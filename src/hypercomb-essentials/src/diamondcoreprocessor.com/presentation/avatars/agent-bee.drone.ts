@@ -35,9 +35,11 @@
 // dance near each other a reader has to guess which name goes with which. What
 // is painted on the bee cannot be read against the wrong one.
 
-import { Drone } from '@hypercomb/core'
+import { Drone, EffectBus } from '@hypercomb/core'
 import { Application, Container, Graphics, Point, Sprite, Texture } from 'pixi.js'
 import type { AgentRegistry, Agent } from '../../assistant/agent-registry.service.js'
+import { conversationModel, listRailConversations } from '../../assistant/chat-thread.js'
+import { restingBees } from './resting-bees.js'
 import { avatarKeyOf, type AgentAvatarRegistry } from './agent-avatar.js'
 import { inWaggleArea, waggleOffset, wagglePath, type AgentKind } from './agent-waggle.js'
 import type { HostReadyPayload } from '../tiles/pixi-host.worker.js'
@@ -91,6 +93,38 @@ const FLAP_FPS = 13
 const HOVER_PX = 38
 /** Fixed compact waggle size. Agent status must not pulse the path width. */
 const WAGGLE_SCALE = 0.34
+
+// ── RESTING: a tile that has been TALKED TO keeps its bee ─────────────
+//
+// A bee used to mean "work is happening here, now", which left the hive
+// blank the moment an answer landed — and a tile you have had six
+// conversations on looked exactly like one nobody has ever spoken to. So a
+// tile holding UNARCHIVED conversations keeps a bee whether or not a
+// question is out.
+//
+// ONE PER TILE, not one per conversation: six threads on a tile is six bees
+// over one hexagon, and the rail's own count already says six. The one bee
+// is branded by the model that tile's NEWEST thread was last held in.
+//
+// THE SAME BEE, CALMER. It is not a second kind of bee and does not get a
+// second look to learn — same body, same colour, same name on the belly,
+// just slower and dimmer. It is also literally the same sprite: the id is
+// `chat:<convoId>`, which is exactly what the chat window raises when a
+// question goes out on that conversation, so sending one WAKES this bee into
+// the full dance instead of fading it out and flying a new one in.
+//
+// Never in the work registry. The orchestrator sweeps that for stalls, and a
+// resting bee sitting there as `working` would be reported silent after four
+// minutes and rogue after forty-five — a watchdog barking at furniture.
+
+/** How fast a resting bee's dance clock runs against a working one's. */
+const REST_PACE = 0.3
+/** How present a resting bee is. Enough to be seen and pressed, not enough to
+ *  compete with a tile that is actually thinking. */
+const REST_ALPHA = 0.5
+/** Soonest the thread pool is re-read after a change. Threads move in bursts
+ *  (a reply lands, a list refreshes); one read per burst is enough. */
+const REST_SETTLE_MS = 400
 /** How far a bee leans into the way it is travelling, in radians. */
 const BANK = 0.11
 /** Where a PERCHED bee sits, as a fraction of the screen. The orchestrator
@@ -238,6 +272,52 @@ export class AgentBeeDrone extends Drone {
   #grounded = (agent: Agent): boolean =>
     this.#inSwarm && (agent.origin ?? 'local') === 'local'
 
+  /** Resting bees, by the same id the chat window raises — see REST_PACE. */
+  #resting = new Map<string, Agent>()
+  #restingTimer: ReturnType<typeof setTimeout> | null = null
+  #dropThreadWatch: (() => void) | null = null
+  #disposed = false
+
+  /** EVERY bee that should exist: the registry's working agents, plus a
+   *  resting one for each talked-to tile that has no working agent of its own.
+   *  Registry first — a question in flight IS the tile's bee, awake. */
+  #allAgents = (): Agent[] => {
+    const working = this.#registry()?.list() ?? []
+    const held = new Set(working.map(a => a.id))
+    return [...working, ...[...this.#resting.values()].filter(a => !held.has(a.id))]
+  }
+
+  /** One bee by id, from either lane. */
+  #agentFor = (id: string): Agent | undefined =>
+    this.#registry()?.get(id) ?? this.#resting.get(id)
+
+  /** Is this bee resting rather than working? Only true while the registry
+   *  has nothing under the same id — the moment a question goes out, the same
+   *  sprite is a working bee. */
+  #isResting = (id: string): boolean =>
+    !this.#registry()?.get(id) && this.#resting.has(id)
+
+  /** Re-read which tiles have been talked to. Coalesced: threads move in
+   *  bursts and one read per burst is enough. */
+  #restingChanged = (): void => {
+    if (this.#restingTimer) return
+    this.#restingTimer = setTimeout(() => {
+      this.#restingTimer = null
+      void this.#refreshResting()
+    }, REST_SETTLE_MS)
+  }
+
+  /** Re-read which tiles have been talked to. The DERIVATION lives in
+   *  resting-bees.ts (pure, and pinned there); this is the read and the
+   *  handoff. */
+  #refreshResting = async (): Promise<void> => {
+    let chats: Awaited<ReturnType<typeof listRailConversations>> = []
+    try { chats = await listRailConversations() } catch { return }
+    if (this.#disposed) return
+    this.#resting = restingBees(chats, conversationModel)
+    this.#sync()
+  }
+
   #registry = (): AgentRegistry | undefined =>
     ioc<AgentRegistry>('@diamondcoreprocessor.com/AgentRegistry')
 
@@ -265,6 +345,14 @@ export class AgentBeeDrone extends Drone {
     else setTimeout(seed, 1200)
     this.#sync()
 
+    // WHICH TILES HAVE BEEN TALKED TO. Off the boot path for the same reason
+    // the ask seed is — it walks the threads pool — and re-read whenever a
+    // turn lands, so a tile spoken to for the first time gets its bee without
+    // a reload, and one whose last thread is archived loses it.
+    this.#dropThreadWatch?.()
+    this.#dropThreadWatch = EffectBus.on('chat:threads-changed', this.#restingChanged)
+    this.#restingChanged()
+
     // Avatar decoration changed — re-resolve textures.
     this.#avatars()?.addEventListener('change', this.#repaintAvatars)
 
@@ -285,7 +373,7 @@ export class AgentBeeDrone extends Drone {
 
   #sync = (): void => {
     if (!this.#layer) return
-    const agents = this.#registry()?.list() ?? []
+    const agents = this.#allAgents()
     const live = new Set(agents.map(a => a.id))
 
     for (const agent of agents) {
@@ -343,7 +431,7 @@ export class AgentBeeDrone extends Drone {
 
   #repaintAvatars = (): void => {
     for (const [id, bee] of this.#bees) {
-      const agent = this.#registry()?.get(id)
+      const agent = this.#agentFor(id)
       if (!agent) continue
       void this.#avatars()?.frames(avatarKeyOf(agent), agent.kind).then(frames => {
         if (!frames?.length) return
@@ -405,7 +493,7 @@ export class AgentBeeDrone extends Drone {
    *  slots rather than jumping. */
   #viewAnchor = (id: string): { x: number; y: number } => {
     if (!this.#app || !this.#world) return { x: 0, y: 0 }
-    const open = (this.#registry()?.list() ?? [])
+    const open = this.#allAgents()
       .filter(a => a.targets.length === 0)
       .map(a => a.id)
       .sort()
@@ -439,7 +527,7 @@ export class AgentBeeDrone extends Drone {
     const scale = BEE_PX / ATLAS_CELL_PX / worldScale
 
     for (const [id, bee] of this.#bees) {
-      const agent = this.#registry()?.get(id)
+      const agent = this.#agentFor(id)
       // In a swarm, your own work is out of sight — same treatment as a bee
       // whose work is on another layer: it fades where it stands and waits.
       const grounded = !!agent && this.#grounded(agent)
@@ -463,7 +551,9 @@ export class AgentBeeDrone extends Drone {
         }
         bee.kind = agent.kind
       }
+      const resting = this.#isResting(id)
       if (!agent || grounded) bee.fadeTarget = 0
+      else if (resting && bee.fadeTarget > REST_ALPHA) bee.fadeTarget = REST_ALPHA
 
       // The dance CENTRE eases onto the anchor; the bee then dances around the
       // centre. Two layers, so a pan or a repaint moves the whole dance
@@ -477,7 +567,10 @@ export class AgentBeeDrone extends Drone {
 
       // Freeze a hovered bee in place so the following press has a stable
       // target. Its wings can keep beating; only the waggle motion pauses.
-      if (!hovered) bee.danceTime += dt
+      // CALMER AT REST. Same figure, same body, run slow — a tile that has
+      // been talked to is present without competing with one that is being
+      // talked to right now.
+      if (!hovered) bee.danceTime += resting ? dt * REST_PACE : dt
       const offset = waggleOffset(bee.kind, bee.danceTime, bee.seed, WAGGLE_SCALE)
       const ahead = waggleOffset(bee.kind, bee.danceTime + 0.05, bee.seed, WAGGLE_SCALE)
       bee.x = bee.centreX + offset.x / worldScale
@@ -712,7 +805,7 @@ export class AgentBeeDrone extends Drone {
       if (this.#canvas && this.#canvas.style.cursor === 'pointer') this.#canvas.style.cursor = ''
       return
     }
-    const agent = this.#registry()?.get(id)
+    const agent = this.#agentFor(id)
     if (!agent) return
     this.#hovering = id
     if (this.#canvas) this.#canvas.style.cursor = 'pointer'
@@ -763,6 +856,11 @@ export class AgentBeeDrone extends Drone {
       window.removeEventListener('pointermove', this.#onPointerMove)
       this.#listenersBound = false
     }
+    this.#disposed = true
+    if (this.#restingTimer) clearTimeout(this.#restingTimer)
+    this.#restingTimer = null
+    this.#dropThreadWatch?.()
+    this.#dropThreadWatch = null
     this.#registry()?.removeEventListener('change', this.#sync)
     this.#avatars()?.removeEventListener('change', this.#repaintAvatars)
     this.#tooltip?.remove()

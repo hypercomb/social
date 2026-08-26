@@ -974,6 +974,7 @@
   "keymap.command-line-toggle": "कमांड लाइन फोकस टॉगल करें",
   "keymap.mesh-toggle": "सार्वजनिक / निजी मोड टॉगल करें",
   "keymap.bees": "मधुमक्खी अवतार टॉगल करें",
+  "keymap.chat": "सहायक खोलें या बंद करें",
   "keymap.screensaver": "स्क्रीनसेवर दिखाएँ",
   "keymap.fit": "सामग्री को स्क्रीन पर फ़िट करें",
   "keymap.recenter": "सामग्री को स्क्रीन पर केंद्रित करें",
@@ -2031,6 +2032,8 @@
   "agent.rail-find": "इस स्तर में खोजें",
   "agent.rail-no-match": "यहाँ कोई टाइल “{query}” से मेल नहीं खाती।",
   "agent.rail-talk": "इस टाइल से बात करें",
+  "agent.rail-go": "{name} के अंदर जाएँ",
+  "agent.rail-threads": "{count} बातचीत",
   "agent.rail-inside": "अंदर जाने के लिए दबाए रखें",
   "agent.rail-draft": "यहाँ बिना भेजे विचार रखे हैं",
   "agent.rail-turns": "{count} बातें",
@@ -2260,6 +2263,10 @@
   "chat.reference.off": "{tile} को इस अनुरोध से हटाएँ",
   "chat.reference.empty": "टाइलें या कोई चित्र यहाँ छोड़ें — या हाइव की कोई भी टाइल कॉपी करें",
   "chat.reference.picture": "चित्र · {size}",
+  "chat.reference.look": "{tile} देखें",
+  "chat.reference.previous": "पिछली तस्वीर",
+  "chat.reference.next": "अगली तस्वीर",
+  "chat.reference.done": "बंद करें",
   "mesh-modal.needs-location": "शामिल होने के लिए एक स्थान चाहिए",
   "mesh-modal.needs-secret": "शामिल होने के लिए एक गुप्त कुंजी चाहिए"
 }

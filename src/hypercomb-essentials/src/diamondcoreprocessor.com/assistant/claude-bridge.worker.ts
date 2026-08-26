@@ -3,7 +3,7 @@ import {
   Worker, EffectBus, normalizeCell, hypercomb, isSignature, SignatureService,
   isLocalClaudeBridgeConfigured,
 } from '@hypercomb/core'
-import { deliverTurn, readTurns } from './chat-thread.js'
+import { deliverTurn, readTurns, setConversationGoalReached } from './chat-thread.js'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import type { HistoryService } from '../history/history.service.js'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
@@ -245,7 +245,7 @@ export class ClaudeBridgeWorker extends Worker {
     'update', 'note-add', 'note-delete', 'note-split', 'put-resource',
     'optimization-add', 'optimization-remove', 'decoration-add',
     'bag-add', 'bag-remove', 'bag-set', 'build-record', 'stamp',
-    'add', 'remove', 'summary-add', 'chat-reply', 'submit',
+    'add', 'remove', 'summary-add', 'chat-reply', 'chat-goal-reached', 'submit',
   ])
 
   #quietDepth = 0
@@ -304,6 +304,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'get-resource': return this.#getResource(req)
       case 'optimization-add':    return this.#optimizationAdd(req)
       case 'chat-reply':   return this.#chatReply(req)
+      case 'chat-goal-reached': return this.#chatGoalReached(req)
       case 'thread-read':  return this.#threadRead(req)
       case 'agent-progress': return this.#agentProgress(req)
       case 'agents-announce': return this.#agentsAnnounce(req)
@@ -577,6 +578,19 @@ export class ClaudeBridgeWorker extends Worker {
     const stored = await deliverTurn(convoId, 'assistant', text)
     if (!stored) return { id: req.id, ok: false, error: 'chat-reply could not be stored — reply NOT delivered' }
     return { id: req.id, ok: true }
+  }
+
+  /** Durable "goals attained" receipt for one chat. `text` names the goals
+   * that were achieved; the surface shows them and offers Archive. */
+  async #chatGoalReached(req: BridgeRequest): Promise<BridgeResponse> {
+    const convoId = typeof req.cell === 'string' ? req.cell.trim() : ''
+    const details = typeof req.text === 'string' ? req.text.trim() : ''
+    if (!convoId) return { id: req.id, ok: false, error: 'chat-goal-reached requires `cell` (the convoId)' }
+    if (!details) return { id: req.id, ok: false, error: 'chat-goal-reached requires attained goals in `text`' }
+    const stored = await setConversationGoalReached(convoId, details)
+    return stored
+      ? { id: req.id, ok: true, data: { convoId } }
+      : { id: req.id, ok: false, error: 'chat-goal-reached could not be stored' }
   }
 
   // ─── thread-read ───────────────────────────────────────────────────

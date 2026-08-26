@@ -72,6 +72,28 @@ class MemoryDir {
   }
 }
 
+const copyFile = async (
+  source: MemoryFile,
+  destination: MemoryDir,
+  name: string,
+): Promise<void> => {
+  const handle = await destination.getFileHandle(name, { create: true })
+  const writable = await handle.createWritable()
+  await writable.write(new Uint8Array(await (await source.getFile()).arrayBuffer()))
+  await writable.close()
+}
+
+/** Deep-copy one memory tree into another, for building layout fixtures. */
+const copyInto = async (source: MemoryDir, destination: MemoryDir): Promise<void> => {
+  for (const [name, entry] of source.entriesMap) {
+    if (entry instanceof MemoryDir) {
+      await copyInto(entry, await destination.getDirectoryHandle(name, { create: true }))
+    } else {
+      await copyFile(entry, destination, name)
+    }
+  }
+}
+
 const put = async (root: MemoryDir, path: string, bytes: Uint8Array): Promise<void> => {
   const parts = path.split('/')
   const name = parts.pop()!
@@ -124,6 +146,113 @@ beforeEach(() => {
   })
 })
 
+describe('FolderSyncService inbound half', () => {
+  const stub = (opfs: MemoryDir, chosen: MemoryDir): void => {
+    Object.defineProperty(navigator, 'storage', {
+      configurable: true,
+      value: { getDirectory: async () => opfs },
+    })
+    Object.defineProperty(window, 'showDirectoryPicker', {
+      configurable: true,
+      value: vi.fn(async () => chosen),
+    })
+  }
+
+  it('adopts a bag marker the folder holds and this browser does not', async () => {
+    const opfs = new MemoryDir('opfs')
+    const chosen = new MemoryDir('Shared folder')
+    const lineage = 'c'.repeat(64)
+    // Written straight into the folder by the other side.
+    await put(chosen, `${lineage}/00000000`, new TextEncoder().encode('{"layer":"from windows"}'))
+    stub(opfs, chosen)
+
+    const service = new FolderSyncService()
+    expect(await service.connect('local')).toBe(true)
+
+    expect(new TextDecoder().decode(await read(opfs, `${lineage}/00000000`)))
+      .toBe('{"layer":"from windows"}')
+    expect(service.state()).toMatchObject({ adopted: 1, collisions: 0 })
+  })
+
+  it('never drains root content — it resolves on demand instead', async () => {
+    const opfs = new MemoryDir('opfs')
+    const chosen = new MemoryDir('Shared folder')
+    const bytes = new TextEncoder().encode('a picture nobody has asked for')
+    const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
+    await put(chosen, sig, bytes)
+    stub(opfs, chosen)
+
+    const service = new FolderSyncService()
+    await service.connect('local')
+
+    // Deliberately NOT copied. Eagerly draining a folder of content is how a
+    // pass costs an entire hive to learn nothing; the lookup fires when
+    // something actually wants the bytes.
+    await expect(read(opfs, sig)).rejects.toThrow()
+    expect(service.state().adopted).toBe(0)
+  })
+
+  it('resolves content from the folder, and refuses bytes that fail their own name', async () => {
+    const opfs = new MemoryDir('opfs')
+    const chosen = new MemoryDir('Shared folder')
+    const bytes = new TextEncoder().encode('resolved from the folder')
+    const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
+    await put(chosen, sig, bytes)
+    // A signature-shaped name whose bytes are not what it claims. A folder is
+    // shared, cloud-synced and hand-editable, so the claim is checked.
+    const liar = 'e'.repeat(64)
+    await put(chosen, liar, new TextEncoder().encode('not these bytes'))
+    stub(opfs, chosen)
+
+    const service = new FolderSyncService()
+    await service.connect('local')
+
+    expect(new TextDecoder().decode((await service.resolveContent(sig))!))
+      .toBe('resolved from the folder')
+    expect(await service.resolveContent(liar)).toBeNull()
+  })
+
+  it('counts a divergent marker and lets NEITHER side overwrite the other', async () => {
+    const opfs = new MemoryDir('opfs')
+    const chosen = new MemoryDir('Shared folder')
+    const lineage = 'd'.repeat(64)
+    // The same address, written independently on both sides between drains.
+    await put(opfs, `${lineage}/00000000`, new TextEncoder().encode('mine'))
+    await put(chosen, `${lineage}/00000000`, new TextEncoder().encode('theirs'))
+    stub(opfs, chosen)
+
+    const service = new FolderSyncService()
+    await service.connect('local')
+
+    expect(service.state().collisions).toBe(1)
+    // Divergence is REPORTED, never resolved — picking a winner would be
+    // picking one at random, and history deliberately never branches.
+    expect(new TextDecoder().decode(await read(opfs, `${lineage}/00000000`))).toBe('mine')
+    // And the outbound pass that follows must not undo the drain's refusal by
+    // writing ours over theirs. That would be the exact silent loss the
+    // collision count exists to surface.
+    expect(new TextDecoder().decode(await read(chosen, `${lineage}/00000000`))).toBe('theirs')
+  })
+
+  it('drains before it mirrors, so one pass settles a round trip', async () => {
+    const opfs = new MemoryDir('opfs')
+    const chosen = new MemoryDir('Shared folder')
+    const theirs = 'a'.repeat(64)
+    const mine = 'b'.repeat(64)
+    await put(chosen, `${theirs}/00000000`, new TextEncoder().encode('theirs'))
+    await put(opfs, `${mine}/00000000`, new TextEncoder().encode('mine'))
+    stub(opfs, chosen)
+
+    const service = new FolderSyncService()
+    await service.connect('local')
+
+    // Their marker came in...
+    expect(new TextDecoder().decode(await read(opfs, `${theirs}/00000000`))).toBe('theirs')
+    // ...and mine went out, in the same pass.
+    expect(new TextDecoder().decode(await read(chosen, `${mine}/00000000`))).toBe('mine')
+  })
+})
+
 describe('FolderSyncService', () => {
   it('opens or resumes folder access when the bare command is invoked', async () => {
     const resume = vi.fn(async () => true)
@@ -152,7 +281,7 @@ describe('FolderSyncService', () => {
     expect(resume).toHaveBeenCalledOnce()
   })
 
-  it('writes a complete per-device OPFS mirror into the chosen directory', async () => {
+  it('writes the hive itself into the chosen directory, in the interchange form', async () => {
     const opfs = new MemoryDir('opfs')
     const chosen = new MemoryDir('Private backups')
     const lineage = 'a'.repeat(64)
@@ -172,17 +301,19 @@ describe('FolderSyncService', () => {
     expect(await service.connect()).toBe(true)
     const deviceId = service.state().deviceId
 
+    // The chosen folder IS the hive: a root record at its own name, a lineage
+    // bag as a signature-named directory of markers. Nothing wrapping it.
     expect(new TextDecoder().decode(await read(
       chosen,
-      `hypercomb-backup/devices/${deviceId}/opfs/plain-record`,
+      'plain-record',
     ))).toBe('record')
     expect(new TextDecoder().decode(await read(
       chosen,
-      `hypercomb-backup/devices/${deviceId}/opfs/${lineage}/00000000`,
+      `${lineage}/00000000`,
     ))).toBe('{"layer":"x"}')
     const report = new TextDecoder().decode(await read(
       chosen,
-      'hypercomb-backup/BACKUP-REPORT.txt',
+      '.hypercomb/BACKUP-REPORT.txt',
     ))
     expect(report).toContain('Scope: every OPFS root file and every file in every OPFS folder')
     expect(report).toContain('Snapshot files: 2')
@@ -255,22 +386,22 @@ describe('FolderSyncService', () => {
     const deviceId = service.state().deviceId
     expect(new TextDecoder().decode(await read(
       chosen,
-      `hypercomb-backup/devices/${deviceId}/opfs/${resourceSig}`,
+      resourceSig,
     ))).toBe('physical resource bytes')
     const inventory = new TextDecoder().decode(await read(
       chosen,
-      `hypercomb-backup/devices/${deviceId}/INVENTORY.txt`,
+      `.hypercomb/devices/${deviceId}/INVENTORY.txt`,
     ))
     expect(inventory).toContain('Mode: hard-copy')
     expect(inventory).toContain('Closure roots checked: 1')
     const manifest = await read(
       chosen,
-      `hypercomb-backup/devices/${deviceId}/manifest.json`,
+      `.hypercomb/devices/${deviceId}/manifest.json`,
     )
     const manifestSig = await SignatureService.sign(manifest.buffer as ArrayBuffer)
     const seal = JSON.parse(new TextDecoder().decode(await read(
       chosen,
-      `hypercomb-backup/devices/${deviceId}/COMPLETE-${manifestSig.slice(0, 12).toUpperCase()}.hypercomb`,
+      `.hypercomb/devices/${deviceId}/COMPLETE-${manifestSig.slice(0, 12).toUpperCase()}.hypercomb`,
     )))
     expect(seal).toMatchObject({
       kind: 'hypercomb-backup-completion',
@@ -307,11 +438,7 @@ describe('FolderSyncService', () => {
 
     // Corrupt the mirror behind the service's back. A copy pass skips this
     // file on name and size; only a re-hash can catch it.
-    await put(
-      chosen,
-      `hypercomb-backup/devices/${deviceId}/opfs/${sig}`,
-      new TextEncoder().encode('tampered!!!'),
-    )
+    await put(chosen, sig, new TextEncoder().encode('tampered!!!'))
     await service.verify()
     expect(service.state()).toMatchObject({ status: 'incomplete', damaged: 1, verified: 0 })
   })
@@ -334,7 +461,7 @@ describe('FolderSyncService', () => {
     const service = new FolderSyncService()
     await service.connect('local')
     const deviceId = service.state().deviceId
-    const manifestPath = `hypercomb-backup/devices/${deviceId}/manifest.json`
+    const manifestPath = `.hypercomb/devices/${deviceId}/manifest.json`
     const afterCopy = JSON.parse(new TextDecoder().decode(await read(chosen, manifestPath)))
 
     await vi.advanceTimersByTimeAsync(1_000)
@@ -453,9 +580,8 @@ describe('FolderSyncService', () => {
     const service = new FolderSyncService()
     await service.connect('local')
 
-    const opfs = await (await (await (await chosen.getDirectoryHandle('hypercomb-backup'))
-      .getDirectoryHandle('devices')).entriesMap.values().next().value as MemoryDir)
-      .getDirectoryHandle('opfs')
+    // The hive is the folder, so the chosen directory is what must hold it.
+    const opfs = chosen
 
     // The hive travelled.
     expect(opfs.entriesMap.has(record)).toBe(true)
@@ -699,6 +825,57 @@ describe('FolderSyncService', () => {
       .rejects.toThrow('no sealed, complete, verified hard-copy snapshots')
   })
 
+  it('still imports a legacy hypercomb-backup/devices/<id>/opfs nest', async () => {
+    // The shape changed the WRITE path only. A folder written by the previous
+    // layout is the one backup that already exists on disk, so it must keep
+    // importing -- otherwise this change silently orphans it.
+    delete (globalThis as any).__getSentinel
+    delete (globalThis as any).__sentinelBridge
+    const chosen = new MemoryDir('Fresh export')
+    let activeOpfs = new MemoryDir('source')
+    const bytes = new TextEncoder().encode('legacy participant bytes')
+    const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
+    await put(activeOpfs, sig, bytes)
+    Object.defineProperty(navigator, 'storage', {
+      configurable: true,
+      value: { getDirectory: async () => activeOpfs },
+    })
+    Object.defineProperty(window, 'showDirectoryPicker', {
+      configurable: true,
+      value: vi.fn(async () => chosen),
+    })
+
+    const exporter = new FolderSyncService()
+    expect(await exporter.connect('hard-copy')).toBe(true)
+    const deviceId = exporter.state().deviceId
+
+    // Re-nest the export exactly where the previous layout put it. The seal
+    // covers the manifest BYTES, not where they sit, so a relocated tree is a
+    // faithful legacy fixture rather than an approximation of one.
+    const legacy = new MemoryDir('Legacy backup')
+    const backup = await legacy.getDirectoryHandle('hypercomb-backup', { create: true })
+    await copyInto(await chosen.getDirectoryHandle('.hypercomb'), backup)
+    const nested = await (await (await backup.getDirectoryHandle('devices', { create: true }))
+      .getDirectoryHandle(deviceId, { create: true }))
+      .getDirectoryHandle('opfs', { create: true })
+    for (const [name, entry] of chosen.entriesMap) {
+      if (name === '.hypercomb') continue
+      if (entry instanceof MemoryDir) await copyInto(entry, await nested.getDirectoryHandle(name, { create: true }))
+      else await copyFile(entry, nested, name)
+    }
+
+    Object.defineProperty(window, 'showDirectoryPicker', {
+      configurable: true,
+      value: vi.fn(async () => legacy),
+    })
+    activeOpfs = new MemoryDir('fresh')
+    localStorage.clear()
+    const result = await new FolderSyncService().importFromFolder()
+    expect(result).toMatchObject({ copied: 1, conflicts: 0, invalid: 0 })
+    expect(new TextDecoder().decode(await read(activeOpfs, sig)))
+      .toBe('legacy participant bytes')
+  })
+
   it('rejects a sealed export when any listed backup file is damaged', async () => {
     const chosen = new MemoryDir('Damaged export')
     let activeOpfs = new MemoryDir('source')
@@ -717,11 +894,7 @@ describe('FolderSyncService', () => {
     const exporter = new FolderSyncService()
     expect(await exporter.connect('hard-copy')).toBe(true)
     const deviceId = exporter.state().deviceId
-    await put(
-      chosen,
-      `hypercomb-backup/devices/${deviceId}/opfs/${sig}`,
-      new TextEncoder().encode('damaged'),
-    )
+    await put(chosen, sig, new TextEncoder().encode('damaged'))
 
     activeOpfs = new MemoryDir('fresh')
     await expect(new FolderSyncService().importFromFolder())

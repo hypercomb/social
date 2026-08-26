@@ -1,11 +1,12 @@
 // agent-tiles-rail.spec.ts — the hive list: three gestures and a search box.
 //
-// CLICK GOES IN. A row with children opens on an ordinary click; a LEAF has
-// nowhere to go, so there a click enters the tile's chat. Ctrl-click gathers
-// context without moving the list; right-click comes back out. (Hold-to-enter
-// is retired — see the rail's header for why.) A row holding unsent thinking
-// wears a mark, so the list shows where you left off thinking as well as what
-// is there.
+// THE LINE TALKS, THE ARROW WALKS. Every row in this list IS a conversation —
+// it carries that conversation's state (how deep, unread, a draft waiting,
+// live right now) — so an ordinary click on any row, leaf or parent, enters
+// its chat. Going INSIDE a tile moved to its own chevron at the end of the
+// row, present only where there is something to go into. Ctrl-click gathers
+// context without moving the list; right-click comes back out from anywhere
+// on the line, including from the arrow.
 //
 // The rail shows one level at a time and a real level runs to dozens of
 // tiles, so the box under the title filters the rows already in hand: no
@@ -14,6 +15,7 @@
 // empty tile — and Escape empties it before the escape cascade sees the key.
 
 import { beforeEach, describe, expect, it } from 'vitest'
+import { EffectBus } from '@hypercomb/core'
 import type { PlacementLayer } from '../history/layer-placement.js'
 
 const sig = (n: number): string => String(n).padStart(64, '0')
@@ -103,11 +105,31 @@ const threadsPool = {
   },
 }
 
+/** The blurb pool, and what is planted in it — keyed by conversation, which
+ *  is the shape chat-blurb writes: one slot per thread, recycled in place. */
+const blurbPool = { kind: 'directory', blurbs: true }
+const plantedBlurbs: Record<string, unknown> = {}
+
 services['@hypercomb.social/Store'] = {
   getResource: async () => null,
-  getPool: async (meaning: string) => (meaning === 'threads' ? threadsPool : {}),
-  getPoolDoc: async () => draftDoc,
+  getPool: async (meaning: string) =>
+    meaning === 'threads' ? threadsPool : meaning === 'chat:blurbs' ? blurbPool : {},
+  getPoolDoc: async (pool: unknown, subKey?: string) => {
+    if (pool !== blurbPool) return draftDoc
+    const held = subKey ? plantedBlurbs[subKey] : undefined
+    return held ? new TextEncoder().encode(JSON.stringify(held)).buffer : null
+  },
   putPoolDoc: async () => 'ok',
+}
+
+/** A registry the rail can count from. Empty unless a test fills it — the
+ *  agent lane and the chat's own busy flag have to be told apart, and that is
+ *  only visible when BOTH could speak for the same tile. */
+const liveAgents: Array<{ id: string; kind: string; status: string; segments: string[]; targets: string[] }> = []
+services['@diamondcoreprocessor.com/AgentRegistry'] = {
+  list: () => liveAgents,
+  addEventListener: () => {},
+  removeEventListener: () => {},
 }
 
 ;(globalThis as unknown as { get: unknown }).get = (key: string) => services[key]
@@ -118,6 +140,7 @@ services['@hypercomb.social/Store'] = {
 }
 
 const { AgentTilesRail } = await import('./agent-tiles-rail.js')
+const { BLURB_VERSION } = await import('./chat-blurb.js')
 
 const settle = async (): Promise<void> => {
   for (let i = 0; i < 4; i++) await new Promise(resolve => setTimeout(resolve, 0))
@@ -209,20 +232,37 @@ describe('tiles rail gestures — every row is a conversation', () => {
     await settle()
   })
 
-  it('a click on a row WITH CHILDREN goes inside it', async () => {
-    // 'pheromone-workflow' holds 'inside'. One ordinary click, no press to
-    // discover, and the conversation is untouched: going somewhere is not
-    // the same act as talking to something.
-    rows()[0].click()
+  it('the ARROW goes inside, and does not touch the conversation', async () => {
+    // 'pheromone-workflow' holds 'inside'. Going somewhere is not the same
+    // act as talking to something, so the two have separate controls.
+    const walk = host.querySelectorAll(`${TILE_ROWS} .hc-rail-walk`)[0] as HTMLButtonElement
+    walk.click()
     await settle()
 
     expect(names(host)).toEqual(['inside'])
     expect(entered).toEqual([])
   })
 
+  it('a click on a row WITH CHILDREN enters its conversation, and stays put', async () => {
+    // The reversal, stated: a parent is a subject like any other tile, and
+    // pressing its line talks to it rather than walking past it.
+    rows()[0].click()
+    await settle()
+
+    expect(entered).toEqual(['pheromone-workflow'])
+    expect(rail.subject?.name).toBe('pheromone-workflow')
+    expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
+  })
+
+  it('a LEAF has no arrow — one that leads nowhere is furniture', () => {
+    const walks = [...host.querySelectorAll(`${TILE_ROWS} .hc-rail-walk`)] as HTMLButtonElement[]
+    // pheromone-workflow has children; diagrams and ai-videos do not.
+    expect(walks.map(w => w.hidden)).toEqual([false, true, true])
+  })
+
   it('a click on a LEAF enters that tile’s conversation and never navigates', async () => {
-    // 'diagrams' has no children, so there is nowhere for a click to go —
-    // and the rail's other job takes it.
+    // The same rule as the row above it — which is the point of the swap:
+    // one gesture, not one that changes with whether a tile has children.
     rows()[1].click()
     await settle()
 
@@ -242,15 +282,12 @@ describe('tiles rail gestures — every row is a conversation', () => {
     expect(host.querySelectorAll(`${TILE_ROWS} .hc-rail-row.current`).length).toBe(1)
   })
 
-  it('the chat icon still opens a PARENT’s own conversations — click no longer can', async () => {
-    // The one thing the swap could have cost: a tile with children losing
-    // its way into a chat. The chat icon is where they live, and the fold
-    // always offers a fresh one.
-    const chats = host.querySelector(`${TILE_ROWS} .hc-rail-chats-open`) as HTMLButtonElement
-    chats.click()
+  it('a PARENT’s own conversations open from its line, and the fold offers a fresh one', async () => {
+    // The thing the old grammar cost: a tile with children could not be
+    // talked to by pressing it. Now it can, and the list does not move.
+    rows()[0].click()
     await settle()
 
-    // The list did NOT move — the icon talks, it does not walk.
     expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
 
     const fresh = host.querySelector('.hc-rail-chat-new') as HTMLButtonElement
@@ -261,13 +298,12 @@ describe('tiles rail gestures — every row is a conversation', () => {
     expect(rail.subject?.name).toBe('pheromone-workflow')
   })
 
-  it('pressing it PUTS YOU IN the conversation you were last in', async () => {
-    // The press is not a disclosure. A tile with children cannot be entered
-    // by clicking its row, so this control is how you talk to one — and
-    // landing outside the list it just opened made the common case (pick up
-    // where I was) cost a second aim at a row.
-    const chats = () => host.querySelectorAll(`${TILE_ROWS} .hc-rail-chats-open`)[1] as HTMLButtonElement
-    chats().click()
+  it('pressing the line PUTS YOU IN the conversation you were last in', async () => {
+    // The press is not a disclosure. Landing outside the list it just opened
+    // would make the common case — pick up where I was — cost a second aim
+    // at a row.
+    const line = () => host.querySelectorAll(`${TILE_ROWS} .hc-rail-main`)[1] as HTMLButtonElement
+    line().click()
     await settle()
 
     expect(entered).toEqual(['diagrams'])
@@ -277,7 +313,9 @@ describe('tiles rail gestures — every row is a conversation', () => {
 
     // A second press folds the list shut WITHOUT putting the conversation
     // down: you are still in it, the rail has just stopped listing the rest.
-    chats().click()
+    // The affordance the chat icon used to carry, now on the line that
+    // replaced it.
+    line().click()
     await settle()
 
     expect(host.querySelector('.hc-rail-chats')).toBeFalsy()
@@ -288,7 +326,7 @@ describe('tiles rail gestures — every row is a conversation', () => {
     // /diagrams holds two threads: one live, one put away. Unfolding shows
     // the live one and says the other exists — it does not list it, and it
     // does not pretend it is gone.
-    const chats = host.querySelectorAll(`${TILE_ROWS} .hc-rail-chats-open`)[1] as HTMLButtonElement
+    const chats = host.querySelectorAll(`${TILE_ROWS} .hc-rail-main`)[1] as HTMLButtonElement
     chats.click()
     await settle()
 
@@ -305,7 +343,7 @@ describe('tiles rail gestures — every row is a conversation', () => {
   })
 
   it('putting one away answers the press at once — and the pool still wins', async () => {
-    const chats = host.querySelectorAll(`${TILE_ROWS} .hc-rail-chats-open`)[1] as HTMLButtonElement
+    const chats = host.querySelectorAll(`${TILE_ROWS} .hc-rail-main`)[1] as HTMLButtonElement
     chats.click()
     await settle()
 
@@ -463,5 +501,375 @@ describe('tiles rail gestures — every row is a conversation', () => {
     await settle()
     expect(rail.selection).toEqual([])
     expect(rows()[1].getAttribute('aria-pressed')).toBe('false')
+  })
+})
+
+// ── WHAT THE CONVERSATION TURNED OUT TO BE ABOUT ──────────────────────
+//
+// A thread is named by its FIRST message, which is what you did not know yet.
+// The blurb (chat-blurb.ts) is the other end of it, written down by the
+// orchestrator and only ever READ here. Two rules the rail owes it:
+//
+//   • ADDITIVE. A row with no blurb draws exactly what it drew before, so a
+//     wiped pool, a stale version, or a hive with no provider configured
+//     costs one line of legibility and nothing else.
+//   • THE POINTS BELONG TO THE ONE YOU ARE IN. Forty rows are SCANNED; the
+//     conversation you have opened is the one with room to say more.
+describe('tiles rail — the blurb on a conversation', () => {
+  let host: HTMLElement
+  let rail: InstanceType<typeof AgentTilesRail>
+
+  /** Unfold /diagrams' conversations — the tile the fixture's threads pool
+   *  holds a thread for. */
+  const unfold = async (): Promise<void> => {
+    const chats = host.querySelectorAll(`${TILE_ROWS} .hc-rail-main`)[1] as HTMLButtonElement
+    chats.click()
+    await settle()
+  }
+
+  const lines = (): string[] =>
+    [...host.querySelectorAll('.hc-rail-chat-blurb')].map(n => n.textContent ?? '')
+  const points = (): string[] =>
+    [...host.querySelectorAll('.hc-rail-chat-points li')].map(n => n.textContent ?? '')
+
+  /** Mount AFTER the blurb is planted. The rail reads the pool once with the
+   *  chat list, so a test that plants afterwards is testing nothing — which
+   *  is also the true behaviour: a blurb minted later arrives on the
+   *  `chat:blurbs-changed` announcement, covered separately below. */
+  const mount = async (): Promise<void> => {
+    rail = new AgentTilesRail()
+    rail.mount(host)
+    await settle()
+  }
+
+  beforeEach(() => {
+    for (const key of Object.keys(plantedBlurbs)) delete plantedBlurbs[key]
+    host = document.createElement('div')
+    document.body.appendChild(host)
+  })
+
+  it('draws the row exactly as before when no blurb is held', async () => {
+    await mount()
+    await unfold()
+    expect([...host.querySelectorAll('.hc-rail-chat-name')].map(n => n.textContent))
+      .toEqual(['what is this'])
+    expect(lines()).toEqual([])
+    expect(points()).toEqual([])
+  })
+
+  it('shows the line under the title, and the points on the open conversation', async () => {
+    plantedBlurbs['chat:tile:/diagrams'] = {
+      kind: 'chat:blurb',
+      convoId: 'chat:tile:/diagrams',
+      line: 'choosing a diagram format',
+      points: ['settled on mermaid', 'left the export open'],
+      v: BLURB_VERSION,
+      upToTurnCount: 2,
+      upToAt: 20,
+      at: 21,
+    }
+    await mount()
+    await unfold()
+
+    // The title is still the first thing that was said — the blurb is added
+    // to the row, it does not replace what named it.
+    expect([...host.querySelectorAll('.hc-rail-chat-name')].map(n => n.textContent))
+      .toEqual(['what is this'])
+    expect(lines()).toEqual(['choosing a diagram format'])
+
+    // Unfolding puts you IN this conversation, so its points are showing.
+    expect(host.querySelector('.hc-rail-chat.current')).toBeTruthy()
+    expect(points()).toEqual(['settled on mermaid', 'left the export open'])
+  })
+
+  it('a record from another derivation is IGNORED, not shown', async () => {
+    plantedBlurbs['chat:tile:/diagrams'] = {
+      kind: 'chat:blurb',
+      convoId: 'chat:tile:/diagrams',
+      line: 'what an older version of this code thought',
+      points: ['stale'],
+      v: BLURB_VERSION + 1,
+      upToTurnCount: 2,
+      upToAt: 20,
+      at: 21,
+    }
+    await mount()
+    await unfold()
+
+    expect(lines()).toEqual([])
+    expect(points()).toEqual([])
+    // …and the row is unharmed by the record it declined to read.
+    expect([...host.querySelectorAll('.hc-rail-chat-name')].map(n => n.textContent))
+      .toEqual(['what is this'])
+  })
+
+  it('the points ride on the ROW, never inside the button', async () => {
+    // A <ul> inside a <button> is not something the DOM allows or a screen
+    // reader can read out — the same reason the archive mark is a sibling.
+    plantedBlurbs['chat:tile:/diagrams'] = {
+      kind: 'chat:blurb',
+      convoId: 'chat:tile:/diagrams',
+      line: 'a line',
+      points: ['a point'],
+      v: BLURB_VERSION,
+      upToTurnCount: 2,
+      upToAt: 20,
+      at: 21,
+    }
+    await mount()
+    await unfold()
+
+    const list = host.querySelector('.hc-rail-chat-points') as HTMLElement
+    expect(list).toBeTruthy()
+    expect(list.closest('button')).toBeNull()
+    expect(list.parentElement?.classList.contains('hc-rail-chat')).toBe(true)
+  })
+
+  it('finds a tile by what its conversation was ABOUT, not only by name', async () => {
+    // The payoff of writing the summary down: a filter can reach into what
+    // was said. A blurb derived on open could never do this — it would not
+    // exist until you were already looking at the row.
+    plantedBlurbs['chat:tile:/diagrams'] = {
+      kind: 'chat:blurb',
+      convoId: 'chat:tile:/diagrams',
+      line: 'choosing a diagram format',
+      points: ['settled on mermaid'],
+      v: BLURB_VERSION,
+      upToTurnCount: 2,
+      upToAt: 20,
+      at: 21,
+    }
+    // The blurbs are read with the chat list; unfolding is not required for
+    // the filter to see them.
+    await mount()
+
+    const find = host.querySelector('.hc-rail-find input') as HTMLInputElement
+    find.value = 'mermaid'
+    find.dispatchEvent(new Event('input'))
+    await settle()
+
+    expect(names(host)).toEqual(['diagrams'])
+
+    // A word in nothing — neither a name nor a blurb — still empties the list.
+    find.value = 'nowhere'
+    find.dispatchEvent(new Event('input'))
+    await settle()
+    expect(names(host)).toEqual([])
+  })
+})
+
+// ── WHAT A LINE SAYS BEFORE YOU READ IT ───────────────────────────────
+//
+// Now that the line IS the conversation control, the marks on it are about
+// the thing pressing it reaches. Two that were missing:
+//
+//   • HOW MANY conversations the tile holds, beside the name they are about —
+//     a tile is a SUBJECT, so several threads about it is the normal case,
+//     and it should not take unfolding the tile to discover that.
+//   • WHETHER ONE IS LIVE right now. Every other mark in the gutter is about
+//     the past (spoken to, this deep, a reply you have not read); this is the
+//     only one in the present tense, so it is the only one that moves.
+describe('tiles rail — what a conversation line says', () => {
+  let host: HTMLElement
+  let rail: InstanceType<typeof AgentTilesRail>
+
+  const row = (at: number): HTMLElement =>
+    [...host.querySelectorAll(`${TILE_ROWS} .hc-rail-row`)][at] as HTMLElement
+  const counts = (): Array<string | null> =>
+    [...host.querySelectorAll(`${TILE_ROWS} .hc-rail-threads`)]
+      .map(n => ((n as HTMLElement).hidden ? null : n.textContent))
+
+  beforeEach(async () => {
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    rail = new AgentTilesRail()
+    rail.mount(host)
+    await settle()
+  })
+
+  it('counts the tile’s conversations after its label, and ARCHIVED ones are not in it', () => {
+    // /diagrams holds two threads in the fixture pool — one live, one put
+    // away. The fold lists one, so the row must promise one: a count that
+    // disagreed with the list under it would be lying about the same set.
+    expect(counts()).toEqual([null, '1', null])
+  })
+
+  it('a tile nobody has spoken to shows no count — “0 conversations” is not a fact', () => {
+    const empty = row(0).querySelector('.hc-rail-threads') as HTMLElement
+    expect(empty.hidden).toBe(true)
+    expect(row(1).querySelector<HTMLElement>('.hc-rail-threads')?.hidden).toBe(false)
+  })
+
+  it('marks a line LIVE while a question of yours is still out, and clears it', async () => {
+    expect(row(1).classList.contains('live')).toBe(false)
+
+    EffectBus.emit('chat:tile-busy', { path: '/diagrams', busy: true })
+    await settle()
+    expect(row(1).classList.contains('live')).toBe(true)
+    // Only the line it is about — a moving mark on every row says nothing.
+    expect(row(0).classList.contains('live')).toBe(false)
+
+    EffectBus.emit('chat:tile-busy', { path: '/diagrams', busy: false })
+    await settle()
+    expect(row(1).classList.contains('live')).toBe(false)
+  })
+
+  it('says the same sentence to a screen reader, since every mark here is CSS', async () => {
+    EffectBus.emit('chat:tile-busy', { path: '/diagrams', busy: true })
+    await settle()
+    const label = row(1).querySelector('.hc-rail-main')?.getAttribute('aria-label') ?? ''
+    expect(label).toContain('diagrams')
+    expect(label).toContain('1 conversations')
+    expect(label).toContain('working')
+    EffectBus.emit('chat:tile-busy', { path: '/diagrams', busy: false })
+  })
+
+  // ── BACK COMES OUT FROM ANYWHERE ON THE LINE ────────────────────────
+  //
+  // The reversal added a control to the row, and a control that swallowed
+  // the back gesture would make the way out depend on where the pointer
+  // happened to be. It bubbles to the rail, so it does not.
+  it('right-click comes back out from the row, and from the arrow too', async () => {
+    const walk = host.querySelectorAll(`${TILE_ROWS} .hc-rail-walk`)[0] as HTMLButtonElement
+    walk.click()
+    await settle()
+    expect(names(host)).toEqual(['inside'])
+
+    host.querySelector(`${TILE_ROWS} .hc-rail-main`)
+      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    await settle()
+    expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
+
+    ;(host.querySelectorAll(`${TILE_ROWS} .hc-rail-walk`)[0] as HTMLButtonElement).click()
+    await settle()
+    expect(names(host)).toEqual(['inside'])
+
+    host.querySelector(`${TILE_ROWS} .hc-rail-walk`)
+      ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    await settle()
+    expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
+  })
+})
+
+// ── THE HIVE'S OWN LINE ───────────────────────────────────────────────
+//
+// The hive sits above every level and is a conversation like the tiles under
+// it — usually the deepest one there is. It was the only row in this list
+// with nowhere to put what it holds: no thread count, no live mark, so a
+// question asked about the whole hive left the surface the moment it was
+// sent. It has no INSIDE, so it is also the one row that carries no arrow —
+// which is the same grammar, not a second one.
+describe('tiles rail — the hive line carries its details too', () => {
+  let host: HTMLElement
+  let rail: InstanceType<typeof AgentTilesRail>
+
+  const hive = (): HTMLElement =>
+    host.querySelector('.hc-rail-hive .hc-rail-row') as HTMLElement
+
+  beforeEach(async () => {
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    rail = new AgentTilesRail()
+    rail.mount(host)
+    await settle()
+  })
+
+  it('has the same slots every tile line has', () => {
+    expect(hive().querySelector('.hc-rail-threads')).toBeTruthy()
+    expect(hive().querySelector('.hc-rail-bees')).toBeTruthy()
+  })
+
+  it('carries no arrow — the hive has no inside to walk into', () => {
+    expect(hive().querySelector('.hc-rail-walk')).toBeFalsy()
+  })
+
+  it('marks itself LIVE while a question about the whole hive is out', async () => {
+    expect(hive().classList.contains('live')).toBe(false)
+
+    EffectBus.emit('chat:tile-busy', { path: '/', busy: true })
+    await settle()
+    expect(hive().classList.contains('live')).toBe(true)
+    expect(hive().querySelector<HTMLElement>('.hc-rail-bees')?.hidden).toBe(false)
+
+    EffectBus.emit('chat:tile-busy', { path: '/', busy: false })
+    await settle()
+    expect(hive().classList.contains('live')).toBe(false)
+  })
+
+  it('its line talks, and a second press folds without putting the chat down', async () => {
+    const line = () => hive().querySelector('.hc-rail-main') as HTMLButtonElement
+    line().click()
+    await settle()
+    expect(rail.subject?.key).toBe('')
+    expect(host.querySelector('.hc-rail-hive .hc-rail-chats')).toBeTruthy()
+
+    line().click()
+    await settle()
+    expect(host.querySelector('.hc-rail-hive .hc-rail-chats')).toBeFalsy()
+    expect(rail.subject?.key).toBe('')
+  })
+})
+
+// ── ONE QUESTION IS ONE BEE ───────────────────────────────────────────
+//
+// Sending a chat question now raises an agent on the same lane a routine
+// does (chat-window's #raiseBee), so the registry counts it. The row's live
+// number used to ADD the chat's own busy flag to that count, which was right
+// while a question raised no agent and would now say 2 for one question.
+describe('tiles rail — the live count never counts one question twice', () => {
+  let host: HTMLElement
+  let rail: InstanceType<typeof AgentTilesRail>
+
+  const badge = (at: number): HTMLElement =>
+    [...host.querySelectorAll(`${TILE_ROWS} .hc-rail-bees`)][at] as HTMLElement
+
+  const mount = async (): Promise<void> => {
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    rail = new AgentTilesRail()
+    rail.mount(host)
+    await settle()
+  }
+
+  beforeEach(() => { liveAgents.length = 0 })
+
+  it('a question with its bee reads 1, not 2', async () => {
+    // The bee the chat window raises: over 'diagrams', on the level it sits on.
+    liveAgents.push({
+      id: 'chat:chat:tile:/diagrams', kind: 'model', status: 'working',
+      segments: [], targets: ['diagrams'],
+    })
+    await mount()
+    // …and the flag the same window emits for the same question.
+    EffectBus.emit('chat:tile-busy', { path: '/diagrams', busy: true })
+    await settle()
+
+    expect(badge(1).hidden).toBe(false)
+    expect(badge(1).textContent).toBe('1')
+    EffectBus.emit('chat:tile-busy', { path: '/diagrams', busy: false })
+  })
+
+  it('a routine working alongside the question still adds up', async () => {
+    liveAgents.push(
+      { id: 'chat:chat:tile:/diagrams', kind: 'model', status: 'working', segments: [], targets: ['diagrams'] },
+      { id: 'sweep', kind: 'script', status: 'working', segments: [], targets: ['diagrams'] },
+    )
+    await mount()
+    EffectBus.emit('chat:tile-busy', { path: '/diagrams', busy: true })
+    await settle()
+
+    expect(badge(1).textContent).toBe('2')
+    EffectBus.emit('chat:tile-busy', { path: '/diagrams', busy: false })
+  })
+
+  it('with no registry to count from, the flag is still the fallback', async () => {
+    await mount()
+    EffectBus.emit('chat:tile-busy', { path: '/diagrams', busy: true })
+    await settle()
+
+    expect(badge(1).hidden).toBe(false)
+    expect(badge(1).textContent).toBe('1')
+    expect([...host.querySelectorAll(`${TILE_ROWS} .hc-rail-row`)][1].classList.contains('live')).toBe(true)
+    EffectBus.emit('chat:tile-busy', { path: '/diagrams', busy: false })
   })
 })

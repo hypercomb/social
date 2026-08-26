@@ -1,0 +1,107 @@
+// Host panel — cold chrome, card radius, no effects. Bottom-left corner:
+// the feedback button owns bottom-right.
+
+:host {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  z-index: 5600;
+  display: block;
+  font-size: 12px;
+}
+
+.host-pill {
+  border: 1px solid var(--hc-border, #3a3a3f);
+  border-radius: 2px;
+  background: var(--hc-surface, #1c1c20);
+  color: var(--hc-text-dim, #9a9aa2);
+  padding: 4px 10px;
+  cursor: pointer;
+
+  &:hover { color: var(--hc-text, #e4e4e8); }
+}
+
+.host-card {
+  position: absolute;
+  left: 0;
+  bottom: 32px;
+  width: 340px;
+  border: 1px solid var(--hc-border, #3a3a3f);
+  border-radius: 3px;
+  background: var(--hc-surface, #1c1c20);
+  color: var(--hc-text, #e4e4e8);
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+
+  &__title {
+    color: var(--hc-text-dim, #9a9aa2);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-size: 10px;
+  }
+}
+
+.host-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+
+  &__label {
+    color: var(--hc-text-dim, #9a9aa2);
+    flex: 0 0 52px;
+  }
+
+  &__value {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &--actions { justify-content: flex-end; flex-wrap: wrap; }
+  &--hint .host-row__value { white-space: normal; }
+
+  input {
+    flex: 1 1 auto;
+    min-width: 0;
+    background: var(--hc-surface-deep, #121215);
+    border: 1px solid var(--hc-border, #3a3a3f);
+    border-radius: 2px;
+    color: inherit;
+    padding: 4px 6px;
+    font: inherit;
+  }
+
+  button {
+    border: 1px solid var(--hc-border, #3a3a3f);
+    border-radius: 2px;
+    background: transparent;
+    color: inherit;
+    padding: 3px 8px;
+    cursor: pointer;
+
+    &:disabled { opacity: 0.4; cursor: default; }
+    &:not(:disabled):hover { border-color: var(--hc-text-dim, #9a9aa2); }
+  }
+}
+
+.host-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--hc-text-dim, #55555c);
+  flex: 0 0 auto;
+
+  &--on { background: #4caf7d; }
+}
+
+.host-primary { border-color: #4caf7d !important; }
+.host-live { border-color: #4caf7d !important; color: #4caf7d !important; }
+
+.host-message {
+  color: var(--hc-text-dim, #9a9aa2);
+  word-break: break-word;
+}

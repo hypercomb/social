@@ -39,6 +39,9 @@ const BLOSSOM_KIND = 24242    // Blossom BUD-02 upload auth
 const HIVE_KIND = 30564       // hive index — publisher-signed {lineageKey → head sig} manifest
 const AUTH_SKEW_SECS = 60     // freshness window — bounds replay of a captured token
 const HIVE_MAX_BYTES = 65_536 // a hive index is a small map, never a byte store
+// The canonical LATEST Windows installer. CI overwrites the blob; the URL
+// never moves, so jwize.com/installer always installs the newest build.
+const INSTALLER_LATEST_URL = 'https://storagehypercomb.blob.core.windows.net/installer/Hypercomb-Setup-latest.exe'
 
 // ── responses ────────────────────────────────────────────────────────────────
 
@@ -642,6 +645,21 @@ export default {
     if (hiveMatch) {
       if (method === 'GET' || method === 'HEAD') return getHive(request, env, hiveMatch[1])
       if (method === 'PUT') return putHive(request, env, hiveMatch[1])
+      return text(405, 'method not allowed')
+    }
+
+    // Installer hand-off — jwize.com/installer (zone route) and this
+    // host's own /installer both 302 to the canonical LATEST Windows
+    // installer on the blob store. Shipping a new build is one blob
+    // overwrite; this link never changes, and it works with the relay
+    // machine off — the edge answers, Azure serves.
+    if (pathname === '/installer' || pathname === '/installer/') {
+      if (method === 'GET' || method === 'HEAD') {
+        return new Response(null, {
+          status: 302,
+          headers: { ...CORS, Location: INSTALLER_LATEST_URL, 'Cache-Control': 'no-cache' },
+        })
+      }
       return text(405, 'method not allowed')
     }
 

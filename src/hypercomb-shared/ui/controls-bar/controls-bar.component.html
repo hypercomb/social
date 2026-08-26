@@ -441,10 +441,13 @@
                [class.drag-scrolling]="dragScrolling()"
                (pointerdown)="onListDragStart($event)">
             @if (dockSide() === 'left') {
-              <!-- BEE leads the rail — the way in for someone who has just
-                   arrived: it starts the guided beeing tour (the same tour
-                   /tutorial runs). It sits above pin because "how does this
-                   work?" comes before any control. -->
+              <!-- CHAT IS NOT HERE ANY MORE. This rail is how-you-SEE — fit,
+                   zoom, pin, fullscreen, orientation — and talking is not one
+                   of those. It sits on the command line instead, beside the
+                   box you type the question into (command-shell's
+                   chat-toggle-btn), and `a` opens it from anywhere. -->
+              <!-- The tour remains in the scrollable list, but finishes it:
+                   help stays available without displacing daily tools. -->
               <button class="ctl-btn rail-tutorial"
                       [class.active]="tourMenuOpen()"
                       (click)="startTutorial($event)"

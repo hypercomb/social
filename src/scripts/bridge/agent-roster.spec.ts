@@ -131,4 +131,29 @@ describe('toProviderSpec', () => {
     })
     expect(spec).not.toHaveProperty('endpoint')
   })
+
+  it('keeps the Codex subscription copy and participant-facing model labels', () => {
+    const codex = roster.declared().find(a => a.id === 'codex-bridge')
+    expect(codex).toBeDefined()
+    const spec = roster.toProviderSpec(codex)
+    expect(spec).toMatchObject({
+      label: 'Codex',
+      account: 'ChatGPT subscription',
+      defaultModel: 'gpt-5.6-sol',
+      requiresKey: false,
+      readsHive: true,
+    })
+    expect(spec.models).toEqual([
+      { name: 'codex', label: 'GPT-5.6 Sol', id: 'gpt-5.6-sol', tier: 'deep' },
+      { name: 'codex-mini', label: 'GPT-5.6 Luna', id: 'gpt-5.6-luna', tier: 'fast' },
+    ])
+  })
+
+  it('carries a live subscription snapshot into the announced provider', () => {
+    const subscription = {
+      status: 'available', source: 'test', checkedAt: 123,
+      windows: [{ label: 'Weekly', remainingPercent: 74 }],
+    }
+    expect(roster.toProviderSpec({ ...agent(), subscription }).subscription).toEqual(subscription)
+  })
 })

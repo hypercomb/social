@@ -974,6 +974,7 @@
   "keymap.command-line-toggle": "切换命令行焦点",
   "keymap.mesh-toggle": "切换公开 / 私密模式",
   "keymap.bees": "切换蜂群头像",
+  "keymap.chat": "打开或关闭助手",
   "keymap.screensaver": "显示屏幕保护程序",
   "keymap.fit": "内容适应屏幕",
   "keymap.recenter": "将内容居中到屏幕",
@@ -2031,6 +2032,8 @@
   "agent.rail-find": "搜索本层",
   "agent.rail-no-match": "这一层没有与“{query}”匹配的磁贴。",
   "agent.rail-talk": "与这个磁贴对话",
+  "agent.rail-go": "进入 {name}",
+  "agent.rail-threads": "{count} 个对话",
   "agent.rail-inside": "长按进入",
   "agent.rail-draft": "这里有未发送的想法",
   "agent.rail-turns": "{count} 轮对话",
@@ -2260,6 +2263,10 @@
   "chat.reference.off": "将 {tile} 移出此请求",
   "chat.reference.empty": "把磁贴或图片拖到这里 — 或复制蜂巢里的任何磁贴",
   "chat.reference.picture": "图片 · {size}",
+  "chat.reference.look": "查看 {tile}",
+  "chat.reference.previous": "上一张图片",
+  "chat.reference.next": "下一张图片",
+  "chat.reference.done": "关闭",
   "mesh-modal.needs-location": "加入需要一个位置",
   "mesh-modal.needs-secret": "加入需要一个密钥"
 }

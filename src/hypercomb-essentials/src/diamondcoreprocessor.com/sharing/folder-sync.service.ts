@@ -32,6 +32,22 @@ const DB_NAME = 'hypercomb-folder-sync'
 const DB_VERSION = 1
 const HANDLE_STORE = 'handles'
 const HANDLE_KEY = 'backup-root'
+// THE SHAPE. The chosen folder IS the hive, in the one interchange form every
+// surface shares -- web OPFS, the native client's store, a backup folder, and a
+// published host:
+//
+//   <folder>/<sig>            content: layers, resources, dependencies
+//   <folder>/<lineageSig>/    lineage bags (8-digit markers, max = head)
+//   <folder>/<sign(meaning)>/ pools of meaning
+//   <folder>/dcp/<domain>/    adopted domain identities -- same grammar, scoped
+//
+// So the Windows client can be started straight from a backup folder, and a
+// folder can be handed to somebody else as-is. Bookkeeping that is NOT hive
+// content lives in a non-signature sidecar, where the native restore's
+// signature filter ignores it and it can never be mistaken for a bag or a pool.
+const META_DIR = '.hypercomb'
+/** LEGACY read-fallback: the old `hypercomb-backup/devices/<id>/opfs/` nest.
+ *  Never written any more; still imported so existing backups keep working. */
 const BACKUP_DIR = 'hypercomb-backup'
 const DEVICES_DIR = 'devices'
 const ROOT_MANIFEST = 'hypercomb-backup.json'
@@ -49,9 +65,23 @@ const BACKUP_REPORT = 'BACKUP-REPORT.txt'
 const DEVICE_INVENTORY = 'INVENTORY.txt'
 const DCP_DIR = 'dcp'
 const DCP_MANIFEST = 'manifest.json'
+/** Root names that are NOT participant content. Because the folder is the hive,
+ *  a walk reading it back must skip its own bookkeeping and the domain zone. */
+const NON_HIVE_ROOT: ReadonlySet<string> = new Set([META_DIR, BACKUP_DIR, DCP_DIR])
 const COMPLETE_RE = /^COMPLETE-([A-F0-9]{12})\.hypercomb$/
 /** Files between manifest checkpoints. The manifest IS the resume cursor. */
 const CHECKPOINT_FILES = 200
+/**
+ * How often a connected folder is re-read for STRUCTURE changes made outside
+ * this browser.
+ *
+ * A real directory produces no change events -- the File System Access API has
+ * none -- so the only honest options are polling and never noticing. This is
+ * cheap because it is only the structure: bags and pools, a few megabytes even
+ * on a large hive. Content is not polled at all; it resolves on demand through
+ * `resolveContent`.
+ */
+const DRAIN_INTERVAL_MS = 60_000
 
 type FolderSyncStatus =
   | 'unsupported'
@@ -89,6 +119,10 @@ export interface FolderSyncState {
   failedRoots?: number
   verified?: number
   damaged?: number
+  /** Structure adopted FROM the folder by the most recent inbound drain. */
+  adopted?: number
+  /** Addresses that differ on the two sides -- unresolved divergence. */
+  collisions?: number
   at: number
   error?: string
 }
@@ -99,6 +133,27 @@ interface FileStamp {
   sha256?: string
   category?: string
 }
+
+/** What one inbound structure pass adopted from the folder. */
+export interface FolderDrainResult {
+  /** Lineage-bag markers adopted at their own index. */
+  markers: number
+  /** Pool members (and non-signature root strays) adopted by name. */
+  poolMembers: number
+  /** Already held, byte-identical. */
+  identical: number
+  /**
+   * The same address holding DIFFERENT bytes on the two sides.
+   *
+   * Real divergence, and deliberately counted rather than resolved: choosing a
+   * winner here would be choosing one at random, and history never branches.
+   * See `documentation/one-folder-shape.md` for the lease and rebase options.
+   */
+  collisions: number
+}
+
+/** Which counter an adoption lands in. */
+type DrainKind = 'markers' | 'poolMembers'
 
 export interface CategoryStamp {
   files: number
@@ -393,6 +448,42 @@ const readFileBytes = async (
   }
 }
 
+/**
+ * The old per-device `opfs/` tree, when a folder is still in the legacy nest.
+ *
+ * `undefined` means the hive lives at the folder root -- the shape. Probing for
+ * the directory rather than recording which layout was chosen means a folder
+ * caught mid-migration still reads correctly from either side.
+ */
+const legacyHiveRoot = async (
+  device: FileSystemDirectoryHandle,
+): Promise<FileSystemDirectoryHandle | undefined> => {
+  try {
+    return await device.getDirectoryHandle('opfs', { create: false })
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The bookkeeping directory of an already-written backup, wherever it sits.
+ *
+ * The sidecar in the shape, the old wrapper in a legacy folder. Probed in that
+ * order so a folder written before the shape can still be verified rather than
+ * failing with a bare `NotFoundError` naming a directory it was never going to
+ * have.
+ */
+const existingMetaDir = async (
+  selected: FileSystemDirectoryHandle,
+): Promise<FileSystemDirectoryHandle | undefined> => {
+  for (const name of [META_DIR, BACKUP_DIR]) {
+    try {
+      return await selected.getDirectoryHandle(name, { create: false })
+    } catch { /* not this layout; try the next */ }
+  }
+  return undefined
+}
+
 const directoryAt = async (
   root: FileSystemDirectoryHandle,
   segments: readonly string[],
@@ -480,6 +571,8 @@ export class FolderSyncService {
   readonly #deviceId = this.#loadDeviceId()
   #selected: FileSystemDirectoryHandle | null = null
   #backupHandle: FileSystemDirectoryHandle | null = null
+  /** `<folder>/.hypercomb` -- device manifests, seals, reports. Not content. */
+  #metaHandle: FileSystemDirectoryHandle | null = null
   #manifest: DeviceManifest | null = null
   #serial: Promise<void> = Promise.resolve()
   #reconciling = false
@@ -492,6 +585,20 @@ export class FolderSyncService {
   #pendingMirrors = new Map<string, { relativePath: string[]; bytes: ArrayBuffer }>()
   #mirrorDrainScheduled = false
   #lastPathReportAt = 0
+  /** Repeating inbound structure drain while a folder is connected. */
+  #drainTimer: ReturnType<typeof setInterval> | null = null
+  #lastDrain: FolderDrainResult | null = null
+  /**
+   * Folder-relative paths the two sides disagree about, rebuilt by every
+   * inbound drain.
+   *
+   * These are QUARANTINED from the outbound mirror. Without this the drain
+   * would decline to overwrite the folder's bytes and then the copy pass
+   * immediately would -- the folder's divergent marker replaced by ours, which
+   * is precisely the silent loss the collision count exists to prevent. Both
+   * sides keep what they have until somebody resolves it.
+   */
+  #divergent = new Set<string>()
   #lastState: FolderSyncState = {
     status: 'unconfigured',
     deviceId: this.#deviceId,
@@ -527,7 +634,15 @@ export class FolderSyncService {
   public readonly isSupported = (): boolean =>
     typeof (window as any).showDirectoryPicker === 'function'
 
-  public readonly state = (): FolderSyncState => ({ ...this.#lastState })
+  public readonly state = (): FolderSyncState => ({
+    ...this.#lastState,
+    ...(this.#lastDrain
+      ? {
+          adopted: this.#lastDrain.markers + this.#lastDrain.poolMembers,
+          collisions: this.#lastDrain.collisions,
+        }
+      : {}),
+  })
 
   public readonly settings = (): FolderSyncSettings => ({
     automatic: localStorage.getItem(AUTO_KEY) !== 'false',
@@ -567,10 +682,13 @@ export class FolderSyncService {
       return
     }
     this.#report('backed-up', { folder: this.#selected.name })
-    // Resume as a slow one-way drain. This never performs network reads and
+    // Resume as a slow reconciliation. This never performs network reads and
     // waits for an idle slice so startup and first paint do not contend with a
-    // complete OPFS reconciliation.
-    if (this.settings().automatic) this.#schedulePassiveReconciliation()
+    // complete OPFS pass.
+    if (this.settings().automatic) {
+      this.#schedulePassiveReconciliation()
+      this.#startContinuousDrain()
+    }
   }
 
   /** Must be called from a user gesture: opens the directory picker. */
@@ -595,6 +713,7 @@ export class FolderSyncService {
     this.#backupHandle = null
     await this.#saveHandle(selected)
     await this.syncNow(mode)
+    this.#startContinuousDrain()
     return ['backed-up', 'incomplete'].includes(this.#lastState.status)
   }
 
@@ -608,16 +727,81 @@ export class FolderSyncService {
       return false
     }
     await this.syncNow(mode)
+    this.#startContinuousDrain()
     return ['backed-up', 'incomplete'].includes(this.#lastState.status)
+  }
+
+  /** Adopt whatever structure the folder holds that this browser does not. */
+  public readonly drainNow = (): Promise<void> =>
+    this.#enqueue(async () => { await this.#drainFromFolder() })
+
+  /**
+   * The folder's answer to "I do not have this signature."
+   *
+   * This is the INBOUND half for CONTENT, and it is lazy on purpose: nothing
+   * is copied until something actually asks for it. A lookup can only ever
+   * fire for bytes this browser does not hold, so it is conflict-free by
+   * construction -- there is nothing here to overwrite and nothing to poll.
+   * The content broker calls it ahead of every network tier, because a local
+   * folder beats any host on both latency and reliability.
+   */
+  public readonly resolveContent = async (sig: string): Promise<Uint8Array | null> => {
+    const selected = this.#selected
+    if (!selected || !SIG_RE.test(sig)) return null
+    if (await this.#permission(selected, false) !== 'granted') return null
+    try {
+      const bytes = new Uint8Array(await (await (
+        await selected.getFileHandle(sig, { create: false })
+      ).getFile()).arrayBuffer())
+      // The FILENAME is a claim about the bytes, and a folder is shared,
+      // cloud-synced and hand-editable -- so the claim is CHECKED here rather
+      // than trusted. Bad bytes are a miss, not a fetch.
+      if (await SignatureService.sign(bytes.buffer as ArrayBuffer) !== sig) return null
+      return bytes
+    } catch {
+      return null
+    }
   }
 
   /** Forget access only. Existing backup bytes are intentionally untouched. */
   public readonly disconnect = async (): Promise<void> => {
+    this.#stopContinuousDrain()
     this.#selected = null
     this.#backupHandle = null
+    this.#metaHandle = null
     this.#manifest = null
+    this.#lastDrain = null
     await this.#deleteHandle()
     this.#report('unconfigured')
+  }
+
+  /**
+   * Keep re-reading the folder's STRUCTURE for as long as one is connected.
+   *
+   * The outbound half is already continuous -- every content and marker write
+   * mirrors incrementally -- and content comes back in on demand through
+   * `resolveContent`. What neither of those covers is structure: you do not
+   * "miss" a marker by name, you enumerate a bag to find its head, so bags and
+   * pools have to be walked. It is a poll because a browser tab cannot watch a
+   * directory: the page must be open, the handle came from a user gesture, and
+   * the File System Access API emits no change events. The native client -- a
+   * real process that CAN watch -- is where a true watcher belongs.
+   */
+  readonly #startContinuousDrain = (): void => {
+    if (this.#drainTimer !== null || typeof setInterval !== 'function') return
+    this.#drainTimer = setInterval(() => {
+      // A full pass already drains first; overlapping them would double the
+      // work and interleave two writers over the same OPFS paths.
+      if (!this.#selected || this.#fullPass || this.#reconciling) return
+      if (!this.settings().automatic) return
+      void this.#enqueue(async () => { await this.#drainFromFolder() }).catch(() => {})
+    }, DRAIN_INTERVAL_MS)
+  }
+
+  readonly #stopContinuousDrain = (): void => {
+    if (this.#drainTimer === null) return
+    clearInterval(this.#drainTimer)
+    this.#drainTimer = null
   }
 
   /**
@@ -626,7 +810,14 @@ export class FolderSyncService {
    */
   public readonly syncNow = (mode: FolderSyncMode = 'hard-copy'): Promise<void> => {
     if (this.#fullPass) return this.#fullPass
-    const run = this.#enqueue(() => this.#syncAll(mode)).finally(() => {
+    // SYMMETRIC BY DESIGN: neither OPFS nor the folder is the source of truth.
+    // Whatever structure the folder gained since the last pass is adopted
+    // FIRST, so the outbound mirror that follows already carries it and a
+    // round trip settles in one pass instead of two.
+    const run = this.#enqueue(async () => {
+      await this.#drainFromFolder()
+      await this.#syncAll(mode)
+    }).finally(() => {
       this.#fullPass = null
       this.#fullPassRanThisSession = true
     })
@@ -666,11 +857,11 @@ export class FolderSyncService {
     // the installer writes a complete participant tree and no dcp/ directory;
     // requiring one made every such backup permanently unimportable, and made
     // import impossible in a private window, where DCP can never be present.
-    const dcpSnapshot = await this.#verifiedDcpSnapshot(backup)
+    const dcpSnapshot = await this.#verifiedDcpSnapshot(selected, backup)
     if (dcpSnapshot === null) {
       throw new Error('This backup contains a DCP snapshot, but it is not sealed, complete, and verified.')
     }
-    const sources = await this.#deviceSnapshots(backup)
+    const sources = await this.#deviceSnapshots(backup, selected)
     if (sources.length === 0) {
       throw new Error('The selected folder contains no sealed, complete, verified hard-copy snapshots.')
     }
@@ -732,6 +923,10 @@ export class FolderSyncService {
         for await (const entry of walkFiles(source.opfs)) {
           const parts = entry.path.split('/')
           const name = parts.pop()!
+          // Because the folder IS the hive, its own bookkeeping and the domain
+          // zone sit beside the content. Neither is participant content, and
+          // importing either would mint junk at the OPFS root.
+          if (NON_HIVE_ROOT.has(parts[0] ?? name)) continue
           if (!parts.every(validSegment) || !validSegment(name)) {
             result.invalid++
             continue
@@ -790,6 +985,154 @@ export class FolderSyncService {
     }
   }
 
+  /**
+   * Adopt the structure the folder holds that this browser does not.
+   *
+   * The reverse of the mirror, and deliberately the SAME merge rule, because
+   * neither side is the source of truth: bag markers are inserted at their own
+   * index, pool members union by name, and nothing is ever overwritten. It is
+   * the rule `interchange.rs` states for restore, run in the other direction.
+   *
+   * CONTENT IS NOT DRAINED HERE. A signature-named root file resolves on
+   * demand instead (`resolveContent`), which is both cheaper -- nothing is
+   * copied until something wants it, so an unchanged folder costs one
+   * enumeration -- and conflict-free, because a lookup only fires for bytes
+   * this browser does not hold. Copying a whole folder eagerly to learn
+   * nothing is exactly what this avoids.
+   *
+   * Markers and pool members are the mutable half, and they cannot be lazy:
+   * you do not "miss" a marker by name, you enumerate a bag to find its head.
+   * The same address holding different bytes on the two sides is REAL
+   * DIVERGENCE, counted and reported rather than silently resolved.
+   */
+  readonly #drainFromFolder = async (): Promise<FolderDrainResult | null> => {
+    const selected = this.#selected
+    if (!selected) return null
+    if (await this.#permission(selected, false) !== 'granted') return null
+
+    const result: FolderDrainResult = {
+      markers: 0, poolMembers: 0, identical: 0, collisions: 0,
+    }
+    // Rebuilt from scratch every pass, so an address the participant has since
+    // reconciled stops being quarantined without anything having to clear it.
+    this.#divergent.clear()
+    const opfs = await navigator.storage.getDirectory()
+
+    /**
+     * A destination created only if something is actually adopted into it.
+     * Resolving eagerly would mint an empty signature-named directory at the
+     * OPFS root for every bag the folder holds and this browser does not.
+     */
+    interface Target {
+      handle: FileSystemDirectoryHandle | null
+      ensure: () => Promise<FileSystemDirectoryHandle>
+    }
+
+    const adopt = async (
+      sourceDir: FileSystemDirectoryHandle,
+      target: Target,
+      name: string,
+      path: string,
+      kind: DrainKind,
+    ): Promise<void> => {
+      let existing: FileSystemFileHandle | null = null
+      if (target.handle) {
+        try {
+          existing = await target.handle.getFileHandle(name, { create: false })
+        } catch { existing = null }
+      }
+      let incoming: Uint8Array
+      try {
+        incoming = new Uint8Array(await (await (
+          await sourceDir.getFileHandle(name, { create: false })
+        ).getFile()).arrayBuffer())
+      } catch {
+        // Enumerated and then gone, or unreadable. A folder under sync does
+        // this; the next pass picks up whatever replaced it.
+        return
+      }
+      if (existing) {
+        const current = new Uint8Array(await (await existing.getFile()).arrayBuffer())
+        if (equalBytes(current, incoming)) {
+          result.identical++
+        } else {
+          result.collisions++
+          this.#divergent.add(path)
+        }
+        return
+      }
+      await writeFile(await target.ensure(), name, incoming)
+      result[kind]++
+    }
+
+    const rootTarget: Target = { handle: opfs, ensure: async () => opfs }
+
+    for await (const [name, handle] of (selected as any).entries()) {
+      // The folder is the hive, so its own bookkeeping and the domain zone sit
+      // beside the content. Neither is participant content.
+      if (NON_HIVE_ROOT.has(name) || name.endsWith('.crswap')) continue
+      if (!validSegment(name)) continue
+
+      if (handle.kind === 'file') {
+        // Signature-named content resolves on demand, never by drain.
+        if (SIG_RE.test(name)) continue
+        // A non-signature root stray is not content-addressed, so it cannot be
+        // looked up by name and has to union here.
+        await adopt(selected, rootTarget, name, name, 'poolMembers')
+        continue
+      }
+      if (handle.kind !== 'directory') continue
+
+      // A signature-named directory may be a bag, a pool, or BOTH -- for a
+      // bare-word meaning the two addresses are byte-identical. So classify
+      // each ENTRY, never the directory: an 8-digit name is a marker, anything
+      // else is a pool member. That is the same rule `restore` uses, and it is
+      // why a colliding address drains correctly without ever guessing.
+      const sourceDir = handle as FileSystemDirectoryHandle
+      const target: Target = {
+        handle: null,
+        ensure: async () => (target.handle ??= await opfs.getDirectoryHandle(name, { create: true })),
+      }
+      try {
+        target.handle = await opfs.getDirectoryHandle(name, { create: false })
+      } catch { /* absent here; created on the first adoption */ }
+
+      for await (const [member, memberHandle] of (sourceDir as any).entries()) {
+        if (memberHandle.kind !== 'file' || member.endsWith('.crswap')) continue
+        if (!validSegment(member)) continue
+        await adopt(
+          sourceDir, target, member, `${name}/${member}`,
+          MARKER_RE.test(member) ? 'markers' : 'poolMembers',
+        )
+      }
+    }
+
+    this.#lastDrain = result
+    const adopted = result.markers + result.poolMembers
+    if (adopted > 0) {
+      EffectBus.emit('activity:log', {
+        message: `adopted ${adopted} item${adopted === 1 ? '' : 's'} from ${selected.name}`,
+        icon: '\u25c8',
+      })
+    }
+    if (result.collisions > 0) {
+      // Divergence must never be quiet. Both sides keep their own bytes, both
+      // passes report success, and without this the two hives drift apart with
+      // nothing ever saying so.
+      EffectBus.emit('toast:show', {
+        type: 'error',
+        title: 'Folder and hive disagree',
+        message: `${result.collisions} address${result.collisions === 1 ? '' : 'es'} hold different bytes in ${selected.name} than in this hive. Nothing was overwritten -- both sides kept what they had.`,
+        duration: 0,
+      })
+      EffectBus.emit('activity:log', {
+        message: `${result.collisions} address${result.collisions === 1 ? '' : 'es'} differ between this hive and ${selected.name}; nothing overwritten`,
+        icon: '!',
+      })
+    }
+    return result
+  }
+
   readonly #syncAll = async (mode: FolderSyncMode): Promise<void> => {
     const selected = this.#selected
     if (!selected) {
@@ -802,7 +1145,9 @@ export class FolderSyncService {
     }
     // Resolve and retain the exact directory receiving the backup. UI actions
     // must open this handle, not the participant-selected parent.
-    this.#backupHandle = await selected.getDirectoryHandle(BACKUP_DIR, { create: true })
+    // The backup IS the chosen folder; the sidecar holds only bookkeeping.
+    this.#backupHandle = selected
+    this.#metaHandle = await selected.getDirectoryHandle(META_DIR, { create: true })
 
     const agentId = `folder-sync:${this.#deviceId}`
     this.#report('syncing', {
@@ -825,7 +1170,7 @@ export class FolderSyncService {
       EffectBus.emit('toast:show', {
         type: 'info',
         title: 'Folder backup destination',
-        message: `${selected.name}\\${BACKUP_DIR} — click to open the native folder window at this location.`,
+        message: `${selected.name} — click to open the native folder window at this location.`,
         duration: 0,
         actionLabel: 'Open backup folder',
         actionEffect: 'folder-sync:show-location',
@@ -863,10 +1208,14 @@ export class FolderSyncService {
       // to finish before bytes start landing: a pass interrupted at ninety
       // percent leaves ninety percent saved, and a pass over a folder that is
       // already current fetches nothing at all.
-      const backup = this.#backupHandle
+      const backup = this.#metaHandle!
       const devicesEarly = await backup.getDirectoryHandle(DEVICES_DIR, { create: true })
       const deviceEarly = await devicesEarly.getDirectoryHandle(this.#deviceId, { create: true })
-      const destination = await deviceEarly.getDirectoryHandle('opfs', { create: true })
+      // THE HIVE IS THE FOLDER. Content lands at `<folder>/<sig>`, bags and
+      // pools as their own signature-named directories -- byte-for-byte the
+      // tree the native client exports and restores, so this folder can BE a
+      // hive rather than merely describe one.
+      const destination = selected
 
       const hardCopy = mode === 'hard-copy'
         ? await this.#materializeHardCopy(source, selected.name, mode, agentId, destination)
@@ -874,7 +1223,7 @@ export class FolderSyncService {
 
       await this.#writeRootManifest(backup)
       if (mode === 'hard-copy') {
-        const dcpSnapshot = await this.#exportDcpBackup(backup, agentId)
+        const dcpSnapshot = await this.#exportDcpBackup(selected, agentId)
         if (dcpSnapshot === null) {
           hardCopy.resolverAvailable = false
           hardCopy.missing++
@@ -928,6 +1277,10 @@ export class FolderSyncService {
           console.warn('[folder-sync] entry disappeared mid-walk:', entry.path, error)
           continue
         }
+        // QUARANTINE: the folder holds different bytes at this address and the
+        // drain refused to overwrite ours. Writing ours over theirs here would
+        // undo that refusal and destroy the other side's record.
+        if (this.#divergent.has(entry.path)) continue
         const parts = entry.path.split('/')
         const name = parts.pop()!
         // A root-level sig-named file is content-addressed: the NAME is the
@@ -1019,7 +1372,7 @@ export class FolderSyncService {
         }
         this.#reportLatestPath(
           agentId,
-          `${selected.name}\\${BACKUP_DIR}\\${DEVICES_DIR}\\${this.#deviceId}\\opfs\\${entry.path.replaceAll('/', '\\')}`,
+          `${selected.name}\\${entry.path.replaceAll('/', '\\')}`,
         )
         if (scanned % 25 === 0) {
           this.#report('syncing', {
@@ -1076,7 +1429,7 @@ export class FolderSyncService {
       if (mode === 'hard-copy') {
         try {
           dcpManifest = await readJson<DcpBackupManifest>(
-            await backup.getDirectoryHandle(DCP_DIR, { create: false }),
+            await selected.getDirectoryHandle(DCP_DIR, { create: false }),
             DCP_MANIFEST,
           )
         } catch { /* the incomplete state below explains the absent DCP copy */ }
@@ -1117,7 +1470,7 @@ export class FolderSyncService {
       })
       EffectBus.emit('activity:log', {
         message: passSucceeded
-          ? `${mode === 'hard-copy' ? 'portable hard copy' : 'local mirror'} verified: ${scanned} files (${formatBytes(totalBytes)}) in ${selected.name}; see ${BACKUP_DIR}/${BACKUP_REPORT}`
+          ? `${mode === 'hard-copy' ? 'portable hard copy' : 'local mirror'} verified: ${scanned} files (${formatBytes(totalBytes)}) in ${selected.name}; see ${META_DIR}/${BACKUP_REPORT}`
           : `backup copied ${scanned} local files (${formatBytes(totalBytes)}) but is not fully portable: ${hardCopy.missing} referenced items are missing`,
         icon: passSucceeded ? '◈' : '!',
       })
@@ -1158,10 +1511,12 @@ export class FolderSyncService {
       segments: [],
     })
     try {
-      const backup = await selected.getDirectoryHandle(BACKUP_DIR, { create: false })
+      const backup = await existingMetaDir(selected)
+      if (!backup) throw new Error('this folder holds no backup to verify')
       const devices = await backup.getDirectoryHandle(DEVICES_DIR, { create: false })
       const device = await devices.getDirectoryHandle(this.#deviceId, { create: false })
-      const opfs = await device.getDirectoryHandle('opfs', { create: false })
+      // The hive is the folder; a legacy nest still verifies where it sits.
+      const opfs = (await legacyHiveRoot(device)) ?? selected
       const manifest = await readJson<DeviceManifest>(device, DEVICE_MANIFEST)
       if (manifest?.kind !== 'hypercomb-folder-backup-device') {
         throw new Error('this device has no backup manifest to verify against')
@@ -1493,15 +1848,18 @@ export class FolderSyncService {
     if (!selected || entries.length === 0
         || await this.#permission(selected, false) !== 'granted') return
     try {
-      const backup = await selected.getDirectoryHandle(BACKUP_DIR, { create: true })
+      const backup = await selected.getDirectoryHandle(META_DIR, { create: true })
       const devices = await backup.getDirectoryHandle(DEVICES_DIR, { create: true })
       const device = await devices.getDirectoryHandle(this.#deviceId, { create: true })
-      const opfs = await device.getDirectoryHandle('opfs', { create: true })
+      const opfs = selected
       const manifest = this.#manifest ?? await readJson<DeviceManifest>(device, DEVICE_MANIFEST)
         ?? this.#freshManifest()
       const pools = await poolMeanings()
       let copiedBytes = 0
       for (const entry of entries) {
+        // Same quarantine as the full pass: a disputed address is never
+        // written over from this side either.
+        if (this.#divergent.has(entry.relativePath.join('/'))) continue
         const parts = [...entry.relativePath]
         const name = parts.pop()!
         const target = await directoryAt(opfs, parts, true)
@@ -1584,17 +1942,20 @@ export class FolderSyncService {
   readonly #resolveBackupRoot = async (
     selected: FileSystemDirectoryHandle,
   ): Promise<FileSystemDirectoryHandle | null> => {
-    if (await readJson(selected, ROOT_MANIFEST)) return selected
-    try {
-      const nested = await selected.getDirectoryHandle(BACKUP_DIR, { create: false })
-      return await readJson(nested, ROOT_MANIFEST) ? nested : null
-    } catch {
-      return null
+    // `.hypercomb` (the shape) first, then the legacy `hypercomb-backup` nest,
+    // then a folder that IS the bookkeeping directory.
+    for (const name of [META_DIR, BACKUP_DIR]) {
+      try {
+        const nested = await selected.getDirectoryHandle(name, { create: false })
+        if (await readJson(nested, ROOT_MANIFEST)) return nested
+      } catch { /* not this layout; try the next */ }
     }
+    return await readJson(selected, ROOT_MANIFEST) ? selected : null
   }
 
   readonly #deviceSnapshots = async (
     backup: FileSystemDirectoryHandle,
+    hive: FileSystemDirectoryHandle,
   ): Promise<Array<{
     deviceId: string
     updatedAt: number
@@ -1631,7 +1992,9 @@ export class FolderSyncService {
       const manifestSha256 = await SignatureService.sign(manifestBytes)
       if (!(await this.#hasValidCompletionSeal(dir, manifestSha256, deviceId))) continue
       try {
-        const opfs = await dir.getDirectoryHandle('opfs', { create: false })
+        // The shape puts the hive at the folder root; a legacy backup keeps a
+        // per-device `opfs/` nest. Both import, each verified where it sits.
+        const opfs = (await legacyHiveRoot(dir)) ?? hive
         if (!(await this.#verifySnapshotFiles(opfs, manifest))) continue
         snapshots.push({ deviceId, updatedAt: manifest.updatedAt, opfs })
       } catch {
@@ -1981,12 +2344,19 @@ export class FolderSyncService {
    * corrupt backup and must never be restored.
    */
   readonly #verifiedDcpSnapshot = async (
-    backup: FileSystemDirectoryHandle,
+    hive: FileSystemDirectoryHandle,
+    meta: FileSystemDirectoryHandle,
   ): Promise<{ manifest: DcpBackupManifest; opfs: FileSystemDirectoryHandle } | 'absent' | null> => {
-    let dcp: FileSystemDirectoryHandle
-    try {
-      dcp = await backup.getDirectoryHandle(DCP_DIR, { create: false })
-    } catch {
+    // `<folder>/dcp` in the shape; `<folder>/hypercomb-backup/dcp` in a legacy
+    // backup. The domain zone is the same either way once it is found.
+    let dcp: FileSystemDirectoryHandle | undefined
+    for (const parent of hive === meta ? [meta] : [hive, meta]) {
+      try {
+        dcp = await parent.getDirectoryHandle(DCP_DIR, { create: false })
+        break
+      } catch { /* not here */ }
+    }
+    if (!dcp) {
       return 'absent'
     }
     try {

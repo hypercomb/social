@@ -84,6 +84,20 @@ export const globalKeyMap: KeyMapLayer = {
       pierce: true,
     },
     {
+      // THE ASSISTANT, on the letter it starts with. It took `a` from the
+      // arrange cycle, which moved to `l` — a bare left-hand letter is the
+      // scarcest thing in this map (see the quick-menu note above), and
+      // "open the conversation" earns one far more than "next arrangement"
+      // does: one is the thing you reach for mid-thought, the other is a
+      // view you set once and leave. Global, not default: the chat is about
+      // wherever you are standing, so it opens from anywhere.
+      cmd: 'chat.toggle',
+      sequence: [[{ key: 'a' }]],
+      description: 'Open or close the assistant',
+      descriptionKey: 'keymap.chat',
+      category: 'View',
+    },
+    {
       cmd: 'screensaver.show',
       sequence: [[{ key: '7', code: 'digit7', ctrl: true, shift: true }]],
       description: 'Show screensaver',
@@ -155,17 +169,20 @@ export const defaultKeyMap: KeyMapLayer = {
       category: 'Clipboard',
     },
 
-    // Arrange — apply / cycle tile target sequences over existing tiles
+    // Arrange — apply / cycle tile target sequences over existing tiles.
+    // ON `l` SINCE THE ASSISTANT TOOK `a`: layout, and a free right-hand
+    // letter. The pair keeps its shape — bare steps forward, shifted steps
+    // back — so only the finger changes.
     {
       cmd: 'sequence.cycle',
-      sequence: [[{ key: 'a', shift: false }]],
+      sequence: [[{ key: 'l', shift: false }]],
       description: 'Arrange tiles by the next sequence',
       descriptionKey: 'keymap.arrange',
       category: 'View',
     },
     {
       cmd: 'sequence.cyclePrev',
-      sequence: [[{ key: 'a', shift: true }]],
+      sequence: [[{ key: 'l', shift: true }]],
       description: 'Arrange tiles by the previous sequence',
       descriptionKey: 'keymap.arrangePrev',
       category: 'View',

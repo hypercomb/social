@@ -223,9 +223,9 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   readonly notesLabel = input<string>('notes')
 
 
-  /** The chat window's open state — its toggle LEADS the standing-tools group
-   *  (the chat window is the default companion view, so its switch comes
-   *  first; the per-cell behaviour icons stay in their own group to the left). */
+  /** The chat window's open state. THIS rail owns the launcher again — the
+   *  control bar's copy is gone, so there is one opener and it sits on the
+   *  box the question is typed into. */
   readonly chatPanelOpen = input<boolean>(false)
   readonly chatLabel = input<string>('chat')
 

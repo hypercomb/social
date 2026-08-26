@@ -132,10 +132,12 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // documentation/entrances-and-sets.md). Not among the header aggregates — it
   // manages referenced hives on different roots; it is not a launch group.
   { id: 'pools',        label: 'collections-landing.title', action: 'openPools',      visibleWhen: 'always' },
-  // The chat window boots open (the default companion view). Its PRIMARY
-  // switch is the leading icon of the command line's tools rail; this rail
-  // entry is the optional second opener, off by default like the magnifiers.
-  { id: 'chat',         label: 'controls.chat',         action: 'toggleChat',         visibleWhen: 'always' },
+  // NO CHAT ENTRY. This bar is how-you-SEE — fit, zoom, pin, fullscreen,
+  // orientation — and talking is not one of those; the assistant sits on the
+  // command line beside the box you type into (command-shell's
+  // chat-toggle-btn), reachable from anywhere with `a`. Leaving a registry
+  // entry here would put a second opener on a bar that no longer owns the
+  // act, in a place that says nothing about what it does.
   { id: 'fit',          label: 'controls.fit-content',  action: 'fitOrCenter',        visibleWhen: 'always' },
   { id: 'zoom-out',     label: 'controls.zoom-out',     action: 'zoomOut',            visibleWhen: 'always' },
   { id: 'zoom-in',      label: 'controls.zoom-in',      action: 'zoomIn',             visibleWhen: 'always' },
@@ -515,7 +517,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #clipboardPanelOpen = signal(false)
   // Whether the chat window is showing — its `chat:window-state` announcement,
   // so the launcher lights while the default view is up.
-  #chatOpen = signal(false)
   #hasSelection = signal(false)
   #textOnly = signal(false)
   #layoutPinned = signal(false)
@@ -602,9 +603,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  the rail) so it stays reachable no matter how long the icon list grows
    *  and is never user-mutable in edit mode. */
   readonly railControls = computed((): ControlItem[] => {
-    // On the left dock, pin is lifted out of the scrollable list and rendered
-    // as a fixed action at the very top (above home) — drop it here so it
-    // isn't duplicated. Every other dock/layout keeps pin inline in the list.
+    // On the left dock, pin is lifted into a structural position — drop its
+    // registry entry here so it cannot render twice. Every other dock/layout
+    // keeps the customizable entries inline in the list.
     const onLeftRail = this.#dockSide() === 'left' && !this.isMobile()
     return this.visibleControls().filter(ctrl =>
       ctrl.id !== 'back' && !(onLeftRail && ctrl.id === 'pin'),
@@ -787,7 +788,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly isActive = (ctrl: ControlItem): boolean => {
     switch (ctrl.id) {
       case 'clipboard': return this.#clipboardPanelOpen()
-      case 'chat': return this.#chatOpen()
       case 'pin': return this.pinnedHere()
       case 'fit': return this.fitLocked()
       case 'text-only': return this.#textOnly()
@@ -1358,7 +1358,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #textOnlyUnsub: (() => void) | null = null
   #clipboardAvailableUnsub: (() => void) | null = null
   #clipboardOpenUnsub: (() => void) | null = null
-  #chatOpenUnsub: (() => void) | null = null
   #atomizeModeUnsub: (() => void) | null = null
   #atomizeAtomsUnsub: (() => void) | null = null
   #atomizeStrategyUnsub: (() => void) | null = null
@@ -1552,12 +1551,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // replayed, so a late mount reflects the current panel state.
     this.#clipboardOpenUnsub = EffectBus.on<{ open?: boolean }>('clipboard:open', ({ open }) => {
       this.#clipboardPanelOpen.set(!!open)
-    })
-
-    // Chat-window state light. Last-value replayed, so a bar mounting after
-    // the window's boot-open still shows it lit.
-    this.#chatOpenUnsub = EffectBus.on<{ open?: boolean }>('chat:window-state', ({ open }) => {
-      this.#chatOpen.set(!!open)
     })
 
     this.#moveModeUnsub = EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
@@ -1832,7 +1825,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#textOnlyUnsub?.()
     this.#clipboardAvailableUnsub?.()
     this.#clipboardOpenUnsub?.()
-    this.#chatOpenUnsub?.()
     this.#tagsUnsub?.()
     this.#tagFilterUnsub?.()
     this.#hoverTagsUnsub?.()

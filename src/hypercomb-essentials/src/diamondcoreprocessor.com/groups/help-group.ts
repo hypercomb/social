@@ -68,6 +68,7 @@ const ACTION_LABELS: Record<string, string> = {
   'navigation.recenter': 'Center',
   'ui.commandPalette': 'Palette',
   'ui.commandLineToggle': 'Command Line',
+  'chat.toggle': 'Assistant',
   'sequence.cycle': 'Arrange',
   'sequence.cyclePrev': 'Arrange Back',
   'render.toggleOrientation': 'Orientation',
@@ -149,6 +150,7 @@ const TIERS: readonly { header: string; keys: readonly string[] }[] = [
     keys: [
       'ui.commandPalette',
       'ui.commandLineToggle',
+      'chat.toggle',
       'sequence.cycle',
       'sequence.cyclePrev',
       'render.toggleOrientation',

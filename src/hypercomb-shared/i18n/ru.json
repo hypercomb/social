@@ -974,6 +974,7 @@
   "keymap.command-line-toggle": "Переключить фокус командной строки",
   "keymap.mesh-toggle": "Переключить публичный / приватный режим",
   "keymap.bees": "Переключить аватары пчёл",
+  "keymap.chat": "Открыть или закрыть ассистента",
   "keymap.screensaver": "Показать заставку",
   "keymap.fit": "Подогнать содержимое под экран",
   "keymap.recenter": "Центрировать содержимое на экране",
@@ -2031,6 +2032,8 @@
   "agent.rail-find": "Поиск на этом уровне",
   "agent.rail-no-match": "Здесь нет плиток, подходящих под «{query}».",
   "agent.rail-talk": "Поговорить с этой плиткой",
+  "agent.rail-go": "Войти в {name}",
+  "agent.rail-threads": "бесед: {count}",
   "agent.rail-inside": "удерживайте, чтобы войти",
   "agent.rail-draft": "Здесь ждут неотправленные мысли",
   "agent.rail-turns": "реплик: {count}",
@@ -2260,6 +2263,10 @@
   "chat.reference.off": "Убрать {tile} из этого запроса",
   "chat.reference.empty": "Перетащите плитки или изображение сюда — или скопируйте любую плитку в улье",
   "chat.reference.picture": "изображение · {size}",
+  "chat.reference.look": "Посмотреть {tile}",
+  "chat.reference.previous": "Предыдущее изображение",
+  "chat.reference.next": "Следующее изображение",
+  "chat.reference.done": "Закрыть",
   "mesh-modal.needs-location": "для присоединения нужно место",
   "mesh-modal.needs-secret": "для присоединения нужен секрет"
 }

@@ -1773,6 +1773,141 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "resolver-install-command",
+      "title": "Mirror the resolver: hypercomb install (read-only deployment Phase 3)",
+      "run": null,
+      "note": "New CLI creation: hypercomb-cli/src/commands/install.ts (+spec, +index wiring) — the resolver from documentation/read-only-deployment.md. Mirror = tiles for the parts (install.ts, install.spec.ts, index.ts wiring) 1:1 with source, a collection gathering them under the read-only-deployment creation, pheromones marking part/behavior per declared vocabulary, and a note per tile carrying what it does (signature+domain -> exact Merkle install; delta; refusal; holes). note-add is additive — manual drain only.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "publish-site-command",
+      "title": "Mirror publish:site (read-only deployment Phase 3 assembly)",
+      "run": null,
+      "note": "New creation: scripts/publish-site.ts + publish:site npm script - assembles the xcopy folder (closure via the resolver at root, module package at /content, full visual:website:page tree materialized with resource: css inlined in face copies only). Tiles 1:1 with source under the read-only-deployment collection, marks per vocabulary, notes carry the acceptance proof (523-sig revolucion closure, dumb-server render, flavor-wheel interactive page cold). note-add additive - manual drain.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "native-host-feature",
+      "title": "Mirror the native Host feature (executable makes anybody a host)",
+      "run": null,
+      "note": "New creation across client+shared: crates/host/src/serve.rs (SiteServer, 4 tests), app/src/hosting.rs (cloudflared orchestration, hosting.json beside hive, RunEvent::Exit teardown), app/src/main.rs wiring (7 hosting_* commands), hypercomb-shared/ui/host-panel/* (native-gated shell surface, hosting.* i18n en+ja). Tiles 1:1 with these sources under the read-only-deployment collection, marks per vocabulary, notes carry: serves ONLY the picked published folder (consent boundary), tunnel run --url never config.yml (jwize protection), CSP forbids localhost fetch so status rides IPC. note-add additive - manual drain.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "chat-blurb-summaries",
+      "title": "Mirror the chat blurb: a conversation said briefly, one recycled slot per thread",
+      "run": null,
+      "note": "New creation: hypercomb-essentials/src/diamondcoreprocessor.com/assistant/chat-blurb.ts (+chat-blurb.spec.ts), the orchestrator's silent drain in orchestrator.drone.ts, and the rail's read side in agent-tiles-rail.ts (+spec). Tiles 1:1 with source under an assistant collection, marks per declared vocabulary, notes carrying: (1) STICKY, NOT ON THE FLY — a finished thread can never say anything new, and a summary you can only see while a model is reachable is a tooltip; (2) ONE SLOT PER CONVERSATION, RECYCLED — keying by the turn-set hash is right for a BRANCH and wrong for a conversation, because a conversation GROWS and would leave one orphan per turn; putPoolDoc's own exactly-one-member rule IS the recycling; (3) VERSIONED — keyed-by-input is not self-invalidating, BLURB_VERSION is the second half of the key; (4) NEVER LOAD-BEARING — the row draws from its title alone when a blurb is missing, which is what makes the whole pool disposable; (5) the payoff — a written-down summary makes the rail's filter reach into what was SAID, which a derived-on-open blurb could never do. New pool meaning: chat:blurbs (colon mandatory). note-add is additive — manual drain only.",
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "chat-shelf-picture-viewer",
+      "title": "Mirror the shelf picture viewer: look at what the request carries, without leaving",
+      "run": null,
+      "note": "New creation in hypercomb-shared/ui/chat-window: chat-look.scss (new fourth sheet), the viewer state in chat-window.component.ts (viewing/viewingUrl/picturesOnShelf/stepPicture/onPictureKey + the new first rung of the Escape cascade + the fold closing it), and the shelf thumbnail becoming a press target in chat-window.component.html. Tiles 1:1 with source under the chat-window collection, marks per declared vocabulary, notes carrying: (1) IN PLACE, NEVER A TAB — the composer holds an unsent question and the shelf holds what you gathered, and on the native shell a document navigation takes the window with it (no view may link out), so the overlay is a child of .chat-panel; (2) NO SECOND FETCH — it paints the URL contextThumbs already holds (a tile's large picture, an attached image's own bytes, both full size), so opening is free and the thumbnail cache stays the sole owner of every object-URL; (3) THE PICTURE IS THE ONLY NEW GESTURE — the chip is still a drag handle and the x still drops the reference, so three gestures share one chip and the cursor tells them apart; (4) LEFT/RIGHT WALK THE SHELF, the same 'next one of these' axis the rest of the product uses, wrapping; (5) Escape unwinds it FIRST — nothing was composed, put down or chosen, so it is the smallest commitment in the cascade. New i18n keys landed in all 14 catalogs: chat.reference.look/previous/next/done. note-add is additive — manual drain only.",
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "folder-sync-one-shape",
+      "title": "Mirror the one folder shape: the chosen folder IS the hive, in the interchange form",
+      "run": null,
+      "note": "Behaviour change to folder-sync (hypercomb-essentials/src/diamondcoreprocessor.com/sharing/folder-sync.service.ts + folder-sync.spec.ts + folder-sync-drain.spec.ts). Extends the existing folder-sync mirror (scripts/mirror-folder-sync.ts, -bounds, -correction) — EXTEND, never re-run. Notes to carry: (1) ONE SHAPE EVERYWHERE — root/<sig> content, root/<lineageSig>/ bags, root/<sign(meaning)>/ pools, root/dcp/<domain>/ identity zone; the same tree web OPFS, the native client's store, a backup folder and a published host all speak, so a Windows client can be STARTED from a backup folder and a folder can be handed to somebody as-is. (2) A READ-ONLY HOST CARRIES LESS OF IT, not a different shape — a layer signature is a complete handshake, so publish-site.ts serves only the content half ('the folder IS the pool'). (3) THE SIDECAR IS NOT CONTENT — .hypercomb/ holds device manifests, seals and reports; non-signature names are exactly what the native restore's as_sig filter ignores, which is why bookkeeping can sit beside a hive without ever being mistaken for a bag or a pool. (4) LEGACY NEST IS READ-FALLBACK ONLY — hypercomb-backup/devices/<id>/opfs/ is never written again and still imports, probed by looking for the opfs dir rather than by recording which layout was chosen, so a folder caught mid-migration reads from either side. (5) CONVERGENCE IS NOT YET CLOSED — content is conflict-free by construction (sha256-addressed) and pools union by member, but put_marker_at REFUSES an occupied index, so a hive edited on web and desktop between drains silently drops the loser's markers; needs a lease or a rebase-on-drain before two-way sync is safe.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "standalone-shim-commands",
+      "title": "Mirror hypercomb site + serve (the standalone server shim)",
+      "run": null,
+      "note": "New CLI creations: hypercomb-cli/src/commands/site.ts (sync verb: resolveClosure + materializePages/standaloneFace, exported, reused by scripts/publish-site.ts) and serve.ts (standalone read-only server: same contract as the app SiteServer, loopback default, --public, --site sync-then-serve). Tiles 1:1 with the two sources under the read-only-deployment collection; notes carry the verified one-liner (npm i -g @hypercomb/cli; hypercomb serve dir --site sig --from cdn) and the 523-sig/12-page live proof. note-add additive - manual drain.",
+      "unattended": false,
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "rail-line-talks-arrow-walks",
+      "title": "Mirror the rail reversal: the line talks, the arrow walks, and a line says how many and whether one is live",
+      "run": null,
+      "note": "Reversal in hypercomb-essentials/src/diamondcoreprocessor.com/assistant/agent-tiles-rail.ts (+spec): a click on ANY row now enters its conversation (leaf or parent, one rule instead of one that changed with childCount); going inside moved to its own chevron control (.hc-rail-walk, WALK_GLYPH), hidden where there is nothing to go into; a second press on the current row folds the threads shut without putting the conversation down. Tiles 1:1 with source under the rail collection, marks per declared vocabulary, notes carrying: (1) WHY THE REVERSE IS RIGHT — every line in the list IS a conversation and carries that conversation's state (deep/unread/draft/live), so every one of those marks was describing something you could not reach by pressing the line it was on; (2) THE COUNT AFTER THE LABEL — a tile is a SUBJECT, so several threads about it is the normal case, and archived threads are excluded because the fold excludes them (a row promising four and listing three lies about the same set); (3) LIVE is the only mark in the PRESENT TENSE, so it is the only one that moves — amber (the hive is doing something) breathing on the bees' own cycle, drawn even at zero turns because a question just sent is when you most need to see which line it went to; unread wins at equal specificity because a landed reply is no longer in progress; (4) BACK COMES OUT FROM ANYWHERE ON THE LINE — the contextmenu handler is on the host and the new control does not swallow it. Also fixed: ensureRailStyles refreshes the sheet instead of returning early when the element exists, so a rule added to this file is not invisible until a hard reload. New i18n keys in all 14 catalogs: agent.rail-go, agent.rail-threads. note-add is additive — manual drain only.",
+      "created": "2026-08-25",
+      "status": "pending"
+    },
+    {
+      "id": "folder-sync-always-synchronizing",
+      "title": "Mirror the always-synchronizing folder: lazy content lookup, polled structure, quarantined divergence",
+      "run": null,
+      "note": "Extends folder-sync-one-shape. New behaviour in folder-sync.service.ts (resolveContent, drainNow, #drainFromFolder, #startContinuousDrain, #divergent quarantine) and content-broker.drone.ts (#fetchFromFolder, a folder tier AHEAD of HTTP). Notes to carry: (1) NEITHER SIDE IS THE SOURCE OF TRUTH — syncNow drains in before it mirrors out, so a round trip settles in one pass. (2) CONTENT IS LAZY, STRUCTURE IS POLLED — a signature-named file is never drained; a local-store miss asks the folder FIRST, ahead of every network tier, verifies sha256 and writes through. Nothing is copied until something wants it, and a lookup can only fire for bytes this browser lacks, so it is conflict-free with nothing to overwrite. Bags and pools CANNOT be lazy — you do not miss a marker by name, you enumerate a bag to find its head — so they are walked on a cadence, affordable precisely because content is excluded. (3) A BROWSER TAB CANNOT WATCH A DIRECTORY — page must be open, handle came from a gesture, File System Access API has no change events; the web side is pull-on-open/push-on-commit and the true watcher belongs in the native client. (4) DIVERGENCE IS QUARANTINED, NOT RESOLVED — a disputed address is excluded from the OUTBOUND mirror too, or the copy pass would undo the drain's refusal and destroy the other side's record; proven by a mutation test (disable the quarantine and the folder's bytes become ours). Picking a winner would be picking at random; history never branches.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
+    },
+    {
+      "id": "behaviors-mirror-repair",
+      "title": "Mirror the repair pass — write-if-absent marks + notes, and the erosion it fixed",
+      "run": null,
+      "note": "scripts/mirror-behaviors-repair.ts shipped 2026-08-25 with no tile of its own. Owed: a cell beside the mirror toolchain (behaviors/appearance/behaviors-theme is the sibling) explaining write-if-absent repair — read state first, add only what is missing, never rewrite a children array (that is what ate the 81-part spread), appliesTo:[] so 74 tiles share ONE mark record. Also record the erosion itself: 15/74 tiles held their mark+note before the pass, 74/74 after. No mirror script written yet.",
+      "created": "2026-08-26",
+      "status": "pending"
+    },
+    {
+      "id": "el-bar-shop-room",
+      "title": "EL BAR — the shop room behind the lounge's bar picture (mirror pass, manual: note-add is additive)",
+      "run": null,
+      "note": "The bar beehavior: /revolucion/bar carries visual:lounge:room {room:'bar'} — same bundle, second world (atomic-target doctrine). The lounge's gallery wall hangs a clickable EL BAR print (pick 'bar') that walks you into the shop; the bar hangs a lounge print back. Displays derive from SHOP_ITEMS (store-items.ts: SALE + UPGRADE_ITEMS with 'of' targets + BAR_ITEMS); the buy plate spends the embers ledger; a lit upgrade stands where its base prop stood. Mirror owed: part tiles for scripts/lounge3d/lounge-3d.ts (buildBar), scripts/lounge3d/store-items.ts, hypercomb-essentials/src/revolucionstyle.com/lounge/lounge-room.ts (room passthrough), scripts/drive-el-bar.cjs (harness); a collection under behaviors; pheromone marks + notes. (Site build rerun 2026-08-25: pages + bar records LANDED and verified, seal f888f9e961e7 — only the mirror tiles remain owed.)",
+      "created": "2026-08-26",
+      "status": "pending"
+    },
+    {
+      "id": "rail-hive-line-details",
+      "title": "Mirror the hive line: the row above every level carries the same chat details as the tiles under it",
+      "run": null,
+      "note": "Extends the rail reversal pass (see rail-line-talks-arrow-walks). #hiveGroup in agent-tiles-rail.ts now builds .hc-rail-threads and .hc-rail-bees into the hive's row, so a question asked about the whole hive is visible on the surface after it is sent; #paintStatus already resolved its state (HIVE_KEY is the root's key, so keySegments gives [] and tilePath gives HIVE_PATH) and simply had no slots to write into. Its trailing chat icon is GONE and its line carries the second-press fold, exactly like a tile row — the hive has no INSIDE, so it is the one row that carries no arrow, which is the same grammar rather than a second one. Dead code removed with it: CHATS_GLYPH, #openChats, and the whole .hc-rail-chats-open stylesheet. Also: .hc-rail-hive .hc-rail-row.live::before takes full-strength amber, because the hive's tick is ALREADY amber at rest (it is the hive) and live has to be told apart from it by more than colour. Tiles 1:1 with source, notes carrying the above. note-add is additive — manual drain only.",
+      "created": "2026-08-26",
+      "status": "pending"
+    },
+    {
+      "id": "chat-question-raises-a-bee",
+      "title": "Mirror: a chat question is a unit of work, so it raises a branded bee",
+      "run": null,
+      "note": "hypercomb-shared/ui/chat-window/chat-window.component.ts gains #beeId/#answeringModel/#raiseBee and emits agent:start in #startWait, agent:end in #endWait; agent-registry.service.ts re-brands on a re-raise that names a different model; agent-tiles-rail.ts stops summing the chat's busy flag onto the registry count. Tiles 1:1 with source (+ agent-registry-brand.spec.ts), notes carrying: (1) EVERY OTHER KIND OF WORK RAISED ONE — an ask, a routine, a sync — and the thing a person does most often did not, so sending a question and folding the window away left the hive showing nothing happening on the tile it was happening to; AgentRegistry.seed() even skips mode==='chat' explicitly. (2) BRANDING COMES FOR FREE — the registry derives kind→vendor→tier from the model at spawn (#identity/identifyModel), so declaring kind:'model' plus a model IS the branding and this surface never names a colour, which is what keeps the vendor accent bounds a contract. (3) THE TIER IS CHOSEN, NOT DISCOVERED — #answeringModel reads the same bridgeUp() the send path branches on, one moment earlier: with the bridge up the composer's model answers, without it the shallow host relays to Anthropic Haiku (host-ai.service.ts), so the bee is fast-tier from the start instead of claiming the deep tier the composer was showing. If the host DECLINES and the durable queue takes it, the window re-raises with the composer's model and the registry re-brands — identity is settled at spawn and again only when a re-raise names a different model. (4) WHERE THE BEE SITS is the tile's own label with the rest of the path as segments — the shape agent-bee.drone.ts #anchorFor matches against cells on the current layer — and a chat about no tile leaves both empty, which is how that drone spells hive-wide. (5) NOT A SUM — the rail's live number used to add chat:tile-busy to the registry count, right while a question raised no agent and a double count the moment it did; the flag stays as the fallback for a shell with no registry. Shared UI never imports essentials: this is the same agent:start lane any behaviour uses. note-add is additive — manual drain only.",
+      "created": "2026-08-26",
+      "status": "pending"
+    },
+    {
+      "id": "native-mirror-watcher",
+      "title": "Mirror the native continuous mirror: export-on-commit and a real folder watcher",
+      "run": null,
+      "note": "Extends folder-sync-one-shape and folder-sync-always-synchronizing. New: hypercomb-client/crates/host/src/mirror.rs, interchange::export_selective, Host mutation hooks, BusyGuard moved into the host crate. Notes to carry: (1) A PROCESS DOES NOT POLL — the web half polls structure only because a tab cannot watch a directory; the desktop half holds an OS handle, so notify watches the folder and every commit exports. That asymmetry IS the design, not a gap. (2) SELECTIVE, NOT FULL — export_selective mirrors only what a commit touched; the full export stats every signature, which on Windows is an on-access antivirus trip per record, the exact cost redb exists to delete. Debounced 400ms because one tile edit writes a layer, a marker and a rendition. (3) THE ECHO IS THE TRAP — our own writes come back as filesystem events, so export wakes the watcher wakes the restore wakes the commit wakes the export. Every written path is recorded and claimed back ONCE; events are pre-filtered to signature-shaped paths, which disposes of .hcpart temps, receipts and OS furniture with no name list to maintain. (4) LAUNCH STILL MATTERS — arming does not retroactively export and a watcher cannot see what happened while the app was closed, so the full launch export stays and arming schedules one inbound pass for the same reason. (5) DELETION DOES NOT TRAVEL — union merge has no tombstones, so a record deleted here and still in the folder is restored next pass; content is immune by design, markers and pool members are not. Proven by 4 end-to-end tests: a commit reaches the folder unasked, a dropped file reaches the hive, the mirror does not chase its own echo, and nothing mirrors before a folder is chosen.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
+    },
+    {
+      "id": "resting-bees-for-talked-to-tiles",
+      "title": "Mirror the resting bee: a tile that has been talked to keeps its bee",
+      "run": null,
+      "note": "New creation: presentation/avatars/resting-bees.ts (+spec, 9 tests) — the pure derivation — plus the second lane in agent-bee.drone.ts (#resting/#allAgents/#agentFor/#isResting/#refreshResting, the REST_PACE/REST_ALPHA damping in the tick) and conversationModel() in assistant/chat-thread.ts. Tiles 1:1 with source, notes carrying: (1) WHY — a bee meant 'work is happening here NOW', so the hive went blank the moment an answer landed and a tile you had held six conversations on looked exactly like one nobody had ever spoken to; (2) ONE PER TILE, never one per conversation — six threads over one hexagon is a cloud, and the rail's count already says six; the one bee is branded by the model the tile's NEWEST thread was last held in; (3) THE SAME SPRITE — the id is chat:<convoId>, exactly what chat-window raises on agent:start, so sending a question WAKES the resting bee into the full dance instead of fading one out and flying another in; #isResting is simply 'the registry has nothing under this id'; (4) NEVER IN THE WORK REGISTRY — the orchestrator sweeps that for stalls and a resting bee sitting there as working would be reported silent after 4min and rogue after 45, a watchdog barking at furniture; (5) ARCHIVED THREADS DO NOT COUNT, which is the whole way a bee goes away again — a tile whose every thread is put away has none, and the rail's count excludes them for the same reason; (6) THE KEY IS SPELLED TWICE ON PURPOSE — hc:chat-models is written by the chat window (shared) and read by chat-thread.ts (essentials); shared may not import essentials nor the other way, and routing it through core would have put a per-device key in the build chain, so each file names the other. Known cost: #refreshResting walks the threads pool on chat:threads-changed (coalesced 400ms), which is a second walk alongside the rail's. note-add is additive — manual drain only.",
+      "created": "2026-08-26",
+      "status": "pending"
+    },
+    {
+      "id": "assistant-on-the-command-line",
+      "title": "Mirror: the assistant icon moves to the command line, and takes the letter 'a'",
+      "run": null,
+      "note": "The chat toggle moves off the controls bar's left rail onto the command line (command-shell.component.html chat-toggle-btn + its .on filled-glyph rule), and the keymap swaps two bare letters: 'a' now opens the assistant (chat.toggle, GLOBAL layer), and the arrangement cycle moved to 'l'/'L' (sequence.cycle/cyclePrev). Tiles 1:1 with source (+ default-keymap.spec.ts), notes carrying: (1) WHY THE BAR WAS THE WRONG HOME — that rail is how-you-SEE (fit, zoom, pin, fullscreen, orientation) and talking is not one of those; the control belongs on the box you type the question into, and the command-shell already had the wiring (chatPanelOpen/chatLabel/chatToggle) with nothing drawing it. (2) BARE LETTERS ARE THE SCARCEST THING IN THE KEYMAP — the quick-menu binding already notes c/x/a/b/k/p were taken; 'a' went to the assistant because it is what you reach for mid-thought, while the arrangement cycle is a view you set once and leave. (3) ONE WAY IN — the key dispatches through keymap:invoke and the chat window translates chat.toggle into the SAME branch as chat:toggle, so shortcut, icon and palette cannot drift apart. (4) NO SECOND OPENER LEFT BEHIND — the 'chat' registry entry, its left-rail exclusion, its isActive case, the #chatOpen signal, the chat:window-state subscription and the .rail-chat stylesheet all went with it; a customizable entry on a bar that no longer owns the act would be an opener in a place that says nothing about what it does. New i18n key in all 14 catalogs: keymap.chat; help-group lists chat.toggle as 'Assistant' under Beyond. note-add is additive — manual drain only.",
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }

@@ -801,6 +801,29 @@ $bp-phone-max: 599px;
   }
 }
 
+// THE ASSISTANT. It takes the rail's own accent and dimensions — it is not
+// a second colour to learn — and says "open" the way a window toggle should:
+// a FILLED bubble. That was the cue it wore on the control bar, and the one
+// thing worth carrying over from there.
+.chat-toggle-btn {
+  // OPTICALLY CENTRED, not geometrically. The speech bubble's tail hangs
+  // below the body, so the glyph's BOX is centred while the shape reads high
+  // — it sits a hair above every flat-topped neighbour on the rail. Nudging
+  // the glyph down by a fraction of its own height puts the bubble's mass
+  // nearer the line the others sit on, which is what the eye is measuring.
+  //
+  // 6%, not the 12% that lands the body dead on the rule: correcting an
+  // optical illusion all the way reads as an error in the other direction,
+  // because the tail is still part of what the eye weighs. Half the
+  // geometric correction is the whole of the perceived one.
+  //
+  // On the glyph, never the button: the press target and the hover ring stay
+  // exactly where they were.
+  .mat-sym { transform: translateY(6%); }
+
+  &.on .mat-sym { font-variation-settings: 'FILL' 1; }
+}
+
 // Beehaviors is the doorway to a whole tool window, so its active state needs
 // to remain legible under the pointer instead of collapsing into the generic
 // rail hover. Keep the shared dimensions and rhythm; a filled puzzle piece,

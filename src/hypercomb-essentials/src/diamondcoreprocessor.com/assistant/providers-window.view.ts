@@ -30,7 +30,7 @@
 import { EffectBus, I18N_IOC_KEY, llmKeyStore, type I18nProvider } from '@hypercomb/core'
 import { isLendingModels } from '../sharing/peer-models.drone.js'
 import { llmActivation } from './llm-activation.js'
-import { TIERS, candidatesFor, chooseProvider, costOf, explainChoice, llmPolicy } from './model-policy.js'
+import { TIERS, availabilityOf, candidatesFor, chooseProvider, costOf, explainChoice, llmPolicy } from './model-policy.js'
 import { callModel } from './llm-dispatch.js'
 import { llmProviderRegistry } from './llm-provider-registry.js'
 import './providers/builtin-providers.js'
@@ -525,7 +525,8 @@ export class ProvidersWindowView extends EventTarget {
     const needsKey = provider.requiresKey !== false
     const hasKey = llmKeyStore.has(provider.id)
     const enabled = llmActivation.isEnabled(provider.id)
-    const usable = enabled && (!needsKey || hasKey)
+    const availability = availabilityOf(provider)
+    const usable = enabled && (!needsKey || hasKey) && availability !== 'exhausted'
 
     const row = document.createElement('div')
     row.className = 'hc-provider'
@@ -552,6 +553,8 @@ export class ProvidersWindowView extends EventTarget {
       ? (llmActivation.wasHeld(provider.id)
           ? this.#t('providers.held', 'held')
           : this.#t('providers.off', 'off'))
+      : availability === 'exhausted'
+        ? this.#t('providers.exhausted', 'limit reached')
       : usable
         ? this.#t('providers.active', 'active')
         : this.#t('providers.noKey', 'no key')
@@ -559,6 +562,12 @@ export class ProvidersWindowView extends EventTarget {
 
     head.append(dot, name)
     if (showReach) head.appendChild(this.#badge(reachLabel(provider)))
+    if (provider.subscription?.windows.length) {
+      const remaining = Math.min(...provider.subscription.windows.map(window => window.remainingPercent))
+      head.appendChild(this.#badge(`${Math.round(remaining)}% left`, availability))
+    } else if (provider.transport === 'agent-bridge') {
+      head.appendChild(this.#badge(this.#t('providers.limitsUnknown', 'limits unknown'), 'unknown'))
+    }
     head.appendChild(state)
     if (provider.readsHive) {
       head.insertBefore(this.#badge(this.#t('providers.readsHive', 'reads the hive'), 'hive'), state)
@@ -603,6 +612,20 @@ export class ProvidersWindowView extends EventTarget {
       )
       detail.appendChild(why)
     }
+
+    if (provider.description) {
+      const description = document.createElement('div')
+      description.className = 'hc-provider-description'
+      description.textContent = provider.description
+      detail.appendChild(description)
+    }
+    if (provider.account) {
+      detail.append(
+        this.#label(this.#t('providers.account', 'Account')),
+        this.#mono(provider.account),
+      )
+    }
+    if (provider.subscription) detail.appendChild(this.#subscription(provider))
 
     // endpoint — always shown BEFORE a key is entered: this is where it goes.
     const endpoint = document.createElement('div')
@@ -655,6 +678,14 @@ export class ProvidersWindowView extends EventTarget {
       docs.rel = 'noopener noreferrer'
       docs.textContent = this.#t('providers.docs', 'Get a key')
       detail.append(this.#label(this.#t('providers.key', 'API key')), keyRow, docs)
+    } else if (provider.transport === 'agent-bridge') {
+      const docs = document.createElement('a')
+      docs.className = 'hc-provider-docs'
+      docs.href = provider.docsUrl
+      docs.target = '_blank'
+      docs.rel = 'noopener noreferrer'
+      docs.textContent = this.#t('providers.setup', 'CLI setup')
+      detail.appendChild(docs)
     }
 
     // models — read-only roster, tiers spelled out.
@@ -663,8 +694,8 @@ export class ProvidersWindowView extends EventTarget {
     for (const model of provider.models) {
       const chip = document.createElement('span')
       chip.className = `hc-provider-model is-${model.tier}`
-      chip.textContent = model.name
-      chip.title = model.id
+      chip.textContent = model.label || model.name
+      chip.title = model.label ? `/${model.name} · ${model.id}` : model.id
       models.appendChild(chip)
     }
     detail.append(this.#label(this.#t('providers.models', 'Models')), models)
@@ -681,12 +712,19 @@ export class ProvidersWindowView extends EventTarget {
     checkbox.addEventListener('change', () => llmActivation.setEnabled(provider.id, checkbox.checked))
     toggle.append(checkbox, document.createTextNode(this.#t('providers.enabled', 'Available to the orchestrator')))
 
-    const test = document.createElement('button')
-    test.className = 'hc-provider-btn'
-    test.textContent = this.#t('providers.test', 'Test')
-    test.addEventListener('click', () => { void this.#test(provider) })
-
-    actions.append(toggle, test)
+    actions.appendChild(toggle)
+    if (provider.transport === 'agent-bridge') {
+      const bridgeState = document.createElement('span')
+      bridgeState.className = 'hc-provider-status'
+      bridgeState.textContent = this.#t('providers.bridgeAnnounced', 'CLI detected and announced')
+      actions.appendChild(bridgeState)
+    } else {
+      const test = document.createElement('button')
+      test.className = 'hc-provider-btn'
+      test.textContent = this.#t('providers.test', 'Test')
+      test.addEventListener('click', () => { void this.#test(provider) })
+      actions.appendChild(test)
+    }
     detail.appendChild(actions)
 
     const status = this.#status.get(provider.id)
@@ -704,6 +742,46 @@ export class ProvidersWindowView extends EventTarget {
     label.className = 'hc-provider-label'
     label.textContent = text
     return label
+  }
+
+  #subscription(provider: LlmProviderDescriptor): HTMLElement {
+    const usage = provider.subscription!
+    const block = document.createElement('div')
+    block.className = `hc-provider-usage is-${usage.status}`
+    block.appendChild(this.#label(this.#t('providers.subscriptionUsage', 'Subscription availability')))
+    if (usage.plan) {
+      const plan = document.createElement('div')
+      plan.className = 'hc-provider-usage-line'
+      plan.textContent = usage.plan
+      block.appendChild(plan)
+    }
+    for (const window of usage.windows) {
+      const line = document.createElement('div')
+      line.className = 'hc-provider-usage-line'
+      const reset = window.resetsAt
+        ? ` · resets ${new Date(window.resetsAt * (window.resetsAt < 10_000_000_000 ? 1000 : 1)).toLocaleString()}`
+        : ''
+      line.textContent = `${window.label}: ${Math.round(window.remainingPercent)}% left${reset}`
+      block.appendChild(line)
+    }
+    if (!usage.windows.length) {
+      const line = document.createElement('div')
+      line.className = 'hc-provider-usage-line is-dim'
+      line.textContent = usage.message || this.#t('providers.limitsUnknownDetail', 'This CLI did not report subscription limits.')
+      block.appendChild(line)
+    }
+    if (usage.credits?.unlimited) {
+      const line = document.createElement('div')
+      line.className = 'hc-provider-usage-line'
+      line.textContent = this.#t('providers.creditsUnlimited', 'Additional credits: unlimited')
+      block.appendChild(line)
+    } else if (usage.credits?.balance) {
+      const line = document.createElement('div')
+      line.className = 'hc-provider-usage-line'
+      line.textContent = `${this.#t('providers.credits', 'Credits')}: ${usage.credits.balance}`
+      block.appendChild(line)
+    }
+    return block
   }
 
   #mono(text: string): HTMLElement {
@@ -876,6 +954,9 @@ export class ProvidersWindowView extends EventTarget {
         border: 1px solid rgba(${STEEL}, 0.3); opacity: 0.75; white-space: nowrap;
       }
       .hc-provider-badge.is-hive { border-color: rgba(240, 200, 90, 0.6); color: rgba(240, 200, 90, 0.95); }
+      .hc-provider-badge.is-limited { border-color: rgba(240, 180, 90, 0.65); color: rgba(255, 204, 115, 0.95); }
+      .hc-provider-badge.is-exhausted { border-color: rgba(240, 100, 100, 0.65); color: rgba(255, 145, 145, 0.95); }
+      .hc-provider-badge.is-unknown { opacity: 0.5; }
       .hc-provider-state { margin-left: auto; font-size: 11px; }
       .hc-provider-state.is-dim { opacity: 0.5; }
       .hc-provider-detail { padding: 4px 2px 12px; }
@@ -919,6 +1000,12 @@ export class ProvidersWindowView extends EventTarget {
       }
       .hc-provider-status { margin-top: 8px; font-size: 12px; word-break: break-word; opacity: 0.9; }
       .hc-provider-origin { font-size: 11px; opacity: 0.7; margin: 6px 0 2px; }
+      .hc-provider-description { font-size: 12px; line-height: 1.45; opacity: 0.82; margin: 5px 0 9px; }
+      .hc-provider-usage { margin: 5px 0 9px; padding: 6px 8px; border-left: 2px solid rgba(${STEEL}, 0.45); background: rgba(${STEEL}, 0.05); }
+      .hc-provider-usage.is-limited { border-left-color: rgba(240, 180, 90, 0.8); }
+      .hc-provider-usage.is-exhausted { border-left-color: rgba(240, 100, 100, 0.8); }
+      .hc-provider-usage-line { font-size: 12px; line-height: 1.45; }
+      .hc-provider-usage-line.is-dim { opacity: 0.58; }
       .hc-provider-warn {
         font-size: 11px; line-height: 1.4; margin: 4px 0 2px; padding: 6px 8px;
         border: 1px solid rgba(240, 180, 90, 0.45); border-radius: var(--hc-radius-control, 2px);

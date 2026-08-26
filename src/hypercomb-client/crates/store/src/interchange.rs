@@ -221,6 +221,85 @@ fn restore_dir(store: &impl ContentStore, source: &Path) -> Result<Transfer> {
     Ok(moved)
 }
 
+/// Export only what MOVED, rather than walking the whole store.
+///
+/// [`export`] is skip-if-exists and therefore safe to re-run, but a full run
+/// costs a `stat` per signature — and on Windows, per the crate docs, that is
+/// a trip through the on-access antivirus filter for every record in the hive.
+/// A mirror that runs after every commit has to touch only what actually
+/// changed, or it stops being affordable at exactly the moment it starts being
+/// continuous.
+///
+/// THE RULES ARE UNCHANGED, because this is [`export`] with a narrower input:
+/// content is skip-if-exists, markers union and never overwrite an occupied
+/// index, pool members are last-writer-wins by name. A caller can therefore mix
+/// the two freely — a launch-time full export and a per-commit selective one
+/// converge on the same folder.
+///
+/// `on_write` observes every path written. A caller that is also WATCHING the
+/// target needs that to tell its own echo from a real external change.
+pub fn export_selective(
+    store: &impl ContentStore,
+    target: impl AsRef<Path>,
+    content: &[Sig],
+    bags: &[BagAddr],
+    pools: &[PoolAddr],
+    mut on_write: impl FnMut(&Path),
+) -> Result<Transfer> {
+    let target = target.as_ref();
+    std::fs::create_dir_all(target)?;
+    let mut moved = Transfer::default();
+
+    for &sig in content {
+        let path = target.join(sig.to_hex());
+        if path.exists() {
+            moved.content_skipped += 1;
+            continue;
+        }
+        if let Some(bytes) = store.get(sig)? {
+            write_atomic(&path, &bytes)?;
+            on_write(&path);
+            moved.content += 1;
+        }
+    }
+
+    // Every marker in a touched bag, not just the new one. A bag is small (a
+    // marker is ~77 bytes and the range query is one scan), and writing the
+    // whole bag means a mirror that was armed late still catches up instead of
+    // exporting only what happened to move while it was watching.
+    for &bag in bags {
+        let dir = target.join(bag.to_hex());
+        std::fs::create_dir_all(&dir)?;
+        for (index, marker) in store.markers(bag)? {
+            let path = dir.join(marker_filename(index));
+            if write_marker_union(&path, &marker.to_bytes())? {
+                on_write(&path);
+                moved.markers += 1;
+            } else {
+                moved.markers_skipped += 1;
+            }
+        }
+    }
+
+    for &pool in pools {
+        let dir = target.join(pool.to_hex());
+        std::fs::create_dir_all(&dir)?;
+        for member in store.pool_list(pool)? {
+            if let Some(bytes) = store.pool_get(pool, &member)? {
+                let path = dir.join(&member);
+                if write_if_different(&path, &bytes)? {
+                    on_write(&path);
+                    moved.pool_members += 1;
+                } else {
+                    moved.pool_members_skipped += 1;
+                }
+            }
+        }
+    }
+
+    Ok(moved)
+}
+
 /// Export ONE root's closure to a directory in the interchange form.
 ///
 /// The drain model, as specified: take each layer out of the history, expand

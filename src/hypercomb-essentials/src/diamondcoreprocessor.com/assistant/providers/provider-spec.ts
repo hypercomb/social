@@ -41,6 +41,7 @@ import type {
   LlmModelDescriptor,
   LlmProviderDescriptor,
   LlmRequest,
+  LlmSubscriptionUsage,
   LlmTier,
 } from './llm-provider.types.js'
 import { anthropicRequest, anthropicResponse, anthropicStreamEvent } from './anthropic.provider.js'
@@ -66,6 +67,9 @@ export type LlmProviderSpec = {
   readonly format: typeof PROVIDER_SPEC_FORMAT
   readonly id: string
   readonly label: string
+  readonly description?: string
+  readonly account?: string
+  readonly subscription?: LlmSubscriptionUsage
   /** Colour family hint. Unknown/omitted → inferred from the default model,
    *  else `local`. Never trusted into the registry unvalidated. */
   readonly vendor?: string
@@ -75,7 +79,7 @@ export type LlmProviderSpec = {
   /** Required for the HTTP shapes; meaningless (and refused) for a bridge. */
   readonly endpoint?: string
   readonly auth?: LlmAuthStyle
-  readonly models: readonly { name: string; id: string; tier?: LlmTier }[]
+  readonly models: readonly { name: string; id: string; tier?: LlmTier; label?: string }[]
   readonly defaultModel: string
   readonly docsUrl: string
   readonly keyPattern?: string
@@ -106,6 +110,41 @@ const fail = (reason: string): never => {
 
 const cleanString = (value: unknown): string => String(value ?? '').trim()
 
+const subscriptionOf = (value: unknown): LlmSubscriptionUsage | undefined => {
+  if (!value || typeof value !== 'object') return undefined
+  const raw = value as Record<string, unknown>
+  const status = cleanString(raw['status']) as LlmSubscriptionUsage['status']
+  if (!['available', 'limited', 'exhausted', 'unknown'].includes(status)) return undefined
+  const windows = (Array.isArray(raw['windows']) ? raw['windows'] : []).flatMap(entry => {
+    if (!entry || typeof entry !== 'object') return []
+    const item = entry as Record<string, unknown>
+    const remainingPercent = Number(item['remainingPercent'])
+    if (!Number.isFinite(remainingPercent)) return []
+    const resetsAt = Number(item['resetsAt'])
+    const durationMinutes = Number(item['durationMinutes'])
+    return [{
+      label: cleanString(item['label']).slice(0, 80) || 'Allowance',
+      remainingPercent: Math.max(0, Math.min(100, remainingPercent)),
+      ...(Number.isFinite(resetsAt) ? { resetsAt } : {}),
+      ...(Number.isFinite(durationMinutes) ? { durationMinutes } : {}),
+    }]
+  })
+  const creditsRaw = raw['credits'] as Record<string, unknown> | undefined
+  return {
+    status,
+    source: cleanString(raw['source']).slice(0, 120) || 'subscription provider',
+    ...(cleanString(raw['message']) ? { message: cleanString(raw['message']).slice(0, 240) } : {}),
+    ...(cleanString(raw['plan']) ? { plan: cleanString(raw['plan']).slice(0, 80) } : {}),
+    checkedAt: Number.isFinite(Number(raw['checkedAt'])) ? Number(raw['checkedAt']) : Date.now(),
+    windows,
+    ...(creditsRaw ? { credits: {
+      hasCredits: creditsRaw['hasCredits'] === true,
+      unlimited: creditsRaw['unlimited'] === true,
+      ...(cleanString(creditsRaw['balance']) ? { balance: cleanString(creditsRaw['balance']).slice(0, 80) } : {}),
+    } } : {}),
+  }
+}
+
 /** Is this an endpoint a key may be sent to? HTTPS, or your own machine. */
 const isAcceptableEndpoint = (url: string): boolean => {
   try {
@@ -133,6 +172,9 @@ export const parseProviderSpec = (json: unknown): LlmProviderSpec => {
   if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(id)) fail(`id "${id}" must be a short lowercase slug`)
   const label = cleanString(raw['label'])
   if (!label) fail(`spec "${id}" must declare a label`)
+  const description = cleanString(raw['description']).slice(0, 500)
+  const account = cleanString(raw['account']).slice(0, 120)
+  const subscription = subscriptionOf(raw['subscription'])
 
   const shape = cleanString(raw['shape']) as LlmProviderSpec['shape']
   if (!SHAPES.includes(shape)) fail(`spec "${id}" shape must be one of ${SHAPES.join(', ')}`)
@@ -159,9 +201,10 @@ export const parseProviderSpec = (json: unknown): LlmProviderSpec => {
     const m = (entry ?? {}) as Record<string, unknown>
     const modelId = cleanString(m['id'])
     const name = cleanString(m['name']) || modelId
+    const label = cleanString(m['label']).slice(0, 120)
     if (!modelId) fail(`spec "${id}" has a model without an id`)
     const tier = cleanString(m['tier']) as LlmTier
-    return { name, id: modelId, ...(TIERS.includes(tier) ? { tier } : {}) }
+    return { name, id: modelId, ...(TIERS.includes(tier) ? { tier } : {}), ...(label ? { label } : {}) }
   })
   if (!models.length) fail(`spec "${id}" must declare at least one model`)
 
@@ -206,6 +249,9 @@ export const parseProviderSpec = (json: unknown): LlmProviderSpec => {
     format: PROVIDER_SPEC_FORMAT,
     id,
     label,
+    ...(description ? { description } : {}),
+    ...(account ? { account } : {}),
+    ...(subscription ? { subscription } : {}),
     ...(cleanString(raw['vendor']) ? { vendor: cleanString(raw['vendor']).toLowerCase() } : {}),
     shape,
     transport: expectedTransport,
@@ -243,7 +289,12 @@ const vendorOf = (spec: LlmProviderSpec): string => {
 
 /** Fill each model's tier where the spec left it out, by name pattern. */
 const modelsOf = (spec: LlmProviderSpec): LlmModelDescriptor[] =>
-  spec.models.map(m => ({ name: m.name, id: m.id, tier: m.tier ?? identifyModel(m.id).tier }))
+  spec.models.map(m => ({
+    name: m.name,
+    id: m.id,
+    tier: m.tier ?? identifyModel(m.id).tier,
+    ...(m.label ? { label: m.label } : {}),
+  }))
 
 /**
  * Spec → live descriptor. The result is indistinguishable from a hand-written
@@ -256,6 +307,9 @@ export const compileProviderSpec = (spec: LlmProviderSpec): LlmProviderDescripto
   const base: Omit<LlmProviderDescriptor, 'toRequest' | 'fromResponse' | 'fromStreamEvent'> = {
     id: spec.id,
     label: spec.label,
+    ...(spec.description ? { description: spec.description } : {}),
+    ...(spec.account ? { account: spec.account } : {}),
+    ...(spec.subscription ? { subscription: spec.subscription } : {}),
     vendor: vendorOf(spec),
     transport: bridge ? 'agent-bridge' : peer ? 'peer-swarm' : 'browser-http',
     ...(spec.endpoint ? { endpoint: spec.endpoint } : {}),

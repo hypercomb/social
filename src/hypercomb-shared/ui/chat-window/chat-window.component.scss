@@ -817,6 +817,30 @@ $accent: #7eb6d6;
   .mat-sym { font-size: 1.05em; }
 }
 
+.chat-goal {
+  border: 0;
+  background: transparent;
+  color: #70d59a;
+  cursor: pointer;
+  padding: 5px 7px;
+  border-radius: 999px;
+}
+.chat-goal.on, .chat-goal:hover { background: rgba(112, 213, 154, 0.14); }
+.chat-goal-details {
+  margin: 0 12px 10px;
+  padding: 12px;
+  border: 1px solid rgba(112, 213, 154, 0.42);
+  // A CARD, so the card rung — not 10px. Above 4px a corner stops reading as
+  // "lifted" and starts disagreeing with the hexagons underneath it.
+  border-radius: tw.$radius-card;
+  background: rgba(23, 42, 32, 0.96);
+  color: inherit;
+}
+.chat-goal-head { display: flex; align-items: center; gap: 8px; color: #8ee5af; }
+.chat-goal-head button { margin-left: auto; border: 0; background: transparent; color: inherit; cursor: pointer; }
+.chat-goal-details p { margin: 10px 0; white-space: pre-wrap; }
+.chat-goal-archive { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+
 .chat-new {
   color: rgba($accent, 0.9);
   &:hover { background: rgba($accent, 0.16); }

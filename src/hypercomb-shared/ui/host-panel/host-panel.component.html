@@ -1,0 +1,65 @@
+<!-- The pill is the whole footprint until opened — cold chrome. -->
+<button type="button" class="host-pill" (click)="toggle()" [attr.aria-label]="'hosting.title' | t">
+  ⬡ {{ 'hosting.pill' | t }}
+</button>
+
+@if (open()) {
+  <section class="host-card" role="dialog" [attr.aria-label]="'hosting.title' | t">
+    <header class="host-card__title">{{ 'hosting.title' | t }}</header>
+
+    @if (status(); as s) {
+
+      <div class="host-row">
+        <span class="host-row__label">{{ 'hosting.folder' | t }}</span>
+        <span class="host-row__value" [title]="s.folder ?? ''">{{ s.folder ?? ('hosting.no-folder' | t) }}</span>
+        <button type="button" [disabled]="busy()" (click)="pickFolder()">{{ 'hosting.choose' | t }}</button>
+      </div>
+
+      <div class="host-row">
+        <span class="host-row__label">{{ 'hosting.serving' | t }}</span>
+        <span class="host-dot" [class.host-dot--on]="s.serving"></span>
+        <span class="host-row__value">{{ s.serving ? ('hosting.on-port' | t: { port: s.port ?? '' }) : ('hosting.off' | t) }}</span>
+        @if (s.serving) {
+          <button type="button" [disabled]="busy()" (click)="stopServing()">{{ 'hosting.stop' | t }}</button>
+        } @else {
+          <button type="button" [disabled]="busy() || !s.folder" (click)="startServing()">{{ 'hosting.start' | t }}</button>
+        }
+      </div>
+
+      @if (!s.cloudflared) {
+        <div class="host-row host-row--hint">
+          <span class="host-row__value">{{ 'hosting.no-cloudflared' | t }}</span>
+          <button type="button" (click)="getCloudflared()">{{ 'hosting.get-cloudflared' | t }}</button>
+        </div>
+      } @else {
+        <div class="host-row">
+          <span class="host-row__label">{{ 'hosting.domain' | t }}</span>
+          <input
+            type="text"
+            [value]="domainDraft()"
+            (input)="onDomainInput($event)"
+            [placeholder]="'hosting.domain-placeholder' | t"
+            spellcheck="false" />
+        </div>
+        <div class="host-row host-row--actions">
+          <button type="button" [disabled]="busy()" (click)="login()">{{ 'hosting.login' | t }}</button>
+          @if (s.tunnel_running) {
+            <button type="button" [disabled]="busy()" (click)="goOffline()">{{ 'hosting.go-offline' | t }}</button>
+            <button type="button" class="host-live" (click)="openLive()">{{ 'hosting.live' | t: { domain: s.domain ?? '' } }}</button>
+          } @else {
+            <button type="button" class="host-primary" [disabled]="busy() || !domainDraft().trim()" (click)="goLive()">
+              {{ 'hosting.go-live' | t }}
+            </button>
+          }
+        </div>
+      }
+
+      @if (message()) {
+        <div class="host-message">{{ message() }}</div>
+      }
+
+    } @else {
+      <div class="host-message">{{ 'hosting.reading' | t }}</div>
+    }
+  </section>
+}

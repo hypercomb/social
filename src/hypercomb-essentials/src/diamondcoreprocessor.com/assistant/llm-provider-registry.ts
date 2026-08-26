@@ -73,7 +73,7 @@ export class LlmProviderRegistry extends EventTarget {
    * and is ignored — two modules competing for one vendor identity is a
    * programming error, not a merge.
    */
-  register(provider: LlmProviderDescriptor): void {
+  register(provider: LlmProviderDescriptor, options: { replace?: boolean } = {}): void {
     if (!provider?.id || typeof provider.id !== 'string') {
       throw new Error('[LlmProviderRegistry] provider.id must be a non-empty string')
     }
@@ -114,6 +114,11 @@ export class LlmProviderRegistry extends EventTarget {
     const existing = this.#providers.get(provider.id)
     if (existing === provider) return                       // idempotent
     if (existing) {
+      if (options.replace) {
+        this.#providers.set(provider.id, provider)
+        this.dispatchEvent(new CustomEvent('change'))
+        return
+      }
       console.warn(`[llm-provider-registry] duplicate provider "${provider.id}" — ignoring re-registration`)
       return
     }
@@ -220,4 +225,10 @@ export const llmProviderRegistry = (): LlmProviderRegistry => {
 /** Colocation helper — what a vendor adapter calls at module load. */
 export const registerLlmProvider = (provider: LlmProviderDescriptor): void => {
   llmProviderRegistry().register(provider)
+}
+
+/** Discovered specs are mutable announcements: a CLI may upgrade its model
+ * roster while keeping the same provider identity. Built-ins remain first-win. */
+export const replaceDiscoveredLlmProvider = (provider: LlmProviderDescriptor): void => {
+  llmProviderRegistry().register(provider, { replace: true })
 }

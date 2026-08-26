@@ -129,10 +129,16 @@ window.ioc?.register?.('@diamondcoreprocessor.com/LlmPolicyStore', llmPolicy)
 
 // ── selection ─────────────────────────────────────────────────────────────
 
-/** Usable right now: switched on, and either needing no key or holding one. */
+/** Subscription availability reported by the provider. Unknown stays usable:
+ *  absence of telemetry is not proof of exhaustion. */
+export const availabilityOf = (provider: LlmProviderDescriptor): 'available' | 'limited' | 'exhausted' | 'unknown' =>
+  provider.subscription?.status ?? 'unknown'
+
+/** Usable right now: switched on, authenticated, and not known exhausted. */
 const isReady = (provider: LlmProviderDescriptor): boolean =>
   llmActivation.isEnabled(provider.id)
   && (provider.requiresKey === false || llmKeyStore.has(provider.id))
+  && availabilityOf(provider) !== 'exhausted'
 
 /** Does this provider offer the tier the work asked for? A provider with no
  *  model at that weight can still answer — its default just is not what was
@@ -160,10 +166,12 @@ export const candidatesFor = (need: ModelNeed = {}): LlmProviderDescriptor[] =>
  *
  * Order of authority, highest first:
  *   1. the participant's PIN for this tier, if it can do the work
- *   2. cost preference (free-first by default), with peers excluded from an
+ *   2. live availability (healthy headroom before unknown, preserve providers
+ *      already below 20%; exhausted providers are excluded)
+ *   3. cost preference (free-first by default), with peers excluded from an
  *      automatic pick unless they allowed it
- *   3. a provider that actually offers a model at the tier asked for
- *   4. registration order — stable, so the same hive picks the same provider
+ *   4. a provider that actually offers a model at the tier asked for
+ *   5. registration order — stable, so the same hive picks the same provider
  */
 export const chooseProvider = (need: ModelNeed = {}): LlmProviderDescriptor | undefined => {
   const tier = need.tier ?? 'balanced'
@@ -186,10 +194,13 @@ export const chooseProvider = (need: ModelNeed = {}): LlmProviderDescriptor | un
 
   const rank = (p: LlmProviderDescriptor): number => {
     const cost = order.indexOf(costOf(p))
+    const availability = availabilityOf(p) === 'available' ? 0
+      : availabilityOf(p) === 'unknown' ? 1
+      : 2
     // Tier match is worth more than one cost step but less than the whole
     // ladder: a free model at the right weight beats a paid one, and a paid
     // model at the right weight beats a free one at the wrong weight.
-    return (cost < 0 ? order.length : cost) * 2 + (hasTier(p, tier) ? 0 : 1)
+    return availability * 100 + (cost < 0 ? order.length : cost) * 2 + (hasTier(p, tier) ? 0 : 1)
   }
 
   let best = pool[0]
@@ -213,10 +224,14 @@ export const explainChoice = (need: ModelNeed = {}): string => {
   const chosen = chooseProvider(need)
   if (!chosen) return 'nothing available can do this'
   if (llmPolicy.pin(tier) === chosen.id) return `${chosen.label} — pinned for ${tier} work`
+  const availability = availabilityOf(chosen)
+  const headroom = chosen.subscription?.windows.length
+    ? `; ${Math.round(Math.min(...chosen.subscription.windows.map(w => w.remainingPercent)))}% minimum headroom`
+    : availability === 'unknown' ? '; limits not reported' : ''
   const cost = costOf(chosen)
   const why = cost === 'local' ? 'runs on this machine'
     : cost === 'peer' ? 'offered by another participant'
     : cost === 'bridge' ? 'a bridged session, which can read the hive'
     : 'the key you configured'
-  return `${chosen.label} — ${why}`
+  return `${chosen.label} — ${why}${headroom}`
 }

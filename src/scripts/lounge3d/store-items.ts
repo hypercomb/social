@@ -22,6 +22,15 @@ export const SLOT = {
   bands: 'slot-bands',
   globe: 'slot-globe',
   chess: 'slot-chess',
+  // upgrades — a finer version OF a slot the room already has. Owning one
+  // and switching it on stands the new prop where the old one stood.
+  chesterfields: 'slot-chesterfields',
+  finerRug: 'slot-finer-rug',
+  tiffanyLamp: 'slot-tiffany-lamp',
+  // the bar's own props — they live in EL BAR, not the lounge
+  barEngines: 'slot-bar-engines',
+  barMirror: 'slot-bar-mirror',
+  barPiano: 'slot-bar-piano',
 } as const
 
 export type StoreItem = {
@@ -32,6 +41,12 @@ export type StoreItem = {
   price: number
   group: string
   blurb: string
+  /** an UPGRADE: the slot id this one replaces when it is on. Everything in
+   *  the room is an atomic target — any prop can be swapped for a finer
+   *  version of itself, which is what the shelf marked "finer things" sells. */
+  of?: string
+  /** which room the prop stands in; absent = the lounge */
+  room?: 'lounge' | 'bar'
 }
 
 /** The room you already have — free, listed so Decorate and the store read
@@ -86,7 +101,64 @@ export const SALE_ITEMS: StoreItem[] = [
   },
 ]
 
-export const STORE_ITEMS: StoreItem[] = [...HOUSE_ITEMS, ...SALE_ITEMS]
+/** The finer version of things the room already has. Bought in EL BAR (or
+ *  El Mercado); switched on, each one REPLACES the prop it names in `of` —
+ *  the atomic-target rule made retail: nothing in the room is final, it is
+ *  only the version of itself you have so far. */
+export const UPGRADE_ITEMS: StoreItem[] = [
+  {
+    id: SLOT.chesterfields, label: 'The chesterfields', price: 320, group: 'finer things',
+    of: 'slot-chairs',
+    blurb: 'Deep-buttoned oxblood, rolled arms, a back you disappear into. ' +
+      'The wingbacks were chairs; these are a decision to stay.',
+  },
+  {
+    id: SLOT.finerRug, label: 'The Isfahan rug', price: 260, group: 'finer things',
+    of: 'slot-rug',
+    blurb: 'A medallion in indigo and ivory, knotted tight enough to read by. ' +
+      'The old rug goes to the bar, where it will be loved differently.',
+  },
+  {
+    id: SLOT.tiffanyLamp, label: 'The stained-glass lamp', price: 200, group: 'finer things',
+    of: 'slot-lamp',
+    blurb: 'Leaded glass in ember and moss over bronze. The same corner, ' +
+      'lit like a jewel box instead of a reading room.',
+  },
+]
+
+/** For the bar itself — the room the shopping happens in. You furnish the
+ *  shop you stand in, which is either recursion or hospitality. */
+export const BAR_ITEMS: StoreItem[] = [
+  {
+    id: SLOT.barEngines, label: 'The brass beer engines', price: 220, group: 'for the bar',
+    room: 'bar',
+    blurb: 'Three tall handles on the counter, porcelain grips, a drip tray ' +
+      'that has seen things. Purely ornamental. Mostly ornamental.',
+  },
+  {
+    id: SLOT.barMirror, label: 'The gilt mirror', price: 180, group: 'for the bar',
+    room: 'bar',
+    blurb: 'A carved gold frame around the back-bar glass, so the bottles ' +
+      'stand twice and the room looks back at itself approvingly.',
+  },
+  {
+    id: SLOT.barPiano, label: 'The upright piano', price: 360, group: 'for the bar',
+    room: 'bar',
+    blurb: 'Walnut case, brass candle sconces, slightly and permanently out ' +
+      'of tune in the way that makes every song sound remembered.',
+  },
+]
+
+/** upgrade id → the slot it replaces, for whoever paints the room */
+export const UPGRADE_OF: Record<string, string> = Object.fromEntries(
+  UPGRADE_ITEMS.filter(i => i.of).map(i => [i.id, i.of as string]),
+)
+
+export const STORE_ITEMS: StoreItem[] = [...HOUSE_ITEMS, ...SALE_ITEMS, ...UPGRADE_ITEMS]
+
+/** Everything EL BAR sells, in shelf order: the lounge props, the finer
+ *  versions of what you have, and the bar's own furniture. */
+export const SHOP_ITEMS: StoreItem[] = [...SALE_ITEMS, ...UPGRADE_ITEMS, ...BAR_ITEMS]
 
 export type EarnRule = { key: string; embers: number; label: string; note: string }
 

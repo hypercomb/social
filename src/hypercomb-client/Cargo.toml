@@ -13,6 +13,7 @@ hypercomb-protocol = { path = "crates/protocol" }
 hypercomb-store = { path = "crates/store" }
 hypercomb-host = { path = "crates/host" }
 redb = "2"
+notify = "8"
 thiserror = "2"
 tempfile = "3"
 sha2 = "0.10"

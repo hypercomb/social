@@ -40,6 +40,85 @@ dependencies, the domain allowlist. The published site is the
 try-before-trust tier; the gate is crossed only when the visitor chooses to
 bring the creation home.
 
+And the door only opens from the inside: nothing on a published site can
+push itself into a hive — the client pulls a chosen signature and verifies
+the bytes. **When you open the door from the inside, you are accepting your
+own request** — requester and acceptor are the same person performing the
+same act, which is why no external party can ever open it for you. What you
+accept is **the layer metadata that resolves the hive from the website you
+were just on**: the site carries its own meta layer (head, place, publisher),
+and accepting it is the whole handshake — no other format, no other channel.
+
+Adoption from a published site is also a **warm start**: since the website
+is there, all the dependencies and resources resolve instantly — the origin
+already serves the full closure, so the pull that follows your acceptance is
+cache-hits from the very site you were just on, not cold fetches from
+somewhere else.
+
+### The handshake
+
+The caller brings the domain with the request and uses it to get resources —
+because a domain is only a WHERE, never a WHAT. The protocol (already built
+in `sharing/hive-visit.drone.ts` for hive-links; the resolver's `--from` is
+the same move from the command line):
+
+1. **The meta layer names everything**: publisher pubkey, place (segments),
+   the domains that serve the bytes, and a head hint for when the index is
+   cold.
+2. **Resolve "now" against the publisher, not the host**: fetch the signed
+   hive index from any of the named domains and verify it against the
+   pinned pubkey (`hive-pointer.ts`) — no host can substitute a head.
+3. **Bring the domain to the broker**: `noteDomainsForSig(head, domains)` —
+   the caller teaches its own byte tier where this closure lives. The
+   domains ride along with every subsequent request precisely because they
+   authenticate nothing.
+4. **Pull and prove**: walk the closure from those domains, sha256-gating
+   every byte against its name. The signature is the trust; the domain is
+   disposable transport — any domain serving the right bytes is
+   interchangeable with any other.
+
+There is no step where the host is believed. The handshake is: *you name a
+publisher and a place; the publisher's signature names the head; the head
+names every byte; the domain merely delivers them.*
+
+**The elegant form: one signature, resolved against where you stand.**
+Can a domain be passed along safely? **With the Merkle proof — yes.** A
+passed domain has no power over content: every byte must hash to its name
+or it is refused, so a lying source achieves nothing and any domain serving
+the right bytes is interchangeable with any other. The proof is what
+disarms the transport. What remains is only a soft consideration — which
+servers your client calls is a privacy courtesy, not a security boundary —
+and the elegant default makes even that moot, because the domain usually
+doesn't need passing at all. It is already in one of two places:
+
+- **Under your feet.** Adopting from a published site, the byte source is
+  `location.origin` — the door you walked through IS the oasis, and you
+  chose to walk through it. The meta layer degenerates to a bare signature
+  (plus the publisher pubkey for later updates); the where is implicit in
+  the being-there.
+- **Inside verified bytes you accepted.** For roaming resolution — mirrors,
+  R2, a friend's desktop — additional oases are CONTENT of the publisher's
+  own sig-verified meta layer (its hosting incidences), pulled from where
+  you stand. They inherit the publisher's authorship because they sit
+  behind the signature; a link-crafter cannot inject them.
+
+And sharing needs no special link format carrying hosts: **share the
+website's URL** — the link IS the domain, and clicking it is the same
+deliberate trust act as all web navigation. Every entrance becomes the
+standing-there case. One web.
+
+Even the hand-off — "add to hypercomb" walking a visitor from a published
+site into hypercomb.io — passes nothing: **the referrer should be enough.**
+The origin you arrived from IS the oasis the staged hive resolves from; the
+browser already says where you stood. (A publisher who wants their site
+adoptable simply keeps a referrer policy that exposes the origin — opting
+in by policy, which is exactly where that choice belongs.)
+
+The resolver CLI's `--from` stays honest under this rule: an operator
+typing a source at their own terminal is the standing act itself — the
+operator chooses their oasis the way a visitor chooses a link. What is
+forbidden is a domain arriving inside a message someone else composed.
+
 And the presentation isn't one declared mode — it is **any number of
 whatever views you had configured in the publish**. View marks live on the
 branches (the default-view cascade: nearest mark wins), so they ride the
@@ -72,6 +151,59 @@ the signature IS the install.
 - Natural home: `hypercomb-cli` — `hypercomb install <sig> --from <url>
   --to <dir>` alongside the existing `build` and `inspect`. That makes
   "anybody can use it" literal: no repo checkout, no bridge, just Node.
+
+**The whole server surface, then, is two things.** A **shim that gets the
+signature** — the one mutable pointer, everything else resolves from it —
+and **upload by resolution**: there is no file-upload protocol to invent,
+because handing the host a new meta layer IS the upload. The host runs the
+same walk the resolver runs — pull what the meta layer names, verify each
+byte against its name, write the flat pool — whether the bytes come from
+R2, another oasis, or a folder the owner copied up. Update, upload, and
+install are one operation wearing three hats; the signature is always the
+entire interface.
+
+Named plainly: **the server shim is a slim server install that lets the
+site sync to a signature, securely.** Its whole life: hold the pin, serve
+the folder, and on a new signature run the resolver's walk and repoint —
+complete-or-absent, never a half-synced site. "Securely" is two gates that
+already exist in the architecture: every byte proves itself against its
+name (the Merkle gate), and the pointer move itself is owner-signed — the
+same pubkey-signed head the hive index already uses — so a host operator
+can sync *for* the owner but can never sync *as* the owner.
+
+**The shim IS a standalone server — BUILT (2026-08-25).** Installing it on
+a server is two commands:
+
+```bash
+npm install -g @hypercomb/cli
+hypercomb serve /var/www/site --site <sig> --from https://content.jwize.com --port 8080
+```
+
+That one process syncs the folder to the signature (resolver walk + the
+website faces — `hypercomb site` is the sync verb alone) and serves it
+read-only with the full contract: GET/HEAD/OPTIONS only, directory-index,
+immutable caching for sig files, no-cache faces, wide CORS,
+traversal-guarded. Loopback by default (front it with a tunnel);
+`--public` binds 0.0.0.0 for a bare VPS. Update = run it again with the
+new signature; delta-only; older signature = rollback. Verified live: a
+fresh folder synced 523 sigs from the CDN, materialized 12 pages, and
+served them — root, cold deep links, sig fetches, refused writes, blocked
+traversal all probed. Face materialization lives in the CLI
+(`commands/site.ts`); `publish:site` reuses it, one implementation.
+Still owed: the owner-signed head *listener* (sync on a signed
+announcement instead of a re-run), and publishing `@hypercomb/cli` to npm
+so the install line works outside this repo.
+
+Once the shim is up, **resolution fills the directory where your packages
+are installed — by signature, and by tile and branch expansion.** The walk
+has the layer protocol as its grammar: a branch expands through its
+`children`, a tile expands through its layer's decorations, resources, and
+pages, a package expands through its manifest's bees and dependencies —
+and every expansion bottoms out in sig-named bytes landing in the one flat
+pool. The resolver's ref-mining is the universal implementation of exactly
+this: packages and content fill the same directory through the same
+expansion, which is why one folder can be a website, a package source, and
+an oasis at once.
 
 **The xcopy contract** survives as the degenerate path: run the resolver
 locally, get the folder, copy it to the server (`xcopy`, FTP, drag-and-drop —
@@ -203,6 +335,16 @@ publish names is which pools go out (the creation's branch head plus the
 pools its beehaviors read). A deployment is a published set of pools — the
 vocabulary of the publish command is meanings, not file paths.
 
+And the communication language is **always layers — meta layers everywhere**.
+That is the dialect of the Hypercomb communication protocol, the same way a
+single event shape is the dialect of Nostr: one message shape for
+everything, with meaning distinguished by content and marks (as Nostr does
+with kinds), never by minting a new format. Meta-information about content
+travels as layers too — announcing a published head IS broadcasting a meta
+layer, just the same as broadcasting a Nostr message. The practical consequence for tooling like the
+resolver: it mints NO bespoke side-formats — its output is flat sig files,
+and any "what's current" pointer rides the existing layer/sigbag doctrine.
+
 **It is the perfect reciprocal format to achieve sharing and installation.**
 One format, two directions: what a publisher shares is byte-for-byte what an
 installer consumes — publish pushes the closure out, resolve pulls it in,
@@ -261,6 +403,63 @@ instead of the full essentials package) is a later optimization — the first
 cut ships the full signed package and relies on the surface barrel + readonly
 gate. Signatures make the pruning safe to add later without format changes.
 
+## Hosting recipes — pointing Cloudflare at your folder
+
+The payload to stand up a server is deliberately tiny: the assembled folder
+plus anything that can serve static files. Two recipes, own-machine first
+because it is the way to go — nothing rented, nothing else needed.
+
+### Your own machine behind a Cloudflare Tunnel (recommended)
+
+Exactly the technique already running jwize.com: a local process serves the
+folder, cloudflared gives it your domain. No opened ports, no public IP, no
+hosting bill; Cloudflare terminates TLS and absorbs the edge.
+
+```bash
+# once: install cloudflared and bind it to your Cloudflare account
+cloudflared tunnel login
+cloudflared tunnel create my-site
+```
+
+`~/.cloudflared/config.yml`:
+
+```yaml
+tunnel: my-site
+credentials-file: ~/.cloudflared/<tunnel-id>.json
+ingress:
+  - hostname: your-domain.com
+    service: http://localhost:8080
+  - service: http_status:404
+```
+
+```bash
+# route the DNS name to the tunnel, then run it
+cloudflared tunnel route dns my-site your-domain.com
+cloudflared tunnel run my-site
+```
+
+Serve the folder on the port the ingress names — any static server works
+(the relay does exactly this for jwize.com; `npx serve <folder> -l 8080` or
+nginx are equally fine). When the server shim exists it takes this seat and
+adds the one verb: sync to a signature. Update today = re-run
+`publish:site` into the same folder; the tunnel notices nothing.
+
+### A public server, Cloudflare in front
+
+1. Copy the folder up (`xcopy`, `scp -r`, FTP — the contract).
+2. Serve it statically — stock nginx/Apache with the folder as the root
+   needs zero configuration beyond the directory-index default it already
+   has. Add CORS headers only if OTHER origins' browsers will consume your
+   packages (see resolution notes above).
+3. Point the DNS record at the server in the Cloudflare dashboard
+   (proxied), and caching is free: every sig file is immutable by name, so
+   `Cache-Control: immutable` on `/<sig>` paths is safe forever.
+
+Cloudflare Pages also swallows the folder as-is (`wrangler pages deploy
+<folder>`) when you'd rather have no server at all — but that is a
+convenience, not a requirement; the folder never needs a build step
+anywhere.
+
 ## The plan
 
 **Phase 1 — visitor boot mode** (in `hypercomb-web`)
@@ -279,21 +478,39 @@ gate. Signatures make the pruning safe to add later without format changes.
 - Doctrine ratchet: visitor build may not register authoring surfaces.
 
 **Phase 3 — the resolver + `publish:site`**
-- `hypercomb install <sig> --from <url> --to <dir>` in `hypercomb-cli`: the
-  pull twin of publish-content's push walk — resolve the Merkle closure from
-  any content host, sha256-gate every byte, write the flat pool + manifest.
-  Idempotent and delta-only: re-running with a new signature fetches only
-  what's missing; an older signature is a rollback.
-- `scripts/publish-site.ts`: assemble the full deployable folder locally —
-  website harness build + resolver output + baked `site.json`. One command,
-  no git required. `npm run publish:site -- /revolucion --out
-  ../deploy/revolucion`.
-- Acceptance = the xcopy contract: publish (or resolve) → serve the folder
-  with the dumbest static server available (defaults, zero config) →
-  Playwright pass (`npm run shot`) proves render + navigation + a beehavior
-  firing, including a hash deep link opened cold. Then: resolve a SECOND
-  signature over the same folder and prove the delta property (only new sigs
-  written, site now serves the new head).
+- **BUILT (2026-08-25)**: `hypercomb install <sig> --from <url> [--from …]
+  --to <dir> [--verify] [--max <n>]` in `hypercomb-cli`
+  (`src/commands/install.ts`): the pull twin of publish-content's push walk —
+  resolve the Merkle closure from any content host over the one contract
+  (`<base>/<sig>`), sha256-gate every byte before it touches disk (staged
+  `.part` write + rename, so a crash can't leave a torn file the delta skip
+  would trust), mine refs from text payloads, refuse lying sources, report
+  holes. Present files are never refetched but ARE mined, so resolving a new
+  signature over an existing folder fetches only the delta; an older
+  signature is a rollback. Honors the meta-layers dialect: NO bespoke
+  side-formats — output is flat sig files only. Six-case contract spec
+  (`install.spec.ts`) + verified live: a 9-sig closure resolved from
+  content.jwize.com with zero holes, rerun = 9 present / 0 fetched.
+- **BUILT (2026-08-25)**: `npm run publish:site -- <headSig|/branch> --out
+  <dir> [--from <url>…]` (`scripts/publish-site.ts`). Assembles the xcopy
+  folder: the creation's closure flat at the ROOT (materialized by the
+  resolver's own `resolveClosure` — publish and install are literally the
+  same walk), the module package verbatim at `/content`, and the branch's
+  full `visual:website:page` TREE materialized as `<name>/…/index.html` so
+  the absolute links pages already carry work on any host that serves a
+  directory's index. Face copies only are rewritten for standalone life
+  (`resource:<sig>/x.css` → inline style, since `<link>` is MIME-enforced
+  and dumb hosts serve sig files as octet-stream; other `resource:` refs →
+  `/<sig>`) — the pool bytes stay canonical under their sigs. A bare head
+  sig needs no bridge; a `/branch` path resolves its head over ws:2401.
+  No pin files, per the meta-layers dialect.
+- Acceptance PASSED: revolucion (523-sig closure, zero holes) assembled and
+  served by a deliberately dumb static server (no rewrites, octet-stream
+  for everything but .html) — root page fully styled, `/revolucion/flavor-
+  wheel` opened COLD renders the interactive wheel live, sig files resolve
+  at `/<sig>`, and a re-run fetches nothing (delta). Playwright-proven.
+- Still owed from this phase: resolving a SECOND head over the same folder
+  as the update gesture becomes routine once revolucion republishes.
 
 **Phase 4 — first real domain**
 - Ship one creation (revolucion is the natural candidate) to its own domain
@@ -302,14 +519,46 @@ gate. Signatures make the pruning safe to add later without format changes.
   hands the visitor a hive-link (the adopt path already exists) — off by
   default until decided.
 
-**Phase 5 — self-host from the desktop app**
-- Fold the resolver + website harness into the jwize.com self-host stack:
-  the desktop app (or the relay it runs) serves a published site at the
-  domain root from its own pool, tunnel-fronted. Installer → desktop app →
-  your domain, no third-party server at all.
-- The relay already serves flat `<sig>`; the delta is serving `index.html` +
-  harness + manifest per hosted domain, keyed by the same head signature the
-  resolver would install.
+**Phase 5 — the executable makes anybody a host** *(core BUILT 2026-08-25)*
+
+Built: the site server (`hypercomb-client/crates/host/src/serve.rs` —
+loopback-only, GET/HEAD/OPTIONS, directory-index, immutable sig caching,
+traversal-guarded, zero new dependencies, 4 tests), the orchestration
+(`app/src/hosting.rs` — 7 `hosting_*` IPC commands: status / pick folder
+via native dialog / serve start-stop / cloudflared login / go-live /
+go-offline; per-run `tunnel run --url` flags so an operator's hand-built
+`~/.cloudflared/config.yml` is NEVER touched; `hosting.json` +
+`hosting.log` beside the hive per instance; tunnel child killed on
+go-offline and app exit), and the Host panel
+(`hypercomb-shared/ui/host-panel/` — native-gated shell surface, `hosting.*`
+i18n in en+ja; status polls over IPC because the app CSP forbids fetching
+localhost). It serves ONLY the picked published folder — the consented
+public subset — never the live store. Still owed: bundling cloudflared as
+a sidecar (`bundle.externalBin`, first ever) so "get cloudflared" is not a
+manual step, and an end-to-end live-domain test.
+- The point is not that the developer's machine is close — it is that
+  **anybody who installs the Windows/Mac/Linux executable is there
+  instantly after they point their Cloudflare.** The app takes care of
+  everything: point and click, enter the server address only if needed.
+  Hosting capability ships inside the executable; the only act left to the
+  owner is the one that must be theirs — putting their domain on
+  Cloudflare and pointing it at their machine.
+- Concretely, the app (`hypercomb-client` — the `host` crate is the
+  serving seat): **Host** → choose the creation → the app serves its pool
+  + faces on a local port → **Connect Cloudflare** → the app manages
+  cloudflared (bundled or fetched, browser login, `tunnel create`, config
+  written, `tunnel route dns` — DNS routing is automatic through the
+  tunnel API) → enter the domain → live. Uninstall-clean; the tunnel and
+  config are the app's to tear down.
+- "Enter the server address if needed" = the remote variant: instead of
+  hosting locally, the app syncs a remote shim by signature (the same one
+  verb) for always-on sites.
+- Possibly simpler still for the first taste: a Cloudflare quick tunnel
+  (no account, throwaway URL) so "see my site on the internet" is one
+  click before any domain exists at all.
+- The relay already proves the serving surface (jwize.com); the delta is
+  the shim verb per hosted domain — `index.html` + faces + manifest keyed
+  by the same head signature the resolver installs.
 
 **Mirror obligation**: the read-only deployment is a creation — when built it
 owes its hive mirror (tiles for the parts, collection, pheromones, notes) in

@@ -78,6 +78,24 @@ describe('costOf', () => {
 })
 
 describe('choosing without a pin', () => {
+  it('uses live subscription headroom before cost preference', () => {
+    const low = descriptor({
+      id: 'low-headroom', vendor: 'local', requiresKey: false,
+      subscription: { status: 'limited', source: 'test', checkedAt: Date.now(), windows: [{ label: 'Weekly', remainingPercent: 8 }] },
+    })
+    roster(low, KEYED)
+    expect(chooseProvider({ tier: 'fast' })?.id).toBe('keyed-vendor')
+  })
+
+  it('never schedules a provider known to be exhausted', () => {
+    const exhausted = descriptor({
+      id: 'exhausted', vendor: 'local', requiresKey: false,
+      subscription: { status: 'exhausted', source: 'test', checkedAt: Date.now(), windows: [{ label: 'Weekly', remainingPercent: 0 }] },
+    })
+    roster(exhausted, KEYED)
+    expect(candidatesFor({ tier: 'fast' }).map(p => p.id)).toEqual(['keyed-vendor'])
+  })
+
   it('prefers a model that costs nothing (the default)', () => {
     roster(KEYED, LOCAL)
     expect(chooseProvider({ tier: 'fast' })?.id).toBe('my-machine')

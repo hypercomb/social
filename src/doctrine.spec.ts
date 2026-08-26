@@ -572,10 +572,25 @@ describe('doctrine ratchets', () => {
       return out
     }
 
-    // `port:` in a server options literal with no `host:` beside it, or a
-    // `.listen(port, …)` whose second argument is not a bind-address string.
+    // `port:` in a server options literal with no `host:` beside it.
     const PORT_NO_HOST = /new\s+WebSocketServer\s*\(\s*\{(?![^}]*\bhost\s*:)[^}]*\bport\s*:/
-    const LISTEN_NO_HOST = /\.listen\s*\(\s*[^,)]+\s*(?:\)|,(?!\s*['"]))/
+    // NO host argument at all — Node then binds every interface, which is the
+    // thing this ratchet is actually named after. Covers both `listen(port)`
+    // and the callback form `listen(port, cb)`.
+    //
+    // It deliberately does NOT require a string LITERAL. Demanding one made
+    // this fire on `hypercomb serve`, which computes
+    // `publicBind ? '0.0.0.0' : '127.0.0.1'` and passes it — loopback by
+    // default with `--public` as an explicit opt-in, i.e. exactly the shape
+    // the ratchet wants. A guard that flags the correct fix teaches people to
+    // route around it, so it now tests its own claim instead: supplying a host
+    // is a deliberate act, and omitting one is the drift.
+    const LISTEN_NO_HOST = /\.listen\s*\(\s*[^,)]+\s*(?:\)|,\s*(?:\(|function\b|async\b))/
+    // ...and a host argument that IS every interface, handed over directly.
+    // The regex can only see literals, so an unconditional `const H='0.0.0.0'`
+    // passed by name would slip through — that is the honest limit here, and
+    // the reason the bind address should stay inline or behind a named flag.
+    const LISTEN_WIDE_HOST = /\.listen\s*\([^)]*,\s*['"](?:0\.0\.0\.0|::)['"]/
 
     const offenders: string[] = []
     for (const dir of SERVER_DIRS) {
@@ -583,7 +598,7 @@ describe('doctrine ratchets', () => {
       try { files = walkAll(join(ROOT, dir)) } catch { continue }
       for (const file of files) {
         const code = stripComments(readFileSync(file, 'utf8'))
-        if (PORT_NO_HOST.test(code) || LISTEN_NO_HOST.test(code)) {
+        if (PORT_NO_HOST.test(code) || LISTEN_NO_HOST.test(code) || LISTEN_WIDE_HOST.test(code)) {
           offenders.push(relative(ROOT, file).replace(/\\/g, '/'))
         }
       }

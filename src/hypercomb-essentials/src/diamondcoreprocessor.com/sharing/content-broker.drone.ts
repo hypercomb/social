@@ -1110,7 +1110,43 @@ export class ContentBrokerDrone extends Drone {
   /** The remote half of fetchBySig — HTTP-direct cascade, then the mesh
    *  fallback for layers. Runs coalesced under #pendingFetches; records
    *  a full-cascade miss (with backoff) when everything comes up empty. */
+  /**
+   * The connected folder-backup tier, ahead of every network tier.
+   *
+   * A folder is LOCAL DISK: it beats any host on latency and on reliability,
+   * and it is the inbound half of the folder sync that never needs a poll --
+   * a lookup only fires for bytes this browser does not hold, so it can
+   * neither conflict with anything nor copy anything nobody asked for.
+   *
+   * Resolved through IoC rather than an import, so no bundle edge is created
+   * between the two drones (folder-sync already imports this module's types
+   * TYPE-ONLY for the same reason).
+   */
+  #fetchFromFolder = async (sig: string, type: ContentType): Promise<Uint8Array | null> => {
+    try {
+      const folder = window.ioc?.get?.('@diamondcoreprocessor.com/FolderSyncService') as
+        | { resolveContent?: (sig: string) => Promise<Uint8Array | null> }
+        | undefined
+      const bytes = await folder?.resolveContent?.(sig)
+      if (!bytes) return null
+      // WRITE-THROUGH, exactly as the HTTP tier does: a sig that resolves but
+      // never lands in the local store is re-resolved on every render pass.
+      await this.#persistLocal(sig, type, bytes)
+      this.#mintOutcome('folder', 'ok')
+      return bytes
+    } catch {
+      return null
+    }
+  }
+
   #resolveRemote = async (s: string, type: ContentType, timeoutMs: number): Promise<Uint8Array | null> => {
+    // Tier -1 — the connected backup folder, before anything on the network.
+    // This is "the Windows version is the first lookup when not found": the
+    // folder the desktop client keeps current answers the miss, and the bytes
+    // are sha256-checked on the way in exactly like every other tier.
+    const fromFolder = await this.#fetchFromFolder(s, type)
+    if (fromFolder) return fromFolder
+
     // HTTP-direct path — try known domains' content endpoints first.
     // Per the layer-only-mesh doctrine, heavy bytes (resources, deps)
     // travel via HTTP exclusively; layers can fall back to mesh.

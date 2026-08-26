@@ -27,7 +27,14 @@
          holds the level you walked to and the picks you made, and a fold is
          not a reason to lose either. -->
     <div class="chat-rail" #chatRail [attr.aria-label]="'chat.rail' | t"></div>
-    <header class="chat-header">
+    <!-- WHILE FOLDED, THE BARS ARE A FRAME AND THE HIVE IS WHAT IS BETWEEN
+         THEM. Reserving them as viewport insets is what makes "centre in
+         window" mean the window you can actually see: the canvas owner
+         squeezes #pixi-host into the free area, and its existing resize path
+         recentres and refits into it. Active ONLY while folded — a full-screen
+         window covers everything and reserving an edge of it would be a lie. -->
+    <header class="chat-header"
+      hcDockInset="top" [hcDockInsetActive]="peeking()">
       <span class="mat-sym chat-glyph" aria-hidden="true">forum</span>
       <!-- WHOSE CONVERSATION IS THIS, and WHAT THE NEXT REQUEST CARRIES.
            The conversations themselves live in the sidebar now, under each
@@ -93,8 +100,19 @@
             (dragstart)="onReferenceDragStart($event, i)"
             (dragend)="onReferenceDragEnd()"
             [title]="'chat.context.one' | t: { tile: pick.name }">
+            <!-- THE PICTURE IS THE WAY TO SEE THE PICTURE. A mark this small
+                 answers WHICH and never WHAT, so pressing it opens the thing
+                 full size where it already is. The rest of the box is
+                 unchanged: the name still reads, the × still drops it, and
+                 dragging it off still sends it back to the clipboard —
+                 nothing that already meant something means something else. -->
             @if (contextThumbs()[pick.key]; as url) {
-              <img class="chat-box-img" [src]="url" alt="">
+              <button class="chat-box-look" type="button"
+                (click)="openPicture(pick, $event)"
+                [title]="'chat.reference.look' | t: { tile: pick.name }"
+                [attr.aria-label]="'chat.reference.look' | t: { tile: pick.name }">
+                <img class="chat-box-img" [src]="url" alt="">
+              </button>
             } @else {
               <span class="mat-sym chat-box-glyph" aria-hidden="true">hexagon</span>
             }
@@ -313,6 +331,13 @@
            are READING, which is the common case and had nowhere to be. Same
            control both directions, like every other archive in the window. -->
       @if (canArchive() && activeId()) {
+        @if (activeGoal()) {
+          <button class="chat-goal" type="button" (click)="toggleGoal()"
+            [class.on]="goalOpen()" [attr.aria-expanded]="goalOpen()"
+            [title]="'chat.goal.open' | t" [attr.aria-label]="'chat.goal.open' | t">
+            <span class="mat-sym" aria-hidden="true">verified</span>
+          </button>
+        }
         <button class="chat-put" type="button"
           (click)="archiveCurrent()"
           [title]="(activeArchived() ? 'chat.archive.restore' : 'chat.archive.put') | t"
@@ -326,6 +351,21 @@
         <span class="mat-sym" aria-hidden="true">add</span>
       </button>
     </div>
+
+    @if (goalOpen() && activeGoal(); as goal) {
+      <section class="chat-goal-details" role="dialog" [attr.aria-label]="'chat.goal.title' | t">
+        <div class="chat-goal-head">
+          <span class="mat-sym" aria-hidden="true">task_alt</span>
+          <strong>{{ 'chat.goal.title' | t }}</strong>
+          <button type="button" (click)="toggleGoal()" [attr.aria-label]="'chat.goal.close' | t">×</button>
+        </div>
+        <p>{{ goal.details }}</p>
+        <button class="chat-goal-archive" type="button" (click)="archiveCurrent()">
+          <span class="mat-sym" aria-hidden="true">archive</span>
+          {{ 'chat.goal.archive' | t }}
+        </button>
+      </section>
+    }
 
     @if (!railVisible() && listOpen()) {
       <ul class="chat-list">
@@ -476,7 +516,8 @@
     }
     </div>
 
-    <footer class="chat-foot">
+    <footer class="chat-foot"
+      hcDockInset="bottom" [hcDockInsetActive]="peeking()">
       <!-- Availability, named — FIRST, because whether an answer can come at
            all is read before which model would give it. A rule under it
            separates the standing fact from the choices about this question. -->
@@ -534,6 +575,53 @@
         }
       </div>
     </footer>
+    }
+
+    <!-- LOOKING AT ONE, WITHOUT PUTTING ANYTHING DOWN. Inside the panel, not
+         over the document and not in another tab: the composer still holds an
+         unsent question and the shelf still holds what you gathered, and both
+         survive because nothing navigated.
+
+         ← and → walk the shelf's other pictures — the "next one of these"
+         axis — and Escape, a backdrop press, or the × come back out. -->
+    @if (viewingUrl(); as url) {
+      <div class="chat-look" role="dialog" aria-modal="true"
+        tabindex="-1" #lookLayer
+        [attr.aria-label]="'chat.reference.look' | t: { tile: viewing()?.name ?? '' }"
+        (keydown)="onPictureKey($event)"
+        (click)="closePicture()">
+        <!-- The picture takes the press without closing; only the ground
+             around it means "done looking". -->
+        <img class="chat-look-img" [src]="url" [alt]="viewing()?.name ?? ''"
+          (click)="$event.stopPropagation()">
+
+        <div class="chat-look-bar" (click)="$event.stopPropagation()">
+          @if (viewingCount() > 1) {
+            <button class="chat-look-step" type="button"
+              (click)="stepPicture(-1)"
+              [title]="'chat.reference.previous' | t"
+              [attr.aria-label]="'chat.reference.previous' | t">
+              <span class="mat-sym" aria-hidden="true">chevron_left</span>
+            </button>
+          }
+          <span class="chat-look-name">{{ viewing()?.name }}</span>
+          @if (viewingCount() > 1) {
+            <span class="chat-look-count">{{ viewingIndex() + 1 }} / {{ viewingCount() }}</span>
+            <button class="chat-look-step" type="button"
+              (click)="stepPicture(1)"
+              [title]="'chat.reference.next' | t"
+              [attr.aria-label]="'chat.reference.next' | t">
+              <span class="mat-sym" aria-hidden="true">chevron_right</span>
+            </button>
+          }
+          <button class="chat-look-off" type="button"
+            (click)="closePicture()"
+            [title]="'chat.reference.done' | t"
+            [attr.aria-label]="'chat.reference.done' | t">
+            <span class="mat-sym" aria-hidden="true">close</span>
+          </button>
+        </div>
+      </div>
     }
   </aside>
 }

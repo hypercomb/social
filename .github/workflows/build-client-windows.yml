@@ -14,8 +14,15 @@ on:
   workflow_dispatch:
   push:
     branches: [development, main]
+    # The frontend is baked into the binary at compile time, so frontend
+    # source IS client source — a shell/module change with no rebuild leaves
+    # the shipped exe silently stale (248 commits deep, once).
     paths:
       - 'src/hypercomb-client/**'
+      - 'src/hypercomb-core/**'
+      - 'src/hypercomb-essentials/**'
+      - 'src/hypercomb-shared/**'
+      - 'src/hypercomb-web/**'
       - '.github/workflows/build-client-windows.yml'
 
 concurrency:
@@ -371,6 +378,37 @@ jobs:
             src/hypercomb-client/target/release/bundle/msi/*.msi
             src/hypercomb-client/target/release/bundle/nsis/*.exe
           if-no-files-found: error
+
+      # ── Ship it ───────────────────────────────────────────────────────────
+      #
+      # jwize.com/installer 302s (via the content worker's zone route) to the
+      # LATEST installer blob — so overwriting that blob here on every green
+      # push IS the release. A sha-named copy lands beside it for rollback.
+      # Absent credentials skip shipping, never fail the build (same posture
+      # as the LIVE workflow's essentials publish).
+      - name: Login to Azure for installer publish
+        id: az_login
+        if: steps.bundle.outcome == 'success' && github.event_name == 'push'
+        continue-on-error: true
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS_LIVE }}
+
+      - name: Ship the installer as latest
+        if: steps.az_login.outcome == 'success'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path src/hypercomb-client/target -Recurse -Include *-setup.exe |
+            Where-Object { $_.FullName -match 'bundle' } | Select-Object -First 1
+          if (-not $exe) { throw "no NSIS installer found to ship" }
+          $sha = "${{ github.sha }}".Substring(0, 8)
+          az storage blob upload --account-name storagehypercomb --container-name installer `
+            --auth-mode login --overwrite --content-type application/octet-stream `
+            --file $exe.FullName --name "Hypercomb-Setup-latest.exe"
+          az storage blob upload --account-name storagehypercomb --container-name installer `
+            --auth-mode login --overwrite --content-type application/octet-stream `
+            --file $exe.FullName --name ("Hypercomb-Setup-" + $sha + ".exe")
+          "shipped: jwize.com/installer -> $($exe.Name) @ $sha" >> $env:GITHUB_STEP_SUMMARY
 
       # A blank window with a working process is the failure mode this client
       # is built to make visible (see RENDERER_DIAGNOSTICS in main.rs). On a

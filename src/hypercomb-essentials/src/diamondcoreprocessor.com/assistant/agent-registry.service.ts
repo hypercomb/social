@@ -484,7 +484,17 @@ export class AgentRegistry extends EventTarget {
     const now = Date.now()
     const existing = this.#agents.get(seed.id)
     if (existing) {
-      Object.assign(existing, seed, { updatedAt: now })
+      // A RE-RAISE THAT NAMES A DIFFERENT MODEL RE-BRANDS. Identity is
+      // normally settled at spawn, but one case genuinely changes tier under
+      // a live agent: a chat question is branded for the tier about to take
+      // it, and if the shallow host DECLINES, the durable bridge queue
+      // answers instead with a different model (chat-window #raiseBee).
+      // Without this the bee keeps the colour and belly of a tier that never
+      // touched it — a wrong answer that looks like a confident one.
+      const rebrand = (seed.model ?? seed.behavior) !== undefined
+        && (seed.model ?? seed.behavior) !== (existing.model ?? existing.behavior)
+      Object.assign(existing, seed, { updatedAt: now },
+        rebrand ? this.#identity({ ...existing, ...seed }) : {})
       this.#changed()
       return
     }
@@ -505,9 +515,10 @@ export class AgentRegistry extends EventTarget {
     this.#changed()
   }
 
-  /** Kind, and — for a model — whose it is. Derived once at spawn: the name
-   *  cannot change under an agent, and every surface that wants to say
-   *  "anthropic · opus" should read the same answer. */
+  /** Kind, and — for a model — whose it is. Derived at spawn, and again only
+   *  when a re-raise names a DIFFERENT model (see #upsert): every surface
+   *  that wants to say "anthropic · opus" reads this one answer, so it must
+   *  never disagree with the model the agent is actually carrying. */
   #identity(seed: Partial<Agent> & { behavior: string }): { kind: AgentKind; vendor?: string; tier?: string } {
     const kind = kindFor(seed)
     if (kind !== 'model') return { kind }

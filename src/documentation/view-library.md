@@ -14,6 +14,29 @@ Views store only a trusted declaration on their root tile. They do not accept
 HTML, JavaScript, CSS, templates, or executable embeds from participants. The
 words remain ordinary notes and the renderer creates DOM with `textContent`.
 
+## Views are composable projections
+
+A view never owns the atoms it displays. It projects a canonical pool through
+independent constraints that can be combined without copying or re-homing data:
+
+- **pool** — the complete population of a meaning;
+- **lineage** — provenance or the path through which atoms are being viewed;
+- **pheromone** — a shared affinity discovered or deliberately marked during
+  exploration;
+- **local filters** — the participant's temporary lens over the result.
+
+The same cigar may therefore appear in an all-cigars portal, a Revolucion
+lineage view, and an `earthy + evening` pheromone view while remaining one
+content-addressed atom. Intersections produce another view, not another
+container. Root pool views show the complete population by default; narrower
+portals declare their projection criteria.
+
+When exploration identifies a useful cohort across lineages, the durable
+result is a common pheromone on those atoms. Any document view can then render
+that cohort by reading the pheromone projection. The exploration does not mint
+a duplicate collection unless the participant explicitly authors a new
+artifact.
+
 ## Living Brief
 
 `/brief here` attaches the professional long-form document view to the current

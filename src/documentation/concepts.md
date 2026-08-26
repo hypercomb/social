@@ -42,6 +42,36 @@ This is not a new idea; it is one the field arrived at twice and named:
 The rest of this page is the path from a single cell to that conclusion, and one
 speed law that falls out of it.
 
+## Pools, lineages, and composable projections
+
+A pool holds the complete canonical population of one meaning: the cigar pool
+holds all cigars, the behavior pool all behaviors. A lineage does not create a
+second population. It points into the canonical atoms and answers **where this
+selection comes from**.
+
+A pheromone supplies an independent selection axis: **what these atoms have in
+common in this exploration**. A swarm may explore across several lineages and
+deposit one shared pheromone on the result. That result is then a reusable
+projection without moving or copying any atom.
+
+These projections compose. A view may intersect lineage, pheromone, and other
+participant-local filters:
+
+```
+canonical cigar pool
+  ∩ lineage:revolucion
+  ∩ pheromone:maduro
+  ∩ pheromone:evening
+  = the view standing here
+```
+
+The invariant is **one atom, many projections**. Pools own canonical data;
+lineages express provenance and paths; pheromones express discovered affinity;
+views render any composition of those constraints. A root-level pool surface is
+therefore a portal onto the complete population, not a folder that owns copies.
+See [view-library.md](view-library.md) for the rendering contract and
+[pheromones.md](pheromones.md) for how shared discoveries become durable scent.
+
 ---
 
 ## 1. Every junction is a computer
