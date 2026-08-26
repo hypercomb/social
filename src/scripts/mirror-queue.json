@@ -2048,6 +2048,15 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "phase2-final-registry-panels",
+      "title": "Mirror the final four registry-fed panel ports",
+      "run": null,
+      "note": "No live renderer on the bridge. The everything-is-a-beehavior Phase 2 final batch moved chat-window, notes-strip, features-viewer, and host-panel from hypercomb-shared Angular UI into framework-free Essentials custom elements. Update the existing four hive creations in place (do not mint duplicates): replace their 1:1 source-part tiles with the new Essentials .view.ts/.i18n.ts and moved sibling files; note that chat-window and notes-strip preserve live DOM state with persistent nodes/anchor walks, features-viewer now carries behavior-enablement/hidden/verified beside the surface, and host-panel defines everywhere but registers only under Tauri. Correct historical source pointers that still name hypercomb-shared/ui. note-add is additive, so this requires a hands-on pass.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
