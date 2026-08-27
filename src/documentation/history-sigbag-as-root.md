@@ -421,8 +421,10 @@ into `relay.js`** — "the host-client handles both," the relay joining the
 conversation it currently only relays.
 
 **Publish = dump + advance the pointer; build ≠ publish.**
-- **Dump** (wired): `copy-to-dcp` → `hypercomb-relay/content/` (additive,
-  deduped — only deltas). Makes bytes *servable*.
+- **Dump** (wired): `copy-to-dcp --publish` xcopies the verified package
+  closure into the live `hypercomb-relay/content/` heap (or `CONTENT_DIR` /
+  `--host-heap`). It is additive and deduped—only missing deltas land, and no
+  historical signature is removed. Makes bytes *servable*.
 - **Advance the pointer** (the gap): push the per-lineage sigbag so its max
   becomes the host's current root. Makes it *discoverable*.
 - Build *locally* without dumping; **publish deliberately** as a one-time

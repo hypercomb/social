@@ -213,6 +213,10 @@ const bootstrap = async (): Promise<void> => {
   const getSentinel = (): Promise<SentinelBridge | null> => {
     if (!sentinelPromise) {
       sentinelPromise = initSentinel().then(bridge => {
+        // An unavailable DCP is transient (cold dev server, offline host,
+        // iframe navigation). Do not permanently memoize null: the next
+        // explicit installer action must be allowed to handshake again.
+        if (!bridge) sentinelPromise = null
         if (bridge) {
           // Per-toggle resync is DELIBERATELY not wired. Toggling a feature in
           // DCP (embedded installer OR standalone tab — both broadcast over the
@@ -228,6 +232,10 @@ const bootstrap = async (): Promise<void> => {
           bridge.onDcpClosed = () => reloadIfDrifted('dcp tab closed')
         }
         return bridge
+      }, error => {
+        sentinelPromise = null
+        console.warn('[main] sentinel handshake failed', error)
+        return null
       })
     }
     return sentinelPromise

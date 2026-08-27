@@ -95,7 +95,7 @@ describe('hc-install-prompt', () => {
     expect(element.querySelector('[role="dialog"]')).not.toBeNull()
   })
 
-  it('saves an upgrade restore point through the installer lineage, not the installed snapshot bee', async () => {
+  it('mirrors an upgrade restore point through an already-connected installer lineage', async () => {
     const { saveInstallRestorePoint } = await import('./install-prompt.element')
     const host = globalThis as typeof globalThis & {
       __sentinelBridge?: unknown
@@ -105,14 +105,15 @@ describe('hc-install-prompt', () => {
     const originalGetSentinel = host.__getSentinel
     try {
       const saveBranch = vi.fn(async () => 'a'.repeat(64))
-      host.__sentinelBridge = undefined
-      host.__getSentinel = vi.fn(async () => ({ saveBranch }))
+      host.__sentinelBridge = { saveBranch }
+      host.__getSentinel = vi.fn(async () => null)
 
       await expect(saveInstallRestorePoint('Before update', 1_000)).resolves.toEqual({
         available: true,
         rootSig: 'a'.repeat(64),
       })
       expect(saveBranch).toHaveBeenCalledWith('Before update')
+      expect(host.__getSentinel).not.toHaveBeenCalled()
     } finally {
       host.__sentinelBridge = originalBridge
       host.__getSentinel = originalGetSentinel
@@ -138,5 +139,56 @@ describe('hc-install-prompt', () => {
       host.__sentinelBridge = originalBridge
       host.__getSentinel = originalGetSentinel
     }
+  })
+
+  it('saves a bootstrap-owned restore point when DCP is not connected', async () => {
+    const {
+      INSTALL_CHECKPOINT_PREFIX,
+      restoreLocalInstallCheckpoint,
+    } = await import('./install-checkpoint')
+    const { saveInstallRestorePoint } = await import('./install-prompt.element')
+    const host = globalThis as typeof globalThis & {
+      __sentinelBridge?: unknown
+      __getSentinel?: unknown
+    }
+    const originalBridge = host.__sentinelBridge
+    const originalGetSentinel = host.__getSentinel
+    try {
+      const priorManifest = JSON.stringify({ version: 1, packageSig: '1'.repeat(64), bees: ['2'.repeat(64)], dependencies: [], layers: [] })
+      localStorage.setItem('core-adapter.installed-manifest', priorManifest)
+      localStorage.setItem('sentinel.sync-signature', '1'.repeat(64))
+      localStorage.setItem('hypercomb.installed', 'true')
+      host.__sentinelBridge = undefined
+      host.__getSentinel = vi.fn(async () => null)
+
+      const checkpoint = await saveInstallRestorePoint('Before update', 1_000)
+
+      expect(checkpoint.available).toBe(true)
+      expect(checkpoint.rootSig).toMatch(/^[a-f0-9]{64}$/)
+      expect(host.__getSentinel).not.toHaveBeenCalled()
+      expect(localStorage.getItem(`${INSTALL_CHECKPOINT_PREFIX}${checkpoint.rootSig}`)).toContain('Before update')
+
+      localStorage.setItem('core-adapter.installed-manifest', JSON.stringify({ version: 1, bees: ['3'.repeat(64)] }))
+      localStorage.setItem('sentinel.sync-signature', '4'.repeat(64))
+      await expect(restoreLocalInstallCheckpoint(checkpoint.rootSig!)).resolves.toBe(true)
+      expect(localStorage.getItem('core-adapter.installed-manifest')).toBe(priorManifest)
+      expect(localStorage.getItem('sentinel.sync-signature')).toBe('1'.repeat(64))
+    } finally {
+      host.__sentinelBridge = originalBridge
+      host.__getSentinel = originalGetSentinel
+    }
+  })
+
+  it('refuses a checkpoint whose immutable record was tampered with', async () => {
+    const {
+      INSTALL_CHECKPOINT_PREFIX,
+      restoreLocalInstallCheckpoint,
+      saveLocalInstallCheckpoint,
+    } = await import('./install-checkpoint')
+    localStorage.setItem('core-adapter.installed-manifest', JSON.stringify({ version: 1, bees: ['2'.repeat(64)] }))
+    const sig = await saveLocalInstallCheckpoint('Before update')
+    expect(sig).toMatch(/^[a-f0-9]{64}$/)
+    localStorage.setItem(`${INSTALL_CHECKPOINT_PREFIX}${sig}`, '{"tampered":true}')
+    await expect(restoreLocalInstallCheckpoint(sig!)).resolves.toBe(false)
   })
 })

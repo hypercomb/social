@@ -12,6 +12,8 @@ const ALLOWED_ORIGINS = [
   'http://localhost:4200',
   'http://localhost:4201',
   'http://localhost:4210',
+  'http://localhost:4250',
+  'http://localhost:4350',
   'https://hypercomb.io',
   'https://www.hypercomb.io'
 ]

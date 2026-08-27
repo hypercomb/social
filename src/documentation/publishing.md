@@ -59,17 +59,32 @@ via the static-follow boot poll for hives adopted from a hive-link
 
 `hypercomb-essentials/scripts/build-module.ts` builds signature-addressed
 bundles; `chain-manifest.ts` mints the revision (fresh→v1, changed→v(max+1),
-identical re-deploy adopts the existing version); `copy-to-dcp.ts` ships the
-SAME merged manifest to all three local targets so chains can't diverge:
+identical re-deploy adopts the existing version); `copy-to-dcp.ts` additively
+fills the local browser heaps, and its explicit `--publish` mode also fills the
+operator heap served by `jwize.com`:
 
-1. `diamond-core-processor/public/` (mirrored)
-2. `hypercomb-web/public/content/` (mirrored — the web shell's bundled source)
-3. `hypercomb-relay/content/` (**additive** — never pruned; also holds content)
+1. `diamond-core-processor/public/` (additive local heap)
+2. `hypercomb-web/public/content/` (additive bundled heap)
+3. `--publish`: `CONTENT_DIR`, `--host-heap`, or the primary checkout's
+   `hypercomb-relay/content/` (the additive live heap)
+
+Every signature-addressed leaf and sigbag is copied before `manifest.json` and
+the signed bootstrap pin advance. No build or publish pass removes a previous
+signature. A linked worktree therefore publishes into the primary checkout's
+real relay heap rather than its private relay copy; `CONTENT_DIR` remains the
+explicit override for another host folder.
+
+The live heap is a **public exposure boundary**, not a general local backup.
+Package artifacts are public by definition. Hive content enters only through
+an explicitly public root and its verified reachable closure. OPFS and a full
+Folder Sync export may contain private signatures and must use a separate,
+non-served vault. Content addressing proves integrity; it does not provide
+confidentiality to a signature stored behind public `GET /<sig>`.
 
 | Command | Effect |
 |---|---|
-| `npm run build:essentials` | Build + copy to the three targets (local only) |
-| `npm run deploy:essentials` | Same, plus `deploy-azure.ps1` → Azure blob `storagehypercomb/dcp` |
+| `npm run build:essentials` | Build + additive copy to the two local browser heaps; does not publish |
+| `npm run deploy:essentials` | Build + local copy + additive fill of the real host heap |
 | `npm run mirror:content` | Flat sig blobs → Azure `content` container (broker fallback host) |
 
 No git commit is ever required — the build reads the working tree; the

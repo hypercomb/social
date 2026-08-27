@@ -1,28 +1,27 @@
 // hypercomb-essentials/scripts/copy-to-dcp.ts
-// Copies built module output to all local targets so dev servers can feed OPFS.
-// Signature beeline: files are named by their signature, so if a file exists in
-// the target with the same name, it IS the correct content. No hashing needed.
+// Copies built module output into flat, append-only signature heaps.
+// Ordinary builds fill the two local browser feeds. `--publish` additionally
+// fills the operator's HTTP heap; use --host-heap (or CONTENT_DIR) when the
+// live relay is served from a different checkout.
 //
 // Layout-agnostic on purpose: dist emits the FLAT layout (bare sig-named files
 // + sig-named bag dirs at the dist root, plus manifest.json and the one-line
 // bootstrap pin — see
 // build-module.ts). This script copies whatever 64-hex-named entries dist
-// holds; it never creates a typed `__x__` dir. Targets that still carry the
-// legacy typed dirs (`__layers__`/`__bees__`/`__dependencies__`/`__resources__`)
-// get a SELF-CLEANING drain: per-entry copy → verify → remove into the flat
-// target root, then a gated non-recursive rmdir that only succeeds once the
-// dir is empty. Nothing is ever deleted before its bytes are confirmed at the
-// flat root.
+// holds; it never creates, migrates, or scans legacy typed dirs. Package
+// publication touches only the signed package closure and its pointer files;
+// private backup/migration pools are outside this boundary.
 //
 // Targets:
 //   diamond-core-processor/public/   — DCP browser app (local-backup tool)
 //   hypercomb-web/public/content/    — local dev server (feeds OPFS via localInstall)
-//   hypercomb-relay/content/         — operator's HTTP host content dir
+//   --publish host heap              — operator's HTTP host content dir
 //                                      (jwize.com serves layer/resource/dependency
 //                                      resolution endpoints from here — see
 //                                      memory: project_domain_as_identity.md)
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs'
+import { execFileSync } from 'node:child_process'
 import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { chainManifest, chainScore, type ContentManifest } from './chain-manifest.js'
@@ -32,33 +31,61 @@ const __dirname = dirname(__filename)
 
 const DIST_ROOT = resolve(__dirname, '..', 'dist')
 
-// `additive: true` = persistent pool — never mirror. The operator HOST pool
-// holds package content AND user-authored (HostSync PUT) AND adopted/co-hosted
-// content, all signature-addressed and deduped. Removing "stale" entries (sigs
-// not in the current build) would wipe user/adopted bytes that the build never
-// produced. Additive only; reclaiming space is a separate, deliberate GC phase
-// (mark-sweep over active roots), never a build-time side effect.
-// The dev OPFS feeds (web/dcp public) stay mirrored — they're regenerable.
-const TARGETS = [
-  { dir: resolve(__dirname, '..', '..', 'diamond-core-processor', 'public'), additive: false },
-  { dir: resolve(__dirname, '..', '..', 'hypercomb-web', 'public', 'content'), additive: false },
-  { dir: resolve(__dirname, '..', '..', 'hypercomb-relay', 'content'), additive: true },
+// Every destination is a heap, including the local browser feeds. A package
+// build can share those directories with authored/adopted content and every
+// chained package revision must remain resolvable. This pass therefore has no
+// deletion phase. Reclamation, if ever needed, is a separate explicit GC over
+// signed active roots—not a build or publish side effect.
+type Target = { dir: string; role: 'local' | 'host' }
+
+const LOCAL_TARGETS: Target[] = [
+  { dir: resolve(__dirname, '..', '..', 'diamond-core-processor', 'public'), role: 'local' },
+  { dir: resolve(__dirname, '..', '..', 'hypercomb-web', 'public', 'content'), role: 'local' },
 ]
+
+const defaultHostHeap = (): string => {
+  try {
+    // An explicit publish from a linked worktree must fill the primary
+    // checkout's relay heap, not the worktree's private copy. The common git
+    // directory sits at <primary-checkout>/.git for both checkout shapes.
+    const commonGitDir = execFileSync(
+      'git',
+      ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+      { cwd: __dirname, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    ).trim()
+    if (commonGitDir) return resolve(dirname(commonGitDir), 'src', 'hypercomb-relay', 'content')
+  } catch {
+    // Non-git package installations can still publish to their adjacent relay.
+  }
+  return resolve(__dirname, '..', '..', 'hypercomb-relay', 'content')
+}
+
+const targetsForInvocation = (): Target[] => {
+  const args = process.argv.slice(2)
+  const publish = args.includes('--publish')
+  const hostAt = args.indexOf('--host-heap')
+  if (hostAt >= 0 && !args[hostAt + 1]) {
+    throw new Error('--host-heap requires a directory path')
+  }
+  if (hostAt >= 0 && !publish) {
+    throw new Error('--host-heap only has an effect with --publish')
+  }
+
+  const targets = [...LOCAL_TARGETS]
+  if (publish) {
+    const configured = (hostAt >= 0 ? args[hostAt + 1] : process.env.CONTENT_DIR)?.trim()
+    const hostHeap = resolve(configured || defaultHostHeap())
+    if (!targets.some(target => target.dir.toLowerCase() === hostHeap.toLowerCase())) {
+      targets.push({ dir: hostHeap, role: 'host' })
+    }
+  }
+  return targets
+}
 
 // A content entry is anything 64-hex-named at the dist/target root:
 // file = leaf bytes, directory = sigbag. Everything else at the target root
 // (index.html, app assets, manifest.json) is NEVER touched by the mirror.
 const SIG_NAME = /^[0-9a-f]{64}$/i
-// LEGACY drain sources at the TARGETS only — dist no longer emits these.
-// The three build dirs were only ever written by this script, so their
-// content is provably build content at every target. `__resources__` was
-// never build-emitted: at the additive relay pool it holds legacy client
-// PUTs (user bytes → drain to the flat root, which additive never prunes);
-// at mirrored targets its provenance is unknown, and draining it into a
-// root that mirror-deletes would eventually destroy it — so it is left
-// untouched there.
-const LEGACY_BUILD_DIRS = ['__layers__', '__bees__', '__dependencies__']
-const LEGACY_RESOURCES_DIR = '__resources__'
 const MANIFEST_FILE = 'manifest.json'
 const BOOTSTRAP_PIN_FILE = 'bootstrap-pin.json'
 
@@ -75,72 +102,6 @@ const copyDirRecursive = (srcDir: string, tgtDir: string): void => {
   }
 }
 
-// recursive (name → size) fingerprint, used to verify a bag copy landed
-// completely before its source is removed.
-const dirFingerprint = (dir: string, prefix = ''): Map<string, number> => {
-  const out = new Map<string, number>()
-  for (const name of readdirSync(dir)) {
-    const full = join(dir, name)
-    const st = statSync(full)
-    if (st.isDirectory()) {
-      for (const [k, v] of dirFingerprint(full, `${prefix}${name}/`)) out.set(k, v)
-    } else {
-      out.set(`${prefix}${name}`, st.size)
-    }
-  }
-  return out
-}
-
-const fingerprintsMatch = (a: Map<string, number>, b: Map<string, number>): boolean => {
-  if (a.size !== b.size) return false
-  for (const [k, v] of a) if (b.get(k) !== v) return false
-  return true
-}
-
-/** Self-cleaning drain of a target's legacy typed dirs into its flat root.
- *  Per entry: copy (if the flat root lacks it or holds a size-mismatched
- *  partial) → verify sizes match → remove the legacy entry. A non-sig-named
- *  straggler is left alone and blocks the final rmdir — the gated,
- *  non-recursive removal only succeeds once the dir is truly empty, so
- *  nothing unconfirmed is ever destroyed. Names are canonicalized: legacy
- *  `<sig>.js` / `<sig>.json` land at the flat root as bare `<sig>`. */
-const drainLegacyDirs = (targetDir: string, additive: boolean): number => {
-  let drained = 0
-  const sources = additive ? [...LEGACY_BUILD_DIRS, LEGACY_RESOURCES_DIR] : LEGACY_BUILD_DIRS
-  for (const legacyName of sources) {
-    const legacyDir = join(targetDir, legacyName)
-    if (!existsSync(legacyDir)) continue
-    for (const name of readdirSync(legacyDir)) {
-      const srcPath = join(legacyDir, name)
-      const st = statSync(srcPath)
-      if (st.isDirectory()) {
-        // sigbag dir — relocate whole, verify by recursive fingerprint
-        if (!SIG_NAME.test(name)) continue // unknown subdir — leave, blocks rmdir
-        const tgtPath = join(targetDir, name)
-        if (!existsSync(tgtPath)) copyDirRecursive(srcPath, tgtPath)
-        if (fingerprintsMatch(dirFingerprint(srcPath), dirFingerprint(tgtPath))) {
-          rmSync(srcPath, { recursive: true, force: true })
-          drained++
-        }
-      } else {
-        const sig = name.replace(/\.(js|json)$/i, '')
-        if (!SIG_NAME.test(sig)) continue // not content-addressed — leave
-        const tgtPath = join(targetDir, sig)
-        const needsCopy = !existsSync(tgtPath) || statSync(tgtPath).size !== st.size
-        if (needsCopy) copyFileSync(srcPath, tgtPath)
-        if (existsSync(tgtPath) && statSync(tgtPath).size === st.size) {
-          unlinkSync(srcPath)
-          drained++
-        }
-      }
-    }
-    // gated removal: non-recursive on purpose — only an EMPTY (fully
-    // drained) legacy dir disappears; stragglers survive to a later run.
-    try { rmdirSync(legacyDir) } catch { /* not yet empty */ }
-  }
-  return drained
-}
-
 /** Read and parse a target's manifest.json, or null when absent/unreadable. */
 const readTargetManifest = (targetDir: string): ContentManifest | null => {
   const path = join(targetDir, MANIFEST_FILE)
@@ -154,8 +115,7 @@ const readTargetManifest = (targetDir: string): ContentManifest | null => {
 }
 
 /** Every signature the chained manifest advertises: the package sigs
- *  themselves plus everything each package references. This is the RETENTION
- *  AUTHORITY — see the prune in syncTarget. */
+ *  themselves plus everything each package references. */
 const advertisedSigs = (manifest: ContentManifest): Set<string> => {
   const out = new Set<string>()
   const packages = (manifest as { packages?: Record<string, Record<string, unknown>> }).packages ?? {}
@@ -174,9 +134,9 @@ const advertisedSigs = (manifest: ContentManifest): Set<string> => {
   return out
 }
 
-/** Copy one sig entry (file or bag dir) into the target from the first source
- *  that holds it. Sources are tried in order; the additive pool is passed
- *  first because it never prunes, so it is the complete one. */
+/** Copy one sig entry (file or bag dir) into the target from the first peer
+ *  that holds it. Every peer is append-only, so older revisions remain useful
+ *  backfill sources. */
 const backfillFrom = (sources: string[], name: string, targetDir: string): boolean => {
   for (const src of sources) {
     const srcPath = join(src, name)
@@ -191,28 +151,21 @@ const backfillFrom = (sources: string[], name: string, targetDir: string): boole
 
 const syncTarget = (
   targetDir: string,
-  additive: boolean,
   manifestJson: string,
   bootstrapPinJson: string,
   keep: Set<string>,
   peers: string[],
-): { copied: number; skipped: number; removed: number; drained: number; healed: number } => {
+): { copied: number; skipped: number; healed: number } => {
   mkdirSync(targetDir, { recursive: true })
 
   let copied = 0
   let skipped = 0
-  let removed = 0
-
-  // drain BEFORE mirroring so relocated-then-stale entries get pruned in the
-  // same run (mirrored targets) and reads keep resolving throughout.
-  const drained = drainLegacyDirs(targetDir, additive)
-
   const srcEntries = new Set(readdirSync(DIST_ROOT).filter(n => SIG_NAME.test(n)))
   const tgtEntries = new Set(readdirSync(targetDir).filter(n => SIG_NAME.test(n)))
 
-  // beeline: entry name IS the signature (file = leaf, directory = bag).
-  // Either way, if the name exists in target, content-addressing guarantees
-  // it's the same content — skip.
+  // Beeline: entry name is the signature (file = leaf, directory = bag).
+  // Existing immutable entries are retained; acceptance still verifies bytes
+  // against that signature before code or content can be used.
   for (const name of srcEntries) {
     if (tgtEntries.has(name)) {
       skipped++
@@ -228,14 +181,9 @@ const syncTarget = (
     copied++
   }
 
-  // BACKFILL — the manifest is CHAINED (every past version stays listed), but
-  // dist only ever holds the NEWEST build's bytes. A mirrored target that has
-  // only ever seen dist therefore advertises ~20 historical versions whose
-  // layer bytes it never received (or pruned in an earlier run, before the
-  // retention rule below existed): selecting any revision but the newest gave
-  // a permanent "No content found" — the row could not heal, because the
-  // bytes really were gone. Restore anything the manifest advertises from
-  // whichever peer target still holds it (the additive pool is complete).
+  // BACKFILL — dist only holds the newest build's bytes, while the chained
+  // manifest advertises historical versions. Fill any advertised gap from a
+  // peer heap before advancing discovery metadata.
   let healed = 0
   for (const name of keep) {
     if (srcEntries.has(name) || tgtEntries.has(name)) continue
@@ -249,16 +197,13 @@ const syncTarget = (
   // once in main against the deepest existing chain), compare-first so an
   // unchanged re-deploy writes nothing.
   //
-  // ORDER MATTERS — files above, manifest here, stale removal LAST. A target
-  // is often being SERVED while this mirror runs (ng serve on DCP public, the
+  // ORDER MATTERS — immutable files above, discovery manifest here, pin last.
+  // A target is often being served while this copy runs (DCP, web, or relay),
   // relay's content dir), and a reader resolves manifest → sig files with no
   // lock. Written in this order, every instant is consistent: the new files
   // land while the old manifest still points only at old files, the new
-  // manifest lands once everything it references is present, and only then do
-  // the entries nothing references anymore go. The old order removed stale
-  // sigs BEFORE the manifest swap — a reader in that window fetched a
-  // manifest that advertised just-deleted bytes, failed the install, and the
-  // installer row fossilized "No content found" (2026-08-14).
+  // manifest lands once everything it references is present. Old entries are
+  // never removed, so rollback and propagation remain possible.
   const tgtManifest = join(targetDir, MANIFEST_FILE)
   const existing = existsSync(tgtManifest) ? readFileSync(tgtManifest, 'utf8') : null
   if (existing === manifestJson) {
@@ -280,31 +225,11 @@ const syncTarget = (
     copied++
   }
 
-  // remove stale entries (signatures no longer in source) — STRICTLY
-  // whitelisted to 64-hex names so app assets sharing the target root
-  // (index.html, worker scripts, manifest.json) are untouchable. Recursive
-  // rm handles bag directories. SKIPPED for additive (persistent) pools so
-  // a rebuild never deletes user-authored or adopted content sharing the dir.
-  //
-  // RETENTION AUTHORITY IS THE MANIFEST, not dist. "Stale" means nothing
-  // advertises it — a sig referenced by ANY package in the chained manifest is
-  // live content, however old the version that references it. Pruning by dist
-  // alone deleted every historical version's bytes on the next build while the
-  // chain kept offering those versions to install, which is how a target came
-  // to advertise 23 revisions it could only serve one of.
-  if (!additive) {
-    for (const name of tgtEntries) {
-      if (!srcEntries.has(name) && !keep.has(name)) {
-        rmSync(join(targetDir, name), { recursive: true, force: true })
-        removed++
-      }
-    }
-  }
-
-  return { copied, skipped, removed, drained, healed }
+  return { copied, skipped, healed }
 }
 
 const main = () => {
+  const targets = targetsForInvocation()
   if (!existsSync(DIST_ROOT)) {
     console.error('[copy-to-dcp] dist/ not found — run build:module first')
     process.exit(1)
@@ -334,7 +259,7 @@ const main = () => {
   const localManifest = JSON.parse(readFileSync(join(DIST_ROOT, MANIFEST_FILE), 'utf8')) as ContentManifest
   let authority: ContentManifest | null = null
   let authorityScore = 0
-  for (const { dir } of TARGETS) {
+  for (const { dir } of targets) {
     const candidate = readTargetManifest(dir)
     const score = chainScore(candidate)
     if (candidate && score > authorityScore) {
@@ -349,24 +274,22 @@ const main = () => {
     console.log(`[copy-to-dcp] manifest version: v${chained.generation} '${chained.label}'${chained.minted ? '' : ' (unchanged re-deploy)'}`)
   }
 
-  // What the shipped manifest advertises — the retention set every target must
-  // be able to serve. Backfill sources are ordered additive-first: those pools
-  // never prune, so they carry the full deploy history.
+  // What the shipped manifest advertises — every target must be able to serve
+  // that closure before its pointer moves.
   const keep = advertisedSigs(chained.manifest)
-  const sourceOrder = [...TARGETS].sort((a, b) => Number(b.additive) - Number(a.additive)).map(t => t.dir)
+  const sourceOrder = targets.map(target => target.dir)
 
-  for (const { dir, additive } of TARGETS) {
+  for (const { dir, role } of targets) {
     const peers = sourceOrder.filter(d => d !== dir && existsSync(d))
-    const { copied, skipped, removed, drained, healed } = syncTarget(
+    const { copied, skipped, healed } = syncTarget(
       dir,
-      additive,
       manifestJson,
       bootstrapPinJson,
       keep,
       peers,
     )
-    console.log(`[copy-to-dcp] ${dir}${additive ? ' (additive/persistent)' : ''}`)
-    console.log(`  ${copied} copied, ${skipped} unchanged, ${removed} removed${healed ? `, ${healed} backfilled for older versions` : ''}${drained ? `, ${drained} drained from legacy dirs` : ''}`)
+    console.log(`[copy-to-dcp] ${dir} (${role}, additive heap)`)
+    console.log(`  ${copied} copied, ${skipped} unchanged, 0 removed${healed ? `, ${healed} backfilled for older versions` : ''}`)
   }
 }
 

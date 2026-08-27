@@ -89,6 +89,17 @@ const assertRatchet = (actual: string[], allowed: string[], rule: string): void 
 
 describe('doctrine ratchets', () => {
 
+  it('package publication is an additive fill and host drains are public-only', () => {
+    const publisher = stripComments(readFileSync(join(ROOT, 'hypercomb-essentials/scripts/copy-to-dcp.ts'), 'utf8'))
+    expect(publisher).not.toMatch(/\brmSync\b|\bunlinkSync\b|\brmdirSync\b|removeEntry\s*\(/)
+    expect(publisher).toContain("args.includes('--publish')")
+    expect(publisher).toContain("['rev-parse', '--path-format=absolute', '--git-common-dir']")
+
+    const hostSync = stripComments(readFileSync(join(ROOT, 'hypercomb-essentials/src/diamondcoreprocessor.com/sharing/host-sync.service.ts'), 'utf8'))
+    expect(hostSync).toContain('if (!(await this.#isPublicMarked(sig))) return')
+    expect(hostSync).not.toMatch(/targets\.push\(\{\s*domain,\s*hostHash:\s*null,\s*publicOnly:\s*false\s*\}\)/)
+  })
+
   it('the web shim never rebuilds an import-map loading path', () => {
     const files = [
       'hypercomb-web/src/index.html',
@@ -136,7 +147,6 @@ describe('doctrine ratchets', () => {
     assertRatchet(actual, [
       'hypercomb-shared/core/initializers/location-parser.ts',
       'hypercomb-shared/core/store.ts',
-      'hypercomb-essentials/scripts/copy-to-dcp.ts',
       'hypercomb-essentials/src/diamondcoreprocessor.com/assistant/structure-drop.worker.ts',
       'hypercomb-essentials/src/diamondcoreprocessor.com/clipboard/clipboard.worker.ts',
       'hypercomb-essentials/src/diamondcoreprocessor.com/commands/website-archive.queen.ts',

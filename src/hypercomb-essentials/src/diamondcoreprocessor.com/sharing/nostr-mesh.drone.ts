@@ -137,6 +137,10 @@ export class NostrMeshDrone extends Drone {
 
   private started = false
   private stopped = false
+  // A page in the back-forward cache must hold no live or connecting socket.
+  // Browsers otherwise report the expected navigation suspension as a failed
+  // WebSocket in DevTools and may evict the page from BFCache entirely.
+  private pageHidden = false
 
   private networkEnabled = this.loadNetworkEnabled()
 
@@ -171,6 +175,9 @@ export class NostrMeshDrone extends Drone {
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#initialized) {
       this.#initialized = true
+
+      window.addEventListener('pagehide', this.#onPageHide)
+      window.addEventListener('pageshow', this.#onPageShow)
 
       this.ensureStartedNow()
 
@@ -657,6 +664,7 @@ export class NostrMeshDrone extends Drone {
   private ensureSocket = (relay: string): void => {
     if (!this.networkEnabled) return
     if (this.stopped) return
+    if (this.pageHidden) return
     if (this.sockets.has(relay)) return
     if (!this.canAttemptRelay(relay)) return
 
@@ -1252,6 +1260,29 @@ export class NostrMeshDrone extends Drone {
   this.recentIds = []
   this.recentIdsSet.clear()
 }
+
+  /** Navigation/BFCache suspension is not a transport failure. Detach handlers
+   *  before closing so no backoff/reconnect is scheduled while the page is
+   *  hidden; pageshow restores the configured sockets. */
+  readonly #onPageHide = (): void => {
+    this.pageHidden = true
+    for (const [, st] of this.backoff.entries()) {
+      if (st.timer) clearTimeout(st.timer)
+      st.timer = undefined
+    }
+    for (const [url, ws] of this.sockets.entries()) {
+      try { ws.onopen = null; ws.onmessage = null; ws.onerror = null; ws.onclose = null } catch { /* ignore */ }
+      try { ws.close() } catch { /* ignore */ }
+      this.sockets.delete(url)
+      this.note('socket:pagehide', url)
+    }
+  }
+
+  readonly #onPageShow = (): void => {
+    if (!this.pageHidden) return
+    this.pageHidden = false
+    if (this.networkEnabled && !this.stopped) this.connectAll()
+  }
 
   private loadDebugFlag = (): boolean => {
     try { return localStorage.getItem('hc:nostrmesh:debug') === '1' } catch { return false }

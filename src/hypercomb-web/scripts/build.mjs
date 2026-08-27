@@ -62,6 +62,25 @@ const copyFonts = async () => {
   }
 }
 
+/** Copy shell-owned public assets, then stage exactly the CURRENT signed
+ *  package closure. `public/content` is an additive local cache and may hold
+ *  historical revisions backfilled from the host heap; shipping that whole
+ *  directory would turn an append-only server history into shell bloat. */
+const copyPublicAssets = async () => {
+  const publicRoot = join(WEB_ROOT, 'public')
+  for (const entry of await readdir(publicRoot, { withFileTypes: true })) {
+    if (entry.name === 'content') continue
+    await cp(join(publicRoot, entry.name), join(OUTPUT_ROOT, entry.name), {
+      recursive: entry.isDirectory(),
+      force: true,
+    })
+  }
+  await copyTree(
+    join(SOURCE_ROOT, 'hypercomb-essentials', 'dist'),
+    join(OUTPUT_ROOT, 'content'),
+  )
+}
+
 /**
  * Publish the content-addressed package namespace at the domain root.
  *
@@ -72,7 +91,7 @@ const copyFonts = async () => {
  * root 404 before falling back to `/content/<signature>`.
  */
 const copySignatureNamespace = async () => {
-  const bundled = join(WEB_ROOT, 'public', 'content')
+  const bundled = join(SOURCE_ROOT, 'hypercomb-essentials', 'dist')
   let entries
   try { entries = await readdir(bundled, { withFileTypes: true }) }
   catch (error) {
@@ -89,7 +108,7 @@ const copySignatureNamespace = async () => {
 }
 
 const copyStaticAssets = async () => {
-  await copyTree(join(WEB_ROOT, 'public'), OUTPUT_ROOT)
+  await copyPublicAssets()
   await copySignatureNamespace()
   await copyTree(join(SOURCE_ROOT, 'shared-public'), OUTPUT_ROOT)
   await copyTree(

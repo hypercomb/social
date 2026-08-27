@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
-import { ensureInstall } from './ensure-install'
+import { ensureInstall, resyncFromSentinel } from './ensure-install'
 
 vi.mock('@hypercomb/core', () => ({
   EffectBus: { emit: vi.fn() },
@@ -75,5 +75,69 @@ describe('ensureInstall install-state validation', () => {
       kind: 'install-needed',
       reason: 'no-writable',
     })
+  })
+})
+
+describe('resyncFromSentinel append-only heap', () => {
+  const fakeDirectory = (name: string, initial: string[]) => {
+    const files = new Set(initial)
+    const removeEntry = vi.fn(async (entry: string) => { files.delete(entry) })
+    return {
+      name,
+      files,
+      removeEntry,
+      async *entries() {
+        for (const entry of files) yield [entry, { kind: 'file' }]
+      },
+    }
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    emit.mockReset()
+    localStorage.clear()
+  })
+
+  it('advances the active manifest without deleting inactive signatures', async () => {
+    const activeBee = 'a'.repeat(64)
+    const oldBee = 'b'.repeat(64)
+    const activeDependency = 'c'.repeat(64)
+    const oldDependency = 'd'.repeat(64)
+    const activeLayer = 'e'.repeat(64)
+    const oldLayer = 'f'.repeat(64)
+
+    const bees = fakeDirectory('bees-pool', [`${activeBee}.js`, `${oldBee}.js`])
+    const dependencies = fakeDirectory('dependencies-pool', [`${activeDependency}.js`, `${oldDependency}.js`])
+    const root = fakeDirectory('root', [activeLayer, oldLayer])
+    const store = {
+      opfsAvailable: true,
+      bees,
+      dependencies,
+      hypercombRoot: root,
+    }
+    const signatureStore = { trustAll: vi.fn(), toJSON: vi.fn(() => []) }
+    vi.stubGlobal('get', vi.fn((key: string) => key === '@hypercomb/SignatureStore' ? signatureStore : store))
+
+    localStorage.setItem('sentinel.sync-signature', 'prior-sync')
+    const sentinel = {
+      sync: vi.fn(async () => ({
+        syncSig: 'next-sync',
+        enabledBees: [activeBee],
+        enabledDeps: [activeDependency],
+        enabledLayers: [activeLayer],
+        beeDeps: {},
+        files: [],
+      })),
+    }
+
+    await resyncFromSentinel(sentinel as never)
+
+    expect(bees.removeEntry).not.toHaveBeenCalled()
+    expect(dependencies.removeEntry).not.toHaveBeenCalled()
+    expect(root.removeEntry).not.toHaveBeenCalled()
+    expect(bees.files).toContain(`${oldBee}.js`)
+    expect(dependencies.files).toContain(`${oldDependency}.js`)
+    expect(root.files).toContain(oldLayer)
+    expect(localStorage.getItem('sentinel.sync-signature')).toBe('next-sync')
   })
 })

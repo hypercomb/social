@@ -11,6 +11,7 @@ import {
 } from '@hypercomb/core'
 import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
 import { checkForUpdate, upgradeFromBundled, type BootStatus } from './ensure-install'
+import { saveLocalInstallCheckpoint } from './install-checkpoint'
 
 const ELEMENT_NAME = 'hc-install-prompt'
 const CHECKPOINT_TIMEOUT_MS = 15_000
@@ -25,11 +26,11 @@ export type InstallCheckpointResult = {
 }
 
 /**
- * Freeze the installer's current logical package head before replacing the
- * local signed package. Package upgrades do not mutate hive tiles, so this is
- * the reversible state that belongs to an upgrade checkpoint. In particular,
- * it must not call SnapshotQueen from the currently-installed package: doing
- * so makes an old snapshot implementation the gate for installing its fix.
+ * Freeze the shell's active package pointer before replacing the local signed
+ * package. Package upgrades do not mutate hive tiles, so the bootstrap-owned
+ * pointer checkpoint is the reversible state that belongs to this operation.
+ * An already-connected DCP may mirror the label into installer lineage, but it
+ * is never a prerequisite: an optional service cannot gate installing its fix.
  */
 export const saveInstallRestorePoint = async (
   name: string,
@@ -53,18 +54,23 @@ export const saveInstallRestorePoint = async (
     void work.then(finish, () => finish(fallback))
   })
 
-  let bridge = host.__sentinelBridge
-  if (typeof bridge?.saveBranch !== 'function' && typeof host.__getSentinel === 'function') {
-    bridge = (await withinDeadline(host.__getSentinel(), null)) ?? undefined
-  }
-  if (typeof bridge?.saveBranch !== 'function') return { available: false, rootSig: null }
+  const checkpointName = String(name ?? '').trim()
+  const localRootSig = await saveLocalInstallCheckpoint(checkpointName)
 
-  const saveBranch = bridge.saveBranch.bind(bridge)
-  const rootSig = await withinDeadline(
-    Promise.resolve().then(() => saveBranch(String(name ?? '').trim())),
-    null,
-  )
-  return { available: true, rootSig: rootSig || null }
+  // Mirror into DCP only when the bridge is already alive. Calling
+  // __getSentinel here used to cache an early handshake timeout and made every
+  // later package upgrade fail with "restore service did not finish loading".
+  const bridge = host.__sentinelBridge
+  if (typeof bridge?.saveBranch === 'function') {
+    const saveBranch = bridge.saveBranch.bind(bridge)
+    const installerRootSig = await withinDeadline(
+      Promise.resolve().then(() => saveBranch(checkpointName)),
+      null,
+    )
+    if (installerRootSig) return { available: true, rootSig: installerRootSig }
+  }
+
+  return { available: !!localRootSig, rootSig: localRootSig }
 }
 
 const FALLBACKS: Record<string, string> = {

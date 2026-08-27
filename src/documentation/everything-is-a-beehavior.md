@@ -47,7 +47,8 @@ verified local-only layer/dependency accessors so broker reads cannot recurse
 into their own host fallback, and a missing layer starts detached self-heal
 without making render wait on the network. Bundled upgrades stage and verify
 the entire leaf closure plus each canonical sigbag before advancing the
-installed package or deleting the prior working package.
+installed package. Prior package files remain immutable in the heap; changing
+the active package is a pointer move, never a deletion pass.
 
 **Deployments are artifacts.** Nothing is ever "running" at a domain — a
 deployment is a static, signed artifact that clients import, and execution

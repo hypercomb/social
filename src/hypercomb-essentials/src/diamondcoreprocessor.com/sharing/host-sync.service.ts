@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/sharing/host-sync.service.ts
 //
-// Remote backup: signed HTTP push of committed content to the operator's
-// OWN host (e.g. jwize.com), with confirmed-read-back receipts.
+// Public replication: signed HTTP push of explicitly published content to the
+// operator's OWN host (e.g. jwize.com), with confirmed-read-back receipts.
 //
 // This is the REMOTE counterpart to PushQueueService's DCP-iframe path.
 // Same trigger (`content:wrote`) and the same crash-safe
@@ -36,14 +36,14 @@
 //   sign('host-receipts')/{sig}.{hostHash} ← per-granted-host receipt
 //
 // MULTI-TARGET DRAIN (consent-hosting.md §"Transfer"): the drain iterates a
-// LIST of targets — the operator's self-domain plus granted hosts. Phase 1
-// grants exactly one standing host: the PUBLIC content endpoint
+// LIST of public targets — the operator's self-domain plus granted hosts.
+// Phase 1 grants exactly one standing host: the PUBLIC content endpoint
 // content.jwize.com (documentation/public-content-endpoint.md — Blossom/
 // NIP-98 worker over R2), behind its own explicit opt-in
 // (localStorage['hc:public-host'] = '1'). Doctrine: swarms resolve around
-// hosts; PUBLIC content posts to the CDN; private/group content NEVER
-// touches the public endpoint. The {sig}.public marker is that gate — a
-// public-only target can only ever receive marker-carrying sigs, and
+// hosts; PUBLIC content posts to both public heaps; private/group content
+// NEVER touches either. The {sig}.public marker is that gate — every target
+// can only receive marker-carrying sigs, and
 // markers are written exclusively where the publish walk enumerates a
 // public closure. An entry leaves the queue only when EVERY currently-
 // enabled applicable target holds its receipt (crash-safe as before).
@@ -61,7 +61,7 @@
 // the signer:
 //
 //   1. localStorage['hc:nostrmesh:self-domain'] — the host to push to.
-//   2. localStorage['hc:host-sync:enabled']     — explicit opt-in flag.
+//   2. localStorage['hc:host-sync:enabled']     — explicit publication flag.
 //
 // Both off keeps the service silent: no enqueue, no timer drain, no
 // signer call. This is the gate that prevents casual visitors from
@@ -182,10 +182,9 @@ export class HostSyncService extends EventTarget {
 
   constructor() {
     super()
-    // Auto-enqueue every committed sig — gated on #isEnabled(). With the
-    // gate off, the handler exits before reaching enqueue/signer, so no
-    // permission prompt can fire. Subscription stays live so toggling the
-    // gate takes effect without reload.
+    // Observe committed sigs while a target is enabled. enqueue() applies the
+    // durable `.public` marker gate before it can retain or transmit bytes, so
+    // private commits remain local even when publication is on.
     EffectBus.on<{ sig: string; kind: HostSyncKind; bytes: ArrayBuffer }>(
       'content:wrote',
       ({ sig, kind, bytes }) => {
@@ -193,9 +192,8 @@ export class HostSyncService extends EventTarget {
         void this.enqueue(sig, kind, bytes)
       }
     )
-    // Periodic retry — skipped while BOTH gates are off so the signer is
-    // never invoked for an un-opted-in visitor. (Each gate — self-domain
-    // backup and the public CDN — is its own explicit opt-in.)
+    // Periodic retry — skipped while BOTH publication targets are off so the
+    // signer is never invoked for an un-opted-in visitor.
     setInterval(() => {
       if (!this.#anyEnabled()) return
       void this.drain()
@@ -205,9 +203,9 @@ export class HostSyncService extends EventTarget {
   /** True iff the operator has both opted in AND configured a self-domain. */
   public readonly isEnabled = (): boolean => this.#isEnabled()
 
-  /** Turn host backup on. Optionally set the self-domain in the same call.
+  /** Turn self-domain publication on. Optionally set the domain in the same call.
    *  Effect is immediate — no reload required. Caller is responsible for
-   *  showing the user a clear "we will sign each backup to <domain>" dialog
+   *  showing the user a clear "we will publish marked content to <domain>" dialog
    *  BEFORE invoking this.
    *
    *  You own the host: writes go to the host's flat sig heap and require your
@@ -227,7 +225,7 @@ export class HostSyncService extends EventTarget {
     void this.drain()
   }
 
-  /** Turn host backup off. Existing queued entries stay on disk (not
+  /** Turn self-domain publication off. Existing queued entries stay on disk (not
    *  destructive); they resume draining if the gate is flipped back on. */
   public readonly disable = (): void => {
     try { localStorage.setItem(ENABLED_KEY, 'false') } catch { /* ignore */ }
@@ -305,11 +303,16 @@ export class HostSyncService extends EventTarget {
   // public API
   // -------------------------------------------------
 
-  /** Queue a sig for remote backup. Idempotent (keyed by {sig}.{kind});
+  /** Queue a sig for public replication. Idempotent (keyed by {sig}.{kind});
    *  skipped entirely if already receipted. Stores the bytes in the queue
    *  file so drain is self-contained and crash-safe. */
   public readonly enqueue = async (sig: string, kind: HostSyncKind, bytes: ArrayBuffer): Promise<void> => {
     if (!SIG_RE.test(sig)) return
+    // HARD EXPOSURE BOUNDARY. A self-domain is still a public HTTP origin:
+    // content addressing authenticates bytes but does not make them secret.
+    // Therefore neither the queue nor its closure walk may retain a private
+    // commit. markPublic writes this durable marker first, then calls enqueue.
+    if (!(await this.#isPublicMarked(sig))) return
     // CLOSURE WALK — runs even when this layer is already receipted: a
     // receipt proves THIS sig serves, not its refs. The doctrine is
     // "push set = the root's transitive closure minus what the host
@@ -336,7 +339,7 @@ export class HostSyncService extends EventTarget {
     void this.drain()
   }
 
-  /** The currently-enabled drain destinations: the operator's self-domain
+  /** The currently-enabled public drain destinations: the operator's self-domain
    *  (when configured AND opted in) plus the public CDN target (behind its
    *  own gate). Empty when everything is off. Future consent-granted hosts
    *  (30411 records) append here with their own scoping. */
@@ -344,7 +347,7 @@ export class HostSyncService extends EventTarget {
     const targets: SyncTarget[] = []
     if (this.#isEnabled()) {
       const domain = this.#hostBase()
-      if (domain) targets.push({ domain, hostHash: null, publicOnly: false })
+      if (domain) targets.push({ domain, hostHash: null, publicOnly: true })
     }
     if (this.#publicHostEnabled()) {
       targets.push({
@@ -571,11 +574,9 @@ export class HostSyncService extends EventTarget {
    *  private stops FUTURE closures (new sigs, new markers) — bytes already
    *  read back from the CDN are public by then; the CDN has no delete.
    *
-   *  Also re-ENQUEUES held bytes: an entry drained to the self-domain
-   *  before the public gate came on was removed from the queue, so marking
-   *  must restage it for the public target (enqueue is idempotent and
-   *  skips anything already fully receipted). Inert without the
-   *  hc:public-host opt-in.
+   *  Also re-ENQUEUES held bytes: publication classification and transport
+   *  are separate. The marker is durable even while every host target is off;
+   *  enabling either target later drains the already-marked closure.
    *
    *  `closure` (PRIVACY-CRITICAL): true = the caller vouches the WHOLE
    *  subtree is public (a public-BRANCH root — isBranchPublic), so the walk
@@ -585,7 +586,6 @@ export class HostSyncService extends EventTarget {
    *  recurses into `cells`/`layers`/`children` — a tile-only public tile
    *  must never mark its private descendants' layers. */
   public readonly markPublic = async (sig: string, kind: HostSyncKind = 'layer', closure = true): Promise<void> => {
-    if (!this.#publicHostEnabled()) return
     const s = String(sig ?? '').trim().toLowerCase()
     if (!SIG_RE.test(s)) return
     // Walk dedup: a completed full-closure walk (bare `s`) covers both
