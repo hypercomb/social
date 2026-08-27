@@ -2358,6 +2358,26 @@ export class HistoryService {
    *  re-hash/re-write of an individual node; this guards the walk itself. */
   readonly #sealByEpoch = new Map<string, { epoch: number; sealedSig: string | null }>()
 
+  /** Exact reason the most recent seal refused. Snapshot surfaces this instead
+   *  of collapsing structural corruption and a remote miss into "visit it". */
+  public lastSealFailure: {
+    path: string[]
+    reason: 'invalid-location' | 'head-unresolvable' | 'child-unresolvable' | 'child-name-missing' | 'cycle'
+    signature?: string
+  } | null = null
+
+  readonly #refuseSeal = (
+    segments: readonly string[],
+    reason: NonNullable<HistoryService['lastSealFailure']>['reason'],
+    signature?: string,
+  ): null => {
+    if (!this.lastSealFailure) {
+      this.lastSealFailure = { path: [...segments], reason, ...(signature ? { signature } : {}) }
+      console.warn('[history] sealSubtree refused', this.lastSealFailure)
+    }
+    return null
+  }
+
   /**
    * Seal a tile's subtree into a merkle-correct root sig for SHARING, WITHOUT
    * touching history. Under leaf-only commit (per-page history — the cascade is
@@ -2383,15 +2403,19 @@ export class HistoryService {
    * resolved right now (a cold / unpooled child) so the caller shares the live
    * sig rather than a lossy seal. Memoised per location by (headSig + children)
    * so an unchanged subtree re-seals in O(nodes) map hits with no re-hash /
-   * re-write; `visited` guards against corrupt cycles.
+   * re-write; `activeLayers` is a recursion-stack guard against corrupt content
+   * cycles. It is deliberately NOT a global visited set: the same immutable
+   * layer can be shared or accidentally repeated by siblings without being a
+   * cycle, and treating that normal DAG shape as one made whole-hive snapshots
+   * fail forever.
    */
   public readonly sealSubtree = async (
     segments: readonly string[],
-    visited: Set<string> = new Set(),
+    activeLayers: Set<string> = new Set(),
   ): Promise<string | null> => {
+    if (activeLayers.size === 0) this.lastSealFailure = null
     const locSig = await this.sign({ explorerSegments: () => [...segments] })
-    if (!locSig || visited.has(locSig)) return null
-    visited.add(locSig)
+    if (!locSig) return this.#refuseSeal(segments, 'invalid-location')
 
     // EPOCH SHORT-CIRCUIT. A seal is a pure function of the subtree's live
     // heads, so while no head has moved the previous answer is still the
@@ -2415,10 +2439,24 @@ export class HistoryService {
     let headSig = this.#headSigFor(locSig) ?? null
     if (!head) {
       const required = await this.#resolveRequiredHead(locSig)
-      if (!required) return null
+      if (!required) {
+        return this.#refuseSeal(segments, 'head-unresolvable', this.#headSigFor(locSig))
+      }
       head = required.head
       headSig = required.headSig
     }
+
+    // Content cycles are detected by the resolved immutable layer signature,
+    // not by location. Location sigs always grow with the path and therefore
+    // cannot detect A -> A -> A; a global location set also falsely rejected a
+    // repeated sibling. Keep only the current recursion stack.
+    const activeIdentity = headSig ?? locSig
+    if (activeLayers.has(activeIdentity)) {
+      return this.#refuseSeal(segments, 'cycle', activeIdentity)
+    }
+    activeLayers.add(activeIdentity)
+
+    try {
 
     // A location's DIRECT children are authoritative at its own head (adding,
     // removing or renaming a direct child re-commits THIS head). Seal each child
@@ -2437,10 +2475,12 @@ export class HistoryService {
     const childSigs = Array.isArray(head.children) ? head.children : []
     const sealedChildren: string[] = []
     for (const cs of childSigs) {
-      const child = await this.#resolveRequiredLayer(String(cs))
+      const childSig = String(cs)
+      const child = await this.#resolveRequiredLayer(childSig)
+      if (!child) return this.#refuseSeal(segments, 'child-unresolvable', childSig)
       const name = (child?.name ?? '').trim()
-      if (!name) return null // cold / unresolvable child — refuse a lossy seal
-      const sealed = await this.sealSubtree([...segments, name], visited)
+      if (!name) return this.#refuseSeal(segments, 'child-name-missing', childSig)
+      const sealed = await this.sealSubtree([...segments, name], activeLayers)
       if (!sealed) return null
       if (sealed === String(cs)) { sealedChildren.push(sealed); continue }
       const childLoc = await this.sign({ explorerSegments: () => [...segments, name] })
@@ -2477,6 +2517,9 @@ export class HistoryService {
     await HistoryService.#poolWriteLayer(sig, bytes)
     this.#sealCache.set(locSig, { key, sealedSig: sig })
     return remember(sig)
+    } finally {
+      activeLayers.delete(activeIdentity)
+    }
   }
 
   /** Canonicalize → encode → sha256 a layer, exactly as commitLayer does, but
