@@ -1,7 +1,8 @@
 // diamondcoreprocessor.com/sharing/image-choice.drone.ts
 //
 // THE IMAGE HIVE — every picture the room is carrying for one fixed-name pool,
-// laid out as ordinary tiles. Click one and it becomes your root default.
+// laid out as ordinary tiles. A Portal/root pick becomes the root default; an
+// ordinary reference pick becomes that reference's local override.
 //
 // In a swarm everybody brings their own image for the same root name. Clicking
 // the images icon from ANY lineage appearance replaces the mesh with a hive of
@@ -11,8 +12,8 @@
 // out on the SAME axial matrix a real layer uses, at full size, so the choice
 // looks like the hive it came from — not like a dialog over it.
 //
-//   CLICK a tile → that picture becomes your /<name> default. One revision,
-//                  undoable; ordinary references inherit it.
+//   CLICK a tile → through Portal/root: /<name> future default;
+//                  through a reference: that appearance's override only.
 //   ESC / empty  → everything snaps back. Nothing was written.
 //
 // The hive is hidden through `render:set-hive-visible`, the same takeover
@@ -46,7 +47,9 @@ import {
   readTilePropsIndex,
   writeTilePropertiesAt,
 } from '../editor/tile-properties.js'
+import { referenceEditsRootDefaultForLabel } from '../commands/decoration-kind-index.js'
 import { canonicalPeerImageCandidates, previewSigOf, type PeerImageCandidate, type PeerImageProps } from './peer-images.js'
+import { imageChoiceWriteTargets } from './image-choice-targets.js'
 
 type Axial = { q: number; r: number }
 
@@ -400,10 +403,10 @@ export class ImageChoiceDrone extends Drone {
     return names.length <= 2 ? names.join(', ') : `${names[0]} +${names.length - 1}`
   }
 
-  /** The image pointers already on the participant's own tile, read from the
-   *  canonical ROOT properties slot with the selected lineage as a legacy
-   *  fallback. A reference appearance and `/<name>` therefore agree on what
-   *  "yours" means. */
+  /** The image pointers already selected on the surface being edited. A
+   *  Portal/root surface reads `/<name>`; an ordinary reference reads only its
+   *  own appearance override. A later root-default change must not silently
+   *  become "mine" for an existing reference. */
   async #myImageProps(label: string): Promise<PeerImageProps | undefined> {
     const pointers = (props: Record<string, unknown> | null): PeerImageProps | undefined => {
       if (!props) return undefined
@@ -420,12 +423,17 @@ export class ImageChoiceDrone extends Drone {
     }
 
     try {
-      const canonical = pointers(await readTilePropertiesAt([], label))
-      if (canonical) return canonical
-      const legacyLocal = pointers(await readTilePropertiesAt(this.#segments, label))
-      if (legacyLocal) return legacyLocal
-      const key = await cellLocationSig(this.#segments, label)
-      const sig = readTilePropsIndex()[key] ?? readTilePropsIndex()[label]
+      const editsRoot = this.#segments.length === 0
+        || referenceEditsRootDefaultForLabel(label)
+      const parentSegments = editsRoot ? [] : this.#segments
+      const selected = pointers(await readTilePropertiesAt(parentSegments, label))
+      if (selected) return selected
+      const key = await cellLocationSig(parentSegments, label)
+      const index = readTilePropsIndex()
+      // A bare-label cache cannot prove which same-name appearance it belongs
+      // to. Keep it only as the ordinary legacy fallback; never let it choose a
+      // Portal/root default.
+      const sig = index[key] ?? (editsRoot ? undefined : index[label])
       if (!sig) return undefined
       const blob = await this.#store()?.getResource?.(sig)
       return blob ? pointers(JSON.parse(await blob.text())) : undefined
@@ -460,9 +468,10 @@ export class ImageChoiceDrone extends Drone {
 
   /**
    * Wear this picture. Pulls every pointer's bytes first — a picture nobody
-   * can serve must not become your tile — then writes ONE revision on the
-   * canonical root carrying the new pointers. It drops the old full-size
-   * original (a peer publishes hex thumbnails only, so keeping it would leave
+   * can serve must not become your tile — then writes either the canonical
+   * root default (Portal/root) or the clicked reference override (ordinary
+   * lineage). It drops the old full-size original (a peer publishes hex
+   * thumbnails only, so keeping it would leave
    * the lightbox showing a picture the tile no longer wears) and the substrate
    * default mark (a picture you chose on purpose is not filler).
    */
@@ -480,35 +489,44 @@ export class ImageChoiceDrone extends Drone {
       }
 
       // The click may originate on any lineage appearance. Ensure the fixed
-      // root exists, then dress THAT root so every reference inherits one
-      // participant-chosen default. A lineage-local face is a separate,
-      // explicit decoration contract and is never implied by this gesture.
+      // root exists, then route by the same rule as edit/attach/format: a
+      // Portal/root gesture writes the future default, while an ordinary
+      // reference writes only its local override. No sibling appearance is
+      // addressed.
       const referenceService = window.ioc.get<CanonicalReferenceService>(CANONICAL_REFERENCE_SERVICE_KEY)
       // Choosing is not an import operation, so it must not register the
       // clicked reference layer itself as another semantic variant.
       const root = await referenceService?.ensureRoot(label, null)
       if (referenceService && !root) throw new Error(`canonical root unavailable for ${label}`)
       const rootName = root?.name ?? label
-      const rootParentSegments: string[] = []
+      const targets = imageChoiceWriteTargets(
+        this.#segments,
+        rootName,
+        referenceEditsRootDefaultForLabel(label),
+      )
+      for (const target of targets) {
+        const existing = await readTilePropertiesAt(target.parentSegments, target.cell)
+        const updates: Record<string, unknown> = {
+          small: choice.props.small,
+          flat: choice.props.flat,
+          point: choice.props.point,
+          imageSig: choice.props.imageSig,
+          large: undefined,
+          substrate: undefined,
+        }
+        const oldLarge = ((existing['large'] as { image?: string } | undefined)?.image) ?? ''
+        if (oldLarge && existing['link'] === `${RESOURCE_URL_PREFIX}${oldLarge}`) {
+          updates['link'] = undefined
+        }
 
-      const existing = await readTilePropertiesAt(rootParentSegments, rootName)
-      const updates: Record<string, unknown> = {
-        small: choice.props.small,
-        flat: choice.props.flat,
-        point: choice.props.point,
-        imageSig: choice.props.imageSig,
-        large: undefined,
-        substrate: undefined,
+        // The props index follows via the central layer-keyed seed inside
+        // writeTilePropertiesAt — no location-keyed write.
+        await writeTilePropertiesAt(target.parentSegments, target.cell, updates)
+        this.emitEffect('tile:saved', {
+          cell: target.cell,
+          segments: target.parentSegments,
+        })
       }
-      const oldLarge = ((existing['large'] as { image?: string } | undefined)?.image) ?? ''
-      if (oldLarge && existing['link'] === `${RESOURCE_URL_PREFIX}${oldLarge}`) updates['link'] = undefined
-
-      // The props index follows via the central layer-keyed seed inside
-      // writeTilePropertiesAt — no location write (Phase C sweep,
-      // visuals-across-lineages.md).
-      await writeTilePropertiesAt(rootParentSegments, rootName, updates)
-
-      this.emitEffect('tile:saved', { cell: rootName, segments: rootParentSegments })
     } catch (err) {
       console.warn('[image-choice] apply failed', err)
       this.emitEffect('toast:show', { type: 'warning', message: this.#t('images.failed', 'That picture could not be fetched — nothing changed.') })

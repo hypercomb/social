@@ -14,9 +14,17 @@ import { CanonicalReferenceServiceImpl } from './canonical-reference.service.js'
 type Layer = { name?: string; children?: string[]; [key: string]: unknown }
 
 const hex = (seed: string): string => {
-  let out = ''
-  for (let i = 0; i < 64; i++) out += ((seed.charCodeAt(i % Math.max(seed.length, 1)) + i) % 16).toString(16)
-  return out
+  // Eight independently salted FNV lanes. The earlier character-cycle fake
+  // collided when a root layer and its appearance shared a long notes sig,
+  // overwriting the fixture's content map and manufacturing a root-clobber
+  // that a real SHA-256 store cannot produce.
+  return Array.from({ length: 8 }, (_, salt) => {
+    let hash = (0x811c9dc5 ^ Math.imul(salt + 1, 0x9e3779b1)) >>> 0
+    for (let i = 0; i < seed.length; i++) {
+      hash = Math.imul(hash ^ seed.charCodeAt(i), 0x01000193) >>> 0
+    }
+    return hash.toString(16).padStart(8, '0')
+  }).join('')
 }
 
 class FakeHistory {
@@ -216,6 +224,48 @@ describe('CanonicalReferenceService', () => {
       await history.sign({ explorerSegments: () => ['sets', 'people'] }),
     )
     expect(portal).toEqual({ name: 'people', decorations: [expect.any(String)] })
+  })
+
+  it('gives /people, /somewhere/people, and /business/people one primitive root', async () => {
+    const service = new CanonicalReferenceServiceImpl()
+    await expect(service.place({
+      name: 'people', sourceSegments: ['nest', 'people'], parentSegments: ['somewhere'],
+    })).resolves.toBe('people')
+    await expect(service.place({
+      name: 'people', sourceSegments: ['nest', 'people'], parentSegments: ['business'],
+    })).resolves.toBe('people')
+
+    const rootAddress = await history.sign({ explorerSegments: () => ['people'] })
+    expect(written).toHaveLength(2)
+    for (const record of written as Array<{
+      kind?: string
+      payload?: { targetSegments?: string[]; targetSig?: string }
+    }>) {
+      expect(record.kind).toBe('reference')
+      expect(record.payload?.targetSegments).toEqual(['people'])
+      expect(record.payload?.targetSig).toBe(rootAddress)
+    }
+
+    const root = await history.currentLayerAt(rootAddress)
+    const somewhere = await history.currentLayerAt(
+      await history.sign({ explorerSegments: () => ['somewhere', 'people'] }),
+    )
+    const business = await history.currentLayerAt(
+      await history.sign({ explorerSegments: () => ['business', 'people'] }),
+    )
+    // The subtree remains whole at the root. Both appearances reuse the
+    // immutable detail sigs but carry no copied child structure.
+    expect(root).toMatchObject({
+      name: 'people', notes: ['1'.repeat(64)], children: [expect.any(String)],
+    })
+    expect(somewhere).toMatchObject({
+      name: 'people', notes: ['1'.repeat(64)], properties: ['3'.repeat(64)],
+    })
+    expect(business).toMatchObject({
+      name: 'people', notes: ['1'.repeat(64)], properties: ['3'.repeat(64)],
+    })
+    expect(somewhere).not.toHaveProperty('children')
+    expect(business).not.toHaveProperty('children')
   })
 
   it('does not repaint an existing jaime appearance when another jaime is added', async () => {

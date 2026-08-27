@@ -101,6 +101,7 @@ export const buildReferencePayload = (opts: {
   targetSig?: string
   requiredMarks?: readonly string[]
   requiredBouquet?: string
+  editsRootDefault?: boolean
 }): Record<string, unknown> => {
   const name = String(opts.targetSegments[opts.targetSegments.length - 1] ?? '')
   return buildCanonicalReferencePayload({ name, ...opts })
@@ -124,6 +125,7 @@ export const buildReferenceRecord = (opts: {
   targetSig?: string
   requiredMarks?: readonly string[]
   requiredBouquet?: string
+  editsRootDefault?: boolean
 }): Record<string, unknown> => {
   const name = String(opts.targetSegments[opts.targetSegments.length - 1] ?? '')
   return buildCanonicalReferenceRecord({ name, ...opts })
@@ -142,6 +144,7 @@ type ReferencePayloadShape = {
   targetSig?: unknown
   requiredMarks?: unknown
   requiredBouquet?: unknown
+  editsRootDefault?: unknown
 }
 
 export class RequiresQueenBee extends QueenBee {
@@ -332,7 +335,15 @@ export class RequiresQueenBee extends QueenBee {
     // declared as the record's resource closure so the demand can still be
     // expanded after a share or an adopt.
     const record = buildCanonicalReferenceRecord({
-      name, targetSig: root.targetSig, requiredMarks: marks, requiredBouquet: bouquet,
+      name,
+      targetSig: root.targetSig,
+      requiredMarks: marks,
+      requiredBouquet: bouquet,
+      // A requirements edit is also the lazy grammar migration. Preserve an
+      // explicit Portal-authoring marker and stamp it onto pre-marker rows in
+      // the reserved /sets inventory instead of silently downgrading them.
+      editsRootDefault: current.editsRootDefault === true
+        || (segments.length === 2 && segments[0] === 'sets'),
     })
 
     try {

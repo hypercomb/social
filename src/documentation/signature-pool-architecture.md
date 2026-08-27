@@ -148,6 +148,10 @@ click /project-a/people
   -> gather every participant variant named "people"
   -> dedupe equal image-pointer sets
   -> show the candidates with publisher provenance
+  -> explicit pick writes /project-a/people's local override
+
+click the Portal inventory row for people
+  -> the same pool/candidates
   -> explicit pick writes the participant's /people root default
 ```
 
@@ -156,6 +160,10 @@ depend on whether the participant happened to visit `/` earlier. Image bytes
 are fetched only for preview/selection and verified by signature. Choosing an
 image is one normal, undoable root revision. Existing appearances retain their
 selected image; the new root image is offered to, and seeds, later activations.
+An Image Hive pick through a Portal/root surface writes that root default. A
+pick through an ordinary reference writes only the clicked appearance's local
+override; the reference still points at the same root and every sibling
+appearance remains unchanged.
 
 Pasting or adopting a same-identity item is **arrival, not selection**. In a
 live swarm it adds the participant's local head to the existing participant
