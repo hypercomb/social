@@ -636,6 +636,10 @@ function tryServeContent(req, res) {
   let urlPath
   try { urlPath = decodeURIComponent((req.url || '').split('?')[0]) } catch { return false }
   if (!urlPath || urlPath === '/') return false
+  // Receipt documents contain private, capability-like signatures. They are
+  // reachable only through authenticated /receipts, never through the legacy
+  // generic content-directory fallback below.
+  if (urlPath === '/.receipts' || urlPath.startsWith('/.receipts/')) return false
 
   let resolved
   let contentType

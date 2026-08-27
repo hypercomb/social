@@ -41,6 +41,7 @@ test('authenticated replication is private, asynchronous, and receipted', { time
       await new Promise(resolve => setTimeout(resolve, 50))
     }
     assert.equal((await fetch(`${base}/receipts`)).status, 401)
+    assert.equal((await fetch(`${base}/.receipts/${getPublicKey(secret)}.json`)).status, 404)
     const body = Buffer.from(JSON.stringify({ signature, sources: [`http://127.0.0.1:${sourcePort}`] }))
     const accepted = await fetch(`${base}/replicate`, { method: 'POST', body, headers: { Authorization: auth(secret, `${base}/replicate`, 'POST', body), 'Content-Type': 'application/json' } })
     assert.equal(accepted.status, 202)
