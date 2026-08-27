@@ -31,7 +31,12 @@
 // Shell-level: every write goes through an IoC-resolved essentials service (the
 // sanctioned route the command line uses). Never imports essentials.
 
-import { EffectBus, hypercomb, isPoolAddress } from '@hypercomb/core'
+import {
+  CANONICAL_REFERENCE_SERVICE_KEY,
+  EffectBus,
+  hypercomb,
+  type CanonicalReferenceService,
+} from '@hypercomb/core'
 import {
   registerAggregateSource,
   type AddedRows, type AggregateItem, type AggregateSource, type StagedEntry,
@@ -295,10 +300,9 @@ class CollectionsSource implements AggregateSource {
       if (!entry.segments.length) continue                       // the hive root is not a member
       if (!into && this.#entries.some(e => e.name === entry.label)) continue   // already indexed
       if (segmentsEqual(entry.segments, parent)) continue        // never reference yourself
-      EffectBus.emit('cell:added', { cell: entry.label, segments: parent, viaUpdate: true })
       const name = await dropReferenceTile(
         { key: entry.label, label: entry.label, segments: entry.segments }, parent)
-      if (name) written.push({ key: name, label: name, segments: entry.segments })
+      if (name) written.push({ key: name, label: name, segments: [name] })
     }
     if (!written.length) return
     await new hypercomb().act()
@@ -348,68 +352,21 @@ class CollectionsSource implements AggregateSource {
     }
   }
 
-  /** Make — or LINK — a collection from a typed name: the + on the search field.
-   *
-   *  ── SAME NAME = SAME TILE ────────────────────────────────────────────────
-   *  One name names one tile; that convention is what lets folders be SHARED
-   *  and filtered by pheromones instead of copied. So the + resolves the name
-   *  against the hive FIRST: if a tile already answers to it anywhere in the
-   *  tree, the row simply references THAT tile, wherever it lives — nothing is
-   *  minted, nothing changes, walking in lands on its real children. (Before
-   *  this, the + always resolved to the top-level `/<name>`: typing the name of
-   *  a NESTED folder minted a fresh empty root beside it and the row opened
-   *  onto nothing.)
-   *
-   *  Only when nothing answers to the name does it mint, and then exactly as
-   *  before — two writes, in this order:
-   *    1. the ROOT itself — one marker in `sign([name])`'s own bag, so `/<name>`
-   *       is a real place with a head rather than a path nothing has ever
-   *       written to. It is PARENTLESS by construction: a single-segment
-   *       location has no parent to be a child of.
-   *    2. a reference to it under `sets/`, through the SAME dropReferenceTile
-   *       every other way into this index uses — so nothing downstream can tell
-   *       a created collection from an adopted one.
-   *
-   *  A name already in the index is a no-op: the row you asked for is there. */
+  /** Make a fixed-name canonical root and its Portal inventory appearance. */
   async create(name: string): Promise<AddedRows> {
     const cell = name.trim()
     if (!cell || this.#entries.some(e => e.name === cell)) return
-    const h = history()
-    if (!h?.sign || !h.commitLayer) return
-
-    // Link an existing tile before ever considering a mint. Shallowest match
-    // wins — the BFS returns the first, which is the one the participant sees.
-    let target = await this.#findByName(cell)
-
-    if (!target) {
-      const rootSig = await h.sign({ explorerSegments: () => [cell] }).catch(() => '')
-      if (!rootSig) return
-      // A bare-word pool of meaning shares this exact address (see
-      // pool-bag-collision.spec in essentials) — committing here would write
-      // history markers INTO the pool. Refuse; throwing keeps the typing in
-      // the field rather than clearing it over a silent no-op.
-      if (await isPoolAddress(rootSig)) {
-        throw new Error(`"${cell}" is a pool address — it can never be a collection`)
-      }
-      // Don't overwrite a root that already exists — /<name> may be a detached
-      // page the participant already has (created here, later removed from the
-      // index); this only needs to guarantee it EXISTS. COLD is not ABSENT: a
-      // head that merely hasn't warmed yet must not be buried under a bare
-      // {name} snapshot — that is how a collection "vanishes". Throw so the
-      // typing survives for a retry.
-      const stats: { cold?: boolean } = {}
-      const existing = await h.currentLayerAt(rootSig, stats).catch(() => null)
-      if (!existing && stats.cold) throw new Error('history is still warming — try again')
-      if (!existing) await h.commitLayer(rootSig, { name: cell })
-      target = [cell]
-    }
-
-    EffectBus.emit('cell:added', { cell, segments: [SETS], viaUpdate: true })
-    const added = await dropReferenceTile({ key: cell, label: cell, segments: target }, [SETS])
+    const references = ioc()?.get(CANONICAL_REFERENCE_SERVICE_KEY) as CanonicalReferenceService | undefined
+    const added = await references?.place({
+      name: cell,
+      sourceSegments: null,
+      parentSegments: [SETS],
+      editsRootDefault: true,
+    })
     if (!added) return
     await new hypercomb().act()
     await this.#syncCursorToHead()
-    return [{ key: added, label: added, segments: target }]
+    return [{ key: added, label: added, segments: [added] }]
   }
 
   /** WHERE a tile answering to `cell` already lives, or null.

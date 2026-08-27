@@ -29,7 +29,13 @@
 // forbidden, so the decoration record is composed here to the same shape
 // `reference.queen.ts` writes.
 
-import { EffectBus, hypercomb } from '@hypercomb/core'
+import {
+  CANONICAL_REFERENCE_SERVICE_KEY,
+  EffectBus,
+  canonicalReferenceName,
+  hypercomb,
+  type CanonicalReferenceService,
+} from '@hypercomb/core'
 import type { AggregateItem } from './aggregate-source'
 
 /** The `drop:target` payload emitted by tile-overlay.drone while dragging. */
@@ -45,34 +51,19 @@ export interface DropTarget {
 /** Mirrors REFERENCE_DECORATION_KIND in essentials
  *  (commands/decoration-kind-index.ts). A string constant, not an import —
  *  shared must not reach into essentials. */
-const REFERENCE_KIND = 'reference'
 const TAG_KIND = 'tag'
 /** Mirrors CONTEXT_DECORATION_KIND — a place whose material belongs in any
  *  language-model request made about the tile carrying it. */
 const CONTEXT_KIND = 'context'
 
-const BACKSLASH = String.fromCharCode(92)
-
 /** Names become path segments — drop separators and control characters
  *  (mirrors the UNSAFE_CELL_NAME guard in essentials). */
-export const safeCellName = (raw: string): string =>
-  [...(raw ?? '')].filter(ch => ch !== '/' && ch !== BACKSLASH && ch.charCodeAt(0) > 31).join('').trim()
+export const safeCellName = canonicalReferenceName
 
 const ioc = (): { get(k: string): unknown } | undefined =>
   (globalThis as { ioc?: { get(k: string): unknown } }).ioc
 
 type StoreLike = { putResource(blob: Blob, options?: { emit?: boolean }): Promise<string> }
-type HistoryLike = {
-  sign(l: { explorerSegments?: () => readonly string[] }): Promise<string>
-  currentLayerAt(sig: string): Promise<Record<string, unknown> | null>
-  commitLayer(locationSig: string, layer: Record<string, unknown>): Promise<string>
-}
-type CommitterLike = {
-  commitChildrenDeltas?: (
-    segments: readonly string[],
-    deltas: { appends?: readonly string[] },
-  ) => Promise<unknown>
-}
 
 /** A reference's payload.
  *
@@ -135,43 +126,20 @@ export const dropReferenceTile = async (
   parentSegments: readonly string[],
   requiredMarks?: readonly string[],
 ): Promise<string | null> => {
-  const store = ioc()?.get('@hypercomb.social/Store') as StoreLike | undefined
-  const history = ioc()?.get('@diamondcoreprocessor.com/HistoryService') as HistoryLike | undefined
-  const committer = ioc()?.get('@diamondcoreprocessor.com/LayerCommitter') as CommitterLike | undefined
-  if (!store?.putResource || !history?.sign || !committer?.commitChildrenDeltas) return null
+  const references = ioc()?.get(CANONICAL_REFERENCE_SERVICE_KEY) as CanonicalReferenceService | undefined
+  if (!references?.place) return null
 
-  const name = safeCellName(item.label)
+  // Display titles are not identity. Prefer the source route's leaf.
+  const name = safeCellName(item.segments[item.segments.length - 1] ?? item.label)
   if (!name) return null
 
-  const payload: ReferencePayload = { targetSegments: [...item.segments] }
-  // Sorted, deduped, blanks dropped, and OMITTED when empty. This is a contract,
-  // not formatting: the record is content-addressed, so two references demanding
-  // the same things in a different order would otherwise mint different sigs and
-  // stop deduplicating, and an emptied demand has to be byte-identical to a
-  // reference that never carried one. `buildReferencePayload` in
-  // requires.queen.ts is the same rule; it cannot be imported here because it
-  // lives in essentials and shared may never import essentials — folding the two
-  // together needs it promoted to core.
-  const marks = [...new Set((requiredMarks ?? []).map(m => String(m ?? '').trim()).filter(Boolean))].sort()
-  if (marks.length) payload.requiredMarks = marks
-
   try {
-    // The target's LINEAGE signature — its bag address, resolved the same way
-    // every location is. Never a content hash: that would be a copy.
-    const targetSig = await history.sign({ explorerSegments: () => [...item.segments] })
-    if (targetSig) payload.targetSig = targetSig
-
-    const record = { kind: REFERENCE_KIND, appliesTo: [] as string[], payload }
-    const decorationSig = await store.putResource(
-      new Blob([JSON.stringify(record)], { type: 'application/json' }))
-
-    const childSegments = [...parentSegments, name]
-    const childSig = await history.sign({ explorerSegments: () => childSegments })
-    const childMarkerSig = await history.commitLayer(childSig, { name, decorations: [decorationSig] })
-    EffectBus.emit('decorations:changed', { segments: childSegments, op: 'append', sig: decorationSig })
-
-    await committer.commitChildrenDeltas(parentSegments, { appends: [childMarkerSig] })
-    return name
+    return await references.place({
+      name,
+      sourceSegments: item.segments,
+      parentSegments,
+      requiredMarks,
+    })
   } catch {
     return null
   }
@@ -213,14 +181,17 @@ export const dropContextOnTile = async (
   tileSegments: readonly string[],
 ): Promise<boolean> => {
   const store = ioc()?.get('@hypercomb.social/Store') as StoreLike | undefined
-  const history = ioc()?.get('@diamondcoreprocessor.com/HistoryService') as HistoryLike | undefined
   if (!store?.putResource || !item.segments.length) return false
 
-  const payload: ReferencePayload = { targetSegments: [...item.segments] }
+  const references = ioc()?.get(CANONICAL_REFERENCE_SERVICE_KEY) as CanonicalReferenceService | undefined
+  const name = safeCellName(item.segments[item.segments.length - 1] ?? item.label)
+  if (!references?.ensureRoot || !name) return false
   try {
-    if (history?.sign) {
-      const targetSig = await history.sign({ explorerSegments: () => [...item.segments] })
-      if (targetSig) payload.targetSig = targetSig
+    const root = await references.ensureRoot(name, item.segments)
+    if (!root) return false
+    const payload: ReferencePayload = {
+      targetSegments: [...root.segments],
+      targetSig: root.targetSig,
     }
     // appliesTo:[] so the same place attached to two tiles dedups to ONE sig —
     // the same economy every other decoration here gets.
@@ -243,7 +214,7 @@ export const dropContextOnTile = async (
         withSummaries?: (branches: readonly unknown[]) => Promise<string[]>
       } | undefined
       if (tileContext?.resolve) {
-        const branches = await tileContext.resolve([...item.segments])
+        const branches = await tileContext.resolve([...root.segments])
         // Through the IoC seam, never by path: this file is SHELL, and shell
         // may never import a module. It is also the only way the call can
         // survive the web shell, where essentials is loaded from OPFS at

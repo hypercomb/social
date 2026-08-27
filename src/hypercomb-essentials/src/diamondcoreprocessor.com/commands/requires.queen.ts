@@ -51,7 +51,15 @@
 // nothing, and the portal silently admits everything — a filter that fails
 // OPEN, which is the one failure mode a requirement must never have.
 
-import { QueenBee, EffectBus } from '@hypercomb/core'
+import {
+  CANONICAL_REFERENCE_SERVICE_KEY,
+  QueenBee,
+  EffectBus,
+  buildCanonicalReferencePayload,
+  buildCanonicalReferenceRecord,
+  normalizeReferenceMarks,
+  type CanonicalReferenceService,
+} from '@hypercomb/core'
 import { REFERENCE_DECORATION_KIND } from './decoration-kind-index.js'
 import { listDecorations, removeDecoration } from './decoration-manifest.js'
 
@@ -73,8 +81,7 @@ const parseMarks = (raw: string): string[] =>
  *  orders have to mint the same sig, and an emptied demand has to be
  *  byte-identical to a reference that never had one — otherwise it would never
  *  dedup with a plain reference to the same place. */
-export const normalizeRequiredMarks = (marks: readonly string[]): string[] =>
-  [...new Set(marks.map(m => String(m ?? '').trim()).filter(Boolean))].sort()
+export const normalizeRequiredMarks = normalizeReferenceMarks
 
 /** Assemble a reference payload in the ONE field order every writer must use.
  *
@@ -95,14 +102,8 @@ export const buildReferencePayload = (opts: {
   requiredMarks?: readonly string[]
   requiredBouquet?: string
 }): Record<string, unknown> => {
-  const payload: Record<string, unknown> = { targetSegments: [...opts.targetSegments] }
-  if (opts.targetSig && /^[0-9a-f]{64}$/.test(opts.targetSig)) payload['targetSig'] = opts.targetSig
-  const marks = normalizeRequiredMarks(opts.requiredMarks ?? [])
-  if (marks.length > 0) payload['requiredMarks'] = marks
-  if (opts.requiredBouquet && /^[0-9a-f]{64}$/.test(opts.requiredBouquet)) {
-    payload['requiredBouquet'] = opts.requiredBouquet
-  }
-  return payload
+  const name = String(opts.targetSegments[opts.targetSegments.length - 1] ?? '')
+  return buildCanonicalReferencePayload({ name, ...opts })
 }
 
 /** Assemble the whole reference DECORATION RECORD — payload plus the resource
@@ -124,14 +125,8 @@ export const buildReferenceRecord = (opts: {
   requiredMarks?: readonly string[]
   requiredBouquet?: string
 }): Record<string, unknown> => {
-  const payload = buildReferencePayload(opts)
-  const refs = typeof payload['requiredBouquet'] === 'string' ? [payload['requiredBouquet']] : []
-  return {
-    kind: REFERENCE_DECORATION_KIND,
-    appliesTo: [],
-    payload,
-    ...(refs.length ? { refs } : {}),
-  }
+  const name = String(opts.targetSegments[opts.targetSegments.length - 1] ?? '')
+  return buildCanonicalReferenceRecord({ name, ...opts })
 }
 
 type LineageShape = { explorerSegments?: () => readonly string[] }
@@ -320,20 +315,22 @@ export class RequiresQueenBee extends QueenBee {
     const store = get<StoreShape>('@hypercomb.social/Store')
     if (!store?.putResource) { this.#log('Requires — unavailable'); return }
 
-    const targetSegments = Array.isArray(current.targetSegments)
+    const legacyTargetSegments = Array.isArray(current.targetSegments)
       ? current.targetSegments.map(s => String(s)).filter(Boolean)
       : []
-    const targetSig = typeof current.targetSig === 'string' && /^[0-9a-f]{64}$/.test(current.targetSig)
-      ? current.targetSig
-      : ''
+
+    // Editing a legacy reference is its lazy migration to the fixed-name root.
+    const roots = get<CanonicalReferenceService>(CANONICAL_REFERENCE_SERVICE_KEY)
+    const root = await roots?.ensureRoot(name, legacyTargetSegments)
+    if (!root) { this.#log('Requires — target could not be promoted to its root'); return }
 
     // Rebuilt in the same field order `/reference` and the Organizer's drop use,
     // with `requiredMarks` OMITTED when empty — same content must produce the
     // same sig no matter which of the three wrote it — and with the bouquet
     // declared as the record's resource closure so the demand can still be
     // expanded after a share or an adopt.
-    const record = buildReferenceRecord({
-      targetSegments, targetSig, requiredMarks: marks, requiredBouquet: bouquet,
+    const record = buildCanonicalReferenceRecord({
+      name, targetSig: root.targetSig, requiredMarks: marks, requiredBouquet: bouquet,
     })
 
     try {
