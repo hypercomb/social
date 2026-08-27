@@ -7216,8 +7216,11 @@ export class ShowCellDrone extends Drone {
       // and then vanished" bug funnels through here, and an unexplained
       // clear is indistinguishable from a legitimate empty-layer render.
       // The reason names the bail site so a vanish in the field is
-      // diagnosable straight from the console.
-      console.warn(`[render] clearMesh: clearing ${this.renderedCount} rendered cell(s) — ${reason}`)
+      // diagnosable straight from the console. Clearing an already-empty warm
+      // mesh is routine initialization/navigation and must remain silent.
+      if (this.renderedCount > 0) {
+        console.warn(`[render] clearMesh: clearing ${this.renderedCount} rendered cell(s) — ${reason}`)
+      }
       // Capture the centering offset before destroying the mesh so the
       // next mesh (e.g. when redo brings tiles back from empty) can
       // restore it instead of starting at (0,0).

@@ -77,8 +77,14 @@ export class IconProviderRegistry extends EventTarget {
   #providers = new Map<string, TileIconProvider>()
 
   add(provider: TileIconProvider): void {
-    if (this.#providers.has(provider.name)) {
-      console.warn(`[icon-provider-registry] duplicate name "${provider.name}" — ignoring`)
+    const existing = this.#providers.get(provider.name)
+    if (existing) {
+      // A signed package can be evaluated again while the same provider from
+      // the previous generation is still live. That is an ordinary first-wins
+      // no-op, not a collision worth surfacing to participants. Keep warnings
+      // for two different owners competing for the same public name.
+      if (existing === provider || (!!existing.owner && existing.owner === provider.owner)) return
+      console.warn(`[icon-provider-registry] conflicting name "${provider.name}" from "${provider.owner ?? 'unknown'}" — keeping "${existing.owner ?? 'unknown'}"`)
       return
     }
     this.#providers.set(provider.name, provider)
