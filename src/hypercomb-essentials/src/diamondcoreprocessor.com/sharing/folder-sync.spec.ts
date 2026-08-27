@@ -554,9 +554,11 @@ describe('FolderSyncService', () => {
       closureRoots: 1,
       failedRoots: 1,
     })
-    // An unmeasured closure must never be importable as a portable hard copy.
-    await expect(new FolderSyncService().importFromFolder())
-      .rejects.toThrow('no sealed, complete, verified')
+    // An unmeasured closure is not called portable, but its independently
+    // verified checkpoint files remain recoverable.
+    const result = await new FolderSyncService().importFromFolder()
+    expect(result).toMatchObject({ incompleteSources: 1, invalid: 0 })
+    expect(result?.warnings.join(' ')).toContain('no complete portable-checkpoint receipt')
   })
 
   it('imports missing files but never overwrites a conflicting local file', async () => {
@@ -680,7 +682,7 @@ describe('FolderSyncService', () => {
     expect(new TextDecoder().decode(await read(activeOpfs, sig))).toBe('participant bytes')
   })
 
-  it('rejects a local mirror because it is not a sealed portable export', async () => {
+  it('imports individually verified files from a local mirror with an incomplete warning', async () => {
     const chosen = new MemoryDir('Local mirror')
     let activeOpfs = new MemoryDir('source')
     await put(activeOpfs, 'settings', new TextEncoder().encode('local only'))
@@ -695,11 +697,46 @@ describe('FolderSyncService', () => {
 
     expect(await new FolderSyncService().connect('local')).toBe(true)
     activeOpfs = new MemoryDir('fresh')
-    await expect(new FolderSyncService().importFromFolder())
-      .rejects.toThrow('no sealed, complete, verified hard-copy snapshots')
+    const result = await new FolderSyncService().importFromFolder()
+    expect(result).toMatchObject({ copied: 1, invalid: 0, incompleteSources: 1 })
+    expect(result?.warnings.join(' ')).toContain('no complete portable-checkpoint receipt')
+    expect(new TextDecoder().decode(await read(activeOpfs, 'settings'))).toBe('local only')
   })
 
-  it('rejects a sealed export when any listed backup file is damaged', async () => {
+  it('imports when the hypercomb-backup folder itself is selected', async () => {
+    delete (globalThis as any).__getSentinel
+    delete (globalThis as any).__sentinelBridge
+    const chosen = new MemoryDir('Fresh export')
+    let activeOpfs = new MemoryDir('source')
+    const bytes = new TextEncoder().encode('participant bytes')
+    const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
+    await put(activeOpfs, sig, bytes)
+    Object.defineProperty(navigator, 'storage', {
+      configurable: true,
+      value: { getDirectory: async () => activeOpfs },
+    })
+    Object.defineProperty(window, 'showDirectoryPicker', {
+      configurable: true,
+      value: vi.fn(async () => chosen),
+    })
+
+    const exporter = new FolderSyncService()
+    expect(await exporter.connect('hard-copy')).toBe(true)
+    const backup = await chosen.getDirectoryHandle('hypercomb-backup')
+
+    Object.defineProperty(window, 'showDirectoryPicker', {
+      configurable: true,
+      value: vi.fn(async () => backup),
+    })
+    activeOpfs = new MemoryDir('fresh')
+    localStorage.clear()
+    const result = await new FolderSyncService().importFromFolder()
+    expect(result).toMatchObject({ copied: 1, conflicts: 0, invalid: 0 })
+    expect(new TextDecoder().decode(await read(activeOpfs, sig)))
+      .toBe('participant bytes')
+  })
+
+  it('rejects only a damaged listed file and imports the rest of its snapshot', async () => {
     const chosen = new MemoryDir('Damaged export')
     let activeOpfs = new MemoryDir('source')
     const bytes = new TextEncoder().encode('original')
@@ -724,7 +761,8 @@ describe('FolderSyncService', () => {
     )
 
     activeOpfs = new MemoryDir('fresh')
-    await expect(new FolderSyncService().importFromFolder())
-      .rejects.toThrow('no sealed, complete, verified hard-copy snapshots')
+    const result = await new FolderSyncService().importFromFolder()
+    expect(result).toMatchObject({ copied: 0, invalid: 1, incompleteSources: 0 })
+    await expect(read(activeOpfs, sig)).rejects.toThrow()
   })
 })

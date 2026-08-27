@@ -193,7 +193,15 @@ export class FolderSyncView extends EventTarget {
     if (this.#busy) return
     this.#busy = true
     this.#render()
-    try { await action() } finally {
+    try {
+      await action()
+    } catch (error) {
+      EffectBus.emit('toast:show', {
+        type: 'error',
+        title: 'Folder backup',
+        message: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
       this.#busy = false
       this.#render()
     }
@@ -213,9 +221,12 @@ export class FolderSyncView extends EventTarget {
 
   #showImport(result: FolderImportResult): void {
     EffectBus.emit('toast:show', {
-      type: result.conflicts || result.invalid ? 'info' : 'success',
+      type: result.conflicts || result.invalid || result.incompleteSources ? 'info' : 'success',
       title: 'Restore complete',
-      message: `${result.copied} files imported; ${result.identical} already present; ${result.conflicts} conflicts untouched.`,
+      message: [
+        `${result.copied} files imported; ${result.identical} already present; ${result.conflicts} conflicts untouched; ${result.invalid} invalid or unavailable files rejected.`,
+        ...result.warnings,
+      ].join(' '),
     })
   }
 

@@ -254,6 +254,17 @@ export interface FolderImportResult {
   identical: number
   conflicts: number
   invalid: number
+  /** Sources without a receipt proving a complete portable checkpoint. */
+  incompleteSources: number
+  warnings: string[]
+}
+
+interface ImportSnapshot {
+  deviceId: string
+  updatedAt: number
+  opfs: FileSystemDirectoryHandle
+  manifest: DeviceManifest
+  checkpointComplete: boolean
 }
 
 type MarkerPayload = {
@@ -404,6 +415,18 @@ const directoryAt = async (
     current = await current.getDirectoryHandle(segment, { create })
   }
   return current
+}
+
+/** Locate the existing per-device OPFS tree used by the current backup shape.
+ * Recovery also accepts a folder-root hive, so absence is not an error. */
+const legacyHiveRoot = async (
+  device: FileSystemDirectoryHandle,
+): Promise<FileSystemDirectoryHandle | undefined> => {
+  try {
+    return await device.getDirectoryHandle('opfs', { create: false })
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -670,10 +693,8 @@ export class FolderSyncService {
     if (dcpSnapshot === null) {
       throw new Error('This backup contains a DCP snapshot, but it is not sealed, complete, and verified.')
     }
-    const sources = await this.#deviceSnapshots(backup)
-    if (sources.length === 0) {
-      throw new Error('The selected folder contains no sealed, complete, verified hard-copy snapshots.')
-    }
+    const sources = await this.#deviceSnapshots(backup, selected)
+    if (sources.length === 0) throw new Error('The selected folder contains no readable device snapshots.')
 
     if (dcpSnapshot !== 'absent') {
       const getSentinel = (globalThis as any).__getSentinel as
@@ -705,6 +726,13 @@ export class FolderSyncService {
       identical: 0,
       conflicts: 0,
       invalid: 0,
+      incompleteSources: sources.filter(source => !source.checkpointComplete).length,
+      warnings: [],
+    }
+    if (result.incompleteSources) {
+      result.warnings.push(
+        `${result.incompleteSources} source snapshot${result.incompleteSources === 1 ? '' : 's'} had no complete portable-checkpoint receipt; individually verified files were imported.`,
+      )
     }
 
     const agentId = `folder-import:${this.#deviceId}`
@@ -729,15 +757,20 @@ export class FolderSyncService {
       // are then reported as conflicts. Existing local bytes still always
       // win: import is union-only and never overwrites.
       for (const source of sources) {
-        for await (const entry of walkFiles(source.opfs)) {
-          const parts = entry.path.split('/')
+        for (const [path, stamp] of Object.entries(source.manifest.files ?? {})) {
+          const parts = path.split('/')
           const name = parts.pop()!
           if (!parts.every(validSegment) || !validSegment(name)) {
             result.invalid++
             continue
           }
-          const incomingFile = await entry.handle.getFile()
-          const incoming = new Uint8Array(await incomingFile.arrayBuffer())
+          const incomingBuffer = await this.#readPath(source.opfs, path)
+          if (!incomingBuffer || !stamp.sha256 || incomingBuffer.byteLength !== stamp.size
+              || await SignatureService.sign(incomingBuffer) !== stamp.sha256) {
+            result.invalid++
+            continue
+          }
+          const incoming = new Uint8Array(incomingBuffer)
 
           // Flat root content is addressed by sha256. Never import poisoned
           // bytes under a trusted-looking signature.
@@ -769,7 +802,7 @@ export class FolderSyncService {
           if (++seen % 50 === 0) {
             EffectBus.emit('agent:progress', {
               id: agentId,
-              activity: `verified ${seen} files; imported ${result.copied}`,
+              activity: `checked ${seen} files; imported ${result.copied}; rejected ${result.invalid}`,
             })
           }
         }
@@ -777,7 +810,7 @@ export class FolderSyncService {
       EffectBus.emit('agent:end', {
         id: agentId,
         ok: result.conflicts === 0 && result.invalid === 0,
-        summary: `imported ${result.copied}; ${result.conflicts} conflicts; ${result.invalid} invalid`,
+        summary: `imported ${result.copied}; ${result.conflicts} conflicts; ${result.invalid} invalid; ${result.incompleteSources} incomplete checkpoints`,
       })
       return result
     } catch (error) {
@@ -1595,22 +1628,15 @@ export class FolderSyncService {
 
   readonly #deviceSnapshots = async (
     backup: FileSystemDirectoryHandle,
-  ): Promise<Array<{
-    deviceId: string
-    updatedAt: number
-    opfs: FileSystemDirectoryHandle
-  }>> => {
+    hive: FileSystemDirectoryHandle,
+  ): Promise<ImportSnapshot[]> => {
     let devices: FileSystemDirectoryHandle
     try {
       devices = await backup.getDirectoryHandle(DEVICES_DIR, { create: false })
     } catch {
       return []
     }
-    const snapshots: Array<{
-      deviceId: string
-      updatedAt: number
-      opfs: FileSystemDirectoryHandle
-    }> = []
+    const snapshots: ImportSnapshot[] = []
     for await (const [deviceId, handle] of (devices as any).entries()) {
       if (handle.kind !== 'directory' || !validSegment(deviceId)) continue
       const dir = handle as FileSystemDirectoryHandle
@@ -1622,18 +1648,19 @@ export class FolderSyncService {
       } catch {
         continue
       }
-      if (manifest.kind !== 'hypercomb-folder-backup-device'
-          || manifest.pass?.active === true
-          || manifest.mode !== 'hard-copy'
-          || !manifest.closure?.resolverAvailable
-          || manifest.closure.missing !== 0
-          || (manifest.closure.rootsFailed ?? 0) !== 0) continue
+      if (manifest.kind !== 'hypercomb-folder-backup-device' || !manifest.files) continue
       const manifestSha256 = await SignatureService.sign(manifestBytes)
-      if (!(await this.#hasValidCompletionSeal(dir, manifestSha256, deviceId))) continue
       try {
-        const opfs = await dir.getDirectoryHandle('opfs', { create: false })
-        if (!(await this.#verifySnapshotFiles(opfs, manifest))) continue
-        snapshots.push({ deviceId, updatedAt: manifest.updatedAt, opfs })
+        // The shape puts the hive at the folder root; a legacy backup keeps a
+        // per-device `opfs/` nest. Both import, each verified where it sits.
+        const opfs = (await legacyHiveRoot(dir)) ?? hive
+        const checkpointComplete = manifest.pass?.active !== true
+          && manifest.mode === 'hard-copy'
+          && !!manifest.closure?.resolverAvailable
+          && manifest.closure.missing === 0
+          && (manifest.closure.rootsFailed ?? 0) === 0
+          && await this.#hasValidCompletionSeal(dir, manifestSha256, deviceId)
+        snapshots.push({ deviceId, updatedAt: manifest.updatedAt, opfs, manifest, checkpointComplete })
       } catch {
         // Incomplete device snapshot.
       }

@@ -113,13 +113,14 @@ export class FolderSyncQueenBee extends QueenBee {
   }
 
   #reportImport(result: FolderImportResult): void {
-    const problems = result.conflicts + result.invalid
+    const problems = result.conflicts + result.invalid + result.incompleteSources
     const sources = result.sourceDevices?.length ?? 1
     const message = [
       `${result.copied} files imported from ${sources} device snapshot${sources === 1 ? '' : 's'}.`,
       `${result.identical} were already present.`,
       result.conflicts ? `${result.conflicts} conflicts were left untouched.` : '',
       result.invalid ? `${result.invalid} invalid files were rejected.` : '',
+      ...result.warnings,
     ].filter(Boolean).join(' ')
     this.#toast(problems ? 'info' : 'success', 'Folder backup import', message)
     if (result.copied > 0) {
