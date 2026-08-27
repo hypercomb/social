@@ -663,7 +663,7 @@ export class ShowCellDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply']
-  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'landing:pending']
+  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'landing:pending']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
@@ -2839,6 +2839,12 @@ export class ShowCellDrone extends Drone {
       return
     }
     this.#forceNextRender = false
+
+    // Rendering owns the main thread until this pass publishes its matching
+    // cell snapshot. Post-paint layers (agent bees today) use the pass id to
+    // reject a replayed cell-count from the layer the participant just left.
+    const renderPassId = ++this.#tileRenderPassId
+    this.emitEffect('render:tiles-target', { locationKey, renderPassId })
 
     // Only a pass that actually proceeds may invalidate shader hover. One
     // navigation queues several duplicate renders; a late duplicate commonly
@@ -7561,8 +7567,12 @@ export class ShowCellDrone extends Drone {
   // streaming, and incremental paths all send identical shapes.
   /** Set on every `navigate`; cleared by the first pass that paints tiles. */
   #navStartedAt = 0
+  /** Monotonic render ownership token carried by tiles-target and cell-count. */
+  #tileRenderPassId = 0
 
   #buildCellCountPayload(cells: readonly Cell[]): {
+    locationKey: string
+    renderPassId: number
     count: number
     labels: string[]
     coords: { q: number; r: number }[]
@@ -7604,6 +7614,8 @@ export class ShowCellDrone extends Drone {
     // re-subscribes). Without this they fall through to the editor's
     // 'open' action and the user can't browse a peer's tree.
     return {
+      locationKey: this.renderedLocationKey || '/',
+      renderPassId: this.#tileRenderPassId,
       count: cells.length,
       labels: cells.map(c => c.label),
       coords: cells.map(c => ({ q: c.q, r: c.r })),

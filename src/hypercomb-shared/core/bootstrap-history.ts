@@ -102,6 +102,13 @@ export class BootstrapHistory {
       try { window.history.replaceState(window.history.state, '', finalUrl) } catch { /* ignore */ }
     }
 
+    // Phase 2 is not merely detached; it is BELOW first paint. Atomic life
+    // metadata can make a path expose many bees, and pulsing them while the
+    // current layer is still resolving steals the same main thread and OPFS
+    // queue the renderer needs. Subscribe before dispatch so a very fast paint
+    // cannot race past the barrier.
+    const targetLocationKey = segments.length ? `/${segments.join('/')}` : '/'
+    const firstTilePaint = this.awaitFirstTilePaint(targetLocationKey)
     this.dispatchPopState()
 
     // Fire the landing intent on the first `synchronize` — emitted once all
@@ -117,8 +124,11 @@ export class BootstrapHistory {
     }
 
     // Phase 2: background bee loading in URL order. Errors are
-    // swallowed per level so one failure can't strand the chain.
+    // swallowed per level so one failure can't strand the chain. Nothing in
+    // this phase runs until the renderer has published its first settled tile
+    // snapshot; tiles own startup, then behaviours follow.
     void (async () => {
+      await firstTilePaint
       await this.encounter(preloader, '').catch(() => {})
       for (const seg of segments) {
         await this.encounter(preloader, seg).catch(() => {})
@@ -186,6 +196,25 @@ export class BootstrapHistory {
       }
     }
   }
+
+  private awaitFirstTilePaint = (targetLocationKey: string): Promise<void> => new Promise<void>((resolve) => {
+    let off: (() => void) | undefined
+    let done = false
+    const finish = (): void => {
+      if (done) return
+      done = true
+      try { off?.() } catch { /* already released */ }
+      resolve()
+    }
+    const maybeOff = EffectBus.on<{ settled?: boolean; locationKey?: string }>('render:cell-count', payload => {
+      if (payload?.settled === false || payload?.locationKey !== targetLocationKey) return
+      // Let the renderer's buffer push complete before bee pulses begin.
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => finish())
+      else queueMicrotask(finish)
+    })
+    off = typeof maybeOff === 'function' ? maybeOff : undefined
+    if (done) off?.()
+  })
 
   private dispatchPopState = (): void => {
     try {

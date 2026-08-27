@@ -113,7 +113,7 @@ export class AgentBeeDrone extends Drone {
   public override effects = ['render'] as const
 
   protected override listens = [
-    'render:host-ready', 'render:geometry-changed', 'render:set-hive-visible', 'agent:closed',
+    'render:host-ready', 'render:geometry-changed', 'render:tiles-target', 'render:cell-count', 'render:set-hive-visible', 'agent:closed',
     'mesh:public-changed',
   ]
   protected override emits = ['agent:open', 'agent:close', 'toast:show']
@@ -125,6 +125,10 @@ export class AgentBeeDrone extends Drone {
   #trace: Graphics | null = null
   #canvas: HTMLCanvasElement | null = null
   #effectsRegistered = false
+  /** Bees are a post-paint layer. Their ticker, atlas work, persistent-agent
+   * seed, and pointer listeners stay dormant until the first tile snapshot. */
+  #tilesPainted = false
+  #tileTarget: { locationKey: string; renderPassId: number } | null = null
   #tickerBound = false
   #listenersBound = false
 
@@ -166,10 +170,27 @@ export class AgentBeeDrone extends Drone {
       this.#app = payload.app
       this.#world = payload.container
       this.#canvas = payload.canvas
-      this.#mount()
+      if (this.#tilesPainted) this.#mount()
     })
 
     this.onEffect<HexGeometry>('render:geometry-changed', geo => { this.#hexGeo = geo })
+
+    this.onEffect<{ locationKey?: string; renderPassId?: number }>('render:tiles-target', payload => {
+      const locationKey = String(payload?.locationKey ?? '')
+      const renderPassId = Number(payload?.renderPassId ?? -1)
+      if (!locationKey || renderPassId < 0) return
+      this.#tileTarget = { locationKey, renderPassId }
+      this.#pauseForTileRender()
+    })
+
+    this.onEffect<{ settled?: boolean; locationKey?: string; renderPassId?: number }>('render:cell-count', payload => {
+      if (payload?.settled === false) return
+      const target = this.#tileTarget
+      if (target && (payload?.locationKey !== target.locationKey
+        || Number(payload?.renderPassId ?? -1) < target.renderPassId)) return
+      this.#tilesPainted = true
+      this.#mount()
+    })
 
     // The panel closed by its own button or Escape. A perch is the visible half
     // of "this agent is open" — when the panel goes, the bee rejoins the hive
@@ -187,7 +208,7 @@ export class AgentBeeDrone extends Drone {
     // the hive is standing down, and so are its agents.
     this.onEffect<{ visible: boolean }>('render:set-hive-visible', ({ visible }) => {
       this.#hiveHidden = visible === false
-      if (this.#layer) this.#layer.visible = !this.#hiveHidden
+      if (this.#layer) this.#layer.visible = this.#tilesPainted && !this.#hiveHidden
     })
 
     // ── in a swarm, the sky belongs to the participants ─────────────
@@ -245,28 +266,31 @@ export class AgentBeeDrone extends Drone {
     ioc<AgentAvatarRegistry>('@diamondcoreprocessor.com/AgentAvatarRegistry')
 
   #mount = (): void => {
-    if (!this.#app || !this.#world) return
+    if (!this.#app || !this.#world || !this.#tilesPainted) return
 
-    this.#layer = new Container()
-    this.#layer.zIndex = 11 // above the peer swarm, below DOM chrome
+    if (!this.#layer) {
+      this.#layer = new Container()
+      this.#layer.zIndex = 11 // above the peer swarm, below DOM chrome
+      this.#world.addChild(this.#layer)
+
+      // Added first so every bee draws over its own trace.
+      this.#trace = new Graphics()
+      this.#layer.addChild(this.#trace)
+
+      const registry = this.#registry()
+      registry?.addEventListener('change', this.#sync)
+      // The pool already holds the asks queued before this reload — pick them
+      // up off the boot path, then draw whatever is there.
+      const seed = (): void => { void registry?.seed().then(this.#sync) }
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(seed, { timeout: 4000 })
+      else setTimeout(seed, 1200)
+      this.#sync()
+
+      // Avatar decoration changed — re-resolve textures.
+      this.#avatars()?.addEventListener('change', this.#repaintAvatars)
+    }
+
     this.#layer.visible = !this.#hiveHidden
-    this.#world.addChild(this.#layer)
-
-    // Added first so every bee draws over its own trace.
-    this.#trace = new Graphics()
-    this.#layer.addChild(this.#trace)
-
-    const registry = this.#registry()
-    registry?.addEventListener('change', this.#sync)
-    // The pool already holds the asks queued before this reload — pick them up
-    // off the boot path, then draw whatever is there.
-    const seed = (): void => { void registry?.seed().then(this.#sync) }
-    if (typeof requestIdleCallback === 'function') requestIdleCallback(seed, { timeout: 4000 })
-    else setTimeout(seed, 1200)
-    this.#sync()
-
-    // Avatar decoration changed — re-resolve textures.
-    this.#avatars()?.addEventListener('change', this.#repaintAvatars)
 
     if (!this.#tickerBound) {
       this.#tickerBound = true
@@ -278,6 +302,19 @@ export class AgentBeeDrone extends Drone {
       window.addEventListener('pointerup', this.#onPointerSettle, true)
       window.addEventListener('click', this.#onPointerSettle, true)
       window.addEventListener('pointermove', this.#onPointerMove, { passive: true })
+    }
+  }
+
+  /** A tile pass owns the frame and the Pixi ticker until its matching cell
+   *  snapshot lands. Existing bees stay allocated, but perform no animation
+   *  work and cannot appear over the outgoing layer while tiles resolve. */
+  #pauseForTileRender = (): void => {
+    this.#tilesPainted = false
+    this.#setHover('')
+    if (this.#layer) this.#layer.visible = false
+    if (this.#tickerBound && this.#app) {
+      this.#app.ticker.remove(this.#onTick)
+      this.#tickerBound = false
     }
   }
 
