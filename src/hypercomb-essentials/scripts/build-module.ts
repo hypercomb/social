@@ -166,8 +166,15 @@ interface BeeDepCacheEntry {
 // version 9 = the acquisition boundary is a signed dependency leaf named by
 // the descriptor. Its signature participates in the cache root even though
 // its sources live in the web setup directory rather than essentials/src.
+//
+// version 10 = namespace units, like bees since v5, are keyed on every file
+// esbuild actually inlined. A child namespace can import a registry from its
+// parent (`assistant/providers` -> `assistant/llm-provider-registry`); v9 only
+// hashed the files exported directly by the child. Editing the registry then
+// left the old signed child bundle in the new package closure. That breaks the
+// Merkle rule: changing a reachable leaf must advance every containing root.
 interface BuildCache {
-  version: 9
+  version: 10
   rootHash: string                            // Merkle root of all unit hashes
   rootLayerSig: string                        // last output root signature
   platformFingerprint: string                 // core + pixi content identities
@@ -185,7 +192,7 @@ const OUTPUT_CACHE_DIR = join(DIST_ROOT, '.cache')
 const loadCache = (): BuildCache | null => {
   try {
     const raw = JSON.parse(readFileSync(CACHE_FILE, 'utf8'))
-    if (raw?.version === 9) return raw
+    if (raw?.version === 10) return raw
   } catch {}
   return null
 }
@@ -740,7 +747,7 @@ const buildNamespaceDependency = async (
   directMemberFiles: SourceFile[],
   allNamespaceSpecifiers: string[],
   platform: PlatformRuntime,
-): Promise<{ sig: string; bytes: Uint8Array } | null> => {
+): Promise<{ sig: string; bytes: Uint8Array; inputs: string[] } | null> => {
   const namespaceSpecifier = specifierFromNamespaceRelDir(namespaceRelDir)
   const namespaceRootFs = join(SRC_ROOT, namespaceRelDir)
   const resolveDir = existsSync(namespaceRootFs) ? namespaceRootFs : SRC_ROOT
@@ -774,6 +781,7 @@ const buildNamespaceDependency = async (
     tsconfig: resolve(PROJECT_ROOT, 'tsconfig.json'),
     external: externals,
     plugins: [signatureExternalPlugin(platform.poolSignature, platform.signatures)],
+    metafile: true,
   })
 
   const compiled = r.outputFiles?.[0]?.text
@@ -784,7 +792,13 @@ const buildNamespaceDependency = async (
 
   const bytes = textToBytes(`// ${namespaceSpecifier}\n${compiled}`)
   const sig = await SignatureService.sign(toArrayBuffer(bytes))
-  return { sig, bytes }
+  const inputs = Object.keys(r.metafile?.inputs ?? {})
+    .map(rel => resolve(process.cwd(), rel))
+    .filter(abs => { try { return statSync(abs).isFile() } catch { return false } })
+  for (const member of directMemberFiles) {
+    if (!inputs.includes(member.entry)) inputs.push(member.entry)
+  }
+  return { sig, bytes, inputs }
 }
 
 /** Compile one bee, and report every file esbuild actually inlined.
@@ -991,6 +1005,7 @@ const main = async (): Promise<void> => {
 
   for (const ns of allNs) {
     const members = namespaceToMembers.get(ns) ?? []
+    const cachedUnit = cache?.namespaces[ns]
 
     // Build the same virtual entry source used by buildNamespaceDependency for hashing
     const namespaceRootFs = join(SRC_ROOT, ns)
@@ -1003,14 +1018,22 @@ const main = async (): Promise<void> => {
         }).sort().join('\n') + '\n'
       : 'export {};\n'
 
-    const { leaves, inputSig } = await resolveUnitInputs(
-      members.map(m => m.entry),
-      cache?.namespaces[ns]?.files,
+    // Track the LAST build's complete inlined graph, not only the files this
+    // namespace exports directly. This is the namespace equivalent of the
+    // bee v5 cache rule and is what makes leaf -> layer -> tree propagation
+    // true for a relative import that crosses a namespace directory.
+    const recorded = cachedUnit
+      ? Object.keys(cachedUnit.files).filter(f => { try { return statSync(f).isFile() } catch { return false } })
+      : []
+    const inputPaths = [...new Set([...members.map(m => m.entry), ...recorded])]
+
+    let { leaves, inputSig } = await resolveUnitInputs(
+      inputPaths,
+      cachedUnit?.files,
       `${entrySource}\nplatform:${platform.fingerprint}`,
     )
 
     allUnitSigs.push(inputSig)
-    const cachedUnit = cache?.namespaces[ns]
     const cachedFile = cachedUnit ? join(OUTPUT_CACHE_DIR, `${cachedUnit.outputSig}.js`) : null
 
     if (cachedUnit?.inputSig === inputSig && cachedFile && existsSync(cachedFile)) {
@@ -1023,6 +1046,14 @@ const main = async (): Promise<void> => {
     } else {
       const built = await buildNamespaceDependency(ns, members, allSpecifiers, platform)
       if (!built) continue
+      // Re-key on the graph esbuild really bundled so the NEXT build sees a
+      // change in an inlined parent/sibling helper and advances this sig.
+      ;({ leaves, inputSig } = await resolveUnitInputs(
+        built.inputs,
+        cachedUnit?.files,
+        `${entrySource}\nplatform:${platform.fingerprint}`,
+      ))
+      allUnitSigs[allUnitSigs.length - 1] = inputSig
       dependencyBytes.set(built.sig, built.bytes)
       addToBucket(resourcesByDir, ns, jsFileName(built.sig), 'dep')
       for (const f of members) addToBucket(resourcesByDir, f.relDir, jsFileName(built.sig), 'dep')
@@ -1462,7 +1493,7 @@ const main = async (): Promise<void> => {
 
   const rootHash = await computeRootHash(allUnitSigs)
   saveCache({
-    version: 9,
+    version: 10,
     rootHash,
     rootLayerSig,
     platformFingerprint: platform.fingerprint,

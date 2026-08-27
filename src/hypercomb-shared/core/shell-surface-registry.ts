@@ -40,7 +40,8 @@ export class ShellSurfaceRegistry extends EventTarget {
 
   add(surface: ShellSurface): void {
     if (this.#surfaces.has(surface.name)) {
-      console.warn(`[shell-surface-registry] duplicate name "${surface.name}" — ignoring`)
+      // A signed package may be inflated more than once. The first surface
+      // wins and the repeat is a normal idempotent registration.
       return
     }
     if (!surface.element) {

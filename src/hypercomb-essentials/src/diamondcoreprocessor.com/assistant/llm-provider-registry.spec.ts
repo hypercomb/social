@@ -60,7 +60,7 @@ describe('LlmProviderRegistry', () => {
       .toThrow(/docsUrl/)
   })
 
-  it('is idempotent for the same descriptor and ignores a rival for one id', () => {
+  it('silently keeps the first descriptor when a signed package registers an id again', () => {
     const registry = mod.llmProviderRegistry()
     const probe = descriptor()
     const rival = descriptor({ label: 'Rival' })
@@ -70,7 +70,7 @@ describe('LlmProviderRegistry', () => {
     registry.register(rival)
     expect(registry.all().filter(p => p.id === 'probe')).toHaveLength(1)
     expect(registry.get('probe')).toBe(probe)
-    expect(warn).toHaveBeenCalled()
+    expect(warn).not.toHaveBeenCalled()
     warn.mockRestore()
   })
 

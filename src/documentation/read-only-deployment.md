@@ -102,17 +102,19 @@ doesn't need passing at all. It is already in one of two places:
   you stand. They inherit the publisher's authorship because they sit
   behind the signature; a link-crafter cannot inject them.
 
-And sharing needs no special link format carrying hosts: **share the
-website's URL** — the link IS the domain, and clicking it is the same
-deliberate trust act as all web navigation. Every entrance becomes the
-standing-there case. One web.
+Sharing the website URL is enough to experience the publication: the link
+IS the domain, and clicking it is the same deliberate navigation as any
+other website. The adoption hand-off is explicit, though. An "add to
+hypercomb" link carries/stages the source origin and signed root so
+hypercomb.io can prefill the source domain and present the exact adoption
+offer. The link grants no trust — it only supplies WHERE and WHAT; the
+client still verifies the entire closure and waits for acceptance.
 
-Even the hand-off — "add to hypercomb" walking a visitor from a published
-site into hypercomb.io — passes nothing: **the referrer should be enough.**
-The origin you arrived from IS the oasis the staged hive resolves from; the
-browser already says where you stood. (A publisher who wants their site
-adoptable simply keeps a referrer policy that exposes the origin — opting
-in by policy, which is exactly where that choice belongs.)
+A direct visit to hypercomb.io never guesses an adoption source. With no
+published-site hand-off, the source field stays blank unless the deployment
+has a deliberately configured safe default; the participant must know and
+enter the domain. A same-origin referrer may be a convenience hint when a
+publisher permits it, but it is not the protocol, authority, or consent.
 
 The resolver CLI's `--from` stays honest under this rule: an operator
 typing a source at their own terminal is the standing act itself — the
@@ -135,6 +137,15 @@ Merkle root — resolving it walks the closure, fetches every referenced sig
 and writes flat sig-named files. Same bytes, every time, on anyone's server:
 the signature IS the install.
 
+**A host needs at least one inflation to begin.** Installing the host alone
+serves no application. The operator adds a `{root signature, source domain}`
+branch to its signatures input; the host resolves the root layer, follows
+the signed tree, drains the target server's published signatures file/pool,
+verifies every byte and replicates the reachable closure locally. Adding
+each later signature branch repeats the same pipeline. This is how a host
+curates applications: add remarkable signed roots, let their trees
+replicate, and serve those applications from the local pool.
+
 - **Update = put in the new signature.** Only missing sigs are fetched (the
   delta — unchanged content already sits on disk under the same name), the
   manifest repoints, done. **Rollback = resolve an older signature** — old
@@ -151,6 +162,20 @@ the signature IS the install.
 - Natural home: `hypercomb-cli` — `hypercomb install <sig> --from <url>
   --to <dir>` alongside the existing `build` and `inspect`. That makes
   "anybody can use it" literal: no repo checkout, no bridge, just Node.
+
+The same resolver/serving seat has three ordinary packages:
+
+- **Local executable + cloudflared** — select/adopt a signed creation, serve
+  its replicated pool locally, then point the managed tunnel and domain at
+  that port.
+- **Tiny npm server** — install the CLI/host on an ordinary server, provide
+  signature + source domain, resolve into a volume and serve it.
+- **Docker** — run that same small resolver/server with the signature pool on
+  a mounted volume; ingress may be Cloudflare, nginx, or the platform's own
+  router.
+
+All three are the same deployment. Only the process seat and ingress differ;
+the bytes, verification, replication and update gesture do not.
 
 **The whole server surface, then, is two things.** A **shim that gets the
 signature** — the one mutable pointer, everything else resolves from it —
@@ -515,9 +540,10 @@ anywhere.
 **Phase 4 — first real domain**
 - Ship one creation (revolucion is the natural candidate) to its own domain
   via Azure SWA or Cloudflare Pages; document the recipe here.
-- Decide the growth affordance: an optional "open in Hypercomb" door that
-  hands the visitor a hive-link (the adopt path already exists) — off by
-  default until decided.
+- Build the optional "open in Hypercomb" door: it hands the visitor a
+  hive-link with source domain + signed root staged, so arrival prefills the
+  source and offers adoption. Direct Hypercomb visits require a domain the
+  participant already knows; no implicit remote source is guessed.
 
 **Phase 5 — the executable makes anybody a host** *(core BUILT 2026-08-25)*
 

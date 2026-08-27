@@ -579,7 +579,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     const bee = await this.store.getBee(signature, buffer)
     tEval = performance.now() - tEvalStart
     if (!bee) {
-      console.warn(`[script-preloader] bee ${signature} returned null from getBee()`)
+      // Normal when this source already registered through a namespace
+      // bundle: IoC keeps the first live generation and Store deliberately
+      // returns null rather than manufacture and pulse a competing drone.
+      // Store logs the actionable null causes itself (bad hash/import/error).
       return null
     }
 

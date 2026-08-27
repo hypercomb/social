@@ -401,10 +401,9 @@ export class VisualBeeRegistry extends EventTarget {
   readonly #bees = new Map<string, VisualBeeDescriptor>()
 
   /**
-   * Register a visual bee. Idempotent for the same descriptor reference
-   * (hot-reload safe); registering a different object under the same
-   * `view` name logs a warning and is ignored (programming error — two
-   * bees competing for one view identity).
+   * Register a visual bee. The first descriptor for a view wins. A repeated
+   * signed-package inflation may recreate the descriptor object, so an
+   * occupied view is an expected idempotent no-op.
    */
   register(bee: VisualBeeDescriptor): void {
     if (!bee?.view || typeof bee.view !== 'string') {
@@ -430,7 +429,6 @@ export class VisualBeeRegistry extends EventTarget {
     }
     const existing = this.#bees.get(bee.view)
     if (existing && existing !== bee) {
-      console.warn(`[visual-bee-registry] duplicate view "${bee.view}" — ignoring re-registration`)
       return
     }
     if (existing === bee) return // idempotent

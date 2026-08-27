@@ -51,6 +51,20 @@ move the pin. "Import" = resolve the pin, pull the sigs, verify, adopt.
 The same artifact can be served by a domain, handed peer-to-peer over the
 swarm, or copied on a USB stick — the signatures make all three identical.
 
+**Propagation is adoption of a root.** One operation drives client install,
+server replication and every later update:
+
+`signature → resolve layer → resolve reachable tree → verify → replicate`
+
+A newly installed host is inert until it completes at least one inflation.
+The operator gives it a root signature and a source domain; the resolver
+drains the signatures reachable from that target into the host's local flat
+pool. Adding another signature branch runs the same operation again. The
+host therefore publishes only the applications whose signed roots its
+operator deliberately selected — the best signatures on the server become
+the applications it can serve, with no unrelated software delivered beside
+them.
+
 **One shim, every domain.** Hosted websites on the hypercomb engine are not
 separate deployments of the engine — they snap into the same shim and
 harness. A domain on the engine publishes three things, all static: its
@@ -78,9 +92,14 @@ nothing else; publishing is per-tile consent. That subset then becomes the
 source of its own adoption: visitors adopt from the artifact, never from
 your live client. And the walk-in IS the onboarding: an "add to hypercomb"
 gesture on any domain hands off to hypercomb.io with that hive staged — you
-arrive, you accept the adopt, and you have it. An instant introduction to
-hypercomb: the domain is the door, hypercomb.io is the hall. The adopt is
-always *offered*, never auto-applied — accepting on arrival is the consent.
+arrive with the source domain prefilled, you review the signed root, you
+accept the adopt, and you have it. An instant introduction to hypercomb: the
+domain is the door, hypercomb.io is the hall. The domain in the hand-off is a
+WHERE, never trust; every fetched byte still has to match its signature. The
+adopt is always *offered*, never auto-applied — accepting on arrival is the
+consent. A direct visit to hypercomb.io has no implicit adoption source: the
+participant must already know and enter a domain (or choose a deliberately
+configured default) before anything can be offered.
 
 **Factory defaults: content adopts, code stays dark.** A fresh participant
 who has joined no communities gets factory defaults that prevent code
@@ -94,14 +113,19 @@ deliberately.
 The walk-in itself is new work (its own pass, not yet built):
 
 - [ ] The hand-off: an "add to hypercomb" gesture on a hosting domain →
-  hypercomb.io with the source pin staged; arrival offers the adopt (rides
-  the example-hives first-boot offer pattern — the offer owns the choices)
+  hypercomb.io with the source domain prefilled and source pin staged;
+  arrival offers the adopt (rides the example-hives first-boot offer pattern
+  — the offer owns the choices). Without that link, source stays blank until
+  the participant enters a domain they already know.
 - [ ] Factory-defaults audit: verify every package path lands dark for a
   community-less participant (roster, provider holds, features opt-in) while
   first-party cohorts stay seeded ON
 
-The shim is everything that must exist **before the first bee can pulse** —
-nothing more. Measured against today's boot path, that is:
+The installed origin contains only the **inflator/verifier and the smallest
+core**. Everything else — installer UI, panels, behaviors, authoring and
+applications — is a signed package reached through inflation. The shim is
+everything that must exist **before the first bee can pulse** — nothing more.
+Measured against today's boot path, that is:
 
 | Piece | Today | LOC |
 |---|---|---|

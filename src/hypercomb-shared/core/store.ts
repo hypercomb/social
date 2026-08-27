@@ -630,7 +630,7 @@ export class Store extends EventTarget {
       try {
         mod = await importer(poolSignature, expectedSignature) as Record<string, unknown>
       } catch (err) {
-        console.log(`[store] failed to import signed bee ${expectedSignature}:`, err)
+        console.warn(`[store] failed to import signed bee ${expectedSignature}:`, err)
         return null
       }
 
@@ -691,7 +691,8 @@ export class Store extends EventTarget {
       //    them down). Null is the truthful answer: this sig is
       //    superseded; the preloader skips it.
       return null
-    } catch {
+    } catch (err) {
+      console.warn(`[store] failed to resolve signed bee ${expectedSignature}:`, err)
       return null
     } finally {
       unhook?.()

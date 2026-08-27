@@ -100,14 +100,13 @@ export interface TutorGameDescriptor {
 export class TutorGameRegistry extends EventTarget {
   readonly #games = new Map<string, TutorGameDescriptor>()
 
-  /** Register a game. Idempotent for the same reference; a different object under the same id is dropped with a warning. */
+  /** Register a game. First id wins; repeated signed-package registration is a silent no-op. */
   register(game: TutorGameDescriptor): void {
     if (!game?.id || typeof game.id !== 'string') {
       throw new Error('[TutorGameRegistry] game.id must be a non-empty string')
     }
     const existing = this.#games.get(game.id)
     if (existing && existing !== game) {
-      console.warn(`[tutor-game-registry] duplicate game "${game.id}" — ignoring re-registration`)
       return
     }
     if (existing === game) return

@@ -68,10 +68,9 @@ export class LlmProviderRegistry extends EventTarget {
   readonly #providers = new Map<string, LlmProviderDescriptor>()
 
   /**
-   * Register a provider. Idempotent for the same descriptor reference
-   * (hot-reload safe); a DIFFERENT object under the same id logs a warning
-   * and is ignored — two modules competing for one vendor identity is a
-   * programming error, not a merge.
+   * Register a provider. The first descriptor for an id wins. Re-inflating a
+   * signed package can present the same declaration as a fresh object, so an
+   * occupied id is an expected idempotent no-op, not console noise.
    */
   register(provider: LlmProviderDescriptor, options: { replace?: boolean } = {}): void {
     if (!provider?.id || typeof provider.id !== 'string') {
@@ -119,7 +118,6 @@ export class LlmProviderRegistry extends EventTarget {
         this.dispatchEvent(new CustomEvent('change'))
         return
       }
-      console.warn(`[llm-provider-registry] duplicate provider "${provider.id}" — ignoring re-registration`)
       return
     }
     this.#providers.set(provider.id, provider)
