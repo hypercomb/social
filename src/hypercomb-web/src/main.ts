@@ -133,8 +133,8 @@ const attachImportMap = async (): Promise<void> => {
   // console warning) on those that don't — hence the reload guard below.
   appendImportMap(JSON.stringify({ imports }, null, 2))
 
-  // No dependency aliases resolved (nothing installed yet) → no bare specifier
-  // gets resolved this session; the next boot picks the cache up early.
+  // No installed dependency metadata → no sig-addressed namespace module will
+  // load this session; the next boot picks the platform map cache up early.
   const aliasMap = (globalThis as any).__hypercombAliasMap as Map<string, string> | undefined
   if (!aliasMap?.size) return
 

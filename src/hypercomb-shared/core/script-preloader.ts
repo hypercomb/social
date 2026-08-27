@@ -5,6 +5,7 @@
 
 import { Bee, type BeeResolver, EffectBus } from '@hypercomb/core'
 import { Store } from './store'
+import { importSignatureModule } from './signature-module-loader'
 
 export interface ActionDescriptor {
   signature: string
@@ -624,25 +625,24 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     if (!needed?.length) return
 
     const aliasMap = (globalThis as any).__hypercombAliasMap as Map<string, string> | undefined
-    if (!aliasMap) return
+    const dependencyPoolSig = await Store.poolSignature(Store.DEPENDENCIES_MEANING)
 
     for (const depSig of needed) {
       if (this.#loadedDeps.has(depSig)) continue
 
-      // Reverse lookup: find alias for this dep signature
-      // aliasMap values may have .js suffix (stored as filenames); strip when comparing
+      // Alias is retained for human-readable logs only. It is deliberately
+      // absent from the executable import path.
       let alias: string | undefined
-      for (const [a, s] of aliasMap) {
-        if (s.replace(/\.js$/i, '') === depSig) { alias = a; break }
-      }
-      if (!alias) {
-        console.warn(`[script-preloader] no alias found for dep ${depSig} (bee ${beeSig})`)
-        continue
+      for (const [a, s] of (aliasMap ?? [])) {
+        if (s.replace(/\.js$/i, '') === depSig) {
+          alias = a
+          break
+        }
       }
 
       try {
-        console.log(`[script-preloader] loading dep ${depSig} (${alias}) for bee ${beeSig}`)
-        await import(/* @vite-ignore */ alias)
+        console.log(`[script-preloader] loading dep ${depSig}${alias ? ` (${alias})` : ''} for bee ${beeSig}`)
+        await importSignatureModule(dependencyPoolSig, depSig)
         this.#loadedDeps.add(depSig)
         console.log(`[script-preloader] dep ${depSig} loaded`)
       } catch (err) {

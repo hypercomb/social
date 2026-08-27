@@ -552,6 +552,16 @@ resolver:
 
 - [ ] Module build emits `import … from '/<prefix>/<sig>'` instead of bare
   aliases (alias comments survive as human metadata only)
+  - **First executable slice complete:** `DependencyLoader` and
+    `ScriptPreloader.#ensureDeps` now import namespace modules from
+    `/opfs/<sign('dependencies')>/<sig>` directly. Aliases are discovery/log
+    metadata only on these paths. An emitted-module census found zero
+    namespace-to-namespace import edges—the namespace bundles already inline
+    relative graphs—so the executable bare-specifier remainder is the two
+    platform bundles, `@hypercomb/core` and `pixi.js`. `resolveImportMap()` now
+    keeps the 49 namespace aliases out of the browser map entirely while still
+    deriving their alias→sig metadata from the dependency bag; the live map is
+    down to those two platform shims.
 - [ ] SW resolver gains network fallback: OPFS miss → `<origin>/<sig>` fetch
   → **verify the bytes hash to the requested sig** (published-pools already
   does this for specs; the module path must too — forged bytes are dropped,

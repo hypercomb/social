@@ -1,7 +1,7 @@
 // hypercomb-client/scripts/bake-frontend.mjs
 //
-// Produce the CLIENT frontend from the web build: copy the dist, then bake a
-// STATIC import map into index.html.
+// Produce the CLIENT frontend from the web build: copy the dist, then bake the
+// two-entry PLATFORM import map into index.html.
 //
 // WHY BAKING IS REQUIRED (verified live over CDP, Edge/WebView2 151):
 //
@@ -10,16 +10,10 @@
 //     late — is INERT: `import('pixi.js')` fails with the map sitting right
 //     there in the DOM. Only a map that is static HTML, ahead of every
 //     modulepreload, resolves.
-//   - Tauri's asset server guesses mime by extension, so the extension-less
-//     `/content/<sig>` files arrive as text/html — which module loading
-//     rejects outright. Baking copies each dependency to `modules/<sig>.js`,
-//     making the mime correct by construction. The twin is deliberately NOT
-//     written beside the content: `/content/` is the flat namespace where a
-//     name IS an address, and `<sig>.js` addresses nothing. (Bees are
-//     unaffected: they are imported from blob URLs built out of store bytes.)
-//     The twins exist only because mime is guessed from the extension; a
-//     scheme handler that served `/content/<sig>` as text/javascript would
-//     remove the need for them entirely.
+//   - Namespace dependencies no longer resolve through this map. Both eager
+//     and bee-lazy loaders import `/opfs/<pool-sig>/<content-sig>`; the service
+//     worker supplies JavaScript MIME and asks the native page bridge for bytes
+//     when its own OPFS is empty. No `/modules/<sig>.js` serving twins remain.
 //
 // The bundled package is fixed at build time, so its import map is too —
 // baking is not a workaround, it is the honest shape of the thing: static
@@ -28,7 +22,7 @@
 // Run after `npm run build` in hypercomb-web:
 //   node hypercomb-client/scripts/bake-frontend.mjs
 
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, copyFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -52,9 +46,8 @@ rmSync(out, { recursive: true, force: true })
 mkdirSync(out, { recursive: true })
 cpSync(dist, out, { recursive: true })
 
-// 2. Derive the import map — the same rules as resolve-import-map.ts:
-//    static runtimes, then one alias per dependency from its first-line
-//    `// @scope/name` comment.
+// 2. Derive the import map — the same executable remainder as
+//    resolve-import-map.ts: only the two platform runtimes.
 const manifest = JSON.parse(readFileSync(join(out, 'content/manifest.json'), 'utf8'))
 const pkg = Object.values(manifest.packages ?? {})[0]
 if (!pkg) throw new Error('bundled manifest has no package')
@@ -62,37 +55,6 @@ if (!pkg) throw new Error('bundled manifest has no package')
 const imports = {
   '@hypercomb/core': '/hypercomb-core.runtime.js',
   'pixi.js': '/vendor/pixi.runtime.js',
-}
-
-// Serving twins live here, outside the content namespace — see the copy below.
-const modulesDir = join(out, 'modules')
-
-let aliased = 0
-for (const sig of pkg.dependencies ?? []) {
-  const source = join(out, 'content', sig)
-  let firstLine = ''
-  try {
-    firstLine = readFileSync(source, 'utf8').split('\n', 1)[0]?.trim() ?? ''
-  } catch {
-    console.warn(`  missing dependency bytes for ${sig.slice(0, 12)} — skipped`)
-    continue
-  }
-  const alias = firstLine.startsWith('//') ? firstLine.split(/\s+/)[1] : undefined
-  if (!alias || imports[alias]) continue
-
-  // Copy as .js so Tauri's extension-based mime guess yields JavaScript —
-  // module loading hard-rejects text/html.
-  //
-  // The twin lands in `modules/`, NOT beside the content. Inside the content
-  // namespace every name is an address, and `<sig>.js` is not the address of
-  // anything — it is a mime-driven serving artifact. Keeping it there put a
-  // non-addressed name in the one namespace whose whole invariant is that the
-  // name IS the hash. `modules/` is derived build output: wipe it and the next
-  // bake reproduces it exactly.
-  mkdirSync(modulesDir, { recursive: true })
-  copyFileSync(source, join(modulesDir, `${sig}.js`))
-  imports[alias] = `/modules/${sig}.js`
-  aliased++
 }
 
 // 3. Bake the map as the FIRST element of <head> — static HTML, ahead of
@@ -115,4 +77,4 @@ if (!html.includes('"importmap"')) throw new Error('failed to inject the import 
 writeFileSync(indexPath, html)
 
 console.log(`baked frontend -> ${out}`)
-console.log(`  import map: ${Object.keys(imports).length} entries (${aliased} dependency aliases)`)
+console.log(`  import map: ${Object.keys(imports).length} platform entries`)

@@ -1,11 +1,12 @@
 // hypercomb-web/src/setup/resolve-import-map.ts
 
-import { environment, Store } from '@hypercomb/shared'
+import type { Store } from '@hypercomb/shared'
 
 export type ResolvedImports = Record<string, string>
 
 /**
- * Build the runtime importmap by opening exactly one bag.
+ * Build the small platform import map and dependency alias metadata by
+ * opening exactly one bag.
  *
  * Dependencies live in the sign('dependencies') POOL OF MEANING — a dir
  * at the OPFS root named by the sha256 of the meaning string, derived at
@@ -25,10 +26,13 @@ export type ResolvedImports = Record<string, string>
  *   1. scan the pool (∪ legacy) until we find a directory (the bag);
  *   2. iterate its entries in parallel; each entry is two-line text
  *      (line 1 = `@scope/name` alias, line 2 = leaf sig);
- *   3. assemble the importmap directly from those pairs.
+ *   3. retain alias → sig as discovery/log metadata.
  *
- * No localStorage on the critical path. No leaf-file opens. No pointer
- * file. The bag dir's existence IS the signal that an install is present.
+ * Namespace modules execute by `/opfs/<pool-sig>/<content-sig>` now, so their
+ * aliases do NOT enter the browser import map. Only the two platform shims
+ * (`@hypercomb/core`, `pixi.js`) remain there. No localStorage on the critical
+ * path. No leaf-file opens. No pointer file. The bag dir's existence IS the
+ * signal that an install is present.
  *
  * A flat-scan fallback survives for installs that predate the bag
  * (`installFromBundled` runs without `dependenciesBag` set). New installs
@@ -83,12 +87,6 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
     console.warn('[resolveImportMap] OPFS unavailable — returning core imports only')
     return imports
   }
-
-  // Import-map URLs are pool-addressed: `/opfs/<sign('dependencies')>/<sig>`.
-  // The SW resolves them from the pool with the legacy dir as read
-  // fallback, and keeps serving the legacy `/opfs/__dependencies__/` URL
-  // shape for pages that froze an old import map.
-  const dependencyBasePath = `/opfs/${await Store.poolSignature(Store.DEPENDENCIES_MEANING)}`
 
   // Pool first, legacy drain dir second — union, not either/or.
   const depDirs = [store.dependencies, store.legacyDependencies]
@@ -146,8 +144,7 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
 
       if (allLeavesPresent) {
         for (const entry of valid) {
-          if (imports[entry.alias]) continue
-          imports[entry.alias] = `${dependencyBasePath}/${entry.sig}`
+          if (aliasSource.has(entry.alias)) continue
           aliasSource.set(entry.alias, entry.sig)
         }
         bagPathSucceeded = aliasSource.size > 0
@@ -180,23 +177,23 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
           const alias = firstLine.split(/\s+/)[1]
           if (!alias) continue
 
-          if (imports[alias]) {
+          if (aliasSource.has(alias)) {
             const existing = aliasSource.get(alias) ?? 'unknown'
             if (existing !== signature) {
               console.warn(`[resolveImportMap] alias collision for ${alias}; keeping ${existing}, skipping ${signature}`)
             }
             continue
           }
-
-          imports[alias] = `${dependencyBasePath}/${signature}`
           aliasSource.set(alias, signature)
         }
       } catch { /* legacy dir vanished mid-drain — the pool holds everything */ }
     }
   }
 
-  // Cache the alias map for in-session reuse by DependencyLoader.
-  // NOT consulted on the next boot — every cold boot re-derives from OPFS.
+  // Cache alias metadata for in-session dependency discovery and readable
+  // logs. DependencyLoader and ScriptPreloader execute the sig URL directly;
+  // neither imports through this alias. NOT consulted on the next boot —
+  // every cold boot re-derives from OPFS.
   ;(globalThis as any).__hypercombAliasMap = aliasSource
 
   return imports

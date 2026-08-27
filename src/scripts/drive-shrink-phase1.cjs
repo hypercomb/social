@@ -250,6 +250,51 @@ async function main() {
     ),
     JSON.stringify(installerSurface))
 
+  const directDependency = await page.evaluate(async () => {
+    const expected = document.title === 'Hypercomb'
+    if (!expected) return { expected }
+    const loader = window.ioc?.get?.('@hypercomb.social/DependencyLoader')
+    if (!loader) return { expected, loader: false }
+    const hex = bytes => [...new Uint8Array(bytes)]
+      .map(byte => byte.toString(16).padStart(2, '0')).join('')
+    const poolSig = hex(await crypto.subtle.digest(
+      'SHA-256', new TextEncoder().encode('dependencies')))
+    const source = '// @gate.test/direct\nglobalThis.__hcDirectSigGate = 7; export {};\n'
+    const sig = hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source)))
+    const root = await navigator.storage.getDirectory()
+    const pool = await root.getDirectoryHandle(poolSig, { create: true })
+    const handle = await pool.getFileHandle(`${sig}.js`, { create: true })
+    const writable = await handle.createWritable()
+    await writable.write(source)
+    await writable.close()
+    const previousAliases = globalThis.__hypercombAliasMap
+    const previousBeeDeps = globalThis.__hypercombBeeDeps
+    globalThis.__hypercombAliasMap = new Map([['@gate.test/direct', sig]])
+    delete globalThis.__hypercombBeeDeps
+    try {
+      await loader.load()
+      return {
+        expected,
+        loader: true,
+        controlled: !!navigator.serviceWorker?.controller,
+        executed: globalThis.__hcDirectSigGate === 7,
+        loaded: loader.loadedSignatures?.includes?.(sig) === true,
+        url: `/opfs/${poolSig}/${sig}`,
+      }
+    } finally {
+      globalThis.__hypercombAliasMap = previousAliases
+      globalThis.__hypercombBeeDeps = previousBeeDeps
+      delete globalThis.__hcDirectSigGate
+      try { await pool.removeEntry(`${sig}.js`) } catch {}
+    }
+  })
+  check('phase 4: dependency loader executes the OPFS signature URL, never its alias',
+    !directDependency.expected || (
+      directDependency.loader && directDependency.controlled
+        && directDependency.executed && directDependency.loaded
+    ),
+    JSON.stringify(directDependency))
+
   const pinRail = await page.evaluate(() => ({
     defined: !!customElements.get('hc-pinned-entrances'),
     mounted: !!document.querySelector('hc-pinned-entrances'),

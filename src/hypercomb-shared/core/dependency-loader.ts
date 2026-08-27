@@ -2,6 +2,7 @@
 
 import { EffectBus } from '@hypercomb/core'
 import { Store } from './store'
+import { importSignatureModule } from './signature-module-loader'
 
 export class DependencyLoader extends EventTarget {
 
@@ -149,10 +150,11 @@ export class DependencyLoader extends EventTarget {
 
   #verifyAndImport = async (sig: string, alias: string): Promise<string> => {
     const pureSig = sig.replace(/\.js$/i, '')
-    console.log(`[dependency-loader] importing ${alias} (${pureSig})`)
-    const mod = await import(/* @vite-ignore */ alias)
+    const poolSig = await Store.poolSignature(Store.DEPENDENCIES_MEANING)
+    console.log(`[dependency-loader] importing ${alias} by signature (${pureSig})`)
+    const mod = await importSignatureModule(poolSig, pureSig)
     void mod
-    console.log(`[dependency-loader] imported ${alias}`)
+    console.log(`[dependency-loader] imported ${alias} by signature`)
     return sig
   }
 
