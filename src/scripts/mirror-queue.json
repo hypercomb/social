@@ -2177,6 +2177,16 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "shrink-phase4-verified-module-fallback",
+      "title": "Mirror the Phase 4 verified module-fallback slice",
+      "run": null,
+      "note": "On an OPFS module miss, both service-worker shells now try the current origin and then posted or persisted known domains. Each host is probed in exact order: /<signature>, /content/<signature>, the legacy typed path, then /content/<legacy-typed-path>. Bytes must match the requested SHA-256 before they receive JavaScript MIME, enter Cache Storage, write through to the canonical OPFS pool, or execute; forged bytes and HTML SPA fallbacks are rejected. A fresh-origin browser proof recovered valid bytes, rejected the same bytes under a forged signature, and remained warm after the host files were removed. Installation remains a boot precondition until pinned root-package discovery lands, so Angular and the Angular builder Vite shell remain temporary. Validation passed 199 files / 1760 tests plus web and dev production builds. Manual: note-add is additive and would double-land.",
+      "commit": "436a4f6ac",
+      "unattended": false,
+      "created": "2026-08-27",
+      "status": "pending"
     }
   ]
 }
