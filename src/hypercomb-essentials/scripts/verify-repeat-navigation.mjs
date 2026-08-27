@@ -200,31 +200,49 @@ try {
         const renderer = window.ioc.get('@diamondcoreprocessor.com/ShowCellDrone')
         await new Promise((resolve, reject) => {
           let sawRevocation = false
+          let exercisingColdClick = false
           let atlasState = 'not churned'
+          let latestLabels = []
+          let latestShaded = []
           let offReadiness = () => {}
           let offCells = () => {}
-          const timer = setTimeout(() => {
+          const finish = (error) => {
+            clearTimeout(timer)
             offReadiness()
             offCells()
-            reject(new Error(`Dolphin readiness did not recover after atlas eviction (${atlasState})`))
+            if (error) reject(error)
+            else resolve()
+          }
+          const waitUntil = async (predicate, description, timeout = 8_000) => {
+            const started = performance.now()
+            while (performance.now() - started < timeout) {
+              if (predicate()) return
+              await new Promise(done => setTimeout(done, 8))
+            }
+            throw new Error(`Timed out ${description}`)
+          }
+          const timer = setTimeout(() => {
+            finish(new Error(`Dolphin readiness did not recover after atlas eviction (${atlasState})`))
           }, 15_000)
           const observe = payload => {
             const shaded = payload?.shadedLabels ?? []
+            if (Array.isArray(payload?.shadedLabels)) latestShaded = shaded
             if (localStorage.getItem('hc:diag') === '1') {
               console.log('[diag:readiness-event]', shaded.join(','))
             }
-            if (shaded.includes('dolphin')) {
+            if (shaded.includes('dolphin') && !exercisingColdClick) {
               // While eviction has legitimately revoked readiness, exercise
-              // the real canvas click and prove the navigation gate holds.
+              // the real canvas click. A cold click is ALLOWED: it diverts
+              // preload priority to this target, navigates, and accepts the
+              // honest delay represented by the shade.
               const canvas = document.querySelector('canvas')
               const point = renderer.hexMesh?.toGlobal?.({ x: 0, y: 0 })
               if (!canvas || !point) {
-                clearTimeout(timer)
-                offReadiness()
-                offCells()
-                reject(new Error('Dolphin cold-click target unavailable'))
+                finish(new Error('Dolphin cold-click target unavailable'))
                 return
               }
+              exercisingColdClick = true
+              sawRevocation = true
               const rect = canvas.getBoundingClientRect()
               const init = {
                 bubbles: true,
@@ -236,25 +254,35 @@ try {
               canvas.dispatchEvent(new PointerEvent('pointerdown', init))
               canvas.dispatchEvent(new PointerEvent('pointerup', init))
               canvas.dispatchEvent(new MouseEvent('click', init))
-              const segments = window.ioc.get('@hypercomb.social/Lineage').explorerSegments()
-              if (segments.length !== 0) {
-                clearTimeout(timer)
-                offReadiness()
-                offCells()
-                reject(new Error(`Cold Dolphin click navigated to /${segments.join('/')}`))
-                return
-              }
-              sawRevocation = true
+              const lineage = window.ioc.get('@hypercomb.social/Lineage')
+              const targetNames = Array.from({ length: 12 }, (_, n) => `calf-${String(n).padStart(2, '0')}`)
+              void (async () => {
+                try {
+                  await waitUntil(
+                    () => lineage.explorerSegments().join('/') === 'dolphin'
+                      && targetNames.every(name => renderer.renderedCells.has(name)),
+                    'for the diverted cold click to paint /dolphin',
+                  )
+                  lineage.explorerUp()
+                  await waitUntil(
+                    () => lineage.explorerSegments().length === 0
+                      && latestLabels.includes('dolphin')
+                      && !latestShaded.includes('dolphin'),
+                    'for Dolphin readiness to repair after returning',
+                  )
+                  finish()
+                } catch (error) {
+                  finish(error)
+                }
+              })()
               return
             }
-            if (!sawRevocation) return
-            clearTimeout(timer)
-            offReadiness()
-            offCells()
-            resolve()
+            if (!sawRevocation || exercisingColdClick) return
+            finish()
           }
           offReadiness = bus.on('render:tile-readiness', observe)
           offCells = bus.on('render:cell-count', payload => {
+            if (Array.isArray(payload?.labels)) latestLabels = payload.labels
             if (!payload?.labels?.includes('dolphin')) return
             observe(payload)
           })
