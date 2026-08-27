@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/core/history.service.ts
-import { CHILD_SLOTS, EffectBus, SignatureService, SignatureStore, USAGE_IOC_KEY, isPoolAddress, packedStoreEnabled, poolAddresses, poolMeaningOf, type UsageRanker } from '@hypercomb/core'
+import { CHILD_SLOTS, EffectBus, SignatureService, SignatureStore, USAGE_IOC_KEY, healLegacyLayer, isMetaEnvelope, isPoolAddress, metaPayloadOf, packedStoreEnabled, poolAddresses, poolMeaningOf, type MetaEnvelope, type UsageRanker } from '@hypercomb/core'
 import { lineageKey, rawLineageKey } from './lineage-key.js'
 import { canonicalizeLayer } from './canonical-layer.js'
 import { isBareLayer } from './child-sig-guard.js'
@@ -872,6 +872,48 @@ export class HistoryService {
    */
   static readonly canonicalizeLayer = canonicalizeLayer<LayerContent>
 
+  /** Promote legacy artifact signatures to deterministic typed incidences at
+   *  the write boundary. Reads stay passive; the next ordinary layer write is
+   *  what materializes the healed metadata records. */
+  static readonly #canonicalArtifactReferences = async (
+    layer: LayerContent,
+  ): Promise<LayerContent> => {
+    const store = get<{
+      getResourceLocal?: (sig: string) => Promise<Blob | null>
+      putResource?: (blob: Blob) => Promise<string>
+    }>('@hypercomb.social/Store')
+    if (!store?.getResourceLocal || !store.putResource) return layer
+
+    const healed = await healLegacyLayer(layer, {
+      sign: async bytes => SignatureService.sign(
+        bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+      ),
+      readMeta: async (sig): Promise<MetaEnvelope | null> => {
+        const blob = await store.getResourceLocal!(sig)
+        if (!blob || blob.size > 64 * 1024) return null
+        try {
+          const parsed = JSON.parse(await blob.text())
+          return isMetaEnvelope(parsed) ? parsed : null
+        } catch { return null }
+      },
+      materialize: async record => {
+        if (record.kind !== 'meta') return
+        const exact = record.bytes.buffer.slice(
+          record.bytes.byteOffset,
+          record.bytes.byteOffset + record.bytes.byteLength,
+        ) as ArrayBuffer
+        const written = await store.putResource!(new Blob([exact], { type: 'application/json' }))
+        if (written !== record.sig) {
+          throw new Error(`[history] metadata write mismatch: expected ${record.sig}, got ${written}`)
+        }
+      },
+    })
+    if (healed.incompatible.length > 0) {
+      throw new Error(`[history] invalid artifact references in: ${healed.incompatible.join(', ')}`)
+    }
+    return healed.layer as LayerContent
+  }
+
   /**
    * Commit a complete layer snapshot for a lineage.
    *
@@ -919,10 +961,7 @@ export class HistoryService {
     if (this.#previewSeeds.has(locationSig)) {
       throw new Error('[history] refusing to commit at a previewed location — adopt or dismiss the preview first')
     }
-    const canonical = HistoryService.canonicalizeLayer(layer)
-    const json = JSON.stringify(canonical)
-    const bytes = new TextEncoder().encode(json)
-    const layerSig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
+    const { sig: layerSig, bytes, layer: canonical } = await HistoryService.#signLayer(layer)
 
     // Dedup: if this sig matches the bag's current latest (real head or
     // this session's virtual seed), the layer is unchanged. Skip the
@@ -931,7 +970,7 @@ export class HistoryService {
     if (lastSig === layerSig) return layerSig
 
     const bag = await this.getBag(locationSig)
-    await this.#ensureEmptyMarker(bag, layer.name, locationSig)
+    await this.#ensureEmptyMarker(bag, canonical.name, locationSig)
 
     // Materialize a pending VIRTUAL seed as a real marker FIRST, so the
     // bag's timeline reads empty → pasted state → this commit, and undo
@@ -2035,6 +2074,9 @@ export class HistoryService {
    */
   readonly #lineageBySig = new Map<string, string>()
 
+  /** Metadata incidence sig → its declared layer artifact. */
+  readonly #metaLayerTarget = new Map<string, string>()
+
   /**
    * Per-bag "fully warm" flag. Set when #warmBag has read every
    * marker file in the bag and populated #preloaderCache + reverse
@@ -2080,8 +2122,11 @@ export class HistoryService {
    */
   readonly #resolveLayerLocal = async (
     layerSig: string,
+    active: ReadonlySet<string> = new Set(),
   ): Promise<LayerContent | null> => {
     if (!HistoryService.#SIG_RE.test(layerSig)) return null
+    if (active.has(layerSig)) return null
+    const nextActive = new Set(active).add(layerSig)
     const parsedHit = this.#parsedLayerCache.get(layerSig)
     if (parsedHit) return parsedHit
     const cached = this.#preloaderCache.get(layerSig)
@@ -2094,6 +2139,15 @@ export class HistoryService {
           const hydrated = HistoryService.#hydrateLayer(parsed)
           this.#parsedLayerCache.set(layerSig, hydrated)
           return hydrated
+        }
+        if (isMetaEnvelope(parsed)) {
+          const payload = metaPayloadOf(parsed)!
+          if (payload.kind === 'layer') {
+            this.#metaLayerTarget.set(layerSig, payload.sig)
+            const target = await this.#resolveLayerLocal(payload.sig, nextActive)
+            if (target) this.#parsedLayerCache.set(layerSig, target)
+            return target
+          }
         }
       } catch { /* fall through to pool */ }
     }
@@ -2115,6 +2169,16 @@ export class HistoryService {
             this.#parsedLayerCache.set(layerSig, hydrated)
             this.#preloaderCache.set(layerSig, poolBytes.buffer as ArrayBuffer)
             return hydrated
+          }
+          if (isMetaEnvelope(parsed)) {
+            const payload = metaPayloadOf(parsed)!
+            if (payload.kind === 'layer') {
+              this.#metaLayerTarget.set(layerSig, payload.sig)
+              this.#preloaderCache.set(layerSig, poolBytes.buffer as ArrayBuffer)
+              const target = await this.#resolveLayerLocal(payload.sig, nextActive)
+              if (target) this.#parsedLayerCache.set(layerSig, target)
+              return target
+            }
           }
         } catch { /* malformed pool file — fall through */ }
       }
@@ -2166,7 +2230,7 @@ export class HistoryService {
     // network. The Store coalesces callers, negative-caches misses for a
     // TTL, and announces arrival (`content:arrived`) so gated renders
     // retry. Inert when no broker/host is configured.
-    void store?.fetchLayerFromHost?.(layerSig)
+    void store?.fetchLayerFromHost?.(this.#metaLayerTarget.get(layerSig) ?? layerSig)
     return null
   }
 
@@ -2410,11 +2474,12 @@ export class HistoryService {
    *  WITHOUT committing it. Backs sealSubtree's node materialisation. */
   static readonly #signLayer = async (
     layer: LayerContent,
-  ): Promise<{ sig: string; bytes: Uint8Array }> => {
-    const canonical = HistoryService.canonicalizeLayer(layer)
+  ): Promise<{ sig: string; bytes: Uint8Array; layer: LayerContent }> => {
+    const withMeta = await HistoryService.#canonicalArtifactReferences(layer)
+    const canonical = HistoryService.canonicalizeLayer(withMeta)
     const bytes = new TextEncoder().encode(JSON.stringify(canonical))
     const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
-    return { sig, bytes }
+    return { sig, bytes, layer: canonical }
   }
 
   /** Pool-write layer bytes by sig (additive, content-addressed, dedup) with NO
@@ -2432,10 +2497,10 @@ export class HistoryService {
    * and need only its sig to hand to a parent's children delta.
    */
   public readonly materializeLayer = async (layer: LayerContent): Promise<string> => {
-    const { sig, bytes } = await HistoryService.#signLayer(layer)
+    const { sig, bytes, layer: canonical } = await HistoryService.#signLayer(layer)
     await HistoryService.#poolWriteLayer(sig, bytes)
     this.#preloaderCache.set(sig, bytes.buffer as ArrayBuffer)
-    this.#parsedLayerCache.set(sig, HistoryService.canonicalizeLayer(layer))
+    this.#parsedLayerCache.set(sig, canonical)
     return sig
   }
 

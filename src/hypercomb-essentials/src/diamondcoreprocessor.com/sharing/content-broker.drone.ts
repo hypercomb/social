@@ -271,7 +271,7 @@ const MAX_MISS_TTL_MS = 30 * 60_000
 // flag, same sha256 harmlessness as the mirrors.
 const BETA_FALLBACK_DOMAINS = ['jwize.com', 'pluginthematrix.io', 'content.jwize.com'] as const
 
-export type ContentType = 'layer' | 'resource' | 'dependency'
+export type ContentType = 'layer' | 'resource' | 'dependency' | 'bee'
 
 // Visuals-by-composedSig is the second flavor of fetch this drone
 // handles. Unlike layer/resource/dependency (content-addressed by
@@ -342,6 +342,10 @@ interface StoreApi {
   getLayerBytes?: (sig: string) => Promise<Uint8Array | null>
   getLayerPoolBytes?: (sig: string) => Promise<Uint8Array | null>
   writeLayerBytes?: (sig: string, bytes: ArrayBuffer) => Promise<void>
+  getDependencyBytes?: (sig: string) => Promise<Uint8Array | null>
+  writeDependencyBytes?: (sig: string, bytes: Uint8Array) => Promise<void>
+  getBeeBytes?: (sig: string) => Promise<Uint8Array | null>
+  writeBeeBytes?: (sig: string, bytes: Uint8Array) => Promise<void>
 }
 
 // ── helpers ─────────────────────────────────────────────────────────
@@ -1731,7 +1735,10 @@ export class ContentBrokerDrone extends Drone {
       } else if (type === 'resource' && store?.putResource) {
         await store.putResource(new Blob([bytes as BlobPart]))
       } else if (type === 'dependency') {
-        await this.#writeDependencyBytes(sig, bytes)
+        if (store?.writeDependencyBytes) await store.writeDependencyBytes(sig, bytes)
+        else await this.#writeDependencyBytes(sig, bytes)
+      } else if (type === 'bee' && store?.writeBeeBytes) {
+        await store.writeBeeBytes(sig, bytes)
       }
     } catch (err) {
       console.warn('[content-broker] persist failed (still returning bytes)', { sig: sig.slice(0, 12), type, err })
@@ -1763,7 +1770,12 @@ export class ContentBrokerDrone extends Drone {
         return new Uint8Array(await blob.arrayBuffer())
       }
       if (type === 'dependency') {
-        return await this.#readDependencyBytes(sig)
+        return store.getDependencyBytes
+          ? await store.getDependencyBytes(sig)
+          : await this.#readDependencyBytes(sig)
+      }
+      if (type === 'bee') {
+        return store.getBeeBytes ? await store.getBeeBytes(sig) : null
       }
     } catch { /* fall through */ }
     return null
