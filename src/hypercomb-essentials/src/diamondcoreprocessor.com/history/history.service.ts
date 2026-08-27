@@ -7,6 +7,14 @@ import { parseHeadIndex, buildFlushIndex } from './head-index.js'
 import { chooseSealChildHandle } from './seal-preference.js'
 import { canonicalise, parse as parseRecord, type DeltaRecord } from './delta-record.js'
 import { reduce as reduceRecords, type HydratedState } from './delta-reducer.js'
+import {
+  mergePreloadStamp,
+  preloadPassCompleted,
+  preloadStampSatisfies,
+  remainingAncestorPreloadDepth,
+  takePreloadBreadthSlice,
+  type PreloadDepthStamp,
+} from './preload-policy.js'
 export type { DeltaRecord } from './delta-record.js'
 export type { HydratedState } from './delta-reducer.js'
 
@@ -3119,14 +3127,11 @@ export class HistoryService {
    * Logs progress every 50 layers so a long boot doesn't look frozen,
    * and emits a summary at the end with depth-binned counts.
    */
-  // Bounded neighbourhood warm, BEST-FIRST by local usage: warm the current
-  // tile's OWN content first (image + every slot), then descend into its
-  // most-USED child, and so on down the lineage — up to this depth. NOT the
-  // whole hive (an unbounded walk fetched ~1500 layers and starved paint);
-  // tiles beyond the bound warm ON DEMAND as the user navigates into them.
+  // Bounded neighbourhood warm. The current layer is always first, followed
+  // breadth-first by its immediate destinations. Usage only orders peers at
+  // the same depth; it never lets a deep hot path outrank a cold sibling.
   static readonly #PRELOAD_MAX_DEPTH = 3
-  // Best-first can chase a hot path deep within the depth bound; cap total
-  // tiles warmed per pass so a pathological neighbourhood can't run away.
+  // Cap total tiles per pass so a pathological neighbourhood cannot run away.
   static readonly #PRELOAD_NODE_BUDGET = 512
   public readonly preloadFromRoot = async (
     rootSig: string,
@@ -3141,13 +3146,15 @@ export class HistoryService {
     // path pass it; the sig-only callers (proximity roots) keep the old
     // behaviour.
     rootSegments: readonly string[] = [],
-  ): Promise<void> => {
-    if (!HistoryService.#SIG_RE.test(rootSig)) return
+  ): Promise<boolean> => {
+    if (!HistoryService.#SIG_RE.test(rootSig)) return false
     const startMs = performance.now()
+    const epochAtStart = this.#treeEpoch
     const visited = new Set<string>([rootSig])
     const depthHistogram = new Map<number, number>()
     let cacheHits = 0
     let walked = 0
+    let incomplete = false
 
     // Cooperative slicing — yield whenever a slice exceeds ~12ms so an
     // in-flight render keeps the event loop.
@@ -3158,15 +3165,9 @@ export class HistoryService {
       sliceStart = performance.now()
     }
 
-    // BEST-FIRST by local usage. A single priority frontier of tiles; each
-    // round drains the highest-weight slice (bounded worker pool), warms each
-    // tile's OWN content (image + every slot) so the TILE itself becomes
-    // available/bright FIRST, then enqueues its children weighted by usage.
-    // Popping the highest weight next makes the walk descend the most-USED
-    // path down the lineage ("move down as you finish the parent") instead of
-    // finishing every level. Cold participant (all weights 0) → the depth
-    // tiebreak makes it shallow-first, i.e. the prior breadth-first behaviour.
-    // Best-effort throughout: never AWAIT the tracker, never gate real-time.
+    // Strict breadth-first, usage-ordered within each level. The entered layer
+    // must actually finish warming before any child starts; all immediate
+    // sibling destinations finish before a grandchild can begin.
     const ranker = get<UsageRanker>(USAGE_IOC_KEY)
     const weightOf = (sig: string): number => (ranker ? ranker.weight(sig) : 0)
     // BALANCE, not dominance. Raw usage weight is milliseconds of dwell plus a
@@ -3208,9 +3209,7 @@ export class HistoryService {
     const CONCURRENCY = 12
 
     while (frontier.length && walked < HistoryService.#PRELOAD_NODE_BUDGET && this.#preloadGeneration === gen) {
-      // Best balance first: usage compressed against distance, ties shallower.
-      frontier.sort((a, b) => (b.score - a.score) || (a.depth - b.depth))
-      const slice = frontier.splice(0, CONCURRENCY)
+      const slice = takePreloadBreadthSlice(frontier, CONCURRENCY)
       let cursor = 0
       const worker = async (): Promise<void> => {
         while (cursor < slice.length) {
@@ -3219,12 +3218,12 @@ export class HistoryService {
           const wasCached = this.#parsedLayerCache.has(node.sig) || this.#preloaderCache.has(node.sig)
           const layer = await this.getLayerBySig(node.sig)
           await yieldIfDue()
-          if (!layer) continue
+          if (!layer) { incomplete = true; continue }
           walked++
           depthHistogram.set(node.depth, (depthHistogram.get(node.depth) ?? 0) + 1)
           if (wasCached) cacheHits++
           if (walked % 50 === 0) {
-            console.log(`[preload] best-first progress: ${walked} tiles warmed (depth ≤ ${node.depth})`)
+            console.log(`[preload] breadth-first progress: ${walked} tiles warmed (depth ≤ ${node.depth})`)
           }
           // Warm this tile's OWN content (all slots + the nested image) so it
           // renders bright without a network hop, BEFORE descending to its
@@ -3248,7 +3247,9 @@ export class HistoryService {
             // addressed and the epoch covers everything else, so a hit here is
             // proof the bytes are already resident.
             this.#warmedTiles.set(node.sig, this.#treeEpoch)
-            this.#warmLayerPack(node.sig, layer, store, gen)
+            // Dispatch order alone is not residency. Complete the current
+            // depth's packs before allowing the frontier to descend.
+            await this.#warmLayerPack(node.sig, layer, store, gen)
           }
           // PREPARE THE VIEW as well as the bytes. Warming content makes the
           // tiles able to appear; resolving this layer's child membership is
@@ -3271,29 +3272,32 @@ export class HistoryService {
             // prepares and 208 marker lookups on a single return to the root).
             // Paying that to be told "already prepared" is the definition of
             // work that shouldn't happen twice.
-            this.#preparedViews.set(node.sig, this.#treeEpoch)
             const renderer = get<{ prepareView?: (sig: string, segments: readonly string[]) => Promise<boolean> }>('@diamondcoreprocessor.com/ShowCellDrone')
             if (renderer?.prepareView) {
               // Under this location's OWN HEAD sig — the key the render pass
               // looks the memo up by. The sig the parent recorded for this
               // child goes stale the moment the child commits (per-page
               // history), and a memo keyed by it would never hit.
-              void (async () => {
-                try {
-                  const name = String(layer.name ?? '')
-                  const locSig = await this.sign({ explorerSegments: () => ownSegments })
-                  const head = ownSegments.length && name
-                    ? await this.latestMarkerSigFor(locSig, name)
-                    : node.sig
-                  // A prepare that came back INCOMPLETE (cold membership, a
-                  // child layer still absent) is not a prepared view — and the
-                  // stamp above was written before we could know that. Leaving
-                  // it would orphan this view for the whole epoch: never
-                  // prepared, never retried, permanently slow to open.
-                  const prepared = await renderer.prepareView!(head || node.sig, ownSegments)
-                  if (!prepared) this.#preparedViews.delete(node.sig)
-                } catch { this.#preparedViews.delete(node.sig) }
-              })()
+              this.#preparedViews.set(node.sig, this.#treeEpoch)
+              try {
+                const name = String(layer.name ?? '')
+                const locSig = await this.sign({ explorerSegments: () => ownSegments })
+                const head = ownSegments.length && name
+                  ? await this.latestMarkerSigFor(locSig, name)
+                  : node.sig
+                // "Prepared" includes the exact view object consumed by first
+                // paint. Join it before advancing depth; dispatch is not proof.
+                const prepared = await renderer.prepareView!(head || node.sig, ownSegments)
+                if (!prepared) {
+                  incomplete = true
+                  this.#preparedViews.delete(node.sig)
+                }
+              } catch {
+                incomplete = true
+                this.#preparedViews.delete(node.sig)
+              }
+            } else {
+              incomplete = true
             }
           }
           // Enqueue children weighted by usage, bounded by depth.
@@ -3325,11 +3329,23 @@ export class HistoryService {
       .sort(([a], [b]) => a - b)
       .map(([d, n]) => `d${d}:${n}`)
       .join(' ')
+    const complete = preloadPassCompleted({
+      frontierRemaining: frontier.length,
+      incomplete,
+      generationAtStart: gen,
+      generationNow: this.#preloadGeneration,
+      epochAtStart,
+      epochNow: this.#treeEpoch,
+    })
+    const outcome = superseded || this.#preloadGeneration !== gen
+      ? 'SUPERSEDED by navigation'
+      : complete ? 'done' : 'INCOMPLETE'
     console.log(
-      `[preload] preloadFromRoot ${superseded || this.#preloadGeneration !== gen ? 'SUPERSEDED by navigation' : 'done'} ` +
-      `(best-first): ${walked} tiles warmed from ${rootSig.slice(0, 12)} ` +
+      `[preload] preloadFromRoot ${outcome} ` +
+      `(breadth-first): ${walked} tiles warmed from ${rootSig.slice(0, 12)} ` +
       `(${cacheHits} already cached) in ${elapsed}ms. depths: ${depthSummary}`
     )
+    return complete
   }
 
   /**
@@ -3352,16 +3368,16 @@ export class HistoryService {
    * whole-hive re-encode racing first paint. Minting is the optimize phase's
    * job (manifest-optimizer.drone), where it is budgeted and off the paint.
    */
-  readonly #warmLayerPack = (
+  readonly #warmLayerPack = async (
     layerSig: string,
     layer: LayerContent,
     store: StoreContentWarm | undefined,
     gen: number,
-  ): void => {
+  ): Promise<void> => {
     const readPack = (store as unknown as {
       readChildrenManifest?: (sig: string) => Promise<Array<Record<string, unknown>> | null>
     } | undefined)?.readChildrenManifest
-    if (!readPack) { this.#warmTileContent(layer, store, gen); return }
+    if (!readPack) { await this.#warmTileContent(layer, store, gen); return }
     // ABANDONED WORK IS NOT DONE WORK. The caller stamps `#warmedTiles` BEFORE
     // dispatching this (so overlapping warms don't pile up on the same tile),
     // which means a pass cut short by navigation would otherwise leave the tile
@@ -3369,25 +3385,23 @@ export class HistoryService {
     // only fills whenever something unrelated happens to touch it. Un-stamp on
     // every bail so the next pass picks it up.
     const abandon = (): void => { this.#warmedTiles.delete(layerSig) }
-    void (async () => {
-      try {
+    try {
+      if (this.#preloadGeneration !== gen) { abandon(); return }
+      const pack = await readPack(layerSig)
+      if (!pack || pack.length === 0) { await this.#warmTileContent(layer, store, gen); return }
+      const adopt = get<{ adoptPackedVisual?: (e: unknown) => void }>('@diamondcoreprocessor.com/ShowCellDrone')
+      const adoptStatic = (adopt?.constructor as { adoptPackedVisual?: (e: unknown) => void } | undefined)
+      let carriedVisuals = 0
+      for (const entry of pack) {
         if (this.#preloadGeneration !== gen) { abandon(); return }
-        const pack = await readPack(layerSig)
-        if (!pack || pack.length === 0) { this.#warmTileContent(layer, store, gen); return }
-        const adopt = get<{ adoptPackedVisual?: (e: unknown) => void }>('@diamondcoreprocessor.com/ShowCellDrone')
-        const adoptStatic = (adopt?.constructor as { adoptPackedVisual?: (e: unknown) => void } | undefined)
-        let carriedVisuals = 0
-        for (const entry of pack) {
-          if (this.#preloadGeneration !== gen) { abandon(); return }
-          adoptStatic?.adoptPackedVisual?.(entry)
-          if ((entry as { visual?: unknown } | null)?.visual) carriedVisuals++
-        }
-        // The pack answered for none of its tiles — it predates the visuals
-        // moving in. It carries `props` too, but nothing reads those, so
-        // without the walk this layer's tiles have no warm content at all.
-        if (carriedVisuals === 0) this.#warmTileContent(layer, store, gen)
-      } catch { this.#warmTileContent(layer, store, gen) }
-    })()
+        adoptStatic?.adoptPackedVisual?.(entry)
+        if ((entry as { visual?: unknown } | null)?.visual) carriedVisuals++
+      }
+      // The pack answered for none of its tiles — it predates the visuals
+      // moving in. It carries `props` too, but nothing reads those, so
+      // without the walk this layer's tiles have no warm content at all.
+      if (carriedVisuals === 0) await this.#warmTileContent(layer, store, gen)
+    } catch { await this.#warmTileContent(layer, store, gen) }
   }
 
   /** Warm a tile's OWN content signatures — every slot plus the image nested
@@ -3396,7 +3410,7 @@ export class HistoryService {
    *  are layers, warmed by the walk itself). LocalOnly (memory→OPFS, never
    *  host) and fire-and-forget: a background warm must not 404 on an absent or
    *  historical sig, and real-time render is never gated on it. */
-  #warmTileContent = (layer: LayerContent, store: StoreContentWarm | undefined, gen?: number): void => {
+  #warmTileContent = async (layer: LayerContent, store: StoreContentWarm | undefined, gen?: number): Promise<void> => {
     const getLocal = store?.getResourceLocal
     const collect = store?.collectSignatures
     if (!getLocal || !collect) return
@@ -3414,22 +3428,20 @@ export class HistoryService {
     // EVERY blob through store.resolve, which JSON.parses megabyte IMAGE
     // bytes on the main thread: at proximity-walk scale that stacked into a
     // 45s+ main-thread freeze. Never parse what you only need cached.
-    void (async () => {
-      for (const s of sigs) {
-        // Stale the moment the user navigates again — stop contending.
-        if (gen !== undefined && this.#preloadGeneration !== gen) return
-        try {
-          const blob = await getLocal(s)
-          if (!blob || blob.size > 32768) continue
-          const props = JSON.parse(await blob.text()) as
-            { small?: { image?: unknown }; flat?: { small?: { image?: unknown } } } | null
-          const img = props?.flat?.small?.image ?? props?.small?.image
-          if (typeof img === 'string' && HistoryService.#SIG_RE.test(img)) {
-            await getLocal(img)
-          }
-        } catch { /* not JSON / absent — any bytes read are warmed regardless */ }
-      }
-    })()
+    for (const s of sigs) {
+      // Stale the moment the user navigates again — stop contending.
+      if (gen !== undefined && this.#preloadGeneration !== gen) return
+      try {
+        const blob = await getLocal(s)
+        if (!blob || blob.size > 32768) continue
+        const props = JSON.parse(await blob.text()) as
+          { small?: { image?: unknown }; flat?: { small?: { image?: unknown } } } | null
+        const img = props?.flat?.small?.image ?? props?.small?.image
+        if (typeof img === 'string' && HistoryService.#SIG_RE.test(img)) {
+          await getLocal(img)
+        }
+      } catch { /* not JSON / absent — any bytes read are warmed regardless */ }
+    }
   }
 
   // Bounded NEIGHBOURHOOD pre-warm — the "passive warmer" the disabled boot
@@ -3444,16 +3456,17 @@ export class HistoryService {
   // fs-churn 'change' events at one location don't re-walk. Driven from
   // runtime-initializer on boot + every lineage 'change' (debounced + idle
   // there). Non-fatal: a cold render is correct, just slower.
-  /**
-   * Head sigs already warmed this session. A SET, not a single slot: dedup on
-   * "the last head warmed" only caught back-to-back churn at ONE location, so
-   * the commonest movement there is — into a tile and straight back out —
-   * re-walked the parent's whole subtree every time, warming what was warm
-   * seconds ago. A head sig is content-addressed, so membership here can never
-   * be wrong: change the location's content and its head is a DIFFERENT sig
-   * that simply isn't in the set. Nothing to invalidate, ever.
-   */
-  readonly #warmedHeads = new Set<string>()
+  /** Greatest fully completed radius for each immutable head in this tree
+   * epoch. A shallow ancestor warm must not satisfy a later depth-3 request. */
+  readonly #warmedDepthByHead = new Map<string, PreloadDepthStamp>()
+  /** Coalesce same-head requests without confusing in-flight work with
+   * completed work. A deeper caller joins a shallow pass, then continues. */
+  readonly #warmingDepthByHead = new Map<string, {
+    depth: number
+    generation: number
+    epoch: number
+    promise: Promise<void>
+  }>()
   /** Layer sigs whose OWN content (slots + nested image) has been warmed, and
    *  the tree epoch it was warmed at. See the guard in preloadFromRoot. */
   readonly #warmedTiles = new Map<string, number>()
@@ -3551,7 +3564,13 @@ export class HistoryService {
       try {
         const locationSig = await this.sign({ explorerSegments: () => ancestor })
         if (!locationSig) continue
-        await this.preloadNeighbourhood(locationSig, 1, ancestor)
+        // Spend the remaining radius from each ancestor going sideways and
+        // down. Nearby ancestors expose siblings and their children.
+        await this.preloadNeighbourhood(
+          locationSig,
+          remainingAncestorPreloadDepth(depth, up),
+          ancestor,
+        )
       } catch { /* opportunistic — a cold render is correct, just slower */ }
     }
   }
@@ -3572,15 +3591,37 @@ export class HistoryService {
       try { await this.#warmLineageHead(locationSig) } catch { return }
       headSig = this.#latestSigByLineage.get(locationSig)
     }
-    if (!headSig || this.#warmedHeads.has(headSig)) return
-    this.#warmedHeads.add(headSig)
+    if (!headSig) return
+    if (preloadStampSatisfies(this.#warmedDepthByHead.get(headSig), maxDepth, this.#treeEpoch)) return
+
     const genAtStart = this.#preloadGeneration
-    await this.preloadFromRoot(headSig, maxDepth, segments)
-    // A walk cut short by navigation warmed only PART of this neighbourhood, so
-    // remembering the head as warmed would deny it the retry it needs. Content-
-    // addressed membership can never be wrong about identity, but it can be
-    // wrong about completeness — forget an abandoned pass.
-    if (this.#preloadGeneration !== genAtStart) this.#warmedHeads.delete(headSig)
+    const epochAtStart = this.#treeEpoch
+    const existing = this.#warmingDepthByHead.get(headSig)
+    if (existing && existing.generation === genAtStart && existing.epoch === epochAtStart) {
+      await existing.promise
+      if (this.#preloadGeneration !== genAtStart) return
+      if (preloadStampSatisfies(this.#warmedDepthByHead.get(headSig), maxDepth, epochAtStart)) return
+    }
+
+    const run = (async (): Promise<void> => {
+      const complete = await this.preloadFromRoot(headSig, maxDepth, segments)
+      // Scheduled, capped, incomplete, superseded, or invalidated work never
+      // earns a completion stamp. Its useful prefix remains cached, but a
+      // later/deeper request is still allowed to finish the radius.
+      if (complete && this.#preloadGeneration === genAtStart && this.#treeEpoch === epochAtStart) {
+        this.#warmedDepthByHead.set(
+          headSig,
+          mergePreloadStamp(this.#warmedDepthByHead.get(headSig), maxDepth, epochAtStart),
+        )
+      }
+    })()
+    const record = { depth: maxDepth, generation: genAtStart, epoch: epochAtStart, promise: run }
+    this.#warmingDepthByHead.set(headSig, record)
+    try {
+      await run
+    } finally {
+      if (this.#warmingDepthByHead.get(headSig) === record) this.#warmingDepthByHead.delete(headSig)
+    }
   }
 
   /**
