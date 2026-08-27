@@ -9,7 +9,7 @@ export const signatureModuleUrl = (poolSignature: string, contentSignature: stri
   return `/opfs/${poolSignature.toLowerCase()}/${contentSignature.toLowerCase()}`
 }
 
-const browserImport: ModuleImporter = url => import(/* @vite-ignore */ url)
+const browserImport: ModuleImporter = url => import(url)
 
 /** Import immutable module bytes by signature; aliases never enter execution. */
 export const importSignatureModule = (

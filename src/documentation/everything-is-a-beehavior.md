@@ -637,16 +637,22 @@ owns everything acquisition:
 
 ## Phase 5 — one framework-free shim
 
-- [ ] Replace `bootstrapApplication` with a plain TS boot — by now all chrome
-  is element-shaped, so Angular has nothing left to render. `router-outlet`
-  collapses (hash = tile selection; no view navigates the document).
+- [x] Replace `bootstrapApplication` with a plain TS boot — web now upgrades a
+  light-DOM `app-root`, initializes the signed runtime, then mounts the
+  element-shaped chrome. `router-outlet`, the Angular app config/routes and
+  the dead home/header component wrappers retired with it. The production
+  shell is a stable `main.js` + integrity-checked `styles.css`; its initial JS
+  is about 248 KB minified and contains no Angular runtime markers.
 - [ ] Collapse web + dev into **one shim, two configs**: web = OPFS/domain
   delivery; dev = the dev server serving essentials dist under the same
   `/<sig>` contract with watch-rebuild (no Vite in the load path — the
   direct `side-effects` import survives only as long as the dev shell does).
-- [ ] The shell-surfaces host itself sheds Angular (its registry is already
-  type-only on `Type<unknown>`): a ~150-LOC custom-element reconciler in the
-  shim, keyed by name, order-sorted, survivors never recreated.
+  **Web half complete:** `scripts/serve.mjs` is a plain Node static/watch
+  server and serves compiler output verbatim; no Vite client, request-time
+  transforms or import rewriting. The separate dev shell remains to fold in.
+- [x] The shell-surfaces host itself sheds Angular: the 78-line
+  `hc-shell-surfaces` custom-element reconciler is keyed by name,
+  order-sorted, and never recreates survivors.
 - [ ] Retire `@hypercomb/shared` — nothing imports it; the path alias goes.
 - [ ] **Stretch:** split `store.ts` (2,011) into a kernel read side
   (read-by-sig, pool addressing, sigbag max-marker resolution) and a

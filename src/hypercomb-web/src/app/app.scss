@@ -35,7 +35,7 @@
 //
 // Hiding is done by attribute selectors with high specificity to win
 // against each component's own `:host { display: block }` rule.
-:host.view-website {
+app-root.view-website {
   & > hc-controls-bar,
   & > hc-history-viewer,
   & > hc-notes-strip,
@@ -84,14 +84,14 @@
 
 // (#pixi-host omitted — reparented to <body>, so this `:host` selector can't
 // reach it; the intro-lock's max z-index already covers the canvas anyway.)
-:host.intro-active hc-controls-bar,
-:host.intro-active hc-tile-editor,
-:host.intro-active hc-portal-overlay,
-:host.intro-active hc-sensitivity-bar,
-:host.intro-active hc-docs-overlay,
-:host.intro-active hc-confirm-dialog,
-:host.intro-active .update-status-dock,
-:host.intro-active .header-bar {
+app-root.intro-active hc-controls-bar,
+app-root.intro-active hc-tile-editor,
+app-root.intro-active hc-portal-overlay,
+app-root.intro-active hc-sensitivity-bar,
+app-root.intro-active hc-docs-overlay,
+app-root.intro-active hc-confirm-dialog,
+app-root.intro-active .update-status-dock,
+app-root.intro-active .header-bar {
   display: none !important;
 }
 
@@ -186,7 +186,7 @@ app-header {
   min-width: 0;
 }
 
-:host {
+app-root {
   display: block;
 
   &.move-mode::after {

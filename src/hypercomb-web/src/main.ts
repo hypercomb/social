@@ -50,27 +50,24 @@ import '@hypercomb/shared/core/invite-capture'
 // `/header` slash command (auto-wires via ioc.onRegister).
 import '@hypercomb/shared/core/header-size'
 
-import { bootstrapApplication } from '@angular/platform-browser'
-import { EffectBus } from '@hypercomb/core'
-import { Store } from '@hypercomb/shared'
+import { BEE_RESOLVER_KEY, EffectBus } from '@hypercomb/core'
+import { Store } from '@hypercomb/shared/core/store'
 import { PACKED_STORE_MEANING } from '@hypercomb/shared/core/packed-store-engine'
 import { packedStoreBlocksBoot } from '@hypercomb/shared/core/packed-store-gate'
 import { fetchPinnedPackage } from './setup/pinned-package'
 import type { BootStatus } from './setup/ensure-install'
 import type { SentinelBridge } from './setup/sentinel-bridge'
 import { cacheImportMap, IMPORT_MAP_STORAGE_KEY, resolveImportMap } from './setup/resolve-import-map'
-import { appConfig } from './app.config'
 import { App } from './app/app'
-import {
-  DependencyLoader,
-  importSignatureModule,
-  initializeRuntime,
-  protectOriginStorage,
-} from '@hypercomb/shared/core'
+import { DependencyLoader } from '@hypercomb/shared/core/dependency-loader'
+import { ScriptPreloader } from '@hypercomb/shared/core/script-preloader'
+import { importSignatureModule } from '@hypercomb/shared/core/signature-module-loader'
+import { initializeRuntime } from '@hypercomb/shared/core/runtime-initializer'
+import { protectOriginStorage } from '@hypercomb/shared/core/storage-persistence'
 import { postCommunityDomainsToServiceWorker } from '@hypercomb/shared/core/sw-domains'
 
 // Ensure side-effect registration
-const _deps = [DependencyLoader]
+const _deps = [DependencyLoader, ScriptPreloader]
 type AcquisitionModule = typeof import('./setup/acquisition-bootstrap')
 
 const loadAcquisition = async (): Promise<AcquisitionModule> => {
@@ -250,24 +247,23 @@ const bootstrap = async (): Promise<void> => {
   // we reload to commit the new state.
   const bootSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
 
-  // Load dependency namespaces so services self-register before Angular renders
+  // Load dependency namespaces so services self-register before the shell renders.
   const loader = get('@hypercomb.social/DependencyLoader') as DependencyLoader | undefined
   await loader?.load?.()
   ;(window as any).__hcBoot('DependencyLoader.load done')
 
-  // Run runtime init (i18n catalogs, layer materialization, etc.) BEFORE
-  // bootstrapApplication. Without this, bootstrap fires Angular's first
-  // change-detection pass while CoreAdapter.initialize() is still loading
-  // i18n catalogs in parallel — translations land mid-CD and the impure
-  // `t` pipe's value flips from key to translated string within the same
-  // tick, triggering ExpressionChangedAfterItHasBeenCheckedError on every
-  // boot. Dev shell already does this (see hypercomb-dev/src/main.ts);
-  // web didn't, which is why the error showed on 4200 but not 4250.
+  // Run runtime init (i18n catalogs, layer materialization, etc.) before the
+  // framework-free host starts its bees, so their first pulse sees complete
+  // catalogs and materialized layers.
   await initializeRuntime({ logOpfs: false })
   ;(window as any).__hcBoot('initializeRuntime done')
 
-  const appRef = await bootstrapApplication(App, appConfig)
-  ;(window as any).__hcBoot('bootstrapApplication done (Angular first paint)')
+  const preloader = get('@hypercomb.social/ScriptPreloader')
+  register(BEE_RESOLVER_KEY, preloader)
+  const appRoot = document.querySelector('app-root')
+  if (!(appRoot instanceof App)) throw new Error('framework-free app-root did not upgrade')
+  void appRoot.start().catch(error => console.error('[app] runtime start failed', error))
+  ;(window as any).__hcBoot('app-root connected (framework-free first paint)')
 
   // Lazy sentinel: no iframe until the user explicitly opens DCP. The
   // first call to getSentinel() mounts the hidden iframe at /sentinel
@@ -331,7 +327,7 @@ const bootstrap = async (): Promise<void> => {
 
     const preloader = get('@hypercomb.social/ScriptPreloader') as any
     if (preloader?.find) await preloader.find('')
-    appRef.tick()
+    appRoot.refresh()
   }
   let syncInFlight: Promise<void> | null = null
   let syncQueued = false

@@ -10,7 +10,7 @@
     "verbatimModuleSyntax": false,
     "isolatedModules": true,
 
-    // helpers (required by Angular)
+    // shared emitted helpers
     "importHelpers": true,
 
     // resolution

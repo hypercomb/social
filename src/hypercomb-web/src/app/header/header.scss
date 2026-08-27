@@ -1,6 +1,6 @@
 @use '../../../../hypercomb-shared/ui/breakpoints' as *;
 
-:host {
+app-header {
   display: contents;
 }
 
@@ -10,7 +10,7 @@ hc-command-line {
 }
 
 @include phone-only {
-  :host {
+  app-header {
     order: 0; // command-line stays at natural position
   }
 }

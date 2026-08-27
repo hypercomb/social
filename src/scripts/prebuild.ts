@@ -196,6 +196,7 @@ function hasModuleOutput(): boolean {
 // caused by serving pre-compiled component factories from a mismatched Angular.
 
 function purgeStaleAngularCache(projectDir: string): void {
+  if (!existsSync(join(projectDir, 'angular.json'))) return
   const cacheRoot = join(projectDir, '.angular', 'cache')
   if (!existsSync(cacheRoot)) return
 

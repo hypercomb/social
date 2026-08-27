@@ -5,6 +5,9 @@ import { Bee, EffectBus, PACKED_STORE_FLAG_KEY, SignatureService, isSignature, r
 import { nativeRoot } from './native-filesystem'
 import { PACKED_STORE_MEANING } from './packed-store-engine'
 import { installPackedStorageOverride, packedRoot, packedStoreHasRecords } from './packed-bridge'
+import { importSignatureModule } from './signature-module-loader'
+
+type SignatureBeeImporter = (poolSignature: string, contentSignature: string) => Promise<unknown>
 
 /** How long a host-resolution MISS is remembered before the cascade may be
  *  re-dialed for that sig. Render passes within the window get an instant
@@ -577,18 +580,20 @@ export class Store extends EventTarget {
 
   public getBee = async (
     signature: string,
-    buffer: ArrayBuffer
+    buffer: ArrayBuffer,
+    importer: SignatureBeeImporter = importSignatureModule,
   ): Promise<Bee | null> => {
 
-    const tryImport = async (url: string): Promise<Record<string, unknown> | null> => {
-      try {
-        const mod = await import(/* @vite-ignore */ url)
-        return mod as any
-      } catch (err) {
-        console.log(`[store] failed to import ${url}:`, err)
-        return null
-      }
+    // A signature-named file is not trusted merely because its name looks
+    // right. Verify the bytes read from OPFS, then seed those exact bytes at
+    // the same origin-hierarchical URL the browser will execute below.
+    const expectedSignature = signature.toLowerCase()
+    const actualSignature = await SignatureService.sign(buffer)
+    if (actualSignature !== expectedSignature) {
+      console.error(`[store] rejected bee ${signature}: content signature was ${actualSignature}`)
+      return null
     }
+    await this.cellResourceCache(expectedSignature, buffer)
 
     // Bee modules come in two shapes: processor bees (Drone/Worker
     // subclasses with pulse) and EventTarget UI drones (command palette,
@@ -618,15 +623,15 @@ export class Store extends EventTarget {
 
       let mod: Record<string, unknown> | null = null
 
-      // Import directly from the verified buffer via blob URL.
-      // This bypasses the service worker entirely — no /opfs/ round-trip,
-      // no cache seeding, no dependency on SW controlling the page.
-      const blob = new Blob([buffer], { type: 'application/javascript' })
-      const blobUrl = URL.createObjectURL(blob)
+      // Execute from the exact signed OPFS URL. A blob: module has no
+      // hierarchical base, so it cannot resolve a signed root-relative
+      // dependency edge such as /opfs/<dependencies-pool>/<core-sig>.
+      const poolSignature = await Store.poolSignature(Store.BEES_MEANING)
       try {
-        mod = await tryImport(blobUrl)
-      } finally {
-        URL.revokeObjectURL(blobUrl)
+        mod = await importer(poolSignature, expectedSignature) as Record<string, unknown>
+      } catch (err) {
+        console.log(`[store] failed to import signed bee ${expectedSignature}:`, err)
+        return null
       }
 
       if (!mod || typeof mod !== 'object') return null
@@ -701,14 +706,15 @@ export class Store extends EventTarget {
     // Cache key under the sign('bees') pool address — the same derived
     // path shape the OPFS layout uses; never a typed folder name.
     const opfsUrl =
-      new URL(`/opfs/${await Store.poolSignature(Store.BEES_MEANING)}/${signature}.js`, location.origin).toString()
+      new URL(`/opfs/${await Store.poolSignature(Store.BEES_MEANING)}/${signature}`, location.origin).toString()
 
     try {
       const cache = await caches.open(Store.CACHE_NAME)
       const existing = await cache.match(opfsUrl)
-      if (!existing) {
-        await cache.put(opfsUrl, new Response(buffer, { headers: this.jsImmutableHeaders() }))
-      }
+      if (existing?.headers.get('x-hypercomb-signature') === signature) return
+      const headers = this.jsImmutableHeaders()
+      headers.set('x-hypercomb-signature', signature)
+      await cache.put(opfsUrl, new Response(buffer, { headers }))
     } catch {
       // ignore
     }

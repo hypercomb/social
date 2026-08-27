@@ -139,7 +139,7 @@ describe('doctrine ratchets', () => {
   })
 
   it('shell templates mount only structural chrome — every other surface is registry-fed', () => {
-    // The shell-surface registry drain (2026-07-09) emptied app.html of
+    // The shell-surface registry drain (2026-07-09) emptied the app host of
     // hand-mounted panels: surfaces self-register via registerShellSurface()
     // and the barrel (shared/ui/shell-surfaces/shell-surfaces.barrel.ts) is
     // the ONE list. Only bound/structural chrome may appear as a template
@@ -148,9 +148,9 @@ describe('doctrine ratchets', () => {
     // tag leaving a template = debt paid; remove it here so the ratchet
     // clicks tight.
     const TEMPLATE_ALLOW: Record<string, string[]> = {
-      'hypercomb-web/src/app/app.html': [
-        'app-header', 'hc-controls-bar', 'hc-edit-actions', 'hc-mesh-header',
-        'hc-shell-surfaces', 'hc-sync-indicator', 'hc-upgrade-indicator', 'router-outlet',
+      'hypercomb-web/src/app/app.ts': [
+        'app-header', 'hc-command-line', 'hc-controls-bar', 'hc-edit-actions',
+        'hc-mesh-header', 'hc-shell-surfaces', 'hc-sync-indicator', 'hc-upgrade-indicator',
       ],
       'hypercomb-dev/src/app/app.html': [
         'hc-command-line', 'hc-controls-bar', 'hc-edit-actions', 'hc-mesh-header',
@@ -222,12 +222,10 @@ describe('doctrine ratchets', () => {
       '@hypercomb.social/DevLayerSource (hypercomb-shared/core/layer-install-sources/dev-layer.source.ts)',
       '@hypercomb.social/DirectoryWalker (hypercomb-shared/core/directory-walker.ts)',
       '@hypercomb.social/DomainLayerSource (hypercomb-shared/core/layer-install-sources/domain-layer.source.ts)',
-      '@hypercomb.social/DroneRegistry (hypercomb-shared/core/drone-registry.ts)',
       '@hypercomb.social/HeaderSizeQueenBee (hypercomb-shared/core/header-size.ts)',
       '@hypercomb.social/InitHistory (hypercomb-dev/src/app/core/init-history.ts)',
       '@hypercomb.social/InstallMonitor (hypercomb-shared/core/install-monitor.ts)',
       '@hypercomb.social/LayerInstaller (hypercomb-shared/core/layer-installer.ts)',
-      '@hypercomb.social/LayerService (hypercomb-web/src/app/layer-service.ts)',
       '@hypercomb.social/OpfsInstallFileSource (hypercomb-shared/core/layer-install-sources/opfs-install-file.source.ts)',
       '@hypercomb.social/OpfsTreeLogger (hypercomb-shared/core/tree-logger.ts)',
       '@hypercomb.social/RegistrySnapshot (hypercomb-shared/core/registry-snapshot.ts)',
@@ -239,7 +237,7 @@ describe('doctrine ratchets', () => {
       '@hypercomb/SignatureStore (hypercomb-dev/src/main.ts)',
       '@hypercomb/SignatureStore (hypercomb-web/src/setup/ensure-install.ts)',
       'BEE_RESOLVER_KEY (hypercomb-dev/src/app/app.config.ts)',
-      'BEE_RESOLVER_KEY (hypercomb-web/src/app.config.ts)',
+      'BEE_RESOLVER_KEY (hypercomb-web/src/main.ts)',
       'SHELL_SURFACE_REGISTRY_KEY (hypercomb-shared/core/shell-surface-registry.ts)',
       '`${ATOMIZABLE_TARGET_PREFIX}input:command-line` (hypercomb-shared/ui/command-line/command-line.atomizer.ts)',
     ], 'shell-side IoC registration')

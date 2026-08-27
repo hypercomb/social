@@ -1,11 +1,13 @@
 // hypercomb-web/src/app/core/core-adapter.ts
 
-import { Injectable, signal } from "@angular/core"
 import { EffectBus } from "@hypercomb/core"
-import { Store, LayerInstaller, DependencyLoader, DroneRegistry, initializeRuntime } from "@hypercomb/shared/core"
-import { LayerService } from "./layer-service"
+import { Store } from '@hypercomb/shared/core/store'
+import { LayerInstaller } from '@hypercomb/shared/core/layer-installer'
+import { DependencyLoader } from '@hypercomb/shared/core/dependency-loader'
+import { initializeRuntime } from '@hypercomb/shared/core/runtime-initializer'
 
-const _ = [DependencyLoader, DroneRegistry, LayerInstaller, LayerService, Store]
+const _dependencies = [DependencyLoader, LayerInstaller, Store]
+void _dependencies
 
 const MESH_PUBLIC_KEY = 'hc:mesh-public'
 
@@ -16,14 +18,14 @@ const MESH_PUBLIC_KEY = 'hc:mesh-public'
 // keymap toggle), and leaving is one refresh away.
 try { localStorage.setItem(MESH_PUBLIC_KEY, 'false') } catch { /* no storage — default is off anyway */ }
 
-@Injectable({ providedIn: 'root' })
 export class CoreAdapter {
 
   // -------------------------------------------------
   // dependencies (lazy IoC resolution)
   // -------------------------------------------------
   // Always boots false — the module-scope force-write above is the truth.
-  public readonly meshPublic = signal(false);
+  private meshPublicValue = false
+  public readonly meshPublic = (): boolean => this.meshPublicValue
 
   // -------------------------------------------------
   // state
@@ -33,7 +35,7 @@ export class CoreAdapter {
 
   constructor() {
     EffectBus.on<{ public: boolean }>('mesh:public-changed', ({ public: pub }) => {
-      this.meshPublic.set(pub)
+      this.meshPublicValue = pub
     })
   }
 
@@ -45,7 +47,7 @@ export class CoreAdapter {
     const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
     const current = this.meshPublic()
     const next = !current
-    this.meshPublic.set(next)
+    this.meshPublicValue = next
     localStorage.setItem(MESH_PUBLIC_KEY, String(next))
     mesh?.setNetworkEnabled?.(next, true)
     EffectBus.emit('mesh:public-changed', { public: next })
