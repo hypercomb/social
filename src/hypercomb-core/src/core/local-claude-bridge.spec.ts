@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { localClaudeBridgeConfiguredFor } from './local-claude-bridge.js'
+import {
+  localClaudeBridgeAutoConnectFor,
+  localClaudeBridgeConfiguredFor,
+} from './local-claude-bridge.js'
 
 const configured = (
   hostname: string,
@@ -32,5 +35,23 @@ describe('local Claude bridge capability', () => {
   it('lets an explicit query flag disable a stored opt-in for one tab', () => {
     expect(configured('localhost', 'false', '1')).toBe(false)
     expect(configured('localhost', '', '1')).toBe(false)
+  })
+
+  it('does not probe an offline browser bridge from persisted configuration', () => {
+    expect(localClaudeBridgeAutoConnectFor({
+      hostname: 'localhost', queryValue: null, storedValue: '1',
+    })).toBe(false)
+    expect(localClaudeBridgeAutoConnectFor({
+      hostname: 'localhost', queryValue: '1', storedValue: null,
+    })).toBe(true)
+  })
+
+  it('does not probe native or public hosts without an explicit bridge action', () => {
+    expect(localClaudeBridgeAutoConnectFor({
+      hostname: 'tauri.localhost', queryValue: null, storedValue: null,
+    })).toBe(false)
+    expect(localClaudeBridgeAutoConnectFor({
+      hostname: 'hypercomb.social', queryValue: '1', storedValue: '1',
+    })).toBe(false)
   })
 })

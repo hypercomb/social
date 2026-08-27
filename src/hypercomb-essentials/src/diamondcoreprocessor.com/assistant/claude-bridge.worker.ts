@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/bridge/claude-bridge.worker.ts
 import {
   Worker, EffectBus, normalizeCell, hypercomb, isSignature, SignatureService,
-  isLocalClaudeBridgeConfigured,
+  isLocalClaudeBridgeAutoConnectRequested, isLocalClaudeBridgeConfigured,
 } from '@hypercomb/core'
 import { deliverTurn, readTurns, setConversationGoalReached } from './chat-thread.js'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
@@ -93,19 +93,14 @@ export class ClaudeBridgeWorker extends Worker {
   #ws: WebSocket | null = null
   #timer: ReturnType<typeof setTimeout> | null = null
 
-  /** Warmup: subscribe to the explicit `claude-bridge:connect` event AND
-   *  attempt an auto-connect. The auto-connect is gated by the shared local
-   *  Claude capability
-   *  (localhost + opt-in flag via URL query or localStorage), so users who
-   *  haven't enabled the bridge see no WS attempt at all. Users who HAVE
-   *  enabled it get a renderer registration on every page load — no manual
-   *  `connect()` console paste needed for Node scripts (e.g.
-   *  `_dolphin-revision.cjs`) to find a renderer. */
+  /** Warmup: subscribe to the explicit `claude-bridge:connect` event and
+   *  auto-connect only when this page load explicitly requested it. Persisted
+   *  configuration alone cannot prove the separate broker is running; probing
+   *  it would make the browser report an unavoidable failed-WS error. */
   protected override act = async (): Promise<void> => {
     this.onEffect('claude-bridge:connect', () => this.connect())
-    // Auto-connect when the shared opt-in says this local tab is configured;
-    // everyone else stays silent.
-    this.connect()
+    if (isLocalClaudeBridgeAutoConnectRequested()) this.connect()
+    else this.#announce()
   }
 
   /** Open the bridge WebSocket. Gated by the shared host + opt-in decision

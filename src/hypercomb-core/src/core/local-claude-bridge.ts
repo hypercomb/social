@@ -40,6 +40,22 @@ export const localClaudeBridgeConfiguredFor = (config: LocalClaudeBridgeConfig):
 }
 
 /**
+ * Whether page boot itself should dial the bridge.
+ *
+ * A stored opt-in describes a capability the participant has configured; it
+ * does not prove the separate loopback broker is running in this session.
+ * Opening a WebSocket from that stale state makes Chromium report an
+ * unavoidable connection error before application handlers run. Browser tabs
+ * therefore auto-connect only from an explicit query on the current URL.
+ * The native shell has no URL bar, so it connects from the explicit setup or
+ * status-row action instead of probing a broker that may not be running.
+ */
+export const localClaudeBridgeAutoConnectFor = (config: LocalClaudeBridgeConfig): boolean => {
+  if (!loopbackHost(config.hostname)) return false
+  return enabledValue(config.queryValue)
+}
+
+/**
  * Whether this tab explicitly opted into the local Claude Code bridge.
  *
  * Query state wins over storage so `?claudeBridge=false` is a safe one-tab
@@ -55,6 +71,21 @@ export const isLocalClaudeBridgeConfigured = (): boolean => {
     try { storedValue = globalThis.localStorage?.getItem(CLAUDE_BRIDGE_ENABLED_STORAGE_KEY) ?? null }
     catch { /* unavailable/private storage means not configured */ }
     return localClaudeBridgeConfiguredFor({ hostname, queryValue, storedValue })
+  } catch {
+    return false
+  }
+}
+
+/** Whether this page load explicitly requested an initial bridge connection. */
+export const isLocalClaudeBridgeAutoConnectRequested = (): boolean => {
+  try {
+    const hostname = globalThis.location?.hostname ?? ''
+    const queryValue = new URLSearchParams(globalThis.location?.search ?? '')
+      .get(CLAUDE_BRIDGE_ENABLED_QUERY_KEY)
+    let storedValue: string | null = null
+    try { storedValue = globalThis.localStorage?.getItem(CLAUDE_BRIDGE_ENABLED_STORAGE_KEY) ?? null }
+    catch { /* unavailable/private storage means not configured */ }
+    return localClaudeBridgeAutoConnectFor({ hostname, queryValue, storedValue })
   } catch {
     return false
   }

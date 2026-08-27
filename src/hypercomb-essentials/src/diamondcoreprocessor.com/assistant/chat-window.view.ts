@@ -336,8 +336,6 @@ const IMAGE_MAX_BYTES = 12 * 1024 * 1024
 const SETUP_TOOLS_KEY = 'hc:bridge-setup-tools'
 /** A bridge answer has landed at least once — the loop is proven. */
 const FIRST_REPLY_KEY = 'hc:bridge-first-reply'
-/** A configured-but-down bridge re-dials on this cadence. */
-const BRIDGE_RETRY_MS = 4_000
 
 /** This window's name in the owner-counted `view:active` mode. */
 const SURFACE_OWNER = 'chat-window'
@@ -1057,7 +1055,6 @@ export class ChatWindowElement extends DockedPanelElement {
   readonly #rendered = new Map<string, string>()
 
   #recovered = false
-  #retryTimer: ReturnType<typeof setInterval> | null = null
   #elapsedTimer: ReturnType<typeof setInterval> | null = null
   /** Every short-lived timeout, so none of them outlives the element. */
   readonly #timers = new Set<ReturnType<typeof setTimeout>>()
@@ -1476,15 +1473,6 @@ export class ChatWindowElement extends DockedPanelElement {
       this.#railQuery.addEventListener('change', this.#onRailQuery)
     }
 
-    // A configured-but-down bridge re-dials quietly, so the checklist's broker
-    // step (and an ordinary dropped connection) recovers hands-free. The worker
-    // never retries a first attempt on its own — this is the nudge.
-    this.#retryTimer = setInterval(() => {
-      if (this.#visible && this.#bridgeConfigured && !this.#bridgeUp) {
-        EffectBus.emit('claude-bridge:connect', {})
-      }
-    }, BRIDGE_RETRY_MS)
-
     // ── configured bridge boot-open ──────────────────────────────────────
     // A local-bridge participant keeps the existing boot-open behavior without
     // stealing command-line focus. Everyone else opens chat deliberately.
@@ -1522,7 +1510,6 @@ export class ChatWindowElement extends DockedPanelElement {
     window.removeEventListener('storage', this.#onStorage)
     this.#railQuery?.removeEventListener('change', this.#onRailQuery)
     this.#railQuery = null
-    if (this.#retryTimer) { clearInterval(this.#retryTimer); this.#retryTimer = null }
     this.#stopClock()
     for (const id of this.#timers) clearTimeout(id)
     this.#timers.clear()
@@ -2241,10 +2228,14 @@ export class ChatWindowElement extends DockedPanelElement {
     if (step === 3) {
       const body = el('div', 'chat-step-body')
       body.append(el('p', undefined, t('chat.setup.step.broker.body',
-        "Run this in the repo's src folder. This step checks itself off the moment the broker answers.")))
+        "Run this in the repo's src folder, then connect this tab.")))
       body.append(this.#cmd('broker', COMMANDS.broker))
+      const connect = button('chat-btn', 'setup-connect')
+      connect.textContent = t('chat.setup.step.broker.connect', 'Connect to broker')
+      connect.addEventListener('click', () => EffectBus.emit('claude-bridge:connect', {}))
+      body.append(connect)
       body.append(el('p', 'chat-step-hint chat-step-live',
-        t('chat.setup.step.broker.watching', 'Watching for the broker…')))
+        t('chat.setup.step.broker.watching', 'The tab connects only when you ask it to.')))
       broker.append(body)
     }
 
@@ -2343,6 +2334,19 @@ export class ChatWindowElement extends DockedPanelElement {
     // Availability, named — FIRST, because whether an answer can come at all is
     // read before which model would give it.
     const link = el('div', 'chat-link')
+    link.setAttribute('role', 'button')
+    link.tabIndex = 0
+    const connectBridge = (): void => {
+      if (this.#bridgeConfigured && !this.#bridgeUp) {
+        EffectBus.emit('claude-bridge:connect', {})
+      }
+    }
+    link.addEventListener('click', connectBridge)
+    link.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return
+      event.preventDefault()
+      connectBridge()
+    })
     const dot = el('span', 'chat-dot')
     dot.setAttribute('aria-hidden', 'true')
     const linkText = el('span')
@@ -2832,6 +2836,10 @@ export class ChatWindowElement extends DockedPanelElement {
     const link = this.#linkEl
     if (link && this.#linkTextEl) {
       link.classList.toggle('waiting', !this.#bridgeUp)
+      link.setAttribute('aria-disabled', String(!this.#bridgeConfigured || this.#bridgeUp))
+      link.title = this.#bridgeConfigured && !this.#bridgeUp
+        ? t('chat.link.connect', 'Connect to the local bridge')
+        : ''
       this.#linkTextEl.textContent = this.#bridgeUp
         ? t('chat.link.up', 'Local Claude bridge connected')
         : this.#hostConfigured
@@ -4040,12 +4048,12 @@ export class ChatWindowElement extends DockedPanelElement {
     this.#render()
   }
 
-  /** Step 2 — opt this tab in and dial the broker now. The worker's connect()
-   *  re-reads the gate, so no reload is needed. */
+  /** Step 2 — remember that this tab may use the local bridge. Socket creation
+   *  stays in step 3, after the participant has started the broker, so an
+   *  expected offline broker never becomes a browser network error. */
   enableBridge(): void {
     try { localStorage.setItem(CLAUDE_BRIDGE_ENABLED_STORAGE_KEY, '1') } catch { /* private mode */ }
     this.#bridgeConfigured = isLocalClaudeBridgeConfigured()
-    EffectBus.emit('claude-bridge:connect', {})
     this.#render()
   }
 
