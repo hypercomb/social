@@ -2207,6 +2207,26 @@
       "unattended": false,
       "created": "2026-08-27",
       "status": "pending"
+    },
+    {
+      "id": "shrink-phase5-framework-free-web-shell",
+      "title": "Mirror the Phase 5 framework-free web shell",
+      "run": null,
+      "note": "The web app now boots through a plain app-root custom element and a compiler-owned esbuild + Sass production build; the development path is a plain Node watch/static server that serves emitted ESM verbatim. Angular bootstrap, Angular web dependencies/config and Vite request-time transformation are gone from hypercomb-web. Public entry names are stable main.js and styles.css, the stylesheet carries matching SHA-256 SRI, and only compiler-owned lazy chunks receive generated names. The shell initializes core before mounting command-line/surfaces, and signed bee evaluation now imports the exact verified /opfs/<bees-pool>/<signature> URL rather than a blob URL that cannot resolve root-relative signed dependencies. Preserve the remaining boundary honestly: the separate dev shell still has to fold into this one shim, and @hypercomb/shared retirement plus the Store read/write split remain. Validation passed 201 files / 1771 tests, production output at about 248 KB JS + 69 KB CSS, fresh-origin signed install and live 4250 smoke with no Angular/Vite load path. Manual: update existing shrink/bootstrap/source tiles; note-add is additive and would double-land.",
+      "commit": "afe4273a9",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
+    },
+    {
+      "id": "signed-dependency-propagation-and-host-inflation",
+      "title": "Mirror signed dependency propagation and host inflation",
+      "run": null,
+      "note": "Namespace package units now key their build cache on every file esbuild actually inlined, not only direct exports. This closes the observed assistant/providers edge where changing llm-provider-registry minted corrected modules but left the old ff8a621 dependency inside the new package closure: leaf changes now advance their containing namespace and root as the Merkle contract requires. Repeated signed-package registrations are normal first-wins no-ops and are silent across LLM, visual, tutor-game and shell-surface registries; Store still warns on actionable bad-hash/import/resolution failures, while a superseded bee generation returning null is silent. Architecture ratchet: the shipped origin is inflator/verifier + smallest core; a host is inert until one {root signature, source domain} inflation, then resolves signature -> layer -> reachable tree -> verifies -> replicates; every later branch repeats that pipeline. The same host seat runs as local executable + cloudflared, tiny npm server or Docker. Published-site handoff prefills domain + signed root; direct Hypercomb visits require a domain the participant already knows or a deliberately configured default, and never auto-adopt. Validation: package root 569068337458..., 118/118 bees, 52/52 dependencies, 59/59 layers, second build 0.215s unchanged early-exit, 201 files / 1771 tests, production build, and clean 4250 browser boot with zero duplicate/null/missing-bee notices or errors. Manual: extend the package-build, resolver, read-only-host and adoption-door creations; note-add is additive and would double-land.",
+      "commit": "6db9738b7",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
