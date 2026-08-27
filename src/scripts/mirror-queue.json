@@ -2187,6 +2187,16 @@
       "unattended": false,
       "created": "2026-08-27",
       "status": "pending"
+    },
+    {
+      "id": "shrink-phase4-signed-package-pin",
+      "title": "Mirror the Phase 4 signed package pin",
+      "run": null,
+      "note": "Package discovery now has one mutable trust edge: bootstrap-pin.json contains only a signed descriptor signature. The descriptor carries the complete package closure and the client verifies its SHA-256 before trusting any layers, bees, dependencies, platform edges, bags or render-critical keys. A genuinely missing pin alone permits the legacy manifest compatibility path; a present malformed pin, forged descriptor or missing descriptor fails closed. Local mirroring retains descriptor and bag edges across historical package revisions. Azure uploads the pin last, after immutable leaves and the compatibility manifest, then downloads and hashes it before claiming success. The verified descriptor signature is preserved in the installed manifest. Validation passed 200 files / 1765 tests, module output hash readback, PowerShell syntax, production build and a clean production browser smoke. Angular/Vite remain only while acquisition code moves behind this pin. Manual: note-add is additive and would double-land.",
+      "commit": "939e52e8b",
+      "unattended": false,
+      "created": "2026-08-27",
+      "status": "pending"
     }
   ]
 }
