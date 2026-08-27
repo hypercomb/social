@@ -1,6 +1,8 @@
 // diamondcoreprocessor.com/editor/tile-editor.drone.ts
 import { EffectBus } from '@hypercomb/core'
 import { TILE_PROPERTIES_FILE, readCellProperties, readTilePropertiesAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, lookupTilePropsSig } from './tile-properties.js'
+import { referenceTargetForLabel } from '../commands/decoration-kind-index.js'
+import { portalEditTarget } from './portal-edit-target.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
 
@@ -95,10 +97,21 @@ export class TileEditorDrone {
       explorerSegments?: () => readonly string[]
       explorerDir?: () => Promise<FileSystemDirectoryHandle | null>
     }>('@hypercomb.social/Lineage')
-    const parentSegments = lineage?.explorerSegments?.() ?? []
+    const appearanceParent = lineage?.explorerSegments?.() ?? []
+    // A Portal starts with the original canonical details and edits that
+    // target as the participant's DEFAULT for future uses. The reference leaf
+    // remains a lightweight appearance; an appearance-local override is a
+    // separate explicit decoration contract.
+    const target = portalEditTarget(
+      appearanceParent,
+      cell,
+      referenceTargetForLabel(cell),
+    )
+    const parentSegments = target.parentSegments
+    const targetCell = target.cell
     let properties: Record<string, unknown> = {}
     try {
-      const layerProps = await readTilePropertiesAt(parentSegments, cell)
+      const layerProps = await readTilePropertiesAt(parentSegments, targetCell)
       if (Object.keys(layerProps).length > 0) {
         properties = layerProps
       } else {
@@ -107,7 +120,14 @@ export class TileEditorDrone {
     } catch {
       try {
         const index = readTilePropsIndex()
-        const propsSig = lookupTilePropsSig(index, await cellLocationSig(parentSegments, cell), cell)
+        const propsSig = lookupTilePropsSig(
+          index,
+          await cellLocationSig(parentSegments, targetCell),
+          // Bare-label entries predate lineage scoping and cannot prove which
+          // same-name appearance they describe. A Portal default may only use
+          // the canonical target's lineage-keyed cache.
+          target.throughPortal ? '' : targetCell,
+        )
         if (!propsSig) throw new Error('no index entry')
         const propsBlob = await store.getResource(propsSig)
         if (!propsBlob) throw new Error('props blob missing')
@@ -115,9 +135,10 @@ export class TileEditorDrone {
         properties = JSON.parse(text)
       } catch {
         try {
+          if (target.throughPortal) throw new Error('portal target has no appearance-local legacy fallback')
           const dir = await lineage?.explorerDir?.()
           if (dir) {
-            const cellDir = await dir.getDirectoryHandle(cell, { create: false })
+            const cellDir = await dir.getDirectoryHandle(targetCell, { create: false })
             properties = await readCellProperties(cellDir)
           }
         } catch {
@@ -135,7 +156,7 @@ export class TileEditorDrone {
     }
 
     // 3. open editor service
-    service.open(cell, properties, largeBlob)
+    service.open(targetCell, properties, largeBlob, target.segments)
   }
 
   // ── save (called by Angular component) ─────────────────────────
@@ -159,7 +180,10 @@ export class TileEditorDrone {
     // navigated to mid-save — a cross-layer content graft.
     const savedCell = service.cell
     const lineageAtSave = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
-    const segmentsForSave: readonly string[] = lineageAtSave?.explorerSegments?.() ?? []
+    const targetSegments = service.targetSegments.length > 0
+      ? [...service.targetSegments]
+      : [...(lineageAtSave?.explorerSegments?.() ?? []), savedCell]
+    const segmentsForSave: readonly string[] = targetSegments.slice(0, -1)
     let saveSucceeded = false
 
     try {
@@ -243,7 +267,7 @@ export class TileEditorDrone {
     // cell:0000-changed — SwarmDrone republishes with it inlined.
     try {
       // segmentsForSave was bound at gesture start — never re-read here.
-      await writeTilePropertiesAt(segmentsForSave, service.cell, props as Record<string, unknown>)
+      await writeTilePropertiesAt(segmentsForSave, savedCell, props as Record<string, unknown>)
     } catch (err) {
       console.warn('[tile-editor] canonical props write failed', err)
     }

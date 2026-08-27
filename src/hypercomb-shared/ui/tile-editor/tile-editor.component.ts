@@ -217,6 +217,8 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
    *  every successful answer submission. */
   /** Segments of the cell being edited: where we are, plus its name. */
   #cellSegments(): string[] {
+    const target = this.editorService?.targetSegments ?? []
+    if (target.length > 0) return [...target]
     const lineage = get('@hypercomb.social/Lineage') as { explorerSegments?: () => readonly string[] } | undefined
     const cell = this.editorService?.cell ?? ''
     if (!cell) return []

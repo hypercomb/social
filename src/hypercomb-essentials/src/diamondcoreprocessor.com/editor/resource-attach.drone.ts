@@ -8,6 +8,8 @@
 
 import { EffectBus, RESOURCE_URL_PREFIX } from '@hypercomb/core'
 import { writeTilePropertiesAt } from './tile-properties.js'
+import { referenceTargetForLabel } from '../commands/decoration-kind-index.js'
+import { portalEditTarget } from './portal-edit-target.js'
 
 type Store = {
   putResource: (blob: Blob) => Promise<string>
@@ -51,6 +53,7 @@ export class ResourceAttachDrone {
     // meantime — a cross-layer content graft.
     const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
     const segments: readonly string[] = lineage?.explorerSegments?.() ?? []
+    const target = portalEditTarget(segments, payload.cell, referenceTargetForLabel(payload.cell))
 
     // Build props exactly like the tile editor's saveAndComplete and the
     // substrate service do: one `small.image` per orientation plus the
@@ -58,7 +61,14 @@ export class ResourceAttachDrone {
     // a user-provided image, so the reroll affordance must stay hidden.
     const props: Record<string, unknown> = {}
 
-    if (payload.atTop) props['index'] = 0
+    // Slot index belongs to this appearance, never the canonical default. A
+    // Portal may override content at the root without teleporting every use to
+    // the Portal row's layout position.
+    if (payload.atTop && target.throughPortal) {
+      try { await writeTilePropertiesAt(segments, payload.cell, { index: 0 }) } catch { /* content can still land */ }
+    } else if (payload.atTop) {
+      props['index'] = 0
+    }
 
     if (payload.smallPointSig) {
       ;(props as any).small = { image: payload.smallPointSig }
@@ -103,16 +113,19 @@ export class ResourceAttachDrone {
     // so the swarm republishes with the image inlined automatically.
     try {
       // segments bound at handler entry — never re-read after the awaits.
-      await writeTilePropertiesAt(segments, payload.cell, props)
+      await writeTilePropertiesAt(target.parentSegments, target.cell, props)
     } catch (err) {
       console.warn('[resource-attach] canonical props write failed', err)
     }
 
-    EffectBus.emit<{ cell: string; segments: readonly string[] }>('tile:saved', { cell: payload.cell, segments })
+    EffectBus.emit<{ cell: string; segments: readonly string[] }>('tile:saved', {
+      cell: target.cell,
+      segments: target.parentSegments,
+    })
 
     if (payload.type === 'youtube' && payload.url) {
       window.ioc.get<YouTubeMetadataQueue>('@diamondcoreprocessor.com/YouTubeMetadataQueue')
-        ?.enqueue({ segments, cell: payload.cell, url: payload.url })
+        ?.enqueue({ segments: target.parentSegments, cell: target.cell, url: payload.url })
     }
 
     // Release the substrate lock — the cell is now fully described by its props.

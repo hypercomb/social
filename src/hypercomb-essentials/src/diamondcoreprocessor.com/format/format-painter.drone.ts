@@ -2,6 +2,8 @@
 import { EffectBus } from '@hypercomb/core'
 import type { FormatEntry, FormatProvider } from './format.provider.js'
 import { cellLocationSig, readTilePropsIndex, lookupTilePropsSig, readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
+import { referenceTargetForLabel } from '../commands/decoration-kind-index.js'
+import { portalEditTarget } from '../editor/portal-edit-target.js'
 
 // ── built-in providers ──────────────────────────────────
 
@@ -79,14 +81,19 @@ export class FormatPainterDrone extends EventTarget {
     let properties: Record<string, unknown> = {}
     const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
     const segments = lineage?.explorerSegments?.() ?? []
+    const target = portalEditTarget(segments, cell, referenceTargetForLabel(cell))
     try {
-      const layerProps = await readTilePropertiesAt(segments, cell)
+      const layerProps = await readTilePropertiesAt(target.parentSegments, target.cell)
       if (Object.keys(layerProps).length === 0) throw new Error('no layer-slot properties')
       properties = layerProps
     } catch {
       try {
         const index = readTilePropsIndex()
-        const propsSig = lookupTilePropsSig(index, await cellLocationSig(segments, cell), cell)
+        const propsSig = lookupTilePropsSig(
+          index,
+          await cellLocationSig(target.parentSegments, target.cell),
+          target.throughPortal ? '' : target.cell,
+        )
         if (!propsSig) throw new Error('no index entry')
         const propsBlob = await store.getResource(propsSig)
         if (!propsBlob) throw new Error('props blob missing')
@@ -188,14 +195,15 @@ export class FormatPainterDrone extends EventTarget {
       // legacy drain fallback (an old index-only tile the reconciler
       // hasn't stamped yet still deserves a correct merge base).
       let props: Record<string, unknown> = {}
+      const target = portalEditTarget(segments, cell, referenceTargetForLabel(cell))
       try {
-        const layerProps = await readTilePropertiesAt(segments, cell)
+        const layerProps = await readTilePropertiesAt(target.parentSegments, target.cell)
         if (Object.keys(layerProps).length === 0) throw new Error('no layer-slot properties')
         props = layerProps
       } catch {
         try {
-          const cellKey = await cellLocationSig(segments, cell)
-          const propsSig = lookupTilePropsSig(index, cellKey, cell)
+          const cellKey = await cellLocationSig(target.parentSegments, target.cell)
+          const propsSig = lookupTilePropsSig(index, cellKey, target.throughPortal ? '' : target.cell)
           if (!propsSig) throw new Error('no index entry')
           const propsBlob = await store.getResource(propsSig)
           if (!propsBlob) throw new Error('props blob missing')
@@ -229,10 +237,13 @@ export class FormatPainterDrone extends EventTarget {
         if (!(k in painted)) updates[k] = undefined     // provider removed it
       }
       if (Object.keys(updates).length === 0) continue
-      await writeTilePropertiesAt(segments, cell, updates)
+      await writeTilePropertiesAt(target.parentSegments, target.cell, updates)
 
       // 4. notify renderer
-      EffectBus.emit<{ cell: string }>('tile:saved', { cell })
+      EffectBus.emit<{ cell: string; segments: readonly string[] }>('tile:saved', {
+        cell: target.cell,
+        segments: target.parentSegments,
+      })
     }
   }
 

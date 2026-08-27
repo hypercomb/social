@@ -7,6 +7,7 @@ export class TileEditorService extends EventTarget {
 
   #mode: 'idle' | 'editing' = 'idle'
   #cell = ''
+  #targetSegments: readonly string[] = []
   #properties: Record<string, unknown> = {}
   #largeBlob: Blob | null = null
 
@@ -14,6 +15,9 @@ export class TileEditorService extends EventTarget {
 
   get mode(): 'idle' | 'editing' { return this.#mode }
   get cell(): string { return this.#cell }
+  /** Content-bearing address for this edit. A Portal reference supplies its
+   * canonical target; ordinary tiles supply their own lineage location. */
+  get targetSegments(): readonly string[] { return this.#targetSegments }
   get properties(): Record<string, unknown> { return this.#properties }
   get largeBlob(): Blob | null { return this.#largeBlob }
 
@@ -40,9 +44,11 @@ export class TileEditorService extends EventTarget {
   readonly open = (
     cell: string,
     properties: Record<string, unknown>,
-    largeBlob: Blob | null
+    largeBlob: Blob | null,
+    targetSegments: readonly string[] = [],
   ): void => {
     this.#cell = cell
+    this.#targetSegments = [...targetSegments]
     this.#properties = { ...properties }
     this.#largeBlob = largeBlob
     this.#mode = 'editing'
@@ -53,6 +59,7 @@ export class TileEditorService extends EventTarget {
   readonly close = (): void => {
     this.#mode = 'idle'
     this.#cell = ''
+    this.#targetSegments = []
     this.#properties = {}
     this.#largeBlob = null
     this.#emit()
