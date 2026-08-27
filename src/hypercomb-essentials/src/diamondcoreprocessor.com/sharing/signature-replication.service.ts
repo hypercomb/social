@@ -48,7 +48,7 @@ export class SignatureReplicationService {
     this.#signer = signer
   }
 
-  public readonly replicate = async (domain: string, request: ReplicationRequest): Promise<boolean> => {
+  public readonly replicate = async (domain: string, request: ReplicationRequest, signal?: AbortSignal): Promise<boolean> => {
     const base = this.#base(domain)
     if (!SIG_RE.test(request.signature) || !request.sources.length) throw new TypeError('invalid replication request')
     const body = new TextEncoder().encode(JSON.stringify(request))
@@ -57,13 +57,13 @@ export class SignatureReplicationService {
     if (!auth) return false
     try {
       const response = await fetch(url, {
-        method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/json' }, body,
+        method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/json' }, body, signal,
       })
       return response.status === 202
     } catch { return false }
   }
 
-  public readonly refreshReceipts = async (domain: string): Promise<ReceiptDocument | null> => {
+  public readonly refreshReceipts = async (domain: string, signal?: AbortSignal): Promise<ReceiptDocument | null> => {
     const base = this.#base(domain)
     const state = this.#domains.get(base) ?? { receipts: new Set(), etag: null, updatedAt: null }
     const url = `${base}/receipts`
@@ -72,7 +72,7 @@ export class SignatureReplicationService {
     const headers: Record<string, string> = { Authorization: auth }
     if (state.etag) headers['If-None-Match'] = state.etag
     try {
-      const response = await fetch(url, { headers, cache: 'no-store' })
+      const response = await fetch(url, { headers, cache: 'no-store', signal })
       if (response.status === 304) return this.#document(state)
       if (!response.ok) return null
       const document = await response.json() as ReceiptDocument
@@ -85,13 +85,13 @@ export class SignatureReplicationService {
     } catch { return null }
   }
 
-  public readonly status = async (domain: string, signature: string): Promise<ReplicationStatus | null> => {
+  public readonly status = async (domain: string, signature: string, signal?: AbortSignal): Promise<ReplicationStatus | null> => {
     if (!SIG_RE.test(signature)) return null
     const url = `${this.#base(domain)}/replicate/${signature}`
     const auth = await this.#nip98(url, 'GET')
     if (!auth) return null
     try {
-      const response = await fetch(url, { headers: { Authorization: auth }, cache: 'no-store' })
+      const response = await fetch(url, { headers: { Authorization: auth }, cache: 'no-store', signal })
       return response.ok ? await response.json() as ReplicationStatus : null
     } catch { return null }
   }
@@ -103,11 +103,11 @@ export class SignatureReplicationService {
     [...(this.#domainsBySignature.get(signature) ?? [])]
 
   /** HEAD is the final proof and repair check; a miss revokes local provenance. */
-  public readonly verify = async (domain: string, signature: string): Promise<boolean> => {
+  public readonly verify = async (domain: string, signature: string, signal?: AbortSignal): Promise<boolean> => {
     if (!SIG_RE.test(signature)) return false
     const base = this.#base(domain)
     let held = false
-    try { held = (await fetch(`${base}/${signature}`, { method: 'HEAD', cache: 'no-store' })).status === 200 } catch {}
+    try { held = (await fetch(`${base}/${signature}`, { method: 'HEAD', cache: 'no-store', signal })).status === 200 } catch {}
     const state = this.#domains.get(base) ?? { receipts: new Set(), etag: null, updatedAt: null }
     if (held) state.receipts.add(signature)
     else state.receipts.delete(signature)

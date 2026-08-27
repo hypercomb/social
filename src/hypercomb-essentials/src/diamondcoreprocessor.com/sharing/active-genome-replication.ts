@@ -18,8 +18,11 @@ export async function replicateActiveGenome(
   activeGenome: ActiveGenomeService,
   domain: string,
   sources: string[],
+  signal?: AbortSignal,
 ): Promise<ActiveGenomeReplicationResult> {
+  if (signal?.aborted) return { accepted: false, inventorySignature: null, inventoryObjects: 0, missing: [], complete: false }
   const record = await activeGenome.current(true)
+  if (signal?.aborted) return { accepted: false, inventorySignature: null, inventoryObjects: 0, missing: [], complete: false }
   const inventorySignature = activeGenome.recordSig
   const missing = record?.missing ? [...record.missing] : []
   if (!record || !inventorySignature) {
@@ -36,7 +39,7 @@ export async function replicateActiveGenome(
     sources,
     inventory: true,
     limit: exact.size + 1,
-  })
+  }, signal)
   return {
     accepted,
     inventorySignature,
