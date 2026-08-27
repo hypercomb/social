@@ -87,6 +87,15 @@ const ARRIVAL_GATE_MS = 2500
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
 type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean; plain?: boolean; pendingProps?: boolean }
+type LabelDerivedState = {
+  images: Map<string, string | null>
+  borders: Map<string, [number, number, number]>
+  tags: Map<string, string[]>
+  links: Map<string, boolean>
+  substrates: Map<string, boolean>
+  hiddenText: Map<string, boolean>
+  external: Set<string>
+}
 type PeerSourceProjection = {
   peerIndex?: number
   peerPubkey?: string
@@ -842,8 +851,10 @@ export class ShowCellDrone extends Drone {
   readonly #preparedHeadByLabel = new Map<string, string>()
   readonly #childImageSigsByParent = new Map<string, Map<string, string[]>>()
   #childReadinessInFlight = false
-  // Layer sigs whose view preparation is running right now (see prepareView).
-  readonly #viewPrepInFlight = new Set<string>()
+  // Keep the promise, not only a flag: the history warmer and visible
+  // readiness pass often reach the same target together. Joining that work
+  // lets both callers observe the completed first-paint snapshot.
+  readonly #viewPrepInFlight = new Map<string, Promise<boolean>>()
   // Click targets that are BAKED — children's images in the image atlas, their
   // names in the label atlas. Bytes are not pixels: measured, a first entry
   // with every byte local still cost ~147ms, of which ~106ms was rasterising 8
@@ -890,9 +901,9 @@ export class ShowCellDrone extends Drone {
      *  Dolphin's own names/images does. */
     targets: Map<string, { headSig: string; imageSigs: string[] }>
   }>()
-  // Monotonic brightness per location-visit: once a label has painted bright
-  // it never re-shades this visit (a late-arriving branch dot or props churn
-  // must not dim an already-bright tile — dim → bright only, never back).
+  // Stable brightness per location visit. Ordinary props/branch churn cannot
+  // dim a proven tile; only losing part of its exact prepared click target
+  // revokes the proof until the repair bake restores it.
   readonly #brightLabels = new Set<string>()
   // Usage-ordered, bounded child-image warm queue. Missing child images are
   // fetched a few at a time IN PRIORITY ORDER — never a simultaneous blast —
@@ -1074,6 +1085,9 @@ export class ShowCellDrone extends Drone {
    * variants from the same name pool. Crossing this boundary must drop every
    * label derivation before either the slow or back-nav path can consult it. */
   #derivedLocationKey = ''
+  /** Warm label projections by lineage. Location changes must isolate raw
+   * label keys without discarding the work already prepared for a revisit. */
+  #derivedStateByLocation = new Map<string, LabelDerivedState>()
   #axialToIndex = new Map<string, number>()
   #heartbeatInitialized = false
   #lastHeartbeatKey = ''
@@ -2289,25 +2303,19 @@ export class ShowCellDrone extends Drone {
     // pixels are gone, and the click pays the decode all over again (the
     // "latency on tiles that have lighted up" bug, reproduced live: 0/12
     // images resident under a still-lit tile). When the victim sig belongs to
-    // a PROVEN click target of the current location, re-queue it for an idle
-    // re-bake — bytes are local, so the promise is restored off the click
-    // path. Bounded by the prebake queue's own budget; a hive whose working
-    // set truly exceeds the atlas just converges to most-recently-proven.
+    // a PROVEN click target of the current location, withdraw the visual
+    // promise and re-queue it for an idle re-bake. Bytes remain local, but the
+    // click is no longer instant until the pixels are resident again.
     const victim = (e as CustomEvent<{ sig?: string }> | undefined)?.detail?.sig
     if (victim && this.#childrenReadyByLabel.size > 0) {
-      const perLabel = this.#childImageSigsByParent.get(this.#passParentSig)
-      if (perLabel) {
-        for (const [label, sigs] of perLabel) {
-          if (this.#childrenReadyByLabel.get(label) !== true) continue
-          if (!sigs.includes(victim)) continue
-          // REPAIR, DON'T REVOKE. The tile's promise is "the inside is here",
-          // and the bytes still are — an eviction only means the click pays a
-          // decode again, so re-bake during idle and leave the tile bright.
-          const headSig = this.#preparedHeadByLabel.get(label)
-          const names = headSig ? (this.#completeChildNamesByParentSig.get(headSig)?.names ?? []) : []
-          if (headSig && !this.#readinessRepairFutile('image')) this.#enqueueBake(headSig, sigs, names)
-          break
-        }
+      const entry = this.#readyByLocation.get(this.#readinessLocationKey)
+      for (const [label, target] of entry?.targets ?? []) {
+        if (this.#childrenReadyByLabel.get(label) !== true) continue
+        if (!target.imageSigs.includes(victim)) continue
+        this.#revokeReadinessForRepair(label)
+        if (this.#readinessRepairFutile('image')) continue
+        const names = this.#completeChildNamesByParentSig.get(target.headSig)?.names ?? []
+        this.#enqueueBake(target.headSig, target.imageSigs, names)
       }
     }
     for (const c of this.renderedCells.values()) {
@@ -2352,11 +2360,11 @@ export class ShowCellDrone extends Drone {
         const names = this.#completeChildNamesByParentSig.get(headSig)?.names ?? []
         if (!names.includes(victim)) continue
         if (DIAG) console.info(`[diag:readiness] label eviction repair branch=${branch} victim=${victim}`)
-        // Repair, never revoke — same rule as the image twin above.
-        if (this.#readinessRepairFutile('label')) break outer
         const target = this.#readyByLocation
           .get(this.#readinessLocationKey)
           ?.targets.get(branch)
+        this.#revokeReadinessForRepair(branch)
+        if (this.#readinessRepairFutile('label')) break outer
         this.#enqueueBake(headSig, target?.imageSigs ?? [], names)
         break outer
       }
@@ -6993,9 +7001,37 @@ export class ShowCellDrone extends Drone {
    * never be overwritten by the page we just left. */
   #enterDerivedLocation = (locationKey: string): void => {
     if (locationKey === this.#derivedLocationKey) return
+    if (this.#derivedLocationKey) {
+      this.#derivedStateByLocation.set(this.#derivedLocationKey, {
+        images: new Map(this.cellImageCache),
+        borders: new Map(this.cellBorderColorCache),
+        tags: new Map(this.cellTagsCache),
+        links: new Map(this.cellLinkCache),
+        substrates: new Map(this.cellSubstrateCache),
+        hiddenText: new Map(this.cellHideTextCache),
+        external: new Set(this.#externallyPaintedLabels),
+      })
+      if (this.#derivedStateByLocation.size > ShowCellDrone.#PREPARED_VIEW_CAP) {
+        const oldest = this.#derivedStateByLocation.keys().next().value
+        if (oldest !== undefined) this.#derivedStateByLocation.delete(oldest)
+      }
+    }
     this.#derivedLocationKey = locationKey
+    // The cell snapshot and its derived projection are one cache entry. If
+    // the former was invalidated, never restore stale presentation facts.
+    const state = this.#layerCellsCache.has(locationKey)
+      ? this.#derivedStateByLocation.get(locationKey)
+      : undefined
+    if (!state) this.#derivedStateByLocation.delete(locationKey)
     this.#invalidateAllLabelDerivedState()
-    this.atlas?.invalidateLabels()
+    if (!state) return
+    for (const [label, value] of state.images) this.cellImageCache.set(label, value)
+    for (const [label, value] of state.borders) this.cellBorderColorCache.set(label, value)
+    for (const [label, value] of state.tags) this.cellTagsCache.set(label, value)
+    for (const [label, value] of state.links) this.cellLinkCache.set(label, value)
+    for (const [label, value] of state.substrates) this.cellSubstrateCache.set(label, value)
+    for (const [label, value] of state.hiddenText) this.cellHideTextCache.set(label, value)
+    for (const label of state.external) this.#externallyPaintedLabels.add(label)
   }
 
   // Layout reconstruction was layer-driven via `content.layoutSig`.
@@ -8285,9 +8321,8 @@ export class ShowCellDrone extends Drone {
     // This is arrival truth, independent of TILE_SHADE and hover. The
     // presentation may lift opacity under the pointer; that changes how the
     // tile LOOKS, never what has actually landed.
-    // Monotonic per location-visit: once a label has painted bright it never
-    // re-shades this visit — a late-arriving branch dot or props churn must
-    // not dim an already-released tile (dim → bright only, never back).
+    // Stable per location visit: late branch/props churn does not dim a proven
+    // tile. Exact atlas eviction explicitly removes the proof and bright bit.
     // A tile may first paint as a leaf while its branch-status is still being
     // resolved. Leaf brightness proves only its OWN image. If it later gains
     // a branch dot, that weaker proof must not bypass children readiness.
@@ -9286,20 +9321,12 @@ export class ShowCellDrone extends Drone {
           }))
           if (!blocked) cachedSigs.set(c.label, sigs)
         }
-        // THE GATE IS THE NEXT LEVEL'S BYTES — NOTHING DEEPER, NOTHING MORE
-        // (Jaime 2026-08-01: "really only the tile images from the next level
-        // have to be available for it to be ready, not the whole hierarchy…
-        // I'm clicking the buttons and the tiles are already there even if
-        // it's shaded when I click — that means your calculations are wrong").
-        // The walk above proved exactly that: every direct child's layer,
-        // props and image are local (or concluded). Everything below —
-        // preparing the destination view, rasterising its labels, decoding its
-        // images into the atlases — is WARMTH, not proof: it makes the click
-        // faster, and the click already lands. Gating on it made readiness
-        // accumulate far slower than the paint it describes (one asset per
-        // idle slice, re-proved after every eviction), so tiles sat shaded
-        // over content that was demonstrably there. Kick it in the background
-        // and release on the bytes.
+        // Readiness is exactly the NEXT level, never the whole hierarchy. But
+        // it includes that level's completed first-paint snapshot: bytes alone
+        // still leave membership/order/atlas work at click time. A bright tile
+        // proves its direct children are local, its view cache is optimized,
+        // and the names/images needed immediately are resident. A shaded tile
+        // remains clickable and navigation diverts the preloader to it.
         if (allReady && isBranchTarget) {
           // Prepare under the child's OWN HEAD sig — the key the render pass
           // will look the memo up by when the click lands. NOT the child sig
@@ -9311,11 +9338,17 @@ export class ShowCellDrone extends Drone {
           const childHeadSig = childLocSig
             ? (await history.latestMarkerSigFor(childLocSig, c.label)) ?? childLayerSigByLabel.get(c.label) ?? ''
             : childLayerSigByLabel.get(c.label) ?? ''
-          if (childHeadSig) this.#preparedHeadByLabel.set(c.label, childHeadSig)
-          // Fire-and-forget: prepare the destination view for speed, never for
-          // permission. Its own memo is content-addressed, so whatever lands
-          // helps every later visit.
-          if (childHeadSig) void this.prepareView(childHeadSig, [...parentSegments, c.label])
+          if (!childHeadSig) {
+            allReady = false
+            this.#queueComputeRetry()
+          } else {
+            this.#preparedHeadByLabel.set(c.label, childHeadSig)
+            const prepared = await this.prepareView(childHeadSig, [...parentSegments, c.label])
+            if (!prepared) {
+              allReady = false
+              this.#queueComputeRetry()
+            }
+          }
           // BYTES ARE NOT PIXELS. Even with the view prepared and the bytes
           // local, the click still pays the atlases: rasterising the children's
           // NAMES (~106ms for 8, measured — the biggest single cost) and
@@ -9323,7 +9356,7 @@ export class ShowCellDrone extends Drone {
           // took 12ms. So a branch is only bright once its click target is
           // baked; the bake runs sliced, in usage order, and both atlases are
           // keyed by name/sig — global and reusable, like everything else here.
-          if (childHeadSig) {
+          if (childHeadSig && allReady) {
             const names = this.#completeChildNamesByParentSig.get(childHeadSig)?.names ?? []
             // Use the image signatures on the prepared destination cells—the
             // exact objects the click fast path will paint. The earlier
@@ -9346,10 +9379,10 @@ export class ShowCellDrone extends Drone {
                 )]
               : null
             const imgs = exactTargetImages ?? cachedSigs.get(c.label) ?? []
-            // Warm the click target's atlases in the background. Residency is
-            // still asked live (never a "baked" flag) — but it decides how FAST
-            // the click paints, not whether the tile is allowed to look ready.
-            if (!this.#clickTargetResident(names, imgs)) this.#enqueueBake(childHeadSig, imgs, names)
+            if (!this.#clickTargetResident(names, imgs)) {
+              allReady = false
+              this.#enqueueBake(childHeadSig, imgs, names)
+            }
           }
         }
         if (DIAG) console.info(`[diag:readiness] ${c.label} allReady=${allReady} cached=${!!cached} queue=${this.#childWarmQueue.length}`)
@@ -9878,9 +9911,7 @@ export class ShowCellDrone extends Drone {
 
   /** Is this click target's paint work actually RESIDENT — every child name in
    *  the label atlas, every child image decoded (or concluded absent)? Asked
-   *  live rather than remembered, and used only to decide what still needs
-   *  WARMING: readiness itself is proven by the next level's bytes, so an
-   *  eviction never takes a tile's brightness back. */
+   *  live: brightness is a promise that this exact first paint is warm. */
   #clickTargetResident(names: readonly string[], sigs: readonly string[]): boolean {
     const labelAtlas = this.atlas
     const imageAtlas = this.imageAtlas
@@ -9904,6 +9935,18 @@ export class ShowCellDrone extends Drone {
     this.#bakeQueued.add(headSig)
     this.#bakeQueue.push({ headSig, sigs: [...sigs], names: [...names] })
     this.#pumpBakes()
+  }
+
+  /** An exact click-target asset was displaced. Shading is informational, not
+   *  a navigation lock, so the tile remains clickable while its repair is
+   *  prioritized; it simply stops promising a delay-free click. */
+  #revokeReadinessForRepair = (label: string): void => {
+    if (this.#childrenReadyByLabel.get(label) !== true) return
+    this.#childrenReadyByLabel.delete(label)
+    this.#brightLabels.delete(label)
+    this.#shadeFadeStartedAt.delete(label)
+    this.#writeShadeFor(label)
+    this.emitEffect('render:tile-readiness', { shadedLabels: this.#preloadingLabels() })
   }
 
   /** A repair bake can re-earn readiness directly. Waiting for an unrelated
@@ -10041,8 +10084,23 @@ export class ShowCellDrone extends Drone {
       && this.#layerCellsCache.has(locationKey)
       && this.#layerViewportCache.has(locationKey)
     ) return true
-    if (this.#viewPrepInFlight.has(layerSig)) return false
-    this.#viewPrepInFlight.add(layerSig)
+    const existing = this.#viewPrepInFlight.get(layerSig)
+    if (existing) return existing
+    const preparation = this.#prepareView(layerSig, segments, locationKey)
+    this.#viewPrepInFlight.set(layerSig, preparation)
+    try { return await preparation }
+    finally {
+      if (this.#viewPrepInFlight.get(layerSig) === preparation) {
+        this.#viewPrepInFlight.delete(layerSig)
+      }
+    }
+  }
+
+  #prepareView = async (
+    layerSig: string,
+    segments: readonly string[],
+    locationKey: string,
+  ): Promise<boolean> => {
     try {
       const history = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
       const axial = this.resolve<any>('axial')
@@ -10117,10 +10175,9 @@ export class ShowCellDrone extends Drone {
           this.#preparedFirstVisitFit.add(locationKey)
         }
       }
-      if (DIAG) console.info(`[diag:readiness] view prepared ${layerSig.slice(0, 8)} names=${ordered.length} fullPaint=1`)
+      if (DIAG) console.info(`[diag:readiness] view prepared ${layerSig.slice(0, 8)} location=${locationKey} names=${ordered.length} fullPaint=1`)
       return true
     } catch { return false }
-    finally { this.#viewPrepInFlight.delete(layerSig) }
   }
 
   /** Coalesced repaint for readiness transitions. Tile releases and warm

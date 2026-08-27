@@ -24,12 +24,15 @@ const memberBody = (marker: string): string => {
 }
 
 describe('show-cell same name across lineages', () => {
-  it('moves every label-derived cache and title glyph to the incoming lineage', () => {
+  it('restores every label-derived cache from the incoming lineage', () => {
     const body = memberBody('#enterDerivedLocation = (locationKey: string): void =>')
     expect(body).toMatch(/locationKey === this\.#derivedLocationKey/)
+    expect(body).toMatch(/#derivedStateByLocation\.set\(this\.#derivedLocationKey/)
     expect(body).toMatch(/this\.#derivedLocationKey = locationKey/)
-    expect(body).toMatch(/this\.#invalidateAllLabelDerivedState\(\)/)
-    expect(body).toMatch(/this\.atlas\?\.invalidateLabels\(\)/)
+    expect(body).toMatch(/#derivedStateByLocation\.get\(locationKey\)/)
+    expect(body).toMatch(/state\.images/)
+    expect(body).toMatch(/state\.external/)
+    expect(body).not.toMatch(/invalidateLabels\(\)/)
   })
 
   it('resets before the back-navigation cache can reuse a raw jaime key', () => {
