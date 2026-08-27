@@ -2197,6 +2197,16 @@
       "unattended": false,
       "created": "2026-08-27",
       "status": "pending"
+    },
+    {
+      "id": "shrink-phase4-signed-acquisition-bootstrap",
+      "title": "Mirror the Phase 4 signed acquisition bootstrap",
+      "run": null,
+      "note": "The mutable bootstrap pin now leads to a SHA-256-verified package descriptor whose acquisition field names an exact signed dependency module. The web shim waits for service-worker control, fetches and validates that descriptor, then imports the acquisition module from its dependencies-pool signature URL. ensure-install, sentinel-bridge and hc-install-prompt moved behind that signed boundary; the prompt resolves the live shell registry through IoC so the bundle cannot create a duplicate singleton. A genuinely absent pin alone may use the bounded local compatibility chunk, while a present invalid pin fails closed. The module build rejects retained Angular and bare Hypercomb specifiers, includes acquisition in the 52-leaf closure, and invalidates the package root when its bytes change. Native and packed byte bridges advertise capability by client id; the worker persists it across restarts and plain browsers now skip the former 1.5-second-per-miss waits. The production initial main shrank from about 499.6 KB to 467.5 KB; a clean origin reached textbox and welcome in 2.8 seconds versus the earlier 12.2-second acquisition delay. Validation passed 200 files and 1769 tests, web and dev production builds, worker-copy hash equality, and fresh production browser boot. Angular bootstrap and the Angular builder Vite server remain for the next framework-free shell slice. Manual: note-add is additive and would double-land.",
+      "commit": "15b321d34",
+      "unattended": false,
+      "created": "2026-08-27",
+      "status": "pending"
     }
   ]
 }
