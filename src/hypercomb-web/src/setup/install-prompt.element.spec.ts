@@ -114,8 +114,9 @@ describe('hc-install-prompt', () => {
       const waiting = waitForSnapshotQueen(1_000)
       callbacks[0]?.('@diamondcoreprocessor.com/SnapshotQueenBee', queen)
       callbacks[0]?.('@diamondcoreprocessor.com/HistoryService', { sealSubtree: vi.fn() })
-      callbacks[0]?.('@hypercomb.social/Store', { putResource: vi.fn() })
+      callbacks[0]?.('@hypercomb.social/Store', { putResource: vi.fn(), fetchLayerFromHost: vi.fn() })
       callbacks[0]?.('@diamondcoreprocessor.com/LayerCommitter', { commitSlotAppend: vi.fn() })
+      callbacks[0]?.('@diamondcoreprocessor.com/ContentBrokerDrone', { fetchBySig: vi.fn() })
       await expect(waiting).resolves.toBe(queen)
       expect(callbacks).toHaveLength(0)
     } finally {

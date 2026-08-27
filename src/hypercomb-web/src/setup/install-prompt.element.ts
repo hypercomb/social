@@ -17,8 +17,8 @@ const SNAPSHOT_QUEEN_KEY = '@diamondcoreprocessor.com/SnapshotQueenBee'
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const STORE_KEY = '@hypercomb.social/Store'
 const COMMITTER_KEY = '@diamondcoreprocessor.com/LayerCommitter'
+const CONTENT_BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
 const SNAPSHOT_READY_TIMEOUT_MS = 15_000
-const SNAPSHOT_COLD_RETRY_MS = 2_250
 
 type SnapshotQueen = {
   createRestorePoint?: (name: string) => Promise<boolean>
@@ -29,12 +29,15 @@ type SnapshotToast = { type?: string; title?: string; message?: string }
 const snapshotQueenWhenReady = (read: (key: string) => unknown): SnapshotQueen | undefined => {
   const queen = read(SNAPSHOT_QUEEN_KEY) as SnapshotQueen | undefined
   const history = read(HISTORY_KEY) as { sealSubtree?: unknown } | undefined
-  const store = read(STORE_KEY) as { putResource?: unknown } | undefined
+  const store = read(STORE_KEY) as { putResource?: unknown; fetchLayerFromHost?: unknown } | undefined
   const committer = read(COMMITTER_KEY) as { commitSlotAppend?: unknown } | undefined
+  const broker = read(CONTENT_BROKER_KEY) as { fetchBySig?: unknown } | undefined
   return typeof queen?.createRestorePoint === 'function'
     && typeof history?.sealSubtree === 'function'
     && typeof store?.putResource === 'function'
+    && typeof store?.fetchLayerFromHost === 'function'
     && typeof committer?.commitSlotAppend === 'function'
+    && typeof broker?.fetchBySig === 'function'
     ? queen
     : undefined
 }
@@ -69,30 +72,6 @@ export const waitForSnapshotQueen = async (
     })
   })
 }
-
-/**
- * A strict seal can discover a locally cold layer and start its verified host
- * fetch. Give that one fetch cycle a chance to land, then retry once. This is
- * bounded and listens for the same `content:arrived` event used by render, so
- * an actually missing layer still fails closed instead of turning update into
- * an unbounded poll.
- */
-const waitForSnapshotColdLayer = (): Promise<void> => new Promise(resolve => {
-  let settled = false
-  let armed = false
-  let off: (() => void) | undefined
-  const finish = (): void => {
-    if (settled) return
-    settled = true
-    window.clearTimeout(timer)
-    off?.()
-    resolve()
-  }
-  const timer = window.setTimeout(finish, SNAPSHOT_COLD_RETRY_MS)
-  off = EffectBus.on('content:arrived', () => { if (armed) finish() })
-  armed = true
-  if (settled) off()
-})
 
 const FALLBACKS: Record<string, string> = {
   'install.title': 'Welcome to Hypercomb',
@@ -308,11 +287,6 @@ export class InstallPromptElement extends HTMLElement {
         try {
           captureSnapshotFailure = true
           checkpointed = !!(await queen.createRestorePoint(checkpointName))
-          if (!checkpointed) {
-            await waitForSnapshotColdLayer()
-            snapshotFailure = ''
-            checkpointed = !!(await queen.createRestorePoint(checkpointName))
-          }
         } finally {
           captureSnapshotFailure = false
           offSnapshotToast()

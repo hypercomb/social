@@ -2175,16 +2175,67 @@ export class HistoryService {
    * local miss and heals in the background; a snapshot/export must instead
    * know whether the complete closure exists before it claims success. Await
    * the same SHA-256-gated broker fetch once, then re-read from the local pool.
+   * Bypass a render miss window here: a detached first-paint probe may have
+   * happened before the broker learned the layer's host, and that negative
+   * cache must not make an explicit snapshot fail for the next minute.
    */
   readonly #resolveRequiredLayer = async (layerSig: string): Promise<LayerContent | null> => {
-    const local = await this.getLayerBySig(layerSig)
+    const local = await this.#resolveLayerLocal(layerSig)
     if (local) return local
     const store = get<{
-      fetchLayerFromHost?: (sig: string) => Promise<Uint8Array | null>
+      fetchLayerFromHost?: (
+        sig: string,
+        options?: { bypassMissWindow?: boolean },
+      ) => Promise<Uint8Array | null>
     }>('@hypercomb.social/Store')
-    const arrived = await store?.fetchLayerFromHost?.(layerSig)
+    const arrived = await store?.fetchLayerFromHost?.(layerSig, { bypassMissWindow: true })
     if (!arrived) return null
     return this.#resolveLayerLocal(layerSig)
+  }
+
+  /**
+   * Resolve a location head for a strict operation without inheriting render's
+   * deliberately lossy cold-read semantics. `currentLayerAt` may drop a stale
+   * cache entry before returning `null`; re-read the actual latest marker so
+   * its target signature is still available to the verified host resolver.
+   * A marker-less adopted location still uses the parent-carried virtual head.
+   */
+  readonly #resolveRequiredHead = async (
+    locationSig: string,
+  ): Promise<{ head: LayerContent; headSig: string | null } | null> => {
+    let latest: { name: string; bag: FileSystemDirectoryHandle } | null
+    try {
+      latest = await this.#scanLatestMarker(locationSig)
+    } catch {
+      // Store registration precedes OPFS readiness. A strict user operation may
+      // wait for that one-time initialization; render paths must never do so.
+      try {
+        await this.preloadAllBags()
+        latest = await this.#scanLatestMarker(locationSig)
+      } catch {
+        return null
+      }
+    }
+
+    if (!latest) {
+      const head = await this.currentLayerAt(locationSig)
+      if (!head) return null
+      return { head, headSig: this.#headSigFor(locationSig) ?? null }
+    }
+
+    try {
+      const fileHandle = await latest.bag.getFileHandle(latest.name, { create: false })
+      const markerBytes = await (await fileHandle.getFile()).arrayBuffer()
+      const { layerSig, isPointer } = await extractLayerSigFromMarker(markerBytes)
+      if (!isPointer) this.#preloaderCache.set(layerSig, markerBytes)
+      this.#setHead(locationSig, layerSig)
+      this.#noteHeadDerived(locationSig, latest.name)
+      this.#scheduleHeadPersist()
+      const head = await this.#resolveRequiredLayer(layerSig)
+      return head ? { head, headSig: layerSig } : null
+    } catch {
+      return null
+    }
   }
 
   /**
@@ -2360,15 +2411,14 @@ export class HistoryService {
       return sealedSig
     }
 
-    const headStats: { cold?: boolean } = {}
-    let head = await this.currentLayerAt(locSig, headStats)
-    if (!head && headStats.cold) {
-      const coldHeadSig = this.#headSigFor(locSig)
-      if (coldHeadSig) await this.#resolveRequiredLayer(coldHeadSig)
-      head = await this.currentLayerAt(locSig)
+    let head = await this.currentLayerAt(locSig)
+    let headSig = this.#headSigFor(locSig) ?? null
+    if (!head) {
+      const required = await this.#resolveRequiredHead(locSig)
+      if (!required) return null
+      head = required.head
+      headSig = required.headSig
     }
-    if (!head) return null
-    const headSig = this.#headSigFor(locSig) ?? null
 
     // A location's DIRECT children are authoritative at its own head (adding,
     // removing or renaming a direct child re-commits THIS head). Seal each child

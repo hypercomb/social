@@ -1016,9 +1016,28 @@ export class Store extends EventTarget {
    * (`content:arrived`) so gated renders can retry. Callers must NOT
    * await this on a render path — render never awaits network.
    */
-  public fetchLayerFromHost = (signature: string): Promise<Uint8Array | null> => {
+  public fetchLayerFromHost = (
+    signature: string,
+    options: { bypassMissWindow?: boolean } = {},
+  ): Promise<Uint8Array | null> => {
     const existing = this.#layerHostFetchPending.get(signature)
-    if (existing) return existing
+    if (existing) {
+      // A strict operation may arrive behind a detached render probe that
+      // started before host knowledge landed. Join it first; only if that old
+      // attempt misses do we clear the window and make one deliberate retry.
+      return options.bypassMissWindow
+        ? existing.then(bytes => bytes ?? this.fetchLayerFromHost(signature, options))
+        : existing
+    }
+    if (options.bypassMissWindow) {
+      this.#layerHostMissUntil.delete(signature)
+      try {
+        const broker = window.ioc?.get?.('@diamondcoreprocessor.com/ContentBrokerDrone') as
+          | { allowFetchRetry?: (sig: string) => void }
+          | undefined
+        broker?.allowFetchRetry?.(signature)
+      } catch { /* broker is optional; the local re-check below still applies */ }
+    }
     // LATER of Store's own window and the broker's backoff — see
     // #effectiveMissUntil.
     const missUntil = this.#effectiveMissUntil(signature, this.#layerHostMissUntil.get(signature))
