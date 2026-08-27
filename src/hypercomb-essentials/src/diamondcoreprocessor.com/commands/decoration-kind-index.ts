@@ -297,6 +297,23 @@ const EMPTY_CONTEXT: readonly string[][] = Object.freeze([])
  *  reference; absent means "not a reference". */
 const referenceTargetByKey = new Map<string, readonly string[]>()
 
+/** Reference appearances normally own a frozen selection of the root's
+ * original details. Only a Portal inventory/editor row carries this mark and
+ * routes content edits to the root default for FUTURE activations. */
+const referenceEditsRootDefaultByKey = new Map<string, boolean>()
+
+export function referenceEditsRootDefaultForLabel(label: string): boolean {
+  const key = keyForLabel(label)
+  if (referenceEditsRootDefaultByKey.get(key) === true) return true
+  // Compatibility for Portal rows minted before the marker existed. `sets/`
+  // is exclusively the Portal inventory, so a real reference there has the
+  // same authority. New writers always persist the explicit mark; no ordinary
+  // lineage is inferred from its name or from reference kind alone.
+  return !flatKeyByLabel.has(label)
+    && currentParentKey() === 'sets'
+    && referenceTargetByKey.has(key)
+}
+
 /** The location a reference tile points at, or `null` if the cell is not a
  *  reference. `[]` is a valid target (the hive root) and is DISTINCT from
  *  `null`. Synchronous + O(1) — tile-overlay reads it per click to decide
@@ -436,6 +453,7 @@ const walkedFaceKeys = new Set<string>()
  *  back to the ordinary imageless path, which is why an unresolved face degrades
  *  to today's appearance rather than to a hole. */
 export function referenceFaceForLabel(label: string): string {
+  if (!referenceEditsRootDefaultForLabel(label)) return ''
   const target = referenceTargetByKey.get(keyForLabel(label))
   if (!target) return ''
   return referenceFaceByKey.get(locationKey(target)) ?? ''
@@ -813,6 +831,13 @@ function targetSigOf(record: DecorationShape): string {
   return typeof raw === 'string' && /^[0-9a-f]{64}$/.test(raw) ? raw : ''
 }
 
+/** Is this reference the Portal's explicit root-default authoring surface? */
+function editsRootDefaultOf(record: DecorationShape): boolean {
+  const payload = record.payload
+  return !!payload && typeof payload === 'object'
+    && (payload as { editsRootDefault?: unknown }).editsRootDefault === true
+}
+
 /** Pull the required marks out of a `reference` payload's `{ requiredMarks }`.
  *
  *  Returns null for absent, malformed, or empty — all three mean "this
@@ -934,6 +959,8 @@ function indexRecord(segments: readonly string[], sig: string, record: Decoratio
     const sig = targetSigOf(record)
     if (sig) referenceSigByKey.set(key, sig)
     else referenceSigByKey.delete(key)
+    if (editsRootDefaultOf(record)) referenceEditsRootDefaultByKey.set(key, true)
+    else referenceEditsRootDefaultByKey.delete(key)
     const marks = requiredMarksOf(record)
     if (marks) referenceMarksByKey.set(key, marks)
     else referenceMarksByKey.delete(key)
@@ -1120,6 +1147,7 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
     if (kind === REFERENCE_DECORATION_KIND) {
       referenceTargetByKey.delete(key)
       referenceSigByKey.delete(key)
+      referenceEditsRootDefaultByKey.delete(key)
       referenceMarksByKey.delete(key)
       referenceBouquetByKey.delete(key)
       // `bouquetMarksBySig` is kept — content-addressed and shared across
@@ -1212,6 +1240,7 @@ export function forgetDecorationLabel(label: string): void {
     launchGroupByKey.delete(key)
     referenceTargetByKey.delete(key)
     referenceSigByKey.delete(key)
+    referenceEditsRootDefaultByKey.delete(key)
     referenceMarksByKey.delete(key)
     contextTargetsByKey.delete(key)
     contextSigByKeyTarget.delete(key)

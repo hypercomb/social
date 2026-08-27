@@ -125,6 +125,7 @@ export const dropReferenceTile = async (
   item: AggregateItem,
   parentSegments: readonly string[],
   requiredMarks?: readonly string[],
+  editsRootDefault = false,
 ): Promise<string | null> => {
   const references = ioc()?.get(CANONICAL_REFERENCE_SERVICE_KEY) as CanonicalReferenceService | undefined
   if (!references?.place) return null
@@ -139,6 +140,7 @@ export const dropReferenceTile = async (
       sourceSegments: item.segments,
       parentSegments,
       requiredMarks,
+      editsRootDefault,
     })
   } catch {
     return null

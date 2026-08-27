@@ -92,6 +92,14 @@ describe('reference payload — the bytes are the identity', () => {
     const payload = buildReferencePayload({ targetSegments: ['a'], targetSig: 'not-a-sig' })
     expect('targetSig' in payload).toBe(false)
   })
+
+  it('preserves an explicit Portal root-default authoring marker', () => {
+    expect(buildReferencePayload({
+      targetSegments: ['people'], targetSig: SIG, editsRootDefault: true,
+    })).toEqual({
+      targetSegments: ['people'], targetSig: SIG, editsRootDefault: true,
+    })
+  })
 })
 
 // A reference payload can hold TWO sigs and only one of them names bytes.

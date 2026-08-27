@@ -1039,6 +1039,11 @@ export class ShowCellDrone extends Drone {
   // clearing it once we proceed) makes the invalidation survive the race.
   #forceNextRender = false
   private renderedLocationKey = ''
+  /** Owner of the label-keyed derived caches. Labels are only unique inside a
+   * lineage: `/friends/jaime` and `/team/jaime` may select different atomic
+   * variants from the same name pool. Crossing this boundary must drop every
+   * label derivation before either the slow or back-nav path can consult it. */
+  #derivedLocationKey = ''
   #axialToIndex = new Map<string, number>()
   #heartbeatInitialized = false
   #lastHeartbeatKey = ''
@@ -2969,6 +2974,10 @@ export class ShowCellDrone extends Drone {
       this.#invalidateAllLabelDerivedState()
       this.atlasRenderer = this.pixiRenderer
     }
+
+    // Labels are appearance-local, not global identities. Reset derived
+    // label state before the synchronous back-navigation cache can consult it.
+    this.#enterDerivedLocation(locationKey)
 
     // ── back-nav fast path ─────────────────────────────────
     // SYNCHRONOUS restore. We have everything in memory; awaiting OPFS
@@ -6898,6 +6907,16 @@ export class ShowCellDrone extends Drone {
     this.cellLinkCache.clear()
     this.cellSubstrateCache.clear()
     this.cellHideTextCache.clear()
+  }
+
+  /** Move the label-keyed projection caches to one lineage. Per-location cell
+   * snapshots remain warm; they already contain their own imageSig and must
+   * never be overwritten by the page we just left. */
+  #enterDerivedLocation = (locationKey: string): void => {
+    if (locationKey === this.#derivedLocationKey) return
+    this.#derivedLocationKey = locationKey
+    this.#invalidateAllLabelDerivedState()
+    this.atlas?.invalidateLabels()
   }
 
   // Layout reconstruction was layer-driven via `content.layoutSig`.

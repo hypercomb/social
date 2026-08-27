@@ -301,7 +301,11 @@ class CollectionsSource implements AggregateSource {
       if (!into && this.#entries.some(e => e.name === entry.label)) continue   // already indexed
       if (segmentsEqual(entry.segments, parent)) continue        // never reference yourself
       const name = await dropReferenceTile(
-        { key: entry.label, label: entry.label, segments: entry.segments }, parent)
+        { key: entry.label, label: entry.label, segments: entry.segments },
+        parent,
+        undefined,
+        !into,
+      )
       if (name) written.push({ key: name, label: name, segments: [name] })
     }
     if (!written.length) return

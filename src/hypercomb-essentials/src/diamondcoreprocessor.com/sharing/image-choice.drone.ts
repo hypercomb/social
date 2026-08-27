@@ -27,7 +27,15 @@
 // guarantee, before anything is written). A picture nobody can serve never
 // becomes your tile — it paints as a labelled hex that refuses to be picked.
 
-import { Drone, I18N_IOC_KEY, RESOURCE_URL_PREFIX, consumePointerGesture, type I18nProvider } from '@hypercomb/core'
+import {
+  CANONICAL_REFERENCE_SERVICE_KEY,
+  Drone,
+  I18N_IOC_KEY,
+  RESOURCE_URL_PREFIX,
+  consumePointerGesture,
+  type CanonicalReferenceService,
+  type I18nProvider,
+} from '@hypercomb/core'
 import { Container, Graphics, Point, Sprite, Text, Texture } from 'pixi.js'
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import {
@@ -36,7 +44,9 @@ import {
   readTilePropsIndex,
   writeTilePropertiesAt,
 } from '../editor/tile-properties.js'
+import { referenceEditsRootDefaultForLabel } from '../commands/decoration-kind-index.js'
 import { peerImageCandidates, previewSigOf, type PeerImageCandidate, type PeerImageProps } from './peer-images.js'
+import { imageChoiceWriteTargets } from './image-choice-targets.js'
 
 type Axial = { q: number; r: number }
 
@@ -409,10 +419,13 @@ export class ImageChoiceDrone extends Drone {
     }
 
     try {
-      const canonical = pointers(await readTilePropertiesAt(this.#segments, label))
-      if (canonical) return canonical
-      const key = await cellLocationSig(this.#segments, label)
-      const sig = readTilePropsIndex()[key] ?? readTilePropsIndex()[label]
+      const editsRoot = this.#segments.length === 0 || referenceEditsRootDefaultForLabel(label)
+      const parentSegments = editsRoot ? [] : this.#segments
+      const selected = pointers(await readTilePropertiesAt(parentSegments, label))
+      if (selected) return selected
+      const key = await cellLocationSig(parentSegments, label)
+      const index = readTilePropsIndex()
+      const sig = index[key] ?? (editsRoot ? undefined : index[label])
       if (!sig) return undefined
       const blob = await this.#store()?.getResource?.(sig)
       return blob ? pointers(JSON.parse(await blob.text())) : undefined
@@ -458,7 +471,6 @@ export class ImageChoiceDrone extends Drone {
     if (this.#applying) return
     this.#applying = true
     const label = this.#label
-    const segments = [...this.#segments]
     try {
       const sigs = [choice.props.small?.image, choice.props.flat?.small.image, choice.props.point?.image, choice.props.imageSig]
         .filter((s): s is string => typeof s === 'string')
@@ -468,24 +480,35 @@ export class ImageChoiceDrone extends Drone {
         return
       }
 
-      const existing = await readTilePropertiesAt(segments, label)
-      const updates: Record<string, unknown> = {
-        small: choice.props.small,
-        flat: choice.props.flat,
-        point: choice.props.point,
-        imageSig: choice.props.imageSig,
-        large: undefined,
-        substrate: undefined,
+      const referenceService = window.ioc.get<CanonicalReferenceService>(CANONICAL_REFERENCE_SERVICE_KEY)
+      const root = await referenceService?.ensureRoot(label, null)
+      if (referenceService && !root) throw new Error(`canonical root unavailable for ${label}`)
+      const rootName = root?.name ?? label
+      const targets = imageChoiceWriteTargets(
+        this.#segments,
+        rootName,
+        referenceEditsRootDefaultForLabel(label),
+      )
+      for (const target of targets) {
+        const existing = await readTilePropertiesAt(target.parentSegments, target.cell)
+        const updates: Record<string, unknown> = {
+          small: choice.props.small,
+          flat: choice.props.flat,
+          point: choice.props.point,
+          imageSig: choice.props.imageSig,
+          large: undefined,
+          substrate: undefined,
+        }
+        const oldLarge = ((existing['large'] as { image?: string } | undefined)?.image) ?? ''
+        if (oldLarge && existing['link'] === `${RESOURCE_URL_PREFIX}${oldLarge}`) {
+          updates['link'] = undefined
+        }
+        await writeTilePropertiesAt(target.parentSegments, target.cell, updates)
+        this.emitEffect('tile:saved', {
+          cell: target.cell,
+          segments: target.parentSegments,
+        })
       }
-      const oldLarge = ((existing['large'] as { image?: string } | undefined)?.image) ?? ''
-      if (oldLarge && existing['link'] === `${RESOURCE_URL_PREFIX}${oldLarge}`) updates['link'] = undefined
-
-      // The props index follows via the central layer-keyed seed inside
-      // writeTilePropertiesAt — no location write (Phase C sweep,
-      // visuals-across-lineages.md).
-      await writeTilePropertiesAt(segments, label, updates)
-
-      this.emitEffect('tile:saved', { cell: label, segments })
     } catch (err) {
       console.warn('[image-choice] apply failed', err)
       this.emitEffect('toast:show', { type: 'warning', message: this.#t('images.failed', 'That picture could not be fetched — nothing changed.') })
