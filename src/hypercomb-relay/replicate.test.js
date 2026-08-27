@@ -58,6 +58,18 @@ test('flat destination writes atoms under their signature', async () => {
   }
 })
 
+test('flat destination repairs a corrupt existing atom', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hypercomb-replicator-'))
+  try {
+    const bytes = Buffer.from('correct atom')
+    const signature = sig(bytes)
+    const io = contentDirectoryIO(dir, [])
+    await io.write(signature, Buffer.from('corrupt'))
+    await io.write(signature, bytes)
+    assert.deepEqual(readFileSync(join(dir, signature)), bytes)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
 test('normalizes the signature-only request contract', () => {
   const request = parseReplicationRequest({
     signature: 'A'.repeat(64),

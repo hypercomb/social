@@ -30,6 +30,7 @@ import { verifyEvent } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
 import { verifyNip98 } from './http-auth.js'
 import { contentDirectoryIO, parseReplicationRequest, resolveSignatureClosure } from './replicate.js'
+import { ReceiptIndex } from './receipt-index.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -613,6 +614,8 @@ function resolveFlatSig(sig) {
   return null
 }
 
+const receiptIndex = new ReceiptIndex(cfg.contentDir, resolveFlatSig)
+
 function tryServeContent(req, res) {
   if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') return false
 
@@ -621,8 +624,8 @@ function tryServeContent(req, res) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, HEAD, PUT, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Methods': 'GET, HEAD, PUT, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, If-None-Match',
       'Access-Control-Max-Age': '86400',
     })
     res.end()
@@ -750,7 +753,10 @@ function tryReplicate(req, res) {
     const existing = replicationJobs.get(key)
     if (!existing) {
       const job = resolveSignatureClosure(request.signature, contentDirectoryIO(cfg.contentDir, request.sources, resolveFlatSig), { limit: request.limit })
-        .then(result => console.log(`[replicate] ${auth.pubkey.slice(0, 8)}… ${request.signature.slice(0, 12)}… fetched=${result.fetched} present=${result.present} holes=${result.holes.length} refused=${result.refused.length}${result.limited ? ' limited' : ''}`))
+        .then(result => {
+          receiptIndex.add(auth.pubkey, result.held)
+          console.log(`[replicate] ${auth.pubkey.slice(0, 8)}… ${request.signature.slice(0, 12)}… fetched=${result.fetched} present=${result.present} holes=${result.holes.length} refused=${result.refused.length}${result.limited ? ' limited' : ''}`)
+        })
         .catch(error => console.error('[replicate] job failed:', error?.message || error))
         .finally(() => replicationJobs.delete(key))
       replicationJobs.set(key, job)
@@ -758,6 +764,23 @@ function tryReplicate(req, res) {
     res.writeHead(202, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' })
     res.end(JSON.stringify({ accepted: true, signature: request.signature, running: !!existing }))
   })
+  return true
+}
+
+function tryServeReceipts(req, res) {
+  if (req.method !== 'GET' || (req.url || '').split('?')[0] !== '/receipts') return false
+  const auth = verifyNip98(req, writers, { devOpen: cfg.devOpenWrites })
+  if (!auth.ok) { respondText(res, 401, auth.reason); return true }
+  const etag = receiptIndex.etag(auth.pubkey)
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(304, { ETag: etag, 'Cache-Control': 'private, no-cache', 'Access-Control-Allow-Origin': '*' }); res.end(); return true
+  }
+  const body = JSON.stringify(receiptIndex.document(auth.pubkey))
+  res.writeHead(200, {
+    'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(body)), ETag: etag,
+    'Cache-Control': 'private, no-cache', 'Access-Control-Allow-Origin': '*', Vary: 'Authorization',
+  })
+  res.end(body)
   return true
 }
 
@@ -798,6 +821,7 @@ function tryWriteContent(req, res) {
     try {
       mkdirSync(dirname(resolved), { recursive: true })
       writeFileSync(resolved, body)
+      receiptIndex.add(auth.pubkey, [sig])
     } catch (e) {
       respondText(res, 500, 'write failed: ' + (e?.message || 'unknown'))
       return
@@ -918,6 +942,8 @@ const server = createServer((req, res) => {
 
   // Read side: GET/HEAD/OPTIONS content serving (returns true if handled)
   if (tryServeContent(req, res)) return
+
+  if (tryServeReceipts(req, res)) return
 
   if (tryReplicate(req, res)) return
 

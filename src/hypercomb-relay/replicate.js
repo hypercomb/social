@@ -33,7 +33,7 @@ export async function resolveSignatureClosure(root, io, options = {}) {
   const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY
   const seen = new Set([root])
   const queue = [root]
-  const result = { root, total: 0, present: 0, fetched: 0, holes: [], refused: [], limited: false }
+  const result = { root, total: 0, present: 0, fetched: 0, held: [], holes: [], refused: [], limited: false }
 
   const resolveOne = async (signature) => {
     let bytes = await io.read(signature)
@@ -46,6 +46,7 @@ export async function resolveSignatureClosure(root, io, options = {}) {
       await io.write(signature, bytes)
       result.fetched++
     }
+    result.held.push(signature)
     for (const child of mineSignatures(bytes)) {
       if (seen.has(child)) continue
       seen.add(child)
@@ -114,13 +115,15 @@ export function contentDirectoryIO(contentDir, sources, resolveExisting = null) 
     write: async (signature, bytes) => {
       mkdirSync(contentDir, { recursive: true })
       const finalPath = join(contentDir, signature)
-      if (existsSync(finalPath)) return
       const partPath = join(contentDir, `.part-${signature}-${randomBytes(6).toString('hex')}`)
+      const oldPath = join(contentDir, `.old-${signature}-${randomBytes(6).toString('hex')}`)
       try {
         writeFileSync(partPath, bytes)
-        if (!existsSync(finalPath)) renameSync(partPath, finalPath)
+        if (existsSync(finalPath)) renameSync(finalPath, oldPath)
+        renameSync(partPath, finalPath)
       } finally {
         try { rmSync(partPath, { force: true }) } catch { /* already renamed */ }
+        try { rmSync(oldPath, { force: true }) } catch {}
       }
     },
   }
