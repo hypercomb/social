@@ -5,8 +5,11 @@ import type { Store } from '@hypercomb/shared'
 export type ResolvedImports = Record<string, string>
 
 /**
- * Build the small platform import map and dependency alias metadata by
- * opening exactly one bag.
+ * Build dependency alias metadata by opening exactly one bag. Current signed
+ * packages need no browser import map: their @hypercomb/core and pixi.js
+ * edges were rewritten to exact OPFS signature URLs when the modules were
+ * built. A two-entry compatibility map survives only for an already-installed
+ * package whose cached manifest predates that platform-signature metadata.
  *
  * Dependencies live in the sign('dependencies') POOL OF MEANING — a dir
  * at the OPFS root named by the sha256 of the meaning string, derived at
@@ -28,30 +31,54 @@ export type ResolvedImports = Record<string, string>
  *      (line 1 = `@scope/name` alias, line 2 = leaf sig);
  *   3. retain alias → sig as discovery/log metadata.
  *
- * Namespace modules execute by `/opfs/<pool-sig>/<content-sig>` now, so their
- * aliases do NOT enter the browser import map. Only the two platform shims
- * (`@hypercomb/core`, `pixi.js`) remain there. No localStorage on the critical
- * path. No leaf-file opens. No pointer file. The bag dir's existence IS the
- * signal that an install is present.
+ * Namespace and platform modules execute by
+ * `/opfs/<pool-sig>/<content-sig>`, so aliases do NOT enter the browser import
+ * map for current packages. No leaf-file opens. No pointer file. The bag
+ * dir's existence IS the signal that an install is present.
  *
  * A flat-scan fallback survives for installs that predate the bag
  * (`installFromBundled` runs without `dependenciesBag` set). New installs
  * always populate the bag, so the fallback eventually goes idle.
  */
 /**
- * Where the resolved map is cached for index.html's pre-module script.
+ * Where the legacy compatibility map is cached for index.html's pre-module
+ * script.
  *
  * An import map only counts if it is live BEFORE the browser triggers any
  * module script load — and the shell's own `main.js` is a module script, so
  * the map appended during bootstrap is always late. Chrome/Edge 133+ merge
  * late maps; Safari and older Chrome discard them and every bare specifier
- * (`@domain.com/namespace`, `@hypercomb/core`, `pixi.js`) fails to resolve.
- * Since the map can only be derived asynchronously from OPFS, the cache is
- * the bridge: written here, replayed synchronously by index.html on the next
- * boot. It is a HINT, never truth — every boot still re-derives from OPFS and
- * corrects the cache (main.ts reloads once when the two disagree).
+ * (`@hypercomb/core`, `pixi.js`) fails to resolve in an old package. Current
+ * package graphs embed signature URLs and remove this cache. It remains a
+ * bounded read fallback so upgrading the shell does not strand a participant
+ * who has not adopted the new content package yet.
  */
 export const IMPORT_MAP_STORAGE_KEY = 'hc:importmap'
+const INSTALL_MANIFEST_STORAGE_KEY = 'core-adapter.installed-manifest'
+const SIGNATURE = /^[a-f0-9]{64}$/i
+
+const needsLegacyPlatformMap = (): boolean => {
+  try {
+    const raw = localStorage.getItem(INSTALL_MANIFEST_STORAGE_KEY)
+    if (!raw) return false
+    const manifest = JSON.parse(raw) as {
+      bees?: unknown
+      dependencies?: unknown
+      platforms?: Record<string, unknown>
+    }
+    if (!Array.isArray(manifest.bees) || manifest.bees.length === 0) return false
+    const dependencies = Array.isArray(manifest.dependencies)
+      ? new Set(manifest.dependencies.filter((value): value is string => typeof value === 'string'))
+      : new Set<string>()
+    const core = manifest.platforms?.['@hypercomb/core']
+    const pixi = manifest.platforms?.['pixi.js']
+    const signed = (value: unknown): value is string =>
+      typeof value === 'string' && SIGNATURE.test(value) && dependencies.has(value)
+    return !signed(core) || !signed(pixi)
+  } catch {
+    return false
+  }
+}
 
 /**
  * Re-derive the import map and cache it for the next boot's pre-module
@@ -62,7 +89,11 @@ export const IMPORT_MAP_STORAGE_KEY = 'hc:importmap'
 export const cacheImportMap = async (): Promise<void> => {
   try {
     const imports = await resolveImportMap()
-    localStorage.setItem(IMPORT_MAP_STORAGE_KEY, JSON.stringify({ imports }))
+    if (Object.keys(imports).length > 0) {
+      localStorage.setItem(IMPORT_MAP_STORAGE_KEY, JSON.stringify({ imports }))
+    } else {
+      localStorage.removeItem(IMPORT_MAP_STORAGE_KEY)
+    }
   } catch (err) {
     console.warn('[resolveImportMap] could not cache import map', err)
   }
@@ -71,20 +102,22 @@ export const cacheImportMap = async (): Promise<void> => {
 export const resolveImportMap = async (): Promise<ResolvedImports> => {
   const imports: ResolvedImports = {}
   const aliasSource = new Map<string, string>()
-  imports['@hypercomb/core'] = '/hypercomb-core.runtime.js'
-  imports['pixi.js'] = '/vendor/pixi.runtime.js'
+  if (needsLegacyPlatformMap()) {
+    imports['@hypercomb/core'] = '/hypercomb-core.runtime.js'
+    imports['pixi.js'] = '/vendor/pixi.runtime.js'
+  }
 
   const store = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(
     '@hypercomb.social/Store',
   ) as Store | undefined
   if (!store) {
-    console.warn('[resolveImportMap] Store not registered — returning core imports only')
+    console.warn('[resolveImportMap] Store not registered — returning compatibility imports only')
     return imports
   }
 
   await store.initialize()
   if (!store.opfsAvailable) {
-    console.warn('[resolveImportMap] OPFS unavailable — returning core imports only')
+    console.warn('[resolveImportMap] OPFS unavailable — returning compatibility imports only')
     return imports
   }
 

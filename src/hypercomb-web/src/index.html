@@ -5,17 +5,14 @@
     <title>Hypercomb</title>
     <base href="/" />
 
-    <!-- Import map pre-apply: MUST run before any module script load is
-         triggered. Angular's own `main.js` is a module script, so a map
-         appended from inside main.ts is always "late": Chrome/Edge 133+ merge
-         late maps, but Safari and older Chrome DROP them — every bare
-         specifier a bee or dependency imports then throws "Failed to resolve
-         module specifier '@domain.com/namespace'". The map is derived from
-         OPFS (async, can't happen here), so main.ts caches the resolved JSON
-         under 'hc:importmap' and this synchronous classic script replays it on
-         the next boot, before the module graph starts. main.ts compares what
-         landed here against a fresh OPFS resolve and reloads once if the cache
-         was stale. -->
+    <!-- Legacy import-map pre-apply. Current content modules embed exact OPFS
+         signature URLs for namespace and platform imports, so new installs do
+         not write this cache. An existing participant may still have a package
+         whose emitted modules contain bare @hypercomb/core / pixi.js edges;
+         while that package remains installed, main.ts caches the two-entry
+         compatibility map here so older Safari/Chromium sees it before any
+         module script. The cache retires itself when current package metadata
+         is adopted. -->
     <script>
       (function () {
         try {
@@ -23,6 +20,7 @@
           if (!raw) return;
           var parsed = JSON.parse(raw);
           if (!parsed || typeof parsed.imports !== 'object' || !parsed.imports) return;
+          if (Object.keys(parsed.imports).length === 0) return;
           var s = document.createElement('script');
           s.type = 'importmap';
           s.textContent = raw;

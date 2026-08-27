@@ -71,6 +71,14 @@ function treeSignature(dir: string): string {
   return createHash('sha256').update(parts.join('\n')).digest('hex')
 }
 
+function fileSetSignature(files: string[]): string {
+  const parts = files
+    .filter(existsSync)
+    .sort()
+    .map(file => `${file}:${statSync(file).mtimeMs}:${statSync(file).size}`)
+  return createHash('sha256').update(parts.join('\n')).digest('hex')
+}
+
 function loadState(): BuildState {
   if (!existsSync(STATE_FILE)) return {}
   try {
@@ -164,6 +172,15 @@ function needsBuild(state: BuildState, key: string, srcDir: string, outputMarker
 
 function recordBuild(state: BuildState, key: string, srcDir: string): void {
   state[key] = { inputSignature: treeSignature(srcDir), builtAt: Date.now() }
+}
+
+function needsFileSetBuild(state: BuildState, key: string, files: string[], outputMarker: string): boolean {
+  if (!existsSync(outputMarker)) return true
+  return state[key]?.inputSignature !== fileSetSignature(files)
+}
+
+function recordFileSetBuild(state: BuildState, key: string, files: string[]): void {
+  state[key] = { inputSignature: fileSetSignature(files), builtAt: Date.now() }
 }
 
 /** Check if dist/ contains a 64-hex-char signature directory */
@@ -348,7 +365,26 @@ async function main() {
   // Runs for both targets so web's public/content/ is always pre-staged.
   // Must run BEFORE the dev tsup build because build-module.ts wipes dist/.
   {
+    // Platform runtime leaves must exist BEFORE build-module: their content
+    // signatures are embedded into every emitted module that imports them.
+    const pixiMarker = join(ROOT, 'hypercomb-web', 'public', 'vendor', 'pixi.runtime.js')
+    const pixiInputs = [
+      join(ROOT, 'hypercomb-web', 'scripts', 'build-pixi-vendor.ts'),
+      join(ROOT, 'hypercomb-web', 'package.json'),
+      join(ROOT, 'package-lock.json'),
+      join(ROOT, 'node_modules', 'pixi.js', 'package.json'),
+    ]
+    const pixiDirty = needsFileSetBuild(state, 'web:pixi-vendor', pixiInputs, pixiMarker)
+    if (pixiDirty) {
+      console.log(`${TAG} bundling pixi.js vendor...`)
+      run(tsxRun('./scripts/build-pixi-vendor.ts'), join(ROOT, 'hypercomb-web'))
+      recordFileSetBuild(state, 'web:pixi-vendor', pixiInputs)
+    } else {
+      console.log(`${TAG} pixi vendor — up to date`)
+    }
+
     const moduleUpToDate = !coreDirty
+      && !pixiDirty
       && hasModuleOutput()
       && !needsBuild(state, 'essentials:module', essentialsSrc)
 
@@ -374,15 +410,6 @@ async function main() {
       console.log(`${TAG} core vendor — up to date`)
     }
 
-    // Pixi vendor (one-time)
-    const pixiMarker = join(ROOT, 'hypercomb-web', 'public', 'vendor', 'pixi.runtime.js')
-    if (!existsSync(pixiMarker)) {
-      console.log(`${TAG} bundling pixi.js vendor...`)
-      run(tsxRun('./scripts/build-pixi-vendor.ts'), join(ROOT, 'hypercomb-web'))
-      state['web:pixi-vendor'] = { builtAt: Date.now() }
-    } else {
-      console.log(`${TAG} pixi vendor — up to date`)
-    }
   }
 
   if (target === 'dev') {

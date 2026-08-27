@@ -40,9 +40,11 @@ const _deps = [Store]
 
 type InstallManifest = {
   version: number
+  packageSig?: string
   layers: string[]
   bees: string[]
   dependencies: string[]
+  platforms?: Record<string, string>
   beeDeps?: Record<string, string[]>
   dependenciesBag?: string
   beesBag?: string
@@ -399,6 +401,7 @@ type BundledPackage = {
   bees: string[]
   dependencies: string[]
   layers: string[]
+  platforms?: Record<string, string>
   beeDeps?: Record<string, string[]>
   // Sigbag (Phase 1 additive): when present, the bundle ships a
   // `<bagSig>/0000…` dir alongside the flat leaves. New flat builds put
@@ -418,7 +421,7 @@ const fetchBundledPackage = async (): Promise<BundledPackage | null> => {
   try {
     const res = await fetch('/content/manifest.json', { cache: 'no-store' })
     if (!res.ok) return null
-    const content = await res.json() as { packages?: Record<string, { bees?: string[]; dependencies?: string[]; layers?: string[]; beeDeps?: Record<string, string[]>; dependenciesBag?: string; beesBag?: string; renderCriticalKeys?: string[]; label?: string; at?: string; previous?: string | null }> }
+    const content = await res.json() as { packages?: Record<string, { bees?: string[]; dependencies?: string[]; layers?: string[]; platforms?: Record<string, string>; beeDeps?: Record<string, string[]>; dependenciesBag?: string; beesBag?: string; renderCriticalKeys?: string[]; label?: string; at?: string; previous?: string | null }> }
     const sig = Object.keys(content.packages ?? {})[0]
     if (!sig) return null
     const pkg = content.packages![sig]
@@ -427,6 +430,7 @@ const fetchBundledPackage = async (): Promise<BundledPackage | null> => {
       bees: pkg.bees ?? [],
       dependencies: pkg.dependencies ?? [],
       layers: pkg.layers ?? [],
+      platforms: pkg.platforms,
       beeDeps: pkg.beeDeps,
       dependenciesBag: pkg.dependenciesBag,
       beesBag: pkg.beesBag,
@@ -443,12 +447,20 @@ const fetchBundledPackage = async (): Promise<BundledPackage | null> => {
 }
 
 const bundledDiffersFromCached = (bundled: BundledPackage, cached: InstallManifest): boolean => {
-  if (bundled.bees.length !== cached.bees.length) return true
-  const cachedSet = new Set(cached.bees)
-  for (const sig of bundled.bees) {
-    if (!cachedSet.has(sig)) return true
+  if (cached.packageSig) return cached.packageSig !== bundled.packageSig
+
+  const sameSignatures = (left: readonly string[], right: readonly string[]): boolean => {
+    if (left.length !== right.length) return false
+    const rightSet = new Set(right)
+    return left.every(signature => rightSet.has(signature))
   }
-  return false
+  if (!sameSignatures(bundled.bees, cached.bees)) return true
+  if (!sameSignatures(bundled.dependencies, cached.dependencies)) return true
+  if (!sameSignatures(bundled.layers, cached.layers)) return true
+
+  const bundledPlatforms = Object.entries(bundled.platforms ?? {}).sort()
+  const cachedPlatforms = Object.entries(cached.platforms ?? {}).sort()
+  return JSON.stringify(bundledPlatforms) !== JSON.stringify(cachedPlatforms)
 }
 
 const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureStore): Promise<void> => {
@@ -607,9 +619,11 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   // included so `resolveImportMap` can prefer the bag over flat scan.
   const manifest = {
     version: 2,
+    packageSig: bundled.packageSig,
     layers: bundled.layers,
     bees: bundled.bees,
     dependencies: bundled.dependencies,
+    platforms: bundled.platforms,
     beeDeps: bundled.beeDeps,
     dependenciesBag: bundled.dependenciesBag,
     beesBag: bundled.beesBag,
@@ -947,9 +961,13 @@ const tryParseManifest = (json: string): InstallManifest | null => {
     if (!parsed || typeof parsed !== 'object') return null
     return {
       version: parsed.version ?? 0,
+      packageSig: typeof parsed.packageSig === 'string' ? parsed.packageSig : undefined,
       layers: Array.isArray(parsed.layers) ? parsed.layers : [],
       bees: Array.isArray(parsed.bees) ? parsed.bees : [],
       dependencies: Array.isArray(parsed.dependencies) ? parsed.dependencies : [],
+      platforms: parsed.platforms && typeof parsed.platforms === 'object'
+        ? parsed.platforms as Record<string, string>
+        : undefined,
       beeDeps: parsed.beeDeps && typeof parsed.beeDeps === 'object' ? parsed.beeDeps : undefined,
       dependenciesBag: typeof parsed.dependenciesBag === 'string' ? parsed.dependenciesBag : undefined,
       beesBag: typeof parsed.beesBag === 'string' ? parsed.beesBag : undefined,

@@ -28,11 +28,12 @@ service worker's "opfs resolution by signature" route already serves locally
 IS a deployment; the client's OPFS is a cache of the same address space; the
 dev server serves dist under the same contract. No bundler in the loading
 path, no name-addressed modules — and therefore **no import map**: once
-Angular and Vite are out of the load path and bee dependencies are imported
-by signature URL instead of by alias, `resolveImportMap()`, the `index.html`
-localStorage replay, and the one-time `location.reload()` hack all retire
-(Phase 4). The signature is the address; the URL is just the signature with
-an origin in front of it.
+the remaining legacy package window closes, `resolveImportMap()`, the
+`index.html` localStorage replay, and the one-time `location.reload()` hack
+all retire (Phase 4). Current package modules already import by signature;
+removing Angular and the Angular builder's Vite dev server is the separate
+Phase 5 shell cut. The signature is the address; the URL is just the signature
+with an origin in front of it.
 
 **Deployments are artifacts.** Nothing is ever "running" at a domain — a
 deployment is a static, signed artifact that clients import, and execution
@@ -550,7 +551,7 @@ already knows each bee's dependency closure *and* the dep signatures — stamp
 them into the specifiers and the ESM graph resolves itself through the sig
 resolver:
 
-- [ ] Module build emits `import … from '/<prefix>/<sig>'` instead of bare
+- [x] Module build emits `import … from '/<prefix>/<sig>'` instead of bare
   aliases (alias comments survive as human metadata only)
   - **First executable slice complete:** `DependencyLoader` and
     `ScriptPreloader.#ensureDeps` now import namespace modules from
@@ -558,10 +559,18 @@ resolver:
     metadata only on these paths. An emitted-module census found zero
     namespace-to-namespace import edges—the namespace bundles already inline
     relative graphs—so the executable bare-specifier remainder is the two
-    platform bundles, `@hypercomb/core` and `pixi.js`. `resolveImportMap()` now
-    keeps the 49 namespace aliases out of the browser map entirely while still
-    deriving their alias→sig metadata from the dependency bag; the live map is
-    down to those two platform shims.
+    platform bundles, `@hypercomb/core` and `pixi.js`.
+  - **Platform slice complete:** the module build now signs the import-free
+    core and Pixi runtimes, includes both bytes as leaves in
+    `manifest.dependencies`, includes their signatures in the root layer's
+    dependency closure, and rewrites every emitted platform edge to
+    `/opfs/<sign('dependencies')>/<platform-sig>`. The platform fingerprint is
+    part of every module cache key, so changing either runtime rebuilds every
+    signed importer. The current-package census is 51 dependency leaves,
+    zero bare platform specifiers, and 840 exact signature edges across 164
+    modules. Current installs emit no import map; the old two-entry map remains
+    only as a compatibility read for a cached pre-platform-signature package.
+    The native frontend no longer bakes a static map.
 - [ ] SW resolver gains network fallback: OPFS miss → `<origin>/<sig>` fetch
   → **verify the bytes hash to the requested sig** (published-pools already
   does this for specs; the module path must too — forged bytes are dropped,

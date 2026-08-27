@@ -103,16 +103,12 @@ const ensureSwControl = async (): Promise<void> => {
   })
 }
 
-// The import map has to be LIVE before the browser triggers any module script
-// load — and Angular's `main.js` (this file) is itself a module script, so a
-// map appended from here is always late. Chrome/Edge 133+ merge late maps;
-// Safari and older Chrome ignore them outright and every bare specifier a bee
-// or dependency imports throws "Failed to resolve module specifier". The map
-// can only be derived asynchronously (OPFS scan), so the contract is:
-//   - index.html replays the cached map synchronously, before the module graph;
-//   - here we keep that cache truthful against OPFS, and when what landed early
-//     doesn't match what this session actually needs, reload ONCE so the early
-//     script wins. Steady-state boots match and never reload.
+// Current content modules embed exact OPFS signature URLs and require no
+// browser import map. This replay path is a bounded compatibility bridge for
+// an already-installed package that predates signed @hypercomb/core / pixi.js
+// leaves. Such a map has to be LIVE before a module script loads, so index.html
+// replays the cached legacy map and this boot keeps that cache truthful until
+// the participant adopts a current package.
 const appendImportMap = (json: string): void => {
   const script = document.createElement('script')
   script.type = 'importmap'
@@ -122,6 +118,15 @@ const appendImportMap = (json: string): void => {
 
 const attachImportMap = async (): Promise<void> => {
   const imports = await resolveImportMap()
+
+  // Current signed package (or no installed package): the dependency scan was
+  // still useful for alias metadata, but there is no executable map. Remove a
+  // stale compatibility cache; exact module URLs make a reload unnecessary.
+  if (Object.keys(imports).length === 0) {
+    try { localStorage.removeItem(IMPORT_MAP_STORAGE_KEY) } catch {}
+    return
+  }
+
   const json = JSON.stringify({ imports })
 
   // Already applied by index.html before the module graph loaded — done.
@@ -133,8 +138,8 @@ const attachImportMap = async (): Promise<void> => {
   // console warning) on those that don't — hence the reload guard below.
   appendImportMap(JSON.stringify({ imports }, null, 2))
 
-  // No installed dependency metadata → no sig-addressed namespace module will
-  // load this session; the next boot picks the platform map cache up early.
+  // No installed dependency metadata → no legacy module will load this
+  // session; the next boot picks the compatibility map cache up early.
   const aliasMap = (globalThis as any).__hypercombAliasMap as Map<string, string> | undefined
   if (!aliasMap?.size) return
 

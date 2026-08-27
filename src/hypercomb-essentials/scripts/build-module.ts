@@ -21,6 +21,7 @@ import { fileURLToPath } from 'url'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { dirname, extname, join, relative, resolve } from 'path'
 import { build } from 'esbuild'
+import { signatureExternalPlugin, type SignatureExternalMap } from './signature-externals'
 
 // -------------------------------------------------
 // esm globals
@@ -59,7 +60,10 @@ const TARGET = 'es2022'
 // domains to exclude from the build output
 const EXCLUDED_DOMAINS: string[] = ['revolucionstyle.com']
 const NAMESPACE_SEGMENTS_MAX = 3
-const PLATFORM_EXTERNALS = ['@hypercomb/core', 'pixi.js']
+const PLATFORM_MODULE_FILES = {
+  '@hypercomb/core': CORE_DIST,
+  'pixi.js': resolve(PROJECT_ROOT, '..', 'hypercomb-web', 'public', 'vendor', 'pixi.runtime.js'),
+} as const
 
 // hard rule: never generate @<domain> root aggregator
 const EMIT_DOMAIN_ROOT_NAMESPACE = false
@@ -138,10 +142,17 @@ interface BeeDepCacheEntry {
 // this change edited the EXTRACTOR, not any source — so every one of the 333
 // files previously cached as `doc: null` would hit the cache and stay
 // nameless. Bumping is what makes an extractor change take effect at all.
+//
+// version 7 = platform externals are packaged as signed dependency leaves and
+// every emitted @hypercomb/core / pixi.js import is rewritten to the exact
+// `/opfs/<dependencies-pool-sig>/<content-sig>` URL. The platform fingerprint
+// participates in every unit cache key, so changing either runtime rebuilds
+// every module whose signed bytes embed those addresses.
 interface BuildCache {
-  version: 6
+  version: 7
   rootHash: string                            // Merkle root of all unit hashes
   rootLayerSig: string                        // last output root signature
+  platformFingerprint: string                 // core + pixi content identities
   namespaces: Record<string, UnitCache>
   bees: Record<string, UnitCache>
   layerCache?: Record<string, LayerCacheEntry>
@@ -155,7 +166,7 @@ const OUTPUT_CACHE_DIR = join(DIST_ROOT, '.cache')
 const loadCache = (): BuildCache | null => {
   try {
     const raw = JSON.parse(readFileSync(CACHE_FILE, 'utf8'))
-    if (raw?.version === 6) return raw
+    if (raw?.version === 7) return raw
   } catch {}
   return null
 }
@@ -315,6 +326,48 @@ const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
 
 const isSig = (v: string): boolean =>
   /^[a-f0-9]{64}$/i.test(v)
+
+type PlatformRuntime = {
+  poolSignature: string
+  signatures: SignatureExternalMap
+  bytesBySignature: Map<string, Uint8Array>
+  fingerprint: string
+}
+
+const loadPlatformRuntime = async (): Promise<PlatformRuntime> => {
+  const signatures: Record<string, string> = {}
+  const bytesBySignature = new Map<string, Uint8Array>()
+
+  for (const [specifier, file] of Object.entries(PLATFORM_MODULE_FILES)) {
+    if (!existsSync(file)) {
+      throw new Error(
+        `platform module ${specifier} is missing at ${file}; build the core and web Pixi runtimes first`,
+      )
+    }
+    const bytes = new Uint8Array(readFileSync(file))
+    const signature = await SignatureService.sign(toArrayBuffer(bytes))
+    const existing = bytesBySignature.get(signature)
+    if (existing && existing.byteLength !== bytes.byteLength) {
+      throw new Error(`platform signature collision at ${signature}`)
+    }
+    signatures[specifier] = signature
+    bytesBySignature.set(signature, bytes)
+  }
+
+  const poolSignature = await SignatureService.sign(
+    toArrayBuffer(textToBytes('dependencies')),
+  )
+  const fingerprint = await SignatureService.sign(
+    toArrayBuffer(textToBytes(
+      Object.entries(signatures)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([specifier, signature]) => `${specifier}:${signature}`)
+        .join('\n'),
+    )),
+  )
+
+  return { poolSignature, signatures, bytesBySignature, fingerprint }
+}
 
 // -------------------------------------------------
 // bee doc extraction (from TypeScript source)
@@ -666,7 +719,8 @@ const buildLayersFromTree = async (
 const buildNamespaceDependency = async (
   namespaceRelDir: string,
   directMemberFiles: SourceFile[],
-  allNamespaceSpecifiers: string[]
+  allNamespaceSpecifiers: string[],
+  platform: PlatformRuntime,
 ): Promise<{ sig: string; bytes: Uint8Array } | null> => {
   const namespaceSpecifier = specifierFromNamespaceRelDir(namespaceRelDir)
   const namespaceRootFs = join(SRC_ROOT, namespaceRelDir)
@@ -683,10 +737,7 @@ const buildNamespaceDependency = async (
 
   const entrySource = exportLines.length ? exportLines.join('\n') + '\n' : 'export {};\n'
 
-  const externals = [
-    ...PLATFORM_EXTERNALS,
-    ...allNamespaceSpecifiers.filter(s => s !== namespaceSpecifier),
-  ]
+  const externals = allNamespaceSpecifiers.filter(s => s !== namespaceSpecifier)
 
   const r = await build({
     stdin: {
@@ -703,6 +754,7 @@ const buildNamespaceDependency = async (
     sourcemap: false,
     tsconfig: resolve(PROJECT_ROOT, 'tsconfig.json'),
     external: externals,
+    plugins: [signatureExternalPlugin(platform.poolSignature, platform.signatures)],
   })
 
   const compiled = r.outputFiles?.[0]?.text
@@ -724,6 +776,7 @@ const buildNamespaceDependency = async (
 const buildBee = async (
   entry: string,
   externals: string[],
+  platform: PlatformRuntime,
 ): Promise<{ bytes: Uint8Array; inputs: string[] }> => {
   const r = await build({
     entryPoints: [entry],
@@ -735,6 +788,7 @@ const buildBee = async (
     sourcemap: false,
     tsconfig: resolve(PROJECT_ROOT, 'tsconfig.json'),
     external: externals,
+    plugins: [signatureExternalPlugin(platform.poolSignature, platform.signatures)],
     metafile: true,
   })
 
@@ -760,6 +814,16 @@ const main = async (): Promise<void> => {
 
   const sources = discoverSources()
   if (!sources.length) throw new Error('no sources found')
+
+  // Platform modules are part of the signed package, not ambient browser
+  // aliases. Their content signatures are embedded into every emitted module
+  // that imports them, and the bytes themselves land in the dependencies
+  // pool alongside namespace modules.
+  const platform = await loadPlatformRuntime()
+  console.log(
+    `[build-module] platform: core=${platform.signatures['@hypercomb/core'].slice(0, 12)} ` +
+    `pixi=${platform.signatures['pixi.js'].slice(0, 12)}`,
+  )
 
   // --- Phase 1: Merkle tree mtime scan (cheap: stat only, no file reads) ---
 
@@ -788,7 +852,7 @@ const main = async (): Promise<void> => {
   const beeSources = sources.filter(s => s.kind === 'bee')
 
   // Quick mtime scan: check if ANY file has a changed mtime
-  let anyMtimeChanged = !cache
+  let anyMtimeChanged = !cache || cache.platformFingerprint !== platform.fingerprint
   if (cache && !anyMtimeChanged) {
     // Check namespace files
     for (const ns of allNs) {
@@ -889,7 +953,7 @@ const main = async (): Promise<void> => {
     const { leaves, inputSig } = await resolveUnitInputs(
       members.map(m => m.entry),
       cache?.namespaces[ns]?.files,
-      entrySource
+      `${entrySource}\nplatform:${platform.fingerprint}`,
     )
 
     allUnitSigs.push(inputSig)
@@ -904,7 +968,7 @@ const main = async (): Promise<void> => {
       newNamespaces[ns] = { files: leaves, inputSig, outputSig: cachedUnit.outputSig }
       cacheHits++
     } else {
-      const built = await buildNamespaceDependency(ns, members, allSpecifiers)
+      const built = await buildNamespaceDependency(ns, members, allSpecifiers, platform)
       if (!built) continue
       dependencyBytes.set(built.sig, built.bytes)
       addToBucket(resourcesByDir, ns, jsFileName(built.sig), 'dep')
@@ -917,9 +981,6 @@ const main = async (): Promise<void> => {
 
   console.log(`[build-module] dependencies: ${cacheHits} cached, ${cacheMisses} built`)
 
-  const rootDependencies = uniqSorted(Array.from(dependencyBytes.keys()).map(jsFileName))
-  const dependencySigs = Array.from(dependencyBytes.keys()).sort((a, b) => a.localeCompare(b))
-
   // class-to-dep reverse index: scan each namespace bundle for exported class names
   const classToDepSig = new Map<string, string>()
   for (const [sig, bytes] of dependencyBytes) {
@@ -930,6 +991,17 @@ const main = async (): Promise<void> => {
     }
   }
   console.log(`[build-module] class-to-dep index: ${classToDepSig.size} classes across ${dependencyBytes.size} namespaces`)
+
+  // The two platform runtimes use the same immutable dependency pool as the
+  // namespace modules, but carry no alias line in the bag. DependencyLoader
+  // therefore does not eagerly execute them; emitted modules pull each exact
+  // signature only when their static import graph needs it.
+  for (const [signature, bytes] of platform.bytesBySignature) {
+    dependencyBytes.set(signature, bytes)
+  }
+  const rootDependencies = uniqSorted(Array.from(dependencyBytes.keys()).map(jsFileName))
+  const dependencySigs = Array.from(dependencyBytes.keys()).sort((a, b) => a.localeCompare(b))
+  console.log(`[build-module] packaged ${platform.bytesBySignature.size} signature-addressed platform modules`)
 
   // pre-extract docs from ALL source files that extend Bee/Drone/Worker/QueenBee
   // beeline: cache doc extraction by file content signature
@@ -968,7 +1040,7 @@ const main = async (): Promise<void> => {
   // bees — extract deps from compiled output and map to dep sigs
   const beeDepsMap = new Map<string, string[]>()
   const docsByDir = new Map<string, Record<string, BeeDocEntry>>()
-  const beeExternals = [...PLATFORM_EXTERNALS, ...allSpecifiers]
+  const beeExternals = [...allSpecifiers]
   let beeCacheHits = 0
   let beeCacheMisses = 0
 
@@ -985,7 +1057,11 @@ const main = async (): Promise<void> => {
       : []
     const inputPaths = recorded.includes(src.entry) ? recorded : [src.entry, ...recorded]
 
-    let { leaves, inputSig } = await resolveUnitInputs(inputPaths, cachedUnit?.files)
+    let { leaves, inputSig } = await resolveUnitInputs(
+      inputPaths,
+      cachedUnit?.files,
+      platform.fingerprint,
+    )
 
     const cachedFile = cachedUnit ? join(OUTPUT_CACHE_DIR, `${cachedUnit.outputSig}.js`) : null
 
@@ -998,13 +1074,17 @@ const main = async (): Promise<void> => {
       newBees[src.relPath] = { files: leaves, inputSig, outputSig: cachedUnit.outputSig }
       beeCacheHits++
     } else {
-      const built = await buildBee(src.entry, beeExternals)
+      const built = await buildBee(src.entry, beeExternals, platform)
       bytes = built.bytes
       sig = await SignatureService.sign(toArrayBuffer(bytes))
       writeFileSync(join(OUTPUT_CACHE_DIR, `${sig}.js`), bytes)
       // Re-key on what was really bundled, so the NEXT run sees a change in
       // any inlined module rather than only in this file.
-      ;({ leaves, inputSig } = await resolveUnitInputs(built.inputs, cachedUnit?.files))
+      ;({ leaves, inputSig } = await resolveUnitInputs(
+        built.inputs,
+        cachedUnit?.files,
+        platform.fingerprint,
+      ))
       newBees[src.relPath] = { files: leaves, inputSig, outputSig: sig }
       beeCacheMisses++
     }
@@ -1199,6 +1279,7 @@ const main = async (): Promise<void> => {
     layers: Array.from(layers.keys()).sort((a, b) => a.localeCompare(b)),
     bees: Array.from(resourceBytes.keys()).sort((a, b) => a.localeCompare(b)),
     dependencies: dependencySigs,
+    platforms: platform.signatures,
     beeDeps: Object.fromEntries(beeDepsMap),
     dependenciesBag,
     beesBag,
@@ -1291,9 +1372,10 @@ const main = async (): Promise<void> => {
 
   const rootHash = await computeRootHash(allUnitSigs)
   saveCache({
-    version: 6,
+    version: 7,
     rootHash,
     rootLayerSig,
+    platformFingerprint: platform.fingerprint,
     namespaces: newNamespaces,
     bees: newBees,
     layerCache: newLayerCache,
