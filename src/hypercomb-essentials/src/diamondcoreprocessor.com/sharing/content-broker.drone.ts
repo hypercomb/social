@@ -1160,6 +1160,20 @@ export class ContentBrokerDrone extends Drone {
   }
 
   /**
+   * Permit one explicit strict-operation retry now. Render misses retain their
+   * exponential backoff; snapshot/export calls use this only after joining any
+   * existing probe, because host attribution may have arrived after that probe
+   * began. Verification is unchanged — `fetchBySig` still accepts bytes only
+   * when their SHA-256 is the requested signature.
+   */
+  public allowFetchRetry = (sig: string): void => {
+    const s = String(sig ?? '').toLowerCase().trim()
+    if (!SIG_RE.test(s)) return
+    this.#fetchMissUntil.delete(s)
+    this.#missBackoff.delete(s)
+  }
+
+  /**
    * Fetch the cached visuals for a composedSig from any participant
    * in the swarm. Returns an array of per-pubkey visuals entries —
    * the requester feeds these into their own swarm peer cache so
