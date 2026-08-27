@@ -221,13 +221,14 @@ export class FolderSyncView extends EventTarget {
 
   #showImport(result: FolderImportResult): void {
     EffectBus.emit('toast:show', {
-      type: result.conflicts || result.invalid || result.incompleteSources ? 'info' : 'success',
+      type: result.conflicts || result.invalid || result.unresolved || result.incompleteSources ? 'info' : 'success',
       title: 'Restore complete',
       message: [
         `${result.copied} files imported; ${result.identical} already present; ${result.conflicts} conflicts untouched; ${result.invalid} invalid or unavailable files rejected.`,
         ...result.warnings,
       ].join(' '),
     })
+    if (result.copied > 0) setTimeout(() => window.location.reload(), 900)
   }
 
   #ensureStyles(): void {

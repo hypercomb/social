@@ -113,7 +113,7 @@ export class FolderSyncQueenBee extends QueenBee {
   }
 
   #reportImport(result: FolderImportResult): void {
-    const problems = result.conflicts + result.invalid + result.incompleteSources
+    const problems = result.conflicts + result.invalid + result.unresolved + result.incompleteSources
     const sources = result.sourceDevices?.length ?? 1
     const message = [
       `${result.copied} files imported from ${sources} device snapshot${sources === 1 ? '' : 's'}.`,
@@ -128,6 +128,10 @@ export class FolderSyncQueenBee extends QueenBee {
         message: `${message} Reload Hypercomb to open the imported state.`,
         icon: '●',
       })
+      // The running shell still holds the pre-import heads and store indexes.
+      // A restore is not complete until those imported bytes become the live
+      // hive, so reopen this same origin after the result has been visible.
+      setTimeout(() => window.location.reload(), 900)
     }
   }
 

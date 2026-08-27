@@ -254,6 +254,8 @@ export interface FolderImportResult {
   identical: number
   conflicts: number
   invalid: number
+  /** Manifest entries the source checkpoint could not carry or resolve. */
+  unresolved: number
   /** Sources without a receipt proving a complete portable checkpoint. */
   incompleteSources: number
   warnings: string[]
@@ -726,12 +728,20 @@ export class FolderSyncService {
       identical: 0,
       conflicts: 0,
       invalid: 0,
+      unresolved: sources.reduce((total, source) => total
+        + (source.manifest.unrepresentableCount ?? source.manifest.unrepresentable?.length ?? 0)
+        + (source.manifest.closure?.unresolved?.length ?? 0), 0),
       incompleteSources: sources.filter(source => !source.checkpointComplete).length,
       warnings: [],
     }
     if (result.incompleteSources) {
       result.warnings.push(
         `${result.incompleteSources} source snapshot${result.incompleteSources === 1 ? '' : 's'} had no complete portable-checkpoint receipt; individually verified files were imported.`,
+      )
+    }
+    if (result.unresolved) {
+      result.warnings.push(
+        `${result.unresolved} source item${result.unresolved === 1 ? '' : 's'} could not be represented or resolved by the backup and remain unresolved.`,
       )
     }
 
