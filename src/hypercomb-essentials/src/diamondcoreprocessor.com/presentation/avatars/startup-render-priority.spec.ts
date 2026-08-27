@@ -16,6 +16,10 @@ const PRELOADER = readFileSync(
   join(__dirname, '../../../../../hypercomb-shared/core/script-preloader.ts'),
   'utf8',
 )
+const PREPARE = readFileSync(
+  join(__dirname, '../../../../scripts/prepare.ts'),
+  'utf8',
+)
 
 describe('startup render priority', () => {
   it('subscribes to first paint before navigation and awaits it before pulsing bees', () => {
@@ -56,18 +60,35 @@ describe('startup render priority', () => {
   it('does not let the dev processor resolver walk OPFS before first paint', () => {
     const barrier = DEV_APP.indexOf('const firstTilePaint = this.awaitFirstTilePaint()')
     const direct = DEV_APP.indexOf('preloader?.useRegisteredBees?.(values)')
-    const pulse = DEV_APP.indexOf('await Promise.allSettled(')
+    const pulse = DEV_APP.indexOf('renderFirst.map(')
     const wait = DEV_APP.indexOf('await firstTilePaint')
     const act = DEV_APP.indexOf("await new hypercomb().act('')")
+    const background = DEV_APP.indexOf('afterPaint.map(')
 
     expect(barrier).toBeGreaterThan(-1)
     expect(direct).toBeGreaterThan(barrier)
     expect(direct).toBeLessThan(pulse)
     expect(wait).toBeGreaterThan(pulse)
     expect(wait).toBeLessThan(act)
+    expect(background).toBeGreaterThan(act)
+    expect(DEV_APP).toContain('RENDER_FIRST_KEYS')
+    expect(DEV_APP).toContain("'@diamondcoreprocessor.com/PixiHostWorker'")
+    expect(DEV_APP).toContain("'@diamondcoreprocessor.com/ShowCellDrone'")
     expect(DEV_APP).toContain("payload?.settled !== true || payload?.locationKey !== targetLocationKey")
     expect(PRELOADER).toContain('if (this.#registeredBees)')
     expect(PRELOADER).toMatch(/if \(this\.#registeredBees\) \{[\s\S]*return \[\]/)
     expect(PRELOADER).toContain('OPFS module walk skipped')
+  })
+
+  it('keeps the generated side-effect entrypoint present during regeneration', () => {
+    const cleanStart = PREPARE.indexOf('const preClean = () =>')
+    const cleanEnd = PREPARE.indexOf('// export parsing', cleanStart)
+    const clean = PREPARE.slice(cleanStart, cleanEnd)
+
+    expect(clean).toContain("join(SRC_ROOT, 'side-effects.ts')")
+    expect(clean).toContain('if (preservedRootOutputs.has(file)) continue')
+    expect(clean.indexOf('if (preservedRootOutputs.has(file)) continue'))
+      .toBeLessThan(clean.indexOf('rmSync(file'))
+    expect(DEV_APP).toContain("import '../../../hypercomb-essentials/src/side-effects'")
   })
 })

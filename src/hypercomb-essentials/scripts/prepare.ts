@@ -193,18 +193,26 @@ const walkFiles = (dir: string): string[] => {
 
 const preClean = () => {
   let removed = 0
+  // Root entrypoints are rewritten from complete in-memory content below.
+  // Never unlink them first: Angular watches the linked source package and
+  // can rebuild in the gap, producing a fatal unresolved side-effects import.
+  // If preparation is interrupted after cleanup, that transient gap becomes
+  // permanent until another prepare run. Keeping the old valid root outputs
+  // until writeIfChanged replaces them makes regeneration atomic from every
+  // consumer's point of view.
+  const preservedRootOutputs = new Set([
+    join(SRC_ROOT, 'index.ts'),
+    join(SRC_ROOT, 'side-effects.ts'),
+    join(SRC_ROOT, 'preload-effects.ts'),
+    join(SRC_ROOT, 'essentials-keys.ts'),
+  ])
   for (const file of walkFiles(SRC_ROOT)) {
+    if (preservedRootOutputs.has(file)) continue
     const name = basename(file)
     if (name === 'index.ts' || name === 'side-effects.ts' || name.endsWith('-keys.ts')) {
       rmSync(file, { force: true })
       removed++
     }
-  }
-  // also remove the master keys file if it exists
-  const masterKeys = join(SRC_ROOT, 'essentials-keys.ts')
-  if (existsSync(masterKeys)) {
-    rmSync(masterKeys, { force: true })
-    removed++
   }
   if (removed) console.log(`[prepare] cleaned ${removed} stale generated file(s)`)
 }
