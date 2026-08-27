@@ -63,6 +63,60 @@ void DroneRegistry
 void IconProviderRegistry
 
 /**
+ * Boot runs before Angular owns the page. If storage cannot be reopened (for
+ * example, a restored packed hive is busy in another tab), Angular never gets
+ * a chance to render its ordinary error surfaces. Do not leave the participant
+ * looking at an inert background: replace the splash with a plain-DOM failure
+ * panel that works even when the framework did not start.
+ */
+const renderBootFailure = (error: unknown): void => {
+  try {
+    document.getElementById('hc-splash')?.remove()
+    const root = document.querySelector('app-root') ?? document.body
+    root.replaceChildren()
+
+    const panel = document.createElement('main')
+    panel.setAttribute('role', 'alert')
+    panel.style.cssText = [
+      'box-sizing:border-box',
+      'max-width:48rem',
+      'margin:12vh auto 0',
+      'padding:1.5rem',
+      'color:#dce7ef',
+      'background:rgba(8,13,19,.94)',
+      'border:1px solid rgba(126,182,214,.38)',
+      'border-radius:6px',
+      'font:14px/1.55 system-ui,sans-serif',
+    ].join(';')
+
+    const heading = document.createElement('h1')
+    heading.textContent = 'Hypercomb could not open this local hive'
+    heading.style.cssText = 'margin:0 0 .75rem;font-size:1.15rem;color:#f1f6fa'
+
+    const explanation = document.createElement('p')
+    explanation.textContent =
+      'Nothing was deleted. If this hive uses the packed store, close any other tab using this same address and retry.'
+
+    const detail = document.createElement('pre')
+    detail.textContent = error instanceof Error ? error.message : String(error)
+    detail.style.cssText =
+      'white-space:pre-wrap;overflow-wrap:anywhere;padding:.8rem;background:#090d12;color:#9fb4c4;border-radius:4px'
+
+    const retry = document.createElement('button')
+    retry.type = 'button'
+    retry.textContent = 'Retry opening this hive'
+    retry.style.cssText =
+      'margin-top:.5rem;padding:.65rem .9rem;border:1px solid #6e9fbd;border-radius:4px;background:#183044;color:#eef7ff;cursor:pointer'
+    retry.addEventListener('click', () => window.location.reload())
+
+    panel.append(heading, explanation, detail, retry)
+    root.append(panel)
+  } catch {
+    // The original console error remains the last-resort diagnostic.
+  }
+}
+
+/**
  * Register the same service worker prod uses. It serves
  * `/@resource/<sig>` from the flat OPFS root (sig-named content files;
  * the legacy `__resources__/` dir is a read-fallback drain source only),
@@ -183,4 +237,7 @@ const main = async (): Promise<void> => {
     sentinelPromise ??= initSentinel()
 }
 
-main().catch(err => console.error(err))
+main().catch(err => {
+  console.error(err)
+  renderBootFailure(err)
+})

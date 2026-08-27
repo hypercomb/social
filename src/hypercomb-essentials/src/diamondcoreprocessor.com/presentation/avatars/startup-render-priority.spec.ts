@@ -12,12 +12,24 @@ const DEV_APP = readFileSync(
   join(__dirname, '../../../../../hypercomb-dev/src/app/app.ts'),
   'utf8',
 )
+const DEV_MAIN = readFileSync(
+  join(__dirname, '../../../../../hypercomb-dev/src/main.ts'),
+  'utf8',
+)
 const PRELOADER = readFileSync(
   join(__dirname, '../../../../../hypercomb-shared/core/script-preloader.ts'),
   'utf8',
 )
 const PREPARE = readFileSync(
   join(__dirname, '../../../../scripts/prepare.ts'),
+  'utf8',
+)
+const PACKED_BRIDGE = readFileSync(
+  join(__dirname, '../../../../../hypercomb-shared/core/packed-bridge.ts'),
+  'utf8',
+)
+const PACKED_WORKER = readFileSync(
+  join(__dirname, '../../../../../hypercomb-shared/core/packed-store.worker.ts'),
   'utf8',
 )
 
@@ -90,5 +102,17 @@ describe('startup render priority', () => {
     expect(clean.indexOf('if (preservedRootOutputs.has(file)) continue'))
       .toBeLessThan(clean.indexOf('rmSync(file'))
     expect(DEV_APP).toContain("import '../../../hypercomb-essentials/src/side-effects'")
+  })
+
+  it('shows a recoverable error when storage fails before Angular bootstrap', () => {
+    expect(DEV_MAIN).toContain('const renderBootFailure = (error: unknown): void =>')
+    expect(DEV_MAIN).toContain("document.getElementById('hc-splash')?.remove()")
+    expect(DEV_MAIN).toContain("retry.addEventListener('click', () => window.location.reload())")
+    expect(DEV_MAIN).toMatch(/main\(\)\.catch\(err => \{[\s\S]*renderBootFailure\(err\)/)
+  })
+
+  it('releases packed-store ownership when opening the restored pack fails', () => {
+    expect(PACKED_BRIDGE).toMatch(/catch \(error\) \{[\s\S]*bridge\?\.terminate\(\)[\s\S]*return null/)
+    expect(PACKED_WORKER).toMatch(/PackedStoreEngine\.open[\s\S]*catch \(error\) \{[\s\S]*this\.#handle\.close\(\)[\s\S]*throw error/)
   })
 })

@@ -154,11 +154,13 @@ export interface PackedBoot {
  */
 export const packedRoot = async (config: PackedStoreConfig): Promise<PackedBoot | null> => {
   if (!packedStoreEnabled() || !packedSupported()) return null
+  let bridge: PackedBridge | null = null
   try {
     const worker = new Worker(new URL('./packed-store.worker', import.meta.url), { type: 'module' })
-    const bridge = new PackedBridge(worker)
-    const info = (await bridge.invoke('pack_open', config)) as PackedBoot['info']
-    bootedBridge = bridge
+    const openedBridge = new PackedBridge(worker)
+    bridge = openedBridge
+    const info = (await openedBridge.invoke('pack_open', config)) as PackedBoot['info']
+    bootedBridge = openedBridge
     // Bulk SHA-256 now happens in the worker, so install verification and
     // folder-sync sweeps stop competing with rendering. Callers reach it
     // through `SignatureService.signMany` and never learn a worker exists.
@@ -175,13 +177,20 @@ export const packedRoot = async (config: PackedStoreConfig): Promise<PackedBoot 
     // commands plus two explicit maintenance ones; nothing here can write a
     // record.
     ;(globalThis as unknown as Record<string, unknown>)['hypercombPackedStore'] = {
-      stats: () => bridge.invoke('pack_stats'),
-      drain: (limit = 200) => bridge.invoke('pack_drain', { limit }),
-      compact: () => bridge.invoke('pack_compact'),
-      collect: () => bridge.invoke('pack_collect'),
+      stats: () => openedBridge.invoke('pack_stats'),
+      drain: (limit = 200) => openedBridge.invoke('pack_drain', { limit }),
+      compact: () => openedBridge.invoke('pack_compact'),
+      collect: () => openedBridge.invoke('pack_collect'),
     }
-    return { root: new NativeRootDirectory(bridge), bridge, info }
+    return { root: new NativeRootDirectory(openedBridge), bridge: openedBridge, info }
   } catch (error) {
+    // `pack_open` acquires the exclusive SyncAccessHandle before it parses the
+    // file. If parsing or any later open step fails, leaving this worker alive
+    // leaves that handle locked even though no usable store was returned.
+    // Reload then sees its own abandoned worker as "another tab" and only a
+    // full Chromium restart releases it. Terminating the failed bridge closes
+    // the worker global and its SyncAccessHandle immediately.
+    bridge?.terminate()
     console.warn('[packed-store] unavailable — continuing on flat OPFS', error)
     return null
   }

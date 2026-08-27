@@ -193,15 +193,23 @@ class PackedHost {
       )
     }
 
-    this.#engine = PackedStoreEngine.open(new OpfsSyncFile(this.#handle))
-    // Any generation that is not the authoritative one is either a
-    // compaction that never completed or one already superseded. Either way
-    // it is not data — the pointer flip is what makes a generation real.
-    await this.#dropOtherGenerations()
-    return {
-      packPoolSig: this.#packPoolSig,
-      stats: this.#engine.stats(),
-      coldOpenMs: performance.now() - started,
+    try {
+      this.#engine = PackedStoreEngine.open(new OpfsSyncFile(this.#handle))
+      // Any generation that is not the authoritative one is either a
+      // compaction that never completed or one already superseded. Either way
+      // it is not data — the pointer flip is what makes a generation real.
+      await this.#dropOtherGenerations()
+      return {
+        packPoolSig: this.#packPoolSig,
+        stats: this.#engine.stats(),
+        coldOpenMs: performance.now() - started,
+      }
+    } catch (error) {
+      // Opening is transactional with respect to ownership. Once the sync
+      // handle has been acquired, every failure must release it; otherwise a
+      // dead worker poisons this origin until the browser process exits.
+      try { this.#handle.close() } catch { /* worker termination is the backstop */ }
+      throw error
     }
   }
 
