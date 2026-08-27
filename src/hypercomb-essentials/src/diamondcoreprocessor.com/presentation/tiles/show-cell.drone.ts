@@ -394,7 +394,11 @@ async function resolveChildNames(
   // not produce a name this pass — the completeness gate paints these as
   // explicit unavailable-placeholders once its retry budget is spent,
   // instead of silently dropping the tiles.
-  stats?: { expected: number; resolved: number; unresolvedSigs?: string[] },
+  stats?: {
+    expected: number
+    resolved: number
+    unresolvedSigs?: string[]
+  },
   // Optional out-param: child NAMES that are branches (have their own
   // children). Derived from each child's `children` array LENGTH — one level
   // down, never loading grandchildren — from the SAME manifest / per-child
@@ -414,10 +418,16 @@ async function resolveChildNames(
   // turned a background warm into a whole-hive re-encode that raced first
   // paint. The layer you are looking at heals; the ones you might visit wait
   // for the optimize phase.
-  options?: { mayUpgradePack?: boolean },
+  options?: {
+    mayUpgradePack?: boolean
+    onBranchesFreshened?: (branches: Set<string>) => void
+  },
 ): Promise<Set<string>> {
   const out = new Set<string>()
-  if (stats) { stats.expected = content?.children?.length ?? 0; stats.resolved = 0 }
+  if (stats) {
+    stats.expected = content?.children?.length ?? 0
+    stats.resolved = 0
+  }
   if (!content?.children?.length) return out
 
   // Branch-status (does a child have its OWN children?) must come from the
@@ -426,8 +436,9 @@ async function resolveChildNames(
   // the parent last committed would otherwise show no branch dot. Path-address
   // each child by name and read its head's children length. branchesOut only
   // gets fresh adds now; the stale parent-sig derivation is gone.
-  const freshenBranches = async (names: Iterable<string>): Promise<void> => {
-    if (!branchesOut) return
+  const readFreshBranches = async (names: Iterable<string>): Promise<{ branches: Set<string>; cold: boolean }> => {
+    const branches = new Set<string>()
+    let cold = false
     await Promise.all([...names].map(async (name) => {
       try {
         const childLocSig = await history.sign({ explorerSegments: () => [...parentSegments, name] })
@@ -451,20 +462,42 @@ async function resolveChildNames(
             // user out of the child branch until a full reload. Leave it
             // unresolved and flag the pass cold so the caller re-renders once
             // the neighbourhood warms.
-            if (branchStats) branchStats.cold = true
+            cold = true
             return
           }
           const kids = (head as { children?: unknown } | null)?.children
           hasChildren = Array.isArray(kids) && kids.length > 0
           branchByHeadSig.set(headSig, hasChildren)
         }
-        if (hasChildren) branchesOut.add(name)
+        if (hasChildren) branches.add(name)
       } catch {
         // A read threw mid-resolution — transient. Leave the dot off for now
         // and flag cold so the caller retries; never cache a false.
-        if (branchStats) branchStats.cold = true
+        cold = true
       }
     }))
+    return { branches, cold }
+  }
+
+  // A current-layer pack already contains each direct child's layer. Names and
+  // branch flags therefore come from that ONE read. Per-child path/head checks
+  // are only a repair for old packs whose ancestor sig was not propagated; they
+  // must never sit between a navigation gesture and paint. Run the repair at
+  // idle and ask the owner to repaint only when a complete fresh result differs.
+  const freshenBranchesAfterPaint = (names: Iterable<string>): void => {
+    if (!options?.onBranchesFreshened) return
+    const snapshot = [...names]
+    const run = () => {
+      void readFreshBranches(snapshot).then(({ branches, cold }) => {
+        if (branchStats) branchStats.cold = cold
+        if (!cold) options.onBranchesFreshened?.(branches)
+      }).catch(() => {
+        if (branchStats) branchStats.cold = true
+      })
+    }
+    const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback
+    if (typeof ric === 'function') ric(run, { timeout: 4_000 })
+    else setTimeout(run, 0)
   }
 
   // Children manifest fast-path. When the parent's sig is known, try
@@ -507,6 +540,9 @@ async function resolveChildNames(
         ShowCellDrone.adoptPackedVisual(entry as { visual?: { sig?: string; webp?: string; type?: string } })
         if (entry?.layer?.name) {
           out.add(entry.layer.name)
+          if (branchesOut && Array.isArray(entry.layer.children) && entry.layer.children.length > 0) {
+            branchesOut.add(entry.layer.name)
+          }
           resolvedCount++
           if (seed && entry.sig) seed.call(history, entry.sig, entry.layer)
         } else if (entry?.sig) {
@@ -515,7 +551,10 @@ async function resolveChildNames(
       }
       // Manifest hit only reaches here when manifest.length === children
       // length, so a fully-named manifest IS the complete set.
-      if (stats) { stats.resolved = resolvedCount; stats.unresolvedSigs = manifestUnresolved }
+      if (stats) {
+        stats.resolved = resolvedCount
+        stats.unresolvedSigs = manifestUnresolved
+      }
       // UPGRADE A THIN PACK. Manifests written before the visuals moved in
       // carry names only, so this layer would keep paying per-tile reads on
       // every visit forever. Re-mint it once, off the render path — the next
@@ -523,7 +562,7 @@ async function resolveChildNames(
       // an immutable content sig, so a successful upgrade is permanent.
       // Render pass only — see `options.mayUpgradePack`.
       if (options?.mayUpgradePack) upgradeThinPack(parentLayerSig, manifest, content.children, store)
-      await freshenBranches(out)
+      freshenBranchesAfterPaint(out)
       return out
     }
   }
@@ -545,10 +584,16 @@ async function resolveChildNames(
     const child = children[__i]
     if (child?.name) {
       out.add(child.name); __resolvedCount++
+      if (branchesOut && Array.isArray(child.children) && child.children.length > 0) {
+        branchesOut.add(child.name)
+      }
     }
     else if (content.children[__i]) __nullSigs.push(content.children[__i])
   }
-  if (stats) { stats.resolved = __resolvedCount; stats.unresolvedSigs = [...__nullSigs] }
+  if (stats) {
+    stats.resolved = __resolvedCount
+    stats.unresolvedSigs = [...__nullSigs]
+  }
   if (__nullSigs.length > 0) {
     console.warn(`[diag:childres] PERCHILD parent=${(parentLayerSig || 'EMPTY').slice(0, 12)} children=${content.children.length} resolved=${out.size} NULL=${__nullSigs.length} nullSigs=[${__nullSigs.map(s => s.slice(0, 12)).join(', ')}]`)
   } else if (DIAG) {
@@ -596,7 +641,7 @@ async function resolveChildNames(
     })
   }
 
-  await freshenBranches(out)
+  freshenBranchesAfterPaint(out)
   return out
 }
 
@@ -3178,7 +3223,7 @@ export class ShowCellDrone extends Drone {
         // net for those. Moving it BEFORE applyGeometry is wrong: listeners
         // that measure live bounds (the control bar's global-fit `arrived`)
         // would then read the OUTGOING page's geometry.
-        this.emitEffect('render:cell-count', this.#buildCellCountPayload(cached.cells))
+        this.emitEffect('render:cell-count', { ...this.#buildCellCountPayload(cached.cells), settled: true })
 
         // Child preloading can reuse atlas slots that belonged to this parent.
         // Repair those slots after the cached paint, never between the Back
@@ -3330,7 +3375,7 @@ export class ShowCellDrone extends Drone {
       this.#emitRenderTags(cells)
       // Listeners (TileSelection, TileOverlay) crash on undefined coords
       // when payload omits them. Send the full shape via the helper.
-      this.emitEffect('render:cell-count', this.#buildCellCountPayload(cells))
+      this.emitEffect('render:cell-count', { ...this.#buildCellCountPayload(cells), settled: true })
       this.rendering = false
       return
     }
@@ -3623,14 +3668,49 @@ export class ShowCellDrone extends Drone {
             for (const b of memo.branches) branchSetFromResolve.add(b)
             childResolveComplete = true
           } else {
-            const stats = { expected: 0, resolved: 0, unresolvedSigs: [] as string[] }
+            const stats: {
+              expected: number
+              resolved: number
+              unresolvedSigs: string[]
+            } = { expected: 0, resolved: 0, unresolvedSigs: [] }
             const branchStats = { cold: false }
             // branchSetFromResolve is filled in the SAME pass that resolves
             // names — one read, no separate per-child branch walk. branchStats
             // reports separately whether any child's branch-STATUS came back on
             // a cold pool miss (see freshenBranches) — names can be complete
             // while branch-status is not.
-            layerAllowed = await resolveChildNames(historyService, parentSegments, dir, content, parentLayerSig, stats, branchSetFromResolve, branchStats, { mayUpgradePack: true })
+            layerAllowed = await resolveChildNames(
+              historyService,
+              parentSegments,
+              dir,
+              content,
+              parentLayerSig,
+              stats,
+              branchSetFromResolve,
+              branchStats,
+              {
+                mayUpgradePack: true,
+                onBranchesFreshened: fresh => {
+                  if (!parentLayerSig) return
+                  const prepared = this.#completeChildNamesByParentSig.get(parentLayerSig)
+                  if (!prepared) return
+                  const old = new Set(prepared.branches)
+                  if (old.size === fresh.size && [...fresh].every(name => old.has(name))) return
+                  this.#completeChildNamesByParentSig.set(parentLayerSig, {
+                    names: prepared.names,
+                    branches: [...fresh],
+                  })
+                  // The repair ran after paint. If the participant is still on
+                  // this location, one targeted pass updates branch dots and
+                  // click routing; otherwise the corrected memo is ready for
+                  // the next visit. Never put the head walk back on navigation.
+                  if (this.renderedLocationKey === locationKey) {
+                    this.#forceNextRender = true
+                    this.requestRender()
+                  }
+                },
+              },
+            )
             // Complete iff every child sig produced a name. expected===0 is
             // a (trivially complete) empty layer.
             childResolveComplete = stats.expected === 0 || stats.resolved >= stats.expected
@@ -5043,7 +5123,7 @@ export class ShowCellDrone extends Drone {
     // itself against the PREVIOUS page's count: the same layer re-framed to a
     // different zoom depending on where you arrived from, and the first page
     // after a reload always fitted at padding 5 (count still 0).
-    this.emitEffect('render:cell-count', this.#buildCellCountPayload(cells))
+    this.emitEffect('render:cell-count', { ...this.#buildCellCountPayload(cells), settled: final })
 
     // After mesh + recenter have settled on the final batch, refit if
     // the restored snapshot was a fit (snap.zoom.fit). The applied

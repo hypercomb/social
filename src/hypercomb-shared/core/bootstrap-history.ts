@@ -207,7 +207,12 @@ export class BootstrapHistory {
       resolve()
     }
     const maybeOff = EffectBus.on<{ settled?: boolean; locationKey?: string }>('render:cell-count', payload => {
-      if (payload?.settled === false || payload?.locationKey !== targetLocationKey) return
+      if (payload?.locationKey !== targetLocationKey) return
+      // Only the renderer's final geometry/empty verdict releases background
+      // work. Earlier cell-count notifications intentionally omit `settled`;
+      // accepting undefined here released the OPFS-wide script-preloader walk
+      // while the current layer was still resolving and starved first paint.
+      if (payload?.settled !== true) return
       // Let the renderer's buffer push complete before bee pulses begin.
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => finish())
       else queueMicrotask(finish)

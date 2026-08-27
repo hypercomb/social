@@ -196,9 +196,22 @@ export class App implements AfterViewInit {
   }
 
   private readonly startRegisteredBees = async (): Promise<void> => {
+    // Subscribe before pulsing: PixiHostWorker + ShowCellDrone can settle the
+    // first layer as soon as their pulses/host-ready hooks run. The processor's
+    // resolver is ScriptPreloader, whose first find walks every bee/dependency
+    // file in OPFS; starting that walk first stretched a trivial explorerDir()
+    // read from single-digit milliseconds to ~900ms on a cold profile.
+    const firstTilePaint = this.awaitFirstTilePaint()
     const values = list()
       .map(key => get(key))
       .filter((value): value is Bee => !!value && typeof (value as Bee).pulse === 'function')
+
+    // Every dev bee is already in the Angular bundle through generated
+    // side-effects. Tell the resolver before first paint so BootstrapHistory
+    // cannot launch a duplicate signature/OPFS module walk when its render
+    // barrier opens.
+    const preloader = get('@hypercomb.social/ScriptPreloader') as any
+    preloader?.useRegisteredBees?.(values)
 
     await Promise.allSettled(
       values.map(bee => bee.pulse('').catch(error =>
@@ -206,13 +219,14 @@ export class App implements AfterViewInit {
       ))
     )
 
-    // Boot kick through the processor — hypercomb.act() owns the
-    // `synchronize` dispatch (and the optimize phase).
+    // Rendering owns startup. Only after the matching layer has published a
+    // final geometry/empty verdict may the processor resolve and pulse the
+    // wider installed behavior graph.
+    await firstTilePaint
     await new hypercomb().act('')
 
     // Dev mode: bees are imported directly, not through ScriptPreloader.
     // Set resourceCount so the command line unlocks.
-    const preloader = get('@hypercomb.social/ScriptPreloader') as any
     preloader?.setResourceCount?.(values.length)
 
     // restore persisted orientation
@@ -222,5 +236,27 @@ export class App implements AfterViewInit {
 
     // broadcast initial mesh state so drones can react
     EffectBus.emit('mesh:public-changed', { public: this.meshPublic() })
+  }
+
+  private readonly awaitFirstTilePaint = (): Promise<void> => {
+    const lineage = get('@hypercomb.social/Lineage') as { explorerLabel?: () => string } | undefined
+    const targetLocationKey = String(lineage?.explorerLabel?.() ?? '/')
+    return new Promise(resolve => {
+      let off: (() => void) | undefined
+      let done = false
+      const finish = (): void => {
+        if (done) return
+        done = true
+        off?.()
+        resolve()
+      }
+      const maybeOff = EffectBus.on<{ settled?: boolean; locationKey?: string }>('render:cell-count', payload => {
+        if (payload?.settled !== true || payload?.locationKey !== targetLocationKey) return
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(finish)
+        else queueMicrotask(finish)
+      })
+      off = typeof maybeOff === 'function' ? maybeOff : undefined
+      if (done) off?.()
+    })
   }
 }

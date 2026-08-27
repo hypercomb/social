@@ -44,6 +44,16 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   #resourceCount = 0
   #finding: Promise<Bee[]> | null = null
 
+  // Angular development bundles import every bee through side-effects.ts.
+  // Re-reading the installed manifest and evaluating those same modules from
+  // OPFS is duplicate work, and blob-module imports cannot resolve the
+  // generated absolute /opfs dependency specifiers. The dev shell supplies
+  // its canonical IoC instances here before first paint instead. Angular
+  // pulses them once itself; processor acts must return an empty encounter
+  // list, exactly like the legacy dev shell, or every action re-pulses the
+  // entire application and makes navigation pay startup cost again.
+  #registeredBees: readonly Bee[] | null = null
+
   // Bees pulsed at least once (either by the processor's encounter loop
   // for the first wave, or individually here once they land off the
   // critical path). Ensures every bee gets exactly one initial pulse.
@@ -57,6 +67,12 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   public setResourceCount(count: number): void {
     this.#resourceCount = count
     this.dispatchEvent(new CustomEvent('change'))
+  }
+
+  /** Dev-shell adapter: use bees already imported and registered by Angular. */
+  public useRegisteredBees(bees: readonly Bee[]): void {
+    this.#registeredBees = [...new Set(bees)]
+    this.setResourceCount(this.#registeredBees.length)
   }
 
   readonly #bySignature = new Map<string, ActionDescriptor>()
@@ -79,6 +95,15 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   // -------------------------------------------------
 
   public find = async (_grammar: string): Promise<Bee[]> => {
+    if (this.#registeredBees) {
+      if (!ScriptPreloader.#firstFindMarked) {
+        ScriptPreloader.#firstFindMarked = true
+        console.log(`[script-preloader] using ${this.#registeredBees.length} Angular-registered bees; OPFS module walk skipped`)
+        ;(window as any).__hcBoot?.('first preloader.find done (registered Angular bees; OPFS skipped)')
+      }
+      return []
+    }
+
     if (this.#finding) return this.#finding
 
     const run = async (): Promise<Bee[]> => {
