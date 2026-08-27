@@ -2147,6 +2147,16 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "shrink-phase4-installer-surface",
+      "title": "Mirror the Phase 4 installer-surface handoff",
+      "run": null,
+      "note": "The web install prompt is now a framework-free, registry-fed hc-install-prompt surface colocated with ensure-install for the later pinned-bootstrap carve. Preserve and update the existing installer/bootstrap and shell-surface architecture parts rather than minting duplicates: BootStatus and install:sync still arrive through last-value EffectBus replay; Start still dispatches hypercomb:start-install; portal open/close still suppresses and restores the welcome dialog; native auto-install keeps its once-per-session loop guard; the console and ?upgrade doors, post-boot/refocus update checks, restore-point checkpoint, revision naming and hypercomb:apply-update path moved with the surface. The Angular app no longer owns installer signals/computeds, TranslatePipe use, prompt template, component-scoped prompt CSS or update listeners. main.ts side-effect imports the surface, and the element self-registers as InstallerBootstrap. This is a boundary handoff, not the completed Phase 4 bootstrap: ensure-install, sentinel-bridge, import maps, Angular bootstrap and Vite are still in the temporary shell until sig-addressed module loading and the pinned bootstrap bundle land. Exact unit tests cover replay/start/progress/storage/portal contracts; web/dev builds pass; targeted web-shell Playwright passed with zero page errors; the dev shrink gate passes every functional check with only the already-known direct-dev-port @resource proxy 404s. Manual: note-add is additive and would double-land.",
+      "commit": "ce00c4678",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
