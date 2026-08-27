@@ -3,16 +3,12 @@
 // Content-addressed fetch with two transports:
 //   1. HTTP-direct (preferred) — fetch from operator domains' HTTP
 //      content endpoints. Used for ALL content types (layer, resource,
-//      dependency). Self-domain + community-trusted + mesh-learned
+//      dependency, bee). Self-domain + community-trusted + mesh-learned
 //      domains, tried in trust order; first verified-bytes wins.
-//   2. Mesh broker (layer-only fallback) — broadcast a sig request on
+//   2. Mesh broker (layer/resource fallback) — broadcast a sig request on
 //      the Nostr mesh and let any peer who has the bytes respond.
-//      Resources and dependencies do NOT use the mesh — they're heavy
-//      bytes that belong on direct HTTPS, per the doctrine in
-//      project_public_navigation_lineage_filter.md:
-//        "Mesh transports LAYER SIGS ONLY — layers are tiny directories;
-//         resources / deps / bees / blobs travel via direct HTTPS
-//         fetches to the domains the mesh told you about."
+//      Resources ride only this request-driven live-availability path;
+//      dependencies and bees remain HTTP-only code artifacts.
 //
 // Why this exists: the swarm publish path (kind 30200 etc.) is
 // LOCATION-keyed and depth-bounded (MAX_PUBLISH_DEPTH = 3 in
@@ -20,18 +16,17 @@
 // publisher hasn't re-walked recently — or wants it from a peer
 // who joined long after the publisher left — the location-keyed flow
 // has nothing for them. The broker replaces "ask the one publisher"
-// with "ask the swarm" for layer sigs. Resources/deps are served by
-// the operator's own HTTP endpoint (jwize.com etc.) on signature URLs,
-// learned via the `{ bytes, domains }` response primitive on layer
-// fetches.
+// with "ask the swarm" for layer/resource sigs. HTTP remains the durable
+// path for every artifact, learned via the `{ bytes, domains }` response
+// primitive on live fetches.
 //
-// Wire shape (layer-only on the mesh):
+// Wire shape (layer/resource on the mesh):
 //
 //   REQUEST  kind 20400, tags [['x', BROADCAST_TAG], ['d', sig], ['t', 'layer']]
 //            content empty; the sig travels as a tag.
 //            Broadcast to every participant subscribed on BROADCAST_TAG.
 //            `t` field retained for forward compatibility but the
-//            responder ignores any value other than 'layer'.
+//            responder accepts 'layer' or 'resource'.
 //
 //   RESPONSE kind 30401 (parameterized-replaceable),
 //            tags [['d', sig], ['t', 'layer'],
@@ -266,10 +261,10 @@ const MAX_MISS_TTL_MS = 30 * 60_000
 // flag, same sha256 harmlessness as the mirrors.
 const BETA_FALLBACK_DOMAINS = ['jwize.com', 'pluginthematrix.io', 'content.jwize.com'] as const
 
-export type ContentType = 'layer' | 'resource' | 'dependency'
+export type ContentType = 'layer' | 'resource' | 'dependency' | 'bee'
 
 // Visuals-by-composedSig is the second flavor of fetch this drone
-// handles. Unlike layer/resource/dependency (content-addressed by
+// handles. Unlike layer/resource/dependency/bee (content-addressed by
 // merkle hash), visuals are LOCATION-addressed — the sig is
 // sha256(path + room + secret), what the swarm publishes events
 // against on kind 30200. The broker serves the latest cached event
@@ -335,6 +330,8 @@ interface StoreApi {
   writeLayerBytes?: (sig: string, bytes: ArrayBuffer) => Promise<void>
   getDependencyBytes?: (sig: string) => Promise<Uint8Array | null>
   writeDependencyBytes?: (sig: string, bytes: Uint8Array) => Promise<void>
+  getBeeBytes?: (sig: string) => Promise<Uint8Array | null>
+  writeBeeBytes?: (sig: string, bytes: Uint8Array) => Promise<void>
 }
 
 // ── helpers ─────────────────────────────────────────────────────────
@@ -374,7 +371,7 @@ export class ContentBrokerDrone extends Drone {
   override genotype = 'sharing'
 
   public override description =
-    'Decentralised content-addressed fetch over the swarm. Any participant with the bytes can respond to a sig request; the requester verifies sha256 before accepting. Same primitive serves layer, resource, and dependency fetches.'
+    'Content-addressed local/HTTP resolution with verified caching. Layers and resources may also resolve live over Swarm; dependencies and bees remain HTTP-only.'
 
   public override effects = ['network'] as const
 
@@ -1088,7 +1085,7 @@ export class ContentBrokerDrone extends Drone {
   }
 
   /** The remote half of fetchBySig — HTTP-direct cascade, then the mesh
-   *  fallback for layers. Runs coalesced under #pendingFetches; records
+   *  fallback for layers/resources. Runs coalesced under #pendingFetches; records
    *  a full-cascade miss (with backoff) when everything comes up empty. */
   /**
    * The connected folder-backup tier, ahead of every network tier.
@@ -1128,8 +1125,8 @@ export class ContentBrokerDrone extends Drone {
     if (fromFolder) return fromFolder
 
     // HTTP-direct path — try known domains' content endpoints first.
-    // Per the layer-only-mesh doctrine, heavy bytes (resources, deps)
-    // travel via HTTP exclusively; layers can fall back to mesh.
+    // HTTP is the durable path for every artifact. Layers/resources can also
+    // use the request-driven live Swarm fallback; code artifacts cannot.
     // Self-domain + community + mesh-learned domains form the
     // candidate set (see #fetchOverHttp); first verified-bytes wins.
     const fromHttp = await this.#fetchOverHttp(s, type)
@@ -1195,7 +1192,7 @@ export class ContentBrokerDrone extends Drone {
    * Coalesced like fetchBySig: concurrent callers for the same
    * composedSig share one in-flight broadcast.
    *
-   * Unlike layer/resource/dependency, no sha256 verification — the
+   * Unlike layer/resource/dependency/bee, no sha256 verification — the
    * sig isn't a content hash. Trust comes from swarm membership
    * (matching room+secret); content sanitisation happens at the
    * swarm cache injection point, not here.
@@ -1762,6 +1759,8 @@ export class ContentBrokerDrone extends Drone {
         await store.putResource(new Blob([bytes as BlobPart]))
       } else if (type === 'dependency' && store?.writeDependencyBytes) {
         await store.writeDependencyBytes(sig, bytes)
+      } else if (type === 'bee' && store?.writeBeeBytes) {
+        await store.writeBeeBytes(sig, bytes)
       }
     } catch (err) {
       console.warn('[content-broker] persist failed (still returning bytes)', { sig: sig.slice(0, 12), type, err })
@@ -1798,6 +1797,9 @@ export class ContentBrokerDrone extends Drone {
       }
       if (type === 'dependency') {
         return store.getDependencyBytes ? await store.getDependencyBytes(sig) : null
+      }
+      if (type === 'bee') {
+        return store.getBeeBytes ? await store.getBeeBytes(sig) : null
       }
     } catch { /* fall through */ }
     return null

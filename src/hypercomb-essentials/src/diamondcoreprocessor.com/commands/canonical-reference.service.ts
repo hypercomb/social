@@ -27,6 +27,12 @@ import {
 
 type StoreLike = {
   putResource(blob: Blob, options?: { emit?: boolean }): Promise<string>
+  putArtifactMeta?(
+    kind: 'layer' | 'resource' | 'dependency' | 'bee',
+    artifactSig: string,
+    incidence?: Record<string, unknown>,
+    options?: { emit?: boolean },
+  ): Promise<string>
   getPool?(meaning: string): Promise<FileSystemDirectoryHandle | null>
 }
 type LineageLike = { readonly domain?: unknown }
@@ -213,6 +219,9 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
     const decorationSig = await store.putResource(
       new Blob([JSON.stringify(record)], { type: 'application/json' }),
     )
+    const decorationMetaSig = store.putArtifactMeta
+      ? await store.putArtifactMeta('resource', decorationSig, { relation: 'decorations', root: name })
+      : decorationSig
 
     const childSegments = [...parentSegments, name]
     const childLocationSig = await history.sign({
@@ -228,7 +237,7 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
     // The Portal inventory row is the exception. It is the explicit default-
     // authoring surface, so it remains a slim live pointer and its editor is
     // routed to the root. Changing that root seeds FUTURE activations only.
-    let childLayer: PlacementLayer = { name, decorations: [decorationSig] }
+    let childLayer: PlacementLayer = { name, decorations: [decorationMetaSig] }
     if (options.editsRootDefault !== true) {
       const rootLayer = await resolveLayerAt(history, lineage?.domain, root.segments)
       if (!rootLayer) return null
@@ -237,21 +246,24 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
         if (slot === 'name' || (CHILD_SLOTS as readonly string[]).includes(slot)) continue
         details[slot] = value
       }
-      const inheritedDecorations = Array.isArray(details.decorations)
-        ? details.decorations.filter((sig): sig is string => typeof sig === 'string')
+      const inheritedDecorations = Array.isArray(details['decorations'])
+        ? details['decorations'].filter((sig): sig is string => typeof sig === 'string')
         : []
       childLayer = {
         ...details,
-        decorations: [...new Set([...inheritedDecorations, decorationSig])],
+        decorations: [...new Set([...inheritedDecorations, decorationMetaSig])],
       }
     }
     const childMarkerSig = await history.commitLayer(childLocationSig, childLayer)
-    await committer.commitChildrenDeltas(parentSegments, { appends: [childMarkerSig] })
+    const childMetaSig = store.putArtifactMeta
+      ? await store.putArtifactMeta('layer', childMarkerSig, { relation: 'children', root: name })
+      : childMarkerSig
+    await committer.commitChildrenDeltas(parentSegments, { appends: [childMetaSig] })
 
     EffectBus.emit('decorations:changed', {
       segments: childSegments,
       op: 'append',
-      sig: decorationSig,
+      sig: decorationMetaSig,
     })
     EffectBus.emit('cell:added', {
       cell: name,

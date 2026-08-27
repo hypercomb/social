@@ -24,13 +24,12 @@
 // registry, never keep a local list. A doctrine ratchet in doctrine.spec.ts
 // forbids new inline referent-field comparisons.
 //
-// THE UNIFORM NODE MODEL (documentation/uniform-decoration.md): going
-// forward, a node is `{ mark, tags, content: <sig>, children: [<sig>] }` and
-// its ONLY edge fields are `content` and `children`. `refs` is the
-// established third edge — a decoration record's self-declared closure
-// (decoration-closure.ts writes and walks it). Any new dependency-carrying
-// field is a design change to the closure contract, not a local decision:
-// it must be added HERE, and every precise walker picks it up by asking.
+// THE LIFE PRIMITIVE (documentation/life-primitive.md): every new reference is
+// a meta signature. Exactly one typed payload key (`layer`, `resource`,
+// `dependency`, or `bee`) is the envelope's content hop. A Life Layer's named
+// refs are meta edges; its `children` is the only collection. `content` and
+// `refs` remain during the legacy drain. Any new legacy dependency field is
+// still a protocol decision and must be added here.
 
 /**
  * Fields whose signature values are DEPENDENCIES — bytes that must travel
@@ -38,13 +37,20 @@
  * protocol-level decision (every walker and the native client must agree),
  * never a per-feature convenience.
  *
- *   - `children` — a node's ordered composition (layers, notes, the
- *     generic hierarchy node).
+ *   - `layer`    — a meta envelope's growable layer payload.
+ *   - `resource` — a meta envelope's raw resource-byte payload.
+ *   - `dependency` — a meta envelope's raw module/dependency payload.
+ *   - `bee`      — a meta envelope's raw behavior payload.
+ *   - `children` — a node's ordered composition (meta signatures).
  *   - `content`  — a node's content hop (the meta-resource envelope, the
  *     generic node's "what this node says" slot).
  *   - `refs`     — a decoration record's self-declared flat closure.
  */
 export const EDGE_FIELDS: readonly string[] = Object.freeze([
+  'layer',
+  'resource',
+  'dependency',
+  'bee',
   'children',
   'content',
   'refs',

@@ -12,7 +12,9 @@ describe('edge registry', () => {
     // Frozen contract: extending EDGE_FIELDS is a closure-protocol decision.
     // If this fails you are CHANGING THE PROTOCOL — every precise walker and
     // the native client must agree before the list moves.
-    expect([...EDGE_FIELDS].sort()).toEqual(['children', 'content', 'refs'])
+    expect([...EDGE_FIELDS].sort()).toEqual([
+      'bee', 'children', 'content', 'dependency', 'layer', 'refs', 'resource',
+    ])
   })
 
   it('a field is never both an edge and a referent', () => {
@@ -24,6 +26,10 @@ describe('edge registry', () => {
     const sigs = edgeSigsOf({
       children: [sigA, sigB, sigA.toUpperCase(), 'not-a-sig'],
       content: sigC,
+      layer: sigA,
+      resource: sigB,
+      dependency: sigC,
+      bee: sigA,
       targetSig: 'd'.repeat(64),   // referent — never harvested
       groupSig: 'e'.repeat(64),    // referent — never harvested
       payload: { htmlSig: 'f'.repeat(64) },  // nested — a per-kind hop, not a node edge

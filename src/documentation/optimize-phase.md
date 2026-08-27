@@ -45,6 +45,38 @@ The litmus test — and the rule for which pool a record belongs in:
 Yes → it is optimization-class and belongs in a derived-cache pool.
 No → it is state; it needs its own pool of meaning and must NOT be minted here.
 
+## Every request, rebuild only on change
+
+Every new read/render request asks for the optimized `children` projection.
+That does not mean recomputing it on every request. The request first probes by
+the complete signed source key:
+
+```text
+(layer sig + result-affecting meta sigs) -> complete children projection
+```
+
+On a hit, the projection is used directly. On a miss, the ordinary meta/layer
+walk produces the correct result and schedules or backfills the complete
+projection. Immutable signatures provide invalidation: unchanged layer/meta
+inputs reuse the existing record; a changed layer or gate/override meta mints a
+new key. Only the affected layer and its changed ancestor path need new
+projections. There is no mutable cache entry to patch and no global rebuild.
+
+The optimized projection may stand in for meta traversal only for the exact
+source key from which it was derived. Authorization and visibility inputs are
+part of that key and remain fail-closed. A shared, authored, historical, or
+load-bearing accelerator is state, not optimization, and enters the life graph
+through a meta-wrapped layer instead.
+
+The canonical meta stays light: `{ meta: 1, layer: <layer-sig> }`. The layer sig
+also derives the local lookup address `sign('manifests')/<layer-sig>`, so storing
+a second cache pointer in meta is redundant and would let device-local cache
+state alter portable identity. A request preloads the small meta, skips all
+child work for a leaf, and reads the manifest JSON only when children are
+actually requested. The manifest contains the resolved child layers,
+properties, and optimized visuals already needed for paint. It stays local and
+is not part of a Swarm closure.
+
 ## History for free
 
 Because records are keyed by the layer sig they derive from, old records keyed

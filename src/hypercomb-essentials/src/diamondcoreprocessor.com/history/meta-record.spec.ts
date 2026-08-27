@@ -21,6 +21,11 @@ describe('isMetaRecord — declaration, never shape-sniffing', () => {
     expect(isMetaRecord({ meta: 1, layer: 'notes' })).toBe(false)
   })
 
+  it('accepts typed atomic payloads and rejects ambiguous envelopes', () => {
+    expect(isMetaRecord({ meta: 1, resource: sigA })).toBe(true)
+    expect(isMetaRecord({ meta: 1, layer: sigA, resource: sigB })).toBe(false)
+  })
+
   it('rejects non-objects and arrays', () => {
     expect(isMetaRecord(null)).toBe(false)
     expect(isMetaRecord(sigA)).toBe(false)
@@ -35,6 +40,11 @@ describe('identityOf — an entry stands for its target', () => {
 
   it('a promoted entry resolves to what it points at', () => {
     const resolved = new Map<string, MetaRecord>([[metaSig, { meta: 1, layer: sigA }]])
+    expect(identityOf(metaSig, resolved)).toBe(sigA)
+  })
+
+  it('uses the declared atomic payload as identity too', () => {
+    const resolved = new Map<string, MetaRecord>([[metaSig, { meta: 1, resource: sigA }]])
     expect(identityOf(metaSig, resolved)).toBe(sigA)
   })
 

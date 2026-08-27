@@ -96,6 +96,7 @@ describe('CanonicalReferenceService', () => {
   let committer: FakeCommitter
   let written: unknown[]
   let pooled: { sig: string; record: unknown }[]
+  let artifactMetas: Array<{ sig: string; kind: string; target: string; incidence: Record<string, unknown> }>
 
   beforeEach(async () => {
     services.clear()
@@ -103,6 +104,7 @@ describe('CanonicalReferenceService', () => {
     committer = new FakeCommitter(history)
     written = []
     pooled = []
+    artifactMetas = []
 
     const friendSig = await history.commitLayer(hex('unused-friend'), {
       name: 'friend', notes: ['2'.repeat(64)],
@@ -133,10 +135,23 @@ describe('CanonicalReferenceService', () => {
           reader.onload = () => resolve(String(reader.result ?? ''))
           reader.readAsText(blob)
         })
-        const record = JSON.parse(text) as { kind?: string }
-        if (record.kind === 'canonical:variant') return hex('variant:' + text)
+        const record = JSON.parse(text) as { kind?: string; meta?: number; relation?: string }
+        if (record.meta === 1 && record.relation === 'canonical:variant') return hex('variant:' + text)
         written.push(record)
         return hex('decoration:' + written.length)
+      },
+      putArtifactMeta: async (
+        kind: 'layer' | 'resource' | 'dependency' | 'bee',
+        target: string,
+        incidence: Record<string, unknown> = {},
+      ) => {
+        const sig = hex(`meta:${kind}:${target}:${JSON.stringify(incidence)}`)
+        artifactMetas.push({ sig, kind, target, incidence })
+        if (kind === 'layer') {
+          const layer = history.content.get(target)
+          if (layer) history.content.set(sig, layer)
+        }
+        return sig
       },
       getPool: async () => ({
         getFileHandle: async (sig: string) => ({
@@ -170,11 +185,11 @@ describe('CanonicalReferenceService', () => {
     const hive = await history.currentLayerAt(await history.sign({ explorerSegments: () => [] }))
     const names = await Promise.all((hive?.children ?? []).map(async sig => (await history.getLayerBySig(sig))?.name))
     expect(names).toContain('people')
-    expect(pooled.some(entry => (entry.record as { kind?: string }).kind === 'canonical:variant')).toBe(true)
+    expect(pooled.some(entry => (entry.record as { relation?: string }).relation === 'canonical:variant')).toBe(true)
     const sourceCandidate = pooled
-      .map(entry => entry.record as { kind?: string; payload?: { layerSig?: string } })
-      .find(record => (history.content.get(record.payload?.layerSig ?? '')?.notes as string[] | undefined)?.[0] === '1'.repeat(64))
-    expect(history.content.get(sourceCandidate?.payload?.layerSig ?? '')).toMatchObject({
+      .map(entry => entry.record as { relation?: string; layer?: string })
+      .find(record => (history.content.get(record.layer ?? '')?.notes as string[] | undefined)?.[0] === '1'.repeat(64))
+    expect(history.content.get(sourceCandidate?.layer ?? '')).toMatchObject({
       name: 'people',
       properties: ['3'.repeat(64)],
       decorations: ['4'.repeat(64)],
@@ -193,6 +208,10 @@ describe('CanonicalReferenceService', () => {
       payload: { targetSegments: ['people'] },
     })
     expect(JSON.stringify(written[0])).not.toContain('nest')
+    expect(artifactMetas).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'resource', incidence: expect.objectContaining({ relation: 'decorations', root: 'people' }) }),
+      expect.objectContaining({ kind: 'layer', incidence: expect.objectContaining({ relation: 'children', root: 'people' }) }),
+    ]))
     const appearance = await history.currentLayerAt(
       await history.sign({ explorerSegments: () => ['project', 'people'] }),
     )
@@ -328,9 +347,9 @@ describe('CanonicalReferenceService', () => {
     const root = await history.currentLayerAt(await history.sign({ explorerSegments: () => ['people'] }))
     expect(root).toMatchObject({ name: 'people', notes: ['b'.repeat(64)] })
     const candidates = pooled
-      .map(entry => entry.record as { kind?: string; payload?: { layerSig?: string } })
-      .filter(record => record.kind === 'canonical:variant')
+      .map(entry => entry.record as { relation?: string; layer?: string })
+      .filter(record => record.relation === 'canonical:variant')
     expect(candidates).toHaveLength(2)
-    expect(new Set(candidates.map(record => record.payload?.layerSig)).size).toBe(2)
+    expect(new Set(candidates.map(record => record.layer)).size).toBe(2)
   })
 })

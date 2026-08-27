@@ -1,6 +1,7 @@
 # Signature pools and canonical portal roots
 
-Status: implemented standard, 2026-08-25.
+Status: canonical standard, 2026-08-26. Meta migration is passive and
+write-canonical; see [life-primitive.md](life-primitive.md).
 
 ## The invariant
 
@@ -22,22 +23,24 @@ another as “Collaborators”, and a Japanese reader as “人々”. They stil
 the single `people` identity pool and stack by that fixed key. Editing display
 text never moves a lineage, renames a bag, splits a pool, or rewrites a peer.
 
-Every lineage appearance is therefore a leaf pointing to the matching root.
-The leaf also pins the complete top-level details selected when it was added:
+Every lineage appearance is therefore a meta-wrapped leaf pointing to the
+matching root. Its structured appearance layer carries its contextual
+relationships plus the root-detail signatures selected when it was activated:
 
 ```text
 /people                 canonical pool + current default
-/sets/people            reference -> /people + selected detail signatures
-/project-a/people       reference -> /people + selected detail signatures
-/project-b/people       reference -> /people + selected detail signatures
+/sets/people            reference meta -> /people + Portal policy
+/project-a/people       reference meta -> /people + local override refs
+/project-b/people       reference meta -> /people + local override refs
 ```
 
 All three leaves resolve the same root **pool address**. They need not select
 the same atomic meaning. The participant's root head is the default used to
 seed a future activation; it is not a live style object that repaints existing
-leaves. Detail slots are copied by immutable content signature, never by
-duplicating resource bytes. There is no second pool minted from a discovery
-route.
+leaves. Activation copies only immutable detail signatures into the local
+appearance layer—never the resource bytes—so a later root-default edit seeds
+future activations without repainting existing ones. Local edits then replace
+those appearance refs. There is no second pool minted from a discovery route.
 
 ## Identity, variants, resources, and appearances are different axes
 
@@ -47,20 +50,20 @@ lineage, or historical revision to have identical content:
 ```text
 /<name> hybrid signature bag
   00000000, 00000001, ...       participant history; max = chosen head
-  canonical:variant(layer A)    immutable candidate meaning
-  canonical:variant(layer B)    immutable candidate meaning
-  canonical:variant(layer C)    immutable candidate meaning
+  meta(layer A, canonical:variant)    immutable candidate incidence
+  meta(layer B, canonical:variant)    immutable candidate incidence
+  meta(layer C, canonical:variant)    immutable candidate incidence
 
-/project-a/<name>               root reference + pinned variant details
-/project-b/<name>               root reference + pinned variant details
+/project-a/<name>               root reference meta + local override metas
+/project-b/<name>               root reference meta + local override metas
 ```
 
-Each `canonical:variant` record names one immutable layer signature and carries
-that signature in `refs`, so ordinary merkle closure/sharing can move the whole
-candidate. The record itself is a signature-named additive member of the hybrid
-root bag. Identical content found through several routes dedupes to one atomic
-member; genuinely different content survives beside it. Discovery lineage is
-provenance, never identity.
+Each `canonical:variant` member is a normal `meta:1` envelope whose `layer`
+names one immutable candidate and whose `relation` is `canonical:variant`.
+The typed `layer` payload is a protocol edge, so ordinary closure/sharing moves the complete
+candidate without a bespoke `refs` array. Identical content found through
+several routes dedupes to one atomic member; genuinely different content
+survives beside it. Discovery lineage is provenance, never identity.
 
 The layer signature is deliberately the unit—not an image signature and not a
 selected subset of fields. Two variants under one identity may differ in every
@@ -75,8 +78,8 @@ This is the precise reading of **Pool of Meaning**:
 - layer signature = one atomic candidate meaning;
 - max history marker = this participant's current choice/default;
 - resource signatures = immutable bytes used by candidates;
-- lineage leaf = an activation/reference into the pool plus its selected
-  detail signatures;
+- lineage leaf = a meta activation/reference into the pool plus local override
+  meta relationships;
 - requirements/pheromones = which meanings are relevant in that appearance.
 
 “Existing root wins” therefore means **do not silently replace the chosen
@@ -101,10 +104,9 @@ participant's chosen hive/lineage.
 
 The active set is ordinary layer truth. It is not a parallel database or a
 second pool format: a name is active in a lineage exactly when that lineage's
-children contain its reference leaf. Creating that leaf snapshots the current
-root detail slots (properties, decorations, notes, files, behaviors, and any
-future non-structural slot) by signature. Its children stay behind the root
-reference, so entering the tile still navigates the canonical lineage.
+`children` contain its reference meta. The reference resolves the canonical
+root and its sparse local relationship metas. Entering the tile still
+navigates the canonical lineage.
 
 This is the anti-stomp rule: `/friends/jaime` and `/team/jaime` both belong to
 the `jaime` pool, but each keeps the image and complete atomic variant selected
@@ -121,8 +123,8 @@ revision the participant's default for future uses.
 
 The original candidate is not mutated or discarded: its immutable `layerSig`
 remains in the name pool and history. A new root default seeds only activations
-created after that choice. Existing lineage appearances keep their pinned
-details. The Portal inventory row itself remains a slim, explicitly marked
+created after that choice. Existing lineage appearances keep their referenced
+selection and local override metas. The Portal inventory row itself remains a slim, explicitly marked
 default-authoring pointer. Portal placement details remain appearance-scoped:
 slot index, hide state, gate/filter requirements, and the fact that the
 reference is active in that lineage never leak into the root.
@@ -176,23 +178,24 @@ the Image Hive as a
 compatibility witness while older participants migrate to canonical roots.
 Nothing on paste writes another participant's head, and nothing automatically
 changes an existing local root default. Only an explicit root-default gesture
-does: choosing an Image Hive candidate or saving overrides from Portal edit
-mode.
+does: choosing through a Portal/root Image Hive surface or saving overrides
+from Portal edit mode.
 
 A lineage may need a special face because its contextual meaning differs. An
-ordinary activation is already the **appearance-local selection**: it pins the
-root's current detail signatures on creation, and its normal editor may replace
-them locally. This must not change the root default, add a second image pool,
-or mutate another lineage merely because the participant viewed through a
-portal. Resolution order is:
+ordinary activation is already the **appearance-local selection**: its meta
+references the root and its layer may name local overrides. Its normal editor
+replaces those override metas locally. This must not change the root default,
+add a second image pool, or mutate another lineage merely because the
+participant viewed through a portal. Resolution order is:
 
 ```text
-appearance selection -> root default at activation time -> no image
+local override meta -> referenced root default/selection -> no image
 ```
 
 The same separation applies to notes, files, galleries, and future resources:
 pool membership preserves candidates; a participant choice selects a future
-default; an appearance pins or edits a selection without forking identity.
+default; an appearance references or locally overrides a selection without
+forking identity.
 
 ## Gates
 
@@ -262,8 +265,8 @@ Requirements (`requiredMarks`, `requiredBouquet`) scope what the doorway shows;
 they do not change which canonical item it names.
 
 Only the Portal inventory's default-authoring row adds
-`"editsRootDefault": true`. Ordinary references omit it and carry the selected
-non-structural detail signatures on their own leaf. Readers must never infer
+`"editsRootDefault": true`. Ordinary references omit it and carry their
+selection/override relationships through the leaf's meta/layer. Readers must never infer
 root-write authority merely from `kind: "reference"`. For compatibility,
 pre-marker references already stored directly under the reserved `/sets`
 Portal inventory receive the same behavior until their next rewrite.
@@ -283,8 +286,8 @@ resolve source subtree
   -> retain the discovered layer as a canonical:variant member of /people
   -> if /people exists, keep its current head (selection is not overwritten)
   -> mint reference payload for /people
-  -> copy the current root's non-structural detail signatures onto the leaf
-  -> commit /project-a/people reference leaf + pinned selection
+  -> mint a /people reference meta with sparse local override relationships
+  -> commit /project-a/people reference leaf
   -> append that leaf to /project-a
 ```
 

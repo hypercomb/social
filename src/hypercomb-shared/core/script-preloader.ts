@@ -3,7 +3,7 @@
 // and loads bee modules on demand. The processor (hypercomb.act()) is the
 // sole caller of find() → pulse → synchronize.
 
-import { Bee, type BeeResolver, EffectBus } from '@hypercomb/core'
+import { Bee, type BeeResolver, EffectBus, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
 import { Store } from './store'
 import { importSignatureModule } from './signature-module-loader'
 
@@ -230,6 +230,48 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     let opfsMs = 0
     let parseMs = 0
 
+    const unwrap = async (raw: string, expected: 'layer' | 'resource' | 'dependency' | 'bee'): Promise<string> => {
+      const clean = this.#stripExt(raw)
+      if (!clean) return ''
+
+      // Legacy installed layers still carry raw artifact sigs. Prove those
+      // from the expected local pool before probing the metadata transport;
+      // otherwise every warm boot would issue an HTTP request asking whether
+      // each already-installed dependency/bee happened to be an envelope.
+      if (expected === 'dependency' && await this.store.getDependencyBytes(clean)) return clean
+      if (expected === 'bee' && await this.store.getBeeBytes(clean)) return clean
+      if (expected === 'layer') {
+        const bytes = await this.store.getLayerLocalBytes(clean)
+        if (bytes) {
+          try {
+            const value = JSON.parse(new TextDecoder().decode(bytes))
+            if (!isMetaEnvelope(value)) return clean
+            const payload = metaPayloadOf(value)!
+            return payload.kind === expected ? payload.sig : clean
+          } catch { return clean }
+        }
+      }
+      if (expected === 'resource') {
+        const blob = await this.store.getResourceLocal(clean)
+        if (blob) {
+          if (blob.size > 64 * 1024) return clean
+          try {
+            const value = JSON.parse(await blob.text())
+            if (!isMetaEnvelope(value)) return clean
+            const payload = metaPayloadOf(value)!
+            return payload.kind === expected ? payload.sig : clean
+          } catch { return clean }
+        }
+      }
+      const resolved = await this.store.resolveArtifactMeta(clean).catch(() => null)
+      return resolved?.payload.kind === expected ? resolved.payload.sig : clean
+    }
+
+    const unwrapAll = async (value: unknown, expected: 'layer' | 'resource' | 'dependency' | 'bee'): Promise<string[]> => {
+      if (!Array.isArray(value)) return []
+      return (await Promise.all(value.map(raw => unwrap(String(raw ?? ''), expected)))).filter(Boolean)
+    }
+
     const visit = async (sig: string): Promise<void> => {
       const clean = this.#stripExt(sig)
       if (!clean || visited.has(clean)) return
@@ -252,10 +294,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         try {
           const layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
           parsed = {
-            bees: ((layer['bees'] as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
-            dependencies: ((layer['dependencies'] as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
-            resources: ((layer['resources'] as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
-            children: ((layer['layers'] as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
+            bees: await unwrapAll(layer['bees'], 'bee'),
+            dependencies: await unwrapAll(layer['dependencies'], 'dependency'),
+            resources: await unwrapAll(layer['resources'], 'resource'),
+            children: await unwrapAll(layer['layers'], 'layer'),
           }
           this.#layerCache.set(clean, parsed)
         } catch (err) {

@@ -1,4 +1,4 @@
-# Uniform decoration — decorate everything the same way
+# Uniform decoration — the life primitive decorates everything
 
 **Status: DOCTRINE — pinned 2026-08-08 (Jaime). First slice BUILT** (edge
 registry + `marksOf` union); the rest adopts lazily, feature by feature.
@@ -12,27 +12,31 @@ behaviors, hierarchies, raw bytes — so that filtering (pheromones) rules the
 world without ever mentioning types. Views, filters, sharing, enablement all
 become queries over marks; features compose without knowing each other.
 
-## The four-axis node
+## One envelope, one growable layer
 
 ```
-node = { mark, tags?, content?: <sig>, children: [<sig>, ...] }
+meta = {
+  meta: 1,
+  exactly one of: layer | resource | dependency | bee: <sig>,
+  mark?, tags?, ...incidence
+}
+
+artifact = existing layer JSON | resource bytes | dependency bytes | bee bytes
 ```
 
-- **Identity** — the node's signature. What these exact bytes are, forever.
-- **Classification** — `mark` + `tags` (pheromones). What KIND of thing this
-  is lives here — never in the container shape, never in a slot name, never
-  in code. Meaning in a schema belongs to the code; meaning in marks belongs
-  to the data.
-- **Content** — a sig reference to what the node SAYS (body, image, page).
-  This IS the "meta layer for everything": there is no fifth axis, and
-  `meta:` alongside `content:` is forbidden — one meaning, one field.
-- **Composition** — ordered `children` sigs.
+- **Identity** — each meta, layer, and raw payload has its own immutable sig.
+- **Incidence/classification** — meta says how a payload occurs here, including
+  `mark`, tags, author, recipients, gate, canonical root, and provenance.
+- **Growth** — features that need trees use existing layers; artifact refs in
+  their installed slots point through meta.
+- **Atoms** — raw bytes terminate through a typed meta payload key. The key is
+  the declaration; referenced content is never sniffed to determine its type.
 
-Any richer field (`title`, `done`, `shape`) privileges one interpretation
-and forks the schema — the reason notes/lists/journal diverged. The test for
-a field: would two unrelated features fill it with the same kind of meaning?
-`NoteLayer`'s `note` field is an inlined content slot — a compatible
-ancestor, not a rival; it drains when a feature needs it to.
+A richer relationship (`notes`, `image`, `properties`, `done`, `shape`) keeps
+its installed scalar/array slot shape; each artifact it names is referenced by
+a meta sig. An authored display label, image, or border for one reference
+therefore stays on that reference's local meta/layer and cannot stomp another
+appearance of the same canonical root.
 
 **Lists proved the model**: a list is a LENS over the notes tree, not a
 second structure. A list item and a note are byte-identical shapes with
@@ -41,24 +45,29 @@ marks (declared vocabulary) and, if needed, a view.
 
 ## Collections are values
 
-A collection-valued slot holds ONE sig pointing at a node subtree — never an
-inline array. The wrapper gives the collection identity: shareable,
-diffable, undo = a sig swap, superimposable. New slots use this shape from
-day one; the notes array (`notes: [sig, ...]` inline on the cell) drains on
-its trigger — the first feature that needs the collection AS a value.
+Existing collection-valued slots remain arrays. Each artifact entry is a meta
+sig, so occurrences can differ without changing the shared artifact. If a
+collection itself needs identity, decoration, or children, represent that
+feature as an ordinary layer; no new collection storage primitive is needed.
 
-**References point at NODES; only a node's `content` points at bytes.**
-Never content-sniff "bytes or node?". A node's `mark` says how to RENDER its
-content, never how to parse a reference.
+**References point at META.** A layer payload opens a growable node. A
+`resource`, `dependency`, or `bee` payload opens raw bytes. Never content-sniff
+"bytes or layer?"; the payload key already answers it.
 
 ## Meta resources (promotion)
 
-Bare bytes at `<root>/<sig>` are promoted by wrapping in a node
-`{ content: <byte-sig>, mark, tags }` — lazy, free, bytes untouched, old sig
-valid forever. The envelope is minted the first time someone decorates the
-bytes. Envelope marks are AUTHORED classification: merkle-linked, travel
-with sharing, and decorating is an edit (sig ripples up). Personal
-annotation on bytes uses the pool carrier below instead — no graph churn.
+Bare bytes at `<root>/<sig>` gain metadata without changing them:
+
+```text
+raw bytes <- { meta: 1, resource: <byte sig>, relation: "image" }
+```
+
+Use `dependency` or `bee` instead of `resource` for those atom kinds. Add an
+ordinary feature layer only when that occurrence needs children, notes, or
+other growth; the raw byte atom remains terminal. Envelope marks are AUTHORED
+classification: merkle-linked, carried by sharing, and decorating is an edit.
+Personal annotation on bytes can use the pool carrier below instead, avoiding
+unwanted graph churn.
 
 ## Two carriers, one read
 
@@ -89,8 +98,9 @@ Sig-shaped fields split two ways, and every PRECISE reachability walker
 over-approximates) must consult the one declaration in
 `hypercomb-core/src/core/edge-registry.ts`:
 
-- **EDGE_FIELDS** = `children`, `content`, `refs` — dependencies whose
-  bytes must travel. Frozen; extending it is a closure-protocol decision.
+- **EDGE_FIELDS** = `layer`, `resource`, `dependency`, `bee`, `children`, plus
+  legacy-drain `content` and `refs` — dependencies whose bytes must travel.
+  Frozen; extending it is a closure-protocol decision.
 - **REFERENT_FIELDS** = `groupSig`, `targetSig` — addresses/identities
   with no bytes behind them; fetching one 404s forever. May grow — adding
   here is how a new pointer field opts out of every walker at once.
@@ -101,8 +111,10 @@ a mark may select a renderer, never grant behaviour or execution.
 
 ## Adoption discipline
 
-Nothing migrates for its own sake. Each piece lands when a feature pulls
-it: envelopes when a mark must travel, the generic tree service when a
-second hierarchy asks, the notes-array drain when a collection must be a
-value. Existing shapes keep working forever (drains, not rewrites); the
-model can be adopted lazily and abandoned partially without stranding data.
+Legacy shapes keep working forever through deterministic passive projection.
+Reads do not rewrite history; synthesized meta records may be added to the flat
+pool as a cache, and the next ordinary edit emits metadata refs in the existing
+artifact shape.
+New features must pass the life-primitive test: if the feature cannot be a
+meta-wrapped layer capable of further references and growth, it introduces an
+unnecessary terminal special case.

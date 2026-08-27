@@ -13,7 +13,11 @@
 //
 // This module lives in core because shell-level Portals and essentials slash
 // commands both mint references. The JSON bytes are content identity, so field
-// order and omission rules must have one owner.
+// order and omission rules must have one owner. Pool variants use the life
+// primitive's meta envelope: the pool member is an incidence, while `layer`
+// points at the immutable candidate content.
+
+import { mintMetaEnvelope } from './life-primitive.js'
 
 export const CANONICAL_REFERENCE_KIND = 'reference'
 /** A candidate meaning retained inside the fixed-name root pool. The root's
@@ -98,22 +102,21 @@ export interface CanonicalVariantRecordOptions {
   layerSig: string
 }
 
-/** Build the deterministic membership record stored in the hybrid `/<name>`
- * signature bag. Provenance is deliberately outside content identity: the
- * same layer discovered through two routes remains one atomic candidate.
- * `refs` makes the candidate's merkle closure explicit to generic sharing and
- * archive walkers. */
+/** Build the deterministic meta envelope stored in the fixed-name pool.
+ * Provenance is deliberately outside content identity: the same layer
+ * discovered through two routes remains one atomic candidate. The envelope's
+ * `layer` hop is a protocol edge, so closure walkers carry the candidate
+ * without a bespoke `refs` side channel. */
 export const buildCanonicalVariantRecord = (
   opts: CanonicalVariantRecordOptions,
 ): Record<string, unknown> | null => {
   const name = canonicalReferenceName(opts.name)
   if (!name || !SIG_RE.test(opts.layerSig)) return null
-  return {
-    kind: CANONICAL_VARIANT_KIND,
-    name,
-    payload: { layerSig: opts.layerSig },
-    refs: [opts.layerSig],
-  }
+  return mintMetaEnvelope({
+    layer: opts.layerSig,
+    relation: CANONICAL_VARIANT_KIND,
+    root: name,
+  })
 }
 
 export interface CanonicalRoot {

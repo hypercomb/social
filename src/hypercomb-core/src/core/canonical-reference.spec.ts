@@ -56,10 +56,10 @@ describe('canonical portal reference grammar', () => {
 
   it('retains a same-name meaning as one layer-addressed pool candidate', () => {
     expect(buildCanonicalVariantRecord({ name: ' people ', layerSig: SIG })).toEqual({
-      kind: 'canonical:variant',
-      name: 'people',
-      payload: { layerSig: SIG },
-      refs: [SIG],
+      meta: 1,
+      layer: SIG,
+      relation: 'canonical:variant',
+      root: 'people',
     })
     expect(buildCanonicalVariantRecord({ name: 'people', layerSig: 'not-a-sig' })).toBeNull()
   })

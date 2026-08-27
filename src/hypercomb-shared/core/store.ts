@@ -1,7 +1,21 @@
 // hypercomb-shared/core/store.ts
 // hypercomb-web/src/app/core/store.ts
 
-import { Bee, EffectBus, PACKED_STORE_FLAG_KEY, SignatureService, isSignature, registerPoolMeaning } from '@hypercomb/core'
+import {
+  Bee,
+  EffectBus,
+  PACKED_STORE_FLAG_KEY,
+  SignatureService,
+  isMetaEnvelope,
+  isSignature,
+  metaPayloadOf,
+  mintMetaEnvelope,
+  registerPoolMeaning,
+  resolveMetaArtifact,
+  type ArtifactResolutionKind,
+  type MetaPayloadKind,
+  type ResolvedMetaArtifact,
+} from '@hypercomb/core'
 import { nativeRoot } from './native-filesystem'
 import { PACKED_STORE_MEANING } from './packed-store-engine'
 import { installPackedStorageOverride, packedRoot, packedStoreHasRecords } from './packed-bridge'
@@ -817,6 +831,24 @@ export class Store extends EventTarget {
     return signature
   }
 
+  /** Mint the one canonical metadata incidence around an existing artifact. */
+  public putArtifactMeta = async (
+    kind: MetaPayloadKind,
+    artifactSig: string,
+    incidence: Record<string, unknown> = {},
+    options?: { emit?: boolean },
+  ): Promise<string> => {
+    const payload = kind === 'layer' ? { layer: artifactSig }
+      : kind === 'resource' ? { resource: artifactSig }
+        : kind === 'dependency' ? { dependency: artifactSig }
+          : { bee: artifactSig }
+    const record = mintMetaEnvelope({ ...payload, ...incidence })
+    return this.putResource(
+      new Blob([JSON.stringify(record)], { type: 'application/json' }),
+      options,
+    )
+  }
+
   readonly #resourceCache = new Map<string, Blob>()
   readonly #resourcePending = new Map<string, Promise<Blob | null>>()
   readonly #hostFetchPending = new Map<string, Promise<Blob | null>>()
@@ -913,9 +945,30 @@ export class Store extends EventTarget {
     // local read, or the warm case (we already have the bytes) pays a
     // network round-trip it shouldn't. Ordering is the contract:
     // memory → OPFS → host.
+    return this.#getResolvedResource(signature, new Set(), false)
+  }
+
+  readonly #getResolvedResource = async (
+    signature: string,
+    active: ReadonlySet<string>,
+    localOnly: boolean,
+  ): Promise<Blob | null> => {
+    if (active.has(signature)) return null
+    const next = new Set(active).add(signature)
     const local = await this.getResourceLocal(signature)
-    if (local) return local
-    return this.#fetchResourceFromHost(signature)
+    const blob = local ?? (localOnly ? null : await this.#fetchResourceFromHost(signature))
+    if (!blob) return null
+    // Metadata is self-declared; ordinary JSON resources are never inferred
+    // as envelopes from their shape. Keep the probe bounded to small JSON.
+    if (blob.size > 64 * 1024) return blob
+    try {
+      const parsed = JSON.parse(await blob.text())
+      if (!isMetaEnvelope(parsed)) return blob
+      const payload = metaPayloadOf(parsed)!
+      return payload.kind === 'resource'
+        ? this.#getResolvedResource(payload.sig, next, localOnly)
+        : null
+    } catch { return blob }
   }
 
   /** Prefetch a resource into the in-memory cache. Safe to call concurrently
@@ -1484,7 +1537,9 @@ export class Store extends EventTarget {
         // missing historical resource must not trigger a host fetch — that
         // logs a 404 in the console for a purely best-effort warm. A real
         // on-demand read (localOnly=false) still falls through to the host.
-        const blob = localOnly ? await this.getResourceLocal(value) : await this.getResource(value)
+        const blob = localOnly
+          ? await this.#getResolvedResource(value, new Set(), true)
+          : await this.getResource(value)
         if (!blob) return value as T
         const parsed = JSON.parse(await blob.text()) as T
         this.#parsedResourceCache.set(value, parsed)
@@ -1686,9 +1741,64 @@ export class Store extends EventTarget {
    *  which lets the gated render retry from the local cache. */
   public getLayerBytes = async (signature: string): Promise<Uint8Array | null> => {
     const local = await this.getLayerLocalBytes(signature)
-    if (local) return local
+    if (local) {
+      try {
+        const parsed = JSON.parse(new TextDecoder().decode(local))
+        if (isMetaEnvelope(parsed)) {
+          const payload = metaPayloadOf(parsed)!
+          if (payload.kind !== 'layer') return null
+          const target = await this.getLayerLocalBytes(payload.sig)
+          if (target) return target
+          void this.fetchLayerFromHost(payload.sig)
+          return null
+        }
+      } catch { /* normal non-JSON bytes are not layer artifacts */ }
+      return local
+    }
     void this.fetchLayerFromHost(signature)
     return null
+  }
+
+  /**
+   * Resolve one light typed metadata envelope and then its artifact. Both
+   * signature hops are local-first, HTTP on miss, SHA-256 verified, and
+   * written through locally. The flat HTTP route is type-agnostic; the meta
+   * payload key selects the correct local artifact pool.
+   */
+  public resolveArtifactMeta = async (metaSig: string): Promise<ResolvedMetaArtifact | null> => {
+    const broker = (window.ioc?.get?.('@diamondcoreprocessor.com/ContentBrokerDrone')) as
+      | { fetchBySig?: (sig: string, type: string) => Promise<Uint8Array | null> }
+      | undefined
+
+    const blobBytes = async (blob: Blob | null): Promise<Uint8Array | null> =>
+      blob ? new Uint8Array(await blob.arrayBuffer()) : null
+    const exactBuffer = (bytes: Uint8Array): ArrayBuffer =>
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+
+    const readLocal = async (sig: string, kind: ArtifactResolutionKind): Promise<Uint8Array | null> => {
+      if (kind === 'meta' || kind === 'resource') return blobBytes(await this.getResourceLocal(sig))
+      if (kind === 'layer') return this.getLayerLocalBytes(sig)
+      if (kind === 'dependency') return this.getDependencyBytes(sig)
+      return this.getBeeBytes(sig)
+    }
+    const cacheLocal = async (sig: string, kind: ArtifactResolutionKind, bytes: Uint8Array): Promise<void> => {
+      if (kind === 'meta' || kind === 'resource') {
+        await this.putResource(new Blob([new Uint8Array(bytes)]), { emit: false })
+      } else if (kind === 'layer') {
+        await this.writeLayerBytes(sig, exactBuffer(bytes))
+      } else if (kind === 'dependency') {
+        await this.writeDependencyBytes(sig, bytes)
+      } else {
+        await this.writeBeeBytes(sig, bytes)
+      }
+    }
+
+    return resolveMetaArtifact(metaSig, {
+      readLocal,
+      fetchHttp: async (sig, kind) => broker?.fetchBySig?.(sig, kind === 'meta' ? 'resource' : kind) ?? null,
+      sign: async bytes => SignatureService.sign(exactBuffer(bytes)),
+      cacheLocal,
+    })
   }
 
   /** Read layer bytes by signature, root-first: the flat root
@@ -1730,6 +1840,38 @@ export class Store extends EventTarget {
       const handle = await this.hypercombRoot.getFileHandle(signature, { create: true })
       const writable = await handle.createWritable()
       try { await writable.write(bytes) } finally { await writable.close() }
+    } catch { /* best-effort */ }
+  }
+
+  /** Read a bee module from its canonical meaning pool or legacy drain. */
+  public getBeeBytes = async (signature: string): Promise<Uint8Array | null> => {
+    const expected = signature.toLowerCase()
+    for (const source of [this.bees, this.legacyBees]) {
+      if (!source) continue
+      for (const name of [`${expected}.js`, expected]) {
+        try {
+          const bytes = new Uint8Array(await (await (await source.getFileHandle(name, { create: false })).getFile()).arrayBuffer())
+          const exact = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+          if (await SignatureService.sign(exact) === expected) return bytes
+        } catch { /* miss/corruption — try the next shape/source */ }
+      }
+    }
+    return null
+  }
+
+  /** Persist verified bee bytes in the canonical sign('bees') pool. */
+  public writeBeeBytes = async (signature: string, bytes: Uint8Array): Promise<void> => {
+    if (!this.bees) return
+    const expected = signature.toLowerCase()
+    const exact = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+    if (await SignatureService.sign(exact) !== expected) {
+      console.warn(`[store] refused bee write ${signature.slice(0, 12)}: content signature mismatch`)
+      return
+    }
+    try {
+      const handle = await this.bees.getFileHandle(expected, { create: true })
+      const writable = await handle.createWritable()
+      try { await writable.write(exact) } finally { await writable.close() }
     } catch { /* best-effort */ }
   }
 

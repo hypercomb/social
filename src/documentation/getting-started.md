@@ -20,7 +20,7 @@ Hypercomb is a live, presence-based workspace. A hexagonal grid of cells holds y
 
 - **Using the app** — [command-line-reference.md](command-line-reference.md) · [slash-behaviour-reference.md](slash-behaviour-reference.md) · [glossary.md](glossary.md)
 - **Building a drone** — [signature-node-pattern.md](signature-node-pattern.md) · [core-processor-architecture.md](core-processor-architecture.md) · [drone-installer-contract.md](drone-installer-contract.md)
-- **Understanding the theory** — [signature-system.md](signature-system.md) · [dna.md](dna.md) · [signature-algebra.md](signature-algebra.md) · [genome-primitive.md](genome-primitive.md) (the genome as a recursive-merkle-root *concept*, not a shipped service) · [collapsed-compute.md](collapsed-compute.md)
+- **Understanding the theory** — [life-primitive.md](life-primitive.md) · [signature-system.md](signature-system.md) · [dna.md](dna.md) · [signature-algebra.md](signature-algebra.md) · [genome-primitive.md](genome-primitive.md) (the genome as a recursive-merkle-root *concept*, not a shipped service) · [collapsed-compute.md](collapsed-compute.md)
 - **Contributing** — [contributing.md](contributing.md) · [contributor-agreement.md](contributor-agreement.md) · [licensing.md](licensing.md)
 
 For the full catalogue, see [index.md](index.md).
