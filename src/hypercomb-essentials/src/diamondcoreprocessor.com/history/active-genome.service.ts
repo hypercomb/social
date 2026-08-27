@@ -30,8 +30,9 @@ const STORE_KEY = '@hypercomb.social/Store'
 const COMPUTED_MEANING = 'computed:genome'
 const COMPUTED_SUBKEY = 'active-genome'
 const QUEUE_SUBKEY = 'active-genome-queue'
-const DEBOUNCE_MS = 500
-const RETRY_MS = 5_000
+const PASSIVE_QUEUE_KEY = 'hc:active-genome:pending'
+const DEBOUNCE_MS = 15_000
+const RETRY_MS = 30_000
 const SIG_RE = /^[0-9a-f]{64}$/
 const INDICATOR_KEY = 'genome-weight'
 
@@ -87,6 +88,9 @@ export class ActiveGenomeService {
   #dirty = true
   #generation = 0
   #timer: ReturnType<typeof setTimeout> | null = null
+  #idleHandle: number | null = null
+  #foregroundActive = false
+  #passiveIntent = false
   #refreshing: Promise<ActiveGenomeRecord | null> | null = null
   #computedPool: Promise<FileSystemDirectoryHandle | null> | null = null
   #hydrating: Promise<void> | null = null
@@ -101,14 +105,9 @@ export class ActiveGenomeService {
       p => this.invalidate(this.#markerSignature(p?.bytes)))
     EffectBus.on<{ sig?: unknown }>('content:wrote',
       p => this.invalidate(this.#signature(p?.sig)))
-    EffectBus.on<{ sig?: unknown }>('content:arrived',
-      p => this.invalidate(this.#signature(p?.sig)))
-
-    const ioc = (window as { ioc?: { whenReady?: <T>(key: string, cb: (value: T) => void) => void } }).ioc
-    ioc?.whenReady?.(HISTORY_KEY, () => this.invalidate())
-    ioc?.whenReady?.<StoreLike>(STORE_KEY, store => { void this.initialize(store) })
+    EffectBus.on('navigation:guard-start', () => this.#foregroundStarted())
+    EffectBus.on('navigation:guard-end', () => this.#foregroundSettled())
     this.#publishState()
-    this.#schedule()
   }
 
   get record(): ActiveGenomeRecord | null { return this.#record }
@@ -119,6 +118,7 @@ export class ActiveGenomeService {
     this.#dirty = true
     this.#generation++
     if (signature && SIG_RE.test(signature)) this.#enqueueSignature(signature)
+    this.#passiveIntent = true
     EffectBus.emit('genome:dirty', { previous: this.#record })
     this.#publishState()
     this.#schedule()
@@ -151,14 +151,38 @@ export class ActiveGenomeService {
   }
 
   #schedule(delay = DEBOUNCE_MS): void {
-    if (this.#timer !== null) clearTimeout(this.#timer)
-    this.#timer = setTimeout(() => {
+    if (!this.#passiveIntent || this.#foregroundActive || this.#idleHandle !== null || this.#timer !== null) return
+    const scope = globalThis as typeof globalThis & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
+      cancelIdleCallback?: (handle: number) => void
+    }
+    const run = () => {
       this.#timer = null
+      this.#idleHandle = null
+      if (this.#foregroundActive || !this.#passiveIntent) return
+      this.#passiveIntent = false
       void this.refresh()
-    }, delay)
+    }
+    if (scope.requestIdleCallback) this.#idleHandle = scope.requestIdleCallback(run, { timeout: delay })
+    else this.#timer = setTimeout(run, delay)
+  }
+
+  #foregroundStarted(): void {
+    this.#foregroundActive = true
+    const scope = globalThis as typeof globalThis & { cancelIdleCallback?: (handle: number) => void }
+    if (this.#idleHandle !== null) scope.cancelIdleCallback?.(this.#idleHandle)
+    if (this.#timer !== null) clearTimeout(this.#timer)
+    this.#idleHandle = null
+    this.#timer = null
+  }
+
+  #foregroundSettled(): void {
+    this.#foregroundActive = false
+    this.#schedule()
   }
 
   async #refresh(): Promise<ActiveGenomeRecord | null> {
+    if (this.#foregroundActive) { this.#passiveIntent = true; return this.#record }
     const history = iocGet<HistoryLike>(HISTORY_KEY)
     const store = iocGet<StoreLike>(STORE_KEY)
     if (!history?.headLayer || !history?.readMarker || !history?.getLayerBySig || !store?.getResourceLocal) {
@@ -167,11 +191,20 @@ export class ActiveGenomeService {
       return this.#record
     }
     await this.initialize(store)
+    await this.#persistPendingQueue(store)
 
     const generation = this.#generation
     const source = this.#source(history, store)
     for (let attempt = 0; attempt < 3; attempt++) {
-      const result = await collectActiveGenome(source)
+      let result
+      try { result = await collectActiveGenome(source) } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          this.#passiveIntent = true
+          this.#schedule()
+          return this.#record
+        }
+        throw error
+      }
       if (!result.stable) continue
       if (!result.record) {
         this.#dirty = true
@@ -202,27 +235,33 @@ export class ActiveGenomeService {
   }
 
   #source(history: HistoryLike, store: StoreLike): ActiveGenomeSource {
+    const background = async <T>(operation: () => Promise<T>): Promise<T> => {
+      if (this.#foregroundActive) throw new DOMException('foreground work resumed', 'AbortError')
+      const value = await operation()
+      if (this.#foregroundActive) throw new DOMException('foreground work resumed', 'AbortError')
+      return value
+    }
     return {
       epoch: () => history.treeEpoch(),
       root: async () => {
-        const lineage = await history.sign({ explorerSegments: () => [] })
+        const lineage = await background(() => history.sign({ explorerSegments: () => [] }))
         // A cold/brand-new root still gets a partial, retrying census keyed
         // by its lineage address. This keeps `/weight` informative without
         // materializing 00000000 merely to measure it.
-        return (await history.headLayer(lineage))?.layerSig ?? lineage
+        return (await background(() => history.headLayer(lineage)))?.layerSig ?? lineage
       },
-      lineage: path => history.sign({ explorerSegments: () => [...path] }),
+      lineage: path => background(() => history.sign({ explorerSegments: () => [...path] })),
       layer: async signature => {
-        const [bytes, value] = await Promise.all([
+        const [bytes, value] = await background(() => Promise.all([
           store.getLayerPoolBytes(signature),
           history.getLayerBySig(signature),
-        ])
+        ]))
         return bytes && value ? { bytes: bytes.byteLength, value } : null
       },
       head: async lineage => {
-        const head = await history.headLayer(lineage)
+        const head = await background(() => history.headLayer(lineage))
         if (!head) return null
-        const marker = await history.readMarker(lineage, head.filename)
+        const marker = await background(() => history.readMarker(lineage, head.filename))
         return marker ? {
           marker: head.filename,
           layer: marker.layerSig,
@@ -230,7 +269,7 @@ export class ActiveGenomeService {
         } : null
       },
       resource: async signature => {
-        const blob = await store.getResourceLocal(signature)
+        const blob = await background(() => store.getResourceLocal(signature))
         if (!blob) return null
         const value = await expandable(blob)
         return {
@@ -238,8 +277,8 @@ export class ActiveGenomeService {
           ...(value === undefined ? {} : { value }),
         } satisfies ActiveGenomeContent
       },
-      beeBytes: signature => poolFileSize(signature, store.bees, store.legacyBees),
-      dependencyBytes: signature => poolFileSize(signature, store.dependencies, store.legacyDependencies),
+      beeBytes: signature => background(() => poolFileSize(signature, store.bees, store.legacyBees)),
+      dependencyBytes: signature => background(() => poolFileSize(signature, store.dependencies, store.legacyDependencies)),
     }
   }
 
@@ -276,6 +315,12 @@ export class ActiveGenomeService {
     this.#hydrated = true
     const pending = this.#pendingQueueSig
     if (pending) this.#enqueueSignature(pending)
+    else {
+      try {
+        const localPending = this.#signature(localStorage.getItem(PASSIVE_QUEUE_KEY))
+        if (localPending) this.#enqueueSignature(localPending)
+      } catch { /* storage unavailable */ }
+    }
     this.#publishState()
     this.#schedule()
   }
@@ -286,13 +331,20 @@ export class ActiveGenomeService {
 
   #enqueueSignature(signature: string): void {
     this.#pendingQueueSig = signature
+    // One synchronous atomic marker only. OPFS persistence is deferred to the
+    // idle collector so a commit handler never starts filesystem work.
+    try { localStorage.setItem(PASSIVE_QUEUE_KEY, signature) } catch {}
+  }
+
+  async #persistPendingQueue(store: StoreLike): Promise<void> {
+    const signature = this.#pendingQueueSig
+    if (!signature) return
     this.#queueWrites = this.#queueWrites.then(async () => {
-      const store = iocGet<StoreLike>(STORE_KEY)
-      if (!store) return
       const pool = await this.#pool(store)
       if (!pool) return
       await this.#writeDoc(store, pool, QUEUE_SUBKEY, { queued: signature })
     }).catch(() => { /* leave dirty; the next change/boot retries */ })
+    await this.#queueWrites
   }
 
   async #settleQueue(store: StoreLike, generation: number, recordSig: string): Promise<boolean> {
@@ -307,6 +359,7 @@ export class ActiveGenomeService {
       })
       if (sig && this.#generation === generation) {
         this.#pendingQueueSig = null
+        try { localStorage.removeItem(PASSIVE_QUEUE_KEY) } catch {}
         settled = true
       }
     }).catch(() => { /* queue remains pending */ })

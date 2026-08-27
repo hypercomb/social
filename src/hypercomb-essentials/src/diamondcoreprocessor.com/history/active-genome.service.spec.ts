@@ -90,6 +90,21 @@ const history = (head: string | null = root) => ({
 })
 
 describe('passive active-genome queue', () => {
+  it('does no hydration or census work merely from construction/startup', async () => {
+    const store = new MemoryComputedStore()
+    const getPoolDoc = vi.spyOn(store, 'getPoolDoc')
+    const liveHistory = history()
+    const headLayer = vi.spyOn(liveHistory, 'headLayer')
+    registrations.set('@hypercomb.social/Store', store)
+    registrations.set('@diamondcoreprocessor.com/HistoryService', liveHistory)
+
+    new ActiveGenomeService()
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(getPoolDoc).not.toHaveBeenCalled()
+    expect(headLayer).not.toHaveBeenCalled()
+  })
+
   it('persists a queued signature, computes, then clears the queue only after the record lands', async () => {
     const store = new MemoryComputedStore()
     const sealSubtree = vi.fn(async () => null)
@@ -159,13 +174,10 @@ describe('passive active-genome queue', () => {
     const store = new MemoryComputedStore()
     registrations.set('@hypercomb.social/Store', store)
     registrations.set('@diamondcoreprocessor.com/HistoryService', history(null))
-    const queued = new Promise<void>(resolve => {
-      store.onQueue = value => { if (value.queued === trigger) resolve() }
-    })
     const service = new ActiveGenomeService()
 
     service.invalidate(trigger)
-    await queued
+    expect(localStorage.getItem('hc:active-genome:pending')).toBe(trigger)
     await service.refresh()
 
     expect(service.dirty).toBe(true)
