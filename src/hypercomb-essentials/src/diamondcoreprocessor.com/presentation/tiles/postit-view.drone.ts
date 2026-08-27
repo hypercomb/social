@@ -114,6 +114,13 @@ export class PostitViewDrone extends Drone {
     if (!this.#bound) {
       this.#vm()?.addEventListener('change', this.#change)
       window.addEventListener('keydown', this.#key, true)
+      // Navigation changes which location a bare on-screen sticky belongs to.
+      // Reconcile on the navigation event itself so the generation advances
+      // immediately: otherwise an async render from the previous layer can
+      // finish after the move, leave its stale sticky on the glass, and a
+      // click opens that old path in post-it mode before the destination's
+      // synchronize pass gets a chance to draw its real note.
+      window.addEventListener('navigate', this.#navigate)
       window.addEventListener('synchronize', this.#change)
       this.onEffect('decorations:changed', this.#change)
       // Cold session: the mark is discovered by the post-paint hydration walk,
@@ -158,6 +165,7 @@ export class PostitViewDrone extends Drone {
   protected override dispose(): void {
     this.#vm()?.removeEventListener('change', this.#change)
     window.removeEventListener('keydown', this.#key, true)
+    window.removeEventListener('navigate', this.#navigate)
     window.removeEventListener('synchronize', this.#change)
     this.#backOff?.()
     this.#backOff = null
@@ -167,6 +175,17 @@ export class PostitViewDrone extends Drone {
   }
 
   #changeTimer = 0
+  readonly #navigate = (): void => {
+    // Do not leave the old layer interactive during the trailing/coalesced
+    // read. Advancing the generation cancels any in-flight render, and taking
+    // its host off the glass closes the stale-click window synchronously.
+    ++this.#gen
+    if (this.#vm()?.mode === 'hexagons') {
+      this.#stickies?.remove()
+      this.#stickies = null
+    }
+    this.#change()
+  }
   readonly #change = (): void => {
     // Coalesce event bursts into ONE trailing pass. replaceDecoration lands
     // as removeSig THEN append: reconciling on the removeSig half saw no
