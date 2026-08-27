@@ -14,10 +14,29 @@ import { checkForUpdate, upgradeFromBundled, type BootStatus } from './ensure-in
 
 const ELEMENT_NAME = 'hc-install-prompt'
 const SNAPSHOT_QUEEN_KEY = '@diamondcoreprocessor.com/SnapshotQueenBee'
+const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
+const STORE_KEY = '@hypercomb.social/Store'
+const COMMITTER_KEY = '@diamondcoreprocessor.com/LayerCommitter'
 const SNAPSHOT_READY_TIMEOUT_MS = 15_000
+const SNAPSHOT_COLD_RETRY_MS = 2_250
 
 type SnapshotQueen = {
   createRestorePoint?: (name: string) => Promise<boolean>
+}
+
+type SnapshotToast = { type?: string; title?: string; message?: string }
+
+const snapshotQueenWhenReady = (read: (key: string) => unknown): SnapshotQueen | undefined => {
+  const queen = read(SNAPSHOT_QUEEN_KEY) as SnapshotQueen | undefined
+  const history = read(HISTORY_KEY) as { sealSubtree?: unknown } | undefined
+  const store = read(STORE_KEY) as { putResource?: unknown } | undefined
+  const committer = read(COMMITTER_KEY) as { commitSlotAppend?: unknown } | undefined
+  return typeof queen?.createRestorePoint === 'function'
+    && typeof history?.sealSubtree === 'function'
+    && typeof store?.putResource === 'function'
+    && typeof committer?.commitSlotAppend === 'function'
+    ? queen
+    : undefined
 }
 
 /**
@@ -28,7 +47,9 @@ type SnapshotQueen = {
 export const waitForSnapshotQueen = async (
   timeoutMs = SNAPSHOT_READY_TIMEOUT_MS,
 ): Promise<SnapshotQueen | undefined> => {
-  const current = window.ioc?.get?.<SnapshotQueen>(SNAPSHOT_QUEEN_KEY)
+  const observed = new Map<string, unknown>()
+  const read = (key: string): unknown => observed.has(key) ? observed.get(key) : window.ioc?.get?.(key)
+  const current = snapshotQueenWhenReady(read)
   if (current) return current
   return new Promise(resolve => {
     let settled = false
@@ -42,10 +63,36 @@ export const waitForSnapshotQueen = async (
     }
     const timer = window.setTimeout(() => finish(), timeoutMs)
     off = window.ioc?.onRegister?.((key, value) => {
-      if (key === SNAPSHOT_QUEEN_KEY) finish(value as SnapshotQueen)
+      observed.set(key, value)
+      const ready = snapshotQueenWhenReady(read)
+      if (ready) finish(ready)
     })
   })
 }
+
+/**
+ * A strict seal can discover a locally cold layer and start its verified host
+ * fetch. Give that one fetch cycle a chance to land, then retry once. This is
+ * bounded and listens for the same `content:arrived` event used by render, so
+ * an actually missing layer still fails closed instead of turning update into
+ * an unbounded poll.
+ */
+const waitForSnapshotColdLayer = (): Promise<void> => new Promise(resolve => {
+  let settled = false
+  let armed = false
+  let off: (() => void) | undefined
+  const finish = (): void => {
+    if (settled) return
+    settled = true
+    window.clearTimeout(timer)
+    off?.()
+    resolve()
+  }
+  const timer = window.setTimeout(finish, SNAPSHOT_COLD_RETRY_MS)
+  off = EffectBus.on('content:arrived', () => { if (armed) finish() })
+  armed = true
+  if (settled) off()
+})
 
 const FALLBACKS: Record<string, string> = {
   'install.title': 'Welcome to Hypercomb',
@@ -249,11 +296,33 @@ export class InstallPromptElement extends HTMLElement {
           this.#render()
           return
         }
-        const checkpointed = await queen?.createRestorePoint?.(String(restorePointName ?? '').trim())
+        let snapshotFailure = ''
+        let captureSnapshotFailure = false
+        const offSnapshotToast = EffectBus.on<SnapshotToast>('toast:show', payload => {
+          if (!captureSnapshotFailure || payload?.type !== 'error') return
+          if (!/^snapshot$/i.test(String(payload?.title ?? '').trim())) return
+          snapshotFailure = String(payload?.message ?? '').trim()
+        })
+        const checkpointName = String(restorePointName ?? '').trim()
+        let checkpointed = false
+        try {
+          captureSnapshotFailure = true
+          checkpointed = !!(await queen.createRestorePoint(checkpointName))
+          if (!checkpointed) {
+            await waitForSnapshotColdLayer()
+            snapshotFailure = ''
+            checkpointed = !!(await queen.createRestorePoint(checkpointName))
+          }
+        } finally {
+          captureSnapshotFailure = false
+          offSnapshotToast()
+        }
         if (!checkpointed) {
           EffectBus.emit('update:status', {
             phase: 'error',
-            message: 'Update stopped — the restore point was not saved',
+            message: snapshotFailure
+              ? `Update stopped — ${snapshotFailure}`
+              : 'Update stopped — the restore point was not saved',
           })
           this.#upgrading = false
           this.#render()

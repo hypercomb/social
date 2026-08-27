@@ -36,7 +36,7 @@ describe('pinned package discovery', () => {
     expect(parsePinnedPackage({ ...descriptor, beeDeps: { forged: [SIG_C] } })).toBeNull()
   })
 
-  it('tries the canonical flat path before bundled content and accepts only matching bytes', async () => {
+  it('tries the pin-adjacent content path first and accepts only matching bytes', async () => {
     const valid = bytesOf(descriptor)
     const descriptorSig = signatureOf(valid)
     const forged = bytesOf({ ...descriptor, label: 'forged' })
@@ -45,8 +45,8 @@ describe('pinned package discovery', () => {
       if (path === BOOTSTRAP_PIN_PATH) {
         return new Response(JSON.stringify({ version: 1, bootstrap: descriptorSig }), { status: 200 })
       }
-      if (path === `/${descriptorSig}`) return new Response(forged, { status: 200 })
-      if (path === `/content/${descriptorSig}`) return new Response(valid, { status: 200 })
+      if (path === `/content/${descriptorSig}`) return new Response(forged, { status: 200 })
+      if (path === `/${descriptorSig}`) return new Response(valid, { status: 200 })
       return new Response('', { status: 404 })
     })
 
@@ -57,8 +57,8 @@ describe('pinned package discovery', () => {
     })
     expect(fetcher.mock.calls.map(([path]) => String(path))).toEqual([
       BOOTSTRAP_PIN_PATH,
-      `/${descriptorSig}`,
       `/content/${descriptorSig}`,
+      `/${descriptorSig}`,
     ])
   })
 

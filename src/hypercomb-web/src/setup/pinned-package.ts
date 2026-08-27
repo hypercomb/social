@@ -148,7 +148,11 @@ export const fetchPinnedPackage = async (
     return { status: 'invalid', reason: 'pin does not name one descriptor signature' }
   }
 
-  for (const path of [`/${descriptorSig}`, `/content/${descriptorSig}`]) {
+  // The pin itself lives under /content, so its immutable target is adjacent
+  // there on every current deployment. Try that advertised location first;
+  // flat-root remains a compatibility fallback. Reversing these produced one
+  // expected 404 in DevTools on every update check.
+  for (const path of [`/content/${descriptorSig}`, `/${descriptorSig}`]) {
     let response: Response
     try { response = await fetcher(path, { cache: 'no-store' }) } catch { continue }
     if (!response.ok) continue

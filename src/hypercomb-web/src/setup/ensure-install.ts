@@ -481,11 +481,10 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     }
   }
 
-  // Delivery-format bridge: new builds emit FLAT sig-named files at the
-  // content root (no `__bees__`/`__dependencies__`/`__layers__` dirs in
-  // dist); deployed Azure/CDN content and the shell's own /content/ tree
-  // stay old-layout until redeployed. Try the flat URL first, fall back
-  // to the legacy typed URL shape.
+  // Delivery-format bridge: new builds emit FLAT sig-named files inside the
+  // advertised /content root (no typed dirs). Try that current location first;
+  // root-flat and legacy typed layouts remain compatibility fallbacks. This
+  // ordering avoids an expected 404 for every single package leaf.
   const fetchFirst = async (paths: string[]): Promise<ArrayBuffer | null> => {
     for (const path of paths) {
       const bytes = await fetchBytes(path)
@@ -522,9 +521,9 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   // OPFS root for layers. A fetch miss just never enters the apply set;
   // the partial-install warn below stays loud about the gap.
   const toApply: ApplyFile[] = [
-    ...await fetchAll(bundled.bees, 'bee', (s) => [`/${s}`, `/content/${s}`, `/__bees__/${s}.js`, `/content/__bees__/${s}.js`]),
-    ...await fetchAll(bundled.dependencies, 'dependency', (s) => [`/${s}`, `/content/${s}`, `/__dependencies__/${s}.js`, `/content/__dependencies__/${s}.js`]),
-    ...await fetchAll(bundled.layers, 'layer', (s) => [`/${s}`, `/content/${s}`, `/__layers__/${s}.json`, `/content/__layers__/${s}.json`]),
+    ...await fetchAll(bundled.bees, 'bee', (s) => [`/content/${s}`, `/${s}`, `/content/__bees__/${s}.js`, `/__bees__/${s}.js`]),
+    ...await fetchAll(bundled.dependencies, 'dependency', (s) => [`/content/${s}`, `/${s}`, `/content/__dependencies__/${s}.js`, `/__dependencies__/${s}.js`]),
+    ...await fetchAll(bundled.layers, 'layer', (s) => [`/content/${s}`, `/${s}`, `/content/__layers__/${s}.json`, `/__layers__/${s}.json`]),
   ]
   const { appliedSigs } = await applyVerifiedFiles(store, toApply, 'bundled')
   const appliedOf = (sigs: string[]): number => sigs.filter(s => appliedSigs.has(s.toLowerCase())).length
@@ -555,14 +554,14 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
       // Flat dist puts the bag dir at the content root; legacy dists
       // nested it inside the typed dir (URL-shape fallback only).
       const bytes = await fetchFirst([
-        `/${bagSig}/${indexName}`,
         `/content/${bagSig}/${indexName}`,
-        `/${legacyDir}/${bagSig}/${indexName}`,
+        `/${bagSig}/${indexName}`,
         `/content/${legacyDir}/${bagSig}/${indexName}`,
-        `/${bagSig}/${legacyIndexName}`,
+        `/${legacyDir}/${bagSig}/${indexName}`,
         `/content/${bagSig}/${legacyIndexName}`,
-        `/${legacyDir}/${bagSig}/${legacyIndexName}`,
+        `/${bagSig}/${legacyIndexName}`,
         `/content/${legacyDir}/${bagSig}/${legacyIndexName}`,
+        `/${legacyDir}/${bagSig}/${legacyIndexName}`,
       ])
       return bytes ? { indexName, bytes } : null
     }))

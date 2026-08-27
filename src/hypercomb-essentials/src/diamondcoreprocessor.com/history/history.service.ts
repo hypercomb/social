@@ -2171,6 +2171,23 @@ export class HistoryService {
   }
 
   /**
+   * Strict-operation layer resolution. Rendering deliberately returns on a
+   * local miss and heals in the background; a snapshot/export must instead
+   * know whether the complete closure exists before it claims success. Await
+   * the same SHA-256-gated broker fetch once, then re-read from the local pool.
+   */
+  readonly #resolveRequiredLayer = async (layerSig: string): Promise<LayerContent | null> => {
+    const local = await this.getLayerBySig(layerSig)
+    if (local) return local
+    const store = get<{
+      fetchLayerFromHost?: (sig: string) => Promise<Uint8Array | null>
+    }>('@hypercomb.social/Store')
+    const arrived = await store?.fetchLayerFromHost?.(layerSig)
+    if (!arrived) return null
+    return this.#resolveLayerLocal(layerSig)
+  }
+
+  /**
    * Read the current head layer at a location WITHOUT auto-minting an
    * empty marker if the bag doesn't exist. Used by readers that just
    * want the present state — UI consumers, slot-cache warmers, the
@@ -2343,7 +2360,13 @@ export class HistoryService {
       return sealedSig
     }
 
-    const head = await this.currentLayerAt(locSig)
+    const headStats: { cold?: boolean } = {}
+    let head = await this.currentLayerAt(locSig, headStats)
+    if (!head && headStats.cold) {
+      const coldHeadSig = this.#headSigFor(locSig)
+      if (coldHeadSig) await this.#resolveRequiredLayer(coldHeadSig)
+      head = await this.currentLayerAt(locSig)
+    }
     if (!head) return null
     const headSig = this.#headSigFor(locSig) ?? null
 
@@ -2364,7 +2387,7 @@ export class HistoryService {
     const childSigs = Array.isArray(head.children) ? head.children : []
     const sealedChildren: string[] = []
     for (const cs of childSigs) {
-      const child = await this.getLayerBySig(String(cs))
+      const child = await this.#resolveRequiredLayer(String(cs))
       const name = (child?.name ?? '').trim()
       if (!name) return null // cold / unresolvable child — refuse a lossy seal
       const sealed = await this.sealSubtree([...segments, name], visited)

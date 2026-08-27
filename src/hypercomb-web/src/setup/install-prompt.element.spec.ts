@@ -95,7 +95,7 @@ describe('hc-install-prompt', () => {
     expect(element.querySelector('[role="dialog"]')).not.toBeNull()
   })
 
-  it('waits for the snapshot service when update is clicked before its bee lands', async () => {
+  it('waits for the snapshot bee and every service it needs before declaring it ready', async () => {
     const { waitForSnapshotQueen } = await import('./install-prompt.element')
     const callbacks: Array<(key: string, value: unknown) => void> = []
     const ioc = (window as unknown as { ioc: {
@@ -113,6 +113,9 @@ describe('hc-install-prompt', () => {
       const queen = { createRestorePoint: vi.fn(async () => true) }
       const waiting = waitForSnapshotQueen(1_000)
       callbacks[0]?.('@diamondcoreprocessor.com/SnapshotQueenBee', queen)
+      callbacks[0]?.('@diamondcoreprocessor.com/HistoryService', { sealSubtree: vi.fn() })
+      callbacks[0]?.('@hypercomb.social/Store', { putResource: vi.fn() })
+      callbacks[0]?.('@diamondcoreprocessor.com/LayerCommitter', { commitSlotAppend: vi.fn() })
       await expect(waiting).resolves.toBe(queen)
       expect(callbacks).toHaveLength(0)
     } finally {
