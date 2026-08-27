@@ -1,9 +1,10 @@
 // hypercomb-shared/core/sw-domains.ts
 //
-// Page → service-worker host-domain hand-off (resource streaming, Phase 2).
+// Page → service-worker host-domain hand-off (signed content streaming).
 //
-// The service worker serves embedded-site resources at /@resource/<sig> and,
-// on an OPFS miss, streams them from a host. But a service worker has no
+// The service worker serves embedded-site resources at /@resource/<sig> and
+// executable modules at /opfs/<pool>/<sig>; on an OPFS miss, either may stream
+// verified bytes from a host. But a service worker has no
 // localStorage / IoC, so it can't discover host domains on its own — the page
 // must tell it. This mirrors the content broker's candidate set on the main
 // thread (self-domain + community domains); the SW verifies sha256 on whatever
@@ -40,9 +41,11 @@ const readDomains = (): string[] => {
 
 /**
  * Post the current host domains (self + community) to the controlling service
- * worker so it can resolve /@resource/<sig> misses from a host. No-op when
- * there's no service worker, no active worker yet, or no domains configured.
- * Best-effort and idempotent — safe to call on every boot.
+ * worker so it can resolve signature misses from a host. The worker always
+ * tries its own origin without this message; the posted list adds self-hosted,
+ * community, and learned publisher domains. No-op when there is no service
+ * worker, active worker, or configured external domain. Best-effort and
+ * idempotent — safe to call on every boot.
  */
 export const postCommunityDomainsToServiceWorker = async (): Promise<void> => {
   try {

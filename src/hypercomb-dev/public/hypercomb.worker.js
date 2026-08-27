@@ -163,15 +163,15 @@ async function handleOpfsRequest(request) {
   if (token === '__layers__') return handleLayerRequest(request)
   const pools = await poolSignatures()
   if (token === pools.bees || token === '__bees__') {
-    return handleModuleRequest(request, [pools.bees, '__bees__'])
+    return handleModuleRequest(request, [pools.bees, '__bees__'], 'bee')
   }
   if (token === pools.dependencies || token === '__dependencies__') {
-    return handleModuleRequest(request, [pools.dependencies, '__dependencies__'])
+    return handleModuleRequest(request, [pools.dependencies, '__dependencies__'], 'dependency')
   }
   return new Response('unknown opfs path', { status: 404 })
 }
 
-async function handleModuleRequest(request, dirNames) {
+async function handleModuleRequest(request, dirNames, kind) {
   const url = new URL(request.url)
   const sig = readSignature(url.pathname)
   if (!sig) return new Response('invalid signature', { status: 400 })
@@ -186,6 +186,21 @@ async function handleModuleRequest(request, dirNames) {
       await cachePut(request, opfs)
       return toHeadIfNeeded(request, opfs)
     }
+  }
+
+  // Cold-cache acquisition. A signature URL is its own integrity assertion:
+  // fetch the flat deployment leaf (same origin first, then known community
+  // hosts), reject SPA HTML and ANY byte sequence whose SHA-256 is not the
+  // requested signature, then warm both OPFS and Cache API before execution.
+  const fetched = await fetchSignedModuleFromHosts(sig, kind)
+  if (fetched) {
+    await writeModuleToOpfs(dirNames[0], sig, fetched.buf)
+    const headers = new Headers()
+    headers.set('content-type', 'application/javascript; charset=utf-8')
+    headers.set('cache-control', 'public, max-age=31536000, immutable')
+    const response = new Response(fetched.buf, { status: 200, headers })
+    await cachePut(request, response)
+    return toHeadIfNeeded(request, response.clone())
   }
 
   return new Response('module not found', { status: 404 })
@@ -654,6 +669,58 @@ async function sha256Hex(buffer) {
   return hex
 }
 
+async function moduleCandidateOrigins() {
+  let domains = KNOWN_DOMAINS
+  if (!domains || domains.length === 0) domains = await loadDomains()
+  const origins = [self.location.origin]
+  for (const raw of (domains || [])) {
+    const host = String(raw || '').replace(/^https?:\/\//, '').replace(/\/+$/, '').trim()
+    if (!host) continue
+    const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
+    origins.push(`${scheme}://${host}`)
+  }
+  return [...new Set(origins)]
+}
+
+function moduleHostPaths(origin, sig, kind) {
+  const base = String(origin || '').replace(/\/+$/, '')
+  const legacyDir = kind === 'bee' ? '__bees__' : '__dependencies__'
+  return [
+    `${base}/${sig}`,
+    `${base}/content/${sig}`,
+    `${base}/${legacyDir}/${sig}.js`,
+    `${base}/content/${legacyDir}/${sig}.js`,
+  ]
+}
+
+async function verifiedResponseBytes(sig, response) {
+  if (!response || !response.ok) return null
+  if ((response.headers.get('content-type') || '').toLowerCase().includes('text/html')) return null
+  const buf = await response.arrayBuffer()
+  return await sha256Hex(buf) === sig.toLowerCase() ? buf : null
+}
+
+// Try the canonical flat deployment path first, the shell's bundled /content
+// mirror second, then old typed paths only for unmigrated deployments. The
+// optional origins argument is a test seam; production always derives the
+// current origin + posted/persisted community domains.
+async function fetchSignedModuleFromHosts(sig, kind, origins) {
+  const candidates = origins ?? await moduleCandidateOrigins()
+  const attempted = new Set()
+  for (const origin of candidates) {
+    for (const url of moduleHostPaths(origin, sig, kind)) {
+      if (attempted.has(url)) continue
+      attempted.add(url)
+      try {
+        const response = await fetch(url, { cache: 'no-store' })
+        const buf = await verifiedResponseBytes(sig, response)
+        if (buf) return { buf }
+      } catch { /* network / CORS / cert — try the next path / host */ }
+    }
+  }
+  return null
+}
+
 // Try each known host in order; the first response whose bytes sha256 to the
 // requested sig wins. Loopback hosts use http (content-side analog of the
 // mesh allow-loopback); real domains use https. Returns { buf, contentType }
@@ -694,6 +761,26 @@ async function writeResourceToOpfs(sig, buffer) {
     const root = await self.navigator.storage.getDirectory()
     try { await root.getFileHandle(sig); return } catch { /* not present — create */ }
     const handle = await root.getFileHandle(sig, { create: true })
+    const writable = await handle.createWritable()
+    try { await writable.write(buffer) } finally { await writable.close() }
+  } catch { /* best-effort cache fill */ }
+}
+
+// Module write-through targets the derived pool-of-meaning directory. A
+// verified network response may arrive before install has created that pool,
+// so the worker is allowed to create this one canonical cache directory. An
+// equal-size existing leaf is complete and immutable; a short/zero leaf is an
+// interrupted prior write and is healed with the verified bytes.
+async function writeModuleToOpfs(poolDir, sig, buffer) {
+  try {
+    const root = await self.navigator.storage.getDirectory()
+    const dir = await root.getDirectoryHandle(poolDir, { create: true })
+    const name = `${sig}.js`
+    try {
+      const existing = await dir.getFileHandle(name)
+      if ((await existing.getFile()).size === buffer.byteLength) return
+    } catch { /* absent — create below */ }
+    const handle = await dir.getFileHandle(name, { create: true })
     const writable = await handle.createWritable()
     try { await writable.write(buffer) } finally { await writable.close() }
   } catch { /* best-effort cache fill */ }

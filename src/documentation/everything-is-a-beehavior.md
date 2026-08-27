@@ -571,12 +571,26 @@ resolver:
     modules. Current installs emit no import map; the old two-entry map remains
     only as a compatibility read for a cached pre-platform-signature package.
     The native frontend no longer bakes a static map.
-- [ ] SW resolver gains network fallback: OPFS miss → `<origin>/<sig>` fetch
+- [x] SW resolver gains network fallback: OPFS miss → `<origin>/<sig>` fetch
   → **verify the bytes hash to the requested sig** (published-pools already
   does this for specs; the module path must too — forged bytes are dropped,
-  never cached, never executed) → write back to OPFS. Install becomes
-  cache-warming, not a precondition — `ensure-install` shrinks to
-  sentinel/pinning
+  never cached, never executed) → write back to OPFS.
+  - The worker tries the current deployment first, then posted/persisted
+    community hosts; within each it checks flat, bundled `/content`, and
+    legacy typed module paths in that order. Only a SHA-256 match receives
+    JavaScript MIME, immutable Cache API storage, and pool write-through.
+    Exact Node tests prove a forged first response is skipped for a valid
+    second response, while forged and SPA-HTML responses exhaust to `null`.
+    Web and dev worker copies remain byte-identical. A fresh-origin browser
+    proof requested a synthetic signature absent from OPFS: the worker missed
+    the flat deployment path, accepted the hash-matching `/content/<sig>`
+    bytes, served them, and served them again after the host file was removed;
+    the same bytes published under a forged signature returned `module not
+    found` and never warmed.
+- [ ] Install becomes cache-warming, not a precondition — `ensure-install`
+  shrinks to sentinel/pinning. The verified miss path now exists, but the
+  shell still needs the pinned bootstrap/root discovery carve below before a
+  completely empty OPFS can know which package signature to request.
 - [ ] Retire `resolve-import-map.ts` (203), `apply-import-map.ts`,
   `dependency-loader.ts` (170), the `index.html` localStorage replay, and
   the one-time `location.reload()`; `ScriptPreloader.#ensureDeps` collapses

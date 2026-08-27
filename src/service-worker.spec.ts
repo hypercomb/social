@@ -29,8 +29,9 @@
 // the functions are lifted out of the source by brace matching. A failure to
 // lift is reported as a harness failure, never as a sniffer failure.
 
-import { describe, it, expect } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
 const at = (p: string): string => fileURLToPath(new URL(p, import.meta.url))
@@ -41,8 +42,8 @@ const DEV = at('./hypercomb-dev/public/hypercomb.worker.js')
 const source = readFileSync(WEB, 'utf8')
 
 /** Lift `async function <name>(…) { … }` out of the worker source. */
-const lift = (name: string): string => {
-  const start = source.indexOf(`async function ${name}(`)
+const lift = (name: string, asyncFunction = true): string => {
+  const start = source.indexOf(`${asyncFunction ? 'async ' : ''}function ${name}(`)
   expect(start, `harness: ${name} not found in the worker source`).toBeGreaterThan(-1)
   let depth = 0
   let opened = false
@@ -68,6 +69,24 @@ const load = async (): Promise<Sniffers> => await import(
   )
 ) as Sniffers
 
+type ModuleFallback = {
+  moduleHostPaths(origin: string, sig: string, kind: 'bee' | 'dependency'): string[]
+  verifiedResponseBytes(sig: string, response: Response): Promise<ArrayBuffer | null>
+  fetchSignedModuleFromHosts(
+    sig: string,
+    kind: 'bee' | 'dependency',
+    origins: string[],
+  ): Promise<{ buf: ArrayBuffer } | null>
+}
+
+const loadModuleFallback = async (): Promise<ModuleFallback> => await import(
+  'data:text/javascript,' + encodeURIComponent(
+    `${lift('sha256Hex')}\n${lift('moduleHostPaths', false)}\n`
+    + `${lift('verifiedResponseBytes')}\n${lift('fetchSignedModuleFromHosts')}\n`
+    + 'export { moduleHostPaths, verifiedResponseBytes, fetchSignedModuleFromHosts }',
+  )
+) as ModuleFallback
+
 /** Bytes + enough tail that a 32-byte header read is always satisfied. */
 const bytes = (...head: number[]): Blob =>
   new Blob([new Uint8Array([...head, ...new Array(32).fill(0)])])
@@ -80,6 +99,59 @@ const ascii = (...parts: Array<string | number[]>): Blob =>
 describe('service worker copies', () => {
   it('are byte-identical across the web and dev shells', () => {
     expect(readFileSync(DEV)).toEqual(readFileSync(WEB))
+  })
+})
+
+describe('signature module network fallback', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const moduleBytes = new TextEncoder().encode('export const verified = true\n')
+  const signature = createHash('sha256').update(moduleBytes).digest('hex')
+
+  it('tries flat, bundled, then legacy deployment paths', async () => {
+    const fallback = await loadModuleFallback()
+    expect(fallback.moduleHostPaths('https://host.test/', signature, 'dependency')).toEqual([
+      `https://host.test/${signature}`,
+      `https://host.test/content/${signature}`,
+      `https://host.test/__dependencies__/${signature}.js`,
+      `https://host.test/content/__dependencies__/${signature}.js`,
+    ])
+  })
+
+  it('accepts only bytes whose SHA-256 is the requested signature', async () => {
+    const fallback = await loadModuleFallback()
+    const fetchMock = vi.fn(async (url: string) =>
+      url.includes('/content/')
+        ? new Response(moduleBytes, { status: 200, headers: { 'content-type': 'application/octet-stream' } })
+        : new Response('forged', { status: 200, headers: { 'content-type': 'application/javascript' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fallback.fetchSignedModuleFromHosts(signature, 'dependency', ['https://host.test'])
+    expect(new Uint8Array(result?.buf ?? new ArrayBuffer(0))).toEqual(moduleBytes)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('drops forged and SPA-fallback responses instead of executing them', async () => {
+    const fallback = await loadModuleFallback()
+    const fetchMock = vi.fn(async (url: string) =>
+      url.endsWith(`/${signature}`)
+        ? new Response(moduleBytes, { status: 200, headers: { 'content-type': 'text/html' } })
+        : new Response('forged', { status: 200, headers: { 'content-type': 'application/javascript' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      fallback.fetchSignedModuleFromHosts(signature, 'bee', ['https://host.test']),
+    ).resolves.toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+  })
+
+  it('wires verified bytes into module cache warming before the 404', () => {
+    expect(source).toContain('const fetched = await fetchSignedModuleFromHosts(sig, kind)')
+    expect(source).toContain('await writeModuleToOpfs(dirNames[0], sig, fetched.buf)')
+    expect(source.indexOf('const fetched = await fetchSignedModuleFromHosts(sig, kind)'))
+      .toBeLessThan(source.indexOf("return new Response('module not found', { status: 404 })"))
   })
 })
 
