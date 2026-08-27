@@ -102,7 +102,7 @@
   "providers.search": "Pesquisar provedores e modelos",
   "providers.empty": "Nada corresponde",
   "providers.tab.subscription": "Assinaturas",
-  "providers.tab.api": "Requisições de API",
+  "providers.tab.api": "API de chat",
   "providers.tab.swarm": "Enxame",
   "providers.tabHint.subscription": "Um plano que você já paga. Uma sessão de CLI rodando nesta máquina responde pela conta dela — e só esses respondentes conseguem ler o seu hive.",
   "providers.tabHint.api": "Cobrado por requisição com a chave que você cola aqui. A chave fica neste navegador, e o endpoint para onde ela iria aparece antes de você colar.",

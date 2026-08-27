@@ -536,6 +536,7 @@ export class ControlsBarElement extends HTMLElement {
   #clipboardItems = signal<string[]>([])
   #roomOpen = signal(false)
   #beesVisible = signal(localStorage.getItem('hc:bees-visible') === 'true')
+  #agentsVisible = signal(localStorage.getItem('hc:agents-visible') !== 'false')
   #showHidden = signal(localStorage.getItem('hc:show-hidden') === '1')
   // Fit button is a two-state switch:
   //  - 'off'    (white): regular click performs a one-shot fit; nothing sticks
@@ -1077,6 +1078,8 @@ export class ControlsBarElement extends HTMLElement {
   #touchDragging = signal(false)
   #viewActiveUnsub: (() => void) | null = null
   #viewActive = signal(false)
+  #keepsControlsUnsub: (() => void) | null = null
+  #keepsControls = signal(false)
   readonly #IDLE_DELAY = 3000
 
   // ── swipe-to-go-back gesture ────────────────────────────
@@ -1416,9 +1419,32 @@ export class ControlsBarElement extends HTMLElement {
     // deterministic vibrant color from tag name — no grays
     return tagNameToColor(name)
   }
-  readonly visible = computed(() => !this.#touchDragging() && !this.#viewActive())
+  // A view covering the canvas puts this bar away — that is what a takeover
+  // means. But a view can also cover the canvas and LEAVE THE BAR ITS EDGE:
+  // the chat window lays itself out against the same reservation every docked
+  // toolwindow does (`--hc-controls-<side>`), so there is a bar-shaped strip it
+  // never paints on. Hiding the bar there took away every control on it for as
+  // long as a conversation was open, and left only the bar's own edge line
+  // showing — a stray rule down the side of the window with nothing beside it.
+  //
+  // So the view says which kind it is, by holding `view:keeps-controls`
+  // (owner-counted, same as `view:active`). Nothing here knows any window's
+  // name; a view that leaves room keeps the bar, and any that does not still
+  // takes the screen whole.
+  readonly visible = computed(() =>
+    !this.#touchDragging() && (!this.#viewActive() || this.#keepsControls()))
+
+  /** Kept on screen WHILE a view covers the canvas — the bar is standing beside
+   *  a window that reserved its edge, not on the bare hive. Its own band
+   *  (59999–60003) sits under the docked-window band (100002+), which is right
+   *  when the bar is chrome ON the canvas and wrong here: the rail is visible
+   *  and pressable, but anything it opens anchored to itself would render
+   *  behind the very window it is standing beside. Lifted only for as long as
+   *  that is true. */
+  readonly overView = computed(() => this.#viewActive() && this.#keepsControls())
   readonly roomOpen = this.#roomOpen.asReadonly()
   readonly beesVisible = this.#beesVisible.asReadonly()
+  readonly agentsVisible = this.#agentsVisible.asReadonly()
   readonly showHidden = this.#showHidden.asReadonly()
   readonly voiceActive = signal(false)
   readonly voiceSupported = voiceInputSupported()
@@ -1469,6 +1495,11 @@ export class ControlsBarElement extends HTMLElement {
     // reaches an icon. On the host (not the list) because the list is
     // created and destroyed by the mode/dock branches.
     this.#installClickSwallow()
+
+    // Participant chrome, restored before the renderer mounts. EffectBus
+    // replays this value to a late AgentBeeDrone, so boot never flashes agents
+    // that the participant has chosen to hide.
+    EffectBus.emit('render:set-agents-visible', { visible: this.#agentsVisible() })
 
     // Hand the zoom drone this page's partial-pin hold, so every fit path —
     // including resize refits that originate inside the drone — respects
@@ -1668,6 +1699,10 @@ export class ControlsBarElement extends HTMLElement {
       this.#viewActive.set(active)
     })
 
+    this.#keepsControlsUnsub = EffectBus.on<{ active: boolean }>('view:keeps-controls', ({ active }) => {
+      this.#keepsControls.set(active)
+    })
+
     this.#tagsUnsub = EffectBus.on<{ tags: { name: string; count: number }[] }>('render:tags', ({ tags }) => {
       // sort by hue so tags form a rainbow gradient
       const sorted = [...tags].sort((a, b) => extractHue(this.tagColor(a.name)) - extractHue(this.tagColor(b.name)))
@@ -1826,6 +1861,64 @@ export class ControlsBarElement extends HTMLElement {
     // fallback value, which a `0px` would override.
     if (leftTop) root.style.setProperty('--hc-controls-left-top', leftTop)
     else root.style.removeProperty('--hc-controls-left-top')
+    this.#paintControlsEdge(side, left, right, stage?.offsetTop ?? 0)
+  }
+
+  // ── THE BAR'S OWN EDGE, WHICH NOTHING GETS TO COVER ─────────────────
+  //
+  // A docked bar closes itself against the canvas with a 1px border on its
+  // inner side, and that line kept disappearing the moment anything opened
+  // beside it. The border belongs to the rail, so it paints in the BAR's
+  // stacking context (z-index 59999) — and a tool window docking flush against
+  // it paints at 100002, with a drop shadow tens of pixels wide. The window
+  // never covers the bar's BOX (it starts at the reservation this same measure
+  // publishes), but its shadow washes straight over that one pixel, and a 1px
+  // line under a 60px blur is gone.
+  //
+  // Raising the whole bar over the panels would fix it and break more: things
+  // are meant to be able to cover the bar (a takeover, a modal). So only the
+  // LINE is lifted — one fixed, pointer-transparent pixel at the bar's inner
+  // edge, above the docked-window band. It is the bar's edge, drawn where
+  // nothing can put anything on top of it.
+  //
+  // Body-level rather than a pseudo-element for exactly that reason: a child
+  // of the rail shares the rail's stacking context and would be painted over
+  // with it.
+  #edgeLine: HTMLDivElement | null = null
+
+  #paintControlsEdge(side: 'left' | 'right' | null, left: number, right: number, top: number): void {
+    // Undocked, mobile, or torn down: no edge to draw. The floating pill closes
+    // itself with its own border on all four sides and reserves nothing.
+    // Nothing measured yet is the same as nothing docked: a line at -1px is a
+    // line off the screen, and one drawn before the rail has a width would sit
+    // wherever the fallback put it.
+    const edge = side === 'left' ? left : right
+    if (!side || this.isMobile() || edge <= 0) {
+      this.#edgeLine?.remove()
+      this.#edgeLine = null
+      return
+    }
+    const line = this.#edgeLine ?? document.createElement('div')
+    if (!this.#edgeLine) {
+      line.className = 'hc-controls-edge'
+      line.setAttribute('aria-hidden', 'true')
+      line.style.cssText =
+        'position:fixed;width:1px;pointer-events:none;z-index:100003;' +
+        'background:color-mix(in srgb, var(--md-outline-variant) 70%, transparent);'
+      document.body.appendChild(line)
+      this.#edgeLine = line
+    }
+    // The rail starts below the header and runs to the bottom; the same top the
+    // reservation publishes, so the line and the panels beside it agree.
+    line.style.top = `${Math.round(Math.max(0, top))}px`
+    line.style.bottom = '0'
+    if (side === 'left') {
+      line.style.left = `${Math.round(left) - 1}px`
+      line.style.right = 'auto'
+    } else {
+      line.style.right = `${Math.round(right) - 1}px`
+      line.style.left = 'auto'
+    }
   }
 
   #observeControlsEdge(): void {
@@ -1886,6 +1979,8 @@ export class ControlsBarElement extends HTMLElement {
     document.documentElement.style.setProperty('--hc-controls-left', '0px')
     document.documentElement.style.setProperty('--hc-controls-right', '0px')
     document.documentElement.style.removeProperty('--hc-controls-left-top')
+    this.#edgeLine?.remove()
+    this.#edgeLine = null
     window.removeEventListener('resize', this.#onResize)
     document.removeEventListener('fullscreenchange', this.#fullscreenHandler)
     window.removeEventListener('pointermove', this.#onActivity)
@@ -1910,6 +2005,7 @@ export class ControlsBarElement extends HTMLElement {
     this.#layoutModeUnsub?.()
     this.#touchDraggingUnsub?.()
     this.#viewActiveUnsub?.()
+    this.#keepsControlsUnsub?.()
     this.#beesUnsub?.()
     this.#voiceActiveUnsub?.()
     this.#showHiddenUnsub?.()
@@ -2969,6 +3065,13 @@ export class ControlsBarElement extends HTMLElement {
     EffectBus.emit('render:set-bees-visible', { visible: next })
   }
 
+  readonly toggleAgents = (): void => {
+    const next = !this.#agentsVisible()
+    this.#agentsVisible.set(next)
+    localStorage.setItem('hc:agents-visible', String(next))
+    EffectBus.emit('render:set-agents-visible', { visible: next })
+  }
+
   // ── show hidden items ────────────────────────────────
 
   readonly toggleShowHidden = (): void => {
@@ -3378,6 +3481,7 @@ export class ControlsBarElement extends HTMLElement {
     if (!this.tourMenuOpen()) return null
     const menu = document.createElement('div')
     menu.className = 'tour-menu'
+    menu.classList.toggle('over-view', this.overView())
     menu.style.left = `${this.tourMenuPos().x}px`
     menu.style.top = `${this.tourMenuPos().y}px`
     menu.setAttribute('role', 'menu')
@@ -3429,6 +3533,7 @@ export class ControlsBarElement extends HTMLElement {
     if (!this.homeMenuOpen()) return null
     const menu = document.createElement('div')
     menu.className = 'tour-menu home-menu'
+    menu.classList.toggle('over-view', this.overView())
     menu.style.left = `${this.homeMenuPos().x}px`
     menu.style.top = `${this.homeMenuPos().y}px`
     menu.setAttribute('role', 'menu')
@@ -3477,6 +3582,7 @@ export class ControlsBarElement extends HTMLElement {
     if (!this.fitMenuOpen()) return null
     const menu = document.createElement('div')
     menu.className = 'fit-menu'
+    menu.classList.toggle('over-view', this.overView())
     menu.style.left = `${this.fitMenuPos().x}px`
     menu.style.top = `${this.fitMenuPos().y}px`
     menu.setAttribute('role', 'menu')
@@ -3583,6 +3689,26 @@ export class ControlsBarElement extends HTMLElement {
       crumb.append(this.#separator(), install)
     }
     return crumb
+  }
+
+  #renderAgentVisibilityToggle(): HTMLButtonElement {
+    const visible = this.agentsVisible()
+    const key = visible ? 'controls.hide-agents' : 'controls.show-agents'
+    const label = this.#t(key)
+    const toggle = this.#button(
+      'agent-visibility-toggle',
+      label,
+      visible ? 'visibility' : 'visibility_off',
+      () => this.toggleAgents(),
+    )
+    toggle.classList.toggle('rail-left', this.dockSide() === 'left')
+    toggle.classList.toggle('agents-hidden', !visible)
+    toggle.setAttribute('aria-pressed', String(!visible))
+    toggle.title = label
+    const text = document.createElement('span')
+    text.textContent = label
+    toggle.appendChild(text)
+    return toggle
   }
 
   #renderTags(): HTMLElement | null {
@@ -3832,6 +3958,7 @@ export class ControlsBarElement extends HTMLElement {
     const dock = this.dockSide()
     const position = this.pillPos()
     stage.classList.toggle('faded', !this.visible())
+    stage.classList.toggle('over-view', this.overView())
     stage.classList.toggle('positioned', !!position && !mobile && !dock)
     stage.classList.toggle('dock-left', dock === 'left' && !mobile)
     stage.classList.toggle('dock-right', dock === 'right' && !mobile)
@@ -3880,7 +4007,7 @@ export class ControlsBarElement extends HTMLElement {
     // This replaces the app template's former [style.visibility] binding.
     // Full-screen views suppress the whole control surface (rail, tags and
     // breadcrumb), while the pill's own faded class still handles touch drag.
-    this.style.visibility = this.#viewActive() ? 'hidden' : ''
+    this.style.visibility = this.#viewActive() && !this.#keepsControls() ? 'hidden' : ''
     const oldList = this.querySelector<HTMLElement>('.controls-row')
     const scrollTop = oldList?.scrollTop ?? 0
     const scrollLeft = oldList?.scrollLeft ?? 0
@@ -3900,6 +4027,7 @@ export class ControlsBarElement extends HTMLElement {
     if (tour) fragment.appendChild(tour)
     if (home) fragment.appendChild(home)
     if (fit) fragment.appendChild(fit)
+    fragment.appendChild(this.#renderAgentVisibilityToggle())
     fragment.appendChild(this.#renderBreadcrumb())
     const tags = this.#renderTags()
     if (tags) fragment.appendChild(tags)

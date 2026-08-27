@@ -27,6 +27,42 @@ button:focus:not(:focus-visible) {
 
 // ── breadcrumb (below header, right-aligned) ────────────
 
+// Agent visibility lives at the seam between the command line and the left
+// control rail: it describes what is painted on the hive, but is useful often
+// enough that it should not be buried in the rail's edit mode. Text makes the
+// state explicit; the compact cold-chrome treatment keeps it subordinate to
+// both pieces of primary chrome.
+.agent-visibility-toggle {
+  position: fixed;
+  top: max(
+    calc(2.75rem * var(--hc-header-zoom, 1.0)),
+    calc(var(--hc-header-bottom, 0px) + 0.35rem)
+  );
+  left: 0.7rem;
+  z-index: 59999;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  padding: 0.22rem 0.42rem;
+  border: 1px solid color-mix(in srgb, var(--md-outline-variant) 55%, transparent);
+  border-radius: var(--hc-radius-floating, 4px);
+  background: color-mix(in srgb, var(--md-surface-c-low) 82%, transparent);
+  color: color-mix(in srgb, var(--md-on-surface) 62%, transparent);
+  font-family: var(--hc-mono);
+  font-size: 0.64rem;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+
+  &.rail-left { left: calc(#{$rail-width} + 0.45rem); }
+  .mat-sym { font-size: 0.9rem; }
+  &:hover, &:focus-visible { color: var(--md-on-surface); }
+  &.agents-hidden { color: rgba(126, 182, 214, 0.9); }
+
+  @media (max-width: 599px), (max-height: 449px) { display: none; }
+}
+
 .breadcrumb-top {
   position: fixed;
   // Dock below the header. The static term tracks the header size
@@ -175,13 +211,34 @@ button:focus:not(:focus-visible) {
 .tag-float {
   position: fixed;
   bottom: 0.45rem;
-  left: 0.7rem;
+  // BESIDE AN OPEN TOOLWINDOW, NOT UNDER IT. The strip is position:fixed
+  // chrome like the breadcrumb and the undo/redo corner, so it reads the
+  // reserved edges (core/viewport-inset-vars.ts) rather than the raw
+  // viewport: a right-docked panel took the right end of the row and painted
+  // straight over the tags that ran under it. The control bar itself stays
+  // pinned — panels fit around the bar — but the strip is not the bar.
+  // ONE START, DECLARED ONCE. Both variants set only this; the width below is
+  // written against it, so the row's two ends can never be computed from
+  // different assumptions about where it begins.
+  --tag-left: calc(0.7rem + var(--hc-inset-left, 0px));
+  left: var(--tag-left);
   // Hugs its content and grows rightward only as far as the free width — so
   // the arrow ends up beside the last tag, and the opened-out surface is only
   // as wide as the tags it holds instead of a mostly-empty full-width bar.
-  // The max-width is what keeps a long list off the undo/redo corner.
+  //
+  // THE ROW ENDS WHERE THE CORNER BEGINS, and the corner is MEASURED
+  // (`--hc-actions-width`, published by edit-actions) rather than guessed at
+  // 12rem. The undo/redo cluster hugs an open toolwindow's edge — it carries
+  // the same `--hc-inset-right` — so reserving its true width is what puts
+  // the tags neatly beside the panel instead of a corner's worth short of it.
+  // 1.275rem = the cluster's own 0.675rem edge offset + the gap between them.
   width: fit-content;
-  max-width: calc(100vw - 0.7rem - #{$actions-corner});
+  max-width: calc(
+    100vw - var(--tag-left)
+    - var(--hc-inset-right, 0px)
+    - var(--hc-actions-width, #{$actions-corner})
+    - 1.275rem
+  );
   // border-box or the opened-out surface's padding is ADDED to max-width and
   // the panel overhangs the corner it was told to keep clear of.
   box-sizing: border-box;
@@ -228,9 +285,15 @@ button:focus:not(:focus-visible) {
 .tag-float:not(.expanded) .tag-strip { max-height: calc(1.35em + 0.2rem); }
 
 // Left-docked menu: start the row just inside the rail rather than under it.
+// The rail's LIVE inner edge (`--hc-controls-left`, published by
+// #measureControlsEdge) rather than the static width, floored at it so a beat
+// before the first measurement never starts the row under the rail. A
+// left-docked panel is a second obstruction and is added on top; the width
+// follows from `--tag-left` with no second formula to keep in step.
 .tag-float.rail-left {
-  left: calc(#{$rail-width} + 0.85rem);
-  max-width: calc(100vw - #{$rail-width} - 0.85rem - #{$actions-corner});
+  --tag-left: calc(
+    max(var(--hc-controls-left, 0px), #{$rail-width}) + 0.85rem + var(--hc-inset-left, 0px)
+  );
 }
 
 // ── opened out ────────────────────────────────────────────
@@ -406,6 +469,15 @@ button:focus:not(:focus-visible) {
     }
   }
 
+  // STANDING BESIDE A WINDOW, NOT UNDER THE CANVAS'S CHROME. A view that keeps
+  // this bar (`view:keeps-controls`) has laid itself out against the edge the
+  // bar reserves, so the two never share a pixel — but the bar's band (60000)
+  // is below the docked-window band (100002), and the window's shadow and its
+  // anchored surfaces would still wash over the rail. Lifted for exactly as
+  // long as such a view is open, and no longer: the ordinary case is chrome ON
+  // the canvas, which a takeover is meant to be able to cover.
+  &.over-view { z-index: 100004; }
+
   // When the user has drag-moved the pill, drop the bottom/transform default
   // and honor explicit [style.left] / [style.top] bindings.
   &.positioned {
@@ -470,6 +542,15 @@ button:focus:not(:focus-visible) {
   // clears the header bottom at any size: 2.8rem × the active header zoom
   top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
   bottom: 0;
+
+  // …EXCEPT when the rail is standing beside a view that kept it. The gap at
+  // the top is there to clear the header bar, and the shell hides the header
+  // for exactly the same `view:active` that put us here — so the gap clears
+  // nothing and shows a thumbnail-sized square of hive above the rail, which
+  // reads as a hole rather than as the hive. Run to the top instead; the
+  // reservation follows, because `--hc-controls-left-top` is measured from
+  // this box (and the height change is what re-measures it).
+  &.over-view { top: 0; }
   transform: none;
   align-items: stretch; // let the rail fill the full height
 
@@ -1638,7 +1719,11 @@ button:focus:not(:focus-visible) {
     .dcp-icon { font-size: 2.2rem; }
   }
 
-  .tag-float { max-width: 28rem; }
+  // NO WIDTH CAP HERE. A 27" screen used to stop the pheromone row at 28rem,
+  // which read as the row giving up half a monitor short of the corner it was
+  // running toward. The base rule already ends it at the MEASURED undo/redo
+  // cluster and at whatever a toolwindow reserved, so on a wide screen it does
+  // what it does on every other one: run until something is actually there.
 }
 
 // The breadcrumb's 13" laptop-band shift is folded into `--hc-header-zoom`,
@@ -1674,6 +1759,12 @@ button:focus:not(:focus-visible) {
 // pill so it reads as chrome, not as content: cold, hairline, no glow. Fixed
 // positioning is set inline from the button's rect (see the template comment)
 // because the rail scrolls and clips.
+
+// Anchored to a rail button but opening INBOARD, over whatever is beside the
+// bar — so a lifted rail has to lift its menus with it, or pressing a button on
+// a visible bar opens a menu nobody can see.
+.tour-menu.over-view,
+.fit-menu.over-view { z-index: 100005; }
 
 .tour-menu {
   position: fixed;

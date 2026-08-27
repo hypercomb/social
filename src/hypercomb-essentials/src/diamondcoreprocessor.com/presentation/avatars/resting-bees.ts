@@ -91,3 +91,11 @@ export const restingBees = (
   }
   return out
 }
+
+/**
+ * The conversation behind a resting bee's id, or `''` for an id that is not
+ * one. The inverse of the `chat:<convoId>` key minted above, spelled here so
+ * the press that opens the talk can never drift from the key that names it.
+ */
+export const restingConvoId = (id: string): string =>
+  id.startsWith('chat:') ? id.slice('chat:'.length) : ''

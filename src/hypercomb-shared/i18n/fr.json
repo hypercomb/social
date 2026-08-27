@@ -102,7 +102,7 @@
   "providers.search": "Rechercher fournisseurs et modèles",
   "providers.empty": "Aucun résultat",
   "providers.tab.subscription": "Abonnements",
-  "providers.tab.api": "Requêtes API",
+  "providers.tab.api": "API de chat",
   "providers.tab.swarm": "Essaim",
   "providers.tabHint.subscription": "Un abonnement que vous payez déjà. Une session CLI lancée sur cette machine répond avec son propre compte — et ce sont les seuls répondants qui peuvent lire votre hive.",
   "providers.tabHint.api": "Facturé à la requête avec la clé que vous collez ici. La clé reste dans ce navigateur, et l’endpoint où elle irait est affiché avant que vous la colliez.",

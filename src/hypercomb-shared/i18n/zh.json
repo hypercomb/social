@@ -102,7 +102,7 @@
   "providers.search": "搜索提供方和模型",
   "providers.empty": "没有匹配项",
   "providers.tab.subscription": "订阅",
-  "providers.tab.api": "API 请求",
+  "providers.tab.api": "聊天 API",
   "providers.tab.swarm": "蜂群",
   "providers.tabHint.subscription": "你已经在付费的套餐。运行在这台机器上的 CLI 会话用它自己的账户作答——也只有这类响应者能读取你的蜂巢。",
   "providers.tabHint.api": "按请求计费，用你在这里粘贴的密钥。密钥留在本浏览器中，它将要发往的端点会在你粘贴之前先显示出来。",

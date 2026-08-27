@@ -292,6 +292,53 @@ export class AgentRegistry extends EventTarget {
     return this.#agents.size
   }
 
+  // ── THE RESTING LANE ─────────────────────────────────────────────────
+  //
+  // A tile that has been TALKED TO keeps a bee whether or not a question is
+  // out (presentation/avatars/resting-bees.ts). Those bees are not WORK:
+  // nothing is running under them, so the watchdog above must never see them
+  // — it would report furniture silent after four minutes and rogue after
+  // forty-five. Hence a second map: never in `list()`, never swept, never
+  // finished.
+  //
+  // They are still agents, though, and anything holding an id has to be able
+  // to resolve one — that is what `find` is for. Kept privately by the drone
+  // instead, the panel a press opens had no record to render and returned in
+  // silence: a bee that answers a click with nothing.
+  readonly #resting = new Map<string, Agent>()
+
+  /** Replace the resting lane wholesale. The derivation is a pure function of
+   *  the thread list (`restingBees`), so the whole set is re-derived at once
+   *  rather than patched — and a re-derivation that lands the same set is
+   *  SILENT, so a burst of thread writes does not repaint the hive. */
+  rest(agents: ReadonlyMap<string, Agent>): void {
+    const same = agents.size === this.#resting.size
+      && [...agents].every(([id, agent]) => this.#resting.get(id)?.updatedAt === agent.updatedAt)
+    if (same) return
+    this.#resting.clear()
+    for (const [id, agent] of agents) this.#resting.set(id, agent)
+    this.#changed()
+  }
+
+  /** Every resting agent, oldest first. Separate from `list()` on purpose —
+   *  callers that mean "what is running" must not have to filter. */
+  resting(): Agent[] {
+    return [...this.#resting.values()].sort((a, b) => a.startedAt - b.startedAt)
+  }
+
+  /** One agent from EITHER lane. WORK FIRST: a resting bee and the working
+   *  one that wakes from it share an id, and the working record is the truth
+   *  the moment a question is out. */
+  find(id: string): Agent | undefined {
+    return this.#agents.get(id) ?? this.#resting.get(id)
+  }
+
+  /** Is this id resting rather than working? Only while the work lane has
+   *  nothing under it. */
+  isResting(id: string): boolean {
+    return !this.#agents.has(id) && this.#resting.has(id)
+  }
+
   /** Read the asks already sitting in the pool, so a reload doesn't lose the
    *  bees. Idempotent and idle-scheduled — the render layer calls it once the
    *  hive is up. */

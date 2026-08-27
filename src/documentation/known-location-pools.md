@@ -131,6 +131,23 @@ Marks-first, with structure as local scaffolding — not the reverse.
   layers by a cold client, so by the optimize-phase litmus it is state,
   gets its own pool, and is never minted from the optimize phase.
 
+## Design example: published heuristic results
+
+The [heuristic signature library](heuristic-signature-library.md) applies the
+same pointer pattern to precomputed facts. `sign('heuristics:results')` maps a
+canonical computation signature—algorithm plus ordered operand signatures—to
+an `answerSig`; the exact answer bytes live at
+`sign('heuristics:heap')/<answerSig>`, keeping mined payloads out of the hive
+root. `sign('heuristics:lists')` points to signed lists that select
+the currently recommended algorithm signatures. Updating a list never
+rewrites an old result: a new algorithm signature produces a new key.
+
+These pools are distributable indexes, not truth. A receiver verifies the
+resource bytes and recomposes the key from the envelope before accepting a
+mapping. Pool position resolves the record kind locally; signed heuristic
+marks and publisher attestations provide the portable classification and
+trust signals required across a swarm.
+
 ## Worked example: hives (NOT BUILT — design sketch; Jaime, 2026-07-21)
 
 - Pool: `sign('hives:names')` — never bare `'hives'` (the ratchet

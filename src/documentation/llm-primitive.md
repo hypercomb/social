@@ -33,6 +33,12 @@ A traditional graph edge is binary: A → B. A hyperedge is N-ary: {A, B, C} →
 
 ## Why This Matters
 
+The [heuristic signature library](heuristic-signature-library.md) moves common
+context discovery ahead of this request path. Before an LLM transform spends
+tokens or compute inspecting a resource, it can resolve results already mined
+for the exact algorithm and content signatures—locally, from the hive, or
+from a verifying swarm cache.
+
 In a regular graph, sharing context between nodes requires explicit pairwise connections — O(n²) links. In a hypergraph, a single hyperedge captures the relationship between all participants at once. The LLM is the transform function at the center of the hyperedge, turning many inputs into many outputs in one atomic operation.
 
 Because the output is itself a signature, it can participate in the next hyperedge. The hypergraph grows through composition:

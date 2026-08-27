@@ -245,6 +245,46 @@ type HostAiLike = {
   setHost?(domain: string): void
 }
 
+type PolicyLike = {
+  designate?(need: { tier?: string; readsHive?: boolean; streaming?: boolean }): DesignationLike | undefined
+}
+
+type DesignationLike = {
+  readonly providerId: string
+  readonly label: string
+  readonly vendor: string
+  readonly tier: string
+  readonly model: string
+  readonly name: string
+}
+
+type RoutedChunkLike = {
+  readonly text: string
+  readonly providerId: string
+  readonly providerLabel: string
+  readonly vendor: string
+  readonly model: string
+}
+
+type LlmRouterLike = {
+  ready?(call?: {
+    providerId?: string
+    model?: string
+    preferModel?: string
+    need?: { tier?: string; streaming?: boolean }
+  }): boolean
+  stream?(call: {
+    providerId?: string
+    model?: string
+    preferModel?: string
+    need?: { tier?: string; streaming?: boolean }
+    messages: readonly { role: 'user' | 'assistant'; content: string }[]
+    system?: string
+    maxTokens?: number
+    signal?: AbortSignal
+  }): AsyncGenerator<RoutedChunkLike>
+}
+
 /** The tile-context module (assistant/tile-context.ts). `branchesFor` is the
  *  cheap synchronous count for the status chip; `signaturesFor` is the resolved
  *  union an ask carries. */
@@ -262,10 +302,6 @@ type DroppedTile = { readonly name: string; readonly path: string; readonly sig:
 
 // ── constants, verbatim from the component ────────────────────────────────
 
-/** Model hints the bridge understands. The responder maps the name to a real
- *  model id (scripts/bridge/drain-tick.cjs). Keep aligned with that map. */
-const MODELS = ['opus', 'sonnet', 'haiku', 'fable'] as const
-
 /** The command line's bracket syntax passes the SHORT op — `[tile]/o ask me`
  *  sets the model to `o`. Unmapped, that is silently not a model. */
 const MODEL_ALIASES: Record<string, string> = { o: 'opus', s: 'sonnet', h: 'haiku', f: 'fable' }
@@ -276,6 +312,17 @@ const MODEL_ALIASES: Record<string, string> = { o: 'opus', s: 'sonnet', h: 'haik
  *  `conversationModel`). chat-thread.ts names this file as the writer. */
 const MODEL_KEY = 'hc:chat-models'
 const DEFAULT_MODEL = 'opus'
+const RAIL_WIDTH_KEY = 'hc:chat-rail-width'
+const RAIL_MIN = 180
+const RAIL_MAX = 640
+const CONVERSATION_MIN = 260
+
+const readRailWidth = (): number => {
+  try {
+    const raw = Number(localStorage.getItem(RAIL_WIDTH_KEY) ?? '')
+    return Number.isFinite(raw) && raw >= RAIL_MIN ? Math.min(RAIL_MAX, raw) : 0
+  } catch { return 0 }
+}
 
 /** WHAT THE SHALLOW TIER ANSWERS WITH. WHICH TIER will answer is decided at
  *  send time by `#bridgeUp` — so the bee is branded from the tier that is
@@ -289,6 +336,7 @@ const TRANSCRIPT_TURNS = 12
  *  written down. */
 const DRAFT_HOLD_MS = 500
 const HOST_AI_IOC_KEY = '@diamondcoreprocessor.com/HostAi'
+const LLM_ROUTER_IOC_KEY = '@diamondcoreprocessor.com/LlmRouter'
 const THREADS_IOC_KEY = '@diamondcoreprocessor.com/ChatThreads'
 const QUEEN_IOC_KEY = '@diamondcoreprocessor.com/LlmQueenBee'
 const STORE_IOC_KEY = '@hypercomb.social/Store'
@@ -339,6 +387,7 @@ const FIRST_REPLY_KEY = 'hc:bridge-first-reply'
 
 /** This window's name in the owner-counted `view:active` mode. */
 const SURFACE_OWNER = 'chat-window'
+const KEEPS_CONTROLS = 'view:keeps-controls'
 
 /** The commands the checklist hands out — copy targets, never typed, never
  *  translated (they are literal shell lines). */
@@ -618,15 +667,20 @@ const resolveEntryImageUrl = async (
 // a global namespace and a document-level sheet must not squat a bare one.
 // Angular's build autoprefixed; `-webkit-backdrop-filter` is written by hand.
 const CSS = `
-${SURFACE_NAME}{position:fixed;inset:0;right:0!important;width:auto!important;max-width:none;margin:0;z-index:100002;pointer-events:auto;display:none;flex-direction:column;font-size:calc(1rem * var(--hc-panel-scale,1));
+${SURFACE_NAME}{position:fixed;inset:0;left:var(--hc-controls-left,0px);right:var(--hc-controls-right,0px)!important;width:auto!important;max-width:none;margin:0;z-index:100002;pointer-events:auto;display:none;flex-direction:column;font-size:calc(1rem * var(--hc-panel-scale,1));
   --hc-window-accent:#7eb6d6;--hc-window-radius-control:var(--hc-radius-control);--hc-window-radius-card:var(--hc-radius-card);--hc-window-radius-floating:var(--hc-radius-floating);
   background:rgba(13,15,21,.975);backdrop-filter:blur(14px) saturate(1.04);-webkit-backdrop-filter:blur(14px) saturate(1.04);border-radius:0;
   border-right:none;border-left:1px solid rgba(126,182,214,.38);font-family:var(--hc-mono,system-ui);color:#eef2f5;outline:none;
   padding-left:var(--chat-rail-width,clamp(15rem,22vw,20rem));box-shadow:0 18px 60px rgba(0,0,0,.55)}
 ${SURFACE_NAME}.open{display:flex}
-${SURFACE_NAME} .chat-body{display:contents}
+${SURFACE_NAME} .chat-body{flex:1;min-height:0;display:flex;align-items:stretch}
+${SURFACE_NAME} .chat-reading{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
+${SURFACE_NAME} .chat-providers-host{flex:0 0 auto;width:var(--hc-providers-width,0px);min-width:0;display:flex;overflow:visible}
 ${SURFACE_NAME} .chat-rail{position:absolute;top:0;bottom:0;left:0;width:var(--chat-rail-width,clamp(15rem,22vw,20rem));display:flex;flex-direction:column;border-right:1px solid rgba(126,182,214,.18);background:rgba(3,5,9,.55)}
-@media (max-width:700px){${SURFACE_NAME}{padding-left:0}${SURFACE_NAME} .chat-rail{display:none}}
+${SURFACE_NAME} .chat-rail-grip{position:absolute;top:0;bottom:0;left:var(--chat-rail-width,clamp(15rem,22vw,20rem));width:8px;margin-left:-4px;z-index:3;cursor:col-resize;background:transparent;transition:background 120ms ease}
+${SURFACE_NAME} .chat-rail-grip:hover,${SURFACE_NAME} .chat-rail-grip:focus-visible,${SURFACE_NAME} .chat-rail-grip.dragging{background:rgba(126,182,214,.35)}
+${SURFACE_NAME} .chat-rail-grip:focus-visible{outline:none}
+@media (max-width:700px){${SURFACE_NAME}{padding-left:0}${SURFACE_NAME} .chat-rail,${SURFACE_NAME} .chat-rail-grip{display:none}}
 ${SURFACE_NAME} .chat-header{flex:0 0 auto;box-sizing:border-box;display:flex;align-items:center;gap:.4em;height:2.875rem;min-height:2.875rem;padding:0 .75rem;line-height:1;background:linear-gradient(180deg,rgba(255,255,255,.018),rgba(255,255,255,.006));border-bottom:1px solid rgba(126,182,214,.25);position:relative}
 ${SURFACE_NAME} .chat-header>button{box-sizing:border-box;display:inline-grid;place-items:center;min-width:1.75rem;height:1.75rem;padding:0 .25rem;border-radius:var(--hc-radius-control);line-height:1;transition:color 120ms ease,background-color 120ms ease,border-color 120ms ease}
 ${SURFACE_NAME} .chat-header>button:hover{background-color:rgba(255,255,255,.055)}
@@ -773,10 +827,10 @@ ${SURFACE_NAME} .chat-msg{max-width:min(92%,44em)}
 ${SURFACE_NAME} .chat-think{color:rgba(216,230,238,.55);animation:hc-chat-window-pulse 1.4s ease-in-out infinite}
 @keyframes hc-chat-window-pulse{0%,100%{opacity:.45}50%{opacity:1}}
 @media (prefers-reduced-motion:reduce){${SURFACE_NAME} .chat-think{animation:none}}
-${SURFACE_NAME} .chat-foot{flex:0 0 auto;padding:.55em .75em .7em;background:rgba(255,255,255,.015)}
-${SURFACE_NAME} .chat-status{display:flex;align-items:center;gap:.45em;min-width:0;padding-top:.5em;border-top:1px solid rgba(255,255,255,.07);font-size:.68em;color:rgba(255,255,255,.5)}
-${SURFACE_NAME} .chat-model{flex:0 0 auto;padding:.15em .2em;font:inherit;color:rgba(126,182,214,.95);background:rgba(126,182,214,.1);border:1px solid rgba(126,182,214,.3);border-radius:var(--md-shape-xs,4px);cursor:pointer}
-${SURFACE_NAME} .chat-where{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+${SURFACE_NAME} .chat-foot{flex:0 0 auto;padding:.55em calc(.75em + var(--hc-providers-width,0px)) .7em .75em;background:rgba(255,255,255,.015);transition:padding-right .16s ease}
+${SURFACE_NAME} .chat-answering{display:inline-flex;align-items:center;gap:.25em;flex:0 0 auto;margin-right:.65em;max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:.15em .35em;font:inherit;font-family:var(--hc-mono,monospace);color:rgba(126,182,214,.95);background:rgba(126,182,214,.1);border:1px solid rgba(126,182,214,.3);border-radius:var(--md-shape-xs,4px);cursor:pointer}
+${SURFACE_NAME} .chat-answering .mat-sym{font-size:1.15em;opacity:.75}
+${SURFACE_NAME} .chat-answering:hover{background:rgba(126,182,214,.18)}
 ${SURFACE_NAME} .chat-subject-tile{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--hc-mono,monospace);color:rgba(126,182,214,.95)}
 ${SURFACE_NAME} .chat-title-caret{flex:0 0 auto;font-size:1em;opacity:.6}
 ${SURFACE_NAME} .chat-list-tile{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--hc-mono,monospace);font-size:.82em;color:rgba(126,182,214,.95)}
@@ -878,10 +932,10 @@ ${SURFACE_NAME}.peeking .chat-header,${SURFACE_NAME}.peeking .chat-foot{pointer-
 ${SURFACE_NAME}.peeking .chat-header::before,${SURFACE_NAME}.peeking .chat-foot::before{content:'';position:absolute;inset:0;z-index:-1;background:rgba(6,10,16,.82);backdrop-filter:blur(10px) saturate(1.1);-webkit-backdrop-filter:blur(10px) saturate(1.1)}
 ${SURFACE_NAME}.peeking .chat-header::before{border-bottom:1px solid rgba(126,182,214,.28)}
 ${SURFACE_NAME}.peeking .chat-foot::before{border-top:1px solid rgba(126,182,214,.28)}
-${SURFACE_NAME} .chat-peek{flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:1.9em;height:1.9em;padding:0;border:1px solid transparent;border-radius:.35em;background:none;color:rgba(255,255,255,.55);cursor:pointer;transition:color .14s ease,background .14s ease,border-color .14s ease}
-${SURFACE_NAME} .chat-peek .mat-sym{font-size:1.05em}
-${SURFACE_NAME} .chat-peek:hover,${SURFACE_NAME} .chat-peek:focus-visible{color:rgba(126,182,214,.95);background:rgba(126,182,214,.12)}
-${SURFACE_NAME} .chat-peek.on{color:rgba(126,182,214,.95);background:rgba(126,182,214,.16);border-color:rgba(126,182,214,.4)}
+${SURFACE_NAME} .chat-peek,${SURFACE_NAME} .chat-providers{flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:1.9em;height:1.9em;padding:0;border:1px solid transparent;border-radius:.35em;background:none;color:rgba(255,255,255,.55);cursor:pointer;transition:color .14s ease,background .14s ease,border-color .14s ease}
+${SURFACE_NAME} .chat-peek .mat-sym,${SURFACE_NAME} .chat-providers .mat-sym{font-size:1.05em}
+${SURFACE_NAME} .chat-peek:hover,${SURFACE_NAME} .chat-peek:focus-visible,${SURFACE_NAME} .chat-providers:hover,${SURFACE_NAME} .chat-providers:focus-visible{color:rgba(126,182,214,.95);background:rgba(126,182,214,.12)}
+${SURFACE_NAME} .chat-peek.on,${SURFACE_NAME} .chat-providers.on{color:rgba(126,182,214,.95);background:rgba(126,182,214,.16);border-color:rgba(126,182,214,.4)}
 
 /* ── chat-look.scss — a shelf picture, full size, without leaving ──────── */
 ${SURFACE_NAME} .chat-box-look{flex:0 0 auto;display:block;padding:0;margin:0;border:0;background:none;line-height:0;cursor:zoom-in}
@@ -941,6 +995,7 @@ export class ChatWindowElement extends DockedPanelElement {
   #bridgeConfigured = isLocalClaudeBridgeConfigured()
   #hostConfigured = isParticipantAiHostConfigured()
   #bridgeUp = false
+  #providerReady = false
 
   /** THE visibility flag — the field `open`, `close`, the toggle and the
    *  session's park/unpark all read and write. */
@@ -966,7 +1021,12 @@ export class ChatWindowElement extends DockedPanelElement {
    *  that has left but not been picked up. */
   #pendingSig = ''
 
-  #model: string = DEFAULT_MODEL
+  /** An explicitly named model overrides policy; an empty model lets policy
+   *  designate the provider and model for the question. */
+  #model = ''
+  #modelExplicit = false
+  #designated: DesignationLike | null = null
+  #providersOpen = false
 
   /** An answer arriving a chunk at a time. Held apart from `#turns` because it
    *  is not a turn yet — it becomes one, once, when the stream closes. */
@@ -1033,6 +1093,7 @@ export class ChatWindowElement extends DockedPanelElement {
   #peeking = false
   #foldSuspendedViewport = false
   #surfaceWanted = false
+  #railWidth = readRailWidth()
 
   #dragOverReference = false
   #draggingRef: number | null = null
@@ -1073,6 +1134,7 @@ export class ChatWindowElement extends DockedPanelElement {
   #clipShelfEl: HTMLElement | null = null
   #headerSpaceEl: HTMLElement | null = null
   #peekBtn: HTMLButtonElement | null = null
+  #providersBtn: HTMLButtonElement | null = null
   #closeBtn: HTMLButtonElement | null = null
   #bodyEl: HTMLElement | null = null
   #lookEl: HTMLElement | null = null
@@ -1106,9 +1168,7 @@ export class ChatWindowElement extends DockedPanelElement {
   #footEl: HTMLElement | null = null
   #linkEl: HTMLElement | null = null
   #linkTextEl: HTMLElement | null = null
-  #statusEl: HTMLElement | null = null
-  #modelSelect: HTMLSelectElement | null = null
-  #whereEl: HTMLElement | null = null
+  #answeringEl: HTMLButtonElement | null = null
   #inputRowEl: HTMLElement | null = null
   /** THE COMPOSER. Created once per activation and never replaced. */
   #inputEl: HTMLTextAreaElement | null = null
@@ -1138,6 +1198,7 @@ export class ChatWindowElement extends DockedPanelElement {
     this.minWidth = 300
     this.maxWidth = 720
     this.defaultWidth = 400
+    this.defaultText = 1
     // `[hasReadingSurface]="true"` — the transcript is prose, so the settings
     // popover offers the reading-font row.
     this.hasReadingSurface = true
@@ -1170,7 +1231,14 @@ export class ChatWindowElement extends DockedPanelElement {
 
   // ── derived readings (Angular computeds, as methods) ─────────────────
 
-  #enabled(): boolean { return this.#bridgeConfigured || this.#hostConfigured }
+  #enabled(): boolean { return this.#providerReady || this.#bridgeConfigured || this.#hostConfigured }
+
+  #answering(): string { return this.#model || this.#designated?.model || DEFAULT_MODEL }
+
+  #answeringWhy(): string {
+    const chosen = this.#designated
+    return chosen ? `${chosen.label} · ${chosen.tier}` : ''
+  }
 
   #path(): string { return this.#here.length ? '/' + this.#here.join('/') : '/' }
 
@@ -1309,6 +1377,21 @@ export class ChatWindowElement extends DockedPanelElement {
     this.#hostConfigured = host ? !!host.configured : isParticipantAiHostConfigured()
   }
 
+  #refreshDesignation(): void {
+    const policy = get<PolicyLike>('@diamondcoreprocessor.com/LlmPolicyStore')
+    const need = { tier: 'fast', streaming: true }
+    this.#designated = policy?.designate?.(need) ?? null
+    const router = get<LlmRouterLike>(LLM_ROUTER_IOC_KEY)
+    this.#providerReady = !!router?.ready?.({
+      model: this.#modelExplicit ? this.#model || undefined : undefined,
+      preferModel: !this.#modelExplicit ? this.#model || undefined : undefined,
+      need,
+    })
+    if (this.#visible) this.#renderFoot()
+  }
+
+  openProviders(): void { EffectBus.emit('providers:open', {}) }
+
   /** A timeout that cannot outlive the element. */
   #after(ms: number, run: () => void): void {
     const id = setTimeout(() => { this.#timers.delete(id); run() }, ms)
@@ -1421,9 +1504,17 @@ export class ChatWindowElement extends DockedPanelElement {
       EffectBus.on<{ convoId?: string; text?: string; outcome?: string }>(
         'chat:host-done', payload => this.#onHostDone(payload)),
 
+      EffectBus.on('llm:policy-changed', () => this.#refreshDesignation()),
+
+      EffectBus.on<{ open?: boolean }>('providers:state', payload => {
+        this.#providersOpen = !!payload?.open
+        this.#renderHeader()
+      }),
+
       EffectBus.on<{ connected?: boolean }>('bridge:status', payload => {
         this.#bridgeConfigured = isLocalClaudeBridgeConfigured()
         this.#bridgeUp = !!payload?.connected
+        this.#refreshDesignation()
         this.#render()
       }),
 
@@ -1477,6 +1568,7 @@ export class ChatWindowElement extends DockedPanelElement {
     // A local-bridge participant keeps the existing boot-open behavior without
     // stealing command-line focus. Everyone else opens chat deliberately.
     this.#refreshAvailability()
+    this.#refreshDesignation()
     EffectBus.emit('chat:window-state', { open: this.#visible })
     if (this.#visible) {
       // #show() before the claim, so the DOM the claim describes exists.
@@ -1497,6 +1589,7 @@ export class ChatWindowElement extends DockedPanelElement {
       this.#hostConfigured = !!(value as HostAiLike | undefined)?.configured
       this.#render()
     })
+    window.ioc?.whenReady?.(LLM_ROUTER_IOC_KEY, () => this.#refreshDesignation())
   }
 
   override disconnectedCallback(): void {
@@ -1569,7 +1662,7 @@ export class ChatWindowElement extends DockedPanelElement {
     this.#branch = 'none'
     this.#railHost = null; this.#headerEl = null; this.#subjectEl = null
     this.#payloadEl = null; this.#clipBtn = null; this.#clipShelfEl = null
-    this.#headerSpaceEl = null; this.#peekBtn = null; this.#closeBtn = null
+    this.#headerSpaceEl = null; this.#peekBtn = null; this.#providersBtn = null; this.#closeBtn = null
     this.#bodyEl = null; this.#lookEl = null; this.#lookStamp = ''
     this.#setupEl = null; this.#setupCompleteEl = null; this.#setupChecklist = []
     this.#setupHostBlock = null; this.#setupSkipEl = null; this.#setupNoteEl = null
@@ -1578,7 +1671,7 @@ export class ChatWindowElement extends DockedPanelElement {
     this.#barEl = null; this.#goalEl = null; this.#listEl = null
     this.#threadWrapEl = null; this.#threadEl = null; this.#pillEl = null
     this.#footEl = null; this.#linkEl = null; this.#linkTextEl = null
-    this.#statusEl = null; this.#modelSelect = null; this.#whereEl = null
+    this.#answeringEl = null
     this.#inputRowEl = null; this.#inputEl = null; this.#sendBtn = null
     this.#emptyEl = null; this.#streamEl = null; this.#streamTextEl = null
     this.#waitEl = null; this.#waitTextEl = null; this.#waitClockEl = null
@@ -1653,13 +1746,21 @@ export class ChatWindowElement extends DockedPanelElement {
       // intent that was current when this call was made.
       if (active) {
         window.ioc?.whenReady?.(MODE_REGISTRY_IOC_KEY, value => {
-          if (this.#surfaceWanted) (value as ModeRegistryLike).enter('view:active', SURFACE_OWNER)
+          if (!this.#surfaceWanted) return
+          const late = value as ModeRegistryLike
+          late.enter('view:active', SURFACE_OWNER)
+          late.enter(KEEPS_CONTROLS, SURFACE_OWNER)
         })
       }
       return
     }
-    if (active) modes.enter('view:active', SURFACE_OWNER)
-    else modes.exit('view:active', SURFACE_OWNER)
+    if (active) {
+      modes.enter('view:active', SURFACE_OWNER)
+      modes.enter(KEEPS_CONTROLS, SURFACE_OWNER)
+    } else {
+      modes.exit('view:active', SURFACE_OWNER)
+      modes.exit(KEEPS_CONTROLS, SURFACE_OWNER)
+    }
   }
 
   // ── window / document listeners (added and removed by reference) ─────
@@ -1711,6 +1812,17 @@ export class ChatWindowElement extends DockedPanelElement {
     rail.setAttribute('aria-label', t('chat.rail', 'Your tiles, one conversation each'))
     this.#railHost = rail
 
+    const railGrip = el('div', 'chat-rail-grip')
+    railGrip.setAttribute('role', 'separator')
+    railGrip.setAttribute('aria-orientation', 'vertical')
+    railGrip.setAttribute('aria-label', t('chat.rail.resize', 'Resize the tiles rail'))
+    railGrip.title = t('chat.rail.resize', 'Resize the tiles rail')
+    railGrip.tabIndex = 0
+    railGrip.addEventListener('pointerdown', this.#startRailDrag)
+    railGrip.addEventListener('dblclick', () => this.#resetRailWidth())
+    railGrip.addEventListener('keydown', this.#onRailGripKey)
+    if (this.#railWidth) this.style.setProperty('--chat-rail-width', `${this.#railWidth}px`)
+
     const header = el('header', 'chat-header')
     header.append(sym('forum', 'mat-sym chat-glyph'))
 
@@ -1740,6 +1852,11 @@ export class ChatWindowElement extends DockedPanelElement {
     peek.addEventListener('click', () => this.togglePeek())
     this.#peekBtn = peek
 
+    const providers = button('chat-providers', 'providers')
+    providers.append(sym('hub'))
+    providers.addEventListener('click', () => this.openProviders())
+    this.#providersBtn = providers
+
     const close = button('chat-close', 'close')
     close.textContent = '×'
     close.addEventListener('click', () => this.close())
@@ -1748,7 +1865,7 @@ export class ChatWindowElement extends DockedPanelElement {
     // The close button must be the header's LAST child when activate() runs:
     // DockedPanelElement reads `header.lastElementChild` to size the gear's
     // inset and nudges that node over to make room for it.
-    header.append(subject, payload, space, peek, close)
+    header.append(subject, payload, space, peek, providers, close)
     this.#headerEl = header
 
     // `display: contents` — the setup section, the bar, the list, the thread
@@ -1758,9 +1875,12 @@ export class ChatWindowElement extends DockedPanelElement {
     // that reached for the panel's own children would take the base's resize
     // grip and settings gear with it.
     const body = el('div', 'chat-body')
-    this.#bodyEl = body
+    const reading = el('div', 'chat-reading')
+    const providersHost = el('div', 'chat-providers-host')
+    body.append(reading, providersHost)
+    this.#bodyEl = reading
 
-    this.append(rail, header, body)
+    this.append(rail, railGrip, header, body)
 
     // WHILE FOLDED, THE BARS ARE A FRAME AND THE HIVE IS WHAT IS BETWEEN THEM.
     // `hcDockInset="top"` on the header; the footer's `"bottom"` twin is
@@ -1797,16 +1917,67 @@ export class ChatWindowElement extends DockedPanelElement {
       const glyph = peek.querySelector('.mat-sym')
       if (glyph) glyph.textContent = this.#peeking ? 'unfold_more' : 'unfold_less'
     }
+    const providerLabel = this.#providersOpen
+      ? t('chat.providers.hide', 'Hide providers')
+      : t('chat.providers.show', 'Show providers')
+    if (this.#providersBtn) {
+      this.#providersBtn.title = providerLabel
+      this.#providersBtn.setAttribute('aria-label', providerLabel)
+      this.#providersBtn.setAttribute('aria-pressed', String(this.#providersOpen))
+      this.#providersBtn.classList.toggle('on', this.#providersOpen)
+    }
     if (this.#inputEl) {
       const placeholder = t('chat.placeholder', 'Ask anything…')
       this.#inputEl.placeholder = placeholder
       this.#inputEl.setAttribute('aria-label', placeholder)
     }
-    if (this.#modelSelect) {
-      const label = t('chat.model', 'Model')
-      this.#modelSelect.title = label
-      this.#modelSelect.setAttribute('aria-label', label)
+  }
+
+  #railBounds(): { min: number; max: number } {
+    const room = this.getBoundingClientRect().width - CONVERSATION_MIN
+    return { min: RAIL_MIN, max: Math.max(RAIL_MIN, Math.min(RAIL_MAX, room || RAIL_MAX)) }
+  }
+
+  #setRailWidth(next: number): void {
+    const { min, max } = this.#railBounds()
+    this.#railWidth = Math.round(Math.min(max, Math.max(min, next)))
+    this.style.setProperty('--chat-rail-width', `${this.#railWidth}px`)
+    try { localStorage.setItem(RAIL_WIDTH_KEY, String(this.#railWidth)) } catch { /* private mode */ }
+  }
+
+  readonly #startRailDrag = (event: PointerEvent): void => {
+    const grip = event.currentTarget as HTMLElement | null
+    const rail = this.#railHost
+    if (!grip || !rail) return
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = rail.getBoundingClientRect().width
+    grip.classList.add('dragging')
+    try { grip.setPointerCapture(event.pointerId) } catch { /* window listeners still work */ }
+    const move = (moved: PointerEvent): void => this.#setRailWidth(startWidth + moved.clientX - startX)
+    const up = (): void => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      grip.classList.remove('dragging')
     }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+  }
+
+  #resetRailWidth(): void {
+    this.#railWidth = 0
+    this.style.removeProperty('--chat-rail-width')
+    try { localStorage.removeItem(RAIL_WIDTH_KEY) } catch { /* private mode */ }
+  }
+
+  readonly #onRailGripKey = (event: KeyboardEvent): void => {
+    const step = event.shiftKey ? 40 : 12
+    const current = this.#railWidth || this.#railHost?.getBoundingClientRect().width || RAIL_MIN
+    if (event.key === 'ArrowLeft') { event.preventDefault(); this.#setRailWidth(current - step) }
+    else if (event.key === 'ArrowRight') { event.preventDefault(); this.#setRailWidth(current + step) }
+    else if (event.key === 'Home') { event.preventDefault(); this.#resetRailWidth() }
   }
 
   /** The rail. Created ONCE per window lifetime and re-mounted whenever the
@@ -2039,15 +2210,16 @@ export class ChatWindowElement extends DockedPanelElement {
     const want: 'setup' | 'chat' = this.#showSetup() ? 'setup' : 'chat'
     if (want !== this.#branch) {
       this.#footInset?.dispose(); this.#footInset = null
+      this.#footEl?.remove()
       body.replaceChildren()
       this.#rows.clear()
       this.#emptyEl = null; this.#streamEl = null; this.#streamTextEl = null
       this.#waitEl = null; this.#waitTextEl = null; this.#waitClockEl = null
-      this.#waitHintEl = null; this.#inputEl = null; this.#modelSelect = null
+      this.#waitHintEl = null; this.#inputEl = null
       this.#sendBtn = null; this.#barEl = null; this.#goalEl = null; this.#listEl = null
       this.#threadWrapEl = null; this.#threadEl = null; this.#pillEl = null
       this.#footEl = null; this.#linkEl = null; this.#linkTextEl = null
-      this.#statusEl = null; this.#whereEl = null; this.#inputRowEl = null
+      this.#answeringEl = null; this.#inputRowEl = null
       this.#setupEl = null; this.#setupCompleteEl = null; this.#setupChecklist = []
       this.#setupHostBlock = null; this.#setupSkipEl = null; this.#setupNoteEl = null
       this.#setupHeadingEl = null; this.#setupBodyEl = null; this.#wizardEl = null
@@ -2331,44 +2503,17 @@ export class ChatWindowElement extends DockedPanelElement {
 
     const foot = el('footer', 'chat-foot')
 
-    // Availability, named — FIRST, because whether an answer can come at all is
-    // read before which model would give it.
+    // What can answer, on one line: live state, actual model, and provider.
     const link = el('div', 'chat-link')
-    link.setAttribute('role', 'button')
-    link.tabIndex = 0
-    const connectBridge = (): void => {
-      if (this.#bridgeConfigured && !this.#bridgeUp) {
-        EffectBus.emit('claude-bridge:connect', {})
-      }
-    }
-    link.addEventListener('click', connectBridge)
-    link.addEventListener('keydown', event => {
-      if (event.key !== 'Enter' && event.key !== ' ') return
-      event.preventDefault()
-      connectBridge()
-    })
     const dot = el('span', 'chat-dot')
     dot.setAttribute('aria-hidden', 'true')
+    const answering = button('chat-answering', 'answering')
+    answering.addEventListener('click', () => this.openProviders())
     const linkText = el('span')
-    link.append(dot, linkText)
+    link.append(dot, answering, linkText)
     this.#linkEl = link
     this.#linkTextEl = linkText
-
-    // Context, REPORTED, under the rule.
-    const status = el('div', 'chat-status')
-    const select = el('select', 'chat-model')
-    select.dataset['hcRow'] = 'model'
-    for (const name of MODELS) {
-      const option = el('option', undefined, name)
-      option.value = name
-      select.append(option)
-    }
-    select.addEventListener('change', () => this.setModel(select.value))
-    const where = el('span', 'chat-where')
-    status.append(select, where)
-    this.#statusEl = status
-    this.#modelSelect = select
-    this.#whereEl = where
+    this.#answeringEl = answering
 
     const inputRow = el('div', 'chat-inputrow')
     // THE COMPOSER. Created here and NOWHERE else: from this line until the
@@ -2383,10 +2528,11 @@ export class ChatWindowElement extends DockedPanelElement {
     this.#inputRowEl = inputRow
     this.#inputEl = input
 
-    foot.append(link, status, inputRow)
+    foot.append(link, inputRow)
     this.#footEl = foot
 
-    body.append(bar, wrap, foot)
+    body.append(bar, wrap)
+    body.parentElement?.insertAdjacentElement('afterend', foot)
 
     // The footer's `hcDockInset="bottom"`, live only while folded away.
     this.#footInset = attachInset(foot, 'bottom')
@@ -2789,7 +2935,7 @@ export class ChatWindowElement extends DockedPanelElement {
         ? t('chat.unattended', 'Nothing is listening yet')
         : this.#bridgeUp
           ? t('chat.thinking', 'Thinking…')
-          : t('chat.queued', 'Queued — waiting for a Claude session to pick it up')
+          : t('chat.queued.wait', 'Queued — waiting for a session to pick it up')
     }
     if (this.#waitClockEl) this.#waitClockEl.textContent = this.#elapsedLabel()
 
@@ -2797,7 +2943,7 @@ export class ChatWindowElement extends DockedPanelElement {
     if (unattended) {
       const hint = this.#waitHintEl ?? el('p', 'chat-wait-hint')
       this.#waitHintEl = hint
-      hint.textContent = t('chat.unattended.hint',
+      hint.textContent = t('chat.unattended.hint.wait',
         'Your question is saved and will be answered the moment a Claude Code session connects. '
         + 'Start the broker, park a session and tell it to listen for hive asks — or withdraw the question below.')
       nodes.push(hint)
@@ -2836,44 +2982,23 @@ export class ChatWindowElement extends DockedPanelElement {
     const link = this.#linkEl
     if (link && this.#linkTextEl) {
       link.classList.toggle('waiting', !this.#bridgeUp)
-      link.setAttribute('aria-disabled', String(!this.#bridgeConfigured || this.#bridgeUp))
-      link.title = this.#bridgeConfigured && !this.#bridgeUp
-        ? t('chat.link.connect', 'Connect to the local bridge')
-        : ''
-      this.#linkTextEl.textContent = this.#bridgeUp
-        ? t('chat.link.up', 'Local Claude bridge connected')
-        : this.#hostConfigured
-          ? t('chat.link.host', 'Your AI host is configured')
-          : t('chat.link.waiting', 'Local bridge configured — waiting for Claude Code')
-    }
-
-    const status = this.#statusEl
-    const select = this.#modelSelect
-    const where = this.#whereEl
-    if (status && select && where) {
-      select.value = this.#model
-      const path = this.#path()
-      where.textContent = path
-      where.title = path
-      // Keep the select and the path; replace only what follows them.
-      while (where.nextSibling) where.nextSibling.remove()
-      const chosen = this.#chosen()
-      if (chosen) {
-        status.append(el('span', 'chat-targets',
-          tCount('chat.selected', '{count} tile selected', '{count} tiles selected', chosen)))
-      }
-      // Attached context (portal-drop branches) rides with every question — a
-      // rider the participant can't see is a surprise, so it is counted here
-      // beside the path it belongs to. POLARITY IS LOAD-BEARING: `> 0`, exactly
-      // as the template wrote it.
-      if (this.#contextCount > 0) {
-        const chip = el('span', 'chat-context')
-        chip.title = tCount('chat.context.title',
-          '1 context branch is attached to this tile — its material rides with every question',
-          '{count} context branches are attached to this tile — their material rides with every question',
-          this.#contextCount)
-        chip.append(sym('attach_file'), document.createTextNode(String(this.#contextCount)))
-        status.append(chip)
+      const who = this.#designated
+      this.#linkTextEl.textContent = who
+        ? this.#bridgeUp
+          ? t('chat.link.ready', '{provider} is ready', { provider: who.label })
+          : this.#hostConfigured
+            ? t('chat.link.host', 'Your AI host is configured')
+            : t('chat.link.pending', '{provider} is configured and waiting', { provider: who.label })
+        : this.#bridgeUp
+          ? t('chat.link.ready.any', 'A configured provider is ready')
+          : this.#hostConfigured
+            ? t('chat.link.host', 'Your AI host is configured')
+            : t('chat.link.pending.any', 'Waiting for a configured provider')
+      if (this.#answeringEl) {
+        const label = t('chat.answering', 'Provider answering this conversation')
+        this.#answeringEl.title = this.#answeringWhy() || label
+        this.#answeringEl.setAttribute('aria-label', label)
+        this.#answeringEl.replaceChildren(sym('auto_awesome'), document.createTextNode(this.#answering()))
       }
     }
 
@@ -3373,6 +3498,7 @@ export class ChatWindowElement extends DockedPanelElement {
    */
   async open(payload?: { model?: string; prefill?: string; convoId?: string }): Promise<void> {
     this.#refreshAvailability()
+    this.#refreshDesignation()
     const prefill = String(payload?.prefill ?? '').trim()
     this.#show()
     rememberChatVisibility(true)
@@ -3387,6 +3513,7 @@ export class ChatWindowElement extends DockedPanelElement {
     if (!this.#enabled()) { this.#render(); return }
     this.#refreshContext()
     this.#bridgeUp = !!get<BridgeLike>(BRIDGE_IOC_KEY)?.connected
+    this.#refreshDesignation()
 
     if (payload?.convoId) { await this.#refreshList(); await this.#load(payload.convoId) }
     else if (prefill) { await this.#refreshList(); this.newChat() }
@@ -3424,6 +3551,7 @@ export class ChatWindowElement extends DockedPanelElement {
       if (recent) {
         this.#activeId = recent.convoId
         this.#model = this.#rememberedModel(recent.convoId)
+        this.#modelExplicit = false
         this.#streaming = ''
         this.#turns = latestTurns
         this.#syncWait(recent.convoId)
@@ -3520,6 +3648,7 @@ export class ChatWindowElement extends DockedPanelElement {
     if (!threads || !convoId) return
     this.#activeId = convoId
     this.#model = this.#rememberedModel(convoId)
+    this.#modelExplicit = false
     this.#streaming = ''
     const turns = await threads.readTurns(convoId)
     // A slow read landing after the participant moved on must not paint one
@@ -3660,6 +3789,9 @@ export class ChatWindowElement extends DockedPanelElement {
     if (box) { box.value = ''; this.autosize(box) }
     this.#turns = []
     this.#streaming = ''
+    this.#model = ''
+    this.#modelExplicit = false
+    this.#refreshDesignation()
     this.#endWait()
     this.#listOpen = false
     this.#armed = ''
@@ -3734,19 +3866,25 @@ export class ChatWindowElement extends DockedPanelElement {
 
   #rememberedModel(convoId: string): string {
     const remembered = this.#modelMap()[convoId]
-    return MODELS.includes(remembered as typeof MODELS[number]) ? remembered : DEFAULT_MODEL
+    return typeof remembered === 'string' ? remembered.trim().toLowerCase() : ''
   }
 
   setModel(requested: string): void {
-    const next = MODEL_ALIASES[requested] ?? requested
-    if (!MODELS.includes(next as typeof MODELS[number])) return
+    const next = String(MODEL_ALIASES[requested] ?? requested ?? '').trim().toLowerCase()
+    if (!next) return
     this.#model = next
-    if (this.#modelSelect) this.#modelSelect.value = next
+    this.#modelExplicit = true
+    this.#remember(next)
+    this.#refreshDesignation()
+  }
+
+  #remember(model: string): void {
     const id = this.#activeId
-    if (!id) return
+    if (!id || !model) return
     try {
       const map = this.#modelMap()
-      map[id] = next
+      if (map[id] === model) return
+      map[id] = model
       localStorage.setItem(MODEL_KEY, JSON.stringify(map))
     } catch { /* participant-local convenience — never worth failing a send */ }
   }
@@ -3824,7 +3962,9 @@ export class ChatWindowElement extends DockedPanelElement {
   /** WHO IS ABOUT TO ANSWER. With a session on the bridge it is the model the
    *  composer is set to; without one the shallow host takes it, and that tier
    *  has its own model. */
-  #answeringModel(): string { return this.#bridgeUp ? this.#model : HOST_TIER_MODEL }
+  #answeringModel(): string {
+    return this.#providerReady ? this.#answering() : this.#bridgeUp ? this.#answering() : HOST_TIER_MODEL
+  }
 
   /** A QUESTION IS A UNIT OF WORK, so it gets a bee. The registry derives
    *  kind → vendor → tier from the model at spawn, so declaring `kind:'model'`
@@ -4118,6 +4258,7 @@ export class ChatWindowElement extends DockedPanelElement {
    */
   async send(text?: string): Promise<void> {
     this.#refreshAvailability()
+    this.#refreshDesignation()
     if (!this.#enabled()) return
     const element = this.#inputEl
     const message = String(text ?? element?.value ?? '').trim()
@@ -4125,7 +4266,7 @@ export class ChatWindowElement extends DockedPanelElement {
 
     const threads = this.#threads()
     const queen = this.#queen()
-    if (!threads || !queen?.submitChat) {
+    if (!threads) {
       EffectBus.emit('toast:show', {
         type: 'warning',
         message: 'Chat service unavailable — try again in a moment.',
@@ -4151,7 +4292,11 @@ export class ChatWindowElement extends DockedPanelElement {
     const stored = await threads.appendTurn(convoId, 'user', message)
     if (!stored) console.warn('[chat] the question was not stored — it will be missing after a reload')
 
-    // TWO TIERS, one window. With a session on the bridge, the question goes to
+    // Direct/local/keyed providers route first and apply the standing policy.
+    const routed = await this.#askProvider(convoId, message)
+    if (routed === 'answered' || routed === 'aborted') return
+
+    // The legacy host and bridge tiers remain honest fallbacks. With a session on the bridge, the question goes to
     // it: that is the deep tier, and the only one that can read the hive. With
     // nothing listening, the host's AI answers immediately instead. If the host
     // tier is unreachable and a local bridge is configured, the question is
@@ -4169,7 +4314,7 @@ export class ChatWindowElement extends DockedPanelElement {
 
     // A participant-host failure is retryable, but without a configured local
     // bridge there is nobody who could ever drain the durable bridge queue.
-    if (!this.#bridgeConfigured) {
+    if (!this.#bridgeConfigured || !queen?.submitChat) {
       this.#endWait()
       EffectBus.emit('toast:show', {
         type: 'warning',
@@ -4185,9 +4330,10 @@ export class ChatWindowElement extends DockedPanelElement {
     // THE TIER CHANGED UNDER THE QUESTION. Getting here with the bridge down
     // means the shallow host declined it and the durable queue will answer
     // instead — with the composer's model, not the host's.
-    if (!this.#bridgeUp) this.#raiseBee(convoId, message, this.#model)
+    if (!this.#bridgeUp) this.#raiseBee(convoId, message, this.#answering())
 
-    queen.activeModel = this.#model
+    queen.activeModel = this.#answering()
+    this.#remember(this.#answering())
     const queued = await queen.submitChat(
       convoId, message, this.#chosenTargets(), transcript, this.referencePayload())
     if (!queued) {
@@ -4201,6 +4347,63 @@ export class ChatWindowElement extends DockedPanelElement {
       if (convoId === this.#activeId) { this.#pendingSig = queued; this.#renderFoot() }
     }
     if (!this.#bumpList(convoId)) void this.#refreshList()
+  }
+
+  /** Route ordinary chat through the provider registry before legacy
+   *  transports. This path sees only the transcript and explicit references;
+   *  it never claims to have walked the hive. */
+  async #askProvider(convoId: string, message: string): Promise<'answered' | 'declined' | 'aborted'> {
+    const router = get<LlmRouterLike>(LLM_ROUTER_IOC_KEY)
+    const need = { tier: 'fast', streaming: true }
+    const namedModel = this.#modelExplicit ? this.#model || undefined : undefined
+    const preferModel = !this.#modelExplicit ? this.#model || undefined : undefined
+    if (!router?.stream || !router.ready?.({ model: namedModel, preferModel, need })) return 'declined'
+
+    const messages = this.#turns.slice(-TRANSCRIPT_TURNS).map(turn => ({
+      role: turn.role,
+      content: turn.text,
+    }))
+    const about = this.#chosenTargets()
+    const system = about.length
+      ? `You are helping inside Hypercomb. The participant says this conversation is about: ${about.join(', ')}. Do not claim to have read tile contents unless they are present in the messages.`
+      : 'You are helping inside Hypercomb. Be accurate and concise. Do not claim to have read hive contents unless they are present in the messages.'
+
+    const component = this
+    const ask: HostAsk = async function* (_question, opts) {
+      for await (const chunk of router.stream!({
+        model: namedModel,
+        preferModel,
+        need,
+        messages,
+        system,
+        signal: opts?.signal,
+      })) {
+        component.#designated = {
+          providerId: chunk.providerId,
+          label: chunk.providerLabel,
+          vendor: chunk.vendor,
+          tier: 'fast',
+          model: chunk.model,
+          name: chunk.model,
+        }
+        component.#model = chunk.model
+        component.#modelExplicit = false
+        component.#remember(chunk.model)
+        yield chunk.text
+      }
+      return ''
+    }
+
+    EffectBus.emit('agent:progress', {
+      id: this.#beeId(convoId),
+      activity: `routing to ${this.#designated?.label ?? 'a configured provider'}`,
+    })
+    if (convoId === this.#activeId) { this.#hostStreaming = true; this.#renderFoot() }
+    const threads = this.#threads()
+    return startHostRun(convoId, message, { ask }, {
+      appendTurn: (id, role, text) => threads?.appendTurn(id, role as TurnRole, text) ?? Promise.resolve(false),
+      saveStreamCheckpoint: (id, text) => threads?.saveStreamCheckpoint?.(id, text) ?? Promise.resolve(false),
+    })
   }
 
   /**

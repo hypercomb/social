@@ -32,20 +32,6 @@ export const globalKeyMap: KeyMapLayer = {
       pierce: true,
     },
     {
-      // HOLD it — the quick menu is a gesture, not a toggle. Holding blooms
-      // the ring at the pointer and releasing fires whatever you flicked to;
-      // a plain tap leaves it up so you can aim and click. Bare `q` because
-      // the left hand has to hold it while the right hand does the aiming,
-      // and it is the only free left-side letter (c, x, a, b, k, p are taken).
-      // The keymap owns the keydown so focus suppression is handled here;
-      // QuickMenuInput watches the matching keyup for the release.
-      cmd: 'ui.quickMenu',
-      sequence: [[{ key: 'q' }]],
-      description: 'Hold for the quick menu — flick a direction, release to choose',
-      descriptionKey: 'keymap.quick-menu',
-      category: 'Navigation',
-    },
-    {
       cmd: 'render.togglePivot',
       sequence: [[{ key: '8', code: 'digit8', primary: true, shift: true }]],
       description: 'Toggle grid pivot',
@@ -84,15 +70,10 @@ export const globalKeyMap: KeyMapLayer = {
       pierce: true,
     },
     {
-      // THE ASSISTANT, on the letter it starts with. It took `a` from the
-      // arrange cycle, which moved to `l` — a bare left-hand letter is the
-      // scarcest thing in this map (see the quick-menu note above), and
-      // "open the conversation" earns one far more than "next arrangement"
-      // does: one is the thing you reach for mid-thought, the other is a
-      // view you set once and leave. Global, not default: the chat is about
-      // wherever you are standing, so it opens from anywhere.
+      // Chat is global because the conversation follows wherever you are
+      // standing. `q` is its single, quick doorway from the canvas.
       cmd: 'chat.toggle',
-      sequence: [[{ key: 'a' }]],
+      sequence: [[{ key: 'q' }]],
       description: 'Open or close the assistant',
       descriptionKey: 'keymap.chat',
       category: 'View',
@@ -170,19 +151,17 @@ export const defaultKeyMap: KeyMapLayer = {
     },
 
     // Arrange — apply / cycle tile target sequences over existing tiles.
-    // ON `l` SINCE THE ASSISTANT TOOK `a`: layout, and a free right-hand
-    // letter. The pair keeps its shape — bare steps forward, shifted steps
-    // back — so only the finger changes.
+    // Bare `a` steps forward; shifted `A` steps back.
     {
       cmd: 'sequence.cycle',
-      sequence: [[{ key: 'l', shift: false }]],
+      sequence: [[{ key: 'a', shift: false }]],
       description: 'Arrange tiles by the next sequence',
       descriptionKey: 'keymap.arrange',
       category: 'View',
     },
     {
       cmd: 'sequence.cyclePrev',
-      sequence: [[{ key: 'l', shift: true }]],
+      sequence: [[{ key: 'a', shift: true }]],
       description: 'Arrange tiles by the previous sequence',
       descriptionKey: 'keymap.arrangePrev',
       category: 'View',

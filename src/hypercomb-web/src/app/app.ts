@@ -42,6 +42,9 @@ export class App extends HTMLElement {
   private viewMode = 'hexagons'
   private inputOpen = false
   private viewActive = false
+  /** A view is covering the canvas while deliberately keeping the controls
+   * edge available (chat does this for its beside-the-bar rail). */
+  private controlsKept = false
   private moveMode = false
   private swarmEmpty = false
 
@@ -78,6 +81,10 @@ export class App extends HTMLElement {
     const header = this.querySelector<HTMLElement>('.header-bar')
     header?.classList.toggle('input-open', this.inputOpen)
     if (header) header.style.visibility = this.viewActive || this.viewMode === 'website' ? 'hidden' : ''
+    const controls = this.querySelector<HTMLElement>('hc-controls-bar')
+    if (controls) controls.style.visibility = this.viewActive && !this.controlsKept ? 'hidden' : ''
+    const editActions = this.querySelector<HTMLElement>('hc-edit-actions')
+    if (editActions) editActions.style.visibility = this.viewActive ? 'hidden' : ''
 
     for (const name of [...document.body.classList]) {
       if (name.startsWith('hc-view-')) document.body.classList.remove(name)
@@ -118,6 +125,11 @@ export class App extends HTMLElement {
       this.viewMode = 'hexagons'
       this.refresh()
       EffectBus.emit('nav:to-hive', { reason: 'adopt-complete' })
+    }))
+
+    this.cleanups.push(EffectBus.on<{ active: boolean }>('view:keeps-controls', ({ active }) => {
+      this.controlsKept = active
+      this.refresh()
     }))
 
     const wireViewMode = (service: ViewModeService): void => {

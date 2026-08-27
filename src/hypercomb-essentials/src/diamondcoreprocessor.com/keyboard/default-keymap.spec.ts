@@ -5,9 +5,7 @@
 // worth writing down — and a second act quietly taking a letter that is
 // already bound is the failure this pins.
 //
-// `a` opens the ASSISTANT. It used to cycle the arrangements, which moved to
-// `l`: one is the thing you reach for mid-thought, the other is a view you
-// set once and leave.
+// `a` arranges again; `q` opens the chat.
 
 import { describe, it, expect } from 'vitest'
 import { globalKeyMap, defaultKeyMap } from './default-keymap.js'
@@ -23,25 +21,22 @@ const chordsOf = (cmd: string) =>
 
 describe('default keymap — who holds which letter', () => {
 
-  it('`a` opens the assistant, and nothing else claims it', () => {
+  it('`q` opens chat, and nothing else claims it', () => {
     const chords = chordsOf('chat.toggle')
     expect(chords).toHaveLength(1)
-    expect(chords[0]?.key).toBe('a')
+    expect(chords[0]?.key).toBe('q')
     // Global, not the default layer: a conversation is about wherever you are
     // standing, so it opens from anywhere.
     expect(globalKeyMap.bindings.some(b => b.cmd === 'chat.toggle')).toBe(true)
   })
 
-  it('`l` steps the arrangements, shifted steps back', () => {
-    expect(chordsOf('sequence.cycle')[0]).toMatchObject({ key: 'l', shift: false })
-    expect(chordsOf('sequence.cyclePrev')[0]).toMatchObject({ key: 'l', shift: true })
+  it('`a` arranges again, shifted steps back', () => {
+    expect(chordsOf('sequence.cycle')[0]).toMatchObject({ key: 'a', shift: false })
+    expect(chordsOf('sequence.cyclePrev')[0]).toMatchObject({ key: 'a', shift: true })
   })
 
-  it('nothing is still bound to `a` for arranging', () => {
-    const arranging = ['sequence.cycle', 'sequence.cyclePrev']
-      .flatMap(chordsOf)
-      .map(chord => chord.key)
-    expect(arranging).not.toContain('a')
+  it('the quick menu no longer competes for `q`', () => {
+    expect(chordsOf('ui.quickMenu')).toHaveLength(0)
   })
 
   it('no two commands share the same single-key chord', () => {

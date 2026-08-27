@@ -11,8 +11,16 @@
      by the global `body.hc-view-website #pixi-host{,canvas}` rule in
      styles.scss: visibility (NOT display:none → 0×0 corrupts zoom) +
      pointer-events:none on the <canvas>. -->
-<hc-controls-bar></hc-controls-bar>
-<hc-edit-actions></hc-edit-actions>
+<!-- `viewActive()` means a view has taken the canvas, so the chrome goes away.
+     A view can also take the canvas and LEAVE THIS BAR ITS EDGE — the chat
+     window lays itself out against the same `--hc-controls-<side>` reservation
+     every docked toolwindow uses, so the rail has somewhere to be and hiding it
+     only cost every control on it for as long as a conversation was open. Such
+     a view says so by holding `view:keeps-controls` (owner-counted, alongside
+     `view:active`), and the bar stays. The header bar and the edit-actions
+     cluster below are NOT kept: both sit where the window paints. -->
+<hc-controls-bar [style.visibility]="viewActive() && !controlsKept() ? 'hidden' : null"></hc-controls-bar>
+<hc-edit-actions [style.visibility]="viewActive() ? 'hidden' : null"></hc-edit-actions>
 <!-- Every other shell surface is registry-fed: registered in
      shared/ui/shell-surfaces/shell-surfaces.barrel.ts, mounted here in `order`
      order. Never add an <hc-*> tag below — add a registration to the barrel. -->

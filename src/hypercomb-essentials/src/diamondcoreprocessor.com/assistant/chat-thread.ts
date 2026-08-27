@@ -706,7 +706,7 @@ export const setConversationArchived = async (
       // Announced from HERE, not from the surface that pressed the button:
       // several surfaces list the same thread (the rail's fold, the window's
       // flat list), and only this function knows the write landed.
-      EffectBus.emit('chat:threads-changed', { convoId: id })
+      EffectBus.emit('chat:threads-changed', { convoId: id, archived: false })
       return true
     }
     const bytes = new TextEncoder().encode(
@@ -715,7 +715,7 @@ export const setConversationArchived = async (
     const handle = await bucket.getFileHandle(marker, { create: true })
     const writable = await handle.createWritable()
     try { await writable.write(new Blob([bytes as BlobPart])) } finally { await writable.close() }
-    EffectBus.emit('chat:threads-changed', { convoId: id })
+    EffectBus.emit('chat:threads-changed', { convoId: id, archived: true })
     return true
   } catch { return false }
 }

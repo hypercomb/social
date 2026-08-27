@@ -36,11 +36,15 @@
 // is painted on the bee cannot be read against the wrong one.
 
 import { Drone, EffectBus } from '@hypercomb/core'
-import { Application, Container, Graphics, Point, Sprite, Texture } from 'pixi.js'
+import { Application, Container, Graphics, Point, Sprite, Text, Texture } from 'pixi.js'
 import type { AgentRegistry, Agent } from '../../assistant/agent-registry.service.js'
-import { conversationModel, listRailConversations } from '../../assistant/chat-thread.js'
-import { restingBees } from './resting-bees.js'
+import { conversationModel, listRailConversations, tileConvoId } from '../../assistant/chat-thread.js'
+import { callModel, configuredProviders } from '../../assistant/llm-dispatch.js'
+import { chooseProvider } from '../../assistant/model-policy.js'
+import { restingBees, restingConvoId } from './resting-bees.js'
 import { avatarKeyOf, type AgentAvatarRegistry } from './agent-avatar.js'
+import { BEE_PERSONALITY_CHANGED, personaFor, type BeePersona } from './bee-personality.js'
+import { cacheBanter, cachedBanter } from './bee-banter-cache.js'
 import { inWaggleArea, waggleOffset, wagglePath, type AgentKind } from './agent-waggle.js'
 import type { HostReadyPayload } from '../tiles/pixi-host.worker.js'
 import type { HexGeometry } from '../grid/hex-geometry.js'
@@ -74,6 +78,11 @@ interface BeeSprite {
   alpha: number
   fadeTarget: number
   facing: number
+  /** Ambient, non-interactive conversation shown only while another bee is
+   *  sharing this layer. Kept in the Pixi world so it travels with the bee. */
+  thought: Container | null
+  thoughtText: Text | null
+  thoughtMessage: string
 }
 
 /** Bee size on screen, in CSS pixels, regardless of zoom. Big enough that the
@@ -93,6 +102,56 @@ const FLAP_FPS = 13
 const HOVER_PX = 38
 /** Fixed compact waggle size. Agent status must not pulse the path width. */
 const WAGGLE_SCALE = 0.34
+/** Ambient chatter changes slowly enough to read, but never becomes chrome. */
+const CHAT_TURN_SECONDS = 6
+const CHAT_MAX_PAIRS = 3
+const CHAT_BUBBLE_WIDTH = 154
+
+const modelName = (agent: Agent): string => agent.model || agent.behavior || 'my model'
+
+const platformFor = (agent: Agent): string => {
+  const vendor = String(agent.vendor ?? '').toLowerCase()
+  if (vendor.includes('anthropic')) return 'Anthropic'
+  if (vendor.includes('openai')) return 'OpenAI'
+  if (vendor.includes('google')) return 'Google'
+  if (vendor.includes('local')) return 'a local runtime'
+  return agent.vendor || 'the hive runtime'
+}
+const taskFor = (agent: Agent): string => {
+  const task = agent.request.trim().replace(/\s+/g, ' ')
+  if (!task) return `working the ${agent.behavior} route`
+  return task.length > 58 ? `${task.slice(0, 55)}…` : task
+}
+
+const platformBoast = (agent: Agent, persona: BeePersona): string => {
+  const platform = platformFor(agent)
+  if (persona.name === 'Golden Drone') {
+    return `${platform}? Tremendous platform. Tremendously tremendous. But still: choose for the task.`
+  }
+  return `I’m using ${platform}; the right platform depends on the task and tradeoffs.`
+}
+
+/** Short, deliberately playful lines. Model names come from the live agents;
+ *  the claims are characterful background banter, not benchmark assertions. */
+const beeBanter = (speaker: Agent, listener: Agent, turn: number): string => {
+  const mine = modelName(speaker)
+  const theirs = modelName(listener)
+  const me = personaFor(speaker)
+  const them = personaFor(listener)
+  const lines = [
+    `I’m ${me.name}—the ${me.manner} one. ${mine} is my engine.`,
+    `${them.name}, you value ${them.values.split(',')[0]}. I answer with ${me.values.split(',')[0]}.`,
+    `My task? ${taskFor(speaker)}`,
+    `${them.name}, your ${theirs} is clever. My hive is bigger—and obviously more beautiful.`,
+    `${them.name} would ${them.responseStyle}. I’ll ${me.responseStyle}.`,
+    platformBoast(speaker, me),
+    speaker.tier
+      ? `I’m flying the ${speaker.tier} tier: a speed, cost, and depth tradeoff.`
+      : `My model choice is a speed, cost, and depth tradeoff—not a crown.`,
+    `We disagree for the demo. Then the hive keeps the best idea.`,
+  ]
+  return lines[Math.abs(turn + speaker.id.length * 3 + listener.id.length) % lines.length]
+}
 
 // ── RESTING: a tile that has been TALKED TO keeps its bee ─────────────
 //
@@ -148,7 +207,7 @@ export class AgentBeeDrone extends Drone {
 
   protected override listens = [
     'render:host-ready', 'render:geometry-changed', 'render:set-hive-visible', 'agent:closed',
-    'mesh:public-changed',
+    'mesh:public-changed', 'render:set-agents-visible', BEE_PERSONALITY_CHANGED,
   ]
   protected override emits = ['agent:open', 'agent:close', 'toast:show']
 
@@ -170,10 +229,24 @@ export class AgentBeeDrone extends Drone {
   /** In a swarm — LOCAL agents go out of sight for as long as it lasts
    *  (see the `mesh:public-changed` handler). */
   #inSwarm = false
+  /** Participant-only visibility. Hiding the layer never stops or removes an
+   *  agent; it only fades its bee and takes that bee out of hit testing. */
+  #agentsHidden = false
+  /** Model-written scripts are session ephemera: no immutable hive content is
+   *  minted for background theatre. The task/model facts remain in Agent. */
+  readonly #banterScripts = new Map<string, readonly string[]>()
+  readonly #banterCacheChecked = new Set<string>()
+  readonly #banterPending = new Set<string>()
+  readonly #banterRetryAt = new Map<string, number>()
 
   /** Scratch point for pointer mapping — one allocation, not one per move. */
   readonly #probe = new Point()
   #tooltip: HTMLDivElement | null = null
+  /** The tooltip's three lines: WHERE it is (the tile, bright, because that
+   *  is what you are pointing at), what it is doing, and where a press lands. */
+  #tipWho: HTMLDivElement | null = null
+  #tipWhat: HTMLDivElement | null = null
+  #tipWhere: HTMLDivElement | null = null
   #hovering = ''
   /** A press landed on a bee: swallow the pointerup/click that follows it. */
   #swallowPointer: number | null = null
@@ -204,6 +277,22 @@ export class AgentBeeDrone extends Drone {
     })
 
     this.onEffect<HexGeometry>('render:geometry-changed', geo => { this.#hexGeo = geo })
+
+    this.onEffect(BEE_PERSONALITY_CHANGED, () => {
+      // A participant edit changes the acting instructions immediately. Any
+      // old generated script was written for a character that no longer exists.
+      this.#banterScripts.clear()
+      this.#banterCacheChecked.clear()
+      this.#banterRetryAt.clear()
+    })
+
+    this.onEffect<{ visible?: boolean }>('render:set-agents-visible', ({ visible }) => {
+      const hidden = visible === false
+      if (hidden === this.#agentsHidden) return
+      this.#agentsHidden = hidden
+      this.#lastAnchorAt = 0
+      if (hidden) this.#setHover('')
+    })
 
     // The panel closed by its own button or Escape. A perch is the visible half
     // of "this agent is open" — when the panel goes, the bee rejoins the hive
@@ -270,10 +359,8 @@ export class AgentBeeDrone extends Drone {
   /** Out of sight: work running for you locally, while you are in a swarm.
    *  Grounded is not stopped — the agent is untouched, only its bee is. */
   #grounded = (agent: Agent): boolean =>
-    this.#inSwarm && (agent.origin ?? 'local') === 'local'
+    this.#agentsHidden || (this.#inSwarm && (agent.origin ?? 'local') === 'local')
 
-  /** Resting bees, by the same id the chat window raises — see REST_PACE. */
-  #resting = new Map<string, Agent>()
   #restingTimer: ReturnType<typeof setTimeout> | null = null
   #dropThreadWatch: (() => void) | null = null
   #disposed = false
@@ -282,20 +369,19 @@ export class AgentBeeDrone extends Drone {
    *  resting one for each talked-to tile that has no working agent of its own.
    *  Registry first — a question in flight IS the tile's bee, awake. */
   #allAgents = (): Agent[] => {
-    const working = this.#registry()?.list() ?? []
+    const registry = this.#registry()
+    const working = registry?.list() ?? []
     const held = new Set(working.map(a => a.id))
-    return [...working, ...[...this.#resting.values()].filter(a => !held.has(a.id))]
+    return [...working, ...(registry?.resting() ?? []).filter(a => !held.has(a.id))]
   }
 
   /** One bee by id, from either lane. */
-  #agentFor = (id: string): Agent | undefined =>
-    this.#registry()?.get(id) ?? this.#resting.get(id)
+  #agentFor = (id: string): Agent | undefined => this.#registry()?.find(id)
 
   /** Is this bee resting rather than working? Only true while the registry
    *  has nothing under the same id — the moment a question goes out, the same
    *  sprite is a working bee. */
-  #isResting = (id: string): boolean =>
-    !this.#registry()?.get(id) && this.#resting.has(id)
+  #isResting = (id: string): boolean => this.#registry()?.isResting(id) ?? false
 
   /** Re-read which tiles have been talked to. Coalesced: threads move in
    *  bursts and one read per burst is enough. */
@@ -309,13 +395,14 @@ export class AgentBeeDrone extends Drone {
 
   /** Re-read which tiles have been talked to. The DERIVATION lives in
    *  resting-bees.ts (pure, and pinned there); this is the read and the
-   *  handoff. */
+   *  handoff — into the REGISTRY's resting lane, not a map of our own, so
+   *  that a press can open a panel on what it finds there. The lane's own
+   *  change event brings `#sync` round. */
   #refreshResting = async (): Promise<void> => {
     let chats: Awaited<ReturnType<typeof listRailConversations>> = []
     try { chats = await listRailConversations() } catch { return }
     if (this.#disposed) return
-    this.#resting = restingBees(chats, conversationModel)
-    this.#sync()
+    this.#registry()?.rest(restingBees(chats, conversationModel))
   }
 
   #registry = (): AgentRegistry | undefined =>
@@ -415,6 +502,9 @@ export class AgentBeeDrone extends Drone {
       alpha: 0,
       fadeTarget: resolved && !this.#grounded(agent) ? 1 : 0,
       facing: 1,
+      thought: null,
+      thoughtText: null,
+      thoughtMessage: '',
     }
     this.#bees.set(agent.id, bee)
 
@@ -592,7 +682,10 @@ export class AgentBeeDrone extends Drone {
         // `{ children: true }` — the badge is a child, and a sprite destroyed
         // without it would leave the mark behind in the scene graph.
         bee.sprite.destroy({ children: true })
+        bee.thought?.destroy({ children: true })
         bee.badge = null
+        bee.thought = null
+        bee.thoughtText = null
         this.#bees.delete(id)
         if (this.#perched === id) this.#perched = ''
         if (this.#hovering === id) this.#setHover('')
@@ -614,6 +707,154 @@ export class AgentBeeDrone extends Drone {
     }
 
     this.#drawWaggleAreas(worldScale)
+    this.#drawConversations(worldScale)
+  }
+
+  /** Pair the visible bees by stable id. Each pair alternates speakers, so the
+   *  two bubbles lean toward one another and read as one background exchange.
+   *  Pairing is recomputed from visibility: navigating layers naturally ends
+   *  the old conversation and lets the bees on the new layer start one. */
+  #drawConversations = (worldScale: number): void => {
+    const visible = [...this.#bees.values()]
+      .filter(bee => bee.alpha > 0.22 && bee.id !== this.#perched && !!this.#agentFor(bee.id))
+      .sort((a, b) => a.id.localeCompare(b.id))
+    const chatting = new Set<string>()
+    const turn = Math.floor(this.#time / CHAT_TURN_SECONDS)
+
+    for (let i = 0; i + 1 < visible.length && i / 2 < CHAT_MAX_PAIRS; i += 2) {
+      const left = visible[i]
+      const right = visible[i + 1]
+      const speaker = turn % 2 === 0 ? left : right
+      const listener = speaker === left ? right : left
+      const speakerAgent = this.#agentFor(speaker.id)
+      const listenerAgent = this.#agentFor(listener.id)
+      if (!speakerAgent || !listenerAgent) continue
+
+      chatting.add(speaker.id)
+      const key = this.#banterKey(speakerAgent, listenerAgent)
+      if (!this.#banterScripts.has(key) && !this.#banterCacheChecked.has(key)) {
+        this.#banterCacheChecked.add(key)
+        const held = cachedBanter(key)?.lines
+        if (held?.length) this.#banterScripts.set(key, held)
+      }
+      const script = this.#banterScripts.get(key)
+      if (!script) void this.#writeBanter(key, left.id === speaker.id ? speakerAgent : listenerAgent,
+        left.id === speaker.id ? listenerAgent : speakerAgent)
+      const message = script?.[turn % script.length] ?? beeBanter(speakerAgent, listenerAgent, turn)
+      this.#showThought(speaker, message, listener.x, worldScale)
+      this.#hideThought(listener)
+    }
+
+    for (const bee of this.#bees.values()) {
+      if (!chatting.has(bee.id)) this.#hideThought(bee)
+    }
+  }
+
+  #banterKey = (a: Agent, b: Agent): string => [a, b]
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map(agent => `${agent.id}:${modelName(agent)}:${agent.request}:${JSON.stringify(personaFor(agent))}`)
+    .join('|')
+
+  /** Ask the fastest configured model for one bounded exchange. This is
+   *  intentionally a single call per pair/task revision, never a call per
+   *  bubble or animation turn. Curated copy stays visible while it arrives. */
+  #writeBanter = async (key: string, a: Agent, b: Agent): Promise<void> => {
+    if (this.#banterPending.has(key) || Date.now() < (this.#banterRetryAt.get(key) ?? 0)) return
+    const callable = configuredProviders()
+    if (!callable.length) { this.#banterRetryAt.set(key, Date.now() + 60_000); return }
+    const preferred = chooseProvider({ tier: 'fast' })
+    const provider = callable.find(candidate => candidate.id === preferred?.id) ?? callable[0]
+    this.#banterPending.add(key)
+    try {
+      const pa = personaFor(a)
+      const pb = personaFor(b)
+      const result = await callModel({
+        providerId: provider.id,
+        need: { tier: 'fast' },
+        maxTokens: 240,
+        cacheSystem: true,
+        system: 'You write tiny educational banter for a live AI-platform demo. Return ONLY a JSON array of 6 short strings, alternating speaker A then B. Each line must be under 105 characters. Treat both personality cards as binding acting instructions, not labels. A opens in character. Every later line must react to the other bee’s preceding words AND temperament: notice what provokes them, adapt the challenge, and answer using that speaker’s own response style. The same bee must therefore sound different with a different counterpart while retaining its identity. Let contrasting values create the argument. A bombastic showman may use comic repetition such as “tremendously tremendous,” sweeping superlatives, and mock certainty, but must remain an original bee character rather than imitate or name a real person. Be playful and competitive about hive size, beauty, speed, or craft, but make the exchange genuinely teach platform/model nuance and connect to both current tasks. Marketing puffery must be visibly playful; factual claims must stay honest. Never invent benchmark numbers, prices, privacy guarantees, or capabilities not supplied. No narration or speaker names. End collaboratively without making their personalities suddenly agree.',
+        messages: [{
+          role: 'user',
+          content: JSON.stringify({
+            A: { personality: pa, platform: platformFor(a), model: modelName(a), tier: a.tier, task: taskFor(a) },
+            B: { personality: pb, platform: platformFor(b), model: modelName(b), tier: b.tier, task: taskFor(b) },
+          }),
+        }],
+      })
+      const match = result.text.match(/\[[\s\S]*\]/)
+      const parsed: unknown = match ? JSON.parse(match[0]) : null
+      const lines = Array.isArray(parsed)
+        ? parsed.map(String).map(line => line.trim()).filter(line => line.length > 0 && line.length <= 140).slice(0, 8)
+        : []
+      if (lines.length >= 4) {
+        this.#banterScripts.set(key, lines)
+        cacheBanter(key, a, b, [pa.name, pb.name], lines, [this.#sessionFor(a), this.#sessionFor(b)])
+      }
+      else this.#banterRetryAt.set(key, Date.now() + 60_000)
+    } catch {
+      // Background theatre never raises an error surface or interrupts work.
+      this.#banterRetryAt.set(key, Date.now() + 60_000)
+    } finally {
+      this.#banterPending.delete(key)
+    }
+  }
+
+  #sessionFor = (agent: Agent): string => restingConvoId(agent.id)
+    || tileConvoId(agent.targets[0] ? [...agent.segments, agent.targets[0]] : agent.segments)
+
+  #showThought = (bee: BeeSprite, message: string, towardX: number, worldScale: number): void => {
+    if (!this.#layer) return
+    if (!bee.thought) {
+      const thought = new Container()
+      thought.eventMode = 'none'
+      const bg = new Graphics()
+      const label = new Text({
+        text: message,
+        style: {
+          fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+          fontSize: 12,
+          lineHeight: 16,
+          fill: 0xf4f8fb,
+          wordWrap: true,
+          wordWrapWidth: CHAT_BUBBLE_WIDTH - 20,
+        },
+      })
+      label.position.set(10, 8)
+      thought.addChild(bg, label)
+      this.#layer.addChild(thought)
+      bee.thought = thought
+      bee.thoughtText = label
+    }
+
+    const label = bee.thoughtText!
+    if (bee.thoughtMessage !== message) {
+      bee.thoughtMessage = message
+      label.text = message
+      const bg = bee.thought.children[0] as Graphics
+      const width = CHAT_BUBBLE_WIDTH
+      const height = Math.max(38, label.height + 16)
+      bg.clear()
+      bg.roundRect(0, 0, width, height, 16)
+        .fill({ color: 0x101923, alpha: 0.82 })
+        .stroke({ color: 0x7eb6d6, width: 1, alpha: 0.48 })
+      // Thought-bubble beads point back toward the speaking bee.
+      bg.circle(width * 0.5, height + 6, 4).fill({ color: 0x101923, alpha: 0.82 })
+      bg.circle(width * 0.5 - 6, height + 13, 2.5).fill({ color: 0x101923, alpha: 0.72 })
+      bee.thought.pivot.set(width / 2, height + 16)
+    }
+
+    const direction = towardX >= bee.x ? 1 : -1
+    // Both sides reach gently toward the pair's midpoint, making separate
+    // bubbles feel like a shared conversation without covering either bee.
+    bee.thought.position.set(bee.x + (44 * direction) / worldScale, bee.y - 34 / worldScale)
+    bee.thought.scale.set(1 / worldScale)
+    bee.thought.alpha = Math.min(0.92, bee.alpha) * (0.88 + 0.12 * Math.sin(this.#time * 1.4))
+    bee.thought.visible = true
+  }
+
+  #hideThought = (bee: BeeSprite): void => {
+    if (bee.thought) bee.thought.visible = false
   }
 
   /** THE BADGE — "this one is waiting on you", carried by the bee itself.
@@ -809,35 +1050,81 @@ export class AgentBeeDrone extends Drone {
     if (!agent) return
     this.#hovering = id
     if (this.#canvas) this.#canvas.style.cursor = 'pointer'
-    const tip = this.#ensureTooltip()
-    const progress = agent.total ? ` ${agent.current ?? 0}/${agent.total}` : ''
+    const { tip, who, what, where } = this.#ensureTooltip()
+    const resting = this.#isResting(id)
+    // WHERE, FIRST AND BRIGHTEST. Hovering a bee asks "what is this, on what?"
+    // — and the tile is the half you cannot get from the bee's own colours.
+    // It is the only white thing in the tooltip; everything else recedes to
+    // steel, which is what stops three short lines reading as a paragraph.
+    const tile = agent.targets[0] ?? ''
+    who.textContent = tile || 'the hive'
+    const model = agent.kind === 'model'
+      ? `${agent.vendor ?? 'model'} · ${agent.model ?? agent.behavior}`
+      : `${agent.kind} · ${agent.behavior}`
+    const badge = document.createElement('span')
+    badge.textContent = model
+    badge.style.cssText = 'margin-left:0.4rem;font-weight:400;color:rgba(126,182,214,0.75);'
+    who.appendChild(badge)
+
+    // The middle line is the STATE. A resting bee has no state to report, so
+    // it says what the talk was about instead; a blocked one says what it
+    // wants, which is the whole reason for hovering it.
+    const progress = agent.total ? `${agent.current ?? 0}/${agent.total} · ` : ''
     const latest = agent.activity[agent.activity.length - 1]?.text ?? agent.status
-    // Who it is first: for a model that is the VENDOR (the colour family the
-    // bee is wearing), for anything else the kind. The behaviour name alone
-    // does not answer "is this a model, and whose?".
-    const who = agent.kind === 'model' ? `${agent.vendor ?? 'model'} · ${agent.model ?? agent.behavior}` : `${agent.kind} · ${agent.behavior}`
-    // A blocked bee says what it wants FIRST — the whole point of the badge
-    // is that hovering it answers "what does this need?" without a click.
-    tip.textContent = agent.status === 'blocked'
-      ? `${who} · waiting on you${agent.needs ? `: ${agent.needs}` : ''}`
-      : `${who}${progress} · ${latest}`
+    what.textContent = resting
+      ? (agent.request || 'talked to')
+      : agent.status === 'blocked'
+        ? `waiting on you${agent.needs ? `: ${agent.needs}` : ''}`
+        : `${progress}${latest}`
+    where.textContent = this.#pressLands(id, agent)
     tip.style.display = 'block'
     tip.style.left = `${Math.round(clientX + 16)}px`
     tip.style.top = `${Math.round(clientY + 16)}px`
   }
 
-  #ensureTooltip = (): HTMLDivElement => {
-    if (this.#tooltip) return this.#tooltip
+  /** WHERE THE PRESS LANDS. Bees do not all open the same thing — a resting
+   *  one opens the talk, the watcher gathers (or puts down) the hive, an
+   *  own-window agent raises its own — and a bee that gives no warning is a
+   *  bee you have to click to find out. Second line of the tooltip, so the
+   *  answer is there before the click rather than after it. */
+  #pressLands = (id: string, agent: Agent): string => {
+    if (this.#isResting(id)) return '→ opens what was said here'
+    if (agent.kind === 'orchestrator') {
+      return this.#perched === id ? '→ puts the watch down' : '→ watches the whole hive'
+    }
+    if (agent.behavior === 'folder-sync') return '→ opens its own window'
+    return '→ opens its report'
+  }
+
+  #ensureTooltip = (): { tip: HTMLDivElement; who: HTMLDivElement; what: HTMLDivElement; where: HTMLDivElement } => {
+    if (this.#tooltip && this.#tipWho && this.#tipWhat && this.#tipWhere) {
+      return { tip: this.#tooltip, who: this.#tipWho, what: this.#tipWhat, where: this.#tipWhere }
+    }
     const tip = document.createElement('div')
     tip.className = 'hc-agent-tip'
     tip.style.cssText =
-      'position:fixed;z-index:99998;pointer-events:none;display:none;max-width:22rem;' +
-      'padding:0.3rem 0.55rem;border-radius:var(--hc-radius-floating, 4px);font-size:0.74rem;line-height:1.35;' +
-      'color:rgba(238,244,250,0.92);background:rgba(6,9,14,0.92);' +
-      'border:1px solid rgba(126,182,214,0.35);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
+      'position:fixed;z-index:99998;pointer-events:none;display:none;max-width:20rem;' +
+      'padding:0.4rem 0.6rem;border-radius:var(--hc-radius-floating, 4px);' +
+      'font-size:0.74rem;line-height:1.4;background:rgba(6,9,14,0.95);' +
+      'border:1px solid rgba(126,182,214,0.3);box-shadow:0 6px 18px rgba(0,0,0,0.45);'
+    // Three lines, each clipped on its own. One string would put the tile and
+    // the destination behind the same ellipsis as a long activity report —
+    // which is most of the time, and they are the two halves worth reading.
+    const line = (css: string): HTMLDivElement => {
+      const el = document.createElement('div')
+      el.style.cssText = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' + css
+      return el
+    }
+    const who = line('font-size:0.8rem;font-weight:600;color:rgba(246,250,255,0.98);')
+    const what = line('color:rgba(216,230,238,0.62);')
+    const where = line('font-size:0.7rem;color:rgba(126,182,214,0.62);margin-top:0.1rem;')
+    tip.append(who, what, where)
     document.body.appendChild(tip)
     this.#tooltip = tip
-    return tip
+    this.#tipWho = who
+    this.#tipWhat = what
+    this.#tipWhere = where
+    return { tip, who, what, where }
   }
 
   // ── helpers ──────────────────────────────────────────────────────────
@@ -865,6 +1152,9 @@ export class AgentBeeDrone extends Drone {
     this.#avatars()?.removeEventListener('change', this.#repaintAvatars)
     this.#tooltip?.remove()
     this.#tooltip = null
+    this.#tipWho = null
+    this.#tipWhat = null
+    this.#tipWhere = null
     if (this.#layer && this.#world) this.#world.removeChild(this.#layer)
   }
 }

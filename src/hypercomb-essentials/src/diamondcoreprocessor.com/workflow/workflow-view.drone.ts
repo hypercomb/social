@@ -372,7 +372,9 @@ export class WorkflowViewDrone extends Drone {
 
     const statusByCell = new Map<string, string>()
     for (const r of this.#run?.results ?? []) statusByCell.set(r.cell, r.status)
-    const runningCell = this.#run?.running ? steps[this.#run.at ?? 0]?.cell : undefined
+    const runningCell = this.#run?.running
+      ? this.#run.activeCell ?? steps[this.#run.at ?? 0]?.cell
+      : undefined
 
     const width = PAD * 2 + Math.max(NODE_W, steps.length * NODE_W + Math.max(0, steps.length - 1) * GAP_X)
     const height = PAD * 2 + NODE_H + 120

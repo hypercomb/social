@@ -102,7 +102,7 @@
   "providers.search": "प्रदाता और मॉडल खोजें",
   "providers.empty": "कोई मेल नहीं",
   "providers.tab.subscription": "सदस्यताएँ",
-  "providers.tab.api": "API अनुरोध",
+  "providers.tab.api": "चैट API",
   "providers.tab.swarm": "झुंड",
   "providers.tabHint.subscription": "वह प्लान जिसका भुगतान आप पहले से करते हैं। इस मशीन पर चल रहा CLI सत्र अपने ही खाते से उत्तर देता है — और आपकी हाइव केवल यही उत्तरदाता पढ़ सकते हैं।",
   "providers.tabHint.api": "यहाँ चिपकाई गई कुंजी से हर अनुरोध का शुल्क लगता है। कुंजी इसी ब्राउज़र में रहती है, और वह जिस एंडपॉइंट तक जाएगी वह चिपकाने से पहले दिखाया जाता है।",

@@ -102,7 +102,7 @@
   "providers.search": "Cari penyedia dan model",
   "providers.empty": "Tidak ada yang cocok",
   "providers.tab.subscription": "Langganan",
-  "providers.tab.api": "Permintaan API",
+  "providers.tab.api": "API obrolan",
   "providers.tab.swarm": "Swarm",
   "providers.tabHint.subscription": "Paket yang sudah Anda bayar. Sesi CLI yang berjalan di mesin ini menjawab lewat akunnya sendiri — dan hanya penjawab inilah yang bisa membaca hive Anda.",
   "providers.tabHint.api": "Ditagih per permintaan dengan kunci yang Anda tempel di sini. Kunci tetap di peramban ini, dan endpoint yang akan dituju ditampilkan sebelum Anda menempelnya.",

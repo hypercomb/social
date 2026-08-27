@@ -20,6 +20,10 @@
   },
   "scripts": {
     "audit-imports": "tsx scripts/audit-imports.ts",
+    "heuristics:audit": "node scripts/heuristic-audit.cjs once",
+    "heuristics:watch": "node scripts/heuristic-audit.cjs watch",
+    "heuristics:test": "node --test scripts/heuristics/*.spec.cjs",
+    "heuristics:hive": "node scripts/hive-heuristic-compute.cjs",
     "bridge": "node scripts/bridge/run-bridge.cjs",
     "bridge:watch": "node scripts/bridge/watch-asks.cjs",
     "bridge:watch:once": "node scripts/bridge/watch-asks.cjs --once",

@@ -102,7 +102,7 @@
   "providers.search": "Anbieter und Modelle durchsuchen",
   "providers.empty": "Keine Treffer",
   "providers.tab.subscription": "Abonnements",
-  "providers.tab.api": "API-Anfragen",
+  "providers.tab.api": "Chat-API",
   "providers.tab.swarm": "Schwarm",
   "providers.tabHint.subscription": "Ein Tarif, den Sie ohnehin zahlen. Eine CLI-Sitzung auf dieser Maschine antwortet über ihr eigenes Konto — und nur diese Antwortenden können Ihren Hive lesen.",
   "providers.tabHint.api": "Pro Anfrage abgerechnet, mit dem Schlüssel, den Sie hier einfügen. Der Schlüssel bleibt in diesem Browser, und der Endpunkt, an den er ginge, wird vorher angezeigt.",

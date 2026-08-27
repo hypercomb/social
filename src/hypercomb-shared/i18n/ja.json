@@ -106,7 +106,7 @@
   "providers.search": "プロバイダーとモデルを検索",
   "providers.empty": "該当なし",
   "providers.tab.subscription": "サブスクリプション",
-  "providers.tab.api": "APIリクエスト",
+  "providers.tab.api": "チャットAPI",
   "providers.tab.swarm": "群れ",
   "providers.tabHint.subscription": "すでに支払っているプランです。このマシンで動いているCLIセッションが自分のアカウントで応答します。ハイブを読めるのはこの応答者だけです。",
   "providers.tabHint.api": "ここに貼った鍵でリクエストごとに課金されます。鍵はこのブラウザに留まり、送信先のエンドポイントは貼る前に表示されます。",

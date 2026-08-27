@@ -112,7 +112,15 @@ interface StateStep {
   args?: string
   text?: string
   model?: string
+  next?: readonly string[]
+  position?: Readonly<{ x: number; y: number }>
   hasChildren: boolean
+}
+
+interface FlowConnection {
+  id: string
+  sourceCell: string
+  targetCell: string
 }
 
 interface WorkflowStateMsg {
@@ -322,6 +330,58 @@ ${SURFACE_NAME} .workflow-log-list{list-style:none;margin:0;padding:0 .9rem}
 ${SURFACE_NAME} .workflow-log-row{display:flex;align-items:flex-start;gap:.4rem;padding:.16rem 0;min-width:0}
 ${SURFACE_NAME} .workflow-log-cell{color:#cfe3ef}
 ${SURFACE_NAME} .workflow-log-detail{flex:1;color:#7f95a3;font-size:.88em;overflow-wrap:anywhere}
+
+/* Framework-free workflow studio. The records remain Hypercomb tiles; this
+   surface owns only interaction and projection. */
+${SURFACE_NAME}.open{overflow:hidden}
+${SURFACE_NAME} .workflow-panel.workflow-studio{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:auto}
+${SURFACE_NAME} .workflow-commandbar{flex:0 0 auto;display:flex;align-items:center;gap:.4rem;min-height:2.65rem;padding:.35rem .65rem;border-bottom:1px solid rgba(126,182,214,.18);background:rgba(10,13,19,.98)}
+${SURFACE_NAME} .workflow-commandbar-spacer{flex:1}
+${SURFACE_NAME} .workflow-workbench{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:minmax(190px,22%) minmax(320px,1fr) minmax(240px,28%);overflow:hidden}
+${SURFACE_NAME} .workflow-library,${SURFACE_NAME} .workflow-inspector-pane{min-width:0;min-height:0;display:flex;flex-direction:column;overflow:auto;background:rgba(8,11,16,.97)}
+${SURFACE_NAME} .workflow-library{border-right:1px solid rgba(126,182,214,.18)}
+${SURFACE_NAME} .workflow-inspector-pane{border-left:1px solid rgba(126,182,214,.18)}
+${SURFACE_NAME} .workflow-pane-head{display:flex;align-items:center;gap:.5rem;padding:.2rem 0;border-bottom:1px solid rgba(126,182,214,.1)}
+${SURFACE_NAME} .workflow-pane-head .workflow-section-title{flex:1}
+${SURFACE_NAME} .workflow-library .workflow-palette-search{flex:0 0 auto}
+${SURFACE_NAME} .workflow-library .workflow-palette-list{flex:1;max-height:none;padding-bottom:.6rem}
+${SURFACE_NAME} .workflow-library .workflow-palette-btn{cursor:pointer}
+
+${SURFACE_NAME} .workflow-flow-pane{position:relative;min-width:0;min-height:0;overflow:auto;outline:none;cursor:grab;background-color:#090d13;background-image:radial-gradient(circle,rgba(126,182,214,.2) 1px,transparent 1px);background-size:16px 16px;scrollbar-color:rgba(126,182,214,.3) transparent}
+${SURFACE_NAME} .workflow-flow-pane.panning{cursor:grabbing;user-select:none}
+${SURFACE_NAME} .workflow-flow-pane:focus-visible{box-shadow:inset 0 0 0 1px rgba(126,182,214,.45)}
+${SURFACE_NAME} .workflow-graph{position:relative;transform-origin:0 0;transition:transform 100ms ease}
+${SURFACE_NAME} .workflow-connections{position:absolute;inset:0;overflow:visible;pointer-events:none}
+${SURFACE_NAME} .workflow-edge{fill:none;stroke:rgba(126,182,214,.5);stroke-width:2.25;pointer-events:stroke;cursor:pointer}
+${SURFACE_NAME} .workflow-edge:hover{stroke:rgba(126,182,214,.95);stroke-width:3}
+${SURFACE_NAME} .workflow-edge.selected{stroke:#d99a4e;stroke-width:3.5}
+${SURFACE_NAME} .workflow-edge.creating{stroke:#7eb6d6;stroke-dasharray:6 5;pointer-events:none}
+${SURFACE_NAME} .workflow-node{position:absolute;box-sizing:border-box;width:236px;min-height:112px;padding:0;border:1px solid rgba(126,182,214,.32);border-radius:var(--hc-radius-card,3px);background:rgba(15,20,29,.98);box-shadow:0 10px 28px rgba(0,0,0,.35);outline:none;cursor:default;user-select:none}
+${SURFACE_NAME} .workflow-node:hover{border-color:rgba(126,182,214,.62)}
+${SURFACE_NAME} .workflow-node.selected{border-color:#7eb6d6;box-shadow:0 0 0 2px rgba(126,182,214,.2),0 12px 32px rgba(0,0,0,.45)}
+${SURFACE_NAME} .workflow-node.dragging{opacity:.9;box-shadow:0 18px 42px rgba(0,0,0,.55)}
+${SURFACE_NAME} .workflow-node.unset{border-color:rgba(217,154,78,.55)}
+${SURFACE_NAME} .workflow-node-head{display:flex;align-items:center;gap:.42rem;min-height:2.4rem;padding:.35rem .55rem;border-bottom:1px solid rgba(126,182,214,.14);cursor:move}
+${SURFACE_NAME} .workflow-node-icon{font-size:1.1rem;color:#7eb6d6}
+${SURFACE_NAME} .workflow-node-head .workflow-step-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+${SURFACE_NAME} .workflow-node-body{display:flex;flex-direction:column;align-items:flex-start;gap:.45rem;padding:.55rem .65rem}
+${SURFACE_NAME} .workflow-node-body .workflow-step-summary{display:-webkit-box;overflow:hidden;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+${SURFACE_NAME} .workflow-node-body .workflow-step-nested{display:inline-flex;align-items:center;gap:.25rem;font-size:.76em}
+${SURFACE_NAME} .workflow-node-body .workflow-step-nested .mat-sym{font-size:1rem}
+${SURFACE_NAME} .workflow-connector{position:absolute;top:48px;width:12px;height:12px;border:2px solid rgba(126,182,214,.9);border-radius:999px;background:#0a0f16;z-index:3}
+${SURFACE_NAME} .workflow-connector.input{left:-8px}
+${SURFACE_NAME} .workflow-connector.output{right:-8px;cursor:crosshair}
+${SURFACE_NAME} .workflow-connector:hover{background:#7eb6d6;box-shadow:0 0 0 4px rgba(126,182,214,.16)}
+${SURFACE_NAME} .workflow-flow-empty,${SURFACE_NAME} .workflow-inspector-empty{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.45rem;text-align:center;color:#7f95a3}
+${SURFACE_NAME} .workflow-flow-empty .mat-sym,${SURFACE_NAME} .workflow-inspector-empty .mat-sym{font-size:2.2rem;color:rgba(126,182,214,.65)}
+${SURFACE_NAME} .workflow-flow-empty strong,${SURFACE_NAME} .workflow-inspector-empty strong{color:#cfe3ef;font-weight:500}
+${SURFACE_NAME} .workflow-inspector.studio{margin:0;border-top:0}
+${SURFACE_NAME} .workflow-inspector-pane .workflow-textarea{min-height:6rem}
+${SURFACE_NAME} .workflow-edges{margin-top:.35rem;padding-top:.35rem;border-top:1px solid rgba(126,182,214,.15)}
+${SURFACE_NAME} .workflow-edge-row{display:flex;align-items:center;gap:.35rem;margin:.2rem .9rem;padding:.3rem .45rem;border:1px solid rgba(126,182,214,.18);border-radius:var(--hc-radius-control,2px);color:#cfe3ef}
+${SURFACE_NAME} .workflow-edge-row>span:first-child{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+${SURFACE_NAME} .workflow-edge-remove{border:0;background:none;color:#7f95a3;cursor:pointer}
+${SURFACE_NAME} .workflow-edge-remove:hover{color:#cf6f5e}
 `
 
 let cssInstalled = false
@@ -389,6 +449,8 @@ export class WorkflowDesignerElement extends DockedPanelElement {
   #selected: string | null = null
   #paletteQuery = ''
   #paletteOpen = false
+  #selectedEdge: string | null = null
+  #graphScale = 1
   /** The name typed into the empty state, before the workflow exists. */
   #draftName = ''
 
@@ -424,6 +486,9 @@ export class WorkflowDesignerElement extends DockedPanelElement {
   #paletteEl: HTMLElement | null = null
   #paletteLabelEl: HTMLElement | null = null
   #logEl: HTMLElement | null = null
+  #inspectorPane: HTMLElement | null = null
+  #flowPane: HTMLElement | null = null
+  #graphEl: HTMLElement | null = null
   /** One record per step ROW. The ONLY keyed map in this file, and it exists
    *  for exactly the sanctioned reason: `workflow:run-state` and
    *  `workflow:step-focus` are STREAMS while a run walks, and rebuilding the
@@ -440,9 +505,9 @@ export class WorkflowDesignerElement extends DockedPanelElement {
     // code font and group membership all come across with the participant.
     this.panelId = 'workflow-designer'
     this.dockSide = 'left'
-    this.minWidth = 300
-    this.maxWidth = 620
-    this.defaultWidth = 380
+    this.minWidth = 720
+    this.maxWidth = 1440
+    this.defaultWidth = 1080
     // Registry-fed: mounted once at boot, engaged only when something opens it.
     this.autoActivate = false
     // The Angular original built this with `signalSession(visible, announce,
@@ -530,6 +595,38 @@ export class WorkflowDesignerElement extends DockedPanelElement {
     return ''
   }
 
+  #positionOf(step: StateStep): { x: number; y: number } {
+    if (Number.isFinite(step.position?.x) && Number.isFinite(step.position?.y)) {
+      return { x: Number(step.position?.x), y: Number(step.position?.y) }
+    }
+    return { x: 72 + (step.index % 4) * 288, y: 88 + Math.floor(step.index / 4) * 190 }
+  }
+
+  #iconOf(step: StateStep): string {
+    const rows = this.#palette
+    if (step.kind === 'command') {
+      return rows.find(row => row.kind === 'command' && row.command === step.command)?.icon
+        ?? rows.find(row => row.kind === 'command' && !row.command)?.icon
+        ?? 'terminal'
+    }
+    return rows.find(row => row.kind === step.kind)?.icon ?? (step.kind ? 'bolt' : 'help')
+  }
+
+  #connections(): FlowConnection[] {
+    const cells = new Set(this.#steps.map(step => step.cell))
+    const out: FlowConnection[] = []
+    this.#steps.forEach((step, index) => {
+      const targets = step.next === undefined
+        ? (this.#steps[index + 1] ? [this.#steps[index + 1].cell] : [])
+        : step.next
+      for (const target of targets) {
+        if (!cells.has(target) || target === step.cell) continue
+        out.push({ id: `edge:${step.cell}->${target}`, sourceCell: step.cell, targetCell: target })
+      }
+    })
+    return out
+  }
+
   #hasField(field: PaletteEntry['fields'][number]): boolean {
     return this.#selectedKind?.fields?.includes(field) === true
   }
@@ -571,6 +668,9 @@ export class WorkflowDesignerElement extends DockedPanelElement {
         // different workflow) must not linger in the inspector.
         if (this.#selected && !this.#steps.some(s => s.cell === this.#selected)) {
           this.#selected = null
+        }
+        if (this.#selectedEdge && !this.#connections().some(edge => edge.id === this.#selectedEdge)) {
+          this.#selectedEdge = null
         }
         this.#loadDrafts()
         // A workflow with no steps yet is a panel whose one useful control is
@@ -723,6 +823,9 @@ export class WorkflowDesignerElement extends DockedPanelElement {
     this.#paletteEl = null
     this.#paletteLabelEl = null
     this.#logEl = null
+    this.#inspectorPane = null
+    this.#flowPane = null
+    this.#graphEl = null
     this.#stepRows.clear()
   }
 
@@ -749,7 +852,7 @@ export class WorkflowDesignerElement extends DockedPanelElement {
     // to place its canvas — see the file header. It carries NONE of the panel
     // material (that is on the tag); it is a plain full-width block, so the
     // left/right the drone reads are the panel's own.
-    const body = el('div', 'workflow-panel')
+    const body = el('div', 'workflow-panel workflow-studio')
 
     this.append(header, body)
     this.#titleEl = title
@@ -784,7 +887,11 @@ export class WorkflowDesignerElement extends DockedPanelElement {
     const count = this.#countEl
     const heading = this.#headingEl
     if (!count || !heading) return
-    if (!this.#isWorkflow) { count.remove(); return }
+    const priorName = heading.querySelector('.workflow-name')
+    if (!this.#isWorkflow) { count.remove(); priorName?.remove(); return }
+    const name = priorName ?? el('span', 'workflow-name')
+    name.textContent = this.#name
+    if (!name.parentNode) heading.appendChild(name)
     count.textContent = String(this.#stepCount)
     if (!count.parentNode) heading.appendChild(count)
   }
@@ -808,6 +915,8 @@ export class WorkflowDesignerElement extends DockedPanelElement {
     const snap = focusSnapshot(body)
     const panelScroll = this.scrollTop
     const paletteScroll = body.querySelector('.workflow-palette-list')?.scrollTop ?? 0
+    const flowLeft = body.querySelector('.workflow-flow-pane')?.scrollLeft ?? 0
+    const flowTop = body.querySelector('.workflow-flow-pane')?.scrollTop ?? 0
 
     body.replaceChildren()
     this.#stepRows.clear()
@@ -816,12 +925,17 @@ export class WorkflowDesignerElement extends DockedPanelElement {
     this.#paletteEl = null
     this.#paletteLabelEl = null
     this.#logEl = null
+    this.#inspectorPane = null
+    this.#flowPane = null
+    this.#graphEl = null
 
     body.append(...(this.#isWorkflow ? this.#buildWorkflow() : [this.#buildEmptyState()]))
 
     if (panelScroll > 0) this.scrollTop = panelScroll
     const list = body.querySelector('.workflow-palette-list')
     if (list && paletteScroll > 0) list.scrollTop = paletteScroll
+    const flow = body.querySelector('.workflow-flow-pane')
+    if (flow) { flow.scrollLeft = flowLeft; flow.scrollTop = flowTop }
     restoreFocus(body, snap)
   }
 
@@ -896,37 +1010,364 @@ export class WorkflowDesignerElement extends DockedPanelElement {
 
   // ── the workflow ────────────────────────────────────────────────────
   #buildWorkflow(): HTMLElement[] {
-    const parts: HTMLElement[] = []
-
-    const identity = el('section', 'workflow-identity')
-    identity.appendChild(el('span', 'workflow-name', this.#name))
-    if (this.#description) {
-      identity.appendChild(el('span', 'workflow-description', this.#description))
-    }
-    parts.push(identity)
-
-    const run = el('section', 'workflow-run')
-    run.setAttribute('role', 'group')
+    const run = el('section', 'workflow-commandbar')
+    run.setAttribute('role', 'toolbar')
     run.setAttribute('aria-label', t('workflow.run.title', 'Run'))
     this.#runBar = run
     this.#fillRunBar()
-    parts.push(run)
 
-    parts.push(el('h3', 'workflow-section-title', t('workflow.steps.title', 'Steps')))
-    parts.push(this.#stepCount ? this.#buildSteps() : el('p', 'workflow-hint',
-      t('workflow.steps.empty',
-        'No steps yet. Add one below, or make tiles on the hive — every child tile is a step.')))
+    const workbench = el('div', 'workflow-workbench')
+    const library = this.#buildLibrary()
+    const flow = this.#buildFlowPane()
+    const inspector = el('aside', 'workflow-inspector-pane')
+    inspector.setAttribute('aria-label', 'Step inspector')
+    this.#inspectorPane = inspector
+    this.#fillStudioInspector()
+    workbench.append(library, flow, inspector)
+    return [run, workbench]
+  }
 
-    const inspector = this.#buildInspector()
-    if (inspector) { this.#inspectorEl = inspector; parts.push(inspector) }
+  #buildLibrary(): HTMLElement {
+    const library = el('aside', 'workflow-library')
+    library.setAttribute('aria-label', 'Step library')
+    const head = el('div', 'workflow-pane-head')
+    head.append(el('h3', 'workflow-section-title', t('workflow.steps.title', 'Steps')),
+      el('span', 'workflow-count', String(this.#paletteRows.length)))
+    library.appendChild(head)
 
-    this.#paletteEl = this.#buildPalette()
-    parts.push(this.#paletteEl)
+    const search = el('input', 'workflow-input workflow-palette-search')
+    search.type = 'search'
+    search.value = this.#paletteQuery
+    search.placeholder = t('workflow.palette.search', 'Search steps and commands…')
+    search.dataset['hcRow'] = 'palette-search'
+    search.addEventListener('input', event => {
+      this.#paletteQuery = valueOf(event)
+      this.#replacePaletteRows()
+    })
+    search.addEventListener('keydown', event => event.stopPropagation())
+    library.append(search, this.#buildStudioPaletteRows())
+    if (this.#paletteTruncated) library.appendChild(el('p', 'workflow-hint',
+      t('workflow.palette.more', 'Narrow the search to see more.')))
+    this.#paletteEl = library
+    return library
+  }
 
+  #buildStudioPaletteRows(): HTMLElement {
+    const list = el('ul', 'workflow-palette-list')
+    for (const entry of this.#paletteRows) {
+      const row = el('li', 'workflow-palette-row')
+      row.setAttribute('data-group', entry.group)
+      const pick = el('button', 'workflow-palette-btn')
+      pick.type = 'button'
+      pick.dataset['hcRow'] = `palette:${entry.kind}:${entry.command ?? ''}`
+      pick.append(sym(entry.icon, 'mat-sym workflow-palette-icon'))
+      const copy = el('span', 'workflow-palette-body')
+      copy.appendChild(el('span', 'workflow-palette-label', entry.label))
+      if (entry.description) copy.appendChild(el('span', 'workflow-palette-description', entry.description))
+      pick.appendChild(copy)
+      pick.addEventListener('click', () => this.#pick(entry))
+      row.appendChild(pick)
+      list.appendChild(row)
+    }
+    return list
+  }
+
+  #buildFlowPane(): HTMLElement {
+    const pane = el('main', 'workflow-flow-pane')
+    pane.setAttribute('aria-label', 'Workflow graph')
+    pane.tabIndex = 0
+    pane.addEventListener('keydown', this.#onGraphKey)
+    pane.addEventListener('wheel', this.#onGraphWheel, { passive: false })
+    pane.addEventListener('pointerdown', this.#startGraphPan)
+    this.#flowPane = pane
+
+    if (!this.#stepCount) {
+      const empty = el('div', 'workflow-flow-empty')
+      empty.append(sym('account_tree'), el('strong', undefined, 'No steps yet'),
+        el('span', undefined, 'Choose a step from the library to begin.'))
+      pane.appendChild(empty)
+      return pane
+    }
+
+    const positions = new Map(this.#steps.map(step => [step.cell, this.#positionOf(step)]))
+    const width = Math.max(1200, ...[...positions.values()].map(point => point.x + 360))
+    const height = Math.max(780, ...[...positions.values()].map(point => point.y + 240))
+    const graph = el('div', 'workflow-graph')
+    graph.style.width = `${width}px`
+    graph.style.height = `${height}px`
+    graph.style.transform = `scale(${this.#graphScale})`
+    this.#graphEl = graph
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    svg.classList.add('workflow-connections')
+    svg.setAttribute('width', String(width))
+    svg.setAttribute('height', String(height))
+    for (const connection of this.#connections()) {
+      const source = positions.get(connection.sourceCell)
+      const target = positions.get(connection.targetCell)
+      if (!source || !target) continue
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+      const x1 = source.x + 236
+      const y1 = source.y + 56
+      const x2 = target.x
+      const y2 = target.y + 56
+      const bend = Math.max(70, Math.abs(x2 - x1) * .45)
+      path.setAttribute('d', `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`)
+      path.classList.add('workflow-edge')
+      path.classList.toggle('selected', this.#selectedEdge === connection.id)
+      path.dataset['edge'] = connection.id
+      path.addEventListener('pointerdown', event => {
+        event.stopPropagation()
+        this.#selectedEdge = connection.id
+        this.#selected = null
+        this.#applySelection()
+        pane.focus()
+      })
+      svg.appendChild(path)
+    }
+    graph.appendChild(svg)
+
+    for (const step of this.#steps) {
+      const point = positions.get(step.cell)!
+      const node = el('article', 'workflow-node')
+      node.style.left = `${point.x}px`
+      node.style.top = `${point.y}px`
+      node.dataset['workflowStep'] = step.cell
+      node.dataset['hcRow'] = `step:${step.cell}`
+      node.classList.toggle('selected', this.#selected === step.cell)
+      node.classList.toggle('unset', !step.kind)
+      node.setAttribute('data-status', this.#statusOf(step.cell))
+      node.tabIndex = 0
+      node.addEventListener('click', () => this.#focus(step.cell))
+
+      const input = el('span', 'workflow-connector input')
+      input.dataset['connector'] = `in:${step.cell}`
+      const head = el('header', 'workflow-node-head')
+      head.append(el('span', 'workflow-step-index', String(step.index + 1)),
+        sym(this.#iconOf(step), 'mat-sym workflow-node-icon'),
+        el('span', 'workflow-step-name', step.cell))
+      let dot: HTMLElement | null = null
+      const status = this.#statusOf(step.cell)
+      if (status) {
+        dot = el('span', 'workflow-step-status')
+        dot.setAttribute('data-status', status)
+        head.appendChild(dot)
+      }
+      head.addEventListener('pointerdown', event => this.#startNodeDrag(event, step, node))
+
+      const body = el('div', 'workflow-node-body')
+      const kind = el('span', 'workflow-step-kind', step.kind || t('workflow.step.unset', 'needs a kind'))
+      kind.classList.toggle('needs', !step.kind)
+      body.appendChild(kind)
+      const summary = this.#summaryOf(step)
+      if (summary) body.appendChild(el('span', 'workflow-step-summary', summary))
+      if (step.hasChildren) {
+        const nested = el('span', 'workflow-step-nested')
+        nested.append(sym('account_tree'), document.createTextNode('Sub-workflow'))
+        body.appendChild(nested)
+      }
+      const output = el('span', 'workflow-connector output')
+      output.dataset['connector'] = `out:${step.cell}`
+      output.addEventListener('pointerdown', event => this.#startConnection(event, step.cell))
+      node.append(input, head, body, output)
+      graph.appendChild(node)
+      this.#stepRows.set(step.cell, { li: node, btn: node, dot })
+    }
+    pane.appendChild(graph)
+    return pane
+  }
+
+  #fillStudioInspector(): void {
+    const pane = this.#inspectorPane
+    if (!pane) return
+    pane.replaceChildren()
+    const step = this.#selectedStep
+    if (step) {
+      const inspector = this.#buildInspector()
+      if (inspector) {
+        inspector.classList.add('studio')
+        pane.appendChild(inspector)
+        this.#inspectorEl = inspector
+      }
+      const routes = el('section', 'workflow-edges')
+      routes.appendChild(el('h3', 'workflow-section-title', 'Routes'))
+      for (const connection of this.#connections().filter(edge => edge.sourceCell === step.cell)) {
+        const row = el('div', 'workflow-edge-row')
+        row.append(el('span', undefined, connection.targetCell), sym('arrow_forward'))
+        const remove = el('button', 'workflow-edge-remove', '×')
+        remove.type = 'button'
+        remove.setAttribute('aria-label', `Remove route to ${connection.targetCell}`)
+        remove.addEventListener('click', () => this.#removeConnection(connection))
+        row.appendChild(remove)
+        routes.appendChild(row)
+      }
+      routes.appendChild(el('p', 'workflow-hint',
+        'Drag from a node’s right connector to another node’s left connector to create a route.'))
+      pane.appendChild(routes)
+    } else {
+      const empty = el('div', 'workflow-inspector-empty')
+      empty.append(sym('touch_app'), el('strong', undefined, 'Select a step'),
+        el('span', undefined, 'Edit its behaviour, prompt, model, and routes here.'))
+      pane.appendChild(empty)
+    }
     this.#logEl = this.#buildLog()
-    if (this.#logEl) parts.push(this.#logEl)
+    if (this.#logEl) pane.appendChild(this.#logEl)
+  }
 
-    return parts
+  #replaceTargets(cell: string, update: (targets: string[]) => string[]): void {
+    const index = this.#steps.findIndex(step => step.cell === cell)
+    if (index < 0) return
+    const step = this.#steps[index]
+    const current = step.next === undefined
+      ? (this.#steps[index + 1] ? [this.#steps[index + 1].cell] : [])
+      : [...step.next]
+    const valid = new Set(this.#steps.map(item => item.cell))
+    const targets = [...new Set(update(current))]
+      .filter(target => target !== cell && valid.has(target))
+    EffectBus.emit('workflow:connection-set', { segments: step.segments, targets })
+  }
+
+  #removeConnection(connection: FlowConnection): void {
+    this.#replaceTargets(connection.sourceCell,
+      targets => targets.filter(target => target !== connection.targetCell))
+    this.#selectedEdge = null
+  }
+
+  #startNodeDrag(event: PointerEvent, step: StateStep, node: HTMLElement): void {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    this.#focus(step.cell)
+    const start = this.#positionOf(step)
+    const startX = event.clientX
+    const startY = event.clientY
+    let moved = false
+    const move = (next: PointerEvent): void => {
+      const x = Math.max(16, start.x + (next.clientX - startX) / this.#graphScale)
+      const y = Math.max(16, start.y + (next.clientY - startY) / this.#graphScale)
+      node.style.left = `${Math.round(x)}px`
+      node.style.top = `${Math.round(y)}px`
+      moved ||= Math.abs(next.clientX - startX) + Math.abs(next.clientY - startY) > 3
+    }
+    const up = (next: PointerEvent): void => {
+      document.removeEventListener('pointermove', move)
+      document.removeEventListener('pointerup', up)
+      node.classList.remove('dragging')
+      if (!moved) return
+      EffectBus.emit('workflow:step-move', {
+        segments: step.segments,
+        position: {
+          x: Math.max(16, Math.round(start.x + (next.clientX - startX) / this.#graphScale)),
+          y: Math.max(16, Math.round(start.y + (next.clientY - startY) / this.#graphScale)),
+        },
+      })
+    }
+    node.classList.add('dragging')
+    document.addEventListener('pointermove', move)
+    document.addEventListener('pointerup', up)
+  }
+
+  #startConnection(event: PointerEvent, sourceCell: string): void {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    const graph = this.#graphEl
+    const svg = graph?.querySelector<SVGSVGElement>('.workflow-connections')
+    const source = this.#steps.find(step => step.cell === sourceCell)
+    if (!graph || !svg || !source) return
+    const point = this.#positionOf(source)
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    path.classList.add('workflow-edge', 'creating')
+    svg.appendChild(path)
+    const draw = (next: PointerEvent): void => {
+      const rect = graph.getBoundingClientRect()
+      const x1 = point.x + 236
+      const y1 = point.y + 56
+      const x2 = (next.clientX - rect.left) / this.#graphScale
+      const y2 = (next.clientY - rect.top) / this.#graphScale
+      const bend = Math.max(70, Math.abs(x2 - x1) * .45)
+      path.setAttribute('d', `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`)
+    }
+    draw(event)
+    const up = (next: PointerEvent): void => {
+      document.removeEventListener('pointermove', draw)
+      document.removeEventListener('pointerup', up)
+      path.remove()
+      const target = document.elementFromPoint(next.clientX, next.clientY)
+        ?.closest<HTMLElement>('[data-connector^="in:"]')
+      const targetCell = target?.dataset['connector']?.slice(3)
+      if (targetCell && targetCell !== sourceCell) {
+        this.#replaceTargets(sourceCell, targets => [...targets, targetCell])
+      }
+    }
+    document.addEventListener('pointermove', draw)
+    document.addEventListener('pointerup', up)
+  }
+
+  readonly #onGraphKey = (event: KeyboardEvent): void => {
+    if (event.key !== 'Delete' && event.key !== 'Backspace') return
+    if (this.#selectedEdge) {
+      const edge = this.#connections().find(candidate => candidate.id === this.#selectedEdge)
+      if (edge) this.#removeConnection(edge)
+      event.preventDefault()
+      return
+    }
+    if (this.#selected) {
+      EffectBus.emit('toast:show', {
+        type: 'info', title: 'Workflow',
+        message: 'Delete the underlying tile to remove a workflow step.',
+      })
+      event.preventDefault()
+    }
+  }
+
+  readonly #onGraphWheel = (event: WheelEvent): void => {
+    if (!event.ctrlKey && !event.metaKey) return
+    event.preventDefault()
+    this.#graphScale = Math.min(1.6, Math.max(.35, this.#graphScale * (event.deltaY > 0 ? .9 : 1.1)))
+    if (this.#graphEl) this.#graphEl.style.transform = `scale(${this.#graphScale})`
+  }
+
+  readonly #startGraphPan = (event: PointerEvent): void => {
+    const pane = this.#flowPane
+    if (!pane || event.button !== 0) return
+    const target = event.target as HTMLElement
+    if (target.closest('.workflow-node,.workflow-edge')) return
+    const startX = event.clientX
+    const startY = event.clientY
+    const left = pane.scrollLeft
+    const top = pane.scrollTop
+    const move = (next: PointerEvent): void => {
+      pane.scrollLeft = left - (next.clientX - startX)
+      pane.scrollTop = top - (next.clientY - startY)
+    }
+    const up = (): void => {
+      document.removeEventListener('pointermove', move)
+      document.removeEventListener('pointerup', up)
+      pane.classList.remove('panning')
+    }
+    pane.classList.add('panning')
+    document.addEventListener('pointermove', move)
+    document.addEventListener('pointerup', up)
+  }
+
+  #fitFlow(): void {
+    const pane = this.#flowPane
+    const graph = this.#graphEl
+    if (!pane || !graph) return
+    const width = parseFloat(graph.style.width) || 1200
+    const height = parseFloat(graph.style.height) || 780
+    this.#graphScale = Math.min(1, Math.max(.35,
+      Math.min((pane.clientWidth - 64) / width, (pane.clientHeight - 64) / height)))
+    graph.style.transform = `scale(${this.#graphScale})`
+    pane.scrollTo({ left: 0, top: 0, behavior: 'smooth' })
+  }
+
+  #appendRunTools(bar: HTMLElement): void {
+    const spacer = el('span', 'workflow-commandbar-spacer')
+    const fit = this.#runButton('fit_screen', 'Fit', () => this.#fitFlow())
+    fit.dataset['hcRow'] = 'fit-flow'
+    bar.append(spacer, fit)
   }
 
   // ── run bar ─────────────────────────────────────────────────────────
@@ -951,6 +1392,7 @@ export class WorkflowDesignerElement extends DockedPanelElement {
       stepwise.disabled = !this.#stepCount
       stepwise.dataset['hcRow'] = 'run-stepwise'
       bar.append(start, stepwise)
+      this.#appendRunTools(bar)
       return
     }
 
@@ -967,6 +1409,7 @@ export class WorkflowDesignerElement extends DockedPanelElement {
       at: (this.#run?.at ?? 0) + 1,
       total: this.#run?.total ?? 0,
     })))
+    this.#appendRunTools(bar)
   }
 
   #runButton(glyph: string, label: string, onClick: () => void): HTMLButtonElement {
@@ -1105,6 +1548,12 @@ export class WorkflowDesignerElement extends DockedPanelElement {
    *  before when it comes back. */
   #renderInspector(): void {
     if (!this.#body || !this.#isWorkflow) return
+    if (this.#inspectorPane) {
+      const snap = focusSnapshot(this)
+      this.#fillStudioInspector()
+      restoreFocus(this, snap)
+      return
+    }
     // The inspector holds live form controls, so replacing it wholesale throws
     // away whatever the participant was typing in. `#renderBody` guards this;
     // this path did not, and it runs on every `workflow:palette`. Snapshot
@@ -1202,7 +1651,9 @@ export class WorkflowDesignerElement extends DockedPanelElement {
     if (!section) return
     const current = section.querySelector('.workflow-palette-list')
     if (!current) return
-    current.replaceWith(this.#buildPaletteRows())
+    current.replaceWith(section.classList.contains('workflow-library')
+      ? this.#buildStudioPaletteRows()
+      : this.#buildPaletteRows())
     const hint = section.querySelector('.workflow-palette-list ~ .workflow-hint')
     const wanted = this.#paletteTruncated
     if (wanted && !hint) {
@@ -1215,6 +1666,10 @@ export class WorkflowDesignerElement extends DockedPanelElement {
 
   #renderPaletteSection(): void {
     if (!this.#body || !this.#isWorkflow) return
+    if (this.#paletteEl?.classList.contains('workflow-library')) {
+      this.#renderBody()
+      return
+    }
     // Same guard as `#renderBody`: this replaces the search box and the whole
     // row list, and it runs on every `workflow:palette`. Without the snapshot a
     // participant filtering the palette loses the caret on their own keystroke,
@@ -1303,7 +1758,7 @@ export class WorkflowDesignerElement extends DockedPanelElement {
     const current = this.#logEl
     if (current && next) current.replaceWith(next)
     else if (current && !next) current.remove()
-    else if (!current && next) this.#body.appendChild(next)
+    else if (!current && next) (this.#inspectorPane ?? this.#body).appendChild(next)
     this.#logEl = next
   }
 
@@ -1313,6 +1768,9 @@ export class WorkflowDesignerElement extends DockedPanelElement {
   #applySelection(): void {
     for (const [cell, row] of this.#stepRows) {
       row.li.classList.toggle('selected', this.#selected === cell)
+    }
+    for (const edge of this.querySelectorAll<SVGPathElement>('.workflow-edge:not(.creating)')) {
+      edge.classList.toggle('selected', edge.dataset['edge'] === this.#selectedEdge)
     }
     this.#renderInspector()
     if (this.#paletteLabelEl) {
@@ -1344,6 +1802,7 @@ export class WorkflowDesignerElement extends DockedPanelElement {
   // ── steps ───────────────────────────────────────────────────────────
 
   #select(cell: string): void {
+    this.#selectedEdge = null
     this.#selected = this.#selected === cell ? null : cell
     this.#loadDrafts()
     this.#applySelection()
@@ -1354,6 +1813,7 @@ export class WorkflowDesignerElement extends DockedPanelElement {
    *  external click means "this one", never "put it away". */
   #focus(cell: string): void {
     if (!this.#steps.some(s => s.cell === cell)) return
+    this.#selectedEdge = null
     this.#selected = cell
     this.#loadDrafts()
     this.#applySelection()
@@ -1391,6 +1851,8 @@ export class WorkflowDesignerElement extends DockedPanelElement {
         args: this.#draftArgs,
         text: this.#draftText,
         model: this.#draftModel,
+        next: step.next,
+        position: step.position,
       },
     })
   }
@@ -1408,7 +1870,10 @@ export class WorkflowDesignerElement extends DockedPanelElement {
     if (this.#swallowClick) { this.#swallowClick = false; return }
     const step = this.#selectedStep
     if (step) {
-      EffectBus.emit('workflow:step-set', { segments: step.segments, step: seedOf(entry) })
+      EffectBus.emit('workflow:step-set', {
+        segments: step.segments,
+        step: { ...seedOf(entry), next: step.next, position: step.position },
+      })
       return
     }
     EffectBus.emit('workflow:step-add', {

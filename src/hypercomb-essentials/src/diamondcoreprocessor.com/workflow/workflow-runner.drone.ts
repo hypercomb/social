@@ -41,6 +41,7 @@
 import { Drone, EffectBus } from '@hypercomb/core'
 import { readWorkflow } from './workflow-slot.js'
 import { readSteps, type WorkflowStep, type WorkflowStepView } from './workflow-step.js'
+import { planWorkflowSteps } from './workflow-graph.js'
 import type {
   WorkflowRunContext, WorkflowStepKind, WorkflowStepOutcome, WorkflowStepRegistry,
 } from './workflow-step-registry.js'
@@ -70,6 +71,9 @@ export interface WorkflowRunState {
   readonly at: number
   readonly total: number
   readonly results: readonly WorkflowRunResult[]
+  /** The graph node currently waiting to run. Prefer this over assuming the
+   *  child-list index when explicit connections reorder execution. */
+  readonly activeCell?: string
   /** Set when the run has ended — 'done', 'stopped', 'failed', 'asked'. */
   readonly finished?: 'done' | 'stopped' | 'failed' | 'asked'
 }
@@ -141,7 +145,7 @@ export class WorkflowRunnerDrone extends Drone {
     }
 
     const record = await readWorkflow(segments)
-    const steps = await readSteps(segments)
+    const steps = planWorkflowSteps(await readSteps(segments))
     if (!steps.length) {
       this.#toast('info', 'This workflow has no steps yet')
       return
@@ -348,6 +352,7 @@ export class WorkflowRunnerDrone extends Drone {
       at: run.at,
       total: run.steps.length,
       results: [...run.results],
+      activeCell: run.steps[run.at]?.cell,
       ...(finished ? { finished } : {}),
     })
   }

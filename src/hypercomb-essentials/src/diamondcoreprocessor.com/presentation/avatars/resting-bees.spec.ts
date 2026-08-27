@@ -8,9 +8,10 @@
 //   4. the id is the chat window's own, so resting and working are ONE sprite
 //   5. no targets for the hive's own conversation — how the drone spells
 //      "hive-wide"
+//   6. the id reads back as the conversation, so a press can open the talk
 
 import { describe, it, expect } from 'vitest'
-import { restingBees, type RestingSource } from './resting-bees.js'
+import { restingBees, restingConvoId, type RestingSource } from './resting-bees.js'
 
 const chat = (over: Partial<RestingSource> & { path: string; convoId: string }): RestingSource => ({
   title: 'what is this', lastAt: 1_000, archived: false, ...over,
@@ -94,5 +95,19 @@ describe('resting bees — one per talked-to tile', () => {
 
   it('nothing talked to is no bees', () => {
     expect(restingBees([], noModels).size).toBe(0)
+  })
+})
+
+describe('restingConvoId', () => {
+  it('reads the conversation back out of the bee id', () => {
+    const [id] = [...restingBees([{
+      path: '/diagrams', convoId: 'chat:tile:/diagrams',
+      title: 't', lastAt: 1, archived: false,
+    }], noModels).keys()]
+    expect(restingConvoId(id!)).toBe('chat:tile:/diagrams')
+  })
+
+  it('is empty for an id that is not a conversation — an agent’s report stays its own', () => {
+    expect(restingConvoId('folder-sync-1')).toBe('')
   })
 })

@@ -1,12 +1,17 @@
 // diamondcoreprocessor.com/assistant/agent-panel.view.ts
 //
-// AGENT PANEL — click a bee, see what it is doing, give it more to work with.
+// AGENT PANEL — click a bee, read what it is doing.
 //
 // Opened by the `agent:open` effect (agent-bee.drone.ts). Shows one agent:
 // which behaviour is flying, what was asked, where the answer will land, and
-// the running activity the responder reports over the bridge. The text box at
-// the bottom hands the agent MORE CONTEXT while it is still in flight — the
-// thing you think of ten seconds after you asked.
+// the running activity the responder reports over the bridge.
+//
+// READ-ONLY, ON PURPOSE. This window is a LOG — an account of a tile that the
+// participant and the orchestrator both come past to read. It used to carry a
+// text box ("add context while it works"), which made it a second, worse place
+// to talk: a composer with no thread behind it, no history, and no way to see
+// what it had already said. There is one place to talk to a tile and it is the
+// chat window, so the corner button opens THAT, on this tile's conversation.
 //
 // A panel, not a takeover: the hive stays visible and navigable behind it.
 // Native form controls own their keyboard events; the panel must not lock the
@@ -21,16 +26,58 @@ import type { Agent, AgentRegistry } from './agent-registry.service.js'
 // panel reaches it structurally through IoC instead.
 import type { OrchestratorFinding, OrchestratorSummary } from './orchestrator.drone.js'
 import { avatarKeyOf, type AgentAvatarRegistry } from '../presentation/avatars/agent-avatar.js'
-import { AgentTilesRail } from './agent-tiles-rail.js'
+import { restingConvoId } from '../presentation/avatars/resting-bees.js'
+import { BEE_PERSONALITY_CHANGED, personaFor, resetPersona, savePersona, type BeePersona } from '../presentation/avatars/bee-personality.js'
+import { banterReferencesFor, cachedBanterFor } from '../presentation/avatars/bee-banter-cache.js'
+import { readBlurb, type ChatBlurb } from './chat-blurb.js'
+import { tileConvoId } from './chat-thread.js'
 
 const STYLE_ID = 'hc-agent-panel-styles'
 const STEEL = '126, 182, 214'
 const WIDTH_KEY = 'hc:agent-panel-width'
-const FULLSCREEN_KEY = 'hc:agent-panel-fullscreen'
 const MIN_WIDTH = 320
+/** ONE PIXEL RIGHT, SO THE BORDERS DO NOT FIGHT. Flush against the control
+ *  bar's reservation, this window's 1px border lands exactly on the bar's own
+ *  border — two lines in one place, and the bar's read as covered. Tucked a
+ *  pixel further right the window slides UNDER the bar's edge (it sits below
+ *  the bar's z-band), so what you see there is the bar's border and nothing
+ *  else. */
+const BORDER_TUCK = 1
+/** And between it and the next window inboard, so two docked windows read as
+ *  two windows rather than one seam. */
+const LANE_GAP = 8
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as unknown as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
+
+/** A place on a screen edge, offered by the shell over IoC
+ *  (hypercomb-shared/ui/docked-panel/dock-lanes.ts). Structural, because a
+ *  module may not import from shared — and it does not need to: the lane only
+ *  ever asks a window four things.
+ *
+ *  WHY THE PANEL TAKES A PLACE AT ALL. Every tool window on the right edge
+ *  stacks inward from the control bar, which publishes what it occupies as
+ *  `--hc-controls-right` so it is never covered. This window sat on the same
+ *  edge WITHOUT taking a slot: open the notes window and the two were one on
+ *  top of the other, the bar respected by one of them and not the other. In
+ *  the lane it is pushed inboard as another window opens, and slides back to
+ *  the edge as one closes — the same as everything else docked there. */
+type LaneMemberLike = {
+  readonly laneId: string
+  readonly laneSide: 'left' | 'right'
+  laneWidth(): number
+  placeInLane(offset: number): void
+  evictFromLane(): void
+  returnToLane(): void
+}
+type DockLanesLike = {
+  claim(member: LaneMemberLike): void
+  release(member: LaneMemberLike): void
+  reflow(): void
+}
+
+const dockLanes = (): DockLanesLike | undefined =>
+  ioc<DockLanesLike>('@hypercomb.social/DockLanes')
 
 /** What the panel needs of the orchestrator, described where it is used. */
 type OrchestratorLike = {
@@ -59,20 +106,18 @@ export class AgentPanelView extends EventTarget {
   #panel: HTMLDivElement | null = null
   #id = ''
   #body: HTMLDivElement | null = null
-  #input: HTMLTextAreaElement | null = null
+  /** Blurbs already read, by conversation. `#render` runs on every registry
+   *  change; without this the log would blink out and re-read each time
+   *  anything anywhere in the hive reported progress. */
+  #blurbs = new Map<string, ChatBlurb | null>()
   #stopButton: HTMLButtonElement | null = null
   #registry: AgentRegistry | undefined
   #expandedActivity = new Set<string>()
-  #fullscreen = false
   #resizeCleanup: (() => void) | null = null
-  /** The Copilot-style left column, alive only in full screen: the hive as a
-   *  drillable vertical list, where agents are applied to tiles. */
-  #rail: AgentTilesRail | null = null
-  #railHost: HTMLDivElement | null = null
-  #chips: HTMLDivElement | null = null
-  #send: HTMLButtonElement | null = null
-  /** Model hint the Apply flow rides out on; the chip in the chips row cycles it. */
-  #askModel = 'opus'
+  /** How far inboard of the control bar the lane has put this window. */
+  #laneOffset = 0
+  /** Last measured width, so a rebuild never publishes zero to the lane. */
+  #laneWidth = MIN_WIDTH
   /** Where "back" goes — the agent this panel was opened FROM, when the
    *  participant stepped into one agent's log out of the orchestrator's
    *  report. '' when the panel was opened directly from a bee. */
@@ -85,9 +130,6 @@ export class AgentPanelView extends EventTarget {
   #onKey = (event: KeyboardEvent): void => {
     if (event.key !== 'Escape' || !this.#panel) return
     event.stopPropagation()
-    // Leaving a tile's conversation is the smaller commitment — let Escape
-    // put that down first, and only a second press closes the panel.
-    if (this.#rail?.subject) { this.#rail.clearSubject(); return }
     this.close()
   }
 
@@ -102,9 +144,18 @@ export class AgentPanelView extends EventTarget {
       // simply raises the agent's window over it. Routed inside `open()` it
       // would close the report first — the audit you were reading, dismantled
       // by the thing it pointed you at.
-      const agent = ioc<AgentRegistry>('@diamondcoreprocessor.com/AgentRegistry')?.get(id)
+      const agent = ioc<AgentRegistry>('@diamondcoreprocessor.com/AgentRegistry')?.find(id)
       if (agent?.behavior === 'folder-sync') {
         EffectBus.emit('folder-sync:open', { agentId: id })
+        return
+      }
+      // LAST RESORT for a `chat:<convoId>` id with NO record in either lane —
+      // a press that lands before the resting derivation has run, say. The
+      // panel has nothing to render, and returning would be a bee that
+      // answers a click with silence, so the window that holds the talk gets
+      // it instead.
+      if (!agent && id.startsWith('chat:')) {
+        EffectBus.emit('chat:open', { convoId: id.slice('chat:'.length) })
         return
       }
       // `from` means "opened out of that agent" — today, clicking a bee inside
@@ -135,7 +186,7 @@ export class AgentPanelView extends EventTarget {
     // bee keeps flying, so its panel stays up.
     EffectBus.on<{ public?: boolean }>('mesh:public-changed', payload => {
       if (payload?.public !== true || !this.#panel) return
-      const agent = this.#registry?.get(this.#id)
+      const agent = this.#registry?.find(this.#id)
       if ((agent?.origin ?? 'local') === 'local') this.close()
     })
     // The report is live. Findings clear on their own when work recovers, and
@@ -146,6 +197,45 @@ export class AgentPanelView extends EventTarget {
       if (this.#panel && this.#registry?.get(this.#id)?.kind === 'orchestrator') this.#render()
     })
   }
+
+  // ── LaneMember ─────────────────────────────────────────────────────
+  // Four methods and no framework. The lane calls these; nothing here knows
+  // what else is docked, which is the point of letting the lane place it.
+
+  readonly laneId = 'agent-panel'
+  readonly laneSide = 'right' as const
+
+  /** What the window inboard of this one is offset by. Measured, because the
+   *  participant can drag this panel wider and the one beside it has to move
+   *  with it. */
+  laneWidth(): number {
+    // Remembered across a SWAP: the panel's DOM is rebuilt between the close
+    // and the open, and a window asking the lane for room in that gap would be
+    // told this one is 0 wide and land on top of it.
+    const live = this.#panel?.getBoundingClientRect().width ?? 0
+    if (live) this.#laneWidth = live
+    return this.#laneWidth + LANE_GAP
+  }
+
+  /** Sit this far in from the edge. Written as a `calc` over the control bar's
+   *  own reservation rather than a resolved number, so a bar that docks,
+   *  undocks or changes width moves the window with it and never ends up
+   *  underneath it. */
+  placeInLane(offset: number): void {
+    this.#laneOffset = Math.max(0, Math.round(offset))
+    if (this.#panel) {
+      this.#panel.style.right = `calc(var(--hc-controls-right, 0px) + ${this.#laneOffset - BORDER_TUCK}px)`
+    }
+  }
+
+  /** Pushed out of a full lane. A parked window keeps its content and comes
+   *  back; this one has nothing staged and nothing unsaved — it is a reading
+   *  window over a record that is still there — so closing IS the park, and
+   *  pressing the bee again brings back exactly what was on screen. */
+  evictFromLane(): void { this.close() }
+
+  /** Nothing to unpark: see evictFromLane. */
+  returnToLane(): void { /* the bee is the way back */ }
 
   #t(key: string, fallback: string): string {
     const value = ioc<I18nProvider>(I18N_IOC_KEY)?.t?.(key)
@@ -158,7 +248,10 @@ export class AgentPanelView extends EventTarget {
     if (this.#panel) this.close()
 
     this.#registry = ioc<AgentRegistry>('@diamondcoreprocessor.com/AgentRegistry')
-    const agent = this.#registry?.get(id)
+    // EITHER LANE. A resting bee — a tile that has been talked to, with
+    // nothing running on it — is an agent this panel can open; `get` alone
+    // returned undefined and left the press showing nothing at all.
+    const agent = this.#registry?.find(id)
     if (!agent) return
     // Own-window agents (folder-sync) are routed by the `agent:open` handler
     // and by #swap before this runs — this is the last resort for a direct
@@ -175,8 +268,9 @@ export class AgentPanelView extends EventTarget {
     panel.className = 'hc-agent'
     const savedWidth = Number.parseFloat(localStorage.getItem(WIDTH_KEY) ?? '')
     if (Number.isFinite(savedWidth)) panel.style.width = `${Math.max(MIN_WIDTH, savedWidth)}px`
-    this.#fullscreen = localStorage.getItem(FULLSCREEN_KEY) === 'true'
-    panel.classList.toggle('fullscreen', this.#fullscreen)
+    // Where the lane last had it, so the panel paints in its place rather than
+    // at the edge and then jumping inboard on the next frame.
+    panel.style.right = `calc(var(--hc-controls-right, 0px) + ${this.#laneOffset - BORDER_TUCK}px)`
 
     const resize = document.createElement('div')
     resize.className = 'hc-agent-resize'
@@ -208,45 +302,36 @@ export class AgentPanelView extends EventTarget {
       ?.imageUrl(avatarKeyOf(agent), 96, agent.kind) ?? ''
     const title = document.createElement('div')
     title.className = 'hc-agent-title'
-    title.textContent = agent.kind === 'model' ? (agent.model ?? agent.behavior) : agent.behavior
+    // The name is its own element so it can ellipsise on its own line — a bare
+    // text node in a column stack overflows the box instead of clipping.
+    const name = document.createElement('span')
+    name.className = 'hc-agent-name'
+    name.textContent = agent.kind === 'model' ? (agent.model ?? agent.behavior) : agent.behavior
+    title.appendChild(name)
     // What SORT of worker this is — the same thing the bee's dance and its
     // mark are saying, spelled out. For a model that means the VENDOR, which
     // is the colour family it is flying.
     const kind = document.createElement('span')
     kind.className = 'hc-agent-kind'
+    // The tier is dropped when the NAME above is already saying it — "opus"
+    // over "anthropic · opus" is the same word twice, and the line under a
+    // name is for what the name does not tell you.
+    const tier = agent.tier && agent.tier !== name.textContent ? ` · ${agent.tier}` : ''
     kind.textContent = agent.kind === 'model' && agent.vendor
-      ? `${agent.vendor}${agent.tier ? ` · ${agent.tier}` : ''}`
+      ? `${agent.vendor}${tier}`
       : this.#t(`agent.kind.${agent.kind}`, agent.kind)
     title.appendChild(kind)
-    const fullscreen = document.createElement('button')
-    fullscreen.type = 'button'
-    fullscreen.className = 'hc-agent-window'
-    const updateFullscreenButton = (): void => {
-      fullscreen.textContent = this.#fullscreen ? '↙' : '⛶'
-      const label = this.#fullscreen
-        ? this.#t('agent.restore', 'Restore window')
-        : this.#t('agent.fullscreen', 'Full screen')
-      fullscreen.title = label
-      fullscreen.setAttribute('aria-label', label)
-      fullscreen.setAttribute('aria-pressed', String(this.#fullscreen))
-    }
-    updateFullscreenButton()
-    fullscreen.addEventListener('click', () => {
-      this.#fullscreen = !this.#fullscreen
-      panel.classList.toggle('fullscreen', this.#fullscreen)
-      localStorage.setItem(FULLSCREEN_KEY, String(this.#fullscreen))
-      updateFullscreenButton()
-      // The rail exists only where there is room for it. Once mounted it
-      // stays (hidden) across toggles, keeping its trail and picks.
-      if (this.#fullscreen) this.#mountRail()
-    })
+    // WHAT THE CORNER HOLDS: the way to the talk. This window only ever
+    // reads, so the one thing it owes the participant is a door to the place
+    // where they can answer — that tile's conversations, in the chat window.
+    const corner = this.#conversationsButton(agent)
     const close = document.createElement('button')
     close.type = 'button'
     close.className = 'hc-agent-close'
     close.textContent = '×'
     close.setAttribute('aria-label', this.#t('agent.close', 'Close'))
     close.addEventListener('click', () => this.close())
-    head.append(avatar, title, fullscreen, close)
+    head.append(avatar, title, corner, close)
 
     // STOP — the way out for work that cannot finish. Closing the panel only
     // hides it; this takes the request out of the pool so nothing picks it up
@@ -263,171 +348,40 @@ export class AgentPanelView extends EventTarget {
     body.className = 'hc-agent-body'
     this.#body = body
 
-    // The tile you are talking to lands here, as a chip over the composer —
-    // the visible sign that Enter now APPLIES agents instead of adding
-    // context.
-    const chips = document.createElement('div')
-    chips.className = 'hc-agent-chips'
-    chips.hidden = true
-    this.#chips = chips
+    // Stop is the only control a reading window keeps: work that cannot
+    // finish has to be stoppable from where you found out about it, and there
+    // is nowhere else to do it. Hidden unless there is something to stop.
+    const actions = document.createElement('div')
+    actions.className = 'hc-agent-actions'
+    actions.appendChild(stop)
 
-    const row = document.createElement('div')
-    row.className = 'hc-agent-row'
-    const input = document.createElement('textarea')
-    input.className = 'hc-agent-input'
-    input.rows = 2
-    input.placeholder = this.#t('agent.context-placeholder', 'Add context while it works…')
-    const send = document.createElement('button')
-    send.type = 'button'
-    send.className = 'hc-agent-btn hc-agent-ok'
-    send.textContent = this.#t('agent.context-send', 'Add')
-    this.#send = send
-    const submit = (): void => {
-      if (this.#rail?.applied.length) void this.#applyToTiles(send)
-      else void this.#addContext(send)
-    }
-    send.addEventListener('click', submit)
-    input.addEventListener('keydown', event => {
-      if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit() }
-    })
-    row.append(input, send, stop)
-    this.#input = input
-
-    // Two columns: the tiles rail (full screen only) and everything the
-    // panel already was. The rail host exists from the start so toggling
-    // full screen is a CSS matter, not a rebuild.
-    const railHost = document.createElement('div')
-    railHost.className = 'hc-agent-rail'
-    this.#railHost = railHost
     const main = document.createElement('div')
     main.className = 'hc-agent-main'
-    main.append(head, body, chips, row)
+    main.append(head, body, actions)
 
-    panel.append(resize, railHost, main)
+    panel.append(resize, main)
     document.body.appendChild(panel)
     this.#panel = panel
 
-    if (this.#fullscreen) this.#mountRail()
     this.#render()
+    // A SWAP KEEPS THE PLACE. Stepping from the orchestrator's report into one
+    // agent's log rebuilds this panel's DOM, and re-claiming would put it back
+    // at the edge — over the window it was sitting beside a moment ago.
+    if (!this.#swapping) dockLanes()?.claim(this)
     this.#registry?.addEventListener('change', this.#render)
     document.addEventListener('keydown', this.#onKey, true)
-  }
-
-  /** Bring the rail up. One rail per panel LIFETIME, not per subject: a swap
-   *  rebuilds the panel's DOM, so the same rail re-mounts into the new host
-   *  with its trail, subject and icon cache intact — stepping into an agent's
-   *  log must not drop the conversation you were halfway through. */
-  #mountRail(): void {
-    if (!this.#railHost) return
-    if (!this.#rail) {
-      this.#rail = new AgentTilesRail()
-      this.#rail.onSubjectChanged = () => this.#renderChips()
-    }
-    this.#rail.mount(this.#railHost)
-    this.#renderChips()
-  }
-
-  /** The chips row mirrors the rail's subject: the tile the asks will ride
-   *  out against, and the model answering. The composer's words follow suit. */
-  #renderChips(): void {
-    const chips = this.#chips
-    if (!chips) return
-    const picks = this.#rail?.applied ?? []
-    chips.textContent = ''
-    chips.hidden = picks.length === 0
-    if (this.#input) {
-      this.#input.placeholder = picks.length
-        ? this.#t('agent.apply-placeholder', 'What should they do on this tile?')
-        : this.#t('agent.context-placeholder', 'Add context while it works…')
-    }
-    if (this.#send) {
-      this.#send.textContent = picks.length
-        ? this.#t('agent.apply-send', 'Apply')
-        : this.#t('agent.context-send', 'Add')
-    }
-    if (!picks.length) return
-
-    for (const pick of picks) {
-      const chip = document.createElement('span')
-      chip.className = 'hc-agent-chip'
-      const name = document.createElement('span')
-      name.className = 'hc-agent-chip-name'
-      name.textContent = pick.name
-      const off = document.createElement('button')
-      off.type = 'button'
-      off.className = 'hc-agent-chip-off'
-      off.textContent = '×'
-      off.setAttribute('aria-label', this.#t('agent.chip-remove', 'Remove'))
-      off.addEventListener('click', () => this.#rail?.clearSubject())
-      chip.append(name, off)
-      chips.appendChild(chip)
-    }
-
-    // The model is part of the send, so it lives with the chips — one quiet
-    // word that cycles rather than a control that shouts.
-    const model = document.createElement('button')
-    model.type = 'button'
-    model.className = 'hc-agent-chip hc-agent-chip-model'
-    model.textContent = this.#askModel
-    model.title = this.#t('agent.model-cycle', 'Which model answers — click to change')
-    model.addEventListener('click', () => {
-      const models = ['opus', 'sonnet', 'haiku', 'fable']
-      this.#askModel = models[(models.indexOf(this.#askModel) + 1) % models.length]
-      model.textContent = this.#askModel
-    })
-    chips.appendChild(model)
-  }
-
-  /** APPLY — mint a real ask for the tile the conversation is with. Targets
-   *  are grouped by the level they live on (an ask names tiles on ONE page),
-   *  which is what lets this stay unchanged if a future gesture hands it more
-   *  than one. Any number of applications, one after another, is exactly what
-   *  the registry and the bees are built for. */
-  async #applyToTiles(button: HTMLButtonElement): Promise<void> {
-    const rail = this.#rail
-    const input = this.#input
-    const prompt = input?.value.trim() ?? ''
-    const picks = rail?.applied ?? []
-    if (!rail || !prompt || !picks.length) return
-
-    const queen = ioc<{ activeModel: string; submitAsk?: (prompt: string, targets: string[], at?: readonly string[]) => Promise<boolean> }>(
-      '@diamondcoreprocessor.com/LlmQueenBee')
-    if (!queen?.submitAsk) {
-      EffectBus.emit('toast:show', { type: 'warning', message: this.#t('agent.apply-error', 'Could not queue the work — try again.') })
-      return
-    }
-
-    const groups = new Map<string, { path: readonly string[]; names: string[] }>()
-    for (const pick of picks) {
-      const key = pick.path.join('\u0000')
-      const group = groups.get(key) ?? { path: pick.path, names: [] }
-      group.names.push(pick.name)
-      groups.set(key, group)
-    }
-
-    button.disabled = true
-    const prior = queen.activeModel
-    queen.activeModel = this.#askModel
-    let ok = true
-    try {
-      for (const group of groups.values()) {
-        ok = (await queen.submitAsk(prompt, group.names, group.path)) && ok
-      }
-    } finally {
-      queen.activeModel = prior
-      button.disabled = false
-    }
-    if (ok) {
-      if (input) input.value = ''
-      rail.clearSubject()
-    }
   }
 
   #render = (): void => {
     const body = this.#body
     if (!body) return
-    const agent = this.#registry?.get(this.#id)
-    const running = agent?.status === 'pending' || agent?.status === 'working' || agent?.status === 'blocked'
+    const agent = this.#registry?.find(this.#id)
+    // AT REST IS NOT RUNNING. The record says `working` because that is what
+    // keeps the bee dancing, so the status field alone would offer a Stop
+    // button for work that does not exist.
+    const resting = this.#registry?.isResting(this.#id) ?? false
+    const running = !resting
+      && (agent?.status === 'pending' || agent?.status === 'working' || agent?.status === 'blocked')
     if (this.#stopButton) this.#stopButton.hidden = !running
     if (!agent) {
       // The agent finished and its record has been retired — say so rather
@@ -441,6 +395,7 @@ export class AgentPanelView extends EventTarget {
     }
 
     body.textContent = ''
+    if (resting) { this.#renderResting(body, agent); return }
     body.append(this.#statusRow(agent))
     // The orchestrator's panel is a REPORT, not a request. Its own "where" is
     // the whole hive and its own "request" is a sentence nobody needs twice —
@@ -453,6 +408,7 @@ export class AgentPanelView extends EventTarget {
         this.#section(this.#t('agent.request', 'The request'), agent.request || '—'),
       )
     }
+    if (agent.kind === 'model') body.appendChild(this.#personality(agent))
     body.appendChild(this.#activity(agent))
     if (agent.context.length) {
       body.appendChild(this.#section(
@@ -712,6 +668,248 @@ export class AgentPanelView extends EventTarget {
     navigation()?.goRaw?.(agent.targets.length ? agent.segments : [])
   }
 
+  // ── A BEE AT REST ────────────────────────────────────────────────────
+  //
+  // Nothing is running, so there is no activity log, no progress and nothing
+  // to stop. What is left is short and stays short: what it is, where it sits,
+  // what it is about, and ONE ICON to the tile's conversations. The talk lives
+  // in the chat window; details are a label on the door, not the room.
+  #renderResting(body: HTMLElement, agent: Agent): void {
+    body.append(
+      this.#restingStatus(agent),
+      this.#whereRow(agent, this.#t('agent.where-talked', 'Talked to')),
+      this.#section(this.#t('agent.about', 'What it is about'), agent.request || '—'),
+      this.#personality(agent),
+      this.#restingLog(agent),
+    )
+  }
+
+  /** Participant-authored acting instructions for this reusable model bee.
+   *  Saved by model/behaviour identity, so the character survives new tasks. */
+  #personality(agent: Agent): HTMLElement {
+    const details = document.createElement('details')
+    details.className = 'hc-agent-personality'
+    const summary = document.createElement('summary')
+    const current = personaFor(agent)
+    summary.textContent = `Personality · ${current.name}`
+    details.appendChild(summary)
+
+    const form = document.createElement('div')
+    form.className = 'hc-agent-personality-form'
+    const fields: Array<[keyof BeePersona, string]> = [
+      ['name', 'Name'], ['manner', 'Temperament'], ['voice', 'Voice'],
+      ['values', 'Values'], ['provokedBy', 'Provoked by'], ['responseStyle', 'How it responds'],
+    ]
+    const inputs = new Map<keyof BeePersona, HTMLInputElement | HTMLTextAreaElement>()
+    for (const [key, label] of fields) {
+      const row = document.createElement('label')
+      row.className = 'hc-agent-personality-field'
+      const caption = document.createElement('span')
+      caption.textContent = label
+      const input = key === 'name' || key === 'manner'
+        ? document.createElement('input')
+        : document.createElement('textarea')
+      input.value = current[key]
+      input.maxLength = key === 'name' ? 40 : 220
+      if (input instanceof HTMLTextAreaElement) input.rows = 2
+      row.append(caption, input)
+      form.appendChild(row)
+      inputs.set(key, input)
+    }
+
+    const actions = document.createElement('div')
+    actions.className = 'hc-agent-personality-actions'
+    const save = document.createElement('button')
+    save.type = 'button'
+    save.className = 'hc-agent-btn hc-agent-ok'
+    save.textContent = 'Save personality'
+    save.addEventListener('click', () => {
+      const next = Object.fromEntries(fields.map(([key]) => [key, inputs.get(key)?.value.trim() || current[key]])) as unknown as BeePersona
+      savePersona(agent, next)
+      summary.textContent = `Personality · ${next.name}`
+      EffectBus.emit(BEE_PERSONALITY_CHANGED, { agent: agent.id })
+      EffectBus.emit('toast:show', { type: 'tip', message: `${next.name} will use these instructions in bee conversations.` })
+    })
+    const reset = document.createElement('button')
+    reset.type = 'button'
+    reset.className = 'hc-agent-btn'
+    reset.textContent = 'Use preset'
+    reset.addEventListener('click', () => {
+      const next = resetPersona(agent)
+      for (const [key] of fields) { const input = inputs.get(key); if (input) input.value = next[key] }
+      summary.textContent = `Personality · ${next.name}`
+      EffectBus.emit(BEE_PERSONALITY_CHANGED, { agent: agent.id })
+    })
+    actions.append(save, reset)
+    form.appendChild(actions)
+    details.appendChild(form)
+    const history = cachedBanterFor(agent)
+    if (history.length) {
+      const historyDetails = document.createElement('details')
+      historyDetails.className = 'hc-agent-banter-history'
+      const historySummary = document.createElement('summary')
+      historySummary.textContent = `Recent bee conversations · ${history.length}`
+      historyDetails.appendChild(historySummary)
+      for (const record of history) {
+        const exchange = document.createElement('div')
+        exchange.className = 'hc-agent-banter-exchange'
+        const meta = document.createElement('div')
+        meta.className = 'hc-agent-dim'
+        meta.textContent = `${record.beeNames.join(' ↔ ')} · ${new Date(record.createdAt).toLocaleString()}`
+        exchange.appendChild(meta)
+        record.lines.forEach((line, index) => {
+          const turn = document.createElement('div')
+          turn.className = 'hc-agent-banter-turn'
+          turn.textContent = `${record.beeNames[index % 2]}: ${line}`
+          exchange.appendChild(turn)
+        })
+        historyDetails.appendChild(exchange)
+      }
+      details.appendChild(historyDetails)
+    }
+    const references = banterReferencesFor(agent)
+    if (references.length) {
+      const referenceDetails = document.createElement('details')
+      referenceDetails.className = 'hc-agent-banter-history'
+      const referenceSummary = document.createElement('summary')
+      referenceSummary.textContent = `Archived conversation references · ${references.length}`
+      referenceDetails.appendChild(referenceSummary)
+      for (const reference of references) {
+        const file = document.createElement('div')
+        file.className = 'hc-agent-banter-exchange'
+        const meta = document.createElement('div')
+        meta.className = 'hc-agent-dim'
+        meta.textContent = `${reference.beeNames.join(' ↔ ')} · archived ${new Date(reference.archivedAt).toLocaleString()}`
+        const summaryLine = document.createElement('div')
+        summaryLine.className = 'hc-agent-banter-turn'
+        summaryLine.textContent = reference.summary
+        file.append(meta, summaryLine)
+        for (const highlight of reference.highlights) {
+          const quote = document.createElement('div')
+          quote.className = 'hc-agent-banter-turn'
+          quote.textContent = `“${highlight}”`
+          file.appendChild(quote)
+        }
+        referenceDetails.appendChild(file)
+      }
+      details.appendChild(referenceDetails)
+    }
+    return details
+  }
+
+  /** THE WAY IN, NOT THE THING ITSELF. The conversations belong to the chat
+   *  window and are read there; a panel that printed the turns would be a
+   *  second, worse copy of a window that already exists. So: one button, in
+   *  the corner where full screen would be, and the tile's conversations open
+   *  where they live. */
+  #conversationsButton(agent: Agent): HTMLButtonElement {
+    // A chat bee IS a conversation and carries its id. Anything else — an ask,
+    // a sync, the orchestrator — is work ON a tile, and the tile's own
+    // conversation is the thread to answer in, so the door leads there.
+    const convoId = restingConvoId(agent.id)
+      || tileConvoId(agent.targets[0] ? [...agent.segments, agent.targets[0]] : agent.segments)
+    const open = document.createElement('button')
+    open.type = 'button'
+    open.className = 'hc-agent-window'
+    const label = this.#t('agent.open-chat', 'Open this tile’s conversations')
+    open.title = label
+    open.setAttribute('aria-label', label)
+    const glyph = document.createElement('span')
+    glyph.className = 'mat-sym'
+    glyph.setAttribute('aria-hidden', 'true')
+    glyph.textContent = 'forum'
+    open.appendChild(glyph)
+    open.addEventListener('click', () => { EffectBus.emit('chat:open', { convoId }) })
+    return open
+  }
+
+  /** THE LOG — what has been said here, in summary. Not the turns: the
+   *  conversation's own blurb (`chat-blurb.ts`), which is the other end of the
+   *  thread said briefly — a line and the concrete points under it.
+   *
+   *  This is what the panel is FOR once nothing is running. It is also what
+   *  the orchestrator comes past to read: an account of the tile that keeps
+   *  itself current as the conversation grows, rather than a box asking the
+   *  participant to type the account by hand.
+   *
+   *  NEVER LOAD-BEARING. A blurb missing (not minted yet, wiped, or from an
+   *  older derivation) costs these lines and nothing else — the panel above it
+   *  reads exactly the same. */
+  #restingLog(agent: Agent): HTMLElement {
+    const convoId = restingConvoId(agent.id)
+    const wrap = document.createElement('div')
+    wrap.className = 'hc-agent-section'
+    const head = document.createElement('div')
+    head.className = 'hc-agent-label'
+    head.textContent = this.#t('agent.log', 'The log')
+    wrap.appendChild(head)
+
+    const body = document.createElement('div')
+    body.className = 'hc-agent-log'
+    wrap.appendChild(body)
+
+    // What was read last time, straight away: a re-render must not blink.
+    if (this.#blurbs.has(convoId)) this.#fillLog(body, this.#blurbs.get(convoId) ?? null)
+    else {
+      const reading = document.createElement('div')
+      reading.className = 'hc-agent-dim'
+      reading.textContent = this.#t('agent.log-reading', 'reading…')
+      body.appendChild(reading)
+    }
+
+    const opened = this.#id
+    void readBlurb(convoId).then(blurb => {
+      this.#blurbs.set(convoId, blurb)
+      if (this.#id !== opened || !body.isConnected) return
+      this.#fillLog(body, blurb)
+    }).catch(() => { /* no blurb is a normal answer, not an error */ })
+    return wrap
+  }
+
+  #fillLog(body: HTMLElement, blurb: ChatBlurb | null): void {
+    body.textContent = ''
+    if (!blurb) {
+      const none = document.createElement('div')
+      none.className = 'hc-agent-dim'
+      none.textContent = this.#t('agent.log-none', 'No summary yet — one is written as the conversation settles.')
+      body.appendChild(none)
+      return
+    }
+    const line = document.createElement('div')
+    line.className = 'hc-agent-text'
+    line.textContent = blurb.line
+    body.appendChild(line)
+    for (const point of blurb.points) {
+      const item = document.createElement('div')
+      item.className = 'hc-agent-point'
+      item.textContent = point
+      body.appendChild(item)
+    }
+    const read = document.createElement('div')
+    read.className = 'hc-agent-dim'
+    read.textContent = this.#t('agent.log-upto', 'summarised through {count} turns, {ago} ago')
+      .replace('{count}', String(blurb.upToTurnCount))
+      .replace('{ago}', elapsed(blurb.upToAt || blurb.at))
+    body.appendChild(read)
+  }
+
+  /** The status line of a resting bee: at rest, in which model, last spoken
+   *  when. `#statusRow` would read the record's `working` out loud. */
+  #restingStatus(agent: Agent): HTMLElement {
+    const row = document.createElement('div')
+    row.className = 'hc-agent-status'
+    const pill = document.createElement('span')
+    pill.className = 'hc-agent-pill resting'
+    pill.textContent = this.#t('agent.status.resting', 'Idle')
+    row.appendChild(pill)
+    const when = document.createElement('span')
+    when.className = 'hc-agent-dim'
+    when.textContent = this.#t('agent.last-spoken', 'last spoken {ago} ago')
+      .replace('{ago}', elapsed(agent.updatedAt || agent.startedAt))
+    row.appendChild(when)
+    return row
+  }
+
   #statusRow(agent: Agent): HTMLElement {
     const row = document.createElement('div')
     row.className = 'hc-agent-status'
@@ -758,12 +956,12 @@ export class AgentPanelView extends EventTarget {
    *  flying — see #goToBee) and raises a spotlight on the tile, which burns
    *  until the pointer finds it. A hive-wide agent has no single place, so it
    *  stays a sentence. */
-  #whereRow(agent: Agent): HTMLElement {
+  #whereRow(agent: Agent, label = this.#t('agent.where', 'Working on')): HTMLElement {
     const wrap = document.createElement('div')
     wrap.className = 'hc-agent-section'
     const head = document.createElement('div')
     head.className = 'hc-agent-label'
-    head.textContent = this.#t('agent.where', 'Working on')
+    head.textContent = label
     wrap.appendChild(head)
 
     if (agent.scope === 'hive') {
@@ -857,20 +1055,6 @@ export class AgentPanelView extends EventTarget {
     return wrap
   }
 
-  async #addContext(button: HTMLButtonElement): Promise<void> {
-    const input = this.#input
-    const text = input?.value.trim() ?? ''
-    if (!text) return
-    button.disabled = true
-    const ok = await this.#registry?.addContext(this.#id, text)
-    button.disabled = false
-    if (ok) {
-      if (input) input.value = ''
-    } else {
-      EffectBus.emit('toast:show', { type: 'warning', message: 'Could not add context — try again.' })
-    }
-  }
-
   /** Stop the work this panel is showing. One click, no dialog: the record is
    *  the participant's own request and stopping it destroys nothing they
    *  wrote — an answer that already landed is a note, and notes stay. */
@@ -908,7 +1092,7 @@ export class AgentPanelView extends EventTarget {
     if (!id || id === this.#id) return
     // An own-window agent is not a subject this panel can show — raise its
     // window and leave the panel (the report, usually) exactly as it stands.
-    if (this.#registry?.get(id)?.behavior === 'folder-sync') {
+    if (this.#registry?.find(id)?.behavior === 'folder-sync') {
       EffectBus.emit('folder-sync:open', { agentId: id })
       return
     }
@@ -933,18 +1117,13 @@ export class AgentPanelView extends EventTarget {
     }
     this.#resizeCleanup?.()
     this.#resizeCleanup = null
-    // A swap keeps the rail (see #mountRail); only a real close puts it down.
     if (!this.#swapping) {
-      this.#rail?.dispose()
-      this.#rail = null
+      dockLanes()?.release(this)
+      this.#laneOffset = 0
     }
-    this.#railHost = null
-    this.#chips = null
-    this.#send = null
     this.#panel?.remove()
     this.#panel = null
     this.#body = null
-    this.#input = null
     this.#stopButton = null
     this.#id = ''
     this.#expandedActivity.clear()
@@ -952,7 +1131,7 @@ export class AgentPanelView extends EventTarget {
 
   #beginResize(event: PointerEvent): void {
     const panel = this.#panel
-    if (!panel || this.#fullscreen) return
+    if (!panel) return
     event.preventDefault()
     const startX = event.clientX
     const startWidth = panel.getBoundingClientRect().width
@@ -964,6 +1143,9 @@ export class AgentPanelView extends EventTarget {
     }
     const finish = (): void => {
       localStorage.setItem(WIDTH_KEY, String(Math.round(panel.getBoundingClientRect().width)))
+      // This window just got wider or narrower, so whatever is inboard of it
+      // in the lane is now in the wrong place.
+      dockLanes()?.reflow()
       window.removeEventListener('pointermove', move, true)
       window.removeEventListener('pointerup', finish, true)
       window.removeEventListener('pointercancel', finish, true)
@@ -981,41 +1163,40 @@ export class AgentPanelView extends EventTarget {
     const style = document.createElement('style')
     style.id = STYLE_ID
     style.textContent = `
-.hc-agent{position:fixed;z-index:99999;display:flex;flex-direction:row;align-items:stretch;
-  right:calc(var(--hc-controls-right, 0px) + 1rem);bottom:1rem;width:min(24rem,calc(100vw - 2rem));
+/* UNDER THE CONTROL BAR. The bar publishes what it occupies as
+   --hc-controls-right and this window docks flush inboard of it, so the two
+   should never meet — but the reservation is 0 while the bar is free-floating
+   or on the other edge, and at 99999 this window then drew straight over the
+   bar's border and cut it off. Sitting below the bar's own band (59999–60003,
+   controls-bar.component.scss) the bar is always the one on top, whatever the
+   reservation says. */
+.hc-agent{position:fixed;z-index:59990;display:flex;flex-direction:row;align-items:stretch;
+  right:calc(var(--hc-controls-right, 0px) - 1px);bottom:1rem;width:min(24rem,calc(100vw - 2rem));
   max-height:min(30rem,70vh);box-sizing:border-box;
-  background:rgba(6,9,14,0.96);border:1px solid rgba(${STEEL},0.35);border-radius:var(--hc-radius-floating, 4px);}
-.hc-agent.fullscreen{inset:0;width:auto!important;max-width:none;height:auto;max-height:none;
-  border-radius:0;border:none;}
-.hc-agent-main{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column;gap:0.55rem;
-  padding:0.75rem 0.85rem;box-sizing:border-box;}
-.hc-agent-rail{display:none;}
-.hc-agent.fullscreen .hc-agent-rail{display:flex;flex-direction:column;min-height:0;
-  flex:0 0 clamp(15rem,24vw,19rem);border-right:1px solid rgba(${STEEL},0.16);
-  background:rgba(3,5,9,0.55);}
-.hc-agent-chips{display:flex;flex-wrap:wrap;gap:0.3rem;flex:0 0 auto;}
-.hc-agent-chips[hidden]{display:none;}
-.hc-agent-chip{display:inline-flex;align-items:center;gap:0.25rem;max-width:12rem;
-  padding:0.1rem 0.3rem 0.1rem 0.55rem;border:1px solid rgba(${STEEL},0.4);border-radius:999px;
-  color:rgba(238,244,250,0.92);font-size:0.76rem;background:rgba(${STEEL},0.08);}
-.hc-agent-chip-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.hc-agent-chip-off{border:0;background:none;color:rgba(238,244,250,0.55);font:inherit;
-  font-size:0.9rem;line-height:1;cursor:pointer;padding:0 0.15rem;border-radius:999px;}
-.hc-agent-chip-off:hover{color:whitesmoke;}
-.hc-agent-chip-model{cursor:pointer;font-family:var(--hc-mono,monospace);letter-spacing:0.06em;
-  text-transform:uppercase;font-size:0.68rem;color:rgba(${STEEL},0.9);background:none;
-  padding:0.14rem 0.6rem;margin-left:auto;}
-.hc-agent-chip-model:hover{background:rgba(${STEEL},0.12);}
+  background:rgba(6,9,14,0.96);border:1px solid rgba(${STEEL},0.28);border-radius:var(--hc-radius-floating, 4px);
+  box-shadow:0 12px 34px rgba(0,0,0,0.5);
+  transition:right 160ms ease;}
+@media (prefers-reduced-motion:reduce){.hc-agent{transition:none;}}
+.hc-agent-main{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column;gap:0.6rem;
+  padding:0.7rem 0.85rem 0.75rem;box-sizing:border-box;}
 .hc-agent-resize{position:absolute;z-index:1;inset:0 auto 0 -0.35rem;width:0.7rem;cursor:ew-resize;}
 .hc-agent-resize::after{content:"";position:absolute;top:42%;bottom:42%;left:0.25rem;
   border-left:1px solid rgba(${STEEL},0.42);}
-.hc-agent.fullscreen .hc-agent-resize{display:none;}
-.hc-agent-head{display:flex;align-items:center;gap:0.5rem;flex:0 0 auto;}
+/* THE HEAD. One hairline under it does the work a heavier border was doing
+   badly: the panel reads as head + body instead of one undivided box. */
+.hc-agent-head{display:flex;align-items:center;gap:0.55rem;flex:0 0 auto;
+  padding-bottom:0.55rem;border-bottom:1px solid rgba(${STEEL},0.16);}
 .hc-agent-avatar{width:1.9rem;height:1.9rem;flex:0 0 auto;}
-.hc-agent-title{flex:1 1 auto;font-family:var(--hc-mono,monospace);font-size:0.76rem;font-weight:600;
-  letter-spacing:0.1em;text-transform:uppercase;color:rgba(${STEEL},0.95);}
-.hc-agent-kind{margin-left:0.5rem;font-weight:400;letter-spacing:0.06em;
-  color:rgba(216,230,238,0.45);}
+/* WHO, IN TWO LINES. The name and the vendor were competing on one line and
+   ellipsising each other; stacked, the name is the thing you read and the
+   vendor is the thing you glance at. */
+.hc-agent-title{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:0.08rem;
+  font-family:var(--hc-mono,monospace);font-size:0.78rem;font-weight:600;
+  letter-spacing:0.08em;text-transform:uppercase;color:rgba(246,250,255,0.96);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hc-agent-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hc-agent-kind{font-size:0.62rem;font-weight:400;letter-spacing:0.12em;
+  color:rgba(${STEEL},0.62);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .hc-agent-back{width:1.7rem;height:2rem;flex:0 0 auto;border:none;background:none;
   color:rgba(${STEEL},0.75);font-size:1.5rem;line-height:1;cursor:pointer;border-radius:var(--hc-radius-control, 2px);}
 .hc-agent-back:hover{color:whitesmoke;background:rgba(255,255,255,0.07);}
@@ -1047,17 +1228,41 @@ export class AgentPanelView extends EventTarget {
   font-size:1.3rem;line-height:1;cursor:pointer;border-radius:var(--hc-radius-control, 2px);}
 .hc-agent-window{font-size:1rem;}
 .hc-agent-close:hover,.hc-agent-window:hover{color:whitesmoke;background:rgba(255,255,255,0.07);}
-.hc-agent-body{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:0.6rem;}
-.hc-agent-status{display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;}
-.hc-agent-pill{padding:0.12rem 0.5rem;border-radius:999px;font-size:0.68rem;letter-spacing:0.08em;
+.hc-agent-body{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:0.75rem;
+  padding-right:0.2rem;}
+/* Every section is a label and its content, and nothing else. Given a rule of
+   its own, the gap between a label and what it labels stops being whatever
+   the last element happened to leave behind. */
+.hc-agent-section{display:flex;flex-direction:column;gap:0.3rem;}
+.hc-agent-personality{border:1px solid rgba(${STEEL},0.18);border-radius:4px;padding:0.45rem 0.55rem;}
+.hc-agent-personality>summary{cursor:pointer;color:rgba(246,250,255,0.9);font-size:0.75rem;font-weight:600;}
+.hc-agent-personality-form{display:flex;flex-direction:column;gap:0.45rem;margin-top:0.6rem;}
+.hc-agent-personality-field{display:flex;flex-direction:column;gap:0.18rem;font-size:0.67rem;color:rgba(${STEEL},0.72);}
+.hc-agent-personality-field input,.hc-agent-personality-field textarea{box-sizing:border-box;width:100%;resize:vertical;
+  color:rgba(246,250,255,0.94);background:rgba(255,255,255,0.035);border:1px solid rgba(${STEEL},0.22);
+  border-radius:3px;padding:0.35rem 0.42rem;font:0.72rem/1.35 var(--hc-mono,monospace);}
+.hc-agent-personality-field input:focus,.hc-agent-personality-field textarea:focus{outline:1px solid rgba(${STEEL},0.62);}
+.hc-agent-personality-actions{display:flex;gap:0.4rem;justify-content:flex-end;margin-top:0.15rem;}
+.hc-agent-banter-history{margin-top:0.6rem;border-top:1px solid rgba(${STEEL},0.14);padding-top:0.5rem;}
+.hc-agent-banter-history>summary{cursor:pointer;font-size:0.7rem;color:rgba(${STEEL},0.78);}
+.hc-agent-banter-exchange{display:flex;flex-direction:column;gap:0.24rem;margin-top:0.55rem;padding-top:0.5rem;
+  border-top:1px solid rgba(${STEEL},0.1);}
+.hc-agent-banter-turn{font-size:0.69rem;line-height:1.35;color:rgba(232,240,246,0.82);}
+.hc-agent-status{display:flex;align-items:center;gap:0.45rem;flex-wrap:wrap;}
+.hc-agent-pill{padding:0.1rem 0.5rem;border-radius:999px;font-size:0.62rem;letter-spacing:0.12em;
   text-transform:uppercase;border:1px solid rgba(${STEEL},0.4);color:rgba(${STEEL},0.9);}
 .hc-agent-pill.working{border-color:rgba(${STEEL},0.9);background:rgba(${STEEL},0.16);}
+.hc-agent-pill.resting{border-color:rgba(${STEEL},0.45);color:rgba(${STEEL},0.75);background:none;}
 .hc-agent-pill.stalled{border-color:rgba(214,178,110,0.7);color:rgba(226,196,140,0.95);background:none;}
 .hc-agent-pill.blocked{border-color:rgba(126,182,214,0.85);color:rgba(196,226,246,0.98);background:rgba(126,182,214,0.12);}
 .hc-agent-needs{font-size:0.76rem;line-height:1.35;color:rgba(196,226,246,0.9);}
 .hc-agent-pill.done{border-color:rgba(126,196,142,0.7);color:rgba(150,214,164,0.95);}
 .hc-agent-pill.failed{border-color:rgba(226,75,74,0.7);color:rgba(232,124,123,0.95);}
 .hc-agent-dim{font-size:0.72rem;color:rgba(216,230,238,0.5);}
+.hc-agent-window .mat-sym{font-size:1.05rem;line-height:1;}
+.hc-agent-point{font-size:0.76rem;line-height:1.45;padding-left:0.75rem;position:relative;
+  color:rgba(238,244,250,0.78);}
+.hc-agent-point::before{content:'·';position:absolute;left:0.15rem;color:rgba(${STEEL},0.7);}
 .hc-agent-headline{font-size:0.92rem;line-height:1.4;color:rgba(238,244,250,0.95);margin-bottom:0.5rem;}
 .hc-agent-headline.ok{color:rgba(150,214,164,0.95);}
 .hc-agent-headline.attention{color:rgba(226,196,140,0.98);}
@@ -1065,11 +1270,17 @@ export class AgentPanelView extends EventTarget {
 .hc-agent-finding{display:flex;align-items:flex-start;gap:0.5rem;padding:0.25rem 0;}
 .hc-agent-finding .hc-agent-pill{flex:0 0 auto;}
 .hc-agent-finding .hc-agent-text{flex:1 1 auto;min-width:0;font-size:0.8rem;}
-.hc-agent-label{font-size:0.68rem;letter-spacing:0.06em;text-transform:uppercase;
-  color:rgba(${STEEL},0.6);margin-bottom:0.2rem;}
+/* Labels recede. There are four or five of them down a short panel, and at
+   full weight they were louder than the answers underneath. */
+.hc-agent-label{font-size:0.62rem;letter-spacing:0.14em;text-transform:uppercase;
+  color:rgba(${STEEL},0.52);}
 .hc-agent-where{display:flex;flex-wrap:wrap;gap:0.3rem;}
-.hc-agent-tile{padding:0.14rem 0.55rem;border:1px solid rgba(${STEEL},0.35);border-radius:999px;
-  background:none;color:rgba(238,244,250,0.9);font:inherit;font-size:0.8rem;cursor:pointer;
+/* THE TILE, IN ITS OWN COLOUR. A hovered bee names its tile in white against
+   steel (agent-bee.drone.ts); the panel says it the same way, so the thing you
+   pointed at and the thing you are reading about are recognisably one thing. */
+.hc-agent-tile{padding:0.16rem 0.6rem;border:1px solid rgba(${STEEL},0.3);border-radius:999px;
+  background:rgba(${STEEL},0.07);color:rgba(246,250,255,0.98);font:inherit;font-size:0.8rem;
+  font-weight:600;cursor:pointer;
   max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .hc-agent-tile:hover,.hc-agent-tile:focus-visible{border-color:rgba(${STEEL},0.85);
   background:rgba(${STEEL},0.14);color:whitesmoke;outline:none;}
@@ -1084,11 +1295,10 @@ export class AgentPanelView extends EventTarget {
 .hc-agent-logtext{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .hc-agent-logline.expanded .hc-agent-logtext{overflow:visible;text-overflow:clip;white-space:pre-wrap;
   overflow-wrap:anywhere;}
-.hc-agent-row{display:flex;gap:0.5rem;align-items:flex-end;flex:0 0 auto;}
-.hc-agent-input{flex:1 1 auto;box-sizing:border-box;resize:none;padding:0.5rem 0.6rem;font:inherit;
-  font-size:16px;line-height:1.4;color:whitesmoke;background:rgba(255,255,255,0.05);
-  border:1px solid rgba(255,255,255,0.12);border-radius:var(--hc-radius-control, 2px);outline:none;}
-.hc-agent-input:focus{border-color:rgba(${STEEL},0.55);}
+/* The one row of controls a reading window has. Empty and invisible until
+   there is something to stop. */
+.hc-agent-actions{display:flex;justify-content:flex-end;gap:0.5rem;flex:0 0 auto;}
+.hc-agent-actions:empty{display:none;}
 .hc-agent-btn{min-height:2.4rem;padding:0 0.9rem;border-radius:var(--hc-radius-control, 2px);border:1px solid rgba(255,255,255,0.14);
   background:none;color:rgba(235,242,248,0.85);font:inherit;font-size:0.86rem;cursor:pointer;}
 .hc-agent-ok{background:rgba(${STEEL},0.9);border-color:rgba(${STEEL},0.9);color:#0c1118;font-weight:700;}

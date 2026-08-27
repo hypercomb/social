@@ -71,6 +71,7 @@ export class EditActionsElement extends HTMLElement {
   #feedbackOpen = false
   #offs: Array<() => void> = []
   #i18n: I18nTarget | null = null
+  #widthWatch: ResizeObserver | null = null
 
   connectedCallback(): void {
     if (this.#connected) return
@@ -117,6 +118,9 @@ export class EditActionsElement extends HTMLElement {
     this.#offs.length = 0
     this.#i18n?.removeEventListener('change', this.#onI18nChange)
     this.#i18n = null
+    this.#widthWatch?.disconnect()
+    this.#widthWatch = null
+    document.documentElement.style.removeProperty('--hc-actions-width')
   }
 
   #connectI18n(): void {
@@ -264,6 +268,21 @@ export class EditActionsElement extends HTMLElement {
       ))
     }
     this.replaceChildren(group)
+    this.#observeWidth(group)
+  }
+
+  /** Publish the live corner reservation consumed by the pheromone strip. */
+  #observeWidth(group: HTMLElement): void {
+    this.#widthWatch?.disconnect()
+    const publish = (): void => {
+      const width = Math.round(group.getBoundingClientRect().width)
+      document.documentElement.style.setProperty('--hc-actions-width', `${width}px`)
+    }
+    if (typeof ResizeObserver !== 'undefined') {
+      this.#widthWatch = new ResizeObserver(publish)
+      this.#widthWatch.observe(group)
+    }
+    publish()
   }
 }
 

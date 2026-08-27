@@ -8,13 +8,14 @@
 // its name, its prose, its keywords, its picture, its own children — it
 // already has, because it is a tile and tiles have all of that.
 //
-// ── Why the order is not in the record ────────────────────────────────
+// ── Legacy order and explicit graph edges ─────────────────────────────
 //
-// The step order IS the parent's `children` order. Writing it a second time
-// into a workflow record would create two truths that drift the first time
-// somebody drags a tile. So: no `index`, no `next`, no edge list. Reorder is
-// the reorder you already have, undo is the undo you already have, and a
-// step deleted on canvas is a step deleted from the workflow.
+// A step with no `next` field follows the parent's `children` order, exactly
+// as v1 workflows always did. Once someone edits connections in the visual
+// designer, `next` becomes an explicit list of target child names on the
+// SOURCE step. There is still no second central edge table to drift: the
+// content-addressed step resource owns its outgoing contract. `next: []`
+// deliberately marks a terminal step.
 //
 // ── Why the payload is a sig ──────────────────────────────────────────
 //
@@ -52,6 +53,12 @@ export interface WorkflowStep {
   readonly text?: string
   /** Advisory model hint for AI-shaped steps ('haiku', 'sonnet', 'opus'). */
   readonly model?: string
+  /** Explicit outgoing targets by sibling tile name. Undefined preserves the
+   *  legacy next-sibling sequence; an empty list makes this step terminal. */
+  readonly next?: readonly string[]
+  /** Authoring-canvas position. It travels with the workflow so a carefully
+   *  arranged graph remains readable after adoption. */
+  readonly position?: Readonly<{ x: number; y: number }>
 }
 
 /** A step as the designer and the runner see it: the tile plus its record. */
@@ -144,7 +151,20 @@ export async function readStepResource(sig: string): Promise<WorkflowStep | null
     if (!blob) return null
     const parsed = JSON.parse(await blob.text()) as Partial<WorkflowStep>
     if (typeof parsed?.kind !== 'string' || !parsed.kind) return null
-    return { ...parsed, v: 1, kind: parsed.kind } as WorkflowStep
+    const next = Array.isArray(parsed.next)
+      ? parsed.next.map(value => String(value).trim()).filter(Boolean)
+      : undefined
+    const point = parsed.position as { x?: unknown; y?: unknown } | undefined
+    const position = Number.isFinite(point?.x) && Number.isFinite(point?.y)
+      ? { x: Number(point?.x), y: Number(point?.y) }
+      : undefined
+    return {
+      ...parsed,
+      v: 1,
+      kind: parsed.kind,
+      ...(next ? { next } : {}),
+      ...(position ? { position } : {}),
+    } as WorkflowStep
   } catch {
     return null
   }

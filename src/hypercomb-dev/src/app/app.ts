@@ -53,6 +53,10 @@ export class App implements AfterViewInit {
   public readonly meshPublic = signal(false);
   public readonly inputOpen = signal(false);
   public readonly viewActive = signal(false);
+  /** A view is covering the canvas AND leaving the control bar its edge — see
+   *  the binding in app.html. Owner-counted in ModeRegistry alongside
+   *  `view:active`, so it stays true while ANY such view is open. */
+  public readonly controlsKept = signal(false);
   public readonly orientation = signal<HexOrientation>(
     (localStorage.getItem('hc:hex-orientation') as HexOrientation) || DEFAULT_HEX_ORIENTATION
   );
@@ -82,6 +86,10 @@ export class App implements AfterViewInit {
 
     EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {
       this.viewActive.set(active)
+    })
+
+    EffectBus.on<{ active: boolean }>('view:keeps-controls', ({ active }) => {
+      this.controlsKept.set(active)
     })
 
     EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {

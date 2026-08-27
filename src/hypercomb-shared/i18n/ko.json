@@ -102,7 +102,7 @@
   "providers.search": "프로바이더와 모델 검색",
   "providers.empty": "일치 항목 없음",
   "providers.tab.subscription": "구독",
-  "providers.tab.api": "API 요청",
+  "providers.tab.api": "채팅 API",
   "providers.tab.swarm": "스웜",
   "providers.tabHint.subscription": "이미 결제하고 있는 요금제입니다. 이 컴퓨터에서 실행 중인 CLI 세션이 자체 계정으로 응답하며, 하이브를 읽을 수 있는 응답자는 이들뿐입니다.",
   "providers.tabHint.api": "여기에 붙여넣은 키로 요청마다 과금됩니다. 키는 이 브라우저에 남고, 키가 향할 엔드포인트는 붙여넣기 전에 표시됩니다.",
