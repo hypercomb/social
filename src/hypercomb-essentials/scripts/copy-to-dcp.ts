@@ -4,7 +4,8 @@
 // the target with the same name, it IS the correct content. No hashing needed.
 //
 // Layout-agnostic on purpose: dist emits the FLAT layout (bare sig-named files
-// + sig-named bag dirs at the dist root, plus manifest.json — see
+// + sig-named bag dirs at the dist root, plus manifest.json and the one-line
+// bootstrap pin — see
 // build-module.ts). This script copies whatever 64-hex-named entries dist
 // holds; it never creates a typed `__x__` dir. Targets that still carry the
 // legacy typed dirs (`__layers__`/`__bees__`/`__dependencies__`/`__resources__`)
@@ -59,6 +60,7 @@ const SIG_NAME = /^[0-9a-f]{64}$/i
 const LEGACY_BUILD_DIRS = ['__layers__', '__bees__', '__dependencies__']
 const LEGACY_RESOURCES_DIR = '__resources__'
 const MANIFEST_FILE = 'manifest.json'
+const BOOTSTRAP_PIN_FILE = 'bootstrap-pin.json'
 
 const copyDirRecursive = (srcDir: string, tgtDir: string): void => {
   mkdirSync(tgtDir, { recursive: true })
@@ -162,6 +164,12 @@ const advertisedSigs = (manifest: ContentManifest): Set<string> => {
     for (const field of ['layers', 'bees', 'dependencies', 'resources']) {
       for (const ref of (pkg[field] as string[] | undefined) ?? []) out.add(ref)
     }
+    // Signed package descriptor and sigbags are scalar signature edges.
+    // Retaining them keeps every advertised historical revision resolvable.
+    for (const field of ['bootstrap', 'dependenciesBag', 'beesBag']) {
+      const ref = String(pkg[field] ?? '')
+      if (SIG_NAME.test(ref)) out.add(ref)
+    }
   }
   return out
 }
@@ -185,6 +193,7 @@ const syncTarget = (
   targetDir: string,
   additive: boolean,
   manifestJson: string,
+  bootstrapPinJson: string,
   keep: Set<string>,
   peers: string[],
 ): { copied: number; skipped: number; removed: number; drained: number; healed: number } => {
@@ -258,6 +267,18 @@ const syncTarget = (
     writeFileSync(tgtManifest, manifestJson, 'utf8')
     copied++
   }
+  // The pin is the deployment's only mutable trust edge. Write it only after
+  // every signed leaf and the matching discovery manifest are present. A
+  // reader then sees either the previous valid pin or the new valid pin—never
+  // a signature whose descriptor has not landed yet.
+  const targetPin = join(targetDir, BOOTSTRAP_PIN_FILE)
+  const existingPin = existsSync(targetPin) ? readFileSync(targetPin, 'utf8') : null
+  if (existingPin === bootstrapPinJson) {
+    skipped++
+  } else {
+    writeFileSync(targetPin, bootstrapPinJson, 'utf8')
+    copied++
+  }
 
   // remove stale entries (signatures no longer in source) — STRICTLY
   // whitelisted to 64-hex names so app assets sharing the target root
@@ -294,6 +315,11 @@ const main = () => {
     process.exit(1)
   }
 
+  if (!existsSync(join(DIST_ROOT, BOOTSTRAP_PIN_FILE))) {
+    console.error('[copy-to-dcp] dist/bootstrap-pin.json not found — run build:module first')
+    process.exit(1)
+  }
+
   // ── Version chaining ────────────────────────────────────────────────────
   // dist holds the build's single-package manifest (stable genesis label,
   // previous: null — see build-module.ts). The version is minted HERE, at
@@ -318,6 +344,7 @@ const main = () => {
   }
   const chained = chainManifest(localManifest, authority, new Date())
   const manifestJson = JSON.stringify(chained.manifest, null, 2) + '\n'
+  const bootstrapPinJson = readFileSync(join(DIST_ROOT, BOOTSTRAP_PIN_FILE), 'utf8')
   if (chained.generation) {
     console.log(`[copy-to-dcp] manifest version: v${chained.generation} '${chained.label}'${chained.minted ? '' : ' (unchanged re-deploy)'}`)
   }
@@ -330,7 +357,14 @@ const main = () => {
 
   for (const { dir, additive } of TARGETS) {
     const peers = sourceOrder.filter(d => d !== dir && existsSync(d))
-    const { copied, skipped, removed, drained, healed } = syncTarget(dir, additive, manifestJson, keep, peers)
+    const { copied, skipped, removed, drained, healed } = syncTarget(
+      dir,
+      additive,
+      manifestJson,
+      bootstrapPinJson,
+      keep,
+      peers,
+    )
     console.log(`[copy-to-dcp] ${dir}${additive ? ' (additive/persistent)' : ''}`)
     console.log(`  ${copied} copied, ${skipped} unchanged, ${removed} removed${healed ? `, ${healed} backfilled for older versions` : ''}${drained ? `, ${drained} drained from legacy dirs` : ''}`)
   }

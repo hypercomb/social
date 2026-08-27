@@ -12,6 +12,7 @@ import { EffectBus, SignatureStore } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared/core'
 import { seedDarkOnFreshInstall } from '@hypercomb/shared/core/behavior-fresh-install'
 import type { SentinelBridge } from './sentinel-bridge'
+import { fetchPinnedPackage, type PinnedPackage } from './pinned-package'
 
 export type BootStatus =
   | { kind: 'cached' }
@@ -41,6 +42,7 @@ const _deps = [Store]
 type InstallManifest = {
   version: number
   packageSig?: string
+  bootstrap?: string
   layers: string[]
   bees: string[]
   dependencies: string[]
@@ -396,28 +398,27 @@ const adoptNativeBundle = async (): Promise<boolean> => {
 // DCP hasn't pushed yet.
 // -------------------------------------------------
 
-type BundledPackage = {
-  packageSig: string
-  bees: string[]
-  dependencies: string[]
-  layers: string[]
-  platforms?: Record<string, string>
-  beeDeps?: Record<string, string[]>
-  // Sigbag (Phase 1 additive): when present, the bundle ships a
-  // `<bagSig>/0000…` dir alongside the flat leaves. New flat builds put
-  // the bag dir at the content root; legacy bundles nested it inside the
-  // retired `__dependencies__/` / `__bees__/` dirs (fetch falls back to
-  // that URL shape). Absent for older bundles.
-  dependenciesBag?: string
-  beesBag?: string
-  renderCriticalKeys?: string[]
-  // Sidecar branch metadata (does not affect packageSig). Ignored at install.
-  label?: string
-  at?: string
-  previous?: string | null
-}
+type BundledPackage = Omit<PinnedPackage, 'version'> & { bootstrap?: string }
 
 const fetchBundledPackage = async (): Promise<BundledPackage | null> => {
+  // Current deployments publish one mutable signature and an immutable,
+  // hash-verified descriptor behind it. A PRESENT but broken pin fails closed:
+  // falling through to mutable manifest metadata would silently restore the
+  // wider trust surface this carve removes. Only a genuine missing pin means
+  // the deployment predates this protocol and may use the compatibility path.
+  const pinned = await fetchPinnedPackage()
+  if (pinned.status === 'verified') {
+    return { ...pinned.package, bootstrap: pinned.descriptorSig }
+  }
+  if (pinned.status === 'invalid') {
+    console.warn(`[ensure-install] rejected bootstrap pin: ${pinned.reason}`)
+    return null
+  }
+
+  return fetchLegacyBundledPackage()
+}
+
+const fetchLegacyBundledPackage = async (): Promise<BundledPackage | null> => {
   try {
     const res = await fetch('/content/manifest.json', { cache: 'no-store' })
     if (!res.ok) return null
@@ -620,6 +621,7 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   const manifest = {
     version: 2,
     packageSig: bundled.packageSig,
+    bootstrap: bundled.bootstrap,
     layers: bundled.layers,
     bees: bundled.bees,
     dependencies: bundled.dependencies,
@@ -841,6 +843,10 @@ const resyncPass = async (sentinel: SentinelBridge, store: Store): Promise<void>
     // CARRIED FORWARD from the prior install — a resync must not blank the
     // first-paint gate.
     renderCriticalKeys: priorManifest?.renderCriticalKeys,
+    // A DCP logical union has no single package descriptor of its own. Keep
+    // the last verified bundled pin only as provenance/read compatibility;
+    // packageSig is intentionally absent on the union.
+    bootstrap: priorManifest?.bootstrap,
     // DCP logical union → DCP is this install's update authority, NOT the shell
     // bundle. checkForUpdate uses this to suppress phantom bundle-drift updates.
     source: 'sentinel' as const,
@@ -962,6 +968,7 @@ const tryParseManifest = (json: string): InstallManifest | null => {
     return {
       version: parsed.version ?? 0,
       packageSig: typeof parsed.packageSig === 'string' ? parsed.packageSig : undefined,
+      bootstrap: typeof parsed.bootstrap === 'string' ? parsed.bootstrap : undefined,
       layers: Array.isArray(parsed.layers) ? parsed.layers : [],
       bees: Array.isArray(parsed.bees) ? parsed.bees : [],
       dependencies: Array.isArray(parsed.dependencies) ? parsed.dependencies : [],
@@ -971,6 +978,7 @@ const tryParseManifest = (json: string): InstallManifest | null => {
       beeDeps: parsed.beeDeps && typeof parsed.beeDeps === 'object' ? parsed.beeDeps : undefined,
       dependenciesBag: typeof parsed.dependenciesBag === 'string' ? parsed.dependenciesBag : undefined,
       beesBag: typeof parsed.beesBag === 'string' ? parsed.beesBag : undefined,
+      renderCriticalKeys: Array.isArray(parsed.renderCriticalKeys) ? parsed.renderCriticalKeys : undefined,
       source: parsed.source === 'bundled' || parsed.source === 'sentinel' ? parsed.source : undefined,
     }
   } catch {

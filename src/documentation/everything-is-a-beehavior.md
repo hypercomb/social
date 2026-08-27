@@ -603,6 +603,13 @@ SW control → ioc → Store → fetch the pinned bootstrap bundle (OPFS first,
 network fallback when cold) → run it. That bundle is a privileged bee that
 owns everything acquisition:
 
+- [x] Collapse mutable package discovery to one signature: builds emit
+  `bootstrap-pin.json` containing only the signed descriptor signature; the
+  descriptor holds the complete package closure and is SHA-256 verified before
+  any field is trusted. Only a genuinely absent pin may use the legacy mutable
+  `manifest.json`; a present malformed pin or forged/missing descriptor fails
+  closed. Local mirrors retain every historical descriptor edge, and Azure
+  moves plus reads back the pin only after its signed leaves are live.
 - [ ] Carve `ensure-install.ts` (1,103) + `sentinel-bridge.ts` (561) out of
   the web shell into one sig-addressed bootstrap bundle
 - [ ] Move `layer-installer` (302), the three `layer-install-sources`,

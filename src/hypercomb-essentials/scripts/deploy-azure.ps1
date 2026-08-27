@@ -278,7 +278,8 @@ if ([string]::IsNullOrWhiteSpace($containerName)) {
 $authArguments = get-auth-arguments
 
 # Flat delivery layout: content entries are 64-hex sig names at the dist root
-# (file = layer/bee/dependency bytes, dir = sigbag) plus manifest.json — see
+# (file = layer/bee/dependency/descriptor bytes, dir = sigbag) plus
+# manifest.json and bootstrap-pin.json — see
 # build-module.ts. Never .cache/. Nothing else is enumerated: a build wipes
 # dist first, so no typed dir can survive to be re-emitted. Blobs already on
 # Azure under the old typed `__x__/` names are NEVER deleted or renamed — old
@@ -290,7 +291,7 @@ foreach ($entry in (Get-ChildItem -LiteralPath $resolvedSource | Sort-Object Nam
     if ($entry.Name -match $sigNamePattern) {
       $files += @(Get-ChildItem -LiteralPath $entry.FullName -Recurse -File | Sort-Object FullName)
     }
-  } elseif ($entry.Name -match $sigNamePattern -or $entry.Name -eq 'manifest.json') {
+  } elseif ($entry.Name -match $sigNamePattern -or $entry.Name -in @('manifest.json', 'bootstrap-pin.json')) {
     $files += @(Get-Item -LiteralPath $entry.FullName)
   }
 }
@@ -310,6 +311,7 @@ write-step ''
 # --- Phase 1: Merge manifest with remote before uploading ---
 
 $localManifestPath = Join-Path $resolvedSource 'manifest.json'
+$localBootstrapPinPath = Join-Path $resolvedSource 'bootstrap-pin.json'
 if (Test-Path -LiteralPath $localManifestPath -PathType Leaf) {
   $manifestBlobName = if ($resolvedDestination) { "$resolvedDestination/manifest.json" } else { 'manifest.json' }
   # Cross-platform temp dir: Windows uses $env:TEMP, Linux/macOS use
@@ -472,10 +474,10 @@ foreach ($file in $files) {
   $blobName = if ($resolvedDestination) { "$resolvedDestination/$relativePath" } else { $relativePath }
 
   # Every enumerated file must resolve to a name consumers can actually
-  # fetch: a flat sig, a sigbag entry, a legacy typed path, or manifest.json.
+  # fetch: a flat sig, a sigbag entry, manifest.json, or the one-line pin.
   # Anything else means relative-path resolution broke (e.g. the dist/ prefix
   # bug) — fail loudly instead of publishing 300 unreachable blobs green.
-  if (-not (is-content-addressed -RelativePath $relativePath) -and $relativePath -ne 'manifest.json') {
+  if (-not (is-content-addressed -RelativePath $relativePath) -and $relativePath -notin @('manifest.json', 'bootstrap-pin.json')) {
     fail "unexpected blob name '$relativePath' for '$($file.FullName)' — relative path resolution is broken; refusing to upload unreachable content"
   }
 
@@ -636,6 +638,25 @@ if (Test-Path -LiteralPath $localManifestPath -PathType Leaf) {
   write-step ''
 }
 
+# The pin moves LAST. At this point every immutable descriptor/content leaf
+# and the compatibility manifest are already live, so readers observe either
+# the previous valid signature or the new valid signature—never a dangling
+# trust edge.
+if (Test-Path -LiteralPath $localBootstrapPinPath -PathType Leaf) {
+  write-step '--- Phase 2.6: explicit final bootstrap pin upload ---'
+  $bootstrapPinBlobNameFinal = if ($resolvedDestination) { "$resolvedDestination/bootstrap-pin.json" } else { 'bootstrap-pin.json' }
+  invoke-az -Arguments ((@(
+    'storage', 'blob', 'upload',
+    '--container-name', $containerName,
+    '--file', $localBootstrapPinPath,
+    '--name', $bootstrapPinBlobNameFinal,
+    '--overwrite', 'true',
+    '--content-type', 'application/json',
+    '--no-progress'
+  )) + $authArguments)
+  write-step ''
+}
+
 if (Test-Path -LiteralPath $localManifestPath -PathType Leaf) {
   write-step '--- Phase 3: verifying live manifest matches local ---'
 
@@ -737,5 +758,35 @@ Failing the deploy so it cannot be mistaken for a success.
   }
 
   write-step " ✓ verified — live manifest bytes match local (sha256 $($localHash.Substring(0,16))...)"
+  write-step ''
+}
+
+if (Test-Path -LiteralPath $localBootstrapPinPath -PathType Leaf) {
+  write-step '--- Phase 3.1: verifying live bootstrap pin matches local ---'
+  $pinBlobNameVerify = if ($resolvedDestination) { "$resolvedDestination/bootstrap-pin.json" } else { 'bootstrap-pin.json' }
+  $tempDirPinVerify = if (-not [string]::IsNullOrWhiteSpace($env:TEMP)) { $env:TEMP } `
+                     elseif (-not [string]::IsNullOrWhiteSpace($env:TMPDIR)) { $env:TMPDIR } `
+                     else { '/tmp' }
+  $tempPinVerifyPath = Join-Path $tempDirPinVerify 'hypercomb-verify-bootstrap-pin.json'
+  Remove-Item -LiteralPath $tempPinVerifyPath -Force -ErrorAction SilentlyContinue
+  $pinVerifyResult = invoke-az-silent -Arguments ((@(
+    'storage', 'blob', 'download',
+    '--container-name', $containerName,
+    '--name', $pinBlobNameVerify,
+    '--file', $tempPinVerifyPath,
+    '--overwrite', 'true',
+    '--only-show-errors'
+  )) + $authArguments)
+  if ($pinVerifyResult.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $tempPinVerifyPath -PathType Leaf)) {
+    fail "verification failed: could not download bootstrap-pin.json after upload (container=$containerName blob=$pinBlobNameVerify exit=$($pinVerifyResult.ExitCode))"
+  }
+  $pinSha = [System.Security.Cryptography.SHA256]::Create()
+  $localPinHash = ($pinSha.ComputeHash([System.IO.File]::ReadAllBytes($localBootstrapPinPath)) | ForEach-Object { $_.ToString('x2') }) -join ''
+  $remotePinHash = ($pinSha.ComputeHash([System.IO.File]::ReadAllBytes($tempPinVerifyPath)) | ForEach-Object { $_.ToString('x2') }) -join ''
+  Remove-Item -LiteralPath $tempPinVerifyPath -Force -ErrorAction SilentlyContinue
+  if ($localPinHash -ne $remotePinHash) {
+    fail "verification failed: live bootstrap pin does not match local after upload (local=$localPinHash remote=$remotePinHash)"
+  }
+  write-step " ✓ verified — live bootstrap pin bytes match local (sha256 $($localPinHash.Substring(0,16))...)"
   write-step ''
 }

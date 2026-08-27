@@ -70,6 +70,7 @@ const EMIT_DOMAIN_ROOT_NAMESPACE = false
 
 // content manifest (replaces latest.json — supports multiple entry points)
 const MANIFEST_FILE = 'manifest.json'
+const BOOTSTRAP_PIN_FILE = 'bootstrap-pin.json'
 
 // Genesis label for a freshly built package. This is a STABLE sidecar handle —
 // the current git branch (or 'genesis' outside a repo) — NOT a timestamp, so a
@@ -148,8 +149,13 @@ interface BeeDepCacheEntry {
 // `/opfs/<dependencies-pool-sig>/<content-sig>` URL. The platform fingerprint
 // participates in every unit cache key, so changing either runtime rebuilds
 // every module whose signed bytes embed those addresses.
+//
+// version 8 = every package emits a signed descriptor plus the one-signature
+// bootstrap pin. This changes the required output set without changing module
+// inputs, so old caches must rebuild once rather than early-exit without the
+// pin and descriptor.
 interface BuildCache {
-  version: 7
+  version: 8
   rootHash: string                            // Merkle root of all unit hashes
   rootLayerSig: string                        // last output root signature
   platformFingerprint: string                 // core + pixi content identities
@@ -166,7 +172,7 @@ const OUTPUT_CACHE_DIR = join(DIST_ROOT, '.cache')
 const loadCache = (): BuildCache | null => {
   try {
     const raw = JSON.parse(readFileSync(CACHE_FILE, 'utf8'))
-    if (raw?.version === 7) return raw
+    if (raw?.version === 8) return raw
   } catch {}
   return null
 }
@@ -894,7 +900,7 @@ const main = async (): Promise<void> => {
     const skipDeploy = process.argv.includes('--local')
 
     // Verify output still exists (not wiped externally)
-    if (existsSync(manifestFile)) {
+    if (existsSync(manifestFile) && existsSync(join(DIST_ROOT, BOOTSTRAP_PIN_FILE))) {
       const elapsed = ((performance.now() - t0) / 1000).toFixed(3)
       console.log(`[build-module] Merkle root unchanged — skipping build entirely`)
       console.log(`[build-module] root signature: ${cache.rootLayerSig}`)
@@ -1275,7 +1281,9 @@ const main = async (): Promise<void> => {
     readFileSync(resolve(PROJECT_ROOT, 'src', 'render-critical.json'), 'utf8'),
   ) as { keys: string[] }).keys
 
-  const packageEntry = {
+  const packageDescriptor = {
+    version: 1,
+    packageSig: rootLayerSig,
     layers: Array.from(layers.keys()).sort((a, b) => a.localeCompare(b)),
     bees: Array.from(resourceBytes.keys()).sort((a, b) => a.localeCompare(b)),
     dependencies: dependencySigs,
@@ -1286,6 +1294,23 @@ const main = async (): Promise<void> => {
     renderCriticalKeys,
     label: resolveGenesisLabel(),
     previous: null as string | null,
+  }
+
+  // The deployment's mutable authority is one signature, not a mutable JSON
+  // object containing every executable edge. bootstrap-pin.json names this
+  // immutable descriptor; the receiver verifies the descriptor bytes before
+  // trusting any package field. Updating the package therefore means moving
+  // one small pin while every expandable field remains content-addressed.
+  const packageDescriptorJson = JSON.stringify(packageDescriptor) + '\n'
+  const packageDescriptorSig = await SignatureService.sign(
+    toArrayBuffer(textToBytes(packageDescriptorJson)),
+  )
+
+  const packageEntry = {
+    ...packageDescriptor,
+    // Retention/discovery edge only. It does not participate in packageSig:
+    // package identity remains the root layer signature.
+    bootstrap: packageDescriptorSig,
   }
 
   // ── Closure check ────────────────────────────────────────────────
@@ -1352,6 +1377,10 @@ const main = async (): Promise<void> => {
     console.log(`[build-module] closure OK — ${onDiskLayers.size} layers, ${onDiskBees.size} bees, ${onDiskDeps.size} deps, no dangling refs`)
   }
 
+  // Do not publish even the descriptor leaf until the closure above proves
+  // that every signature it names is present and advertised.
+  writeSigFile(DIST_ROOT, packageDescriptorSig, packageDescriptorJson)
+
   // Single-package manifest: always write only the current rootLayerSig.
   // Merging with prior manifest entries is a footgun — stale package keys
   // accumulate and the runtime loader picks Object.keys(packages)[0], which
@@ -1368,11 +1397,21 @@ const main = async (): Promise<void> => {
     console.log(`[build-module] manifest unchanged — skipped write`)
   }
 
+  const bootstrapPinPath = join(DIST_ROOT, BOOTSTRAP_PIN_FILE)
+  const nextPinJson = JSON.stringify({ version: 1, bootstrap: packageDescriptorSig }, null, 2) + '\n'
+  const previousPinJson = existsSync(bootstrapPinPath) ? readFileSync(bootstrapPinPath, 'utf8') : ''
+  if (nextPinJson !== previousPinJson) {
+    writeFileSync(bootstrapPinPath, nextPinJson, 'utf8')
+    console.log(`[build-module] bootstrap pin updated (${packageDescriptorSig.slice(0, 12)})`)
+  } else {
+    console.log('[build-module] bootstrap pin unchanged — skipped write')
+  }
+
   // --- Phase 5: persist Merkle cache + GC ---
 
   const rootHash = await computeRootHash(allUnitSigs)
   saveCache({
-    version: 7,
+    version: 8,
     rootHash,
     rootLayerSig,
     platformFingerprint: platform.fingerprint,
