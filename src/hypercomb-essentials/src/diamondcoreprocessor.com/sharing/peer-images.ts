@@ -9,11 +9,10 @@
 // of them (freshest publisher wins) and only for a tile you do not hold
 // yourself; every other version is on the wire and invisible.
 //
-// This module turns that wire traffic into a CHOICE: for a tile label at the
-// live swarm signature, every distinct image any peer is offering, with the
-// participants offering it. The overlay reads `hasPeerImages` synchronously
-// (icon visibility is computed on hover, where nothing async is allowed) and
-// the picker reads `peerImageCandidates` when it opens.
+// This module turns that wire traffic into a CHOICE. The synchronous read is
+// scoped to the live swarm signature (needed by the hover affordance). The
+// chooser probes the HIVE ROOT for the fixed-name pool and unions the current
+// lineage as a compatibility witness while older participants migrate.
 //
 // POINTERS ONLY. Nothing here fetches bytes, writes a layer, or touches
 // OPFS — a candidate is a set of signatures plus who is publishing them.
@@ -46,6 +45,9 @@ export type PeerImageCandidate = {
 
 type SwarmLike = {
   peerTilesAtCurrentSig?: () => readonly ({ name: string; peerPubkey: string } & Record<string, unknown>)[]
+  peerTilesAtSig?: (sig: string) => readonly ({ name: string; peerPubkey: string } & Record<string, unknown>)[]
+  composeSigForSegments?: (segments: readonly string[]) => Promise<string>
+  primePeerTilesAt?: (sig: string, opts?: { force?: boolean }) => Promise<void>
   labelFor?: (pubkey: string) => string
 }
 
@@ -85,21 +87,11 @@ export const previewSigOf = (props: PeerImageProps): string =>
 const candidateKey = (props: PeerImageProps): string =>
   [props.small?.image ?? '', props.flat?.small.image ?? '', props.point?.image ?? '', props.imageSig ?? ''].join('|')
 
-/**
- * Every distinct image the swarm is offering for `label` at the live
- * signature, freshest publisher first (the order `peerTilesAtSig` walks).
- * Empty when the mesh is off, nobody is here, or nobody published a picture
- * for this tile — the affordance is evidence, never a guess.
- */
-export const peerImageCandidates = (label: string): readonly PeerImageCandidate[] => {
-  const name = String(label ?? '').trim()
-  if (!name) return []
-  const drone = swarm()
-  if (!drone?.peerTilesAtCurrentSig) return []
-
-  let tiles: readonly ({ name: string; peerPubkey: string } & Record<string, unknown>)[] = []
-  try { tiles = drone.peerTilesAtCurrentSig() } catch { return [] }
-
+const candidatesFrom = (
+  name: string,
+  tiles: readonly ({ name: string; peerPubkey: string } & Record<string, unknown>)[],
+  labelFor?: (pubkey: string) => string,
+): readonly PeerImageCandidate[] => {
   const byImage = new Map<string, PeerImageCandidate>()
   for (const tile of tiles) {
     if (tile.name !== name) continue
@@ -108,7 +100,7 @@ export const peerImageCandidates = (label: string): readonly PeerImageCandidate[
     const preview = previewSigOf(props)
     if (!preview) continue
     const key = candidateKey(props)
-    const peer = { pubkey: tile.peerPubkey, label: drone.labelFor?.(tile.peerPubkey) ?? '' }
+    const peer = { pubkey: tile.peerPubkey, label: labelFor?.(tile.peerPubkey) ?? '' }
     const existing = byImage.get(key)
     if (existing) {
       if (!existing.peers.some(p => p.pubkey === peer.pubkey)) {
@@ -119,6 +111,69 @@ export const peerImageCandidates = (label: string): readonly PeerImageCandidate[
     byImage.set(key, { previewSig: preview, props, peers: [peer] })
   }
   return [...byImage.values()]
+}
+
+/** Union candidate projections without losing publisher provenance. Root
+ *  variants come first; live-lineage witnesses fill migration gaps. */
+const mergeCandidates = (
+  ...bags: (readonly PeerImageCandidate[])[]
+): readonly PeerImageCandidate[] => {
+  const merged = new Map<string, PeerImageCandidate>()
+  for (const bag of bags) {
+    for (const candidate of bag) {
+      const key = candidateKey(candidate.props)
+      const existing = merged.get(key)
+      if (!existing) {
+        merged.set(key, { ...candidate, peers: [...candidate.peers] })
+        continue
+      }
+      const peers = existing.peers as { pubkey: string; label: string }[]
+      for (const peer of candidate.peers) {
+        if (!peers.some(p => p.pubkey === peer.pubkey)) peers.push(peer)
+      }
+    }
+  }
+  return [...merged.values()]
+}
+
+/**
+ * Every distinct image the swarm is offering for `label` at the live
+ * signature. This remains the synchronous overlay evidence check.
+ */
+export const peerImageCandidates = (label: string): readonly PeerImageCandidate[] => {
+  const name = String(label ?? '').trim()
+  if (!name) return []
+  const drone = swarm()
+  if (!drone?.peerTilesAtCurrentSig) return []
+  try { return candidatesFrom(name, drone.peerTilesAtCurrentSig(), drone.labelFor) }
+  catch { return [] }
+}
+
+/**
+ * Every distinct image published for the fixed name at the canonical root,
+ * plus current-lineage witnesses that have not reached that root yet. An
+ * explicit chooser gesture forces the root probe; older swarm implementations
+ * fall back to the live location instead of making the chooser unusable.
+ */
+export const canonicalPeerImageCandidates = async (
+  label: string,
+): Promise<readonly PeerImageCandidate[]> => {
+  const name = String(label ?? '').trim()
+  if (!name) return []
+  const drone = swarm()
+  if (!drone) return []
+  if (!drone.composeSigForSegments || !drone.peerTilesAtSig) return peerImageCandidates(name)
+
+  try {
+    const rootSig = await drone.composeSigForSegments([])
+    if (!rootSig) return peerImageCandidates(name)
+    await drone.primePeerTilesAt?.(rootSig, { force: true })
+    const canonical = candidatesFrom(name, drone.peerTilesAtSig(rootSig), drone.labelFor)
+    const live = drone.peerTilesAtCurrentSig
+      ? candidatesFrom(name, drone.peerTilesAtCurrentSig(), drone.labelFor)
+      : []
+    return mergeCandidates(canonical, live)
+  } catch { return peerImageCandidates(name) }
 }
 
 /** Sync predicate for the overlay's `visibleWhen`: is there another version

@@ -14,7 +14,7 @@
 // to choose from rather than showing nothing at all.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
-import { peerImageCandidates } from './peer-images.js'
+import { canonicalPeerImageCandidates } from './peer-images.js'
 
 const get = (key: string) => (window as any).ioc?.get?.(key)
 
@@ -41,7 +41,7 @@ export class ImagesQueenBee extends QueenBee {
     const label = args.trim().toLowerCase() || this.#selected()
     if (!label) { this.#log('name a tile, or select one first'); return }
 
-    const offered = peerImageCandidates(label)
+    const offered = await canonicalPeerImageCandidates(label)
     if (offered.length === 0) {
       this.#log(`nobody in the room is offering a picture for "${label}"`)
       return

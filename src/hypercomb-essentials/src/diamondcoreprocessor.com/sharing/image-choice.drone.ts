@@ -45,7 +45,7 @@ import {
   writeTilePropertiesAt,
 } from '../editor/tile-properties.js'
 import { referenceEditsRootDefaultForLabel } from '../commands/decoration-kind-index.js'
-import { peerImageCandidates, previewSigOf, type PeerImageCandidate, type PeerImageProps } from './peer-images.js'
+import { canonicalPeerImageCandidates, previewSigOf, type PeerImageCandidate, type PeerImageProps } from './peer-images.js'
 import { imageChoiceWriteTargets } from './image-choice-targets.js'
 
 type Axial = { q: number; r: number }
@@ -353,7 +353,8 @@ export class ImageChoiceDrone extends Drone {
     if (mine && minePreview) {
       entries.push({ props: mine, previewSig: minePreview, who: this.#t('images.yours', 'yours'), mine: true })
     }
-    const offered = peerImageCandidates(label)
+    const offered = await canonicalPeerImageCandidates(label)
+    if (token !== this.#buildToken) return
     for (const candidate of offered) {
       if (entries.length >= MAX_CHOICES) break
       // A peer carrying exactly the picture you already wear folds into YOUR
