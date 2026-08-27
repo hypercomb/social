@@ -95,33 +95,48 @@ describe('hc-install-prompt', () => {
     expect(element.querySelector('[role="dialog"]')).not.toBeNull()
   })
 
-  it('waits for the snapshot bee and every service it needs before declaring it ready', async () => {
-    const { waitForSnapshotQueen } = await import('./install-prompt.element')
-    const callbacks: Array<(key: string, value: unknown) => void> = []
-    const ioc = (window as unknown as { ioc: {
-      get: (key: string) => unknown
-      onRegister: (callback: (key: string, value: unknown) => void) => () => void
-    } }).ioc
-    const originalGet = ioc.get
-    const originalOnRegister = ioc.onRegister
+  it('saves an upgrade restore point through the installer lineage, not the installed snapshot bee', async () => {
+    const { saveInstallRestorePoint } = await import('./install-prompt.element')
+    const host = globalThis as typeof globalThis & {
+      __sentinelBridge?: unknown
+      __getSentinel?: unknown
+    }
+    const originalBridge = host.__sentinelBridge
+    const originalGetSentinel = host.__getSentinel
     try {
-      ioc.get = () => undefined
-      ioc.onRegister = callback => {
-        callbacks.push(callback)
-        return () => callbacks.splice(callbacks.indexOf(callback), 1)
-      }
-      const queen = { createRestorePoint: vi.fn(async () => true) }
-      const waiting = waitForSnapshotQueen(1_000)
-      callbacks[0]?.('@diamondcoreprocessor.com/SnapshotQueenBee', queen)
-      callbacks[0]?.('@diamondcoreprocessor.com/HistoryService', { sealSubtree: vi.fn() })
-      callbacks[0]?.('@hypercomb.social/Store', { putResource: vi.fn(), fetchLayerFromHost: vi.fn() })
-      callbacks[0]?.('@diamondcoreprocessor.com/LayerCommitter', { commitSlotAppend: vi.fn() })
-      callbacks[0]?.('@diamondcoreprocessor.com/ContentBrokerDrone', { fetchBySig: vi.fn() })
-      await expect(waiting).resolves.toBe(queen)
-      expect(callbacks).toHaveLength(0)
+      const saveBranch = vi.fn(async () => 'a'.repeat(64))
+      host.__sentinelBridge = undefined
+      host.__getSentinel = vi.fn(async () => ({ saveBranch }))
+
+      await expect(saveInstallRestorePoint('Before update', 1_000)).resolves.toEqual({
+        available: true,
+        rootSig: 'a'.repeat(64),
+      })
+      expect(saveBranch).toHaveBeenCalledWith('Before update')
     } finally {
-      ioc.get = originalGet
-      ioc.onRegister = originalOnRegister
+      host.__sentinelBridge = originalBridge
+      host.__getSentinel = originalGetSentinel
+    }
+  })
+
+  it('reports an unavailable installer checkpoint without consulting hive services', async () => {
+    const { saveInstallRestorePoint } = await import('./install-prompt.element')
+    const host = globalThis as typeof globalThis & {
+      __sentinelBridge?: unknown
+      __getSentinel?: unknown
+    }
+    const originalBridge = host.__sentinelBridge
+    const originalGetSentinel = host.__getSentinel
+    try {
+      host.__sentinelBridge = undefined
+      host.__getSentinel = vi.fn(async () => null)
+      await expect(saveInstallRestorePoint('Before update', 1_000)).resolves.toEqual({
+        available: false,
+        rootSig: null,
+      })
+    } finally {
+      host.__sentinelBridge = originalBridge
+      host.__getSentinel = originalGetSentinel
     }
   })
 })

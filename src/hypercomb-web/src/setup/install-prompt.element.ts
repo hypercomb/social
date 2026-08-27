@@ -13,64 +13,58 @@ import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
 import { checkForUpdate, upgradeFromBundled, type BootStatus } from './ensure-install'
 
 const ELEMENT_NAME = 'hc-install-prompt'
-const SNAPSHOT_QUEEN_KEY = '@diamondcoreprocessor.com/SnapshotQueenBee'
-const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
-const STORE_KEY = '@hypercomb.social/Store'
-const COMMITTER_KEY = '@diamondcoreprocessor.com/LayerCommitter'
-const CONTENT_BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
-const SNAPSHOT_READY_TIMEOUT_MS = 15_000
+const CHECKPOINT_TIMEOUT_MS = 15_000
 
-type SnapshotQueen = {
-  createRestorePoint?: (name: string) => Promise<boolean>
+type InstallCheckpointBridge = {
+  saveBranch?: (name: string) => Promise<string | null>
 }
 
-type SnapshotToast = { type?: string; title?: string; message?: string }
-
-const snapshotQueenWhenReady = (read: (key: string) => unknown): SnapshotQueen | undefined => {
-  const queen = read(SNAPSHOT_QUEEN_KEY) as SnapshotQueen | undefined
-  const history = read(HISTORY_KEY) as { sealSubtree?: unknown } | undefined
-  const store = read(STORE_KEY) as { putResource?: unknown; fetchLayerFromHost?: unknown } | undefined
-  const committer = read(COMMITTER_KEY) as { commitSlotAppend?: unknown } | undefined
-  const broker = read(CONTENT_BROKER_KEY) as { fetchBySig?: unknown } | undefined
-  return typeof queen?.createRestorePoint === 'function'
-    && typeof history?.sealSubtree === 'function'
-    && typeof store?.putResource === 'function'
-    && typeof store?.fetchLayerFromHost === 'function'
-    && typeof committer?.commitSlotAppend === 'function'
-    && typeof broker?.fetchBySig === 'function'
-    ? queen
-    : undefined
+export type InstallCheckpointResult = {
+  available: boolean
+  rootSig: string | null
 }
 
 /**
- * The update affordance can appear while non-critical bees are still landing.
- * A fast click must wait for the checkpoint service instead of treating its
- * not-yet-registered state as a failed snapshot.
+ * Freeze the installer's current logical package head before replacing the
+ * local signed package. Package upgrades do not mutate hive tiles, so this is
+ * the reversible state that belongs to an upgrade checkpoint. In particular,
+ * it must not call SnapshotQueen from the currently-installed package: doing
+ * so makes an old snapshot implementation the gate for installing its fix.
  */
-export const waitForSnapshotQueen = async (
-  timeoutMs = SNAPSHOT_READY_TIMEOUT_MS,
-): Promise<SnapshotQueen | undefined> => {
-  const observed = new Map<string, unknown>()
-  const read = (key: string): unknown => observed.has(key) ? observed.get(key) : window.ioc?.get?.(key)
-  const current = snapshotQueenWhenReady(read)
-  if (current) return current
-  return new Promise(resolve => {
+export const saveInstallRestorePoint = async (
+  name: string,
+  timeoutMs = CHECKPOINT_TIMEOUT_MS,
+): Promise<InstallCheckpointResult> => {
+  const host = globalThis as typeof globalThis & {
+    __sentinelBridge?: InstallCheckpointBridge
+    __getSentinel?: () => Promise<InstallCheckpointBridge | null>
+  }
+  const deadline = Date.now() + Math.max(0, timeoutMs)
+  const withinDeadline = <T>(work: Promise<T>, fallback: T): Promise<T> => new Promise(resolve => {
+    const remaining = Math.max(0, deadline - Date.now())
     let settled = false
-    let off: (() => void) | undefined
-    const finish = (queen?: SnapshotQueen): void => {
+    const finish = (value: T): void => {
       if (settled) return
       settled = true
-      window.clearTimeout(timer)
-      off?.()
-      resolve(queen)
+      globalThis.clearTimeout(timer)
+      resolve(value)
     }
-    const timer = window.setTimeout(() => finish(), timeoutMs)
-    off = window.ioc?.onRegister?.((key, value) => {
-      observed.set(key, value)
-      const ready = snapshotQueenWhenReady(read)
-      if (ready) finish(ready)
-    })
+    const timer = globalThis.setTimeout(() => finish(fallback), remaining)
+    void work.then(finish, () => finish(fallback))
   })
+
+  let bridge = host.__sentinelBridge
+  if (typeof bridge?.saveBranch !== 'function' && typeof host.__getSentinel === 'function') {
+    bridge = (await withinDeadline(host.__getSentinel(), null)) ?? undefined
+  }
+  if (typeof bridge?.saveBranch !== 'function') return { available: false, rootSig: null }
+
+  const saveBranch = bridge.saveBranch.bind(bridge)
+  const rootSig = await withinDeadline(
+    Promise.resolve().then(() => saveBranch(String(name ?? '').trim())),
+    null,
+  )
+  return { available: true, rootSig: rootSig || null }
 }
 
 const FALLBACKS: Record<string, string> = {
@@ -265,38 +259,14 @@ export class InstallPromptElement extends HTMLElement {
     try {
       if (requireCheckpoint) {
         EffectBus.emit('update:status', { phase: 'snapshotting', message: 'Saving restore point…' })
-        const queen = await waitForSnapshotQueen()
-        if (!queen?.createRestorePoint) {
-          EffectBus.emit('update:status', {
-            phase: 'error',
-            message: 'Update stopped — the restore service did not finish loading',
-          })
-          this.#upgrading = false
-          this.#render()
-          return
-        }
-        let snapshotFailure = ''
-        let captureSnapshotFailure = false
-        const offSnapshotToast = EffectBus.on<SnapshotToast>('toast:show', payload => {
-          if (!captureSnapshotFailure || payload?.type !== 'error') return
-          if (!/^snapshot$/i.test(String(payload?.title ?? '').trim())) return
-          snapshotFailure = String(payload?.message ?? '').trim()
-        })
         const checkpointName = String(restorePointName ?? '').trim()
-        let checkpointed = false
-        try {
-          captureSnapshotFailure = true
-          checkpointed = !!(await queen.createRestorePoint(checkpointName))
-        } finally {
-          captureSnapshotFailure = false
-          offSnapshotToast()
-        }
-        if (!checkpointed) {
+        const checkpoint = await saveInstallRestorePoint(checkpointName)
+        if (!checkpoint.rootSig) {
           EffectBus.emit('update:status', {
             phase: 'error',
-            message: snapshotFailure
-              ? `Update stopped — ${snapshotFailure}`
-              : 'Update stopped — the restore point was not saved',
+            message: checkpoint.available
+              ? 'Update stopped — the installer did not save the restore point'
+              : 'Update stopped — the installer restore service did not finish loading',
           })
           this.#upgrading = false
           this.#render()

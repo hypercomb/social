@@ -669,10 +669,11 @@ owns everything acquisition:
   `install-monitor` into it
 - [x] The install prompt UI is included in the signed acquisition bundle. It
   resolves the live shell-surface registry through IoC instead of statically
-  bundling a second registry singleton. Its update checkpoint now waits for
-  the non-critical snapshot bee to register, closing the fast-click race that
-  previously reported "restore point was not saved" while the service was
-  still loading.
+  bundling a second registry singleton. A package-only upgrade now freezes the
+  installer's current logical package head through the privileged sentinel
+  bridge; it does not ask the currently-installed SnapshotQueen to gate the
+  upgrade that contains its own snapshot fix. Hive/content folds still take
+  their separate tile-and-behaviour checkpoint at the mutation boundary.
 - [ ] Shim keeps only: SW registration/control, the pinned-sig fetch path,
   and the packed-store one-way-door gate (it must run before any Store use —
   keep it to the smallest possible check)

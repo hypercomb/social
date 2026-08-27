@@ -79,6 +79,19 @@ function fileSetSignature(files: string[]): string {
   return createHash('sha256').update(parts.join('\n')).digest('hex')
 }
 
+/** Signature for a mixed set of source trees and individual build inputs.
+ *  The signed essentials package also bundles web acquisition code, so a
+ *  gate that watches only hypercomb-essentials/src can incorrectly reuse an
+ *  old acquisition signature after the installer itself changes. */
+function pathSetSignature(paths: string[]): string {
+  const extensions = ['.ts', '.js', '.cjs', '.mjs', '.json']
+  const files = paths.flatMap(path => {
+    if (!existsSync(path)) return []
+    return statSync(path).isDirectory() ? walkFiles(path, extensions) : [path]
+  })
+  return fileSetSignature(files)
+}
+
 function loadState(): BuildState {
   if (!existsSync(STATE_FILE)) return {}
   try {
@@ -181,6 +194,15 @@ function needsFileSetBuild(state: BuildState, key: string, files: string[], outp
 
 function recordFileSetBuild(state: BuildState, key: string, files: string[]): void {
   state[key] = { inputSignature: fileSetSignature(files), builtAt: Date.now() }
+}
+
+function needsPathSetBuild(state: BuildState, key: string, paths: string[], outputMarker?: string): boolean {
+  if (outputMarker && !existsSync(outputMarker)) return true
+  return state[key]?.inputSignature !== pathSetSignature(paths)
+}
+
+function recordPathSetBuild(state: BuildState, key: string, paths: string[]): void {
+  state[key] = { inputSignature: pathSetSignature(paths), builtAt: Date.now() }
 }
 
 /** Check if dist/ contains a 64-hex-char signature directory */
@@ -361,6 +383,18 @@ async function main() {
 
   const essentialsSrc = join(ROOT, 'hypercomb-essentials', 'src')
   const essentialsDir = join(ROOT, 'hypercomb-essentials')
+  const moduleInputs = [
+    essentialsSrc,
+    join(essentialsDir, 'scripts'),
+    // build-module.ts bundles acquisition-bootstrap.ts and its setup imports
+    // into a privileged, signature-addressed dependency leaf.
+    join(ROOT, 'hypercomb-web', 'src', 'setup'),
+    // Acquisition setup imports the storage/native substrate directly.
+    join(ROOT, 'hypercomb-shared', 'core'),
+    join(essentialsDir, 'package.json'),
+    join(ROOT, 'hypercomb-web', 'tsconfig.app.json'),
+    join(ROOT, 'package-lock.json'),
+  ]
 
   // Module build (signature-addressed bundles) + web vendor staging.
   // Runs for both targets so web's public/content/ is always pre-staged.
@@ -387,13 +421,13 @@ async function main() {
     const moduleUpToDate = !coreDirty
       && !pixiDirty
       && hasModuleOutput()
-      && !needsBuild(state, 'essentials:module', essentialsSrc)
+      && !needsPathSetBuild(state, 'essentials:module', moduleInputs)
 
     if (!moduleUpToDate) {
       console.log(`${TAG} building essentials modules...`)
       run(nodeRun('./scripts/run-prepare.cjs'), essentialsDir)
       run(tsxRun('./scripts/build-module.ts', ['--local']), essentialsDir)
-      recordBuild(state, 'essentials:module', essentialsSrc)
+      recordPathSetBuild(state, 'essentials:module', moduleInputs)
 
       console.log(`${TAG} copying modules to dcp...`)
       run(tsxRun('./scripts/copy-to-dcp.ts'), essentialsDir)
