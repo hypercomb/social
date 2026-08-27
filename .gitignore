@@ -23,6 +23,9 @@ dist/
 # TypeScript cache
 *.tsbuildinfo
 
+# Local heuristic-audit cache/export (generated, not source or hive data)
+src/.hypercomb/
+
 # Logs
 npm-debug.log*
 yarn-debug.log*
@@ -64,3 +67,4 @@ src/scripts/ai-inside/.*/
 src/diamond-core-processor/public/
 src/NUL
 src/NUL.map
+    
