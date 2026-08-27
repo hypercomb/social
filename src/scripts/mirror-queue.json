@@ -2157,6 +2157,16 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "shrink-phase4-signature-module-loading",
+      "title": "Mirror the Phase 4 signature-module loading slice",
+      "run": null,
+      "note": "Eager and lazy namespace dependency execution now imports directly from /opfs/<dependencies-pool-signature>/<content-signature>; alias metadata remains only for dependency-bag discovery and human-readable logs. The runtime and native import maps are reduced to two platform entries, @hypercomb/core and pixi.js, and the native /modules/<signature>.js compatibility twins retired. An emitted-module census found no namespace-to-namespace bare import edges, so these are the only remaining executable bare specifiers. This is not full import-map retirement yet: service-worker network fallback with byte-hash verification and signature packaging for the two platform modules remain, as do Angular bootstrap and Vite in the temporary skeleton. Validation passed 198 files / 1752 tests, web and dev production builds, and a real browser DependencyLoader proof through the service worker; the 4350 dev gate passes all functional checks with only the known direct-dev-port @resource proxy 404s. Manual: note-add is additive and would double-land.",
+      "commit": "f4a1f01d6",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
