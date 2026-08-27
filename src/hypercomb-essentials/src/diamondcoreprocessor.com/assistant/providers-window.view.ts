@@ -30,7 +30,7 @@
 import { EffectBus, I18N_IOC_KEY, llmKeyStore, type I18nProvider } from '@hypercomb/core'
 import { isLendingModels } from '../sharing/peer-models.drone.js'
 import { llmActivation } from './llm-activation.js'
-import { TIERS, availabilityOf, candidatesFor, chooseProvider, costOf, explainChoice, llmPolicy } from './model-policy.js'
+import { TIERS, USAGE_PLANS, availabilityOf, candidatesFor, chooseProvider, costOf, explainChoice, llmPolicy } from './model-policy.js'
 import { callModel } from './llm-dispatch.js'
 import { llmProviderRegistry } from './llm-provider-registry.js'
 import './providers/builtin-providers.js'
@@ -43,8 +43,8 @@ const STYLE_ID = 'hc-providers-styles'
 const STEEL = '126, 182, 214'
 const WIDTH_KEY = 'hc:providers-window-width'
 const TAB_KEY = 'hc:providers-window-tab'
-const POLICY_OPEN_KEY = 'hc:providers-window-policy'
 const MIN_WIDTH = 340
+const DEFAULT_WIDTH = 420
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as unknown as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
@@ -74,7 +74,10 @@ const TABS: readonly { id: ProviderTab; label: string; hint: string }[] = [
   },
   {
     id: 'api',
-    label: 'API requests',
+    // CHAT API, not "API requests" — the tab is named for what the key BUYS
+    // (an answer in the conversation), not for the shape of the transaction,
+    // and the shorter word is also the one that fits the strip on one line.
+    label: 'Chat API',
     hint: 'Billed per request against a key you paste here. The key stays in this browser, '
       + 'and the endpoint it would travel to is shown before you paste it.',
   },
@@ -127,9 +130,17 @@ export class ProvidersWindowView extends EventTarget {
   #body: HTMLDivElement | null = null
   #search = ''
   #tab: ProviderTab = rememberedTab()
-  #policyOpen = (() => {
-    try { return localStorage.getItem(POLICY_OPEN_KEY) === '1' } catch { return false }
-  })()
+  /** THE STANDING INSTRUCTIONS ARE CLOSED WHEN YOU ARRIVE.
+   *
+   *  They are REFERENCE — what happens when nobody names a model — and the
+   *  bar above them already reports the answer they produce. Left open they
+   *  push the roster (the thing the console is for) off the bottom of a
+   *  narrow column, and the open state used to persist, so one look at the
+   *  policy cost you the roster on every visit afterwards.
+   *
+   *  Not remembered, deliberately: the fold is a question you ask, not a
+   *  shape the console keeps. Opening it is one press away, every time. */
+  #policyOpen = false
   #openId: string | null = null
   #addOpen = false
   /** providerId → transient test/status line ('…' = running). */
@@ -144,6 +155,49 @@ export class ProvidersWindowView extends EventTarget {
   constructor() {
     super()
     EffectBus.on('providers:open', () => { this.toggle() })
+    // THE CHAT ARRIVING OR LEAVING MOVES THIS CONSOLE'S HOME. Standing inside
+    // the chat's reading row is the whole point, and that row only exists
+    // while the chat is up; a console left where it was would either be
+    // orphaned in the body or torn down with the row. Re-mount, which for a
+    // window that is a pure read of live stores is just a re-render.
+    EffectBus.on('chat:window-state', () => this.#rehome())
+  }
+
+  /** WHERE THIS CONSOLE STANDS. Inside the chat window's reading row when
+   *  there is one — that is what "hives | chat | providers" means, and it is
+   *  the chat that owns the row (chat-window.component.html
+   *  `.chat-providers-host`). Found by class rather than handed over: the
+   *  shell offers a place, this module takes it, and neither imports the
+   *  other.
+   *
+   *  With no chat up, the console is an ordinary right-docked tool window on
+   *  the body — `/providers` has always been reachable on its own. */
+  /** Move to whichever home is right NOW, if it is not already there.
+   *
+   *  Scheduled across a few frames rather than run on the spot: the effect
+   *  that announces the chat fires when the window's state changes, and the
+   *  row it renders does not exist until Angular has drawn it. Checking once,
+   *  immediately, found no host and left the console standing outside the
+   *  window it was supposed to be inside. Idempotent — a pass that finds the
+   *  console already in the right place does nothing, so retrying costs
+   *  nothing and the last pass settles it. */
+  #rehome(): void {
+    let tries = 0
+    const attempt = (): void => {
+      if (!this.#panel) return
+      const { el, embedded } = this.#host()
+      if (this.#panel.parentElement === el) return
+      // Only move once the DOM actually offers the new home; until then keep
+      // showing the console where it is.
+      if (embedded || tries >= 3) { this.close(); this.open(); return }
+      if (tries++ < 3) requestAnimationFrame(attempt)
+    }
+    requestAnimationFrame(attempt)
+  }
+
+  #host(): { el: HTMLElement; embedded: boolean } {
+    const inChat = document.querySelector('.chat-providers-host') as HTMLElement | null
+    return inChat ? { el: inChat, embedded: true } : { el: document.body, embedded: false }
   }
 
   #t(key: string, fallback: string): string {
@@ -156,14 +210,38 @@ export class ProvidersWindowView extends EventTarget {
     this.open()
   }
 
+  /** SAY HOW MUCH OF THE RIGHT EDGE THIS CONSOLE IS STANDING ON.
+   *
+   *  The chat window is full-bleed — one shape, the whole viewport — so a
+   *  console laid over its right side covers the transcript instead of
+   *  sitting beside it. The chat already solves this on its LEFT: the tiles
+   *  rail is absolutely positioned and the panel pads itself away from it by
+   *  `--chat-rail-width`. This is the same move on the other side, so the
+   *  three read left to right as hives | chat | providers.
+   *
+   *  A custom property rather than an effect: it is pure geometry, it has to
+   *  be readable from a stylesheet, and nothing has to be listening for the
+   *  chat to get out of the way. Cleared on close, so a shut console reserves
+   *  nothing. */
+  #publishGutter(width: number | null): void {
+    const root = document.documentElement
+    if (width == null) root.style.removeProperty('--hc-providers-width')
+    else root.style.setProperty('--hc-providers-width', `${Math.round(width)}px`)
+  }
+
   open(): void {
     if (this.#panel) return
     this.#ensureStyles()
+    // Every arrival starts on the roster. The console is a long-lived view,
+    // so an opened fold would otherwise outlive the visit that opened it.
+    this.#policyOpen = false
 
     const panel = document.createElement('div')
     panel.className = 'hc-providers'
     const savedWidth = Number.parseFloat(localStorage.getItem(WIDTH_KEY) ?? '')
-    if (Number.isFinite(savedWidth)) panel.style.width = `${Math.max(MIN_WIDTH, savedWidth)}px`
+    if (Number.isFinite(savedWidth) && !document.querySelector('.chat-providers-host')) {
+      panel.style.width = `${Math.max(MIN_WIDTH, savedWidth)}px`
+    }
 
     const resize = document.createElement('div')
     resize.className = 'hc-providers-resize'
@@ -171,8 +249,14 @@ export class ProvidersWindowView extends EventTarget {
     let dragging = false
     const onMove = (event: PointerEvent): void => {
       if (!dragging) return
-      const width = Math.max(MIN_WIDTH, window.innerWidth - event.clientX - 8)
-      panel.style.width = `${width}px`
+      const width = Math.max(MIN_WIDTH, window.innerWidth - event.clientX)
+      // Embedded, the HOST carries the width and the panel fills it — writing
+      // an inline width here would fight the property the host reads. Free-
+      // standing, the panel is its own geometry and sets it directly.
+      if (!panel.classList.contains('is-embedded')) panel.style.width = `${width}px`
+      // Live, not on release: the transcript beside it has to give way WITH
+      // the grip, the same way one docked window tracks another's drag.
+      this.#publishGutter(width)
     }
     const onUp = (): void => {
       if (!dragging) return
@@ -226,7 +310,9 @@ export class ProvidersWindowView extends EventTarget {
     panel.appendChild(foot)
     this.#footHost = foot
 
-    document.body.appendChild(panel)
+    const { el: host, embedded } = this.#host()
+    if (embedded) panel.classList.add('is-embedded')
+    host.appendChild(panel)
     this.#panel = panel
     window.addEventListener('keydown', this.#onKey, true)
 
@@ -245,6 +331,15 @@ export class ProvidersWindowView extends EventTarget {
 
     this.#render()
     search.focus()
+    // SAY WHETHER THE CONSOLE IS UP. The chat window carries a toggle for
+    // this console and has to draw it pressed or not; the console is the only
+    // thing that knows. Last-value replay means a toggle that mounts later
+    // still learns the truth without asking.
+    // Embedded, the host is what gives the panel its width, and the host reads
+    // that width from this very property — so it is published from the SAVED
+    // width, not measured off a panel that is still zero wide.
+    this.#publishGutter(Number.isFinite(savedWidth) ? Math.max(MIN_WIDTH, savedWidth) : DEFAULT_WIDTH)
+    EffectBus.emit('providers:state', { open: true })
   }
 
   close(): void {
@@ -258,6 +353,8 @@ export class ProvidersWindowView extends EventTarget {
     this.#footHost = null
     this.#tabsHost = null
     this.#body = null
+    this.#publishGutter(null)
+    EffectBus.emit('providers:state', { open: false })
   }
 
   // ── rows ────────────────────────────────────────────────────────────────
@@ -425,7 +522,6 @@ export class ProvidersWindowView extends EventTarget {
     bar.append(label, value, caret)
     bar.addEventListener('click', () => {
       this.#policyOpen = !this.#policyOpen
-      try { localStorage.setItem(POLICY_OPEN_KEY, this.#policyOpen ? '1' : '0') } catch { /* session-only */ }
       this.#renderFoot()
     })
     return bar
@@ -445,6 +541,32 @@ export class ProvidersWindowView extends EventTarget {
   #policyPanel(): HTMLElement {
     const section = document.createElement('div')
     section.className = 'hc-providers-policy'
+
+    const planRow = document.createElement('div')
+    planRow.className = 'hc-policy-row'
+    const planName = document.createElement('span')
+    planName.className = 'hc-policy-tier'
+    planName.textContent = this.#t('providers.usagePlan', 'Usage plan')
+    const planWrap = document.createElement('span')
+    planWrap.className = 'hc-policy-pickwrap'
+    const planPicker = document.createElement('select')
+    planPicker.className = 'hc-policy-pick'
+    for (const plan of USAGE_PLANS) {
+      const option = document.createElement('option')
+      option.value = plan.id
+      option.textContent = this.#t(`providers.usagePlan.${plan.id}`, plan.label)
+      option.title = plan.description
+      planPicker.appendChild(option)
+    }
+    planPicker.value = llmPolicy.usagePlan
+    planPicker.title = USAGE_PLANS.find(plan => plan.id === llmPolicy.usagePlan)?.description ?? ''
+    planPicker.addEventListener('change', () => {
+      llmPolicy.usagePlan = planPicker.value as typeof llmPolicy.usagePlan
+      this.#render()
+    })
+    planWrap.appendChild(planPicker)
+    planRow.append(planName, planWrap)
+    section.appendChild(planRow)
 
     for (const tier of TIERS) {
       const row = document.createElement('div')
@@ -491,10 +613,6 @@ export class ProvidersWindowView extends EventTarget {
       section.appendChild(row)
     }
 
-    section.appendChild(this.#policySwitch(
-      'providers.preferFree', 'Prefer models that cost nothing',
-      llmPolicy.preferFree, on => { llmPolicy.preferFree = on },
-    ))
     section.appendChild(this.#policySwitch(
       'providers.allowPeers', 'May use another participant’s machine automatically',
       llmPolicy.allowPeers, on => { llmPolicy.allowPeers = on },
@@ -901,47 +1019,96 @@ export class ProvidersWindowView extends EventTarget {
     const style = document.createElement('style')
     style.id = STYLE_ID
     style.textContent = `
+      /* THE SAME MATERIAL AS EVERY OTHER TOOL WINDOW. This console used to
+         draw itself in system-ui on its own dark grey with a rounded border,
+         which read as a dialog from another program parked on the hive. The
+         shell's tool-window vocabulary is small and it is all in custom
+         properties and one surface recipe (the panel + header mixins in
+         hypercomb-shared/ui/_toolwindow.scss): the mono face, the panel scale,
+         the flat right edge, the accent hairline on the docking side. A module
+         cannot @use a shared stylesheet, so the recipe is restated here — the
+         VALUES are the shared ones, deliberately, and content is sized in em
+         off the panel scale so it follows the window-size ladder. */
       .hc-providers {
-        position: fixed; top: 56px; right: 8px; bottom: 8px; width: 420px;
-        display: flex; flex-direction: column; z-index: 99999;
-        background: rgba(16, 22, 26, 0.96); border: 1px solid rgba(${STEEL}, 0.35);
-        border-radius: var(--hc-radius-floating, 4px); color: rgba(${STEEL}, 0.95);
-        font: 13px/1.45 system-ui, sans-serif; overflow: hidden;
+        position: fixed; top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor, 0px));
+        right: var(--hc-controls-right, 0px); bottom: 0; width: ${DEFAULT_WIDTH}px;
+        min-width: ${MIN_WIDTH}px; box-sizing: border-box;
+        display: flex; flex-direction: column; z-index: 100004;
+        background: rgba(13, 15, 21, 0.975);
+        backdrop-filter: blur(14px) saturate(1.04);
+        -webkit-backdrop-filter: blur(14px) saturate(1.04);
+        border: 0; border-left: 1px solid rgba(${STEEL}, 0.38); border-radius: 0;
+        box-shadow: -14px 0 44px rgba(0, 0, 0, 0.46), inset 1px 0 rgba(255, 255, 255, 0.025);
+        color: #eef2f5;
+        font-family: var(--hc-mono, system-ui);
+        font-size: calc(0.8125rem * var(--hc-panel-scale, 1));
+        line-height: 1.45; overflow: hidden; outline: none;
       }
-      .hc-providers-resize { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
-      .hc-providers-head { display: flex; align-items: center; padding: 10px 12px 6px; }
-      .hc-providers-title { flex: 1; font-weight: 600; letter-spacing: 0.04em; }
+      /* INSIDE THE CHAT. No geometry of its own: the host is the column and
+         this fills it, so the chat's header and composer keep the full width
+         of the window instead of being walked leftward to make room. No
+         backdrop blur either — there is no hive behind it here, only the
+         transcript, and blurring that just costs a compositor layer. */
+      .hc-providers.is-embedded {
+        position: relative; inset: auto; width: 100%; height: 100%;
+        min-width: 0; z-index: auto;
+        backdrop-filter: none; -webkit-backdrop-filter: none;
+        background: rgba(13, 15, 21, 0.975);
+        box-shadow: -14px 0 44px rgba(0, 0, 0, 0.34);
+      }
+      .hc-providers-resize { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: ew-resize; z-index: 2; }
+      /* The shared header BAND — the same 2.875rem every tool window in the
+         shell uses, so a row of docked windows has one horizon. rem, not em:
+         chrome height must not move when panel content scales. */
+      .hc-providers-head {
+        flex: 0 0 auto; box-sizing: border-box; display: flex; align-items: center;
+        gap: 0.5rem; height: 2.875rem; min-height: 2.875rem; padding: 0 0.75rem;
+        line-height: 1;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0.006));
+        border-bottom: 1px solid rgba(${STEEL}, 0.25);
+      }
+      .hc-providers-title {
+        flex: 1; font-weight: 600; font-size: 0.9em; letter-spacing: 0.05em;
+        color: rgba(${STEEL}, 0.95);
+      }
       .hc-providers-close {
-        background: none; border: none; color: inherit; font-size: 18px;
-        cursor: pointer; opacity: 0.7; padding: 0 4px;
+        box-sizing: border-box; display: inline-grid; place-items: center;
+        width: 1.75rem; min-width: 1.75rem; height: 1.75rem; padding: 0;
+        background: none; border: none; border-radius: var(--hc-radius-control, 2px);
+        color: rgba(238, 244, 248, 0.62); font: inherit; font-size: 1.125rem;
+        line-height: 1; cursor: pointer;
+        transition: color 120ms ease, background-color 120ms ease;
       }
-      .hc-providers-close:hover { opacity: 1; }
+      .hc-providers-close:hover { color: #fff; background-color: rgba(255, 255, 255, 0.075); }
+      .hc-providers-close:focus-visible {
+        outline: 1px solid rgba(${STEEL}, 0.72); outline-offset: 1px;
+      }
       .hc-providers-tabs {
-        display: flex; align-items: stretch; gap: 2px; padding: 0 10px; flex: none;
+        display: flex; align-items: stretch; gap: 0.1538em; padding: 0 0.7692em; flex: none;
         border-bottom: 1px solid rgba(${STEEL}, 0.25);
       }
       .hc-providers-tab {
-        display: flex; align-items: center; gap: 6px;
+        display: flex; align-items: center; gap: 0.4615em; white-space: nowrap;
         background: none; border: 0; border-bottom: 2px solid transparent;
         color: rgba(${STEEL}, 0.55); font: inherit; font-weight: 600; letter-spacing: 0.03em;
-        padding: 7px 10px 5px; cursor: pointer;
+        padding: 0.5385em 0.7692em 0.3846em; cursor: pointer;
       }
       .hc-providers-tab:hover { color: rgba(${STEEL}, 0.85); }
       .hc-providers-tab.is-active { color: rgba(${STEEL}, 0.96); border-bottom-color: rgba(${STEEL}, 0.8); }
       .hc-providers-tab:focus-visible { outline: 1px solid rgba(${STEEL}, 0.7); outline-offset: -1px; }
-      .hc-providers-count { font-size: 10px; font-weight: 500; opacity: 0.6; }
-      .hc-providers-hint { font-size: 11px; line-height: 1.5; opacity: 0.6; padding: 9px 2px 7px; }
+      .hc-providers-count { font-size: 0.7692em; font-weight: 500; opacity: 0.6; }
+      .hc-providers-hint { font-size: 0.8462em; line-height: 1.5; opacity: 0.6; padding: 0.6923em 0.1538em 0.5385em; }
       .hc-providers-search {
-        margin: 8px 12px; padding: 6px 8px; background: rgba(${STEEL}, 0.08);
+        margin: 0.6154em 0.9231em; padding: 0.4615em 0.6154em; background: rgba(${STEEL}, 0.08);
         border: 1px solid rgba(${STEEL}, 0.25); border-radius: var(--hc-radius-control, 2px); color: inherit; outline: none;
       }
-      .hc-providers-body { flex: 1; overflow-y: auto; padding: 0 12px 12px; }
-      .hc-providers-empty { opacity: 0.6; padding: 12px 2px; }
+      .hc-providers-body { flex: 1; overflow-y: auto; padding: 0 0.9231em 0.9231em; }
+      .hc-providers-empty { opacity: 0.6; padding: 0.9231em 0.1538em; }
       .hc-provider { border-bottom: 1px solid rgba(${STEEL}, 0.12); }
       .hc-provider-head {
-        display: flex; align-items: center; gap: 8px; width: 100%;
+        display: flex; align-items: center; gap: 0.6154em; width: 100%;
         background: none; border: none; color: inherit; font: inherit;
-        text-align: left; padding: 9px 2px; cursor: pointer;
+        text-align: left; padding: 0.6923em 0.1538em; cursor: pointer;
       }
       .hc-provider-head:hover { background: rgba(${STEEL}, 0.05); }
       .hc-provider-dot {
@@ -950,37 +1117,37 @@ export class ProvidersWindowView extends EventTarget {
       .hc-provider-dot.is-active { opacity: 1; box-shadow: 0 0 6px currentColor; }
       .hc-provider-name { font-weight: 600; }
       .hc-provider-badge {
-        font-size: 10px; padding: 1px 6px; border-radius: 999px;
+        font-size: 0.7692em; padding: 0.0769em 0.4615em; border-radius: 999px;
         border: 1px solid rgba(${STEEL}, 0.3); opacity: 0.75; white-space: nowrap;
       }
       .hc-provider-badge.is-hive { border-color: rgba(240, 200, 90, 0.6); color: rgba(240, 200, 90, 0.95); }
       .hc-provider-badge.is-limited { border-color: rgba(240, 180, 90, 0.65); color: rgba(255, 204, 115, 0.95); }
       .hc-provider-badge.is-exhausted { border-color: rgba(240, 100, 100, 0.65); color: rgba(255, 145, 145, 0.95); }
       .hc-provider-badge.is-unknown { opacity: 0.5; }
-      .hc-provider-state { margin-left: auto; font-size: 11px; }
+      .hc-provider-state { margin-left: auto; font-size: 0.8462em; }
       .hc-provider-state.is-dim { opacity: 0.5; }
-      .hc-provider-detail { padding: 4px 2px 12px; }
-      .hc-provider-label { font-size: 11px; opacity: 0.6; margin: 8px 0 3px; letter-spacing: 0.05em; }
-      .hc-provider-keyrow { display: flex; gap: 6px; }
+      .hc-provider-detail { padding: 0.3077em 0.1538em 0.9231em; }
+      .hc-provider-label { font-size: 0.8462em; opacity: 0.6; margin: 0.6154em 0 0.2308em; letter-spacing: 0.05em; }
+      .hc-provider-keyrow { display: flex; gap: 0.4615em; }
       .hc-provider-input {
-        flex: 1; min-width: 0; padding: 5px 8px; background: rgba(${STEEL}, 0.08);
+        flex: 1; min-width: 0; padding: 0.3846em 0.6154em; background: rgba(${STEEL}, 0.08);
         border: 1px solid rgba(${STEEL}, 0.25); border-radius: var(--hc-radius-control, 2px); color: inherit; outline: none;
       }
       .hc-provider-btn {
-        padding: 5px 12px; background: rgba(${STEEL}, 0.15); color: inherit;
+        padding: 0.3846em 0.9231em; background: rgba(${STEEL}, 0.15); color: inherit;
         border: 1px solid rgba(${STEEL}, 0.35); border-radius: var(--hc-radius-control, 2px); cursor: pointer; font: inherit;
       }
       .hc-provider-btn:hover { background: rgba(${STEEL}, 0.25); }
       .hc-provider-btn.is-quiet { background: none; border-color: rgba(${STEEL}, 0.2); opacity: 0.8; }
-      .hc-provider-docs { display: inline-block; margin-top: 5px; color: rgba(${STEEL}, 0.9); font-size: 12px; }
-      .hc-provider-models { display: flex; flex-wrap: wrap; gap: 5px; }
+      .hc-provider-docs { display: inline-block; margin-top: 0.3846em; color: rgba(${STEEL}, 0.9); font-size: 0.9231em; }
+      .hc-provider-models { display: flex; flex-wrap: wrap; gap: 0.3846em; }
       .hc-provider-model {
-        font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(${STEEL}, 0.3);
+        font-size: 0.8462em; padding: 0.1538em 0.6154em; border-radius: 999px; border: 1px solid rgba(${STEEL}, 0.3);
       }
       .hc-provider-model.is-deep { border-color: rgba(200, 150, 255, 0.5); }
       .hc-provider-model.is-fast { border-color: rgba(140, 220, 160, 0.5); }
-      .hc-provider-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
-      .hc-provider-toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; flex: 1; }
+      .hc-provider-actions { display: flex; align-items: center; gap: 0.7692em; margin-top: 0.9231em; }
+      .hc-provider-toggle { display: flex; align-items: center; gap: 0.4615em; cursor: pointer; flex: 1; }
       .hc-provider-toggle input[type="checkbox"] {
         appearance: none; -webkit-appearance: none; flex: none; margin: 0;
         width: 13px; height: 13px; border-radius: 2px; cursor: pointer;
@@ -998,20 +1165,20 @@ export class ProvidersWindowView extends EventTarget {
       .hc-provider-toggle input[type="checkbox"]:focus-visible {
         outline: 1px solid rgba(${STEEL}, 0.7); outline-offset: 1px;
       }
-      .hc-provider-status { margin-top: 8px; font-size: 12px; word-break: break-word; opacity: 0.9; }
-      .hc-provider-origin { font-size: 11px; opacity: 0.7; margin: 6px 0 2px; }
-      .hc-provider-description { font-size: 12px; line-height: 1.45; opacity: 0.82; margin: 5px 0 9px; }
-      .hc-provider-usage { margin: 5px 0 9px; padding: 6px 8px; border-left: 2px solid rgba(${STEEL}, 0.45); background: rgba(${STEEL}, 0.05); }
+      .hc-provider-status { margin-top: 0.6154em; font-size: 0.9231em; word-break: break-word; opacity: 0.9; }
+      .hc-provider-origin { font-size: 0.8462em; opacity: 0.7; margin: 0.4615em 0 0.1538em; }
+      .hc-provider-description { font-size: 0.9231em; line-height: 1.45; opacity: 0.82; margin: 0.3846em 0 0.6923em; }
+      .hc-provider-usage { margin: 0.3846em 0 0.6923em; padding: 0.4615em 0.6154em; border-left: 2px solid rgba(${STEEL}, 0.45); background: rgba(${STEEL}, 0.05); }
       .hc-provider-usage.is-limited { border-left-color: rgba(240, 180, 90, 0.8); }
       .hc-provider-usage.is-exhausted { border-left-color: rgba(240, 100, 100, 0.8); }
-      .hc-provider-usage-line { font-size: 12px; line-height: 1.45; }
+      .hc-provider-usage-line { font-size: 0.9231em; line-height: 1.45; }
       .hc-provider-usage-line.is-dim { opacity: 0.58; }
       .hc-provider-warn {
-        font-size: 11px; line-height: 1.4; margin: 4px 0 2px; padding: 6px 8px;
+        font-size: 0.8462em; line-height: 1.4; margin: 0.3077em 0 0.1538em; padding: 0.4615em 0.6154em;
         border: 1px solid rgba(240, 180, 90, 0.45); border-radius: var(--hc-radius-control, 2px);
         color: rgba(245, 205, 140, 0.95); background: rgba(240, 180, 90, 0.08);
       }
-      .hc-provider-mono { font-size: 11px; opacity: 0.85; word-break: break-all; }
+      .hc-provider-mono { font-size: 0.8462em; opacity: 0.85; word-break: break-all; }
       .hc-provider-endpoint { display: block; }
       /* THE FOOT — a status bar that opens upward into the pickers. */
       .hc-providers-foot {
@@ -1019,56 +1186,56 @@ export class ProvidersWindowView extends EventTarget {
         border-top: 1px solid rgba(${STEEL}, 0.22); background: rgba(${STEEL}, 0.045);
       }
       .hc-providers-footbar {
-        display: flex; align-items: center; gap: 8px; width: 100%;
-        padding: 8px 12px; background: none; border: 0; color: inherit;
-        font: inherit; font-size: 11px; letter-spacing: 0.04em;
+        display: flex; align-items: center; gap: 0.6154em; width: 100%;
+        padding: 0.6154em 0.9231em; background: none; border: 0; color: inherit;
+        font: inherit; font-size: 0.8462em; letter-spacing: 0.04em;
         text-align: left; cursor: pointer;
       }
       .hc-providers-footbar:hover { background: rgba(${STEEL}, 0.06); }
       .hc-providers-footbar:focus-visible { outline: 1px solid rgba(${STEEL}, 0.7); outline-offset: -1px; }
       .hc-foot-label { opacity: 0.55; white-space: nowrap; }
       .hc-foot-value {
-        margin-left: auto; display: flex; align-items: center; gap: 6px;
+        margin-left: auto; display: flex; align-items: center; gap: 0.4615em;
         min-width: 0; opacity: 0.95; font-weight: 600;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       }
       .hc-foot-value.is-dim { opacity: 0.5; font-weight: 400; font-style: italic; }
       .hc-foot-value .hc-provider-dot { width: 7px; height: 7px; }
-      .hc-foot-caret { opacity: 0.5; font-size: 9px; }
+      .hc-foot-caret { opacity: 0.5; font-size: 0.6923em; }
       .hc-providers-policy {
-        padding: 10px 12px 12px; max-height: 46vh; overflow-y: auto;
+        padding: 0.7692em 0.9231em 0.9231em; max-height: 46vh; overflow-y: auto;
         border-bottom: 1px solid rgba(${STEEL}, 0.14);
       }
       .hc-policy-row {
         display: grid; grid-template-columns: 66px 1fr; align-items: center;
-        column-gap: 10px; margin-bottom: 9px;
+        column-gap: 0.7692em; margin-bottom: 0.6923em;
       }
-      .hc-policy-tier { font-size: 11px; opacity: 0.6; letter-spacing: 0.04em; }
+      .hc-policy-tier { font-size: 0.8462em; opacity: 0.6; letter-spacing: 0.04em; }
       .hc-policy-pickwrap { position: relative; display: block; min-width: 0; }
       .hc-policy-pickwrap::after {
         content: '▾'; position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
-        pointer-events: none; font-size: 10px; opacity: 0.65;
+        pointer-events: none; font-size: 0.7692em; opacity: 0.65;
       }
       .hc-policy-pick {
         appearance: none; -webkit-appearance: none;
-        width: 100%; padding: 5px 22px 5px 8px; background: rgba(${STEEL}, 0.08);
+        width: 100%; padding: 0.3846em 1.6923em 0.3846em 0.6154em; background: rgba(${STEEL}, 0.08);
         border: 1px solid rgba(${STEEL}, 0.22); border-radius: var(--hc-radius-control, 2px);
-        color: inherit; font: inherit; font-size: 12px; outline: none; cursor: pointer;
+        color: inherit; font: inherit; font-size: 0.9231em; outline: none; cursor: pointer;
       }
       .hc-policy-pick:hover { border-color: rgba(${STEEL}, 0.4); }
       .hc-policy-pick:focus-visible { border-color: rgba(${STEEL}, 0.7); }
       .hc-policy-pick option { background: rgb(18, 25, 30); color: rgba(${STEEL}, 0.95); }
       .hc-policy-resolved {
-        grid-column: 2; font-size: 10.5px; opacity: 0.5; margin-top: 3px;
+        grid-column: 2; font-size: 0.8076em; opacity: 0.5; margin-top: 0.2308em;
       }
-      .hc-policy-note { font-size: 10.5px; opacity: 0.45; margin-top: 10px; }
-      .hc-providers-policy .hc-provider-toggle { font-size: 11.5px; margin-top: 7px; }
+      .hc-policy-note { font-size: 0.8076em; opacity: 0.45; margin-top: 0.7692em; }
+      .hc-providers-policy .hc-provider-toggle { font-size: 0.8847em; margin-top: 0.5385em; }
       .hc-providers-lend {
-        padding: 12px 2px 4px; margin-top: 8px; border-top: 1px solid rgba(${STEEL}, 0.15);
+        padding: 0.9231em 0.1538em 0.3077em; margin-top: 0.6154em; border-top: 1px solid rgba(${STEEL}, 0.15);
       }
-      .hc-providers-add { padding: 12px 2px; }
+      .hc-providers-add { padding: 0.9231em 0.1538em; }
       .hc-providers-spec {
-        width: 100%; margin: 4px 0 8px; padding: 6px 8px; background: rgba(${STEEL}, 0.06);
+        width: 100%; margin: 0.3077em 0 0.6154em; padding: 0.4615em 0.6154em; background: rgba(${STEEL}, 0.06);
         border: 1px solid rgba(${STEEL}, 0.25); border-radius: var(--hc-radius-control, 2px); color: inherit;
         font: 11px/1.4 ui-monospace, monospace; outline: none; resize: vertical; box-sizing: border-box;
       }

@@ -7,6 +7,7 @@
 @use '../../hypercomb-shared/styles/material-tokens';
 @use '../../hypercomb-shared/styles/canvas-suppress' as *;
 @use '../../hypercomb-shared/styles/header-size';
+@use '@foblex/flow/styles' as flow-theme;
 
 // The shape ladder's :root block, emitted ONCE per shell. It is a mixin so it
 // never lands inside the 22 component sheets that reach the same file for its
@@ -82,4 +83,5 @@ body.hc-view-website {
 @include suppress-canvas-under('.hc-view-website'); // website render mode
 @include suppress-canvas-under('.hc-view-covered'); // every full-surface view (isTransientMode)
 @include suppress-canvas-under('.viewer-open');     // youtube fullscreen viewer
-
+@include flow-theme.theme-tokens();
+@include flow-theme.theme-all();

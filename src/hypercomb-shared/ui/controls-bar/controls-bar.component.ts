@@ -433,6 +433,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #clipboardItems = signal<string[]>([])
   #roomOpen = signal(false)
   #beesVisible = signal(localStorage.getItem('hc:bees-visible') === 'true')
+  #agentsVisible = signal(localStorage.getItem('hc:agents-visible') !== 'false')
   #showHidden = signal(localStorage.getItem('hc:show-hidden') === '1')
   // Fit button is a two-state switch:
   //  - 'off'    (white): regular click performs a one-shot fit; nothing sticks
@@ -970,6 +971,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #touchDragging = signal(false)
   #viewActiveUnsub: (() => void) | null = null
   #viewActive = signal(false)
+  #keepsControlsUnsub: (() => void) | null = null
+  #keepsControls = signal(false)
   readonly #IDLE_DELAY = 3000
 
   // ── swipe-to-go-back gesture ────────────────────────────
@@ -1309,9 +1312,32 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // deterministic vibrant color from tag name — no grays
     return tagNameToColor(name)
   }
-  readonly visible = computed(() => !this.#touchDragging() && !this.#viewActive())
+  // A view covering the canvas puts this bar away — that is what a takeover
+  // means. But a view can also cover the canvas and LEAVE THE BAR ITS EDGE:
+  // the chat window lays itself out against the same reservation every docked
+  // toolwindow does (`--hc-controls-<side>`), so there is a bar-shaped strip it
+  // never paints on. Hiding the bar there took away every control on it for as
+  // long as a conversation was open, and left only the bar's own edge line
+  // showing — a stray rule down the side of the window with nothing beside it.
+  //
+  // So the view says which kind it is, by holding `view:keeps-controls`
+  // (owner-counted, same as `view:active`). Nothing here knows any window's
+  // name; a view that leaves room keeps the bar, and any that does not still
+  // takes the screen whole.
+  readonly visible = computed(() =>
+    !this.#touchDragging() && (!this.#viewActive() || this.#keepsControls()))
+
+  /** Kept on screen WHILE a view covers the canvas — the bar is standing beside
+   *  a window that reserved its edge, not on the bare hive. Its own band
+   *  (59999–60003) sits under the docked-window band (100002+), which is right
+   *  when the bar is chrome ON the canvas and wrong here: the rail is visible
+   *  and pressable, but anything it opens anchored to itself would render
+   *  behind the very window it is standing beside. Lifted only for as long as
+   *  that is true. */
+  readonly overView = computed(() => this.#viewActive() && this.#keepsControls())
   readonly roomOpen = this.#roomOpen.asReadonly()
   readonly beesVisible = this.#beesVisible.asReadonly()
+  readonly agentsVisible = this.#agentsVisible.asReadonly()
   readonly showHidden = this.#showHidden.asReadonly()
   readonly voiceActive = signal(false)
   readonly voiceSupported = VoiceInputService.supported()
@@ -1354,6 +1380,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // reaches an icon. On the host (not the list) because the list is
     // created and destroyed by the mode/dock branches.
     this.#installClickSwallow()
+
+    // Participant chrome, restored before the renderer mounts. EffectBus
+    // replays this value to a late AgentBeeDrone, so boot never flashes agents
+    // that the participant has chosen to hide.
+    EffectBus.emit('render:set-agents-visible', { visible: this.#agentsVisible() })
 
     // Hand the zoom drone this page's partial-pin hold, so every fit path —
     // including resize refits that originate inside the drone — respects
@@ -1547,6 +1578,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       this.#viewActive.set(active)
     })
 
+    this.#keepsControlsUnsub = EffectBus.on<{ active: boolean }>('view:keeps-controls', ({ active }) => {
+      this.#keepsControls.set(active)
+    })
+
     this.#tagsUnsub = EffectBus.on<{ tags: { name: string; count: number }[] }>('render:tags', ({ tags }) => {
       // sort by hue so tags form a rainbow gradient
       const sorted = [...tags].sort((a, b) => extractHue(this.tagColor(a.name)) - extractHue(this.tagColor(b.name)))
@@ -1699,6 +1734,64 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // fallback value, which a `0px` would override.
     if (leftTop) root.style.setProperty('--hc-controls-left-top', leftTop)
     else root.style.removeProperty('--hc-controls-left-top')
+    this.#paintControlsEdge(side, left, right, stage?.offsetTop ?? 0)
+  }
+
+  // ── THE BAR'S OWN EDGE, WHICH NOTHING GETS TO COVER ─────────────────
+  //
+  // A docked bar closes itself against the canvas with a 1px border on its
+  // inner side, and that line kept disappearing the moment anything opened
+  // beside it. The border belongs to the rail, so it paints in the BAR's
+  // stacking context (z-index 59999) — and a tool window docking flush against
+  // it paints at 100002, with a drop shadow tens of pixels wide. The window
+  // never covers the bar's BOX (it starts at the reservation this same measure
+  // publishes), but its shadow washes straight over that one pixel, and a 1px
+  // line under a 60px blur is gone.
+  //
+  // Raising the whole bar over the panels would fix it and break more: things
+  // are meant to be able to cover the bar (a takeover, a modal). So only the
+  // LINE is lifted — one fixed, pointer-transparent pixel at the bar's inner
+  // edge, above the docked-window band. It is the bar's edge, drawn where
+  // nothing can put anything on top of it.
+  //
+  // Body-level rather than a pseudo-element for exactly that reason: a child
+  // of the rail shares the rail's stacking context and would be painted over
+  // with it.
+  #edgeLine: HTMLDivElement | null = null
+
+  #paintControlsEdge(side: 'left' | 'right' | null, left: number, right: number, top: number): void {
+    // Undocked, mobile, or torn down: no edge to draw. The floating pill closes
+    // itself with its own border on all four sides and reserves nothing.
+    // Nothing measured yet is the same as nothing docked: a line at -1px is a
+    // line off the screen, and one drawn before the rail has a width would sit
+    // wherever the fallback put it.
+    const edge = side === 'left' ? left : right
+    if (!side || this.isMobile() || edge <= 0) {
+      this.#edgeLine?.remove()
+      this.#edgeLine = null
+      return
+    }
+    const line = this.#edgeLine ?? document.createElement('div')
+    if (!this.#edgeLine) {
+      line.className = 'hc-controls-edge'
+      line.setAttribute('aria-hidden', 'true')
+      line.style.cssText =
+        'position:fixed;width:1px;pointer-events:none;z-index:100003;' +
+        'background:color-mix(in srgb, var(--md-outline-variant) 70%, transparent);'
+      document.body.appendChild(line)
+      this.#edgeLine = line
+    }
+    // The rail starts below the header and runs to the bottom; the same top the
+    // reservation publishes, so the line and the panels beside it agree.
+    line.style.top = `${Math.round(Math.max(0, top))}px`
+    line.style.bottom = '0'
+    if (side === 'left') {
+      line.style.left = `${Math.round(left) - 1}px`
+      line.style.right = 'auto'
+    } else {
+      line.style.right = `${Math.round(right) - 1}px`
+      line.style.left = 'auto'
+    }
   }
 
   /** Re-measure whenever the bar changes edge (or mobile flips) — a dock swap
@@ -1767,6 +1860,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     document.documentElement.style.setProperty('--hc-controls-left', '0px')
     document.documentElement.style.setProperty('--hc-controls-right', '0px')
     document.documentElement.style.removeProperty('--hc-controls-left-top')
+    this.#edgeLine?.remove()
+    this.#edgeLine = null
     window.removeEventListener('resize', this.#onResize)
     document.removeEventListener('fullscreenchange', this.#fullscreenHandler)
     window.removeEventListener('pointermove', this.#onActivity)
@@ -1791,6 +1886,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#layoutModeUnsub?.()
     this.#touchDraggingUnsub?.()
     this.#viewActiveUnsub?.()
+    this.#keepsControlsUnsub?.()
     this.#beesUnsub?.()
     this.#voiceActiveUnsub?.()
     this.#showHiddenUnsub?.()
@@ -2833,6 +2929,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#beesVisible.set(next)
     localStorage.setItem('hc:bees-visible', String(next))
     EffectBus.emit('render:set-bees-visible', { visible: next })
+  }
+
+  readonly toggleAgents = (): void => {
+    const next = !this.#agentsVisible()
+    this.#agentsVisible.set(next)
+    localStorage.setItem('hc:agents-visible', String(next))
+    EffectBus.emit('render:set-agents-visible', { visible: next })
   }
 
   // ── show hidden items ────────────────────────────────

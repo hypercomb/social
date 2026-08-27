@@ -35,6 +35,10 @@ export class App implements AfterViewInit {
   protected readonly inputOpen = signal(false)
   public showHeader = true
   public readonly viewActive = signal(false)
+  /** A view is covering the canvas AND leaving the control bar its edge — see
+   *  the binding in app.html. Owner-counted in ModeRegistry alongside
+   *  `view:active`, so it stays true while ANY such view is open. */
+  public readonly controlsKept = signal(false)
   readonly moveMode = signal(false)
   // Empty-layer swarm watermark — set when show-cell reports the current
   // public/swarm location has zero tiles. Drives a faint full-bleed
@@ -211,6 +215,10 @@ export class App implements AfterViewInit {
 
     EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {
       this.viewActive.set(active)
+    })
+
+    EffectBus.on<{ active: boolean }>('view:keeps-controls', ({ active }) => {
+      this.controlsKept.set(active)
     })
 
     EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {

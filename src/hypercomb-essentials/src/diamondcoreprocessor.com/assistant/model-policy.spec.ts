@@ -1,9 +1,9 @@
 // model-policy.spec.ts — who answers when nobody said.
 //
 // The rules worth guarding are the ones a participant would be angry to
-// discover by accident: money spent when something free could have done the
-// job, a private prompt sent to a stranger's machine, or a pin they set being
-// quietly ignored.
+// discover by accident: a weaker model chosen only because it is free, a
+// private prompt sent to a stranger's machine, or a pin they set being quietly
+// ignored.
 
 import { beforeEach, describe, expect, it } from 'vitest'
 
@@ -15,7 +15,7 @@ const iocMap = new Map<string, unknown>()
   },
 }
 
-const { candidatesFor, chooseProvider, costOf, llmPolicy, modelForTier } =
+const { candidatesFor, chooseProvider, costOf, designate, llmPolicy, modelForTier, rankProviders } =
   await import('./model-policy.js')
 const { llmProviderRegistry } = await import('./llm-provider-registry.js')
 const { llmActivation } = await import('./llm-activation.js')
@@ -96,15 +96,27 @@ describe('choosing without a pin', () => {
     expect(candidatesFor({ tier: 'fast' }).map(p => p.id)).toEqual(['keyed-vendor'])
   })
 
-  it('prefers a model that costs nothing (the default)', () => {
+  it('uses intelligence first by default, not free first', () => {
     roster(KEYED, LOCAL)
+    expect(llmPolicy.usagePlan).toBe('intelligence')
+    expect(chooseProvider({ tier: 'fast' })?.id).toBe('keyed-vendor')
+  })
+
+  it('uses the local model when the participant selects economy', () => {
+    roster(KEYED, LOCAL)
+    llmPolicy.usagePlan = 'economy'
     expect(chooseProvider({ tier: 'fast' })?.id).toBe('my-machine')
   })
 
-  it('uses the paid one when the participant turns that preference off', () => {
-    roster(KEYED, LOCAL)
-    llmPolicy.preferFree = false
-    expect(chooseProvider({ tier: 'fast' })?.id).toBe('keyed-vendor')
+  it('keeps exact capability ahead of locality in intelligence-first mode', () => {
+    const localBalanced = descriptor({
+      id: 'local-balanced', vendor: 'local', requiresKey: false,
+      models: [{ name: 'local-balanced', id: 'local-balanced', tier: 'balanced' }],
+      defaultModel: 'local-balanced',
+    })
+    roster(localBalanced, KEYED)
+    llmActivation.setEnabled('local-balanced', true)
+    expect(chooseProvider({ tier: 'deep' })?.id).toBe('keyed-vendor')
   })
 
   it('NEVER sends a prompt to a peer automatically', () => {
@@ -116,6 +128,7 @@ describe('choosing without a pin', () => {
   it('will use a peer once the participant allows it', () => {
     roster(PEER, KEYED)
     llmPolicy.allowPeers = true
+    llmPolicy.usagePlan = 'economy'
     expect(chooseProvider({ tier: 'fast' })?.id).toBe('peer-abcd')
   })
 
@@ -141,6 +154,34 @@ describe('choosing without a pin', () => {
   it('says nothing rather than inventing a vendor when nothing is ready', () => {
     roster()
     expect(chooseProvider({ tier: 'deep' })).toBeUndefined()
+  })
+})
+
+describe('usage plans', () => {
+  it.each(['balanced', 'fast', 'private'] as const)(
+    '%s may prefer local execution when capability and health are equal', plan => {
+      roster(KEYED, LOCAL)
+      llmPolicy.usagePlan = plan
+      expect(chooseProvider({ tier: 'fast' })?.id).toBe('my-machine')
+    },
+  )
+
+  it('economy is allowed to trade tier fit for no incremental cost', () => {
+    const localBalanced = descriptor({
+      id: 'local-balanced', vendor: 'local', requiresKey: false,
+      models: [{ name: 'local-balanced', id: 'local-balanced', tier: 'balanced' }],
+      defaultModel: 'local-balanced',
+    })
+    roster(KEYED, localBalanced)
+    llmActivation.setEnabled('local-balanced', true)
+    llmPolicy.usagePlan = 'economy'
+    expect(chooseProvider({ tier: 'deep' })?.id).toBe('local-balanced')
+  })
+
+  it('migrates an explicitly stored legacy prefer-free choice', () => {
+    localStorage.removeItem('hc:llm:usage-plan')
+    localStorage.setItem('hc:llm:prefer-free', 'true')
+    expect(llmPolicy.usagePlan).toBe('economy')
   })
 })
 
@@ -170,6 +211,7 @@ describe('pins', () => {
 
   it('are per tier, not global', () => {
     roster(KEYED, LOCAL)
+    llmPolicy.usagePlan = 'economy'
     llmPolicy.setPin('deep', 'keyed-vendor')
     expect(chooseProvider({ tier: 'deep' })?.id).toBe('keyed-vendor')
     expect(chooseProvider({ tier: 'fast' })?.id).toBe('my-machine')
@@ -183,9 +225,16 @@ describe('pins', () => {
 
   it('clear back to letting the policy decide', () => {
     roster(KEYED, LOCAL)
+    llmPolicy.usagePlan = 'economy'
     llmPolicy.setPin('fast', 'keyed-vendor')
     llmPolicy.setPin('fast', '')
     expect(chooseProvider({ tier: 'fast' })?.id).toBe('my-machine')
+  })
+
+  it('puts a usable pin first while retaining authorized fallbacks', () => {
+    roster(LOCAL, KEYED)
+    llmPolicy.setPin('fast', 'keyed-vendor')
+    expect(rankProviders({ tier: 'fast' }).map(p => p.id)).toEqual(['keyed-vendor', 'my-machine'])
   })
 })
 
@@ -206,5 +255,62 @@ describe('the tier actually asked for', () => {
     expect(modelForTier(KEYED, 'deep')).toBe('keyed-vendor-deep')
     // a tier the provider does not offer falls back to its own default
     expect(modelForTier(KEYED, 'balanced')).toBe('keyed-vendor-deep')
+  })
+})
+
+// ── the designation ───────────────────────────────────────────────────────
+//
+// One provider, one model, in the words a bee is branded from. The rule worth
+// guarding is the one the participant did not ask for and would still want:
+// an account nearly spent answers one tier LIGHTER rather than jumping to a
+// different company mid-conversation.
+
+describe('designate', () => {
+  const LOADED = descriptor({
+    id: 'loaded-bridge', vendor: 'anthropic', transport: 'agent-bridge',
+    requiresKey: false, readsHive: true,
+    models: [
+      { name: 'big', id: 'big-1', tier: 'deep' },
+      { name: 'middle', id: 'middle-1', tier: 'balanced' },
+    ],
+    defaultModel: 'big-1',
+    subscription: {
+      status: 'limited', source: 'test', checkedAt: 0,
+      windows: [{ label: 'weekly', remainingPercent: 4 }],
+    },
+  })
+
+  it('names the wire model, the vendor and the declared tier', () => {
+    roster(BRIDGE)
+    llmActivation.setEnabled('claude-bridge', true)
+    const chosen = designate({ tier: 'deep', readsHive: true })
+    expect(chosen?.providerId).toBe('claude-bridge')
+    expect(chosen?.model).toBe('claude-bridge-deep')
+    expect(chosen?.vendor).toBe('anthropic')
+    expect(chosen?.tier).toBe('deep')
+  })
+
+  it('steps DOWN a tier rather than out to another vendor under load', () => {
+    roster(LOADED)
+    llmActivation.setEnabled('loaded-bridge', true)
+    const chosen = designate({ tier: 'deep', readsHive: true })
+    expect(chosen?.providerId).toBe('loaded-bridge')
+    expect(chosen?.tier).toBe('balanced')
+    expect(chosen?.model).toBe('middle-1')
+    expect(chosen?.availability).toBe('limited')
+  })
+
+  it('stays on the heavy model while headroom is healthy', () => {
+    roster({
+      ...LOADED, id: 'rested-bridge',
+      subscription: { status: 'available', source: 'test', checkedAt: 0, windows: [] },
+    } as Descriptor)
+    llmActivation.setEnabled('rested-bridge', true)
+    expect(designate({ tier: 'deep', readsHive: true })?.tier).toBe('deep')
+  })
+
+  it('is undefined when nothing can do the work', () => {
+    roster()
+    expect(designate({ tier: 'deep', readsHive: true })).toBeUndefined()
   })
 })

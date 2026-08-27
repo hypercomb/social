@@ -12,6 +12,27 @@
 //   node scripts/bridge/watch-asks.cjs           → watch forever (Monitor mode)
 //   node scripts/bridge/watch-asks.cjs --once    → one tick, then exit (smoke)
 //   ASK_POLL_MS=6000                             → poll cadence (default 6s)
+//   ASK_SESSION_MODEL=claude-opus-5              → what THIS parked session is
+//
+// ── AN ASK NAMES ITS MODEL, AND A PARKED SESSION CANNOT BECOME IT ─────────
+//
+// Every ask carries the model that was DESIGNATED for it (the participant's
+// standing instructions, or a word they typed). This watcher's session is one
+// model, from one company, and it cannot re-model itself to honour the next
+// line it prints — so waking it for an ask designated elsewhere answers the
+// question in the wrong voice while looking entirely confident about it.
+//
+// With `ASK_SESSION_MODEL` set, such an ask is HANDED OFF instead: the
+// watcher starts a SILENT SESSION in the designated model — the owning CLI,
+// headless, pointed at this same skill, with that CLI's own argv from
+// `agent-bridges.json` — and never prints the line. Nothing is dropped: a
+// handoff that cannot start (CLI not installed here) or that exits badly
+// falls back to printing the line, because a question answered by a different
+// model still beats a question nobody answers.
+//
+// Unset, the watcher behaves exactly as it always did: every ask wakes the
+// session. The variable is what the session knows and the script cannot —
+// which model it actually is.
 //
 // Zero changes to the live broker or renderer: it speaks the same
 // request/response envelope every scripts/bridge client uses. The poll is
@@ -33,14 +54,95 @@
 // throttles a backgrounded tab (drop + 3s reconnect). A single-tick miss is
 // noise; a persistent one is an outage worth a wake-up.
 
+const { spawn } = require('child_process')
+const path = require('path')
 const WebSocket = require('ws')
+const roster = require('./agent-roster.cjs')
 
+const REPO = path.resolve(__dirname, '..', '..')
 const BRIDGE = process.env.BRIDGE_URL || 'ws://localhost:2401'
 // Only needed when driving a REMOTE broker (loopback senders are trusted).
 const TOKEN = String(process.env.HYPERCOMB_BRIDGE_TOKEN || '').trim()
 const WS_OPTS = TOKEN ? { headers: { Authorization: `Bearer ${TOKEN}` } } : undefined
 const POLL_MS = Math.max(2_000, Number(process.env.ASK_POLL_MS || 6_000))
 const ONCE = process.argv.includes('--once')
+/** What this parked session IS — a model word or a wire id, whichever the
+ *  session knows itself by. Empty = do not hand anything off. */
+const SESSION_MODEL = String(process.env.ASK_SESSION_MODEL || '').trim().toLowerCase()
+
+// ── handing an ask to the model it asked for ─────────────────────────────
+
+/** Probed once: `roster.installed()` runs `--version` per CLI, and the answer
+ *  does not change under a parked watcher often enough to pay for it again. */
+let installedBridges = null
+const bridges = () => (installedBridges ??= roster.installed())
+
+/** Which bridge and which wire model a hint resolves to here — null when
+ *  nothing installed owns it (then the parked session takes it, as before). */
+function planFor(hint) {
+  const agent = roster.agentForModel(String(hint || '').trim(), bridges())
+  if (!agent) return null
+  return { agent, model: roster.modelIdFor(agent, hint) }
+}
+
+/** Is this ask for the model this session already is? Compared as RESOLVED
+ *  wire ids, so `opus` and `claude-opus-5` are one answer rather than two. */
+function isOwnModel(hint) {
+  if (!SESSION_MODEL) return true
+  const wanted = planFor(hint)
+  if (!wanted) return true
+  const mine = planFor(SESSION_MODEL)
+  if (!mine) return true
+  return wanted.agent.id === mine.agent.id && wanted.model === mine.model
+}
+
+/**
+ * START A SILENT SESSION in the designated model, for ONE ask.
+ *
+ * The prompt is vendor-neutral on purpose — the skill file is the contract,
+ * and any coding agent with repo access can follow it, which is what lets a
+ * bridge be added as data (`agent-bridges.json`) rather than as code. Resolves
+ * false when the ask was NOT taken, and the caller prints the line instead.
+ */
+function handOff(sig, plan) {
+  const prompt = [
+    `One hive ask (${sig}) is pending on the Hypercomb bridge, designated for this model.`,
+    'Read .claude/skills/bridge-listen/SKILL.md and follow its section 3 exactly to answer and retire it.',
+    'Work from the repo root. Do not start a Monitor and do not park — answer that one ask, then stop.',
+    'Ground the answer by reading the target tile over the bridge first.',
+    'Answer only what was asked: never propose or create tiles unless the ask itself asks for that.',
+    'If the ask raises a decision rather than a question, mint a dashboard question instead of deciding.',
+  ].join(' ')
+
+  const { bin, file, spawnArgs, options } = roster.invocation(plan.agent, prompt, plan.model)
+  if (!bin) return Promise.resolve(false)
+
+  return new Promise(resolve => {
+    let child
+    try {
+      child = spawn(file, spawnArgs, {
+        cwd: REPO,
+        shell: false,
+        ...options,
+        // stdin CLOSED: this child has no console of its own, and the CLIs
+        // otherwise wait seconds for input that will never arrive.
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+    } catch { return resolve(false) }
+    // The child's output belongs to the watcher's operator, not to the wake
+    // contract — stdout here is a protocol, so this goes to stderr.
+    let out = ''
+    child.stdout.on('data', d => { out += String(d) })
+    child.stderr.on('data', d => { out += String(d) })
+    child.on('error', () => resolve(false))
+    child.on('close', code => {
+      const tail = out.trim().split('\n').slice(-2).join(' / ').slice(-400)
+      process.stderr.write(`[handoff] ${plan.agent.id} (${plan.model}) exited ${code} for `
+        + `${sig.slice(0, 12)}${tail ? ' - ' + tail : ''}\n`)
+      resolve(code === 0)
+    })
+  })
+}
 
 let counter = 0
 const nextId = () => `askwatch-${Date.now()}-${++counter}`
@@ -156,7 +258,8 @@ async function tick() {
     }
     if (seen.has(sig)) continue
     seen.add(sig)
-    console.log(JSON.stringify({
+
+    const line = JSON.stringify({
       ask: sig,
       context: contextByAsk.get(sig) ?? [],
       // mode 'chat' = a refinement-conversation turn: reply via the
@@ -181,7 +284,21 @@ async function tick() {
       targets: it.payload?.targets ?? [],
       segments: it.payload?.segments ?? [],
       appliesTo: it.appliesTo ?? [],
-    }))
+    })
+
+    // DESIGNATED ELSEWHERE — start a silent session in that model rather than
+    // waking this one to answer in a voice the ask did not ask for. Fire and
+    // forget: the tick must not stall behind a model, and a handoff that
+    // fails prints the line so the ask is never dropped.
+    const hint = String(it.payload?.model ?? '')
+    if (!isOwnModel(hint)) {
+      const plan = planFor(hint)
+      if (plan) {
+        void handOff(sig, plan).then(taken => { if (!taken) console.log(line) })
+        continue
+      }
+    }
+    console.log(line)
   }
 }
 

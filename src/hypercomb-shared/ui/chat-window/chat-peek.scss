@@ -82,7 +82,12 @@ $accent: #7eb6d6;
 
 // The fold control itself. Lit while folded, because that is a state you can
 // otherwise only infer from the absence of the transcript.
-.chat-peek {
+//
+// The providers toggle beside it is the SAME KIND of control — a header press
+// whose state is visible — so it is drawn from this one rule rather than a
+// second copy that would drift a pixel at a time.
+.chat-peek,
+.chat-providers {
   flex: 0 0 auto;
   display: flex;
   align-items: center;

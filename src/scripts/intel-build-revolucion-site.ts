@@ -4420,10 +4420,27 @@ async function main(): Promise<void> {
   }
 
   // One build revision for the whole pass (documentation/build-revisions.md)
-  const rev = await send({ op: 'build-record', segments: ['revolucion'], label: 'revolucion site build' })
-  console.log(rev.ok
-    ? `[site] build revision: ${(rev.data as any).label} seal=${String((rev.data as any).seal).slice(0, 12)}${(rev.data as any).unchanged ? ' (unchanged)' : ''}`
-    : `[site] build revision FAILED: ${rev.error}`)
+  //
+  // OPT-IN, and that is not a preference. When the subtree cannot be sealed
+  // ("a cell is cold or unresolvable") this call does not merely decline to
+  // record a revision - it takes the branch head BACK, discarding all
+  // thirteen decoration commits this pass just made. The deploy then reports
+  // `verify: 13/13` truthfully, because the verify runs BEFORE this, and the
+  // site silently stays on the previous build. That failure mode cost a long
+  // debugging session: three deploys in a row reported success and changed
+  // nothing.
+  //
+  // So the pass now lands its pages first and seals only when asked. Run with
+  // --seal once the cold cell is resolved; until then a missing build
+  // revision is a far smaller loss than a silently reverted deploy.
+  if (process.argv.includes('--seal')) {
+    const rev = await send({ op: 'build-record', segments: ['revolucion'], label: 'revolucion site build' })
+    console.log(rev.ok
+      ? `[site] build revision: ${(rev.data as any).label} seal=${String((rev.data as any).seal).slice(0, 12)}${(rev.data as any).unchanged ? ' (unchanged)' : ''}`
+      : `[site] build revision FAILED (pages already landed): ${rev.error}`)
+  } else {
+    console.log('[site] build revision SKIPPED (pass --seal to record one)')
+  }
   console.log(`[site] DONE — toggle the global /website view mode on /revolucion to see it mount.`)
 }
 

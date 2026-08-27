@@ -22,16 +22,35 @@ $accent: #7eb6d6;
   pointer-events: none;
 }
 
-// The ENTIRE screen, with the tiles rail down the left. `!important` against
-// hcDockedPanel's inline width and lane offset — the directive is kept for the
-// window group's text ladder and settings gear, not for geometry. The rail is
-// absolutely positioned, so the window's column flow just moves right by the
-// rail's width.
+// The ENTIRE screen EXCEPT THE CONTROL BAR, with the tiles rail down the left.
+// `!important` against hcDockedPanel's inline width and lane offset — the
+// directive is kept for the window group's text ladder and settings gear, not
+// for geometry. The rail is absolutely positioned, so the window's column flow
+// just moves right by the rail's width.
+//
+// BESIDE THE BAR, NEVER OVER IT. "The whole screen" used to include the docked
+// control rail, and since the bar paints at z-index 59999 and this window at
+// 100002, the bar was simply gone for as long as a conversation was open —
+// with its own edge line (deliberately drawn above the docked-window band, so
+// nothing can cover it) coming through the tiles rail as a stray vertical rule
+// down the list. That line was the symptom; the window covering the bar was
+// the fault.
+//
+// The bar is the ANCHOR every docked window lays out against: it publishes
+// what it occupies as `--hc-controls-left` / `--hc-controls-right` (0px when
+// it is free-floating, or on mobile, where it owns no side), and every other
+// panel already starts just inboard of it — see hcDockedPanel `#position`.
+// This is that same rule applied to the one window that was exempt, on BOTH
+// edges, so it holds whichever side the bar is dragged to. The `!important`
+// stays on `right` for what it was always for — dropping the LANE offset, so a
+// full-screen window is never pushed in by a neighbour it does not share the
+// screen with — and the reservation is kept.
 .chat-panel {
   pointer-events: auto;
   position: absolute;
   inset: 0;
-  right: 0 !important;
+  left: var(--hc-controls-left, 0px);
+  right: var(--hc-controls-right, 0px) !important;
   width: auto !important;
   max-width: none;
   margin: 0;
@@ -60,11 +79,34 @@ $accent: #7eb6d6;
   background: rgba(3, 5, 9, 0.55);
 }
 
+// THE HANDLE. Sits ON the rail's border rather than beside it, so nothing
+// moves when it appears: it is transparent until pointed at, and the border it
+// covers is what the participant is already reading as the edge. Wide enough
+// to hit (8px), narrow enough that the rows behind it stay clickable.
+.chat-rail-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--chat-rail-width, clamp(15rem, 22vw, 20rem));
+  width: 8px;
+  margin-left: -4px;
+  z-index: 3;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 120ms ease;
+
+  &:hover,
+  &:focus-visible,
+  &.dragging { background: rgba($accent, 0.35); }
+  &:focus-visible { outline: none; }
+}
+
 // A phone has no room for a sidebar beside a conversation — full screen there
 // is the conversation alone, and tiles are chosen by selecting on the canvas.
 @media (max-width: 700px) {
   .chat-panel { padding-left: 0; }
-  .chat-rail { display: none; }
+  .chat-rail,
+  .chat-rail-grip { display: none; }
 }
 
 .chat-header {
@@ -1071,38 +1113,51 @@ $accent: #7eb6d6;
   // mark tucked into the corner. The one rule in here is the one that does
   // work: between the standing fact and the choices under it.
   background: rgba(255, 255, 255, 0.015);
+  // THE INPUT STOPS WHERE THE CONSOLE STARTS. The reading area already gives
+  // the console its column (`.chat-providers-host`, inside `.chat-body`), but
+  // the footer sits OUTSIDE that row — deliberately, so the window's own
+  // chrome keeps the full width — and the composer therefore ran on underneath
+  // the console. A line you type into that continues behind a panel is the one
+  // place "beside, not over" visibly failed. The same reserved width, applied
+  // where it is the composer's own right edge rather than a column beside it.
+  padding-right: calc(0.75em + var(--hc-providers-width, 0px));
+  // It PULLS OUT rather than jumping: the console slides, and the composer's
+  // edge travels with it.
+  transition: padding-right 0.16s ease;
 }
 
-// THE CHOICES ABOUT THIS QUESTION — model, where you stand, what is chosen.
-// Under the rule that separates them from the standing fact above it, with
-// the same air on both sides so the footer reads as three even bands:
-// availability · choices · the box you type in.
-.chat-status {
-  display: flex;
+// WHO ANSWERS. LEADS the availability line, right after the dot: shortest
+// thing on the row and the one most often looked for. It reads as a fact, not
+// a control — one press to the providers console, where it is actually
+// chosen. The model in mono, because it is an id, not a word.
+.chat-answering {
+  display: inline-flex;
   align-items: center;
-  gap: 0.45em;
-  min-width: 0;
-  padding-top: 0.5em;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
-  font-size: 0.68em;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.chat-model {
+  gap: 0.25em;
   flex: 0 0 auto;
-  padding: 0.15em 0.2em;
+  // The line's own gap is the space between WORDS; this is the space between
+  // two different statements — which model, and over whose bridge — so the
+  // pill gets air of its own on the sentence side.
+  margin-right: 0.65em;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.15em 0.35em;
   font: inherit;
+  font-family: var(--hc-mono, monospace);
   color: rgba($accent, 0.95);
   background: rgba($accent, 0.1);
   border: 1px solid rgba($accent, 0.3);
   border-radius: var(--md-shape-xs, 4px);
   cursor: pointer;
-}
 
-.chat-where {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  .mat-sym {
+    font-size: 1.15em;
+    opacity: 0.75;
+  }
+
+  &:hover { background: rgba($accent, 0.18); }
 }
 
 // The tile's own name, in the mono the hive uses for addresses.
@@ -1145,11 +1200,6 @@ $accent: #7eb6d6;
   font-size: 0.92em;
 }
 
-.chat-targets {
-  flex: 0 0 auto;
-  color: rgba($accent, 0.85);
-}
-
 // GATHERED CONTEXT — the ctrl-clicked tiles riding the next question. Steel
 // like the sidebar it was gathered in, so the eye connects the chip to the
 // rows that made it, and pressable because letting go is one press.
@@ -1179,21 +1229,11 @@ $accent: #7eb6d6;
   line-height: 1;
 }
 
-// Attached-context count — the branches dragged onto this tile, which ride
-// with every question. Honey-warm so it reads as cargo, not chrome.
-.chat-context {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.15em;
-  color: rgba(224, 180, 92, 0.9);
-
-  .mat-sym { font-size: 1.15em; }
-}
-
-// AVAILABILITY, at the top of the footer: it is the standing fact — whether
-// an answer can arrive at all — and it is read before any choice about this
-// particular question.
+// THE FOOTER IS TWO BANDS: what can answer, and the box you type in. The row
+// of reported context that used to sit between them is gone — the path it
+// named is the header's subject, the references it counted are shown box by
+// box up there, and read directly under the model it made a model look like
+// it had a location.
 .chat-link {
   display: flex;
   align-items: center;
@@ -1288,4 +1328,40 @@ $accent: #7eb6d6;
 
   .mat-sym { font-size: 1.05em; }
   &:hover { background: $accent; }
+}
+
+// ── THE READING ROW ──────────────────────────────────────────────────────
+//
+// hives | chat | providers, and the row is what makes the third column
+// possible: header and footer are OUTSIDE it, so opening the console splits
+// the reading area and leaves the window's own chrome the full width. The
+// first attempt padded the whole panel instead, which walked the header and
+// the composer leftward every time the console opened — the console was
+// beside the window rather than in it.
+.chat-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+// Everything that was already in the reading area, unchanged, now in a column
+// of its own so the console can sit beside it.
+.chat-reading {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+// The console's place. Zero-wide and invisible until the console publishes
+// `--hc-providers-width`; the console itself fills it (see
+// providers-window.view.ts `.hc-providers.is-embedded`).
+.chat-providers-host {
+  flex: 0 0 auto;
+  width: var(--hc-providers-width, 0px);
+  min-width: 0;
+  display: flex;
+  overflow: visible;
 }

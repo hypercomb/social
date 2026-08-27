@@ -1,6 +1,6 @@
 # Workflows and skills — every step is a tile
 
-**Status: BUILT (2026-07-26), first slice.** Companions:
+**Status: BUILT (2026-07-26), professional editor upgrade 2026-08-26.** Companions:
 [selection-tool-windows.md](selection-tool-windows.md) (the tool-window
 pattern), [meaning-loop.md](meaning-loop.md) (the ask gate a workflow
 obeys), [aggregation-layer-model.md](aggregation-layer-model.md),
@@ -21,7 +21,9 @@ steps are its child tiles.** Everything that follows is a consequence.
 |---|---|
 | the workflow | a cell, with a `workflow` slot naming it |
 | a step | a child tile, with a `visual:workflow:step` decoration |
-| the step ORDER | the parent's `children` order — nothing else |
+| default step order | the parent's `children` order (legacy-compatible) |
+| explicit routes | the source step's optional `next` target list |
+| node layout | the step resource's optional `position` |
 | the step's kind | a `WorkflowStepRegistry` key; nearly always `command` |
 | a nested workflow | a step tile that has children of its own |
 | a **skill** | a workflow with a name — a `NameRegistry` entry |
@@ -34,11 +36,11 @@ is the entire argument for the design.
 
 ## What is deliberately absent
 
-- **No edge list, no `next`, no `index`.** The order is the tiles' order.
-  A second copy would drift the first time somebody dragged a tile.
-- **No node-graph canvas in the tool window.** The hive *is* the graph. A
-  second rendering of tiles you are already looking at would be a worse one,
-  and would disagree the moment you moved something.
+- **No central edge table.** Legacy workflows still follow tile order. When a
+  participant draws routes, each content-addressed source step owns its own
+  `next` contract; `next: []` is an explicit terminal.
+- **No second workflow database.** Foblex Flow renders and edits the graph,
+  while DCP tiles and step resources remain authoritative.
 - **No run state in the layer.** Which step is running is participant-local
   and transient — the same rule as viewport and clipboard. Putting it in a
   layer would change the workflow's signature every time anybody ran it, so
@@ -132,38 +134,31 @@ already drains these needs no change to drain a workflow's.
 
 ## The tool window
 
-`/workflow` opens `hc-workflow-designer` — a registry-fed shell surface
-(never an `<hc-*>` tag in an app.html), docked **left**: you drag out of the
-palette and into the sequence on the canvas to its right, so the source sits
-before the target. It holds the four things the canvas cannot:
+`/workflow` opens `hc-workflow-designer` as a wide, left-docked authoring
+studio. Its graph surface is Foblex Flow, embedded directly in Hypercomb:
 
-- **palette** — every control kind and every slash command the hive currently
-  answers to. **Drag one onto the hive** to place it: drop on empty space to
-  add a step at the end, drop on a step tile to make that step this kind.
-  (Clicking a row is the keyboard/touch path — it re-types the selected step,
-  or appends when nothing is selected.)
-- **inspector** — the selected step's kind, command and arguments. Which
-  fields it offers comes from the palette entry, so the window knows nothing
-  about any particular kind.
-- **run bar** — go, one-step-at-a-time, stop, with live status on each step.
-- **naming**, which is what turns a workflow into a skill. At the hive root —
-  which has no tile of its own — the same field MINTS a tile, declares it, and
-  walks you into it. Standing somewhere that cannot itself become a workflow
-  is a reason to make one, never a reason to refuse.
+- **library** — every registered control kind and slash command, searchable
+  and available without teaching the editor about particular step types;
+- **graph canvas** — pan, zoom, fit, snap-to-grid, multi-selection, keyboard
+  deletion, draggable nodes, and connectable routes;
+- **inspector** — the selected step's kind, command, arguments, position, and
+  outgoing routes;
+- **run bar and log** — run, step, stop, and live status on the same graph;
+- **naming** — turns the current workflow into a reusable skill. At the hive
+  root it mints the workflow tile before declaring it.
 
-An empty workflow opens the palette on its own (its one useful control would
-otherwise be folded shut under "No steps yet. Add one below"). It only ever
-opens, and stops once you work the toggle yourself.
+Foblex owns interaction and rendering only. DCP remains authoritative: the
+designer renders `workflow:state` and emits effects; it does not maintain a
+second workflow database.
 
-### The drag
+### Graph persistence
 
-Pointer events, not HTML5 drag-and-drop — the drop target is a WebGL canvas
-with no DOM nodes to land on. The tile under the release is resolved from
-**release coordinates** via `TileOverlayDrone.labelAtClient`, never a
-remembered `tile:hover`, which nulls the moment the pointer crosses chrome and
-every drag out of a docked panel does exactly that. Only a tile that is a step
-*of this workflow* is a re-type target; a drop on anything else adds a step.
-Releasing back over the panel is a cancel.
+Every node remains a workflow child tile. Editor position is stored on that
+step as `position`, and outgoing routes are stored on the source step as
+`next`. There is no central edge table. Missing `next` preserves older linear
+workflows by routing to the next sibling; `next: []` marks an explicit terminal
+step. This keeps old workflows valid while allowing branches and cycles to be
+expressed visually.
 
 ### Step tiles render as their kind
 
@@ -193,6 +188,8 @@ tile on the hive focuses it in the inspector.
 | `workflow:declare` | panel → drone | `{ name, description? }` |
 | `workflow:step-add` | panel → drone | `{ segments, step, name? }` |
 | `workflow:step-set` | panel → drone | `{ segments, step }` |
+| `workflow:step-move` | panel → drone | `{ segments, position }` |
+| `workflow:connection-set` | panel → drone | `{ segments, targets }` |
 | `workflow:step-drop` | panel → drone | `{ segments, step, name?, x, y }` — release point |
 | `workflow:run` | → runner | `{ segments, stepThrough?, continueOnError? }` |
 | `workflow:run-next` / `:run-stop` | → runner | — |
@@ -224,43 +221,15 @@ Aliases: `/flow`, `/skill`.
   in a pool of meaning — `sign('workflow:runs')`, with the colon that keeps a
   pool address out of the bare-word collision space
   ([known-location-pools.md](known-location-pools.md)) — and never in a slot.
-- **Reordering from the panel.** The steps list mirrors the canvas order but
-  cannot change it — dragging tiles on the hive is how you reorder, which is
-  correct (one truth) but means the panel is read-only about order.
-- **Conditionals.** No `branch` kind yet. When one lands, its condition must be
+- **Conditional expressions.** Explicit graph branches run every reachable
+  route once today. A future conditional route must be
   a predicate the hive already has (a pheromone, a tag filter, the hidden pool)
   — not a second selector language.
 
-## The workflow surface — a wide canvas, not hexagons
+## Legacy workflow view
 
-A honeycomb says *these are siblings*. That is true of a workflow's steps and
-useless about them, because the one thing a workflow is is an **order**. So a
-workflow gets its own render of the same layers — `WorkflowViewDrone`, the
-same shape as the website and tutor takeovers, driven by `ViewMode`.
-
-- **The flow runs left → right** and the stage grows with it, **scrolling**
-  rather than shrinking. Fit-to-width is a button, never the default: a
-  20-step skill squeezed into 900px is not a diagram.
-- **It docks beside the designer**, not under it — the canvas starts where the
-  palette ends, so the two are usable together.
-- **One node per step**, in `children` order, joined by connectors, each
-  carrying its position, tile name, kind, and what it will actually do. A step
-  with children says it has its own steps.
-- **A run colours the nodes live** — the same hues as the panel's dots —
-  so you watch the run walk the flow.
-- **Every node carries `data-workflow-step="<cell>"`.** That is what lets the
-  palette drag land on a node here exactly as it lands on a hexagon: the panel
-  reads the element under the release point and hands the drone an explicit
-  label. On the hex grid there is no such element, so there the release point
-  resolves through `TileOverlayDrone.labelAtClient`. One drag, either surface.
-- **Clicking a node** emits `workflow:step-focus`; the designer's inspector
-  follows it. SVG nodes never travel through tile selection, so the surface
-  reports its own clicks.
-
-Opening the designer on a workflow switches the surface automatically, and
-only from `hexagons` — someone who deliberately put the hive in another view
-has said what they want to look at, and a panel must not overrule that.
-Walking off a workflow returns you to hexagons rather than stranding you on an
-empty flow. Escape or right-click leaves; the takeover is claimed through the
-owner-counted `ModeRegistry`, which is the only thing allowed to broadcast
-`view:active` (a doctrine ratchet enforces it).
+`WorkflowViewDrone`, the earlier full-screen SVG workflow view, remains
+registered for compatibility with callers that request it explicitly.
+Opening `/workflow` no longer switches `ViewMode`: the embedded Foblex studio
+is the authoritative authoring surface. The legacy view can be removed after
+downstream callers no longer depend on its mode.

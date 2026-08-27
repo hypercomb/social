@@ -215,7 +215,7 @@
   "providers.search": "ابحث عن المزوّدين والنماذج",
   "providers.empty": "لا نتائج مطابقة",
   "providers.tab.subscription": "الاشتراكات",
-  "providers.tab.api": "طلبات API",
+  "providers.tab.api": "API الدردشة",
   "providers.tab.swarm": "السرب",
   "providers.tabHint.subscription": "خطة تدفع ثمنها بالفعل. جلسة CLI تعمل على هذا الجهاز تجيب عبر حسابها الخاص — وهؤلاء وحدهم من يستطيعون قراءة خليتك.",
   "providers.tabHint.api": "المحاسبة على كل طلب بالمفتاح الذي تلصقه هنا. يبقى المفتاح في هذا المتصفح، وتُعرض نقطة النهاية التي سيسافر إليها قبل أن تلصقه.",

@@ -2,6 +2,11 @@
 
 **Critical architecture infrastructure.** Every design decision, every data structure, every new feature follows this doctrine. Without signature composition, nothing in Hypercomb scales. With it, every fragment is composable, every superposition is cacheable, and compute becomes optional.
 
+The [heuristic signature library](heuristic-signature-library.md) applies this
+doctrine to background AI preparation: an algorithm signature composed with a
+content signature resolves to a signed, reusable result that can be shared
+across machines and swarms.
+
 ---
 
 ## The primitive: signature + payload

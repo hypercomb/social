@@ -215,7 +215,7 @@
   "providers.search": "Cerca fornitori e modelli",
   "providers.empty": "Nessuna corrispondenza",
   "providers.tab.subscription": "Abbonamenti",
-  "providers.tab.api": "Richieste API",
+  "providers.tab.api": "API chat",
   "providers.tab.swarm": "Sciame",
   "providers.tabHint.subscription": "Un piano che paghi già. Una sessione CLI in esecuzione su questa macchina risponde con il proprio account — e sono gli unici che possono leggere il tuo hive.",
   "providers.tabHint.api": "Fatturato a richiesta con la chiave che incolli qui. La chiave resta in questo browser, e l’endpoint verso cui viaggerebbe è mostrato prima che tu la incolli.",

@@ -1,8 +1,17 @@
 @if (visible()) {
   <!-- THE ONE SHAPE: full screen. The chat covers everything, so there is no
        dim, no click-out and no docked half-size to choose between — Escape and
-       the close button are the ways back. -->
+       the close button are the ways back.
+
+       `defaultText` is 1 because AUTO IS MEANINGLESS FOR A WINDOW THAT IS
+       ALWAYS FULL SCREEN. The width-derived multiplier is
+       `measured / defaultWidth`, and this panel's measured width is the
+       VIEWPORT — so it clamped to `maxScale` every time and the conversation
+       opened shouting at 1.4x, which is not a size anybody chose. It opens at
+       1x now, with the whole ladder (Auto included) one press away in the
+       gear. -->
   <aside
+    #panel
     class="chat-panel"
     [class.peeking]="peeking()"
     hcDockedPanel="chat-window"
@@ -13,6 +22,7 @@
     [minWidth]="300"
     [maxWidth]="720"
     [defaultWidth]="400"
+    [defaultText]="1"
     data-consumes-wheel
     (keydown)="onKey($event)"
     tabindex="-1"
@@ -27,6 +37,20 @@
          holds the level you walked to and the picks you made, and a fold is
          not a reason to lose either. -->
     <div class="chat-rail" #chatRail [attr.aria-label]="'chat.rail' | t"></div>
+
+    <!-- THE RAIL'S EDGE IS A HANDLE. The sidebar holds tile names, which are
+         as long as the participant made them — a fixed width is somebody
+         else's guess about their hive. Dragging moves both halves at once:
+         the rail's width and the conversation's left inset are one custom
+         property. Double-click gives the stylesheet's width back, and the
+         arrow keys move it for a hand that never reaches for a mouse. -->
+    <div class="chat-rail-grip" role="separator" aria-orientation="vertical"
+      tabindex="0"
+      [attr.aria-label]="'chat.rail.resize' | t"
+      [title]="'chat.rail.resize' | t"
+      (pointerdown)="startRailDrag($event)"
+      (dblclick)="resetRailWidth()"
+      (keydown)="onRailGripKey($event)"></div>
     <!-- WHILE FOLDED, THE BARS ARE A FRAME AND THE HIVE IS WHAT IS BETWEEN
          THEM. Reserving them as viewport insets is what makes "centre in
          window" mean the window you can actually see: the canvas owner
@@ -174,11 +198,37 @@
         [attr.aria-label]="(peeking() ? 'chat.peek.off' : 'chat.peek.on') | t">
         <span class="mat-sym" aria-hidden="true">{{ peeking() ? 'unfold_more' : 'unfold_less' }}</span>
       </button>
+      <!-- SHOW THE PROVIDERS. The footer line already points at the console,
+           but it only reads as a link once you have noticed the model word in
+           it; this is the same console as a standing affordance, in the corner
+           where a window keeps its controls. It sits immediately left of the
+           settings gear (pinned there by hcDockedPanel, out of this flow) —
+           window settings are about THIS window, providers are about what
+           answers in it, and the two belong side by side.
+           A TOGGLE, not a launcher: pressed while the console stands, and
+           pressing it again shuts it. -->
+      <button class="chat-providers" type="button" (click)="openProviders()"
+        [class.on]="providersOpen()"
+        [attr.aria-pressed]="providersOpen()"
+        [title]="(providersOpen() ? 'chat.providers.hide' : 'chat.providers.show') | t"
+        [attr.aria-label]="(providersOpen() ? 'chat.providers.hide' : 'chat.providers.show') | t">
+        <span class="mat-sym" aria-hidden="true">hub</span>
+      </button>
       <button class="chat-close" type="button" (click)="close()"
         [attr.aria-label]="'chat.close' | t">×</button>
     </header>
 
     @if (showSetup()) {
+    <!-- THE READING ROW. The header above it and the composer below it still
+         span the whole window — they are about the window, not about what is
+         being read in it. Only this row splits, so the providers console can
+         stand INSIDE the chat as a third column rather than shoving the
+         window's own chrome leftward to make room for itself.
+         Written once per branch because the composer lives inside the `@else`:
+         the setup checklist has no composer, and a wrapper that straddled the
+         branch would close a div the other branch never opened. -->
+    <div class="chat-body">
+    <div class="chat-reading">
       <!-- GUIDED SETUP — one step at a time, each checked off as it verifies
            itself. Steps 2 and 3 are LIVE: enabling flips the config gate, and
            the broker check completes on the worker's own bridge:status. The
@@ -306,7 +356,27 @@
           <p class="chat-setup-note">{{ 'chat.setup.note' | t }}</p>
         }
       </section>
+    </div>
+    <!-- WHERE THE PROVIDERS CONSOLE STANDS. Empty and zero-wide until the
+         console mounts into it: the console is cold chrome from essentials
+         (providers-window.view.ts) and finds this host by class, so the shell
+         offers a place without importing a module and the module renders
+         itself without knowing what an Angular template is. Its width IS
+         `--hc-providers-width`, which the console publishes and keeps live
+         while its grip is dragged. -->
+    <div class="chat-providers-host" [class.on]="providersOpen()"></div>
+    </div>
     } @else {
+    <!-- THE READING ROW. The header above it and the composer below it still
+         span the whole window — they are about the window, not about what is
+         being read in it. Only this row splits, so the providers console can
+         stand INSIDE the chat as a third column rather than shoving the
+         window's own chrome leftward to make room for itself.
+         Written once per branch because the composer lives inside the `@else`:
+         the setup checklist has no composer, and a wrapper that straddled the
+         branch would close a div the other branch never opened. -->
+    <div class="chat-body">
+    <div class="chat-reading">
     <!-- Which conversation you are in — the NAME, not a list. The list of a
          tile's conversations hangs under that tile in the rail, where it can
          say what each one is about; a flat list of every chat above the
@@ -495,12 +565,12 @@
              actually listening, and a way out of it. -->
         <div class="chat-msg ai chat-wait" role="status" aria-live="polite">
           <span class="chat-msg-text" [class.chat-think]="!unattended()">{{
-            (unattended() ? 'chat.unattended' : bridgeUp() ? 'chat.thinking' : 'chat.queued') | t
+            (unattended() ? 'chat.unattended' : bridgeUp() ? 'chat.thinking' : 'chat.queued.wait') | t
           }}</span>
           <span class="chat-wait-clock">{{ elapsedLabel() }}</span>
         </div>
         @if (unattended()) {
-          <p class="chat-wait-hint">{{ 'chat.unattended.hint' | t }}</p>
+          <p class="chat-wait-hint">{{ 'chat.unattended.hint.wait' | t }}</p>
         }
       }
     </div>
@@ -516,38 +586,47 @@
     }
     </div>
 
+    </div>
+    <!-- WHERE THE PROVIDERS CONSOLE STANDS. Empty and zero-wide until the
+         console mounts into it: the console is cold chrome from essentials
+         (providers-window.view.ts) and finds this host by class, so the shell
+         offers a place without importing a module and the module renders
+         itself without knowing what an Angular template is. Its width IS
+         `--hc-providers-width`, which the console publishes and keeps live
+         while its grip is dragged. -->
+    <div class="chat-providers-host" [class.on]="providersOpen()"></div>
+    </div>
+
     <footer class="chat-foot"
       hcDockInset="bottom" [hcDockInsetActive]="peeking()">
-      <!-- Availability, named — FIRST, because whether an answer can come at
-           all is read before which model would give it. A rule under it
-           separates the standing fact from the choices about this question. -->
+      <!-- WHAT CAN ANSWER, on one line: the dot, the model, and whose bridge
+           it is coming over. The row of reported context that used to follow
+           it is gone — nothing there was maintained, and a path reading
+           directly after a model made the model look like it had one.
+
+           NAMED, NOT ASSUMED. The bridge is one socket that any frontier CLI
+           can park on, so the line says WHO the designation put behind it
+           rather than the one vendor that used to be the only answer. With
+           nothing designated it says only what it knows: the link's state. -->
       <div class="chat-link" [class.waiting]="!bridgeUp()">
         <span class="chat-dot" aria-hidden="true"></span>
-        <span>{{ (bridgeUp() ? 'chat.link.up' : hostConfigured() ? 'chat.link.host' : 'chat.link.waiting') | t }}</span>
-      </div>
-
-      <!-- Context, REPORTED, under the rule. Where you are standing and what you have selected
-           is what the question carries — there is nothing to maintain here. -->
-      <div class="chat-status">
-        <select class="chat-model" (change)="onModelChange($event)"
-          [attr.aria-label]="'chat.model' | t" [title]="'chat.model' | t">
-          @for (name of models; track name) {
-            <option [value]="name" [selected]="name === model()">{{ name }}</option>
-          }
-        </select>
-        <span class="chat-where" [title]="path()">{{ path() }}</span>
-        @if (chosen()) {
-          <span class="chat-targets">{{ 'chat.selected' | t: { count: chosen() } }}</span>
-        }
-        <!-- The gathered context used to be counted here; it is now SHOWN,
-             box by box, in the header row where the request is composed. -->
-        <!-- Attached context (portal-drop branches) rides with every question —
-             a rider the participant can't see is a surprise, so it is counted
-             here beside the path it belongs to. -->
-        @if (contextCount() > 0) {
-          <span class="chat-context" [title]="'chat.context.title' | t: { count: contextCount() }">
-            <span class="mat-sym" aria-hidden="true">attach_file</span>{{ contextCount() }}
-          </span>
+        <!-- WHO ANSWERS — reported, not asked. It leads the line because it is
+             the shortest thing on it and the one most often looked for: the
+             dot says whether an answer can come, this says in which model, and
+             the sentence after it says from whose bridge. It used to sit in
+             the row below, where the path fell in directly behind it and the
+             two read as one string — a model with a location after it. The
+             press is the way to the providers console, the one place company,
+             model and level of thinking are chosen. -->
+        <button class="chat-answering" type="button" (click)="openProviders()"
+          [title]="answeringWhy() || ('chat.answering' | t)"
+          [attr.aria-label]="'chat.answering' | t">
+          <span class="mat-sym" aria-hidden="true">auto_awesome</span>{{ answering() }}
+        </button>
+        @if (designated(); as who) {
+          <span>{{ (bridgeUp() ? 'chat.link.ready' : hostConfigured() ? 'chat.link.host' : 'chat.link.pending') | t: { provider: who.label } }}</span>
+        } @else {
+          <span>{{ (bridgeUp() ? 'chat.link.ready.any' : hostConfigured() ? 'chat.link.host' : 'chat.link.pending.any') | t }}</span>
         }
       </div>
 

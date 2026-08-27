@@ -215,7 +215,7 @@
   "providers.search": "Sağlayıcı ve model ara",
   "providers.empty": "Eşleşme yok",
   "providers.tab.subscription": "Abonelikler",
-  "providers.tab.api": "API istekleri",
+  "providers.tab.api": "Sohbet API",
   "providers.tab.swarm": "Sürü",
   "providers.tabHint.subscription": "Zaten ödediğin bir plan. Bu makinede çalışan bir CLI oturumu kendi hesabıyla yanıtlar — ve kovanını okuyabilen tek yanıtlayıcılar bunlardır.",
   "providers.tabHint.api": "Buraya yapıştırdığın anahtarla istek başına ücretlendirilir. Anahtar bu tarayıcıda kalır, gideceği uç nokta ise yapıştırmadan önce gösterilir.",

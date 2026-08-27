@@ -280,6 +280,48 @@ type HostAiLike = {
   setHost?(domain: string): void
 }
 
+/** WHO ANSWERS, decided by the participant's standing instructions rather
+ *  than by a control in this window (assistant/model-policy.ts, over IoC —
+ *  the shell may never import a module). `model` is the WIRE ID: the ask
+ *  hint the bridge roster resolves, and the one string a model bee's vendor
+ *  family and tier shade are read off. `tier` is the level of thinking the
+ *  designation was made for, DECLARED by the provider. */
+type PolicyLike = {
+  designate?(need: { tier?: string; readsHive?: boolean; streaming?: boolean }):
+    DesignationLike | undefined
+}
+
+type DesignationLike = {
+  readonly providerId: string
+  readonly label: string
+  readonly vendor: string
+  readonly tier: string
+  readonly model: string
+  readonly name: string
+}
+
+type RoutedChunkLike = {
+  readonly text: string
+  readonly providerId: string
+  readonly providerLabel: string
+  readonly vendor: string
+  readonly model: string
+}
+
+type LlmRouterLike = {
+  ready?(call?: { providerId?: string; model?: string; preferModel?: string; need?: { tier?: string; streaming?: boolean } }): boolean
+  stream?(call: {
+    providerId?: string
+    model?: string
+    preferModel?: string
+    need?: { tier?: string; streaming?: boolean }
+    messages: readonly { role: 'user' | 'assistant'; content: string }[]
+    system?: string
+    maxTokens?: number
+    signal?: AbortSignal
+  }): AsyncGenerator<RoutedChunkLike>
+}
+
 /** The tile-context module (assistant/tile-context.ts), over IoC — the shell
  *  may never import essentials. `branchesFor` is the cheap synchronous count
  *  for the status chip; `signaturesFor` is the resolved union an ask carries. */
@@ -287,11 +329,6 @@ type TileContextLike = {
   branchesFor?(segments: readonly string[]): readonly string[][]
   signaturesFor?(segments: readonly string[]): Promise<readonly string[]>
 }
-
-/** Model hints the bridge understands. The responder maps the name to a real
- *  model id (scripts/bridge/drain-tick.cjs); a parked session answers as
- *  whatever it already is. Keep aligned with that map. */
-const MODELS = ['opus', 'sonnet', 'haiku', 'fable'] as const
 
 /** The command line's bracket syntax passes the SHORT op — `[tile]/o ask me`
  *  sets the model to `o` (command-line.component.ts, the opus/sonnet/haiku
@@ -306,11 +343,39 @@ const MODEL_ALIASES: Record<string, string> = { o: 'opus', s: 'sonnet', h: 'haik
  *  THE RENDER LAYER READS THIS MAP TOO — a tile's resting bee is branded from
  *  the model its newest conversation was last held in
  *  (presentation/avatars/agent-bee.drone.ts, via chat-thread's
- *  `conversationModel`). Shared may not import essentials nor the other way
+ *  `conversationModel`). Since the composer stopped asking, what is written
+ *  here is WHO ANSWERED — the designation, or the word the participant named —
+ *  so a tile's resting bee wears the model that actually took its last
+ *  question rather than a preference nobody expressed.
+ *
+ *  Shared may not import essentials nor the other way
  *  round, so the key is spelled in both; chat-thread.ts names this file as
  *  the writer, and this comment names it as the reader. Change one, change
  *  both. */
+/** How wide the participant dragged the tiles rail. Device-local: it is a
+ *  fit to THIS screen and this hive's tile names, not something a thread
+ *  carries. `0` = never dragged, and the stylesheet's own clamp stands. */
+const RAIL_WIDTH_KEY = 'hc:chat-rail-width'
+/** Narrow enough to be only names, wide enough for a long one. */
+const RAIL_MIN = 180
+const RAIL_MAX = 640
+/** What the conversation column may never shrink below — the rail can grow
+ *  until it would leave the thread itself unreadable, and no further. */
+const CONVERSATION_MIN = 260
+
+/** The remembered rail width, or 0 when there is none to honour. */
+const readRailWidth = (): number => {
+  try {
+    const raw = Number(localStorage.getItem(RAIL_WIDTH_KEY) ?? '')
+    return Number.isFinite(raw) && raw >= RAIL_MIN ? Math.min(RAIL_MAX, raw) : 0
+  } catch { return 0 }
+}
+
 const MODEL_KEY = 'hc:chat-models'
+
+/** THE LAST RESORT, and only that: nothing named, nothing designated, and a
+ *  question still has to carry a hint the bridge roster can resolve. Every
+ *  other path names a real model — see `answering`. */
 const DEFAULT_MODEL = 'opus'
 
 /** WHAT THE SHALLOW TIER ANSWERS WITH. The host worker relays `/ai/ask` to
@@ -330,6 +395,7 @@ const TRANSCRIPT_TURNS = 12
  *  that a hand leaving the keyboard has already been saved. */
 const DRAFT_HOLD_MS = 500
 const HOST_AI_IOC_KEY = '@diamondcoreprocessor.com/HostAi'
+const LLM_ROUTER_IOC_KEY = '@diamondcoreprocessor.com/LlmRouter'
 
 /** How far back a pending ask record may reach and still be shown as waiting.
  *  Matches the agent registry's give-up window: past it nobody is coming, and
@@ -414,6 +480,22 @@ const ioc = (): { get(k: string): unknown } | undefined =>
 /** This window's name in the owner-counted `view:active` mode. */
 const SURFACE_OWNER = 'chat-window'
 
+/** THE VIEW THAT LEAVES THE BAR ITS EDGE.
+ *
+ *  `view:active` means "a view is covering the canvas, put the chrome away",
+ *  and the control bar obeys it by hiding — correct for a takeover, wrong for
+ *  this window. The chat covers the canvas but stops at the bar's reservation
+ *  (see the stylesheet's `--hc-controls-left` / `--hc-controls-right`), so the
+ *  bar has a place to be, and hiding it only cost the participant every control
+ *  on it for as long as a conversation was open.
+ *
+ *  A second owner-counted mode says so, rather than the bar learning this
+ *  window's name: any view that leaves the bar its edge can hold it, and the
+ *  bar stays while ANY owner does. Claimed and released in lockstep with
+ *  `view:active` — the fold releases both, which is what brings the hive AND
+ *  its chrome back. */
+const KEEPS_CONTROLS = 'view:keeps-controls'
+
 const MODE_REGISTRY_IOC_KEY = '@diamondcoreprocessor.com/ModeRegistry'
 
 type ModeRegistryLike = {
@@ -441,12 +523,16 @@ type ModeRegistryLike = {
 })
 export class ChatWindowComponent implements OnDestroy {
 
+  /** A direct/keyed/local provider can answer ordinary chat even when no
+   * host or hive-reading bridge is configured. */
+  readonly providerReady = signal(false)
+
   /** Chat stays discoverable, but only a participant-supplied responder makes
    *  it interactive. `configured` is stable through a temporary disconnect;
    *  `bridgeUp` below is merely the live transport state. */
   readonly bridgeConfigured = signal(isLocalClaudeBridgeConfigured())
   readonly hostConfigured = signal(isParticipantAiHostConfigured())
-  readonly enabled = computed(() => this.bridgeConfigured() || this.hostConfigured())
+  readonly enabled = computed(() => this.providerReady() || this.bridgeConfigured() || this.hostConfigured())
 
   /** The participant's last explicit open/closed choice survives a refresh.
    *  On the first visit only, a configured local bridge keeps the established
@@ -501,7 +587,36 @@ export class ChatWindowComponent implements OnDestroy {
   readonly pendingSig = signal('')
 
   readonly bridgeUp = signal(false)
-  readonly model = signal<string>(DEFAULT_MODEL)
+
+  /** THE MODEL SOMEBODY NAMED, for this conversation. `''` is the normal
+   *  case: nobody named one, and the policy designates instead. Naming still
+   *  wins — `/opus`, `[tile]/o …`, a `chat:open` carrying a model — because a
+   *  participant overriding their own default is the whole point of being
+   *  able to say it. */
+  readonly model = signal<string>('')
+  /** Whether `model` was named by the participant. A remembered actual model
+   * is sticky, but remains fallback-capable. */
+  readonly modelExplicit = signal(false)
+
+  /** WHO THE POLICY DESIGNATED for a hive-reading question, refreshed from
+   *  the providers console's standing instructions (assistant/model-policy.ts
+   *  over IoC). Null while nothing is set up — then the composer says only
+   *  what the availability line already says. */
+  readonly designated = signal<DesignationLike | null>(null)
+
+  /** THE MODEL THAT WILL ANSWER — named, else designated, else the word this
+   *  hive has always defaulted to. One string: the ask hint, the bee's brand,
+   *  and what the footer reports, so those three can never disagree. */
+  readonly answering = computed(() => this.model() || this.designated()?.model || DEFAULT_MODEL)
+
+  /** The designation said in full — "Claude Code · deep": whose model, and at
+   *  what level of thinking. The footer's title, because the line itself
+   *  carries the model and nothing else. Empty when nothing is designated;
+   *  the template falls back to the standing explanation. */
+  readonly answeringWhy = computed(() => {
+    const chosen = this.designated()
+    return chosen ? `${chosen.label} · ${chosen.tier}` : ''
+  })
 
   /** An answer arriving a chunk at a time from the host tier. Held apart from
    *  `turns` because it is not a turn yet — it becomes one, once, when the
@@ -1184,8 +1299,6 @@ export class ChatWindowComponent implements OnDestroy {
   /** Which message's Copy just fired — a transient tick on that one row. */
   readonly copiedTurn = signal('')
 
-  readonly models = MODELS
-
   // ── guided setup state ──────────────────────────────────────────────────
 
   /** Checklist flags. `toolsDone` is the one manual step; the rest derive
@@ -1239,6 +1352,7 @@ export class ChatWindowComponent implements OnDestroy {
   readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller')
   readonly chatRail = viewChild<ElementRef<HTMLDivElement>>('chatRail')
   readonly lookLayer = viewChild<ElementRef<HTMLElement>>('lookLayer')
+  readonly panel = viewChild<ElementRef<HTMLElement>>('panel')
 
   /** ONE rail per window lifetime, mounted whenever full screen puts its host
    *  in the DOM — so the trail you drilled and the tiles you chose survive
@@ -1381,6 +1495,12 @@ export class ChatWindowComponent implements OnDestroy {
   // exactly what you left, now carrying whatever you picked up.
   readonly peeking = signal(false)
 
+  /** Whether the providers console is standing. Reported BY the console, never
+   *  guessed here: the same press opens and shuts it, and a toggle that draws
+   *  itself from its own last press goes wrong the moment the console is shut
+   *  any other way (Escape, `/providers`, the command line). */
+  readonly providersOpen = signal(false)
+
   /** Fold the window away to the hive, or bring it back. */
   togglePeek(): void {
     const next = !this.peeking()
@@ -1444,12 +1564,19 @@ export class ChatWindowComponent implements OnDestroy {
       // it lands. Claim on the SETTLED intent when it arrives, never on the
       // intent that was current when this call was made.
       if (active) this.#whenModes(late => {
-        if (this.#surfaceWanted) late.enter('view:active', SURFACE_OWNER)
+        if (!this.#surfaceWanted) return
+        late.enter('view:active', SURFACE_OWNER)
+        late.enter(KEEPS_CONTROLS, SURFACE_OWNER)
       })
       return
     }
-    if (active) modes.enter('view:active', SURFACE_OWNER)
-    else modes.exit('view:active', SURFACE_OWNER)
+    if (active) {
+      modes.enter('view:active', SURFACE_OWNER)
+      modes.enter(KEEPS_CONTROLS, SURFACE_OWNER)
+    } else {
+      modes.exit('view:active', SURFACE_OWNER)
+      modes.exit(KEEPS_CONTROLS, SURFACE_OWNER)
+    }
   }
 
   /** Is the surface claimed, as far as this window is concerned. */
@@ -1619,10 +1746,27 @@ export class ChatWindowComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<{ convoId?: string; text?: string; outcome?: string }>(
       'chat:host-done', payload => this.#onHostDone(payload)))
 
+    // WHO ANSWERS CAN CHANGE WHILE YOU ARE LOOKING AT IT — a key arrives, a
+    // bridge announces itself, a provider reports its headroom nearly spent,
+    // a tier gets pinned. One effect carries all of it (model-policy.ts) and
+    // replays its last value, so this both keeps the readout live and does
+    // the FIRST read: an essentials build landing after the shell still
+    // announces once on load.
+    this.#cleanups.push(EffectBus.on('llm:policy-changed', () => this.#refreshDesignation()))
+
+    // The console says when it is up or down; the header's toggle draws
+    // itself from that. Replayed, so a window opened while the console is
+    // already standing shows it pressed straight away.
+    this.#cleanups.push(EffectBus.on<{ open?: boolean }>(
+      'providers:state', payload => this.providersOpen.set(!!payload?.open)))
+
     this.#cleanups.push(EffectBus.on<{ connected?: boolean }>(
       'bridge:status', payload => {
         this.bridgeConfigured.set(isLocalClaudeBridgeConfigured())
         this.bridgeUp.set(!!payload?.connected)
+        // A bridge arriving or leaving changes who can answer at all, so the
+        // designation is re-read on the same signal the footer's light is.
+        this.#refreshDesignation()
       }))
 
     this.#cleanups.push(EffectBus.on<{ configured?: boolean }>(
@@ -1666,6 +1810,7 @@ export class ChatWindowComponent implements OnDestroy {
     // stealing command-line focus. Everyone else opens chat deliberately; an
     // unconfigured participant then sees the setup-required view.
     this.#refreshAvailability()
+    this.#refreshDesignation()
     EffectBus.emit('chat:window-state', { open: this.visible() })
     if (this.visible()) {
       this.#claimSurface(true)
@@ -1686,6 +1831,8 @@ export class ChatWindowComponent implements OnDestroy {
       ?.whenReady?.(HOST_AI_IOC_KEY, value => {
         this.hostConfigured.set(!!(value as HostAiLike | undefined)?.configured)
       })
+    ;(globalThis as { ioc?: { whenReady?: (k: string, cb: () => void) => void } }).ioc
+      ?.whenReady?.(LLM_ROUTER_IOC_KEY, () => this.#refreshDesignation())
   }
 
   ngOnDestroy(): void {
@@ -1883,7 +2030,7 @@ export class ChatWindowComponent implements OnDestroy {
    *  the reply — the same `bridgeUp()` the send path branches on, read one
    *  moment earlier. */
   #answeringModel(): string {
-    return this.bridgeUp() ? this.model() : HOST_TIER_MODEL
+    return this.providerReady() ? this.answering() : this.bridgeUp() ? this.answering() : HOST_TIER_MODEL
   }
 
   #raiseBee(convoId: string, question: string, model = this.#answeringModel()): void {
@@ -2097,6 +2244,7 @@ export class ChatWindowComponent implements OnDestroy {
    */
   async open(payload?: { model?: string; prefill?: string; convoId?: string }): Promise<void> {
     this.#refreshAvailability()
+    this.#refreshDesignation()
     const prefill = String(payload?.prefill ?? '').trim()
     this.visible.set(true)
     rememberChatVisibility(true)
@@ -2110,6 +2258,7 @@ export class ChatWindowComponent implements OnDestroy {
     if (!this.enabled()) return
     this.#refreshContext()
     this.bridgeUp.set(!!(ioc()?.get('@diamondcoreprocessor.com/ClaudeBridgeWorker') as BridgeLike | undefined)?.connected)
+    this.#refreshDesignation()
 
     if (payload?.convoId) { await this.#refreshList(); await this.#load(payload.convoId) }
     else if (prefill) { await this.#refreshList(); this.newChat() }
@@ -2147,6 +2296,7 @@ export class ChatWindowComponent implements OnDestroy {
       if (recent) {
         this.activeId.set(recent.convoId)
         this.model.set(this.#rememberedModel(recent.convoId))
+        this.modelExplicit.set(false)
         this.streaming.set('')
         this.turns.set(latestTurns)
         this.#syncWait(recent.convoId)
@@ -2188,6 +2338,89 @@ export class ChatWindowComponent implements OnDestroy {
     this.clipboardOpen.set(false)
     this.#railSeen = new Map()
     EffectBus.emit('chat:window-state', { open: false })
+  }
+
+  // ── THE RAIL'S WIDTH ─────────────────────────────────────────────
+  //
+  // One custom property moves both halves — the rail's own width and the
+  // conversation's left inset are the same `--chat-rail-width` — so there is
+  // no pair of numbers that can disagree. Written on the panel element rather
+  // than through a style binding because the panel comes and goes with
+  // `visible()`, and an effect that re-applies on arrival is the honest way
+  // to survive that.
+
+  /** Dragged width in px, or 0 while the stylesheet's clamp still stands. */
+  readonly railWidth = signal(readRailWidth())
+
+  /** Live while a drag is in flight, so the grip can stay lit. */
+  readonly railDragging = signal(false)
+
+  /** Put the width on the panel whenever either can have changed. */
+  readonly #railWidthEffect = effect(() => {
+    const element = this.panel()?.nativeElement
+    if (!element) return
+    const width = this.railWidth()
+    if (width) element.style.setProperty('--chat-rail-width', `${width}px`)
+    else element.style.removeProperty('--chat-rail-width')
+  })
+
+  /** How wide the rail may be right now: never so wide that the conversation
+   *  it sits beside stops being readable. Measured from the panel, because
+   *  the panel is itself resizable. */
+  #railBounds(): { min: number; max: number } {
+    const panel = this.panel()?.nativeElement
+    const room = panel ? panel.getBoundingClientRect().width - CONVERSATION_MIN : RAIL_MAX
+    return { min: RAIL_MIN, max: Math.max(RAIL_MIN, Math.min(RAIL_MAX, room)) }
+  }
+
+  #setRailWidth(next: number): void {
+    const { min, max } = this.#railBounds()
+    const width = Math.round(Math.min(max, Math.max(min, next)))
+    this.railWidth.set(width)
+    try { localStorage.setItem(RAIL_WIDTH_KEY, String(width)) } catch { /* private mode */ }
+  }
+
+  /** Drag from wherever the rail ACTUALLY is — including the stylesheet's
+   *  clamp, which is what it is on the first drag. */
+  startRailDrag(event: PointerEvent): void {
+    const grip = event.target as HTMLElement | null
+    const rail = this.chatRail()?.nativeElement
+    if (!grip || !rail) return
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = rail.getBoundingClientRect().width
+    this.railDragging.set(true)
+    grip.classList.add('dragging')
+    try { grip.setPointerCapture(event.pointerId) } catch { /* older engines still get the window listeners */ }
+
+    const move = (moved: PointerEvent): void => this.#setRailWidth(startWidth + (moved.clientX - startX))
+    const up = (): void => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      grip.classList.remove('dragging')
+      this.railDragging.set(false)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+  }
+
+  /** Give the stylesheet's width back — the way out of a drag that went too
+   *  far, without hunting for the original number. */
+  resetRailWidth(): void {
+    this.railWidth.set(0)
+    try { localStorage.removeItem(RAIL_WIDTH_KEY) } catch { /* private mode */ }
+  }
+
+  /** The same handle, for a hand that never reaches for a mouse. */
+  onRailGripKey(event: KeyboardEvent): void {
+    const step = event.shiftKey ? 40 : 12
+    const rail = this.chatRail()?.nativeElement
+    const current = this.railWidth() || rail?.getBoundingClientRect().width || RAIL_MIN
+    if (event.key === 'ArrowLeft') { event.preventDefault(); this.#setRailWidth(current - step) }
+    else if (event.key === 'ArrowRight') { event.preventDefault(); this.#setRailWidth(current + step) }
+    else if (event.key === 'Home') { event.preventDefault(); this.resetRailWidth() }
   }
 
   onKey(event: KeyboardEvent): void {
@@ -2265,6 +2498,7 @@ export class ChatWindowComponent implements OnDestroy {
     if (!threads || !convoId) return
     this.activeId.set(convoId)
     this.model.set(this.#rememberedModel(convoId))
+    this.modelExplicit.set(false)
     this.streaming.set('')
     const turns = await threads.readTurns(convoId)
     // A slow read landing after the participant moved on must not paint one
@@ -2377,6 +2611,13 @@ export class ChatWindowComponent implements OnDestroy {
     if (box) { box.value = ''; this.autosize(box) }
     this.turns.set([])
     this.streaming.set('')
+    // A NEW CONVERSATION HAS NAMED NOBODY. Carrying the last thread's named
+    // model into it was survivable while a picker showed what it was; with
+    // the policy designating, an inherited name is a silent override of the
+    // participant's own standing instructions.
+    this.model.set('')
+    this.modelExplicit.set(false)
+    this.#refreshDesignation()
     this.#endWait()
     this.listOpen.set(false)
     this.armed.set('')
@@ -2448,26 +2689,67 @@ export class ChatWindowComponent implements OnDestroy {
     catch { return {} }
   }
 
+  /** What this thread was last held in, or `''` — a thread nobody has named a
+   *  model for is not a thread that chose the default, and the difference is
+   *  what lets the policy designate for it. */
   #rememberedModel(convoId: string): string {
     const remembered = this.#modelMap()[convoId]
-    return MODELS.includes(remembered as typeof MODELS[number]) ? remembered : DEFAULT_MODEL
+    return typeof remembered === 'string' ? remembered.trim().toLowerCase() : ''
   }
 
+  /** NAMING A MODEL for this conversation — the command line's `/opus`, its
+   *  bracket form, or a `chat:open` that carried one. No longer restricted to
+   *  the four Claude words: a bridge announces its own model words
+   *  (llm.queen's slash provider), and a word the participant typed is an
+   *  override whichever roster it came from. */
   setModel(requested: string): void {
-    const next = MODEL_ALIASES[requested] ?? requested
-    if (!MODELS.includes(next as typeof MODELS[number])) return
+    const next = String(MODEL_ALIASES[requested] ?? requested ?? '').trim().toLowerCase()
+    if (!next) return
     this.model.set(next)
+    this.modelExplicit.set(true)
+    this.#remember(next)
+  }
+
+  /** Write what this conversation is being held in. Called when a model is
+   *  NAMED and again when a question actually leaves — the map is a record of
+   *  who took the last question, which is what the render layer brands a
+   *  tile's resting bee from. */
+  #remember(model: string): void {
     const id = this.activeId()
-    if (!id) return
+    if (!id || !model) return
     try {
       const map = this.#modelMap()
-      map[id] = next
+      if (map[id] === model) return
+      map[id] = model
       localStorage.setItem(MODEL_KEY, JSON.stringify(map))
     } catch { /* participant-local convenience — never worth failing a send */ }
   }
 
-  onModelChange(event: Event): void {
-    this.setModel((event.target as HTMLSelectElement).value)
+  /** ASK THE POLICY WHO ANSWERS. A chat question is the deep, hive-reading
+   *  kind — that is the whole difference between this window and a routine's
+   *  one-shot call — so the need is stated once, here.
+   *
+   *  Read at the moments the answer could have changed (opening, the bridge
+   *  coming or going, sending) rather than watched: the providers console is
+   *  where it changes, and you cannot be in it and in here at once. */
+  /** THE ONE PLACE IT IS CHOSEN. Company, model and level of thinking are set
+   *  in the providers console — pinned per tier, or left to the policy — and
+   *  this window points at it rather than keeping a second, smaller answer to
+   *  the same question. */
+  openProviders(): void {
+    EffectBus.emit('providers:open', {})
+  }
+
+  #refreshDesignation(): void {
+    const policy = ioc()?.get('@diamondcoreprocessor.com/LlmPolicyStore') as PolicyLike | undefined
+    const need = { tier: 'fast', streaming: true }
+    this.designated.set(policy?.designate?.(need) ?? null)
+    const router = ioc()?.get(LLM_ROUTER_IOC_KEY) as LlmRouterLike | undefined
+    this.providerReady.set(!!router?.ready?.({
+      model: this.modelExplicit() ? this.model() || undefined : undefined,
+      preferModel: !this.modelExplicit() ? this.model() || undefined : undefined,
+      need,
+    }))
   }
 
   // ── context ─────────────────────────────────────────────────────────────
@@ -2532,14 +2814,18 @@ export class ChatWindowComponent implements OnDestroy {
    */
   async send(text?: string): Promise<void> {
     this.#refreshAvailability()
+    this.#refreshDesignation()
     if (!this.enabled()) return
+    // BEFORE the bee is raised: the wait indicator brands one, and a bee
+    // wearing a designation that is one question out of date is exactly the
+    // confident-looking wrong answer the registry re-brands to avoid.
     const element = this.input()?.nativeElement
     const message = String(text ?? element?.value ?? '').trim()
     if (!message) return
 
     const threads = this.#threads()
     const queen = this.#queen()
-    if (!threads || !queen?.submitChat) {
+    if (!threads) {
       EffectBus.emit('toast:show', {
         type: 'warning',
         message: 'Chat service unavailable — try again in a moment.',
@@ -2565,7 +2851,14 @@ export class ChatWindowComponent implements OnDestroy {
     const stored = await threads.appendTurn(convoId, 'user', message)
     if (!stored) console.warn('[chat] the question was not stored — it will be missing after a reload')
 
-    // TWO TIERS, one window.
+    // THREE TIERS, one window. The provider router is first: it covers local
+    // Ollama and participant-keyed APIs, applies policy, and owns bounded
+    // fallback. It cannot take an explicitly named bridge model, so those
+    // choices fall through without silently changing vendor.
+    const routed = await this.#askProvider(convoId, message)
+    if (routed === 'answered' || routed === 'aborted') return
+
+    // The two legacy transports remain honest fallbacks.
     //
     // With a session on the bridge, the question goes to it: that is the deep
     // tier, and the only one that can read the hive. With nothing listening,
@@ -2589,7 +2882,7 @@ export class ChatWindowComponent implements OnDestroy {
 
     // A participant-host failure is retryable, but without a configured local
     // bridge there is nobody who could ever drain the durable bridge queue.
-    if (!this.bridgeConfigured()) {
+    if (!this.bridgeConfigured() || !queen?.submitChat) {
       this.#endWait()
       EffectBus.emit('toast:show', {
         type: 'warning',
@@ -2607,9 +2900,13 @@ export class ChatWindowComponent implements OnDestroy {
     // instead — with the composer's model, not the host's. The bee was
     // branded for the tier that was going to take it, so it is re-branded
     // for the one that actually did.
-    if (!this.bridgeUp()) this.#raiseBee(convoId, message, this.model())
+    if (!this.bridgeUp()) this.#raiseBee(convoId, message, this.answering())
 
-    queen.activeModel = this.model()
+    // WHAT ANSWERED IS WHAT THE THREAD IS HELD IN. The hint and the brand are
+    // one string (`answering`), and writing it down here is what lets the
+    // tile's resting bee wear the designation after this window is closed.
+    queen.activeModel = this.answering()
+    this.#remember(this.answering())
     const queued = await queen.submitChat(
       convoId, message, this.#chosenTargets(), transcript, this.referencePayload())
     if (!queued) {
@@ -2625,6 +2922,66 @@ export class ChatWindowComponent implements OnDestroy {
       if (convoId === this.activeId()) this.pendingSig.set(queued)
     }
     if (!this.#bumpList(convoId)) void this.#refreshList()
+  }
+
+  /** Direct provider route (local Ollama or a configured API key). The
+   * transcript is the context these providers can honestly see; unlike a
+   * bridge, this path never claims it can walk the hive. */
+  async #askProvider(convoId: string, message: string): Promise<'answered' | 'declined' | 'aborted'> {
+    const router = ioc()?.get(LLM_ROUTER_IOC_KEY) as LlmRouterLike | undefined
+    const need = { tier: 'fast', streaming: true }
+    const namedModel = this.modelExplicit() ? this.model() || undefined : undefined
+    const preferModel = !this.modelExplicit() ? this.model() || undefined : undefined
+    if (!router?.stream || !router.ready?.({ model: namedModel, preferModel, need })) return 'declined'
+
+    const messages = this.turns().slice(-TRANSCRIPT_TURNS).map(turn => ({
+      role: turn.role,
+      content: turn.text,
+    }))
+    const about = this.#chosenTargets()
+    const system = about.length
+      ? `You are helping inside Hypercomb. The participant says this conversation is about: ${about.join(', ')}. Do not claim to have read tile contents unless they are present in the messages.`
+      : 'You are helping inside Hypercomb. Be accurate and concise. Do not claim to have read hive contents unless they are present in the messages.'
+
+    const component = this
+    const ask: HostAsk = async function* (_question, opts) {
+      for await (const chunk of router.stream!({
+        model: namedModel,
+        preferModel,
+        need,
+        messages,
+        system,
+        signal: opts?.signal,
+      })) {
+        // The route that emitted text is the truth, including after a
+        // pre-output fallback. Keep the footer, resting bee and transcript's
+        // remembered model aligned with that actual answer.
+        component.designated.set({
+          providerId: chunk.providerId,
+          label: chunk.providerLabel,
+          vendor: chunk.vendor,
+          tier: 'fast',
+          model: chunk.model,
+          name: chunk.model,
+        })
+        component.model.set(chunk.model)
+        component.modelExplicit.set(false)
+        component.#remember(chunk.model)
+        yield chunk.text
+      }
+      return ''
+    }
+
+    EffectBus.emit('agent:progress', {
+      id: this.#beeId(convoId),
+      activity: `routing to ${this.designated()?.label ?? 'a configured provider'}`,
+    })
+    if (convoId === this.activeId()) this.hostStreaming.set(true)
+    const threads = this.#threads()
+    return startHostRun(convoId, message, { ask }, {
+      appendTurn: (id, role, text) => threads?.appendTurn(id, role as 'user' | 'assistant', text) ?? Promise.resolve(false),
+      saveStreamCheckpoint: (id, text) => threads?.saveStreamCheckpoint?.(id, text) ?? Promise.resolve(false),
+    })
   }
 
   /**

@@ -64,3 +64,7 @@ src/scripts/ai-inside/.*/
 src/diamond-core-processor/public/
 src/NUL
 src/NUL.map
+
+# Local repository heuristic index and immutable result cache.
+# The protocol and runners are source; mined machine-local observations are not.
+src/.hypercomb/heuristics/

@@ -15,7 +15,15 @@
      pointer-events:auto otherwise EATS website clicks at z 59989, one above the
      site overlay's 59988). Single source of truth — see styles.scss. -->
 <div id="pixi-host" style="z-index: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
-<hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" [style.visibility]="viewActive() ? 'hidden' : null"></hc-controls-bar>
+<!-- `viewActive()` means a view has taken the canvas, so the chrome goes away.
+     A view can also take the canvas and LEAVE THIS BAR ITS EDGE — the chat
+     window lays itself out against the same `--hc-controls-<side>` reservation
+     every docked toolwindow uses, so the rail has somewhere to be and hiding it
+     only cost every control on it for as long as a conversation was open. Such
+     a view says so by holding `view:keeps-controls` (owner-counted, alongside
+     `view:active`), and the bar stays. The header bar and the edit-actions
+     cluster below are NOT kept: both sit where the window paints. -->
+<hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" [style.visibility]="viewActive() && !controlsKept() ? 'hidden' : null"></hc-controls-bar>
 <div class="update-status-dock">
   <hc-upgrade-indicator></hc-upgrade-indicator>
   <hc-sync-indicator></hc-sync-indicator>

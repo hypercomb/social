@@ -1,15 +1,16 @@
 // hypercomb-shared/ui/workflow-designer/workflow-designer.component.ts
 //
-// Right-docked "Workflow" designer — opened by `/workflow`
+// Professional node-based Workflow designer — opened by `/workflow`
 // (`workflow:view-open`).
 //
 // ── What this window is, and what the canvas is ───────────────────────
 //
-// The canvas IS the workflow. A workflow is a cell, its steps are its child
-// tiles, and their order is the order you see. So this window deliberately
-// does NOT draw a node graph: it would be a second, worse view of tiles you
-// are already looking at, and the moment you dragged a tile the two would
-// disagree.
+// Foblex Flow owns graph interaction and rendering; Hypercomb continues to
+// own the records. Nodes are real child tiles, node positions and explicit
+// outgoing edges live on their content-addressed step resources, and every
+// edit crosses EffectBus into WorkflowAuthorDrone. The editor therefore gains
+// professional pan/zoom, selection, connection and alignment behaviour without
+// introducing a second workflow database.
 //
 // What the canvas cannot do is the rest of it, and that is all this window
 // holds:
@@ -43,9 +44,20 @@
 
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import {
-  ChangeDetectorRef, Component, computed, inject, signal, type OnDestroy,
+  ChangeDetectorRef, Component, ViewChild, ViewEncapsulation, computed, inject, signal, type OnDestroy,
 } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
+import {
+  FCanvasComponent,
+  FFlowModule,
+  type FCreateConnectionEvent,
+  type FDeleteSelectedEvent,
+  type FMoveNodesEvent,
+  type FReassignConnectionEvent,
+  type FSelectionChangeEvent,
+  provideFFlow,
+  withA11y,
+} from '@foblex/flow'
 import { onSelection } from '../../core/selection-context'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
@@ -62,7 +74,17 @@ interface StateStep {
   args?: string
   text?: string
   model?: string
+  next?: string[]
+  position?: { x: number; y: number }
   hasChildren: boolean
+}
+
+interface FlowConnection {
+  id: string
+  sourceCell: string
+  targetCell: string
+  sourceId: string
+  targetId: string
 }
 
 interface WorkflowStateMsg {
@@ -114,11 +136,15 @@ const DRAG_THRESHOLD = 5
 @Component({
   selector: 'hc-workflow-designer',
   standalone: true,
-  imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective],
+  imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective, FFlowModule],
+  providers: [provideFFlow(withA11y())],
   templateUrl: './workflow-designer.component.html',
   styleUrls: ['./workflow-designer.component.scss'],
+  encapsulation: ViewEncapsulation.None,
 })
 export class WorkflowDesignerComponent implements OnDestroy {
+
+  @ViewChild(FCanvasComponent) private flowCanvas?: FCanvasComponent
 
   readonly visible = signal(false)
 
@@ -159,6 +185,29 @@ export class WorkflowDesignerComponent implements OnDestroy {
   readonly draftModel = signal('')
 
   readonly stepCount = computed(() => this.steps().length)
+
+  readonly flowConnections = computed<FlowConnection[]>(() => {
+    const steps = this.steps()
+    const cells = new Set(steps.map(step => step.cell))
+    const out: FlowConnection[] = []
+    for (let index = 0; index < steps.length; index++) {
+      const step = steps[index]
+      const targets = step.next === undefined
+        ? (steps[index + 1] ? [steps[index + 1].cell] : [])
+        : step.next
+      for (const target of targets) {
+        if (!cells.has(target) || target === step.cell) continue
+        out.push({
+          id: edgeId(step.cell, target),
+          sourceCell: step.cell,
+          targetCell: target,
+          sourceId: outputId(step.cell),
+          targetId: inputId(target),
+        })
+      }
+    }
+    return out
+  })
 
   readonly selectedStep = computed<StateStep | null>(() => {
     const want = this.selected()
@@ -333,6 +382,100 @@ export class WorkflowDesignerComponent implements OnDestroy {
 
   statusOf(cell: string): string { return this.statusByCell()[cell] ?? '' }
 
+  positionOf(step: StateStep): { x: number; y: number } {
+    if (Number.isFinite(step.position?.x) && Number.isFinite(step.position?.y)) {
+      return { x: Number(step.position?.x), y: Number(step.position?.y) }
+    }
+    const column = step.index % 4
+    const row = Math.floor(step.index / 4)
+    return { x: 72 + column * 288, y: 88 + row * 190 }
+  }
+
+  inputOf(cell: string): string { return inputId(cell) }
+  outputOf(cell: string): string { return outputId(cell) }
+
+  onFlowSelection(event: FSelectionChangeEvent): void {
+    const cell = event.nodeIds.at(-1)
+    if (cell) this.#focus(cell)
+    else if (!event.connectionIds.length) this.selected.set(null)
+  }
+
+  onFlowMove(event: FMoveNodesEvent): void {
+    const byCell = new Map(this.steps().map(step => [step.cell, step]))
+    for (const moved of event.nodes) {
+      const step = byCell.get(moved.id)
+      if (!step) continue
+      EffectBus.emit('workflow:step-move', {
+        segments: step.segments,
+        position: { x: moved.position.x, y: moved.position.y },
+      })
+    }
+  }
+
+  onCreateConnection(event: FCreateConnectionEvent): void {
+    if (!event.targetId) return
+    const source = cellFromConnector(event.sourceId, 'out:')
+    const target = cellFromConnector(event.targetId, 'in:')
+    if (!source || !target || source === target) return
+    this.#replaceTargets(source, targets => [...targets, target])
+  }
+
+  onReassignConnection(event: FReassignConnectionEvent): void {
+    const prior = this.flowConnections().find(connection => connection.id === event.connectionId)
+    if (!prior) return
+    const nextSource = event.nextSourceId
+      ? cellFromConnector(event.nextSourceId, 'out:')
+      : undefined
+    const nextTarget = event.nextTargetId
+      ? cellFromConnector(event.nextTargetId, 'in:')
+      : undefined
+
+    this.#replaceTargets(prior.sourceCell, targets =>
+      targets.filter(target => target !== prior.targetCell))
+    if (nextSource && nextTarget && nextSource !== nextTarget) {
+      this.#replaceTargets(nextSource, targets => [...targets, nextTarget])
+    }
+  }
+
+  onDeleteSelected(event: FDeleteSelectedEvent): void {
+    for (const id of event.connectionIds) {
+      const connection = this.flowConnections().find(candidate => candidate.id === id)
+      if (!connection) continue
+      this.#replaceTargets(connection.sourceCell, targets =>
+        targets.filter(target => target !== connection.targetCell))
+    }
+    if (event.nodeIds.length) {
+      EffectBus.emit('toast:show', {
+        type: 'info', title: 'Workflow',
+        message: 'Delete the underlying tile to remove a workflow step.',
+      })
+    }
+  }
+
+  #replaceTargets(cell: string, update: (targets: string[]) => string[]): void {
+    const steps = this.steps()
+    const index = steps.findIndex(step => step.cell === cell)
+    if (index < 0) return
+    const step = steps[index]
+    const current = step.next === undefined
+      ? (steps[index + 1] ? [steps[index + 1].cell] : [])
+      : [...step.next]
+    const valid = new Set(steps.map(item => item.cell))
+    const targets = [...new Set(update(current))]
+      .filter(target => target !== cell && valid.has(target))
+    EffectBus.emit('workflow:connection-set', { segments: step.segments, targets })
+  }
+
+  #lastFitted = ''
+  onNodesRendered(): void {
+    const key = `${this.segments().join('/')}:${this.steps().map(step => step.cell).join('|')}`
+    if (!this.flowCanvas || key === this.#lastFitted) return
+    this.#lastFitted = key
+    this.flowCanvas.fitToScreen({ x: 80, y: 80 }, false, false)
+  }
+
+  fitFlow(): void { this.flowCanvas?.fitToScreen({ x: 80, y: 80 }, true, false) }
+
   /** The step's one-line summary — what it will actually do. */
   summaryOf(step: StateStep): string {
     if (!step.kind) return ''
@@ -340,6 +483,16 @@ export class WorkflowDesignerComponent implements OnDestroy {
     if (step.text) return step.text
     if (step.kind === 'sub') return step.hasChildren ? '' : 'no child tiles yet'
     return ''
+  }
+
+  iconOf(step: StateStep): string {
+    const rows = this.#palette()
+    if (step.kind === 'command') {
+      return rows.find(row => row.kind === 'command' && row.command === step.command)?.icon
+        ?? rows.find(row => row.kind === 'command' && !row.command)?.icon
+        ?? 'terminal'
+    }
+    return rows.find(row => row.kind === step.kind)?.icon ?? (step.kind ? 'bolt' : 'help')
   }
 
   // ── the inspector ─────────────────────────────────────────────────
@@ -377,6 +530,8 @@ export class WorkflowDesignerComponent implements OnDestroy {
         args: this.draftArgs(),
         text: this.draftText(),
         model: this.draftModel(),
+        next: step.next,
+        position: step.position,
       },
     })
   }
@@ -407,7 +562,10 @@ export class WorkflowDesignerComponent implements OnDestroy {
     if (this.#swallowClick) { this.#swallowClick = false; return }
     const step = this.selectedStep()
     if (step) {
-      EffectBus.emit('workflow:step-set', { segments: step.segments, step: seedOf(entry) })
+      EffectBus.emit('workflow:step-set', {
+        segments: step.segments,
+        step: { ...seedOf(entry), next: step.next, position: step.position },
+      })
       return
     }
     EffectBus.emit('workflow:step-add', {
@@ -557,6 +715,12 @@ const seedOf = (entry: PaletteEntry): { kind: string; command?: string } => ({
   kind: entry.kind,
   ...(entry.command ? { command: entry.command } : {}),
 })
+
+const inputId = (cell: string): string => `in:${cell}`
+const outputId = (cell: string): string => `out:${cell}`
+const edgeId = (source: string, target: string): string => `edge:${source}->${target}`
+const cellFromConnector = (id: string, prefix: string): string | undefined =>
+  id.startsWith(prefix) ? id.slice(prefix.length) : undefined
 
 // Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
 // app.html tag (see shell-surface-registry.ts).

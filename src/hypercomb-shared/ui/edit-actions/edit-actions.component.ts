@@ -33,7 +33,7 @@
 // Shell UI: NEVER imports essentials — it reaches the runtime only through
 // window.ioc (the local `get` helper) and EffectBus.
 
-import { Component, type OnDestroy, type OnInit, signal } from '@angular/core'
+import { Component, ElementRef, inject, type AfterViewInit, type OnDestroy, type OnInit, signal } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { ensureViewportInsetVars } from '../../core/viewport-inset-vars'
@@ -60,7 +60,7 @@ type SentinelBridgeLike = { saveBranch?: (name: string) => Promise<string | null
   templateUrl: './edit-actions.component.html',
   styleUrls: ['./edit-actions.component.scss'],
 })
-export class EditActionsComponent implements OnInit, OnDestroy {
+export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
 
   // can-undo: cursor sits above pre-history (something to step back to).
   // can-redo: cursor is rewound (something to step forward to).
@@ -91,6 +91,11 @@ export class EditActionsComponent implements OnInit, OnDestroy {
   // the old FAB owned — now a proper member of the document cluster, left of
   // the rotate icon.
   readonly feedbackOpen = signal(false)
+
+  readonly #host = inject(ElementRef) as ElementRef<HTMLElement>
+
+  /** Watches the cluster's live width — see ngAfterViewInit. */
+  #widthWatch: ResizeObserver | null = null
 
   #cursorUnsub: (() => void) | null = null
   #selectionUnsub: (() => void) | null = null
@@ -136,7 +141,40 @@ export class EditActionsComponent implements OnInit, OnDestroy {
     })
   }
 
+  /**
+   * HOW MUCH BOTTOM-RIGHT CORNER THIS CLUSTER ACTUALLY TAKES, published as
+   * `--hc-actions-width`.
+   *
+   * The pheromone strip runs along the same bottom band from the other side
+   * and has to stop before this cluster. It used to stop 12rem short — a
+   * static guess made when the cluster held two buttons, and wrong in both
+   * directions since: the cluster GROWS (selection verbs, save, feedback,
+   * rotate) and it DISAPPEARS entirely under a full-viewport view. A guess
+   * that is too generous leaves a visible gap between the tags and the
+   * toolwindow beside them; one that is too tight puts tags under the icons.
+   *
+   * So it is measured. `display: none` reports 0, which is the right answer:
+   * a cluster that is not on screen reserves nothing and the tags may run all
+   * the way to whatever the panel left free.
+   */
+  ngAfterViewInit(): void {
+    const cluster = this.#host.nativeElement.querySelector('.edit-actions') as HTMLElement | null
+    if (!cluster || typeof ResizeObserver === 'undefined') return
+    const publish = (): void => {
+      const width = Math.round(cluster.getBoundingClientRect().width)
+      document.documentElement.style.setProperty('--hc-actions-width', `${width}px`)
+    }
+    this.#widthWatch = new ResizeObserver(publish)
+    this.#widthWatch.observe(cluster)
+    publish()
+  }
+
   ngOnDestroy(): void {
+    this.#widthWatch?.disconnect()
+    this.#widthWatch = null
+    // Removed, not zeroed: a consumer's own fallback is a better answer than
+    // "the cluster is 0 wide" once nobody is publishing.
+    document.documentElement.style.removeProperty('--hc-actions-width')
     this.#cursorUnsub?.()
     this.#selectionUnsub?.()
     this.#orientationUnsub?.()

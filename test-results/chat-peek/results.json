@@ -66,17 +66,17 @@
   {
     "name": "folding reserves the header as a TOP inset",
     "ok": true,
-    "detail": "{\"top\":46,\"bottom\":110.234375,\"hostTop\":46,\"hostBottom\":110.234}"
+    "detail": "{\"top\":46,\"bottom\":88.640625,\"hostTop\":46,\"hostBottom\":88.6406}"
   },
   {
     "name": "and the composer as a BOTTOM inset",
     "ok": true,
-    "detail": "{\"top\":46,\"bottom\":110.234375,\"hostTop\":46,\"hostBottom\":110.234}"
+    "detail": "{\"top\":46,\"bottom\":88.640625,\"hostTop\":46,\"hostBottom\":88.6406}"
   },
   {
     "name": "the canvas host is squeezed into the band between them",
     "ok": true,
-    "detail": "{\"top\":46,\"bottom\":110.234375,\"hostTop\":46,\"hostBottom\":110.234}"
+    "detail": "{\"top\":46,\"bottom\":88.640625,\"hostTop\":46,\"hostBottom\":88.6406}"
   },
   {
     "name": "the viewport service is reachable",

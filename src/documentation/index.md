@@ -28,6 +28,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 - [genome-primitive.md](genome-primitive.md) — *(design — concept only)* Recursive Merkle root over subtrees — universal short-circuit for derived computations
 - [collapsed-compute.md](collapsed-compute.md) — Network effect: memoized signatures eliminate redundant computation
 - [deterministic-computation.md](deterministic-computation.md) — Authenticity layer: script + resource → deterministic result
+- [heuristic-signature-library.md](heuristic-signature-library.md) — Background heuristic mining: local repository slice built; hive and swarm result distribution designed
 - [history-sigbag-as-root.md](history-sigbag-as-root.md) — *(design — aspirational)* History sigbag as root: store, discovery, self-heal, and integrity
 - [llm-primitive.md](llm-primitive.md) — Hypergraph primitive connecting signatures through LLM command transforms
 - [group-signatures.md](group-signatures.md) — Group identity as a first-class citizen: sign('group:<meaning>') carried by every member, so a set adds and deletes as one unit

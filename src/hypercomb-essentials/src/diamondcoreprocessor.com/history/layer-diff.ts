@@ -8,6 +8,14 @@
 //   - `children`: membership + order → cell-added / cell-removed /
 //     cells-reordered (kind names retain `cell-*` for continuity with
 //     the renderer/UI, which translates sig deltas to display names).
+//     Membership is compared on IDENTITY, not on the raw entry: a
+//     promoted entry (see meta-record) is a different signature pointing
+//     at the same target, so a raw compare would report "removed X,
+//     added Y" and the trail would fabricate a delete-and-add the first
+//     time an agent said anything about a tile. Identity equal on both
+//     sides with a changed entry signature is `meta-changed` instead —
+//     attached, re-authored, recipients edited — which is a genuinely
+//     different event from the content changing.
 //   - Every other field present on either side: `slot-changed` with
 //     the slot name and before/after values. The history viewer can
 //     render slot diffs generically by slot name, or specialise per

@@ -43,7 +43,7 @@
 import { Drone, EffectBus } from '@hypercomb/core'
 import { canonicalizeLineageSegment } from '../history/lineage-key.js'
 import { listWorkflows, nameWorkflow, readWorkflow } from './workflow-slot.js'
-import { readSteps, writeStep, type WorkflowStep } from './workflow-step.js'
+import { readStep, readSteps, writeStep, type WorkflowStep } from './workflow-step.js'
 import type { WorkflowPaletteEntry, WorkflowStepRegistry } from './workflow-step-registry.js'
 
 /** One step as the panel draws it — the record flattened onto the tile. */
@@ -56,6 +56,8 @@ export interface WorkflowStateStep {
   readonly args?: string
   readonly text?: string
   readonly model?: string
+  readonly next?: readonly string[]
+  readonly position?: Readonly<{ x: number; y: number }>
   readonly hasChildren: boolean
 }
 
@@ -139,6 +141,7 @@ export class WorkflowAuthorDrone extends Drone {
     'workflow:view-open', 'workflow:refresh', 'workflow:changed',
     'workflow:declare', 'workflow:create',
     'workflow:step-add', 'workflow:step-set', 'workflow:step-drop',
+    'workflow:step-move', 'workflow:connection-set',
   ]
   protected override emits = [
     'workflow:state', 'workflow:palette', 'cell:added', 'toast:show',
@@ -164,7 +167,7 @@ export class WorkflowAuthorDrone extends Drone {
     this.#wired = true
 
     this.onEffect('workflow:view-open', () => {
-      this.#schedule(); this.#emitPalette(); void this.#maybeShowSurface()
+      this.#schedule(); this.#emitPalette()
     })
     this.onEffect('workflow:refresh', () => this.#schedule())
     this.onEffect('workflow:changed', () => this.#schedule())
@@ -183,6 +186,12 @@ export class WorkflowAuthorDrone extends Drone {
 
     this.onEffect<{ segments?: readonly string[]; step?: Partial<WorkflowStep> }>(
       'workflow:step-set', (p) => { void this.#setStep(p ?? {}) })
+
+    this.onEffect<{ segments?: readonly string[]; position?: { x?: number; y?: number } }>(
+      'workflow:step-move', (p) => { void this.#moveStep(p ?? {}) })
+
+    this.onEffect<{ segments?: readonly string[]; targets?: readonly string[] }>(
+      'workflow:connection-set', (p) => { void this.#setConnections(p ?? {}) })
 
     this.onEffect<{
       segments?: readonly string[]
@@ -230,39 +239,14 @@ export class WorkflowAuthorDrone extends Drone {
         args: s.step?.args,
         text: s.step?.text,
         model: s.step?.model,
+        next: s.step?.next,
+        position: s.step?.position,
         hasChildren: s.hasChildren,
       })),
       skills,
     })
 
     this.#syncStepIcons(steps.map(s => ({ cell: s.cell, kind: s.step?.kind ?? '' })))
-  }
-
-  /**
-   * Show the workflow SURFACE for this cell — the flow, not the honeycomb.
-   *
-   * A workflow is an ORDER, and a hex grid cannot say order; it says
-   * "siblings", which is true and useless here. So opening the designer on a
-   * workflow switches the render surface, exactly as opening a website does.
-   *
-   * Only ever switches ONTO a workflow cell, and only from the hexagon
-   * surface: someone who has deliberately put the hive in another view (a
-   * website, the tree) has said what they want to look at, and yanking that
-   * away because they opened a panel would be the panel overruling them.
-   */
-  /** Opening the designer on a cell that IS a workflow shows its surface. On
-   *  anything else it does nothing — there is no flow to draw. */
-  async #maybeShowSurface(): Promise<void> {
-    const segments = this.#segments()
-    if (!segments.length) return
-    if (await readWorkflow(segments)) this.#showSurface(segments)
-  }
-
-  #showSurface(segments: readonly string[]): void {
-    const vm = ioc<{ mode?: string; setMode?: (m: string) => void }>('@hypercomb.social/ViewMode')
-    if (!vm?.setMode || !segments.length) return
-    if (vm.mode && vm.mode !== 'hexagons') return
-    vm.setMode('workflow')
   }
 
   /**
@@ -348,7 +332,6 @@ export class WorkflowAuthorDrone extends Drone {
         at: Date.now(),
       })
       this.#toast('success', `"${name}" is a workflow`)
-      this.#showSurface(segments)
     } catch (error) {
       this.#toast('warning', messageOf(error))
     }
@@ -414,6 +397,8 @@ export class WorkflowAuthorDrone extends Drone {
       ...(opts.step?.args ? { args: String(opts.step.args) } : {}),
       ...(opts.step?.text ? { text: String(opts.step.text) } : {}),
       ...(opts.step?.model ? { model: String(opts.step.model) } : {}),
+      ...(Array.isArray(opts.step?.next) ? { next: opts.step.next.map(String) } : {}),
+      ...(validPosition(opts.step?.position) ? { position: opts.step?.position } : {}),
     }
 
     const existing = (await readSteps(workflowSegments)).map(s => s.cell)
@@ -494,9 +479,49 @@ export class WorkflowAuthorDrone extends Drone {
       ...(opts.step?.args ? { args: String(opts.step.args) } : {}),
       ...(opts.step?.text ? { text: String(opts.step.text) } : {}),
       ...(opts.step?.model ? { model: String(opts.step.model) } : {}),
+      ...(Array.isArray(opts.step?.next) ? { next: opts.step.next.map(String) } : {}),
+      ...(validPosition(opts.step?.position) ? { position: opts.step?.position } : {}),
     }
     try {
       await writeStep({ segments, step })
+    } catch (error) {
+      this.#toast('warning', messageOf(error))
+    }
+    this.#schedule()
+  }
+
+  /** Persist a completed node drag without rewriting the step's behaviour. */
+  async #moveStep(opts: {
+    segments?: readonly string[]
+    position?: { x?: number; y?: number }
+  }): Promise<void> {
+    const segments = [...(opts.segments ?? [])]
+    if (!segments.length || !validPosition(opts.position)) return
+    const current = await readStepAt(segments)
+    if (!current) return
+    try {
+      await writeStep({
+        segments,
+        step: { ...current, position: { x: Number(opts.position.x), y: Number(opts.position.y) } },
+      })
+    } catch (error) {
+      this.#toast('warning', messageOf(error))
+    }
+    this.#schedule()
+  }
+
+  /** Replace one step's outgoing graph edges. `[]` means terminal. */
+  async #setConnections(opts: {
+    segments?: readonly string[]
+    targets?: readonly string[]
+  }): Promise<void> {
+    const segments = [...(opts.segments ?? [])]
+    if (!segments.length) return
+    const current = await readStepAt(segments)
+    if (!current) return
+    const targets = [...new Set((opts.targets ?? []).map(String).map(v => v.trim()).filter(Boolean))]
+    try {
+      await writeStep({ segments, step: { ...current, next: targets } })
     } catch (error) {
       this.#toast('warning', messageOf(error))
     }
@@ -521,6 +546,16 @@ function uniqueName(base: string, taken: readonly string[]): string {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? 'failed')
+}
+
+const validPosition = (value: unknown): value is { x: number; y: number } => {
+  const point = value as { x?: unknown; y?: unknown } | null
+  return Number.isFinite(point?.x) && Number.isFinite(point?.y)
+}
+
+async function readStepAt(segments: readonly string[]): Promise<WorkflowStep | null> {
+  const resolved = await readStep(segments)
+  return resolved?.step ?? null
 }
 
 const _workflowAuthor = new WorkflowAuthorDrone()

@@ -1794,9 +1794,9 @@
     },
     {
       "id": "resting-bee-press-opens-the-talk",
-      "title": "Resting bee — a read-only log, and the way to the conversations",
+      "title": "Agent panel — a read-only log with a door to the chat",
       "run": null,
-      "note": "A resting bee had no work-registry record, so agent:open returned in silence. The registry now has a RESTING LANE (rest/resting/find/isResting) beside the work lane — never in list(), so the stall watchdog never sees it — and the bee drone publishes its derivation there. The agent panel opens on either lane. A resting bee's panel is READ-ONLY: no composer, no stop, never full screen. It reads at rest / model / last spoken, the tile, what it is about, and THE LOG — the conversation's blurb (chat-blurb.ts: line + points + how far it read), which the orchestrator's sweep keeps current and which it can come past and read. The corner button, where a working agent has full screen, opens that tile's conversations (mat-sym 'forum' → chat:open). Mirror: note on the agent-bee behaviour tile in the behaviors mirror, write-if-absent. LOOK PASS: the bee's tooltip is three clipped lines — TILE NAME in white (the one bright thing), vendor·model in steel beside it, the state under it, the destination under that; the panel says the tile the same way (white chip) so the thing you pointed at and the thing you are reading are one thing. Head gained a hairline and stacks name over vendor (tier dropped when the name already says it); sections got their own rule; labels recede.",
+      "note": "A resting bee had no work-registry record, so agent:open returned in silence. The registry now has a RESTING LANE (rest/resting/find/isResting) beside the work lane — never in list(), so the stall watchdog never sees it — and the bee drone publishes its derivation there. The agent panel opens on either lane. A resting bee's panel is READ-ONLY: no composer, no stop, never full screen. It reads at rest / model / last spoken, the tile, what it is about, and THE LOG — the conversation's blurb (chat-blurb.ts: line + points + how far it read), which the orchestrator's sweep keeps current and which it can come past and read. The corner button, where a working agent has full screen, opens that tile's conversations (mat-sym 'forum' → chat:open). Mirror: note on the agent-bee behaviour tile in the behaviors mirror, write-if-absent. LOOK PASS: the bee's tooltip is three clipped lines — TILE NAME in white (the one bright thing), vendor·model in steel beside it, the state under it, the destination under that; the panel says the tile the same way (white chip) so the thing you pointed at and the thing you are reading are one thing. Head gained a hairline and stacks name over vendor (tier dropped when the name already says it); sections got their own rule; labels recede. READ-ONLY PASS: the composer is gone from the WHOLE panel (no 'add context while it works', no apply-to-tiles chips, no model chip) — one place to talk to a tile and it is the chat window. With no input, full screen and the panel's tiles rail lost their reason and went with it; the rail still lives in the chat window. Every agent's corner is now the conversations button: a chat bee opens its own thread, anything else opens its TILE's conversation (tileConvoId of segments+target). Stop is the one control left, in its own actions row. DOCKED: the lane model (hypercomb-shared/ui/docked-panel/dock-lanes.ts) is now offered over IoC as '@hypercomb.social/DockLanes' so COLD CHROME can take a place on an edge — the agent panel implements LaneMember structurally (a module may not import shared) and claims the right lane on open, releases on close, reflows on drag-resize. It stacks inboard of the control bar's --hc-controls-right reservation like every other tool window instead of sitting on top of one, slides on a 160ms transition, and a swap keeps its place. Idle is the pill word, not 'at rest'.",
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
@@ -1811,11 +1811,54 @@
       "status": "pending"
     },
     {
+      "id": "chat-answering-designation",
+      "title": "Mirror the chat window's WHO ANSWERS readout: the model selector is retired, the designation (company / model / level of thinking) is reported and the press opens /providers; plus the bridge listener's silent-session handoff (ASK_SESSION_MODEL)",
+      "run": null,
+      "note": "Tiles: chat-answering readout, model-policy designate(), watch-asks handoff. Mark each part; note explains why a picker was a second answer to the same question.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
+    },
+    {
+      "id": "agent-visibility-corner-toggle",
+      "title": "Agent visibility toggle at the command-line/control-rail seam",
+      "run": null,
+      "note": "ControlsBar adds a persistent hide/show agents control tucked below the command line and right of the left rail. It emits render:set-agents-visible; AgentBeeDrone fades sprites and removes hit targets without stopping work. Mirror as a part of behaviors/assistant/agents with source tiles for controls-bar component html/scss/ts and agent-bee.drone.ts. note-add is additive, so drain manually.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
+    },
+    {
+      "id": "chat-rail-resize",
+      "title": "Mirror the chat window's draggable tiles rail: the rail's edge is a handle, one custom property moves both halves, double-click resets, arrows move it",
+      "run": null,
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
+    },
+    {
       "id": "chat-durability",
       "title": "Chat questions are durable until answered — the run outlives the window, the wait is rebuilt from the pool",
       "run": null,
       "note": "Three parts to mirror under behaviors/assistant (chat): (1) host-stream.ts — the module-scope run that stores the turn whether or not a window is alive; (2) chat-thread.ts stream checkpoints (sign('chat:streams')) — the partial written down while it arrives and filed on the next boot; (3) chat-window #recoverWaits — the wait/clock/Stop/bee/tile-busy rebuilt from pending kind:'ask' mode:'chat' records after a reload. One collection, one part tile per source file, marked part; note on each explaining what it protects. Needs a live renderer on the bridge.",
       "created": "2026-08-26",
+      "status": "pending"
+    },
+    {
+      "id": "chat-window-beside-control-bar",
+      "title": "Chat window sits BESIDE the control bar (view:keeps-controls)",
+      "run": null,
+      "note": "The full-screen chat window laid itself out at inset:0 and painted over the docked control bar (bar z 59999, window 100002), so the bar was gone for the length of a conversation and only its edge line (z 100003) came through — a stray vertical rule down the tiles rail. Two parts: (1) .chat-panel now starts at the bar's own reservation on BOTH edges (--hc-controls-left / --hc-controls-right), the same rule hcDockedPanel #position gives every other window; (2) a second owner-counted mode 'view:keeps-controls', entered alongside 'view:active' by the chat window and read by both app shells + ControlsBar, says 'this view left the bar its edge' so the bar is not hidden — and while it is held the rail's band is lifted above the docked-window band (.over-view) and runs to the top of the viewport, because the header it clears is hidden anyway. Mirror owes: tiles for chat-window.component.scss, chat-window.component.ts, controls-bar.component.{ts,html,scss}, app.html/app.ts (dev+web), a collection gathering them, pheromone marks for part/behaviour, and a note carrying this explanation.",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
+    },
+    {
+      "id": "keymap-a-arrange-q-chat",
+      "title": "Mirror the restored A arrange and Q chat shortcuts",
+      "run": null,
+      "note": "Update the keyboard/keymap hive tiles and notes: A and Shift+A cycle arrangements, Q toggles chat, and Q no longer invokes the quick menu.",
+      "created": "2026-08-27",
       "status": "pending"
     }
   ]
