@@ -155,10 +155,13 @@ describe('incremental drain', () => {
     EffectBus.emit('content:wrote', { sig: drainedSig, bytes: drained.buffer as ArrayBuffer })
     await vi.advanceTimersByTimeAsync(20_000)
 
-    const after = JSON.parse(new TextDecoder().decode(
-      await read(chosen, `.hypercomb/devices/${deviceId}/manifest.json`),
-    ))
-    expect(after.files[drainedSig]).toBeDefined()
+    let after: any
+    await vi.waitFor(async () => {
+      after = JSON.parse(new TextDecoder().decode(
+        await read(chosen, `.hypercomb/devices/${deviceId}/manifest.json`),
+      ))
+      expect(after.files[drainedSig]).toBeDefined()
+    })
     // A drain only ADDS bytes. Restating these erased the record of what was
     // missing and silently dropped the snapshot below the import bar.
     expect(after.closure).toEqual(before.closure)
