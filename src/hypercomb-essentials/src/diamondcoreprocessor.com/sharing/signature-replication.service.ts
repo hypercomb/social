@@ -24,6 +24,19 @@ export type ReplicationRequest = {
   inventory?: boolean
 }
 
+export type ReplicationStatus = {
+  state: 'running' | 'complete' | 'failed'
+  signature: string
+  total?: number
+  present?: number
+  fetched?: number
+  held?: string[]
+  holes?: string[]
+  refused?: string[]
+  limited?: boolean
+  error?: string
+}
+
 type DomainState = { receipts: Set<string>; etag: string | null; updatedAt: string | null }
 
 export class SignatureReplicationService {
@@ -69,6 +82,17 @@ export class SignatureReplicationService {
       state.updatedAt = document.updatedAt
       this.#domains.set(base, state)
       return this.#document(state, document.revision)
+    } catch { return null }
+  }
+
+  public readonly status = async (domain: string, signature: string): Promise<ReplicationStatus | null> => {
+    if (!SIG_RE.test(signature)) return null
+    const url = `${this.#base(domain)}/replicate/${signature}`
+    const auth = await this.#nip98(url, 'GET')
+    if (!auth) return null
+    try {
+      const response = await fetch(url, { headers: { Authorization: auth }, cache: 'no-store' })
+      return response.ok ? await response.json() as ReplicationStatus : null
     } catch { return null }
   }
 

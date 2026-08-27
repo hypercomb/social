@@ -29,7 +29,7 @@ import { WebSocketServer } from 'ws'
 import { verifyEvent } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
 import { verifyNip98 } from './http-auth.js'
-import { contentDirectoryIO, parseReplicationRequest, resolveSignatureClosure } from './replicate.js'
+import { contentDirectoryIO, parseReplicationRequest, resolveSignatureClosure, resolveSignatureInventory } from './replicate.js'
 import { ReceiptIndex } from './receipt-index.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -725,6 +725,12 @@ function verifyWriteAuth(req) {
 }
 
 const replicationJobs = new Map()
+const replicationResults = new Map()
+function setReplicationResult(key, value) {
+  replicationResults.delete(key)
+  replicationResults.set(key, value)
+  while (replicationResults.size > 1000) replicationResults.delete(replicationResults.keys().next().value)
+}
 
 function readRequestBody(req, res, maxBytes, done) {
   const chunks = []
@@ -752,18 +758,38 @@ function tryReplicate(req, res) {
     const key = `${auth.pubkey}:${request.signature}`
     const existing = replicationJobs.get(key)
     if (!existing) {
-      const job = resolveSignatureClosure(request.signature, contentDirectoryIO(cfg.contentDir, request.sources, resolveFlatSig), { limit: request.limit })
+      const resolver = request.inventory ? resolveSignatureInventory : resolveSignatureClosure
+      setReplicationResult(key, { state: 'running', signature: request.signature, startedAt: new Date().toISOString() })
+      const job = resolver(request.signature, contentDirectoryIO(cfg.contentDir, request.sources, resolveFlatSig), { limit: request.limit })
         .then(result => {
           receiptIndex.add(auth.pubkey, result.held)
+          setReplicationResult(key, { state: 'complete', completedAt: new Date().toISOString(), ...result })
           console.log(`[replicate] ${auth.pubkey.slice(0, 8)}… ${request.signature.slice(0, 12)}… fetched=${result.fetched} present=${result.present} holes=${result.holes.length} refused=${result.refused.length}${result.limited ? ' limited' : ''}`)
         })
-        .catch(error => console.error('[replicate] job failed:', error?.message || error))
+        .catch(error => {
+          setReplicationResult(key, { state: 'failed', signature: request.signature, completedAt: new Date().toISOString(), error: String(error?.message || error) })
+          console.error('[replicate] job failed:', error?.message || error)
+        })
         .finally(() => replicationJobs.delete(key))
       replicationJobs.set(key, job)
     }
     res.writeHead(202, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' })
     res.end(JSON.stringify({ accepted: true, signature: request.signature, running: !!existing }))
   })
+  return true
+}
+
+function tryServeReplicationStatus(req, res) {
+  if (req.method !== 'GET') return false
+  const match = (req.url || '').split('?')[0].match(/^\/replicate\/([a-f0-9]{64})$/)
+  if (!match) return false
+  const auth = verifyNip98(req, writers, { devOpen: cfg.devOpenWrites })
+  if (!auth.ok) { respondText(res, 401, auth.reason); return true }
+  const result = replicationResults.get(`${auth.pubkey}:${match[1]}`)
+  if (!result) { respondText(res, 404, 'replication job not found'); return true }
+  const body = JSON.stringify(result)
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(body)), 'Cache-Control': 'private, no-store', 'Access-Control-Allow-Origin': '*', Vary: 'Authorization' })
+  res.end(body)
   return true
 }
 
@@ -939,6 +965,9 @@ const server = createServer((req, res) => {
     res.end(JSON.stringify(relayInfo))
     return
   }
+
+  // Authenticated job status must precede the generic typed-path fallback.
+  if (tryServeReplicationStatus(req, res)) return
 
   // Read side: GET/HEAD/OPTIONS content serving (returns true if handled)
   if (tryServeContent(req, res)) return

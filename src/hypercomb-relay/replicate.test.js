@@ -8,6 +8,7 @@ import {
   contentDirectoryIO,
   parseReplicationRequest,
   resolveSignatureClosure,
+  resolveSignatureInventory,
 } from './replicate.js'
 
 const sig = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -84,4 +85,24 @@ test('rejects credential-bearing source URLs', () => {
     signature: 'a'.repeat(64),
     sources: ['https://secret@example.test'],
   }), /credentials/)
+})
+
+test('active inventory fetches exact atoms without walking stale child references', async () => {
+  const current = Buffer.from('current')
+  const currentSig = sig(current)
+  const stale = Buffer.from('stale')
+  const staleSig = sig(stale)
+  const layer = Buffer.from(JSON.stringify({ child: staleSig }))
+  const layerSig = sig(layer)
+  const record = Buffer.from(JSON.stringify({ heads: [{ layer: layerSig }], objects: [{ sig: currentSig }] }))
+  const root = sig(record)
+  const source = new Map([[root, record], [layerSig, layer], [currentSig, current], [staleSig, stale]])
+  const held = new Map()
+  const result = await resolveSignatureInventory(root, {
+    fetch: async signature => source.get(signature) ?? null,
+    read: async signature => held.get(signature) ?? null,
+    write: async (signature, bytes) => held.set(signature, bytes),
+  })
+  assert.deepEqual(new Set(result.held), new Set([root, layerSig, currentSig]))
+  assert.equal(held.has(staleSig), false)
 })
