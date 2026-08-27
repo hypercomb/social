@@ -115,9 +115,23 @@ export class SnapshotQueenBee extends QueenBee {
       seal = await history.sealSubtree([])
     }
     if (!seal || !SIG_RE.test(seal)) {
+      const failure = history.lastSealFailure
+      const path = failure ? `/${failure.path.join('/')}` : ''
+      const signature = failure?.signature ? ` [${failure.signature.slice(0, 12)}]` : ''
+      const reason = failure
+        ? ({
+            'invalid-location': 'the location could not be signed',
+            'head-unresolvable': 'its current layer head is unavailable',
+            'child-unresolvable': 'a referenced child layer is unavailable',
+            'child-name-missing': 'a referenced child has no location name',
+            cycle: 'the layer graph contains a content cycle',
+          } as const)[failure.reason]
+        : ''
       this.#toast('error', this.#t(i18n, 'snapshot.title', 'Snapshot'),
-        this.#t(i18n, 'snapshot.seal-failed',
-          'The hive could not be sealed (a tile is cold or unresolvable) — visit it once, then run /snapshot again.'))
+        failure
+          ? `The hive could not be sealed at ${path || '/'}: ${reason}${signature}. The update was not applied.`
+          : this.#t(i18n, 'snapshot.seal-failed',
+            'The hive could not be sealed because its signed layer closure is incomplete. The update was not applied.'))
       return false
     }
 
