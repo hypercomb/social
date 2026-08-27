@@ -56,6 +56,7 @@ import { Store } from '@hypercomb/shared'
 import { PACKED_STORE_MEANING } from '@hypercomb/shared/core/packed-store-engine'
 import { packedStoreBlocksBoot } from '@hypercomb/shared/core/packed-store-gate'
 import { ensureInstall, opfsWritable, resyncFromSentinel, upgradeFromBundled, type BootStatus } from './setup/ensure-install'
+import './setup/install-prompt.element'
 import { initSentinel, type SentinelBridge } from './setup/sentinel-bridge'
 import { cacheImportMap, IMPORT_MAP_STORAGE_KEY, resolveImportMap } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
@@ -164,7 +165,7 @@ const bootstrap = async (): Promise<void> => {
 
   // The real 'hypercomb:start-install' handler registers at the END of
   // bootstrap, after Angular is up. An early dispatch — the native shell's
-  // auto-install fires from the App constructor, DURING Angular bootstrap —
+  // auto-install fires when hc-install-prompt connects DURING Angular bootstrap —
   // lands before that handler exists and is silently lost, leaving the card
   // on "Starting…" forever. (A human click seconds later never hits this,
   // which is why the web shell never saw it.) Catch the early dispatch here

@@ -531,7 +531,11 @@ tag becomes an ordinary element surface.
   shell property/CustomEvent wiring without Angular. Focus and selection APIs,
   keyboard completion navigation, mobile visibility and the view/tool rail stay
   intact.
-- [ ] Web's install prompt — folds into the Phase 4 installer story
+- [x] ~~Web's install prompt~~ — now a framework-free, registry-fed surface
+  colocated with `ensure-install`; its boot/progress/i18n/native-auto-install,
+  explicit-upgrade and update-check lifecycle no longer belongs to Angular.
+  It moves with the acquisition code when the pinned bootstrap bundle is
+  carved in Phase 4.
 - [ ] End of phase: both `app.html` files contain `<hc-shell-surfaces>` and
   nothing else; the "structural chrome" ratchet allowlist reaches zero.
 
@@ -570,7 +574,8 @@ owns everything acquisition:
   the web shell into one sig-addressed bootstrap bundle
 - [ ] Move `layer-installer` (302), the three `layer-install-sources`,
   `install-monitor` into it
-- [ ] The install prompt UI (from Phase 3) becomes this bee's surface
+- [ ] The install prompt UI is already an element-shaped installer surface;
+  include it in this bee's signed bundle when the acquisition code moves
 - [ ] Shim keeps only: SW registration/control, the pinned-sig fetch path,
   and the packed-store one-way-door gate (it must run before any Store use —
   keep it to the smallest possible check)

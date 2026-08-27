@@ -205,6 +205,51 @@ async function main() {
       && surfaceHost.stable && surfaceHost.removed,
     JSON.stringify(surfaceHost))
 
+  const installerSurface = await page.evaluate(async () => {
+    const bus = window.__hypercombEffectBus
+    const registry = window.ioc?.get?.('@hypercomb.social/ShellSurfaceRegistry')
+    const prompt = document.querySelector('hc-install-prompt')
+    const expected = document.title === 'Hypercomb'
+    if (!bus || !registry || !prompt) return {
+      expected,
+      defined: !!customElements.get('hc-install-prompt'),
+      registered: !!registry?.all?.().some(surface => surface.name === 'hc-install-prompt'),
+      mounted: !!prompt,
+    }
+    bus.emit('boot:status', { kind: 'install-needed', reason: 'no-sentinel' })
+    const start = !!prompt.querySelector('.install-cta')
+    // Put the surface into its real Starting state without allowing the
+    // headless gate to launch an install. Capture runs before main.ts's
+    // bubble listener for the event dispatched at window.
+    window.addEventListener('hypercomb:start-install', event => {
+      event.stopImmediatePropagation()
+    }, { capture: true, once: true })
+    prompt.querySelector('.install-cta')?.click()
+    bus.emit('install:sync', {
+      active: true, source: 'gate', phase: 'dependencies', current: 2, total: 5,
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    const result = {
+      expected,
+      defined: customElements.get('hc-install-prompt') === prompt.constructor,
+      registered: registry.all().some(surface =>
+        surface.name === 'hc-install-prompt' && surface.element === 'hc-install-prompt'),
+      mounted: true,
+      dialog: !!prompt.querySelector('[role="dialog"]'),
+      start,
+      progress: prompt.textContent.includes('gate · dependencies 2/5'),
+    }
+    bus.emit('install:sync', { active: false, source: 'gate' })
+    bus.emit('boot:status', { kind: 'cached' })
+    return result
+  })
+  check('converted chrome: web installer prompt is registry-fed when that shell is loaded',
+    !installerSurface.expected || (
+      installerSurface.defined && installerSurface.registered && installerSurface.mounted
+        && installerSurface.dialog && installerSurface.start && installerSurface.progress
+    ),
+    JSON.stringify(installerSurface))
+
   const pinRail = await page.evaluate(() => ({
     defined: !!customElements.get('hc-pinned-entrances'),
     mounted: !!document.querySelector('hc-pinned-entrances'),
