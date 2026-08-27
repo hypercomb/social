@@ -133,9 +133,11 @@ const compileStyles = async production => {
   }).css)
   const css = parts.join('\n')
   const name = 'styles.css'
-  const integrity = `sha256-${createHash('sha256').update(css).digest('base64')}`
+  const digest = createHash('sha256').update(css).digest()
+  const integrity = `sha256-${digest.toString('base64')}`
+  const version = digest.toString('hex').slice(0, 16)
   await writeFile(join(OUTPUT_ROOT, name), css, 'utf8')
-  return { name, integrity }
+  return { name, integrity, version }
 }
 
 const findMainOutput = metafile => {
@@ -146,15 +148,15 @@ const findMainOutput = metafile => {
   throw new Error('esbuild did not report a main entry output')
 }
 
-const writeIndex = async ({ mainName, styleName, styleIntegrity }) => {
+const writeIndex = async ({ mainName, mainVersion, styleName, styleIntegrity, styleVersion }) => {
   let html = await readFile(join(WEB_ROOT, 'src', 'index.html'), 'utf8')
   html = html.replace(
     '</head>',
-    `    <link rel="stylesheet" href="/${styleName}" integrity="${styleIntegrity}" />\n  </head>`,
+    `    <link rel="stylesheet" href="/${styleName}?v=${styleVersion}" integrity="${styleIntegrity}" />\n  </head>`,
   )
   html = html.replace(
     '</body>',
-    `    <script type="module" src="/${mainName}"></script>\n  </body>`,
+    `    <script type="module" src="/${mainName}?v=${mainVersion}"></script>\n  </body>`,
   )
   await writeFile(join(OUTPUT_ROOT, 'index.html'), html, 'utf8')
 }
@@ -225,9 +227,13 @@ export const buildWeb = async ({
     tsconfig: TSCONFIG,
   })
 
-  const { name: styleName, integrity: styleIntegrity } = await compileStyles(production)
+  const { name: styleName, integrity: styleIntegrity, version: styleVersion } = await compileStyles(production)
   const mainName = findMainOutput(result.metafile)
-  await writeIndex({ mainName, styleName, styleIntegrity })
+  const mainVersion = createHash('sha256')
+    .update(await readFile(join(OUTPUT_ROOT, mainName)))
+    .digest('hex')
+    .slice(0, 16)
+  await writeIndex({ mainName, mainVersion, styleName, styleIntegrity, styleVersion })
 
   const mainStats = await stat(join(OUTPUT_ROOT, mainName))
   const styleStats = await stat(join(OUTPUT_ROOT, styleName))
