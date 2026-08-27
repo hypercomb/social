@@ -11,8 +11,12 @@
 //
 // So: count the round trips.
 
-import { describe, expect, it } from 'vitest'
-import { NativeRootDirectory, type NativeBridge } from './native-filesystem'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  installSwBytesBridge,
+  NativeRootDirectory,
+  type NativeBridge,
+} from './native-filesystem.ts'
 
 /** A bridge that records every command, with a pool of `size` members. */
 const bridgeWith = (size: number) => {
@@ -39,6 +43,37 @@ const bridgeWith = (size: number) => {
 }
 
 const SIG = 'a'.repeat(64)
+
+afterEach(() => {
+  Reflect.deleteProperty(navigator, 'serviceWorker')
+})
+
+describe('service-worker bytes bridge capability', () => {
+  it('advertises to the current and ready workers and after controller changes', async () => {
+    const currentPost = vi.fn()
+    const activePost = vi.fn()
+    const listeners = new Map<string, EventListener>()
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      value: {
+        controller: { postMessage: currentPost },
+        ready: Promise.resolve({ active: { postMessage: activePost } }),
+        addEventListener: vi.fn((type: string, listener: EventListener) => listeners.set(type, listener)),
+      },
+    })
+    const bridge: NativeBridge = { invoke: async () => null }
+
+    expect(navigator.serviceWorker.controller?.postMessage).toBe(currentPost)
+    expect(installSwBytesBridge(bridge)).toBe(true)
+    await Promise.resolve()
+
+    expect(currentPost).toHaveBeenCalledWith({ type: 'hc:bytes-bridge', active: true })
+    expect(activePost).toHaveBeenCalledWith({ type: 'hc:bytes-bridge', active: true })
+
+    listeners.get('controllerchange')?.(new Event('controllerchange'))
+    expect(currentPost).toHaveBeenCalledTimes(2)
+  })
+})
 
 describe('native filesystem facade: lookups must not list', () => {
   it('reads one member without enumerating the directory', async () => {

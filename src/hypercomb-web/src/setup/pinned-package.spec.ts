@@ -9,6 +9,7 @@ const SIG_C = 'c'.repeat(64)
 const descriptor = {
   version: 1 as const,
   packageSig: SIG_A,
+  acquisition: SIG_C,
   layers: [SIG_A],
   bees: [SIG_B],
   dependencies: [SIG_C],

@@ -55,14 +55,15 @@ import { EffectBus } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared'
 import { PACKED_STORE_MEANING } from '@hypercomb/shared/core/packed-store-engine'
 import { packedStoreBlocksBoot } from '@hypercomb/shared/core/packed-store-gate'
-import { ensureInstall, opfsWritable, resyncFromSentinel, upgradeFromBundled, type BootStatus } from './setup/ensure-install'
-import './setup/install-prompt.element'
-import { initSentinel, type SentinelBridge } from './setup/sentinel-bridge'
+import { fetchPinnedPackage } from './setup/pinned-package'
+import type { BootStatus } from './setup/ensure-install'
+import type { SentinelBridge } from './setup/sentinel-bridge'
 import { cacheImportMap, IMPORT_MAP_STORAGE_KEY, resolveImportMap } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
 import { App } from './app/app'
 import {
   DependencyLoader,
+  importSignatureModule,
   initializeRuntime,
   protectOriginStorage,
 } from '@hypercomb/shared/core'
@@ -70,6 +71,21 @@ import { postCommunityDomainsToServiceWorker } from '@hypercomb/shared/core/sw-d
 
 // Ensure side-effect registration
 const _deps = [DependencyLoader]
+type AcquisitionModule = typeof import('./setup/acquisition-bootstrap')
+
+const loadAcquisition = async (): Promise<AcquisitionModule> => {
+  const pinned = await fetchPinnedPackage()
+  if (pinned.status === 'absent') {
+    console.warn('[main] bootstrap pin absent — using the bounded legacy acquisition chunk')
+    return import('./setup/acquisition-bootstrap')
+  }
+  if (pinned.status === 'invalid') {
+    throw new Error(`bootstrap pin rejected: ${pinned.reason}`)
+  }
+  const poolSignature = await Store.poolSignature('dependencies')
+  const loaded = await importSignatureModule(poolSignature, pinned.package.acquisition)
+  return loaded as AcquisitionModule
+}
 
 const ensureSwControl = async (): Promise<void> => {
   if (!('serviceWorker' in navigator)) return
@@ -83,24 +99,33 @@ const ensureSwControl = async (): Promise<void> => {
   await navigator.serviceWorker.register('/hypercomb.worker.js' + (swV ? '?v=' + swV : ''), { scope: '/' })
   const reg = await navigator.serviceWorker.ready
 
-  if (navigator.serviceWorker.controller) return
+  const reloadGuard = 'hc:sw-control-reload'
+  if (navigator.serviceWorker.controller) {
+    try { sessionStorage.removeItem(reloadGuard) } catch {}
+    return
+  }
 
-  // Uncontrolled page + active worker + nothing installing/waiting is the
-  // HARD-RELOAD state: clients.claim() ran long ago, controllerchange can
-  // never fire, and the page stays uncontrolled for its lifetime no
-  // matter how long we wait — this gate used to stall every hard reload
-  // the full 3s for nothing. Nothing on the first-tiles path needs page
-  // control (the SW's /@resource/ route serves embedded-site composition
-  // only), so proceed immediately.
-  if (reg.active && !reg.installing && !reg.waiting) return
-
-  // A worker IS installing/waiting (first visit / worker update):
-  // clients.claim() fires controllerchange sub-second — wait for it,
-  // briefly.
+  // The acquisition bundle itself now arrives through `/opfs/<pool>/<sig>`,
+  // so page control is a real boot invariant rather than an optional resource
+  // optimization. A newly activating worker normally claims within this
+  // window. An already-active worker cannot retroactively claim a page that
+  // navigated uncontrolled, so reload once and let the next navigation start
+  // under it; the guard converts a genuinely broken registration into an
+  // explicit failure instead of an infinite loop.
   await new Promise<void>(resolve => {
     navigator.serviceWorker.addEventListener('controllerchange', () => resolve(), { once: true })
     setTimeout(resolve, 1500)
   })
+  if (navigator.serviceWorker.controller) {
+    try { sessionStorage.removeItem(reloadGuard) } catch {}
+    return
+  }
+  let alreadyReloaded = false
+  try { alreadyReloaded = sessionStorage.getItem(reloadGuard) === 'true' } catch {}
+  if (alreadyReloaded) throw new Error('service worker did not take control after the bootstrap reload')
+  try { sessionStorage.setItem(reloadGuard, 'true') } catch {}
+  location.reload()
+  await new Promise<never>(() => {})
 }
 
 // Current content modules embed exact OPFS signature URLs and require no
@@ -187,28 +212,21 @@ const bootstrap = async (): Promise<void> => {
   // trusted interaction (Firefox may prompt; Chromium/Safari decide silently).
   void protectOriginStorage()
 
-  // SW readiness runs OVERLAPPED with the install chain instead of gating it.
-  // ensureSwControl can block up to 1500ms waiting for controllerchange on a
-  // first visit / worker update, and nothing in ensureInstall → attachImportMap
-  // → loader.load() depends on page control (the SW's /@resource/ route serves
-  // embedded-site composition only — see ensureSwControl's hard-reload note;
-  // every hard reload already boots fully uncontrolled). Relative order INSIDE
-  // the chain is preserved: domains are posted only after control is ensured,
-  // so the message reaches the controlling/active worker as before. The chain
-  // is awaited below, before bootstrapApplication, so the end state at first
-  // paint is unchanged.
-  const swChain = (async () => {
-    await ensureSwControl()
-    // Hand the service worker the host domains (self + community) so an
-    // embedded-site /@resource/<sig> request can stream from a host on an OPFS
-    // miss. The SW has no localStorage/IoC, so the page must post them.
-    await postCommunityDomainsToServiceWorker()
-    ;(window as any).__hcBoot('ensureSwControl + sw-domains done')
-  })()
-  // Keep a handler attached from the start so a rejection during the install
-  // overlap can't surface as an unhandledrejection; the real `await swChain`
-  // below rethrows it, preserving the serial chain's abort-boot semantics.
-  swChain.catch(() => {})
+  // The first executable thing behind the mutable deployment pin is an exact
+  // `/opfs/<pool>/<sig>` import, so SW control precedes package discovery.
+  await ensureSwControl()
+  await postCommunityDomainsToServiceWorker()
+  ;(window as any).__hcBoot('ensureSwControl + sw-domains done')
+
+  const acquisition = await loadAcquisition()
+  const {
+    ensureInstall,
+    initSentinel,
+    opfsWritable,
+    resyncFromSentinel,
+    upgradeFromBundled,
+  } = acquisition
+  ;(window as any).__hcBoot('signed acquisition bootstrap loaded')
 
   // Push-only contract: NO DCP iframe is mounted at boot. Boot reads
   // OPFS only. The sentinel bridge is created lazily on the first
@@ -247,12 +265,6 @@ const bootstrap = async (): Promise<void> => {
   // web didn't, which is why the error showed on 4200 but not 4250.
   await initializeRuntime({ logOpfs: false })
   ;(window as any).__hcBoot('initializeRuntime done')
-
-  // Join the overlapped SW chain before Angular boots: same guarantee as the
-  // old serial order (SW controlled + domains posted before first paint), and
-  // a failure aborts boot exactly like it did when the chain was awaited
-  // up top (rethrows into bootstrap().catch).
-  await swChain
 
   const appRef = await bootstrapApplication(App, appConfig)
   ;(window as any).__hcBoot('bootstrapApplication done (Angular first paint)')

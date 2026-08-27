@@ -64,6 +64,14 @@ const PLATFORM_MODULE_FILES = {
   '@hypercomb/core': CORE_DIST,
   'pixi.js': resolve(PROJECT_ROOT, '..', 'hypercomb-web', 'public', 'vendor', 'pixi.runtime.js'),
 } as const
+const ACQUISITION_BOOTSTRAP_ENTRY = resolve(
+  PROJECT_ROOT,
+  '..',
+  'hypercomb-web',
+  'src',
+  'setup',
+  'acquisition-bootstrap.ts',
+)
 
 // hard rule: never generate @<domain> root aggregator
 const EMIT_DOMAIN_ROOT_NAMESPACE = false
@@ -154,11 +162,16 @@ interface BeeDepCacheEntry {
 // bootstrap pin. This changes the required output set without changing module
 // inputs, so old caches must rebuild once rather than early-exit without the
 // pin and descriptor.
+//
+// version 9 = the acquisition boundary is a signed dependency leaf named by
+// the descriptor. Its signature participates in the cache root even though
+// its sources live in the web setup directory rather than essentials/src.
 interface BuildCache {
-  version: 8
+  version: 9
   rootHash: string                            // Merkle root of all unit hashes
   rootLayerSig: string                        // last output root signature
   platformFingerprint: string                 // core + pixi content identities
+  acquisitionSignature: string                // signed installer/bootstrap bundle
   namespaces: Record<string, UnitCache>
   bees: Record<string, UnitCache>
   layerCache?: Record<string, LayerCacheEntry>
@@ -172,7 +185,7 @@ const OUTPUT_CACHE_DIR = join(DIST_ROOT, '.cache')
 const loadCache = (): BuildCache | null => {
   try {
     const raw = JSON.parse(readFileSync(CACHE_FILE, 'utf8'))
-    if (raw?.version === 8) return raw
+    if (raw?.version === 9) return raw
   } catch {}
   return null
 }
@@ -811,6 +824,36 @@ const buildBee = async (
   return { bytes: textToBytes(compiled), inputs }
 }
 
+/** Build the privileged acquisition boundary as one immutable dependency.
+ *  Shared shell state is reached through IoC; only the import-free core
+ *  runtime remains external and is rewritten to its exact OPFS signature. */
+const buildAcquisitionBootstrap = async (
+  platform: PlatformRuntime,
+): Promise<{ sig: string; bytes: Uint8Array }> => {
+  const r = await build({
+    entryPoints: [ACQUISITION_BOOTSTRAP_ENTRY],
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    write: false,
+    target: TARGET,
+    sourcemap: false,
+    tsconfig: resolve(PROJECT_ROOT, '..', 'hypercomb-web', 'tsconfig.app.json'),
+    plugins: [signatureExternalPlugin(platform.poolSignature, platform.signatures)],
+  })
+  const compiled = r.outputFiles?.[0]?.text
+  if (!compiled) throw new Error('no output: acquisition bootstrap')
+  if (compiled.includes('@angular/')) throw new Error('acquisition bootstrap retained an Angular import')
+  if (/\bfrom\s*["']@hypercomb\//.test(compiled) || /\bimport\s*["']@hypercomb\//.test(compiled)) {
+    throw new Error('acquisition bootstrap retained a bare Hypercomb import')
+  }
+  // An empty metadata line keeps old flat alias scans from mistaking an
+  // esbuild comment for a dependency alias. Current packages use the bag.
+  const bytes = textToBytes(`//\n${compiled}`)
+  const sig = await SignatureService.sign(toArrayBuffer(bytes))
+  return { sig, bytes }
+}
+
 // -------------------------------------------------
 // main
 // -------------------------------------------------
@@ -830,6 +873,8 @@ const main = async (): Promise<void> => {
     `[build-module] platform: core=${platform.signatures['@hypercomb/core'].slice(0, 12)} ` +
     `pixi=${platform.signatures['pixi.js'].slice(0, 12)}`,
   )
+  const acquisition = await buildAcquisitionBootstrap(platform)
+  console.log(`[build-module] acquisition bootstrap=${acquisition.sig.slice(0, 12)}`)
 
   // --- Phase 1: Merkle tree mtime scan (cheap: stat only, no file reads) ---
 
@@ -858,7 +903,9 @@ const main = async (): Promise<void> => {
   const beeSources = sources.filter(s => s.kind === 'bee')
 
   // Quick mtime scan: check if ANY file has a changed mtime
-  let anyMtimeChanged = !cache || cache.platformFingerprint !== platform.fingerprint
+  let anyMtimeChanged = !cache
+    || cache.platformFingerprint !== platform.fingerprint
+    || cache.acquisitionSignature !== acquisition.sig
   if (cache && !anyMtimeChanged) {
     // Check namespace files
     for (const ns of allNs) {
@@ -1005,9 +1052,12 @@ const main = async (): Promise<void> => {
   for (const [signature, bytes] of platform.bytesBySignature) {
     dependencyBytes.set(signature, bytes)
   }
+  dependencyBytes.set(acquisition.sig, acquisition.bytes)
   const rootDependencies = uniqSorted(Array.from(dependencyBytes.keys()).map(jsFileName))
   const dependencySigs = Array.from(dependencyBytes.keys()).sort((a, b) => a.localeCompare(b))
-  console.log(`[build-module] packaged ${platform.bytesBySignature.size} signature-addressed platform modules`)
+  console.log(
+    `[build-module] packaged ${platform.bytesBySignature.size} signature-addressed platform modules + acquisition bootstrap`,
+  )
 
   // pre-extract docs from ALL source files that extend Bee/Drone/Worker/QueenBee
   // beeline: cache doc extraction by file content signature
@@ -1284,6 +1334,7 @@ const main = async (): Promise<void> => {
   const packageDescriptor = {
     version: 1,
     packageSig: rootLayerSig,
+    acquisition: acquisition.sig,
     layers: Array.from(layers.keys()).sort((a, b) => a.localeCompare(b)),
     bees: Array.from(resourceBytes.keys()).sort((a, b) => a.localeCompare(b)),
     dependencies: dependencySigs,
@@ -1411,10 +1462,11 @@ const main = async (): Promise<void> => {
 
   const rootHash = await computeRootHash(allUnitSigs)
   saveCache({
-    version: 8,
+    version: 9,
     rootHash,
     rootLayerSig,
     platformFingerprint: platform.fingerprint,
+    acquisitionSignature: acquisition.sig,
     namespaces: newNamespaces,
     bees: newBees,
     layerCache: newLayerCache,

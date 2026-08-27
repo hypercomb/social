@@ -79,6 +79,20 @@ type ModuleFallback = {
   ): Promise<{ buf: ArrayBuffer } | null>
 }
 
+type ClientBytesBridge = {
+  bridgeClientIds: Set<string>
+  askClientBytes(kind: string, dir: string, name: string): Promise<File | null>
+}
+
+const loadClientBytesBridge = async (): Promise<ClientBytesBridge> => await import(
+  'data:text/javascript,' + encodeURIComponent(
+    'const BYTES_BRIDGE_CLIENT_IDS = new Set()\n'
+    + 'let BYTES_BRIDGE_CLIENT_IDS_LOADED = true\n'
+    + `${lift('askClientBytes')}\n`
+    + 'export { BYTES_BRIDGE_CLIENT_IDS as bridgeClientIds, askClientBytes }',
+  )
+) as ClientBytesBridge
+
 const loadModuleFallback = async (): Promise<ModuleFallback> => await import(
   'data:text/javascript,' + encodeURIComponent(
     `${lift('sha256Hex')}\n${lift('moduleHostPaths', false)}\n`
@@ -152,6 +166,45 @@ describe('signature module network fallback', () => {
     expect(source).toContain('await writeModuleToOpfs(dirNames[0], sig, fetched.buf)')
     expect(source.indexOf('const fetched = await fetchSignedModuleFromHosts(sig, kind)'))
       .toBeLessThan(source.indexOf("return new Response('module not found', { status: 404 })"))
+  })
+})
+
+describe('service-worker client bytes bridge', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('does not wait on or message clients that never advertised a bridge', async () => {
+    const postMessage = vi.fn()
+    const matchAll = vi.fn(async () => [{ id: 'plain-web', postMessage }])
+    vi.stubGlobal('self', { clients: { matchAll } })
+
+    const bridge = await loadClientBytesBridge()
+    await expect(bridge.askClientBytes('dir', 'pool', 'missing')).resolves.toBeNull()
+
+    expect(matchAll).toHaveBeenCalledOnce()
+    expect(postMessage).not.toHaveBeenCalled()
+  })
+
+  it('keeps the native timeout path for an explicitly advertised client', async () => {
+    const postMessage = vi.fn((_message: unknown, ports: MessagePort[]) => {
+      ports[0].postMessage({ bytes: null })
+    })
+    vi.stubGlobal('self', {
+      clients: { matchAll: async () => [{ id: 'native-shell', postMessage }] },
+    })
+
+    const bridge = await loadClientBytesBridge()
+    bridge.bridgeClientIds.add('native-shell')
+    await expect(bridge.askClientBytes('content', 'a'.repeat(64), '')).resolves.toBeNull()
+
+    expect(postMessage).toHaveBeenCalledOnce()
+  })
+
+  it('registers page bridge capability by service-worker client id', () => {
+    expect(source).toContain("const SW_BYTES_BRIDGE_MSG = 'hc:bytes-bridge'")
+    expect(source).toContain('BYTES_BRIDGE_CLIENT_IDS.add(clientId)')
+    expect(source).toContain('clients.filter(client => BYTES_BRIDGE_CLIENT_IDS.has(client.id))')
+    expect(source).toContain('for (const clientId of await loadBytesBridgeClientIds())')
+    expect(source).toContain('event.waitUntil(persisted)')
   })
 })
 

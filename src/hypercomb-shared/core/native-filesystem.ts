@@ -737,8 +737,8 @@ export const nativeRoot = (): NativeRootDirectory | null => {
  *                                     `.json` suffix is the frozen URL shape)
  *               <64-hex>            → that sig-dir's member (bag or pool)
  *
- * No response in a plain browser (this never installs), so the SW's timeout
- * preserves web behavior exactly.
+ * Plain browsers never advertise this bridge, so their SW misses fall through
+ * immediately without paying a response timeout.
  */
 export const installNativeSwBridge = (): boolean => {
   const bridge = ambientBridge()
@@ -769,6 +769,19 @@ const asBytes = (value: unknown): Uint8Array | null => {
  */
 export const installSwBytesBridge = (bridge: NativeBridge): boolean => {
   if (!('serviceWorker' in navigator)) return false
+
+  const advertise = (): void => {
+    const message = { type: 'hc:bytes-bridge', active: true }
+    navigator.serviceWorker.controller?.postMessage(message)
+    void navigator.serviceWorker.ready
+      .then(registration => registration.active?.postMessage(message))
+      .catch(() => undefined)
+  }
+
+  // Capability is held by worker client id. Re-advertise after a controller
+  // transition so an activated/restarted worker never loses the bridge.
+  advertise()
+  navigator.serviceWorker.addEventListener('controllerchange', advertise)
 
   const readFor = async (kind: string, dir: string, name: string): Promise<Uint8Array | null> => {
     const content = async (sig: string): Promise<Uint8Array | null> => {

@@ -9,7 +9,7 @@
 // even when the sentinel hasn't pushed yet.
 
 import { EffectBus, SignatureStore } from '@hypercomb/core'
-import { Store } from '@hypercomb/shared/core'
+import type { Store } from '@hypercomb/shared/core/store'
 import { seedDarkOnFreshInstall } from '@hypercomb/shared/core/behavior-fresh-install'
 import type { SentinelBridge } from './sentinel-bridge'
 import { fetchPinnedPackage, type PinnedPackage } from './pinned-package'
@@ -35,9 +35,7 @@ const MANIFEST_KEY = 'core-adapter.installed-manifest'
 const SIG_STORE_KEY = 'hypercomb.signature-store'
 const SYNC_SIG_KEY = 'sentinel.sync-signature'
 const INSTALLED_FLAG_KEY = 'hypercomb.installed'
-
-// ensure side-effect registrations
-const _deps = [Store]
+const legacyPoolDirectory = (meaning: string): string => `__${meaning}__`
 
 type InstallManifest = {
   version: number
@@ -398,7 +396,10 @@ const adoptNativeBundle = async (): Promise<boolean> => {
 // DCP hasn't pushed yet.
 // -------------------------------------------------
 
-type BundledPackage = Omit<PinnedPackage, 'version'> & { bootstrap?: string }
+type BundledPackage = Omit<PinnedPackage, 'version' | 'acquisition'> & {
+  acquisition?: string
+  bootstrap?: string
+}
 
 const fetchBundledPackage = async (): Promise<BundledPackage | null> => {
   // Current deployments publish one mutable signature and an immutable,
@@ -677,8 +678,8 @@ const purgeStaleOpfsArtifacts = async (store: Store): Promise<void> => {
     await purgeDir(dir)
     try { await store.opfsRoot.removeEntry(name); return true } catch { return false }
   }
-  if (await dropLegacy(store.legacyBees, Store.LEGACY_BEES_DIRECTORY)) store.legacyBees = undefined
-  if (await dropLegacy(store.legacyDependencies, Store.LEGACY_DEPENDENCIES_DIRECTORY)) store.legacyDependencies = undefined
+  if (await dropLegacy(store.legacyBees, legacyPoolDirectory('bees'))) store.legacyBees = undefined
+  if (await dropLegacy(store.legacyDependencies, legacyPoolDirectory('dependencies'))) store.legacyDependencies = undefined
   try {
     // Legacy `__layers__` may be absent (retired — layer bytes live flat
     // at the OPFS root now); only legacy installs still have stale
@@ -902,8 +903,8 @@ const applyVerifiedFiles = async (
   // extension-less — the import map emits extension-less URLs; layers keep
   // the frozen legacy URL token as their route's cache key).
   const layerDir = store.hypercombRoot
-  const beesUrlBase = `/opfs/${await Store.poolSignature(Store.BEES_MEANING)}`
-  const depsUrlBase = `/opfs/${await Store.poolSignature(Store.DEPENDENCIES_MEANING)}`
+  const beesUrlBase = `/opfs/${store.bees.name}`
+  const depsUrlBase = `/opfs/${store.dependencies.name}`
   const appliedSigs = new Set<string>()
   let failed = 0
   let processed = 0

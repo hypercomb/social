@@ -9,6 +9,7 @@ const SIGNATURE = /^[a-f0-9]{64}$/
 export type PinnedPackage = {
   version: 1
   packageSig: string
+  acquisition: string
   bees: string[]
   dependencies: string[]
   layers: string[]
@@ -71,7 +72,7 @@ const parseStringArray = (value: unknown): string[] | undefined | null => {
 export const parsePinnedPackage = (value: unknown): PinnedPackage | null => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const source = value as Record<string, unknown>
-  if (source['version'] !== 1 || !isSignature(source['packageSig'])) return null
+  if (source['version'] !== 1 || !isSignature(source['packageSig']) || !isSignature(source['acquisition'])) return null
 
   const bees = signatures(source['bees'])
   const dependencies = signatures(source['dependencies'])
@@ -102,6 +103,7 @@ export const parsePinnedPackage = (value: unknown): PinnedPackage | null => {
   return {
     version: 1,
     packageSig: source['packageSig'],
+    acquisition: source['acquisition'],
     bees,
     dependencies,
     layers,

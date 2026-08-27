@@ -610,12 +610,25 @@ owns everything acquisition:
   `manifest.json`; a present malformed pin or forged/missing descriptor fails
   closed. Local mirrors retain every historical descriptor edge, and Azure
   moves plus reads back the pin only after its signed leaves are live.
-- [ ] Carve `ensure-install.ts` (1,103) + `sentinel-bridge.ts` (561) out of
-  the web shell into one sig-addressed bootstrap bundle
+- [x] Carve `ensure-install.ts` (1,103) + `sentinel-bridge.ts` (561) out of
+  the web shell into one sig-addressed bootstrap bundle. The build compiles a
+  closed ESM acquisition entry, rejects retained Angular/bare-Hypercomb
+  specifiers, signs it, includes it among the package's 52 dependency leaves,
+  and records its exact signature in the signed descriptor. `main.ts` now
+  imports that signature through the worker after SW control; only a genuinely
+  absent pin may load the bounded local compatibility chunk. The production
+  initial main fell from ~499.6 KB to ~467.5 KB. A fresh-origin production
+  proof reached the complete shell from the signed acquisition and signed core
+  URLs. Its cold-miss follow-up also removed a measured 12-second delay: pages
+  advertise native/packed byte-bridge capability by SW client id, and ordinary
+  web clients are never messaged or timed out. A second clean origin reached
+  the textbox and welcome surface in 2.8 seconds, including SW registration,
+  the one guarded control reload, signed acquisition import, and first paint.
 - [ ] Move `layer-installer` (302), the three `layer-install-sources`,
   `install-monitor` into it
-- [ ] The install prompt UI is already an element-shaped installer surface;
-  include it in this bee's signed bundle when the acquisition code moves
+- [x] The install prompt UI is included in the signed acquisition bundle. It
+  resolves the live shell-surface registry through IoC instead of statically
+  bundling a second registry singleton.
 - [ ] Shim keeps only: SW registration/control, the pinned-sig fetch path,
   and the packed-store one-way-door gate (it must run before any Store use —
   keep it to the smallest possible check)

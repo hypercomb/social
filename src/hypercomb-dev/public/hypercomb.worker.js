@@ -45,8 +45,12 @@ const EMPTY_CONTENT_SIG = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca4959
 // — a Cache-API URL key, not an OPFS dir) so a restarted SW that serves before
 // the page re-posts still has the list.
 const SW_DOMAINS_MSG = 'hc:sw:domains'
+const SW_BYTES_BRIDGE_MSG = 'hc:bytes-bridge'
 const DOMAINS_CACHE_KEY = '/__hc_sw_domains__'
+const BYTES_BRIDGES_CACHE_KEY = '/__hc_sw_bytes_bridges__'
 let KNOWN_DOMAINS = []
+const BYTES_BRIDGE_CLIENT_IDS = new Set()
+let BYTES_BRIDGE_CLIENT_IDS_LOADED = false
 
 self.addEventListener('install', (event) => {
   event.waitUntil(self.skipWaiting())
@@ -77,7 +81,19 @@ self.addEventListener('activate', (event) => {
 // Used by the /@resource/ OPFS-miss fallback to know which hosts to try.
 self.addEventListener('message', (event) => {
   const data = event.data
-  if (!data || data.type !== SW_DOMAINS_MSG) return
+  if (!data) return
+  if (data.type === SW_BYTES_BRIDGE_MSG) {
+    const clientId = event.source?.id
+    if (typeof clientId === 'string' && clientId) {
+      if (data.active === false) BYTES_BRIDGE_CLIENT_IDS.delete(clientId)
+      else BYTES_BRIDGE_CLIENT_IDS.add(clientId)
+      BYTES_BRIDGE_CLIENT_IDS_LOADED = true
+      const persisted = persistBytesBridgeClientIds()
+      if (typeof event.waitUntil === 'function') event.waitUntil(persisted)
+    }
+    return
+  }
+  if (data.type !== SW_DOMAINS_MSG) return
   const domains = Array.isArray(data.domains)
     ? data.domains.filter((d) => typeof d === 'string' && d)
     : []
@@ -544,14 +560,29 @@ async function fetchUncachedAsset(request) {
 // Inside hypercomb-client the hive lives in the NATIVE store, and this
 // worker's own OPFS is empty — every cold read below would 404. On a miss,
 // ask a window client for the bytes over a MessageChannel: the page holds
-// the native root and answers from it. In a normal browser no listener is
-// installed, nothing responds, and the timeout preserves the old 404
-// behavior exactly. One mechanism, every route: modules, layers, site
-// resources.
+// the native root and answers from it. Bridge-capable pages advertise first,
+// so an ordinary browser miss falls through immediately instead of paying
+// one timeout for every candidate path. One mechanism, every route: modules,
+// layers, site resources.
 async function askClientBytes(kind, dir, name) {
   try {
+    if (!BYTES_BRIDGE_CLIENT_IDS_LOADED) {
+      for (const clientId of await loadBytesBridgeClientIds()) {
+        BYTES_BRIDGE_CLIENT_IDS.add(clientId)
+      }
+      BYTES_BRIDGE_CLIENT_IDS_LOADED = true
+    }
     const clients = await self.clients.matchAll({ type: 'window' })
-    for (const client of clients) {
+    const liveClientIds = new Set(clients.map(client => client.id))
+    let pruned = false
+    for (const clientId of BYTES_BRIDGE_CLIENT_IDS) {
+      if (liveClientIds.has(clientId)) continue
+      BYTES_BRIDGE_CLIENT_IDS.delete(clientId)
+      pruned = true
+    }
+    if (pruned) void persistBytesBridgeClientIds()
+    const bridgeClients = clients.filter(client => BYTES_BRIDGE_CLIENT_IDS.has(client.id))
+    for (const client of bridgeClients) {
       const bytes = await new Promise(resolve => {
         const channel = new MessageChannel()
         const timer = setTimeout(() => resolve(null), 1500)
@@ -658,6 +689,28 @@ async function loadDomains() {
     const cache = await caches.open(CACHE_NAME)
     const res = await cache.match(DOMAINS_CACHE_KEY)
     if (res) { const arr = await res.json(); if (Array.isArray(arr)) return arr }
+  } catch { /* ignore */ }
+  return []
+}
+
+async function persistBytesBridgeClientIds() {
+  try {
+    const cache = await caches.open(CACHE_NAME)
+    await cache.put(BYTES_BRIDGES_CACHE_KEY, new Response(
+      JSON.stringify([...BYTES_BRIDGE_CLIENT_IDS]),
+      { headers: { 'content-type': 'application/json' } },
+    ))
+  } catch { /* best-effort */ }
+}
+
+async function loadBytesBridgeClientIds() {
+  try {
+    const cache = await caches.open(CACHE_NAME)
+    const res = await cache.match(BYTES_BRIDGES_CACHE_KEY)
+    if (res) {
+      const ids = await res.json()
+      if (Array.isArray(ids)) return ids.filter(id => typeof id === 'string' && id)
+    }
   } catch { /* ignore */ }
   return []
 }

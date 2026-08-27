@@ -9,7 +9,6 @@ import {
   I18N_IOC_KEY,
   type I18nProvider,
 } from '@hypercomb/core'
-import { registerShellSurface } from '@hypercomb/shared/core/shell-surface-registry'
 import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
 import { checkForUpdate, upgradeFromBundled, type BootStatus } from './ensure-install'
 import { cacheImportMap } from './resolve-import-map'
@@ -309,7 +308,14 @@ if (typeof customElements !== 'undefined' && !customElements.get(ELEMENT_NAME)) 
   customElements.define(ELEMENT_NAME, InstallPromptElement)
 }
 
-registerShellSurface({
+// Resolve the shell-owned registry through IoC instead of importing its
+// implementation. This element is delivered inside the signed acquisition
+// bundle; bundling the registry module would create a second singleton and
+// replace the shell's live surface set when this module executes.
+const registry = get('@hypercomb.social/ShellSurfaceRegistry') as {
+  add(surface: { name: string; owner?: string; element: string; order?: number }): void
+} | undefined
+registry?.add({
   name: ELEMENT_NAME,
   owner: 'InstallerBootstrap',
   element: ELEMENT_NAME,
