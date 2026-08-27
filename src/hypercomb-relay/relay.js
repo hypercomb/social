@@ -28,6 +28,8 @@ import Database from 'better-sqlite3'
 import { WebSocketServer } from 'ws'
 import { verifyEvent } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
+import { verifyNip98 } from './http-auth.js'
+import { contentDirectoryIO, parseReplicationRequest, resolveSignatureClosure } from './replicate.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -716,30 +718,47 @@ function respondText(res, code, msg) {
 function verifyWriteAuth(req) {
   // DEV ONLY: bypass writer-auth (sha256(body)===sig is still enforced by the
   // caller, so content can't be forged — only the WHO check is skipped).
-  if (cfg.devOpenWrites) return { ok: true, pubkey: 'dev-open' }
-  if (writers.size === 0) return { ok: false, reason: 'writes not enabled (no authorized writers configured)' }
-  const header = String(req.headers['authorization'] || '').trim()
-  const m = /^Nostr\s+(.+)$/i.exec(header)
-  if (!m) return { ok: false, reason: 'missing Nostr authorization header' }
-  let evt
-  try { evt = JSON.parse(Buffer.from(m[1], 'base64').toString('utf8')) } catch { return { ok: false, reason: 'malformed auth token' } }
-  try { if (!verifyEvent(evt)) return { ok: false, reason: 'invalid signature' } } catch { return { ok: false, reason: 'invalid signature' } }
-  if (Number(evt.kind) !== 27235) return { ok: false, reason: 'wrong auth event kind (expected NIP-98 27235)' }
-  const pubkey = String(evt.pubkey || '').toLowerCase()
-  if (!writers.has(pubkey)) return { ok: false, reason: 'pubkey is not an authorized writer' }
-  // freshness window (±60s) — bounds replay of a captured token
-  const now = Math.floor(Date.now() / 1000)
-  if (Math.abs(now - Number(evt.created_at || 0)) > 60) return { ok: false, reason: 'auth token outside freshness window' }
-  // bind to method + path (body is bound implicitly: the URL sig == sha256(body))
-  const tags = Array.isArray(evt.tags) ? evt.tags : []
-  const methodTag = tags.find((t) => Array.isArray(t) && t[0] === 'method')?.[1]
-  if (String(methodTag || '').toUpperCase() !== 'PUT') return { ok: false, reason: 'auth method tag mismatch' }
-  const uTag = tags.find((t) => Array.isArray(t) && t[0] === 'u')?.[1]
-  let signedPath
-  try { signedPath = new URL(String(uTag)).pathname } catch { signedPath = String(uTag || '') }
-  const reqPath = (req.url || '').split('?')[0]
-  if (signedPath !== reqPath) return { ok: false, reason: 'auth url tag mismatch' }
-  return { ok: true, pubkey }
+  return verifyNip98(req, writers, { devOpen: cfg.devOpenWrites })
+}
+
+const replicationJobs = new Map()
+
+function readRequestBody(req, res, maxBytes, done) {
+  const chunks = []
+  let size = 0
+  let ended = false
+  req.on('data', chunk => {
+    if (ended) return
+    size += chunk.length
+    if (size > maxBytes) { ended = true; respondText(res, 413, 'body too large'); req.destroy(); return }
+    chunks.push(chunk)
+  })
+  req.on('end', () => { if (!ended) done(Buffer.concat(chunks)) })
+  req.on('error', () => { if (!ended) { ended = true; respondText(res, 400, 'request stream error') } })
+}
+
+function tryReplicate(req, res) {
+  if (req.method !== 'POST' || (req.url || '').split('?')[0] !== '/replicate') return false
+  readRequestBody(req, res, 64 * 1024, body => {
+    const auth = verifyNip98(req, writers, { devOpen: cfg.devOpenWrites, payload: body })
+    if (!auth.ok) { respondText(res, 401, auth.reason); return }
+    let request
+    try { request = parseReplicationRequest(JSON.parse(body.toString('utf8'))) } catch (error) {
+      respondText(res, 400, error?.message || 'invalid replication request'); return
+    }
+    const key = `${auth.pubkey}:${request.signature}`
+    const existing = replicationJobs.get(key)
+    if (!existing) {
+      const job = resolveSignatureClosure(request.signature, contentDirectoryIO(cfg.contentDir, request.sources, resolveFlatSig), { limit: request.limit })
+        .then(result => console.log(`[replicate] ${auth.pubkey.slice(0, 8)}… ${request.signature.slice(0, 12)}… fetched=${result.fetched} present=${result.present} holes=${result.holes.length} refused=${result.refused.length}${result.limited ? ' limited' : ''}`))
+        .catch(error => console.error('[replicate] job failed:', error?.message || error))
+        .finally(() => replicationJobs.delete(key))
+      replicationJobs.set(key, job)
+    }
+    res.writeHead(202, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' })
+    res.end(JSON.stringify({ accepted: true, signature: request.signature, running: !!existing }))
+  })
+  return true
 }
 
 function tryWriteContent(req, res) {
@@ -899,6 +918,8 @@ const server = createServer((req, res) => {
 
   // Read side: GET/HEAD/OPTIONS content serving (returns true if handled)
   if (tryServeContent(req, res)) return
+
+  if (tryReplicate(req, res)) return
 
   // Write side: PUT content into the sig pool (gated). Returns true if handled.
   if (tryWriteContent(req, res)) return
