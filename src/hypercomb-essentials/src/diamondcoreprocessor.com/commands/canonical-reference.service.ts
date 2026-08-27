@@ -1,6 +1,9 @@
-// The one write door for Portals. A discovered item is promoted into one
-// fixed-name root bag. Ordinary lineage appearances pin the selected details;
-// the marked Portal inventory row remains a future-default authoring pointer.
+// diamondcoreprocessor.com/commands/canonical-reference.service.ts
+//
+// The one write door for Portals. A source may be discovered anywhere, but its
+// fixed name promotes it into one canonical root bag. Every lineage appearance
+// points to that root and pins the selected detail signatures; the marked
+// Portal inventory row stays a slim future-default authoring pointer.
 
 import {
   CANONICAL_REFERENCE_SERVICE_KEY,
@@ -188,10 +191,15 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
       domain: lineage?.domain,
       explorerSegments: () => childSegments,
     })
-
-    // Ordinary activations snapshot root details by signature. Structure stays
-    // at the canonical root; each appearance head remains independently
-    // editable and cannot repaint another same-name lineage.
+    // An ordinary activation takes a SNAPSHOT OF THE CURRENT ROOT DETAILS.
+    // It shares the exact same resource/decorations/notes signatures, so no
+    // bytes are copied, but its appearance head is independent: creating or
+    // editing `/team/jaime` can never repaint `/friends/jaime`. The reference
+    // still points at the fixed root pool for identity/navigation.
+    //
+    // The Portal inventory row is the exception. It is the explicit default-
+    // authoring surface, so it remains a slim live pointer and its editor is
+    // routed to the root. Changing that root seeds FUTURE activations only.
     let childLayer: PlacementLayer = { name, decorations: [decorationSig] }
     if (options.editsRootDefault !== true) {
       const rootLayer = await resolveLayerAt(history, lineage?.domain, root.segments)

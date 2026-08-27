@@ -8,7 +8,7 @@
 
 import { EffectBus, RESOURCE_URL_PREFIX } from '@hypercomb/core'
 import { writeTilePropertiesAt } from './tile-properties.js'
-import { referenceTargetForLabel } from '../commands/decoration-kind-index.js'
+import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../commands/decoration-kind-index.js'
 import { portalEditTarget } from './portal-edit-target.js'
 
 type Store = {
@@ -53,7 +53,13 @@ export class ResourceAttachDrone {
     // meantime — a cross-layer content graft.
     const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
     const segments: readonly string[] = lineage?.explorerSegments?.() ?? []
-    const target = portalEditTarget(segments, payload.cell, referenceTargetForLabel(payload.cell))
+    const target = portalEditTarget(
+      segments,
+      payload.cell,
+      referenceEditsRootDefaultForLabel(payload.cell)
+        ? referenceTargetForLabel(payload.cell)
+        : null,
+    )
 
     // Build props exactly like the tile editor's saveAndComplete and the
     // substrate service do: one `small.image` per orientation plus the

@@ -41,7 +41,9 @@ export interface CanonicalReferencePayloadOptions {
   targetSig?: string
   requiredMarks?: readonly string[]
   requiredBouquet?: string
-  /** The Portal inventory row edits the root default for future activations. */
+  /** This appearance is the Portal's default-authoring surface. Its editor
+   * writes the canonical root for future activations. Ordinary appearances
+   * omit this and keep their own selected variant/details. */
   editsRootDefault?: boolean
 }
 

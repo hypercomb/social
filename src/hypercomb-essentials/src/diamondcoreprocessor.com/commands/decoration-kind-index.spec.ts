@@ -305,10 +305,9 @@ describe('decoration index — location is the identity', () => {
 
   // ── Portal default FACE: resolve THROUGH the pointer ────────────────────
   //
-  // A reference cell's layer is a pointer with no `properties`, so rendered
-  // from its own layer it is a blank named tile — a collection of references
-  // paints as a page of empty hexagons. The face has to come from the target,
-  // read at paint time, so one item looks like itself everywhere it appears.
+  // A marked Portal inventory row is intentionally a slim live pointer. It
+  // wears the root default it edits. Ordinary activations carry their own
+  // pinned properties and never enter this dynamic fallback.
 
   it('gives the marked Portal row its target’s current picture', async () => {
     layerImages.set('friends/rosa', 'a'.repeat(64))

@@ -160,6 +160,8 @@ describe('CanonicalReferenceService', () => {
       properties: ['3'.repeat(64)],
       decorations: expect.arrayContaining(['4'.repeat(64), expect.any(String)]),
     })
+    // Structure stays behind the root pointer. The activation snapshots its
+    // atomic details but navigation still enters the canonical lineage.
     expect(appearance).not.toHaveProperty('children')
   })
 
@@ -206,5 +208,29 @@ describe('CanonicalReferenceService', () => {
     )
     expect(friends?.properties).toEqual(['a'.repeat(64)])
     expect(team?.properties).toEqual(['b'.repeat(64)])
+  })
+
+  it('keeps the chosen root authoritative and retains later discoveries as variants', async () => {
+    const canonicalSig = await history.commitLayer(hex('canonical'), {
+      name: 'people', notes: ['b'.repeat(64)],
+    })
+    const hiveSig = await history.sign({ explorerSegments: () => [] })
+    const hive = await history.currentLayerAt(hiveSig)
+    await history.commitLayer(hiveSig, {
+      ...hive,
+      children: [...(hive?.children ?? []), canonicalSig],
+    })
+
+    const service = new CanonicalReferenceServiceImpl()
+    await expect(service.ensureRoot('people', ['nest', 'people'])).resolves.toMatchObject({
+      name: 'people', segments: ['people'],
+    })
+    const root = await history.currentLayerAt(await history.sign({ explorerSegments: () => ['people'] }))
+    expect(root).toMatchObject({ name: 'people', notes: ['b'.repeat(64)] })
+    const candidates = pooled
+      .map(entry => entry as { kind?: string; payload?: { layerSig?: string } })
+      .filter(record => record.kind === 'canonical:variant')
+    expect(candidates).toHaveLength(2)
+    expect(new Set(candidates.map(record => record.payload?.layerSig)).size).toBe(2)
   })
 })

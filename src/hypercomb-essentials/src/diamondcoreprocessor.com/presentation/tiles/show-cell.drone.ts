@@ -3005,8 +3005,12 @@ export class ShowCellDrone extends Drone {
       this.atlasRenderer = this.pixiRenderer
     }
 
-    // Labels are appearance-local, not global identities. Reset derived
-    // label state before the synchronous back-navigation cache can consult it.
+    // THE SAME-NAME / DIFFERENT-LINEAGE BOUNDARY. The caches below are keyed
+    // by label for hot render-loop access, but a label is not an appearance
+    // address. Without this reset, adding `/team/jaime` with a new picture can
+    // repaint `/friends/jaime`, and the warm back-nav path then writes the
+    // second picture into the first page's cached cell. Titles share the same
+    // raw-label atlas key, so flush glyphs in the same transaction.
     this.#enterDerivedLocation(locationKey)
 
     // ── back-nav fast path ─────────────────────────────────
@@ -8855,12 +8859,10 @@ export class ShowCellDrone extends Drone {
           cell.imageSig = smallSig
           this.cellImageCache.set(cell.label, smallSig)
         } else if (referenceFaceForLabel(cell.label)) {
-          // A REFERENCE tile owns no image: its layer is a pointer, not
-          // content. Wear the TARGET's face instead, resolved through the
-          // pointer at paint time, so one item looks like itself in every
-          // place it appears and an edit at the canonical reaches all of
-          // them. Display-time only — writing this sig into the reference's
-          // own layer would freeze it into a copy that drifts.
+          // Only the marked Portal inventory row reaches this fallback. It is
+          // a slim future-default authoring pointer and deliberately wears the
+          // root's current face. Ordinary activations pin their selected
+          // details—even an explicit no-image selection—and return '' above.
           const faceSig = referenceFaceForLabel(cell.label)
           await loadImageOnce(faceSig)
           cell.imageSig = faceSig

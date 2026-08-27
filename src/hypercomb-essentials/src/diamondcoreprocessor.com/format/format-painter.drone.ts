@@ -2,7 +2,7 @@
 import { EffectBus } from '@hypercomb/core'
 import type { FormatEntry, FormatProvider } from './format.provider.js'
 import { cellLocationSig, readTilePropsIndex, lookupTilePropsSig, readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
-import { referenceTargetForLabel } from '../commands/decoration-kind-index.js'
+import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../commands/decoration-kind-index.js'
 import { portalEditTarget } from '../editor/portal-edit-target.js'
 
 // ── built-in providers ──────────────────────────────────
@@ -81,7 +81,11 @@ export class FormatPainterDrone extends EventTarget {
     let properties: Record<string, unknown> = {}
     const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
     const segments = lineage?.explorerSegments?.() ?? []
-    const target = portalEditTarget(segments, cell, referenceTargetForLabel(cell))
+    const target = portalEditTarget(
+      segments,
+      cell,
+      referenceEditsRootDefaultForLabel(cell) ? referenceTargetForLabel(cell) : null,
+    )
     try {
       const layerProps = await readTilePropertiesAt(target.parentSegments, target.cell)
       if (Object.keys(layerProps).length === 0) throw new Error('no layer-slot properties')
@@ -195,7 +199,11 @@ export class FormatPainterDrone extends EventTarget {
       // legacy drain fallback (an old index-only tile the reconciler
       // hasn't stamped yet still deserves a correct merge base).
       let props: Record<string, unknown> = {}
-      const target = portalEditTarget(segments, cell, referenceTargetForLabel(cell))
+      const target = portalEditTarget(
+        segments,
+        cell,
+        referenceEditsRootDefaultForLabel(cell) ? referenceTargetForLabel(cell) : null,
+      )
       try {
         const layerProps = await readTilePropertiesAt(target.parentSegments, target.cell)
         if (Object.keys(layerProps).length === 0) throw new Error('no layer-slot properties')

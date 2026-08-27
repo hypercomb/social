@@ -421,23 +421,16 @@ async function hydrateBouquetMarks(sig: string): Promise<void> {
 // it is a blank named tile, so a collection of references paints as a page of
 // empty hexagons even though the addressing underneath is correct.
 //
-// So a reference resolves its FACE through the pointer: the picture shown is
-// the TARGET's, read at paint time from the target's current head. One item in
-// many places looks like itself in all of them, and an edit at the canonical
-// reaches every appearance with no sync, because nothing was copied.
+// The marked Portal inventory row resolves its FACE through the pointer: it is
+// the future-default authoring surface and therefore follows the TARGET's
+// current head. Ordinary lineage activations pin their own selected details
+// and must never use this dynamic fallback—the absence of a local image is a
+// real, stable selection too.
 //
-// The face is deliberately NOT written into the reference cell's layer. Baking
-// the target's image sig at creation time would convert an alias into a frozen
-// copy: it would stop tracking the moment the target changed, and the N places
-// would silently drift apart — the one failure this whole model exists to
-// prevent.
-//
-// Keyed by the TARGET's location, not by the referring cell, so every reference
-// to one target shares a single record and a single read.
+// Keyed by the TARGET's location, so the Portal read remains one shared fetch.
 
-/** Map<locationKey(TARGET), imageSig> — the picture a reference should wear.
- *  Absent = not resolved yet (or the target genuinely has no image); the caller
- *  then falls back exactly as it does for any imageless tile. */
+/** Map<locationKey(TARGET), imageSig> — the picture a Portal authoring row
+ *  should wear. Absent = not resolved yet (or genuinely no image). */
 const referenceFaceByKey = new Map<string, string>()
 
 /** Target locations whose face has been walked, successful or not — one read
@@ -445,8 +438,8 @@ const referenceFaceByKey = new Map<string, string>()
  *  LOCATION we resolve through, not a cell on the page being rendered. */
 const walkedFaceKeys = new Set<string>()
 
-/** The image sig a reference cell should render, or '' when the cell is not a
- *  reference / the target has no image / it hasn't resolved yet.
+/** The image sig a Portal default-authoring row should render, or '' when the
+ *  cell is ordinary / the target has no image / it hasn't resolved yet.
  *
  *  Synchronous and O(1) — show-cell calls this per visible cell while composing
  *  geometry, so it must never touch OPFS. A miss returns '' and the tile falls

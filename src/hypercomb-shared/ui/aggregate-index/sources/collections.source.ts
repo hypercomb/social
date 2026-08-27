@@ -18,9 +18,10 @@
 //     offers both side by side; add is an appearance, move is custody.
 //   • create — the + beside the panel's search field. This ADDS a way in rather
 //     than replacing add: you have somewhere to gather things before you have
-//     the things, and the tile it makes is PARENTLESS — a root at `/<name>`,
-//     under nothing, which is exactly what a collection is. The index then
-//     holds an ordinary reference to it, the same shape `add` writes, so a
+//     the things. It makes the canonical root at `/<name>` and links it into
+//     the hive-root complement. The index then
+//     holds a marked Portal default-authoring reference, the same shape `add`
+//     writes into the index, so a
 //     created collection and an adopted one are indistinguishable afterwards.
 //   • rename — NOT a mutation. A cell is immutable + content-addressed, so this
 //     RE-HOMES the same child sigs under a new root (no byte copy) and swaps the
@@ -356,7 +357,12 @@ class CollectionsSource implements AggregateSource {
     }
   }
 
-  /** Make a fixed-name canonical root and its Portal inventory appearance. */
+  /** Make a collection from a typed fixed name.
+   *
+   *  One name names one canonical root. The canonical service creates or
+   *  reuses `/<name>`, guarantees it appears in the hive-root complement, and
+   *  writes a marked default-authoring reference under `sets/`. A name already
+   *  in the index is a no-op. */
   async create(name: string): Promise<AddedRows> {
     const cell = name.trim()
     if (!cell || this.#entries.some(e => e.name === cell)) return
@@ -365,6 +371,9 @@ class CollectionsSource implements AggregateSource {
       name: cell,
       sourceSegments: null,
       parentSegments: [SETS],
+      // The Portals index is the one place where editing a reference means
+      // "make this my default for future uses". References activated inside
+      // ordinary lineages keep their own selected details.
       editsRootDefault: true,
     })
     if (!added) return
