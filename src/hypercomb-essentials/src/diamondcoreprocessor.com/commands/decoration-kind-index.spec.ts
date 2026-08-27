@@ -255,7 +255,7 @@ describe('decoration index — location is the identity', () => {
     // one. Walking IN warms them incidentally; arriving by a jump (deep link,
     // restored session, reference portal) does not, which is why the crumbs
     // kept reading raw addresses after the title feature landed.
-    layers.set('venue', [titleSig({ en: 'The Blue Note' })])
+    layers.set('venue', [titleSig({ en: 'The Blue Note', ja: 'ブルーノート' })])
     layers.set('venue/room', [titleSig({ en: 'Back Room' })])
 
     goTo('venue', 'room')
@@ -263,6 +263,7 @@ describe('decoration index — location is the identity', () => {
 
     await vi.waitFor(() => {
       expect(index.titleForSegments(['venue'], 'en')).toBe('The Blue Note')
+      expect(index.titlesForSegments(['venue'])).toEqual({ en: 'The Blue Note', ja: 'ブルーノート' })
       expect(index.titleForSegments(['venue', 'room'], 'en')).toBe('Back Room')
     })
   })

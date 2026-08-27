@@ -32,8 +32,10 @@ export type TileKind = 'opfs' | 'clipboard' | 'peer'
  * services find the actual content for that tile.
  */
 export interface TileEntry {
-  /** Display name (the lineage segment for an OPFS tile, the label for
-   *  a clipboard entry, the publisher's tile name for a peer). */
+  /** Stable identity name/address. This is the lineage segment and the
+   *  canonical pool key, NOT necessarily the text painted on the tile.
+   *  A participant variant may carry a different editable display title in
+   *  `source.titles` while still stacking under this same identity. */
   readonly name: string
   readonly kind: TileKind
   /** Where the content lives. Different fields are populated per kind:
@@ -62,6 +64,19 @@ export interface TileSourceRef {
    *  to the next-free slot starting at 0 (which collides with the
    *  local cell at index 0 and produces a disjoint layout). */
   readonly peerIndex?: number
+  /** Publisher's complete SANITIZED tile-properties projection. A
+   *  participant variant is not merely a different image/index: border,
+   *  background, tags, link, hideText, and future admitted property fields
+   *  may all differ. The canonical whole-layer candidate remains the source
+   *  of truth; this projection exists so the live stack can render without
+   *  fetching that whole layer first. */
+  readonly properties?: Readonly<Record<string, unknown>>
+  /** Locale -> editable display title published for this participant's
+   *  variant. Titles never participate in identity/dedup; `TileEntry.name`
+   *  remains the stable fixed-name pool key. */
+  readonly titles?: Readonly<Record<string, string>>
+  /** Immutable whole-layer candidate backing this live projection. */
+  readonly layerSig?: string
 }
 
 /**

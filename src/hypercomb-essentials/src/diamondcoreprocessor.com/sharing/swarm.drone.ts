@@ -31,7 +31,7 @@ import { readTilePropertiesAt, withoutSubstrateImage } from '../editor/tile-prop
 import { sanitizeVisual } from './visual-sanitizer.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
 import { isBranchPublic, isCellPublic, setCellPublic } from '../presentation/tiles/tile-actions.drone.js'
-import { referenceTargetForLabel } from '../commands/decoration-kind-index.js'
+import { referenceTargetForLabel, titlesForSegments } from '../commands/decoration-kind-index.js'
 import { listDecorations } from '../commands/decoration-manifest.js'
 import { kindsForLabel } from '../commands/decoration-kind-index.js'
 import { SWARM_INVITE_KIND } from './meeting-invite.js'
@@ -254,10 +254,11 @@ interface SwarmLayerPayload {
 
   // The 0000 array — one entry per child at the publisher's current
   // location. Each entry is flat: `name` is the lineage leaf, and
-  // every other field is a first-class cell property (index, imageSig,
-  // small.image, tags, hideText, link, etc.) inlined directly. No
-  // `props` wrapper — the visual IS the properties, plus the name
-  // that identifies which child it belongs to.
+  // the admitted 0000 fields are first-class cell properties (index,
+  // imageSig, small.image, colors, tags, hideText, link, etc.) inlined
+  // directly. `layerSig` is the atomic whole-layer handle and `titles` is the
+  // locale->display-label projection. No `props` wrapper — the visual is the
+  // immediate projection plus the stable name that identifies its pool.
   //
   // Image bytes (heavy binary content) still ride the companion kind
   // 30201 resource pipeline, referenced by sig inside the visual.
@@ -2641,6 +2642,14 @@ export class SwarmDrone extends Drone {
           visual = canonicaliseValue({ ...base, ...props }) as ChildEntry
         }
       } catch { /* no props yet — name-only publish */ }
+      // The lineage name is the stable identity/pool key. The participant's
+      // editable label is a property of THEIR complete variant and therefore
+      // travels separately. Keep every locale so a receiver does not have to
+      // display the publisher's English title while reading in Japanese.
+      const titles = titlesForSegments([...segments, name])
+      if (Object.keys(titles).length > 0) {
+        visual = canonicaliseValue({ ...visual, titles }) as ChildEntry
+      }
       // Surface a swarm:invite junction's bundle sig on the wire so observers
       // can show the invite icon and switch in. Gated by the SYNC decoration
       // index so the (cold) listDecorations read only fires for tiles that
@@ -3802,6 +3811,10 @@ const payload: SwarmLayerPayload = myLabel
           visual = canonicaliseValue({ name, layerSig, ...props }) as ChildEntry
         }
       } catch { /* name-only + sig */ }
+      const titles = titlesForSegments([...segments, name])
+      if (Object.keys(titles).length > 0) {
+        visual = canonicaliseValue({ ...visual, titles }) as ChildEntry
+      }
       return visual
     }))
 

@@ -133,6 +133,15 @@ describe('CanonicalReferenceService', () => {
     const child = await history.currentLayerAt(await history.sign({ explorerSegments: () => ['people', 'friend'] }))
     expect(child).toMatchObject({ name: 'friend', notes: ['2'.repeat(64)] })
     expect(pooled).toContainEqual(expect.objectContaining({ kind: 'canonical:variant' }))
+    const sourceCandidate = pooled
+      .map(entry => entry as { kind?: string; payload?: { layerSig?: string } })
+      .find(record => (history.content.get(record.payload?.layerSig ?? '')?.notes as string[] | undefined)?.[0] === '1'.repeat(64))
+    expect(history.content.get(sourceCandidate?.payload?.layerSig ?? '')).toMatchObject({
+      name: 'people',
+      properties: ['3'.repeat(64)],
+      decorations: ['4'.repeat(64)],
+      children: [expect.any(String)],
+    })
   })
 
   it('snapshots details but keeps structure at the canonical root', async () => {

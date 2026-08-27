@@ -25,7 +25,19 @@ interface SwarmDroneLike {
     peerPubkey: string
     index?: number
     imageSig?: string
+    layerSig?: string
+    titles?: Readonly<Record<string, string>>
+    [property: string]: unknown
   }[]
+}
+
+const asTitles = (value: unknown): Readonly<Record<string, string>> | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const titles = Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+  )
+  return Object.keys(titles).length > 0 ? titles : undefined
 }
 
 /** The swarm source: emits TileEntries for each tile any peer is
@@ -40,13 +52,22 @@ export const swarmTileSource: TileSource = async (
   ) as SwarmDroneLike | undefined
   if (!drone?.peerTilesAtCurrentSig) return []
   const tiles = drone.peerTilesAtCurrentSig()
-  return tiles.map(({ name, peerPubkey, index, imageSig }) => ({
-    name,
-    kind: 'peer' as const,
-    source: {
-      peerPubkey,
-      ...(typeof index === 'number' ? { peerIndex: index } : {}),
-      ...(typeof imageSig === 'string' ? { imageSig } : {}),
-    },
-  }))
+  return tiles.map((tile) => {
+    const { name, peerPubkey, layerSig, titles: rawTitles, ...properties } = tile
+    const index = properties['index']
+    const imageSig = properties['imageSig']
+    const titles = asTitles(rawTitles)
+    return {
+      name,
+      kind: 'peer' as const,
+      source: {
+        peerPubkey,
+        properties,
+        ...(typeof index === 'number' ? { peerIndex: index } : {}),
+        ...(typeof imageSig === 'string' ? { imageSig } : {}),
+        ...(typeof layerSig === 'string' ? { layerSig } : {}),
+        ...(titles ? { titles } : {}),
+      },
+    }
+  })
 }

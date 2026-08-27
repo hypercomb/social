@@ -242,13 +242,29 @@ per-lineage copies of anything.
   the single recompute all paths funnel through. Composite keys stay
   available as the escalation if a future surface needs simultaneous
   multi-lineage paint of one label.
-- **Phase D — candidate pools** (`imagePool`) when a feature wants it; the
-  shape is reserved above so nothing in A–C has to move.
+- **Phase D — candidate pools. Partially built 2026-08-26.** The canonical
+  reference service retains every imported same-name layer as a
+  `canonical:variant` member of the fixed-name root pool. The Image Hive probes
+  peer variants at the canonical root (not the current lineage), shows distinct
+  images with publisher provenance, unions live-lineage witnesses for migration
+  compatibility, and writes an explicit pick to the participant root default
+  for root/Portal gestures or to the clicked reference's local appearance for
+  an ordinary lineage gesture.
+  The participant stack is now a whole-variant projection: the swarm
+  tile-source carries the backing `layerSig`, every admitted 0000 property,
+  and the participant's localized editable titles—not only `imageSig` and
+  `index`. The stable raw name remains the stack/pool identity. Rolling selects
+  one coherent participant projection, so a pasted local twin cannot repaint a
+  peer variant or leak its border, tags, link, hide-text state, or display label
+  into that peer's version.
+  A materialized `imagePool` array remains optional; it is not the source of
+  truth.
 
 ## Guardrails
 
-- No new pool of meaning is minted by this design; if Phase D ever wants
-  one, it carries a colon (`pictures:pool`) per `known-location-pools.md`.
+- No separate image-only pool is minted: image candidates ride the fixed-name
+  canonical variant pool. If a future derived picture pool is needed, it
+  carries a colon (`pictures:pool`) per `known-location-pools.md`.
 - No derived record keyed by name/path/position — layer sig or content sig
   only. The legacy location-keyed index is a read-fallback that drains; no
   new writes target it.

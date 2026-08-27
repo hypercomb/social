@@ -17,6 +17,7 @@ import { tagsForLabel, kindsForLabel, launchShapeForLabel, launchRoleForLabel, l
 import { defaultViewWithinAt } from '../../commands/view-default.js'
 import { launcherClusterLayout, type ClusterGroup } from './launcher-cluster-layout.js'
 import { setTileStacks, type StackVariant } from './tile-stack.js'
+import { participantVariantVisual } from './participant-variant.js'
 import { hideStorageKey, isCellPublic } from './tile-actions.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
 import type { HistoryService, LayerContent } from '../../history/history.service.js'
@@ -86,6 +87,24 @@ const ARRIVAL_GATE_MS = 2500
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
 type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean; plain?: boolean; pendingProps?: boolean }
+type PeerSourceProjection = {
+  peerIndex?: number
+  peerPubkey?: string
+  imageSig?: string
+  layerSig?: string
+  properties?: Readonly<Record<string, unknown>>
+  titles?: Readonly<Record<string, string>>
+}
+type TileSourceProjection = { name: string; kind: string; source?: PeerSourceProjection }
+const tileSourceProjectionKey = (entries: readonly TileSourceProjection[]): string =>
+  entries.map(e => [
+    e.kind,
+    e.name,
+    e.source?.peerPubkey ?? '',
+    e.source?.layerSig ?? '',
+    JSON.stringify(e.source?.properties ?? {}),
+    JSON.stringify(e.source?.titles ?? {}),
+  ].join(':')).join('|')
 
 /** Launch-group pages live at single-segment ROOT locations named by group id
  *  (/games, /websites, /help, …) — each is its own leaf-only lineage,
@@ -689,7 +708,7 @@ export class ShowCellDrone extends Drone {
   /** Last resolved TileSourceRegistry entries per location key — the
    *  fallback a render pass uses when source resolution exceeds its
    *  budget (see the bounded resolve in the render path). */
-  readonly #sourceEntriesCache = new Map<string, readonly { name: string; kind: string; source?: { peerIndex?: number; peerPubkey?: string; imageSig?: string } }[]>()
+  readonly #sourceEntriesCache = new Map<string, readonly TileSourceProjection[]>()
 
   /** Budget for awaited tile-source resolution per render pass. Local
    *  sources answer in single-digit ms; anything slower (a source mid
@@ -706,6 +725,17 @@ export class ShowCellDrone extends Drone {
    *  sources, e.g. DCP-adopted branches mounted in SOLO). Fallback source
    *  for external cells when no live swarm publisher is present. */
   private readonly registryImageByLabel = new Map<string, string>()
+  /** Full sanitized projection for whichever external/spotlit participant is
+   *  currently painting this identity. Images are only one field in it. */
+  private readonly registryPropertiesByLabel = new Map<string, Readonly<Record<string, unknown>>>()
+  /** Display titles for the selected participant variant. The map key remains
+   *  the fixed identity name, so changing this text never splits a stack. */
+  private readonly registryTitlesByLabel = new Map<string, Readonly<Record<string, string>>>()
+  /** Labels whose derived caches were last filled from an external participant
+   *  projection. If paste/adopt turns one local, every derived field must be
+   *  dropped before the local read—otherwise a peer border/tag/title can
+   *  survive even after image provenance was corrected. */
+  readonly #externallyPaintedLabels = new Set<string>()
   // cache: cell label → tag names (avoids re-reading 0000 on every render)
   private readonly cellTagsCache = new Map<string, string[]>()
   // cache: cell label → border color RGB floats
@@ -3762,9 +3792,13 @@ export class ShowCellDrone extends Drone {
     this.#stackDepthByLabel = new Map()
     this.#stackVariantLabels = new Set()
     setTileStacks(new Map())
+    const previousVariantTitles = new Map(this.registryTitlesByLabel)
+    this.registryPropertiesByLabel.clear()
+    this.registryTitlesByLabel.clear()
+    const registryVariantSeen = new Set<string>()
     try {
       const registry = (window as any).ioc?.get?.('@hypercomb.social/TileSourceRegistry') as
-        | { resolve: (loc: { segments: readonly string[]; dir: FileSystemDirectoryHandle | null }) => Promise<readonly { name: string; kind: string; source?: { peerIndex?: number; peerPubkey?: string; imageSig?: string } }[]> }
+        | { resolve: (loc: { segments: readonly string[]; dir: FileSystemDirectoryHandle | null }) => Promise<readonly TileSourceProjection[]> }
         | undefined
       if (registry?.resolve) {
         const segs = lineage?.explorerSegments?.() ?? []
@@ -3786,9 +3820,9 @@ export class ShowCellDrone extends Drone {
         ])
         const entries = raced ?? this.#sourceEntriesCache.get(srcKey) ?? []
         if (!raced) {
-          const usedKey = entries.map(e => `${e.kind}:${e.name}`).join('|')
+          const usedKey = tileSourceProjectionKey(entries)
           void live.then((res) => {
-            const gotKey = res.map(e => `${e.kind}:${e.name}`).join('|')
+            const gotKey = tileSourceProjectionKey(res)
             if (gotKey !== usedKey) this.requestRender()
           }).catch(() => { /* already logged by the registry */ })
         }
@@ -3819,10 +3853,16 @@ export class ShowCellDrone extends Drone {
           if (bag.some(v => v.pubkey === pk)) continue
           const vsig = e.source?.imageSig
           const vidx = e.source?.peerIndex
+          const properties = e.source?.properties
+          const titles = e.source?.titles
+          const layerSig = e.source?.layerSig
           bag.push({
             pubkey: pk,
             ...(typeof vsig === 'string' && /^[a-f0-9]{64}$/i.test(vsig) ? { imageSig: vsig.toLowerCase() } : {}),
             ...(typeof vidx === 'number' && Number.isFinite(vidx) && vidx >= 0 ? { index: vidx } : {}),
+            ...(properties ? { properties } : {}),
+            ...(titles ? { titles } : {}),
+            ...(typeof layerSig === 'string' && /^[a-f0-9]{64}$/i.test(layerSig) ? { layerSig: layerSig.toLowerCase() } : {}),
           })
         }
         setTileStacks(stacks)
@@ -3845,7 +3885,10 @@ export class ShowCellDrone extends Drone {
             if (!mine) continue
             this.#stackVariantLabels.add(label)
             this.#peerPubkeyByLabel.set(label, spotlit)
+            this.registryImageByLabel.delete(label)
             if (mine.imageSig) this.registryImageByLabel.set(label, mine.imageSig)
+            if (mine.properties) this.registryPropertiesByLabel.set(label, mine.properties)
+            if (mine.titles) this.registryTitlesByLabel.set(label, mine.titles)
             // The SLOT stays yours. A shared tile keeps your index while
             // you roll through its versions — the stack is a depth at
             // one position, and taking the publisher's index instead
@@ -3860,19 +3903,15 @@ export class ShowCellDrone extends Drone {
         // theirs → yours on dismiss, theirs → nothing when the publisher
         // departs or is filtered away (transitions with no spotlight
         // event, which is why this diff lives HERE, at the one recompute
-        // every path funnels through). The image cache is a per-label
-        // derivation of whichever source last painted, and the local
-        // branch trusts it blindly — a surviving entry would serve the
-        // outgoing lineage's picture on the incoming lineage's tile
-        // (visuals-across-lineages.md, move 3: derivations follow their
-        // lineage, never the bare label). Drop the derivation AND its
-        // provenance record; this pass re-derives — external via the
-        // source-guarded peer path, local via layer-first props. Labels
-        // ENTERING or STAYING are already covered by that source guard.
+        // every path funnels through). Every label-keyed property cache is a
+        // derivation of whichever participant last painted—not just image. A
+        // surviving entry would manufacture a hybrid from the outgoing
+        // lineage's border/tags/link/etc. and the incoming tile. Drop the
+        // entire projection; this pass re-derives external state from the
+        // selected publisher and local state from layer-first properties.
         for (const label of previousVariantLabels) {
           if (this.#stackVariantLabels.has(label)) continue
-          this.cellImageCache.delete(label)
-          this.peerImageSourceByLabel.delete(label)
+          this.#invalidateLabelDerivedState(label)
         }
 
         // Mismatch check — only mismatched peer names produce any
@@ -3907,16 +3946,28 @@ export class ShowCellDrone extends Drone {
             if (typeof ppk === 'string' && ppk.length > 0 && !this.#peerPubkeyByLabel.has(e.name)) {
               this.#peerPubkeyByLabel.set(e.name, ppk)
             }
+            // Keep every visual field from the SAME first/freshest publisher
+            // that owns the solo tile. A participant variant may differ in
+            // border, tags, link, hideText, title, or any other admitted
+            // property — choosing its image while reading the rest locally
+            // would manufacture a hybrid nobody actually published.
+            const firstVariant = !registryVariantSeen.has(e.name)
+            if (firstVariant) {
+              registryVariantSeen.add(e.name)
+              this.registryImageByLabel.delete(e.name)
+              if (e.source?.properties) this.registryPropertiesByLabel.set(e.name, e.source.properties)
+              if (e.source?.titles) this.registryTitlesByLabel.set(e.name, e.source.titles)
+            }
             // The registry entry's publisher image (canonical 0000's
             // small.image, carried by config/snapshot sources). This is
             // the SOLO image path: with no swarm running, loadOne's
             // peerTilesAtCurrentSig lookup is empty, and without this
             // map config-mounted tiles render imageless forever.
             const isig = (e.source as { imageSig?: string } | undefined)?.imageSig
-            if (typeof isig === 'string' && /^[a-f0-9]{64}$/i.test(isig)) {
-              // Last-write-wins: track the publisher's CURRENT sig so a genuine
-              // source-image change is honoured (the old first-write-wins guard
-              // silently dropped it, pinning the tile to the first sig seen).
+            if (firstVariant && typeof isig === 'string' && /^[a-f0-9]{64}$/i.test(isig)) {
+              // The first/freshest publisher's CURRENT sig is authoritative
+              // for the complete selected variant. A later participant never
+              // contributes only their image to that first variant's props.
               // The per-pass prune below removes the entry when the publisher
               // leaves, so a stale sig can never be used as a fallback to
               // DOWNGRADE an already-shown image.
@@ -3930,6 +3981,15 @@ export class ShowCellDrone extends Drone {
       // Registry hiccups must never block the render. Previews just
       // won't appear this pass and will catch up on the next render.
       console.warn('[show-cell] ephemeral source resolution failed', err)
+    }
+    // The atlas is keyed by the stable raw identity, so changing only the
+    // selected participant's title would otherwise serve the old glyphs from
+    // that key. Invalidate exactly the identities whose reading changed.
+    const titleLabels = new Set([...previousVariantTitles.keys(), ...this.registryTitlesByLabel.keys()])
+    for (const label of titleLabels) {
+      if (JSON.stringify(previousVariantTitles.get(label) ?? {}) !== JSON.stringify(this.registryTitlesByLabel.get(label) ?? {})) {
+        this.atlas?.invalidateLabel(label)
+      }
     }
     this.#ephemeralCellSet = ephemeralCellSet
     this.#peerCellSet = peerCellSet
@@ -6907,6 +6967,21 @@ export class ShowCellDrone extends Drone {
     this.cellLinkCache.clear()
     this.cellSubstrateCache.clear()
     this.cellHideTextCache.clear()
+    this.#externallyPaintedLabels.clear()
+  }
+
+  /** Drop every presentation fact derived from one participant variant. These
+   *  caches are one coherent projection: invalidating only its image creates a
+   *  tile that combines a new head with an old participant's other fields. */
+  #invalidateLabelDerivedState = (label: string): void => {
+    this.#externallyPaintedLabels.delete(label)
+    this.cellImageCache.delete(label)
+    this.cellBorderColorCache.delete(label)
+    this.cellTagsCache.delete(label)
+    this.cellLinkCache.delete(label)
+    this.cellSubstrateCache.delete(label)
+    this.cellHideTextCache.delete(label)
+    this.peerImageSourceByLabel.delete(label)
   }
 
   /** Move the label-keyed projection caches to one lineage. Per-location cell
@@ -7298,9 +7373,12 @@ export class ShowCellDrone extends Drone {
    *  swaps titles with no extra wiring. */
   private readonly attachLabelResolver = (atlas: HexLabelAtlas): void => {
     const i18n = get<I18nProvider>(I18N_IOC_KEY)
-    atlas.setLabelResolver((directoryName: string) =>
-      titleForLabel(directoryName, i18n?.locale ?? 'en')
-      || (i18n ? i18n.resolveCell(directoryName) : directoryName))
+    atlas.setLabelResolver((directoryName: string) => {
+      const locale = i18n?.locale ?? 'en'
+      return this.registryTitlesByLabel.get(directoryName)?.[locale]?.trim()
+        || titleForLabel(directoryName, locale)
+        || (i18n ? i18n.resolveCell(directoryName) : directoryName)
+    })
   }
 
   /**
@@ -8544,6 +8622,13 @@ export class ShowCellDrone extends Drone {
     }
 
     const loadOne = async (cell: Cell): Promise<void> => {
+      // A peer-only tile can become a local same-identity twin between render
+      // passes (paste/adopt). Its previous caches are a projection of the peer,
+      // not reusable facts about the new local head. Clear the whole set once
+      // before entering the ordinary local resolver.
+      if (!cell.external && this.#externallyPaintedLabels.delete(cell.label)) {
+        this.#invalidateLabelDerivedState(cell.label)
+      }
       // External cells (kind:'peer' from the SwarmDrone) have no local
       // OPFS dir, so the OPFS-based
       // tags/link/substrate reads further down would always throw. The
@@ -8553,6 +8638,24 @@ export class ShowCellDrone extends Drone {
       // do (propsBlob → small.image → imageAtlas), then return without
       // touching the OPFS-only caches.
       if (cell.external) {
+        this.#externallyPaintedLabels.add(cell.label)
+        const publishedProperties = this.registryPropertiesByLabel.get(cell.label)
+        const published = publishedProperties
+          ? participantVariantVisual(publishedProperties, this.#flat)
+          : undefined
+        if (published) {
+          cell.pendingProps = false
+          if (published.borderColor) cell.borderColor = published.borderColor
+          cell.hasLink = published.hasLink
+          cell.hasSubstrate = published.hasSubstrate
+          cell.hideText = published.hideText
+          if (published.borderColor) this.cellBorderColorCache.set(cell.label, published.borderColor)
+          else this.cellBorderColorCache.delete(cell.label)
+          this.cellTagsCache.set(cell.label, [...published.tags])
+          this.cellLinkCache.set(cell.label, published.hasLink)
+          this.cellSubstrateCache.set(cell.label, published.hasSubstrate)
+          this.cellHideTextCache.set(cell.label, published.hideText)
+        }
         // Peer-only tiles render ONLY the publisher's streamed image — the
         // sig is content-addressed and the publisher is the authority, so
         // the CURRENT peerImageSigByLabel value always wins. The cache is a
@@ -8568,8 +8671,9 @@ export class ShowCellDrone extends Drone {
         // have no live publisher, their canonical image rides the
         // TileSourceRegistry entry instead. Both are publisher-derived
         // from the same canonical 0000, so either is exact.
-        const peerSig = peerImageSigByLabel.get(cell.label)
-          ?? this.registryImageByLabel.get(cell.label)
+        const peerSig = publishedProperties
+          ? published?.imageSig
+          : peerImageSigByLabel.get(cell.label) ?? this.registryImageByLabel.get(cell.label)
         if (peerSig) {
           const cached = this.cellImageCache.get(cell.label)
           if (cached && this.peerImageSourceByLabel.get(cell.label) === peerSig) {
@@ -8615,6 +8719,15 @@ export class ShowCellDrone extends Drone {
           } catch {
             this.cellImageCache.set(cell.label, null)
           }
+          return
+        }
+        // A complete peer projection with no picture means exactly that: this
+        // participant's variant is pictureless. Never reuse the outgoing
+        // participant's image or a local substrate fallback.
+        if (publishedProperties) {
+          cell.imageSig = undefined
+          this.cellImageCache.set(cell.label, null)
+          this.peerImageSourceByLabel.delete(cell.label)
           return
         }
         // No CURRENT peer sig (bytes/visual not arrived this pass): reuse a

@@ -62,6 +62,7 @@ let committer: { commitSlotSet: ReturnType<typeof vi.fn>; update: ReturnType<typ
 let broker: { adopt: ReturnType<typeof vi.fn>; getKnownDomains: ReturnType<typeof vi.fn> }
 let cursor: { state: { rewound: boolean }; currentLayerSig?: string }
 let commitLands: boolean
+let setTitle: ReturnType<typeof vi.fn>
 /** What the zone offers HERE — what a take can reach. */
 let peerTiles: Record<string, unknown>[]
 /** Where the participant is standing. A click MOVES this mid-gesture. */
@@ -88,6 +89,7 @@ const iocRegistry = (): Record<string, unknown> => ({
   '@diamondcoreprocessor.com/HistoryService': history,
   '@diamondcoreprocessor.com/LayerCommitter': committer,
   '@diamondcoreprocessor.com/HistoryCursorService': cursor,
+  '@diamondcoreprocessor.com/DecorationService': { setTitle },
 })
 
 ;(window as unknown as { ioc: unknown }).ioc = {
@@ -104,6 +106,10 @@ const GARDEN_OFFER = {
   imageSig: IMG,
   tags: ['flowers'],
   hideText: true,
+  background: { color: '#102030' },
+  border: { color: '#336699' },
+  participant: true,
+  titles: { en: 'Alice Garden', ja: 'アリスの庭' },
   index: 4,            // the rendered slot — MUST travel (the tile never jumps)
   inviteSig: '2'.repeat(64),
 }
@@ -121,6 +127,7 @@ const freshWorld = () => {
   // this stub pins the honest shape so that regression stays caught.
   cursor = { state: { rewound: false }, currentLayerSig: 'c'.repeat(64) }
   commitLands = true
+  setTitle = vi.fn(async () => 'set')
   store = {
     getResource: vi.fn(async () => null),
     // This DOM environment has no Blob.prototype.text — read via FileReader.
@@ -260,6 +267,9 @@ describe('the wand is the keep', () => {
     expect(body['imageSig']).toBe(IMG)
     expect(body['tags']).toEqual(['flowers'])
     expect(body['hideText']).toBe(true)
+    expect(body['background']).toEqual({ color: '#102030' })
+    expect(body['border']).toEqual({ color: '#336699' })
+    expect(body['participant']).toBe(true)
     // Swarm metadata stays OUT of the taken 0000.
     // THE SLOT TRAVELS: the tile was rendered at the publisher's slot as
     // a witness; the take keeps it there — no score-fill jump on landing.
@@ -267,6 +277,11 @@ describe('the wand is the keep', () => {
     expect(body['layerSig']).toBeUndefined()
     expect(body['inviteSig']).toBeUndefined()
     expect(body['peerPubkey']).toBeUndefined()
+    // The mutable display title is a decoration on the landed identity, not
+    // a replacement name and not a 0000 property.
+    expect(body['titles']).toBeUndefined()
+    expect(setTitle).toHaveBeenCalledWith(['garden'], 'Alice Garden', 'en')
+    expect(setTitle).toHaveBeenCalledWith(['garden'], 'アリスの庭', 'ja')
 
     // Records of a LANDED take: genome, receipt, adopted root.
     const rec = visitRecordAt(['garden'])

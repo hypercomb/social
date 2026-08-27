@@ -12,6 +12,7 @@ import {
   stackDepth,
   stackedLabels,
   variantFor,
+  variantTitle,
   hoveredLabel,
   hoveredStackDepth,
   rollHoveredStack,
@@ -86,6 +87,23 @@ describe('tile-stack', () => {
     setTileStacks(new Map([['notes', stack({ pubkey: '' }, { pubkey: ALICE, imageSig: sig })]]))
     expect(variantFor('notes', ALICE)?.imageSig).toBe(sig)
     expect(variantFor('notes', '')?.imageSig).toBeUndefined()
+  })
+
+  it('keeps complete properties and an editable label under the fixed identity key', () => {
+    const layerSig = 'd'.repeat(64)
+    const alice: StackVariant = {
+      pubkey: ALICE,
+      layerSig,
+      properties: { border: { color: '#336699' }, tags: ['music'], hideText: true },
+      titles: { en: 'Jazz People', ja: 'ジャズの人々' },
+    }
+    setTileStacks(new Map([['people', stack({ pubkey: '' }, alice)]]))
+
+    expect(variantFor('people', ALICE)).toEqual(alice)
+    expect(variantTitle(alice, 'en', 'people')).toBe('Jazz People')
+    expect(variantTitle(alice, 'ja', 'people')).toBe('ジャズの人々')
+    expect(variantTitle(alice, 'fr', 'people')).toBe('people')
+    expect([...stackedLabels()]).toEqual(['people'])
   })
 
   describe('hover', () => {
