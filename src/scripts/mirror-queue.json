@@ -2167,6 +2167,16 @@
       "unattended": false,
       "created": "2026-08-26",
       "status": "pending"
+    },
+    {
+      "id": "shrink-phase4-signed-platform-edges",
+      "title": "Mirror the Phase 4 signed-platform module slice",
+      "run": null,
+      "note": "The module build now signs the import-free @hypercomb/core and Pixi runtimes, packages both as dependency leaves, includes them in the root layer closure, and rewrites every emitted platform import to /opfs/<sign('dependencies')>/<platform-signature>. The platform fingerprint participates in every module cache key, so changing either runtime rebuilds all signed importers. The generated package has 51 dependency leaves, zero bare @hypercomb/core/pixi.js specifiers and 840 exact signature edges across 164 modules. Current installed packages emit no browser import map and the native bake no longer injects one; the two-entry static runtime mapping survives only as a read-compatibility bridge for cached manifests that predate platform signature metadata. Preserve that bounded old-package window until acquisition fallback is complete. Angular bootstrap and the Angular builder's Vite development server remain in the temporary shell. Validation passed 199 files / 1756 tests, web and dev production builds, a real service-worker-served browser install with no import-map element or runtime error, exact core execution from its OPFS signature URL, and a clean 4350 smoke test. Manual: note-add is additive and would double-land.",
+      "commit": "38e965065",
+      "unattended": false,
+      "created": "2026-08-26",
+      "status": "pending"
     }
   ]
 }
