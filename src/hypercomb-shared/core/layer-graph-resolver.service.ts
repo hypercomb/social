@@ -1,6 +1,7 @@
 // hypercomb-web/src/app/core/layer-graph-resolver.service.ts
 
 import { Store } from './store'
+import { SignatureService } from '@hypercomb/core'
 
 export type LayerRecord = {
   name: string
@@ -21,7 +22,6 @@ export class LayerGraphResolver {
   // -------------------------------------------------
 
   private readonly decoder = new TextDecoder()
-  private readonly encoder = new TextEncoder()
 
   // -------------------------------------------------
   // api
@@ -37,72 +37,49 @@ export class LayerGraphResolver {
 
     // Single flat layer pool at the hive root (Phase-1b) — domain has no
     // effect on storage location. `domain` kept for caller-API back-compat
-    // but unused here. A not-yet-relocated legacy layer simply re-fetches
-    // from `location` and caches to the root (see fetchLayerJson).
+    // but unused here. A local miss re-fetches exact bytes from `location`
+    // and writes them through Store's verified flat-root boundary.
     void domain
-    const layersDir = this.store.hypercombRoot
-
-    const result = await this.getLayerJsonText(layersDir, location, signature)
-    if (!result.content) return null
-
-    if (!result.exists) {
-      await this.writeCachedLayerJson(layersDir, signature, result.content)
-    }
-
-    return this.parseLayerJson(signature, result.content)
+    const bytes = await this.getLayerBytes(location, signature)
+    if (!bytes) return null
+    return this.parseLayerJson(signature, this.decoder.decode(bytes))
   }
 
   // ------------------------------
 
-  private getLayerJsonText = async (
-    layersDir: FileSystemDirectoryHandle,
+  private getLayerBytes = async (
     location: string,
     signature: string
-  ): Promise<{ exists: boolean; content: string }> => {
-
-    const cached = await this.readCachedLayerJson(layersDir, signature)
-    if (cached) return { exists: true, content: cached }
-
-    const fetched = await this.fetchLayerJson(location, signature)
-    return { exists: false, content: fetched || '' }
+  ): Promise<Uint8Array | null> => {
+    const cached = await this.store.getLayerLocalBytes(signature)
+    if (cached) return cached
+    const fetched = await this.fetchLayerBytes(location, signature)
+    if (!fetched) return null
+    await this.store.writeLayerBytes(signature, fetched.buffer as ArrayBuffer)
+    return fetched
   }
 
-  private readCachedLayerJson = async (
-    layersDir: FileSystemDirectoryHandle,
-    signature: string
-  ): Promise<string | null> => {
-    try {
-      const handle = await layersDir.getFileHandle(signature)
-      const file = await handle.getFile()
-      return this.decoder.decode(await file.arrayBuffer())
-    } catch {
-      return null
-    }
-  }
-
-  private writeCachedLayerJson = async (
-    layersDir: FileSystemDirectoryHandle,
-    signature: string,
-    jsonText: string
-  ): Promise<void> => {
-
-    const handle = await layersDir.getFileHandle(signature, { create: true })
-    const writable = await handle.createWritable()
-    try {
-      await writable.write(this.encoder.encode(jsonText))
-    } finally {
-      await writable.close()
-    }
-  }
-
-  private fetchLayerJson = async (
+  private fetchLayerBytes = async (
     location: string,
     signature: string
-  ): Promise<string | null> => {
-
-    const res = await fetch(`${location.replace(/\/+$/, '')}/${signature}`)
-    if (!res.ok) return null
-    return await res.text()
+  ): Promise<Uint8Array<ArrayBuffer> | null> => {
+    const base = location.replace(/\/+$/, '')
+    for (const url of [
+      `${base}/${signature}`,
+      `${base}/content/${signature}`,
+      `${base}/__layers__/${signature}.json`,
+      `${base}/content/__layers__/${signature}.json`,
+    ]) {
+      try {
+        const res = await fetch(url)
+        if (!res.ok) continue
+        const buffer = await res.arrayBuffer()
+        if (await SignatureService.sign(buffer) === signature.toLowerCase()) {
+          return new Uint8Array(buffer)
+        }
+      } catch { /* try the next deployment shape */ }
+    }
+    return null
   }
 
   private parseLayerJson = (

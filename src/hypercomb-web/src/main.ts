@@ -57,7 +57,6 @@ import { packedStoreBlocksBoot } from '@hypercomb/shared/core/packed-store-gate'
 import { fetchPinnedPackage } from './setup/pinned-package'
 import type { BootStatus } from './setup/ensure-install'
 import type { SentinelBridge } from './setup/sentinel-bridge'
-import { cacheImportMap, IMPORT_MAP_STORAGE_KEY, resolveImportMap } from './setup/resolve-import-map'
 import { App } from './app/app'
 import { DependencyLoader } from '@hypercomb/shared/core/dependency-loader'
 import { ScriptPreloader } from '@hypercomb/shared/core/script-preloader'
@@ -125,61 +124,6 @@ const ensureSwControl = async (): Promise<void> => {
   await new Promise<never>(() => {})
 }
 
-// Current content modules embed exact OPFS signature URLs and require no
-// browser import map. This replay path is a bounded compatibility bridge for
-// an already-installed package that predates signed @hypercomb/core / pixi.js
-// leaves. Such a map has to be LIVE before a module script loads, so index.html
-// replays the cached legacy map and this boot keeps that cache truthful until
-// the participant adopts a current package.
-const appendImportMap = (json: string): void => {
-  const script = document.createElement('script')
-  script.type = 'importmap'
-  script.textContent = json
-  document.head.appendChild(script)
-}
-
-const attachImportMap = async (): Promise<void> => {
-  const imports = await resolveImportMap()
-
-  // Current signed package (or no installed package): the dependency scan was
-  // still useful for alias metadata, but there is no executable map. Remove a
-  // stale compatibility cache; exact module URLs make a reload unnecessary.
-  if (Object.keys(imports).length === 0) {
-    try { localStorage.removeItem(IMPORT_MAP_STORAGE_KEY) } catch {}
-    return
-  }
-
-  const json = JSON.stringify({ imports })
-
-  // Already applied by index.html before the module graph loaded — done.
-  if ((window as any).__hcImportMapApplied === json) return
-
-  try { localStorage.setItem(IMPORT_MAP_STORAGE_KEY, json) } catch {}
-
-  // Late append: correct on browsers that merge late maps, ignored (with a
-  // console warning) on those that don't — hence the reload guard below.
-  appendImportMap(JSON.stringify({ imports }, null, 2))
-
-  // No installed dependency metadata → no legacy module will load this
-  // session; the next boot picks the compatibility map cache up early.
-  const aliasMap = (globalThis as any).__hypercombAliasMap as Map<string, string> | undefined
-  if (!aliasMap?.size) return
-
-  // The map this session needs was NOT live at module-load time. On a browser
-  // that ignored the late append, every dep and bee import is about to fail.
-  // Reload once per map per session so index.html applies it up front; the
-  // guard means a browser that DID accept the late map never loops.
-  let guard: string | null = null
-  try { guard = sessionStorage.getItem(IMPORT_MAP_STORAGE_KEY) } catch {}
-  if (guard === json) return
-
-  try { sessionStorage.setItem(IMPORT_MAP_STORAGE_KEY, json) } catch { return }
-  console.warn('[main] import map was not live at module load — reloading once to apply it early')
-  location.reload()
-  // Stop boot here; the reload is in flight and nothing below should run.
-  await new Promise<never>(() => {})
-}
-
 const bootstrap = async (): Promise<void> => {
   ;(window as any).__hcBoot('bootstrap() started')
   // ONE-WAY DOOR GATE. Must be the FIRST thing in ${0,0}main — before any module can
@@ -237,9 +181,6 @@ const bootstrap = async (): Promise<void> => {
   // let a stale `true` suppress the cold-install reload even though no usable
   // install existed — the shell stayed up with no bees and no tiles.
   const wasInstalledAtBoot = localStorage.getItem('hypercomb.installed') === 'true'
-
-  await attachImportMap()
-  ;(window as any).__hcBoot('attachImportMap (resolveImportMap) done')
 
   // Snapshot the sync signature applied at boot. Anything that drifts
   // from this (toggles in DCP, intake from web→DCP, etc.) means the
@@ -318,9 +259,6 @@ const bootstrap = async (): Promise<void> => {
     // install prompt.
     if (!wasInstalledAtBoot && localStorage.getItem('hypercomb.installed') === 'true') {
       console.log('[main] cold install completed — reloading')
-      // Cache the map the install just made resolvable, so the reload boots
-      // with it live before the module graph (see attachImportMap).
-      await cacheImportMap()
       location.reload()
       return
     }
@@ -354,7 +292,6 @@ const bootstrap = async (): Promise<void> => {
     const currentSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
     if (currentSyncSig && currentSyncSig !== bootSyncSig) {
       console.log(`[main] ${source} with drift — reloading`)
-      await cacheImportMap()
       location.reload()
     }
   }
@@ -414,7 +351,6 @@ const bootstrap = async (): Promise<void> => {
 
         const currentSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
         const drifted = !!currentSyncSig && currentSyncSig !== bootSyncSig
-        if (drifted) await cacheImportMap()
 
         // Persisted by the indicator so the check survives a required reload.
         EffectBus.emit('update:status', { phase: 'complete', message: 'Everything is updated' })
@@ -566,7 +502,7 @@ const bootstrap = async (): Promise<void> => {
         console.warn('[main] bundled install threw', err)
         return false
       })
-      if (ok) { await cacheImportMap(); location.reload(); return }
+      if (ok) { location.reload(); return }
       console.warn('[main] first-run install exhausted both sources (sentinel + bundled)')
       EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-sentinel' } as BootStatus)
     })()

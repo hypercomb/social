@@ -27,13 +27,27 @@ service worker's "opfs resolution by signature" route already serves locally
 (`hypercomb-web/public/hypercomb.worker.js`, `handleOpfsRequest`). A domain
 IS a deployment; the client's OPFS is a cache of the same address space; the
 dev server serves dist under the same contract. No bundler in the loading
-path, no name-addressed modules — and therefore **no import map**: once
-the remaining legacy package window closes, `resolveImportMap()`, the
-`index.html` localStorage replay, and the one-time `location.reload()` hack
-all retire (Phase 4). Current package modules already import by signature;
+path, no name-addressed modules — and therefore **no import map**:
+`resolveImportMap()`, the `index.html` localStorage replay, and the one-time
+compatibility reload are retired (Phase 4). Current package modules import by signature;
 removing Angular and the Angular builder's Vite dev server is the separate
 Phase 5 shell cut. The signature is the address; the URL is just the signature
 with an origin in front of it.
+
+The plain web compiler publishes that same flat signature namespace at its
+output root. `/content/<sig>` remains a bundled compatibility mirror, but a
+local 4250 run and a static production host now exercise `<origin>/<sig>`
+first without a normal fallback 404.
+
+All byte kinds now use the same acceptance rule: bee, dependency, layer, and
+resource candidates are tried across flat, bundled, and legacy URL shapes
+until one hashes to the requested signature. MIME is metadata rather than an
+authority (a signed resource may legitimately be HTML). Store exposes
+verified local-only layer/dependency accessors so broker reads cannot recurse
+into their own host fallback, and a missing layer starts detached self-heal
+without making render wait on the network. Bundled upgrades stage and verify
+the entire leaf closure plus each canonical sigbag before advancing the
+installed package or deleting the prior working package.
 
 **Deployments are artifacts.** Nothing is ever "running" at a domain — a
 deployment is a static, signed artifact that clients import, and execution
@@ -592,9 +606,8 @@ resolver:
     part of every module cache key, so changing either runtime rebuilds every
     signed importer. The current-package census is 51 dependency leaves,
     zero bare platform specifiers, and 840 exact signature edges across 164
-    modules. Current installs emit no import map; the old two-entry map remains
-    only as a compatibility read for a cached pre-platform-signature package.
-    The native frontend no longer bakes a static map.
+    modules. The old two-entry compatibility map and its early HTML replay are
+    gone; the native frontend no longer bakes a static map.
 - [x] SW resolver gains network fallback: OPFS miss → `<origin>/<sig>` fetch
   → **verify the bytes hash to the requested sig** (published-pools already
   does this for specs; the module path must too — forged bytes are dropped,
@@ -618,6 +631,10 @@ resolver:
 - [ ] Retire `resolve-import-map.ts` (203), `apply-import-map.ts`,
   `dependency-loader.ts` (170), the `index.html` localStorage replay, and
   the one-time `location.reload()`; `ScriptPreloader.#ensureDeps` collapses
+  - Map slice complete: `resolve-import-map.ts`, `apply-import-map.ts`, their
+    specs, the HTML localStorage replay, boot-time alias scan/cache, and every
+    map-preparation reload hook are gone. `DependencyLoader` and the
+    preloader's dependency loop remain as signed-pool loading machinery.
 - [ ] Pixi stops being a special `public/vendor/pixi.runtime.js` bundle —
   just another sig-addressed dependency
 
@@ -652,7 +669,10 @@ owns everything acquisition:
   `install-monitor` into it
 - [x] The install prompt UI is included in the signed acquisition bundle. It
   resolves the live shell-surface registry through IoC instead of statically
-  bundling a second registry singleton.
+  bundling a second registry singleton. Its update checkpoint now waits for
+  the non-critical snapshot bee to register, closing the fast-click race that
+  previously reported "restore point was not saved" while the service was
+  still loading.
 - [ ] Shim keeps only: SW registration/control, the pinned-sig fetch path,
   and the packed-store one-way-door gate (it must run before any Store use —
   keep it to the smallest possible check)

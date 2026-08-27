@@ -26,7 +26,6 @@ export class DependencyLoader extends EventTarget {
     }
 
     const run = async (): Promise<void> => {
-      // Use cached alias map from resolveImportMap() if available (skips OPFS re-scan)
       let pending = await this.#collectPending()
       if (!pending.length) {
         console.log('[dependency-loader] no pending dependencies')
@@ -91,24 +90,9 @@ export class DependencyLoader extends EventTarget {
   }
 
   #collectPending = async (): Promise<{ sig: string; alias: string }[]> => {
-    // Fast path: use cached alias map from resolveImportMap() (web mode)
-    const cachedMap = (globalThis as any).__hypercombAliasMap as Map<string, string> | undefined
-    if (cachedMap && cachedMap.size > 0) {
-      const pending: { sig: string; alias: string }[] = []
-      for (const [alias, sig] of cachedMap) {
-        if (this.#loaded.has(sig)) {
-          console.log(`[dependency-loader] ${alias} (${sig}) already loaded, skipping`)
-          continue
-        }
-        pending.push({ sig, alias })
-      }
-      return pending
-    }
-
-    // Fallback: scan the sign('dependencies') pool (dev mode or no cached
-    // map), UNIONED with the legacy `__dependencies__` drain dir while it
-    // exists — the Store's detached absorb may still be moving files on
-    // the first post-upgrade boot.
+    // Scan the sign('dependencies') pool, UNIONED with the legacy
+    // `__dependencies__` drain dir while it exists — the Store's detached
+    // absorb may still be moving files on the first post-upgrade boot.
     if (!this.store.opfsAvailable) return []
     const depDirs = [this.store.dependencies, this.store.legacyDependencies]
       .filter((d): d is FileSystemDirectoryHandle => !!d)
@@ -119,9 +103,10 @@ export class DependencyLoader extends EventTarget {
 
     for (const depDir of depDirs) {
       try {
-        for await (const [sig, entry] of depDir.entries()) {
+        for await (const [name, entry] of depDir.entries()) {
           if (entry.kind !== 'file') continue
-          if (!this.#isSignature(sig)) continue
+          if (!this.#isSignature(name)) continue
+          const sig = name.replace(/\.js$/i, '').toLowerCase()
           if (seen.has(sig)) continue   // mid-drain: same file in both locations
           seen.add(sig)
           if (this.#loaded.has(sig)) {

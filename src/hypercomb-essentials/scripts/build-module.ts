@@ -1280,8 +1280,8 @@ const main = async (): Promise<void> => {
 
   // Sigbag emission. A bag is a directory named by its content sig; entries
   // are zero-padded index files (0000, 0001, …) whose contents carry the
-  // leaf metadata needed to build the importmap directly — no follow-up
-  // leaf-file open required.
+  // leaf metadata needed to replicate or inspect the closure directly — no
+  // follow-up leaf-file open required.
   //
   // Entry format (two-line text):
   //   line 1: alias (e.g. `@diamondcoreprocessor.com/clipboard`) or empty

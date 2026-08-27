@@ -53,7 +53,7 @@
 // `createSyncAccessHandle` (worker-only sync access) has no call sites in the
 // shell and no sane IPC analogue. It throws rather than silently misbehaving.
 
-import { poolMeanings } from '@hypercomb/core'
+import { poolMeanings, SignatureService } from '@hypercomb/core'
 
 type Invoke = (
   command: string,
@@ -527,6 +527,14 @@ const viaScheme = async (sig: string): Promise<Uint8Array | null | 'unavailable'
       if (response.status === 404) return null
       if (!response.ok) return 'unavailable'
       const bytes = new Uint8Array(await response.arrayBuffer())
+      const exact = bytes.buffer.slice(
+        bytes.byteOffset,
+        bytes.byteOffset + bytes.byteLength,
+      ) as ArrayBuffer
+      if (await SignatureService.sign(exact) !== sig.toLowerCase()) {
+        console.warn(`[store] native content ${sig.slice(0, 12)} failed exact-signature verification; falling back to IPC`)
+        return 'unavailable'
+      }
       return bytes
     } catch {
       // This shape is not served here. Try the next; if none answer, the host

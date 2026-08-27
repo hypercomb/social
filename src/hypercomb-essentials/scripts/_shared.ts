@@ -64,7 +64,7 @@ export const readEssentialsTokenFromFirstLine = (text: string): string | null =>
   return token
 }
 
-// ensures each dependency has a unique specifier so import map can bind it 1:1
+// ensures each dependency has a unique human-readable identity in metadata
 // - if missing/invalid: @essentials/default/<base>
 // - if only a namespace (two segments): @essentials/<group>/<base>
 // - if already qualified: keep

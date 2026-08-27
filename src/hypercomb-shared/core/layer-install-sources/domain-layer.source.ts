@@ -1,6 +1,7 @@
 // hypercomb-web/src/app/core/layer-install-sources/domain-layer.source.ts
 
 import { LayerInstallContext, LayerInstallFile, LayerInstallSource } from '../layer-install.types'
+import { SignatureService } from '@hypercomb/core'
 
 export class DomainLayerSource implements LayerInstallSource {
 
@@ -32,8 +33,10 @@ export class DomainLayerSource implements LayerInstallSource {
       const res = await fetch(url)
       if (!res.ok) return null
 
-      const parsed = (await res.json()) as any
-      return this.coerce(parsed, signature)
+      const bytes = await res.arrayBuffer()
+      if (await SignatureService.sign(bytes) !== signature.toLowerCase()) return null
+      const parsed = JSON.parse(new TextDecoder().decode(bytes)) as any
+      return this.coerce(parsed, signature.toLowerCase())
     } catch {
       return null
     }
@@ -42,10 +45,7 @@ export class DomainLayerSource implements LayerInstallSource {
   private coerce = (parsed: any, fallbackSig: string): LayerInstallFile | null => {
     if (!parsed || typeof parsed !== 'object') return null
 
-    const signature =
-      String(parsed.signature ?? fallbackSig ?? '')
-        .trim()
-        .toLowerCase()
+    const signature = String(fallbackSig ?? '').trim().toLowerCase()
 
     if (!/^[a-f0-9]{64}$/i.test(signature)) return null
 

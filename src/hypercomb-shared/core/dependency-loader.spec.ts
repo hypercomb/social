@@ -26,14 +26,28 @@ beforeAll(async () => {
 describe('DependencyLoader signature addressing', () => {
   beforeEach(() => {
     vi.mocked(importSignatureModule).mockClear()
+    values.clear()
     delete (globalThis as { __hypercombBeeDeps?: unknown }).__hypercombBeeDeps
   })
 
   it('uses the alias as metadata but imports the dependency by pool and content sig', async () => {
     const signature = 'b'.repeat(64)
-    ;(globalThis as { __hypercombAliasMap?: Map<string, string> }).__hypercombAliasMap = new Map([
-      ['@example.test/tools', signature],
-    ])
+    const moduleBytes = new TextEncoder().encode('// @example.test/tools\nexport const loaded = true\n')
+    const file = {
+      slice: (start: number, end: number) => ({
+        arrayBuffer: async () => moduleBytes.slice(start, end).buffer,
+      }),
+    } as unknown as Blob
+    const dependencyPool = {
+      async *entries(): AsyncGenerator<[string, { kind: 'file'; getFile: () => Promise<Blob> }]> {
+        yield [`${signature}.js`, { kind: 'file', getFile: async () => file }]
+      },
+    }
+    values.set('@hypercomb.social/Store', {
+      opfsAvailable: true,
+      dependencies: dependencyPool,
+      legacyDependencies: undefined,
+    })
     const loader = new DependencyLoaderClass()
 
     await loader.load()

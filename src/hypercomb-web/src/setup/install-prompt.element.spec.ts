@@ -94,4 +94,30 @@ describe('hc-install-prompt', () => {
     window.dispatchEvent(new CustomEvent('dcp:embed-closed'))
     expect(element.querySelector('[role="dialog"]')).not.toBeNull()
   })
+
+  it('waits for the snapshot service when update is clicked before its bee lands', async () => {
+    const { waitForSnapshotQueen } = await import('./install-prompt.element')
+    const callbacks: Array<(key: string, value: unknown) => void> = []
+    const ioc = (window as unknown as { ioc: {
+      get: (key: string) => unknown
+      onRegister: (callback: (key: string, value: unknown) => void) => () => void
+    } }).ioc
+    const originalGet = ioc.get
+    const originalOnRegister = ioc.onRegister
+    try {
+      ioc.get = () => undefined
+      ioc.onRegister = callback => {
+        callbacks.push(callback)
+        return () => callbacks.splice(callbacks.indexOf(callback), 1)
+      }
+      const queen = { createRestorePoint: vi.fn(async () => true) }
+      const waiting = waitForSnapshotQueen(1_000)
+      callbacks[0]?.('@diamondcoreprocessor.com/SnapshotQueenBee', queen)
+      await expect(waiting).resolves.toBe(queen)
+      expect(callbacks).toHaveLength(0)
+    } finally {
+      ioc.get = originalGet
+      ioc.onRegister = originalOnRegister
+    }
+  })
 })

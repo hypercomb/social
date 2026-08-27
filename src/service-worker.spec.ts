@@ -69,14 +69,15 @@ const load = async (): Promise<Sniffers> => await import(
   )
 ) as Sniffers
 
-type ModuleFallback = {
-  moduleHostPaths(origin: string, sig: string, kind: 'bee' | 'dependency'): string[]
-  verifiedResponseBytes(sig: string, response: Response): Promise<ArrayBuffer | null>
-  fetchSignedModuleFromHosts(
+type SignedKind = 'bee' | 'dependency' | 'layer' | 'resource'
+type SignedFallback = {
+  signedHostPaths(origin: string, sig: string, kind: SignedKind): string[]
+  verifiedResponseBytes(sig: string, response: Response): Promise<{ buf: ArrayBuffer; contentType: string } | null>
+  fetchSignedBytesFromHosts(
     sig: string,
-    kind: 'bee' | 'dependency',
+    kind: SignedKind,
     origins: string[],
-  ): Promise<{ buf: ArrayBuffer } | null>
+  ): Promise<{ buf: ArrayBuffer; contentType: string } | null>
 }
 
 type ClientBytesBridge = {
@@ -93,13 +94,13 @@ const loadClientBytesBridge = async (): Promise<ClientBytesBridge> => await impo
   )
 ) as ClientBytesBridge
 
-const loadModuleFallback = async (): Promise<ModuleFallback> => await import(
+const loadSignedFallback = async (): Promise<SignedFallback> => await import(
   'data:text/javascript,' + encodeURIComponent(
-    `${lift('sha256Hex')}\n${lift('moduleHostPaths', false)}\n`
-    + `${lift('verifiedResponseBytes')}\n${lift('fetchSignedModuleFromHosts')}\n`
-    + 'export { moduleHostPaths, verifiedResponseBytes, fetchSignedModuleFromHosts }',
+    `${lift('sha256Hex')}\n${lift('signedHostPaths', false)}\n`
+    + `${lift('verifiedResponseBytes')}\n${lift('fetchSignedBytesFromHosts')}\n`
+    + 'export { signedHostPaths, verifiedResponseBytes, fetchSignedBytesFromHosts }',
   )
-) as ModuleFallback
+) as SignedFallback
 
 /** Bytes + enough tail that a 32-byte header read is always satisfied. */
 const bytes = (...head: number[]): Blob =>
@@ -116,24 +117,36 @@ describe('service worker copies', () => {
   })
 })
 
-describe('signature module network fallback', () => {
+describe('exact-signature network fallback', () => {
   afterEach(() => vi.unstubAllGlobals())
 
   const moduleBytes = new TextEncoder().encode('export const verified = true\n')
   const signature = createHash('sha256').update(moduleBytes).digest('hex')
 
   it('tries flat, bundled, then legacy deployment paths', async () => {
-    const fallback = await loadModuleFallback()
-    expect(fallback.moduleHostPaths('https://host.test/', signature, 'dependency')).toEqual([
+    const fallback = await loadSignedFallback()
+    expect(fallback.signedHostPaths('https://host.test/', signature, 'dependency')).toEqual([
       `https://host.test/${signature}`,
       `https://host.test/content/${signature}`,
       `https://host.test/__dependencies__/${signature}.js`,
       `https://host.test/content/__dependencies__/${signature}.js`,
     ])
+    expect(fallback.signedHostPaths('https://host.test/', signature, 'layer')).toEqual([
+      `https://host.test/${signature}`,
+      `https://host.test/content/${signature}`,
+      `https://host.test/__layers__/${signature}.json`,
+      `https://host.test/content/__layers__/${signature}.json`,
+    ])
+    expect(fallback.signedHostPaths('https://host.test/', signature, 'resource')).toEqual([
+      `https://host.test/${signature}`,
+      `https://host.test/content/${signature}`,
+      `https://host.test/__resources__/${signature}`,
+      `https://host.test/content/__resources__/${signature}`,
+    ])
   })
 
   it('accepts only bytes whose SHA-256 is the requested signature', async () => {
-    const fallback = await loadModuleFallback()
+    const fallback = await loadSignedFallback()
     const fetchMock = vi.fn(async (url: string) =>
       url.includes('/content/')
         ? new Response(moduleBytes, { status: 200, headers: { 'content-type': 'application/octet-stream' } })
@@ -141,31 +154,34 @@ describe('signature module network fallback', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await fallback.fetchSignedModuleFromHosts(signature, 'dependency', ['https://host.test'])
+    const result = await fallback.fetchSignedBytesFromHosts(signature, 'dependency', ['https://host.test'])
     expect(new Uint8Array(result?.buf ?? new ArrayBuffer(0))).toEqual(moduleBytes)
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it('drops forged and SPA-fallback responses instead of executing them', async () => {
-    const fallback = await loadModuleFallback()
-    const fetchMock = vi.fn(async (url: string) =>
-      url.endsWith(`/${signature}`)
-        ? new Response(moduleBytes, { status: 200, headers: { 'content-type': 'text/html' } })
-        : new Response('forged', { status: 200, headers: { 'content-type': 'application/javascript' } }),
+  it('treats MIME as metadata and the content signature as authority', async () => {
+    const fallback = await loadSignedFallback()
+    const htmlBytes = new TextEncoder().encode('<!doctype html><title>signed resource</title>')
+    const htmlSignature = createHash('sha256').update(htmlBytes).digest('hex')
+    const fetchMock = vi.fn(async () =>
+      new Response(htmlBytes, { status: 200, headers: { 'content-type': 'text/html' } }),
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(
-      fallback.fetchSignedModuleFromHosts(signature, 'bee', ['https://host.test']),
-    ).resolves.toBeNull()
-    expect(fetchMock).toHaveBeenCalledTimes(4)
+    const result = await fallback.fetchSignedBytesFromHosts(htmlSignature, 'resource', ['https://host.test'])
+    expect(new Uint8Array(result?.buf ?? new ArrayBuffer(0))).toEqual(htmlBytes)
+    expect(result?.contentType).toBe('text/html')
+    expect(fetchMock).toHaveBeenCalledOnce()
   })
 
-  it('wires verified bytes into module cache warming before the 404', () => {
-    expect(source).toContain('const fetched = await fetchSignedModuleFromHosts(sig, kind)')
+  it('wires every signed kind through verified fetch before its 404', () => {
+    expect(source).toContain('const fetched = await fetchSignedBytesFromHosts(sig, kind)')
     expect(source).toContain('await writeModuleToOpfs(dirNames[0], sig, fetched.buf)')
-    expect(source.indexOf('const fetched = await fetchSignedModuleFromHosts(sig, kind)'))
+    expect(source.indexOf('const fetched = await fetchSignedBytesFromHosts(sig, kind)'))
       .toBeLessThan(source.indexOf("return new Response('module not found', { status: 404 })"))
+    expect(source).toContain("const fetched = await fetchSignedBytesFromHosts(sig, 'layer')")
+    expect(source).toContain("const fetched = await fetchSignedBytesFromHosts(sig, 'resource')")
+    expect(source).toContain('await writeFlatContentToOpfs(sig, fetched.buf)')
   })
 })
 

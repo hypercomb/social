@@ -62,8 +62,35 @@ const copyFonts = async () => {
   }
 }
 
+/**
+ * Publish the content-addressed package namespace at the domain root.
+ *
+ * `/content` remains the bundled compatibility mirror, but the runtime
+ * contract is `<origin>/<signature>`. Keeping the flat leaves in compiler
+ * output means the plain local server and a static production deployment
+ * exercise the same resolution path instead of producing a normal-but-noisy
+ * root 404 before falling back to `/content/<signature>`.
+ */
+const copySignatureNamespace = async () => {
+  const bundled = join(WEB_ROOT, 'public', 'content')
+  let entries
+  try { entries = await readdir(bundled, { withFileTypes: true }) }
+  catch (error) {
+    if (error?.code === 'ENOENT') return
+    throw error
+  }
+  for (const entry of entries) {
+    if (!/^[a-f0-9]{64}$/i.test(entry.name)) continue
+    await cp(join(bundled, entry.name), join(OUTPUT_ROOT, entry.name), {
+      recursive: entry.isDirectory(),
+      force: true,
+    })
+  }
+}
+
 const copyStaticAssets = async () => {
   await copyTree(join(WEB_ROOT, 'public'), OUTPUT_ROOT)
+  await copySignatureNamespace()
   await copyTree(join(SOURCE_ROOT, 'shared-public'), OUTPUT_ROOT)
   await copyTree(
     join(SOURCE_ROOT, 'hypercomb-shared', 'tracks'),
@@ -119,18 +146,15 @@ const findMainOutput = metafile => {
   throw new Error('esbuild did not report a main entry output')
 }
 
-const writeIndex = async ({ mainName, styleName, styleIntegrity, liveReload }) => {
+const writeIndex = async ({ mainName, styleName, styleIntegrity }) => {
   let html = await readFile(join(WEB_ROOT, 'src', 'index.html'), 'utf8')
   html = html.replace(
     '</head>',
     `    <link rel="stylesheet" href="/${styleName}" integrity="${styleIntegrity}" />\n  </head>`,
   )
-  const reload = liveReload
-    ? `\n    <script>new EventSource('/__hc_reload').onmessage = () => location.reload()</script>`
-    : ''
   html = html.replace(
     '</body>',
-    `    <script type="module" src="/${mainName}"></script>${reload}\n  </body>`,
+    `    <script type="module" src="/${mainName}"></script>\n  </body>`,
   )
   await writeFile(join(OUTPUT_ROOT, 'index.html'), html, 'utf8')
 }
@@ -139,7 +163,6 @@ export const buildWeb = async ({
   production = true,
   clean = true,
   copyStatic = true,
-  liveReload = false,
 } = {}) => {
   const started = performance.now()
   await mkdir(OUTPUT_ROOT, { recursive: true })
@@ -204,7 +227,7 @@ export const buildWeb = async ({
 
   const { name: styleName, integrity: styleIntegrity } = await compileStyles(production)
   const mainName = findMainOutput(result.metafile)
-  await writeIndex({ mainName, styleName, styleIntegrity, liveReload })
+  await writeIndex({ mainName, styleName, styleIntegrity })
 
   const mainStats = await stat(join(OUTPUT_ROOT, mainName))
   const styleStats = await stat(join(OUTPUT_ROOT, styleName))

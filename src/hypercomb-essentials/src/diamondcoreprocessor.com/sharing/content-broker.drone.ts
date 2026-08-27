@@ -61,16 +61,11 @@
 // so we don't loop on our own broadcasts. Local-fanout events arrive
 // without a pubkey (pre-sign) — also dropped.
 //
-// On dependency fetches: dependencies live in the sign('dependencies')
-// POOL OF MEANING — a dir at the OPFS root named by sha256 of the
-// UTF-8 'dependencies' bytes, the same derivation Store uses. Store
-// doesn't expose a getDependencyBytes yet, so we address the pool
-// directly (prefer Store's pre-opened handle, else derive); the legacy
-// `__dependencies__` dir is a READ fallback only until its
-// self-cleaning drain removes it. Layer/resource paths use the
-// canonical Store APIs.
+// Dependencies live in the sign('dependencies') POOL OF MEANING. Store owns
+// the verified local accessor and canonical write boundary; the broker never
+// hand-addresses a pool or resurrects a legacy typed directory.
 
-import { Drone, EffectBus, registerPoolMeaning } from '@hypercomb/core'
+import { Drone, EffectBus } from '@hypercomb/core'
 import { decorationClosureSigs } from './decoration-closure.js'
 
 const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
@@ -333,15 +328,13 @@ interface SignerApi {
 }
 
 interface StoreApi {
-  opfsRoot?: FileSystemDirectoryHandle
-  /** sign('dependencies') pool handle — Store pre-opens it at init. */
-  dependencies?: FileSystemDirectoryHandle
-  getResource?: (sig: string) => Promise<Blob | null>
   getResourceLocal?: (sig: string) => Promise<Blob | null>
   putResource?: (blob: Blob) => Promise<string>
-  getLayerBytes?: (sig: string) => Promise<Uint8Array | null>
+  getLayerLocalBytes?: (sig: string) => Promise<Uint8Array | null>
   getLayerPoolBytes?: (sig: string) => Promise<Uint8Array | null>
   writeLayerBytes?: (sig: string, bytes: ArrayBuffer) => Promise<void>
+  getDependencyBytes?: (sig: string) => Promise<Uint8Array | null>
+  writeDependencyBytes?: (sig: string, bytes: Uint8Array) => Promise<void>
 }
 
 // ── helpers ─────────────────────────────────────────────────────────
@@ -372,13 +365,6 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 }
 
 const SIG_RE = /^[0-9a-f]{64}$/
-
-// sign(meaning) → pool address, memoized, via the core POOL REGISTRY.
-// Deriving the address REGISTERS the meaning, so anything that walks the
-// OPFS root can tell this pool apart from a lineage sigbag (they share one
-// flat namespace, and a bare-word meaning hashes to the same address as a
-// same-named root tile). Never re-derive locally.
-const poolSignature = (meaning: string): Promise<string> => registerPoolMeaning(meaning)
 
 // ── drone ───────────────────────────────────────────────────────────
 
@@ -411,8 +397,8 @@ export class ContentBrokerDrone extends Drone {
   // the fetch settles.
   #pendingFetches = new Map<string, Promise<Uint8Array | null>>()
 
-  // Per-host URL-shape memo: once a host answers a real 200 (non-HTML
-  // bytes) on the flat `/<sig>` shape or the legacy typed path, only
+  // Per-host URL-shape memo: once a host answers exact verified bytes on the
+  // flat `/<sig>` shape or the legacy typed path, only
   // that shape is probed against the host for the rest of the session.
   // First contact still tries flat-then-legacy. Halves the 404 cost of
   // every subsequent miss against a known host.
@@ -937,24 +923,18 @@ export class ContentBrokerDrone extends Drone {
             this.#mintOutcome(host, res.status === 404 ? 'not-found' : 'unreachable')
             continue
           }
-          // SPA fallback guard: sig-addressed bytes are never text/html —
-          // skip before hashing (an extension-less /<sig> on a dev-server
-          // origin 200s with index.html). Health-wise this IS a not-found:
-          // the host answered, it just doesn't serve this sig.
-          if ((res.headers.get('content-type') || '').toLowerCase().includes('text/html')) {
-            this.#mintOutcome(host, 'not-found')
-            continue
-          }
-          // Capability memo: this host serves real (non-HTML) bytes on this
-          // URL shape — remember it and stop probing the other shape. Set
-          // before verification: even mismatched bytes prove the shape.
-          this.#hostPathShape.set(host, tryPath === flatPath ? 'flat' : 'legacy')
           const buf = await res.arrayBuffer()
           const bytes = new Uint8Array(buf)
           if (!await this.#verifyBytes(bytes, sig)) {
             this.#mintOutcome(host, 'mismatch')
             continue
           }
+          // Capability memo only after exact verification. A SPA fallback or
+          // forged response proves nothing about which immutable-content URL
+          // shape the host supports. MIME is deliberately irrelevant: HTML
+          // can be a legitimate resource and wrong index.html bytes cannot
+          // satisfy the requested SHA-256.
+          this.#hostPathShape.set(host, tryPath === flatPath ? 'flat' : 'legacy')
           // Branch-closure attribution (§21.14): a host serving a LAYER is
           // presumed to serve the layer's entire closure — the standard is
           // "a branch merkle signature hosts all its contents". Every ref
@@ -1766,8 +1746,8 @@ export class ContentBrokerDrone extends Drone {
         await store.writeLayerBytes(sig, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
       } else if (type === 'resource' && store?.putResource) {
         await store.putResource(new Blob([bytes as BlobPart]))
-      } else if (type === 'dependency') {
-        await this.#writeDependencyBytes(sig, bytes)
+      } else if (type === 'dependency' && store?.writeDependencyBytes) {
+        await store.writeDependencyBytes(sig, bytes)
       }
     } catch (err) {
       console.warn('[content-broker] persist failed (still returning bytes)', { sig: sig.slice(0, 12), type, err })
@@ -1785,7 +1765,11 @@ export class ContentBrokerDrone extends Drone {
     if (!store) return null
     try {
       if (type === 'layer') {
-        if (store.getLayerBytes) return (await store.getLayerBytes(sig)) ?? null
+        // Pure-local read ONLY. Store.getLayerBytes starts detached host
+        // healing on a miss; calling it from the broker would re-enter this
+        // same coalesced fetch. New stores expose the explicit local accessor;
+        // the pool read keeps older store bundles compatible.
+        if (store.getLayerLocalBytes) return (await store.getLayerLocalBytes(sig)) ?? null
         if (store.getLayerPoolBytes) return (await store.getLayerPoolBytes(sig)) ?? null
         return null
       }
@@ -1799,64 +1783,10 @@ export class ContentBrokerDrone extends Drone {
         return new Uint8Array(await blob.arrayBuffer())
       }
       if (type === 'dependency') {
-        return await this.#readDependencyBytes(sig)
+        return store.getDependencyBytes ? await store.getDependencyBytes(sig) : null
       }
     } catch { /* fall through */ }
     return null
-  }
-
-  // Dependencies live in the sign('dependencies') pool at the OPFS
-  // root. Store doesn't expose a typed accessor for them yet, so we
-  // address the pool here — Store's pre-opened handle when available
-  // (it auto-retargets with Store), else the derived pool address.
-  // Read-only and write paths are kept local so a future
-  // Store.getDependencyBytes refactor only needs to replace these
-  // helpers.
-
-  #dependencyPool = async (create: boolean): Promise<FileSystemDirectoryHandle | null> => {
-    const store = this.#getStore()
-    if (store?.dependencies) return store.dependencies
-    const root = store?.opfsRoot
-    if (!root) return null
-    try {
-      return await root.getDirectoryHandle(await poolSignature('dependencies'), { create })
-    } catch { return null }
-  }
-
-  #readDependencyBytes = async (sig: string): Promise<Uint8Array | null> => {
-    const pool = await this.#dependencyPool(false)
-    if (pool) {
-      try {
-        const handle = await pool.getFileHandle(sig, { create: false })
-        const file = await handle.getFile()
-        return new Uint8Array(await file.arrayBuffer())
-      } catch { /* pool miss — fall through to the legacy drain source */ }
-    }
-    // LEGACY read fallback (drain window only): `__dependencies__` is
-    // opened WITHOUT create so the dir stays gone once Store's
-    // self-cleaning absorb has drained and removed it.
-    const root = this.#getStore()?.opfsRoot
-    if (!root) return null
-    try {
-      const legacy = await root.getDirectoryHandle('__dependencies__', { create: false })
-      const handle = await legacy.getFileHandle(sig, { create: false })
-      const file = await handle.getFile()
-      return new Uint8Array(await file.arrayBuffer())
-    } catch { return null }
-  }
-
-  #writeDependencyBytes = async (sig: string, bytes: Uint8Array): Promise<void> => {
-    // Writes target the sign('dependencies') pool ONLY — never the
-    // legacy dir (a legacy write would split-brain freshly fetched
-    // bytes away from the pool the loaders read).
-    const pool = await this.#dependencyPool(true)
-    if (!pool) return
-    try {
-      const handle = await pool.getFileHandle(sig, { create: true })
-      const w = await handle.createWritable()
-      try { await w.write(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer) }
-      finally { await w.close() }
-    } catch { /* best-effort */ }
   }
 
   // ─────────────────────────────────────────────────────────────────

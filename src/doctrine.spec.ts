@@ -89,6 +89,20 @@ const assertRatchet = (actual: string[], allowed: string[], rule: string): void 
 
 describe('doctrine ratchets', () => {
 
+  it('the web shim never rebuilds an import-map loading path', () => {
+    const files = [
+      'hypercomb-web/src/index.html',
+      'hypercomb-web/src/main.ts',
+      'hypercomb-shared/core/dependency-loader.ts',
+      'hypercomb-shared/core/script-preloader.ts',
+    ]
+    for (const file of files) {
+      const source = stripComments(readFileSync(join(ROOT, file), 'utf8'))
+      expect(source, `${file}: signed packages resolve by exact URL; import maps are retired`)
+        .not.toMatch(/type\s*=\s*['"]importmap['"]|hc:importmap|resolveImportMap|cacheImportMap|__hypercombAliasMap/)
+    }
+  })
+
   it('synchronize is dispatched only by the processor (plus frozen boot-kick debt)', () => {
     // hypercomb.act()'s finally block is the sole sanctioned dispatcher.
     // (The three shell boot kicks were routed through act('') — debt paid.)
@@ -130,7 +144,6 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/diamondcoreprocessor.com/history/history.service.ts',
       'hypercomb-essentials/src/diamondcoreprocessor.com/move/layout.queen.ts',
       'hypercomb-essentials/src/diamondcoreprocessor.com/move/layout.service.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/sharing/content-broker.drone.ts',
       'hypercomb-essentials/src/diamondcoreprocessor.com/sharing/feedback-channel.drone.ts',
       'hypercomb-essentials/src/diamondcoreprocessor.com/sharing/host-sync.service.ts',
       'hypercomb-essentials/src/diamondcoreprocessor.com/sharing/push-queue.service.ts',

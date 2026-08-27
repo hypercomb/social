@@ -12,7 +12,6 @@ const option = name => {
 
 const port = Number(option('--port') ?? 4250)
 const host = option('--host') ?? 'localhost'
-const reloadClients = new Set()
 
 const MIME = new Map([
   ['.css', 'text/css; charset=utf-8'],
@@ -50,18 +49,6 @@ const safeFile = pathname => {
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? `${host}:${port}`}`)
-    if (url.pathname === '/__hc_reload') {
-      response.writeHead(200, {
-        'cache-control': 'no-store',
-        connection: 'keep-alive',
-        'content-type': 'text/event-stream',
-      })
-      response.write(': connected\n\n')
-      reloadClients.add(response)
-      request.on('close', () => reloadClients.delete(response))
-      return
-    }
-
     let file = safeFile(decodeURIComponent(url.pathname))
     if (!file) {
       response.writeHead(403).end('forbidden')
@@ -104,10 +91,8 @@ const rebuild = async () => {
         production: false,
         clean: false,
         copyStatic: true,
-        liveReload: true,
       })
     } while (queued)
-    for (const client of reloadClients) client.write(`data: ${Date.now()}\n\n`)
   } catch (error) {
     console.error('[web-serve] rebuild failed; keeping the last good output', error)
   } finally {
@@ -124,7 +109,6 @@ await buildWeb({
   production: false,
   clean: true,
   copyStatic: true,
-  liveReload: true,
 })
 
 const watchRoots = [
@@ -143,7 +127,6 @@ server.listen(port, host, () => {
 
 const close = () => {
   for (const watcher of watchers) watcher.close()
-  for (const client of reloadClients) client.end()
   server.close(() => process.exit(0))
 }
 

@@ -11,9 +11,41 @@ import {
 } from '@hypercomb/core'
 import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
 import { checkForUpdate, upgradeFromBundled, type BootStatus } from './ensure-install'
-import { cacheImportMap } from './resolve-import-map'
 
 const ELEMENT_NAME = 'hc-install-prompt'
+const SNAPSHOT_QUEEN_KEY = '@diamondcoreprocessor.com/SnapshotQueenBee'
+const SNAPSHOT_READY_TIMEOUT_MS = 15_000
+
+type SnapshotQueen = {
+  createRestorePoint?: (name: string) => Promise<boolean>
+}
+
+/**
+ * The update affordance can appear while non-critical bees are still landing.
+ * A fast click must wait for the checkpoint service instead of treating its
+ * not-yet-registered state as a failed snapshot.
+ */
+export const waitForSnapshotQueen = async (
+  timeoutMs = SNAPSHOT_READY_TIMEOUT_MS,
+): Promise<SnapshotQueen | undefined> => {
+  const current = window.ioc?.get?.<SnapshotQueen>(SNAPSHOT_QUEEN_KEY)
+  if (current) return current
+  return new Promise(resolve => {
+    let settled = false
+    let off: (() => void) | undefined
+    const finish = (queen?: SnapshotQueen): void => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timer)
+      off?.()
+      resolve(queen)
+    }
+    const timer = window.setTimeout(() => finish(), timeoutMs)
+    off = window.ioc?.onRegister?.((key, value) => {
+      if (key === SNAPSHOT_QUEEN_KEY) finish(value as SnapshotQueen)
+    })
+  })
+}
 
 const FALLBACKS: Record<string, string> = {
   'install.title': 'Welcome to Hypercomb',
@@ -207,9 +239,16 @@ export class InstallPromptElement extends HTMLElement {
     try {
       if (requireCheckpoint) {
         EffectBus.emit('update:status', { phase: 'snapshotting', message: 'Saving restore point…' })
-        const queen = window.ioc?.get<{
-          createRestorePoint?: (name: string) => Promise<boolean>
-        }>('@diamondcoreprocessor.com/SnapshotQueenBee')
+        const queen = await waitForSnapshotQueen()
+        if (!queen?.createRestorePoint) {
+          EffectBus.emit('update:status', {
+            phase: 'error',
+            message: 'Update stopped — the restore service did not finish loading',
+          })
+          this.#upgrading = false
+          this.#render()
+          return
+        }
         const checkpointed = await queen?.createRestorePoint?.(String(restorePointName ?? '').trim())
         if (!checkpointed) {
           EffectBus.emit('update:status', {
@@ -224,7 +263,6 @@ export class InstallPromptElement extends HTMLElement {
       EffectBus.emit('update:status', { phase: 'applying', message: 'Updating packages and website…' })
       const ok = await upgradeFromBundled()
       if (ok) {
-        await cacheImportMap()
         EffectBus.emit('update:status', { phase: 'complete', message: 'Everything is updated' })
         location.reload()
       } else {

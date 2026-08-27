@@ -1,6 +1,6 @@
 // hypercomb-web/public/hypercomb.worker.js
 // service worker
-// - serves esm modules from /opfs/** without letting vite transform them
+// - serves immutable ESM modules from /opfs/** by exact signature
 // - cache-first
 // - opfs fallback (prod reads bytes from opfs)
 // - dev served verbatim from /dev/** (NO rewrite)
@@ -206,9 +206,9 @@ async function handleModuleRequest(request, dirNames, kind) {
 
   // Cold-cache acquisition. A signature URL is its own integrity assertion:
   // fetch the flat deployment leaf (same origin first, then known community
-  // hosts), reject SPA HTML and ANY byte sequence whose SHA-256 is not the
-  // requested signature, then warm both OPFS and Cache API before execution.
-  const fetched = await fetchSignedModuleFromHosts(sig, kind)
+  // hosts), accept only the byte sequence whose SHA-256 is the requested
+  // signature, then warm both OPFS and Cache API before execution.
+  const fetched = await fetchSignedBytesFromHosts(sig, kind)
   if (fetched) {
     await writeModuleToOpfs(dirNames[0], sig, fetched.buf)
     const headers = new Headers()
@@ -249,6 +249,17 @@ async function handleLayerRequest(request) {
   if (opfs) {
     await cachePut(request, opfs)
     return toHeadIfNeeded(request, opfs)
+  }
+
+  const fetched = await fetchSignedBytesFromHosts(sig, 'layer')
+  if (fetched) {
+    await writeFlatContentToOpfs(sig, fetched.buf)
+    const headers = new Headers()
+    headers.set('content-type', 'application/json; charset=utf-8')
+    headers.set('cache-control', 'public, max-age=31536000, immutable')
+    const response = new Response(fetched.buf, { status: 200, headers })
+    await cachePut(request, response)
+    return toHeadIfNeeded(request, response.clone())
   }
 
   return new Response('layer not found', { status: 404 })
@@ -292,9 +303,9 @@ async function handleSiteResourceRequest(request) {
   // the domains the page posted. Bytes are sha256-verified before serving,
   // then written through to OPFS (silently — the SW can't emit
   // content:wrote) so future reads (SW or Store) hit locally and offline.
-  const fetched = await fetchResourceFromHosts(sig)
+  const fetched = await fetchSignedBytesFromHosts(sig, 'resource')
   if (!fetched) return new Response('resource not found', { status: 404 })
-  void writeResourceToOpfs(sig, fetched.buf)
+  void writeFlatContentToOpfs(sig, fetched.buf)
   const headers = new Headers()
   // The host stores resources by bare signature (no extension) and serves
   // them as application/octet-stream. Browsers enforce strict MIME checking
@@ -722,7 +733,7 @@ async function sha256Hex(buffer) {
   return hex
 }
 
-async function moduleCandidateOrigins() {
+async function signedCandidateOrigins() {
   let domains = KNOWN_DOMAINS
   if (!domains || domains.length === 0) domains = await loadDomains()
   const origins = [self.location.origin]
@@ -735,69 +746,47 @@ async function moduleCandidateOrigins() {
   return [...new Set(origins)]
 }
 
-function moduleHostPaths(origin, sig, kind) {
+function signedHostPaths(origin, sig, kind) {
   const base = String(origin || '').replace(/\/+$/, '')
-  const legacyDir = kind === 'bee' ? '__bees__' : '__dependencies__'
+  const legacyDir = kind === 'bee' ? '__bees__'
+    : kind === 'dependency' ? '__dependencies__'
+      : kind === 'layer' ? '__layers__'
+        : '__resources__'
+  const suffix = kind === 'bee' || kind === 'dependency' ? '.js'
+    : kind === 'layer' ? '.json'
+      : ''
   return [
     `${base}/${sig}`,
     `${base}/content/${sig}`,
-    `${base}/${legacyDir}/${sig}.js`,
-    `${base}/content/${legacyDir}/${sig}.js`,
+    `${base}/${legacyDir}/${sig}${suffix}`,
+    `${base}/content/${legacyDir}/${sig}${suffix}`,
   ]
 }
 
 async function verifiedResponseBytes(sig, response) {
   if (!response || !response.ok) return null
-  if ((response.headers.get('content-type') || '').toLowerCase().includes('text/html')) return null
   const buf = await response.arrayBuffer()
-  return await sha256Hex(buf) === sig.toLowerCase() ? buf : null
+  if (await sha256Hex(buf) !== sig.toLowerCase()) return null
+  return { buf, contentType: response.headers.get('content-type') || '' }
 }
 
-// Try the canonical flat deployment path first, the shell's bundled /content
-// mirror second, then old typed paths only for unmigrated deployments. The
-// optional origins argument is a test seam; production always derives the
-// current origin + posted/persisted community domains.
-async function fetchSignedModuleFromHosts(sig, kind, origins) {
-  const candidates = origins ?? await moduleCandidateOrigins()
+// One network resolver for every signed byte kind. Try the canonical flat
+// deployment path first, the bundled /content mirror second, then old typed
+// paths only for unmigrated deployments. The signature — not MIME or path —
+// is the authority. The optional origins argument is a test seam; production
+// derives the current origin plus posted/persisted community domains.
+async function fetchSignedBytesFromHosts(sig, kind, origins) {
+  const candidates = origins ?? await signedCandidateOrigins()
   const attempted = new Set()
   for (const origin of candidates) {
-    for (const url of moduleHostPaths(origin, sig, kind)) {
+    for (const url of signedHostPaths(origin, sig, kind)) {
       if (attempted.has(url)) continue
       attempted.add(url)
       try {
         const response = await fetch(url, { cache: 'no-store' })
-        const buf = await verifiedResponseBytes(sig, response)
-        if (buf) return { buf }
+        const verified = await verifiedResponseBytes(sig, response)
+        if (verified) return verified
       } catch { /* network / CORS / cert — try the next path / host */ }
-    }
-  }
-  return null
-}
-
-// Try each known host in order; the first response whose bytes sha256 to the
-// requested sig wins. Loopback hosts use http (content-side analog of the
-// mesh allow-loopback); real domains use https. Returns { buf, contentType }
-// or null. Verification is the backstop — a wrong/hostile domain can only
-// cost a 404, never serve incorrect bytes.
-async function fetchResourceFromHosts(sig) {
-  let domains = KNOWN_DOMAINS
-  if (!domains || domains.length === 0) domains = await loadDomains()
-  for (const raw of (domains || [])) {
-    const host = String(raw || '').replace(/^https?:\/\//, '').replace(/\/+$/, '').trim()
-    if (!host) continue
-    const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
-    // Flat heap first (`/<sig>` — the canonical address; host-sync pushes
-    // land there), legacy typed pool fallback for unmigrated hosts.
-    for (const path of [`/${sig}`, `/__resources__/${sig}`]) {
-      try {
-        const res = await fetch(`${scheme}://${host}${path}`, { cache: 'no-store' })
-        if (!res || !res.ok) continue
-        // SPA fallback guard: sig-addressed bytes are never text/html.
-        if ((res.headers.get('content-type') || '').toLowerCase().includes('text/html')) continue
-        const buf = await res.arrayBuffer()
-        if (await sha256Hex(buf) !== sig) continue
-        return { buf, contentType: res.headers.get('content-type') || '' }
-      } catch { /* network / CORS / cert — try next path / host */ }
     }
   }
   return null
@@ -809,7 +798,7 @@ async function fetchResourceFromHosts(sig) {
 // as a sig-named file at the FLAT OPFS ROOT — the canonical content address.
 // No directory is created, ever: the legacy `__hive__`/`__resources__` dirs
 // are drain sources the Store removes, and a create here would resurrect them.
-async function writeResourceToOpfs(sig, buffer) {
+async function writeFlatContentToOpfs(sig, buffer) {
   try {
     const root = await self.navigator.storage.getDirectory()
     try { await root.getFileHandle(sig); return } catch { /* not present — create */ }

@@ -5,31 +5,6 @@
     <title>Hypercomb</title>
     <base href="/" />
 
-    <!-- Legacy import-map pre-apply. Current content modules embed exact OPFS
-         signature URLs for namespace and platform imports, so new installs do
-         not write this cache. An existing participant may still have a package
-         whose emitted modules contain bare @hypercomb/core / pixi.js edges;
-         while that package remains installed, main.ts caches the two-entry
-         compatibility map here so older Safari/Chromium sees it before any
-         module script. The cache retires itself when current package metadata
-         is adopted. -->
-    <script>
-      (function () {
-        try {
-          var raw = localStorage.getItem('hc:importmap');
-          if (!raw) return;
-          var parsed = JSON.parse(raw);
-          if (!parsed || typeof parsed.imports !== 'object' || !parsed.imports) return;
-          if (Object.keys(parsed.imports).length === 0) return;
-          var s = document.createElement('script');
-          s.type = 'importmap';
-          s.textContent = raw;
-          document.head.appendChild(s);
-          window.__hcImportMapApplied = raw;
-        } catch (e) {}
-      })();
-    </script>
-
     <!-- Theme pre-paint: reflect the stored theme onto <html> before first
          paint so there's no flash. ThemeService (@hypercomb.social/Theme) owns
          it thereafter. Boots dark when no preference is stored; 'system' clears

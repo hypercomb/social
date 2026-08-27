@@ -1,7 +1,4 @@
 // hypercomb-web/src/setup/ensure-install.ts
-// Runs BEFORE the import map is set, so that OPFS dependencies are written
-// before the browser freezes the import-map entries.
-//
 // Two-source install: the sentinel is the preferred source (DCP audits
 // content, can push deltas). The bundled `/content/` shipped with the
 // web shell is the fallback — used when DCP is unreachable, and as a
@@ -144,7 +141,7 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
     // One missing file → wipe + reinstall.
     // ONE directory listing per dir instead of ~97 serial getFileHandle
     // probes (59 bees + 28 deps + 10 beeDep values, each a sequential
-    // awaited OPFS roundtrip blocking the import map, dep loading, and
+    // awaited OPFS roundtrip blocking signed dependency loading and
     // first paint). Enumerate names once, check membership in memory.
     // UNION the sign(meaning) pool with its legacy `__x__` drain dir:
     // the Store's absorb runs detached, so on the first post-upgrade
@@ -326,8 +323,8 @@ export const checkForUpdate = async (): Promise<void> => {
  * On success the caller is expected to `location.reload()` so the
  * freshly-installed bees take over.
  *
- * Returns `true` when at least one bee landed in OPFS, `false`
- * otherwise (network down, no bundled package, partial fetch).
+ * Returns `true` only when the complete signed package landed in OPFS,
+ * `false` otherwise (network down, no bundle, mismatch, or partial fetch).
  */
 export const upgradeFromBundled = async (): Promise<boolean> => {
   const store = get('@hypercomb.social/Store') as Store | undefined
@@ -347,16 +344,11 @@ export const upgradeFromBundled = async (): Promise<boolean> => {
       console.warn('[upgrade-from-bundled] no bundled /content/manifest.json available')
       return false
     }
-    // Wipe stale artifacts before reinstall so signatures dropped from
-    // the new bundle don't linger and load on next boot.
-    const cached = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
-    if (cached) {
-      localStorage.removeItem(MANIFEST_KEY)
-      localStorage.removeItem(SYNC_SIG_KEY)
-      await purgeStaleOpfsArtifacts(store)
-    }
-    await installFromBundled(bundled, sigStore)
-    return true
+    // Keep the current signed install intact until every replacement leaf and
+    // sigbag has verified. installFromBundled performs targeted stale-GC only
+    // after the new closure is complete, so a network failure cannot strand
+    // the participant between versions.
+    return await installFromBundled(bundled, sigStore)
   } finally {
     EffectBus.emit('install:sync', { active: false, source: 'bundled' })
   }
@@ -465,9 +457,9 @@ const bundledDiffersFromCached = (bundled: BundledPackage, cached: InstallManife
   return JSON.stringify(bundledPlatforms) !== JSON.stringify(cachedPlatforms)
 }
 
-const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureStore): Promise<void> => {
+const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureStore): Promise<boolean> => {
   const store = get('@hypercomb.social/Store') as Store | undefined
-  if (!store) return
+  if (!store) return false
 
   const fetchBytes = async (path: string): Promise<ArrayBuffer | null> => {
     try {
@@ -479,20 +471,10 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
       // no-store — that one must always revalidate.
       const res = await fetch(path)
       if (!res.ok) return null
-      // SPA fallback guard: an extension-less flat /content/<sig> on a
-      // dev-server origin returns index.html with 200. Sig-addressed
-      // bytes are never text/html.
-      //
-      // NATIVE EXCEPTION: Tauri's asset server guesses mime by file
-      // extension, so every extension-less sig file arrives as text/html —
-      // the guard rejected all 203 bundled files and the install reported
-      // 0/107 with no error (verified live: correct bytes, wrong header).
-      // There is no SPA fallback inside the native shell, and the sha256
-      // check in applyVerifiedFiles is the real gate — index.html bytes
-      // could never hash to a declared sig. Let the hash decide there.
-      const { nativeAvailable } = await import('@hypercomb/shared/core/native-filesystem')
-      if (!nativeAvailable() &&
-          (res.headers.get('content-type') || '').toLowerCase().includes('text/html')) return null
+      // MIME is not an authority for content-addressed bytes. A legitimate
+      // resource may itself be HTML, while a SPA's index.html fallback can
+      // never hash to an unrelated requested signature. Exact verification
+      // happens before any leaf is accepted below.
       return await res.arrayBuffer()
     } catch {
       return null
@@ -512,10 +494,22 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     return null
   }
 
+  // A responding path is only a candidate. Continue through every deployment
+  // shape until the bytes themselves match the requested address; a forged or
+  // SPA-fallback 200 must never suppress a valid legacy/content fallback.
+  const fetchExact = async (signature: string, paths: string[]): Promise<ArrayBuffer | null> => {
+    const expected = signature.toLowerCase()
+    for (const path of paths) {
+      const bytes = await fetchBytes(path)
+      if (bytes && await sha256Hex(bytes) === expected) return bytes
+    }
+    return null
+  }
+
   const fetchAll = async (sigs: string[], kind: ApplyKind, urlsFor: (sig: string) => string[]): Promise<ApplyFile[]> => {
     const out: ApplyFile[] = []
     await Promise.all(sigs.map(async (sig) => {
-      const bytes = await fetchFirst(urlsFor(sig))
+      const bytes = await fetchExact(sig, urlsFor(sig))
       if (bytes) out.push({ kind, signature: sig, bytes })
     }))
     return out
@@ -528,9 +522,9 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   // OPFS root for layers. A fetch miss just never enters the apply set;
   // the partial-install warn below stays loud about the gap.
   const toApply: ApplyFile[] = [
-    ...await fetchAll(bundled.bees, 'bee', (s) => [`/content/${s}`, `/content/__bees__/${s}.js`]),
-    ...await fetchAll(bundled.dependencies, 'dependency', (s) => [`/content/${s}`, `/content/__dependencies__/${s}.js`]),
-    ...await fetchAll(bundled.layers, 'layer', (s) => [`/content/${s}`, `/content/__layers__/${s}.json`]),
+    ...await fetchAll(bundled.bees, 'bee', (s) => [`/${s}`, `/content/${s}`, `/__bees__/${s}.js`, `/content/__bees__/${s}.js`]),
+    ...await fetchAll(bundled.dependencies, 'dependency', (s) => [`/${s}`, `/content/${s}`, `/__dependencies__/${s}.js`, `/content/__dependencies__/${s}.js`]),
+    ...await fetchAll(bundled.layers, 'layer', (s) => [`/${s}`, `/content/${s}`, `/__layers__/${s}.json`, `/content/__layers__/${s}.json`]),
   ]
   const { appliedSigs } = await applyVerifiedFiles(store, toApply, 'bundled')
   const appliedOf = (sigs: string[]): number => sigs.filter(s => appliedSigs.has(s.toLowerCase())).length
@@ -539,19 +533,18 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   const layerCount = appliedOf(bundled.layers)
 
   // Sigbag fetch (Phase 2 additive): when the bundle declares a bag sig,
-  // fetch each indexed entry and write under <bagSig>/<index>. Entry count
-  // matches the flat array length by construction (the build emits both).
+  // fetch each indexed entry, verify the canonical NUL-joined bytestream,
+  // then write under <bagSig>/<index>. No directory is mutated until the
+  // aggregate itself hashes to bagSig.
   // The bag dir is a sig-named dir INSIDE the sign(meaning) pool —
   // legitimate structure, not a typed folder.
   const writeBag = async (
     parentDir: FileSystemDirectoryHandle,
     bagSig: string,
     entryCount: number,
-    legacyContentPath: string,
+    legacyDir: string,
   ): Promise<number> => {
-    const bagDir = await parentDir.getDirectoryHandle(bagSig, { create: true })
-    let written = 0
-    await Promise.all(Array.from({ length: entryCount }, (_, i) => i).map(async (i) => {
+    const staged = await Promise.all(Array.from({ length: entryCount }, (_, i) => i).map(async (i) => {
       // 8 digits is the conformance marker width that builds now emit. The
       // 4-digit name is a READ FALLBACK for dists deployed before the
       // widening: the bag sig is derived from entry CONTENT, so an old dist
@@ -562,27 +555,38 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
       // Flat dist puts the bag dir at the content root; legacy dists
       // nested it inside the typed dir (URL-shape fallback only).
       const bytes = await fetchFirst([
+        `/${bagSig}/${indexName}`,
         `/content/${bagSig}/${indexName}`,
-        `${legacyContentPath}/${bagSig}/${indexName}`,
+        `/${legacyDir}/${bagSig}/${indexName}`,
+        `/content/${legacyDir}/${bagSig}/${indexName}`,
+        `/${bagSig}/${legacyIndexName}`,
         `/content/${bagSig}/${legacyIndexName}`,
-        `${legacyContentPath}/${bagSig}/${legacyIndexName}`,
+        `/${legacyDir}/${bagSig}/${legacyIndexName}`,
+        `/content/${legacyDir}/${bagSig}/${legacyIndexName}`,
       ])
-      if (!bytes) return
+      return bytes ? { indexName, bytes } : null
+    }))
+    if (staged.some(entry => !entry)) return 0
+    const entries = staged as Array<{ indexName: string; bytes: ArrayBuffer }>
+    const canonical = entries.map(entry => new TextDecoder().decode(entry.bytes)).join('\0')
+    if (await sha256Hex(new TextEncoder().encode(canonical).buffer as ArrayBuffer) !== bagSig.toLowerCase()) {
+      console.warn(`[ensure-install] REFUSED sigbag ${bagSig.slice(0, 12)} — entries do not hash to the declared sig`)
+      return 0
+    }
+    const bagDir = await parentDir.getDirectoryHandle(bagSig, { create: true })
+    await Promise.all(entries.map(async ({ indexName, bytes }) => {
       const handle = await bagDir.getFileHandle(indexName, { create: true })
       const writable = await handle.createWritable()
-      await writable.write(bytes)
-      await writable.close()
-      written++
+      try { await writable.write(bytes) } finally { await writable.close() }
     }))
-    return written
+    return entries.length
   }
 
   // Single-bag invariant: before writing the new bag dir, evict any prior
   // bag dirs so the sign('dependencies') and sign('bees') pools each
-  // contain exactly one bag dir after install. The receiver's importmap
-  // build relies on a `readdir` finding only the active bag — no pointer
-  // file needed. Scoped STRICTLY to install-owned pools: at the OPFS root
-  // the same 64-hex dir shape is a user lineage sigbag.
+  // contain exactly one bag dir after install. Scoped STRICTLY to
+  // install-owned pools: at the OPFS root the same 64-hex dir shape is a
+  // user lineage sigbag.
   const evictOldBagDirs = async (parentDir: FileSystemDirectoryHandle, keepSig: string): Promise<void> => {
     const stale: string[] = []
     for await (const [name, handle] of parentDir.entries()) {
@@ -595,30 +599,61 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
       try { await parentDir.removeEntry(name, { recursive: true }) } catch { /* skip */ }
     }
   }
-  if (bundled.dependenciesBag) await evictOldBagDirs(store.dependencies, bundled.dependenciesBag)
-  if (bundled.beesBag) await evictOldBagDirs(store.bees, bundled.beesBag)
-
   let depBagCount = 0
   let beeBagCount = 0
   if (bundled.dependenciesBag) {
-    depBagCount = await writeBag(store.dependencies, bundled.dependenciesBag, bundled.dependencies.length, '/content/__dependencies__')
+    depBagCount = await writeBag(
+      store.dependencies,
+      bundled.dependenciesBag,
+      bundled.dependencies.length,
+      legacyPoolDirectory('dependencies'),
+    )
   }
   if (bundled.beesBag) {
-    beeBagCount = await writeBag(store.bees, bundled.beesBag, bundled.bees.length, '/content/__bees__')
-  }
-
-  // Loud failure mode. If any file failed to land, surface it now —
-  // otherwise the next boot's spot-check will silently wipe and retry,
-  // and the user just sees a flash of the install prompt.
-  if (beeCount !== bundled.bees.length || depCount !== bundled.dependencies.length || layerCount !== bundled.layers.length) {
-    console.warn(
-      `[ensure-install] partial bundled install: bees ${beeCount}/${bundled.bees.length}, deps ${depCount}/${bundled.dependencies.length}, layers ${layerCount}/${bundled.layers.length} — next reload will retry`,
+    beeBagCount = await writeBag(
+      store.bees,
+      bundled.beesBag,
+      bundled.bees.length,
+      legacyPoolDirectory('bees'),
     )
   }
 
+  // Transaction gate: do not advance the installed manifest/sync sig, trust
+  // store, or stale-GC the working package unless every declared leaf and bag
+  // verified. Partial new files are harmless immutable cache and a retry can
+  // resume them; the old signed install remains authoritative and runnable.
+  const leavesComplete = beeCount === bundled.bees.length
+    && depCount === bundled.dependencies.length
+    && layerCount === bundled.layers.length
+  const bagsComplete = (!bundled.dependenciesBag || depBagCount === bundled.dependencies.length)
+    && (!bundled.beesBag || beeBagCount === bundled.bees.length)
+  if (!leavesComplete || !bagsComplete) {
+    console.warn(
+      `[ensure-install] partial bundled install: bees ${beeCount}/${bundled.bees.length}, deps ${depCount}/${bundled.dependencies.length}, layers ${layerCount}/${bundled.layers.length}, bags deps=${depBagCount}/${bundled.dependencies.length} bees=${beeBagCount}/${bundled.bees.length} — current install retained`,
+    )
+    return false
+  }
+
+  // Only now may the replacement retire old replication metadata. Until the
+  // whole closure passes the transaction gate, the prior package (including
+  // its sigbags) remains untouched and authoritative.
+  if (bundled.dependenciesBag) {
+    await evictOldBagDirs(store.dependencies, bundled.dependenciesBag)
+  }
+  if (bundled.beesBag) {
+    await evictOldBagDirs(store.bees, bundled.beesBag)
+  }
+
+  const enabledBees = new Set(bundled.bees.map(sig => sig.toLowerCase()))
+  const enabledDeps = new Set(bundled.dependencies.map(sig => sig.toLowerCase()))
+  await removeDisabled(store.bees, enabledBees, '.js', bundled.beesBag)
+  await removeDisabled(store.dependencies, enabledDeps, '.js', bundled.dependenciesBag)
+  if (store.legacyBees) await removeDisabled(store.legacyBees, enabledBees, '.js', bundled.beesBag)
+  if (store.legacyDependencies) await removeDisabled(store.legacyDependencies, enabledDeps, '.js', bundled.dependenciesBag)
+
   // Mirror the manifest + sync state that resyncFromSentinel would write
-  // so the next reload boots through the cached fast path. Bag sigs are
-  // included so `resolveImportMap` can prefer the bag over flat scan.
+  // so the next reload boots through the cached fast path. Bag sigs remain
+  // replication metadata; executable modules resolve by exact signature.
   const manifest = {
     version: 2,
     packageSig: bundled.packageSig,
@@ -642,6 +677,7 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   sigStore.trustAll([...bundled.bees, ...bundled.dependencies, ...bundled.layers])
   localStorage.setItem(SIG_STORE_KEY, JSON.stringify(sigStore.toJSON()))
   console.log(`[ensure-install] bundled install complete: ${bundled.packageSig.slice(0, 12)} (${beeCount}/${bundled.bees.length} bees, ${depCount}/${bundled.dependencies.length} deps, ${layerCount}/${bundled.layers.length} layers, bags: deps=${depBagCount} bees=${beeBagCount})`)
+  return true
 }
 
 /**
@@ -753,17 +789,9 @@ const resyncPass = async (sentinel: SentinelBridge, store: Store): Promise<void>
   if (store.legacyBees) await removeDisabled(store.legacyBees, enabledBeeSet, '.js', priorManifest?.beesBag)
   if (store.legacyDependencies) await removeDisabled(store.legacyDependencies, enabledDepSet, '.js', priorManifest?.dependenciesBag)
 
-  // The dependency *bag* is the import-map's source of truth: resolveImportMap
-  // reads the bag's leaf sigs to build the alias→`/opfs/<sign('dependencies')>/<sig>`
-  // map. But resync only maintains the FLAT `<sig>.js` dep files — it writes
-  // enabledDeps and removeDisabled() above just deleted the rest. It never
-  // rebuilds the bag. So a bag carried over from the last bundled install
-  // still points at leaf sigs that no longer exist on disk, and the next
-  // boot's import map resolves aliases to files the SW 404s on — surfacing as
-  // "Failed to fetch dynamically imported module" for every dep. Evict the bag
-  // here so resolveImportMap drops to its flat-scan fallback, which derives the
-  // map straight from the `// @scope/name` first line of each flat file this
-  // pass wrote — always consistent with what's actually on disk.
+  // Resync maintains the flat `<sig>.js` dependency files but does not rebuild
+  // the dependency bag. Evict the now-stale bag rather than advertising a
+  // closure that no longer matches the exact signed leaves on disk.
   await evictBagDirs(store.dependencies)
   // Bag dirs stranded in the legacy drain dirs are stale by the same
   // argument (the pool carries the active install; nothing on the
@@ -826,12 +854,9 @@ const resyncPass = async (sentinel: SentinelBridge, store: Store): Promise<void>
   }
 
   // The dependency bag was just evicted (see evictBagDirs above), so the
-  // manifest must NOT advertise one — otherwise the next boot's
-  // resolveImportMap would scan for a bag, find none, and that's fine, but
-  // recording a stale bag sig here invites future code to trust it. Null it
-  // out; resolveImportMap rebuilds the map from flat files. The bee bag is
-  // left intact: nothing on the receiver's read path consults it (bees load
-  // by sig, not by alias), so its staleness is inert.
+  // manifest must not advertise it. The bee bag is left intact: nothing on
+  // the receiver's execution path consults it (bees load by sig), so its
+  // staleness is inert.
   const syncManifest = {
     version: 2,
     layers: enabledLayers,
@@ -900,8 +925,8 @@ const applyVerifiedFiles = async (
   // OPFS root (`<root>/<sig>`, `store.hypercombRoot === opfsRoot`); bees and
   // deps land as `<sig>.js` in their sign(meaning) pools. Cache keys are the
   // pool-addressed `/opfs/<sign(meaning)>/…` URL shapes the SW routes (deps
-  // extension-less — the import map emits extension-less URLs; layers keep
-  // the frozen legacy URL token as their route's cache key).
+  // are extension-less exact signature URLs; layers keep the frozen legacy
+  // URL token as their route's cache key).
   const layerDir = store.hypercombRoot
   const beesUrlBase = `/opfs/${store.bees.name}`
   const depsUrlBase = `/opfs/${store.dependencies.name}`

@@ -627,24 +627,13 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     const needed = map[beeSig]
     if (!needed?.length) return
 
-    const aliasMap = (globalThis as any).__hypercombAliasMap as Map<string, string> | undefined
     const dependencyPoolSig = await Store.poolSignature(Store.DEPENDENCIES_MEANING)
 
     for (const depSig of needed) {
       if (this.#loadedDeps.has(depSig)) continue
 
-      // Alias is retained for human-readable logs only. It is deliberately
-      // absent from the executable import path.
-      let alias: string | undefined
-      for (const [a, s] of (aliasMap ?? [])) {
-        if (s.replace(/\.js$/i, '') === depSig) {
-          alias = a
-          break
-        }
-      }
-
       try {
-        console.log(`[script-preloader] loading dep ${depSig}${alias ? ` (${alias})` : ''} for bee ${beeSig}`)
+        console.log(`[script-preloader] loading dep ${depSig} for bee ${beeSig}`)
         await importSignatureModule(dependencyPoolSig, depSig)
         this.#loadedDeps.add(depSig)
         console.log(`[script-preloader] dep ${depSig} loaded`)

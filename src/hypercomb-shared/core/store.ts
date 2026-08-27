@@ -1641,8 +1641,10 @@ export class Store extends EventTarget {
   /** Read layer bytes by signature. Resolves through:
    *    1. In-memory layerBytesCache (hot, instant)
    *    2. The flat root (`<root>/<sig>`), then the legacy sources
-   *  Once read, cached in memory for subsequent calls. */
-  public getLayerBytes = async (signature: string): Promise<Uint8Array | null> => {
+   *  Once read, cached in memory for subsequent calls. This accessor is
+   *  intentionally local-only so ContentBroker can inspect storage without
+   *  re-entering its own host cascade. */
+  public getLayerLocalBytes = async (signature: string): Promise<Uint8Array | null> => {
     const cached = this.#layerBytesCache.get(signature)
     if (cached) { this.#perfStats.cacheHits++; this.#stageToHost(signature, 'layer', cached); return cached }
     const pending = this.#layerBytesPending.get(signature)
@@ -1659,6 +1661,17 @@ export class Store extends EventTarget {
     }
   }
 
+  /** Render-facing layer lookup. A local miss starts detached host healing,
+   *  then returns null immediately: render never waits on network. The
+   *  broker writes verified arrivals through and emits `content:arrived`,
+   *  which lets the gated render retry from the local cache. */
+  public getLayerBytes = async (signature: string): Promise<Uint8Array | null> => {
+    const local = await this.getLayerLocalBytes(signature)
+    if (local) return local
+    void this.fetchLayerFromHost(signature)
+    return null
+  }
+
   /** Read layer bytes by signature, root-first: the flat root
    *  (`<root>/<sig>`) then the legacy sources (see `#readContentFile`).
    *  Absent everywhere → null. Content-addressed: sig === hash(bytes),
@@ -1670,6 +1683,9 @@ export class Store extends EventTarget {
       const file = await this.#readContentFile(signature, this.layers)
       if (!file) return null
       const bytes = new Uint8Array(await file.arrayBuffer())
+      if (await SignatureService.sign(
+        bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+      ) !== signature.toLowerCase()) return null
       // The warmup/preloader reads layers through the pool directly (not via
       // getLayerBytes), so without this the author only pushed the branches it
       // navigated, leaving sibling tiles 404 on the relay. Push here too so the
@@ -1688,9 +1704,57 @@ export class Store extends EventTarget {
   public writeLayerBytes = async (signature: string, bytes: ArrayBuffer): Promise<void> => {
     if (!this.hypercombRoot) return
     try {
+      if (await SignatureService.sign(bytes) !== signature.toLowerCase()) {
+        console.warn(`[store] refused layer write ${signature.slice(0, 12)}: content signature mismatch`)
+        return
+      }
       const handle = await this.hypercombRoot.getFileHandle(signature, { create: true })
       const writable = await handle.createWritable()
       try { await writable.write(bytes) } finally { await writable.close() }
+    } catch { /* best-effort */ }
+  }
+
+  /** Read a dependency leaf from the canonical sign('dependencies') pool,
+   *  then its legacy drain source. Both `<sig>.js` (current install shape)
+   *  and bare `<sig>` (older hosts) resolve, but bytes are returned only when
+   *  they hash to the requested signature. */
+  public getDependencyBytes = async (signature: string): Promise<Uint8Array | null> => {
+    const expected = signature.toLowerCase()
+    for (const source of [this.dependencies, this.legacyDependencies]) {
+      if (!source) continue
+      for (const name of [`${expected}.js`, expected]) {
+        try {
+          const handle = await source.getFileHandle(name, { create: false })
+          const bytes = new Uint8Array(await (await handle.getFile()).arrayBuffer())
+          const exact = bytes.buffer.slice(
+            bytes.byteOffset,
+            bytes.byteOffset + bytes.byteLength,
+          ) as ArrayBuffer
+          if (await SignatureService.sign(exact) === expected) return bytes
+        } catch { /* miss/corruption — try the next shape/source */ }
+      }
+    }
+    return null
+  }
+
+  /** Persist an exact dependency leaf in the canonical pool only. The Store
+   *  owns this boundary so every caller gets the same signature gate and no
+   *  broker/installer can accidentally resurrect `__dependencies__`. */
+  public writeDependencyBytes = async (signature: string, bytes: Uint8Array): Promise<void> => {
+    if (!this.dependencies) return
+    const expected = signature.toLowerCase()
+    const exact = bytes.buffer.slice(
+      bytes.byteOffset,
+      bytes.byteOffset + bytes.byteLength,
+    ) as ArrayBuffer
+    if (await SignatureService.sign(exact) !== expected) {
+      console.warn(`[store] refused dependency write ${signature.slice(0, 12)}: content signature mismatch`)
+      return
+    }
+    try {
+      const handle = await this.dependencies.getFileHandle(`${expected}.js`, { create: true })
+      const writable = await handle.createWritable()
+      try { await writable.write(exact) } finally { await writable.close() }
     } catch { /* best-effort */ }
   }
 
