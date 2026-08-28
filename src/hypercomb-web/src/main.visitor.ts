@@ -19,6 +19,67 @@ installReadonlyNetwork()
 // above is installed. It loads the same verified core and render path as the
 // participant shell, but every filesystem operation lands in session memory.
 const { EffectBus } = await import('@hypercomb/core')
+
+// ── the loading dot owns the screen until the SITE is on it ────────────────
+// `.site-loading` starts inside <app-root>, which Angular REPLACES at
+// bootstrap (~1.4s) — a beat before the published view mounts (~3s). That gap
+// showed the hive's own visuals (background rings, the empty prompt) between
+// the dot and the page. Re-parent the loader to <body> so it survives
+// bootstrap, and take it down only when the deployed experience is up:
+//   • pinned view (view:arrival names a view) → when the body is COVERED by
+//     the takeover surface (body.hc-view-covered — the same signal that
+//     neutralises the canvas), so the ground under the fade is the themed
+//     body, never hexagons;
+//   • hexagons site (empty verdict) → when real tiles land (count>0), or the
+//     location is genuinely settled-empty — the splash contract.
+const siteLoader = document.querySelector('.site-loading')
+if (siteLoader) document.body.appendChild(siteLoader)
+const removeSiteLoader = (): void => {
+  const el = document.querySelector('.site-loading')
+  if (!el) return
+  ;(el as HTMLElement).style.transition = 'opacity .3s ease'
+  ;(el as HTMLElement).style.opacity = '0'
+  setTimeout(() => el.remove(), 340)
+}
+{
+  // EffectBus REPLAYS the last value SYNCHRONOUSLY inside .on(), so a
+  // `const off = EffectBus.on(..., () => off())` pattern dies in the TDZ
+  // when the replay fires the handler before the const exists — the exact
+  // silent death that left the dot up until the failsafe. Guard with a
+  // flag; unsubscribe on the next tick, when the binding is real.
+  let arrivalSeen = false
+  let offArrival: (() => void) | undefined
+  let offCells: (() => void) | undefined
+  const onVerdict = (view: string): void => {
+    if (view) {
+      const tick = (): void => {
+        if (document.body.classList.contains('hc-view-covered')) removeSiteLoader()
+        else requestAnimationFrame(tick)
+      }
+      tick()
+      return
+    }
+    let cellsSeen = false
+    offCells = EffectBus.on<{ count?: number; settled?: boolean }>('render:cell-count', pl => {
+      if (cellsSeen) return
+      if ((pl?.count ?? 0) > 0 || pl?.settled) {
+        cellsSeen = true
+        removeSiteLoader()
+        setTimeout(() => offCells?.(), 0)
+      }
+    })
+  }
+  offArrival = EffectBus.on<{ view?: string }>('view:arrival', p => {
+    if (arrivalSeen) return
+    arrivalSeen = true
+    setTimeout(() => offArrival?.(), 0)
+    onVerdict(String(p?.view ?? ''))
+  })
+  // Failsafe: a boot that never reaches a verdict (engine error, unreachable
+  // index) must not strand the visitor behind an eternal dot.
+  setTimeout(removeSiteLoader, 25_000)
+}
+
 await import('./main')
 
 const waitForIoc = async (key: string, timeoutMs = 30_000): Promise<boolean> => {
@@ -90,5 +151,6 @@ window.addEventListener('hypercomb:runtime-ready', () => {
   })().catch(error => {
     console.error('[visitor] failed to open publication', error)
     document.documentElement.dataset['visitorError'] = 'true'
+    removeSiteLoader()
   })
 }, { once: true })

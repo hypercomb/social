@@ -435,7 +435,12 @@
       // ready signal. An empty view means "opens as hexagons after all";
       // only a real view name reveals. (EffectBus replays the last value,
       // so a verdict emitted before this subscription still lands.)
-      bus.on('view:arrival', function (p) { if (p && p.view) requestExit(); });
+      // Published visitor: the pinned page IS the site — reveal the instant
+      // the verdict lands, skipping the finishing run and the ~1s hold. The
+      // fade in dismiss() still smooths the flip; nothing paints in between.
+      var visitorShell = false;
+      try { visitorShell = document.documentElement.getAttribute('data-hypercomb-mode') === 'visitor'; } catch (e) {}
+      bus.on('view:arrival', function (p) { if (p && p.view) { if (visitorShell) dismiss(); else requestExit(); } });
       bus.on('render:unsupported', function () { dismiss(); });                                 // GPU blocked → tiles never paint
       // install-needed → the welcome card's "Start" button is behind the splash.
       // Reveal it NOW so the user can click Start to load the libraries. Holding

@@ -31,6 +31,7 @@
 // moved — same receipts, same tombstone respect as mesh auto-sync.
 
 import { Drone, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { ensureDecorationsIndexed } from '../commands/decoration-kind-index.js'
 import { validateHiveLinkBundle, STATIC_FOLLOWS_KEY, type HiveLinkBundle } from './hive-link.js'
 import { fetchHiveManifestFromAny } from './hive-pointer.js'
 import { lineageKey } from '../history/lineage-key.js'
@@ -110,12 +111,17 @@ export class HiveVisitDrone extends Drone {
 
   #preview = async (raw: unknown): Promise<void> => {
     const bundle = validateHiveLinkBundle(raw)
-    if (!bundle) return
+    if (!bundle) { console.warn('[hive-visit] link rejected — malformed bundle', raw); return }
     const i18n = this.#i18n()
     const history = this.#ioc()?.get<HistoryLike>(HISTORY_KEY)
     const broker = this.#ioc()?.get<BrokerLike>(BROKER_KEY)
     const nav = this.#ioc()?.get<NavLike>(NAV_KEY)
-    if (!history?.seedPreviewHead || !broker?.adopt || !nav) return
+    if (!history?.seedPreviewHead || !broker?.adopt || !nav) {
+      console.warn('[hive-visit] cannot open: missing services', {
+        history: !!history?.seedPreviewHead, broker: !!broker?.adopt, nav: !!nav,
+      })
+      return
+    }
 
     // One preview at a time — a fresh link replaces the current one.
     if (this.#active) this.#dismiss({ silent: true })
@@ -135,7 +141,9 @@ export class HiveVisitDrone extends Drone {
     // private mode, no relay flag needed), then localize the layer closure.
     // Bytes in the pool are content-addressed cache, not adoption.
     broker.noteDomainsForSig?.(head, bundle.hosts)
+    console.log('[hive-visit] localizing closure from', bundle.hosts.join(','), 'head', head.slice(0, 12))
     const stats = await broker.adopt(head, { layersOnly: true, silent: true })
+    console.log('[hive-visit] closure localized', JSON.stringify(stats))
     const root = await history.getLayerBySig(head)
     if (!root) {
       this.#toast('error', i18n?.t('preview.banner.title') ?? 'Hive preview',
@@ -149,6 +157,7 @@ export class HiveVisitDrone extends Drone {
     // caught however it is held.
     const locSig = await history.sign({ explorerSegments: () => [name] })
     const occupied = await history.currentLayerAt(locSig).catch(() => null)
+    if (occupied) console.warn('[hive-visit] name already occupied:', name)
     if (occupied || !(await history.seedPreviewHead([name], head))) {
       this.#toast('tip', i18n?.t('preview.banner.title') ?? 'Hive preview',
         i18n?.t('preview.collision', { name }) ?? `You already have "${name}" — move or rename yours first, then open the link again.`)
@@ -156,6 +165,15 @@ export class HiveVisitDrone extends Drone {
     }
 
     this.#active = { bundle, head, name, key }
+    // Hydrate the preview root's decorations BEFORE arriving. The arrival
+    // arbitration (view.bee #openDefaultView) runs pre-paint and reads the
+    // synchronous decoration index — deciding before this hydration meant a
+    // published site whose root carries a view:default mark got a "hexagons"
+    // verdict first, painted the empty grid + splash reveal, and only flipped
+    // to its pinned page when the mark hydrated late. With the index warm the
+    // first verdict IS the page, show-cell never paints, and the splash holds
+    // until the view is up: loading screen → the opened view, nothing between.
+    await ensureDecorationsIndexed([name], []).catch(() => { /* verdict falls back to late hydration */ })
     nav.go([name])
     this.emitEffect('preview:mode', {
       active: true,
