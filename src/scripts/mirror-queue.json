@@ -1670,9 +1670,121 @@
       "id": "cross-browser-tile-lego",
       "title": "Mirror portable cross-browser tile drag",
       "run": null,
-      "note": "Create one behavior collection for drag-and-drop LEGO between browsers. Parts are hypercomb-core/src/portable-tile.ts, assistant/agent-tiles-rail.ts and shared chat-window drag sources, move/portable-tile-drop.drone.ts, presentation/tiles/move-preview.drone.ts, and link/link-drop.worker.ts arbitration. Note the protected-drag-data constraint: the public layer signature rides in a custom MIME type suffix so the destination can resolve it during dragover; text/plain is the universal signature fallback. The destination previews the exact signed tile at the hovered axial and commits that same layer plus its hovered slot only on drop. Mark each source file as a part. Manual because notes are additive.",
+      "note": "Create one behavior collection for drag-and-drop LEGO between browsers. Parts are hypercomb-core/src/portable-tile.ts, assistant/agent-tiles-rail.ts and shared chat-window drag sources, move/portable-tile-drop.drone.ts + portable-tile-drop.spec.ts, presentation/tiles/move-preview.drone.ts, and link/link-drop.worker.ts arbitration. Note the protected-drag-data constraint: the public layer signature rides in a custom MIME type suffix so the destination can resolve it on dragenter; text/plain is the universal signature fallback. The destination immediately paints a signature-labelled ghost, awaits Store.fetchLayerFromHost with bypassMissWindow so ContentBroker tries self/community/known/fallback domains and verifies SHA-256, upgrades the ghost with the resolved tile image, then commits that same layer plus its hovered slot only on drop. A fast drop awaits the same in-flight acquisition. Mark each source file as a part. Manual because notes are additive.",
       "unattended": false,
       "created": "2026-08-27",
+      "status": "pending"
+    },
+    {
+      "id": "sealed-installer-package",
+      "title": "Sealed installer packages reject undeclared or substituted content",
+      "run": null,
+      "note": "Mirror one behavior collection for the sealed package receiving boundary. Parts: hypercomb-shared/core/sealed-package.ts (package closure validation and SHA-256 byte verification), sealed-package.spec.ts (acceptance), layer-installer.ts (enforcement before cache writes), and core/index.ts (public contract). Notes: the root layer signature is package identity; every bee dependency must be declared; host bytes are verified before entering OPFS; the installer may fetch only signatures enumerated by the package. Mark the parts as package-contract, verification, installer, and acceptance using declared vocabulary. Manual because note creation is additive.",
+      "unattended": false,
+      "created": "2026-08-28",
+      "status": "pending"
+    },
+    {
+      "id": "actionless-command-noop",
+      "title": "Mirror actionless command no-op",
+      "run": null,
+      "note": "Update the command-line behavior mirror: in Action stance, a Common Tongue reading with grammar/residue but no resolved behavior is inert, creates no tile or pathway, and teaches neither command history nor SpokenHabits.",
+      "created": "2026-08-28",
+      "status": "pending"
+    },
+    {
+      "id": "dcp-real-package-promotion",
+      "title": "DCP promotion creates an installable package artifact",
+      "run": null,
+      "note": "Mirror the first functional package-workshop slice. Parts: dcp-installer.service.ts plus dcp-installer-sealed.spec.ts (receiving-side closure validation and atomic install), package-export.service.ts (strict complete closure export; missing bytes abort), home.component.ts (promotion exports before claiming a package row), and tree-row.component.ts (truthful create-package affordance). Notes must state that the old promote action only created an in-memory row; it now writes a flat host-ready manifest and signed blobs, cancellation makes no claim, partial packages cannot activate, and the next slice is the multi-select composer/publisher. Manual because note creation is additive.",
+      "unattended": false,
+      "created": "2026-08-28",
+      "status": "pending"
+    },
+    {
+      "id": "dcp-plain-language-package-workshop",
+      "title": "DCP speaks in one plain-language version workflow",
+      "run": null,
+      "note": "Mirror the professional simplification pass. Parts: hypercomb-shared/i18n/en.json (Apps; Add source; Use/Keep/Remove; version language), home.component.html (one orientation explanation, redundant verb lesson removed), and tree-row.component.ts (visible Make version action with responsive compact form). Notes: signatures/manifests/dependencies remain verification details, never the primary vocabulary; the everyday path is add a source, choose what to use, make a version. Manual because note creation is additive.",
+      "unattended": false,
+      "created": "2026-08-28",
+      "status": "pending"
+    },
+    {
+      "id": "chat-conversation-exists-after-return",
+      "title": "A conversation row exists only after the exchange returns",
+      "run": null,
+      "note": "Mirror the removal of conversation-creation furniture. Parts: agent-tiles-rail.ts (no pending empty rows, no + New conversation row, list accepts a live thread only after at least two turns; archived history remains visible), agent-tiles-rail.spec.ts (empty composer creates no row/control), and chat-window.component.html (header + button removed). Note the single gesture: type in the already-empty composer and press Enter; when the reply lands, the conversation becomes one list item. Manual because note creation is additive.",
+      "unattended": false,
+      "created": "2026-08-28",
+      "status": "pending"
+    },
+    {
+      "id": "viewport-refresh-write-ahead",
+      "title": "Viewport refresh persistence — synchronous pending frame and stale-read guard",
+      "run": null,
+      "note": "Mirror the navigation/zoom ViewportPersistence change: the final user pan/zoom is synchronously journaled before the debounced OPFS write, restored over the older durable snapshot after refresh, and cleared only when the matching revision commits. A stale location read cannot clear the replacement read or expose the prior page camera. Source: navigation/zoom/zoom.drone.ts.",
+      "unattended": false,
+      "created": "2026-08-28",
+      "status": "pending"
+    },
+    {
+      "id": "readonly-published-website-lens",
+      "title": "Mirror the read-only published website lens into the hive",
+      "run": null,
+      "note": "Phase 1 implements the generic website lens under the Core-everywhere invariant and the Tree of Life participation doctrine: to take part in Hypercomb's Tree of Life, a node MUST have Core. Stores hold DNA, relays carry signals, and Core metabolizes signatures into beehavior. A parked signed application is potential life; a Core resolving it under a capability profile is the living node. hypercomb.io, DCP, pluginthematrix.com and participant subdomains are capability profiles of the same Core; the published profile is read-only, not a different runtime. Every Hypercomb application host MUST boot Core so it connects directly to hypercomb.io through the shared signed-reference, resolver, handoff and adoption protocol; a GET-only signature mirror is content transport, not an application host. Shared Core grants compatibility, never ambient authority: public byte viewing, code adoption, provider-origin storage and copying personal hive data are separate trust decisions. Consumers store accounts or application state at a provider only when they trust that domain as they would any normal website/platform; that origin-scoped state deliberately couples the consumer to the chosen provider, while movement to or from the personal hypercomb.io hive stays explicit and scoped. main.visitor installs a session-memory filesystem and same-origin GET/HEAD network gate before runtime; resolve-import-map uses immutable /content/<sig> URLs; the visitor-only index and empty shell-surface barrel remove participant/DCP/PWA chrome; the build prepares only the current signed renderer package. The Blossom Worker derives machine-only /site.json and /publications.json coordinates from allowlisted, re-verified kind-30564 publisher indexes; every human route, including /revisions, is Core-rendered; SITE_BINDINGS hosts reject all mutations before relay routing. The bare pluginthematrix.com binding opens /pluginthematrix as its signed directory creation and revolucion.pluginthematrix.com opens /revolucion. A supervised /behaviors test publish identified Jaime's public key eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a, now pinned in both bindings; each site still fails closed until the exact pluginthematrix/revolucion lineage is published and the Worker is deployed. Mirror these arrangements and the doctrine in documentation/tree-of-life-core.md plus the request-flow doctrine from documentation/read-only-deployment.md. note-add is additive, so this needs a human pass.",
+      "unattended": false,
+      "created": "2026-08-28",
+      "status": "pending"
+    },
+    {
+      "id": "publish-gate-creation-id-fix",
+      "title": "Mirror the publish-availability repair (creation-id closure exemption + bridge ops + /content module MIME)",
+      "run": null,
+      "note": "creation decorations are identity-only: decorationClosureSigs + bridge decoration-add now exempt kind:'creation' like 'group' (payload.id is sha256 of the act, no bytes exist — dead ref eb8fd240 blocked publishing /revolucion). New bridge ops: effect-emit (allowlisted publish intents), redrain, closure-gaps. blossom-worker serves /content/<sig> modules as text/javascript (assets-first, R2 fallback). Tiles for claude-bridge.worker.ts, decoration-closure.ts, worker.js; notes carry the dead-id story. MANUAL: needs live bridge.",
+      "created": "2026-08-28",
+      "status": "pending"
+    },
+    {
+      "id": "shim-framework-free-boot",
+      "title": "Mirror hypercomb-shim: the framework-free boot",
+      "run": null,
+      "note": "New creation: src/hypercomb-shim (index.html, src/main.ts, src/surfaces.ts, build.mjs, README.md). Needs a collection gathering one tile per source file, marked as parts, with notes explaining: the boot chain is web/main.ts unfused from Angular; the build fails loudly on any @angular import because field decorators throw in JIT; acquisition (ensure-install/sentinel/install prompt) is deliberately absent pending the Phase 4 pinned bootstrap bee; the per-boot surfaces scoreboard (element-shaped vs still-Angular) may only go down. Also owes a note on the tool-windows popover-dismisser inversion (shared/ui/tool-windows.ts + hc-docked-panel.directive.ts) that removed the last Angular seam from runtime-initializer.",
+      "created": "2026-08-28",
+      "status": "pending"
+    },
+    {
+      "id": "dev-deploy-configuration",
+      "title": "Mirror hypercomb-dev deploy configuration (step one of dev-as-deployed)",
+      "run": null,
+      "note": "New: hypercomb-dev/src/main.deploy.ts (one-line re-export of hypercomb-web/src/main), hypercomb-dev/tsconfig.deploy.json (program excludes dev's own app so the dev entry cannot leak into production), and the 'deploy' configuration in hypercomb-dev/angular.json (index/assets/styles all POINT AT hypercomb-web source, no copies). Tiles should carry the proof: artifacts are equivalent by construction not inspection — 2626 files each, every chunk identical by content-hash name, main bundle byte-identical at 1716933 bytes, only the entry filename hash differs. Step two (flipping the two workflow app_location paths) and the visitor-build equivalent are still owed.",
+      "created": "2026-08-28",
+      "status": "pending"
+    },
+    {
+      "id": "visitor-renders-published-content",
+      "title": "Mirror the published-visitor rendering fixes (nav urlBase, visitor enablement, index cold-retry)",
+      "run": null,
+      "note": "Three tiles under the behaviors mirror, pheromone-marked, notes carrying the failure fingerprints: (1) Navigation urlBase (navigation.ts + main.visitor.ts) — visitor URLs omit the creation's root; readers prepend, writers strip, symmetric; the old one-way pushState patch made nav.go a no-op (empty hive at root). (2) behavior-enablement visitor rule — on the read-only shell the publisher shipping a decoration IS the enablement; only publisher withholds stay dormant (postit was dark on every cold visitor). (3) decoration-kind-index cold retry — a null layer un-memoizes hydrateLabel so the preview-seed race retries (sticky-never-appears flake). MANUAL: note-add is additive.",
+      "commit": "4cf322af6",
+      "created": "2026-08-28",
+      "status": "pending"
+    },
+    {
+      "id": "pinned-view-published-experience",
+      "title": "Mirror the pinned published experience (view:default pin, sealed publish mode, no-flash boot)",
+      "run": null,
+      "note": "Tiles under the behaviors mirror: (1) view:default = the standardized decorator that pins ANY behaviour as a layer's opening face — meetup pinned to postit via bridge decoration-add, republished by /host; (2) publish mode seals the pinned root (no x, no Escape, no back — the page IS the site); (3) no-flash boot: hive-visit pre-hydrates root decorations pre-nav so the first arrival verdict is the page, .site-loading holds until the takeover covers the body (EffectBus sync-replay TDZ trap documented in main.visitor.ts). MANUAL: note-add is additive.",
+      "commit": "4c8f84996",
+      "created": "2026-08-28",
+      "status": "pending"
+    },
+    {
+      "id": "visitor-canvas-background-gate",
+      "title": "Canvas background visitor gate — note on the background behavior tile",
+      "run": null,
+      "note": "canvas-background.service.ts now refuses to paint on a published visitor shell (isPublishedVisitorShell in apply()): the backdrop is participant-local appearance with no truth on a visitor origin, so published sites keep the look their creation supplies. Owed: a note on the behaviors mirror tile for presentation/background saying the backdrop is participant-only and dark on published sites. note-add is additive — drain by hand, do not re-run blindly.",
+      "created": "2026-08-28",
       "status": "pending"
     }
   ]

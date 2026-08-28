@@ -18,6 +18,7 @@
 // Default: contour (steel on dark, daylight on light).
 
 import { EffectBus } from '@hypercomb/core'
+import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'
 
 const STORAGE_KEY = 'hc:canvas-bg'
 
@@ -262,6 +263,10 @@ export class CanvasBackgroundService extends EventTarget {
    *  gradients fill the viewport and patterns repeat, so it always covers the
    *  whole screen in any orientation — no image files, no cropping, no seams. */
   apply(): void {
+    // A published site's look belongs to the creation, not the shell: this
+    // backdrop is participant-local appearance with no source of truth on a
+    // visitor origin, so it must not paint over what the creation supplies.
+    if (isPublishedVisitorShell()) return
     const body = document.body
     if (!body) return
     const s = body.style
