@@ -24,6 +24,13 @@ type CopyDragPayload = {
   r?: number
 } | null
 
+type PortableTilePreviewPayload = {
+  label: string
+  imageSig?: string | null
+  q: number
+  r: number
+} | null
+
 // swap target indicators
 const SWAP_FILL = 0xff8844
 const SWAP_FILL_ALPHA = 0.2
@@ -89,7 +96,7 @@ export class MovePreviewDrone extends Drone {
   protected override deps = {
     axial: '@diamondcoreprocessor.com/AxialService',
   }
-  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:set-orientation', 'move:preview', 'move:drop-into', 'move:drop-into-commit', 'move:copy-drag']
+  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:set-orientation', 'move:preview', 'move:drop-into', 'move:drop-into-commit', 'move:copy-drag', 'portable-tile:preview']
   protected override emits: string[] = []
 
   #effectsRegistered = false
@@ -146,6 +153,15 @@ export class MovePreviewDrone extends Drone {
       } else {
         this.#hideHeld()
       }
+    })
+
+    // Cross-window drag: unlike an internal move, the tile is not in this
+    // level's render snapshot yet. The receiver supplies its resolved image
+    // signature and the hovered axial directly.
+    this.onEffect<PortableTilePreviewPayload>('portable-tile:preview', (payload) => {
+      if (!payload) { this.#hideHeld(); return }
+      const explicit = payload.imageSig ? new Map([[payload.label, payload.imageSig]]) : undefined
+      this.#showHeldAt(this.#axialCenter(payload.q, payload.r), [payload.label], explicit)
     })
   }
 
@@ -259,15 +275,19 @@ export class MovePreviewDrone extends Drone {
   /** Show the held exact-tile cluster at a container-space center. Shared by
    *  drop-into (centered on the target tile) and copy-drag (centered on the
    *  hovered slot, which may be empty). */
-  #showHeldAt(center: { x: number; y: number } | null, dragged: string[]): void {
+  #showHeldAt(
+    center: { x: number; y: number } | null,
+    dragged: string[],
+    explicitImageSigs?: ReadonlyMap<string, string>,
+  ): void {
     if (!center || dragged.length === 0) { this.#hideHeld(); return }
 
-    const key = dragged.join('\u0001')
+    const key = `${dragged.join('\u0001')}\u0002${[...(explicitImageSigs?.values() ?? [])].join('\u0001')}`
     if (this.#heldKey !== key) {
       this.#destroyHeld()                 // bumps #buildToken, clears state
       this.#heldKey = key
       const token = this.#buildToken
-      void this.#buildHeld(dragged, token)
+      void this.#buildHeld(dragged, token, explicitImageSigs)
     }
     this.#heldCenter = center
     this.#ensureRaf()
@@ -278,7 +298,11 @@ export class MovePreviewDrone extends Drone {
     this.#destroyHeld()
   }
 
-  async #buildHeld(dragged: string[], token: number): Promise<void> {
+  async #buildHeld(
+    dragged: string[],
+    token: number,
+    explicitImageSigs?: ReadonlyMap<string, string>,
+  ): Promise<void> {
     if (!this.#renderContainer) return
 
     const r = this.#hexRadius()
@@ -288,7 +312,7 @@ export class MovePreviewDrone extends Drone {
 
     // Resolve each dragged tile's bootstrap image and decode it once.
     // Falls back to a labelled hex when a tile has no image.
-    const sigs = this.#imageSigs(dragged)
+    const sigs = explicitImageSigs ?? this.#imageSigs(dragged)
     const textures: (Texture | null)[] = []
     for (let i = 0; i < n; i++) {
       const sig = sigs.get(dragged[i])

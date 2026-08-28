@@ -2,7 +2,7 @@
 // Intercepts drag-and-drop link events on the document and routes them
 // through the safety service + tile editor pipeline.
 
-import { Worker, EffectBus, requestConfirm } from '@hypercomb/core'
+import { Worker, EffectBus, portableTileSignatureFromTypes, requestConfirm } from '@hypercomb/core'
 import { parseYouTubeVideoId, fetchYouTubeOpenGraph, type YouTubeOpenGraph } from './youtube.js'
 import { fetchImageBlob, isImageUrl } from './photo.js'
 import { normalizeLink } from './normalize.js'
@@ -97,6 +97,10 @@ export class LinkDropWorker extends Worker {
     // allow drops on the surface — but not when over form inputs
     const tgt = e.target as HTMLElement | null
     if (tgt?.closest?.('input, textarea, select, [contenteditable]')) return
+    // A portable tile also carries text/plain, but its signature is not a
+    // hyperlink. Leave the gesture to PortableTileDropDrone so this worker
+    // does not replace its exact-slot preview with the link-at-top ring.
+    if (portableTileSignatureFromTypes(e.dataTransfer?.types ?? [])) return
 
     // Claim anything carrying a link. `Files` is ADVERTISED by sources that
     // deliver no file at all — a dragged browser tab, a link out of a native

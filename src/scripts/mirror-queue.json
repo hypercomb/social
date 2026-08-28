@@ -1665,6 +1665,15 @@
       "unattended": false,
       "created": "2026-08-25",
       "status": "pending"
+    },
+    {
+      "id": "cross-browser-tile-lego",
+      "title": "Mirror portable cross-browser tile drag",
+      "run": null,
+      "note": "Create one behavior collection for drag-and-drop LEGO between browsers. Parts are hypercomb-core/src/portable-tile.ts, assistant/agent-tiles-rail.ts and shared chat-window drag sources, move/portable-tile-drop.drone.ts, presentation/tiles/move-preview.drone.ts, and link/link-drop.worker.ts arbitration. Note the protected-drag-data constraint: the public layer signature rides in a custom MIME type suffix so the destination can resolve it during dragover; text/plain is the universal signature fallback. The destination previews the exact signed tile at the hovered axial and commits that same layer plus its hovered slot only on drop. Mark each source file as a part. Manual because notes are additive.",
+      "unattended": false,
+      "created": "2026-08-27",
+      "status": "pending"
     }
   ]
 }

@@ -83,7 +83,7 @@
 // bytes; a miss falls back to the original and asks the optimize phase to
 // mint the thumbnail for next time.
 
-import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, writePortableTileTransfer, type I18nProvider } from '@hypercomb/core'
 import {
   HIVE_PATH, foldTileConversations, listRailConversations, listTileDrafts,
   newTileConvoId, readConversationSummary, setConversationArchived, tileConvoId,
@@ -1079,9 +1079,21 @@ export class AgentTilesRail {
           sig: row.sig ?? '',
           propsSig: row.propsSig ?? '',
         })
-        event.dataTransfer?.setData(TILE_DRAG_TYPE, payload)
-        event.dataTransfer?.setData('text/plain', tilePath(row.segments))
-        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
+        if (event.dataTransfer) {
+          const wrotePortable = writePortableTileTransfer(event.dataTransfer, {
+            name: row.name,
+            path: tilePath(row.segments),
+            sig: row.sig ?? '',
+            propsSig: row.propsSig ?? '',
+          })
+          // A cold row can briefly be sig-less. Keep the local-path transfer
+          // alive until its signature resolves and the tile becomes portable.
+          if (!wrotePortable) {
+            event.dataTransfer.setData(TILE_DRAG_TYPE, payload)
+            event.dataTransfer.setData('text/plain', tilePath(row.segments))
+          }
+          event.dataTransfer.effectAllowed = 'copy'
+        }
       })
 
       // THE CHAT ICON OPENS THE TILE'S CHATS — AND PUTS YOU IN ONE. It is

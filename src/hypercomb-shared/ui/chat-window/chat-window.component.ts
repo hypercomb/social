@@ -101,6 +101,7 @@ import {
   PARTICIPANT_AI_HOST_STORAGE_KEY,
   isLocalClaudeBridgeConfigured,
   isParticipantAiHostConfigured,
+  writePortableTileTransfer,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '../../core/shell-surface-registry'
@@ -858,9 +859,18 @@ export class ChatWindowComponent implements OnDestroy {
       path: held.key,
       sig: held.sig ?? '',
     })
-    event.dataTransfer?.setData(TILE_DRAG_TYPE, payload)
-    event.dataTransfer?.setData('text/plain', held.key)
-    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+    if (event.dataTransfer) {
+      const wrotePortable = writePortableTileTransfer(event.dataTransfer, {
+        name: held.name,
+        path: held.key,
+        sig: held.sig ?? '',
+      })
+      if (!wrotePortable) {
+        event.dataTransfer.setData(TILE_DRAG_TYPE, payload)
+        event.dataTransfer.setData('text/plain', held.key)
+      }
+      event.dataTransfer.effectAllowed = 'move'
+    }
   }
 
   /** The drag ended. Dropped back on the shelf → nothing happened (the shelf's
