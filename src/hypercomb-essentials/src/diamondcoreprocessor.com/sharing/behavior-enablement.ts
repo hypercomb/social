@@ -358,8 +358,10 @@ export function isBehaviorDormant(kind: string, segments: readonly string[]): bo
 
 /** The read-only published-site shell stamps `data-hypercomb-mode="visitor"`
  *  on the document element (visitor index.html) — the one signal essentials
- *  may read without importing anything shell-side. */
-function isPublishedVisitorShell(): boolean {
+ *  may read without importing anything shell-side. Exported for the surfaces
+ *  that behave differently on a published site (a pinned root view has no ×
+ *  or back — the page IS the site, there is no hive behind it to return to). */
+export function isPublishedVisitorShell(): boolean {
   try { return document.documentElement.dataset['hypercombMode'] === 'visitor' }
   catch { return false }
 }

@@ -20,11 +20,12 @@
 import { Drone, RESOURCE_URL_PREFIX } from '@hypercomb/core'
 import { hasDecorationKindAt, titleForLabel } from '../../commands/decoration-kind-index.js'
 import { isFeatureHidden } from '../../sharing/feature-hidden.js'
-import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../../sharing/behavior-enablement.js'
+import { isBehaviorDormant, isPublishedVisitorShell, ENABLEMENT_CHANGED } from '../../sharing/behavior-enablement.js'
 import { listDecorations, replaceDecoration } from '../../commands/decoration-manifest.js'
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { childNamesOf, type PlacementHistory, type PlacementLayer } from '../../history/layer-placement.js'
-import { tilePictureCandidates } from '../../editor/tile-properties.js'
+import { readTilePropertiesAt, tilePictureCandidates } from '../../editor/tile-properties.js'
+import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { trackScrollGutter } from './scroll-gutter.js'
 import { POSTIT_KIND, POSTIT_VIEW, POSTIT_SIZE_KEY, type PostitPayload } from '../../commands/postit.queen.js'
 import type { BackGesture } from '../../navigation/back-gesture.service.js'
@@ -42,6 +43,7 @@ const SIG_RE = /^[0-9a-f]{64}$/
 type StoreShape = {
   getResource(sig: string): Promise<Blob | null>
   getResourceLocal?(sig: string): Promise<Blob | null>
+  getResourceResolvedLocal?(sig: string): Promise<Blob | null>
 }
 
 const STICKY_LIMIT = 5
@@ -156,7 +158,10 @@ export class PostitViewDrone extends Drone {
       })
       // Right-click closes the post the same way its × does.
       this.#backOff = window.ioc?.get<BackGesture>('@diamondcoreprocessor.com/BackGesture')
-        ?.register({ owner: 'postit-view', back: () => this.#vm()?.setMode('hexagons') }) ?? null
+        ?.register({ owner: 'postit-view', back: () => {
+          if (this.#sealedOpen()) return   // publish mode: nothing to go back to
+          this.#vm()?.setMode('hexagons')
+        } }) ?? null
       this.#bound = true
     }
     await this.#reconcile()
@@ -197,9 +202,20 @@ export class PostitViewDrone extends Drone {
   }
   readonly #key = (event: KeyboardEvent): void => {
     if (event.key !== 'Escape' || this.#vm()?.mode !== POSTIT_VIEW) return
+    if (this.#sealedOpen()) return   // publish mode: the page IS the site
     event.preventDefault()
     event.stopImmediatePropagation()
     this.#vm()?.setMode('hexagons')
+  }
+
+  /** True when the mounted post is a published site's ROOT surface. There is
+   *  no hive behind it for a visitor — no ×, no Escape, no back gesture: the
+   *  page is the whole experience, exactly what the publisher deployed. */
+  #sealedOpen(): boolean {
+    if (!isPublishedVisitorShell()) return false
+    const lineage = window.ioc?.get<LineageShape>('@hypercomb.social/Lineage')
+    const segments = this.#targetSegments ?? [...(lineage?.explorerSegments?.() ?? [])]
+    return segments.length <= 1
   }
 
   /** Show or hide both surfaces for the covering window. `display` rather
@@ -678,7 +694,8 @@ export class PostitViewDrone extends Drone {
       host.append(frame)
     }
 
-    host.append(close)
+    // Publish mode: the page IS the site — no × to fall out of it.
+    if (!this.#sealedOpen()) host.append(close)
     document.body.appendChild(host)
     // The post scrolls, so on Windows it wears a real scrollbar — measure it
     // and let the × step aside by that much (scroll-gutter.ts).
@@ -693,24 +710,20 @@ export class PostitViewDrone extends Drone {
   async #tileImageSig(segments: readonly string[]): Promise<string | null> {
     const history = window.ioc?.get<HistoryShape>('@diamondcoreprocessor.com/HistoryService')
     const store = window.ioc?.get<StoreShape>('@hypercomb.social/Store')
-    if (!history || !store) return null
+    if (!history || !store || segments.length === 0) return null
     try {
-      const layer = await history.currentLayerAt(await history.sign({ explorerSegments: () => segments }))
-      const propsSig = Array.isArray((layer as { properties?: unknown })?.properties)
-        ? String(((layer as { properties?: unknown[] }).properties as unknown[])[0] ?? '')
-        : ''
-      if (!SIG_RE.test(propsSig)) return null
-      const blob = await store.getResource(propsSig)
-      if (!blob) return null
+      const props = await readTilePropertiesAt(segments.slice(0, -1), segments[segments.length - 1])
       // A post-it shows the asset as a RECTANGLE, so it wants the picture
       // itself — not the hexagon-shaped capture with the gold rim baked
       // across it. First candidate whose bytes are actually here: a tile
       // can name an original it does not hold (adoption carries the props
       // blob, not the heavy original), and a broken image is worse than a
       // framed one.
-      const candidates = tilePictureCandidates(JSON.parse(await blob.text()))
+      const candidates = tilePictureCandidates(props)
       for (const sig of candidates) {
-        const bytes = await (store.getResourceLocal?.(sig) ?? store.getResource(sig))
+        const bytes = store.getResourceLocal
+          ? await resolveLocalResourceReference(store as StoreShape & { getResourceLocal(sig: string): Promise<Blob | null> }, sig)
+          : await store.getResource(sig)
         if (bytes && bytes.size > 0) return sig
       }
       return candidates[0] ?? null
