@@ -464,11 +464,22 @@ async function hydrateReferenceFace(
   try {
     const locationSig = await history.sign({ explorerSegments: () => targetSegments })
     const layer = await history.currentLayerAt(locationSig) as { properties?: unknown } | null
-    const props = Array.isArray(layer?.properties)
-      ? (layer.properties as Record<string, unknown>[])[0]
-      : undefined
-    const small = props?.['small'] as Record<string, unknown> | undefined
-    const image = small?.['image']
+    const slot = Array.isArray(layer?.properties) ? layer.properties[0] : undefined
+    let props: Record<string, unknown> | undefined
+    if (typeof slot === 'string' && /^[0-9a-f]{64}$/.test(slot)) {
+      // Current layer schema: properties[0] is a content-addressed resource
+      // signature, exactly the path the editor dereferences. The old hydrator
+      // cast that string to an object and therefore made every Portal face
+      // blank while edit could still discover it.
+      const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as StoreLike | undefined
+      const blob = await store?.getResource?.(slot)
+      if (blob) props = JSON.parse(await blob.text()) as Record<string, unknown>
+    } else if (slot && typeof slot === 'object') {
+      // Legacy inline properties fixture/data.
+      props = slot as Record<string, unknown>
+    }
+    const p = props as any
+    const image = p?.small?.image ?? p?.flat?.small?.image ?? p?.large?.image ?? p?.imageSig
     if (typeof image !== 'string' || !/^[0-9a-f]{64}$/.test(image)) return false
     referenceFaceByKey.set(key, image)
     return true
@@ -1284,7 +1295,16 @@ async function hydrateLabel(
     segmentsByKey.set(pathKey, segments)
     const locationSig = await history.sign({ explorerSegments: () => segments })
     const layer = await history.currentLayerAt(locationSig) as { decorations?: unknown } | null
-    if (!layer) return false
+    if (!layer) {
+      // No layer is a COLD answer here, not an authoritative one — on a
+      // published visitor the preview head is seeded moments after the first
+      // render pass, and keeping the memo froze the race's loser forever:
+      // the standing cell's post-it never indexed, so its sticky (and the
+      // page behind it) never rendered. Forget the walk so the next
+      // render:cell-count retries; a warm re-check is one memoized head read.
+      seenPaths.delete(pathKey)
+      return false
+    }
     const decorations = layer.decorations
     if (!Array.isArray(decorations)) return false
     for (const decorationSig of decorations) {

@@ -343,9 +343,25 @@ export function isWithdrawnByBinding(kind: string, segments: readonly string[]):
 export function isBehaviorDormant(kind: string, segments: readonly string[]): boolean {
   if (!kind) return false
   if (isWokenAt(kind, segments)) return false
+  // A published read-only site has no participant roster to consult — the
+  // shell is a cold install, so the opt-in model would leave EVERY behaviour
+  // dark and the site would render plain hexagons over its own content. The
+  // publisher shipping a decoration IS the enablement there: publishing is
+  // the deliberate act the roster switch performs on a participant hive.
+  // Only an explicit publisher withhold still answers dormant; the
+  // verification gate (feature-availability) stays in force on top.
+  if (isPublishedVisitorShell()) return isWithheldByPublisherAt(kind, segments)
   return isKindGloballyOff(kind)
     || isWithheldByPublisherAt(kind, segments)
     || isBoundElsewhere(kind, segments)
+}
+
+/** The read-only published-site shell stamps `data-hypercomb-mode="visitor"`
+ *  on the document element (visitor index.html) — the one signal essentials
+ *  may read without importing anything shell-side. */
+function isPublishedVisitorShell(): boolean {
+  try { return document.documentElement.dataset['hypercombMode'] === 'visitor' }
+  catch { return false }
 }
 
 /** What the swarm broadcasts as withheld (wire kind 30208): exactly the
