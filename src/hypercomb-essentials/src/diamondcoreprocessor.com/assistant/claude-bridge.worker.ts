@@ -3,7 +3,7 @@ import {
   Worker, EffectBus, normalizeCell, hypercomb, isSignature, SignatureService,
   isLocalClaudeBridgeConfigured,
 } from '@hypercomb/core'
-import { deliverTurn, readTurns } from './chat-thread.js'
+import { deliverTurn, readTurns, setConversationGoalReached } from './chat-thread.js'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import type { HistoryService } from '../history/history.service.js'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
@@ -245,7 +245,7 @@ export class ClaudeBridgeWorker extends Worker {
     'update', 'note-add', 'note-delete', 'note-split', 'put-resource',
     'optimization-add', 'optimization-remove', 'decoration-add',
     'bag-add', 'bag-remove', 'bag-set', 'build-record', 'stamp',
-    'add', 'remove', 'summary-add', 'chat-reply', 'submit',
+    'add', 'remove', 'summary-add', 'chat-reply', 'chat-goal-reached', 'submit',
   ])
 
   #quietDepth = 0
@@ -304,6 +304,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'get-resource': return this.#getResource(req)
       case 'optimization-add':    return this.#optimizationAdd(req)
       case 'chat-reply':   return this.#chatReply(req)
+      case 'chat-goal-reached': return this.#chatGoalReached(req)
       case 'thread-read':  return this.#threadRead(req)
       case 'agent-progress': return this.#agentProgress(req)
       case 'agents-announce': return this.#agentsAnnounce(req)
@@ -329,6 +330,9 @@ export class ClaudeBridgeWorker extends Worker {
       case 'inspect':      return this.#inspect(req)
       case 'history':      return this.#history(req)
       case 'submit':       return this.#submit(req)
+      case 'effect-emit':  return this.#effectEmit(req)
+      case 'redrain':      return this.#redrain(req)
+      case 'closure-gaps': return this.#closureGaps(req)
       default:             return { id: req.id, ok: false, error: `unknown op: ${req.op}` }
     }
   }
@@ -577,6 +581,19 @@ export class ClaudeBridgeWorker extends Worker {
     const stored = await deliverTurn(convoId, 'assistant', text)
     if (!stored) return { id: req.id, ok: false, error: 'chat-reply could not be stored — reply NOT delivered' }
     return { id: req.id, ok: true }
+  }
+
+  /** Durable "goals attained" receipt for one chat. `text` names the goals
+   * that were achieved; the surface shows them and offers Archive. */
+  async #chatGoalReached(req: BridgeRequest): Promise<BridgeResponse> {
+    const convoId = typeof req.cell === 'string' ? req.cell.trim() : ''
+    const details = typeof req.text === 'string' ? req.text.trim() : ''
+    if (!convoId) return { id: req.id, ok: false, error: 'chat-goal-reached requires `cell` (the convoId)' }
+    if (!details) return { id: req.id, ok: false, error: 'chat-goal-reached requires attained goals in `text`' }
+    const stored = await setConversationGoalReached(convoId, details)
+    return stored
+      ? { id: req.id, ok: true, data: { convoId } }
+      : { id: req.id, ok: false, error: 'chat-goal-reached could not be stored' }
   }
 
   // ─── thread-read ───────────────────────────────────────────────────
@@ -862,7 +879,11 @@ export class ClaudeBridgeWorker extends Worker {
     // — except group decorations: payload.sig is a group signature (pure
     // identity, sha256('group:'+meaning)); no bytes exist for it anywhere,
     // so declaring it would send every closure walker on a permanent 404.
-    if (kind !== 'group') for (const s of collectSigsDeep(payload)) refs.add(s)
+    // — and creation decorations for the same reason: payload.id is a pure
+    // identity (sha256 of the act's descriptor — see creation.ts), never a
+    // stored resource. Harvesting it into `refs` poisons the closure walk
+    // with a permanent 404 that blocks publishing the whole branch.
+    if (kind !== 'group' && kind !== 'creation') for (const s of collectSigsDeep(payload)) refs.add(s)
     // (b) When the payload names an HTML body, read it NOW (it is local — the
     // caller put-resourced it moments ago) and capture `htmlSig` plus every
     // resource the body embeds (chrome.css, images). This closes the
@@ -1443,6 +1464,51 @@ export class ClaudeBridgeWorker extends Worker {
     return { id: req.id, ok: true }
   }
 
+  // Emits one allowlisted UI intent — the same effects the matching panel
+  // buttons emit — so a remote session can drive an action that today has
+  // only a pointer path (e.g. the publish panel's per-row Publish). The
+  // allowlist is the whole contract: intents only, never truth-minting
+  // effects, and `synchronize` stays processor-only by doctrine.
+  static readonly #REMOTE_INTENTS = new Set([
+    'publish:run', 'publish:unpublish', 'publish:refresh', 'publish:expand',
+    'publish:view-toggle', 'publish:close', 'publish:opens-as',
+  ])
+
+  async #effectEmit(req: BridgeRequest): Promise<BridgeResponse> {
+    const name = typeof req.cell === 'string' ? req.cell : ''
+    if (!ClaudeBridgeWorker.#REMOTE_INTENTS.has(name)) {
+      return { id: req.id, ok: false, error: `effect not allowlisted: ${name}` }
+    }
+    EffectBus.emit(name, req.payload ?? {})
+    return { id: req.id, ok: true, data: { name } }
+  }
+
+  // Runs HostSyncService.reDrain() and returns its summary verbatim. The
+  // summary's `skippedMissingLocal` is the ONLY surface that names the
+  // genuine closure holes (refs no local store holds and no receipt
+  // covers) — the exact sigs a stuck availability gate is tripping on.
+  async #redrain(req: BridgeRequest): Promise<BridgeResponse> {
+    const hostSync = window.ioc.get<{
+      reDrain?: () => Promise<{ queued: number; pushed: number; failed: number; skippedMissingLocal: string[] }>
+    }>('@diamondcoreprocessor.com/HostSyncService')
+    if (!hostSync?.reDrain) return { id: req.id, ok: false, error: 'HostSyncService.reDrain unavailable' }
+    const summary = await hostSync.reDrain()
+    return { id: req.id, ok: true, data: summary }
+  }
+
+  // Names the exact holes a stuck availability gate is tripping on:
+  // HostSyncService.closureGaps turns "the closure isn't fully served" into
+  // "these objects are missing" — the only actionable form.
+  async #closureGaps(req: BridgeRequest): Promise<BridgeResponse> {
+    const sig = typeof req.sig === 'string' ? req.sig : ''
+    const hostSync = window.ioc.get<{
+      closureGaps?: (sig: string, kind?: string, closure?: boolean, limit?: number) => Promise<string[]>
+    }>('@diamondcoreprocessor.com/HostSyncService')
+    if (!hostSync?.closureGaps) return { id: req.id, ok: false, error: 'HostSyncService.closureGaps unavailable' }
+    const gaps = await hostSync.closureGaps(sig, 'layer', true, 100)
+    return { id: req.id, ok: true, data: { sig, gaps } }
+  }
+
   // ------- operations -------
 
   async #add(req: BridgeRequest): Promise<BridgeResponse> {
@@ -1640,3 +1706,4 @@ window.ioc.register('@diamondcoreprocessor.com/ClaudeBridgeWorker', _claudeBridg
     slotRegistry.register({ slot: CONTEXT_SLOT, triggers: [] })
   },
 )
+
