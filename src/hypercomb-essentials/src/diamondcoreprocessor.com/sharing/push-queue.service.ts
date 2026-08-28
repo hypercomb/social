@@ -175,19 +175,29 @@ export class PushQueueService extends EventTarget {
         const entries = await this.#listQueue()
         if (entries.length === 0) break
 
+        // A pass that removes nothing must end the run: with no sentinel
+        // (the read-only visitor, or a shell booted before the bridge) every
+        // push fails without ever touching the network, and re-listing the
+        // same entries is a pure-microtask spin that starves the event loop
+        // — timers, rendering, everything. The entries stay queued; the next
+        // enqueue or explicit drain() retries them.
+        let progressed = false
         for (const entry of entries) {
           if (await this.hasReceipt(entry.sig)) {
             // Already pushed in a prior session — drop the stale
             // queue entry without re-pushing.
             await this.#removeQueueEntry(entry)
+            progressed = true
             continue
           }
           const ok = await this.#pushAndReceipt(entry)
           if (!ok) continue   // leave the entry; retry on next drain
           await this.#removeQueueEntry(entry)
+          progressed = true
           this.dispatchEvent(new CustomEvent('receipt', { detail: { sig: entry.sig } }))
           EffectBus.emit('push:receipt', { sig: entry.sig })
         }
+        if (!progressed) break
       }
     } finally {
       this.#draining = false
