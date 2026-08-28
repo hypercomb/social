@@ -32,7 +32,8 @@
 // full — it stops the branch being advertised, it does not un-share it.
 
 import { registerShellSurface } from '../../core/shell-surface-registry'
-import { Component, computed, signal, type OnDestroy } from '@angular/core'
+import { Component, computed, inject, signal, type OnDestroy } from '@angular/core'
+import { DomSanitizer, type SafeHtml } from '@angular/platform-browser'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
@@ -62,6 +63,16 @@ interface PublishRow {
   expanded: boolean
   link: string | null
   busyPhase: string | null
+  /** The view the branch ROOT opens as ('' = hexagons) — view:default mark. */
+  opensAs: string
+  /** Published heads, newest first — a version IS a signature. */
+  versions: { sig: string; at: number }[]
+}
+
+interface PublishViewChoice {
+  view: string
+  label: string
+  icon: string
 }
 
 interface PublishCollision {
@@ -81,6 +92,7 @@ interface PublishRenderPayload {
   refreshing: boolean
   rows: PublishRow[]
   collisions: PublishCollision[]
+  views: PublishViewChoice[]
 }
 
 /** One rendered section. Empty ones never reach the template. */
@@ -146,6 +158,15 @@ export class PublishPanelComponent implements OnDestroy {
   readonly refreshing = signal(false)
   readonly rows = signal<PublishRow[]>([])
   readonly collisions = signal<PublishCollision[]>([])
+  /** Opens-as choices from the drone — svg sanitized ONCE per payload, never
+   *  in a template helper (change detection would re-trust every check). */
+  readonly views = signal<{ view: string; label: string; icon: SafeHtml }[]>([])
+  readonly #sanitizer = inject(DomSanitizer)
+  /** A deliberately coarse render clock. Template helpers must not call
+   *  Date.now() themselves: Angular's development check renders twice and a
+   *  minute boundary between those reads would make identical input appear
+   *  to change during one check. */
+  readonly renderedAt = signal(Date.now())
 
   /** Rows whose verdict has not landed yet — the leading unlabelled block. */
   readonly comparing = computed(() => this.rows().filter(r => r.state === 'comparing'))
@@ -170,6 +191,9 @@ export class PublishPanelComponent implements OnDestroy {
   #cleanups: (() => void)[] = []
 
   constructor() {
+    const ageTimer = setInterval(() => this.renderedAt.set(Date.now()), 15_000)
+    this.#cleanups.push(() => clearInterval(ageTimer))
+
     this.#cleanups.push(EffectBus.on<PublishRenderPayload>('publish:render', (p) => {
       if (!p) return
       this.gateActive.set(p.gateActive === true)
@@ -179,8 +203,30 @@ export class PublishPanelComponent implements OnDestroy {
       this.indexStale.set(p.indexStale === true)
       this.keyMismatch.set(p.keyMismatch === true)
       this.refreshing.set(p.refreshing === true)
-      this.rows.set(Array.isArray(p.rows) ? p.rows : [])
-      this.collisions.set(Array.isArray(p.collisions) ? p.collisions : [])
+      // The drone progressively mutates its internal rows as observations
+      // land. Never retain those objects in the Angular view: an async state
+      // transition could otherwise happen between Angular's render and its
+      // development-mode verification pass (NG0100). Every bus payload is a
+      // stable UI snapshot, including its nested mutable arrays.
+      this.rows.set(Array.isArray(p.rows)
+        ? p.rows.map(row => ({
+            ...row,
+            segments: [...row.segments],
+            gaps: [...row.gaps],
+            opensAs: String(row.opensAs ?? ''),
+            versions: Array.isArray(row.versions) ? row.versions.map(v => ({ ...v })) : [],
+          }))
+        : [])
+      this.views.set(Array.isArray(p.views)
+        ? p.views.map(v => ({
+            view: String(v.view ?? ''),
+            label: String(v.label ?? v.view ?? ''),
+            icon: this.#sanitizer.bypassSecurityTrustHtml(String(v.icon ?? '')),
+          }))
+        : [])
+      this.collisions.set(Array.isArray(p.collisions)
+        ? p.collisions.map(collision => ({ ...collision, paths: [...collision.paths] }))
+        : [])
       // No sibling is closed here — the lane decides what fits on an edge and
       // parks whatever it displaces.
       this.visible.set(!!p.open)
@@ -220,6 +266,26 @@ export class PublishPanelComponent implements OnDestroy {
 
   copyLink(row: PublishRow): void {
     EffectBus.emit('publish:copy-link', { key: row.key })
+  }
+
+  /** Pin (or unpin) the branch root's opening face — the drone writes the
+   *  same view:default decorator every arrival surface reads. */
+  pickView(row: PublishRow, view: string): void {
+    if (row.segments.length === 0 || row.opensAs === view) return
+    EffectBus.emit('publish:opens-as', { key: row.key, view })
+  }
+
+  /** The collapsed row's face mark — the icon of the view this branch opens
+   *  as. Hexagons (no pin) shows nothing: the ground is not a badge. */
+  opensAsIcon(row: PublishRow): SafeHtml | null {
+    if (!row.opensAs) return null
+    return this.views().find(v => v.view === row.opensAs)?.icon ?? null
+  }
+
+  /** A version IS a signature — tapping the chip puts the full sig on the
+   *  clipboard. */
+  copySig(sig: string): void {
+    try { void navigator.clipboard?.writeText(sig) } catch { /* clipboard denied */ }
   }
 
   /** Walk to the branch this row describes. Rows published from another
@@ -339,7 +405,7 @@ export class PublishPanelComponent implements OnDestroy {
    *  strings the catalog never agreed to. */
   age(at: number | null): string {
     if (!at || at <= 0) return ''
-    const seconds = Math.max(0, Math.round((Date.now() - at) / 1000))
+    const seconds = Math.max(0, Math.round((this.renderedAt() - at) / 1000))
     if (seconds < 60) return `${seconds}s`
     const minutes = Math.round(seconds / 60)
     if (minutes < 60) return `${minutes}m`

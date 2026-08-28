@@ -24,6 +24,7 @@
 import { EffectBus, I18N_IOC_KEY } from '@hypercomb/core'
 import { childNamesOf } from '../../history/layer-placement.js'
 import { isClaimedByTakeoverAt } from '../../commands/decoration-kind-index.js'
+import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'
 
 const SETS = 'sets'
 
@@ -153,6 +154,11 @@ class CollectionEmptyPromptDrone {
 
   async #reconcile(): Promise<void> {
     const seq = ++this.#checkSeq
+    // A published read-only site never invites editing: "Add a tile" is a
+    // participant gesture, and a visitor has no hive here to add to. Nothing
+    // of this surface loads in publish mode — an empty published layer is
+    // simply empty.
+    if (isPublishedVisitorShell()) { this.#hide(); return }
     const segments = this.#segments()
     // /sets has its own landing, and a takeover view (website, home, slides,
     // tree) hides the hex surface entirely — the emptiness on screen is not the

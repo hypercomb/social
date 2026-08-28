@@ -42,10 +42,13 @@ import {
   collidingPaths,
   highWaterIndexStamp,
   latestByLineageKey,
+  listPublishRecords,
   readObservation,
   writeObservation,
   type PublishLedgerEntry,
 } from './publish-heads.js'
+import { clearDefaultView, defaultViewAt, writeDefaultView } from '../commands/view-default.js'
+import { visualBeeIconSvg } from '../commands/visual-bee-icon-svg.js'
 import {
   publishBranch,
   unpublishBranch,
@@ -76,9 +79,28 @@ const SIG_RE = /^[a-f0-9]{64}$/
 /** Gap enumeration reads local bytes across a closure — opt-in per row, and
  *  capped: "at least this many holes" is enough to refuse a green light. */
 const GAP_LIMIT = 8
+/** Version history shown per row — enough to step back through, short enough
+ *  for a side panel. Every entry is just a signature + a stamp. */
+const VERSIONS_SHOWN = 6
 /** Head-change bursts (a commit storm while the panel is open) invalidate
  *  every seal. Coalesce instead of restarting the sweep on each one. */
 const REFRESH_DEBOUNCE_MS = 750
+/** Status work must never turn into a permanent UI state. Sealing and public
+ *  probes are observations, not publish operations; after this deadline the
+ *  row settles conservatively and the user can explicitly re-check it. */
+const STATUS_STEP_TIMEOUT_MS = 15_000
+
+async function beforeDeadline<T>(work: Promise<T>, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      work,
+      new Promise<T>(resolve => { timer = setTimeout(() => resolve(fallback), STATUS_STEP_TIMEOUT_MS) }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
 
 interface HistoryLike {
   sealSubtree: (segments: readonly string[]) => Promise<string | null>
@@ -115,6 +137,22 @@ export interface PublishRow {
   link: string | null
   /** Present while this row is publishing. */
   busyPhase: string | null
+  /** The view the branch ROOT opens as — its own `view:default` mark, '' for
+   *  hexagons. The root face is the one publishing decides: it is what a
+   *  visitor lands on, and it is read from (and written back as) the same
+   *  atomic decorator the rest of the system honours. */
+  opensAs: string
+  /** Every head this branch has ever published, newest first — the ledger's
+   *  immutable records, so a version IS a signature and nothing more. */
+  versions: { sig: string; at: number }[]
+}
+
+/** One choice on the "opens as" strip. `view: ''` is the hexagons ground. */
+export interface PublishViewChoice {
+  view: string
+  label: string
+  /** Inline SVG mark (visual-bee-icon-svg) — the same identity the tiles wear. */
+  icon: string
 }
 
 export interface PublishRenderPayload {
@@ -136,6 +174,9 @@ export interface PublishRenderPayload {
   rows: PublishRow[]
   /** Distinct paths that fold to the same index key — only one can be served. */
   collisions: { key: string; paths: string[] }[]
+  /** The opens-as choices, once for every row — the registry's views plus the
+   *  hexagons ground. */
+  views: PublishViewChoice[]
 }
 
 export class PublishStatusDrone extends Drone {
@@ -149,6 +190,7 @@ export class PublishStatusDrone extends Drone {
   protected override listens: string[] = [
     'publish:view-toggle', 'publish:close', 'publish:refresh',
     'publish:run', 'publish:unpublish', 'publish:expand', 'publish:copy-link',
+    'publish:opens-as',
     'history:head-changed', 'share:receipt-revoked',
   ]
   protected override emits: string[] = ['publish:render', 'toast:show', 'activity:log']
@@ -159,7 +201,7 @@ export class PublishStatusDrone extends Drone {
   #payload: PublishRenderPayload = {
     open: false, gateActive: false, host: '', pubkey: '',
     index: 'checking', indexCreatedAt: 0, indexStale: false,
-    keyMismatch: false, refreshing: false, rows: [], collisions: [],
+    keyMismatch: false, refreshing: false, rows: [], collisions: [], views: [],
   }
   #debounce: ReturnType<typeof setTimeout> | null = null
   /** Rows the participant opened. Gap enumeration is expensive; it happens
@@ -194,6 +236,9 @@ export class PublishStatusDrone extends Drone {
     this.onEffect<{ key?: string }>('publish:run', (p) => { void this.#run(String(p?.key ?? '')) })
     this.onEffect<{ key?: string }>('publish:unpublish', (p) => { void this.#unpublish(String(p?.key ?? '')) })
     this.onEffect<{ key?: string }>('publish:copy-link', (p) => { void this.#copyLink(String(p?.key ?? '')) })
+    this.onEffect<{ key?: string; view?: string }>('publish:opens-as', (p) => {
+      void this.#setOpensAs(String(p?.key ?? ''), String(p?.view ?? ''))
+    })
 
     // A commit anywhere bumps the tree epoch, which invalidates every seal —
     // so every row's local side is stale. Coalesce: a burst of commits must
@@ -266,12 +311,24 @@ export class PublishStatusDrone extends Drone {
 
       const collisions = [...await collidingPaths(pubkey)].map(([key, paths]) => ({ key, paths }))
 
+      // Version history straight from the ledger: every record IS a head sig,
+      // immutable, newest first — a version needs no storage beyond that.
+      const versionsByKey = new Map<string, { sig: string; at: number }[]>()
+      for (const entry of await listPublishRecords()) {
+        if (entry.record.pubkey !== pubkey) continue
+        const list = versionsByKey.get(entry.record.lineageKey) ?? []
+        if (list.length < VERSIONS_SHOWN) list.push({ sig: entry.sealed, at: entry.record.at })
+        versionsByKey.set(entry.record.lineageKey, list)
+      }
+
       // Paint what we already know, then fill the local side progressively:
       // sealing is the only expensive step and it must not hold the panel shut.
       const draft: PublishRow[] = []
       for (const [key, segments] of candidates) {
         const entry = ledger.get(key)
-        draft.push(this.#draftRow(key, segments, roots[key] ?? null, entry))
+        const row = this.#draftRow(key, segments, roots[key] ?? null, entry)
+        row.versions = versionsByKey.get(key) ?? []
+        draft.push(row)
       }
       draft.sort((a, b) => a.path.localeCompare(b.path))
       this.#rows = draft
@@ -279,6 +336,7 @@ export class PublishStatusDrone extends Drone {
         open: this.#open, gateActive, host, pubkey,
         index: indexState, indexCreatedAt, indexStale, keyMismatch,
         refreshing: true, rows: this.#rows, collisions,
+        views: this.#viewChoices(),
       }
       this.#emit()
 
@@ -287,11 +345,19 @@ export class PublishStatusDrone extends Drone {
       // branch — running N of those concurrently is how a status panel becomes
       // a stall.
       for (const row of this.#rows) {
+        // The branch root's opening face — read, never guessed, from the same
+        // view:default decorator the arrival machinery honours.
+        if (row.segments.length > 0) {
+          row.opensAs = await beforeDeadline(defaultViewAt(row.segments).catch(() => ''), '')
+        }
         const here = row.segments.length > 0 && history?.sealSubtree
-          ? await history.sealSubtree(row.segments).catch(() => null)
+          ? await beforeDeadline(history.sealSubtree(row.segments).catch(() => null), null)
           : null
         const served = row.live
-          ? await (hostSync?.probeServed?.(host, row.live) ?? Promise.resolve('unknown' as const))
+          ? await beforeDeadline(
+              hostSync?.probeServed?.(host, row.live) ?? Promise.resolve('unknown' as const),
+              'unknown' as const,
+            )
           : 'unknown'
         const entry = ledger.get(row.key)
         row.here = here
@@ -335,7 +401,43 @@ export class PublishStatusDrone extends Drone {
       expanded: this.#expanded.has(key),
       link: entry?.record.bundleSig ? this.#linkFor(entry.record.bundleSig) : null,
       busyPhase: null,
+      opensAs: '',
+      versions: [],
     }
+  }
+
+  /** The opens-as choices: the hexagons ground first, then every registered
+   *  view, wearing the same SVG identity the tiles wear. */
+  #viewChoices(): PublishViewChoice[] {
+    const registry = get<{ all?: () => { view: string; toggleIcon?: string }[] }>(
+      '@diamondcoreprocessor.com/VisualBeeRegistry')
+    const choices: PublishViewChoice[] = [
+      { view: '', label: 'hexagons', icon: visualBeeIconSvg('hexagon', 'hexagons') },
+    ]
+    for (const bee of registry?.all?.() ?? []) {
+      if (!bee?.view) continue
+      choices.push({
+        view: bee.view,
+        label: bee.view,
+        icon: visualBeeIconSvg(String(bee.toggleIcon ?? ''), bee.view),
+      })
+    }
+    return choices
+  }
+
+  /** `publish:opens-as` — pin (or unpin) the branch ROOT's opening face. The
+   *  write is the same atomic `view:default` decorator every surface reads;
+   *  the head changes, so the differential immediately shows the republish
+   *  this pin now owes. */
+  async #setOpensAs(key: string, view: string): Promise<void> {
+    const row = this.#rows.find(r => r.key === key)
+    if (!row || row.segments.length === 0) return
+    try {
+      if (view) await writeDefaultView(row.segments, view)
+      else await clearDefaultView(row.segments)
+      row.opensAs = view
+      this.#emit()
+    } catch { /* cold layer — the next refresh re-reads the truth */ }
   }
 
   /** Gap enumeration for one expanded row. Reads local bytes across the
@@ -345,9 +447,15 @@ export class PublishStatusDrone extends Drone {
     if (!row) return
     row.expanded = this.#expanded.has(key)
     if (!row.expanded || !row.live) { row.gaps = []; this.#emit(); return }
+    // Expansion is a UI fact, so render it before the optional closure walk.
+    // A slow/cold store must not make the click look like it was ignored.
+    this.#emit()
     const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
     const host = this.#payload.host
-    row.gaps = (await hostSync?.closureGaps?.(row.live, 'layer', true, GAP_LIMIT)) ?? []
+    row.gaps = await beforeDeadline(
+      hostSync?.closureGaps?.(row.live, 'layer', true, GAP_LIMIT) ?? Promise.resolve([]),
+      [],
+    )
     const observation = await readObservation(row.live, host)
     row.seenAt = observation?.at ?? null
     this.#emit()

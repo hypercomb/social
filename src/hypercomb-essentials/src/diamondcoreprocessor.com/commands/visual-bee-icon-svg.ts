@@ -21,6 +21,10 @@ const GLYPHS: Readonly<Record<string, string>> = {
     '<rect x="3" y="3" width="6" height="5" rx="1"/><rect x="15" y="10" width="6" height="5" rx="1"/><rect x="15" y="18" width="6" height="4" rx="1"/><path d="M6 8v8h9M12 12h3M12 20h3"/>',
   conversion_path:
     '<circle cx="5" cy="5" r="2"/><circle cx="19" cy="19" r="2"/><path d="M7 5h4a3 3 0 0 1 3 3v8a3 3 0 0 0 3 3"/><path d="m10 13 4 3-4 3"/>',
+  // The hexagons ground itself — the publish panel's opens-as strip offers it
+  // beside the registered views, so the un-pinned face has an honest mark.
+  hexagon:
+    '<path d="M12 3l7.8 4.5v9L12 21l-7.8-4.5v-9z"/>',
 }
 
 function hashedGlyph(seed: string): string {

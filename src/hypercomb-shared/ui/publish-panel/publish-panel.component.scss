@@ -129,6 +129,16 @@ $quiet: #8ea2b0;
   padding: 0.1em 0.55em;
 }
 
+// The host the index line describes — quiet, right after the verdict.
+.publish-host {
+  font-size: 0.68em;
+  color: rgba(255, 255, 255, 0.35);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12em;
+}
+
 // The one loud thing in the panel.
 .publish-alarm {
   flex: 0 0 auto;
@@ -372,6 +382,154 @@ $quiet: #8ea2b0;
 }
 
 .pdet-age { color: $quiet; }
+
+// ── focus: controls appear when the row is engaged ────────────────────
+//
+// A column of buttons is noise; a row's action belongs to the row you are
+// ON. Hidden with opacity (not display) so the row's geometry never shifts,
+// and revealed for hover, keyboard focus, expansion, and busy rows.
+// Pointerless devices (hover: none) keep every action visible — a control
+// you cannot summon is a control you do not have.
+
+.prow-action,
+.prow-face {
+  opacity: 0;
+  transition: opacity 0.14s ease;
+}
+
+.publish-row:hover .prow-action,
+.publish-row:focus-within .prow-action,
+.publish-row.expanded .prow-action,
+.publish-row.is-busy .prow-action,
+.publish-row:hover .prow-face,
+.publish-row:focus-within .prow-face,
+.publish-row.expanded .prow-face {
+  opacity: 1;
+}
+
+// The face mark keeps a whisper of presence even unhovered — it is status,
+// not an action.
+.publish-row .prow-face { opacity: 0.35; }
+
+@media (hover: none) {
+  .prow-action, .prow-face { opacity: 1; }
+}
+
+// ── opens-as: the branch root's face ──────────────────────────────────
+//
+// One atomic view:default decorator behind every choice. The selected mark
+// wears the accent; the rest sit as quiet outlines. Icons are the SAME svg
+// identity the tiles wear (visual-bee-icon-svg), recoloured to the panel.
+
+.pdet-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3em;
+  padding: 0.2em 0 0.1em;
+}
+
+.pdet-views {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3em;
+}
+
+.pdet-view {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2em;
+  height: 2em;
+  padding: 0.3em;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba($accent, 0.18);
+  border-radius: tw.$radius-control;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+  opacity: 0.75;
+
+  &:hover { background: rgba($accent, 0.14); opacity: 1; }
+
+  &.selected {
+    background: rgba($accent, 0.2);
+    border-color: rgba($accent, 0.7);
+    opacity: 1;
+    box-shadow: 0 0 0 1px rgba($accent, 0.25) inset;
+  }
+}
+
+// [innerHTML] svg carries no _ngcontent attribute — style it through ::ng-deep
+// or the rules match nothing, silently.
+.pdet-view ::ng-deep svg,
+.prow-face ::ng-deep svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  stroke: #c6d5e0;
+}
+
+.pdet-view.selected ::ng-deep svg { stroke: #eaf4fb; }
+
+// Collapsed-row face mark: which view this branch opens as, at a glance.
+.prow-face {
+  flex: 0 0 auto;
+  width: 1.35em;
+  height: 1.35em;
+  opacity: 0.8;
+  align-self: center;
+}
+
+// ── versions: the ledger, worn as chips ───────────────────────────────
+//
+// Every entry is an immutable published head — a version IS a signature.
+// Tapping copies the full sig; the serving one carries the mint tag.
+
+.pdet-versions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+}
+
+.pdet-version {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: tw.$radius-control;
+  padding: 0.25em 0.55em;
+  font: inherit;
+  font-size: 0.7em;
+  color: rgba(214, 228, 238, 0.85);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+
+  &:hover { background: rgba($accent, 0.1); border-color: rgba($accent, 0.3); }
+
+  &.current { border-color: rgba($mint, 0.45); }
+
+  .pdet-sig { font-size: 1em; }
+}
+
+.pdet-vage {
+  margin-left: auto;
+  color: $quiet;
+}
+
+.pdet-vlive {
+  flex: 0 0 auto;
+  font-size: 0.85em;
+  letter-spacing: 0.05em;
+  color: $mint;
+  background: rgba($mint, 0.12);
+  border: 1px solid rgba($mint, 0.35);
+  border-radius: tw.$radius-pill;
+  padding: 0 0.5em;
+}
 
 .pdet-gaps { color: rgba($amber, 0.9); }
 

@@ -1,0 +1,8 @@
+const fs = require('fs')
+const WebSocket = require('ws')
+const req = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))
+const ws = new WebSocket('ws://localhost:2401')
+const timer = setTimeout(() => { console.error('bridge timeout'); process.exit(1) }, 120000)
+ws.on('open', () => ws.send(JSON.stringify({ ...req, id: 'file-' + Date.now() })))
+ws.on('message', raw => { clearTimeout(timer); console.log(String(raw)); ws.close(); process.exit(0) })
+ws.on('error', e => { console.error(String(e)); process.exit(1) })
