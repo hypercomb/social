@@ -1,0 +1,54 @@
+# Plugin the Matrix — independent public relay + read-only Core hosts.
+#
+# This deployment intentionally owns no jwize.com route. The relay hostname
+# accepts authenticated publisher writes; application hostnames are bound in
+# SITE_BINDINGS and worker.js rejects every non-GET/HEAD request on them.
+
+name = "pluginthematrix-core"
+main = "worker.js"
+compatibility_date = "2026-06-01"
+
+routes = [
+  { pattern = "content.pluginthematrix.com", custom_domain = true },
+  { pattern = "pluginthematrix.com", custom_domain = true },
+  { pattern = "revolucion.pluginthematrix.com", custom_domain = true },
+  # Nested-lineage site: the implicit wildcard rule only maps a label to a
+  # TOP-LEVEL lineage, so a page living under another creation needs its own
+  # custom domain + explicit SITE_BINDINGS entry naming the full lineage key.
+  { pattern = "meetup.pluginthematrix.com", custom_domain = true },
+  { pattern = "arkanoid.pluginthematrix.com", custom_domain = true },
+  # Every participant name resolves here (subdomain IS the hive name). A
+  # proxied wildcard DNS record (* CNAME pluginthematrix.com) must exist in
+  # the zone; unbound names get the worker's "nothing here" page.
+  { pattern = "*.pluginthematrix.com/*", zone_name = "pluginthematrix.com" }
+]
+
+[assets]
+directory = "../../hypercomb-web/dist/hypercomb-web/visitor"
+binding = "ASSETS"
+run_worker_first = true
+
+# One immutable signature heap shared by the relay and every application host.
+[[r2_buckets]]
+binding = "CONTENT"
+bucket_name = "hypercomb-content"
+
+[[kv_namespaces]]
+binding = "GRANTS"
+id = "11e24dcda743413ab24397e936671641"
+
+[[kv_namespaces]]
+binding = "HIVES"
+id = "186c91f7458b421abea02d7647f27821"
+
+[vars]
+AUTO_GRANT = "1"
+DEFAULT_QUOTA_BYTES = "104857600"
+GRANT_TTL_DAYS = "90"
+AI_MODEL = "claude-haiku-4-5"
+AI_MAX_TOKENS = "1024"
+AI_DAILY_TOKENS = "100000"
+AI_WRITERS = ""
+
+# The relay hostname is deliberately absent: it must retain signed PUT routes.
+SITE_BINDINGS = '{"pluginthematrix.com":{"title":"Plugin the Matrix","lineage":"pluginthematrix","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"revolucion.pluginthematrix.com":{"title":"Revolución","lineage":"revolucion","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"meetup.pluginthematrix.com":{"title":"Meetup","lineage":"revolucion/meetup","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"arkanoid.pluginthematrix.com":{"title":"Arkanoid","lineage":"games/arkanoid","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]}}'
