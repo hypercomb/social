@@ -26,7 +26,54 @@ routes = [
 [assets]
 directory = "../../hypercomb-web/dist/hypercomb-web/visitor"
 binding = "ASSETS"
-run_worker_first = true
+
+# Workers Free allows 100,000 requests/DAY across the account, and every
+# hostname here is served by this one script — so when the cap is hit, every
+# site dies at once and only recovers at UTC midnight. `run_worker_first = true`
+# billed EVERY static asset (bundles, theme art, images) as a Worker
+# invocation; one page load cost ~135 requests, ~40 of them pure static. The
+# asset server answers the negated paths directly, off the quota entirely.
+#
+# The list is deliberately EXPLICIT rather than extension globs: `*` matches
+# slashes, so a rule like `!/*.png` would also swallow `/@resource/<sig>/art.png`
+# and serve R2-backed content as a missing static file.
+#
+# Everything NOT negated still runs the Worker first — `/` (so the implicit-site
+# "nothing published here" check and the page CSP are unchanged), bare
+# `/<sig>`, `/@resource/*`, `/content/*`, `/site.json`, `/publications.json`,
+# `/hive/*`, `/upload`, `/grant`, `/ai/ask`. Security headers for the negated
+# paths live in hypercomb-web/public/_headers.
+run_worker_first = [
+  "/*",
+  "!/chunk-*.js",
+  "!/main-*.js",
+  "!/worker-*.js",
+  "!/polyfills-*.js",
+  "!/styles-*.css",
+  "!/substrate/*",
+  "!/vendor/*",
+  "!/core/*",
+  "!/media/*",
+  "!/tracks/*",
+  "!/env.js",
+  "!/splash.js",
+  "!/pixi.js",
+  "!/hypercomb-core.runtime.js",
+  "!/hypercomb.worker.js",
+  "!/example-hives.json",
+  "!/manifest.webmanifest",
+  "!/staticwebapp.config.json",
+  "!/favicon.ico",
+  "!/icon.svg",
+  "!/external.png",
+  "!/external.svg",
+  "!/house.png",
+  "!/local.png",
+  "!/local.svg",
+  "!/local-flat.svg",
+  "!/spw.png",
+  "!/unnamed.jpg",
+]
 
 # One immutable signature heap shared by the relay and every application host.
 [[r2_buckets]]
