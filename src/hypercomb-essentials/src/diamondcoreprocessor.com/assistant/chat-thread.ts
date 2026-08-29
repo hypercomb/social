@@ -87,11 +87,21 @@ type TurnManifest = {
 // overwrite and un-setting can remove. A hashed constant can never collide
 // with a turn file, whose name is the hash of a JSON record.
 const ARCHIVE_MARKER = 'chat-archived'
+const GOAL_MARKER = 'chat-goal-reached'
 
 /** The marker file's name inside a bucket. Derived once, then held. */
 let archiveNamePromise: Promise<string> | null = null
 const archiveName = (): Promise<string> =>
   (archiveNamePromise ??= sha256(new TextEncoder().encode(ARCHIVE_MARKER).buffer as ArrayBuffer))
+let goalNamePromise: Promise<string> | null = null
+const goalName = (): Promise<string> =>
+  (goalNamePromise ??= sha256(new TextEncoder().encode(GOAL_MARKER).buffer as ArrayBuffer))
+
+export interface ChatGoalReached {
+  /** Human-readable attained goals, one per line when there is more than one. */
+  readonly details: string
+  readonly at: number
+}
 
 /** A parsed bucket file before its text is materialized: either a legacy
  *  inline turn (text present) or a manifest (contentSig present). */
@@ -108,6 +118,7 @@ type RawTurn = {
 type BucketRead = {
   readonly turns: RawTurn[]
   readonly archived: boolean
+  readonly goal?: ChatGoalReached
 }
 
 /** One conversation, as the chat window lists it. Recovered from the pool —
@@ -123,6 +134,8 @@ export interface ConversationSummary {
   readonly lastAt: number
   /** PUT AWAY, not thrown away — see the archive marker below. */
   readonly archived: boolean
+  /** Set by a bridge responder when the conversation's requested outcome is complete. */
+  readonly goal?: ChatGoalReached
 }
 
 /** Conversations that belong to a PERSON, and so appear in the chat window.
@@ -291,6 +304,7 @@ const readBucketRaw = async (
 ): Promise<BucketRead | null> => {
   const out: RawTurn[] = []
   let archived = false
+  let goal: ChatGoalReached | undefined
   let decided = !humanOnly
   const entries = (bucket as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()
   for await (const [, handle] of entries) {
@@ -302,6 +316,11 @@ const readBucketRaw = async (
       // walk that was already reading every file learns the flag for free —
       // no second pass, no second read per thread.
       if (turn?.kind === ARCHIVE_MARKER) { archived = true; continue }
+      if (turn?.kind === GOAL_MARKER) {
+        const details = typeof turn.text === 'string' ? turn.text : ''
+        goal = { details, at: Number(turn.at) || 0 }
+        continue
+      }
       if (turn?.kind !== 'chat-turn' || !turn.convoId) continue
       // Either shape: legacy inline text, or a manifest pointing at it.
       if (typeof turn.text !== 'string' && typeof turn.contentSig !== 'string') continue
@@ -313,7 +332,7 @@ const readBucketRaw = async (
       out.push(turn)
     } catch { /* one unreadable turn must not hide the thread */ }
   }
-  return { turns: out.sort((a, b) => a.at - b.at), archived }
+  return { turns: out.sort((a, b) => a.at - b.at), archived, goal }
 }
 
 /** The text behind one raw turn: inline (legacy) or resolved from the content
@@ -423,6 +442,7 @@ export const listConversationsWithLatest = async (): Promise<ConversationList> =
           turnCount: raw.length,
           lastAt,
           archived: read.archived,
+          ...(read.goal ? { goal: read.goal } : {}),
         })
         // AN ARCHIVED THREAD IS NEVER "where you were". `latestTurns` is what
         // a window opening onto resume will show, and resuming into a
@@ -458,6 +478,31 @@ export const listConversations = async (): Promise<ConversationSummary[]> =>
 // model choice, never in a pool. Losing it costs one bold row, not data.
 
 const SEEN_KEY = 'hc:chat-seen'
+
+/** WHICH MODEL EACH CONVERSATION WAS LAST HELD IN — `{ [convoId]: model }`.
+ *  Per-device like SEEN above, and for the same reason: the tier you chose
+ *  for a thread is part of how YOU are set up, not a fact about the hive.
+ *
+ *  WRITTEN by the chat window (hypercomb-shared/ui/chat-window, `MODEL_KEY`),
+ *  read here so the render layer can brand a tile's resting bee with the
+ *  model its newest thread was last held in — a conversation you have been
+ *  holding in Haiku should not wear Opus's colours over its tile. Shared may
+ *  not import essentials nor the other way round, so the key is spelled in
+ *  both places and each names the other. Change one, change both. */
+const MODEL_KEY = 'hc:chat-models'
+
+/** The model a conversation was last held in, or '' when it has never been
+ *  chosen. Best-effort: a missing map is not an error, it is a thread you
+ *  have not picked a tier for. */
+export const conversationModel = (convoId: string): string => {
+  const id = String(convoId ?? '').trim()
+  if (!id) return ''
+  try {
+    const map = JSON.parse(localStorage.getItem(MODEL_KEY) ?? '{}') as Record<string, string>
+    const held = map[id]
+    return typeof held === 'string' ? held : ''
+  } catch { return '' }
+}
 
 /** What the rail needs to know about one tile's conversation. */
 export interface TileConversation {
@@ -661,7 +706,7 @@ export const setConversationArchived = async (
       // Announced from HERE, not from the surface that pressed the button:
       // several surfaces list the same thread (the rail's fold, the window's
       // flat list), and only this function knows the write landed.
-      EffectBus.emit('chat:threads-changed', { convoId: id })
+      EffectBus.emit('chat:threads-changed', { convoId: id, archived: false })
       return true
     }
     const bytes = new TextEncoder().encode(
@@ -670,6 +715,33 @@ export const setConversationArchived = async (
     const handle = await bucket.getFileHandle(marker, { create: true })
     const writable = await handle.createWritable()
     try { await writable.write(new Blob([bytes as BlobPart])) } finally { await writable.close() }
+    EffectBus.emit('chat:threads-changed', { convoId: id, archived: true })
+    return true
+  } catch { return false }
+}
+
+/** Persist the responder's "goals attained" receipt beside this conversation. */
+export const setConversationGoalReached = async (
+  convoId: string,
+  details: string,
+): Promise<boolean> => {
+  const id = String(convoId ?? '').trim()
+  const text = String(details ?? '').trim().slice(0, 8_000)
+  if (!id || !text) return false
+  const store = get<StoreLike>('@hypercomb.social/Store')
+  const pool = await store?.getPool?.(THREADS_POOL)
+  if (!pool) return false
+  try {
+    const name = await sha256(new TextEncoder().encode(id).buffer as ArrayBuffer)
+    const bucket = await pool.getDirectoryHandle(name, { create: true })
+    const marker = await goalName()
+    const at = Date.now()
+    const handle = await bucket.getFileHandle(marker, { create: true })
+    const writable = await handle.createWritable()
+    try {
+      await writable.write(new Blob([JSON.stringify({ kind: GOAL_MARKER, convoId: id, text, at })]))
+    } finally { await writable.close() }
+    EffectBus.emit('chat:goal-reached', { convoId: id, details: text, at })
     EffectBus.emit('chat:threads-changed', { convoId: id })
     return true
   } catch { return false }
@@ -919,6 +991,7 @@ export class ChatThreads {
   readonly listConversationsWithLatest = listConversationsWithLatest
   readonly deleteConversation = deleteConversation
   readonly setConversationArchived = setConversationArchived
+  readonly setConversationGoalReached = setConversationGoalReached
   readonly newConvoId = newConvoId
   readonly isHumanConversation = isHumanConversation
 }
