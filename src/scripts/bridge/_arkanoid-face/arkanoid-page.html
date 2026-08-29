@@ -1,0 +1,160 @@
+<style>
+  :host{all:initial}
+  .ak{display:block;min-height:100vh;background:#08090c;color:#dfe3ec;
+      font:16px/1.65 -apple-system,'Segoe UI',system-ui,sans-serif}
+  .ak *{box-sizing:border-box;margin:0}
+  .ak a{color:#38e0ff;text-decoration:none}
+  .ak a:hover{text-decoration:underline}
+  .ak code{font:0.86em/1.5 Consolas,'Cascadia Mono',monospace;background:#141926;
+      border-radius:4px;padding:.1em .4em;color:#f6d109}
+
+  .ak-wrap{max-width:880px;margin:0 auto;padding:0 22px 90px}
+
+  /* ── hero: a wall mid-game ─────────────────────────────── */
+  .ak-hero{padding:64px 0 46px;border-bottom:1px solid #1c2333;text-align:center}
+  .ak-wall{display:grid;grid-template-columns:repeat(11,1fr);gap:5px;max-width:560px;
+      margin:0 auto 8px}
+  .ak-brick{height:17px;border-radius:3px;opacity:.95}
+  .ak-b1{background:linear-gradient(180deg,#4de3ff,#1fa8cc)}
+  .ak-b2{background:linear-gradient(180deg,#ffd93b,#d3a802)}
+  .ak-b3{background:linear-gradient(180deg,#ff5c96,#d1246a)}
+  .ak-b4{background:linear-gradient(180deg,#a488ff,#6c48e0)}
+  .ak-b0{background:none}
+  .ak-court{position:relative;max-width:560px;margin:0 auto 30px;height:96px}
+  .ak-ball{position:absolute;left:63%;top:34px;width:11px;height:11px;border-radius:50%;
+      background:#fdfdf6;box-shadow:0 0 16px #fdfdf6,0 0 34px #38e0ff}
+  .ak-trail{position:absolute;left:46%;top:74px;width:120px;height:2px;
+      background:linear-gradient(90deg,transparent,#38e0ff);transform:rotate(-24deg);opacity:.55}
+  .ak-paddle{position:absolute;left:38%;bottom:0;width:110px;height:13px;border-radius:7px;
+      background:linear-gradient(180deg,#67e8ff,#1b90b8);box-shadow:0 0 18px rgba(56,224,255,.55)}
+  .ak-hero h1{font-size:clamp(42px,8vw,70px);font-weight:800;letter-spacing:.14em;
+      color:#fdfdf6;text-shadow:0 0 26px rgba(56,224,255,.35)}
+  .ak-hero h1 span{color:#f6d109}
+  .ak-lede{margin:14px auto 0;font-size:19px;color:#9aa2b5;max-width:600px}
+  .ak-lede b{color:#dfe3ec;font-weight:600}
+
+  .ak h2{font-size:24px;font-weight:700;color:#fdfdf6;margin:60px 0 6px;letter-spacing:-.01em}
+  .ak .ak-sub{color:#828b9f;font-size:15px;margin-bottom:16px}
+
+  /* ── level names ───────────────────────────────────────── */
+  .ak-levels{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+  .ak-lvl{font:13px/1 Consolas,'Cascadia Mono',monospace;color:#b9c0d2;background:#10151f;
+      border:1px solid #222a3c;border-radius:5px;padding:7px 11px}
+  .ak-lvl.ak-more{color:#f6d109;border-color:#3a3410}
+  .ak-themes{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:18px}
+  .ak-theme{border:1px solid #222a3c;border-radius:9px;padding:14px 16px;background:#0c111b}
+  .ak-theme b{display:block;color:#fdfdf6;font-size:15.5px;margin-bottom:4px}
+  .ak-theme span{font-size:13.5px;color:#828b9f}
+  .ak-theme i{display:block;width:34px;height:5px;border-radius:3px;margin-bottom:10px}
+
+  /* ── pills ─────────────────────────────────────────────── */
+  .ak-pills{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin-top:16px}
+  .ak-pill{display:flex;align-items:center;gap:12px;background:#0c111b;border:1px solid #222a3c;
+      border-radius:9px;padding:11px 13px}
+  .ak-cap{flex:none;width:34px;height:22px;border-radius:11px;display:grid;place-items:center;
+      font:800 13px/1 Consolas,monospace;color:#08090c}
+  .ak-pill b{color:#e8ebf3;font-size:14.5px;font-weight:600}
+  .ak-pill span{display:block;font-size:12.5px;color:#79839a}
+
+  /* ── controls ──────────────────────────────────────────── */
+  .ak-keys{margin-top:16px;border:1px solid #222a3c;border-radius:10px;overflow:hidden}
+  .ak-key{display:grid;grid-template-columns:190px 1fr;gap:14px;padding:12px 16px;
+      background:#0c111b;border-top:1px solid #171d2b;font-size:15px;color:#b9c0d2}
+  .ak-key:first-child{border-top:none}
+  .ak-key b{font:600 13.5px/1.5 Consolas,'Cascadia Mono',monospace;color:#f6d109}
+
+  .ak-cta{display:inline-block;margin:18px 0 4px;background:#f6d109;color:#08090c;
+      font-weight:700;font-size:15px;padding:11px 24px;border-radius:6px}
+  .ak-cta:hover{text-decoration:none;filter:brightness(1.08)}
+
+  .ak-foot{margin-top:72px;padding-top:18px;border-top:1px solid #1c2333;
+      font-size:13.5px;color:#5f6879}
+  .ak-foot a{color:#828b9f}
+  @media(max-width:620px){
+    .ak-themes{grid-template-columns:1fr}
+    .ak-key{grid-template-columns:1fr;gap:2px}
+  }
+</style>
+<div class="ak"><div class="ak-wrap">
+
+  <header class="ak-hero">
+    <div class="ak-wall">
+      <div class="ak-brick ak-b4"></div><div class="ak-brick ak-b4"></div><div class="ak-brick ak-b4"></div><div class="ak-brick ak-b4"></div><div class="ak-brick ak-b4"></div><div class="ak-brick ak-b4"></div><div class="ak-brick ak-b4"></div><div class="ak-brick ak-b4"></div><div class="ak-brick ak-b4"></div><div class="ak-brick ak-b4"></div><div class="ak-brick ak-b4"></div>
+      <div class="ak-brick ak-b3"></div><div class="ak-brick ak-b3"></div><div class="ak-brick ak-b3"></div><div class="ak-brick ak-b3"></div><div class="ak-brick ak-b0"></div><div class="ak-brick ak-b3"></div><div class="ak-brick ak-b3"></div><div class="ak-brick ak-b3"></div><div class="ak-brick ak-b3"></div><div class="ak-brick ak-b3"></div><div class="ak-brick ak-b3"></div>
+      <div class="ak-brick ak-b2"></div><div class="ak-brick ak-b2"></div><div class="ak-brick ak-b2"></div><div class="ak-brick ak-b0"></div><div class="ak-brick ak-b0"></div><div class="ak-brick ak-b0"></div><div class="ak-brick ak-b2"></div><div class="ak-brick ak-b2"></div><div class="ak-brick ak-b2"></div><div class="ak-brick ak-b2"></div><div class="ak-brick ak-b2"></div>
+      <div class="ak-brick ak-b1"></div><div class="ak-brick ak-b1"></div><div class="ak-brick ak-b1"></div><div class="ak-brick ak-b1"></div><div class="ak-brick ak-b0"></div><div class="ak-brick ak-b1"></div><div class="ak-brick ak-b1"></div><div class="ak-brick ak-b0"></div><div class="ak-brick ak-b1"></div><div class="ak-brick ak-b1"></div><div class="ak-brick ak-b1"></div>
+    </div>
+    <div class="ak-court">
+      <div class="ak-ball"></div>
+      <div class="ak-trail"></div>
+      <div class="ak-paddle"></div>
+    </div>
+    <h1>ARKANOID<span>.</span></h1>
+    <p class="ak-lede">A full-blooded brick-breaker living inside the Hypercomb hive —
+      <b>one hundred hand-built walls</b>, a charge-and-release laser, eleven power-up
+      pills, and a level designer of its own.</p>
+  </header>
+
+  <h2>One hundred walls</h2>
+  <p class="ak-sub">Every level is a drawn layout, not a generator — from a three-row warmup
+    to sealed vaults that take the whole arsenal to crack.</p>
+  <div class="ak-levels">
+    <span class="ak-lvl">Warmup</span><span class="ak-lvl">Greek Cross</span>
+    <span class="ak-lvl">Pixel Heart</span><span class="ak-lvl">Space Invader</span>
+    <span class="ak-lvl">Pac-Man Chomp</span><span class="ak-lvl">Lighthouse</span>
+    <span class="ak-lvl">Spiral Galaxy</span><span class="ak-lvl">Black Hole</span>
+    <span class="ak-lvl">Reactor Core</span><span class="ak-lvl">Dragon's Hoard</span>
+    <span class="ak-lvl">Vault Door</span><span class="ak-lvl">Sun Disc Idol</span>
+    <span class="ak-lvl ak-more">…88 more</span>
+  </div>
+  <div class="ak-themes">
+    <div class="ak-theme"><i style="background:#38e0ff"></i><b>Neon Grid</b>
+      <span>synthwave lines and glow — the classic arcade read</span></div>
+    <div class="ak-theme"><i style="background:#a488ff"></i><b>Haunted Keep</b>
+      <span>stone, torchlight and things that watch you play</span></div>
+    <div class="ak-theme"><i style="background:#ff5c96"></i><b>Space Madness</b>
+      <span>deep-field chaos for the steady of hand</span></div>
+  </div>
+
+  <h2>The arsenal</h2>
+  <p class="ak-sub">Pills fall from broken bricks. Catch them with the bat.</p>
+  <div class="ak-pills">
+    <div class="ak-pill"><span class="ak-cap" style="background:#4de3ff">O</span><div><b>Oscillate</b><span>the wall itself starts to sway</span></div></div>
+    <div class="ak-pill"><span class="ak-cap" style="background:#ffd93b">B</span><div><b>Break</b><span>skip ahead — the exit opens</span></div></div>
+    <div class="ak-pill"><span class="ak-cap" style="background:#ff5c96">L</span><div><b>Laser</b><span>charge and release a fireball</span></div></div>
+    <div class="ak-pill"><span class="ak-cap" style="background:#a488ff">E</span><div><b>Expand</b><span>a wider bat, a calmer life</span></div></div>
+    <div class="ak-pill"><span class="ak-cap" style="background:#4de3ff">G</span><div><b>Gun</b><span>the bat shoots back</span></div></div>
+    <div class="ak-pill"><span class="ak-cap" style="background:#ffd93b">M</span><div><b>Magnet</b><span>catch the ball, aim the next throw</span></div></div>
+    <div class="ak-pill"><span class="ak-cap" style="background:#ff5c96">&#8593;</span><div><b>Rocket</b><span>straight up through everything</span></div></div>
+    <div class="ak-pill"><span class="ak-cap" style="background:#a488ff">&#215;</span><div><b>Multiplier</b><span>more balls, more trouble</span></div></div>
+    <div class="ak-pill"><span class="ak-cap" style="background:#4de3ff">&#8727;</span><div><b>Burst</b><span>the ball detonates on impact</span></div></div>
+    <div class="ak-pill"><span class="ak-cap" style="background:#ffd93b">P</span><div><b>Pinball</b><span>flippers where the bat used to be</span></div></div>
+    <div class="ak-pill"><span class="ak-cap" style="background:#ff5c96">I</span><div><b>Beam</b><span>a standing column of light</span></div></div>
+  </div>
+
+  <h2>At the controls</h2>
+  <div class="ak-keys">
+    <div class="ak-key"><b>&#8592; &#8594; / mouse</b><span>move the bat — click the field for pointer lock</span></div>
+    <div class="ak-key"><b>Space / left-click</b><span>launch — or HOLD to charge a Laser fireball, release to fire</span></div>
+    <div class="ak-key"><b>right-click</b><span>fire the missile</span></div>
+    <div class="ak-key"><b>R</b><span>restart the level</span></div>
+    <div class="ak-key"><b>Esc</b><span>release the pointer, then close the game</span></div>
+  </div>
+
+  <h2>Where it lives</h2>
+  <p class="ak-sub">Arkanoid is a <b>beehaviour</b> — a module riding above the Hypercomb
+    hexagon grid, switchable like everything else in the hive.</p>
+  <p style="color:#b9c0d2">Open the Hypercomb app and type <code>/arkanoid</code>
+    (or <code>/breakout</code>, or <code>/bricks</code>) — the game mounts as a
+    full-screen overlay above your tiles. <code>/arkanoid design</code> opens the
+    level designer, where you paint bricks straight onto the grid and play what
+    you drew.</p>
+  <a class="ak-cta" href="https://dylan.pluginthematrix.com">Run your own hive &#8594;</a>
+  <p class="ak-sub" style="margin-top:10px">The install guide walks you from nothing to a
+    self-hosted Hypercomb — the same setup that serves this very page.</p>
+
+  <p class="ak-foot">Served from the <code>/games/arkanoid</code> lineage of a Hypercomb
+    hive — a signed, content-addressed publish. This page is the branch's arrival face;
+    the site will one day open straight into the game itself.</p>
+
+</div></div>
