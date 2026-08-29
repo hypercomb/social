@@ -1,0 +1,20 @@
+<!-- hypercomb-shared/ui/text-scale/text-scale.component.html -->
+<!--
+  A segmented control, not a dropdown: four steps is few enough to show, and
+  seeing the one you are on beside the ones you are not is the whole reading.
+  `mousedown.prevent` keeps focus where it was — the completion list is driven
+  from an input that must not blur to change its own size.
+-->
+<div class="text-scale" role="group" [attr.aria-label]="'panel.text.label' | t">
+  <span class="text-scale-label">{{ 'panel.text.label' | t }}</span>
+  @for (size of sizes; track size.key) {
+    <button
+      type="button"
+      class="text-scale-step"
+      [class.on]="size.scale === scale()"
+      [attr.aria-pressed]="size.scale === scale()"
+      (mousedown)="$event.preventDefault()"
+      (click)="pick(size.scale)"
+    >{{ 'panel.text.' + size.key | t }}</button>
+  }
+</div>

@@ -15,6 +15,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 
 ## Concepts
 
+- [tree-of-life-core.md](tree-of-life-core.md) — Core participation doctrine: stores hold DNA, relays carry signals, Core metabolizes signatures into beehavior
 - [concepts.md](concepts.md) — The hive is a computer: junction-as-computer, the byte-sandwich dataflow, six-pile radix scheduling, geometry-as-processor, and nested exponential reach
 - [emergence.md](emergence.md) — Brooding and eclosion — the visual lifecycle of tiles
 - [simple-naming-initiative.md](simple-naming-initiative.md) — Verb-first, consistent, human-readable naming
@@ -31,6 +32,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 - [history-sigbag-as-root.md](history-sigbag-as-root.md) — *(design — aspirational)* History sigbag as root: store, discovery, self-heal, and integrity
 - [llm-primitive.md](llm-primitive.md) — Hypergraph primitive connecting signatures through LLM command transforms
 - [group-signatures.md](group-signatures.md) — Group identity as a first-class citizen: sign('group:<meaning>') carried by every member, so a set adds and deletes as one unit
+- [website-artifact-paradigm.md](website-artifact-paradigm.md) — Atomic artifacts related by decoration: never mint a parent to hold a view's members; one website artifact names the relation and every member wears its mark
 
 ## Architecture
 

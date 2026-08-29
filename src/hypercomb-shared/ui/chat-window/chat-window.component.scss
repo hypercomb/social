@@ -12,6 +12,7 @@
 // so it follows that scale; geometry is the viewport.
 
 @use '../toolwindow' as tw;
+@use '../panel-identity' as identity;
 
 $accent: #7eb6d6;
 
@@ -22,16 +23,43 @@ $accent: #7eb6d6;
   pointer-events: none;
 }
 
-// The ENTIRE screen, with the tiles rail down the left. `!important` against
-// hcDockedPanel's inline width and lane offset — the directive is kept for the
-// window group's text ladder and settings gear, not for geometry. The rail is
-// absolutely positioned, so the window's column flow just moves right by the
-// rail's width.
+// The ENTIRE screen EXCEPT THE CONTROL BAR, with the tiles rail down the left.
+// `!important` against hcDockedPanel's inline width and lane offset — the
+// directive is kept for the window group's text ladder and settings gear, not
+// for geometry. The rail is absolutely positioned, so the window's column flow
+// just moves right by the rail's width.
+//
+// BESIDE THE BAR, NEVER OVER IT. "The whole screen" used to include the docked
+// control rail, and since the bar paints at z-index 59999 and this window at
+// 100002, the bar was simply gone for as long as a conversation was open —
+// with its own edge line (deliberately drawn above the docked-window band, so
+// nothing can cover it) coming through the tiles rail as a stray vertical rule
+// down the list. That line was the symptom; the window covering the bar was
+// the fault.
+//
+// The bar is the ANCHOR every docked window lays out against: it publishes
+// what it occupies as `--hc-controls-left` / `--hc-controls-right` (0px when
+// it is free-floating, or on mobile, where it owns no side), and every other
+// panel already starts just inboard of it — see hcDockedPanel `#position`.
+// This is that same rule applied to the one window that was exempt, on BOTH
+// edges, so it holds whichever side the bar is dragged to. The `!important`
+// stays on `right` for what it was always for — dropping the LANE offset, so a
+// full-screen window is never pushed in by a neighbour it does not share the
+// screen with — and the reservation is kept.
 .chat-panel {
+  // A remembered drag width belongs to the viewport it was chosen in. When
+  // the window later opens narrower, cap the rail against the live space so
+  // the conversation always keeps its minimum readable column instead of
+  // collapsing to the sliver shown in the regression screenshot.
+  --chat-rail-effective-width: min(
+    var(--chat-rail-width, clamp(15rem, 22vw, 20rem)),
+    max(11.25rem, calc(100vw - var(--hc-controls-left, 0px) - var(--hc-controls-right, 0px) - 260px))
+  );
   pointer-events: auto;
   position: absolute;
   inset: 0;
-  right: 0 !important;
+  left: var(--hc-controls-left, 0px);
+  right: var(--hc-controls-right, 0px) !important;
   width: auto !important;
   max-width: none;
   margin: 0;
@@ -41,8 +69,8 @@ $accent: #7eb6d6;
   @include tw.panel($accent, right);
   border-radius: 0;
   border-right: none;
-  padding-left: var(--chat-rail-width, clamp(15rem, 22vw, 20rem));
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+  padding-left: var(--chat-rail-effective-width);
+  box-shadow: 0 18px 60px rgba(var(--hc-panel-shadow), 0.55);
 }
 
 // The left sidebar — the tiles rail (essentials builds its rows; this owns
@@ -53,31 +81,50 @@ $accent: #7eb6d6;
   top: 0;
   bottom: 0;
   left: 0;
-  width: var(--chat-rail-width, clamp(15rem, 22vw, 20rem));
+  width: var(--chat-rail-effective-width);
   display: flex;
   flex-direction: column;
-  border-right: 1px solid rgba($accent, 0.18);
-  background: rgba(3, 5, 9, 0.55);
+  border-right: 1px solid rgba(var(--acc), 0.18);
+  background: rgba(var(--hc-panel-pane), 0.55);
+}
+
+.chat-rail-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--chat-rail-effective-width);
+  width: 8px;
+  margin-left: -4px;
+  z-index: 3;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 120ms ease;
+
+  &:hover,
+  &:focus-visible,
+  &.dragging { background: rgba(var(--acc), 0.35); }
+  &:focus-visible { outline: none; }
 }
 
 // A phone has no room for a sidebar beside a conversation — full screen there
 // is the conversation alone, and tiles are chosen by selecting on the canvas.
 @media (max-width: 700px) {
   .chat-panel { padding-left: 0; }
-  .chat-rail { display: none; }
+  .chat-rail,
+  .chat-rail-grip { display: none; }
 }
 
 .chat-header {
   @include tw.header;
   gap: 0.4em;
-  border-bottom: 1px solid rgba($accent, 0.25);
+  border-bottom: 1px solid rgba(var(--acc), 0.25);
   // The clipboard shelf hangs from the header's bottom edge.
   position: relative;
 }
 
 .chat-glyph {
   font-size: 1.05em;
-  color: rgba($accent, 0.8);
+  color: rgba(var(--acc), 0.8);
 }
 
 // THE HEADER IS THE REQUEST. The tile it is about, then the branch that needs
@@ -120,18 +167,18 @@ $accent: #7eb6d6;
   // border reads as a mistake, and the row is the one place in the header
   // where several objects sit side by side.
   padding: 0.28rem 0.5rem;
-  border: 1px dashed rgba($accent, 0.28);
+  border: 1px dashed rgba(var(--acc), 0.28);
   border-radius: var(--hc-radius-control, 2px);
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
-  scrollbar-color: rgba($accent, 0.3) transparent;
+  scrollbar-color: rgba(var(--acc), 0.3) transparent;
 
   // While a tile is over it the whole rectangle answers, not one square in it.
   &.over {
     border-style: solid;
-    border-color: rgba($accent, 0.9);
-    background: rgba($accent, 0.14);
+    border-color: rgba(var(--acc), 0.9);
+    background: rgba(var(--acc), 0.14);
   }
 }
 
@@ -143,7 +190,7 @@ $accent: #7eb6d6;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba($accent, 0.45);
+  color: rgba(var(--acc), 0.45);
   font-size: 0.78em;
 }
 
@@ -157,10 +204,10 @@ $accent: #7eb6d6;
   max-width: 10rem;
   min-width: 2rem;
   padding: 0.1em 0.4em;
-  border: 1px dashed rgba($accent, 0.4);
+  border: 1px dashed rgba(var(--acc), 0.4);
   border-radius: var(--hc-radius-control, 2px);
   background: none;
-  color: rgba($accent, 0.75);
+  color: rgba(var(--acc), 0.75);
   font: inherit;
   font-size: 0.82em;
   line-height: 1.6;
@@ -168,19 +215,19 @@ $accent: #7eb6d6;
 
   &.filled {
     border-style: solid;
-    background: rgba($accent, 0.12);
-    color: rgba($accent, 0.98);
+    background: rgba(var(--acc), 0.12);
+    color: rgba(var(--acc), 0.98);
   }
 
   // While a tile is over it, the box says so — a drop target that does not
   // react is a drop target nobody trusts.
   &.over {
-    border-color: rgba($accent, 0.95);
-    background: rgba($accent, 0.22);
+    border-color: rgba(var(--acc), 0.95);
+    background: rgba(var(--acc), 0.22);
     color: rgba(238, 244, 250, 0.98);
   }
 
-  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: 1px; }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
 
   .mat-sym { font-size: 1.05em; opacity: 0.85; }
 }
@@ -209,13 +256,13 @@ $accent: #7eb6d6;
   cursor: pointer;
 
   &:hover { opacity: 1; }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.8); outline-offset: 1px; opacity: 1; }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.8); outline-offset: 1px; opacity: 1; }
 }
 
 .chat-box-add {
   justify-content: center;
   min-width: 1.5rem;
-  color: rgba($accent, 0.6);
+  color: rgba(var(--acc), 0.6);
 }
 
 // THE WAY IN — the clipboard, one press from the composer. Quiet until it
@@ -229,15 +276,15 @@ $accent: #7eb6d6;
   border: 0;
   border-radius: var(--hc-radius-control, 2px);
   background: none;
-  color: rgba($accent, 0.45);
+  color: rgba(var(--acc), 0.45);
   font: inherit;
   font-size: 0.82em;
   cursor: pointer;
 
-  &.holding { color: rgba($accent, 0.85); }
-  &.on { background: rgba($accent, 0.18); color: rgba(238, 244, 250, 0.98); }
+  &.holding { color: rgba(var(--acc), 0.85); }
+  &.on { background: rgba(var(--acc), 0.18); color: rgba(238, 244, 250, 0.98); }
   &:hover { color: rgba(238, 244, 250, 0.95); }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: 1px; }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
 
   .mat-sym { font-size: 1.1em; }
 }
@@ -265,10 +312,10 @@ $accent: #7eb6d6;
   max-height: 40vh;
   padding: 0.4rem;
   overflow-y: auto;
-  border: 1px solid rgba($accent, 0.35);
+  border: 1px solid rgba(var(--acc), 0.35);
   border-radius: var(--hc-radius-floating, 4px);
-  background: rgba(6, 10, 16, 0.97);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  background: rgba(var(--hc-panel-pane), 0.97);
+  box-shadow: 0 10px 30px rgba(var(--hc-panel-shadow), 0.5);
 }
 
 // One thing there is to paste — a ROW, not a card: the mark at 60% of the
@@ -283,14 +330,14 @@ $accent: #7eb6d6;
   border: 1px solid transparent;
   border-radius: var(--hc-radius-control, 2px);
   background: none;
-  color: rgba($accent, 0.9);
+  color: rgba(var(--acc), 0.9);
   font: inherit;
   font-size: 0.72em;
   text-align: left;
   cursor: pointer;
 
-  &:hover { border-color: rgba($accent, 0.6); background: rgba($accent, 0.14); }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.75); outline-offset: 1px; }
+  &:hover { border-color: rgba(var(--acc), 0.6); background: rgba(var(--acc), 0.14); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.75); outline-offset: 1px; }
 }
 
 .chat-clip-img {
@@ -340,7 +387,7 @@ $accent: #7eb6d6;
 
 .chat-clip-empty {
   padding: 0.2rem 0.3rem;
-  color: rgba($accent, 0.5);
+  color: rgba(var(--acc), 0.5);
   font-size: 0.78em;
 }
 
@@ -432,11 +479,11 @@ $accent: #7eb6d6;
   font-size: 0.9em;
   letter-spacing: 0.05em;
   font-family: inherit;
-  color: rgba($accent, 0.95);
+  color: rgba(var(--acc), 0.95);
   cursor: pointer;
 
-  &:hover, &.on { background: rgba($accent, 0.14); }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: -1px; }
+  &:hover, &.on { background: rgba(var(--acc), 0.14); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: -1px; }
 }
 
 // Pushes the close cluster hard right without space-between, so the settings
@@ -448,13 +495,13 @@ $accent: #7eb6d6;
 .chat-close {
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(var(--hc-panel-ink), 0.55);
   font-size: 1.2em;
   line-height: 1;
   padding: 0 0.25em;
   cursor: pointer;
 
-  &:hover { color: #fff; }
+  &:hover { color: var(--hc-panel-text); }
 }
 
 // ── which conversation ────────────────────────────────────────────────────
@@ -477,13 +524,13 @@ $accent: #7eb6d6;
   // .chat-cmd code pins itself back to --hc-code.
   font-family: var(--hc-read, inherit);
   scrollbar-width: thin;
-  scrollbar-color: rgba($accent, 0.35) transparent;
+  scrollbar-color: rgba(var(--acc), 0.35) transparent;
 
   h2 {
     margin: 0;
     font-size: 1em;
     font-weight: 600;
-    color: rgba($accent, 0.98);
+    color: rgba(var(--acc), 0.98);
   }
 
   > p {
@@ -491,13 +538,13 @@ $accent: #7eb6d6;
     margin: 0;
     font-size: 0.78em;
     line-height: 1.6;
-    color: rgba(255, 255, 255, 0.62);
+    color: rgba(var(--hc-panel-ink), 0.62);
   }
 }
 
 .chat-setup-glyph {
   font-size: 2.2em;
-  color: rgba($accent, 0.72);
+  color: rgba(var(--acc), 0.72);
 }
 
 .chat-setup-options {
@@ -512,9 +559,9 @@ $accent: #7eb6d6;
     gap: 0.6em;
     margin: 0;
     padding: 0.75em 0.85em;
-    border: 1px solid rgba($accent, 0.2);
+    border: 1px solid rgba(var(--acc), 0.2);
     border-radius: var(--hc-radius-card);
-    background: rgba($accent, 0.07);
+    background: rgba(var(--acc), 0.07);
     font-size: 0.75em;
     line-height: 1.45;
     text-align: left;
@@ -523,13 +570,13 @@ $accent: #7eb6d6;
   .mat-sym {
     flex: 0 0 auto;
     font-size: 1.25em;
-    color: rgba($accent, 0.88);
+    color: rgba(var(--acc), 0.88);
   }
 }
 
 .chat-setup .chat-setup-note {
   font-size: 0.68em;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(var(--hc-panel-ink), 0.4);
 }
 
 // ── guided setup checklist ────────────────────────────────────────────────
@@ -554,16 +601,16 @@ $accent: #7eb6d6;
   min-width: 0;
   box-sizing: border-box;
   padding: 0.55em 0.7em;
-  border: 1px solid rgba($accent, 0.16);
+  border: 1px solid rgba(var(--acc), 0.16);
   border-radius: var(--hc-radius-card);
-  background: rgba(255, 255, 255, 0.025);
+  background: rgba(var(--hc-panel-ink), 0.025);
   opacity: 0.55;
 
   &.done { opacity: 0.8; border-color: rgba(140, 220, 170, 0.28); }
   &.current {
     opacity: 1;
-    border-color: rgba($accent, 0.45);
-    background: rgba($accent, 0.07);
+    border-color: rgba(var(--acc), 0.45);
+    background: rgba(var(--acc), 0.07);
   }
 }
 
@@ -583,9 +630,9 @@ $accent: #7eb6d6;
   display: grid;
   place-items: center;
   font-size: 0.85em;
-  border: 1px solid rgba($accent, 0.5);
+  border: 1px solid rgba(var(--acc), 0.5);
   border-radius: tw.$radius-pill;
-  color: rgba($accent, 0.95);
+  color: rgba(var(--acc), 0.95);
 }
 
 .chat-step-check {
@@ -604,7 +651,7 @@ $accent: #7eb6d6;
     margin: 0;
     font-size: 0.72em;
     line-height: 1.5;
-    color: rgba(255, 255, 255, 0.66);
+    color: rgba(var(--hc-panel-ink), 0.66);
   }
 }
 
@@ -625,8 +672,8 @@ $accent: #7eb6d6;
   min-width: 0;
   box-sizing: border-box;
   padding: 0.4em 0.55em;
-  background: rgba(6, 10, 16, 0.75);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(var(--hc-panel-pane), 0.75);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.1);
   border-radius: var(--md-shape-xs, 4px);
 
   code {
@@ -649,13 +696,13 @@ $accent: #7eb6d6;
     font: inherit;
     font-size: 0.65em;
     letter-spacing: 0.04em;
-    color: rgba($accent, 0.9);
+    color: rgba(var(--acc), 0.9);
     background: none;
-    border: 1px solid rgba($accent, 0.35);
+    border: 1px solid rgba(var(--acc), 0.35);
     border-radius: var(--md-shape-xs, 4px);
     cursor: pointer;
 
-    &:hover { background: rgba($accent, 0.14); }
+    &:hover { background: rgba(var(--acc), 0.14); }
   }
 }
 
@@ -667,12 +714,12 @@ $accent: #7eb6d6;
   font-size: 0.75em;
   font-weight: 600;
   color: #0c1118;
-  background: rgba($accent, 0.92);
-  border: 1px solid rgba($accent, 0.92);
+  background: rgba(var(--acc), 0.92);
+  border: 1px solid rgba(var(--acc), 0.92);
   border-radius: var(--md-shape-xs, 4px);
   cursor: pointer;
 
-  &:hover { background: $accent; }
+  &:hover { background: rgb(var(--acc)); }
   &:disabled { opacity: 0.5; cursor: default; }
 }
 
@@ -683,13 +730,13 @@ $accent: #7eb6d6;
   box-sizing: border-box;
   margin-top: 0.6em;
   padding-top: 0.7em;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(var(--hc-panel-ink), 0.08);
   text-align: left;
 
   > p {
     margin: 0 0 0.4em;
     font-size: 0.72em;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(var(--hc-panel-ink), 0.6);
   }
 }
 
@@ -703,13 +750,13 @@ $accent: #7eb6d6;
     padding: 0.4em 0.55em;
     font: inherit;
     font-size: max(0.72em, 16px);
-    color: whitesmoke;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.13);
+    color: var(--hc-panel-text);
+    background: rgba(var(--hc-panel-ink), 0.05);
+    border: 1px solid rgba(var(--hc-panel-ink), 0.13);
     border-radius: var(--md-shape-xs, 4px);
     outline: none;
 
-    &:focus { border-color: rgba($accent, 0.6); }
+    &:focus { border-color: rgba(var(--acc), 0.6); }
   }
 
   button {
@@ -717,13 +764,13 @@ $accent: #7eb6d6;
     padding: 0.35em 0.85em;
     font: inherit;
     font-size: 0.75em;
-    color: rgba($accent, 0.95);
-    background: rgba($accent, 0.12);
-    border: 1px solid rgba($accent, 0.4);
+    color: rgba(var(--acc), 0.95);
+    background: rgba(var(--acc), 0.12);
+    border: 1px solid rgba(var(--acc), 0.4);
     border-radius: var(--md-shape-xs, 4px);
     cursor: pointer;
 
-    &:hover { background: rgba($accent, 0.2); }
+    &:hover { background: rgba(var(--acc), 0.2); }
   }
 }
 
@@ -733,12 +780,12 @@ $accent: #7eb6d6;
   border: none;
   font: inherit;
   font-size: 0.68em;
-  color: rgba(255, 255, 255, 0.42);
+  color: rgba(var(--hc-panel-ink), 0.42);
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
 
-  &:hover { color: rgba(255, 255, 255, 0.7); }
+  &:hover { color: rgba(var(--hc-panel-ink), 0.7); }
 }
 
 // The finish line — the checklist proved the loop, say so once, plainly.
@@ -749,7 +796,7 @@ $accent: #7eb6d6;
   gap: 0.6em;
 
   h2 { margin: 0; font-size: 1em; color: rgba(140, 220, 170, 0.95); }
-  p { margin: 0; font-size: 0.78em; color: rgba(255, 255, 255, 0.62); }
+  p { margin: 0; font-size: 0.78em; color: rgba(var(--hc-panel-ink), 0.62); }
 }
 
 .chat-complete-glyph {
@@ -763,7 +810,7 @@ $accent: #7eb6d6;
   align-items: center;
   gap: 0.3em;
   padding: 0.35em 0.5em 0.35em 0.35em;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.06);
 }
 
 .chat-current {
@@ -775,15 +822,15 @@ $accent: #7eb6d6;
   padding: 0.35em 0.4em;
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(var(--hc-panel-ink), 0.85);
   font: inherit;
   font-size: 0.8em;
   text-align: left;
   cursor: pointer;
   border-radius: var(--md-shape-xs, 4px);
 
-  .mat-sym { font-size: 1.1em; color: rgba(255, 255, 255, 0.45); }
-  &:hover { background: rgba($accent, 0.09); }
+  .mat-sym { font-size: 1.1em; color: rgba(var(--hc-panel-ink), 0.45); }
+  &:hover { background: rgba(var(--acc), 0.09); }
 }
 
 // With the rail carrying the list, the name is only a NAME: it says which of
@@ -817,14 +864,38 @@ $accent: #7eb6d6;
   .mat-sym { font-size: 1.05em; }
 }
 
+.chat-goal {
+  border: 0;
+  background: transparent;
+  color: #70d59a;
+  cursor: pointer;
+  padding: 5px 7px;
+  border-radius: 999px;
+}
+.chat-goal.on, .chat-goal:hover { background: rgba(112, 213, 154, 0.14); }
+.chat-goal-details {
+  margin: 0 12px 10px;
+  padding: 12px;
+  border: 1px solid rgba(112, 213, 154, 0.42);
+  // A CARD, so the card rung — not 10px. Above 4px a corner stops reading as
+  // "lifted" and starts disagreeing with the hexagons underneath it.
+  border-radius: tw.$radius-card;
+  background: rgba(var(--hc-panel-pane), 0.96);
+  color: inherit;
+}
+.chat-goal-head { display: flex; align-items: center; gap: 8px; color: #8ee5af; }
+.chat-goal-head button { margin-left: auto; border: 0; background: transparent; color: inherit; cursor: pointer; }
+.chat-goal-details p { margin: 10px 0; white-space: pre-wrap; }
+.chat-goal-archive { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+
 .chat-new {
-  color: rgba($accent, 0.9);
-  &:hover { background: rgba($accent, 0.16); }
+  color: rgba(var(--acc), 0.9);
+  &:hover { background: rgba(var(--acc), 0.16); }
 }
 
 .chat-put {
-  color: rgba(255, 255, 255, 0.42);
-  &:hover { color: rgba($accent, 0.95); background: rgba($accent, 0.14); }
+  color: rgba(var(--hc-panel-ink), 0.42);
+  &:hover { color: rgba(var(--acc), 0.95); background: rgba(var(--acc), 0.14); }
 }
 
 .chat-bar-split {
@@ -833,7 +904,7 @@ $accent: #7eb6d6;
   width: 1px;
   height: 1.1em;
   margin: 0 0.15em;
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(var(--hc-panel-ink), 0.14);
 }
 
 .chat-list {
@@ -843,13 +914,13 @@ $accent: #7eb6d6;
   padding: 0.2em 0;
   overflow-y: auto;
   max-height: 40%;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.07);
 }
 
 .chat-list-empty {
   padding: 0.7em 0.9em;
   font-size: 0.72em;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(var(--hc-panel-ink), 0.45);
 }
 
 .chat-list-row {
@@ -857,8 +928,8 @@ $accent: #7eb6d6;
   align-items: stretch;
   padding: 0 0.35em;
 
-  &:hover { background: rgba($accent, 0.07); }
-  &.on { background: rgba($accent, 0.13); }
+  &:hover { background: rgba(var(--acc), 0.07); }
+  &.on { background: rgba(var(--acc), 0.13); }
 }
 
 .chat-list-body {
@@ -886,7 +957,7 @@ $accent: #7eb6d6;
 
 .chat-list-meta {
   font-size: 0.65em;
-  color: rgba(255, 255, 255, 0.42);
+  color: rgba(var(--hc-panel-ink), 0.42);
 }
 
 .chat-list-del {
@@ -894,7 +965,7 @@ $accent: #7eb6d6;
   align-self: center;
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(var(--hc-panel-ink), 0.3);
   padding: 0.3em;
   cursor: pointer;
   border-radius: var(--md-shape-xs, 4px);
@@ -902,7 +973,7 @@ $accent: #7eb6d6;
   .mat-sym { font-size: 1em; }
   &:hover { color: rgba(255, 140, 140, 0.9); background: rgba(255, 120, 120, 0.12); }
   // Armed: the next press destroys turns, so it stops being a quiet glyph.
-  &.armed { color: #fff; background: rgba(226, 75, 74, 0.85); }
+  &.armed { color: var(--hc-panel-text); background: rgba(226, 75, 74, 0.85); }
 }
 
 // PUT AWAY, NOT THROWN AWAY. The archive control sits BEFORE the delete and
@@ -914,20 +985,20 @@ $accent: #7eb6d6;
   align-self: center;
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.28);
+  color: rgba(var(--hc-panel-ink), 0.28);
   padding: 0.3em;
   cursor: pointer;
   border-radius: var(--md-shape-xs, 4px);
 
   .mat-sym { font-size: 1em; }
-  &:hover { color: rgba($accent, 0.95); background: rgba($accent, 0.14); }
+  &:hover { color: rgba(var(--acc), 0.95); background: rgba(var(--acc), 0.14); }
 }
 
 // An archived row reads as a different shelf, so the section under the
 // disclosure is visibly not the live list.
 .chat-list-row.filed {
   .chat-list-name { color: rgba(243, 243, 243, 0.55); }
-  .chat-list-meta { color: rgba(255, 255, 255, 0.3); }
+  .chat-list-meta { color: rgba(var(--hc-panel-ink), 0.3); }
 }
 
 .chat-list-archived {
@@ -942,15 +1013,15 @@ $accent: #7eb6d6;
     background: none;
     border: none;
     border-radius: var(--md-shape-xs, 4px);
-    color: rgba(255, 255, 255, 0.42);
+    color: rgba(var(--hc-panel-ink), 0.42);
     font: inherit;
     font-size: 0.68em;
     text-align: left;
     cursor: pointer;
 
     .mat-sym { font-size: 1.1em; }
-    &:hover { color: rgba($accent, 0.9); background: rgba($accent, 0.08); }
-    &.on { color: rgba($accent, 0.9); }
+    &:hover { color: rgba(var(--acc), 0.9); background: rgba(var(--acc), 0.08); }
+    &.on { color: rgba(var(--acc), 0.9); }
   }
 }
 
@@ -970,11 +1041,11 @@ $accent: #7eb6d6;
   // stops sentences rendering as terminal output.
   font-family: var(--hc-read, inherit);
   scrollbar-width: thin;
-  scrollbar-color: rgba($accent, 0.35) transparent;
+  scrollbar-color: rgba(var(--acc), 0.35) transparent;
 
   &::-webkit-scrollbar { width: 6px; }
   &::-webkit-scrollbar-thumb {
-    background: rgba($accent, 0.3);
+    background: rgba(var(--acc), 0.3);
     border-radius: tw.$radius-pill;
   }
 }
@@ -984,7 +1055,7 @@ $accent: #7eb6d6;
   padding: 1em 0.4em;
   font-size: 0.75em;
   line-height: 1.6;
-  color: rgba(255, 255, 255, 0.42);
+  color: rgba(var(--hc-panel-ink), 0.42);
   text-align: center;
 }
 
@@ -998,17 +1069,17 @@ $accent: #7eb6d6;
 
   &.user {
     align-self: flex-end;
-    background: rgba($accent, 0.17);
-    border: 1px solid rgba($accent, 0.3);
+    background: rgba(var(--acc), 0.17);
+    border: 1px solid rgba(var(--acc), 0.3);
   }
 
   &.ai {
     align-self: flex-start;
-    background: rgba(255, 255, 255, 0.045);
-    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: rgba(var(--hc-panel-ink), 0.045);
+    border: 1px solid rgba(var(--hc-panel-ink), 0.09);
     // The steel hairline is the assistant's voice — a scannable edge that
     // separates its cards from the participant's without loud color.
-    border-left: 2px solid rgba($accent, 0.55);
+    border-left: 2px solid rgba(var(--acc), 0.55);
   }
 }
 
@@ -1024,7 +1095,7 @@ $accent: #7eb6d6;
 // block margins the renderer produces).
 
 .chat-think {
-  color: rgba(216, 230, 238, 0.55);
+  color: rgba(var(--hc-panel-ink), 0.55);
   animation: chat-pulse 1.4s ease-in-out infinite;
 }
 
@@ -1046,39 +1117,52 @@ $accent: #7eb6d6;
   // ground, and a hairline right above the availability line read as a stray
   // mark tucked into the corner. The one rule in here is the one that does
   // work: between the standing fact and the choices under it.
-  background: rgba(255, 255, 255, 0.015);
+  background: rgba(var(--hc-panel-ink), 0.015);
+  // THE INPUT STOPS WHERE THE CONSOLE STARTS. The reading area already gives
+  // the console its column (`.chat-providers-host`, inside `.chat-body`), but
+  // the footer sits OUTSIDE that row — deliberately, so the window's own
+  // chrome keeps the full width — and the composer therefore ran on underneath
+  // the console. A line you type into that continues behind a panel is the one
+  // place "beside, not over" visibly failed. The same reserved width, applied
+  // where it is the composer's own right edge rather than a column beside it.
+  padding-right: calc(0.75em + var(--hc-providers-width, 0px));
+  // It PULLS OUT rather than jumping: the console slides, and the composer's
+  // edge travels with it.
+  transition: padding-right 0.16s ease;
 }
 
-// THE CHOICES ABOUT THIS QUESTION — model, where you stand, what is chosen.
-// Under the rule that separates them from the standing fact above it, with
-// the same air on both sides so the footer reads as three even bands:
-// availability · choices · the box you type in.
-.chat-status {
-  display: flex;
+// WHO ANSWERS. LEADS the availability line: shortest thing on the row and the
+// one most often looked for. It reads as a fact, not
+// a control — one press to the providers console, where it is actually
+// chosen. The model in mono, because it is an id, not a word.
+.chat-answering {
+  display: inline-flex;
   align-items: center;
-  gap: 0.45em;
-  min-width: 0;
-  padding-top: 0.5em;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
-  font-size: 0.68em;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.chat-model {
+  gap: 0.25em;
   flex: 0 0 auto;
-  padding: 0.15em 0.2em;
-  font: inherit;
-  color: rgba($accent, 0.95);
-  background: rgba($accent, 0.1);
-  border: 1px solid rgba($accent, 0.3);
-  border-radius: var(--md-shape-xs, 4px);
-  cursor: pointer;
-}
-
-.chat-where {
+  // The line's own gap is the space between WORDS; this is the space between
+  // two different statements — which model, and over whose bridge — so the
+  // pill gets air of its own on the sentence side.
+  margin-right: 0.65em;
+  max-width: 50%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 0.15em 0.35em;
+  font: inherit;
+  font-family: var(--hc-mono, monospace);
+  color: rgba(var(--acc), 0.95);
+  background: rgba(var(--acc), 0.1);
+  border: 1px solid rgba(var(--acc), 0.3);
+  border-radius: var(--md-shape-xs, 4px);
+  cursor: pointer;
+
+  .mat-sym {
+    font-size: 1.15em;
+    opacity: 0.75;
+  }
+
+  &:hover { background: rgba(var(--acc), 0.18); }
 }
 
 // The tile's own name, in the mono the hive uses for addresses.
@@ -1088,7 +1172,7 @@ $accent: #7eb6d6;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--hc-mono, monospace);
-  color: rgba($accent, 0.95);
+  color: rgba(var(--acc), 0.95);
 }
 
 
@@ -1107,7 +1191,7 @@ $accent: #7eb6d6;
   white-space: nowrap;
   font-family: var(--hc-mono, monospace);
   font-size: 0.82em;
-  color: rgba($accent, 0.95);
+  color: rgba(var(--acc), 0.95);
 }
 
 // A conversation that holds nothing but unsent words still has to be
@@ -1121,11 +1205,6 @@ $accent: #7eb6d6;
   font-size: 0.92em;
 }
 
-.chat-targets {
-  flex: 0 0 auto;
-  color: rgba($accent, 0.85);
-}
-
 // GATHERED CONTEXT — the ctrl-clicked tiles riding the next question. Steel
 // like the sidebar it was gathered in, so the eye connects the chip to the
 // rows that made it, and pressable because letting go is one press.
@@ -1135,16 +1214,16 @@ $accent: #7eb6d6;
   align-items: center;
   gap: 0.25em;
   padding: 0.05em 0.4em;
-  border: 1px solid rgba($accent, 0.45);
+  border: 1px solid rgba(var(--acc), 0.45);
   border-radius: var(--hc-radius-control, 2px);
-  background: rgba($accent, 0.1);
-  color: rgba($accent, 0.95);
+  background: rgba(var(--acc), 0.1);
+  color: rgba(var(--acc), 0.95);
   font: inherit;
   font-size: 0.92em;
   cursor: pointer;
 
-  &:hover { background: rgba($accent, 0.18); }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: 1px; }
+  &:hover { background: rgba(var(--acc), 0.18); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
 
   .mat-sym { font-size: 1.05em; }
 }
@@ -1155,38 +1234,28 @@ $accent: #7eb6d6;
   line-height: 1;
 }
 
-// Attached-context count — the branches dragged onto this tile, which ride
-// with every question. Honey-warm so it reads as cargo, not chrome.
-.chat-context {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.15em;
-  color: rgba(224, 180, 92, 0.9);
-
-  .mat-sym { font-size: 1.15em; }
-}
-
-// AVAILABILITY, at the top of the footer: it is the standing fact — whether
-// an answer can arrive at all — and it is read before any choice about this
-// particular question.
+// THE FOOTER IS TWO BANDS: what can answer, and the box you type in. The row
+// of reported context that used to sit between them is gone — the path it
+// named is the header's subject, the references it counted are shown box by
+// box up there, and read directly under the model it made a model look like
+// it had a location.
 .chat-link {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 0.35em;
-  padding-bottom: 0.5em;
+  padding: 0.55em 0.75em 0.5em;
+  // This row typesets at 65% of the window font, so its `em` inset used to
+  // shrink with the text and begin left of the full-size composer below it.
+  // Scale the left inset back to the footer's 0.75em content line.
+  padding-left: 1.15385em;
+  padding-right: calc(0.75em + var(--hc-providers-width, 0px));
   font-size: 0.65em;
   color: rgba(140, 220, 170, 0.85);
+  transition: padding-right 0.16s ease;
 
-  &.down { color: rgba(255, 255, 255, 0.42); }
+  &.down { color: rgba(var(--hc-panel-ink), 0.42); }
   &.waiting { color: rgba(224, 180, 92, 0.88); }
-}
-
-.chat-dot {
-  width: 0.55em;
-  height: 0.55em;
-  border-radius: tw.$radius-pill;
-  background: currentColor;
 }
 
 .chat-inputrow {
@@ -1218,36 +1287,36 @@ $accent: #7eb6d6;
   // 16px floor: anything smaller and iOS Safari zooms the page on focus.
   font-size: var(--hc-chat-line);
   line-height: 1.45;
-  color: whitesmoke;
-  caret-color: rgba($accent, 0.95);
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.13);
+  color: var(--hc-panel-text);
+  caret-color: rgba(var(--acc), 0.95);
+  background: rgba(var(--hc-panel-ink), 0.05);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.13);
   border-radius: var(--md-shape-xs, 4px);
   outline: none;
   transition: border-color 140ms ease, box-shadow 140ms ease;
 
   &:focus {
-    border-color: rgba($accent, 0.6);
-    box-shadow: 0 0 0 1px rgba($accent, 0.18);
+    border-color: rgba(var(--acc), 0.6);
+    box-shadow: 0 0 0 1px rgba(var(--acc), 0.18);
   }
 
   // A LONG MESSAGE SCROLLS QUIETLY. Left alone, this is the platform's own
   // scrollbar — a light trough with stepper arrows, sitting inside a dark
   // composer looking like something that broke. Thin, themed, no steppers.
   scrollbar-width: thin;
-  scrollbar-color: rgba($accent, 0.38) transparent;
+  scrollbar-color: rgba(var(--acc), 0.38) transparent;
 
   &::-webkit-scrollbar { width: 0.5em; }
   &::-webkit-scrollbar-track { background: transparent; }
   &::-webkit-scrollbar-button { display: none; height: 0; width: 0; }
   &::-webkit-scrollbar-thumb {
-    background: rgba($accent, 0.32);
+    background: rgba(var(--acc), 0.32);
     border-radius: 0.25em;
     // Inset from the border, so the thumb never touches the rounded edge.
     border: 2px solid transparent;
     background-clip: padding-box;
   }
-  &:hover::-webkit-scrollbar-thumb { background-clip: padding-box; background: rgba($accent, 0.5); }
+  &:hover::-webkit-scrollbar-thumb { background-clip: padding-box; background: rgba(var(--acc), 0.5); }
 }
 
 .chat-send {
@@ -1257,11 +1326,47 @@ $accent: #7eb6d6;
   // the box beside it.
   width: var(--hc-chat-box);
   height: var(--hc-chat-box);
-  background: rgba($accent, 0.9);
-  border: 1px solid rgba($accent, 0.9);
+  background: rgba(var(--acc), 0.9);
+  border: 1px solid rgba(var(--acc), 0.9);
   color: #0c1118;
   cursor: pointer;
 
   .mat-sym { font-size: 1.05em; }
-  &:hover { background: $accent; }
+  &:hover { background: rgb(var(--acc)); }
+}
+
+// ── THE READING ROW ──────────────────────────────────────────────────────
+//
+// hives | chat | providers, and the row is what makes the third column
+// possible: header and footer are OUTSIDE it, so opening the console splits
+// the reading area and leaves the window's own chrome the full width. The
+// first attempt padded the whole panel instead, which walked the header and
+// the composer leftward every time the console opened — the console was
+// beside the window rather than in it.
+.chat-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+// Everything that was already in the reading area, unchanged, now in a column
+// of its own so the console can sit beside it.
+.chat-reading {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+// The console's place. Zero-wide and invisible until the console publishes
+// `--hc-providers-width`; the console itself fills it (see
+// providers-window.view.ts `.hc-providers.is-embedded`).
+.chat-providers-host {
+  flex: 0 0 auto;
+  width: var(--hc-providers-width, 0px);
+  min-width: 0;
+  display: flex;
+  overflow: visible;
 }

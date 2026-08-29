@@ -47,6 +47,11 @@ import {
   writeObservation,
   type PublishLedgerEntry,
 } from './publish-heads.js'
+import {
+  ENABLEMENT_CHANGED,
+  isKindGloballyOff,
+  isPublishedVisitorShell,
+} from './behavior-enablement.js'
 import { clearDefaultView, defaultViewAt, writeDefaultView } from '../commands/view-default.js'
 import { visualBeeIconSvg } from '../commands/visual-bee-icon-svg.js'
 import {
@@ -153,6 +158,10 @@ export interface PublishViewChoice {
   label: string
   /** Inline SVG mark (visual-bee-icon-svg) — the same identity the tiles wear. */
   icon: string
+  /** The behaviour is not lit in the global roster. Carried, not dropped: a
+   *  row whose face is ALREADY pinned to a put-out view must still show that
+   *  face, and must still be able to unpin it. The picker drops the rest. */
+  dormant?: boolean
 }
 
 export interface PublishRenderPayload {
@@ -191,7 +200,7 @@ export class PublishStatusDrone extends Drone {
     'publish:view-toggle', 'publish:close', 'publish:refresh',
     'publish:run', 'publish:unpublish', 'publish:expand', 'publish:copy-link',
     'publish:opens-as',
-    'history:head-changed', 'share:receipt-revoked',
+    'history:head-changed', 'share:receipt-revoked', 'behavior:enablement-changed',
   ]
   protected override emits: string[] = ['publish:render', 'toast:show', 'activity:log']
 
@@ -250,6 +259,14 @@ export class PublishStatusDrone extends Drone {
     }
     this.onEffect('history:head-changed', invalidate)
     this.onEffect('share:receipt-revoked', invalidate)
+
+    // Lighting or putting out a behaviour changes what the strip may offer.
+    // No sweep is owed for that — only the choices are restated.
+    this.onEffect(ENABLEMENT_CHANGED, () => {
+      if (!this.#open) return
+      this.#payload = { ...this.#payload, views: this.#viewChoices() }
+      this.#emit()
+    })
   }
 
   // ── the sweep ─────────────────────────────────────────────────────────
@@ -409,17 +426,29 @@ export class PublishStatusDrone extends Drone {
   /** The opens-as choices: the hexagons ground first, then every registered
    *  view, wearing the same SVG identity the tiles wear. */
   #viewChoices(): PublishViewChoice[] {
-    const registry = get<{ all?: () => { view: string; toggleIcon?: string }[] }>(
-      '@diamondcoreprocessor.com/VisualBeeRegistry')
+    const registry = get<{ all?: () => {
+      view: string; toggleIcon?: string; decorationKind?: string; labelKey?: string
+    }[] }>('@diamondcoreprocessor.com/VisualBeeRegistry')
+    const i18n = get<I18nProvider>(I18N_IOC_KEY)
+    // The roster's own answer, not a per-tile one: this strip is a single list
+    // shared by every row, so the question it can honestly ask is the GLOBAL
+    // one — "is this behaviour lit at all". A binding stays listed (it is lit,
+    // just narrowed), and a visitor shell has no roster to consult, so nothing
+    // is put out there.
+    const visitor = isPublishedVisitorShell()
     const choices: PublishViewChoice[] = [
       { view: '', label: 'hexagons', icon: visualBeeIconSvg('hexagon', 'hexagons') },
     ]
     for (const bee of registry?.all?.() ?? []) {
       if (!bee?.view) continue
+      const kind = String(bee.decorationKind ?? '')
+      const key = String(bee.labelKey ?? '')
+      const label = key ? (i18n?.t(key) ?? bee.view) : bee.view
       choices.push({
         view: bee.view,
-        label: bee.view,
+        label: label === key ? bee.view : label,
         icon: visualBeeIconSvg(String(bee.toggleIcon ?? ''), bee.view),
+        dormant: !visitor && !!kind && isKindGloballyOff(kind),
       })
     }
     return choices

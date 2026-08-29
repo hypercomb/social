@@ -134,6 +134,15 @@ export class HexImageAtlas {
   #recordFailure(sig: string): number {
     const count = (this.#failures.get(sig)?.count ?? 0) + 1
     this.#failures.set(sig, { count, at: Date.now() })
+    if (count === HexImageAtlas.MAX_RETRIES) {
+      setTimeout(() => {
+        const failure = this.#failures.get(sig)
+        if (!failure || failure.count < HexImageAtlas.MAX_RETRIES) return
+        if (Date.now() - failure.at < HexImageAtlas.FAILURE_RETRY_MS) return
+        this.#failures.delete(sig)
+        window.dispatchEvent(new CustomEvent('hex-image-atlas:retry', { detail: { sig } }))
+      }, HexImageAtlas.FAILURE_RETRY_MS)
+    }
     return count
   }
 
@@ -174,26 +183,6 @@ export class HexImageAtlas {
       }
     }
     this.#nextSlot++
-
-    // Invariant maintenance: whatever sig was living in this slot is
-    // about to lose its pixels. Evict its map entry now so later
-    // `getImageUV(previousSig)` returns null (caller falls back to
-    // label) instead of resolving to a UV whose pixels now belong to
-    // a different image.
-    const previous = this.#slotToSig[slot]
-    if (previous !== null && previous !== sig) {
-      this.#map.delete(previous)
-      // Signal to consumers that a previously-issued UV is no longer
-      // valid. The geometry builder reads this counter to decide
-      // whether to rebuild its baked UV buffer.
-      this.#evictionGeneration++
-      // A live sig just lost its pixels — and evictions can originate
-      // OUTSIDE any render pass (substrate preheat, detached back-nav
-      // refills). If the displaced sig belongs to an on-screen cell, its
-      // baked UV now samples foreign pixels and no pass is guaranteed to
-      // follow. Announce it so the renderer can repaint when affected.
-      window.dispatchEvent(new CustomEvent('hex-image-atlas:evicted', { detail: { sig: previous } }))
-    }
 
     const col = slot % this.#cols
     const row = Math.floor(slot / this.#cols)
@@ -272,6 +261,19 @@ export class HexImageAtlas {
 
     // render into atlas (keep previous images)
     this.#renderer.render({ container: sprite, target: this.#atlas, clear: false })
+
+    // Decoding, Texture creation, and the GPU write can all fail transiently.
+    // Until the write succeeds, the selected slot's old pixels and mapping are
+    // still the last known-good pair. Evicting before those operations made an
+    // unrelated healthy tile disappear whenever its would-be replacement
+    // failed. renderer.render is synchronous, so committing immediately after
+    // it preserves the map/slot invariant without exposing stale UVs.
+    const previous = this.#slotToSig[slot]
+    if (previous !== null && previous !== sig) {
+      this.#map.delete(previous)
+      this.#evictionGeneration++
+      window.dispatchEvent(new CustomEvent('hex-image-atlas:evicted', { detail: { sig: previous } }))
+    }
     sprite.destroy()
     // The atlas RenderTexture now holds the baked pixels, so the per-image
     // source Texture + its GPU TextureSource are no longer needed. `true`

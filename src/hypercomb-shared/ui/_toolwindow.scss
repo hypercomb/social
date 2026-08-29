@@ -25,7 +25,16 @@
 /// and 2rem. It now lives in `_shape.scss` — the whole app's ladder, in SCSS
 /// and as `:root` custom properties so drone views can reach it too — and is
 /// re-exported from here so every `tw.$radius-…` call site keeps working.
+/// ── WHY THIS FILE READS --hc-panel-*, NOT --hc-chrome-* ──────────────────
+/// A tool window is an INSPECTOR, not chrome. The bar and the rail follow the
+/// theme; these panes deliberately do not, because every panel's accent is a
+/// pastel picked to sit on a dark ground and its identity would be lost on a
+/// light one. The roles are still roles — a theme COULD answer them — but the
+/// panel family is defined once on :root and left dark until thirty panels
+/// have been re-picked together. See _material-tokens.scss.
+
 @use './shape' as shape;
+@use './panel-identity' as identity;
 
 $radius-control: shape.$radius-control;
 $radius-card: shape.$radius-card;
@@ -48,44 +57,52 @@ $header-action-gap: 0.25rem;
 /// Shared docked shell. Layout geometry and accent identity stay with the
 /// caller; material, edge, elevation, typography and shape live here.
 @mixin panel($accent, $side: right) {
-  --hc-window-accent: #{$accent};
+  // The identity, published as a triple and taken DEEP under a bright theme —
+  // see _panel-identity.scss. Every panel comes through this mixin, so this is
+  // the one place it has to be said, whether the caller passes a variable or a
+  // literal. `--hc-window-accent` is now derived from it rather than frozen at
+  // the authored pastel.
+  @include identity.accent($accent);
+  --hc-window-accent: rgb(var(--acc));
   --hc-window-radius-control: #{$radius-control};
   --hc-window-radius-card: #{$radius-card};
   --hc-window-radius-floating: #{$radius-floating};
 
-  background: rgba(13, 15, 21, 0.975);
+  background: rgba(var(--hc-panel-pane), 0.975);
   backdrop-filter: blur(14px) saturate(1.04);
   -webkit-backdrop-filter: blur(14px) saturate(1.04);
   border-radius: 0;
   font-family: var(--hc-mono, system-ui);
-  color: #eef2f5;
+  color: var(--hc-panel-text);
   outline: none;
 
   @if $side == left {
     border-left: 0;
     border-right: 1px solid rgba($accent, 0.38);
-    box-shadow: 14px 0 44px rgba(0, 0, 0, 0.46), inset -1px 0 rgba(255, 255, 255, 0.025);
+    box-shadow: 14px 0 44px rgba(var(--hc-panel-shadow), 0.46), inset -1px 0 rgba(var(--hc-panel-sheen), 0.025);
   } @else {
     border-right: 0;
     border-left: 1px solid rgba($accent, 0.38);
-    box-shadow: -14px 0 44px rgba(0, 0, 0, 0.46), inset 1px 0 rgba(255, 255, 255, 0.025);
+    box-shadow: -14px 0 44px rgba(var(--hc-panel-shadow), 0.46), inset 1px 0 rgba(var(--hc-panel-sheen), 0.025);
   }
 }
 
 /// Shared floating/modal shell. It uses the same material with only enough
 /// radius to distinguish a free object from the canvas behind it.
 @mixin floating-panel($accent) {
-  --hc-window-accent: #{$accent};
+  // Same identity contract as `panel()` — see _panel-identity.scss.
+  @include identity.accent($accent);
+  --hc-window-accent: rgb(var(--acc));
   --hc-window-radius-control: #{$radius-control};
   --hc-window-radius-card: #{$radius-card};
   --hc-window-radius-floating: #{$radius-floating};
 
-  background: rgba(13, 15, 21, 0.98);
-  border: 1px solid rgba($accent, 0.38);
+  background: rgba(var(--hc-panel-pane), 0.98);
+  border: 1px solid rgba(var(--acc), 0.38);
   border-radius: $radius-floating;
-  box-shadow: 0 18px 54px rgba(0, 0, 0, 0.55), inset 0 1px rgba(255, 255, 255, 0.03);
+  box-shadow: 0 18px 54px rgba(var(--hc-panel-shadow), 0.55), inset 0 1px rgba(var(--hc-panel-sheen), 0.03);
   font-family: var(--hc-mono, system-ui);
-  color: #eef2f5;
+  color: var(--hc-panel-text);
   outline: none;
 }
 
@@ -102,7 +119,7 @@ $header-action-gap: 0.25rem;
   min-height: $header-height;
   padding: 0 $header-padding-inline;
   line-height: 1;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0.006));
+  background: linear-gradient(180deg, rgba(var(--hc-panel-sheen), 0.018), rgba(var(--hc-panel-sheen), 0.006));
 
   // Header controls used to range from bare 15px glyphs to padded text-sized
   // buttons. A fixed hit area gives every window the same baseline and optical
@@ -119,7 +136,7 @@ $header-action-gap: 0.25rem;
     line-height: 1;
     transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
 
-    &:hover { background-color: rgba(255, 255, 255, 0.055); }
+    &:hover { background-color: rgba(var(--hc-panel-ink), 0.055); }
     &:focus-visible {
       outline: 1px solid color-mix(in srgb, var(--hc-window-accent) 72%, white);
       outline-offset: 1px;
@@ -134,9 +151,9 @@ $header-action-gap: 0.25rem;
     min-width: $header-action-size;
     padding: 0;
     font-size: 1.125rem;
-    color: rgba(238, 244, 248, 0.62);
+    color: rgba(var(--hc-panel-ink), 0.62);
 
-    &:hover { color: #fff; background-color: rgba(255, 255, 255, 0.075); }
+    &:hover { color: var(--hc-panel-text); background-color: rgba(var(--hc-panel-ink), 0.075); }
   }
 }
 

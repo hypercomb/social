@@ -17,7 +17,7 @@
 
 import { titleForLabel, tagsForSegments } from '../../commands/decoration-kind-index.js'
 import { defaultViewAt } from '../../commands/view-default.js'
-import { isKindGloballyOff, isBehaviorDormant } from '../../sharing/behavior-enablement.js'
+import { isBehaviorDormant } from '../../sharing/behavior-enablement.js'
 import { childNamesOf, type PlacementHistory, type PlacementLayer } from '../../history/layer-placement.js'
 import { splitNoteRoots, paletteRoleResolver } from '../../notes/note-classify.js'
 import type { Note } from '../../notes/note-tree.js'
@@ -232,7 +232,11 @@ async function readBehaviors(
       label: briefText(bee.labelKey, humanize(bee.view)),
       description: briefText(bee.descriptionKey, ''),
       opensAs: false,
-      dormant: isKindGloballyOff(kind) || isBehaviorDormant(kind, segments),
+      // The dormancy lens alone — it already reads the global roster, and a
+      // raw isKindGloballyOff OR'd in front would defeat both the published
+      // visitor shell's exception (dark cold-install roster ⇒ every brief row
+      // dormant) and the local wake's escape hatch.
+      dormant: isBehaviorDormant(kind, segments),
     })
   }
 

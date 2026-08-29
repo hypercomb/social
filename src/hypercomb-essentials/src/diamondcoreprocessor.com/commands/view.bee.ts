@@ -53,11 +53,14 @@ const DEFAULT_SURFACE = 'hexagons'
  *  `['a','b']` and `['a/b']` are never the same address. */
 const SEGMENT_SEPARATOR = String.fromCharCode(0)
 
-/** Does this record's kind belong to the view — under its current name OR a
- *  retired one (`legacyKinds`)? Marks written before a rename live on layers
- *  forever; presence must keep answering for them. */
+/** Does this record's kind belong to the view — under its current name, a
+ *  further LIVE one (`alsoKinds`, a peer artifact that enters the same view),
+ *  OR a retired one (`legacyKinds`)? Marks written before a rename live on
+ *  layers forever; presence must keep answering for them. */
 const recordBelongsTo = (v: VisualBeeDescriptor, kind: string): boolean =>
-  kind === v.decorationKind || (v.legacyKinds?.includes(kind) ?? false)
+  kind === v.decorationKind
+  || (v.alsoKinds?.includes(kind) ?? false)
+  || (v.legacyKinds?.includes(kind) ?? false)
 
 type LineageLike = EventTarget & {
   domain?: () => string

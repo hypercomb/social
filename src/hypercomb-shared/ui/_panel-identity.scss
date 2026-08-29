@@ -1,0 +1,128 @@
+// hypercomb-shared/ui/_panel-identity.scss
+//
+// A PANEL'S ACCENT IS ITS IDENTITY, AND THE IDENTITY IS THE HUE.
+//
+// Every tool window names one colour and paints its title, its edge, its
+// selected row and its focus ring from it — #c8b8ff Beehaviors, #ffe14a Notes,
+// #a8ffd8 Contacts, #ffa866 Context, #7eb6d6 the steel family. That colour is
+// how you know which panel you are looking at without reading the title, and
+// it must not change when the theme does.
+//
+// But every one of those values is a PASTEL, and a pastel is only legible
+// because the pane behind it is dark. Put the same #ffe14a on a cream panel
+// and the title vanishes. That is the whole reason the tool windows were left
+// dark when the bright themes landed, and it is what this file fixes.
+//
+// The split: the hue is the identity, the LIGHTNESS is the theme's business.
+//
+//   dark themes   → the accent exactly as authored (nothing changes, ever)
+//   bright themes → the same hue taken deep: scaled down in lightness and up
+//                   in saturation, so #ffe14a becomes a dark amber and
+//                   #c8b8ff a dark violet. Same panel, same identity, read
+//                   against a light ground instead of a dark one.
+//
+// Both variants are computed AT BUILD TIME by Sass, so there is no runtime
+// colour maths and no second value for anyone to keep in sync — a panel still
+// declares one accent and gets both.
+//
+// USAGE — at the top of a panel's SCSS, beside `@use '../toolwindow' as tw`:
+//
+//     @use '../panel-identity' as identity;
+//     $accent: #c8b8ff;                     // unchanged: the identity
+//     .features-panel { @include identity.accent($accent); }
+//
+// and then paint from the triple rather than the SCSS colour:
+//
+//     rgba($accent, 0.38)   →   rgba(var(--acc), 0.38)
+//     color: $accent        →   color: rgb(var(--acc))
+//
+// The triple form is not incidental. Every call site in these panels already
+// tunes its own alpha inline, and `rgba()` is a Sass function that cannot take
+// a custom property — so the value has to cross as `r, g, b` for the existing
+// idiom to survive the swap unchanged.
+
+@use 'sass:color';
+@use 'sass:list';
+@use 'sass:math';
+
+/// The themes that need the deep variant. A bright theme is one whose panel
+/// ground is light; they are named here rather than detected because Sass
+/// compiles before any theme is chosen. Keep in step with the bright value-sets
+/// in `styles/_material-tokens.scss` — adding a look means adding it here, and
+/// a look that is missing simply keeps the authored pastel (wrong, but never
+/// broken).
+$bright-themes: 'light', 'honey', 'bloom', 'sherbet';
+
+/// WHAT "DEEP ENOUGH" MEANS — a luminance target, not a fixed step.
+///
+/// The first cut scaled every accent's lightness by the same -58% and it was
+/// wrong in a way worth recording: HSL lightness is not perceived brightness.
+/// The same step took #c8b8ff (violet) to a solid rgb(42,0,184) and #a8ffd8
+/// (mint) only as far as rgb(0,178,98) — because green carries ~7x the
+/// perceptual weight of blue. One panel read; the next was still a wash.
+///
+/// So the accent is darkened UNTIL IT IS DARK ENOUGH, measured. 0.18 relative
+/// luminance sits a little under mid-grey: comfortably over 4.5:1 against
+/// every bright pane in `_material-tokens.scss`, and not so far down that the
+/// hues converge into a single near-black and Beehaviors stops being
+/// distinguishable from Files at a glance.
+$deepen-target: 0.18;
+/// Enough passes to take the lightest pastel under the target; the loop stops
+/// on its own the moment it gets there.
+$deepen-max-steps: 24;
+
+/// sRGB relative luminance (WCAG), 0..1.
+@function luminance($c) {
+  $total: 0;
+  @each $channel, $weight in ('red': 0.2126, 'green': 0.7152, 'blue': 0.0722) {
+    $v: math.div(color.channel($c, $channel), 255);
+    @if $v > 0.03928 {
+      $v: math.pow(math.div($v + 0.055, 1.055), 2.4);
+    } @else {
+      $v: math.div($v, 12.92);
+    }
+    $total: $total + $v * $weight;
+  }
+  @return $total;
+}
+
+/// `r, g, b` — the form every call site needs. Rounded: `color.scale` returns
+/// fractional channels and 200.00000001 in a stylesheet helps nobody.
+@function triple($c) {
+  @return #{math.round(color.channel($c, 'red'))},
+          #{math.round(color.channel($c, 'green'))},
+          #{math.round(color.channel($c, 'blue'))};
+}
+
+/// The same HUE, taken down until it carries enough weight to read on a light
+/// pane. Hue and saturation are never touched — the identity is the hue, and
+/// only its lightness is the theme's business.
+@function deepen($c) {
+  $out: $c;
+  $steps: 0;
+  @while luminance($out) > $deepen-target and $steps < $deepen-max-steps {
+    $out: color.scale($out, $lightness: -10%);
+    $steps: $steps + 1;
+  }
+  @return $out;
+}
+
+/// Declare a panel's identity. Emits `--acc` for the current theme and the
+/// deep variant under every bright one.
+///
+/// The bright rule is written with `@at-root` and an `:is()` list so it stays
+/// ONE selector no matter how many looks exist — thirty panels each emitting
+/// four near-identical blocks is how a stylesheet budget gets spent on
+/// nothing.
+@mixin accent($accent) {
+  --acc: #{triple($accent)};
+
+  $sel: ();
+  @each $theme in $bright-themes {
+    $sel: list.append($sel, '[data-theme="#{$theme}"]', $separator: comma);
+  }
+
+  @at-root :is(#{$sel}) & {
+    --acc: #{triple(deepen($accent))};
+  }
+}

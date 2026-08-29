@@ -38,12 +38,15 @@ export const LOCAL_PROVIDER: LlmProviderDescriptor = {
   transport: 'browser-http',
   endpoint: DEFAULT_HOST,
   requiresKey: false,
+  // Keep the built-in local choice conservative: it must fit wholly in the
+  // common 8 GB GPU tier and produce visible output through Ollama's OpenAI
+  // compatibility endpoint. Larger or reasoning-first models can still be
+  // addressed explicitly; resolveModelId deliberately passes unknown ids
+  // through to Ollama.
   models: [
-    { name: 'llama-70b', id: 'llama3.1:70b', tier: 'deep' },
-    { name: 'llama', id: 'llama3.1', tier: 'balanced' },
-    { name: 'llama-8b', id: 'llama3.1:8b', tier: 'fast' },
+    { name: 'qwen-coder', id: 'qwen2.5-coder:7b', tier: 'fast' },
   ],
-  defaultModel: 'llama3.1',
+  defaultModel: 'qwen2.5-coder:7b',
   docsUrl: 'https://ollama.com/download',
   // No Authorization header: a local server has no account behind it, and
   // sending `Bearer ` with an empty key makes some builds reject the call.

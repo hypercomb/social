@@ -2,6 +2,7 @@ node_modules
 scripts/.build-state.json
 **/public/env.js
 .dev-relay-content/
+hypercomb-relay/blossom-worker/.wrangler/
 
 # relay ops diagnostics (local transcripts + staged dev content)
 hypercomb-relay/fix-result.txt

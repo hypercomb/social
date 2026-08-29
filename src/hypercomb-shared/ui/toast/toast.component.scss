@@ -42,9 +42,6 @@ $types: (
   gap: 0.45rem;
   padding: 0.25rem 0.55rem;
   pointer-events: auto;
-  white-space: nowrap;
-  overflow: hidden;
-
   // A dark translucent plate, not a solid chip: the hive still shows
   // through, but nothing bright behind a toast bleeds into its type. The
   // shadow doubles as a soft skirt so the strip separates from busy art.
@@ -97,8 +94,8 @@ $types: (
 .toast-message {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
   color: rgba(245, 245, 245, 0.82);
 }
 

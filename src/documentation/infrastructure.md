@@ -8,6 +8,29 @@ bytes fetch HTTP-direct from operator domains at `GET /<sig>`. the mesh carries 
 
 hypercomb is a decentralized platform. there is no place for a central byte chokepoint in it — no single host every client must reach, no Azure default fallback, no API tier that owns user data. content is signature-addressed, so any host that holds the bytes for a `<sig>` serves byte-identical content, and a reader verifies sha256 before trusting it. the host is interchangeable; the signature is the identity.
 
+### core hosts and provider trust
+
+every Hypercomb **application host** must deliver Hypercomb Core. That is what
+makes `hypercomb.io`, DCP, published creations, and provider applications one
+interoperable system: they exchange the same signed references through the
+same resolver and adoption protocol instead of integrating through bespoke
+application APIs. A server that only mirrors `GET /<sig>` bytes is useful
+transport, but it is a content host rather than an application host.
+
+the normative version is the
+[Tree of Life Core doctrine](tree-of-life-core.md): stores hold DNA, relays
+carry signals, and only Core metabolizes signatures into beehavior.
+
+shared Core does not create shared authority. Public signatures establish byte
+identity; they do not grant a domain access to a consumer's personal hive. A
+read-only application host may be visited without giving it storage or write
+capabilities. If a provider application offers accounts, persistence or
+transactions, using those features is normal origin trust: the consumer must
+trust that domain as their provider before storing information there. The
+browser origin deliberately couples that state to the chosen provider, while
+moving anything between it and `hypercomb.io` remains an explicit, scoped
+consumer action.
+
 this is *not* "no CDN ever." immutable `/<sig>` URLs are exactly what edge caches are good at — Cloudflare caching of `/<sig>` is **embraced** as a scale primitive, because a cache hit on an immutable content-addressed URL can never serve the wrong bytes (the sig gates them). what we reject is a *central* chokepoint: a single origin every client must funnel through, or a hard-coded fallback that turns one provider's outage into a network outage. fetch candidates come from the operator's own domain, community-trusted domains, and mesh-learned domains, tried in trust order; first verified-bytes wins.
 
 **beta ramp exception (current).** while the shared relay rolls out, `ContentBroker.#getFallbackDomains` appends two shared byte mirrors — `jwize.com` and `pluginthematrix.io` (an Azure copy of jwize.com's content dir, served at the domain root — see the mirror section below) — but **only when the shared live relay is active** (`#liveRelayActive`, same policy as the mesh seed: `use-live-relay='1'` forces it, `'0'` opts fully out, unset = on for a real origin / off on loopback). this exists because *resources have no mesh fallback*: a fresh viewer that never received the publisher's `['domain']` attribution has no host to try and the page/tile 404s. the two mirrors give every client a guaranteed byte source. sha256 still gates every byte, so a mirror outage degrades to "try the next host," never wrong content. this is a deliberate ramp posture, opt-out-able per client (`/use-live-relay off`) — revisit the default when third-party operators federate (the doctrine remains: no *mandatory* central chokepoint).

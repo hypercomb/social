@@ -112,6 +112,22 @@ const ensureSwControl = async (): Promise<void> => {
 //   - here we keep that cache truthful against OPFS, and when what landed early
 //     doesn't match what this session actually needs, reload ONCE so the early
 //     script wins. Steady-state boots match and never reload.
+/** A published website must NEVER reload itself. Its store is session memory,
+ *  so every boot legitimately re-installs the bundled renderer and re-derives
+ *  the import map — conditions the participant shell only ever hits once, and
+ *  answers with a reload. On the visitor that turns into an endless boot loop
+ *  the visitor can never exit, because nothing it learns survives the reload.
+ *  Reload sites all route through here; the visitor simply carries on with
+ *  the late-appended map (proven to resolve every dep in one pass). */
+const reloadUnlessVisitor = (why: string): boolean => {
+  if ((window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__ === true) {
+    console.log(`[main] visitor: skipping reload (${why}) — a published website never reloads itself`)
+    return false
+  }
+  location.reload()
+  return true
+}
+
 const appendImportMap = (json: string): void => {
   const script = document.createElement('script')
   script.type = 'importmap'
@@ -147,13 +163,14 @@ const attachImportMap = async (): Promise<void> => {
 
   try { sessionStorage.setItem(IMPORT_MAP_STORAGE_KEY, json) } catch { return }
   console.warn('[main] import map was not live at module load — reloading once to apply it early')
-  location.reload()
+  if (!reloadUnlessVisitor('import map not live')) return
   // Stop boot here; the reload is in flight and nothing below should run.
   await new Promise<never>(() => {})
 }
 
 const bootstrap = async (): Promise<void> => {
   ;(window as any).__hcBoot('bootstrap() started')
+  const readonlyVisitor = (window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__ === true
   // ONE-WAY DOOR GATE. Must be the FIRST thing in ${0,0}main — before any module can
   // acquire OPFS. A hive drained into the packed store is not fully present in
   // the flat layout, and booting on it would silently build atop a partial
@@ -179,7 +196,9 @@ const bootstrap = async (): Promise<void> => {
   // OPFS starts as best-effort storage. Check its eviction protection without
   // delaying boot, then request persistence inside the participant's first
   // trusted interaction (Firefox may prompt; Chromium/Safari decide silently).
-  void protectOriginStorage()
+  if (!readonlyVisitor) {
+    void protectOriginStorage()
+  }
 
   // SW readiness runs OVERLAPPED with the install chain instead of gating it.
   // ensureSwControl can block up to 1500ms waiting for controllerchange on a
@@ -191,14 +210,18 @@ const bootstrap = async (): Promise<void> => {
   // so the message reaches the controlling/active worker as before. The chain
   // is awaited below, before bootstrapApplication, so the end state at first
   // paint is unchanged.
-  const swChain = (async () => {
-    await ensureSwControl()
-    // Hand the service worker the host domains (self + community) so an
-    // embedded-site /@resource/<sig> request can stream from a host on an OPFS
-    // miss. The SW has no localStorage/IoC, so the page must post them.
-    await postCommunityDomainsToServiceWorker()
-    ;(window as any).__hcBoot('ensureSwControl + sw-domains done')
-  })()
+  const swChain = readonlyVisitor
+    // Published trees use ordinary immutable HTTP GETs. They neither register
+    // the participant service worker nor teach one about community hosts.
+    ? Promise.resolve()
+    : (async () => {
+        await ensureSwControl()
+        // Hand the service worker the host domains (self + community) so an
+        // embedded-site /@resource/<sig> request can stream from a host on an OPFS
+        // miss. The SW has no localStorage/IoC, so the page must post them.
+        await postCommunityDomainsToServiceWorker()
+        ;(window as any).__hcBoot('ensureSwControl + sw-domains done')
+      })()
   // Keep a handler attached from the start so a rejection during the install
   // overlap can't surface as an unhandledrejection; the real `await swChain`
   // below rethrows it, preserving the serial chain's abort-boot semantics.
@@ -210,6 +233,17 @@ const bootstrap = async (): Promise<void> => {
   // the menu, the install-needed prompt, or the in-app DCP portal.
   await ensureInstall(null)
   ;(window as any).__hcBoot('ensureInstall done')
+
+  // Every visitor refresh starts with a new memory filesystem. Seed the
+  // generic renderer from this deployment's hash-addressed /content package
+  // before resolving the import map; never ask DCP to install it. ensureInstall
+  // above has already initialized Store and corrected any stale localStorage
+  // claim left by the previous, now-discarded session root.
+  if (readonlyVisitor && localStorage.getItem('hypercomb.installed') !== 'true') {
+    const installed = await upgradeFromBundled()
+    if (!installed) throw new Error('visitor renderer package is unavailable')
+    ;(window as any).__hcBoot('visitor bundled renderer installed in memory')
+  }
 
   // Capture install state only AFTER ensureInstall has initialized the store
   // and normalized localStorage against the real cache. Reading the flag first
@@ -250,12 +284,18 @@ const bootstrap = async (): Promise<void> => {
 
   const appRef = await bootstrapApplication(App, appConfig)
   ;(window as any).__hcBoot('bootstrapApplication done (Angular first paint)')
+  // Visitor builds wait for this boundary before handing the signed site
+  // descriptor to HiveVisitDrone. By here dependencies and bees are loaded,
+  // Angular is painted, and the existing preview path can receive the root.
+  window.dispatchEvent(new Event('hypercomb:runtime-ready'))
 
   // Lazy sentinel: no iframe until the user explicitly opens DCP. The
   // first call to getSentinel() mounts the hidden iframe at /sentinel
   // and performs the handshake; subsequent calls reuse the same bridge.
   let sentinelPromise: Promise<SentinelBridge | null> | null = null
   const getSentinel = (): Promise<SentinelBridge | null> => {
+    // A published website has no installer and never mounts the DCP iframe.
+    if (readonlyVisitor) return Promise.resolve(null)
     if (!sentinelPromise) {
       sentinelPromise = initSentinel().then(bridge => {
         if (bridge) {
@@ -307,7 +347,7 @@ const bootstrap = async (): Promise<void> => {
       // Cache the map the install just made resolvable, so the reload boots
       // with it live before the module graph (see attachImportMap).
       await cacheImportMap()
-      location.reload()
+      if (!reloadUnlessVisitor('cold install completed')) return
       return
     }
 
@@ -341,7 +381,7 @@ const bootstrap = async (): Promise<void> => {
     if (currentSyncSig && currentSyncSig !== bootSyncSig) {
       console.log(`[main] ${source} with drift — reloading`)
       await cacheImportMap()
-      location.reload()
+      reloadUnlessVisitor('sync drift')
     }
   }
 
@@ -406,7 +446,7 @@ const bootstrap = async (): Promise<void> => {
         EffectBus.emit('update:status', { phase: 'complete', message: 'Everything is updated' })
         if (drifted) {
           console.log('[main] installer accepted with drift — reloading after all adoption work completed')
-          location.reload()
+          reloadUnlessVisitor('installer drift')
         }
       } catch (err) {
         console.error('[main] accepted DCP update failed safely', err)
@@ -428,6 +468,7 @@ const bootstrap = async (): Promise<void> => {
   // sha256-verified against its signature. Only when BOTH sources come
   // up empty does the card re-arm (boot:status install-needed).
   window.addEventListener('hypercomb:start-install', () => {
+    if (readonlyVisitor) return
     console.log('[main] start-install received')
     // Persistent storage is the install's substrate — without OPFS every
     // source fails (slowly: sentinel timeout → resync no-op → bundled
@@ -552,7 +593,7 @@ const bootstrap = async (): Promise<void> => {
         console.warn('[main] bundled install threw', err)
         return false
       })
-      if (ok) { await cacheImportMap(); location.reload(); return }
+      if (ok) { await cacheImportMap(); reloadUnlessVisitor('first-run bundled install'); return }
       console.warn('[main] first-run install exhausted both sources (sentinel + bundled)')
       EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-sentinel' } as BootStatus)
     })()

@@ -377,6 +377,27 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 
 const SIG_RE = /^[0-9a-f]{64}$/
 
+/** How many sibling layers an adopt walk fetches at once. Bounded so a wide
+ *  tree cannot open hundreds of sockets; large enough that latency, not
+ *  bandwidth, stops being what a visitor waits on. */
+const ADOPT_WALK_CONCURRENCY = 8
+
+/** Run `task` over `items` with at most `limit` in flight. Order-independent
+ *  by contract — callers use it only where each task's effect is idempotent
+ *  and commutative (content-addressed fetches, counters). */
+const inBatches = async <T>(items: readonly T[], limit: number, task: (item: T) => Promise<void>): Promise<void> => {
+  if (items.length === 0) return
+  let cursor = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const index = cursor++
+      if (index >= items.length) return
+      await task(items[index] as T)
+    }
+  })
+  await Promise.all(workers)
+}
+
 // sign(meaning) → pool address, memoized, via the core POOL REGISTRY.
 // Deriving the address REGISTERS the meaning, so anything that walks the
 // OPFS root can tell this pool apart from a lineage sigbag (they share one
@@ -636,14 +657,24 @@ export class ContentBrokerDrone extends Drone {
   #noteDomains = (sig: string, domains: string[]): void => {
     if (!domains.length) return
     const set = this.#knownDomainsBySig.get(sig) ?? new Set<string>()
+    const before = set.size
     for (const d of domains) set.add(d)
     this.#knownDomainsBySig.set(sig, set)
+    // Did we actually LEARN anything? Re-hearing a host we already had is not
+    // new knowledge, and treating it as such is a retry storm: the closure
+    // walk attributes every ref of every layer it reads, so a sig that no
+    // host holds (a byteless identity, a superseded generation) had its miss
+    // backoff cleared on each re-attribution, woke its consumers, missed
+    // again, and went round — hundreds of requests for one dead sig in a
+    // single tick, with the main thread pinned and the page never painting.
+    const learnedSomething = set.size > before
     // The HOST half of the knowledge is durable: persist + hand to the SW so
     // reloads and DOM-side /@resource/ fetches can still reach the publisher.
     for (const d of domains) this.#learnHost(d)
     // New address knowledge for this sig — its egg may now hatch; lift
     // the miss window AND reset the backoff so the next ask re-dials
     // immediately (not on the backed-off schedule).
+    if (!learnedSomething) return
     const wasMissing = this.#fetchMissUntil.delete(sig)
     this.#missBackoff.delete(sig)
     // Wake gated consumers: a sig that sat inside a miss window is worth
@@ -717,6 +748,16 @@ export class ContentBrokerDrone extends Drone {
       }
     } catch { /* best-effort — the boot re-post covers the next load */ }
   }
+
+  /** Every server this participant can ask for content, in trust order.
+   * Exposed for derived-address reads such as fixed-name meaning pools, whose
+   * index must be discovered before an ordinary signature fetch can begin. */
+  public knownContentHosts = (): readonly string[] => [...new Set([
+    this.#domainToHost(this.#getSelfDomain()),
+    ...this.#getCommunityDomains(),
+    ...this.#sessionKnownDomains,
+    ...this.#loadPersistedHosts(),
+  ].filter(Boolean))]
 
   /** Record a full-cascade miss for `s` with exponential backoff: first miss
    *  suppresses re-dialing for FETCH_MISS_TTL_MS, each consecutive miss doubles
@@ -1258,8 +1299,22 @@ export class ContentBrokerDrone extends Drone {
     const walkLayer = async (sig: string): Promise<void> => {
       if (visited.has(sig)) return
       visited.add(sig)
-      const bytes = await this.fetchBySig(sig, 'layer') // fill + verify + store
-      if (!bytes) { stats.failed++; return }
+      const started = Date.now()
+      // A layer that never answers is the difference between "this hive is
+      // still opening" and "this hive will never open", and only the walk can
+      // tell them apart. Say so once, per sig, rather than leaving a caller
+      // to guess from a spinner that never stops.
+      const slow = setTimeout(() => {
+        console.warn(`[adopt] still waiting on layer ${sig.slice(0, 12)} after 10s`)
+      }, 10_000)
+      let bytes: Uint8Array | null = null
+      try { bytes = await this.fetchBySig(sig, 'layer') } // fill + verify + store
+      finally { clearTimeout(slow) }
+      if (!bytes) {
+        stats.failed++
+        console.warn(`[adopt] unresolved layer ${sig.slice(0, 12)} (${Date.now() - started}ms)`)
+        return
+      }
       stats.layers++
       // Layers are never skipped on the destination's behalf: the walk has to
       // READ one to learn its children, and they are a handful of tiny JSONs
@@ -1294,7 +1349,17 @@ export class ContentBrokerDrone extends Drone {
         await this.#walkResources([...referenced], stats, visited, opts, childSet, bees, { from: sig, where })
       }
 
-      for (const c of children) await walkLayer(c)
+      // Siblings walk CONCURRENTLY, bounded. A serial descent costs one
+      // network round trip per layer — on a published website that is the
+      // whole difference between "opens" and "stares at the background":
+      // several hundred layers × RTT, in series, before the first tile can
+      // paint. Safe by construction: `visited` is checked and set
+      // synchronously at entry (no interleaving can double-walk a sig),
+      // fetchBySig already coalesces concurrent fetches for the same sig,
+      // bytes are content-addressed and verified, and every stat is a
+      // counter. The cap keeps a wide tree from opening hundreds of
+      // sockets at once.
+      await inBatches(children, ADOPT_WALK_CONCURRENCY, walkLayer)
     }
 
     await walkLayer(root)

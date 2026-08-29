@@ -41,7 +41,9 @@
 //   { slot, op: 'set',       sigs }      — full-replace (rare; use only
 //                                           when the entire slot value is
 //                                           known atomically, e.g. on a
-//                                           full re-hydrate)
+//                                           full re-hydrate); duplicate
+//                                           entries collapse to the first
+
 //
 // Each `apply` returns `{ changed: boolean }` so callers can chain
 // fallback logic (e.g. swap-by-sig misses → resolve-by-name → retry).
@@ -197,7 +199,13 @@ export class LayerMachine {
     }
 
     if (delta.op === 'set') {
-      const incoming = Array.isArray(delta.sigs) ? delta.sigs.slice() : []
+      // A slot is a set: `append` refuses an entry already present and
+      // `removeSig` drops one instance, so a duplicate is unreachable through
+      // the delta vocabulary — one arriving here is a caller's blind
+      // read-push-set (the doubled visual:game:play record on /games/arkanoid).
+      // First occurrence wins, order preserved. Only identical primitives
+      // merge; distinct inline-payload objects never do.
+      const incoming = Array.isArray(delta.sigs) ? [...new Set(delta.sigs)] : []
       const same = arr.length === incoming.length && arr.every((v, i) => v === incoming[i])
       if (same) return { changed: false }
       if (incoming.length === 0) this.#slots.delete(delta.slot)

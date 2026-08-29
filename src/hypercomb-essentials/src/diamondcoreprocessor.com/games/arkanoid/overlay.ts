@@ -26,6 +26,10 @@ import { arkanoidThemes } from './theme.js'
 import './themes/register-themes.js'   // side-effect: load + register the built-in scene themes
 
 const STYLE_ID = 'ark-overlay-styles'
+
+/** Breathing room around the playfield, in CSS px. Mirrored by `.ark-stage`
+ *  padding — `#fit` measures the stage's client box, which includes it. */
+const GUTTER = 8
 const Z = 2147483000
 
 const GAME_KEYS = new Set([
@@ -548,8 +552,12 @@ export class ArkanoidOverlay {
   #fit = (): void => {
     const c = this.#canvas, s = this.#stage
     if (!c || !s) return
-    const availW = (s.clientWidth - 28) * 0.9    // narrow the screen to 90% of the stage width (margins each side)
-    const availH = s.clientHeight - 28
+    // The field takes the whole stage minus one gutter. It used to keep 10% of
+    // the width in reserve on top of the padding, which on a phone (where the
+    // near-square world is WIDTH-limited) threw away a fifth of the playfield.
+    // GUTTER mirrors `.ark-stage` padding — clientWidth/Height include it.
+    const availW = s.clientWidth - GUTTER * 2
+    const availH = s.clientHeight - GUTTER * 2
     if (availW <= 0 || availH <= 0) return
     const cssScale = Math.min(availW / W, availH / H)
     const dispW = W * cssScale, dispH = H * cssScale
@@ -1029,6 +1037,10 @@ const CSS = `
   background:radial-gradient(130% 120% at 50% -8%,#3a2a8f 0%,#241a66 44%,#140f3e 78%,#0a0826 100%);
   font-family:'Segoe UI',system-ui,sans-serif;color:#e8e0ff;user-select:none;
   animation:ark-in .22s ease both}
+/* A phone's browser UI overlaps the LARGE viewport that a fixed-position box
+   is sized against, so the bottom of the field hid behind it. dvh tracks the
+   viewport that is actually visible. */
+@supports (height:100dvh){.ark-overlay{height:100dvh}}
 @keyframes ark-in{from{opacity:0}to{opacity:1}}
 @keyframes ark-candle{0%,100%{opacity:.78}45%{opacity:1}62%{opacity:.7}80%{opacity:.95}}
 .ark-bar{display:flex;align-items:center;gap:.5rem;padding:.45rem .7rem;
@@ -1071,7 +1083,7 @@ const CSS = `
 .ark-close{width:2rem;height:2rem;border-radius:50%;border:none;cursor:pointer;
   background:rgba(122,60,255,.22);color:#d8c2ff;font-size:1rem;transition:all .15s ease}
 .ark-close:hover{background:rgba(255,80,120,.34);color:#fff;box-shadow:0 0 12px rgba(255,80,120,.5)}
-.ark-stage{flex:1;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;padding:14px}
+.ark-stage{flex:1;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;padding:8px}
 .ark-canvas{border-radius:12px;
   box-shadow:0 18px 64px rgba(0,0,0,.6),
     0 0 0 1px rgba(61,240,255,.45),
@@ -1124,4 +1136,48 @@ const CSS = `
 .ark-info-row{margin:9px 0}
 .ark-info-title{font-weight:700;font-size:.78rem;color:#d8ffe2;margin-bottom:1px}
 .ark-hidden{display:none!important}
+
+/* ── THE FIELD GETS THE SCREEN ────────────────────────────────────────
+   The world is near-square (554×600), so a wide screen wastes its dead
+   space at the SIDES while the chrome eats the height the field actually
+   wants. Above 760px the bar becomes a right-hand rail and the stage takes
+   the full height; below it the bar collapses to one scrollable strip and
+   the keyboard legend — meaningless on touch — goes away entirely. Layout
+   only: the same nodes move, so every control stays where the code left it
+   and the ResizeObserver on the stage refits the canvas either way. */
+@media (min-width:760px){
+  .ark-overlay{display:grid;grid-template-columns:1fr var(--ark-rail,206px);grid-template-rows:1fr auto}
+  .ark-stage{grid-column:1;grid-row:1 / span 2;padding:10px}
+  .ark-bar{grid-column:2;grid-row:1;flex-direction:column;align-items:stretch;flex-wrap:nowrap;
+    overflow-y:auto;border-bottom:none;border-left:1px solid rgba(122,60,255,.34);
+    box-shadow:-10px 0 30px rgba(0,0,0,.5);padding:.55rem .6rem;
+    padding-right:calc(.6rem + env(safe-area-inset-right,0px))}
+  .ark-tabs{margin-left:0}
+  .ark-tab{flex:1;text-align:center}
+  .ark-level-label{min-width:0}
+  .ark-status{margin-left:0;margin-top:auto;padding-top:.4rem}
+  /* Keep the way out in the corner it has always been in. */
+  .ark-close{order:-1;align-self:flex-end;flex:0 0 auto}
+  .ark-help{grid-column:2;grid-row:2;border-top:1px solid rgba(122,60,255,.2);
+    text-align:left;line-height:1.5;
+    padding-bottom:calc(.45rem + env(safe-area-inset-bottom,0px))}
+}
+@media (max-width:759px){
+  .ark-bar{flex-wrap:nowrap;overflow-x:auto;gap:.35rem;padding:.3rem .45rem;
+    padding-top:calc(.3rem + env(safe-area-inset-top,0px));scrollbar-width:none}
+  .ark-bar::-webkit-scrollbar{display:none}
+  .ark-bar > *{flex:0 0 auto}
+  .ark-logo{font-size:.85rem}
+  .ark-level-label{min-width:0;font-size:.78rem}
+  .ark-stage{padding:4px}
+  /* Touch has no keys to press and no room to spare — the pill guide lives
+     in the PILLS flyout, which stays. */
+  .ark-help{display:none}
+}
+/* Landscape phone: height is the scarce axis, so trim the rail as well. */
+@media (max-height:520px){
+  .ark-overlay{--ark-rail:168px}
+  .ark-bar{padding:.35rem .45rem;font-size:.92em}
+  .ark-help{display:none}
+}
 `

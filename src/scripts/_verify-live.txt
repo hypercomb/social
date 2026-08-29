@@ -1,0 +1,16 @@
+navigating
++4s [visitor] opening publication {head: 36b886365596, segments: Array(1), hosts: Array(1)}
++5s [hive-visit] localizing closure from revolucion.pluginthematrix.com head 36b886365596
++18s visitorReady=busy
++36s visitorReady=busy
++54s visitorReady=busy
++72s visitorReady=busy
++90s visitorReady=busy
++108s visitorReady=busy
++126s visitorReady=busy
++144s visitorReady=busy
++162s visitorReady=busy
++181s visitorReady=busy
++199s visitorReady=busy
++217s visitorReady=busy
+END

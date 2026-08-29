@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en" data-hypercomb-mode="visitor">
+  <head>
+    <meta charset="utf-8" />
+    <title>Published website</title>
+    <base href="/" />
+
+    <!-- NO cached import map on a published site.
+         The visitor resolves dependencies to blob: URLs so the site runs on
+         any static host without the host having to type extensionless sig
+         files (see resolve-import-map.ts). Blob URLs die with the session, so
+         a replayed map can only ever be a map of DEAD specifiers — and the
+         first map wins, so it would poison the boot it was meant to speed up.
+         A visitor re-derives from scratch every load by design; there is
+         nothing durable here to cache. Participants keep the cache. -->
+    <script>
+      try { localStorage.removeItem('hc:importmap'); } catch (error) {}
+    </script>
+
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#08090c" />
+    <style>
+      html,body{margin:0;width:100%;height:100%;background:#08090c}
+      .site-loading{position:fixed;inset:0;display:grid;place-items:center;background:#08090c}
+      .site-loading::after{content:"";width:10px;height:10px;border-radius:50%;background:#f6d109;box-shadow:0 0 24px #f6d109;animation:site-pulse 1.3s ease-in-out infinite}
+      @keyframes site-pulse{50%{opacity:.35;transform:scale(.72)}}
+      @media(prefers-reduced-motion:reduce){.site-loading::after{animation:none}}
+    </style>
+  </head>
+  <body>
+    <script src="env.js"></script>
+    <app-root><div class="site-loading" role="status" aria-label="Loading website"></div></app-root>
+  </body>
+</html>

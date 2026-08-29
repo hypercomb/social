@@ -35,6 +35,7 @@ const PER_PASS = 4
 
 type VisualStore = {
   getResourceLocal(sig: string): Promise<Blob | null>
+  getResourceResolvedLocal?(sig: string): Promise<Blob | null>
   getOptimizedVisual?(sig: string): Promise<Blob | null>
   optimizeVisual?(sig: string, raw: Blob): Promise<void>
 }
@@ -76,7 +77,7 @@ export class VisualOptimizerDrone extends Drone {
         if (await store.getOptimizedVisual?.(sig)) continue
         // LOCAL only — a derived cache is minted from bytes already here;
         // fetching would put network traffic on an optimization path.
-        const source = await store.getResourceLocal(sig)
+        const source = await (store.getResourceResolvedLocal?.(sig) ?? store.getResourceLocal(sig))
         if (!source) continue
         await store.optimizeVisual(sig, source)
       } catch {

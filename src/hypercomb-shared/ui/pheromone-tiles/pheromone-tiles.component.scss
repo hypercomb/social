@@ -1,3 +1,4 @@
+@use '../panel-identity' as identity;
 // hypercomb-shared/ui/pheromone-tiles/pheromone-tiles.component.scss
 //
 // The on-tile pheromone card: a small floating cluster of coloured keyword
@@ -5,6 +6,11 @@
 // the Pheromones panel. The hive stays visible/interactive behind it.
 
 $accent: #ffcf6b;
+
+
+// The identity as a triple — a bright theme takes the same hue deep.
+// These panels do not come through `tw.panel()`, so they say it here.
+:host { @include identity.accent($accent); }
 
 :host {
   position: fixed;
@@ -20,18 +26,18 @@ $accent: #ffcf6b;
   max-height: calc(100vh - 2rem);
   display: flex;
   flex-direction: column;
-  background: rgba(14, 14, 22, 0.96);
-  border: 1px solid rgba($accent, 0.4);
+  background: rgba(var(--hc-panel-pane), 0.96);
+  border: 1px solid rgba(var(--acc), 0.4);
   border-radius: var(--hc-radius-floating);
-  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba($accent, 0.06) inset;
+  box-shadow: 0 14px 44px rgba(var(--hc-panel-shadow), 0.55), 0 0 0 1px rgba(var(--acc), 0.06) inset;
   font-family: var(--hc-mono, system-ui);
   color: #f3f3f3;
   overflow: hidden;
 }
 
 .pheromone-card.pinned {
-  border-color: rgba($accent, 0.7);
-  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba($accent, 0.18) inset;
+  border-color: rgba(var(--acc), 0.7);
+  box-shadow: 0 14px 44px rgba(var(--hc-panel-shadow), 0.6), 0 0 0 1px rgba(var(--acc), 0.18) inset;
 }
 
 .pheromone-card-header {
@@ -39,7 +45,7 @@ $accent: #ffcf6b;
   align-items: center;
   gap: 0.4rem;
   padding: 0.5rem 0.65rem;
-  border-bottom: 1px solid rgba($accent, 0.2);
+  border-bottom: 1px solid rgba(var(--acc), 0.2);
   cursor: grab;
   user-select: none;
   touch-action: none;
@@ -50,7 +56,7 @@ $accent: #ffcf6b;
 }
 
 .pheromone-grip {
-  color: rgba(255, 255, 255, 0.35);
+  color: rgba(var(--hc-panel-ink), 0.35);
   font-size: 0.85rem;
   line-height: 1;
 }
@@ -58,7 +64,7 @@ $accent: #ffcf6b;
 .pheromone-card-cell {
   flex: 1;
   font-size: 0.78rem;
-  color: rgba(255, 255, 255, 0.72);
+  color: rgba(var(--hc-panel-ink), 0.72);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -69,7 +75,7 @@ $accent: #ffcf6b;
   flex: 0 0 auto;
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(var(--hc-panel-ink), 0.5);
   font-size: 1.1rem;
   line-height: 1;
   cursor: pointer;
@@ -104,8 +110,8 @@ $accent: #ffcf6b;
   gap: 0.4rem;
   padding: 0.22rem 0.3rem 0.22rem 0.35rem;
   border-radius: var(--hc-radius-floating);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(var(--hc-panel-ink), 0.06);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.14);
   font-size: 0.76rem;
   line-height: 1.2;
   color: #e8eef5;
@@ -119,7 +125,7 @@ $accent: #ffcf6b;
   border-radius: 3px;
   // Inset hairline so a pale colour still reads as a distinct square instead
   // of bleeding into the chip.
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45) inset;
+  box-shadow: 0 0 0 1px rgba(var(--hc-panel-shadow), 0.45) inset;
 }
 
 .pheromone-chip-name {
@@ -154,5 +160,5 @@ $accent: #ffcf6b;
   margin: 0;
   padding: 0 0.65rem 0.55rem;
   font-size: 0.66rem;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(var(--hc-panel-ink), 0.4);
 }

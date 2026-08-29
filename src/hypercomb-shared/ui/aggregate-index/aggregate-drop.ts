@@ -46,6 +46,7 @@ export interface DropTarget {
   label: string | null
   index: number
   hasImage: boolean
+  over?: boolean
 }
 
 /** Mirrors REFERENCE_DECORATION_KIND in essentials

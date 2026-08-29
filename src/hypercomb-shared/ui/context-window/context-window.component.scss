@@ -14,6 +14,7 @@
 // (top offset) stays in rem so position is fixed.
 
 @use '../toolwindow' as tw;
+@use '../panel-identity' as identity;
 
 $accent: #ffa866;
 
@@ -37,9 +38,9 @@ $accent: #ffa866;
   max-width: calc(100vw - 1.5rem);
   display: flex;
   flex-direction: column;
-  background: rgba(14, 14, 22, 0.96);
-  border-left: 1px solid rgba($accent, 0.5);
-  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba($accent, 0.06) inset;
+  background: rgba(var(--hc-panel-pane), 0.96);
+  border-left: 1px solid rgba(var(--acc), 0.5);
+  box-shadow: -10px 0 40px rgba(var(--hc-panel-shadow), 0.5), 0 0 0 1px rgba(var(--acc), 0.06) inset;
   font-family: var(--hc-mono, system-ui);
   font-size: calc(1rem * var(--hc-panel-scale, 1));
   color: #f3f3f3;
@@ -50,7 +51,7 @@ $accent: #ffa866;
 .ctx-header {
   @include tw.header;
   justify-content: space-between;
-  border-bottom: 1px solid rgba($accent, 0.25);
+  border-bottom: 1px solid rgba(var(--acc), 0.25);
 }
 
 .ctx-heading {
@@ -63,13 +64,13 @@ $accent: #ffa866;
 .ctx-title {
   font-size: 0.9em;
   letter-spacing: 0.05em;
-  color: rgba($accent, 0.95);
+  color: rgba(var(--acc), 0.95);
   flex-shrink: 0;
 }
 
 .ctx-cell {
   font-size: 0.8em;
-  color: rgba(255, 255, 255, 0.62);
+  color: rgba(var(--hc-panel-ink), 0.62);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -78,13 +79,13 @@ $accent: #ffa866;
 .ctx-close {
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(var(--hc-panel-ink), 0.55);
   font-size: 1.2em;
   line-height: 1;
   padding: 0 0.25em;
   cursor: pointer;
 
-  &:hover { color: #fff; }
+  &:hover { color: var(--hc-panel-text); }
 }
 
 // The headline the list is only evidence for.
@@ -93,13 +94,13 @@ $accent: #ffa866;
   padding: 0.55em 0.9em;
   font-size: 0.72em;
   line-height: 1.5;
-  color: rgba(255, 255, 255, 0.62);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  color: rgba(var(--hc-panel-ink), 0.62);
+  border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.06);
 }
 
 .ctx-warn {
   margin-left: 0.4em;
-  color: rgba($accent, 0.9);
+  color: rgba(var(--acc), 0.9);
 }
 
 .ctx-empty {
@@ -107,7 +108,7 @@ $accent: #ffa866;
   padding: 1.1em 0.9em;
   font-size: 0.75em;
   line-height: 1.6;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(var(--hc-panel-ink), 0.5);
 }
 
 .ctx-list {
@@ -124,11 +125,11 @@ $accent: #ffa866;
   gap: 0.2em;
   padding: 0 0.4em;
 
-  &:hover { background: rgba($accent, 0.07); }
+  &:hover { background: rgba(var(--acc), 0.07); }
 
   // Attached but unreadable — the pointer is real, the material is not here.
   // Dimmed rather than hidden: a row you cannot see is a row you cannot detach.
-  &.broken .ctx-row-name { color: rgba(255, 255, 255, 0.45); }
+  &.broken .ctx-row-name { color: rgba(var(--hc-panel-ink), 0.45); }
 }
 
 .ctx-row-body {
@@ -156,7 +157,7 @@ $accent: #ffa866;
 
 .ctx-row-path {
   font-size: 0.68em;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(var(--hc-panel-ink), 0.4);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -164,7 +165,7 @@ $accent: #ffa866;
 
 .ctx-row-meta {
   font-size: 0.66em;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(var(--hc-panel-ink), 0.5);
 }
 
 .ctx-row-error { color: rgba(255, 140, 140, 0.8); }
@@ -174,7 +175,7 @@ $accent: #ffa866;
   align-self: center;
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(var(--hc-panel-ink), 0.4);
   padding: 0.35em;
   cursor: pointer;
   border-radius: var(--md-shape-xs, 4px);
@@ -182,15 +183,15 @@ $accent: #ffa866;
   .mat-sym { font-size: 1.05em; }
 
   &:hover {
-    color: rgba($accent, 0.95);
-    background: rgba($accent, 0.12);
+    color: rgba(var(--acc), 0.95);
+    background: rgba(var(--acc), 0.12);
   }
 }
 
 .ctx-foot {
   flex: 0 0 auto;
   padding: 0.6em 0.7em 0.8em;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 1px solid rgba(var(--hc-panel-ink), 0.07);
 }
 
 .ctx-ask {
@@ -202,15 +203,15 @@ $accent: #ffa866;
   padding: 0.55em 0.7em;
   font: inherit;
   font-size: 0.78em;
-  color: rgba($accent, 0.95);
-  background: rgba($accent, 0.1);
-  border: 1px solid rgba($accent, 0.35);
+  color: rgba(var(--acc), 0.95);
+  background: rgba(var(--acc), 0.1);
+  border: 1px solid rgba(var(--acc), 0.35);
   border-radius: var(--md-shape-xs, 4px);
   cursor: pointer;
 
   .mat-sym { font-size: 1.05em; }
 
-  &:hover { background: rgba($accent, 0.18); }
+  &:hover { background: rgba(var(--acc), 0.18); }
 }
 
 .ctx-foot-note {

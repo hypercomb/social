@@ -235,6 +235,16 @@ export abstract class NurseBee<T = unknown> extends Bee {
         this.invalidate(payload.cacheKey)
       },
     )
+    // A root-default edit can change the composed value at every outer
+    // lineage even though none of those outer head signatures moved. Cache
+    // keys are hashed locations (not hierarchical strings), so the safe and
+    // exact response for this attribute is a whole nurse-cache invalidation.
+    this.onEffect<{ keys: readonly string[] }>(
+      'tile:root-default-changed',
+      (payload) => {
+        if (payload?.keys?.includes(this.attribute)) this.clear()
+      },
+    )
   }
 
   // ── nurses don't run per pulse ─────────────────────────────────────

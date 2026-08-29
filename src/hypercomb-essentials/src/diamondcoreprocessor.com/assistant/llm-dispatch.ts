@@ -29,7 +29,7 @@
 
 import { EffectBus, llmKeyStore } from '@hypercomb/core'
 import { llmActivation } from './llm-activation.js'
-import { chooseProvider, modelForTier, type ModelNeed } from './model-policy.js'
+import { chooseProvider, modelForTier, rankProviders, type ModelNeed } from './model-policy.js'
 import { llmProviderRegistry, type LlmProviderRegistry } from './llm-provider-registry.js'
 import './providers/builtin-providers.js'
 import type {
@@ -62,12 +62,24 @@ export type LlmCall = {
   readonly need?: ModelNeed
   /** Wire id or the descriptor's human name (`opus`, `gemini`). */
   readonly model?: string
+  /** Soft session stickiness. Preferred while eligible; unlike `model`, it
+   * does not forbid an automatic fallback. */
+  readonly preferModel?: string
   readonly messages: readonly LlmChatMessage[]
   readonly system?: string
   readonly maxTokens?: number
   /** Hint that `system` is stable and worth prompt-caching where supported. */
   readonly cacheSystem?: boolean
   readonly signal?: AbortSignal
+}
+
+/** One routed stream delta, carrying the truth about who actually answered. */
+export type LlmRoutedChunk = {
+  readonly text: string
+  readonly providerId: string
+  readonly providerLabel: string
+  readonly vendor: string
+  readonly model: string
 }
 
 /**
@@ -203,7 +215,9 @@ export const buildRequest = (
     // provider's fast model, not whatever its default happens to be.
     model: call.model
       ? registry().resolveModelId(provider, call.model)
-      : modelForTier(provider, call.need?.tier ?? 'balanced'),
+      : call.preferModel && registry().providerForModel(call.preferModel)?.id === provider.id
+        ? registry().resolveModelId(provider, call.preferModel)
+        : modelForTier(provider, call.need?.tier ?? 'balanced'),
     messages: call.messages,
     system: call.system,
     maxTokens: call.maxTokens,
@@ -294,6 +308,145 @@ async function* sseFrames(response: Response, signal?: AbortSignal): AsyncGenera
   }
 }
 
+const emitLocalUse = (provider: LlmProviderDescriptor): void => {
+  if (provider.requiresKey === false && provider.transport === 'browser-http') {
+    EffectBus.emit('llm:local-used', { providerId: provider.id })
+  }
+}
+
+/** Stream one already-selected provider. Selection and fallback live above it. */
+async function* streamProvider(
+  provider: LlmProviderDescriptor,
+  call: LlmCall,
+): AsyncGenerator<{ text: string; model: string }> {
+  if (provider.transport === 'peer-swarm' || !provider.fromStreamEvent) {
+    const request = buildRequest(provider, call)
+    let result: LlmCallResult
+    if (provider.transport === 'peer-swarm') {
+      if (!peerCaller) {
+        throw new LlmDispatchError(
+          `"${provider.id}" runs on another participant's machine and the swarm is not available here`,
+          provider.id, request.model,
+        )
+      }
+      result = await peerCaller(provider, request, call.signal)
+    } else {
+      emitLocalUse(provider)
+      const response = await send(provider, request, call.signal)
+      result = provider.fromResponse(await response.json(), request)
+    }
+    if (result.text) yield { text: result.text, model: result.model || request.model }
+    return
+  }
+
+  const request = buildRequest(provider, call, { stream: true })
+  emitLocalUse(provider)
+  const response = await send(provider, request, call.signal)
+  for await (const frame of sseFrames(response, call.signal)) {
+    const delta = provider.fromStreamEvent(frame)
+    if (delta) yield { text: delta, model: request.model }
+  }
+}
+
+// A provider that just failed should not win every fresh automatic route and
+// make each caller pay the same timeout. It is demoted, never banned: when all
+// choices are cooling down they remain available in their original order.
+const ROUTE_COOLDOWN_MS = 30_000
+const MAX_ROUTE_ATTEMPTS = 3
+const coolingUntil = new Map<string, number>()
+
+const isAbort = (error: unknown, signal?: AbortSignal): boolean =>
+  !!signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')
+
+const isTransient = (error: unknown): boolean => {
+  if (!(error instanceof LlmDispatchError)) return true
+  const status = error.status
+  return status === undefined || status === 408 || status === 409 || status === 425
+    || status === 429 || status >= 500
+}
+
+/** The ordered, callable attempt plan. Explicit provider/model choices do not
+ * silently change vendor; automatic choices may fall through their policy-
+ * ranked alternatives. */
+export const routeCandidates = (
+  call: Pick<LlmCall, 'providerId' | 'model' | 'preferModel' | 'need'>,
+): LlmProviderDescriptor[] => {
+  const explicit = !!call.providerId || !!call.model
+  let candidates = explicit ? [resolveProvider(call)] : rankProviders(call.need ?? {})
+  // Session stickiness is a preference, not authority. Reuse the previous
+  // model only while its provider is still eligible for this request.
+  if (!explicit && call.preferModel) {
+    const sticky = registry().providerForModel(call.preferModel)
+    const index = sticky ? candidates.findIndex(provider => provider.id === sticky.id) : -1
+    if (index > 0) candidates = [candidates[index], ...candidates.slice(0, index), ...candidates.slice(index + 1)]
+  }
+  const callable = candidates.filter(provider =>
+    provider.transport !== 'agent-bridge'
+    && (provider.transport !== 'peer-swarm' || !!peerCaller))
+  if (explicit || callable.length < 2) return callable.slice(0, MAX_ROUTE_ATTEMPTS)
+
+  const now = Date.now()
+  const ready = callable.filter(provider => (coolingUntil.get(provider.id) ?? 0) <= now)
+  const cooling = callable.filter(provider => (coolingUntil.get(provider.id) ?? 0) > now)
+  return [...(ready.length ? ready : callable), ...(ready.length ? cooling : [])]
+    .slice(0, MAX_ROUTE_ATTEMPTS)
+}
+
+/**
+ * Route and stream with bounded fallbacks.
+ *
+ * Fallback is allowed only before a provider emits text. Once bytes are on
+ * screen, switching models would splice two answers into one turn. Abort is
+ * always final. An empty successful response counts as a failed attempt —
+ * this catches reasoning-only/incompatible responses instead of persisting a
+ * blank assistant turn.
+ */
+export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoutedChunk> {
+  const candidates = routeCandidates(call)
+  if (!candidates.length) {
+    throw new LlmDispatchError(
+      'no callable AI provider is available for this request', call.providerId ?? '', call.model ?? '',
+    )
+  }
+
+  const automatic = !call.providerId && !call.model
+  const failures: string[] = []
+  for (const provider of candidates) {
+    let emitted = false
+    try {
+      for await (const chunk of streamProvider(provider, call)) {
+        emitted = true
+        coolingUntil.delete(provider.id)
+        yield {
+          text: chunk.text,
+          providerId: provider.id,
+          providerLabel: provider.label,
+          vendor: provider.vendor,
+          model: chunk.model,
+        }
+      }
+      if (!emitted) {
+        throw new LlmDispatchError(
+          `${provider.label} returned no visible text`, provider.id,
+          call.model ?? modelForTier(provider, call.need?.tier ?? 'balanced'),
+        )
+      }
+      return
+    } catch (error) {
+      if (isAbort(error, call.signal) || emitted || !automatic) throw error
+      const message = error instanceof Error ? error.message : String(error)
+      failures.push(`${provider.label}: ${message}`)
+      if (isTransient(error)) coolingUntil.set(provider.id, Date.now() + ROUTE_COOLDOWN_MS)
+      EffectBus.emit('llm:route-fallback', { providerId: provider.id, message })
+    }
+  }
+
+  throw new LlmDispatchError(
+    `every eligible AI provider failed: ${failures.join(' | ')}`,
+    candidates[candidates.length - 1]?.id ?? '', call.model ?? '',
+  )
+}
+
 /**
  * Ask a model and receive its answer in pieces. Yields text deltas only —
  * concatenating everything the generator yields gives the full answer.
@@ -303,17 +456,15 @@ async function* sseFrames(response: Response, signal?: AbortSignal): AsyncGenera
  */
 export async function* streamModel(call: LlmCall): AsyncGenerator<string> {
   const provider = resolveProvider(call)
-  // A peer answers in one piece: the mesh carries a reply, not a stream. The
-  // caller's loop is unchanged — it just yields once.
-  if (provider.transport === 'peer-swarm' || !provider.fromStreamEvent) {
-    const result = await callModel(call)
-    if (result.text) yield result.text
-    return
-  }
-  const request = buildRequest(provider, call, { stream: true })
-  const response = await send(provider, request, call.signal)
-  for await (const frame of sseFrames(response, call.signal)) {
-    const delta = provider.fromStreamEvent(frame)
-    if (delta) yield delta
-  }
+  for await (const chunk of streamProvider(provider, call)) yield chunk.text
 }
+
+/** Structural seam for shells that may not import essentials. */
+export const LLM_ROUTER_IOC_KEY = '@diamondcoreprocessor.com/LlmRouter'
+export const llmRouter = {
+  ready: (call: Pick<LlmCall, 'providerId' | 'model' | 'preferModel' | 'need'> = {}): boolean => {
+    try { return routeCandidates(call).length > 0 } catch { return false }
+  },
+  stream: (call: LlmCall): AsyncGenerator<LlmRoutedChunk> => streamRoutedModel(call),
+}
+window.ioc?.register?.(LLM_ROUTER_IOC_KEY, llmRouter)

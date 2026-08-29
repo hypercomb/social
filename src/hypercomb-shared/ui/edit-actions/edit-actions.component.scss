@@ -52,7 +52,7 @@ $steel: rgb(126, 182, 214);
 
   background: none;
   border: none;
-  color: rgba(206, 224, 240, 0.5);
+  color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-quiet));
   cursor: pointer;
   transition: color 150ms ease, transform 120ms ease;
 
@@ -62,20 +62,20 @@ $steel: rgb(126, 182, 214);
     line-height: 1;
   }
 
-  &:hover:not(:disabled) { color: #eaf5fb; }
+  &:hover:not(:disabled) { color: var(--hc-chrome-text); }
   &:active:not(:disabled) { transform: scale(0.9); }
-  &:focus-visible { outline: 1px solid rgba($steel, 0.6); outline-offset: 2px; border-radius: var(--hc-radius-control); }
+  &:focus-visible { outline: 1px solid rgba(var(--hc-chrome-accent), 0.6); outline-offset: 2px; border-radius: var(--hc-radius-control); }
   &:disabled { opacity: 0.25; cursor: default; }
 
   // Lit while the window a button opens is showing (the feedback toggle).
-  &.on { color: rgba($steel, 1); }
+  &.on { color: rgba(var(--hc-chrome-accent), 1); }
 }
 
 .ea-divider {
   width: 1px;
   height: 1.2rem;
   margin: 0 0.1rem;
-  background: rgba($steel, 0.22);
+  background: rgba(var(--hc-chrome-accent), 0.22);
 }
 
 // Save = the merge. A text pill (the word, not an icon) that only appears
@@ -91,21 +91,21 @@ $steel: rgb(126, 182, 214);
   font-family: inherit;
   font-size: 0.74rem;
   letter-spacing: 0.04em;
-  color: rgba(206, 224, 240, 0.95);
+  color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-loud));
 
-  background: rgba($steel, 0.16);
-  border: 1px solid rgba($steel, 0.55);
+  background: rgba(var(--hc-chrome-accent), 0.16);
+  border: 1px solid rgba(var(--hc-chrome-accent), 0.55);
   border-radius: var(--hc-radius-control);
   cursor: pointer;
   transition: color 150ms ease, border-color 150ms ease, background 150ms ease, transform 120ms ease;
 
   &:hover:not(:disabled) {
-    color: #fff;
-    background: rgba($steel, 0.3);
-    border-color: rgba($steel, 0.9);
+    color: var(--hc-chrome-text);
+    background: rgba(var(--hc-chrome-accent), 0.3);
+    border-color: rgba(var(--hc-chrome-accent), 0.9);
   }
   &:active:not(:disabled) { transform: scale(0.95); }
-  &:focus-visible { outline: 1px solid rgba($steel, 0.6); outline-offset: 2px; }
+  &:focus-visible { outline: 1px solid rgba(var(--hc-chrome-accent), 0.6); outline-offset: 2px; }
   &:disabled { opacity: 0.55; cursor: default; }
 }
 

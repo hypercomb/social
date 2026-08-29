@@ -60,6 +60,15 @@ export type ViewportSnapshot = { zoom?: ZoomSnapshot; pan?: PanSnapshot; meshOff
  */
 export type ViewportSource = 'user' | 'auto-persist' | 'auto'
 
+// Synchronous write-ahead journal for the small interval before the debounced
+// OPFS commit finishes. `pagehide` cannot guarantee completion of an async
+// OPFS write (notably during refresh), but localStorage is synchronous. The
+// journal is participant-local and contains only the latest viewport per
+// location; OPFS remains the durable source of truth after the commit lands.
+const VIEWPORT_JOURNAL_KEY = 'hypercomb.viewport.pending.v1'
+type ViewportJournalEntry = { revision: number; snapshot: ViewportSnapshot }
+type ViewportJournal = Record<string, ViewportJournalEntry>
+
 export class ViewportPersistence extends EventTarget {
 
   constructor() {
@@ -98,6 +107,42 @@ export class ViewportPersistence extends EventTarget {
   #currentSegments: readonly string[] | null = null
   #commitTimer: ReturnType<typeof setTimeout> | null = null
   #COMMIT_DEBOUNCE_MS = 200
+  #revision = 0
+
+  #locationKey = (segments: readonly string[]): string => JSON.stringify(segments)
+
+  #readJournal = (): ViewportJournal => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(VIEWPORT_JOURNAL_KEY) ?? '{}')
+      return parsed && typeof parsed === 'object' ? parsed as ViewportJournal : {}
+    } catch { return {} }
+  }
+
+  #writeJournal = (segments: readonly string[]): void => {
+    try {
+      const journal = this.#readJournal()
+      journal[this.#locationKey(segments)] = {
+        revision: ++this.#revision,
+        snapshot: { ...this.#lastRead },
+      }
+      localStorage.setItem(VIEWPORT_JOURNAL_KEY, JSON.stringify(journal))
+    } catch { /* storage unavailable/full — OPFS path still operates */ }
+  }
+
+  #journaledSnapshot = (segments: readonly string[]): ViewportSnapshot | null =>
+    this.#readJournal()[this.#locationKey(segments)]?.snapshot ?? null
+
+  #clearJournalRevision = (segments: readonly string[], revision: number): void => {
+    try {
+      const journal = this.#readJournal()
+      const key = this.#locationKey(segments)
+      // Never let completion of an older async write erase a newer frame.
+      if (journal[key]?.revision !== revision) return
+      delete journal[key]
+      if (Object.keys(journal).length === 0) localStorage.removeItem(VIEWPORT_JOURNAL_KEY)
+      else localStorage.setItem(VIEWPORT_JOURNAL_KEY, JSON.stringify(journal))
+    } catch { /* leave it for the next boot/commit */ }
+  }
 
   /** Suspend persistence — AUTOMATIC viewport changes are applied visually but
    *  not saved. Explicit user gestures still persist: every caller suspends
@@ -124,14 +169,22 @@ export class ViewportPersistence extends EventTarget {
     // absence == not a fit. Only set the property when truly a fit.
     const zoom = fit ? { scale, cx, cy, fit: true } : { scale, cx, cy }
     this.#lastRead = { ...this.#lastRead, zoom }
-    if (source !== 'auto') this.#scheduleStoreCommit()
+    if (source !== 'auto') {
+      const segs = this.#currentSegments ?? this.#segmentsFromLineage()
+      if (segs) this.#writeJournal(segs)
+      this.#scheduleStoreCommit()
+    }
   }
 
   setPan = (dx: number, dy: number, source: ViewportSource = 'auto'): void => {
     if (this.#suspended && source === 'auto') return
     const pan = { dx, dy }
     this.#lastRead = { ...this.#lastRead, pan }
-    if (source !== 'auto') this.#scheduleStoreCommit()
+    if (source !== 'auto') {
+      const segs = this.#currentSegments ?? this.#segmentsFromLineage()
+      if (segs) this.#writeJournal(segs)
+      this.#scheduleStoreCommit()
+    }
   }
 
   /** Persist the renderer's mesh offset (its position inside the layer
@@ -142,7 +195,11 @@ export class ViewportPersistence extends EventTarget {
     if (this.#suspended && source === 'auto') return
     const meshOffset = { x, y }
     this.#lastRead = { ...this.#lastRead, meshOffset }
-    if (source !== 'auto') this.#scheduleStoreCommit()
+    if (source !== 'auto') {
+      const segs = this.#currentSegments ?? this.#segmentsFromLineage()
+      if (segs) this.#writeJournal(segs)
+      this.#scheduleStoreCommit()
+    }
   }
 
   get lastPan(): PanSnapshot | undefined {
@@ -164,9 +221,14 @@ export class ViewportPersistence extends EventTarget {
     const segs = this.#currentSegments ?? this.#segmentsFromLineage()
     if (!segs) return Promise.resolve({})
 
-    this.#reading = (async () => {
+    const reading = (async () => {
       try {
-        const snap = await readViewportAt(segs)
+        const stored = await readViewportAt(segs)
+        // A journal entry is newer by definition: it exists only while its
+        // corresponding OPFS commit has not completed. Merge it over storage
+        // so refresh restores the exact final gesture, not the prior commit.
+        const pending = this.#journaledSnapshot(segs)
+        const snap = pending ? { ...stored, ...pending } : stored
         // Only adopt into the cache if we're still at this location — a
         // nav during the read must not let stale data overwrite the new
         // location's snapshot.
@@ -176,12 +238,15 @@ export class ViewportPersistence extends EventTarget {
         return {} as ViewportSnapshot
       }
     })()
+    this.#reading = reading
 
-    void this.#reading.finally(() => {
-      this.#reading = null
+    void reading.finally(() => {
+      // A location change can start a replacement read before this one
+      // settles. Completion of the stale read must not clear the new one.
+      if (this.#reading === reading) this.#reading = null
     })
 
-    return this.#reading
+    return reading
   }
 
   /** Resolve the current location's lineage segments (root = []). Used
@@ -226,6 +291,11 @@ export class ViewportPersistence extends EventTarget {
     // one into the in-memory cache so synchronous getters (lastPan /
     // lastZoom, read by applyCenter on resize/boot) reflect where we are.
     this.#reading = null
+    // Never expose the previous page's viewport while the new OPFS/cache read
+    // is in flight. A synchronous journal hit is safe to adopt immediately;
+    // otherwise empty is preferable to contaminating a fast first gesture on
+    // the new page with zoom/pan fields from the page we just left.
+    this.#lastRead = next ? (this.#journaledSnapshot(next) ?? {}) : {}
     // Location changed — tell ZoomDrone to cancel any in-flight zoom
     // animation so it can't tick stale mid-frame values onto the new
     // layer's container. (Formerly fired by setDir/setDirSilent.)
@@ -262,8 +332,10 @@ export class ViewportPersistence extends EventTarget {
       pan: this.lastPan,
       meshOffset: this.lastMeshOffset,
     }
+    const journalRevision = this.#readJournal()[this.#locationKey(segs)]?.revision
     try {
       await writeViewportAt(segs, snapshot)
+      if (journalRevision !== undefined) this.#clearJournalRevision(segs, journalRevision)
     } catch (err) {
       console.warn('[viewport] commit failed:', err)
     }

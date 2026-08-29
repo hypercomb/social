@@ -26,7 +26,13 @@ type HistoryLike = {
   currentLayerAt(sig: string): Promise<Layer | null>
   getLayerBySig(sig: string): Promise<Layer | null>
 }
-type StoreLike = { getResource(sig: string): Promise<Blob | null> }
+type StoreLike = {
+  getResource(sig: string): Promise<Blob | null>
+  fetchLayerFromHost?(
+    sig: string,
+    options?: { bypassMissWindow?: boolean },
+  ): Promise<Uint8Array | null>
+}
 type LineageLike = { readonly domain?: unknown; explorerSegments(): readonly string[] }
 type CommitterLike = {
   commitChildrenDeltas(segments: readonly string[], changes: { appends?: readonly string[] }): Promise<string>
@@ -49,10 +55,12 @@ export class PortableTileDropDrone extends Drone {
   #imageSig: string | null = null
   #target: DropTarget | null = null
   #resolveToken = 0
+  #resolvePromise: Promise<Layer | null> | null = null
   #effectsRegistered = false
 
   constructor() {
     super()
+    document.addEventListener('dragenter', this.#onDragOver)
     document.addEventListener('dragover', this.#onDragOver)
     document.addEventListener('dragleave', this.#onDragLeave)
     document.addEventListener('drop', this.#onDrop)
@@ -69,6 +77,7 @@ export class PortableTileDropDrone extends Drone {
   }
 
   protected override dispose(): void {
+    document.removeEventListener('dragenter', this.#onDragOver)
     document.removeEventListener('dragover', this.#onDragOver)
     document.removeEventListener('dragleave', this.#onDragLeave)
     document.removeEventListener('drop', this.#onDrop)
@@ -92,7 +101,8 @@ export class PortableTileDropDrone extends Drone {
     this.#target = null
     const token = ++this.#resolveToken
     EffectBus.emit('drop:dragging', { active: true })
-    void this.#resolve(signature, token)
+    this.#resolvePromise = resolvePortableLayer(signature, this.#history, this.#store)
+    void this.#resolve(signature, token, this.#resolvePromise)
   }
 
   #onDragLeave = (event: DragEvent): void => {
@@ -106,14 +116,21 @@ export class PortableTileDropDrone extends Drone {
     event.preventDefault()
     const target = this.#target
     const layer = this.#layer
+    const pending = this.#resolvePromise
     this.#clear()
-    if (layer && target && target.over !== false) void this.#commit(signature, layer, target)
+    if (!target || target.over === false) return
+    if (layer) void this.#commit(signature, layer, target)
+    else if (pending) void pending.then(resolved => {
+      if (resolved) void this.#commit(signature, resolved, target)
+    })
   }
 
-  async #resolve(signature: string, token: number): Promise<void> {
-    const history = this.#history
-    if (!history) return
-    const layer = await history.getLayerBySig(signature).catch(() => null)
+  async #resolve(
+    signature: string,
+    token: number,
+    pending: Promise<Layer | null>,
+  ): Promise<void> {
+    const layer = await pending
     if (token !== this.#resolveToken || signature !== this.#activeSig || !layer) return
     this.#layer = layer
     this.#imageSig = await this.#pictureSig(layer)
@@ -122,10 +139,11 @@ export class PortableTileDropDrone extends Drone {
   }
 
   #paint(): void {
-    const layer = this.#layer
     const target = this.#target
-    if (!this.#activeSig || !layer || !target || target.over === false) return
-    const label = typeof layer.name === 'string' && layer.name ? layer.name : this.#activeSig.slice(0, 8)
+    if (!this.#activeSig || !target || target.over === false) return
+    const label = typeof this.#layer?.name === 'string' && this.#layer.name
+      ? this.#layer.name
+      : this.#activeSig.slice(0, 8)
     EffectBus.emit('portable-tile:preview', {
       signature: this.#activeSig,
       label,
@@ -189,6 +207,7 @@ export class PortableTileDropDrone extends Drone {
     this.#layer = null
     this.#imageSig = null
     this.#target = null
+    this.#resolvePromise = null
     this.#resolveToken++
     EffectBus.emit('portable-tile:preview', null)
     EffectBus.emit('drop:dragging', { active: false })
@@ -206,6 +225,25 @@ export class PortableTileDropDrone extends Drone {
   get #committer(): CommitterLike | undefined {
     return window.ioc.get<CommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
   }
+}
+
+/**
+ * A drag is an explicit acquisition gesture, so unlike ordinary rendering it
+ * awaits the existing verified domain cascade. Store/ContentBroker checks the
+ * SHA-256 before writing the bytes; the second history read is therefore local.
+ */
+export async function resolvePortableLayer(
+  signature: string,
+  history: HistoryLike | undefined,
+  store: StoreLike | undefined,
+): Promise<Layer | null> {
+  if (!history) return null
+  const local = await history.getLayerBySig(signature).catch(() => null)
+  if (local) return local
+  const fetch = store?.fetchLayerFromHost?.(signature, { bypassMissWindow: true })
+  const bytes = fetch ? await fetch.catch(() => null) : null
+  if (!bytes) return null
+  return history.getLayerBySig(signature).catch(() => null)
 }
 
 const _portableTileDrop = new PortableTileDropDrone()

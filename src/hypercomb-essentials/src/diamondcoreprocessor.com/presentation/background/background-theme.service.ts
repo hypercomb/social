@@ -14,6 +14,22 @@
 //
 //   screen — the backdrop behind the hive (handed to CanvasBackgroundService)
 //   tiles  — the pictures that fill blank tiles (a SubstrateService source id)
+//   chrome — the `--md-*` value-set the panels wear (handed to ThemeService)
+//
+// ── THE THIRD HALF ────────────────────────────────────────────────────────
+//
+// `chrome` closes the last seam. Appearance was still TWO choices that knew
+// nothing about each other: this service dressed the screen and the tiles,
+// and `/theme` dressed the panels — so a bright daylight backdrop under dark
+// steel panels was not just reachable, it was what you got by changing one of
+// them. That is the same "two axes you had to hold in your head" this file was
+// written to end, left standing in the middle of it.
+//
+// Now a look dresses the whole app, and it is still data: a theme names the
+// chrome it wears, the same way it names its backdrop. A theme that names no
+// chrome leaves the panels alone — which is exactly right for the twelve
+// picture-only themes, because a set of tile photographs has no opinion about
+// what the command line should look like.
 //
 // A theme may declare either half or both. A theme that names no screen leaves
 // the screen alone, so an image theme can be laid over any backdrop. Nothing
@@ -27,7 +43,7 @@
 // Participant-local, like everything about appearance: the choice persists to
 // localStorage and is never written to a layer.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, THEME_IOC_KEY, type ThemeProvider } from '@hypercomb/core'
 import type { CanvasBackgroundService } from './canvas-background.service.js'
 
 const STORAGE_KEY = 'hc:background-theme'
@@ -39,6 +55,7 @@ type SubstrateLike = {
   setActive(id: string | null): Promise<void>
   listSources(): readonly { id: string; label?: string; builtin?: boolean }[]
   listImages(): { name: string; imageSig: string; enabled: boolean }[]
+  previewSourceImages?(id: string): Promise<{ name: string; imageSig: string }[]>
   activeSource: { id: string } | null
   defaultSigs: ReadonlySet<string>
   pinImage(token: string): { name: string } | null
@@ -61,6 +78,10 @@ export type BackgroundTheme = {
   screen?: { archetype: string; palette: string }
   /** SubstrateService source id for blank-tile pictures. Omit to leave tiles. */
   tiles?: string
+  /** The `--md-*` chrome theme worn with this look — the panels, the command
+   *  line, the notes strip. Omit to leave the chrome alone, which is what
+   *  every picture-only theme wants. See THE THIRD HALF below. */
+  chrome?: string
   /** One picture from the tiles set, for the chip on a theme with no screen.
    *  Named rather than discovered: a manifest lookup would make the swatch
    *  asynchronous, and the dropdown draws now. */
@@ -76,6 +97,16 @@ export type BackgroundTheme = {
 // is data, not doctrine — changing one changes the theme, and adding a new
 // entry here adds a theme with no other edit anywhere.
 export const BACKGROUND_THEMES: readonly BackgroundTheme[] = [
+  // ── the bright three ──────────────────────────────────────────────────
+  // The only three that dress all THREE halves. Each pairs a light backdrop
+  // with the chrome theme of the same name, so the screen behind the hive and
+  // the panels over it are lit by the same colour. They name no tiles: a look
+  // this saturated wants to sit over whatever pictures are already there, and
+  // forcing a picture set would overwrite a choice the participant made.
+  { id: 'honey',   label: 'Honey',   screen: { archetype: 'honeycomb', palette: 'honey' },   chrome: 'honey' },
+  { id: 'bloom',   label: 'Bloom',   screen: { archetype: 'mesh',      palette: 'bloom' },   chrome: 'bloom' },
+  { id: 'sherbet', label: 'Sherbet', screen: { archetype: 'dots',      palette: 'sherbet' }, chrome: 'sherbet' },
+
   // Nature is the SHIP DEFAULT — twenty scenes, first in the list, and what an
   // unchosen `active` reads as. Its tiles set is the substrate's default too.
   { id: 'nature',    label: 'Nature',    tiles: 'builtin:theme-nature',    preview: '/substrate/theme-nature/1.jpg' },
@@ -99,6 +130,7 @@ export const DEFAULT_BACKGROUND_THEME = 'nature'
 export class BackgroundThemeService extends EventTarget {
   #themes: BackgroundTheme[] = [...BACKGROUND_THEMES]
   #active: string | null = DEFAULT_BACKGROUND_THEME
+  #activeItem: string | null = null
 
   constructor() {
     super()
@@ -109,6 +141,8 @@ export class BackgroundThemeService extends EventTarget {
 
   get themes(): readonly BackgroundTheme[] { return this.#themes }
   get active(): string | null { return this.#active }
+  /** The mutually-exclusive picture pinned inside the active theme. */
+  get activeItem(): string | null { return this.#activeItem }
   /** Every word `set()` accepts — the theme names plus `off`. */
   get names(): readonly string[] { return [...this.#themes.map(t => t.id), 'off'] }
 
@@ -179,6 +213,7 @@ export class BackgroundThemeService extends EventTarget {
     if (name === 'off') {
       canvas?.set('off')
       this.#active = 'off'
+      this.#activeItem = null
       this.#persist()
       this.dispatchEvent(new CustomEvent('change'))
       return 'background off — bare surface'
@@ -194,6 +229,16 @@ export class BackgroundThemeService extends EventTarget {
     if (theme.screen && canvas) {
       canvas.set(`${theme.screen.palette} ${theme.screen.archetype}`)
       dressed.push('screen')
+    }
+
+    // The chrome goes on BEFORE the screen settles rather than after: the
+    // canvas re-reads its own palette off `theme:changed`, so setting the
+    // chrome second would repaint a backdrop this theme had just chosen. The
+    // pinned palette above wins either way — this only keeps the panels from
+    // arguing with it.
+    if (theme.chrome) {
+      const chrome = get(THEME_IOC_KEY) as ThemeProvider | undefined
+      if (chrome) { chrome.setTheme(theme.chrome); dressed.push('chrome') }
     }
 
     let tail = ''
@@ -214,8 +259,10 @@ export class BackgroundThemeService extends EventTarget {
             return `${theme.label} has no picture called "${item}" — try /background ${theme.id} items`
           }
           tail = ` · ${pinned.name} on every tile`
+          this.#activeItem = pinned.name
         } else {
           substrate.unpinImages()
+          this.#activeItem = null
         }
 
         if (reach !== 'none') {
@@ -245,6 +292,18 @@ export class BackgroundThemeService extends EventTarget {
     return dressed.length
       ? `background → ${theme.label} (${dressed.join(' + ')})${tail}`
       : `background → ${theme.label}${tail}`
+  }
+
+  /** Read a theme's pictures for visual choosers without activating it. */
+  async choices(id: string): Promise<{ name: string; imageSig: string }[]> {
+    const theme = this.theme(id)
+    const substrate = get('@diamondcoreprocessor.com/SubstrateService') as SubstrateLike | undefined
+    if (!theme?.tiles || !substrate) return []
+    await substrate.ensureLoaded()
+    if (substrate.activeSource?.id === theme.tiles) {
+      return substrate.listImages().map(({ name, imageSig }) => ({ name, imageSig }))
+    }
+    return await substrate.previewSourceImages?.(theme.tiles) ?? []
   }
 
   /** The pictures in a theme's group, by name. Empty until the group is the

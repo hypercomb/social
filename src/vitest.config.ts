@@ -11,6 +11,18 @@ export default defineConfig({
   // stale code from another branch and a source change appears to do
   // nothing. Tests run against the source they are testing.
   resolve: {
+    // `.ts` BEFORE `.js`, which inverts Vite's default. Stale compiled
+    // droppings sit beside their sources in the working tree — five of them
+    // in hypercomb-shared/core alone, all matched by that package's
+    // `*.js` gitignore — and with the default order a DEEP import
+    // (`@hypercomb/shared/core/store`) resolves to the built `store.js`
+    // instead of `store.ts`. The suite then tests whatever was last built,
+    // and fails in ways that have nothing to do with the code under test
+    // (a module-scope `register()` throwing ReferenceError, for instance).
+    // CI never sees it — a fresh checkout has no droppings — so the failure
+    // only ever reproduces on a developer's machine. Same intent as the
+    // alias block below: tests run against the source they are testing.
+    extensions: ['.ts', '.mts', '.mjs', '.js', '.tsx', '.jsx', '.json'],
     alias: {
       '@hypercomb/core': src('./hypercomb-core/src/index.ts'),
       '@hypercomb/essentials': src('./hypercomb-essentials/src/index.ts'),

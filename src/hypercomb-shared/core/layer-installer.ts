@@ -1,9 +1,10 @@
 // hypercomb-shared/core/layer-installer.ts
 
 import { type LocationParseResult } from './initializers/location-parser'
+import { bytesMatchSignature, type SealedInstallPackage, validateSealedPackage } from './sealed-package'
 import { Store } from './store'
 
-type InstallManifest = { version: number; layers: string[]; bees: string[]; dependencies: string[]; beeDeps?: Record<string, string[]>; label?: string; at?: string; previous?: string | null }
+type InstallManifest = SealedInstallPackage
 type ContentManifest = { version: number; packages: Record<string, InstallManifest> }
 
 // global get/register/list available via ioc.web.ts
@@ -67,6 +68,11 @@ export class LayerInstaller {
       console.warn(`[layer-installer] package ${packageSig.slice(0, 12)} not found in manifest`)
       return null
     }
+    const validation = validateSealedPackage(packageSig, pkg)
+    if (!validation.valid) {
+      console.warn(`[layer-installer] package ${packageSig.slice(0, 12)} is not sealed: ${validation.errors.join('; ')}`)
+      return null
+    }
     return pkg
   }
 
@@ -124,6 +130,10 @@ export class LayerInstaller {
         console.warn(`[layer-installer] failed to download layer ${sig}`)
         continue
       }
+      if (!await bytesMatchSignature(bytes, sig)) {
+        console.warn(`[layer-installer] rejected layer ${sig}: host bytes do not match signature`)
+        continue
+      }
 
       // Store flat at the OPFS root (`<root>/<sig>`) — no extension, no
       // domain partition, no typed dir. Matches what commitLayer writes;
@@ -164,6 +174,10 @@ export class LayerInstaller {
         console.warn(`[layer-installer] failed to download dependency ${sig}`)
         continue
       }
+      if (!await bytesMatchSignature(bytes, sig)) {
+        console.warn(`[layer-installer] rejected dependency ${sig}: host bytes do not match signature`)
+        continue
+      }
 
       // store as <sig>.js in the sign('dependencies') pool
       await this.#writeBytesFile(depDir, name, bytes)
@@ -199,6 +213,10 @@ export class LayerInstaller {
         ?? await this.#fetchBytes(`${endpoint}/__bees__/${name}`)
       if (!bytes) {
         console.warn(`[layer-installer] failed to download bee ${sig}`)
+        continue
+      }
+      if (!await bytesMatchSignature(bytes, sig)) {
+        console.warn(`[layer-installer] rejected bee ${sig}: host bytes do not match signature`)
         continue
       }
 

@@ -18,7 +18,7 @@
 // back within the edge snap zone to re-anchor.
 .cv2-dragbar {
   @include tw.header;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(var(--hc-panel-ink), 0.02);
   border-bottom: 1px solid rgba($steel, 0.25);
   border-radius: 0;
   user-select: none;
@@ -78,7 +78,7 @@
   padding: 1px 5px;
   border: 1px solid rgba($steel, 0.55);
   border-radius: var(--hc-radius-floating);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(var(--hc-panel-ink), 0.04);
   color: var(--md-on-surface);
   font-family: var(--hc-notes-face);
   font-size: scaled(0.82rem);
@@ -98,7 +98,7 @@
   gap: 0.15rem;
   padding: 0 0.35rem;
   border-bottom: 1px solid rgba($steel, 0.25);
-  background: rgba(255, 255, 255, 0.015);
+  background: rgba(var(--hc-panel-ink), 0.015);
 }
 
 .cv2-tab {
@@ -140,7 +140,7 @@
   transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
 
   &:hover {
-    color: #fff;
+    color: var(--hc-panel-text);
     background: rgba($steel, 0.16);
     border-color: rgba($steel, 0.4);
   }

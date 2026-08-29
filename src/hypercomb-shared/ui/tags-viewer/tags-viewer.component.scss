@@ -34,9 +34,9 @@ $mint: #6fbf94;
   max-width: calc(100vw - 1.5rem);
   display: flex;
   flex-direction: column;
-  background: rgba(14, 14, 22, 0.96);
+  background: rgba(var(--hc-panel-pane), 0.96);
   border-left: 1px solid rgba($steel, 0.5);
-  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba($steel, 0.06) inset;
+  box-shadow: -10px 0 40px rgba(var(--hc-panel-shadow), 0.5), 0 0 0 1px rgba($steel, 0.06) inset;
   font-family: var(--hc-mono, system-ui);
   font-size: calc(1rem * var(--hc-panel-scale, 1));
   color: #eaf0f4;
@@ -65,7 +65,7 @@ $mint: #6fbf94;
     border-left: none;
     border-top: 1px solid rgba($steel, 0.5);
     border-radius: tw.$radius-floating tw.$radius-floating 0 0;
-    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba($steel, 0.06) inset;
+    box-shadow: 0 -10px 40px rgba(var(--hc-panel-shadow), 0.55), 0 0 0 1px rgba($steel, 0.06) inset;
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
@@ -119,8 +119,8 @@ $mint: #6fbf94;
   gap: 0.2rem;
   margin-left: auto;
   padding: 0.15rem;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(var(--hc-panel-ink), 0.03);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.08);
   border-radius: tw.$radius-control;
 }
 
@@ -141,7 +141,7 @@ $mint: #6fbf94;
   &:hover { color: rgba(238, 243, 248, 0.9); }
 
   &.active {
-    color: #fff;
+    color: var(--hc-panel-text);
     background: rgba($steel, 0.16);
     border-color: rgba($steel, 0.45);
   }
@@ -245,7 +245,7 @@ $mint: #6fbf94;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
 
-  &:hover { background: rgba($steel, 0.16); color: #fff; }
+  &:hover { background: rgba($steel, 0.16); color: var(--hc-panel-text); }
 }
 
 // ── armed removal ─────────────────────────────────────────
@@ -326,14 +326,14 @@ $mint: #6fbf94;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 
-  &:hover { background: rgba($steel, 0.16); color: #fff; }
+  &:hover { background: rgba($steel, 0.16); color: var(--hc-panel-text); }
 }
 
 .removal-commit {
   border-color: rgba($amber, 0.6);
   color: #f0d9b6;
 
-  &:hover:not(:disabled) { background: rgba($amber, 0.22); color: #fff; }
+  &:hover:not(:disabled) { background: rgba($amber, 0.22); color: var(--hc-panel-text); }
 
   &:disabled {
     opacity: 0.4;
@@ -403,7 +403,7 @@ $mint: #6fbf94;
   width: 0.95em;
   height: 0.95em;
   border-radius: 3px;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45) inset;
+  box-shadow: 0 0 0 1px rgba(var(--hc-panel-shadow), 0.45) inset;
 }
 
 .painter-chip-drop {
@@ -415,7 +415,7 @@ $mint: #6fbf94;
   line-height: 1;
   cursor: pointer;
 
-  &:hover { color: #fff; }
+  &:hover { color: var(--hc-panel-text); }
 }
 
 // ── selection response — scent the whole canvas selection in one press ──
@@ -462,7 +462,7 @@ $mint: #6fbf94;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 
-  &:hover { background: rgba($steel, 0.16); color: #fff; }
+  &:hover { background: rgba($steel, 0.16); color: var(--hc-panel-text); }
 }
 
 // ── bouquets — the gathered set, named ────────────────────
@@ -553,14 +553,14 @@ $mint: #6fbf94;
   padding: 0.25em 0.6em;
   cursor: pointer;
 
-  &:hover { background: rgba($steel, 0.16); color: #fff; }
+  &:hover { background: rgba($steel, 0.16); color: var(--hc-panel-text); }
 }
 
 .bouquet-name-commit {
   border-color: rgba($mint, 0.6);
   color: #cdead9;
 
-  &:hover { background: rgba($mint, 0.22); color: #fff; }
+  &:hover { background: rgba($mint, 0.22); color: var(--hc-panel-text); }
 }
 
 .tags-bouquets-section {
@@ -682,7 +682,7 @@ $mint: #6fbf94;
   gap: 0.3em;
   padding: 0.1em 0.3em 0.1em 0.22em;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(var(--hc-panel-ink), 0.04);
   font-size: 0.68em;
   color: rgba(214, 228, 238, 0.85);
 }
@@ -692,7 +692,7 @@ $mint: #6fbf94;
   width: 0.8em;
   height: 0.8em;
   border-radius: 2px;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45) inset;
+  box-shadow: 0 0 0 1px rgba(var(--hc-panel-shadow), 0.45) inset;
 }
 
 .bouquet-forget {
@@ -895,7 +895,7 @@ $mint: #6fbf94;
 
   .tag-name,
   .bouquet-name,
-  .painter-chip-name { color: #fff; }
+  .painter-chip-name { color: var(--hc-panel-text); }
 }
 
 .tag-swatch {
@@ -903,7 +903,7 @@ $mint: #6fbf94;
   width: 1.1em;
   height: 1.1em;
   border-radius: 3px;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4) inset;
+  box-shadow: 0 0 0 1px rgba(var(--hc-panel-shadow), 0.4) inset;
   cursor: pointer;
   position: relative;
   overflow: hidden;
@@ -939,9 +939,9 @@ $mint: #6fbf94;
   gap: 0.45em;
   padding: 0.3em 0.6em 0.3em 0.35em;
   border-radius: tw.$radius-control;
-  background: rgba(14, 17, 24, 0.96);
+  background: rgba(var(--hc-panel-pane), 0.96);
   border: 1px solid rgba($steel, 0.5);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 8px 22px rgba(var(--hc-panel-shadow), 0.55);
   font-family: var(--hc-mono, system-ui);
   font-size: 0.78rem;
   line-height: 1.2;
@@ -956,7 +956,7 @@ $mint: #6fbf94;
   border-radius: 3px;
   // Same inset hairline the list swatch carries, so a pale colour still reads
   // as a distinct square rather than bleeding into the chip.
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45) inset;
+  box-shadow: 0 0 0 1px rgba(var(--hc-panel-shadow), 0.45) inset;
 }
 
 // A dragged BOUQUET says how many marks it is carrying.
@@ -993,7 +993,7 @@ $mint: #6fbf94;
   text-overflow: ellipsis;
 
   &:active { cursor: grabbing; }
-  &:hover { color: #fff; }
+  &:hover { color: var(--hc-panel-text); }
   &[aria-pressed="true"] { color: $steel; font-weight: 600; }
 }
 

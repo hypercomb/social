@@ -752,6 +752,8 @@
   "view.squareTileView.description": "セルの子タイルを正方形のプレートとして明るいページに並べます。プレートをくぐると中に入れます。",
   "view.lounge": "ラウンジ",
   "view.lounge.description": "このタイルが抱えている部屋です。中に入って見回してみてください。",
+  "view.game": "ゲーム",
+  "view.game.description": "このタイルが抱えているゲームです。中に入って遊んでください。",
   "view.publications": "公開作品",
   "view.publications.description": "このホストの公開台帳を正方形のプレートとして表示します。公開された作品が一枚のプレートになり、くぐるとその作品を訪れます。",
   "publications.tagline": "世界に共有された作品たち",

@@ -11,6 +11,9 @@ these terms define the user-facing language. they predate the current architectu
 ### hive
 a live session. not a page, feed, or file. exists only while people are present. the spatial representation of a hive is the hex grid (see **axial coordinate**).
 
+### core (the mitochondria)
+the minimum living machinery of Hypercomb. stores preserve signature-addressed **dna** and relays carry signals, but Core resolves, verifies, interprets, and expresses that material as beehavior. every participating application/client/domain must run Core; a byte mirror or relay without Core is supporting infrastructure, not a living node in the Tree of Life. see [tree-of-life-core.md](tree-of-life-core.md).
+
 ### bee
 a participant in the hive. identity is visual/social (recognizable avatar), not accounts. implemented as a **bee** (`Bee` base class) in the architecture, specialized as **drone** or **worker**.
 

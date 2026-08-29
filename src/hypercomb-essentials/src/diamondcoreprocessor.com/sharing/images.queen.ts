@@ -42,7 +42,9 @@ export class ImagesQueenBee extends QueenBee {
     if (!label) { this.#log('name a tile, or select one first'); return }
 
     const offered = await canonicalPeerImageCandidates(label)
-    if (offered.length === 0) {
+    const themes = (get('@diamondcoreprocessor.com/BackgroundThemes') as
+      { themes?: readonly unknown[] } | undefined)?.themes ?? []
+    if (offered.length === 0 && themes.length === 0) {
       this.#log(`nobody in the room is offering a picture for "${label}"`)
       return
     }

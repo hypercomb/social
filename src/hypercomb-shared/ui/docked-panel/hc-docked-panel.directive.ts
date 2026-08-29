@@ -94,6 +94,7 @@ import { holdWindow, type WindowSession } from '../window-session'
 // The one-window rule — opening a tool window puts the others away, with the
 // pheromone palette the single surface allowed to stay beside one.
 import { holdToolWindow } from '../window-rule'
+import { setPopoverDismisser } from '../tool-windows'
 
 const t = (key: string, fallback: string, params?: Record<string, unknown>): string => {
   const i18n = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@hypercomb.social/I18n') as
@@ -119,6 +120,15 @@ export function dismissOpenPopover(): boolean {
   for (const panel of live) if (panel.popoverOpen) return panel.dismissPopover()
   return false
 }
+
+// Hand it to the Escape owner rather than letting the Escape owner import this
+// file. tool-windows.ts is imported by runtime-initializer, so importing it
+// FROM there pulled @angular/core into every boot — including the
+// framework-free shim, where the field decorators below throw at module
+// evaluation. Registering at module scope keeps the ordering safe: this module
+// is the only thing that can open a popover, so nothing can be open before
+// this line has run. See tool-windows.ts:setPopoverDismisser.
+setPopoverDismisser(dismissOpenPopover)
 
 /** A self-sizing window that holds its width in a SIGNAL rather than in the
  *  element's inline style. Such a window must be told, not written to — an

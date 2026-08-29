@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/presentation/tiles/drop-landing.drone.ts
 //
-// WHERE WILL THIS LAND? — the ring drawn under a drag that is carrying meaning
-// onto the hive (a row dragged out of the portals index, a structure, a file).
+// WHERE WILL THIS LAND? — the target drawn under a drag that is carrying
+// meaning onto the hive (a Portal row, a structure, a file).
 //
 // The drag already knows what it is carrying and the overlay already knows what
 // is under the pointer. What neither said, until this drone, is the one thing
@@ -9,19 +9,13 @@
 // used to be the first moment you found out — and the two outcomes are not
 // variations of one act, they are different acts:
 //
-//   over an OCCUPIED tile → the drop attaches to THAT TILE. Amber ring on it.
-//   over EMPTY hive       → the drop MINTS A TILE, and it lands in the next free
-//                           slot. Teal ring THERE — not under the pointer.
+//   over an OCCUPIED tile → the drop is refused/attaches according to its owner.
+//   over EMPTY hive       → an ordinary full-size target tile appears on the
+//                           exact cursor hex and that exact slot is committed.
 //
-// ── The ring is not always under the cursor, deliberately ────────────────────
-//
-// A new tile's position is its INDEX in the parent's children, resolved through
-// the spiral (AxialService.items). There is no such thing as "this arbitrary
-// empty hex": `#occupiedByAxial` only knows occupied hexes, and the layout gives
-// the next child the next slot. Drawing the ring under the cursor would promise
-// a placement the model cannot keep, so it is drawn where the tile will actually
-// be. Pointing at empty space anywhere is a perfectly good way to say "not onto
-// a tile" — the ring then answers "so here, then".
+// The drop target carries the reverse-mapped AxialService index, including for
+// empty hexes. That is what turns the cursor's position into a durable slot
+// instead of silently demoting the new tile to the lowest free index.
 //
 // ── Geometry is mirrored, not asked for ─────────────────────────────────────
 //
@@ -31,8 +25,7 @@
 // renderer's business rather than inventing a fourth service for it.
 
 import { Drone } from '@hypercomb/core'
-import { Graphics } from 'pixi.js'
-import type { Container } from 'pixi.js'
+import { Container, Graphics, Sprite, Text, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 
 /** The `drop:target` broadcast. `over` is absent on payloads written before the
@@ -48,6 +41,8 @@ type DropTarget = {
   over?: boolean
 }
 
+type TargetTile = { label: string; imageSig?: string }
+
 // Landing on a TILE — the drop attaches to what is already there.
 const ATTACH_FILL = 0xff8844
 const ATTACH_FILL_ALPHA = 0.16
@@ -60,6 +55,11 @@ const LAND_FILL_ALPHA = 0.18
 const LAND_STROKE = 0x33bbcc
 const LAND_STROKE_ALPHA = 0.9
 
+const TILE_FILL = 0x0e1722
+const TILE_BORDER = 0x7eb6d6
+const TILE_LABEL = 0xe8f2f8
+const TARGET_TILE_Z = 7000
+
 const STROKE_WIDTH = 2
 /** Above the mesh, below the move drone's held cluster (7001/7002). */
 const LANDING_Z = 6999
@@ -71,10 +71,14 @@ export class DropLandingDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'presentation'
   override description =
-    'Rings the hex a drag will land on — the tile it attaches to, or the free slot a new tile will occupy.'
+    'Shows the exact hive tile a drag will occupy, including the carried Portal image.'
 
   #renderContainer: Container | null = null
   #layer: Graphics | null = null
+  #targetTile: Container | null = null
+  #targetTexture: Texture | null = null
+  #targetSpec: TargetTile | null = null
+  #targetBuildToken = 0
   #meshOffset = { x: 0, y: 0 }
   #coords: AxialLike[] = []
   #cellCount = 0
@@ -105,6 +109,7 @@ export class DropLandingDrone extends Drone {
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
       this.#renderContainer = payload.container
       this.#initLayer()
+      if (this.#targetSpec) this.#rebuildTargetTile()
     })
 
     this.onEffect<{ x: number; y: number }>('render:mesh-offset', (offset) => {
@@ -123,15 +128,23 @@ export class DropLandingDrone extends Drone {
     })
     this.onEffect<{ flat?: boolean }>('render:set-orientation', (p) => {
       this.#flat = !!p?.flat
+      if (this.#targetSpec) this.#rebuildTargetTile()
       this.#redraw()
     })
 
-    this.onEffect<{ active: boolean; atTop?: boolean }>('drop:dragging', ({ active, atTop }) => {
+    this.onEffect<{ active: boolean; atTop?: boolean; targetTile?: TargetTile }>('drop:dragging', ({ active, atTop, targetTile }) => {
       this.#dragging = !!active
       // A drag that MINTS AT THE TOP lands in slot 0, not the tail of the
       // spiral. Ringing the append slot would promise a place the tile is not
       // going to take. Absent flag = the old behaviour, unchanged.
       this.#landsAtTop = !!active && atTop === true
+      const spec = active && targetTile?.label
+        ? { label: String(targetTile.label), ...(targetTile.imageSig ? { imageSig: String(targetTile.imageSig) } : {}) }
+        : null
+      if (JSON.stringify(spec) !== JSON.stringify(this.#targetSpec)) {
+        this.#targetSpec = spec
+        this.#rebuildTargetTile()
+      }
       // The target that arrives with the NEXT move is the only one this drag
       // owns. Clearing on arm rather than trusting the previous drag's farewell
       // keeps a replayed last-value from painting a ring before the pointer has
@@ -147,6 +160,7 @@ export class DropLandingDrone extends Drone {
   }
 
   protected override dispose(): void {
+    this.#destroyTargetTile()
     if (this.#layer) {
       this.#layer.parent?.removeChild(this.#layer)
       this.#layer.destroy()
@@ -167,13 +181,24 @@ export class DropLandingDrone extends Drone {
     this.#layer.clear()
 
     const t = this.#target
+    const targetVisible = !!this.#targetTile && this.#dragging && !!t && t.over !== false && !t.occupied
+    if (this.#targetTile) {
+      this.#targetTile.visible = targetVisible
+      if (targetVisible && t) {
+        const center = this.#centerOfAxial(t.q, t.r)
+        if (center) this.#targetTile.position.set(center.x, center.y)
+        else this.#targetTile.visible = false
+      }
+    }
     if (!this.#dragging || !t || t.over === false) return
+
+    // A Portal supplies its own full target tile. Occupied hex refusal is drawn
+    // by tile-overlay; empty hexes need no extra ring fighting the image.
+    if (this.#targetSpec) return
 
     const center = t.occupied
       ? this.#centerOfIndex(t.index)
-      // the slot a NEW tile will take — the first one when the drag mints at
-      // the top, otherwise the next free one at the tail of the spiral
-      : this.#centerOfIndex(this.#landsAtTop ? 0 : this.#cellCount)
+      : this.#centerOfIndex(t.index >= 0 ? t.index : (this.#landsAtTop ? 0 : this.#cellCount))
     if (!center) return
 
     const fill = t.occupied ? ATTACH_FILL : LAND_FILL
@@ -186,6 +211,122 @@ export class DropLandingDrone extends Drone {
     this.#layer.fill({ color: fill, alpha: fillAlpha })
     this.#layer.poly(verts, true)
     this.#layer.stroke({ color: stroke, alpha: strokeAlpha, width: STROKE_WIDTH })
+  }
+
+  /** Build the Portal's ordinary target tile once per drag. Pointer movement
+   *  only repositions this container; image decoding never runs per hex. */
+  #rebuildTargetTile(): void {
+    this.#destroyTargetTile()
+    const spec = this.#targetSpec
+    const host = this.#renderContainer
+    if (!spec || !host) { this.#redraw(); return }
+
+    const token = this.#targetBuildToken
+    const node = this.#buildTargetTileNode(spec.label, null)
+    node.zIndex = TARGET_TILE_Z
+    node.visible = false
+    host.addChild(node)
+    host.sortableChildren = true
+    this.#targetTile = node
+    this.#redraw()
+
+    if (!spec.imageSig) return
+    void this.#loadTexture(spec.imageSig).then(texture => {
+      if (!texture) return
+      if (token !== this.#targetBuildToken || this.#targetSpec?.imageSig !== spec.imageSig || !this.#renderContainer) {
+        texture.destroy(true)
+        return
+      }
+      const previous = this.#targetTile
+      const replacement = this.#buildTargetTileNode(spec.label, texture)
+      replacement.zIndex = TARGET_TILE_Z
+      replacement.visible = previous?.visible ?? false
+      if (previous) replacement.position.copyFrom(previous.position)
+      previous?.parent?.removeChild(previous)
+      previous?.destroy({ children: true })
+      this.#renderContainer.addChild(replacement)
+      this.#renderContainer.sortableChildren = true
+      this.#targetTile = replacement
+      this.#targetTexture = texture
+      this.#redraw()
+    })
+  }
+
+  #destroyTargetTile(): void {
+    this.#targetBuildToken++
+    if (this.#targetTile) {
+      this.#targetTile.parent?.removeChild(this.#targetTile)
+      this.#targetTile.destroy({ children: true })
+      this.#targetTile = null
+    }
+    if (this.#targetTexture) {
+      try { this.#targetTexture.destroy(true) } catch { /* already released */ }
+      this.#targetTexture = null
+    }
+  }
+
+  #buildTargetTileNode(label: string, texture: Texture | null): Container {
+    const node = new Container()
+    const radius = this.#hexRadius()
+    const width = this.#flat ? radius * 2 : Math.sqrt(3) * radius
+    const height = this.#flat ? Math.sqrt(3) * radius : radius * 2
+    const verts = this.#hexVerts(0, 0, radius)
+
+    const body = new Graphics()
+    body.poly(verts, true)
+    body.fill({ color: TILE_FILL, alpha: 1 })
+    node.addChild(body)
+
+    if (texture) {
+      const sprite = new Sprite(texture)
+      sprite.anchor.set(0.5)
+      const scale = Math.max(width / Math.max(1, texture.width), height / Math.max(1, texture.height))
+      sprite.scale.set(scale)
+      const mask = new Graphics()
+      mask.poly(this.#hexVerts(0, 0, radius * 0.985), true)
+      mask.fill({ color: 0xffffff })
+      node.addChild(sprite)
+      node.addChild(mask)
+      sprite.mask = mask
+    }
+
+    // The same centered name band an ordinary tile presents. It stays on the
+    // preview even with an image, so the target is the Portal tile rather than
+    // an anonymous picture floating over a hex.
+    const bandHeight = Math.max(16, radius * 0.42)
+    const band = new Graphics()
+    band.rect(-width * 0.49, -bandHeight / 2, width * 0.98, bandHeight)
+    band.fill({ color: 0x071018, alpha: 0.62 })
+    node.addChild(band)
+
+    const text = new Text({
+      text: label,
+      style: {
+        fontFamily: 'DM Mono, ui-monospace, monospace',
+        fontSize: Math.max(8, radius * 0.27),
+        fill: TILE_LABEL,
+        align: 'center',
+      },
+    })
+    text.anchor.set(0.5)
+    if (text.width > width * 0.82) text.scale.set((width * 0.82) / text.width)
+    node.addChild(text)
+
+    const border = new Graphics()
+    border.poly(verts, true)
+    border.stroke({ color: TILE_BORDER, alpha: 0.96, width: 1.4, join: 'round' })
+    node.addChild(border)
+    return node
+  }
+
+  async #loadTexture(sig: string): Promise<Texture | null> {
+    try {
+      const store = window.ioc.get<{ getResource?: (value: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
+      const blob = await store?.getResource?.(sig)
+      if (!blob) return null
+      const bitmap = await createImageBitmap(blob)
+      return Texture.from(bitmap)
+    } catch { return null }
   }
 
   /** Container-space center of a SLOT by its index.
@@ -203,6 +344,11 @@ export class DropLandingDrone extends Drone {
     return { x: p.x + this.#meshOffset.x, y: p.y + this.#meshOffset.y }
   }
 
+  #centerOfAxial(q: number, r: number): { x: number; y: number } {
+    const p = this.#axialToPixel(q, r)
+    return { x: p.x + this.#meshOffset.x, y: p.y + this.#meshOffset.y }
+  }
+
   #spiralCoord(index: number): AxialLike | null {
     const axial = this.resolve<AxialServiceLike>('axial')
     return axial?.items?.get(index) ?? null
@@ -217,8 +363,9 @@ export class DropLandingDrone extends Drone {
   /** Pointy-top hex vertices about (cx, cy) — matches move-preview's rings. */
   #hexVerts(cx: number, cy: number, radius: number): number[] {
     const verts: number[] = []
+    const start = this.#flat ? 0 : -Math.PI / 2
     for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i - Math.PI / 2
+      const angle = start + (Math.PI / 3) * i
       verts.push(cx + radius * Math.cos(angle))
       verts.push(cy + radius * Math.sin(angle))
     }

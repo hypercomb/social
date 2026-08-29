@@ -121,20 +121,39 @@ function nothingHere(hostname, zone) {
   )
 }
 
-async function publishedRoot(env, publisher, lineage) {
+/** A publisher's index, parsed and signature-checked: `{roots, createdAt}`, or
+ *  null when the key holds nothing this host will trust. */
+async function verifiedIndex(env, pubkey) {
   let evt
-  try { evt = JSON.parse((await env.HIVES.get(publisher.pubkey)) ?? 'null') } catch { return null }
-  if (!evt || Number(evt.kind) !== HIVE_KIND || evt.pubkey !== publisher.pubkey) return null
+  try { evt = JSON.parse((await env.HIVES.get(pubkey)) ?? 'null') } catch { return null }
+  if (!evt || Number(evt.kind) !== HIVE_KIND || evt.pubkey !== pubkey) return null
   if (!(await verifyEventSig(evt))) return null
   let content
   try { content = JSON.parse(evt.content) } catch { return null }
-  const head = String(content?.roots?.[lineage] || '').toLowerCase()
+  if (!content?.roots || typeof content.roots !== 'object') return null
+  return { roots: content.roots, createdAt: Number(evt.created_at || 0) }
+}
+
+/** One request's index reads, memoized by pubkey. The ledger asks the same
+ *  key for every site it reports; without this a directory read re-fetched
+ *  and re-verified one schnorr signature per site per publisher. */
+function indexReader(env) {
+  const reads = new Map()
+  return (pubkey) => {
+    if (!reads.has(pubkey)) reads.set(pubkey, verifiedIndex(env, pubkey))
+    return reads.get(pubkey)
+  }
+}
+
+async function publishedRoot(env, publisher, lineage, read = indexReader(env)) {
+  const index = await read(publisher.pubkey)
+  const head = String(index?.roots?.[lineage] || '').toLowerCase()
   if (!SIG_RE.test(head)) return null
   return {
     head,
     pubkey: publisher.pubkey,
     label: publisher.label || publisher.pubkey.slice(0, 12) + '…',
-    publishedAt: Number(evt.created_at || 0),
+    publishedAt: index.createdAt,
   }
 }
 
@@ -157,15 +176,16 @@ async function serveSiteDescriptor(request, env, site) {
   }, { 'Cache-Control': 'no-store' })
 }
 
-async function servePublications(request, env) {
-  const protocol = new URL(request.url).protocol
-  const sites = await Promise.all(Object.entries(siteBindings(env)).map(async ([host, site]) => ({
+/** One site as the ledger reports it — the same shape for a hand-bound host
+ *  and for one the naming rule brought to life. */
+async function ledgerEntry(env, read, protocol, host, site) {
+  return {
     host,
     url: `${protocol}//${host}/`,
     title: site.title,
     lineage: site.lineage,
     publishers: await Promise.all(site.publishers.map(async (publisher) => {
-      const publication = await publishedRoot(env, publisher, site.lineage)
+      const publication = await publishedRoot(env, publisher, site.lineage, read)
       return {
         pubkey: publisher.pubkey,
         label: publisher.label || publisher.pubkey.slice(0, 12) + '…',
@@ -174,7 +194,53 @@ async function servePublications(request, env) {
         publishedAt: publication?.publishedAt ?? null,
       }
     })),
-  })))
+  }
+}
+
+/** The hosts a wildcard label can hang off: a bound host that is not itself a
+ *  subdomain of another bound host. This is the apex the zone's `*` DNS record
+ *  covers, so it is the only place an implicit name actually answers. */
+function wildcardZones(bindings) {
+  const hosts = Object.keys(bindings)
+  return hosts.filter((h) => !hosts.some((g) => g !== h && h.endsWith('.' + g)))
+}
+
+// Publishing IS the naming step, so the ledger must report the sites that rule
+// brings to life — not only the hand-bound ones. Every TOP-LEVEL root in an
+// approved publisher's verified index is already live at `<root>.<zone>`
+// (resolveSite), and enumerating only SITE_BINDINGS left those names off the
+// directory forever: publishing a new creation went live but never earned a
+// plate. Each candidate is resolved back through resolveSite, so this can
+// never advertise an address the router would refuse to serve.
+async function servePublications(request, env) {
+  const protocol = new URL(request.url).protocol
+  const read = indexReader(env)
+  const bindings = siteBindings(env)
+  const sites = []
+  for (const [host, site] of Object.entries(bindings)) {
+    sites.push(await ledgerEntry(env, read, protocol, host, site))
+  }
+
+  // One plate per creation: an explicit binding already names its lineage, and
+  // the first zone to name an implicit one keeps it.
+  const named = new Set(Object.values(bindings).map((s) => s.lineage))
+  for (const zone of wildcardZones(bindings)) {
+    for (const publisher of bindings[zone].publishers) {
+      const index = await read(publisher.pubkey)
+      if (!index) continue
+      for (const [lineage, sig] of Object.entries(index.roots)) {
+        // Nested lineages need their own custom domain + binding — the
+        // wildcard maps a single label, never a path.
+        if (named.has(lineage) || lineage.includes('/')) continue
+        if (!SIG_RE.test(String(sig || '').toLowerCase())) continue
+        const host = `${lineage}.${zone}`
+        const resolved = resolveSite(env, host)
+        if (!resolved.implicit || resolved.site?.lineage !== lineage) continue
+        named.add(lineage)
+        sites.push(await ledgerEntry(env, read, protocol, host, resolved.site))
+      }
+    }
+  }
   return json(200, { sites }, { 'Cache-Control': 'no-store' })
 }
 

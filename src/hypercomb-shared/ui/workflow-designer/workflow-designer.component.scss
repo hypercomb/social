@@ -39,9 +39,9 @@ $dim: #7f95a3;
   flex-direction: column;
   overflow-y: auto;
   overflow-x: hidden;
-  background: rgba(14, 14, 22, 0.96);
+  background: rgba(var(--hc-panel-pane), 0.96);
   border-right: 1px solid rgba($steel, 0.5);
-  box-shadow: 10px 0 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba($steel, 0.06) inset;
+  box-shadow: 10px 0 40px rgba(var(--hc-panel-shadow), 0.5), 0 0 0 1px rgba($steel, 0.06) inset;
   font-family: var(--hc-mono, system-ui);
   font-size: calc(0.78rem * var(--hc-panel-scale, 1));
   color: #c8d6de;
@@ -64,7 +64,7 @@ $dim: #7f95a3;
   color: #0d1218;
   background: rgba($steel, 0.92);
   border-radius: 3px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 4px 14px rgba(var(--hc-panel-shadow), 0.45);
 
   .mat-sym { font-size: 1.05em; }
 }
@@ -75,7 +75,7 @@ $dim: #7f95a3;
   position: sticky;
   top: 0;
   z-index: 2;
-  background: rgba(14, 14, 22, 0.98);
+  background: rgba(var(--hc-panel-pane), 0.98);
   border-bottom: 1px solid rgba($steel, 0.35);
 }
 
@@ -152,7 +152,7 @@ $dim: #7f95a3;
   padding: 0.32rem 0.45rem;
   font: inherit;
   color: #c8d6de;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(var(--hc-panel-ink), 0.04);
   border: 1px solid rgba($steel, 0.25);
   border-radius: 3px;
 
@@ -266,7 +266,7 @@ $dim: #7f95a3;
   border-radius: 3px;
   cursor: pointer;
 
-  &:hover { background: rgba(255, 255, 255, 0.04); }
+  &:hover { background: rgba(var(--hc-panel-ink), 0.04); }
 }
 
 .workflow-step.selected .workflow-step-btn {
@@ -408,7 +408,7 @@ $dim: #7f95a3;
   touch-action: none;
 
   &:active { cursor: grabbing; }
-  &:hover { background: rgba(255, 255, 255, 0.05); }
+  &:hover { background: rgba(var(--hc-panel-ink), 0.05); }
 }
 
 .workflow-palette-icon {

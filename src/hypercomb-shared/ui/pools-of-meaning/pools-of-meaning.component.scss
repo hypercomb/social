@@ -29,7 +29,7 @@ $steel: rgb(126, 182, 214);
 
 .pools-panel.pinned {
   border-color: rgba($steel, 0.7);
-  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba($steel, 0.18) inset;
+  box-shadow: 0 16px 50px rgba(var(--hc-panel-shadow), 0.6), 0 0 0 1px rgba($steel, 0.18) inset;
 }
 
 .pools-header {
@@ -45,7 +45,7 @@ $steel: rgb(126, 182, 214);
 }
 
 .pools-drag-grip {
-  color: rgba(255, 255, 255, 0.35);
+  color: rgba(var(--hc-panel-ink), 0.35);
   font-size: 0.85rem;
   line-height: 1;
 }
@@ -61,7 +61,7 @@ $steel: rgb(126, 182, 214);
   flex: 0 0 auto;
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(var(--hc-panel-ink), 0.5);
   font-size: 1.1rem;
   line-height: 1;
   cursor: pointer;
@@ -85,7 +85,7 @@ $steel: rgb(126, 182, 214);
   margin: 0;
   font-size: 0.78rem;
   line-height: 1.45;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(var(--hc-panel-ink), 0.55);
 }
 
 .pools-roots {
@@ -102,9 +102,9 @@ $steel: rgb(126, 182, 214);
   align-items: center;
   gap: 0.45rem;
   padding: 0.35rem 0.45rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.08);
   border-radius: tw.$radius-card;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(var(--hc-panel-ink), 0.02);
   font-size: 0.78rem;
 }
 
@@ -117,7 +117,7 @@ $steel: rgb(126, 182, 214);
 
 .pools-domain {
   flex: 1;
-  color: rgba(255, 255, 255, 0.88);
+  color: rgba(var(--hc-panel-ink), 0.88);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -129,8 +129,8 @@ $steel: rgb(126, 182, 214);
   letter-spacing: 0.07em;
   padding: 0.1rem 0.4rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  color: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.18);
+  color: rgba(var(--hc-panel-ink), 0.55);
 
   &.self {
     border-color: rgba($steel, 0.5);
@@ -149,12 +149,12 @@ $steel: rgb(126, 182, 214);
   color: $steel;
   transition: background 150ms ease, color 150ms ease;
 
-  &:hover { background: rgba($steel, 0.24); color: #fff; }
+  &:hover { background: rgba($steel, 0.24); color: var(--hc-panel-text); }
 
   &.ghost {
     background: transparent;
     border: none;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(var(--hc-panel-ink), 0.4);
     font-size: 0.95rem;
     line-height: 1;
     padding: 0 0.25rem;
@@ -165,6 +165,6 @@ $steel: rgb(126, 182, 214);
 
 .pools-stick-hint {
   font-size: 0.66rem;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(var(--hc-panel-ink), 0.4);
   letter-spacing: 0.03em;
 }

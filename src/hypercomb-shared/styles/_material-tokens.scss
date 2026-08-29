@@ -27,6 +27,14 @@
 //   --md-dur-*        motion durations
 
 :root {
+  // ── how bright this theme is, declared rather than guessed ────────
+  // Derived surfaces (the Pixi canvas backdrop, chiefly) need to know whether
+  // the chrome around them is light or dark. They used to guess from the
+  // theme NAME — `light` yes, `dark` no, anything else fell through to the OS
+  // preference — which meant every theme past the first two answered wrong on
+  // half the machines. A theme says what it is; nothing keeps a list.
+  --md-is-light: 1;
+
   // ── surface system (LIGHT default — per /instructions/styles doctrine) ─
   // Fresh sites and the dev shell default to light. Dark is the explicit
   // override via [data-theme="dark"] or prefers-color-scheme: dark when no
@@ -93,6 +101,111 @@
   --md-font-ui:      Inter, "Segoe UI Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --md-font-mono:    "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
+
+  // ── CHROME ────────────────────────────────────────────────────────
+  // The header bar, the icon rail and every docked tool window used to be
+  // painted from literals — one dark glass, one steel hairline, one white
+  // ink — so they stayed dark no matter which theme was on. A bright theme
+  // lit the canvas and the panels that happened to use --md-* tokens, and
+  // left the chrome as a dark band across the top of it.
+  //
+  // These are the chrome's ROLES, and every theme answers them. Two things
+  // make it work with no per-component edits:
+  //
+  //   • They are r,g,b TRIPLES, not colours. Every chrome rule already
+  //     tuned its own alpha inline (`rgba(126,182,214, 0.28)`); a triple
+  //     keeps that idiom exactly, so the swap is mechanical.
+  //   • `ink` is "the opposite of the pane". Every hover wash, faint label
+  //     and disabled state is ink at a low alpha — white-on-dark today,
+  //     and therefore ink-on-light for free the moment the triple flips.
+  //     No state needed a second value.
+
+  // ── THE PANEL FAMILY ──────────────────────────────────────────────
+  // The docked tool windows. A SECOND family beside --hc-chrome-* because a
+  // panel is a different material from the bar: it is a raised pane over the
+  // hive, it needs its own ground, and — the part that made this hard — every
+  // panel carries a pastel ACCENT as its identity (#c8b8ff Beehaviors,
+  // #ffe14a Notes, #a8ffd8 Contacts ...) that was picked to sit on a dark pane.
+  //
+  // Lighting the pane alone turns thirty identities into a whisper. So the
+  // identity travels with it: `ui/_panel-identity.scss` turns each panel's
+  // accent into a `--acc` triple and, under a bright theme, into a DEEP
+  // version of the same hue — same identity, legible ground.
+  //
+  // `ink` is "the opposite of the pane": every hover wash, faint label and
+  // disabled state is ink at a low alpha, so flipping one triple flips all of
+  // them. `sheen` is the 1px inset edge highlight and stays white on purpose —
+  // it is a bevel, not text.
+  --hc-panel-pane:       253, 250, 242;
+  --hc-panel-ink:        26, 31, 44;
+  --hc-panel-text:       #1a1f2c;
+  --hc-panel-shadow:     40, 44, 60;
+  --hc-panel-sheen:      255, 255, 255;
+
+  --hc-chrome-glass:     255, 253, 246;
+  --hc-chrome-glass-a:   0.82;
+  --hc-chrome-rule:      79, 86, 106;
+  --hc-chrome-rule-firm: 26, 31, 44;
+  --hc-chrome-accent:    31, 67, 118;
+  --hc-chrome-ink:       26, 31, 44;
+  --hc-chrome-text:      #1a1f2c;
+  --hc-chrome-shadow:    40, 44, 60;
+  --hc-chrome-sheen:     255, 255, 255;
+
+  // ── THE INK LADDER ────────────────────────────────────────────────
+  // `ink` alone was not enough to make the chrome legible on both grounds,
+  // and the reason is not obvious: THE SAME ALPHA IS NOT THE SAME WEIGHT.
+  // White at 0.5 on near-black lands mid-grey and reads fine; the mirror
+  // move — ink at 0.5 on cream — lands at contrast 3.1 and reads as a
+  // smudge, because a bright ground gives a translucent mark far less to
+  // subtract from. Every washed-out label in a bright theme was this.
+  //
+  // So the WEIGHTS are named and the theme sets what each one costs. A
+  // rule asks for `quiet`, not for 0.6, and gets whatever quiet has to be
+  // on this ground to still be quiet-but-readable.
+  //
+  //   ghost  separators, decorative glyphs — presence, not information
+  //   faint  resting state of a control that lifts on hover
+  //   quiet  secondary labels, the pheromone strip at rest   (>= 4.5:1)
+  //   plain  icons and labels doing actual work              (>= 7:1)
+  //   loud   the one thing in the group that is selected
+  --hc-ink-a-ghost: 0.46;
+  --hc-ink-a-faint: 0.62;
+  --hc-ink-a-quiet: 0.70;
+  --hc-ink-a-plain: 0.82;
+  --hc-ink-a-loud:  0.96;
+
+  // ── CHROME STATUS ─────────────────────────────────────────────────
+  // The chrome's SEMANTIC colours: live/ok, warning, alert, information,
+  // a branch, a secret. Every one of them used to be a literal picked to
+  // glow on a near-black bar (#00e5a0 live, #ff4444 recording, a pale
+  // #8caad2 for "private"), which is the one job they cannot do on a
+  // bright ground — a neon mint on cream is a smudge.
+  //
+  // Unlike `ink`, these are NOT one value flipped. A status colour has to
+  // stay recognisably itself (green is still green) while changing its
+  // VALUE — light grounds need the dark, saturated end of the hue; dark
+  // grounds need the pale, luminous end. So they are declared here at the
+  // light end and overridden ONLY in md-dark-tokens.
+  //
+  // The three bright looks inherit these unchanged, on purpose: a status
+  // is a fact about the hive, not part of the look's chord. Honey's amber
+  // and sherbet's magenta dress the chrome; they must not be able to make
+  // "recording" mean something other than red.
+  --hc-status-ok:     #08745a;
+  --hc-status-warn:   #9a5c06;
+  --hc-status-alert:  #b3261e;
+  --hc-status-info:   #1f4376;
+  --hc-status-branch: #6b3a86;
+  --hc-status-secret: #855312;
+  --hc-status-solo:   #a3116b;
+  --hc-status-swarm:  #175f8a;
+
+  // Lightness for the shield crumb, whose hue is COMPUTED from secret
+  // strength (see controls-bar/mesh-header shieldColor) and so cannot be a
+  // fixed token. The hue carries the meaning; the ground decides the value.
+  --hc-shield-l: 30%;
+
   // ── motion ────────────────────────────────────────────────────────
   --md-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
   --md-easing-standard:   cubic-bezier(0.2, 0, 0.2, 1);
@@ -110,6 +223,43 @@
 // these tokens gets dark mode for free with no per-component code.
 
 @mixin md-dark-tokens {
+  --md-is-light: 0;
+  // Today's chrome, value for value — routing it through the roles is what
+  // lets a theme change it; dark itself is untouched.
+  --hc-chrome-glass-a:   0.78;
+  --hc-panel-pane:       13, 15, 21;
+  --hc-panel-ink:        238, 244, 248;
+  --hc-panel-text:       #eef2f5;
+  --hc-panel-shadow:     0, 0, 0;
+  --hc-panel-sheen:      255, 255, 255;
+  --hc-chrome-glass:     8, 16, 26;
+  --hc-chrome-rule:      72, 104, 124;
+  --hc-chrome-rule-firm: 84, 122, 146;
+  --hc-chrome-accent:    126, 182, 214;
+  --hc-chrome-ink:       245, 245, 245;
+  --hc-chrome-text:      #eef2f5;
+  --hc-chrome-shadow:    0, 0, 0;
+
+  // A translucent white subtracts more from near-black than ink does from
+  // cream, so every weight costs less here. These are today's values.
+  --hc-ink-a-ghost: 0.32;
+  --hc-ink-a-faint: 0.48;
+  --hc-ink-a-quiet: 0.60;
+  --hc-ink-a-plain: 0.80;
+  --hc-ink-a-loud:  1;
+
+  // The luminous end of each status hue — these are the literals the bar
+  // has always used, moved behind the role rather than restyled.
+  --hc-status-ok:     #00e5a0;
+  --hc-status-warn:   #f0b05c;
+  --hc-status-alert:  #ff4444;
+  --hc-status-info:   #8caad2;
+  --hc-status-branch: #be8cc8;
+  --hc-status-secret: #daa564;
+  --hc-status-solo:   #ff2d8a;
+  --hc-status-swarm:  #78c8ff;
+  --hc-shield-l: 50%;
+
   --md-surface:           #0e161c;
   --md-surface-dim:       #090f15;
   --md-surface-bright:    #1c2832;
@@ -141,6 +291,214 @@
 }
 
 [data-theme="dark"] { @include md-dark-tokens; }
+
+// ── THE BRIGHT THREE ──────────────────────────────────────────────────
+//
+// Light and dark are the two ends of one dimmer. These three are LOOKS: a
+// hive dressed in a colour, not a screen turned up. They exist because the
+// system had exactly one bright value-set and it was a beige office — the
+// shell could be legible or it could be pleasant, never both.
+//
+// What makes them read as bright is not the surface hex. It is three things
+// the old sets never did:
+//
+//   • THE LIGHT IS COLOURED. Every elevation shadow is tinted with the
+//     theme's own deep tone instead of black. Black shadow on a warm ground
+//     reads as dirt; a honey-brown one reads as sunlight. This is the single
+//     biggest lever in the file and it costs nothing to draw.
+//   • THE ACCENTS ARE A CHORD, not one hue plus two greys. Each look names a
+//     primary, a warm second and a cool third that are meant to sit beside
+//     each other — so a panel with three states looks composed rather than
+//     decorated.
+//   • THE MOTION HAS A LITTLE SPRING. `emphasized` overshoots slightly and
+//     the durations are shorter. Nothing new animates; what already moved
+//     just stopped being polite about it.
+//
+// None of this is an effect: no glow, no bloom, no hover ornament. It is the
+// same components, lit differently. Chrome stays chrome.
+
+// The spring the three share. `emphasized` overshoots by a hair on the way
+// out — a panel arrives and settles instead of gliding to a stop — and every
+// duration is a step shorter. Held to ONE place so the three can never drift
+// from each other, and so a fourth look inherits the feel by including it.
+@mixin md-lively-motion {
+  --md-easing-emphasized: cubic-bezier(0.2, 0.9, 0.25, 1.06);
+  --md-easing-standard:   cubic-bezier(0.25, 0, 0.15, 1);
+  --md-dur-short:    130ms;
+  --md-dur-medium:   220ms;
+  --md-dur-long:     360ms;
+}
+
+// HONEY — the hive's own colour. Warm amber ground, ink-brown text, deep
+// honey primary with coral and teal beside it. The flagship.
+@mixin md-honey-tokens {
+  --md-is-light: 1;
+  --hc-chrome-glass-a:   0.82;
+  --hc-panel-pane:       255, 252, 244;
+  --hc-panel-ink:        43, 30, 6;
+  --hc-panel-text:       #2b1e06;
+  --hc-panel-shadow:     120, 80, 10;
+  --hc-panel-sheen:      255, 255, 255;
+  --hc-chrome-glass:     255, 250, 236;
+  --hc-chrome-rule:      150, 112, 40;
+  --hc-chrome-rule-firm: 120, 86, 20;
+  --hc-chrome-accent:    181, 115, 10;
+  --hc-chrome-ink:       43, 30, 6;
+  --hc-chrome-text:      #2b1e06;
+  --hc-chrome-shadow:    120, 80, 10;
+
+  --md-surface:           #fff8e7;
+  --md-surface-dim:       #f6e9cd;
+  --md-surface-bright:    #fffdf6;
+  --md-surface-c-lowest:  #ffffff;
+  --md-surface-c-low:     #fff4de;
+  --md-surface-c:         #fdedcd;
+  --md-surface-c-high:    #f8e2b4;
+  --md-surface-c-highest: #f2d597;
+  --md-on-surface:        #2b1e06;
+  --md-on-surface-strong: #160f02;
+  --md-on-surface-var:    #6b5426;
+  --md-on-surface-faint:  #a08a5c;
+
+  --md-primary:           #b5730a;
+  --md-on-primary:        #ffffff;
+  --md-primary-container: #ffdf9e;
+  --md-on-primary-c:      #3a2500;
+
+  --md-secondary:         #d4562f;
+  --md-on-secondary:      #ffffff;
+  --md-secondary-c:       #ffdac9;
+  --md-on-secondary-c:    #40120a;
+
+  --md-tertiary:          #0f766e;
+  --md-tertiary-c:        #b8f0e6;
+
+  --md-outline:           rgba(43, 30, 6, 0.22);
+  --md-outline-variant:   rgba(43, 30, 6, 0.10);
+
+  // Sunlight, not soot — the shadow carries the ground's own deep tone.
+  --md-elev-1: 0 1px 2px rgba(120, 80, 10, 0.10), 0 1px 3px 1px rgba(120, 80, 10, 0.07);
+  --md-elev-2: 0 1px 2px rgba(120, 80, 10, 0.12), 0 2px 6px 2px rgba(120, 80, 10, 0.08);
+  --md-elev-3: 0 4px 8px 3px rgba(120, 80, 10, 0.11), 0 1px 3px rgba(120, 80, 10, 0.16);
+  --md-elev-4: 0 6px 10px 4px rgba(120, 80, 10, 0.11), 0 2px 3px rgba(120, 80, 10, 0.16);
+
+  @include md-lively-motion;
+}
+
+// BLOOM — a cold morning. Mint-white ground, deep green primary, coral and
+// violet beside it. The quietest of the three; it reads as fresh rather than
+// sweet.
+@mixin md-bloom-tokens {
+  --md-is-light: 1;
+  --hc-chrome-glass-a:   0.82;
+  --hc-panel-pane:       249, 254, 252;
+  --hc-panel-ink:        15, 42, 34;
+  --hc-panel-text:       #0f2a22;
+  --hc-panel-shadow:     10, 70, 55;
+  --hc-panel-sheen:      255, 255, 255;
+  --hc-chrome-glass:     246, 253, 250;
+  --hc-chrome-rule:      46, 100, 84;
+  --hc-chrome-rule-firm: 15, 70, 55;
+  --hc-chrome-accent:    13, 122, 95;
+  --hc-chrome-ink:       15, 42, 34;
+  --hc-chrome-text:      #0f2a22;
+  --hc-chrome-shadow:    10, 70, 55;
+
+  --md-surface:           #f2fbf7;
+  --md-surface-dim:       #e2f2ea;
+  --md-surface-bright:    #fbfffd;
+  --md-surface-c-lowest:  #ffffff;
+  --md-surface-c-low:     #ecf8f2;
+  --md-surface-c:         #e3f3ec;
+  --md-surface-c-high:    #d6ece2;
+  --md-surface-c-highest: #c5e2d5;
+  --md-on-surface:        #0f2a22;
+  --md-on-surface-strong: #04160f;
+  --md-on-surface-var:    #3f6357;
+  --md-on-surface-faint:  #7e9c90;
+
+  --md-primary:           #0d7a5f;
+  --md-on-primary:        #ffffff;
+  --md-primary-container: #b6ecd9;
+  --md-on-primary-c:      #00281c;
+
+  --md-secondary:         #e0563f;
+  --md-on-secondary:      #ffffff;
+  --md-secondary-c:       #ffd9d0;
+  --md-on-secondary-c:    #3d0f06;
+
+  --md-tertiary:          #6b4fd1;
+  --md-tertiary-c:        #ded4ff;
+
+  --md-outline:           rgba(15, 42, 34, 0.20);
+  --md-outline-variant:   rgba(15, 42, 34, 0.09);
+
+  --md-elev-1: 0 1px 2px rgba(10, 70, 55, 0.10), 0 1px 3px 1px rgba(10, 70, 55, 0.06);
+  --md-elev-2: 0 1px 2px rgba(10, 70, 55, 0.12), 0 2px 6px 2px rgba(10, 70, 55, 0.07);
+  --md-elev-3: 0 4px 8px 3px rgba(10, 70, 55, 0.10), 0 1px 3px rgba(10, 70, 55, 0.15);
+  --md-elev-4: 0 6px 10px 4px rgba(10, 70, 55, 0.10), 0 2px 3px rgba(10, 70, 55, 0.15);
+
+  @include md-lively-motion;
+}
+
+// SHERBET — the loud one, and deliberately so. Near-white with a magenta /
+// cyan / lime chord. Use it when the hive should feel like a toy.
+@mixin md-sherbet-tokens {
+  --md-is-light: 1;
+  --hc-chrome-glass-a:   0.82;
+  --hc-panel-pane:       255, 252, 255;
+  --hc-panel-ink:        36, 16, 51;
+  --hc-panel-text:       #241033;
+  --hc-panel-shadow:     90, 20, 90;
+  --hc-panel-sheen:      255, 255, 255;
+  --hc-chrome-glass:     254, 250, 255;
+  --hc-chrome-rule:      110, 78, 132;
+  --hc-chrome-rule-firm: 70, 36, 96;
+  --hc-chrome-accent:    194, 17, 143;
+  --hc-chrome-ink:       36, 16, 51;
+  --hc-chrome-text:      #241033;
+  --hc-chrome-shadow:    90, 20, 90;
+
+  --md-surface:           #fdf6ff;
+  --md-surface-dim:       #f0e4f6;
+  --md-surface-bright:    #fffcff;
+  --md-surface-c-lowest:  #ffffff;
+  --md-surface-c-low:     #f9eefd;
+  --md-surface-c:         #f4e6fa;
+  --md-surface-c-high:    #ecd9f4;
+  --md-surface-c-highest: #e1c9ec;
+  --md-on-surface:        #241033;
+  --md-on-surface-strong: #12061c;
+  --md-on-surface-var:    #5b4470;
+  --md-on-surface-faint:  #9385a3;
+
+  --md-primary:           #c2118f;
+  --md-on-primary:        #ffffff;
+  --md-primary-container: #ffd4f0;
+  --md-on-primary-c:      #3d0030;
+
+  --md-secondary:         #0aa5c9;
+  --md-on-secondary:      #ffffff;
+  --md-secondary-c:       #c4f0fb;
+  --md-on-secondary-c:    #00303c;
+
+  --md-tertiary:          #6f9f14;
+  --md-tertiary-c:        #e2f8bd;
+
+  --md-outline:           rgba(36, 16, 51, 0.20);
+  --md-outline-variant:   rgba(36, 16, 51, 0.09);
+
+  --md-elev-1: 0 1px 2px rgba(90, 20, 90, 0.10), 0 1px 3px 1px rgba(90, 20, 90, 0.06);
+  --md-elev-2: 0 1px 2px rgba(90, 20, 90, 0.12), 0 2px 6px 2px rgba(90, 20, 90, 0.07);
+  --md-elev-3: 0 4px 8px 3px rgba(90, 20, 90, 0.10), 0 1px 3px rgba(90, 20, 90, 0.15);
+  --md-elev-4: 0 6px 10px 4px rgba(90, 20, 90, 0.10), 0 2px 3px rgba(90, 20, 90, 0.15);
+
+  @include md-lively-motion;
+}
+
+[data-theme="honey"]   { @include md-honey-tokens; }
+[data-theme="bloom"]   { @include md-bloom-tokens; }
+[data-theme="sherbet"] { @include md-sherbet-tokens; }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) { @include md-dark-tokens; }

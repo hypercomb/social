@@ -49,6 +49,10 @@
   border-radius: var(--hc-radius-floating);
   box-shadow: var(--md-elev-4);
   font-family: var(--hc-font);
+  // ONE number moves the whole dialog: every size inside it is in `em`, and
+  // the width is `28em`, so a larger text size also gives the text room to be
+  // larger in. Same var, same ladder, same record as a docked panel's.
+  font-size: calc(1rem * var(--hc-panel-scale, 1));
 }
 
 // ── header ──────────────────────────────────────────────
@@ -71,6 +75,14 @@
     color: var(--md-on-surface-strong);
     cursor: text;             // it IS the rename control
   }
+}
+
+// The text-size row closes the fields column — full width, so the ladder can
+// lay out without competing with anything.
+.text-size-row {
+  margin-top: 0.2em;
+  padding-top: 0.6em;
+  border-top: 1px solid var(--md-outline-variant);
 }
 
 // Sits exactly where the heading was — same metrics, so revealing the field

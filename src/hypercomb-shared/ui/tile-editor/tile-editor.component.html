@@ -1,7 +1,8 @@
 @if (open()) {
   <div class="editor-backdrop" (click)="save()"></div>
 
-  <div class="editor-panel" role="dialog" [attr.aria-label]="'editor.title' | t">
+  <div class="editor-panel" role="dialog" [attr.aria-label]="'editor.title' | t"
+    [style.--hc-panel-scale]="textScale()">
     <!-- The heading IS the rename control: click it (or the edit icon) and it
          becomes a field. Editing it never moves the tile — only how the tile
          reads in the current language changes, so links, history and peers are
@@ -137,6 +138,15 @@
               (ngModelChange)="borderColorValue = $event; onBorderColorChange($event)"
             />
           </label>
+        </div>
+
+        <!-- Text size for the whole dialog. A setting row, at the end of the
+             settings — not in the header, where four steps and a label would
+             have squeezed the tile's own name to nothing. Same ladder and same
+             record a tool window offers behind its gear; this dialog has no
+             gear, so it shows the control. -->
+        <div class="text-size-row">
+          <hc-text-size [window]="textScaleWindow" (scaleChange)="textScale.set($event)" />
         </div>
 
       </div>

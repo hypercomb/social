@@ -44,7 +44,26 @@
 // has the focus); this owns the POLICY.
 
 import { focusedWindow } from './window-session'
-import { dismissOpenPopover } from './docked-panel/hc-docked-panel.directive'
+
+/** How the popover half arrives — INVERTED, so this file stays framework-free.
+ *
+ *  It used to `import { dismissOpenPopover }` from the Angular docked-panel
+ *  directive, which dragged @angular/core into every importer of this module.
+ *  That is fine inside an Angular shell and fatal outside one: the shim boots
+ *  the same runtime-initializer, and Angular's field decorators throw
+ *  "not supported in JIT mode" the moment the directive module evaluates.
+ *
+ *  So the panel kit REGISTERS its dismisser instead of being imported for it.
+ *  Ordering is safe by construction — the only thing that can open a popover
+ *  is the kit itself, so no popover can exist before its module has evaluated
+ *  and registered. No registration means no popovers, and `false` is the
+ *  correct answer. The element kit registers here too when it lands. */
+let popoverDismisser: (() => boolean) | null = null
+
+/** Called at module scope by whichever panel kit owns popovers. */
+export const setPopoverDismisser = (dismiss: () => boolean): void => {
+  popoverDismisser = dismiss
+}
 
 /** The IoC contract. Kept structural so essentials can type it without
  *  importing shared. */
@@ -62,7 +81,7 @@ const api: ToolWindowsApi = {
     // Innermost first — a popover belongs to a window, so it backs out before
     // the window does. It is checked without consulting focus because it IS the
     // focused thing whenever it is open (the popover takes focus on open).
-    if (dismissOpenPopover()) return true
+    if (popoverDismisser?.() === true) return true
     return focusedWindow()?.session.dismiss?.() === true
   },
 

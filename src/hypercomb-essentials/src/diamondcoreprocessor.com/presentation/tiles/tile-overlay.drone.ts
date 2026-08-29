@@ -243,7 +243,7 @@ const DRAG_ALPHA = 0.6
 // yet renders at this alpha and is inert (see #updatePerTileVisibility and the
 // click hit-test) — the "shaded until preloaded" rule, applied to features.
 const INERT_ALPHA = 0.4
-const DROP_HIGHLIGHT_TINT = 0x88ffff
+const DROP_REFUSAL_COLOR = 0xff5268
 
 // TILE VIEW PENDING. A view assigned to a tile may need to read its layer,
 // decorations, notes, or media before it can cover the hexagon surface. Keep
@@ -315,6 +315,7 @@ export class TileOverlayDrone extends Drone {
 
   #overlay: Container | null = null
   #hexBg: HexOverlayMesh | null = null
+  #dropRefusal: Graphics | null = null
   #actions: OverlayAction[] = []
   /** In-tile acknowledgement between `view:open-for-tile` and the assigned
    *  view entering owner-counted `view:active`. Independent of hover: moving
@@ -582,6 +583,7 @@ export class TileOverlayDrone extends Drone {
 
   #dropDragging = false
   #dropGroupOnly = false
+  #dropEmptyOnly = false
 
   #effectsRegistered = false
   // Handshake state: #requestedRegister makes #initOverlay emit
@@ -1172,9 +1174,10 @@ export class TileOverlayDrone extends Drone {
       // the hive over. Collecting rides ctrl+click in SelectionInputDrone, and
       // show-cell still reads the staged set for the future-add marks.)
 
-      this.onEffect<{ active: boolean; groupOnly?: boolean }>('drop:dragging', ({ active, groupOnly }) => {
+      this.onEffect<{ active: boolean; groupOnly?: boolean; emptyOnly?: boolean }>('drop:dragging', ({ active, groupOnly, emptyOnly }) => {
         this.#dropDragging = active
         this.#dropGroupOnly = active && groupOnly === true
+        this.#dropEmptyOnly = active && emptyOnly === true
         // Entering the drag: suppress buttons (overlay is a bare drop target).
         // Leaving it: recover — the drop may have opened the editor or rebuilt
         // the map, clearing #currentAxial; #recoverHover re-derives so the menu
@@ -1228,6 +1231,7 @@ export class TileOverlayDrone extends Drone {
       this.#overlay.destroy({ children: true })
       this.#overlay = null
       this.#hexBg = null
+      this.#dropRefusal = null
       this.#actions = []
     }
   }
@@ -1243,6 +1247,10 @@ export class TileOverlayDrone extends Drone {
 
     this.#hexBg = new HexOverlayMesh(this.#geo.circumRadiusPx, this.#flat)
     this.#overlay.addChild(this.#hexBg.mesh)
+    this.#dropRefusal = new Graphics()
+    this.#dropRefusal.visible = false
+    this.#overlay.addChild(this.#dropRefusal)
+    this.#drawDropRefusal()
 
     // No tray here: the icons sit on the SECOND row of the tile's own label
     // band, which the hex shader doubles while the tile is hovered (see
@@ -1336,6 +1344,7 @@ export class TileOverlayDrone extends Drone {
 
   #updateHexBg(): void {
     this.#hexBg?.update(this.#geo.circumRadiusPx, this.#flat)
+    this.#drawDropRefusal()
   }
 
   /** Build the pending mark once. It is deliberately its own container rather
@@ -3858,6 +3867,38 @@ export class TileOverlayDrone extends Drone {
     return this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))?.label ?? null
   }
 
+  /** Exact hive target at a viewport point. Row drags use this again on
+   *  pointerup instead of trusting the last coalesced pointermove: a fast
+   *  release can otherwise commit an earlier hex even though the preview
+   *  visibly reached the cursor. */
+  dropTargetAtClient(clientX: number, clientY: number): {
+    q: number
+    r: number
+    occupied: boolean
+    label: string | null
+    index: number
+    hasImage: boolean
+    over: true
+  } | null {
+    if (!this.#renderContainer || !this.#renderer || !this.#canvas) return null
+    if (document.elementFromPoint(clientX, clientY) !== this.#canvas) return null
+    const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
+    if (!detector) return null
+    const pixiGlobal = this.#clientToPixiGlobal(clientX, clientY)
+    const local = this.#renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))
+    const axial = detector.pixelToAxial(local.x - this.#meshOffset.x, local.y - this.#meshOffset.y, this.#flat)
+    const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
+    return {
+      q: axial.q,
+      r: axial.r,
+      occupied: !!entry,
+      label: entry?.label ?? null,
+      index: this.#spiralIndex(axial.q, axial.r),
+      hasImage: entry ? !this.#noImageLabels.has(entry.label) : false,
+      over: true,
+    }
+  }
+
   /** Where the tile named `label` sits ON SCREEN: its hex centre in client
    *  (viewport) coordinates plus its on-screen circumradius. The inverse of
    *  labelAtClient, for chrome that wants to stand BESIDE a tile rather than
@@ -4125,6 +4166,19 @@ export class TileOverlayDrone extends Drone {
     return this.#occupiedByAxial.get(TileOverlayDrone.axialKey(q, r))?.index
   }
 
+  /** Exact persistent slot for an axial coordinate, occupied or empty. The
+   *  renderer's model is index -> axial, so a cursor-chosen empty hex must be
+   *  reversed here while geometry is authoritative. Sending -1 made the later
+   *  save guess again and fall back to the lowest free slot when that guess
+   *  missed — the preview and the committed tile then disagreed. */
+  #spiralIndex(q: number, r: number): number {
+    const items = this.resolve<{ items?: Map<number, Axial> }>('axial')?.items
+    for (const [index, candidate] of items ?? []) {
+      if (candidate.q === q && candidate.r === r) return index
+    }
+    return -1
+  }
+
   /** Broadcast where a drag would land. `null` means NOWHERE — the pointer has
    *  left the hive for chrome — and is sent with the shape intact rather than as
    *  a null payload, because consumers destructure this on arrival. `over`
@@ -4133,21 +4187,55 @@ export class TileOverlayDrone extends Drone {
    *  true, so every consumer written before this field behaves as it always did. */
   #emitDropTarget(axial: Axial | null): void {
     if (!axial) {
+      this.#setDropRefusal(false)
       this.emitEffect('drop:target', {
         q: 0, r: 0, occupied: false, label: null, index: -1, hasImage: false, over: false,
       })
       return
     }
     const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
+    const index = entry?.index ?? this.#spiralIndex(axial.q, axial.r)
+    this.#setDropRefusal(!!entry)
     this.emitEffect('drop:target', {
       q: axial.q,
       r: axial.r,
       occupied: !!entry,
       label: entry?.label ?? null,
-      index: entry?.index ?? -1,
+      index,
       hasImage: entry ? !this.#noImageLabels.has(entry.label) : false,
       over: true,
     })
+  }
+
+  /** Portal rows can only land on an empty hex. Say that at the occupied tile
+   *  itself with the conventional red outline/X and cursor; empty hexes keep
+   *  the ordinary landing surface with no extra preview. */
+  #setDropRefusal(occupied: boolean): void {
+    const refused = this.#dropDragging && this.#dropEmptyOnly && occupied
+    if (this.#dropRefusal) this.#dropRefusal.visible = refused
+    if (this.#canvas) this.#canvas.style.cursor = refused ? 'not-allowed' : ''
+  }
+
+  #drawDropRefusal(): void {
+    const mark = this.#dropRefusal
+    if (!mark) return
+    mark.clear()
+    const radius = Math.max(8, this.#geo.circumRadiusPx - 1)
+    const start = this.#flat ? 0 : -Math.PI / 2
+    for (let i = 0; i < 6; i++) {
+      const angle = start + i * Math.PI / 3
+      const x = Math.cos(angle) * radius
+      const y = Math.sin(angle) * radius
+      if (i === 0) mark.moveTo(x, y)
+      else mark.lineTo(x, y)
+    }
+    mark.closePath()
+    mark.fill({ color: DROP_REFUSAL_COLOR, alpha: 0.12 })
+    mark.stroke({ width: 1.5, color: DROP_REFUSAL_COLOR, alpha: 0.96, join: 'round' })
+    const cross = radius * 0.3
+    mark.moveTo(-cross, -cross); mark.lineTo(cross, cross)
+    mark.moveTo(cross, -cross); mark.lineTo(-cross, cross)
+    mark.stroke({ width: 2, color: DROP_REFUSAL_COLOR, alpha: 0.98, cap: 'round' })
   }
 
   #clientToPixiGlobal(cx: number, cy: number) {

@@ -167,14 +167,19 @@ export const POWER_ORDER: PowerKind[] = ['oscillate', 'break', 'laser', 'expand'
 
 // ── World geometry (units; the overlay scales to fit) ──────────────
 // The playfield is 20% wider than the base and bricks are 80% size, kept
-// CONTIGUOUS (brick width = pitch): the smaller solid wall is centred (BRICK_X0)
-// in the wider field, leaving open margins down each side.
-export const COLS = 11
-export const BRICK_W = 33.6          // brick width = pitch (contiguous), 80% of the base 42
-export const BRICK_H = 16            // row pitch = brick height, 80% of the base 20
+// FLUSH TO THE WALLS: the 11-column grid spans the whole field, column 0
+// against the left wall and column 10 against the right. It used to be a
+// narrower wall CENTRED in the field, which left a dead channel ~92px wide
+// down each side — a third of the board that no level could ever reach.
+// Empty space at an edge is now something a LEVEL says (a blank column),
+// never something the geometry imposes. Row pitch is untouched, so all 100
+// hand-built layouts land exactly as they were drawn.
 export const W = 554.4               // playfield width — 20% wider than the base 462
 export const H = 600
-export const BRICK_X0 = (W - COLS * BRICK_W) / 2   // x of column 0 — centres the wall
+export const COLS = 11
+export const BRICK_W = W / COLS      // 50.4 — brick pitch, wall to wall
+export const BRICK_H = 16            // row pitch = brick height, 80% of the base 20
+export const BRICK_X0 = 0            // column 0 starts AT the left wall
 export const BRICK_TOP = 56           // first brick row's y (shared with the designer view)
 
 const PADDLE_W = 84

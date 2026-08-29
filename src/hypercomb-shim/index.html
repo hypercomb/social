@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Hypercomb (shim)</title>
+    <base href="/" />
+
+    <!-- Import map pre-apply. MUST run before any module script loads: a map
+         appended from inside main.ts is "late", and while Chrome/Edge 133+
+         merge late maps, Safari and older Chrome DROP them — every bare
+         specifier a bee imports then throws. The map is derived from OPFS
+         (async), so main.ts caches the resolved JSON under 'hc:importmap' and
+         this synchronous classic script replays it on the NEXT boot, before
+         the module graph starts. Retires in Phase 4 when deps import by
+         signature URL and there is no map at all. -->
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem('hc:importmap');
+          if (!raw) return;
+          var parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed.imports !== 'object' || !parsed.imports) return;
+          var s = document.createElement('script');
+          s.type = 'importmap';
+          s.textContent = raw;
+          document.head.appendChild(s);
+          window.__hcImportMapApplied = raw;
+        } catch (e) {}
+      })();
+    </script>
+
+    <!-- Theme pre-paint, so there is no flash before ThemeService takes over. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('hc:theme');
+          var el = document.documentElement;
+          if (t === 'system') el.removeAttribute('data-theme');
+          else el.setAttribute('data-theme', t || 'dark');
+        } catch (e) {}
+      })();
+    </script>
+
+    <!-- An older cached show-cell bee reads an unset readiness shade as ON and
+         can leave every tile dark. Stamp the safe default before any module
+         evaluates it; an explicit participant choice is preserved. -->
+    <script>
+      (function () {
+        try {
+          if (localStorage.getItem('hc:tile-shade') === null) {
+            localStorage.setItem('hc:tile-shade', '0');
+          }
+        } catch (e) {}
+      })();
+    </script>
+
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+    <link rel="icon" type="image/x-icon" href="favicon.ico" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block" rel="stylesheet" />
+
+    <style>
+      html, body {
+        margin: 0; padding: 0; height: 100%;
+        /* Lock page scrolling — the Pixi canvas owns wheel events for zoom
+           and any document scrollbar would steal them. */
+        overflow: hidden;
+        background-color: #05060a;
+        touch-action: manipulation;
+        font-family: Inter, system-ui, sans-serif;
+      }
+      #hc-splash{position:fixed;inset:0;z-index:2147483000;overflow:hidden;background:radial-gradient(120% 90% at 50% 42%,#0c1018 0%,#05060a 60%,#030409 100%)}
+      #hc-splash .m{position:absolute;left:0;right:0;top:calc(66% + 30px);text-align:center;color:#dfe8f0;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:clamp(15px,2.76vw,23px);letter-spacing:.62em;text-indent:.62em;font-weight:600;pointer-events:none;user-select:none}
+    </style>
+  </head>
+  <body>
+    <script src="env.js"></script>
+
+    <!-- The Pixi host must EXIST before PixiHostWorker pulses: its ready()
+         gate is `document.getElementById('pixi-host')` and it returns false
+         without it, so the renderer never starts. The worker then reparents
+         this node to <body> (fixed, z-index 59989, pointer-events:none) and
+         owns its geometry from that point on. -->
+    <div id="pixi-host" style="z-index:0;position:absolute;top:0;left:0;width:100%;height:100%"></div>
+
+    <!-- Every shell surface mounts here, element-shaped, in registry order.
+         src/surfaces.ts creates this if it is absent; it is declared here so
+         its position in the document is explicit rather than incidental. -->
+    <div id="hc-surfaces" style="display:contents"></div>
+
+    <div id="hc-splash" aria-hidden="true">
+      <div class="m">hypercomb</div>
+    </div>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

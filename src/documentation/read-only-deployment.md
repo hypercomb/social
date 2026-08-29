@@ -1,6 +1,226 @@
 # Read-only deployment — creations as published websites
 
-*(design — planned, not built; decided 2026-08-24)*
+## Core invariant
+
+Everything runs on Hypercomb Core. `hypercomb.io`, DCP, a publication directory
+such as `pluginthematrix.com`, and a participant site such as
+`revolucion.pluginthematrix.com` are host profiles of the same engine. A signed
+creation or beehavior that resolves in one Core resolves in every other Core.
+The published profile is only narrower in authority: it may resolve and render
+public signed content and answer same-origin `GET`/`HEAD` requests, but it may
+not author, persist, install, publish, upload, open arbitrary network channels,
+or invoke DCP.
+
+DCP is therefore not a separate application paradigm. It is Core with the
+authoring and publishing capabilities granted. A public website is Core with
+those capabilities withheld. The content format, signature semantics, Merkle
+traversal, resolver and renderer stay identical across both.
+
+This is the [Tree of Life Core doctrine](tree-of-life-core.md): stores hold
+DNA, relays carry signals, and Core metabolizes signatures into beehavior. A
+published domain is a participant because it runs a narrower Core, not merely
+because its server holds public objects.
+
+### Every application host is a Core host
+
+This is a protocol requirement, not a branding preference. Any domain that
+claims to be a Hypercomb application MUST boot Hypercomb Core. A domain that
+only serves `GET /<signature>` bytes is a content mirror, not an application
+host. Running Core puts every application in the same signed address space and
+lets it connect directly to `hypercomb.io` through the ordinary resolve,
+handoff and adoption protocol—without a domain-specific translation API.
+
+“Connected directly” does not mean implicitly trusted, continuously connected,
+or entitled to personal hive data. It means both ends speak the same Core
+protocol and can exchange signed references when the consumer deliberately
+asks them to. The consumer remains the authority at every crossing.
+
+There are distinct trust decisions:
+
+| Decision | What it grants | Default |
+|---|---|---|
+| View public signed content | Resolve and render immutable public bytes | Allowed in the read-only profile |
+| Run or adopt application code in `hypercomb.io` | Execute that publisher's beehaviors in the personal hive | Explicit adoption and code consent |
+| Use a provider domain for an account or storage | Let that normal web origin hold consumer data and mediate its services | Only after the consumer trusts that domain |
+| Copy personal hive data to a provider | Send specifically selected signed content out of the personal hive | Explicit, scoped consumer action |
+
+The current `pluginthematrix.com` website profile implements only the first
+row. It has no persistent origin store and no write channel. A future trusted
+provider profile may add origin-local accounts, storage or transactions, but
+that is ordinary website/platform trust: the consumer is choosing that domain
+as a provider. It never follows merely from the fact that both sides run Core.
+Browser-origin separation keeps that provider relationship tight and natural:
+the consumer's state at one provider does not silently become another
+provider's state or the contents of their personal `hypercomb.io` hive.
+
+## The hosting model (settled 2026-08-28)
+
+A publish **is** the website deployment. There is no separately maintained
+static-site copy of a creation and no per-site application build. DCP seals a
+creation into a Merkle root, pushes every missing signature object, proves the
+closure is publicly readable, and only then advances the publisher-signed hive
+index. The domain is a human entrance to that signed tree:
+
+```text
+custom domain
+  → Hypercomb Core (read-only host capabilities)
+  → domain binding (publisher public key + lineage key)
+  → verified signed hive index
+  → current Merkle root
+  → public GET /<signature> traversal
+  → the ordinary Hypercomb renderer
+```
+
+To the browser this is conventional HTTPS hosting. Cloudflare supplies DNS,
+TLS, caching and compression. Visitors use only public `GET`/`HEAD` requests;
+DCP's existing NIP-98/signed-index path protects `PUT`. A Cloudflare account
+token, shared publish password, VM, Keycloak instance and application database
+are not part of the publication path.
+
+### Domain behavior
+
+The bare `pluginthematrix.com` domain opens the signed `/pluginthematrix`
+creation. That creation is the public directory of approved participant sites.
+`revolucion.pluginthematrix.com` opens the signed `/revolucion` creation. Both
+are ordinary Core applications and support meaningful navigation paths
+(`/revisions`, `/journal`, `/lounge`, and so on). Those are coordinates in a
+creation, not storage filenames or Worker-rendered pages. Unknown application
+paths load the same Core and are interpreted after its signed root mounts.
+
+The small conventional host surface is:
+
+```text
+GET /                 visitor engine; opens the designated current root
+GET /site.json        domain coordinates and current verified root
+GET /publications.json configured hosts plus their verified signed heads
+GET /<64-hex sig>     immutable public object from the shared heap
+HEAD /<64-hex sig>    object presence/metadata probe
+```
+
+`/site.json` and `/publications.json` are machine coordinates, not an alternate
+server application. Human routes—including `/revisions`—always enter Core. The
+`/pluginthematrix` directory creation reads `/publications.json` and renders
+the approved published sites as square plates — the **publications view**
+(`/publications`, kind `visual:publications:view`; reader
+`sharing/publications-ledger.ts`, renderer
+`presentation/tiles/publications-view.drone.ts`), a normal signed beehavior.
+The creation carries the mark plus a `view:default`, so the bare domain's
+welcome IS the directory: publishing a lineage adds its plate, unpublishing
+removes it, and nothing on the page is hand-maintained. The registry lists
+only operator-approved publisher keys and only reports roots whose hive
+indexes verify. Arbitrary objects present in R2 never become listings.
+
+### Opaque storage, signed meaning
+
+Published objects are stored under bare 64-character SHA-256 addresses. Their
+storage references intentionally carry no filename, folder, owner or purpose.
+Meaning lives in signed parent records and pheromones; a parent says how a
+referenced signature participates in the creation. HTTP `Content-Type` is a
+delivery hint, not authority: bytes are hash-verified before use, the signed
+tree supplies interpretation, and untrusted directly-renderable objects stay
+sandboxed.
+
+Public means fetchable, not mutable or secret. Content addressing makes public
+objects safe to cache forever and impossible to replace beneath an existing
+URL. New bytes mint a new signature; rollback advances the signed pointer to an
+older root whose closure remains held.
+
+### Visitor storage contract: no OPFS
+
+The participant shell owns a persistent OPFS hive. A published website does
+not. Its complete source of truth already exists in the immutable public heap,
+so the visitor configuration MUST install a session-only in-memory filesystem
+before importing the normal runtime. The real
+`navigator.storage.getDirectory()` implementation is never called.
+
+The adapter exists to preserve the proven Core/renderer interfaces while
+module bytes and the selected closure are unfolded. It is scratch space only:
+refresh discards it. Network objects use the browser's ordinary HTTP cache;
+decoded records may be retained in memory for the session. The visitor Core
+profile must not request persistent storage, initialize a participant hive, run DCP,
+or expose authoring/publish/install surfaces. Preview-head commit refusal is the
+write gate over the rendered creation; a shell-level `__HC_READONLY__` flag is
+also installed so every remaining write door can fail closed explicitly.
+
+The visitor HTML is separate from the participant shell: no PWA/install
+metadata, third-party font requests, Hypercomb title or platform-branded loading
+screen is emitted. The creation supplies its own identity after the signed root
+mounts.
+
+The page installs a network capability gate before runtime import. It permits
+same-origin `GET`/`HEAD` only, maps signed module imports to immutable
+`/content/<signature>` URLs, and disables WebSocket, beacon, cross-origin and
+mutation requests. The edge response repeats the boundary with a Content
+Security Policy. Publisher writes occur only in DCP, never in the website lens.
+
+### Adding domains and publishers
+
+The engine is deployed once and reused. A domain binding contains configuration,
+not content:
+
+```json
+{
+  "host": "revolucion.pluginthematrix.com",
+  "publisher": "<64-hex public key>",
+  "lineage": "revolucion",
+  "title": "Revolución"
+}
+```
+
+Adding a publisher means approving a display label and public key for that
+curated domain. Adding a domain means pointing DNS at the Cloudflare entrance
+and registering its binding. Neither operation creates another server or
+another copy of the engine. Private keys remain in the publisher's DCP/browser
+profile and never land on Cloudflare.
+
+The content relay and application hosts may share one Worker and one public
+signature heap, but they do not share authority. Relay hostnames expose the
+signed write protocol used by DCP. Any hostname present in `SITE_BINDINGS` is
+failed closed above those routes: all non-`GET`/`HEAD` methods return `405`.
+For this installation, `content.pluginthematrix.com` is the relay and is
+deliberately absent from `SITE_BINDINGS`; `pluginthematrix.com` and
+`revolucion.pluginthematrix.com` are the GET-only Core hosts.
+
+### Go-live runbook
+
+The repository owns one repeatable harness. From
+`hypercomb-relay/blossom-worker`, `npm run deploy:pluginthematrix` first builds
+the visitor configuration and then deploys `wrangler.pluginthematrix.toml` plus
+its assets. This is a separate Worker configuration containing no `jwize.com`
+route. A new participant or domain does not need a new build.
+
+The deployable asset directory contains only the current signed renderer
+package and its sigbags, not the participant distribution's historical package
+catalog. The creation itself is never copied into that shell bundle: it remains
+in the shared public signature heap and is selected by the signed hive index.
+
+The one-time supervised sequence is:
+
+1. Deploy the Worker with `npm run deploy:pluginthematrix`; Cloudflare creates
+   the relay and application custom-domain routes and their certificates.
+2. In DCP, publish `/pluginthematrix` and `/revolucion` to
+   `content.pluginthematrix.com`. This pushes every missing signature object,
+   proves each closure with public reads, and writes the publisher-signed
+   `/hive/<public-key>` index.
+3. Copy that public key (never the private key) into both domain publisher
+   allowlists in `blossom-worker/wrangler.pluginthematrix.toml`, with its display label.
+   **Completed locally 2026-08-28:** the supervised `/behaviors` test publish
+   identified Jaime's key; only the public key is pinned in both bindings.
+4. Verify `/site.json`, `/publications.json`, `/revisions`, `/`, one deep link
+   such as `/journal`, and a direct `GET /<signature>`. The machine descriptors
+   must name the signed current roots; `/revisions` must be rendered by Core;
+   forged or unapproved indexes must remain invisible.
+
+The allowlists deliberately pin that publisher rather than choosing an
+arbitrary writer merely because the writer has objects in the shared heap. A
+site still fails closed until this key publishes the exact lineage bound to its
+hostname (`pluginthematrix` or `revolucion`).
+
+*(Phase 1 visitor/host implementation and the dedicated Plugin the Matrix
+configuration were completed locally 2026-08-28; the supervised Cloudflare
+deploy and first `/revolucion` publish landed the same day. The
+`/pluginthematrix` directory creation itself was published 2026-08-28: the
+bare domain now opens the publications view over the live registry.)*
 
 **This is the canonical way to publish a hive** — how a participant shares
 their digital content with consumers. Publish a creation as a **read-only
@@ -8,11 +228,12 @@ deployment**: a website on its own domain, running the real runtime and the
 creation's beehaviors, that a visitor uses with **zero install**. Nothing
 inside that installation is updatable — the installation IS the deployment.
 Updating it means republishing to the server; the next page load has the new
-head. Consumers can post information back to the publisher — but only what
-they choose to, only when they decide to (see Post-back below).
+head. A later, explicitly granted host profile may add voluntary post-back;
+the present public profile is deliberately `GET`/`HEAD` only.
 
-**This is not Hypercomb.** The visitor is looking at a published website —
-the creation is the entire identity of the site. No header bar, no controls
+**This is not the participant/authoring profile.** It is still Hypercomb Core,
+but the visitor is looking at a published website and the creation is the
+entire identity of the site. No header bar, no controls
 bar, no hive chrome, no branding, no management console, no editor, no
 install prompt, no DCP. The deployment carries *just enough of the
 application to bin-deploy and run the kiosked experience, whatever it is* —
@@ -24,8 +245,8 @@ above hypercomb-core arrives as beehaviors in the signed closure — views,
 games, the creation itself — and hosted websites snap into the same shim.
 
 That is the default, not a ceiling. **Nothing stops a creation from
-presenting a hexagon interface — or from connecting back to Hypercomb and
-leading the visitor into actually being in the hive again.** The spectrum
+presenting a hexagon interface — or from linking back to Hypercomb and
+letting the visitor deliberately enter the hive.** The spectrum
 runs from pure kiosk (no hive visible at all) through hex-rendered sites, up
 to a full gateway: the same engine is underneath either way, so a site that
 wants to be a door into the hive just declares it. What's stripped is the
@@ -107,12 +328,11 @@ website's URL** — the link IS the domain, and clicking it is the same
 deliberate trust act as all web navigation. Every entrance becomes the
 standing-there case. One web.
 
-Even the hand-off — "add to hypercomb" walking a visitor from a published
-site into hypercomb.io — passes nothing: **the referrer should be enough.**
-The origin you arrived from IS the oasis the staged hive resolves from; the
-browser already says where you stood. (A publisher who wants their site
-adoptable simply keeps a referrer policy that exposes the origin — opting
-in by policy, which is exactly where that choice belongs.)
+An eventual "add to Hypercomb" hand-off must be an explicit visitor action.
+The current website profile sends `Referrer-Policy: no-referrer`, so adoption
+must not depend on ambient referrer data. It can use a user-selected signed
+meta layer or a URL the visitor deliberately opens; the receiving Core still
+verifies the publisher, head and every fetched byte.
 
 The resolver CLI's `--from` stays honest under this rule: an operator
 typing a source at their own terminal is the standing act itself — the
@@ -214,7 +434,13 @@ the shell, a **baked site descriptor**, and a **boot path** that
 auto-installs silently from its own origin and enters the preview state
 permanently.
 
-## Architecture
+## Superseded static-folder sketch (historical)
+
+> The sketch below records the earlier xcopy/static-host exploration. It is
+> not the deployed Cloudflare architecture. The settled implementation above
+> uses one shared Worker asset bundle, derives heads from the verified signed
+> hive index on every boot, and gives visitor Core a session-memory filesystem
+> rather than OPFS. It remains useful for future self-hosted resolvers.
 
 ### The deployed folder
 
@@ -306,22 +532,14 @@ generic machinery runs them anywhere; marks, not code, say what each piece
 is. A capability like this deployment doesn't have to be built so much as
 assembled — the discipline already paid for it.
 
-### Post-back — the one voluntary door out
+### Future post-back — a separate, explicit capability
 
-Read-only means the visitor writes nothing to the site — it does not mean
-the site is mute. A consumer can **post information back to the publisher,
-but only what they decide to send, only when they decide to send it**: a
-message, an order, an answer, feedback. Nothing automatic, nothing ambient,
-no tracking, and never stored on the site's origin — the payload travels to
-the publisher's channel (the feedback transport routed through the
-publisher's host — see [feedback-channel.md](feedback-channel.md) — or a
-creation-declared endpoint) and the visitor's browser keeps nothing. The
-creation's beehaviors declare whether a post-back door exists at all; a site
-with none is a pure kiosk.
-
-That direction of consent is the point: the publisher shares freely, and
-consumes content back from consumers **when they're ready** — that is the
-natural data flow for responsible sharing.
+The current public profile has no post-back door: its browser gate and edge
+router permit only same-origin `GET`/`HEAD`. A future profile could grant one
+specific, user-triggered feedback capability for a message, order, answer or
+other deliberate payload. That would be a new capability grant, not something
+a creation acquires merely by declaring an endpoint. It must remain explicit,
+non-ambient and independently documented before it is enabled.
 
 ### Read-only guarantees (belt and suspenders)
 
@@ -350,7 +568,7 @@ instead of the full essentials package) is a later optimization — the first
 cut ships the full signed package and relies on the surface barrel + readonly
 gate. Signatures make the pruning safe to add later without format changes.
 
-## The plan
+## Superseded phase plan (historical)
 
 **Phase 1 — visitor boot mode** (in `hypercomb-web`)
 - `main.visitor.ts` + a `visitor` configuration in angular.json
@@ -412,19 +630,17 @@ gate. Signatures make the pruning safe to add later without format changes.
 owes its hive mirror (tiles for the parts, collection, pheromones, notes) in
 the same pass, or a mirror-queue entry naming what is owed.
 
-## Open decisions
+## Resolved and remaining questions
 
-1. **OPFS cache vs no-storage**: recommended (and assumed above) OPFS-as-cache
-   with silent refresh — it reuses the entire install path and gives visitors
-   warm reloads. The alternative (pure network import) forks ScriptPreloader.
+1. **Resolved — no OPFS**: visitor Core installs a session-memory filesystem
+   before runtime import. Ordinary HTTP caching retains immutable network bytes.
 2. **The hive door is per-creation, not policy** — presentation needs NO new
    vocabulary: the site plays back any number of the views configured in the
    publish (view marks ride the closure via the default-view cascade). The
    only declaration left to decide is the participation door — the mark that
    says "this site leads into the hive".
-3. **Head indirection** — `site.json` baked head (assumed) vs consulting the
-   signed hive index at boot. Baked keeps the deployment self-contained and
-   offline-proof; the index can be added later for multi-host serving.
+3. **Resolved — signed head indirection**: the Worker verifies the allowlisted
+   publisher's signed hive index and derives `site.json` at request time.
 4. **One signature for the whole site** — should the harness itself
    (index.html + runtime bundles) live inside the signed closure, so the
    install signature covers the ENTIRE site, engine included? That is the

@@ -1811,6 +1811,96 @@
       "note": "hive-visit.drone.ts: on a published visitor shell the preview now mounts at the publisher's FULL segments (games/arkanoid), not the flattened [name] — location-pinned marks (view:default) only match where the publisher minted them, so nested lineages arrived as bare hexagons with their face unmatched. main.visitor.ts hides the whole base in the URL. select-mode.drone.ts: the mobile select pill never mounts on a visitor shell (selection feeds authoring verbs). Owed: notes on the behaviors mirror tiles for sharing/hive-visit and selection. note-add is additive — drain by hand.",
       "created": "2026-08-29",
       "status": "pending"
+    },
+    {
+      "id": "publish-panel-density-and-strip",
+      "title": "The publish differential reads at a glance: closed row = one line, opens-as strip offers only roster-lit faces, hover message is instant",
+      "run": null,
+      "note": "Three notes owed on the publish behaviour's tile: (1) a CLOSED ROW IS ONE LINE — path + verdict inline, the reason sentence waits for the row to be opened; (2) THE STRIP OFFERS ONLY LIT FACES — the opens-as choices are filtered by the global roster (isKindGloballyOff), with the face a row is ALREADY pinned to always kept and marked .dormant so it can be seen and taken off; the strip restates itself on behavior:enablement-changed with no sweep; (3) THE HOVER MESSAGE ARRIVES AT ONCE — native title replaced by a data-tip ::after tooltip, zero delay, 90ms fade, off on (hover: none). Proof: node scripts/drive-publish-panel-density.cjs --url http://localhost:4250 (17/17).",
+      "unattended": false,
+      "created": "2026-08-29",
+      "status": "pending"
+    },
+    {
+      "id": "publications-ledger-dynamic",
+      "title": "publications directory tile: note the ledger now derives plates",
+      "run": null,
+      "note": "note-add on the publications-view behaviour tile: servePublications (blossom-worker) no longer enumerates only SITE_BINDINGS — it reads each approved publisher's verified hive index and mints a plate for every TOP-LEVEL root not already bound, at <root>.<zone>, validating each candidate back through resolveSite so the ledger can never advertise an address the router refuses. Publishing IS the naming step, so publishing a creation now earns its plate with no operator config. Nested lineages still need their own custom domain + binding. Deployed 2026-08-28; dylan + susan appeared on pluginthematrix.com immediately. Known gap: publishedAt is the index event's created_at, so every plate shares one timestamp and the view's newest-first sort cannot order them — per-root timestamps would be a protocol change.",
+      "unattended": false,
+      "created": "2026-08-29",
+      "status": "pending"
+    },
+    {
+      "id": "bright-themes-honey-bloom-sherbet",
+      "title": "The hive opens bright: three new looks, a theme that declares its own luminance, and one look dressing screen + tiles + chrome together",
+      "run": null,
+      "note": "Notes owed on the theme behaviour's tile: (1) THREE NEW LOOKS — honey (flagship, warm amber), bloom (mint/coral/violet), sherbet (magenta/cyan/lime); honey is the boot default in both shells + ThemeService. (2) WHAT MAKES THEM BRIGHT is not the surface hex: coloured elevation (shadows tinted with the theme's deep tone, never black), an accent CHORD instead of one hue plus greys, and a slightly springy easing with shorter durations — no new effect anywhere. (3) A THEME DECLARES ITS OWN LUMINANCE via --md-is-light; canvas-background #isLight() reads the token instead of matching the theme NAME, so any look — including a runtime-registered one — answers for itself on a dark-OS machine. (4) A LOOK DRESSES THE WHOLE APP: BackgroundTheme gains chrome?, so /background honey|bloom|sherbet sets backdrop + tiles + --md-* together; a theme naming no chrome leaves the panels alone. (5) CHROME IS A ROLE — --hc-chrome-* triples answered per theme; dark answers with the exact former literals so cold chrome is unchanged. (6) THE PANEL FAMILY IS SEPARATE AND STAYS DARK — --hc-panel-* on :root only, because ~30 tool windows carry pastel identity accents drawn for a dark ground; bright hive + dark inspectors is the deliberate look. Proof: node scripts/drive-bright-themes.cjs --url http://localhost:4250 (23/23).",
+      "unattended": false,
+      "created": "2026-08-29",
+      "status": "pending"
+    },
+    {
+      "id": "chrome-ink-ladder-status-roles",
+      "title": "Mirror the chrome legibility roles: the ink ladder (ghost/faint/quiet/plain/loud) and the chrome status roles (ok/warn/alert/info/branch/secret/solo/swarm), as tiles under the styles/theming collection with pheromones marking each as a token role, plus a note on why the same alpha is not the same weight on a bright ground",
+      "run": null,
+      "note": "Added in hypercomb-shared/styles/_material-tokens.scss; consumers converted: controls-bar (crumbs, pheromone strip, rail icons, fit menu), _header-bar.scss, command-shell rail, edit-actions, example-hives-offer. Needs a live renderer on the bridge.",
+      "unattended": false,
+      "created": "2026-08-29",
+      "status": "pending"
+    },
+    {
+      "id": "intel-two-column-standard",
+      "title": "The command list style: /help's reference layout, in the autocomplete too",
+      "run": null,
+      "note": "STANDARD: name column | description column, aligned across every row via CSS subgrid; UI mono (--hc-mono); descriptions WRAP (clamped 3 lines) never flush-right; other spellings ride as outlined chips on the canonical row. Applied to command-shell intellisense + shortcut-sheet (/help). Alias folding is display-only and conditional: a row folds only when its canonical also matched the typed prefix, so completion still completes what was typed. Owes: a note on the command-line + reference tiles recording the standard, and a pheromone marking both surfaces as sharing it.",
+      "unattended": false,
+      "created": "2026-08-29",
+      "status": "pending"
+    },
+    {
+      "id": "slide-artifact-paradigm",
+      "title": "Mirror the slide artifact + website artifact paradigm",
+      "run": null,
+      "note": "Retired visual:diagram:deck. New model, needs tiles under behaviors/views/slides (or a new 'artifacts' collection): (1) part tile for presentation/tiles/slide-artifact.ts — the ONE member component, the group-mark relation, the Life Primitive content hop, the hive-root walk; (2) part tile for the website artifact (visual:site:artifact) — a PEER that names the relation, never a container; (3) part tile for the order-on-the-mark rule — position is an attribute of the INCIDENCE, so one tile can be in N presentations; (4) update the existing slides behaviour card: the deck cell is gone, click any slide to open the presentation AT it, /present site <name> and /present <name>; (5) a note on visual-bee-registry for the new alsoKinds field (peer artifacts entering one view, never a container kind). Files: presentation/tiles/slide-artifact.ts(+spec), presentation/tiles/slides-view.drone.ts, commands/present.queen.ts, commands/visual-bee-registry.ts, commands/view.bee.ts, documentation/website-artifact-paradigm.md. Manual: minting tiles is not re-runnable.",
+      "unattended": false,
+      "created": "2026-08-29",
+      "status": "pending"
+    },
+    {
+      "id": "surface-text-size",
+      "title": "Text size on the completion panel + tile editor",
+      "run": null,
+      "note": "Two surfaces that are not docked panels now carry the tool windows' TEXT_SIZES ladder, --hc-panel-scale contract and hc:panel-text:<window> record: window ids 'command-intel' and 'tile-editor'. New shared control hypercomb-shared/ui/text-scale. Ctrl+= / Ctrl+- steps it while the completion panel is open. Owes: tiles for the text-scale control + its two mounts, gathered in a collection, marked as parts of the command-surface typography standard, with a note recording WHY auto is not offered here (a dropdown and a fixed dialog have no width to derive from).",
+      "unattended": false,
+      "created": "2026-08-29",
+      "status": "pending"
+    },
+    {
+      "id": "visitor-picture-arrival",
+      "title": "Note the visitor picture-arrival fix on the tiles that carry it",
+      "run": null,
+      "note": "Published tiles painted substrate art instead of their own picture: Store negative-cached every sig fetched before the ContentBrokerDrone registered (no transport treated as a host miss), and show-cell CACHED the substrate fallback taken during that cold window, so no later pass re-read the props. Fix: store.ts bails before the miss window when no broker is registered; show-cell's loadDefaultImage takes cold=true and remembers nothing while props are still arriving. Mirror: note-add on the show-cell / content-broker / store tiles + the read-only-visitor collection.",
+      "unattended": false,
+      "created": "2026-08-29",
+      "status": "pending"
+    },
+    {
+      "id": "tile-property-clear-tombstone",
+      "title": "Tile property CLEAR is expressible: undefined = removal, propertyPins = the tombstone against inheritance",
+      "run": null,
+      "note": "Mirror the fix on the tile-editor/tile-properties tiles: (1) clearing a property sends the key as undefined, never a delete — a merge reads an absent key as 'leave alone'; (2) at an outer appearance a cleared INHERITED key is tombstoned by adding it to propertyPins, retired when the appearance supplies its own value again. Applies to link, border colour, background colour, hideText.",
+      "unattended": false,
+      "created": "2026-08-29",
+      "status": "pending"
+    },
+    {
+      "id": "enrollment-primitive",
+      "title": "Mirror the enrolment primitive and the lightbox pass",
+      "run": null,
+      "note": "Follows slide-artifact-paradigm. Needs tiles under behaviors (a new 'artifacts' or 'enrolment' collection): (1) part tile for pheromones/enrollment.ts — the ONE relation, type-agnostic readCell, the hive-root walk, order on the incidence; (2) part tile for pheromones/enrollment-acts.ts — the four acts, each touching ONE tile; (3) part tile for commands/enroll.queen.ts — /enroll, /enroll as, bare /enroll = what am I part of; (4) part tile for presentation/tiles/artifact-content.ts — the shared Life Primitive content hop, relation names the ROLE; (5) update the lightbox behaviour card: the children source is retired, a gallery is pictures ENROLLED in a website artifact, slides and lightbox are two views of one set. Files: pheromones/{enrollment,enrollment-acts,enrollment.spec}.ts, commands/{enroll.queen,lightbox.queen}.ts, presentation/tiles/{artifact-content,artifact-content.spec,slide-artifact,slides-view.drone}.ts. Manual: minting tiles is not re-runnable.",
+      "unattended": false,
+      "created": "2026-08-29",
+      "status": "pending"
     }
   ]
 }

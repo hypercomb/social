@@ -8,6 +8,7 @@
      lesson registry, so a build ships exactly the courses it has. -->
 @if (tourMenuOpen()) {
   <div class="tour-menu"
+       [class.over-view]="overView()"
        [style.left.px]="tourMenuPos().x"
        [style.top.px]="tourMenuPos().y"
        role="menu"
@@ -41,12 +42,10 @@
   </div>
 }
 
-<!-- RECENT PORTALS — Ctrl/⌘+click on Home. Home is the last portal you walked,
-     so this is the list of the ones before it: an older focus is one click away
-     rather than a walk back down the tree. Picking one makes it home again.
-     The hive root is the last row — adopting a portal as home must never make
-     the root unreachable from the button that used to mean it. Fixed position
-     for the same reason as the tour menu: the rail scrolls and clips. -->
+<!-- Legacy recent-portals picker. Home ownership no longer lives in the
+     Portals window: Ctrl/⌘+clicking the global Home control toggles the current
+     lineage directly. Kept render-compatible while older callers may still
+     open the recent list. -->
 @if (homeMenuOpen()) {
   <div class="tour-menu home-menu"
        [style.left.px]="homeMenuPos().x"
@@ -88,6 +87,7 @@
      reason as the tour menu: the rail scrolls and clips. -->
 @if (fitMenuOpen()) {
   <div class="fit-menu"
+       [class.over-view]="overView()"
        [style.left.px]="fitMenuPos().x"
        [style.top.px]="fitMenuPos().y"
        role="menu"
@@ -134,6 +134,18 @@
 }
 
 <!-- breadcrumb: below header, right-aligned -->
+<button class="agent-visibility-toggle"
+        [class.rail-left]="dockSide() === 'left'"
+        [class.agents-hidden]="!agentsVisible()"
+        type="button"
+        (click)="toggleAgents()"
+        [attr.aria-pressed]="!agentsVisible()"
+        [attr.aria-label]="(agentsVisible() ? 'controls.hide-agents' : 'controls.show-agents') | t"
+        [title]="(agentsVisible() ? 'controls.hide-agents' : 'controls.show-agents') | t">
+  <span class="mat-sym" aria-hidden="true">{{ agentsVisible() ? 'visibility' : 'visibility_off' }}</span>
+  <span>{{ (agentsVisible() ? 'controls.hide-agents' : 'controls.show-agents') | t }}</span>
+</button>
+
 <div class="breadcrumb-top" [class.faded]="isMobile()">
   @if (meshPublic()) {
     <span class="public-crumb" [style.color]="shieldColor()">{{ 'breadcrumb.public' | t }}</span><span class="sep-crumb">◆</span>
@@ -243,6 +255,7 @@
 <div
   class="pill-stage"
   [class.faded]="!visible()"
+  [class.over-view]="overView()"
   [class.positioned]="!!pillPos() && !isMobile() && !dockSide()"
   [class.dock-left]="dockSide() === 'left' && !isMobile()"
   [class.dock-right]="dockSide() === 'right' && !isMobile()"
@@ -441,10 +454,13 @@
                [class.drag-scrolling]="dragScrolling()"
                (pointerdown)="onListDragStart($event)">
             @if (dockSide() === 'left') {
-              <!-- BEE leads the rail — the way in for someone who has just
-                   arrived: it starts the guided beeing tour (the same tour
-                   /tutorial runs). It sits above pin because "how does this
-                   work?" comes before any control. -->
+              <!-- CHAT IS NOT HERE ANY MORE. This rail is how-you-SEE — fit,
+                   zoom, pin, fullscreen, orientation — and talking is not one
+                   of those. It sits on the command line instead, beside the
+                   box you type the question into (command-shell's
+                   chat-toggle-btn), and `c` opens it from anywhere. -->
+              <!-- The tour remains in the scrollable list, but finishes it:
+                   help stays available without displacing daily tools. -->
               <button class="ctl-btn rail-tutorial"
                       [class.active]="tourMenuOpen()"
                       (click)="startTutorial($event)"
@@ -479,9 +495,9 @@
                       [attr.aria-label]="homePortal()
                         ? ('controls.home.portal' | t: { portal: homeLabel() })
                         : ('controls.home' | t)"
-                      [title]="(homePortal()
+                      [title]="homePortal()
                         ? ('controls.home.portal' | t: { portal: homeLabel() })
-                        : ('controls.home' | t)) + ' — ' + ('controls.home.pick' | t)">
+                        : ('controls.home' | t)">
                 <span class="mat-sym">{{ homePortal() ? 'home_pin' : 'home' }}</span>
               </button>
             }

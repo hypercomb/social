@@ -19,8 +19,13 @@
 // Pulling the bytes and committing a pick is the picker's job, on an
 // explicit gesture. Reading this file can never move a byte of anyone's hive.
 
+import { SignatureService } from '@hypercomb/core'
+
 const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
+const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
+const STORE_KEY = '@hypercomb.social/Store'
 const SIG_RE = /^[0-9a-f]{64}$/
+const MAX_POOL_MEMBERS = 256
 
 /** The image-bearing fields of a peer visual — the ONLY keys copied when a
  *  candidate is applied. Everything else a peer publishes (index, tags,
@@ -53,6 +58,83 @@ type SwarmLike = {
 
 const swarm = (): SwarmLike | undefined =>
   (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(SWARM_KEY) as SwarmLike | undefined
+
+type StoreLike = { getResource?: (sig: string) => Promise<Blob | null> }
+type BrokerLike = { knownContentHosts?: () => readonly string[] }
+
+const ioc = (key: string): unknown =>
+  (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key)
+
+const hostUrl = (host: string): string =>
+  `${/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(host) ? 'http' : 'https'}://${host}`
+
+const poolMembers = (value: unknown): string[] => {
+  const raw = Array.isArray(value)
+    ? value
+    : Array.isArray((value as { members?: unknown })?.members)
+      ? (value as { members: unknown[] }).members
+      : []
+  return raw.map(String).map(value => value.trim().toLowerCase())
+    .filter(value => SIG_RE.test(value)).slice(0, MAX_POOL_MEMBERS)
+}
+
+/** Ask every known server for sign(name), then resolve its canonical variant
+ * records through the normal verified content broker. The pool index is the
+ * discovery document; every member/layer/property/image byte remains
+ * signature-addressed and SHA-gated by Store.getResource. */
+const meaningPoolImageCandidates = async (name: string): Promise<readonly PeerImageCandidate[]> => {
+  const broker = ioc(BROKER_KEY) as BrokerLike | undefined
+  const store = ioc(STORE_KEY) as StoreLike | undefined
+  if (!store?.getResource) return []
+  const hosts = broker?.knownContentHosts?.() ?? []
+  if (!hosts.length) return []
+
+  const address = await SignatureService.sign(
+    new TextEncoder().encode(name).buffer as ArrayBuffer,
+  )
+  const membersByHost = new Map<string, string[]>()
+  await Promise.all(hosts.map(async host => {
+    try {
+      const response = await fetch(`${hostUrl(host)}/${address}`, {
+        cache: 'no-cache',
+        signal: AbortSignal.timeout(2_500),
+      })
+      if (!response.ok) return
+      const members = poolMembers(await response.json())
+      if (members.length) membersByHost.set(host, members)
+    } catch { /* this server has no pool for the name */ }
+  }))
+
+  const candidates: PeerImageCandidate[] = []
+  for (const [host, members] of membersByHost) {
+    for (const recordSig of members) {
+      try {
+        const recordBlob = await store.getResource(recordSig)
+        if (!recordBlob) continue
+        const record = JSON.parse(await recordBlob.text()) as Record<string, unknown>
+        const layerSig = sig((record['payload'] as Record<string, unknown> | undefined)?.['layerSig'])
+        if (!layerSig) continue
+        const layerBlob = await store.getResource(layerSig)
+        if (!layerBlob) continue
+        const layer = JSON.parse(await layerBlob.text()) as Record<string, unknown>
+        const propsSig = Array.isArray(layer['properties']) ? sig(layer['properties'][0]) : undefined
+        if (!propsSig) continue
+        const propsBlob = await store.getResource(propsSig)
+        if (!propsBlob) continue
+        const props = imagePropsOf(JSON.parse(await propsBlob.text()) as Record<string, unknown>)
+        if (!props) continue
+        const previewSig = previewSigOf(props)
+        if (!previewSig) continue
+        candidates.push({
+          previewSig,
+          props,
+          peers: [{ pubkey: host, label: host }],
+        })
+      } catch { /* malformed or incomplete variant — skip only this member */ }
+    }
+  }
+  return mergeCandidates(candidates)
+}
 
 const sig = (value: unknown): string | undefined =>
   typeof value === 'string' && SIG_RE.test(value) ? value : undefined
@@ -160,9 +242,12 @@ export const canonicalPeerImageCandidates = async (
 ): Promise<readonly PeerImageCandidate[]> => {
   const name = String(label ?? '').trim()
   if (!name) return []
+  const pooled = meaningPoolImageCandidates(name)
   const drone = swarm()
-  if (!drone) return []
-  if (!drone.composeSigForSegments || !drone.peerTilesAtSig) return peerImageCandidates(name)
+  if (!drone) return await pooled
+  if (!drone.composeSigForSegments || !drone.peerTilesAtSig) {
+    return mergeCandidates(await pooled, peerImageCandidates(name))
+  }
 
   try {
     const rootSig = await drone.composeSigForSegments([])
@@ -172,10 +257,15 @@ export const canonicalPeerImageCandidates = async (
     const live = drone.peerTilesAtCurrentSig
       ? candidatesFrom(name, drone.peerTilesAtCurrentSig(), drone.labelFor)
       : []
-    return mergeCandidates(canonical, live)
-  } catch { return peerImageCandidates(name) }
+    return mergeCandidates(await pooled, canonical, live)
+  } catch { return mergeCandidates(await pooled, peerImageCandidates(name)) }
 }
 
 /** Sync predicate for the overlay's `visibleWhen`: is there another version
  *  of this tile's picture in the room? */
-export const hasPeerImages = (label: string): boolean => peerImageCandidates(label).length > 0
+export const hasPeerImages = (label: string, tileAlreadyHasImage = false): boolean => {
+  const offered = peerImageCandidates(label).length
+  // The affordance represents a choice, never merely the existence of one
+  // picture. A dressed local tile plus one offered picture is already two.
+  return offered > 1 || (tileAlreadyHasImage && offered > 0)
+}

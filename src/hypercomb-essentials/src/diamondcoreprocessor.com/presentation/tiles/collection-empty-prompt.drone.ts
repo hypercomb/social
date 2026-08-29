@@ -268,26 +268,26 @@ class CollectionEmptyPromptDrone {
     const notice = document.createElement('div')
     notice.style.cssText =
       'pointer-events:auto;display:flex;align-items:center;gap:14px;max-width:calc(100vw - 32px);' +
-      'padding:10px 11px 10px 16px;border-radius:var(--hc-radius-floating, 4px);background:rgba(12,17,24,0.9);' +
-      'border:1px solid rgba(216,230,238,0.13);box-shadow:0 12px 32px rgba(0,0,0,0.24);' +
+      'padding:10px 11px 10px 16px;border-radius:var(--hc-radius-floating, 4px);background:rgba(var(--hc-chrome-glass),0.94);' +
+      'border:1px solid rgba(var(--hc-chrome-ink),0.13);box-shadow:0 12px 32px rgba(var(--hc-chrome-shadow),0.24);' +
       'backdrop-filter:blur(14px);white-space:nowrap;'
 
     const copy = document.createElement('div')
     copy.style.cssText = 'display:flex;align-items:baseline;gap:8px;min-width:0;'
 
     const title = document.createElement('strong')
-    title.style.cssText = 'font-size:13px;font-weight:650;color:#d8e6ee;'
+    title.style.cssText = 'font-size:13px;font-weight:650;color:var(--hc-chrome-text);'
     title.textContent = this.#t('hive.empty.title', 'Your hive is empty')
 
     const hint = document.createElement('span')
-    hint.style.cssText = 'font-size:12px;color:rgba(216,230,238,0.5);'
+    hint.style.cssText = 'font-size:12px;color:rgba(var(--hc-chrome-ink),0.5);'
     hint.textContent = this.#t('hive.empty.notice', 'Add the first thing you want to keep.')
 
     const button = document.createElement('button')
     button.type = 'button'
     button.style.cssText =
-      'flex:none;border:1px solid rgba(126,182,214,0.35);border-radius:var(--hc-radius-control, 2px);padding:7px 11px;' +
-      'font:inherit;font-size:12px;font-weight:650;color:#a8d0e7;background:rgba(126,182,214,0.09);cursor:pointer;'
+      'flex:none;border:1px solid rgba(var(--hc-chrome-accent),0.35);border-radius:var(--hc-radius-control, 2px);padding:7px 11px;' +
+      'font:inherit;font-size:12px;font-weight:650;color:rgb(var(--hc-chrome-accent));background:rgba(var(--hc-chrome-accent),0.09);cursor:pointer;'
     button.textContent = this.#t('hive.empty.action', 'Add a tile')
     const requestFocus = (event: Event): void => this.#focusCommandLine(event)
     button.addEventListener('pointerdown', requestFocus, true)
@@ -343,25 +343,25 @@ class CollectionEmptyPromptDrone {
     panel.dataset['role'] = 'panel'
     panel.style.cssText =
       'pointer-events:auto;width:min(300px,calc(100vw - 40px));text-align:left;border-radius:var(--hc-radius-floating, 4px);padding:18px;' +
-      'background:rgba(12,17,24,0.88);border:1px solid rgba(216,230,238,0.12);' +
-      'box-shadow:0 14px 36px rgba(0,0,0,0.22);backdrop-filter:blur(12px);cursor:pointer;'
+      'background:rgba(var(--hc-chrome-glass),0.92);border:1px solid rgba(var(--hc-chrome-ink),0.12);' +
+      'box-shadow:0 14px 36px rgba(var(--hc-chrome-shadow),0.22);backdrop-filter:blur(12px);cursor:pointer;'
 
     const title = document.createElement('div')
     title.dataset['role'] = 'title'
-    title.style.cssText = 'font-size:17px;font-weight:650;color:#d8e6ee;margin-bottom:6px;letter-spacing:-0.01em;'
+    title.style.cssText = 'font-size:17px;font-weight:650;color:var(--hc-chrome-text);margin-bottom:6px;letter-spacing:-0.01em;'
     title.textContent = titleText
 
     const body = document.createElement('div')
     body.dataset['role'] = 'body'
-    body.style.cssText = 'font-size:13px;line-height:1.5;color:rgba(216,230,238,0.58);margin-bottom:14px;'
+    body.style.cssText = 'font-size:13px;line-height:1.5;color:rgba(var(--hc-chrome-ink),0.58);margin-bottom:14px;'
     body.textContent = bodyText
 
     const button = document.createElement('button')
     button.type = 'button'
     button.dataset['role'] = 'action'
     button.style.cssText =
-      'border:1px solid rgba(126,182,214,0.38);border-radius:var(--hc-radius-control, 2px);padding:8px 12px;font:inherit;font-size:13px;font-weight:650;' +
-      'color:#a8d0e7;background:rgba(126,182,214,0.08);cursor:pointer;'
+      'border:1px solid rgba(var(--hc-chrome-accent),0.38);border-radius:var(--hc-radius-control, 2px);padding:8px 12px;font:inherit;font-size:13px;font-weight:650;' +
+      'color:rgb(var(--hc-chrome-accent));background:rgba(var(--hc-chrome-accent),0.08);cursor:pointer;'
     button.textContent = actionText
     const requestFocus = (event: Event): void => this.#focusCommandLine(event)
     button.addEventListener('pointerdown', requestFocus, true)

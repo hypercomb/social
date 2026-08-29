@@ -36,7 +36,7 @@ let here: readonly string[] = []
 /** `decorations` slot per location key — what the hydration walk finds. */
 const layers = new Map<string, string[]>()
 
-/** `properties[0].small.image` per location key — the picture a cell wears. A
+/** Image carried by the props RESOURCE referenced at `properties[0]`. A
  *  reference cell has none of its own, so this is what its TARGET supplies. */
 const layerImages = new Map<string, string>()
 
@@ -60,7 +60,7 @@ const iocTable: Record<string, unknown> = {
       if (!decorations && !image) return null
       return {
         ...(decorations ? { decorations } : {}),
-        ...(image ? { properties: [{ small: { image } }] } : {}),
+        ...(image ? { properties: [putResource({ small: { image } })] } : {}),
       }
     },
   },

@@ -35,6 +35,8 @@ export class App implements AfterViewInit {
   protected readonly inputOpen = signal(false)
   public showHeader = true
   public readonly viewActive = signal(false)
+  /** A canvas-taking view can deliberately preserve the controls rail when it
+   *  has reserved that rail's edge, as the chat window does. */
   readonly moveMode = signal(false)
   // Empty-layer swarm watermark — set when show-cell reports the current
   // public/swarm location has zero tiles. Drives a faint full-bleed

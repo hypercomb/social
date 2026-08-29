@@ -1,0 +1,67 @@
+[
+  {
+    "name": "honey/features: the pane follows the theme",
+    "ok": true,
+    "detail": "pane=rgba(255, 252, 244, 0.976)"
+  },
+  {
+    "name": "honey/features: the identity reads on it",
+    "ok": false,
+    "detail": "--acc=200,\n    184,\n    255 vs pane 1.7:1"
+  },
+  {
+    "name": "honey/features: nothing is a whisper",
+    "ok": false,
+    "detail": "worst text 1.0:1 (rgba(250, 249, 255, 0.96)) over rgba(255, 252, 244, 0.976)"
+  },
+  {
+    "name": "honey/publish: the pane follows the theme",
+    "ok": true,
+    "detail": "pane=rgba(255, 252, 244, 0.976)"
+  },
+  {
+    "name": "honey/publish: the identity reads on it",
+    "ok": false,
+    "detail": "--acc=126,\n    182,\n    214 vs pane 2.1:1"
+  },
+  {
+    "name": "honey/publish: nothing is a whisper",
+    "ok": false,
+    "detail": "worst text 1.1:1 (rgba(238, 243, 246, 0.85)) over rgba(255, 252, 244, 0.976)"
+  },
+  {
+    "name": "dark/features: the pane follows the theme",
+    "ok": true,
+    "detail": "pane=rgba(13, 15, 21, 0.976)"
+  },
+  {
+    "name": "dark/features: the identity reads on it",
+    "ok": true,
+    "detail": "--acc=200,\n    184,\n    255 vs pane 10.7:1"
+  },
+  {
+    "name": "dark/features: nothing is a whisper",
+    "ok": true,
+    "detail": "worst text 4.8:1 (rgb(110, 130, 144)) over rgba(13, 15, 21, 0.976)"
+  },
+  {
+    "name": "dark/publish: the pane follows the theme",
+    "ok": true,
+    "detail": "pane=rgba(13, 15, 21, 0.976)"
+  },
+  {
+    "name": "dark/publish: the identity reads on it",
+    "ok": true,
+    "detail": "--acc=126,\n    182,\n    214 vs pane 8.7:1"
+  },
+  {
+    "name": "dark/publish: nothing is a whisper",
+    "ok": true,
+    "detail": "worst text 4.8:1 (rgb(110, 130, 144)) over rgba(13, 15, 21, 0.976)"
+  },
+  {
+    "name": "deepening kept the identities apart",
+    "ok": true,
+    "detail": "2 panels, all distinct"
+  }
+]

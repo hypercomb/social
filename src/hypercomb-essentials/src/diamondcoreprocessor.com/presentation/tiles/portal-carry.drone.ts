@@ -220,6 +220,15 @@ export class PortalCarryDrone extends Drone {
       this.emitEffect('portal-carry:drop', {
         label: p.label, segments: [...p.segments], targetKey,
       })
+    } else if (under?.closest('hc-aggregate-index')) {
+      // The panel surface is a valid first half of the gesture. Stage the
+      // carried tile in the references window; its + buttons now name the
+      // target pool explicitly. This avoids requiring pixel-perfect row drops
+      // and, more importantly, lets the participant inspect the pool before
+      // committing the reference.
+      this.emitEffect('portal-carry:drop', {
+        label: p.label, segments: [...p.segments],
+      })
     }
     this.emitEffect('portal-carry:drag-end', {})
   }

@@ -85,7 +85,7 @@ const renderBootFailure = (error: unknown): void => {
       'color:#dce7ef',
       'background:rgba(8,13,19,.94)',
       'border:1px solid rgba(126,182,214,.38)',
-      'border-radius:6px',
+      'border-radius:4px',
       'font:14px/1.55 system-ui,sans-serif',
     ].join(';')
 

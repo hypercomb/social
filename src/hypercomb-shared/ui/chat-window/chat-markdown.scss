@@ -45,7 +45,7 @@ $accent: #7eb6d6;
     margin: 1.1em 0 0.45em;
     font-weight: 600;
     line-height: 1.3;
-    color: rgba($accent, 0.95);
+    color: rgba(var(--acc), 0.95);
   }
 
   h1 { font-size: 1.15em; }
@@ -65,7 +65,7 @@ $accent: #7eb6d6;
   blockquote {
     margin: 0 0 0.7em;
     padding: 0.1em 0 0.1em 0.8em;
-    border-left: 2px solid rgba($accent, 0.4);
+    border-left: 2px solid rgba(var(--acc), 0.4);
     color: rgba(238, 244, 250, 0.72);
     font-style: italic;
   }
@@ -73,10 +73,10 @@ $accent: #7eb6d6;
   hr {
     margin: 1em 0;
     border: none;
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    border-top: 1px solid rgba(var(--hc-panel-ink), 0.12);
   }
 
-  strong { font-weight: 650; color: #fff; }
+  strong { font-weight: 650; color: var(--hc-panel-text); }
   del { opacity: 0.6; }
 
   // An inline code span, not a block: no scroller, just a tint.
@@ -85,8 +85,8 @@ $accent: #7eb6d6;
     font-family: var(--hc-code);
     font-variant-ligatures: var(--hc-code-ligatures);
     font-size: 0.9em;
-    background: rgba(6, 10, 16, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(var(--hc-panel-pane), 0.6);
+    border: 1px solid rgba(var(--hc-panel-ink), 0.08);
     border-radius: var(--md-shape-xs, 4px);
   }
 }
@@ -94,12 +94,12 @@ $accent: #7eb6d6;
 // A link out of the hive. Underlined rather than coloured-only, so it survives
 // being read by someone who cannot tell the steel from the body text.
 :host ::ng-deep .chat-link-out {
-  color: rgba($accent, 0.95);
+  color: rgba(var(--acc), 0.95);
   text-decoration: underline;
   text-underline-offset: 2px;
   overflow-wrap: anywhere;
 
-  &:hover { color: #fff; }
+  &:hover { color: var(--hc-panel-text); }
 }
 
 // A PLACE IN THE HIVE. A button, never an anchor — an href here would navigate
@@ -121,7 +121,7 @@ $accent: #7eb6d6;
   vertical-align: baseline;
 
   &:hover {
-    color: #fff;
+    color: var(--hc-panel-text);
     background: rgba(224, 180, 92, 0.24);
   }
 
@@ -132,9 +132,9 @@ $accent: #7eb6d6;
 
 :host ::ng-deep .chat-code {
   margin: 0 0 0.7em;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.1);
   border-radius: var(--md-shape-xs, 4px);
-  background: rgba(6, 10, 16, 0.78);
+  background: rgba(var(--hc-panel-pane), 0.78);
   overflow: hidden;
 
   pre {
@@ -144,7 +144,7 @@ $accent: #7eb6d6;
     padding: 0.6em 0.7em;
     overflow-x: auto;
     scrollbar-width: thin;
-    scrollbar-color: rgba($accent, 0.3) transparent;
+    scrollbar-color: rgba(var(--acc), 0.3) transparent;
   }
 
   code {
@@ -165,8 +165,8 @@ $accent: #7eb6d6;
     align-items: center;
     gap: 0.5em;
     padding: 0.2em 0.4em 0.2em 0.6em;
-    background: rgba(255, 255, 255, 0.035);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(var(--hc-panel-ink), 0.035);
+    border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.07);
   }
 
   .chat-code-lang {
@@ -175,7 +175,7 @@ $accent: #7eb6d6;
     font-size: 0.7em;
     letter-spacing: 0.06em;
     text-transform: lowercase;
-    color: rgba(255, 255, 255, 0.42);
+    color: rgba(var(--hc-panel-ink), 0.42);
   }
 
   .chat-code-copy {
@@ -184,25 +184,25 @@ $accent: #7eb6d6;
     font: inherit;
     font-size: 0.68em;
     letter-spacing: 0.04em;
-    color: rgba($accent, 0.85);
+    color: rgba(var(--acc), 0.85);
     background: none;
-    border: 1px solid rgba($accent, 0.28);
+    border: 1px solid rgba(var(--acc), 0.28);
     border-radius: var(--md-shape-xs, 4px);
     cursor: pointer;
 
-    &:hover { background: rgba($accent, 0.15); color: #fff; }
+    &:hover { background: rgba(var(--acc), 0.15); color: var(--hc-panel-text); }
   }
 
   // highlight.js tokens, in the panel's own palette rather than an imported
   // theme — the answer should look like it belongs to this window.
-  .hljs-comment, .hljs-quote { color: rgba(255, 255, 255, 0.35); font-style: italic; }
+  .hljs-comment, .hljs-quote { color: rgba(var(--hc-panel-ink), 0.35); font-style: italic; }
   .hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-doctag { color: #c99bf0; }
   .hljs-string, .hljs-regexp, .hljs-addition { color: #9fd6a0; }
   .hljs-number, .hljs-symbol, .hljs-bullet { color: #e0b45c; }
   .hljs-title, .hljs-name, .hljs-section, .hljs-selector-id { color: #7eb6d6; }
   .hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable { color: #86cdd6; }
   .hljs-type, .hljs-built_in { color: #d6b98a; }
-  .hljs-meta { color: rgba(255, 255, 255, 0.45); }
+  .hljs-meta { color: rgba(var(--hc-panel-ink), 0.45); }
   .hljs-deletion { color: #e08a8a; }
   .hljs-emphasis { font-style: italic; }
   .hljs-strong { font-weight: 600; }
@@ -216,7 +216,7 @@ $accent: #7eb6d6;
   // normal case, not the pathological one.
   overflow-x: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgba($accent, 0.3) transparent;
+  scrollbar-color: rgba(var(--acc), 0.3) transparent;
 
   table {
     border-collapse: collapse;
@@ -230,13 +230,13 @@ $accent: #7eb6d6;
     padding: 0.32em 0.6em;
     text-align: left;
     white-space: nowrap;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(var(--hc-panel-ink), 0.1);
   }
 
   th {
     font-weight: 600;
-    color: rgba($accent, 0.92);
-    background: rgba(255, 255, 255, 0.04);
+    color: rgba(var(--acc), 0.92);
+    background: rgba(var(--hc-panel-ink), 0.04);
   }
 }
 
@@ -256,8 +256,8 @@ $accent: #7eb6d6;
   gap: 0.1em;
   padding: 0.1em;
   border-radius: var(--md-shape-xs, 4px);
-  background: rgba(10, 16, 24, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(var(--hc-panel-pane), 0.92);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.1);
   opacity: 0;
   transition: opacity 120ms ease;
 
@@ -265,12 +265,12 @@ $accent: #7eb6d6;
     padding: 0.15em 0.25em;
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(var(--hc-panel-ink), 0.5);
     cursor: pointer;
     border-radius: var(--md-shape-xs, 4px);
 
     .mat-sym { font-size: 0.95em; display: block; }
-    &:hover { color: rgba($accent, 0.98); background: rgba($accent, 0.14); }
+    &:hover { color: rgba(var(--acc), 0.98); background: rgba(var(--acc), 0.14); }
     &:disabled { opacity: 0.35; cursor: default; background: none; }
   }
 }
@@ -290,7 +290,7 @@ $accent: #7eb6d6;
   display: flex;
   align-items: baseline;
   gap: 0.6em;
-  color: rgba(216, 230, 238, 0.6);
+  color: rgba(var(--hc-panel-ink), 0.6);
 }
 
 .chat-wait-clock {
@@ -298,7 +298,7 @@ $accent: #7eb6d6;
   font-family: var(--hc-code);
   font-variant-ligatures: var(--hc-code-ligatures);
   font-size: 0.85em;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(var(--hc-panel-ink), 0.4);
   font-variant-numeric: tabular-nums;
 }
 
@@ -339,12 +339,12 @@ $accent: #7eb6d6;
   font: inherit;
   font-size: 0.7em;
   color: #0c1118;
-  background: rgba($accent, 0.94);
+  background: rgba(var(--acc), 0.94);
   border: none;
   border-radius: tw.$radius-pill;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 4px 14px rgba(var(--hc-panel-shadow), 0.45);
   cursor: pointer;
 
   .mat-sym { font-size: 1.15em; }
-  &:hover { background: $accent; }
+  &:hover { background: rgb(var(--acc)); }
 }

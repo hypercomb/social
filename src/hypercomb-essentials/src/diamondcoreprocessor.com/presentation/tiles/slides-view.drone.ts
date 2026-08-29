@@ -1,11 +1,33 @@
 // diamondcoreprocessor.com/presentation/tiles/slides-view.drone.ts
 //
 // Full-viewport SLIDES takeover — the presentation sibling of SiteViewDrone /
-// TutorViewDrone. When ViewMode is 'slides', the current cell
-// (the DECK) renders as a PowerPoint-style, screen-by-screen deck of its
-// children instead of the hex grid. One slide fills the viewport; arrow keys /
+// TutorViewDrone. When ViewMode is 'slides', a PowerPoint-style, screen-by-
+// screen deck replaces the hex grid. One slide fills the viewport; arrow keys /
 // on-screen chevrons step through; a counter and dot strip track position;
 // Escape / right-click / the exit button return to hexagons.
+//
+// ── WHAT A DECK IS (and no longer is) ────────────────────────────────
+//
+// There is no deck CELL any more. The retired model put `visual:diagram:deck`
+// on a PARENT and played its children, so nothing could be presented without
+// first minting a container to hold it. What plays now is a RELATION:
+//
+//   • a SLIDE is any tile carrying `visual:diagram:slide` — atomic, parentless;
+//   • a WEBSITE ARTIFACT (`visual:site:artifact`) is the tile that IS the
+//     presentation, a PEER of its slides rather than their box;
+//   • every member, artifact included, wears the same `group` PHEROMONE, and
+//     that mark is the whole relation.
+//
+// So the deck is "who else wears this mark", collected by a hive-root walk
+// (#collectPresentation → slide-artifact.ts) — a member filed anywhere is still
+// a member. Arriving through a slide opens the presentation AT that slide;
+// arriving through the artifact plays it from the start. A slide's bytes hang
+// off the Life Primitive: `payload.content` is a meta envelope, never a raw
+// resource sig. See documentation/website-artifact-paradigm.md.
+//
+// A cell wearing the retired deck kind — or any cell you simply press play on —
+// still plays its CHILDREN (#collectSlides). Read-only compatibility; nothing
+// writes a deck any more.
 //
 // ── A UNIVERSAL viewer AND player ────────────────────────────────────
 //
@@ -18,11 +40,10 @@
 // So a deck can mix a diagram, a screen recording, a track, and a YouTube
 // video, and you step through them all in one presentation.
 //
-// Slides are the deck cell's CHILDREN, so adding a child "just plugs in" on the
-// next collect (cell:added / decorations:changed). Each child resolves via, in
-// order: a `visual:diagram:slide` decoration (payload { contentSig, format,
-// title?, caption?, order? }) → a `visual:lightbox:gallery` decoration
-// (payload.images[]) → the child's own LINK.
+// A member resolves via, in order: its `visual:diagram:slide` decoration
+// (payload { content, title?, caption?, order? }) → its own LINK. In the
+// retired container collect a child also resolves via a
+// `visual:lightbox:gallery` decoration (payload.images[]).
 //
 // The link is a TILE PROPERTY (`properties[0].link` — where the attach flow
 // writes it), NOT a top-level layer field, and it is read from the child's OWN
@@ -80,13 +101,29 @@
 import { Drone, RESOURCE_URL_PREFIX, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { childSigsOf } from '../../history/layer-placement.js'
 import { isFeatureHidden } from '../../sharing/feature-hidden.js'
-import { DECK_KIND, SLIDE_KIND } from '../../commands/present.queen.js'
+import {
+  enrolledCells,
+  forgetEnrollments,
+  ordered,
+  payloadOf,
+  payloadsOf,
+  readCell,
+  type CellEnrollment,
+} from '../../pheromones/enrollment.js'
+import {
+  SLIDE_KIND,
+  legacySlideOrder,
+  slideContentRef,
+  terminalContentSig,
+  type SlidePayload,
+} from './slide-artifact.js'
 import { GALLERY_KIND, LIGHTBOX_VIEW } from '../../commands/lightbox.queen.js'
 import { isImageUrl, sniffImageMime } from '../../link/photo.js'
 import { embedUrlFor, mediaKindForUrl, kindForMime, type PlayableKind } from '../../link/media.js'
 import { TAG_DECORATION_KIND } from '../../commands/decoration-kind-index.js'
-import { readTilePropsIndex, lookupTilePropsSig, cellLocationSig } from '../../editor/tile-properties.js'
+import { readTilePropsIndex, lookupTilePropsSig, cellLocationSig, readTilePropertiesAt } from '../../editor/tile-properties.js'
 import { bindAxes, walkFrom, landOnWalkTarget } from './viewer-walk.js'
+import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { mountViewerScroller, type ScrollerHandle, type ScrollerSection } from './viewer-scroller.js'
 import { MOBILE_MODE_IOC_KEY, MOBILE_MODE_EFFECT } from '../../preferences/mobile-pheromones.js'
 
@@ -102,9 +139,20 @@ type Surface = typeof SLIDES_VIEW | typeof LIGHTBOX_VIEW
 /** The decoration kind that GATES each surface — what the Beehaviors panel's
  *  off-switch hides, and what the tile must carry for the view to mount. */
 const GATE_KIND: Readonly<Record<Surface, string>> = {
-  [SLIDES_VIEW]: DECK_KIND,
+  [SLIDES_VIEW]: SLIDE_KIND,
   [LIGHTBOX_VIEW]: GALLERY_KIND,
 }
+
+/** How deep a site enrolled inside another site expands. Two is enough for a
+ *  site of sites; beyond that a set is describing structure the tree already
+ *  holds, and the guard keeps a mutual enrolment from spinning. */
+const NEST_DEPTH = 2
+
+/** A set orders by the position on the MARK; this supplies the retired
+ *  per-member order so decks authored under the container model keep their
+ *  sequence. */
+const ORDER_FALLBACK = (cell: CellEnrollment): number | undefined =>
+  legacySlideOrder(payloadOf(cell, SLIDE_KIND) as SlidePayload | null)
 
 /** Steel accent shared with the site-view exit chrome — cold/clean, no glow. */
 const STEEL = 'rgba(126,182,214,0.92)'
@@ -125,6 +173,7 @@ type StoreShape = {
    *  host fallback) is kept only for the actual slide MEDIA, resolved async
    *  per-slide in #show so a slow fetch never stalls the collect. */
   getResourceLocal(sig: string): Promise<Blob | null>
+  getResourceResolvedLocal?(sig: string): Promise<Blob | null>
 }
 
 /** How a slide renders. `auto` = content-addressed bytes whose real kind is
@@ -235,11 +284,15 @@ export class SlidesViewDrone extends Drone {
       this.#keyBound = true
     }
     if (!this.#effectsBound) {
-      // Keep the deck fresh when children / decorations change under it — a new
-      // diagram tile plugs in on the next collect.
-      this.onEffect('decorations:changed', () => { void this.#reconcile() })
-      this.onEffect('cell:added', () => { void this.#reconcile() })
-      this.onEffect('cell:removed', () => { void this.#reconcile() })
+      // Keep the presentation fresh when marks / cells change anywhere — a
+      // newly related slide plugs in on the next collect. Membership is a
+      // pheromone worn ANYWHERE in the hive, so there is no local head to key
+      // the walk memo on: drop it wholesale on the same structural signals the
+      // viewer already reconciles for. That is the honest invalidation.
+      const restructured = (): void => { forgetEnrollments(); void this.#reconcile() }
+      this.onEffect('decorations:changed', restructured)
+      this.onEffect('cell:added', restructured)
+      this.onEffect('cell:removed', restructured)
       // Hide / restore in the Beehaviors panel turns this behaviour off / back on.
       this.onEffect('feature:hidden', () => { void this.#reconcile() })
       this.onEffect('feature:restored', () => { void this.#reconcile() })
@@ -382,9 +435,8 @@ export class SlidesViewDrone extends Drone {
       // Honor the Beehaviors panel's off switch: a hidden deck stays inert (torn
       // down) until restored — the same hidden-pool gate SiteViewDrone uses.
       if (await isFeatureHidden(segments, GATE_KIND[surface])) { this.#teardown(); return }
-      const slides = surface === LIGHTBOX_VIEW
-        ? await this.#collectPictures(segments, history, store)
-        : await this.#collectSlides(segments, history, store)
+      const collected = await this.#collectPresentation(segments, history, store, surface)
+      const slides = collected.slides
       if (this.#surface() !== surface) { this.#targetSegments = null; this.#teardown(); return } // flipped mid-read
 
       // Surface-scoped identity: flipping between the deck and the lightbox of
@@ -399,7 +451,7 @@ export class SlidesViewDrone extends Drone {
         this.#show(this.#index)
         return
       }
-      this.#mountDeck(deckKey, slides, surface)
+      this.#mountDeck(deckKey, slides, surface, collected.index)
     } finally {
       this.#reconciling = false
       if (this.#queued) { this.#queued = false; void this.#reconcile() }
@@ -426,8 +478,10 @@ export class SlidesViewDrone extends Drone {
     void this.#reconcile()
   }
 
-  /** LIGHTBOX source — every picture this tile holds, in the order a
-   *  participant would expect to meet them:
+  /** RETIRED LIGHTBOX source — every picture this tile holds, plus its
+   *  CHILDREN's. Read-only compatibility: the container is what made a tile the
+   *  thing that held a gallery, and enrolment replaced it. Reached only when the
+   *  tile is enrolled in nothing. In the order a participant would expect:
    *
    *    1. its own gallery images (`/lightbox add` → payload.images[])
    *    2. its own picture — the tile's link, then its display image, so a tile
@@ -490,7 +544,7 @@ export class SlidesViewDrone extends Drone {
     const out: string[] = []
     for (const sig of sigs) {
       try {
-        const blob = await store.getResourceLocal(sig)
+        const blob = await resolveLocalResourceReference(store, sig)
         if (!blob) continue
         const rec = JSON.parse(await blob.text()) as { kind?: string; payload?: Record<string, unknown> }
         if (rec?.kind !== GALLERY_KIND) continue
@@ -514,10 +568,16 @@ export class SlidesViewDrone extends Drone {
     parentSegments: readonly string[],
     store: StoreShape,
   ): Promise<string> {
+    try {
+      const effective = await readTilePropertiesAt(parentSegments, name)
+      const image = (effective['large'] as { image?: unknown } | undefined)?.image
+      if (typeof image === 'string' && SIG.test(image)) return image
+    } catch { /* continue through mixed-version fallbacks */ }
+
     const fromPropsSig = async (sig: string): Promise<string> => {
       if (!SIG.test(sig)) return ''
       try {
-        const blob = await store.getResourceLocal(sig)
+        const blob = await resolveLocalResourceReference(store, sig)
         if (!blob) return ''
         const props = JSON.parse(await blob.text()) as { large?: { image?: unknown } }
         const image = props?.large?.image
@@ -535,6 +595,161 @@ export class SlidesViewDrone extends Drone {
       if (indexed) return await fromPropsSig(indexed)
     } catch { /* index unavailable */ }
     return ''
+  }
+
+  /** Is this member excluded by the standing mark filter? A set narrows with
+   *  the filter you are standing in, exactly like the hex grid. */
+  #filteredOut(marks: readonly string[]): boolean {
+    return this.#filterTags.size > 0 && !marks.some(m => this.#filterTags.has(m))
+  }
+
+  /**
+   * THE PRESENTATION — what plays when you arrive at `segments`, and WHERE it
+   * opens.
+   *
+   * The relation is a MARK, not containment: every member of a set — the
+   * website artifact included — wears the same one, so what plays is "who else
+   * wears this", never "who is filed under this". The walk starts at the hive
+   * ROOT (pheromones/enrollment.ts): a member filed somewhere else is still a
+   * member, which is the whole point of retiring the parent.
+   *
+   * The entry point IS the position. Arriving through a member opens the set at
+   * that member; arriving through the website artifact (which wears the mark but
+   * carries no member content of its own) leaves the index at 0.
+   */
+  async #collectPresentation(
+    segments: readonly string[],
+    history: HistoryShape,
+    store: StoreShape,
+    surface: Surface = SLIDES_VIEW,
+  ): Promise<{ slides: Slide[]; index: number }> {
+    try {
+      const here = await history.currentLayerAt(await history.sign({ explorerSegments: () => segments }))
+      const cell = await readCell(store, here, segments)
+
+      if (cell.enrollments.length > 0) {
+        const groupSigs = cell.enrollments.map(e => e.sig)
+        const members = ordered(
+          await enrolledCells(history, store, groupSigs),
+          groupSigs,
+          ORDER_FALLBACK,
+        )
+        const slides: Slide[] = []
+        const key = segments.join('/')
+        let index = 0
+        for (const member of members) {
+          const mine = member.segments.join('/') === key
+          const produced = await this.#playableFrom(member, history, store, new Set(groupSigs), 0)
+          // The clicked member opens the set — recorded BEFORE its own slides
+          // are pushed, so a member that expands into several opens at its first.
+          if (mine && produced.length > 0) index = slides.length
+          slides.push(...produced)
+        }
+        if (slides.length > 0) return { slides, index }
+      }
+
+      // A LONE ARTIFACT — attached but enrolled in nothing yet. It still plays,
+      // so "attach a file, press play" never lands on an empty stage. The
+      // LIGHTBOX skips this: a tile's own pictures are collected below, where
+      // every source it holds is unioned rather than first-match.
+      if (surface !== LIGHTBOX_VIEW) {
+        const own = await this.#playableFrom(cell, history, store, new Set(), 0)
+        if (own.length > 0) return { slides: own, index: 0 }
+      }
+    } catch { /* cold read — fall through to the retired container collect */ }
+
+    // THE RETIRED CONTAINER MODEL. A cell wearing the retired deck kind (or a
+    // lightbox on a container) still reads its CHILDREN, so hives built before
+    // this remodel keep working. Read-only: nothing writes a container again,
+    // and enrolling is how a set is built now.
+    const legacy = surface === LIGHTBOX_VIEW
+      ? await this.#collectPictures(segments, history, store)
+      : await this.#collectSlides(segments, history, store)
+    return { slides: legacy, index: 0 }
+  }
+
+  /**
+   * ONE MEMBER, whatever it happens to be. Type-agnostic on purpose: a set has
+   * no member type, so this asks the cell what it IS and takes the first answer.
+   *
+   *   1. a SLIDE   — its Life-Primitive content hop (envelope, then bytes)
+   *   2. a GALLERY — every picture it holds, in order
+   *   3. a SITE    — its own members, expanded in place (a site inside a site)
+   *   4. anything that POINTS somewhere — its link, played by kind
+   *   5. a PHOTO   — its display picture
+   *
+   * So a website, a slide and a photo enrolled together all play, and none of
+   * them had to know about the others.
+   */
+  async #playableFrom(
+    member: CellEnrollment,
+    history: HistoryShape,
+    store: StoreShape,
+    playing: Set<string>,
+    depth: number,
+  ): Promise<Slide[]> {
+    if (this.#filteredOut(member.marks)) return []
+
+    const slidePayload = payloadOf(member, SLIDE_KIND) as SlidePayload | null
+    const title = (typeof slidePayload?.title === 'string' && slidePayload.title.trim())
+      ? slidePayload.title
+      : member.name
+    const caption = typeof slidePayload?.caption === 'string' ? slidePayload.caption : undefined
+
+    // 1 — a slide.
+    const ref = slideContentRef(slidePayload)
+    if (ref) return [{ kind: 'auto', src: ref, title, caption }]
+
+    // 2 — a gallery. A photo set enrolled in a presentation IS a run of slides.
+    const images: string[] = []
+    for (const gallery of payloadsOf(member, GALLERY_KIND)) {
+      const list = gallery['images']
+      if (!Array.isArray(list)) continue
+      for (const entry of list) {
+        const value = String(entry)
+        if (SIG.test(value) && !images.includes(value)) images.push(value)
+      }
+    }
+    if (images.length > 0) {
+      return images.map((imgSig, i) => ({
+        kind: 'auto' as const,
+        src: imgSig,
+        title: images.length > 1 ? `${title} ${i + 1}` : title,
+        caption,
+      }))
+    }
+
+    // 3 — A SITE INSIDE A SITE. A website artifact enrolled in another site
+    // expands to its own members, in its own order. Depth-guarded and
+    // cycle-guarded on the group signatures already playing, so two sites
+    // enrolled in each other resolve instead of spinning.
+    if (member.names && depth < NEST_DEPTH && !playing.has(member.names.groupSig)) {
+      const nestedSigs = [member.names.groupSig]
+      playing.add(member.names.groupSig)
+      const nested = ordered(
+        await enrolledCells(history, store, nestedSigs),
+        nestedSigs,
+        ORDER_FALLBACK,
+      )
+      const out: Slide[] = []
+      for (const inner of nested) {
+        if (inner.segments.join('/') === member.segments.join('/')) continue // itself
+        out.push(...await this.#playableFrom(inner, history, store, playing, depth + 1))
+      }
+      if (out.length > 0) return out
+    }
+
+    // 4 — whatever it points at. The universal-player rule survives the remodel.
+    const parent = member.segments.slice(0, -1)
+    const link = await this.#childLink(member.layer, member.name, parent, store)
+    const fromLink = this.#slideFromLink(link, title, 0)
+    if (fromLink) return [{ kind: fromLink.kind, src: fromLink.src, title, caption }]
+
+    // 5 — a plain photo tile. Enrolling a picture is enough to show it.
+    const picture = await this.#tilePictureSig(member.layer, member.name, parent, store)
+    if (picture) return [{ kind: 'auto', src: picture, title, caption }]
+
+    return []
   }
 
   /** Walk the deck cell's children and resolve each to zero-or-more slides.
@@ -604,7 +819,7 @@ export class SlidesViewDrone extends Drone {
     let gallery: string[] | null = null
     const marks: string[] = []
     for (const sig of decorationSigs) {
-      const blob = await store.getResourceLocal(sig)
+      const blob = await resolveLocalResourceReference(store, sig)
       if (!blob) continue
       try {
         const rec = JSON.parse(await blob.text()) as { kind?: string; payload?: Record<string, unknown> }
@@ -705,10 +920,16 @@ export class SlidesViewDrone extends Drone {
     deckSegments: readonly string[],
     store: StoreShape,
   ): Promise<string> {
+    try {
+      const effective = await readTilePropertiesAt(deckSegments, name)
+      const inherited = effective['link']
+      if (typeof inherited === 'string' && inherited.trim()) return inherited.trim()
+    } catch { /* continue through mixed-version fallbacks */ }
+
     const linkFromPropsSig = async (sig: string): Promise<string> => {
       if (!SIG.test(sig)) return ''
       try {
-        const blob = await store.getResourceLocal(sig)
+        const blob = await resolveLocalResourceReference(store, sig)
         if (!blob) return ''
         const props = JSON.parse(await blob.text()) as Record<string, unknown>
         const link = props['link']
@@ -764,12 +985,19 @@ export class SlidesViewDrone extends Drone {
   /** Resolve a content sig to a same-origin object URL plus the blob's own MIME
    *  — the only kind signal a bare signature carries. Cached; revoked on
    *  teardown. */
-  async #resolveSig(sig: string): Promise<{ url: string; mime: string }> {
-    const cached = this.#resolved.get(sig)
+  async #resolveSig(ref: string): Promise<{ url: string; mime: string }> {
+    const cached = this.#resolved.get(ref)
     if (cached) return cached
     const store = this.resolve<StoreShape>('store')
     if (!store?.getResource) return { url: '', mime: '' }
     try {
+      // THE LIFE PRIMITIVE HOP. A slide's `content` is a META ENVELOPE, not the
+      // bytes — following it here is what lets every other reader hold the one
+      // typed incidence. The envelope is small JSON and lands locally with the
+      // decoration; only the terminal bytes go through `getResource`, which is
+      // the read that may have to reach the host. A retired raw `contentSig`
+      // resolves to itself, so both shapes take the same path.
+      const sig = (await terminalContentSig(store, ref)) ?? ref
       const blob = await store.getResource(sig)
       if (!blob) return { url: '', mime: '' }
       // Content-addressed resources are stored WITHOUT a MIME (a signature has
@@ -788,15 +1016,17 @@ export class SlidesViewDrone extends Drone {
         mime = sniffImageMime(bytes) || ''
         if (mime) typed = new Blob([bytes], { type: mime })
       }
+      // Keyed by the REF the caller holds (the envelope), not by the terminal
+      // sig — otherwise every lookup pays the hop again and the cache never hits.
       const entry = { url: URL.createObjectURL(typed), mime }
-      this.#resolved.set(sig, entry)
+      this.#resolved.set(ref, entry)
       return entry
     } catch { return { url: '', mime: '' } }
   }
 
   // ── DOM ────────────────────────────────────────────────────
 
-  #mountDeck(deckKey: string, slides: Slide[], surface: Surface = SLIDES_VIEW): void {
+  #mountDeck(deckKey: string, slides: Slide[], surface: Surface = SLIDES_VIEW, startIndex = 0): void {
     this.#teardown()
     const scrolling = this.#scrollerMode()
     const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
@@ -894,14 +1124,18 @@ export class SlidesViewDrone extends Drone {
     const empty = document.createElement('div')
     empty.style.cssText = `color:${DIM};font-size:15px;line-height:1.6;text-align:center;max-width:34rem;padding:2rem;`
     empty.textContent = surface === LIGHTBOX_VIEW
-      ? (i18n?.t('lightbox.empty') ?? 'No pictures here yet. Drop images on this tile or inside it, or run /lightbox add.')
-      : (i18n?.t('slides.empty') ?? 'No diagram tiles here yet. Add a child tile, then run /present slide on it to connect an SVG or image.')
+      ? (i18n?.t('lightbox.empty') ?? 'No pictures here yet. Run /lightbox add to hold images on this tile, or /enroll <website> to show the pictures related to it.')
+      : (i18n?.t('slides.empty') ?? 'Nothing is related to this presentation yet. Run /present slide on a tile to make it a slide, then /present <website> to relate it in.')
     host.appendChild(empty)
 
     this.#mount = { host, deckKey, slides, stage, scroller, titleEl, captionEl, counterEl, dots, empty, emptyDefault: empty.textContent ?? '' }
-    this.#index = 0
+    // OPEN AT THE SLIDE YOU CLICKED. With no container deciding where a
+    // presentation starts, the entry point IS the position: arriving through a
+    // slide opens the whole presentation at that slide, arriving through the
+    // website artifact opens it at the beginning (index 0).
+    this.#index = Math.max(0, Math.min(startIndex, Math.max(0, slides.length - 1)))
     this.#setViewActive(true)
-    this.#show(0)
+    this.#show(this.#index)
   }
 
   /** The scroller replaces the paged stage while the mobile experience is
@@ -1013,7 +1247,7 @@ export class SlidesViewDrone extends Drone {
       // A filter that hides EVERY slide has to say so — otherwise the deck reads
       // as empty and you go hunting for content that is merely filtered out.
       m.empty.textContent = this.#filterTags.size > 0
-        ? `Nothing in this deck carries ${this.#markLabel()}. Clear the filter to play the whole deck.`
+        ? `Nothing in this presentation carries ${this.#markLabel()}. Clear the filter to play all of it.`
         : m.emptyDefault
       this.#clearStage(m)
       return

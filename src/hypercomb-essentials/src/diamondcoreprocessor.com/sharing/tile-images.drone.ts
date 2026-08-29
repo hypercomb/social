@@ -22,6 +22,14 @@ const IMAGES_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" 
 
 const OWNER = '@diamondcoreprocessor.com/TileImagesDrone'
 
+const hasThemeChoices = (): boolean => {
+  try {
+    return (window.ioc.get<{ themes?: readonly unknown[] }>(
+      '@diamondcoreprocessor.com/BackgroundThemes',
+    )?.themes?.length ?? 0) > 0
+  } catch { return false }
+}
+
 const descriptor = (profile: 'private' | 'public-own'): OverlayActionDescriptor => ({
   name: 'images',
   owner: OWNER,
@@ -30,7 +38,10 @@ const descriptor = (profile: 'private' | 'public-own'): OverlayActionDescriptor 
   y: -7,
   hoverTint: 0xa8d8ff,
   profile,
-  visibleWhen: (ctx: OverlayTileContext) => hasPeerImages(ctx.label),
+  // The shipped theme library guarantees choices even when this tile has only
+  // one assigned image. Remote/live alternatives are the other entrance gate.
+  visibleWhen: (ctx: OverlayTileContext) =>
+    hasThemeChoices() || hasPeerImages(ctx.label, !ctx.noImage),
   labelKey: 'action.images',
   descriptionKey: 'action.images.description',
 })

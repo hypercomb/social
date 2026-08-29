@@ -209,6 +209,14 @@ export async function decorationClosureSigs(
   // 8-URL 404 cascade per group, repeating each MISS-TTL expiry.
   if (record['kind'] === 'group') return []
 
+  // Creation decorations likewise: payload.id is a pure identity — sha256 of
+  // the act's descriptor (creation.ts) — never a stored resource. Records
+  // minted before the write-side guard declared it in refs[], and history
+  // keeps those records reachable forever (builds → old generations), so
+  // without this every closure walk demands bytes that never existed and the
+  // availability gate blocks publishing the whole branch on a permanent 404.
+  if (record['kind'] === 'creation') return []
+
   const out = new Set<string>()
 
   // Forward path: a flat refs closure was recorded at write time.

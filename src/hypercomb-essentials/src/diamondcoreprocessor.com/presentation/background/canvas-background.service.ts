@@ -23,7 +23,7 @@ import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'
 const STORAGE_KEY = 'hc:canvas-bg'
 
 export const CANVAS_BG_ARCHETYPES = ['depth', 'honeycomb', 'sheen', 'mesh', 'dots', 'contour', 'grid'] as const
-export const CANVAS_BG_PALETTES = ['steel', 'daylight', 'indigo', 'teal', 'ember'] as const
+export const CANVAS_BG_PALETTES = ['steel', 'daylight', 'indigo', 'teal', 'ember', 'honey', 'bloom', 'sherbet'] as const
 
 type Archetype = typeof CANVAS_BG_ARCHETYPES[number]
 type Palette = typeof CANVAS_BG_PALETTES[number]
@@ -48,6 +48,13 @@ const PAL: Record<Palette, Pal> = {
   indigo:   { light: false, base: '#0d1226', base2: '#161d3a', deep: '4,6,15',      accent: '123,139,224', accent2: '36,48,121' },
   teal:     { light: false, base: '#07201c', base2: '#0c2e28', deep: '2,15,12',     accent: '69,199,165',  accent2: '13,77,64' },
   ember:    { light: false, base: '#1a1410', base2: '#2a1d12', deep: '11,7,4',      accent: '211,164,122', accent2: '90,58,24' },
+  // The three bright looks. `daylight` was the only light palette here, and it
+  // is a beige office — these are the backdrops that go with the honey / bloom
+  // / sherbet chrome, each carrying that theme's own primary as its accent so
+  // the screen behind the hive and the panels over it are the same colour.
+  honey:    { light: true,  base: '#fdf3dd', base2: '#fffaf0', deep: '196,160,86',  accent: '181,115,10',  accent2: '240,196,102' },
+  bloom:    { light: true,  base: '#eefaf4', base2: '#fbfffd', deep: '150,190,175', accent: '13,122,95',   accent2: '224,86,63' },
+  sherbet:  { light: true,  base: '#faf0fc', base2: '#fffdff', deep: '196,168,208', accent: '194,17,143',  accent2: '10,165,201' },
 }
 
 const glowC = (p: Pal, a: number) => (p.light ? `rgba(255,255,255,${a})` : `rgba(${p.accent},${a})`)
@@ -201,7 +208,12 @@ export class CanvasBackgroundService extends EventTarget {
   get palettes(): readonly string[] { return CANVAS_BG_PALETTES }
 
   /** Resolve which palette is actually showing (pinned, else theme-derived). */
-  resolvedPalette(): Palette { return this.#palette ?? (this.#isLight() ? 'daylight' : 'steel') }
+  /** The palette actually showing: the pinned one, else the one that goes with
+   *  the chrome's brightness. The bright side answers `honey` because that is
+   *  what the shell now opens as — an unpinned backdrop should be lit by the
+   *  same colour as the panels over it, not by the beige `daylight` that used
+   *  to be the only light option. */
+  resolvedPalette(): Palette { return this.#palette ?? (this.#isLight() ? 'honey' : 'steel') }
 
   /**
    * Apply one or more space-separated tokens: an archetype (depth, honeycomb,
@@ -246,7 +258,7 @@ export class CanvasBackgroundService extends EventTarget {
       if (tok === 'off') return ''
       const a = archetypeOf(tok)
       if (a) { arch = a; known = true; continue }
-      if (tok === 'auto') { pal = this.#isLight() ? 'daylight' : 'steel'; known = true; continue }
+      if (tok === 'auto') { pal = this.#isLight() ? 'honey' : 'steel'; known = true; continue }
       if (CANVAS_BG_PALETTES.includes(tok as Palette)) { pal = tok as Palette; known = true; continue }
     }
     return known ? swatchFor(arch, PAL[pal]) : ''
@@ -394,10 +406,20 @@ export class CanvasBackgroundService extends EventTarget {
 
   // ── internals ──────────────────────────────────────────────────────
 
+  // The chrome theme SAYS how bright it is (`--md-is-light`, set by every
+  // value-set in _material-tokens.scss) rather than being recognised by name.
+  // Matching on the name answered correctly for exactly two themes and fell
+  // through to the OS preference for every other one — so a bright look on a
+  // dark-OS machine got the steel backdrop behind its cream panels. Reading
+  // the token means a theme nobody here has heard of, including one a
+  // community module registered at runtime, still answers for itself.
   #isLight(): boolean {
-    const t = document.documentElement.getAttribute('data-theme')
-    if (t === 'light') return true
-    if (t === 'dark') return false
+    try {
+      const declared = getComputedStyle(document.documentElement)
+        .getPropertyValue('--md-is-light').trim()
+      if (declared === '1') return true
+      if (declared === '0') return false
+    } catch { /* no computed style — fall through to the OS */ }
     try { return !!window.matchMedia?.('(prefers-color-scheme: light)')?.matches } catch { return false }
   }
 

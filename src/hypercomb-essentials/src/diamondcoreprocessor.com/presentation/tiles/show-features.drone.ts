@@ -163,8 +163,8 @@ const CAPABILITIES: Readonly<Record<string, {
     cascades: false,
     addable: false,
   },
-  // Node-local content behaviours rendered elsewhere: a slide plays in its
-  // parent deck's slideshow.
+  // Node-local content behaviours rendered elsewhere: a slide plays in whatever
+  // website it is ENROLLED in — no parent holds it (pheromones/enrollment.ts).
   'visual:diagram:slide': {
     view: 'slide',
     icon: 'crop_landscape',
@@ -172,6 +172,19 @@ const CAPABILITIES: Readonly<Record<string, {
     labelKey: 'features.cap.slide',
     descriptionKey: 'features.cap.slide.desc',
     fallbackLabel: 'Slide',
+    cascades: false,
+    addable: false,
+  },
+  // The WEBSITE ARTIFACT: the tile that IS a website. A peer of its members,
+  // never their container — they belong to it by wearing its mark, which is why
+  // this never cascades and carries nothing beneath it.
+  'visual:site:artifact': {
+    view: 'site-artifact',
+    icon: 'hub',
+    slashCommand: '/enroll as',
+    labelKey: 'features.cap.site',
+    descriptionKey: 'features.cap.site.desc',
+    fallbackLabel: 'Website',
     cascades: false,
     addable: false,
   },

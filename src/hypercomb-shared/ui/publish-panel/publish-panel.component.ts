@@ -73,6 +73,9 @@ interface PublishViewChoice {
   view: string
   label: string
   icon: string
+  /** The behaviour is not lit in the global roster — offered to nobody, kept
+   *  only so a row already pinned to it can still show and un-pin it. */
+  dormant?: boolean
 }
 
 interface PublishCollision {
@@ -160,7 +163,7 @@ export class PublishPanelComponent implements OnDestroy {
   readonly collisions = signal<PublishCollision[]>([])
   /** Opens-as choices from the drone — svg sanitized ONCE per payload, never
    *  in a template helper (change detection would re-trust every check). */
-  readonly views = signal<{ view: string; label: string; icon: SafeHtml }[]>([])
+  readonly views = signal<{ view: string; label: string; icon: SafeHtml; dormant: boolean }[]>([])
   readonly #sanitizer = inject(DomSanitizer)
   /** A deliberately coarse render clock. Template helpers must not call
    *  Date.now() themselves: Angular's development check renders twice and a
@@ -222,6 +225,7 @@ export class PublishPanelComponent implements OnDestroy {
             view: String(v.view ?? ''),
             label: String(v.label ?? v.view ?? ''),
             icon: this.#sanitizer.bypassSecurityTrustHtml(String(v.icon ?? '')),
+            dormant: v.dormant === true,
           }))
         : [])
       this.collisions.set(Array.isArray(p.collisions)
@@ -273,6 +277,15 @@ export class PublishPanelComponent implements OnDestroy {
   pickView(row: PublishRow, view: string): void {
     if (row.segments.length === 0 || row.opensAs === view) return
     EffectBus.emit('publish:opens-as', { key: row.key, view })
+  }
+
+  /** The faces this row may be pinned to: the ones lit in the global roster,
+   *  plus whatever this row is ALREADY pinned to. A behaviour switched off in
+   *  the roster is not a choice — offering it here is how the strip filled up
+   *  with faces nobody uses; but a face already pinned must stay visible, or
+   *  there would be no way to see it, let alone take it off. */
+  viewsFor(row: PublishRow): { view: string; label: string; icon: SafeHtml; dormant: boolean }[] {
+    return this.views().filter(v => !v.dormant || v.view === row.opensAs)
   }
 
   /** The collapsed row's face mark — the icon of the view this branch opens

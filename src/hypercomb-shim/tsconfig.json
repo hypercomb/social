@@ -1,0 +1,27 @@
+// hypercomb-shim/tsconfig.json
+//
+// STANDALONE ON PURPOSE. Nothing in hypercomb-web references this file, and
+// hypercomb-web/tsconfig.app.json does not include this directory — the shim
+// lives outside `hypercomb-web/src` precisely so `ng build` can neither
+// bundle it (unreachable from src/main.ts) nor type-check it (outside the
+// include glob). The live deploy cannot see the shim.
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": [],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "../hypercomb-shared/**/*.ts",
+    "../hypercomb-web/src/setup/**/*.ts"
+  ],
+  "exclude": [
+    "**/*.spec.ts"
+  ]
+}

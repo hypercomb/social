@@ -1253,6 +1253,23 @@ export class SubstrateService extends EventTarget {
     return out.sort((a, b) => a.name.localeCompare(b.name))
   }
 
+  /** Resolve another source for a visual chooser without changing the active
+   * source, its pool, or the participant's current background selection. */
+  async previewSourceImages(id: string): Promise<{ name: string; imageSig: string }[]> {
+    await this.ensureLoaded()
+    const source = this.#registry.sources.find(candidate => candidate.id === id)
+    if (!source) return []
+    const sigs = await this.#loadSourceImages(source)
+    const seen = new Set<string>()
+    return sigs
+      .filter(imageSig => imageSig && !seen.has(imageSig) && !!seen.add(imageSig))
+      .map(imageSig => ({
+        name: this.#imageNames.get(imageSig) ?? imageSig.slice(0, 8),
+        imageSig,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }
+
   /** Resolve a user-typed token to a pooled imageSig: exact name, then name
    *  prefix, then sig prefix. Null when nothing matches. */
   #resolveImage(token: string): string | null {

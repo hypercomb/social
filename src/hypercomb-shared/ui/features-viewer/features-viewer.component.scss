@@ -12,10 +12,11 @@
 
 @use '../breakpoints' as *;
 @use '../toolwindow' as tw;
+@use '../panel-identity' as identity;
 
 $accent: #c8b8ff;
 // The cool blue a VIEW wears everywhere it appears — rows here, and the tile
-// overlay's hover tint (0xa8d8ff). Declared beside $accent because the scope
+// overlay's hover tint (0xa8d8ff). Declared beside rgb(var(--acc)) because the scope
 // strip's kind filters wear the two kind colours side by side.
 $view-ground: #a8d8ff;
 
@@ -58,9 +59,9 @@ $gutter-phone: 0.7rem;
   max-width: calc(100vw - 1.5rem);
   display: flex;
   flex-direction: column;
-  background: rgba(14, 14, 22, 0.96);
-  border-left: 1px solid rgba($accent, 0.5);
-  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba($accent, 0.06) inset;
+  background: rgba(var(--hc-panel-pane), 0.96);
+  border-left: 1px solid rgba(var(--acc), 0.5);
+  box-shadow: -10px 0 40px rgba(var(--hc-panel-shadow), 0.5), 0 0 0 1px rgba(var(--acc), 0.06) inset;
   font-family: var(--hc-mono, system-ui);
   // Content scale — see file header. Inner em sizes follow this root font.
   font-size: calc(1rem * var(--hc-panel-scale, 1));
@@ -70,7 +71,7 @@ $gutter-phone: 0.7rem;
 
 .features-header {
   @include tw.header;
-  border-bottom: 1px solid rgba($accent, 0.25);
+  border-bottom: 1px solid rgba(var(--acc), 0.25);
 }
 
 // The header IS the search — the panel name rides in the placeholder
@@ -79,16 +80,16 @@ $gutter-phone: 0.7rem;
   flex: 1 1 auto;
   min-width: 0;
   padding: 0.3em 0.6em;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba($accent, 0.2);
+  background: rgba(var(--hc-panel-ink), 0.04);
+  border: 1px solid rgba(var(--acc), 0.2);
   border-radius: tw.$radius-card;
   color: #f3f3f3;
   font: inherit;
   font-size: 0.9em;
   outline: none;
 
-  &::placeholder { color: rgba($accent, 0.55); letter-spacing: 0.03em; }
-  &:focus { border-color: rgba($accent, 0.5); background: rgba(255, 255, 255, 0.06); }
+  &::placeholder { color: rgba(var(--acc), 0.55); letter-spacing: 0.03em; }
+  &:focus { border-color: rgba(var(--acc), 0.5); background: rgba(var(--hc-panel-ink), 0.06); }
   // The native clear glyph fights the panel's own Escape-to-clear; hide it.
   &::-webkit-search-cancel-button { display: none; }
 }
@@ -109,8 +110,8 @@ $gutter-phone: 0.7rem;
   width: 100%;
   padding: 0.45em $gutter;
   border: 0;
-  border-bottom: 1px solid rgba($accent, 0.18);
-  background: rgba($accent, 0.07);
+  border-bottom: 1px solid rgba(var(--acc), 0.18);
+  background: rgba(var(--acc), 0.07);
   color: rgba(230, 224, 255, 0.85);
   cursor: pointer;
   font: inherit;
@@ -118,9 +119,9 @@ $gutter-phone: 0.7rem;
   text-align: left;
   transition: background 140ms ease, color 140ms ease;
 
-  .mat-sym { font-size: 1.1em; color: $accent; }
-  &:hover { background: rgba($accent, 0.14); color: #f6f3ff; }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: -1px; }
+  .mat-sym { font-size: 1.1em; color: rgb(var(--acc)); }
+  &:hover { background: rgba(var(--acc), 0.14); color: #f6f3ff; }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: -1px; }
 }
 
 .features-selection-label {
@@ -133,32 +134,32 @@ $gutter-phone: 0.7rem;
 .features-clear {
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(var(--hc-panel-ink), 0.5);
   font-family: inherit;
   font-size: 0.74em;
   cursor: pointer;
   padding: 0 0.25em;
 
-  &:hover { color: $accent; }
+  &:hover { color: rgb(var(--acc)); }
 }
 
 .features-close {
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(var(--hc-panel-ink), 0.7);
   font-size: 1.4em;
   line-height: 1;
   cursor: pointer;
   padding: 0 0.25em;
 
-  &:hover { color: $accent; }
+  &:hover { color: rgb(var(--acc)); }
 }
 
 .features-empty {
   margin: 0;
   padding: 1.5em 1em;
   font-size: 0.85em;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(var(--hc-panel-ink), 0.45);
 }
 
 .features-scroll {
@@ -178,7 +179,7 @@ $gutter-phone: 0.7rem;
   margin: 0;
   padding: 0.1em 1em 0.5em;
   font-size: 0.72em;
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(var(--hc-panel-ink), 0.3);
   font-style: italic;
 }
 
@@ -197,11 +198,11 @@ $gutter-phone: 0.7rem;
   cursor: pointer;
   transition: background 120ms ease;
 
-  &:hover { background: rgba($accent, 0.06); }
+  &:hover { background: rgba(var(--acc), 0.06); }
 }
 
 .features-row.busy { opacity: 0.55; cursor: progress; }
-.features-row:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
+.features-row:focus-visible { outline: 1px solid rgba(var(--acc), 0.6); outline-offset: -1px; }
 
 .feature-meta {
   flex: 1;
@@ -219,7 +220,7 @@ $gutter-phone: 0.7rem;
 .feature-desc {
   font-size: 0.74em;
   line-height: 1.35;
-  color: rgba(255, 255, 255, 0.62);
+  color: rgba(var(--hc-panel-ink), 0.62);
 }
 
 // ── origin badge ──────────────────────────────────────────────────
@@ -237,14 +238,14 @@ $gutter-phone: 0.7rem;
   font-size: 0.62em;
   font-family: var(--hc-mono, monospace);
   letter-spacing: 0.02em;
-  color: rgba(255, 255, 255, 0.4);
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(var(--hc-panel-ink), 0.4);
+  background: rgba(var(--hc-panel-ink), 0.05);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.08);
 
   &.cascade {
-    color: rgba($accent, 0.95);
-    background: rgba($accent, 0.12);
-    border-color: rgba($accent, 0.4);
+    color: rgba(var(--acc), 0.95);
+    background: rgba(var(--acc), 0.12);
+    border-color: rgba(var(--acc), 0.4);
   }
 }
 
@@ -256,9 +257,9 @@ $gutter-phone: 0.7rem;
   border-radius: 3px;
   font-family: var(--hc-mono, monospace);
   font-size: 0.66em;
-  color: rgba($accent, 0.85);
-  background: rgba($accent, 0.1);
-  border: 1px solid rgba($accent, 0.22);
+  color: rgba(var(--acc), 0.85);
+  background: rgba(var(--acc), 0.1);
+  border: 1px solid rgba(var(--acc), 0.22);
   white-space: nowrap;
 }
 
@@ -267,17 +268,17 @@ $gutter-phone: 0.7rem;
 .avail-flow {
   margin-left: 0.3em;
   font-size: 0.72em;
-  color: rgba($accent, 0.6);
+  color: rgba(var(--acc), 0.6);
   cursor: help;
 }
 
 .features-foot {
   flex: 0 0 auto;
   padding: 0.6em $gutter 0.8em;
-  border-top: 1px solid rgba($accent, 0.2);
+  border-top: 1px solid rgba(var(--acc), 0.2);
   font-size: 0.72em;
   line-height: 1.4;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(var(--hc-panel-ink), 0.5);
 }
 
 // ── responsive: stay flush below the header at every header height ──
@@ -359,14 +360,14 @@ $gutter-phone: 0.7rem;
     width: calc(100% - 1.5rem);
     min-height: 2.9rem;
     margin: 0.55rem 0.75rem 0;
-    border: 1px solid rgba($accent, 0.55);
+    border: 1px solid rgba(var(--acc), 0.55);
     border-radius: tw.$radius-control;
-    background: rgba($accent, 0.12);
-    color: $accent;
+    background: rgba(var(--acc), 0.12);
+    color: rgb(var(--acc));
     font: 600 0.9rem/1 inherit;
     cursor: pointer;
 
-    &:active { background: rgba($accent, 0.22); }
+    &:active { background: rgba(var(--acc), 0.22); }
     .mat-sym { font-size: 1.15rem; }
   }
 }
@@ -385,7 +386,7 @@ $gutter-phone: 0.7rem;
 // Dim: a row a LEGACY hidden record still suppresses (click restores) —
 // reads as inactive until the drain lands.
 .features-row.off {
-  .feature-name { color: rgba(245, 245, 245, 0.5); }
+  .feature-name { color: rgba(var(--hc-panel-ink), 0.5); }
   .feature-origin,
   .feature-desc { opacity: 0.55; }
 }
@@ -398,15 +399,15 @@ $gutter-phone: 0.7rem;
   align-items: center;
   gap: 0.5em;
   padding: 0.5em $gutter;
-  border-bottom: 1px solid rgba($accent, 0.25);
-  background: rgba($accent, 0.07);
+  border-bottom: 1px solid rgba(var(--acc), 0.25);
+  background: rgba(var(--acc), 0.07);
 }
 
 .bulk-count {
   flex: 1;
   font-size: 0.7em;
   letter-spacing: 0.04em;
-  color: rgba(255, 255, 255, 0.65);
+  color: rgba(var(--hc-panel-ink), 0.65);
 }
 
 .bulk-download {
@@ -421,15 +422,15 @@ $gutter-phone: 0.7rem;
   transition: background 120ms ease, transform 120ms ease;
 
   &:active { transform: scale(0.94); }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.6); outline-offset: -1px; }
 }
 
 .bulk-download {
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  color: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.25);
+  color: rgba(var(--hc-panel-ink), 0.75);
 
-  &:hover { border-color: rgba($accent, 0.5); color: $accent; }
+  &:hover { border-color: rgba(var(--acc), 0.5); color: rgb(var(--acc)); }
   &.busy { opacity: 0.55; cursor: progress; }
 }
 
@@ -446,7 +447,7 @@ $path-fail: #e08a8a;     // failed terminal
 
 .download-status {
   padding: 0.55em $gutter 0.5em;
-  border-bottom: 1px solid rgba($accent, 0.18);
+  border-bottom: 1px solid rgba(var(--acc), 0.18);
   display: flex;
   flex-direction: column;
   gap: 0.65em;
@@ -474,7 +475,7 @@ $path-fail: #e08a8a;     // failed terminal
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba($accent, 0.85);
+  color: rgba(var(--acc), 0.85);
 }
 
 .dl-text {
@@ -484,7 +485,7 @@ $path-fail: #e08a8a;     // failed terminal
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: right;
-  color: rgba(255, 255, 255, 0.65);
+  color: rgba(var(--hc-panel-ink), 0.65);
 }
 
 .dl-path.ok .dl-text { color: rgba($path-ok, 0.9); }
@@ -501,7 +502,7 @@ $path-fail: #e08a8a;     // failed terminal
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  border: 1.5px solid rgba(255, 255, 255, 0.28);
+  border: 1.5px solid rgba(var(--hc-panel-ink), 0.28);
   background: transparent;
   box-sizing: border-box;
 
@@ -528,7 +529,7 @@ $path-fail: #e08a8a;     // failed terminal
 .dl-seg {
   flex: 1;
   height: 2px;
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(var(--hc-panel-ink), 0.14);
 
   &.filled { background: $path-active; }
 }
@@ -551,9 +552,9 @@ $path-fail: #e08a8a;     // failed terminal
   font-size: 0.58em;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(var(--hc-panel-ink), 0.3);
 
-  span.lit { color: rgba(255, 255, 255, 0.6); }
+  span.lit { color: rgba(var(--hc-panel-ink), 0.6); }
   span:first-child { text-align: left; }
   span:last-child { text-align: right; }
 }
@@ -570,13 +571,13 @@ $path-fail: #e08a8a;     // failed terminal
   flex: 0 0 auto;
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(var(--hc-panel-ink), 0.45);
   font-size: 1.05em;
   line-height: 1;
   cursor: pointer;
   padding: 0 0.2em;
 
-  &:hover { color: $accent; }
+  &:hover { color: rgb(var(--acc)); }
 }
 
 // Row-level outcome: the plain-words failure landing on the row that asked
@@ -606,8 +607,8 @@ $path-fail: #e08a8a;     // failed terminal
   flex-direction: column;
   gap: 0.6em;
   padding: 0.85em $gutter;
-  border-bottom: 1px solid rgba($accent, 0.25);
-  background: rgba(20, 18, 30, 0.6);
+  border-bottom: 1px solid rgba(var(--acc), 0.25);
+  background: rgba(var(--hc-panel-pane), 0.6);
 }
 
 .review-head {
@@ -620,19 +621,19 @@ $path-fail: #e08a8a;     // failed terminal
   flex: 1;
   font-size: 0.86em;
   letter-spacing: 0.03em;
-  color: rgba($accent, 0.95);
+  color: rgba(var(--acc), 0.95);
 }
 
 .review-kind {
   font-size: 0.7em;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(var(--hc-panel-ink), 0.45);
 }
 
 .review-note {
   margin: 0;
   font-size: 0.78em;
   line-height: 1.5;
-  color: rgba(255, 255, 255, 0.78);
+  color: rgba(var(--hc-panel-ink), 0.78);
 }
 
 .review-code {
@@ -641,7 +642,7 @@ $path-fail: #e08a8a;     // failed terminal
   overflow: auto;
   padding: 0.7em 0.8em;
   background: rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba($accent, 0.18);
+  border: 1px solid rgba(var(--acc), 0.18);
   border-radius: tw.$radius-card;
   font-family: var(--hc-mono, ui-monospace, monospace);
   font-size: 0.7em;
@@ -667,8 +668,8 @@ $path-fail: #e08a8a;     // failed terminal
 }
 
 .review-accept {
-  background: rgba($accent, 0.18);
-  border-color: rgba($accent, 0.6);
+  background: rgba(var(--acc), 0.18);
+  border-color: rgba(var(--acc), 0.6);
   color: #f3f3f3;
 }
 
@@ -680,8 +681,8 @@ $path-fail: #e08a8a;     // failed terminal
 
 .review-cancel {
   background: transparent;
-  border-color: rgba(255, 255, 255, 0.2);
-  color: rgba(255, 255, 255, 0.6);
+  border-color: rgba(var(--hc-panel-ink), 0.2);
+  color: rgba(var(--hc-panel-ink), 0.6);
 }
 
 // ── the phone review: a decision screen, then (optionally) the code ──
@@ -735,8 +736,8 @@ $path-fail: #e08a8a;     // failed terminal
   // it decides nothing by itself.
   .review-readcode {
     background: transparent;
-    border-color: rgba(255, 255, 255, 0.16);
-    color: rgba(255, 255, 255, 0.62);
+    border-color: rgba(var(--hc-panel-ink), 0.16);
+    color: rgba(var(--hc-panel-ink), 0.62);
     font-weight: 500;
   }
 
@@ -758,7 +759,7 @@ $path-fail: #e08a8a;     // failed terminal
     border: none;
     font-size: 1.3em;
     line-height: 1;
-    color: rgba($accent, 0.9);
+    color: rgba(var(--acc), 0.9);
     cursor: pointer;
   }
 }
@@ -800,17 +801,17 @@ $path-fail: #e08a8a;     // failed terminal
   padding: 0;
   border: 0;
   background: transparent;
-  color: rgba(255, 255, 255, 0.32);
+  color: rgba(var(--hc-panel-ink), 0.32);
   cursor: pointer;
   transition: color 140ms ease;
 
   .mat-sym { font-size: 1.05em; line-height: 1; }
 
-  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: 2px; }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.6); outline-offset: 2px; }
 
-  &:hover { color: rgba(255, 255, 255, 0.72); }
+  &:hover { color: rgba(var(--hc-panel-ink), 0.72); }
 
-  &.behaviors.on { color: $accent; }
+  &.behaviors.on { color: rgb(var(--acc)); }
   &.views.on { color: $view-ground; }
 }
 
@@ -830,18 +831,18 @@ $path-fail: #e08a8a;     // failed terminal
   padding: 0;
   border: 0;
   background: transparent;
-  color: rgba(255, 255, 255, 0.42);
+  color: rgba(var(--hc-panel-ink), 0.42);
   cursor: pointer;
   transition: color 140ms ease;
 
   .mat-sym { font-size: 1.05em; line-height: 1; }
 
-  &:hover { color: rgba(255, 255, 255, 0.82); }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: 2px; }
+  &:hover { color: rgba(var(--hc-panel-ink), 0.82); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.6); outline-offset: 2px; }
 
   // `.pool` is the class the template actually sets — this rule was written
   // as `.on` and so the pool has never once lit itself.
-  &.pool { color: $accent; }
+  &.pool { color: rgb(var(--acc)); }
 }
 
 // A behaviour whose module hasn't arrived. Provenance, not an error: quiet
@@ -851,9 +852,9 @@ $path-fail: #e08a8a;     // failed terminal
   font-size: 0.62em;
   letter-spacing: 0.04em;
   padding: 0.1em 0.45em;
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.22);
   border-radius: 3px;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(var(--hc-panel-ink), 0.6);
 }
 
 // BOUND — this behavior belongs to one tile. Warmer than the awaiting chip
@@ -914,11 +915,11 @@ $path-fail: #e08a8a;     // failed terminal
   height: 2rem;
   display: grid;
   place-items: center;
-  border: 1px solid rgba($accent, 0.3);
+  border: 1px solid rgba(var(--acc), 0.3);
   border-radius: tw.$radius-card;
   color: #eee9ff;
   background:
-    linear-gradient(145deg, rgba($accent, 0.24), rgba($accent, 0.07));
+    linear-gradient(145deg, rgba(var(--acc), 0.24), rgba(var(--acc), 0.07));
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.1);
 
   .mat-sym { font-size: 1.1rem; }
@@ -940,7 +941,7 @@ $path-fail: #e08a8a;     // failed terminal
 .features-title-sep {
   flex: 0 0 auto;
   font-weight: 400;
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(var(--hc-panel-ink), 0.3);
 }
 
 .features-title-app { flex: 0 0 auto; }
@@ -991,8 +992,8 @@ $path-fail: #e08a8a;     // failed terminal
 
   .mat-sym { font-size: 1.12rem; }
   &:hover {
-    border-color: rgba(255, 255, 255, 0.1);
-    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(var(--hc-panel-ink), 0.1);
+    background: rgba(var(--hc-panel-ink), 0.05);
   }
 }
 
@@ -1004,9 +1005,9 @@ $path-fail: #e08a8a;     // failed terminal
   margin: 0.05rem 1rem 0.7rem;
   min-height: 2.35rem;
   padding: 0 0.72rem;
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.09);
   border-radius: tw.$radius-control;
-  background: rgba(255, 255, 255, 0.035);
+  background: rgba(var(--hc-panel-ink), 0.035);
 
   // Sticky pool filter — anchored (tile-bound) behaviors in or out.
   // Active = the filter is ON (anchored hidden, only hive-wide rows).
@@ -1020,7 +1021,7 @@ $path-fail: #e08a8a;     // failed terminal
     border: 1px solid transparent;
     border-radius: tw.$radius-control;
     background: transparent;
-    color: rgba(255, 255, 255, 0.35);
+    color: rgba(var(--hc-panel-ink), 0.35);
     cursor: pointer;
     transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
 
@@ -1034,16 +1035,16 @@ $path-fail: #e08a8a;     // failed terminal
       background: rgba(255, 214, 138, 0.08);
     }
 
-    &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
+    &:focus-visible { outline: 1px solid rgba(var(--acc), 0.6); outline-offset: -1px; }
   }
-  color: rgba(255, 255, 255, 0.34);
+  color: rgba(var(--hc-panel-ink), 0.34);
   transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
 
   &:focus-within {
-    border-color: rgba($accent, 0.48);
-    background: rgba($accent, 0.045);
-    box-shadow: 0 0 0 3px rgba($accent, 0.07);
-    color: rgba($accent, 0.8);
+    border-color: rgba(var(--acc), 0.48);
+    background: rgba(var(--acc), 0.045);
+    box-shadow: 0 0 0 3px rgba(var(--acc), 0.07);
+    color: rgba(var(--acc), 0.8);
   }
 
   > .mat-sym { flex: 0 0 auto; font-size: 1rem; }
@@ -1059,14 +1060,14 @@ $path-fail: #e08a8a;     // failed terminal
   font-family: inherit;
   font-size: 0.8rem;
 
-  &::placeholder { color: rgba(255, 255, 255, 0.35); letter-spacing: 0; }
+  &::placeholder { color: rgba(var(--hc-panel-ink), 0.35); letter-spacing: 0; }
   &:focus { border: 0; background: transparent; }
 }
 
 .features-scroll {
   padding: 0 $gutter 1rem;
   scrollbar-width: thin;
-  scrollbar-color: rgba($accent, 0.2) transparent;
+  scrollbar-color: rgba(var(--acc), 0.2) transparent;
 }
 
 .features-group { padding: 0; }
@@ -1074,9 +1075,9 @@ $path-fail: #e08a8a;     // failed terminal
 .section-empty {
   margin: 0;
   padding: 1rem;
-  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border: 1px dashed rgba(var(--hc-panel-ink), 0.08);
   border-radius: tw.$radius-card;
-  background: rgba(255, 255, 255, 0.018);
+  background: rgba(var(--hc-panel-ink), 0.018);
   font-size: 0.7rem;
   text-align: center;
 }
@@ -1095,9 +1096,9 @@ $path-fail: #e08a8a;     // failed terminal
   min-height: 4.35rem;
   padding: 0.78rem;
   box-sizing: border-box;
-  border: 1px solid rgba(255, 255, 255, 0.075);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.075);
   border-radius: tw.$radius-card;
-  background: rgba(255, 255, 255, 0.026);
+  background: rgba(var(--hc-panel-ink), 0.026);
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.018);
   transition:
     transform 140ms ease,
@@ -1108,8 +1109,8 @@ $path-fail: #e08a8a;     // failed terminal
   &:hover {
     z-index: 1;
     transform: translateY(-1px);
-    border-color: rgba($accent, 0.24);
-    background: rgba($accent, 0.055);
+    border-color: rgba(var(--acc), 0.24);
+    background: rgba(var(--acc), 0.055);
     box-shadow:
       0 8px 22px rgba(0, 0, 0, 0.16),
       inset 0 1px rgba(255, 255, 255, 0.035);
@@ -1117,14 +1118,14 @@ $path-fail: #e08a8a;     // failed terminal
 
   &:focus-visible {
     outline: 0;
-    border-color: rgba($accent, 0.62);
-    box-shadow: 0 0 0 3px rgba($accent, 0.1);
+    border-color: rgba(var(--acc), 0.62);
+    box-shadow: 0 0 0 3px rgba(var(--acc), 0.1);
   }
 
   // Neutral, and NO ground change — see the note above
   // `.features-row.selected`. Lightness is reserved for on/off.
   &.selected {
-    border-color: rgba(255, 255, 255, 0.28);
+    border-color: rgba(var(--hc-panel-ink), 0.28);
     box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.05);
   }
 }
@@ -1136,20 +1137,20 @@ $path-fail: #e08a8a;     // failed terminal
   height: 2.35rem;
   display: grid;
   place-items: center;
-  border: 1px solid rgba($accent, 0.19);
+  border: 1px solid rgba(var(--acc), 0.19);
   border-radius: tw.$radius-card;
   color: rgba(235, 229, 255, 0.92);
   background:
-    linear-gradient(145deg, rgba($accent, 0.2), rgba($accent, 0.065));
+    linear-gradient(145deg, rgba(var(--acc), 0.2), rgba(var(--acc), 0.065));
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.07);
 
   .mat-sym { font-size: 1.12rem; }
 }
 
 .features-row.off .feature-icon {
-  color: rgba(255, 255, 255, 0.46);
-  border-color: rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.035);
+  color: rgba(var(--hc-panel-ink), 0.46);
+  border-color: rgba(var(--hc-panel-ink), 0.08);
+  background: rgba(var(--hc-panel-ink), 0.035);
   box-shadow: none;
 }
 
@@ -1177,7 +1178,7 @@ $path-fail: #e08a8a;     // failed terminal
   overflow: hidden;
   font-size: 0.67rem;
   line-height: 1.45;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(var(--hc-panel-ink), 0.55);
 }
 
 .feature-origin {
@@ -1186,12 +1187,12 @@ $path-fail: #e08a8a;     // failed terminal
   font-size: 0.52rem;
   line-height: 1.2;
   white-space: nowrap;
-  color: rgba(255, 255, 255, 0.42);
+  color: rgba(var(--hc-panel-ink), 0.42);
 
   &.cascade {
-    color: rgba($accent, 0.88);
-    border-color: rgba($accent, 0.24);
-    background: rgba($accent, 0.08);
+    color: rgba(var(--acc), 0.88);
+    border-color: rgba(var(--acc), 0.24);
+    background: rgba(var(--acc), 0.08);
   }
 }
 
@@ -1215,13 +1216,13 @@ $path-fail: #e08a8a;     // failed terminal
   align-items: center;
   gap: 0.25rem;
   padding: 0.08rem 0.45rem;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.14);
   border-radius: 999px;
   font-size: 0.55rem;
   line-height: 1.4;
   white-space: nowrap;
-  color: rgba(255, 255, 255, 0.6);
-  background: rgba(16, 14, 24, 0.92);
+  color: rgba(var(--hc-panel-ink), 0.6);
+  background: rgba(var(--hc-panel-pane), 0.92);
   opacity: 0;
   pointer-events: none;
   transition: opacity 140ms ease;
@@ -1247,9 +1248,9 @@ $path-fail: #e08a8a;     // failed terminal
   align-items: center;
   gap: 0.28rem;
   padding: 0.27rem 0.38rem;
-  border: 1px solid rgba($accent, 0.24);
+  border: 1px solid rgba(var(--acc), 0.24);
   border-radius: tw.$radius-control;
-  background: rgba($accent, 0.08);
+  background: rgba(var(--acc), 0.08);
   color: rgba(235, 229, 255, 0.92);
   font-size: 0.56rem;
   font-weight: 650;
@@ -1264,8 +1265,8 @@ $path-fail: #e08a8a;     // failed terminal
     pointer-events: auto;
   }
 
-  &:hover { background: rgba($accent, 0.22); }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
+  &:hover { background: rgba(var(--acc), 0.22); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.6); outline-offset: -1px; }
 }
 
 // ── THE BULB ──────────────────────────────────────────────────────
@@ -1280,7 +1281,7 @@ $path-fail: #e08a8a;     // failed terminal
   place-items: center;
   margin-left: 0.1rem;
   border-radius: 50%;
-  color: rgba(255, 255, 255, 0.26);
+  color: rgba(var(--hc-panel-ink), 0.26);
   transition: color 260ms ease, background 260ms ease, box-shadow 260ms ease;
 
   .mat-sym {
@@ -1315,8 +1316,8 @@ $path-fail: #e08a8a;     // failed terminal
 
 .features-row.off {
   opacity: 0.68;
-  border-color: rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.012);
+  border-color: rgba(var(--hc-panel-ink), 0.06);
+  background: rgba(var(--hc-panel-ink), 0.012);
 
   &:hover { opacity: 0.92; }
 
@@ -1369,11 +1370,11 @@ $view-ground: #a8d8ff;
     box-shadow 160ms ease;
 
   &:hover {
-    border-color: rgba($accent, 0.45);
-    background: linear-gradient(145deg, rgba($accent, 0.3), rgba($accent, 0.1));
+    border-color: rgba(var(--acc), 0.45);
+    background: linear-gradient(145deg, rgba(var(--acc), 0.3), rgba(var(--acc), 0.1));
   }
 
-  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: 1px; }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
 }
 
 // THE DEFAULT. Written last so it wins over `.features-row.off
@@ -1381,10 +1382,10 @@ $view-ground: #a8d8ff;
 // must not flicker with the pointer.
 .features-row .feature-icon.as-default.is-default {
   color: #efe9ff;
-  border-color: rgba($accent, 0.7);
-  background: linear-gradient(145deg, rgba($accent, 0.42), rgba($accent, 0.16));
+  border-color: rgba(var(--acc), 0.7);
+  background: linear-gradient(145deg, rgba(var(--acc), 0.42), rgba(var(--acc), 0.16));
   box-shadow:
-    0 0 16px rgba($accent, 0.3),
+    0 0 16px rgba(var(--acc), 0.3),
     inset 0 1px rgba(255, 255, 255, 0.12);
 
   .mat-sym { font-variation-settings: 'FILL' 1, 'wght' 500, 'GRAD' 0, 'opsz' 24; }
@@ -1396,7 +1397,7 @@ $view-ground: #a8d8ff;
   line-height: 1.4;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: rgba($accent, 0.85);
+  color: rgba(var(--acc), 0.85);
 }
 
 // ── MANAGE ────────────────────────────────────────────────────────
@@ -1410,10 +1411,10 @@ $view-ground: #a8d8ff;
   place-items: center;
   width: 1.7rem;
   height: 1.7rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.12);
   border-radius: tw.$radius-control;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.62);
+  background: rgba(var(--hc-panel-ink), 0.04);
+  color: rgba(var(--hc-panel-ink), 0.62);
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
@@ -1429,13 +1430,13 @@ $view-ground: #a8d8ff;
   }
 
   &.open {
-    border-color: rgba($accent, 0.45);
-    background: rgba($accent, 0.16);
+    border-color: rgba(var(--acc), 0.45);
+    background: rgba(var(--acc), 0.16);
     color: rgba(240, 236, 255, 0.95);
   }
 
-  &:hover { background: rgba($accent, 0.18); }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
+  &:hover { background: rgba(var(--acc), 0.18); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.6); outline-offset: -1px; }
 }
 
 // The strip itself: two words, one choice, on its own line across the card.
@@ -1451,21 +1452,21 @@ $view-ground: #a8d8ff;
   button {
     flex: 1 1 0;
     padding: 0.3rem 0.4rem;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(var(--hc-panel-ink), 0.12);
     border-radius: tw.$radius-control;
-    background: rgba(255, 255, 255, 0.035);
-    color: rgba(255, 255, 255, 0.66);
+    background: rgba(var(--hc-panel-ink), 0.035);
+    color: rgba(var(--hc-panel-ink), 0.66);
     font-size: 0.58rem;
     font-weight: 620;
     cursor: pointer;
     transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 
-    &:hover { background: rgba($accent, 0.14); }
-    &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
+    &:hover { background: rgba(var(--acc), 0.14); }
+    &:focus-visible { outline: 1px solid rgba(var(--acc), 0.6); outline-offset: -1px; }
 
     &.on {
-      border-color: rgba($accent, 0.5);
-      background: rgba($accent, 0.2);
+      border-color: rgba(var(--acc), 0.5);
+      background: rgba(var(--acc), 0.2);
       color: rgba(242, 238, 255, 0.96);
     }
   }
@@ -1480,10 +1481,10 @@ $view-ground: #a8d8ff;
 .features-foot {
   margin: 0 $gutter;
   padding: 0.65rem 0 0.72rem;
-  border-top-color: rgba(255, 255, 255, 0.055);
+  border-top-color: rgba(var(--hc-panel-ink), 0.055);
   font-size: 0.58rem;
   line-height: 1.45;
-  color: rgba(255, 255, 255, 0.31);
+  color: rgba(var(--hc-panel-ink), 0.31);
 }
 
 @media (max-width: 599px), (max-height: 449px) {

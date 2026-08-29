@@ -23,7 +23,10 @@
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 100001;
-  width: min(92vw, 36rem);
+  // Wider than the old 36rem: this sheet is a REFERENCE, and at 36rem a
+  // command with two aliases left ~100px for its sentence, which then hard-
+  // wrapped into a ragged eight-line ribbon. Room to read is the feature.
+  width: min(92vw, 44rem);
   max-height: 82vh;
   display: flex;
   flex-direction: column;
@@ -86,6 +89,9 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 
   input {
+    // border-box, or `width: 100%` + padding + border runs the field past the
+    // panel's right edge and its own border disappears off the side.
+    box-sizing: border-box;
     width: 100%;
     padding: 0.42rem 0.6rem;
     font-family: inherit;
@@ -175,6 +181,28 @@
   gap: 0;
 }
 
+// TWO ALIGNED COLUMNS for the name/description sections. `space-between` gave
+// every row its own private right edge, so descriptions staircased down the
+// sheet and squeezed themselves into whatever the longest name left over. A
+// grid + per-row `subgrid` puts every description on ONE shared x, and
+// fit-content caps how much of the sheet the name column may claim.
+.paired-list {
+  display: grid;
+  grid-template-columns: fit-content(16rem) minmax(0, 1fr);
+  align-content: start;
+
+  .sheet-row {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    align-items: baseline;
+    column-gap: 1.1rem;
+    justify-content: initial;
+  }
+
+  .row-primary { flex-wrap: wrap; }
+}
+
 // ── row ─────────────────────────────────────────────────
 
 .sheet-row {
@@ -199,11 +227,14 @@
   min-width: 0;
 }
 
+// LEFT-aligned, always. Right-aligning a wrapped sentence gives it a ragged
+// left edge — the eye loses the line start on every row.
 .row-desc {
   font-size: 0.72rem;
+  line-height: 1.45;
   color: rgba(245, 245, 245, 0.55);
   min-width: 0;
-  text-align: right;
+  text-align: left;
 }
 
 // ── slash-row ───────────────────────────────────────────

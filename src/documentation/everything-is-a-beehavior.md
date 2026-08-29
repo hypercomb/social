@@ -50,9 +50,11 @@ move the pin. "Import" = resolve the pin, pull the sigs, verify, adopt.
 The same artifact can be served by a domain, handed peer-to-peer over the
 swarm, or copied on a USB stick — the signatures make all three identical.
 
-**One shim, every domain.** Hosted websites on the hypercomb engine are not
-separate deployments of the engine — they snap into the same shim and
-harness. A domain on the engine publishes three things, all static: its
+**One Core, every application host — mandatory.** Hosted websites on the
+Hypercomb engine are not separate application paradigms — every application
+domain boots the same Core shim and harness. A domain that merely serves
+`GET /<sig>` is a content mirror; it becomes a Hypercomb application host only
+when it boots Core. A domain on the engine publishes three things, all static: its
 content at `<domain>/<sig>`, its pin (the manifest/bootstrap head), and any
 behavior modules of its own. The visiting shim resolves the pin, pulls sigs
 through the resolver, the domain's bees register in the same IoC, its
@@ -62,6 +64,25 @@ plus beehaviors adopted into the harness — which is why one client can hold
 many domains at once (the `dcp/<domain.com>/` scopes already model exactly
 this), and why every domain the community stands up strengthens the same
 engine instead of forking it.
+
+This is the [Tree of Life Core doctrine](tree-of-life-core.md): stores hold
+DNA, relays carry signals, and Core metabolizes signatures into beehavior. A
+parked signed application is potential life; a Core resolving it under a
+capability profile is the living node.
+
+That shared Core is the direct connection to `hypercomb.io`: both sides use
+the same signed references, resolver, handoff and adoption protocol, so no
+application-specific integration layer sits between them. Direct protocol
+compatibility is not ambient permission. A domain cannot read or write a
+consumer's personal hive merely because it runs Core.
+
+If an application asks the consumer to keep an account, data or transactions
+at its origin, the trust decision is the familiar web-platform decision: trust
+that provider domain before storing anything there. Such state is tightly
+coupled to that consumer-provider relationship and remains origin-scoped. The
+read-only website profile grants no storage at all; any provider profile that
+does must request that capability explicitly, and copying from the personal
+hive remains a separate, consumer-selected act.
 
 **A door from everywhere.** Every page, domain, and artifact on the engine
 is an entrance to the hypercomb — land anywhere, and the shim is already the

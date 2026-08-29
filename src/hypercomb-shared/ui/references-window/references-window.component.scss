@@ -1,0 +1,41 @@
+@use '../toolwindow' as tw;
+@use '../panel-identity' as identity;
+
+$accent: #7eb6d6;
+
+:host { position: fixed; inset: 0; z-index: 100002; pointer-events: none; }
+.ref-panel {
+  pointer-events: auto; position: absolute; top: max(calc(2.3rem * var(--hc-header-zoom, 1)), var(--hc-header-anchor));
+  right: 0; bottom: 0; width: 340px; min-width: 260px; max-width: calc(100vw - 1.5rem);
+  display: flex; flex-direction: column; background: rgba(var(--hc-panel-pane), 0.96);
+  border-left: 1px solid rgba(var(--acc), .5); box-shadow: -10px 0 40px rgba(var(--hc-panel-shadow), .5);
+  color: #eaf3f9; font-family: var(--hc-mono, system-ui); font-size: calc(1rem * var(--hc-panel-scale, 1));
+  @include tw.panel($accent, right);
+}
+.ref-header { @include tw.header; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(var(--acc), .25); }
+.ref-heading { display: flex; align-items: center; gap: .5em; color: rgb(var(--acc)); font-size: .9em; letter-spacing: .04em; }
+.ref-heading .mat-sym { font-size: 1.05em; }
+.ref-close { border: 0; background: none; color: rgba(var(--hc-panel-ink), .55); font: inherit; font-size: 1.2em; cursor: pointer; }
+.ref-details { margin: .75em; padding: .8em; display: grid; gap: .45em; border: 1px solid rgba(var(--acc), .32); border-radius: tw.$radius-card; background: rgba(var(--acc), .06); }
+.ref-state, .ref-actions, .ref-target { display: flex; align-items: center; }
+.ref-state { justify-content: space-between; font-size: .76em; font-weight: 650; }
+.ref-state small { color: rgba(207,226,238,.45); font-weight: 500; }
+.ref-target { gap: .75em; margin: .45em 0 .6em; }
+.ref-tile { width: 2.7em; aspect-ratio: .866; display: grid; place-items: center; flex: 0 0 auto; background: rgba(var(--acc), .22); clip-path: polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%); }
+.ref-tile span { font-size: .68em; color: rgb(var(--acc)); }
+.ref-target-copy { min-width: 0; display: flex; flex-direction: column; gap: .14em; }
+.ref-target-copy strong, .ref-target-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ref-target-copy strong { font-size: .84em; } .ref-target-copy small { color: rgba(207,226,238,.46); font-size: .67em; }
+.ref-details label { color: rgba(207,226,238,.7); font-size: .7em; }
+.ref-name { box-sizing: border-box; width: 100%; padding: .5em .6em; border: 1px solid rgba(var(--acc), .34); border-radius: tw.$radius-control; background: rgba(var(--hc-panel-pane), .72); color: #eaf3f9; font: inherit; font-size: .8em; outline: none; }
+.ref-name:focus { border-color: rgba(var(--acc), .78); }
+.ref-error { margin: 0; color: #ff9ca8; font-size: .66em; line-height: 1.35; }
+.ref-landing, .ref-hint { margin: .1em 0; font-size: .67em; line-height: 1.45; }
+.ref-landing { color: rgba(var(--acc), .82); } .ref-hint { color: rgba(207,226,238,.44); }
+.ref-actions { justify-content: flex-end; gap: .45em; margin-top: .35em; }
+.ref-actions button { padding: .43em .72em; border-radius: tw.$radius-control; font: inherit; font-size: .72em; cursor: pointer; }
+.ref-cancel { border: 1px solid rgba(var(--acc), .24); background: transparent; color: rgba(234,243,249,.7); }
+.ref-save { border: 1px solid rgba(var(--acc), .7); background: rgba(var(--acc), .22); color: #f4fafd; }
+.ref-save:disabled { opacity: .4; cursor: default; }
+.ref-empty { margin: auto; max-width: 15em; text-align: center; color: rgba(207,226,238,.42); font-size: .76em; line-height: 1.55; }
+.ref-empty .mat-sym { color: rgba(var(--acc), .62); font-size: 2em; }

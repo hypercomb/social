@@ -20,9 +20,10 @@
 import { Drone, EffectBus } from '@hypercomb/core'
 import { titleForLabel, kindsForLabel } from '../../commands/decoration-kind-index.js'
 import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
-import { isKindGloballyOff } from '../../sharing/behavior-enablement.js'
+import { isBehaviorDormant } from '../../sharing/behavior-enablement.js'
 import { listDecorations } from '../../commands/decoration-manifest.js'
-import { tilePictureCandidates } from '../../editor/tile-properties.js'
+import { readTilePropertiesAt, tilePictureCandidates } from '../../editor/tile-properties.js'
+import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { childNamesOf, type PlacementHistory, type PlacementLayer } from '../../history/layer-placement.js'
 import { trackScrollGutter } from './scroll-gutter.js'
 import { readTileBrief, type TileBrief } from './tile-brief.js'
@@ -52,6 +53,7 @@ type HistoryShape = {
 type StoreShape = {
   getResource(sig: string): Promise<Blob | null>
   getResourceLocal?(sig: string): Promise<Blob | null>
+  getResourceResolvedLocal?(sig: string): Promise<Blob | null>
 }
 const SIG_RE = /^[0-9a-f]{64}$/
 
@@ -190,9 +192,13 @@ export class SquareTileViewDrone extends Drone {
   async #mount(gen: number): Promise<void> {
     const lineage = window.ioc?.get<LineageShape>('@hypercomb.social/Lineage')
     const segments = this.#targetSegments ?? [...(lineage?.explorerSegments?.() ?? [])]
+    // isBehaviorDormant, not raw isKindGloballyOff: the published visitor
+    // shell is a cold install whose roster starts DARK, and there publishing
+    // the mark IS the enablement — the dormancy check carries that exception,
+    // the raw roster read does not (a raw read blanks the whole site).
     // Hidden reach matches the view's BRANCH scope: a hide at the marked
     // root silences the view all the way down, same as view.bee's gate.
-    if (isKindGloballyOff(SQUARE_TILE_KIND) || await isFeatureHiddenWithin(segments, SQUARE_TILE_KIND)) {
+    if (isBehaviorDormant(SQUARE_TILE_KIND, segments) || await isFeatureHiddenWithin(segments, SQUARE_TILE_KIND)) {
       this.#targetSegments = null
       this.#teardown()
       this.#vm()?.setMode('hexagons')
@@ -258,15 +264,9 @@ export class SquareTileViewDrone extends Drone {
   async #tileImageUrl(segments: readonly string[], sink: string[]): Promise<string | null> {
     const history = window.ioc?.get<HistoryShape>('@diamondcoreprocessor.com/HistoryService')
     const store = window.ioc?.get<StoreShape>('@hypercomb.social/Store')
-    if (!history || !store) return null
+    if (!history || !store || segments.length === 0) return null
     try {
-      const layer = await history.currentLayerAt(await history.sign({ explorerSegments: () => [...segments] }))
-      const propsSig = Array.isArray((layer as { properties?: unknown })?.properties)
-        ? String(((layer as { properties?: unknown[] }).properties as unknown[])[0] ?? '')
-        : ''
-      if (!SIG_RE.test(propsSig)) return null
-      const blob = await store.getResource(propsSig)
-      if (!blob) return null
+      const props = await readTilePropertiesAt(segments.slice(0, -1), segments[segments.length - 1])
       // The PICTURE, not the hex capture: a plate is a rectangle, and the
       // capture carries the hexagon's crop — and, on anything saved
       // through the tile editor before the frame stopped being baked, the
@@ -279,8 +279,10 @@ export class SquareTileViewDrone extends Drone {
       // whose bytes are here, and hand the browser those bytes rather
       // than making it fetch them a second time through /@resource/.
       // Local reads only: sixteen plates must not each wait on the host.
-      for (const sig of tilePictureCandidates(JSON.parse(await blob.text()))) {
-        const bytes = await (store.getResourceLocal?.(sig) ?? store.getResource(sig))
+      for (const sig of tilePictureCandidates(props)) {
+        const bytes = store.getResourceLocal
+          ? await resolveLocalResourceReference(store as StoreShape & { getResourceLocal(sig: string): Promise<Blob | null> }, sig)
+          : await store.getResource(sig)
         if (!bytes || bytes.size === 0) continue
         const url = URL.createObjectURL(bytes)
         sink.push(url)

@@ -7,26 +7,35 @@
 //
 // ── What a lightbox shows ─────────────────────────────────────────────
 //
-// Everything the tile holds, in this order (SlidesViewDrone's `lightbox`
-// surface resolves them):
-//   1. its own gallery images — a `visual:lightbox:gallery` decoration whose
-//      payload is `{ images: [sig, …] }` (written by `/lightbox add`)
-//   2. its own picture — the tile's link/display image, so a tile you made by
-//      dropping ONE image is already a one-image lightbox
-//   3. its children's pictures — so a lightbox on a CONTAINER is the gallery
-//      of everything dropped inside it, and a newly dropped image joins it
-//      with nothing to type
+// THE SET, if this tile is enrolled in one. A lightbox is the picture-facing
+// VIEW of the same relation the slides view plays: every artifact wearing the
+// mark, wherever it lives, opened AT the one you arrived through. Enrolling is
+// `/enroll` and is not a lightbox command — a website, a slide and a photo all
+// join a set the same way (pheromones/enrollment.ts).
 //
-// That third source is what makes the drop flow streamline: put the lightbox
-// on the container once, and every image dropped in from then on shows up in
-// it automatically.
+// Otherwise, WHAT THIS TILE ITSELF HOLDS:
+//   1. its own pictures — a `visual:lightbox:gallery` decoration whose payload
+//      is `{ images: [ref, …] }` (written by `/lightbox add`)
+//   2. its own picture — the tile's link/display image, so a tile you made by
+//      dropping ONE image is already a one-picture lightbox
+//
+// RETIRED — its CHILDREN's pictures. A lightbox on a container used to be the
+// gallery of everything dropped inside it, which made the container the thing
+// that held the set. That path survives as a read-only fallback so existing
+// hives keep working; the way to build a gallery now is to enrol pictures in a
+// website artifact, which lets one picture belong to several galleries and lets
+// a gallery hold pictures that live anywhere.
+//
+// Each entry in `images[]` is a LIFE PRIMITIVE hop — the signature of a meta
+// envelope carrying the bytes, never the bytes' own signature. Raw legacy
+// entries still resolve; nothing writes one again.
 //
 // ── Syntax ────────────────────────────────────────────────────────────
 //   /lightbox                    — toggle hexagons ↔ lightbox
 //   /lightbox on | open | view   — open the lightbox
 //   /lightbox off | hex          — back to hexagons
 //   /lightbox add | attach       — pick image files and hold them on this tile
-//   /lightbox clear              — take the gallery off this tile (the images
+//   /lightbox clear              — take the pictures off this tile (the images
 //                                  themselves stay — they're content-addressed)
 //
 // `name@lightbox` from the command line attaches it declaratively (the
@@ -37,10 +46,17 @@
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import type { VisualBeeRegistry } from './visual-bee-registry.js'
 import { writeDecoration, listDecorations, removeDecoration } from './decoration-manifest.js'
+import { SITE_ARTIFACT_KIND } from '../pheromones/enrollment.js'
+import { mintContentRef } from '../presentation/tiles/artifact-content.js'
 
-/** Images held on a tile — the lightbox's content, and (on a CHILD of a deck)
- *  a slide source for `/present`. Payload: `{ images: [sig, …] }`. */
+/** Pictures held on a tile — the lightbox's own content, and a source for any
+ *  view that renders a set this tile is enrolled in. Payload:
+ *  `{ images: [ref, …] }`, where each ref is a Life Primitive content hop. */
 export const GALLERY_KIND = 'visual:lightbox:gallery'
+
+/** The slot a picture's incidence is held in. Distinct from a slide's, so the
+ *  same bytes used both ways mint two envelopes rather than colliding. */
+export const PICTURE_RELATION = 'picture'
 
 /** The ViewMode surface this behaviour renders on. Matches the kind's own
  *  `visual:<view>:<noun>` middle segment — the vocabulary the command line's
@@ -57,6 +73,30 @@ const OFF_KEYWORDS = new Set(['off', 'hex', 'hexagons', 'hexagon', 'close', 'sto
 type ViewModeShape = { mode: string; setMode(next: string): void }
 type LineageShape = { explorerSegments?: () => readonly string[] }
 type StoreShape = { putResource(blob: Blob): Promise<string> }
+
+/** Every picture held on a tile, as the REFS its payload declares — a meta
+ *  envelope under the current model, a raw resource signature under the retired
+ *  one. Callers hand these to the store, which follows the hop transparently, so
+ *  neither shape needs special-casing at the call site. The shared read seam for
+ *  the full-screen lightbox and the images chooser alike. */
+export async function galleryImageSigsAt(segments: readonly string[]): Promise<string[]> {
+  const out: string[] = []
+  try {
+    const decorations = await listDecorations<{ images?: unknown }>({
+      kind: GALLERY_KIND,
+      segments,
+    })
+    for (const { record } of decorations) {
+      const images = record.payload?.images
+      if (!Array.isArray(images)) continue
+      for (const value of images) {
+        const imageSig = String(value)
+        if (SIG.test(imageSig) && !out.includes(imageSig)) out.push(imageSig)
+      }
+    }
+  } catch { /* no readable gallery at this location */ }
+  return out
+}
 
 export class LightboxQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -149,8 +189,12 @@ export class LightboxQueenBee extends QueenBee {
       const added: string[] = []
       for (const file of files) {
         const blob = new Blob([await file.arrayBuffer()], { type: file.type || 'application/octet-stream' })
-        const sig = await store.putResource(blob)
-        if (SIG.test(sig)) added.push(sig)
+        const bytesSig = await store.putResource(blob)
+        if (!SIG.test(bytesSig)) continue
+        // THE LIFE PRIMITIVE: the gallery points at a typed incidence, and the
+        // incidence points at the bytes. Never raw bytes in a payload field.
+        const ref = await mintContentRef(store, bytesSig, PICTURE_RELATION)
+        if (SIG.test(ref)) added.push(ref)
       }
       if (added.length === 0) { this.#log('Lightbox — nothing could be stored', '○'); return }
 
@@ -208,13 +252,18 @@ window.ioc.register('@diamondcoreprocessor.com/LightboxQueenBee', _lightbox)
       toggleIcon: 'photo_library',
       behavior: 'render',
       decorationKind: GALLERY_KIND,
+      // A website artifact opens this face too: the lightbox and the slides
+      // view are two VIEWS of one relation, not two containers.
+      alsoKinds: [SITE_ARTIFACT_KIND],
       labelKey: 'view.lightbox',
       descriptionKey: 'view.lightbox.description',
       queenKey: '@diamondcoreprocessor.com/LightboxQueenBee',
       adoptable: true,
-      // A lightbox on a CONTAINER shows the pictures of its children, so
-      // adopting it must carry them — same reasoning as a slides deck.
-      adoptScope: 'hierarchy',
+      // A tile's pictures are ITS OWN — there is no subtree to carry. A gallery
+      // travels the way its relation does: member by member, each wearing the
+      // same mark. (The retired children source is why this used to be
+      // 'hierarchy'; it is a read-only fallback now.)
+      adoptScope: 'tile',
       // Its content is what the tile ALREADY has (its picture, its children's
       // pictures), so writing the decoration IS the whole install — that is
       // what makes `name@lightbox` work straight off a dropped image.

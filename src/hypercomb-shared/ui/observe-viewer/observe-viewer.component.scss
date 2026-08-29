@@ -13,6 +13,7 @@
 
 @use '../breakpoints' as *;
 @use '../toolwindow' as tw;
+@use '../panel-identity' as identity;
 
 $accent: #7eb6d6;
 
@@ -34,9 +35,9 @@ $accent: #7eb6d6;
   max-width: calc(100vw - 1.5rem);
   display: flex;
   flex-direction: column;
-  background: rgba(12, 16, 20, 0.96);
-  border-left: 1px solid rgba($accent, 0.45);
-  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba($accent, 0.06) inset;
+  background: rgba(var(--hc-panel-pane), 0.96);
+  border-left: 1px solid rgba(var(--acc), 0.45);
+  box-shadow: -10px 0 40px rgba(var(--hc-panel-shadow), 0.5), 0 0 0 1px rgba(var(--acc), 0.06) inset;
   font-family: var(--hc-mono, system-ui);
   font-size: calc(1rem * var(--hc-panel-scale, 1));
   color: #eef3f6;
@@ -46,20 +47,20 @@ $accent: #7eb6d6;
 
 .observe-header {
   @include tw.header;
-  border-bottom: 1px solid rgba($accent, 0.22);
+  border-bottom: 1px solid rgba(var(--acc), 0.22);
 }
 
 .observe-title {
   flex: 1;
   font-size: 0.9em;
   letter-spacing: 0.05em;
-  color: rgba($accent, 0.95);
+  color: rgba(var(--acc), 0.95);
 }
 
 .observe-chip {
   flex: 0 0 auto;
-  background: rgba($accent, 0.1);
-  border: 1px solid rgba($accent, 0.25);
+  background: rgba(var(--acc), 0.1);
+  border: 1px solid rgba(var(--acc), 0.25);
   border-radius: 999px;
   color: rgba(238, 243, 246, 0.85);
   font-family: inherit;
@@ -69,28 +70,28 @@ $accent: #7eb6d6;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
 
-  &:hover { background: rgba($accent, 0.2); color: #fff; }
-  &[aria-pressed='true'] { background: rgba($accent, 0.28); border-color: rgba($accent, 0.5); color: #fff; }
+  &:hover { background: rgba(var(--acc), 0.2); color: var(--hc-panel-text); }
+  &[aria-pressed='true'] { background: rgba(var(--acc), 0.28); border-color: rgba(var(--acc), 0.5); color: var(--hc-panel-text); }
 }
 
 .observe-close {
   flex: 0 0 auto;
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(var(--hc-panel-ink), 0.7);
   font-size: 1.4em;
   line-height: 1;
   cursor: pointer;
   padding: 0 0.2em;
 
-  &:hover { color: $accent; }
+  &:hover { color: rgb(var(--acc)); }
 }
 
 .observe-empty {
   margin: 0;
   padding: 1.5em 1em;
   font-size: 0.85em;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(var(--hc-panel-ink), 0.45);
 }
 
 .observe-scroll {
@@ -102,7 +103,7 @@ $accent: #7eb6d6;
 }
 
 .observe-group {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.05);
 }
 
 .ogroup-header {
@@ -118,7 +119,7 @@ $accent: #7eb6d6;
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: rgba($accent, 0.8);
+  color: rgba(var(--acc), 0.8);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -132,8 +133,8 @@ $accent: #7eb6d6;
   text-align: center;
   font-size: 0.6em;
   font-family: var(--hc-mono, monospace);
-  color: rgba($accent, 0.85);
-  background: rgba($accent, 0.12);
+  color: rgba(var(--acc), 0.85);
+  background: rgba(var(--acc), 0.12);
 }
 
 .observe-list {
@@ -149,7 +150,7 @@ $accent: #7eb6d6;
   padding: 0.45em 1em;
   transition: background 120ms ease;
 
-  &:hover { background: rgba($accent, 0.07); }
+  &:hover { background: rgba(var(--acc), 0.07); }
 }
 
 // Passive "there are changes you haven't taken" cue — a quiet amber dot against
@@ -182,7 +183,7 @@ $accent: #7eb6d6;
 
 .point-by {
   font-size: 0.68em;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(var(--hc-panel-ink), 0.5);
   display: inline-flex;
   align-items: center;
   gap: 0.4em;
@@ -191,7 +192,7 @@ $accent: #7eb6d6;
 .point-domain {
   font-family: var(--hc-mono, monospace);
   font-size: 0.92em;
-  color: rgba($accent, 0.7);
+  color: rgba(var(--acc), 0.7);
 }
 
 .interest-pill {
@@ -202,9 +203,9 @@ $accent: #7eb6d6;
   text-align: center;
   font-size: 0.66em;
   font-family: var(--hc-mono, monospace);
-  color: rgba($accent, 0.95);
-  background: rgba($accent, 0.14);
-  border: 1px solid rgba($accent, 0.3);
+  color: rgba(var(--acc), 0.95);
+  background: rgba(var(--acc), 0.14);
+  border: 1px solid rgba(var(--acc), 0.3);
 }
 
 // ── responsive: stay flush below the header at every header height ──

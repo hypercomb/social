@@ -3,6 +3,7 @@
        dim, no click-out and no docked half-size to choose between — Escape and
        the close button are the ways back. -->
   <aside
+    #panel
     class="chat-panel"
     [class.peeking]="peeking()"
     hcDockedPanel="chat-window"
@@ -13,6 +14,7 @@
     [minWidth]="300"
     [maxWidth]="720"
     [defaultWidth]="400"
+    [defaultText]="1"
     data-consumes-wheel
     (keydown)="onKey($event)"
     tabindex="-1"
@@ -27,6 +29,13 @@
          holds the level you walked to and the picks you made, and a fold is
          not a reason to lose either. -->
     <div class="chat-rail" #chatRail [attr.aria-label]="'chat.rail' | t"></div>
+    <div class="chat-rail-grip" role="separator" aria-orientation="vertical"
+      tabindex="0"
+      [attr.aria-label]="'chat.rail.resize' | t"
+      [title]="'chat.rail.resize' | t"
+      (pointerdown)="startRailDrag($event)"
+      (dblclick)="resetRailWidth()"
+      (keydown)="onRailGripKey($event)"></div>
     <header class="chat-header">
       <span class="mat-sym chat-glyph" aria-hidden="true">forum</span>
       <!-- WHOSE CONVERSATION IS THIS, and WHAT THE NEXT REQUEST CARRIES.
@@ -93,8 +102,19 @@
             (dragstart)="onReferenceDragStart($event, i)"
             (dragend)="onReferenceDragEnd()"
             [title]="'chat.context.one' | t: { tile: pick.name }">
+            <!-- THE PICTURE IS THE WAY TO SEE THE PICTURE. A mark this small
+                 answers WHICH and never WHAT, so pressing it opens the thing
+                 full size where it already is. The rest of the box is
+                 unchanged: the name still reads, the × still drops it, and
+                 dragging it off still sends it back to the clipboard —
+                 nothing that already meant something means something else. -->
             @if (contextThumbs()[pick.key]; as url) {
-              <img class="chat-box-img" [src]="url" alt="">
+              <button class="chat-box-look" type="button"
+                (click)="openPicture(pick, $event)"
+                [title]="'chat.reference.look' | t: { tile: pick.name }"
+                [attr.aria-label]="'chat.reference.look' | t: { tile: pick.name }">
+                <img class="chat-box-img" [src]="url" alt="">
+              </button>
             } @else {
               <span class="mat-sym chat-box-glyph" aria-hidden="true">hexagon</span>
             }
@@ -156,11 +176,37 @@
         [attr.aria-label]="(peeking() ? 'chat.peek.off' : 'chat.peek.on') | t">
         <span class="mat-sym" aria-hidden="true">{{ peeking() ? 'unfold_more' : 'unfold_less' }}</span>
       </button>
+      <!-- SHOW THE PROVIDERS. The footer line already points at the console,
+           but it only reads as a link once you have noticed the model word in
+           it; this is the same console as a standing affordance, in the corner
+           where a window keeps its controls. It sits immediately left of the
+           settings gear (pinned there by hcDockedPanel, out of this flow) —
+           window settings are about THIS window, providers are about what
+           answers in it, and the two belong side by side.
+           A TOGGLE, not a launcher: pressed while the console stands, and
+           pressing it again shuts it. -->
+      <button class="chat-providers" type="button" (click)="openProviders()"
+        [class.on]="providersOpen()"
+        [attr.aria-pressed]="providersOpen()"
+        [title]="(providersOpen() ? 'chat.providers.hide' : 'chat.providers.show') | t"
+        [attr.aria-label]="(providersOpen() ? 'chat.providers.hide' : 'chat.providers.show') | t">
+        <span class="mat-sym" aria-hidden="true">hub</span>
+      </button>
       <button class="chat-close" type="button" (click)="close()"
         [attr.aria-label]="'chat.close' | t">×</button>
     </header>
 
     @if (showSetup()) {
+    <!-- THE READING ROW. The header above it and the composer below it still
+         span the whole window — they are about the window, not about what is
+         being read in it. Only this row splits, so the providers console can
+         stand INSIDE the chat as a third column rather than shoving the
+         window's own chrome leftward to make room for itself.
+         Written once per branch because the composer lives inside the `@else`:
+         the setup checklist has no composer, and a wrapper that straddled the
+         branch would close a div the other branch never opened. -->
+    <div class="chat-body">
+    <div class="chat-reading">
       <!-- GUIDED SETUP — one step at a time, each checked off as it verifies
            itself. Steps 2 and 3 are LIVE: enabling flips the config gate, and
            the broker check completes on the worker's own bridge:status. The
@@ -288,7 +334,27 @@
           <p class="chat-setup-note">{{ 'chat.setup.note' | t }}</p>
         }
       </section>
+    </div>
+    <!-- WHERE THE PROVIDERS CONSOLE STANDS. Empty and zero-wide until the
+         console mounts into it: the console is cold chrome from essentials
+         (providers-window.view.ts) and finds this host by class, so the shell
+         offers a place without importing a module and the module renders
+         itself without knowing what an Angular template is. Its width IS
+         `--hc-providers-width`, which the console publishes and keeps live
+         while its grip is dragged. -->
+    <div class="chat-providers-host" [class.on]="providersOpen()"></div>
+    </div>
     } @else {
+    <!-- THE READING ROW. The header above it and the composer below it still
+         span the whole window — they are about the window, not about what is
+         being read in it. Only this row splits, so the providers console can
+         stand INSIDE the chat as a third column rather than shoving the
+         window's own chrome leftward to make room for itself.
+         Written once per branch because the composer lives inside the `@else`:
+         the setup checklist has no composer, and a wrapper that straddled the
+         branch would close a div the other branch never opened. -->
+    <div class="chat-body">
+    <div class="chat-reading">
     <!-- Which conversation you are in — the NAME, not a list. The list of a
          tile's conversations hangs under that tile in the rail, where it can
          say what each one is about; a flat list of every chat above the
@@ -313,6 +379,13 @@
            are READING, which is the common case and had nowhere to be. Same
            control both directions, like every other archive in the window. -->
       @if (canArchive() && activeId()) {
+        @if (activeGoal()) {
+          <button class="chat-goal" type="button" (click)="toggleGoal()"
+            [class.on]="goalOpen()" [attr.aria-expanded]="goalOpen()"
+            [title]="'chat.goal.open' | t" [attr.aria-label]="'chat.goal.open' | t">
+            <span class="mat-sym" aria-hidden="true">verified</span>
+          </button>
+        }
         <button class="chat-put" type="button"
           (click)="archiveCurrent()"
           [title]="(activeArchived() ? 'chat.archive.restore' : 'chat.archive.put') | t"
@@ -321,11 +394,22 @@
         </button>
         <span class="chat-bar-split" aria-hidden="true"></span>
       }
-      <button class="chat-new" type="button" (click)="newChat()"
-        [title]="'chat.new' | t" [attr.aria-label]="'chat.new' | t">
-        <span class="mat-sym" aria-hidden="true">add</span>
-      </button>
     </div>
+
+    @if (goalOpen() && activeGoal(); as goal) {
+      <section class="chat-goal-details" role="dialog" [attr.aria-label]="'chat.goal.title' | t">
+        <div class="chat-goal-head">
+          <span class="mat-sym" aria-hidden="true">task_alt</span>
+          <strong>{{ 'chat.goal.title' | t }}</strong>
+          <button type="button" (click)="toggleGoal()" [attr.aria-label]="'chat.goal.close' | t">×</button>
+        </div>
+        <p>{{ goal.details }}</p>
+        <button class="chat-goal-archive" type="button" (click)="archiveCurrent()">
+          <span class="mat-sym" aria-hidden="true">archive</span>
+          {{ 'chat.goal.archive' | t }}
+        </button>
+      </section>
+    }
 
     @if (!railVisible() && listOpen()) {
       <ul class="chat-list">
@@ -455,12 +539,12 @@
              actually listening, and a way out of it. -->
         <div class="chat-msg ai chat-wait" role="status" aria-live="polite">
           <span class="chat-msg-text" [class.chat-think]="!unattended()">{{
-            (unattended() ? 'chat.unattended' : bridgeUp() ? 'chat.thinking' : 'chat.queued') | t
+            (unattended() ? 'chat.unattended' : bridgeUp() ? 'chat.thinking' : 'chat.queued.wait') | t
           }}</span>
           <span class="chat-wait-clock">{{ elapsedLabel() }}</span>
         </div>
         @if (unattended()) {
-          <p class="chat-wait-hint">{{ 'chat.unattended.hint' | t }}</p>
+          <p class="chat-wait-hint">{{ 'chat.unattended.hint.wait' | t }}</p>
         }
       }
     </div>
@@ -476,39 +560,38 @@
     }
     </div>
 
-    <footer class="chat-foot">
-      <!-- Availability, named — FIRST, because whether an answer can come at
-           all is read before which model would give it. A rule under it
-           separates the standing fact from the choices about this question. -->
-      <div class="chat-link" [class.waiting]="!bridgeUp()">
-        <span class="chat-dot" aria-hidden="true"></span>
-        <span>{{ (bridgeUp() ? 'chat.link.up' : hostConfigured() ? 'chat.link.host' : 'chat.link.waiting') | t }}</span>
-      </div>
+    <!-- WHAT CAN ANSWER, on one line: the model and whose bridge it is coming
+           over. The row of reported context that used to follow
+           it is gone — nothing there was maintained, and a path reading
+           directly after a model made the model look like it had one.
 
-      <!-- Context, REPORTED, under the rule. Where you are standing and what you have selected
-           is what the question carries — there is nothing to maintain here. -->
-      <div class="chat-status">
-        <select class="chat-model" (change)="onModelChange($event)"
-          [attr.aria-label]="'chat.model' | t" [title]="'chat.model' | t">
-          @for (name of models; track name) {
-            <option [value]="name" [selected]="name === model()">{{ name }}</option>
-          }
-        </select>
-        <span class="chat-where" [title]="path()">{{ path() }}</span>
-        @if (chosen()) {
-          <span class="chat-targets">{{ 'chat.selected' | t: { count: chosen() } }}</span>
-        }
-        <!-- The gathered context used to be counted here; it is now SHOWN,
-             box by box, in the header row where the request is composed. -->
-        <!-- Attached context (portal-drop branches) rides with every question —
-             a rider the participant can't see is a surprise, so it is counted
-             here beside the path it belongs to. -->
-        @if (contextCount() > 0) {
-          <span class="chat-context" [title]="'chat.context.title' | t: { count: contextCount() }">
-            <span class="mat-sym" aria-hidden="true">attach_file</span>{{ contextCount() }}
-          </span>
-        }
-      </div>
+           NAMED, NOT ASSUMED. The bridge is one socket that any frontier CLI
+           can park on, so the line says WHO the designation put behind it
+           rather than the one vendor that used to be the only answer. With
+           nothing designated it says only what it knows: the link's state. -->
+    <div class="chat-link" [class.waiting]="!linkUp()">
+        <!-- WHO ANSWERS — reported, not asked. It leads the line because it is
+             the shortest thing on it and the one most often looked for: the
+             label says which model answers, and the sentence after it says
+             from whose bridge. It used to sit in
+             the row below, where the path fell in directly behind it and the
+             two read as one string — a model with a location after it. The
+             press is the way to the providers console, the one place company,
+             model and level of thinking are chosen. -->
+      <button class="chat-answering" type="button" (click)="openProviders()"
+        [title]="answeringWhy() || ('chat.answering' | t)"
+        [attr.aria-label]="'chat.answering' | t">
+        <span class="mat-sym" aria-hidden="true">auto_awesome</span>{{ answering() }}
+      </button>
+      @if (designated(); as who) {
+        <span>{{ (linkUp() ? 'chat.link.ready' : hostConfigured() ? 'chat.link.host' : 'chat.link.pending') | t: { provider: who.label } }}</span>
+      } @else {
+        <span>{{ (linkUp() ? 'chat.link.ready.any' : hostConfigured() ? 'chat.link.host' : 'chat.link.pending.any') | t }}</span>
+      }
+    </div>
+
+    <footer class="chat-foot"
+      hcDockInset="bottom" [hcDockInsetActive]="peeking()">
 
       <div class="chat-inputrow">
         <textarea #input class="chat-input" rows="1"
@@ -534,6 +617,59 @@
         }
       </div>
     </footer>
+    </div>
+    <!-- WHERE THE PROVIDERS CONSOLE STANDS. It is the reading column's sibling,
+         so it spans the complete remaining height while the composer remains
+         inside the chat-reading column beside it. -->
+    <div class="chat-providers-host" [class.on]="providersOpen()"></div>
+    </div>
+    }
+
+    <!-- LOOKING AT ONE, WITHOUT PUTTING ANYTHING DOWN. Inside the panel, not
+         over the document and not in another tab: the composer still holds an
+         unsent question and the shelf still holds what you gathered, and both
+         survive because nothing navigated.
+
+         ← and → walk the shelf's other pictures — the "next one of these"
+         axis — and Escape, a backdrop press, or the × come back out. -->
+    @if (viewingUrl(); as url) {
+      <div class="chat-look" role="dialog" aria-modal="true"
+        tabindex="-1" #lookLayer
+        [attr.aria-label]="'chat.reference.look' | t: { tile: viewing()?.name ?? '' }"
+        (keydown)="onPictureKey($event)"
+        (click)="closePicture()">
+        <!-- The picture takes the press without closing; only the ground
+             around it means "done looking". -->
+        <img class="chat-look-img" [src]="url" [alt]="viewing()?.name ?? ''"
+          (click)="$event.stopPropagation()">
+
+        <div class="chat-look-bar" (click)="$event.stopPropagation()">
+          @if (viewingCount() > 1) {
+            <button class="chat-look-step" type="button"
+              (click)="stepPicture(-1)"
+              [title]="'chat.reference.previous' | t"
+              [attr.aria-label]="'chat.reference.previous' | t">
+              <span class="mat-sym" aria-hidden="true">chevron_left</span>
+            </button>
+          }
+          <span class="chat-look-name">{{ viewing()?.name }}</span>
+          @if (viewingCount() > 1) {
+            <span class="chat-look-count">{{ viewingIndex() + 1 }} / {{ viewingCount() }}</span>
+            <button class="chat-look-step" type="button"
+              (click)="stepPicture(1)"
+              [title]="'chat.reference.next' | t"
+              [attr.aria-label]="'chat.reference.next' | t">
+              <span class="mat-sym" aria-hidden="true">chevron_right</span>
+            </button>
+          }
+          <button class="chat-look-off" type="button"
+            (click)="closePicture()"
+            [title]="'chat.reference.done' | t"
+            [attr.aria-label]="'chat.reference.done' | t">
+            <span class="mat-sym" aria-hidden="true">close</span>
+          </button>
+        </div>
+      </div>
     }
   </aside>
 }

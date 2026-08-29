@@ -28,6 +28,42 @@ $actions-corner: 12rem;
 
 // ── breadcrumb (below header, right-aligned) ────────────
 
+// Agent visibility lives at the seam between the command line and the left
+// control rail: it describes what is painted on the hive, but is useful often
+// enough that it should not be buried in the rail's edit mode. Text makes the
+// state explicit; the compact cold-chrome treatment keeps it subordinate to
+// both pieces of primary chrome.
+.agent-visibility-toggle {
+  position: fixed;
+  top: max(
+    calc(2.75rem * var(--hc-header-zoom, 1.0)),
+    calc(var(--hc-header-bottom, 0px) + 0.35rem)
+  );
+  left: 0.7rem;
+  z-index: 59999;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  padding: 0.22rem 0.42rem;
+  border: 1px solid color-mix(in srgb, var(--md-outline-variant) 55%, transparent);
+  border-radius: var(--hc-radius-floating, 4px);
+  background: color-mix(in srgb, var(--md-surface-c-low) 82%, transparent);
+  color: color-mix(in srgb, var(--md-on-surface) 62%, transparent);
+  font-family: var(--hc-mono);
+  font-size: 0.64rem;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+
+  &.rail-left { left: calc(#{$rail-width} + 0.45rem); }
+  .mat-sym { font-size: 0.9rem; }
+  &:hover, &:focus-visible { color: var(--md-on-surface); }
+  &.agents-hidden { color: rgba(var(--hc-chrome-accent), var(--hc-ink-a-loud)); }
+
+  @media (max-width: 599px), (max-height: 449px) { display: none; }
+}
+
 .breadcrumb-top {
   position: fixed;
   // Dock below the header. The static term tracks the header size
@@ -54,33 +90,33 @@ $actions-corner: 12rem;
   font-size: 0.65rem;
   font-style: italic;
   letter-spacing: 0.08em;
-  color: rgba(245, 245, 245, 0.3);
+  color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-faint));
   text-transform: lowercase;
   pointer-events: auto;
   transition: opacity 200ms ease;
 
   .public-crumb { padding: 0; font-weight: 500; }
-  .private-crumb { color: rgba(140, 170, 210, 0.7); padding: 0; }
-  .sep-crumb { color: rgba(210, 215, 220, 0.3); padding: 0 0.3em; font-size: 0.55em; vertical-align: middle; }
+  .private-crumb { color: var(--hc-status-info); padding: 0; }
+  .sep-crumb { color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-ghost)); padding: 0 0.3em; font-size: 0.55em; vertical-align: middle; }
   .secure-crumb { padding: 0; font-weight: 500; }
-  .unsecure-crumb { color: hsl(0, 70%, 50%); padding: 0; }
-  .secret-crumb { color: rgba(218, 165, 100, 0.85); padding: 0; }
-  .domain-crumb { color: rgba(210, 215, 220, 0.6); padding: 0; }
-  .branch-crumb { color: rgba(190, 140, 200, 0.85); padding: 0; font-weight: 500; font-size: 1.12em; }
+  .unsecure-crumb { color: var(--hc-status-alert); padding: 0; }
+  .secret-crumb { color: var(--hc-status-secret); padding: 0; }
+  .domain-crumb { color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-quiet)); padding: 0; }
+  .branch-crumb { color: var(--hc-status-branch); padding: 0; font-weight: 500; font-size: 1.12em; }
   .branch-bracket { font-size: 1.45em; font-weight: 400; vertical-align: -0.06em; }
   // The tile under the pointer — the only place its name shows while hovered.
   // Cool and unweighted against the branch crumb's warm 500: it says "this is
   // what you are ON", never "this is where you ARE".
-  .hover-crumb { color: rgba(150, 200, 230, 0.9); padding: 0; font-weight: 400; }
+  .hover-crumb { color: var(--hc-status-info); padding: 0; font-weight: 400; }
 
   .install-crumb {
     padding: 0;
     font-weight: 500;
     transition: opacity 250ms ease, color 250ms ease;
-    &[data-state='checking'] { color: rgba(150, 165, 180, 0.7); }
-    &[data-state='syncing']  { color: hsl(40, 80%, 60%); animation: install-pulse 1.4s ease-in-out infinite; }
-    &[data-state='complete'] { color: hsl(140, 60%, 55%); }
-    &[data-state='error']    { color: hsl(0, 70%, 55%); }
+    &[data-state='checking'] { color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-quiet)); }
+    &[data-state='syncing']  { color: var(--hc-status-warn); animation: install-pulse 1.4s ease-in-out infinite; }
+    &[data-state='complete'] { color: var(--hc-status-ok); }
+    &[data-state='error']    { color: var(--hc-status-alert); }
   }
 
   @keyframes install-pulse {
@@ -91,7 +127,7 @@ $actions-corner: 12rem;
   .crumb-link {
     cursor: pointer;
     transition: color 150ms ease;
-    &:hover { color: rgba(245, 245, 245, 0.7); }
+    &:hover { color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-loud)); }
   }
 
   &.faded {
@@ -131,7 +167,7 @@ $actions-corner: 12rem;
   line-height: inherit;
   letter-spacing: 0.02em;
   white-space: nowrap;
-  color: rgba(214, 228, 240, 0.5);
+  color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-quiet));
   cursor: pointer;
   transition: color var(--md-dur-short) var(--md-easing-standard),
               border-color var(--md-dur-short) var(--md-easing-standard);
@@ -141,26 +177,26 @@ $actions-corner: 12rem;
     width: 0.42em;
     height: 0.42em;
     border-radius: 50%;
-    background: var(--tag-color, rgba(126, 182, 214, 0.8));
+    background: var(--tag-color, rgba(var(--hc-chrome-accent), 0.8));
     opacity: 0.55;
     flex-shrink: 0;
     transition: opacity var(--md-dur-short) var(--md-easing-standard);
   }
 
-  &:hover { color: rgba(232, 242, 250, 0.85); }
+  &:hover { color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-loud)); }
   &:hover::before { opacity: 0.9; }
 }
 
 // active filter — bright name + a hairline underline in the tag's own colour
 .tag-active {
-  color: #eaf5fb;
-  border-bottom-color: var(--tag-color, rgba(126, 182, 214, 0.8));
+  color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-loud));
+  border-bottom-color: var(--tag-color, rgba(var(--hc-chrome-accent), 0.8));
   &::before { opacity: 1; }
 }
 
 // tile rollover — the tags defining the hovered tile light up to full white
 .tag-hovered {
-  color: #ffffff;
+  color: var(--hc-chrome-text);
   &::before { opacity: 1; }
 }
 
@@ -176,13 +212,34 @@ $actions-corner: 12rem;
 .tag-float {
   position: fixed;
   bottom: 0.45rem;
-  left: 0.7rem;
+  // BESIDE AN OPEN TOOLWINDOW, NOT UNDER IT. The strip is position:fixed
+  // chrome like the breadcrumb and the undo/redo corner, so it reads the
+  // reserved edges (core/viewport-inset-vars.ts) rather than the raw
+  // viewport: a right-docked panel took the right end of the row and painted
+  // straight over the tags that ran under it. The control bar itself stays
+  // pinned — panels fit around the bar — but the strip is not the bar.
+  // ONE START, DECLARED ONCE. Both variants set only this; the width below is
+  // written against it, so the row's two ends can never be computed from
+  // different assumptions about where it begins.
+  --tag-left: calc(0.7rem + var(--hc-inset-left, 0px));
+  left: var(--tag-left);
   // Hugs its content and grows rightward only as far as the free width — so
   // the arrow ends up beside the last tag, and the opened-out surface is only
   // as wide as the tags it holds instead of a mostly-empty full-width bar.
-  // The max-width is what keeps a long list off the undo/redo corner.
+  //
+  // THE ROW ENDS WHERE THE CORNER BEGINS, and the corner is MEASURED
+  // (`--hc-actions-width`, published by edit-actions) rather than guessed at
+  // 12rem. The undo/redo cluster hugs an open toolwindow's edge — it carries
+  // the same `--hc-inset-right` — so reserving its true width is what puts
+  // the tags neatly beside the panel instead of a corner's worth short of it.
+  // 1.275rem = the cluster's own 0.675rem edge offset + the gap between them.
   width: fit-content;
-  max-width: calc(100vw - 0.7rem - #{$actions-corner});
+  max-width: calc(
+    100vw - var(--tag-left)
+    - var(--hc-inset-right, 0px)
+    - var(--hc-actions-width, #{$actions-corner})
+    - 1.275rem
+  );
   // border-box or the opened-out surface's padding is ADDED to max-width and
   // the panel overhangs the corner it was told to keep clear of.
   box-sizing: border-box;
@@ -229,9 +286,15 @@ $actions-corner: 12rem;
 .tag-float:not(.expanded) .tag-strip { max-height: calc(1.35em + 0.2rem); }
 
 // Left-docked menu: start the row just inside the rail rather than under it.
+// The rail's LIVE inner edge (`--hc-controls-left`, published by
+// #measureControlsEdge) rather than the static width, floored at it so a beat
+// before the first measurement never starts the row under the rail. A
+// left-docked panel is a second obstruction and is added on top; the width
+// follows from `--tag-left` with no second formula to keep in step.
 .tag-float.rail-left {
-  left: calc(#{$rail-width} + 0.85rem);
-  max-width: calc(100vw - #{$rail-width} - 0.85rem - #{$actions-corner});
+  --tag-left: calc(
+    max(var(--hc-controls-left, 0px), #{$rail-width}) + 0.85rem + var(--hc-inset-left, 0px)
+  );
 }
 
 // ── opened out ────────────────────────────────────────────
@@ -241,8 +304,8 @@ $actions-corner: 12rem;
 // rather than climbing the screen.
 .tag-float.expanded {
   padding: 0.45rem 0.6rem;
-  background: rgba(14, 14, 22, 0.9);
-  border: 1px solid rgba(126, 182, 214, 0.18);
+  background: rgba(var(--hc-chrome-glass), var(--hc-chrome-glass-a));
+  border: 1px solid rgba(var(--hc-chrome-rule), 0.32);
   border-radius: 4px;
 
   .tag-strip {
@@ -260,7 +323,7 @@ $actions-corner: 12rem;
   gap: 0.1rem;
   margin-right: 0.35rem;
   padding-right: 0.5rem;
-  border-right: 1px solid rgba(126, 182, 214, 0.18);
+  border-right: 1px solid rgba(var(--hc-chrome-rule), 0.32);
 }
 
 .tag-scope-opt {
@@ -273,18 +336,18 @@ $actions-corner: 12rem;
   border: none;
   border-radius: 3px;
   background: none;
-  color: rgba(126, 182, 214, 0.5);
+  color: rgba(var(--hc-chrome-accent), var(--hc-ink-a-faint));
   cursor: pointer;
   transition: color var(--md-dur-short) var(--md-easing-standard),
               background var(--md-dur-short) var(--md-easing-standard);
 
   .mat-sym { font-size: 0.95rem; line-height: 1; }
 
-  &:hover { color: #eaf5fb; }
+  &:hover { color: var(--hc-chrome-text); }
 
   &.selected {
-    color: #d6ecf7;
-    background: rgba(126, 182, 214, 0.16);
+    color: var(--hc-chrome-text);
+    background: rgba(var(--hc-chrome-accent), 0.16);
   }
 }
 
@@ -299,14 +362,14 @@ $actions-corner: 12rem;
   padding: 0;
   border: none;
   background: none;
-  color: rgba(126, 182, 214, 0.55);
+  color: rgba(var(--hc-chrome-accent), var(--hc-ink-a-faint));
   cursor: pointer;
   transition: color var(--md-dur-short) var(--md-easing-standard);
 
   .mat-sym { font-size: 1.02rem; line-height: 1; }
 
-  &:hover { color: #eaf5fb; }
-  &.open { color: rgba(126, 182, 214, 0.9); }
+  &:hover { color: var(--hc-chrome-text); }
+  &.open { color: rgba(var(--hc-chrome-accent), var(--hc-ink-a-loud)); }
 }
 
 // Mobile keeps the older right-anchored placement — the bottom centre is the
@@ -350,7 +413,7 @@ $actions-corner: 12rem;
   padding: 0;
   border: none;
   background: none;
-  color: rgba(126, 182, 214, 0.75);
+  color: rgba(var(--hc-chrome-accent), var(--hc-ink-a-quiet));
   cursor: pointer;
   flex-shrink: 0;
   opacity: 0.55;
@@ -363,9 +426,9 @@ $actions-corner: 12rem;
     line-height: 1;
   }
 
-  &:hover { color: #eaf5fb; }
-  &[data-scope='children'] { color: rgba(126, 182, 214, 0.9); }
-  &[data-scope='global'] { color: #d6ecf7; }
+  &:hover { color: var(--hc-chrome-text); }
+  &[data-scope='children'] { color: rgba(var(--hc-chrome-accent), var(--hc-ink-a-loud)); }
+  &[data-scope='global'] { color: var(--hc-chrome-text); }
 }
 
 // full strength while the list is engaged, or on keyboard focus
@@ -406,6 +469,15 @@ $actions-corner: 12rem;
       transform: translateX(-50%) translateY(0);
     }
   }
+
+  // STANDING BESIDE A WINDOW, NOT UNDER THE CANVAS'S CHROME. A view that keeps
+  // this bar (`view:keeps-controls`) has laid itself out against the edge the
+  // bar reserves, so the two never share a pixel — but the bar's band (60000)
+  // is below the docked-window band (100002), and the window's shadow and its
+  // anchored surfaces would still wash over the rail. Lifted for exactly as
+  // long as such a view is open, and no longer: the ordinary case is chrome ON
+  // the canvas, which a takeover is meant to be able to cover.
+  &.over-view { z-index: 100004; }
 
   // When the user has drag-moved the pill, drop the bottom/transform default
   // and honor explicit [style.left] / [style.top] bindings.
@@ -471,6 +543,15 @@ $actions-corner: 12rem;
   // clears the header bottom at any size: 2.8rem × the active header zoom
   top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
   bottom: 0;
+
+  // …EXCEPT when the rail is standing beside a view that kept it. The gap at
+  // the top is there to clear the header bar, and the shell hides the header
+  // for exactly the same `view:active` that put us here — so the gap clears
+  // nothing and shows a thumbnail-sized square of hive above the rail, which
+  // reads as a hole rather than as the hive. Run to the top instead; the
+  // reservation follows, because `--hc-controls-left-top` is measured from
+  // this box (and the height change is what re-measures it).
+  &.over-view { top: 0; }
   transform: none;
   align-items: stretch; // let the rail fill the full height
 
@@ -552,8 +633,8 @@ $actions-corner: 12rem;
     > .ctl-btn { flex-shrink: 0; }
   }
 
-  // Bee (tour), then pin, then home lead the list (see the order rules at the
-  // bottom of this file) — all three scroll with the rest of the icons.
+  // Chat leads the list, followed by pin and home. The tutorial bee closes the
+  // scrollable run (see the explicit order rules below).
   // The active (view-locked) state must read on EVERY platform: macOS/Safari
   // does not reliably repaint the Material Symbols FILL axis when .filled is
   // toggled, so the locked cue here never relies on the variable-font fill
@@ -568,24 +649,24 @@ $actions-corner: 12rem;
     &:hover { color: whitesmoke; }
 
     &.active {
-      color: #00e5a0;
-      background: rgba(0, 229, 160, 0.16);
-      box-shadow: inset 0 0 0 1px rgba(0, 229, 160, 0.45);
+      color: var(--hc-status-ok);
+      background: color-mix(in srgb, var(--hc-status-ok) 14%, transparent);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hc-status-ok) 45%, transparent);
       .mat-sym {
-        color: #00e5a0;
+        color: var(--hc-status-ok);
         transform: rotate(45deg) scale(1.08);
-        text-shadow: 0 0 8px rgba(0, 229, 160, 0.45);
+        text-shadow: 0 0 8px color-mix(in srgb, var(--hc-status-ok) 45%, transparent);
       }
     }
   }
 
-  // The bee sits above pin — the tour opener leads the rail. Same box and gap
-  // as every other icon; only the amber tint marks it as the "start here".
+  // The bee closes the list. Same box and gap as every other icon; only the
+  // amber tint marks it as guided help rather than an everyday tool.
   .rail-tutorial {
     flex-shrink: 0;
     padding: 0.5rem 0 0.55rem;
-    color: color-mix(in srgb, #ffc65c 72%, var(--md-on-surface));
-    &:hover { color: #ffc65c; }
+    color: color-mix(in srgb, var(--hc-status-warn) 78%, var(--md-on-surface));
+    &:hover { color: var(--hc-status-warn); }
   }
 
   // Home sits directly under pin. No divider under it — the rail is one
@@ -717,17 +798,17 @@ $actions-corner: 12rem;
   .controls-row { flex-direction: column; }
 }
 
-// Explicit rail icon order (top → bottom). The bee (guided tour) leads, then
-// pin and home (the two navigation constants), then registry order — except the two
+// Explicit rail icon order (top → bottom). Chat leads, then pin and home
+// (the two navigation constants), then registry order — except the two
 // magnifiers, flipped so the +(zoom-in) stays ABOVE the −(zoom-out). Any
 // enabled extra (default order 50) falls below the named set. The edit-mode
 // chevron and back live in the pinned footer (a separate zone), so they're
 // not ordered here.
 .pill-stage.dock-left .controls-row {
   .ctl-btn                             { order: 50; }
-  .rail-tutorial                       { order: -3; }
   .rail-pin                            { order: -2; }
   .rail-home                           { order: -1; }
+  .rail-tutorial                       { order: 100; }
   .ctl-btn[data-ctrl-id='dcp']         { order: 1; }
   // Portals rides directly under the installer — both are ways OUT of this
   // page. It needs its own rule: anything unlisted falls to the catch-all
@@ -842,7 +923,7 @@ $actions-corner: 12rem;
   // state rather than running actions. Kept low-key per the project's
   // no-flashy-effects rule.
   &.editing {
-    outline: 1px dashed rgba(200, 200, 200, 0.25);
+    outline: 1px dashed rgba(var(--hc-chrome-ink), var(--hc-ink-a-ghost));
     outline-offset: 2px;
     border-radius: 3px;
   }
@@ -865,8 +946,21 @@ $actions-corner: 12rem;
 .rail-footer { display: contents; }
 
 .controls-pill:not(.column) {
+  // A floating bar is one continuous run. Narrow chat space must never turn
+  // it into two icon rows; keep every nested grouping on the same line and
+  // let the run scroll horizontally when it cannot fit the viewport.
+  flex-wrap: nowrap;
+  max-width: calc(100vw - 1rem);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  &::-webkit-scrollbar { display: none; }
+
   .controls-rows { flex-direction: row; align-items: center; }
-  .rail-back     { order: -1; }   // leftmost, as before
+  .controls-rows,
+  .controls-row,
+  .controls-section { flex-wrap: nowrap; flex-shrink: 0; }
+  .rail-back     { order: -1; flex-shrink: 0; }   // leftmost, as before
   .controls-row  { order: 0; }
   .expand-toggle { order: 1; }    // rightmost, as before
 }
@@ -931,7 +1025,7 @@ $actions-corner: 12rem;
 .expand-chevron {
   display: inline-block;
   transition: transform 200ms ease;
-  color: rgba(200, 200, 200, 0.5);
+  color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-faint));
   line-height: 1;
 
   // edit mode rotates the right-pointing chevron to point down
@@ -945,7 +1039,7 @@ $actions-corner: 12rem;
 .controls-divider {
   width: 1px;
   height: 0.96rem;
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(var(--hc-chrome-ink), 0.16);
   margin: 0 0.3rem;
 }
 
@@ -962,7 +1056,7 @@ $actions-corner: 12rem;
   background: none;
   border: none;
   border-radius: 3px;
-  color: rgba(200, 200, 200, 0.8);
+  color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-plain));
   cursor: pointer;
   transition: color 200ms ease, background 200ms ease;
 
@@ -993,7 +1087,7 @@ $actions-corner: 12rem;
 
   &:hover {
     color: whitesmoke;
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(var(--hc-chrome-ink), 0.10);
   }
 
   &:active { transform: scale(0.94); }
@@ -1009,9 +1103,9 @@ $actions-corner: 12rem;
     white-space: nowrap;
     font-family: var(--hc-mono);
     font-size: 0.9rem;
-    color: rgba(245, 245, 245, 0.75);
-    background: rgba(14, 18, 24, 0.88);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(var(--hc-chrome-glass), var(--hc-ink-a-loud));
+    background: rgba(var(--hc-chrome-ink), 0.92);
+    border: 1px solid rgba(var(--hc-chrome-glass), 0.16);
     border-radius: 3px;
     opacity: 0;
     pointer-events: none;
@@ -1021,7 +1115,7 @@ $actions-corner: 12rem;
 
 
   &:focus-visible {
-    outline: 1px solid rgba(255, 255, 255, 0.3);
+    outline: 1px solid rgba(var(--hc-chrome-accent), 0.65);
     outline-offset: 1px;
   }
 
@@ -1030,12 +1124,12 @@ $actions-corner: 12rem;
     line-height: 0;
     display: inline-block;
     transform: translateY(-0.5px);
-    color: rgba(200, 151, 90, 0.75);
+    color: var(--hc-status-secret);
   }
 
   &.active {
-    color: #00e5a0;
-    background: rgba(0, 229, 160, 0.08);
+    color: var(--hc-status-ok);
+    background: color-mix(in srgb, var(--hc-status-ok) 14%, transparent);
   }
 
   // ── locked-attempt pulse ────────────────────────────────
@@ -1054,17 +1148,17 @@ $actions-corner: 12rem;
   //   global (green) — every layer auto-fits on navigation, everywhere
   // Plain click always performs a zoom-to-fit without changing state.
   &.fit-btn {
-    color: rgba(245, 245, 245, 0.85);
+    color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-plain));
     // Anchors the caret. The badge does the same trick from .clipboard-btn.
     position: relative;
 
-    &:hover { color: #ffffff; }
+    &:hover { color: var(--hc-chrome-text); }
 
     &.fit-global {
-      color: #00e5a0;
-      background: rgba(0, 229, 160, 0.10);
+      color: var(--hc-status-ok);
+      background: color-mix(in srgb, var(--hc-status-ok) 14%, transparent);
     }
-    &.fit-global:hover { color: #36f2b4; }
+    &.fit-global:hover { color: var(--hc-status-ok); }
 
     // The view flyout's only affordance. Dim until the button is hovered —
     // it is a hint that a menu is here, not a second control competing with
@@ -1081,15 +1175,15 @@ $actions-corner: 12rem;
       justify-content: center;
       font-size: 0.72rem;
       line-height: 1;
-      color: rgba(245, 245, 245, 0.4);
+      color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-faint));
       cursor: pointer;
       transition: color 120ms ease;
     }
 
-    &:hover .fit-caret { color: rgba(245, 245, 245, 0.85); }
-    .fit-caret:hover { color: #ffffff; }
-    &.fit-global .fit-caret { color: rgba(0, 229, 160, 0.65); }
-    &.fit-global:hover .fit-caret { color: #36f2b4; }
+    &:hover .fit-caret { color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-plain)); }
+    .fit-caret:hover { color: var(--hc-chrome-text); }
+    &.fit-global .fit-caret { color: color-mix(in srgb, var(--hc-status-ok) 65%, transparent); }
+    &.fit-global:hover .fit-caret { color: var(--hc-status-ok); }
   }
 }
 
@@ -1103,7 +1197,7 @@ $actions-corner: 12rem;
     letter-spacing: 0.04em;
   }
 
-  &.active .mesh-label { color: #00e5a0; }
+  &.active .mesh-label { color: var(--hc-status-ok); }
 }
 
 // ── voice input mic button ────────────────────────────
@@ -1114,8 +1208,8 @@ $actions-corner: 12rem;
   touch-action: none; // prevent scroll on long-press
 
   &.recording {
-    color: #ff4444;
-    background: rgba(255, 68, 68, 0.12);
+    color: var(--hc-status-alert);
+    background: color-mix(in srgb, var(--hc-status-alert) calc(0.12 * 100%), transparent);
 
     .mat-sym {
       animation: mic-pulse 1.2s ease-in-out infinite;
@@ -1127,7 +1221,7 @@ $actions-corner: 12rem;
       position: absolute;
       inset: -2px;
       border-radius: var(--hc-radius-floating);
-      border: 1px solid rgba(255, 68, 68, 0.4);
+      border: 1px solid color-mix(in srgb, var(--hc-status-alert) calc(0.4 * 100%), transparent);
       animation: mic-glow 1.2s ease-in-out infinite;
       pointer-events: none;
     }
@@ -1140,20 +1234,20 @@ $actions-corner: 12rem;
 }
 
 @keyframes mic-glow {
-  0%, 100% { border-color: rgba(255, 68, 68, 0.2); box-shadow: 0 0 4px rgba(255, 68, 68, 0.1); }
-  50% { border-color: rgba(255, 68, 68, 0.5); box-shadow: 0 0 10px rgba(255, 68, 68, 0.25); }
+  0%, 100% { border-color: color-mix(in srgb, var(--hc-status-alert) calc(0.2 * 100%), transparent); box-shadow: 0 0 4px color-mix(in srgb, var(--hc-status-alert) calc(0.1 * 100%), transparent); }
+  50% { border-color: color-mix(in srgb, var(--hc-status-alert) calc(0.5 * 100%), transparent); box-shadow: 0 0 10px color-mix(in srgb, var(--hc-status-alert) calc(0.25 * 100%), transparent); }
 }
 
 // Header lock-button attention pulse — two amber throbs with a glow, then
 // settles back to the button's resting (locked-green) state. Colour is set
 // on the .mat-sym child via currentColor; the button animates transform +
-// text-shadow. Amber: rgb(240, 176, 92).
+// text-shadow. Amber: var(--hc-status-warn).
 @keyframes lock-bump-pulse {
-  0%   { transform: scale(1);    color: rgb(240, 176, 92); text-shadow: 0 0 10px rgba(240, 176, 92, 0.85); }
-  18%  { transform: scale(1.28); color: rgb(245, 186, 104); text-shadow: 0 0 12px rgba(245, 186, 104, 0.9); }
-  36%  { transform: scale(1.02); color: rgb(240, 176, 92); text-shadow: 0 0 6px rgba(240, 176, 92, 0.6); }
-  54%  { transform: scale(1.16); color: rgb(245, 186, 104); text-shadow: 0 0 10px rgba(245, 186, 104, 0.8); }
-  72%  { transform: scale(1);    color: rgb(240, 176, 92); text-shadow: 0 0 5px rgba(240, 176, 92, 0.5); }
+  0%   { transform: scale(1);    color: var(--hc-status-warn); text-shadow: 0 0 10px color-mix(in srgb, var(--hc-status-warn) calc(0.85 * 100%), transparent); }
+  18%  { transform: scale(1.28); color: var(--hc-status-warn); text-shadow: 0 0 12px color-mix(in srgb, var(--hc-status-warn) calc(0.9 * 100%), transparent); }
+  36%  { transform: scale(1.02); color: var(--hc-status-warn); text-shadow: 0 0 6px color-mix(in srgb, var(--hc-status-warn) calc(0.6 * 100%), transparent); }
+  54%  { transform: scale(1.16); color: var(--hc-status-warn); text-shadow: 0 0 10px color-mix(in srgb, var(--hc-status-warn) calc(0.8 * 100%), transparent); }
+  72%  { transform: scale(1);    color: var(--hc-status-warn); text-shadow: 0 0 5px color-mix(in srgb, var(--hc-status-warn) calc(0.5 * 100%), transparent); }
   100% { transform: scale(1);    text-shadow: none; }
 }
 
@@ -1182,13 +1276,13 @@ $actions-corner: 12rem;
   font-weight: 500;
   letter-spacing: 0.3px;
   text-transform: uppercase;
-  color: rgba(245, 245, 245, 0.6);
+  color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-quiet));
 }
 
 .close-x {
   font-size: 0.99rem;
   line-height: 1;
-  color: rgba(200, 200, 200, 0.8);
+  color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-plain));
 }
 
 .room-display {
@@ -1200,7 +1294,7 @@ $actions-corner: 12rem;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: rgba(218, 165, 100, 0.9);
+  color: var(--hc-status-secret);
   padding: 0 0.3rem;
 }
 
@@ -1214,7 +1308,7 @@ $actions-corner: 12rem;
   width: 4px;
   z-index: 60002;
 
-  background: rgba(200, 151, 90, 0.6);
+  background: color-mix(in srgb, var(--hc-status-secret) 70%, transparent);
   border-radius: 0 2px 2px 0;
   opacity: 0;
   transform: scaleX(0);
@@ -1360,15 +1454,15 @@ $actions-corner: 12rem;
     min-height: 3.4rem;
     padding: 0.55rem;
     border-radius: 50%;
-    background: rgba(14, 18, 24, 0.72);
+    background: rgba(var(--hc-chrome-glass), calc(var(--hc-chrome-glass-a) * 0.9));
     backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(var(--hc-chrome-rule), 0.34);
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
-    color: rgba(245, 245, 245, 0.85);
+    color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-plain));
 
     --icon-size: 1.5rem;
 
-    &:hover { background: rgba(14, 18, 24, 0.88); }
+    &:hover { background: rgba(var(--hc-chrome-glass), var(--hc-chrome-glass-a)); }
     &:active:not(:disabled) { transform: scale(0.92); }
 
     // Unavailable ≠ invisible. The bar is a fixed five-slot rhythm, so a
@@ -1448,8 +1542,8 @@ $actions-corner: 12rem;
   // only cue that it is the fixed one.
   .ctl-btn.mobile-center {
     align-self: center;
-    background: rgba(20, 26, 34, 0.85);
-    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(var(--hc-chrome-glass), var(--hc-chrome-glass-a));
+    border-color: rgba(var(--hc-chrome-rule), 0.42);
   }
 
   // Pinned layer — fit is gone; the spacer only holds the slot so the row keeps
@@ -1461,7 +1555,7 @@ $actions-corner: 12rem;
 
   // The shutter reads warm against the cold chrome — it is the one control on
   // the bar that MAKES something rather than moving the view.
-  .ctl-btn.camera-btn .mat-sym { color: #c8975a; }
+  .ctl-btn.camera-btn .mat-sym { color: var(--hc-status-secret); }
 
   .badge { top: -4px; right: -4px; }
 }
@@ -1469,17 +1563,17 @@ $actions-corner: 12rem;
 // Landscape keyboard toggle — lit while the command line is revealed,
 // same cold accent language as the mesh button's active state.
 .pill-stage.mobile .keyboard-btn.active {
-  color: #00e5a0;
-  background: rgba(0, 229, 160, 0.12);
-  border-color: rgba(0, 229, 160, 0.45);
+  color: var(--hc-status-ok);
+  background: color-mix(in srgb, var(--hc-status-ok) 14%, transparent);
+  border-color: color-mix(in srgb, var(--hc-status-ok) 45%, transparent);
 }
 
 // The view toggle — lit while its row is up, so the chevron is not the only
 // thing saying which way it will go.
 .pill-stage.mobile .view-row-btn.active {
-  color: rgba(126, 182, 214, 0.95);
-  background: rgba(126, 182, 214, 0.14);
-  border-color: rgba(126, 182, 214, 0.45);
+  color: rgba(var(--hc-chrome-accent), var(--hc-ink-a-loud));
+  background: rgba(var(--hc-chrome-accent), 0.14);
+  border-color: rgba(var(--hc-chrome-accent), 0.45);
 }
 
 // Lanes — the legibility ladder. The digit sits in the corner of the glyph
@@ -1501,9 +1595,9 @@ $actions-corner: 12rem;
   }
 
   &.active {
-    color: rgba(126, 182, 214, 0.95);
-    background: rgba(126, 182, 214, 0.14);
-    border-color: rgba(126, 182, 214, 0.45);
+    color: rgba(var(--hc-chrome-accent), var(--hc-ink-a-loud));
+    background: rgba(var(--hc-chrome-accent), 0.14);
+    border-color: rgba(var(--hc-chrome-accent), 0.45);
   }
 }
 
@@ -1512,16 +1606,16 @@ $actions-corner: 12rem;
 // this bar is now inside the command line; its recording visual moved with
 // it — see command-line.component.scss.)
 .pill-stage.mobile .fullscreen-btn.active {
-  color: rgba(126, 182, 214, 0.95);
-  background: rgba(126, 182, 214, 0.14);
-  border-color: rgba(126, 182, 214, 0.45);
+  color: rgba(var(--hc-chrome-accent), var(--hc-ink-a-loud));
+  background: rgba(var(--hc-chrome-accent), 0.14);
+  border-color: rgba(var(--hc-chrome-accent), 0.45);
 }
 
 // Solo / swarm mode indicator on mobile
 .pill-stage.mobile .mesh-mobile-btn {
-  color: rgba(255, 45, 138, 0.85); // solo
+  color: var(--hc-status-solo); // solo
 
-  &.shield-mode { color: rgba(120, 200, 255, 0.9); } // swarm
+  &.shield-mode { color: var(--hc-status-swarm); } // swarm
 }
 
 // ── phone (≤599px) — non-mobile-pill phone-specific tweaks ───
@@ -1639,7 +1733,11 @@ $actions-corner: 12rem;
     .dcp-icon { font-size: 2.2rem; }
   }
 
-  .tag-float { max-width: 28rem; }
+  // NO WIDTH CAP HERE. A 27" screen used to stop the pheromone row at 28rem,
+  // which read as the row giving up half a monitor short of the corner it was
+  // running toward. The base rule already ends it at the MEASURED undo/redo
+  // cluster and at whatever a toolwindow reserved, so on a wide screen it does
+  // what it does on every other one: run until something is actually there.
 }
 
 // The breadcrumb's 13" laptop-band shift is folded into `--hc-header-zoom`,
@@ -1675,6 +1773,12 @@ $actions-corner: 12rem;
 // pill so it reads as chrome, not as content: cold, hairline, no glow. Fixed
 // positioning is set inline from the button's rect (see the template comment)
 // because the rail scrolls and clips.
+
+// Anchored to a rail button but opening INBOARD, over whatever is beside the
+// bar — so a lifted rail has to lift its menus with it, or pressing a button on
+// a visible bar opens a menu nobody can see.
+.tour-menu.over-view,
+.fit-menu.over-view { z-index: 100005; }
 
 .tour-menu {
   position: fixed;
@@ -1726,12 +1830,12 @@ $actions-corner: 12rem;
 
   .mat-sym {
     font-size: 1.05rem;
-    color: color-mix(in srgb, #ffc65c 72%, var(--md-on-surface));
+    color: color-mix(in srgb, var(--hc-status-warn) 78%, var(--md-on-surface));
   }
 
   &:hover {
     background: color-mix(in srgb, var(--md-on-surface) 10%, transparent);
-    .mat-sym { color: #ffc65c; }
+    .mat-sym { color: var(--hc-status-warn); }
   }
 }
 
@@ -1839,8 +1943,8 @@ $actions-corner: 12rem;
 // The pinned portal, if one is pinned. Lit the same gold the Portals toolwindow
 // uses for the pin, so the two surfaces agree at a glance about which is home.
 .tour-row.is-pinned {
-  .mat-sym { color: #ffc65c; }
-  .home-name { color: #f0e3c9; }
+  .mat-sym { color: var(--hc-status-warn); }
+  .home-name { color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-plain)); }
 }
 
 // Forget stays quiet until the row is under the pointer: putting a portal down
@@ -1867,7 +1971,7 @@ $actions-corner: 12rem;
 // Home standing on a portal rather than the root. A hairline ring, no fill —
 // this is a statement of what the button means, not an alert.
 .rail-home.on-portal .mat-sym {
-  color: color-mix(in srgb, #ffc65c 72%, var(--md-on-surface));
+  color: color-mix(in srgb, var(--hc-status-warn) 78%, var(--md-on-surface));
 }
 
 // ── fit flyout ───────────────────────────────────────────
@@ -1916,8 +2020,8 @@ $actions-corner: 12rem;
   // Checked rows carry the global-fit green — the same state colour the
   // rail's fit button shows when the switch is on.
   &.on {
-    color: #00e5a0;
-    .mat-sym { color: #00e5a0; }
+    color: var(--hc-status-ok);
+    .mat-sym { color: var(--hc-status-ok); }
   }
 }
 
@@ -1955,7 +2059,7 @@ $actions-corner: 12rem;
 
 // The bee stays lit while its menu is open.
 .rail-tutorial.active {
-  color: #ffc65c;
-  background: rgba(255, 198, 92, 0.14);
-  box-shadow: inset 0 0 0 1px rgba(255, 198, 92, 0.4);
+  color: var(--hc-status-warn);
+  background: color-mix(in srgb, var(--hc-status-warn) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hc-status-warn) 45%, transparent);
 }

@@ -323,6 +323,22 @@ describe('chat-thread — turns are contentSig manifests; legacy stays readable'
     expect(pool.dirs.has(bucketName)).toBe(false)
   })
 
+  it('goal completion belongs only to the conversation that reached it', async () => {
+    await mod.appendTurn('chat:finished', 'user', 'finish this outcome')
+    await mod.appendTurn('chat:ongoing', 'user', 'this still has work')
+
+    expect(await mod.setConversationGoalReached('chat:finished', 'Built and verified the requested result.'))
+      .toBe(true)
+
+    const { conversations } = await mod.listConversationsWithLatest()
+    const byId = new Map(conversations.map(c => [c.convoId, c]))
+    expect(byId.get('chat:finished')?.goal?.details).toBe('Built and verified the requested result.')
+    expect(byId.get('chat:ongoing')?.goal).toBeUndefined()
+    // A receipt is metadata, never another visible transcript turn.
+    expect(byId.get('chat:finished')?.turnCount).toBe(1)
+    expect((await mod.readTurns('chat:finished')).map(t => t.text)).toEqual(['finish this outcome'])
+  })
+
   it('deleteConversation drops the bucket and leaves the text resource', async () => {
     await mod.appendTurn('chat:doomed', 'user', 'kept bytes')
     const bucketName = await sha256Hex(new TextEncoder().encode('chat:doomed'))

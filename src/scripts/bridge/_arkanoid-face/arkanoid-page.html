@@ -10,9 +10,19 @@
 
   .ak-wrap{max-width:880px;margin:0 auto;padding:0 22px 90px}
 
-  /* ── hero: a wall mid-game ─────────────────────────────── */
-  .ak-hero{padding:64px 0 46px;border-bottom:1px solid #1c2333;text-align:center}
-  .ak-wall{display:grid;grid-template-columns:repeat(11,1fr);gap:5px;max-width:560px;
+  /* ── hero: a wall mid-game, holding the whole first screen ── */
+  .ak-hero{min-height:100vh;box-sizing:border-box;display:flex;flex-direction:column;
+      justify-content:center;padding:40px 0 46px;border-bottom:1px solid #1c2333;text-align:center}
+  @supports (height:100dvh){.ak-hero{min-height:100dvh}}
+  .ak-scroll-cue{margin-top:auto;padding-top:26px;font-size:13px;letter-spacing:.14em;
+      color:#5f6879;text-transform:uppercase}
+  .ak-scroll-cue span{display:block;margin-top:6px;font-size:17px;color:#38e0ff;
+      animation:ak-bob 1.9s ease-in-out infinite}
+  @keyframes ak-bob{50%{transform:translateY(6px)}}
+  /* width:100% because the hero is a COLUMN FLEX box: `margin:0 auto` sets the
+     cross-axis margins to auto, which cancels the default stretch and shrinks
+     a 1fr grid to its content (the wall collapsed to 50px). */
+  .ak-wall{display:grid;grid-template-columns:repeat(11,1fr);gap:5px;width:100%;max-width:560px;
       margin:0 auto 8px}
   .ak-brick{height:17px;border-radius:3px;opacity:.95}
   .ak-b1{background:linear-gradient(180deg,#4de3ff,#1fa8cc)}
@@ -20,7 +30,7 @@
   .ak-b3{background:linear-gradient(180deg,#ff5c96,#d1246a)}
   .ak-b4{background:linear-gradient(180deg,#a488ff,#6c48e0)}
   .ak-b0{background:none}
-  .ak-court{position:relative;max-width:560px;margin:0 auto 30px;height:96px}
+  .ak-court{position:relative;width:100%;max-width:560px;margin:0 auto 30px;height:96px}
   .ak-ball{position:absolute;left:63%;top:34px;width:11px;height:11px;border-radius:50%;
       background:#fdfdf6;box-shadow:0 0 16px #fdfdf6,0 0 34px #38e0ff}
   .ak-trail{position:absolute;left:46%;top:74px;width:120px;height:2px;
@@ -30,7 +40,17 @@
   .ak-hero h1{font-size:clamp(42px,8vw,70px);font-weight:800;letter-spacing:.14em;
       color:#fdfdf6;text-shadow:0 0 26px rgba(56,224,255,.35)}
   .ak-hero h1 span{color:#f6d109}
-  .ak-lede{margin:14px auto 0;font-size:19px;color:#9aa2b5;max-width:600px}
+  .ak-start{display:inline-block;align-self:center;margin:26px 0 6px;padding:18px 54px;border:0;border-radius:12px;
+      background:linear-gradient(180deg,#ffe14d,#e8c400);color:#08090c;cursor:pointer;
+      font:800 clamp(19px,3vw,24px)/1 -apple-system,'Segoe UI',system-ui,sans-serif;
+      letter-spacing:.08em;box-shadow:0 0 28px rgba(246,209,9,.45),0 4px 0 #9c8300;
+      animation:ak-pulse 2.2s ease-in-out infinite}
+  .ak-start:hover{filter:brightness(1.07)}
+  .ak-start:active{transform:translateY(3px);box-shadow:0 0 28px rgba(246,209,9,.45),0 1px 0 #9c8300}
+  .ak-start[disabled]{cursor:wait;animation:none;filter:saturate(.5) brightness(.85)}
+  @keyframes ak-pulse{50%{box-shadow:0 0 46px rgba(246,209,9,.75),0 4px 0 #9c8300}}
+  .ak-start-hint{margin-top:10px;font-size:14px;color:#828b9f}
+  .ak-lede{margin:14px auto 0;font-size:19px;color:#9aa2b5;width:100%;max-width:600px}
   .ak-lede b{color:#dfe3ec;font-weight:600}
 
   .ak h2{font-size:24px;font-weight:700;color:#fdfdf6;margin:60px 0 6px;letter-spacing:-.01em}
@@ -74,6 +94,28 @@
     .ak-themes{grid-template-columns:1fr}
     .ak-key{grid-template-columns:1fr;gap:2px}
   }
+  /* The hero is meant to BE the first screen. On a short window its content
+     would grow past that, so the decoration yields by degrees rather than
+     pushing START under the fold: first the wall and court shrink, then (on a
+     landscape phone) they step aside entirely. The art is the last thing to
+     go and the button is never the thing that moves. */
+  @media(max-height:760px){
+    .ak-hero{padding:20px 0 26px}
+    .ak-hero h1{font-size:clamp(32px,6vw,50px)}
+    .ak-brick{height:12px}
+    .ak-wall{gap:4px}
+    .ak-court{height:56px;margin-bottom:16px}
+    .ak-ball{top:18px}
+    .ak-trail{top:44px}
+    .ak-start{margin-top:16px;padding:15px 44px}
+    .ak-lede{font-size:16.5px;margin-top:10px}
+    .ak-scroll-cue{padding-top:12px}
+  }
+  @media(max-height:560px){
+    .ak-wall,.ak-court{display:none}
+    .ak-hero{padding-top:18px}
+    .ak-lede{font-size:16px}
+  }
 </style>
 <div class="ak"><div class="ak-wrap">
 
@@ -90,9 +132,12 @@
       <div class="ak-paddle"></div>
     </div>
     <h1>ARKANOID<span>.</span></h1>
+    <button id="ak-start" class="ak-start" type="button">&#9654; START GAME</button>
+    <p class="ak-start-hint">Plays right here, full screen — no install, no account.</p>
     <p class="ak-lede">A full-blooded brick-breaker living inside the Hypercomb hive —
       <b>one hundred hand-built walls</b>, a charge-and-release laser, eleven power-up
       pills, and a level designer of its own.</p>
+    <p class="ak-scroll-cue">What's inside<span>&#8595;</span></p>
   </header>
 
   <h2>One hundred walls</h2>
@@ -154,7 +199,60 @@
     self-hosted Hypercomb — the same setup that serves this very page.</p>
 
   <p class="ak-foot">Served from the <code>/games/arkanoid</code> lineage of a Hypercomb
-    hive — a signed, content-addressed publish. This page is the branch's arrival face;
-    the site will one day open straight into the game itself.</p>
+    hive — a signed, content-addressed publish. The start button opens the game itself,
+    full screen, straight from this page.</p>
 
 </div></div>
+<script>
+// START GAME — opens the REAL arkanoid overlay (the bee the hive ships),
+// full screen above this page. The page mounts in a shadow root, so the
+// button is found via the composed click path, never getElementById; the
+// wired flag keeps re-mounts from stacking listeners.
+(function () {
+  if (window.__akStartWired) return
+  window.__akStartWired = true
+
+  function findGame() {
+    var ioc = window.ioc
+    if (!ioc || typeof ioc.list !== 'function') return null
+    var keys = ioc.list()
+    for (var i = 0; i < keys.length; i++) {
+      var bee
+      try { bee = ioc.get(keys[i]) } catch (e) { continue }
+      if (bee && bee.genotype === 'game' && String(bee.gameId) === 'arkanoid' &&
+          typeof bee.open === 'function') return bee
+    }
+    return null
+  }
+
+  function start(button) {
+    var game = findGame()
+    if (game) { game.open(); return }
+    // The bees may still be loading — hold the button and retry briefly.
+    button.disabled = true
+    var label = button.textContent
+    button.textContent = 'LOADING…'
+    var waited = 0
+    var timer = setInterval(function () {
+      waited += 300
+      var late = findGame()
+      if (late) { clearInterval(timer); button.disabled = false; button.textContent = label; late.open(); return }
+      if (waited >= 10000) {
+        clearInterval(timer)
+        button.disabled = false
+        button.textContent = label
+        var hint = (button.getRootNode() || document).querySelector('.ak-start-hint')
+        if (hint) hint.textContent = 'The game rides the hive shell — open this page on its site to play.'
+      }
+    }, 300)
+  }
+
+  document.addEventListener('click', function (event) {
+    var path = typeof event.composedPath === 'function' ? event.composedPath() : [event.target]
+    for (var i = 0; i < path.length; i++) {
+      var node = path[i]
+      if (node && node.id === 'ak-start') { start(node); return }
+    }
+  })
+})()
+</script>

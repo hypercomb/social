@@ -40,7 +40,7 @@ export const STATIC_FOLLOWS_KEY = 'hc:static-follows'
  *  link-bundle resolution so a fresh visitor on ANY origin can fetch a
  *  bundle minted to the public CDN — private mode, no relay flags. Same
  *  standing host HostSyncService drains public closures to. */
-export const PUBLIC_CONTENT_HOSTS = ['content.jwize.com']
+export const PUBLIC_CONTENT_HOSTS = ['content.pluginthematrix.com']
 
 export interface HiveLinkBundle {
   kind: typeof HIVE_LINK_KIND

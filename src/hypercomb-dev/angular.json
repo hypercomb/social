@@ -8,7 +8,6 @@
       "root": "",
       "sourceRoot": "src",
       "prefix": "app",
-
       "targets": {
         "build": {
           "builder": "@angular/build:application",
@@ -19,7 +18,6 @@
             "polyfills": [],
             "tsConfig": "tsconfig.app.json",
             "inlineStyleLanguage": "scss",
-
             "assets": [
               {
                 "glob": "**/*",
@@ -40,12 +38,13 @@
                 "output": "/documentation"
               }
             ],
-
-            "styles": ["src/styles.scss"],
-
+            "styles": [
+              "src/styles.scss"
+            ],
             "allowedCommonJsDependencies": [
               "@xmldom/xmldom",
-              "parse-svg-path"
+              "parse-svg-path",
+              "@hypercomb/shared/core/ioc.web"
             ]
           },
           "configurations": {
@@ -75,11 +74,56 @@
                 "hidden": false,
                 "sourcesContent": true
               }
+            },
+            "deploy": {
+              "browser": "src/main.deploy.ts",
+              "index": {
+                "input": "../hypercomb-web/src/index.html",
+                "output": "index.html"
+              },
+              "assets": [
+                {
+                  "glob": "**/*",
+                  "input": "../hypercomb-web/public"
+                },
+                {
+                  "glob": "**/*",
+                  "input": "../shared-public"
+                },
+                {
+                  "glob": "**/*",
+                  "input": "../hypercomb-shared/tracks",
+                  "output": "/tracks"
+                },
+                {
+                  "glob": "**/*.md",
+                  "input": "../documentation",
+                  "output": "/documentation"
+                }
+              ],
+              "styles": [
+                "../hypercomb-web/src/styles.scss",
+                "@angular/material/prebuilt-themes/deeppurple-amber.css"
+              ],
+              "tsConfig": "tsconfig.deploy.json",
+              "sourceMap": false,
+              "outputHashing": "all",
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "1.8MB",
+                  "maximumError": "2.5MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "32kB",
+                  "maximumError": "48kB"
+                }
+              ]
             }
           },
           "defaultConfiguration": "development"
         },
-
         "serve": {
           "builder": "@angular/build:dev-server",
           "options": {
@@ -93,6 +137,9 @@
             },
             "production": {
               "buildTarget": "hypercomb-dev:build:production"
+            },
+            "deploy": {
+              "buildTarget": "hypercomb-dev:build:deploy"
             }
           },
           "defaultConfiguration": "development"

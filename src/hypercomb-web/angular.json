@@ -70,6 +70,41 @@
               "optimization": false,
               "extractLicenses": false,
               "sourceMap": true
+            },
+            "visitor": {
+              "browser": "src/main.visitor.ts",
+              "index": {
+                "input": "src/index.visitor.html",
+                "output": "index.html"
+              },
+              "fileReplacements": [
+                {
+                  "replace": "../hypercomb-shared/ui/shell-surfaces/shell-surfaces.barrel.ts",
+                  "with": "../hypercomb-shared/ui/shell-surfaces/shell-surfaces.website.barrel.ts"
+                }
+              ],
+              "optimization": {
+                "scripts": true,
+                "styles": {
+                  "minify": true,
+                  "inlineCritical": true
+                },
+                "fonts": false
+              },
+              "sourceMap": false,
+              "outputHashing": "all",
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "1.8MB",
+                  "maximumError": "2.5MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "32kB",
+                  "maximumError": "48kB"
+                }
+              ]
             }
           },
           "defaultConfiguration": "production"
@@ -82,6 +117,9 @@
             },
             "development": {
               "buildTarget": "hypercomb-web:build:development"
+            },
+            "visitor": {
+              "buildTarget": "hypercomb-web:build:visitor"
             }
           },
           "defaultConfiguration": "development"

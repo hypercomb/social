@@ -150,7 +150,7 @@
                     <span
                       class="prow-light"
                       aria-hidden="true"
-                      [attr.title]="('publish.state.' + row.state) | t"
+                      [attr.data-tip]="('publish.state.' + row.state) | t"
                     ></span>
                     <div class="prow-meta">
                       <span class="prow-path" [title]="row.path">{{ row.path }}</span>
@@ -163,7 +163,7 @@
                       <span
                         class="prow-face"
                         aria-hidden="true"
-                        [attr.title]="row.opensAs"
+                        [attr.data-tip]="row.opensAs"
                         [innerHTML]="face"
                       ></span>
                     }
@@ -184,18 +184,20 @@
                            picking here is the same write every arrival surface
                            reads, and it changes the head — the differential
                            then shows the republish this pin owes. -->
-                      @if (row.segments.length > 0 && views().length > 0) {
+                      @if (row.segments.length > 0 && viewsFor(row).length > 0) {
                         <div class="pdet-block">
                           <span class="pdet-label">{{ 'publish.row.opens-as' | t }}</span>
                           <div class="pdet-views" role="radiogroup" [attr.aria-label]="'publish.row.opens-as' | t">
-                            @for (v of views(); track v.view) {
+                            @for (v of viewsFor(row); track v.view) {
                               <button
                                 class="pdet-view"
                                 type="button"
                                 role="radio"
                                 [class.selected]="row.opensAs === v.view"
+                                [class.dormant]="v.dormant"
                                 [attr.aria-checked]="row.opensAs === v.view"
-                                [attr.title]="v.label"
+                                [attr.aria-label]="v.label"
+                                [attr.data-tip]="v.label"
                                 (click)="pickView(row, v.view); $event.stopPropagation()"
                                 [innerHTML]="v.icon"
                               ></button>

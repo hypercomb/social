@@ -15,7 +15,11 @@
      pointer-events:auto otherwise EATS website clicks at z 59989, one above the
      site overlay's 59988). Single source of truth — see styles.scss. -->
 <div id="pixi-host" style="z-index: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
-<hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" [style.visibility]="viewActive() ? 'hidden' : null"></hc-controls-bar>
+<!-- The controls bar owns its view-visibility decision. It consumes both
+     `view:active` and the owner-counted `view:keeps-controls` mode itself, so
+     applying a second shell-level visibility gate here can race its replay and
+     hide a correctly kept rail while leaving the rail's gutter reserved. -->
+<hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()"></hc-controls-bar>
 <div class="update-status-dock">
   <hc-upgrade-indicator></hc-upgrade-indicator>
   <hc-sync-indicator></hc-sync-indicator>

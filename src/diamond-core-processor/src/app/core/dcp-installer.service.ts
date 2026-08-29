@@ -35,7 +35,43 @@ export type InstallProgress = {
   total: number
 }
 
-const SIGNATURE_PATTERN = /^[a-f0-9]{64}$/i
+const SIGNATURE_PATTERN = /^[a-f0-9]{64}$/
+
+/** Receiving-side package boundary. Build-time closure checks protect our
+ * own releases; this protects participants from a malformed third-party
+ * installer host. */
+export const validateInstallManifest = (
+  rootSig: string,
+  manifest: InstallManifest,
+): string[] => {
+  const errors: string[] = []
+  const layers = manifest.layers ?? []
+  const bees = manifest.bees ?? []
+  const dependencies = manifest.dependencies ?? []
+  const layerSet = new Set(layers)
+  const beeSet = new Set(bees)
+  const dependencySet = new Set(dependencies)
+  const check = (kind: string, values: string[]): void => {
+    const seen = new Set<string>()
+    for (const sig of values) {
+      if (!SIGNATURE_PATTERN.test(sig)) errors.push(`${kind} contains an invalid signature: ${sig}`)
+      if (seen.has(sig)) errors.push(`${kind} contains a duplicate signature: ${sig}`)
+      seen.add(sig)
+    }
+  }
+  check('layers', layers)
+  check('bees', bees)
+  check('dependencies', dependencies)
+  if (!SIGNATURE_PATTERN.test(rootSig)) errors.push('package signature is invalid')
+  if (!layerSet.has(rootSig)) errors.push('package root is not declared in layers')
+  for (const [bee, required] of Object.entries(manifest.beeDeps ?? {})) {
+    if (!beeSet.has(bee)) errors.push(`beeDeps names an undeclared bee: ${bee}`)
+    for (const dep of required) {
+      if (!dependencySet.has(dep)) errors.push(`bee ${bee} requires undeclared dependency: ${dep}`)
+    }
+  }
+  return errors
+}
 
 /** Child layer signatures of a layer JSON — `cells` is the current name,
  *  `layers`/`children` the older ones, same as the patch cascade reads. */
@@ -138,24 +174,32 @@ export class DcpInstallerService {
 
     // 3) install layers — flat heap first, legacy typed path fallback — parallel
     onProgress?.({ phase: 'layers', current: 0, total: layers.length })
-    await Promise.all(layers.map((sig, i) =>
+    const installedLayers = await Promise.all(layers.map((sig, i) =>
       this.#installFile(domainDir, [`${base}/${sig}`, `${base}/__layers__/${sig}.json`], sig, sig)
-        .then(() => onProgress?.({ phase: 'layers', current: i + 1, total: layers.length }))
+        .then(ok => { onProgress?.({ phase: 'layers', current: i + 1, total: layers.length }); return ok })
     ))
 
     // 4) install bees — parallel
     onProgress?.({ phase: 'bees', current: 0, total: bees.length })
-    await Promise.all(bees.map((sig, i) =>
+    const installedBees = await Promise.all(bees.map((sig, i) =>
       this.#installFile(this.#store.bees, [`${base}/${sig}`, `${base}/__bees__/${sig}.js`], sig, `${sig}.js`)
-        .then(() => onProgress?.({ phase: 'bees', current: i + 1, total: bees.length }))
+        .then(ok => { onProgress?.({ phase: 'bees', current: i + 1, total: bees.length }); return ok })
     ))
 
     // 5) install dependencies — parallel
     onProgress?.({ phase: 'dependencies', current: 0, total: deps.length })
-    await Promise.all(deps.map((sig, i) =>
+    const installedDeps = await Promise.all(deps.map((sig, i) =>
       this.#installFile(this.#store.dependencies, [`${base}/${sig}`, `${base}/__dependencies__/${sig}.js`], sig, `${sig}.js`)
-        .then(() => onProgress?.({ phase: 'dependencies', current: i + 1, total: deps.length }))
+        .then(ok => { onProgress?.({ phase: 'dependencies', current: i + 1, total: deps.length }); return ok })
     ))
+
+    // A package is atomic at the acceptance boundary. Never cache or report a
+    // partial install as usable: the next run resumes from the verified files
+    // already present and retries only the missing signatures.
+    if (installedLayers.some(ok => !ok) || installedBees.some(ok => !ok) || installedDeps.some(ok => !ok)) {
+      console.warn('[dcp-installer] package incomplete — refusing activation')
+      return null
+    }
 
     // 6) cache resolved manifest in OPFS for offline sync
     await this.#cacheManifest(domainDir, manifest)
@@ -213,6 +257,11 @@ export class DcpInstallerService {
       const pkg = content?.packages?.[rootSig]
       if (!pkg) {
         console.warn(`[dcp-installer] package ${rootSig.slice(0, 12)} not found in manifest`)
+        return null
+      }
+      const errors = validateInstallManifest(rootSig, pkg)
+      if (errors.length) {
+        console.warn(`[dcp-installer] rejected unsealed package ${rootSig.slice(0, 12)}: ${errors.join('; ')}`)
         return null
       }
       return pkg

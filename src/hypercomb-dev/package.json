@@ -9,6 +9,7 @@
     "start:4253": "npx ng serve --port 4253 --host localhost --configuration development --no-hmr",
     "start:4450": "npx ng serve --port 4450 --host localhost --configuration development --no-hmr",
     "build": "npx ng build --configuration production",
+    "build:deploy": "npm --prefix .. run prebuild:dev && npx ng build --configuration deploy",
     "watch": "npx ng build --watch --configuration development",
     "test": "npx ng test",
     "start:4254": "npx ng serve --port 4254 --host localhost --configuration development --no-hmr"

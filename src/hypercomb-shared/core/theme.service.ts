@@ -26,13 +26,20 @@ import { EffectBus, THEME_IOC_KEY } from '@hypercomb/core'
 import type { ThemeProvider, ThemeTokens } from '@hypercomb/core'
 
 const STORAGE_KEY = 'hc:theme'
-// Default when the participant has never chosen: keep today's look (dark) as the
-// baseline. Light + system are first-class opt-ins via setTheme().
-const DEFAULT_THEME = 'dark'
+// Default when the participant has never chosen. `honey` — the bright warm
+// look — is what a hive opens as; dark, light and system are all one word away
+// via setTheme(). This value MUST match the pre-paint fallback in both shells'
+// index.html ([[web/dev shell parity]]), or the first paint flashes one theme
+// and the service replaces it with another.
+const DEFAULT_THEME = 'honey'
 const SYSTEM = 'system'
 // Built-in themes defined in static CSS (_material-tokens.scss). Registered
 // themes are appended to this set at runtime.
-const BUILTINS = ['light', 'dark'] as const
+//
+// light/dark are the two ends of one dimmer; honey/bloom/sherbet are LOOKS —
+// bright value-sets with their own accent chord, coloured elevation and a
+// livelier motion curve. Order is the order `/theme` offers them.
+const BUILTINS = ['light', 'dark', 'honey', 'bloom', 'sherbet'] as const
 
 // id of the managed <style> that holds runtime-registered theme blocks
 const REGISTRY_STYLE_ID = 'hc-theme-registry'

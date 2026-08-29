@@ -66,55 +66,48 @@ export class TileEditorService extends EventTarget {
     EffectBus.emit<EditorModePayload>('editor:mode', { active: false })
   }
 
+  // CLEARING IS `undefined`, NEVER `delete`. The editor form is handed whole to
+  // `writeTilePropertiesAt`, which merges it over the tile's stored props — an
+  // ABSENT key there means "leave this one alone", so deleting made every
+  // clear a silent no-op (the old value came straight back on save). A key
+  // present with `undefined` is the one channel a merge has for a removal.
+
   readonly setLink = (value: string): void => {
-    if (value) {
-      (this.#properties as any).link = value
-    } else {
-      delete (this.#properties as any).link
-    }
+    const props = this.#properties as any
+    props.link = value || undefined
     this.#emit()
   }
 
   readonly setBorderColor = (value: string): void => {
+    const props = this.#properties as any
     if (value) {
-      if (!(this.#properties as any).border) {
-        (this.#properties as any).border = {}
-      }
-      (this.#properties as any).border.color = value
-    } else {
-      if ((this.#properties as any).border) {
-        delete (this.#properties as any).border.color
-        if (Object.keys((this.#properties as any).border).length === 0) {
-          delete (this.#properties as any).border
-        }
-      }
+      if (!props.border) props.border = {}
+      props.border.color = value
+    } else if (props.border) {
+      delete props.border.color
+      // The merge is shallow at the top level, so the whole `border` object is
+      // replaced — dropping the colour is enough while other keys remain. An
+      // emptied object must travel as `undefined` or the stored one survives.
+      if (Object.keys(props.border).length === 0) props.border = undefined
     }
     this.#emit()
   }
 
   readonly setBackgroundColor = (value: string): void => {
+    const props = this.#properties as any
     if (value) {
-      if (!(this.#properties as any).background) {
-        (this.#properties as any).background = {}
-      }
-      (this.#properties as any).background.color = value
-    } else {
-      if ((this.#properties as any).background) {
-        delete (this.#properties as any).background.color
-        if (Object.keys((this.#properties as any).background).length === 0) {
-          delete (this.#properties as any).background
-        }
-      }
+      if (!props.background) props.background = {}
+      props.background.color = value
+    } else if (props.background) {
+      delete props.background.color
+      if (Object.keys(props.background).length === 0) props.background = undefined
     }
     this.#emit()
   }
 
   readonly setHideText = (value: boolean): void => {
-    if (value) {
-      (this.#properties as any).hideText = true
-    } else {
-      delete (this.#properties as any).hideText
-    }
+    const props = this.#properties as any
+    props.hideText = value ? true : undefined
     this.#emit()
   }
 

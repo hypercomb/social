@@ -3076,7 +3076,10 @@ export class HomeComponent implements OnDestroy {
 
   /**
    * Promote a branch (layer) to its own package root within the same domain.
-   * Creates a new DomainSection using the branch signature as root.
+   * A promotion is a real package operation: collect the branch's complete
+   * signed closure and write a host-ready flat package (directory picker when
+   * available, verified JSON bundle otherwise), then surface that immutable
+   * root as a package revision in DCP. It is never only a dashboard row.
    */
   async promoteBranchToPackage(node: TreeNode, sourceSection: DomainSection): Promise<void> {
     if (!node.signature || node.kind !== 'layer') return
@@ -3089,6 +3092,19 @@ export class HomeComponent implements OnDestroy {
     // resolve the subtree from local OPFS using the branch as root
     const root = await this.#resolver.resolveFromLocal(branchSig, sourceSection.domainName)
     if (!root) return
+
+    // Export first. If collection cannot resolve the full local closure the
+    // exporter throws and no package row is claimed. A cancelled directory
+    // picker is handled by the exporter without mutating host state.
+    let saved = false
+    try {
+      saved = await this.#exporter.exportPackage(branchSig, sourceSection.domainName)
+    } catch (error) {
+      sourceSection.error = error instanceof Error ? error.message : 'Package creation failed'
+      this.#refreshSections()
+      return
+    }
+    if (!saved) return
 
     const flat = this.#flattenDomainSubfolder(root.children)
     const section: DomainSection = {
@@ -3103,8 +3119,7 @@ export class HomeComponent implements OnDestroy {
       installStatus: null,
       patches: [],
       enabled: true,
-      // promoted from a package source → inherits package provenance
-      kind: sourceSection.kind ?? 'package',
+      kind: 'package',
     }
 
     this.sections.set([...this.sections(), section])

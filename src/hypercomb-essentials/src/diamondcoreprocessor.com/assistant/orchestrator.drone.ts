@@ -35,6 +35,7 @@
 
 import { Drone, EffectBus } from '@hypercomb/core'
 import type { Agent, AgentRegistry } from './agent-registry.service.js'
+import { drainBlurbs } from './chat-blurb.js'
 
 export type FindingKind = 'waiting' | 'silent' | 'overlap' | 'failed' | 'rogue' | 'sweep' | 'blocked'
 
@@ -97,6 +98,24 @@ const SUMMARY_MS = 3 * 60_000
  *  for an hour must still say so out loud. */
 const STEADY_MS = 12 * 60_000
 
+// ── LABELLING THE THREADS NOBODY LABELLED ─────────────────────────────
+//
+// A conversation is named by its FIRST message, which is what you did not
+// know yet when you typed it. The blurb (chat-blurb.ts) is the other end of
+// the thread said briefly, and something has to notice which threads are
+// missing one — that is a sweep over background work nobody is watching,
+// which is this bee's whole job.
+//
+// It runs on its OWN clock, not inside #sweep, because #sweep stands down
+// entirely when no agent is live — and an idle hive is exactly when there is
+// room to do this. It is also silent: the drain never RAISES the bee (see
+// #blurbPass), so a hive with nothing to watch stays empty while its threads
+// quietly get their labels.
+const BLURB_MS = 5 * 60_000
+/** Threads labelled per pass. Small on purpose — it competes with the hive
+ *  for one main thread, so it takes a few and comes back in five minutes. */
+const BLURB_LIMIT = 2
+
 const ioc = <T,>(key: string): T | undefined =>
   (window as unknown as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
 
@@ -116,6 +135,10 @@ export class OrchestratorDrone extends Drone {
   ]
 
   #timer: ReturnType<typeof setInterval> | null = null
+  #blurbTimer: ReturnType<typeof setInterval> | null = null
+  /** A pass in flight. Model calls outlast the interval, and two drains would
+   *  pick the same threads and pay for them twice. */
+  #blurbBusy = false
   #started = false
   /** Findings currently standing, keyed so the same one is not re-announced
    *  every 15 seconds — an alert that repeats is an alert nobody reads. */
@@ -152,6 +175,28 @@ export class OrchestratorDrone extends Drone {
     this.#started = true
     this.#timer = setInterval(this.#sweep, SWEEP_MS)
     this.#sweep()
+    this.#blurbTimer = setInterval(this.#blurbPass, BLURB_MS)
+    void this.#blurbPass()
+  }
+
+  /** ONE LABELLING PASS. Never raises the bee: a hive with nothing to watch
+   *  must stay empty, and a blurb is a convenience, not a finding. It reports
+   *  only when the orchestrator is ALREADY up and has a log worth adding to. */
+  #blurbPass = async (): Promise<void> => {
+    if (this.#blurbBusy) return
+    this.#blurbBusy = true
+    try {
+      const { behind, minted } = await drainBlurbs(BLURB_LIMIT)
+      if (!minted || !this.#raised) return
+      const left = behind - minted
+      this.emitEffect('agent:progress', {
+        id: ORCHESTRATOR_ID,
+        status: 'working',
+        activity: `labelled ${minted} conversation${minted === 1 ? '' : 's'}`
+          + (left > 0 ? ` — ${left} still unlabelled` : ''),
+      })
+    } catch { /* a convenience nobody asked for out loud must never raise */ }
+    finally { this.#blurbBusy = false }
   }
 
   /** Everything currently wrong, newest first. */
@@ -563,6 +608,8 @@ export class OrchestratorDrone extends Drone {
   protected override dispose = (): void => {
     if (this.#timer) clearInterval(this.#timer)
     this.#timer = null
+    if (this.#blurbTimer) clearInterval(this.#blurbTimer)
+    this.#blurbTimer = null
   }
 }
 

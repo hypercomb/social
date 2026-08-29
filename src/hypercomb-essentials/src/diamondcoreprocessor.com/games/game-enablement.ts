@@ -38,7 +38,7 @@
 // answers, once, naming where the light lives.
 
 import { EffectBus } from '@hypercomb/core'
-import { isKindGloballyOff, ENABLEMENT_CHANGED } from '../sharing/behavior-enablement.js'
+import { isKindGloballyOff, isPublishedVisitorShell, ENABLEMENT_CHANGED } from '../sharing/behavior-enablement.js'
 
 /** A game's kind is its id under this prefix. Two segments, no module
  *  segment: a game belongs to no tile and to no render pipeline, so the
@@ -58,10 +58,17 @@ export function gameKind(gameId: string): string {
 
 /** THE dormancy answer for a game. Global only — a game has no location, so
  *  none of the per-tile dormancy sources (wake, publisher-withheld, binding)
- *  can apply to it. One light, hive-wide, exactly as the pool row shows. */
+ *  can apply to it. One light, hive-wide, exactly as the pool row shows.
+ *
+ *  On a published visitor shell the roster is a cold install seeded DARK —
+ *  the raw read answers "off" for every kind and `open()` refuses silently
+ *  (the visitor-shell-dormancy trap). There is no roster to consult there:
+ *  the publisher shipping the game IS the enablement. */
 export function isGameDormant(gameId: string): boolean {
   const kind = gameKind(gameId)
-  return kind ? isKindGloballyOff(kind) : false
+  if (!kind) return false
+  if (isPublishedVisitorShell()) return false
+  return isKindGloballyOff(kind)
 }
 
 /** Subscribe to roster flips. A game must react the moment its light goes

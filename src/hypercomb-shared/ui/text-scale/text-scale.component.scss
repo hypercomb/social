@@ -1,0 +1,50 @@
+// hypercomb-shared/ui/text-scale/text-scale.component.scss
+//
+// Chrome, so it does NOT scale with the thing it scales — sized in rem off the
+// root, never in em off the host. A control that grew with its own setting
+// would walk off the edge of the surface it is sitting on at Larger.
+
+:host { display: block; }
+
+.text-scale {
+  display: flex;
+  flex-wrap: wrap;   // in a narrow pane the last step wraps; it never clips
+  align-items: center;
+  gap: 0.15rem;
+  font-family: var(--hc-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+}
+
+.text-scale-label {
+  margin-right: 0.35rem;
+  color: rgba(var(--hc-chrome-ink), 0.42);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.text-scale-step {
+  padding: 0.12rem 0.4rem;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: rgba(var(--hc-chrome-ink), 0.5);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+
+  &:hover {
+    color: rgba(var(--hc-chrome-ink), 0.85);
+    background: rgba(var(--glow-color-rgb, var(--hc-chrome-accent)), 0.08);
+  }
+
+  // The step you are on wears the outline the alias chips wear — one chip
+  // vocabulary across the command surfaces.
+  &.on {
+    border-color: rgba(var(--hc-chrome-ink), 0.22);
+    color: var(--hc-chrome-text);
+    background: rgba(var(--glow-color-rgb, var(--hc-chrome-accent)), 0.12);
+  }
+}

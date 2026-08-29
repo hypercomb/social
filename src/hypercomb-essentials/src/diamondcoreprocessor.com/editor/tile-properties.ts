@@ -60,7 +60,10 @@
 // nurses keyed on layer sigs stay coherent regardless of which API
 // the writer chose during migration.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, type MetaPayloadKind } from '@hypercomb/core'
+import { canonicalPropertyLifeReferences } from './property-life-references.js'
+import { inheritTileProperties, sparseTileOverrides, TILE_PROPERTY_PINS } from './tile-property-inheritance.js'
+export { TILE_PROPERTY_PINS } from './tile-property-inheritance.js'
 
 export const TILE_PROPERTIES_FILE = '0000'
 
@@ -153,6 +156,18 @@ export const primaryTileImageSig = (props: unknown): string | undefined => {
   const p = props as any
   const sig = p?.small?.image ?? p?.flat?.small?.image
   return isSignature(sig) ? sig as string : undefined
+}
+
+/** The picture a hex tile can render. Prefer the orientation-specific baked
+ * capture, but recover old/incomplete props that retain only their original.
+ * A full-resolution image scaled into the hex is better than declaring a
+ * known picture absent; the next editor save may mint the optimized small. */
+export const recoverableTileImageSig = (props: unknown, flat = false): string | undefined => {
+  const p = props as any
+  const candidates = flat
+    ? [p?.flat?.small?.image, p?.small?.image, p?.large?.image, p?.imageSig]
+    : [p?.small?.image, p?.flat?.small?.image, p?.large?.image, p?.imageSig]
+  return candidates.find(isSignature) as string | undefined
 }
 
 /** The sig of the tile's picture AS A PICTURE — what a rectangle should
@@ -403,7 +418,13 @@ type HistoryServiceLike = {
 
 type StoreLike = {
   getResource?: (sig: string) => Promise<Blob | null>
+  getResourceLocal?: (sig: string) => Promise<Blob | null>
   putResource?: (blob: Blob) => Promise<string>
+  ensureArtifactMeta?: (
+    kind: MetaPayloadKind,
+    artifactOrMetaSig: string,
+    incidence?: Record<string, unknown>,
+  ) => Promise<string>
 }
 
 type LayerCommitterLike = {
@@ -437,7 +458,7 @@ const iocGet = <T>(key: string): T | undefined => {
  * index resolution) must treat a cold `{}` as unresolved — retry — never
  * as truth. Caching a cold miss was the root of the tile-scramble bug.
  */
-export const readTilePropertiesAt = async (
+const readOwnTilePropertiesAt = async (
   parentSegments: readonly string[],
   cellName: string,
   stats?: { cold?: boolean },
@@ -488,6 +509,35 @@ export const readTilePropertiesAt = async (
     if (stats) stats.cold = true  // read/parse failure — retry-able, never authoritative
     return {}
   }
+}
+
+/**
+ * Read the effective properties for one fixed-name tile appearance.
+ *
+ * The root tile is the inner/default object. A tile at any outer lineage is a
+ * sparse override object at that exact address. Composition is the ordinary
+ * shallow object merge: root first, outer second. This keeps defaults live —
+ * changing the root changes every appearance that has not explicitly
+ * replaced that key — without copying inherited fields into descendant
+ * layers. Signature-valued fields remain the same typed Life incidences.
+ */
+export const readTilePropertiesAt = async (
+  parentSegments: readonly string[],
+  cellName: string,
+  stats?: { cold?: boolean },
+): Promise<Record<string, unknown>> => {
+  if (parentSegments.length === 0) {
+    return readOwnTilePropertiesAt(parentSegments, cellName, stats)
+  }
+
+  const rootStats = { cold: false }
+  const outerStats = { cold: false }
+  const [innerDefaults, outerOverrides] = await Promise.all([
+    readOwnTilePropertiesAt([], cellName, rootStats),
+    readOwnTilePropertiesAt(parentSegments, cellName, outerStats),
+  ])
+  if (stats && (rootStats.cold || outerStats.cold)) stats.cold = true
+  return inheritTileProperties(innerDefaults, outerOverrides)
 }
 
 /**
@@ -646,6 +696,48 @@ const withTileWriteLock = async <T>(key: string, task: () => Promise<T>): Promis
   return result
 }
 
+const pinListOf = (properties: Readonly<Record<string, unknown>>): string[] => {
+  const raw = properties[TILE_PROPERTY_PINS]
+  return Array.isArray(raw) ? raw.filter((key): key is string => typeof key === 'string') : []
+}
+
+/**
+ * Tombstone the keys an OUTER appearance just cleared.
+ *
+ * Removing a value at an outer lineage has nothing local to remove when the
+ * value lives on the root — the read composes root defaults under the sparse
+ * override and hands the inherited value straight back, so the clear appears
+ * to do nothing. `propertyPins` is the model's tombstone: a pinned key that is
+ * ABSENT from the outer object suppresses the inherited default (see
+ * `inheritTileProperties`), without inventing a null-value dialect.
+ *
+ * Mint one pin per cleared-but-inherited key, and retire it the moment this
+ * appearance supplies its own value for that key again. Keys the ROOT pins are
+ * skipped: that lock is already absolute, and copying it outward would
+ * duplicate a lock this layer does not own.
+ */
+const withClearedInheritedKeysPinned = (
+  inheritedDefaults: Readonly<Record<string, unknown>>,
+  sparse: Record<string, unknown>,
+  clearedKeys: readonly string[],
+  updates: Readonly<Record<string, unknown>>,
+): Record<string, unknown> => {
+  const rootPins = new Set(pinListOf(inheritedDefaults))
+  const pins = new Set(pinListOf(sparse))
+  for (const key of clearedKeys) {
+    if (key in inheritedDefaults && !rootPins.has(key)) pins.add(key)
+  }
+  // A defined value written here IS this appearance's answer for that key — it
+  // cannot also be absent, so any tombstone standing on it is spent.
+  for (const key of Object.keys(updates)) {
+    if (updates[key] !== undefined) pins.delete(key)
+  }
+  const next = { ...sparse }
+  if (pins.size > 0) next[TILE_PROPERTY_PINS] = [...pins].sort()
+  else delete next[TILE_PROPERTY_PINS]
+  return next
+}
+
 /**
  * Write tile properties to the tile's layer.
  *
@@ -698,19 +790,21 @@ export const writeTilePropertiesAt = async (
     // `HistoryService`). Anything we trim/filter here would be a parallel
     // canonicalization that drifts from the single source of truth the
     // moment `history.sign` changes.
-    const existing = await readTilePropertiesAt(parentSegments, cellName)
+    // Writes merge only with this appearance's OWN sparse overrides. Reading
+    // the inherited composition here would materialize every root default in
+    // the outer layer and freeze it against future root changes.
+    const existing = await readOwnTilePropertiesAt(parentSegments, cellName)
+    const rootStats = { cold: false }
+    const inheritedDefaults = parentSegments.length > 0
+      ? await readOwnTilePropertiesAt([], cellName, rootStats)
+      : {}
     const merged: Record<string, unknown> = { ...existing, ...updates }
 
-    // OWNERSHIP, decided in the merge. A write that SETS a picture and does
-    // not declare itself a substrate default is a person putting a picture
-    // on a tile: mark it theirs and drop any inherited substrate mark, so
-    // the two can never both be true and a later theme pass can never
-    // mistake their picture for one of its own. A write that touches no
-    // picture leaves both marks exactly as they were.
-    if (hasTileImage(updates) && updates[SUBSTRATE_MARK] !== true) {
-      delete merged[SUBSTRATE_MARK]
-      merged[PARTICIPANT_MARK] = true
-    }
+    // A key present in `updates` with `undefined` is an explicit REMOVAL — the
+    // only channel a merge has for expressing a delete, since an ABSENT key
+    // means "leave alone". Capture them before the drop below erases the
+    // difference between "cleared" and "never mentioned".
+    const clearedKeys = Object.keys(updates).filter(key => updates[key] === undefined)
 
     // Drop keys whose value is `undefined` — JSON.stringify would skip
     // them anyway, but dropping here keeps the merged object iterable
@@ -719,14 +813,57 @@ export const writeTilePropertiesAt = async (
       if (merged[k] === undefined) delete merged[k]
     }
 
+    // Every sig-shaped property value is an artifact incidence under the Life
+    // Primitive. Do this at the one canonical writer so editor images, theme
+    // images, attachments, and future property resources cannot diverge into
+    // raw-vs-meta dialects. Referent fields are excluded by the edge registry.
+    let withLifeReferences = store!.ensureArtifactMeta
+      ? await canonicalPropertyLifeReferences(
+          merged,
+          (sig, relation) => store!.ensureArtifactMeta!('resource', sig, { relation }),
+        ) as Record<string, unknown>
+      : merged
+
+    // An outer edit may arrive as a complete editor form containing inherited
+    // fields. Collapse values equal to the root back out of the stored object
+    // so the lineage keeps following that default. A cold root is unknown,
+    // never evidence that a value is redundant, so skip the collapse then.
+    if (parentSegments.length > 0 && !rootStats.cold) {
+      withLifeReferences = sparseTileOverrides(inheritedDefaults, withLifeReferences)
+      withLifeReferences = withClearedInheritedKeysPinned(
+        inheritedDefaults,
+        withLifeReferences,
+        clearedKeys,
+        updates,
+      )
+    }
+
+    // OWNERSHIP is decided after inheritance collapses. A complete editor
+    // form can contain the root's inherited image; treating that as a local
+    // image write would stamp `participant:true` and accidentally pin an
+    // override that does not exist. Only a picture that survives in this
+    // layer's sparse object is locally owned. Substrate defaults keep their
+    // own mark; all other local pictures are participant content.
+    if (hasTileImage(updates) && hasTileImage(withLifeReferences) && updates[SUBSTRATE_MARK] !== true) {
+      delete withLifeReferences[SUBSTRATE_MARK]
+      withLifeReferences[PARTICIPANT_MARK] = true
+    } else if (!hasTileImage(withLifeReferences)) {
+      delete withLifeReferences[PARTICIPANT_MARK]
+    }
+    const changedKeys = [...new Set([
+      ...Object.keys(existing),
+      ...Object.keys(withLifeReferences),
+      ...Object.keys(updates),
+    ])]
+
     // Serialise + content-address. Deterministic key order so the same
     // logical properties yield the same sig across callers — same
     // canonicalization rule, applied to the JSON-object form: sorted
     // keys, then `JSON.stringify`. This produces the bytes that
     // `Store.putResource` hashes via `SignatureService.sign`.
-    const sortedKeys = Object.keys(merged).sort()
+    const sortedKeys = Object.keys(withLifeReferences).sort()
     const canonical: Record<string, unknown> = {}
-    for (const k of sortedKeys) canonical[k] = merged[k]
+    for (const k of sortedKeys) canonical[k] = withLifeReferences[k]
     const blob = new Blob([JSON.stringify(canonical)], { type: 'application/json' })
     // `store`/`committer` were guarded non-null above; the guard's
     // narrowing doesn't survive into this closure, so re-assert. Called
@@ -741,15 +878,21 @@ export const writeTilePropertiesAt = async (
 
     EffectBus.emit('cell:0000-changed', {
       cacheKey: lockKey,
-      keys: Object.keys(updates),
+      keys: changedKeys,
     })
+    if (parentSegments.length === 0) {
+      EffectBus.emit('tile:root-default-changed', {
+        cell: cellName,
+        keys: changedKeys,
+      })
+    }
 
     // A picture just landed — ask for its square thumbnail NOW, so the first
     // list or tree that shows this tile finds the 96px webp already minted
     // instead of decoding the original. The demand is only ever a demand:
     // the optimize phase does the deriving, in its own idle pass, and a
     // duplicate emit for an already-minted sig is a no-op there.
-    for (const sig of new Set(imageSigsOf(updates))) {
+    for (const sig of new Set(imageSigsOf(withLifeReferences))) {
       EffectBus.emit('thumbnail:wanted', { sig })
     }
 
@@ -758,7 +901,14 @@ export const writeTilePropertiesAt = async (
     // lookup — never an OPFS read. Every writer that commits canonically
     // (editor, substrate restamp, image-choice, link workers, …) gets its
     // layer-keyed entry refreshed here without touching the index itself.
-    if (isSignature(lockKey)) seedLayerKeyedTileProps(lockKey, propSig)
+    if (isSignature(lockKey)) {
+      // History's Life write boundary wraps the raw properties blob in a
+      // `relation:properties` incidence. Seed the exact sig the committed head
+      // carries, not the inner blob sig, or the derived index bypasses Life and
+      // disagrees with canonical immediately after every edit.
+      const canonicalPropRef = await readTilePropsSigAt(parentSegments, cellName)
+      seedLayerKeyedTileProps(lockKey, canonicalPropRef ?? propSig)
+    }
   })
 }
 

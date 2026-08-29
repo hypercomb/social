@@ -7,7 +7,7 @@
 //   2. Gathering is READ-ONLY on pointers. Nothing in this module may fetch,
 //      write, or resolve bytes; a malformed sig is dropped, never followed.
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   canonicalPeerImageCandidates,
   hasPeerImages,
@@ -33,7 +33,10 @@ const stubSwarm = (tiles: Visual[], labels: Record<string, string> = {}): void =
 }
 
 describe('peer image candidates', () => {
-  beforeEach(() => { (window as unknown as { ioc?: unknown }).ioc = undefined })
+  beforeEach(() => {
+    ;(window as unknown as { ioc?: unknown }).ioc = undefined
+    vi.unstubAllGlobals()
+  })
 
   it('offers nothing when the mesh is off', () => {
     expect(peerImageCandidates('tile')).toEqual([])
@@ -65,6 +68,12 @@ describe('peer image candidates', () => {
     // No announced label — the pubkey is the identity, never a fabricated name.
     expect(found[1].peers[0].label).toBe('')
     expect(hasPeerImages('tile')).toBe(true)
+  })
+
+  it('hides the affordance when there is only one picture to show', () => {
+    stubSwarm([{ name: 'tile', peerPubkey: 'p1', small: { image: POINT } }])
+    expect(hasPeerImages('tile')).toBe(false)
+    expect(hasPeerImages('tile', true)).toBe(true)
   })
 
   it('collapses the same picture from several peers into ONE choice', () => {
@@ -132,6 +141,41 @@ describe('peer image candidates', () => {
     await expect(canonicalPeerImageCandidates('tile')).resolves.toMatchObject([
       { previewSig: POINT },
     ])
+  })
+
+  it('discovers fixed-name image variants from every known content server', async () => {
+    const RECORD = '1'.repeat(64)
+    const LAYER = '2'.repeat(64)
+    const PROPS = '3'.repeat(64)
+    const jsonBlob = (value: unknown) => ({ text: async () => JSON.stringify(value) })
+    const resources = new Map<string, { text(): Promise<string> }>([
+      [RECORD, jsonBlob({ kind: 'canonical:variant', payload: { layerSig: LAYER } })],
+      [LAYER, jsonBlob({ name: 'tile', properties: [PROPS] })],
+      [PROPS, jsonBlob({ small: { image: POINT } })],
+    ])
+    ;(window as unknown as { ioc: unknown }).ioc = {
+      get: (key: string) => {
+        if (key === '@diamondcoreprocessor.com/ContentBrokerDrone') {
+          return { knownContentHosts: () => ['one.example', 'two.example'] }
+        }
+        if (key === '@hypercomb.social/Store') {
+          return { getResource: async (sig: string) => resources.get(sig) ?? null }
+        }
+        return undefined
+      },
+    }
+    const fetchMock = vi.fn(async (url: string) => ({
+      ok: true,
+      json: async () => ({ members: [RECORD] }),
+      url,
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const found = await canonicalPeerImageCandidates('tile')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(found).toHaveLength(1)
+    expect(found[0].previewSig).toBe(POINT)
+    expect(found[0].peers.map(peer => peer.label)).toEqual(['one.example', 'two.example'])
   })
 
   it('prefers the point-top thumbnail for preview, then flat, then the bare pointer', () => {

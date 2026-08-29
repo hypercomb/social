@@ -1,3 +1,4 @@
+@use '../panel-identity' as identity;
 // hypercomb-shared/ui/contact-card/contact-hover.component.scss
 //
 // Floating, draggable contact-details panel. Parks wherever the user drops
@@ -5,6 +6,11 @@
 // overlay icon. The hive stays visible/interactive behind it.
 
 $accent: #a8ffd8;
+
+
+// The identity as a triple — a bright theme takes the same hue deep.
+// These panels do not come through `tw.panel()`, so they say it here.
+:host { @include identity.accent($accent); }
 
 :host {
   position: fixed;
@@ -20,10 +26,10 @@ $accent: #a8ffd8;
   max-height: calc(100vh - 2rem);
   display: flex;
   flex-direction: column;
-  background: rgba(14, 14, 22, 0.96);
-  border: 1px solid rgba($accent, 0.45);
+  background: rgba(var(--hc-panel-pane), 0.96);
+  border: 1px solid rgba(var(--acc), 0.45);
   border-radius: var(--hc-radius-floating);
-  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba($accent, 0.06) inset;
+  box-shadow: 0 16px 50px rgba(var(--hc-panel-shadow), 0.55), 0 0 0 1px rgba(var(--acc), 0.06) inset;
   font-family: var(--hc-mono, system-ui);
   color: #f3f3f3;
   overflow: hidden;
@@ -31,8 +37,8 @@ $accent: #a8ffd8;
 
 .contact-hover-panel.pinned {
   // Locked open until closed — a slightly firmer accent says "this is parked".
-  border-color: rgba($accent, 0.7);
-  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba($accent, 0.18) inset;
+  border-color: rgba(var(--acc), 0.7);
+  box-shadow: 0 16px 50px rgba(var(--hc-panel-shadow), 0.6), 0 0 0 1px rgba(var(--acc), 0.18) inset;
 }
 
 .contact-hover-header {
@@ -40,7 +46,7 @@ $accent: #a8ffd8;
   align-items: center;
   gap: 0.45rem;
   padding: 0.6rem 0.8rem;
-  border-bottom: 1px solid rgba($accent, 0.22);
+  border-bottom: 1px solid rgba(var(--acc), 0.22);
   cursor: grab;
   user-select: none;
   touch-action: none;
@@ -56,7 +62,7 @@ $accent: #a8ffd8;
   flex: 0 0 auto;
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(var(--hc-panel-ink), 0.5);
   font-size: 1.1rem;
   line-height: 1;
   cursor: pointer;
@@ -68,7 +74,7 @@ $accent: #a8ffd8;
 }
 
 .contact-drag-grip {
-  color: rgba(255, 255, 255, 0.35);
+  color: rgba(var(--hc-panel-ink), 0.35);
   font-size: 0.85rem;
   line-height: 1;
 }
@@ -76,14 +82,14 @@ $accent: #a8ffd8;
 .contact-hover-title {
   font-size: 0.82rem;
   letter-spacing: 0.05em;
-  color: rgba($accent, 0.95);
+  color: rgba(var(--acc), 0.95);
 }
 
 .contact-hover-cell {
   flex: 1;
   text-align: right;
   font-size: 0.74rem;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(var(--hc-panel-ink), 0.5);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -100,10 +106,10 @@ $accent: #a8ffd8;
 }
 
 .contact-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.08);
   border-radius: var(--hc-radius-card);
   padding: 0.6rem 0.7rem;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(var(--hc-panel-ink), 0.02);
 }
 
 .contact-card-head {
@@ -116,12 +122,12 @@ $accent: #a8ffd8;
 .contact-name {
   font-size: 0.95rem;
   font-weight: 600;
-  color: #fff;
+  color: var(--hc-panel-text);
 }
 
 .contact-org {
   font-size: 0.74rem;
-  color: rgba($accent, 0.8);
+  color: rgba(var(--acc), 0.8);
 }
 
 .contact-lines {
@@ -140,7 +146,7 @@ $accent: #a8ffd8;
   }
 
   a {
-    color: $accent;
+    color: rgb(var(--acc));
     text-decoration: none;
     overflow-wrap: anywhere;
 
@@ -153,18 +159,18 @@ $accent: #a8ffd8;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-size: 0.62rem;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(var(--hc-panel-ink), 0.4);
   padding-top: 0.12rem;
 }
 
 .contact-val {
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(var(--hc-panel-ink), 0.85);
   overflow-wrap: anywhere;
 }
 
 .contact-note .contact-val {
   font-style: italic;
-  color: rgba(255, 255, 255, 0.65);
+  color: rgba(var(--hc-panel-ink), 0.65);
 }
 
 .contact-card-actions {
@@ -184,17 +190,17 @@ $accent: #a8ffd8;
   &.primary {
     flex: 1;
     padding: 0.32rem 0.5rem;
-    background: rgba($accent, 0.14);
-    border: 1px solid rgba($accent, 0.5);
-    color: $accent;
+    background: rgba(var(--acc), 0.14);
+    border: 1px solid rgba(var(--acc), 0.5);
+    color: rgb(var(--acc));
 
-    &:hover { background: rgba($accent, 0.26); color: #fff; border-color: $accent; }
+    &:hover { background: rgba(var(--acc), 0.26); color: var(--hc-panel-text); border-color: rgb(var(--acc)); }
   }
 
   &.ghost {
     background: transparent;
     border: none;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(var(--hc-panel-ink), 0.4);
     font-size: 1.05rem;
     line-height: 1;
     padding: 0 0.3rem;

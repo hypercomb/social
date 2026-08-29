@@ -24,7 +24,7 @@
       @if (slashCommands().length) {
         <section class="sheet-section">
           <h4 class="section-title">{{ 'shortcuts.section.slash' | t }}</h4>
-          <div class="section-list">
+          <div class="section-list paired-list">
             @for (entry of slashCommands(); track entry.name) {
               <div class="sheet-row slash-row">
                 <span class="row-primary">
@@ -43,7 +43,7 @@
       @if (commandLineOps().length) {
         <section class="sheet-section">
           <h4 class="section-title">{{ 'shortcuts.section.command-line' | t }}</h4>
-          <div class="section-list">
+          <div class="section-list paired-list">
             @for (entry of commandLineOps(); track $index) {
               <div class="sheet-row cli-row">
                 <span class="row-primary">

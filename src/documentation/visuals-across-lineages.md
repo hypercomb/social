@@ -257,13 +257,24 @@ per-lineage copies of anything.
   one coherent participant projection, so a pasted local twin cannot repaint a
   peer variant or leak its border, tags, link, hide-text state, or display label
   into that peer's version.
-  Portal inventory edit mode is the deliberate future-default seam: its
-  explicitly marked row reads the original details from the canonical target,
-  then writes the participant's complete override back to that root for future
-  activations. Ordinary lineage activations pin their selected top-level detail
-  signatures, so adding or editing `/team/jaime` cannot repaint
-  `/friends/jaime`. The Portal row's index, visibility and gate/filter
-  decorations remain local to the appearance.
+  Portal inventory edit mode is the deliberate default seam: its explicitly
+  marked row writes the fixed-name root properties. Every ordinary appearance
+  reads a shallow composition, `{ ...rootDefaults, ...outerOverrides }`.
+  Consequently a root edit updates every appearance that has not replaced that
+  property, while `/team/jaime` and `/friends/jaime` can still carry different
+  explicit images, borders, tags, links, or any future property. Outer writes
+  stay sparse: values equal to the root are removed instead of copied, so an
+  editor round-trip cannot accidentally pin today's default. Signature-valued
+  defaults remain their original typed Life incidences; inheritance never
+  copies or re-mints resources. An outer object may carry
+  `propertyPins: string[]`: pinned keys survive even while equal to the root,
+  and a pinned key with no value locks that property off. A pin is precedence:
+  a root/inner pin blocks outer writes to that key; a pin introduced by an
+  outer layer protects its value from any later composition. Effective pin
+  metadata flows outward, while sparse writes store only the pins introduced
+  at that layer. This supplies the explicit locked/always-override state
+  without changing ordinary merge semantics. The Portal row's index, visibility and
+  gate/filter decorations remain local to the appearance.
   A materialized `imagePool` array remains optional; it is not the source of
   truth.
 

@@ -23,13 +23,29 @@ import { type ThemeEnv, bandFor, arkanoidThemes } from './theme.js'
 // are still distinct, shows '4' in amber and '*' in gold (see drawEditor).
 // Vivid arcade palette — bright, saturated, high-contrast so the tiles POP off the
 // dark board (kept clearly distinct: mint → cyan → indigo → hot orange → gold).
+// THE ARRIVAL PAGE'S WALL, brought into the game — the exact four gradient
+// pairs from `arkanoid-page.html` (.ak-b1…b4). `BRICK_COLORS` stays the
+// tile's IDENTITY colour, which is what `brickColor()` hands the particle
+// system; `BRICK_SHADE` is the bottom stop of that same tile's gradient, so
+// a tile on the board and a tile on the page are the same object.
 const BRICK_COLORS: Record<number, string> = {
-  1: '#2BE36B',   // spectral-green haunted stone
-  2: '#39FF6A',   // brighter spectral green
-  3: '#B65CFF',   // violet stone
-  4: '#FFB23A',   // candle-amber — a clearly tougher haunted block
+  1: '#4DE3FF',   // page .ak-b1 — cyan
+  2: '#FFD93B',   // page .ak-b2 — gold
+  3: '#FF5C96',   // page .ak-b3 — pink
+  4: '#A488FF',   // page .ak-b4 — purple
 }
-const TOUGH_COLOR = '#FFB23A'   // candle amber — the toughest '*' stone
+const BRICK_SHADE: Record<string, string> = {
+  '#4DE3FF': '#1FA8CC',
+  '#FFD93B': '#D3A802',
+  '#FF5C96': '#D1246A',
+  '#A488FF': '#6C48E0',
+}
+/** The page's 5px/22px gutters at the page's own pitch, in world units —
+ *  what makes a wall read as separate tiles rather than one slab. */
+const BRICK_GAP_X = 5
+const BRICK_GAP_Y = 3
+const TOUGH_COLOR = '#A488FF'   // the page's purple — the toughest '*' stone
+const FINALE_GOLD = '#FFD93B'   // the page's gold — mega + last-brick beacon
 // Cartoon frog (the hopping top dispenser) — bright candy greens + a dark-green ink contour.
 const FROG_BODY_TOP = '#7CF05A'   // bright lime crown
 const FROG_BODY_MID = '#3FD13A'   // saturated grass green
@@ -261,7 +277,7 @@ export class Renderer {
         // The big sparkling brick: gold body via the shared painter (which now
         // streams lightning-fork cracks as it takes hits) plus a twinkle. No hit
         // counter — the spreading cracks read the damage.
-        this.#drawBrick(b.x, b.y, b.w, b.h, TOUGH_COLOR, b.hp / b.max)
+        this.#drawBrick(b.x, b.y, b.w, b.h, FINALE_GOLD, b.hp / b.max)
         this.#sparkle(b, time, 6)
         continue
       }
@@ -291,7 +307,7 @@ export class Renderer {
     ctx.fillStyle = halo
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill()
     ctx.restore()
-    this.#drawBrick(b.x, b.y, b.w, b.h, TOUGH_COLOR, b.hp / b.max)
+    this.#drawBrick(b.x, b.y, b.w, b.h, FINALE_GOLD, b.hp / b.max)
     this.#sparkle(b, time, 4)
   }
 
@@ -445,71 +461,40 @@ export class Renderer {
     ctx.restore()
   }
 
-  /** Paint one brick. `wear` is hp/max (1 = fresh, →0 = nearly dead). Damaged
-   *  bricks DARKEN + DESATURATE toward a charred grey-brown rather than fading
-   *  alpha, so a battered brick reads as obviously cracked/charred while the
-   *  shape stays solid (crisp top highlight + a clear darker edge). Heavily
-   *  damaged bricks also get a couple of dark crack lines. */
+  /** Paint one brick — THE ARRIVAL PAGE'S TILE. A rounded plate carrying one
+   *  two-stop vertical gradient, separated from its neighbours by the page's
+   *  own gutter. The painter used to stack a shine edge, an ink contour, a cel
+   *  band, a gloss sweep and a specular hotspot onto every tile; beside the
+   *  page's clean wall that read as busy, so all of it is gone.
+   *
+   *  `wear` is hp/max (1 = fresh, →0 = nearly dead). Damage still shows —
+   *  BOTH gradient stops darken toward charred and the fracture network grows
+   *  — because that is information the player plays on, not decoration. */
   #drawBrick(x: number, y: number, w: number, h: number, baseHex: string, wear: number): void {
     const ctx = this.#ctx
-    const fresh = hexRgb(baseHex)
-    // 0 = full damage, 1 = fresh. Pull the colour toward charred and darken it as
-    // wear falls. Squaring keeps the first hit subtle and the last hit dramatic.
+    const freshTop = hexRgb(baseHex)
+    // The page pairs each colour with its own hand-picked bottom stop; a hue
+    // the page never named (a theme's own colour) derives one instead.
+    const pairHex = BRICK_SHADE[baseHex.toUpperCase()]
+    const freshBottom = pairHex ? hexRgb(pairHex) : darken(freshTop, 0.62)
+    // 0 = full damage, 1 = fresh. Squaring keeps the first hit subtle and the
+    // last hit dramatic.
     const dmg = 1 - Math.max(0, Math.min(1, wear))
     const toward = dmg * dmg
-    const body = mix(fresh, BRICK_CHARRED, toward * 0.82)
-    const top = mix(body, { r: 255, g: 255, b: 255 }, 0.45)   // bright glossy top of the gradient
-    const shade = darken(body, 0.5)                           // rich (not muddy) bottom
-    const rx = x + 1.5, ry = y + 1.5, rw = w - 3, rh = h - 3
+    const top = mix(freshTop, BRICK_CHARRED, toward * 0.82)
+    const bottom = mix(freshBottom, BRICK_CHARRED, toward * 0.82)
+    // Half the gutter on each side, so the PITCH stays wall-to-wall while the
+    // tiles keep the page's air between them.
+    const gapX = Math.min(BRICK_GAP_X, w * 0.18), gapY = Math.min(BRICK_GAP_Y, h * 0.24)
+    const rx = x + gapX / 2, ry = y + gapY / 2, rw = w - gapX, rh = h - gapY
 
     ctx.globalAlpha = 1
-    // body — a vivid top-lit gradient (bright crown → saturated body → rich base)
-    this.#roundRect(rx, ry, rw, rh, 4)
+    this.#roundRect(rx, ry, rw, rh, 3)
     const g = ctx.createLinearGradient(rx, ry, rx, ry + rh)
     g.addColorStop(0, rgbStr(top.r, top.g, top.b))
-    g.addColorStop(0.42, rgbStr(body.r, body.g, body.b))
-    g.addColorStop(1, rgbStr(shade.r, shade.g, shade.b))
+    g.addColorStop(1, rgbStr(bottom.r, bottom.g, bottom.b))
     ctx.fillStyle = g
     ctx.fill()
-
-    // bright lit shine-edge along the top + left (the arcade "this tile glows" cue)
-    ctx.globalAlpha = 0.55 * (0.4 + 0.6 * wear)
-    ctx.strokeStyle = rgbStr(Math.min(255, top.r + 28), Math.min(255, top.g + 28), Math.min(255, top.b + 28))
-    ctx.lineWidth = 1.3; ctx.lineCap = 'round'
-    ctx.beginPath()
-    ctx.moveTo(rx + 4, ry + 0.8); ctx.lineTo(rx + rw - 4, ry + 0.8)
-    ctx.moveTo(rx + 0.8, ry + 4); ctx.lineTo(rx + 0.8, ry + rh - 4)
-    ctx.stroke()
-    ctx.globalAlpha = 1
-
-    // tinted ink contour — the cartoon outline that unifies the look (never #000)
-    const ink = darken(body, 0.22)
-    ctx.globalAlpha = 0.55 + 0.45 * wear
-    this.#roundRect(rx + 0.5, ry + 0.5, rw - 1, rh - 1, 3.5)
-    this.#inkContour(rgbStr(ink.r, ink.g, ink.b), 1.6)
-    ctx.globalAlpha = 1
-
-    // ONE hard-edged cel shadow band across the lower ~42% (cel-shading read)
-    if (rw >= 6 && rh >= 6) {
-      ctx.save()
-      this.#roundRect(rx, ry, rw, rh, 4); ctx.clip()
-      const band = darken(body, 0.62)
-      ctx.globalAlpha = 0.32; ctx.fillStyle = rgbStr(band.r, band.g, band.b)
-      ctx.fillRect(rx, ry + rh * 0.58, rw, rh * 0.42)
-      ctx.restore()
-    }
-
-    // GLOSS — a candy specular sweep across the top + a plastic hotspot
-    ctx.globalAlpha = 0.5 * (0.45 + 0.55 * wear)
-    const gloss = ctx.createLinearGradient(rx, ry, rx, ry + rh * 0.55)
-    gloss.addColorStop(0, 'rgba(255,255,255,0.92)'); gloss.addColorStop(1, 'rgba(255,255,255,0)')
-    ctx.fillStyle = gloss
-    this.#roundRect(rx + 2, ry + 1.2, rw - 4, rh * 0.42, 3)
-    ctx.fill()
-    ctx.globalAlpha = 0.5 * wear
-    ctx.fillStyle = '#ffffff'
-    ctx.beginPath(); ctx.ellipse(rx + rw * 0.26, ry + rh * 0.34, rw * 0.15, rh * 0.2, -0.35, 0, Math.PI * 2); ctx.fill()
-    ctx.globalAlpha = 1
 
     // Branching fracture network that grows as the brick disintegrates.
     this.#cracks(rx, ry, rw, rh, dmg)

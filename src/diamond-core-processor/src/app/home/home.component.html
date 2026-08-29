@@ -241,7 +241,6 @@
       <aside class="orientation">
         <p class="orientation-line orientation-lead">{{ 'dcp.orientation-what' | t }}</p>
         <p class="orientation-line">{{ 'dcp.orientation-install' | t }}</p>
-        <p class="orientation-line">{{ 'dcp.orientation-verbs' | t }}</p>
         <div class="orientation-footer">
           <ul class="orientation-legend">
             <li><i class="legend-swatch layer" aria-hidden="true"></i>{{ 'dcp.legend-layer' | t }}</li>
@@ -289,11 +288,9 @@
       </a>
     }
 
-    <!-- ── THE LIST ──────────────────────────────────────────────────
-         One list, one switch. Behaviors are packages: adopt one, save the
-         state you are in, go back to a state you saved. Tiles are content:
-         they keep their own revisions. Either row opens its CODE, because
-         reading a package is how you decide to trust it. -->
+    <!-- One primary list: apps in the everyday view, content in the content
+         view. Packaging and verification details stay behind explicit
+         actions instead of becoming a second vocabulary users must learn. -->
     @if (!advancedView()) {
       @if (simpleList() === 'behaviors') {
         @if (!behaviorRows().length) {

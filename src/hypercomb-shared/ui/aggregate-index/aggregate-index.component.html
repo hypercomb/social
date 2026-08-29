@@ -62,6 +62,37 @@
       </button>
     }
 
+    @if (referencePick(); as pick) {
+      <div class="ai-staged" role="group">
+        <p class="ai-versions-note">
+          {{ pick.portal.label }} · {{ 'select.picked' | t: { count: selection().length } }}
+        </p>
+        <button class="ai-staged-add" type="button"
+                [disabled]="selection().length === 0"
+                (click)="finishReferencePick()">
+          {{ 'collections-landing.add-to' | t: {
+            count: selection().length,
+            name: pick.parentSegments[pick.parentSegments.length - 1]
+          } }}
+        </button>
+        <form class="ai-filter-row"
+              (submit)="$event.preventDefault(); finishReferencePick(referenceContainerName())">
+          <div class="ai-filter-field">
+            <input class="ai-filter-input" type="text" autocomplete="off"
+                   [value]="referenceContainerName()"
+                   (input)="referenceContainerName.set($any($event.target).value)"
+                   [placeholder]="'collections-landing.new' | t" />
+          </div>
+          <button class="ai-filter-add mat-sym" type="submit"
+                  [disabled]="selection().length === 0 || !referenceContainerName().trim()"
+                  [attr.aria-label]="'aggregate.create-named' | t: { name: referenceContainerName() }">add</button>
+        </form>
+        <button class="ai-carry-clear" type="button" (click)="cancelReferencePick()">
+          {{ 'aggregate.carry.clear' | t }}
+        </button>
+      </div>
+    }
+
     <!-- Carrying: picked here, applied wherever you walk to. The bar names the
          page it would land on, so pressing it can never be a guess — and it
          says what the bouquet in hand will do, because a mark landing on twelve
@@ -251,6 +282,19 @@
                 </form>
               } @else {
                 <div class="ai-actions">
+                  @if (portalDropView()) {
+                    <!-- Portals stay intentionally spare: + is the whole
+                         reference act. A staged tile makes this pool its
+                         target; otherwise the pool itself is picked up. -->
+                    <button class="ai-action ai-action-carry" type="button"
+                            [class.is-carried]="isCarried(item)"
+                            (click)="addToPortal(item, $event)"
+                            [attr.aria-pressed]="isCarried(item)"
+                            [attr.aria-label]="'aggregate.carry.add' | t: { name: item.label }"
+                            [title]="'aggregate.carry.add' | t: { name: item.label }">
+                      <span class="mat-sym">add</span>
+                    </button>
+                  } @else {
                   <!-- Pick it up to apply elsewhere. Its own control, never the
                        row body: the body already means open, and press-and-move
                        already means drag. -->
@@ -262,19 +306,6 @@
                           [title]="(isCarried(item) ? 'aggregate.carry.remove' : 'aggregate.carry.add') | t: { name: item.label }">
                     <span class="mat-sym">{{ isCarried(item) ? 'luggage' : 'add' }}</span>
                   </button>
-                  <!-- Pin this portal as home. One pin across the whole list —
-                       the store holds a single slot, so lighting this row is
-                       what unlights whichever was lit before. -->
-                  @if (canPinHome()) {
-                    <button class="ai-action ai-action-home" type="button"
-                            [class.is-home]="isHome(item)"
-                            (click)="toggleHome(item, $event)"
-                            [attr.aria-pressed]="isHome(item)"
-                            [attr.aria-label]="(isHome(item) ? 'aggregate.home.unpin' : 'aggregate.home.pin') | t: { name: item.label }"
-                            [title]="(isHome(item) ? 'aggregate.home.unpin' : 'aggregate.home.pin') | t: { name: item.label }">
-                      <span class="mat-sym">{{ isHome(item) ? 'home_pin' : 'home' }}</span>
-                    </button>
-                  }
                   @if (canPickVersion()) {
                     <button class="ai-action" type="button"
                             [class.is-active]="versionsFor() === item.key"
@@ -295,6 +326,7 @@
                             [attr.aria-label]="'aggregate.remove' | t" [title]="'aggregate.remove' | t">
                       <span class="mat-sym">delete</span>
                     </button>
+                  }
                   }
                 </div>
               }
@@ -346,7 +378,7 @@
   <!-- Drag ghost — follows the cursor across the whole screen, so it must live
        outside the panel and ignore pointer events. -->
   @if (dragging(); as drag) {
-    <div class="ai-ghost" aria-hidden="true"
+    <div class="ai-ghost" [class.is-over-hive]="dragOverHive()" aria-hidden="true"
          [style.--accent]="accent(drag.label)"
          [style.left.px]="dragPos().x"
          [style.top.px]="dragPos().y">

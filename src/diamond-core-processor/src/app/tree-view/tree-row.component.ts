@@ -87,8 +87,9 @@ import type { TreeNode } from '../core/tree-node'
               <button class="ract" (click)="openEditor.emit(node()); $event.stopPropagation()" aria-label="AI edit">
                 <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M14 6l4 4"/></svg>
               </button>
-              <button class="ract" (click)="promoteToPackage.emit(node()); $event.stopPropagation()" aria-label="Promote to package root">
+              <button class="ract make-version" (click)="promoteToPackage.emit(node()); $event.stopPropagation()" aria-label="Make a version from here" title="Make a version from here">
                 <svg viewBox="0 0 24 24"><path d="M12 20V7M12 7l-5 5M12 7l5 5M5 4h14"/></svg>
+                <span>Make version</span>
               </button>
             }
           }
@@ -113,7 +114,7 @@ import type { TreeNode } from '../core/tree-node'
        <span class="cell"> so the six columns never shift. */
     .row {
       display: grid;
-      grid-template-columns: 16px 34px 18px minmax(0, 1fr) 74px 66px;
+      grid-template-columns: 16px 34px 18px minmax(0, 1fr) 74px 118px;
       align-items: center;
       column-gap: 12px;
       min-height: 44px;
@@ -179,6 +180,7 @@ import type { TreeNode } from '../core/tree-node'
       transition: opacity 0.12s, color 0.12s, border-color 0.12s;
     }
     .ract svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .ract.make-version { width: auto; padding: 0 8px; gap: 5px; white-space: nowrap; font: 700 9px/1 var(--dcp-ui); letter-spacing: 0.04em; text-transform: uppercase; }
     .row:hover .ract { opacity: 1; }
     .ract:hover { color: var(--dcp-accent); border-color: var(--dcp-accent); }
     @media (hover: none) { .ract { opacity: 1; } }
@@ -226,6 +228,8 @@ import type { TreeNode } from '../core/tree-node'
       .name { font-size: 15px; }
       .crumb, .desc, .chip.audit { display: none; }
       .ract { opacity: 1; }
+      .ract.make-version { width: 26px; padding: 0; }
+      .ract.make-version span { display: none; }
       .row-placeholder { height: 52px; padding-left: calc(14px + var(--depth, 0) * 14px); }
     }
   `]

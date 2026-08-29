@@ -33,6 +33,7 @@
     "build:packages": "npm run build:core && npm run build:essentials",
     "build:all": "npm run build:core && npm run build:sdk && npm run build:cli && npm run build:essentials && npm run build:web && npm run build:dev && npm run build:dcp && npm run build:avatars && npm run build:meadowverse",
     "build:web": "npm --prefix hypercomb-web run build",
+    "build:shim": "node hypercomb-shim/build.mjs",
     "build:dev": "npm --prefix hypercomb-dev run build",
     "build:dcp": "npm --prefix diamond-core-processor run build",
     "build:avatars": "npm --prefix hypercomb-avatars run build",

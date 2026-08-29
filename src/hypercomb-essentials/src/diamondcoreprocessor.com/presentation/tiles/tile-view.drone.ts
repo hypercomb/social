@@ -88,10 +88,11 @@
 
 import { Drone, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { sniffImageMime } from '../../link/photo.js'
-import { readTilePropsIndex, lookupTilePropsSig, cellLocationSig } from '../../editor/tile-properties.js'
+import { readTilePropsIndex, lookupTilePropsSig, cellLocationSig, readTilePropertiesAt, recoverableTileImageSig } from '../../editor/tile-properties.js'
 import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
 import { nextTile, rememberCloseUpEntry, VIEW_ENTER_PREFIX } from './viewer-walk.js'
 import { tileArtSig } from './tile-art.js'
+import { resolveLocalResourceReference } from './local-resource-reference.js'
 import type { VisualBeeDescriptor, VisualBeeRegistry } from '../../commands/visual-bee-registry.js'
 import { isKindGloballyOff } from '../../sharing/behavior-enablement.js'
 import { MOBILE_MODE_IOC_KEY } from '../../preferences/mobile-pheromones.js'
@@ -291,6 +292,7 @@ const COVER_GRACE_MS = 1600
 type StoreShape = {
   getResource(sig: string): Promise<Blob | null>
   getResourceLocal(sig: string): Promise<Blob | null>
+  getResourceResolvedLocal?(sig: string): Promise<Blob | null>
 }
 type HistoryShape = {
   sign(l: { explorerSegments?: () => readonly string[] }): Promise<string>
@@ -1874,7 +1876,7 @@ export class TileViewDrone extends Drone {
     const fromPropsSig = async (sig: string): Promise<string> => {
       if (!SIG.test(sig)) return ''
       try {
-        const blob = await store.getResourceLocal(sig)
+        const blob = await resolveLocalResourceReference(store, sig)
         if (!blob) return ''
         const props = JSON.parse(await blob.text()) as {
           small?: { image?: unknown }
@@ -1885,6 +1887,15 @@ export class TileViewDrone extends Drone {
         return typeof image === 'string' && SIG.test(image) ? image : ''
       } catch { return '' }
     }
+
+    // Effective canonical view: fixed-name root defaults first, then this
+    // appearance's outer overrides. This is the same object the hex renderer
+    // and editor consume; inherited image incidences need no reminting.
+    try {
+      const effective = await readTilePropertiesAt(this.#segments, label)
+      const inherited = recoverableTileImageSig(effective)
+      if (inherited) return inherited
+    } catch { /* continue through mixed-version fallbacks */ }
 
     try {
       if (history?.sign && history?.currentLayerAt) {

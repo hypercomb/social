@@ -157,7 +157,7 @@
 .action-mark-add { font-size: 1.5rem; font-weight: 400; }
 .action-copy { display: grid; gap: 0.16rem; }
 .action-copy strong { font-size: 0.88rem; }
-.action-copy small { color: rgba(216, 230, 238, 0.5); font-size: 0.71rem; }
+.action-copy small { color: rgba(216, 230, 238, 0.62); font-size: 0.71rem; }
 .action-arrow { color: #7eb6d6; font-size: 1.1rem; }
 
 .examples {
@@ -175,8 +175,8 @@
   h3 { margin: 0; font-size: 1.2rem; font-weight: 650; }
 }
 
-.section-kicker { margin-bottom: 0.35rem; color: rgba(216, 230, 238, 0.42); }
-.section-note { max-width: 13rem; color: rgba(216, 230, 238, 0.38); font-size: 0.7rem; line-height: 1.4; text-align: right; }
+.section-kicker { margin-bottom: 0.35rem; color: rgba(216, 230, 238, 0.56); }
+.section-note { max-width: 13rem; color: rgba(216, 230, 238, 0.54); font-size: 0.7rem; line-height: 1.4; text-align: right; }
 
 .rows {
   list-style: none;
@@ -234,7 +234,7 @@
 .description {
   font-size: 0.78rem;
   line-height: 1.4;
-  color: rgba(216, 230, 238, 0.5);
+  color: rgba(216, 230, 238, 0.62);
 }
 
 .meta {
@@ -294,7 +294,7 @@ button {
 
 .dismiss {
   border: 0;
-  color: rgba(216, 230, 238, 0.48);
+  color: rgba(216, 230, 238, 0.6);
   background: transparent;
 
   &:hover { color: rgba(216, 230, 238, 0.8); background: transparent; }

@@ -111,6 +111,10 @@ export class PostitViewDrone extends Drone {
    *  VISIBILITY flag, not a teardown: the notes (and an opened post) keep
    *  their nodes and come back exactly as they were. */
   #covered = false
+  /** The publisher's mounted segments on a visitor shell — a nested lineage
+   *  mounts at its FULL segments (the visit engine says where via
+   *  `preview:mode`), so the site root is `base.length` deep, not one. */
+  #previewBase: string[] | null = null
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#bound) {
@@ -150,6 +154,11 @@ export class PostitViewDrone extends Drone {
       // owner is excluded: the post-it view holds `view:active` while it is
       // showing, and hiding the surface it just opened is exactly backwards.
       this.onEffect('view:active', () => this.#recheckCover())
+      this.onEffect<{ active?: boolean; segments?: string[] }>('preview:mode', p => {
+        this.#previewBase = p?.active && Array.isArray(p.segments)
+          ? p.segments.map(String).filter(Boolean)
+          : null
+      })
       this.onEffect<{ view?: string; segments?: string[] }>('view:open-for-tile', payload => {
         if (payload?.view !== POSTIT_VIEW) return
         this.#targetSegments = (payload.segments ?? []).map(String).filter(Boolean)
@@ -215,7 +224,11 @@ export class PostitViewDrone extends Drone {
     if (!isPublishedVisitorShell()) return false
     const lineage = window.ioc?.get<LineageShape>('@hypercomb.social/Lineage')
     const segments = this.#targetSegments ?? [...(lineage?.explorerSegments?.() ?? [])]
-    return segments.length <= 1
+    // The root is as deep as the publisher's mount: a nested lineage stands at
+    // its full segments (games/arkanoid), so `<= 1` read every nested site's
+    // root face as a child page and offered a × onto bare hexagons.
+    const base = this.#previewBase
+    return segments.length <= (base?.length || 1)
   }
 
   /** Show or hide both surfaces for the covering window. `display` rather

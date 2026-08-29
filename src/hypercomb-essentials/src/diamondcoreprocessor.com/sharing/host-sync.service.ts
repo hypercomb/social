@@ -38,7 +38,7 @@
 // MULTI-TARGET DRAIN (consent-hosting.md §"Transfer"): the drain iterates a
 // LIST of targets — the operator's self-domain plus granted hosts. Phase 1
 // grants exactly one standing host: the PUBLIC content endpoint
-// content.jwize.com (documentation/public-content-endpoint.md — Blossom/
+// content.pluginthematrix.com (documentation/read-only-deployment.md — Blossom/
 // NIP-98 worker over R2), behind its own explicit opt-in
 // (localStorage['hc:public-host'] = '1'). Doctrine: swarms resolve around
 // hosts; PUBLIC content posts to the CDN; private/group content NEVER
@@ -72,7 +72,7 @@
 // Toggle live via the public enable()/disable() methods; localStorage
 // changes take effect on the next event, no reload required.
 
-import { EffectBus, SignatureService, registerPoolMeaning } from '@hypercomb/core'
+import { EffectBus, SignatureService, registerPoolMeaning, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
 import { decorationClosureSigs, nestedResourceSigs } from './decoration-closure.js'
 
 export type HostSyncKind = 'layer' | 'bee' | 'dependency' | 'resource'
@@ -82,6 +82,39 @@ interface SignerLike {
 }
 
 const SIG_RE = /^[a-f0-9]{64}$/
+
+/** Child slots a layer holds its descendant layers in. Also the set of
+ *  `relation` values a meta envelope can carry to mean "I am held as a
+ *  child" — the privacy gate reads the relation exactly as it reads a slot. */
+const CHILD_SLOTS = new Set(['cells', 'layers', 'children'])
+
+/** The one incidence a META ENVELOPE (Life Primitive) references.
+ *
+ *  Every walk below classifies a layer's refs by iterating its ARRAY slots.
+ *  An envelope has none: `{ meta: 1, layer: '<sig>', relation: 'children' }`
+ *  carries its payload in a SCALAR slot, so `Object.entries` finds nothing to
+ *  follow and the walk dead-ends ON the envelope — the envelope reaches the
+ *  host, the layer it stands for never does. Because the push walk
+ *  (`markPublic`), the gate (`isClosureAvailable`) and the diagnostic
+ *  (`closureGaps`) all shared that blind spot, a branch with envelope children
+ *  published "complete" and gap-checked "clean" while its children 404'd.
+ *  Measured on the live revolucion head: 4 of 14 envelope targets missing.
+ *
+ *  Payload kinds are self-declared and are exactly HostSyncKind's members
+ *  (`META_PAYLOAD_FIELDS`), so the declared key IS the store to read from. */
+const metaIncidence = (record: unknown): { sig: string; kind: HostSyncKind } | null => {
+  if (!isMetaEnvelope(record)) return null
+  const payload = metaPayloadOf(record)
+  if (!payload || !SIG_RE.test(payload.sig)) return null
+  return { sig: payload.sig, kind: payload.kind as HostSyncKind }
+}
+
+/** True when an envelope is held as a descendant LAYER — the same condition
+ *  the slot walks express as `CHILD_SLOTS.has(slot)`. A tile-only share must
+ *  not descend through one, exactly as it does not descend a `children[]`. */
+const metaIsChildIncidence = (record: unknown, kind: HostSyncKind): boolean =>
+  kind === 'layer'
+  && CHILD_SLOTS.has(String((record as Record<string, unknown>)?.['relation'] ?? 'children'))
 const ENTRY_RE = /^([a-f0-9]{64})\.(layer|bee|dependency|resource)$/
 // Pool meanings — sign(meaning) IS the pool address (see #poolSignature).
 // Distinct from PushQueueService's 'push'/'receipts' meanings so the two
@@ -110,7 +143,7 @@ const ENABLED_KEY = 'hc:host-sync:enabled'
 // the consent handshake (kinds 20410/30411 — not built here) and simply
 // append to #targets().
 const PUBLIC_HOST_KEY = 'hc:public-host'
-const PUBLIC_HOST_DOMAIN = 'content.jwize.com'
+const PUBLIC_HOST_DOMAIN = 'content.pluginthematrix.com'
 // Queue-pool sidecar marker: `{sig}.public` = this sig belongs to a
 // published-public closure. THE doctrine gate for the CDN target — written
 // only by markPublic() (fed by the swarm publish walk, which enumerates
@@ -236,12 +269,13 @@ export class HostSyncService extends EventTarget {
   /** True iff the operator opted in to the PUBLIC content endpoint. */
   public readonly isPublicHostEnabled = (): boolean => this.#publicHostEnabled()
 
-  /** Opt in to the public CDN target (content.jwize.com). Published-public
+  /** Opt in to the public relay target (content.pluginthematrix.com). Published-public
    *  closures (and ONLY those — see markPublic) start draining there.
    *  Effect is immediate. Caller shows the "your public tiles will be
    *  posted to the public content endpoint" consent BEFORE invoking —
    *  same contract as enable(). */
   public readonly enablePublicHost = (): void => {
+    if (this.#readonlyVisitor()) return
     try { localStorage.setItem(PUBLIC_HOST_KEY, '1') } catch { /* private mode — honor in-session */ }
     // The operator's "retry now" signal for THIS host.
     this.#unauthorizedUntil.delete(PUBLIC_HOST_DOMAIN)
@@ -290,11 +324,25 @@ export class HostSyncService extends EventTarget {
     try { return localStorage.getItem(PUBLIC_HOST_KEY) === '1' } catch { return false }
   }
 
+  /** A published website NEVER backs anything up. Its store is session
+   *  memory that dies with the tab, its network profile is GET-only, and
+   *  publisher writes belong to DCP — so every push here is guaranteed
+   *  waste. Left ungated it was the visitor's single largest cost: the fold
+   *  writes each layer, the queue re-reads every file to push it, the push
+   *  is refused, and the whole store is walked again — two thirds of all CPU
+   *  spent reading bytes that could never leave. Gated at the one predicate
+   *  that fronts the content:wrote handler, the retry timer and the boot
+   *  drains, so nothing downstream has to remember this rule. */
+  readonly #readonlyVisitor = (): boolean =>
+    (window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__ === true
+
   /** Any drain destination enabled at all? Gates the content:wrote
    *  handler, the retry timer, and the boot drains. */
-  readonly #anyEnabled = (): boolean => this.#isEnabled() || this.#publicHostEnabled()
+  readonly #anyEnabled = (): boolean =>
+    !this.#readonlyVisitor() && (this.#isEnabled() || this.#publicHostEnabled())
 
   readonly #isEnabled = (): boolean => {
+    if (this.#readonlyVisitor()) return false
     let flag = ''
     try { flag = String(localStorage.getItem(ENABLED_KEY) ?? '').trim().toLowerCase() } catch { return false }
     if (flag !== 'true') return false
@@ -309,6 +357,7 @@ export class HostSyncService extends EventTarget {
    *  skipped entirely if already receipted. Stores the bytes in the queue
    *  file so drain is self-contained and crash-safe. */
   public readonly enqueue = async (sig: string, kind: HostSyncKind, bytes: ArrayBuffer): Promise<void> => {
+    if (this.#readonlyVisitor()) return
     if (!SIG_RE.test(sig)) return
     // CLOSURE WALK — runs even when this layer is already receipted: a
     // receipt proves THIS sig serves, not its refs. The doctrine is
@@ -452,7 +501,19 @@ export class HostSyncService extends EventTarget {
     let layer: Record<string, unknown>
     try { layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown> } catch { return }
     if (!layer || typeof layer !== 'object') return
-    const CHILD_SLOTS = new Set(['cells', 'layers', 'children'])
+    // Meta envelope: one scalar incidence, no array slots. Stage it and stop —
+    // the loop below would find nothing and drop the payload on the floor.
+    const incidence = metaIncidence(layer)
+    if (incidence) {
+      try {
+        const metaBytes = await this.#readLocalBytes(incidence.sig, incidence.kind)
+        if (!metaBytes) return await this.#noteWalkMiss(incidence.sig)
+        this.#missingLocal.delete(incidence.sig)
+        await this.enqueue(incidence.sig, incidence.kind, metaBytes)
+        if (incidence.kind === 'resource') await this.#enqueueResourceClosure(incidence.sig, metaBytes)
+      } catch { await this.#noteWalkMiss(incidence.sig) }
+      return
+    }
     for (const [slot, value] of Object.entries(layer)) {
       if (!Array.isArray(value)) continue
       const kind: HostSyncKind = CHILD_SLOTS.has(slot) ? 'layer'
@@ -607,7 +668,14 @@ export class HostSyncService extends EventTarget {
       let layer: Record<string, unknown>
       try { layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown> } catch { return }
       if (!layer || typeof layer !== 'object') return
-      const CHILD_SLOTS = new Set(['cells', 'layers', 'children'])
+      // Meta envelope: the incidence IS the whole reference set. Its
+      // `relation` plays the part a slot name plays below, so the privacy
+      // gate reads identically.
+      const incidence = metaIncidence(layer)
+      if (incidence) {
+        if (metaIsChildIncidence(layer, incidence.kind) && !closure) return
+        return await this.markPublic(incidence.sig, incidence.kind, closure)
+      }
       for (const [slot, value] of Object.entries(layer)) {
         if (!Array.isArray(value)) continue
         const isChildSlot = CHILD_SLOTS.has(slot)
@@ -689,6 +757,10 @@ export class HostSyncService extends EventTarget {
    *  stalls self-domain backup, and vice versa. No-op when no target is
    *  enabled. */
   public readonly drain = async (): Promise<void> => {
+    // Belt and braces with #anyEnabled: drain is also called directly by
+    // callers that know they just staged something. In a published website
+    // there is nothing to stage and nowhere to send it.
+    if (this.#readonlyVisitor()) return
     if (this.#draining) return
     const targets = await this.#targets()
     if (targets.length === 0) return // nothing enabled — stay inert
@@ -1148,7 +1220,13 @@ export class HostSyncService extends EventTarget {
       let layer: Record<string, unknown>
       try { layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown> } catch { return true }
       if (!layer || typeof layer !== 'object') return true
-      const CHILD_SLOTS = new Set(['cells', 'layers', 'children'])
+      // Meta envelope: vouch for the incidence it stands for, or the gate
+      // greenlights a branch whose children the host does not serve.
+      const incidence = metaIncidence(layer)
+      if (incidence) {
+        if (metaIsChildIncidence(layer, incidence.kind) && !closure) return true
+        return await this.#closureReceipted(incidence.sig, incidence.kind, closure, visited)
+      }
       for (const [slot, value] of Object.entries(layer)) {
         if (!Array.isArray(value)) continue
         const isChildSlot = CHILD_SLOTS.has(slot)
@@ -1237,7 +1315,14 @@ export class HostSyncService extends EventTarget {
         let layer: Record<string, unknown>
         try { layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown> } catch { return }
         if (!layer || typeof layer !== 'object') return
-        const CHILD_SLOTS = new Set(['cells', 'layers', 'children'])
+        // Meta envelope: report the hole behind it, not the envelope that
+        // resolves fine. This is the line that turned 4 missing children
+        // into "0 gaps" on the live revolucion head.
+        const incidence = metaIncidence(layer)
+        if (incidence) {
+          if (metaIsChildIncidence(layer, incidence.kind) && !closure) return
+          return await walk(incidence.sig, incidence.kind)
+        }
         for (const [slot, value] of Object.entries(layer)) {
           if (!Array.isArray(value)) continue
           const isChildSlot = CHILD_SLOTS.has(slot)
@@ -1639,6 +1724,12 @@ export class HostSyncService extends EventTarget {
    *  so read/remove target the right source; on a same-name collision the
    *  pool copy wins. */
   readonly #listQueue = async (): Promise<QueueEntry[]> => {
+    // A published website has no queue and never will: nothing may leave it.
+    // Gated HERE rather than at each caller because the walk is the expensive
+    // part (a getFile per entry per pass, just for mtime) and status surfaces
+    // poll `pending()` on their own schedule — one of them kept the visitor's
+    // main thread busy long after every push path was already refused.
+    if (this.#readonlyVisitor()) return []
     const byName = new Map<string, QueueEntry>()
     const collect = async (dir: FileSystemDirectoryHandle | null): Promise<void> => {
       if (!dir) return

@@ -187,6 +187,24 @@ export type VisualBeeDescriptor = {
   readonly legacyKinds?: readonly string[]
 
   /**
+   * FURTHER LIVE kinds this bee answers for — distinct from `legacyKinds`,
+   * which is retired spellings of one thing. Use it when a view is genuinely
+   * entered from two DIFFERENT artifacts: the slides view is opened both from
+   * a `visual:diagram:slide` (play the presentation AT this slide) and from
+   * the `visual:site:artifact` that relates them (play it from the start).
+   *
+   * The pair is a PEER relationship, never a container one — that is the whole
+   * reason a second kind is honest here instead of a parent kind that owns its
+   * children. A view whose second kind would merely be "the thing that holds
+   * the first" does not want this; it wants a pheromone
+   * (documentation/website-artifact-paradigm.md).
+   *
+   * Writers still use `decorationKind` for the member component; a bee that
+   * writes an `alsoKinds` record does it explicitly, from its own command.
+   */
+  readonly alsoKinds?: readonly string[]
+
+  /**
    * For `behavior: 'render'` views whose content is a FIRST-CLASS LAYER
    * SLOT (not a decoration): the slot name on the layer JSON (e.g.
    * `'tutor'`). When set, ViewBee surfaces the per-node toggle whenever
@@ -482,10 +500,12 @@ export class VisualBeeRegistry extends EventTarget {
     return out
   }
 
-  /** Look up the bee that owns a decoration kind — current or legacy. */
+  /** Look up the bee that owns a decoration kind — current, further-live
+   *  (`alsoKinds`) or retired (`legacyKinds`). */
   byDecorationKind(kind: string): VisualBeeDescriptor | undefined {
     for (const bee of this.#bees.values()) {
       if (bee.decorationKind === kind) return bee
+      if (bee.alsoKinds?.includes(kind)) return bee
       if (bee.legacyKinds?.includes(kind)) return bee
     }
     return undefined

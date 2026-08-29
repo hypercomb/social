@@ -39,6 +39,9 @@ export interface AggregateItem {
    *  Absent → the panel draws its accent + monogram fallback, so a row is never
    *  a blank slot. */
   image?: string
+  /** Content signature behind `image`, when the source has one. Used by
+   *  ordinary full-size draft-tile rendering without decoding the object URL. */
+  imageSig?: string
 }
 
 /** One selectable VERSION of a row.

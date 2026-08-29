@@ -41,6 +41,10 @@ const BUILTIN_SLASH: { behaviour: { name: string; description: string; descripti
 // Tap-vs-hold boundary for the mobile mic. Generous on purpose: a relaxed
 // thumb tap routinely exceeds 300ms, and misreading a tap as a hold turns
 // toggle-listening into an instant start/stop that discards the dictation.
+/** One frozen empty map for the no-aliases case — a fresh Map per recompute
+ *  would hand the shell a new input identity on every keystroke. */
+const EMPTY_ALIAS_MAP: ReadonlyMap<string, readonly string[]> = new Map()
+
 const MIC_LONG_PRESS_MS = 450
 
 /** How long the lock indicator stays lit after a pan/zoom-while-locked attempt. */
@@ -351,6 +355,66 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       .map((m, i) => ({ m, i, uses: habits.useCount(m.behaviour.name) }))
       .sort((a, b) => b.uses - a.uses || a.i - b.i)
       .map(x => x.m)
+  })
+
+  /**
+   * The slash census as ROWS — every alias spelling folded into the row for
+   * the behaviour it reaches, plus the spellings each row absorbed.
+   *
+   * `SlashBehaviourDrone.match()` emits one entry per reachable name so that
+   * autocomplete can find a behaviour by any of them. Shown raw that is three
+   * rows repeating one sentence (`save-session` / `session-save` / `save`),
+   * which reads as a bug rather than as a courtesy. The /help reference has
+   * always shown this correctly: one name, its other spellings as chips. This
+   * is that shape, computed once for both the list and the chips so they can
+   * never disagree.
+   */
+  readonly #slashCensus = computed<{
+    readonly names: readonly string[]
+    readonly aliases: ReadonlyMap<string, readonly string[]>
+  }>(() => {
+    const matches = this.#slashMatches()
+    const names = matches.map(m => m.behaviour.name)
+    const offered = new Set(names)
+
+    // `match()` overwrites `name` on an alias row, so the behaviour's own name
+    // is not on the row itself. What every row of one behaviour DOES share is
+    // its alias list and its sentence — together those name the family, and
+    // the row whose name is not in the alias list is the canonical one.
+    const groups = new Map<string, { canonical?: string; spellings: string[] }>()
+    for (const m of matches) {
+      const b = m.behaviour as { name: string; description?: string; aliases?: readonly string[] }
+      const aliases = b.aliases ?? []
+      if (!aliases.length) continue
+      const key = JSON.stringify([aliases, b.description ?? ''])
+      let g = groups.get(key)
+      if (!g) { g = { spellings: [] }; groups.set(key, g) }
+      if (aliases.includes(b.name)) g.spellings.push(b.name)
+      else g.canonical = b.name
+    }
+
+    const absorbed = new Map<string, readonly string[]>()
+    const folded = new Set<string>()
+    for (const g of groups.values()) {
+      // Fold ONLY when the behaviour's own name is on offer too. The surviving
+      // row must still START with what the participant typed — otherwise the
+      // prefix highlight paints a prefix that is not there and Tab completes a
+      // word they never began. Type `sess` and `session-save` stays its own
+      // row, because `save-session` did not match.
+      if (!g.canonical || !g.spellings.length || !offered.has(g.canonical)) continue
+      absorbed.set(g.canonical, g.spellings)
+      for (const spelling of g.spellings) folded.add(spelling)
+    }
+
+    if (!folded.size) return { names, aliases: EMPTY_ALIAS_MAP }
+    return { names: names.filter(n => !folded.has(n)), aliases: absorbed }
+  })
+
+  /** Other spellings for each slash row, for the dropdown's chips. */
+  readonly aliasMap = computed<ReadonlyMap<string, readonly string[]>>(() => {
+    const ctx = this.context()
+    if (!ctx.active || ctx.mode !== 'slash') return EMPTY_ALIAS_MAP
+    return this.#slashCensus().aliases
   })
 
   readonly slashDescriptionMap = computed<ReadonlyMap<string, string>>(() => {
@@ -1513,7 +1577,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // is offered where the dropdown would otherwise be empty.
       const learned = this.#learnedPhrasings().map(p => p.phrasing)
       if (learned.length) return learned
-      const census = this.#slashMatches().map(m => m.behaviour.name)
+      const census = this.#slashCensus().names
       // Before the first space the census speaks, and your own words follow
       // it — never in front of it, and never twice: a word a behaviour
       // already spells IS that behaviour's row. Strictly additive, so a
@@ -2096,9 +2160,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }
     })
 
-    // voice input: live interim preview while speaking
+    // voice input: live interim preview while speaking.
+    //
+    // The dropdown stands down while a sentence is being spoken — nothing is
+    // being typed, so a ghost completion is offering to finish a word the
+    // participant is already saying, and its dot-style rendering was what
+    // turned a heard "open providers" into "open.providers" on screen.
+    // Find stance is the exception: there the rows ARE the answer arriving,
+    // and watching them narrow is the point of speaking.
     this.#voiceInterimUnsub = EffectBus.on<{ text: string }>('voice:interim', ({ text }) => {
-      this.#setShellValue(text, false)
+      this.#setShellValue(text, this.#stance() !== 'find')
     })
 
     // voice input: auto-submit on release (push-to-talk complete).
@@ -2130,9 +2201,21 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       void this.#preprocessTagsThenExecute(text)
     })
 
-    // voice active state sync (for mic button visual)
+    // voice active state sync (for mic button visual) — and the stance guard.
+    //
+    // SPEAKING IS SAYING, NOT NAMING. Tiles stance reads a plain line as the
+    // name of something to make, so a dictated sentence there mints a tile
+    // called whatever was said. Listening therefore takes the line into a
+    // stance that READS: command, where the Common Tongue hears the sentence.
+    // Find stance is left alone — speech there is a question, which is
+    // already safe — and the guard sits HERE, on the moment dictation
+    // begins, so it covers every way in: the rail mic, the control bar's
+    // toggle, and /voice alike.
+    // Sticky afterwards, as the stance always is: one click on the prompt
+    // glyph walks back to naming.
     this.#voiceActiveUnsub = EffectBus.on<{ active: boolean }>('voice:active', ({ active }) => {
       this.voiceActive.set(active)
+      if (active && this.#stance() === 'tiles') this.#setStance('command')
     })
 
     // push-to-talk toggle (from /push-to-talk slash behaviour)
@@ -2823,28 +2906,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
 
     if (!reading.actions.length) {
-      // Nothing matched. No implicit anything — the line offers its pathways.
-      //
-      // Creation is NOT one of them. This stance mints nothing off an unread
-      // sentence: offering "make a tile named <the whole sentence>" turned
-      // every typo and half-remembered command into a junk tile named after
-      // the mistake. In beehaviour mode a tile is made by SAYING so — the
-      // create behaviour — which is why that word is the hint here and not a
-      // one-keystroke pathway sitting where the misread landed.
-      //
-      // 'create' still leads the list, because "I meant a tile" is still the
-      // likeliest reading of an unmatched sentence and the default row should
-      // be where the participant was going. What changed is what taking it
-      // DOES: it hands you the sentence instead of the tile.
-      this.#pendingChoice.set({
-        kind: 'pathway', text,
-        options: [
-          { label: 'create', description: this.#utteranceText('utterance.pathway.create', `say it: create ${text}`) },
-          { label: 'ask', description: this.#utteranceText('utterance.pathway.ask', 'ask the assistant') },
-          { label: 'filter', description: this.#utteranceText('utterance.pathway.filter', 'filter tiles by these words') },
-        ],
-      })
-      this.shell?.unsuppress()
+      // Grammar without a behaviour is inert. It must not fall through to
+      // tile creation, offer a creation pathway, enter command history, or
+      // teach SpokenHabits: none of those are evidence that an action ran.
+      this.#pendingChoice.set(null)
+      this.#utteranceResolutions.set(new Map())
+      this.clear()
       return true
     }
 

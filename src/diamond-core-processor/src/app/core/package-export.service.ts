@@ -56,7 +56,7 @@ export class PackageExportService {
    * Export the full package for a given root signature.
    * Tries showDirectoryPicker first, falls back to JSON bundle download.
    */
-  async exportPackage(rootSig: string, domain: string): Promise<void> {
+  async exportPackage(rootSig: string, domain: string): Promise<boolean> {
     await this.#store.initialize()
 
     // collect all signatures by walking the tree
@@ -78,15 +78,16 @@ export class PackageExportService {
     if ('showDirectoryPicker' in window) {
       try {
         await this.#exportToDirectory(rootSig, domain, manifest, allLayers, allBees, allDeps)
-        return
+        return true
       } catch (e: unknown) {
         // user cancelled or API not available — fall through to JSON bundle
-        if (e instanceof DOMException && e.name === 'AbortError') return
+        if (e instanceof DOMException && e.name === 'AbortError') return false
       }
     }
 
     // fallback: JSON bundle download
     await this.#exportAsJsonBundle(rootSig, domain, manifest, allLayers, allBees, allDeps)
+    return true
   }
 
   async #exportToDirectory(
@@ -109,15 +110,18 @@ export class PackageExportService {
     // sig alone is the address; the kind is recoverable from the manifest.
     for (const sig of layers) {
       const bytes = await this.#readLayerBytes(sig, domain)
-      if (bytes) await this.#writeBinaryFile(rootDir, sig, bytes)
+      if (!bytes) throw new Error(`Package layer ${sig} disappeared during export`)
+      await this.#writeBinaryFile(rootDir, sig, bytes)
     }
     for (const sig of bees) {
       const bytes = await this.#readBeeBytes(sig, domain)
-      if (bytes) await this.#writeBinaryFile(rootDir, sig, bytes)
+      if (!bytes) throw new Error(`Package bee ${sig} is missing locally`)
+      await this.#writeBinaryFile(rootDir, sig, bytes)
     }
     for (const sig of deps) {
       const bytes = await this.#readDepBytes(sig, domain)
-      if (bytes) await this.#writeBinaryFile(rootDir, sig, bytes)
+      if (!bytes) throw new Error(`Package dependency ${sig} is missing locally`)
+      await this.#writeBinaryFile(rootDir, sig, bytes)
     }
   }
 
@@ -134,17 +138,20 @@ export class PackageExportService {
     // — the same flat sig-heap shape the delivery pipeline emits.
     for (const sig of layers) {
       const bytes = await this.#readLayerBytes(sig, domain)
-      if (bytes) files[sig] = this.#toBase64(bytes)
+      if (!bytes) throw new Error(`Package layer ${sig} disappeared during export`)
+      files[sig] = this.#toBase64(bytes)
     }
 
     for (const sig of bees) {
       const bytes = await this.#readBeeBytes(sig, domain)
-      if (bytes) files[sig] = this.#toBase64(bytes)
+      if (!bytes) throw new Error(`Package bee ${sig} is missing locally`)
+      files[sig] = this.#toBase64(bytes)
     }
 
     for (const sig of deps) {
       const bytes = await this.#readDepBytes(sig, domain)
-      if (bytes) files[sig] = this.#toBase64(bytes)
+      if (!bytes) throw new Error(`Package dependency ${sig} is missing locally`)
+      files[sig] = this.#toBase64(bytes)
     }
 
     const bundle: ExportBundle = {
@@ -166,14 +173,20 @@ export class PackageExportService {
 
   async #collectSigs(
     layerSig: string, domain: string,
-    layers: string[], bees: string[], deps: string[]
+    layers: string[], bees: string[], deps: string[],
+    visiting = new Set<string>(),
   ): Promise<void> {
+    if (visiting.has(layerSig)) throw new Error(`Package layer cycle at ${layerSig}`)
+    if (layers.includes(layerSig)) return
+    visiting.add(layerSig)
     layers.push(layerSig)
 
     const bytes = await this.#readLayerBytes(layerSig, domain)
-    if (!bytes) return
+    if (!bytes) throw new Error(`Package layer ${layerSig} is missing locally`)
 
-    const layer = JSON.parse(new TextDecoder().decode(bytes)) as LayerJson
+    let layer: LayerJson
+    try { layer = JSON.parse(new TextDecoder().decode(bytes)) as LayerJson }
+    catch { throw new Error(`Package layer ${layerSig} is not valid JSON`) }
 
     for (const raw of layer.bees ?? []) {
       const sig = raw.replace(/\.js$/i, '')
@@ -186,8 +199,9 @@ export class PackageExportService {
     }
 
     for (const childSig of layer.cells ?? layer.layers ?? layer.children ?? []) {
-      await this.#collectSigs(childSig, domain, layers, bees, deps)
+      await this.#collectSigs(childSig, domain, layers, bees, deps, visiting)
     }
+    visiting.delete(layerSig)
   }
 
   /**

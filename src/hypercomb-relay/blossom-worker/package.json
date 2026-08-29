@@ -6,8 +6,12 @@
   "main": "worker.js",
   "scripts": {
     "check": "node --check worker.js",
+    "test": "node --test worker.spec.js",
+    "build:site": "npm --prefix ../../hypercomb-web run build:visitor",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "predeploy": "npm run build:site",
+    "deploy": "wrangler deploy",
+    "deploy:pluginthematrix": "npm run build:site && wrangler deploy --config wrangler.pluginthematrix.toml"
   },
   "dependencies": {
     "@noble/curves": "^1.9.0"

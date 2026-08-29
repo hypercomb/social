@@ -371,6 +371,14 @@ function dispatchEnterAction(action: string, label: string | undefined): void {
   // so closing drops you back on the layer where the icon was clicked. The
   // icon names the exact view; tile-body navigation never enters this path.
   if (bee.opensOnTileClick) {
+    // The photo-library icon is the entrance to the image CHOOSER. The
+    // lightbox remains a view behaviour, but its tile affordance first lays
+    // out the held pictures and background themes as a shaded, selectable
+    // layer instead of immediately starting full-screen playback.
+    if (bee.view === 'lightbox') {
+      EffectBus.emit('images:open', { label, segments: here })
+      return
+    }
     EffectBus.emit('view:open-for-tile', { view: bee.view, segments: [...here, label] })
     return
   }
