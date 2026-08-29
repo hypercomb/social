@@ -839,6 +839,39 @@ export class Store extends EventTarget {
     return this.putResource(new Blob([JSON.stringify(record)], { type: 'application/json' }), options)
   }
 
+  /** Return a correctly-typed incidence for an artifact reference.
+   * Existing incidences are reused when their payload kind and relation match;
+   * a legacy raw sig (or an incidence being used in a different relation) is
+   * wrapped around the terminal artifact, never around another meta envelope. */
+  public ensureArtifactMeta = async (
+    kind: MetaPayloadKind,
+    artifactOrMetaSig: string,
+    incidence: Record<string, unknown> = {},
+    options?: { emit?: boolean },
+  ): Promise<string> => {
+    let artifactSig = artifactOrMetaSig.toLowerCase()
+    const requestedRelation = String(incidence['relation'] ?? '').trim()
+    const raw = await this.getResourceLocal(artifactSig)
+    if (raw && raw.size <= 64 * 1024) {
+      try {
+        const parsed = JSON.parse(await raw.text())
+        if (isMetaEnvelope(parsed)) {
+          const payload = metaPayloadOf(parsed)!
+          if (payload.kind !== kind) {
+            throw new Error(`artifact incidence kind mismatch: expected ${kind}, got ${payload.kind}`)
+          }
+          const existingRelation = String(parsed.relation ?? '').trim()
+          if (!requestedRelation || existingRelation === requestedRelation) return artifactSig
+          artifactSig = payload.sig
+        }
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('artifact incidence kind mismatch:')) throw error
+        // Non-JSON artifact bytes are the normal legacy/raw case.
+      }
+    }
+    return this.putArtifactMeta(kind, artifactSig, incidence, options)
+  }
+
   readonly #resourceCache = new Map<string, Blob>()
   readonly #resourcePending = new Map<string, Promise<Blob | null>>()
   readonly #hostFetchPending = new Map<string, Promise<Blob | null>>()
@@ -938,6 +971,13 @@ export class Store extends EventTarget {
     return this.#getResolvedResource(signature, new Set(), false)
   }
 
+  /** Local-only counterpart to getResource. It follows declared resource
+   * incidences but never starts a host/network fetch. Raw getResourceLocal is
+   * intentionally retained for protocol code that needs to inspect the meta
+   * envelope itself. */
+  public getResourceResolvedLocal = async (signature: string): Promise<Blob | null> =>
+    this.#getResolvedResource(signature, new Set(), true)
+
   readonly #getResolvedResource = async (
     signature: string,
     active: ReadonlySet<string>,
@@ -1015,7 +1055,15 @@ export class Store extends EventTarget {
         const broker = (window.ioc?.get?.('@diamondcoreprocessor.com/ContentBrokerDrone')) as
           | { fetchBySig?: (sig: string, type: string, timeoutMs?: number) => Promise<Uint8Array | null> }
           | undefined
-        const bytes = await broker?.fetchBySig?.(signature, 'resource')
+        // NO TRANSPORT IS NOT A MISS. The broker is a bee: on a cold boot
+        // (and on a published site, where EVERY byte comes from the origin)
+        // the first render pass can run before it registers. Recording that
+        // as a host miss negative-cached the sig for a full minute and the
+        // paint fell back to substrate art — the published tile's own
+        // picture never arrived for the session. Answer null and let the
+        // very next call try again once the broker is up.
+        if (!broker?.fetchBySig) return null
+        const bytes = await broker.fetchBySig(signature, 'resource')
         if (!bytes || bytes.byteLength === 0) {
           this.#hostFetchMissUntil.set(signature, Date.now() + HOST_MISS_TTL_MS)
           return null
@@ -1090,7 +1138,10 @@ export class Store extends EventTarget {
         const broker = (window.ioc?.get?.('@diamondcoreprocessor.com/ContentBrokerDrone')) as
           | { fetchBySig?: (sig: string, type: string, timeoutMs?: number) => Promise<Uint8Array | null> }
           | undefined
-        const bytes = await broker?.fetchBySig?.(signature, 'layer')
+        // No transport yet — same rule as the resource path above: not a
+        // miss, so never negative-cache it.
+        if (!broker?.fetchBySig) return null
+        const bytes = await broker.fetchBySig(signature, 'layer')
         if (!bytes || bytes.byteLength === 0) {
           this.#layerHostMissUntil.set(signature, Date.now() + HOST_MISS_TTL_MS)
           return null

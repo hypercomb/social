@@ -4,10 +4,12 @@ import type { I18nProvider, UsageRanker } from '@hypercomb/core'
 import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import { HexLabelAtlas } from '../grid/hex-label.atlas.js'
+import { publishOwnedProjection } from './derived-projection-cache.js'
+import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { HexImageAtlas } from '../grid/hex-image.atlas.js'
 import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
-import { isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt, readTilePropsSigAt, readTilePropsIndex, writeTilePropsIndex } from '../../editor/tile-properties.js'
+import { isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt, readTilePropsSigAt, readTilePropsIndex, writeTilePropsIndex, recoverableTileImageSig, seedLayerKeyedEntries } from '../../editor/tile-properties.js'
 import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
 import { peerDivergesAt } from '../../sharing/peer-divergence.js'
@@ -87,6 +89,12 @@ const ARRIVAL_GATE_MS = 2500
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
 type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean; plain?: boolean; pendingProps?: boolean }
+type ReferenceDraftPreview = {
+  name: string
+  imageSig?: string
+  index: number
+  parentSegments: readonly string[]
+}
 type LabelDerivedState = {
   images: Map<string, string | null>
   borders: Map<string, [number, number, number]>
@@ -707,7 +715,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'landing:pending']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -1223,6 +1231,11 @@ export class ShowCellDrone extends Drone {
   // Cleared and rebuilt on each renderFromSynchronize.
   #ephemeralCellSet = new Set<string>()
 
+  // A reference composition borrows the ordinary tile renderer without
+  // joining the layer yet. It therefore looks and sits exactly like the tile
+  // that Save will commit, while remaining disposable on Cancel.
+  #referenceDraft: ReferenceDraftPreview | null = null
+
   // Names of cells in the current render that came from a swarm peer
   // (kind:'peer' from TileSourceRegistry). Treated like ephemeral for
   // visual treatment, but additionally surfaced as branches so a click
@@ -1598,7 +1611,7 @@ export class ShowCellDrone extends Drone {
         if (!blob) continue
         try {
           const props = JSON.parse(await blob.text())
-          const sig = props?.small?.image
+          const sig = recoverableTileImageSig(props)
           if (typeof sig === 'string' && /^[a-f0-9]{64}$/i.test(sig)) imageSigs.add(sig)
         } catch { /* skip malformed */ }
       }
@@ -3165,6 +3178,7 @@ export class ShowCellDrone extends Drone {
         // while we were away, mark it for background top-up.
         const atlas = this.imageAtlas
         const evictedSigs: string[] = []
+        let hasUnresolvedLocalImage = false
         for (const cell of cached.cells) {
           const label = cell.label
           // EXTERNAL cells restore with the imageSig they were cached
@@ -3195,6 +3209,11 @@ export class ShowCellDrone extends Drone {
               evictedSigs.push(sig)
             }
           }
+          // A cached null/absent derivation is not proof that the layer has no
+          // picture. It may be the stale-index state that edit+save repairs.
+          // Back-nav used to refresh ONLY known sigs evicted from the atlas,
+          // permanently excluding exactly these blank cells from healing.
+          if (!cell.imageSig) hasUnresolvedLocalImage = true
           this.renderedCells.set(label, cell)
         }
 
@@ -3228,10 +3247,16 @@ export class ShowCellDrone extends Drone {
         // Child preloading can reuse atlas slots that belonged to this parent.
         // Repair those slots after the cached paint, never between the Back
         // gesture and that paint. Repaint only if the parent is still visible.
-        if (evictedSigs.length > 0) {
+        if (evictedSigs.length > 0 || hasUnresolvedLocalImage) {
           void (async () => {
             try {
-              await this.loadCellImages(cached.cells, cachedDir ?? null)
+              // Force image-less cache entries through the canonical layer
+              // check in loadCellImages instead of returning the remembered
+              // null before reaching the slow resolver.
+              const force = hasUnresolvedLocalImage
+                ? new Set(cached.cells.filter(c => !c.external && !c.imageSig).map(c => c.label))
+                : undefined
+              await this.loadCellImages(cached.cells, cachedDir ?? null, force)
               if (this.renderedLocationKey === locationKey) {
                 await this.applyGeometry(cached.cells, true)
               }
@@ -3887,6 +3912,7 @@ export class ShowCellDrone extends Drone {
     // resolving so a location with no publishers (or a registry that
     // isn't up yet) reads as unstacked instead of inheriting the last
     // location's multiplicity marks.
+    const previousVariantLabels = new Set(this.#stackVariantLabels)
     this.#stackDepthByLabel = new Map()
     this.#stackVariantLabels = new Set()
     setTileStacks(new Map())
@@ -3973,7 +3999,6 @@ export class ShowCellDrone extends Drone {
         // Only tiles they actually publish move; the rest of your layer
         // stays put, which is what makes the difference between the two
         // layers readable rather than a full-page swap.
-        const previousVariantLabels = this.#stackVariantLabels
         this.#stackVariantLabels = new Set<string>()
         const spotlit = this.#spotlightPubkey
         if (spotlit) {
@@ -4333,6 +4358,21 @@ export class ShowCellDrone extends Drone {
         ephemeralCellSet.delete(name)
         peerCellSet.delete(name)
       }
+    }
+
+    // Reference composition is deliberately not a second preview renderer.
+    // Add the draft to this pass as a local-looking cell so it receives the
+    // same geometry, label band, image, scale and hit footprint as every
+    // ordinary tile. It is only in memory; layer membership is untouched
+    // until the References window saves.
+    const referenceDraft = this.#referenceDraft
+    const draftIsHere = !!referenceDraft
+      && referenceDraft.parentSegments.length === passSegments.length
+      && referenceDraft.parentSegments.every((segment, index) => String(segment) === String(passSegments[index]))
+    if (referenceDraft && draftIsHere && referenceDraft.name) {
+      union.add(referenceDraft.name)
+      localCellSet.add(referenceDraft.name)
+      if (referenceDraft.imageSig) this.cellImageCache.set(referenceDraft.name, referenceDraft.imageSig)
     }
 
     // Source breakdown for this pass — proves WHERE each tile comes from
@@ -5540,6 +5580,7 @@ export class ShowCellDrone extends Drone {
     // affected; mid-pass evictions are skipped because the running pass
     // rebuilds geometry itself.
     window.addEventListener('hex-image-atlas:evicted', this.#onAtlasEvicted)
+    window.addEventListener('hex-image-atlas:retry', this.#onAtlasEvicted)
     // Label-atlas twin — in-place updates bake uncached labels on demand,
     // and once the 256-slot label ring has wrapped, such a bake displaces
     // an on-screen label whose baked UV then shows the WRONG text.
@@ -5718,6 +5759,33 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    // Root properties are live defaults for every same-named appearance.
+    // Their outer lineage heads do not move when the root changes, so neither
+    // a layer-keyed props cache nor a prepared back-navigation snapshot can
+    // notice the dependency on its own. Invalidate this label in every saved
+    // projection and force the current view to re-compose root + outer.
+    this.onEffect<{ cell: string }>('tile:root-default-changed', (payload) => {
+      const label = String(payload?.cell ?? '').trim()
+      if (!label) return
+      this.#invalidateLabelDerivedState(label)
+      for (const state of this.#derivedStateByLocation.values()) {
+        state.images.delete(label)
+        state.borders.delete(label)
+        state.tags.delete(label)
+        state.links.delete(label)
+        state.substrates.delete(label)
+        state.hiddenText.delete(label)
+        state.external.delete(label)
+      }
+      // Cached Cell snapshots already contain their previously composed image
+      // and display flags. They are cheap to rebuild and cannot be surgically
+      // edited without repeating the property projection here.
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.#forceNextRender = true
+      this.requestRender()
+    })
+
     // tags:changed — invalidate only the affected cells' tag caches, then run
     // an incremental render to re-emit tag state without touching geometry I/O.
     this.onEffect<{ updates: { cell: string }[] }>('tags:changed', (payload) => {
@@ -5860,6 +5928,35 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    // A dropped Portal first becomes an in-memory tile at the release slot.
+    // Re-render through the normal cell path; clearing the payload removes it
+    // without ever having written membership to the layer.
+    this.onEffect<ReferenceDraftPreview | null>('reference:draft-preview', (payload) => {
+      const previous = this.#referenceDraft
+      if (previous?.name && previous.name !== payload?.name) {
+        this.cellImageCache.delete(previous.name)
+        this.atlas?.invalidateLabel(previous.name)
+        this.#sessionSlotByLabel.delete(previous.name)
+      }
+      const name = String(payload?.name ?? '').trim()
+      const index = Number(payload?.index)
+      this.#referenceDraft = name && Number.isFinite(index) && index >= 0
+        ? {
+            name,
+            index,
+            parentSegments: [...(payload?.parentSegments ?? [])],
+            ...(typeof payload?.imageSig === 'string' && payload.imageSig ? { imageSig: payload.imageSig } : {}),
+          }
+        : null
+      if (this.#referenceDraft?.imageSig) {
+        this.cellImageCache.set(this.#referenceDraft.name, this.#referenceDraft.imageSig)
+      }
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.#forceNextRender = true
+      this.requestRender()
+    })
+
     // fs:changed — bulk OPFS mutation marker. Workers fire this BEFORE
     // committing layer state so that any render triggered by the cascade
     // (cursor.onNewLayer) sees post-mutation OPFS. We use it here to
@@ -5893,6 +5990,19 @@ export class ShowCellDrone extends Drone {
         this.#pendingCellMutations.delete(cell)
       }
       if (this.#slots.seeded) this.#queueIncremental({})
+    })
+
+    // A References composition writes its children while another layer is on
+    // screen, then returns here. The membership events invalidate the right
+    // caches but cannot flip a slot that was not mounted at that moment. Once
+    // the parent has painted, this render-only arrival signal is conclusive
+    // proof that the target is a branch, so its first click enters it.
+    this.onEffect<{ segments?: readonly string[] }>('reference:branch-ready', payload => {
+      const segments = payload?.segments
+      if (!segments?.length) return
+      this.#invalidatePreparedViewsFor(segments)
+      this.#layerCellsCache.clear()
+      this.#flipParentBranchFor(segments)
     })
 
     // cell:added / cell:removed — synchronous incremental path. Zero awaits
@@ -7133,6 +7243,7 @@ export class ShowCellDrone extends Drone {
     window.removeEventListener('synchronize', this.onSynchronize)
     window.removeEventListener('navigate', this.onNavigate)
     window.removeEventListener('hex-image-atlas:evicted', this.#onAtlasEvicted)
+    window.removeEventListener('hex-image-atlas:retry', this.#onAtlasEvicted)
     window.removeEventListener('hex-label-atlas:evicted', this.#onLabelAtlasEvicted)
 
     if (this.#clusterRetryTimer) { clearTimeout(this.#clusterRetryTimer); this.#clusterRetryTimer = null }
@@ -7857,6 +7968,18 @@ export class ShowCellDrone extends Drone {
     // the paint rather than score-filling a tile that owns a real slot.
     const coldByName = new Set<string>()
     await Promise.all(localNames.map(async (name) => {
+      // The draft owns the release slot for the lifetime of the References
+      // composition. Do not ask the layer for an index it cannot have yet and
+      // do not score-fill it somewhere else.
+      const draft = this.#referenceDraft
+      const isDraftHere = !!draft
+        && draft.name === name
+        && draft.parentSegments.length === parentSegments.length
+        && draft.parentSegments.every((segment, index) => String(segment) === String(parentSegments[index]))
+      if (draft && isDraftHere && draft.index <= maxSlot) {
+        idxByName.set(name, draft.index)
+        return
+      }
       try {
         // Layer-slot read with 0000 fallback. cellDir is opportunistic
         // — the dir may not exist for layer-only tiles, in which case
@@ -8591,6 +8714,18 @@ export class ShowCellDrone extends Drone {
       } | undefined
     if (!store || !this.imageAtlas) return
     const imageAtlas = this.imageAtlas
+    // Off-screen preparation must never write into the visible lineage's
+    // label-keyed projection caches. Those writes race the foreground render:
+    // a child view resolving the same label (or a temporary miss) could finish
+    // last and erase the image currently on screen. Prepared cells carry their
+    // resolved values themselves, so isolated maps are sufficient here.
+    const cacheOwner = this.#derivedLocationKey
+    const imageCache = prepareOnly ? new Map<string, string | null>() : new Map(this.cellImageCache)
+    const borderCache = prepareOnly ? new Map<string, [number, number, number]>() : new Map(this.cellBorderColorCache)
+    const tagsCache = prepareOnly ? new Map<string, string[]>() : new Map(this.cellTagsCache)
+    const linkCache = prepareOnly ? new Map<string, boolean>() : new Map(this.cellLinkCache)
+    const substrateCache = prepareOnly ? new Map<string, boolean>() : new Map(this.cellSubstrateCache)
+    const hideTextCache = prepareOnly ? new Map<string, boolean>() : new Map(this.cellHideTextCache)
 
     // Detached host fill — the render path's bytes come from LOCAL reads
     // only (memory/OPFS); anything missing is fetched off-path through the
@@ -8625,7 +8760,7 @@ export class ShowCellDrone extends Drone {
           // bare requestRender is a no-op at an unchanged location
           // (fast-path skip on renderedCellsKey), so the landed bytes
           // would never paint until an unrelated invalidation.
-          if (label) this.cellImageCache.delete(label)
+          if (label && cacheOwner === this.#derivedLocationKey) this.cellImageCache.delete(label)
           this.#forceNextRender = true
           this.requestRender()
         } catch { /* bounded by the Store's miss cache */ }
@@ -8746,7 +8881,9 @@ export class ShowCellDrone extends Drone {
           const blob = await this.#localDecodeBlob(sig)
           if (!blob) { fillFromHost(sig); return }
           await imageAtlas.loadImage(sig, blob)
-        } catch { /* per-cell warnings removed — fired on every nav */ }
+        } catch (error) {
+          console.warn(`[show-cell] atlas load failed for ${sig.slice(0, 12)}…`, error)
+        }
       })()
       inFlightImages.set(sig, promise)
       return promise
@@ -8780,12 +8917,12 @@ export class ShowCellDrone extends Drone {
           cell.hasLink = published.hasLink
           cell.hasSubstrate = published.hasSubstrate
           cell.hideText = published.hideText
-          if (published.borderColor) this.cellBorderColorCache.set(cell.label, published.borderColor)
-          else this.cellBorderColorCache.delete(cell.label)
-          this.cellTagsCache.set(cell.label, [...published.tags])
-          this.cellLinkCache.set(cell.label, published.hasLink)
-          this.cellSubstrateCache.set(cell.label, published.hasSubstrate)
-          this.cellHideTextCache.set(cell.label, published.hideText)
+          if (published.borderColor) borderCache.set(cell.label, published.borderColor)
+          else borderCache.delete(cell.label)
+          tagsCache.set(cell.label, [...published.tags])
+          linkCache.set(cell.label, published.hasLink)
+          substrateCache.set(cell.label, published.hasSubstrate)
+          hideTextCache.set(cell.label, published.hideText)
         }
         // Peer-only tiles render ONLY the publisher's streamed image — the
         // sig is content-addressed and the publisher is the authority, so
@@ -8806,7 +8943,7 @@ export class ShowCellDrone extends Drone {
           ? published?.imageSig
           : peerImageSigByLabel.get(cell.label) ?? this.registryImageByLabel.get(cell.label)
         if (peerSig) {
-          const cached = this.cellImageCache.get(cell.label)
+          const cached = imageCache.get(cell.label)
           if (cached && this.peerImageSourceByLabel.get(cell.label) === peerSig) {
             cell.imageSig = cached
             return
@@ -8818,11 +8955,11 @@ export class ShowCellDrone extends Drone {
             // (pendingProps) — a concluded miss (#fillMissedSigs) releases
             // it to the bright label-only preview so an offline publisher
             // can't strand the tile dimmed/inert.
-            const blob = await store.getResourceLocal(peerSig)
+            const blob = await resolveLocalResourceReference(store, peerSig)
             if (!blob) {
               fillFromHost(peerSig, cell.label)
               cell.pendingProps = !this.#fillMissedSigs.has(peerSig)
-              this.cellImageCache.set(cell.label, null)
+              imageCache.set(cell.label, null)
               return
             }
             // The wire has carried two shapes: a PROPS pointer (JSON blob
@@ -8834,7 +8971,7 @@ export class ShowCellDrone extends Drone {
             let finalSig: string | null = null
             try {
               const props = JSON.parse(await blob.text())
-              const smallSig = (this.#flat && props?.flat?.small?.image) || props?.small?.image
+              const smallSig = recoverableTileImageSig(props, this.#flat)
               if (smallSig && isSignature(smallSig)) finalSig = smallSig
             } catch {
               finalSig = peerSig
@@ -8842,13 +8979,13 @@ export class ShowCellDrone extends Drone {
             if (finalSig) {
               await loadImageOnce(finalSig)
               cell.imageSig = finalSig
-              this.cellImageCache.set(cell.label, finalSig)
+              imageCache.set(cell.label, finalSig)
               this.peerImageSourceByLabel.set(cell.label, peerSig)
             } else {
-              this.cellImageCache.set(cell.label, null)
+              imageCache.set(cell.label, null)
             }
           } catch {
-            this.cellImageCache.set(cell.label, null)
+            imageCache.set(cell.label, null)
           }
           return
         }
@@ -8857,7 +8994,7 @@ export class ShowCellDrone extends Drone {
         // participant's image or a local substrate fallback.
         if (publishedProperties) {
           cell.imageSig = undefined
-          this.cellImageCache.set(cell.label, null)
+          imageCache.set(cell.label, null)
           this.peerImageSourceByLabel.delete(cell.label)
           return
         }
@@ -8865,9 +9002,9 @@ export class ShowCellDrone extends Drone {
         // previously-derived value if one exists — re-render passes must not
         // strand the tile — otherwise mark null and wait for the next
         // visuals/resource arrival to re-attempt.
-        const cached = this.cellImageCache.get(cell.label)
+        const cached = imageCache.get(cell.label)
         if (cached) { cell.imageSig = cached; return }
-        this.cellImageCache.set(cell.label, null)
+        imageCache.set(cell.label, null)
         return
       }
 
@@ -8875,21 +9012,21 @@ export class ShowCellDrone extends Drone {
       // Sub-layer locations have no on-disk dir under layer-as-primitive; the
       // image path below still resolves via __resources__, so we just skip
       // the tags/link folder read when _dir is null.
-      if (!this.cellTagsCache.has(cell.label)) {
+      if (!tagsCache.has(cell.label)) {
         if (_dir) {
           try {
             const cellDir = await _dir.getDirectoryHandle(cell.label)
             const tagProps = await readCellProperties(cellDir)
             const rawTags = tagProps?.['tags']
-            this.cellTagsCache.set(cell.label, Array.isArray(rawTags)
+            tagsCache.set(cell.label, Array.isArray(rawTags)
               ? (rawTags as unknown[]).filter((t): t is string => typeof t === 'string')
               : [])
-            if (!this.cellLinkCache.has(cell.label)) {
-              this.cellLinkCache.set(cell.label, typeof tagProps?.['link'] === 'string' && (tagProps['link'] as string).length > 0)
+            if (!linkCache.has(cell.label)) {
+              linkCache.set(cell.label, typeof tagProps?.['link'] === 'string' && (tagProps['link'] as string).length > 0)
             }
-          } catch { this.cellTagsCache.set(cell.label, []) }
+          } catch { tagsCache.set(cell.label, []) }
         } else {
-          this.cellTagsCache.set(cell.label, [])
+          tagsCache.set(cell.label, [])
         }
       }
 
@@ -8897,14 +9034,14 @@ export class ShowCellDrone extends Drone {
       // label (substrate:applied / substrate:rerolled just wrote a new
       // propsSig and we need to re-read props instead of serving the
       // stale cached sig).
-      if (!forceReload?.has(cell.label) && this.cellImageCache.has(cell.label)) {
-        const cachedSig = this.cellImageCache.get(cell.label) ?? undefined
+      if (!forceReload?.has(cell.label) && imageCache.has(cell.label)) {
+        const cachedSig = imageCache.get(cell.label) ?? undefined
         cell.imageSig = cachedSig
         cell.pendingProps = false
-        cell.borderColor = this.cellBorderColorCache.get(cell.label)
-        cell.hasLink = this.cellLinkCache.get(cell.label) ?? false
-        cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false
-        cell.hideText = this.cellHideTextCache.get(cell.label) ?? false
+        cell.borderColor = borderCache.get(cell.label)
+        cell.hasLink = linkCache.get(cell.label) ?? false
+        cell.hasSubstrate = substrateCache.get(cell.label) ?? false
+        cell.hideText = hideTextCache.get(cell.label) ?? false
         // If the atlas has since evicted this signature (a later
         // loadImage displaced its slot), re-queue a load so the
         // render doesn't fall back to label. The blob is almost
@@ -8920,27 +9057,103 @@ export class ShowCellDrone extends Drone {
           // later path retries. Fall through to the slow path so we
           // re-read propsIndex in case substrate has since populated
           // it.
-          this.cellImageCache.delete(cell.label)
+          imageCache.delete(cell.label)
         }
-        if (this.cellImageCache.has(cell.label)) return
+        if (imageCache.has(cell.label)) return
       }
 
-      // read tile properties from content-addressed resource
-      try {
-        const propsSig = propsSigForLabel(cell.label)
-        if (!propsSig) throw new Error('no props')
-        // LOCAL only — a props blob not yet pulled renders readiness-SHADED
-        // this pass; the detached fill invalidates + re-renders when it
-        // lands (or releases the shade on a concluded miss).
-        const blob = await store.getResourceLocal(propsSig)
-        if (!blob) {
-          fillFromHost(propsSig, cell.label)
-          cell.pendingProps = !this.#fillMissedSigs.has(propsSig)
-          throw new Error('no blob')
+      // One invariant for every path: explicit/reference sig first, otherwise
+      // the active substrate set. A props/index timing miss must never turn
+      // "use the default set" into a cached blank tile.
+      //
+      // PROVISIONAL (`cold`): the tile's own props were not readable THIS
+      // pass — the sig is known but its bytes are still arriving (the normal
+      // state on a published site, where every byte comes off the origin).
+      // The default set is the right thing to PAINT now and the wrong thing
+      // to REMEMBER: a cached non-null fallback short-circuits every later
+      // pass (only a cached `null` re-reads), so the tile kept its substrate
+      // stand-in for the whole session and the published picture never
+      // appeared. Paint it, cache nothing, re-derive when the bytes land.
+      const loadDefaultImage = async (cold = false): Promise<void> => {
+        const remember = (sig: string | null): void => {
+          if (cold) { imageCache.delete(cell.label); return }
+          imageCache.set(cell.label, sig)
         }
-        const text = await blob.text()
-        const props = JSON.parse(text)
-        cell.pendingProps = false
+        const faceSig = referenceFaceForLabel(cell.label)
+        if (faceSig && isSignature(faceSig)) {
+          await loadImageOnce(faceSig)
+          cell.imageSig = faceSig
+          remember(faceSig)
+          return
+        }
+        const subSvc = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SubstrateService') as
+          { pickImageForLabel?: (label: string) => string | null } | undefined
+        const fallbackSig = subSvc?.pickImageForLabel?.(cell.label) ?? null
+        if (fallbackSig && isSignature(fallbackSig)) {
+          await loadImageOnce(fallbackSig)
+          cell.imageSig = fallbackSig
+          remember(fallbackSig)
+        } else {
+          remember(null)
+        }
+      }
+
+      // Read tile properties from the content-addressed resource. The index is
+      // a cache, never the authority: edit mode reads the canonical properties
+      // slot, so letting a cache miss become an imageless paint is exactly how
+      // opening edit appeared to "repair" lost pictures. Resolve canonical on
+      // the miss in this paint, including when the warm-head map is cold.
+      // True when this pass could not READ the tile's props (bytes still in
+      // flight), as opposed to reading them and finding no picture. Only the
+      // first is provisional — see loadDefaultImage.
+      let propsCold = false
+      try {
+        let propsSig = propsSigForLabel(cell.label)
+        if (!propsSig) {
+          propsSig = await readTilePropsSigAt(segmentsForLabel(cell.label), cell.label)
+          if (propsSig) {
+            const headSig = headSigByLabel.get(cell.label) ?? ''
+            if (headSig) seedLayerKeyedEntries([[headSig, propsSig]])
+          }
+        }
+        let outerProps: Record<string, unknown> = {}
+        if (propsSig) {
+          // LOCAL first keeps a cold resource out of the render's critical
+          // path. The canonical read below composes the root defaults and can
+          // heal/fetch either incidence; this local projection remains useful
+          // while that composition is transiently unavailable.
+          const blob = await resolveLocalResourceReference(store, propsSig)
+          if (blob) outerProps = JSON.parse(await blob.text()) as Record<string, unknown>
+          else {
+            fillFromHost(propsSig, cell.label)
+            cell.pendingProps = !this.#fillMissedSigs.has(propsSig)
+          }
+        }
+
+        // The effective object is exactly `{ ...rootDefaults,
+        // ...outerOverrides }`. readTilePropertiesAt owns that composition;
+        // artifact values stay as the typed Life incidences carried by each
+        // source object. Do not seed this merged view into the props index —
+        // the index records the outer layer's own canonical incidence only.
+        const effectiveStats = { cold: false }
+        const effectiveProps = this.#cursorPropsOverride?.has(cell.label)
+          ? outerProps
+          : await readTilePropertiesAt(
+              segmentsForLabel(cell.label),
+              cell.label,
+              effectiveStats,
+            )
+        const props: any = Object.keys(effectiveProps).length > 0
+          ? effectiveProps
+          : outerProps
+        if (effectiveStats.cold) propsCold = true
+        if (Object.keys(props).length === 0) {
+          if (effectiveStats.cold) cell.pendingProps = true
+          throw new Error('no props')
+        }
+        if (effectiveStats.cold) cell.pendingProps = true
+
+        if (!effectiveStats.cold) cell.pendingProps = false
 
         // extract border color from properties
         const bc = props?.border?.color
@@ -8950,31 +9163,31 @@ export class ShowCellDrone extends Drone {
           const g = parseInt(hex.slice(3, 5), 16) / 255
           const b = parseInt(hex.slice(5, 7), 16) / 255
           cell.borderColor = [r, g, b]
-          this.cellBorderColorCache.set(cell.label, [r, g, b])
+          borderCache.set(cell.label, [r, g, b])
         }
 
         // extract tags from properties
         const cellTags = props?.['tags']
         if (Array.isArray(cellTags)) {
-          this.cellTagsCache.set(cell.label, cellTags.filter((t: unknown) => typeof t === 'string'))
+          tagsCache.set(cell.label, cellTags.filter((t: unknown) => typeof t === 'string'))
         } else {
-          this.cellTagsCache.set(cell.label, [])
+          tagsCache.set(cell.label, [])
         }
 
         // extract link presence
         const hasLink = typeof props?.link === 'string' && props.link.length > 0
-        this.cellLinkCache.set(cell.label, hasLink)
+        linkCache.set(cell.label, hasLink)
         cell.hasLink = hasLink
 
         const isSubstrate = props?.substrate === true
-        this.cellSubstrateCache.set(cell.label, isSubstrate)
+        substrateCache.set(cell.label, isSubstrate)
         cell.hasSubstrate = isSubstrate
 
         const hideText = props?.hideText === true
-        this.cellHideTextCache.set(cell.label, hideText)
+        hideTextCache.set(cell.label, hideText)
         cell.hideText = hideText
 
-        const smallSig = (this.#flat && props?.flat?.small?.image) || props?.small?.image
+        const smallSig = recoverableTileImageSig(props, this.#flat)
         if (smallSig && isSignature(smallSig)) {
           // Load atlas FIRST, then publish the new sig to the cache.
           // Any concurrent render observing `cellImageCache` during the
@@ -8984,40 +9197,58 @@ export class ShowCellDrone extends Drone {
           // holds the new image.
           await loadImageOnce(smallSig)
           cell.imageSig = smallSig
-          this.cellImageCache.set(cell.label, smallSig)
-        } else if (referenceFaceForLabel(cell.label)) {
-          // Only the marked Portal inventory row reaches this fallback. It is
-          // a slim future-default authoring pointer and deliberately wears the
-          // root's current face. Ordinary activations pin their selected
-          // details—even an explicit no-image selection—and return '' above.
-          const faceSig = referenceFaceForLabel(cell.label)
-          await loadImageOnce(faceSig)
-          cell.imageSig = faceSig
-          this.cellImageCache.set(cell.label, faceSig)
+          imageCache.set(cell.label, smallSig)
         } else {
-          // No image on this tile's persistent props (commonly label-only
-          // tiles with viewport state). Ask substrate for a deterministic
-          // per-label fallback so the tile shows a background instead of
-          // empty. Does NOT mutate the user's props — only sets the
-          // display-time imageSig.
-          const subSvc = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SubstrateService') as
-            { pickImageForLabel?: (label: string) => string | null } | undefined
-          const fallbackSig = subSvc?.pickImageForLabel?.(cell.label) ?? null
-          if (fallbackSig && isSignature(fallbackSig)) {
-            await loadImageOnce(fallbackSig)
-            cell.imageSig = fallbackSig
-            this.cellImageCache.set(cell.label, fallbackSig)
-          } else {
-            this.cellImageCache.set(cell.label, null)
-          }
+          await loadDefaultImage(propsCold)
         }
       } catch {
-        // no cell dir or no properties file — no image
-        this.cellImageCache.set(cell.label, null)
+        // Missing props/index/resource is a timing state, not a third image
+        // state. Apply the same deterministic default-set projection used by
+        // an image-less props bag; the later fill event retries the explicit
+        // signature when its bytes arrive.
+        await loadDefaultImage(propsCold)
       }
     }
 
     await Promise.all(cells.map(loadOne))
+
+    // Close the decode→geometry eviction window. applyGeometry pins these
+    // signatures too, but background atlas baking can run after this await and
+    // before geometry begins. Pin the just-resolved foreground set now, joined
+    // with the currently rendered set for incremental/probe calls, so a valid
+    // decode cannot disappear between `loadImage` and its first frame.
+    if (!prepareOnly && cacheOwner === this.#derivedLocationKey) {
+      const pins = new Set<string>()
+      for (const rendered of this.renderedCells.values()) {
+        if (rendered.imageSig) pins.add(rendered.imageSig)
+      }
+      for (const cell of cells) {
+        if (cell.imageSig) pins.add(cell.imageSig)
+      }
+      imageAtlas.setPinned(pins)
+    }
+
+    // Publish only the labels this invocation resolved, and only while its
+    // lineage still owns the live caches. An older async render finishing
+    // after navigation must be unable to write into the incoming page.
+    const labels = cells.map(cell => cell.label)
+    const commit = <T>(source: ReadonlyMap<string, T>, target: Map<string, T>, preserveResolvedOnNull = false): void => {
+      publishOwnedProjection({
+        owner: cacheOwner,
+        currentOwner: this.#derivedLocationKey,
+        prepareOnly,
+        source,
+        target,
+        labels,
+        preserveResolvedOnNull,
+      })
+    }
+    commit(imageCache, this.cellImageCache, true)
+    commit(borderCache, this.cellBorderColorCache)
+    commit(tagsCache, this.cellTagsCache)
+    commit(linkCache, this.cellLinkCache)
+    commit(substrateCache, this.cellSubstrateCache)
+    commit(hideTextCache, this.cellHideTextCache)
 
     // Re-mint absent layer-keyed entries from CANONICAL — never from the
     // location fallback we just served: a stale location entry frozen
@@ -9051,7 +9282,7 @@ export class ShowCellDrone extends Drone {
             // that disagrees with canonical (stale location entry — the
             // adopt-sync/restore shape): shed the cached derivation and
             // repaint with the canonical answer now, not next pass.
-            if (served !== canonical) {
+            if (served !== canonical && cacheOwner === this.#derivedLocationKey) {
               this.cellImageCache.delete(label)
               repaint = true
             }
@@ -9347,7 +9578,7 @@ export class ShowCellDrone extends Drone {
               if (gen !== this.#readinessGen) return
               const sig = cached[i++]
               if (this.#fillMissedSigs.has(sig) || this.imageAtlas?.hasFailed(sig)) continue // concluded → doesn't block
-              const blob = await store.getResourceLocal(sig)
+              const blob = await resolveLocalResourceReference(store, sig)
               if (!blob) { allReady = false; this.#enqueueChildWarm(sig) }
             }
           }))
@@ -9389,7 +9620,7 @@ export class ShowCellDrone extends Drone {
               const propsSig = livePropsIndex[key] ?? livePropsIndex[gName]
               if (!propsSig || !isSignature(propsSig)) continue
               if (this.#fillMissedSigs.has(propsSig)) continue   // concluded-missing props → fail-open
-              const pblob = await store.getResourceLocal(propsSig)
+              const pblob = await resolveLocalResourceReference(store, propsSig)
               if (!pblob) {
                 // Props not local → the image sig is UNKNOWN. Hold the parent
                 // and queue the props blob; re-resolve once it lands (or a
@@ -9401,11 +9632,11 @@ export class ShowCellDrone extends Drone {
               }
               try {
                 const props = JSON.parse(await pblob.text())
-                const img = (this.#flat && props?.flat?.small?.image) || props?.small?.image
+                const img = recoverableTileImageSig(props, this.#flat)
                 if (typeof img === 'string' && isSignature(img)) {
                   sigs.push(img)
                   if (this.#fillMissedSigs.has(img) || this.imageAtlas?.hasFailed(img)) continue
-                  const blob2 = await store.getResourceLocal(img)
+                  const blob2 = await resolveLocalResourceReference(store, img)
                   if (!blob2) { allReady = false; this.#enqueueChildWarm(img) }
                 }
               } catch { /* skip malformed props */ }
@@ -9585,9 +9816,9 @@ export class ShowCellDrone extends Drone {
       getOptimizedVisual?: (s: string) => Promise<Blob | null>
     } | undefined
     if (!store) return null
-    const optimized = (await store.getOptimizedVisual?.(sig)) ?? null
-    if (optimized) return optimized
-    const raw = await store.getResourceLocal(sig)
+    // The atlas remains keyed by the outer incidence sig so lineage identity
+    // is preserved even though decoding needs the terminal shared bytes.
+    const raw = await resolveLocalResourceReference(store, sig, { optimized: true })
     if (raw && raw.size >= ShowCellDrone.#VISUAL_DEMAND_MIN_BYTES) {
       this.emitEffect('visual:wanted', { sig })
     }
@@ -9732,11 +9963,11 @@ export class ShowCellDrone extends Drone {
             const key = await cellLocationSig(childSegments, gName)
             const propsSig = livePropsIndex[key] ?? livePropsIndex[gName]
             if (!propsSig || !isSignature(propsSig)) continue
-            const pblob = await store.getResourceLocal(propsSig)
+            const pblob = await resolveLocalResourceReference(store, propsSig)
             if (!pblob) continue
             try {
               const props = JSON.parse(await pblob.text())
-              const img = (this.#flat && props?.flat?.small?.image) || props?.small?.image
+              const img = recoverableTileImageSig(props, this.#flat)
               if (typeof img === 'string' && isSignature(img)) sigs.push(img)
             } catch { /* malformed props — skip */ }
           }
