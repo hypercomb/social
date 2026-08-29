@@ -54,7 +54,14 @@ export function openExternalLink(href: string): void {
       console.warn('[document-view] host could not open', href, err))
     return
   }
-  window.open(href, '_blank', 'noopener,noreferrer')
+  // A popup blocker (or an embedding pane) answers window.open with null —
+  // the click must still go somewhere, so the refusal falls back to walking
+  // the document there. External departure is sanctioned ("external links
+  // are fine"); a click that silently does nothing is not.
+  const opened = window.open(href, '_blank', 'noopener,noreferrer')
+  if (!opened) {
+    try { window.location.assign(href) } catch { /* fully sandboxed — nothing left to try */ }
+  }
 }
 
 /** A contents/rail entry. A button, not an anchor, precisely because an

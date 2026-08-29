@@ -12,6 +12,7 @@ import { extractPageRefSigs, collectSigsDeep } from '../sharing/decoration-closu
 import { markAuthored, markLayerAuthoredPageSigs } from '../sharing/authored-sigs.js'
 import { mintBuildRecord } from '../history/builds-slot.js'
 import { putSummary, listSummaryRuns, type FeedbackSummaryRecord } from './feedback-summaries.js'
+import { readPublicBranches, setBranchPublic } from '../presentation/tiles/tile-actions.drone.js'
 
 // Bridge protocol — matches @hypercomb/sdk/bridge
 const BRIDGE_PORT = 2401
@@ -72,6 +73,9 @@ type BridgeRequest = {
   dryRun?: boolean
   /** How many entries to return (summary-list). Clamped receiver-side. */
   limit?: number
+  /** `branch-public`: mark (true, the default) or unmark (false) the branch
+   *  at `segments` as public. */
+  public?: boolean
 }
 type BridgeResponse = { id: string; ok: boolean; data?: unknown; error?: string }
 
@@ -331,6 +335,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'history':      return this.#history(req)
       case 'submit':       return this.#submit(req)
       case 'effect-emit':  return this.#effectEmit(req)
+      case 'branch-public': return this.#branchPublic(req)
       case 'redrain':      return this.#redrain(req)
       case 'closure-gaps': return this.#closureGaps(req)
       default:             return { id: req.id, ok: false, error: `unknown op: ${req.op}` }
@@ -1481,6 +1486,26 @@ export class ClaudeBridgeWorker extends Worker {
     }
     EffectBus.emit(name, req.payload ?? {})
     return { id: req.id, ok: true, data: { name } }
+  }
+
+  // Marks (or unmarks) the branch at `segments` public — the same
+  // participant-local flag the tile overlay's make-branch-public toggle
+  // writes. A branch never published before has no publish-panel row until
+  // it carries this mark, so a headless publish (`effect-emit publish:run`)
+  // had no way to reach a FIRST publish; this is that missing step. The mark
+  // is localStorage only — publishing truth still moves solely through
+  // `publishBranch`'s sealed closure and signed index.
+  async #branchPublic(req: BridgeRequest): Promise<BridgeResponse> {
+    const segments = (req.segments ?? [])
+      .map(s => normalizeCell(String(s ?? '')) || String(s ?? '').trim())
+      .filter(Boolean)
+    if (segments.length === 0) {
+      return { id: req.id, ok: false, error: 'branch-public requires `segments`' }
+    }
+    const location = segments.slice(0, -1).join('/')
+    const label = segments[segments.length - 1]
+    const branches = setBranchPublic(location, label, req.public !== false)
+    return { id: req.id, ok: true, data: { branches: readPublicBranches(), applied: branches } }
   }
 
   // Runs HostSyncService.reDrain() and returns its summary verbatim. The

@@ -1786,6 +1786,14 @@
       "note": "canvas-background.service.ts now refuses to paint on a published visitor shell (isPublishedVisitorShell in apply()): the backdrop is participant-local appearance with no truth on a visitor origin, so published sites keep the look their creation supplies. Owed: a note on the behaviors mirror tile for presentation/background saying the backdrop is participant-only and dark on published sites. note-add is additive — drain by hand, do not re-run blindly.",
       "created": "2026-08-28",
       "status": "pending"
+    },
+    {
+      "id": "publications-view-theme-card",
+      "title": "Themed card for behaviors/views/publications",
+      "run": null,
+      "note": "Structural mirror RAN 2026-08-28 (tile + 3 part tiles + notes + behavior/view/part pheromones, all verified ok over the bridge). Owed: the themed card art only — run scripts/behaviors-theme sweep scoped to behaviors/views/publications, or accept the next full sweep. Manual because the full sweep re-themes every eroded tile (mass-write burst can wedge the renderer).",
+      "created": "2026-08-29",
+      "status": "pending"
     }
   ]
 }

@@ -57,6 +57,9 @@ const TRANSIENT_MODES = new Set<ViewMode>([
   // The lounge takes the whole surface — a three.js room painted from the
   // tile's own `visual:lounge:room` record, with no hexagons under it.
   'lounge',
+  // The publication directory — a bright page of plates built from the
+  // host's publish ledger (the bare directory domain's welcome face).
+  'publications',
 ])
 
 /** True when `mode` is a full-surface (canvas-covering) view. The shells
