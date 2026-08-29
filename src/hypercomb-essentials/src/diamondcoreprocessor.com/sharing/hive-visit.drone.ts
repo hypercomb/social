@@ -36,6 +36,7 @@ import { validateHiveLinkBundle, STATIC_FOLLOWS_KEY, type HiveLinkBundle } from 
 import { fetchHiveManifestFromAny } from './hive-pointer.js'
 import { lineageKey } from '../history/lineage-key.js'
 import { isAdoptTombstoned } from './adopted-roots.js'
+import { isPublishedVisitorShell } from './behavior-enablement.js'
 
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
@@ -152,13 +153,25 @@ export class HiveVisitDrone extends Drone {
     }
     const name = String(root['name'] ?? '').trim() || bundle.segments[bundle.segments.length - 1]
 
+    // WHERE the preview mounts. A participant hive-link lands at the top
+    // level (/<name>): the visitor doesn't hold the publisher's ancestors,
+    // and a nested mount could shadow their own content. A published SITE
+    // mounts at the publisher's own segments instead — location-pinned marks
+    // (view:default, the pheromone walk) only match where the publisher
+    // minted them, so a nested lineage (games/arkanoid) flattened to
+    // /arkanoid arrives as bare hexagons with its face unmatched. A visitor
+    // origin holds no content of its own, so nothing can be shadowed there.
+    const mount = isPublishedVisitorShell() && bundle.segments.length > 0
+      ? [...bundle.segments]
+      : [name]
+
     // Collision: never preview OVER the visitor's own content. currentLayerAt
     // resolves real bags AND parent-carried children, so an occupied name is
     // caught however it is held.
-    const locSig = await history.sign({ explorerSegments: () => [name] })
+    const locSig = await history.sign({ explorerSegments: () => [...mount] })
     const occupied = await history.currentLayerAt(locSig).catch(() => null)
     if (occupied) console.warn('[hive-visit] name already occupied:', name)
-    if (occupied || !(await history.seedPreviewHead([name], head))) {
+    if (occupied || !(await history.seedPreviewHead(mount, head))) {
       this.#toast('tip', i18n?.t('preview.banner.title') ?? 'Hive preview',
         i18n?.t('preview.collision', { name }) ?? `You already have "${name}" — move or rename yours first, then open the link again.`)
       return
@@ -173,11 +186,12 @@ export class HiveVisitDrone extends Drone {
     // to its pinned page when the mark hydrated late. With the index warm the
     // first verdict IS the page, show-cell never paints, and the splash holds
     // until the view is up: loading screen → the opened view, nothing between.
-    await ensureDecorationsIndexed([name], []).catch(() => { /* verdict falls back to late hydration */ })
-    nav.go([name])
+    await ensureDecorationsIndexed(mount, []).catch(() => { /* verdict falls back to late hydration */ })
+    nav.go(mount)
     this.emitEffect('preview:mode', {
       active: true,
       label: name,
+      segments: mount,
       pubkey: bundle.pubkey,
       hosts: bundle.hosts,
       tiles: stats.layers,

@@ -125,7 +125,7 @@ window.addEventListener('hypercomb:runtime-ready', () => {
     // monkey-patch stripped only the WRITE half — Navigation.go() would
     // push '/', immediately re-parse '/' as the hive root, and every visit
     // landed on "Your hive is empty" instead of the published creation.
-    const off = EffectBus.on<{ active?: boolean; label?: string }>('preview:mode', preview => {
+    const off = EffectBus.on<{ active?: boolean; label?: string; segments?: string[] }>('preview:mode', preview => {
       if (!preview?.active) return
       off()
       document.documentElement.dataset['visitorReady'] = 'true'
@@ -135,9 +135,14 @@ window.addEventListener('hypercomb:runtime-ready', () => {
       }>('@hypercomb.social/Navigation')
       // Bare / opens the creation itself — the subdomain names it, so the
       // visitor never sees the empty hive root the adoption folded into.
+      // A nested lineage mounts at the publisher's full segments (the visit
+      // engine says where via `segments`); the URL base hides them all.
       const label = String(preview.label ?? rootName)
-      navigation?.setUrlBase?.([label])
-      navigation?.go?.([label, ...route])
+      const base = Array.isArray(preview.segments) && preview.segments.length > 0
+        ? preview.segments.map(s => String(s ?? '').trim()).filter(Boolean)
+        : [label]
+      navigation?.setUrlBase?.(base)
+      navigation?.go?.([...base, ...route])
     })
     console.log('[visitor] opening publication', { head: head.slice(0, 12), segments, hosts })
     EffectBus.emit('hive:link', {

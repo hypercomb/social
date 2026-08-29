@@ -57,6 +57,7 @@
 
 import { Drone, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { MOBILE_MODE_EFFECT, MOBILE_MODE_IOC_KEY } from '../preferences/mobile-pheromones.js'
+import { isPublishedVisitorShell } from '../sharing/behavior-enablement.js'
 
 const SELECTION_KEY = '@diamondcoreprocessor.com/SelectionService'
 const QUICK_MENU_INPUT_KEY = '@diamondcoreprocessor.com/QuickMenuInput'
@@ -241,6 +242,9 @@ export class SelectModeDrone extends Drone {
    *  pointer picks with ctrl and needs no invitation — but an armed mode with
    *  no visible way out would be a trap. */
   #wanted(): boolean {
+    // A published site never grows the picker: selection feeds authoring
+    // verbs, and the pill is shell chrome — not part of anyone's website.
+    if (isPublishedVisitorShell()) return false
     if (this.#viewActive) return false
     if (this.#armed) return true
     // The swarm's own picker is armed and owns the gesture; two pills would

@@ -1794,6 +1794,23 @@
       "note": "Structural mirror RAN 2026-08-28 (tile + 3 part tiles + notes + behavior/view/part pheromones, all verified ok over the bridge). Owed: the themed card art only — run scripts/behaviors-theme sweep scoped to behaviors/views/publications, or accept the next full sweep. Manual because the full sweep re-themes every eroded tile (mass-write burst can wedge the renderer).",
       "created": "2026-08-29",
       "status": "pending"
+    },
+    {
+      "id": "square-tile-visitor-gate",
+      "title": "square-tile-view behaviour tile: note the visitor-gate fix",
+      "run": null,
+      "note": "note-add on the square-tile-view behaviour tile (behaviors mirror): #mount now gates on isBehaviorDormant(SQUARE_TILE_KIND, segments), not raw isKindGloballyOff — on a published visitor shell (data-hypercomb-mode=visitor) the roster seeds DARK and the raw read blanked the whole site; publishing the mark IS the enablement there, only a publisher withhold stays dormant. Same pass dropped the redundant raw OR from tile-brief.ts dormant rows. Spec: sharing/visitor-shell-dormancy.spec.ts.",
+      "unattended": false,
+      "created": "2026-08-29",
+      "status": "pending"
+    },
+    {
+      "id": "visitor-nested-lineage-mount",
+      "title": "Visitor nested-lineage mount + select-pill gate — notes on sharing/selection behavior tiles",
+      "run": null,
+      "note": "hive-visit.drone.ts: on a published visitor shell the preview now mounts at the publisher's FULL segments (games/arkanoid), not the flattened [name] — location-pinned marks (view:default) only match where the publisher minted them, so nested lineages arrived as bare hexagons with their face unmatched. main.visitor.ts hides the whole base in the URL. select-mode.drone.ts: the mobile select pill never mounts on a visitor shell (selection feeds authoring verbs). Owed: notes on the behaviors mirror tiles for sharing/hive-visit and selection. note-add is additive — drain by hand.",
+      "created": "2026-08-29",
+      "status": "pending"
     }
   ]
 }
