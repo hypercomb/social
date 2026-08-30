@@ -336,10 +336,12 @@ describe('tiles rail gestures — every row is a conversation', () => {
     rows()[1].click()
     await settle()
 
-    const panel = host.querySelector('.hc-rail-chats') as HTMLElement
     const fresh = host.querySelector('.hc-rail-chat-new') as HTMLButtonElement
     expect(fresh).toBeTruthy()
-    expect(panel.lastElementChild).toBe(fresh)
+    // Under the live rows, ABOVE the archive — the next thread joins the
+    // available ones; the archive is a different shelf.
+    expect(fresh.previousElementSibling?.classList.contains('hc-rail-chat')).toBe(true)
+    expect(fresh.nextElementSibling?.classList.contains('hc-rail-archived')).toBe(true)
 
     const bodies = () => host.querySelectorAll('.hc-rail-chat-body').length
     const before = bodies()
