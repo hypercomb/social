@@ -179,6 +179,68 @@ export async function putHiveManifest(host: string, roots: Record<string, string
   } catch { return { ok: false, pubkey, createdAt, reason: 'host unreachable' } }
 }
 
+export interface SetHiveRootResult {
+  ok: boolean
+  key: string
+  sig: string
+  host: string
+  /** Publisher pubkey the write went out under ('' on refusal). */
+  pubkey: string
+  /** created_at of the signed index (freshness stamp; 0 on refusal). */
+  createdAt: number
+  /** Refusal reason, or 'unchanged' on the idempotent no-op. */
+  reason?: string
+}
+
+/** Collaborators, injectable for tests. Defaults are the live module. */
+export type SetHiveRootDeps = {
+  fetchIndex?: typeof fetchHiveIndex
+  putManifest?: typeof putHiveManifest
+  publicKey?: () => Promise<string | null>
+}
+
+/** Merge ONE root into the participant's OWN index on `host` — the
+ *  fetch-verify-merge-PUT step of publishBranch, extracted for callers that
+ *  set a root directly (install channels — install-by-replication.md steps
+ *  2+6). Same safety rules, exactly:
+ *
+ *  - a 404 read is the ONLY sanctioned `{}` baseline (nothing published yet);
+ *  - an unreachable, malformed, or forged read REFUSES the write — we cannot
+ *    see what we would be overwriting, so we do not overwrite it;
+ *  - the merge touches exactly one key, so a set can never resurrect or drop
+ *    the publisher's other roots;
+ *  - a root already at the requested sig no-ops without re-signing
+ *    (`reason: 'unchanged'`) — a re-run deploy stamp costs nothing. */
+export async function setHiveRoot(host: string, key: string, sig: string, deps: SetHiveRootDeps = {}): Promise<SetHiveRootResult> {
+  const fetchIndex = deps.fetchIndex ?? fetchHiveIndex
+  const putManifest = deps.putManifest ?? putHiveManifest
+  const publicKey = deps.publicKey ?? (() => get<SignerLike>(NOSTR_SIGNER_KEY)?.getPublicKeyHex?.() ?? Promise.resolve(null))
+
+  const cleanKey = key.trim()
+  const cleanSig = sig.trim().toLowerCase()
+  const refuse = (reason: string): SetHiveRootResult =>
+    ({ ok: false, key: cleanKey, sig: cleanSig, host, pubkey: '', createdAt: 0, reason })
+  if (!cleanKey) return refuse('empty key')
+  if (!SIG_RE.test(cleanSig)) return refuse('sig is not a 64-hex signature')
+
+  const pubkey = String((await publicKey().catch(() => null)) ?? '').toLowerCase()
+  if (!SIG_RE.test(pubkey)) return refuse('no signer')
+
+  const read = await fetchIndex(host, pubkey)
+  let existing: Record<string, string>
+  if (read.ok) existing = read.manifest.roots
+  else if (read.reason === 'http' && read.status === 404) existing = {}
+  else return refuse(`index-unsafe: ${read.reason}`)
+
+  if (existing[cleanKey] === cleanSig) {
+    return { ok: true, key: cleanKey, sig: cleanSig, host, pubkey, createdAt: read.ok ? read.manifest.createdAt : 0, reason: 'unchanged' }
+  }
+
+  const put = await putManifest(host, { ...existing, [cleanKey]: cleanSig })
+  if (!put.ok) return refuse(put.reason ?? 'index write failed')
+  return { ok: true, key: cleanKey, sig: cleanSig, host, pubkey: put.pubkey, createdAt: put.createdAt }
+}
+
 /** NIP-98 Authorization header — same envelope HostSyncService signs for
  *  byte PUTs: a kind-27235 event binding method + url, base64'd. */
 async function nip98Header(signer: SignerLike, url: string, method: string): Promise<string | null> {

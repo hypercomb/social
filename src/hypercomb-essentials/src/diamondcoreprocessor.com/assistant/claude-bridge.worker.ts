@@ -13,6 +13,8 @@ import { markAuthored, markLayerAuthoredPageSigs } from '../sharing/authored-sig
 import { mintBuildRecord } from '../history/builds-slot.js'
 import { putSummary, listSummaryRuns, type FeedbackSummaryRecord } from './feedback-summaries.js'
 import { readPublicBranches, setBranchPublic } from '../presentation/tiles/tile-actions.drone.js'
+import { setHiveRoot } from '../sharing/hive-pointer.js'
+import { PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
 
 // Bridge protocol — matches @hypercomb/sdk/bridge
 const BRIDGE_PORT = 2401
@@ -76,6 +78,11 @@ type BridgeRequest = {
   /** `branch-public`: mark (true, the default) or unmark (false) the branch
    *  at `segments` as public. */
   public?: boolean
+  /** `hive-root-set`: colon-carrying index key (e.g. `install:essentials`). */
+  key?: string
+  /** `hive-root-set`: index host override (defaults to the standing public
+   *  content endpoint). */
+  host?: string
 }
 type BridgeResponse = { id: string; ok: boolean; data?: unknown; error?: string }
 
@@ -304,6 +311,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'list-at':      return this.#listAt(req)
       case 'inflate':      return this.#inflate(req)
       case 'layer-at':     return this.#layerAt(req)
+      case 'layer-by-sig': return this.#layerBySig(req)
       case 'put-resource': return this.#putResource(req)
       case 'get-resource': return this.#getResource(req)
       case 'optimization-add':    return this.#optimizationAdd(req)
@@ -327,6 +335,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'bag-remove':   return this.#bagMutate(req, 'remove')
       case 'bag-set':      return this.#bagSet(req)
       case 'build-record': return this.#buildRecord(req)
+      case 'hive-root-set': return this.#hiveRootSet(req)
       case 'stamp':        return this.#stamp(req)
       case 'add':          return this.#add(req)        // legacy: delegates to update
       case 'remove':       return this.#remove(req)     // legacy: delegates to update
@@ -1095,6 +1104,36 @@ export class ClaudeBridgeWorker extends Worker {
     return { id: req.id, ok: true, data: result }
   }
 
+  /** Merge ONE colon-keyed root into the publisher's OWN signed hive
+   *  index — the install-channel producer (install-by-replication.md,
+   *  steps 2+6): `{ op: 'hive-root-set', key, sig, host? }`. The deploy
+   *  drives this over the bridge after upload, so signing stays in the
+   *  browser's NostrSigner (custody: browser-over-bridge, decided
+   *  2026-08-30). Colon-less keys are REFUSED at this surface: a folded
+   *  site lineage can never carry a colon, so the bridge can stamp
+   *  install channels but never clobber a published site. All index
+   *  safety (404-only empty baseline, refuse-on-unreadable, one-key
+   *  merge, unchanged no-op) lives in setHiveRoot. */
+  async #hiveRootSet(req: BridgeRequest): Promise<BridgeResponse> {
+    const key = String(req.key ?? '').trim()
+    const sig = String(req.sig ?? '').trim().toLowerCase()
+    if (!key.includes(':')) {
+      return { id: req.id, ok: false, error: 'hive-root-set requires a colon-carrying key (e.g. install:essentials) — site lineage roots are not settable over the bridge' }
+    }
+    const host = String(req.host ?? '').trim().toLowerCase() || PUBLIC_CONTENT_HOSTS[0] || ''
+    if (!host) return { id: req.id, ok: false, error: 'no index host configured' }
+    const result = await setHiveRoot(host, key, sig)
+    if (!result.ok) return { id: req.id, ok: false, error: result.reason ?? 'hive-root-set failed' }
+    return {
+      id: req.id, ok: true,
+      data: {
+        key: result.key, sig: result.sig, host: result.host,
+        pubkey: result.pubkey, createdAt: result.createdAt,
+        ...(result.reason === 'unchanged' ? { unchanged: true } : {}),
+      },
+    }
+  }
+
   // ─── property stamp ────────────────────────────────────────────────
   //
   // Write a key=value into the cell's properties slot on its layer.
@@ -1153,6 +1192,27 @@ export class ClaudeBridgeWorker extends Worker {
     const locationSig = await history.sign({ explorerSegments: () => segments })
     const layer = await history.currentLayerAt(locationSig)
     if (!layer) return { id: req.id, ok: false, error: `no layer at /${segments.join('/')}` }
+    return { id: req.id, ok: true, data: layer }
+  }
+
+  // Raw layer read BY SIGNATURE — the sig-addressed twin of `layer-at`.
+  //
+  // A parent's `children` slot holds LAYER sigs, and a layer sig is NOT a
+  // resource: `get-resource` on one answers "resource not found: <sig>".
+  // Bridge callers that wanted a child's NAME therefore had only `inflate`,
+  // which resolves the ENTIRE subtree to read one string — and several
+  // scripts instead reached for `get-resource`, silently got nothing back,
+  // and concluded the parent had no children. This is the one-hop read:
+  // slots stay as sigs, exactly as `layer-at` leaves them.
+  async #layerBySig(req: BridgeRequest): Promise<BridgeResponse> {
+    const sig = typeof req.cell === 'string' ? req.cell.trim() : ''
+    if (!isSignature(sig)) {
+      return { id: req.id, ok: false, error: 'layer-by-sig requires a 64-hex layer sig in `cell`' }
+    }
+    const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (!history) return { id: req.id, ok: false, error: 'HistoryService not available' }
+    const layer = await history.getLayerBySig(sig)
+    if (!layer) return { id: req.id, ok: false, error: `no layer for sig ${sig}` }
     return { id: req.id, ok: true, data: layer }
   }
 
@@ -1477,6 +1537,11 @@ export class ClaudeBridgeWorker extends Worker {
   static readonly #REMOTE_INTENTS = new Set([
     'publish:run', 'publish:unpublish', 'publish:refresh', 'publish:expand',
     'publish:view-toggle', 'publish:close', 'publish:opens-as',
+    // A responder that just created parts over the bridge owes them each an
+    // appearance (website-artifact paradigm, rules 10 and 11) and cannot cut
+    // an image from out there. It hands the act back to the hive, which holds
+    // the pixels. See assistant/visual-distribution.drone.ts.
+    'parts:distribute-visual',
   ])
 
   async #effectEmit(req: BridgeRequest): Promise<BridgeResponse> {

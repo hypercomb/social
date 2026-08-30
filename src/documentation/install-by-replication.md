@@ -179,8 +179,14 @@ DCP the *transport* dies. DCP the *ledger* is promoted:
    back — same merge-before-write rule as the /host queen; refuse keys
    without a colon so no bridge caller can clobber a site lineage. Deploy
    side: after upload, connect ws:2401 and send the verb with the freshly
-   built package sig. Deferred only until the current repo sweep settles —
-   the worker and sharing files are mid-flight in a concurrent session.*
+   built package sig.
+   PRODUCER BUILT 2026-08-30: `setHiveRoot` in `sharing/hive-pointer.ts`
+   (5 specs — one-key merge, 404-only empty baseline, refuse-on-unreadable,
+   unchanged no-op), bridge verb `hive-root-set` in the worker (colon gate),
+   and `stamp-install-channel.ts` as the last step of `build:module:deploy`
+   — best-effort with an unmissable SENTINEL STAMP OWED box + paste-ready
+   retry when the bridge is closed (`--require` to hard-fail instead). The
+   first real stamp happens on the next deploy with the hive open.*
 7. **Retire `LayerInstaller` and the DCP transport role.** Legacy fallbacks
    (`__layers__/`, `.json` names, legacy typed URLs) stay in the drain code
    and die with the drains — they must NOT migrate into the protocol.
