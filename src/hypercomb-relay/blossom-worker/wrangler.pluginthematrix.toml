@@ -20,7 +20,19 @@ routes = [
   # Every participant name resolves here (subdomain IS the hive name). A
   # proxied wildcard DNS record (* CNAME pluginthematrix.com) must exist in
   # the zone; unbound names get the worker's "nothing here" page.
-  { pattern = "*.pluginthematrix.com/*", zone_name = "pluginthematrix.com" }
+  { pattern = "*.pluginthematrix.com/*", zone_name = "pluginthematrix.com" },
+  # Second zone, same script — WILDCARD ONLY. No apex custom domain and no
+  # named host: a trusted host offers every participant the same door and
+  # plays favourites with none, so the only route is the wildcard. The zone
+  # carries one record, a proxied `* CNAME realones.online`. Proxying is what
+  # makes that work with no apex record at all: the DNS answer is Cloudflare's
+  # own anycast address, and this route claims every request before the edge
+  # would ever dial the named origin. Route the apex later and it resolves too.
+  # realones.online still needs a SITE_BINDINGS key below: resolveSite finds a
+  # label's zone by matching the bound suffix, so without it every
+  # *.realones.online name is unroutable. Deploying this route before the zone
+  # is ACTIVE in the account fails the WHOLE deploy — every other host with it.
+  { pattern = "*.realones.online/*", zone_name = "realones.online" }
 ]
 
 [assets]
@@ -98,4 +110,12 @@ AI_DAILY_TOKENS = "100000"
 AI_WRITERS = ""
 
 # The relay hostname is deliberately absent: it must retain signed PUT routes.
-SITE_BINDINGS = '{"pluginthematrix.com":{"title":"Plugin the Matrix","lineage":"pluginthematrix","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"revolucion.pluginthematrix.com":{"title":"Revolución","lineage":"revolucion","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"meetup.pluginthematrix.com":{"title":"Meetup","lineage":"revolucion/meetup","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"arkanoid.pluginthematrix.com":{"title":"Arkanoid","lineage":"games/arkanoid","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]}}'
+#
+# realones.online is a ZONE ANCHOR, not a site: it exists so resolveSite can
+# find the zone behind a `<label>.realones.online` request, and its apex is
+# never routed. Its lineage is deliberately the unreachable key
+# "realones.online" — lineageKey folds every non-alphanumeric character to `-`,
+# so no hive location can ever mint a lineage containing a dot. A plausible
+# anchor lineage like "realones" would instead sit in the publications ledger's
+# `named` set and silently deny a real hive of that name its plate.
+SITE_BINDINGS = '{"pluginthematrix.com":{"title":"Plugin the Matrix","lineage":"pluginthematrix","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"revolucion.pluginthematrix.com":{"title":"Revolución","lineage":"revolucion","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"meetup.pluginthematrix.com":{"title":"Meetup","lineage":"revolucion/meetup","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"arkanoid.pluginthematrix.com":{"title":"Arkanoid","lineage":"games/arkanoid","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"realones.online":{"title":"Real Ones","lineage":"realones.online","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]}}'
