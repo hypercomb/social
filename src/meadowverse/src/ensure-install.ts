@@ -13,9 +13,7 @@
 // GC is a deliberate separate phase, never an install side effect).
 
 import { SignatureStore } from '@hypercomb/core'
-import { Store } from '../../hypercomb-shared/core'
-import { LocationParser } from '../../hypercomb-shared/core/initializers/location-parser'
-import { LayerInstaller } from './layer-installer'
+import { isComplete, resolveInventory, Store, validateSealedPackage } from '../../hypercomb-shared/core'
 
 const AZURE_CONTENT_URL = 'https://storagemeadowverse.blob.core.windows.net/content'
 const isLocalDev = typeof window !== 'undefined'
@@ -29,7 +27,7 @@ const MANIFEST_KEY = 'meadowverse.installed-manifest'
 const SIG_STORE_KEY = 'meadowverse.signature-store'
 
 // ensure side-effect registrations
-const _deps = [Store, LayerInstaller]
+const _deps = [Store]
 
 type InstallManifest = {
   version: number
@@ -90,16 +88,28 @@ export const ensureInstall = async (): Promise<void> => {
     return
   }
 
-  const installer = get('@hypercomb.social/LayerInstaller') as LayerInstaller | undefined
-  if (!installer) {
-    console.warn('[meadowverse:install] LayerInstaller not registered')
+  // The live manifest is the inventory record; without it there is nothing
+  // sealed to install against. (Offline with a matching prior install already
+  // returned above via needsInstall.)
+  if (!newManifest) {
+    console.warn('[meadowverse:install] live manifest unavailable — cannot install; will retry next load')
+    return
+  }
+
+  // Admission-time authority gate (install-by-replication.md): the package
+  // record must be sealed — the root sig declared in its own layer set, every
+  // sig well-formed, beeDeps closed over the declared sets. Nothing outside
+  // the sealed record is an install candidate.
+  const sealed = validateSealedPackage(signature, newManifest)
+  if (!sealed.valid) {
+    console.warn(`[meadowverse:install] package ${signature.slice(0, 12)} is not sealed: ${sealed.errors.join('; ')}`)
     return
   }
 
   const oldManifestJson = localStorage.getItem(MANIFEST_KEY)
   const oldManifest = oldManifestJson ? tryParseManifest(oldManifestJson) : null
 
-  if (oldManifest && newManifest) {
+  if (oldManifest) {
     console.log('[meadowverse:install] incremental update:', signature)
     // bees/deps: install-cache pools + their legacy drain dirs.
     await removeStale([store.bees, store.legacyBees], oldManifest.bees, newManifest.bees)
@@ -117,10 +127,37 @@ export const ensureInstall = async (): Promise<void> => {
     await clearDirectories(store.layers)
   }
 
-  const installUrl = `${contentBase}/${signature}`
-  const parsed = LocationParser.parse(installUrl)
-
-  const complete = await installer.install(parsed)
+  // Replication engine (documentation/install-by-replication.md): the sealed
+  // package is an exact inventory — resolve each kind through the walker,
+  // which verifies every byte against its name before write and reuses what
+  // is present (idempotent delta repair). Placement (pool vs flat root) and
+  // legacy drain fallbacks live HERE in the io wiring; the walker itself is
+  // kind- and legacy-free.
+  const [layersResult, depsResult, beesResult] = await Promise.all([
+    resolveInventory(signature, newManifest.layers, {
+      read: readFrom([store.hypercombRoot, store.legacyHive, store.legacyHypercombIo, store.layers], sig => [sig, `${sig}.json`]),
+      fetch: fetchFrom(sig => [`${contentBase}/${sig}`, `${contentBase}/__layers__/${sig}.json`]),
+      write: writeTo(store.hypercombRoot, sig => sig),
+    }),
+    resolveInventory(signature, newManifest.dependencies, {
+      read: readFrom([store.dependencies, store.legacyDependencies], sig => [`${sig}.js`, sig]),
+      fetch: fetchFrom(sig => [`${contentBase}/${sig}`, `${contentBase}/__dependencies__/${sig}.js`]),
+      write: writeTo(store.dependencies, sig => `${sig}.js`),
+    }),
+    resolveInventory(signature, newManifest.bees, {
+      read: readFrom([store.bees, store.legacyBees], sig => [`${sig}.js`, sig]),
+      fetch: fetchFrom(sig => [`${contentBase}/${sig}`, `${contentBase}/__bees__/${sig}.js`]),
+      write: writeTo(store.bees, sig => `${sig}.js`),
+    }),
+  ])
+  const complete = [layersResult, depsResult, beesResult].every(isComplete)
+  if (!complete) {
+    console.warn(
+      `[meadowverse:install] incomplete — holes layers/deps/bees: `
+      + `${layersResult.holes.length}/${depsResult.holes.length}/${beesResult.holes.length}, `
+      + `refused: ${layersResult.refused.length}/${depsResult.refused.length}/${beesResult.refused.length}`,
+    )
+  }
 
   await populateSignatureStore(sigStore, contentBase, signature)
 
@@ -141,6 +178,53 @@ export const ensureInstall = async (): Promise<void> => {
 }
 
 // ----- helpers -----
+
+// Replication io wiring — kind-specific placement and drain-window fallbacks
+// belong here, never in the walker.
+
+/** Probe the given dirs (pool + legacy drain sources) for any name shape;
+ *  return the bytes so the walker can re-verify them against the sig. */
+const readFrom = (
+  dirs: (FileSystemDirectoryHandle | undefined)[],
+  names: (sig: string) => string[],
+) => async (sig: string): Promise<Uint8Array<ArrayBuffer> | null> => {
+  for (const dir of dirs) {
+    if (!dir) continue
+    for (const name of names(sig)) {
+      try {
+        const file = await (await dir.getFileHandle(name)).getFile()
+        return new Uint8Array(await file.arrayBuffer()) as Uint8Array<ArrayBuffer>
+      } catch { /* next shape */ }
+    }
+  }
+  return null
+}
+
+/** Fetch the first URL that answers with non-HTML bytes (SPA fallback guard:
+ *  an extension-less /<sig> on a dev-server origin returns index.html 200;
+ *  sig-addressed bytes are never text/html). Flat URL first, legacy typed
+ *  URL shape as the unmigrated-host fallback. */
+const fetchFrom = (urls: (sig: string) => string[]) =>
+  async (sig: string): Promise<Uint8Array<ArrayBuffer> | null> => {
+    for (const url of urls(sig)) {
+      try {
+        const res = await fetch(url)
+        if (!res.ok) continue
+        if ((res.headers.get('content-type') || '').toLowerCase().includes('text/html')) continue
+        return new Uint8Array(await res.arrayBuffer()) as Uint8Array<ArrayBuffer>
+      } catch { /* next source */ }
+    }
+    return null
+  }
+
+/** Admit verified bytes at their kind's location. */
+const writeTo = (dir: FileSystemDirectoryHandle, name: (sig: string) => string) =>
+  async (sig: string, bytes: Uint8Array<ArrayBuffer>): Promise<void> => {
+    const handle = await dir.getFileHandle(name(sig), { create: true })
+    const writable = await handle.createWritable()
+    await writable.write(bytes)
+    await writable.close()
+  }
 
 const needsInstall = async (
   store: Store,

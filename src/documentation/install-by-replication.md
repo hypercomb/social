@@ -132,6 +132,13 @@ DCP the *transport* dies. DCP the *ledger* is promoted:
    no drone imports, no auth — public pulls are anonymous GETs of
    `<origin>/<sig>`). The shell needs a bootstrap client of the protocol, not
    a second protocol.
+   *Status 2026-08-30: DONE — `hypercomb-shared/core/replication-walker.ts`
+   (`resolveSignatureClosure` + `resolveInventory` + `mineSignatures`, spec
+   alongside). The walker is kind- and legacy-free by rule: placement and
+   drain-window fallbacks live in the caller's io wiring. meadowverse's
+   bootstrap is its first client (sealed package = exact inventory, one
+   `resolveInventory` per kind); its relocated `LayerInstaller` copy is
+   deleted — the class no longer exists outside the DCP app's own mirror.*
 2. **Sentinel as sole discovery.** `manifest.json`'s surviving job — mapping
    "current" to a root sig — shrinks to a signed sentinel pointer (the sigbag
    model sentinel sync already half-implements). Then retire `manifest.json`.

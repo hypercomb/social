@@ -1918,7 +1918,8 @@
       "note": "Artifact https://claude.ai/code/artifact/fc3dfbce-5ea8-44e8-85ad-dcb2692e8cd2 (source: scratchpad replication-by-signature.html, single self-contained page). Mirror: one collection gathering seven part tiles 1:1 with the deck's stages — interface / the-shim / handshake / inflate / closure / second-host / publish — each marked part, plus a tile for the artifact itself carrying the URL. Notes per tile carry that stage's claim (pin+folder+walk+reach; sig-then-layer with sha256 gate before disk; structural substitution and the quotation rule; BFS closure with delta re-run; DCP takeover and the minimal package; hive-as-node sealed to one head). Pheromones from the declared vocabulary only. note-add is additive so this is hands-on, not for the idle drain.",
       "unattended": false,
       "created": "2026-08-30",
-      "status": "pending"
+      "status": "done",
+      "completed": "2026-08-30"
     },
     {
       "id": "smart-autolinker-hive-sync",
@@ -1934,6 +1935,24 @@
       "title": "Mirror the install-by-replication plan doc into the hive",
       "run": null,
       "note": "New doctrine doc src/documentation/install-by-replication.md: the DCP installer is superseded by the pull replication protocol - one verb replicate(root); version = root sig (install/update/repair are the same idempotent call); updates are consumer-requested via subscription sigbags under dcp/<domain>/ + a sentinel currency check + an update icon, demand-driven never push; trust = verify at admission never at runtime (sha256 name=hash before write, boot gates on closure holes.length===0, sentinel signed by the publisher key); a community IS a host (join = subscribe, trust = accept signed roots, fork = new sentinel over shared atoms); DCP transport dies, DCP sigbag ledger promoted to subscription list; 7-step migration ending with LayerInstaller retirement. Mirror: a tile for the plan under the doctrine/documentation area with the doc as its note, child part tiles 1:1 with the load-bearing sections (one-verb model, update icon model, admission-time trust, community-is-a-host, migration steps), marked from the declared vocabulary, gathered by a collection. note-add is additive so manual, not idle drain.",
+      "unattended": false,
+      "created": "2026-08-30",
+      "status": "pending"
+    },
+    {
+      "id": "bridge-layer-by-sig",
+      "title": "Mirror the layer-by-sig bridge op and the child-read trap it retires",
+      "run": null,
+      "note": "New bridge op layer-by-sig (claude-bridge.worker.ts) is the one-hop sig->layer read; a parent's children slot holds LAYER sigs, so get-resource on one answers 'resource not found' and every reader that used it silently reported an empty parent. Owes: a tile under behaviors/assistant/claude-bridge for the op, a tile for the read-merge-SET hazard (update children = SET, add = APPEND), and a note on both. MANUAL: note-add would land twice on a re-run.",
+      "unattended": false,
+      "created": "2026-08-30",
+      "status": "pending"
+    },
+    {
+      "id": "replication-walker",
+      "title": "Mirror the shell-embedded replication walker into the hive",
+      "run": null,
+      "note": "Migration step 1 of install-by-replication landed: hypercomb-shared/core/replication-walker.ts is the shell-embedded replication client - resolveSignatureClosure (recursive literal-sig walk), resolveInventory (exact sealed-package/genome shape, no mining), mineSignatures, isComplete; every atom verified against its name before write, local reads re-verified, idempotent delta repair; walker is kind- and legacy-free by rule (placement + drain fallbacks live in caller io). First client: meadowverse ensure-install (validateSealedPackage gate + three per-kind resolveInventory passes); its LayerInstaller copy deleted. Mirror: under the install-by-replication plan tile add part tiles 1:1 with replication-walker.ts, replication-walker.spec.ts, and the meadowverse ensure-install rewrite, marked part, notes carrying the io-wiring rule and admission-time verification doctrine. note-add is additive so manual.",
       "unattended": false,
       "created": "2026-08-30",
       "status": "pending"
