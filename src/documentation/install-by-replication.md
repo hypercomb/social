@@ -142,6 +142,19 @@ DCP the *transport* dies. DCP the *ledger* is promoted:
 2. **Sentinel as sole discovery.** `manifest.json`'s surviving job — mapping
    "current" to a root sig — shrinks to a signed sentinel pointer (the sigbag
    model sentinel sync already half-implements). Then retire `manifest.json`.
+   *Status 2026-08-30: the signed sentinel already EXISTS — it is the
+   kind-30564 hive index (`sharing/hive-link.ts` constants,
+   `sharing/hive-pointer.ts` client with end-to-end pinned-pubkey
+   verification and the forged/malformed/unreachable taxonomy,
+   `putHiveManifest` producer, blossom-worker `verifiedIndex` server-side,
+   served at `GET /hive/<pubkey>`). The package universe joins it via
+   **install channels**: a reserved `install:<channel>` root in the SAME
+   index (`installChannelKey` / `installRootOf` in hive-link.ts) —
+   collision-free by the pool-meaning argument (lineageKey folds
+   non-alphanumerics to `-`, so no location can mint a `:` key). One index,
+   one signature, one verification. Remaining: the producer stamp at
+   essentials deploy (custody fork below) and the consumers (step 5 icon,
+   meadowverse/web discovery).*
 3. **Pool placement moves post-resolution.** The installer routes bees to
    `sign('bees')` and deps to `sign('dependencies')` by which manifest array a
    sig rode in — transport-time classification. Replace with a thin
@@ -155,6 +168,14 @@ DCP the *transport* dies. DCP the *ledger* is promoted:
 6. **Sentinel signing.** Publisher signs the sentinel; subscribers verify
    before advancing a root. This lands with (2), not after it — authority is
    part of discovery, not a follow-up.
+   *Status 2026-08-30: built for the hive universe (see step 2 status). The
+   ONE open decision is producer custody for install channels: signing lives
+   in the browser's NostrSigner (headless flows drive it over the bridge —
+   `publish-content.ts` pattern), so either (a) the essentials deploy asks
+   the authoring browser to stamp `install:essentials` over the bridge after
+   upload, keeping keys out of CI forever, or (b) a publisher secret lands in
+   CI env and the deploy signs directly. (a) matches existing custody; (b)
+   makes deploys self-contained. Decide before wiring the producer.*
 7. **Retire `LayerInstaller` and the DCP transport role.** Legacy fallbacks
    (`__layers__/`, `.json` names, legacy typed URLs) stay in the drain code
    and die with the drains — they must NOT migrate into the protocol.

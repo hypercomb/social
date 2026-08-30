@@ -30,6 +30,36 @@ export const HIVE_LINK_VERSION = 1
  *  range: latest created_at wins, monotonicity enforced by the host. */
 export const HIVE_INDEX_EVENT_KIND = 30564
 
+// ── Install channels (documentation/install-by-replication.md, steps 2+6) ──
+//
+// The package sentinel is NOT a second format: a domain's installable
+// package (essentials bundle, module pack) is published as a root in the
+// SAME kind-30564 index, under a reserved `install:<channel>` key, signed
+// by the same publisher key and verified by the same fetchHiveIndex path.
+// One index, one signature, one verification — sites and packages differ
+// only in what the root sig names.
+//
+// Collision rule (the pool-meaning argument): lineageKey() folds every
+// non-letter/number to `-`, so no site lineage can ever produce a key
+// containing `:`. `install:`-prefixed keys are therefore reserved by
+// construction — no allowlist needed, no census to drift.
+
+export const INSTALL_CHANNEL_PREFIX = 'install:'
+
+/** Index key for an install channel, e.g. installChannelKey('essentials')
+ *  → 'install:essentials'. Channel names are single lowercase words. */
+export function installChannelKey(channel: string): string {
+  return `${INSTALL_CHANNEL_PREFIX}${channel.trim().toLowerCase()}`
+}
+
+/** The verified package root a hive index publishes for a channel, or null.
+ *  Callers pass the `roots` of an ALREADY-VERIFIED index (fetchHiveIndex /
+ *  the worker's verifiedIndex) — this helper adds no trust of its own. */
+export function installRootOf(roots: Record<string, string>, channel: string): string | null {
+  const sig = String(roots[installChannelKey(channel)] ?? '').trim().toLowerCase()
+  return SIG_RE.test(sig) ? sig : null
+}
+
 /** localStorage key recording which adopted roots follow a static
  *  publisher: `{ "<rootName>": { pubkey, hosts, lineageKey } }`.
  *  Participant-local — like hc:adopted-roots, never folded into lineage. */
