@@ -165,6 +165,20 @@ DCP the *transport* dies. DCP the *ledger* is promoted:
    path when everything is present.
 5. **Update icon.** Currency check per subscribed domain + the act
    (replicate → append marker). Demand-driven, per the guardrail above.
+   *Status 2026-08-30: CONSUMER BUILT — `sharing/update-scout.service.ts`
+   (6 specs). Once per boot, off the critical path, it reads the pinned
+   follow record (`localStorage['hc:install-follow']` =
+   `{pubkey, hosts?, channel?}`), fetches + end-to-end-verifies the
+   publisher's index, and lights the EXISTING upgrade pill
+   (`update:available`) only on a genuine divergence. Silence rules: no
+   follow → dormant; no installed sig → genesis, not an update;
+   unreachable/forged → silent; current → silent (never emits
+   available:false — the shell's bundled check owns that verdict). Adopt/
+   review keep their existing paths (DCP resolves the package by sig); the
+   walker-based act replaces them with steps 3/4. The meadowverse discovery
+   consumer waits on meadowverse having a publisher identity (no signer or
+   hosted index exists for storagemeadowverse yet) — build it then, on the
+   same follow-record pattern.*
 6. **Sentinel signing.** Publisher signs the sentinel; subscribers verify
    before advancing a root. This lands with (2), not after it — authority is
    part of discovery, not a follow-up.
