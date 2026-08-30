@@ -1928,6 +1928,15 @@
       "unattended": false,
       "created": "2026-08-30",
       "status": "pending"
+    },
+    {
+      "id": "install-by-replication-doctrine",
+      "title": "Mirror the install-by-replication plan doc into the hive",
+      "run": null,
+      "note": "New doctrine doc src/documentation/install-by-replication.md: the DCP installer is superseded by the pull replication protocol - one verb replicate(root); version = root sig (install/update/repair are the same idempotent call); updates are consumer-requested via subscription sigbags under dcp/<domain>/ + a sentinel currency check + an update icon, demand-driven never push; trust = verify at admission never at runtime (sha256 name=hash before write, boot gates on closure holes.length===0, sentinel signed by the publisher key); a community IS a host (join = subscribe, trust = accept signed roots, fork = new sentinel over shared atoms); DCP transport dies, DCP sigbag ledger promoted to subscription list; 7-step migration ending with LayerInstaller retirement. Mirror: a tile for the plan under the doctrine/documentation area with the doc as its note, child part tiles 1:1 with the load-bearing sections (one-verb model, update icon model, admission-time trust, community-is-a-host, migration steps), marked from the declared vocabulary, gathered by a collection. note-add is additive so manual, not idle drain.",
+      "unattended": false,
+      "created": "2026-08-30",
+      "status": "pending"
     }
   ]
 }

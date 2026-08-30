@@ -13,8 +13,9 @@
 // GC is a deliberate separate phase, never an install side effect).
 
 import { SignatureStore } from '@hypercomb/core'
-import { Store, LayerInstaller } from '../../hypercomb-shared/core'
+import { Store } from '../../hypercomb-shared/core'
 import { LocationParser } from '../../hypercomb-shared/core/initializers/location-parser'
+import { LayerInstaller } from './layer-installer'
 
 const AZURE_CONTENT_URL = 'https://storagemeadowverse.blob.core.windows.net/content'
 const isLocalDev = typeof window !== 'undefined'
