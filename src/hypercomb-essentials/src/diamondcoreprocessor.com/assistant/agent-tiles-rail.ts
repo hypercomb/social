@@ -213,6 +213,14 @@ const AMBER = '226, 196, 140'
  *  identically inside the agent panel and the chat window. Host geometry
  *  (where the rail sits, how wide) stays with whichever surface mounts it. */
 const RAIL_CSS = `
+/* BORDER-BOX, EVERYWHERE IN HERE. This sheet is installed into whatever
+   surface mounts the rail, so it cannot inherit a host's reset — and half
+   these rows are \`width:100%\` WITH horizontal padding, which under the
+   default content-box is a box wider than the column that holds it. That is
+   what put the lit background of the open conversation out past the fold's
+   right edge. One line, and the whole class of it cannot come back. */
+.hc-rail-list,.hc-rail-list *,.hc-rail-list *::before,.hc-rail-list *::after{
+  box-sizing:border-box;}
 .hc-rail-head{display:flex;align-items:center;gap:0.35rem;flex:0 0 auto;
   padding:0.8rem 0.85rem 0.5rem;}
 .hc-rail-back{width:1.7rem;height:1.9rem;flex:0 0 auto;border:none;background:none;
@@ -436,7 +444,13 @@ const RAIL_CSS = `
    picture's worth of indent turned a list of two chats into a diagram. */
 .hc-rail-chats{display:flex;flex-direction:column;gap:1px;
   margin:1px 0 4px 0.9rem;padding-left:0;}
-.hc-rail-chat{display:flex;align-items:baseline;gap:0.5rem;width:100%;
+/* THE ROW WRAPS. The points list under an open conversation is a flex item
+   asking for a whole line (\`flex:1 0 100%\`), and a line is only ever given
+   to it if the row is allowed to have a second one. Without the wrap it
+   took its full basis on the SAME line: the name was squeezed to one word
+   per line and the archive mark was pushed into the middle of the row. */
+.hc-rail-chat{display:flex;flex-wrap:wrap;align-items:baseline;gap:0.5rem;
+  width:100%;
   padding:0.28rem 0.45rem;border:0;background:none;cursor:pointer;
   text-align:left;font:inherit;font-size:0.8rem;
   color:rgba(238,244,250,0.72);border-radius:var(--hc-radius-control, 2px);}
@@ -492,16 +506,17 @@ const RAIL_CSS = `
    control nobody can see is a control nobody uses, and the reason it had to
    hide was that there were a dozen of them. There is one.
 
-   THE SAME COLUMN AS THE BLOCK ABOVE IT. A square of the row's own height,
-   flush to the fold's right edge, so its edge lines up with the chat block
-   on the tile's row rather than floating a padding's width inside it. It
-   takes its width from its height for the same reason that one does.
+   A FIXED SQUARE AT THE TOP OF THE ROW. It used to stretch to the row's
+   height, which was true while a row was one line — the open conversation
+   now carries a wrapped blurb under its name, and stretching to THAT is a
+   button as tall as a paragraph with its glyph adrift in the middle of it.
+   The mark belongs beside the NAME, which is the thing it acts on.
 
    STEEL, which in this list means THE CONVERSATION — never amber, which
    says the hive is doing something or waiting on you, and putting a thread
    away is neither. */
-.hc-rail-chat-put{flex:0 0 auto;align-self:stretch;aspect-ratio:1;
-  width:auto;height:auto;box-sizing:border-box;padding:0;margin:0;border:0;
+.hc-rail-chat-put{flex:0 0 auto;align-self:flex-start;
+  width:1.45rem;height:1.45rem;box-sizing:border-box;padding:0;margin:0;border:0;
   display:grid;place-items:center;overflow:hidden;
   background:none;cursor:pointer;
   font-family:'Material Symbols Outlined','Material Symbols Rounded';
