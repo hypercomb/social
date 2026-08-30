@@ -1025,6 +1025,27 @@ $accent: #7eb6d6;
   }
 }
 
+// The way to the next conversation — a quiet link at the bottom of the list,
+// wearing the row shape so the eye reads it as part of what it grows.
+.chat-list-new {
+  padding: 0.15em 0.35em;
+
+  button {
+    width: 100%;
+    padding: 0.35em 0.4em;
+    background: none;
+    border: none;
+    border-radius: var(--md-shape-xs, 4px);
+    color: rgba(var(--acc), 0.75);
+    font: inherit;
+    font-size: 0.72em;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover { color: rgba(var(--acc), 0.95); background: rgba(var(--acc), 0.08); }
+  }
+}
+
 // ── the conversation ──────────────────────────────────────────────────────
 
 .chat-thread {

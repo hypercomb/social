@@ -1956,6 +1956,60 @@
       "unattended": false,
       "created": "2026-08-30",
       "status": "pending"
+    },
+    {
+      "id": "seal-incidence-hint",
+      "title": "Mirror the seal incidence-hint fix and the stale-publish story",
+      "run": null,
+      "note": "sealSubtree compared a children-slot metadata incidence against bare bag markers, so every wrapped child read as off-lineage and the seal froze the branch: edited tiles could never reach a publish. Proven on /susan (3 tiles, 2 images never uploaded). Mirror: note on the history/sealSubtree tile + the publish collection.",
+      "unattended": false,
+      "created": "2026-08-30",
+      "status": "pending"
+    },
+    {
+      "id": "visual-division-distribution",
+      "title": "Mirror the visual-division creation: tiles for visual-division.ts, visual-distribution.ts, visual-distribution.drone.ts + the spec, a collection gathering them, part/creation pheromones, and notes explaining rules 10 and 11 (divide the visual, keep the placeholder)",
+      "run": null,
+      "note": "Three source resources = three child tiles marked part, one collection named for the creation. Notes must state: a slot names a POSITION and never the part that fills it; seating is the part's enrollment order; an empty hole is a finished state. Queued --manual because note-add is additive and a re-run would double the notes.",
+      "unattended": false,
+      "created": "2026-08-30",
+      "status": "pending"
+    },
+    {
+      "id": "visual-division-rule-10",
+      "title": "Mirror the visual-division creation: tiles for visual-division.ts (geometry/frame), visual-distribution.ts (the act), visual-distribution.drone.ts (the door every producer knocks on), a collection gathering them, pheromones marking each part, and notes explaining rules 10 and 11",
+      "run": null,
+      "note": "Rule 10+11 of the website-artifact paradigm: breaking apart distributes the visual and the whole keeps a frame of placeholders. Files: hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/visual-division.ts, assistant/visual-distribution.ts, assistant/visual-distribution.drone.ts. One tile per file (marked part), collection over them, notes carry the doctrine.",
+      "unattended": false,
+      "created": "2026-08-30",
+      "status": "pending"
+    },
+    {
+      "id": "publish-panel-site-link",
+      "title": "Publish panel: published-domain link inside the selected row",
+      "run": null,
+      "note": "publish-status.drone.ts mints row.site (last lineage label + public zone from PUBLIC_CONTENT_HOSTS); publish-panel component renders it as the 'live at' line in both expanded-row variants; publish.row.site added to all 14 catalogs. Mirror = note on the publish behavior card under behaviors (note-add is additive — manual).",
+      "unattended": false,
+      "created": "2026-08-30",
+      "status": "pending"
+    },
+    {
+      "id": "hive-children-sweep",
+      "title": "Mirror scripts/lib/hive-children.mjs and the child-read sweep",
+      "run": null,
+      "note": "One shared module now owns every bridge script's child read and child creation (scripts/lib/hive-children.mjs). Owes: a tile for the module under behaviors/assistant/claude-bridge, marked part; a note carrying the two rules (existence per CHILD PATH via layer-at; creation via op:add which the committer APPENDS - never update with a children array, which SETs); and a note on the doctrine ratchet that keeps it from re-propagating. 20 scripts swept, 12 of them armed. MANUAL: note-add is not idempotent.",
+      "unattended": false,
+      "created": "2026-08-30",
+      "status": "pending"
+    },
+    {
+      "id": "chat-new-conversation-link",
+      "title": "Note the '+ New conversation' line on the copilot rail / chat window tiles",
+      "run": null,
+      "note": "The chat rail's fold (agent-tiles-rail.ts #chatsPanel) and the window's railless fallback list both end with a '+ New conversation' link. It mints nothing: pressing it swaps the window to a fresh composer; the row appears when the first turn lands and titleOfRaw names it. Absent when a fold lists nothing (there the empty composer IS the invitation). Add a note saying so on the chat-window / copilot-rail tiles in the behaviors mirror.",
+      "unattended": false,
+      "created": "2026-08-30",
+      "status": "pending"
     }
   ]
 }

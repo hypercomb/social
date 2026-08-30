@@ -325,6 +325,39 @@ describe('tiles rail gestures — every row is a conversation', () => {
     expect(names()).toEqual(['what is this', 'the old thread'])
   })
 
+  it('a fold that lists conversations ends with + New conversation, which mints no row', async () => {
+    // Entering a chat remembers it as the tile's sticky thread (that is the
+    // point of sticky) — and this test enters a MINTED id, which would leak
+    // into every later test that resumes /diagrams. Put the memory back.
+    const sticky = localStorage.getItem('hc:rail-chat')
+
+    // /diagrams already holds threads, so its fold carries the way to the
+    // next one — at the bottom, where the list grows.
+    rows()[1].click()
+    await settle()
+
+    const panel = host.querySelector('.hc-rail-chats') as HTMLElement
+    const fresh = host.querySelector('.hc-rail-chat-new') as HTMLButtonElement
+    expect(fresh).toBeTruthy()
+    expect(panel.lastElementChild).toBe(fresh)
+
+    const bodies = () => host.querySelectorAll('.hc-rail-chat-body').length
+    const before = bodies()
+    fresh.click()
+    await settle()
+
+    // You are IN a fresh thread on the same tile — not the sticky one — and
+    // the list is exactly what it was: nothing exists until a turn lands.
+    expect(rail.subject?.name).toBe('diagrams')
+    expect(rail.subject?.convoId).toBeTruthy()
+    expect(rail.subject?.convoId).not.toBe('chat:tile:/diagrams')
+    expect(bodies()).toBe(before)
+    expect(host.querySelector('.hc-rail-chat.current')).toBeNull()
+
+    if (sticky === null) localStorage.removeItem('hc:rail-chat')
+    else localStorage.setItem('hc:rail-chat', sticky)
+  })
+
   it('putting one away answers the press at once — and the pool still wins', async () => {
     rows()[1].click()
     await settle()

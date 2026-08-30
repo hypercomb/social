@@ -440,6 +440,13 @@
             }
           }
         }
+        <!-- THE WAY TO THE NEXT ONE, at the bottom where the list grows. A
+             link, not a row: it swaps the window to a fresh composer and
+             lists NOTHING — the conversation appears above when its first
+             turn lands and names it. Same words as the rail's own fold. -->
+        <li class="chat-list-new">
+          <button type="button" (click)="newChat()">{{ 'agent.rail-chat-new' | t }}</button>
+        </li>
       </ul>
 
       <!-- ONE ROW SHAPE for both shelves — a live conversation and an

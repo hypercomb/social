@@ -43,8 +43,13 @@
 //                is not for.)
 //   the chat     TALK ABOUT it — the icon unfolds conversations that actually
 //   icon         hold an exchange and resumes the one you were last in. An
-//                empty composer is already the way to begin; it does not need
-//                a fake row or a second “new conversation” control.
+//                empty composer is already the way to begin the FIRST one, so
+//                a tile nobody has spoken to shows no fold furniture at all.
+//                A fold that DOES list conversations ends with one quiet
+//                "+ New conversation" line — the way to the next thread. It
+//                is a link, not a row: pressing it swaps the window to a
+//                fresh composer and mints nothing; the conversation appears
+//                in the list when its first turn lands and names it.
 //   ctrl-click   CHOOSE it — add the tile to the context the next request
 //                carries. Any number, gathered across any number of levels
 //                (the choice survives walking in and out), because what is
@@ -1332,7 +1337,13 @@ export class AgentTilesRail {
 
   /** THE TILE'S CONVERSATIONS. Only conversations containing real turns are
    *  rows. An empty composer is an invitation to type, not a conversation
-   *  record and not another piece of navigation furniture. */
+   *  record and not another piece of navigation furniture.
+   *
+   *  The fold ends with "+ New conversation" — the way to the NEXT thread on
+   *  a tile that already holds some. It creates nothing: the press puts a
+   *  fresh composer in the window, and the row appears only when the first
+   *  turn lands and names it. Absent when the fold lists nothing, because
+   *  there the empty composer IS the new conversation. */
   #chatsPanel(key: string, row: RailRow): HTMLElement {
     const path = tilePath(row.segments)
     const panel = document.createElement('div')
@@ -1470,6 +1481,21 @@ export class AgentTilesRail {
       })
       panel.appendChild(toggle)
       if (showing) for (const chat of filed) panel.appendChild(drawChat(chat))
+    }
+
+    // THE WAY TO THE NEXT ONE, at the bottom where a list grows. A link,
+    // not a row — it enters a freshly minted thread id without writing a
+    // thing, so pressing it and walking away leaves no husk behind.
+    if (chats.length) {
+      const fresh = document.createElement('button')
+      fresh.type = 'button'
+      fresh.className = 'hc-rail-chat hc-rail-chat-new'
+      fresh.textContent = this.#t('agent.rail-chat-new', '+ New conversation')
+      fresh.addEventListener('click', event => {
+        event.stopPropagation()
+        this.#enterChat(row, key, newTileConvoId(row.segments))
+      })
+      panel.appendChild(fresh)
     }
 
     return panel
