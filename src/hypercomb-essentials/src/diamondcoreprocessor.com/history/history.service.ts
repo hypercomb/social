@@ -2085,6 +2085,24 @@ export class HistoryService {
   /** Metadata incidence sig → its declared layer artifact. */
   readonly #metaLayerTarget = new Map<string, string>()
 
+  /** The bare LAYER signature behind a children-slot entry: the entry itself
+   *  when it is a layer, or the artifact a metadata incidence declares. Only
+   *  consults the map `#resolveLayerLocal` fills while dereferencing, so it is
+   *  synchronous and correct exactly when the child has already been resolved
+   *  (every caller resolves first). Bounded against a cyclic chain. */
+  readonly #terminalLayerSig = (sig: string): string => {
+    let current = sig
+    const seen = new Set<string>()
+    for (let hop = 0; hop < 8; hop++) {
+      if (seen.has(current)) return current
+      seen.add(current)
+      const next = this.#metaLayerTarget.get(current)
+      if (!next || next === current) return current
+      current = next
+    }
+    return current
+  }
+
   /**
    * Per-bag "fully warm" flag. Set when #warmBag has read every
    * marker file in the bag and populated #preloaderCache + reverse
@@ -2554,21 +2572,35 @@ export class HistoryService {
       if (!name) return this.#refuseSeal(segments, 'child-name-missing', childSig)
       const sealed = await this.sealSubtree([...segments, name], activeLayers)
       if (!sealed) return null
-      if (sealed === String(cs)) { sealedChildren.push(sealed); continue }
+      // COMPARE LIKE WITH LIKE. The children slot may carry a metadata
+      // INCIDENCE (`{meta:1, layer, relation}`) rather than the layer sig
+      // itself, while a bag's markers are always bare layer sigs. Testing the
+      // incidence sig for bag membership can never match, so every wrapped
+      // child read as `hint-off-lineage` and the seal honoured a stale hint
+      // FOREVER: a tile edited after its parent's last commit could not reach
+      // any publish, and the site kept serving the picture it was already
+      // serving (proven on /susan, 2026-08-29 — three tiles' new pictures were
+      // invisible to publish until the branch was re-linked by hand).
+      // #resolveRequiredLayer above already dereferenced the incidence, so its
+      // target is known here.
+      const terminalHint = this.#terminalLayerSig(childSig)
+      if (sealed === terminalHint) { sealedChildren.push(childSig); continue }
       const childLoc = await this.sign({ explorerSegments: () => [...segments, name] })
       const bag = childLoc ? await this.listLayers(childLoc) : []
       const decision = chooseSealChildHandle({
-        hintSig: String(cs),
+        hintSig: terminalHint,
         sealSig: sealed,
         bagSigs: bag.map(e => e.layerSig),
       })
       if (decision.reason === 'hint-off-lineage') {
         console.info(
           `[history] sealSubtree: off-lineage hint honored at /${[...segments, name].join('/')} ` +
-          `(hint ${String(cs).slice(0, 8)}, location seal ${sealed.slice(0, 8)})`,
+          `(hint ${terminalHint.slice(0, 8)}, location seal ${sealed.slice(0, 8)})`,
         )
       }
-      sealedChildren.push(decision.handle)
+      // Honouring the hint carries the ORIGINAL slot entry — dropping the
+      // incidence would rewrite the tree the hint was chosen to preserve.
+      sealedChildren.push(decision.reason === 'hint-off-lineage' ? childSig : decision.handle)
     }
 
     // Leaf: the head is already a correct merkle node. getLayerBySig ===
