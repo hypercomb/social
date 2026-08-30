@@ -168,14 +168,19 @@ DCP the *transport* dies. DCP the *ledger* is promoted:
 6. **Sentinel signing.** Publisher signs the sentinel; subscribers verify
    before advancing a root. This lands with (2), not after it — authority is
    part of discovery, not a follow-up.
-   *Status 2026-08-30: built for the hive universe (see step 2 status). The
-   ONE open decision is producer custody for install channels: signing lives
-   in the browser's NostrSigner (headless flows drive it over the bridge —
-   `publish-content.ts` pattern), so either (a) the essentials deploy asks
-   the authoring browser to stamp `install:essentials` over the bridge after
-   upload, keeping keys out of CI forever, or (b) a publisher secret lands in
-   CI env and the deploy signs directly. (a) matches existing custody; (b)
-   makes deploys self-contained. Decide before wiring the producer.*
+   *Status 2026-08-30: built for the hive universe (see step 2 status).
+   Custody DECIDED (Jaime): browser-over-bridge — keys never leave the
+   browser's NostrSigner; the essentials deploy asks the authoring browser
+   to stamp the channel over the bridge after upload (`publish-content.ts`
+   pattern). Producer design, ready to implement: a bridge verb
+   `hive-root-set { key: 'install:essentials', sig: <packageSig> }` in
+   `claude-bridge.worker.ts` that fetches the publisher's own verified
+   index (`fetchHiveIndex`), merges the one root, and `putHiveManifest`s it
+   back — same merge-before-write rule as the /host queen; refuse keys
+   without a colon so no bridge caller can clobber a site lineage. Deploy
+   side: after upload, connect ws:2401 and send the verb with the freshly
+   built package sig. Deferred only until the current repo sweep settles —
+   the worker and sharing files are mid-flight in a concurrent session.*
 7. **Retire `LayerInstaller` and the DCP transport role.** Legacy fallbacks
    (`__layers__/`, `.json` names, legacy typed URLs) stay in the drain code
    and die with the drains — they must NOT migrate into the protocol.
