@@ -22,6 +22,25 @@ Create groups such as **Pheromones**, **Email**, or **Articles**, then assign ea
 
 If the same active phrase has more than one eligible destination URL, an in-place chooser appears beside the editor. Pick the group and URL to use; that choice is applied to matching occurrences from the current typing or paste pass.
 
+## Hypercomb publications
+
+The settings page has a **Hypercomb publications** section that syncs your
+published domains straight from the signed ledger (default
+`https://pluginthematrix.com/publications.json`). Sync fetches the ledger,
+follows each site's verified head signature, and walks the published tree
+(`layer → children → incidence → layer`), minting one replacement per named
+creation: the phrase is the tile name (dashed cell names also get a spaced
+spelling), the URL is the creation's page on that domain
+(`https://revolucion.pluginthematrix.com/flavor-wheel`).
+
+- Synced links live in `chrome.storage.local` under the **Hypercomb** group —
+  toggle them per site in settings, or via the group in the popup and
+  per-domain rules.
+- Re-syncing is cheap: a site whose head signature is unchanged reuses its
+  cached links without refetching the tree.
+- Publish something new, press **Sync publications**, and its whole tree is
+  immediately linkable while you type.
+
 ## Behavior and limits
 
 - Matches whole words/phrases, case-insensitively by default.

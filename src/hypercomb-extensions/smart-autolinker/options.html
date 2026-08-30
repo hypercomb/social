@@ -27,6 +27,13 @@
       <div id="domainRules" class="domain-rules"></div>
     </section>
 
+    <section>
+      <div class="section-title"><div><h2>Hypercomb publications</h2><p>Sync your published domains and link every creation in their trees.</p></div><button id="syncHive" class="secondary">↻ Sync publications</button></div>
+      <form id="hiveForm" class="inline-form"><input id="hiveLedger" aria-label="Publications ledger URL" placeholder="https://pluginthematrix.com/publications.json"><button class="secondary">Sync</button></form>
+      <div id="hiveStatus" role="status"></div>
+      <div id="hiveSites" class="domain-rules"></div>
+    </section>
+
     <section class="preferences">
       <h2>Preferences</h2>
       <label><input id="caseSensitive" type="checkbox"> Match case exactly</label>
@@ -52,6 +59,7 @@
     </div>
   </template>
   <script src="defaults.js"></script>
+  <script src="hive.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

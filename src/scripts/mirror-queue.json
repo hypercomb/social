@@ -1901,6 +1901,33 @@
       "unattended": false,
       "created": "2026-08-29",
       "status": "pending"
+    },
+    {
+      "id": "workflow-enrollment",
+      "title": "Mirror the workflow enrolment pass and the content-hop read rule",
+      "run": null,
+      "note": "Follows slide-artifact-paradigm + enrollment-primitive. Owed under behaviors/views/workflow (and the enrolment collection): (1) update the workflow behaviour card — a workflow IS a website artifact, its steps are ENROLLED not held, one step tile can serve several skills, sub-workflows nest by enrolment; (2) a part tile for the FILING IS NOT MEMBERSHIP rule — the designer files a step tile under the workflow because a tile has to live somewhere, and the mark is what makes it a step; (3) a part tile for the read rule — Store.getResource does NOT follow the meta hop, use fetchThroughContentHop for bytes or terminalContentSig for the signature; this is the regression the migration causes and it only appears once real envelopes exist; (4) a note on ensure* vs toggle* for programmatic callers. Files: workflow/{workflow-step,workflow.queen,workflow-author.drone}.ts, pheromones/enrollment-acts.ts, presentation/tiles/{artifact-content,artifact-content.spec}.ts, commands/lightbox.queen.ts, sharing/image-choice.drone.ts. Manual: minting tiles is not re-runnable.",
+      "unattended": false,
+      "created": "2026-08-29",
+      "status": "pending"
+    },
+    {
+      "id": "replication-by-signature-deck",
+      "title": "Mirror the Replication by Signature presentation into the hive",
+      "run": null,
+      "note": "Artifact https://claude.ai/code/artifact/fc3dfbce-5ea8-44e8-85ad-dcb2692e8cd2 (source: scratchpad replication-by-signature.html, single self-contained page). Mirror: one collection gathering seven part tiles 1:1 with the deck's stages — interface / the-shim / handshake / inflate / closure / second-host / publish — each marked part, plus a tile for the artifact itself carrying the URL. Notes per tile carry that stage's claim (pin+folder+walk+reach; sig-then-layer with sha256 gate before disk; structural substitution and the quotation rule; BFS closure with delta re-run; DCP takeover and the minimal package; hive-as-node sealed to one head). Pheromones from the declared vocabulary only. note-add is additive so this is hands-on, not for the idle drain.",
+      "unattended": false,
+      "created": "2026-08-30",
+      "status": "pending"
+    },
+    {
+      "id": "smart-autolinker-hive-sync",
+      "title": "Mirror the Smart Autolinker hive sync into the hive",
+      "run": null,
+      "note": "Chrome extension hypercomb-extensions/smart-autolinker gained a Hypercomb publications sync (v1.3.0): options page fetches the signed publications ledger (/publications.json), follows each site's verified head sig, walks the published tree (layer -> children -> incidence record -> layer), and mints one phrase->URL replacement per named creation (dashed cell names also minted with a spaced spelling) into chrome.storage.local under a 'hive' group; content script merges them with manual replacements; re-sync skips unchanged heads by signature. Mirror: under the smart-autolinker creation tile add part tiles 1:1 with the new/changed sources - hive.js (sync engine + tree walk), options.js/options.html (publications section), content.js (hive merge), hive.test.cjs + content.test.cjs (proof) - marked part, gathered by the existing collection; notes carry what each part does and the ledger->head->tree->replacement flow; pheromones from the declared vocabulary only. note-add is additive so hands-on, not idle drain.",
+      "unattended": false,
+      "created": "2026-08-30",
+      "status": "pending"
     }
   ]
 }
