@@ -360,27 +360,26 @@ describe('tiles rail gestures — every row is a conversation', () => {
     else localStorage.setItem('hc:rail-chat', sticky)
   })
 
-  it('putting one away answers the press at once — and the pool still wins', async () => {
+  it('no row carries an archive mark — putting one away is done from the pane', async () => {
+    // The list's job is to be scanned for a NAME. Archiving belongs to the
+    // conversation you have OPENED, where the pane already carries every
+    // other thing you can do to it — so no row, current or not, wears a
+    // control for it.
     rows()[1].click()
     await settle()
 
-    const names = () => [...host.querySelectorAll('.hc-rail-chat-name')].map(n => n.textContent)
-    expect(names()).toEqual(['what is this'])
+    expect(host.querySelector('.hc-rail-chat.current')).toBeTruthy()
+    expect(host.querySelector('.hc-rail-chat-put')).toBeNull()
 
-    // ONE PRESS, ANSWERED IMMEDIATELY. This is a row under the pointer; a
-    // press that shows nothing until a disk round-trip completes reads as a
-    // press that did not land. So the row leaves the list before the write.
-    const put = host.querySelector('.hc-rail-chat-put') as HTMLButtonElement
-    put.click()
-    expect(names()).toEqual([])
-    expect((host.querySelector('.hc-rail-archived') as HTMLElement).textContent).toContain('2')
-
-    // AND THE POOL IS STILL THE TRUTH. This fixture's pool cannot take the
-    // write, so the refresh behind the optimistic flip puts the thread back.
-    // An optimistic list that kept a lie after a failed write would be worse
-    // than one that never moved.
+    // And READING what was put away is untouched: the disclosure still says
+    // how many, and still opens onto them.
+    const disclosure = host.querySelector('.hc-rail-archived') as HTMLButtonElement
+    expect(disclosure.textContent).toContain('1')
+    disclosure.click()
     await settle()
-    expect(names()).toEqual(['what is this'])
+    expect([...host.querySelectorAll('.hc-rail-chat-name')].map(n => n.textContent))
+      .toEqual(['what is this', 'the old thread'])
+    expect(host.querySelector('.hc-rail-chat-put')).toBeNull()
   })
 
   it('right-click comes back out', async () => {

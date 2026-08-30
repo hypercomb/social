@@ -69,6 +69,10 @@
 // chooses, and the level that arrives takes the focus so a keyboard is never
 // stranded on a row that no longer exists.
 //
+// Archiving is NOT one of the row's gestures. A thread is put away from the
+// PANE, on the conversation you have opened; this list only ever READS what
+// was put away, behind the fold's "Archived (n)" disclosure.
+//
 // A tile nobody has spoken to is DORMANT: the conversation is derived, not
 // minted, so it costs nothing until a draft or a turn lands in it. A row
 // holding unsent thinking wears a quiet mark, which is how you find your way
@@ -86,7 +90,7 @@ import {
 } from '@hypercomb/core'
 import {
   HIVE_PATH, foldTileConversations, listRailConversations, listTileDrafts,
-  newTileConvoId, readConversationSummary, setConversationArchived, tileConvoId,
+  newTileConvoId, readConversationSummary, tileConvoId,
   tilePath, tilePathOf,
   type TileConversation,
 } from './chat-thread.js'
@@ -195,8 +199,6 @@ const STICKY_KEY = 'hc:rail-chat'
 
 /** GO INSIDE. The row talks; this chevron is the separate control that walks. */
 const WALK_GLYPH = 'chevron_right'
-const ARCHIVE_GLYPH = 'archive'
-const UNARCHIVE_GLYPH = 'unarchive'
 
 /** What a dragged row carries. Shared with the chat window's header boxes —
  *  the shell may not import this module, so the CONTRACT is the mime type and
@@ -501,33 +503,6 @@ const RAIL_CSS = `
   font-size:0.7rem;line-height:1.35;color:rgba(216,230,238,0.55);}
 .hc-rail-chat-points li{margin:0 0 0.12rem;}
 .hc-rail-chat-body:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:1px;}
-/* IN THE OPEN, because it is on ONE row now. It used to be drawn on every
-   conversation and kept at zero opacity until the pointer found it — a
-   control nobody can see is a control nobody uses, and the reason it had to
-   hide was that there were a dozen of them. There is one.
-
-   A FIXED SQUARE AT THE TOP OF THE ROW. It used to stretch to the row's
-   height, which was true while a row was one line — the open conversation
-   now carries a wrapped blurb under its name, and stretching to THAT is a
-   button as tall as a paragraph with its glyph adrift in the middle of it.
-   The mark belongs beside the NAME, which is the thing it acts on.
-
-   STEEL, which in this list means THE CONVERSATION — never amber, which
-   says the hive is doing something or waiting on you, and putting a thread
-   away is neither. */
-.hc-rail-chat-put{flex:0 0 auto;align-self:flex-start;
-  width:1.45rem;height:1.45rem;box-sizing:border-box;padding:0;margin:0;border:0;
-  display:grid;place-items:center;overflow:hidden;
-  background:none;cursor:pointer;
-  font-family:'Material Symbols Outlined','Material Symbols Rounded';
-  font-weight:400;font-style:normal;letter-spacing:normal;text-transform:none;
-  white-space:nowrap;direction:ltr;-webkit-font-feature-settings:'liga';
-  font-feature-settings:'liga';-webkit-font-smoothing:antialiased;
-  font-size:1rem;line-height:1;color:rgba(${STEEL},0.8);
-  border-radius:var(--hc-radius-control, 2px);
-  transition:color 0.12s ease,background 0.12s ease;}
-.hc-rail-chat-put:hover{color:rgba(${STEEL},1);background:rgba(${STEEL},0.18);}
-.hc-rail-chat-put:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:-1px;}
 /* PUT AWAY, and it reads that way: dimmer than a live thread, so the section
    under the disclosure is visibly a different shelf. */
 .hc-rail-chat.filed{color:rgba(238,244,250,0.48);}
@@ -1360,7 +1335,13 @@ export class AgentTilesRail {
    *  archive is a different shelf. It creates nothing: the press puts a
    *  fresh composer in the window, and the row appears only when the first
    *  turn lands and names it. Only on the tile you are IN, and absent when
-   *  the fold lists nothing — there the empty composer IS the invitation. */
+   *  the fold lists nothing — there the empty composer IS the invitation.
+   *
+   *  NO ROW CARRIES AN ARCHIVE MARK. This list is scanned for a NAME;
+   *  putting a thread away is done from the PANE, on the conversation you
+   *  have opened, where every other thing you can do to it already lives.
+   *  What stays here is READING what was put away — the disclosure below
+   *  says how many and opens onto them. */
   #chatsPanel(key: string, row: RailRow): HTMLElement {
     const path = tilePath(row.segments)
     const panel = document.createElement('div')
@@ -1428,51 +1409,30 @@ export class AgentTilesRail {
         this.#enterChat(row, key, chat.convoId)
       })
 
-      // THE ONE CONTROL, BOTH WAYS, ON ONE ROW. Archiving and un-archiving
-      // are the same act with the flag flipped, so they are the same button —
-      // no separate "restore" living somewhere else for you to go and find.
+      item.append(body)
+
+      // WHAT IT DECIDED, on the conversation you are IN. On the ROW and not
+      // inside the body, because the body is a <button> and a list inside a
+      // button is not something the DOM allows or a screen reader can read
+      // out.
       //
-      // AND IT IS ONLY ON THE CONVERSATION YOU ARE IN. A mark on every row
-      // was a column of controls down the side of a list whose job is to be
-      // scanned for a NAME, and hiding that column until the pointer was over
-      // it only meant the control could not be found at all. One row carries
-      // it, the row you are already reading, where it is worth the ink and
-      // can stand in the open. An archived thread is reached the same way it
-      // always was — click it, you are in it, and the way back out is right
-      // there on it.
-      if (chat.convoId === open) {
-        const put = document.createElement('button')
-        put.type = 'button'
-        put.className = 'hc-rail-chat-put'
-        put.textContent = chat.archived ? UNARCHIVE_GLYPH : ARCHIVE_GLYPH
-        const label = chat.archived
-          ? this.#t('agent.rail-chat-unarchive', 'Bring this conversation back')
-          : this.#t('agent.rail-chat-archive', 'Archive this conversation')
-        put.title = label
-        put.setAttribute('aria-label', label)
-        put.addEventListener('click', event => {
-          event.stopPropagation()
-          void this.#setArchived(key, chat, !chat.archived)
-        })
-        item.append(body, put)
-        // THE LIST, on the conversation you are IN. On the ROW and not inside
-        // the body, because the body is a <button> and a list inside a button
-        // is not something the DOM allows or a screen reader can read out —
-        // the same reason the archive mark is a sibling rather than a child.
-        if (blurb?.points.length) {
-          const points = document.createElement('ul')
-          points.className = 'hc-rail-chat-points'
-          for (const point of blurb.points) {
-            const entry = document.createElement('li')
-            entry.textContent = point
-            points.append(entry)
-          }
-          item.append(points)
+      // NO ARCHIVE MARK HERE. Putting a thread away is done from the PANE,
+      // on the conversation you have opened — this list's job is to be
+      // scanned for a NAME, and a control riding the rows is ink spent on
+      // something the reading surface already carries. Reaching an archived
+      // thread is unchanged: open it, and the way back out is in the pane
+      // with everything else you can do to it.
+      if (chat.convoId === open && blurb?.points.length) {
+        const points = document.createElement('ul')
+        points.className = 'hc-rail-chat-points'
+        for (const point of blurb.points) {
+          const entry = document.createElement('li')
+          entry.textContent = point
+          points.append(entry)
         }
-        return item
+        item.append(points)
       }
 
-      item.append(body)
       return item
     }
 
@@ -1519,32 +1479,6 @@ export class AgentTilesRail {
     }
 
     return panel
-  }
-
-  /** Put a conversation away, or bring it back.
-   *
-   *  The local copy is flipped BEFORE the write and the fold repainted
-   *  immediately: this is a one-press act on a row under the pointer, and a
-   *  press that does nothing until a disk round-trip completes reads as a
-   *  press that did not land. The pool is still the truth — the refresh
-   *  behind it will correct an optimistic flip that failed.
-   *
-   *  Archiving the conversation you are IN leaves you in it. It is still
-   *  open, still readable, still where what you type goes; what changed is
-   *  where it sits in the list, and yanking someone out of a thread they can
-   *  see is not what "put this away" asks for. */
-  async #setArchived(key: string, chat: TileConversation, archived: boolean): Promise<void> {
-    const index = this.#chatList.findIndex(entry => entry.convoId === chat.convoId)
-    if (index >= 0) this.#chatList[index] = { ...this.#chatList[index]!, archived }
-    // Bringing one back with the archive open must not leave the fold showing
-    // a section that is now empty.
-    if (!archived && !this.#chatList.some(entry => entry.archived && entry.path === chat.path)) {
-      this.#archiveOpen.delete(key)
-    }
-    this.#repaintExpanded()
-    await setConversationArchived(chat.convoId, archived)
-    if (this.#disposed) return
-    await this.#refreshChats()
   }
 
   /** Enter one named conversation on a tile, and remember it as this tile's
