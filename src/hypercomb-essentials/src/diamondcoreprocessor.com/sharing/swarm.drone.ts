@@ -2238,11 +2238,10 @@ export class SwarmDrone extends Drone {
 
     // Follow is DETECTION-ONLY (safety layer — nothing auto-adopts). When a
     // peer we follow republishes, SURFACE that they have updates; never commit.
-    // Acceptance is a participant action in the installer — this only lights the
-    // signal. (Was "Follow == auto-adopt", which folded the followed peer's
-    // content into our tree on every republish with zero gesture in the moment;
-    // removed per the manual-update safety rule — same class as the dropped
-    // RegistrySnapshot auto-fold, but worse since not even a per-item click.)
+    // Acceptance is a participant action — this only lights the signal. (Was
+    // "Follow == auto-adopt", which folded the followed peer's content into our
+    // tree on every republish with zero gesture in the moment; removed per the
+    // manual-update safety rule.)
     if (layerChanged && this.subscribedTo() === pubkey) {
       const names = layer.visuals
         .map(v => String((v as { name?: unknown }).name ?? '').trim())
