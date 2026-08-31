@@ -98,9 +98,23 @@
   // to one device pixel, so `0.5px` and `1px` paint the same row — the only
   // lever that actually thins the rule is lowering its contrast against the
   // bar. Reach for these alphas, never a smaller px value.
+  //
+  // THE BOTTOM EDGE IS THE SEAM THAT MATTERS. Everything the shell docks —
+  // tool windows, the notes strip, the hint bar, the breadcrumb — hangs off
+  // the MEASURED bottom of this bar, so that one line is the only thing
+  // saying where chrome ends and the workspace begins. At the steel rule's
+  // resting alpha it read as another faint hairline among the panel edges
+  // below it and the separation vanished. It now carries the theme's own
+  // `--hc-chrome-accent` — a role every theme already answers, so the seam
+  // is blue under dark, ink-blue under light, amber under honey — at full
+  // alpha, which is what does most of the work. It is the ONE edge allowed
+  // a width of its own, and only barely: 1px against the sides' 0.5px, a
+  // single device pixel more on a 2x screen. A rule, not a bar — 2px read
+  // as a band of chrome in its own right. Colour states the seam; the extra
+  // pixel only keeps it from dissolving into the panel edges below.
   border: 0.5px solid rgba(var(--hc-chrome-rule), 0.16);
   border-top-color: rgba(var(--hc-chrome-rule), 0.38);
-  border-bottom-color: rgba(var(--hc-chrome-rule), 0.38);
+  border-bottom: 1px solid rgba(var(--hc-chrome-accent), 1);
   border-radius: 0;
   // Clip children's hover fills to the frame. Safe for the intellisense
   // dropdown + hint surfaces — they position `fixed` and escape the clip,
@@ -135,7 +149,10 @@
 .header-bar.input-open {
   border-color: rgba(var(--hc-chrome-rule-firm), 0.24);
   border-top-color: rgba(var(--hc-chrome-rule-firm), 0.55);
-  border-bottom-color: rgba(var(--hc-chrome-rule-firm), 0.55);
+  // The accent seam stays the accent when the line is active — it just goes
+  // fully opaque. Firming it into the steel rule would erase the boundary at
+  // the exact moment the bar has the user's attention.
+  border-bottom-color: rgba(var(--hc-chrome-accent), 1);
 }
 
 // ── hci icon font ────────────────────────────────────────
