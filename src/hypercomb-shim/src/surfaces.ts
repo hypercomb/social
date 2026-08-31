@@ -20,8 +20,8 @@
 //   • a surface that self-portals to document.body is left where it moved to
 //   • remove() from the registry cascades the node out of the DOM
 
-import { SHELL_SURFACE_REGISTRY_KEY } from '@hypercomb/shared/core/shell-surface-registry'
-import type { ShellSurface, ShellSurfaceRegistry } from '@hypercomb/shared/core/shell-surface-registry'
+import { SHELL_SURFACE_REGISTRY_KEY } from '@hypercomb/runtime/shell-surface-registry'
+import type { ShellSurface, ShellSurfaceRegistry } from '@hypercomb/runtime/shell-surface-registry'
 
 /** Surfaces the shim mounted, by name. Survivors are reused, never rebuilt. */
 const mounted = new Map<string, HTMLElement>()
@@ -29,20 +29,49 @@ const mounted = new Map<string, HTMLElement>()
 /** Names whose registration is Angular-shaped, so the shim skipped them. */
 const skipped = new Set<string>()
 
+/** Entries in shared's shell-surfaces barrel, counted AT BUILD TIME and
+ *  injected by build.mjs. It cannot be observed at runtime: those surfaces
+ *  register themselves by being imported from that barrel, and the shim never
+ *  imports it — so `skipped` is always 0 here, and reporting that number alone
+ *  says "migration complete" when it means "none reached me". The barrel IS
+ *  the plan doc's scoreboard, so the honest number is the barrel's length. */
+declare const __HC_BARREL_ENTRIES__: number
+const barrelEntries: number =
+  typeof __HC_BARREL_ENTRIES__ === 'number' ? __HC_BARREL_ENTRIES__ : 0
+
 export interface SurfaceReport {
   /** Custom elements the shim actually mounted. */
   mounted: number
-  /** Angular component registrations the shim cannot render. */
+  /** Angular-shaped registrations that DID reach the registry and were
+   *  skipped. Zero in the shim by construction — a drone contributing an
+   *  Angular component would be a bug, not a migration step. */
   angular: number
-  /** Names of the Angular-shaped registrations, for the scoreboard. */
+  /** Names of the Angular-shaped registrations that reached the registry. */
   angularNames: string[]
+  /** Surfaces that exist but can never reach the shim: shared's Angular
+   *  panels, listed in the shell-surfaces barrel. This is the number that
+   *  measures Phase 2/3, and it may only go down. */
+  unreachable: number
 }
 
 export const surfaceReport = (): SurfaceReport => ({
   mounted: mounted.size,
   angular: skipped.size,
   angularNames: [...skipped].sort(),
+  unreachable: barrelEntries,
 })
+
+/** One line, honest in both halves: what came up, and what still cannot. */
+export const scoreboardLine = (report: SurfaceReport): string => {
+  const parts = [`${report.mounted} element-shaped mounted`]
+  if (report.angular > 0) parts.push(`${report.angular} Angular-shaped skipped`)
+  parts.push(
+    report.unreachable === 0
+      ? 'the shell-surfaces barrel is empty — nothing is out of reach'
+      : `${report.unreachable} barrel entries still Angular-shaped, unreachable from the shim`,
+  )
+  return `[shim] surfaces — ${parts.join(' · ')}`
+}
 
 const hostElement = (): HTMLElement => {
   let host = document.getElementById('hc-surfaces')

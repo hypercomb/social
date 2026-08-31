@@ -1,0 +1,20 @@
+{
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": [
+      "/content/*",
+      "/vendor/*",
+      "/core/*",
+      "*.js",
+      "*.css",
+      "*.ico",
+      "*.json",
+      "*.svg",
+      "*.webmanifest",
+      "*.map"
+    ]
+  },
+  "mimeTypes": {
+    ".webmanifest": "application/manifest+json"
+  }
+}

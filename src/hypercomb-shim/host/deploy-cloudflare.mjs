@@ -59,8 +59,12 @@ existing \`npx wrangler login\` session. This script never handles it.
   process.exitCode = 2
 }
 
-const run = (command, args, options = {}) => new Promise((done, fail) => {
-  const child = spawn(command, args, { stdio: 'inherit', shell: process.platform === 'win32', ...options })
+// Shell is OPT-IN, not a platform default. npx is a PATH launcher and needs
+// one on Windows; a resolved script path does not, and passing one through a
+// shell breaks the moment the install path contains a space — which, for a
+// package other people install, it eventually will.
+const run = (command, args, { shell = false, ...options } = {}) => new Promise((done, fail) => {
+  const child = spawn(command, args, { stdio: 'inherit', shell, ...options })
   child.on('error', fail)
   child.on('close', code => code === 0 ? done() : fail(new Error(`${command} ${args[0]} exited ${code}`)))
 })
@@ -85,7 +89,8 @@ if (project) {
 
   console.log(`[deploy] uploading ${dist} to Pages project "${project}" (branch ${branch})`)
   await run('npx', ['-y', 'wrangler', 'pages', 'deploy', dist,
-    '--project-name', project, '--branch', branch, '--commit-dirty=true'])
+    '--project-name', project, '--branch', branch, '--commit-dirty=true'],
+    { shell: process.platform === 'win32' })
 
   if (domain) {
     console.log(`[deploy] attaching ${domain}`)
@@ -94,7 +99,8 @@ if (project) {
     // elsewhere it prints the CNAME to create, which is the honest outcome —
     // there is nothing this script could do about someone else's DNS.
     try {
-      await run('npx', ['-y', 'wrangler', 'pages', 'domain', 'add', domain, '--project-name', project])
+      await run('npx', ['-y', 'wrangler', 'pages', 'domain', 'add', domain, '--project-name', project],
+        { shell: process.platform === 'win32' })
     } catch (error) {
       console.warn(`[deploy] could not attach ${domain} automatically: ${error.message}`)
       console.warn(`[deploy] point it manually:  CNAME ${domain} -> ${project}.pages.dev`)
@@ -109,7 +115,7 @@ if (project) {
   // DNS and certificates can lag a minute, so a fresh custom domain may need
   // one re-run.
   try {
-    await run('node', [resolve(here, 'check-host.mjs'), target])
+    await run(process.execPath, [resolve(here, 'check-host.mjs'), target])
   } catch {
     console.warn('\n[deploy] the host did not pass yet. A new custom domain often needs a minute for DNS')
     console.warn(`[deploy] and its certificate — re-run:  npm run host:check -- ${target}`)

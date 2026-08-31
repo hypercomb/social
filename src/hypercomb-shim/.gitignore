@@ -1,0 +1,10 @@
+# Build output — the whole servable origin is regenerable.
+dist/
+
+# Vendor + core are BUILT into the static root by scripts/build-vendor.mjs.
+# Checking them in is what let hypercomb-web's copies drift from their source.
+public/vendor/
+public/core/
+
+# Written at build time by scripts/build-vendor.mjs (a stub; never a key).
+public/env.js

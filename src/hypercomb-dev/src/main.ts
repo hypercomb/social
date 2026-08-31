@@ -33,6 +33,16 @@
   console.log(`[nav] +${(now - t0).toFixed(0)}ms ${label}${extra ? ` ${extra}` : ''}`)
 }
 
+// The shipped locale catalogs. They used to live inside runtime-initializer;
+// that module is in @hypercomb/runtime now and ships none of its own, because
+// a locale is content and which languages exist is the host's answer. Web and
+// dev still bundle theirs — Angular lazy-chunks them — so pass them in
+// explicitly and nothing about these shells changes.
+import { bundledCatalogs, bundledLocales } from '@hypercomb/shared/core/bundled-catalogs'
+// The escape cascade's door. This used to ride into every shell inside
+// runtime-initializer; the runtime package cannot reach hypercomb-shared/ui,
+// so the shell that wants tool windows imports them itself.
+import '@hypercomb/shared/ui/tool-windows'
 import '@hypercomb/shared/core/ioc.web'
 // Capture a `/<sig>` meeting-place invite link before navigation parses the
 // URL — stashes the sig for the receive-side MeetingInviteWorker.
@@ -174,7 +184,7 @@ const main = async (): Promise<void> => {
   // OPFS miss. The SW has no localStorage/IoC, so the page must post them.
   await postCommunityDomainsToServiceWorker()
   ;(window as any).__hcBoot('ensureSwControl done')
-  await initializeRuntime()
+  await initializeRuntime({ catalogs: bundledCatalogs, locales: bundledLocales })
   ;(window as any).__hcBoot('initializeRuntime done')
 
   // ── the accepted install reports that it FINISHED ────────────────────

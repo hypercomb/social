@@ -1,0 +1,27 @@
+{
+  "name": "Hypercomb",
+  "short_name": "Hypercomb",
+  "description": "A living hive of hexagonal tiles — share and explore visual hives on any device.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#05060a",
+  "theme_color": "#05060a",
+  "categories": ["social", "productivity"],
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

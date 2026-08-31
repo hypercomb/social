@@ -1,0 +1,7 @@
+# tsup output — rebuilt by `npm run build:runtime`, never committed.
+dist/
+
+# Stale hand-off artifacts: tsup emits declarations into dist/. A .d.ts beside
+# a .ts here would shadow the real source for every consumer.
+src/*.d.ts
+!src/globals.d.ts

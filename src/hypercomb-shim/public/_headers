@@ -1,0 +1,42 @@
+# Static-asset headers for the shim harness (Cloudflare Pages / any host that
+# reads _headers). The shim serves three kinds of thing and they cache
+# differently:
+#
+#   /<sig>, /content/<sig>  — content-addressed. The name IS the hash, so the
+#                             bytes behind it can never change. Immutable.
+#   /vendor, /core          — built, replaced under a fixed name. Cache, but
+#                             keep a revalidation path.
+#   the worker + env.js     — the only code channel left. A stale service
+#                             worker strands a client on an old runtime with
+#                             no way back, so it must never cache hard.
+
+# REPLICATION REQUIRES CORS. A host exists to be pulled FROM — by nodes on
+# other origins, which is the whole point of a replicated network. Without an
+# Access-Control-Allow-Origin header every cross-origin replication dies as an
+# opaque "Failed to fetch" with no status and no diagnosis, and the host looks
+# to the node exactly like a host that publishes nothing.
+#
+# `*` is correct and not a compromise: every byte served here is public,
+# immutable, content-addressed, and sha256-verified by the reader before it is
+# admitted. There is no credential, no session, and no request whose ORIGIN
+# changes the answer — so there is nothing for an origin check to protect.
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Access-Control-Allow-Origin: *
+
+/content/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/vendor/*
+  Cache-Control: public, max-age=604800
+/core/*
+  Cache-Control: public, max-age=86400
+
+/hypercomb.worker.js
+  Cache-Control: public, max-age=0, must-revalidate
+/env.js
+  Cache-Control: public, max-age=0, must-revalidate
+/main.js
+  Cache-Control: public, max-age=0, must-revalidate

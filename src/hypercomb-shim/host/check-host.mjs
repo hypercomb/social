@@ -141,7 +141,38 @@ if (!manifest) {
     '`*` is correct: the bytes are public, immutable and verified by the reader.')
 }
 
-// ── 6. the fetcher, and its cache posture ────────────────────────────────────
+// ── 6. locales, as content ───────────────────────────────────────────────────
+// A locale is not bundled and not an installer resource — it is bytes the host
+// holds, named by their own hash. A host with no index simply publishes no
+// languages, which is a warning rather than a failure: the shell still runs in
+// its fallback locale.
+{
+  const res = await get('/locales.json', { cache: 'no-store' })
+  if (res.error || !res.ok) {
+    record(null, 'publishes locales as content', 'no /locales.json',
+      'optional — without it the host offers no languages and clients fall back to their built-in keys')
+  } else {
+    let index = {}
+    try { index = await res.json() } catch { /* not JSON */ }
+    const locales = Object.entries(index).filter(([, sig]) => SIG_RE.test(String(sig)))
+    record(locales.length > 0, 'publishes locales as content', `${locales.length} locale(s)`,
+      '/locales.json maps locale -> 64-hex signature')
+    const [locale, sig] = locales[0] ?? []
+    if (sig) {
+      const bytes = await get(`/${sig}`).then(r => r.error || !r.ok ? null : r.arrayBuffer())
+      if (!bytes) {
+        record(false, 'serves the catalogs it lists', `${locale} -> ${String(sig).slice(0, 12)}… unreachable`,
+          'every signature in /locales.json must be reachable at <origin>/<sig>')
+      } else {
+        record(await sha256(bytes) === sig, 'catalog bytes hash to their name',
+          `${locale} verified, ${(bytes.byteLength / 1024).toFixed(0)} kB`,
+          'served bytes do not match their signature — the client REFUSES them and the locale stays untranslated')
+      }
+    }
+  }
+}
+
+// ── 7. the fetcher, and its cache posture ────────────────────────────────────
 {
   const res = await get('/hypercomb.worker.js')
   if (res.error || !res.ok) {
@@ -157,7 +188,7 @@ if (!manifest) {
   }
 }
 
-// ── 7. deep links reach the shell ────────────────────────────────────────────
+// ── 8. deep links reach the shell ────────────────────────────────────────────
 {
   const res = await get('/a/deep/hive/location')
   if (res.error) {

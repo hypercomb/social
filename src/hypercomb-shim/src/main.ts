@@ -47,31 +47,79 @@
 // ioc.web FIRST — it installs window.ioc, and every module below registers
 // into it at module scope. Importing it late means those registrations land
 // on an ioc that does not exist yet.
-import '@hypercomb/shared/core/ioc.web'
+import '@hypercomb/runtime/ioc.web'
+// NO TOOL WINDOWS HERE, and that is not an omission. `@hypercomb.social/
+// ToolWindows` is the docked-panel escape rung, and a host has no docked
+// panels — every panel is still Angular in shared/ui, unreachable from here.
+// Its only consumer resolves it optionally and documents the absent case:
+// "with no panel showing, this rung answers false and the press falls
+// straight through" (essentials/keyboard/escape-cascade.ts). Importing it
+// would tie a publishable host to the monorepo to register a service
+// nothing here can use. It arrives when panels do — as drones.
 
-import type { DependencyLoader } from '@hypercomb/shared/core/dependency-loader'
-import { PACKED_STORE_MEANING } from '@hypercomb/shared/core/packed-store-engine'
-import { packedStoreBlocksBoot } from '@hypercomb/shared/core/packed-store-gate'
-import { initializeRuntime } from '@hypercomb/shared/core/runtime-initializer'
-import { Store } from '@hypercomb/shared/core/store'
-import { postCommunityDomainsToServiceWorker } from '@hypercomb/shared/core/sw-domains'
+// The processor itself, and the key it resolves bees through.
+import { BEE_RESOLVER_KEY, hypercomb } from '@hypercomb/core'
 
-// NO ensure-install HERE, deliberately. Acquisition is not the shim's job —
-// plan doc Phase 4 carves ensure-install (1,103 lines) + sentinel-bridge into
-// ONE sig-addressed bootstrap bundle that the shim fetches by pinned
-// signature, and the install prompt becomes that bee's surface. Importing it
-// here would fuse the shim to the thing it is supposed to load.
+// SIDE-EFFECT IMPORT, and it must stay one. `import type` here compiles, ships,
+// and silently does nothing: the module's module-scope
+// `register('@hypercomb.social/DependencyLoader', …)` never runs, the lookup
+// below answers undefined, and `loader?.load?.()` no-ops. The boot then prints
+// "DependencyLoader.load done" in 0ms, no namespace bundle is ever imported,
+// and every service they register — Settings, AxialService — is simply absent,
+// so the renderer's `ready()` gate fails and the hive comes up blank with no
+// error anywhere. A type-only import of a self-registering module is a silent
+// removal of the module.
+import '@hypercomb/runtime/dependency-loader'
+import type { DependencyLoader } from '@hypercomb/runtime/dependency-loader'
+// THE RUNNER'S OTHER HALF. Imported for its side effect: the module registers
+// `@hypercomb.social/ScriptPreloader` at module scope, and BootstrapHistory
+// (inside initializeRuntime) resolves it through IoC to import the installed
+// bees. Without this import that lookup answers undefined, every boot mounts
+// 0 surfaces, and nothing says why — the heap can be complete and verified and
+// the hive still comes up empty.
+import '@hypercomb/runtime/script-preloader'
+// Same shape again: LocalizationService self-registers at module scope, and
+// runtime-initializer's whole i18n block is gated on
+// `get('@hypercomb.social/I18n')`. Without this import that lookup answered
+// undefined, the block never ran, and the shim had NO translations at all —
+// while still shipping 2.9 MB of catalogs for the service that never existed.
+// Third self-registering module to be missing here; the pattern is the bug.
+import '@hypercomb/runtime/i18n.service'
+import { PACKED_STORE_MEANING } from '@hypercomb/runtime/packed-store-engine'
+import { packedStoreBlocksBoot } from '@hypercomb/runtime/packed-store-gate'
+import { initializeRuntime } from '@hypercomb/runtime/runtime-initializer'
+import { Store } from '@hypercomb/runtime/store'
+import { postCommunityDomainsToServiceWorker } from '@hypercomb/runtime/sw-domains'
+
+// NO ACQUISITION CODE HERE. Not ensure-install, and no longer the shim's own
+// replicate either — acquisition is SIGNED CONTENT now, fetched by pinned
+// signature and verified before it runs (src/bootstrap-loader.ts). The shim
+// keeps exactly three things, and this is the list:
 //
-// It is also load-bearing in a way worth recording: ensure-install reaches
-// shared through the `@hypercomb/shared/core` BARREL, and that barrel is what
-// makes the ambient `register()` global exist by the time store.ts evaluates
-// its module-scope registration. Narrowing that import to
-// `@hypercomb/shared/core/store` compiles and ships fine, but breaks
-// ensure-install.spec.ts, which imports the module without a shell to install
-// the global first. Left alone until the carve-out makes the question moot.
-import { IMPORT_MAP_STORAGE_KEY, resolveImportMap } from '../../hypercomb-web/src/setup/resolve-import-map'
+//   1. service-worker registration and control
+//   2. the packed-store one-way-door gate
+//   3. the pinned-sig fetch path
+//
+// Everything else it does below is RUNTIME, not acquisition: ioc, the store,
+// the module graph, the processor pulse. Those cannot be content — they are
+// what content runs on.
+//
+// EVERY IMPORT BELOW IS MODULE-SPECIFIC, never the `@hypercomb/shared/core`
+// barrel. The barrel re-exports Angular-flavoured modules, so a single import
+// of it pulls @angular/core in — and that does not merely bloat the shim, it
+// stops it booting (field decorators throw "not supported in JIT mode" with no
+// AOT compiler). `ioc.web` above is what installs the ambient `register()` /
+// `get()` globals the narrow modules expect at their module scope, which is
+// why narrowing is safe here and the import ORDER is not cosmetic.
+import { IMPORT_MAP_STORAGE_KEY, resolveImportMap } from './import-map'
+// Only the LOADER is compiled in — the acquisition it loads is not. That
+// bundle is fetched by signature at boot and verified before it runs, so
+// nothing below imports it and the type is the only thing that crosses.
+import { loadBootstrap, type BootstrapHandle } from './bootstrap-loader'
+// Locales resolve by signature from the host, never from this bundle.
+import { signatureCatalogs } from './locales'
 
-import { mountSurfaces, surfaceReport } from './surfaces'
+import { mountSurfaces, scoreboardLine, surfaceReport } from './surfaces'
 
 /** Register the OPFS module server. It serves `/@resource/<sig>` from the
  *  flat root; without it, composed pages 404 their shared chrome. */
@@ -146,6 +194,21 @@ const boot = async (): Promise<void> => {
   await attachImportMap()
   ;(window as any).__hcBoot('import map attached')
 
+  // ACQUISITION, BY SIGNATURE. Loaded after the map because the bundle imports
+  // `@hypercomb/core` as a bare specifier — the map's core entry is
+  // unconditional, so it resolves on the coldest possible boot — and before
+  // the module graph, because whatever it installs has to be on disk before
+  // the preloader goes looking.
+  let acquisition: BootstrapHandle | null = null
+  try {
+    acquisition = await loadBootstrap({ reason: 'cold' })
+  } catch (error) {
+    console.error('[shim] bootstrap failed to load', error)
+  }
+  ;(window as any).__hcBoot(
+    acquisition ? `bootstrap ${acquisition.pin.slice(0, 12)} running` : 'bootstrap UNAVAILABLE',
+  )
+
   // Dependency namespaces self-register their services before anything asks
   // for them.
   const loader = window.ioc?.get<DependencyLoader>('@hypercomb.social/DependencyLoader')
@@ -153,22 +216,55 @@ const boot = async (): Promise<void> => {
   ;(window as any).__hcBoot('DependencyLoader.load done')
 
   // i18n catalogs, layer materialization, host resolution.
-  await initializeRuntime({ logOpfs: false })
+  await initializeRuntime({ logOpfs: false, catalogs: signatureCatalogs })
   ;(window as any).__hcBoot('initializeRuntime done')
 
-  const report = mountSurfaces()
-  ;(window as any).__hcBoot(`surfaces mounted (${report.mounted} element, ${report.angular} angular)`)
+  // THE PROCESSOR'S BEE SOURCE. `hypercomb.act()` resolves bees through
+  // BEE_RESOLVER_KEY and does nothing at all when it answers undefined — no
+  // error, no warning, just an empty pulse. The shells wire this in an
+  // Angular `provideAppInitializer`; the shim wires it here. Without it a
+  // complete, verified heap still comes up as an empty hive.
+  const preloader = window.ioc?.get('@hypercomb.social/ScriptPreloader')
+  if (preloader) window.ioc?.register(BEE_RESOLVER_KEY, preloader)
 
-  // The scoreboard, printed every boot. `angular` is the number of panels
-  // still owing a conversion; it may only go down.
-  console.log(
-    `[shim] surfaces — ${report.mounted} element-shaped mounted, ${report.angular} still Angular-shaped`,
-    report.angularNames,
-  )
+  // Surfaces mount BEFORE the first pulse, and stay live after it: the
+  // registry announces every late registration and the reconciler is
+  // subscribed, so a bee that registers a surface halfway through the pulse
+  // still lands. Mounting first also means the count below is a floor, never
+  // a race.
+  const report = mountSurfaces()
+  ;(window as any).__hcBoot(`surfaces mounted pre-pulse (${report.mounted} element, ${report.unreachable} unreachable)`)
   ;(window as any).__hcSurfaces = surfaceReport
+
+  // THE FIRST PULSE. This is the whole runner: the processor asks the resolver
+  // for bees, imports them, and pulses each one. Everything the hive is —
+  // render, navigation, panels, behaviours — arrives from here.
+  await new hypercomb().act()
+  const live = surfaceReport()
+  ;(window as any).__hcBoot(`first pulse done (${live.mounted} element, ${live.unreachable} unreachable)`)
+
+  // The scoreboard, printed every boot. `unreachable` is the number of panels
+  // still owing a conversion — counted from shared's barrel at BUILD time,
+  // because the shim cannot see them at runtime. It may only go down.
+  console.log(scoreboardLine(live), live.angularNames)
 
   document.getElementById('hc-splash')?.remove()
   window.dispatchEvent(new Event('hypercomb:runtime-ready'))
+
+  // NOTHING CAME UP ⇒ ASK FOR A DOMAIN. The card is the shim's only surface
+  // and this is the only place it appears. The test is what actually MOUNTED
+  // after a pulse, not what localStorage claims: a hive whose package was
+  // half-written, or whose OPFS was cleared under a stale installed-marker, is
+  // empty in the way that matters however confident the marker is. Anything
+  // that reached a surface boots straight past this and never sees it.
+  if (live.mounted === 0 && live.angular === 0) {
+    console.log('[shim] 0 surfaces — no package is live')
+    if (acquisition) acquisition.prompt()
+    else renderBootFailure(new Error(
+      'Nothing is installed, and the bootstrap could not be loaded — so there is no way to install anything. ' +
+      'The origin must publish /pin and serve the bundle it names.',
+    ))
+  }
 }
 
 boot().catch(err => {

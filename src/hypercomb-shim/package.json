@@ -1,0 +1,42 @@
+{
+  "name": "@hypercomb/host",
+  "version": "0.1.0",
+  "description": "A Hypercomb node: the framework-free shim, its service worker, a pinned bootstrap, and the tools to serve, deploy and verify a host.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "bin": {
+    "hypercomb-host": "./host/cli.mjs"
+  },
+  "files": [
+    "dist",
+    "host",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "build:vendor": "node scripts/build-vendor.mjs",
+    "start": "node host/serve.mjs dist 4270",
+    "typecheck": "npx tsc -p tsconfig.json --noEmit",
+    "host:check": "node host/check-host.mjs",
+    "host:deploy": "node host/deploy-cloudflare.mjs"
+  },
+  "dependencies": {
+    "@hypercomb/core": "file:../hypercomb-core",
+    "@hypercomb/runtime": "file:../hypercomb-runtime"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.0",
+    "pixi.js": "^8.16.0",
+    "typescript": "~5.9.3"
+  },
+  "keywords": [
+    "hypercomb",
+    "host",
+    "static",
+    "content-addressed",
+    "replication"
+  ]
+}

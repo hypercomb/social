@@ -33,7 +33,17 @@
   console.log(`[nav] +${(now - t0).toFixed(0)}ms ${label}${extra ? ` ${extra}` : ''}`)
 }
 
+// The shipped locale catalogs. They used to live inside runtime-initializer;
+// that module is in @hypercomb/runtime now and ships none of its own, because
+// a locale is content and which languages exist is the host's answer. Web and
+// dev still bundle theirs — Angular lazy-chunks them — so pass them in
+// explicitly and nothing about these shells changes.
+import { bundledCatalogs, bundledLocales } from '@hypercomb/shared/core/bundled-catalogs'
 import '@hypercomb/shared/core/ioc.web'
+// The escape cascade's door. This used to ride into every shell inside
+// runtime-initializer; the runtime package cannot reach hypercomb-shared/ui,
+// so the shell that wants tool windows imports them itself.
+import '@hypercomb/shared/ui/tool-windows'
 // NATIVE SHELL: route every OPFS acquisition to the one native hive BEFORE
 // anything can capture the original — nine files call
 // navigator.storage.getDirectory() directly, and WebView2 has a real OPFS
@@ -265,7 +275,7 @@ const bootstrap = async (): Promise<void> => {
   // tick, triggering ExpressionChangedAfterItHasBeenCheckedError on every
   // boot. Dev shell already does this (see hypercomb-dev/src/main.ts);
   // web didn't, which is why the error showed on 4200 but not 4250.
-  await initializeRuntime({ logOpfs: false })
+  await initializeRuntime({ logOpfs: false, catalogs: bundledCatalogs, locales: bundledLocales })
   ;(window as any).__hcBoot('initializeRuntime done')
 
   // Join the overlapped SW chain before Angular boots: same guarantee as the

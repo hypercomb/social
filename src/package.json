@@ -9,6 +9,8 @@
     "hypercomb-dev",
     "hypercomb-essentials",
     "hypercomb-sdk",
+    "hypercomb-runtime",
+    "hypercomb-shim",
     "hypercomb-shared",
     "hypercomb-web",
     "meadowverse"
@@ -29,10 +31,11 @@
     "docs:links": "node documentation/check-links.mjs",
     "build:core": "npm --prefix hypercomb-core run build",
     "build:essentials": "npm --prefix hypercomb-essentials run build && npm run build:module && npm --prefix hypercomb-web run runtime:core",
-    "build:packages": "npm run build:core && npm run build:essentials",
+    "build:packages": "npm run build:core && npm run build:runtime && npm run build:essentials",
     "build:all": "npm run build:core && npm run build:sdk && npm run build:cli && npm run build:essentials && npm run build:web && npm run build:dev && npm run build:avatars && npm run build:meadowverse",
     "build:web": "npm --prefix hypercomb-web run build",
-    "build:shim": "node hypercomb-shim/build.mjs",
+    "build:shim": "npm --prefix hypercomb-shim run build:vendor && npm --prefix hypercomb-shim run build",
+    "start:shim": "npm --prefix hypercomb-shim run start",
     "build:dev": "npm --prefix hypercomb-dev run build",
     "build:avatars": "npm --prefix hypercomb-avatars run build",
     "build:meadowverse": "npm --prefix meadowverse run build",
@@ -65,7 +68,8 @@
     "intel:build-hive": "tsx scripts/intel-build-hive.ts",
     "revolucion:preview": "tsx scripts/intel-build-revolucion-site.ts --preview site-preview && npx -y http-server site-preview -p 4336 -c-1 -o /revolucion.html",
     "revolucion:deploy": "tsx scripts/intel-build-revolucion-site.ts",
-    "shot": "node scripts/shot.cjs"
+    "shot": "node scripts/shot.cjs",
+    "build:runtime": "npm --prefix hypercomb-runtime run build"
   },
   "dependencies": {
     "@angular/animations": "21.2.4",
