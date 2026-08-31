@@ -82,6 +82,24 @@ export class PackedBridge implements NativeBridge {
 
 let bootedBridge: PackedBridge | null = null
 
+/** WHY the last `packedRoot()` call returned null.
+ *
+ *  The three null cases are not the same problem and must not produce the
+ *  same advice. `busy` is the single-writer rule doing its job — another tab
+ *  (or an abandoned worker from a failed open) holds the pack's exclusive
+ *  SyncAccessHandle, and the flag is irrelevant. `disabled` is packed mode
+ *  switched off or unsupported. `failed` is an open that got far enough to
+ *  throw for some other reason. Callers that must refuse the boot read this
+ *  so they can name the ACTUAL cause instead of listing every possibility
+ *  and leading with the wrong one. */
+export type PackedUnavailable = 'disabled' | 'busy' | 'failed'
+
+let lastUnavailable: PackedUnavailable | null = null
+
+/** Why packed mode did not engage on the last `packedRoot()` call, or null
+ *  when it did engage (or has not been attempted). */
+export const packedUnavailableReason = (): PackedUnavailable | null => lastUnavailable
+
 /** The live bridge, once `packedRoot()` has opened it. Null before boot or
  *  when packed mode is off — callers (bulk signing, drain scheduling) treat
  *  null as "do it the old way". */
@@ -153,7 +171,10 @@ export interface PackedBoot {
  * holds it.
  */
 export const packedRoot = async (config: PackedStoreConfig): Promise<PackedBoot | null> => {
-  if (!packedStoreEnabled() || !packedSupported()) return null
+  if (!packedStoreEnabled() || !packedSupported()) {
+    lastUnavailable = 'disabled'
+    return null
+  }
   let bridge: PackedBridge | null = null
   try {
     const worker = new Worker(new URL('./packed-store.worker', import.meta.url), { type: 'module' })
@@ -182,6 +203,7 @@ export const packedRoot = async (config: PackedStoreConfig): Promise<PackedBoot 
       compact: () => openedBridge.invoke('pack_compact'),
       collect: () => openedBridge.invoke('pack_collect'),
     }
+    lastUnavailable = null
     return { root: new NativeRootDirectory(openedBridge), bridge: openedBridge, info }
   } catch (error) {
     // `pack_open` acquires the exclusive SyncAccessHandle before it parses the
@@ -191,7 +213,11 @@ export const packedRoot = async (config: PackedStoreConfig): Promise<PackedBoot 
     // full Chromium restart releases it. Terminating the failed bridge closes
     // the worker global and its SyncAccessHandle immediately.
     bridge?.terminate()
-    console.warn('[packed-store] unavailable — continuing on flat OPFS', error)
+    // The worker tags single-writer contention as `kind: 'Busy'` and the
+    // bridge rehydrates that onto the rejection, so this is an exact
+    // classification, not a message sniff.
+    lastUnavailable = (error as { kind?: string } | null)?.kind === 'Busy' ? 'busy' : 'failed'
+    console.warn(`[packed-store] unavailable (${lastUnavailable}) — continuing on flat OPFS`, error)
     return null
   }
 }

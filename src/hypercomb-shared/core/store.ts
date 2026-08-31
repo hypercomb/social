@@ -18,7 +18,7 @@ import {
 } from '@hypercomb/core'
 import { nativeRoot } from './native-filesystem'
 import { PACKED_STORE_MEANING } from './packed-store-engine'
-import { installPackedStorageOverride, packedRoot, packedStoreHasRecords } from './packed-bridge'
+import { installPackedStorageOverride, packedRoot, packedStoreHasRecords, packedUnavailableReason } from './packed-bridge'
 
 /** How long a host-resolution MISS is remembered before the cascade may be
  *  re-dialed for that sig. Render passes within the window get an instant
@@ -364,19 +364,35 @@ export class Store extends EventTarget {
       // the next commit would build on that hollow state. Refuse instead.
       //
       // Only reached when packed mode did NOT engage: the flag was turned
-      // off, or the pack is held by another tab. Both are the same danger.
+      // off, or the pack is held by another writer. Both are the same danger,
+      // but NOT the same fix — so say which one actually happened.
+      // `packedUnavailableReason()` is the exact classification from the open
+      // attempt (the worker tags contention `kind:'Busy'`), never a guess. The
+      // old message listed every possibility and LED WITH THE FLAG — the one
+      // case the boot gate already repairs automatically before Store runs — so
+      // the advice on screen was almost always wrong, and it pointed at a
+      // localStorage edit for a problem no edit can fix.
       // An empty pack (created, never drained) is not a door at all — the
       // flat layout is still whole — and does not trip this.
       const packPoolSig = await Store.poolSignature(PACKED_STORE_MEANING)
       if (await packedStoreHasRecords(packPoolSig)) {
         this.#opfsAvailable = false
         this.#initPromise = null
+        const reason = packedUnavailableReason()
         throw new Error(
           '[store] this hive has been migrated into the packed store, so the flat ' +
-          'layout no longer holds all of it. Refusing to open a partial hive.\n' +
-          `Re-enable packed mode — localStorage['${PACKED_STORE_FLAG_KEY}'] = '1' — and reload.\n` +
-          'If another tab already has the hive open, use that tab instead: the packed ' +
-          'store admits one writer at a time.',
+          'layout no longer holds all of it. Refusing to open a partial hive.\n' + (
+            reason === 'busy'
+              ? 'Another tab or window already has this hive open — the packed store ' +
+                'admits ONE writer at a time. Use that tab, or close it and retry here.\n' +
+                'If no other tab is open, an earlier one left the pack locked: quit the ' +
+                'browser window entirely so its worker is torn down, then reopen.'
+              : reason === 'failed'
+                ? 'The packed store could not be opened — see the [packed-store] warning ' +
+                  'above for the underlying error. Nothing was lost: the records are in ' +
+                  'the pack, and this hive opens again once that error is addressed.'
+                : `Packed mode is off. Re-enable it — localStorage['${PACKED_STORE_FLAG_KEY}'] = '1' — and reload.`
+          ),
         )
       }
       try {
