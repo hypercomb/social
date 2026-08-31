@@ -19,6 +19,7 @@ import {
 } from '@hypercomb/core'
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
+import { composeDivision } from './division-render.js'
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
 import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
 import { openExternalLink } from './document-view-links.js'
@@ -701,7 +702,17 @@ export class SiteViewDrone extends Drone {
     // what enforces "nothing runs until reviewed" across the async boundary.
     if (gen !== this.#gen) return
     if (!blob) { this.#teardown(); return }
-    const rawHtml = await blob.text()
+    // SEAT THIS CELL'S PARTS INTO ITS PAGE. A cell broken apart with an HTML
+    // flow declares holes; its members' own pages fill them, and the two read
+    // as one document (the other face of walking IN to a child, which replaces
+    // this page instead). Composition never fails: anything it cannot do hands
+    // back the authored page untouched, so a part that will not load costs one
+    // empty hole rather than the page.
+    const rawHtml = await composeDivision(
+      segments,
+      await blob.text(),
+      segs => this.resolvePageSig(segs),
+    )
     if (gen !== this.#gen) return
 
     this.#teardown()
