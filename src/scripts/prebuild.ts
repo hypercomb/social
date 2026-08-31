@@ -355,7 +355,7 @@ async function main() {
     if (!moduleUpToDate) {
       console.log(`${TAG} building essentials modules...`)
       run(nodeRun('./scripts/run-prepare.cjs'), essentialsDir)
-      run(tsxRun('./scripts/build-module.ts', ['--local']), essentialsDir)
+      run(tsxRun('./scripts/build-module.ts'), essentialsDir)
       recordBuild(state, 'essentials:module', essentialsSrc)
 
       console.log(`${TAG} copying modules to the content targets...`)
