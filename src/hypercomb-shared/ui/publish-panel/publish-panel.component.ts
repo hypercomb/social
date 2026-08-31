@@ -26,6 +26,11 @@
 //     or "Changed here", and putting it in either would invent a difference
 //     (or a confirmation) out of a computation still running.
 //
+// The panel is a PROPERTIES WINDOW over a LIST. It opens on the page you are
+// standing on and follows the list — a tapped row becomes its subject — so
+// every branch's addresses are reachable, including at the hive root, where
+// the drone can name no current branch at all.
+//
 // One action per row, never a bulk selection bar: bulk selection is
 // pointer-only and dies on a phone, where this panel becomes a bottom sheet.
 // Unpublish lives in the row's expansion, under its honest limit stated in
@@ -62,6 +67,10 @@ interface PublishRow {
   gaps: string[]
   expanded: boolean
   link: string | null
+  /** The public site URL once published — where a visitor views the branch. */
+  site: string | null
+  /** Every root domain this branch claims, primary first. */
+  zones: string[]
   busyPhase: string | null
   /** The view the branch ROOT opens as ('' = hexagons) — view:default mark. */
   opensAs: string
@@ -87,6 +96,13 @@ interface PublishRenderPayload {
   open: boolean
   gateActive: boolean
   host: string
+  /** The ROOT domain of the target — the only choosable part of an address:
+   *  the tile's name is the subdomain, the content endpoint is plumbing. */
+  zone: string
+  /** The hosts this participant actually has — the pick-list. */
+  hosts: string[]
+  /** The row for the CURRENT PAGE — the panel's one subject. */
+  currentKey: string
   pubkey: string
   index: PublishIndexState
   indexCreatedAt: number
@@ -98,7 +114,7 @@ interface PublishRenderPayload {
   views: PublishViewChoice[]
 }
 
-/** One rendered section. Empty ones never reach the template. */
+/** One rendered section of THE LIST. Empty ones never reach the template. */
 interface PublishSection {
   key: 'live' | 'changed' | 'unpublished' | 'attention'
   titleKey: string
@@ -124,6 +140,10 @@ const SECTION_TITLES: { key: PublishSection['key']; titleKey: string }[] = [
   { key: 'unpublished', titleKey: 'publish.section.unpublished' },
   { key: 'attention', titleKey: 'publish.section.attention' },
 ]
+
+/** The properties window's tabs. Sticky — the choice survives the session. */
+type PublishTab = 'status' | 'community' | 'opens' | 'versions'
+const TAB_STORE_KEY = 'hc:publish-panel:tab'
 
 /** Head sigs are shown at this length — enough to compare two by eye, short
  *  enough to sit on a phone row. */
@@ -153,7 +173,19 @@ export class PublishPanelComponent implements OnDestroy {
   readonly session = signalSession(this.visible, undefined, { close: () => this.close() })
 
   readonly gateActive = signal(false)
-  readonly host = signal('')
+  /** The STANDING default zone — what a branch that never chose rides. */
+  readonly zone = signal('')
+  /** THE HOSTS YOU KNOW. A domain is not typed — it is one of these. A
+   *  hostname nobody runs is an address that never answers, so the panel
+   *  offers the participant's actual hosts and the branch picks among them.
+   *  Gaining a NEW host is a consent handshake with whoever runs it, not a
+   *  spelling exercise in a properties pane.
+   *
+   *  The panel never touches the setting itself — a pick leaves as a
+   *  `publish:set-target` intent carrying the row's key and its full list;
+   *  the drone validates, and a refusal comes back as a toast with nothing
+   *  moved, which is the honest outcome. */
+  readonly hosts = signal<string[]>([])
   readonly index = signal<PublishIndexState>('checking')
   readonly indexCreatedAt = signal(0)
   readonly indexStale = signal(false)
@@ -171,7 +203,39 @@ export class PublishPanelComponent implements OnDestroy {
    *  to change during one check. */
   readonly renderedAt = signal(Date.now())
 
-  /** Rows whose verdict has not landed yet — the leading unlabelled block. */
+  /** THE CURRENT PAGE's row — where the panel opens. Walking to a tile
+   *  selects it, which is why the pane needs no picker of its own. */
+  readonly currentKey = signal('')
+  readonly current = computed<PublishRow | null>(() =>
+    this.rows().find(r => r.key === this.currentKey()) ?? null)
+
+  /** THE SUBJECT of the properties pane. It STARTS as the current page and
+   *  follows the list: tapping a row makes that branch the subject, so every
+   *  branch is configurable, not just the one you happen to be standing on.
+   *
+   *  This is why it exists at all — at the hive ROOT the drone can name no
+   *  current branch (there is no path above you to seal), so `current()` was
+   *  null and the pane, its tabs and the address editor all vanished. Falling
+   *  through to the first row means the addresses are always reachable. */
+  readonly selectedKey = signal('')
+  readonly subject = computed<PublishRow | null>(() => {
+    const rows = this.rows()
+    return rows.find(r => r.key === this.selectedKey())
+      ?? rows.find(r => r.key === this.currentKey())
+      ?? rows[0]
+      ?? null
+  })
+
+  /** Make a list row the subject. Selection and expansion are one gesture —
+   *  the row you opened is the row the pane is describing. */
+  select(row: PublishRow): void {
+    this.selectedKey.set(row.key)
+  }
+
+  /** THE LIST — every branch, not just the page you are on. The tabbed block
+   *  above answers "what about HERE"; the list answers "what about the rest",
+   *  and the current page's own row is marked in it rather than hidden, so the
+   *  two readings are visibly the same rows. */
   readonly comparing = computed(() => this.rows().filter(r => r.state === 'comparing'))
 
   /** The four sections, in reading order, empty ones dropped. */
@@ -191,7 +255,134 @@ export class PublishPanelComponent implements OnDestroy {
 
   readonly hasRows = computed(() => this.rows().length > 0)
 
+  /** The open tab — sticky across sessions like every panel choice. */
+  readonly activeTab = signal<PublishTab>(this.#loadTab())
+
+  #loadTab(): PublishTab {
+    try {
+      const v = localStorage.getItem(TAB_STORE_KEY)
+      // `domains` is the retained spelling of the tab this became: it used to
+      // be where you picked an address, and it is now the community you carry.
+      if (v === 'domains') return 'community'
+      return v === 'community' || v === 'opens' || v === 'versions' ? v : 'status'
+    } catch { return 'status' }
+  }
+
+  setTab(tab: PublishTab): void {
+    this.activeTab.set(tab)
+    try { localStorage.setItem(TAB_STORE_KEY, tab) } catch { /* in-session only */ }
+  }
+
+  /** A sticky tab the current row cannot honestly show (no faces to pick, no
+   *  versions yet) falls back to status rather than rendering blank. */
+  effectiveTab(row: PublishRow): PublishTab {
+    const tab = this.activeTab()
+    if (tab === 'opens' && (row.segments.length === 0 || this.viewsFor(row).length === 0)) return 'status'
+    if (tab === 'versions' && row.versions.length === 0) return 'status'
+    return tab
+  }
+
   #cleanups: (() => void)[] = []
+
+  /** The row's own name — its last path label, which IS its subdomain. */
+  label(row: PublishRow): string {
+    return row.path.split('/').filter(Boolean).pop() ?? ''
+  }
+
+  /** Is the full ledger open? Closed by default: the answer to "which version
+   *  is out there" is ONE row, and a standing list of every head this branch
+   *  ever published is scrollback, not an answer. The rest is a click away. */
+  readonly versionsOpen = signal(false)
+
+  /** The version rows to render: the serving one alone, or the whole ledger.
+   *  A branch with no live head yet has nothing to single out, so it opens
+   *  showing its newest — there is no "active" to collapse to. */
+  versionsShown(row: PublishRow): { sig: string; at: number }[] {
+    if (this.versionsOpen()) return row.versions
+    const live = row.versions.find(v => v.sig === row.live)
+    return live ? [live] : row.versions.slice(0, 1)
+  }
+
+  /** How many the fold is hiding — 0 means the toggle would say nothing. */
+  versionsHidden(row: PublishRow): number {
+    return Math.max(0, row.versions.length - this.versionsShown(row).length)
+  }
+
+  /** THE PICK-LIST for one branch: every host you know, each saying whether
+   *  this branch answers there. `chosen` comes from the branch's own list —
+   *  which falls back to the standing default, so a branch that never chose
+   *  still shows where it actually rides. */
+  hostChoices(row: PublishRow): { zone: string; chosen: boolean; primary: boolean }[] {
+    const known = this.hosts()
+    // A host the branch claims but the roster has not caught up on must still
+    // appear, or a live address would be invisible and un-droppable.
+    const zones = [...new Set([...known, ...row.zones])]
+    return zones.map(zone => ({
+      zone,
+      chosen: row.zones.includes(zone),
+      primary: row.zones[0] === zone,
+    }))
+  }
+
+  /** Answer here, or stop answering here. The LAST remaining host cannot be
+   *  dropped: a branch always publishes somewhere, and an empty list only
+   *  means "back to the standing default", which would re-tick itself and
+   *  read as a control that did nothing. */
+  toggleHost(row: PublishRow, zone: string): void {
+    const has = row.zones.includes(zone)
+    if (has && row.zones.length <= 1) return
+    const zones = has ? row.zones.filter(z => z !== zone) : [...row.zones, zone]
+    EffectBus.emit('publish:set-target', { key: row.key, domains: zones })
+  }
+
+  /** Promote one chosen host to PRIMARY — first in the list. The primary is
+   *  the door the index write goes through and the address a bare visit
+   *  lands on, so which one leads is a real choice, not presentation. */
+  makePrimary(row: PublishRow, zone: string): void {
+    if (!row.zones.includes(zone) || row.zones[0] === zone) return
+    EffectBus.emit('publish:set-target', {
+      key: row.key,
+      domains: [zone, ...row.zones.filter(z => z !== zone)],
+    })
+  }
+
+  /** THE COMMUNITY — the hosts you carry, which is what the tab shows and
+   *  what a branch's picker offers. Not a list of addresses in use: a host is
+   *  here because it was added. */
+  communityHosts(): string[] {
+    return this.hosts()
+  }
+
+  /** Take a host into your community. The text is normalized where the
+   *  signature is minted, not here, so `HYPERCOMB.com` and
+   *  `https://hypercomb.com/` are the one host they obviously are. */
+  addCommunityHost(input: HTMLInputElement): void {
+    const zone = input.value.trim()
+    if (!zone) return
+    EffectBus.emit('publish:community-add', { zone })
+    input.value = ''
+  }
+
+  /** Drop a host from your community. Branches that name it keep their mark —
+   *  they say where they publish, and that is still true of a host you no
+   *  longer carry. */
+  removeCommunityHost(zone: string): void {
+    EffectBus.emit('publish:community-remove', { zone })
+  }
+
+  /** Which branches would be left naming a host that is about to go. Shown on
+   *  the remove, because dropping the address three branches publish to should
+   *  say so before it happens rather than after. */
+  namingHost(zone: string): number {
+    return this.rows().filter(r => r.zones.includes(zone)).length
+  }
+
+  /** Where ONE address lives once published. A branch with no name of its own
+   *  (the hive root) has no subdomain — the zone IS the address. */
+  addressUrl(row: PublishRow, zone: string): string {
+    const name = this.label(row)
+    return `https://${name ? `${name}.` : ''}${zone}`
+  }
 
   constructor() {
     const ageTimer = setInterval(() => this.renderedAt.set(Date.now()), 15_000)
@@ -200,7 +391,14 @@ export class PublishPanelComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<PublishRenderPayload>('publish:render', (p) => {
       if (!p) return
       this.gateActive.set(p.gateActive === true)
-      this.host.set(String(p.host ?? ''))
+      this.zone.set(String(p.zone ?? '') || String(p.host ?? '').replace(/^content\./, ''))
+      this.hosts.set(Array.isArray(p.hosts) ? p.hosts.map(String).filter(Boolean) : [])
+      const nextCurrent = String(p.currentKey ?? '')
+      // Walking to another tile re-aims the pane. A selection made by hand
+      // survives repeated renders of the SAME page, so a refresh mid-edit does
+      // not yank the subject out from under the address being typed.
+      if (nextCurrent !== this.currentKey()) this.selectedKey.set(nextCurrent)
+      this.currentKey.set(nextCurrent)
       this.index.set(this.#normIndex(p.index))
       this.indexCreatedAt.set(Number(p.indexCreatedAt ?? 0) || 0)
       this.indexStale.set(p.indexStale === true)
@@ -216,6 +414,7 @@ export class PublishPanelComponent implements OnDestroy {
             ...row,
             segments: [...row.segments],
             gaps: [...row.gaps],
+            zones: Array.isArray(row.zones) ? row.zones.map(String) : [],
             opensAs: String(row.opensAs ?? ''),
             versions: Array.isArray(row.versions) ? row.versions.map(v => ({ ...v })) : [],
           }))
@@ -252,8 +451,8 @@ export class PublishPanelComponent implements OnDestroy {
     EffectBus.emit('publish:refresh', {})
   }
 
-  /** Tapping a row opens its detail — which is also what runs the gap check,
-   *  so it stays opt-in and per row. */
+  /** Tapping a list row opens its detail — which is also what runs the gap
+   *  check, so it stays opt-in and per row. */
   toggle(row: PublishRow): void {
     EffectBus.emit('publish:expand', { key: row.key })
   }
@@ -293,6 +492,11 @@ export class PublishPanelComponent implements OnDestroy {
   opensAsIcon(row: PublishRow): SafeHtml | null {
     if (!row.opensAs) return null
     return this.views().find(v => v.view === row.opensAs)?.icon ?? null
+  }
+
+  /** Nothing was proved — the row recedes rather than shouting. */
+  isQuiet(row: PublishRow): boolean {
+    return row.state === 'unknown' || row.state === 'cannot-compare' || row.state === 'comparing'
   }
 
   /** A version IS a signature — tapping the chip puts the full sig on the
@@ -359,8 +563,12 @@ export class PublishPanelComponent implements OnDestroy {
       case 'stale-edge': return 'publish.action.recheck'
       case 'pending': return 'publish.action.recheck'
       case 'live': return row.link ? 'publish.action.copy-link' : 'publish.action.recheck'
-      // unknown / cannot-compare: nothing was asserted, so nothing is fixed
-      // from here. Looking again is the only truthful verb.
+      // unknown / cannot-compare: the branch's own door is not answering, but
+      // every door writes the same shared index — so publishing is still a
+      // real offer (the routine falls back through live doors), and it is
+      // what a participant staring at "can't tell" actually wants to do.
+      case 'unknown':
+      case 'cannot-compare': return 'publish.action.publish'
       default: return 'publish.action.recheck'
     }
   }
@@ -398,11 +606,6 @@ export class PublishPanelComponent implements OnDestroy {
       age: row.seenAt ? this.age(row.seenAt) : '',
       count: row.gaps.length,
     }
-  }
-
-  /** Quiet states read as furniture, not as failure. */
-  isQuiet(row: PublishRow): boolean {
-    return row.state === 'unknown' || row.state === 'cannot-compare' || row.state === 'comparing'
   }
 
   gapsShown(row: PublishRow): string[] {
