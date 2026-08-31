@@ -84,6 +84,7 @@ import {
   payloadOfPlan,
   slotAt,
   type DerivedVisualSpec,
+  type DivisionFlow,
   type DivisionSlot,
 } from '../presentation/tiles/visual-division.js'
 
@@ -130,6 +131,11 @@ export async function distributeVisual(opts: {
   readonly wholeSegments: readonly string[]
   readonly parts: readonly string[]
   readonly place?: boolean
+  /** How the holes are arranged. `spiral` (the default) divides a picture;
+   *  the HTML flows divide a page. */
+  readonly flow?: DivisionFlow
+  /** Relative weight per hole. Never a size. */
+  readonly spans?: readonly number[]
 }): Promise<DistributeOutcome> {
   const empty = { ok: false, slots: 0, divided: 0, derived: 0, kept: 0 }
   const wholeSegments = opts.wholeSegments.map(s => String(s ?? '').trim()).filter(Boolean)
@@ -142,7 +148,7 @@ export async function distributeVisual(opts: {
 
   const wholeName = wholeSegments[wholeSegments.length - 1]
   const parentOfWhole = wholeSegments.slice(0, -1)
-  const plan = divisionPlan(parts.length)
+  const plan = divisionPlan(parts.length, opts.flow ?? 'spiral', opts.spans)
 
   // ── the whole: a frame, and a face for the parts to belong to ──
   //

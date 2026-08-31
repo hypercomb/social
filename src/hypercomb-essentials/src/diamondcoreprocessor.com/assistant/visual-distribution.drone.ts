@@ -38,6 +38,7 @@ import { Drone, EffectBus, normalizeCell } from '@hypercomb/core'
 import { readChildrenStrict, type PlacementHistory } from '../history/layer-placement.js'
 import { creationsOf } from './creation.js'
 import { distributeVisual, dressParts } from './visual-distribution.js'
+import type { DivisionFlow } from '../presentation/tiles/visual-division.js'
 
 type DistributeRequest = {
   segments?: readonly string[]
@@ -54,6 +55,12 @@ type DistributeRequest = {
    *  (rule 10's third clause) but nothing was cut up, so declaring a frame
    *  would re-declare the arity of a whole nobody broke apart. */
   divide?: boolean
+  /** `spiral` (default) divides a picture among the parts; `stack`/`row`/
+   *  `grid` divide a PAGE — the whole's container gets a hole per part and
+   *  each part's own page is seated into it. */
+  flow?: DivisionFlow
+  /** Relative weight per hole. Never a size. */
+  spans?: readonly number[]
 }
 
 type LineageLike = { explorerSegments?: () => readonly string[]; domain?: unknown }
@@ -134,6 +141,8 @@ export class VisualDistributionDrone extends Drone {
       wholeSegments,
       parts,
       place: request?.place,
+      flow: request?.flow,
+      spans: request?.spans,
     })
     if (!outcome.ok) {
       console.warn('[visual-distribution] refused:', outcome.reason)

@@ -19,7 +19,7 @@ import {
 } from '@hypercomb/core'
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
-import { composeDivision } from './division-render.js'
+import { composeDivision, hydrateSeatedParts } from './division-render.js'
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
 import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
 import { openExternalLink } from './document-view-links.js'
@@ -708,11 +708,7 @@ export class SiteViewDrone extends Drone {
     // this page instead). Composition never fails: anything it cannot do hands
     // back the authored page untouched, so a part that will not load costs one
     // empty hole rather than the page.
-    const rawHtml = await composeDivision(
-      segments,
-      await blob.text(),
-      segs => this.resolvePageSig(segs),
-    )
+    const rawHtml = await composeDivision(segments, await blob.text())
     if (gen !== this.#gen) return
 
     this.#teardown()
@@ -774,6 +770,11 @@ export class SiteViewDrone extends Drone {
     // overlay uses), restoring native scroll.
     host.setAttribute('data-consumes-wheel', '')
     document.body.appendChild(host)
+
+    // Finish the seating. `DOMParser` leaves a declarative shadow root inert,
+    // and inert means invisible — the part's markup is there and renders
+    // nothing. No-op when nothing was seated.
+    hydrateSeatedParts(parsed.body)
 
     // The page's own CSS goes INSIDE the page's host, rewritten so every rule
     // is confined to it (`body{…}` → `#hc-site-view-host{…}`). A cell page is
