@@ -458,7 +458,7 @@ const iocGet = <T>(key: string): T | undefined => {
  * index resolution) must treat a cold `{}` as unresolved — retry — never
  * as truth. Caching a cold miss was the root of the tile-scramble bug.
  */
-const readOwnTilePropertiesAt = async (
+export const readOwnTilePropertiesAt = async (
   parentSegments: readonly string[],
   cellName: string,
   stats?: { cold?: boolean },

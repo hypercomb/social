@@ -2,8 +2,8 @@
 
 **Status: DESIGN — pinned 2026-08-02 (Jaime). Not built.**
 Companions: `pheromones.md` (marks, bouquets, scoped sniffing),
-`view-library.md` (existing document views), `mirror-paradigm.md`
-(parts as tiles), `known-location-pools.md` (root vocabulary).
+`view-library.md` (existing document views), `website-artifact-paradigm.md`
+(parts as artifacts), `known-location-pools.md` (root vocabulary).
 
 ## One protocol, not one per feature
 
@@ -48,7 +48,15 @@ arranges instead of narrating.
   because the mark isn't there, never because a code branch hid it.
 - The vocabulary wants to be data: `geometry`, `part`, `assigned`,
   `hole` as marks. No per-view code — render and behaviour resolve from
-  the mark (the mirror-paradigm rule applied to views themselves).
+  the mark.
+
+**The arrangement half of this is built.** A division frame
+(`visual:division:plan`, see `website-artifact-paradigm.md`) is the layer this
+document calls an arrangement: a declared arity whose positions derive, holding
+no reference to what fills them. Its slots are NOT the `hole` mark above — a
+slot is a position and exists even when everything is realized; a `hole` is a
+piece that does not exist yet. They compose: an arrangement of arity 7 whose
+slot 3 is occupied by a piece marked `hole`.
 
 ## No unmarked tile, ever
 
