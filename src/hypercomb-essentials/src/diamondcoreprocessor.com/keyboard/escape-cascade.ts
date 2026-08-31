@@ -85,16 +85,24 @@ EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
     return
   }
 
-  // Priority 2e: unwind ONE level inside the tool window the focus is IN — its
-  // settings popover, then whatever it considers its own innermost state.
+  // Priority 2e: unwind ONE level inside the tool window this press is about —
+  // its settings popover, then whatever it considers its own innermost state.
   //
-  // Gated on focus, which is the entire design. Tool windows used to bind their
-  // own Escape listeners; the two that bound them on the WINDOW in capture phase
-  // stopped this cascade dead whenever they were open, so an armed pheromone
-  // painter or a live selection out on the canvas could not be cancelled at all.
-  // Asking "is the focus in a window" makes one press mean one thing: focus on
-  // the canvas falls straight through to the selection clear below, and on to
-  // the InputGate recovery, exactly as if no panel were open.
+  // WHICH window that is, tool-windows.ts decides: the one the focus is in, or
+  // the newest showing one when the focus is in none of them. That second half
+  // is why a window opened by a slash command answers Escape at all — it
+  // leaves the focus on <body>, so a focus-only rule said "no window is
+  // involved" for exactly the windows most likely to be covering the hive, and
+  // the press did nothing whatsoever.
+  //
+  // The focus half is still the design, and still the fix for what came
+  // before: tool windows used to bind their own Escape listeners, and the two
+  // that bound them on the WINDOW in capture phase stopped this cascade dead
+  // whenever they were open, so an armed pheromone painter or a live selection
+  // out on the canvas could not be cancelled at all. One owner, one press, one
+  // level — with no panel showing, this rung answers false and the press falls
+  // straight through to the selection clear and the InputGate recovery below,
+  // exactly as if no panel had ever existed.
   const windows = window.ioc.get<{ dismissFocused(): boolean; closeFocused(): boolean }>(
     '@hypercomb.social/ToolWindows',
   )

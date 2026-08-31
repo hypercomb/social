@@ -15,14 +15,29 @@
 // capture listeners were not just outranking the cascade, they were swallowing a
 // SIBLING's presses.
 //
-// So there is one rule, and it is a question about FOCUS:
+// So there is one rule, and it has two halves:
 //
-//     Escape acts on the window the focus is in. Nothing else.
+//     ESCAPE MEANS "SHOW ME THE HEXAGONS AGAIN".
+//     Focus decides WHICH window it takes away; the newest decides when
+//     focus decides nothing.
 //
-// Focus on the canvas means no window is involved — the press belongs to the
-// cascade's own rungs (cancel the editor, clear the selection, unstick the
-// InputGate), exactly as it did before any panel opened. Focus inside a window
-// means that window unwinds one level, and only that window.
+// Focus inside a window means that window unwinds one level, and only that
+// window — a press inside a panel belongs to that panel, never to a sibling.
+// That half has not changed and is the whole reason this file exists.
+//
+// The second half is what the focus rule alone got wrong. A window opened by
+// a SLASH COMMAND leaves the focus on `<body>` (measured: `activeElement` is
+// BODY right after `/tutorial`), so "the window the focus is in" was null for
+// exactly the windows most likely to be open. You pressed Escape over a panel
+// covering the hive and nothing happened — not the cascade's own rungs
+// either, because there was no editor and no selection to clear. The key did
+// nothing at all, which is the one thing Escape may never do.
+//
+// So when the focus is in NO window, the press acts on the newest showing
+// tool window (window-rule.ts owns that list, in open order). Only once
+// there is no window left does it fall through to the cascade's own rungs —
+// cancel the editor, clear the selection, unstick the InputGate — exactly as
+// it did before any panel opened.
 //
 // Two verbs, innermost first:
 //   dismissFocused() — unwind ONE level: the open settings popover if there is
@@ -43,7 +58,8 @@
 // and IoC-free, and it stays that way — it owns the FACTS (who is showing, who
 // has the focus); this owns the POLICY.
 
-import { focusedWindow } from './window-session'
+import { newestToolWindow } from './window-rule'
+import { focusedWindow, type WindowSession } from './window-session'
 
 /** How the popover half arrives — INVERTED, so this file stays framework-free.
  *
@@ -76,17 +92,22 @@ export interface ToolWindowsApi {
 
 export const TOOL_WINDOWS_IOC_KEY = '@hypercomb.social/ToolWindows'
 
+/** The window this press is about: the one the focus is in, or — when the
+ *  focus is in none of them — the last one opened. */
+const target = (): { id: string; session: WindowSession } | null =>
+  focusedWindow() ?? newestToolWindow()
+
 const api: ToolWindowsApi = {
   dismissFocused(): boolean {
     // Innermost first — a popover belongs to a window, so it backs out before
     // the window does. It is checked without consulting focus because it IS the
     // focused thing whenever it is open (the popover takes focus on open).
     if (popoverDismisser?.() === true) return true
-    return focusedWindow()?.session.dismiss?.() === true
+    return target()?.session.dismiss?.() === true
   },
 
   closeFocused(): boolean {
-    const hit = focusedWindow()
+    const hit = target()
     if (!hit?.session.close) return false
     hit.session.close()
     return true
