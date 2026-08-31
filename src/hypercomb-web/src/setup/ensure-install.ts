@@ -2,22 +2,21 @@
 // Runs BEFORE the import map is set, so that OPFS dependencies are written
 // before the browser freezes the import-map entries.
 //
-// Two-source install: the sentinel is the preferred source (DCP audits
-// content, can push deltas). The bundled `/content/` shipped with the
-// web shell is the fallback — used when DCP is unreachable, and as a
-// reference for stale-cache detection so a new deploy is picked up
-// even when the sentinel hasn't pushed yet.
+// Content arrives ONLY by replication (documentation/install-by-replication.md):
+// one root signature, resolved into the local heap, verified at admission.
+// There is no installer and no second source. The bundled `/content/`
+// package shipped with the shell is an ORIGIN the walker may pull atoms
+// from — never a competing install machine.
 
 import { EffectBus, SignatureStore } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared/core'
 import { seedDarkOnFreshInstall } from '@hypercomb/shared/ui/features-viewer/behavior-enablement'
-import type { SentinelBridge } from './sentinel-bridge'
 
 export type BootStatus =
   | { kind: 'cached' }
   | { kind: 'installing' }
   | { kind: 'installed' }
-  | { kind: 'install-needed'; reason: 'no-sentinel' | 'sentinel-empty' | 'no-storage' | 'no-writable' }
+  | { kind: 'install-needed'; reason: 'no-source' | 'no-storage' | 'no-writable' }
 
 /** Can this browser actually WRITE to OPFS? `getDirectory` alone is not the
  *  answer: iOS Safari 16.4–18.3 has it, but every write in the store goes
@@ -59,7 +58,7 @@ type InstallManifest = {
   source?: 'bundled' | 'sentinel'
 }
 
-export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<void> => {
+export const ensureInstall = async (): Promise<void> => {
   // register the central signature allowlist — scripts in the store skip re-verification
   const sigStore = new SignatureStore()
   register('@hypercomb/SignatureStore', sigStore)
@@ -176,13 +175,6 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
         location.reload()
         return
       }
-      if (sentinel) {
-        try {
-          await resyncFromSentinel(sentinel)
-        } catch (err) {
-          console.warn('[ensure-install] boot resync failed; continuing with cached state', err)
-        }
-      }
       console.log('[ensure-install] booting from cached state')
       restoreSignatureStore(sigStore)
       restoreCachedBeeDeps()
@@ -216,26 +208,11 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
     await purgeStaleOpfsArtifacts(store)
   }
 
-  // Cold boot / cache miss. Only DCP push is allowed to install; no
-  // bundled silent fallback. If a sentinel is already wired (rare —
-  // main.ts passes null here per push-only contract), let it try.
-  // Otherwise surface install-needed so the install-prompt UI can
-  // route the user to DCP or to the explicit Upgrade button.
-  if (sentinel) {
-    console.log('[ensure-install] cold/refresh boot — awaiting sentinel sync')
-    EffectBus.emit('boot:status', { kind: 'installing' } as BootStatus)
-    await resyncFromSentinel(sentinel)
-    const postSyncManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
-    if (!postSyncManifest || postSyncManifest.bees.length === 0) {
-      EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'sentinel-empty' } as BootStatus)
-      return
-    }
-    EffectBus.emit('boot:status', { kind: 'installed' } as BootStatus)
-    return
-  }
-
-  console.log('[ensure-install] no cached install + no sentinel — surfacing install-needed')
-  EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-sentinel' } as BootStatus)
+  // Cold boot / cache miss. There is no second content machine to consult:
+  // content arrives ONLY by replicating a root signature. Surface the state
+  // and let the participant start it explicitly.
+  console.log('[ensure-install] no cached content — surfacing install-needed')
+  EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-source' } as BootStatus)
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -673,174 +650,12 @@ const purgeStaleOpfsArtifacts = async (store: Store): Promise<void> => {
   } catch { /* skip */ }
 }
 
-// -------------------------------------------------
-// resync — the SOLE install/update path
-// -------------------------------------------------
-
-export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void> => {
-  const store = get('@hypercomb.social/Store') as Store | undefined
-  if (!store || !store.opfsAvailable) return
-
-  // Visual cue: bracket the whole pass so the sync-indicator shows while
-  // the sentinel computes the diff, streams files, and we apply them to
-  // OPFS. Every exit path (no result, no-op diff, throw) lands in the
-  // finally so the cue can never get stuck on. Own lane ('resync') so an
-  // overlapping first-run install keeps its counts and the cue stays up
-  // until BOTH lanes are quiet.
-  EffectBus.emit('install:sync', { active: true, source: 'resync' })
-  try {
-    await resyncPass(sentinel, store)
-  } finally {
-    EffectBus.emit('install:sync', { active: false, source: 'resync' })
-  }
-}
-
-const resyncPass = async (sentinel: SentinelBridge, store: Store): Promise<void> => {
-  const currentSyncSig = (localStorage.getItem(SYNC_SIG_KEY) ?? '').trim() || undefined
-
-  // INCREMENTAL RECONCILE: tell the sentinel which sigs we already hold so it
-  // streams ONLY the missing ones ("fill in if any files are missing"), instead
-  // of re-streaming the whole enabled set on every toggle. The enabled* arrays
-  // in the result are still the full set, so stale-GC (removeDisabled) and the
-  // cached manifest stay correct — only the BYTES are deltaed.
-  const have = await collectPresentSigs(store)
-  const result = await sentinel.sync(currentSyncSig, have)
-  if (!result) return
-
-  const { syncSig, enabledBees, enabledDeps, enabledLayers, beeDeps, files } = result
-
-  if (!files.length && currentSyncSig === syncSig) return
-
-  const enabledBeeSet = new Set(enabledBees)
-  const enabledDepSet = new Set(enabledDeps)
-  const enabledLayerSet = new Set(enabledLayers)
-
-  // Bag-aware GC (Phase 3): the sentinel result doesn't carry bag sigs yet,
-  // so preserve whichever bag the previously-cached manifest declared.
-  // When sentinel later pushes its own bag sigs, swap in those instead.
-  const priorManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
-
-  // GC targets both the sign(meaning) pools AND their legacy `__x__`
-  // drain dirs while those exist — a disabled sig lingering in the legacy
-  // dir would otherwise be absorbed back into the pool by the Store's
-  // detached drain. Install cache only; never user data.
-  await removeDisabled(store.bees, enabledBeeSet, '.js', priorManifest?.beesBag)
-  await removeDisabled(store.dependencies, enabledDepSet, '.js', priorManifest?.dependenciesBag)
-  if (store.legacyBees) await removeDisabled(store.legacyBees, enabledBeeSet, '.js', priorManifest?.beesBag)
-  if (store.legacyDependencies) await removeDisabled(store.legacyDependencies, enabledDepSet, '.js', priorManifest?.dependenciesBag)
-
-  // The dependency *bag* is the import-map's source of truth: resolveImportMap
-  // reads the bag's leaf sigs to build the alias→`/opfs/<sign('dependencies')>/<sig>`
-  // map. But resync only maintains the FLAT `<sig>.js` dep files — it writes
-  // enabledDeps and removeDisabled() above just deleted the rest. It never
-  // rebuilds the bag. So a bag carried over from the last bundled install
-  // still points at leaf sigs that no longer exist on disk, and the next
-  // boot's import map resolves aliases to files the SW 404s on — surfacing as
-  // "Failed to fetch dynamically imported module" for every dep. Evict the bag
-  // here so resolveImportMap drops to its flat-scan fallback, which derives the
-  // map straight from the `// @scope/name` first line of each flat file this
-  // pass wrote — always consistent with what's actually on disk.
-  await evictBagDirs(store.dependencies)
-  // Bag dirs stranded in the legacy drain dirs are stale by the same
-  // argument (the pool carries the active install; nothing on the
-  // receiver's read path consults a bee bag at all) — and a bag dir is
-  // the one thing that blocks the Store's gated final removeEntry from
-  // ever retiring the legacy dir. Evict them so the drain can finish.
-  if (store.legacyDependencies) await evictBagDirs(store.legacyDependencies)
-  if (store.legacyBees) await evictBagDirs(store.legacyBees)
-  // Layers live flat at the OPFS root (`<root>/<sig>`) shared with user
-  // commits. We can't blindly remove sigs not in `enabledLayerSet`
-  // here — that would also delete every user-committed layer. GC for the
-  // layer content requires a separate reachability sweep (mark-and-sweep
-  // over history markers + install set). For now, layers grow
-  // monotonically; a future `/sweep` command cleans unreachable sigs.
-  await clearStaleCaches()
-
-  // Land every streamed file through the ONE shared apply path —
-  // sha256 gate, write, cache seed, targeted read-back probe. A refused
-  // (hash-mismatch) or dropped byte simply never enters appliedSigs, and
-  // the receipt verify below holds syncSig so the next resync re-requests
-  // the gap — exactly the accounting that already guarded a dropped byte.
-  const { appliedSigs } = await applyVerifiedFiles(store, files, 'resync')
-
-  // RECEIPT VERIFY — read-back confirm, not bare stream-ok. Synchronizing a
-  // sigbag is a normal update(layer): we only advance to the new HEAD (syncSig)
-  // once we can confirm the hive actually holds every file the current logical
-  // names. A byte dropped mid-stream (or one DCP couldn't resolve) must NOT
-  // advance syncSig — otherwise the next boot trusts a manifest whose bytes are
-  // missing and falls back to the wipe path. Leave syncSig/manifest untouched
-  // on a miss so the next resync re-requests the gap.
-  //
-  // TARGETED read-back: the pre-sync `have` scan (collectPresentSigs) already
-  // walked all 8 dirs including the whole OPFS root; repeating that walk here
-  // just to confirm THIS pass's writes would be a second full-root scan per
-  // resync. Instead, appliedSigs holds exactly the files whose post-write
-  // probe found them on disk (inside applyVerifiedFiles) — union it with the
-  // pre-scan set. The union is sound for the enabled-set check: between scan
-  // and receipt, removeDisabled only ever deletes sigs OUTSIDE the enabled
-  // set and evictBagDirs only deletes bag DIRECTORIES, so an enabled sig
-  // present at pre-scan is still present.
-  const present = new Set(have)
-  for (const sig of appliedSigs) present.add(sig)
-  const missing = [...enabledBees, ...enabledDeps, ...enabledLayers]
-    .filter(sig => !present.has(sig.toLowerCase()))
-  if (missing.length) {
-    console.warn(
-      `[ensure-install] sync receipt FAILED for ${syncSig.slice(0, 12)} — `
-      + `${missing.length} enabled file(s) missing after apply; NOT advancing syncSig `
-      + `(next resync re-requests the gap):`,
-      missing.slice(0, 8),
-    )
-    return
-  }
-
-  const sigStore = get('@hypercomb/SignatureStore') as SignatureStore | undefined
-  if (sigStore) {
-    const allSigs = [...enabledBees, ...enabledDeps, ...enabledLayers]
-    sigStore.trustAll(allSigs)
-    localStorage.setItem(SIG_STORE_KEY, JSON.stringify(sigStore.toJSON()))
-  }
-
-  // The dependency bag was just evicted (see evictBagDirs above), so the
-  // manifest must NOT advertise one — otherwise the next boot's
-  // resolveImportMap would scan for a bag, find none, and that's fine, but
-  // recording a stale bag sig here invites future code to trust it. Null it
-  // out; resolveImportMap rebuilds the map from flat files. The bee bag is
-  // left intact: nothing on the receiver's read path consults it (bees load
-  // by sig, not by alias), so its staleness is inert.
-  const syncManifest = {
-    version: 2,
-    layers: enabledLayers,
-    bees: enabledBees,
-    dependencies: enabledDeps,
-    beeDeps,
-    dependenciesBag: undefined,
-    beesBag: priorManifest?.beesBag,
-    // DCP logical union → DCP is this install's update authority, NOT the shell
-    // bundle. checkForUpdate uses this to suppress phantom bundle-drift updates.
-    source: 'sentinel' as const,
-  }
-  localStorage.setItem(SYNC_SIG_KEY, syncSig)
-  localStorage.setItem(MANIFEST_KEY, JSON.stringify(syncManifest))
-  if (beeDeps) (globalThis as any).__hypercombBeeDeps = beeDeps
-
-  // First successful resync that produced a non-empty install satisfies
-  // the cold-boot consent gate. Adding a domain in DCP fires
-  // toggle-changed, which lands content here and flips the flag so the
-  // post-resync reload boots through the cached fast path.
-  if (enabledBees.length > 0 && localStorage.getItem(INSTALLED_FLAG_KEY) !== 'true') {
-    localStorage.setItem(INSTALLED_FLAG_KEY, 'true')
-  }
-
-  console.log(`[ensure-install] resync complete + receipt OK: ${syncSig.slice(0, 12)} (${enabledBees.length} bees, ${enabledDeps.length} deps, ${enabledLayers.length} layers synchronized)`)
-}
-
 // ─────────────────────────────────────────────────────────────────────
 // applyVerifiedFiles — the ONE apply path for install bytes
 // (dcp-single-door.md: "the host verifies sha256 on every byte it
 // applies, regardless of source"; one shared apply function owns
-// write + verify + receipt). Both install modes — the sentinel resync
-// stream and the bundled /content/ fetch — land their files here:
+// write + verify + receipt). The bundled /content/ fetch lands its
+// files here:
 //
 //   sha256 gate → OPFS write → SW cache seed → targeted read-back probe
 //
@@ -862,7 +677,7 @@ const sha256Hex = async (bytes: ArrayBuffer): Promise<string> => {
 const applyVerifiedFiles = async (
   store: Store,
   files: ApplyFile[],
-  source: 'resync' | 'bundled',
+  source: 'bundled',
 ): Promise<{ appliedSigs: Set<string>; failed: number }> => {
   // All layers — boot bundle, sentinel sync, user commits — share the flat
   // OPFS root (`<root>/<sig>`, `store.hypercombRoot === opfsRoot`); bees and
@@ -920,16 +735,6 @@ const applyVerifiedFiles = async (
 
 // ----- helpers -----
 
-const clearStaleCaches = async (): Promise<void> => {
-  // Clear Service Worker Cache API — old signature entries are stale after resync
-  if ('caches' in self) {
-    const deleted = await caches.delete('hypercomb-modules-v2')
-    if (deleted) console.log('[ensure-install] cleared SW module cache')
-  }
-  // Prune signature store — old trusted sigs are irrelevant after resync
-  localStorage.removeItem(SIG_STORE_KEY)
-}
-
 const tryParseManifest = (json: string): InstallManifest | null => {
   try {
     const parsed = JSON.parse(json)
@@ -972,59 +777,6 @@ const seedCacheEntry = async (path: string, bytes: ArrayBuffer, contentType: str
   }
 }
 
-/**
- * Remove files from a directory whose signature is NOT in the enabled set.
- * Handles files stored as `{sig}{ext}` or bare `{sig}`.
- *
- * Bag-aware (Phase 3): directories whose name is a 64-hex sig are treated as
- * sigbags. The currently active bag (passed as `enabledBagSig`) is preserved;
- * any other bag-shaped directory is recursively removed. When `enabledBagSig`
- * is undefined, ALL bag-shaped directories are left untouched — this keeps
- * older bundled-install bags alive across sentinel resyncs that don't yet
- * carry bag info in their payload.
- */
-const removeDisabled = async (
-  dir: FileSystemDirectoryHandle,
-  enabledSigs: Set<string>,
-  ext: string,
-  enabledBagSig?: string,
-): Promise<void> => {
-  for await (const [name, handle] of dir.entries()) {
-    if (handle.kind === 'directory') {
-      // Bag directory: only act when an explicit active-bag sig is known.
-      // Without it, we have no authority to remove — leave bags alone.
-      if (enabledBagSig === undefined) continue
-      if (/^[a-f0-9]{64}$/i.test(name) && name !== enabledBagSig) {
-        try { await dir.removeEntry(name, { recursive: true }) } catch { /* skip */ }
-      }
-      continue
-    }
-    const sig = ext ? name.replace(new RegExp(`\\${ext}$`, 'i'), '') : name
-    if (/^[a-f0-9]{64}$/i.test(sig) && !enabledSigs.has(sig)) {
-      try { await dir.removeEntry(name) } catch { /* skip */ }
-    }
-  }
-}
-
-/**
- * Remove EVERY sigbag directory from a pool. Unlike installFromBundled's
- * evictOldBagDirs (which keeps the active bag because the bundled install
- * writes a fresh, consistent one), resync writes no bag at all — it only
- * maintains the flat `<sig>.js` files. Any bag left behind is therefore
- * stale by definition, so resync drops all of them.
- */
-const evictBagDirs = async (dir: FileSystemDirectoryHandle): Promise<void> => {
-  const stale: string[] = []
-  for await (const [name, handle] of dir.entries()) {
-    if (handle.kind !== 'directory') continue
-    if (!/^[a-f0-9]{64}$/i.test(name)) continue
-    stale.push(name)
-  }
-  for (const name of stale) {
-    try { await dir.removeEntry(name, { recursive: true }) } catch { /* skip */ }
-  }
-}
-
 // ----- signature store helpers -----
 
 const restoreCachedBeeDeps = (): void => {
@@ -1044,45 +796,6 @@ const restoreSignatureStore = (sigStore: SignatureStore): void => {
   } catch {
     // non-fatal
   }
-}
-
-/** Sigs already present in OPFS (flat bee/dep/layer files), so the sentinel can
- *  stream only the delta on resync. Bees/deps are `<sig>.js` in their
- *  sign(meaning) pools; layers are bare `<sig>` at the flat OPFS root
- *  (user-committed layers included — harmless: they're sigs the hive
- *  genuinely holds, and the sentinel only checks the enabled set against
- *  this). Every legacy drain source is UNIONED in while it still exists —
- *  a byte mid-drain is a byte we hold. Bag subdirectories are skipped —
- *  resyncPass writes the flat files, so flat presence is what the delta is
- *  computed against (directories are also what keeps this from ever
- *  counting lineage bags at the root). */
-const collectPresentSigs = async (store: Store): Promise<string[]> => {
-  const sigs = new Set<string>()
-  const addFrom = async (dir: FileSystemDirectoryHandle | undefined, ext: string): Promise<void> => {
-    if (!dir) return
-    try {
-      for await (const [name, handle] of dir.entries()) {
-        if (handle.kind !== 'file') continue
-        const sig = ext ? name.replace(new RegExp(`\\${ext}$`, 'i'), '') : name
-        if (/^[a-f0-9]{64}$/i.test(sig)) sigs.add(sig.toLowerCase())
-      }
-    } catch { /* dir unreadable — treat as empty (sentinel streams more, never fewer) */ }
-  }
-  await addFrom(store.bees, '.js')
-  await addFrom(store.dependencies, '.js')
-  await addFrom(store.legacyBees, '.js')
-  await addFrom(store.legacyDependencies, '.js')
-  // Layer/content bytes live at the flat OPFS root; the legacy content
-  // sources (`__layers__`, `__hive__`, `hypercomb.io/`) are scanned too
-  // while they drain. All are flat sig files — the 64-hex filter ignores
-  // history markers (NNNN) and scope subdirs. The resource sigs the root
-  // also holds are a harmless superset (the sentinel only checks its
-  // enabled set against this — more, never fewer).
-  await addFrom(store.hypercombRoot, '')
-  await addFrom(store.layers, '')
-  await addFrom(store.legacyHive, '')
-  await addFrom(store.legacyHypercombIo, '')
-  return [...sigs]
 }
 
 /** All file names across the given directories as one Set — a single

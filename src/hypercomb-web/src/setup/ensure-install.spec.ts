@@ -38,13 +38,13 @@ describe('ensureInstall install-state validation', () => {
   it('clears an installed claim when its required manifest is absent', async () => {
     localStorage.setItem('hypercomb.installed', 'true')
 
-    await ensureInstall(null)
+    await ensureInstall()
 
     expect(store.initialize).toHaveBeenCalledOnce()
     expect(localStorage.getItem('hypercomb.installed')).toBeNull()
     expect(emit).toHaveBeenCalledWith('boot:status', {
       kind: 'install-needed',
-      reason: 'no-sentinel',
+      reason: 'no-source',
     })
   })
 
@@ -55,7 +55,7 @@ describe('ensureInstall install-state validation', () => {
     store.opfsAvailable = false
     localStorage.setItem('hypercomb.installed', 'true')
 
-    await ensureInstall(null)
+    await ensureInstall()
 
     expect(localStorage.getItem('hypercomb.installed')).toBeNull()
     expect(emit).toHaveBeenCalledWith('boot:status', {
@@ -68,7 +68,7 @@ describe('ensureInstall install-state validation', () => {
     vi.stubGlobal('FileSystemFileHandle', class FileSystemFileHandle {})
     localStorage.setItem('hypercomb.installed', 'true')
 
-    await ensureInstall(null)
+    await ensureInstall()
 
     expect(localStorage.getItem('hypercomb.installed')).toBeNull()
     expect(emit).toHaveBeenCalledWith('boot:status', {

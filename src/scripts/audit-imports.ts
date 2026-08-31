@@ -13,7 +13,6 @@ type Layer =
   | 'shared'
   | 'web'
   | 'dev'
-  | 'dcp'
   | 'legacy'
   | 'byte-test'
 
@@ -39,7 +38,6 @@ const LAYER_MAP: Record<string, Layer> = {
   'hypercomb-shared': 'shared',
   'hypercomb-web': 'web',
   'hypercomb-dev': 'dev',
-  'diamond-core-processor': 'dcp',
   'hypercomb-legacy': 'legacy',
   'hypercomb-byte-test': 'byte-test',
 }
@@ -93,13 +91,6 @@ const rules: Record<Layer, LayerRule> = {
   dev: {
     allowed: () => true,
     description: 'hypercomb-dev may import everything (sandbox)',
-  },
-  dcp: {
-    allowed: (s) =>
-      !s.startsWith('@hypercomb/essentials') &&
-      !s.startsWith('@hypercomb/shared'),
-    description:
-      'diamond-core-processor must NOT import @hypercomb/essentials or @hypercomb/shared',
   },
   legacy: {
     allowed: (s) => !s.startsWith('@hypercomb/'),
@@ -214,7 +205,6 @@ function printReport(
     'shared',
     'web',
     'dev',
-    'dcp',
     'legacy',
     'byte-test',
   ]

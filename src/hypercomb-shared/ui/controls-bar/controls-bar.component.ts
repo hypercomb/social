@@ -106,7 +106,6 @@ interface TourCourse {
 
 const CONTROL_REGISTRY: readonly ControlItem[] = [
   { id: 'back',         label: 'controls.back',         action: 'goBack',             visibleWhen: 'always' },
-  { id: 'dcp',          label: 'controls.dcp',          action: 'openDcp',            visibleWhen: 'always' },
   // Portals sits DIRECTLY after the installer: both are ways OUT of the current
   // page — DCP into other domains, Portals into the collections index — so they
   // read as one pair at the head of the rail, before the viewport controls.
@@ -176,7 +175,7 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
 const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   // The magnifiers default OFF: the wheel owns zoom, and their verbs live in
   // the fit flyout now. Edit mode re-enables them for trackpad-less setups.
-  'back': true, 'dcp': true, 'fit': true, 'zoom-out': false, 'zoom-in': false, 'pin': true, 'fullscreen': true,
+  'back': true, 'fit': true, 'zoom-out': false, 'zoom-in': false, 'pin': true, 'fullscreen': true,
   'text-only': false,
   'pools': true,
   'chat': false,
@@ -741,7 +740,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Action dispatch map — routes control actions to existing methods. */
   readonly #actions: Record<string, (e?: MouseEvent) => void> = {
     goBack: () => this.goBack(),
-    openDcp: () => this.openDcp(),
     fitOrCenter: (e) => this.fitOrCenter(e!),
     zoomOut: () => this.zoomOut(),
     zoomIn: () => this.zoomIn(),
@@ -799,7 +797,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly #rawIconSymbol = (ctrl: ControlItem): string => {
     switch (ctrl.id) {
       case 'back':         return 'arrow_back'
-      case 'dcp':          return 'dashboard_customize'
       case 'fit':          return 'center_focus_strong'
       // zoom_in/zoom_out is the lens-style magnifying glass (circle +
       // handle). Visually off-centre by default because the handle
@@ -2377,10 +2374,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   // ── view actions ──────────────────────────────────────
-
-  readonly openDcp = (): void => {
-    window.dispatchEvent(new CustomEvent('portal:open', { detail: { target: 'dcp' } }))
-  }
 
   readonly centerView = (): void => {
     const host = this.pixiHost

@@ -67,7 +67,7 @@ interface NavLike { go: (segments: readonly string[]) => void }
 
 interface AdoptLike {
   adoptResolvedBranch: (branch: { layerSig: string; at: string[]; domain?: string; label: string }) =>
-    Promise<'committed' | 'exists' | 'rewound' | 'unavailable' | 'code-routed' | 'declined' | 'uninspectable'>
+    Promise<'committed' | 'exists' | 'rewound' | 'unavailable' | 'declined' | 'uninspectable'>
   syncResolvedBranch: (branch: { layerSig: string; at: string[]; domain?: string; label: string }) =>
     Promise<'committed' | 'exists' | 'unavailable' | 'rewound'>
 }
@@ -226,13 +226,6 @@ export class HiveVisitDrone extends Drone {
 
     if (res === 'committed' || res === 'exists') {
       this.#recordFollow(p.name, { pubkey: p.bundle.pubkey, hosts: p.bundle.hosts, lineageKey: p.key })
-      this.#active = null
-      return
-    }
-    if (res === 'code-routed') {
-      // The headless DCP install owns the outcome now; the preview stays
-      // down (the features panel is the visible landing). Follow recording
-      // waits for a landed fold — phase 2.
       this.#active = null
       return
     }

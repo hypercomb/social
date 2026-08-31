@@ -1,4 +1,4 @@
-// hypercomb-essentials/scripts/copy-to-dcp.ts
+// hypercomb-essentials/scripts/copy-content.ts
 // Copies built module output to all local targets so dev servers can feed OPFS.
 // Signature beeline: files are named by their signature, so if a file exists in
 // the target with the same name, it IS the correct content. No hashing needed.
@@ -14,7 +14,6 @@
 // flat root.
 //
 // Targets:
-//   diamond-core-processor/public/   — DCP browser app (local-backup tool)
 //   hypercomb-web/public/content/    — local dev server (feeds OPFS via localInstall)
 //   hypercomb-relay/content/         — operator's HTTP host content dir
 //                                      (jwize.com serves layer/resource/dependency
@@ -37,9 +36,8 @@ const DIST_ROOT = resolve(__dirname, '..', 'dist')
 // not in the current build) would wipe user/adopted bytes that the build never
 // produced. Additive only; reclaiming space is a separate, deliberate GC phase
 // (mark-sweep over active roots), never a build-time side effect.
-// The dev OPFS feeds (web/dcp public) stay mirrored — they're regenerable.
+// The dev OPFS feed (web public) stays mirrored — it's regenerable.
 const TARGETS = [
-  { dir: resolve(__dirname, '..', '..', 'diamond-core-processor', 'public'), additive: false },
   { dir: resolve(__dirname, '..', '..', 'hypercomb-web', 'public', 'content'), additive: false },
   { dir: resolve(__dirname, '..', '..', 'hypercomb-relay', 'content'), additive: true },
 ]
@@ -241,7 +239,7 @@ const syncTarget = (
   // unchanged re-deploy writes nothing.
   //
   // ORDER MATTERS — files above, manifest here, stale removal LAST. A target
-  // is often being SERVED while this mirror runs (ng serve on DCP public, the
+  // is often being SERVED while this mirror runs (ng serve on web public, the
   // relay's content dir), and a reader resolves manifest → sig files with no
   // lock. Written in this order, every instant is consistent: the new files
   // land while the old manifest still points only at old files, the new
@@ -285,12 +283,12 @@ const syncTarget = (
 
 const main = () => {
   if (!existsSync(DIST_ROOT)) {
-    console.error('[copy-to-dcp] dist/ not found — run build:module first')
+    console.error('[copy-content] dist/ not found — run build:module first')
     process.exit(1)
   }
 
   if (!existsSync(join(DIST_ROOT, MANIFEST_FILE))) {
-    console.error('[copy-to-dcp] dist/manifest.json not found — run build:module first')
+    console.error('[copy-content] dist/manifest.json not found — run build:module first')
     process.exit(1)
   }
 
@@ -319,7 +317,7 @@ const main = () => {
   const chained = chainManifest(localManifest, authority, new Date())
   const manifestJson = JSON.stringify(chained.manifest, null, 2) + '\n'
   if (chained.generation) {
-    console.log(`[copy-to-dcp] manifest version: v${chained.generation} '${chained.label}'${chained.minted ? '' : ' (unchanged re-deploy)'}`)
+    console.log(`[copy-content] manifest version: v${chained.generation} '${chained.label}'${chained.minted ? '' : ' (unchanged re-deploy)'}`)
   }
 
   // What the shipped manifest advertises — the retention set every target must
@@ -331,7 +329,7 @@ const main = () => {
   for (const { dir, additive } of TARGETS) {
     const peers = sourceOrder.filter(d => d !== dir && existsSync(d))
     const { copied, skipped, removed, drained, healed } = syncTarget(dir, additive, manifestJson, keep, peers)
-    console.log(`[copy-to-dcp] ${dir}${additive ? ' (additive/persistent)' : ''}`)
+    console.log(`[copy-content] ${dir}${additive ? ' (additive/persistent)' : ''}`)
     console.log(`  ${copied} copied, ${skipped} unchanged, ${removed} removed${healed ? `, ${healed} backfilled for older versions` : ''}${drained ? `, ${drained} drained from legacy dirs` : ''}`)
   }
 }

@@ -1155,50 +1155,26 @@ export class SwarmAdoptDrone extends Drone {
   public adoptResolvedBranch = async (
     branch: { layerSig: string; at: string[]; domain?: string; label: string },
     opts?: { silent?: boolean },
-  ): Promise<'committed' | 'exists' | 'rewound' | 'unavailable' | 'code-routed' | 'declined' | 'uninspectable'> => {
+  ): Promise<'committed' | 'exists' | 'rewound' | 'unavailable' | 'declined' | 'uninspectable'> => {
     // The explicit adopt gesture is the participant RE-SUBSCRIBING — clear
     // any revocation on this path before the fold (delete's counterpart).
     clearAdoptTombstone([...branch.at, branch.label])
     const codeSigs = await this.#branchCodeSigs(branch.layerSig, branch.domain)
     if (codeSigs === null) {
-      // Couldn't resolve the branch to inspect it → open the installer VISIBLY
-      // with the branch we already hold. Never inline-fold content we couldn't
-      // verify, and don't falsely claim "brings code" for something we can't see.
-      window.dispatchEvent(new CustomEvent('portal:open', {
-        detail: { target: 'dcp', branchSig: branch.layerSig, at: branch.at, domain: branch.domain, label: branch.label },
-      }))
+      // Couldn't resolve the branch to inspect it. Never inline-fold content we
+      // couldn't verify, and don't falsely claim "brings code" for something we
+      // can't see — say so and fold nothing.
+      EffectBus.emit('features:outcome', { cell: branch.label, kind: '', ok: false, message: `"${branch.label}" could not be resolved for inspection — nothing was folded` })
       return 'uninspectable'
     }
     if (codeSigs.length > 0) {
-      // Declares CODE → ask consent, then install via a HEADLESS (invisible) DCP,
-      // pre-ticking the code nodes. The visible installer never takes over the
-      // screen (it only appears if the headless install stalls — its fallback).
-      const ok = await requestConfirm({
-        title: 'adopt.code.title',
-        message: 'adopt.code.message',
-        messageParams: { label: branch.label },
-        confirmLabel: 'adopt.code.allow',
-        cancelLabel: 'adopt.code.deny',
-      })
-      if (!ok) {
-        // The participant said no — settle the panel's busy switch NOW (no
-        // silent 8s leash) with the honest landing, not a wedged toggle.
-        EffectBus.emit('features:outcome', { cell: branch.label, kind: '', ok: false, message: `code adopt of "${branch.label}" declined — nothing was folded` })
-        return 'declined'
-      }
-      window.dispatchEvent(new CustomEvent('portal:open', {
-        detail: {
-          target: 'dcp', headless: true,
-          branchSig: branch.layerSig, at: branch.at, domain: branch.domain, label: branch.label,
-          stage: codeSigs,
-        },
-      }))
-      // The headless install proceeds off-screen; the features panel is the
-      // visible outcome of the adopt gesture (rows show their gate state as
-      // the install lands). segments = the TARGET, so the refreshed group
-      // reads the tile where it will actually land.
-      EffectBus.emit('tile:action', { action: 'features', label: branch.label, segments: [...branch.at, branch.label] })
-      return 'code-routed'
+      // Declares CODE. There is no installer to route this to: code arrives by
+      // replicating a root signature (documentation/install-by-replication.md),
+      // and no install channel is stamped yet, so there is nothing to replicate
+      // against. Refuse honestly and fold NOTHING rather than half-adopting the
+      // content half of a branch whose code cannot follow it.
+      EffectBus.emit('features:outcome', { cell: branch.label, kind: '', ok: false, message: `"${branch.label}" brings code — code adoption is unavailable until its install channel is published; nothing was folded` })
+      return 'unavailable'
     }
     // Content-only → pull the publisher's LATEST and fold it in place. ADOPT
     // MEANS GET THE LATEST: commit with `sync` semantics so a re-adopt re-homes
@@ -1226,6 +1202,12 @@ export class SwarmAdoptDrone extends Drone {
       // Seed the auto-sync receipt: this publisher sig IS the current
       // generation here, so re-broadcasts of the same sig never re-fold.
       this.#recordSyncReceipt([...branch.at, branch.label], branch.layerSig)
+      // …and the recoverable FOLDED receipt (`hc:last-folded`), the branch-sig
+      // list swarm-observation reads to mark a peer's point "already taken".
+      // The adopt gesture itself owns this now: it used to be written only by
+      // the installer's config fold, so when the installer went the marker
+      // would have gone stale for every adopt that isn't one.
+      this.#recordFoldedBranch(branch.layerSig, branch.label, [...branch.at])
       // Bulk additive child-adopt (#additiveAdoptHeld) suppresses the per-tile
       // Beehaviors landing — folding N missing children must not open N panels.
       // The single-tile adopt still lands on the panel (its whole point).
@@ -2195,6 +2177,19 @@ export class SwarmAdoptDrone extends Drone {
         : []
     } catch { return [] }
   }
+  /** Add ONE landed branch to the recoverable folded receipt, idempotently
+   *  (a re-adopt of the same sig refreshes the entry rather than duplicating
+   *  it). Kept sorted by sig so the list's own sha256 stays stable. */
+  #recordFoldedBranch = (sig: string, name: string, at: string[]): void => {
+    const clean = String(sig ?? '').trim().toLowerCase()
+    if (!SIG_RE.test(clean)) return
+    try {
+      const next = this.#loadFolded().filter(e => e.sig !== clean)
+      next.push({ sig: clean, name: String(name ?? '').trim(), at })
+      this.#saveFolded(next.sort((a, b) => a.sig.localeCompare(b.sig)))
+    } catch { /* quota / malformed — the receipt is recoverable, never load-bearing */ }
+  }
+
   #saveFolded = (entries: FoldedEntry[]): void => {
     try { localStorage.setItem(FOLDED_KEY, JSON.stringify(entries)) } catch { /* no localStorage — diff degrades */ }
   }

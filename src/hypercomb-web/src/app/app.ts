@@ -43,9 +43,8 @@ export class App implements AfterViewInit {
   // "invite others" watermark, mirroring clipboard-mode.
   readonly swarmEmpty = signal(false)
   protected readonly bootStatus = signal<BootStatus | null>(null)
-  protected readonly dcpPortalOpen = signal(false)
   protected readonly installNeeded = computed(() =>
-    this.bootStatus()?.kind === 'install-needed' && !this.dcpPortalOpen()
+    this.bootStatus()?.kind === 'install-needed'
   )
   /** Persistent storage (OPFS) is missing — private window, or a Safari
    *  before 16.4. Installing is impossible, so the welcome card explains
@@ -242,11 +241,6 @@ export class App implements AfterViewInit {
       this.viewMode.set('hexagons')
       EffectBus.emit('nav:to-hive', { reason: 'adopt-complete' })
     })
-
-    window.addEventListener('portal:open', (e) => {
-      if ((e as CustomEvent).detail?.target === 'dcp') this.dcpPortalOpen.set(true)
-    })
-    window.addEventListener('dcp:embed-closed', () => this.dcpPortalOpen.set(false))
 
     // "New features" indicator → just apply. We're in alpha; the eggs
     // (negative-cache + render guards) protect the canvas, so a deployed

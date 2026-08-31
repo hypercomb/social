@@ -201,7 +201,32 @@ DCP the *transport* dies. DCP the *ledger* is promoted:
    — best-effort with an unmissable SENTINEL STAMP OWED box + paste-ready
    retry when the bridge is closed (`--require` to hard-fail instead). The
    first real stamp happens on the next deploy with the hive open.*
-7. **Retire `LayerInstaller` and the DCP transport role.** Legacy fallbacks
+7. **Retire `LayerInstaller` and the DCP transport role.**
+   *Status 2026-08-30 — DONE for the web shell and the DCP app itself.
+   THERE IS NO INSTALL CONCEPT LEFT IN THE SHELL. Deleted: the
+   `diamond-core-processor/` app, its workspace entry, `build:dcp` /
+   `start:dcp`, and `.github/workflows/deploy-dcp-application.yml` (the
+   already-deployed diamondcoreprocessor.com host is deliberately left
+   standing and now has no CI attached);
+   `hypercomb-web/src/setup/sentinel-bridge.ts`; `resyncFromSentinel` +
+   `resyncPass` and their four helpers in `ensure-install.ts`;
+   `ensureInstall` takes no sentinel; main.ts's lazy sentinel, `__getSentinel`,
+   `resyncAndEnforce`, `reloadIfDrifted` and the whole `actions:available`
+   accept chain; PortalOverlayComponent's installer machine (809 → ~190 lines
+   — it is now the generic framed overlay the games and sibling hives use);
+   the controls-bar DCP entry and the upgrade indicator's "review in
+   installer" door. `copy-to-dcp.ts` → `copy-content.ts`, web + relay targets
+   only. BootStatus reasons `no-sentinel`/`sentinel-empty` → `no-source`.
+   CODE ADOPT IS THE ACCEPTED GAP: `adoptResolvedBranch` now refuses a
+   code-bearing branch outright (returns 'unavailable', folds nothing) instead
+   of routing it to a headless installer. It returns when steps 3/4 land and
+   an install channel is stamped. The `hc:last-folded` receipt that
+   swarm-observation reads was re-homed onto the adopt gesture
+   (`#recordFoldedBranch`) — it used to be written only by the installer's
+   config fold. Still standing: the now-unreachable `#foldEnabledConfig`
+   subsystem in swarm-adopt, the DCP half of `/folder-sync`, meadowverse's
+   `ensure-install.ts` + `layer-installer.ts`, and the prose references under
+   `hypercomb-client/app/frontend/documentation/`.* Legacy fallbacks
    (`__layers__/`, `.json` names, legacy typed URLs) stay in the drain code
    and die with the drains — they must NOT migrate into the protocol.
    *Status 2026-08-30: `LayerInstaller` is gone from `hypercomb-shared` —

@@ -89,6 +89,69 @@ const assertRatchet = (actual: string[], allowed: string[], rule: string): void 
 
 describe('doctrine ratchets', () => {
 
+  // ─── bridge scripts: a child sig is a LAYER sig, not a resource ──────
+  //
+  // `scripts/` is scanned on its own here (NOT added to SCAN_DIRS — the other
+  // ratchets are about shipped source). Two patterns, one bug, verified live
+  // 2026-08-30 against the authoring hive:
+  //
+  //   1. Decoding a child's NAME with `get-resource`. A parent's `children`
+  //      slot holds LAYER sigs; `get-resource` on one answers "resource not
+  //      found" for every entry, so the reader reports an EMPTY parent for a
+  //      healthy hive — silently, and positively.
+  //   2. Growing a parent with `update(..., { children: [...] })`. That is a
+  //      SET op; the committer REPLACES the slot. It is only ever as safe as
+  //      the read that fed it, and (1) made every such read a lie.
+  //
+  // Both are retired by scripts/lib/hive-children.mjs: existence per CHILD
+  // PATH, creation via `op:'add'` (an APPEND). Anything matching below is a
+  // new copy of the bug.
+
+  const scriptFiles = (): string[] => {
+    const out: string[] = []
+    const walkScripts = (dir: string): void => {
+      let entries
+      try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          if (!SKIP_DIRS.has(entry.name) && !entry.name.startsWith('.')) walkScripts(join(dir, entry.name))
+        } else if (/\.(ts|cjs|mjs|js)$/.test(entry.name) && !entry.name.endsWith('.d.ts')) {
+          out.push(join(dir, entry.name))
+        }
+      }
+    }
+    walkScripts(join(ROOT, 'scripts'))
+    return out
+  }
+
+  const scriptsMatching = (pattern: RegExp): string[] => {
+    const hits = new Set<string>()
+    for (const file of scriptFiles()) {
+      const code = stripComments(readFileSync(file, 'utf8'))
+      if (pattern.test(code)) hits.add(relative(ROOT, file).replace(/\\/g, '/'))
+    }
+    return [...hits].sort()
+  }
+
+  it('no bridge script decodes a CHILD signature with get-resource', () => {
+    // A `children` entry is a LAYER sig. Resolve it with `layer-by-sig` (one
+    // hop) or `inflate` (whole subtree) — never `get-resource`, which cannot
+    // answer for a layer and whose failure is indistinguishable from an empty
+    // parent. Twelve scripts had this, several feeding the empty result into
+    // an `update` carrying `children`, which the committer applies by
+    // REPLACING the slot. All now read through scripts/lib/hive-children.mjs,
+    // which throws rather than under-report.
+    //
+    // This matches only a LOOP OVER a children array that calls get-resource
+    // inside it — `get-resource` on a properties or decoration sig is correct
+    // and common, and is not matched.
+    const actual = scriptsMatching(
+      /(?:of|in)\s*\(?[^\n]{0,60}children[^\n]{0,40}\)?\s*\)?\s*\{?[\s\S]{0,160}?op:\s*['"`]get-resource['"`]/,
+    )
+    assertRatchet(actual, [], 'child sig decoded as a resource')
+  })
+
+
   it('synchronize is dispatched only by the processor (plus frozen boot-kick debt)', () => {
     // hypercomb.act()'s finally block is the sole sanctioned dispatcher.
     // (The three shell boot kicks were routed through act('') — debt paid.)
@@ -122,7 +185,7 @@ describe('doctrine ratchets', () => {
     assertRatchet(actual, [
       'hypercomb-shared/core/initializers/location-parser.ts',
       'hypercomb-shared/core/store.ts',
-      'hypercomb-essentials/scripts/copy-to-dcp.ts',
+      'hypercomb-essentials/scripts/copy-content.ts',
       'hypercomb-essentials/src/diamondcoreprocessor.com/assistant/structure-drop.worker.ts',
       'hypercomb-essentials/src/diamondcoreprocessor.com/clipboard/clipboard.worker.ts',
       'hypercomb-essentials/src/diamondcoreprocessor.com/commands/website-archive.queen.ts',

@@ -46,12 +46,9 @@ const COMPLETE_VISIBLE_MS = 12_000
               (input)="restorePointName.set($any($event.target).value)"
               (keydown.enter)="adopt()" (keydown.escape)="collapse()" />
           </label>
-          <!-- Adopt installs SILENTLY: snapshot under the shown name, apply,
-               reload back to this exact spot. No screen to visit. The
-               installer review is the OVERRIDE, not a gate on the way. -->
+          <!-- Adopt applies SILENTLY: snapshot under the shown name, apply,
+               reload back to this exact spot. No screen to visit. -->
           <button class="upgrade-act adopt" type="button" (click)="adopt()">{{ 'upgrade.adopt' | t }}</button>
-          <button class="upgrade-act review" type="button" (click)="reviewInInstaller()"
-            [title]="'upgrade.installer-hint' | t">{{ 'upgrade.installer' | t }}</button>
           <button class="upgrade-act save" type="button" (click)="save()">{{ 'upgrade.save' | t }}</button>
           <button class="upgrade-act discard" type="button" (click)="discard()">{{ 'upgrade.discard' | t }}</button>
         }
@@ -170,23 +167,6 @@ export class UpgradeIndicatorComponent implements OnDestroy {
         packageSig: this.#packageSig || null,
         newBees: this.#newBees,
         previous: this.#previous,
-      },
-    }))
-  }
-
-  /** The other door: open the installer ON this package, changed items
-   *  marked for review — the portal's `upgrade:` handoff. Nothing installs
-   *  from here; the pill stays available for when they come back. */
-  readonly reviewInInstaller = (): void => {
-    this.collapse()
-    window.dispatchEvent(new CustomEvent('portal:open', {
-      detail: {
-        target: 'dcp',
-        upgrade: {
-          packageSig: this.#packageSig || null,
-          newBees: this.#newBees,
-          previous: this.#previous,
-        },
       },
     }))
   }

@@ -13,7 +13,7 @@
 // This used to live only inside deploy-azure.ps1's merge phase, which meant
 // revisions existed ONLY on the Azure path — the jwize/relay/DCP targets got
 // a wholesale-replaced single-package manifest and DCP's revision list never
-// had a chain to show. Now copy-to-dcp.ts chains every target through this
+// had a chain to show. Now copy-content.ts chains every target through this
 // module; deploy-azure.ps1 keeps its own equivalent merge for the Azure
 // remote (its numbering is per-remote by construction).
 //
