@@ -14,7 +14,7 @@ almost entirely *moves and rewrites of things that are already decoupled* —
 not an untangling.
 
 This is a living document. Chip an item, check its box, remove its ratchet
-line, run (or queue) its mirror pass.
+line.
 
 ---
 
@@ -409,8 +409,6 @@ owns everything acquisition:
 
 ## Bookkeeping (every chip, every time)
 
-- The chip's mirror pass runs in the same pass, or its entry lands in the
-  mirror queue — run or queued, never neither.
 - The chip's ratchet line (IoC census, barrel entry, structural allowlist) is
   removed in the same commit, so the ratchet clicks tight behind it.
 - New pool meanings minted along the way carry a colon and register through

@@ -1,4 +1,4 @@
-# behaviors-theme — keep the behaviors mirror's artwork in sync
+# behaviors-theme — keep the behaviors deck's artwork in sync
 
 The `behaviors` hive is visually themed (2026-08-02): every cell wears a
 generated card — dark slate ground, faint hex lattice, one Material glyph in a
@@ -38,12 +38,10 @@ default is left on that same pitch.
 
 ## Sync model
 
-Theming is part of the **mirror doctrine** (`src/documentation/mirror-paradigm.md`):
-when a behavior ships, the same pass that adds its tile + pheromones + note also
-mints its card. Two ways to stay in sync:
+When a behavior gets a tile in the behaviors deck, it wants a card. Two ways to
+stay in sync:
 
-1. **Per-behavior (preferred, same pass as the code):** add the tile to the
-   mirror as usual, add a glyph for it in `GLYPHS` in `gen-behavior-tiles.mjs`
+1. **Per-behavior:** add a glyph for it in `GLYPHS` in `gen-behavior-tiles.mjs`
    (falls back to the collection glyph if omitted), then run the sweep.
 2. **Sweep (catch-up):** `node scripts/behaviors-theme/sweep.cjs` walks the
    live tree, renders every card, and pushes only cells not already wearing

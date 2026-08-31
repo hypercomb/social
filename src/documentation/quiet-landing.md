@@ -111,9 +111,6 @@ anything.
 | `hypercomb-shared/ui/landing-badge/` | the badge |
 | `hypercomb-shared/ui/shell-surfaces/shell-surfaces.barrel.ts` | the mount |
 
-Mirrored in the hive at `behaviors/assistant/quiet-landing`
-(`scripts/mirror-quiet-landing.ts`).
-
 ## Proving it
 
 `scripts/drive-quiet-landing.cjs` drives its own Playwright profile (a scratch

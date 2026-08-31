@@ -626,10 +626,6 @@ gate. Signatures make the pruning safe to add later without format changes.
   harness + manifest per hosted domain, keyed by the same head signature the
   resolver would install.
 
-**Mirror obligation**: the read-only deployment is a creation — when built it
-owes its hive mirror (tiles for the parts, collection, pheromones, notes) in
-the same pass, or a mirror-queue entry naming what is owed.
-
 ## Resolved and remaining questions
 
 1. **Resolved — no OPFS**: visitor Core installs a session-memory filesystem

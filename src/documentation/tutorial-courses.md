@@ -58,8 +58,7 @@ Four properties make this work:
    lesson that throws is logged and stepped over — one broken lesson never takes
    the course down.
 2. **Marked.** `pheromones` come from the DECLARED vocabulary in
-   `tutorial-lesson.ts`; the registry refuses a lesson that invents a word. The
-   hive mirror paints exactly these marks, so tile and code cannot drift.
+   `tutorial-lesson.ts`; the registry refuses a lesson that invents a word.
 3. **Grouped by signature.** Every course is a group —
    `sign('group:tutorial:course:<level>')` — carried by everything the course
    mints. See `group-signatures.md`.
@@ -153,32 +152,3 @@ and a lesson cannot demonstrate something that would not really happen.
 2. **Nothing is ever published.** Going public is always the participant's own
    deliberate act. A tutorial that shared your hive to teach you sharing would
    be the exact opposite of the lesson.
-
-## The mirror
-
-`scripts/mirror-tutorials.ts` builds the hive mirror: `tutorials` at the root,
-one collection per course, one tile per lesson, notes carrying what each teaches
-and how to run it alone, pheromones taken verbatim from the lesson
-declarations, and the course group signature on every tile. It also spreads the
-implementation files as `part` cells under `behaviors/guidance/tutorial` (the
-1:1 rule — see `mirror-paradigm.md`).
-
-Run it against a live renderer with the bridge open:
-
-```bash
-npx tsx scripts/mirror-tutorials.ts
-```
-
-**When a lesson ships, extend the mirror in the same pass** — add its tile under
-the right course, paint its marks, note what it teaches. And when a lesson is
-RETIRED, take its tile out in the same pass; the roster rots in both directions.
-
-⚠ The script's roster is **hand-transcribed**. It is a bridge CLI and never
-imports the tutorial sources, so nothing in it is checked against
-`TutorialLessonRegistry` or the declared pheromone vocabulary at build time —
-which is precisely how six lessons went unmirrored and five notes went stale in
-under three weeks. Read `lessons/*.lessons.ts` beside the `COURSES` array
-whenever you touch either. The lasting fix is to stop transcribing: have the
-renderer hand back `tutorialLessons.all()` over the bridge and drive structure,
-notes and marks from that, so the mirror can only ever be one bridge run behind
-the code instead of one hand edit behind it.

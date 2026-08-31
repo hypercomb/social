@@ -25,9 +25,6 @@ and interruptible.
 | Orchestrator — the bee that watches the bees | `essentials/…/assistant/orchestrator.drone.ts` |
 | Orchestrator sweep — the repo half | `scripts/bridge/orchestrator-sweep.cjs` |
 
-Mirrored in the hive at `behaviors/assistant/agents` and
-`behaviors/assistant/orchestrator`, one tile per part.
-
 ## Reading a bee
 
 Three things are legible before you click anything:
@@ -210,8 +207,6 @@ knowing before you conclude it has stopped.
 
 - **logs** — stray `*.log` / `nohup.out` a run left behind (only files git can
   see; an ignored build dir is nobody's problem)
-- **mirrors** — a behaviour registered in code with no tile under `behaviors/`
-- **drift** — a mirror note citing `source: <path>` that no longer exists
 
 Findings print as JSON for a parked session and ride the `agent-progress` op
 onto the orchestrator's own bee (prefixed `sweep: `, which is what keeps the

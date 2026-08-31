@@ -83,8 +83,7 @@ authors, the members of an object *are* a pool's contents or the tiles carrying
 a mark. `:` walks the tag pool. `#` walks the marker vocabulary. A collection's
 members are the tiles marked for it. None of that needs code: an object can be
 declared as *"my members are the tiles marked X"*, and painting that mark on a
-new tile grows the object. This is the mirror doctrine applied to the command
-line — the hive is the vocabulary.
+new tile grows the object. The hive is the vocabulary.
 
 **Invocation — no, a pool cannot answer this.** A pool gives you a *set*, not an
 action; `sign('themes')` can tell you Ember exists but not what applying it

@@ -118,10 +118,6 @@ to the card. Data-driven from marks, never a per-feature branch in the shell.
 | **5 — Rhythm** | scroll snap along the lane axis, focus follows centre | PLAN |
 | **6 — Declared reads** | registry hook for per-view 1-lane renderers | PLAN |
 
-Each phase lands with its **mirror pass in the hive** in the same PR (tiles for
-the parts, a collection, pheromones from the declared vocabulary, notes) — per
-the mirror doctrine.
-
 ## 5. Phase 1 — what was built
 
 | File | Change |

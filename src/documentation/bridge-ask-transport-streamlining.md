@@ -159,5 +159,3 @@ silently dropped (`run-bridge.cjs:106-113`). Adding renderer→client fanout is
 
 1–3 are the ones that pay immediately. 5 is what makes the tier feel live.
 
-*If any of this gets built, it owes a mirror pass (tiles + collection +
-pheromones + notes) or a queue entry naming it.*

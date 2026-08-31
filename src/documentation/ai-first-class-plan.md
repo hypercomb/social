@@ -233,5 +233,4 @@ ladders, easiest first:
 app.html, no hardcoded hex, pool meanings need a colon — `llm:providers`),
 essentials `side-effects.ts` is generated (`npm run prepare`), Angular
 per-component style budget freezes deploys silently, build order
-core→essentials, one renderer slot, never wipe OPFS, and **every phase owes
-its hive mirror in the same pass or a mirror-queue entry**.
+core→essentials, one renderer slot, and never wipe OPFS.

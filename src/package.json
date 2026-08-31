@@ -68,8 +68,6 @@
     "intel:build-hive": "tsx scripts/intel-build-hive.ts",
     "revolucion:preview": "tsx scripts/intel-build-revolucion-site.ts --preview site-preview && npx -y http-server site-preview -p 4336 -c-1 -o /revolucion.html",
     "revolucion:deploy": "tsx scripts/intel-build-revolucion-site.ts",
-    "mirror:queue": "tsx scripts/mirror-queue.ts",
-    "mirror:queue:run": "tsx scripts/mirror-queue.ts run",
     "shot": "node scripts/shot.cjs"
   },
   "dependencies": {

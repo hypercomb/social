@@ -113,8 +113,6 @@ should be marked as one.
 
 ## See also
 
-- `mirror-paradigm.md` — why a creation is only half built until it exists in
-  the hive
 - `known-location-pools.md` — the closed root vocabulary this addressing assumes
 - `documentation/protocol/conformance.md` — the contract the `web`/`windows`
   layers both answer to

@@ -86,16 +86,6 @@ hinge it at the rim and open it a little.
 | `scripts/lounge3d/store-items.ts` | catalogue, earn rules, `EMBERS_JS` ledger runtime |
 | `scripts/lounge3d/lounge-3d.ts` | the five props, their camera presets, `lounge3d:leg` |
 | `scripts/intel-build-revolucion-site.ts` | the store page, the nav purse chip, the inventory-gated Decorate list, the earning hooks |
-| `scripts/mirror-mercado.ts` | the hive mirror — tiles, notes, `mercado`/`part` marks |
 
 The ledger runtime is injected **before** the page body, not as a tail script:
 the lounge's Decorate list reads `window.RevEmbers` while it parses.
-
-## The mirror
-
-`scripts/mirror-mercado.ts` builds the storefront in the hive under
-`revolucion/store`: one tile per good plus an `embers` tile for the ledger,
-notes on each, and pheromones from a declared vocabulary — `mercado` keywords
-the collection and every good in it, `part` marks the implementation cells.
-Merge mode: children union, notes and marks only for cells the run creates, so
-re-running adds nothing.
