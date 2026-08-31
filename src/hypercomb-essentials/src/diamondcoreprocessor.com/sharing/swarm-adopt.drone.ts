@@ -21,9 +21,8 @@
 // no tile merging from the Beehaviors window — behaviors are toggles on
 // what the adopted tile already carries. `sync` (re-pull a publisher's
 // current version of a tile you hold) has NO user button — it remains a
-// programmatic action a future auto-sync can ride. It does NOT auto-fold
-// the installer's projected branches (RegistrySnapshot) — nothing enters
-// your tree without a participant action.
+// programmatic action a future auto-sync can ride. Nothing enters your tree
+// without a participant action.
 
 import { Drone, EffectBus, hypercomb, requestConfirm, revisionName, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import {
@@ -62,7 +61,6 @@ const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const COMMITTER_KEY = '@diamondcoreprocessor.com/LayerCommitter'
-const REGISTRY_SNAPSHOT_KEY = '@hypercomb.social/RegistrySnapshot'
 const SNAPSHOT_QUEEN_KEY = '@diamondcoreprocessor.com/SnapshotQueenBee'
 // Recoverable receipt of branches this hive has folded in — the baseline the
 // pending-diff (portal counts) and the un-fold (remove) path read from.
@@ -142,22 +140,9 @@ interface CommitterLike {
   ) => Promise<void>
 }
 
-/** The DCP installer's registry projection (control plane → data plane),
- *  cached in shared's RegistrySnapshotStore and re-emitted on EffectBus
- *  'registry:snapshot'. We read only the fields the fold needs. */
-interface RegistryBranchLike {
-  domain?: string
-  name?: string
-  branchSig?: string
-  at?: string[]
-  enabled?: boolean
-  kind?: 'package' | 'content'
-}
-interface RegistrySnapshotLike { branches?: RegistryBranchLike[] }
-interface RegistrySnapshotStoreLike { snapshot?: RegistrySnapshotLike | null }
-
 /** A branch this hive has folded in — the recoverable receipt persisted at
- *  FOLDED_KEY. Drives the portal's pending-diff counts and lets a disable
+ *  FOLDED_KEY. Read by swarm-observation to mark a peer's point already
+ *  taken, and lets a disable
  *  un-fold the right tile. Removal is recoverable: the installer keeps the
  *  branch record (re-enable re-folds) and history keeps the prior marker +
  *  the content-addressed bytes, so nothing is ever lost. */
@@ -222,11 +207,10 @@ export class SwarmAdoptDrone extends Drone {
   public override description =
     'Adopts a peer tile by localizing its branch (ContentBroker) and folding it into the hive layer via the same update({children}) cascade as paste, on explicit user click ONLY — no snapshot bridge, no automatic installer fold.'
 
-  protected override listens: string[] = ['tile:action', 'registry:snapshot', 'features:download', 'swarm:peers-changed', 'swarm:tile-visited', 'swarm:wand']
-  protected override emits: string[] = ['adopt:started', 'fs:changed', 'fold:receipt', 'tile:saved', 'tile:action', 'features:download:done', 'activity:log', 'features:outcome', 'toast:show', 'swarm:visit-folded']
+  protected override listens: string[] = ['tile:action', 'features:download', 'swarm:peers-changed', 'swarm:tile-visited', 'swarm:wand']
+  protected override emits: string[] = ['adopt:started', 'fs:changed', 'tile:saved', 'tile:action', 'features:download:done', 'activity:log', 'features:outcome', 'toast:show', 'swarm:visit-folded']
 
   // Latest installer registry projection — cached for the Done-gated fold.
-  #lastSnapshot: RegistrySnapshotLike | null = null
 
   constructor() {
     super()
@@ -395,30 +379,6 @@ export class SwarmAdoptDrone extends Drone {
       // off until the participant opts in via the `features` icon.
       void this.#syncPeerTile(label, undefined, { explicit: true })
     })
-
-    // ── DCP installer round-trip → hive config fold (on ACCEPT) ────────
-    // The participant adopts/enables inside the DCP installer; their intent
-    // streams over as `registry:snapshot` while they toggle. NOTHING is
-    // folded until an EXPLICIT ACCEPT — portal-overlay dispatches
-    // `actions:available` ONLY from apply(), which is reached by the
-    // installer's own `dcp:confirm` or a headless install settling. Every
-    // EXIT — the chrome's Done button (it only leaves), the backdrop, Escape,
-    // a touch-drag — fires `dcp:embed-closed` instead and is DISCARDED here:
-    // a change must never enter your hive — and start running — before you
-    // authorize it.
-    //
-    // On accept we fold the installer's enabled CONTENT config into the hive
-    // sigbag via the SAME #commitBranch / update({children}) cascade a manual
-    // adopt uses — the one way into your hive, the symmetric counterpart to
-    // the hive→DCP content push. A discarded diff isn't lost: DCP keeps the
-    // config and the installer re-surfaces it next open. Idempotent, so a
-    // stray re-fire is a safe no-op (existing children → 'exists').
-    this.onEffect<RegistrySnapshotLike>('registry:snapshot', (snap) => {
-      this.#lastSnapshot = snap
-      console.info('[swarm-adopt] registry:snapshot received —', (snap?.branches?.length ?? 0), 'branch(es)')
-    })
-    // Fold ONLY on the explicit accept signal, NEVER on a passive close.
-    window.addEventListener('actions:available', this.#onDcpDone)
 
     // ── features:download — pull a feature's bytes onto this machine NOW ──
     // Backs the features panel's bulk "download" action. A peer-offered /
@@ -1952,56 +1912,6 @@ export class SwarmAdoptDrone extends Drone {
     }
   }
 
-  // ── DCP→hive config fold (accept-gated: actions:available) ────────
-  #onDcpDone = (ev?: Event): void => {
-    console.info('[swarm-adopt] fold trigger:', ev?.type ?? 'manual')
-    const detail = (ev as CustomEvent<{ restorePointName?: string; transactionId?: string }> | undefined)?.detail
-    void this.#foldEnabledConfig(String(detail?.transactionId ?? ''), String(detail?.restorePointName ?? ''))
-  }
-
-  #folding = false
-  #foldQueued = false
-  #foldTransactionId = ''
-  #queuedFoldTransactionId = ''
-  // One auto-checkpoint per accept-burst (not per coalesced sub-run) — reset
-  // when the burst ends so the next accept takes a fresh restore point.
-  #checkpointedThisFold = false
-  /** The name the accept carried, if the participant typed one in the
-   *  installer. Read once per burst — the burst's single checkpoint belongs
-   *  to the accept that opened it. */
-  #foldRestorePointName = ''
-  #foldEnabledConfig = async (transactionId = '', restorePointName = ''): Promise<void> => {
-    // COALESCE re-entry, never drop it: sequential headless installs (the
-    // portal-overlay pending-open queue) fire `actions:available` back-to-back,
-    // and a trigger landing while a fold is mid-flight carries NEWLY-accepted
-    // config — skipping it would silently leave that install unfolded. A
-    // single trailing re-run reads the latest snapshot, so N triggers coalesce.
-    if (this.#folding) {
-      this.#foldQueued = true
-      if (transactionId) this.#queuedFoldTransactionId = transactionId
-      return
-    }
-    this.#folding = true
-    this.#checkpointedThisFold = false
-    this.#foldRestorePointName = restorePointName.trim()
-    this.#foldTransactionId = transactionId
-    try {
-      do {
-        this.#foldQueued = false
-        await this.#foldEnabledConfigOnce()
-        if (this.#foldQueued && this.#queuedFoldTransactionId) {
-          this.#foldTransactionId = this.#queuedFoldTransactionId
-          this.#queuedFoldTransactionId = ''
-        }
-      } while (this.#foldQueued)
-    } finally {
-      this.#folding = false
-      this.#foldRestorePointName = ''
-      this.#foldTransactionId = ''
-      this.#queuedFoldTransactionId = ''
-    }
-  }
-
   /**
    * Name the marker an adopt just minted at the parent location — the line
    * item Revision History shows for this adoption. The name is deterministic
@@ -2040,128 +1950,6 @@ export class SwarmAdoptDrone extends Drone {
     } catch (err) {
       console.warn('[swarm-adopt] adopt landed but its revision label could not be written', err)
     }
-  }
-
-  /**
-   * Auto-checkpoint BEFORE an incoming content fold changes the hive — the
-   * same safety /restore takes before it rewinds. A fold appends markers at
-   * many locations, so undo (per-location) is a poor way back; a named restore
-   * point makes the way back one gesture. Best-effort: a seal that can't
-   * complete (a cold tile) must NEVER block the fold the participant already
-   * accepted. Reuses the proven /snapshot path (SnapshotQueenBee.invoke), the
-   * same call restore.queen makes. Code/package updates are excluded from the
-   * seal, so this only fires for real tile changes — a package-only accept
-   * rolls back through the installer's own revision history instead.
-   *
-   * This is the ONLY hive checkpoint on the accept path. The portal chrome
-   * used to take a second one first and refuse the accept when it failed;
-   * one snapshot, best-effort, taken by the code that knows what is about to
-   * change, is the whole of it now.
-   */
-  #checkpointBeforeFold = async (sigs: readonly string[]): Promise<void> => {
-    try {
-      const queen = this.#ioc()?.get?.(SNAPSHOT_QUEEN_KEY) as { invoke?: (a: string) => Promise<void> } | undefined
-      if (!queen?.invoke) return
-      EffectBus.emit('activity:log', { message: 'saving a restore point before installing…', icon: '●' })
-      // The participant's own word wins when the accept carried one (they
-      // typed it in the installer, and one typed name covers both sides).
-      // Otherwise the naming service mints it — two deterministic words from
-      // the set of branch sigs this burst installs (sorted, so the same
-      // install reads as the same name on every device), then what is about
-      // to happen.
-      const locale = (this.#ioc()?.get?.(I18N_IOC_KEY) as I18nProvider | undefined)?.locale
-      const n = sigs.length
-      await queen.invoke(this.#foldRestorePointName || revisionName({
-        packageSig: [...sigs].sort().join('+'),
-        label: `before installing ${n} change${n === 1 ? '' : 's'}`,
-        locale,
-      }))
-    } catch (err) {
-      console.warn('[swarm-adopt] pre-fold checkpoint skipped', err)
-    }
-  }
-
-  #foldEnabledConfigOnce = async (): Promise<void> => {
-    // Prefer the persisted snapshot store (survives reloads); fall back to
-    // the last live snapshot seen this session.
-    const store = this.#ioc()?.get?.(REGISTRY_SNAPSHOT_KEY) as RegistrySnapshotStoreLike | undefined
-    const snap = store?.snapshot ?? this.#lastSnapshot
-    const branches: RegistryBranchLike[] = (snap && Array.isArray(snap.branches)) ? snap.branches : []
-
-    // DESIRED = the installer's ENABLED CONTENT branches (its current intent).
-    // Packages are functionality (refs only, never tiles); disabled = off.
-    const desired = branches.filter((b): b is RegistryBranchLike & { branchSig: string } =>
-      !!b && b.enabled !== false
-      && (b.kind ?? 'content') === 'content'
-      && typeof b.branchSig === 'string' && SIG_RE.test(b.branchSig.toLowerCase()))
-
-    // FOLDED = the recoverable receipt of what this hive last folded in.
-    const folded = this.#loadFolded()
-    const desiredSigs = new Set(desired.map(b => b.branchSig.toLowerCase()))
-    const foldedSigs = new Set(folded.map(f => f.sig))
-
-    // ADDS = desired, not yet folded.  REMOVES = folded, no longer desired.
-    const adds = desired.filter(b => !foldedSigs.has(b.branchSig.toLowerCase()))
-    const removes = folded.filter(f => !desiredSigs.has(f.sig))
-
-    console.info(`[swarm-adopt] fold: desired ${desired.length}, folded ${folded.length} → +${adds.length} −${removes.length}`)
-    if (!adds.length && !removes.length) {
-      // A caller may have computed its pending count from the immediately
-      // preceding registry projection. A coalesced/duplicate accept can make
-      // that diff empty by the time we read it; still acknowledge completion
-      // so the shell does not sit on an hourglass until its safety timeout.
-      const transactionId = this.#foldTransactionId
-      queueMicrotask(() =>
-        EffectBus.emit('fold:receipt', {
-          committed: 0, removed: 0, unavailable: 0, transactionId,
-        }))
-      return
-    }
-
-    // A real diff — the hive is about to change at potentially many locations.
-    // Take a restore point FIRST (once per accept-burst), before any mutation,
-    // so "go back to before this install" is one gesture. Best-effort; never
-    // blocks the fold on a snapshot failure.
-    if (!this.#checkpointedThisFold) {
-      this.#checkpointedThisFold = true
-      await this.#checkpointBeforeFold([
-        ...adds.map(b => b.branchSig.toLowerCase()),
-        ...removes.map(f => f.sig),
-      ])
-    }
-
-    // Next receipt begins as the still-desired folded entries.
-    const nextFolded: FoldedEntry[] = folded.filter(f => desiredSigs.has(f.sig))
-    let committed = 0, removed = 0, unavailable = 0
-
-    // REMOVES first — un-fold the tile from the hive membership. RECOVERABLE:
-    // the installer keeps the branch record (re-enable re-folds) and history
-    // keeps the prior marker + content-addressed bytes, so nothing is lost.
-    for (const f of removes) {
-      const ok = await this.#unfoldBranch(f.name, f.at)
-      if (ok) removed++
-      else nextFolded.push(f)   // couldn't remove → keep it in the receipt
-    }
-
-    // ADDS — fold the newly-enabled content in (layersOnly; resources stream).
-    for (const b of adds) {
-      const at = Array.isArray(b.at) ? b.at.map(s => String(s ?? '').trim()).filter(Boolean) : []
-      const res = await this.#commitBranch(b.branchSig.toLowerCase(), at, b.domain ? String(b.domain) : undefined)
-      if (res === 'committed' || res === 'exists') {
-        committed++
-        nextFolded.push({ sig: b.branchSig.toLowerCase(), name: String(b.name ?? '').trim(), at })
-      } else {
-        unavailable++   // bytes unresolved — stays a pending add for next time
-      }
-    }
-
-    // Persist the new recoverable receipt (sorted by sig — a stable list whose
-    // sha256 is the hive's installed signature the installer can verify).
-    this.#saveFolded([...nextFolded].sort((a, b) => a.sig.localeCompare(b.sig)))
-    console.info(`[swarm-adopt] DCP config fold — +${committed} −${removed} (${unavailable} unavailable)`)
-    EffectBus.emit('fold:receipt', {
-      committed, removed, unavailable, transactionId: this.#foldTransactionId,
-    })
   }
 
   // ── recoverable fold receipt (persisted) ──────────────────────────

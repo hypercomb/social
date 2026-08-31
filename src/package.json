@@ -113,6 +113,7 @@
     "fast-check": "^4.3.0",
     "jasmine-core": "~4.0.0",
     "js-logger": "^1.6.1",
+    "jsdom": "^27.1.0",
     "karma": "~6.4.0",
     "karma-chrome-launcher": "~3.1.0",
     "karma-coverage": "~2.1.0",
@@ -123,6 +124,7 @@
     "rimraf": "^6.0.1",
     "ts-morph": "^26.0.0",
     "tsx": "^4.21.0",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "vitest": "^4.0.8"
   }
 }

@@ -47,8 +47,6 @@ const CONTENT_BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
 const README_FILE = 'README.txt'
 const BACKUP_REPORT = 'BACKUP-REPORT.txt'
 const DEVICE_INVENTORY = 'INVENTORY.txt'
-const DCP_DIR = 'dcp'
-const DCP_MANIFEST = 'manifest.json'
 const COMPLETE_RE = /^COMPLETE-([A-F0-9]{12})\.hypercomb$/
 /** Files between manifest checkpoints. The manifest IS the resume cursor. */
 const CHECKPOINT_FILES = 200
@@ -79,8 +77,6 @@ export interface FolderSyncState {
   scanned?: number
   copiedBytes?: number
   totalBytes?: number
-  dcpFiles?: number
-  dcpBytes?: number
   categories?: Record<string, CategoryStamp>
   resolvedLayers?: number
   resolvedResources?: number
@@ -185,25 +181,6 @@ interface CompletionSeal {
   deviceId: string
   manifestSha256: string
   completedAt: number
-}
-
-interface SentinelBackupBridge {
-  exportBackup?: (
-    onFile: (file: { path: string; sha256: string; bytes: ArrayBuffer }) => Promise<void>,
-    onProgress?: (progress: { phase: string; current: number; total: number }) => void,
-  ) => Promise<{ files: number; bytes: number } | null>
-  importBackupFile?: (
-    file: { path: string; sha256: string; bytes: ArrayBuffer },
-  ) => Promise<boolean>
-}
-
-interface DcpBackupManifest {
-  kind: 'hypercomb-dcp-backup'
-  version: 1
-  exportedAt: number
-  files: number
-  bytes: number
-  entries: Record<string, { size: number; sha256: string }>
 }
 
 interface ContentBrokerLike {
@@ -687,38 +664,12 @@ export class FolderSyncService {
 
     const backup = await this.#resolveBackupRoot(selected)
     if (!backup) throw new Error('The selected folder is not a Hypercomb backup.')
-    // A DCP snapshot is an OPTIONAL component of a backup. A browser without
-    // the installer writes a complete participant tree and no dcp/ directory;
-    // requiring one made every such backup permanently unimportable, and made
-    // import impossible in a private window, where DCP can never be present.
-    const dcpSnapshot = await this.#verifiedDcpSnapshot(backup)
-    if (dcpSnapshot === null) {
-      throw new Error('This backup contains a DCP snapshot, but it is not sealed, complete, and verified.')
-    }
+    // A backup carries the participant tree and nothing else. The optional
+    // `dcp/` half an installer used to write is no longer produced or read;
+    // an older backup that still carries one is imported by its participant
+    // tree exactly as before, and the stale half is simply left alone.
     const sources = await this.#deviceSnapshots(backup, selected)
     if (sources.length === 0) throw new Error('The selected folder contains no readable device snapshots.')
-
-    if (dcpSnapshot !== 'absent') {
-      const getSentinel = (globalThis as any).__getSentinel as
-        | (() => Promise<SentinelBackupBridge | null>)
-        | undefined
-      const existingBridge = (globalThis as any).__sentinelBridge as SentinelBackupBridge | undefined
-      const restoreBridge = existingBridge?.importBackupFile ? existingBridge : await getSentinel?.()
-      // The participant tree below is still importable without DCP; only the
-      // profile half of this backup is skipped, and it is reported as such.
-      if (restoreBridge?.importBackupFile) {
-        for (const [path, stamp] of Object.entries(dcpSnapshot.manifest.entries)) {
-          const bytes = await this.#readPath(dcpSnapshot.opfs, path)
-          if (!bytes || !(await restoreBridge.importBackupFile({
-            path,
-            sha256: stamp.sha256,
-            bytes,
-          }))) {
-            throw new Error(`DCP restore failed for "${path}". No profile files were imported.`)
-          }
-        }
-      }
-    }
 
     const opfs = await navigator.storage.getDirectory()
     const result: FolderImportResult = {
@@ -916,21 +867,6 @@ export class FolderSyncService {
         : emptyClosure()
 
       await this.#writeRootManifest(backup)
-      if (mode === 'hard-copy') {
-        const dcpSnapshot = await this.#exportDcpBackup(backup, agentId)
-        if (dcpSnapshot === null) {
-          hardCopy.resolverAvailable = false
-          hardCopy.missing++
-        } else if (dcpSnapshot !== 'absent') {
-          this.#report('syncing', {
-            folder: selected.name,
-            mode,
-            phase: 'DCP packages and resources copied and verified',
-            dcpFiles: dcpSnapshot.files,
-            dcpBytes: dcpSnapshot.bytes,
-          })
-        }
-      }
       const device = deviceEarly
       const prior = await readJson<DeviceManifest>(device, DEVICE_MANIFEST)
       const manifest: DeviceManifest = prior?.kind === 'hypercomb-folder-backup-device'
@@ -1115,15 +1051,6 @@ export class FolderSyncService {
       const passSucceeded = unrepresentable.length === 0
         && (mode === 'local'
           || (hardCopy.resolverAvailable && hardCopy.missing === 0 && hardCopy.rootsFailed === 0))
-      let dcpManifest: DcpBackupManifest | null = null
-      if (mode === 'hard-copy') {
-        try {
-          dcpManifest = await readJson<DcpBackupManifest>(
-            await backup.getDirectoryHandle(DCP_DIR, { create: false }),
-            DCP_MANIFEST,
-          )
-        } catch { /* the incomplete state below explains the absent DCP copy */ }
-      }
       this.#report(passSucceeded ? 'backed-up' : 'incomplete', {
         folder: selected.name,
         mode: manifest.mode,
@@ -1135,9 +1062,7 @@ export class FolderSyncService {
         copied,
         scanned,
         copiedBytes,
-        totalBytes: manifest.totalBytes + (dcpManifest?.bytes ?? 0),
-        dcpFiles: dcpManifest?.files ?? 0,
-        dcpBytes: dcpManifest?.bytes ?? 0,
+        totalBytes: manifest.totalBytes,
         categories: manifest.categories,
         resolvedLayers: hardCopy.layers,
         resolvedResources: hardCopy.resources,
@@ -1694,13 +1619,10 @@ export class FolderSyncService {
       'folder, recursively. The real bytes are under:',
       '',
       '  devices/<device-id>/opfs/',
-      '  dcp/opfs/',
       '',
       'Hypercomb uses content signatures as filenames, so many resources look like',
       'long hexadecimal names. They are real local files, not internet shortcuts.',
-      'The dcp/ snapshot is streamed from DCP itself and verified separately. It is',
-      'present only when this browser has DCP attached; a browser without it writes',
-      'a complete participant backup and no dcp/ directory.',
+      'A backup carries the participant tree only.',
       '',
       'HOW TO VERIFY IT',
       `Open ${BACKUP_REPORT} for the total file count, byte count, category`,
@@ -1726,7 +1648,7 @@ export class FolderSyncService {
       'RESTORE',
       'Use /folder-sync import and choose this directory or its parent.',
       'Import accepts only a complete, cryptographically sealed hard-copy export.',
-      'A dcp/ snapshot, when present, is verified and restored first; when this',
+      'The participant tree is verified before it is restored; when this',
       'backup has none, the participant tree is imported on its own.',
       'Existing differing local files are never overwritten automatically.',
       '',
@@ -1749,7 +1671,6 @@ export class FolderSyncService {
       `Files: ${manifest.fileCount}`,
       `Physical bytes: ${manifest.totalBytes} (${formatBytes(manifest.totalBytes)})`,
       'This device inventory covers participant/profile OPFS only.',
-      `DCP packages and behaviors are inventoried separately in ../../${DCP_DIR}/${DCP_MANIFEST}.`,
       `History markers seen: ${hardCopy.markers}`,
       `Closure roots checked: ${hardCopy.roots}`,
       `Roots that produced no layer (subtree unmeasured): ${hardCopy.rootsFailed}`,
@@ -1832,15 +1753,6 @@ export class FolderSyncService {
     manifests.sort((a, b) => b.updatedAt - a.updatedAt)
     const aggregateFiles = manifests.reduce((sum, manifest) => sum + (manifest.fileCount ?? 0), 0)
     const aggregateBytes = manifests.reduce((sum, manifest) => sum + (manifest.totalBytes ?? 0), 0)
-    // Never `create: true` here. An empty dcp/ minted by the report writer
-    // reads at import time as "a DCP snapshot that fails verification".
-    let dcp: DcpBackupManifest | null = null
-    try {
-      dcp = await readJson<DcpBackupManifest>(
-        await backup.getDirectoryHandle(DCP_DIR, { create: false }),
-        DCP_MANIFEST,
-      )
-    } catch { /* participant-only backup: no DCP half */ }
     const lines = [
       'HYPERCOMB BACKUP REPORT',
       '',
@@ -1849,10 +1761,8 @@ export class FolderSyncService {
       `Device snapshots: ${manifests.length}`,
       `Snapshot files: ${aggregateFiles}`,
       `Snapshot bytes: ${aggregateBytes} (${formatBytes(aggregateBytes)})`,
-      `DCP files: ${dcp?.files ?? 0}`,
-      `DCP bytes: ${dcp?.bytes ?? 0} (${formatBytes(dcp?.bytes ?? 0)})`,
-      `Total portable files: ${aggregateFiles + (dcp?.files ?? 0)}`,
-      `Total portable bytes: ${aggregateBytes + (dcp?.bytes ?? 0)} (${formatBytes(aggregateBytes + (dcp?.bytes ?? 0))})`,
+      `Total portable files: ${aggregateFiles}`,
+      `Total portable bytes: ${aggregateBytes} (${formatBytes(aggregateBytes)})`,
       '',
       'Each device has its own snapshot so a shared disk, NAS, or synchronized',
       'folder never lets two computers overwrite one another.',
@@ -1933,128 +1843,6 @@ export class FolderSyncService {
       `COMPLETE-${manifestSha256.slice(0, 12).toUpperCase()}.hypercomb`,
       JSON.stringify(seal, null, 2),
     )
-  }
-
-  /**
-   * `'absent'` — no DCP is attached to this browser, so there is no profile
-   * half to copy. That is a complete participant backup, not a failure.
-   * `null` — DCP IS present but its export was broken or empty, which must
-   * make the pass incomplete.
-   */
-  readonly #exportDcpBackup = async (
-    backup: FileSystemDirectoryHandle,
-    agentId: string,
-  ): Promise<{ files: number; bytes: number } | 'absent' | null> => {
-    const getSentinel = (globalThis as any).__getSentinel as
-      | (() => Promise<SentinelBackupBridge | null>)
-      | undefined
-    const existing = (globalThis as any).__sentinelBridge as SentinelBackupBridge | undefined
-    const bridge = existing?.exportBackup ? existing : await getSentinel?.()
-    if (!bridge?.exportBackup) return 'absent'
-
-    const dcp = await backup.getDirectoryHandle(DCP_DIR, { create: true })
-    const destination = await dcp.getDirectoryHandle('opfs', { create: true })
-    const entries: Record<string, { size: number; sha256: string }> = {}
-    let writtenFiles = 0
-    let writtenBytes = 0
-    const result = await bridge.exportBackup(async file => {
-      const parts = file.path.split('/')
-      const name = parts.pop()
-      if (!name || !validSegment(name) || !parts.every(validSegment)
-          || !SIG_RE.test(file.sha256)) throw new Error('DCP returned an unsafe backup entry')
-      if (await SignatureService.sign(file.bytes) !== file.sha256) {
-        throw new Error(`DCP backup hash mismatch for "${file.path}"`)
-      }
-      const target = await directoryAt(destination, parts, true)
-      await writeFile(target, name, new Uint8Array(file.bytes))
-      const readBack = await (await (
-        await target.getFileHandle(name, { create: false })
-      ).getFile()).arrayBuffer()
-      if (await SignatureService.sign(readBack) !== file.sha256) {
-        throw new Error(`DCP backup read-back failed for "${file.path}"`)
-      }
-      entries[file.path] = { size: file.bytes.byteLength, sha256: file.sha256 }
-      writtenFiles++
-      writtenBytes += file.bytes.byteLength
-      this.#reportLatestPath(
-        agentId,
-        `${backup.name}\\${DCP_DIR}\\opfs\\${file.path.replaceAll('/', '\\')}`,
-      )
-    }, progress => {
-      EffectBus.emit('agent:progress', {
-        id: agentId,
-        activity: `${progress.phase}: ${progress.current} DCP files`,
-      })
-    })
-    // A connected DCP always has at least its registry/module state. An empty
-    // stream is a broken bridge, not a valid portable backup.
-    if (!result || result.files < 1 || result.bytes < 1
-        || result.files !== writtenFiles || result.bytes !== writtenBytes) return null
-
-    const manifest: DcpBackupManifest = {
-      kind: 'hypercomb-dcp-backup',
-      version: 1,
-      exportedAt: Date.now(),
-      files: writtenFiles,
-      bytes: writtenBytes,
-      entries,
-    }
-    const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest, null, 2))
-    await writeFile(dcp, DCP_MANIFEST, manifestBytes)
-    const hash = await SignatureService.sign(manifestBytes.buffer as ArrayBuffer)
-    await writeFile(dcp, `COMPLETE-${hash.slice(0, 12).toUpperCase()}.hypercomb`, JSON.stringify({
-      kind: 'hypercomb-dcp-backup-completion',
-      version: 1,
-      manifestSha256: hash,
-      completedAt: Date.now(),
-    }, null, 2))
-    return { files: writtenFiles, bytes: writtenBytes }
-  }
-
-  /**
-   * `'absent'` — this backup carries no DCP half at all (no dcp/ directory or
-   * no manifest in it), which is a valid participant-only backup.
-   * `null` — a DCP snapshot IS present but fails verification, which is a
-   * corrupt backup and must never be restored.
-   */
-  readonly #verifiedDcpSnapshot = async (
-    backup: FileSystemDirectoryHandle,
-  ): Promise<{ manifest: DcpBackupManifest; opfs: FileSystemDirectoryHandle } | 'absent' | null> => {
-    let dcp: FileSystemDirectoryHandle
-    try {
-      dcp = await backup.getDirectoryHandle(DCP_DIR, { create: false })
-    } catch {
-      return 'absent'
-    }
-    try {
-      const manifestBytes = await readFileBytes(dcp, DCP_MANIFEST)
-      if (!manifestBytes) return 'absent'
-      const manifest = JSON.parse(new TextDecoder().decode(manifestBytes)) as DcpBackupManifest
-      if (manifest?.kind !== 'hypercomb-dcp-backup' || manifest.version !== 1) return null
-      const hash = await SignatureService.sign(manifestBytes)
-      const seal = await readJson<{
-        kind?: string
-        version?: number
-        manifestSha256?: string
-      }>(dcp, `COMPLETE-${hash.slice(0, 12).toUpperCase()}.hypercomb`)
-      if (seal?.kind !== 'hypercomb-dcp-backup-completion'
-          || seal.version !== 1
-          || seal.manifestSha256 !== hash) return null
-      const opfs = await dcp.getDirectoryHandle('opfs', { create: false })
-      let files = 0
-      let bytes = 0
-      for (const [path, stamp] of Object.entries(manifest.entries ?? {})) {
-        const data = await this.#readPath(opfs, path)
-        if (!data || data.byteLength !== stamp.size
-            || await SignatureService.sign(data) !== stamp.sha256) return null
-        files++
-        bytes += data.byteLength
-      }
-      if (files !== manifest.files || bytes !== manifest.bytes) return null
-      return { manifest, opfs }
-    } catch {
-      return null
-    }
   }
 
   readonly #readPath = async (

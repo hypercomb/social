@@ -110,18 +110,6 @@ beforeAll(async () => {
 beforeEach(() => {
   localStorage.clear()
   registrations.clear()
-  ;(globalThis as any).__sentinelBridge = undefined
-  ;(globalThis as any).__getSentinel = async () => ({
-    exportBackup: async (
-      onFile: (file: { path: string; sha256: string; bytes: ArrayBuffer }) => Promise<void>,
-    ) => {
-      const bytes = new TextEncoder().encode('DCP registry')
-      const sha256 = await SignatureService.sign(bytes.buffer as ArrayBuffer)
-      await onFile({ path: 'registry', sha256, bytes: bytes.buffer as ArrayBuffer })
-      return { files: 1, bytes: bytes.byteLength }
-    },
-    importBackupFile: async () => true,
-  })
 })
 
 describe('FolderSyncService', () => {
@@ -566,22 +554,6 @@ describe('FolderSyncService', () => {
     const chosen = new MemoryDir('USB')
     const original = new TextEncoder().encode('portable bytes')
     const sig = await SignatureService.sign(original.buffer as ArrayBuffer)
-    const dcpBytes = new TextEncoder().encode('DCP behavior bundle')
-    const dcpSha = await SignatureService.sign(dcpBytes.buffer as ArrayBuffer)
-    const importBackupFile = vi.fn(async () => true)
-    ;(globalThis as any).__getSentinel = async () => ({
-      exportBackup: async (
-        onFile: (file: { path: string; sha256: string; bytes: ArrayBuffer }) => Promise<void>,
-      ) => {
-        await onFile({
-          path: `${'a'.repeat(64)}/behavior.js`,
-          sha256: dcpSha,
-          bytes: dcpBytes.buffer.slice(0) as ArrayBuffer,
-        })
-        return { files: 1, bytes: dcpBytes.byteLength }
-      },
-      importBackupFile,
-    })
     await put(sourceOpfs, sig, original)
     await put(sourceOpfs, 'settings', new TextEncoder().encode('from backup'))
 
@@ -609,10 +581,6 @@ describe('FolderSyncService', () => {
     expect(result).toMatchObject({ copied: 1, conflicts: 1, invalid: 0 })
     expect(new TextDecoder().decode(await read(destination, sig))).toBe('portable bytes')
     expect(new TextDecoder().decode(await read(destination, 'settings'))).toBe('keep local')
-    expect(importBackupFile).toHaveBeenCalledWith(expect.objectContaining({
-      path: `${'a'.repeat(64)}/behavior.js`,
-      sha256: dcpSha,
-    }))
   })
 
   it('merges snapshots from every computer in a shared backup folder', async () => {
@@ -652,11 +620,9 @@ describe('FolderSyncService', () => {
     expect(new TextDecoder().decode(await read(activeOpfs, secondSig))).toBe('from computer two')
   })
 
-  it('exports and imports a participant backup on a browser with no DCP', async () => {
-    // A private window can never have DCP attached. Requiring a DCP half made
-    // both halves of the round trip impossible there.
-    delete (globalThis as any).__getSentinel
-    delete (globalThis as any).__sentinelBridge
+  it('exports and imports a participant backup round trip', async () => {
+    // A backup is the participant tree and nothing else — the round trip must
+    // work anywhere, including a private window.
     const chosen = new MemoryDir('Export')
     let activeOpfs = new MemoryDir('source')
     const bytes = new TextEncoder().encode('participant bytes')
@@ -704,8 +670,6 @@ describe('FolderSyncService', () => {
   })
 
   it('imports when the hypercomb-backup folder itself is selected', async () => {
-    delete (globalThis as any).__getSentinel
-    delete (globalThis as any).__sentinelBridge
     const chosen = new MemoryDir('Fresh export')
     let activeOpfs = new MemoryDir('source')
     const bytes = new TextEncoder().encode('participant bytes')
