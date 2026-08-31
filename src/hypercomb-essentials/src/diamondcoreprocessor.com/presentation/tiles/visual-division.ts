@@ -98,23 +98,52 @@ export interface DivisionSlot {
 }
 
 /**
+ * How a whole's holes are arranged.
+ *
+ *   spiral  the hex grid — holes are REGIONS of the whole's picture, and
+ *           `slotAt` gives each one's rectangle. What break-apart does to a
+ *           tile that carries a picture.
+ *   stack   one hole per row, each the full width
+ *   row     holes side by side, wrapping
+ *   grid    holes in columns, wrapping by weight
+ *
+ * The three HTML flows deliberately have NO geometry function: a hole in them
+ * has a width relative to its siblings and NO HEIGHT AT ALL. That omission is
+ * the whole of what makes a part interchangeable — a hole that says "a column
+ * that grows" accepts any content, a hole that says 300×200 accepts almost
+ * none, and a part that only fits one whole is a part that can live in one
+ * whole.
+ */
+export type DivisionFlow = 'spiral' | 'stack' | 'row' | 'grid'
+
+/** The attribute that marks a hole in a container. Positional: the value is
+ *  the slot index, which is the position a member's enrolment mark carries.
+ *  A container never names the artifact that fills a hole. */
+export const SLOT_ATTR = 'data-hc-slot'
+
+/**
  * The frame a whole keeps after giving its appearance away.
  *
- * ONE NUMBER. Every rectangle is a pure function of the arity and the index —
- * `spiralAxial(k)` fitted to the spiral's own bounding box — so storing the
- * rectangles would be caching a derivation, and a derived cache written as
- * truth is the thing the optimize-phase contract forbids.
+ * HOW MANY, AND HOW ARRANGED — and nothing else. Positions are a pure function
+ * of those two: for `spiral`, `spiralAxial(k)` fitted to the spiral's own box.
+ * Storing the positions would be caching a derivation, and a derived cache
+ * written as truth is what the optimize-phase contract forbids.
  *
- * The arity itself is NOT derivable and is the whole of what a frame declares.
- * It is frozen at the moment of breaking apart, deliberately: derive it from
- * live membership instead and removing a part would reflow every remaining
- * hole, which is exactly how the whole would stop being finished. Seven holes
- * with two parts in them is a whole with five empty holes, not a whole with
- * two.
+ * The arity is NOT derivable, and it is frozen at the moment of breaking apart
+ * rather than recounted from live membership: recount, and removing a part
+ * reflows every remaining hole, which is exactly how a whole stops being
+ * finished. Seven holes with two parts in them is a whole with five EMPTY
+ * holes, not a whole with two.
  */
 export interface DivisionPlan {
   /** How many holes the whole declares. Frozen; never recounted. */
   readonly arity: number
+  /** How they are arranged. Absent on a frame written before flows existed,
+   *  which read back as `spiral` — the only thing they could have been. */
+  readonly flow: DivisionFlow
+  /** RELATIVE weight per hole, never a size. Absent = every hole equal.
+   *  Ignored by `spiral`, whose hexes are all one size by construction. */
+  readonly spans?: readonly number[]
 }
 
 // ── the spiral ───────────────────────────────────────────────────────────
@@ -183,8 +212,23 @@ export const HEX_H = 2
  * Nothing here needs a picture to exist. A frame is shape, and shape is what a
  * whole can declare long before anyone has drawn anything to put in it.
  */
-export function divisionPlan(count: number): DivisionPlan {
-  return { arity: Number.isInteger(count) && count > 0 ? count : 0 }
+export function divisionPlan(
+  count: number,
+  flow: DivisionFlow = 'spiral',
+  spans?: readonly number[],
+): DivisionPlan {
+  const arity = Number.isInteger(count) && count > 0 ? count : 0
+  const weights = spans?.length === arity && spans.every(w => Number.isFinite(w) && w > 0)
+    ? [...spans]
+    : undefined
+  return weights ? { arity, flow, spans: weights } : { arity, flow }
+}
+
+/** The weight of hole `index` relative to its siblings. Equal by default —
+ *  a frame that says nothing about proportion is saying they are the same. */
+export function spanAt(plan: DivisionPlan, index: number): number {
+  if (index < 0 || index >= plan.arity) return 0
+  return plan.spans?.[index] ?? 1
 }
 
 /** The bounding box the whole spiral of `n` hexes occupies, in side units.
@@ -218,6 +262,10 @@ function frameBox(n: number): { minX: number; minY: number; spanX: number; spanY
 export function slotAt(plan: DivisionPlan, index: number): DivisionSlot | null {
   const n = plan.arity
   if (!Number.isInteger(index) || index < 0 || index >= n) return null
+  // Only the spiral has a rectangle. An HTML flow's hole has a width relative
+  // to its siblings and NO HEIGHT — inventing one here is precisely how a hole
+  // would stop accepting content that does not happen to fit it.
+  if (plan.flow !== 'spiral') return null
   const { minX, minY, spanX, spanY } = frameBox(n)
   const { q, r } = spiralAxial(index)
   const c = axialCentre(q, r)
@@ -241,8 +289,12 @@ export function slotsOf(plan: DivisionPlan): DivisionSlot[] {
 }
 
 /** What a frame is WRITTEN as. One number — see `DivisionPlan`. */
-export function payloadOfPlan(plan: DivisionPlan): { arity: number } {
-  return { arity: plan.arity }
+export function payloadOfPlan(
+  plan: DivisionPlan,
+): { arity: number; flow: DivisionFlow; spans?: readonly number[] } {
+  return plan.spans
+    ? { arity: plan.arity, flow: plan.flow, spans: [...plan.spans] }
+    : { arity: plan.arity, flow: plan.flow }
 }
 
 /**
@@ -254,11 +306,19 @@ export function payloadOfPlan(plan: DivisionPlan): { arity: number } {
  * they were understood to be derived — reads as its own length, so frames
  * already written keep their arity instead of silently becoming zero.
  */
+const FLOWS: ReadonlySet<string> = new Set<DivisionFlow>(['spiral', 'stack', 'row', 'grid'])
+
 export function planOfPayload(payload: unknown): DivisionPlan {
-  const record = payload as { arity?: unknown; slots?: unknown } | null | undefined
-  const arity = Number(record?.arity)
-  if (Number.isInteger(arity) && arity >= 0) return { arity }
-  return { arity: Array.isArray(record?.slots) ? record.slots.length : 0 }
+  const record = payload as
+    { arity?: unknown; flow?: unknown; spans?: unknown; slots?: unknown } | null | undefined
+  // A frame written before flows existed could only ever have been a spiral.
+  const flow = FLOWS.has(String(record?.flow)) ? String(record?.flow) as DivisionFlow : 'spiral'
+  const declared = Number(record?.arity)
+  const arity = Number.isInteger(declared) && declared >= 0
+    ? declared
+    : (Array.isArray(record?.slots) ? record.slots.length : 0)
+  const spans = Array.isArray(record?.spans) ? record.spans.map(Number) : undefined
+  return divisionPlan(arity, flow, spans)
 }
 
 // ── the derived visual ───────────────────────────────────────────────────

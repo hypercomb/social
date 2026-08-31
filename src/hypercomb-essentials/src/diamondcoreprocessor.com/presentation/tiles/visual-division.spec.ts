@@ -65,9 +65,31 @@ describe('the frame', () => {
     expect(slotsOf(divisionPlan(1))).toHaveLength(1)
   })
 
-  it('is ONE number — every rectangle is derived, none is stored', () => {
-    expect(payloadOfPlan(divisionPlan(7))).toEqual({ arity: 7 })
-    expect(JSON.stringify(payloadOfPlan(divisionPlan(7)))).toHaveLength('{"arity":7}'.length)
+  it('stores how many and how arranged — never a position', () => {
+    expect(payloadOfPlan(divisionPlan(7))).toEqual({ arity: 7, flow: 'spiral' })
+    expect(payloadOfPlan(divisionPlan(2, 'row', [3, 1])))
+      .toEqual({ arity: 2, flow: 'row', spans: [3, 1] })
+    // No x/y/w/h anywhere: every position is derived from those two fields.
+    const written = JSON.stringify(payloadOfPlan(divisionPlan(7)))
+    for (const key of ['x', 'y', 'w', 'h', 'slots']) {
+      expect(written).not.toContain(`"${key}"`)
+    }
+  })
+
+  it('reads a frame written before flows existed as the spiral it was', () => {
+    expect(planOfPayload({ arity: 7 })).toEqual(divisionPlan(7, 'spiral'))
+  })
+
+  it('ignores a weight list that does not match the arity', () => {
+    expect(divisionPlan(3, 'row', [2, 1]).spans).toBeUndefined()
+    expect(divisionPlan(3, 'row', [2, 1, 0]).spans).toBeUndefined()
+    expect(divisionPlan(3, 'row', [2, 1, 1]).spans).toEqual([2, 1, 1])
+  })
+
+  it('gives an HTML hole no rectangle at all — height is never declared', () => {
+    expect(slotAt(divisionPlan(3, 'row'), 0)).toBeNull()
+    expect(slotAt(divisionPlan(3, 'stack'), 1)).toBeNull()
+    expect(slotAt(divisionPlan(3, 'spiral'), 1)).not.toBeNull()
   })
 
   it('is empty rather than wrong when there are no parts', () => {
