@@ -38,22 +38,6 @@
     @if (totalLessons() === 0) {
       <p class="tut-empty">{{ 'tutorials.empty' | t }}</p>
     } @else {
-      <!-- THE ONE DOOR. Forty-odd lessons is too many to choose from cold, so
-           the window answers the question before it is asked: here is the next
-           one you have not flown. Everything below is for when you would
-           rather pick. -->
-      @if (next(); as up) {
-        <button class="tut-continue" type="button" (click)="flyLesson(up.id)">
-          <span class="mat-sym" aria-hidden="true">play_arrow</span>
-          <span class="tut-continue-copy">
-            <small>{{ (totalFlown() === 0 ? 'tutorials.begin' : 'tutorials.continue') | t }}</small>
-            <strong>{{ up.title }}</strong>
-          </span>
-        </button>
-      } @else {
-        <p class="tut-done">{{ 'tutorials.all-flown' | t }}</p>
-      }
-
       <div class="tut-progress" [attr.aria-label]="'tutorials.progress' | t: { flown: totalFlown(), total: totalLessons() }">
         <span class="tut-bar"><span class="tut-bar-fill" [style.width.%]="percent(totalFlown() / totalLessons())"></span></span>
         <span class="tut-count">{{ totalFlown() }}/{{ totalLessons() }}</span>
@@ -80,6 +64,28 @@
       }
 
       <div class="tut-scroll">
+        <!-- THE ONE DOOR, AND IT IS A ROW LIKE THE REST. Forty-odd lessons is
+             too many to choose from cold, so the list opens with the next one
+             you have not flown — but as the FIRST ITEM, not as a slab of
+             chrome above the list saying the same thing in a different
+             shape. It stands down while you are searching: the list is then
+             the answer to what you typed, and a row that ignores the search
+             would be the first thing you had to read past. -->
+        @if (!searching()) {
+          @if (next(); as up) {
+            <button class="tut-continue" type="button" (click)="flyLesson(up.id)">
+              <span class="tut-continue-mark" aria-hidden="true"><span class="mat-sym">play_arrow</span></span>
+              <span class="tut-continue-copy">
+                <small>{{ (totalFlown() === 0 ? 'tutorials.begin' : 'tutorials.continue') | t }}</small>
+                <strong>{{ up.title }}</strong>
+                @if (up.summary) { <span class="tut-about">{{ up.summary }}</span> }
+              </span>
+            </button>
+          } @else {
+            <p class="tut-done">{{ 'tutorials.all-flown' | t }}</p>
+          }
+        }
+
         @for (course of courses(); track course.level) {
           <section class="tut-course" [class.is-open]="isExpanded(course.level)">
             <header class="tut-course-head" (click)="toggleCourse(course.level)">

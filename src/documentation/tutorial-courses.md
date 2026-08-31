@@ -37,7 +37,7 @@ What it shows, in one screen:
 
 | | |
 |---|---|
-| **Continue** | the next lesson you have not flown, across every course — one door, no choosing |
+| **Continue** | the list's FIRST ROW: the next lesson you have not flown, across every course — one door, no choosing. It stands down while you are searching, because the list is then the answer to what you typed |
 | **Progress** | a bar over the whole roster; per course a pill (`3/8`) and a hexagon that FILLS as you fly it, numbered with the course's step in the ramp |
 | **Search** | narrows by title, blurb, topic mark or id, and opens every course it matched |
 | **Courses** | title, one-line blurb, and a play button that flies the whole thing |

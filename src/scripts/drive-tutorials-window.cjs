@@ -67,6 +67,8 @@ const SNAP = () => {
     grip: !!q('.tut-panel [class*="grip"], .tut-panel .hc-panel-grip'),
     gear: !!q('.tut-panel [class*="gear"]'),
     overall: text(q('.tut-count')),
+    // The one door is the FIRST ROW of the list now, not a card above it.
+    continueIsFirstRow: q('.tut-scroll')?.firstElementChild?.classList.contains('tut-continue') === true,
     continueLabel: text(q('.tut-continue-copy strong')),
     continueKind: text(q('.tut-continue-copy small')),
     footer: text(q('.tut-footer span')),
@@ -145,6 +147,7 @@ async function main() {
     check('the one door offers the first lesson',
       snap.continueLabel.length > 0 && /start/i.test(snap.continueKind),
       `${snap.continueKind} → ${snap.continueLabel}`)
+    check('it leads the list rather than sitting above it', snap.continueIsFirstRow)
     check('the footer counts the whole roster', /\d+ lessons in \d+ courses/.test(snap.footer), snap.footer)
 
     // ── it is a tool window: the shared chrome is there ───────────────
@@ -187,8 +190,8 @@ async function main() {
     check('search opens every course it matched', snap.courses.every(c => c.open))
     check('the roster totals do not move', snap.footer === whole.footer && snap.overall === whole.overall,
       `${whole.footer} / ${whole.overall} → ${snap.footer} / ${snap.overall}`)
-    check('Continue still names the next unflown lesson', snap.continueLabel === whole.next,
-      `${whole.next} → ${snap.continueLabel}`)
+    check('the Continue row stands down while searching', !snap.continueIsFirstRow && !snap.continueLabel,
+      snap.continueLabel || 'absent')
     check('a course keeps its step in the ramp',
       snap.courses.every(c => c.step === whole.steps[c.title]),
       snap.courses.map(c => `${c.title} ${c.step} (was ${whole.steps[c.title]})`).join(' | '))
@@ -197,7 +200,10 @@ async function main() {
         /note/i.test(l.title + l.about + l.topics.join(' ')) || /note/i.test(c.title))))
 
     await page.locator('.tut-clear').click()
-    await page.waitForTimeout(400)
+    await page.waitForTimeout(500)
+    snap = await page.evaluate(SNAP)
+    check('and comes back naming the same lesson', snap.continueIsFirstRow && snap.continueLabel === whole.next,
+      `${whole.next} → ${snap.continueLabel}`)
 
     // ── progress: a flown lesson ticks, and Continue moves on ─────────
     const first = (await page.evaluate(SNAP)).courses.find(c => c.open)?.lessons[0]?.title

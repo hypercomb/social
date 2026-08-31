@@ -93,44 +93,66 @@ $accent: #d9a441;
   &:hover { background: rgba(var(--acc), 0.2); color: var(--hc-window-ink-loud); }
 }
 
-// ── the one door ────────────────────────────────────────
+// ── the one door, as the list's first row ───────────────
+//
+// It was a bordered card ABOVE the list — a slab of chrome saying the same
+// thing the list says, in a different shape, spending the height of two rows
+// to name one lesson. It is a ROW now, on the same grid as every lesson under
+// it (mark, then copy), told apart by weight rather than by being a different
+// kind of object: the accent rule down its left edge, which is the device the
+// tool windows already use for "this one".
 .tut-continue {
-  flex: 0 0 auto;
+  width: 100%;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.6em;
-  margin: 0.7em 0.9em 0.5em;
-  padding: 0.55em 0.7em;
-  border: 1px solid rgba(var(--acc), 0.55);
-  border-radius: tw.$radius-card;
-  background: rgba(var(--acc), 0.16);
+  padding: 0.55em 0.9em 0.6em 1.1em;
+  border: 0;
+  border-left: 2px solid var(--hc-window-accent);
+  background: var(--hc-window-wash);
   color: var(--hc-window-ink-loud);
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition: background 120ms ease;
 
-  &:hover { background: rgba(var(--acc), 0.26); border-color: rgba(var(--acc), 0.8); }
-  .mat-sym { color: rgb(var(--acc)); font-size: 1.25em; }
+  &:hover { background: var(--hc-window-wash-strong); }
 }
-.tut-continue-copy { display: flex; flex-direction: column; gap: 0.12em; min-width: 0; }
+// The play glyph sits in the slot the lesson numbers use, so the column of
+// marks down the left edge stays ONE column.
+.tut-continue-mark {
+  flex: 0 0 auto;
+  margin-top: 0.15em;
+  width: 1.5em;
+  height: 1.5em;
+  display: grid;
+  place-items: center;
+  border-radius: tw.$radius-control;
+  background: var(--hc-window-wash-strong);
+
+  .mat-sym { color: var(--hc-window-ink-loud); font-size: 0.9em; }
+}
+.tut-continue-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.2em; }
 .tut-continue-copy small {
-  font-size: 0.62em;
+  font-size: 0.6em;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--hc-window-accent);
 }
-.tut-continue-copy strong { font-size: 0.84em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tut-continue-copy strong { font-size: 0.8em; }
 
 .tut-done {
-  margin: 0.7em 0.9em 0.4em;
+  margin: 0;
+  padding: 0.7em 0.9em 0.7em 1.1em;
+  border-left: 2px solid var(--hc-window-edge-firm);
   font-family: var(--hc-read, inherit);
-  font-size: 0.76em;
+  font-size: 0.74em;
+  line-height: 1.45;
   color: var(--hc-window-accent);
 }
 
 // ── overall progress ────────────────────────────────────
-.tut-progress { display: flex; align-items: center; gap: 0.6em; margin: 0 0.9em 0.6em; }
+.tut-progress { display: flex; align-items: center; gap: 0.6em; margin: 0.75em 0.9em 0.6em; }
 .tut-bar {
   flex: 1;
   height: 0.28em;
@@ -200,6 +222,11 @@ $accent: #d9a441;
   overscroll-behavior: contain;
   padding-bottom: 0.4em;
 }
+
+// The Continue row leads the list, so the first course under it needs the
+// separator every other course gets from its predecessor.
+.tut-continue + .tut-course,
+.tut-done + .tut-course { border-top-color: rgba(var(--hc-panel-ink), 0.12); }
 
 .tut-course { border-top: 1px solid rgba(var(--hc-panel-ink), 0.07); }
 
