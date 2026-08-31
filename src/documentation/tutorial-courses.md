@@ -5,25 +5,58 @@ hive works — not once, as a scripted tour, but as a growing set of independent
 lessons organised into four courses.
 
 ```
-/tutorial                  the starter course — move, make, get home
+/tutorial                  open the TUTORIALS WINDOW — every course, every lesson
+/tutorial start            fly the starter course straight away
 /tutorial beginner         the everyday verbs
 /tutorial intermediate     meaning: marks, filters, titles, references, filing, history
 /tutorial expert           THE WINDOWS — one lesson per primary window
 /tutorial <lesson>         one lesson on its own (e.g. /tutorial go-in)
-/tutorial list             what is on offer
+/tutorial list             what is on offer, in the activity log
 /tutorial stop             end a running tour
 ```
 
+## The bare word opens the window, it does not fly
+
+`/tutorial` used to launch the starter course on the spot. That made it the one
+command in the hive whose plain form committed you to a five-minute flight
+before showing you what else was on offer — and forty-odd lessons across four
+courses cannot be chosen from a command whose argument you have to already
+know. So the bare word opens the roster, and every argument that NAMES
+something still flies it directly, unchanged.
+
+`hypercomb-shared/ui/tutorials-window/` — a **tool window** like every other:
+docked in the lane, drag-resized with content-shrink, the common header band,
+the shared settings gear (group, text size, and the reading face, because half
+of what it shows is prose), parked and unparked with the rest, and Escape
+unwound one level at a time through the cascade. It is fed by
+`TutorialLessonRegistry` over IoC and never imports essentials, so a build
+without the tutorial module simply has no window, and a community module that
+registers a lesson appears in it for free.
+
+What it shows, in one screen:
+
+| | |
+|---|---|
+| **Continue** | the next lesson you have not flown, across every course — one door, no choosing |
+| **Progress** | a bar over the whole roster; per course a pill (`3/8`) and a hexagon that FILLS as you fly it, numbered with the course's step in the ramp |
+| **Search** | narrows by title, blurb, topic mark or id, and opens every course it matched |
+| **Courses** | title, one-line blurb, and a play button that flies the whole thing |
+| **Lessons** | curriculum number, title, one-line blurb, topic marks (click one to search it), a tick once flown |
+| **Flying** | while a tour is up: which lesson, and a Stop |
+
+Progress is a participant preference, not content — `hc:tutorial:flown` in
+localStorage, never a layer, the same call the help launcher's reached-tier
+makes. The drone announces `tutorial:flown` only for a lesson that ran to the
+END (one that threw is deliberately not ticked) and `tutorial:flying` for what
+is in the air; those two effects are what make Stop and Continue possible.
+
+The rail's bee toggles the same window — **one door, not two**. It used to fly
+the starter course on a plain click and open a fixed-position course flyout on
+Ctrl/⌘+click; the flyout showed an id and a count, said nothing about what a
+lesson was for, and the first click anywhere dismissed it. It is gone.
+
 The Help page (`/help`) leads with a **Guided Tours** island — one tile per
 course; clicking it sends the bee up.
-
-The rail's bee is the other way in. Plain click flies the starter tour;
-**Ctrl/⌘+click opens the picker**, which is two levels deep: the course row
-flies the whole course, and its caret opens **every lesson underneath, each
-startable on its own**. That is not a convenience — a lesson is an independent
-piece by construction, so "just show me the tags window" has to be one click,
-not a slash command you have to know the id for. The deepest course opens
-expanded, because that is the one whose lessons are looked for by name.
 
 ## A lesson is an independent piece
 
@@ -31,7 +64,7 @@ expanded, because that is the one whose lessons are looked for by name.
 
 | File | Role |
 |---|---|
-| `tutorial-lesson.ts` | the lesson primitive + registry, the declared pheromone vocabulary, each course's group signature |
+| `tutorial-lesson.ts` | the lesson primitive + registry, the declared pheromone vocabulary, each course's group signature and blurb (`TUTORIAL_COURSES`) |
 | `tutorial-stage.ts` | the stage contract — the only surface a lesson may touch |
 | `bee-tutorial.drone.ts` | the course runner — owns the stage, runs lessons in order |
 | `lessons/*.lessons.ts` | the courses: one registration per lesson |
@@ -43,6 +76,7 @@ tutorialLessons.register({
   level: 'beginner',
   order: 10,                                   // the curriculum IS this number
   title: 'Select tiles',
+  summary: 'Ctrl+click picks tiles without going in, and Ctrl+drag paints a run.',
   pheromones: ['tutorial', 'lesson', 'beginner', 'editing'],
   requires: () => hasBehaviour('keyword'),     // dormant behaviour → lesson drops out
   async run(stage) { /* fly, talk, demonstrate */ },

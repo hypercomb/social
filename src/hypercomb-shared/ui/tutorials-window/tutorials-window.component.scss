@@ -1,0 +1,388 @@
+// hypercomb-shared/ui/tutorials-window/tutorials-window.component.scss
+//
+// The tutorials window wears the tour's own amber, not a new pastel: the bee
+// in the rail, the speech bubble it talks through and this roster are one
+// feature, and a third colour would have said they were three.
+//
+// TWO FACES, deliberately. Titles, numbers, counts and chips are chrome and
+// stay on `--hc-mono`. The BLURBS are prose — a sentence you read to decide
+// whether to fly something — so they take `--hc-read`, which is why the panel
+// declares `[hasReadingSurface]="true"` and offers the reading-face picker in
+// the shared gear (the ligature-switch rule: a control only appears where it
+// can change what you are looking at).
+//
+// A TOOL WINDOW NEVER NAMES A COLOUR. Ink asks for a WEIGHT off the ladder on
+// :root (`--hc-window-ink-quiet` and friends); identity comes through `--acc`,
+// which is the authored pastel already taken deep under a bright look. Low-
+// alpha `--hc-panel-ink` survives below only as GROUNDS and hairlines, which
+// is what the shared header band uses it for too.
+//
+// Geometry, resize, content-shrink and the header band all come from
+// `hcDockedPanel` + `_toolwindow.scss`. Sizes below are in `em` so the body
+// shrinks and grows with the panel's `--hc-panel-scale`; dock offsets stay in
+// rem so position never moves with it.
+
+@use '../breakpoints' as *;
+@use '../toolwindow' as tw;
+
+$accent: #d9a441;
+
+:host {
+  position: fixed;
+  inset: 0;
+  z-index: 100002;
+  pointer-events: none;
+}
+
+.tut-panel {
+  pointer-events: auto;
+  position: absolute;
+  top: max(calc(2.3rem * var(--hc-header-zoom, 1)), var(--hc-header-anchor));
+  right: 0;
+  bottom: 0;
+  width: 380px;
+  min-width: 300px;
+  max-width: calc(100vw - 1.5rem);
+  display: flex;
+  flex-direction: column;
+  font-size: calc(1rem * var(--hc-panel-scale, 1));
+  @include tw.panel($accent, right);
+}
+
+// ── header ──────────────────────────────────────────────
+.tut-header {
+  @include tw.header;
+  border-bottom: 1px solid rgba(var(--acc), 0.24);
+}
+.tut-mark { color: rgb(var(--acc)); font-size: 1.05em; }
+.tut-title { flex: 1; font-size: 0.9em; letter-spacing: 0.05em; color: var(--hc-window-accent); }
+.tut-close { border: 0; background: none; font: inherit; cursor: pointer; }
+
+// ── in the air ──────────────────────────────────────────
+.tut-flying {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.5em 0.9em;
+  border-bottom: 1px solid rgba(var(--acc), 0.18);
+  background: rgba(var(--acc), 0.1);
+}
+.tut-flying-pulse {
+  flex: 0 0 auto;
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+  background: rgb(var(--acc));
+  box-shadow: 0 0 0 2px rgba(var(--acc), 0.2);
+}
+.tut-flying-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1em; }
+.tut-flying-copy strong { font-size: 0.8em; color: var(--hc-window-ink-loud); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tut-flying-copy small { font-size: 0.66em; color: var(--hc-window-accent-quiet); }
+.tut-stop {
+  flex: 0 0 auto;
+  border: 1px solid rgba(var(--acc), 0.5);
+  border-radius: tw.$radius-control;
+  background: transparent;
+  color: var(--hc-window-ink-loud);
+  font: inherit;
+  font-size: 0.7em;
+  @include tw.compact-button-padding;
+  cursor: pointer;
+
+  &:hover { background: rgba(var(--acc), 0.2); color: var(--hc-window-ink-loud); }
+}
+
+// ── the one door ────────────────────────────────────────
+.tut-continue {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  margin: 0.7em 0.9em 0.5em;
+  padding: 0.55em 0.7em;
+  border: 1px solid rgba(var(--acc), 0.55);
+  border-radius: tw.$radius-card;
+  background: rgba(var(--acc), 0.16);
+  color: var(--hc-window-ink-loud);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+
+  &:hover { background: rgba(var(--acc), 0.26); border-color: rgba(var(--acc), 0.8); }
+  .mat-sym { color: rgb(var(--acc)); font-size: 1.25em; }
+}
+.tut-continue-copy { display: flex; flex-direction: column; gap: 0.12em; min-width: 0; }
+.tut-continue-copy small {
+  font-size: 0.62em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hc-window-accent);
+}
+.tut-continue-copy strong { font-size: 0.84em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.tut-done {
+  margin: 0.7em 0.9em 0.4em;
+  font-family: var(--hc-read, inherit);
+  font-size: 0.76em;
+  color: var(--hc-window-accent);
+}
+
+// ── overall progress ────────────────────────────────────
+.tut-progress { display: flex; align-items: center; gap: 0.6em; margin: 0 0.9em 0.6em; }
+.tut-bar {
+  flex: 1;
+  height: 0.28em;
+  border-radius: tw.$radius-pill;
+  background: rgba(var(--hc-panel-ink), 0.12);
+  overflow: hidden;
+}
+.tut-bar-fill { display: block; height: 100%; background: rgba(var(--acc), 0.85); transition: width 200ms ease; }
+.tut-count { font-size: 0.66em; color: var(--hc-window-ink-quiet); }
+
+// ── search ──────────────────────────────────────────────
+.tut-search {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  margin: 0 0.9em 0.5em;
+  padding: 0.3em 0.55em;
+  border: 1px solid rgba(var(--acc), 0.26);
+  border-radius: tw.$radius-control;
+  background: rgba(var(--hc-panel-pane), 0.65);
+
+  &:focus-within { border-color: rgba(var(--acc), 0.7); }
+  .mat-sym { color: var(--hc-window-accent-quiet); font-size: 0.95em; }
+
+  input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: none;
+    color: var(--hc-window-ink-loud);
+    font: inherit;
+    font-size: 0.78em;
+    outline: none;
+
+    &::placeholder { color: var(--hc-window-ink-quiet); }
+  }
+}
+.tut-clear {
+  border: 0;
+  background: none;
+  color: var(--hc-window-ink-quiet);
+  font: inherit;
+  font-size: 1em;
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover { color: var(--hc-window-ink-loud); }
+}
+.tut-matches { margin: -0.2em 0.95em 0.5em; font-size: 0.66em; color: var(--hc-window-ink-quiet); }
+
+.tut-empty {
+  margin: auto;
+  max-width: 16em;
+  padding: 1.5em;
+  text-align: center;
+  font-family: var(--hc-read, inherit);
+  font-size: 0.78em;
+  line-height: 1.5;
+  color: var(--hc-window-ink-quiet);
+}
+
+// ── courses ─────────────────────────────────────────────
+.tut-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 0.4em;
+}
+
+.tut-course { border-top: 1px solid rgba(var(--hc-panel-ink), 0.07); }
+
+.tut-course-head {
+  display: flex;
+  align-items: center;
+  gap: 0.65em;
+  padding: 0.6em 0.9em;
+  cursor: pointer;
+
+  &:hover { background: rgba(var(--acc), 0.06); }
+}
+
+// TWO FACTS IN ONE GLYPH, and no third copy of either. The hexagon says
+// WHERE in the ramp this course sits (the number is its step, 1-4 — the
+// curriculum is an order, so the roster should look like one) and HOW FAR
+// through it you are (the fill rises from the bottom as lessons are flown).
+// The count itself is the pill beside the title; putting it in here too was
+// the same number twice, which is how the old flyout read.
+.tut-hex {
+  position: relative;
+  flex: 0 0 auto;
+  width: 2.1em;
+  aspect-ratio: 0.866;
+  display: grid;
+  place-items: center;
+  // Firmer than a wash: a clip-path takes the border with it, so the resting
+  // ground IS the shape's only edge and has to carry it on a cream pane too.
+  background: rgba(var(--acc), 0.26);
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+}
+.tut-hex-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(var(--acc), 0.7);
+  transition: height 220ms ease;
+}
+.tut-hex-step {
+  position: relative;
+  font-size: 0.68em;
+  color: var(--hc-window-ink-plain);
+}
+
+.tut-course-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15em; }
+.tut-course-line { display: flex; align-items: center; gap: 0.5em; min-width: 0; }
+.tut-course-line strong {
+  font-size: 0.84em;
+  color: var(--hc-window-accent);
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tut-course-copy small {
+  font-family: var(--hc-read, inherit);
+  font-size: 0.7em;
+  line-height: 1.4;
+  color: var(--hc-window-ink-quiet);
+}
+.tut-pill {
+  flex: 0 0 auto;
+  padding: 0.05em 0.45em;
+  border-radius: tw.$radius-pill;
+  background: rgba(var(--acc), 0.14);
+  color: var(--hc-window-accent);
+  font-size: 0.6em;
+}
+.tut-fly {
+  flex: 0 0 auto;
+  @include tw.icon-button;
+  border: 1px solid rgba(var(--acc), 0.4);
+  background: transparent;
+  color: var(--hc-window-accent);
+  cursor: pointer;
+
+  &:hover { background: rgba(var(--acc), 0.22); color: var(--hc-window-ink-loud); }
+  .mat-sym { font-size: 1em; }
+}
+.tut-caret { flex: 0 0 auto; color: var(--hc-window-ink-quiet); font-size: 1em; }
+
+// ── lessons ─────────────────────────────────────────────
+.tut-lessons { list-style: none; margin: 0; padding: 0 0 0.3em; }
+
+.tut-lesson {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6em;
+  padding: 0.45em 0.9em 0.5em 1.1em;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+
+  &:hover { background: rgba(var(--acc), 0.08); border-left-color: rgba(var(--acc), 0.5); }
+  &:hover .tut-go { opacity: 1; }
+  &.is-flying { background: rgba(var(--acc), 0.14); border-left-color: rgb(var(--acc)); }
+  &.is-flown .tut-num { background: rgba(var(--acc), 0.28); color: var(--hc-window-ink-loud); }
+  &.is-flown strong { color: var(--hc-window-ink-quiet); }
+}
+
+.tut-num {
+  flex: 0 0 auto;
+  margin-top: 0.15em;
+  width: 1.5em;
+  height: 1.5em;
+  display: grid;
+  place-items: center;
+  border-radius: tw.$radius-control;
+  background: rgba(var(--hc-panel-ink), 0.09);
+  color: var(--hc-window-ink-quiet);
+  font-size: 0.62em;
+
+  .mat-sym { font-size: 1.15em; }
+}
+
+.tut-lesson-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.2em; }
+.tut-lesson-copy strong { font-size: 0.8em; color: var(--hc-window-ink-loud); }
+
+// The blurb — the half of this window that is READING, not chrome.
+.tut-about {
+  font-family: var(--hc-read, inherit);
+  font-size: 0.72em;
+  line-height: 1.45;
+  color: var(--hc-window-ink-quiet);
+}
+
+.tut-topics { display: flex; flex-wrap: wrap; gap: 0.25em; margin-top: 0.1em; }
+.tut-topic {
+  padding: 0.02em 0.4em;
+  border: 1px solid rgba(var(--acc), 0.2);
+  border-radius: tw.$radius-pill;
+  color: var(--hc-window-accent-quiet);
+  font-size: 0.58em;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+
+  &:hover { background: rgba(var(--acc), 0.18); color: var(--hc-window-ink-loud); }
+}
+
+.tut-go {
+  flex: 0 0 auto;
+  margin-top: 0.15em;
+  opacity: 0;
+  color: var(--hc-window-accent);
+  font-size: 1em;
+  transition: opacity 120ms ease;
+}
+
+// ── footer ──────────────────────────────────────────────
+.tut-footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5em;
+  padding: 0.45em 0.9em;
+  border-top: 1px solid rgba(var(--hc-panel-ink), 0.08);
+  font-size: 0.64em;
+  color: var(--hc-window-ink-quiet);
+}
+.tut-reset {
+  border: 0;
+  background: none;
+  color: var(--hc-window-ink-quiet);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+
+  &:hover { color: var(--hc-window-accent); }
+}
+
+// ── responsive: stay flush below the header at every header height ──
+@include touch {
+  .tut-panel { top: max(calc(3.65rem * var(--hc-header-zoom, 1)), calc(var(--hc-header-anchor) + 1.02rem)); }
+}
+
+@include phone-only {
+  .tut-panel { top: 0; }
+}

@@ -15,8 +15,8 @@
 //     and nothing else, and cleans up after itself. Removing one from the
 //     registry removes it from the course; no other lesson notices.
 //   - MARKED: `pheromones` are drawn from the DECLARED vocabulary below (never
-//     minted on the fly). The mirror in the hive paints exactly these marks on
-//     the lesson's tile, so the tile and the code agree by construction, and a
+//     minted on the fly). The lesson's tile in the hive wears exactly these
+//     marks, so the tile and the code agree by construction, and a
 //     course can be assembled from a mark instead of from a list in code.
 //   - GROUPED BY SIGNATURE: every lesson belongs to a course, and a course's
 //     identity is `groupSignature('tutorial:course:<level>')` — a first-class
@@ -44,9 +44,46 @@ export const TUTORIAL_LEVELS: readonly TutorialLevel[] = Object.freeze([
 ])
 
 /**
- * The DECLARED pheromone vocabulary of the tutorial mirror. Nothing outside
+ * WHAT A COURSE IS, IN ONE LINE EACH.
+ *
+ * The roster used to be readable only as a list of ids in a log line, because
+ * the only place it was ever shown was `/tutorial list`. A window that OFFERS
+ * the courses has to say what each one is for before you pick it — so the
+ * blurb is declared here, beside the level it describes, rather than written
+ * into whatever surface happens to be listing them today.
+ *
+ * `title`/`summary` are fallbacks: `tutorial.level.<level>` and
+ * `tutorial.level.<level>.about` win when the catalog carries them.
+ */
+export interface TutorialCourse {
+  readonly level: TutorialLevel
+  /** Short human name — "Starter", "The windows". */
+  readonly title: string
+  /** One sentence: what you can do after flying it. */
+  readonly summary: string
+}
+
+export const TUTORIAL_COURSES: readonly TutorialCourse[] = Object.freeze([
+  { level: 'starter', title: 'Starter',
+    summary: 'Your first flight — make a tile, go in, come back out, and find your way home.' },
+  { level: 'beginner', title: 'Beginner',
+    summary: 'The everyday verbs: select, edit, note, copy, remove, undo, fit and arrange.' },
+  { level: 'intermediate', title: 'Intermediate',
+    summary: 'Meaning and time — marks, filters, titles, references, filing, and walking your history.' },
+  { level: 'expert', title: 'The windows',
+    summary: 'One lesson per window in the shell, each opening the real thing and putting it away again.' },
+])
+
+/** The declared blurb for a course, or an empty pair for a level some module
+ *  invented. Never throws — a community course is a level like any other. */
+export const courseInfo = (level: TutorialLevel): TutorialCourse =>
+  TUTORIAL_COURSES.find(c => c.level === level)
+    ?? { level, title: level.charAt(0).toUpperCase() + level.slice(1), summary: '' }
+
+/**
+ * The DECLARED pheromone vocabulary of the tutorial. Nothing outside
  * this list may be painted on a lesson — a new kind of lesson means adding a
- * word here deliberately, and to the mirror's vocabulary registration, in the
+ * word here deliberately, and to the vocabulary registration, in the
  * same pass.
  *
  * The topic marks deliberately REUSE the behaviour census's category keywords
@@ -68,7 +105,7 @@ export const TUTORIAL_PHEROMONES: readonly string[] = Object.freeze([
 
 /**
  * The one mark the tutorial ever PAINTS on tiles (as opposed to the marks its
- * mirror tiles wear). Declared here for the same reason as everything above:
+ * lesson tiles wear). Declared here for the same reason as everything above:
  * a lesson that teaches pheromones has to paint one, and it must be a word we
  * chose deliberately — not `urgent` or whatever the example says — because a
  * painted keyword joins the participant's real vocabulary. It is only ever
@@ -85,7 +122,7 @@ export const courseSignature = (level: TutorialLevel): Promise<string> =>
   groupSignature(courseMeaning(level))
 
 export interface TutorialLesson {
-  /** Stable id, kebab-case. Also the lesson's tile name in the mirror and the
+  /** Stable id, kebab-case. Also the lesson's tile name in the hive and the
    *  argument that runs it alone (`/tutorial go-in`). */
   readonly id: string
 
@@ -96,18 +133,27 @@ export interface TutorialLesson {
    *  is expressed here, not by the order of registration. */
   readonly order: number
 
-  /** Marks painted on this lesson's mirror tile. Must come from
+  /** Marks painted on this lesson's tile. Must come from
    *  TUTORIAL_PHEROMONES — the registry rejects anything else, so a typo can
    *  never mint a keyword on the fly. */
   readonly pheromones: readonly string[]
 
   /** The behaviour(s) this lesson teaches, by their name in the behaviour
    *  census (`keyword`, `snapshot`, `website`…). Links the lesson's tile to the
-   *  behaviour's tile in the mirror; informational for the code. */
+   *  behaviour's tile in the hive; informational for the code. */
   readonly teaches?: readonly string[]
 
   /** Short human title fallback (i18n key `tutorial.lesson.<id>`). */
   readonly title: string
+
+  /** ONE LINE saying what this lesson actually shows you — the sentence a
+   *  window puts under the title so the roster can be READ rather than
+   *  guessed at from an id. Fallback for `tutorial.lesson.<id>.about`.
+   *
+   *  It is declared on the lesson, not in the surface listing it, for the
+   *  same reason `pheromones` is: a lesson is independent, and everything
+   *  needed to offer it travels with it. */
+  readonly summary?: string
 
   /** Whether this lesson can run right now — the behaviour it teaches is
    *  registered, the chrome it needs is mounted. Absent = always available. */
@@ -173,7 +219,7 @@ export class TutorialLessonRegistry extends EventTarget {
   }
 
   /** Lessons carrying a mark — the pheromone read the collections are built
-   *  from. `/tutorial keyword` and the mirror both go through this. */
+   *  from. `/tutorial keyword` and the lesson tiles both go through this. */
   withPheromone(mark: string): TutorialLesson[] {
     return this.all().filter(l => l.pheromones.includes(mark))
   }
@@ -181,6 +227,26 @@ export class TutorialLessonRegistry extends EventTarget {
   /** Every level that has at least one available lesson. */
   levels(): TutorialLevel[] {
     return TUTORIAL_LEVELS.filter(l => this.course(l).length > 0)
+  }
+
+  /** Every course that has at least one available lesson, with its declared
+   *  blurb and its lessons already resolved. The shape a window wants: one
+   *  call, nothing to cross-reference, no second opinion about ordering. */
+  courses(): Array<TutorialCourse & { lessons: TutorialLesson[] }> {
+    return this.levels().map(level => ({ ...courseInfo(level), lessons: this.course(level) }))
+  }
+
+  /** The TOPIC marks in play — the declared vocabulary minus the words that
+   *  say what a tile IS (`tutorial`, `lesson`, `course`) and minus the level
+   *  names, which the course heading already carries. What is left is the
+   *  axis a roster can actually be grouped or filtered by. */
+  topics(): string[] {
+    const structural = new Set<string>(['tutorial', 'lesson', 'course', ...TUTORIAL_LEVELS])
+    const seen = new Set<string>()
+    for (const lesson of this.all()) {
+      for (const mark of lesson.pheromones) if (!structural.has(mark)) seen.add(mark)
+    }
+    return [...seen].sort()
   }
 
   /** The group signature of a course — see courseSignature. */

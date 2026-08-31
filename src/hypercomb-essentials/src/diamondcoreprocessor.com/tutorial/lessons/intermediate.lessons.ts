@@ -25,6 +25,7 @@ tutorialLessons.register({
   level: L,
   order: 10,
   title: 'Paint a pheromone',
+  summary: 'Marks say what a tile IS, and everything wearing the same mark belongs together.',
   pheromones: ['tutorial', 'lesson', 'intermediate', 'meaning'],
   teaches: ['keyword'],
   requires: () => hasBehaviour('keyword'),
@@ -55,6 +56,7 @@ tutorialLessons.register({
   level: L,
   order: 20,
   title: 'Find by mark',
+  summary: 'Typing >? narrows the page live, by name or by mark. A filter is a lens, never a move.',
   pheromones: ['tutorial', 'lesson', 'intermediate', 'meaning'],
   async run(stage) {
     await subjects(stage, 2, names(stage), 8)
@@ -81,6 +83,7 @@ tutorialLessons.register({
   level: L,
   order: 30,
   title: 'Rename without moving',
+  summary: 'A name is an address, so /title gives a tile new words to draw under and keeps every link good.',
   pheromones: ['tutorial', 'lesson', 'intermediate', 'structure'],
   teaches: ['title'],
   requires: () => hasBehaviour('title'),
@@ -108,6 +111,7 @@ tutorialLessons.register({
   level: L,
   order: 40,
   title: 'Point at another place',
+  summary: 'A reference tile is a live doorway onto the real thing, which stays where it lives.',
   pheromones: ['tutorial', 'lesson', 'intermediate', 'structure'],
   teaches: ['reference'],
   requires: () => hasBehaviour('reference'),
@@ -142,6 +146,7 @@ tutorialLessons.register({
   level: L,
   order: 45,
   title: 'File a tile away',
+  summary: 'Filing MOVES a tile inside another one — the tidying verb, next to the reference verb.',
   pheromones: ['tutorial', 'lesson', 'intermediate', 'structure'],
   teaches: ['into'],
   requires: () => hasBehaviour('into'),
@@ -198,6 +203,7 @@ tutorialLessons.register({
   level: L,
   order: 50,
   title: 'The command palette',
+  summary: 'Every bound action in one searchable list, found by what it means, not its keystroke.',
   pheromones: ['tutorial', 'lesson', 'intermediate', 'guidance'],
   async run(stage) {
     const c = stage.center()
@@ -228,6 +234,7 @@ tutorialLessons.register({
   level: L,
   order: 60,
   title: 'Walk your history',
+  summary: 'Every change is a revision that stays; the history panel is the road through them.',
   pheromones: ['tutorial', 'lesson', 'intermediate', 'history'],
   teaches: ['history'],
   requires: () => hasBehaviour('history'),
@@ -251,6 +258,7 @@ tutorialLessons.register({
   level: L,
   order: 70,
   title: 'Checkpoints you can name',
+  summary: 'Named checkpoints you can come back to — narrated here, never fired on your own hive.',
   pheromones: ['tutorial', 'lesson', 'intermediate', 'history'],
   teaches: ['snapshot', 'restore'],
   requires: () => hasBehaviour('snapshot'),

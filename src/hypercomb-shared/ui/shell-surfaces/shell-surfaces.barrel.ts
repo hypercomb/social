@@ -28,9 +28,13 @@ import '../context-window/context-window.component'
 import '../references-window/references-window.component'
 import '../chat-window/chat-window.component'
 import '../features-viewer/features-viewer.component'
+// The guided tours, as a roster you can read before you fly one. It replaced
+// the rail bee's Ctrl+click flyout — see tutorials-window.component.ts.
+import '../tutorials-window/tutorials-window.component'
 import '../sequence-viewer/sequence-viewer.component'
 import '../tags-viewer/tags-viewer.component'
 import '../workflow-designer/workflow-designer.component'
+import '../layout-designer/layout-designer.component'
 import '../pheromone-tiles/pheromone-tiles.component'
 import '../observe-viewer/observe-viewer.component'
 import '../publish-panel/publish-panel.component'

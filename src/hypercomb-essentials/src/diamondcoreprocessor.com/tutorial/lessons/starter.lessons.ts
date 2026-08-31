@@ -22,6 +22,7 @@ tutorialLessons.register({
   level: L,
   order: 10,
   title: 'Create a tile',
+  summary: 'Type a name into the command line and a tile is born — cover picture and all.',
   pheromones: ['tutorial', 'lesson', 'starter', 'creation'],
   teaches: ['create'],
   async run(stage) {
@@ -46,6 +47,7 @@ tutorialLessons.register({
   level: L,
   order: 20,
   title: 'Go inside a tile',
+  summary: 'A plain left-click steps inside a tile; the address bar always says where you are.',
   pheromones: ['tutorial', 'lesson', 'starter', 'navigation'],
   async run(stage) {
     const label = await subject(stage, plannerName(stage), 1)
@@ -70,6 +72,7 @@ tutorialLessons.register({
   level: L,
   order: 30,
   title: 'Come back out',
+  summary: 'Three ways back up: right-click anywhere, Shift+click, or the Back button.',
   pheromones: ['tutorial', 'lesson', 'starter', 'navigation'],
   async run(stage) {
     // Standing at the practice page's own level? Step inside something first,
@@ -103,6 +106,7 @@ tutorialLessons.register({
   level: L,
   order: 40,
   title: 'Give a tile children',
+  summary: 'Tiles hold tiles — and square brackets make a whole week of them in one line.',
   pheromones: ['tutorial', 'lesson', 'starter', 'creation', 'structure'],
   async run(stage) {
     const parent = await subject(stage, plannerName(stage), 1)
@@ -135,6 +139,7 @@ tutorialLessons.register({
   level: L,
   order: 50,
   title: 'Travel between tiles',
+  summary: 'Wander in, out and across. Back and Home always know the way, so you cannot get lost.',
   pheromones: ['tutorial', 'lesson', 'starter', 'navigation'],
   async run(stage) {
     await stage.say('travel', 'Travel',
@@ -164,6 +169,7 @@ tutorialLessons.register({
   level: L,
   order: 60,
   title: 'Zoom the honeycomb',
+  summary: 'The wheel zooms the honeycomb in and out; a pinch does it on a touch screen.',
   pheromones: ['tutorial', 'lesson', 'starter', 'navigation'],
   async run(stage) {
     const c = stage.center()
@@ -192,6 +198,7 @@ tutorialLessons.register({
   level: L,
   order: 70,
   title: 'Glide across the field',
+  summary: 'Hold Space and drag to glide across the field — one finger drags on touch.',
   pheromones: ['tutorial', 'lesson', 'starter', 'navigation'],
   async run(stage) {
     // Two fingers is PINCH (or the sensitivity swipe), never a pan — the
@@ -208,6 +215,7 @@ tutorialLessons.register({
   level: L,
   order: 80,
   title: 'Home',
+  summary: 'The Home button brings you straight back to your front door from anywhere.',
   pheromones: ['tutorial', 'lesson', 'starter', 'navigation'],
   async run(stage) {
     // The aria-label is not a stable handle for this one: it becomes

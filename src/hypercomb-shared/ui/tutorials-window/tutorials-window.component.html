@@ -1,0 +1,158 @@
+@if (visible()) {
+  <aside
+    class="tut-panel"
+    hcDockInset="right"
+    hcDockedPanel="tutorials-window"
+    [hcSession]="session"
+    (hcDockedPanelClose)="close()"
+    dockSide="right"
+    [minWidth]="300"
+    [maxWidth]="640"
+    [defaultWidth]="380"
+    [hasReadingSurface]="true"
+    data-consumes-wheel
+    tabindex="-1"
+    [attr.aria-label]="'tutorials.title' | t"
+  >
+    <header class="tut-header">
+      <span class="mat-sym tut-mark" aria-hidden="true">emoji_nature</span>
+      <span class="tut-title">{{ 'tutorials.title' | t }}</span>
+      <button class="tut-close" type="button" (click)="close()" [attr.aria-label]="'tutorials.close' | t">&times;</button>
+    </header>
+
+    <!-- IN THE AIR. The one piece of state the roster cannot read off itself:
+         a tour is running somewhere over the hive, and this is where you stop
+         it. Absent when nothing is flying, so the window is not carrying a
+         permanently-dead control. -->
+    @if (flying()) {
+      <div class="tut-flying" role="status">
+        <span class="tut-flying-pulse" aria-hidden="true"></span>
+        <span class="tut-flying-copy">
+          <strong>{{ flyingRow()?.title ?? flyingCourse()?.title ?? ('tutorials.flying.generic' | t) }}</strong>
+          @if (flyingCourse(); as course) { <small>{{ course.title }}</small> }
+        </span>
+        <button class="tut-stop" type="button" (click)="stop()">{{ 'tutorials.stop' | t }}</button>
+      </div>
+    }
+
+    @if (totalLessons() === 0) {
+      <p class="tut-empty">{{ 'tutorials.empty' | t }}</p>
+    } @else {
+      <!-- THE ONE DOOR. Forty-odd lessons is too many to choose from cold, so
+           the window answers the question before it is asked: here is the next
+           one you have not flown. Everything below is for when you would
+           rather pick. -->
+      @if (next(); as up) {
+        <button class="tut-continue" type="button" (click)="flyLesson(up.id)">
+          <span class="mat-sym" aria-hidden="true">play_arrow</span>
+          <span class="tut-continue-copy">
+            <small>{{ (totalFlown() === 0 ? 'tutorials.begin' : 'tutorials.continue') | t }}</small>
+            <strong>{{ up.title }}</strong>
+          </span>
+        </button>
+      } @else {
+        <p class="tut-done">{{ 'tutorials.all-flown' | t }}</p>
+      }
+
+      <div class="tut-progress" [attr.aria-label]="'tutorials.progress' | t: { flown: totalFlown(), total: totalLessons() }">
+        <span class="tut-bar"><span class="tut-bar-fill" [style.width.%]="percent(totalFlown() / totalLessons())"></span></span>
+        <span class="tut-count">{{ totalFlown() }}/{{ totalLessons() }}</span>
+      </div>
+
+      <div class="tut-search">
+        <span class="mat-sym" aria-hidden="true">search</span>
+        <input
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          [value]="query()"
+          (input)="search($any($event.target).value)"
+          [attr.placeholder]="'tutorials.search' | t"
+          [attr.aria-label]="'tutorials.search' | t"
+        />
+        @if (searching()) {
+          <button class="tut-clear" type="button" (click)="search('')" [attr.aria-label]="'tutorials.clear' | t">&times;</button>
+        }
+      </div>
+
+      @if (searching()) {
+        <p class="tut-matches">{{ 'tutorials.matches' | t: { count: matchCount() } }}</p>
+      }
+
+      <div class="tut-scroll">
+        @for (course of courses(); track course.level) {
+          <section class="tut-course" [class.is-open]="isExpanded(course.level)">
+            <header class="tut-course-head" (click)="toggleCourse(course.level)">
+              <!-- The step in the ramp, and how far through it you are, in one
+                   glyph in the hive's own shape: the number is the course's
+                   place (1-4), the fill rises as its lessons are flown. -->
+              <span class="tut-hex" aria-hidden="true">
+                <span class="tut-hex-fill" [style.height.%]="percent(course.progress)"></span>
+                <span class="tut-hex-step">{{ course.step }}</span>
+              </span>
+              <span class="tut-course-copy">
+                <span class="tut-course-line">
+                  <strong>{{ course.title }}</strong>
+                  <span class="tut-pill">{{ course.flownCount }}/{{ course.total }}</span>
+                </span>
+                @if (course.summary) { <small>{{ course.summary }}</small> }
+              </span>
+              <button
+                class="tut-fly"
+                type="button"
+                (click)="flyCourse(course.level, $event)"
+                [attr.title]="'tutorials.fly-course' | t"
+                [attr.aria-label]="'tutorials.fly-course' | t"
+              ><span class="mat-sym" aria-hidden="true">play_arrow</span></button>
+              @if (!searching()) {
+                <span class="mat-sym tut-caret" aria-hidden="true">{{ isExpanded(course.level) ? 'expand_less' : 'expand_more' }}</span>
+              }
+            </header>
+
+            @if (isExpanded(course.level)) {
+              <ul class="tut-lessons">
+                @for (lesson of course.matches; track lesson.id) {
+                  <li>
+                    <button
+                      class="tut-lesson"
+                      type="button"
+                      [class.is-flown]="lesson.flown"
+                      [class.is-flying]="flying()?.lesson === lesson.id"
+                      (click)="flyLesson(lesson.id)"
+                    >
+                      <span class="tut-num" aria-hidden="true">
+                        @if (lesson.flown) { <span class="mat-sym">check</span> } @else { {{ lesson.number }} }
+                      </span>
+                      <span class="tut-lesson-copy">
+                        <strong>{{ lesson.title }}</strong>
+                        @if (lesson.summary) { <span class="tut-about">{{ lesson.summary }}</span> }
+                        @if (lesson.topics.length) {
+                          <span class="tut-topics">
+                            @for (topic of lesson.topics; track topic) {
+                              <span class="tut-topic" role="button" tabindex="0"
+                                    (click)="pickTopic(topic, $event)"
+                                    (keydown.enter)="pickTopic(topic, $event)"
+                              >{{ topic }}</span>
+                            }
+                          </span>
+                        }
+                      </span>
+                      <span class="mat-sym tut-go" aria-hidden="true">play_arrow</span>
+                    </button>
+                  </li>
+                }
+              </ul>
+            }
+          </section>
+        }
+      </div>
+
+      <footer class="tut-footer">
+        <span>{{ 'tutorials.footer' | t: { lessons: totalLessons(), courses: roster().length } }}</span>
+        @if (totalFlown() > 0) {
+          <button class="tut-reset" type="button" (click)="resetProgress()">{{ 'tutorials.reset' | t }}</button>
+        }
+      </footer>
+    }
+  </aside>
+}

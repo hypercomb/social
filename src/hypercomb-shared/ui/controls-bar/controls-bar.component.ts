@@ -95,15 +95,6 @@ interface ControlItem {
   visibleWhen: 'always' | 'voiceSupported' | 'public' | 'hasSelection'
 }
 
-/** A row in the tour picker: the course, and the individual lessons under it.
- *  Read from the tutorial's own registry over IoC — see #openTourMenu. */
-interface TourCourse {
-  level: string
-  label: string
-  count: number
-  lessons: { id: string; label: string }[]
-}
-
 const CONTROL_REGISTRY: readonly ControlItem[] = [
   { id: 'back',         label: 'controls.back',         action: 'goBack',             visibleWhen: 'always' },
   // Portals sits DIRECTLY after the installer: both are ways OUT of the current
@@ -1360,6 +1351,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #textOnlyUnsub: (() => void) | null = null
   #clipboardAvailableUnsub: (() => void) | null = null
   #clipboardOpenUnsub: (() => void) | null = null
+  #tutorialsOpenUnsub: (() => void) | null = null
   #atomizeModeUnsub: (() => void) | null = null
   #atomizeAtomsUnsub: (() => void) | null = null
   #atomizeStrategyUnsub: (() => void) | null = null
@@ -1551,6 +1543,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // replayed, so a late mount reflects the current panel state.
     this.#clipboardOpenUnsub = EffectBus.on<{ open?: boolean }>('clipboard:open', ({ open }) => {
       this.#clipboardPanelOpen.set(!!open)
+    })
+
+    // The bee lights while the tutorials window is showing — the window
+    // announces itself, the same bar/panel pair every other icon uses.
+    this.#tutorialsOpenUnsub = EffectBus.on<{ open?: boolean }>('tutorials:state', ({ open }) => {
+      this.tutorialsOpen.set(!!open)
     })
 
     this.#moveModeUnsub = EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
@@ -1839,8 +1837,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     // The pickers' window listeners are capture-phase and live only while
-    // open — closing releases them.
-    this.closeTourMenu()
+    // open — closing releases them. (The tour picker is not among them any
+    // more: it is a tool window, which tears itself down.)
     this.closeFitMenu()
     this.closeHomeMenu()
     // Never leave the gate locked behind a torn-down bar — the pin would be
@@ -1890,6 +1888,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#textOnlyUnsub?.()
     this.#clipboardAvailableUnsub?.()
     this.#clipboardOpenUnsub?.()
+    this.#tutorialsOpenUnsub?.()
     this.#tagsUnsub?.()
     this.#tagFilterUnsub?.()
     this.#hoverTagsUnsub?.()
@@ -2138,153 +2137,21 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.closeHomeMenu()
   }
 
-  /** Start the guided beeing tour — the same entry point /tutorial uses, so
-   *  the rail's bee and the slash behaviour run one identical tour. The drone
-   *  ignores a second start while one is already running.
+  /** THE BEE OPENS THE ROSTER.
    *
-   *  CTRL (or ⌘) + click opens the COURSE PICKER instead: the tour is four
-   *  courses now (starter, then beginner → intermediate → expert), and the
-   *  deeper ones need a way in that isn't typing a slash command. Plain click
-   *  keeps meaning "just show me" — the starter tour, unchanged. */
-  readonly startTutorial = (event?: MouseEvent): void => {
-    if (event && (event.ctrlKey || event.metaKey)) {
-      this.#openTourMenu(event)
-      return
-    }
-    this.closeTourMenu()
-    EffectBus.emit('tutorial:start', {})
+   *  It used to fly the starter course on a plain click and open a
+   *  fixed-position course flyout on Ctrl+click — two doors onto one feature,
+   *  and the only one that listed the courses was the one nobody found. The
+   *  roster is a tool window now (hc-tutorials-window), which is the same
+   *  thing `/tutorial` opens, so the icon and the command are one path again.
+   *  Its first row is Continue: one more click still flies. */
+  readonly startTutorial = (): void => {
+    EffectBus.emit('tutorials:toggle', {})
   }
 
-  // ── the course picker ─────────────────────────────────
-  //
-  // Fed by the tutorial's OWN lesson registry over IoC (never imported — a
-  // shell surface must not depend on essentials), so the list is whatever
-  // courses this build actually ships: a level with no lessons is not offered,
-  // and a module that registers its own lessons shows up here for free.
-
-  readonly tourMenuOpen = signal(false)
-  readonly tourMenuPos = signal<{ x: number; y: number; flip: boolean }>({ x: 0, y: 0, flip: false })
-  readonly tourCourses = signal<TourCourse[]>([])
-
-  /** Which courses are showing their lessons. The picker is two levels: the
-   *  row flies the whole course, the caret opens the individual lessons — a
-   *  lesson is an independent piece and has to be startable on its own. The
-   *  deepest course opens EXPANDED, because that is the one whose lessons are
-   *  looked for by name (one per window). */
-  readonly tourExpanded = signal<readonly string[]>([])
-
-  #openTourMenu(event: MouseEvent): void {
-    const registry = get<{
-      levels?: () => string[]
-      course?: (l: string) => { id: string; title: string }[]
-    }>('@diamondcoreprocessor.com/TutorialLessonRegistry')
-    const levels = registry?.levels?.() ?? []
-    if (levels.length === 0) {
-      // No roster (the tutorial module isn't loaded) — fall back to the tour
-      // rather than opening an empty menu.
-      EffectBus.emit('tutorial:start', {})
-      return
-    }
-    this.tourCourses.set(levels.map(level => {
-      const lessons = registry?.course?.(level) ?? []
-      return {
-        level,
-        label: this.#tourLabel(level),
-        count: lessons.length,
-        lessons: lessons.map(l => ({ id: l.id, label: this.#lessonLabel(l) })),
-      }
-    }))
-    this.tourExpanded.set(levels.length ? [levels[levels.length - 1]] : [])
-
-    // Fixed positioning off the button's own rect: the rail is a scrolling,
-    // overflow-hidden box, so a menu rendered inside it would be clipped.
-    const rect = (event.currentTarget as HTMLElement | null)?.getBoundingClientRect()
-    const width = 232
-    const x = rect ? rect.right + 10 : 12
-    const flip = x + width > window.innerWidth - 8
-    // Keep the whole menu on screen. It is two levels deep now, so its height
-    // is the CSS cap (min(70vh, 620px)) rather than a few rows — clamping to a
-    // fixed 260 would have let the expanded course run off the bottom.
-    const maxHeight = Math.min(window.innerHeight * 0.7, 620)
-    const menuX = flip ? Math.max(8, (rect?.left ?? 12) - width - 10) : x
-    this.tourMenuPos.set({
-      x: menuX,
-      y: Math.min(Math.max(8, rect?.top ?? 12), Math.max(8, window.innerHeight - maxHeight - 8)),
-      flip,
-    })
-    this.#clearLaneForMenu(menuX)
-    this.tourMenuOpen.set(true)
-    window.addEventListener('pointerdown', this.#onTourMenuOutside, true)
-    window.addEventListener('keydown', this.#onTourMenuKey, true)
-  }
-
-  readonly closeTourMenu = (): void => {
-    this.#restoreLane()
-    if (!this.tourMenuOpen()) return
-    this.tourMenuOpen.set(false)
-    window.removeEventListener('pointerdown', this.#onTourMenuOutside, true)
-    window.removeEventListener('keydown', this.#onTourMenuKey, true)
-  }
-
-  /** Fly the picked course. Same effect the slash behaviour raises, so the
-   *  picker and `/tutorial <level>` are one path. */
-  readonly pickTour = (level: string): void => {
-    this.closeTourMenu()
-    EffectBus.emit('tutorial:start', { level })
-  }
-
-  /** Fly ONE lesson. Same effect `/tutorial <lesson>` raises — a lesson is
-   *  independent by construction (it makes whatever it needs on the practice
-   *  page), so starting it alone is a first-class way in, not a shortcut. */
-  readonly pickLesson = (id: string): void => {
-    this.closeTourMenu()
-    EffectBus.emit('tutorial:start', { lesson: id })
-  }
-
-  readonly toggleTourCourse = (level: string, event?: MouseEvent): void => {
-    event?.stopPropagation()
-    const open = this.tourExpanded()
-    this.tourExpanded.set(open.includes(level)
-      ? open.filter(l => l !== level)
-      : [...open, level])
-  }
-
-  readonly isTourExpanded = (level: string): boolean => this.tourExpanded().includes(level)
-
-  /** A lesson's own title, localized. `tutorial.lesson.<id>` if the catalog
-   *  carries it, otherwise the title the lesson declared in code. */
-  #lessonLabel(lesson: { id: string; title: string }): string {
-    const key = `tutorial.lesson.${lesson.id}`
-    const i18n = get<{ t?: (k: string) => string }>('@hypercomb.social/I18n')
-    const resolved = i18n?.t?.(key)
-    return resolved && resolved !== key ? resolved : lesson.title
-  }
-
-  #tourLabel(level: string): string {
-    const fallback: Record<string, string> = {
-      starter: 'Starter tour', beginner: 'Beginner',
-      intermediate: 'Intermediate', expert: 'Expert',
-    }
-    const key = `tutorial.level.${level}`
-    const i18n = get<{ t?: (k: string) => string }>('@hypercomb.social/I18n')
-    const resolved = i18n?.t?.(key)
-    return resolved && resolved !== key ? resolved : (fallback[level] ?? level)
-  }
-
-  readonly #onTourMenuOutside = (event: PointerEvent): void => {
-    const target = event.target as HTMLElement | null
-    if (target?.closest?.('.tour-menu, .rail-tutorial')) return
-    this.closeTourMenu()
-  }
-
-  readonly #onTourMenuKey = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape') return
-    // Take Escape before the global cascade — the menu is the innermost thing
-    // open, so it is what Escape must close.
-    event.stopPropagation()
-    event.preventDefault()
-    this.closeTourMenu()
-  }
+  /** Lit while the tutorials window is showing — the window announces itself
+   *  (`tutorials:state`), the same shape every other panel/bar pair uses. */
+  readonly tutorialsOpen = signal(false)
 
   // ── fit flyout ────────────────────────────────────────
   //

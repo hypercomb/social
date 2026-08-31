@@ -1868,43 +1868,7 @@ $actions-corner: 12rem;
   }
 }
 
-// One lesson, startable on its own. Indented under its course, and quieter
-// than the course row so the two levels read apart at a glance.
-.tour-lesson {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  padding: 0.3rem 0.45rem 0.3rem 1.6rem;
-  background: transparent;
-  border: 0;
-  border-radius: 4px;
-  color: color-mix(in srgb, var(--md-on-surface) 78%, transparent);
-  font: inherit;
-  font-size: 0.76rem;
-  text-align: left;
-  cursor: pointer;
-
-  &:hover {
-    background: color-mix(in srgb, var(--md-on-surface) 10%, transparent);
-    color: var(--md-on-surface);
-  }
-}
-
 .tour-label { flex: 1; min-width: 0; }
-
-// Lesson count — the indicator-pill convention: a number in a chip, never a
-// sentence.
-.tour-count {
-  flex-shrink: 0;
-  min-width: 1.35rem;
-  padding: 0.05rem 0.32rem;
-  border: 1px solid var(--md-outline-variant);
-  border-radius: 999px;
-  font-family: var(--hc-mono);
-  font-size: 0.62rem;
-  text-align: center;
-  color: color-mix(in srgb, var(--md-on-surface) 70%, transparent);
-}
 
 // ── recent portals ───────────────────────────────────────
 //

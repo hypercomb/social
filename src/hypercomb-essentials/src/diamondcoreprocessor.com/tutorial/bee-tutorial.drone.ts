@@ -79,6 +79,9 @@ export class BeeTutorialDrone extends Drone {
   protected override emits = [
     'search:prefill', 'command-line:remote-submit', 'cell:attach-resource',
     'keymap:invoke', 'mobile:input-visible', 'tile:action',
+    // What is in the air, and what finished — the two facts a roster needs to
+    // offer a Stop and a Continue (see the tutorials window).
+    'tutorial:flying', 'tutorial:flown',
   ]
 
   // the tour is effect-driven, never pulse-driven
@@ -170,6 +173,17 @@ export class BeeTutorialDrone extends Drone {
     this.#cancelled = false
     this.#coverSigs = []
     this.#level = level
+    // WHAT IS IN THE AIR, SAID OUT LOUD. A tour used to be invisible to every
+    // other surface: nothing could offer a Stop, and nothing could show which
+    // lesson you were in. Two facts, replayed by the bus, are enough for a
+    // roster to be honest — `tutorial:flying` (running, and what) and
+    // `tutorial:flown` (a lesson finished, so a roster can tick it).
+    this.emitEffect('tutorial:flying', {
+      running: true,
+      level,
+      lesson: request.lesson && lessons.length === 1 ? lessons[0]?.id : undefined,
+      total: lessons.length,
+    })
     this.#groupSig = await courseSignature(level).catch(() => '')
     overlay.onSkipRequested = () => { this.#cancelled = true }
     overlay.activate()
@@ -188,6 +202,7 @@ export class BeeTutorialDrone extends Drone {
       overlay.deactivate()
       overlay.onSkipRequested = null
       this.#running = false
+      this.emitEffect('tutorial:flying', { running: false })
     }
   }
 
@@ -265,8 +280,12 @@ export class BeeTutorialDrone extends Drone {
     for (const lesson of lessons) {
       this.#ck()
       if (lesson.requires?.() === false) continue
+      this.emitEffect('tutorial:flying', { running: true, level, lesson: lesson.id, total: lessons.length })
       try {
         await lesson.run(stage)
+        // Flown to the end without aborting — the only claim a roster's tick
+        // is allowed to make. A lesson that threw is deliberately NOT ticked.
+        this.emitEffect('tutorial:flown', { lesson: lesson.id, level })
       } catch (err) {
         if (err instanceof TutorialAborted) throw err
         // One lesson failing must never take the course down — the bee moves

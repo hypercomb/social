@@ -25,6 +25,7 @@ tutorialLessons.register({
   level: L,
   order: 10,
   title: 'Select tiles',
+  summary: 'Ctrl+click picks tiles without going in, and Ctrl+drag paints a whole run of them.',
   pheromones: ['tutorial', 'lesson', 'beginner', 'editing'],
   async run(stage) {
     const three = await subjects(stage, 3, names(stage), 2)
@@ -56,6 +57,7 @@ tutorialLessons.register({
   level: L,
   order: 20,
   title: 'Edit a tile',
+  summary: 'E — or the pencil — opens the tile editor, where its words, pictures and links live.',
   pheromones: ['tutorial', 'lesson', 'beginner', 'editing'],
   async run(stage) {
     const label = await subject(stage, names(stage)[0], 3)
@@ -79,6 +81,7 @@ tutorialLessons.register({
   level: L,
   order: 30,
   title: 'Leave a note',
+  summary: 'Notes are the writing that belongs WITH a tile, and they travel with it everywhere.',
   pheromones: ['tutorial', 'lesson', 'beginner', 'editing', 'meaning'],
   async run(stage) {
     const label = await subject(stage, names(stage)[0], 4)
@@ -107,6 +110,7 @@ tutorialLessons.register({
   level: L,
   order: 40,
   title: 'Copy and paste',
+  summary: 'Ctrl+C carries a tile and its whole branch; Enter drops it where you are standing.',
   pheromones: ['tutorial', 'lesson', 'beginner', 'editing'],
   async run(stage) {
     const two = await subjects(stage, 2, names(stage), 5)
@@ -143,6 +147,7 @@ tutorialLessons.register({
   level: L,
   order: 50,
   title: 'Remove a tile',
+  summary: 'Delete takes a tile off the page — and a branch is never removed without asking first.',
   pheromones: ['tutorial', 'lesson', 'beginner', 'editing'],
   async run(stage) {
     const spare = await stage.create(stage.t('tutorial.name.spare', 'Spare'), cover(6))
@@ -166,6 +171,7 @@ tutorialLessons.register({
   level: L,
   order: 60,
   title: 'Undo and redo',
+  summary: 'Ctrl+Z walks the page back a change at a time, Ctrl+Y walks it forward again.',
   pheromones: ['tutorial', 'lesson', 'beginner', 'history'],
   async run(stage) {
     // Stand alone: make something and remove it, so there is a change to undo.
@@ -202,6 +208,7 @@ tutorialLessons.register({
   level: L,
   order: 70,
   title: 'Fit and centre',
+  summary: 'Fit brings the whole page back on screen in one move when you have wandered off.',
   pheromones: ['tutorial', 'lesson', 'beginner', 'navigation'],
   async run(stage) {
     const c = stage.center()
@@ -220,6 +227,7 @@ tutorialLessons.register({
   level: L,
   order: 80,
   title: 'Arrange the page',
+  summary: 'Tiles fill the page along a sequence — cycle it and the page re-lays itself.',
   pheromones: ['tutorial', 'lesson', 'beginner', 'appearance', 'structure'],
   async run(stage) {
     await subjects(stage, 3, names(stage), 7)
