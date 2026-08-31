@@ -10,12 +10,16 @@
 //
 // So there is one act, reached by one effect:
 //
-//   parts:distribute-visual  { segments, parts?, creationId?, place? }
+//   parts:distribute-visual  { segments, parts?, creationId?, place?, divide? }
 //
 // `segments` is the WHOLE. `parts` is the ordered list of the parts it was
 // broken into; leave it out and the whole's children are read in layer order,
 // narrowed to the ones stamped with `creationId` when one is given — which is
 // what a producer that has just created a batch actually holds.
+//
+// `divide: false` says nothing was cut up — the tiles are still owed their own
+// appearance, but no frame is declared and nobody is seated. That is what
+// `/expand`, the atomizers and importers want: they widen, they do not deepen.
 //
 // WHY AN EFFECT AND NOT A CALL. A part-producing act can finish anywhere: in
 // the hive, in a worker, or — for break-apart — in a bridge-connected session
@@ -33,13 +37,23 @@
 import { Drone, EffectBus, normalizeCell } from '@hypercomb/core'
 import { readChildrenStrict, type PlacementHistory } from '../history/layer-placement.js'
 import { creationsOf } from './creation.js'
-import { distributeVisual } from './visual-distribution.js'
+import { distributeVisual, dressParts } from './visual-distribution.js'
 
 type DistributeRequest = {
   segments?: readonly string[]
   parts?: readonly string[]
   creationId?: string
   place?: boolean
+  /** Did a whole's appearance actually get DIVIDED among these tiles?
+   *
+   *  True (the default) is break-apart: the tiles are parts of the whole at
+   *  `segments`, so it gains a frame and they are seated into it.
+   *
+   *  False is everything that widens rather than deepens — `/expand`, an
+   *  atomizer, an importer. Those tiles are still owed their own appearance
+   *  (rule 10's third clause) but nothing was cut up, so declaring a frame
+   *  would re-declare the arity of a whole nobody broke apart. */
+  divide?: boolean
 }
 
 type LineageLike = { explorerSegments?: () => readonly string[]; domain?: unknown }
@@ -103,6 +117,17 @@ export class VisualDistributionDrone extends Drone {
     if (parts.length === 0) {
       console.log(`[visual-distribution] /${wholeSegments.join('/')} has no parts to dress`)
       return 0
+    }
+
+    if (request?.divide === false) {
+      const { dressed, kept } = await dressParts({ segments: wholeSegments, parts })
+      if (dressed) {
+        EffectBus.emit('toast:show', {
+          type: 'tip',
+          message: `${dressed} new ${dressed === 1 ? 'tile' : 'tiles'} now carry a picture of their own.`,
+        })
+      }
+      return dressed + kept
     }
 
     const outcome = await distributeVisual({

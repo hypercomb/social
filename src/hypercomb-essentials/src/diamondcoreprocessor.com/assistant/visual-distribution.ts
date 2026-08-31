@@ -231,6 +231,58 @@ export async function distributeVisual(opts: {
   return { ok: true, slots: plan.arity, divided, derived, kept }
 }
 
+/**
+ * Give each of these tiles a visual of its own — and declare nothing.
+ *
+ * The half of rule 10 that applies when NOTHING WAS DIVIDED. `/expand` widens
+ * a layer, an atomizer turns a dropped structure into tiles, an importer lands
+ * a set: in none of those did a whole's appearance get cut up, so there is no
+ * frame to declare and no division to seat anybody into. What is still owed is
+ * the rule's third clause — *where there is nothing to divide, each part is
+ * GIVEN its own visual at creation, derived from what that part is, never left
+ * absent*.
+ *
+ * Writing a frame here would be worse than doing nothing: it would re-declare
+ * the arity of a whole that was never broken apart, and on a whole that WAS,
+ * every existing part's region would silently stop lining up.
+ *
+ * Same refusals as `distributeVisual`: a tile that already owns its picture is
+ * left alone, and an inherited one does not count as owning.
+ */
+export async function dressParts(opts: {
+  readonly segments: readonly string[]
+  readonly parts: readonly string[]
+}): Promise<{ readonly dressed: number; readonly kept: number }> {
+  const segments = opts.segments.map(s => String(s ?? '').trim()).filter(Boolean)
+  const parts = opts.parts.map(p => String(p ?? '').trim()).filter(Boolean)
+  if (parts.length === 0) return { dressed: 0, kept: 0 }
+
+  const store = get<StoreLike>('@hypercomb.social/Store')
+  if (!store?.putResource) return { dressed: 0, kept: 0 }
+
+  let dressed = 0
+  let kept = 0
+  for (const part of parts) {
+    try {
+      if (isParticipantImage(await readOwnTilePropertiesAt(segments, part))) { kept++; continue }
+      const bytes = await drawDerived(derivedVisualSpec(part))
+      if (!bytes) continue
+      const sig = await store.putResource(bytes)
+      await writeTilePropertiesAt(segments, part, {
+        large: { image: sig, x: 0, y: 0, scale: 1 },
+        small: { image: sig },
+        substrate: undefined,
+      })
+      EffectBus.emit('tile:saved', { cell: part, segments })
+      dressed++
+    } catch (err) {
+      console.warn('[visual-distribution] could not dress', part, err)
+    }
+  }
+  console.log(`[visual-distribution] /${segments.join('/')}: dressed ${dressed}, ${kept} already had a picture`)
+  return { dressed, kept }
+}
+
 // ── the relation ────────────────────────────────────────────────────────
 
 /**

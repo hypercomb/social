@@ -370,6 +370,23 @@ export class OrganizeDrone extends Drone {
         if (landed.length === g.members.length) receipt.landed()
         else if (landed.length === 0) receipt.skipped('refused every move')
         else receipt.skipped('partly moved')
+
+        // RULES 10 AND 11 (website-artifact-paradigm.md). A group organize
+        // mints is a new artifact and owes an appearance of its own — nothing
+        // was cut up to make it, so it is GIVEN one derived from what it is.
+        // Its members are then its parts: the group takes a frame, and each
+        // member is seated into the hole its position names. Members that
+        // already carry a picture keep it — organize re-homes, it never
+        // redresses. Fire-and-forget: a group that could not be dressed is a
+        // plainer tile, never a failed organize.
+        EffectBus.emit('parts:distribute-visual', {
+          segments, parts: [g.name], divide: false,
+        })
+        if (landed.length > 0) {
+          EffectBus.emit('parts:distribute-visual', {
+            segments: [...segments, g.name], parts: landed, place: false,
+          })
+        }
       }
 
       const r = receipt.build()
