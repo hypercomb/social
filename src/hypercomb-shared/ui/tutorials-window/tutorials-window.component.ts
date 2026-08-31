@@ -37,6 +37,7 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
+import { accordion } from '../accordion'
 import { signalSession } from '../window-session'
 
 /** Structural mirrors of the essentials shapes — shared cannot import them. */
@@ -140,8 +141,11 @@ export class TutorialsWindowComponent implements OnDestroy {
   readonly visible = signal(false)
   readonly query = signal('')
   readonly flown = signal<ReadonlySet<string>>(readFlown())
-  /** Which courses are showing their lessons. */
-  readonly expanded = signal<readonly string[]>([])
+  /** Which course is showing its lessons — ONE at a time (accordion.ts). Two
+   *  open at once pushed the courses below off the bottom of a 380px panel,
+   *  so the list you opened in order to browse became the thing you could not
+   *  browse. */
+  readonly sections = accordion()
   /** What the bee is flying right now, from `tutorial:flying`. */
   readonly flying = signal<{ level?: string; lesson?: string } | null>(null)
   /** Bumped to re-read the registry, which is an EventTarget, not a signal. */
@@ -151,9 +155,13 @@ export class TutorialsWindowComponent implements OnDestroy {
     this.visible,
     open => { EffectBus.emit('tutorials:state', { open }) },
     {
-      // One level per press: a search narrows the roster, so clearing it is a
-      // step back that must not also cost you the window.
-      dismiss: () => { if (!this.query()) return false; this.query.set(''); return true },
+      // One level per press, innermost first: a search narrows the roster and
+      // an open course narrows it again, so backing out of either is a step
+      // back that must not also cost you the window.
+      dismiss: () => {
+        if (this.query()) { this.query.set(''); return true }
+        return this.sections.dismiss()
+      },
       close: () => this.close(),
     },
   )
@@ -300,9 +308,11 @@ export class TutorialsWindowComponent implements OnDestroy {
   })
 
   /** A search opens every course it matched — a hit hidden inside a collapsed
-   *  section is a search that did not answer. */
+   *  section is a search that did not answer. It overrides the accordion
+   *  rather than writing to it, so clearing the search puts back whichever
+   *  section you had open before you typed. */
   isExpanded(level: string): boolean {
-    return this.searching() || this.expanded().includes(level)
+    return this.searching() || this.sections.isOpen(level)
   }
 
   /** Percent, for the inline fill styles. */
@@ -313,12 +323,13 @@ export class TutorialsWindowComponent implements OnDestroy {
   open(): void {
     if (!this.visible()) {
       this.revision.update(n => n + 1)
-      // Open on the course you are partway through, else the first one.
-      // Nothing is remembered here on purpose: where you are IS the progress.
-      const courses = this.roster()
-      const started = courses.find(course => course.flownCount > 0 && course.flownCount < course.total)
-      const target = started ?? courses[0]
-      this.expanded.set(target ? [target.level] : [])
+      // EVERY SECTION CLOSED. It used to pre-open whichever course you were
+      // partway through, which is the shell choosing for you: you arrive
+      // already inside one of four courses, with the other three pushed down
+      // by its eight rows. All four headers fit on the screen at once, and
+      // where you are is already said — by the Continue row at the top and by
+      // each course's own pill.
+      this.sections.closeAll()
     }
     this.visible.set(true)
     EffectBus.emit('tutorials:state', { open: true })
@@ -331,9 +342,10 @@ export class TutorialsWindowComponent implements OnDestroy {
   }
 
   toggleCourse(level: string): void {
+    // While searching every match is forced open, so a header press has
+    // nothing to say — it would write a state you cannot see the effect of.
     if (this.searching()) return
-    const open = this.expanded()
-    this.expanded.set(open.includes(level) ? open.filter(other => other !== level) : [...open, level])
+    this.sections.toggle(level)
   }
 
   /** Fly a whole course. Same effect `/tutorial <level>` raises, so the window

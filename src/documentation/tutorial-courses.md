@@ -40,7 +40,7 @@ What it shows, in one screen:
 | **Continue** | the list's FIRST ROW: the next lesson you have not flown, across every course — one door, no choosing. It stands down while you are searching, because the list is then the answer to what you typed |
 | **Progress** | a bar over the whole roster; per course a pill (`3/8`) and a hexagon that FILLS as you fly it, numbered with the course's step in the ramp |
 | **Search** | narrows by title, blurb, topic mark or id, and opens every course it matched |
-| **Courses** | title, one-line blurb, and a play button that flies the whole thing |
+| **Courses** | title, one-line blurb, and a play button that flies the whole thing. ONE open at a time (`ui/accordion.ts`), and the window opens with all four closed — all four headers fit on screen, and where you are is already said by the Continue row and each course's pill |
 | **Lessons** | curriculum number, title, one-line blurb, topic marks (click one to search it), a tick once flown |
 | **Flying** | while a tour is up: which lesson, and a Stop |
 

@@ -132,8 +132,38 @@ async function main() {
     check('every course says what it is for',
       snap.courses.every(c => c.blurb.length > 20),
       snap.courses.map(c => c.blurb.slice(0, 34)).join(' | '))
-    check('exactly one course is open on arrival',
-      snap.courses.filter(c => c.open).length === 1)
+    check('every section is closed on arrival',
+      snap.courses.filter(c => c.open).length === 0,
+      snap.courses.filter(c => c.open).map(c => c.title).join(',') || 'all closed')
+
+    // ── ONE SECTION OPEN AT A TIME ────────────────────────────────────
+    // Two open at once pushed the courses below off the bottom of a 380px
+    // panel, so the list you opened in order to browse became the thing you
+    // could not browse. Opening a header closes the others.
+    await page.locator('.tut-course-head').first().click()
+    await page.waitForTimeout(400)
+    snap = await page.evaluate(SNAP)
+    check('a header opens its section', snap.courses.filter(c => c.open).length === 1,
+      snap.courses.find(c => c.open)?.title ?? 'none')
+
+    await page.locator('.tut-course-head').nth(2).click()
+    await page.waitForTimeout(400)
+    snap = await page.evaluate(SNAP)
+    check('opening another closes the first', snap.courses.filter(c => c.open).length === 1,
+      snap.courses.find(c => c.open)?.title ?? 'none')
+    check('and it is the one that was pressed',
+      snap.courses.filter(c => c.open)[0]?.title === snap.courses[2]?.title)
+
+    await page.locator('.tut-course-head').nth(2).click()
+    await page.waitForTimeout(400)
+    check('pressing the open one closes it, so all-closed is reachable',
+      (await page.evaluate(SNAP)).courses.filter(c => c.open).length === 0)
+
+    // Back to one open, for the rows the rest of the run reads.
+    await page.locator('.tut-course-head').first().click()
+    await page.waitForTimeout(400)
+    snap = await page.evaluate(SNAP)
+    await shot('01b-one-open')
 
     const open = snap.courses.find(c => c.open)
     check('its lessons carry a one-line description',
@@ -229,6 +259,22 @@ async function main() {
     await emit(page, 'tutorial:flying', { running: false })
     await page.waitForTimeout(300)
     check('the banner leaves with the tour', !(await page.evaluate(SNAP)).flying)
+
+    // ── Escape unwinds one level at a time ────────────────────────────
+    // An open section is state of the window's own, so backing out of it must
+    // not also cost you the window.
+    // The cascade routes Escape to the window the FOCUS is in, so the press
+    // only reaches this window once the focus is actually inside it. Focus
+    // the panel root (it carries tabindex="-1" for exactly this) rather than
+    // clicking a corner, which lands on the resize grip.
+    await page.evaluate(() => (document.querySelector('.tut-panel'))?.focus())
+    await page.waitForTimeout(300)
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(500)
+    snap = await page.evaluate(SNAP)
+    check('Escape closes the open section first, keeping the window',
+      snap.panel && snap.courses.filter(c => c.open).length === 0,
+      snap.panel ? 'window kept' : 'window closed too')
 
     // ── the rail's bee is the same door ───────────────────────────────
     await page.locator('.tut-close').click()

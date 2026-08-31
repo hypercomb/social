@@ -110,6 +110,43 @@ authoritative list):
 Note: a surface may relocate itself after mount (history-viewer portals to
 `document.body`) — counting host children finds it absent by design.
 
+## One section open at a time
+
+`hypercomb-shared/ui/accordion.ts`
+
+A window that lists things under **peer section headers** opens one section at
+a time. Open a header and the others close; pressing the open one closes it,
+so all-closed is reachable; a window opens with nothing expanded.
+
+The reason is the panel, not taste. A tool window is 300–640px wide. Let two
+headers stand open and the second one's rows push the third, fourth and fifth
+off the bottom — so the list you opened in order to browse it is the one thing
+you can no longer browse.
+
+The rule was already there, hand-rolled: `publish-status.drone.ts` clears its
+expanded set before adding (`#expanded.clear()`), which is this behaviour
+written out longhand. The tutorials window was the one list that disagreed.
+`accordion()` names it so the next such window inherits it instead of
+re-deciding what a header click means:
+
+```ts
+readonly sections = accordion()
+// template: isOpen(key) → sections.isOpen(key) · (click) → sections.toggle(key)
+// on open:  sections.closeAll()
+// Escape:   sections.dismiss() — a rung BEFORE closing the window
+```
+
+It is signal-backed because the shells run `provideZonelessChangeDetection()`:
+a plain getter read from a template would never repaint, so the header would
+flip and the section would not move.
+
+**It is not for trees.** An outline collapses its branches independently —
+reading one paragraph while another stays open is the whole point of an
+outline. The notes strip's note chevrons and the chat list's archive
+disclosure are outlines and stay as they are. This is for a flat set of
+headers over one list, where exactly one of them is the thing you are
+looking at.
+
 ## What stays in the templates
 
 Only bound or structural chrome: the header bar (command line / app-header,
