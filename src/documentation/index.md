@@ -33,6 +33,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 - [llm-primitive.md](llm-primitive.md) — Hypergraph primitive connecting signatures through LLM command transforms
 - [group-signatures.md](group-signatures.md) — Group identity as a first-class citizen: sign('group:<meaning>') carried by every member, so a set adds and deletes as one unit
 - [website-artifact-paradigm.md](website-artifact-paradigm.md) — Atomic artifacts related by decoration: never mint a parent to hold a view's members; one website artifact names the relation and every member wears its mark
+- [layout-templates.md](layout-templates.md) — Named, shared layouts a container opts into by wearing a mark: holes are an interface, arity is data, and one inherited variable vocabulary replaces a namespace per layout
 
 ## Architecture
 
@@ -77,6 +78,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 
 - [publishing.md](publishing.md) — How to publish today: content, modules, and apps — three rails and their gotchas
 - [infrastructure.md](infrastructure.md) — Decentralized design: two relays, no centralized hosting
+- [hosting-from-a-machine.md](hosting-from-a-machine.md) — Being a host: the desktop client and the headless `hypercomb-serve` answer the host contract live out of the store, with no export step
 - [lets-discover-meadowverse-pipeline.md](lets-discover-meadowverse-pipeline.md) — Authoring-runtime split: hypercomb.io → meadowverse.ca
 - [feedback-channel.md](feedback-channel.md) — Durable feedback transport — the loop routed through jwize.com
 
@@ -90,6 +92,7 @@ Forward-looking proposals and migration plans — not yet built. Retained so the
 - [feature-tuning-garage.md](feature-tuning-garage.md) — Installer feature-gating, two-lens review, capability dedup, and signature-addressed tuning recipes
 - [sign-meaning-pool-migration-plan.md](sign-meaning-pool-migration-plan.md) — Removing the underscore folders in favour of `sign(meaning)` pools
 - [three-js-migration-plan.md](three-js-migration-plan.md) — Pixi.js → three.js feasibility and strategy evaluation
+- [shim-extraction-scope.md](shim-extraction-scope.md) — Shipping the shim + host kit as standalone packages: the measured dependency closure, the 18x code-splitting win, and why store.ts is the only blocker
 
 ## Security & Governance
 

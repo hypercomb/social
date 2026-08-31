@@ -11,6 +11,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 hypercomb-host.workspace = true
+hypercomb-serve.workspace = true
 hypercomb-store.workspace = true
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"

@@ -1306,6 +1306,7 @@ name = "hypercomb-client"
 version = "0.1.0"
 dependencies = [
  "hypercomb-host",
+ "hypercomb-serve",
  "hypercomb-store",
  "serde",
  "serde_json",
@@ -1334,6 +1335,16 @@ dependencies = [
  "serde_json",
  "sha2",
  "unicode-normalization",
+]
+
+[[package]]
+name = "hypercomb-serve"
+version = "0.1.0"
+dependencies = [
+ "hypercomb-host",
+ "hypercomb-protocol",
+ "hypercomb-store",
+ "tempfile",
 ]
 
 [[package]]

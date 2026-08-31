@@ -81,13 +81,13 @@ jobs:
       # is the honest boundary. Portable logic here, window down there.
       - name: Conformance and unit tests
         working-directory: src/hypercomb-client
-        run: cargo test --release -p hypercomb-protocol -p hypercomb-store -p hypercomb-host
+        run: cargo test --release -p hypercomb-protocol -p hypercomb-store -p hypercomb-host -p hypercomb-serve
 
       - name: Lint the library crates
         working-directory: src/hypercomb-client
         run: |
           cargo clippy --release --all-targets \
-            -p hypercomb-protocol -p hypercomb-store -p hypercomb-host -- -D warnings
+            -p hypercomb-protocol -p hypercomb-store -p hypercomb-host -p hypercomb-serve -- -D warnings
 
       # ── The frontend the window actually shows ────────────────────────────
 
@@ -104,6 +104,37 @@ jobs:
       - name: Build essentials modules
         working-directory: src
         run: npm run build:essentials
+
+      # The shell a VISITOR boots when this machine serves its hive — a
+      # different artifact from the app's own frontend, for a different reader.
+      # See scripts/stage-host-shell.mjs. Without it the shipped app's
+      # Hive > Serve This Hive has nothing to serve.
+      - name: Build the shim
+        working-directory: src
+        run: npm run build:shim
+
+      - name: Stage the host shell into the client
+        working-directory: src
+        run: node hypercomb-client/scripts/stage-host-shell.mjs
+
+      # The host contract, mechanically, against the real binary: eleven rules
+      # that each fail silently and expensively in production. A HARD GATE — a
+      # host that fails the contract is not a host.
+      - name: Host conformance — check-host.mjs against the real binary
+        working-directory: src
+        run: |
+          set -euo pipefail
+          cargo build --release -p hypercomb-serve --bin hypercomb-serve --manifest-path hypercomb-client/Cargo.toml
+          HIVE="$(mktemp -d)"
+          HOST=hypercomb-client/target/release/hypercomb-serve
+          "$HOST" --hive "$HIVE" --shell hypercomb-client/app/host-shell --port 4271 --local &
+          HOST_PID=$!
+          trap 'kill $HOST_PID 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:4271/pin >/dev/null 2>&1 && break
+            sleep 1
+          done
+          node hypercomb-shim/host/check-host.mjs http://localhost:4271
 
       # The baked import map resolves 'pixi.js' to /vendor/pixi.runtime.js, so
       # the vendor bundle has to exist before the web build copies public/.

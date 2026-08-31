@@ -1,7 +1,7 @@
-# The native client (Windows and macOS)
+# The native client (Windows, macOS and Linux)
 
 `src/hypercomb-client` is one Tauri 2 project that builds a native window on
-the hive for both Windows and macOS. There is no per-platform fork, and there
+the hive for Windows, macOS and Linux. There is no per-platform fork, and there
 should not be one.
 
 ## Why one project
@@ -111,6 +111,40 @@ stays in it.
 | A restore reloads | The running shell holds the pre-restore head in memory and would keep painting it. A restore you cannot see reads as a restore that did not happen. |
 | The parent folder is fine | A picked folder with no hive in it, holding exactly one subfolder that has one, restores from that subfolder. Two candidates restore nothing rather than guess which hive was meant. |
 
+## Serving the hive
+
+**Hive ▸ Serve This Hive** turns this machine into a host: other people's
+browsers open it, and other nodes replicate from it. It binds every interface on
+the first free port in 4270–4279 and reports the address; **Stop Serving** ends
+it, and so does quitting.
+
+Nothing is exported first. `hypercomb-serve` (`crates/serve`) answers the host
+contract live out of the open store — `/<sig>` is a content read, `/<bagSig>/
+00000007` is a marker, `/<poolSig>/<member>` is a pool member — so the hive
+being served is the hive as it is, not a copy that was current when someone last
+remembered to publish. Full picture:
+[hosting-from-a-machine.md](hosting-from-a-machine.md).
+
+Three things about it are deliberate and should stay that way:
+
+- **The renderer cannot reach any of it.** Serving is a native menu action, like
+  backup. Page script chooses no port, learns no address, and cannot turn the
+  host on. Adopted content runs in that renderer.
+- **The store is not opened twice.** redb is single-writer and the app holds it
+  open, so the host reads through the `Host` already in app state (an
+  `AppHandle`, which is `Send + Sync + 'static`; a `State` guard could never
+  be). Never open a second store for serving — including from the headless
+  binary, which must be pointed at a hive nothing else has open.
+- **The shell is the shim, not this app's frontend.** They are different
+  artifacts for different readers: `app/frontend` is the Angular shell THIS
+  window shows, baked for its webview with a static import map and no `/pin`.
+  `app/host-shell` is what a stranger's browser boots, and only a shim build
+  mints the `/pin` → bootstrap-bundle pair the contract requires. Stage it with
+  `node scripts/stage-host-shell.mjs` after `npm run build:shim`; all three CI
+  workflows do it before bundling.
+
+There is no write path, on purpose. A host publishes; it does not accept.
+
 ## Nothing in the shell may navigate the document
 
 A native window has no address bar. Three behaviours were measured in
@@ -135,13 +169,20 @@ it is a reboot — drones unload, the store re-opens, every bee re-instantiates.
 
 ## What differs per platform
 
-| | Windows | macOS |
-|---|---|---|
-| Bundle | `msi`, `nsis` | `app`, `dmg` |
-| Config | `app/tauri.windows.conf.json` | `app/tauri.macos.conf.json` |
-| Icon | `icons/icon.ico` | `icons/icon.icns` |
-| Webview | WebView2 (Chromium) | WKWebView (WebKit) |
-| Hive lives at | `%APPDATA%\io.hypercomb.client\hive` | `~/Library/Application Support/io.hypercomb.client/hive` |
+| | Windows | macOS | Linux |
+|---|---|---|---|
+| Bundle | `msi`, `nsis` | `app`, `dmg` | `deb`, `appimage` |
+| Config | `app/tauri.windows.conf.json` | `app/tauri.macos.conf.json` | `app/tauri.linux.conf.json` |
+| Icon | `icons/icon.ico` | `icons/icon.icns` | the PNG set |
+| Webview | WebView2 (Chromium) | WKWebView (WebKit) | WebKitGTK 4.1 |
+| Hive lives at | `%APPDATA%\io.hypercomb.client\hive` | `~/Library/Application Support/io.hypercomb.client/hive` | `~/.local/share/io.hypercomb.client/hive` |
+
+Linux is the platform that matters for HOSTING — see *Serving the hive* above —
+so its workflow also builds and ships `hypercomb-serve`, the headless host, as
+a separate artifact. The webview there is versioned in the distro rather than
+shipped with the OS: Tauri 2 targets WebKitGTK **4.1**, which is what Ubuntu
+24.04 carries. A 4.0 image fails at link time, which is the good failure; the
+bad one is a mismatched libsoup that only shows up as a blank window.
 
 Tauri merges `tauri.<platform>.conf.json` over `tauri.conf.json` automatically
 for whichever target is being built. No flag selects it. Everything common —
@@ -405,3 +446,9 @@ client to anyone else needs a certificate.
 - Windows builds x64 only; there is no ARM64 target in the workflow.
 - No macOS-native window chrome work has been done — the window is the same
   1280x800 dark-themed window as on Windows.
+- The Linux workflow has never run. The serving crate's own tests and the host
+  conformance check pass locally on Windows; the .deb, the AppImage and the
+  Xvfb smoke test are unexercised until its first green run.
+- Serving speaks plain HTTP and holds no certificate. Reaching a host from the
+  internet is a port forward, a tunnel or a reverse proxy — the app does not
+  try to arrange one, and there is no UPnP or hole-punching anywhere in it.

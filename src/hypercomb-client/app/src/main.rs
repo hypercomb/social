@@ -534,6 +534,139 @@ fn instance_name() -> String {
     "default".to_string()
 }
 
+// ---------------------------------------------------------------------------
+// hosting — the hive, served to other machines
+//
+// A published hive is a static host: a shim build, plus the interchange form of
+// the content, behind seven rules that `hypercomb-shim/host/check-host.mjs`
+// tests. `hypercomb-serve` answers all of it live out of THIS store, so the
+// desktop app can be the origin other nodes replicate from without exporting a
+// folder first and without anything running in a cloud.
+//
+// The renderer cannot reach any of this. Serving is a native menu action, the
+// same as backup — page script chooses no port, learns no address, and cannot
+// turn the host on. Adopted content runs in that renderer.
+// ---------------------------------------------------------------------------
+
+/// The hive, read through the app that owns it.
+///
+/// The store is one memory-mapped database with a single writer, so the host
+/// must NOT open its own — it reads through the `Host` already in app state.
+/// An `AppHandle` is `Send + Sync + 'static`, which is exactly what the
+/// listener threads need and what a `State` guard could never be.
+#[derive(Debug)]
+struct AppHive(tauri::AppHandle);
+
+impl hypercomb_serve::HiveSource for AppHive {
+    fn content(&self, sig: &str) -> Option<Vec<u8>> {
+        self.0.state::<Host>().raw_get(sig).ok().flatten()
+    }
+
+    fn entry(&self, sig: &str, name: &str) -> Option<Vec<u8>> {
+        self.0.state::<Host>().raw_dir_get(sig, name).ok().flatten()
+    }
+}
+
+/// The running host, or nothing. Managed state so the menu can stop what the
+/// menu started, and so quitting drops the listener with the app.
+#[derive(Debug, Default)]
+struct Hosting(std::sync::Mutex<Option<hypercomb_serve::Serving>>);
+
+/// Ports tried, in order. A fixed first choice matters — an address someone
+/// wrote down should still work tomorrow — but a second instance, or a dev
+/// server on the same machine, must not turn "serve" into a dead end.
+const HOST_PORTS: std::ops::RangeInclusive<u16> = 4270..=4279;
+
+/// The shell a visitor's browser boots: a built `hypercomb-shim/dist`.
+///
+/// Bundled as a resource rather than assembled here, because it is not ours to
+/// improvise: `/pin` names a bootstrap bundle whose bytes must hash to it, and
+/// the shim build is what mints that pair.
+fn host_shell(app: &tauri::AppHandle) -> Option<PathBuf> {
+    if let Ok(path) = app
+        .path()
+        .resolve("host-shell", tauri::path::BaseDirectory::Resource)
+    {
+        if path.join("index.html").is_file() && path.join("pin").is_file() {
+            return Some(path);
+        }
+    }
+    // Development only: serve the repo's own shim build, so `tauri dev` can
+    // host without a staging step. Never compiled into a release binary — a
+    // shipped app must not depend on a path from the machine that built it.
+    if cfg!(debug_assertions) {
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../hypercomb-shim/dist");
+        if repo.join("index.html").is_file() {
+            return Some(repo);
+        }
+    }
+    None
+}
+
+/// Start serving, returning the address to hand out.
+fn start_hosting(app: &tauri::AppHandle) -> std::result::Result<String, String> {
+    let Some(shell) = host_shell(app) else {
+        return Err(
+            "This build has no host shell.\n\n\
+             Serving needs a built hypercomb-shim (its index.html, /pin and the packages a \
+             first-time visitor boots from), staged into the app as `host-shell`. Build one with \
+             `npm run build:shim`, then `node hypercomb-client/scripts/stage-host-shell.mjs`."
+                .to_string(),
+        );
+    };
+
+    let hive: std::sync::Arc<dyn hypercomb_serve::HiveSource> =
+        std::sync::Arc::new(AppHive(app.clone()));
+    let mut last: Option<String> = None;
+
+    for port in HOST_PORTS {
+        // Every interface, not loopback: a host nobody else can reach is not a
+        // host. What it is reachable BY is the network's business — a LAN, a
+        // tunnel, a forwarded port.
+        match hypercomb_serve::serve(&shell, hive.clone(), hypercomb_serve::ANY, port) {
+            Ok(serving) => {
+                let url = serving.lan_url();
+                match app.state::<Hosting>().0.lock() {
+                    Ok(mut held) => *held = Some(serving),
+                    // A poisoned lock means a previous handler panicked while
+                    // holding it. Stop the listener we just started rather than
+                    // leak one nothing can turn off.
+                    Err(_) => {
+                        serving.stop();
+                        return Err("The hosting state is not usable — restart the app.".into());
+                    }
+                }
+                return Ok(url);
+            }
+            Err(e) => last = Some(e.to_string()),
+        }
+    }
+
+    Err(format!(
+        "No free port between {} and {}.\n\n{}",
+        HOST_PORTS.start(),
+        HOST_PORTS.end(),
+        last.unwrap_or_default()
+    ))
+}
+
+/// Stop serving. Returns whether anything was running.
+fn stop_hosting(app: &tauri::AppHandle) -> bool {
+    let taken = app
+        .state::<Hosting>()
+        .0
+        .lock()
+        .ok()
+        .and_then(|mut held| held.take());
+    match taken {
+        Some(serving) => {
+            serving.stop();
+            true
+        }
+        None => false,
+    }
+}
+
 fn main() {
     let instance = instance_name();
     tauri::Builder::default()
@@ -555,6 +688,10 @@ fn main() {
 
             let host = Host::open(&dir).map_err(|e| format!("opening hive at {}: {e}", dir.display()))?;
             app.manage(host);
+            // Not serving until asked. Managed here so the listener is owned by
+            // the app and dies with it — a host that outlived its window would
+            // keep publishing a hive nobody is looking at.
+            app.manage(Hosting::default());
 
             // Truncated per launch, so a log always describes ONE run rather
             // than an accumulating pile that hides which failure was current.
@@ -614,11 +751,18 @@ fn main() {
                 let forget = MenuItemBuilder::with_id("hive-forget-backup", "Forget Backup Folder")
                     .enabled(remembered.is_some())
                     .build(app)?;
+                let serve_item = MenuItemBuilder::with_id("hive-serve", "Serve This Hive…").build(app)?;
+                let serve_stop = MenuItemBuilder::with_id("hive-serve-stop", "Stop Serving")
+                    .enabled(false)
+                    .build(app)?;
                 let hive = SubmenuBuilder::new(app, "Hive")
                     .item(&backup)
                     .item(&backup_again)
                     .separator()
                     .item(&restore)
+                    .separator()
+                    .item(&serve_item)
+                    .item(&serve_stop)
                     .separator()
                     .item(&forget)
                     .build()?;
@@ -693,6 +837,73 @@ fn main() {
                 let instance_label = instance.clone();
                 app.on_menu_event(move |app, event| {
                     let id = event.id().as_ref().to_string();
+
+                    // ── Serving ───────────────────────────────────────────
+                    //
+                    // Ahead of the backup branch and on its own thread: binding
+                    // a socket is fast, but the dialog that reports the address
+                    // is modal, and a modal on the menu thread freezes the
+                    // window it belongs to.
+                    if id == "hive-serve" || id == "hive-serve-stop" {
+                        let app = app.clone();
+                        let serve_item = serve_item.clone();
+                        let serve_stop = serve_stop.clone();
+                        std::thread::spawn(move || {
+                            use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+
+                            if id == "hive-serve-stop" {
+                                let was_serving = stop_hosting(&app);
+                                let _ = serve_item.set_enabled(true);
+                                let _ = serve_stop.set_enabled(false);
+                                let _ = serve_stop.set_text("Stop Serving");
+                                if was_serving {
+                                    app.dialog()
+                                        .message(
+                                            "This hive is no longer served.\n\n\
+                                             Nothing was removed. Anyone who already replicated from \
+                                             it keeps what they pulled — they verified every byte \
+                                             against its own signature when they took it.",
+                                        )
+                                        .title("Stopped Serving")
+                                        .blocking_show();
+                                }
+                                return;
+                            }
+
+                            match start_hosting(&app) {
+                                Ok(url) => {
+                                    let _ = serve_item.set_enabled(false);
+                                    let _ = serve_stop.set_enabled(true);
+                                    let _ = serve_stop.set_text(format!(
+                                        "Stop Serving ({})",
+                                        url.trim_start_matches("http://")
+                                    ));
+                                    app.dialog()
+                                        .message(format!(
+                                            "This hive is being served at\n\n    {url}\n\n\
+                                             Anyone who can reach that address can open the hive and \
+                                             replicate from it. Every byte they take is checked \
+                                             against its own signature, so a host can cost them a \
+                                             404 but never a wrong answer.\n\n\
+                                             It speaks plain HTTP and holds no certificate. To put \
+                                             it on the internet, forward the port, or run a tunnel \
+                                             or a reverse proxy in front of it.",
+                                        ))
+                                        .title("Serving This Hive")
+                                        .blocking_show();
+                                }
+                                Err(why) => {
+                                    app.dialog()
+                                        .message(why)
+                                        .kind(MessageDialogKind::Warning)
+                                        .title("Could Not Serve")
+                                        .blocking_show();
+                                }
+                            }
+                        });
+                        return;
+                    }
+
                     if !matches!(
                         id.as_str(),
                         "hive-backup" | "hive-backup-again" | "hive-restore" | "hive-forget-backup"
