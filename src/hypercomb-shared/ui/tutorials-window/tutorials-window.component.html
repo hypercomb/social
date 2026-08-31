@@ -20,21 +20,6 @@
       <button class="tut-close" type="button" (click)="close()" [attr.aria-label]="'tutorials.close' | t">&times;</button>
     </header>
 
-    <!-- IN THE AIR. The one piece of state the roster cannot read off itself:
-         a tour is running somewhere over the hive, and this is where you stop
-         it. Absent when nothing is flying, so the window is not carrying a
-         permanently-dead control. -->
-    @if (flying()) {
-      <div class="tut-flying" role="status">
-        <span class="tut-flying-pulse" aria-hidden="true"></span>
-        <span class="tut-flying-copy">
-          <strong>{{ flyingRow()?.title ?? flyingCourse()?.title ?? ('tutorials.flying.generic' | t) }}</strong>
-          @if (flyingCourse(); as course) { <small>{{ course.title }}</small> }
-        </span>
-        <button class="tut-stop" type="button" (click)="stop()">{{ 'tutorials.stop' | t }}</button>
-      </div>
-    }
-
     @if (totalLessons() === 0) {
       <p class="tut-empty">{{ 'tutorials.empty' | t }}</p>
     } @else {
@@ -64,30 +49,48 @@
       }
 
       <div class="tut-scroll">
-        <!-- THE ONE DOOR, AND IT IS A ROW LIKE THE REST. Forty-odd lessons is
-             too many to choose from cold, so the list opens with the next one
-             you have not flown — but as the FIRST ITEM, not as a slab of
-             chrome above the list saying the same thing in a different
-             shape. It stands down while you are searching: the list is then
-             the answer to what you typed, and a row that ignores the search
-             would be the first thing you had to read past. -->
+        <!-- THE CARTRIDGE. One slot at the head of the list holding the ONE
+             lesson you are on: the next unflown one by default, the row you
+             pressed once you press one, the tour itself while a tour runs.
+             It was three surfaces naming the same lesson — a flying banner, a
+             Continue card, and the lesson's own row in the list. It is one.
+
+             It STICKS to the top of the scroller so the Stop stays reachable
+             however far down the list you have gone, and it stands down while
+             you are searching: the list is then the answer to what you typed,
+             and a row that ignores the search would be the first thing you
+             had to read past. -->
         @if (!searching()) {
-          @if (next(); as up) {
-            <button class="tut-continue" type="button" (click)="flyLesson(up.id)">
-              <span class="tut-continue-mark" aria-hidden="true"><span class="mat-sym">play_arrow</span></span>
-              <span class="tut-continue-copy">
-                <small>{{ (totalFlown() === 0 ? 'tutorials.begin' : 'tutorials.continue') | t }}</small>
-                <strong>{{ up.title }}</strong>
-                @if (up.summary) { <span class="tut-about">{{ up.summary }}</span> }
-              </span>
-            </button>
+          @if (cartridge(); as up) {
+            <div class="tut-slot" [class.is-flying]="!!flying()">
+              <button class="tut-continue" type="button" (click)="flyLesson(up.id)"
+                [attr.aria-label]="'tutorials.fly-lesson' | t: { lesson: up.title }">
+                <span class="tut-continue-mark" aria-hidden="true">
+                  @if (flying()) { <span class="tut-pulse"></span> }
+                  @else { <span class="mat-sym">play_arrow</span> }
+                </span>
+                <span class="tut-continue-copy">
+                  <small>
+                    @if (flying()) { {{ flyingCourse()?.title ?? ('tutorials.flying.generic' | t) }} }
+                    @else { {{ (totalFlown() === 0 ? 'tutorials.begin' : 'tutorials.continue') | t }} }
+                  </small>
+                  <strong>{{ up.title }}</strong>
+                  @if (up.summary) { <span class="tut-about">{{ up.summary }}</span> }
+                </span>
+              </button>
+              @if (flying()) {
+                <button class="tut-stop" type="button" (click)="stop()">{{ 'tutorials.stop' | t }}</button>
+              }
+            </div>
           } @else {
             <p class="tut-done">{{ 'tutorials.all-flown' | t }}</p>
           }
         }
 
         @for (course of courses(); track course.level) {
-          <section class="tut-course" [class.is-open]="isExpanded(course.level)">
+          <section class="tut-course"
+            [class.is-open]="isExpanded(course.level)"
+            [class.is-active]="course.level === activeLevel() && !searching()">
             <header class="tut-course-head" (click)="toggleCourse(course.level)">
               <!-- The step in the ramp, and how far through it you are, in one
                    glyph in the hive's own shape: the number is the course's
@@ -101,7 +104,10 @@
                   <strong>{{ course.title }}</strong>
                   <span class="tut-pill">{{ course.flownCount }}/{{ course.total }}</span>
                 </span>
-                @if (course.summary) { <small>{{ course.summary }}</small> }
+                <!-- The blurb goes when the course is ACTIVE: the cartridge
+                     above already says which course you are in, so this would
+                     be the same subject introduced twice. -->
+                @if (course.summary && course.level !== activeLevel()) { <small>{{ course.summary }}</small> }
               </span>
               <button
                 class="tut-fly"

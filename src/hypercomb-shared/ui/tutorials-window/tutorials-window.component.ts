@@ -148,6 +148,10 @@ export class TutorialsWindowComponent implements OnDestroy {
   readonly sections = accordion()
   /** What the bee is flying right now, from `tutorial:flying`. */
   readonly flying = signal<{ level?: string; lesson?: string } | null>(null)
+  /** THE CARTRIDGE you set into the top: the lesson you picked. Cleared once
+   *  it has been flown, so the slot falls back to the next unflown one rather
+   *  than sitting on something you have finished. */
+  readonly picked = signal<string | null>(null)
   /** Bumped to re-read the registry, which is an EventTarget, not a signal. */
   readonly revision = signal(0)
 
@@ -179,7 +183,11 @@ export class TutorialsWindowComponent implements OnDestroy {
     ))
     this.#cleanups.push(EffectBus.on<{ lesson?: string }>('tutorial:flown', payload => {
       const id = payload?.lesson
-      if (!id || this.flown().has(id)) return
+      if (!id) return
+      // A finished lesson is no longer what you are on, so the slot hands
+      // itself back to Continue rather than sitting on something done.
+      if (this.picked() === id) this.picked.set(null)
+      if (this.flown().has(id)) return
       const next = new Set(this.flown())
       next.add(id)
       writeFlown(next)
@@ -257,19 +265,29 @@ export class TutorialsWindowComponent implements OnDestroy {
     })
   })
 
-  /** WHAT THE LIST SHOWS -- the roster narrowed by the search. A course with no
-   *  matching lesson drops out entirely; the rows that remain keep their own
-   *  numbers, because a lesson's number is its place in the curriculum, never
-   *  its position in a filtered list. */
+  /** WHAT THE LIST SHOWS -- the roster narrowed by the search, MINUS whatever
+   *  is loaded in the cartridge.
+   *
+   *  A lesson named at the top and again three rows down is the same lesson
+   *  twice, and the top one is not a summary of the list — it IS one of its
+   *  items, lifted out. So it leaves the list while it is up there, and drops
+   *  back in when something else takes its place. (While searching the
+   *  cartridge stands down entirely, so nothing is subtracted and the results
+   *  are complete.)
+   *
+   *  A course with no matching lesson drops out; the rows that remain keep
+   *  their own numbers, because a lesson's number is its place in the
+   *  curriculum, never its position in a filtered list. */
   readonly courses = computed<CourseRow[]>(() => {
     const needle = this.query().trim().toLowerCase()
-    if (!needle) return this.roster()
+    const lifted = needle ? null : this.cartridge()?.id ?? null
     return this.roster()
       .map(course => ({
         ...course,
-        matches: course.lessons.filter(lesson => this.#matches(lesson, course.title, needle)),
+        matches: course.lessons.filter(lesson =>
+          lesson.id !== lifted && (!needle || this.#matches(lesson, course.title, needle))),
       }))
-      .filter(course => course.matches.length > 0)
+      .filter(course => course.matches.length > 0 || !needle)
   })
 
   #matches(lesson: LessonRow, courseTitle: string, needle: string): boolean {
@@ -292,7 +310,31 @@ export class TutorialsWindowComponent implements OnDestroy {
     return null
   })
 
-  /** The lesson in the air, resolved for the banner. */
+  /** WHAT IS LOADED IN THE TOP SLOT, in priority order:
+   *
+   *    the lesson in the air  — while a tour runs, the slot IS that tour, and
+   *                             it is where the Stop lives
+   *    the one you picked     — clicking a row lifts it up here
+   *    the next unflown       — the standing offer, when you have picked
+   *                             nothing and nothing is flying
+   *
+   *  One slot, one lesson. It used to be two surfaces (a flying banner and a
+   *  Continue card) that named the same lesson while the list named it a
+   *  third time. */
+  readonly cartridge = computed<LessonRow | null>(() =>
+    this.flyingRow()
+      ?? (this.picked() ? this.#find(this.picked() as string) : null)
+      ?? this.next())
+
+  #find(id: string): LessonRow | null {
+    for (const course of this.roster()) {
+      const hit = course.lessons.find(lesson => lesson.id === id)
+      if (hit) return hit
+    }
+    return null
+  }
+
+  /** The lesson in the air, resolved for the slot. */
   readonly flyingRow = computed<LessonRow | null>(() => {
     const id = this.flying()?.lesson
     if (!id) return null
@@ -306,6 +348,15 @@ export class TutorialsWindowComponent implements OnDestroy {
     const level = this.flying()?.level
     return level ? this.roster().find(course => course.level === level) ?? null : null
   })
+
+  /** THE ACTIVE COURSE — the one the cartridge's lesson belongs to.
+   *
+   *  "Create a tile" and "Starter" are the same subject at that moment: the
+   *  slot at the top already says which course you are in, so the course's own
+   *  header repeating its blurb underneath is the same sentence twice. An
+   *  active course draws as ONE shaded line — still there, still openable,
+   *  just no longer introducing itself. */
+  readonly activeLevel = computed<string | null>(() => this.cartridge()?.level ?? null)
 
   /** A search opens every course it matched — a hit hidden inside a collapsed
    *  section is a search that did not answer. It overrides the accordion
@@ -330,6 +381,7 @@ export class TutorialsWindowComponent implements OnDestroy {
       // where you are is already said — by the Continue row at the top and by
       // each course's own pill.
       this.sections.closeAll()
+      this.picked.set(null)
     }
     this.visible.set(true)
     EffectBus.emit('tutorials:state', { open: true })
@@ -355,9 +407,14 @@ export class TutorialsWindowComponent implements OnDestroy {
     EffectBus.emit('tutorial:start', { level })
   }
 
-  /** Fly ONE lesson. A lesson makes whatever it needs on the practice page, so
+  /** Fly ONE lesson, and load it into the top slot on the way — the row you
+   *  pressed is the lesson you are on, so it belongs up there and not in the
+   *  list twice. A lesson makes whatever it needs on the practice page, so
    *  starting it alone is a first-class way in, not a shortcut. */
-  flyLesson(id: string): void { EffectBus.emit('tutorial:start', { lesson: id }) }
+  flyLesson(id: string): void {
+    this.picked.set(id)
+    EffectBus.emit('tutorial:start', { lesson: id })
+  }
 
   stop(): void { EffectBus.emit('tutorial:stop', {}) }
 

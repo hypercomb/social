@@ -37,7 +37,8 @@ What it shows, in one screen:
 
 | | |
 |---|---|
-| **Continue** | the list's FIRST ROW: the next lesson you have not flown, across every course — one door, no choosing. It stands down while you are searching, because the list is then the answer to what you typed |
+| **The cartridge** | ONE sticky slot at the head of the list holding the one lesson you are on: the next unflown one by default, the row you pressed once you press one, the tour itself while a tour runs (the Stop lives in it). Whatever is in it is LIFTED OUT of the list — a lesson named at the top and again three rows down is the same lesson twice. It stands down while you are searching, because the list is then the answer to what you typed |
+| **The active course** | the course the cartridge's lesson belongs to draws as ONE shaded line, blurb dropped — the slot above already names it |
 | **Progress** | a bar over the whole roster; per course a pill (`3/8`) and a hexagon that FILLS as you fly it, numbered with the course's step in the ramp |
 | **Search** | narrows by title, blurb, topic mark or id, and opens every course it matched |
 | **Courses** | title, one-line blurb, and a play button that flies the whole thing. ONE open at a time (`ui/accordion.ts`), and the window opens with all four closed — all four headers fit on screen, and where you are is already said by the Continue row and each course's pill |

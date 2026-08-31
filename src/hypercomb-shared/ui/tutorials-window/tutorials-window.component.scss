@@ -58,41 +58,6 @@ $accent: #d9a441;
 .tut-title { flex: 1; font-size: 0.9em; letter-spacing: 0.05em; color: var(--hc-window-accent); }
 .tut-close { border: 0; background: none; font: inherit; cursor: pointer; }
 
-// ── in the air ──────────────────────────────────────────
-.tut-flying {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 0.6em;
-  padding: 0.5em 0.9em;
-  border-bottom: 1px solid rgba(var(--acc), 0.18);
-  background: rgba(var(--acc), 0.1);
-}
-.tut-flying-pulse {
-  flex: 0 0 auto;
-  width: 0.5em;
-  height: 0.5em;
-  border-radius: 50%;
-  background: rgb(var(--acc));
-  box-shadow: 0 0 0 2px rgba(var(--acc), 0.2);
-}
-.tut-flying-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1em; }
-.tut-flying-copy strong { font-size: 0.8em; color: var(--hc-window-ink-loud); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tut-flying-copy small { font-size: 0.66em; color: var(--hc-window-accent-quiet); }
-.tut-stop {
-  flex: 0 0 auto;
-  border: 1px solid rgba(var(--acc), 0.5);
-  border-radius: tw.$radius-control;
-  background: transparent;
-  color: var(--hc-window-ink-loud);
-  font: inherit;
-  font-size: 0.7em;
-  @include tw.compact-button-padding;
-  cursor: pointer;
-
-  &:hover { background: rgba(var(--acc), 0.2); color: var(--hc-window-ink-loud); }
-}
-
 // ── the one door, as the list's first row ───────────────
 //
 // It was a bordered card ABOVE the list — a slab of chrome saying the same
@@ -101,22 +66,65 @@ $accent: #d9a441;
 // it (mark, then copy), told apart by weight rather than by being a different
 // kind of object: the accent rule down its left edge, which is the device the
 // tool windows already use for "this one".
+// STICKY, because the Stop lives in here. The slot is the first item of the
+// list, and it is also the thing you reach for while a tour is running — so
+// it stays put as the list scrolls under it rather than being scrolled away
+// from the tour it is driving.
+.tut-slot {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4em;
+  padding-right: 0.7em;
+  border-left: 2px solid var(--hc-window-accent);
+  background: var(--hc-window-wash);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+
+  &:hover { background: var(--hc-window-wash-strong); }
+  &.is-flying { background: var(--hc-window-wash-strong); }
+}
+
 .tut-continue {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: flex-start;
   gap: 0.6em;
-  padding: 0.55em 0.9em 0.6em 1.1em;
+  padding: 0.55em 0.2em 0.6em 0.9em;
   border: 0;
-  border-left: 2px solid var(--hc-window-accent);
-  background: var(--hc-window-wash);
+  background: none;
   color: var(--hc-window-ink-loud);
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background 120ms ease;
+}
 
-  &:hover { background: var(--hc-window-wash-strong); }
+// The running pulse — the mark the flying banner carried, in the slot that
+// replaced it.
+.tut-pulse {
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+  background: var(--hc-window-accent);
+  box-shadow: 0 0 0 2px var(--hc-window-wash-strong);
+}
+
+.tut-stop {
+  flex: 0 0 auto;
+  align-self: center;
+  border: 1px solid var(--hc-window-edge-firm);
+  border-radius: tw.$radius-control;
+  background: transparent;
+  color: var(--hc-window-ink-plain);
+  font: inherit;
+  font-size: 0.7em;
+  @include tw.compact-button-padding;
+  cursor: pointer;
+
+  &:hover { background: var(--hc-window-wash-strong); color: var(--hc-window-ink-loud); }
 }
 // The play glyph sits in the slot the lesson numbers use, so the column of
 // marks down the left edge stays ONE column.
@@ -229,6 +237,19 @@ $accent: #d9a441;
 .tut-done + .tut-course { border-top-color: rgba(var(--hc-panel-ink), 0.12); }
 
 .tut-course { border-top: 1px solid rgba(var(--hc-panel-ink), 0.07); }
+
+// THE ACTIVE COURSE RECEDES. Its lesson is loaded in the slot above, which
+// already names the course — so the header stops introducing itself: the
+// blurb goes (the template drops it), the row tightens to one line, and the
+// whole thing shades back. Still a header, still opens; just no longer
+// competing with the thing it is describing.
+.tut-course.is-active {
+  .tut-course-head { padding-top: 0.4em; padding-bottom: 0.4em; opacity: 0.6; }
+  &:hover .tut-course-head, .tut-course-head:hover { opacity: 1; }
+  .tut-hex { width: 1.5em; }
+  .tut-hex-step { font-size: 0.55em; }
+  .tut-course-line strong { font-size: 0.76em; }
+}
 
 .tut-course-head {
   display: flex;
