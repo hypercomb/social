@@ -186,7 +186,6 @@ describe('doctrine ratchets', () => {
       'hypercomb-shared/core/initializers/location-parser.ts',
       'hypercomb-shared/core/store.ts',
       'hypercomb-essentials/scripts/copy-content.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/assistant/structure-drop.worker.ts',
       'hypercomb-essentials/src/diamondcoreprocessor.com/clipboard/clipboard.worker.ts',
       'hypercomb-essentials/src/diamondcoreprocessor.com/commands/website-archive.queen.ts',
       'hypercomb-essentials/src/diamondcoreprocessor.com/editor/viewport-store.ts',

@@ -15,7 +15,6 @@ import {
   MOVEMENT,
   NAVIGATION,
   RESOURCE_COMPLETION,
-  RESOURCE_MSG_HANDLER,
   SCRIPT_PRELOADER,
 } from './tokens'
 
@@ -26,6 +25,5 @@ export const sharedProviders = bridgeProviders([
   MOVEMENT,
   NAVIGATION,
   RESOURCE_COMPLETION,
-  RESOURCE_MSG_HANDLER,
   SCRIPT_PRELOADER,
 ])
