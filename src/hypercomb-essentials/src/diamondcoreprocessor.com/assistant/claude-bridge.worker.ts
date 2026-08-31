@@ -873,9 +873,11 @@ export class ClaudeBridgeWorker extends Worker {
     if (!history) return { id: req.id, ok: false, error: 'HistoryService not available' }
 
     const committer = get<{
-      update?: (segments: readonly string[], layer: object) => Promise<string>
+      commitSlotSet?: (segments: readonly string[], slot: string, sigs: readonly string[]) => Promise<void>
     }>('@diamondcoreprocessor.com/LayerCommitter')
-    if (!committer?.update) return { id: req.id, ok: false, error: 'LayerCommitter.update not available' }
+    if (!committer?.commitSlotSet) {
+      return { id: req.id, ok: false, error: 'LayerCommitter.commitSlotSet not available' }
+    }
 
     // 1. Mint the decoration record.
     const record: Record<string, unknown> = { kind, appliesTo, payload }
@@ -960,9 +962,15 @@ export class ClaudeBridgeWorker extends Worker {
     }
     const next = prior.includes(newSig) ? prior : [...prior, newSig]
 
-    // 5. Cascade.
-    const nextLayer: { name: string; decorations: readonly string[] } = { name: cellName, decorations: next }
-    await committer.update(segments, nextLayer)
+    // 5. Cascade — SLOT-SCOPED. `committer.update` would take this
+    //    `{ name, decorations }` as the cell's FULL new layer state and wipe
+    //    every slot not named, `children` included: adding one decoration
+    //    would orphan the cell's whole subtree, silently and without error.
+    //    See #bagSet for the long version.
+    if (!committer.commitSlotSet) {
+      return { id: req.id, ok: false, error: 'LayerCommitter.commitSlotSet not available' }
+    }
+    await committer.commitSlotSet(segments, 'decorations', next)
 
     // 6. Notify downstream observers. The cascade is already complete;
     //    LayerCommitter's `onTrigger` handler dedups against the
@@ -1021,17 +1029,16 @@ export class ClaudeBridgeWorker extends Worker {
     // Record locally-authored page sigs written to a page slot (parity with
     // #bagSet / #update / #decorationAdd) so the gate never quarantines them.
     markLayerAuthoredPageSigs({ [slot]: next })
-    // `children` is a NAME slot in committer.update — each entry would be
-    // resolved as a tile name, and a 64-hex sig "name" reads a cold bag that
-    // auto-mints a `{name:<sig>}` husk tile (the lineage-pool-printed-to-the-
-    // hive incident). Children carry sigs already: commit at the SIG level.
-    if (slot === 'children') {
-      if (!committer.commitSlotSet) return { id: req.id, ok: false, error: 'LayerCommitter.commitSlotSet not available' }
-      await committer.commitSlotSet(segments, slot, next)
-      return { id: req.id, ok: true, data: { slot, count: next.length, mode } }
+    // SET ONE SLOT, TOUCH NO OTHER — see #bagSet. `committer.update` reads a
+    // `{ name, [slot] }` object as the cell's FULL new layer state ("absent ≡
+    // empty"), so mutating one bag wiped `children` and every other slot the
+    // cell was wearing. `children` already took the slot-scoped path for its
+    // own reason (it is a NAME slot there, and a 64-hex "name" reads a cold
+    // bag that auto-mints a husk tile); every other slot needs it too.
+    if (!committer.commitSlotSet) {
+      return { id: req.id, ok: false, error: 'LayerCommitter.commitSlotSet not available' }
     }
-    const nextLayer: { name: string; [slot: string]: unknown } = { name: cellName, [slot]: next }
-    await committer.update(segments, nextLayer)
+    await committer.commitSlotSet(segments, slot, next)
     return { id: req.id, ok: true, data: { slot, count: next.length, mode } }
   }
 
@@ -1071,17 +1078,28 @@ export class ClaudeBridgeWorker extends Worker {
     // authored content — record its sigs so the gate treats your own pages as
     // own. One helper across every local slot-writer keeps coverage from drifting.
     markLayerAuthoredPageSigs({ [slot]: next })
-    // `children` is a NAME slot in committer.update — each entry would be
-    // resolved as a tile name, and a 64-hex sig "name" reads a cold bag that
-    // auto-mints a `{name:<sig>}` husk tile (the lineage-pool-printed-to-the-
-    // hive incident). Children carry sigs already: commit at the SIG level.
-    if (slot === 'children') {
-      if (!committer.commitSlotSet) return { id: req.id, ok: false, error: 'LayerCommitter.commitSlotSet not available' }
-      await committer.commitSlotSet(segments, slot, next)
-      return { id: req.id, ok: true, data: { slot, count: next.length } }
+    // SET ONE SLOT, TOUCH NO OTHER — via `commitSlotSet`, never `update`.
+    //
+    // `LayerCommitter.update` is the layer-as-primitive write: the caller
+    // passes the FULL new layer state and "absent ≡ empty", so every slot the
+    // caller did not name is WIPED. Naming one slot in a `{ name, [slot] }`
+    // object therefore silently erased the cell's `children` — and its notes,
+    // and everything else it was wearing. A `bag-set properties` on a tile
+    // with seven children left seven orphans: still resolvable by their own
+    // path, simply gone from their parent's membership, so nothing draws them
+    // and nothing errors. You only notice by eye. (Same shape as the
+    // inflate-on-the-write-side orphaning, arriving through a different door.)
+    //
+    // `children` already took this path, for its own reason: it is a NAME slot
+    // in `update`, so a 64-hex sig would be resolved as a tile NAME, reading a
+    // cold bag that auto-mints a `{name:<sig>}` husk tile. Children carry sigs
+    // already. That special case was right and was hiding how wrong the
+    // general case was — every OTHER slot needs the same commit, for the
+    // opposite reason.
+    if (!committer.commitSlotSet) {
+      return { id: req.id, ok: false, error: 'LayerCommitter.commitSlotSet not available' }
     }
-    const nextLayer: { name: string; [slot: string]: unknown } = { name: cellName, [slot]: next }
-    await committer.update(segments, nextLayer)
+    await committer.commitSlotSet(segments, slot, next)
     return { id: req.id, ok: true, data: { slot, count: next.length } }
   }
 
