@@ -41,6 +41,33 @@
 // taught about any other. That is what lets a photo, a slide and a nested site
 // sit in one set: the set does not have a member TYPE.
 //
+// ── THE GROUPING IS THE COMPATIBILITY ────────────────────────────────
+//
+// There is no compatibility table, and there must never be one. Artifacts that
+// are grouped together operate together — that is what grouping MEANS. Different
+// types may interoperate freely; the only law is that none of them may be
+// DEPENDENT on another. A declared matrix of "these two pair" would be a second
+// truth about a relation the mark already states, and it would go stale the day
+// a module ships a new behaviour.
+//
+// ── FAMILIES: one tile, several relations ────────────────────────────
+//
+// A tile may NAME more than one relation, because a tile may have more than one
+// face. The same tile can be a WEBSITE artifact and a PHOTO GALLERY artifact:
+// open the gallery and you see what is grouped under the gallery, open the
+// website and you see what is grouped under the website. Neither face knows
+// about the other, and removing one leaves the other intact.
+//
+// A naming record is any decoration kind of the shape `visual:<family>:artifact`,
+// and its meanings are scoped `<family>:<name>`. The suffix is the whole
+// declaration — a new artifact type ships its own naming kind and its own family
+// with no registration here, exactly like the slash-command palette. What a view
+// renders is the family it owns:
+//
+//     visual:site:artifact      names   site:pitch       → the slides/site face
+//     visual:gallery:artifact   names   gallery:holiday  → the pictures face
+//     visual:workflow:artifact  names   workflow:onboard → the steps face
+//
 // Full doctrine: documentation/website-artifact-paradigm.md.
 
 import {
@@ -63,19 +90,55 @@ const SEP = String.fromCharCode(0)
  *  one that already means "these belong together". */
 export const ENROLLMENT_KIND = GROUP_DECORATION_KIND
 
-/** The decoration that NAMES a relation. Worn by the WEBSITE ARTIFACT, which is
- *  a peer of its members and never their container. */
-export const SITE_ARTIFACT_KIND = 'visual:site:artifact'
+/** Every decoration kind of this shape NAMES a relation. Matching IS the
+ *  declaration: a new artifact type ships `visual:<family>:artifact` and needs
+ *  no registration here. */
+const ARTIFACT_KIND_RE = /^visual:([a-z0-9][a-z0-9-]*):artifact$/
+
+/** `visual:gallery:artifact` → `gallery`; anything else → null. */
+export const artifactFamilyOf = (kind: string): string | null =>
+  ARTIFACT_KIND_RE.exec(String(kind ?? ''))?.[1] ?? null
+
+/** `gallery` → `visual:gallery:artifact`. */
+export const artifactKindFor = (family: string): string => `visual:${family}:artifact`
+
+/** The family every behaviour that has not declared one of its own falls into —
+ *  a WEBSITE, the general "this names a set" artifact. */
+export const SITE_FAMILY = 'site'
+
+/** The decoration that NAMES a website relation. A peer of its members, never
+ *  their container. */
+export const SITE_ARTIFACT_KIND = artifactKindFor(SITE_FAMILY)
 
 /** Author pheromones ride the same decoration primitive. */
 export const TAG_KIND = 'tag'
 
-/** Every meaning this paradigm mints is scoped `site:<name>`. The colon is
+/** Every meaning this paradigm mints is scoped `<family>:<name>`. The colon is
  *  load-bearing twice over: `lineageKey` folds every non-alphanumeric to `-`, so
  *  a group signature can never collide with a lineage sigbag or a pool of
- *  meaning; and the scope keeps two features from minting the same group by
- *  accident. */
-export const SITE_MEANING_PREFIX = 'site:'
+ *  meaning; and the family scope keeps two artifact types from minting the same
+ *  group by accident — `site:holiday` and `gallery:holiday` are different sets,
+ *  which is exactly what lets one tile carry both faces. */
+export const SITE_MEANING_PREFIX = `${SITE_FAMILY}:`
+
+/** `gallery`, `holiday` → `gallery:holiday`. Empty name → empty meaning. */
+export const relationMeaning = (family: string, name: string): string => {
+  const slug = siteSlug(name)
+  const scope = siteSlug(family)
+  return slug && scope ? `${scope}:${slug}` : ''
+}
+
+/** `gallery:holiday` → `gallery`; unscoped → ''. */
+export const familyOfMeaning = (meaning: string): string => {
+  const at = String(meaning ?? '').indexOf(':')
+  return at > 0 ? meaning.slice(0, at) : ''
+}
+
+/** `gallery:holiday` → `holiday`; unscoped → the whole string. */
+export const nameOfMeaning = (meaning: string): string => {
+  const at = String(meaning ?? '').indexOf(':')
+  return at > 0 ? meaning.slice(at + 1) : String(meaning ?? '')
+}
 
 /** Fold a typed name into the stable half of a meaning. Lowercase, and every run
  *  of non-alphanumerics becomes one `-`, so "My Pitch" and "my  pitch" name the
@@ -117,12 +180,20 @@ export type Enrollment = {
   readonly order?: number
 }
 
-/** What a WEBSITE ARTIFACT says about the relation it names. */
-export type SiteArtifact = {
+/** What a NAMING ARTIFACT says about the relation it names. A tile may carry
+ *  several, one per family — a website face and a gallery face on one tile. */
+export type NamedRelation = {
+  /** The decoration kind that named it (`visual:gallery:artifact`). */
+  readonly kind: string
+  /** The artifact family (`gallery`) — which VIEW owns this face. */
+  readonly family: string
   readonly groupSig: string
   readonly meaning: string
   readonly name: string
 }
+
+/** Retained spelling. A website is one family among several. */
+export type SiteArtifact = NamedRelation
 
 /**
  * Everything one cell contributes, read in a single pass over its decorations.
@@ -138,8 +209,10 @@ export type CellEnrollment = {
   readonly layer: Record<string, unknown>
   /** Memberships worn by this cell — the relation itself. */
   readonly enrollments: readonly Enrollment[]
-  /** Set when this cell NAMES a relation (it is a website artifact). */
-  readonly names: SiteArtifact | null
+  /** Every relation this cell NAMES — one per family. A tile that is both a
+   *  website and a photo gallery carries two, and neither face knows about the
+   *  other. Empty for an ordinary member. */
+  readonly names: readonly NamedRelation[]
   /** Author pheromones, for the standing mark filter. */
   readonly marks: readonly string[]
   /** Every decoration payload this cell carries, by kind. Type-agnostic on
@@ -157,8 +230,19 @@ const NO_PAYLOADS: ReadonlyMap<string, readonly Record<string, unknown>[]> = new
 
 const emptyCell = (segments: readonly string[], layer: Record<string, unknown>): CellEnrollment => ({
   segments, name: segments[segments.length - 1] ?? '', layer,
-  enrollments: [], names: null, marks: [], payloads: NO_PAYLOADS,
+  enrollments: [], names: [], marks: [], payloads: NO_PAYLOADS,
 })
+
+/** The relation this cell names in `family`, if any. What a view asks for: it
+ *  renders its OWN face and ignores the others. */
+export const namedIn = (cell: CellEnrollment, family: string): NamedRelation | null =>
+  cell.names.find(n => n.family === family) ?? null
+
+/** This cell's memberships in `family` — the sets of that face. A slide in a
+ *  website and in a gallery has one of each, and the view that asks gets only
+ *  the one it owns. */
+export const enrollmentsIn = (cell: CellEnrollment, family: string): readonly Enrollment[] =>
+  cell.enrollments.filter(e => familyOfMeaning(e.meaning) === family)
 
 /** The first payload of `kind`, or null. The common ask: a behaviour that
  *  replaces its own record keeps exactly one. */
@@ -230,7 +314,8 @@ export async function readCell(
   const enrollments: Enrollment[] = []
   const marks: string[] = []
   const seen = new Set<string>()
-  let names: SiteArtifact | null = null
+  const names: NamedRelation[] = []
+  const namedFamilies = new Set<string>()
 
   for (const sig of sigs) {
     const record = await readDecorationRecord(store, sig)
@@ -245,14 +330,18 @@ export async function readCell(
       if (enrolled && !seen.has(enrolled.sig)) { seen.add(enrolled.sig); enrollments.push(enrolled) }
       continue
     }
-    if (record.kind === SITE_ARTIFACT_KIND && !names) {
+    const family = artifactFamilyOf(record.kind)
+    if (family && !namedFamilies.has(family)) {
       const named = readEnrollment(payload, 'groupSig')
       if (named) {
-        names = {
+        namedFamilies.add(family)
+        names.push({
+          kind: record.kind,
+          family,
           groupSig: named.sig,
           meaning: named.meaning,
-          name: String(payload['name'] ?? siteNameOf(named.meaning)),
-        }
+          name: String(payload['name'] ?? nameOfMeaning(named.meaning)),
+        })
       }
       continue
     }
@@ -262,11 +351,14 @@ export async function readCell(
     }
   }
 
-  // A site is a member of its own relation whether or not the membership record
-  // landed — naming implies belonging, and a half-written pair must not silently
-  // drop the site out of its own set.
-  if (names && !seen.has(names.groupSig)) {
-    enrollments.push({ sig: names.groupSig, meaning: names.meaning })
+  // A naming artifact is a member of every relation it names, whether or not the
+  // membership record landed — naming implies belonging, and a half-written pair
+  // must not silently drop the artifact out of its own set.
+  for (const named of names) {
+    if (!seen.has(named.groupSig)) {
+      seen.add(named.groupSig)
+      enrollments.push({ sig: named.groupSig, meaning: named.meaning })
+    }
   }
 
   return {

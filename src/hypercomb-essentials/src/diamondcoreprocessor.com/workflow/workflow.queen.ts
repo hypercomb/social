@@ -3,7 +3,8 @@
 // `/workflow` — the designer, and the way to run one from the keyboard.
 //
 //   /workflow                 open the designer beside the canvas
-//   /workflow new <name>      make the cell you are standing in a workflow
+//   /workflow new <name>      make the cell you are standing in a workflow —
+//                             its steps are the tiles ENROLLED in it (/enroll)
 //   /workflow run             run the workflow you are standing in
 //   /workflow run <name>      run a named workflow (a SKILL) from anywhere
 //   /workflow step            run it one step at a time
@@ -16,6 +17,8 @@
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import { listWorkflows, nameWorkflow, readWorkflow, WORKFLOW_SLOT } from './workflow-slot.js'
+import { ensureSiteArtifact } from '../pheromones/enrollment-acts.js'
+import { WORKFLOW_FAMILY } from './workflow-family.js'
 
 // Keeps the slot registration alive against tree-shaking (the tutor slot uses
 // the same trick via its renderer).
@@ -44,7 +47,7 @@ export class WorkflowQueenBee extends QueenBee {
   override options = ['new <name>', 'run [name]', 'step', 'stop', 'list']
   override examples = [
     { input: '/workflow', result: 'Opens the designer beside the canvas' },
-    { input: '/workflow new onboard a peer', result: 'Makes this tile a workflow; its child tiles are the steps' },
+    { input: '/workflow new onboard a peer', result: 'Makes this tile a workflow; tiles enrolled in it are its steps' },
     { input: '/workflow run onboard a peer', result: 'Runs that skill from wherever you are standing' },
   ]
 
@@ -85,9 +88,16 @@ export class WorkflowQueenBee extends QueenBee {
     }
   }
 
-  /** Make the cell you are standing in a workflow. The steps are whatever
-   *  child tiles it has — including none yet, which is the normal way to
-   *  start: declare it, then add tiles.
+  /** Make the cell you are standing in a workflow. Declaring it does two
+   *  things: it writes the workflow record (the name and description that
+   *  travel with the cell), and it NAMES A RELATION — the cell becomes the
+   *  website artifact its steps enrol in. Steps are whatever is enrolled,
+   *  including nothing yet, which is the normal way to start.
+   *
+   *  A workflow built before the remodel names no relation, and its steps are
+   *  still read from its children (workflow-step.ts). Declaring it again is how
+   *  it moves over: `ensureSiteArtifact` is idempotent, so re-running `new` on
+   *  a workflow never unnames it.
    *
    *  At the hive ROOT there is no tile to name, so this MINTS one instead of
    *  refusing — the root has no tile of its own, which is a fact about the
@@ -112,8 +122,11 @@ export class WorkflowQueenBee extends QueenBee {
     }
 
     await nameWorkflow({ segments, name, at: Date.now() })
+    // The relation, so steps can enrol in it. Nothing about the workflow holds
+    // its steps: they wear its mark and can live anywhere in the hive.
+    await ensureSiteArtifact(segments, name, WORKFLOW_FAMILY)
     this.#cachedNames = [...new Set([...this.#cachedNames, name])].sort()
-    toast('success', `"${name}" is a workflow — its child tiles are its steps`)
+    toast('success', `"${name}" is a workflow — add steps, or /enroll ${name} on any tile`)
     EffectBus.emit('workflow:changed', { segments })
   }
 
@@ -162,11 +175,11 @@ window.ioc.register('@diamondcoreprocessor.com/WorkflowQueenBee', _workflow)
 // other one does: a toggle on the command line when the cell you are on has
 // a `workflow` slot, and an adoption opt-in.
 //
-// `adoptScope: 'hierarchy'` is the load-bearing field. A workflow's content
-// IS its child subtree — the steps — so adopting the behaviour has to carry
-// the tiles, not just the host cell's slot. This is what makes a skill
-// shareable at all: a peer folds the whole thing, signature-verified,
-// and can then fork it by editing tiles like any other part of their hive.
+// A workflow's steps are ENROLLED, not held, so there is no subtree to carry:
+// `adoptScope: 'tile'`. A skill travels the way its relation does — step by
+// step, each wearing the same mark — which is also what lets one step tile
+// belong to several skills, and lets a skill reach a step that lives somewhere
+// else entirely. (It was 'hierarchy' while the steps were child tiles.)
 ;(window as {
   ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void }
 }).ioc?.whenReady?.<{ register(bee: Record<string, unknown>): void }>(
@@ -183,7 +196,7 @@ window.ioc.register('@diamondcoreprocessor.com/WorkflowQueenBee', _workflow)
       descriptionKey: 'view.workflow.description',
       queenKey: '@diamondcoreprocessor.com/WorkflowQueenBee',
       adoptable: true,
-      adoptScope: 'hierarchy',
+      adoptScope: 'tile',
       resourceScope: 'layer',
       pheromones: ['platform:desktop'],
     })

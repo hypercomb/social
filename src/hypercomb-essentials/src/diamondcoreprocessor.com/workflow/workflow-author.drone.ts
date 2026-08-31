@@ -44,6 +44,8 @@ import { Drone, EffectBus } from '@hypercomb/core'
 import { canonicalizeLineageSegment } from '../history/lineage-key.js'
 import { listWorkflows, nameWorkflow, readWorkflow } from './workflow-slot.js'
 import { readSteps, writeStep, type WorkflowStep } from './workflow-step.js'
+import { ensureEnrollment, ensureSiteArtifact, siteGroupFor } from '../pheromones/enrollment-acts.js'
+import { WORKFLOW_FAMILY } from './workflow-family.js'
 import type { WorkflowPaletteEntry, WorkflowStepRegistry } from './workflow-step-registry.js'
 
 /** One step as the panel draws it — the record flattened onto the tile. */
@@ -347,6 +349,9 @@ export class WorkflowAuthorDrone extends Drone {
         description: opts.description,
         at: Date.now(),
       })
+      // The relation, so steps can enrol in it. Idempotent — declaring an
+      // existing workflow again never unnames it.
+      await ensureSiteArtifact(segments, name, WORKFLOW_FAMILY)
       this.#toast('success', `"${name}" is a workflow`)
       this.#showSurface(segments)
     } catch (error) {
@@ -394,10 +399,17 @@ export class WorkflowAuthorDrone extends Drone {
   }
 
   /**
-   * Add a step: create a child tile, then give it its kind. The tile's name
-   * comes from the step (a command's own name, or the kind's) and is
-   * de-duplicated against the workflow's existing children — a name is an
-   * address, so two steps cannot share one.
+   * Add a step: make a tile, give it its kind, and ENROL it in the workflow.
+   *
+   * The tile is filed under the workflow because a tile has to live somewhere
+   * and that is the least surprising place — but filing is not membership. What
+   * makes it a step is the enrolment mark, which is also where its position
+   * lives, so the same tile can later be moved, or enrolled in a second
+   * workflow, without either workflow noticing.
+   *
+   * The name comes from the step (a command's own name, or the kind's) and is
+   * de-duplicated against the steps already there — a name is an address, so two
+   * tiles under one parent cannot share one.
    */
   async #addStep(opts: {
     segments?: readonly string[]
@@ -433,12 +445,24 @@ export class WorkflowAuthorDrone extends Drone {
       { segments: [...workflowSegments, cell], layer: { name: cell } },
     ])
 
+    const stepSegments = [...workflowSegments, cell]
     try {
-      await writeStep({ segments: [...workflowSegments, cell], step })
+      await writeStep({ segments: stepSegments, step })
     } catch (error) {
       // The tile exists and is a step with no kind yet — recoverable, and the
       // designer shows it as needing one rather than pretending it landed.
       this.#toast('warning', `Step tile added, but its kind did not stick: ${messageOf(error)}`)
+    }
+
+    // MEMBERSHIP, which is a separate act from making the tile. A workflow
+    // declared before the remodel names no relation; there is nothing to enrol
+    // in, and its steps keep being read from its children.
+    try {
+      const record = await readWorkflow(workflowSegments)
+      const group = record ? await siteGroupFor(record.name, WORKFLOW_FAMILY) : null
+      if (group) await ensureEnrollment(stepSegments, group.sig, group.meaning)
+    } catch (error) {
+      this.#toast('warning', `Step tile added, but it did not join the workflow: ${messageOf(error)}`)
     }
     this.#schedule()
   }

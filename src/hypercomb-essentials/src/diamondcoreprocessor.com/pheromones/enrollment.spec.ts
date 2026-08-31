@@ -2,14 +2,19 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { GROUP_DECORATION_KIND, groupSignature } from '@hypercomb/core'
 import {
   SITE_ARTIFACT_KIND,
+  artifactFamilyOf,
+  artifactKindFor,
   carries,
   enrolledCells,
+  enrollmentsIn,
   forgetEnrollments,
+  namedIn,
   nextOrder,
   ordered,
   payloadOf,
   payloadsOf,
   readCell,
+  relationMeaning,
   siteMeaning,
   siteNameOf,
   siteSlug,
@@ -92,7 +97,7 @@ describe('readCell — type-agnostic on purpose', () => {
     expect(carries(cell, GALLERY_KIND)).toBe(true)
     expect(cell.enrollments).toEqual([{ sig: g, meaning: 'site:pitch', order: 3 }])
     expect(cell.marks).toEqual(['draft'])
-    expect(cell.names).toBeNull()
+    expect(cell.names).toEqual([])
   })
 
   it('does not stop at the first content record — a membership can sit after it', async () => {
@@ -112,14 +117,14 @@ describe('readCell — type-agnostic on purpose', () => {
       payload: { groupSig: g, meaning: 'site:pitch', name: 'pitch' },
     })
     const cell = await readCell(store, { decorations: [hex('own:artifact')] })
-    expect(cell.names?.name).toBe('pitch')
+    expect(namedIn(cell, 'site')?.name).toBe('pitch')
     expect(cell.enrollments.map(e => e.sig)).toEqual([g])
   })
 
   it('answers empty for a cell with no decorations', async () => {
     const cell = await readCell(makeStore(), { name: 'plain' }, ['plain'])
     expect(cell.enrollments).toEqual([])
-    expect(cell.names).toBeNull()
+    expect(cell.names).toEqual([])
     expect(payloadOf(cell, SLIDE_KIND)).toBeNull()
   })
 })
@@ -203,7 +208,7 @@ describe('enrolledCells — the relation is a mark, not containment', () => {
 
 describe('position is an attribute of the membership, never of the artifact', () => {
   const cell = (order: number | undefined, groupSig: string): CellEnrollment => ({
-    segments: ['x'], name: 'x', layer: {}, names: null, marks: [], payloads: new Map(),
+    segments: ['x'], name: 'x', layer: {}, names: [], marks: [], payloads: new Map(),
     enrollments: [order === undefined
       ? { sig: groupSig, meaning: 'site:pitch' }
       : { sig: groupSig, meaning: 'site:pitch', order }],
@@ -226,5 +231,91 @@ describe('position is an attribute of the membership, never of the artifact', ()
   it('accepts a caller-supplied fallback so container-model sets keep their sequence', () => {
     const g = hex('pos:legacy')
     expect(nextOrder([cell(undefined, g)], [g], () => 7)).toBe(8)
+  })
+})
+
+describe('families — one tile, several faces', () => {
+  it('treats any visual:<family>:artifact kind as a naming record', () => {
+    // Matching IS the declaration: a new artifact type ships its own naming
+    // kind and needs no registration anywhere.
+    expect(artifactFamilyOf('visual:gallery:artifact')).toBe('gallery')
+    expect(artifactFamilyOf(SITE_ARTIFACT_KIND)).toBe('site')
+    expect(artifactKindFor('gallery')).toBe('visual:gallery:artifact')
+    expect(artifactFamilyOf('visual:diagram:slide')).toBeNull()
+    expect(artifactFamilyOf('group')).toBeNull()
+  })
+
+  it('scopes meanings by family, so one name in two families is two relations', () => {
+    // This is what lets one tile be a website AND a photo gallery without the
+    // two faces bleeding into each other.
+    expect(relationMeaning('gallery', 'holiday')).toBe('gallery:holiday')
+    expect(relationMeaning('site', 'holiday')).not.toBe(relationMeaning('gallery', 'holiday'))
+    expect(relationMeaning('site', 'Holiday!')).toBe(siteMeaning('holiday'))
+    expect(relationMeaning('gallery', '  ')).toBe('')
+  })
+
+  it('reads EVERY face a tile names, and belongs to each', async () => {
+    const store = makeStore()
+    const site = hex('faces:site-sig')
+    const gallery = hex('faces:gallery-sig')
+    store.put('faces:site', {
+      kind: 'visual:site:artifact',
+      payload: { groupSig: site, meaning: 'site:pitch', name: 'pitch' },
+    })
+    store.put('faces:gallery', {
+      kind: 'visual:gallery:artifact',
+      payload: { groupSig: gallery, meaning: 'gallery:holiday', name: 'holiday' },
+    })
+
+    const cell = await readCell(store, {
+      decorations: [hex('faces:site'), hex('faces:gallery')],
+    }, ['both'])
+
+    expect(cell.names.map(n => n.family).sort()).toEqual(['gallery', 'site'])
+    expect(namedIn(cell, 'site')?.name).toBe('pitch')
+    expect(namedIn(cell, 'gallery')?.name).toBe('holiday')
+    // Naming implies belonging — to BOTH, independently.
+    expect([...cell.enrollments.map(e => e.sig)].sort()).toEqual([site, gallery].sort())
+  })
+
+  it('hands a view only the memberships of the face it owns', async () => {
+    const store = makeStore()
+    const site = hex('split:site-sig')
+    const gallery = hex('split:gallery-sig')
+    store.put('split:inSite', {
+      kind: GROUP_DECORATION_KIND,
+      payload: { sig: site, meaning: 'site:pitch', order: 0 },
+    })
+    store.put('split:inGallery', {
+      kind: GROUP_DECORATION_KIND,
+      payload: { sig: gallery, meaning: 'gallery:holiday', order: 5 },
+    })
+
+    // One photo, in a presentation AND in a gallery.
+    const cell = await readCell(store, {
+      decorations: [hex('split:inSite'), hex('split:inGallery')],
+    }, ['photo'])
+
+    expect(cell.enrollments).toHaveLength(2)
+    expect(enrollmentsIn(cell, 'site').map(e => e.sig)).toEqual([site])
+    expect(enrollmentsIn(cell, 'gallery').map(e => e.sig)).toEqual([gallery])
+    // The two positions are independent — one set cannot renumber the other.
+    expect(enrollmentsIn(cell, 'site')[0].order).toBe(0)
+    expect(enrollmentsIn(cell, 'gallery')[0].order).toBe(5)
+  })
+
+  it('keeps one face per family, first wins', async () => {
+    const store = makeStore()
+    store.put('dup:first', {
+      kind: 'visual:site:artifact',
+      payload: { groupSig: hex('dup:a'), meaning: 'site:one', name: 'one' },
+    })
+    store.put('dup:second', {
+      kind: 'visual:site:artifact',
+      payload: { groupSig: hex('dup:b'), meaning: 'site:two', name: 'two' },
+    })
+    const cell = await readCell(store, { decorations: [hex('dup:first'), hex('dup:second')] })
+    expect(cell.names).toHaveLength(1)
+    expect(namedIn(cell, 'site')?.name).toBe('one')
   })
 })

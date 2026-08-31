@@ -47,7 +47,7 @@ import { QueenBee, EffectBus } from '@hypercomb/core'
 import type { VisualBeeRegistry } from './visual-bee-registry.js'
 import { writeDecoration, listDecorations, removeDecoration } from './decoration-manifest.js'
 import { SITE_ARTIFACT_KIND } from '../pheromones/enrollment.js'
-import { mintContentRef } from '../presentation/tiles/artifact-content.js'
+import { mintContentRef, terminalContentSig } from '../presentation/tiles/artifact-content.js'
 
 /** Pictures held on a tile — the lightbox's own content, and a source for any
  *  view that renders a set this tile is enrolled in. Payload:
@@ -74,13 +74,24 @@ type ViewModeShape = { mode: string; setMode(next: string): void }
 type LineageShape = { explorerSegments?: () => readonly string[] }
 type StoreShape = { putResource(blob: Blob): Promise<string> }
 
-/** Every picture held on a tile, as the REFS its payload declares — a meta
- *  envelope under the current model, a raw resource signature under the retired
- *  one. Callers hand these to the store, which follows the hop transparently, so
- *  neither shape needs special-casing at the call site. The shared read seam for
- *  the full-screen lightbox and the images chooser alike. */
+/**
+ * Every picture held on a tile, RESOLVED to the signature of its bytes.
+ *
+ * The payload declares a Life Primitive hop — a meta envelope under the current
+ * model, a raw resource signature under the retired one — and this seam follows
+ * it, so every caller gets the same thing it always got. That matters because
+ * `Store.getResource` does NOT follow the hop: a consumer handed an envelope
+ * signature would fetch the envelope's JSON and try to paint it as a picture.
+ * Resolving once, here, is what keeps the full-screen lightbox and the images
+ * chooser both correct without either learning about incidences.
+ *
+ * An envelope whose target is not held locally resolves to itself, which is the
+ * honest answer — the caller's own fetch cascade is what can still reach it, and
+ * `fetchThroughContentHop` is how it should.
+ */
 export async function galleryImageSigsAt(segments: readonly string[]): Promise<string[]> {
   const out: string[] = []
+  const store = get<{ getResourceLocal?(sig: string): Promise<Blob | null> }>('@hypercomb.social/Store')
   try {
     const decorations = await listDecorations<{ images?: unknown }>({
       kind: GALLERY_KIND,
@@ -90,8 +101,12 @@ export async function galleryImageSigsAt(segments: readonly string[]): Promise<s
       const images = record.payload?.images
       if (!Array.isArray(images)) continue
       for (const value of images) {
-        const imageSig = String(value)
-        if (SIG.test(imageSig) && !out.includes(imageSig)) out.push(imageSig)
+        const ref = String(value)
+        if (!SIG.test(ref)) continue
+        const imageSig = store?.getResourceLocal
+          ? (await terminalContentSig(store as { getResourceLocal(s: string): Promise<Blob | null> }, ref)) ?? ref
+          : ref
+        if (!out.includes(imageSig)) out.push(imageSig)
       }
     }
   } catch { /* no readable gallery at this location */ }

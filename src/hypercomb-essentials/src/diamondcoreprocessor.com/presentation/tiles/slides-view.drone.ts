@@ -102,8 +102,11 @@ import { Drone, RESOURCE_URL_PREFIX, I18N_IOC_KEY, type I18nProvider } from '@hy
 import { childSigsOf } from '../../history/layer-placement.js'
 import { isFeatureHidden } from '../../sharing/feature-hidden.js'
 import {
+  SITE_FAMILY,
   enrolledCells,
+  enrollmentsIn,
   forgetEnrollments,
+  namedIn,
   ordered,
   payloadOf,
   payloadsOf,
@@ -627,8 +630,13 @@ export class SlidesViewDrone extends Drone {
       const here = await history.currentLayerAt(await history.sign({ explorerSegments: () => segments }))
       const cell = await readCell(store, here, segments)
 
-      if (cell.enrollments.length > 0) {
-        const groupSigs = cell.enrollments.map(e => e.sig)
+      // ONE FACE AT A TIME. A tile can name (and belong to) several relations —
+      // a website and a photo gallery — and this view renders the site family
+      // only. Asking for every membership would splice two different sets into
+      // one playback.
+      const mine = enrollmentsIn(cell, SITE_FAMILY)
+      if (mine.length > 0) {
+        const groupSigs = mine.map(e => e.sig)
         const members = ordered(
           await enrolledCells(history, store, groupSigs),
           groupSigs,
@@ -723,16 +731,17 @@ export class SlidesViewDrone extends Drone {
     // expands to its own members, in its own order. Depth-guarded and
     // cycle-guarded on the group signatures already playing, so two sites
     // enrolled in each other resolve instead of spinning.
-    if (member.names && depth < NEST_DEPTH && !playing.has(member.names.groupSig)) {
-      const nestedSigs = [member.names.groupSig]
-      playing.add(member.names.groupSig)
-      const nested = ordered(
+    const nested = namedIn(member, SITE_FAMILY)
+    if (nested && depth < NEST_DEPTH && !playing.has(nested.groupSig)) {
+      const nestedSigs = [nested.groupSig]
+      playing.add(nested.groupSig)
+      const members = ordered(
         await enrolledCells(history, store, nestedSigs),
         nestedSigs,
         ORDER_FALLBACK,
       )
       const out: Slide[] = []
-      for (const inner of nested) {
+      for (const inner of members) {
         if (inner.segments.join('/') === member.segments.join('/')) continue // itself
         out.push(...await this.#playableFrom(inner, history, store, playing, depth + 1))
       }

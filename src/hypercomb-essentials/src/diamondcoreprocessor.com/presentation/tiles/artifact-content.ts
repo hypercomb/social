@@ -105,3 +105,44 @@ export async function terminalContentSig(
   }
   return null
 }
+
+/**
+ * Fetch the bytes BEHIND a content hop, with a caller-supplied fetcher.
+ *
+ * `terminalContentSig` answers "which signature holds the bytes" from local
+ * reads alone. This is the other half, for a caller that already has a fetch
+ * cascade of its own (local → host → mesh) and needs the bytes rather than the
+ * name: hand it `store.getResource` and it follows the alternation using that.
+ *
+ * WHY IT EXISTS: `Store.getResource` does NOT follow the hop — only
+ * `getResourceResolvedLocal` and `getLayerBytes` do. Any consumer that fetches a
+ * payload reference straight through `getResource` will get the ENVELOPE's JSON
+ * and try to render it as content. Every such call site goes through here.
+ *
+ * A retired raw signature returns its own bytes on the first pass, so both
+ * shapes take one path.
+ */
+export async function fetchThroughContentHop(
+  sig: string,
+  fetch: (signature: string) => Promise<Blob | null>,
+  maxDepth = 4,
+): Promise<Blob | null> {
+  if (!SIG.test(sig)) return null
+  let current = sig.toLowerCase()
+  const seen = new Set<string>()
+  for (let depth = 0; depth <= maxDepth; depth++) {
+    if (seen.has(current)) return null
+    seen.add(current)
+    const blob = await fetch(current)
+    if (!blob) return null
+    // An envelope is small JSON; anything larger is the content itself.
+    if (blob.size > 64 * 1024) return blob
+    let parsed: unknown
+    try { parsed = JSON.parse(await blob.text()) } catch { return blob }
+    if (!isMetaEnvelope(parsed)) return blob
+    const payload = metaPayloadOf(parsed)
+    if (!payload || payload.kind !== 'resource') return null
+    current = payload.sig
+  }
+  return null
+}

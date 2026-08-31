@@ -23,10 +23,11 @@ import {
 } from '../commands/decoration-manifest.js'
 import {
   ENROLLMENT_KIND,
-  SITE_ARTIFACT_KIND,
+  SITE_FAMILY,
+  artifactKindFor,
   enrolledCells,
   nextOrder,
-  siteMeaning,
+  relationMeaning,
   siteSlug,
   type CellEnrollment,
   type Enrollment,
@@ -48,11 +49,16 @@ const get = <T,>(key: string): T | undefined =>
 const history = (): WalkHistory | undefined => get<WalkHistory>('@diamondcoreprocessor.com/HistoryService')
 const store = (): ReadStore | undefined => get<ReadStore>('@hypercomb.social/Store')
 
-/** The signature and meaning behind a typed site name. */
-export async function siteGroupFor(name: string): Promise<{ sig: string; meaning: string; slug: string } | null> {
-  const meaning = siteMeaning(name)
+/** The signature and meaning behind a typed name in one FAMILY. `site:pitch`
+ *  and `gallery:pitch` are different relations by construction, which is what
+ *  lets one tile carry both faces without them bleeding into each other. */
+export async function siteGroupFor(
+  name: string,
+  family: string = SITE_FAMILY,
+): Promise<{ sig: string; meaning: string; slug: string; family: string } | null> {
+  const meaning = relationMeaning(family, name)
   if (!meaning) return null
-  return { sig: await groupSignature(meaning), meaning, slug: siteSlug(name) }
+  return { sig: await groupSignature(meaning), meaning, slug: siteSlug(name), family: siteSlug(family) }
 }
 
 /** Put the membership mark on a cell. Idempotent: the same mark mints the same
@@ -109,9 +115,10 @@ export async function toggleEnrollment(
   segments: readonly string[],
   name: string,
   fallback?: (cell: CellEnrollment) => number | undefined,
+  family: string = SITE_FAMILY,
 ): Promise<EnrollResult> {
   if (segments.length === 0) return { ok: false, reason: 'nowhere' }
-  const group = await siteGroupFor(name)
+  const group = await siteGroupFor(name, family)
   if (!group) return { ok: false, reason: 'no-name' }
 
   if (await dropEnrollment(segments, group.sig)) {
@@ -138,12 +145,14 @@ export type NameResult =
 export async function toggleSiteArtifact(
   segments: readonly string[],
   name: string,
+  family: string = SITE_FAMILY,
 ): Promise<NameResult> {
   if (segments.length === 0) return { ok: false, reason: 'nowhere' }
-  const group = await siteGroupFor(name)
+  const group = await siteGroupFor(name, family)
   if (!group) return { ok: false, reason: 'no-name' }
 
-  const existing = await listDecorations<{ groupSig?: string }>({ kind: SITE_ARTIFACT_KIND, segments })
+  const kind = artifactKindFor(group.family)
+  const existing = await listDecorations<{ groupSig?: string }>({ kind, segments })
   const same = existing.filter(e => String(e.record.payload?.groupSig ?? '').toLowerCase() === group.sig)
   if (same.length) {
     for (const entry of same) removeDecoration({ sig: entry.sig, segments })
@@ -152,7 +161,7 @@ export async function toggleSiteArtifact(
   }
 
   await replaceDecoration({
-    kind: SITE_ARTIFACT_KIND,
+    kind,
     appliesTo: segments,
     segments,
     payload: { groupSig: group.sig, meaning: group.meaning, name: group.slug },
@@ -162,9 +171,63 @@ export async function toggleSiteArtifact(
   return { ok: true, act: 'named', slug: group.slug }
 }
 
-/** Every site this tile is currently enrolled in, by name. For `/enroll` with
- *  no argument — "what am I part of?" is a question the tile can answer alone,
- *  which is the whole test of an atomic model. */
+/**
+ * Make this tile the website artifact for `<name>` WITHOUT toggling — the form
+ * a behaviour's own command calls when naming is a side effect of something
+ * else (declaring a workflow, publishing a site). Idempotent: already named is
+ * a no-op, so re-running the declaring command never quietly unnames it.
+ */
+export async function ensureSiteArtifact(
+  segments: readonly string[],
+  name: string,
+  family: string = SITE_FAMILY,
+): Promise<{ sig: string; meaning: string; slug: string; family: string } | null> {
+  if (segments.length === 0) return null
+  const group = await siteGroupFor(name, family)
+  if (!group) return null
+
+  const kind = artifactKindFor(group.family)
+  const existing = await listDecorations<{ groupSig?: string }>({ kind, segments })
+  const already = existing.some(e => String(e.record.payload?.groupSig ?? '').toLowerCase() === group.sig)
+  if (!already) {
+    await replaceDecoration({
+      kind,
+      appliesTo: segments,
+      segments,
+      payload: { groupSig: group.sig, meaning: group.meaning, name: group.slug },
+      mark: 'persistent',
+    })
+  }
+  await ensureEnrollment(segments, group.sig, group.meaning)
+  return group
+}
+
+/**
+ * Enrol this tile WITHOUT toggling — the form a behaviour calls when membership
+ * is a side effect (the designer adding a step, an importer folding a set).
+ * Idempotent, and it never renumbers: a tile already enrolled keeps the position
+ * it has.
+ */
+export async function ensureEnrollment(
+  segments: readonly string[],
+  groupSig: string,
+  meaning: string,
+  fallback?: (cell: CellEnrollment) => number | undefined,
+): Promise<void> {
+  if (segments.length === 0) return
+  const worn = await listDecorations<{ sig?: string }>({ kind: ENROLLMENT_KIND, segments })
+  if (worn.some(e => String(e.record.payload?.sig ?? '').toLowerCase() === groupSig)) return
+  await wearEnrollment(segments, {
+    sig: groupSig,
+    meaning,
+    order: await nextOrderIn(groupSig, fallback),
+  })
+}
+
+/** Every relation this tile is currently enrolled in, as `<family>:<name>`
+ *  meanings across every family. For `/enroll` with no argument — "what am I
+ *  part of?" is a question the tile answers alone, which is the whole test of an
+ *  atomic model. */
 export async function sitesOf(segments: readonly string[]): Promise<string[]> {
   const worn = await listDecorations<{ meaning?: string }>({ kind: ENROLLMENT_KIND, segments })
   const out: string[] = []

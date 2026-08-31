@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
-import { contentEnvelope, contentRefOf, terminalContentSig } from './artifact-content.js'
+import {
+  contentEnvelope,
+  contentRefOf,
+  fetchThroughContentHop,
+  terminalContentSig,
+} from './artifact-content.js'
 
 const sig = (seed: string): string => seed.repeat(64).slice(0, 64)
 
@@ -59,5 +64,40 @@ describe('the content hop is one rule, not one per artifact', () => {
     expect(contentRefOf({ contentSig: OTHER })).toBe(OTHER)
     expect(contentRefOf({})).toBeNull()
     expect(contentRefOf(null)).toBeNull()
+  })
+})
+
+describe('fetching THROUGH the hop', () => {
+  /** The failure this exists to stop: `Store.getResource` does not follow the
+   *  hop, so a consumer handed a reference gets the ENVELOPE's JSON and paints
+   *  it as content. */
+  it('returns the bytes behind the envelope, not the envelope', async () => {
+    const bytes = { pretend: 'image bytes' }
+    const records: Record<string, unknown> = {
+      [AT]: contentEnvelope(BYTES, 'picture'),
+      [BYTES]: bytes,
+    }
+    const blob = await fetchThroughContentHop(AT, async s => (s in records ? jsonBlob(records[s]) : null))
+    expect(JSON.parse(await blob!.text())).toEqual(bytes)
+  })
+
+  it('returns a retired raw reference on the first pass', async () => {
+    const bytes = { pretend: 'legacy bytes' }
+    const blob = await fetchThroughContentHop(BYTES, async s => (s === BYTES ? jsonBlob(bytes) : null))
+    expect(JSON.parse(await blob!.text())).toEqual(bytes)
+  })
+
+  it('gives up rather than looping on a cycle', async () => {
+    // Real signatures mint backward so this cannot happen, but a damaged or
+    // hostile record must not spin the fetcher.
+    const records: Record<string, unknown> = {
+      [AT]: { meta: 1, resource: OTHER, relation: 'picture' },
+      [OTHER]: { meta: 1, resource: AT, relation: 'picture' },
+    }
+    expect(await fetchThroughContentHop(AT, async s => (s in records ? jsonBlob(records[s]) : null))).toBeNull()
+  })
+
+  it('answers null when nothing is there', async () => {
+    expect(await fetchThroughContentHop(AT, async () => null)).toBeNull()
   })
 })

@@ -43,6 +43,7 @@ import {
 } from '../editor/tile-properties.js'
 import { referenceEditsRootDefaultForLabel } from '../commands/decoration-kind-index.js'
 import { galleryImageSigsAt } from '../commands/lightbox.queen.js'
+import { fetchThroughContentHop } from '../presentation/tiles/artifact-content.js'
 import { canonicalPeerImageCandidates, previewSigOf, type PeerImageCandidate, type PeerImageProps } from './peer-images.js'
 import { imageChoiceWriteTargets } from './image-choice-targets.js'
 
@@ -575,8 +576,10 @@ export class ImageChoiceDrone extends Drone {
       // write and make a perfectly valid click close without changing anything.
       // New image relationships use the Life Primitive: the tile carries a
       // meta incidence, and that typed incidence carries the immutable image
-      // resource. Store.getResource transparently follows this hop, so every
-      // existing renderer remains compatible while raw legacy image sigs are
+      // resource. Readers follow the hop explicitly — `getResource` does NOT do
+      // it on its own (only `getResourceResolvedLocal` and `getLayerBytes` do),
+      // which is why every fetch here goes through `fetchThroughContentHop`.
+      // Raw legacy image sigs pass through the same path unchanged and are
       // upgraded the next time somebody chooses them.
       const targets = imageChoiceWriteTargets(
         this.#segments,
@@ -840,8 +843,15 @@ export class ImageChoiceDrone extends Drone {
   async #bytes(sig: string): Promise<Blob | null> {
     if (!sig) return null
     // Full cascade (local → host → mesh) with write-through to OPFS — the same
-    // path the renderer's detached fill uses for a peer's picture.
-    try { return await this.#store()?.getResource?.(sig) ?? null } catch { return null }
+    // path the renderer's detached fill uses for a peer's picture — THROUGH the
+    // Life Primitive hop. `getResource` does not follow it on its own, so a
+    // reference that names an incidence rather than raw bytes would come back as
+    // the envelope's JSON and paint as a broken picture.
+    const store = this.#store()
+    if (!store?.getResource) return null
+    try {
+      return await fetchThroughContentHop(sig, s => store.getResource!(s))
+    } catch { return null }
   }
 
   async #texture(sig: string): Promise<Texture | null> {
