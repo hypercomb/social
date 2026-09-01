@@ -350,6 +350,10 @@ describe('doctrine ratchets', () => {
     // producers where a build record is n/a by design, and KNOWN DEBT —
     // multi-anchor producers not yet wired. Wiring one = remove it here
     // AND in scripts/audit-atomicity.cjs (the live twin) so both click.
+    // The debt tier is now EMPTY: every multi-anchor producer in the tree
+    // ends its pass with a record, so what remains below is only the
+    // single-anchor set. A new name in either list means a producer shipped
+    // unsealed.
     const scriptsDir = join(ROOT, 'scripts')
     const files: string[] = []
     const walkScripts = (dir: string): void => {
@@ -380,11 +384,6 @@ describe('doctrine ratchets', () => {
       'scripts/bridge/_tutor-deck.cjs',
       'scripts/build-hypercomb-articles.cjs',
       'scripts/meaning-loop-phase1.ts',
-      // KNOWN DEBT — multi-anchor producers awaiting their end-of-pass build-record
-      'scripts/bridge/_ai-privacy-build.cjs',
-      'scripts/bridge/_ai-privacy-chart.cjs',
-      'scripts/bridge/_generate-dolphin-pages.cjs',
-      'scripts/bridge/_pheromone-workflow.cjs',
     ].sort(), 'unwired multi-anchor producer')
   })
 

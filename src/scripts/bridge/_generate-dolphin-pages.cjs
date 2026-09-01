@@ -485,4 +485,17 @@ const PAGES = [
     }
   }
   console.log(`\nDone. chrome=${chromeSig.slice(0, 12)}, ${ok} pages stamped, ${failed} failed.`)
+
+  // ONE BUILD REVISION FOR THE WHOLE PASS (documentation/build-revisions.md).
+  //
+  // Nine anchors, all inside one tree: ['dolphin'] itself and its eight
+  // branches. A record seals the subtree at its root, so one at ['dolphin']
+  // holds the lot. Its sibling _dolphin-revision.cjs records for ['dolphin']
+  // AND ['dashboard'] because that pass genuinely touches two independent
+  // trees; this one never leaves dolphin, so a second root would seal a tree
+  // it did not write to.
+  const rev = await send({ op: 'build-record', segments: ['dolphin'], label: 'dolphin pages build' })
+  console.log(rev.ok
+    ? `build revision: ${rev.data.label} seal=${String(rev.data.seal).slice(0, 12)}${rev.data.unchanged ? ' (unchanged)' : ''}`
+    : `build revision FAILED: ${rev.error}`)
 })()

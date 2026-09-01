@@ -58,13 +58,12 @@ const SINGLE_ANCHOR = new Set([
 ])
 
 /** Multi-anchor producers KNOWN to lack the end-of-pass build-record.
- *  FROZEN DEBT: wiring one = remove it here and the ratchet clicks. */
-const KNOWN_DEBT = new Set([
-  'scripts/bridge/_ai-privacy-build.cjs',
-  'scripts/bridge/_ai-privacy-chart.cjs',
-  'scripts/bridge/_generate-dolphin-pages.cjs',
-  'scripts/bridge/_pheromone-workflow.cjs',
-])
+ *  FROZEN DEBT: wiring one = remove it here and the ratchet clicks.
+ *
+ *  EMPTY, and worth keeping empty. Every multi-anchor producer in the tree now
+ *  ends its pass with a build record; the last four were wired together rather
+ *  than left to accumulate. A new name here is a regression, not a backlog. */
+const KNOWN_DEBT = new Set([])
 
 /** Site roots the live probe checks — the roots the producers above target.
  *  Extend when a new multi-page root ships. */

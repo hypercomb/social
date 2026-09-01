@@ -121,5 +121,17 @@ async function main() {
     }
   } else console.log('home link: SKIPPED (no root page)')
   console.log('Done.')
+
+  // ONE BUILD REVISION FOR THE WHOLE PASS (documentation/build-revisions.md).
+  //
+  // Two anchors: the comparison page at ['ai-inside','data-privacy'] and the
+  // card injected into the home page at ['ai-inside']. The second contains the
+  // first, and a record seals the subtree at its root, so recording once at
+  // ['ai-inside'] covers both — and covers them TOGETHER, which is what makes
+  // the page and the link that reaches it one restorable step.
+  const rev = await ask({ op: 'build-record', segments: ['ai-inside'], label: 'ai-inside data-privacy chart' })
+  console.log(rev.ok
+    ? `build revision: ${rev.data.label} seal=${String(rev.data.seal).slice(0, 12)}${rev.data.unchanged ? ' (unchanged)' : ''}`
+    : `build revision FAILED: ${rev.error}`)
 }
 main().catch(e => { console.error(e); process.exit(2) })

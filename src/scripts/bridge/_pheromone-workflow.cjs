@@ -260,6 +260,19 @@ async function main() {
   log('root notes slot', await dedupeSlot([ROOT], 'notes'))
 
   log('\ndone → /' + ROOT)
+
+  // ONE BUILD REVISION FOR THE WHOLE PASS (documentation/build-revisions.md).
+  //
+  // [ROOT], not []. The pass does touch the hive root — `add` puts the
+  // workflow cell in the root's children, and the root note is addressed
+  // parent-plus-cell — but both of those are how a cell comes into being at
+  // all, and `build-record` refuses empty segments by design, pointing at
+  // /snapshot for the whole-hive case. Everything the pass MEANS is the
+  // workflow tile and its steps, and a record seals that whole subtree.
+  const rev = await ask({ op: 'build-record', segments: [ROOT], label: 'pheromone workflow build' })
+  log('build revision', rev.ok
+    ? `${rev.data.label} seal=${String(rev.data.seal).slice(0, 12)}${rev.data.unchanged ? ' (unchanged)' : ''}`
+    : `FAILED: ${rev.error}`)
 }
 
 main().catch(e => { console.error('FAILED:', e.message); process.exit(1) })
