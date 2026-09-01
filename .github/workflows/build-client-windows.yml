@@ -16,9 +16,22 @@ on:
     branches: [development, main]
     paths:
       - 'src/hypercomb-client/**'
-      # The client BAKES this shell's frontend, and the bake is gitignored —
-      # so a web change is a client change that no client path can see.
+      # This workflow builds the client out of the WHOLE monorepo and bakes
+      # hypercomb-web's dist into it, and `app/frontend/` is gitignored — so
+      # every package that build compiles is a client path no client path can
+      # see. Web alone is not enough: an essentials bee, a shared service or a
+      # core primitive changes the app that gets launched just as surely, and
+      # none of them triggered a build. That is how the installed exe drifted
+      # 248 commits stale once already, and why "it works on the web but not
+      # in the app" kept being the same bug wearing a different feature.
       - 'src/hypercomb-web/**'
+      - 'src/hypercomb-shared/**'
+      - 'src/hypercomb-essentials/**'
+      - 'src/hypercomb-core/**'
+      - 'src/hypercomb-runtime/**'
+      - 'src/hypercomb-shim/**'
+      - 'src/package.json'
+      - 'src/package-lock.json'
       - '.github/workflows/build-client-windows.yml'
 
 concurrency:
