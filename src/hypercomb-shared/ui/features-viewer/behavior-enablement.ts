@@ -1,10 +1,10 @@
 // hypercomb-shared/ui/features-viewer/behavior-enablement.ts
 //
 // The WRITE side of the behavior-enablement lens (shell) — the pool's
-// global lights and the per-tile "wake here" exception. The READER lives
-// essentials-side in `sharing/behavior-enablement.ts`; the two never import
-// each other — they agree ONLY on the localStorage keys, the record shapes,
-// and the `behavior:enablement-changed` event (the hidden/verified split).
+// global lights. The READER lives essentials-side in
+// `sharing/behavior-enablement.ts`; the two never import each other — they
+// agree ONLY on the localStorage keys, the record shapes, and the
+// `behavior:enablement-changed` event (the hidden/verified split).
 //
 // Model (OPT-IN — everything is off until it is lit in the pool):
 //   • `hc:behavior-global-on` — THE truth once it exists: the decoration
@@ -21,28 +21,20 @@
 //   • `hc:behavior-seeded` — the cohort ledger: which groups of kinds have
 //     already had their lights decided, so no seed runs twice. `'*'` means
 //     the hive STARTED DARK and no cohort may ever light itself here.
-//   • `hc:behavior-wake` — { "/path": [kinds] } local ON exceptions. A wake
-//     covers its subtree; it outranks a global off (and a publisher's
-//     withheld mark) at that tile. Never touched by the global flip, so
-//     re-lighting globally simply wakes everything wherever it lives.
+//   • `hc:behavior-wake` — { "/path": [kinds] } local ON exceptions,
+//     honored by the essentials READER for records that already exist. This
+//     side no longer writes them: the wake writer had no UI and no callers,
+//     so it was removed (2026-09-01) rather than carried as dead surface.
 
-import { EffectBus, normalizeCell } from '@hypercomb/core'
+import { EffectBus } from '@hypercomb/core'
 
 export const GLOBAL_ON_KEY = 'hc:behavior-global-on'
 export const GLOBAL_OFF_KEY = 'hc:behavior-global-off'
-export const WAKE_KEY = 'hc:behavior-wake'
 /** Cohorts whose lights have been decided (essentials owns the seeding —
  *  this side only stamps `'*'` for a dark start). Agreed by key, like the
  *  rest of this lens. */
 export const SEEDED_COHORTS_KEY = 'hc:behavior-seeded'
 export const ENABLEMENT_CHANGED = 'behavior:enablement-changed'
-
-/** Canonical absolute path — every segment normalized; MUST match the
- *  essentials reader's `behaviorPath` (lockstep by convention, not import). */
-export function behaviorPath(segments: readonly string[]): string {
-  const segs = segments.map(s => String(s ?? '').trim()).filter(Boolean).map(s => normalizeCell(s) || s)
-  return '/' + segs.join('/')
-}
 
 function readStringArray(key: string): string[] {
   try {
@@ -117,40 +109,4 @@ export function setKindGlobalOn(kind: string, on: boolean): void {
 
 function write(key: string, list: string[]): void {
   try { localStorage.setItem(key, JSON.stringify(list)) } catch { /* private-browsing */ }
-}
-
-function readWakeMap(): Record<string, string[]> {
-  try {
-    const obj = JSON.parse(localStorage.getItem(WAKE_KEY) ?? '{}')
-    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return {}
-    const out: Record<string, string[]> = {}
-    for (const [p, kinds] of Object.entries(obj as Record<string, unknown>)) {
-      if (Array.isArray(kinds)) out[p] = kinds.filter((k): k is string => typeof k === 'string')
-    }
-    return out
-  } catch { return {} }
-}
-
-/** True when a wake exception exists EXACTLY at this path (what the panel's
- *  wake toggle reflects — subtree coverage is the reader's concern). */
-export function isWokenExactlyAt(kind: string, segments: readonly string[]): boolean {
-  return (readWakeMap()[behaviorPath(segments)] ?? []).includes(kind)
-}
-
-/** Set/clear the local ON exception for a kind at a tile. */
-export function setWakeAt(segments: readonly string[], kind: string, awake: boolean): void {
-  const k = String(kind ?? '').trim()
-  if (!k) return
-  const map = readWakeMap()
-  const p = behaviorPath(segments)
-  const kinds = map[p] ?? []
-  const has = kinds.includes(k)
-  if (awake && !has) map[p] = [...kinds, k]
-  else if (!awake && has) {
-    const next = kinds.filter(x => x !== k)
-    if (next.length > 0) map[p] = next
-    else delete map[p]
-  } else return
-  try { localStorage.setItem(WAKE_KEY, JSON.stringify(map)) } catch { /* private-browsing */ }
-  EffectBus.emit(ENABLEMENT_CHANGED, { kind: k, root: p, awake })
 }
