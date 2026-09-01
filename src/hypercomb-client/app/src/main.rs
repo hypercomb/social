@@ -314,6 +314,18 @@ const RENDERER_DIAGNOSTICS: &str = r#"
     try { window.__TAURI__.core.invoke('renderer_log', { level, message: String(message).slice(0, 2000) }) }
     catch { /* bridge not up yet */ }
   };
+  // JavaScriptCore's error.stack is FRAMES ONLY. V8 leads its stack with
+  // "Name: message"; WebKit does not, so forwarding the stack alone is how a
+  // boot-killing rejection reached the log as three anonymous frames and a
+  // native `register`, with nothing anywhere saying what actually went wrong.
+  // Lead with the message when the stack is missing it.
+  const describe = value => {
+    if (!(value instanceof Error)) return value?.stack ?? value?.message ?? value;
+    const stack = value.stack ?? '';
+    if (stack.startsWith(value.name)) return stack;
+    const head = value.name + ': ' + value.message;
+    return stack ? head + '\n' + stack : head;
+  };
   // console.log is forwarded FILTERED — install/boot subsystems narrate
   // through it, and those lines are exactly what a silent install stall
   // needs. Unfiltered would drown the log in render chatter.
@@ -323,7 +335,7 @@ const RENDERER_DIAGNOSTICS: &str = r#"
       original(...args);
       const first = String(args[0] ?? '');
       if (/^\[(main|ensure-install|upgrade|install|sentinel|store|layer-install|dcp|script-preloader|atlas|io)/.test(first)) {
-        send('log', args.map(a => a?.stack ?? a?.message ?? a).join(' '));
+        send('log', args.map(describe).join(' '));
       }
     };
   }
@@ -331,7 +343,7 @@ const RENDERER_DIAGNOSTICS: &str = r#"
     const original = console[level].bind(console);
     console[level] = (...args) => {
       original(...args);
-      send(level, args.map(a => a?.stack ?? a?.message ?? a).join(' '));
+      send(level, args.map(describe).join(' '));
     };
   }
   window.addEventListener('error', event => {
@@ -341,10 +353,10 @@ const RENDERER_DIAGNOSTICS: &str = r#"
       const t = event.target;
       send('resource', `${t.tagName}: ${t.src || t.href || t.currentSrc || t.outerHTML?.slice(0,120)}`);
     } else {
-      send('error', event.error?.stack ?? event.message);
+      send('error', event.error ? describe(event.error) : event.message);
     }
   }, true);
-  window.addEventListener('unhandledrejection', e => send('rejection', e.reason?.stack ?? e.reason));
+  window.addEventListener('unhandledrejection', e => send('rejection', describe(e.reason)));
   // Boot milestone trace. The shell calls window.__hcBoot('<milestone>') at
   // each step of bootstrap; forwarding it shows exactly WHERE a silent boot
   // stalls — the difference between "stuck before ensureInstall" and "stuck

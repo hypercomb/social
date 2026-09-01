@@ -88,8 +88,25 @@ const ensureSwControl = async (): Promise<void> => {
   // active). A versioned URL makes every worker change a fresh registration.
   // Web is untouched: __hcSwV is undefined there.
   const swV = (window as any).__hcSwV
-  await navigator.serviceWorker.register('/hypercomb.worker.js' + (swV ? '?v=' + swV : ''), { scope: '/' })
-  const reg = await navigator.serviceWorker.ready
+
+  // A worker that CANNOT be registered is a missing feature, not a failed
+  // boot. WebKitGTK — the Linux native shell's webview — exposes
+  // navigator.serviceWorker on the tauri:// custom scheme, so the guard above
+  // passes, and then rejects register() outright. This sits one statement
+  // before bootstrapApplication, so the rejection took the whole shell down:
+  // boot stopped at milestone #11 and never painted, on the one platform
+  // whose smoke test is a hard gate. Nothing on the first-paint path needs a
+  // worker — its /@resource/ route serves embedded-site composition only,
+  // exactly as the controller gate below already notes — so degrade loudly
+  // and carry on. macOS and WebView2 register normally and are unaffected.
+  let reg: ServiceWorkerRegistration | null = null
+  try {
+    await navigator.serviceWorker.register('/hypercomb.worker.js' + (swV ? '?v=' + swV : ''), { scope: '/' })
+    reg = await navigator.serviceWorker.ready
+  } catch (error) {
+    console.warn('[main] service worker unavailable — embedded-site resources will not stream from a host', error)
+  }
+  if (!reg) return
 
   if (navigator.serviceWorker.controller) return
 
