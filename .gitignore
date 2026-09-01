@@ -23,6 +23,21 @@ dist/
 # TypeScript cache
 *.tsbuildinfo
 
+# Local generated scratch artifacts. The node_modules rule above is anchored to
+# the repo root, so a deck or tool that installs its own deps down here is not
+# covered by it.
+/.tmp/
+
+# Staged host output (src/hypercomb-client/scripts/stage-host-shell.mjs) —
+# signature-named content bytes and the shell built around them. Generated from
+# the store on demand, never source; the README that explains the folder is.
+/src/hypercomb-client/app/host-shell/*
+!/src/hypercomb-client/app/host-shell/README.md
+
+# Vendored runtime bundles, copied into place by `npm run runtime`. 2.3MB of
+# pixi that is rebuilt from the dependency, not written here.
+/src/hypercomb-shim/public/vendor/
+
 # Local heuristic-audit cache/export (generated, not source or hive data)
 src/.hypercomb/
 
