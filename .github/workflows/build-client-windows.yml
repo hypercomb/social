@@ -416,9 +416,9 @@ jobs:
           name: renderer-log-windows
           if-no-files-found: ignore
 
-      # The smoke test is deliberately non-blocking (see its comment), which
-      # means a failure there would otherwise leave the run green and the
-      # finding buried in the log. Say it plainly in the summary instead.
+      # The smoke test fails the run, but a red X names the step, not what the
+      # step proves. Say it in words too — and `if: always()` is what keeps
+      # this running when the gate trips.
       - name: Summarise
         if: always()
         run: |
