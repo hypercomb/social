@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::time::Duration;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -287,5 +288,66 @@ fn one_connection_serves_many_requests() {
     stream.read_to_string(&mut out).expect("read");
 
     assert_eq!(out.matches("HTTP/1.1 200 OK").count(), 2, "{out}");
+    serving.stop();
+}
+
+/// A body larger than any socket send buffer arrives WHOLE.
+///
+/// The listener is non-blocking so shutdown can interrupt it, and on macOS/BSD
+/// and Windows an accepted socket inherits that flag. `write_all` treats the
+/// resulting WouldBlock as a failure rather than a wait, so the host used to
+/// stop at the first full send buffer — a 164 kB locale catalog reached its
+/// reader as 128 kB and a dropped socket. Small replies never noticed, which is
+/// why every other test here passed. Anything over the buffer notices.
+#[test]
+fn a_body_larger_than_the_socket_buffer_arrives_whole() {
+    const SIZE: usize = 2 * 1024 * 1024;
+    let (_dir, root) = shell();
+    let mut stub = Stub::default();
+    stub.content.insert(SIG_B.to_string(), vec![b'x'; SIZE]);
+
+    let serving = serve(root, Arc::new(stub), LOOPBACK, 0).expect("bind");
+    let response = fetch(
+        serving.addr(),
+        &format!("GET /{SIG_B} HTTP/1.1
+Host: h
+Connection: close
+
+"),
+    );
+
+    assert!(response.contains(&format!("content-length: {SIZE}")), "{}", &response[..200.min(response.len())]);
+    let body = response.split("
+
+").nth(1).unwrap_or_default();
+    assert_eq!(body.len(), SIZE, "body truncated at {} of {SIZE} bytes", body.len());
+    serving.stop();
+}
+
+/// A request that arrives AFTER the accept is answered, not rejected.
+///
+/// The other half of the inherited non-blocking flag: a read whose bytes have
+/// not landed yet answered WouldBlock, which reads as a malformed request line
+/// and became a 400 on a connection that did nothing wrong. Every client that
+/// opens a socket before it knows what to ask for hits this window; the sleep
+/// just makes the window certain instead of a race.
+#[test]
+fn a_request_that_arrives_after_the_accept_is_answered() {
+    let (_dir, root) = shell();
+    let serving = serve(root, Arc::new(Stub::default()), LOOPBACK, 0).expect("bind");
+
+    let mut stream = TcpStream::connect(serving.addr()).expect("connect");
+    std::thread::sleep(Duration::from_millis(250));
+    stream
+        .write_all(b"GET /pin HTTP/1.1
+Host: h
+Connection: close
+
+")
+        .expect("write");
+    let mut out = String::new();
+    stream.read_to_string(&mut out).expect("read");
+
+    assert!(out.starts_with("HTTP/1.1 200 OK"), "{out}");
     serving.stop();
 }

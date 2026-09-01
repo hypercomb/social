@@ -19,10 +19,21 @@ import { BARE_WORD_POOL_MEANINGS } from '@hypercomb/core'
 
 const ROOT = __dirname
 
-// the five-tier packages + shells; worktrees/dist/node_modules excluded
+// Every package + shell; worktrees/dist/node_modules excluded.
+//
+// A RATCHET ONLY HOLDS WHAT IT CAN SEE, so a package missing from this list is
+// not merely unchecked — it is an exit. When `hypercomb-runtime` was split out
+// of `hypercomb-shared/core` and this list was not extended with it, three
+// ratchets reported their `store.ts` entries as DEBT PAID: the file had not
+// been cleaned up, it had walked out of the room, and pruning those entries as
+// the message invites would have sealed the debt in permanently. Adding a
+// package here is part of creating one.
 const SCAN_DIRS = [
   'hypercomb-core/src',
   'hypercomb-shared',
+  'hypercomb-runtime/src',
+  'hypercomb-shim/src',
+  'hypercomb-legacy/src',
   'hypercomb-essentials/src',
   'hypercomb-essentials/scripts',
   'hypercomb-web/src',
@@ -167,7 +178,7 @@ describe('doctrine ratchets', () => {
     // documented sha256-of-empty sentinels only.
     const actual = filesMatching(/['"`][0-9a-f]{64}['"`]/)
     assertRatchet(actual, [
-      'hypercomb-shared/core/store.ts',                                              // EMPTY_CONTENT_SIG
+      'hypercomb-runtime/src/store.ts',                                              // EMPTY_CONTENT_SIG
       'hypercomb-essentials/src/history/history.service.ts', // EMPTY_LAYER_*_SIG
     ], 'hardcoded signature')
   })
@@ -184,7 +195,7 @@ describe('doctrine ratchets', () => {
     const actual = filesMatching(/['"`]__[a-z][a-z0-9_-]*__['"`]/)
     assertRatchet(actual, [
       'hypercomb-shared/core/initializers/location-parser.ts',
-      'hypercomb-shared/core/store.ts',
+      'hypercomb-runtime/src/store.ts',
       'hypercomb-essentials/scripts/copy-content.ts',
       'hypercomb-essentials/src/clipboard/clipboard.worker.ts',
       'hypercomb-essentials/src/commands/website-archive.queen.ts',
@@ -234,7 +245,7 @@ describe('doctrine ratchets', () => {
     // show-cell resolveChildNames backfill; store.ts defines it.
     const actual = filesMatching(/writeChildrenManifest/)
     assertRatchet(actual, [
-      'hypercomb-shared/core/store.ts',
+      'hypercomb-runtime/src/store.ts',
       'hypercomb-essentials/src/history/manifest-optimizer.drone.ts',
       'hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts',
     ], 'children-manifest writer')

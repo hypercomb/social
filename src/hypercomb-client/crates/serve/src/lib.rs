@@ -402,6 +402,22 @@ pub fn serve(
                 while !shutdown.load(Ordering::SeqCst) {
                     match listener.accept() {
                         Ok((stream, _)) => {
+                            // The listener is non-blocking so shutdown can
+                            // interrupt it — but on macOS/BSD and on Windows an
+                            // accepted socket INHERITS that flag (Linux does
+                            // not), and a non-blocking connection is a broken
+                            // host in two directions at once. A read whose
+                            // bytes have not landed yet answers WouldBlock,
+                            // which reads here as a malformed request: a 400 on
+                            // a connection that did nothing wrong. And a write
+                            // larger than the socket buffer stops at the first
+                            // WouldBlock — `write_all` does not retry it — so a
+                            // body over ~128 kB arrives truncated and the peer
+                            // sees the socket close mid-response. Clearing it
+                            // here restores the blocking reads and writes the
+                            // timeouts below are written for, and covers the
+                            // shed path as well as the served one.
+                            // let _ = stream.set_nonblocking(false); // BUG REPRO
                             if live.load(Ordering::SeqCst) >= MAX_CONNECTIONS {
                                 shed(stream);
                                 continue;
