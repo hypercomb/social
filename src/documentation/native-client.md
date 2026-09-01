@@ -346,6 +346,77 @@ additions:
   nothing.
 - The bundle is **msi + nsis**, selected by `tauri.windows.conf.json`.
 
+### What the workflow watches
+
+The client is built from the **whole monorepo** — `build:core`,
+`build:essentials`, `build:shim`, the vendored runtimes, `build:web` — and
+that result is baked into the binary. `app/frontend/` is gitignored, so none of
+it ever appears in a commit: a path filter that watches only
+`src/hypercomb-client/**` sees a client that never changes while the app it
+produces changes every day.
+
+That is the mechanism behind the entire "works on the web, broken in the app"
+class of report. It is not a webview quirk and it is rarely the feature: the
+binary simply predates the feature. Measured once at 248 commits stale.
+
+So the trigger names every package the build actually compiles —
+`hypercomb-web`, `hypercomb-shared`, `hypercomb-essentials`,
+`hypercomb-core`, `hypercomb-runtime`, `hypercomb-shim` — plus the root
+lockfile that pins what they compile against. All three platform workflows carry
+the same list; an asymmetric trigger is the same trap wearing a different OS.
+
+The rule for anything added later: **if the bundle would differ, the trigger
+must fire.** A new workspace consumed by the shell belongs in that list on the
+same commit that introduces it.
+
+## Keeping the installed app current
+
+CI builds it; nothing installs it. Because Smart App Control makes CI the only
+builder, every refresh used to be a manual `gh run download` and a click, and
+an app nobody remembers to update is an app that silently drifts — which lands
+back in exactly the stale-binary failure above, now as a habit rather than a
+config bug.
+
+`scripts/client/windows-client.mjs` closes it:
+
+```bash
+npm run client:windows          # update to the newest green build, then launch
+npm run client:windows:update   # update only
+```
+
+It asks `gh` for the newest **successful** `build-client-windows.yml` run on
+`development`, compares that run's commit against `installed-build.json` beside
+the exe, and if they differ downloads the artifact and runs the NSIS installer
+with `/S` — per-user, no elevation. Fetched through `gh` the installer carries
+no Mark-of-the-Web, which is what lets an unsigned build install on a machine
+with SAC enforced.
+
+Three things it deliberately does:
+
+- **Launching is never blocked by updating.** No `gh`, no network, no artifact,
+  a red run — every failure path falls through to starting whatever is already
+  installed. An updater that can stop you opening your own hive is worse than a
+  stale build.
+- **It refuses to install over a running app** and says so, rather than half
+  writing an exe that is open.
+- **It waits for the exe to change**, not for the installer to exit. NSIS `/S`
+  returns before it has finished writing, so the exit code is not the witness.
+
+`install-launcher.ps1` wires it into the shell: a Desktop shortcut that updates
+then launches, and a Startup shortcut that updates only, minimised, at logon. By
+the time the app is opened the newest build is usually already installed, so the
+launch is instant rather than a download; the Desktop half covers the machine
+being off when the build landed.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scriptsclientinstall-launcher.ps1
+powershell -ExecutionPolicy Bypass -File scriptsclientinstall-launcher.ps1 -Remove
+```
+
+Neither shortcut is a system change, and deleting either by hand leaves the
+other working.
+
+
 ## Signing, notarization, distribution
 
 The CI build is **unsigned and un-notarized** — no Apple Developer credentials

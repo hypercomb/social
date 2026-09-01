@@ -69,6 +69,8 @@
     "revolucion:preview": "tsx scripts/intel-build-revolucion-site.ts --preview site-preview && npx -y http-server site-preview -p 4336 -c-1 -o /revolucion.html",
     "revolucion:deploy": "tsx scripts/intel-build-revolucion-site.ts",
     "shot": "node scripts/shot.cjs",
+    "client:windows": "node scripts/client/windows-client.mjs --launch",
+    "client:windows:update": "node scripts/client/windows-client.mjs",
     "build:runtime": "npm --prefix hypercomb-runtime run build"
   },
   "dependencies": {
