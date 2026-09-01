@@ -30,6 +30,9 @@ import {
   removeDecorationAndWait,
   replaceDecoration,
 } from './decoration-manifest.js'
+import { normalizeViewToken } from './decoration-kind-index.js'
+import { WEBSITE_SLOT } from './website-slot.js'
+import { WEBSITE_PAGE_KIND } from './website-binding.js'
 
 /** The decoration kind. Read asynchronously on arrival only, so it does not
  *  need a synchronous index the way `view:default` does. */
@@ -75,6 +78,122 @@ export async function publishLightsWithinAt(
     if (lights) return lights
   }
   return null
+}
+
+// ── The dressing census ──────────────────────────────────────────────────────
+//
+// "The behaviours this creation was dressed in" is a fact about the BRANCH,
+// not about the publisher's whole roster. A legacy hive's census seed lit
+// every kind the module graph knows, so stamping the raw on-list dressed
+// every publication in ~everything — and every visitor's Beehaviors list
+// arrived fully lit ("sites turning them all on"). The census walks the
+// branch and answers which kinds it actually WEARS; the publish routine
+// stamps the intersection of that with the publisher's lights.
+
+const SIG_RE = /^[0-9a-f]{64}$/
+/** Depth guard — matches the website sweep's. */
+const MAX_DEPTH = 24
+const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
+const STORE_KEY = '@hypercomb.social/Store'
+const VISUAL_BEE_REGISTRY_KEY = '@diamondcoreprocessor.com/VisualBeeRegistry'
+const DEFAULT_VIEW_KIND = 'view:default'
+
+type HistoryLike = {
+  sign(l: { explorerSegments?: () => readonly string[] }): Promise<string>
+  currentLayerAt(locationSig: string): Promise<Record<string, unknown> | null>
+  getLayerBySig(sig: string): Promise<{ name?: unknown } | null>
+}
+type StoreLike = { getResource(sig: string): Promise<{ text(): Promise<string> } | null> }
+type RegistryLike = { all?(): readonly { view: string; decorationKind: string; slot?: string }[] }
+
+const iocGet = <T,>(key: string): T | undefined =>
+  (window as unknown as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
+
+const slotWorn = (value: unknown): boolean =>
+  Array.isArray(value)
+    ? value.some(s => SIG_RE.test(String(s ?? '')))
+    : typeof value === 'string' && SIG_RE.test(value)
+
+/** Every decoration kind the branch at `segments` WEARS — its own layer and
+ *  every descendant's: decoration records, slot-backed bees (a first-class
+ *  slot is how tutor decks and website pages ride), and the kind behind each
+ *  `view:default` mark (a pinned view must be able to mount even when no
+ *  tile in the branch carries its record — publications derives its plates).
+ *  `null` when the branch cannot be read at all, so the caller can fall back
+ *  rather than stamp an empty dressing over a live creation. */
+export async function wornKindsWithin(
+  segments: readonly string[],
+): Promise<ReadonlySet<string> | null> {
+  const history = iocGet<HistoryLike>(HISTORY_KEY)
+  const store = iocGet<StoreLike>(STORE_KEY)
+  if (!history?.sign || !history.currentLayerAt || !store?.getResource) return null
+  const bees = iocGet<RegistryLike>(VISUAL_BEE_REGISTRY_KEY)?.all?.() ?? []
+  const kindByView = new Map(bees.map(b => [b.view, b.decorationKind]))
+  const slotted = bees.filter(b => b.slot)
+
+  const worn = new Set<string>()
+  const visited = new Set<string>()
+  let layersRead = 0
+
+  const childNames = async (layer: Record<string, unknown>): Promise<string[]> => {
+    const children = Array.isArray(layer['children']) ? layer['children'] : []
+    const names: string[] = []
+    for (const entry of children) {
+      const s = String(entry ?? '').trim()
+      if (!s) continue
+      if (SIG_RE.test(s)) {
+        const child = await history.getLayerBySig(s).catch(() => null)
+        const n = child?.name
+        if (typeof n === 'string' && n) names.push(n)
+      } else {
+        names.push(s)
+      }
+    }
+    return names
+  }
+
+  const collect = async (layer: Record<string, unknown>): Promise<void> => {
+    for (const bee of slotted) {
+      if (slotWorn(layer[bee.slot as string])) worn.add(bee.decorationKind)
+    }
+    // The website bee declares no slot of its own — same special as
+    // show-features' scope-root probe and website-binding's layerHasWebsite.
+    if (slotWorn(layer[WEBSITE_SLOT])) worn.add(WEBSITE_PAGE_KIND)
+    const decos = Array.isArray(layer['decorations']) ? layer['decorations'] : []
+    for (const entry of decos) {
+      const sig = String(entry ?? '')
+      if (!SIG_RE.test(sig)) continue
+      const blob = await store.getResource(sig).catch(() => null)
+      if (!blob) continue
+      try {
+        const rec = JSON.parse(await blob.text()) as { kind?: string; payload?: { view?: unknown } }
+        if (typeof rec?.kind !== 'string' || !rec.kind) continue
+        worn.add(rec.kind)
+        if (rec.kind === DEFAULT_VIEW_KIND) {
+          const view = normalizeViewToken(String(rec.payload?.view ?? '').trim())
+          const kind = kindByView.get(view)
+          if (kind) worn.add(kind)
+        }
+      } catch { /* malformed record — skip */ }
+    }
+  }
+
+  const walk = async (segs: string[], depth: number): Promise<void> => {
+    if (depth < 0) return
+    const pathKey = segs.join('/')
+    if (visited.has(pathKey)) return
+    visited.add(pathKey)
+    const locSig = await history.sign({ explorerSegments: () => segs }).catch(() => null)
+    if (!locSig) return
+    const layer = await history.currentLayerAt(locSig).catch(() => null)
+    if (!layer) return
+    layersRead++
+    await collect(layer)
+    for (const name of await childNames(layer)) await walk([...segs, name], depth - 1)
+  }
+
+  await walk([...segments], MAX_DEPTH)
+  return layersRead > 0 ? worn : null
 }
 
 /** Stamp this branch with the lights it is being published under. Replaces
