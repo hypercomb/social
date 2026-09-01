@@ -402,11 +402,39 @@ Three things it deliberately does:
 - **It waits for the exe to change**, not for the installer to exit. NSIS `/S`
   returns before it has finished writing, so the exit code is not the witness.
 
-`install-launcher.ps1` wires it into the shell: a Desktop shortcut that updates
-then launches, and a Startup shortcut that updates only, minimised, at logon. By
-the time the app is opened the newest build is usually already installed, so the
-launch is instant rather than a download; the Desktop half covers the machine
-being off when the build landed.
+- **It finds the install rather than assuming one.** `%LOCALAPPDATA%hypercomb`
+  is not a constant. A Claude Code session runs inside the desktop app's MSIX
+  container, where `AppDataLocal` is redirected into
+  `Packages<pkg>LocalCacheLocal` — so an install done from a session lands
+  there, while the scheduled task, running outside the container, sees the real
+  `AppDataLocal` and finds nothing. Assuming the path installs a SECOND copy
+  that nothing launches, and reports success while the shortcut goes stale. So
+  the updater looks for the binary — explicit `--dir=`, then
+  `%LOCALAPPDATA%hypercomb`, then any `Packages*LocalCacheLocalhypercomb`
+  — passes the winner to NSIS as `/D=`, and names it on every run.
+- **It writes `update.log` beside the exe.** A scheduled run has nobody watching
+  it; the log is the only way it can report.
+
+`install-launcher.ps1` wires three pieces into the shell, each removable on its
+own and none of them a system change:
+
+| | What | Why |
+|---|---|---|
+| Desktop shortcut | update, then launch | covers the machine being off when the build landed |
+| Startup shortcut | update only, at logon | by the time the app is opened it is already current |
+| Scheduled task | update only, every 3h | closes the gap where a build goes green *after* logon |
+
+The task can never interrupt anything: the updater refuses to install over a
+running app, so in practice it installs while the app is shut. It goes through
+`update-quiet.vbs` — Task Scheduler shows a console for anything it starts under
+the Interactive logon type, and S4U, which would not, needs a privilege this
+machine does not grant. `wscript` with window style 0 always works and costs
+nothing now the log exists.
+
+A pinned taskbar shortcut needs no maintenance: NSIS installs per-user to a
+fixed path with no version in it, so every update overwrites in place and the
+pin always points at the newest build. What a pin does not do is *trigger* an
+update — that is what the Startup shortcut and the task are for.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scriptsclientinstall-launcher.ps1

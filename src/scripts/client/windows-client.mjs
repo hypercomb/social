@@ -20,7 +20,7 @@
 //   node scripts/client/windows-client.mjs --force    # reinstall the newest build
 //
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -31,19 +31,72 @@ const ARTIFACT = 'hypercomb-client-windows-x64'
 
 // cargo names the binary after the CRATE; `productName` only applies inside the
 // bundle, so searching the install dir for "Hypercomb.exe" finds nothing.
-const INSTALL_DIR = join(process.env.LOCALAPPDATA ?? '', 'hypercomb')
-const EXE = join(INSTALL_DIR, 'hypercomb-client.exe')
+const BINARY = 'hypercomb-client.exe'
+
+const args = new Set(process.argv.slice(2))
+const wantLaunch = args.has('--launch')
+const force = args.has('--force')
+const arg = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.split('=').slice(1).join('=')
+const branch = arg('branch') ?? 'development'
+
+// Where the app actually lives is not a constant, and assuming it is installs a
+// SECOND copy that nothing launches.
+//
+// A Claude Code session runs inside the desktop app's MSIX container, where
+// AppData\Local is redirected into Packages\<pkg>\LocalCache — so an
+// install done from a session lands there, while the scheduled task, running
+// outside the container, sees the real AppData\Local and finds nothing.
+// Both must update the SAME directory or the shortcut goes stale while the
+// updater reports success.
+//
+// So: look for the binary rather than assume a path, and say which one won.
+function resolveInstallDir() {
+  const local = process.env.LOCALAPPDATA ?? ''
+  const explicit = arg('dir') ?? process.env.HYPERCOMB_CLIENT_DIR
+  if (explicit) return { dir: explicit, how: 'explicit' }
+
+  const plain = join(local, 'hypercomb')
+  if (existsSync(join(plain, BINARY))) return { dir: plain, how: 'LOCALAPPDATA' }
+
+  // Any packaged container's redirected LocalAppData. Matched by shape, not by
+  // package name — this is not specific to one host application.
+  const packages = join(local, 'Packages')
+  const found = []
+  if (existsSync(packages)) {
+    for (const pkg of readdirSync(packages, { withFileTypes: true })) {
+      if (!pkg.isDirectory()) continue
+      const candidate = join(packages, pkg.name, 'LocalCache', 'Local', 'hypercomb')
+      const exe = join(candidate, BINARY)
+      if (existsSync(exe)) found.push({ dir: candidate, at: statSync(exe).mtimeMs })
+    }
+  }
+  if (found.length) {
+    found.sort((a, b) => b.at - a.at)
+    return { dir: found[0].dir, how: 'container' }
+  }
+
+  return { dir: plain, how: 'fresh' }
+}
+
+const { dir: INSTALL_DIR, how: FOUND_BY } = resolveInstallDir()
+const EXE = join(INSTALL_DIR, BINARY)
 
 // Beside the exe rather than inside the hive: this records which BUILD is
 // installed, which is a fact about the machine, not about anyone's content.
 const STAMP = join(INSTALL_DIR, 'installed-build.json')
 
-const args = new Set(process.argv.slice(2))
-const wantLaunch = args.has('--launch')
-const force = args.has('--force')
-const branch = process.argv.find((a) => a.startsWith('--branch='))?.split('=')[1] ?? 'development'
-
-const say = (m) => console.log(`[client] ${m}`)
+// A scheduled run has nobody watching it, so the only way it can report is in
+// writing. Beside the exe: if the app is gone the log is moot anyway.
+const LOG = join(INSTALL_DIR, 'update.log')
+const say = (m) => {
+  console.log(`[client] ${m}`)
+  try {
+    appendFileSync(LOG, `${new Date().toISOString()} ${m}
+`)
+  } catch {
+    // An unwritable log must never be the reason an update or a launch fails.
+  }
+}
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 
 function gh(argv, opts = {}) {
@@ -116,7 +169,8 @@ function update() {
 
     const before = existsSync(EXE) ? statSync(EXE).mtimeMs : 0
     say(`installing ${setup.split(/[\/]/).pop()} (silent, per-user)`)
-    const install = spawnSync(setup, ['/S'], { stdio: 'inherit' })
+    // /D must be last and unquoted; it pins NSIS to the install we resolved.
+    const install = spawnSync(setup, ['/S', `/D=${INSTALL_DIR}`], { stdio: 'inherit' })
     if (install.error) throw install.error
 
     // NSIS /S returns before it has finished writing, so the exit code is not
@@ -135,6 +189,8 @@ function update() {
     rmSync(staging, { recursive: true, force: true })
   }
 }
+
+say(`install dir ${INSTALL_DIR} (${FOUND_BY})`)
 
 try {
   update()
