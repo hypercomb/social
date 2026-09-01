@@ -204,7 +204,13 @@ async function main() {
   // One per company would be the opposite of the point: this pass is a single
   // thing somebody did, and it should be a single thing to go back from —
   // including the `--slugs` case, which is the same pass over fewer of them.
-  const rev = await ask({ op: 'build-record', segments: ['ai-inside'], label: 'ai-inside data-privacy build' })
+  // Reported, never thrown — and that needs the guard, not just the shape of
+  // the log. `ask` re-throws the transport error on its last attempt, so a
+  // bridge that drops at the very end would exit(2) through main().catch
+  // after every anchor in the pass had already committed.
+  let rev
+  try { rev = await ask({ op: 'build-record', segments: ['ai-inside'], label: 'ai-inside data-privacy build' }) }
+  catch (err) { rev = { ok: false, error: err.message } }
   console.log(rev.ok
     ? `build revision: ${rev.data.label} seal=${String(rev.data.seal).slice(0, 12)}${rev.data.unchanged ? ' (unchanged)' : ''}`
     : `build revision FAILED: ${rev.error}`)

@@ -89,7 +89,12 @@ async function build() {
   //
   // AFTER the distribute has settled, not before: the seal should capture the
   // divided visual, which is the state this pass exists to produce.
-  const rev = await send({ op:'build-record', segments:[WHOLE], label:'division-live build' })
+  // Reported, never thrown — and that needs the guard, not just the shape of
+  // the log. `send` rejects on a bridge timeout, and the runner's catch would
+  // turn a proof that had already reported its findings into exit(1).
+  let rev
+  try { rev = await send({ op:'build-record', segments:[WHOLE], label:'division-live build' }) }
+  catch (err) { rev = { ok:false, error: err.message } }
   console.log(rev && rev.ok
     ? `build revision: ${rev.data.label} seal=${String(rev.data.seal).slice(0, 12)}${rev.data.unchanged ? ' (unchanged)' : ''}`
     : `build revision FAILED: ${rev && rev.error}`)

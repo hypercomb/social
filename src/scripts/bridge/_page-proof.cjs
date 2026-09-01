@@ -82,7 +82,12 @@ async function build() {
   // in a real hive, over the bridge. A pass that mints resources and touches
   // more than one anchor has to end as ONE restorable step, or the only way
   // back out is four separate undos in the right order.
-  const rev = await send({ op: 'build-record', segments: [W], label: 'page-proof build' })
+  // Reported, never thrown — and that needs the guard, not just the shape of
+  // the log. `send` rejects on a bridge timeout, and the runner's catch would
+  // turn a proof that had already reported its findings into exit(1).
+  let rev
+  try { rev = await send({ op: 'build-record', segments: [W], label: 'page-proof build' }) }
+  catch (err) { rev = { ok: false, error: err.message } }
   console.log(rev && rev.ok
     ? `build revision: ${rev.data.label} seal=${String(rev.data.seal).slice(0, 12)}${rev.data.unchanged ? ' (unchanged)' : ''}`
     : `build revision FAILED: ${rev && rev.error}`)

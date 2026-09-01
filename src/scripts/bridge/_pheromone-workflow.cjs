@@ -269,7 +269,13 @@ async function main() {
   // all, and `build-record` refuses empty segments by design, pointing at
   // /snapshot for the whole-hive case. Everything the pass MEANS is the
   // workflow tile and its steps, and a record seals that whole subtree.
-  const rev = await ask({ op: 'build-record', segments: [ROOT], label: 'pheromone workflow build' })
+  // Reported, never thrown — and that needs the guard, not just the shape of
+  // the log. `ask` re-throws the transport error on its last attempt, so a
+  // bridge that drops at the very end would exit(1) through main().catch
+  // after every anchor in the pass had already committed.
+  let rev
+  try { rev = await ask({ op: 'build-record', segments: [ROOT], label: 'pheromone workflow build' }) }
+  catch (err) { rev = { ok: false, error: err.message } }
   log('build revision', rev.ok
     ? `${rev.data.label} seal=${String(rev.data.seal).slice(0, 12)}${rev.data.unchanged ? ' (unchanged)' : ''}`
     : `FAILED: ${rev.error}`)
