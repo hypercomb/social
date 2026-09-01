@@ -23,6 +23,9 @@ on:
     paths:
       - 'src/hypercomb-client/**'
       - 'src/hypercomb-shim/**'
+      # The client BAKES this shell's frontend, and the bake is gitignored —
+      # so a web change is a client change that no client path can see.
+      - 'src/hypercomb-web/**'
       - '.github/workflows/build-client-linux.yml'
 
 concurrency:
