@@ -417,7 +417,7 @@ pub fn serve(
                             // here restores the blocking reads and writes the
                             // timeouts below are written for, and covers the
                             // shed path as well as the served one.
-                            // let _ = stream.set_nonblocking(false); // BUG REPRO
+                            let _ = stream.set_nonblocking(false);
                             if live.load(Ordering::SeqCst) >= MAX_CONNECTIONS {
                                 shed(stream);
                                 continue;
