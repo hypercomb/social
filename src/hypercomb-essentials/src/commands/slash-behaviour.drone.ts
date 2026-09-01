@@ -359,8 +359,7 @@ class MoveProvider implements SlashBehaviourProvider {
 // /organize instead. Otherwise the unit is a TILE, applied foreach: selection
 // → each selected tile; no selection → each leaf on the current layer.
 //
-// Not `/atomize-ui`, which toggles the atomizer toolbar — a different
-// mechanism that splits dropped input, not this verb. Not `/organize`,
+// Not `/organize`,
 // which goes the OTHER way — mints no leaves, inserts a level and re-homes
 // existing children into groups. Not `/expand`, which grows the CURRENT
 // layer sideways with new siblings instead of deepening a leaf.
@@ -496,19 +495,6 @@ class TextOnlyProvider implements SlashBehaviourProvider {
   }
 }
 
-class AtomizeUiProvider implements SlashBehaviourProvider {
-  readonly name = 'atomize-ui-provider'
-  readonly priority = 100
-  readonly behaviours: SlashBehaviour[] = [
-    { name: 'atomize-ui', description: 'Toggle the atomizer toolbar', descriptionKey: 'slash.atomize-ui',
-      examples: [{ input: '/atomize-ui', result: 'Opens the atomizer toolbar' }] }
-  ]
-
-  execute(): void {
-    EffectBus.emit('atomizer-bar:toggle', { active: true })
-  }
-}
-
 // ORGANIZE — the inverse of break-apart. Mints no leaves: it inserts a level and
 // re-homes the layer's existing children into named groups, so a crowded page
 // becomes a handful of groups. Haiku plans the clusters over the bridge; the
@@ -616,7 +602,6 @@ _slashBehaviours.addProvider(new OrganizeProvider())
 _slashBehaviours.addProvider(new VoiceProvider())
 _slashBehaviours.addProvider(new PushToTalkProvider())
 _slashBehaviours.addProvider(new TextOnlyProvider())
-_slashBehaviours.addProvider(new AtomizeUiProvider())
 _slashBehaviours.addProvider(new DocsProvider())
 _slashBehaviours.addProvider(new DomainProvider())
 _slashBehaviours.addProvider(new ObserveProvider())

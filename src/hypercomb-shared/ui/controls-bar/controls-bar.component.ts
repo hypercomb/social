@@ -419,7 +419,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #inputVisibleMirrorUnsub?: () => void
   #utility = signal(localStorage.getItem('hc:utility-expanded') !== 'false')
   #moveMode = signal(false)
-  #mode = signal<'browsing' | 'atomize'>('browsing')
+  // 'browsing' is the only mode left — the retired atomize surface was the
+  // second variant, and the template still switches on this signal.
+  #mode = signal<'browsing'>('browsing')
   #clipboardItems = signal<string[]>([])
   #roomOpen = signal(false)
   #beesVisible = signal(localStorage.getItem('hc:bees-visible') === 'true')
@@ -509,9 +511,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly hoveredCell = computed(() => this.#hoveredCell())
   #hoveredCell = signal<string | null>(null)
   readonly addressHover = signal(false)
-  #atomizeTarget = signal('')
-  #atomizeStrategy = signal('')
-  #atomizeAtomCount = signal(0)
 
   // ── single-row layout with edit-mode toggling ──────────────
   // Replaces the previous multi-row + expand/collapse split. All items
@@ -1329,9 +1328,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly showHidden = this.#showHidden.asReadonly()
   readonly voiceActive = signal(false)
   readonly voiceSupported = VoiceInputService.supported()
-  readonly atomizeTarget = this.#atomizeTarget.asReadonly()
-  readonly atomizeStrategy = this.#atomizeStrategy.asReadonly()
-  readonly atomizeAtomCount = this.#atomizeAtomCount.asReadonly()
 
   // ── lifecycle ───────────────────────────────────────────
 
@@ -1352,9 +1348,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #clipboardAvailableUnsub: (() => void) | null = null
   #clipboardOpenUnsub: (() => void) | null = null
   #tutorialsOpenUnsub: (() => void) | null = null
-  #atomizeModeUnsub: (() => void) | null = null
-  #atomizeAtomsUnsub: (() => void) | null = null
-  #atomizeStrategyUnsub: (() => void) | null = null
   #meshModalUnsub: (() => void) | null = null
   #lanesUnsub: (() => void) | null = null
   #meshJoinUnsub: (() => void) | null = null
@@ -1608,36 +1601,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#textOnlyUnsub = EffectBus.on<{ textOnly: boolean }>('render:set-text-only', ({ textOnly }) => {
       this.#textOnly.set(textOnly)
     })
-
-    this.#atomizeModeUnsub = EffectBus.on<{ active: boolean; target: string; strategy: string }>(
-      'atomize:mode',
-      ({ active, target, strategy }) => {
-        if (active) {
-          this.#mode.set('atomize')
-          this.#atomizeTarget.set(target)
-          this.#atomizeStrategy.set(strategy)
-        } else {
-          this.#mode.set('browsing')
-          this.#atomizeTarget.set('')
-          this.#atomizeStrategy.set('')
-          this.#atomizeAtomCount.set(0)
-        }
-      },
-    )
-
-    this.#atomizeAtomsUnsub = EffectBus.on<{ atoms: unknown[]; target: string }>(
-      'atomize:atoms',
-      ({ atoms }) => {
-        this.#atomizeAtomCount.set(atoms.length)
-      },
-    )
-
-    this.#atomizeStrategyUnsub = EffectBus.on<{ strategy: string }>(
-      'atomize:strategy-changed',
-      ({ strategy }) => {
-        this.#atomizeStrategy.set(strategy)
-      },
-    )
 
     // emit initial show-hidden state so drones pick it up
     if (this.#showHidden()) {
@@ -1907,9 +1870,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#tagsUnsub?.()
     this.#tagFilterUnsub?.()
     this.#hoverTagsUnsub?.()
-    this.#atomizeModeUnsub?.()
-    this.#atomizeAtomsUnsub?.()
-    this.#atomizeStrategyUnsub?.()
     this.#meshModalUnsub?.()
     this.#meshJoinUnsub?.()
     this.#swarmZoneUnsub?.()
@@ -2789,23 +2749,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // The panel (hc-clipboard-panel) lists the captured tiles and places
     // them onto THIS page in place.
     EffectBus.emit('clipboard:panel', { visible: true })
-  }
-
-  // ── atomize ──────────────────────────────────────────
-
-  readonly STRATEGY_NAMES = ['shatter', 'orbital', 'blueprint', 'cascade', 'particle'] as const
-
-  readonly setAtomizeStrategy = (strategy: string): void => {
-    EffectBus.emit('atomize:set-strategy', { strategy })
-  }
-
-  readonly closeAtomize = (): void => {
-    EffectBus.emit('atomize:close', {})
-    this.#mode.set('browsing')
-  }
-
-  readonly reassemble = (): void => {
-    this.closeAtomize()
   }
 
   // ── bees ────────────────────────────────────────────

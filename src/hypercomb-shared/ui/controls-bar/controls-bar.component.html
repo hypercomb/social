@@ -545,32 +545,6 @@
 
     }
 
-    @case ('atomize') {
-      <div class="controls-section atomize-mode">
-        <span class="mode-label">{{ 'controls.atomize' | t }}</span>
-        <span class="atomize-count">{{ atomizeAtomCount() }}</span>
-      </div>
-      <div class="controls-divider"></div>
-      <!-- strategy picker: 5 icons -->
-      <div class="controls-section strategy-picker">
-        @for (name of STRATEGY_NAMES; track name) {
-          <button class="ctl-btn strategy-btn"
-                  [class.active]="atomizeStrategy() === name"
-                  (click)="setAtomizeStrategy(name)"
-                  [attr.aria-label]="'controls.atomize-' + name | t">
-            <span class="strategy-icon" [attr.data-strategy]="name">{{ name.charAt(0).toUpperCase() }}</span>
-          </button>
-        }
-      </div>
-      <div class="controls-divider"></div>
-      <button class="ctl-btn" (click)="reassemble()" [attr.aria-label]="'controls.atomize-reassemble' | t">
-        <span class="mat-sym" style="color:#4caf50">join_full</span>
-      </button>
-      <button class="ctl-btn" (click)="closeAtomize()" [attr.aria-label]="'controls.atomize-close' | t">
-        <span class="mat-sym">close</span>
-      </button>
-    }
-
   }
   </div>
   </div>
