@@ -2309,5 +2309,19 @@
   "sequences.aria": "タイルの配置",
   "mesh-modal.needs-location": "参加するには場所が必要です",
   "mesh-modal.needs-secret": "参加するには秘密鍵が必要です",
-  "command-line.placeholder.find": "ここを検索 · [ブランチ] · @ハイブ"
+  "command-line.placeholder.find": "ここを検索 · [ブランチ] · @ハイブ",
+  "slash.aliases": "ビヘイビアに自分の名前を付ける",
+  "aliases.title": "エイリアス",
+  "aliases.close": "エイリアスを閉じる",
+  "aliases.filter": "ビヘイビアを探す…",
+  "aliases.note": "ビヘイビアの正式名はそのまま。ここで付けた名前は、正式名が使える場所ならどこでも使えます。",
+  "aliases.candidates": "候補",
+  "aliases.add": "追加",
+  "aliases.remove": "削除",
+  "aliases.own": "自分の名前 — Enter で付ける",
+  "aliases.empty": "該当するビヘイビアがありません。",
+  "aliases.refused-not-a-name": "名前は一語で：英数字とハイフンのみ",
+  "aliases.refused-is-the-command": "それはすでに正式名です",
+  "aliases.refused-is-another-command": "別のビヘイビアがその名前に応答します",
+  "aliases.refused-taken": "その名前は別のビヘイビアに付けています"
 }

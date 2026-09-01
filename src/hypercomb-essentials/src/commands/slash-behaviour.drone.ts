@@ -15,13 +15,38 @@ export class SlashBehaviourDrone extends EventTarget {
     this.#providers.sort((a, b) => b.priority - a.priority)
   }
 
+  /**
+   * PARTICIPANT-GIVEN names for a behaviour — the other half of the "one
+   * name in code" doctrine. Queens carry theirs on the instance already
+   * (ParticipantAliases rewrites `queen.aliases` in place, and the auto-wrap
+   * captured that same array), so this fold is what reaches the MANUAL
+   * providers no queen stands behind. Read live on every walk: a name given
+   * in the aliases window works on the very next keystroke.
+   */
+  #given(command: string): readonly string[] {
+    const held = get('@diamondcoreprocessor.com/ParticipantAliases') as
+      { aliasesFor?: (command: string) => readonly string[] } | undefined
+    return held?.aliasesFor?.(command) ?? []
+  }
+
+  /** Every name that reaches `behaviour`: canonical first, then declared-seam
+   *  and participant-given names, deduped (queens hold the given ones on the
+   *  seam already, so the two sources overlap on purpose). */
+  #names(behaviour: SlashBehaviour): string[] {
+    const names = [behaviour.name, ...(behaviour.aliases ?? [])]
+    for (const name of this.#given(behaviour.name)) {
+      if (!names.includes(name)) names.push(name)
+    }
+    return names
+  }
+
   all(): SlashBehaviour[] {
     const results: SlashBehaviour[] = []
     for (const provider of this.#providers) {
       for (const behaviour of provider.behaviours) {
         const localized = this.#localize(behaviour)
         results.push(localized)
-        for (const alias of behaviour.aliases ?? []) {
+        for (const alias of this.#names(behaviour).slice(1)) {
           results.push({ ...localized, name: alias })
         }
       }
@@ -29,9 +54,11 @@ export class SlashBehaviourDrone extends EventTarget {
     return results
   }
 
-  /** Primary behaviours only (aliases preserved on each entry's `aliases` field). */
+  /** Primary behaviours only (every reachable extra name folded onto each
+   *  entry's `aliases` field, so the display surfaces show what works). */
   entries(): SlashBehaviour[] {
-    return this.#providers.flatMap(p => p.behaviours).map(b => this.#localize(b))
+    return this.#providers.flatMap(p => p.behaviours)
+      .map(b => ({ ...this.#localize(b), aliases: this.#names(b).slice(1) }))
   }
 
   match(query: string): SlashBehaviourMatch[] {
@@ -44,8 +71,8 @@ export class SlashBehaviourDrone extends EventTarget {
         // but never surface in autocomplete suggestions. Used for
         // destructive / dev-only commands the user must type in full.
         if (behaviour.hidden) continue
-        const localized = this.#localize(behaviour)
-        const names = [behaviour.name, ...(behaviour.aliases ?? [])]
+        const names = this.#names(behaviour)
+        const localized = { ...this.#localize(behaviour), aliases: names.slice(1) }
 
         for (const name of names) {
           if (!q || name.startsWith(q)) {
@@ -79,8 +106,7 @@ export class SlashBehaviourDrone extends EventTarget {
 
     for (const provider of this.#providers) {
       for (const behaviour of provider.behaviours) {
-        const names = [behaviour.name, ...(behaviour.aliases ?? [])]
-        if (names.includes(name) && provider.complete) {
+        if (this.#names(behaviour).includes(name) && provider.complete) {
           return provider.complete(behaviour.name, args)
         }
       }
@@ -93,8 +119,7 @@ export class SlashBehaviourDrone extends EventTarget {
 
     for (const provider of this.#providers) {
       for (const behaviour of provider.behaviours) {
-        const names = [behaviour.name, ...(behaviour.aliases ?? [])]
-        if (names.includes(name)) {
+        if (this.#names(behaviour).includes(name)) {
           return provider.execute(behaviour.name, args)
         }
       }
@@ -109,7 +134,7 @@ export class SlashBehaviourDrone extends EventTarget {
     const name = behaviourName.toLowerCase().trim()
     for (const provider of this.#providers) {
       for (const behaviour of provider.behaviours) {
-        if ([behaviour.name, ...(behaviour.aliases ?? [])].includes(name)) return true
+        if (this.#names(behaviour).includes(name)) return true
       }
     }
     return false

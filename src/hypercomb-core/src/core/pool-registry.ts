@@ -119,6 +119,19 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // Content, and small by construction: a workflow is a recipe, never a
   // model — no checkpoint, LoRA or output ever enters the hive through it.
   'comfy:workflows',
+  // THE NAMES THIS PARTICIPANT GAVE THE BEHAVIOURS — one content-addressed
+  // doc mapping canonical command → the participant's own names for it
+  // (essentials/commands/aliases/participant-aliases.ts). Code never declares
+  // an alias (the doctrine ratchet in doctrine.spec.ts keeps them out of
+  // source); this pool is where the participant's do live, and the runtime
+  // seam (QueenBee.aliases + the slash census fold) is what they ride. It is
+  // a pool and not localStorage for the same reason spoken habits are: a
+  // name that did not follow you to your other machine was not your name for
+  // it. TRUTH POOL — a christening is an act, not a derivation; no cold
+  // client could rebuild it from layers (optimize-phase.md litmus), so it is
+  // never minted from the optimize phase. Colon-scoped so it can never
+  // collide with a tile slugged 'commands'.
+  'commands:aliases',
   // How this participant actually TALKS to the command line — one record
   // holding the lead-in→behaviour phrasings learned from utterances that RAN,
   // plus per-behaviour run counts (essentials/commands/utterance/
