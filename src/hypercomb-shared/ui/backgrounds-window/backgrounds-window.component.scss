@@ -204,6 +204,18 @@ $accent: #7eb6d6;
   color: var(--hc-window-ink-quiet);
   input[type='range'] { flex: 1; min-width: 0; accent-color: rgb(var(--acc)); }
 }
+.bg-cascade {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+  margin-top: 0.65em;
+  color: var(--hc-window-ink-plain);
+  cursor: pointer;
+  input { margin-top: 0.15em; accent-color: rgb(var(--acc)); }
+  span { display: flex; flex-direction: column; gap: 0.12em; }
+  strong { font-size: 0.72em; font-weight: 600; }
+  small { font-size: 0.65em; color: var(--hc-window-ink-quiet); }
+}
 .bg-dim-name { flex: 0 0 auto; }
 .bg-dim-value { flex: 0 0 auto; font-variant-numeric: tabular-nums; color: var(--hc-window-ink-plain); }
 

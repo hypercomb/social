@@ -155,6 +155,14 @@
   border-bottom-color: rgba(var(--hc-chrome-accent), 1);
 }
 
+// Dark and System carry the hive's gold seam. System is represented by no
+// explicit data-theme attribute, regardless of the OS colour scheme. Keeping
+// this after the active state means focus never turns the seam back to steel.
+:root[data-theme='dark'] .header-bar,
+:root:not([data-theme]) .header-bar {
+  border-bottom-color: #ffe14a;
+}
+
 // ── hci icon font ────────────────────────────────────────
 
 .hci {

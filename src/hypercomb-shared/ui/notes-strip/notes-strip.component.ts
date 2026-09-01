@@ -1550,6 +1550,16 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     EffectBus.emit('notes:open', { cellLabel })
   }
 
+  /** MARK UP THE SCREEN — open the drawing sheet over the whole app
+   *  (markup-overlay.component.ts). An annotation drawn on the interface is
+   *  still an annotation; its reader is the agent, which is why the shot it
+   *  produces lands on the chat's reference shelf rather than in this tree.
+   *  The active tile rides along only to NAME the picture — the sheet covers
+   *  the screen, not the tile, so there is nothing to gate on here. */
+  markUp(): void {
+    EffectBus.emit('markup:open', { cellLabel: this.cell() })
+  }
+
   // ── Panel drag-to-reposition ─────────────────────────────
   // Translate delta from the natural centered baseline. {0,0} = the
   // CSS-default position; any non-zero delta is a user drag we persist.

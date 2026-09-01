@@ -107,6 +107,13 @@
                  the default. Anything less washes it toward the palette, for
                  when a white tile label needs a calmer field to sit on. -->
             @if (hasPicture()) {
+              <label class="bg-cascade">
+                <input type="checkbox" [checked]="cascade()" (change)="setCascade($any($event.target).checked)" />
+                <span>
+                  <strong>cascade to children</strong>
+                  <small>{{ cascade() ? 'descendants inherit this background' : 'this node only; descendants inherit from its parent' }}</small>
+                </span>
+              </label>
               <label class="bg-dim">
                 <span class="bg-dim-name">{{ 'backgrounds.opacity' | t }}</span>
                 <input

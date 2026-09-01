@@ -36,6 +36,12 @@ import { registerPoolMeaning, SignatureStore } from '@hypercomb/core'
 // module state — which is the entire reason they may be bundled in here. The
 // walker IS the protocol; only the io wiring below is ours.
 import { isComplete, resolveInventory, type ReplicationIo, type ReplicationResult } from '@hypercomb/runtime/replication-walker'
+import { hostBases, listHostPackages, type HostPackage } from '@hypercomb/runtime/host-packages'
+
+// Re-exported so the shim's own callers keep one import site. The
+// IMPLEMENTATION moved to runtime (the app needs the same answer and cannot
+// import the shim); nothing about the shape changed.
+export { hostBases, listHostPackages, type HostPackage }
 import { validateSealedPackage } from '@hypercomb/runtime/sealed-package'
 
 // Store is reached STRUCTURALLY, never imported. Importing the module would
@@ -66,21 +72,6 @@ const SIG_RE = /^[a-f0-9]{64}$/
  *  re-derives it on any call. */
 const INSTALLED_KEY = 'hc:shim:installed-package'
 
-export type HostPackage = {
-  zone: string
-  base: string
-  packageSig: string
-  label: string
-  at: string
-  generation: number | null
-  layers: string[]
-  bees: string[]
-  dependencies: string[]
-  beeDeps: Record<string, string[]>
-  beesBag?: string
-  dependenciesBag?: string
-}
-
 export type InstallOutcome = {
   ok: boolean
   packageSig: string
@@ -96,18 +87,6 @@ export const installedPackageSig = (): string | null => {
     const sig = localStorage.getItem(INSTALLED_KEY)
     return sig && SIG_RE.test(sig) ? sig : null
   } catch { return null }
-}
-
-const isLoopback = (zone: string): boolean =>
-  /^(localhost|127(?:\.\d+){3})(:\d{1,5})?$/i.test(zone)
-
-/** Loopback hosts speak http; everything else https. A published site serves
- *  the heap flat at its root; a shell origin serves it under `/content`. Both
- *  are tried — the manifest probe settles which. */
-const basesFor = (zone: string): string[] => {
-  const scheme = isLoopback(zone) ? 'http' : 'https'
-  return [`${scheme}://${zone}`, `${scheme}://content.${zone}`]
-    .flatMap(base => [`${base}/content`, base])
 }
 
 /** The shim's OWN origin is always a byte source, so a node that serves its
@@ -127,54 +106,6 @@ const fetchBytes = async (url: string): Promise<Uint8Array<ArrayBuffer> | null> 
     if ((res.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) return null
     return new Uint8Array(await res.arrayBuffer()) as Uint8Array<ArrayBuffer>
   } catch { return null }
-}
-
-type ManifestEntry = {
-  bees?: string[]
-  dependencies?: string[]
-  layers?: string[]
-  beeDeps?: Record<string, string[]>
-  beesBag?: string
-  dependenciesBag?: string
-  label?: string
-  at?: string
-  generation?: number
-}
-
-/** What one domain publishes. The manifest is the domain's own voice — the
- *  one mutable pointer in the chain, which is what a domain IS. Everything it
- *  names is content-addressed from here down. */
-export const listHostPackages = async (zone: string): Promise<HostPackage[]> => {
-  for (const base of basesFor(zone)) {
-    let manifest: { packages?: Record<string, ManifestEntry> } | null = null
-    try {
-      const res = await fetch(`${base}/manifest.json`, { cache: 'no-store' })
-      if (!res.ok) continue
-      manifest = await res.json() as { packages?: Record<string, ManifestEntry> }
-    } catch { continue }
-    const packages = Object.entries(manifest?.packages ?? {})
-      .filter(([sig]) => SIG_RE.test(sig))
-      .map(([packageSig, entry]): HostPackage => ({
-        zone,
-        base,
-        packageSig,
-        label: String(entry.label ?? '').trim() || packageSig.slice(0, 12),
-        at: String(entry.at ?? ''),
-        generation: typeof entry.generation === 'number' ? entry.generation : null,
-        layers: entry.layers ?? [],
-        bees: entry.bees ?? [],
-        dependencies: entry.dependencies ?? [],
-        beeDeps: entry.beeDeps ?? {},
-        beesBag: entry.beesBag,
-        dependenciesBag: entry.dependenciesBag,
-      }))
-    if (packages.length) {
-      // Newest first — `generation` is the version counter the build stamps.
-      packages.sort((a, b) => (b.generation ?? 0) - (a.generation ?? 0) || b.at.localeCompare(a.at))
-      return packages
-    }
-  }
-  return []
 }
 
 const writeBytes = async (dir: FileSystemDirectoryHandle, name: string, bytes: ArrayBuffer): Promise<void> => {

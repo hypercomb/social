@@ -1,0 +1,193 @@
+// hypercomb-shared/ui/markup-overlay/markup-overlay.component.scss
+//
+// The sheet is invisible by design — it must not tint the screen it is about
+// to photograph, so there is no scrim here and never should be. All the
+// material in this file belongs to the toolbar, which is the only thing the
+// participant is meant to see arrive.
+//
+// COLOUR ROLES, NEVER LITERALS (documentation/tool-window-colour-roles.md):
+// the bar comes through `tw.floating-panel()` so its ground and its ink move
+// together with the theme. A hand-rolled dark pill would have been unreadable
+// the moment somebody switched to honey — and this bar floats over a bright
+// screenshot as often as a dark one.
+
+@use '../toolwindow' as tw;
+
+// The annotations window's identity: this sheet opens from that window and is
+// part of the same gesture, so it wears the same cold steel.
+$steel: #7eb6d6;
+
+:host { display: contents; }
+
+// ── the sheet ────────────────────────────────────────────────────────
+
+.mk-ink {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  // Above the tile editor (100002) and the camera (100003); below the toast
+  // (100010), which is how the participant is told the picture landed.
+  z-index: 100004;
+  cursor: crosshair;
+  // The sheet takes the whole gesture — a pen stroke must not scroll the
+  // panel underneath it or pan the hive.
+  touch-action: none;
+  background: transparent;
+
+  &.tool-pin { cursor: copy; }
+}
+
+// ── the toolbar ──────────────────────────────────────────────────────
+
+.mk-bar {
+  @include tw.floating-panel($steel);
+
+  position: fixed;
+  z-index: 100005;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(1.25rem + var(--hc-safe-bottom, 0px));
+
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.4rem 0.55rem;
+  max-width: min(96vw, 46rem);
+}
+
+.mk-group {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.mk-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 0.1rem 0.15rem;
+  background: var(--hc-window-line, rgba(127, 127, 127, 0.28));
+}
+
+.mk-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--hc-window-radius-control);
+  background: none;
+  color: var(--hc-window-ink-quiet);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+
+  .mat-sym { font-size: 1.05rem; line-height: 1; }
+
+  &:hover:not(:disabled) {
+    background: var(--hc-window-wash);
+    color: var(--hc-window-ink-loud);
+  }
+
+  &.is-on {
+    background: var(--hc-window-wash-strong);
+    color: var(--hc-window-accent);
+    box-shadow: inset 0 0 0 1px var(--hc-window-edge-firm);
+  }
+
+  &:disabled { opacity: 0.35; cursor: default; }
+}
+
+// ── ink swatches ─────────────────────────────────────────────────────
+// A swatch is a genuinely round thing, so 50% is the ladder's own exemption
+// rather than drift. The colour arrives as an inline background from the
+// palette the canvas paints with — one list, never two.
+
+.mk-inks { gap: 0.28rem; }
+
+.mk-swatch {
+  width: 1.05rem;
+  height: 1.05rem;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+  transition: transform 120ms ease, box-shadow 120ms ease;
+
+  &:hover { transform: scale(1.12); }
+
+  &.is-on {
+    transform: scale(1.12);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 0 3px var(--hc-window-edge-firm);
+  }
+}
+
+// ── the act ──────────────────────────────────────────────────────────
+
+.mk-send {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 1.85rem;
+  padding: 0 0.7rem;
+  border: none;
+  border-radius: var(--hc-window-radius-control);
+  background: var(--hc-window-accent);
+  color: var(--hc-window-on-accent);
+  font-family: var(--hc-mono, system-ui);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: filter 140ms ease;
+
+  .mat-sym { font-size: 1rem; line-height: 1; }
+
+  &:hover { filter: brightness(1.08); }
+}
+
+.mk-close { margin-left: 0.1rem; }
+
+// ── the hint ─────────────────────────────────────────────────────────
+// One line, above the bar, saying what the press will do. It sits on the
+// screenshot rather than on a panel, so it carries its own dark plate.
+
+.mk-hint {
+  position: fixed;
+  z-index: 100005;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(4.1rem + var(--hc-safe-bottom, 0px));
+
+  max-width: min(92vw, 40rem);
+  padding: 0.25rem 0.6rem;
+  // The hint sits OUTSIDE the bar, so the radius vars the floating-panel
+  // mixin publishes on .mk-bar do not reach it — the ladder value is spelled
+  // as the fallback rather than inherited from nothing.
+  border-radius: var(--hc-window-radius-control, 2px);
+  background: rgba(0, 0, 0, 0.62);
+  color: var(--hc-window-ink-plain);
+  font-family: var(--hc-mono, system-ui);
+  font-size: 0.62rem;
+  letter-spacing: 0.03em;
+  text-align: center;
+  pointer-events: none;
+}
+
+// A dark plate under bright ink is correct in both themes; under a bright
+// theme the panel ink is dark, so the plate goes with it and the line stays
+// legible instead of disappearing into the shot.
+:host-context(:is([data-theme='light'], [data-theme='honey'], [data-theme='sherbet'])) .mk-hint,
+:is([data-theme='light'], [data-theme='honey'], [data-theme='sherbet']) .mk-hint {
+  background: rgba(255, 255, 255, 0.82);
+}
+
+@media (max-width: 560px) {
+  .mk-send-text { display: none; }
+  .mk-send { padding: 0 0.55rem; }
+  .mk-hint { display: none; }
+}

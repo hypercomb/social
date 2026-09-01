@@ -148,6 +148,18 @@ export function unparkWindows(): number {
  *  already made. */
 export function isWindowShowing(id: string): boolean { return showing.has(id) }
 
+/** Everything on screen right now, in open order.
+ *
+ *  `parkWindows` already walks this set for the installer; Escape needs the
+ *  same walk without the installer's single remembered set, because ONE press
+ *  takes away everything that is up and the press after brings it all back.
+ *  Handing out the list rather than a second park-everything verb keeps the
+ *  POLICY (what Escape means) in tool-windows.ts, where it belongs, and leaves
+ *  this file owning only the facts. */
+export function showingWindows(): readonly { id: string; session: WindowSession }[] {
+  return [...showing].map(([id, held]) => ({ id, session: held.session }))
+}
+
 /** True while windows are put away (we are not in the hive). */
 export function windowsParked(): boolean { return parked.length > 0 }
 

@@ -67,6 +67,7 @@ type CanvasLike = EventTarget & {
   zoom: number
   panX: number
   panY: number
+  cascade: boolean
   enabled: boolean
   setPicture(sig: string): Promise<boolean>
   adoptPicture(blob: Blob): Promise<string | null>
@@ -74,6 +75,7 @@ type CanvasLike = EventTarget & {
   setDim(value: number): void
   setZoom(value: number): void
   setPan(x: number, y: number): void
+  setCascade(value: boolean): void
   setPreview(active: boolean): void
   pictureSwatch(): string
   status(): string
@@ -270,6 +272,11 @@ export class BackgroundsWindowComponent implements OnDestroy {
     return Math.round((this.#canvas()?.zoom ?? 1) * 100)
   })
 
+  readonly cascade = computed<boolean>(() => {
+    this.revision()
+    return this.#canvas()?.cascade !== false
+  })
+
   /** The active picture's signature — what a drag onto a shelf carries. */
   readonly activePicture = computed<string | null>(() => {
     this.revision()
@@ -460,6 +467,11 @@ export class BackgroundsWindowComponent implements OnDestroy {
 
   resetPan(): void {
     this.#canvas()?.setPan(0, 0)
+  }
+
+  setCascade(value: boolean): void {
+    this.#canvas()?.setCascade(value)
+    this.revision.update(n => n + 1)
   }
 
   @HostListener('window:keydown', ['$event'])

@@ -1,0 +1,126 @@
+@if (visible()) {
+  <aside
+    class="hosts-panel"
+    hcDockInset="right"
+    hcDockedPanel="hosts-panel"
+    [hcSession]="session"
+    (hcDockedPanelClose)="close()"
+    dockSide="right"
+    [minWidth]="280"
+    [maxWidth]="560"
+    [defaultWidth]="340"
+    launcherControlId="hosts"
+    data-consumes-wheel
+    tabindex="-1"
+    role="dialog"
+    [attr.aria-label]="'hosts.title' | t"
+  >
+    <header class="hosts-header">
+      <span class="hosts-title">{{ 'hosts.title' | t }}</span>
+      <button class="hosts-close" type="button" (click)="close()" [attr.aria-label]="'hosts.title' | t">×</button>
+    </header>
+
+    <div class="hosts-body">
+      <!-- THE SWITCH. Hosting is one global state, not a verb and not a
+           per-branch setting: either this participant puts bytes on a public
+           host or they do not. A branch is then published from its own line
+           item in the publish panel. -->
+      <button
+        class="hosts-switch"
+        type="button"
+        role="switch"
+        [class.on]="hosting()"
+        [attr.aria-checked]="hosting()"
+        (click)="toggleHosting()"
+      >
+        <span class="hosts-switch-dot" aria-hidden="true"></span>
+        <span class="hosts-switch-label">{{ (hosting() ? 'hosts.hosting.on' : 'hosts.hosting.off') | t }}</span>
+      </button>
+
+      <!-- YOUR COMMUNITY — the hosts you have been given, or given yourself.
+           Not a place to choose an address: each of these is an artifact you
+           carry, and a branch names the ones it answers on from its own line
+           item in the publish panel.
+
+           A host is not free text pretending to be a setting. It is a host
+           that exists and serves your signed index, so adding one is a real
+           act with a real consequence, and removing one is a DELETE — the
+           artifact goes, and every branch that named it keeps saying so,
+           which is the honest state and reads as one. -->
+      @for (zone of zones(); track zone) {
+        <div class="hosts-row">
+          <!-- The address IS the control that asks what it publishes: a host
+               you carry is a place you can look into, and a separate button
+               for that would be a second thing to explain. -->
+          <button
+            class="hosts-address"
+            type="button"
+            [class.open]="offerOf(zone) || isProbing(zone)"
+            [attr.aria-label]="'hosts.look' | t"
+            (click)="look(zone)"
+          >{{ zone }}</button>
+          @if (branchCount(zone); as naming) {
+            <span class="hosts-count">{{ 'hosts.naming' | t: { count: naming } }}</span>
+          }
+          <button
+            class="hosts-drop"
+            type="button"
+            [attr.data-tip]="'hosts.remove' | t"
+            [attr.aria-label]="'hosts.remove' | t"
+            (click)="remove(zone)"
+          >✕</button>
+        </div>
+
+        <!-- WHAT THIS DOMAIN PUBLISHES. Asked only when looked at — a manifest
+             runs to megabytes, so opening the panel must not fetch every
+             host's. -->
+        @if (isProbing(zone)) {
+          <p class="hosts-probing">{{ 'hosts.probing' | t }}</p>
+        } @else if (offerOf(zone); as offer) {
+          @if (offer.packages.length) {
+            <ul class="hosts-offers">
+              @for (pkg of offer.shown; track pkg.packageSig) {
+                <li class="hosts-offer">
+                  <span class="hosts-offer-label">{{ pkg.label }}</span>
+                  <span class="hosts-offer-meta">{{ 'hosts.offer.meta' | t: {
+                    bees: pkg.bees.length, layers: pkg.layers.length
+                  } }}</span>
+                </li>
+              }
+            </ul>
+            <!-- Never a silent truncation: a shortened list that does not say
+                 so reads as the whole of what a host offers. -->
+            @if (moreCount(zone); as more) {
+              <p class="hosts-more">{{ 'hosts.offer.more' | t: { count: more } }}</p>
+            }
+          } @else if (wasAsked(zone)) {
+            <p class="hosts-probing">{{ 'hosts.offer.none' | t }}</p>
+          }
+        }
+      } @empty {
+        <!-- Only once a read has actually completed. Flashing "no hosts" over
+             a list that is about to arrive reads as a wrong answer, not a
+             slow one. -->
+        @if (loaded()) {
+          <p class="hosts-empty">{{ 'hosts.empty' | t }}</p>
+        }
+      }
+
+      <div class="hosts-add">
+        <input
+          #hostInput
+          class="hosts-input"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          [attr.placeholder]="'hosts.placeholder' | t"
+          [attr.aria-label]="'hosts.add' | t"
+          (keydown.enter)="add(hostInput)"
+        />
+        <button class="hosts-take" type="button" (click)="add(hostInput)">{{ 'hosts.add' | t }}</button>
+      </div>
+
+      <p class="hosts-note">{{ 'hosts.note' | t }}</p>
+    </div>
+  </aside>
+}

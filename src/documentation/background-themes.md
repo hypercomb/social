@@ -316,14 +316,42 @@ takes it off its shelf (the bytes, as ever, are content and are left alone).
 
 **The shelves live in a pool of meaning** — `backgrounds:saved`, one
 content-addressed doc `{ light: [sigs], dark: [sigs] }` (seeded in
-`pool-registry.ts`). The distinction: anything that should be queryable
-across the network belongs in a pool — domains then become gates for
-discovering that content — while which picture is showing and how washed
-stays a participant-local pref (`hc:canvas-bg`, which carries `v: 2` now;
-shelf entries an interim build left in the pref are adopted into the pool
-once and never written back).
+`pool-registry.ts`). Anything that should be queryable across the network
+belongs in a pool — domains then become gates for discovering that content.
+Shelf entries an interim build left in the pref are adopted into the pool once
+and never written back.
 
-Two traps this cost, both worth keeping written down:
+**And so does the screen itself** — `backgrounds:screen`, one doc naming the
+picture's signature plus how it is washed, zoomed and offset. What is showing
+is still a participant-local CHOICE, but participant-local never meant
+localStorage-only here (the viewport is participant-local and lives in a pool),
+and keeping it there alone cost two things:
+
+- **Reachability.** Nothing in the hive referenced the backdrop's bytes. A
+  resource no marker and no pool member names is, to every collector in this
+  system, litter from an abandoned gesture — indistinguishable from a paste
+  that was escaped. A pool member naming the signature makes it referenced
+  content, which is what it always was.
+- **Travel.** A replicated hive, a second origin, a browser that dropped its
+  storage — each arrived with the picture present in the store and no idea it
+  was the backdrop.
+
+`hc:canvas-bg` (carrying `v: 2`) stays as the instant read, because the first
+paint cannot wait for OPFS; the pool is the durable half. The pref WINS
+whenever it names a picture, or says the backdrop is off — the pool only
+speaks where nothing local does.
+
+Three traps this cost, all worth keeping written down:
+
+- **The boot read was TIMED rather than waited for.** The picture resolved on
+  a fixed eight-second ladder, and on a large hive the store settles after
+  that: the read gave up, the screen fell back to a pattern, and the
+  preference went on naming a picture that was sitting right there. That is
+  what "I keep losing my background" was. The wait is exact now — the
+  registration is polled (a service locator cannot announce a registration
+  that already happened, which is why `whenReady` never settles here) and
+  readiness is the store's own idempotent `initialize()`. A signature that
+  resolves to nothing is KEPT and said out loud once, never cleared.
 
 - It was briefly its own fixed element so the blur could be live CSS. That
   element measured **0×0** on the shell's real page — a `position: fixed` box

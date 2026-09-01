@@ -1,0 +1,86 @@
+@if (active()) {
+  <!-- THE SHEET. Transparent, over everything, and the only thing that takes
+       the pointer while it is up: the screen underneath is being photographed,
+       not operated. -->
+  <canvas #sheet class="mk-ink"
+          [class.tool-pin]="tool() === 'pin'"
+          (pointerdown)="onPointerDown($event)"
+          (pointermove)="onPointerMove($event)"
+          (pointerup)="onPointerUp($event)"
+          (pointercancel)="onPointerUp($event)"
+          [attr.aria-label]="'markup.sheet' | t"></canvas>
+
+  <!-- REMOVED from the DOM for the shot, not merely hidden: the toolbar is
+       the one thing on screen that is about taking the picture rather than in
+       it, and `visibility` still reserves its box in the compositor. -->
+  @if (!shooting()) {
+    <div class="mk-bar" role="toolbar" [attr.aria-label]="'markup.title' | t">
+
+      <div class="mk-group">
+        <button type="button" class="mk-btn" [class.is-on]="tool() === 'pen'"
+                (click)="pick('pen')"
+                [title]="'markup.tool.pen' | t" [attr.aria-label]="'markup.tool.pen' | t">
+          <span class="mat-sym">stylus</span>
+        </button>
+        <button type="button" class="mk-btn" [class.is-on]="tool() === 'arrow'"
+                (click)="pick('arrow')"
+                [title]="'markup.tool.arrow' | t" [attr.aria-label]="'markup.tool.arrow' | t">
+          <span class="mat-sym">arrow_outward</span>
+        </button>
+        <button type="button" class="mk-btn" [class.is-on]="tool() === 'box'"
+                (click)="pick('box')"
+                [title]="'markup.tool.box' | t" [attr.aria-label]="'markup.tool.box' | t">
+          <span class="mat-sym">crop_square</span>
+        </button>
+        <button type="button" class="mk-btn" [class.is-on]="tool() === 'pin'"
+                (click)="pick('pin')"
+                [title]="'markup.tool.pin' | t" [attr.aria-label]="'markup.tool.pin' | t">
+          <span class="mat-sym">counter_1</span>
+        </button>
+      </div>
+
+      <span class="mk-sep" aria-hidden="true"></span>
+
+      <!-- The swatch IS the colour, so it is painted from the palette the
+           canvas draws with rather than from a second list in the stylesheet. -->
+      <div class="mk-group mk-inks">
+        @for (colour of inks; track colour) {
+          <button type="button" class="mk-swatch" [class.is-on]="ink() === colour"
+                  [style.background]="colour"
+                  (click)="pickInk(colour)"
+                  [attr.aria-label]="'markup.colour' | t"></button>
+        }
+      </div>
+
+      <span class="mk-sep" aria-hidden="true"></span>
+
+      <div class="mk-group">
+        <button type="button" class="mk-btn" (click)="undo()" [disabled]="!marked()"
+                [title]="'markup.undo' | t" [attr.aria-label]="'markup.undo' | t">
+          <span class="mat-sym">undo</span>
+        </button>
+        <button type="button" class="mk-btn" (click)="clear()" [disabled]="!marked()"
+                [title]="'markup.clear' | t" [attr.aria-label]="'markup.clear' | t">
+          <span class="mat-sym">ink_eraser</span>
+        </button>
+      </div>
+
+      <span class="mk-sep" aria-hidden="true"></span>
+
+      <!-- The act. Everything left of here is preparation for this one press:
+           photograph the screen and put the picture on the chat's shelf. -->
+      <button type="button" class="mk-send" (click)="send()" [disabled]="busy()"
+              [title]="'markup.send.hint' | t">
+        <span class="mat-sym">photo_camera</span>
+        <span class="mk-send-text">{{ 'markup.send' | t }}</span>
+      </button>
+
+      <button type="button" class="mk-btn mk-close" (click)="close()"
+              [title]="'markup.close' | t" [attr.aria-label]="'markup.close' | t">
+        <span class="mat-sym">close</span>
+      </button>
+    </div>
+
+    <div class="mk-hint">{{ 'markup.hint' | t }}</div>
+  }
+}

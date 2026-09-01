@@ -38,6 +38,10 @@ export const CANVAS_BG_PALETTES = ['steel', 'daylight', 'indigo', 'teal', 'ember
 
 type Archetype = typeof CANVAS_BG_ARCHETYPES[number]
 type Palette = typeof CANVAS_BG_PALETTES[number]
+type ScreenRecord = {
+  picture: string; dim: number; zoom: number; panX: number; panY: number
+  cascade: boolean
+}
 
 /** The two worlds a saved backdrop can be sorted into — the same split the
  *  looks already live by. */
@@ -60,16 +64,38 @@ const DEFAULT_ARCHETYPE: Archetype = 'contour'
 // up front.
 const DEFAULT_DIM = 0
 
-// How long to keep asking for the stored picture's bytes at boot, in ms
-// between tries. Six tries over about eight seconds: long enough for OPFS to
-// open on a cold start, short enough that a signature naming nothing gives up.
-const RESOLVE_LADDER = [0, 250, 500, 1000, 2000, 4000] as const
+// WAITING FOR THE STORE, NOT TIMING IT. This service is constructed at module
+// load, long before the shell has built a Store or opened OPFS, so everything
+// it reads has to wait for that. It used to wait on a fixed eight-second
+// ladder — and on a large hive the ladder ran out BEFORE the store settled,
+// the picture never resolved, and the screen quietly fell back to a pattern
+// with the preference still naming it. That is the "I keep losing my
+// background" bug: nothing was lost, it was given up on.
+//
+// Now the wait is exact. Registration is polled (a service locator cannot
+// announce a registration that already happened), and readiness is the
+// store's OWN initialize promise — idempotent, and the same promise the shell
+// is already awaiting.
+const STORE_POLL_MS = 100
+const STORE_POLL_TRIES = 300
+
+// Retries AFTER the store is settled. A miss there is close to a real miss,
+// but a legacy drain can still be relocating content off the boot path, so
+// ask three more times over five seconds before believing it.
+const SETTLED_RETRIES = [250, 1000, 4000] as const
+
+// One pan drag is hundreds of persists. The pref takes them all (localStorage
+// is free); the pool takes one, trailing.
+const SCREEN_WRITE_DEBOUNCE = 400
 
 // The store, structurally. This service is presentation and has no business
 // importing the shell's Store — it names exactly the methods it needs.
 // Resources are addressed by signature; nothing here knows a path.
 const STORE_KEY = '@hypercomb.social/Store'
 type StoreHandle = {
+  /** Idempotent: hands back the SAME promise the shell is already awaiting,
+   *  so asking for it is a wait rather than a second initialization. */
+  initialize?(): Promise<void>
   getResource(sig: string): Promise<Blob | null>
   putResource?(blob: Blob): Promise<string>
   getPool?(meaning: string): Promise<FileSystemDirectoryHandle | null>
@@ -85,6 +111,25 @@ type StoreHandle = {
 // ({ light: [sigs], dark: [sigs] }), the mobile-roots pattern. Colon meaning,
 // as every NEW pool meaning must be — a location can never mint this address.
 const SAVED_POOL_MEANING = 'backgrounds:saved'
+
+// AND THE SCREEN ITSELF IS A POOL RECORD. What is showing stays a
+// participant-local choice — but participant-local has never meant
+// localStorage-only here (the viewport is participant-local and lives in a
+// pool), and holding this one ONLY in localStorage had two real costs:
+//
+//   1. Nothing in the hive referenced the picture's bytes. A resource that no
+//      marker and no pool member names is, to every collector in this system,
+//      litter from an abandoned gesture — indistinguishable from a paste that
+//      was escaped. A pool member naming the signature makes it reachable
+//      content, which is what it always was.
+//   2. The choice could not travel. A replicated hive, a second origin, a
+//      browser that dropped its storage — each arrives with the picture
+//      present in the store and no idea it was the backdrop.
+//
+// localStorage stays the instant read: the first paint cannot wait for OPFS.
+// The pool is the durable half, and it fills the gap when the pref has
+// nothing to say.
+const SCREEN_POOL_MEANING = 'backgrounds:screen'
 
 // Per-palette colours for the CSS backdrops. `accent`/`accent2`/`deep` are
 // "r,g,b" triples so alpha can be tuned inline. Everything is rendered with CSS
@@ -275,6 +320,13 @@ export class CanvasBackgroundService extends EventTarget {
   /** True when the localStorage pref still carried shelf entries — a legacy
    *  source to adopt into the pool once, then stop writing forever. */
   #prefCarriedSaved = false
+  /** The boot read, as a promise — a pool write must never land before it. */
+  #hydration: Promise<void> = Promise.resolve()
+  #screenWrite: ReturnType<typeof setTimeout> | null = null
+  #screenRecords: Record<string, ScreenRecord> = {}
+  #screenSourceKey = '[]'
+  #cascade = true
+  #navigationEpoch = 0
   #auroraEl: HTMLDivElement | null = null
   #glowEl: HTMLDivElement | null = null
   #previewEl: HTMLDivElement | null = null
@@ -283,8 +335,8 @@ export class CanvasBackgroundService extends EventTarget {
   constructor() {
     super()
     this.#restore()
-    void this.#loadPicture()
-    void this.#loadSaved()
+    this.#hydration = this.#hydrate()
+    void this.#hydration.then(() => this.#followLineage())
     // Re-apply when the colour theme flips so an auto palette tracks it.
     EffectBus.on('theme:changed', () => { if (!this.#palette) this.apply() })
     // matchMedia covers the 'system' theme (no data-theme attribute).
@@ -309,6 +361,7 @@ export class CanvasBackgroundService extends EventTarget {
   get zoom(): number { return this.#zoom }
   get panX(): number { return this.#panX }
   get panY(): number { return this.#panY }
+  get cascade(): boolean { return this.#cascade }
   /** The saved backdrops, by world. Signature arrays — resolve on demand. */
   get saved(): Record<BackdropWorld, readonly string[]> {
     return { light: [...this.#saved.light], dark: [...this.#saved.dark] }
@@ -351,17 +404,14 @@ export class CanvasBackgroundService extends EventTarget {
   /** Hydrate the shelves from their pool of meaning. The pref briefly carried
    *  them; anything still found there is adopted into the pool ONCE and the
    *  pref stops carrying it — reads union the legacy source, writes never
-   *  target it. Same boot ladder as the picture: the store registers in IoC
-   *  before OPFS is open, so one early read answering nothing is not an empty
-   *  shelf. */
-  async #loadSaved(): Promise<void> {
-    for (const wait of RESOLVE_LADDER) {
-      const store = this.#store()
-      if (store?.getPool && store.getPoolDoc) {
+   *  target it. */
+  async #loadSaved(store: StoreHandle): Promise<void> {
+    for (const wait of SETTLED_RETRIES) {
+      if (store.getPool && store.getPoolDoc) {
         try {
-          // A null pool is the store answering before OPFS is open — the same
-          // boot trap the picture resolve pays for — so it rides the ladder
-          // rather than being read as "no shelves".
+          // A null pool would mean the store answered before OPFS was open.
+          // It is settled by the time this runs, so this is belt and braces
+          // rather than the boot trap it used to be.
           const pool = await store.getPool(SAVED_POOL_MEANING)
           if (!pool) throw new Error('store not settled')
           const buf = await store.getPoolDoc(pool)
@@ -391,7 +441,7 @@ export class CanvasBackgroundService extends EventTarget {
           if (this.#prefCarriedSaved) { this.#prefCarriedSaved = false; this.#persist() }
           this.dispatchEvent(new CustomEvent('change'))
           return
-        } catch { /* store not settled — ask again */ }
+        } catch { /* not settled after all — ask again */ }
       }
       await new Promise(resolve => setTimeout(resolve, wait))
     }
@@ -402,7 +452,7 @@ export class CanvasBackgroundService extends EventTarget {
    *  by the next one rather than leaving a partial record. */
   #writeSaved(): void {
     void (async () => {
-      const store = this.#store()
+      const store = await this.#storeReady()
       if (!store?.getPool || !store.putPoolDoc) return
       try {
         const pool = await store.getPool(SAVED_POOL_MEANING)
@@ -427,6 +477,8 @@ export class CanvasBackgroundService extends EventTarget {
     if (!blob) return false
     this.#revokePicture()
     this.#pictureSig = clean
+    this.#screenSourceKey = this.#currentPathKey()
+    this.#cascade = true
     this.#pictureUrl = URL.createObjectURL(blob)
     this.#measurePicture()
     this.#enabled = true
@@ -451,10 +503,11 @@ export class CanvasBackgroundService extends EventTarget {
    *  something else may well be pointing at them. */
   clearPicture(): void {
     if (!this.#pictureSig && !this.#pictureUrl) return
+    delete this.#screenRecords[this.#screenSourceKey]
     this.#revokePicture()
     this.#pictureSig = null
     this.#persist()
-    this.apply()
+    void this.#resolveScreenForCurrentPath()
   }
 
   /** How far the picture is washed toward the palette, 0..1. */
@@ -485,6 +538,13 @@ export class CanvasBackgroundService extends EventTarget {
     this.#panY = nextY
     this.#persist()
     this.apply()
+  }
+
+  setCascade(value: boolean): void {
+    if (value === this.#cascade) return
+    this.#cascade = value
+    this.#persist()
+    this.dispatchEvent(new CustomEvent('change'))
   }
 
   /** Show the backdrop above the hive while it is being framed. */
@@ -849,15 +909,13 @@ export class CanvasBackgroundService extends EventTarget {
   }
 
   /** Resolve the stored signature's bytes at boot. The signature is the truth
-   *  and survives a reload; the object URL never does. */
+   *  and survives a reload; the object URL never does. The store is SETTLED
+   *  before this runs — see #storeReady — so a miss here is about the bytes,
+   *  not about the timing. */
   async #loadPicture(): Promise<void> {
     const sig = this.#pictureSig
     if (!sig) return
-    // THE STORE ANSWERS BEFORE IT IS READY. It registers in IoC while OPFS is
-    // still opening, so one read at boot comes back null for a picture that is
-    // plainly there — and the backdrop stayed a pattern until the next time
-    // you changed something. Ask again on a short ladder instead of losing it.
-    for (const wait of RESOLVE_LADDER) {
+    for (const wait of SETTLED_RETRIES) {
       // A newer choice landed while this one was resolving — that one wins.
       if (this.#pictureSig !== sig) return
       const blob = await this.#readResource(sig)
@@ -871,13 +929,152 @@ export class CanvasBackgroundService extends EventTarget {
       }
       await new Promise(resolve => setTimeout(resolve, wait))
     }
+    // THE SIGNATURE IS KEPT. The preference is not wrong — the bytes are
+    // missing — and clearing it would turn an absence a replication or a
+    // drain can still heal into a choice the participant has to make again.
+    console.warn(`[canvas-bg] picture ${sig.slice(0, 12)}… names no bytes in this hive — the backdrop is showing its pattern`)
   }
 
-  /** The store, once it exists. This service is constructed at module load,
-   *  well before the shell has opened OPFS, so a boot-time read has to wait
-   *  for the registration rather than answering null and losing the picture. */
+  /** The store, once it exists. */
   #store(): StoreHandle | undefined {
     return (window as { ioc?: { get?(key: string): unknown } }).ioc?.get?.(STORE_KEY) as StoreHandle | undefined
+  }
+
+  /** The store, REGISTERED AND SETTLED. Polls IoC for the registration (a
+   *  promise parked on `whenReady` never settles when the registration it is
+   *  waiting for has already happened), then awaits the store's own
+   *  idempotent initialize. Null only if no Store ever appears at all. */
+  async #storeReady(): Promise<StoreHandle | null> {
+    for (let attempt = 0; attempt < STORE_POLL_TRIES; attempt++) {
+      const store = this.#store()
+      if (store) {
+        try { await store.initialize?.() } catch { /* a wedged OPFS answers null; that is an answer */ }
+        return store
+      }
+      await new Promise(resolve => setTimeout(resolve, STORE_POLL_MS))
+    }
+    return null
+  }
+
+  /** Everything this service needs from the store, in the one order that
+   *  works: settle, adopt the record, resolve the bytes, hydrate the shelves. */
+  async #hydrate(): Promise<void> {
+    const store = await this.#storeReady()
+    if (!store) return
+    await this.#loadScreen(store)
+    await this.#loadPicture()
+    await this.#loadSaved(store)
+  }
+
+  /** Read the screen record out of its pool of meaning.
+   *
+   *  The local pref is this origin's own hand and is rewritten on every
+   *  change, so it WINS whenever it names a picture. The pool speaks for a
+   *  hive that arrived carrying one — replicated, opened on a second origin,
+   *  reopened after the browser dropped its storage — and fills the gap
+   *  rather than overruling anything. */
+  async #loadScreen(store: StoreHandle): Promise<void> {
+    if (!store.getPool || !store.getPoolDoc) return
+    // A pref that already names a picture, or that says the backdrop is off,
+    // is an answer — the pool only speaks where nothing local does.
+    try {
+      const pool = await store.getPool(SCREEN_POOL_MEANING)
+      const buf = await store.getPoolDoc(pool ?? undefined)
+      if (buf) {
+        const doc = JSON.parse(new TextDecoder().decode(buf)) as {
+          records?: Record<string, ScreenRecord>
+          picture?: unknown; dim?: unknown; zoom?: unknown; panX?: unknown; panY?: unknown
+        }
+        if (doc.records && typeof doc.records === 'object') this.#screenRecords = doc.records
+        else if (typeof doc.picture === 'string' && SIG_RE.test(doc.picture)) {
+          this.#screenRecords['[]'] = {
+            picture: doc.picture,
+            dim: typeof doc.dim === 'number' ? doc.dim : 0,
+            zoom: typeof doc.zoom === 'number' ? doc.zoom : 1,
+            panX: typeof doc.panX === 'number' ? doc.panX : 0,
+            panY: typeof doc.panY === 'number' ? doc.panY : 0,
+            cascade: true,
+          }
+        }
+      }
+      if (this.#pictureSig) this.#screenRecords['[]'] = this.#currentRecord()
+      await this.#resolveScreenForCurrentPath()
+    } catch { /* absent or corrupt — the pref stands */ }
+  }
+
+  /** Mirror the screen record into its pool of meaning. Whole state every
+   *  time, so a write the store was not ready for is healed by the next one
+   *  rather than leaving a partial record — and never before #loadScreen has
+   *  read, or an empty pref on a fresh origin would erase a hive's backdrop
+   *  before anybody had looked at it. */
+  #writeScreen(): void {
+    if (this.#pictureSig) this.#screenRecords[this.#screenSourceKey] = this.#currentRecord()
+    if (this.#screenWrite !== null) clearTimeout(this.#screenWrite)
+    this.#screenWrite = setTimeout(() => {
+      this.#screenWrite = null
+      void (async () => {
+        await this.#hydration
+        const store = await this.#storeReady()
+        if (!store?.getPool || !store.putPoolDoc) return
+        try {
+          const pool = await store.getPool(SCREEN_POOL_MEANING)
+          if (!pool) return
+          const bytes = new TextEncoder().encode(JSON.stringify({ v: 2, records: this.#screenRecords })).buffer as ArrayBuffer
+          await store.putPoolDoc(pool, bytes)
+        } catch { /* not ready — the next whole-state write covers this one */ }
+      })()
+    }, SCREEN_WRITE_DEBOUNCE)
+  }
+
+  #currentRecord(): ScreenRecord {
+    return { picture: this.#pictureSig ?? '', dim: this.#dim, zoom: this.#zoom,
+      panX: this.#panX, panY: this.#panY, cascade: this.#cascade }
+  }
+
+  #currentSegments(): string[] {
+    const lineage = (window as { ioc?: { get?(key: string): unknown } }).ioc?.get?.('@hypercomb.social/Lineage') as
+      { explorerSegments?(): readonly string[] } | undefined
+    return [...(lineage?.explorerSegments?.() ?? [])]
+  }
+
+  #currentPathKey(): string { return JSON.stringify(this.#currentSegments()) }
+
+  async #resolveScreenForCurrentPath(): Promise<void> {
+    const epoch = ++this.#navigationEpoch
+    const segments = this.#currentSegments()
+    let found: { key: string; record: ScreenRecord } | null = null
+    for (let length = segments.length; length >= 0; length--) {
+      const key = JSON.stringify(segments.slice(0, length))
+      const record = this.#screenRecords[key]
+      if (!record || !SIG_RE.test(record.picture)) continue
+      if (length === segments.length || record.cascade !== false) { found = { key, record }; break }
+    }
+    if (epoch !== this.#navigationEpoch) return
+    if (!found) { this.#revokePicture(); this.#pictureSig = null; this.apply(); return }
+    const { key, record } = found
+    this.#screenSourceKey = key
+    this.#cascade = record.cascade !== false
+    this.#dim = record.dim
+    this.#zoom = record.zoom
+    this.#panX = record.panX
+    this.#panY = record.panY
+    if (this.#pictureSig !== record.picture || !this.#pictureUrl) {
+      this.#revokePicture()
+      this.#pictureSig = record.picture
+      await this.#loadPicture()
+    } else this.apply()
+    this.dispatchEvent(new CustomEvent('change'))
+  }
+
+  #followLineage(): void {
+    const ioc = (window as { ioc?: { get?(key: string): unknown; whenReady?(key: string, cb: (value: unknown) => void): void } }).ioc
+    const attach = (value: unknown): void => {
+      const lineage = value as EventTarget | undefined
+      lineage?.addEventListener?.('change', () => { void this.#resolveScreenForCurrentPath() })
+    }
+    const ready = ioc?.get?.('@hypercomb.social/Lineage')
+    if (ready) attach(ready)
+    else ioc?.whenReady?.('@hypercomb.social/Lineage', attach)
   }
 
   /** One read. Answers null rather than waiting — the caller that needs to
@@ -914,7 +1111,7 @@ export class CanvasBackgroundService extends EventTarget {
       if (typeof parsed.enabled === 'boolean') this.#enabled = parsed.enabled
       // A signature, or nothing. Anything else in the slot is a corrupt pref,
       // not a picture, and asking the store for it would only fail later.
-      if (typeof parsed.picture === 'string' && SIG_RE.test(parsed.picture)) this.#pictureSig = parsed.picture
+      if (parsed.v !== 3 && typeof parsed.picture === 'string' && SIG_RE.test(parsed.picture)) this.#pictureSig = parsed.picture
       // The retired build levied a half-strength wash BY DEFAULT and persisted
       // it, so a truly-legacy pref's 0.5 is that levy, not a choice — it takes
       // the new default (full opacity) instead. Later prefs are recognisable
@@ -945,9 +1142,12 @@ export class CanvasBackgroundService extends EventTarget {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         archetype: this.#archetype, palette: this.#palette, enabled: this.#enabled,
         picture: this.#pictureSig, dim: this.#dim, zoom: this.#zoom,
-        panX: this.#panX, panY: this.#panY, v: 2,
+        panX: this.#panX, panY: this.#panY, v: 3,
       }))
     } catch { /* storage unavailable */ }
+    // The durable half: a pool member naming the signature is what keeps the
+    // picture's bytes REACHABLE, and what lets the choice travel with the hive.
+    this.#writeScreen()
   }
 }
 

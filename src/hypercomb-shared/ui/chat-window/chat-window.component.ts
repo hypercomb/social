@@ -1729,6 +1729,32 @@ export class ChatWindowComponent implements OnDestroy {
 
     this.#cleanups.push(EffectBus.on('chat:close', () => { if (this.visible()) this.close() }))
 
+    // A PICTURE ARRIVING FROM ELSEWHERE. The markup sheet (markup-overlay)
+    // photographs the screen and stores the bytes itself, so what reaches the
+    // shelf is the same {sig, kind} reference a pasted screenshot becomes —
+    // the surface that took the picture never has to know how this window
+    // holds one. The window opens on arrival: a context nobody can see is a
+    // context nobody will use.
+    this.#cleanups.push(EffectBus.on<{ sig?: string; name?: string; kind?: string; size?: number; open?: boolean }>(
+      'chat:attach-picture', payload => {
+        const sig = String(payload?.sig ?? '')
+        if (!/^[0-9a-f]{64}$/.test(sig)) return
+        const key = `image:${sig}`
+        if (!this.references().some(held => held.key === key)) {
+          this.references.set([...this.references(), {
+            key,
+            path: [],
+            name: String(payload?.name || 'marked-up screen'),
+            sig,
+            size: Number(payload?.size) || undefined,
+            kind: String(payload?.kind || 'image/png'),
+          }])
+          this.#announceSet()
+          void this.#refreshContextThumbs()
+        }
+        if (payload?.open !== false && !this.visible()) void this.open()
+      }))
+
     // A draft landing anywhere — this composer, another window, a sweep — is
     // a change to the roster, because a conversation that holds only unsent
     // words is still a conversation you must be able to get back to.

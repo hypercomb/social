@@ -127,12 +127,6 @@
           [attr.aria-selected]="effectiveTab(row) === 'status'"
           (click)="setTab('status')"
         >{{ 'publish.tab.status' | t }}</button>
-        <button
-          class="ptab" type="button" role="tab"
-          [class.active]="effectiveTab(row) === 'community'"
-          [attr.aria-selected]="effectiveTab(row) === 'community'"
-          (click)="setTab('community')"
-        >{{ 'publish.tab.community' | t }}</button>
         @if (row.segments.length > 0 && viewsFor(row).length > 0) {
           <button
             class="ptab" type="button" role="tab"
@@ -153,58 +147,6 @@
 
       <div class="publish-body">
         @switch (effectiveTab(row)) {
-
-          @case ('community') {
-            <!-- YOUR COMMUNITY — the hosts you have been given, or given
-                 yourself. Not a place to choose an address: each of these is
-                 an artifact you carry, and a branch names the ones it answers
-                 on from its own line item above.
-
-                 A host is not free text pretending to be a setting. It is a
-                 host that exists and serves your signed index, so adding one
-                 is a real act with a real consequence, and removing one is a
-                 DELETE — the artifact goes, and every branch that named it
-                 keeps saying so, which is the honest state and reads as one. -->
-            <div class="pdet-domains pdet-community">
-              @for (zone of communityHosts(); track zone) {
-                <div class="pdet-domain is-carried">
-                  <span class="pdet-address">{{ zone }}</span>
-                  @if (namingHost(zone); as naming) {
-                    <span class="pdet-host-count">{{ 'publish.community.naming' | t: { count: naming } }}</span>
-                  }
-                  <button
-                    class="pdet-domain-lead pdet-host-drop"
-                    type="button"
-                    [attr.data-tip]="'publish.community.remove' | t"
-                    [attr.aria-label]="'publish.community.remove' | t"
-                    (click)="removeCommunityHost(zone)"
-                  >✕</button>
-                </div>
-              } @empty {
-                <p class="pdet-host-empty">{{ 'publish.community.empty' | t }}</p>
-              }
-
-              <div class="pdet-host-add">
-                <input
-                  #hostInput
-                  class="pdet-host-input"
-                  type="text"
-                  autocomplete="off"
-                  spellcheck="false"
-                  [attr.placeholder]="'publish.community.placeholder' | t"
-                  [attr.aria-label]="'publish.community.add' | t"
-                  (keydown.enter)="addCommunityHost(hostInput)"
-                />
-                <button
-                  class="pdet-host-take"
-                  type="button"
-                  (click)="addCommunityHost(hostInput)"
-                >{{ 'publish.community.add' | t }}</button>
-              </div>
-
-              <p class="pdet-domain-note">{{ 'publish.row.domain-note' | t }}</p>
-            </div>
-          }
 
           @case ('opens') {
             <!-- OPENS AS — the branch root's face, the one thing a visitor

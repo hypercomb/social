@@ -1,0 +1,297 @@
+// hypercomb-shared/ui/comfy-panel/comfy-panel.component.scss
+//
+// Right-docked "ComfyUI" panel — a prompt, a workflow, and where the picture
+// goes.
+//
+// Cold steel chrome (126,182,214) and the shared docked shell, like every
+// other tool window. It sits one notch after the Backgrounds window: both are
+// about pictures, and this is the one that makes them.
+//
+// NO COLOUR IS NAMED HERE except the accent this panel is authored with.
+// Everything else asks for a ROLE — the ink ladder for weight, `--acc` for
+// identity — so the panel reads correctly under honey, sherbet and every
+// other bright look, where a literal near-white title would sit at 1.1:1.
+// The one exception earns itself: the host dot is a green that MEANS
+// "answering", so it goes through `tw.ink()`, which keeps the hue and moves
+// the value onto this ground.
+
+@use '../toolwindow' as tw;
+
+$accent: #7eb6d6;
+
+:host {
+  position: fixed;
+  inset: 0;
+  z-index: 100002;
+  pointer-events: none;
+}
+
+.comfy-panel {
+  pointer-events: auto;
+  position: absolute;
+  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  right: 0;
+  bottom: 0;
+  width: 360px;
+  min-width: 300px;
+  max-width: calc(100vw - 1.5rem);
+  display: flex;
+  flex-direction: column;
+  font-family: var(--hc-mono, system-ui);
+  // The docked-panel directive sets --hc-panel-scale from the drag width;
+  // inner sizes ride it in em so content shrinks with the panel.
+  font-size: calc(1rem * var(--hc-panel-scale, 1));
+  color: var(--hc-window-ink-loud);
+  outline: none;
+  @include tw.panel($accent, right);
+}
+
+.comfy-header {
+  @include tw.header;
+  border-bottom: 1px solid rgba(var(--acc), 0.22);
+}
+
+.comfy-title {
+  flex: 1;
+  font-size: 0.9em;
+  letter-spacing: 0.05em;
+  color: var(--hc-window-accent);
+}
+
+.comfy-close {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  padding: 0 0.2em;
+  font-size: 1.1em;
+  line-height: 1;
+  color: var(--hc-window-ink-quiet);
+  cursor: pointer;
+
+  &:hover { color: var(--hc-window-ink-loud); }
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+}
+
+.comfy-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 0.5em 0.7em 0.8em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7em;
+}
+
+// ── the four sections ───────────────────────────────────────────────────────
+.comfy-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+}
+
+.comfy-section {
+  font-size: 0.7em;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--hc-window-accent-quiet);
+}
+
+.comfy-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+}
+
+// ── the machine ─────────────────────────────────────────────────────────────
+// Green MEANS answering, so it is a colour on purpose — through ink() so the
+// hue survives a bright pane and the value comes to this ground.
+.comfy-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: tw.$radius-round;
+  background: color-mix(in srgb, var(--hc-panel-text) 22%, transparent);
+
+  &.on { background: #{tw.ink(#70d59a)}; }
+}
+
+.comfy-state {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8em;
+  color: var(--hc-window-ink-plain);
+}
+
+// ── controls ────────────────────────────────────────────────────────────────
+.comfy-input,
+.comfy-pick,
+.comfy-prompt,
+.comfy-paste {
+  flex: 1 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0.32em 0.45em;
+  font: inherit;
+  font-size: 0.8em;
+  color: var(--hc-panel-text);
+  background: color-mix(in srgb, var(--hc-panel-text) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--hc-panel-text) 18%, transparent);
+  border-radius: tw.$radius-control;
+
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+}
+
+.comfy-prompt,
+.comfy-paste {
+  width: 100%;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.comfy-paste {
+  font-family: ui-monospace, monospace;
+  font-size: 0.7em;
+}
+
+.comfy-chip {
+  flex: 0 0 auto;
+  @include tw.compact-button-padding;
+  font: inherit;
+  font-size: 0.7em;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--hc-window-ink-plain);
+  background: rgba(var(--acc), 0.1);
+  border: 1px solid rgba(var(--acc), 0.25);
+  border-radius: tw.$radius-pill;
+  cursor: pointer;
+
+  &:hover { background: rgba(var(--acc), 0.18); }
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+}
+
+// ── the numbers ─────────────────────────────────────────────────────────────
+// One field per seam the workflow offers, wrapping rather than scrolling — a
+// narrow panel gets two rows of three, not a horizontal scrollbar.
+.comfy-numbers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+}
+
+.comfy-number {
+  flex: 1 1 4.2em;
+  min-width: 4.2em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1em;
+  font-size: 0.66em;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--hc-window-ink-quiet);
+
+  input {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 0.3em 0.4em;
+    font: inherit;
+    font-size: 1.2em;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--hc-panel-text);
+    background: color-mix(in srgb, var(--hc-panel-text) 6%, transparent);
+    border: 1px solid color-mix(in srgb, var(--hc-panel-text) 18%, transparent);
+    border-radius: tw.$radius-control;
+
+    &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+  }
+}
+
+// ── the run ─────────────────────────────────────────────────────────────────
+.comfy-run {
+  width: 100%;
+  padding: 0.42em 0.6em;
+  font: inherit;
+  font-size: 0.78em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hc-window-ink-loud);
+  background: rgba(var(--acc), 0.14);
+  border: 1px solid rgba(var(--acc), 0.32);
+  border-radius: tw.$radius-control;
+  cursor: pointer;
+
+  &:hover { background: rgba(var(--acc), 0.22); }
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+}
+
+.comfy-bar {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--hc-panel-text) 8%, transparent);
+}
+
+.comfy-fill {
+  height: 100%;
+  background: var(--hc-window-accent);
+  transition: width 120ms linear;
+}
+
+.comfy-target {
+  margin: 0;
+  font-size: 0.75em;
+  color: var(--hc-window-accent-quiet);
+}
+
+.comfy-note {
+  margin: 0;
+  font-size: 0.74em;
+  line-height: 1.45;
+  color: var(--hc-window-ink-quiet);
+}
+
+// A caution, not a verdict — the two failures it carries (a missing CORS
+// flag, an https page reaching plain http) are both things the participant
+// can go and fix.
+.comfy-warn {
+  margin: 0;
+  padding: 0.32em 0.45em;
+  font-size: 0.74em;
+  line-height: 1.4;
+  color: #{tw.ink(#f0b45a)};
+  background: color-mix(in srgb, #{tw.ink(#f0b45a)} 10%, transparent);
+  border: 1px solid color-mix(in srgb, #{tw.ink(#f0b45a)} 42%, transparent);
+  border-radius: tw.$radius-control;
+}
+
+// ── the pictures ────────────────────────────────────────────────────────────
+.comfy-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3em;
+}
+
+.comfy-thumb {
+  flex: 0 0 auto;
+  width: 4em;
+  height: 4em;
+  padding: 0;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--hc-panel-text) 4%, transparent);
+  border: 1px solid rgba(var(--acc), 0.22);
+  border-radius: tw.$radius-control;
+  cursor: pointer;
+
+  &:hover { border-color: rgba(var(--acc), 0.7); }
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+
+  img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+}

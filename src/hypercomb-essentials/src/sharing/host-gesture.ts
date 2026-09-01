@@ -1,6 +1,13 @@
-// sharing/host.queen.ts
+// sharing/host-gesture.ts
 //
-// `/host` — publish the CURRENT branch as a STATIC hive and mint its link.
+// Publish the CURRENT branch as a STATIC hive and mint its link.
+//
+// THERE IS NO `/host` BEHAVIOUR. Hosting is not a verb you type: it is a
+// switch you turn on once, in the hosts window, and then a branch is published
+// from its own line item in the publish panel. This module keeps the GESTURE
+// — consent, progress, the outcome toast, link delivery — because the phone
+// share sheet still needs exactly one call that puts a branch into the world
+// and hands back a link a cold stranger can open.
 //
 // The publisher side of static hive hosting: no swarm, no relay, no
 // hc:mesh-public — the whole flow rides the HTTPS byte tier.
@@ -29,14 +36,18 @@ const PROGRESS_NOTE_MS = 15_000
 
 interface LineageLike { explorerSegments?: () => readonly string[] }
 
-export class HostQueenBee {
-  readonly command = 'host'
-  readonly aliases = ['publish-static', 'host-branch'] as const
-  readonly description =
-    'Host the current branch as a static hive: seal it, upload its closure to the public content endpoint, advance your signed hive index, and copy a shareable preview link.'
-  readonly descriptionKey = 'slash.host'
+const t = (i18n: I18nProvider | undefined, key: string, fallback: string, params?: Record<string, unknown>): string =>
+  i18n?.t(key, params as never) ?? fallback
 
-  async invoke(_args: string): Promise<void> {
+const activity = (message: string, icon: string): void => {
+  EffectBus.emit('activity:log', { message, icon })
+}
+
+const toast = (type: string, title: string, message: string): void => {
+  EffectBus.emit('toast:show', { type, title, message })
+}
+
+export const hostCurrentBranch = async (): Promise<void> => {
     const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
     const lineage = get<LineageLike>(LINEAGE_KEY)
 
@@ -44,8 +55,8 @@ export class HostQueenBee {
       .map(s => String(s ?? '').trim()).filter(Boolean)
     if (segments.length === 0) {
       // The whole hive root is not a branch — name the gesture precisely.
-      this.#toast('tip', this.#t(i18n, 'host.title', 'Host branch'),
-        this.#t(i18n, 'host.not-branch', 'Navigate into the branch you want to host, then run /host again.'))
+      toast('tip', t(i18n, 'host.title', 'Host branch'),
+        t(i18n, 'host.not-branch', 'Navigate into the branch you want to host, then run /host again.'))
       return
     }
     const name = segments[segments.length - 1] ?? ''
@@ -63,16 +74,16 @@ export class HostQueenBee {
     let nextNote = 0
     const onProgress = (p: PublishProgress): void => {
       if (p.phase === 'staging') {
-        this.#activity(this.#t(i18n, 'host.uploading', 'uploading branch to the public host…'), '●')
+        activity(t(i18n, 'host.uploading', 'uploading branch to the public host…'), '●')
         nextNote = Date.now() + PROGRESS_NOTE_MS
         return
       }
       if (p.phase !== 'waiting' || Date.now() < nextNote) return
       nextNote = Date.now() + PROGRESS_NOTE_MS
-      this.#activity(
+      activity(
         typeof p.pending === 'number'
-          ? this.#t(i18n, 'host.progress', `still uploading — ${p.pending} pending`, { pending: p.pending })
-          : this.#t(i18n, 'host.progress-quiet', 'still uploading…'),
+          ? t(i18n, 'host.progress', `still uploading — ${p.pending} pending`, { pending: p.pending })
+          : t(i18n, 'host.progress-quiet', 'still uploading…'),
         '○')
     }
 
@@ -81,37 +92,37 @@ export class HostQueenBee {
     if (!result.ok) {
       switch (result.failure) {
         case 'services':
-          this.#toast('error', this.#t(i18n, 'host.title', 'Host branch'), 'Core services are not ready yet.')
+          toast('error', t(i18n, 'host.title', 'Host branch'), 'Core services are not ready yet.')
           return
         case 'no-branch':
-          this.#toast('tip', this.#t(i18n, 'host.title', 'Host branch'),
-            this.#t(i18n, 'host.not-branch', 'Navigate into the branch you want to host, then run /host again.'))
+          toast('tip', t(i18n, 'host.title', 'Host branch'),
+            t(i18n, 'host.not-branch', 'Navigate into the branch you want to host, then run /host again.'))
           return
         case 'seal-failed':
-          this.#toast('error', this.#t(i18n, 'host.title', 'Host branch'),
-            this.#t(i18n, 'host.seal-failed', 'The branch could not be sealed (a child is cold or unresolvable) — visit its tiles once, then run /host again.'))
+          toast('error', t(i18n, 'host.title', 'Host branch'),
+            t(i18n, 'host.seal-failed', 'The branch could not be sealed (a child is cold or unresolvable) — visit its tiles once, then run /host again.'))
           return
         case 'no-signer':
-          this.#toast('error', this.#t(i18n, 'host.title', 'Host branch'), 'No signing key available — the hive index must be signed.')
+          toast('error', t(i18n, 'host.title', 'Host branch'), 'No signing key available — the hive index must be signed.')
           return
         case 'not-available':
-          this.#toast('info', this.#t(i18n, 'host.title', 'Host branch'),
-            this.#t(i18n, 'host.failed', 'The branch is still uploading — your hive index was NOT advanced (no dead links). Uploads retry automatically; run /host again once the sync pill clears.'))
+          toast('info', t(i18n, 'host.title', 'Host branch'),
+            t(i18n, 'host.failed', 'The branch is still uploading — your hive index was NOT advanced (no dead links). Uploads retry automatically; run /host again once the sync pill clears.'))
           return
         case 'index-unsafe':
           // The refusal that protects every OTHER branch: rewriting the index
           // off a read we could not verify would drop the ones we cannot see.
-          this.#toast('error', this.#t(i18n, 'host.title', 'Host branch'),
-            this.#t(i18n, 'host.index-unsafe',
+          toast('error', t(i18n, 'host.title', 'Host branch'),
+            t(i18n, 'host.index-unsafe',
               'Your hive index could not be read back ({reason}), so it was left untouched — the bytes are hosted; run /host again when the host answers.',
               { reason: result.reason ?? 'unreachable' }))
           return
         case 'index-failed':
-          this.#toast('error', this.#t(i18n, 'host.title', 'Host branch'),
-            this.#t(i18n, 'host.index-failed', 'The bytes are hosted but the hive index update failed ({reason}) — run /host again to retry the index.', { reason: result.reason ?? 'unknown' }))
+          toast('error', t(i18n, 'host.title', 'Host branch'),
+            t(i18n, 'host.index-failed', 'The bytes are hosted but the hive index update failed ({reason}) — run /host again to retry the index.', { reason: result.reason ?? 'unknown' }))
           return
         default:
-          this.#toast('error', this.#t(i18n, 'host.title', 'Host branch'), 'Could not create the link bundle resource.')
+          toast('error', t(i18n, 'host.title', 'Host branch'), 'Could not create the link bundle resource.')
           return
       }
     }
@@ -127,13 +138,13 @@ export class HostQueenBee {
         ? 'Link copied — anyone who opens it can preview, then adopt.'
         : result.url
     const doneMsg = result.linkReceipted
-      ? this.#t(i18n, 'host.done', 'Branch hosted. {link}', { link: linkText })
-      : this.#t(i18n, 'host.done-pending-link', 'Branch hosted; the link itself is still uploading (retries automatically). {link}', { link: delivery === 'offered' ? result.url : 'Link ready.' })
-    this.#toast(result.status === 'confirmed' ? 'success' : 'info',
-      this.#t(i18n, 'host.title', 'Host branch'),
+      ? t(i18n, 'host.done', 'Branch hosted. {link}', { link: linkText })
+      : t(i18n, 'host.done-pending-link', 'Branch hosted; the link itself is still uploading (retries automatically). {link}', { link: delivery === 'offered' ? result.url : 'Link ready.' })
+    toast(result.status === 'confirmed' ? 'success' : 'info',
+      t(i18n, 'host.title', 'Host branch'),
       result.status === 'confirmed'
         ? doneMsg
-        : this.#t(i18n, 'host.done-unconfirmed',
+        : t(i18n, 'host.done-unconfirmed',
           'Branch published — the public host has not served it back yet. Open /publish to watch it go live. {link}',
           { link: linkText }))
 
@@ -141,8 +152,8 @@ export class HostQueenBee {
     // own ledger names branches the live index does not carry. Reported, never
     // silently re-asserted — republishing them is the participant's call.
     if (result.missingFromIndex.length > 0) {
-      this.#toast('info', this.#t(i18n, 'host.title', 'Host branch'),
-        this.#t(i18n, 'host.index-gaps',
+      toast('info', t(i18n, 'host.title', 'Host branch'),
+        t(i18n, 'host.index-gaps',
           '{count} branch(es) you published before are missing from your hive index — open /publish to republish them.',
           { count: result.missingFromIndex.length }))
     }
@@ -150,17 +161,3 @@ export class HostQueenBee {
     console.log(`[host] "${name}" sealed=${result.sealed.slice(0, 12)}… index=${result.host}/hive/${result.pubkey.slice(0, 12)}… link=${result.url} status=${result.status}`)
   }
 
-  #t = (i18n: I18nProvider | undefined, key: string, fallback: string, params?: Record<string, unknown>): string =>
-    i18n?.t(key, params as never) ?? fallback
-
-  #activity = (message: string, icon: string): void => {
-    EffectBus.emit('activity:log', { message, icon })
-  }
-
-  #toast = (type: string, title: string, message: string): void => {
-    EffectBus.emit('toast:show', { type, title, message })
-  }
-}
-
-const _host = new HostQueenBee()
-window.ioc.register('@diamondcoreprocessor.com/HostQueenBee', _host)

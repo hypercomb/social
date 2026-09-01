@@ -142,7 +142,7 @@ const SECTION_TITLES: { key: PublishSection['key']; titleKey: string }[] = [
 ]
 
 /** The properties window's tabs. Sticky — the choice survives the session. */
-type PublishTab = 'status' | 'community' | 'opens' | 'versions'
+type PublishTab = 'status' | 'opens' | 'versions'
 const TAB_STORE_KEY = 'hc:publish-panel:tab'
 
 /** Head sigs are shown at this length — enough to compare two by eye, short
@@ -261,10 +261,12 @@ export class PublishPanelComponent implements OnDestroy {
   #loadTab(): PublishTab {
     try {
       const v = localStorage.getItem(TAB_STORE_KEY)
-      // `domains` is the retained spelling of the tab this became: it used to
-      // be where you picked an address, and it is now the community you carry.
-      if (v === 'domains') return 'community'
-      return v === 'community' || v === 'opens' || v === 'versions' ? v : 'status'
+      // `domains` and `community` are both retired spellings of the tab that
+      // LEFT: the hosts you carry are their own panel now (`/hosts`), because
+      // a host exists before any branch names it and outlives every branch
+      // that does. A participant whose last open tab was that one lands on
+      // Status rather than on nothing.
+      return v === 'opens' || v === 'versions' ? v : 'status'
     } catch { return 'status' }
   }
 
@@ -344,37 +346,6 @@ export class PublishPanelComponent implements OnDestroy {
       key: row.key,
       domains: [zone, ...row.zones.filter(z => z !== zone)],
     })
-  }
-
-  /** THE COMMUNITY — the hosts you carry, which is what the tab shows and
-   *  what a branch's picker offers. Not a list of addresses in use: a host is
-   *  here because it was added. */
-  communityHosts(): string[] {
-    return this.hosts()
-  }
-
-  /** Take a host into your community. The text is normalized where the
-   *  signature is minted, not here, so `HYPERCOMB.com` and
-   *  `https://hypercomb.com/` are the one host they obviously are. */
-  addCommunityHost(input: HTMLInputElement): void {
-    const zone = input.value.trim()
-    if (!zone) return
-    EffectBus.emit('publish:community-add', { zone })
-    input.value = ''
-  }
-
-  /** Drop a host from your community. Branches that name it keep their mark —
-   *  they say where they publish, and that is still true of a host you no
-   *  longer carry. */
-  removeCommunityHost(zone: string): void {
-    EffectBus.emit('publish:community-remove', { zone })
-  }
-
-  /** Which branches would be left naming a host that is about to go. Shown on
-   *  the remove, because dropping the address three branches publish to should
-   *  say so before it happens rather than after. */
-  namingHost(zone: string): number {
-    return this.rows().filter(r => r.zones.includes(zone)).length
   }
 
   /** Where ONE address lives once published. A branch with no name of its own

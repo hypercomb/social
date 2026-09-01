@@ -1,0 +1,264 @@
+// hypercomb-shared/ui/hosts-panel/hosts-panel.component.scss
+//
+// Right-docked "Hosts" panel — the hosts you carry, as a plain list.
+//
+// Cold steel chrome (126,182,214) like every other tool window, and NO colour
+// role beyond it: nothing in this panel is a claim that could be proved or
+// disproved. A host is here because it was added. There is no state to light
+// up, no verdict to warm or alarm, so the whole surface stays on the ink
+// ladder and spends no accent on anything but its own title.
+//
+// Sits beside the publish panel deliberately — same dock side, same chrome,
+// one notch earlier in the mount order. It reads as the same family of window
+// because it is the set that panel's picker draws from.
+
+@use '../toolwindow' as tw;
+
+$accent: #7eb6d6;
+
+:host {
+  position: fixed;
+  inset: 0;
+  z-index: 100002;
+  pointer-events: none;
+}
+
+.hosts-panel {
+  pointer-events: auto;
+  position: absolute;
+  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  right: 0;
+  bottom: 0;
+  width: 340px;
+  min-width: 280px;
+  max-width: calc(100vw - 1.5rem);
+  display: flex;
+  flex-direction: column;
+  font-family: var(--hc-mono, system-ui);
+  // The docked-panel directive sets --hc-panel-scale from the drag width;
+  // inner sizes ride it in em so content shrinks with the panel.
+  font-size: calc(1rem * var(--hc-panel-scale, 1));
+  color: var(--hc-window-ink-loud);
+  outline: none;
+  @include tw.panel($accent, right);
+}
+
+.hosts-header {
+  @include tw.header;
+  border-bottom: 1px solid rgba(var(--acc), 0.22);
+}
+
+.hosts-title {
+  flex: 1;
+  font-size: 0.9em;
+  letter-spacing: 0.05em;
+  color: var(--hc-window-accent);
+}
+
+.hosts-close {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  padding: 0 0.2em;
+  font-size: 1.1em;
+  line-height: 1;
+  color: var(--hc-window-ink-quiet);
+  cursor: pointer;
+
+  &:hover { color: var(--hc-window-ink-loud); }
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+}
+
+.hosts-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 0.5em 0.7em 0.8em;
+}
+
+// ── one host ────────────────────────────────────────────────────────────────
+// A host is an artifact you carry, so the control on it is a DELETE and the
+// count says what would be left naming it.
+.hosts-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.32em 0;
+  border-bottom: 1px solid rgba(var(--acc), 0.08);
+}
+
+.hosts-count {
+  flex: 0 0 auto;
+  font-size: 0.72em;
+  white-space: nowrap;
+  color: var(--hc-window-ink-quiet);
+}
+
+.hosts-drop {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  padding: 0 0.25em;
+  font-size: 0.8em;
+  line-height: 1;
+  color: var(--hc-window-ink-quiet);
+  cursor: pointer;
+  opacity: 0.55;
+
+  &:hover { opacity: 1; color: var(--hc-window-ink-loud); }
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+}
+
+.hosts-empty {
+  margin: 0.3em 0 0.6em;
+  font-size: 0.78em;
+  color: var(--hc-window-ink-quiet);
+}
+
+// ── taking one in ───────────────────────────────────────────────────────────
+.hosts-add {
+  display: flex;
+  gap: 0.4em;
+  margin: 0.6em 0 0.3em;
+}
+
+.hosts-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.3em 0.45em;
+  font: inherit;
+  font-size: 0.8em;
+  color: var(--hc-panel-text);
+  background: color-mix(in srgb, var(--hc-panel-text) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--hc-panel-text) 18%, transparent);
+  border-radius: 3px;
+
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+}
+
+.hosts-take {
+  flex: 0 0 auto;
+  padding: 0.3em 0.6em;
+  font: inherit;
+  font-size: 0.78em;
+  color: var(--hc-window-ink-plain);
+  background: rgba(var(--acc), 0.1);
+  border: 1px solid rgba(var(--acc), 0.25);
+  border-radius: tw.$radius-pill;
+  cursor: pointer;
+
+  &:hover { background: rgba(var(--acc), 0.18); }
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+}
+
+.hosts-note {
+  margin: 0.5em 0 0;
+  font-size: 0.74em;
+  line-height: 1.45;
+  color: var(--hc-window-ink-quiet);
+}
+
+// ── what a host publishes ───────────────────────────────────────────────────
+// Asked on demand, so these states only ever appear under the row you looked
+// at. Indented under it, quiet: an offer is information, not a claim.
+.hosts-address {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 0.82em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--hc-window-ink-plain);
+  cursor: pointer;
+
+  &:hover { color: var(--hc-window-ink-loud); }
+  &.open { color: var(--hc-window-accent); }
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+}
+
+.hosts-probing,
+.hosts-more {
+  margin: 0.2em 0 0.4em 0.8em;
+  font-size: 0.74em;
+  color: var(--hc-window-ink-quiet);
+}
+
+.hosts-offers {
+  list-style: none;
+  margin: 0.25em 0 0.2em;
+  padding: 0 0 0 0.8em;
+}
+
+.hosts-offer {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  padding: 0.15em 0;
+}
+
+.hosts-offer-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.78em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--hc-window-ink-plain);
+}
+
+.hosts-offer-meta {
+  flex: 0 0 auto;
+  font-size: 0.7em;
+  font-variant-numeric: tabular-nums;
+  color: var(--hc-window-ink-quiet);
+}
+
+// ── the switch ──────────────────────────────────────────────────────────────
+// The one global state in this window: bytes go to a public host, or they do
+// not. Given the accent when ON because it is the single fact here that IS a
+// claim about the world — everything below it is just a list.
+.hosts-switch {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  width: 100%;
+  margin: 0 0 0.7em;
+  padding: 0.45em 0.55em;
+  font: inherit;
+  font-size: 0.8em;
+  text-align: left;
+  color: var(--hc-window-ink-quiet);
+  background: color-mix(in srgb, var(--hc-panel-text) 4%, transparent);
+  border: 1px solid rgba(var(--acc), 0.18);
+  border-radius: 4px;
+  cursor: pointer;
+
+  &:hover { border-color: rgba(var(--acc), 0.34); }
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+
+  &.on {
+    color: var(--hc-window-ink-loud);
+    background: rgba(var(--acc), 0.1);
+    border-color: rgba(var(--acc), 0.4);
+  }
+}
+
+.hosts-switch-dot {
+  flex: 0 0 auto;
+  width: 0.62em;
+  height: 0.62em;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid currentColor;
+
+  .hosts-switch.on & {
+    background: var(--hc-window-accent);
+    border-color: var(--hc-window-accent);
+  }
+}
+
+.hosts-switch-label { flex: 1 1 auto; }

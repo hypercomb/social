@@ -39,11 +39,19 @@
 // dev still bundle theirs — Angular lazy-chunks them — so pass them in
 // explicitly and nothing about these shells changes.
 import { bundledCatalogs, bundledLocales } from '@hypercomb/shared/core/bundled-catalogs'
+import '@hypercomb/shared/core/ioc.web'
 // The escape cascade's door. This used to ride into every shell inside
 // runtime-initializer; the runtime package cannot reach hypercomb-shared/ui,
 // so the shell that wants tool windows imports them itself.
+//
+// BELOW `ioc.web`, which is what installs `window.ioc` — this line sat above
+// it here (and only here; web had it the right way round), so the door
+// registered into nothing and every window rung of the Escape cascade was
+// dead in this shell. It read exactly like the bug the cascade was written to
+// fix: you pressed Escape over a panel covering the hive and nothing at all
+// happened. The registration retries on a microtask now so the order cannot
+// silently cost that again, but the order is still the honest one.
 import '@hypercomb/shared/ui/tool-windows'
-import '@hypercomb/shared/core/ioc.web'
 // Capture a `/<sig>` meeting-place invite link before navigation parses the
 // URL — stashes the sig for the receive-side MeetingInviteWorker.
 import '@hypercomb/shared/core/invite-capture'

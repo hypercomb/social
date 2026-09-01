@@ -125,9 +125,14 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
    *  restores the pins the participant actually put up. */
   readonly windowSession: WindowSession = {
     park: () => {
-      if (this.#sessionParked.length) return
-      this.#sessionParked = this.panels().filter(p => !p.ephemeral)
-      if (!this.#sessionParked.length) return
+      // ADDED TO, never replaced. A park used to refuse outright while
+      // anything was already parked, which was right for the installer's one
+      // park/unpark cycle and wrong for Escape: pin a card, press Escape, pin
+      // another, press Escape — the second press found the first park still
+      // held and did nothing at all, so the new pin stayed on screen.
+      const going = this.panels().filter(p => !p.ephemeral)
+      if (!going.length) return
+      this.#sessionParked = [...this.#sessionParked, ...going]
       this.panels.set([])          // drops the transient peek with them
       this.#announce()
     },

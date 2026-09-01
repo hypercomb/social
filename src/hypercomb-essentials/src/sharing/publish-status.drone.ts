@@ -36,11 +36,13 @@ import { Drone, EffectBus, get, I18N_IOC_KEY, type I18nProvider } from '@hyperco
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 import { fetchHiveIndex } from './hive-pointer.js'
 import { publishVerdict, type PublishIndexState, type PublishRowState } from './publish-verdict.js'
+// READS the community, and seeds an empty pool once. The two ACTS (add,
+// remove) left with the panel — HostsDrone owns them now, so there is one
+// writer of `community:hosts` and this drone is not it.
 import {
   addCommunityHost,
   hostsOfBranch,
   listCommunityHosts,
-  removeCommunityHost,
   setBranchHosts,
 } from './community-hosts.js'
 import { lineageKey } from '../history/lineage-key.js'
@@ -314,28 +316,6 @@ export class PublishStatusDrone extends Drone {
       void setBranchHosts(segments, zones).then(() => { if (this.#open) void this.#refresh() })
       this.emitEffect('activity:log', { message: `${key} publishes at ${now.join(', ')}` })
       if (this.#open) void this.#refresh()
-    })
-
-    // THE COMMUNITY — adding a host is its own act, never a side effect of
-    // publishing somewhere. A host you carry is an artifact in the
-    // `community:hosts` pool; removing it deletes that artifact and leaves
-    // every branch that names it exactly as it was.
-    this.onEffect<{ zone?: string }>('publish:community-add', (p) => {
-      void addCommunityHost(p?.zone).then(zone => {
-        if (!zone) {
-          this.emitEffect('toast:show', { message: `not a domain: ${String(p?.zone ?? '')}` })
-          return
-        }
-        this.emitEffect('activity:log', { message: `${zone} joined your community` })
-        if (this.#open) void this.#refresh()
-      })
-    })
-
-    this.onEffect<{ zone?: string }>('publish:community-remove', (p) => {
-      void removeCommunityHost(p?.zone).then(gone => {
-        if (gone) this.emitEffect('activity:log', { message: `${String(p?.zone ?? '')} left your community` })
-        if (this.#open) void this.#refresh()
-      })
     })
 
     // ONE row open at a time — the panel shows a single properties pane, so

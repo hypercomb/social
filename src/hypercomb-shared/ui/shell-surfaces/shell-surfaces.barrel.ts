@@ -34,6 +34,10 @@ import '../tutorials-window/tutorials-window.component'
 // What is behind the hive and what fills a blank tile, in one window — and the
 // only surface from which a picture of your own can be either.
 import '../backgrounds-window/backgrounds-window.component'
+// Makes the pictures the window above puts behind things. ComfyUI runs on the
+// participant's own machine; this panel is the prompt, the workflow and where
+// the picture lands — the data lives in essentials and crosses on comfy:render.
+import '../comfy-panel/comfy-panel.component'
 import '../sequence-viewer/sequence-viewer.component'
 import '../tags-viewer/tags-viewer.component'
 import '../workflow-designer/workflow-designer.component'
@@ -41,6 +45,10 @@ import '../layout-designer/layout-designer.component'
 import '../flex-editor/flex-editor.component'
 import '../pheromone-tiles/pheromone-tiles.component'
 import '../observe-viewer/observe-viewer.component'
+// The hosts you carry — lifted out of the publish panel, where it had been a
+// tab. It is the data set that panel's picker draws from, so it has to be
+// readable on its own terms and not as a by-product of a publish sweep.
+import '../hosts-panel/hosts-panel.component'
 import '../publish-panel/publish-panel.component'
 import '../clipboard-panel/clipboard-panel.component'
 import '../contact-card/contact-form.component'
@@ -51,6 +59,9 @@ import '../website-nav/website-nav.component'
 import '../tile-editor/tile-editor.component'
 import '../camera-capture/camera-capture.component'
 import '../portal/portal-overlay.component'
+// Draw on the screen, photograph it, and hand the picture to the agents —
+// opened from the annotations window (markup-overlay.component.ts).
+import '../markup-overlay/markup-overlay.component'
 import '../confirm-dialog/confirm-dialog.component'
 import '../icon-picker/icon-picker.component'
 import '../mesh-modal/mesh-modal.component'
