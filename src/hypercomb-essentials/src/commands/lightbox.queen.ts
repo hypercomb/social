@@ -116,7 +116,6 @@ export async function galleryImageSigsAt(segments: readonly string[]): Promise<s
 export class LightboxQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'lightbox'
-  override readonly aliases = ['gallery', 'images']
   override description = 'Lightbox view — show the pictures this tile holds, one screen at a time'
   override descriptionKey = 'slash.lightbox'
   override options = ['on', 'off', 'add', 'clear']

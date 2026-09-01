@@ -38,7 +38,6 @@ type StoreDocApi = {
 export class I18nOverrideQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'i18n-override'
-  override readonly aliases = []
   override description = 'Override any UI translation (savvy users)'
   override descriptionKey = 'slash.i18n-override'
   override options = ['<locale> <key> <value>', '<locale> <key>', 'reset', 'reset <locale>']

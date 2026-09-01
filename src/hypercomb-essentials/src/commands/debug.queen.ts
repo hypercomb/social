@@ -12,8 +12,8 @@ import { QueenBee, EffectBus } from '@hypercomb/core'
 export class DebugQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'debug'
-  override readonly aliases = []
-
+  // Dev tool (Pixi inspector) — never offered in autocomplete; typed in full.
+  override slashHidden = true
   override description = 'Toggle the Pixi display-tree inspector'
   override descriptionKey = 'slash.debug'
   override examples = [{ input: '/debug', result: 'Pixi inspector toggles on/off; hover to inspect' }]

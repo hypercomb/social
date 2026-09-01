@@ -206,6 +206,10 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    * what else it answers to.
    */
   readonly aliasMap = input<ReadonlyMap<string, readonly string[]>>(new Map())
+  /** Suggestion names on the workshop shelf — rendered dimmed, at the bottom
+   *  (the census already sinks them), wearing the stage chip. */
+  readonly prototypes = input<ReadonlySet<string>>(new Set())
+  readonly prototypeLabel = input('prototype')
 
   /**
    * Detail for the CURRENTLY-ACTIVE suggestion, rendered in the right-hand
@@ -741,6 +745,10 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
 
   colorFor = (suggestion: string): string => {
     return this.colorMap().get(suggestion) ?? ''
+  }
+
+  isPrototype = (suggestion: string): boolean => {
+    return this.prototypes().has(suggestion)
   }
 
   // ── event handlers ──────────────────────────────────────

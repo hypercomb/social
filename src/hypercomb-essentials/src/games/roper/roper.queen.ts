@@ -15,7 +15,6 @@ const get = (key: string) => (window as any).ioc?.get?.(key)
 export class RoperQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'roper'
-  override readonly aliases = ['worms', 'rope']
   override description = 'Roper — turn-based Worms-style artillery with a ninja rope'
   override descriptionKey = 'slash.roper'
   override options = ['on', 'off']

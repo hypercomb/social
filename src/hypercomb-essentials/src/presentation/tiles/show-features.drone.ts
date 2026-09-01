@@ -79,7 +79,7 @@ import {
   isBehaviorDormant, isKindGloballyOff, readGlobalOffKinds,
   readGlobalOnKinds, seedGlobalOnKinds, seedCohortOn,
   bindingAt, bindingsFor, isWithdrawnByBinding, allBindings,
-  behaviorPath, bindBehaviorTo, unbindBehavior, type BehaviorBinding,
+  type BehaviorBinding,
 } from '../../sharing/behavior-enablement.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
 import { gameCensus, gameKinds, GAME_COHORT } from '../../games/game-enablement.js'
@@ -420,7 +420,7 @@ export class ShowFeaturesDrone extends Drone {
   public override description =
     'Gathers the bee-feature metadata (no code) of a clicked tile — both render features and cascading capabilities — and emits features:open so the shell panel lists them, tagging each with its origin (direct on the tile, or cascaded from an ancestor). Read-only — staging the features is benign and handled panel-side.'
 
-  protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action', 'features:enable', 'features:remove', 'features:bind', 'features:default', 'feature:apply', 'features:roster-open']
+  protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action', 'features:enable', 'features:remove', 'features:default', 'feature:apply', 'features:roster-open']
   protected override emits: string[] = ['features:open', 'selection:has-features', 'activity:log', 'features:outcome', 'features:roster']
 
   constructor() {
@@ -492,19 +492,6 @@ export class ShowFeaturesDrone extends Drone {
       const cell = String(p?.cell ?? '').trim()
       if (!kind || (segments.length === 0 && !cell)) return
       void this.#removeAt(segments, kind, cell)
-    })
-
-    // The panel's BELONGS-HERE toggle on an applied row. One tap is the whole
-    // gesture: you are standing on the tile, the row is in front of you, and
-    // the tap says "this behaviour is this tile's". The panel cannot write the
-    // record itself — binding needs the LOCATION SIGNATURE, and only this side
-    // has the signer — so the shell states the intent and this drone resolves
-    // it, exactly as `features:enable` / `features:remove` already do.
-    this.onEffect<{ cell?: string; segments?: string[]; kind?: string; bound?: boolean }>('features:bind', (p) => {
-      const segments = Array.isArray(p?.segments) ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
-      const kind = String(p?.kind ?? '')
-      if (!kind || segments.length === 0) return
-      void this.#bindAt(segments, kind, p?.bound !== false)
     })
 
     // The DEFAULT toggle — clicking a view row's ICON in the panel, or
@@ -871,40 +858,6 @@ export class ShowFeaturesDrone extends Drone {
     } catch (err) {
       console.warn('[show-features] called attach failed', { view, segments, err })
       this.emitEffect('features:outcome', { cell: label, kind: bee?.decorationKind ?? '', ok: false, message: `couldn't apply "${view}" to "${label}"` })
-    }
-  }
-
-  /** BIND (or free) `kind` at `segments` — the panel row's belongs-here tap.
-   *
-   *  The tile's LOCATION signature is the record's identity, and this side owns
-   *  the signer, so the resolution happens here rather than in the shell. The
-   *  free direction clears the WHOLE binding, not just this location: the tap
-   *  reads as "stop belonging to one tile", and leaving a behaviour bound to
-   *  some other tile the participant is not standing on would be an invisible
-   *  outcome for a visible gesture. */
-  async #bindAt(segments: readonly string[], kind: string, bound: boolean): Promise<void> {
-    const label = segments[segments.length - 1] ?? ''
-    try {
-      if (!bound) {
-        unbindBehavior(kind)
-        this.emitEffect('activity:log', { message: `"${label}" no longer owns this beehavior`, icon: 'link_off' })
-        this.emitEffect('features:outcome', { cell: label, kind, ok: true, message: '' })
-        await this.#open(label, segments)
-        return
-      }
-      const history = this.#ioc()?.get<HistoryLike>(HISTORY_KEY)
-      if (!history?.sign) {
-        this.emitEffect('features:outcome', { cell: label, kind, ok: false, message: 'history not ready — try again in a moment' })
-        return
-      }
-      const sig = await history.sign({ explorerSegments: () => [...segments] })
-      bindBehaviorTo(kind, { sig, path: behaviorPath(segments), name: label })
-      this.emitEffect('activity:log', { message: `this beehavior belongs to "${label}"`, icon: 'link' })
-      this.emitEffect('features:outcome', { cell: label, kind, ok: true, message: '' })
-      await this.#open(label, segments)
-    } catch (err) {
-      console.warn('[show-features] bind failed', { kind, segments, bound, err })
-      this.emitEffect('features:outcome', { cell: label, kind, ok: false, message: `couldn't ${bound ? 'bind' : 'free'} "${kind}"` })
     }
   }
 

@@ -29,7 +29,6 @@ const get = <T,>(key: string): T | undefined =>
 export class BriefQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'brief'
-  override readonly aliases = ['document', 'living-brief']
   override description = 'Living Brief — read this category and its children as a professional document'
   override options = [
     'on', 'off', 'here', 'here layer', 'here hierarchy',

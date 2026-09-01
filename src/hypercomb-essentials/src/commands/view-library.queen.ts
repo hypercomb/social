@@ -100,7 +100,9 @@ abstract class LibraryViewQueen extends QueenBee {
 
 export class AtlasQueenBee extends LibraryViewQueen {
   readonly command = 'atlas'
-  override readonly aliases = ['evidence', 'evidence-atlas']
+  // PROTOTYPE STAGE — the least-settled of the three document views; in the
+  // global, concealed until /prototypes opens the workshop shelf.
+  override slashPrototype = true
   readonly view = EVIDENCE_ATLAS_VIEW
   readonly kind = EVIDENCE_ATLAS_KIND
   readonly label = 'Evidence Atlas'
@@ -110,7 +112,8 @@ export class AtlasQueenBee extends LibraryViewQueen {
 
 export class StudioQueenBee extends LibraryViewQueen {
   readonly command = 'studio'
-  override readonly aliases = ['knowledge-studio']
+  // PROTOTYPE STAGE — see /atlas above; same shelf, same reason.
+  override slashPrototype = true
   readonly view = KNOWLEDGE_STUDIO_VIEW
   readonly kind = KNOWLEDGE_STUDIO_KIND
   readonly label = 'Knowledge Studio'

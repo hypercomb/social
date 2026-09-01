@@ -6,6 +6,7 @@
 
 import { EffectBus, POINTER_GESTURE_END } from '@hypercomb/core'
 import type { InputGate } from '../input-gate.service.js'
+import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
 
 type Point = { x: number; y: number }
 type PointerEntry = { start: Point; current: Point; id: number }
@@ -475,8 +476,13 @@ export class TouchGestureCoordinator {
     let sumDx = 0, sumDy = 0
     for (const s of recent) { sumDx += s.dx; sumDy += s.dy }
 
-    const vxPerMs = sumDx / totalTime
-    const vyPerMs = sumDy / totalTime
+    // Under a rail the finger only ever travels one way, so the coast must
+    // too: panBy discards the locked axis, and a sideways flick in portrait
+    // used to hold the input gate and `touch:dragging` for a whole decay
+    // while nothing on screen moved.
+    const laneAxis = getLaneScrollAxis()
+    const vxPerMs = laneAxis === 'y' ? 0 : sumDx / totalTime
+    const vyPerMs = laneAxis === 'x' ? 0 : sumDy / totalTime
     const speed = Math.hypot(vxPerMs, vyPerMs)
 
     if (speed < MOMENTUM_VELOCITY_THRESHOLD) return false

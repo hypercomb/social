@@ -26,7 +26,6 @@ import type { PruneService } from './prune.service.js'
 export class PruneQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'prune'
-  override readonly aliases = []
   override description = 'Open the layer of deleted tiles at this location'
   override examples = [
     { input: '/prune', result: 'Shows the tiles deleted here, ready to be destroyed for good' },

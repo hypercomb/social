@@ -42,8 +42,9 @@ type Store = {
 export class ViewCurrentQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'view-current'
-  override readonly aliases = ['view-layer', 'current']
-
+  // A console-only debug dump (deepResolve → console.log) — dev tooling,
+  // never offered in autocomplete. Still invokable typed in full.
+  override slashHidden = true
   override description = 'Show the current branch as a fully-expanded object'
   override options = ['<depth>']
   override examples = [

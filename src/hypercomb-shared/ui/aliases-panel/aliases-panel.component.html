@@ -1,0 +1,114 @@
+@if (visible()) {
+  <aside
+    class="aliases-panel"
+    hcDockInset="right"
+    hcDockedPanel="aliases-panel"
+    [hcSession]="session"
+    (hcDockedPanelClose)="close()"
+    dockSide="right"
+    [minWidth]="280"
+    [maxWidth]="520"
+    [defaultWidth]="340"
+    launcherControlId="aliases"
+    data-consumes-wheel
+    tabindex="-1"
+    role="dialog"
+    [attr.aria-label]="'aliases.title' | t"
+  >
+    <header class="aliases-header">
+      <span class="aliases-title">{{ 'aliases.title' | t }}</span>
+      <button class="aliases-close" type="button" (click)="close()" [attr.aria-label]="'aliases.close' | t">×</button>
+    </header>
+
+    <div class="aliases-body">
+
+      <input
+        #find
+        class="aliases-find"
+        type="text"
+        spellcheck="false"
+        [value]="filter()"
+        (input)="setFilter(find)"
+        [attr.placeholder]="'aliases.filter' | t"
+        [attr.aria-label]="'aliases.filter' | t"
+      />
+
+      <p class="aliases-note">{{ 'aliases.note' | t }}</p>
+
+      <!-- ONE ROW PER BEHAVIOUR — an accordion, one open at a time. Closed,
+           a row is the ledger at a glance: the canonical name and the names
+           given so far. Open, it is where the giving happens. -->
+      <div class="aliases-rows">
+        @for (row of shown(); track row.command) {
+          <section class="aliases-row" [class.open]="openRow() === row.command">
+            <button
+              class="aliases-row-head"
+              type="button"
+              (click)="toggleRow(row.command)"
+              [attr.aria-expanded]="openRow() === row.command"
+            >
+              <span class="aliases-command">{{ row.command }}</span>
+              <span class="aliases-held">
+                @for (name of row.given; track name) {
+                  <span class="aliases-held-name">{{ name }}</span>
+                }
+              </span>
+            </button>
+
+            @if (openRow() === row.command) {
+              @if (row.description) {
+                <p class="aliases-description">{{ row.description }}</p>
+              }
+
+              @if (row.given.length) {
+                <div class="aliases-chips">
+                  @for (name of row.given; track name) {
+                    <button
+                      class="aliases-chip given"
+                      type="button"
+                      (click)="remove(row, name)"
+                      [attr.aria-label]="('aliases.remove' | t) + ' ' + name"
+                    >{{ name }} ×</button>
+                  }
+                </div>
+              }
+
+              @if (row.candidates.length) {
+                <div class="aliases-section">{{ 'aliases.candidates' | t }}</div>
+                <div class="aliases-chips">
+                  @for (name of row.candidates; track name) {
+                    <button
+                      class="aliases-chip"
+                      type="button"
+                      (click)="add(row, name)"
+                      [attr.aria-label]="('aliases.add' | t) + ' ' + name"
+                    >+ {{ name }}</button>
+                  }
+                </div>
+              }
+
+              <input
+                #own
+                class="aliases-own"
+                type="text"
+                spellcheck="false"
+                [attr.placeholder]="'aliases.own' | t"
+                [attr.aria-label]="'aliases.own' | t"
+                (keydown.enter)="addTyped(row, own)"
+              />
+
+              @if (refusedFor() === row.command) {
+                @for (r of refused(); track r.name) {
+                  <p class="aliases-warn">"{{ r.name }}" — {{ refusalKey(r.reason) | t }}</p>
+                }
+              }
+            }
+          </section>
+        } @empty {
+          <p class="aliases-note">{{ 'aliases.empty' | t }}</p>
+        }
+      </div>
+
+    </div>
+  </aside>
+}

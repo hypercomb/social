@@ -1,6 +1,6 @@
 // commands/reference.queen.ts
 //
-// `/reference` (alias `/ref`) — drop a REFERENCE tile at the current location:
+// `/reference` — drop a REFERENCE tile at the current location:
 // a live pointer to another lineage. Clicking the tile portals to the target
 // (see tile-overlay #navigateInto). This is the
 // atom that lets a set collect references to your own tiles without
@@ -10,7 +10,6 @@
 // Syntax:
 //   /reference <path>            — tile named after the target leaf
 //   /reference <name> = <path>   — explicit tile name
-//   /ref <path>                  — alias
 //
 // <path> is a full hive path (slash-separated names from the root), e.g.
 //   /reference interests/music/jazz
@@ -66,15 +65,14 @@ type CursorShape = { jumpToLatest?(): void }
 export class ReferenceQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'reference'
-  override readonly aliases = ['ref']
   override description = 'Drop a reference tile here — a live pointer to another location'
   override descriptionKey = 'slash.reference'
   override options = ['<path>', '<name> = <path>', '<name> = <path> + <marks>']
   override examples = [
     { input: '/reference interests/music/jazz', result: 'Adds a "jazz" tile that portals to /interests/music/jazz' },
-    { input: '/ref favourites = interests/music', result: 'Adds a "favourites" reference to /interests/music' },
-    { input: '/ref people = friends/people + family', result: 'A "people" portal that shows only what is marked family' },
-    { input: '/ref people = friends/people + @field-notes', result: 'A "people" portal demanding the field-notes bouquet' },
+    { input: '/reference favourites = interests/music', result: 'Adds a "favourites" reference to /interests/music' },
+    { input: '/reference people = friends/people + family', result: 'A "people" portal that shows only what is marked family' },
+    { input: '/reference people = friends/people + @field-notes', result: 'A "people" portal demanding the field-notes bouquet' },
   ]
 
   /**

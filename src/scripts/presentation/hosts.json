@@ -1,0 +1,30 @@
+{
+  "zone": "hypercomb.com",
+  "doors": [
+    {
+      "host": "dylan.hypercomb.com",
+      "label": "dylan",
+      "title": "dylan"
+    },
+    {
+      "host": "pluginthematrix.hypercomb.com",
+      "label": "pluginthematrix",
+      "title": "Plugin the Matrix"
+    },
+    {
+      "host": "replication.hypercomb.com",
+      "label": "replication",
+      "title": "Replication by Signature"
+    },
+    {
+      "host": "revolucion.hypercomb.com",
+      "label": "revolucion",
+      "title": "Revolución"
+    },
+    {
+      "host": "susan.hypercomb.com",
+      "label": "susan",
+      "title": "susan"
+    }
+  ]
+}

@@ -38,3 +38,5 @@ hypercomb-client/app/host-shell/*
 # (hypercomb-web/public/content) has always been ignored for the same reason.
 hypercomb-client/app/frontend/
 .claude/skill-library/
+.scratch/
+test-results/

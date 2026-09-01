@@ -8,9 +8,10 @@
   <meta http-equiv="Content-Security-Policy">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
 
-  <link rel="preconnect" href="https://fonts.gstatic.com">
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <!-- No web fonts. Roboto fell through to the system stack in styles.scss and
+       Material Icons had zero usages, so both Google links were dropped rather
+       than self-hosted — an off-origin font hands that host the visitor's IP,
+       UA and Referer. See documentation/no-third-party-requests.md. -->
 </head>
 <body>
 

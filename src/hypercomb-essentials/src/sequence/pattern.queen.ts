@@ -19,8 +19,6 @@ type EditorLike = { openPatternEditor(name: string): Promise<void> }
 export class PatternQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'pattern'
-  override readonly aliases = []
-
   override description = 'Draw a tile shape a frame can be read through'
   override descriptionKey = 'slash.pattern'
   override options = ['<pattern name>']

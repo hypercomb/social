@@ -10,7 +10,6 @@ import {
 export class GenomeQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'genome'
-  override readonly aliases = ['weight']
   override description = 'Measure the active hive genome: current markers plus every reachable byte'
   override options = ['refresh']
   override examples = [

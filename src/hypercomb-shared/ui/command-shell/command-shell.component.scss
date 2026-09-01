@@ -496,6 +496,26 @@ $bp-phone-max: 599px;
   white-space: nowrap;
 }
 
+// THE WORKSHOP SHELF. Prototype rows only exist while /prototypes holds the
+// filter open; the census sinks them to the bottom as one group, and here
+// they read as unfinished: the whole row recedes, and the stage chip wears
+// a DASHED outline — the drawn-but-not-inked mark, next to the alias chip's
+// solid one. Ink from the same ladder as everything else on this surface.
+.command-results li.prototype {
+  opacity: 0.55;
+}
+.opt-proto {
+  flex: 0 0 auto;
+  padding: 0.05rem 0.3rem;
+  border: 1px dashed rgba(var(--hc-chrome-ink), 0.32);
+  border-radius: 3px;
+  color: rgba(var(--hc-chrome-ink), 0.5);
+  font-size: 0.78em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 // The highlight is a LIFT, not a colour. A tinted wash under mono text reads
 // as generic editor chrome and fought the warm, near-neutral panel; lifting
 // the row off the surface with the page's own ink, and marking it with a

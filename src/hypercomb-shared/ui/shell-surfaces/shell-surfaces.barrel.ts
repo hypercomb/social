@@ -38,6 +38,10 @@ import '../backgrounds-window/backgrounds-window.component'
 // participant's own machine; this panel is the prompt, the workflow and where
 // the picture lands — the data lives in essentials and crosses on comfy:render.
 import '../comfy-panel/comfy-panel.component'
+// The names the participant gave the behaviours — code declares none (the
+// doctrine ratchet), so this window is where an alias enters the language.
+// The ledger lives in essentials and crosses on aliases:render.
+import '../aliases-panel/aliases-panel.component'
 import '../sequence-viewer/sequence-viewer.component'
 import '../tags-viewer/tags-viewer.component'
 import '../workflow-designer/workflow-designer.component'
@@ -81,5 +85,3 @@ import '../youtube-viewer/youtube-viewer.component'
 import '../activity-log/activity-log.component'
 import '../command-palette/command-palette.component'
 import '../format-painter/format-painter.component'
-import '../atomizer-bar/atomizer-bar.component'
-import '../atomizer-bar/atomizer-sidebar.component'

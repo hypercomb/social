@@ -38,7 +38,6 @@ const safeName = (raw: string): string =>
 export class CreateQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'create'
-  override readonly aliases = ['make']
   override description = 'Make a tile here — the only way to create one in beehaviour mode'
   override descriptionKey = 'slash.create'
   override options = ['<name>', '<parent>/<child>']

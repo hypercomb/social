@@ -22,7 +22,6 @@ type SequenceServiceLike = { list(): string[] }
 export class SequenceQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'sequence'
-  override readonly aliases = ['seq']
   override description = 'Open Tile arrangements or edit a named drop-target sequence'
   override descriptionKey = 'slash.sequence'
   override options = ['<set name>']

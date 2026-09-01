@@ -34,7 +34,6 @@ const APPLY_UPDATE_EVENT = 'hypercomb:apply-update'
 export class UpgradeQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'upgrade'
-  override readonly aliases = []
   override description = 'Install the newest build this shell is serving, then reload'
   override descriptionKey = 'slash.upgrade'
   override examples = [

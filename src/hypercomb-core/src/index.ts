@@ -38,7 +38,6 @@ export * from './usage.types.js'
 export * from './theme.types.js'
 export * from './icon-ref.js'
 export * from './tile-content-renderer.js'
-export * from './atomizer.types.js'
 export * from './confirm.js'
 export * from './substrate.types.js'
 export * from './pointer-gesture-consumer.js'
@@ -50,3 +49,17 @@ export * from './core/llm-keys.js'
 export * from './core/secret-words/index.js'
 export * from './core/revision-name.js'
 export * from './core/behaviour-call.js'
+
+// The PANEL KIT — the docked tool-window model, moved out of the Angular shell
+// (2026-09-01) so a behaviour can build its own chrome. Framework-free by
+// construction: a module may only import from core, and the shim cannot load
+// Angular at all. `docked-panel.js` is the primitive itself; the rest is the
+// model it drives (lanes, groups, settings rows, sessions, breakpoints).
+export * from './core/panels/breakpoints.js'
+export * from './core/panels/window-session.js'
+export * from './core/panels/window-rule.js'
+export * from './core/panels/dock-lanes.js'
+export * from './core/panels/panel-groups.js'
+export * from './core/panels/panel-settings.js'
+export * from './core/panels/tool-windows.js'
+export * from './core/panels/docked-panel.js'

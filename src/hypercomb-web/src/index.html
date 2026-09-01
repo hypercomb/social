@@ -69,7 +69,11 @@
          rides above the keyboard rather than hiding underneath. iOS ignores it
          harmlessly. -->
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
-    <link rel="icon" type="image/x-icon" href="favicon.ico" />
+    <!-- Built by `node scripts/build-favicons.cjs` from one master mark; the
+         .ico carries 16/32/48 for the tab, the .svg is what modern browsers
+         actually pick and scales to any density. -->
+    <link rel="icon" href="favicon.ico" sizes="48x48" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
 
     <!-- PWA: installable to a phone home screen, launches standalone. The
          service worker (hypercomb.worker.js) is an OPFS module server, not an
@@ -80,25 +84,16 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Hypercomb" />
-    <!-- iOS ignores SVG here (needs a PNG apple-touch-icon for a crisp home
-         icon); harmless until raster icons are added. -->
-    <link rel="apple-touch-icon" href="icon.svg" />
+    <!-- iOS ignores SVG here and flattens transparency unpredictably, so this
+         is the opaque PNG rendering with the mark inset in the safe zone. -->
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
 
-    <!-- Google Fonts: Inter (UI) + Material Symbols Outlined (icons) -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
-    <link
-      href="https://fonts.googleapis.com/icon?family=Material+Icons"
-      rel="stylesheet"
-    />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block"
-      rel="stylesheet"
-    />
+    <!-- Inter, self-hosted. NOTHING here may point at a third-party origin —
+         an off-origin font/script/style hands that host the visitor's IP, UA
+         and Referer on every page load. See
+         documentation/no-third-party-requests.md. Regenerate the woff2 with
+         `node scripts/fetch-fonts.cjs hypercomb-web/public/fonts inter`. -->
+    <link rel="stylesheet" href="fonts/fonts.css" />
 
     <!-- Loading-page (genesis splash) styles — in <head> so they survive the
          re-parent out of <app-root> that keeps the splash up until tiles paint. -->

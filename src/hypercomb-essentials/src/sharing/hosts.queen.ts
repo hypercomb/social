@@ -14,7 +14,6 @@ import { EffectBus } from '@hypercomb/core'
 
 export class HostsQueenBee {
   readonly command = 'hosts'
-  readonly aliases = ['community', 'domains'] as const
   readonly description =
     'The hosts you carry — add one you have been given, drop one you no longer want, and see which of your branches name it. The list your branches choose their addresses from.'
   readonly descriptionKey = 'slash.hosts'

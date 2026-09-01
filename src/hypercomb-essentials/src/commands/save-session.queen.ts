@@ -25,7 +25,6 @@ const AUTO_SAVE_KEY = 'hc:auto-save-session-on-leave'
 export class SaveSessionQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'save-session'
-  override readonly aliases = ['session-save', 'save']
   override description = 'Collapse this session\'s history entries at the current location into one head'
   override options = ['auto on', 'auto off']
   override examples = [

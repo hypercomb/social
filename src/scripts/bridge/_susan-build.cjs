@@ -12,6 +12,7 @@
 
 const WebSocket = require('ws')
 const fs = require('fs')
+const { FRAUNCES_FACE, UI_STACK } = require('./_site-fonts.cjs')
 const BRIDGE = 'ws://localhost:2401'
 const ROOT = 'susan'
 const SPEC_PATH = 'scripts/bridge/_susan_spec.json'
@@ -197,7 +198,9 @@ const CHROME_CSS = `
   --shadow:0 18px 46px rgba(80,52,28,.13); --shadow-sm:0 5px 16px rgba(80,52,28,.08);
   --r-s:11px; --r-m:18px; --r-l:26px; --r-pill:999px;
   --serif:"Fraunces","Source Serif 4","Iowan Old Style",Georgia,serif;
-  --sans:Inter,"Segoe UI",ui-sans-serif,system-ui,sans-serif;
+  /* Inter dropped with the Google link — system-ui is a hair from it at body
+     sizes and costs nothing. Fraunces stays, inlined as a data: URI. */
+  --sans:${UI_STACK};
   --ease:cubic-bezier(.2,.7,.2,1);
 }
 [data-theme="dark"]{
@@ -312,9 +315,7 @@ function shell({ segments, eyebrow, title, titleIcon, lede, artImg, bodyHtml, ca
   return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} — Family Support</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap">
-<script>${PAINT}</script><style>${CHROME_CSS}</style></head>
+<script>${PAINT}</script><style>${FRAUNCES_FACE()}${CHROME_CSS}</style></head>
 <body><div class="s-bg" aria-hidden="true"></div>
 <main>
   <header class="s-bar"><nav class="s-crumb">${crumb(segments)}</nav>

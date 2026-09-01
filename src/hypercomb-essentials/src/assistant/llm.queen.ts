@@ -118,7 +118,6 @@ export class LlmQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'assistant'
   readonly command = 'opus'
-  override readonly aliases = []
   override description = 'Open the chat with a live Claude Code (via the bridge) — /opus, /sonnet, /haiku, /fable'
   override options = ['<question>']
   override examples = [

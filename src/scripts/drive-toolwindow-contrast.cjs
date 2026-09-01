@@ -43,7 +43,11 @@ function launcherFor(name) {
 const WINDOWS = [
   { id: 'portals',    effect: 'aggregate:view-open', payload: { id: 'collections' }, sel: '.ai-panel' },
   { id: 'notes',      effect: 'notes:panel',         payload: { visible: true },     sel: '.cv2-panel, .notes-strip' },
-  { id: 'behaviors',  effect: 'features:open',       payload: {},                    sel: '.features-panel' },
+  // `features:open` is the DRONE'S ANSWER and needs a cell — an empty payload
+  // is refused by the panel, which left this row "not present" in every theme
+  // (a check that could never fail). `features:context-open` is the real door:
+  // the panel asks the drone about the loaded layer and raises itself.
+  { id: 'behaviors',  effect: 'features:context-open', payload: {},                  sel: '.features-panel' },
   { id: 'files',      effect: 'files:open',          payload: {},                    sel: '.files-panel' },
   { id: 'tags',       effect: 'tags:view-open',      payload: {},                    sel: '.tags-panel' },
   { id: 'history',    effect: 'history:view-open',   payload: {},                    sel: '.history-viewer' },

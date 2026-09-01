@@ -212,9 +212,17 @@ export class HiveVisitDrone extends Drone {
     // previewing, not visiting: replacing THEIR roster with a stranger's
     // arrangement would be a hive-wide change nobody asked for. An older
     // publication carries no mark (`null`) and is left alone.
+    // AN EMPTY MARK IS NOT AN INSTRUCTION TO GO DARK. `[]` is truthy, so the
+    // old `if (lights)` adopted it — and an empty on-list means every kind is
+    // OFF, where an ABSENT one means all-on (isKindGloballyOff). A publication
+    // whose census found nothing to name therefore blanked the visitor's whole
+    // roster and rendered as bare hexagons wearing default art: strictly worse
+    // than never having adopted at all. Adopt only when there is something to
+    // light; "the publisher lit nothing" and "this predates the mark" both
+    // leave the visitor's defaults alone, which is the same screen either way.
     if (isReadOnlySession()) {
       const lights = await publishLightsWithinAt(mount).catch(() => null)
-      if (lights) adoptPublishedLights(lights)
+      if (lights?.length) adoptPublishedLights(lights)
     }
     nav.go(mount)
     this.emitEffect('preview:mode', {

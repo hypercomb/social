@@ -241,7 +241,7 @@ export async function distributeVisual(opts: {
  * Give each of these tiles a visual of its own — and declare nothing.
  *
  * The half of rule 10 that applies when NOTHING WAS DIVIDED. `/expand` widens
- * a layer, an atomizer turns a dropped structure into tiles, an importer lands
+ * a layer, an importer lands
  * a set: in none of those did a whole's appearance get cut up, so there is no
  * frame to declare and no division to seat anybody into. What is still owed is
  * the rule's third clause — *where there is nothing to divide, each part is

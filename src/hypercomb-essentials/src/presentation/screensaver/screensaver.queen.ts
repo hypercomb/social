@@ -29,7 +29,6 @@ const get = (key: string) => (window as any).ioc?.get?.(key)
 export class ScreensaverQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'screensaver'
-  override readonly aliases = ['bounce', 'bubbles']
   override description = 'Idle screensaver: toggle on/off, pick the look (hexagon, circle, thought…) and the motion (bounce, shooting-stars…)'
   override descriptionKey = 'slash.screensaver'
   override options = ['on', 'off', 'now', 'hexagon', 'circle', 'thought']

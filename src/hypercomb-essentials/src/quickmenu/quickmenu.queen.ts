@@ -21,7 +21,6 @@ const get = <T,>(key: string): T | undefined =>
 export class QuickMenuQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'menu'
-  override readonly aliases = ['ring']
   override description = 'Quick menu — seven hexagons at the pointer; flick a direction to choose'
   override descriptionKey = 'slash.menu'
   override options = ['<name>', 'list']

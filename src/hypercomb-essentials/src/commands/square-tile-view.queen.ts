@@ -52,7 +52,6 @@ const get = <T,>(key: string): T | undefined =>
 export class SquareTileViewQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'square-tile-view'
-  override readonly aliases = ['welcome', 'threshold']
   override description = 'Square tile view — the layer\'s children as square plates on a bright page'
   override options = ['here [tagline]', 'remove', 'on', 'off']
   override examples = [

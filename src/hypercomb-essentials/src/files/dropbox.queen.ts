@@ -27,7 +27,6 @@ type DropboxServiceLike = { sigsAt(segments: readonly string[]): string[] }
 export class DropboxQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'dropbox'
-  override readonly aliases = ['dropzone']
   override description = 'Make this location a typed file dropbox (cascades to its subtree)'
   override descriptionKey = 'slash.dropbox'
   override options = ['documents', 'images', 'any', '<ext,ext>', 'off']

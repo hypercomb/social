@@ -16,7 +16,6 @@ export class RecordingQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'recording'
   readonly command = 'record'
-  override readonly aliases = []
   override description = 'Start AI-powered meeting recording with live hierarchy compilation'
   override descriptionKey = 'slash.record'
   override options = ['start', 'stop', 'interval <seconds>', 'model <haiku|sonnet|opus>']

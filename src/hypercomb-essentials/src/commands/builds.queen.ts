@@ -44,7 +44,6 @@ export class BuildsQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'history'
   readonly command = 'builds'
-  override readonly aliases = ['build']
   override description =
     'Build revisions for this subtree — record the state after a build pass, list them, restore one'
   override descriptionKey = 'slash.builds'

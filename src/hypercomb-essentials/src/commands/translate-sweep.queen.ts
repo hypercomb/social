@@ -20,7 +20,6 @@ import type { TranslationService } from './translation.service.js'
 export class TranslateSweepQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'translate-sweep'
-  override readonly aliases = ['translate']
   override description = 'Batch-translate all tiles (dry-run by default; add --go to execute)'
   override descriptionKey = 'slash.translate-sweep'
   override options = ['<locale>', 'all', '--go']

@@ -1,58 +1,12 @@
 // presentation/tiles/wave-layout.spec.ts
 //
 // Coverage of the dive's decisions:
-//   - the props key the tile image ACTUALLY lives at (the labelled-hex bug)
 //   - how far the wheel may take you, and that it never lands on empty ground
+//   - what a click on a dived tile does, and where its view comes back out
+//   - the rim colour parse, which must match the renderer's own
 
 import { describe, it, expect } from 'vitest'
-import { waveImageSigFromProps, waveHideTextFromProps, depthAvailableFrom, clampDepth } from './wave-layout.js'
-
-const SIG_A = 'a'.repeat(64)
-const SIG_B = 'b'.repeat(64)
-const SIG_C = 'c'.repeat(64)
-
-describe('waveImageSigFromProps', () => {
-  it('reads small.image — the key the renderer actually writes', () => {
-    expect(waveImageSigFromProps({ small: { image: SIG_A } })).toBe(SIG_A)
-  })
-
-  it('falls back to flat.small.image for flat-top orientation', () => {
-    expect(waveImageSigFromProps({ flat: { small: { image: SIG_B } } })).toBe(SIG_B)
-  })
-
-  it('prefers small.image over the flat and legacy spellings', () => {
-    const props = { small: { image: SIG_A }, flat: { small: { image: SIG_B } }, imageSig: SIG_C }
-    expect(waveImageSigFromProps(props)).toBe(SIG_A)
-  })
-
-  it('accepts a top-level imageSig only as a last resort', () => {
-    expect(waveImageSigFromProps({ imageSig: SIG_C })).toBe(SIG_C)
-  })
-
-  it('returns undefined for props with no image, and for junk', () => {
-    for (const junk of [null, undefined, {}, { small: {} }, 'nope', 42, { small: { image: 'not-a-sig' } }]) {
-      expect(waveImageSigFromProps(junk)).toBeUndefined()
-    }
-  })
-})
-
-describe('waveHideTextFromProps', () => {
-  it('suppresses the name only when the tile explicitly asks', () => {
-    expect(waveHideTextFromProps({ hideText: true })).toBe(true)
-  })
-
-  it('keeps the name for an ordinary tile — including one WITH an image', () => {
-    // The regression: a picture alone is not a reason to drop the name.
-    expect(waveHideTextFromProps({ small: { image: SIG_A } })).toBe(false)
-    expect(waveHideTextFromProps({})).toBe(false)
-  })
-
-  it('treats anything non-true as "show the name"', () => {
-    for (const junk of [null, undefined, 'true', 1, { hideText: 'yes' }, { hideText: 0 }]) {
-      expect(waveHideTextFromProps(junk)).toBe(false)
-    }
-  })
-})
+import { depthAvailableFrom, clampDepth, diveClickPlan, borderColorFromProps } from './wave-layout.js'
 
 describe('depthAvailableFrom — the wheel must be able to leave generation 1', () => {
   it('reports another level when the walk held children it never spent', () => {
@@ -78,48 +32,86 @@ describe('depthAvailableFrom — the wheel must be able to leave generation 1', 
     expect(depthAvailableFrom(0, false)).toBe(1)
     expect(depthAvailableFrom(-3, false)).toBe(1)
   })
+})
 
-  it('composes with clampDepth so a wheel-down actually advances', () => {
-    // depth 1 + leftover frontier → asking for 2 yields 2, not 1.
-    const available = depthAvailableFrom(1, true)
-    expect(clampDepth(2, available, 5)).toBe(2)
-    // …and with nothing left over it holds at 1 instead of blanking.
-    expect(clampDepth(2, depthAvailableFrom(1, false), 5)).toBe(1)
+describe('clampDepth — the wheel settles on real ground', () => {
+  it('steps down and back up within what exists', () => {
+    expect(clampDepth(2, 3, 5)).toBe(2)
+    expect(clampDepth(3, 3, 5)).toBe(3)
+    expect(clampDepth(1, 3, 5)).toBe(1)
+  })
+
+  it('never asks for ground the subject does not have', () => {
+    expect(clampDepth(4, 2, 5)).toBe(2)
+  })
+
+  it('never rises above the first generation, and honours the hard ceiling', () => {
+    expect(clampDepth(0, 3, 5)).toBe(1)
+    expect(clampDepth(-2, 3, 5)).toBe(1)
+    expect(clampDepth(9, 9, 5)).toBe(5)
+  })
+
+  it('settles on generation 1 when nothing is available', () => {
+    expect(clampDepth(3, 0, 5)).toBe(1)
   })
 })
 
-describe('clampDepth', () => {
-  it('honours the wheel while there is ground under it', () => {
-    expect(clampDepth(1, 4, 5)).toBe(1)
-    expect(clampDepth(3, 4, 5)).toBe(3)
-    expect(clampDepth(4, 4, 5)).toBe(4)
+describe('diveClickPlan — a dived tile executes as if it stood in front of you', () => {
+  const from = ['work']
+  const tile = ['work', 'ledger', 'q3']
+
+  it('enters an ordinary tile and records no spawn — plain hexagons have nothing to come back out of', () => {
+    const plan = diveClickPlan({ segments: tile, referenceTarget: null, arrivalView: '', from, mode: '' })
+    expect(plan).toEqual({ kind: 'enter', travel: tile, spawn: null })
   })
 
-  it('settles on the deepest real generation rather than showing an empty dive', () => {
-    expect(clampDepth(5, 2, 5)).toBe(2)
-    expect(clampDepth(99, 1, 5)).toBe(1)
+  it('treats an explicit "hexagons" arrival face as no view', () => {
+    const plan = diveClickPlan({ segments: tile, referenceTarget: null, arrivalView: 'hexagons', from, mode: '' })
+    expect(plan.spawn).toBeNull()
   })
 
-  it('never rises above the first generation', () => {
-    expect(clampDepth(0, 3, 5)).toBe(1)
-    expect(clampDepth(-7, 3, 5)).toBe(1)
+  it('a destination that opens as a view is told it was spawned from the dive page, in the surface that was up', () => {
+    // THE POINT OF THE FEATURE: activate something deep down and, when it
+    // closes, be back on the page you never left — not on the tile's page.
+    const plan = diveClickPlan({ segments: tile, referenceTarget: null, arrivalView: 'tree', from, mode: 'square-tile-view' })
+    expect(plan.kind).toBe('enter')
+    expect(plan.travel).toEqual(tile)
+    expect(plan.spawn).toEqual({ view: 'tree', mode: 'square-tile-view', segments: from })
   })
 
-  it('respects the feature ceiling even when the tree goes deeper', () => {
-    expect(clampDepth(9, 40, 5)).toBe(5)
+  it('a website root spawns too — the same rule, the same page to come back to', () => {
+    const plan = diveClickPlan({ segments: tile, referenceTarget: null, arrivalView: 'website', from: [], mode: '' })
+    expect(plan.spawn).toEqual({ view: 'website', mode: '', segments: [] })
   })
 
-  it('always returns at least 1, even for a subject with no ground recorded', () => {
-    for (const requested of [-1, 0, 1, 9]) {
-      expect(clampDepth(requested, 0, 5)).toBe(1)
+  it('a portal travels THROUGH to its target and spawns nothing — the target is a real place the participant chose', () => {
+    const plan = diveClickPlan({ segments: tile, referenceTarget: ['people', 'ana'], arrivalView: 'tree', from, mode: '' })
+    expect(plan).toEqual({ kind: 'reference', travel: ['people', 'ana'], spawn: null })
+  })
+
+  it('a portal to the hive root is a real destination, never a missing one', () => {
+    const plan = diveClickPlan({ segments: tile, referenceTarget: [], arrivalView: '', from, mode: '' })
+    expect(plan.kind).toBe('reference')
+    expect(plan.travel).toEqual([])
+  })
+
+  it('copies its inputs rather than aliasing them', () => {
+    const target = ['a', 'b']
+    const plan = diveClickPlan({ segments: tile, referenceTarget: target, arrivalView: '', from, mode: '' })
+    target.push('c')
+    expect(plan.travel).toEqual(['a', 'b'])
+  })
+})
+
+describe('borderColorFromProps — the renderer\'s own rim parse', () => {
+  it('reads a six-digit hex, with or without the hash', () => {
+    expect(borderColorFromProps({ border: { color: '#ff0000' } })).toEqual([1, 0, 0])
+    expect(borderColorFromProps({ border: { color: '00ff00' } })).toEqual([0, 1, 0])
+  })
+
+  it('leaves the default rim alone for anything else', () => {
+    for (const junk of [null, undefined, {}, { border: {} }, { border: { color: 'red' } }, { border: { color: '#fff' } }, { border: { color: 12 } }]) {
+      expect(borderColorFromProps(junk)).toBeUndefined()
     }
-  })
-
-  it('wheeling down then up returns to the same generation', () => {
-    const available = 3, hard = 5
-    let d = clampDepth(2, available, hard)
-    d = clampDepth(d + 1, available, hard)
-    d = clampDepth(d - 1, available, hard)
-    expect(d).toBe(2)
   })
 })

@@ -22,7 +22,6 @@ type ContactServiceLike = { sigsAt(segments: readonly string[]): string[] }
 export class ContactQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'contact'
-  override readonly aliases = []
   override description =
     'Enable contact cards for this location\'s children (cascades to the subtree). Then click the contact icon on a tile to add a shareable contact.'
   override descriptionKey = 'slash.contact'

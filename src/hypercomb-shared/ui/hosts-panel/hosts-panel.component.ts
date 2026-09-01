@@ -52,7 +52,6 @@ interface HostsRenderPayload {
   open: boolean
   zones: string[]
   loaded: boolean
-  hosting: boolean
 }
 
 /** The only part of `publish:render` this panel reads. */
@@ -77,11 +76,6 @@ export class HostsPanelComponent implements OnDestroy {
   readonly zones = signal<string[]>([])
   readonly loaded = signal(false)
 
-  /** THE SWITCH — whether this participant publishes bytes to a public host
-   *  at all. One global state; there is no `/host` behaviour and no
-   *  per-branch version of this question. */
-  readonly hosting = signal(false)
-
   /** zone → how many branches name it. Empty until a publish sweep has been
    *  seen; a missing entry renders as nothing at all. */
   readonly naming = signal<Record<string, number>>({})
@@ -93,7 +87,6 @@ export class HostsPanelComponent implements OnDestroy {
       this.visible.set(!!p?.open)
       this.zones.set(Array.isArray(p?.zones) ? p.zones : [])
       this.loaded.set(!!p?.loaded)
-      this.hosting.set(!!p?.hosting)
     }))
 
     // Decoration only — see the note at the top. EffectBus replays the last
@@ -132,14 +125,6 @@ export class HostsPanelComponent implements OnDestroy {
    *  longer carry. */
   remove(zone: string): void {
     EffectBus.emit('hosts:remove', { zone })
-  }
-
-  /** Flip public hosting. Turning it ON prompts for consent in the drone —
-   *  the panel only states the intent. The signal is NOT set optimistically:
-   *  it moves when the drone says it moved, so a declined consent leaves the
-   *  switch where it was rather than showing a state that never happened. */
-  toggleHosting(): void {
-    EffectBus.emit('hosts:set-hosting', { on: !this.hosting() })
   }
 
   /** How many branches name this host, or 0 when no publish sweep has been

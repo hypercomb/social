@@ -39,7 +39,6 @@ const get = <T,>(key: string): T | undefined =>
 export class GameQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'game'
-  override readonly aliases = ['play']
   override description = 'The game — an arcade game this tile carries as its own presence'
   override options = ['here <gameId>', 'remove', 'on', 'off']
   override examples = [

@@ -686,6 +686,19 @@ export class ZoomDrone extends Drone {
     // Both axes pinned — the viewport is fully the user's; nothing to fit.
     if (resolvedHold === 'both') return false
 
+    // A STRIP FITS ACROSS ITSELF, WHOEVER ASKED. While the phone reads in
+    // rails the long axis is the one you scroll, so fitting it too would
+    // shrink the whole strip onto the screen — every tile smaller for every
+    // tile added — and that is exactly what every plain caller used to do
+    // (the fit button, /fit, 0/r, the rotation recentre, the first-visit
+    // refit). Deriving the axis HERE means no caller has to know about rails:
+    // portrait fits the width and aligns the top edge, landscape fits the
+    // height and aligns the left edge, and the desktop is untouched.
+    if (fitAxis === 'both') {
+      const laneAxis = getLaneScrollAxis()
+      fitAxis = laneAxis === 'y' ? 'x' : laneAxis === 'x' ? 'y' : 'both'
+    }
+
     this.#cancelAnim()
 
     const target = this.renderContainer

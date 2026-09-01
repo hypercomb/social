@@ -130,6 +130,16 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // changed here since. Slash-first (`/publish`), so like `sequences` it stays
   // off the rail until the participant enables it from inside its own window.
   { id: 'publish',      label: 'controls.publish',      action: 'togglePublish',      visibleWhen: 'always' },
+  // THREE WINDOWS THAT DECLARED A LAUNCHER AND HAD NOWHERE TO LAND.
+  // `hcDockedPanel`'s settings gear offers "Add to controls" for any window
+  // carrying a `launcherControlId`, and writes `hc:controls-enabled-map[<id>]`.
+  // hosts, comfy and aliases all declared one — with no entry here the map was
+  // written, the switch read as ON, and nothing ever appeared on the rail. Off
+  // by default like sequences and publish: the window's own gear is what puts
+  // it there.
+  { id: 'hosts',        label: 'hosts.title',           action: 'toggleHosts',        visibleWhen: 'always' },
+  { id: 'comfy',        label: 'comfy.title',           action: 'openComfy',          visibleWhen: 'always' },
+  { id: 'aliases',      label: 'aliases.title',         action: 'openAliases',        visibleWhen: 'always' },
   // Selection verbs — the floating vertical selection menu is retired
   // (documentation/selection-tool-windows.md); one-shot verbs live here on the
   // registry (user-toggleable like every control) while windowed responses
@@ -172,6 +182,9 @@ const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   'chat': false,
   'sequences': false,
   'publish': false,
+  'hosts': false,
+  'comfy': false,
+  'aliases': false,
   // Selection verbs default ON (they only appear while a selection exists;
   // the retired floating menu was the old primary path).
   'promote-to-parent': true,
@@ -419,7 +432,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #inputVisibleMirrorUnsub?: () => void
   #utility = signal(localStorage.getItem('hc:utility-expanded') !== 'false')
   #moveMode = signal(false)
-  #mode = signal<'browsing' | 'atomize'>('browsing')
+  // 'browsing' is the only mode left — the retired atomize surface was the
+  // second variant, and the template still switches on this signal.
+  #mode = signal<'browsing'>('browsing')
   #clipboardItems = signal<string[]>([])
   #roomOpen = signal(false)
   #beesVisible = signal(localStorage.getItem('hc:bees-visible') === 'true')
@@ -509,9 +524,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly hoveredCell = computed(() => this.#hoveredCell())
   #hoveredCell = signal<string | null>(null)
   readonly addressHover = signal(false)
-  #atomizeTarget = signal('')
-  #atomizeStrategy = signal('')
-  #atomizeAtomCount = signal(0)
 
   // ── single-row layout with edit-mode toggling ──────────────
   // Replaces the previous multi-row + expand/collapse split. All items
@@ -742,6 +754,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     toggleChat: () => EffectBus.emit('chat:toggle', {}),
     openSequences: () => EffectBus.emit('sequence:view-open', {}),
     togglePublish: () => EffectBus.emit('publish:view-toggle', {}),
+    toggleHosts: () => EffectBus.emit('hosts:view-toggle', {}),
+    // comfy and aliases have no toggle effect — only open/close, which their
+    // own close buttons already own. Opening an open window is a no-op.
+    openComfy: () => EffectBus.emit('comfy:open', {}),
+    openAliases: () => EffectBus.emit('aliases:open', {}),
     cut: () => this.cut(),
     copy: () => this.copy(),
     remove: () => this.remove(),
@@ -805,6 +822,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'chat':         return 'chat'
       case 'sequences':    return 'schema'
       case 'publish':      return 'cloud_upload'
+      // All three already ship in the icon subset (scripts/icon-names.cjs reads
+      // this file), so they cost no new glyph. A name that is NOT in the subset
+      // renders BLANK and says nothing about it — check before inventing one.
+      case 'hosts':        return 'dns'
+      case 'comfy':        return 'palette'
+      // NOT `label` — the pheromone panel's button already wears it, and two
+      // rail icons with the same glyph are two controls nobody can tell apart.
+      case 'aliases':      return 'tag'
       case 'promote-to-parent': return 'arrow_upward'
       case 'clipboard':    return 'content_paste'
       case 'voice':        return 'mic'
@@ -1329,9 +1354,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly showHidden = this.#showHidden.asReadonly()
   readonly voiceActive = signal(false)
   readonly voiceSupported = VoiceInputService.supported()
-  readonly atomizeTarget = this.#atomizeTarget.asReadonly()
-  readonly atomizeStrategy = this.#atomizeStrategy.asReadonly()
-  readonly atomizeAtomCount = this.#atomizeAtomCount.asReadonly()
 
   // ── lifecycle ───────────────────────────────────────────
 
@@ -1352,9 +1374,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #clipboardAvailableUnsub: (() => void) | null = null
   #clipboardOpenUnsub: (() => void) | null = null
   #tutorialsOpenUnsub: (() => void) | null = null
-  #atomizeModeUnsub: (() => void) | null = null
-  #atomizeAtomsUnsub: (() => void) | null = null
-  #atomizeStrategyUnsub: (() => void) | null = null
   #meshModalUnsub: (() => void) | null = null
   #lanesUnsub: (() => void) | null = null
   #meshJoinUnsub: (() => void) | null = null
@@ -1608,36 +1627,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#textOnlyUnsub = EffectBus.on<{ textOnly: boolean }>('render:set-text-only', ({ textOnly }) => {
       this.#textOnly.set(textOnly)
     })
-
-    this.#atomizeModeUnsub = EffectBus.on<{ active: boolean; target: string; strategy: string }>(
-      'atomize:mode',
-      ({ active, target, strategy }) => {
-        if (active) {
-          this.#mode.set('atomize')
-          this.#atomizeTarget.set(target)
-          this.#atomizeStrategy.set(strategy)
-        } else {
-          this.#mode.set('browsing')
-          this.#atomizeTarget.set('')
-          this.#atomizeStrategy.set('')
-          this.#atomizeAtomCount.set(0)
-        }
-      },
-    )
-
-    this.#atomizeAtomsUnsub = EffectBus.on<{ atoms: unknown[]; target: string }>(
-      'atomize:atoms',
-      ({ atoms }) => {
-        this.#atomizeAtomCount.set(atoms.length)
-      },
-    )
-
-    this.#atomizeStrategyUnsub = EffectBus.on<{ strategy: string }>(
-      'atomize:strategy-changed',
-      ({ strategy }) => {
-        this.#atomizeStrategy.set(strategy)
-      },
-    )
 
     // emit initial show-hidden state so drones pick it up
     if (this.#showHidden()) {
@@ -1907,9 +1896,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#tagsUnsub?.()
     this.#tagFilterUnsub?.()
     this.#hoverTagsUnsub?.()
-    this.#atomizeModeUnsub?.()
-    this.#atomizeAtomsUnsub?.()
-    this.#atomizeStrategyUnsub?.()
     this.#meshModalUnsub?.()
     this.#meshJoinUnsub?.()
     this.#swarmZoneUnsub?.()
@@ -2789,23 +2775,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // The panel (hc-clipboard-panel) lists the captured tiles and places
     // them onto THIS page in place.
     EffectBus.emit('clipboard:panel', { visible: true })
-  }
-
-  // ── atomize ──────────────────────────────────────────
-
-  readonly STRATEGY_NAMES = ['shatter', 'orbital', 'blueprint', 'cascade', 'particle'] as const
-
-  readonly setAtomizeStrategy = (strategy: string): void => {
-    EffectBus.emit('atomize:set-strategy', { strategy })
-  }
-
-  readonly closeAtomize = (): void => {
-    EffectBus.emit('atomize:close', {})
-    this.#mode.set('browsing')
-  }
-
-  readonly reassemble = (): void => {
-    this.closeAtomize()
   }
 
   // ── bees ────────────────────────────────────────────

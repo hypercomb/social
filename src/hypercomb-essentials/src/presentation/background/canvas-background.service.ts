@@ -43,6 +43,16 @@ type ScreenRecord = {
   cascade: boolean
 }
 
+/** A picture that is READY: decoded, measured, with its strip built. The
+ *  handles belong to the prepared cache, not to whatever is on screen — the
+ *  screen only points at one of these. */
+type Prepared = {
+  url: string
+  size: { width: number; height: number } | null
+  mirror: string | null
+  panel: { width: number; height: number } | null
+}
+
 /** The two worlds a saved backdrop can be sorted into — the same split the
  *  looks already live by. */
 export type BackdropWorld = 'light' | 'dark'
@@ -83,6 +93,57 @@ const STORE_POLL_TRIES = 300
 // but a legacy drain can still be relocating content off the boot path, so
 // ask three more times over five seconds before believing it.
 const SETTLED_RETRIES = [250, 1000, 4000] as const
+
+// A BACKDROP DOES NOT ARRIVE IN PIECES. The picture used to be painted the
+// moment its bytes resolved and then twice more: once when the image had
+// loaded and its zoom could finally be honoured, and once when the mirrored
+// strip had finished encoding and it could span the full width. What the
+// participant saw was a small picture growing out to the edges — a backdrop
+// animating itself into place, which is not a thing a backdrop should ever
+// do. It is prepared whole now and shown once. This is the cap on that wait:
+// a picture nothing can decode is shown as best we can rather than holding
+// the screen forever.
+const PICTURE_READY_DEADLINE_MS = 4000
+
+// `decode()` only WARMS the bitmap — it is never allowed to decide whether a
+// picture is ready. A tab that is not being shown has no reason to rasterise
+// anything, and its decode promise can stay pending for as long as it likes;
+// waiting on that one cost the picture its measured size, which is the whole
+// thing this file is for. Loaded is ready; warm is a bonus, briefly waited on.
+const PICTURE_WARM_MS = 500
+
+// THE STRIP IS BUILT FOR THE SCREEN, NOT FOR THE FILE. A picture mirrored at
+// its own resolution is a canvas nobody sees a pixel of — a 2560-wide backdrop
+// becomes a 5120-wide sheet that has to be encoded before anything can be
+// painted, and a photograph straight off a camera is far worse. It is drawn at
+// the size it will be SHOWN instead, in device pixels, capped by what the
+// picture actually has. The bytes at the content root are never touched: they
+// are content, other things point at them, and a peer's screen is not this one.
+const STRIP_PIXEL_RATIO_CAP = 2
+// WebP, because the strip is a paint buffer rather than a stored picture: the
+// same image at a fraction of PNG's encode time and memory.
+const STRIP_TYPE = 'image/webp'
+const STRIP_QUALITY = 0.92
+// Zoom in far enough, or open the window wider, and the strip owes more pixels
+// than it was built with. Rebuilt then — same size on screen, only sharper.
+const STRIP_REBUILD_FACTOR = 1.25
+const STRIP_REBUILD_DEBOUNCE = 300
+
+// WALKING BACK IS NOT A NEW PICTURE. A signature names the same bytes forever,
+// so a page you were just on can be re-dressed from what is already prepared
+// rather than read, decoded and re-encoded again — which is the whole gap
+// between the page changing and the backdrop catching up. The last few
+// pictures keep their handles; a return trip swaps in the same frame.
+const PREPARED_KEPT = 5
+
+// AND THE PAGES YOU CAN WALK TO ARE GOT READY BEFORE YOU WALK. The screen
+// records already name the backdrop of every page that has one, so the way
+// out and the ways in can be read and built while nothing else is happening.
+// A first visit then costs what a return visit costs: nothing. Bounded on
+// purpose — this is idle work for the pages next door, not a sweep of the
+// hive, and it never touches what is on screen.
+const PRELOAD_NEIGHBOURS = 2
+const PRELOAD_IDLE_MS = 1200
 
 // One pan drag is hundreds of persists. The pref takes them all (localStorage
 // is free); the pool takes one, trailing.
@@ -310,8 +371,26 @@ export class CanvasBackgroundService extends EventTarget {
   /** Intrinsic picture size, used to turn the contain fit into a zoomable
    *  pixel size without stretching portrait or landscape images. */
   #pictureSize: { width: number; height: number } | null = null
+  /** Pictures already prepared, by signature, oldest first. The session owns
+   *  these handles; the screen only borrows one. */
+  #prepared = new Map<string, Prepared>()
+  /** Preparations in flight, so a preload and a choice for the same picture
+   *  share one build rather than racing and leaking a set of handles. */
+  #preparing = new Map<string, Promise<Prepared>>()
+  #preloadWork: ReturnType<typeof setTimeout> | null = null
+  /** Which preparation the screen is waiting on. Bumped by every new choice,
+   *  so a picture that was still getting ready when a newer one was chosen is
+   *  dropped without ever having been seen. */
+  #pictureEpoch = 0
+  /** A picture is named and on its way. The screen is HELD for it — see the
+   *  hold in `apply()` — rather than painting a pattern it is about to lose. */
+  #picturePending = false
   /** Two-panel original + horizontally flipped copy, repeated along x. */
   #mirrorUrl: string | null = null
+  /** The device-pixel size ONE panel of that strip was built at, so a zoom or
+   *  a wider window can tell when it owes more than it has. */
+  #stripPanel: { width: number; height: number } | null = null
+  #stripWork: ReturnType<typeof setTimeout> | null = null
   /** The participant's saved backdrops, sorted by the world they suit. A
    *  picture says NOTHING by default — dragging it onto a shelf in the
    *  backgrounds window IS the sorting. Signatures only, never bytes. This is
@@ -344,7 +423,11 @@ export class CanvasBackgroundService extends EventTarget {
       window.matchMedia?.('(prefers-color-scheme: light)')
         ?.addEventListener?.('change', () => { if (!this.#palette) this.apply() })
     } catch { /* matchMedia unavailable */ }
-    window.addEventListener('resize', () => { if (this.#pictureUrl) this.apply() })
+    window.addEventListener('resize', () => {
+      if (!this.#pictureUrl) return
+      this.apply()
+      this.#refreshStrip()
+    })
     this.apply()
   }
 
@@ -475,15 +558,25 @@ export class CanvasBackgroundService extends EventTarget {
     if (!clean) return false
     const blob = await this.#readResource(clean)
     if (!blob) return false
-    this.#revokePicture()
     this.#pictureSig = clean
     this.#screenSourceKey = this.#currentPathKey()
     this.#cascade = true
-    this.#pictureUrl = URL.createObjectURL(blob)
-    this.#measurePicture()
     this.#enabled = true
     this.#persist()
-    this.apply()
+    // NOTHING REPAINTS HERE — and that is the fix, not an omission.
+    //
+    // Choosing a picture used to drop the one showing on the spot: its size
+    // and its mirrored strip went with it, so the screen fell back to the
+    // whole-picture `contain` fit — the same photograph, suddenly small and
+    // centred — held there for as long as the new one took to arrive, and
+    // then flipped. "It resizes to the middle and then flips to the other
+    // one." There is always latency in getting a photograph onto a screen;
+    // what there is no excuse for is spending it on a wrong-sized picture.
+    //
+    // The picture that is showing stays EXACTLY as it is, untouched, until
+    // the new one can be shown whole. One change on screen, and it is the
+    // one the participant asked for.
+    void this.#preparePicture(clean, blob)
     return true
   }
 
@@ -504,6 +597,7 @@ export class CanvasBackgroundService extends EventTarget {
   clearPicture(): void {
     if (!this.#pictureSig && !this.#pictureUrl) return
     delete this.#screenRecords[this.#screenSourceKey]
+    this.#cancelPreparing()
     this.#revokePicture()
     this.#pictureSig = null
     this.#persist()
@@ -527,6 +621,9 @@ export class CanvasBackgroundService extends EventTarget {
     this.#zoom = rounded
     this.#persist()
     this.apply()
+    // Zoomed in past what the strip was drawn for: it is rebuilt sharper,
+    // at the same size, once the slider settles.
+    this.#refreshStrip()
   }
 
   /** Offset the picture from viewport centre. Readability layers stay fixed. */
@@ -657,6 +754,22 @@ export class CanvasBackgroundService extends EventTarget {
     }
 
     const p = PAL[this.resolvedPalette()]
+
+    // A PICTURE THAT IS COMING GETS THE SCREEN HELD FOR IT. Painting the
+    // pattern first and swapping it for a photograph a second later is the
+    // same flicker as growing the picture into place — the participant chose a
+    // picture, and a lattice they never asked to see is not a better wait.
+    // Until it is ready (or until the ladder gives up on the bytes), the
+    // screen is the palette's own base colour: the same colour the picture
+    // will sit on, so its arrival is the only change there is to see.
+    if (!this.#pictureUrl && this.#picturePending) {
+      s.backgroundColor = p.base
+      this.#hideAurora()
+      this.#hideGlow()
+      EffectBus.emit('canvas:lines', { kind: null, accent: '', alpha: 0 })
+      this.dispatchEvent(new CustomEvent('change'))
+      return
+    }
 
     // A PICTURE STANDS IN FOR THE PATTERN. Contour rings or a dot lattice over
     // a photograph is two backdrops fighting for the same screen, so while a
@@ -838,31 +951,199 @@ export class CanvasBackgroundService extends EventTarget {
 
   // ── the participant's own picture ───────────────────────────────────
 
-  /** Drop the session handle. The BYTES are content and are never touched —
-   *  a tile, the references pool or a peer may well be pointing at them. */
+  /** Stop showing the picture. The handles are NOT revoked here — they belong
+   *  to the prepared cache, which is what makes walking back instant; they go
+   *  when that cache lets them go. The BYTES behind them are content and are
+   *  never touched at all: a tile, the references pool or a peer may well be
+   *  pointing at them. */
   #revokePicture(): void {
-    if (!this.#pictureUrl) return
-    try { URL.revokeObjectURL(this.#pictureUrl) } catch { /* already gone */ }
     this.#pictureUrl = null
-    if (this.#mirrorUrl) {
-      try { URL.revokeObjectURL(this.#mirrorUrl) } catch { /* already gone */ }
-      this.#mirrorUrl = null
-    }
+    this.#mirrorUrl = null
     this.#pictureSize = null
+    this.#stripPanel = null
+    if (this.#stripWork !== null) { clearTimeout(this.#stripWork); this.#stripWork = null }
   }
 
-  #measurePicture(): void {
-    const url = this.#pictureUrl
-    this.#pictureSize = null
-    if (!url) return
-    const image = new Image()
-    image.onload = () => {
-      if (this.#pictureUrl !== url) return
-      this.#pictureSize = { width: image.naturalWidth, height: image.naturalHeight }
-      this.apply()
-      void this.#buildMirrorStrip(image, url)
+  /** Wear a picture already prepared this session, if there is one. Answers
+   *  whether it did — and it does it WITHOUT touching the store, which is what
+   *  turns walking back into a page you were just on from a read, a decode and
+   *  an encode into a single repaint. */
+  #wearPrepared(sig: string): boolean {
+    const ready = this.#prepared.get(sig)
+    if (!ready) return false
+    // Anything still getting ready is overtaken by this.
+    this.#pictureEpoch++
+    this.#revokePicture()
+    this.#showPrepared(sig, ready)
+    return true
+  }
+
+  /** Wear a picture that is already prepared. Synchronous, by design: this is
+   *  the same-frame half of the swap. */
+  #showPrepared(sig: string, ready: Prepared): void {
+    // Re-inserted so the map stays oldest-first for eviction.
+    this.#prepared.delete(sig)
+    this.#prepared.set(sig, ready)
+    this.#pictureUrl = ready.url
+    this.#pictureSize = ready.size
+    this.#mirrorUrl = ready.mirror
+    this.#stripPanel = ready.panel
+    this.#picturePending = false
+    this.apply()
+    // This screen may owe more pixels than the strip was built with — a
+    // bigger window, or a deeper zoom on this page than on the last one.
+    this.#refreshStrip()
+    this.#forgetOldPrepared(sig)
+  }
+
+  /** Let go of everything past the last few, never the one being worn. */
+  #forgetOldPrepared(keep: string): void {
+    while (this.#prepared.size > PREPARED_KEPT) {
+      const oldest = this.#prepared.keys().next().value
+      if (oldest === undefined) return
+      const spent = this.#prepared.get(oldest)
+      this.#prepared.delete(oldest)
+      if (oldest === keep) {
+        // Worn, so it goes back on as the newest instead of being dropped.
+        if (spent) this.#prepared.set(oldest, spent)
+        continue
+      }
+      if (!spent) continue
+      try { URL.revokeObjectURL(spent.url) } catch { /* already gone */ }
+      if (spent.mirror) { try { URL.revokeObjectURL(spent.mirror) } catch { /* already gone */ } }
     }
-    image.src = url
+  }
+
+  /** Get a picture COMPLETELY ready before it is ever shown, then swap it in
+   *  with a single paint.
+   *
+   *  Decode it, measure it, build its mirrored strip, decode that too — and
+   *  only then does anything change on screen. Whatever is showing meanwhile
+   *  keeps showing: the picture before it when one is being replaced, the held
+   *  base colour at boot. That is the whole point — nothing is ever seen at a
+   *  size it is about to grow out of.
+   *
+   *  Nothing awaits this. A choice is answered the moment its bytes resolve;
+   *  the screen changes when the picture is worth looking at — and for a
+   *  picture already prepared this session, that is the same frame. */
+  async #preparePicture(sig: string, blob: Blob): Promise<void> {
+    const epoch = ++this.#pictureEpoch
+    this.#picturePending = true
+    if (this.#wearPrepared(sig)) return
+    const prepared = await this.#prepareHandles(sig, blob)
+    // A newer choice landed while this one was getting ready — that one wins.
+    // The work is KEPT either way: the bytes are named by a signature and will
+    // not change, and the choice that overtook this one may be overtaken back.
+    if (epoch !== this.#pictureEpoch) return
+    this.#revokePicture()
+    this.#showPrepared(sig, prepared)
+  }
+
+  /** Build a picture's handles and keep them. Shows NOTHING — this is the
+   *  half a preload uses, and the half a choice waits on. */
+  #prepareHandles(sig: string, blob: Blob): Promise<Prepared> {
+    const held = this.#prepared.get(sig)
+    if (held) return Promise.resolve(held)
+    const already = this.#preparing.get(sig)
+    if (already) return already
+    const work = (async (): Promise<Prepared> => {
+      const url = URL.createObjectURL(blob)
+      const image = await this.#decoded(url)
+      const size = image ? { width: image.naturalWidth, height: image.naturalHeight } : null
+      const panel = size ? this.#panelPixels(size) : null
+      const mirror = image && panel ? await this.#mirrorStrip(image, panel) : null
+      if (mirror) await this.#decoded(mirror)
+      const prepared: Prepared = { url, size, mirror, panel: mirror ? panel : null }
+      this.#prepared.set(sig, prepared)
+      this.#forgetOldPrepared(this.#pictureSig ?? '')
+      return prepared
+    })().finally(() => { this.#preparing.delete(sig) })
+    this.#preparing.set(sig, work)
+    return work
+  }
+
+  /** Get the pages next door ready, once things have gone quiet. */
+  #preloadNeighbours(): void {
+    if (this.#preloadWork !== null) clearTimeout(this.#preloadWork)
+    this.#preloadWork = setTimeout(() => {
+      this.#preloadWork = null
+      void this.#preloadRun()
+    }, PRELOAD_IDLE_MS)
+  }
+
+  /** Prepare the backdrops of the nearest pages ON THIS BRANCH — the way out
+   *  and the ways in, nearest first. Nothing here changes what is showing: a
+   *  preloaded picture is worn only if the participant walks onto its page. */
+  async #preloadRun(): Promise<void> {
+    const segments = this.#currentSegments()
+    const here = JSON.stringify(segments)
+    const near: { distance: number; picture: string }[] = []
+    for (const [key, record] of Object.entries(this.#screenRecords)) {
+      if (key === here || !record || !SIG_RE.test(record.picture)) continue
+      if (this.#prepared.has(record.picture)) continue
+      let path: string[]
+      try { path = JSON.parse(key) as string[] } catch { continue }
+      if (!Array.isArray(path)) continue
+      let shared = 0
+      while (shared < path.length && shared < segments.length && path[shared] === segments[shared]) shared++
+      // On this branch only: an ancestor of here, or a descendant of it. A
+      // page off in another arm of the hive is not somewhere you can step.
+      if (shared !== Math.min(path.length, segments.length)) continue
+      near.push({ distance: Math.abs(path.length - segments.length), picture: record.picture })
+    }
+    near.sort((a, b) => a.distance - b.distance)
+    const wanted: string[] = []
+    for (const { picture } of near) {
+      if (wanted.includes(picture)) continue
+      wanted.push(picture)
+      if (wanted.length === PRELOAD_NEIGHBOURS) break
+    }
+    for (const picture of wanted) {
+      if (this.#prepared.has(picture)) continue
+      const blob = await this.#readResource(picture)
+      if (!blob) continue
+      await this.#prepareHandles(picture, blob)
+    }
+  }
+
+  /** An image, loaded and (where it is worth waiting for) decoded — or null if
+   *  it will not load at all. Capped: a picture the browser cannot read must
+   *  not hold the screen forever. The cap answers with whatever HAS loaded,
+   *  because the size is the point and a warm bitmap is only a nicety. */
+  #decoded(url: string): Promise<HTMLImageElement | null> {
+    return new Promise<HTMLImageElement | null>(resolve => {
+      let timer: ReturnType<typeof setTimeout> | null = null
+      let loaded: HTMLImageElement | null = null
+      let settled = false
+      const done = (value: HTMLImageElement | null): void => {
+        if (settled) return
+        settled = true
+        if (timer) clearTimeout(timer)
+        resolve(value)
+      }
+      const image = new Image()
+      // LOADED IS READY. `decode()` only warms the bitmap so the body is not
+      // carrying an image the compositor has still to unpack — worth a short
+      // wait, never worth the picture's own dimensions, and not worth asking
+      // for at all in a tab nobody is looking at (see PICTURE_WARM_MS).
+      image.onload = () => {
+        loaded = image
+        const warm = document.visibilityState === 'hidden'
+          ? Promise.resolve()
+          : Promise.resolve(image.decode?.()).catch(() => { /* loaded is enough */ })
+        void Promise.race([warm, new Promise(resolve => setTimeout(resolve, PICTURE_WARM_MS))]).then(() => done(image))
+      }
+      image.onerror = () => done(null)
+      timer = setTimeout(() => done(loaded), PICTURE_READY_DEADLINE_MS)
+      image.src = url
+    })
+  }
+
+  /** Drop a preparation that has been undone — a picture the participant has
+   *  since cleared or navigated away from must not land a moment later. */
+  #cancelPreparing(): void {
+    this.#pictureEpoch++
+    this.#picturePending = false
   }
 
   #pictureBackgroundSize(): string {
@@ -885,27 +1166,102 @@ export class CanvasBackgroundService extends EventTarget {
   #pictureMetrics(): { width: number; height: number } | null {
     const size = this.#pictureSize
     if (!size) return null
-    const fit = Math.min(window.innerWidth / size.width, window.innerHeight / size.height)
-    return { width: size.width * fit * this.#zoom, height: size.height * fit * this.#zoom }
+    const fit = this.#fitFor(size) * this.#zoom
+    return { width: size.width * fit, height: size.height * fit }
   }
 
-  async #buildMirrorStrip(image: HTMLImageElement, sourceUrl: string): Promise<void> {
-    const canvas = document.createElement('canvas')
-    canvas.width = image.naturalWidth * 2
-    canvas.height = image.naturalHeight
-    const context = canvas.getContext('2d')
-    if (!context) return
-    context.drawImage(image, 0, 0)
-    context.save()
-    context.translate(canvas.width, 0)
-    context.scale(-1, 1)
-    context.drawImage(image, 0, 0)
-    context.restore()
-    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
-    if (!blob || this.#pictureUrl !== sourceUrl) return
-    if (this.#mirrorUrl) URL.revokeObjectURL(this.#mirrorUrl)
-    this.#mirrorUrl = URL.createObjectURL(blob)
+  /** The two-panel [original][mirror] strip that lets a picture narrower than
+   *  the screen repeat outwards without a seam. Drawn at the size it will be
+   *  SHOWN — see #panelPixels — so a photograph straight off a camera costs
+   *  the same as one that was already the right size. Null when the canvas
+   *  will not give it up: the picture then shows on its own, which is honest. */
+  async #mirrorStrip(image: HTMLImageElement, panel: { width: number; height: number }): Promise<string | null> {
+    try {
+      const canvas = document.createElement('canvas')
+      canvas.width = panel.width * 2
+      canvas.height = panel.height
+      const context = canvas.getContext('2d')
+      if (!context) return null
+      context.imageSmoothingQuality = 'high'
+      context.drawImage(image, 0, 0, panel.width, panel.height)
+      context.save()
+      context.translate(canvas.width, 0)
+      context.scale(-1, 1)
+      context.drawImage(image, 0, 0, panel.width, panel.height)
+      context.restore()
+      const encode = (type: string, quality?: number): Promise<Blob | null> =>
+        new Promise<Blob | null>(resolve => canvas.toBlob(resolve, type, quality))
+      // A browser without WebP answers null (or hands back a PNG regardless);
+      // either way the picture still gets its strip.
+      const blob = await encode(STRIP_TYPE, STRIP_QUALITY) ?? await encode('image/png')
+      return blob ? URL.createObjectURL(blob) : null
+    } catch { return null }
+  }
+
+  /** How many device pixels ONE panel of the strip is worth right now: the
+   *  size it is displayed at, never more than the picture actually has. This
+   *  is where a 24-megapixel photograph stops being a 24-megapixel paint
+   *  buffer — the stored bytes are untouched, only this session's strip. */
+  #panelPixels(size: { width: number; height: number }): { width: number; height: number } {
+    const ratio = Math.min(Math.max(window.devicePixelRatio || 1, 1), STRIP_PIXEL_RATIO_CAP)
+    const scale = Math.min(1, this.#fitFor(size) * this.#zoom * ratio)
+    return {
+      width: Math.max(1, Math.round(size.width * scale)),
+      height: Math.max(1, Math.round(size.height * scale)),
+    }
+  }
+
+  /** The whole-picture (`contain`) fit for this viewport — the scale at which
+   *  neither portrait nor landscape is stretched or cropped. A viewport that
+   *  measures nothing (a window not yet laid out, a hidden host) is not a fit
+   *  of zero: the picture keeps its own scale until a resize says otherwise. */
+  #fitFor(size: { width: number; height: number }): number {
+    const width = window.innerWidth
+    const height = window.innerHeight
+    if (!(width > 0) || !(height > 0)) return 1
+    return Math.min(width / size.width, height / size.height)
+  }
+
+  /** The strip owes more pixels than it was built with — zoomed in, or a
+   *  bigger window. Rebuilt at the new resolution and swapped in place: the
+   *  same size on screen, only sharper, so nothing moves. Never for a small
+   *  change, and never past what the picture itself has. */
+  #refreshStrip(): void {
+    const size = this.#pictureSize
+    const url = this.#pictureUrl
+    const built = this.#stripPanel
+    if (!size || !url || !this.#mirrorUrl || !built) return
+    if (built.width >= size.width) return
+    const want = this.#panelPixels(size)
+    if (want.width <= Math.round(built.width * STRIP_REBUILD_FACTOR)) return
+    if (this.#stripWork !== null) clearTimeout(this.#stripWork)
+    this.#stripWork = setTimeout(() => {
+      this.#stripWork = null
+      void this.#rebuildStrip(url, want)
+    }, STRIP_REBUILD_DEBOUNCE)
+  }
+
+  async #rebuildStrip(url: string, panel: { width: number; height: number }): Promise<void> {
+    const epoch = this.#pictureEpoch
+    const image = await this.#decoded(url)
+    const current = (): boolean => epoch === this.#pictureEpoch && this.#pictureUrl === url
+    if (!image || !current()) return
+    const mirror = await this.#mirrorStrip(image, panel)
+    if (!mirror) return
+    if (!current()) {
+      try { URL.revokeObjectURL(mirror) } catch { /* already gone */ }
+      return
+    }
+    const spent = this.#mirrorUrl
+    this.#mirrorUrl = mirror
+    this.#stripPanel = panel
+    // The prepared copy holds the same handles the screen is wearing, so it
+    // moves with it — otherwise walking back would bring the coarser strip
+    // (or a revoked one) with it.
+    const held = this.#pictureSig ? this.#prepared.get(this.#pictureSig) : undefined
+    if (held && held.url === url) { held.mirror = mirror; held.panel = panel }
     this.apply()
+    if (spent && spent !== mirror) { try { URL.revokeObjectURL(spent) } catch { /* already gone */ } }
   }
 
   /** Resolve the stored signature's bytes at boot. The signature is the truth
@@ -915,16 +1271,21 @@ export class CanvasBackgroundService extends EventTarget {
   async #loadPicture(): Promise<void> {
     const sig = this.#pictureSig
     if (!sig) return
+    // Walked back onto a picture this session already prepared: worn now, in
+    // the same frame the page changed, with no read at all.
+    if (this.#wearPrepared(sig)) return
+    // A picture is NAMED, so the screen is held for it rather than painting a
+    // pattern it is about to lose. Released either way below.
+    if (!this.#pictureUrl) this.#picturePending = true
     for (const wait of SETTLED_RETRIES) {
       // A newer choice landed while this one was resolving — that one wins.
       if (this.#pictureSig !== sig) return
       const blob = await this.#readResource(sig)
       if (blob) {
         if (this.#pictureSig !== sig) return
-        this.#revokePicture()
-        this.#pictureUrl = URL.createObjectURL(blob)
-        this.#measurePicture()
-        this.apply()
+        // Not awaited: the bytes are here, and the screen changes when the
+        // picture is ready to be looked at rather than while it is arriving.
+        void this.#preparePicture(sig, blob)
         return
       }
       await new Promise(resolve => setTimeout(resolve, wait))
@@ -933,6 +1294,13 @@ export class CanvasBackgroundService extends EventTarget {
     // missing — and clearing it would turn an absence a replication or a
     // drain can still heal into a choice the participant has to make again.
     console.warn(`[canvas-bg] picture ${sig.slice(0, 12)}… names no bytes in this hive — the backdrop is showing its pattern`)
+    // And the hold is released, so it can: a picture that never arrives must
+    // not leave the screen a bare field forever, nor leave the picture before
+    // it standing in for a choice that has already moved on.
+    if (this.#pictureSig !== sig) return
+    this.#picturePending = false
+    this.#revokePicture()
+    this.apply()
   }
 
   /** The store, once it exists. */
@@ -960,10 +1328,21 @@ export class CanvasBackgroundService extends EventTarget {
    *  works: settle, adopt the record, resolve the bytes, hydrate the shelves. */
   async #hydrate(): Promise<void> {
     const store = await this.#storeReady()
-    if (!store) return
+    // No store will ever appear, so no picture will either — release the hold
+    // the pref asked for rather than leaving a bare field on screen.
+    if (!store) {
+      if (this.#picturePending) { this.#picturePending = false; this.apply() }
+      return
+    }
     await this.#loadScreen(store)
     await this.#loadPicture()
+    // The pref's "a picture is coming" hint has been answered by now, one way
+    // or the other. Anything still holding is holding for nothing.
+    if (this.#picturePending && !this.#pictureSig) { this.#picturePending = false; this.apply() }
     await this.#loadSaved(store)
+    // Everything this page needed is on screen; the pages next to it can be
+    // got ready in the quiet after.
+    this.#preloadNeighbours()
   }
 
   /** Read the screen record out of its pool of meaning.
@@ -1050,7 +1429,15 @@ export class CanvasBackgroundService extends EventTarget {
       if (length === segments.length || record.cascade !== false) { found = { key, record }; break }
     }
     if (epoch !== this.#navigationEpoch) return
-    if (!found) { this.#revokePicture(); this.#pictureSig = null; this.apply(); return }
+    if (!found) {
+      this.#cancelPreparing()
+      this.#revokePicture()
+      this.#pictureSig = null
+      this.apply()
+      // No backdrop HERE still means new neighbours — one of them may have one.
+      this.#preloadNeighbours()
+      return
+    }
     const { key, record } = found
     this.#screenSourceKey = key
     this.#cascade = record.cascade !== false
@@ -1059,10 +1446,18 @@ export class CanvasBackgroundService extends EventTarget {
     this.#panX = record.panX
     this.#panY = record.panY
     if (this.#pictureSig !== record.picture || !this.#pictureUrl) {
-      this.#revokePicture()
+      // The picture on screen is NOT dropped first: it holds this layer's look
+      // until the next one is ready, so walking into a page with its own
+      // backdrop is one change rather than a blank field and then a photograph.
       this.#pictureSig = record.picture
       await this.#loadPicture()
     } else this.apply()
+    // The pref carries what this page is wearing, so the NEXT boot knows a
+    // picture is coming before the store has said a word — that hint is what
+    // holds the screen instead of flashing a pattern. See #restore.
+    this.#persist()
+    // Walked somewhere: the neighbours are different neighbours now.
+    this.#preloadNeighbours()
     this.dispatchEvent(new CustomEvent('change'))
   }
 
@@ -1111,7 +1506,14 @@ export class CanvasBackgroundService extends EventTarget {
       if (typeof parsed.enabled === 'boolean') this.#enabled = parsed.enabled
       // A signature, or nothing. Anything else in the slot is a corrupt pref,
       // not a picture, and asking the store for it would only fail later.
-      if (parsed.v !== 3 && typeof parsed.picture === 'string' && SIG_RE.test(parsed.picture)) this.#pictureSig = parsed.picture
+      if (typeof parsed.picture === 'string' && SIG_RE.test(parsed.picture)) {
+        if (parsed.v !== 3) this.#pictureSig = parsed.picture
+        // WHICH picture belongs to this page is the pool's to say (v3 keeps a
+        // record per path), but THAT one is coming is known from the first
+        // tick — so the very first paint of the session already holds the
+        // screen. The pattern never gets a frame it is only going to lose.
+        this.#picturePending = true
+      }
       // The retired build levied a half-strength wash BY DEFAULT and persisted
       // it, so a truly-legacy pref's 0.5 is that levy, not a choice — it takes
       // the new default (full opacity) instead. Later prefs are recognisable

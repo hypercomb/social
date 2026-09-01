@@ -1,0 +1,4 @@
+# Vendored from jsdelivr, PINNED. Refresh deliberately, never floating.
+docsify 4.13.1
+docsify-copy-code 3.0.2
+prismjs 1.30.0

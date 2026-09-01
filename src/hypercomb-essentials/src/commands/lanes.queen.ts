@@ -9,7 +9,6 @@ import { EffectBus, QueenBee } from '@hypercomb/core'
 export class LanesQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'lanes'
-  override readonly aliases = ['three', 'three-lanes']
   override description =
     'In mobile mode, arrange tiles into readable lanes: 3 to scan, 2 to browse, 1 to read'
   override descriptionKey = 'slash.lanes'

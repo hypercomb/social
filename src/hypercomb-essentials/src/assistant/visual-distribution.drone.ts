@@ -3,7 +3,7 @@
 // THE DOOR EVERY PRODUCER OF PARTS KNOCKS ON.
 //
 // Rules 10 and 11 of the website-artifact paradigm are owed by everything that
-// mints parts — `/break-apart`, `/organize`, `/expand`, the atomizers, an
+// mints parts — `/break-apart`, `/organize`, `/expand`, an
 // importer, a bridge responder. If each of them grew its own answer they would
 // drift, and the ones written later would quietly not do it at all (which is
 // exactly how every break-apart to date produced naked parts).
@@ -19,7 +19,7 @@
 //
 // `divide: false` says nothing was cut up — the tiles are still owed their own
 // appearance, but no frame is declared and nobody is seated. That is what
-// `/expand`, the atomizers and importers want: they widen, they do not deepen.
+// `/expand` and the importers want: they widen, they do not deepen.
 //
 // WHY AN EFFECT AND NOT A CALL. A part-producing act can finish anywhere: in
 // the hive, in a worker, or — for break-apart — in a bridge-connected session
@@ -51,7 +51,7 @@ type DistributeRequest = {
    *  `segments`, so it gains a frame and they are seated into it.
    *
    *  False is everything that widens rather than deepens — `/expand`, an
-   *  atomizer, an importer. Those tiles are still owed their own appearance
+   *  importer. Those tiles are still owed their own appearance
    *  (rule 10's third clause) but nothing was cut up, so declaring a frame
    *  would re-declare the arity of a whole nobody broke apart. */
   divide?: boolean

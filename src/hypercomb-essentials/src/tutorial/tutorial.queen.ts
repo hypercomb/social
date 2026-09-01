@@ -29,12 +29,10 @@ import { tutorialLessons, TUTORIAL_LEVELS, type TutorialLevel } from './tutorial
  *   /tutorial <lesson>         — one lesson on its own (e.g. /tutorial go-in)
  *   /tutorial list             — what is on offer, in the activity log
  *   /tutorial stop             — end a running tour
- *   /tour, /tutorials          — aliases
  */
 export class TutorialQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'tutorial'
-  override readonly aliases = ['tour', 'tutorials']
   override description = 'Open the tutorials window — every course and lesson, or fly one by name'
   override descriptionKey = 'slash.tutorial'
   override options = ['start', ...TUTORIAL_LEVELS, 'list', 'stop', '<lesson>']

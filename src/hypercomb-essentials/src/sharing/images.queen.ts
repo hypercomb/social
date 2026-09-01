@@ -21,7 +21,6 @@ const get = (key: string) => (window as any).ioc?.get?.(key)
 export class ImagesQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'images'
-  override readonly aliases = []
   override description = 'Open the room\'s pictures for a tile and choose one'
   override descriptionKey = 'slash.images'
   override options = ['<cell name>']

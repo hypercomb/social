@@ -17,7 +17,12 @@ export abstract class QueenBee extends Bee {
   /** The slash behaviour this queen bee responds to (e.g. 'paste', 'export', 'publish') */
   abstract readonly command: string
 
-  /** Optional aliases — additional names that resolve to this queen bee */
+  /**
+   * Additional names that resolve to this queen bee. ALIASES ARE THE
+   * PARTICIPANT'S TO GIVE — code never declares one (a doctrine ratchet
+   * enforces this). This field is the seam where participant-given
+   * aliases are applied at runtime; in source it stays empty.
+   */
   readonly aliases: string[] = []
 
   /**
@@ -57,6 +62,19 @@ export abstract class QueenBee extends Bee {
    * type in full so they can't be triggered by accidental tab-complete.
    */
   public slashHidden: boolean = false
+
+  /**
+   * PROTOTYPE STAGE. Hypercomb is a creation tool, and behaviours are
+   * born the way everything here is born — a word, played with, built
+   * upon. A queen still in the workshop declares itself a prototype: it
+   * stays registered and invokable (it is in the global), but the
+   * palette conceals it until the participant opens the filter
+   * (`/prototypes`), where prototypes list at the BOTTOM, dimmed, each
+   * wearing the stage chip. Graduating is deleting this line.
+   * Distinct from `slashHidden`, which is for destructive / dev
+   * commands that must be typed in full on purpose.
+   */
+  public slashPrototype: boolean = false
 
   /** Real-time execution — called immediately when `/behaviour` is invoked */
   protected abstract execute(args: string): void | Promise<void>

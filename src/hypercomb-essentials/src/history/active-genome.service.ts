@@ -246,7 +246,7 @@ export class ActiveGenomeService {
       root: async () => {
         const lineage = await background(() => history.sign({ explorerSegments: () => [] }))
         // A cold/brand-new root still gets a partial, retrying census keyed
-        // by its lineage address. This keeps `/weight` informative without
+        // by its lineage address. This keeps `/genome` informative without
         // materializing 00000000 merely to measure it.
         return (await background(() => history.headLayer(lineage)))?.layerSig ?? lineage
       },

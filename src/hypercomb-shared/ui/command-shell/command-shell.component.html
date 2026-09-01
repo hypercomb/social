@@ -333,6 +333,7 @@
           <li
             role="option"
             [class.active]="i === getActiveIndex()"
+            [class.prototype]="isPrototype(s)"
             (mousedown)="onSuggestionMouseDown($event, s, i)"
           >
             <!-- TWO CELLS, one per subgrid column: the option's own name, then
@@ -353,6 +354,9 @@
                    sentence. -->
               @for (alias of aliasesFor(s); track alias) {
                 <span class="opt-alias">{{ alias }}</span>
+              }
+              @if (isPrototype(s)) {
+                <span class="opt-proto">{{ prototypeLabel() }}</span>
               }
             </span>
             @if (descriptionFor(s); as desc) {

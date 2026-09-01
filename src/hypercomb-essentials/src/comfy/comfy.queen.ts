@@ -95,7 +95,6 @@ registerCommandRoot('comfy', comfyObject)
 export class ComfyQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'comfy'
-  override readonly aliases = ['comfyui']
   override description = 'Make a picture with ComfyUI and put it on a tile'
   override descriptionKey = 'slash.comfy'
   override options = [

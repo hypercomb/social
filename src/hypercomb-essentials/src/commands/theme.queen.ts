@@ -21,7 +21,6 @@ import { QueenBee, type ThemeProvider, THEME_IOC_KEY } from '@hypercomb/core'
 export class ThemeQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'theme'
-  override readonly aliases = ['themes']
   override description = 'Switch the UI theme (light, dark, system, or a registered theme)'
   override descriptionKey = 'slash.theme'
   override options = ['light', 'dark', 'system', '<theme name>']

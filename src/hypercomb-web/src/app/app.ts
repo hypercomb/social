@@ -142,9 +142,9 @@ export class App implements AfterViewInit {
   get swarmEmptyClass() { return this.swarmEmpty(); }
 
   // View-mode CSS hook. When 'website', the header-bar (and its
-  // command-line) docks to the bottom of the viewport, the website-view
-  // takes the upper area, and you can type /view (or future aliases) to
-  // toggle back without moving your cursor.
+  // command-line) docks to the bottom of the viewport and the website-view
+  // takes the upper area; the view's own close and the Escape cascade
+  // hand the surface back to the hexagons.
   @HostBinding('class.view-website')
   get viewWebsiteClass() { return this.viewMode() === 'website'; }
   private runtimeReady: Promise<void> = Promise.resolve()

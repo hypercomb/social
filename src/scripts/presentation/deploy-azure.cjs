@@ -17,24 +17,25 @@ const GROUP = 'swa-hypercomb-prod-west-001'
 const dist = path.join(ROOT, 'dist', 'hypercomb-presentation.html')
 if (!fs.existsSync(dist)) throw new Error('run build.cjs first — dist/hypercomb-presentation.html is missing')
 
+// Built from empty every time: the SWA CLI uploads whatever is in this folder,
+// so a file that stopped being part of the site would otherwise keep shipping
+// from a previous run's leftovers. What is staged here IS the site.
 const stage = path.join(ROOT, 'deploy')
+fs.rmSync(stage, { recursive: true, force: true })
 fs.mkdirSync(stage, { recursive: true })
 fs.copyFileSync(dist, path.join(stage, 'index.html'))
 // the link card social platforms fetch when the URL is posted
 fs.copyFileSync(path.join(ROOT, 'og.png'), path.join(stage, 'og.png'))
-// /setup — the Claude Code + bridge checklist, linked from the splash
-fs.mkdirSync(path.join(stage, 'setup'), { recursive: true })
-fs.copyFileSync(path.join(ROOT, 'setup.html'), path.join(stage, 'setup', 'index.html'))
-// the walkthrough video — one canonical copy lives with the downloads site
-fs.copyFileSync(
-  path.join(ROOT, '..', '..', 'documentation', 'hypercomb.com', 'assets', 'bridge-setup.mp4'),
-  path.join(stage, 'setup', 'bridge-setup.mp4'))
+// The Claude Code + bridge checklist is no longer part of this site: hypercomb.com
+// is the pitch, and wiring an AI into a hive is a step you take after you have
+// one. It stays written down — documentation/claude-bridge-setup.md is the full
+// tutorial, and setup.html is the page it was published as. Its walkthrough
+// capture lives with the other clips in media/bridge-setup.mp4, so the page
+// still plays when opened straight from the folder.
 fs.writeFileSync(path.join(stage, 'staticwebapp.config.json'), JSON.stringify({
   navigationFallback: { rewrite: '/index.html' },
   globalHeaders: { 'cache-control': 'public, max-age=300, must-revalidate' },
-  // .mp4 must be declared or SWA serves it as octet-stream — Safari/iOS
-  // refuses to play a <video> whose bytes arrive without a video/* type.
-  mimeTypes: { '.html': 'text/html; charset=utf-8', '.mp4': 'video/mp4' },
+  mimeTypes: { '.html': 'text/html; charset=utf-8' },
 }, null, 2))
 
 const az = (...args) => execFileSync('az', args, { encoding: 'utf8', shell: true }).trim()

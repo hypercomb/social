@@ -144,9 +144,13 @@ withheld wire (kind 30208) needs an enumerable list. Wake exceptions,
 bindings, hidden records: unchanged.
 
 **Deleted from the panel:** the OPEN/×/✓ row buttons, the bind (belongs-here)
-button (bindings still display; `features:bind` remains wired drone-side),
-the add (+) rows, the applied/available section split, store categories, the
-in-use badge, bulk-open.
+button (bindings still display; the drone's `features:bind` listener was
+removed 2026-09-01 after a year with no emitter — bindings are written by
+`/behavior bind` and derived by `ensureWebsiteBoundAt`), the add (+) rows,
+the applied/available section split, store categories, the in-use badge,
+bulk-open. The wake-here writer (`setWakeAt`) went the same day: no UI ever
+called it; the essentials reader still honors existing `hc:behavior-wake`
+records.
 
 ## 2026-08-19 — one control, and the subject in the title
 

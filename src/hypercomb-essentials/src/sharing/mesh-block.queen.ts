@@ -2,8 +2,9 @@
 //
 // Host-driven peer block. Slash command `/block-peer <pubkey>` adds a
 // pubkey (full 64-hex or 8–16 hex prefix) to the dev relay's blocklist
-// and locally evicts every cached peer entry for it. Pair with
-// `/unblock-peer <pubkey>` to lift the block.
+// and locally evicts every cached peer entry for it. The block is
+// one-way: there is no unblock command — restart the dev relay to
+// clear its blocklist.
 //
 // Use case: another browser tab or profile is heartbeating tile events
 // onto your local mesh and you want to silence it without hunting
@@ -30,7 +31,9 @@ const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 
 export class MeshBlockQueenBee {
   readonly command = 'block-peer'
-  readonly aliases = ['blockpeer', 'block-pubkey', 'kick-peer'] as const
+  // Dev-relay-only (see header) — hidden from participant autocomplete;
+  // the auto-wrapper duck-reads this field. Still invokable typed in full.
+  readonly slashHidden = true
   readonly description = 'Block a peer pubkey at the dev relay and drop its tiles locally. Args: full 64-hex or 8–16 hex prefix.'
   readonly descriptionKey = 'slash.block-peer'
 

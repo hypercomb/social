@@ -9,7 +9,6 @@ import { QueenBee, EffectBus } from '@hypercomb/core'
 export class TagsViewQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'tags'
-  override readonly aliases = []
   override description = 'Open the tag view'
   override descriptionKey = 'slash.tags'
   override examples = [

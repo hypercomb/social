@@ -11,7 +11,6 @@ import { QueenBee, EffectBus } from '@hypercomb/core'
 export class ViewsQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'views'
-  override readonly aliases = ['view-library']
   override description = 'Show the views this layer can be drawn as'
 
   protected execute(): void {

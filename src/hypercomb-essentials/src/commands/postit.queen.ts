@@ -66,7 +66,6 @@ const get = <T,>(key: string): T | undefined =>
 export class PostitQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'postit'
-  override readonly aliases = ['sticky', 'note-view']
   override description = 'Post-it — a small sticky on the tile that opens into a full page'
   override options = ['here <text>', 'tile', 'sticky', 'remove', 'on', 'off']
   override examples = [

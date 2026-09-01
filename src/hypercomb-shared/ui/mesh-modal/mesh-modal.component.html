@@ -74,7 +74,8 @@
       <section class="mesh-modal-section">
         <div class="mesh-modal-label-row">
           <label class="mesh-modal-label" for="mesh-modal-secret-input">{{ 'mesh-modal.secret-label' | t }}</label>
-          <span class="mesh-modal-shield material-symbols-outlined" [style.color]="shieldColor()" aria-hidden="true">shield</span>
+          <svg class="mesh-modal-shield" [style.color]="shieldColor()" aria-hidden="true"
+               viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z"/></svg>
         </div>
         <div class="mesh-modal-secret-row">
           <input
@@ -92,7 +93,13 @@
                   type="button"
                   (click)="toggleSecretVisible()"
                   [attr.aria-label]="(secretVisible() ? 'mesh-modal.hide-secret' : 'mesh-modal.show-secret') | t">
-            <span class="material-symbols-outlined">{{ secretVisible() ? 'visibility_off' : 'visibility' }}</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z"/>
+              <circle cx="12" cy="12" r="2.6"/>
+              <!-- struck through = "click to hide", matching the aria-label -->
+              @if (secretVisible()) { <path d="m4 4 16 16"/> }
+            </svg>
           </button>
         </div>
         @if (missingField() === 'secret') {
@@ -111,7 +118,11 @@
            roster (global switches — off = dormant everywhere AND withheld
            from the swarm). The modal stays open; the panel docks beside it. -->
       <button class="mesh-modal-behaviors" type="button" (click)="openSharedBehaviors()">
-        <span class="material-symbols-outlined" aria-hidden="true">tune</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" aria-hidden="true">
+          <path d="M4 7h10M18 7h2M4 17h4M12 17h8"/>
+          <circle cx="16" cy="7" r="2.1"/><circle cx="10" cy="17" r="2.1"/>
+        </svg>
         {{ 'mesh-modal.shared-behaviors' | t }}
       </button>
     }

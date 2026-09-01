@@ -13,7 +13,6 @@ import { EffectBus, QueenBee } from '@hypercomb/core'
 export class SpotlightQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'spotlight'
-  override readonly aliases = []
   override description = 'Light a tile up until it is found'
   override descriptionKey = 'slash.spotlight'
   override options = ['<tile>', '<tile>, <tile>', 'off']

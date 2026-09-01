@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy — Hypercomb</title>
+<meta name="description" content="What Hypercomb stores, what leaves your device, and who can see it.">
+<style>
+  :root {
+    --ink: #16130c; --ink-soft: #4a4335; --rule: #e2dccc;
+    --page: #fbf8f0; --panel: #fffdf7; --gold: #c08b1e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #f2ece0; --ink-soft: #a89e8a; --rule: #33302a;
+      --page: #14120e; --panel: #1c1a15; --gold: #e0a92e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 1.25rem 5rem;
+    background: var(--page); color: var(--ink);
+    font: 16px/1.65 ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  main { max-width: 44rem; margin: 0 auto; }
+  header { padding: 3.5rem 0 2rem; border-bottom: 1px solid var(--rule); }
+  .mark { width: 2.25rem; height: 2.25rem; display: block; margin-bottom: 1.25rem; }
+  h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 .4rem; letter-spacing: -.01em; }
+  .sub { color: var(--ink-soft); margin: 0; font-size: .95rem; }
+  h2 { font-size: 1.15rem; margin: 2.75rem 0 .75rem; letter-spacing: -.005em; }
+  h3 { font-size: 1rem; margin: 1.75rem 0 .5rem; }
+  p, li { color: var(--ink); }
+  .lede { font-size: 1.05rem; }
+  a { color: var(--gold); }
+  ul { padding-left: 1.15rem; }
+  li { margin: .4rem 0; }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .93rem; }
+  th, td { text-align: left; vertical-align: top; padding: .6rem .7rem; border-bottom: 1px solid var(--rule); }
+  th { color: var(--ink-soft); font-weight: 600; }
+  .wrap { overflow-x: auto; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: .6rem; padding: 1rem 1.15rem; margin: 1.25rem 0;
+  }
+  .panel p:first-child { margin-top: 0; }
+  .panel p:last-child { margin-bottom: 0; }
+  footer { margin-top: 3.5rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); color: var(--ink-soft); font-size: .9rem; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .9em; }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <svg class="mark" viewBox="0 0 100 100" aria-hidden="true">
+    <polygon points="50,3 93,27 93,73 50,97 7,73 7,27" fill="#c08b1e"/>
+    <path d="M36 30h9v14h10V30h9v40h-9V54H45v16h-9z" fill="#14120e"/>
+  </svg>
+  <h1>Privacy</h1>
+  <p class="sub">How Hypercomb handles your information. Last updated 1 September 2026.</p>
+</header>
+
+<p class="lede">Hypercomb is a local-first application. Your hive — every tile, note, picture and revision in it — is
+stored on your own device. There is no Hypercomb account, no sign-in, and no server that holds a copy of your work
+by default.</p>
+
+<h2>What we collect</h2>
+
+<p><strong>Nothing.</strong> Hypercomb has no analytics, no telemetry, no crash reporting and no advertising
+identifiers. We do not operate a service that receives your data, and there is no account to attach data to. We
+never ask for your name, email address or payment details, because there is nothing to sign up for.</p>
+
+<p>The application keeps local usage counters — for example, how often you have used a particular behaviour, so it
+can order menus by what you actually use. These counters are written into your own hive on your own disk and are
+never transmitted anywhere.</p>
+
+<h2>Where your hive lives</h2>
+
+<ul>
+  <li><strong>Desktop application.</strong> One database file inside your user profile, on your machine.</li>
+  <li><strong>Web browser.</strong> The browser's private storage for the site (OPFS), on your machine.</li>
+  <li><strong>Backups.</strong> Only in the folder you choose, when you choose it.</li>
+</ul>
+
+<p>Uninstalling the desktop application, or clearing the site's storage in your browser, removes the hive from that
+device. Nothing is retained elsewhere on your behalf.</p>
+
+<h2>What leaves your device, and when</h2>
+
+<p>Every outbound connection Hypercomb makes is one you started. Nothing below happens on its own.</p>
+
+<div class="wrap">
+<table>
+  <tr><th>Action</th><th>What travels</th><th>Who can see it</th></tr>
+  <tr>
+    <td>You publish a page or branch to a host</td>
+    <td>The content you selected, addressed by signature</td>
+    <td>The host you chose, and anyone it serves that content to</td>
+  </tr>
+  <tr>
+    <td>You replicate content from a host</td>
+    <td>Requests for the signatures you need</td>
+    <td>That host sees your IP address and which signatures you asked for</td>
+  </tr>
+  <tr>
+    <td>You choose <em>Serve This Hive</em></td>
+    <td>Your machine accepts connections on a local port until you stop it</td>
+    <td>Anyone who can reach your machine on your network</td>
+  </tr>
+  <tr>
+    <td>You join a shared room on the mesh</td>
+    <td>Encrypted events for that room, via a relay</td>
+    <td>The relay sees encrypted traffic; only people holding the room secret can read it</td>
+  </tr>
+  <tr>
+    <td>You use an AI behaviour</td>
+    <td>The prompt and context you supplied</td>
+    <td>The provider whose tool you connected — under their privacy terms, not ours</td>
+  </tr>
+</table>
+</div>
+
+<h3>The mesh will not speak without a secret</h3>
+
+<p>Hypercomb refuses to subscribe to, or publish on, a shared room unless you have supplied both a room and a
+secret for it. Without both, no mesh traffic is sent or received. This is enforced in the application, not left to
+configuration.</p>
+
+<h3>Serving is off unless you turn it on</h3>
+
+<p><em>Serve This Hive</em> makes your machine a host that other people's browsers and other Hypercomb nodes can
+read from. It runs only while you have it on, stops when you stop it or quit, and Windows will ask you to permit
+the connection the first time. Only content already published from your hive is served.</p>
+
+<h2>Third parties</h2>
+
+<p>The application makes no third-party requests of its own. Fonts, icons and libraries are shipped inside the
+application rather than fetched from a content delivery network, so simply opening Hypercomb contacts nobody.</p>
+
+<p>Connections to hosts, relays and AI providers happen only where you have named one. Those services are operated
+by whoever runs them, under their own terms — including any host you run yourself. Hypercomb has no privileged
+view into them and receives nothing back from them.</p>
+
+<h2>Children</h2>
+
+<p>Hypercomb is not directed at children and collects no information from anyone, including children.</p>
+
+<h2>Your rights</h2>
+
+<p>Because we hold no data about you, there is nothing for us to disclose, correct, export or erase on request.
+Your hive is in your hands: it can be exported to a folder in an open, self-verifying format at any time from
+<em>Hive ▸ Back Up Hive…</em>, and deleted by removing that folder and uninstalling the application.</p>
+
+<h2>Changes</h2>
+
+<p>If this policy changes, the date at the top of this page changes with it. Material changes will be noted in the
+application's release notes.</p>
+
+<div class="panel">
+  <p><strong>Questions about this policy</strong></p>
+  <p>Write to <a href="mailto:PRIVACY_CONTACT_EMAIL">PRIVACY_CONTACT_EMAIL</a>.</p>
+</div>
+
+<footer>
+  Hypercomb is free software, licensed under the GNU Affero General Public License v3.0. The source is public, so
+  every claim on this page can be checked against the code rather than taken on trust.
+</footer>
+
+</main>
+</body>
+</html>

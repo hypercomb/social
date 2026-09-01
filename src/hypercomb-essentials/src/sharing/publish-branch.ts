@@ -38,7 +38,7 @@ import { fetchHiveIndex, putHiveManifest } from './hive-pointer.js'
 import { lineageKey } from '../history/lineage-key.js'
 import { isBranchPublic, setBranchPublic } from '../presentation/tiles/tile-actions.drone.js'
 import { knownRoots, writePublishRecord, type PublishRecord } from './publish-heads.js'
-import { writePublishLights } from '../commands/publish-lights.js'
+import { wornKindsWithin, writePublishLights } from '../commands/publish-lights.js'
 import { readGlobalOnKinds } from './behavior-enablement.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
@@ -197,16 +197,29 @@ export async function publishBranch(
   hostSync.enablePublicHost?.()
 
   // 2. THE LIGHTS TRAVEL WITH THE TREE. Stamp the branch root with the
-  //    behaviours that are on right now, BEFORE sealing, so the mark is
-  //    inside the closure it describes. A visitor's browser is a fresh
-  //    install with no roster: without this it can only guess, and both
-  //    guesses are wrong (nothing lit → shaded hexagons and default art;
-  //    everything lit → not what the publisher arranged). Best-effort — a
-  //    publication that cannot carry its lights is still a publication, and
-  //    the visitor falls back to its own default.
+  //    behaviours it is DRESSED IN, BEFORE sealing, so the mark is inside
+  //    the closure it describes. A visitor's browser is a fresh install
+  //    with no roster: without this it can only guess, and both guesses
+  //    are wrong (nothing lit → shaded hexagons and default art;
+  //    everything lit → not what the publisher arranged).
+  //
+  //    Dressed in — NOT the publisher's whole roster: the stamp is the
+  //    intersection of the branch's own worn kinds (wornKindsWithin walks
+  //    it) with the lights that are on. A legacy hive has ~every kind lit,
+  //    and sealing that list dressed every publication in everything — a
+  //    visitor's Beehaviors list arrived fully lit, drowning a new
+  //    participant in switches for behaviours the site never used.
+  //    Best-effort — a publication that cannot carry its lights is still a
+  //    publication (census unreadable → the full on-list, the old
+  //    behaviour, rather than an empty dressing over a live creation).
   const lit = readGlobalOnKinds()
   if (lit) {
-    try { await writePublishLights(segs, [...lit]) }
+    let lights: string[] = [...lit]
+    try {
+      const worn = await wornKindsWithin(segs)
+      if (worn) lights = [...worn].filter(k => lit.has(k))
+    } catch { /* census is best-effort — fall back to the full on-list */ }
+    try { await writePublishLights(segs, lights) }
     catch { /* the stamp is a courtesy to the reader, never a gate */ }
   }
 

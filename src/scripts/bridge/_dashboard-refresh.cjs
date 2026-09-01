@@ -381,10 +381,10 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Dashboard — Relational Intelligence</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=Inter:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block">
+<!-- No web fonts: a Google link hands them every reader's IP, UA and Referer.
+     --serif/--sans resolve to faces the reader already has, and the Material
+     Symbols link was dead weight — icons here render as inline SVG via
+     iconSvg(), never as ligatures. See documentation/no-third-party-requests.md. -->
 <script>${PAINT_SCRIPT}</script>
 <link rel="stylesheet" href="resource:${chromeSig}/chrome.css">
 <style>

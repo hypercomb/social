@@ -104,8 +104,9 @@
 }
 
 .mesh-modal-shield {
-  font-size: 1rem;
-  line-height: 1;
+  width: 1rem;
+  height: 1rem;
+  display: block;
   transition: color 200ms ease;
 }
 
@@ -171,8 +172,10 @@
   cursor: pointer;
   transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
 
-  .material-symbols-outlined {
-    font-size: 1.05rem;
+  svg {
+    width: 1.05rem;
+    height: 1.05rem;
+    display: block;
   }
 
   &:hover {
@@ -274,8 +277,10 @@
   font-size: 0.68rem;
   cursor: pointer;
 
-  .material-symbols-outlined {
-    font-size: 0.9rem;
+  svg {
+    width: 0.9rem;
+    height: 0.9rem;
+    flex: none;
   }
 
   &:hover {

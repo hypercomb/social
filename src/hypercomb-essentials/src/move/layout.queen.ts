@@ -34,7 +34,6 @@ export class LayoutQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'movement'
   readonly command = 'layout'
-  override readonly aliases = []
   override description = 'Save, apply, list, or remove layout templates'
   override descriptionKey = 'slash.layout'
   override options = ['save <name>', 'apply <name>', '<name>', 'list', 'remove <name>']

@@ -2,6 +2,7 @@
 //
 //   scenes/scene-NN.json   — one chunk per scene: { n, name, chapter, say }
 //   template.html          — layout + player engine (visual chunks live here)
+//   hosts.json             — the doors under hypercomb.com (hosts.cjs derives them)
 //   media/*.mp4            — live-capture clips
 //   audio-cache/<h16>.mp3  — narration audio, named by sha256(voice|say)
 //   dist/hypercomb-presentation.html — the assembled, self-contained deliverable
@@ -10,11 +11,13 @@
 // that scene's audio is regenerated; everything else is a cache hit. Same
 // content, same hash, no work: the signature idea applied to the build.
 //
-//   node scripts/presentation/build.cjs           # assemble (regenerates stale audio)
-//   node scripts/presentation/build.cjs --check   # report stale audio without network
+//   node scripts/presentation/build.cjs             # assemble (regenerates stale audio)
+//   node scripts/presentation/build.cjs --check     # report stale audio without network
+//   node scripts/presentation/build.cjs --no-hosts  # assemble from the committed hosts.json
 const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
+const hosts = require('./hosts.cjs')
 
 const ROOT = __dirname
 const VOICE = 'en-US-AndrewMultilingualNeural'
@@ -180,9 +183,29 @@ function sceneObject(s) {
   return o
 }
 
-function assemble() {
+// --- the zone directory ------------------------------------------------------
+// Every hive published under hypercomb.com is a door on the splash. The list is
+// derived and PROVEN by hosts.cjs and baked in here, because the page itself is
+// one self-contained file that asks nobody for anything at view time.
+function doorsHtml(doors) {
+  if (!doors.length) return ''
+  // a new tab: a door is a place to go, not a way to lose the deck you are watching
+  const chip = d => `
+      <a class="door" href="https://${esc(d.host)}/" target="_blank" rel="noopener">` +
+    `<b>${esc(d.title)}</b><span>${esc(d.host)}</span></a>`
+  return `  <nav id="doors" aria-label="Hives published on ${hosts.ZONE}">
+` +
+    `    <p class="lbl">live on ${hosts.ZONE} · ${doors.length} ${doors.length === 1 ? 'hive' : 'hives'}</p>
+` +
+    `    <div id="doorrow">${doors.map(chip).join('')}
+    </div>
+  </nav>`
+}
+
+function assemble(doors) {
   let html = fs.readFileSync(path.join(ROOT, 'template.html'), 'utf8')
-  html = html.replace('{{SCENES}}', JSON.stringify(scenes.map(sceneObject), null, 1))
+  html = html.replace('{{SCENES}}', () => JSON.stringify(scenes.map(sceneObject), null, 1))
+  html = html.replace('{{DOORS}}', () => doorsHtml(doors))
   const vuri = f => 'data:video/mp4;base64,' + fs.readFileSync(path.join(ROOT, 'media', f)).toString('base64')
   const auri = s => 'data:audio/mpeg;base64,' + fs.readFileSync(cachePath(s.say)).toString('base64')
   html = html
@@ -196,8 +219,18 @@ function assemble() {
     .replace('{{AUDIO_JSON}}', JSON.stringify(scenes.map(auri)))
   const out = path.join(ROOT, 'dist', 'hypercomb-presentation.html')
   fs.writeFileSync(out, html)
-  console.log(`assembled ${out} (${(fs.statSync(out).size / 1e6).toFixed(2)} MB, ${scenes.length} scenes)`)
+  console.log(`assembled ${out} (${(fs.statSync(out).size / 1e6).toFixed(2)} MB, ${scenes.length} scenes, ${doors.length} door(s))`)
 }
 
-ensureAudio().then(() => { if (!process.argv.includes('--check')) assemble() })
+// The directory is refreshed on every build so a hive published today is on the
+// page today — but a build must never fail because a host was slow, so an
+// unreachable ledger falls back to the committed list and says so.
+async function currentDoors() {
+  if (process.argv.includes('--no-hosts')) return hosts.load().doors
+  try { return (await hosts.refresh()).doors }
+  catch (e) { console.warn(`hosts: ${e.message} — using the committed hosts.json`); return hosts.load().doors }
+}
+
+ensureAudio()
+  .then(async () => { if (!process.argv.includes('--check')) assemble(await currentDoors()) })
   .catch(e => { console.error('build failed:', e.message); process.exit(1) })

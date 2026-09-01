@@ -136,6 +136,24 @@ AI_WRITERS = ""
 
 # The relay hostname is deliberately absent: it must retain signed PUT routes.
 #
+# `routed` / `wildcard` (both default true) SAY WHAT IS DEPLOYED — a binding
+# whose route is commented out above resolves in the worker and is never reached
+# from the outside, and Cloudflare does not hand a script its own routes. They
+# gate what /publications.json ADVERTISES, never what the worker serves, so a
+# request that does arrive is still answered. KEEP THEM IN STEP WITH THE ROUTES:
+# uncommenting a route above without clearing its flag here leaves a live door
+# missing from the directory, and the reverse advertises one nobody can dial.
+#   hypercomb.com    routed:false  — apex still `A → Azure`; it answers 200 with the
+#                                    Azure page, so a status code proves NOTHING here
+#   realones.online  both false    — anchor apex, and the `*` route is disabled
+#
+# replication.hypercomb.com carries NO flag on purpose, even though its own
+# custom-domain route is commented out above: a commented route is not the test.
+# `*.hypercomb.com/*` matches it, so the request reaches this worker and the exact
+# binding serves it. Verified — it answers `application/json`, where the apex
+# answers `text/html` from Azure. A named host under a wildcard-routed zone is
+# reachable; only the APEX needs its own route, because `*` never matches it.
+#
 # realones.online is a ZONE ANCHOR, not a site: it exists so resolveSite can
 # find the zone behind a `<label>.realones.online` request, and its apex is
 # never routed. Its lineage is deliberately the unreachable key
@@ -143,4 +161,4 @@ AI_WRITERS = ""
 # so no hive location can ever mint a lineage containing a dot. A plausible
 # anchor lineage like "realones" would instead sit in the publications ledger's
 # `named` set and silently deny a real hive of that name its plate.
-SITE_BINDINGS = '{"pluginthematrix.com":{"title":"Plugin the Matrix","lineage":"pluginthematrix","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"revolucion.pluginthematrix.com":{"title":"Revolución","lineage":"revolucion","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"meetup.pluginthematrix.com":{"title":"Meetup","lineage":"revolucion/meetup","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"arkanoid.pluginthematrix.com":{"title":"Arkanoid","lineage":"games/arkanoid","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"realones.online":{"title":"Real Ones","lineage":"realones.online","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"hypercomb.com":{"title":"Hypercomb","lineage":"hypercomb","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"replication.hypercomb.com":{"title":"Replication by Signature","lineage":"hypercomb/architecture/replication-by-signature","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]}}'
+SITE_BINDINGS = '{"pluginthematrix.com":{"title":"Plugin the Matrix","lineage":"pluginthematrix","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"revolucion.pluginthematrix.com":{"title":"Revolución","lineage":"revolucion","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"meetup.pluginthematrix.com":{"title":"Meetup","lineage":"revolucion/meetup","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"arkanoid.pluginthematrix.com":{"title":"Arkanoid","lineage":"games/arkanoid","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"realones.online":{"title":"Real Ones","lineage":"realones.online","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"routed":false,"wildcard":false},"hypercomb.com":{"title":"Hypercomb","lineage":"hypercomb","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}],"routed":false},"replication.hypercomb.com":{"title":"Replication by Signature","lineage":"hypercomb/architecture/replication-by-signature","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]}}'

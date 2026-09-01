@@ -71,3 +71,13 @@ bundles is two copies of its module state, and the record would never arrive.
 Verify: `node scripts/drive-tree-exit-spawn.cjs --url http://localhost:4251`
 (9/9 on a live shell — step-in from the hexagons, step-in from a view, typed
 `/tree`, travel) plus `view-spawn.spec.ts`.
+
+## The same answer for a dive
+
+Holding **Alt** over a tile dives into the layers under it without moving
+(`wave-view.md`). Clicking a dived tile executes it as if it stood in front of
+you, and when the destination opens as a view the wave view announces the
+same `view:spawn` record before it travels — naming the **page the dive was
+made from**, not the tile's own page. Closing that view comes back out where
+the dive was made, which is what lets a dive be a way to *go and activate
+something and stay*.

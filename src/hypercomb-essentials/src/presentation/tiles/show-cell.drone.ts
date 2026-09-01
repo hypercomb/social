@@ -90,6 +90,23 @@ const ARRIVAL_GATE_MS = 2500
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
 type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean; plain?: boolean; pendingProps?: boolean }
+
+/** One tile of a DIVE (`render:dive`, wave-view): what another layer's tile
+ *  needs to be painted HERE, in the page's own slots, by the page's own
+ *  shader. Only what the packer reads — everything location-scoped
+ *  (selection, shade, peer colour, hidden dimming) belongs to the page
+ *  underneath and is deliberately absent. */
+export type DiveCell = {
+  q: number
+  r: number
+  label: string
+  imageSig?: string
+  hasBranch: boolean
+  hideText: boolean
+  borderColor?: [number, number, number]
+  /** A reference tile — hovers with the portal shimmer, as on its own page. */
+  portal: boolean
+}
 type ReferenceDraftPreview = {
   name: string
   imageSig?: string
@@ -716,8 +733,8 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'clipboard:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply']
-  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'landing:pending']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'clipboard:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover']
+  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'landing:pending', 'render:dive-painted']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
@@ -1043,6 +1060,23 @@ export class ShowCellDrone extends Drone {
   // screen: the hive layer is hidden and synchronize-driven renders short-
   // circuit so nothing flips it back. Cleared via render:set-hive-visible.
   #hiveHidden = false
+
+  // ── DIVE (wave-view) — another layer's tiles painted IN PLACE of this one ──
+  // The wave view resolves a generation and asks for it with `render:dive`;
+  // this drone paints it through the SAME shader, atlases and geometry packer
+  // the page uses, so a dive IS the tiles underneath rather than a picture of
+  // them. The page's mesh is hidden (never torn down), the atlases pin the
+  // union of page and dive, and synchronize-driven renders are deferred until
+  // the dive ends — which restores the mesh, the pins and the hover exactly.
+  #diveActive = false
+  #diveHidMain = false
+  #diveMesh: any | null = null
+  #diveGeom: Geometry | null = null
+  #diveCells: Cell[] = []
+  #divePortals: ReadonlySet<string> = new Set<string>()
+  readonly #diveLabelToIndex = new Map<string, number>()
+  #diveHoverLabel: string | null = null
+  #diveToken = 0
 
   /** A lightweight snapshot of the tiles currently painted at this node —
    *  axial coords, label, image signature, and whether text is suppressed.
@@ -2829,6 +2863,11 @@ export class ShowCellDrone extends Drone {
     // A takeover feature (screensaver) owns the screen — keep the hive hidden
     // and do no work. A queued requestRender fires on restore (set-hive-visible).
     if (this.#hiveHidden) { if (this.layer) this.layer.visible = false; return }
+    // A DIVE owns the surface (wave-view): the page's mesh stays hidden and its
+    // state untouched until the dive ends, which re-requests this pass.
+    // Painting now would re-show the mesh under the dive and re-pin the
+    // atlases against the page alone.
+    if (this.#diveActive) return
     if (!this.pixiApp || !this.pixiContainer || !this.pixiRenderer) {
       this.clearMesh("synchronize: pixi not ready")
       return
@@ -5726,6 +5765,16 @@ export class ShowCellDrone extends Drone {
       }
       if (this.layer) this.layer.visible = true
       this.requestRender()
+    })
+
+    // render:dive — the wave view asks for another layer's generation to be
+    // painted in this page's slots (null = give the page back). Hover rides
+    // separately so a pointer move never re-resolves a generation.
+    this.onEffect<{ cells?: readonly DiveCell[] | null }>('render:dive', (payload) => {
+      void this.#paintDive(payload?.cells ?? null)
+    })
+    this.onEffect<{ label?: string | null }>('render:dive-hover', (payload) => {
+      this.#hoverDive(payload?.label ?? null)
     })
 
     // viewport:persisted — VP just wrote pan/zoom/meshOffset for some
@@ -8747,8 +8796,29 @@ export class ShowCellDrone extends Drone {
 
   private buildCellsFromAxial = (axial: any, names: string[], max: number, localCellSet: Set<string>, branchSet?: Set<string>): Cell[] => {
     const out: Cell[] = []
-    // during move drag, use reordered names so labels map to correct indices
-    const effectiveNames = this.#effectivePreviewNames() ?? names
+    // A preview — a move drag, or an arrangement being activated — is a SPARSE
+    // slot array: the index IS the grid slot and an empty string is a slot
+    // deliberately left free. While one is up it is AUTHORITATIVE for every
+    // slot: a missing entry means EMPTY, never "fall back to where that tile
+    // used to sit". The old per-slot fallback drew a tile at its new slot AND
+    // its old one whenever the new arrangement packed tighter than the
+    // committed one — the arrangement doubling up and leaving the previous
+    // shape behind. Symmetrically, walking only to the COMMITTED length cut
+    // every tile the new arrangement had placed past it. So the walk is sized
+    // by whichever array is authoritative, bounded by the grid.
+    const preview = this.#effectivePreviewNames()
+    const effectiveNames = preview ?? names
+    const gridMax = typeof axial?.items?.size === 'number' ? axial.items.size : effectiveNames.length
+    // A preview array is grid-length (move) or highest-slot-length (arrange);
+    // either way only the slots up to its LAST occupant can produce a tile, so
+    // the walk stops there rather than at the raw length.
+    let previewEnd = 0
+    if (preview) {
+      for (let i = preview.length - 1; i >= 0; i--) {
+        if (preview[i]) { previewEnd = i + 1; break }
+      }
+    }
+    const walk = Math.min(Math.max(max, previewEnd), gridMax)
     // Clustered-island layout for the ordered help page — placed by label, so
     // grouping reads the committed `names` order (a transient move-drag never
     // rescrambles the islands). Null on every other page ⇒ the spiral below.
@@ -8766,17 +8836,17 @@ export class ShowCellDrone extends Drone {
     // render entirely — those tiles only appear when a later pass renders
     // with a bigger axial map. This is the "second stage" of a two-stage
     // load: a score-filled tile placed past the axial size waits here.
-    const beyondMax = names.slice(max).map((l, off) => l ? `${l}@${max + off}` : '').filter(Boolean)
-    if (beyondMax.length) console.info(`[layout] axial-truncated (slots ≥ ${max}):`, beyondMax.join(', '))
+    const beyondMax = effectiveNames.slice(walk).map((l, off) => l ? `${l}@${walk + off}` : '').filter(Boolean)
+    if (beyondMax.length) console.info(`[layout] axial-truncated (slots ≥ ${walk}):`, beyondMax.join(', '))
 
-    for (let i = 0; i < max; i++) {
-      const label = effectiveNames[i] ?? names[i]
+    for (let i = 0; i < walk; i++) {
+      const label = preview ? (preview[i] ?? '') : names[i]
       // On a clustered launcher page the tile sits at its island coordinate
       // (resolved by label); everywhere else it takes the axial spiral slot i.
       const override = cluster?.coords.get(label)
       const a = override ?? (axial.items.get(i) as Axial | undefined)
       if (!a) {
-        const dropped = names.slice(i).map((l, off) => l ? `${l}@${i + off}` : '').filter(Boolean)
+        const dropped = effectiveNames.slice(i).map((l, off) => l ? `${l}@${i + off}` : '').filter(Boolean)
         if (dropped.length) console.info(`[layout] axial-dropped (no coords from slot ${i}):`, dropped.join(', '))
         break
       }
@@ -10739,7 +10809,14 @@ export class ShowCellDrone extends Drone {
     ? { x: 1.5 * s * q, y: Math.sqrt(3) * s * (r + q / 2) }
     : { x: Math.sqrt(3) * s * (q + r / 2), y: s * 1.5 * r }
 
-  private buildFillQuadGeometry(cells: Cell[], r: number, gap: number, hw: number, hh: number): Geometry {
+  /** `foreign` — the cells belong to ANOTHER layer (a dive): read nothing
+   *  location-scoped for them (selection, shade, peers, hidden dimming,
+   *  launcher shapes, the page's hover) and overwrite none of the page's
+   *  buffer bookkeeping; portals and the hover-reveal come from the caller. */
+  private buildFillQuadGeometry(
+    cells: Cell[], r: number, gap: number, hw: number, hh: number,
+    foreign?: { portals: ReadonlySet<string>; reveal: string | null },
+  ): Geometry {
     const spacing = r + gap
 
     const selectionService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
@@ -10751,7 +10828,8 @@ export class ShowCellDrone extends Drone {
     // "susan") — resolving shapes off `agg-` pages leaked the group theme
     // onto normal hive tiles. Gate here, the one place aShapeMode is baked.
     const gateSegs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
-    const onLauncherPage = isLauncherLocation(gateSegs)
+    const onLauncherPage = !foreign && isLauncherLocation(gateSegs)
+    const revealLabel = foreign ? foreign.reveal : this.#hoverRevealLabel
 
     const pos = new Float32Array(cells.length * 8)
     const uv = new Float32Array(cells.length * 8)
@@ -10780,7 +10858,7 @@ export class ShowCellDrone extends Drone {
     let pv = 0, uvp = 0, luvp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, bcp = 0, cip = 0, dp = 0, ii = 0, base = 0, sap = 0, pp = 0
     let ci = 0
 
-    this.#shadedLabels.clear()
+    if (!foreign) this.#shadedLabels.clear()
 
     for (const c of cells) {
       const { x, y } = this.axialToPixel(c.q, c.r, spacing, this.#flat)
@@ -10802,10 +10880,10 @@ export class ShowCellDrone extends Drone {
       // rebuild mid-hover does not blink the text back off, and TEXT-ONLY mode
       // exempts every tile (#hidesName): with no image drawn there is nothing
       // to hide behind, so a hidden name comes back for as long as the mode is on.
-      const atlasLabel = this.#pendingCellMutations.has(c.label) && !this.atlas!.hasLabel(c.label)
+      const atlasLabel = !foreign && this.#pendingCellMutations.has(c.label) && !this.atlas!.hasLabel(c.label)
         ? PENDING_CELL_LABEL
         : c.label
-      const ruv = (this.#hidesName(c.hideText, !!imgUV) && c.label !== this.#hoverRevealLabel)
+      const ruv = (this.#hidesName(c.hideText, !!imgUV) && c.label !== revealLabel)
         ? { u0: 0, v0: 0, u1: 0, v1: 0 }
         : this.atlas!.getLabelUV(atlasLabel)
       for (let i = 0; i < 4; i++) {
@@ -10827,7 +10905,7 @@ export class ShowCellDrone extends Drone {
 
       let [cr, cg, cb] = labelToRgb(c.label)
       // gray out hidden items when show-hidden is active
-      const isHiddenItem = this.#showHiddenItems && this.#currentHiddenSet.has(c.label)
+      const isHiddenItem = !foreign && this.#showHiddenItems && this.#currentHiddenSet.has(c.label)
       if (isHiddenItem) {
         const gray = cr * 0.3 + cg * 0.3 + cb * 0.3
         cr = gray * 0.5; cg = gray * 0.5; cb = gray * 0.5
@@ -10857,7 +10935,7 @@ export class ShowCellDrone extends Drone {
       // brightness; other peer groups dim slightly so the active layer
       // pops without losing the rest. Own tiles keep their normal
       // borderColor (label or substrate-derived).
-      const cellPubkey = this.#peerPubkeyByLabel.get(c.label)
+      const cellPubkey = foreign ? undefined : this.#peerPubkeyByLabel.get(c.label)
       if (cellPubkey) {
         const [pr, pg, pb] = labelToRgb(cellPubkey)
         const brightness = this.#spotlightPubkey === null
@@ -10867,7 +10945,7 @@ export class ShowCellDrone extends Drone {
         bcr = pr * brightness
         bcg = pg * brightness
         bcb = pb * brightness
-      } else if ((this.#stackDepthByLabel.get(c.label) ?? 0) > 1) {
+      } else if (!foreign && (this.#stackDepthByLabel.get(c.label) ?? 0) > 1) {
         // Yours is the version showing, but other participants hold
         // this tile too. Mark the depth on the border so a stacked tile
         // is findable without hovering every hex — this is the whole
@@ -10892,9 +10970,9 @@ export class ShowCellDrone extends Drone {
       // Continuous 0..1 — a tile mid-fade keeps its current fade value across a
       // geometry rebuild, so a repaint that happens to land during the fade
       // never snaps it to full.
-      const sh = this.#shadeValueFor(c)
+      const sh = foreign ? 0 : this.#shadeValueFor(c)
       shaded.set([sh, sh, sh, sh], dp)
-      if (this.#cellIsShaded(c)) this.#shadedLabels.add(c.label)
+      if (!foreign && this.#cellIsShaded(c)) this.#shadedLabels.add(c.label)
       dp += 4
 
       // Per-tile launcher silhouette. Only launcher tiles carry a launch:target
@@ -10906,7 +10984,7 @@ export class ShowCellDrone extends Drone {
       // Reference/portal tiles hover with the magical shimmer (see hex-sdf
       // fragment). referenceTargetForLabel returns the target segments (or null
       // for a non-reference) from the same decoration index the click path uses.
-      const pv2 = referenceTargetForLabel(c.label) !== null ? 1 : 0
+      const pv2 = (foreign ? foreign.portals.has(c.label) : referenceTargetForLabel(c.label) !== null) ? 1 : 0
       portal.set([pv2, pv2, pv2, pv2], pp)
       pp += 4
 
@@ -10935,11 +11013,151 @@ export class ShowCellDrone extends Drone {
 
     // save buffer references + label→index map so tile:saved can push
     // in-place attribute updates to the GPU without rebuilding geometry
-    this.#buf = { pos, labelUV, imageUV, hasImage, heat, identityColor, branch, borderColor, divergence, shaded }
-    this.#labelToIndex.clear()
-    for (let i = 0; i < cells.length; i++) this.#labelToIndex.set(cells[i].label, i)
+    // A dive's buffers are its own (see #diveLabelToIndex) — the page's
+    // in-place update path must keep pointing at the page's geometry.
+    if (!foreign) {
+      this.#buf = { pos, labelUV, imageUV, hasImage, heat, identityColor, branch, borderColor, divergence, shaded }
+      this.#labelToIndex.clear()
+      for (let i = 0; i < cells.length; i++) this.#labelToIndex.set(cells[i].label, i)
+    }
 
     return g
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // DIVE — paint another layer's generation in this page's slots
+  // ─────────────────────────────────────────────────────────────────────
+
+  /** Paint a dive (or, with nothing to paint, give the page back). The
+   *  generation lands WHOLE: every label baked and every picture decoded
+   *  before the page's mesh is hidden, so a dive never trickles in over the
+   *  tiles it replaces. Same slots, same offset, same shader — a dive is
+   *  indistinguishable from the page it previews. */
+  async #paintDive(input: readonly DiveCell[] | null): Promise<void> {
+    const token = ++this.#diveToken
+    if (!input || input.length === 0) { this.#clearDive(); return }
+    const atlas = this.atlas, imageAtlas = this.imageAtlas
+    if (!this.layer || !this.hexMesh || !this.shader || !atlas || !imageAtlas) { this.#clearDive(); return }
+
+    const cells: Cell[] = input.map(d => ({
+      q: d.q, r: d.r, label: d.label, external: false, imageSig: d.imageSig,
+      hasBranch: d.hasBranch, hideText: d.hideText, borderColor: d.borderColor, heat: 0,
+    }))
+    const portals = new Set(input.filter(d => d.portal).map(d => d.label))
+
+    // Pin the UNION of what is on screen and what is about to be: neither the
+    // page underneath nor the dive may lose its glyphs or pixels to the other.
+    const pageSigs = [...this.renderedCells.values()].flatMap(c => (c.imageSig ? [c.imageSig] : []))
+    atlas.setPinned([...this.renderedCells.keys(), ...cells.map(c => c.label), PENDING_CELL_LABEL])
+    imageAtlas.setPinned([...pageSigs, ...cells.flatMap(c => (c.imageSig ? [c.imageSig] : []))])
+    for (const c of cells) atlas.getLabelUV(c.label)
+
+    await Promise.all(cells.map(async (c) => {
+      const sig = c.imageSig
+      if (!sig || imageAtlas.hasImage(sig) || imageAtlas.hasFailed(sig)) return
+      try {
+        const blob = await this.#localDecodeBlob(sig)
+        if (blob) await imageAtlas.loadImage(sig, blob)
+      } catch { /* label-only, exactly as the page would paint it */ }
+    }))
+    if (token !== this.#diveToken) return
+    if (!this.layer || !this.hexMesh || !this.shader) { this.#clearDive(); return }
+
+    this.#diveCells = cells
+    this.#divePortals = portals
+    this.#rebuildDiveGeometry()
+    if (!this.#diveHidMain) { this.#diveHidMain = true; this.hexMesh.visible = false }
+    this.#diveActive = true
+    this.#applyDiveHover()
+    this.emitEffect('render:dive-painted', { count: cells.length })
+  }
+
+  /** (Re)pack the dive's geometry through the page's own packer, in FOREIGN
+   *  mode — nothing location-scoped is read and nothing of the page's buffer
+   *  bookkeeping is overwritten — and put it on a mesh that shares the page's
+   *  shader, at the page's own mesh offset. */
+  #rebuildDiveGeometry(): void {
+    if (!this.layer || !this.hexMesh || !this.shader) return
+    const { circumRadiusPx, gapPx, padPx } = this.#hexGeo
+    const pointReachPx = circumRadiusPx / 0.8660254
+    const hexHalfW = this.#flat ? pointReachPx : circumRadiusPx
+    const hexHalfH = this.#flat ? circumRadiusPx : pointReachPx
+    const geom = this.buildFillQuadGeometry(
+      this.#diveCells, circumRadiusPx, gapPx, hexHalfW + padPx, hexHalfH + padPx,
+      { portals: this.#divePortals, reveal: this.#diveHoverLabel },
+    )
+    this.#diveLabelToIndex.clear()
+    this.#diveCells.forEach((c, i) => this.#diveLabelToIndex.set(c.label, i))
+    if (!this.#diveMesh) {
+      this.#diveMesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: Texture.WHITE as any } as any)
+      ;(this.#diveMesh as any).blendMode = 'pre-multiply'
+      this.layer.addChild(this.#diveMesh as any)
+    } else {
+      this.#diveMesh.geometry = geom
+      this.#diveMesh.shader = (this.shader as any).shader
+    }
+    if (this.#diveGeom) { try { this.#diveGeom.destroy(true) } catch { /* gone */ } }
+    this.#diveGeom = geom
+    this.#diveMesh.position.set(this.hexMesh.position.x, this.hexMesh.position.y)
+    this.#diveMesh.visible = true
+  }
+
+  /** The dived tile under the pointer. A picture-only tile reveals its name
+   *  while hovered, as on its own page — that is a label-UV change, so the
+   *  geometry is repacked (pure CPU, no I/O) only when the hover leaves or
+   *  lands on such a tile. */
+  #hoverDive(label: string | null): void {
+    if (label === this.#diveHoverLabel) return
+    const hides = (l: string | null): boolean => {
+      const c = l ? this.#diveCells.find(x => x.label === l) : undefined
+      return !!c && this.#hidesName(c.hideText, !!(c.imageSig && this.imageAtlas?.hasImage(c.imageSig)))
+    }
+    const repack = this.#diveActive && (hides(this.#diveHoverLabel) || hides(label))
+    this.#diveHoverLabel = label
+    if (repack) this.#rebuildDiveGeometry()
+    if (this.#diveActive) this.#applyDiveHover()
+  }
+
+  #applyDiveHover(): void {
+    const i = this.#diveHoverLabel ? this.#diveLabelToIndex.get(this.#diveHoverLabel) : undefined
+    this.shader?.setHoveredIndex(i ?? -1)
+  }
+
+  /** Give the page back exactly as it was: its mesh, its pins, its hover —
+   *  and the render pass a synchronize may have queued while the dive owned
+   *  the surface. Safe to call twice. */
+  #clearDive(): void {
+    this.#diveToken++
+    const wasActive = this.#diveActive
+    this.#diveActive = false
+    if (this.#diveMesh) {
+      try { this.layer?.removeChild(this.#diveMesh) } catch { /* gone */ }
+      try { this.#diveMesh.destroy?.() } catch { /* gone */ }
+      this.#diveMesh = null
+    }
+    if (this.#diveGeom) {
+      try { this.#diveGeom.destroy(true) } catch { /* gone */ }
+      this.#diveGeom = null
+    }
+    this.#diveCells = []
+    this.#divePortals = new Set<string>()
+    this.#diveLabelToIndex.clear()
+    this.#diveHoverLabel = null
+    if (this.#diveHidMain) {
+      this.#diveHidMain = false
+      if (this.hexMesh && this.renderedCount > 0) this.hexMesh.visible = true
+    }
+    // Announced even when nothing was up: a dive that could not be painted
+    // (no mesh yet, no shader) reads as "the page is showing" to the wave
+    // view, which then lets go of the pointer instead of holding a dive that
+    // never landed.
+    this.emitEffect('render:dive-painted', { count: 0 })
+    if (!wasActive) return
+    this.atlas?.setPinned([...this.renderedCells.keys(), PENDING_CELL_LABEL])
+    this.imageAtlas?.setPinned([...this.renderedCells.values()].flatMap(c => (c.imageSig ? [c.imageSig] : [])))
+    const restored = this.#hoverRevealLabel ? this.#labelToIndex.get(this.#hoverRevealLabel) : undefined
+    this.shader?.setHoveredIndex(restored ?? -1)
+    this.requestRender()
   }
 
   // ─────────────────────────────────────────────────────────────────────
