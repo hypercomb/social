@@ -32,7 +32,6 @@ const get = (key: string) => (window as any).ioc?.get?.(key)
 export class AccentQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'accent'
-  override readonly aliases = []
   override description = 'Set the hover accent color by name'
   override options = ['<color name>']
   override examples = [{ input: '/accent teal', result: 'Hover accent turns teal' }]

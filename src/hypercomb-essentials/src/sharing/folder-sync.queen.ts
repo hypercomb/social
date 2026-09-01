@@ -12,7 +12,6 @@ import {
 export class FolderSyncQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'folder-sync'
-  override readonly aliases = ['folder', 'backup-folder', 'offline-backup']
   override readonly description =
     'Back up the complete local hive to a private folder, USB disk, NAS, or cloud-synced directory'
   override readonly options = ['hard-copy', 'local', 'status', 'connect', 'resume', 'sync', 'now', 'verify', 'import', 'disconnect']
@@ -33,8 +32,7 @@ export class FolderSyncQueenBee extends QueenBee {
     // The command itself is an action, not a status page. `resume` is the
     // smart entry point: it reuses a remembered handle, requests permission
     // again when the browser requires it, and opens the picker when no handle
-    // has ever been selected. The short `/folder sync` spelling reaches the
-    // same path through the `folder` alias.
+    // has ever been selected.
     const requested = raw.trim().toLowerCase()
     if (!requested) {
       EffectBus.emit('folder-sync:open', {})

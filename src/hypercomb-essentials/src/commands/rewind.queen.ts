@@ -15,7 +15,6 @@ import { EffectBus, QueenBee } from '@hypercomb/core'
 export class RewindQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'rewind'
-  override readonly aliases = []
   override description = 'Open the visual rewind window'
   override descriptionKey = 'slash.rewind'
   override examples = [{ input: '/rewind', result: 'Rewind window opens; repeat to hide it' }]

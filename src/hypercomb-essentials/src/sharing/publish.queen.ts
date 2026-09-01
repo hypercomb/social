@@ -15,7 +15,6 @@ import { EffectBus } from '@hypercomb/core'
 
 export class PublishQueenBee {
   readonly command = 'publish'
-  readonly aliases = ['published', 'live', 'publish-status'] as const
   readonly description =
     'Show what your published hive is serving right now, next to what has changed here since — one row per branch, with publish, re-check and unpublish per row.'
   readonly descriptionKey = 'slash.publish'

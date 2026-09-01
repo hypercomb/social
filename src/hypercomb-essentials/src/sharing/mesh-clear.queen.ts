@@ -45,7 +45,6 @@ export class MeshClearQueenBee {
   // fields into a slash provider at command-parse time. No mirror
   // entry needed in the manual provider list.
   readonly command = 'clear-mesh'
-  readonly aliases = ['clearmesh', 'clear-relay', 'wipe-mesh'] as const
   readonly description = 'Wipe the dev relay event store and drop all peer caches. Live peers will reappear on their next heartbeat (≤30s).'
   readonly descriptionKey = 'slash.clear-mesh'
 

@@ -51,7 +51,6 @@ type MoveShape = {
 export class IntoQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'into'
-  override readonly aliases = ['file']
   override description = 'Move the selected tiles inside another tile — they leave this page'
   override descriptionKey = 'slash.into'
   override options = ['<cell>', '<path>/<cell>']

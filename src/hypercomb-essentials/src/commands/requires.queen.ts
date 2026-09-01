@@ -150,7 +150,6 @@ type ReferencePayloadShape = {
 export class RequiresQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'requires'
-  override readonly aliases = ['require']
   override description = 'Manage the pheromones a reference demands of what it shows'
   override descriptionKey = 'slash.requires'
   override options = ['<cell>', '<cell> = <marks>', '<cell> = @<bouquet>', '<cell> + <mark>', '<cell> ~ <mark>']

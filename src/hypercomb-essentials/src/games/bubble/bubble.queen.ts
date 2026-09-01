@@ -15,7 +15,6 @@ const get = (key: string) => (window as any).ioc?.get?.(key)
 export class BubbleQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'bubble'
-  override readonly aliases = ['bobble']
   override description = 'Bubble Bobble — blow bubbles, trap foes, clear the screen'
   override descriptionKey = 'slash.bubble'
   override options = ['on', 'off', 'design']

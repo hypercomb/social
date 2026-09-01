@@ -189,7 +189,6 @@ registerCommandRoot('background', backgroundObject)
 export class BackgroundQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'background'
-  override readonly aliases = []
   override description = 'Choose what is behind the hive and what fills a blank tile'
   override descriptionKey = 'slash.background'
   override options = [

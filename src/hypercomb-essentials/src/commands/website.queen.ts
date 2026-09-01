@@ -348,7 +348,6 @@ async function walkLayer(
 export class WebsiteQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'website'
-  override readonly aliases = []
   override description =
     'Toggle the website view, export the current subtree as JSON, or trigger a Claude codegen build. Bundle stamping was removed; per-cell pages live on each cell\'s `context` slot.'
   override descriptionKey = 'slash.website'

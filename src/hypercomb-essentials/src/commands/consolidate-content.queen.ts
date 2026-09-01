@@ -28,7 +28,6 @@ import { QueenBee } from '@hypercomb/core'
 export class ConsolidateContentQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'consolidate-content'
-  override readonly aliases = ['retire-content-pools', 'migrate-content']
   override description = 'Relocate leftover legacy content (resources, layers, hive roots) up to the flat OPFS root and retire the drained folders'
   override examples = [{ input: '/consolidate-content', result: 'Copies legacy content up to the flat OPFS root' }]
   // Maintenance utility — keep it out of autocomplete so a stray tab-complete

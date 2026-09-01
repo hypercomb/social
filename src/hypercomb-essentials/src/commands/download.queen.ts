@@ -20,7 +20,6 @@ import { buildStoreZip } from './store-zip.js'
 export class DownloadQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'download'
-  override readonly aliases = ['export']
   override description = 'Download an OPFS zip snapshot of the full client state'
   override examples = [{ input: '/download', result: 'Browser saves a .zip snapshot of all OPFS state' }]
 

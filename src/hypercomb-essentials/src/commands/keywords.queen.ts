@@ -9,7 +9,6 @@ import { QueenBee, EffectBus } from '@hypercomb/core'
 export class KeywordsQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'keywords'
-  override readonly aliases = ['keyphrases']
   override description = 'Generate grouped transcript keywords with Haiku in the background, then review and add the chosen ones'
   override options = ['<optional transcript>']
   override examples = [

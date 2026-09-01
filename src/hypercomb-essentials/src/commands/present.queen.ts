@@ -61,7 +61,6 @@ type StoreShape = { putResource(blob: Blob): Promise<string> }
 export class PresentQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'present'
-  override readonly aliases = ['slides', 'slideshow']
   override description = 'Slides view — play the presentation this tile belongs to, one screen at a time'
   override descriptionKey = 'slash.present'
   override options = ['on', 'off', 'slide']

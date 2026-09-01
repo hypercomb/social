@@ -63,7 +63,6 @@ applyHeaderSize(currentHeaderSize())
 class HeaderSizeQueenBee extends QueenBee {
   readonly namespace = 'hypercomb.social'
   readonly command = 'header'
-  override readonly aliases = []
   override description = 'Set the header size (1 = small, 2 = medium, 3 = large)'
   override descriptionKey = 'slash.header'
 

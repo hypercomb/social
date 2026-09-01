@@ -21,8 +21,6 @@ const OFF = new Set(['off', 'none', 'clear', 'release'])
 export class FrameQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'frame'
-  override readonly aliases = []
-
   override description = 'Read this branch through a fixed pattern'
   override descriptionKey = 'slash.frame'
   override options = ['<pattern name>', 'off']

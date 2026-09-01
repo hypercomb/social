@@ -18,7 +18,6 @@ type SelectionLike = { selected: ReadonlySet<string>; clear(): void }
 export class SelectQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'select'
-  override readonly aliases = ['pick']
   override description = 'Pick tiles by tapping them, then act on the set'
   override descriptionKey = 'slash.select'
   override options = ['on', 'off', 'all', 'none', 'options']

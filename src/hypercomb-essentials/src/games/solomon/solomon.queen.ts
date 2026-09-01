@@ -16,7 +16,6 @@ const get = (key: string) => (window as any).ioc?.get?.(key)
 export class SolomonQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'solomon'
-  override readonly aliases = ['game', 'dana']
   override description = "Solomon's Key — block-conjuring puzzle-platformer with a level designer"
   override descriptionKey = 'slash.solomon'
   override options = ['on', 'off', 'design']

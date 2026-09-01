@@ -19,7 +19,6 @@ import { EffectBus, QueenBee } from '@hypercomb/core'
 export class HistoryQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'history'
-  override readonly aliases = []
   override description = 'Toggle the history panel'
   override descriptionKey = 'slash.history'
   override examples = [{ input: '/history', result: 'History panel opens; repeat to hide it' }]

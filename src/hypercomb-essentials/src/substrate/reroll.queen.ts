@@ -21,7 +21,6 @@ const get = (key: string) => (window as any).ioc?.get?.(key)
 export class RerollQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'reroll'
-  override readonly aliases = []
   override description = 'Reroll substrate background images on tiles'
   override descriptionKey = 'slash.reroll'
   override options = ['<cell name>', '[<cell>, <cell>, ...]']

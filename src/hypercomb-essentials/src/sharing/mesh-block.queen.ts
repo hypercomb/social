@@ -30,7 +30,6 @@ const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 
 export class MeshBlockQueenBee {
   readonly command = 'block-peer'
-  readonly aliases = ['blockpeer', 'block-pubkey', 'kick-peer'] as const
   readonly description = 'Block a peer pubkey at the dev relay and drop its tiles locally. Args: full 64-hex or 8–16 hex prefix.'
   readonly descriptionKey = 'slash.block-peer'
 

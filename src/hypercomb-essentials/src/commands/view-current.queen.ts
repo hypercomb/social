@@ -42,8 +42,6 @@ type Store = {
 export class ViewCurrentQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'view-current'
-  override readonly aliases = ['view-layer', 'current']
-
   override description = 'Show the current branch as a fully-expanded object'
   override options = ['<depth>']
   override examples = [

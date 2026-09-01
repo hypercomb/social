@@ -172,6 +172,23 @@ describe('doctrine ratchets', () => {
     ], 'synchronize dispatch')
   })
 
+  it('no behaviour declares an alias in code — aliases are the participant\'s to give', () => {
+    // A behaviour's name is its ONE name. The 54 code-declared alias lists
+    // (removed 2026-09-01) put every spelling into autocomplete, the common
+    // tongue, and the help surfaces at once — three names for one verb,
+    // polluting the census and making the command line harder to read, not
+    // easier. The `aliases` seam stays (QueenBee.aliases, SlashBehaviour.
+    // aliases) so PARTICIPANT-given aliases can ride it at runtime, but no
+    // source file may ever assign one again. Matches any aliases
+    // declaration whose array holds a string literal; argument-value
+    // normalization maps (LOCALE_ALIASES etc.) are not behaviour names and
+    // do not match. Empty allowlist, and it stays empty.
+    const actual = filesMatching(
+      /\baliases\s*(?::\s*\[\s*['"`]|(?::[^=\n]{0,60})?=\s*\[\s*['"`])/,
+    )
+    assertRatchet(actual, [], 'code-declared behaviour alias')
+  })
+
   it('no hardcoded 64-hex signatures outside the documented empty-content sentinels', () => {
     // Pool addresses are DERIVED via Store.poolSignature(meaning) /
     // sign(meaning) — never hardcoded. The two allowed files hold the

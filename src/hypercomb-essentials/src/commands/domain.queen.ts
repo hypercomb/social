@@ -20,7 +20,6 @@ import { QueenBee } from '@hypercomb/core'
 export class DomainQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'domain'
-  override readonly aliases = ['relay']
   override description = 'Add, remove, or list mesh relay domains'
   override options = ['<ws:// or wss:// url>', 'remove <url>', 'list', 'clear']
   override examples = [

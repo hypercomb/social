@@ -20,7 +20,6 @@ import type { HistoryCursorService } from '../history/history-cursor.service.js'
 export class FlattenQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'flatten'
-  override readonly aliases = []
   override description = 'Collapse this location\'s history to its head (history is lost)'
   override examples = [{ input: '/flatten', result: 'History collapses to start + head; middle is lost' }]
   // Destructive — keep it out of autocomplete so the user has to type

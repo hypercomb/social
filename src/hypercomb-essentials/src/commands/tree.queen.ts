@@ -52,7 +52,6 @@ type NameRegistryShape = {
 export class TreeQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'tree'
-  override readonly aliases = ['mindmap', 'branches']
   override description =
     'Sideways tree — draw a branch as a mind map: trunk on the left, one column per ring, any signature as the root'
   override descriptionKey = 'slash.tree'

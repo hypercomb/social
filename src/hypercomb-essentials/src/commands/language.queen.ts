@@ -29,7 +29,6 @@ import { QueenBee, type I18nProvider, I18N_IOC_KEY } from '@hypercomb/core'
 export class LanguageQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'language'
-  override readonly aliases = []
   override description = 'Switch the UI language (14 languages supported)'
   override descriptionKey = 'slash.language'
   override options = ['en', 'ja', 'zh', 'es', 'ar', 'pt', 'fr', 'de', 'ko', 'ru', 'hi', 'id', 'tr', 'it']

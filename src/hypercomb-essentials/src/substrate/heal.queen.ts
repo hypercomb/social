@@ -29,7 +29,6 @@ const get = (key: string) => (window as any).ioc?.get?.(key)
 export class HealQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'heal'
-  override readonly aliases = []
   override description = 'Restore participant pictures a default overwrote'
   override descriptionKey = 'slash.heal'
   override options = ['check']

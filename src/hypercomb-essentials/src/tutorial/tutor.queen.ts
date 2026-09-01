@@ -43,7 +43,6 @@ type LineageShape = { explorerSegments?: () => readonly string[] }
 export class TutorQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'tutor'
-  override readonly aliases = ['study']
   override description = 'Study games — turn this hive into spaced-repetition games'
   override descriptionKey = 'slash.tutor'
   override options = ['on', 'off', 'here', 'build', 'list']

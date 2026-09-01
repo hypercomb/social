@@ -45,7 +45,6 @@ const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 export class BehaviorQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'behavior'
-  override readonly aliases = ['behaviour', 'beehaviour']
   override description = 'Bind a behaviour to the tile it belongs to — it shows there and nowhere else'
   override descriptionKey = 'slash.behavior'
   override options = ['bind <behaviour> [tile]', 'free <behaviour>', 'where <behaviour>']

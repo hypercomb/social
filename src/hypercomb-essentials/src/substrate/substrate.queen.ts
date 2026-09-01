@@ -26,7 +26,6 @@ const DEFAULT_TILES_SET_ID = 'builtin:theme-nature'
 export class SubstrateQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'substrate'
-  override readonly aliases = []
   override description = 'Manage substrate background image sources'
   override descriptionKey = 'slash.substrate'
   override options = ['sets', 'set <name>', 'here', 'link', 'on', 'off', 'reset', 'list']

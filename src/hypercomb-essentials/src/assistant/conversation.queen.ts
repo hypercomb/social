@@ -24,7 +24,6 @@ export class ConversationQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'assistant'
   readonly command = 'chat'
-  override readonly aliases = []
   override description = 'Open the chat — one conversation per chat, history kept'
   override descriptionKey = 'slash.chat'
   override options = ['<message>', '--model <model> <message>']

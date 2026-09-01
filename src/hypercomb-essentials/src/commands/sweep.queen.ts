@@ -57,7 +57,6 @@ const isLegitName = (name: string, kind: FileSystemHandle['kind']): boolean => {
 export class SweepQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'sweep'
-  override readonly aliases = []
   override description = 'Quarantine stray OPFS root entries into the temporary pool'
   override examples = [
     { input: '/sweep', result: 'Moves stray OPFS root entries into the sign(temporary) pool' },

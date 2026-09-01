@@ -35,7 +35,6 @@ type ShowCellShape = { snapshotCells?: () => { label: string }[] }
 export class ContextQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'context'
-  override readonly aliases = []
   override description = 'Manage the branches this tile’s AI requests read'
   override descriptionKey = 'slash.context'
   override options = ['', '<cell>']

@@ -14,7 +14,6 @@ export class FormatQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'editor'
   readonly command = 'format'
-  override readonly aliases = []
   override description = 'Copy visual formatting from the active tile'
   override descriptionKey = 'slash.format'
   override examples = [

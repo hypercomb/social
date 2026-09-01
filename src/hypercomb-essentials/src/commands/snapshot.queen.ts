@@ -65,7 +65,6 @@ interface PushQueueLike {
 export class SnapshotQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'snapshot'
-  override readonly aliases = ['snapshots']
   override description =
     'Freeze the whole hive under a name you can come back to — tiles and behaviours in one signature'
   override descriptionKey = 'slash.snapshot'

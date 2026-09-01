@@ -39,7 +39,6 @@ type LineageShape = { explorerSegments?: () => readonly string[] }
 export class EnrollQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'enroll'
-  override readonly aliases = ['enrol', 'join']
   override description = 'Relate this tile to a website — the one way artifacts belong together'
   override descriptionKey = 'slash.enroll'
   override options = ['as']

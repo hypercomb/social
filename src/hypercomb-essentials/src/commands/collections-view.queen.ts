@@ -16,7 +16,6 @@ import { QueenBee, EffectBus } from '@hypercomb/core'
 export class CollectionsViewQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'collections'
-  override readonly aliases = ['sets']
   override description = 'Open the collections entrance'
   override examples = [
     { input: '/collections', result: 'Opens the right-docked collections panel' },

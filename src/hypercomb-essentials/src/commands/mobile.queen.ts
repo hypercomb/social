@@ -30,7 +30,6 @@ const MAX_NODES = 500
 export class MobileQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'mobile'
-  override readonly aliases = []
   override description = 'Mobile viewer: on / off / auto, sweep tiles, or designate a hive'
   override descriptionKey = 'slash.mobile'
   override options = ['on', 'off', 'auto', 'sweep', 'hive']

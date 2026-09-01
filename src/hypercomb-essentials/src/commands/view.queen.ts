@@ -36,7 +36,6 @@ const VIEW_MODE_KEY = '@hypercomb.social/ViewMode'
 export class ViewQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'view'
-  override readonly aliases = ['mode', 'surface']
   override description = 'Toggle between hexagons and website rendering of the layer tree'
   override descriptionKey = 'slash.view'
   override options = ['hexagons', 'website', '<mode name>']

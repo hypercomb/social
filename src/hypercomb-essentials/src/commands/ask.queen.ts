@@ -29,7 +29,6 @@ import type { HostAiService } from '../assistant/host-ai.service.js'
 export class AskQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'ask'
-  override readonly aliases = []
   override description = 'Open the chat and ask'
   override descriptionKey = 'slash.ask'
   override options = ['<question>', 'host <domain>']

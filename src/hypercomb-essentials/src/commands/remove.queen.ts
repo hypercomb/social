@@ -40,7 +40,6 @@ type LayerCommitterLike = {
 export class RemoveQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'remove'
-  override readonly aliases = []
   override description = 'Remove tiles from the current directory'
   override options = ['<tile name>', '[<tile>, <tile>, ...]']
   override examples = [

@@ -42,9 +42,10 @@ const record = (complete = true): ActiveGenomeRecord => ({
   },
 })
 
-describe('/weight active-genome reporting', () => {
-  it('is an alias of /genome', () => {
-    expect(new GenomeQueenBee().matches('weight')).toBe(true)
+describe('/genome active-genome reporting', () => {
+  it('answers only its canonical name — aliases are the participant\'s to give, never code\'s', () => {
+    expect(new GenomeQueenBee().matches('genome')).toBe(true)
+    expect(new GenomeQueenBee().matches('weight')).toBe(false)
   })
 
   it('reports a pending census without claiming content would be lost', async () => {

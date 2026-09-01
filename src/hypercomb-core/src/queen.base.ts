@@ -17,7 +17,12 @@ export abstract class QueenBee extends Bee {
   /** The slash behaviour this queen bee responds to (e.g. 'paste', 'export', 'publish') */
   abstract readonly command: string
 
-  /** Optional aliases — additional names that resolve to this queen bee */
+  /**
+   * Additional names that resolve to this queen bee. ALIASES ARE THE
+   * PARTICIPANT'S TO GIVE — code never declares one (a doctrine ratchet
+   * enforces this). This field is the seam where participant-given
+   * aliases are applied at runtime; in source it stays empty.
+   */
   readonly aliases: string[] = []
 
   /**

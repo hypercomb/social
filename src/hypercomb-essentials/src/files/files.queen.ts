@@ -21,7 +21,6 @@ type SelectionLike = { selected: ReadonlySet<string> }
 export class FilesQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'files'
-  override readonly aliases = ['resources']
   override description = 'Browse files attached to the selected tiles, or every tile in view'
   override descriptionKey = 'slash.files'
   override options = ['all']

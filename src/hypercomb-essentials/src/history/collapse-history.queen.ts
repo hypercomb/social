@@ -27,8 +27,6 @@ export class CollapseHistoryQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'history'
   readonly command = 'collapse-history'
-  override readonly aliases = ['collapse-histories', 'squash-history']
-
   override description = 'Reduce every location history to 3 states — empty/unused/active (dev utility)'
   override examples = [
     { input: '/collapse-history', result: 'Reduces every history bag to 3 states, then reloads' },

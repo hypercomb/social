@@ -40,7 +40,6 @@ const currentSegments = (): string[] => {
 export class WorkflowQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'workflow'
-  override readonly aliases = ['flow', 'skill']
   override description =
     'Design a workflow out of tiles — one step per tile — and run it. A named workflow is a skill the hive can run from anywhere.'
   override descriptionKey = 'slash.workflow'

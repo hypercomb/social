@@ -20,8 +20,6 @@ export class ConsolidateHistoryQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'history'
   readonly command = 'consolidate-history'
-  override readonly aliases = ['retire-history-folder', 'migrate-history']
-
   override description = 'Relocate leftover legacy history bags to the root and remove the drained folder'
   override examples = [
     { input: '/consolidate-history', result: 'Relocates legacy history bags to the root; retires the drained folder' },

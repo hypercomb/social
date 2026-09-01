@@ -93,8 +93,6 @@ const SHOW_HIDDEN_KEY = 'hc:show-hidden'
 export class VerifyHistoryQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'verify-history'
-  override readonly aliases = ['vh', 'check-history']
-
   override description =
     "Walk the current location's history forward and backward; verify undo and redo render the same tile count at every position"
   override examples = [

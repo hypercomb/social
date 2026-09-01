@@ -12,7 +12,7 @@
 //
 // The invite encodes (segments, room, secret) so a recipient reproduces the
 // exact swarm channel. SlashBehaviourDrone auto-wraps this registered object
-// into a slash provider (command/aliases/description/invoke).
+// into a slash provider (command/description/invoke).
 //
 // Reachability: for a link OR a junction to resolve on another machine the
 // bundle bytes must be fetchable by signature from a host. Store.putResource
@@ -59,7 +59,6 @@ const LOOPBACK_RE = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i
 
 export class InviteQueenBee {
   readonly command = 'invite'
-  readonly aliases = ['meetlink', 'meeting-link', 'share-meeting'] as const
   readonly description =
     'Invite people to your current meeting place. With a tile selected, stamps it as a swarm junction; always copies a shareable link.'
   readonly descriptionKey = 'slash.invite'

@@ -39,7 +39,6 @@ const get = <T,>(key: string): T | undefined =>
 export class LoungeQueenBee extends QueenBee {
   readonly namespace = 'revolucionstyle.com'
   readonly command = 'lounge'
-  override readonly aliases = ['room']
   override description = 'The lounge — a three-dimensional room this tile carries as its own presence'
   override options = ['here <bundleSig>', 'remove', 'on', 'off']
   override examples = [

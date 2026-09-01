@@ -26,7 +26,6 @@ const NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/
 export class HiveQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'hive'
-  override readonly aliases = ['branch', 'mark', 'label']
   override description =
     'Give a lineage path or signature a named handle that other slash commands autocomplete against.'
   override descriptionKey = 'slash.hive'

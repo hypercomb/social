@@ -26,7 +26,6 @@ type DecorationServiceLike = {
 export class KeywordQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'keyword'
-  override readonly aliases = []
   override description = 'Add or remove keywords (tags) on selected tiles'
   override options = ['<tag>', '<tag>(#<color>)', '~<tag>', '[<tag>, ~<tag>, ...]']
   override examples = [
