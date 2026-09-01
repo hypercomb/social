@@ -652,6 +652,8 @@
   "slash.forget": "Drop the phrasings the command line learned from you; forget [<lead-in>]",
   "slash.move": "Toggle move mode for drag-reordering tiles",
   "slash.revise": "Toggle revision mode (history clock)",
+  "slash.prototypes": "Open or close the workshop shelf — behaviours still being played into shape; on | off",
+  "command-line.prototype": "prototype",
   "slash.break-apart": "Break tiles into the pieces that compose them, via Claude Haiku",
   "slash.expand": "Grow this layer with new tiles that extend its subject, via Claude Haiku",
   "slash.organize": "Group a crowded layer into subfolders via Claude Haiku",

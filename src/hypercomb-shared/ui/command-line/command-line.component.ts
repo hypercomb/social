@@ -41,6 +41,10 @@ const BUILTIN_SLASH: { behaviour: { name: string; description: string; descripti
 // Tap-vs-hold boundary for the mobile mic. Generous on purpose: a relaxed
 // thumb tap routinely exceeds 300ms, and misreading a tap as a hold turns
 // toggle-listening into an instant start/stop that discards the dictation.
+/** One frozen empty set for the closed-shelf case — same identity trick as
+ *  the alias map below, so the computed answers stable when nothing changed. */
+const EMPTY_PROTOTYPE_SET: ReadonlySet<string> = new Set()
+
 /** One frozen empty map for the no-aliases case — a fresh Map per recompute
  *  would hand the shell a new input identity on every keystroke. */
 const EMPTY_ALIAS_MAP: ReadonlyMap<string, readonly string[]> = new Map()
@@ -345,16 +349,34 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       provider: null,
     }))
     const all = [...builtinMatches, ...droneMatches]
-    // The behaviours you live in rise. A STABLE sort keyed on run count only:
-    // ties keep the census order exactly as it was, so this reorders what you
-    // have actually used and touches nothing else. Counts come from execution
-    // alone, so a catalogue you have never run reads precisely as it always did.
+    // The behaviours you live in rise; THE WORKSHOP SINKS. A STABLE sort:
+    // prototypes go to the bottom as one group (they only appear at all when
+    // /prototypes has opened the shelf), then run count, then census order —
+    // so this reorders what you have actually used and touches nothing else.
+    // Counts come from execution alone, so a catalogue you have never run
+    // reads precisely as it always did.
     const habits = this.#spokenHabits()
-    if (!habits) return all
     return all
-      .map((m, i) => ({ m, i, uses: habits.useCount(m.behaviour.name) }))
-      .sort((a, b) => b.uses - a.uses || a.i - b.i)
+      .map((m, i) => ({
+        m, i,
+        proto: (m.behaviour as { prototype?: boolean }).prototype === true,
+        uses: habits?.useCount(m.behaviour.name) ?? 0,
+      }))
+      .sort((a, b) => (a.proto ? 1 : 0) - (b.proto ? 1 : 0) || b.uses - a.uses || a.i - b.i)
       .map(x => x.m)
+  })
+
+  /** The suggestion names that are PROTOTYPES — the shell dims these rows
+   *  and hangs the stage chip on them. Empty whenever the shelf is closed
+   *  (concealed prototypes never reach `match()` at all). */
+  readonly prototypeNames = computed<ReadonlySet<string>>(() => {
+    const ctx = this.context()
+    if (!ctx.active || ctx.mode !== 'slash') return EMPTY_PROTOTYPE_SET
+    const set = new Set<string>()
+    for (const m of this.#slashMatches()) {
+      if ((m.behaviour as { prototype?: boolean }).prototype === true) set.add(m.behaviour.name)
+    }
+    return set.size ? set : EMPTY_PROTOTYPE_SET
   })
 
   /**

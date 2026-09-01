@@ -6,6 +6,15 @@ export interface SlashBehaviour {
   readonly descriptionKey?: string
   readonly aliases?: readonly string[]
   /**
+   * PROTOTYPE STAGE — still in the workshop. Registered and invokable,
+   * but concealed from the palette until the participant opens the
+   * `/prototypes` filter; then it lists at the bottom, dimmed, wearing
+   * the stage chip. The drone presents a concealed prototype as
+   * `hidden`, so every downstream surface (utterance census, reference
+   * sheets, action cards) inherits the concealment from one seam.
+   */
+  readonly prototype?: boolean
+  /**
    * When true, this behaviour is invokable but does not appear in
    * autocomplete suggestions. Use for destructive / dev-only commands
    * the user must type in full (e.g. /flatten, /collapse-history).

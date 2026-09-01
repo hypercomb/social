@@ -1,11 +1,20 @@
 // ui/slash-behaviour/slash-behaviour.drone.ts
 import {
-  EffectBus, hypercomb, I18N_IOC_KEY, type I18nProvider,
+  EffectBus, get, hypercomb, I18N_IOC_KEY, type I18nProvider,
   registerCommandRoot, commandRoot, type CommandObject, type CommandMember,
 } from '@hypercomb/core'
 import { ReceiptBuilder, describeReceipt } from '../assistant/receipt.js'
 import { BREAK_APART_SKIP_LABELS } from '../assistant/break-apart.drone.js'
 import type { SlashBehaviour, SlashBehaviourMatch, SlashBehaviourProvider } from './slash-behaviour.provider.js'
+
+/** Participant-local lens: whether the prototypes filter is open. Read live
+ *  on every presentation so `/prototypes` takes effect on the next keystroke
+ *  with no event plumbing. */
+export const PROTOTYPES_SHOWN_KEY = 'hc:prototypes-shown'
+
+const prototypesShown = (): boolean => {
+  try { return localStorage.getItem(PROTOTYPES_SHOWN_KEY) === 'on' } catch { return false }
+}
 
 export class SlashBehaviourDrone extends EventTarget {
   #providers: SlashBehaviourProvider[] = []
@@ -44,10 +53,10 @@ export class SlashBehaviourDrone extends EventTarget {
     const results: SlashBehaviour[] = []
     for (const provider of this.#providers) {
       for (const behaviour of provider.behaviours) {
-        const localized = this.#localize(behaviour)
-        results.push(localized)
+        const presented = this.#present(behaviour)
+        results.push(presented)
         for (const alias of this.#names(behaviour).slice(1)) {
-          results.push({ ...localized, name: alias })
+          results.push({ ...presented, name: alias })
         }
       }
     }
@@ -58,7 +67,7 @@ export class SlashBehaviourDrone extends EventTarget {
    *  entry's `aliases` field, so the display surfaces show what works). */
   entries(): SlashBehaviour[] {
     return this.#providers.flatMap(p => p.behaviours)
-      .map(b => ({ ...this.#localize(b), aliases: this.#names(b).slice(1) }))
+      .map(b => ({ ...this.#present(b), aliases: this.#names(b).slice(1) }))
   }
 
   match(query: string): SlashBehaviourMatch[] {
@@ -70,9 +79,12 @@ export class SlashBehaviourDrone extends EventTarget {
         // Behaviours flagged hidden are still invokable via execute()
         // but never surface in autocomplete suggestions. Used for
         // destructive / dev-only commands the user must type in full.
-        if (behaviour.hidden) continue
+        // A CONCEALED PROTOTYPE presents as hidden (see #present), so the
+        // workshop shelf vanishes here too until /prototypes opens it.
+        const presented = this.#present(behaviour)
+        if (presented.hidden) continue
         const names = this.#names(behaviour)
-        const localized = { ...this.#localize(behaviour), aliases: names.slice(1) }
+        const row = { ...presented, aliases: names.slice(1) }
 
         for (const name of names) {
           if (!q || name.startsWith(q)) {
@@ -80,8 +92,8 @@ export class SlashBehaviourDrone extends EventTarget {
             // so autocomplete sees every reachable name, not just the primary
             results.push({
               behaviour: name === behaviour.name
-                ? localized
-                : { ...localized, name },
+                ? row
+                : { ...row, name },
               provider,
             })
           }
@@ -99,6 +111,18 @@ export class SlashBehaviourDrone extends EventTarget {
     const translated = i18n.t(behaviour.descriptionKey)
     if (translated === behaviour.descriptionKey) return behaviour
     return { ...behaviour, description: translated }
+  }
+
+  /** The ONE presentation seam: localization, plus the prototype stage.
+   *  A prototype with the filter closed presents as `hidden`, so every
+   *  listing surface conceals it the same way; with the filter open it
+   *  rides through carrying `prototype: true` for the dimmed rendering.
+   *  Invocation paths (execute/has/complete) read the raw behaviours and
+   *  are untouched — a prototype is in the global either way. */
+  #present(behaviour: SlashBehaviour): SlashBehaviour {
+    const localized = this.#localize(behaviour)
+    if (localized.prototype && !prototypesShown()) return { ...localized, hidden: true }
+    return localized
   }
 
   complete(behaviourName: string, args: string): readonly string[] {
@@ -590,6 +614,45 @@ class ObserveProvider implements SlashBehaviourProvider {
 // ── registration ────────────────────────────────────────
 
 const _slashBehaviours = new SlashBehaviourDrone()
+// THE DOOR TO THE WORKSHOP SHELF. Prototype behaviours are in the global —
+// registered, invokable — but concealed from the everyday palette. This
+// filter opens and closes that shelf; open, prototypes list at the bottom,
+// dimmed, each wearing the stage chip. The state is a participant-local
+// lens (localStorage), read live, so the very next `/` reflects it.
+class PrototypesProvider implements SlashBehaviourProvider {
+  readonly name = 'prototypes-provider'
+  readonly priority = 100
+  readonly behaviours: SlashBehaviour[] = [
+    { name: 'prototypes',
+      description: 'Open or close the workshop shelf — behaviours still being played into shape',
+      descriptionKey: 'slash.prototypes',
+      options: ['on', 'off'],
+      examples: [
+        { input: '/prototypes on', result: 'Prototype behaviours join the palette, dimmed, at the bottom' },
+        { input: '/prototypes off', result: 'The shelf closes — the everyday palette again' },
+      ] }
+  ]
+
+  execute(_behaviourName: string, args: string): void {
+    const want = args.trim().toLowerCase()
+    const next = want === 'on' ? true : want === 'off' ? false : !prototypesShown()
+    try { localStorage.setItem(PROTOTYPES_SHOWN_KEY, next ? 'on' : 'off') } catch { /* private-browsing */ }
+    EffectBus.emit('toast:show', {
+      title: 'Prototypes',
+      message: next
+        ? 'The workshop shelf is open — prototypes list at the bottom of the palette.'
+        : 'The workshop shelf is closed.',
+      type: 'info',
+    })
+  }
+
+  complete(_behaviourName: string, args: string): readonly string[] {
+    const q = args.trim().toLowerCase()
+    return ['on', 'off'].filter(o => !q || o.startsWith(q))
+  }
+}
+
+_slashBehaviours.addProvider(new PrototypesProvider())
 _slashBehaviours.addProvider(new HelpProvider())
 _slashBehaviours.addProvider(new ClearProvider())
 _slashBehaviours.addProvider(new KeywordProvider())
@@ -625,6 +688,7 @@ const isQueen = (value: unknown): value is {
   description?: string
   descriptionKey?: string
   slashHidden?: boolean
+  slashPrototype?: boolean
   invoke: (args: string) => Promise<void> | void
   slashComplete?: (args: string) => readonly string[]
 } => {
@@ -646,6 +710,7 @@ const wrapQueen = (queen: ReturnType<typeof isQueen> extends true ? never : any)
     descriptionKey: queen.descriptionKey,
     aliases: queen.aliases ?? [],
     hidden: queen.slashHidden === true,
+    prototype: queen.slashPrototype === true,
     // Structured usage docs (QueenBee.options / .examples) ride through so
     // every reference surface gets them without parsing descriptions.
     options: queen.options,

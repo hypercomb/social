@@ -605,6 +605,8 @@
   "slash.forget": "コマンドラインがあなたから学んだ言い回しを削除します; forget [<lead-in>]",
   "slash.move": "タイルのドラッグ並べ替えモードの切替",
   "slash.revise": "リビジョンモード（履歴クロック）の切替",
+  "slash.prototypes": "工房の棚を開閉 — まだ形づくり中のビヘイビア; on | off",
+  "command-line.prototype": "試作",
   "slash.break-apart": "Claude Haikuでタイルを構成する要素に分解",
   "slash.expand": "Claude Haikuでこのレイヤーの主題を広げる新しいタイルを追加",
   "slash.organize": "Claude Haikuで混雑したレイヤーをグループにまとめる",
