@@ -309,17 +309,11 @@ fn a_body_larger_than_the_socket_buffer_arrives_whole() {
     let serving = serve(root, Arc::new(stub), LOOPBACK, 0).expect("bind");
     let response = fetch(
         serving.addr(),
-        &format!("GET /{SIG_B} HTTP/1.1
-Host: h
-Connection: close
-
-"),
+        &format!("GET /{SIG_B} HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n"),
     );
 
-    assert!(response.contains(&format!("content-length: {SIZE}")), "{}", &response[..200.min(response.len())]);
-    let body = response.split("
-
-").nth(1).unwrap_or_default();
+    let (head, body) = response.split_once("\r\n\r\n").expect("a header block");
+    assert!(head.contains(&format!("content-length: {SIZE}")), "{head}");
     assert_eq!(body.len(), SIZE, "body truncated at {} of {SIZE} bytes", body.len());
     serving.stop();
 }
@@ -339,11 +333,7 @@ fn a_request_that_arrives_after_the_accept_is_answered() {
     let mut stream = TcpStream::connect(serving.addr()).expect("connect");
     std::thread::sleep(Duration::from_millis(250));
     stream
-        .write_all(b"GET /pin HTTP/1.1
-Host: h
-Connection: close
-
-")
+        .write_all(b"GET /pin HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n")
         .expect("write");
     let mut out = String::new();
     stream.read_to_string(&mut out).expect("read");
