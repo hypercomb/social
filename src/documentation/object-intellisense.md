@@ -124,3 +124,53 @@ and thirty-three behaviours that describe their shape instead of parsing strings
 `/background` dot-walks today, and the dropdown already renders per-suggestion
 swatches, descriptions and a detail pane. The protocol is mostly a matter of
 naming what that surface already does and pointing the other nine modes at it.
+
+## Every beehaviour walks with dots
+
+`/background` was the first citizen of this protocol and for a while the only
+one, which made the dot a feature of ONE behaviour rather than of the language.
+Everything else still answered a flat string it split on spaces, so the same
+question — WHAT CAN COME NEXT HERE? — was answered one way in one place and its
+own way everywhere else.
+
+A behaviour already declares what may follow it, twice over: `slashComplete`
+(what it offers as you type, in context) and `options` (the forms it
+documents). That IS membership, already written down. So every behaviour the
+slash drone wraps gets a command object **derived from what it already says**,
+and walks with dots for free:
+
+```bash
+/substrate set.photos
+/theme dark
+/background tiles.ember.force.global
+```
+
+The derivation lives at the one seam where behaviours register
+(`commands/slash-behaviour.drone.ts`): `deriveCommandRoot()` builds the object,
+`derivedMembers()` answers each depth from the behaviour's own completer first
+and its documented forms second. A `<placeholder>` is never offered as a member
+— it stands for something you supply, and putting the angle brackets into the
+line is not a completion.
+
+A behaviour that registered its **own** root keeps it. A hand-written object
+knows things a derivation cannot — that a reach stops being a member once a
+picture is pinned — and a derivation must never overwrite that.
+
+### The dot has to survive the trip
+
+Completion is only half of it. The dropdown can complete `substrate.set.steel`
+all day; if the string handed to the behaviour still has dots in it, the
+command fails on arrival. So the wrapper normalises dots back to the spaces the
+behaviour's own parser expects — **but only when every segment is a word that
+behaviour actually offers.**
+
+That check is the whole safety argument. A dot is load-bearing in the arguments
+people really pass — `susan.hypercomb.com`, `1.5`, `notes.md` — and a blanket
+replacement would break every one of them. Segments are walked against the
+object; a string with even one segment the behaviour does not offer is passed
+through exactly as typed.
+
+The derived root is registered only for behaviours the drone also wraps.
+Completion and execution have to move together: a behaviour whose execution
+still goes through a hand-written provider would be offered dotted paths its
+own space-splitting parser cannot read.

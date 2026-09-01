@@ -285,7 +285,7 @@ When a receiver materializes a `brood` node:
    - `brood → active`: drops `facade: true`, starts pulling layer events, tiles hatch in UI.
    - `* → revoked`: surfaces danger overlay, blocks navigation into subtree.
 
-`facade: true` is a *proposed* bootstrap-skeleton field. **Not built as of 2026-06-18** — neither [tile-properties.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/editor/tile-properties.ts) nor [show-cell.drone.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/show-cell.drone.ts) currently carries or reads a `facade` flag (the only `facade` occurrences in essentials live in the build `scripts/prepare.ts`). The intent is that the property store grow a skeleton flag and the renderer apply the capped-cell overlay when it is set; both still need to be wired.
+`facade: true` is a *proposed* bootstrap-skeleton field. **Not built as of 2026-06-18** — neither [tile-properties.ts](../hypercomb-essentials/src/editor/tile-properties.ts) nor [show-cell.drone.ts](../hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts) currently carries or reads a `facade` flag (the only `facade` occurrences in essentials live in the build `scripts/prepare.ts`). The intent is that the property store grow a skeleton flag and the renderer apply the capped-cell overlay when it is set; both still need to be wired.
 
 ---
 

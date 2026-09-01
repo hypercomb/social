@@ -179,11 +179,21 @@ export function signalSession(
    *  behaviour in the same breath as its session, rather than hand-rolling a
    *  listener that competes with the cascade. */
   escape?: { dismiss?: () => boolean; close?: () => void },
+  /** `companion: true` means this surface is NOT a view of its own — it acts
+   *  on whatever else is open, so the one-window-at-a-time rule lets it stay
+   *  beside the window it serves (window-rule.ts).
+   *
+   *  The rule states the exception without naming any ids, precisely so a new
+   *  companion inherits it by declaring itself one. Until now only a
+   *  hand-rolled session could say it, which meant the one window that had the
+   *  right to also had to give up this helper. */
+  options?: { companion?: boolean },
 ): WindowSession {
   return {
     park: () => { visible.set(false); announce?.(false) },
     unpark: () => { visible.set(true); announce?.(true) },
     ...(escape?.dismiss ? { dismiss: escape.dismiss } : {}),
     ...(escape?.close ? { close: escape.close } : {}),
+    ...(options?.companion ? { companion: true } : {}),
   }
 }

@@ -175,6 +175,61 @@
   --hc-ink-a-plain: 0.82;
   --hc-ink-a-loud:  0.96;
 
+  // ── THE LADDER, SPELLED OUT FOR PANELS ────────────────────────────
+  // The alphas above are the theme's answer to "what does quiet cost on this
+  // ground"; these are that answer already applied to the PANEL's ink, so a
+  // tool window can ask for a weight and never name a colour:
+  //
+  //     color: var(--hc-window-ink-quiet);     not  rgba(207, 226, 238, 0.62)
+  //
+  // Why they live on :root and not in the panel mixin: not every surface that
+  // needs them is a docked panel. Overlays, banners, hover cards and the
+  // settings gear the docked-panel directive injects are all panel-material
+  // too, and half of them never call `tw.panel()`. One definition here means
+  // a rule can reach for a rung from anywhere, and a theme that moves
+  // `--hc-panel-ink` moves every rung with it.
+  //
+  // These were the single biggest source of unreadable bright-theme chrome:
+  // thirty panels had each picked their own near-white for "faint label",
+  // which is invisible the moment the pane goes cream. A rung cannot be.
+  --hc-window-ink-ghost: rgba(var(--hc-panel-ink), var(--hc-ink-a-ghost));
+  --hc-window-ink-faint: rgba(var(--hc-panel-ink), var(--hc-ink-a-faint));
+  --hc-window-ink-quiet: rgba(var(--hc-panel-ink), var(--hc-ink-a-quiet));
+  --hc-window-ink-plain: rgba(var(--hc-panel-ink), var(--hc-ink-a-plain));
+  --hc-window-ink-loud:  rgba(var(--hc-panel-ink), var(--hc-ink-a-loud));
+
+  // ── THE PANEL'S OWN GROUNDS ───────────────────────────────────────
+  // A row, a field, a chip and a divider inside a tool window are not the
+  // pane and not the accent — they are the pane with a little of its own ink
+  // stirred in. Written as literals (`background: #17201e`) they are a dark
+  // ground that stays dark under a bright look, and then even correctly-dark
+  // text on top of them is unreadable. Written as a tint of ink over the
+  // pane, they follow the theme with no second value.
+  --hc-window-tint:        rgba(var(--hc-panel-ink), 0.045);
+  --hc-window-tint-strong: rgba(var(--hc-panel-ink), 0.09);
+  --hc-window-line:        rgba(var(--hc-panel-ink), 0.14);
+  --hc-window-line-firm:   rgba(var(--hc-panel-ink), 0.26);
+
+  // ── HOW FAR A COLOURED MARK HAS TO COME DOWN ──────────────────────
+  // The ink ladder and the accent roles cover weight and identity. What is
+  // left is the handful of marks that are a COLOUR on purpose — a green
+  // "ready", an amber caution, a violet branch glyph, a panel's decorative
+  // second hue. Each was picked to glow on near-black, and a pale mint on
+  // cream is a smudge for exactly the reason the status block above explains.
+  //
+  // They cannot go on the ladder (they would stop being green) and they are
+  // too many and too varied to enumerate as tokens. So instead of a second
+  // value per colour, there is ONE knob: how far any coloured mark should be
+  // pulled toward the panel's ink on this ground.
+  //
+  //     color: color-mix(in srgb, #70d59a, rgb(var(--hc-panel-ink)) var(--hc-deepen));
+  //
+  // Bright grounds pull it down until it carries weight; dark grounds set 0%
+  // and the authored colour survives untouched. Hue is preserved either way —
+  // mixing toward a near-neutral ink changes value, not identity. `tw.ink()`
+  // wraps the expression so call sites stay readable.
+  --hc-deepen: 46%;
+
   // ── CHROME STATUS ─────────────────────────────────────────────────
   // The chrome's SEMANTIC colours: live/ok, warning, alert, information,
   // a branch, a secret. Every one of them used to be a literal picked to
@@ -247,6 +302,9 @@
   --hc-ink-a-quiet: 0.60;
   --hc-ink-a-plain: 0.80;
   --hc-ink-a-loud:  1;
+
+  // A coloured mark was authored FOR this ground. Nothing to pull down.
+  --hc-deepen: 0%;
 
   // The luminous end of each status hue — these are the literals the bar
   // has always used, moved behind the role rather than restyled.

@@ -41,6 +41,14 @@ async function addTile(page, name) {
     input.dispatchEvent(new Event('input', { bubbles: true }))
     await new Promise(r => setTimeout(r, 120))
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }))
+    // LEAVE THE LINE. `command:composing` stands the hive's hover down while
+    // the caret is in the command line — deliberately, so a pointer merely
+    // crossing the hive while you are writing does not light tiles up. A
+    // harness that types a name and never blurs is testing a SUPPRESSED hive:
+    // every hover-driven cue reads as missing, and the key-driven ones (ctrl)
+    // still work, which makes it look like a bug in the cue rather than in
+    // the harness. Cost a full investigation once; never again.
+    input.blur()
     return { ok: true }
   }, name)
 }

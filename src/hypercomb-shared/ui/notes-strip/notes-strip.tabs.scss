@@ -35,7 +35,7 @@
   font-size: scaled(0.85rem);
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: rgba(206, 224, 240, 0.96);
+  color: var(--hc-window-ink-loud);
 }
 
 .cv2-dragbar-sep { color: var(--md-on-surface-faint); }
@@ -111,15 +111,15 @@
   font-size: scaled(0.78rem);
   font-weight: 600;
   letter-spacing: 0.03em;
-  color: rgba(206, 224, 240, 0.55);
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
   border-bottom: 2px solid transparent;
 
-  &:hover { color: rgba(206, 224, 240, 0.85); }
+  &:hover { color: var(--hc-window-ink-plain); }
   &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: -1px; }
 
   &.is-active {
-    color: rgba(206, 224, 240, 0.96);
+    color: var(--hc-window-ink-loud);
     border-bottom-color: rgba($steel, 0.8);
   }
 }
@@ -132,7 +132,7 @@
   justify-content: center;
   background: transparent;
   border: 1px solid transparent;
-  color: rgba(226, 235, 244, 0.6);
+  color: var(--hc-window-ink-quiet);
   border-radius: var(--hc-radius-floating);
   cursor: pointer;
   padding: 0;
@@ -145,7 +145,7 @@
     border-color: rgba($steel, 0.4);
   }
 
-  &.ghost { color: rgba(226, 235, 244, 0.4); }
+  &.ghost { color: var(--hc-window-ink-quiet); }
 }
 
 // Labeled exit pill — sits in the dragbar when see-all mode is on.

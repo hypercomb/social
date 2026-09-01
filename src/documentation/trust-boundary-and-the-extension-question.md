@@ -66,7 +66,7 @@ That design is good. Note what it is keyed on: **the source domain**.
 ### Gate B — the essentials render gate (signature-keyed)
 
 `featureNeedsReview` —
-`hypercomb-essentials/src/diamondcoreprocessor.com/sharing/feature-availability.ts:153`
+`hypercomb-essentials/src/sharing/feature-availability.ts:153`
 
 A wholly separate gate, fail-closed, that stops a *foreign, unverified* heavy
 visual feature (a website, a game) from mounting, running scripts, or pulling
@@ -117,7 +117,7 @@ not a transport problem.
 
 ### Aside — a fourth, unrelated list
 
-`diamondcoreprocessor.com/safety/link-safety.service.ts` keeps a hardcoded
+`safety/link-safety.service.ts` keeps a hardcoded
 `TRUSTED_HOSTS` set and defers to a local LLM at `127.0.0.1:4220` for unknown
 URLs. Different problem (outbound link safety), different list, no relation to
 community trust. Flagged only so a future "unify the trust vocabulary" pass

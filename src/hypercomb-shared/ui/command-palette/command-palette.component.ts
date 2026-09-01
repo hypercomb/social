@@ -21,7 +21,7 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
 
 import type { CommandPaletteState, PaletteItem } from
-  '@hypercomb/essentials/diamondcoreprocessor.com/commands/command-palette.drone'
+  '@hypercomb/essentials/commands/command-palette.drone'
 
 // Owner token for the InputGate lock held while the palette is open. Owner-
 // scoped so it composes with locks held by the editor / other overlays.

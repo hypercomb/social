@@ -3,7 +3,7 @@
 Plan and doctrine. The installer (`hypercomb-shared/core/layer-installer.ts`
 plus the DCP transport role) is superseded by the pull replication protocol
 (`hypercomb-relay/replicate.js`,
-`hypercomb-essentials/src/diamondcoreprocessor.com/sharing/signature-replication.service.ts`).
+`hypercomb-essentials/src/sharing/signature-replication.service.ts`).
 There is one question in the system — *"do I hold this signature's closure?"* —
 and one verb that answers it: `replicate(root)`.
 

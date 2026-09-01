@@ -166,6 +166,13 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
   readonly width = signal<number>(this.#restoreWidth())
   /** True while a left-grip drag is in progress (drives cursor/handle style). */
   readonly resizing = signal(false)
+  /** Ctrl/Meta down. On THIS side of the swap ctrl is the WALK (it is the
+   *  copy on the hive — see the asymmetry note in the class header), and the
+   *  row has to say which of the two it is offering before the click lands.
+   *  Window-wide, not per-row: the modifier is a property of the window, so
+   *  one class on the root flips every row at once and the answer changes
+   *  under a still pointer the instant the key goes down. */
+  readonly ctrlHeld = signal(false)
   // `--hc-panel-scale` is NOT computed here any more: hcDockedPanel owns it for
   // every tool window, because it is now a SETTING (auto, or a picked text
   // size) and not merely a function of the width. The panel hands the directive
@@ -242,8 +249,31 @@ export class ClipboardPanelComponent implements OnDestroy, PanelSizeOwner {
     // current immediately.
     this.#cleanups.push(onSelection(({ selected }) => this.selectionCount.set(selected.length)))
 
+    // Ctrl tracking for the row verb. Capture-phase and on `window`, so it is
+    // current no matter where focus sits; `blur` clears it because a key
+    // released while the tab is away never sends its keyup here and the rows
+    // would be left offering the wrong verb.
+    window.addEventListener('keydown', this.#onModifier, true)
+    window.addEventListener('keyup', this.#onModifier, true)
+    window.addEventListener('blur', this.#clearModifier)
+    this.#cleanups.push(() => {
+      window.removeEventListener('keydown', this.#onModifier, true)
+      window.removeEventListener('keyup', this.#onModifier, true)
+      window.removeEventListener('blur', this.#clearModifier)
+    })
+
     // Subscriptions wired; allow auto-open from here on.
     this.#ready = true
+  }
+
+  #onModifier = (e: KeyboardEvent): void => {
+    if (!this.visible()) { this.#clearModifier(); return }
+    const held = e.ctrlKey || e.metaKey
+    if (this.ctrlHeld() !== held) this.ctrlHeld.set(held)
+  }
+
+  #clearModifier = (): void => {
+    if (this.ctrlHeld()) this.ctrlHeld.set(false)
   }
 
   /** Capture the current selection from inside the window — same verbs the

@@ -1,3 +1,4 @@
+@use '../toolwindow' as tw;
 @use '../panel-identity' as identity;
 // hypercomb-shared/ui/pheromone-tiles/pheromone-tiles.component.scss
 //
@@ -31,7 +32,7 @@ $accent: #ffcf6b;
   border-radius: var(--hc-radius-floating);
   box-shadow: 0 14px 44px rgba(var(--hc-panel-shadow), 0.55), 0 0 0 1px rgba(var(--acc), 0.06) inset;
   font-family: var(--hc-mono, system-ui);
-  color: #f3f3f3;
+  color: var(--hc-window-ink-loud);
   overflow: hidden;
 }
 
@@ -56,7 +57,7 @@ $accent: #ffcf6b;
 }
 
 .pheromone-grip {
-  color: rgba(var(--hc-panel-ink), 0.35);
+  color: var(--hc-window-ink-quiet);
   font-size: 0.85rem;
   line-height: 1;
 }
@@ -64,7 +65,7 @@ $accent: #ffcf6b;
 .pheromone-card-cell {
   flex: 1;
   font-size: 0.78rem;
-  color: rgba(var(--hc-panel-ink), 0.72);
+  color: var(--hc-window-ink-quiet);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -75,7 +76,7 @@ $accent: #ffcf6b;
   flex: 0 0 auto;
   background: transparent;
   border: none;
-  color: rgba(var(--hc-panel-ink), 0.5);
+  color: var(--hc-window-ink-quiet);
   font-size: 1.1rem;
   line-height: 1;
   cursor: pointer;
@@ -83,11 +84,11 @@ $accent: #ffcf6b;
   transition: color 150ms ease;
 }
 
-.pheromone-card-close:hover { color: #ffc8c8; }
+.pheromone-card-close:hover { color: tw.ink(#ffc8c8); }
 
 // The peek's only control — it keeps the card up, which is what makes the
 // chips' ×'s reachable now that the tile's hover band stands down here.
-.pheromone-card-pin:hover { color: #ffcf6b; }
+.pheromone-card-pin:hover { color: tw.ink(#ffcf6b); }
 
 .pheromone-chips {
   list-style: none;
@@ -114,7 +115,7 @@ $accent: #ffcf6b;
   border: 1px solid rgba(var(--hc-panel-ink), 0.14);
   font-size: 0.76rem;
   line-height: 1.2;
-  color: #e8eef5;
+  color: var(--hc-window-ink-loud);
   max-width: 100%;
 }
 
@@ -143,22 +144,22 @@ $accent: #ffcf6b;
   height: 1.05rem;
   border: none;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.22);
+  background: var(--hc-window-tint-strong);
   // Cold chrome now that the chip is no longer colour-filled — the × used to
   // inherit a per-chip contrast colour computed from the fill.
-  color: #b9c8d6;
+  color: var(--hc-window-ink-loud);
   font-size: 0.9rem;
   line-height: 1;
   cursor: pointer;
   opacity: 0.75;
   transition: opacity 130ms ease, background 130ms ease, color 130ms ease;
 
-  &:hover { opacity: 1; background: rgba(0, 0, 0, 0.34); color: #ffc8c8; }
+  &:hover { opacity: 1; background: rgba(0, 0, 0, 0.34); color: tw.ink(#ffc8c8); }
 }
 
 .pheromone-card-hint {
   margin: 0;
   padding: 0 0.65rem 0.55rem;
   font-size: 0.66rem;
-  color: rgba(var(--hc-panel-ink), 0.4);
+  color: var(--hc-window-ink-quiet);
 }

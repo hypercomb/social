@@ -55,7 +55,7 @@ $types: (
   font-family: var(--hc-mono);
   font-size: 0.7rem;
   line-height: 1.5;
-  color: rgba(245, 245, 245, 0.9);
+  color: var(--hc-window-ink-loud);
 
   animation: toast-enter 220ms ease-out forwards;
   transition: opacity 200ms ease, transform 200ms ease;
@@ -96,7 +96,7 @@ $types: (
   min-width: 0;
   white-space: normal;
   overflow-wrap: anywhere;
-  color: rgba(245, 245, 245, 0.82);
+  color: var(--hc-window-ink-plain);
 }
 
 .toast-action {
@@ -152,12 +152,12 @@ $types: (
 
   &.secondary {
     background: transparent;
-    color: rgba(245, 245, 245, 0.75);
+    color: var(--hc-window-ink-quiet);
     border: 1px solid transparent;
 
     &:hover {
       background: rgba(245, 245, 245, 0.06);
-      color: rgba(245, 245, 245, 0.95);
+      color: var(--hc-window-ink-loud);
     }
   }
 }
@@ -172,13 +172,13 @@ $types: (
   background: none;
   border: none;
   border-radius: 2px;
-  color: rgba(245, 245, 245, 0.25);
+  color: var(--hc-window-ink-quiet);
   font-size: 0.85rem;
   cursor: pointer;
   transition: color 120ms ease, background 120ms ease;
 
   &:hover {
-    color: rgba(245, 245, 245, 0.6);
+    color: var(--hc-window-ink-quiet);
     background: rgba(255, 255, 255, 0.06);
   }
 }

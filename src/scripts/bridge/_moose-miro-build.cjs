@@ -91,27 +91,20 @@ async function ask(req, attempts = 10) {
 
 // ── reads ─────────────────────────────────────────────────────────────
 
-const resourceCache = new Map()
-async function resource(sig) {
-  if (resourceCache.has(sig)) return resourceCache.get(sig)
-  const r = await ask({ op: 'get-resource', sig })
-  const v = r.ok ? r.data.text : null
-  resourceCache.set(sig, v)
-  return v
-}
-
-/** Child names of a layer, resolved in parallel. */
-async function childNamesOf(segments) {
-  const layer = await ask({ op: 'layer-at', segments })
-  if (!layer.ok) return null
-  const sigs = Array.isArray(layer.data?.children) ? layer.data.children.map(String) : []
-  const texts = await Promise.all(sigs.map(resource))
-  const names = []
-  for (const t of texts) {
-    if (!t) continue
-    try { const n = JSON.parse(t).name; if (typeof n === 'string' && n.trim()) names.push(n.trim()) } catch {}
-  }
-  return names
+// Child reads and child creation come from ONE implementation, shared with
+// every other bridge script: scripts/lib/hive-children.mjs. This file used to
+// decode child names with `get-resource`, which CANNOT work - a parent's
+// `children` slot holds LAYER sigs and a layer sig is not a resource - so it
+// read every parent as empty and fed that into a `children:` SET. The module
+// carries the trap and the two rules that retire it.
+let childCount, cellExists, childNamesOf, ensureChildrenSafe
+async function bindHiveHelpers() {
+  const { hiveChildren } = await import('../lib/hive-children.mjs')
+  const h = hiveChildren(ask)
+  childCount = h.childCount
+  cellExists = h.cellExists
+  childNamesOf = h.childNamesOf
+  ensureChildrenSafe = h.ensureChildren
 }
 
 async function noteFirstLines(segments) {
@@ -123,26 +116,19 @@ async function noteFirstLines(segments) {
 
 // ── writes ────────────────────────────────────────────────────────────
 
+/**
+ * Append `wanted` under `segments`. Existence is checked PER CHILD PATH and
+ * creation goes through `op:'add'` (an APPEND), so this can never drop a
+ * sibling - see scripts/lib/hive-children.mjs. Batching lives in the module.
+ */
 async function ensureChildren(segments, wanted) {
-  const have = await childNamesOf(segments)
-  if (have === null) return { ok: false, reason: 'no layer' }
-  const missing = wanted.filter(n => !have.includes(n))
-  if (!missing.length) return { ok: true, added: 0, total: have.length }
-  if (DRY) return { ok: true, added: missing.length, dry: true }
-  const name = segments[segments.length - 1]
-  // Commit in batches — a single update carrying hundreds of new children
-  // freezes the renderer hard enough that the tab reloads mid-write.
-  const BATCH = 100
-  let running = [...have], added = 0
-  for (let i = 0; i < missing.length; i += BATCH) {
-    const slice = missing.slice(i, i + BATCH)
-    const r = await ask({ op: 'update', segments, layer: { name, children: [...running, ...slice] } })
-    if (!r.ok) return { ok: false, reason: r.error, added }
-    running = [...running, ...slice]
-    added += slice.length
-    if (missing.length > BATCH) log(`      … ${added}/${missing.length}`)
-  }
-  return { ok: true, added }
+  const before = await childCount(segments)
+  if (before < 0) return { ok: false, reason: 'no layer' }
+  const r = await ensureChildrenSafe(segments, wanted, { dry: DRY })
+  if (!r.missing.length) return { ok: true, added: 0, total: before }
+  if (DRY) return { ok: true, added: r.missing.length, dry: true }
+  if (!r.ok) return { ok: false, reason: r.error, added: r.added }
+  return { ok: true, added: r.added }
 }
 
 async function ensureNote(parentSegments, cell, text) {
@@ -318,24 +304,27 @@ async function stageLists() {
  * a write aimed at moose-on-the-loose would land in it silently. Refuse to
  * write unless the attached hive is the one that owns this tree.
  */
+// Is the attached renderer the authoring hive? Ask whether the PATH resolves
+// rather than decoding every root child - one call, and it cannot be fooled by
+// a name read that silently returns nothing (which is how this check used to
+// pass or fail for the wrong reason).
 async function assertRightHive() {
   const root = await ask({ op: 'layer-at', segments: [] })
   if (!root.ok) throw new Error('cannot read the hive root: ' + root.error)
-  const sigs = (root.data?.children || []).map(String)
-  const texts = await Promise.all(sigs.map(resource))
-  const names = []
-  for (const t of texts) { if (!t) continue; try { const n = JSON.parse(t).name; if (n) names.push(n) } catch {} }
-  if (!names.includes('moose-on-the-loose')) {
+  const branches = Array.isArray(root.data?.children) ? root.data.children.length : 0
+  if (!(await cellExists(['moose-on-the-loose']))) {
+    const names = (await childNamesOf([])) || []
     throw new Error(
-      'WRONG HIVE — the attached renderer has no /moose-on-the-loose.\n' +
+      'WRONG HIVE \u2014 the attached renderer has no /moose-on-the-loose.\n' +
       `  root children: ${names.join(', ')}\n` +
       '  A stray tab stole the broker slot. Re-open the authoring hive with\n' +
       "  Start-Process chrome 'http://localhost:4250/?claudeBridge=1' and close the other tab.")
   }
-  log(`hive ok — root holds ${names.length} branches including moose-on-the-loose`)
+  log(`hive ok \u2014 root holds ${branches} branches including moose-on-the-loose`)
 }
 
 async function main() {
+  await bindHiveHelpers()
   log(`plan: ${plan.tiles.length} claim tiles, ${plan.companyTiles.length} company tiles, ${plan.branches.length} parent layers`)
   await assertRightHive()
   log(`stage=${STAGE}${DRY ? ' DRY' : ''}${LIMIT ? ` limit=${LIMIT}` : ''}${ONLY ? ` only=${ONLY}` : ''}`)

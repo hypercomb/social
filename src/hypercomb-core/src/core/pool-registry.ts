@@ -81,6 +81,16 @@ export const BARE_WORD_POOL_MEANINGS: readonly string[] = Object.freeze([
  *  is the expensive half: `sign()` of a typo mints a different address forever,
  *  so a later correction is a data migration, not an edit. */
 export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
+  // The participant's saved screen backdrops, sorted into the world they
+  // suit — one content-addressed doc { light: [sigs], dark: [sigs] } written
+  // by CanvasBackgroundService (presentation/background). The sigs point at
+  // ordinary content-root resources; the pool is what makes the collection
+  // queryable across the network, while WHICH picture is showing (and how
+  // washed) stays a localStorage pref — that is the distinction. TRUTH POOL,
+  // never minted from the optimize phase: a sorting is the participant's
+  // hand, not derivable from layers (optimize-phase.md litmus). Colon-scoped
+  // so it can never collide with a tile slugged 'backgrounds'.
+  'backgrounds:saved',
   // How this participant actually TALKS to the command line — one record
   // holding the lead-in→behaviour phrasings learned from utterances that RAN,
   // plus per-behaviour run counts (essentials/commands/utterance/

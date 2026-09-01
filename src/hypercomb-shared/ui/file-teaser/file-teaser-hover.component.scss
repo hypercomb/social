@@ -2,6 +2,7 @@
 // type chips (mat-sym icon + count) so the teaser and the full panel read the
 // same. Fixed-positioned; the base component drives left/top + drag.
 
+@use '../toolwindow' as tw;
 :host {
   position: fixed;
   inset: 0;
@@ -19,7 +20,7 @@
   border: 1px solid rgba(126, 182, 214, 0.22);
   border-radius: var(--hc-radius-floating);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.36);
-  color: #e8edf2;
+  color: var(--hc-window-ink-loud);
   font-size: 12px;
   overflow: hidden;
   animation: teaser-in 120ms ease-out;
@@ -54,14 +55,14 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #cfe0ec;
+  color: var(--hc-window-ink-loud);
 }
 
 .teaser-total {
   flex: none;
   font-variant-numeric: tabular-nums;
   font-size: 11px;
-  color: #8aa3b4;
+  color: var(--hc-window-ink-quiet);
   background: rgba(126, 182, 214, 0.12);
   border-radius: 999px;
   padding: 1px 7px;
@@ -76,18 +77,18 @@
   border: none;
   border-radius: var(--hc-radius-floating);
   background: transparent;
-  color: #8aa3b4;
+  color: var(--hc-window-ink-quiet);
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
 
-  &:hover { background: rgba(255, 120, 120, 0.16); color: #ff9b9b; }
+  &:hover { background: rgba(255, 120, 120, 0.16); color: tw.ink(#ff9b9b); }
 }
 
 .teaser-empty {
   margin: 0;
   padding: 12px 10px;
-  color: #7d8b98;
+  color: var(--hc-window-ink-quiet);
   font-style: italic;
 }
 
@@ -119,5 +120,5 @@
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   font-size: 11px;
-  color: #e8edf2;
+  color: var(--hc-window-ink-loud);
 }

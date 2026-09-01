@@ -53,7 +53,7 @@ the hive is layered. each ring depends only on the rings inside it.
                          build: tsup (ESM + CJS + .d.ts)
 
 @hypercomb/essentials    pixi peer dep. domain-namespaced modules.
-                         diamondcoreprocessor.com/:
+                         :
                            core, input, nostr, pixi, editor, settings
                          revolucionstyle.com/:
                            journal, wheel, cigar, discovery

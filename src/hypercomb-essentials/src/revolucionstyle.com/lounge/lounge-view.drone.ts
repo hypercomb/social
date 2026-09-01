@@ -18,9 +18,9 @@
 // every view here follows.
 
 import { Drone } from '@hypercomb/core'
-import { isFeatureHidden } from '../../diamondcoreprocessor.com/sharing/feature-hidden.js'
-import { titleForLabel } from '../../diamondcoreprocessor.com/commands/decoration-kind-index.js'
-import type { BackGesture } from '../../diamondcoreprocessor.com/navigation/back-gesture.service.js'
+import { isFeatureHidden } from '../../sharing/feature-hidden.js'
+import { titleForLabel } from '../../commands/decoration-kind-index.js'
+import type { BackGesture } from '../../navigation/back-gesture.service.js'
 import {
   LOUNGE_KIND, LOUNGE_VIEW, loungeRoomAt, loungeViews, mountLoungeRoom,
   type LoungeRoomPayload, type MountedRoom,

@@ -43,7 +43,7 @@
   font-size: 0.68rem;
   letter-spacing: 0.02em;
   line-height: 1.2;
-  color: rgba(245, 245, 245, 0.75);
+  color: var(--hc-window-ink-quiet);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -53,7 +53,7 @@
   border-color: rgba(110, 201, 110, 0.28);
 
   .sync-label {
-    color: rgba(220, 245, 225, 0.76);
+    color: var(--hc-window-ink-plain);
   }
 }
 

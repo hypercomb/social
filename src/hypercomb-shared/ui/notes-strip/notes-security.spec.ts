@@ -32,7 +32,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 // Resolve repo-relative paths from this spec's location. We climb out
 // of `hypercomb-shared/ui/notes-strip/` to `src/`, then walk into each
 // notes-* dir under hypercomb-shared/ui/ and the notes module under
-// hypercomb-essentials/src/diamondcoreprocessor.com/.
+// hypercomb-essentials/src/.
 const SRC = resolve(__dirname, '..', '..', '..')
 
 const SCAN_ROOTS: readonly string[] = [

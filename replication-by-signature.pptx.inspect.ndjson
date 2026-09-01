@@ -1,0 +1,210 @@
+{"kind":"deck","id":"pr/zy68ui","name":"Deck"}
+{"kind":"layout","layoutId":"d2a3f602-a1db-4944-aa03-ba90d4d8dec3","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"6e015ab5-a395-4caa-be51-6ff10f006320","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/gg103h","slide":1,"title":"REPLICATION, REDUCED","textShapes":6}
+{"kind":"textbox","id":"sh/mh4vupkf","slide":1,"name":"text","text":"REPLICATION, REDUCED","textPreview":"REPLICATION, REDUCED","textChars":20,"textLines":1,"bbox":[42,42,420,28]}
+{"kind":"textbox","id":"sh/94vepkj6","slide":1,"name":"text","text":"One signature\ncan bring a host\nin sync.","textPreview":"One signature | can bring a host | in sync.","textChars":39,"textLines":3,"bbox":[42,154,760,270]}
+{"kind":"textbox","id":"sh/83mdwfil","slide":1,"name":"text","text":"A shim fetches the signed layer. The host inflates only what it chose to publish. The core takes over seamlessly.","textPreview":"A shim fetches the signed layer. The host inflates only what it chose to publish. The core takes over seamlessly.","textChars":113,"textLines":1,"bbox":[42,500,780,92]}
+{"kind":"shape","id":"sh/zetcja14","slide":1,"name":"signature-tile","bbox":[920,120,260,430]}
+{"kind":"textbox","id":"sh/ydkvq5kj","slide":1,"name":"text","text":"σ","textPreview":"σ","textChars":1,"textLines":1,"bbox":[920,165,260,190]}
+{"kind":"textbox","id":"sh/lgvulkja","slide":1,"name":"text","text":"small signal","textPreview":"small signal","textChars":12,"textLines":1,"bbox":[950,400,200,28]}
+{"kind":"textbox","id":"sh/0fmdsf2p","slide":1,"name":"text","text":"complete arrival","textPreview":"complete arrival","textChars":16,"textLines":1,"bbox":[950,440,200,28]}
+{"kind":"notes","id":"nt/gg103h","slide":1,"text":"[Sources]\n- Conceptual flow based on the supplied system description."}
+{"kind":"slide","id":"sl/xamz98","slide":2,"title":"01","textShapes":11}
+{"kind":"textbox","id":"sh/1gbadc3y","slide":2,"name":"text","text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[42,28,220,28]}
+{"kind":"textbox","id":"sh/edkrih4n","slide":2,"name":"text","text":"The signature is the handoff; the layer is the payload.","textPreview":"The signature is the handoff; the layer is the payload.","textChars":55,"textLines":1,"bbox":[42,62,1170,78]}
+{"kind":"shape","id":"sh/zetsbm58","slide":2,"bbox":[42,154,1196,1]}
+{"kind":"shape","id":"sh/cbi9g7mh","slide":2,"bbox":[260,350,220,1]}
+{"kind":"shape","id":"sh/dcra9cn2","slide":2,"bbox":[710,350,220,1]}
+{"kind":"shape","id":"sh/qp0rex4b","slide":2,"name":"Origin host","bbox":[42,290,220,130]}
+{"kind":"textbox","id":"sh/rq9s725w","slide":2,"name":"text","text":"Origin host","textPreview":"Origin host","textChars":11,"textLines":1,"bbox":[60,310,184,36]}
+{"kind":"textbox","id":"sh/4ni9cnml","slide":2,"name":"text","text":"content + signature","textPreview":"content + signature","textChars":19,"textLines":1,"bbox":[60,349,184,42]}
+{"kind":"shape","id":"sh/pora5sn6","slide":2,"name":"Shim","bbox":[485,290,220,130]}
+{"kind":"textbox","id":"sh/l8vmh8za","slide":2,"name":"text","text":"Shim","textPreview":"Shim","textChars":4,"textLines":1,"bbox":[503,310,184,36]}
+{"kind":"textbox","id":"sh/knmlo3yp","slide":2,"name":"text","text":"resolves domains","textPreview":"resolves domains","textChars":16,"textLines":1,"bbox":[503,349,184,42]}
+{"kind":"shape","id":"sh/zmt4fyh4","slide":2,"name":"New host","bbox":[935,290,245,130]}
+{"kind":"textbox","id":"sh/ylk3mtgj","slide":2,"name":"text","text":"New host","textPreview":"New host","textChars":8,"textLines":1,"bbox":[953,310,209,36]}
+{"kind":"textbox","id":"sh/xkbmdozy","slide":2,"name":"text","text":"inflates + runs","textPreview":"inflates + runs","textChars":15,"textLines":1,"bbox":[953,349,209,42]}
+{"kind":"textbox","id":"sh/cj2lkjyd","slide":2,"name":"text","text":"σ","textPreview":"σ","textChars":1,"textLines":1,"bbox":[310,305,120,55]}
+{"kind":"textbox","id":"sh/bit4behs","slide":2,"name":"text","text":"layer","textPreview":"layer","textChars":5,"textLines":1,"bbox":[755,305,120,55]}
+{"kind":"textbox","id":"sh/ahk3i9gn","slide":2,"name":"text","text":"The coordination object stays tiny. Content moves only after the signature is understood.","textPreview":"The coordination object stays tiny. Content moves only after the signature is understood.","textChars":89,"textLines":1,"bbox":[210,520,860,70]}
+{"kind":"notes","id":"nt/xamz98","slide":2,"text":"[Sources]\n- Conceptual flow based on the supplied system description."}
+{"kind":"slide","id":"sl/i6wh07","slide":3,"title":"02","textShapes":9}
+{"kind":"textbox","id":"sh/lczihwjy","slide":3,"name":"text","text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[42,28,220,28]}
+{"kind":"textbox","id":"sh/y98jm1kn","slide":3,"name":"text","text":"First, send the signature—not the whole server.","textPreview":"First, send the signature—not the whole server.","textChars":47,"textLines":1,"bbox":[42,62,1170,78]}
+{"kind":"shape","id":"sh/zah0fm18","slide":3,"bbox":[42,154,1196,1]}
+{"kind":"shape","id":"sh/8fa1sb2p","slide":3,"name":"box","bbox":[42,205,510,330]}
+{"kind":"textbox","id":"sh/9gjilgja","slide":3,"name":"text","text":"σ","textPreview":"σ","textChars":1,"textLines":1,"bbox":[82,245,160,150]}
+{"kind":"textbox","id":"sh/mdsjq1kj","slide":3,"name":"text","text":"Identity","textPreview":"Identity","textChars":8,"textLines":1,"bbox":[285,244,210,34]}
+{"kind":"textbox","id":"sh/7e10j614","slide":3,"name":"text","text":"Integrity","textPreview":"Integrity","textChars":9,"textLines":1,"bbox":[285,310,210,34]}
+{"kind":"textbox","id":"sh/w3a1wb21","slide":3,"name":"text","text":"Layer address","textPreview":"Layer address","textChars":13,"textLines":1,"bbox":[285,376,210,34]}
+{"kind":"textbox","id":"sh/h43ipgj6","slide":3,"name":"text","text":"Policy / hive","textPreview":"Policy / hive","textChars":13,"textLines":1,"bbox":[285,442,210,34]}
+{"kind":"textbox","id":"sh/dgnm54fa","slide":3,"name":"text","text":"The signature tells the receiver what to trust, what to request, and how to reconstruct the selected package.","textPreview":"The signature tells the receiver what to trust, what to request, and how to reconstruct the selected package.","textChars":109,"textLines":1,"bbox":[640,245,520,170]}
+{"kind":"textbox","id":"sh/sfelwzyp","slide":3,"name":"text","text":"Small enough to pass around. Specific enough to drive deterministic retrieval.","textPreview":"Small enough to pass around. Specific enough to drive deterministic retrieval.","textChars":78,"textLines":1,"bbox":[640,445,500,80]}
+{"kind":"notes","id":"nt/i6wh07","slide":3,"text":"[Sources]\n- Conceptual flow based on the supplied system description."}
+{"kind":"slide","id":"sl/yw1grq","slide":4,"title":"03","textShapes":13}
+{"kind":"textbox","id":"sh/9knm1ovq","slide":4,"name":"text","text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[42,28,220,28]}
+{"kind":"textbox","id":"sh/mhwnqtcz","slide":4,"name":"text","text":"The shim knows where the layer can be fetched.","textPreview":"The shim knows where the layer can be fetched.","textChars":46,"textLines":1,"bbox":[42,62,1170,78]}
+{"kind":"shape","id":"sh/7i54zydk","slide":4,"bbox":[42,154,1196,1]}
+{"kind":"shape","id":"sh/wny5w3u1","slide":4,"name":"Shim","bbox":[490,260,300,150]}
+{"kind":"textbox","id":"sh/ho7m58vm","slide":4,"name":"text","text":"Shim","textPreview":"Shim","textChars":4,"textLines":1,"bbox":[508,280,264,36]}
+{"kind":"textbox","id":"sh/ulwnutcb","slide":4,"name":"text","text":"domain-aware resolver","textPreview":"domain-aware resolver","textChars":21,"textLines":1,"bbox":[508,319,264,42]}
+{"kind":"shape","id":"sh/vm543ydg","slide":4,"bbox":[300,285,190,50]}
+{"kind":"shape","id":"sh/crulkjux","slide":4,"name":"domain A","bbox":[90,230,210,110]}
+{"kind":"textbox","id":"sh/xs3mt4vi","slide":4,"name":"text","text":"domain A","textPreview":"domain A","textChars":8,"textLines":1,"bbox":[108,250,174,36]}
+{"kind":"textbox","id":"sh/90jqhkzm","slide":4,"name":"text","text":"signed source","textPreview":"signed source","textChars":13,"textLines":1,"bbox":[108,289,174,42]}
+{"kind":"shape","id":"sh/ozqp8fy1","slide":4,"bbox":[300,335,190,180]}
+{"kind":"shape","id":"sh/nyh8fahg","slide":4,"name":"domain B","bbox":[90,460,210,110]}
+{"kind":"textbox","id":"sh/mx8765gv","slide":4,"name":"text","text":"domain B","textPreview":"domain B","textChars":8,"textLines":1,"bbox":[108,480,174,36]}
+{"kind":"textbox","id":"sh/x4jqlkzi","slide":4,"name":"text","text":"signed source","textPreview":"signed source","textChars":13,"textLines":1,"bbox":[108,519,174,42]}
+{"kind":"shape","id":"sh/w3apczyx","slide":4,"bbox":[790,285,160,50]}
+{"kind":"shape","id":"sh/b218juhc","slide":4,"name":"peer cache","bbox":[950,230,210,110]}
+{"kind":"textbox","id":"sh/a1s7apgr","slide":4,"name":"text","text":"peer cache","textPreview":"peer cache","textChars":10,"textLines":1,"bbox":[968,250,174,36]}
+{"kind":"textbox","id":"sh/ls3qp4ze","slide":4,"name":"text","text":"signed source","textPreview":"signed source","textChars":13,"textLines":1,"bbox":[968,289,174,42]}
+{"kind":"shape","id":"sh/k7upgzy9","slide":4,"bbox":[790,335,160,180]}
+{"kind":"shape","id":"sh/4n21s7ah","slide":4,"name":"origin","bbox":[950,460,210,110]}
+{"kind":"textbox","id":"sh/5ovi1cb2","slide":4,"name":"text","text":"origin","textPreview":"origin","textChars":6,"textLines":1,"bbox":[968,480,174,36]}
+{"kind":"textbox","id":"sh/ilkjqxsb","slide":4,"name":"text","text":"signed source","textPreview":"signed source","textChars":13,"textLines":1,"bbox":[968,519,174,42]}
+{"kind":"textbox","id":"sh/3mt0z2tw","slide":4,"name":"text","text":"Resolve → verify → fetch","textPreview":"Resolve → verify → fetch","textChars":24,"textLines":1,"bbox":[452,500,375,46]}
+{"kind":"notes","id":"nt/yw1grq","slide":4,"text":"[Sources]\n- Conceptual flow based on the supplied system description."}
+{"kind":"slide","id":"sl/v970sv","slide":5,"title":"04","textShapes":13}
+{"kind":"textbox","id":"sh/3qpo7ipw","slide":5,"name":"text","text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[42,28,220,28]}
+{"kind":"textbox","id":"sh/orypgn6h","slide":5,"name":"text","text":"Inflation turns one signed layer into runnable content.","textPreview":"Inflation turns one signed layer into runnable content.","textChars":55,"textLines":1,"bbox":[42,62,1170,78]}
+{"kind":"shape","id":"sh/ps769s7m","slide":5,"bbox":[42,154,1196,1]}
+{"kind":"shape","id":"sh/e1w7atoz","slide":5,"bbox":[212,345,78,1]}
+{"kind":"shape","id":"sh/f2po3ypk","slide":5,"name":"box","bbox":[42,270,170,150]}
+{"kind":"textbox","id":"sh/gnypc365","slide":5,"name":"text","text":"1","textPreview":"1","textChars":1,"textLines":1,"bbox":[97,290,60,48]}
+{"kind":"textbox","id":"sh/1o76587q","slide":5,"name":"text","text":"Verify σ","textPreview":"Verify σ","textChars":8,"textLines":1,"bbox":[54,350,146,40]}
+{"kind":"shape","id":"sh/6xwn6to3","slide":5,"bbox":[470,345,78,1]}
+{"kind":"shape","id":"sh/ry5ozypo","slide":5,"name":"box","bbox":[300,270,170,150]}
+{"kind":"textbox","id":"sh/3uh47mdk","slide":5,"name":"text","text":"2","textPreview":"2","textChars":1,"textLines":1,"bbox":[355,290,60,48]}
+{"kind":"textbox","id":"sh/2t83ehwz","slide":5,"name":"text","text":"Fetch layer","textPreview":"Fetch layer","textChars":11,"textLines":1,"bbox":[312,350,146,40]}
+{"kind":"shape","id":"sh/pgzm9cvq","slide":5,"bbox":[728,345,78,1]}
+{"kind":"shape","id":"sh/ofqlg7e5","slide":5,"name":"box","bbox":[558,270,170,150]}
+{"kind":"textbox","id":"sh/bi14bmdw","slide":5,"name":"text","text":"3","textPreview":"3","textChars":1,"textLines":1,"bbox":[613,290,60,48]}
+{"kind":"textbox","id":"sh/ahs3ihwb","slide":5,"name":"text","text":"Inflate","textPreview":"Inflate","textChars":7,"textLines":1,"bbox":[570,350,146,40]}
+{"kind":"shape","id":"sh/xkjmdwvm","slide":5,"bbox":[986,345,78,1]}
+{"kind":"shape","id":"sh/cjalkreh","slide":5,"name":"box","bbox":[816,270,170,150]}
+{"kind":"textbox","id":"sh/rmxkz2xc","slide":5,"name":"text","text":"4","textPreview":"4","textChars":1,"textLines":1,"bbox":[871,290,60,48]}
+{"kind":"textbox","id":"sh/6lo36xw7","slide":5,"name":"text","text":"Fetch content","textPreview":"Fetch content","textChars":13,"textLines":1,"bbox":[828,350,146,40]}
+{"kind":"shape","id":"sh/uhw7e5gf","slide":5,"name":"box","bbox":[1074,270,170,150]}
+{"kind":"textbox","id":"sh/vi5o7qx0","slide":5,"name":"text","text":"5","textPreview":"5","textChars":1,"textLines":1,"bbox":[1129,290,60,48]}
+{"kind":"textbox","id":"sh/wjepgvyl","slide":5,"name":"text","text":"Start core","textPreview":"Start core","textChars":10,"textLines":1,"bbox":[1086,350,146,40]}
+{"kind":"textbox","id":"sh/h4n690f6","slide":5,"name":"text","text":"Inflation is the transition point: the minimal bootstrap yields control to the diamond core processor.","textPreview":"Inflation is the transition point: the minimal bootstrap yields control to the diamond core processor.","textChars":102,"textLines":1,"bbox":[220,510,840,72]}
+{"kind":"notes","id":"nt/v970sv","slide":5,"text":"[Sources]\n- Conceptual flow based on the supplied system description."}
+{"kind":"slide","id":"sl/acbo7q","slide":6,"title":"05","textShapes":10}
+{"kind":"textbox","id":"sh/b25cji1k","slide":6,"name":"text","text":"05","textPreview":"05","textChars":2,"textLines":1,"bbox":[42,28,220,28]}
+{"kind":"textbox","id":"sh/c3edcn25","slide":6,"name":"text","text":"When content arrives, the server becomes a peer.","textPreview":"When content arrives, the server becomes a peer.","textChars":48,"textLines":1,"bbox":[42,62,1170,78]}
+{"kind":"shape","id":"sh/x47ulsjq","slide":6,"bbox":[42,154,1196,1]}
+{"kind":"shape","id":"sh/ypgvedkb","slide":6,"name":"Host A","bbox":[110,270,260,150]}
+{"kind":"textbox","id":"sh/zqpcni1w","slide":6,"name":"text","text":"Host A","textPreview":"Host A","textChars":6,"textLines":1,"bbox":[128,290,224,36]}
+{"kind":"textbox","id":"sh/krydgn2h","slide":6,"name":"text","text":"publishing","textPreview":"publishing","textChars":10,"textLines":1,"bbox":[128,329,224,42]}
+{"kind":"shape","id":"sh/ls7epsj2","slide":6,"name":"Host B","bbox":[910,270,260,150]}
+{"kind":"textbox","id":"sh/mtgvixkn","slide":6,"name":"text","text":"Host B","textPreview":"Host B","textChars":6,"textLines":1,"bbox":[928,290,224,36]}
+{"kind":"textbox","id":"sh/7upwr21s","slide":6,"name":"text","text":"in sync","textPreview":"in sync","textChars":7,"textLines":1,"bbox":[928,329,224,42]}
+{"kind":"shape","id":"sh/nalcjahk","slide":6,"bbox":[370,345,540,1]}
+{"kind":"textbox","id":"sh/m9cva50z","slide":6,"name":"text","text":"same signature","textPreview":"same signature","textChars":14,"textLines":1,"bbox":[500,270,280,34]}
+{"kind":"textbox","id":"sh/9cnul0zq","slide":6,"name":"text","text":"same selected layer","textPreview":"same selected layer","textChars":19,"textLines":1,"bbox":[500,320,280,34]}
+{"kind":"textbox","id":"sh/8budcvi5","slide":6,"name":"text","text":"same runnable core","textPreview":"same runnable core","textChars":18,"textLines":1,"bbox":[500,370,280,34]}
+{"kind":"textbox","id":"sh/z6lcfqho","slide":6,"name":"text","text":"Replication does not copy an installation ritual. It reproduces a verified state.","textPreview":"Replication does not copy an installation ritual. It reproduces a verified state.","textChars":81,"textLines":1,"bbox":[255,520,770,64]}
+{"kind":"notes","id":"nt/acbo7q","slide":6,"text":"[Sources]\n- Conceptual flow based on the supplied system description."}
+{"kind":"slide","id":"sl/fz1gzd","slide":7,"title":"06","textShapes":11}
+{"kind":"textbox","id":"sh/8nidcfy5","slide":7,"name":"text","text":"06","textPreview":"06","textChars":2,"textLines":1,"bbox":[42,28,220,28]}
+{"kind":"textbox","id":"sh/nm9wjahk","slide":7,"name":"text","text":"A second host repeats the same apparatus.","textPreview":"A second host repeats the same apparatus.","textChars":41,"textLines":1,"bbox":[42,62,1170,78]}
+{"kind":"shape","id":"sh/m10vapgz","slide":7,"bbox":[42,154,1196,1]}
+{"kind":"shape","id":"sh/l0rehkze","slide":7,"name":"Host A","bbox":[42,255,225,135]}
+{"kind":"textbox","id":"sh/0zyd8fyt","slide":7,"name":"text","text":"Host A","textPreview":"Host A","textChars":6,"textLines":1,"bbox":[60,275,189,36]}
+{"kind":"textbox","id":"sh/zypwfaho","slide":7,"name":"text","text":"already serving","textPreview":"already serving","textChars":15,"textLines":1,"bbox":[60,314,189,42]}
+{"kind":"shape","id":"sh/exgv65g3","slide":7,"name":"Host B","bbox":[525,255,225,135]}
+{"kind":"textbox","id":"sh/dw7ed0zi","slide":7,"name":"text","text":"Host B","textPreview":"Host B","textChars":6,"textLines":1,"bbox":[543,275,189,36]}
+{"kind":"textbox","id":"sh/cvyd4vyx","slide":7,"name":"text","text":"already serving","textPreview":"already serving","textChars":15,"textLines":1,"bbox":[543,314,189,42]}
+{"kind":"shape","id":"sh/2p8bixsf","slide":7,"name":"Host C","bbox":[1013,255,225,135]}
+{"kind":"textbox","id":"sh/3qhsb2t0","slide":7,"name":"text","text":"Host C","textPreview":"Host C","textChars":6,"textLines":1,"bbox":[1031,275,189,36]}
+{"kind":"textbox","id":"sh/4ratknal","slide":7,"name":"text","text":"wants to host","textPreview":"wants to host","textChars":13,"textLines":1,"bbox":[1031,314,189,42]}
+{"kind":"shape","id":"sh/psjadsb6","slide":7,"bbox":[267,322,258,1]}
+{"kind":"shape","id":"sh/u18redsj","slide":7,"bbox":[750,322,263,1]}
+{"kind":"textbox","id":"sh/f2hs7it4","slide":7,"name":"text","text":"σ","textPreview":"σ","textChars":1,"textLines":1,"bbox":[340,270,110,55]}
+{"kind":"textbox","id":"sh/g3qtgna9","slide":7,"name":"text","text":"σ","textPreview":"σ","textChars":1,"textLines":1,"bbox":[830,270,110,55]}
+{"kind":"textbox","id":"sh/hoza9sbu","slide":7,"name":"text","text":"The signature propagates intent; each receiver performs its own verified fetch and inflation.","textPreview":"The signature propagates intent; each receiver performs its own verified fetch and inflation.","textChars":93,"textLines":1,"bbox":[220,490,840,80]}
+{"kind":"notes","id":"nt/fz1gzd","slide":7,"text":"[Sources]\n- Conceptual flow based on the supplied system description."}
+{"kind":"slide","id":"sl/5wg4hy","slide":8,"title":"TRY IT","textShapes":13}
+{"kind":"textbox","id":"sh/mdo76pob","slide":8,"name":"text","text":"TRY IT","textPreview":"TRY IT","textChars":6,"textLines":1,"bbox":[42,28,220,28]}
+{"kind":"textbox","id":"sh/9gfq14n2","slide":8,"name":"text","text":"Choose the hive this node should publish.","textPreview":"Choose the hive this node should publish.","textChars":41,"textLines":1,"bbox":[42,62,1170,78]}
+{"kind":"shape","id":"sh/8f6p8z6h","slide":8,"bbox":[42,154,1196,1]}
+{"kind":"textbox","id":"sh/vix83e5s","slide":8,"name":"text","text":"Each hive defines a deliberately minimal package. Click one to inspect what arrives.","textPreview":"Each hive defines a deliberately minimal package. Click one to inspect what arrives.","textChars":84,"textLines":1,"bbox":[42,158,900,52]}
+{"kind":"shape","id":"sh/aho7u947","slide":8,"name":"WEB HIVE","bbox":[260,270,230,210]}
+{"kind":"textbox","id":"sh/xkzq54ny","slide":8,"name":"text","text":"◇","textPreview":"◇","textChars":1,"textLines":1,"bbox":[330,292,90,68]}
+{"kind":"textbox","id":"sh/wjqpwjmd","slide":8,"name":"text","text":"WEB HIVE","textPreview":"WEB HIVE","textChars":8,"textLines":1,"bbox":[280,375,190,38]}
+{"kind":"textbox","id":"sh/bmdora5o","slide":8,"name":"text","text":"site + edge runtime","textPreview":"site + edge runtime","textChars":19,"textLines":1,"bbox":[280,420,190,38]}
+{"kind":"shape","id":"sh/ql47y5o3","slide":8,"name":"DATA HIVE","bbox":[515,270,230,210]}
+{"kind":"textbox","id":"sh/83ex8321","slide":8,"name":"text","text":"◇","textPreview":"◇","textChars":1,"textLines":1,"bbox":[585,292,90,68]}
+{"kind":"textbox","id":"sh/94ne183m","slide":8,"name":"text","text":"DATA HIVE","textPreview":"DATA HIVE","textChars":9,"textLines":1,"bbox":[535,375,190,38]}
+{"kind":"textbox","id":"sh/m1cf6tkb","slide":8,"name":"text","text":"dataset + query core","textPreview":"dataset + query core","textChars":20,"textLines":1,"bbox":[535,420,190,38]}
+{"kind":"shape","id":"sh/72lwzylw","slide":8,"name":"MEDIA HIVE","bbox":[770,270,230,210]}
+{"kind":"textbox","id":"sh/grexcn2d","slide":8,"name":"text","text":"◇","textPreview":"◇","textChars":1,"textLines":1,"bbox":[840,292,90,68]}
+{"kind":"textbox","id":"sh/hsny583y","slide":8,"name":"text","text":"MEDIA HIVE","textPreview":"MEDIA HIVE","textChars":10,"textLines":1,"bbox":[790,375,190,38]}
+{"kind":"textbox","id":"sh/u5wfadk7","slide":8,"name":"text","text":"assets + stream core","textPreview":"assets + stream core","textChars":20,"textLines":1,"bbox":[790,420,190,38]}
+{"kind":"textbox","id":"sh/v65w3ils","slide":8,"name":"text","text":"The node is the hive. Name it, include only what you intend to expose, then publish.","textPreview":"The node is the hive. Name it, include only what you intend to expose, then publish.","textChars":84,"textLines":1,"bbox":[250,545,780,64]}
+{"kind":"notes","id":"nt/5wg4hy","slide":8,"text":"[Sources]\n- Conceptual flow based on the supplied system description."}
+{"kind":"slide","id":"sl/w5x2ly","slide":9,"title":"SELECTED HIVE","textShapes":12}
+{"kind":"textbox","id":"sh/1wb6dsza","slide":9,"name":"text","text":"SELECTED HIVE","textPreview":"SELECTED HIVE","textChars":13,"textLines":1,"bbox":[42,28,220,28]}
+{"kind":"textbox","id":"sh/etkn2d0j","slide":9,"name":"text","text":"WEB HIVE inflates only its declared package.","textPreview":"WEB HIVE inflates only its declared package.","textChars":44,"textLines":1,"bbox":[42,62,1170,78]}
+{"kind":"shape","id":"sh/futobih4","slide":9,"bbox":[42,154,1196,1]}
+{"kind":"shape","id":"sh/ozmp8nil","slide":9,"name":"box","bbox":[42,205,380,330]}
+{"kind":"textbox","id":"sh/p0v6hsz6","slide":9,"name":"text","text":"σ","textPreview":"σ","textChars":1,"textLines":1,"bbox":[102,240,260,120]}
+{"kind":"textbox","id":"sh/2xkn6d0v","slide":9,"name":"text","text":"WEB HIVE\nsignature","textPreview":"WEB HIVE | signature","textChars":18,"textLines":2,"bbox":[92,390,280,72]}
+{"kind":"textbox","id":"sh/nytofih0","slide":9,"name":"text","text":"Minimal package","textPreview":"Minimal package","textChars":15,"textLines":1,"bbox":[505,205,510,42]}
+{"kind":"textbox","id":"sh/c3mpc7ix","slide":9,"name":"text","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[505,275,42,38]}
+{"kind":"textbox","id":"sh/xov6lczi","slide":9,"name":"text","text":"public site layer","textPreview":"public site layer","textChars":17,"textLines":1,"bbox":[560,270,560,46]}
+{"kind":"textbox","id":"sh/d0vudsra","slide":9,"name":"text","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[505,347,42,38]}
+{"kind":"textbox","id":"sh/cz2d4nqp","slide":9,"name":"text","text":"edge runtime","textPreview":"edge runtime","textChars":12,"textLines":1,"bbox":[560,342,560,46]}
+{"kind":"textbox","id":"sh/rytcbi94","slide":9,"name":"text","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[505,419,42,38]}
+{"kind":"textbox","id":"sh/qdkv2x8z","slide":9,"name":"text","text":"routing manifest","textPreview":"routing manifest","textChars":16,"textLines":1,"bbox":[560,414,560,46]}
+{"kind":"textbox","id":"sh/14vuhc7m","slide":9,"name":"text","text":"← Choose another hive","textPreview":"← Choose another hive","textChars":21,"textLines":1,"bbox":[505,525,330,44]}
+{"kind":"notes","id":"nt/w5x2ly","slide":9,"text":"[Sources]\n- Conceptual flow based on the supplied system description."}
+{"kind":"slide","id":"sl/2thxaf","slide":10,"title":"SELECTED HIVE","textShapes":12}
+{"kind":"textbox","id":"sh/14ba1032","slide":10,"name":"text","text":"SELECTED HIVE","textPreview":"SELECTED HIVE","textChars":13,"textLines":1,"bbox":[42,28,220,28]}
+{"kind":"textbox","id":"sh/ehkrql4r","slide":10,"name":"text","text":"DATA HIVE inflates only its declared package.","textPreview":"DATA HIVE inflates only its declared package.","textChars":45,"textLines":1,"bbox":[42,62,1170,78]}
+{"kind":"shape","id":"sh/fitszqlc","slide":10,"bbox":[42,154,1196,1]}
+{"kind":"shape","id":"sh/sf29ovml","slide":10,"name":"box","bbox":[42,205,380,330]}
+{"kind":"textbox","id":"sh/dgbaxg36","slide":10,"name":"text","text":"σ","textPreview":"σ","textChars":1,"textLines":1,"bbox":[102,240,260,120]}
+{"kind":"textbox","id":"sh/qd0rml4f","slide":10,"name":"text","text":"DATA HIVE\nsignature","textPreview":"DATA HIVE | signature","textChars":19,"textLines":2,"bbox":[92,390,280,72]}
+{"kind":"textbox","id":"sh/re98vql0","slide":10,"name":"text","text":"Minimal package","textPreview":"Minimal package","textChars":15,"textLines":1,"bbox":[505,205,510,42]}
+{"kind":"textbox","id":"sh/4bi9kbm9","slide":10,"name":"text","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[505,275,42,38]}
+{"kind":"textbox","id":"sh/5crqtg3u","slide":10,"name":"text","text":"published dataset","textPreview":"published dataset","textChars":17,"textLines":1,"bbox":[560,270,560,46]}
+{"kind":"textbox","id":"sh/9ovedozy","slide":10,"name":"text","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[505,347,42,38]}
+{"kind":"textbox","id":"sh/8nmxkjid","slide":10,"name":"text","text":"query processor","textPreview":"query processor","textChars":15,"textLines":1,"bbox":[560,342,560,46]}
+{"kind":"textbox","id":"sh/nmtwbehs","slide":10,"name":"text","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[505,419,42,38]}
+{"kind":"textbox","id":"sh/m1kfi90n","slide":10,"name":"text","text":"access policy","textPreview":"access policy","textChars":13,"textLines":1,"bbox":[560,414,560,46]}
+{"kind":"textbox","id":"sh/l0be9oz2","slide":10,"name":"text","text":"← Choose another hive","textPreview":"← Choose another hive","textChars":21,"textLines":1,"bbox":[505,525,330,44]}
+{"kind":"notes","id":"nt/2thxaf","slide":10,"text":"[Sources]\n- Conceptual flow based on the supplied system description."}
+{"kind":"slide","id":"sl/d04wzl","slide":11,"title":"SELECTED HIVE","textShapes":12}
+{"kind":"textbox","id":"sh/3u50nuho","slide":11,"name":"text","text":"SELECTED HIVE","textPreview":"SELECTED HIVE","textChars":13,"textLines":1,"bbox":[42,28,220,28]}
+{"kind":"textbox","id":"sh/4ve1gzy9","slide":11,"name":"text","text":"MEDIA HIVE inflates only its declared package.","textPreview":"MEDIA HIVE inflates only its declared package.","textChars":46,"textLines":1,"bbox":[42,62,1170,78]}
+{"kind":"shape","id":"sh/pwnipkzu","slide":11,"bbox":[42,154,1196,1]}
+{"kind":"shape","id":"sh/u5cja5g7","slide":11,"name":"box","bbox":[42,205,380,330]}
+{"kind":"textbox","id":"sh/v6l0jahs","slide":11,"name":"text","text":"σ","textPreview":"σ","textChars":1,"textLines":1,"bbox":[102,240,260,120]}
+{"kind":"textbox","id":"sh/g7u1cfyx","slide":11,"name":"text","text":"MEDIA HIVE\nsignature","textPreview":"MEDIA HIVE | signature","textChars":20,"textLines":2,"bbox":[92,390,280,72]}
+{"kind":"textbox","id":"sh/hs3ilkzi","slide":11,"name":"text","text":"Minimal package","textPreview":"Minimal package","textChars":15,"textLines":1,"bbox":[505,205,510,42]}
+{"kind":"textbox","id":"sh/61sz65gv","slide":11,"name":"text","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[505,275,42,38]}
+{"kind":"textbox","id":"sh/7210fahg","slide":11,"name":"text","text":"selected assets","textPreview":"selected assets","textChars":15,"textLines":1,"bbox":[560,270,560,46]}
+{"kind":"textbox","id":"sh/76x0ve94","slide":11,"name":"text","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[505,347,42,38]}
+{"kind":"textbox","id":"sh/6lojm98z","slide":11,"name":"text","text":"stream processor","textPreview":"stream processor","textChars":16,"textLines":1,"bbox":[560,342,560,46]}
+{"kind":"textbox","id":"sh/t8fixora","slide":11,"name":"text","text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[505,419,42,38]}
+{"kind":"textbox","id":"sh/8761ojqp","slide":11,"name":"text","text":"delivery manifest","textPreview":"delivery manifest","textChars":17,"textLines":1,"bbox":[560,414,560,46]}
+{"kind":"textbox","id":"sh/vah0zypg","slide":11,"name":"text","text":"← Choose another hive","textPreview":"← Choose another hive","textChars":21,"textLines":1,"bbox":[505,525,330,44]}
+{"kind":"notes","id":"nt/d04wzl","slide":11,"text":"[Sources]\n- Conceptual flow based on the supplied system description."}
+{"kind":"slide","id":"sl/ohnirl","slide":12,"title":"OUTCOME","textShapes":10}
+{"kind":"textbox","id":"sh/2povyhgj","slide":12,"name":"text","text":"OUTCOME","textPreview":"OUTCOME","textChars":7,"textLines":1,"bbox":[42,28,220,28]}
+{"kind":"textbox","id":"sh/pszetwzu","slide":12,"name":"text","text":"Publish a hive; replication becomes a signature-sized decision.","textPreview":"Publish a hive; replication becomes a signature-sized decision.","textChars":63,"textLines":1,"bbox":[42,62,1170,78]}
+{"kind":"shape","id":"sh/4r6d0ryp","slide":12,"bbox":[42,154,1196,1]}
+{"kind":"textbox","id":"sh/ruhwv6h0","slide":12,"name":"text","text":"1","textPreview":"1","textChars":1,"textLines":1,"bbox":[90,235,70,70]}
+{"kind":"textbox","id":"sh/qt8v21gf","slide":12,"name":"text","text":"Create a hive","textPreview":"Create a hive","textChars":13,"textLines":1,"bbox":[175,235,330,55]}
+{"kind":"textbox","id":"sh/dgzexwz6","slide":12,"name":"text","text":"2","textPreview":"2","textChars":1,"textLines":1,"bbox":[90,350,70,70]}
+{"kind":"textbox","id":"sh/cvqd4ryl","slide":12,"name":"text","text":"Choose its contents","textPreview":"Choose its contents","textChars":19,"textLines":1,"bbox":[175,350,420,55]}
+{"kind":"textbox","id":"sh/7ydcj2hw","slide":12,"name":"text","text":"3","textPreview":"3","textChars":1,"textLines":1,"bbox":[90,465,70,70]}
+{"kind":"textbox","id":"sh/6x4vqxgb","slide":12,"name":"text","text":"Publish the signature","textPreview":"Publish the signature","textChars":21,"textLines":1,"bbox":[175,465,440,55]}
+{"kind":"shape","id":"sh/0ju9cjyl","slide":12,"name":"box","bbox":[790,220,360,330]}
+{"kind":"textbox","id":"sh/1k3aloz6","slide":12,"name":"text","text":"σ → layer → core","textPreview":"σ → layer → core","textChars":16,"textLines":1,"bbox":[820,285,300,70]}
+{"kind":"textbox","id":"sh/ehsra9gv","slide":12,"name":"text","text":"Minimal bootstrap.\nVerified arrival.\nSeamless takeover.","textPreview":"Minimal bootstrap. | Verified arrival. | Seamless takeover.","textChars":55,"textLines":3,"bbox":[830,380,280,110]}
+{"kind":"notes","id":"nt/ohnirl","slide":12,"text":"[Sources]\n- Conceptual flow based on the supplied system description."}

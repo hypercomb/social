@@ -2757,7 +2757,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   // ── the utterance reading (Common Tongue: the reader + the marks) ────────
   // In command stance plain language is READ, never guessed: action words
-  // light in their behaviour's own color (the category keyword its mirror
+  // light in their behaviour's own color (the category keyword its behaviour
   // tile wears), argument text attaches verbatim, filler stays plain, and a
   // word two behaviours claim marks as an AMBIGUITY the line must resolve
   // before Enter fires. The reader lives in essentials

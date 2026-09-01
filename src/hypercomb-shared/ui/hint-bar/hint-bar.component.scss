@@ -3,6 +3,7 @@
 // Left-aligned breadcrumb bar at bottom of viewport — mirrors the tag float
 // on the right side. Shows available intellisense options as small crumbs.
 
+@use '../toolwindow' as tw;
 @use '../breakpoints' as *;
 
 :host {
@@ -35,13 +36,13 @@
   border: 0.5px solid rgba(200, 200, 200, 0.3);
   border-radius: 1px;
   background: none;
-  color: rgba(200, 200, 200, 0.35);
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
   font-family: inherit;
   transition: opacity 150ms ease, color 150ms ease, border-color 150ms ease;
 
   &:hover {
-    color: rgba(245, 245, 245, 0.8);
+    color: var(--hc-window-ink-plain);
     border-color: rgba(200, 200, 200, 0.6);
   }
 }
@@ -56,12 +57,12 @@
 }
 
 .hint-matched {
-  color: rgba(200, 200, 200, 0.8);
+  color: var(--hc-window-ink-plain);
   border-color: rgba(200, 200, 200, 0.5);
 }
 
 .hint-chosen {
-  color: rgba(77, 166, 255, 0.9);
+  color: tw.ink(rgba(77, 166, 255, 0.9));
   border-color: rgba(77, 166, 255, 0.5);
   background: rgba(77, 166, 255, 0.06);
 }

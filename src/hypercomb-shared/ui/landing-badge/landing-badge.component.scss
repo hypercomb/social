@@ -4,6 +4,7 @@
 // top-center, one soft pulse and nothing else moving. It reports work that
 // already succeeded — it must read as an offer, never an alarm.
 
+@use '../toolwindow' as tw;
 :host {
   position: fixed;
   // One step below the preview banner so the two never overlap when a
@@ -41,7 +42,7 @@
   white-space: nowrap;
   font-size: 0.8rem;
   font-family: inherit;
-  color: rgba(245, 245, 245, 0.85);
+  color: var(--hc-window-ink-plain);
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease;
 
@@ -74,7 +75,7 @@
 .count { font-weight: 600; }
 
 .where {
-  color: rgba(245, 245, 245, 0.45);
+  color: var(--hc-window-ink-quiet);
   font-size: 0.72rem;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -86,5 +87,5 @@
   border-radius: 999px;
   padding: 0.18rem 0.7rem;
   font-size: 0.74rem;
-  color: #e2b75e;
+  color: tw.ink(#e2b75e);
 }

@@ -47,7 +47,7 @@ import { signalSession } from '../window-session'
 
 // Mirrors of the essentials read-model shapes (shared cannot import
 // essentials). Kept field-for-field identical to PublishRenderPayload in
-// diamondcoreprocessor.com/sharing/publish-status.drone.ts.
+// sharing/publish-status.drone.ts.
 type PublishRowState =
   | 'live' | 'drift' | 'unpublished' | 'pending' | 'stale-edge'
   | 'gone' | 'unknown' | 'cannot-compare' | 'comparing'

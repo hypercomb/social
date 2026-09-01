@@ -65,7 +65,7 @@ $gutter-phone: 0.7rem;
   font-family: var(--hc-mono, system-ui);
   // Content scale — see file header. Inner em sizes follow this root font.
   font-size: calc(1rem * var(--hc-panel-scale, 1));
-  color: #f3f3f3;
+  color: var(--hc-window-ink-loud);
   outline: none;
 }
 
@@ -83,12 +83,12 @@ $gutter-phone: 0.7rem;
   background: rgba(var(--hc-panel-ink), 0.04);
   border: 1px solid rgba(var(--acc), 0.2);
   border-radius: tw.$radius-card;
-  color: #f3f3f3;
+  color: var(--hc-window-ink-loud);
   font: inherit;
   font-size: 0.9em;
   outline: none;
 
-  &::placeholder { color: rgba(var(--acc), 0.55); letter-spacing: 0.03em; }
+  &::placeholder { color: var(--hc-window-accent-quiet); letter-spacing: 0.03em; }
   &:focus { border-color: rgba(var(--acc), 0.5); background: rgba(var(--hc-panel-ink), 0.06); }
   // The native clear glyph fights the panel's own Escape-to-clear; hide it.
   &::-webkit-search-cancel-button { display: none; }
@@ -112,7 +112,7 @@ $gutter-phone: 0.7rem;
   border: 0;
   border-bottom: 1px solid rgba(var(--acc), 0.18);
   background: rgba(var(--acc), 0.07);
-  color: rgba(230, 224, 255, 0.85);
+  color: var(--hc-window-ink-plain);
   cursor: pointer;
   font: inherit;
   font-size: 0.8em;
@@ -120,7 +120,7 @@ $gutter-phone: 0.7rem;
   transition: background 140ms ease, color 140ms ease;
 
   .mat-sym { font-size: 1.1em; color: rgb(var(--acc)); }
-  &:hover { background: rgba(var(--acc), 0.14); color: #f6f3ff; }
+  &:hover { background: rgba(var(--acc), 0.14); color: var(--hc-window-ink-loud); }
   &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: -1px; }
 }
 
@@ -134,7 +134,7 @@ $gutter-phone: 0.7rem;
 .features-clear {
   background: transparent;
   border: none;
-  color: rgba(var(--hc-panel-ink), 0.5);
+  color: var(--hc-window-ink-quiet);
   font-family: inherit;
   font-size: 0.74em;
   cursor: pointer;
@@ -146,7 +146,7 @@ $gutter-phone: 0.7rem;
 .features-close {
   background: transparent;
   border: none;
-  color: rgba(var(--hc-panel-ink), 0.7);
+  color: var(--hc-window-ink-quiet);
   font-size: 1.4em;
   line-height: 1;
   cursor: pointer;
@@ -159,7 +159,7 @@ $gutter-phone: 0.7rem;
   margin: 0;
   padding: 1.5em 1em;
   font-size: 0.85em;
-  color: rgba(var(--hc-panel-ink), 0.45);
+  color: var(--hc-window-ink-quiet);
 }
 
 .features-scroll {
@@ -179,7 +179,7 @@ $gutter-phone: 0.7rem;
   margin: 0;
   padding: 0.1em 1em 0.5em;
   font-size: 0.72em;
-  color: rgba(var(--hc-panel-ink), 0.3);
+  color: var(--hc-window-ink-quiet);
   font-style: italic;
 }
 
@@ -214,13 +214,13 @@ $gutter-phone: 0.7rem;
 
 .feature-name {
   font-size: 0.86em;
-  color: #f3f3f3;
+  color: var(--hc-window-ink-loud);
 }
 
 .feature-desc {
   font-size: 0.74em;
   line-height: 1.35;
-  color: rgba(var(--hc-panel-ink), 0.62);
+  color: var(--hc-window-ink-quiet);
 }
 
 // ── origin badge ──────────────────────────────────────────────────
@@ -238,12 +238,12 @@ $gutter-phone: 0.7rem;
   font-size: 0.62em;
   font-family: var(--hc-mono, monospace);
   letter-spacing: 0.02em;
-  color: rgba(var(--hc-panel-ink), 0.4);
+  color: var(--hc-window-ink-quiet);
   background: rgba(var(--hc-panel-ink), 0.05);
   border: 1px solid rgba(var(--hc-panel-ink), 0.08);
 
   &.cascade {
-    color: rgba(var(--acc), 0.95);
+    color: var(--hc-window-accent);
     background: rgba(var(--acc), 0.12);
     border-color: rgba(var(--acc), 0.4);
   }
@@ -257,7 +257,7 @@ $gutter-phone: 0.7rem;
   border-radius: 3px;
   font-family: var(--hc-mono, monospace);
   font-size: 0.66em;
-  color: rgba(var(--acc), 0.85);
+  color: var(--hc-window-accent);
   background: rgba(var(--acc), 0.1);
   border: 1px solid rgba(var(--acc), 0.22);
   white-space: nowrap;
@@ -268,7 +268,7 @@ $gutter-phone: 0.7rem;
 .avail-flow {
   margin-left: 0.3em;
   font-size: 0.72em;
-  color: rgba(var(--acc), 0.6);
+  color: var(--hc-window-accent-quiet);
   cursor: help;
 }
 
@@ -278,7 +278,7 @@ $gutter-phone: 0.7rem;
   border-top: 1px solid rgba(var(--acc), 0.2);
   font-size: 0.72em;
   line-height: 1.4;
-  color: rgba(var(--hc-panel-ink), 0.5);
+  color: var(--hc-window-ink-quiet);
 }
 
 // ── responsive: stay flush below the header at every header height ──
@@ -386,7 +386,7 @@ $gutter-phone: 0.7rem;
 // Dim: a row a LEGACY hidden record still suppresses (click restores) —
 // reads as inactive until the drain lands.
 .features-row.off {
-  .feature-name { color: rgba(var(--hc-panel-ink), 0.5); }
+  .feature-name { color: var(--hc-window-ink-quiet); }
   .feature-origin,
   .feature-desc { opacity: 0.55; }
 }
@@ -407,7 +407,7 @@ $gutter-phone: 0.7rem;
   flex: 1;
   font-size: 0.7em;
   letter-spacing: 0.04em;
-  color: rgba(var(--hc-panel-ink), 0.65);
+  color: var(--hc-window-ink-quiet);
 }
 
 .bulk-download {
@@ -428,7 +428,7 @@ $gutter-phone: 0.7rem;
 .bulk-download {
   background: transparent;
   border: 1px solid rgba(var(--hc-panel-ink), 0.25);
-  color: rgba(var(--hc-panel-ink), 0.75);
+  color: var(--hc-window-ink-quiet);
 
   &:hover { border-color: rgba(var(--acc), 0.5); color: rgb(var(--acc)); }
   &.busy { opacity: 0.55; cursor: progress; }
@@ -475,7 +475,7 @@ $path-fail: #e08a8a;     // failed terminal
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba(var(--acc), 0.85);
+  color: var(--hc-window-accent);
 }
 
 .dl-text {
@@ -485,7 +485,7 @@ $path-fail: #e08a8a;     // failed terminal
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: right;
-  color: rgba(var(--hc-panel-ink), 0.65);
+  color: var(--hc-window-ink-quiet);
 }
 
 .dl-path.ok .dl-text { color: rgba($path-ok, 0.9); }
@@ -552,9 +552,9 @@ $path-fail: #e08a8a;     // failed terminal
   font-size: 0.58em;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: rgba(var(--hc-panel-ink), 0.3);
+  color: var(--hc-window-ink-quiet);
 
-  span.lit { color: rgba(var(--hc-panel-ink), 0.6); }
+  span.lit { color: var(--hc-window-ink-quiet); }
   span:first-child { text-align: left; }
   span:last-child { text-align: right; }
 }
@@ -571,7 +571,7 @@ $path-fail: #e08a8a;     // failed terminal
   flex: 0 0 auto;
   background: transparent;
   border: none;
-  color: rgba(var(--hc-panel-ink), 0.45);
+  color: var(--hc-window-ink-quiet);
   font-size: 1.05em;
   line-height: 1;
   cursor: pointer;
@@ -590,11 +590,11 @@ $path-fail: #e08a8a;     // failed terminal
   margin-top: 0.05em;
   font-size: 0.62em;
   line-height: 1.35;
-  color: rgba(255, 160, 150, 0.85);
+  color: tw.ink(rgba(255, 160, 150, 0.85));
 
   .note-why {
     display: block;
-    color: rgba(255, 200, 150, 0.7);
+    color: tw.ink(rgba(255, 200, 150, 0.7));
   }
 }
 
@@ -621,19 +621,19 @@ $path-fail: #e08a8a;     // failed terminal
   flex: 1;
   font-size: 0.86em;
   letter-spacing: 0.03em;
-  color: rgba(var(--acc), 0.95);
+  color: var(--hc-window-accent);
 }
 
 .review-kind {
   font-size: 0.7em;
-  color: rgba(var(--hc-panel-ink), 0.45);
+  color: var(--hc-window-ink-quiet);
 }
 
 .review-note {
   margin: 0;
   font-size: 0.78em;
   line-height: 1.5;
-  color: rgba(var(--hc-panel-ink), 0.78);
+  color: var(--hc-window-ink-plain);
 }
 
 .review-code {
@@ -649,7 +649,7 @@ $path-fail: #e08a8a;     // failed terminal
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
-  color: rgba(220, 230, 240, 0.92);
+  color: var(--hc-window-ink-loud);
 }
 
 .review-actions {
@@ -670,19 +670,19 @@ $path-fail: #e08a8a;     // failed terminal
 .review-accept {
   background: rgba(var(--acc), 0.18);
   border-color: rgba(var(--acc), 0.6);
-  color: #f3f3f3;
+  color: var(--hc-window-ink-loud);
 }
 
 .review-bypass {
   background: transparent;
   border-color: rgba(255, 180, 120, 0.45);
-  color: rgba(255, 200, 150, 0.9);
+  color: tw.ink(rgba(255, 200, 150, 0.9));
 }
 
 .review-cancel {
   background: transparent;
   border-color: rgba(var(--hc-panel-ink), 0.2);
-  color: rgba(var(--hc-panel-ink), 0.6);
+  color: var(--hc-window-ink-quiet);
 }
 
 // ── the phone review: a decision screen, then (optionally) the code ──
@@ -710,7 +710,7 @@ $path-fail: #e08a8a;     // failed terminal
     border-radius: tw.$radius-card;
     font-size: 0.88em;
     line-height: 1.55;
-    color: rgba(255, 214, 170, 0.92);
+    color: tw.ink(rgba(255, 214, 170, 0.92));
   }
 
   // Stacked, full-width, thumb-sized — a decision is not a toolbar.
@@ -737,7 +737,7 @@ $path-fail: #e08a8a;     // failed terminal
   .review-readcode {
     background: transparent;
     border-color: rgba(var(--hc-panel-ink), 0.16);
-    color: rgba(var(--hc-panel-ink), 0.62);
+    color: var(--hc-window-ink-quiet);
     font-weight: 500;
   }
 
@@ -759,7 +759,7 @@ $path-fail: #e08a8a;     // failed terminal
     border: none;
     font-size: 1.3em;
     line-height: 1;
-    color: rgba(var(--acc), 0.9);
+    color: var(--hc-window-accent);
     cursor: pointer;
   }
 }
@@ -801,7 +801,7 @@ $path-fail: #e08a8a;     // failed terminal
   padding: 0;
   border: 0;
   background: transparent;
-  color: rgba(var(--hc-panel-ink), 0.32);
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
   transition: color 140ms ease;
 
@@ -809,7 +809,7 @@ $path-fail: #e08a8a;     // failed terminal
 
   &:focus-visible { outline: 1px solid rgba(var(--acc), 0.6); outline-offset: 2px; }
 
-  &:hover { color: rgba(var(--hc-panel-ink), 0.72); }
+  &:hover { color: var(--hc-window-ink-quiet); }
 
   &.behaviors.on { color: rgb(var(--acc)); }
   &.views.on { color: $view-ground; }
@@ -831,13 +831,13 @@ $path-fail: #e08a8a;     // failed terminal
   padding: 0;
   border: 0;
   background: transparent;
-  color: rgba(var(--hc-panel-ink), 0.42);
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
   transition: color 140ms ease;
 
   .mat-sym { font-size: 1.05em; line-height: 1; }
 
-  &:hover { color: rgba(var(--hc-panel-ink), 0.82); }
+  &:hover { color: var(--hc-window-ink-plain); }
   &:focus-visible { outline: 1px solid rgba(var(--acc), 0.6); outline-offset: 2px; }
 
   // `.pool` is the class the template actually sets — this rule was written
@@ -854,7 +854,7 @@ $path-fail: #e08a8a;     // failed terminal
   padding: 0.1em 0.45em;
   border: 1px solid rgba(var(--hc-panel-ink), 0.22);
   border-radius: 3px;
-  color: rgba(var(--hc-panel-ink), 0.6);
+  color: var(--hc-window-ink-quiet);
 }
 
 // BOUND — this behavior belongs to one tile. Warmer than the awaiting chip
@@ -870,7 +870,7 @@ $path-fail: #e08a8a;     // failed terminal
   padding: 0.1em 0.45em;
   border: 1px solid rgba(255, 214, 138, 0.34);
   border-radius: 3px;
-  color: rgba(255, 214, 138, 0.82);
+  color: tw.ink(rgba(255, 214, 138, 0.82));
 
   .mat-sym {
     font-size: 1.1em;
@@ -917,7 +917,7 @@ $path-fail: #e08a8a;     // failed terminal
   place-items: center;
   border: 1px solid rgba(var(--acc), 0.3);
   border-radius: tw.$radius-card;
-  color: #eee9ff;
+  color: var(--hc-window-ink-loud);
   background:
     linear-gradient(145deg, rgba(var(--acc), 0.24), rgba(var(--acc), 0.07));
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.1);
@@ -934,14 +934,14 @@ $path-fail: #e08a8a;     // failed terminal
   font-size: 0.98rem;
   font-weight: 650;
   letter-spacing: 0.01em;
-  color: rgba(250, 249, 255, 0.96);
+  color: var(--hc-window-ink-loud);
 }
 
 // The scope hangs off the app name: `Beehaviors / local`.
 .features-title-sep {
   flex: 0 0 auto;
   font-weight: 400;
-  color: rgba(var(--hc-panel-ink), 0.3);
+  color: var(--hc-window-ink-quiet);
 }
 
 .features-title-app { flex: 0 0 auto; }
@@ -955,7 +955,7 @@ $path-fail: #e08a8a;     // failed terminal
   white-space: nowrap;
   text-overflow: ellipsis;
   font-weight: 500;
-  color: rgba(233, 228, 255, 0.72);
+  color: var(--hc-window-ink-quiet);
 }
 
 // THE POOL, which has no subject — lower case and light, because the app
@@ -966,7 +966,7 @@ $path-fail: #e08a8a;     // failed terminal
   flex: 0 0 auto;
   font-weight: 500;
   text-transform: lowercase;
-  color: rgba(233, 228, 255, 0.62);
+  color: var(--hc-window-ink-quiet);
 }
 
 .features-close {
@@ -1021,30 +1021,30 @@ $path-fail: #e08a8a;     // failed terminal
     border: 1px solid transparent;
     border-radius: tw.$radius-control;
     background: transparent;
-    color: rgba(var(--hc-panel-ink), 0.35);
+    color: var(--hc-window-ink-quiet);
     cursor: pointer;
     transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
 
     .mat-sym { font-size: 1rem; }
 
-    &:hover { color: rgba(255, 214, 138, 0.9); }
+    &:hover { color: tw.ink(rgba(255, 214, 138, 0.9)); }
 
     &.active {
-      color: rgba(255, 214, 138, 0.92);
+      color: tw.ink(rgba(255, 214, 138, 0.92));
       border-color: rgba(255, 214, 138, 0.3);
       background: rgba(255, 214, 138, 0.08);
     }
 
     &:focus-visible { outline: 1px solid rgba(var(--acc), 0.6); outline-offset: -1px; }
   }
-  color: rgba(var(--hc-panel-ink), 0.34);
+  color: var(--hc-window-ink-quiet);
   transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
 
   &:focus-within {
     border-color: rgba(var(--acc), 0.48);
     background: rgba(var(--acc), 0.045);
     box-shadow: 0 0 0 3px rgba(var(--acc), 0.07);
-    color: rgba(var(--acc), 0.8);
+    color: var(--hc-window-accent-quiet);
   }
 
   > .mat-sym { flex: 0 0 auto; font-size: 1rem; }
@@ -1060,7 +1060,7 @@ $path-fail: #e08a8a;     // failed terminal
   font-family: inherit;
   font-size: 0.8rem;
 
-  &::placeholder { color: rgba(var(--hc-panel-ink), 0.35); letter-spacing: 0; }
+  &::placeholder { color: var(--hc-window-ink-quiet); letter-spacing: 0; }
   &:focus { border: 0; background: transparent; }
 }
 
@@ -1139,7 +1139,7 @@ $path-fail: #e08a8a;     // failed terminal
   place-items: center;
   border: 1px solid rgba(var(--acc), 0.19);
   border-radius: tw.$radius-card;
-  color: rgba(235, 229, 255, 0.92);
+  color: var(--hc-window-ink-loud);
   background:
     linear-gradient(145deg, rgba(var(--acc), 0.2), rgba(var(--acc), 0.065));
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.07);
@@ -1148,7 +1148,7 @@ $path-fail: #e08a8a;     // failed terminal
 }
 
 .features-row.off .feature-icon {
-  color: rgba(var(--hc-panel-ink), 0.46);
+  color: var(--hc-window-ink-quiet);
   border-color: rgba(var(--hc-panel-ink), 0.08);
   background: rgba(var(--hc-panel-ink), 0.035);
   box-shadow: none;
@@ -1162,7 +1162,7 @@ $path-fail: #e08a8a;     // failed terminal
   font-size: 0.84rem;
   font-weight: 620;
   line-height: 1.25;
-  color: rgba(250, 249, 255, 0.94);
+  color: var(--hc-window-ink-loud);
 }
 
 // Two lines, then an ellipsis. Not a space saving — an EVEN RHYTHM: a
@@ -1178,7 +1178,7 @@ $path-fail: #e08a8a;     // failed terminal
   overflow: hidden;
   font-size: 0.67rem;
   line-height: 1.45;
-  color: rgba(var(--hc-panel-ink), 0.55);
+  color: var(--hc-window-ink-quiet);
 }
 
 .feature-origin {
@@ -1187,10 +1187,10 @@ $path-fail: #e08a8a;     // failed terminal
   font-size: 0.52rem;
   line-height: 1.2;
   white-space: nowrap;
-  color: rgba(var(--hc-panel-ink), 0.42);
+  color: var(--hc-window-ink-quiet);
 
   &.cascade {
-    color: rgba(var(--acc), 0.88);
+    color: var(--hc-window-accent);
     border-color: rgba(var(--acc), 0.24);
     background: rgba(var(--acc), 0.08);
   }
@@ -1221,7 +1221,7 @@ $path-fail: #e08a8a;     // failed terminal
   font-size: 0.55rem;
   line-height: 1.4;
   white-space: nowrap;
-  color: rgba(var(--hc-panel-ink), 0.6);
+  color: var(--hc-window-ink-quiet);
   background: rgba(var(--hc-panel-pane), 0.92);
   opacity: 0;
   pointer-events: none;
@@ -1230,7 +1230,7 @@ $path-fail: #e08a8a;     // failed terminal
   .mat-sym { font-size: 0.72rem; }
 
   &.bound {
-    color: rgba(255, 214, 138, 0.85);
+    color: tw.ink(rgba(255, 214, 138, 0.85));
     border-color: rgba(255, 214, 138, 0.28);
   }
 }
@@ -1251,7 +1251,7 @@ $path-fail: #e08a8a;     // failed terminal
   border: 1px solid rgba(var(--acc), 0.24);
   border-radius: tw.$radius-control;
   background: rgba(var(--acc), 0.08);
-  color: rgba(235, 229, 255, 0.92);
+  color: var(--hc-window-ink-loud);
   font-size: 0.56rem;
   font-weight: 650;
   cursor: pointer;
@@ -1281,7 +1281,7 @@ $path-fail: #e08a8a;     // failed terminal
   place-items: center;
   margin-left: 0.1rem;
   border-radius: 50%;
-  color: rgba(var(--hc-panel-ink), 0.26);
+  color: var(--hc-window-ink-quiet);
   transition: color 260ms ease, background 260ms ease, box-shadow 260ms ease;
 
   .mat-sym {
@@ -1294,7 +1294,7 @@ $path-fail: #e08a8a;     // failed terminal
   }
 
   &.on {
-    color: #ffd97a;
+    color: tw.ink(#ffd97a);
     background: radial-gradient(circle at 50% 42%, rgba(255, 205, 100, 0.16), transparent 70%);
     box-shadow: 0 0 18px rgba(255, 195, 80, 0.12);
 
@@ -1321,7 +1321,7 @@ $path-fail: #e08a8a;     // failed terminal
 
   &:hover { opacity: 0.92; }
 
-  .feature-name { color: rgba(245, 245, 250, 0.58); }
+  .feature-name { color: var(--hc-window-ink-quiet); }
 }
 
 // Inherited: lit from an ancestor — the row explains itself here and
@@ -1381,7 +1381,7 @@ $view-ground: #a8d8ff;
 // .feature-icon` and the hover above — a default is a standing fact and
 // must not flicker with the pointer.
 .features-row .feature-icon.as-default.is-default {
-  color: #efe9ff;
+  color: var(--hc-window-ink-loud);
   border-color: rgba(var(--acc), 0.7);
   background: linear-gradient(145deg, rgba(var(--acc), 0.42), rgba(var(--acc), 0.16));
   box-shadow:
@@ -1397,7 +1397,7 @@ $view-ground: #a8d8ff;
   line-height: 1.4;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: rgba(var(--acc), 0.85);
+  color: var(--hc-window-accent);
 }
 
 // ── MANAGE ────────────────────────────────────────────────────────
@@ -1414,7 +1414,7 @@ $view-ground: #a8d8ff;
   border: 1px solid rgba(var(--hc-panel-ink), 0.12);
   border-radius: tw.$radius-control;
   background: rgba(var(--hc-panel-ink), 0.04);
-  color: rgba(var(--hc-panel-ink), 0.62);
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
@@ -1432,7 +1432,7 @@ $view-ground: #a8d8ff;
   &.open {
     border-color: rgba(var(--acc), 0.45);
     background: rgba(var(--acc), 0.16);
-    color: rgba(240, 236, 255, 0.95);
+    color: var(--hc-window-ink-loud);
   }
 
   &:hover { background: rgba(var(--acc), 0.18); }
@@ -1455,7 +1455,7 @@ $view-ground: #a8d8ff;
     border: 1px solid rgba(var(--hc-panel-ink), 0.12);
     border-radius: tw.$radius-control;
     background: rgba(var(--hc-panel-ink), 0.035);
-    color: rgba(var(--hc-panel-ink), 0.66);
+    color: var(--hc-window-ink-quiet);
     font-size: 0.58rem;
     font-weight: 620;
     cursor: pointer;
@@ -1467,7 +1467,7 @@ $view-ground: #a8d8ff;
     &.on {
       border-color: rgba(var(--acc), 0.5);
       background: rgba(var(--acc), 0.2);
-      color: rgba(242, 238, 255, 0.96);
+      color: var(--hc-window-ink-loud);
     }
   }
 }
@@ -1484,7 +1484,7 @@ $view-ground: #a8d8ff;
   border-top-color: rgba(var(--hc-panel-ink), 0.055);
   font-size: 0.58rem;
   line-height: 1.45;
-  color: rgba(var(--hc-panel-ink), 0.31);
+  color: var(--hc-window-ink-quiet);
 }
 
 @media (max-width: 599px), (max-height: 449px) {

@@ -832,7 +832,10 @@ export class HcDockedPanelDirective implements OnInit, OnChanges, OnDestroy, Gro
     const group = this.#group
     // The RESTING colour only — as a custom property, so the sheet's `:hover`
     // rule still wins (an inline `color` would outrank it).
-    btn.style.setProperty('--hc-gear', group ? `rgb(${STEEL})` : '#6e8290')
+    // The panel's own accent when grouped (deepened under a bright look by
+    // `identity.accent()`), the quiet ink rung when not — never a literal,
+    // which is how this one glyph was unreadable in every bright theme.
+    btn.style.setProperty('--hc-gear', group ? 'var(--hc-window-accent)' : 'var(--hc-window-ink-quiet)')
     btn.title = group
       ? this.#t('panel.settings.grouped', `Window settings — ${group}`, { group })
       : this.#t('panel.settings', 'Window settings')

@@ -48,19 +48,25 @@ async function sendRetry(req, tries = 5) {
   return { ok: false, error: `retries exhausted: ${last}` }
 }
 
-/** Child names as the LAYER BYTES report them — the walk.cjs method. */
-async function liveChildNames(layer) {
-  const names = []
-  for (const csig of (layer?.children || [])) {
-    const r = await sendRetry({ op: 'get-resource', sig: csig })
-    if (r.ok && r.data.encoding === 'text') {
-      try { const cl = JSON.parse(r.data.text); if (cl?.name) names.push(cl.name) } catch {}
-    }
-  }
-  return names
+// Child names come from the ONE shared implementation
+// (scripts/lib/hive-children.mjs). This read decoded them with
+// `get-resource`, which CANNOT work: a parent's `children` slot holds LAYER
+// sigs, and a layer sig is not a resource, so EVERY parent read as empty.
+// In a repair tool that is the worst possible failure: `live` came back `[]`,
+// so every parent looked broken, and the census list was written over the
+// slot as a SET — dropping any live child the census did not name.
+let namesOfChildSigs
+async function bindHiveHelpers() {
+  const { hiveChildren } = await import('../lib/hive-children.mjs')
+  ;({ namesOfChildSigs } = hiveChildren(sendRetry))
 }
 
+/** Child names as the LAYER BYTES report them. Throws rather than
+ *  under-report a parent whose children will not decode. */
+const liveChildNames = async (layer) => namesOfChildSigs(layer?.children || [], 'a parent')
+
 async function main() {
+  await bindHiveHelpers()
   if (!CENSUS || !fs.existsSync(CENSUS)) {
     console.error('usage: node repair-children.cjs <census.json> [--apply]')
     process.exit(1)
@@ -104,6 +110,15 @@ async function main() {
 
   let done = 0, failed = 0
   for (const p of plan) {
+    // A repair RESTORES links; it must never shrink a parent. `confirmed` is
+    // the union of the census and what is live, each name probed to resolve,
+    // so it is a superset by construction — assert that before the SET.
+    const dropped = p.live.filter(n => !p.confirmed.includes(n))
+    if (dropped.length) {
+      console.error(`! /${p.key} REFUSED: the write would drop ${dropped.join(', ')}`)
+      failed++
+      continue
+    }
     const res = await sendRetry({
       op: 'update', segments: p.segs,
       layer: { name: p.layer?.name ?? p.segs[p.segs.length - 1], children: p.confirmed },

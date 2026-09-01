@@ -58,15 +58,23 @@ async function ask(req, attempts = 8) {
   return { ok: false, error: 'renderer never came back' }
 }
 
+// Child reads and child creation come from ONE implementation, shared with
+// every other bridge script: scripts/lib/hive-children.mjs. The loops this
+// replaces decoded child names with `get-resource`, which CANNOT work — a
+// parent's `children` slot holds LAYER sigs and a layer sig is not a resource
+// — so every parent read as EMPTY, and that empty read fed a `children:`
+// update, which the committer applies by REPLACING the slot.
+let namesOfChildSigs, childNamesOf, cellExists, ensureChildren
+async function bindHiveHelpers() {
+  const { hiveChildren } = await import('../lib/hive-children.mjs')
+  ;({ namesOfChildSigs, childNamesOf, cellExists, ensureChildren } = hiveChildren(ask))
+}
+
 // ── guard: never write into the wrong hive ────────────────────────────
 async function assertRightHive() {
   const root = await ask({ op: 'layer-at', segments: [] })
   if (!root.ok) throw new Error('cannot read hive root: ' + root.error)
-  const names = []
-  for (const sig of (root.data?.children || []).map(String)) {
-    const r = await ask({ op: 'get-resource', sig })
-    if (r.ok) { try { const n = JSON.parse(r.data.text).name; if (n) names.push(n) } catch {} }
-  }
+  const names = await namesOfChildSigs(root.data?.children || [], '_moose-paint.cjs')
   if (!names.includes('moose-on-the-loose')) {
     throw new Error('WRONG HIVE — no /moose-on-the-loose. A stray tab stole the broker slot.\n  root: ' + names.join(', '))
   }
@@ -322,18 +330,19 @@ const TILES = {
 }
 
 /** Create the tile under its parent if it is not there yet. */
+/**
+ * Create the leaf of `segments` under its parent. Existence is checked on the
+ * CHILD PATH and creation goes through `op:'add'`, which the committer turns
+ * into an APPEND — so this cannot drop a sibling, whatever any read believed.
+ * See scripts/lib/hive-children.mjs.
+ */
 async function ensureChild(segments) {
   const parent = segments.slice(0, -1), name = segments[segments.length - 1]
   const layer = await ask({ op: 'layer-at', segments: parent })
   if (!layer.ok) throw new Error('no parent layer at /' + parent.join('/'))
-  const have = []
-  for (const sig of (layer.data?.children || []).map(String)) {
-    const r = await ask({ op: 'get-resource', sig })
-    if (r.ok) { try { const n = JSON.parse(r.data.text).name; if (n) have.push(n) } catch {} }
-  }
-  if (have.includes(name)) return 'present'
+  if (await cellExists(segments)) return 'present'
   if (DRY) return 'would-create'
-  const u = await ask({ op: 'update', segments: parent, layer: { name: parent[parent.length - 1], children: [...have, name] } })
+  const u = await ensureChildren(parent, [name])
   return u.ok ? 'created' : 'ERR ' + u.error
 }
 
@@ -358,6 +367,7 @@ function stockRegisterLists() {
 
 // ── main ──────────────────────────────────────────────────────────────
 async function main() {
+  await bindHiveHelpers()
   if (process.argv.includes('--list')) { log('tiles:', Object.keys(TILES).join(', ')); return }
   const def = TILES[KEY]
   if (!def) { console.error(`unknown tile "${KEY}". Known: ${Object.keys(TILES).join(', ')}`); process.exit(1) }

@@ -59,9 +59,12 @@ const TARGET = 'es2022'
 // domains to exclude from the build output
 const EXCLUDED_DOMAINS: string[] = ['revolucionstyle.com']
 const NAMESPACE_SEGMENTS_MAX = 3
+const PACKAGE_SPECIFIER = '@hypercomb/essentials'
 const PLATFORM_EXTERNALS = ['@hypercomb/core', 'pixi.js']
 
-// hard rule: never generate @<domain> root aggregator
+// Separately owned capability packs may still use domain-shaped roots. The
+// package's own capabilities live directly under src/ and publish beneath the
+// package specifier instead of pretending to be domains.
 const EMIT_DOMAIN_ROOT_NAMESPACE = false
 
 // content manifest (replaces latest.json — supports multiple entry points)
@@ -453,13 +456,20 @@ const namespaceRelDirFromRelDir = (relDir: string): string => {
   return parts.slice(0, Math.min(NAMESPACE_SEGMENTS_MAX, parts.length)).join('/')
 }
 
+const isDomainNamespace = (namespaceRelDir: string): boolean =>
+  splitPath(namespaceRelDir)[0]?.includes('.') ?? false
+
 const specifierFromNamespaceRelDir = (namespaceRelDir: string): string =>
-  `@${namespaceRelDir}`
+  isDomainNamespace(namespaceRelDir)
+    ? `@${namespaceRelDir}`
+    : `${PACKAGE_SPECIFIER}/${namespaceRelDir}`
 
 const prefixesForNamespaceRelDir = (nsRelDir: string): string[] => {
   const parts = splitPath(nsRelDir)
   const out: string[] = []
-  const start = EMIT_DOMAIN_ROOT_NAMESPACE ? 1 : 2
+  const start = isDomainNamespace(nsRelDir)
+    ? (EMIT_DOMAIN_ROOT_NAMESPACE ? 1 : 2)
+    : 1
   for (let i = start; i <= Math.min(parts.length, NAMESPACE_SEGMENTS_MAX); i++) {
     out.push(parts.slice(0, i).join('/'))
   }

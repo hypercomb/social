@@ -70,7 +70,7 @@ signature doctrine holds end to end.
 
 ## The client
 
-`hypercomb-essentials/src/diamondcoreprocessor.com/assistant/host-ai.service.ts`
+`hypercomb-essentials/src/assistant/host-ai.service.ts`
 — `HostAiService`, IoC `@diamondcoreprocessor.com/HostAi`.
 
 ```ts

@@ -61,12 +61,18 @@ $bright-themes: 'light', 'honey', 'bloom', 'sherbet';
 /// (mint) only as far as rgb(0,178,98) — because green carries ~7x the
 /// perceptual weight of blue. One panel read; the next was still a wash.
 ///
-/// So the accent is darkened UNTIL IT IS DARK ENOUGH, measured. 0.18 relative
-/// luminance sits a little under mid-grey: comfortably over 4.5:1 against
-/// every bright pane in `_material-tokens.scss`, and not so far down that the
-/// hues converge into a single near-black and Beehaviors stops being
+/// So the accent is darkened UNTIL IT IS DARK ENOUGH, measured. 0.12 relative
+/// luminance sits well under mid-grey, and not so far down that the hues
+/// converge into a single near-black and Beehaviors stops being
 /// distinguishable from Files at a glance.
-$deepen-target: 0.18;
+///
+/// It was 0.18, chosen against the PANE. But accent ink does not only sit on
+/// the pane — it sits on tinted rows, chips and hover washes that are a step
+/// darker, and there 0.18 measured 4.1–4.4:1: a hair under, in eleven places
+/// at once. The target is now set against the WORST ground a panel offers,
+/// not the best. (Measured by `scripts/drive-toolwindow-contrast.cjs`, which
+/// composites each run of text over the ground it actually has.)
+$deepen-target: 0.12;
 /// Enough passes to take the lightest pastel under the target; the loop stops
 /// on its own the moment it gets there.
 $deepen-max-steps: 24;
@@ -110,10 +116,33 @@ $deepen-max-steps: 24;
 /// Declare a panel's identity. Emits `--acc` for the current theme and the
 /// deep variant under every bright one.
 ///
-/// The bright rule is written with `@at-root` and an `:is()` list so it stays
-/// ONE selector no matter how many looks exist — thirty panels each emitting
-/// four near-identical blocks is how a stylesheet budget gets spent on
-/// nothing.
+/// The bright rule is written with an `:is()` list so it stays ONE selector no
+/// matter how many looks exist — thirty panels each emitting four
+/// near-identical blocks is how a stylesheet budget gets spent on nothing.
+///
+/// ── WHY IT IS EMITTED TWICE ──────────────────────────────────────────────
+///
+/// This mixin is used almost exclusively from Angular COMPONENT stylesheets,
+/// and emulated view encapsulation rewrites every compound selector in one by
+/// stamping `[_ngcontent-xyz]` onto it. That rewrite does not stop at the
+/// component's own classes: `@at-root :is([data-theme="honey"]) &` compiled to
+///
+///     :is([data-theme="honey"][_ngcontent-xyz]) .sequence-panel[_ngcontent-xyz]
+///
+/// and `<html>` carries no `_ngcontent` attribute, because it is not inside
+/// any component. So the rule was in the stylesheet, valid, and could never
+/// match anything. THE DEEPENING NEVER RAN — in any panel, in any bright
+/// theme, since the day it was written. Every "the panel is unreadable in
+/// honey" report traces back to this one line: the pastel accents stayed
+/// pastel and went on being painted onto a cream pane.
+///
+/// `:host-context()` is the one selector Angular deliberately does NOT stamp,
+/// because its whole job is to reach state that lives ABOVE the component. So
+/// the bright value is emitted through it, and the plain `:is()` form is kept
+/// alongside for any consumer that is not a component stylesheet (a global
+/// sheet drops the `:host-context` rule as an unknown pseudo-class, and an
+/// encapsulated one is unharmed by the `:is()` rule that cannot match). One of
+/// the two always applies; neither can misfire.
 @mixin accent($accent) {
   --acc: #{triple($accent)};
 
@@ -121,8 +150,12 @@ $deepen-max-steps: 24;
   @each $theme in $bright-themes {
     $sel: list.append($sel, '[data-theme="#{$theme}"]', $separator: comma);
   }
+  $deep: triple(deepen($accent));
 
   @at-root :is(#{$sel}) & {
-    --acc: #{triple(deepen($accent))};
+    --acc: #{$deep};
+  }
+  @at-root :host-context(:is(#{$sel})) & {
+    --acc: #{$deep};
   }
 }

@@ -1,9 +1,37 @@
 // hypercomb-shared/ui/clipboard-panel/clipboard-panel.component.scss
 //
 // Right-docked "Clipboard" side panel. NOT a dimming modal — the hive stays
-// visible and interactive behind it. Cold/clean chrome: slim, steel hairline
-// (rgb 126,182,214), frosted glass — matching the header/command-line
-// aesthetic, not a vivid chunky panel.
+// visible and interactive behind it.
+//
+// Cold/clean chrome: slim, steel hairline (rgb 126,182,214), frosted glass —
+// the SAME material every other tool window is made of. The clipboard does not
+// get a pane of its own: a docked column whose windows are each a different
+// stuff reads as mal-arranged, and the window is not where this feature needs
+// to announce itself.
+//
+// ── WHERE THE CLIPBOARD DOES ANNOUNCE ITSELF ─────────────────────────────
+//
+// Opening this window CHANGES WHAT A CLICK DOES, everywhere. While it is up, a
+// click on the hive does not walk into a tile, it TAKES it; a click on a row
+// here does not select it, it puts the tile back on the page. No other tool
+// window rewrites the hive's grammar like that — so the announcement belongs
+// on the surface whose grammar changed, which is the MAIN VIEWPORT, not the
+// panel:
+//
+//   THE VIEWPORT  a dashed cut-line frames the stage, captioned CLIPBOARD with
+//                 the count, over a soft wash of the clipboard's own aqua —
+//                 the mode marker (this is what the old "clipboard" watermark
+//                 was for). The dashes are the same marching-ants language the
+//                 hovered tile answers in, so the stage and the tile under the
+//                 pointer are visibly one mode.
+//   THE ROW       hovering the swap target lights a rail down the row, lifts
+//                 its hex, and names the verb — `place` or, with ctrl,
+//                 `walk in`. The row says what the click does before it lands.
+//   THE TILE      the cut rim, painted by hex-sdf.shader.ts from the one verb
+//                 TileOverlayDrone's cue resolves.
+//
+// See documentation/tool-window-colour-roles.md for the role vocabulary all of
+// these paint from.
 //
 // Content-shrink: the drag-resized width drives `--hc-panel-scale` (set inline
 // by the component, clamped). The panel's ROOT font-size is that scale, and all
@@ -17,7 +45,20 @@
 @use '../breakpoints' as *;
 @use '../toolwindow' as tw;
 
+@use '../panel-identity' as identity;
+
+// The window's identity: the shared steel, exactly like its neighbours.
 $steel: rgb(126, 182, 214);
+
+// THE MODE'S identity, used on the VIEWPORT ONLY (`.swap-stage`) and never on
+// the panel. Deliberately clear of every accent already in the dock (steel
+// #7eb6d6, mint #a8ffd8, sage #7eb8a4, periwinkle #a8c8ff), so it sits hard
+// into cyan and stays saturated: nothing else paints the hive this colour,
+// which is the whole point of a mode marker. Cold and exact, and it reads as
+// transfer rather than as caution — the two VERB colours (amber "take",
+// near-white "copy") carry the warning and need a ground that is not
+// competing with them.
+$clipboard: #49d6d0;
 
 :host {
   position: fixed;
@@ -45,13 +86,13 @@ $steel: rgb(126, 182, 214);
   background: rgba(var(--hc-panel-pane), 0.92);
   backdrop-filter: blur(10px) saturate(1.1);
   -webkit-backdrop-filter: blur(10px) saturate(1.1);
-  border-left: 1px solid rgba($steel, 0.45);
-  box-shadow: -10px 0 40px rgba(var(--hc-panel-shadow), 0.5), 0 0 0 1px rgba($steel, 0.05) inset;
+  border-left: 1px solid rgba(var(--acc), 0.45);
+  box-shadow: -10px 0 40px rgba(var(--hc-panel-shadow), 0.5), 0 0 0 1px rgba(var(--acc), 0.05) inset;
   font-family: var(--hc-mono, system-ui);
   // Content scale — see file header. 1rem * scale is the panel's root font;
   // inner em sizes follow it. Defaults to 1 before the component binds.
   font-size: calc(1rem * var(--hc-panel-scale, 1));
-  color: #f1f3f5;
+  color: var(--hc-window-ink-loud);
   outline: none;
   @include tw.panel($steel, right);
 
@@ -84,35 +125,35 @@ $steel: rgb(126, 182, 214);
     transition: background 0.12s ease;
   }
 
-  &:hover::after { background: rgba($steel, 0.6); }
+  &:hover::after { background: rgba(var(--acc), 0.6); }
 }
 
 .clipboard-panel.resizing .resize-grip::after {
-  background: rgba($steel, 0.85);
+  background: rgba(var(--acc), 0.85);
 }
 
 .clipboard-header {
   @include tw.header;
-  border-bottom: 1px solid rgba($steel, 0.22);
+  border-bottom: 1px solid rgba(var(--acc), 0.22);
 }
 
 .clipboard-title {
   flex: 1;
   font-size: 0.88em;
   letter-spacing: 0.06em;
-  color: rgba($steel, 0.95);
+  color: var(--hc-window-accent);
 }
 
 .clipboard-close {
   background: transparent;
   border: none;
-  color: rgba(var(--hc-panel-ink), 0.7);
+  color: var(--hc-window-ink-quiet);
   font-size: 1.35em;
   line-height: 1;
   cursor: pointer;
   padding: 0 0.25em;
 
-  &:hover { color: $steel; }
+  &:hover { color: var(--hc-window-accent); }
 }
 
 // Drill-down header: a back chevron + the breadcrumb of where you are.
@@ -120,20 +161,20 @@ $steel: rgb(126, 182, 214);
   flex: 0 0 auto;
   background: transparent;
   border: none;
-  color: rgba($steel, 0.9);
+  color: var(--hc-window-accent);
   font-size: 1.4em;
   line-height: 1;
   cursor: pointer;
   padding: 0 0.3em 0 0;
 
-  &:hover { color: $steel; }
+  &:hover { color: var(--hc-window-accent); }
 }
 
 .clipboard-crumb {
   flex: 1;
   font-size: 0.82em;
   letter-spacing: 0.04em;
-  color: rgba($steel, 0.95);
+  color: var(--hc-window-accent);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -143,7 +184,7 @@ $steel: rgb(126, 182, 214);
   margin: 0;
   padding: 1.5em 1em;
   font-size: 0.82em;
-  color: rgba(var(--hc-panel-ink), 0.4);
+  color: var(--hc-window-ink-quiet);
 }
 
 // ── selection response strip ─────────────────────────────────────────
@@ -156,15 +197,15 @@ $steel: rgb(126, 182, 214);
   align-items: center;
   gap: 0.4em;
   padding: 0.45em 0.75em;
-  border-bottom: 1px solid rgba($steel, 0.16);
-  background: rgba($steel, 0.06);
+  border-bottom: 1px solid rgba(var(--acc), 0.16);
+  background: rgba(var(--acc), 0.06);
 }
 
 .clipboard-selection-count {
   flex: 1;
   min-width: 0;
   font-size: 0.78em;
-  color: rgba(207, 226, 238, 0.75);
+  color: var(--hc-window-ink-quiet);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -178,16 +219,16 @@ $steel: rgb(126, 182, 214);
   width: 1.7em;
   height: 1.7em;
   padding: 0;
-  border: 1px solid rgba($steel, 0.35);
+  border: 1px solid rgba(var(--acc), 0.35);
   border-radius: tw.$radius-card;
   background: none;
-  color: #cfe2ee;
+  color: var(--hc-window-ink-loud);
   cursor: pointer;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
 
   .mat-sym { font-size: 0.95em; }
-  &:hover { background: rgba($steel, 0.16); border-color: rgba($steel, 0.7); color: #f4fafd; }
-  &:focus-visible { outline: 1px solid rgba($steel, 0.8); outline-offset: 1px; }
+  &:hover { background: rgba(var(--acc), 0.16); border-color: rgba(var(--acc), 0.7); color: var(--hc-window-ink-loud); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.8); outline-offset: 1px; }
 }
 
 .clipboard-scroll {
@@ -204,14 +245,54 @@ $steel: rgb(126, 182, 214);
   padding: 0;
 }
 
+// ── THE ROW, AND WHAT HOVERING IT PROMISES ───────────────────────────
+// A row here is not a list entry you select — one click and the tile LEAVES
+// this window for the page behind it. That is a move, it is immediate, and
+// the row has to say so before the finger commits, the same way the hive's
+// tiles do under the same window.
+//
+// Two levels of hover on purpose. Anywhere on the row (the count badge, the
+// discard ×) is a quiet wash — you are over the row, nothing is armed.
+// Over the SWAP TARGET itself, everything lights: a rail down the docked
+// edge, the identity behind the whole strip, the hex lifted, and the verb
+// named on the right. Nothing about that reads as "selected"; it reads as
+// "about to happen".
 .clipboard-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.6em;
   padding: 0.45em 0.85em;
   border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.04);
+  transition: background 120ms ease;
 
-  &:hover { background: rgba($steel, 0.07); }
+  &:hover { background: rgba(var(--acc), 0.07); }
+
+  // The rail. Grows from the middle out, so the row reads as OPENING rather
+  // than as a static marker switching on.
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 2px;
+    background: rgb(var(--acc));
+    transform: scaleY(0);
+    transition: transform 150ms cubic-bezier(0.2, 0.7, 0.3, 1);
+  }
+
+  // `:has` rather than a class on the button, so the WHOLE strip answers a
+  // hover that lands on the swap target — the label and the hex are one
+  // control and they light as one.
+  &:has(.item-swap:hover),
+  &:has(.item-swap:focus-visible) {
+    background: rgba(var(--acc), 0.17);
+
+    &::before { transform: scaleY(1); }
+    .item-thumb img { transform: scale(1.09); }
+    .item-glyph { color: var(--hc-window-accent); }
+    .item-label { color: var(--hc-window-ink-loud); }
+    .item-verb { opacity: 1; transform: none; }
+  }
 }
 
 // THE SWAP: the row IS the tile. One button carries the hex and the name, so
@@ -233,14 +314,14 @@ $steel: rgb(126, 182, 214);
   cursor: pointer;
 
   &:focus-visible {
-    outline: 1px solid rgba($steel, 0.8);
+    outline: 1px solid rgba(var(--acc), 0.8);
     outline-offset: 2px;
     border-radius: tw.$radius-card;
   }
 }
 
 .item-glyph {
-  color: rgba($steel, 0.7);
+  color: var(--hc-window-accent-quiet);
   font-size: 1.5em;
   line-height: 1;
   flex: 0 0 auto;
@@ -263,9 +344,48 @@ $steel: rgb(126, 182, 214);
     height: 100%;
     object-fit: cover;
     clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
-    background: rgba($steel, 0.08);
+    background: rgba(var(--acc), 0.08);
     user-select: none;
+    // The lift on hover — small, and the only motion in the row. It is the
+    // tile picking itself up, which is what the click is about to do.
+    transition: transform 150ms cubic-bezier(0.2, 0.7, 0.3, 1);
+    transform-origin: 50% 50%;
   }
+}
+
+// ── THE VERB ─────────────────────────────────────────────────────────
+// Named on the row, in the same grammar the hovered TILE uses on the hive:
+// amber for the thing that LEAVES this surface, steel for the thing that
+// merely walks. Hidden until the swap target is hovered, because a verb on
+// every row at rest is a wall of words, and it is only ever true of one.
+//
+// Both words are in the DOM and ctrl picks between them, so the answer flips
+// under a still pointer the instant the key goes down — exactly as the pill
+// above the hex does. (`tw.ink()` on the amber: it is a colour ON PURPOSE,
+// and on a bright pane it has to come down to carry any weight at all.)
+.item-verb {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28em;
+  font-size: 0.6em;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateX(0.35em);
+  transition: opacity 130ms ease, transform 150ms cubic-bezier(0.2, 0.7, 0.3, 1);
+
+  .verb-place { color: tw.ink(#e8a34e); }
+  .verb-walk { color: var(--hc-window-accent); display: none; }
+}
+
+// Ctrl held: the row walks in instead of placing. One class on the panel
+// root flips every row at once — the state belongs to the WINDOW, not to
+// whichever row the pointer happens to be over.
+.clipboard-panel.ctrl-held .item-verb {
+  .verb-place { display: none; }
+  .verb-walk { display: inline; }
 }
 
 .item-label {
@@ -289,17 +409,17 @@ $steel: rgb(126, 182, 214);
   font-size: 0.62em;
   font-variant-numeric: tabular-nums;
   text-align: center;
-  color: rgba($steel, 0.9);
-  background: rgba($steel, 0.14);
-  border: 1px solid rgba($steel, 0.3);
+  color: var(--hc-window-accent);
+  background: rgba(var(--acc), 0.14);
+  border: 1px solid rgba(var(--acc), 0.3);
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
 
   &:hover {
-    background: rgba($steel, 0.26);
-    border-color: rgba($steel, 0.7);
+    background: rgba(var(--acc), 0.26);
+    border-color: rgba(var(--acc), 0.7);
   }
-  &:focus-visible { outline: 1px solid rgba($steel, 0.8); outline-offset: 1px; }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.8); outline-offset: 1px; }
 }
 
 // Per-item discard — drop one pointer without placing it. Invisible until the
@@ -314,15 +434,15 @@ $steel: rgb(126, 182, 214);
   height: 1.7em;
   background: transparent;
   border: none;
-  color: rgba(var(--hc-panel-ink), 0.4);
+  color: var(--hc-window-ink-quiet);
   font-size: 1.15em;
   line-height: 1;
   cursor: pointer;
   opacity: 0;
   transition: color 0.12s ease, opacity 0.12s ease;
 
-  &:hover { color: rgba(255, 140, 140, 0.9); }
-  &:focus-visible { opacity: 1; outline: 1px solid rgba($steel, 0.8); outline-offset: 1px; }
+  &:hover { color: tw.ink(rgba(255, 140, 140, 0.9)); }
+  &:focus-visible { opacity: 1; outline: 1px solid rgba(var(--acc), 0.8); outline-offset: 1px; }
 }
 
 .clipboard-item:hover .item-discard,
@@ -333,35 +453,35 @@ $steel: rgb(126, 182, 214);
   align-items: center;
   gap: 0.5em;
   padding: 0.7em 0.85em;
-  border-top: 1px solid rgba($steel, 0.2);
+  border-top: 1px solid rgba(var(--acc), 0.2);
 }
 
 .place-all {
   flex: 1;
   padding: 0.55em 0.75em;
-  background: rgba($steel, 0.16);
-  border: 1px solid rgba($steel, 0.5);
+  background: rgba(var(--acc), 0.16);
+  border: 1px solid rgba(var(--acc), 0.5);
   border-radius: tw.$radius-card;
-  color: #eaf4fb;
+  color: var(--hc-window-ink-loud);
   font-family: inherit;
   font-size: 0.8em;
   letter-spacing: 0.02em;
   cursor: pointer;
   transition: background 0.12s ease;
 
-  &:hover { background: rgba($steel, 0.28); }
+  &:hover { background: rgba(var(--acc), 0.28); }
 }
 
 .clear-all {
   background: transparent;
   border: none;
-  color: rgba(var(--hc-panel-ink), 0.45);
+  color: var(--hc-window-ink-quiet);
   font-family: inherit;
   font-size: 0.74em;
   cursor: pointer;
   padding: 0 0.4em;
 
-  &:hover { color: rgba(255, 140, 140, 0.9); }
+  &:hover { color: tw.ink(rgba(255, 140, 140, 0.9)); }
 }
 
 // The swap grammar, said once at the bottom of the window: while it is open,
@@ -372,10 +492,125 @@ $steel: rgb(126, 182, 214);
   padding: 0.55em 0.85em 0.75em;
   font-size: 0.62em;
   line-height: 1.45;
-  color: rgba(var(--hc-panel-ink), 0.38);
+  color: var(--hc-window-ink-quiet);
   border-top: 1px solid rgba(var(--hc-panel-ink), 0.05);
 }
 
 // An empty window is not a dead one any more — it is where clicked tiles
 // land — so the empty line sits close to the hint that explains it.
 .clipboard-empty { flex: 1; }
+
+
+// ── THE MODE MARKER, ON THE MAIN VIEWPORT ────────────────────────────
+// The window looks like every other tool window, because the window is not
+// what changed. What changed is the VIEWPORT: while the clipboard is open a
+// click there does not walk into a tile, it takes it. So the viewport is
+// where this says so, and it says it in the clipboard's own language.
+//
+// THE CUT LINE. A dashed hairline frames the stage — the marching-ants
+// outline every clipboard since the first one has used, and the same broken
+// line the hovered tile wears (hex-sdf.shader.ts). The stage and the tile
+// under the pointer are then visibly ONE mode rather than two unrelated
+// decorations. Static, never marching: an animated frame around the whole
+// screen is a strobe, and the meaning is in the dashes, not in the motion.
+//
+// The old watermark said CLIPBOARD across the middle. Right about the need,
+// wrong about the place: a word that size sits on top of the very tiles you
+// are aiming at. The word moved onto the frame's top edge instead, set like
+// a drawing's title block, with the count beside it.
+//
+// It spans the STAGE, not the viewport: the controls rail on the left and the
+// panel on the right are chrome, not hive, so the marker stops at both.
+// `[style.right.px]` is the panel's live drag-resized width.
+.swap-stage {
+  @include identity.accent($clipboard);
+  @include tw.window-roles;
+
+  position: absolute;
+  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  bottom: 0;
+  left: var(--hc-controls-left, 0px);
+  pointer-events: none;
+  // The ground itself takes a breath of the mode's colour, hugging the stage
+  // edge. Soft enough that no tile has to be read through it; present enough
+  // that the hive is visibly not in its resting state.
+  box-shadow: inset 0 0 6rem -2rem rgba(var(--acc), 0.85);
+}
+
+// The cut line. Four separate 1px runs rather than `border: dashed`, because
+// the browser's own dash rendering is unpredictable at hairline widths and
+// puts a different phase on every edge; these are exact, and they meet in the
+// corners. Inset so the frame reads as a mark ON the stage, not as the edge
+// of the window.
+.swap-stage::before {
+  content: '';
+  position: absolute;
+  inset: 0.55rem;
+  --hc-cut: rgba(var(--acc), 0.62);
+  background-image:
+    repeating-linear-gradient(90deg, var(--hc-cut) 0 7px, transparent 7px 14px),
+    repeating-linear-gradient(90deg, var(--hc-cut) 0 7px, transparent 7px 14px),
+    repeating-linear-gradient(180deg, var(--hc-cut) 0 7px, transparent 7px 14px),
+    repeating-linear-gradient(180deg, var(--hc-cut) 0 7px, transparent 7px 14px);
+  background-size: 100% 1px, 100% 1px, 1px 100%, 1px 100%;
+  background-position: 0 0, 0 100%, 0 0, 100% 0;
+  background-repeat: no-repeat;
+}
+
+// The caption, set into the frame's top edge like a title block — the cut
+// line runs up to it and continues after it, which is what makes the pair
+// read as one drawn object rather than a label floating over a border.
+.swap-stage-legend {
+  position: absolute;
+  top: 0.55rem;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.42em 1.05em;
+  // The shape ladder, not a pill: this is a title block set into a drawn
+  // frame, and a rounded capsule reads as a floating badge that happens to
+  // be near the line. See ui/_shape.scss — round is reserved for things that
+  // are genuinely round.
+  border: 1px solid rgba(var(--acc), 0.7);
+  border-radius: tw.$radius-control;
+  // Its own ground: the pane plus a wash of the mode colour, so the caption
+  // carries from across the room instead of only being legible up close.
+  background:
+    linear-gradient(rgba(var(--acc), 0.18), rgba(var(--acc), 0.18)),
+    rgba(var(--hc-panel-pane), 0.94);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 1px 10px rgba(var(--hc-panel-shadow), 0.35);
+  color: var(--hc-window-accent);
+  font-family: var(--hc-mono, system-ui);
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.34em;
+  // Tracking pads the RIGHT of the last glyph; nudge back so the word sits
+  // optically centred in the chip rather than measurably centred.
+  text-indent: 0.34em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+// NOT ON A PHONE. The hive does not swap there — `#swapClickArmed` in
+// TileOverlayDrone is false under `#mobileMode()`, because a tap has no
+// hover to warn you with and no ctrl to mean copy — so a frame announcing
+// that the viewport answers takes would be a lie. On a phone the panel is
+// also nearly the whole screen, which leaves the marker a sliver narrower
+// than its own caption.
+@include phone-only {
+  .swap-stage { display: none; }
+}
+
+.swap-stage-count {
+  padding: 0.18em 0.5em;
+  border-radius: tw.$radius-control;
+  background: rgba(var(--acc), 0.3);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  text-indent: 0;
+}

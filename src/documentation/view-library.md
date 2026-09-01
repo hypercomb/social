@@ -133,11 +133,11 @@ only what it wrote itself.
 
 The implementation lives in:
 
-- `hypercomb-essentials/src/diamondcoreprocessor.com/commands/brief.queen.ts`
-- `hypercomb-essentials/src/diamondcoreprocessor.com/commands/view-library.queen.ts`
-- `hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/living-brief-view.drone.ts`
-- `hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/view-library.drone.ts`
-- `hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/document-view-source.ts`
-- `hypercomb-essentials/src/diamondcoreprocessor.com/commands/view-source-scope.ts`
-- `hypercomb-essentials/src/diamondcoreprocessor.com/commands/views.queen.ts`
+- `hypercomb-essentials/src/commands/brief.queen.ts`
+- `hypercomb-essentials/src/commands/view-library.queen.ts`
+- `hypercomb-essentials/src/presentation/tiles/living-brief-view.drone.ts`
+- `hypercomb-essentials/src/presentation/tiles/view-library.drone.ts`
+- `hypercomb-essentials/src/presentation/tiles/document-view-source.ts`
+- `hypercomb-essentials/src/commands/view-source-scope.ts`
+- `hypercomb-essentials/src/commands/views.queen.ts`
 - `hypercomb-shared/ui/views-viewer/`

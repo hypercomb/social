@@ -106,7 +106,7 @@ than to raise the ceiling again — see below.
 1. **Preload lane.** `hypercomb-essentials/scripts/prepare.ts` splits the barrel
    into `side-effects.ts` (initial) and `preload-effects.ts` (dynamic, warmed
    after the first settled render). Classification is path-derived — today only
-   `diamondcoreprocessor.com/games/**`. Widening that predicate moves whole
+   `games/**`. Widening that predicate moves whole
    feature areas out of the initial chunk with no barrel upkeep. Both files are
    generated; edit the predicate, never the barrels.
 2. **Genuinely eager third-party code.** Check what actually landed before

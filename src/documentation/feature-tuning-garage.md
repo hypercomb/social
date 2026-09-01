@@ -321,7 +321,7 @@ At adopt time the adopted bees are untrusted and **not instantiated**, so `capab
 - essentials build — emit `capability`/`exclusive` into the per-bee doc entry so it lands in layer/manifest bytes (static extraction, §6.2).
 
 **New singleton (essentials):**
-- `hypercomb-essentials/src/diamondcoreprocessor.com/capability/cap-resolver.ts` — `CapResolver`, IoC `@diamondcoreprocessor.com/CapResolver`, `EventTarget`, self-registers, subscribes to `window.ioc.onRegister`. Emits `cap:resolved {tag, winnerSig}`. Exposes the allow-set to `ScriptPreloader`.
+- `hypercomb-essentials/src/capability/cap-resolver.ts` — `CapResolver`, IoC `@diamondcoreprocessor.com/CapResolver`, `EventTarget`, self-registers, subscribes to `window.ioc.onRegister`. Emits `cap:resolved {tag, winnerSig}`. Exposes the allow-set to `ScriptPreloader`.
 - `resolveCapability(tag, candidates, pins): string | null` — pure function, the single dedup definition (bench + swarm merge + recipe apply).
 
 **New UI (DCP + shell):**

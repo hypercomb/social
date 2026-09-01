@@ -28,6 +28,7 @@
 // hypercomb-web/public/example-hives.json (the first-boot offer roster).
 
 import WebSocket from 'ws'
+import { hiveChildren } from './lib/hive-children.mjs'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -186,28 +187,20 @@ const PARENT_TILE: Tile = { name: ROOT_BRANCH, image: 'examples-cover', note: PA
 
 // ── read helpers (gates for idempotent re-runs) ──────────────────────
 
-/** Child NAMES via raw layer bytes — `layer-at` holds child SIGS, and each
- *  child's name lives in its own layer JSON. `get-resource` reads those bytes
- *  without the recursive merkle expand `inflate` would do (the root's children
- *  include branches with thousands of cells). */
+// Child reads and child creation come from ONE implementation, shared with
+// every other bridge script: scripts/lib/hive-children.mjs. It carries the
+// trap (a parent's `children` slot holds LAYER sigs, and a layer sig is NOT a
+// resource, so `get-resource` on one answers "resource not found") and the
+// two rules that retire it: existence per CHILD PATH, creation via `op:'add'`,
+// which the committer applies as an APPEND. Never a `children:` SET to grow a
+// parent — that op REPLACES the slot.
+const hive = hiveChildren(send)
+
+/** Child NAMES, or `[]` when there is no layer at `segments` at all. The
+ *  shared reader prefers the one-hop `layer-by-sig` op and falls back to
+ *  `inflate` only on a renderer that predates it. */
 async function childrenOf(segments: string[]): Promise<string[]> {
-  const layer = await send({ op: 'layer-at', segments })
-  if (!layer.ok) return []
-  const sigs: string[] = Array.isArray(layer.data?.children) ? layer.data.children.map(String) : []
-  const names: string[] = []
-  for (const sig of sigs) {
-    const res = await send({ op: 'get-resource', sig })
-    if (res.ok) {
-      try {
-        const name = JSON.parse(res.data.text)?.name
-        if (typeof name === 'string' && name.trim()) { names.push(name.trim()); continue }
-      } catch { /* fall through to inflate */ }
-    }
-    const inf = await send({ op: 'inflate', cell: sig })
-    const name = (inf?.data as { name?: unknown })?.name
-    if (typeof name === 'string' && name.trim()) names.push(name.trim())
-  }
-  return names
+  return (await hive.childNamesOf(segments)) ?? []
 }
 
 async function noteCount(segments: string[]): Promise<number> {
@@ -249,18 +242,16 @@ async function currentProps(segments: string[]): Promise<Record<string, unknown>
 
 // ── write phases ─────────────────────────────────────────────────────
 
-const fail = (label: string, res: BridgeRes): never => {
+const fail = (label: string, res: { error?: string }): never => {
   console.error(`${label} FAILED: ${res.error}`)
   process.exit(1)
 }
 
 async function ensureStructure(segments: string[], tile: Tile): Promise<void> {
   const wanted = (tile.children ?? []).map(c => c.name)
-  const have = await childrenOf(segments)
-  const merged = [...have, ...wanted.filter(n => !have.includes(n))]
-  process.stdout.write(`[struct] /${segments.join('/')} (${merged.length} children) ... `)
-  const res = await send({ op: 'update', segments, layer: { name: tile.name, children: merged } })
-  console.log(res.ok ? 'ok' : fail('update', res))
+  process.stdout.write(`[struct] /${segments.join('/')} (${wanted.length} wanted) ... `)
+  const res = await hive.ensureChildren(segments, wanted)
+  console.log(res.ok ? `ok (+${res.added})` : fail('update', res))
   for (const child of tile.children ?? []) {
     await ensureStructure([...segments, child.name], child)
   }
@@ -339,7 +330,7 @@ async function main(): Promise<void> {
   // 1. structure — union `examples` into the root, then the whole census
   if (!rootKids.includes(ROOT_BRANCH)) {
     process.stdout.write(`[struct] / ← +${ROOT_BRANCH} ... `)
-    const res = await send({ op: 'update', segments: [], layer: { name: rootName, children: [...rootKids, ROOT_BRANCH] } })
+    const res = await hive.ensureChildren([], [ROOT_BRANCH])
     console.log(res.ok ? 'ok' : fail('root update', res))
   }
   await ensureStructure([ROOT_BRANCH], { ...PARENT_TILE, children: HIVES.map(h => h.root) })

@@ -49,9 +49,9 @@ first frame back. That is one TCP connect + one HTTP Upgrade + one close per
 logical op — and via `bridge-cli` also one `node` process each.
 
 This is a client convention, **not a protocol constraint**. The broker already
-routes by `id` (`run-bridge.cjs:95,107`), and **eight scripts in the same
+routes by `id` (`run-bridge.cjs:95,107`), and **several scripts in the same
 directory already multiplex** many concurrent ops over one socket
-(`_moose-paint.cjs`, `_mirror-welcome.cjs`, `_welcome-decorate.cjs`, …).
+(`_moose-paint.cjs`, `_welcome-decorate.cjs`, …).
 
 Measured, resolving the 16 root tiles to names:
 

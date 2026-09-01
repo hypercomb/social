@@ -127,6 +127,6 @@ localStorage.setItem('hc:anthropic-api-key', 'sk-ant-...')
 | `/sonnet` | `/s` | `claude-sonnet-4-6` | Balanced intelligence and speed |
 | `/haiku` | `/h` | `claude-haiku-4-5-20251001` | Fast, lightweight transforms |
 
-The model IDs above are the source-of-truth `MODELS` map in `hypercomb-essentials/src/diamondcoreprocessor.com/assistant/llm-api.ts` (verified current as of 2026-06-18); if that map changes, this table drifts — treat the code as canonical.
+The model IDs above are the source-of-truth `MODELS` map in `hypercomb-essentials/src/assistant/llm-api.ts` (verified current as of 2026-06-18); if that map changes, this table drifts — treat the code as canonical.
 
 The model choice is a property of the hyperedge — the same input and output vertices can be connected through different transforms depending on the depth of intelligence required.

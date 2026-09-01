@@ -1,5 +1,5 @@
 (() => {
-  // hypercomb-essentials/src/diamondcoreprocessor.com/games/arkanoid/engine.ts
+  // hypercomb-essentials/src/games/arkanoid/engine.ts
   var DIFFICULTY = [
     { name: "Rookie", tagline: "Fresh off the block \u2014 the streets are still smiling at you.", lives: 3, ballSpeedMul: 1, enemyCapBonus: 0, enemyFireMul: 1, enemyRefillMul: 1, turretDmgMul: 1, hazardCooldownMul: 1, oscAggroMul: 1, supportMul: 1, mayhemMul: 1 },
     { name: "Hustler", tagline: "You've got a corner now \u2014 and the corner's got eyes on you.", lives: 3, ballSpeedMul: 1.08, enemyCapBonus: 0, enemyFireMul: 0.9, enemyRefillMul: 0.85, turretDmgMul: 1.15, hazardCooldownMul: 0.88, oscAggroMul: 1.15, supportMul: 1.3, mayhemMul: 1.2 },
@@ -2782,7 +2782,7 @@
     }
   };
 
-  // hypercomb-essentials/src/diamondcoreprocessor.com/games/arkanoid/levels.ts
+  // hypercomb-essentials/src/games/arkanoid/levels.ts
   var LEVELS = [
     {
       name: "Warmup",
@@ -3949,7 +3949,7 @@
   var EDIT_COLS = 11;
   var EDIT_ROWS = 12;
 
-  // hypercomb-essentials/src/diamondcoreprocessor.com/games/arkanoid/theme.ts
+  // hypercomb-essentials/src/games/arkanoid/theme.ts
   function bandFor(theme, levelIndex) {
     return theme.bands[Math.floor(levelIndex / 4) % theme.bands.length];
   }
@@ -4005,7 +4005,7 @@
     return reg;
   })();
 
-  // hypercomb-essentials/src/diamondcoreprocessor.com/games/arkanoid/renderer.ts
+  // hypercomb-essentials/src/games/arkanoid/renderer.ts
   var BRICK_COLORS = {
     1: "#4DE3FF",
     // page .ak-b1 — cyan

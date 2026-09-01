@@ -203,7 +203,7 @@ is fire-and-forget.
 
 ## The drone
 
-`FeedbackChannelDrone` (`diamondcoreprocessor.com/sharing/feedback-channel.drone.ts`)
+`FeedbackChannelDrone` (`sharing/feedback-channel.drone.ts`)
 owns the whole concern. It has **two roles**, keyed off one flag
 (`hc:feedback-channel:enabled`) plus owner/visitor context:
 

@@ -9,16 +9,18 @@ const send = req => new Promise((res, rej) => {
   ws.on('error', e => { clearTimeout(t); rej(e) })
 })
 const ROOT = 'moose-on-the-loose'
-async function names(seg) {
-  const l = await send({ op: 'layer-at', segments: seg })
-  if (!l.ok) return []
-  const out = []
-  for (const s of (l.data.children || [])) {
-    const r = await send({ op: 'get-resource', sig: s })
-    if (r.ok) { try { out.push(JSON.parse(r.data.text).name) } catch {} }
-  }
-  return out
+// Child names come from the shared reader (scripts/lib/hive-children.mjs).
+// This verifier used to decode them with `get-resource`, which CANNOT work -
+// a parent's `children` slot holds LAYER sigs and a layer sig is not a
+// resource - so it reported EVERY parent as childless. A verifier that always
+// says "empty" is worse than none: it is the tool you reach for to check the
+// build scripts this bug was hiding in.
+let childNamesOf
+async function bindHiveHelpers() {
+  const { hiveChildren } = await import('../lib/hive-children.mjs')
+  ;({ childNamesOf } = hiveChildren(send))
 }
+const names = async seg => (await childNamesOf(seg)) ?? []
 async function marks(seg) {
   const l = await send({ op: 'layer-at', segments: seg })
   const out = []
@@ -35,6 +37,7 @@ async function notes(seg) {
   return items.map(n => String(n.text || '').split('\n')[0].slice(0, 72))
 }
 ;(async () => {
+  await bindHiveHelpers()
   console.log('root children :', (await names([])).join(', '))
   console.log(ROOT + '  :', (await names([ROOT])).join(', '))
   const coi = [ROOT, 'people', 'mark-carney', 'conflicts-of-interest']

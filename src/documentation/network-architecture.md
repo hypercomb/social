@@ -319,7 +319,7 @@ The complete trip from "click adopt on a peer's tile in a swarm" to
    window.dispatchEvent('portal:open', { branchSig, at, publisher-domain })
 
 4. PORTAL OVERLAY opens an iframe to the canonical installer
-   URL: https://diamondcoreprocessor.com/#branch=<sig>&at=<path>&from=<domain>
+   URL: https://#branch=<sig>&at=<path>&from=<domain>
    ─ canonical = the project's published installer
    ─ buildSig verifiable via /.well-known/hypercomb-installer.json
 
@@ -503,7 +503,7 @@ What it does:
 **To verify your mirror serves canonical-equivalent code:**
 
 ```bash
-curl https://diamondcoreprocessor.com/.well-known/hypercomb-installer.json
+curl https://.well-known/hypercomb-installer.json
 curl https://your-mirror.dev/.well-known/hypercomb-installer.json
 # Compare buildSig fields — if equal, your mirror is byte-equal canonical.
 ```

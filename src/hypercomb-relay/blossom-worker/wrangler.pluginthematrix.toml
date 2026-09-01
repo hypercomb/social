@@ -32,7 +32,32 @@ routes = [
   # label's zone by matching the bound suffix, so without it every
   # *.realones.online name is unroutable. Deploying this route before the zone
   # is ACTIVE in the account fails the WHOLE deploy — every other host with it.
-  { pattern = "*.realones.online/*", zone_name = "realones.online" }
+  # DISABLED 2026-08-30 — realones.online is PENDING in Cloudflare: its
+  # nameservers were never moved at its registrar (public resolvers SERVFAIL,
+  # the zone has a wildcard CNAME and no apex). A `zone_name` route naming a
+  # zone that is not ACTIVE fails the ENTIRE deploy, which would take every
+  # hostname in this file down with it — so one dormant domain must never be
+  # able to hold the live ones hostage. Re-enable the moment the zone reads
+  # Active; nothing else about it needs to change.
+  # { pattern = "*.realones.online/*", zone_name = "realones.online" },
+  # THIRD ZONE — hypercomb.com. Same script, same bindings: one worker serves
+  # every zone, so a new domain is routes + SITE_BINDINGS and nothing else.
+  # Zone ACTIVE 2026-08-30 (registrar NS moved to jack/margaret) with a
+  # proxied `* CNAME hypercomb.com` for the wildcard. WILDCARD ONLY for now:
+  #
+  #   • The apex custom domain is deliberately NOT routed yet. The zone still
+  #     carries the imported `A hypercomb.com → Azure` record, so the apex
+  #     keeps serving the old Azure site until the `hypercomb` lineage is
+  #     published and the cutover is chosen — routing it today would replace
+  #     a working site with "nothing published here" AND collide with that
+  #     A record at deploy time.
+  #   • replication.hypercomb.com waits with it: its nested lineage
+  #     (hypercomb/architecture/replication-by-signature) is not published
+  #     yet either. Uncomment both together at cutover.
+  #
+  # { pattern = "hypercomb.com", custom_domain = true },
+  # { pattern = "replication.hypercomb.com", custom_domain = true },
+  { pattern = "*.hypercomb.com/*", zone_name = "hypercomb.com" }
 ]
 
 [assets]
@@ -118,4 +143,4 @@ AI_WRITERS = ""
 # so no hive location can ever mint a lineage containing a dot. A plausible
 # anchor lineage like "realones" would instead sit in the publications ledger's
 # `named` set and silently deny a real hive of that name its plate.
-SITE_BINDINGS = '{"pluginthematrix.com":{"title":"Plugin the Matrix","lineage":"pluginthematrix","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"revolucion.pluginthematrix.com":{"title":"Revolución","lineage":"revolucion","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"meetup.pluginthematrix.com":{"title":"Meetup","lineage":"revolucion/meetup","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"arkanoid.pluginthematrix.com":{"title":"Arkanoid","lineage":"games/arkanoid","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"realones.online":{"title":"Real Ones","lineage":"realones.online","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]}}'
+SITE_BINDINGS = '{"pluginthematrix.com":{"title":"Plugin the Matrix","lineage":"pluginthematrix","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"revolucion.pluginthematrix.com":{"title":"Revolución","lineage":"revolucion","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"meetup.pluginthematrix.com":{"title":"Meetup","lineage":"revolucion/meetup","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"arkanoid.pluginthematrix.com":{"title":"Arkanoid","lineage":"games/arkanoid","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"realones.online":{"title":"Real Ones","lineage":"realones.online","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"hypercomb.com":{"title":"Hypercomb","lineage":"hypercomb","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]},"replication.hypercomb.com":{"title":"Replication by Signature","lineage":"hypercomb/architecture/replication-by-signature","publishers":[{"pubkey":"eacc0e65aeed6d421d12141b04f4cd47e2926ee470a835505c0a5ad2f1f75a9a","label":"Jaime","primary":true}]}}'

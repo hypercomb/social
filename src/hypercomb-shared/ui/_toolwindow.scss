@@ -26,15 +26,80 @@
 /// and as `:root` custom properties so drone views can reach it too — and is
 /// re-exported from here so every `tw.$radius-…` call site keeps working.
 /// ── WHY THIS FILE READS --hc-panel-*, NOT --hc-chrome-* ──────────────────
-/// A tool window is an INSPECTOR, not chrome. The bar and the rail follow the
-/// theme; these panes deliberately do not, because every panel's accent is a
-/// pastel picked to sit on a dark ground and its identity would be lost on a
-/// light one. The roles are still roles — a theme COULD answer them — but the
-/// panel family is defined once on :root and left dark until thirty panels
-/// have been re-picked together. See _material-tokens.scss.
+/// A tool window is an INSPECTOR, not chrome — but it is still THIS theme's
+/// inspector. The panel family answers the theme (bright pane under a bright
+/// look), and `_panel-identity.scss` takes each panel's pastel accent DEEP so
+/// the identity survives the flip. See _material-tokens.scss.
 
 @use './shape' as shape;
 @use './panel-identity' as identity;
+
+/// ── A TOOL WINDOW NEVER NAMES A COLOUR ───────────────────────────────────
+///
+/// It names a ROLE, and `window-roles` below answers it. This is the whole
+/// fix for "the portals window is unreadable in honey / light / sherbet".
+///
+/// The panels were not un-themed — most of them already sat on a themed pane.
+/// They were painting their LABELS from literals: a near-white `#eaf3f9` for
+/// the title, an `rgba(207, 226, 238, 0.62)` for the lede, the authored pastel
+/// `$steel` for the icon. Every one of those was picked against a dark pane,
+/// so a bright pane arriving underneath left the text at 1.1:1 — present in
+/// the DOM, invisible on screen. Measured, not guessed:
+/// `scripts/drive-toolwindow-contrast.cjs`.
+///
+/// Two families, and between them they cover every mark a tool window makes:
+///
+///   INK    the ladder from `_material-tokens.scss`, spelled out against the
+///          panel's own ink. `--hc-window-ink-quiet` is whatever quiet has to
+///          COST on this ground to still be quiet-but-readable — 0.70 on
+///          cream, 0.60 on near-black, because the same alpha is not the same
+///          weight. A rule asks for the weight, never the number.
+///
+///   ACCENT the panel's identity, from `--acc` (deepened under bright looks).
+///          `accent` is the identity as TEXT; `wash`/`wash-strong` are it as a
+///          GROUND (hover, selected); `edge`/`edge-firm` are it as a HAIRLINE.
+///          Painting from `rgba($accent, …)` instead is the bug that survived
+///          `identity.accent()` — the SCSS variable is the authored pastel and
+///          never deepens; only `var(--acc)` does.
+///
+/// Emitted by `panel()` and `floating-panel()`, so every window that takes the
+/// shared shell gets the vocabulary with it. A surface that takes neither can
+/// still reach the ink rungs — those are on `:root`.
+@mixin window-roles {
+  --hc-window-accent: rgb(var(--acc));
+  // Quiet, not faint. This is the identity used for a secondary label or a
+  // resting glyph — it still has to be READ, so it steps down in presence and
+  // not off the contrast cliff. At 0.72 it measured under target on every
+  // bright pane; the visible difference between 0.88 and full is enough.
+  --hc-window-accent-quiet: rgba(var(--acc), 0.88);
+  --hc-window-wash: rgba(var(--acc), 0.10);
+  --hc-window-wash-strong: rgba(var(--acc), 0.20);
+  --hc-window-edge: rgba(var(--acc), 0.28);
+  --hc-window-edge-firm: rgba(var(--acc), 0.62);
+
+  // Text ON an accent ground — a count chip, a primary button, a selected
+  // row filled with the identity. It is the PANE, and that is not a trick:
+  // the accent is a pale pastel on a dark theme (so its text must be dark,
+  // and dark is what the pane is) and a deep tone on a bright one (so its
+  // text must be light, and light is what the pane is). One expression,
+  // correct at both ends, with nothing to keep in sync.
+  --hc-window-on-accent: rgb(var(--hc-panel-pane));
+}
+
+/// A mark that is a COLOUR on purpose — a green "ready", an amber caution, a
+/// panel's decorative second hue — brought down to this ground. On a dark
+/// theme `--hc-deepen` is 0% and the authored colour passes through untouched;
+/// on a bright one it is pulled toward the panel's ink until it carries weight.
+/// Hue survives, value moves. See the `--hc-deepen` note in _material-tokens.
+///
+///     color: tw.ink(#70d59a);
+///
+/// Use this ONLY where the colour is the point. Weight belongs on the ink
+/// ladder and identity belongs on the accent roles; reaching for `ink()` to
+/// dodge either is how a panel drifts back out of the system.
+@function ink($c) {
+  @return #{'color-mix(in srgb, ' + $c + ', rgb(var(--hc-panel-ink)) var(--hc-deepen))'};
+}
 
 $radius-control: shape.$radius-control;
 $radius-card: shape.$radius-card;
@@ -63,7 +128,7 @@ $header-action-gap: 0.25rem;
   // literal. `--hc-window-accent` is now derived from it rather than frozen at
   // the authored pastel.
   @include identity.accent($accent);
-  --hc-window-accent: rgb(var(--acc));
+  @include window-roles;
   --hc-window-radius-control: #{$radius-control};
   --hc-window-radius-card: #{$radius-card};
   --hc-window-radius-floating: #{$radius-floating};
@@ -78,11 +143,11 @@ $header-action-gap: 0.25rem;
 
   @if $side == left {
     border-left: 0;
-    border-right: 1px solid rgba($accent, 0.38);
+    border-right: 1px solid rgba(var(--acc), 0.38);
     box-shadow: 14px 0 44px rgba(var(--hc-panel-shadow), 0.46), inset -1px 0 rgba(var(--hc-panel-sheen), 0.025);
   } @else {
     border-right: 0;
-    border-left: 1px solid rgba($accent, 0.38);
+    border-left: 1px solid rgba(var(--acc), 0.38);
     box-shadow: -14px 0 44px rgba(var(--hc-panel-shadow), 0.46), inset 1px 0 rgba(var(--hc-panel-sheen), 0.025);
   }
 }
@@ -92,7 +157,7 @@ $header-action-gap: 0.25rem;
 @mixin floating-panel($accent) {
   // Same identity contract as `panel()` — see _panel-identity.scss.
   @include identity.accent($accent);
-  --hc-window-accent: rgb(var(--acc));
+  @include window-roles;
   --hc-window-radius-control: #{$radius-control};
   --hc-window-radius-card: #{$radius-card};
   --hc-window-radius-floating: #{$radius-floating};

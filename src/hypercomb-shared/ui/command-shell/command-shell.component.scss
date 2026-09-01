@@ -3,6 +3,7 @@
 // Shared dark command shell — fixed height, same on all screen sizes.
 // Mobile styling is the source of truth.
 
+@use '../toolwindow' as tw;
 $bp-phone-max: 599px;
 
 :host {
@@ -49,6 +50,18 @@ $bp-phone-max: 599px;
   // is dark. Against the chrome's own text colour the same 60% lands legible
   // either way, and stays one cohesive family with the icon beside it.
   --cmd-fg: color-mix(in srgb, var(--glow-color) 60%, var(--hc-chrome-text));
+
+  // THE COMMAND REGISTER'S COLOUR. It was written out as `#ecbc57` in four
+  // places — the caret, the slash sigil, the reading's action segments — and
+  // the completion list, which is that same register's list, was wearing the
+  // shell's steel blue instead. One name, one hue, every surface the register
+  // touches. (`--cmd-accent` is its opposite number for the find register.)
+  // GROUNDED in the chrome's own ink so it is legible on either ground: on
+  // dark that lightens the honey a touch, on a bright theme it deepens to an
+  // amber that actually reads against cream. Raw #ecbc57 on white is a ~1.9:1
+  // glyph — fine as a 2px rule, not fine as a word. No theme selector needed:
+  // --hc-chrome-text already flips, so this flips with it.
+  --cmd-accent-command: color-mix(in srgb, #ecbc57 78%, var(--hc-chrome-text));
 }
 
 // The icon rail is a SIBLING of the shell, not a child of it (see the
@@ -173,8 +186,8 @@ $bp-phone-max: 599px;
 .command-shell.stance-command {
   background: color-mix(in srgb, var(--glow-color) 12%, transparent);
 
-  .command-input { caret-color: #ecbc57; }
-  .prompt-slash { color: #ecbc57; }
+  .command-input { caret-color: var(--cmd-accent-command); }
+  .prompt-slash { color: var(--cmd-accent-command); }
 }
 
 // While the reading paints, the input's own glyphs stand down — one text,
@@ -312,12 +325,12 @@ $bp-phone-max: 599px;
   white-space: pre;
 
   .seg-action {
-    color: #ecbc57;
+    color: var(--cmd-accent-command);
     text-decoration: underline;
     text-underline-offset: 0.22em;
   }
   .seg-ambiguity {
-    color: #b48ad8;
+    color: tw.ink(#b48ad8);
     text-decoration: underline dashed;
     text-underline-offset: 0.22em;
   }
@@ -375,7 +388,12 @@ $bp-phone-max: 599px;
   border-radius: var(--hc-radius-floating);
   background: color-mix(in srgb, var(--md-surface-c-lowest) 92%, transparent);
   backdrop-filter: blur(12px);
-  border: 1.5px solid var(--shell-border);
+  // A NEUTRAL hairline, not the shell's steel. `--shell-border` is right for
+  // the bar — it is the app's cold chrome — but this panel is the command
+  // register's own surface, and a blue frame around warm mono text was the
+  // last thing holding it to the wrong palette. Same choice the /help sheet
+  // makes: a plain light hairline, and the accent spent only on meaning.
+  border: 1.5px solid rgba(var(--hc-chrome-ink), 0.16);
   box-shadow: var(--md-elev-3);
   overflow: hidden;
   // THE REFERENCE SHEET'S TYPEFACE. `/help` and this dropdown answer the same
@@ -429,9 +447,9 @@ $bp-phone-max: 599px;
   &::-webkit-scrollbar { width: 4px; }
   &::-webkit-scrollbar-track { background: transparent; }
   &::-webkit-scrollbar-thumb {
-    background: rgba(var(--glow-color-rgb), 0.2);
+    background: rgba(var(--hc-chrome-ink), 0.2);
     border-radius: 2px;
-    &:hover { background: rgba(var(--glow-color-rgb), 0.35); }
+    &:hover { background: rgba(var(--hc-chrome-ink), 0.35); }
   }
 }
 
@@ -478,8 +496,24 @@ $bp-phone-max: 599px;
   white-space: nowrap;
 }
 
-.command-results li:hover { background: rgba(var(--glow-color-rgb), 0.06); }
-.command-results li.active { background: rgba(var(--glow-color-rgb), 0.1); box-shadow: inset 2px 0 0 var(--glow-color); }
+// The highlight is a LIFT, not a colour. A tinted wash under mono text reads
+// as generic editor chrome and fought the warm, near-neutral panel; lifting
+// the row off the surface with the page's own ink, and marking it with a
+// single warm rule in the command register's colour, says the same thing more
+// quietly and belongs to this surface.
+.command-results li:hover {
+  background: color-mix(in srgb, var(--hc-chrome-text) 4%, transparent);
+}
+
+.command-results li.active {
+  background: color-mix(in srgb, var(--hc-chrome-text) 8%, transparent);
+  box-shadow: inset 2px 0 0 var(--cmd-accent-command);
+
+  // The row you are on says its name a little louder — the only weight change
+  // in the list, so it reads as focus rather than as decoration.
+  .opt-name { color: var(--hc-chrome-text); }
+  .slash-desc { color: rgba(var(--hc-chrome-ink), 0.72); }
+}
 
 // ── detail pane (right) — info + sub-options for the active item ──────
 .command-detail {
@@ -491,13 +525,15 @@ $bp-phone-max: 599px;
   max-height: min(60vh, 26rem);
   overflow-y: auto;
   padding: 0.7rem 0.85rem;
-  border-left: 1px solid var(--shell-border);
-  background: rgba(var(--glow-color-rgb), 0.03);
+  border-left: 1px solid rgba(var(--hc-chrome-ink), 0.12);
+  // The pane is a hair lighter than the list beside it — a LIFT, the same
+  // move the active row makes, rather than a blue wash over half the panel.
+  background: rgba(var(--hc-chrome-ink), 0.03);
   color: var(--hc-chrome-text);
 
   &::-webkit-scrollbar { width: 4px; }
   &::-webkit-scrollbar-thumb {
-    background: rgba(var(--glow-color-rgb), 0.2);
+    background: rgba(var(--hc-chrome-ink), 0.2);
     border-radius: 2px;
   }
 }
@@ -513,7 +549,7 @@ $bp-phone-max: 599px;
   flex: 0 0 auto;
   font-size: 1.1em;
   line-height: 1;
-  color: var(--glow-color);
+  color: var(--cmd-accent-command);
 }
 
 .detail-name {
@@ -521,7 +557,9 @@ $bp-phone-max: 599px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--cmd-fg);
+  // The panel's own ink, not the bar's blue-white mix — the name of the thing
+  // you are reading about should be the brightest plain text here, and plain.
+  color: var(--hc-chrome-text);
   font-weight: 600;
 }
 
@@ -530,8 +568,8 @@ $bp-phone-max: 599px;
   margin-left: auto;
   padding: 0.05rem 0.4rem;
   border-radius: var(--md-shape-xs);
-  background: rgba(var(--glow-color-rgb), 0.12);
-  color: rgba(var(--glow-color-rgb), 0.75);
+  background: color-mix(in srgb, var(--cmd-accent-command) 16%, transparent);
+  color: var(--cmd-accent-command);
   font-size: 0.78em;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -556,17 +594,17 @@ $bp-phone-max: 599px;
 
 .detail-meta {
   margin-top: 0.5rem;
-  color: rgba(var(--glow-color-rgb), 0.55);
+  color: rgba(var(--hc-chrome-ink), 0.5);
   font-size: 0.85em;
 
-  .detail-count { color: var(--glow-color); font-weight: 600; }
+  .detail-count { color: var(--cmd-accent-command); font-weight: 600; }
 }
 
 .detail-options {
   margin-top: 0.6rem;
 
   .detail-options-label {
-    color: rgba(var(--glow-color-rgb), 0.5);
+    color: rgba(var(--hc-chrome-ink), 0.45);
     font-size: 0.78em;
     letter-spacing: 0.1em;
     text-transform: uppercase;
@@ -608,7 +646,7 @@ $bp-phone-max: 599px;
   margin-right: 0.6em;
 }
 
-.typed { color: var(--glow-color); }
+.typed { color: var(--cmd-accent-command); }
 .rest { color: var(--hc-chrome-text); opacity: 0.6; }
 
 // Second subgrid column. LEFT-aligned on the shared column edge — the old
@@ -654,7 +692,7 @@ $bp-phone-max: 599px;
   margin-right: 0.3rem;
   font-size: 1.05em;
   line-height: 1;
-  color: rgb(235, 170, 90);
+  color: tw.ink(rgb(235, 170, 90));
   text-shadow: 0 0 8px rgba(235, 170, 90, 0.7);
   pointer-events: none;
   user-select: none;
@@ -726,12 +764,12 @@ $bp-phone-max: 599px;
 }
 
 .indicator-pill.action {
-  color: #f4bf75;
+  color: tw.ink(#f4bf75);
   border-color: rgba(244, 191, 117, 0.48);
   background: rgba(244, 191, 117, 0.12);
 
   &:hover {
-    color: #ffd89f;
+    color: tw.ink(#ffd89f);
     border-color: rgba(244, 191, 117, 0.75);
     background: rgba(244, 191, 117, 0.2);
   }
@@ -1019,12 +1057,12 @@ $default-face: #c8b8ff;
   user-select: none;
 
   &:hover {
-    color: rgba(255, 120, 120, 0.9);
+    color: tw.ink(rgba(255, 120, 120, 0.9));
     background: rgba(255, 68, 68, 0.1);
   }
 
   &.on {
-    color: rgb(255, 92, 92);
+    color: tw.ink(rgb(255, 92, 92));
     background: rgba(255, 68, 68, 0.18);
     box-shadow: 0 0 4px rgba(255, 68, 68, 0.45);
 
@@ -1057,14 +1095,14 @@ $default-face: #c8b8ff;
   // Mobile portrait — command line is a full-width prompt at ~11vh.
   // Brighten the input text on dark background.
   .command-input {
-    color: #fafafa;
+    color: var(--hc-window-ink-loud);
     font-size: 1.4em;
   }
   .command-input::placeholder {
     color: rgba(var(--hc-chrome-accent), 0.85);
   }
   .ghost {
-    color: rgba(180, 215, 255, 0.55);
+    color: tw.ink(rgba(180, 215, 255, 0.55));
     font-size: 1.4em;
   }
   .reading { font-size: 1.4em; }   // the marks mirror the input's metrics, always

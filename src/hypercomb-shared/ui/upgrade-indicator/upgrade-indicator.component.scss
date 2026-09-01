@@ -1,3 +1,4 @@
+@use '../toolwindow' as tw;
 :host { display: contents; }
 
 .upgrade-indicator {
@@ -8,7 +9,7 @@
   min-width: 0;
   min-height: 2.15rem;
   padding: 0.28rem 0.38rem;
-  color: #74baff;
+  color: tw.ink(#74baff);
   border: 1px solid rgba(116, 186, 255, 0.28);
   border-radius: var(--hc-radius-floating);
   background: rgba(9, 14, 20, 0.94);
@@ -16,8 +17,8 @@
   backdrop-filter: blur(12px);
   pointer-events: auto;
 
-  &[data-phase='complete'] { color: #74c98a; }
-  &[data-phase='error'] { color: #e78b8b; }
+  &[data-phase='complete'] { color: tw.ink(#74c98a); }
+  &[data-phase='error'] { color: tw.ink(#e78b8b); }
 }
 
 .status-button {
@@ -64,7 +65,7 @@
   padding: 0.3rem 0.5rem;
   border: 1px solid transparent;
   border-radius: 4px;
-  color: rgba(220, 234, 245, 0.68);
+  color: var(--hc-window-ink-quiet);
   background: transparent;
   cursor: pointer;
   white-space: nowrap;
@@ -72,11 +73,11 @@
   text-transform: uppercase;
   letter-spacing: 0.035em;
 
-  &:hover:not(:disabled) { color: #f0f6fb; background: rgba(255, 255, 255, 0.07); }
+  &:hover:not(:disabled) { color: var(--hc-window-ink-loud); background: rgba(255, 255, 255, 0.07); }
   &:disabled { opacity: 0.4; cursor: default; }
 
   &.adopt {
-    color: #74baff;
+    color: tw.ink(#74baff);
     border-color: rgba(116, 186, 255, 0.35);
     background: rgba(77, 166, 255, 0.1);
   }
@@ -86,7 +87,7 @@
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  color: rgba(220, 234, 245, 0.55);
+  color: var(--hc-window-ink-quiet);
   font: 600 0.58rem/1 var(--hc-ui-font, system-ui, sans-serif);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -99,7 +100,7 @@
     border: 1px solid rgba(116, 186, 255, 0.35);
     border-radius: 4px;
     outline: 0;
-    color: #eaf4fc;
+    color: var(--hc-window-ink-loud);
     background: rgba(6, 12, 18, 0.72);
     font: 500 0.68rem/1 var(--hc-ui-font, system-ui, sans-serif);
 

@@ -1,0 +1,11144 @@
+// pixi/show-cell.drone.ts
+import { Drone, EffectBus, I18N_IOC_KEY, USAGE_IOC_KEY } from '@hypercomb/core'
+import type { I18nProvider, UsageRanker } from '@hypercomb/core'
+import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
+import type { HostReadyPayload } from './pixi-host.worker.js'
+import { HexLabelAtlas } from '../grid/hex-label.atlas.js'
+import { publishOwnedProjection } from './derived-projection-cache.js'
+import { resolveLocalResourceReference } from './local-resource-reference.js'
+import { HexImageAtlas } from '../grid/hex-image.atlas.js'
+import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
+import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
+import { isSignature, readCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt, readTilePropsSigAt, readTilePropsIndex, writeTilePropsIndex, recoverableTileImageSig, seedLayerKeyedEntries } from '../../editor/tile-properties.js'
+import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
+import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
+import { peerDivergesAt } from '../../sharing/peer-divergence.js'
+import { visitRecordAt } from '../../sharing/visit-genome.js'
+import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../../sharing/behavior-enablement.js'
+import { tagsForLabel, kindsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, ensureDecorationsIndexed, referenceTargetForLabel, referenceFaceForLabel, titleForLabel, defaultViewWithinSegments, HEXAGONS_SURFACE } from '../../commands/decoration-kind-index.js'
+import { defaultViewWithinAt } from '../../commands/view-default.js'
+import { slotAt, type AxialLike } from '../../sequence/pattern.js'
+import { launcherClusterLayout, type ClusterGroup } from './launcher-cluster-layout.js'
+import { setTileStacks, type StackVariant } from './tile-stack.js'
+import { participantVariantVisual } from './participant-variant.js'
+import { hideStorageKey, isCellPublic } from './tile-actions.drone.js'
+import { sessionHideStore } from './session-hide.store.js'
+import type { HistoryService, LayerContent } from '../../history/history.service.js'
+import { lineageKey } from '../../history/lineage-key.js'
+import type { HistoryCursorService, CursorState } from '../../history/history-cursor.service.js'
+import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoom/zoom.drone.js'
+
+// Render-path diagnostics are opt-in (localStorage 'hc:diag' = '1').
+// resolveChildNames runs on every non-memoized pass; the per-pass info
+// lines below short-circuit on this flag BEFORE their log strings are
+// built. Anomaly warns (stale manifest, null sigs, gate exhausted) stay
+// unconditional — they fire rarely and have earned their keep.
+const DIAG = (() => { try { return localStorage.getItem('hc:diag') === '1' } catch { return false } })()
+
+// Children-readiness shade — ON. A branch tile stays shaded (never inert —
+// clicking it enters and redirects the preloader) until the exact view inside
+// it is resident, releasing individually (most-used first). Bright means "the
+// destination's first paint is already prepared"; dim means "you may go in,
+// you will wait a moment."
+//
+// Its earlier bolt-on integration regressed because readiness derived from
+// lineage reads that STRADDLE navigations (currentSig vs explorerSegments vs
+// cursor) — wiped memos, stuck tiles. It is now driven from the render pass's
+// OWN stamped address (#passLocSig/#passSegments/#passParentSig). Escape hatch
+// for debugging the plain own-image shade: localStorage 'hc:child-shade' = '0'.
+const CHILD_SHADE = (() => { try { return localStorage.getItem('hc:child-shade') !== '0' } catch { return true } })()
+
+// READINESS SHADE — ON by default (Jaime 2026-08-01: "the tiles don't fade in
+// anymore while preloading, this makes it sketchy again — the participant needs
+// to know if the tile is ready to be clicked or is still preloading in the
+// background"). A preloading tile paints FADED and fades IN over
+// SHADE_FADE_MS when its proof lands. It NEVER blocks: the shade is purely
+// informational, hover lifts it, and a click on a faded tile still enters
+// (front-of-the-line divert) — see tile-overlay #navigateInto.
+//
+// The fade is deliberately LIGHT (see hex-sdf.shader): the earlier near-black
+// treatment had a real failure mode — on a first boot the child-warm queue has
+// a long tail, so branch tiles sat dark for a long time and read as "no
+// background images at all". A faded tile must still show what it is; only its
+// readiness is in question, never its content.
+// Escape hatch to turn it off: localStorage 'hc:tile-fade' = '0'. NOTE the key
+// changed with the default: profiles that debugged the old opt-in flag still
+// carry 'hc:tile-shade' values, and a stale one there would silently suppress
+// the fade for exactly the people who have been testing it.
+const TILE_SHADE = (() => { try { return localStorage.getItem('hc:tile-fade') !== '0' } catch { return true } })()
+/** How long a released tile takes to fade from faded to full. Short enough to
+ *  feel like arrival, long enough that the eye catches WHICH tile landed. */
+const SHADE_FADE_MS = 280
+/** Already-baked label used for the first optimistic frame. The real label's
+ *  SDF is rasterized after the commit settles, never in the input frame. */
+const PENDING_CELL_LABEL = '\u2026'
+
+// ── THE ARRIVAL GATE ────────────────────────────────────────────────────────
+// A layer marked `view:default` opens as a VIEW, not as hexagons — so the
+// hexagons must never be the first thing ON SCREEN. The gate ORDERS the
+// boot/arrival: it holds this drone's paint until view.bee's verdict
+// (`view:arrival`) lands and the surface has flipped, then paints anyway —
+// under the covered canvas. The paint is never skipped: the resolved cells
+// are the tile roster the deck-shaped views feed on, and the warm mesh is
+// what an escape back to hexagons reveals instantly. How long the gate may
+// hold before giving up: the verdict rides the same triggers as this
+// render, so it normally lands in milliseconds; the timeout only exists so
+// a cold read that never resolves strands the participant on their hive,
+// not on an empty ink field.
+const ARRIVAL_GATE_MS = 2500
+
+type Axial = { q: number; r: number }
+/** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
+type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean; plain?: boolean; pendingProps?: boolean }
+type ReferenceDraftPreview = {
+  name: string
+  imageSig?: string
+  index: number
+  parentSegments: readonly string[]
+}
+type LabelDerivedState = {
+  images: Map<string, string | null>
+  borders: Map<string, [number, number, number]>
+  tags: Map<string, string[]>
+  links: Map<string, boolean>
+  substrates: Map<string, boolean>
+  hiddenText: Map<string, boolean>
+  external: Set<string>
+}
+type PeerSourceProjection = {
+  peerIndex?: number
+  peerPubkey?: string
+  imageSig?: string
+  layerSig?: string
+  properties?: Readonly<Record<string, unknown>>
+  titles?: Readonly<Record<string, string>>
+}
+type TileSourceProjection = { name: string; kind: string; source?: PeerSourceProjection }
+const tileSourceProjectionKey = (entries: readonly TileSourceProjection[]): string =>
+  entries.map(e => [
+    e.kind,
+    e.name,
+    e.source?.peerPubkey ?? '',
+    e.source?.layerSig ?? '',
+    JSON.stringify(e.source?.properties ?? {}),
+    JSON.stringify(e.source?.titles ?? {}),
+  ].join(':')).join('|')
+
+/** Launch-group pages live at single-segment ROOT locations named by group id
+ *  (/games, /websites, /help, …) — each is its own leaf-only lineage,
+ *  addressable directly. Resolved LIVE against the shell's GroupLauncher
+ *  registry over IoC at call time (modules must not IMPORT shared — an IoC
+ *  read is the sanctioned bridge). Legacy `agg-` locations still count so old
+ *  history renders.
+ *
+ *  `openDirectly` groups are EXCLUDED per the LaunchGroup contract
+ *  (group-registry.ts): they have no browsable aggregator page, so /<id> is a
+ *  REAL cell page. */
+function isLauncherLocation(segs: readonly unknown[]): boolean {
+  if (segs.length !== 1 || typeof segs[0] !== 'string') return false
+  if (segs[0].startsWith('agg-')) return true
+  const reg = (window as any).ioc?.get?.('@hypercomb.social/GroupLauncher') as { get?: (id: string) => { openDirectly?: boolean } | undefined } | undefined
+  const group = reg?.get?.(segs[0])
+  return !!group && group.openDirectly !== true
+}
+
+/** Map a launch group's shape id (from its `launch:target` decoration) to the
+ *  shader's aShapeMode value: 0 = hexagon · 2 = Space Invader (games).
+ *  Unknown / empty → hexagon, so a normal hive tile (no launch decoration) and
+ *  any future group default to the plain shape.
+ *  (Help tiles carry no shape — hexagons. RETIRED silhouettes fall through to
+ *  hexagon here, no migration needed: 'keycap', and 'flower-pot' — the
+ *  websites cloud, phased out; 2 stays put so games' decorations keep working.) */
+function launchShapeToMode(shape: string): number {
+  return shape === 'space-invader' ? 2 : 0
+}
+
+/** Cold-steel border (126,182,214 → 0..1) for the clustered-help category
+ *  TITLE tiles, so a header reads as a header without any new tile shape —
+ *  the per-cell borderColor attribute already exists. */
+const HEADER_BORDER: [number, number, number] = [0.494, 0.714, 0.839]
+
+/** COLLECTION RIM — the swarm's "which of these are mine now" answer, on
+ *  the rim channel so it's unmistakable at a glance (Jaime, 2026-08-20:
+ *  "very clear on the fact that we have now included that in our
+ *  collection"). Green = acquired from the swarm (the visit genome or an
+ *  adopted root covers it); dim slate = witnessed only, not yours yet;
+ *  the ordinary gold rim stays for tiles native to your hive. A user-set
+ *  border decoration still overrides (applied later in the pass). */
+const COLLECTED_BORDER: [number, number, number] = [0.435, 0.827, 0.604]
+const WITNESSED_BORDER: [number, number, number] = [0.302, 0.365, 0.447]
+/** THE WAND'S TOUCH — the instant the ctrl+press/sweep crosses a witnessed
+ *  tile it lights this bright gold rim and lifts out of the armed shade,
+ *  ahead of the fold landing; the next render then paints it native with
+ *  the COLLECTED green. Prominent by design: taking must read as taking
+ *  at the moment of the gesture, not a beat later. */
+const WAND_TAKING_BORDER: [number, number, number] = [1.0, 0.83, 0.42]
+/** Cold grey-blue for a tile that more than one participant holds, mixed into
+ *  its own border while YOUR version is the one showing. It marks depth, not
+ *  ownership — the moment you roll onto a participant the border takes that
+ *  publisher's identity hue instead, so the two readings never overlap. */
+const STACK_BORDER: [number, number, number] = [0.62, 0.68, 0.78]
+/** How much of STACK_BORDER a stacked tile takes. Enough to read as "there is
+ *  something under this one" across a page, well short of a state change — a
+ *  tile you can roll is still an ordinary tile. */
+const STACK_BORDER_MIX = 0.5
+/** How far a launcher tile may wander while drifting, as a fraction of the hex
+ *  circumradius. Small on purpose: the drifted tile must stay inside its home
+ *  hex's pointer→axial catchment so clicking the floating tile still opens its
+ *  site. The peak offset is √2× this (two summed axes), still well under the
+ *  ~0.87·spacing neighbour boundary. */
+const LAUNCHER_DRIFT_FRACTION = 0.18
+
+/** `#rrggbb` (or bare `rrggbb`) → [r, g, b] in 0–1, or null if it isn't one.
+ *  A pheromone's colour arrives from the registry as CSS text; the shader wants
+ *  a triple. Null (never a guessed colour) so the caller keeps the last good
+ *  one instead of flashing a wrong mark colour. */
+function hexToRgbTriple(css: string): [number, number, number] | null {
+  const raw = String(css ?? '').trim().replace('#', '')
+  if (!/^[0-9a-fA-F]{6}$/.test(raw)) return null
+  return [
+    parseInt(raw.slice(0, 2), 16) / 255,
+    parseInt(raw.slice(2, 4), 16) / 255,
+    parseInt(raw.slice(4, 6), 16) / 255,
+  ]
+}
+
+/** Deterministic label → RGB via DJB2 hash → HSL → RGB. Returns [r, g, b] in 0–1 range. */
+function labelToRgb(label: string): [number, number, number] {
+  let hash = 5381
+  for (let i = 0; i < label.length; i++) hash = ((hash << 5) + hash + label.charCodeAt(i)) | 0
+  hash = hash >>> 0
+
+  const hue = (hash % 360) / 360
+  const sat = 0.5
+  const lit = 0.6
+
+  const c = (1 - Math.abs(2 * lit - 1)) * sat
+  const x = c * (1 - Math.abs(((hue * 6) % 2) - 1))
+  const m = lit - c / 2
+  let r = 0, g = 0, b = 0
+  const sector = (hue * 6) | 0
+  if (sector === 0)      { r = c; g = x; b = 0 }
+  else if (sector === 1) { r = x; g = c; b = 0 }
+  else if (sector === 2) { r = 0; g = c; b = x }
+  else if (sector === 3) { r = 0; g = x; b = c }
+  else if (sector === 4) { r = x; g = 0; b = c }
+  else                   { r = c; g = 0; b = x }
+  return [r + m, g + m, b + m]
+}
+
+type MeshEvt = { relay: string; sig: string; event: any; payload: any }
+type MeshSub = { close: () => void }
+type MeshApi = {
+  ensureStartedForSig: (sig: string) => void
+  awaitReadyForSig?: (sig: string, timeoutMs?: number) => Promise<void>
+  getNonExpired: (sig: string) => MeshEvt[]
+  getSwarmSize?: (sig: string) => number
+  publish?: (kind: number, sig: string, payload: any, extraTags?: string[][]) => Promise<boolean>
+  subscribe?: (sig: string, cb: (e: MeshEvt) => void) => MeshSub
+}
+
+type PixiHostApi = {
+  app?: Application | null
+  container?: Container | null
+}
+
+type SlotsSnapshot = { names: string[]; localCells: Set<string>; branches: Set<string>; mode: 'dense' | 'pinned' }
+
+/**
+ * State machine for tile slot ordering — the single source of truth for
+ * "which label lives at which index" during incremental updates.
+ *
+ * Dense mode:  names is a packed array. Remove = splice out. Add = append.
+ * Pinned mode: names is sparse with '' gaps to hold slot positions. Remove
+ *              replaces with '' (slot preserved). Add returns false — the
+ *              LayoutService owns slot assignment, so callers must fall back
+ *              to the full render path.
+ *
+ * Callers never branch on mode — they call remove/add/snapshot and trust
+ * the result.
+ */
+class CellSlots {
+  #names: string[] = []
+  #local = new Set<string>()
+  #branches = new Set<string>()
+  #mode: 'dense' | 'pinned' = 'dense'
+  #seeded = false
+
+  get seeded(): boolean { return this.#seeded }
+  get mode(): 'dense' | 'pinned' { return this.#mode }
+
+  seed(snap: SlotsSnapshot): void {
+    this.#names = [...snap.names]
+    this.#local = new Set(snap.localCells)
+    this.#branches = new Set(snap.branches)
+    this.#mode = snap.mode
+    this.#seeded = true
+  }
+
+  clear(): void {
+    this.#seeded = false
+    this.#names = []
+    this.#local.clear()
+    this.#branches.clear()
+  }
+
+  snapshot(): SlotsSnapshot {
+    return {
+      names: [...this.#names],
+      localCells: new Set(this.#local),
+      branches: new Set(this.#branches),
+      mode: this.#mode,
+    }
+  }
+
+  remove(label: string): void {
+    // Preserve slot position in both modes — replacing with '' keeps every other
+    // tile's index stable so no tile ever shifts on a neighbouring remove.
+    for (let i = 0; i < this.#names.length; i++) {
+      if (this.#names[i] === label) this.#names[i] = ''
+    }
+    this.#local.delete(label)
+    this.#branches.delete(label)
+  }
+
+  /**
+   * Fill the first gap (''), or append at the end. Gaps exist because remove()
+   * preserves slot positions — reusing them keeps neighbours still.
+   * Pinned mode returns false so LayoutService owns slot assignment.
+   */
+  add(label: string, hasBranch: boolean): boolean {
+    if (this.#mode === 'pinned') return false
+    if (!this.#names.includes(label)) {
+      const gapIndex = this.#names.indexOf('')
+      if (gapIndex >= 0) this.#names[gapIndex] = label
+      else this.#names.push(label)
+    }
+    this.#local.add(label)
+    if (hasBranch) this.#branches.add(label)
+    return true
+  }
+
+  /**
+   * Pinned-mode counterpart to add(): place a label at a specific sparse
+   * slot the caller already computed (the LayoutService scoring lives in
+   * the drone, not here). Grows the backing array with '' gaps as needed.
+   * Idempotent when the label is already present. Returns false only if a
+   * DIFFERENT label already holds the slot, signalling the caller to fall
+   * back to a full render.
+   */
+  addAt(label: string, index: number, hasBranch: boolean): boolean {
+    if (this.#names.includes(label)) {
+      this.#local.add(label)
+      if (hasBranch) this.#branches.add(label)
+      return true
+    }
+    while (this.#names.length <= index) this.#names.push('')
+    if (this.#names[index] !== '' && this.#names[index] !== label) return false
+    this.#names[index] = label
+    this.#local.add(label)
+    if (hasBranch) this.#branches.add(label)
+    return true
+  }
+
+  /** Mark an already-present label as having a branch. No-op if absent. */
+  markBranch(label: string): void {
+    if (this.#names.includes(label)) this.#branches.add(label)
+  }
+
+  hasBranch(label: string): boolean {
+    return this.#branches.has(label)
+  }
+
+  has(label: string): boolean {
+    return this.#names.includes(label)
+  }
+}
+
+/**
+ * Resolve a parent layer's `children` (sigs) into a Set of child
+ * display names.
+ *
+ * Each child layer lives in the CHILD's lineage sigbag `<childLocSig>/`
+ * (at the flat OPFS root; legacy `__history__/<childLocSig>` is a
+ * read-fallback), not the parent's. We don't have a sig→name index, so the only way
+ * to map a sig back to a name is to enumerate the parent's on-disk
+ * children, compute each child's lineage sig, list that bag's markers,
+ * and check if any marker sig matches the parent's `children` entry.
+ *
+ * Names whose sig matches → "allowed" in this historical layer.
+ * Children that have been deleted from disk can't be resolved (no
+ * lineage to query) and silently drop out — known limitation of the
+ * current design (no global sig→name lookup).
+ */
+/**
+ * Resolve a parent layer's `children` (sigs) to display names.
+ *
+ * Mechanical: each sig in `content.children` is a content-addressed
+ * pointer to a child layer's bytes. The preloader (HistoryService.
+ * getLayerBySig) returns the layer for that sig; its `name` field
+ * is the child's display name. No bag scanning, no schema variants,
+ * no name-based fallbacks — just sig→content lookup.
+ *
+ * Sigs that don't resolve are dropped silently (the layer was never
+ * registered in the cache and isn't on disk anywhere).
+ */
+// Memo: child head sig → does that head have children. A child's head sig
+// only changes when the child (or its own children) change, so a stable
+// subtree costs one head-index lookup per render, never a layer reparse.
+const branchByHeadSig = new Map<string, boolean>()
+
+async function resolveChildNames(
+  history: HistoryService,
+  parentSegments: readonly string[],
+  _parentDir: FileSystemDirectoryHandle | null,
+  content: { children?: string[] } | null,
+  parentLayerSig?: string,
+  // Optional out-param. The caller reads `expected` (child-sig count) vs
+  // `resolved` (sigs that produced a name) to decide whether this pass
+  // saw the COMPLETE child set. A resolution where resolved < expected is
+  // partial — the renderer must NOT paint it (the two-stage load). Counts
+  // resolved SIGS, not unique names, so duplicate child names never read
+  // as "incomplete". `unresolvedSigs` lists the FULL child sigs that did
+  // not produce a name this pass — the completeness gate paints these as
+  // explicit unavailable-placeholders once its retry budget is spent,
+  // instead of silently dropping the tiles.
+  stats?: {
+    expected: number
+    resolved: number
+    unresolvedSigs?: string[]
+  },
+  // Optional out-param: child NAMES that are branches (have their own
+  // children). Derived from each child's `children` array LENGTH — one level
+  // down, never loading grandchildren — from the SAME manifest / per-child
+  // resolution that produces names. Lets the render get name + branch-status
+  // from a single read and DELETE the separate per-child branchSet walk that
+  // re-loaded every child on every frame.
+  branchesOut?: Set<string>,
+  // Optional out-param: set `cold=true` when a child's branch-STATUS could not
+  // be read this pass because its head-layer bytes weren't pooled yet (a
+  // TRANSIENT cold miss, NOT a leaf). The caller uses this to avoid memoizing
+  // an incomplete branch set and to schedule a re-render — never to conclude
+  // "not a branch", which would poison the tile's navigability.
+  branchStats?: { cold: boolean },
+  // Only the pass that is PAINTING may heal this layer's pack. Healing means
+  // decoding and re-encoding the source images, and prepareView runs over the
+  // whole warmed neighbourhood (up to 512 layers, 12-wide) — letting it heal
+  // turned a background warm into a whole-hive re-encode that raced first
+  // paint. The layer you are looking at heals; the ones you might visit wait
+  // for the optimize phase.
+  options?: {
+    mayUpgradePack?: boolean
+    onBranchesFreshened?: (branches: Set<string>) => void
+  },
+): Promise<Set<string>> {
+  const out = new Set<string>()
+  if (stats) {
+    stats.expected = content?.children?.length ?? 0
+    stats.resolved = 0
+  }
+  if (!content?.children?.length) return out
+
+  // Branch-status (does a child have its OWN children?) must come from the
+  // child's CURRENT head, not the parent's stored child sig — per-page
+  // history leaves that sig stale, so a child that gained grandchildren since
+  // the parent last committed would otherwise show no branch dot. Path-address
+  // each child by name and read its head's children length. branchesOut only
+  // gets fresh adds now; the stale parent-sig derivation is gone.
+  const readFreshBranches = async (names: Iterable<string>): Promise<{ branches: Set<string>; cold: boolean }> => {
+    const branches = new Set<string>()
+    let cold = false
+    await Promise.all([...names].map(async (name) => {
+      try {
+        const childLocSig = await history.sign({ explorerSegments: () => [...parentSegments, name] })
+        const headSig = await history.latestMarkerSigFor(childLocSig, name)
+        // No head marker = the child never committed a layer of its own = an
+        // authoritative leaf. NOT a cold miss — don't flag the pass cold, or a
+        // leaf-heavy layer would retry forever.
+        if (!headSig) return
+        let hasChildren = branchByHeadSig.get(headSig)
+        if (hasChildren === undefined) {
+          const head = await history.getLayerBySig(headSig)
+          if (!head) {
+            // TRANSIENT cold-pool miss: the head sig exists but its bytes
+            // aren't pooled yet. getLayerBySig returns null here EXACTLY as it
+            // does for a genuine absence (history.service.ts getLayerBySig), so
+            // we must NOT conclude "no children" — and, critically, must NOT
+            // cache that false into the module-global branchByHeadSig. Doing so
+            // poisoned the branch dot for the whole session: the tile painted
+            // as a non-branch, so #onPointerDown/#onClick routed its click to
+            // the 'open' editor action instead of navigating in — locking the
+            // user out of the child branch until a full reload. Leave it
+            // unresolved and flag the pass cold so the caller re-renders once
+            // the neighbourhood warms.
+            cold = true
+            return
+          }
+          const kids = (head as { children?: unknown } | null)?.children
+          hasChildren = Array.isArray(kids) && kids.length > 0
+          branchByHeadSig.set(headSig, hasChildren)
+        }
+        if (hasChildren) branches.add(name)
+      } catch {
+        // A read threw mid-resolution — transient. Leave the dot off for now
+        // and flag cold so the caller retries; never cache a false.
+        cold = true
+      }
+    }))
+    return { branches, cold }
+  }
+
+  // A current-layer pack already contains each direct child's layer. Names and
+  // branch flags therefore come from that ONE read. Per-child path/head checks
+  // are only a repair for old packs whose ancestor sig was not propagated; they
+  // must never sit between a navigation gesture and paint. Run the repair at
+  // idle and ask the owner to repaint only when a complete fresh result differs.
+  const freshenBranchesAfterPaint = (names: Iterable<string>): void => {
+    if (!options?.onBranchesFreshened) return
+    const snapshot = [...names]
+    const run = () => {
+      void readFreshBranches(snapshot).then(({ branches, cold }) => {
+        if (branchStats) branchStats.cold = cold
+        if (!cold) options.onBranchesFreshened?.(branches)
+      }).catch(() => {
+        if (branchStats) branchStats.cold = true
+      })
+    }
+    const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback
+    if (typeof ric === 'function') ric(run, { timeout: 4_000 })
+    else setTimeout(run, 0)
+  }
+
+  // Children manifest fast-path. When the parent's sig is known, try
+  // the sign('manifests') pool keyed by <parentSig> (via
+  // Store.readChildrenManifest; legacy __manifests__/ is a read-fallback)
+  // — a single file read returns the resolved
+  // child layer objects with names already inlined. Skips the per-child
+  // getLayerBySig walk entirely on cold load. Falls through to the
+  // signature-resolution path on miss; commitLayer writes a fresh
+  // manifest after every commit so subsequent reads stay hot.
+  const store = parentLayerSig
+    ? (window as any).ioc?.get?.('@hypercomb.social/Store') as {
+        readChildrenManifest?: (sig: string) => Promise<Array<{ sig: string; layer: { name?: string; children?: string[] } }> | null>
+        writeChildrenManifest?: (sig: string, m: Array<{ sig: string; layer: { name?: string; children?: string[] } }>) => Promise<void>
+      } | undefined
+    : undefined
+
+  if (parentLayerSig && store?.readChildrenManifest) {
+    const manifest = await store.readChildrenManifest(parentLayerSig)
+    if (manifest && manifest.length !== content.children.length) {
+      console.warn(`[diag:childres] MANIFEST STALE parent=${parentLayerSig.slice(0, 12)} manifestLen=${manifest.length} childrenLen=${content.children.length} -> falling to per-child`)
+    }
+    if (manifest && manifest.length === content.children.length) {
+      if (DIAG) console.info(`[diag:childres] MANIFEST HIT parent=${parentLayerSig.slice(0, 12)} len=${manifest.length}`)
+      // Manifest is current iff it covers every child sig in the parent.
+      // Trust it: extract names directly, no bag walk. ALSO seed each
+      // inlined child layer into HistoryService's parsed cache — the
+      // render path immediately follows with per-child getLayerBySig
+      // calls (branch detection), and without the seed every one of
+      // them is a cold pool read on refresh; a single missing pool
+      // entry would then join the multi-second preloadAllBags scan.
+      const seed = (history as { seedParsedLayer?: (sig: string, layer: object) => void }).seedParsedLayer
+      let resolvedCount = 0
+      const manifestUnresolved: string[] = []
+      for (const entry of manifest) {
+        // Bind the visuals from the pack itself — this array IS the layer's
+        // optimization, so every image it carries is decoded from here and
+        // never re-read per tile. Keyed by the SOURCE image sig, so the atlas
+        // identity is identical to the file-fed path.
+        ShowCellDrone.adoptPackedVisual(entry as { visual?: { sig?: string; webp?: string; type?: string } })
+        if (entry?.layer?.name) {
+          out.add(entry.layer.name)
+          if (branchesOut && Array.isArray(entry.layer.children) && entry.layer.children.length > 0) {
+            branchesOut.add(entry.layer.name)
+          }
+          resolvedCount++
+          if (seed && entry.sig) seed.call(history, entry.sig, entry.layer)
+        } else if (entry?.sig) {
+          manifestUnresolved.push(entry.sig)
+        }
+      }
+      // Manifest hit only reaches here when manifest.length === children
+      // length, so a fully-named manifest IS the complete set.
+      if (stats) {
+        stats.resolved = resolvedCount
+        stats.unresolvedSigs = manifestUnresolved
+      }
+      // UPGRADE A THIN PACK. Manifests written before the visuals moved in
+      // carry names only, so this layer would keep paying per-tile reads on
+      // every visit forever. Re-mint it once, off the render path — the next
+      // visit paints from the pack. Once per parent sig per session; keyed by
+      // an immutable content sig, so a successful upgrade is permanent.
+      // Render pass only — see `options.mayUpgradePack`.
+      if (options?.mayUpgradePack) upgradeThinPack(parentLayerSig, manifest, content.children, store)
+      freshenBranchesAfterPaint(out)
+      return out
+    }
+  }
+
+  // Pure signature resolution. For each child sig in the parent's
+  // layer, fetch that child's LayerContent — its `name` field is the
+  // child's display name. NO folder-name lookups, NO seed-by-name
+  // pre-warming. Names live inside the signed bytes, not on the
+  // filesystem. getLayerBySig is content-addressed: hot from the
+  // preloader cache after warmup, cold-walks bags by sig if missed.
+  // Fired in parallel — every call is independent, and a single cold
+  // miss serializing the whole list was the dominant per-frame cost.
+  const children = await Promise.all(
+    content.children.map(sig => history.getLayerBySig(sig)),
+  )
+  const __nullSigs: string[] = []
+  let __resolvedCount = 0
+  for (let __i = 0; __i < children.length; __i++) {
+    const child = children[__i]
+    if (child?.name) {
+      out.add(child.name); __resolvedCount++
+      if (branchesOut && Array.isArray(child.children) && child.children.length > 0) {
+        branchesOut.add(child.name)
+      }
+    }
+    else if (content.children[__i]) __nullSigs.push(content.children[__i])
+  }
+  if (stats) {
+    stats.resolved = __resolvedCount
+    stats.unresolvedSigs = [...__nullSigs]
+  }
+  if (__nullSigs.length > 0) {
+    console.warn(`[diag:childres] PERCHILD parent=${(parentLayerSig || 'EMPTY').slice(0, 12)} children=${content.children.length} resolved=${out.size} NULL=${__nullSigs.length} nullSigs=[${__nullSigs.map(s => s.slice(0, 12)).join(', ')}]`)
+  } else if (DIAG) {
+    console.info(`[diag:childres] PERCHILD parent=${(parentLayerSig || 'EMPTY').slice(0, 12)} children=${content.children.length} all-resolved=${out.size}`)
+  }
+
+  // (see upgradeThinPack, declared below the resolver)
+
+  // Backfill the manifest for pre-existing layers committed before the
+  // decoration shipped (or after a manifest GC) — but ONLY when EVERY
+  // child resolved this pass. A PARTIAL manifest (missing the children
+  // that were cold) has manifest.length < content.children.length, so the
+  // read-side guard (manifest.length === content.children.length) rejects
+  // it on the next load and drops to the per-child path AGAIN — the
+  // two-stage render perpetuates itself forever. Writing only COMPLETE
+  // manifests lets the first fully-warm pass heal the layer so every
+  // subsequent load is a single manifest read with all children present.
+  // Idle-scheduled so the current render path doesn't pay the write.
+  const allResolved = children.length === content.children.length && children.every(c => !!c?.name)
+  if (parentLayerSig && store?.writeChildrenManifest && allResolved) {
+    const thin: Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }> = []
+    for (let i = 0; i < children.length; i++) {
+      thin.push({ sig: content.children[i], layer: children[i]! })
+    }
+    const schedule = typeof (window as any).requestIdleCallback === 'function'
+      ? (cb: () => void) => (window as any).requestIdleCallback(cb, { timeout: 5_000 })
+      : (cb: () => void) => setTimeout(cb, 0)
+    schedule(() => {
+      void (async () => {
+        // ENRICHED when we can: the pack carries each tile's props and its
+        // optimized visual, so the NEXT visit to this layer paints from two
+        // reads. Falling back to the thin array is still correct (the render
+        // resolves per child, as it always did) — it just doesn't pay off.
+        // Enriching MINTS renditions, so only the painting pass may do it; a
+        // prepareView sweeping the neighbourhood writes the thin array and
+        // leaves the visuals to the optimize phase.
+        const optimizer = options?.mayUpgradePack
+          ? (window as any).ioc?.get?.('@diamondcoreprocessor.com/ManifestOptimizerDrone') as {
+              buildEntries?: (sigs: readonly string[], layers: ReadonlyArray<{ name?: string }>) => Promise<Array<Record<string, unknown>> | null>
+            } | undefined
+          : undefined
+        const rich = await optimizer?.buildEntries?.(content.children ?? [], children as Array<{ name?: string }>).catch(() => null)
+        await store.writeChildrenManifest!(parentLayerSig, (rich ?? thin) as typeof thin)
+      })()
+    })
+  }
+
+  freshenBranchesAfterPaint(out)
+  return out
+}
+
+/** Parent sigs whose pack this session already tried to enrich — one attempt
+ *  each, so a layer whose children have no local images doesn't re-mint on
+ *  every visit. */
+const _packUpgradeTried = new Set<string>()
+
+/** Re-mint a names-only manifest as a full pack (props + optimized visual per
+ *  child), off the render path. Silent no-op when the pack is already rich,
+ *  when the optimizer isn't registered, or when the re-mint can't complete —
+ *  the thin pack stays valid, it just keeps costing per-tile reads. */
+function upgradeThinPack(
+  parentLayerSig: string,
+  manifest: Array<{ sig: string; layer: { name?: string; [k: string]: unknown }; visual?: unknown }>,
+  childSigs: readonly string[],
+  store: { writeChildrenManifest?: (sig: string, m: Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }>) => Promise<void> } | undefined,
+): void {
+  if (!parentLayerSig || !store?.writeChildrenManifest || _packUpgradeTried.has(parentLayerSig)) return
+  const optimizerCtor = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ManifestOptimizerDrone') as {
+    buildEntries?: (sigs: readonly string[], layers: ReadonlyArray<{ name?: string }>) => Promise<Array<Record<string, unknown>> | null>
+    constructor?: { packNeedsVisuals?: (p: ReadonlyArray<unknown>) => boolean }
+  } | undefined
+  if (!optimizerCtor?.buildEntries) return
+  const needs = (optimizerCtor.constructor as { packNeedsVisuals?: (p: ReadonlyArray<unknown>) => boolean } | undefined)?.packNeedsVisuals
+  if (needs && !needs(manifest)) return
+  _packUpgradeTried.add(parentLayerSig)
+  const schedule = typeof (window as any).requestIdleCallback === 'function'
+    ? (cb: () => void) => (window as any).requestIdleCallback(cb, { timeout: 8_000 })
+    : (cb: () => void) => setTimeout(cb, 250)
+  schedule(() => {
+    void (async () => {
+      try {
+        const layers = manifest.map(e => e.layer)
+        const rich = await optimizerCtor.buildEntries!(childSigs, layers as ReadonlyArray<{ name?: string }>)
+        if (!rich || rich.length !== childSigs.length) return
+        await store.writeChildrenManifest!(parentLayerSig, rich as Array<{ sig: string; layer: { name?: string } }>)
+        for (const entry of rich) ShowCellDrone.adoptPackedVisual(entry as { visual?: { sig?: string; webp?: string; type?: string } })
+        console.log(`[preload] layer pack enriched: ${parentLayerSig.slice(0, 12)} (${rich.length} tiles bind from one file)`)
+      } catch { /* thin pack stays valid */ }
+    })()
+  })
+}
+
+export class ShowCellDrone extends Drone {
+  readonly namespace = 'diamondcoreprocessor.com'
+
+  public override description =
+    'Renders the hex grid — maps cells to coordinates, manages geometry, and syncs with the Nostr mesh.'
+  public override effects = ['render', 'network'] as const
+
+  // pixi resources (populated via render:host-ready effect)
+  private pixiApp: Application | null = null
+  private pixiContainer: Container | null = null
+  private pixiRenderer: Application['renderer'] | null = null
+
+  private layer: Container | null = null
+  private hexMesh: any | null = null
+
+  protected override deps = {
+    lineage: '@hypercomb.social/Lineage',
+    axial: '@diamondcoreprocessor.com/AxialService',
+    layout: '@diamondcoreprocessor.com/LayoutService',
+  }
+
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'clipboard:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply']
+  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'landing:pending']
+  private geom: Geometry | null = null
+  private shader: HexSdfTextureShader | null = null
+
+  private atlas: HexLabelAtlas | null = null
+  private imageAtlas: HexImageAtlas | null = null
+  private atlasRenderer: unknown = null
+
+  // cache: cell label → small image signature (avoids re-reading 0000 on every render)
+  private readonly cellImageCache = new Map<string, string | null>()
+
+  /** Head layer sigs whose canonical CONCLUDED "no properties" — the
+   *  derive-on-miss pass skips these instead of re-asking every render.
+   *  Keyed by HEAD SIG, so any edit (new head) re-derives automatically;
+   *  session-only, bounded by distinct propless heads seen. */
+  readonly #propslessHeads = new Set<string>()
+
+  /** Sigs with a detached host-fill in flight. Render passes NEVER await
+   *  the network (tile creation is a dequeue): a local miss paints
+   *  label-only NOW, and the full cascade (memory → OPFS → host,
+   *  miss-negative-cached in the Store) runs detached, re-rendering when
+   *  the bytes land. This set only prevents stacking duplicate fills for
+   *  the same sig while one is in flight. */
+  readonly #hostFillInFlight = new Set<string>()
+
+  /** Sigs whose detached host fill CONCLUDED without bytes (miss — the
+   *  Store negative-caches it). A sig in here renders bright label-only
+   *  (the terminal state) instead of readiness-shaded, so an image that
+   *  may never arrive can't leave its tile dimmed and inert forever.
+   *  Cleared when a later fill succeeds. */
+  readonly #fillMissedSigs = new Set<string>()
+
+  /** Labels rendered SHADED on the last geometry bake — content still
+   *  arriving (image or props fetch in flight). Mirrored to
+   *  TileOverlayDrone via render:cell-count.shadedLabels so shaded tiles
+   *  are inert to clicks; read locally to suppress the hover ring.
+   *  Bright means "preloaded — a click lands instantly". */
+  readonly #shadedLabels = new Set<string>()
+
+  /** Tiles a take has touched — lifted out of the swarm's standing shade
+   *  and stamped with WAND_TAKING_BORDER while their fold lands. Held until
+   *  the geometry is rebuilt; by then the landed fold paints them native. */
+  readonly #wandTakingLabels = new Set<string>()
+
+  /** The hideText tile currently under the pointer, if any. A tile that
+   *  hides its name gets it back for as long as it is hovered — nothing
+   *  else about the tile changes, and no other tile is touched. The reveal
+   *  is purely a label-UV flip (see #setHoverReveal), so the text returns
+   *  in its normal place with its normal backing band. */
+  #hoverRevealLabel: string | null = null
+
+  /** Last resolved TileSourceRegistry entries per location key — the
+   *  fallback a render pass uses when source resolution exceeds its
+   *  budget (see the bounded resolve in the render path). */
+  readonly #sourceEntriesCache = new Map<string, readonly TileSourceProjection[]>()
+
+  /** Budget for awaited tile-source resolution per render pass. Local
+   *  sources answer in single-digit ms; anything slower (a source mid
+   *  network cascade) renders from the cached entries and catches up via
+   *  a detached re-render. */
+  static readonly SOURCE_RESOLVE_BUDGET_MS = 250
+  /** For EXTERNAL (peer) labels: which publisher imageSig the cached value
+   *  was derived from. The publisher's CURRENT sig is authoritative — a
+   *  cache entry is only reusable while its source sig is unchanged, so a
+   *  stale or cross-contaminated entry can never pin a peer tile to the
+   *  wrong image. */
+  private readonly peerImageSourceByLabel = new Map<string, string>()
+  /** Publisher image sigs from TileSourceRegistry entries (config/snapshot
+   *  sources, e.g. DCP-adopted branches mounted in SOLO). Fallback source
+   *  for external cells when no live swarm publisher is present. */
+  private readonly registryImageByLabel = new Map<string, string>()
+  /** Full sanitized projection for whichever external/spotlit participant is
+   *  currently painting this identity. Images are only one field in it. */
+  private readonly registryPropertiesByLabel = new Map<string, Readonly<Record<string, unknown>>>()
+  /** Display titles for the selected participant variant. The map key remains
+   *  the fixed identity name, so changing this text never splits a stack. */
+  private readonly registryTitlesByLabel = new Map<string, Readonly<Record<string, string>>>()
+  /** Labels whose derived caches were last filled from an external participant
+   *  projection. If paste/adopt turns one local, every derived field must be
+   *  dropped before the local read—otherwise a peer border/tag/title can
+   *  survive even after image provenance was corrected. */
+  readonly #externallyPaintedLabels = new Set<string>()
+  // cache: cell label → tag names (avoids re-reading 0000 on every render)
+  private readonly cellTagsCache = new Map<string, string[]>()
+  // cache: cell label → border color RGB floats
+  private readonly cellBorderColorCache = new Map<string, [number, number, number]>()
+  // cache: cell label → has link property
+  private readonly cellLinkCache = new Map<string, boolean>()
+  // cache: cell label → is substrate-assigned image
+  private readonly cellSubstrateCache = new Map<string, boolean>()
+  // cache: cell label → hideText property (hide label when image shown)
+  private readonly cellHideTextCache = new Map<string, boolean>()
+
+  private lastKey = ''
+
+  private listening = false
+  private rendering = false
+  private renderQueued = false
+
+  private renderedCellsKey = ''
+  private renderedCount = 0
+
+  // The atlas eviction generations the CURRENT geometry buffer was baked
+  // against. Held BESIDE the cells key, never inside it — that is the whole
+  // point of the pair.
+  //
+  // A generation bump means "baked UVs in the buffer may now point at a slot
+  // that was wiped or handed to another label", and the only cure is a
+  // geometry rebuild (applyGeometry re-bakes and re-points every cell). While
+  // the generations lived inside buildCellsKey, the in-place fast paths —
+  // #repaintReadinessInPlace and #tryInPlaceCellUpdate, which recompute the
+  // WHOLE key after touching one attribute — ADOPTED a bump they had not
+  // acted on. The pending pass then found its key unchanged, took the
+  // early-return below, and the wiped slots were never re-baked: those tiles
+  // kept their label BAND with no name inside it (the shader gates the band
+  // on the UV rect, which is still valid — only the pixels behind it are
+  // gone). Same swallow for a retitle's invalidateLabel and for a pivot flip.
+  //
+  // Only applyGeometry's success path may write these. -1 = nothing baked yet.
+  #bakedImageAtlasGen = -1
+  #bakedLabelAtlasGen = -1
+
+  // Complete child membership, memoized by the PARENT layer's content sig:
+  // names + the subset that are branches (have their own children). Only a
+  // COMPLETE resolution is stored, so a warm re-render reads the full set —
+  // names AND branch-status — with ZERO per-child lookups, and a partial can
+  // never be cached. The parent's content sig is the perfect key: the child
+  // set cannot change without the sig changing, so an entry stays valid until
+  // the layer itself does. This is the "optimize once, read until the list
+  // changes" pattern — safe only because we gate on completeness before
+  // writing here.
+  readonly #completeChildNamesByParentSig = new Map<string, { names: string[]; branches: string[] }>()
+
+  /** How many prepared views to keep. Was 256 — smaller than the number of
+   *  locations a single neighbourhood warm prepares (512 nodes), so the memo
+   *  evicted views WHILE the preloader was still filling it and the same
+   *  resolutions were paid again on the next visit. An entry is a short array
+   *  of names keyed by an immutable content sig; keeping thousands costs a
+   *  rounding error of memory and is the difference between "preloaded once"
+   *  and "preloaded forever". */
+  static readonly #PREPARED_VIEW_CAP = 4096
+
+  /** Prepared-view sig → the location segments it was prepared for, joined.
+   *  Exists so an add/remove can invalidate the ANCESTOR entries it actually
+   *  affects instead of dropping every prepared view in the session (which is
+   *  what "click a tile, come back, and it's slow again" was made of). */
+  readonly #preparedViewPath = new Map<string, string>()
+
+  /** Drop prepared views whose location is an ancestor of (or equal to) the
+   *  segments where a child was just added or removed — those are the only
+   *  entries whose branch-status can have flipped. Everything else keeps its
+   *  preparation. Unknown segments fall back to the old blanket clear, which
+   *  is correct, just wasteful (legacy emitters that don't carry an address). */
+  #invalidatePreparedViewsFor(segments: readonly string[] | undefined): void {
+    if (!segments || segments.length === 0) {
+      this.#completeChildNamesByParentSig.clear()
+      this.#preparedViewPath.clear()
+      return
+    }
+    const path = segments.join('/')
+    for (const [sig, prepared] of [...this.#preparedViewPath]) {
+      // Ancestor-or-self: '' (root) is an ancestor of everything.
+      if (prepared === '' || path === prepared || path.startsWith(prepared + '/')) {
+        this.#completeChildNamesByParentSig.delete(sig)
+        this.#preparedViewPath.delete(sig)
+      }
+    }
+    // Entries with no recorded path predate the index — drop those, they are
+    // the only ones we cannot reason about.
+    for (const sig of this.#completeChildNamesByParentSig.keys()) {
+      if (!this.#preparedViewPath.has(sig)) this.#completeChildNamesByParentSig.delete(sig)
+    }
+  }
+  // Children-readiness shade. A branch tile stays shaded until the tiles INSIDE
+  // it (its direct children) all have their images present locally — an
+  // un-shaded branch means "click me, the inside is already loaded and bright".
+  // `#childrenReadyByLabel`: label → all direct children's images present-or-
+  // concluded. `#childImageSigsByParent`: parent layer sig → child label →
+  // that child's grandchild image sigs (structure is stable per parent sig, so
+  // it is resolved once and only byte-PRESENCE is re-checked each pass).
+  readonly #childrenReadyByLabel = new Map<string, boolean>()
+  // Branch label → the HEAD sig its view was prepared under (this location).
+  // Lets the label-atlas eviction handler find which released branch a
+  // displaced child name belongs to, so its rasterisation can be repaired
+  // during idle instead of at click time.
+  readonly #preparedHeadByLabel = new Map<string, string>()
+  readonly #childImageSigsByParent = new Map<string, Map<string, string[]>>()
+  #childReadinessInFlight = false
+  // Keep the promise, not only a flag: the history warmer and visible
+  // readiness pass often reach the same target together. Joining that work
+  // lets both callers observe the completed first-paint snapshot.
+  readonly #viewPrepInFlight = new Map<string, Promise<boolean>>()
+  // Click targets that are BAKED — children's images in the image atlas, their
+  // names in the label atlas. Bytes are not pixels: measured, a first entry
+  // with every byte local still cost ~147ms, of which ~106ms was rasterising 8
+  // labels and ~22ms decoding 8 images. Baked ahead, the same entry takes 12ms.
+  //
+  // KEYED BY THE TARGET'S HEAD SIG AND NEVER CLEARED. Content-addressed means
+  // baked once is baked everywhere, permanently — the atlases are global, so
+  // re-proving on the way back is pure loss. Keying this by LABEL and clearing
+  // it per visit is exactly what made a back-navigation re-shade tiles that
+  // were already resident.
+  readonly #bakeQueue: { headSig: string; sigs: string[]; names: string[] }[] = []
+  readonly #bakeQueued = new Set<string>()
+  #bakePumping = false
+  #readinessLocationKey = ''
+  // THE PASS'S OWN ADDRESS, stamped by the render pass that produced the cells
+  // and consumed verbatim by the readiness compute. Readiness must never
+  // re-read lineage: currentSig, explorerSegments and the cursor update at
+  // different moments, so a compute that reads them itself can straddle two
+  // locations — which wiped the revisit memo and stranded tiles shaded. One
+  // source, captured once, carried through.
+  #passLocSig = ''
+  #passParentSig = ''
+  #passSegments: readonly string[] = []
+  // Addresses of places already visited: path → location sig, location sig →
+  // the head it was painted under. Lets a back-navigation seed its readiness
+  // SYNCHRONOUSLY, before the first frame — resolving it asynchronously showed
+  // as a flash of shade on a page that was already proven.
+  readonly #locSigBySegments = new Map<string, string>()
+  readonly #parentSigByLocSig = new Map<string, string>()
+  // The tile under the pointer, shown opaque while hovered (never proof).
+  #hoverOpaqueLabel: string | null = null
+  // Readiness memo across visits, keyed by LOCATION (segments join — known
+  // SYNCHRONOUSLY in the render pass, unlike the async parent sig): a
+  // revisited page seeds ready on its FIRST frame when the exact target assets
+  // are still resident. Each entry records the parentLayerSig it was proven
+  // under — the compute drops it when the head moved, and seeding rejects only
+  // targets whose own label/image slots were evicted.
+  readonly #readyByLocation = new Map<string, {
+    parentSig: string
+    labels: Set<string>
+    /** Branch label -> the exact prepared view and images whose residency
+     *  earned readiness. This makes invalidation content-specific: an atlas
+     *  eviction elsewhere cannot make Dolphin cold, while eviction of one of
+     *  Dolphin's own names/images does. */
+    targets: Map<string, { headSig: string; imageSigs: string[] }>
+  }>()
+  // Stable brightness per location visit. Ordinary props/branch churn cannot
+  // dim a proven tile; only losing part of its exact prepared click target
+  // revokes the proof until the repair bake restores it.
+  readonly #brightLabels = new Set<string>()
+  // Usage-ordered, bounded child-image warm queue. Missing child images are
+  // fetched a few at a time IN PRIORITY ORDER — never a simultaneous blast —
+  // so tiles complete (and un-shade) incrementally, most-used first.
+  readonly #childWarmQueue: string[] = []
+  readonly #childWarmQueued = new Set<string>()
+  #childWarmActive = 0
+  static readonly #CHILD_WARM_CONCURRENCY = 4
+  // Click-target pre-bake: after a view settles, the visible branches' CHILD
+  // images (what a click would paint) are decoded into the atlas during idle
+  // — first visit ≈ revisit. Pure opportunism over local bytes: no network,
+  // no user-visible state, a dropped bake just means the click decodes as it
+  // does today. The queue is superseded (gen) by every fresh walk; the
+  // The queue is rebuilt from live residency whenever a location is painted.
+  // Do not time-suppress a return: navigation supersedes the old queue, so a
+  // cooldown here creates a period in which nobody resumes the canceled work.
+  readonly #prebakeQueue: string[] = []
+  readonly #prebakeQueued = new Set<string>()
+  #prebakeGen = 0
+  #prebakeInFlight = false
+  #prebakePumping = false
+  // Click targets baked per location. Cut to 32 on the theory that the layer
+  // pack now carries a destination's visuals in one read, so pre-baking was
+  // only a head start. That theory holds for packs that HAVE visuals — an
+  // existing hive's packs are names-only, so the cut just meant every click
+  // paid its own decode. Restored; the deferral below is what keeps the
+  // current view ahead of the queue, not a small cap.
+  static readonly #PREBAKE_MAX_PER_LOCATION = 128
+  static readonly #PREBAKE_PER_SLICE = 2
+  // Below this, a raw source decodes in ~a millisecond anyway — deriving a
+  // cell-sized copy would spend the optimize phase on images with nothing
+  // to gain. Byte size is a heuristic for pixel count, deliberately loose.
+  static readonly #VISUAL_DEMAND_MIN_BYTES = 24_576
+  #readinessRepaintTimer: ReturnType<typeof setTimeout> | null = null
+  // Bumped on every `navigate`: an in-flight compute for the location the
+  // user just LEFT is stale — it must stop (it holds the in-flight guard)
+  // and above all must never SEED (seeding from a stale run wipes the
+  // CURRENT location's released state — the "stuck shaded forever" bug).
+  #readinessGen = 0
+  #readinessNavHooked = false
+  #computeRetryQueued = false
+  // Per-gate-key count of consecutive INCOMPLETE child resolutions. Bounds
+  // the completeness gate so a genuinely-absent child (corrupt / deleted /
+  // never-synced) can't hold the canvas blank forever — after the budget
+  // the render paints best-effort.
+  readonly #incompleteResolveAttempts = new Map<string, number>()
+  // Gate keys (parent content sig) that exhausted the retry budget. Once a
+  // layer is declared unresolvable it paints best-effort and stops gating,
+  // so a permanently-missing child can't thrash the render loop. A new
+  // parent sig (content changed) gates fresh.
+  readonly #resolveGateExhausted = new Set<string>()
+  static readonly #RESOLVE_GATE_MAX_ATTEMPTS = 12
+  // Per-parent-sig count of consecutive renders whose branch-STATUS (does a
+  // child have its own children?) came back on a cold pool miss. Unlike the
+  // name gate this NEVER holds the paint — tiles show immediately — it only
+  // schedules a bounded re-render so a branch dot that was cold at first paint
+  // fills in THIS visit instead of waiting for an unrelated event. Bounded so a
+  // genuinely-unreadable child head can't thrash the render loop.
+  readonly #branchColdRetries = new Map<string, number>()
+  static readonly #BRANCH_COLD_MAX_RETRIES = 6
+  // Locations whose last paint included unavailable-placeholders (gate
+  // exhausted with unresolved children). Their back-nav cell caches are
+  // dropped on re-arm (content:arrived / miss-window expiry) so a heal
+  // never restores a stale placeholder set from the fast path.
+  readonly #placeholderLocations = new Set<string>()
+  // Per-location dedupe of `content:missing` emissions — the sorted sig
+  // list of the LAST emission. Consecutive identical sets don't re-emit;
+  // a complete resolution clears the entry so a later regression does.
+  readonly #missingEmitKeyByLocation = new Map<string, string>()
+  // Single coalesced miss-window re-arm timer (never a polling loop).
+  // Armed from a placeholder paint when the ContentBrokerDrone reports a
+  // future missUntil for an unresolved sig; fires ONE re-render shortly
+  // after the earliest expiry. A pass that is still incomplete re-arms
+  // for the next window, so healing follows the broker's own cadence.
+  #missWindowTimer: ReturnType<typeof setTimeout> | null = null
+  #missWindowFireAt = 0
+
+  private lineageChangeListening = false
+
+  // incremental rendering state — tracks what's currently painted (geometry cache)
+  private readonly renderedCells = new Map<string, Cell>()
+  // When true, a takeover feature (e.g. the screensaver bounce mode) owns the
+  // screen: the hive layer is hidden and synchronize-driven renders short-
+  // circuit so nothing flips it back. Cleared via render:set-hive-visible.
+  #hiveHidden = false
+
+  /** A lightweight snapshot of the tiles currently painted at this node —
+   *  axial coords, label, image signature, and whether text is suppressed.
+   *  Used by takeover features (screensaver) that need the visible tile set,
+   *  what each tile shows, and where it sits, without reaching into render
+   *  internals. */
+  /** The location whose tiles the mesh currently shows ('' before the
+   *  first paint). view.bee holds a departing arrival face up until this
+   *  catches up with the lineage, so the hexagon reveal always shows the
+   *  DESTINATION's grid — never the previous page's mesh, never a blank
+   *  field mid-stream. */
+  public get paintedLocationKey(): string { return this.renderedLocationKey }
+
+  /** The ViewMode service we are listening to, so dispose can let go. */
+  #viewModeSource: EventTarget | null = null
+
+  /** BACK ON THE HEXAGONS. Make sure the tiles under the surface are THIS
+   *  location's, and painted. Any other mode is a takeover mounting — it
+   *  owns the screen, and the arrival gate orders its paint.
+   *
+   *  The FORCE is the whole point: closing a view usually leaves the
+   *  location alone, so without it the pass is dropped as an unchanged
+   *  page and the empty field stays empty. While the hive is deliberately
+   *  hidden (the screensaver's takeover) this stands aside — that owner
+   *  restores its own visibility, and un-hiding here would tear a hole in
+   *  its screen. */
+  readonly #onViewModeChange = (event: Event): void => {
+    const mode = String((event as CustomEvent<{ mode?: string }>).detail?.mode ?? '')
+    if (mode !== HEXAGONS_SURFACE || this.#hiveHidden) return
+    const currentKey = String(this.resolve<any>('lineage')?.explorerLabel?.() ?? '/')
+    if (this.renderedLocationKey && currentKey !== this.renderedLocationKey) {
+      this.clearMesh('left a view standing somewhere else — drop the stale tiles before the repaint')
+    }
+    if (this.layer) this.layer.visible = true
+    this.#forceNextRender = true
+    this.requestRender()
+  }
+
+  public snapshotCells(): { q: number; r: number; label: string; imageSig?: string; hideText?: boolean }[] {
+    return [...this.renderedCells.values()].map(c => ({ q: c.q, r: c.r, label: c.label, imageSig: c.imageSig, hideText: c.hideText }))
+  }
+  // per-layer cache: location key → cells array (for instant back-navigation)
+  #layerCellsCache = new Map<string, { cells: Cell[]; cellNames: string[]; localCellSet: Set<string>; branchSet: Set<string> }>()
+  // per-layer viewport snapshot cache — skips OPFS read of `0000` on back-nav fast path.
+  // Safe to keep across cell-content changes; only the persisted viewport of another
+  // layer can write here, and the SPA can't reach that layer without revisiting.
+  #layerViewportCache = new Map<string, ViewportSnapshot>()
+  // Prepared first visits skip the slow navigation path, so preserve the
+  // adopted-content fit decision alongside the prepared empty viewport. The
+  // fast path consumes the marker exactly once before its first paint.
+  #preparedFirstVisitFit = new Set<string>()
+  // per-layer explorerDir cache — skips OPFS directory resolution on back-nav fast path.
+  // Entries are keyed by locationKey, so path renames produce a different key and the
+  // stale handle simply goes unreferenced.
+  #layerDirCache = new Map<string, FileSystemDirectoryHandle>()
+  #heatByLabel = new Map<string, number>()
+  #flashLabels = new Set<string>()
+  #flashTimer: ReturnType<typeof setTimeout> | null = null
+  // newly created tiles glow briefly so the user can spot them, then fade
+  #newCellFadeStart = new Map<string, number>()
+  #newCellFadeRaf = 0
+  static readonly #NEW_CELL_FADE_MS = 2500
+  #translatingLabels = new Set<string>()
+  #translationPulseTimer: ReturnType<typeof setInterval> | null = null
+  private streamActive = false
+  // Monotonic stream token. Every call to streamCells captures the current
+  // value; if the renderer starts a new stream (layer switch) it increments
+  // the token, so any batch still awaiting in the old stream sees a
+  // mismatch on its next iteration and bails out. Using a number here
+  // instead of a boolean "cancel" flag is load-bearing: the old flag was
+  // reset to false by the incoming stream's synchronous prelude before
+  // the outgoing stream's next iteration ever observed it, so the
+  // outgoing stream kept running — wrote its (stale) cells into the
+  // shared mesh, and poisoned #layerCellsCache under the new layer's
+  // key. The counter cannot be clobbered: once bumped, it never goes
+  // back.
+  #streamToken = 0
+  // Set at the top of renderFromSynchronize, cleared at the end. Catches
+  // duplicate calls for the same target while the first one is still
+  // running. The fast path doesn't set streamActive, so the streamActive
+  // check alone misses these — back-nav was running its body twice per
+  // click because of the popstate→navigate→lineage-change cascade.
+  #activeRenderTarget: string | null = null
+  // Set by invalidation effects (e.g. swarm:resource-arrived) that fire
+  // while a render may be in flight. Without it, the in-flight render
+  // writes a fresh renderedCellsKey on completion, and the queued
+  // re-render hits the fast-path skip below because renderedCellsKey is
+  // no longer empty. Honoring this flag in the fast-path check (and
+  // clearing it once we proceed) makes the invalidation survive the race.
+  #forceNextRender = false
+  private renderedLocationKey = ''
+  /** Owner of the label-keyed derived caches. Labels are only unique inside a
+   * lineage: `/friends/jaime` and `/team/jaime` may select different atomic
+   * variants from the same name pool. Crossing this boundary must drop every
+   * label derivation before either the slow or back-nav path can consult it. */
+  #derivedLocationKey = ''
+  /** Warm label projections by lineage. Location changes must isolate raw
+   * label keys without discarding the work already prepared for a revisit. */
+  #derivedStateByLocation = new Map<string, LabelDerivedState>()
+  #axialToIndex = new Map<string, number>()
+  #heartbeatInitialized = false
+  #lastHeartbeatKey = ''
+  #accentColor: [number, number, number] = [0.4, 0.85, 1.0]
+
+  // hex geometry (circumradius, gap, pad, spacing) — configurable via render:set-gap effect
+  #hexGeo: HexGeometry = DEFAULT_HEX_GEOMETRY
+
+  // hex orientation: 'point-top' (default) or 'flat-top'
+  #flat = false
+  #pivot = false
+  #textOnly = false
+  #labelsVisible = true
+
+  /** Does a tile's `hideText` mark actually hide its name right now?
+   *  Only ever when the image it hides BEHIND is on screen: an image that
+   *  never landed hid nothing, and TEXT-ONLY mode draws no images at all —
+   *  there the mark has nothing to hide behind, so every tile shows its
+   *  name back, per-tile setting or not. The single answer for every
+   *  labelUV write site (bake, in-place update, hover reveal). */
+  #hidesName(hideText: boolean | undefined, imagePresent: boolean): boolean {
+    return !!hideText && imagePresent && !this.#textOnly
+  }
+  /** Rows the hovered tile's label band must hold (overlay:band-rows). Held as
+   *  drone state, not just pushed at the shader, because a render pass can
+   *  REBUILD the shader — and the overlay only re-lays-out when the hovered hex
+   *  changes, so it would not re-send. Without this the band silently reverted
+   *  to one row under two rows of icons, which read as icons floating outside
+   *  their background above and below. Restored with the other uniforms on
+   *  every pass; see the setFlat/setPivot block in applyGeometry. */
+  #bandRows = 1
+  /** The tile #bandRows was computed FOR. A row count is only ever true of one
+   *  tile, so it is stored with its owner and pushed at the shader only while
+   *  that tile is the hover (#applyBandRows). Navigating in used to carry the
+   *  LEAVING tile's count into the arriving level — a band drawn for one icon
+   *  row under a tile whose icons wrapped to two, which reads as the rows
+   *  collapsing the moment you go inside. */
+  #bandRowsLabel: string | null = null
+  /** Push the band height at the shader. The ONE place that decides it: the
+   *  stored count applies only to the tile it was computed for, and any other
+   *  tile — including one that merely shares a name with a tile on the level we
+   *  just left — gets the resting single row. Called from every path that can
+   *  change either half of that pair (row count, hover, geometry rebuild). */
+  #applyBandRows(): void {
+    const owned = this.#hoverRevealLabel !== null && this.#bandRowsLabel === this.#hoverRevealLabel
+    this.shader?.setBandRows(owned ? this.#bandRows : 1)
+  }
+  /** Put the hover on `label` (null = nothing hovered): the name reveal, the
+   *  band height, the lit cell and its shade lift. ONE path, so the band and
+   *  the icons can never end up describing different tiles — whichever message
+   *  carried the news. A shaded tile is NOT out of reach: hovering it lifts the
+   *  shade and lights its ring like any other, because "this isn't loaded yet"
+   *  must never become "you may not go here". */
+  #applyHover(label: string | null): void {
+    this.#setHoverReveal(label)
+    this.#applyBandRows()
+    if (!this.shader) return
+    this.shader.setHoveredIndex(label !== null ? this.#labelToIndex.get(label) ?? -1 : -1)
+    this.#setHoverOpaque(label)
+  }
+  #substrateFadeStart: number | null = null
+  #substrateFadeRaf = 0
+  // Launcher motion (the games march) — a per-tile float driven in the vertex
+  // shader (u_time + u_driftAmp). Active only on launch-group aggregator pages;
+  // a single rAF advances the clock, geometry is never rebuilt.
+  #driftRaf = 0
+  #driftActive = false
+  #driftStart = 0
+  // Portal shimmer clock — advances u_time while a reference/portal tile is
+  // hovered so its magical hover animates on an otherwise-static hive page. It
+  // shares the u_time uniform and #driftStart origin with launcher drift; only
+  // one drives the clock at a time (drift wins on launcher pages, where u_time
+  // is already ticking, so the shimmer rides it for free).
+  #portalShimmerRaf = 0
+  #portalShimmerActive = false
+  #showHiddenItems = false
+  #currentHiddenSet = new Set<string>()
+  // World mode (control-bar toggle): when on, tiles that are NOT public
+  // render dimmed (a "what you're sharing" preview). It never removes tiles —
+  // everything stays visible, unshared ones just dim.
+  #worldMode = (() => {
+    try { return localStorage.getItem('hc:world-mode') === '1' } catch { return false }
+  })()
+  // Names of cells in the current render that came from an ephemeral
+  // tile source (sync preview, not adopted to OPFS). Used by the pinned
+  // index writer to skip per-cell OPFS writes that would NotFound, and
+  // by the pixi draw path to apply the dashed-accent preview style.
+  // Cleared and rebuilt on each renderFromSynchronize.
+  #ephemeralCellSet = new Set<string>()
+
+  // A reference composition borrows the ordinary tile renderer without
+  // joining the layer yet. It therefore looks and sits exactly like the tile
+  // that Save will commit, while remaining disposable on Cancel.
+  #referenceDraft: ReferenceDraftPreview | null = null
+
+  // Names of cells in the current render that came from a swarm peer
+  // (kind:'peer' from TileSourceRegistry). Treated like ephemeral for
+  // visual treatment, but additionally surfaced as branches so a click
+  // navigates into them — that's the "browse a peer's tree without
+  // adopting first" path. The new lineage's swarm subscription picks
+  // up whatever the peer is publishing at the deeper level (if any),
+  // and the user can add normally from there to mint local tiles.
+  #peerCellSet = new Set<string>()
+
+  // Per-label pubkey of the peer that contributed each peer-kind tile.
+  // Populated alongside #peerCellSet; the spotlight render hook reads
+  // this to decide which tiles to glow when a peer is active. Cleared
+  // and rebuilt on each renderFromSynchronize pass.
+  #peerPubkeyByLabel = new Map<string, string>()
+
+  // Participant filter — selected peer pubkeys mirrored from the
+  // `swarm:filter` effect (SwarmFilterService owns the truth). Empty =
+  // no filter. The AUTHORITATIVE filter runs at the source
+  // (swarm.drone #registerTileSource, pre-registry-dedup); the render
+  // pass re-applies it as belt-and-braces against a stale
+  // #sourceEntriesCache in the frame a toggle lands.
+  #participantFilter = new Set<string>()
+
+  // Per-session in-memory slot assignment cache. Once a tile is placed
+  // via score-based logic (or any other path), its slot is remembered
+  // here so later renders — including pan-triggered re-renders — re-use
+  // the same slot regardless of viewport changes.
+  //
+  // User-spec rule: indexes are fixed; tiles never relocate on pan,
+  // only on manual reorganize. The on-disk index persistence path is
+  // async and can race a rapid pan; this cache fills the gap so
+  // anything once placed stays put for the session.
+  //
+  // Cleared on location change (different lineage = different cell
+  // set; stale cache entries get caught by the sparse-slot-occupied
+  // check anyway, but a fresh cache per location avoids leaks).
+  #sessionSlotByLabel = new Map<string, number>()
+
+  // Currently spotlit peer pubkey (from SpotlightService), or null
+  // when no layer is surfaced. Subscribed on the first heartbeat so
+  // the service is registered by then. Render reads this in
+  // buildCellsFromAxial to override borderColor for matching tiles.
+  #spotlightPubkey: string | null = null
+
+  // Labels rendering the SPOTLIT participant's version of a tile you
+  // also hold. Under superimposition a peer's `notes` is not a second
+  // tile beside yours, it is the same tile seen through their layer —
+  // so while their layer is surfaced these labels ride the external
+  // path (their streamed image, no local prop reads) even though the
+  // name is in localCellSet. Empty whenever no peer is spotlit.
+  #stackVariantLabels = new Set<string>()
+
+  // Depth of each label's participant stack (1 = only one of you holds
+  // it). Read by the GPU write loop to mark tiles that have versions
+  // underneath, so multiplicity is visible BEFORE you roll.
+  #stackDepthByLabel = new Map<string, number>()
+
+  // mesh scoping — space + secret feed into the signature key
+  #space = ''
+  #secret = ''
+
+  // Public/swarm mode. When on, EVERY tile is navigable (you can drill
+  // into an empty tile to explore / invite others), unlike private mode
+  // where only branch tiles — ones that already have children — open on
+  // click. Mirrors the master privacy switch (`hc:mesh-public`) and is
+  // kept live via the `mesh:public-changed` effect.
+  #publicMode = (() => {
+    try { return localStorage.getItem('hc:mesh-public') === 'true' } catch { return false }
+  })()
+
+  // Per-tile presence glow (0..1), keyed by child name. Reflects how many
+  // peers are currently inside (or entering) each child location at the
+  // current swarm sig: a tile someone is exploring glows, and the glow
+  // gets stronger the more people are there. Folded into the SDF heat
+  // ring in buildCellsFromAxial. Rebuilt by #refreshPresenceGlow on every
+  // render and whenever swarm interest changes. Empty in private mode.
+  #presenceGlowByLabel = new Map<string, number>()
+
+  // note: mesh cell state (derived on heartbeat)
+  private meshSig = ''
+  private meshCellsRev = 0
+  private meshCells: string[] = []
+
+  #lastCursorPosition = -1
+  #lastCursorRewound = false
+  #lastCursorLocationSig = ''
+  private meshSub: MeshSub | null = null
+  private readonly publisherId: string = (() => {
+    const key = 'hc:show-honeycomb:publisher-id'
+    try {
+      const existing = String(localStorage.getItem(key) ?? '').trim()
+      if (existing) return existing
+
+      const next = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+        ? crypto.randomUUID()
+        : `pub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+
+      localStorage.setItem(key, next)
+      return next
+    } catch {
+      return `pub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+    }
+  })()
+  private snapshotPostedBySig = new Set<string>()
+  private lastLocalCellsBySig = new Map<string, string[]>()
+  private lastPublishedGrammarSig = ''
+  private lastPublishedGrammarCell = ''
+
+  // lease renewal: periodic refresh to keep tiles alive for late joiners
+  #lastRefreshAtMs = new Map<string, number>()
+  // sync-request: one-shot per sig arrival
+  #syncRequestedBySig = new Set<string>()
+  // rate-limit triggered republishes from sync-requests
+  #lastTriggeredRepublishAtMs = new Map<string, number>()
+
+  private filterKeyword = ''
+  private filterTags = new Set<string>()
+  /** Marks a REFERENCE demands of what it shows, in force while the participant
+   *  stands inside what that reference points at (see
+   *  reference-requirement.drone). A SECOND source, deliberately not merged into
+   *  `filterTags`: the participant's lens is OR-semantics (a cell matching ANY
+   *  active mark shows), so folding a requirement in would BROADEN the page
+   *  instead of narrowing it — the exact opposite of what a requirement means.
+   *  The two sets are ANDed instead: satisfy the lens (if any) AND the
+   *  requirement (if any). Never listed, never toggleable — a requirement is
+   *  part of the reference's identity, not lens state. */
+  #requiredTags = new Set<string>()
+  /** How wide a tag filter reaches: 'local' = current page only, 'children' =
+   *  the current subtree, 'global' = the whole hive. Defaults to 'local'. */
+  #filterScope: 'local' | 'children' | 'global' = 'local'
+  /** Flat list of matches from the cross-page tag scan. null = normal mode.
+   *  `dir` is null under the layer model (sub-locations have no on-disk folder).
+   *  `path` is the ABSOLUTE lineage of the match — a flattened tile can live
+   *  anywhere, so entering it must goRaw(path); appending the label to the
+   *  current location would mint a phantom segment. `hasChildren` is structural
+   *  truth (drives the branch flag); `matchesInside` counts matches strictly
+   *  below it, which is what the filter would show if you entered — 0 means
+   *  entering lands on an empty mesh, so the click is refused instead. */
+  #tagFlattenResults: {
+    label: string
+    dir: FileSystemDirectoryHandle | null
+    path: string[]
+    hasChildren: boolean
+    matchesInside: number
+  }[] | null = null
+  /** Absolute path per flattened label — handed to tile-overlay so a click
+   *  travels to the match's real location instead of appending its name. */
+  #flatPathByLabel = new Map<string, string[]>()
+  /** Flattened labels whose subtree holds no match under the active filter.
+   *  tile-overlay refuses entry and toasts rather than opening a blank page. */
+  #filterBlockedLabels = new Set<string>()
+  /** Lineage the scan last ran from — re-scan when the location moves under a
+   *  live filter, which is what makes the filter FOLLOW you as you drill in. */
+  #filterScanKey: string | null = null
+  /** A GATHERED SET — tiles handed to us by name and absolute path rather than
+   *  found by a predicate, painted through the same flatten machinery. This is
+   *  the "show me these, wherever they live" lane (the agent audit uses it):
+   *  nothing is committed, no layer is minted, and it is gone the moment the
+   *  participant walks anywhere — a gathered view is a look, not a place. */
+  #gathered: { label: string; path: string[] }[] | null = null
+  /** Identity of the current gather, so a different set rebuilds the geometry. */
+  #gatherKey = ''
+  /** Where the gather was raised. Leaving clears it (see the render path). */
+  #gatherAnchorKey = ''
+  /** Where the filter was switched on. A global filter reads the whole hive
+   *  from the root only while you stand here; once you enter a match the walk
+   *  re-roots to the current location (otherwise every level would show the
+   *  identical global flatten and entering would be a no-op). */
+  #filterAnchorKey: string | null = null
+  /** Saved lineage segments before entering tag filter — restored when filter clears. */
+  #preFilterSegments: string[] | null = null
+  private moveNames: string[] | null = null
+  #divergenceFutureAdds = new Set<string>()
+  #divergenceFutureRemoves = new Set<string>()
+  #pendingRemoves = new Set<string>()
+  /** Optimistic additions are already on screen while their history commit
+   *  drains. They remain visibly shaded/inert until that commit settles.
+   *  Failure is followed by a compensating cell event from LayerCommitter,
+   *  so the UI never waits to learn whether it was allowed to change. */
+  #pendingCellMutations = new Set<string>()
+  /** Tiles staged to lose the keyword being removed (TagRemovalDrone). They
+   *  render as a future-remove — struck through, as if the pheromone were
+   *  already gone — while the participant builds the list. Nothing is written
+   *  until the commit, so this is pure intent, cleared on cancel. */
+  #tagRemovalStaged = new Set<string>()
+  /** Tiles painted so far by the armed pheromone brush (PheromoneTilesDrone).
+   *  The mirror of the staged-removal set: those tiles are losing a keyword and
+   *  render as future-removes, these just GAINED one and render as future-adds.
+   *  Without it painting is blind — the click writes and nothing on the hive
+   *  says so. Cleared when the brush is put down. */
+  #tagApplyPainted = new Set<string>()
+  /** ── Pheromone preview (hover a mark → its tiles light up) ──────────────
+   *  The marks under the cursor somewhere in the chrome, and the labels on
+   *  THIS page that carry any of them. Wholly transient: the carriers are
+   *  painted straight into the divergence buffer as the value 3 and nothing
+   *  else ever writes or persists that value — no Cell record holds it, so
+   *  clearing the preview is a restore from the records, not a recomputation.
+   *  A hover must not cost a render pass, hence the in-place attribute push. */
+  #markPreviewMarks: string[] = []
+  #markPreviewLabels = new Set<string>()
+  #markPreviewColor: [number, number, number] = [0.55, 0.85, 1.0]
+  /** THE BOUQUET IN HAND (`tags:apply-pending`) — the STANDING sibling of the
+   *  hover preview above, riding the same buffer flag and the same u_markPreview
+   *  ramp. Opposite matching rule, deliberately: a hover asks "who carries ANY
+   *  of these?" and lights them; the armed bouquet asks "who already wears ALL
+   *  of it?" — those stay lit as settled ground, and every tile still missing
+   *  part of the set recedes, which is exactly the set a click will scent
+   *  (TileOverlayDrone's takeover asks the same question). A live hover
+   *  outranks it while it lasts; ending the hover falls back to this. */
+  #armedApplyMarks: string[] = []
+  #armedApplyColor: [number, number, number] | null = null
+  /** A pheromone (or a whole bouquet) is being DRAGGED out of the panel
+   *  (`drop:dragging {marks, color}`). Same treatment and same ALL-match rule
+   *  as the armed bouquet, for the length of the drag: where the drop would DO
+   *  something is shaded before anything is released. Outranks both the hover
+   *  preview and the armed set while it lasts. */
+  #dragShadeMarks: string[] = []
+  #dragShadeColor: [number, number, number] | null = null
+  /** 0..1 ramp — the whole treatment fades in and out (see u_markPreview). */
+  #markPreviewK = 0
+  #markPreviewTarget = 0
+  #markPreviewRaf = 0
+  /** The geometry the carrier flags were painted into. A rebuild (a repaint, a
+   *  navigation, a warm-mesh swap) makes a NEW buffer with the baked values, so
+   *  the preview repaints itself when this stops matching — one reference
+   *  compare per frame, and no hook into the render path. */
+  #markPreviewGeom: unknown = null
+  /** When cursor is rewound, holds cell→propertiesSig overrides from content-state ops. */
+  #cursorPropsOverride: Map<string, string> | null = null
+  /** Cache key for cursor-time reconstruction: `{locationSig}:{position}` — avoids redundant OPFS reads */
+  #cursorReconstructionKey = ''
+  // One-shot recenter flag. Default false — data operations (move,
+  // add, remove, reorder) NEVER autocenter. The page-nav path sets
+  // this to true when it wants the next applyGeometry pass to recenter
+  // the mesh on its bounds; applyGeometry consumes it (clears it back
+  // to false after firing). The empty→populated viewport-zoom branch
+  // gates on the same flag.
+  #pendingRecenter = false
+  // Last mesh offset captured when clearMesh destroyed the previous
+  // hexMesh. The fresh mesh created by applyGeometry restores this
+  // offset (when no recenter is pending) so the empty→non-empty
+  // transition during a cursor-driven undo/redo doesn't snap content
+  // back to (0,0) — tiles render at the same world position as before.
+  #lastMeshOffset: { x: number; y: number } | null = null
+  // Saved mesh offset awaiting hexMesh creation (set by
+  // #applyViewportFromSnapshot when called before applyGeometry has
+  // built the mesh — first render after refresh, deep-link load,
+  // post-clearMesh rebuild). Consumed once when the new mesh is created.
+  #pendingMeshOffsetRestore: { x: number; y: number } | null = null
+  // When the saved zoom is a fit (snap.zoom.fit), we can't apply its
+  // (cx, cy) directly — those were derived from the safe area at save
+  // time and would leave content shrunk in the new viewport. Set this
+  // flag in #applyViewportFromSnapshot and consume it after
+  // applyGeometry, so the refit runs against valid mesh bounds.
+  #pendingFitRestore = false
+  #layoutMode: 'dense' | 'pinned' = 'dense'
+
+  // First-visit fit (adopted content): the first time the participant opens a
+  // location inside a branch they adopted — the adopted root or any page
+  // beneath it, with no saved viewport yet — frame it to its own content. The
+  // fit runs in applyGeometry BEFORE the layer is revealed, so tiles appear
+  // already sized (no render-then-resize "creep"), and it persists with
+  // source 'user' so it fires exactly once: subsequent visits restore the
+  // saved viewport like any normal sticky location (or the user's later
+  // pan/zoom edits).
+  #pendingFirstVisitFit = false
+
+  // cached render context for fast move:preview path (avoids full OPFS re-read)
+  private cachedCellNames: string[] | null = null
+  private cachedLocalCellSet: Set<string> | null = null
+  private cachedBranchSet: Set<string> | null = null
+
+  // Arranging is optimistic: the sequence controller moves the live mesh
+  // first, then persists each tile's index in the background. Keep those
+  // temporary sparse slot maps per location so an in-flight save cannot
+  // rearrange a different page after navigation.
+  readonly #arrangePreviewNames = new Map<string, string[]>()
+
+  // State machine for slot ordering — the authoritative source of cellNames
+  // during incremental updates. Seeded after every full render; mutated via
+  // add()/remove() by incremental paths. Encapsulates dense vs pinned logic.
+  readonly #slots = new CellSlots()
+
+  // Coalesce rapid cell:added / cell:removed events fired in the same JS turn.
+  // The handlers mutate #slots synchronously; a single microtask runs one
+  // applyGeometry at the end of the turn. Zero awaits in the click path.
+  // Pending incremental adds carry the SEGMENTS captured synchronously at
+  // event time — the microtask defer below plus #placePinnedCell's write
+  // must never re-read live lineage (a navigation in that window pinned
+  // the new cell's index against the WRONG location's layer).
+  #pendingAdds: { name: string; segments: readonly string[] }[] = []
+  #pendingRemovals: string[] = []
+  #incrementalScheduled = false
+
+  // Phase 2: buffer references + label→index map for in-place cell attribute updates
+  // (used by tile:saved fast path — mutate slices and push to GPU without rebuilding geometry)
+  #buf: {
+    pos?: Float32Array
+    labelUV?: Float32Array
+    imageUV?: Float32Array
+    hasImage?: Float32Array
+    heat?: Float32Array
+    identityColor?: Float32Array
+    branch?: Float32Array
+    borderColor?: Float32Array
+    divergence?: Float32Array
+    shaded?: Float32Array
+  } = {}
+  #labelToIndex = new Map<string, number>()
+
+  private readonly onSynchronize = (): void => {
+    this.requestRender()
+  }
+
+  private readonly onLineageChange = (): void => {
+    this.requestRender()
+  }
+
+  private readonly onNavigate = (): void => {
+    this.requestRender()
+  }
+
+  private readonly adoptHostPayload = (payload: HostReadyPayload): void => {
+    this.pixiApp = payload.app
+    this.pixiContainer = payload.container
+    this.pixiRenderer = payload.renderer
+    this.requestRender()
+  }
+
+  /** Pre-warm: preheat every known tile-props blob and its `small.image`
+   *  resource so first paint finds them hot in the Store cache. Runs once
+   *  after registration, before the first pulse. Best-effort. */
+  /**
+   * WARM THE PROPS. LET THE IMAGES ARRIVE AT IDLE.
+   *
+   * The props blobs stay warm and awaited: they are the map from a tile to its
+   * `small.image`, they are under a kilobyte each, and the render path is
+   * measurably NOT tolerant of finding them cold — gutting this warm entirely
+   * left tiles painting with no picture at all, which is the very complaint
+   * this work started from.
+   *
+   * The IMAGES are a different animal. Preheating every `small.image` in the
+   * hive read 41.7 MB before first paint (native boot IO census, real hive) to
+   * draw NINE tiles, and the renderer's own reads queued behind the flood. The
+   * bytes a visible tile needs are read by the render path itself; this warm
+   * only ever helped tiles the user had not navigated to. So it yields —
+   * `requestIdleCallback`, four at a time — and the first paint stops paying
+   * for pictures nobody is looking at yet.
+   */
+  public override async warmup(): Promise<void> {
+    try {
+      const raw = localStorage.getItem('hc:tile-props-index')
+      if (!raw) return
+      const propsIndex = JSON.parse(raw) as Record<string, unknown>
+      // Full-lineage (sig) keys aren't labels — only legacy bare-label
+      // entries can seed the atlas's label slots.
+      this.#warmLabels = Object.keys(propsIndex).filter(k => !/^[0-9a-f]{64}$/.test(k))
+
+      const propsSigs = Object.values(propsIndex)
+        .filter((v): v is string => typeof v === 'string' && /^[a-f0-9]{64}$/i.test(v))
+      if (!propsSigs.length) return
+
+      const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
+        { preheatResource?: (sig: string) => Promise<Blob | null> } | undefined
+      if (!store?.preheatResource) return
+
+      const propsBlobs = await Promise.all(
+        propsSigs.map(sig => store.preheatResource!(sig).catch(() => null))
+      )
+
+      const imageSigs = new Set<string>()
+      for (const blob of propsBlobs) {
+        if (!blob) continue
+        try {
+          const props = JSON.parse(await blob.text())
+          const sig = recoverableTileImageSig(props)
+          if (typeof sig === 'string' && /^[a-f0-9]{64}$/i.test(sig)) imageSigs.add(sig)
+        } catch { /* skip malformed */ }
+      }
+
+      if (imageSigs.size) this.#preheatImagesAtIdle([...imageSigs], store.preheatResource)
+    } catch { /* best-effort */ }
+  }
+
+  /** Feed the image warm through idle time, a few at a time, so it can never
+   *  again be a first-paint tax. Best-effort throughout: a tile that needs one
+   *  of these reads it itself. */
+  #preheatImagesAtIdle = (sigs: string[], preheat: (sig: string) => Promise<Blob | null>): void => {
+    const queue = [...sigs]
+    const whenIdle = (run: () => void): void => {
+      const ric = (globalThis as unknown as { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback
+      if (typeof ric === 'function') ric(run)
+      else setTimeout(run, 1500)
+    }
+    const pump = (): void => {
+      const batch = queue.splice(0, 4)
+      if (!batch.length) return
+      void Promise.allSettled(batch.map(sig => preheat(sig).catch(() => null)))
+        .then(() => { if (queue.length) whenIdle(pump) })
+    }
+    whenIdle(pump)
+  }
+
+  #warmLabels: string[] = []
+
+  protected override heartbeat = async (grammar: string = ''): Promise<void> => {
+    this.ensureListeners()
+
+    // emit initial geometry so consumers start in sync (first pulse only)
+    if (!this.#heartbeatInitialized) {
+      this.#heartbeatInitialized = true
+      this.emitEffect('render:geometry-changed', this.#hexGeo)
+    }
+
+    // mesh cell refresh — only when lineage/grammar actually changed
+    const lineage = this.resolve<any>('lineage')
+    const locationKey = String(lineage?.explorerLabel?.() ?? '/')
+    const fsRev = Number(lineage?.changed?.() ?? 0)
+    const heartbeatKey = `${locationKey}:${fsRev}:${grammar}`
+    if (heartbeatKey !== this.#lastHeartbeatKey) {
+      this.#lastHeartbeatKey = heartbeatKey
+      await this.refreshMeshCells(grammar)
+      this.requestRender()
+    }
+  }
+
+  private refreshMeshCells = async (grammar: string = '', forceResnapshot = false): Promise<void> => {
+    // Mesh is opt-in. Default: dormant. Joining a public session sets the
+    // flag below. Without it, no relay connections, no event subscriptions,
+    // no per-event secp256k1 verifications. Local-only operation.
+    const meshEnabled = (() => {
+      try { return localStorage.getItem('hc:mesh-enabled') === 'true' } catch { return false }
+    })()
+    if (!meshEnabled) return
+
+    const lineage = this.resolve<any>('lineage')
+    const mesh = this.tryGetMesh()
+    if (!lineage || !mesh) return
+
+    const signatureLocation = await this.computeSignatureLocation(lineage)
+    const sig = signatureLocation.sig
+
+    if (sig !== this.meshSig) {
+      const NOSTR = 'wss://relay.snort.social'
+      const nakPayload = '{"cells":["external.alpha","Street Fighter"]}'
+      const nakCmd = `nak event ${NOSTR} --kind 29010 --tag "x=${sig}" --content '${nakPayload}'`
+      ; (window as any).__showHoneycombNakCommand = nakCmd
+      // (debug logs removed — fired on every nav and slowed render with DevTools open)
+    }
+
+    if (!sig) return
+
+    // Privacy gate — show-cell's legacy kind-29010 subscribe + publish
+    // path was the un-credentialled leak the user reported ("the mesh
+    // is sharing even without a location or password"). Without both
+    // a room and a secret we MUST NOT subscribe (would receive other
+    // peers' cached events from the relay) or publish (would broadcast
+    // our local cell list to anyone listening on this lineage sig).
+    // SwarmDrone has the same gate for the new kind-30200 path.
+    if (!this.#space || !this.#secret) {
+      // If we previously had a subscription open from a session with
+      // credentials, close it now so the leak is sealed immediately
+      // when the user clears credentials, not just on next lineage
+      // change.
+      if (this.meshSub) {
+        try { this.meshSub.close() } catch { /* ignore */ }
+        this.meshSub = null
+      }
+      this.meshSig = ''
+      this.meshCells = []
+      this.meshCellsRev++
+      return
+    }
+
+    const sigChanged = sig !== this.meshSig
+
+    if (sigChanged) {
+      if (this.meshSub) {
+        try { this.meshSub.close() } catch { /* ignore */ }
+        this.meshSub = null
+      }
+
+      this.meshSig = sig
+      this.meshCells = []
+      this.meshCellsRev++
+
+      if (typeof mesh.subscribe === 'function') {
+        this.meshSub = mesh.subscribe(sig, (evt) => {
+          // Only react to the legacy ephemeral kind that this drone owns.
+          // Swarm-layer events (kind 30200) belong to SwarmDrone and don't
+          // affect meshCells — re-rendering on every one of them churns
+          // show-cell on each peer publish (and on our own local fanout).
+          // Peer tiles still update at the next render trigger (navigation
+          // / user interaction); they don't need per-event refreshes.
+          const kind = Number((evt?.event as { kind?: number } | undefined)?.kind ?? 0)
+          if (kind && kind !== 29010) return
+
+          // detect sync-request from another publisher — trigger immediate republish
+          this.#handleIncomingSyncRequest(evt, mesh, sig)
+
+          void (async () => {
+            await this.refreshMeshCells()
+            this.requestRender()
+          })()
+        })
+      }
+    }
+
+    // Private mode is a hard boundary: rendering/warm-up must not start mesh
+    // consumers as a side effect. In particular, the delayed synchronize pass
+    // reaches this method after first paint; emitting mesh:ensure-started here
+    // used to wake SwarmDrone, presence, avatars, and meeting consumers even
+    // while the UI said private. Keep the mesh completely cold until the user
+    // explicitly enters public/swarm mode.
+    let meshPublic = false
+    try { meshPublic = localStorage.getItem('hc:mesh-public') === 'true' } catch { /* privacy-safe default: off */ }
+    if (meshPublic) {
+      mesh.ensureStartedForSig(sig)
+      this.emitEffect('mesh:ensure-started', { signature: sig })
+    }
+
+
+    // note: publish local filesystem cells for this sig when changed
+    await this.publishLocalCells(lineage, mesh, sig, grammar, forceResnapshot)
+
+    // note: get non-expired items (mesh owns ttl)
+    const items = mesh.getNonExpired(sig)
+
+    // sync-request: if we arrived and see no items from other publishers, ask the swarm to republish
+    if (!this.#syncRequestedBySig.has(sig) && this.snapshotPostedBySig.has(sig)) {
+      const hasOtherPublishers = items.some(it => {
+        const pubId = this.readPublisherIdFromEvent(it?.event)
+        return pubId && pubId !== this.publisherId
+      })
+      if (!hasOtherPublishers && typeof mesh.publish === 'function') {
+        this.#syncRequestedBySig.add(sig)
+        void mesh.publish(29010, sig, {
+          type: 'sync-request',
+          publisherId: this.publisherId,
+          requestedAtMs: Date.now()
+        }, [['publisher', this.publisherId], ['mode', 'sync-request']])
+      }
+    }
+
+    if (!items || items.length === 0) {
+      if (this.meshCells.length !== 0) {
+        this.meshCells = []
+        this.meshCellsRev++
+      }
+      return
+    }
+
+    // LATEST-SNAPSHOT-WINS per publisher (was: union every non-expired
+    // payload). The old union could never RETRACT — a tile flipped private
+    // (or removed) lingered in the merged set until its original snapshot
+    // aged out of the 10-min cache. Now each publisher's membership is the
+    // cells of their NEWEST full snapshot, plus any single-cell deltas
+    // published at/after it. A fresh snapshot with the reduced set (forced
+    // on tile:public-changed) therefore drops the retracted tile at once.
+    // getNonExpired returns items newest-first, so the first full we see
+    // for a publisher is their newest; `>=` lets a same-second republish
+    // (sorted oldest-received-first within a tie) supersede correctly.
+    type PubAgg = { fullCells: string[] | null; fullAtMs: number; deltas: { cell: string; atMs: number }[] }
+    const byPublisher = new Map<string, PubAgg>()
+    const anonCells = new Set<string>()   // events with no publisher id (e.g. external tools) — unioned
+
+    for (const it of items) {
+      const evt = it?.event
+      const p = it?.payload
+
+      const tagPublisherId = this.readPublisherIdFromEvent(evt)
+      const payloadPublisherId = String(p?.publisherId ?? p?.publisher ?? p?.clientId ?? '').trim()
+      const publisherId = tagPublisherId || payloadPublisherId
+      if (publisherId && publisherId === this.publisherId) continue   // our own echo
+
+      // Classify via tags: mode=snapshot/refresh → authoritative full list;
+      // mode=delta → additive single cell; mode=sync-request → not cells;
+      // grammar heartbeats (no mode) are additive too. Anything else with
+      // no mode (explicit list publish, external tooling) is a full list.
+      let mode = ''
+      let isGrammar = false
+      const tags = Array.isArray(evt?.tags) ? evt.tags : []
+      for (const t of tags) {
+        if (!Array.isArray(t) || t.length < 2) continue
+        const k = String(t[0] ?? '').trim().toLowerCase()
+        if (k === 'mode') mode = String(t[1] ?? '').trim().toLowerCase()
+        else if (k === 'source' && String(t[1] ?? '').trim() === 'show-honeycomb:grammar-heartbeat') isGrammar = true
+      }
+      if (mode === 'sync-request') continue
+
+      const cells = this.extractCellsFromEventContent(evt?.content)
+      if (cells.length === 0) continue
+
+      const atMs = Number(evt?.created_at ?? 0) > 0 ? Number(evt.created_at) * 1000 : 0
+
+      if (!publisherId) {
+        for (const cell of cells) anonCells.add(cell)
+        continue
+      }
+
+      let agg = byPublisher.get(publisherId)
+      if (!agg) { agg = { fullCells: null, fullAtMs: 0, deltas: [] }; byPublisher.set(publisherId, agg) }
+
+      const isFullList = mode === 'snapshot' || mode === 'refresh' || (!mode && !isGrammar)
+      if (isFullList) {
+        if (agg.fullCells === null || atMs >= agg.fullAtMs) { agg.fullCells = cells; agg.fullAtMs = atMs }
+      } else {
+        for (const cell of cells) agg.deltas.push({ cell, atMs })
+      }
+    }
+
+    const set = new Set<string>(anonCells)
+    for (const agg of byPublisher.values()) {
+      if (agg.fullCells) {
+        for (const cell of agg.fullCells) set.add(cell)
+        // additions published at/after the chosen snapshot
+        for (const d of agg.deltas) if (d.atMs >= agg.fullAtMs) set.add(d.cell)
+      } else {
+        // No snapshot seen from this publisher (deltas/grammar only) — no
+        // baseline to retract against, so union what they sent.
+        for (const d of agg.deltas) set.add(d.cell)
+      }
+    }
+
+    const next = Array.from(set)
+    next.sort((a, b) => a.localeCompare(b))
+
+    const sameLen = next.length === this.meshCells.length
+    let same = sameLen
+    if (same) {
+      for (let i = 0; i < next.length; i++) {
+        if (next[i] !== this.meshCells[i]) { same = false; break }
+      }
+    }
+
+    if (!same) {
+      this.meshCells = next
+      this.meshCellsRev++
+    }
+  }
+
+  public publishExplicitCellList = async (cells: string[]): Promise<boolean> => {
+    const lineage = this.resolve<any>('lineage')
+    const mesh = this.tryGetMesh()
+    if (!lineage || !mesh || typeof mesh.publish !== 'function') return false
+
+    const signatureLocation = await this.computeSignatureLocation(lineage)
+    if (!signatureLocation.sig) return false
+
+    const normalized = Array.isArray(cells)
+      ? cells.map(s => String(s ?? '').trim()).filter(s => s.length > 0)
+      : []
+
+    const payload = normalized.join(',')
+    const ok = await mesh.publish(29010, signatureLocation.sig, payload, [['publisher', this.publisherId]])
+
+    await this.refreshMeshCells()
+    this.requestRender()
+
+    return !!ok
+  }
+
+  // Use null sentinel (not '') so the very first call for the root
+  // lineage (key === '') doesn't false-hit the cache and return
+  // the placeholder { sig: '' }. That bug surfaced as a render loop:
+  // cursor.load('') reset cursor state to empty → emit → re-render →
+  // cursor.load('') again, indefinitely.
+  /**
+   * Returns the canonical sigbag for the current lineage location, plus
+   * the key that produced it. Goes through lineage.currentSig() — the
+   * single navigation+sig primitive — so every caller in this codebase
+   * resolves the same sig for the same location via the same cache.
+   * The `{ key, sig }` shape is preserved so call sites don't need to
+   * change; `key` is `explorerSegments.join('/')` post-normalization,
+   * useful for display / logging only.
+   */
+  private computeSignatureLocation = async (lineage: any): Promise<{ key: string; sig: string }> => {
+    const currentSig: () => Promise<string> | undefined = lineage?.currentSig
+    const sig = typeof currentSig === 'function' ? await lineage.currentSig() : ''
+    const explorerSegmentsRaw = lineage?.explorerSegments?.() ?? []
+    // Canonical key via the shared helper so `key` and `sig` describe the same
+    // bag (sig comes from lineage.currentSig() → HistoryService.sign, which
+    // hashes this exact canonical key).
+    const key = lineageKey(explorerSegmentsRaw)
+    return { key, sig }
+  }
+
+  // mesh discovery — resolves whichever mesh drone is registered
+  // note: data queries (getNonExpired, subscribe) still use the direct API
+  // coordination (ensureStartedForSig, publish) also emits effects for observability
+  private tryGetMesh = (): MeshApi | null => {
+    return get<MeshApi>('@diamondcoreprocessor.com/NostrMeshDrone') ?? null
+  }
+
+
+  private publishLocalCells = async (lineage: any, mesh: MeshApi, sig: string, grammar: string = '', forceResnapshot = false): Promise<void> => {
+    if (typeof mesh.publish !== 'function') return
+
+    // Source the cell list from the current layer's children (layer-as-primitive),
+    // not from an OPFS dir walk. Reads via lineage.currentLayer() — the
+    // single navigation+state primitive — and resolves child sigs to
+    // names via HistoryService.getLayerBySig. If neither is ready we
+    // publish an empty children list (same semantic as "I'm here,
+    // contributing nothing yet"); we never fall back to OPFS dirs.
+    const historyService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as {
+      getLayerBySig: (s: string) => Promise<{ name?: string } | null>
+    } | undefined
+    let localCells: string[] = []
+    if (typeof (lineage as { currentLayer?: () => Promise<unknown> })?.currentLayer === 'function' && historyService?.getLayerBySig) {
+      try {
+        const layer = await (lineage as { currentLayer: () => Promise<unknown> }).currentLayer()
+        const childSigs = Array.isArray((layer as { children?: readonly unknown[] } | null)?.children)
+          ? ((layer as { children: readonly unknown[] }).children)
+          : []
+        const resolved = await Promise.all(childSigs.map(async (cs) => {
+          try {
+            const child = await historyService.getLayerBySig(String(cs ?? ''))
+            return typeof child?.name === 'string' && child.name.length > 0 ? child.name : null
+          } catch { return null }
+        }))
+        localCells = resolved.filter((n): n is string => n !== null)
+      } catch { /* keep empty */ }
+    }
+
+    // PUBLIC FILTER — broadcast only the public subset on this mesh path too
+    // (kind 29010), mirroring swarm.drone's #publishSubtree. Private tiles
+    // must never leave the device. isCellPublic is branch-aware.
+    const publicLocation = String(lineage?.explorerLabel?.() ?? '/')
+    localCells = localCells.filter(name => isCellPublic(publicLocation, name))
+
+    const previousCells = this.lastLocalCellsBySig.get(sig) ?? []
+
+    // A full snapshot is authoritative: the latest-snapshot-wins consumer
+    // (refreshMeshCells) treats the newest snapshot per publisher as that
+    // publisher's complete membership. Post one on first publish for this
+    // sig, or on demand (forceResnapshot) when a tile flips public→private —
+    // a fresh snapshot carrying the reduced set is the ONLY way to RETRACT
+    // on this kind-29010 path: it isn't a replaceable event, and the delta
+    // stream below is add-only. Without it, an un-shared tile lingered in
+    // the consumer's union until the original snapshot expired (~10 min).
+    if (forceResnapshot || !this.snapshotPostedBySig.has(sig)) {
+      await mesh.publish(29010, sig, {
+        cells: localCells,
+        publisherId: this.publisherId,
+        mode: 'snapshot',
+        publishedAtMs: Date.now()
+      }, [['publisher', this.publisherId], ['mode', 'snapshot']])
+      this.snapshotPostedBySig.add(sig)
+      this.#lastRefreshAtMs.set(sig, Date.now())
+    } else {
+      // Steady state: post only newly ADDED items as single-cell deltas so
+      // peers see additions instantly without re-sending the whole list.
+      // Removals/retractions never travel as deltas — they ride the next
+      // snapshot (forced above, or the periodic refresh below).
+      const prevSet = new Set(previousCells)
+      for (const cell of localCells) {
+        if (prevSet.has(cell)) continue
+        await mesh.publish(29010, sig, cell, [['publisher', this.publisherId], ['mode', 'delta']])
+      }
+    }
+
+    this.lastLocalCellsBySig.set(sig, localCells)
+
+    // 3) periodic refresh (lease renewal) — re-publish full cell list so late joiners see tiles
+    const now = Date.now()
+    const lastRefresh = this.#lastRefreshAtMs.get(sig) ?? 0
+    const refreshInterval = this.#computeRefreshInterval(mesh, sig)
+    if (lastRefresh > 0 && (now - lastRefresh) >= refreshInterval) {
+      await mesh.publish(29010, sig, {
+        cells: localCells,
+        publisherId: this.publisherId,
+        mode: 'refresh',
+        publishedAtMs: now
+      }, [['publisher', this.publisherId], ['mode', 'refresh']])
+      this.#lastRefreshAtMs.set(sig, now)
+    }
+
+    const grammarCell = this.toGrammarCell(grammar)
+    const grammarIsNew = grammarCell && (sig !== this.lastPublishedGrammarSig || grammarCell !== this.lastPublishedGrammarCell)
+    if (grammarIsNew) {
+      await mesh.publish(29010, sig, grammarCell, [['publisher', this.publisherId], ['source', 'show-honeycomb:grammar-heartbeat']])
+
+      this.lastPublishedGrammarSig = sig
+      this.lastPublishedGrammarCell = grammarCell
+    }
+  }
+
+  // swarm-adaptive refresh interval: smaller swarms refresh more frequently
+  #computeRefreshInterval = (mesh: MeshApi, sig: string): number => {
+    const swarmSize = typeof mesh.getSwarmSize === 'function' ? mesh.getSwarmSize(sig) : 0
+    const jitter = Math.floor(Math.random() * 5000)
+    if (swarmSize > 20) return 90_000 + jitter
+    if (swarmSize > 5) return 60_000 + jitter
+    return 45_000 + jitter
+  }
+
+  // handle incoming sync-request from another publisher — republish snapshot (rate-limited)
+  #handleIncomingSyncRequest = (evt: MeshEvt, mesh: MeshApi, sig: string): void => {
+    if (typeof mesh.publish !== 'function') return
+
+    const tags = evt?.event?.tags
+    if (!Array.isArray(tags)) return
+
+    // check for mode=sync-request tag
+    let isSyncRequest = false
+    let requestPublisherId = ''
+    for (const t of tags) {
+      if (!Array.isArray(t) || t.length < 2) continue
+      if (String(t[0]) === 'mode' && String(t[1]) === 'sync-request') isSyncRequest = true
+      if (String(t[0]) === 'publisher') requestPublisherId = String(t[1] ?? '').trim()
+    }
+
+    if (!isSyncRequest) return
+    if (requestPublisherId === this.publisherId) return // ignore own sync-request
+
+    // rate-limit: at most one triggered republish per 10s + jitter per sig
+    const now = Date.now()
+    const lastTriggered = this.#lastTriggeredRepublishAtMs.get(sig) ?? 0
+    const cooldown = 10_000 + Math.floor(Math.random() * 3000)
+    if ((now - lastTriggered) < cooldown) return
+
+    this.#lastTriggeredRepublishAtMs.set(sig, now)
+
+    // republish current local cells as snapshot
+    const localCells = this.lastLocalCellsBySig.get(sig) ?? []
+    if (localCells.length === 0) return
+
+    void mesh.publish(29010, sig, {
+      cells: localCells,
+      publisherId: this.publisherId,
+      mode: 'snapshot',
+      publishedAtMs: now
+    }, [['publisher', this.publisherId], ['mode', 'snapshot']])
+
+    // reset refresh timer since we just published
+    this.#lastRefreshAtMs.set(sig, now)
+  }
+
+  private readPublisherIdFromEvent = (evt: any): string => {
+    const tags = evt?.tags
+    if (!Array.isArray(tags)) return ''
+
+    for (const t of tags) {
+      if (!Array.isArray(t) || t.length < 2) continue
+      const k = String(t[0] ?? '').trim().toLowerCase()
+      if (k !== 'publisher' && k !== 'p') continue
+
+      const v = String(t[1] ?? '').trim()
+      if (v) return v
+    }
+
+    return ''
+  }
+
+  private extractCellsFromEventContent = (content: any): string[] => {
+    const raw = String(content ?? '').trim()
+    if (!raw) return []
+
+    // direct CSV content (preferred): "a,b,c"
+    if (!raw.startsWith('{') && !raw.startsWith('[') && !raw.startsWith('"')) {
+      return this.splitCsv(raw)
+    }
+
+    // JSON / structured content
+    try {
+      const parsed = JSON.parse(raw)
+
+      if (typeof parsed === 'string') return this.splitCsv(parsed)
+
+      if (Array.isArray(parsed)) {
+        const out: string[] = []
+        for (const x of parsed) out.push(...this.splitCsv(String(x ?? '')))
+        return out
+      }
+
+      if (parsed && typeof parsed === 'object') {
+        const out: string[] = []
+        const cells = (parsed as any).cells ?? (parsed as any).seeds
+        if (Array.isArray(cells)) {
+          for (const x of cells) out.push(...this.splitCsv(String(x ?? '')))
+        }
+
+        const cell = String((parsed as any).cell ?? (parsed as any).seed ?? '').trim()
+        if (cell) out.push(...this.splitCsv(cell))
+        return out
+      }
+    } catch {
+      // tolerant fallback for non-strict object-like payloads:
+      // {cells:[hello2,world2],pubs:123}
+      const cellsMatch = raw.match(/(?:cells|seeds)\s*:\s*\[([^\]]*)\]/i)
+      if (cellsMatch && cellsMatch[1]) {
+        return this.splitCsv(String(cellsMatch[1] ?? ''))
+      }
+
+      // do not split structured text blindly into junk tiles
+      if (this.looksStructuredContent(raw)) return []
+
+      // non-structured plain text fallback
+      return this.splitCsv(raw)
+    }
+
+    return []
+  }
+
+  private looksStructuredContent = (raw: string): boolean => {
+    const s = String(raw ?? '').trim()
+    if (!s) return false
+    return s.startsWith('{') || s.startsWith('[') || s.startsWith('"')
+  }
+
+  private splitCsv = (raw: string): string[] => {
+    const out: string[] = []
+    const parts = String(raw ?? '').split(',')
+    for (const part of parts) {
+      let cell = String(part ?? '').trim()
+      if (cell.startsWith('"') && cell.endsWith('"') && cell.length >= 2) {
+        cell = cell.slice(1, -1).trim()
+      }
+      if (cell.startsWith("'") && cell.endsWith("'") && cell.length >= 2) {
+        cell = cell.slice(1, -1).trim()
+      }
+      if (cell) out.push(cell)
+    }
+    return out
+  }
+
+  private toGrammarCell = (grammar: string): string => {
+    const raw = String(grammar ?? '').trim()
+    if (!raw) return ''
+    if (raw.startsWith('show-honeycomb:')) return ''
+    return raw
+  }
+
+  #renderScheduled = false
+
+  // ── QUIET LANDING ─────────────────────────────────────────────────
+  // A background writer — the bridge answering an ask raised from a tile
+  // — lands its payload as TRUTH the moment it arrives: the layer is
+  // minted, the note is on the cell, the resource is in the pool. What it
+  // must NOT do is pull the surface out from under the participant. A
+  // drained ask writes a dozen notes in one burst, and a dozen full
+  // re-walks is a dozen flickers on a hive somebody is still working in.
+  //
+  // So the WRITE lands and the PAINT waits. `landing:quiet` brackets the
+  // writer's burst (the producer owns the depth count and the settle
+  // delay, so a burst is ONE window); every render request inside the
+  // window is counted instead of run, and the count goes out on
+  // `landing:pending` for the badge to show. The participant taps it when
+  // they are ready — `landing:apply` — and that tap is the only release.
+  //
+  // Held is not dropped, and never lost: holding ARMS #forceNextRender, so
+  // whenever the pass finally runs it survives the unchanged-page fast
+  // path. And a render that happens for any other reason (they panned,
+  // they walked into a layer, they edited something) has already shown
+  // them what landed, so it clears the count on the way through — the
+  // badge means "there is something you have not seen yet", never "there
+  // is something unwritten".
+  #quietLanding = false
+  #heldRenders = 0
+
+  /** Location the hold happened at. A pass at a DIFFERENT location is the
+   *  participant walking somewhere — that must always paint, and seeing the
+   *  new page spends the badge. */
+  #heldAtKey: string | null = null
+
+  /** When the last pass was held.
+   *
+   *  A WRITE'S CONSEQUENCES ARRIVE AS A CHAIN, NOT AN EVENT. The producer's
+   *  window covers the write itself; what follows is the commit flushing its
+   *  marker, then the readiness repaint as each new tile's visual resolves,
+   *  then the optimize tick — measured at 8ms, 36ms, 204ms, 353ms, 407ms,
+   *  659ms, 929ms after one three-tile burst, from SEVEN different call sites.
+   *  No settle delay on the producer covers that, and tagging the callers is a
+   *  losing game: the chain reaches requestRender through paths that look
+   *  exactly like a participant's.
+   *
+   *  So the renderer measures the chain instead of guessing at it. While paints
+   *  keep being held, the landing is still landing. Once nothing has been held
+   *  for #CASCADE_QUIET_MS, the chain is done and the next paint belongs to the
+   *  participant — it runs, and it spends the badge. */
+  #lastHeldAt = 0
+  static readonly #CASCADE_QUIET_MS = 1500
+
+  #locationKeyNow = (): string =>
+    String(this.resolve<any>('lineage')?.explorerLabel?.() ?? '/')
+
+  /** WRITES landed during the window, as counted by the producer — the only
+   *  honest number to show a person. Held renders are not writes: a burst of
+   *  twelve notes coalesces into far fewer paints, so counting paints would
+   *  under-report, and a producer that writes nothing but touches the layer
+   *  would over-report. Survives the window closing (the badge outlives the
+   *  burst); cleared only when a real paint shows them. */
+  #landedWrites = 0
+
+  /** Publish the unseen-change count for the landing badge. */
+  #publishHeld = (): void => {
+    this.emitEffect('landing:pending', {
+      count: this.#heldRenders > 0 ? (this.#landedWrites || this.#heldRenders) : 0,
+      where: String(this.resolve<any>('lineage')?.explorerLabel?.() ?? '/'),
+    })
+  }
+
+  private readonly requestRender = (): void => {
+    // Held while the producer's window is open — whatever caused this pass, a
+    // bridge `add` reaches here through `cell:added`, not only synchronize —
+    // and afterwards for as long as that write is still cascading at a
+    // location the participant has not left.
+    const now = Date.now()
+    const cascading = this.#heldRenders > 0
+      && this.#heldAtKey === this.#locationKeyNow()
+      && (now - this.#lastHeldAt) < ShowCellDrone.#CASCADE_QUIET_MS
+    if (this.#quietLanding || cascading) {
+      if (this.#heldRenders === 0) this.#heldAtKey = this.#locationKeyNow()
+      this.#heldRenders++
+      this.#lastHeldAt = now
+      this.#publishHeld()
+      return
+    }
+
+    // Not held: this pass is about to show them whatever landed — either they
+    // acted, or they walked somewhere else. Either way the badge is spent, and
+    // the pass that spends it must actually RUN: the held change is at the same
+    // location, so the unchanged-page fast path would otherwise return having
+    // done nothing and the badge would clear over a surface that never moved.
+    if (this.#heldRenders > 0) {
+      this.#heldRenders = 0
+      this.#landedWrites = 0
+      this.#heldAtKey = null
+      this.#forceNextRender = true
+      this.#publishHeld()
+    }
+
+    if (this.rendering) {
+      this.renderQueued = true
+      return
+    }
+
+    // coalesce synchronous bursts into one render via microtask
+    if (this.#renderScheduled) return
+    this.#renderScheduled = true
+    queueMicrotask(() => {
+      this.#renderScheduled = false
+      if (this.rendering) {
+        this.renderQueued = true
+        return
+      }
+      this.rendering = true
+      void (async () => {
+        try {
+          do {
+            this.renderQueued = false
+            await this.renderFromSynchronize()
+          } while (this.renderQueued)
+        } finally {
+          this.rendering = false
+        }
+      })()
+    })
+  }
+
+  // Bound on CONSECUTIVE eviction-forced repaints while on-screen sigs
+  // keep going missing. A normal layer converges in one or two passes
+  // (reload lands, next eviction scan comes back clean and resets the
+  // counter). Only a layer with more images than the atlas has slots can
+  // keep the scan dirty forever — self-eviction — and that pathology must
+  // not be allowed to spin the render loop.
+  #evictRepaintCount = 0
+  static readonly #EVICT_REPAINT_MAX = 8
+
+  /** Location keys already warned about a futile readiness working set. */
+  #repairFutileWarned = new Set<string>()
+
+  /** True when the readiness working set at the current location cannot fit
+   *  its atlas, making eviction REPAIR self-defeating: every repair bake
+   *  evicts another prepared entry, whose own eviction re-arms the next
+   *  repair — an endless idle churn (and, before on-screen pinning, the
+   *  every-tile-text-blinking bug witnessed on hub layers whose branches'
+   *  child names total past the label atlas). Repair stands down; clicks on
+   *  affected branches simply re-bake on demand (~13ms per label). */
+  #readinessRepairFutile(kind: 'image' | 'label'): boolean {
+    let capacity: number
+    let demand = 0
+    if (kind === 'image') {
+      capacity = this.imageAtlas?.capacity ?? Number.POSITIVE_INFINITY
+      for (const c of this.renderedCells.values()) if (c.imageSig) demand++
+      const perLabel = this.#childImageSigsByParent.get(this.#passParentSig)
+      if (perLabel) {
+        for (const [label, sigs] of perLabel) {
+          if (this.#childrenReadyByLabel.get(label) === true) demand += sigs.length
+        }
+      }
+    } else {
+      capacity = this.atlas?.capacity ?? Number.POSITIVE_INFINITY
+      demand = this.renderedCells.size
+      for (const [, headSig] of this.#preparedHeadByLabel) {
+        demand += this.#completeChildNamesByParentSig.get(headSig)?.names.length ?? 0
+      }
+    }
+    if (demand <= capacity) return false
+    const key = `${kind}:${this.#readinessLocationKey}`
+    if (!this.#repairFutileWarned.has(key)) {
+      this.#repairFutileWarned.add(key)
+      console.warn(`[show-cell] readiness ${kind} working set (${demand}) exceeds atlas capacity (${capacity}) — standing down eviction repair at this location; affected branches re-bake on click`)
+    }
+    return true
+  }
+
+  /** An atlas slot was reused for different content. If the displaced sig
+   *  belongs to an on-screen cell, its baked UV now points at foreign
+   *  pixels — force a pass so the cell either reloads (loadOne re-queues
+   *  evicted sigs) or falls back to label. This must run even while a
+   *  pass is mid-flight: the eviction may have displaced pixels the
+   *  running pass already awaited (loads and evictions from elsewhere
+   *  interleave), so its rebuilt geometry is stale the moment it bakes.
+   *  requestRender during a pass queues a follow-up pass — bounded by
+   *  #EVICT_REPAINT_MAX so self-evicting oversized layers can't loop. */
+  readonly #onAtlasEvicted = (e?: Event): void => {
+    const atlas = this.imageAtlas
+    if (!atlas) return
+    // PROMISE REPAIR. A branch that brightened made a promise — "the inside is
+    // decoded, the click is instant" — and an eviction can quietly break it:
+    // brightness is monotonic per visit, so the tile stays lit while its
+    // pixels are gone, and the click pays the decode all over again (the
+    // "latency on tiles that have lighted up" bug, reproduced live: 0/12
+    // images resident under a still-lit tile). When the victim sig belongs to
+    // a PROVEN click target of the current location, withdraw the visual
+    // promise and re-queue it for an idle re-bake. Bytes remain local, but the
+    // click is no longer instant until the pixels are resident again.
+    const victim = (e as CustomEvent<{ sig?: string }> | undefined)?.detail?.sig
+    if (victim && this.#childrenReadyByLabel.size > 0) {
+      const entry = this.#readyByLocation.get(this.#readinessLocationKey)
+      for (const [label, target] of entry?.targets ?? []) {
+        if (this.#childrenReadyByLabel.get(label) !== true) continue
+        if (!target.imageSigs.includes(victim)) continue
+        this.#revokeReadinessForRepair(label)
+        if (this.#readinessRepairFutile('image')) continue
+        const names = this.#completeChildNamesByParentSig.get(target.headSig)?.names ?? []
+        this.#enqueueBake(target.headSig, target.imageSigs, names)
+      }
+    }
+    for (const c of this.renderedCells.values()) {
+      if (c.imageSig && !atlas.hasImage(c.imageSig) && !atlas.hasFailed(c.imageSig)) {
+        if (this.#evictRepaintCount >= ShowCellDrone.#EVICT_REPAINT_MAX) {
+          console.warn('[show-cell] atlas eviction repaint bound reached — layer likely exceeds atlas capacity')
+          return
+        }
+        this.#evictRepaintCount++
+        this.#forceNextRender = true
+        this.requestRender()
+        return
+      }
+    }
+    // Clean scan — every on-screen sig is resolvable again; reset the bound.
+    this.#evictRepaintCount = 0
+  }
+
+  /** Label-atlas twin of #onAtlasEvicted. A displaced on-screen label's
+   *  baked UV samples a DIFFERENT label's glyphs (wrong text — the
+   *  superimposed-labels bug class), so force a repaint; the rebuild
+   *  re-bakes it on demand. Shares #evictRepaintCount with the image
+   *  handler — a converged paint resets both. Cells rendering
+   *  hideText-with-image are skipped: their labelUV is intentionally
+   *  zeroed, so a displaced label cannot show. */
+  readonly #onLabelAtlasEvicted = (e?: Event): void => {
+    const atlas = this.atlas
+    if (!atlas) return
+    // Same promise repair as the image twin: a proven branch's child NAME
+    // displaced from the label atlas would make the next click rasterise it
+    // again (~13ms each — the single biggest click cost measured). Re-seed it
+    // during idle instead.
+    const victim = (e as CustomEvent<{ label?: string }> | undefined)?.detail?.label
+    if (DIAG && victim?.startsWith('calf-')) {
+      console.info(
+        `[diag:readiness] label eviction victim=${victim} prepared=${this.#preparedHeadByLabel.size} key=${this.#readinessLocationKey.slice(0, 8)}`,
+      )
+    }
+    if (victim && this.#childrenReadyByLabel.size > 0) {
+      outer: for (const [branch, headSig] of this.#preparedHeadByLabel) {
+        if (this.#childrenReadyByLabel.get(branch) !== true) continue
+        const names = this.#completeChildNamesByParentSig.get(headSig)?.names ?? []
+        if (!names.includes(victim)) continue
+        if (DIAG) console.info(`[diag:readiness] label eviction repair branch=${branch} victim=${victim}`)
+        const target = this.#readyByLocation
+          .get(this.#readinessLocationKey)
+          ?.targets.get(branch)
+        this.#revokeReadinessForRepair(branch)
+        if (this.#readinessRepairFutile('label')) break outer
+        this.#enqueueBake(headSig, target?.imageSigs ?? [], names)
+        break outer
+      }
+    }
+    for (const c of this.renderedCells.values()) {
+      if (this.#hidesName(c.hideText, !!(c.imageSig && this.imageAtlas?.hasImage(c.imageSig)))) continue
+      if (!atlas.hasLabel(c.label)) {
+        if (this.#evictRepaintCount >= ShowCellDrone.#EVICT_REPAINT_MAX) {
+          console.warn('[show-cell] label-atlas eviction repaint bound reached — more on-screen labels than atlas slots')
+          return
+        }
+        this.#evictRepaintCount++
+        this.#forceNextRender = true
+        this.requestRender()
+        return
+      }
+    }
+  }
+
+  /** Fast path for move:preview — skips OPFS/mesh/image loading, only rebuilds geometry with reordered labels */
+  private readonly renderMovePreview = (): void => {
+    const axial = this.resolve<any>('axial')
+    if (!axial?.items || !this.cachedCellNames || !this.cachedLocalCellSet) {
+      this.requestRender()
+      return
+    }
+
+    const cellNames = this.cachedCellNames
+    const localCellSet = this.cachedLocalCellSet
+    const branchSet = this.cachedBranchSet ?? new Set<string>()
+
+    const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
+    const previewNames = this.#effectivePreviewNames()
+    const effectiveLen = previewNames ? previewNames.length : cellNames.length
+    const maxCells = Math.min(effectiveLen, axialMax)
+    if (maxCells <= 0) return
+
+    const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
+    if (cells.length === 0) return
+
+    // reuse cached image sigs (no OPFS read needed)
+    const atlas = this.imageAtlas
+    const needReload: Cell[] = []
+    for (const cell of cells) {
+      // EXTERNAL (peer) cells: the cache is coherent by construction now —
+      // loadOne validates it against the publisher's CURRENT sig
+      // (peerImageSourceByLabel) and externals never receive local
+      // substrate picks. Bind it so peer images survive synchronize-
+      // driven fast rebuilds (skipping entirely left them imageless);
+      // queue a load when no derivation exists yet or the atlas evicted.
+      if (cell.external) {
+        const cachedSig = this.cellImageCache.get(cell.label) ?? undefined
+        if (cachedSig) {
+          cell.imageSig = cachedSig
+          if (atlas && !atlas.hasImage(cachedSig) && !atlas.hasFailed(cachedSig)) needReload.push(cell)
+        } else {
+          needReload.push(cell)
+        }
+        continue
+      }
+      if (this.cellImageCache.has(cell.label)) {
+        const cachedSig = this.cellImageCache.get(cell.label) ?? undefined
+        cell.imageSig = cachedSig
+        // If the atlas evicted this sig (wrap) we must re-queue a load
+        // or the shader falls back to label. Collect here, load after
+        // the loop so loadCellImages handles batching + dedup.
+        if (cachedSig && atlas && !atlas.hasImage(cachedSig) && !atlas.hasFailed(cachedSig)) {
+          needReload.push(cell)
+        }
+      }
+    }
+
+    const finishPreview = (): void => {
+      this.renderedCells.clear()
+      for (const cell of cells) this.renderedCells.set(cell.label, cell)
+      void this.applyGeometry(cells)
+    }
+
+    if (needReload.length > 0) {
+      // Image-complete paint: a tile must NEVER render without its image
+      // outside text-only mode. Finish the (local) reloads BEFORE painting
+      // — the previous geometry stays visible meanwhile, which is images
+      // at old positions rather than an imageless flash.
+      void (async () => {
+        const lineage = this.resolve<any>('lineage')
+        // dir may be null at foreign locations — loadCellImages is
+        // null-tolerant and external tiles don't need a local dir.
+        const dir = (await lineage?.explorerDir?.()) ?? null
+        await this.loadCellImages(needReload, dir)
+        finishPreview()
+      })()
+      return
+    }
+
+    finishPreview()
+  }
+
+  #currentLocationKey = (): string => {
+    const lineage = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
+    return (lineage?.explorerSegments?.() ?? [])
+      .map((segment) => String(segment ?? '').trim())
+      .filter(Boolean)
+      .join('/')
+  }
+
+  #effectivePreviewNames = (): string[] | null =>
+    this.moveNames ?? this.#arrangePreviewNames.get(this.#currentLocationKey()) ?? null
+
+  /**
+   * Incremental render — same-layer tile changes without the full synchronize path.
+   * Follows renderMovePreview's pattern: reuse cached context, update only the
+   * affected tiles, rebuild geometry without hiding the layer.
+   *
+   * No OPFS directory scan, no history replay, no fit-to-content, no layer hide.
+   */
+  /**
+   * Queue a cell diff from a synchronous event handler. All mutations happen
+   * in one microtask per JS turn — rapid clicks in the same turn coalesce.
+   * Zero awaits; the click path is never blocked on OPFS.
+   */
+  readonly #queueIncremental = (change: { added?: { name: string; segments: readonly string[] }[]; removed?: string[] }): void => {
+    if (change.added) for (const n of change.added) this.#pendingAdds.push(n)
+    if (change.removed) for (const n of change.removed) this.#pendingRemovals.push(n)
+    if (this.#incrementalScheduled) return
+    this.#incrementalScheduled = true
+    queueMicrotask(() => {
+      this.#incrementalScheduled = false
+      const added = this.#pendingAdds
+      const removed = this.#pendingRemovals
+      this.#pendingAdds = []
+      this.#pendingRemovals = []
+      this.#runIncrementalSync({ added, removed })
+    })
+  }
+
+  /**
+   * Synchronous incremental render — uses only the slot state machine and
+   * cached image/tag data; no OPFS access. Images for newly-added cells
+   * are fetched fire-and-forget and pushed via in-place buffer update when
+   * ready.
+   */
+  readonly #runIncrementalSync = (change: { added: { name: string; segments: readonly string[] }[]; removed: string[] }): void => {
+    const axial = this.resolve<any>('axial')
+    // A FRAMED page has no incremental placement. The frame decides where
+    // every tile sits from the ORDER of the whole set, so adding one tile can
+    // move any of the others — the slot machine's "put the new one in a free
+    // slot" is the wrong answer by construction. Take the full path, which
+    // re-reads the layer through the frame.
+    if (!axial?.items || !this.#slots.seeded || this.#locationIsFramed()) {
+      this.#layerCellsCache.delete(this.renderedLocationKey)
+      this.renderedCellsKey = ''
+      this.requestRender()
+      return
+    }
+
+    for (const name of change.removed) {
+      this.#slots.remove(name)
+      this.renderedCells.delete(name)
+    }
+
+    for (const { name, segments } of change.added) {
+      // hasBranch defaults to false for newly-added cells (no children yet).
+      // The async fill pass below will correct this if needed.
+      if (this.#slots.add(name, false)) continue
+      // Pinned mode (the only mode): #slots.add defers slot assignment.
+      // Place the new cell HERE exactly as #orderByIndexPinned would for an
+      // unindexed cell — viewport-scored free slot, persisted fire-and-forget
+      // — and render incrementally. The old behaviour fell back to a full
+      // OPFS re-scan of the whole grid on every create, which both lagged the
+      // click and re-rendered every existing tile. Only a genuinely full grid
+      // (or missing axial) forces the slow path now.
+      if (this.#placePinnedCell(name, segments) < 0) {
+        this.#layerCellsCache.delete(this.renderedLocationKey)
+        this.renderedCellsKey = ''
+        this.requestRender()
+        return
+      }
+    }
+
+    const snap = this.#slots.snapshot()
+    const cellNames = snap.names
+    const localCellSet = snap.localCells
+    const branchSet = snap.branches
+
+    this.cachedCellNames = cellNames
+    this.cachedLocalCellSet = localCellSet
+    this.cachedBranchSet = branchSet
+
+    const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
+    const maxCells = Math.min(cellNames.length, axialMax)
+    if (maxCells <= 0) { this.clearMesh(`incremental: maxCells=0 (names=${cellNames.length}, axial=${axialMax})`, true); return }
+
+    const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
+    if (cells.length === 0) { this.clearMesh("incremental: axial yielded 0 cells", true); return }
+
+    // Populate cells from caches — newly-added cells have no cache entry and
+    // will render blank until the async fill completes.
+    const atlas = this.imageAtlas
+    const needReload: Cell[] = []
+    for (const cell of cells) {
+      // EXTERNAL cells: bind the coherent cache value (publisher-sig
+      // validated in loadOne) and queue missing/evicted ones — but skip
+      // the LOCAL decoration caches below (borderColor/link/substrate
+      // are this participant's own per-label state, not the peer's).
+      if (cell.external) {
+        const cachedSig = this.cellImageCache.get(cell.label) ?? undefined
+        if (cachedSig) {
+          cell.imageSig = cachedSig
+          if (atlas && !atlas.hasImage(cachedSig) && !atlas.hasFailed(cachedSig)) needReload.push(cell)
+        } else {
+          needReload.push(cell)
+        }
+        continue
+      }
+      if (this.cellImageCache.has(cell.label)) {
+        const cachedSig = this.cellImageCache.get(cell.label) ?? undefined
+        cell.imageSig = cachedSig
+        // atlas eviction check — if the cached sig is no longer in the
+        // atlas (wrap displaced it) queue a reload. Same shape as the
+        // renderIncremental path above.
+        if (cachedSig && atlas && !atlas.hasImage(cachedSig) && !atlas.hasFailed(cachedSig)) {
+          needReload.push(cell)
+        }
+      }
+      const bc = this.cellBorderColorCache.get(cell.label)
+      if (bc) cell.borderColor = bc
+      cell.hasLink = this.cellLinkCache.get(cell.label) ?? false
+      cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false
+      cell.hideText = this.cellHideTextCache.get(cell.label) ?? false
+    }
+    const finishIncremental = (fillAdded = true): void => {
+      this.renderedCells.clear()
+      for (const cell of cells) this.renderedCells.set(cell.label, cell)
+
+      this.#layerCellsCache.set(this.renderedLocationKey, {
+        cells: [...cells], cellNames, localCellSet, branchSet,
+      })
+
+      // applyGeometry returns a promise but its body is synchronous for our
+      // purposes; don't await — the paint happens in the next frame anyway.
+      void this.applyGeometry(cells)
+
+      // Fire-and-forget: load images and branch flags for added cells, then
+      // push in-place buffer updates. Never blocks the click path. (A
+      // just-created tile has no image YET — substrate assigns one right
+      // after — which is different from rendering an image-bearing tile
+      // without its image; the hard rule targets the latter.)
+      if (fillAdded && change.added.length > 0) {
+        const added = change.added.map(a => a.name)
+        const lineage = this.resolve<any>('lineage')
+        void Promise.resolve(lineage?.explorerDir?.()).then(async (dir) => {
+          if (!dir) return
+          // Branch flags (cheap, parallel). A flip must PROPAGATE: the
+          // payload/cache/paint above were built from the pre-fill snapshot,
+          // so a silently-marked branch stays invisible to tile-overlay
+          // (#branchLabels) and stale in #layerCellsCache. Queue an empty
+          // incremental flush to rebuild + re-emit from the marked state.
+          // added is empty on that re-run, so the fill doesn't recurse.
+          let branchFlipped = false
+          await Promise.all(added.map(async name => {
+            const hasBranch = await this.checkCellHasBranch(dir, name)
+            if (hasBranch && !this.#slots.hasBranch(name)) {
+              this.#slots.markBranch(name)  // idempotent; pinned-safe
+              branchFlipped = true
+            }
+          }))
+          // Images + props — pushed per-cell via in-place update
+          for (const name of added) {
+            await this.#tryInPlaceCellUpdate(name, { dir })
+          }
+          if (branchFlipped) this.#queueIncremental({})
+        }).catch(() => { /* best effort */ })
+      }
+
+      this.emitEffect('render:cell-count', this.#buildCellCountPayload(cells))
+      this.#emitRenderTags(cells)
+    }
+
+    // Membership is interaction truth and must paint on the very next frame.
+    // An unrelated atlas eviction must never hold an add/remove hostage while
+    // its image decodes. Paint the changed membership now (missing visuals are
+    // honestly shaded as pending), then repair those visuals in place.
+    finishIncremental()
+    if (needReload.length > 0) {
+      void (async () => {
+        const lineage = this.resolve<any>('lineage')
+        const dir = (await lineage?.explorerDir?.()) ?? null
+        await this.loadCellImages(needReload, dir)
+        // Rebuild only the GPU bindings. Do not start the added-cell fill a
+        // second time; the immediate pass above already owns that work.
+        finishIncremental(false)
+      })().catch(() => { /* the pending shade is the visible failure state */ })
+    }
+  }
+
+  /**
+   * Async incremental render — kept for callers that legitimately need to
+   * update cached content (tile:saved fallback, tags:changed, substrate
+   * fallback). Never invoked for cell:added/removed.
+   */
+  private readonly renderIncremental = async (change: {
+    added?: string[]
+    removed?: string[]
+    changedContent?: string[]
+    changedTags?: string[]
+  }): Promise<void> => {
+    const axial = this.resolve<any>('axial')
+    const lineage = this.resolve<any>('lineage')
+    // Framed pages re-place from the whole set — see #runIncrementalSync.
+    if (!axial?.items || !lineage || !this.#slots.seeded || this.#locationIsFramed()) {
+      this.#layerCellsCache.delete(this.renderedLocationKey)
+      this.renderedCellsKey = ''
+      this.requestRender()
+      return
+    }
+
+    const dir = await lineage.explorerDir?.()
+    if (!dir) { this.requestRender(); return }
+
+    if (change.removed?.length) {
+      for (const name of change.removed) { this.#slots.remove(name); this.renderedCells.delete(name) }
+    }
+    if (change.added?.length) {
+      for (const name of change.added) {
+        const hasBranch = await this.checkCellHasBranch(dir, name)
+        if (!this.#slots.add(name, hasBranch)) {
+          this.#layerCellsCache.delete(this.renderedLocationKey)
+          this.renderedCellsKey = ''
+          this.requestRender()
+          return
+        }
+      }
+    }
+
+    const snap = this.#slots.snapshot()
+    const cellNames = snap.names
+    const localCellSet = snap.localCells
+    const branchSet = snap.branches
+
+    this.cachedCellNames = cellNames
+    this.cachedLocalCellSet = localCellSet
+    this.cachedBranchSet = branchSet
+
+    const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
+    const maxCells = Math.min(cellNames.length, axialMax)
+    if (maxCells <= 0) { this.clearMesh(`changed-pass: maxCells=0 (names=${cellNames.length}, axial=${axialMax})`); return }
+
+    const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
+    if (cells.length === 0) { this.clearMesh("changed-pass: axial yielded 0 cells"); return }
+
+    const touched = new Set<string>([...(change.added ?? []), ...(change.changedContent ?? [])])
+    // Include cells whose cached sig is no longer in the atlas — the
+    // atlas may have evicted it since the last render (wrap around the
+    // slot allocator). Without this, the cell keeps its stale cached
+    // sig but the atlas can't resolve its UV, and the shader falls
+    // back to the label forever. loadOne's fast-path reload handles
+    // the actual re-fetch; here we just make sure loadOne is called.
+    const atlas = this.imageAtlas
+    const needLoad = cells.filter(c => {
+      if (touched.has(c.label)) return true
+      if (!this.cellImageCache.has(c.label)) return true
+      const cachedSig = this.cellImageCache.get(c.label)
+      if (cachedSig && atlas && !atlas.hasImage(cachedSig) && !atlas.hasFailed(cachedSig)) return true
+      return false
+    })
+    if (needLoad.length > 0) await this.loadCellImages(needLoad, dir)
+
+    for (const cell of cells) {
+      // EXTERNAL cells: needLoad above already queued the no-cache and
+      // evicted cases (loadOne binds those directly); here just bind the
+      // coherent cache value when loadOne didn't touch this cell. Local
+      // decoration caches stay local-only.
+      if (cell.external) {
+        if (!cell.imageSig) {
+          const cachedSig = this.cellImageCache.get(cell.label) ?? undefined
+          if (cachedSig) cell.imageSig = cachedSig
+        }
+        continue
+      }
+      if (this.cellImageCache.has(cell.label)) cell.imageSig = this.cellImageCache.get(cell.label) ?? undefined
+      const bc = this.cellBorderColorCache.get(cell.label)
+      if (bc) cell.borderColor = bc
+      cell.hasLink = this.cellLinkCache.get(cell.label) ?? false
+      cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false
+      cell.hideText = this.cellHideTextCache.get(cell.label) ?? false
+    }
+
+    this.renderedCells.clear()
+    for (const cell of cells) this.renderedCells.set(cell.label, cell)
+
+    this.#layerCellsCache.set(this.renderedLocationKey, {
+      cells: [...cells], cellNames, localCellSet, branchSet,
+    })
+
+    await this.applyGeometry(cells)
+
+    this.emitEffect('render:cell-count', this.#buildCellCountPayload(cells))
+    this.#emitRenderTags(cells)
+  }
+
+  private readonly renderFromSynchronize = async (): Promise<void> => {
+    ;(window as unknown as { __hcNav?: (l: string, e?: string) => void }).__hcNav?.('render:start')
+    // A takeover feature (screensaver) owns the screen — keep the hive hidden
+    // and do no work. A queued requestRender fires on restore (set-hive-visible).
+    if (this.#hiveHidden) { if (this.layer) this.layer.visible = false; return }
+    if (!this.pixiApp || !this.pixiContainer || !this.pixiRenderer) {
+      this.clearMesh("synchronize: pixi not ready")
+      return
+    }
+
+    const axial = this.resolve<any>('axial')
+    if (!axial?.items) {
+      this.clearMesh("synchronize: axial service unavailable")
+      return
+    }
+
+    const lineage = this.resolve<any>('lineage')
+    if (!lineage?.explorerDir || !lineage?.explorerLabel || !lineage?.changed) {
+      this.clearMesh("synchronize: lineage service unavailable")
+      return
+    }
+
+    const locationKey = String(lineage.explorerLabel?.() ?? '/')
+    // THE PASS ADDRESS — captured synchronously alongside locationKey,
+    // before the first await. Every downstream consumer that pairs cell
+    // NAMES from this pass with a location (index reads, deferred index
+    // persistence) must use THIS array, never a live re-read of lineage:
+    // the pass spans many awaits and a mid-pass navigation used to make
+    // names-from-A meet segments-from-B — the cross-layer graft vector.
+    const passSegments: readonly string[] = (lineage.explorerSegments?.() ?? [])
+      .map((s: unknown) => String(s ?? '').trim()).filter(Boolean)
+
+    // fast path: skip all OPFS work when nothing has changed
+    // renderedCellsKey is cleared by any invalidation event (tile:saved, orientation, clipboard, etc.)
+    // #forceNextRender overrides the skip when an effect needs the next render to actually run
+    // (e.g. swarm:resource-arrived firing mid-render — see the field declaration for the race details).
+    if (
+      !this.#forceNextRender
+      && locationKey === this.renderedLocationKey
+      && this.renderedCellsKey !== ''
+    ) {
+      return
+    }
+
+    // ── coalesce duplicate renders for the same target ───────────────
+    // One user nav gesture fires 3–5 events: popstate, navigate,
+    // sometimes synchronize, plus lineage 'change' (from invalidate).
+    // Each schedules a requestRender. Two cases of duplicates we must
+    // catch before any work runs:
+    //
+    //   (A) #activeRenderTarget — set at the top of THIS function,
+    //       cleared in finally. Catches duplicates while ANY part of
+    //       renderFromSynchronize body is still running for this target,
+    //       including the back-nav fast path (which doesn't set
+    //       streamActive). Without this, the IIFE's do-while was running
+    //       the back-nav fast path twice per click.
+    //
+    //   (B) streamActive — set when streamCells starts, cleared when it
+    //       ends. Catches duplicates that arrive AFTER the slow path's
+    //       outer renderFromSynchronize returns but while streamCells is
+    //       still running async.
+    if (
+      this.#activeRenderTarget === locationKey ||
+      (this.streamActive && locationKey === this.renderedLocationKey)
+    ) {
+      // A FORCED invalidation (launcher:reconciled, swarm arrivals) must not
+      // be swallowed by this drop: the in-flight pass gathered its cells
+      // BEFORE the invalidation, so letting it stand paints stale content
+      // with nothing queued behind it. Keep #forceNextRender armed (it is
+      // only consumed below, when a pass actually runs) and retry once the
+      // active pass / stream has settled.
+      // ...unless a landing is being held. This retry is an internal
+      // continuation, not a participant asking for a paint, so it must not be
+      // the thing that spends the badge — it used to re-arm itself every 50ms
+      // and paint the moment the quiet window closed, which is the exact
+      // flicker quiet landing exists to prevent. The tap runs the pass.
+      if (this.#forceNextRender && this.#heldRenders === 0) {
+        setTimeout(() => this.requestRender(), 50)
+      }
+      return
+    }
+    this.#forceNextRender = false
+
+    // Rendering owns the main thread until this pass publishes its matching
+    // cell snapshot. Post-paint layers (agent bees today) use the pass id to
+    // reject a replayed cell-count from the layer the participant just left.
+    const renderPassId = ++this.#tileRenderPassId
+    this.emitEffect('render:tiles-target', { locationKey, renderPassId })
+
+    // Only a pass that actually proceeds may invalidate shader hover. One
+    // navigation queues several duplicate renders; a late duplicate commonly
+    // reaches the unchanged-page return above. Clearing hover before that
+    // return left the stationary pointer's tile with a one-row band until the
+    // cursor exited and re-entered. A real pass emits render:cell-count when it
+    // completes, so TileOverlayDrone recovers hover against the fresh map.
+    this.shader?.setHoveredIndex(-1)
+
+    // From here on we own the render for this target. Wrap the rest in
+    // try/finally so the flag is reliably cleared even on early return
+    // or throw. (The return statements throughout the body below will
+    // run finally; the implicit `return` at function end too.)
+    this.#activeRenderTarget = locationKey
+    try {
+      // THE ARRIVAL GATE — when this layer opens as a view, the view must be
+      // the FIRST thing on screen, so the gate holds this paint until
+      // view.bee's verdict has landed (and the surface has flipped). Then it
+      // paints anyway, under the covered canvas: the paint is not waste —
+      // the resolved cells are the tile roster every deck-shaped view (and
+      // the decoration hydration walk) feeds on, and the mesh is what the
+      // escape back to hexagons reveals with no repaint. Skipping it starved
+      // the views of their own tiles (the "no tiles until toggled back" bug).
+      const arrival = await this.#arrivalGate(passSegments, locationKey !== this.renderedLocationKey)
+      if (arrival === 'abandon') return
+      return await this.#renderFromSynchronizeInner(lineage, locationKey, axial, passSegments)
+    } finally {
+      if (this.#activeRenderTarget === locationKey) this.#activeRenderTarget = null
+      // PUT THE HOVER BACK. Clearing it above is only correct for the DURATION
+      // of the pass — the index it names is stale while the map is being
+      // replaced. Leaving it cleared afterwards was the collapse: the pointer
+      // has not moved, so the overlay keeps the tile's icons on screen (two
+      // rows of them), while the renderer, told nothing is hovered, drops the
+      // band back to the resting one-row pill underneath them. Recovery used to
+      // depend entirely on a round trip — render:cell-count → the overlay's
+      // #recoverHover → tile:hover — which a pass that bails, or one whose
+      // recovery is refused mid-navigation, never completes. Re-deriving from
+      // the label we already hold needs no round trip and is correct whatever
+      // the pass did: by now #hoverRevealLabel is either the tile still under
+      // the cursor, or null because the level it belonged to is gone.
+      this.#applyHover(this.#hoverRevealLabel)
+    }
+  }
+
+  /** ORDERING, not suppression: may this pass paint yet?
+   *
+   *  'paint'   — go ahead (the normal case; on a default-view layer this
+   *              means the verdict has landed and the surface has already
+   *              flipped, so the paint lands under the mounted view).
+   *  'abandon' — the participant navigated away while the gate waited; a
+   *              newer pass owns the render, touch nothing.
+   *
+   *  The mark is read synchronously from the warm decoration index — every
+   *  in-hive navigation warmed it when the parent page hydrated this cell.
+   *  A NAVIGATION pass whose index comes up empty pays one async decoration
+   *  read to be sure: the index holds no negative entries, and the ROOT is
+   *  never in it at all (segments = [] signs the root location, the one
+   *  place the child-hydration walks can never warm) — mid-session arrivals
+   *  at the root were exactly the flash the boot-only probe missed.
+   *  Invalidation passes at an unchanged location skip the read.
+   *
+   *  The OPEN decision stays with view.bee — its verdict inherits every
+   *  gate (dormant, hidden, scope, roster). Holding the paint for it is
+   *  what makes the arrival seamless: the splash's first ready signal is
+   *  the verdict, the view mounts, and only then do the hexagons paint —
+   *  invisibly, under the covered canvas, keeping the tile roster and the
+   *  hydration walk fed and the escape-to-hexagons instant. */
+  async #arrivalGate(passSegments: readonly string[], isNavigation: boolean): Promise<'paint' | 'abandon'> {
+    // THE CASCADE: own mark or the nearest ancestor's — a branch default
+    // covers every page under it, so the gate must hold on those pages too.
+    // An explicit `hexagons` mark is the opt-out: the hexagons ARE the
+    // surface here, so paint straight away.
+    let want = defaultViewWithinSegments(passSegments)
+    if (!want && isNavigation) {
+      want = await defaultViewWithinAt(passSegments)
+      if (!this.#segmentsAreCurrent(passSegments)) return 'abandon'
+    }
+    if (!want || want === HEXAGONS_SURFACE) return 'paint'
+    const vm = get<{ mode: string; is(name: string): boolean }>('@hypercomb.social/ViewMode')
+    if (!vm || vm.is(want)) return 'paint'
+    // The mark says a view opens here but the arbiter has not ruled for THIS
+    // address yet — hold the paint until the verdict lands (or the timeout
+    // releases it). Whatever the verdict says, painting is then correct:
+    // opened → under the view; declined → the hexagons ARE the surface.
+    // Last-value replay makes an already-emitted verdict resolve
+    // synchronously.
+    await this.#awaitArrivalVerdict(passSegments)
+    if (!this.#segmentsAreCurrent(passSegments)) return 'abandon'
+    return 'paint'
+  }
+
+  /** Resolves when view.bee announces the arrival verdict for `segments`,
+   *  or after ARRIVAL_GATE_MS. Verdicts for other addresses (a stale
+   *  replay, a racing navigation) are ignored — only a matching one, of
+   *  either outcome, releases the gate early. */
+  #awaitArrivalVerdict(segments: readonly string[]): Promise<void> {
+    return new Promise<void>(resolve => {
+      let done = false
+      let unsub: (() => void) | null = null
+      let timer: ReturnType<typeof setTimeout> | null = null
+      const finish = (): void => {
+        if (done) return
+        done = true
+        unsub?.()
+        if (timer) clearTimeout(timer)
+        resolve()
+      }
+      unsub = EffectBus.on<{ segments?: readonly string[] }>('view:arrival', p => {
+        const got = p?.segments
+        if (!Array.isArray(got) || got.length !== segments.length) return
+        for (let i = 0; i < segments.length; i++) {
+          if (String(got[i]) !== String(segments[i])) return
+        }
+        finish()
+      })
+      if (!done) timer = setTimeout(finish, ARRIVAL_GATE_MS)
+    })
+  }
+
+  // The body of renderFromSynchronize, factored out so the dedup wrapper
+  // above stays readable. All the existing logic lives here unchanged.
+  readonly #renderFromSynchronizeInner = async (lineage: any, locationKey: string, axial: any, passSegments: readonly string[]): Promise<void> => {
+    // Re-narrow pixi handles. The outer renderFromSynchronize already
+    // guarded these but TS can't carry the narrowing across the function
+    // boundary. Cheap re-check.
+    if (!this.pixiApp || !this.pixiContainer || !this.pixiRenderer) {
+      this.clearMesh("synchronize: pixi handles lost")
+      return
+    }
+
+    // Refresh peer-presence glow once per pass so any cell built below
+    // (full, streamed, or incremental) reads a current crowd count.
+    this.#refreshPresenceGlow()
+
+    // note: init layer + atlases (and reset shader if renderer changes)
+    if (!this.layer) {
+      this.layer = new Container()
+      this.pixiContainer.addChild(this.layer)
+
+      // 16×16 = 256 slots — MUST be >= the imageAtlas slot count (and >= the
+      // realistic on-screen tile count) so hives larger than 64 tiles do NOT
+      // wrap the label atlas. Wrapping bumps evictionGeneration, which
+      // applyGeometry checks against #bakedLabelAtlasGen, so every wrap defeats
+      // its early-return → the whole grid re-bakes its labels on EVERY render
+      // pass (O(tiles) thrash). At 64 slots a 79-tile hive thrashed
+      // continuously; at 256 it builds once and the cache holds.
+      this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 16, 16)
+      this.attachLabelResolver(this.atlas)
+      this.atlas.setPivot(this.#pivot)
+      if (this.#warmLabels.length) this.atlas.seed(this.#warmLabels)
+      this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 16, 16)
+      this.shader = null
+      this.#primeEmptyRenderPipeline()
+      this.#invalidateAllLabelDerivedState()
+      this.atlasRenderer = this.pixiRenderer
+    } else if (!this.atlas || this.atlasRenderer !== this.pixiRenderer) {
+      // 16×16 = 256 slots — MUST be >= the imageAtlas slot count (and >= the
+      // realistic on-screen tile count) so hives larger than 64 tiles do NOT
+      // wrap the label atlas. Wrapping bumps evictionGeneration, which
+      // applyGeometry checks against #bakedLabelAtlasGen, so every wrap defeats
+      // its early-return → the whole grid re-bakes its labels on EVERY render
+      // pass (O(tiles) thrash). At 64 slots a 79-tile hive thrashed
+      // continuously; at 256 it builds once and the cache holds.
+      this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 16, 16)
+      this.attachLabelResolver(this.atlas)
+      this.atlas.setPivot(this.#pivot)
+      if (this.#warmLabels.length) this.atlas.seed(this.#warmLabels)
+      this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 16, 16)
+      this.shader = null
+      this.#primeEmptyRenderPipeline()
+      this.#invalidateAllLabelDerivedState()
+      this.atlasRenderer = this.pixiRenderer
+    }
+
+    // THE SAME-NAME / DIFFERENT-LINEAGE BOUNDARY. The caches below are keyed
+    // by label for hot render-loop access, but a label is not an appearance
+    // address. Without this reset, adding `/team/jaime` with a new picture can
+    // repaint `/friends/jaime`, and the warm back-nav path then writes the
+    // second picture into the first page's cached cell. Titles share the same
+    // raw-label atlas key, so flush glyphs in the same transaction.
+    this.#enterDerivedLocation(locationKey)
+
+    // ── back-nav fast path ─────────────────────────────────
+    // SYNCHRONOUS restore. We have everything in memory; awaiting OPFS
+    // reads or atlas decodes for cells whose data we already cached
+    // turns "show 3 tiles you saw 2 seconds ago" into 400ms of latency.
+    // Every step here MUST be sync. Anything that needs async work (atlas
+    // refill if a slot was evicted, viewport read if no snapshot) is
+    // kicked off in the background and only triggers a re-render if it
+    // produced new state.
+    if (
+      locationKey !== this.renderedLocationKey
+      && !(this.#tagFlattenResults && this.#tagFlattenResults.length > 0)
+    ) {
+      const cached = this.#layerCellsCache.get(locationKey)
+      // Sub-layer locations no longer mint OPFS folders (layer-primitive
+      // doctrine), so `lineage.explorerDir()` returns null for them and
+      // `#layerDirCache` is never populated. The fast path used to
+      // require `cachedDir`, which silently disabled it for every
+      // sub-layer back-click — every back to /alpha, /dolphin, etc.
+      // hit the slow path (full layer fetch + cell stream + atlas refill)
+      // when the user perceived the operation as just "redraw what was
+      // there 2 seconds ago." Drop the cachedDir requirement and gate
+      // the dir-dependent side effects (viewport OPFS read, vp.setDir,
+      // image refill) on its presence below.
+      const cachedDir = this.#layerDirCache.get(locationKey)
+      // An empty page is still a completely cached page. Requiring at least
+      // one cell sent back-navigation through the full async resolver even
+      // though there was nothing to resolve or paint.
+      if (cached) {
+        // Capture the OUTGOING layer's live VP state into our cache so
+        // a future return to that layer restores where the user actually
+        // left it (pan/zoom/meshOffset they applied this session). VP's
+        // OPFS write is debounced; the in-memory cache stays stale until
+        // we explicitly sync it.
+        this.#syncCacheFromVP(this.renderedLocationKey)
+        // abort any stream still running for the previous layer
+        ++this.#streamToken
+
+        // Hide the OUTGOING layer BEFORE the new location's viewport is
+        // applied. Without this the old tiles visibly RESIZE (the new
+        // zoom/pan lands on the still-visible old content) and then
+        // vanish when the cached cells swap in. Same ordering contract
+        // as the slow layer-change path: old level out, then viewport,
+        // then content, then reveal (:1745 below). In the all-sync case
+        // the hide/show happens within one frame — no flicker.
+        if (this.layer) this.layer.visible = false
+
+        // Viewport: prefer the cached snapshot (sync). A visited page and a
+        // prepared page both seed this cache. A legacy partial cache may lack
+        // it; that must not turn Back into a storage read.
+        let appliedSnap: ViewportSnapshot | null = null
+        const vpSnap = this.#layerViewportCache.get(locationKey)
+        if (vpSnap) {
+          // appliedSnap must be what was ACTUALLY applied — the sanitizer
+          // may have rejected components of the cached snapshot.
+          appliedSnap = this.#applyViewportFromSnapshot(vpSnap)
+        } else {
+          // Keep the restore synchronous. A later slow refresh can populate
+          // viewport state for this legacy/partial cache entry.
+          appliedSnap = null
+        }
+        // Explicit set — never inherit from prior render. The back-nav
+        // fast path's mesh ALREADY exists, so we only need to mark
+        // recenter pending; the mesh.position was already set by
+        // #applyViewportFromSnapshot when snap had a meshOffset.
+        this.#pendingRecenter = !appliedSnap?.meshOffset
+        this.#pendingFirstVisitFit = this.#preparedFirstVisitFit.delete(locationKey)
+
+        const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
+        // Tell VP which location it's reporting to. Viewport is keyed by
+        // lineage segments in the sig-keyed __viewport__ store — works for
+        // sub-layers without an OPFS dir and for root (segments=[] → '/').
+        vp?.setCurrentLocation?.(lineage.explorerSegments?.() ?? [])
+
+        this.renderedLocationKey = locationKey
+        this.cachedCellNames = cached.cellNames
+        this.cachedLocalCellSet = cached.localCellSet
+        this.cachedBranchSet = cached.branchSet
+        this.#layoutMode = this.#readLayoutMode(locationKey)
+        this.#pendingRemoves.clear()
+        // No auto-recenter. The mesh offset was saved alongside pan/zoom
+        // when the user first loaded this layer (or when they explicitly
+        // ran navigation.recenter). #applyViewportFromSnapshot above
+        // restored snap.meshOffset onto hexMesh.position — that's the
+        // single source of truth for where the mesh sits. Only the
+        // explicit recenter command (#applyCursorLayout / fitToScreen)
+        // sets pendingRecenter; layer change alone does not.
+        this.renderedCells.clear()
+
+        // SYNC restore per-cell properties from per-label caches. No
+        // OPFS, no atlas decode. If a cell's atlas slot was evicted
+        // while we were away, mark it for background top-up.
+        const atlas = this.imageAtlas
+        const evictedSigs: string[] = []
+        let hasUnresolvedLocalImage = false
+        for (const cell of cached.cells) {
+          const label = cell.label
+          // EXTERNAL cells restore with the imageSig they were cached
+          // with (bound from the publisher's visuals). Top up from the
+          // coherent label cache only when the cached object predates a
+          // derivation, and queue eviction refills the same as local
+          // cells — previously externals were skipped here, so an
+          // atlas-evicted peer image never re-painted.
+          if (cell.external) {
+            if (!cell.imageSig) {
+              const sig = this.cellImageCache.get(label) ?? undefined
+              if (sig) cell.imageSig = sig
+            }
+            if (cell.imageSig && atlas && !atlas.hasImage(cell.imageSig) && !atlas.hasFailed(cell.imageSig)) {
+              evictedSigs.push(cell.imageSig)
+            }
+            this.renderedCells.set(label, cell)
+            continue
+          }
+          if (this.cellImageCache.has(label)) {
+            const sig = this.cellImageCache.get(label) ?? undefined
+            cell.imageSig = sig
+            cell.borderColor = this.cellBorderColorCache.get(label)
+            cell.hasLink = this.cellLinkCache.get(label) ?? false
+            cell.hasSubstrate = this.cellSubstrateCache.get(label) ?? false
+            cell.hideText = this.cellHideTextCache.get(label) ?? false
+            if (sig && atlas && !atlas.hasImage(sig) && !atlas.hasFailed(sig)) {
+              evictedSigs.push(sig)
+            }
+          }
+          // A cached null/absent derivation is not proof that the layer has no
+          // picture. It may be the stale-index state that edit+save repairs.
+          // Back-nav used to refresh ONLY known sigs evicted from the atlas,
+          // permanently excluding exactly these blank cells from healing.
+          if (!cell.imageSig) hasUnresolvedLocalImage = true
+          this.renderedCells.set(label, cell)
+        }
+
+        // Atlas slots are opportunistic. A child preload can reuse a parent's
+        // slot while the parent is off-screen; that must not delay Back.
+        if (this.layer) this.layer.visible = true
+
+        // applyGeometry has no internal awaits; the `async` modifier
+        // just wraps the return — the body runs synchronously. Don't
+        // await it; one less microtask hop.
+        void this.applyGeometry(cached.cells)
+        this.renderedCellsKey = this.buildCellsKey(cached.cells)
+        this.#slots.seed({
+          names: cached.cellNames,
+          localCells: cached.localCellSet,
+          branches: cached.branchSet,
+          mode: this.#layoutMode,
+        })
+
+        this.#emitRenderTags(cached.cells)
+        // Stays AFTER applyGeometry deliberately. applyGeometry now publishes
+        // the count itself, ahead of its restore-refit, which is what fixes the
+        // ordering — but it early-returns before that emit on three paths (0
+        // cells, unchanged cells-key, missing atlas), and back-nav hits the
+        // unchanged-key bail routinely. This unconditional emit is the safety
+        // net for those. Moving it BEFORE applyGeometry is wrong: listeners
+        // that measure live bounds (the control bar's global-fit `arrived`)
+        // would then read the OUTGOING page's geometry.
+        this.emitEffect('render:cell-count', { ...this.#buildCellCountPayload(cached.cells), settled: true })
+
+        // Child preloading can reuse atlas slots that belonged to this parent.
+        // Repair those slots after the cached paint, never between the Back
+        // gesture and that paint. Repaint only if the parent is still visible.
+        if (evictedSigs.length > 0 || hasUnresolvedLocalImage) {
+          void (async () => {
+            try {
+              // Force image-less cache entries through the canonical layer
+              // check in loadCellImages instead of returning the remembered
+              // null before reaching the slow resolver.
+              const force = hasUnresolvedLocalImage
+                ? new Set(cached.cells.filter(c => !c.external && !c.imageSig).map(c => c.label))
+                : undefined
+              await this.loadCellImages(cached.cells, cachedDir ?? null, force)
+              if (this.renderedLocationKey === locationKey) {
+                await this.applyGeometry(cached.cells, true)
+              }
+            } catch { /* cached text paint remains usable */ }
+          })()
+        }
+
+        // background: refresh cursor for undo/redo readiness. Renderer
+        // doesn't need it to draw — cells are already filtered.
+        void (async () => {
+          try {
+            const cursorService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as HistoryCursorService | undefined
+            if (!cursorService) return
+            const sigLoc = await this.computeSignatureLocation(lineage)
+            if (sigLoc.sig) await cursorService.load(sigLoc.sig)
+          } catch { /* best-effort */ }
+        })()
+
+        return
+      }
+    }
+
+    const fsRev = Number(lineage.changed?.() ?? 0)
+    const meshRev = this.meshCellsRev
+
+    const isStale = (): boolean => {
+      const currentKey = String(lineage.explorerLabel?.() ?? '/')
+      const currentRev = Number(lineage.changed?.() ?? 0)
+      const currentMeshRev = this.meshCellsRev
+      return currentKey !== locationKey || currentRev !== fsRev || currentMeshRev !== meshRev
+    }
+
+    // Read-only explorer dir lookup. Layer-as-primitive — hierarchy
+    // lives in layer.children, not in `hypercomb.io/<path>/` folders.
+    // The renderer no longer mints folders to hold viewport state;
+    // viewport persistence lives keyed by lineageSig (flat), not by
+    // a parallel folder tree. A null dir is the new normal for any
+    // sub-layer location.
+    const dir: FileSystemDirectoryHandle | null = await lineage.explorerDir()
+    if (isStale()) {
+      this.renderQueued = true
+      return
+    }
+    // Layer-as-primitive: a missing OPFS dir is the new normal — tile
+    // membership lives in the lineage's history bag, not on disk. Sub-
+    // layer locations that don't have a `__hive__/...` mirror still need
+    // to render from `layer.children`. The old `if (!dir) return` bail
+    // was the path that turned /dolphin (and every other sub-layer)
+    // into a blank canvas after the OPFS-dir migration.
+    //
+    // Downstream code that genuinely requires `dir` (image loaders,
+    // viewport persistence per dir) is gated on its presence — null
+    // dir means "no on-disk shortcut, fall back to layer-only resolve."
+    if (dir) {
+      // populate back-nav fast-path dir cache (only when we have a real dir)
+      this.#layerDirCache.set(locationKey, dir)
+    }
+
+    // ── tag flatten override ──────────────────────────────
+    // The filter FOLLOWS you: entering a match re-roots the walk at wherever
+    // you landed, so the flatten narrows as you drill in rather than redrawing
+    // the same set at every level. A moved location means the scan is stale.
+    // A GATHERED SET is only ever the view you raised it from. Clicking one of
+    // its tiles travels to that tile's real home — and the audit is over, so
+    // the gather clears rather than following you there and painting the same
+    // set again at the destination.
+    if (this.#gathered) {
+      const segs = this.resolve<any>('lineage')?.explorerSegments?.() ?? []
+      if ([...segs].join('/') !== this.#gatherAnchorKey) this.#clearGather()
+    }
+
+    if (this.#narrowing() && !this.#gathered) {
+      const segs = this.resolve<any>('lineage')?.explorerSegments?.() ?? []
+      if ([...segs].join('/') !== this.#filterScanKey) await this.#scanTagsAcrossPages()
+    }
+
+    // Flatten state describes ONE flatten render and nothing else. Drop it here
+    // so an ordinary page can never inherit the previous filter's paths — a
+    // stale entry would redirect (or refuse) a click on an unrelated tile. The
+    // flatten branch below repopulates before it emits.
+    this.#flatPathByLabel.clear()
+    this.#filterBlockedLabels.clear()
+
+    // An active filter that matched nothing in scope shows an EMPTY mesh — not
+    // a silent fall-through to the unfiltered page. We deliberately skip
+    // #emitRenderTags here so the last tag list (with the active filter pill)
+    // stays on screen, leaving a way to clear the filter.
+    if (this.#narrowing() && this.#tagFlattenResults && this.#tagFlattenResults.length === 0) {
+      this.clearMesh('tag-filter: no matches in scope')
+      this.renderedCellsKey = `tag-flatten:${this.#filterScope}:${this.#filterScanKey ?? ''}:` + this.#narrowKey()
+      this.renderedLocationKey = locationKey
+      this.renderedCells.clear()
+      this.emitEffect('render:cell-count', { ...this.#buildCellCountPayload([]), settled: true })
+      this.rendering = false
+      return
+    }
+
+    // When tag filter is active, use pre-scanned cross-page results instead of explorer
+    if (this.#tagFlattenResults && this.#tagFlattenResults.length > 0) {
+      const flatResults = this.#tagFlattenResults
+      const cellNames = flatResults.map(r => r.label)
+      const flatSeedSet = new Set(cellNames)
+
+      const axial = this.resolve<any>('axial')
+      if (!axial) { this.rendering = false; return }
+
+      // A flattened match keeps its structural truth: a tile with children still
+      // renders as a branch, so a filter never turns a parent into a leaf whose
+      // click opens the editor. Entering it is gated separately (below) on
+      // whether the subtree actually holds a match.
+      const flatBranchSet = new Set(flatResults.filter(r => r.hasChildren).map(r => r.label))
+      this.#flatPathByLabel = new Map(flatResults.map(r => [r.label, r.path]))
+      this.#filterBlockedLabels = new Set(
+        flatResults.filter(r => r.hasChildren && r.matchesInside === 0).map(r => r.label),
+      )
+
+      const maxCells = Math.min(cellNames.length, typeof axial.items.size === 'number' ? axial.items.size : cellNames.length)
+      const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, flatSeedSet, flatBranchSet)
+      if (cells.length === 0) { this.clearMesh(`flat-seed: axial yielded 0 cells (names=${cellNames.length})`); this.rendering = false; return }
+
+      // load images (best-effort). Runs even when dir is null —
+      // loadCellImages only needs the dir for tags/link reads (already
+      // null-tolerant), and EXTERNAL (peer) tiles resolve images purely
+      // from the swarm's streamed sigs + __resources__. Gating on dir
+      // left a witness refreshing at a foreign location (no local dir)
+      // with permanently imageless tiles.
+      await this.loadCellImages(cells, dir)
+
+      this.cachedCellNames = cellNames
+      this.cachedLocalCellSet = flatSeedSet
+      this.cachedBranchSet = flatBranchSet
+      // The scan root is part of the identity of a flatten now — without it a
+      // drill-down into a match would reuse the parent level's geometry.
+      this.renderedCellsKey = `tag-flatten:${this.#filterScope}:${this.#filterScanKey ?? ''}:` + this.#narrowKey()
+      this.renderedLocationKey = locationKey
+
+      this.renderedCells.clear()
+      for (const cell of cells) this.renderedCells.set(cell.label, cell)
+      await this.applyGeometry(cells)
+
+      this.#emitRenderTags(cells)
+      // Listeners (TileSelection, TileOverlay) crash on undefined coords
+      // when payload omits them. Send the full shape via the helper.
+      this.emitEffect('render:cell-count', { ...this.#buildCellCountPayload(cells), settled: true })
+      this.rendering = false
+      return
+    }
+
+    // Tile membership is layer-only (project_layer_is_primitive). The
+    // layer's children slot is the sole source of truth for "what tiles
+    // exist at this location". OPFS dirs at hypercomb.io/<name>/ are a
+    // retired artifact of the legacy add path; they may still exist
+    // from old sessions but the render path no longer consults them.
+    //
+    // localCells stays empty here. It gets populated below from the
+    // layer's children once the cursor + history are resolved. Same
+    // identifier kept so the rest of the render path (which uses it as
+    // "what's owned here") doesn't need to be rewritten.
+    const localCells: string[] = []
+    if (isStale()) {
+      this.renderQueued = true
+      return
+    }
+
+    // ATOMIC MEMBERSHIP — `union` starts EMPTY and is filled from the LAYER
+    // only (a render = the current layer's children, nothing else). The
+    // legacy meshCells seed was REMOVED here: it injected the PREVIOUS
+    // location's peers across a navigation (meshCells is repopulated async
+    // by refreshMeshCells, so on a fresh nav it still held the old sig's
+    // cells), and clearMesh never cleared it — a cross-location leak. Swarm
+    // peers now arrive solely through the TileSourceRegistry preview path
+    // below, which is location-scoped by `segments`, so a peer for /A is
+    // structurally absent from /B's resolve.
+    const union = new Set<string>()
+
+    const localCellSet = new Set<string>()
+
+    // Preview tile sets — populated AFTER the layer-filter block runs
+    // (~line 1750+). Why: dedup against localCellSet has to happen on
+    // the post-filter set, otherwise a peer tile whose name matches
+    // an OPFS dir that the layer says "doesn't render" gets dropped
+    // from BOTH the local pass (because it's in OPFS) AND the layer
+    // pass (because the layer wiped localCellSet). The user then sees
+    // neither — even though the swarm has the data.
+    const ephemeralCellSet = new Set<string>()
+    const peerCellSet = new Set<string>()
+
+    // branchSet holds names whose tile has its own sub-tiles (so a
+    // click drills in instead of opening the editor). Starts empty;
+    // populated from layer sublayers once the cursor's content is
+    // resolved below. The old OPFS-walking #computeBranchSet path is
+    // retired — branches are a property of the merkle tree, not OPFS.
+    let branchSet: Set<string> = new Set()
+
+    // note: apply history — filter out cells whose last operation is "remove"
+    // When a cursor is rewound, also compute divergence (future adds/removes)
+    // Skip when clipboard view is active — clipboard labels are authoritative
+    const historyService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
+    const cursorService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as HistoryCursorService | undefined
+    this.#divergenceFutureAdds = new Set<string>()
+    this.#divergenceFutureRemoves = new Set<string>()
+    this.#cursorPropsOverride = null
+    this.#cursorReconstructionKey = ''
+    // Names listed in the cursor's current layer's `children` slot. When
+    // available, this is the authoritative membership for the location —
+    // both at REWOUND (replace union outright) and at HEAD (used to
+    // reconcile pendingRemoves against layer truth, so layer-only deletes
+    // honored and layer-restoring undos drop stale pending entries).
+    let layerAllowed: Set<string> | null = null
+    // Completeness-gate state, read after the layer block below. Default
+    // to "complete" so clipboard / empty / non-layer paths never gate —
+    // only the layer-content path flips these when a resolution is partial.
+    let childResolveComplete = true
+    let childResolveExpected = 0
+    let gateParentSig = ''
+    // Full child sigs that failed to resolve this pass — painted as
+    // unavailable-placeholders when the completeness gate exhausts.
+    let childResolveUnresolved: string[] = []
+    // Source-diagnostic: children count from the memoized currentLayer()
+    // (srcStaleLen) vs the fresh head sig (srcFreshLen). A divergence is the
+    // "stale content" two-stage path (renders the subset, then the full set).
+    let srcStaleLen = -1
+    let srcFreshLen = -1
+    if (historyService) {
+      const sig = await this.computeSignatureLocation(lineage)
+
+      // Real-time supersedes preloader: cursor.load runs a bag scan +
+      // warmupHistoricalResources walk that can take 600ms-1.5s on a
+      // 100-marker lineage — and the ROOT bag gains a marker on every
+      // change made anywhere, so at root this is the whole edit history.
+      // Fire-and-forget is NOT enough: its hundreds of OPFS reads, JSON
+      // parses, and hash continuations share the main thread and the
+      // OPFS backend with the critical render, stretching every awaited
+      // hop of first paint. Defer the kick to IDLE so the render wins
+      // the thread; the user only feels cursor cost when they invoke
+      // /undo or open the history viewer.
+      if (cursorService && sig.sig) {
+        const cursorSig = sig.sig
+        const kick = () => { void cursorService.load(cursorSig).catch(() => {}) }
+        const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback
+        if (typeof ric === 'function') ric(kick, { timeout: 4000 })
+        else setTimeout(kick, 1500)
+      }
+
+      if (cursorService) {
+        // Primary content source: lineage.currentLayer() is memoized per
+        // fsRevision and returns in <1ms from in-memory state. It IS the
+        // live layer for the current location at HEAD. The cursor path
+        // is only consulted when the user has actively rewound.
+        let content: LayerContent | null = null
+        // Did currentLayer() actually RESOLVE (vs throw)? A definitive
+        // "no layer here" (resolved → null) means the location owns zero
+        // tiles, and we must clear the union seed below so a freshly-
+        // navigated empty location doesn't inherit the previous one's
+        // tiles. A THROW (transient lineage hiccup) leaves state untouched
+        // so we never blank a populated location on a momentary error.
+        let layerLookupSucceeded = false
+        try {
+          const live = await (lineage as { currentLayer?: () => Promise<LayerContent | null> }).currentLayer?.()
+          layerLookupSucceeded = true
+          if (live && typeof (live as { name?: unknown }).name === 'string') {
+            content = live as LayerContent
+          }
+        } catch { /* lineage unavailable — fall through to cursor */ }
+
+        // Rewound view: if the user has scrubbed history (cursor.position
+        // < cursor.total) the cursor points at a historical layer and
+        // overrides the live content. cursorState is only meaningful when
+        // cursor.load has already completed for this location — typically
+        // true because the user spent time here before rewinding. On a
+        // freshly-navigated-to location the cursor's state is zeroed
+        // (position=0, total=0) which is NOT rewound, so live content wins.
+        const cursorState = cursorService.state
+        const isRewound = (cursorState?.total ?? 0) > 0
+          && (cursorState?.position ?? 0) < (cursorState?.total ?? 0)
+        if (isRewound) {
+          const cursorContent = await cursorService.layerContentAtCursor().catch(() => null)
+          if (cursorContent) {
+            content = cursorContent
+          } else if ((cursorState?.position ?? 0) === 0) {
+            // Pre-history view (case A from the previous implementation):
+            // user has rewound past every marker. Render empty.
+            content = null
+            union.clear()
+            localCellSet.clear()
+          }
+        }
+
+        // PRUNE MODE — the layer of deleted tiles (history/prune.service.ts).
+        //
+        // Same seam as rewinding, and for the same reason: a layer is just
+        // `{name, children}`, so "the tiles this location threw away" IS a
+        // layer and the entire pipeline below — child-name resolution,
+        // images, layout, hit-testing — works on it unchanged. Nothing here
+        // knows what prune mode is beyond "somebody handed me a different
+        // layer", which is the only way a mode should ever reach a renderer.
+        //
+        // Placed AFTER the rewind branch so scrubbing history while pruning
+        // cannot half-apply: the deleted layer is what you are standing on
+        // until you leave the mode.
+        const pruneService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/PruneService') as
+          { active?: boolean; names?: readonly string[]; layerFor?: (locationSig: string) => LayerContent | null } | undefined
+        let pruneLayerActive = false
+        if (pruneService?.active && pruneService.layerFor) {
+          const prunedLayer = pruneService.layerFor(sig.sig)
+          if (prunedLayer) {
+            content = prunedLayer
+            pruneLayerActive = true
+            union.clear()
+            localCellSet.clear()
+            // These tiles are gone — paint them with the treatment that
+            // already means exactly that (divergence 2, "future-remove").
+            // The mode borrows the existing visual vocabulary rather than
+            // minting a ghost of its own.
+            this.#divergenceFutureRemoves = new Set(pruneService.names ?? [])
+          }
+        }
+
+        if (content) {
+          // Layer-as-primitive: the layer's children list is the truth at
+          // every position (HEAD and REWOUND alike). Cells in OPFS but not
+          // in the layer are layer-removed (e.g. /remove just landed) and
+          // must not render; cells in the layer but not in OPFS are still
+          // imported so the merkle-stored content is recoverable.
+          //
+          // The cell:added incremental path (#queueIncremental) handles
+          // the brief window between user-action and cascade-landing — new
+          // cells render immediately via the slot machine before the next
+          // computeRender re-fires from cursor.onNewLayer.
+          const parentSegments = (lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
+          // parentLayerSig MUST be the parent layer's CONTENT sig — that is
+          // the key commitLayer writes the children-manifest under
+          // (__manifests__/<layerContentSig>). Prefer the cursor's
+          // currentLayerSig (already the content sig; points at the
+          // historical layer when rewound). When the cursor hasn't loaded
+          // yet — its load is deferred to idle, so this is the COMMON case
+          // on first paint — fall back to history's head sig for this
+          // location, NOT lineage.currentSig(): currentSig() returns the
+          // LOCATION/lineage sig, a DIFFERENT value. Reading the manifest
+          // under the location sig misses on every first render, dropping
+          // to the per-child path that loses not-yet-cached children — the
+          // "renders 10, then 13 a second later" bug. latestMarkerSigFor is
+          // a hot cache hit here: currentLayer() above already warmed
+          // #latestSigByLineage for this location.
+          // CROSS-LOCATION SAFETY: cursor.currentLayerSig is authoritative
+          // ONLY when REWOUND (it points at the historical layer being
+          // viewed). At HEAD its idle-deferred load LAGS a fresh navigation,
+          // still pointing at the location we came FROM — which mis-keys the
+          // memo and the manifest and renders the previous location's tiles
+          // (the cross-location leak). At HEAD, read the CURRENT location's
+          // head sig below (latestMarkerSigFor — a hot cache hit, location-
+          // correct), never the cursor sig.
+          let parentLayerSig: string = isRewound ? (cursorService.currentLayerSig || '') : ''
+          // The pass's LOCATION sig — the same source (currentSig) that picked
+          // `content`, so it always matches the cells this pass paints. The
+          // children-readiness seed keys on THIS, never on segments/labels,
+          // whose update can straddle the navigation (the memo-wipe bug).
+          let passLocSig = ''
+          try {
+            passLocSig = await (lineage as { currentSig?: () => Promise<string> }).currentSig?.() ?? ''
+          } catch { /* leave empty — seed skipped, compute seeds instead */ }
+          // The prune layer is SYNTHETIC — it was never committed, so it has
+          // no head sig and no children manifest. Leaving parentLayerSig as
+          // the location's real head would key both the manifest and the
+          // complete-child-names memo under a layer that is NOT the one being
+          // rendered: when the deleted set happens to be the same SIZE as the
+          // live set, the memo's size guard passes and the hive paints the
+          // LIVE tiles while standing on the deleted layer (observed with one
+          // ghost and one live tile). An empty sig is the honest answer — no
+          // memo read, no manifest read, no memo write; resolve per child.
+          if (pruneLayerActive) parentLayerSig = ''
+          else if (!parentLayerSig && passLocSig && historyService?.latestMarkerSigFor) {
+            try {
+              const label = String((lineage as { explorerLabel?: () => string }).explorerLabel?.() ?? '/')
+              parentLayerSig = await historyService.latestMarkerSigFor(passLocSig, label) ?? ''
+            } catch { /* leave empty */ }
+          }
+          // SOURCE DIAGNOSTIC ONLY — record the memoized currentLayer() child
+          // count. An earlier "upgrade `content` to getLayerBySig(parentLayerSig)"
+          // guard was REMOVED here: parentLayerSig prefers cursor.currentLayerSig,
+          // whose cursor.load is idle-DEFERRED, so right after a navigation it
+          // still points at the PARENT location. Reading its layer replaced the
+          // child's content with the parent's — rendering the parent's tiles at
+          // the child location, and the just-left layer's tiles after navigating
+          // back ("tiles left behind after navigate"). currentLayer() resolves
+          // currentLayerAt(currentSig()) and is LOCATION-correct; trust it. Any
+          // future stale-content fix must read the CURRENT location's head
+          // (latestMarkerSigFor(currentLocSig)), never a cross-location sig.
+          srcStaleLen = Array.isArray(content.children) ? content.children.length : 0
+          srcFreshLen = srcStaleLen
+          // Record the parent sig so the completeness gate below can key
+          // its retry budget on the LAYER (content), not the location.
+          gateParentSig = parentLayerSig
+          // Children-readiness seed — keyed by the pass's LOCATION SIG
+          // (currentSig — the source that picked `content`, so it matches
+          // the painted cells even mid-popstate). Never by segments/labels
+          // (they straddle navigations → memo wipes) and never by this
+          // pass's parentLayerSig (cursor-derived, can lag). Seeding before
+          // the shade bits bake means a revisited page paints bright on its
+          // FIRST frame — each page shades at most once per session.
+          // #computeChildrenReadiness validates the memo against the real
+          // parent sig and drops it only when content actually changed.
+          if (CHILD_SHADE && passLocSig) {
+            // Stamp the pass's address for the readiness compute: the location
+            // sig that picked `content`, the segments that name it, and the
+            // head layer whose children we will prove. The compute reads THESE
+            // — never lineage — so its keys always describe the cells this
+            // pass painted.
+            this.#passLocSig = passLocSig
+            this.#passParentSig = parentLayerSig
+            try {
+              this.#passSegments = ((lineage as { explorerSegments?: () => readonly string[] }).explorerSegments?.() ?? [])
+                .map(s => String(s ?? '').trim()).filter(Boolean)
+            } catch { this.#passSegments = [] }
+            this.#rememberAddress(this.#passSegments, passLocSig, parentLayerSig)
+            this.#seedChildReadinessForLocation(passLocSig)
+          }
+          childResolveExpected = Array.isArray(content.children) ? content.children.length : 0
+          // Warm-path memo: a prior COMPLETE resolution under this exact
+          // parent content sig is authoritative — the child set can't have
+          // changed without the sig changing. Read the full membership —
+          // names AND branch-status — with ZERO per-child lookups. Only a
+          // partial (cold) pass ever touches resolveChildNames, and only a
+          // complete pass writes the memo.
+          const branchSetFromResolve = new Set<string>()
+          const memoRaw = parentLayerSig ? this.#completeChildNamesByParentSig.get(parentLayerSig) : undefined
+          // Defense-in-depth: a memo entry is valid only if its size matches
+          // THIS layer's child count. Guards against a mis-keyed entry (a
+          // stale cross-location sig) ever returning another location's
+          // children — the leak is then a cache miss, not wrong tiles.
+          const memo = (memoRaw && memoRaw.names.length === childResolveExpected) ? memoRaw : undefined
+          if (memo) {
+            layerAllowed = new Set(memo.names)
+            for (const b of memo.branches) branchSetFromResolve.add(b)
+            childResolveComplete = true
+          } else {
+            const stats: {
+              expected: number
+              resolved: number
+              unresolvedSigs: string[]
+            } = { expected: 0, resolved: 0, unresolvedSigs: [] }
+            const branchStats = { cold: false }
+            // branchSetFromResolve is filled in the SAME pass that resolves
+            // names — one read, no separate per-child branch walk. branchStats
+            // reports separately whether any child's branch-STATUS came back on
+            // a cold pool miss (see freshenBranches) — names can be complete
+            // while branch-status is not.
+            layerAllowed = await resolveChildNames(
+              historyService,
+              parentSegments,
+              dir,
+              content,
+              parentLayerSig,
+              stats,
+              branchSetFromResolve,
+              branchStats,
+              {
+                mayUpgradePack: true,
+                onBranchesFreshened: fresh => {
+                  if (!parentLayerSig) return
+                  const prepared = this.#completeChildNamesByParentSig.get(parentLayerSig)
+                  if (!prepared) return
+                  const old = new Set(prepared.branches)
+                  if (old.size === fresh.size && [...fresh].every(name => old.has(name))) return
+                  this.#completeChildNamesByParentSig.set(parentLayerSig, {
+                    names: prepared.names,
+                    branches: [...fresh],
+                  })
+                  // The repair ran after paint. If the participant is still on
+                  // this location, one targeted pass updates branch dots and
+                  // click routing; otherwise the corrected memo is ready for
+                  // the next visit. Never put the head walk back on navigation.
+                  if (this.renderedLocationKey === locationKey) {
+                    this.#forceNextRender = true
+                    this.requestRender()
+                  }
+                },
+              },
+            )
+            // Complete iff every child sig produced a name. expected===0 is
+            // a (trivially complete) empty layer.
+            childResolveComplete = stats.expected === 0 || stats.resolved >= stats.expected
+            childResolveUnresolved = stats.unresolvedSigs
+            // A complete NAME set does NOT mean branch-status is settled: a
+            // child's head bytes can be cold while its name resolved from the
+            // manifest. Only memoize when BOTH are settled — caching a cold
+            // branch set under this parent sig would re-serve a missing branch
+            // dot on every later render at this location and lock the tile out
+            // of navigation (the same poison the per-headSig guard in
+            // freshenBranches prevents). When branch-status is cold, schedule a
+            // bounded, NON-blocking re-render so the dot fills in this visit;
+            // the layer still paints now — a missing dot is not a missing tile,
+            // so we never hold the paint the way the name gate does.
+            const branchComplete = !branchStats.cold
+            if (childResolveComplete && branchComplete && parentLayerSig && stats.expected > 0) {
+              const names: string[] = []
+              for (const n of layerAllowed) if (typeof n === 'string' && n.length > 0) names.push(n)
+              // Bound: evict oldest (Map keeps insertion order) past a cap so
+              // a long session of distinct layer sigs can't grow this without
+              // limit. Each entry is keyed by an immutable content sig.
+              if (this.#completeChildNamesByParentSig.size > ShowCellDrone.#PREPARED_VIEW_CAP) {
+                const oldest = this.#completeChildNamesByParentSig.keys().next().value
+                if (oldest !== undefined) this.#completeChildNamesByParentSig.delete(oldest)
+              }
+              this.#completeChildNamesByParentSig.set(parentLayerSig, { names, branches: [...branchSetFromResolve] })
+              this.#preparedViewPath.set(parentLayerSig, (this.#passSegments ?? []).join('/'))
+            }
+            if (parentLayerSig) {
+              if (branchComplete) {
+                this.#branchColdRetries.delete(parentLayerSig)
+              } else {
+                const n = (this.#branchColdRetries.get(parentLayerSig) ?? 0) + 1
+                if (n <= ShowCellDrone.#BRANCH_COLD_MAX_RETRIES) {
+                  this.#branchColdRetries.set(parentLayerSig, n)
+                  this.#forceNextRender = true
+                  setTimeout(() => this.requestRender(), Math.min(500, 100 * n))
+                }
+              }
+            }
+          }
+          // Layer is the only source of truth (project_layer_is_primitive).
+          // Whatever resolveChildNames returns IS the tile membership at
+          // this location — empty layer means zero owned tiles, broken
+          // layer means zero owned tiles. There is no OPFS fallback;
+          // OPFS dirs are retired artifact storage and the render path
+          // ignores them entirely. If a layer is corrupt the right
+          // remedy is to fix it through the history pipeline, not to
+          // fake-show OPFS contents that may be drift.
+          const validNames: string[] = []
+          for (const n of layerAllowed) {
+            if (typeof n === 'string' && n.length > 0) validNames.push(n)
+          }
+          union.clear()
+          localCellSet.clear()
+          for (const cell of validNames) {
+            union.add(cell)
+            localCellSet.add(cell)
+          }
+          layerAllowed = new Set(validNames)
+
+          // Branch-set comes from the SAME resolution that produced names —
+          // populated by resolveChildNames from each child's `children` array
+          // length (manifest hit OR the one-time cold per-child build), and
+          // memoized alongside names. The old separate per-child
+          // getLayerBySig walk — which re-loaded every child on EVERY render,
+          // even on a manifest hit — is GONE. The render now loads the
+          // current layer + its manifest, and never a child layer at draw
+          // time.
+          branchSet = branchSetFromResolve
+        } else if (layerLookupSucceeded && !isRewound) {
+          // Layer-as-primitive: a location with no committed layer owns
+          // ZERO tiles. Clear the union seed — legacy meshCells (seeded
+          // ~line 1927) plus any carry-over — so navigating INTO an empty
+          // location starts from a clean slate instead of surfacing the
+          // PREVIOUS location's tiles. This is the common swarm path:
+          // exploring a peer's tile (or your own) that has no children
+          // yet. Without this, the `if (content)` branch above never runs
+          // and the old location's mesh cells leak in for a frame ("wrong
+          // / leftover tiles"). Peer previews for THIS location are
+          // re-added from the TileSourceRegistry block below.
+          union.clear()
+          localCellSet.clear()
+          layerAllowed = new Set<string>()
+        }
+      }
+    }
+
+    // ── COMPLETENESS GATE ────────────────────────────────────────────
+    // Never paint a PARTIAL child set. If the layer's children didn't all
+    // resolve to names this pass (cold pool / sync still landing), the
+    // visible "first render" would show fewer tiles than the layer holds
+    // and then jump to the full count when the rest warm — the two-stage
+    // load. Suppress the partial: hold the current view (on a nav the
+    // OUTGOING layer is still up — we haven't reached the layer-change
+    // block that hides it; on cold boot the canvas is simply still empty),
+    // warm the missing children, and re-render. Bounded PER PARENT SIG so
+    // a genuinely-absent child can never blank the canvas forever.
+    if (!childResolveComplete && childResolveExpected > 0) {
+      const gateKey = gateParentSig || locationKey
+      if (!this.#resolveGateExhausted.has(gateKey)) {
+        const attempts = (this.#incompleteResolveAttempts.get(gateKey) ?? 0) + 1
+        this.#incompleteResolveAttempts.set(gateKey, attempts)
+        if (attempts <= ShowCellDrone.#RESOLVE_GATE_MAX_ATTEMPTS) {
+          this.#recordRenderAudit('gate', union.size, locationKey)
+          if (DIAG) console.info(`[diag:childres] GATE hold loc=${locationKey} attempt=${attempts}/${ShowCellDrone.#RESOLVE_GATE_MAX_ATTEMPTS} expected=${childResolveExpected} got=${union.size} — deferring partial`)
+          // Force the next render past the fast-path skip and re-render with a
+          // short backoff so the missing bytes land. Missing children resolve
+          // ON DEMAND by signature (direct pool reads) — we do NOT brute-force
+          // preloadAllBags here; a full-hive scan on a partial render is the
+          // O(N) trap we removed. The retry re-attempts the direct reads as the
+          // neighbourhood warms.
+          this.#forceNextRender = true
+          setTimeout(() => this.requestRender(), Math.min(400, 60 * attempts))
+          return
+        }
+        // Budget exhausted — stop gating this layer so it can't thrash the
+        // render loop, then fall through to paint what resolved.
+        this.#resolveGateExhausted.add(gateKey)
+        console.warn(`[diag:childres] GATE exhausted loc=${locationKey} after ${attempts} attempts expected=${childResolveExpected} got=${union.size} — painting placeholders for the missing`)
+      }
+      // Gate exhausted (this pass or a prior one). The unresolved children
+      // are NOT dropped: paint each as an explicit unavailable-placeholder —
+      // same hex cell, no image, sig-suffixed label so the user SEES the
+      // tile exists while its content hasn't arrived. Placeholders join
+      // `union` but never `localCellSet`, so they ride the existing
+      // external-tile path end to end: dashed overlay treatment
+      // (externalLabels), excluded from substrate assignment
+      // (noImageLabels filters external), no per-tile index reads (the
+      // index gate ignores non-local names), and never memoized — the
+      // memo only writes on a COMPLETE resolution.
+      if (childResolveUnresolved.length > 0) {
+        for (const missingSig of childResolveUnresolved) {
+          const label = `unavailable ${missingSig.slice(0, 8)}`
+          union.add(label)
+        }
+        this.#placeholderLocations.add(locationKey)
+        // content:missing — surface the unresolved sigs for future UI (a
+        // re-push surface). Deduped per location on the exact sig set, so
+        // repeated placeholder repaints don't spam subscribers.
+        const emitKey = [...childResolveUnresolved].sort().join(',')
+        if (this.#missingEmitKeyByLocation.get(locationKey) !== emitKey) {
+          this.#missingEmitKeyByLocation.set(locationKey, emitKey)
+          this.emitEffect('content:missing', { sigs: [...childResolveUnresolved], segments: [...passSegments] })
+        }
+        // Miss-window re-arm: if the broker is deliberately not fetching
+        // one of these sigs until a miss window expires, schedule ONE
+        // re-render shortly after the earliest expiry (coalesced timer —
+        // never a polling loop). content:arrived remains the other re-arm.
+        this.#armMissWindowRetry(childResolveUnresolved)
+      }
+    } else if (childResolveComplete && gateParentSig) {
+      // Clean resolution — reset this layer's retry budget and drop the
+      // placeholder bookkeeping so a later regression re-emits fresh.
+      this.#incompleteResolveAttempts.delete(gateParentSig)
+      this.#placeholderLocations.delete(locationKey)
+      this.#missingEmitKeyByLocation.delete(locationKey)
+    }
+
+    // Now that localCellSet reflects layer-truth (or OPFS truth when no
+    // layer constraint applies), pull peer/ephemeral previews from the
+    // TileSourceRegistry. Doing this AFTER the layer block is what lets
+    // a peer publishing a tile name that the local layer "doesn't have"
+    // surface as a preview the user can adopt — without this ordering,
+    // the dedup against the pre-filter localCellSet drops it before the
+    // layer block ever runs.
+    // Per-render map of peer-published slot indices. Built from any
+    // kind:'peer' TileEntry that carries source.peerIndex. Passed into
+    // the pinned-order resolver so peer tiles land at the publisher's
+    // slot instead of being demoted to the next-free slot (which
+    // collides with local cells at low indices).
+    const peerIndices = new Map<string, number>()
+    // Stacks are a derivation of THIS pass's peer entries. Reset before
+    // resolving so a location with no publishers (or a registry that
+    // isn't up yet) reads as unstacked instead of inheriting the last
+    // location's multiplicity marks.
+    const previousVariantLabels = new Set(this.#stackVariantLabels)
+    this.#stackDepthByLabel = new Map()
+    this.#stackVariantLabels = new Set()
+    setTileStacks(new Map())
+    const previousVariantTitles = new Map(this.registryTitlesByLabel)
+    this.registryPropertiesByLabel.clear()
+    this.registryTitlesByLabel.clear()
+    const registryVariantSeen = new Set<string>()
+    try {
+      const registry = (window as any).ioc?.get?.('@hypercomb.social/TileSourceRegistry') as
+        | { resolve: (loc: { segments: readonly string[]; dir: FileSystemDirectoryHandle | null }) => Promise<readonly TileSourceProjection[]> }
+        | undefined
+      if (registry?.resolve) {
+        const segs = lineage?.explorerSegments?.() ?? []
+        // BOUNDED source resolution. Sources can dial the network (config
+        // branches resolve layers/props through the broker), and awaiting
+        // them unbounded let ONE slow source stall every render pass —
+        // navigation must never wait on a tile source. Race against a
+        // short budget: in time → render the live result; over budget →
+        // render the last known entries for this location NOW and let the
+        // resolve finish detached, re-rendering if it brings anything new.
+        const srcKey = segs.join('/')
+        const live = registry.resolve({ segments: segs, dir }).then((res) => {
+          this.#sourceEntriesCache.set(srcKey, res)
+          return res
+        })
+        const raced = await Promise.race([
+          live,
+          new Promise<null>((r) => setTimeout(() => r(null), ShowCellDrone.SOURCE_RESOLVE_BUDGET_MS)),
+        ])
+        const entries = raced ?? this.#sourceEntriesCache.get(srcKey) ?? []
+        if (!raced) {
+          const usedKey = tileSourceProjectionKey(entries)
+          void live.then((res) => {
+            const gotKey = tileSourceProjectionKey(res)
+            if (gotKey !== usedKey) this.requestRender()
+          }).catch(() => { /* already logged by the registry */ })
+        }
+
+        // ── PARTICIPANT STACKS ───────────────────────────────────────
+        // Every peer entry, INCLUDING the names you already hold. A
+        // peer publishing `notes` where you have `notes` is not a
+        // second tile — same coordinates means same tile
+        // (documentation/superimposition.md) — so it collapses onto
+        // yours as a variant underneath instead of being dropped.
+        //
+        // Order is the participant order the swarm resolved (freshest
+        // publisher first, matching the layer-cycle strip), with YOU at
+        // index 0 wherever you hold the label: rolling always starts
+        // from your own version and comes back to it.
+        const stacks = new Map<string, StackVariant[]>()
+        for (const e of entries) {
+          if (e.kind !== 'peer') continue
+          const pk = e.source?.peerPubkey
+          if (typeof pk !== 'string' || pk.length === 0) continue
+          let bag = stacks.get(e.name)
+          if (!bag) {
+            bag = localCellSet.has(e.name) ? [{ pubkey: '' }] : []
+            stacks.set(e.name, bag)
+          }
+          // One variant per participant. A peer republishing within a
+          // pass must not deepen their own stack entry.
+          if (bag.some(v => v.pubkey === pk)) continue
+          const vsig = e.source?.imageSig
+          const vidx = e.source?.peerIndex
+          const properties = e.source?.properties
+          const titles = e.source?.titles
+          const layerSig = e.source?.layerSig
+          bag.push({
+            pubkey: pk,
+            ...(typeof vsig === 'string' && /^[a-f0-9]{64}$/i.test(vsig) ? { imageSig: vsig.toLowerCase() } : {}),
+            ...(typeof vidx === 'number' && Number.isFinite(vidx) && vidx >= 0 ? { index: vidx } : {}),
+            ...(properties ? { properties } : {}),
+            ...(titles ? { titles } : {}),
+            ...(typeof layerSig === 'string' && /^[a-f0-9]{64}$/i.test(layerSig) ? { layerSig: layerSig.toLowerCase() } : {}),
+          })
+        }
+        setTileStacks(stacks)
+        this.#stackDepthByLabel = new Map(
+          [...stacks].map(([label, variants]) => [label, variants.length]),
+        )
+
+        // Surfacing a participant's layer swaps YOUR version of every
+        // shared tile for THEIRS — their picture, at their slot index.
+        // Only tiles they actually publish move; the rest of your layer
+        // stays put, which is what makes the difference between the two
+        // layers readable rather than a full-page swap.
+        this.#stackVariantLabels = new Set<string>()
+        const spotlit = this.#spotlightPubkey
+        if (spotlit) {
+          for (const [label, variants] of stacks) {
+            if (!localCellSet.has(label)) continue
+            const mine = variants.find(v => v.pubkey === spotlit)
+            if (!mine) continue
+            this.#stackVariantLabels.add(label)
+            this.#peerPubkeyByLabel.set(label, spotlit)
+            this.registryImageByLabel.delete(label)
+            if (mine.imageSig) this.registryImageByLabel.set(label, mine.imageSig)
+            if (mine.properties) this.registryPropertiesByLabel.set(label, mine.properties)
+            if (mine.titles) this.registryTitlesByLabel.set(label, mine.titles)
+            // The SLOT stays yours. A shared tile keeps your index while
+            // you roll through its versions — the stack is a depth at
+            // one position, and taking the publisher's index instead
+            // would slide the tile out from under the pointer that is
+            // rolling it. Only tiles that are theirs ALONE take a
+            // published index (the peerIndices path below); those have
+            // no slot of yours to keep.
+          }
+        }
+
+        // A label LEAVING the variant set is changing lineage source —
+        // theirs → yours on dismiss, theirs → nothing when the publisher
+        // departs or is filtered away (transitions with no spotlight
+        // event, which is why this diff lives HERE, at the one recompute
+        // every path funnels through). Every label-keyed property cache is a
+        // derivation of whichever participant last painted—not just image. A
+        // surviving entry would manufacture a hybrid from the outgoing
+        // lineage's border/tags/link/etc. and the incoming tile. Drop the
+        // entire projection; this pass re-derives external state from the
+        // selected publisher and local state from layer-first properties.
+        for (const label of previousVariantLabels) {
+          if (this.#stackVariantLabels.has(label)) continue
+          this.#invalidateLabelDerivedState(label)
+        }
+
+        // Mismatch check — only mismatched peer names produce any
+        // peer-aware state. If every peer name already exists in
+        // localCellSet, the contributor pipeline has nothing new to
+        // surface and we render purely from local-derived state.
+        // This makes the intent visible in code ("only my tiles when
+        // peers add nothing new") instead of relying on the per-entry
+        // dedup to silently no-op below.
+        const mismatched = entries.filter(e =>
+          e.kind === 'peer' && !localCellSet.has(e.name),
+        )
+
+        for (const e of mismatched) {
+          ephemeralCellSet.add(e.name)
+          // Track peer-kind separately so #buildCellCountPayload can mark
+          // them as branches, making clicks route through #navigateInto
+          // instead of falling through to the 'open' editor action.
+          if (e.kind === 'peer') {
+            peerCellSet.add(e.name)
+            const pidx = e.source?.peerIndex
+            // First-publisher-wins — if a second peer publishes the same
+            // name with a different index, the first one we encountered
+            // anchors the slot. The collision check in #orderByIndexPinned
+            // catches any pathological overlap with local indices.
+            if (typeof pidx === 'number' && Number.isFinite(pidx) && pidx >= 0 && !peerIndices.has(e.name)) {
+              peerIndices.set(e.name, pidx)
+            }
+            // Remember which peer contributed this tile so the spotlight
+            // render hook can match cells to the active layer.
+            const ppk = (e.source as { peerPubkey?: string } | undefined)?.peerPubkey
+            if (typeof ppk === 'string' && ppk.length > 0 && !this.#peerPubkeyByLabel.has(e.name)) {
+              this.#peerPubkeyByLabel.set(e.name, ppk)
+            }
+            // Keep every visual field from the SAME first/freshest publisher
+            // that owns the solo tile. A participant variant may differ in
+            // border, tags, link, hideText, title, or any other admitted
+            // property — choosing its image while reading the rest locally
+            // would manufacture a hybrid nobody actually published.
+            const firstVariant = !registryVariantSeen.has(e.name)
+            if (firstVariant) {
+              registryVariantSeen.add(e.name)
+              this.registryImageByLabel.delete(e.name)
+              if (e.source?.properties) this.registryPropertiesByLabel.set(e.name, e.source.properties)
+              if (e.source?.titles) this.registryTitlesByLabel.set(e.name, e.source.titles)
+            }
+            // The registry entry's publisher image (canonical 0000's
+            // small.image, carried by config/snapshot sources). This is
+            // the SOLO image path: with no swarm running, loadOne's
+            // peerTilesAtCurrentSig lookup is empty, and without this
+            // map config-mounted tiles render imageless forever.
+            const isig = (e.source as { imageSig?: string } | undefined)?.imageSig
+            if (firstVariant && typeof isig === 'string' && /^[a-f0-9]{64}$/i.test(isig)) {
+              // The first/freshest publisher's CURRENT sig is authoritative
+              // for the complete selected variant. A later participant never
+              // contributes only their image to that first variant's props.
+              // The per-pass prune below removes the entry when the publisher
+              // leaves, so a stale sig can never be used as a fallback to
+              // DOWNGRADE an already-shown image.
+              this.registryImageByLabel.set(e.name, isig.toLowerCase())
+            }
+          }
+          union.add(e.name)
+        }
+      }
+    } catch (err) {
+      // Registry hiccups must never block the render. Previews just
+      // won't appear this pass and will catch up on the next render.
+      console.warn('[show-cell] ephemeral source resolution failed', err)
+    }
+    // The atlas is keyed by the stable raw identity, so changing only the
+    // selected participant's title would otherwise serve the old glyphs from
+    // that key. Invalidate exactly the identities whose reading changed.
+    const titleLabels = new Set([...previousVariantTitles.keys(), ...this.registryTitlesByLabel.keys()])
+    for (const label of titleLabels) {
+      if (JSON.stringify(previousVariantTitles.get(label) ?? {}) !== JSON.stringify(this.registryTitlesByLabel.get(label) ?? {})) {
+        this.atlas?.invalidateLabel(label)
+      }
+    }
+    this.#ephemeralCellSet = ephemeralCellSet
+    this.#peerCellSet = peerCellSet
+    // Drop pubkey entries for labels that fell out of the peer set
+    // (peer went stale, navigated away). Keeps the map tight; new peer
+    // contributions repopulate it in the loop above.
+    // Stack-variant labels are spared: they are YOUR tiles showing a
+    // spotlit participant's version, so they were never in peerCellSet
+    // (which is peer-ONLY names) and pruning them would strip the
+    // publisher's hue and image off the tile the same pass that put
+    // them there.
+    for (const label of [...this.#peerPubkeyByLabel.keys()]) {
+      if (!peerCellSet.has(label) && !this.#stackVariantLabels.has(label)) this.#peerPubkeyByLabel.delete(label)
+    }
+    // Same prune for the registry image map — it is written ONLY inside the
+    // peer block above, so peerCellSet is its membership set. Dropping a
+    // departed publisher's sig stops loadOne's fallback (peerImageSigByLabel ??
+    // registryImageByLabel) from re-pinning an external tile to a stale/older
+    // image after the live publisher leaves; with no fallback, loadOne keeps
+    // the already-derived image (fill-if-empty, existing image untouched).
+    for (const label of [...this.registryImageByLabel.keys()]) {
+      if (!peerCellSet.has(label) && !this.#stackVariantLabels.has(label)) this.registryImageByLabel.delete(label)
+    }
+
+    // Reconcile pendingRemoves against the layer's children list. Under
+    // layer-as-primitive, the LAYER decides membership: a /remove drops
+    // the cell from layer.children but leaves OPFS bytes intact (so
+    // undo can restore by deleting the head history row). The check is:
+    //   - in layer.children ⇒ pendingRemove is stale (undo restored it,
+    //     paste landed, etc.) → drop the entry, let cell render
+    //   - not in layer.children ⇒ honor the remove
+    // When no layer is available (fresh lineage), fall back to OPFS-truth
+    // — the same semantics this code shipped with.
+    const reconciled: string[] = []
+    for (const cell of this.#pendingRemoves) {
+      const presentInTruth = layerAllowed
+        ? layerAllowed.has(cell)
+        : localCellSet.has(cell)
+      if (presentInTruth) {
+        reconciled.push(cell)
+      } else if (peerCellSet.has(cell) || ephemeralCellSet.has(cell)) {
+        // SWARM VIEW INVARIANT: everyone sees what peers are sharing. A
+        // locally-deleted name that a LIVE peer still publishes must keep
+        // rendering — as their peer/preview tile (localCellSet no longer
+        // claims it, so it takes the external dress). The pendingRemove
+        // entry stays so local truth remains deleted; only the union
+        // suppression is skipped while an external source contributes it.
+      } else {
+        union.delete(cell)
+      }
+    }
+    for (const cell of reconciled) this.#pendingRemoves.delete(cell)
+
+    // The durable head can legitimately lag an optimistic add by a commit
+    // turn. A concurrent full render must project that pending membership too,
+    // or it briefly erases the just-added tile and remounts it when the marker
+    // lands. The lifecycle clears this set on settle/failure; until then the
+    // event is the freshest membership truth the participant has.
+    for (const cell of this.#pendingCellMutations) {
+      union.add(cell)
+      localCellSet.add(cell)
+    }
+
+    // filter out blocked external tiles and hidden local tiles before ordering
+    const blockedSet = new Set<string>(JSON.parse(localStorage.getItem(`hc:blocked-tiles:${locationKey}`) ?? '[]'))
+    for (const blocked of blockedSet) {
+      if (!localCellSet.has(blocked)) union.delete(blocked)
+    }
+
+    // Global blocklist: the BARE `hc:hidden-tiles` key (no location
+    // suffix) holds tile NAMES blocked at every location. Set by hand:
+    //   localStorage.setItem('hc:hidden-tiles', JSON.stringify(['name']))
+    // Unconditional — not subject to the show-hidden toggle — and
+    // covers own, ephemeral, and peer tiles alike. Parse is guarded
+    // because this key is hand-edited; a malformed value means an
+    // empty list, never a broken render pass.
+    let globalBlocked: string[] = []
+    try { globalBlocked = JSON.parse(localStorage.getItem('hc:hidden-tiles') ?? '[]') } catch { /* hand-edited key — ignore malformed value */ }
+    for (const blocked of globalBlocked) {
+      union.delete(blocked)
+      ephemeralCellSet.delete(blocked)
+      peerCellSet.delete(blocked)
+    }
+
+    // Layer no longer carries a `hidden` array — visibility is a
+    // bee-owned primitive. Read live localStorage in both rewound and
+    // head positions. (Per-position playback of visibility is the
+    // visibility bee's responsibility, not the renderer's.)
+    //
+    // Block list also covers swarm peer tiles: a hidden name should
+    // disappear regardless of whether the user owns it or it arrived
+    // from a peer publish. Without the unconditional delete a user
+    // who hides a peer tile would see it pop back on every swarm
+    // republish. ephemeralCellSet/peerCellSet stay in sync so the
+    // tile-overlay doesn't keep treating it as a dashed preview.
+    // Hide list lives in THREE places that union into the renderer's
+    // filter:
+    //   1. Zone-scoped localStorage: `hc:hidden-tiles:<loc>:z<zone>`
+    //      where zone is base64url(room\0secret), written/cleared by
+    //      SwarmDrone#updateZoneKey on every credential change. Per-
+    //      session/per-zone scope: switching zone gives a fresh empty
+    //      filter at the new zone.
+    //   2. Bare-key localStorage: `hc:hidden-tiles:<loc>` — the legacy
+    //      pre-zone-scoping key. Always read alongside (1) so any hide
+    //      that was ever written under either key survives. Bleed
+    //      protection still holds at the WRITE side because new
+    //      writes only go to the zone-scoped key while public.
+    //   3. SwarmDrone.hiddenAtCurrentSig() — peer-published kind 30202
+    //      events at the current composed sig. Restores filter on
+    //      refresh via relay echo with no client storage.
+    // Any source hiding a name drops it from the render.
+    // SESSION-ONLY hides — read from the in-memory store (see session-hide.store.ts).
+    // A refresh empties it, so a hide never persists across reloads.
+    const localHidden: string[] = JSON.parse(sessionHideStore.getItem(hideStorageKey(locationKey)) ?? '[]')
+    const bareHidden: string[] = JSON.parse(sessionHideStore.getItem(`hc:hidden-tiles:${locationKey}`) ?? '[]')
+    const hiddenSet = new Set<string>([...localHidden, ...bareHidden])
+    try {
+      const swarm = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone') as
+        | { hiddenAtCurrentSig?: () => ReadonlySet<string> }
+        | undefined
+      const swarmHidden = swarm?.hiddenAtCurrentSig?.() ?? new Set<string>()
+      for (const n of swarmHidden) hiddenSet.add(n)
+    } catch { /* swarm not registered yet — local hides still apply */ }
+
+    // Zone-INDEPENDENT hide list (hc:hidden-lineages, path-keyed). Every
+    // source above is keyed by the CURRENT zone / composed sig, which
+    // CHANGES the instant you join a swarm (room+secret enter the sig):
+    // hideStorageKey() flips to the new zone suffix and hiddenAtCurrentSig()
+    // reads the new sig — both empty at that moment. Nothing then re-asserts
+    // the hide until the 30s heartbeat republishes the kind-30202 event and
+    // its relay echo lands, so a tile you hid visibly reappears for ~30s
+    // after joining. This path-keyed list survives every zone transition
+    // (it's the SAME "skip these forever" list the swarm tile source already
+    // applies to PEER visuals — SwarmDrone.readHiddenLineages), so reading it
+    // here makes the own-tile hide hold INSTANTLY on join. Name/path
+    // convention matches the peer path exactly: `<locKey>/<name>` (bare
+    // `<name>` at root). Session-only (sessionHideStore), same as the keys
+    // above, so a reload still clears it — unchanged behaviour there.
+    try {
+      const rawLineages = sessionHideStore.getItem('hc:hidden-lineages')
+      const lineageArr = rawLineages ? JSON.parse(rawLineages) : []
+      if (Array.isArray(lineageArr) && lineageArr.length > 0) {
+        const lineageSet = new Set<string>(lineageArr as string[])
+        const locKey = passSegments.join('/')
+        for (const name of union) {
+          const path = locKey ? `${locKey}/${name}` : name
+          if (lineageSet.has(path)) hiddenSet.add(name)
+        }
+      }
+    } catch { /* malformed hc:hidden-lineages — other hide sources still apply */ }
+
+    // TILES ARE ASSETS for takeover views (visual-bee `replacesTileRender`):
+    // a cell claimed by such a view — the post-it whose sticky, not hexagon,
+    // is its whole presence — leaves the hex render entirely.
+    //
+    // UNCONDITIONAL, unlike a hide: the claim and the hexagon are MUTUALLY
+    // EXCLUSIVE, so this filter is not subject to the show-hidden toggle.
+    // (It was, on the theory that show-hidden doubles as an X-ray onto the
+    // underlying tile. In practice that just put the tile and its sticky on
+    // screen together — the one thing the flag exists to prevent — and the
+    // participant has no way to tell an X-ray from a bug. The tile is still
+    // reachable: `/postit tile` stands the view down and the hexagon is
+    // back.) Registry-driven: no view is named here.
+    try {
+      const beeRegistry = (window as any).ioc?.get?.('@diamondcoreprocessor.com/VisualBeeRegistry') as
+        | { kindsReplacingTileRender?: () => ReadonlySet<string> }
+        | undefined
+      const takeoverKinds = beeRegistry?.kindsReplacingTileRender?.()
+      if (takeoverKinds && takeoverKinds.size > 0) {
+        for (const name of [...union]) {
+          const claiming = kindsForLabel(name).filter(k => takeoverKinds.has(k))
+          if (!claiming.length) continue
+          // A takeover the participant switched OFF on the roster (or that a
+          // publisher withheld) is DORMANT — its view renders nothing, so the
+          // hexagon is the cell's presence again. Without this the claim held
+          // regardless and the cell vanished entirely when the behavior was
+          // turned off: no sticky, no tile, no way back.
+          if (claiming.every(k => isBehaviorDormant(k, [...passSegments, name]))) continue
+          union.delete(name)
+          ephemeralCellSet.delete(name)
+          peerCellSet.delete(name)
+        }
+      }
+    } catch { /* registry not up yet — tiles render this pass; the next synchronize re-filters */ }
+
+    this.#currentHiddenSet = hiddenSet
+    if (!this.#showHiddenItems) {
+      for (const hidden of hiddenSet) {
+        union.delete(hidden)
+        ephemeralCellSet.delete(hidden)
+        peerCellSet.delete(hidden)
+      }
+    }
+
+    // SWARM PRIVACY — inside a swarm your canvas shows ONLY what you chose to
+    // share. World mode (the PREP stage) previews the split by DIMMING the
+    // unshared tiles; the moment you actually join, the preview is over and
+    // the unshared tiles leave the view entirely, so what you look at is what
+    // the swarm looks at ("you wouldn't see your nonshared tiles in a swarm").
+    // Joining exits world mode (mesh-header drops to STAGE_PRIVATE on any
+    // meshPublic change), so the dim never doubles up with this filter.
+    //
+    // Gate = exactly the condition under which our tiles actually leave the
+    // device: master switch on AND room+secret set (the same gate
+    // publishLocalCells and SwarmDrone publish under). Leaving the swarm
+    // flips it back and `mesh:public-changed` repaints, so private tiles
+    // return at once — nothing is deleted, only filtered out of this pass.
+    //
+    // OWN tiles only. A peer/ephemeral contribution is somebody else's
+    // sharing decision, already vetted by THEIR isCellPublic before it left
+    // their device; running our flag over it would blank the swarm. A name
+    // that is both ours and peer-published stays for the same reason.
+    if (this.#publicMode && this.#space && this.#secret) {
+      const shareLocation = String(this.resolve<any>('lineage')?.explorerLabel?.() ?? '/')
+      for (const name of union) {
+        if (!localCellSet.has(name)) continue
+        if (peerCellSet.has(name) || ephemeralCellSet.has(name)) continue
+        if (!isCellPublic(shareLocation, name)) union.delete(name)
+      }
+    }
+
+    // TILES ARE UNIVERSAL (Jaime, 2026-07-28). Content renders identically on
+    // every platform — no `mobile:friendly` requirement, no mobile filtering
+    // of the union. The retired viewer gate deleted every unmarked name here,
+    // which blanked unmarked hives on phones and silently swallowed freshly
+    // created tiles the moment mobile mode was active. Platform capability is
+    // expressed on BEHAVIORS (registry pheromones — a view/bee declares
+    // mobile, or mobile+desktop), never on content.
+
+    // ── SWARM PARTICIPANT FILTER (belt-and-braces) ──────────
+    // The authoritative filter runs at the SOURCE (swarm.drone
+    // #registerTileSource, before the registry's kind:name dedup — which is
+    // what keeps a same-name tile resolvable to a SELECTED publisher). This
+    // pass only catches entries served from a stale #sourceEntriesCache in
+    // the same frame a toggle lands. Peers only: a name that is also the
+    // participant's own tile is never filtered.
+    if (this.#participantFilter.size > 0) {
+      for (const name of [...peerCellSet]) {
+        if (localCellSet.has(name)) continue
+        const contributor = this.#peerPubkeyByLabel.get(name)
+        if (contributor && this.#participantFilter.has(contributor)) continue
+        union.delete(name)
+        ephemeralCellSet.delete(name)
+        peerCellSet.delete(name)
+      }
+    }
+
+    // Reference composition is deliberately not a second preview renderer.
+    // Add the draft to this pass as a local-looking cell so it receives the
+    // same geometry, label band, image, scale and hit footprint as every
+    // ordinary tile. It is only in memory; layer membership is untouched
+    // until the References window saves.
+    const referenceDraft = this.#referenceDraft
+    const draftIsHere = !!referenceDraft
+      && referenceDraft.parentSegments.length === passSegments.length
+      && referenceDraft.parentSegments.every((segment, index) => String(segment) === String(passSegments[index]))
+    if (referenceDraft && draftIsHere && referenceDraft.name) {
+      union.add(referenceDraft.name)
+      localCellSet.add(referenceDraft.name)
+      if (referenceDraft.imageSig) this.cellImageCache.set(referenceDraft.name, referenceDraft.imageSig)
+    }
+
+    // Source breakdown for this pass — proves WHERE each tile comes from
+    // (layer vs registry vs mesh) so a stray tile (e.g. a phantom "group" in
+    // the top layer) can be attributed to the exact non-layer source that
+    // injected it. window.__hcSourceReport() summarises it; `outside` lists
+    // every rendered name NOT owned by the layer, tagged by source.
+    const outside: string[] = []
+    for (const name of union) {
+      if (localCellSet.has(name)) continue
+      const src = peerCellSet.has(name) ? 'peer'
+        : ephemeralCellSet.has(name) ? 'ephemeral'
+        : this.meshCells.includes(name) ? 'mesh'
+        : 'unknown'
+      outside.push(`${src}:${name}`)
+    }
+    this.#recordSourceAudit(locationKey, {
+      staleContent: srcStaleLen,
+      freshHead: srcFreshLen,
+      layerLocal: localCellSet.size,
+      ephemeral: ephemeralCellSet.size,
+      peer: peerCellSet.size,
+      mesh: this.meshCells.length,
+      union: union.size,
+      outside,
+    })
+
+    // read layout mode for this location
+    this.#layoutMode = this.#readLayoutMode(locationKey)
+
+    // resolve cell ordering through the layout mode strategy. `dir`
+    // may be null when no OPFS folder mirror exists for this sub-layer;
+    // pass a typed sentinel so the resolver chooses its layer-only
+    // strategy instead of guarding on null shape inside the resolver.
+    // navPass tells the resolver this is a layer CHANGE, so unindexed
+    // placement must be deterministic (the on-screen camera still belongs
+    // to the outgoing page — scoring against it is the "tiles land where
+    // they'd be best on the page I just left" scramble). Evaluated BEFORE
+    // the await: render bodies are serialized by requestRender, so
+    // renderedLocationKey is stable across this pass.
+    const navPass = locationKey !== this.renderedLocationKey
+    const orderStats = { coldIndexNames: [] as string[] }
+    const cellNames = await this.#resolveCellOrder(this.#layoutMode, dir as FileSystemDirectoryHandle, union, localCellSet, lineage, peerIndices, passSegments, navPass, orderStats)
+
+    // ── INDEX COMPLETENESS GATE ──────────────────────────────────────
+    // The name gate above guarantees every child NAME resolved; this one
+    // guarantees every child's INDEX read was authoritative. A cold index
+    // (layer head not warmed / bytes not pooled yet) means a tile that
+    // OWNS a durable slot would be score-filled into a wrong one — the
+    // "tiles randomly rearranged on navigation" glitch. Hold the paint
+    // (outgoing layer stays up — nothing has been hidden or superseded
+    // yet), retry with backoff, and paint best-effort once the bounded
+    // budget is spent so a permanently-cold tile can't blank the canvas.
+    // The nurse never caches cold reads, so each retry re-reads the head.
+    if (orderStats.coldIndexNames.length > 0) {
+      const idxGateKey = 'idx:' + (gateParentSig || locationKey)
+      if (!this.#resolveGateExhausted.has(idxGateKey)) {
+        const attempts = (this.#incompleteResolveAttempts.get(idxGateKey) ?? 0) + 1
+        this.#incompleteResolveAttempts.set(idxGateKey, attempts)
+        if (attempts <= ShowCellDrone.#RESOLVE_GATE_MAX_ATTEMPTS) {
+          this.#recordRenderAudit('gate', union.size, locationKey)
+          console.info(`[diag:idxres] GATE hold loc=${locationKey} attempt=${attempts}/${ShowCellDrone.#RESOLVE_GATE_MAX_ATTEMPTS} cold-index: ${orderStats.coldIndexNames.join(', ')} — deferring paint`)
+          this.#forceNextRender = true
+          setTimeout(() => this.requestRender(), Math.min(400, 60 * attempts))
+          return
+        }
+        this.#resolveGateExhausted.add(idxGateKey)
+        console.warn(`[diag:idxres] GATE exhausted loc=${locationKey} after ${attempts} attempts cold-index: ${orderStats.coldIndexNames.join(', ')} — painting best-effort`)
+      }
+    } else {
+      this.#incompleteResolveAttempts.delete('idx:' + (gateParentSig || locationKey))
+    }
+
+    const previousLocationKey = this.renderedLocationKey
+    const layerChanged = locationKey !== previousLocationKey
+
+    // note: if streaming is active for the same layer, let the stream finish
+    if (this.streamActive && !layerChanged) return
+
+    // note: layer changed — supersede any active stream, rebuild
+    if (layerChanged) {
+      // Capture the OUTGOING layer's live VP state into our cache so
+      // a future return to that layer restores where the user actually
+      // left it (pan/zoom/meshOffset they applied this session). VP's
+      // OPFS write is debounced; the in-memory cache stays stale until
+      // we explicitly sync it. Without this sync the user reports
+      // "drag is lost when I nav back, only refresh shows it."
+      this.#syncCacheFromVP(this.renderedLocationKey)
+      // Bump the stream token FIRST, before any await. Any batch still
+      // running inside the old stream will check this on its next
+      // iteration boundary and bail out.
+      const myToken = ++this.#streamToken
+      this.renderedLocationKey = locationKey
+      this.renderedCellsKey = ''
+      this.renderedCells.clear()
+      this.#pendingRemoves.clear()
+      this.#slots.clear()  // layer change invalidates the slot state machine
+
+      // Hide the OUTGOING layer BEFORE the new location's viewport is
+      // applied. The first-visit path awaits an OPFS read below, and the
+      // new viewport (zoom/pan/meshOffset) lands on the container while
+      // the await is in flight — with the old tiles still visible, the
+      // user saw the CURRENT level visibly re-zoom/jump before the next
+      // level's children streamed in. Hiding first makes the transition
+      // clean: old level out, then viewport, then children stream in.
+      if (this.layer) this.layer.visible = false
+
+      // Viewport: prefer the in-memory snapshot (sync). MUST await the
+      // OPFS read on first visit — backgrounding it caused mesh to render
+      // at the previous layer's pan/zoom, then snap to the saved viewport
+      // when the read landed. User saw "drift to the right/left after
+      // refresh" especially on deep-link boot where the very first render
+      // is the slow path.
+      const vpSnap = this.#layerViewportCache.get(locationKey)
+      let appliedSnap: ViewportSnapshot | null = null
+      if (vpSnap) {
+        // appliedSnap must be what was ACTUALLY applied — the sanitizer
+        // may have rejected components of the cached snapshot.
+        appliedSnap = this.#applyViewportFromSnapshot(vpSnap)
+      } else {
+        // Viewport is sig-keyed by lineage segments (no OPFS dir
+        // required) — always read so dir-less sub-layers restore too.
+        appliedSnap = await this.#applyViewportForLayerReadSnapshot(
+          dir,
+          lineage.explorerSegments?.() ?? [],
+        )
+      }
+
+      // Set pendingRecenter EXPLICITLY based on the new layer's saved
+      // state — never inherit from a previous render. A previous layer
+      // that bailed via clearMesh (e.g. empty branch) used to leak
+      // pendingRecenter=true, which then ignored the new layer's saved
+      // meshOffset and recentered instead — tiles + overlay misaligned
+      // for everything except the layer that just ran a clean recenter.
+      this.#pendingRecenter = !appliedSnap?.meshOffset
+      if (this.#pendingRecenter && this.hexMesh) {
+        // No saved offset → reset mesh to (0,0) and emit so the
+        // overlay's click->axial math uses the right offset between
+        // now and the recenter applyGeometry will run momentarily.
+        this.hexMesh.position.set(0, 0)
+        this.emitEffect('render:mesh-offset', { x: 0, y: 0 })
+      }
+
+      // First visit to adopted content → fit-to-content once, persisted so it
+      // sticks (see #pendingFirstVisitFit). isWithinAdoptedRoot covers the
+      // adopted root AND every page beneath it; hasPersistedViewportAt is false
+      // ONLY on a genuine first visit (no local __viewport__ entry yet — the
+      // fit writes one, so this never re-fires). The fit itself is run by
+      // applyGeometry, before the reveal below.
+      const fvSegments = lineage.explorerSegments?.() ?? []
+      this.#pendingFirstVisitFit =
+        isWithinAdoptedRoot(fvSegments) && !(await hasPersistedViewportAt(fvSegments))
+
+      // If the stream token bumped while we were awaiting the viewport
+      // read, abandon — newer renderFromSynchronize is now the source
+      // of truth for this layer's render.
+      if (myToken !== this.#streamToken) return
+
+      // Tell VP which location it's reporting to so subsequent pan/zoom
+      // writes persist to the correct layer. Viewport is keyed by lineage
+      // segments in the sig-keyed __viewport__ store — no OPFS dir needed,
+      // so this works for dir-less sub-layers and for root alike.
+      const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
+      vp?.setCurrentLocation?.(lineage.explorerSegments?.() ?? [])
+
+      if (cellNames.length === 0) {
+        if (this.layer) this.layer.visible = true
+        // Ready + genuinely empty (this is the boot path for an empty root):
+        // settled=true so the loading splash reveals the hive instead of
+        // waiting for a count>0 that will never arrive.
+        this.clearMesh("layer-change: location has no cells", true)
+        return
+      }
+
+      // ── EAGER CACHE ─────────────────────────────────────────────
+      // Build cells now and populate the back-nav cache BEFORE
+      // streamCells kicks off. If user navigates away and back fast
+      // (or this stream gets superseded), the back-nav fast path will
+      // still find populated caches and restore in <1ms instead of
+      // dropping to the full slow path again. Image sigs may be
+      // missing on this initial cache write — streamCells fills them
+      // in as it loads — but the cells are correct and the back-nav
+      // fast path's own loop will pick up imageSigs from the
+      // per-label cellImageCache as they land.
+      const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
+      const maxCells = Math.min(cellNames.length, axialMax)
+      const eagerCells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
+      if (eagerCells.length > 0) {
+        this.#layerCellsCache.set(locationKey, {
+          cells: [...eagerCells], cellNames, localCellSet, branchSet,
+        })
+      }
+
+      // (layer already hidden above, before the viewport apply — it stays
+      // hidden until streamCells reveals the first batch)
+
+      // emit navigation guard so click handlers block during transition
+      this.emitEffect('navigation:guard-start', { locationKey })
+
+      // stream cells progressively (async, non-blocking). Pass our
+      // token + locationKey so the stream works against the snapshot
+      // that was authoritative when it started; if a newer stream
+      // preempts, we stop touching shared state instead of fighting it.
+      // streamCells signature still wants a non-null dir for image loads;
+      // when we have none, hand a typed sentinel and let the function's
+      // null-tolerant branches no-op the disk lookups.
+      void this.streamCells(dir as FileSystemDirectoryHandle, cellNames, localCellSet, axial, branchSet, myToken, locationKey)
+      return
+    }
+
+    // note: same layer — incremental path (cell collection was fresh, images are cached)
+    if (cellNames.length === 0) {
+      this.clearMesh("same-layer: cellNames empty", true)   // ready + genuinely empty → splash may reveal
+      return
+    }
+
+    const wasEmpty = this.renderedCount === 0
+
+    // First real render after the layer was empty — the sanctioned exception to
+    // "add/remove leaves the screen still". A newly-navigated empty layer never
+    // seeds #slots, so its first tile arrives through this full same-layer render
+    // (not the incremental path). Navigating in nulls #pendingRecenter (clearMesh)
+    // and the add itself never re-sets it, so without this the new mesh inherits
+    // the PREVIOUS layer's stale offset and the first tile lands off-screen
+    // ("nothing was created"). Re-arm here so applyGeometry frames the mesh on the
+    // new bounds AND the wasEmpty camera block below runs. Reaching this line at
+    // all means cellNames is non-empty (the length===0 guard above returned), so
+    // wasEmpty here is exactly the empty→first-tile transition; a later empty
+    // build (maxCells<=0) just clearMesh-resets it, so no spurious recenter.
+    if (wasEmpty) this.#pendingRecenter = true
+
+    const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
+    const maxCells = Math.min(cellNames.length, axialMax)
+    if (maxCells <= 0) {
+      this.clearMesh(`same-layer: maxCells=0 (names=${cellNames.length}, axial=${axialMax})`, true)
+      return
+    }
+
+    const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
+    if (cells.length === 0) {
+      this.clearMesh("same-layer: axial yielded 0 cells", true)
+      return
+    }
+
+    // note: load cell images from 0000 properties → __resources__/
+    // Runs even when dir is null — loadCellImages is null-tolerant (dir
+    // only feeds tags/link reads) and EXTERNAL (peer) tiles resolve
+    // images from streamed sigs + __resources__ without any local dir.
+    // Launcher-shape hydration rides along so an `agg-` page re-render
+    // paints silhouettes on the first pass (see streamCells).
+    await Promise.all([
+      this.loadCellImages(cells, dir),
+      this.#ensureLaunchShapes(cells),
+    ])
+    if (isStale()) {
+      this.renderQueued = true
+      return
+    }
+
+    // cache render context for fast move:preview path
+    this.cachedCellNames = cellNames
+    this.cachedLocalCellSet = localCellSet
+    this.cachedBranchSet = branchSet
+
+    this.renderedCells.clear()
+    for (const cell of cells) this.renderedCells.set(cell.label, cell)
+
+    await this.applyGeometry(cells)
+
+    // Reveal after the rebuild. Normally the mesh is already visible and this
+    // is a no-op; the case that matters is the clipboard-view EXIT, which
+    // hides the mesh up front so the viewport restore doesn't visibly resize
+    // the outgoing tiles. The empty/bail branches above return before here —
+    // that's fine, there's nothing to show in those, so staying hidden is
+    // correct.
+    if (this.layer) this.layer.visible = true
+
+    if (wasEmpty && cells.length > 0 && this.pixiApp && this.pixiContainer && this.pixiRenderer) {
+      // first tile on empty screen → apply 2× default ONLY when the
+      // user has no saved zoom/pan for this layer. A layer with saved
+      // NOTE: gated on the local `wasEmpty`, NOT `#pendingRecenter`. The
+      // applyGeometry() call above consumes #pendingRecenter (sets it false
+      // once the mesh recenter runs), so re-reading it here was always false —
+      // the camera default never ran and the first tile on a freshly-navigated
+      // empty layer stayed at the previous layer's stale camera (off-screen).
+      // `wasEmpty` here is exactly the empty→first-tile transition (the
+      // cellNames.length===0 guard above returns before this), and the saved-
+      // viewport check below still protects a laid-out layer's own viewport.
+      // viewport state (mousewheel zoom, spacebar pan, fit-to-screen)
+      // but missing meshOffset used to land here and have its zoom+pan
+      // wiped to (2, 0, 0) — destroying the user's last position.
+      // Read VP's live state to decide; #applyViewportFromSnapshot has
+      // already restored saved zoom/pan to the container/stage if
+      // present, so we only need to apply the 2× default when VP has
+      // nothing to restore.
+      const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
+      const hasSavedZoom = !!vp?.lastZoom
+      const hasSavedPan = !!vp?.lastPan
+      if (!hasSavedZoom && !hasSavedPan) {
+        const s = this.pixiRenderer.screen
+        this.pixiApp.stage.position.set(s.width * 0.5, s.height * 0.5)
+        this.pixiContainer.scale.set(2)
+        this.pixiContainer.position.set(0, 0)
+        if (vp) {
+          vp.setZoom(2, 0, 0)
+          vp.setPan(0, 0)
+        }
+      }
+    }
+
+    // cache for instant back-navigation
+    this.#layerCellsCache.set(locationKey, { cells: [...cells], cellNames, localCellSet, branchSet })
+    // seed the slot state machine — incremental paths read from here after every full render
+    this.#slots.seed({ names: cellNames, localCells: localCellSet, branches: branchSet, mode: this.#layoutMode })
+  }
+
+  /** Pre-paint launcher-decoration hydration. On a launch-group aggregator
+   *  page the silhouette is a per-vertex geometry attribute (aShapeMode) and
+   *  the clustered-island layout (help's group/role) keys
+   *  the coordinate override, so BOTH must be indexed BEFORE the paint — a
+   *  rebuild after the async decoration walk visibly shrinks full-size
+   *  picture hexagons into their silhouettes, and a cold group index paints
+   *  a clustered page as one plain spiral. Runs even when the hexagon toggle
+   *  forces plain hexes: that mode only voids silhouettes, never the island
+   *  metadata. The index's per-label memo makes repeat calls synchronous
+   *  no-ops. */
+  #ensureLaunchShapes = async (cells: readonly Cell[]): Promise<void> => {
+    if (cells.length === 0) return
+    const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
+    if (!isLauncherLocation(segs)) return
+    await ensureDecorationsIndexed(cells.map(c => c.label), segs).catch(() => { /* best effort */ })
+  }
+
+  private readonly streamCells = async (
+    dir: FileSystemDirectoryHandle,
+    cellNames: string[],
+    localCellSet: Set<string>,
+    axial: any,
+    branchSet: Set<string> | undefined,
+    myToken: number,
+    myLocationKey: string,
+  ): Promise<void> => {
+    this.streamActive = true
+    const hcNav = (window as unknown as { __hcNav?: (l: string, e?: string) => void }).__hcNav
+
+    // Superseded before we even started (a newer renderFromSynchronize ran
+    // between our void-dispatch and here). Do nothing.
+    const superseded = (): boolean => myToken !== this.#streamToken
+
+    // resolve all cell→axial positions through the single mapping function
+    const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
+    const maxCells = Math.min(cellNames.length, axialMax)
+    const allCells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
+    hcNav?.('stream:start', `${allCells.length} cells`)
+
+    if (allCells.length === 0) {
+      // Names resolved to ZERO renderable cells. In pinned layout the
+      // cellNames array is SPARSE — padded with '' gaps to hold slot
+      // positions — so an empty location has length > 0 (a row of '')
+      // yet builds nothing. The earlier `cellNames.length === 0` guards
+      // (e.g. the layer-change empty path) don't catch that, so a
+      // navigation into an empty location lands here. When the axial map
+      // is ready, this is a genuine empty layer: clearMesh tears down any
+      // mesh still attached from the PREVIOUS layer — without it,
+      // revealing the layer below would show the prior location's tiles,
+      // which IS the leftover-tiles bug on swarm navigation — and its
+      // cell-count([]) emit drives the empty-layer invitation watermark.
+      // (When axial isn't ready yet we keep the old reveal-and-wait
+      // behaviour so a transient unready frame doesn't flash empty.)
+      const axialReady = typeof axial?.items?.size === 'number' && axial.items.size > 0
+      // axialReady gates settled=true: the map is populated and this location
+      // simply has no renderable cells — a real empty layer the splash can
+      // reveal. (When axial isn't ready we skip clearMesh entirely, so no
+      // premature settled signal escapes.)
+      if (axialReady) this.clearMesh('stream: empty location (no renderable cells)', true)
+      if (this.layer) this.layer.visible = true
+      this.streamActive = false
+      this.emitEffect('navigation:guard-end', {})
+      return
+    }
+
+    // ── SINGLE-PASS RENDER ──────────────────────────────────────────
+    // A tile's POSITION is its axial slot — known the instant the cell
+    // list is built, with zero dependency on its image. So the ENTIRE
+    // layer is laid out in ONE applyGeometry: positions, bounds,
+    // recenter and any saved fit all settle once, from the COMPLETE set.
+    //
+    // This replaces the old geometric-batch stream, which rebuilt the
+    // GROWING geometry each round. Because bounds grew per batch, the
+    // recenter/fit ran against a partial set and then RE-RAN on the next
+    // — tiles visibly painted, then resized and shifted as the rest
+    // streamed in (and large layers revealed the first batch early so
+    // you saw every step). THAT was the "two stages." One pass kills it.
+    //
+    // Images are resolved up front too, but LOCAL-only and in parallel:
+    // loadCellImages never awaits the network — host misses self-heal
+    // off-path via fillFromHost and re-render as eggs land. warmup()
+    // preheats every tile-props blob + its image, so this is bounded by
+    // warm reads, not I/O. Result: the layer appears exactly once,
+    // complete and already in its final position. No resize, no
+    // reposition, no progressive reveal.
+    //
+    // Swarm churn (peers joining/leaving, resources arriving) is NOT
+    // staggered here. Each such event clears the render key and fires a
+    // fresh render that lands in this same single-pass path. "Constantly
+    // changing" just means that one pass runs again — never a partial.
+    this.renderedCells.clear()
+    for (const cell of allCells) this.renderedCells.set(cell.label, cell)
+
+    // Launcher silhouettes are baked into the geometry (aShapeMode), so on an
+    // `agg-` page the shape index must be warm BEFORE the single paint below —
+    // otherwise every launcher paints as a full-size picture hexagon and then
+    // shrinks into its group silhouette when `launch:indexed` lands. Hydrates
+    // in parallel with the image loads; a per-label memo makes revisits free.
+    // Superseded exits MUST drop streamActive: the token bump may come from a
+    // cache-reset (launcher:reconciled, cursor scrub) with no successor stream
+    // to reclaim the flag — left true, the render dedup would drop every
+    // follow-up pass for this location and the reset could never repaint.
+    await Promise.all([
+      this.loadCellImages(allCells, dir),
+      this.#ensureLaunchShapes(allCells),
+    ])
+    if (superseded()) { this.streamActive = false; return }
+
+    await this.applyGeometry(allCells, true)
+    if (superseded()) { this.streamActive = false; return }
+
+    if (this.layer) this.layer.visible = true
+    hcNav?.('reveal:all-at-once', `${allCells.length} tiles`)
+
+    this.streamActive = false
+    hcNav?.('stream:done', `${allCells.length} tiles`)
+    this.emitEffect('navigation:guard-end', {})
+
+    // cache for instant back-navigation. Use OUR locationKey — do not
+    // read this.renderedLocationKey here; a concurrent stream could
+    // have repointed it at a different layer, which would store our
+    // cells under the wrong cache key and make subsequent back-nav
+    // resurrect them on the wrong layer.
+    const bset = branchSet ?? new Set<string>()
+    this.#layerCellsCache.set(myLocationKey, { cells: [...allCells], cellNames, localCellSet, branchSet: bset })
+    this.#slots.seed({ names: cellNames, localCells: localCellSet, branches: bset, mode: this.#layoutMode })
+
+    this.requestRender()
+  }
+
+  // Pull ViewportPersistence's live state (pan/zoom/meshOffset — pending
+   // OR last-read) into our in-memory snapshot cache for the given layer
+   // BEFORE navigating away. Without this, the cache only ever reflects
+   // the values at first visit. User pans → VP saves to OPFS via debounce
+   // → user navigates away → comes back → cache hit on stale snapshot →
+   // mesh restored to OLD pan instead of where the user dragged it. Real
+   // refresh worked because that re-read OPFS; in-session nav didn't.
+   #syncCacheFromVP = (locationKey: string): void => {
+     if (!locationKey) return
+     const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
+     if (!vp) return
+     const existing = this.#layerViewportCache.get(locationKey) ?? {} as ViewportSnapshot
+     const lp = vp.lastPan; if (lp) existing.pan = { dx: lp.dx, dy: lp.dy }
+     // Preserve the fit flag — without it, back-navigation cache loses
+     // the marker that tells #applyViewportFromSnapshot to refit on the
+     // new viewport, and the user's `r` fit silently degrades to a
+     // raw (cx, cy) restore that drifts off-center after any resize.
+     const lz = vp.lastZoom
+     if (lz) existing.zoom = lz.fit
+       ? { scale: lz.scale, cx: lz.cx, cy: lz.cy, fit: true }
+       : { scale: lz.scale, cx: lz.cx, cy: lz.cy }
+     const lm = vp.lastMeshOffset; if (lm) existing.meshOffset = { x: lm.x, y: lm.y }
+     this.#layerViewportCache.set(locationKey, existing)
+   }
+
+  readonly #applyViewportForLayer = async (dir: FileSystemDirectoryHandle): Promise<boolean> => {
+    // Legacy wrapper — no segments available at this call site, so it
+    // falls through to the legacy `<dir>/0000` fallback. (Currently has
+    // no live callers; left here for back-compat until Step 5 retires
+    // the legacy path entirely.)
+    const snap = await this.#applyViewportForLayerReadSnapshot(dir, null)
+    return !!(snap?.zoom || snap?.pan || snap?.meshOffset)
+  }
+
+  // Same as #applyViewportForLayer but returns the snapshot itself so
+  // the caller can decide whether to recenter (when there's no saved
+  // meshOffset for the layer) or keep the mesh where it was last left.
+  //
+  // Phase B: read prefers the new tile-properties-backed viewport store
+  // (signature-addressed, works for sub-layers without OPFS dirs). Falls
+  // back to legacy `<dir>/0000.viewport` only if the new path has nothing
+  // yet — preserves any pre-migration data while user gestures populate
+  // the new path. Once the legacy fallback proves unused, it can be
+  // dropped (Step 5).
+  readonly #applyViewportForLayerReadSnapshot = async (
+    _dir: FileSystemDirectoryHandle | null,
+    segments: readonly string[] | null = null,
+  ): Promise<ViewportSnapshot> => {
+    // Viewport lives in the sig-keyed `__viewport__` store, addressed by
+    // the location's lineage segments — no OPFS dir, no history. Works
+    // identically for root and dir-less sub-layers.
+    let snap: ViewportSnapshot = {}
+    try {
+      snap = await readViewportAt(segments ?? [])
+    } catch {
+      snap = {}
+    }
+
+    // Apply first (the sanitizer may reject garbage components), then
+    // cache + return what was ACTUALLY applied so revisits and the
+    // caller's recenter decision never act on rejected values.
+    const applied = this.#applyViewportFromSnapshot(snap)
+    const locationKey = this.renderedLocationKey
+    if (locationKey) this.#layerViewportCache.set(locationKey, applied)
+    return applied
+  }
+
+  /** Apply a viewport snapshot (sanitized) and return what was ACTUALLY
+   *  applied — rejected components come back undefined so callers (cache,
+   *  recenter decision) never act on garbage values. */
+  #applyViewportFromSnapshot = (snap: ViewportSnapshot): ViewportSnapshot => {
+    const container = this.pixiContainer
+    const app = this.pixiApp
+    const renderer = this.pixiRenderer
+    if (!container || !app || !renderer) return {}
+
+    const s = renderer.screen
+
+    // Reject garbage BEFORE applying. A persisted `__viewport__` entry
+    // written by a past broken session (duplicate zoom/pan drones
+    // fighting over the container, a crash mid-gesture) can hold
+    // non-finite or absurd values; applying one flings the freshly
+    // rendered tiles off-screen — "the children rendered and then
+    // disappeared". Each component is validated independently; an
+    // invalid one falls back to its default framing, loudly. The next
+    // user gesture overwrites the bad entry, so this self-heals.
+    const bound = 8 * Math.max(s.width, s.height, 1)
+    const sane = (v: unknown, b = bound): boolean =>
+      typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= b
+    let zoom = snap.zoom
+    if (zoom && !(sane(zoom.scale, 100) && (zoom.scale as number) > 0.01 && sane(zoom.cx) && sane(zoom.cy))) {
+      console.warn('[render] viewport restore: rejecting insane zoom snapshot', zoom)
+      zoom = undefined
+    }
+    let pan = snap.pan
+    if (pan && !(sane(pan.dx) && sane(pan.dy))) {
+      console.warn('[render] viewport restore: rejecting insane pan snapshot', pan)
+      pan = undefined
+    }
+    let meshOffset = snap.meshOffset
+    if (meshOffset && !(sane(meshOffset.x) && sane(meshOffset.y))) {
+      console.warn('[render] viewport restore: rejecting insane meshOffset snapshot', meshOffset)
+      meshOffset = undefined
+    }
+
+    if (zoom) {
+      // Apply the saved scale + (cx, cy) as an approximation so the
+      // initial paint isn't blank, but flag the snapshot for a refit
+      // once mesh bounds are available (handled in applyGeometry).
+      // Without this, a fit saved at one viewport size renders shrunk
+      // and off-center after reload at a different size.
+      container.scale.set(zoom.scale)
+      container.position.set(zoom.cx, zoom.cy)
+      // Pan-respects-fit: refit ONLY when the saved pan is zero (or
+      // absent). A non-zero saved pan means the user explicitly moved
+      // away from the fit position; refitting (which calls
+      // setPan(0,0)) would clobber their pan on every boot.
+      const panIsZero = !pan || (pan.dx === 0 && pan.dy === 0)
+      this.#pendingFitRestore = !!zoom.fit && panIsZero
+    } else {
+      container.scale.set(1)
+      container.position.set(0, 0)
+      this.#pendingFitRestore = false
+    }
+
+    if (pan) {
+      app.stage.position.set(s.width * 0.5 + pan.dx, s.height * 0.5 + pan.dy)
+    } else {
+      app.stage.position.set(s.width * 0.5, s.height * 0.5)
+    }
+
+    // Restore the saved mesh offset. If the mesh exists, apply now AND
+    // emit render:mesh-offset so listeners (TileOverlayDrone uses this
+    // to convert click coords → axial; without the emit clicks miss
+    // because the overlay still has the previous layer's offset).
+    // Otherwise stash the value so applyGeometry can apply + emit it
+    // as soon as the mesh is created (first-time render and
+    // post-clearMesh re-create both fall into the latter case).
+    if (meshOffset) {
+      if (this.hexMesh) {
+        this.hexMesh.position.set(meshOffset.x, meshOffset.y)
+        this.emitEffect('render:mesh-offset', { x: meshOffset.x, y: meshOffset.y })
+        this.#pendingMeshOffsetRestore = null
+      } else {
+        this.#pendingMeshOffsetRestore = { x: meshOffset.x, y: meshOffset.y }
+      }
+    } else {
+      this.#pendingMeshOffsetRestore = null
+    }
+
+    return { zoom, pan, meshOffset }
+  }
+
+  private readonly applyGeometry = async (cells: Cell[], final = true): Promise<void> => {
+    if (cells.length === 0) {
+      this.clearMesh("applyGeometry: called with 0 cells")
+      return
+    }
+
+    const { circumRadiusPx, gapPx, padPx } = this.#hexGeo
+
+    const nextCellsKey = this.buildCellsKey(cells)
+    // Read the generations HERE, alongside the key, and store this same pair
+    // on the success path — not the post-bake values. The bake loop below can
+    // itself evict (an oversized layer displaces its own earlier labels), and
+    // that leaves the cells baked before the eviction holding stale UVs; the
+    // entry-time pair is what makes the next pass rebuild instead of calling
+    // the buffer converged. See #bakedLabelAtlasGen for why they are not part
+    // of the key.
+    const nextImageAtlasGen = this.imageAtlas?.evictionGeneration ?? 0
+    const nextLabelAtlasGen = this.atlas?.evictionGeneration ?? 0
+    if (
+      nextCellsKey === this.renderedCellsKey
+      && cells.length === this.renderedCount
+      && nextImageAtlasGen === this.#bakedImageAtlasGen
+      && nextLabelAtlasGen === this.#bakedLabelAtlasGen
+    ) {
+      return
+    }
+
+    // The SDF radius uniform receives circumRadiusPx but is treated as the
+    // apothem, so each hex is drawn with its POINTS reaching circumRadiusPx/cos30
+    // from centre — further than (√3/2)·circumRadiusPx. Size the quad's bounding
+    // box to that true point reach so the sharp tips (top/bottom for point-top,
+    // left/right for flat-top) aren't sliced flat by the quad edge. Only the
+    // transparent quad grows; hex size, spacing and the shader are untouched.
+    const pointReachPx = circumRadiusPx / 0.8660254 // centre-to-point of the drawn hex
+    const hexHalfW = this.#flat ? pointReachPx : circumRadiusPx
+    const hexHalfH = this.#flat ? circumRadiusPx : pointReachPx
+    const quadHalfW = hexHalfW + padPx
+    const quadHalfH = hexHalfH + padPx
+    const quadW = quadHalfW * 2
+    const quadH = quadHalfH * 2
+
+    if (!this.atlas || !this.imageAtlas) {
+      this.clearMesh("applyGeometry: atlas unavailable")
+      return
+    }
+
+    const labelTex = this.atlas.getAtlasTexture()
+    const cellImageTex = this.imageAtlas.getAtlasTexture()
+
+    // Pin THIS pass's labels BEFORE baking them — the hard rule that a
+    // visible tile's text never loses its glyphs to a background readiness
+    // bake (whose working set can exceed the atlas at hub layers; the
+    // eviction→repaint cycle shows as every tile's text blinking). Pinning
+    // must precede the bake loop: with the PREVIOUS layer's pins still
+    // active, a big layer would bake into the few unpinned slots and evict
+    // its own labels mid-pass, re-arming the loop it exists to prevent.
+    // The old layer's labels unpin here and become ordinary evictees.
+    // PENDING_CELL_LABEL is displayed in place of any mid-mutation cell's
+    // name, so it is part of the on-screen set whenever it is baked at all.
+    this.atlas.setPinned([...cells.map(c => c.label), PENDING_CELL_LABEL])
+
+    for (const cell of cells) {
+      const label = this.#pendingCellMutations.has(cell.label) && !this.atlas.hasLabel(cell.label)
+        ? PENDING_CELL_LABEL
+        : cell.label
+      this.atlas.getLabelUV(label)
+    }
+
+    const geom = this.buildFillQuadGeometry(cells, circumRadiusPx, gapPx, quadHalfW, quadHalfH)
+
+    if (!this.shader) {
+      this.shader = new HexSdfTextureShader(labelTex, cellImageTex, quadW, quadH, circumRadiusPx)
+      const [ar, ag, ab] = this.#accentColor
+      this.shader.setAccentColor(ar, ag, ab)
+    } else {
+      try {
+        this.shader.setLabelAtlas(labelTex)
+        this.shader.setCellImageAtlas(cellImageTex)
+        this.shader.setQuadSize(quadW, quadH)
+        this.shader.setRadiusPx(circumRadiusPx)
+      } catch {
+        this.rebuildRenderResources(this.pixiRenderer)
+        this.renderQueued = true
+        return
+      }
+    }
+    this.shader.setFlat(this.#flat)
+    this.shader.setPivot(this.#pivot)
+    this.#applyBandRows()
+    this.shader.setLabelMix(this.#labelsVisible ? 1.0 : 0.0)
+    this.shader.setImageMix(this.#textOnly ? 0.0 : this.#substrateFadeMix())
+
+    // Per-group launcher visuals — NOT universal, and chosen PER TILE so a mixed
+    // launch-group page shows each group's OWN silhouette (games → marching
+    // Space Invader) and groups never share a visual type. Websites members
+    // carry no shape any more — plain picture hexagons like the rest of the hive.
+    // The shape is a per-vertex attribute (aShapeMode) packed in applyGeometry
+    // from each cell's `launch:target` decoration `shape`; every normal hive page
+    // (no such decoration) stays plain hexagons. Here we only run the motion
+    // clock when on a launch-group page — the per-vertex gate (aShapeMode > 1.5)
+    // limits the actual march to game tiles, leaving hexagons still. Drift
+    // amplitude is a small fraction of the hex radius so a marching invader
+    // never costs the participant a click.
+    const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
+    const onLauncherPage = isLauncherLocation(segs)
+    this.#setDrift(onLauncherPage, circumRadiusPx)
+
+    if (!this.hexMesh) {
+      this.hexMesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: Texture.WHITE as any } as any)
+      ;(this.hexMesh as any).blendMode = 'pre-multiply'
+      this.layer!.addChild(this.hexMesh as any)
+      // Mesh-offset restore priority:
+      //   1. Saved snapshot from OPFS (#pendingMeshOffsetRestore) —
+      //      authoritative, survives reload, NEVER changes unless the
+      //      user explicitly recenters.
+      //   2. Last-known position from previous clearMesh — only used
+      //      when the snapshot has no saved offset (e.g. brand-new
+      //      layer that was empty when first visited). Keeps a redo
+      //      after "undo to empty" from snapping tiles to (0,0).
+      //   3. Recenter (when pendingRecenter is set, runs below).
+      if (this.#pendingMeshOffsetRestore && !this.#pendingRecenter) {
+        this.hexMesh.position.set(this.#pendingMeshOffsetRestore.x, this.#pendingMeshOffsetRestore.y)
+        this.emitEffect('render:mesh-offset', { x: this.#pendingMeshOffsetRestore.x, y: this.#pendingMeshOffsetRestore.y })
+      } else if (this.#lastMeshOffset && !this.#pendingRecenter) {
+        this.hexMesh.position.set(this.#lastMeshOffset.x, this.#lastMeshOffset.y)
+        this.emitEffect('render:mesh-offset', { x: this.#lastMeshOffset.x, y: this.#lastMeshOffset.y })
+      }
+      this.#pendingMeshOffsetRestore = null
+      this.#lastMeshOffset = null
+    } else {
+      // Mesh already exists. If a snapshot restore is pending (e.g.
+      // applyViewportFromSnapshot ran before applyGeometry on a layer
+      // change without mesh re-creation), apply it now, before any
+      // potential recenter. Without this, the saved offset would be
+      // dropped on layer-change-without-mesh-recreate paths.
+      if (this.#pendingMeshOffsetRestore && !this.#pendingRecenter) {
+        this.hexMesh.position.set(this.#pendingMeshOffsetRestore.x, this.#pendingMeshOffsetRestore.y)
+        this.emitEffect('render:mesh-offset', { x: this.#pendingMeshOffsetRestore.x, y: this.#pendingMeshOffsetRestore.y })
+        this.#pendingMeshOffsetRestore = null
+      }
+      if (this.geom) this.geom.destroy(true)
+      this.hexMesh.geometry = geom
+      this.hexMesh.shader = (this.shader as any).shader
+    }
+    this.hexMesh.visible = true
+
+    // Recenter mesh on its bounds — but ONLY when pendingRecenter is
+    // set, which now happens only for the explicit recenter path
+    // (navigation.recenter / fitToScreen command, or first-time render
+    // of a layer that has no saved meshOffset). Auto-recentering on
+    // every layer change was the source of the "drift after refresh /
+    // re-centers on back-nav" feedback: each layer was getting a fresh
+    // bounds-based offset every visit, and the user's saved pan/zoom
+    // landed on a different reference frame. Now the mesh position is
+    // saved with the viewport (snap.meshOffset) and restored on load —
+    // it never moves unless the user asks it to.
+    //
+    // When recenter does run, persist the result so the next visit
+    // restores the same offset via #applyViewportFromSnapshot above.
+    if (this.hexMesh?.getLocalBounds && this.#pendingRecenter) {
+      this.hexMesh.position.set(0, 0)
+      const bounds = this.hexMesh.getLocalBounds()
+      const newX = -(bounds.x + bounds.width * 0.5)
+      const newY = -(bounds.y + bounds.height * 0.5)
+      this.hexMesh.position.set(newX, newY)
+      this.emitEffect('render:mesh-offset', { x: newX, y: newY })
+      // Persist so subsequent navs restore this offset rather than
+      // recomputing from current bounds (which would drift if cells
+      // change shape — undo/redo, add/remove, etc.).
+      const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
+      // 'user' — the default 'auto' updates the in-memory mirror only, which
+      // made the comment above a lie: back-nav kept the offset (via the cache
+      // patched below) while a RELOAD recomputed it from live bounds.
+      vp?.setMeshOffset?.(newX, newY, 'user')
+      // Also patch the in-memory snapshot cache. Without this update,
+      // next back-nav reads the old (empty) cached snap, sees no
+      // meshOffset, and recomputes from bounds again — defeating the
+      // whole point of saving it.
+      const cached = this.#layerViewportCache.get(this.renderedLocationKey)
+      if (cached) cached.meshOffset = { x: newX, y: newY }
+      else this.#layerViewportCache.set(this.renderedLocationKey, { meshOffset: { x: newX, y: newY } })
+      if (final) this.#pendingRecenter = false  // consumed only on final batch
+    }
+
+    // Publish the tile count BEFORE the refit below — it is an INPUT to it.
+    // zoomToFit's safe-area padding keys off `#cellCount` (a lone tile gets
+    // 75px of breathing room, anything larger 5px), and that field is fed
+    // only by this effect. Emitted after the refit, every restore-refit sized
+    // itself against the PREVIOUS page's count: the same layer re-framed to a
+    // different zoom depending on where you arrived from, and the first page
+    // after a reload always fitted at padding 5 (count still 0).
+    this.emitEffect('render:cell-count', { ...this.#buildCellCountPayload(cells), settled: final })
+
+    // After mesh + recenter have settled on the final batch, refit if
+    // the restored snapshot was a fit (snap.zoom.fit). The applied
+    // (cx, cy) was an approximation derived from the previous
+    // viewport's safe area — refitting against the new viewport keeps
+    // content centered and not "shrunk" after a resize-then-reload.
+    // Gated on `final` so partial-batch bounds don't produce a fit
+    // that's too tight (would zoom in then out as more cells stream).
+    if (final && (this.#pendingFitRestore || this.#pendingFirstVisitFit) && this.hexMesh?.getLocalBounds) {
+      const firstVisit = this.#pendingFirstVisitFit
+      this.#pendingFitRestore = false
+      this.#pendingFirstVisitFit = false
+      const zoom = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ZoomDrone') as { zoomToFit?: (snap?: boolean, source?: 'user' | 'auto-persist' | 'auto') => void } | undefined
+      // First-visit adopted fit persists ('auto-persist') so it sticks like a
+      // normal viewport and never re-fits; a restored fit re-frames visually
+      // only ('auto') and must never re-commit on every entry.
+      //
+      // 'auto-persist', NOT 'user': this is a RENDER, not a gesture. As 'user'
+      // it announced `viewport:fit`, which the control bar treats as an
+      // explicit request and uses to discard the page's hand framing — so a
+      // first-visit render could quietly strip a framing the participant set.
+      zoom?.zoomToFit?.(true, firstVisit ? 'auto-persist' : 'auto')
+    }
+
+    this.geom = geom
+    this.renderedCellsKey = nextCellsKey
+    // The ONE place these may be written: a fresh buffer whose UVs were just
+    // re-baked is the only thing that makes a generation "already applied".
+    this.#bakedImageAtlasGen = nextImageAtlasGen
+    this.#bakedLabelAtlasGen = nextLabelAtlasGen
+    this.renderedCount = cells.length
+    this.#recordRenderAudit('paint', cells.length, this.renderedLocationKey)
+
+    // A paint with every image AND every label resolvable is the convergence
+    // point of the eviction-repaint cycle — reset its bound here (eviction
+    // events alone can't be relied on for the reset: after the reload pass
+    // converges, no further event arrives to run a clean scan).
+    //
+    // The label half is not optional. #evictRepaintCount is SHARED with
+    // #onLabelAtlasEvicted, so an image-only reset defeats the bound on any
+    // layer with more labels than the 256-slot label atlas: the paint wraps
+    // the label ring, the label listener forces a repaint, this reset clears
+    // the counter because the images were fine, and the cycle runs forever —
+    // visible as tile text blinking. Witnessed on a 522-child layer.
+    const imagesConverged = !!this.imageAtlas && !cells.some(c =>
+      c.imageSig && !this.imageAtlas!.hasImage(c.imageSig) && !this.imageAtlas!.hasFailed(c.imageSig))
+    const labelsConverged = !this.atlas || !cells.some(c =>
+      !this.#hidesName(c.hideText, !!(c.imageSig && this.imageAtlas?.hasImage(c.imageSig)))
+      && !this.atlas!.hasLabel(c.label))
+    if (imagesConverged && labelsConverged) {
+      this.#evictRepaintCount = 0
+    }
+
+    // Pin every on-screen image so the ring allocator never reuses their
+    // slots — the hard display rule: a tile never renders without its
+    // image outside text-only mode. Replacing the set wholesale unpins
+    // the previous layer's sigs automatically.
+    this.imageAtlas?.setPinned(cells.flatMap(c => (c.imageSig ? [c.imageSig] : [])))
+
+    // rebuild reverse axial lookup for O(1) tile:hover
+    this.#axialToIndex.clear()
+    for (let i = 0; i < cells.length; i++) {
+      this.#axialToIndex.set(`${cells[i].q},${cells[i].r}`, i)
+    }
+    // Geometry replacement can change every aCellIndex while the cursor stays
+    // still. Hover is label-owned, so rebind that label to the NEW index map
+    // before exposing the completed frame. Relying only on another tile:hover
+    // event left the normal one-row image strip under a still-visible action
+    // overlay until the pointer exited and re-entered the tile.
+    const restoredHoverIndex = this.#hoverRevealLabel
+      ? this.#labelToIndex.get(this.#hoverRevealLabel)
+      : undefined
+    this.#applyBandRows()
+    this.shader.setHoveredIndex(restoredHoverIndex ?? -1)
+    // A geometry replacement can hand us a NEW shader; the swap verb is a
+    // property of the open window, not of this frame, so re-apply it here or
+    // the cut rim vanishes the first time anything re-renders under it.
+    this.#applySwapMode()
+    this.#emitRenderTags(cells)
+  }
+
+  /** 0 = not swapping · 1 = the click takes the hovered tile · 2 = copies it.
+   *  Pushed by `clipboard:verb` (TileOverlayDrone's cue is the one resolver). */
+  #swapMode = 0
+  /** The verb's colour, normalised — amber for take, near-white for copy. */
+  #swapColor: [number, number, number] = [1, 0.77, 0.5]
+
+  #applySwapMode = (): void => {
+    const shader = this.shader
+    if (!shader) return
+    shader.setSwapMode(this.#swapMode)
+    shader.setSwapColor(this.#swapColor[0], this.#swapColor[1], this.#swapColor[2])
+  }
+
+  /**
+   * Render-pass auditor (proof instrumentation). Records every PAINT and
+   * every completeness-GATE hold to `window.__hcRenderAudit`, and exposes
+   * `window.__hcAuditReport()` which groups paints by location and flags a
+   * two-stage load (a location painted more than once with a GROWING cell
+   * count — exactly the "10 then 13" signature). A correct single-pass
+   * load shows each location with `paints: 1` and `twoStage: false`.
+   */
+  #recordRenderAudit(kind: 'paint' | 'gate', count: number, loc: string): void {
+    try {
+      const w = window as unknown as {
+        __hcRenderAudit?: { t: number; kind: string; loc: string; count: number }[]
+        __hcAuditReport?: () => unknown
+      }
+      const arr = (w.__hcRenderAudit ??= [])
+      arr.push({ t: Math.round(performance.now()), kind, loc, count })
+      if (arr.length > 600) arr.splice(0, arr.length - 600)
+      if (!w.__hcAuditReport) {
+        w.__hcAuditReport = () => {
+          const log = w.__hcRenderAudit ?? []
+          const byLoc = new Map<string, number[]>()
+          const gates = new Map<string, number>()
+          for (const r of log) {
+            if (r.kind === 'paint') {
+              const cur = byLoc.get(r.loc) ?? []
+              cur.push(r.count)
+              byLoc.set(r.loc, cur)
+            } else if (r.kind === 'gate') {
+              gates.set(r.loc, (gates.get(r.loc) ?? 0) + 1)
+            }
+          }
+          const rows: { loc: string; paints: number; counts: number[]; gateHolds: number; twoStage: boolean }[] = []
+          for (const [loc, counts] of byLoc) {
+            const distinct = new Set(counts)
+            const twoStage = counts.length > 1 && distinct.size > 1 && counts[counts.length - 1] > counts[0]
+            rows.push({ loc, paints: counts.length, counts, gateHolds: gates.get(loc) ?? 0, twoStage })
+          }
+          const anyTwoStage = rows.some(r => r.twoStage)
+          return { ok: !anyTwoStage, anyTwoStage, rows }
+        }
+      }
+    } catch { /* instrumentation must never break a render */ }
+  }
+
+  /**
+   * Per-pass SOURCE breakdown (proof instrumentation). Records, for each
+   * render pass, how many tiles each source contributed: the memoized
+   * currentLayer() child count vs the fresh head (`staleContent`/`freshHead`
+   * — a divergence is the stale-content two-stage), the layer-local set, and
+   * ephemeral/peer/mesh additions. `window.__hcSourceReport()` returns the
+   * recent passes so a two-stage count (e.g. 10 then 13) can be attributed to
+   * the exact source on real data.
+   */
+  #recordSourceAudit(loc: string, b: { staleContent: number; freshHead: number; layerLocal: number; ephemeral: number; peer: number; mesh: number; union: number; outside: string[] }): void {
+    try {
+      const w = window as unknown as {
+        __hcSourceAudit?: ({ t: number; loc: string } & typeof b)[]
+        __hcSourceReport?: () => unknown
+      }
+      const arr = (w.__hcSourceAudit ??= [])
+      arr.push({ t: Math.round(performance.now()), loc, ...b })
+      if (arr.length > 200) arr.splice(0, arr.length - 200)
+      if (!w.__hcSourceReport) {
+        w.__hcSourceReport = () => {
+          const log = w.__hcSourceAudit ?? []
+          // Flag passes where the fresh head exceeded the memoized content
+          // (stale-content) or where union > layerLocal (tiles from outside
+          // the layer — registry peer / ephemeral / mesh).
+          return log.map(r => ({
+            ...r,
+            staleContentLag: r.freshHead > r.staleContent,
+            outsideLayer: r.union - r.layerLocal,
+          }))
+        }
+      }
+    } catch { /* instrumentation must never break a render */ }
+  }
+
+  /** Tags applied to a cell: the union of the decoration index (canonical, tags
+   *  ride the `tag` decoration kind) and the legacy `properties.tags` cache
+   *  (back-compat for cells tagged before the decoration migration). */
+  #tagsFor(label: string): string[] {
+    const out = new Set<string>(this.cellTagsCache.get(label) ?? [])
+    for (const t of tagsForLabel(label)) out.add(t)
+    return [...out]
+  }
+
+  /** Emit render:tags (name+count) for the controls-bar tag list — the tags
+   *  defining the current page. There is no on-tile tag icon; the bottom tag
+   *  list lights up per-tile on hover (tile:hover-tags). */
+  #emitRenderTags(cells: Cell[]): void {
+    const counts = new Map<string, number>()
+    for (const cell of cells) {
+      for (const tag of this.#tagsFor(cell.label)) {
+        counts.set(tag, (counts.get(tag) ?? 0) + 1)
+      }
+    }
+    const tags = [...counts.entries()].map(([name, count]) => ({ name, count }))
+    this.emitEffect('render:tags', { tags })
+  }
+
+  /** Is anything narrowing the page — the participant's lens, a reference's
+   *  requirement, or both? Every flatten guard asks this rather than
+   *  `filterTags.size`, so a requirement alone (entered through a reference
+   *  with no lens set) still flattens. */
+  #narrowing(): boolean {
+    return this.filterTags.size > 0 || this.#requiredTags.size > 0 || this.#gathered !== null
+  }
+
+  /** Put a gathered set down. Called when the participant navigates away and
+   *  when the gatherer sends an empty list. */
+  #clearGather(): void {
+    this.#gathered = null
+    this.#gatherKey = ''
+    this.#gatherAnchorKey = ''
+    this.#tagFlattenResults = null
+    this.#flatPathByLabel.clear()
+    this.#filterBlockedLabels.clear()
+    this.emitEffect('render:gathered', { active: false, count: 0 })
+  }
+
+  /** Identity of the current narrowing, for the render key. Both sources, kept
+   *  apart: `a|b` and `b|a` are different renders. */
+  #narrowKey(): string {
+    return [...this.filterTags].sort().join(',') + '|' + [...this.#requiredTags].sort().join(',')
+      + '|' + this.#gatherKey
+  }
+
+  /** Walk the whole layer tree from the hive root and collect every cell whose
+   *  tag set intersects the active `filterTags`, populating `#tagFlattenResults`
+   *  for the flatten render override. Tags are read per cell from BOTH the `tag`
+   *  decoration kind (canonical) and legacy `properties.tags` — the same union
+   *  the controls-bar pills use — so old and new tags both filter. Mirrors the
+   *  `walkLayer` pattern (website.queen / flattenLayerTree): sign each path,
+   *  read its layer, recurse its `children`. One-shot on filter activation. */
+  async #scanTagsAcrossPages(): Promise<void> {
+    const active = this.filterTags
+    const required = this.#requiredTags
+    if (active.size === 0 && required.size === 0) { this.#tagFlattenResults = null; return }
+
+    const history = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as {
+      sign: (l: { explorerSegments?: () => readonly string[] }) => Promise<string>
+      currentLayerAt: (sig: string) => Promise<Record<string, unknown> | null>
+      getLayerBySig: (sig: string) => Promise<{ name?: string } | null>
+    } | undefined
+    const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as {
+      getResource: (sig: string) => Promise<Blob | null>
+    } | undefined
+    if (!history?.sign || !history?.currentLayerAt || !store?.getResource) {
+      this.#tagFlattenResults = null
+      // Stamp the key anyway — otherwise the render-side "location moved" check
+      // sees an unscanned location and re-runs this on every single frame.
+      const segs = this.resolve<any>('lineage')?.explorerSegments?.() ?? []
+      this.#filterScanKey = [...segs].join('/')
+      return
+    }
+
+    const SIG_RE = /^[0-9a-f]{64}$/
+    const results: {
+      label: string
+      dir: FileSystemDirectoryHandle | null
+      path: string[]
+      hasChildren: boolean
+      matchesInside: number
+    }[] = []
+    const seen = new Set<string>()
+    const MAX_DEPTH = 32
+
+    // Scope decides where the walk starts and how deep it reaches:
+    //  • global   — the whole hive from the root, unbounded depth
+    //  • children — the current subtree, unbounded depth
+    //  • local    — the current page only (its immediate cells; depth 1)
+    const lineage = this.resolve<any>('lineage')
+    const currentSegments: string[] = lineage?.explorerSegments?.() ? [...lineage.explorerSegments()] : []
+    const currentKey = currentSegments.join('/')
+    // A global filter reads from the hive root only while you stand at the
+    // location where you switched it on. Enter a match and the walk re-roots
+    // to where you now are — the filter follows you down instead of redrawing
+    // the same hive-wide flatten at every level.
+    const rootPath: string[] = (this.#filterScope === 'global' && currentKey === this.#filterAnchorKey)
+      ? []
+      : currentSegments
+    const recordDepth = this.#filterScope === 'local' ? 1 : MAX_DEPTH
+    // Walk ONE level past the deepest recorded row purely to count. A local
+    // filter records depth 1, but the enterability gate for those rows asks
+    // "would depth 1 FROM there hold anything?" — which is depth 2 from here.
+    const maxRelDepth = Math.min(recordDepth + 1, MAX_DEPTH)
+
+    // Tag names on a single layer: tag-kind decorations ∪ legacy properties.tags.
+    const tagNamesOf = async (layer: Record<string, unknown>): Promise<Set<string>> => {
+      const names = new Set<string>()
+      const decorations = Array.isArray(layer['decorations']) ? layer['decorations'] as unknown[] : []
+      for (const sig of decorations) {
+        if (typeof sig !== 'string' || !SIG_RE.test(sig)) continue
+        try {
+          const blob = await store.getResource(sig)
+          if (!blob) continue
+          const rec = JSON.parse(await blob.text()) as { kind?: string; payload?: { name?: unknown } }
+          if (rec?.kind === 'tag' && typeof rec.payload?.name === 'string') names.add(rec.payload.name)
+        } catch { /* malformed — skip */ }
+      }
+      const props = Array.isArray(layer['properties']) ? layer['properties'] as unknown[] : []
+      const propSig = props[0]
+      if (typeof propSig === 'string' && SIG_RE.test(propSig)) {
+        try {
+          const blob = await store.getResource(propSig)
+          if (blob) {
+            const p = JSON.parse(await blob.text()) as { tags?: unknown }
+            if (Array.isArray(p?.tags)) for (const t of p.tags) if (typeof t === 'string') names.add(t)
+          }
+        } catch { /* malformed — skip */ }
+      }
+      return names
+    }
+
+    // relDepth is measured from the scope root: 0 is the root itself (a page
+    // container — never a result), 1 is its immediate cells, and so on.
+    // Returns how many matches sit AT `path` or below it, which is what lets a
+    // recorded row learn whether entering it would show anything.
+    const walk = async (path: string[], relDepth: number): Promise<number> => {
+      if (relDepth > maxRelDepth) return 0
+      let layer: Record<string, unknown> | null
+      try {
+        const locSig = await history.sign({ explorerSegments: () => path })
+        layer = await history.currentLayerAt(locSig)
+      } catch { return 0 }
+      if (!layer) return 0
+
+      const rawChildren = Array.isArray(layer['children']) ? layer['children'] as unknown[] : []
+
+      // Push the row before recursing; matchesInside is patched in below, since
+      // it isn't knowable until the subtree has been counted.
+      let selfMatched = false
+      let row: (typeof results)[number] | null = null
+      if (relDepth >= 1) {
+        const label = path[path.length - 1]
+        const names = await tagNamesOf(layer)
+        // Two sources, ANDed. Within each, ANY mark matching is enough — the
+        // rule the participant's lens already uses, applied unchanged to the
+        // requirement rather than inventing a second one. An empty source
+        // demands nothing, so a lens alone behaves exactly as it did before
+        // requirements existed.
+        const meetsLens = active.size === 0 || [...active].some(t => names.has(t))
+        const meetsRequirement = required.size === 0 || [...required].some(t => names.has(t))
+        selfMatched = meetsLens && meetsRequirement
+        // Rows are recorded only down to recordDepth — anything past that is
+        // walked purely to answer "is there a match in here?".
+        if (selfMatched && relDepth <= recordDepth && !seen.has(label)) {
+          seen.add(label)
+          row = { label, dir: null, path: [...path], hasChildren: rawChildren.length > 0, matchesInside: 0 }
+          results.push(row)
+        }
+      }
+
+      let below = 0
+      if (relDepth < maxRelDepth) {
+        for (const entry of rawChildren) {
+          const s = String(entry ?? '').trim()
+          if (!s) continue
+          let childName = s
+          if (SIG_RE.test(s)) {
+            try {
+              const child = await history.getLayerBySig(s)
+              if (!child?.name) continue
+              childName = String(child.name)
+            } catch { continue }
+          }
+          below += await walk([...path, childName], relDepth + 1)
+          // The counting-only level records nothing, so one hit already answers
+          // the gate — stop reading siblings instead of paying for the rest.
+          if (below > 0 && relDepth + 1 > recordDepth) break
+        }
+      }
+
+      if (row) row.matchesInside = below
+      return (selfMatched ? 1 : 0) + below
+    }
+
+    await walk(rootPath, 0)
+    this.#tagFlattenResults = results
+    this.#filterScanKey = currentKey
+  }
+
+  /** Returns the current imageMix value, accounting for substrate fade-in animation. */
+  #substrateFadeMix(): number {
+    if (this.#substrateFadeStart === null) return 1.0
+    const elapsed = performance.now() - this.#substrateFadeStart
+    if (elapsed >= 1000) {
+      this.#substrateFadeStart = null
+      return 1.0
+    }
+    const t = elapsed / 1000
+    // Phase 1 (0–500ms): quadratic ease-in from 0 → 0.5 (slow build)
+    // Phase 2 (500–1000ms): linear ramp from 0.5 → 1.0 (quick finish)
+    if (t < 0.5) {
+      const p = t / 0.5
+      return 0.5 * p * p
+    }
+    return 0.5 + 0.5 * ((t - 0.5) / 0.5)
+  }
+
+  /** Kick off the substrate fade-in animation loop. */
+  #startSubstrateFade(): void {
+    if (this.#textOnly) return
+    this.#substrateFadeStart = performance.now()
+    cancelAnimationFrame(this.#substrateFadeRaf)
+    const tick = (): void => {
+      if (this.#substrateFadeStart === null) return
+      const mix = this.#substrateFadeMix()
+      this.shader?.setImageMix(mix)
+      if (mix < 1.0) {
+        this.#substrateFadeRaf = requestAnimationFrame(tick)
+      } else {
+        this.#substrateFadeStart = null
+      }
+    }
+    this.#substrateFadeRaf = requestAnimationFrame(tick)
+  }
+
+  private ensureListeners = (): void => {
+    if (this.listening) return
+    this.listening = true
+
+    // respond to processor-emitted synchronize and URL navigation
+    window.addEventListener('synchronize', this.onSynchronize)
+    window.addEventListener('navigate', this.onNavigate)
+    // CLICK → TILES, AS ONE NUMBER. Every perf claim about navigation has been
+    // argued from reading code; this makes the next one a measurement. One
+    // line per navigation, when the first non-empty pass lands.
+    window.addEventListener('navigate', () => { this.#navStartedAt = performance.now() })
+
+    // Atlas ring eviction — a sig referenced by an ON-SCREEN cell can lose
+    // its pixels with no render pass in flight (substrate preheat, detached
+    // refills wrapping the ring). The baked UV then samples whatever image
+    // took over the slot — the tile shows WRONG pixels — until something
+    // else invalidates. Repaint only when a rendered cell is actually
+    // affected; mid-pass evictions are skipped because the running pass
+    // rebuilds geometry itself.
+    window.addEventListener('hex-image-atlas:evicted', this.#onAtlasEvicted)
+    window.addEventListener('hex-image-atlas:retry', this.#onAtlasEvicted)
+    // Label-atlas twin — in-place updates bake uncached labels on demand,
+    // and once the 256-slot label ring has wrapped, such a bake displaces
+    // an on-screen label whose baked UV then shows the WRONG text.
+    window.addEventListener('hex-label-atlas:evicted', this.#onLabelAtlasEvicted)
+
+    // Lineage 'change' is the canonical "the user's explorerPath
+    // changed" signal — fired by every code path that mutates the
+    // path (URL-bar navigation, explorerEnter, explorerUp,
+    // showDomainRoot, etc.). Without this listener, navigation into
+    // sub-layers (e.g., /dolphin) doesn't trigger a fresh render of
+    // the new location's tiles; the cursor never auto-loads the new
+    // bag and the canvas stays empty until something else (mouse
+    // click on a tile, manual refresh, a synchronize event) forces a
+    // requestRender. The `navigate` window event covers URL-driven
+    // nav but not internal explorerEnter / explorerUp paths, so
+    // listening to both gives us full coverage.
+    const lineage = this.resolve<EventTarget>('lineage')
+    lineage?.addEventListener('change', this.onLineageChange)
+
+    // ── THE SURFACE COMES BACK ────────────────────────────────────────
+    // Leaving a view puts the participant back on the tiles, and THE
+    // ARRIVAL GATE'S BARGAIN is that the mesh painted under the covered
+    // canvas is sitting there to be revealed with no repaint. That is one
+    // assumption too many. A pass abandoned mid-walk, a view that navigated
+    // before it closed, a takeover that mounted before this drone ever
+    // painted the address — each of them leaves the mesh holding SOMEWHERE
+    // ELSE, or holding nothing, and the reveal is an empty ink field.
+    //
+    // Nothing arrives to fix it, either: closing a view rarely changes the
+    // location, so the pass that would repaint meets the unchanged-page
+    // fast path at the top of renderFromSynchronize and returns having done
+    // nothing. Blank until the participant navigates away and back.
+    //
+    // So the return is TOLD, not assumed: on the change back to the
+    // hexagons, drop a mesh that belongs to another location and FORCE one
+    // paint for where the participant actually stands. Same rule the
+    // hive-visible restore already uses, and just as cheap — one paint per
+    // view close. Read over IoC because ViewMode is a shell service and a
+    // module may never import the shell.
+    const viewMode = get<EventTarget & { addEventListener?: EventTarget['addEventListener'] }>('@hypercomb.social/ViewMode')
+    if (viewMode?.addEventListener) {
+      viewMode.addEventListener('change', this.#onViewModeChange)
+      this.#viewModeSource = viewMode
+    }
+
+    // Initial-load kick. When the page boots at a non-root URL (e.g.
+    // /dolphin), the Lineage has already settled to that path before
+    // ensureListeners runs, so the 'change' event we just hooked never
+    // fires for the boot state. Without this explicit request the
+    // sub-layer canvas stays empty until the user does something that
+    // causes a render — clicking, panning, navigating away and back.
+    // Calling requestRender here is idempotent (the per-pulse render
+    // lock collapses repeats), so it's safe to fire alongside the
+    // first heartbeat-driven pass.
+    this.requestRender()
+
+    // ── QUIET LANDING ── see #quietLanding for the whole bargain: the
+    // bridge's write is truth the instant it lands, the repaint is what
+    // waits. This side is a plain on/off — the DEPTH count and the settle
+    // delay that make a burst of twenty writes into ONE window belong to
+    // the producer, which is the only thing that knows a burst is a burst.
+    this.onEffect<{ active?: boolean; writes?: number }>('landing:quiet', (payload) => {
+      this.#quietLanding = payload?.active === true
+      // Carry the producer's tally while the window is OPEN only: the close
+      // emit reports zero, and adopting that would wipe a badge that is
+      // still owed. Cleared by the paint that shows them, not by the burst
+      // ending.
+      const writes = Number(payload?.writes ?? 0)
+      if (this.#quietLanding && writes > 0) this.#landedWrites = writes
+    })
+
+    // The badge was tapped — the participant asked for what landed. The
+    // held change is at the SAME location, so without the force the
+    // unchanged-page fast path returns having done nothing and the tap
+    // does visibly nothing. Guarded on the held count so EffectBus's
+    // last-value replay can't fire a stray forced paint at boot.
+    this.onEffect('landing:apply', () => {
+      if (this.#heldRenders <= 0) return
+      this.#quietLanding = false
+      this.#forceNextRender = true
+      this.requestRender()
+    })
+
+    // content:arrived (kind: layer) — LAYER bytes just landed detached from
+    // the host/mesh (Store.fetchLayerFromHost, the layer-side self-heal).
+    // Any completeness gate that exhausted while those bytes were missing
+    // is stale: re-arm the gates and force a paint so the healed children
+    // surface now instead of waiting for an unrelated invalidation. Cheap
+    // and bounded — arrivals only fire once per healed sig.
+    this.onEffect<{ sig: string; kind: string }>('content:arrived', (payload) => {
+      if (payload?.kind !== 'layer') return
+      this.#rearmResolveGates()
+    })
+
+    // render:set-hive-visible — a takeover feature (screensaver bounce mode)
+    // hides the hive grid while it owns the screen, then restores it. While
+    // hidden, renderFromSynchronize short-circuits (see #hiveHidden) so a
+    // stray synchronize can't un-hide the layer mid-takeover. On restore we
+    // force a fresh paint since renders were suppressed.
+    this.onEffect<{ visible: boolean }>('render:set-hive-visible', ({ visible }) => {
+      this.#hiveHidden = !visible
+      if (!visible) {
+        if (this.layer) this.layer.visible = false
+        return
+      }
+      // Becoming visible again. If the location changed WHILE the hive was
+      // hidden — a shell landing (e.g. the collections page at /sets) navigates
+      // into a node before restoring the hive — the mesh still holds the OLD
+      // node's tiles. Flipping the layer visible would flash those stale tiles
+      // for a frame before the async repaint lands (the blink). Tear the stale
+      // mesh down first so the reveal shows the empty ink field, then repaint
+      // the current node. When the location is UNCHANGED (screensaver dismiss)
+      // the mesh is already correct — reveal instantly, no clear, no regression.
+      const currentKey = String(this.resolve<any>('lineage')?.explorerLabel?.() ?? '/')
+      if (this.renderedLocationKey && currentKey !== this.renderedLocationKey) {
+        this.clearMesh('hive revealed at a new location — drop stale tiles before repaint')
+      }
+      if (this.layer) this.layer.visible = true
+      this.requestRender()
+    })
+
+    // viewport:persisted — VP just wrote pan/zoom/meshOffset for some
+    // directory. Mirror it into our back-nav cache so navigating-out-and-
+    // back sees the latest values WITHOUT a race against an in-flight
+    // OPFS write. Without this, the back-nav fast path (line 1383)
+    // applies the snapshot from the FIRST visit's OPFS read, undoing any
+    // pan/zoom/recenter the user did this session. Symptom: press R,
+    // back, in → viewport resets to pre-R; refresh fixes once but
+    // back/forth resets again.
+    this.onEffect<{ segments: readonly string[]; snapshot: ViewportSnapshot | null }>('viewport:persisted', ({ segments, snapshot }) => {
+      // The viewport store just wrote `segments`. If that's the layer we
+      // currently have rendered, mirror the post-write snapshot into the
+      // back-nav cache so navigating out and back reads the latest values
+      // rather than a stale first-visit snapshot.
+      const lineage = (window as any).ioc?.get?.('@hypercomb.social/Lineage') as
+        { explorerSegments?: () => readonly string[] } | undefined
+      const cur = lineage?.explorerSegments?.() ?? []
+      const same = Array.isArray(segments)
+        && segments.length === cur.length
+        && segments.every((s, i) => s === cur[i])
+      if (same) {
+        this.#layerViewportCache.set(this.renderedLocationKey, { ...(snapshot ?? {}) })
+      }
+    })
+
+    // tile:saved effect — invalidate only the saved cell's caches and run an
+    // incremental render so the rest of the grid stays untouched.
+    this.onEffect<{ cell: string }>('tile:saved', (payload) => {
+      if (payload?.cell) {
+        const oldSig = this.cellImageCache.get(payload.cell)
+        this.cellImageCache.delete(payload.cell)
+        this.cellBorderColorCache.delete(payload.cell)
+        this.cellTagsCache.delete(payload.cell)
+        this.cellLinkCache.delete(payload.cell)
+        this.cellSubstrateCache.delete(payload.cell)
+        this.cellHideTextCache.delete(payload.cell)
+        if (oldSig && this.imageAtlas) {
+          this.imageAtlas.invalidate(oldSig)
+        }
+      }
+      // Fully invalidate cached state and trigger a locked full render.
+      // The incremental and in-place fast paths both raced with concurrent
+      // synchronize renders, leaving the tile blank. requestRender is
+      // serialized via the rendering lock and rebuilds from OPFS.
+      this.#layerCellsCache.delete(this.renderedLocationKey)
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // Root properties are live defaults for every same-named appearance.
+    // Their outer lineage heads do not move when the root changes, so neither
+    // a layer-keyed props cache nor a prepared back-navigation snapshot can
+    // notice the dependency on its own. Invalidate this label in every saved
+    // projection and force the current view to re-compose root + outer.
+    this.onEffect<{ cell: string }>('tile:root-default-changed', (payload) => {
+      const label = String(payload?.cell ?? '').trim()
+      if (!label) return
+      this.#invalidateLabelDerivedState(label)
+      for (const state of this.#derivedStateByLocation.values()) {
+        state.images.delete(label)
+        state.borders.delete(label)
+        state.tags.delete(label)
+        state.links.delete(label)
+        state.substrates.delete(label)
+        state.hiddenText.delete(label)
+        state.external.delete(label)
+      }
+      // Cached Cell snapshots already contain their previously composed image
+      // and display flags. They are cheap to rebuild and cannot be surgically
+      // edited without repeating the property projection here.
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.#forceNextRender = true
+      this.requestRender()
+    })
+
+    // tags:changed — invalidate only the affected cells' tag caches, then run
+    // an incremental render to re-emit tag state without touching geometry I/O.
+    this.onEffect<{ updates: { cell: string }[] }>('tags:changed', (payload) => {
+      if (!payload?.updates) return
+      const changedCells: string[] = []
+      for (const { cell } of payload.updates) {
+        this.cellTagsCache.delete(cell)
+        changedCells.push(cell)
+      }
+      if (this.cachedCellNames && changedCells.length > 0) {
+        void this.renderIncremental({ changedTags: changedCells })
+      } else {
+        this.#layerCellsCache.delete(this.renderedLocationKey)
+        this.renderedCellsKey = ''
+        this.requestRender()
+      }
+      // With the bouquet in hand, a landed scent changes the answer to "who
+      // wears the whole set?" — the tile it just landed on must LIGHT. Re-ask
+      // now (the tick loop re-asks again after any buffer rebuild, so a lagging
+      // index only ever costs a beat, never a stale shade).
+      if (this.#armedApplyMarks.length > 0 || this.#markPreviewMarks.length > 0) {
+        this.#refreshMarkPreview()
+      }
+    })
+
+    // tags:indexed — the decoration index finished hydrating tags for cells
+    // that were already on screen (the index walks AFTER render:cell-count).
+    // Re-aggregate so decoration-backed tags appear in the controls-bar pills
+    // without waiting for the next interaction. Cheap: no geometry I/O.
+    this.onEffect<{ labels: string[] }>('tags:indexed', (payload) => {
+      if (!Array.isArray(payload?.labels) || payload.labels.length === 0) return
+      if (this.renderedCells.size === 0) return
+      this.#emitRenderTags([...this.renderedCells.values()])
+    })
+
+    // feature:hidden / feature:restored — the participant hid or restored a
+    // feature. The decoration-kind index now filters hidden kinds out of its
+    // read functions (the one place draw-from-tiles consumers funnel through),
+    // so re-render to re-evaluate overlay `visibleWhen` and make the feature's
+    // icon disappear / reappear at once. Cheap: a render request, no I/O.
+    this.onEffect('feature:hidden', () => this.requestRender())
+    this.onEffect('feature:restored', () => this.requestRender())
+
+    // launcher:reconciled — the shared launch-group mix (agg-mix) replaced its
+    // committed children (a group was toggled in/out, or a background scan
+    // added/removed a site). This must be a HARD reset: deleting only
+    // renderedLocationKey misses the agg-mix entry when the pick fires while
+    // we're still on the PREVIOUS location (a fresh icon-tap entry — see
+    // MixedGroupBag.enter, which emits this BEFORE goRaw). The stale agg-mix
+    // cells then survive and the next render serves the previous group's tiles
+    // ("switched group but old content / looks hung"). Clear the WHOLE cell
+    // cache (we can't cheaply key just the agg-mix entry, and toggles are rare),
+    // blank renderedLocationKey so the next pass takes the full location-change
+    // gather path, and rebuild the slot set from the fresh children.
+    this.onEffect('launcher:reconciled', () => {
+      // Supersede any in-flight stream: its cells were gathered from the
+      // PREVIOUS union, and left alone it finishes AFTER this reset, painting
+      // the old group's tiles and re-seeding the caches we just cleared (the
+      // sticky "switched group but old content" bug). Same token bump the
+      // cursor-scrub path uses.
+      this.#streamToken++
+      this.#layerCellsCache.clear()
+      this.renderedLocationKey = ''
+      this.renderedCellsKey = ''
+      this.#slots.clear()
+      this.#forceNextRender = true
+      this.requestRender()
+    })
+
+    // launch:indexed — the decoration index finished hydrating a launcher tile's
+    // `shape` AFTER first paint (it walks async, like tags). The silhouette is a
+    // per-vertex attribute (aShapeMode) built in applyGeometry, so force a
+    // geometry rebuild to pick up the now-known shapes — otherwise the launcher
+    // tiles linger as plain hexagons until the next unrelated render.
+    this.onEffect('launch:indexed', () => {
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // takeover:indexed — the decoration index learned (live append, removal,
+    // or the post-paint hydration walk) that a cell's hex render is REPLACED
+    // by a visual-bee view (`replacesTileRender` — the post-it's sticky), or
+    // that the claim was lifted. The union filter only runs during a geometry
+    // pass, so force one — and FORCE it like title:indexed does: on a busy
+    // hive an in-flight stream's dedup swallowed the bare request, and the
+    // tile sat beside its sticky for the whole session. The claim and the
+    // hex are mutually exclusive; a dropped repaint must not undo that.
+    this.onEffect('takeover:indexed', () => {
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.#forceNextRender = true
+      this.requestRender()
+    })
+
+    // A roster switch (or a wake-here) changes the ANSWER the takeover filter
+    // gets without touching a single decoration, so no index event fires.
+    // Re-filter on the same terms, or the hexagon a global-off just handed
+    // back stays missing until an unrelated pass.
+    this.onEffect(ENABLEMENT_CHANGED, () => {
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.#forceNextRender = true
+      this.requestRender()
+    })
+
+    // A frame was bound or released, or the tiles were walked through it.
+    // Neither touches a tile's own index — the placement changed without any
+    // cell changing — so the same re-place-from-scratch the roster switch
+    // needs is the one a frame needs. The layer cache is left alone: the CELLS
+    // are identical, only where they sit is different.
+    this.onEffect('frame:changed', () => {
+      this.renderedCellsKey = ''
+      this.#forceNextRender = true
+      this.requestRender()
+    })
+    this.onEffect('frame:offset', () => {
+      this.renderedCellsKey = ''
+      this.#forceNextRender = true
+      this.requestRender()
+    })
+
+    // title:indexed — a cell gained, changed or lost its display title. The
+    // atlas keys baked glyphs by the RAW label, so the cached entry still holds
+    // the old text; flush it before forcing the geometry rebuild, or the tile
+    // keeps drawing its previous name.
+    // ONE LABEL, not the whole atlas. The navigation walk emits this once per
+    // titled cell, DURING the arrival pass it belongs to — and a full wipe
+    // there blanked every name on the page, not just the retitled one: the
+    // repaint it asked for was swallowed by the same-target coalescing drop,
+    // the in-flight pass wrote a fresh renderedCellsKey over the '' set here,
+    // and nothing re-baked. The tiles kept their label bands with no names
+    // inside them (the band reads the UV rect, which is still valid — only the
+    // pixels behind it were gone). Flushing the one label leaves every other
+    // tile's glyphs alone; #forceNextRender keeps the repaint from being
+    // dropped, so the retitled cell actually re-bakes under its new name.
+    this.onEffect<{ label?: string }>('title:indexed', (payload) => {
+      const label = payload?.label
+      if (typeof label === 'string' && label) this.atlas?.invalidateLabel(label)
+      else this.atlas?.invalidateLabels()
+      this.renderedCellsKey = ''
+      this.#forceNextRender = true
+      this.requestRender()
+    })
+
+    // reference:indexed — the index resolved a reference tile's FACE from its
+    // target, after this page had already painted the tile blank (the pointer
+    // is in its layer, the picture is one hop away and read async). The image
+    // resolver short-circuits on a cached entry, and the first pass cached
+    // "no image" for this label — so drop that entry before rebuilding, or the
+    // tile keeps its substrate fallback until an unrelated render evicts it.
+    this.onEffect<{ label: string }>('reference:indexed', (payload) => {
+      const label = payload?.label
+      if (typeof label !== 'string' || !label) return
+      this.cellImageCache.delete(label)
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // A dropped Portal first becomes an in-memory tile at the release slot.
+    // Re-render through the normal cell path; clearing the payload removes it
+    // without ever having written membership to the layer.
+    this.onEffect<ReferenceDraftPreview | null>('reference:draft-preview', (payload) => {
+      const previous = this.#referenceDraft
+      if (previous?.name && previous.name !== payload?.name) {
+        this.cellImageCache.delete(previous.name)
+        this.atlas?.invalidateLabel(previous.name)
+        this.#sessionSlotByLabel.delete(previous.name)
+      }
+      const name = String(payload?.name ?? '').trim()
+      const index = Number(payload?.index)
+      this.#referenceDraft = name && Number.isFinite(index) && index >= 0
+        ? {
+            name,
+            index,
+            parentSegments: [...(payload?.parentSegments ?? [])],
+            ...(typeof payload?.imageSig === 'string' && payload.imageSig ? { imageSig: payload.imageSig } : {}),
+          }
+        : null
+      if (this.#referenceDraft?.imageSig) {
+        this.cellImageCache.set(this.#referenceDraft.name, this.#referenceDraft.imageSig)
+      }
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.#forceNextRender = true
+      this.requestRender()
+    })
+
+    // fs:changed — bulk OPFS mutation marker. Workers fire this BEFORE
+    // committing layer state so that any render triggered by the cascade
+    // (cursor.onNewLayer) sees post-mutation OPFS. We use it here to
+    // unconditionally drop our caches and re-render — the mutation is a
+    // signal that listCellFolders must refetch and the slot machine state
+    // is stale (positions may shift, new tiles may have appeared).
+    this.onEffect('fs:changed', () => {
+      this.#layerCellsCache.delete(this.renderedLocationKey)
+      this.renderedCellsKey = ''
+      this.#slots.clear()
+      this.requestRender()
+    })
+
+    // The committer announces persistence separately from membership. The
+    // original cell event changes the view immediately; this lifecycle only
+    // controls the honest pending shade. A failed commit is accompanied by a
+    // compensating cell event, so every open surface converges immediately.
+    this.onEffect<{
+      cell?: string
+      segments?: readonly string[]
+      op?: 'add' | 'remove'
+      state?: 'pending' | 'settled' | 'failed'
+    }>('cell:mutation-state', (payload) => {
+      const cell = String(payload?.cell ?? '').trim()
+      if (!cell) return
+      if (payload.segments && !this.#segmentsAreCurrent(payload.segments)) return
+      if (payload.state === 'pending' && payload.op === 'add') {
+        this.#pendingCellMutations.add(cell)
+        this.#brightLabels.delete(cell)
+      } else {
+        this.#pendingCellMutations.delete(cell)
+      }
+      if (this.#slots.seeded) this.#queueIncremental({})
+    })
+
+    // A References composition writes its children while another layer is on
+    // screen, then returns here. The membership events invalidate the right
+    // caches but cannot flip a slot that was not mounted at that moment. Once
+    // the parent has painted, this render-only arrival signal is conclusive
+    // proof that the target is a branch, so its first click enters it.
+    this.onEffect<{ segments?: readonly string[] }>('reference:branch-ready', payload => {
+      const segments = payload?.segments
+      if (!segments?.length) return
+      this.#invalidatePreparedViewsFor(segments)
+      this.#layerCellsCache.clear()
+      this.#flipParentBranchFor(segments)
+    })
+
+    // cell:added / cell:removed — synchronous incremental path. Zero awaits
+    // in the click handler. The slot state machine mutates immediately, the
+    // next microtask runs one applyGeometry, and images for new cells are
+    // loaded fire-and-forget afterward. Rapid clicks in one JS turn coalesce
+    // into a single render.
+    this.onEffect<{ cell: string; segments?: string[]; groupId?: string }>('cell:added', (payload) => {
+      if (!payload?.cell) return
+      // A child gaining its FIRST child flips its branch-status AS SEEN FROM ITS
+      // PARENT — but per-page history commits only the leaf (the child's own
+      // layer), never re-committing the parent, so the parent's content sig is
+      // unchanged and its #completeChildNamesByParentSig entry still lists this
+      // child as a leaf. On a later memo HIT that stale branch-set is re-served
+      // and freshenBranches never re-runs, so the parent's tile paints with no
+      // branch dot and refuses to navigate in. Drop the whole memo (a pure perf
+      // cache; re-resolution runs warm right after an edit) so the parent
+      // re-derives branch-status on its next render. Cleared BEFORE the
+      // current-location guard below so an add at ANY location invalidates a
+      // possibly-ancestor entry. branchByHeadSig is intentionally NOT cleared —
+      // it is keyed by the immutable head sig, so a changed head is just a miss.
+      // TARGETED: only the ancestors of the add can have a stale branch dot.
+      // Dropping EVERY prepared view (what this used to do) threw away the
+      // entire session's preloading on a single tile creation — anywhere.
+      this.#invalidatePreparedViewsFor(payload.segments)
+      // The memo clear above only heals the SLOW render path. Back-nav restores
+      // a parent location SYNCHRONOUSLY from #layerCellsCache — a SEPARATE cache
+      // the fast path paints VERBATIM, cell-by-cell hasBranch flags included,
+      // never re-resolving branch-status. Those flags were captured when the
+      // parent last rendered, with this child still a LEAF; so after the child
+      // gains its first grandchild, the parent's cached cells still mark it
+      // hasBranch=false. #buildCellCountPayload then omits it from branchLabels,
+      // and the tile-overlay routes its click to the 'open' editor action
+      // instead of #navigateInto — the branch is un-enterable until a full
+      // reload drops the in-memory cache ("can't click into the branch until I
+      // refresh"). Invalidate the fast-path cache alongside the memo. Same
+      // perf-cache rationale (it re-warms on the next render) and same reason
+      // it's cleared BEFORE the location guard: an add at a DESCENDANT location
+      // still flips an ancestor's branch dot.
+      this.#layerCellsCache.clear()
+      // Only react to additions at the location we're currently showing.
+      // One create can emit cell:added for several locations at once — a
+      // nested `a/b/c` adds a child to root, /a AND /a/b — and the tiles for
+      // the other locations must NOT appear in this view. When segments are
+      // absent (legacy emitters) we assume the current location.
+      if (payload.segments && !this.#segmentsAreCurrent(payload.segments)) {
+        // A child added ONE level below this screen is deterministic proof
+        // that its parent tile — visible HERE — is now a branch. Flip it
+        // synchronously from the event itself: the eager async branch check
+        // (checkCellHasBranch in the incremental fill) races importTree and
+        // usually reads OPFS before the child bag exists, so a command-line
+        // `abc/123` left `abc` painted as a leaf — omitted from branchLabels,
+        // click routed to the editor instead of #navigateInto, un-enterable
+        // until refresh. No OPFS read needed: the event IS the proof.
+        this.#flipParentBranchFor(payload.segments)
+        return
+      }
+      this.#pendingRemoves.delete(payload.cell)
+      this.#startNewCellFade(payload.cell)
+      // Empty → first item has no mesh yet, but the event itself is complete
+      // membership truth. Seed the empty pinned projection synchronously so
+      // the first tile takes the same next-frame path as every later add.
+      // Falling through to requestRender here used to pay the whole history
+      // read and made the very first add take 0.8–1.5s in Playwright.
+      if (!this.#slots.seeded && this.renderedCells.size === 0) {
+        const axial = this.resolve<any>('axial')
+        if (axial?.items) {
+          this.#slots.seed({
+            names: [],
+            localCells: new Set<string>(),
+            branches: new Set<string>(),
+            mode: 'pinned',
+          })
+        }
+      }
+      if (this.#slots.seeded) {
+        // Capture the address NOW, synchronously with the event — the
+        // incremental placement defers via microtask and its index write
+        // must use the location where this add actually happened.
+        const lineage = this.resolve<any>('lineage')
+        const addSegments: readonly string[] = payload.segments ?? lineage?.explorerSegments?.() ?? []
+        this.#queueIncremental({ added: [{ name: payload.cell, segments: addSegments }] })
+      } else {
+        this.#layerCellsCache.delete(this.renderedLocationKey)
+        this.renderedCellsKey = ''
+        this.requestRender()
+      }
+    })
+
+    this.onEffect<{ cell: string; groupId?: string }>('cell:removed', (payload) => {
+      if (!payload?.cell) return
+      // Symmetric to cell:added: a child losing its LAST child flips it back to
+      // a leaf, and the parent is not re-committed, so its cached branch-set is
+      // stale. Invalidate the parent-branch memo so the (now stale) branch dot
+      // is re-derived on the next render. See the cell:added note above.
+      // TARGETED, same as cell:added — a removal invalidates its ancestors,
+      // not every prepared view in the session.
+      this.#invalidatePreparedViewsFor((payload as { segments?: readonly string[] }).segments)
+      // Same back-nav fast-path staleness as cell:added: a child losing its LAST
+      // grandchild flips branch→leaf, but the parent's #layerCellsCache entry
+      // still marks it a branch (a stale dot + a click that drills into a now-
+      // empty layer) until reload. Invalidate the fast-path cache alongside the
+      // memo. See the cell:added note.
+      this.#layerCellsCache.clear()
+      this.#pendingRemoves.add(payload.cell)
+      this.cellImageCache.delete(payload.cell)
+      this.cellTagsCache.delete(payload.cell)
+      this.cellLinkCache.delete(payload.cell)
+      this.cellBorderColorCache.delete(payload.cell)
+      this.cellSubstrateCache.delete(payload.cell)
+      this.cellHideTextCache.delete(payload.cell)
+      if (this.#slots.seeded) {
+        this.#queueIncremental({ removed: [payload.cell] })
+      } else {
+        this.#layerCellsCache.delete(this.renderedLocationKey)
+        this.renderedCellsKey = ''
+        this.requestRender()
+      }
+    })
+
+    // history:cursor-changed — re-render when cursor moves to a different
+    // layer. Every undo/redo step is a different layer, so we must re-render
+    // each time. When cursor is at head and a NEW layer arrives (not a cursor
+    // move), the incremental cell:added / cell:removed path has already
+    // reconciled the view, so we skip to avoid wiping in-flight work.
+    // Prune mode swaps the layer under this location (see the override in
+    // the render pass). Entering, leaving, and every purge change what the
+    // hive is showing, so each one is a repaint — and it has to be a FORCED
+    // one: the location and its revision are both unchanged, so the
+    // unchanged-page fast path at the top of renderFromSynchronize would
+    // otherwise drop the pass before any layer is read (the mode toggled
+    // and the hive kept painting the live tiles).
+    //
+    // The back-nav cells cache is dropped for this location in the same
+    // breath. It is keyed by location alone, so an entry written while the
+    // ghosts were on screen would restore DELETED tiles onto a live page
+    // the next time the participant walked back here.
+    this.onEffect<{ active?: boolean }>('prune:mode-changed', () => {
+      this.#layerCellsCache.delete(this.renderedLocationKey)
+      this.cellImageCache.clear()
+      this.#forceNextRender = true
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    this.onEffect<CursorState>('history:cursor-changed', (state) => {
+      const nowRewound = state?.rewound ?? false
+      const nowPosition = state?.position ?? -1
+      const nowLocationSig = state?.locationSig ?? ''
+
+      // CRITICAL: cursor.load() resets position to layers.length for each
+      // new location, so cursor-changed fires on EVERY navigation with a
+      // "new" position relative to the previous location. Without this
+      // location-aware guard, every back-nav (from /alpha to /) would
+      // wipe #layerCellsCache via clear() below — and the eager-cache
+      // fix would be defeated immediately. We only treat this as an
+      // actual cursor move (which legitimately invalidates per-label
+      // derived state) when locationSig is unchanged: same layer, real
+      // undo/redo or seek. A different locationSig means navigation —
+      // ShowCellDrone's own back-nav fast path / slow path handles the
+      // layer switch; cursor-changed must keep its hands off the cache.
+      if (nowLocationSig !== this.#lastCursorLocationSig) {
+        // Adopt the new location's cursor state silently, no cache wipe.
+        this.#lastCursorLocationSig = nowLocationSig
+        this.#lastCursorPosition = nowPosition
+        this.#lastCursorRewound = nowRewound
+        return
+      }
+
+      // Head-advancing COMMIT (not a scrub). importTree's onNewLayer bumps
+      // the cursor to a higher position with rewound still false whenever a
+      // new layer is appended while we're at head — which is EVERY create.
+      // The incremental cell:added / cell:removed path has already
+      // reconciled this view, so wiping the caches and running a full
+      // renderFromSynchronize below is pure redundant work: a second
+      // full-grid OPFS re-read + rebuild right after the cheap incremental
+      // render already painted. That redundant render is the residual
+      // create lag. Adopt the new position silently — exactly like the
+      // navigation branch above. This is the skip the comment at the top of
+      // this handler always intended but never implemented.
+      //
+      // Genuine scrubs still fall through to the full re-render: undo has
+      // nowRewound=true; redo and redo-to-head / Make-HEAD have the PREVIOUS
+      // state rewound (#lastCursorRewound=true), so !#lastCursorRewound
+      // excludes them. Only a was-at-head → still-at-head → position-up
+      // transition (a fresh commit) is skipped.
+      if (!nowRewound && !this.#lastCursorRewound && nowPosition > this.#lastCursorPosition) {
+        this.#lastCursorPosition = nowPosition
+        this.#lastCursorRewound = nowRewound
+        return
+      }
+
+      // Same location — was this an actual scrub?
+      if (nowPosition === this.#lastCursorPosition && nowRewound === this.#lastCursorRewound) return
+      this.#lastCursorPosition = nowPosition
+      this.#lastCursorRewound = nowRewound
+      this.#layerCellsCache.clear()
+      // Every per-label cache is keyed by cell label, not by content
+      // signature. On a cursor move the effective propsSig for each
+      // label changes (historical while rewound, live at head), so the
+      // caches must be dropped or the view stays stuck on first-loaded
+      // state. Invalidating through a single helper keeps the six
+      // label-keyed maps in lock-step; longer term these collapse into
+      // one propsSig-keyed derived-state cache.
+      this.#invalidateAllLabelDerivedState()
+      this.renderedCellsKey = ''
+      // Supersede any in-flight stream on this same layer. Cursor moves
+      // do not change locationKey, so the layer-change branch of
+      // renderFromSynchronize won't fire — but the streaming render
+      // that started before the undo still references the pre-undo
+      // cells / props. Bumping the token makes that stream bail out at
+      // its next iteration so it cannot overwrite the post-undo mesh
+      // with stale cells. Without this, undo/redo during a still-
+      // streaming layer leaves some tiles rendered from the old state
+      // (image missing, label from the other branch) until the next
+      // explicit layer change.
+      this.#streamToken++
+      // Apply the layer's layout state (text-only, orientation, pivot,
+      // gap, mode) so every cursor step restores the full visible
+      // configuration. Fires on both rewound and head — at head the
+      // layer mirrors live state because every user intent commits, so
+      // applying head is a no-op modulo redundant emits.
+      void this.#applyCursorLayout()
+      // The re-render itself is scheduled by the requestRender() below
+      // (renderedCellsKey was cleared above, so the fast-path skip can't
+      // swallow it). This used to ALSO call renderFromSynchronize()
+      // directly — the only call site that bypassed requestRender's
+      // body serialization. A direct body interleaving with a queued
+      // body mid-await re-entered the layer-change block against a
+      // repointed renderedLocationKey and repainted the OLD page over
+      // the new one. One scheduler, one queue: requestRender only.
+
+      // Preserve viewport (scale + pan) across the undo/redo re-render.
+      // Snapshot stage / container transforms before requestRender and
+      // restore after, in case any other path nudges them. Mesh recenter
+      // is off by default now (one-shot opt-in via #pendingRecenter), so
+      // no flag set is needed here.
+      const app = this.pixiApp as any
+      const cont = this.pixiContainer as any
+      const snap = (app && cont) ? {
+        stagePos: { x: app.stage.position.x, y: app.stage.position.y },
+        contPos:  { x: cont.position.x,      y: cont.position.y      },
+        contScale:{ x: cont.scale.x,         y: cont.scale.y         },
+      } : null
+      this.requestRender()
+      if (snap && app && cont) {
+        // Restore on the next microtask so requestRender's queued
+        // render runs against the original transforms. The render
+        // itself will read the snapshot values; nothing in the
+        // render path mutates them under the suppress flag.
+        queueMicrotask(() => {
+          app.stage.position.set(snap.stagePos.x, snap.stagePos.y)
+          cont.position.set(snap.contPos.x, snap.contPos.y)
+          cont.scale.set(snap.contScale.x, snap.contScale.y)
+        })
+      }
+    })
+
+    // search:filter effect — live-filter visible tiles by keyword
+    // (the `>?` command-line mode, typed live).
+    //
+    // A filter change moves NEITHER the location nor the cells-key, so
+    // requestRender alone hit renderFromSynchronize's fast-path skip
+    // (`locationKey === renderedLocationKey && renderedCellsKey !== ''`)
+    // and returned without a pass: the keyword landed on the field and
+    // the hive never repainted. Clearing the key is what makes the
+    // keystroke visible. The per-location cells cache is dropped too —
+    // a filtered pass writes its NARROWED set into #layerCellsCache, and
+    // the back-nav fast path would otherwise restore that narrowed set
+    // at a location whose filter has since been cleared.
+    this.onEffect<{ keyword: string }>('search:filter', ({ keyword }) => {
+      const next = String(keyword ?? '').trim().toLowerCase()
+      if (next === this.filterKeyword) return
+      this.filterKeyword = next
+      this.renderedCellsKey = ''
+      this.#layerCellsCache.clear()
+      // Typing is FASTER than a render pass. Keystroke N+1 lands while the
+      // pass for keystroke N is still in flight (or its streamCells is still
+      // running async), and the dedup guard below DROPS that render outright
+      // — nothing is queued behind it, so the last keyword typed never
+      // repaints and the filter looks completely dead at human typing speed.
+      // A filter change is a forced invalidation for exactly the reason the
+      // flag exists: the in-flight pass gathered its cells before the keyword
+      // changed, so its result is already stale. Arming it makes the drop
+      // path re-queue instead of swallow.
+      this.#forceNextRender = true
+      this.requestRender()
+    })
+
+    // tags:removal-pending — TagRemovalDrone's staged set for the keyword being
+    // removed. Purely visual: the staged tiles paint as future-removes so the
+    // pending change is legible on the hive itself, not only in the panel's
+    // list. No geometry moves; only the divergence attribute rebakes.
+    this.onEffect<{ cells?: string[] }>('tags:removal-pending', ({ cells }) => {
+      const next = new Set(Array.isArray(cells) ? cells : [])
+      if (next.size === this.#tagRemovalStaged.size
+        && [...next].every(l => this.#tagRemovalStaged.has(l))) return
+      this.#tagRemovalStaged = next
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // tags:apply-pending — the bouquet in hand. TWO visual duties from one
+    // sticky payload:
+    //   • the ARMED SHADE (#armedApplyMarks): tiles wearing the whole set stay
+    //     lit in the bouquet's colour, every tile missing part of it recedes —
+    //     the standing "click here to scent" readout;
+    //   • the staged future-ADD marks (`cells`, the selection one-shot) — same
+    //     purely-visual contract as the removal staging above, opposite sign.
+    this.onEffect<{ cells?: string[]; active?: boolean; tags?: string[]; color?: string }>(
+      'tags:apply-pending', ({ cells, active, tags, color }) => {
+        const armed = active === false
+          ? []
+          : (Array.isArray(tags) ? tags.map(t => String(t ?? '').trim()).filter(Boolean) : [])
+        if (color) this.#armedApplyColor = hexToRgbTriple(color)
+        if (armed.length !== this.#armedApplyMarks.length
+          || armed.some((m, i) => m !== this.#armedApplyMarks[i])) {
+          this.#armedApplyMarks = armed
+          this.#refreshMarkPreview()
+        }
+        const next = new Set(active === false ? [] : (Array.isArray(cells) ? cells : []))
+        if (next.size === this.#tagApplyPainted.size
+          && [...next].every(l => this.#tagApplyPainted.has(l))) return
+        this.#tagApplyPainted = next
+        this.renderedCellsKey = ''
+        this.requestRender()
+      })
+
+    // drop:dragging — a pheromone (or bouquet) is riding the cursor out of
+    // the panel. While `marks` are aboard, shade exactly as the armed set
+    // does: the tiles the drop would change recede, the ones already wearing
+    // it all stay lit. Emitters without marks (file drops, the aggregate
+    // index) change nothing here.
+    this.onEffect<{ active?: boolean; marks?: string[]; color?: string }>('drop:dragging', ({ active, marks, color }) => {
+      const held = active === true && Array.isArray(marks)
+        ? marks.map(m => String(m ?? '').trim()).filter(Boolean)
+        : []
+      if (held.length === 0 && this.#dragShadeMarks.length === 0) return
+      if (color) this.#dragShadeColor = hexToRgbTriple(color)
+      this.#dragShadeMarks = held
+      this.#refreshMarkPreview()
+    })
+
+    // ── THE TAKE'S TOUCH ─────────────────────────────────────────────
+    // The swarm's shade is a STANDING state now (#cellIsShaded), so there is
+    // nothing for a modifier to arm: what you don't own is dim the whole
+    // time you stand among it.
+    // swarm:wand — a take touched this tile (transient, one per tile per
+    // gesture: the click that walks in, or a ctrl sweep). Lift it out of the
+    // shade NOW and stamp the taking rim; the fold lands behind it and the
+    // next render paints it native — yours, permanently, at full strength.
+    this.onEffect<{ label?: string }>('swarm:wand', ({ label }) => {
+      const l = String(label ?? '').trim()
+      if (l) this.#flashWandTake(l)
+    })
+
+    // The peer-divergence scan re-answered "which held tiles have an update
+    // to take". That answer is part of the shade now (#cellIsShaded), so
+    // rewrite every rendered cell's shade attribute in place — the scan is a
+    // debounced, page-scoped event, and an attribute sweep is exactly what a
+    // hover already does per cell. Never a render:cell-count emit (that
+    // payload doubles as the navigation-guard release).
+    this.onEffect('swarm:divergence-changed', () => {
+      for (const label of this.renderedCells.keys()) this.#writeShadeFor(label)
+    })
+
+    // tags:preview — a pheromone is under the cursor in the chrome (a panel
+    // row, a bouquet, a bottom crumb). A hovered mark asks ONE question —
+    // which tiles carry this? — and the hive is the only surface that can
+    // answer it, so it answers there: every carrier on the page lights in the
+    // mark's own colour and the rest of the page recedes behind them. Purely a
+    // look: nothing is written, nothing is staged, nothing is armed, and
+    // leaving the mark puts the page back exactly as it was.
+    this.onEffect<{ marks?: readonly string[]; color?: string }>('tags:preview', ({ marks, color }) => {
+      const next = (Array.isArray(marks) ? marks : []).map(m => String(m ?? '').trim()).filter(Boolean)
+      const rgb = color ? hexToRgbTriple(color) : null
+      if (rgb) this.#markPreviewColor = rgb
+      if (next.length === this.#markPreviewMarks.length
+        && next.every((m, i) => m === this.#markPreviewMarks[i])) return
+      this.#markPreviewMarks = next
+      this.#refreshMarkPreview()
+    })
+
+    // A programmatic mark change (e.g. /mobile sweep) deposits tags via
+    // DecorationService directly, bypassing the painter's tags:apply
+    // invalidation. Clear the render cache so tag chips refresh without
+    // needing a navigation. (Marks are curation data only — they no longer
+    // filter what renders; tiles are universal.)
+    this.onEffect('mobile:marks-changed', () => {
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // render:gather-set — paint THESE tiles, wherever in the hive they live.
+    //
+    // The predicate lane (`tags:filter`) answers "what matches?"; this answers
+    // "show me this list", which is what a caller holding the answer already
+    // needs. It rides the same flatten render, so a gathered tile keeps its
+    // absolute path and a click travels to its real home. Every gathered tile
+    // is treated as a branch so that click IS an entry on desktop too — from an
+    // audit, pressing a tile means "take me to it", not "open its editor".
+    //
+    // Nothing is committed. No layer is minted, no lineage is written; sending
+    // an empty list (or walking anywhere) puts the hive back as it was.
+    this.onEffect<{ key?: string; items?: Array<{ label?: string; path?: string[] }> }>(
+      'render:gather-set',
+      ({ key, items }) => {
+        const rows = (items ?? [])
+          .map(item => ({ label: String(item?.label ?? '').trim(), path: (item?.path ?? []).map(String) }))
+          .filter(row => row.label)
+        if (rows.length === 0) {
+          if (this.#gathered) { this.#clearGather(); this.renderedCellsKey = ''; this.requestRender() }
+          return
+        }
+        const segs = this.resolve<any>('lineage')?.explorerSegments?.() ?? []
+        this.#gathered = rows
+        this.#gatherKey = String(key ?? '') || rows.map(r => r.label).join(',')
+        this.#gatherAnchorKey = [...segs].join('/')
+        this.#tagFlattenResults = rows.map(row => ({
+          label: row.label,
+          dir: null,
+          path: row.path,
+          hasChildren: true,
+          matchesInside: 1,
+        }))
+        this.renderedCellsKey = ''
+        this.requestRender()
+        this.emitEffect('render:gathered', { active: true, count: rows.length, key: this.#gatherKey })
+      },
+    )
+
+    // tags:required effect — the marks a REFERENCE demands of what it shows,
+    // in force while the participant stands inside what it points at. ANDed
+    // with the lens below; never merged into it, never listed as chips, and it
+    // deliberately does NOT touch #preFilterSegments — walking out of a
+    // requirement is an ordinary navigation, not a filter being cleared, so
+    // there is nowhere to restore anyone to.
+    this.onEffect<{ marks?: string[] }>('tags:required', ({ marks }) => {
+      const next = new Set((marks ?? []).map(m => String(m ?? '').trim()).filter(Boolean))
+      if (next.size === this.#requiredTags.size && [...next].every(m => this.#requiredTags.has(m))) return
+      this.#requiredTags = next
+      // The previous walk answered a different question.
+      this.#filterScanKey = null
+      if (!this.#narrowing()) {
+        this.#tagFlattenResults = null
+        this.#flatPathByLabel.clear()
+        this.#filterBlockedLabels.clear()
+      }
+      void (async () => {
+        if (this.#narrowing()) await this.#scanTagsAcrossPages()
+        this.renderedCellsKey = ''
+        this.requestRender()
+      })()
+    })
+
+    // tags:filter effect — tag flatten, scoped to page / children / global
+    this.onEffect<{ active: string[]; scope?: 'local' | 'children' | 'global' }>('tags:filter', ({ active, scope }) => {
+      const wasFiltering = this.filterTags.size > 0
+      this.#filterScope = scope ?? 'local'
+      this.filterTags = new Set(active)
+      // Any change to the tag set or the scope invalidates the previous walk.
+      this.#filterScanKey = null
+      if (this.filterTags.size > 0) {
+        const lineage = this.resolve<any>('lineage')
+        const here: string[] = lineage?.explorerSegments?.() ? [...lineage.explorerSegments()] : []
+        // Save location before entering filter mode
+        if (!wasFiltering) this.#preFilterSegments = here
+        // Re-anchor on EVERY filter change, not just activation: the anchor is
+        // "where you were when you last touched the filter". A global filter
+        // reads the whole hive while you stand on its anchor and re-roots once
+        // you enter a match — so widening the scope after drilling in has to
+        // move the anchor here, or global would never actually go global.
+        this.#filterAnchorKey = here.join('/')
+        // Scan the whole tree, THEN render — the flatten override reads the
+        // freshly-populated #tagFlattenResults. Clear the render key so the
+        // flatten geometry rebuilds rather than reusing the prior page.
+        void (async () => {
+          await this.#scanTagsAcrossPages()
+          if (!this.#narrowing()) return // narrowing dropped mid-scan
+          this.renderedCellsKey = ''
+          this.requestRender()
+        })()
+      } else if (this.#requiredTags.size > 0) {
+        // The lens cleared but a reference's requirement still stands — the
+        // page stays narrowed to what that reference demands rather than
+        // falling back to the unfiltered layer. Re-scan, because the walk that
+        // just ran answered "lens AND requirement" and this one answers
+        // "requirement alone".
+        this.#filterAnchorKey = null
+        this.#preFilterSegments = null
+        void (async () => {
+          await this.#scanTagsAcrossPages()
+          this.renderedCellsKey = ''
+          this.requestRender()
+        })()
+      } else {
+        this.#tagFlattenResults = null
+        this.#flatPathByLabel.clear()
+        this.#filterBlockedLabels.clear()
+        this.#filterAnchorKey = null
+        this.renderedCellsKey = ''
+        // Restore the pre-filter location ONLY if the filter never moved us.
+        // Entering a match is now a real, path-correct navigation the user
+        // chose — teleporting them back to where they opened the filter would
+        // throw that away. (The restore exists because the old flatten had no
+        // way to enter a match without minting a phantom segment.)
+        if (this.#preFilterSegments !== null) {
+          const lineage = this.resolve<any>('lineage')
+          const here: string[] = lineage?.explorerSegments?.() ? [...lineage.explorerSegments()] : []
+          if (here.join('/') === this.#preFilterSegments.join('/')) {
+            const nav = get('@hypercomb.social/Navigation') as { goRaw?: (segs: string[]) => void } | undefined
+            nav?.goRaw?.(this.#preFilterSegments)
+          }
+          this.#preFilterSegments = null
+        }
+        this.requestRender()
+      }
+    })
+
+    // move:preview — reordered names during drag (fast path avoids full OPFS re-read)
+    this.onEffect<{ names: string[]; movedLabels: Set<string> } | null>('move:preview', (payload) => {
+      this.moveNames = payload?.names ?? null
+      this.renderedCellsKey = '' // force geometry rebuild
+      if (payload && this.cachedCellNames) {
+        // fast path: reuse cached render context, only rebuild geometry with swapped labels
+        this.renderMovePreview()
+      } else {
+        // clearing move preview or no cache — full render
+        this.requestRender()
+      }
+    })
+
+    // listen for pixi host readiness via effect bus
+    this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
+      this.pixiApp = payload.app
+      this.pixiContainer = payload.container
+      this.pixiRenderer = payload.renderer
+      this.requestRender()
+    })
+
+    // listen for orientation change
+    this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
+      if (this.#flat !== payload.flat) {
+        this.#flat = payload.flat
+        // invalidate image cache since we need different snapshots
+        this.cellImageCache.clear()
+        this.#layerCellsCache.clear()
+        this.renderedCellsKey = ''
+        this.requestRender()
+      }
+    })
+
+    // listen for space (room) and secret changes — recompute signature.
+    // Both also drop #layerCellsCache: room+secret are half the swarm gate,
+    // so crossing them changes MEMBERSHIP (the swarm-privacy filter starts or
+    // stops dropping unshared tiles) and flips the zone-scoped hide keys.
+    // Blanking renderedLocationKey alone makes the next pass look like a NAV
+    // pass, which takes the synchronous cached-cells fast path (:2156) and
+    // would repaint the pre-join cells — unfiltered — until something else
+    // invalidated. Credential changes are rare; re-deriving the cells is cheap.
+    this.onEffect<{ room: string }>('mesh:room', ({ room }) => {
+      if (this.#space !== room) {
+        this.#space = room
+        this.#layerCellsCache.clear()
+        this.renderedCellsKey = ''
+        this.renderedLocationKey = ''
+        this.requestRender()
+      }
+    })
+
+    this.onEffect<{ secret: string }>('mesh:secret', ({ secret }) => {
+      if (this.#secret !== secret) {
+        this.#secret = secret
+        this.#layerCellsCache.clear()
+        this.renderedCellsKey = ''
+        this.renderedLocationKey = ''
+        this.requestRender()
+      }
+    })
+
+    // clipboard:view page-replacement REMOVED — the clipboard is now a
+    // non-navigating side panel (hc-clipboard-panel) that never takes over
+    // the page render. The old listener, the `#clipboardView` field, and all
+    // its render-path guards are gone.
+
+    // ── THE SWAP HOVER ────────────────────────────────────────────────
+    // While the clipboard window is open a click MOVES the hovered tile, so
+    // its hover ring must not go on promising navigation. The verb is
+    // resolved in exactly one place — TileOverlayDrone's cue, which also
+    // draws the pill above the hex — and pushed here, so the pill and the
+    // rim can never disagree about what the click is about to do.
+    this.onEffect<{ verb: 'take' | 'copy' | null; color?: number }>('clipboard:verb', (payload) => {
+      const verb = payload?.verb ?? null
+      this.#swapMode = verb === 'copy' ? 2 : verb === 'take' ? 1 : 0
+      if (payload?.color !== undefined) {
+        const c = payload.color
+        this.#swapColor = [((c >> 16) & 0xff) / 255, ((c >> 8) & 0xff) / 255, (c & 0xff) / 255]
+      }
+      this.#applySwapMode()
+    })
+
+    // clipboard:captured — brief visual flash on copied tiles. Heat-only
+    // change → in-place buffer update, no full re-render.
+    this.onEffect<{ labels: string[]; op: string }>('clipboard:captured', (payload) => {
+      if (!payload?.labels?.length) return
+
+      if (payload.op === 'copy') {
+        if (this.#flashTimer) clearTimeout(this.#flashTimer)
+        this.#flashLabels = new Set(payload.labels)
+        for (const label of payload.labels) {
+          this.#heatByLabel.set(label, 1.0)
+          this.#updateCellHeat(label, 1.0)
+        }
+
+        this.#flashTimer = setTimeout(() => {
+          for (const label of this.#flashLabels) {
+            this.#heatByLabel.delete(label)
+            this.#updateCellHeat(label, 0)
+          }
+          this.#flashLabels.clear()
+          this.#flashTimer = null
+        }, 600)
+      }
+      // cut: tiles disappear via history remove ops + synchronize (handled by ClipboardWorker)
+    })
+
+    // translation:tile-start — sustained heat glow while translating.
+    // Heat-only → in-place buffer update on each pulse, no geometry rebuild.
+    this.onEffect<{ labels: string[]; locale: string }>('translation:tile-start', (payload) => {
+      if (!payload?.labels?.length) return
+      for (const label of payload.labels) {
+        this.#translatingLabels.add(label)
+        this.#heatByLabel.set(label, 0.5)
+        this.#updateCellHeat(label, 0.5)
+      }
+
+      if (!this.#translationPulseTimer) {
+        this.#translationPulseTimer = setInterval(() => {
+          if (!this.#translatingLabels.size) {
+            clearInterval(this.#translationPulseTimer!)
+            this.#translationPulseTimer = null
+            return
+          }
+          const t = Date.now() / 1000
+          const pulse = 0.3 + 0.2 * Math.sin(t * 3)
+          for (const label of this.#translatingLabels) {
+            this.#heatByLabel.set(label, pulse)
+            this.#updateCellHeat(label, pulse)
+          }
+        }, 100)
+      }
+    })
+
+    // translation:tile-done — clear heat on a single tile in place.
+    this.onEffect<{ label: string }>('translation:tile-done', (payload) => {
+      if (!payload?.label) return
+      this.#translatingLabels.delete(payload.label)
+      this.#heatByLabel.delete(payload.label)
+      this.#updateCellHeat(payload.label, 0)
+    })
+
+    // locale:changed — flush label atlas so all tile labels re-resolve through i18n.
+    // Forced for the same reason as title:indexed: a wipe with a swallowed
+    // repaint leaves every name blank behind its band.
+    this.onEffect<{ locale: string }>('locale:changed', () => {
+      if (this.atlas) {
+        this.atlas.invalidateLabels()
+      }
+      this.renderedCellsKey = ''
+      this.#forceNextRender = true
+      this.requestRender()
+    })
+
+    // labels:invalidated — fresh translations registered for current locale; re-resolve atlas.
+    this.onEffect<{ locale: string }>('labels:invalidated', () => {
+      if (this.atlas) {
+        this.atlas.invalidateLabels()
+      }
+      this.renderedCellsKey = ''
+      this.#forceNextRender = true
+      this.requestRender()
+    })
+
+    // cell from persisted stores so secret/room survive page reload
+    const roomStore = get<any>('@hypercomb.social/RoomStore')
+    const secretStore = get<any>('@hypercomb.social/SecretStore')
+    if (roomStore?.value && this.#space !== roomStore.value) {
+      this.#space = roomStore.value
+      this.renderedLocationKey = ''
+    }
+    if (secretStore?.value && this.#secret !== secretStore.value) {
+      this.#secret = secretStore.value
+      this.renderedLocationKey = ''
+    }
+
+    // listen for public/private toggle — clear mesh cells when going private so
+    // external tiles disappear immediately without requiring a manual refresh
+    this.onEffect<{ public: boolean }>('mesh:public-changed', ({ public: isPublic }) => {
+      this.#publicMode = !!isPublic
+      if (!isPublic) {
+        this.meshCells = []
+        this.meshCellsRev++
+        // Leaving the swarm: presence glow is meaningless in private mode.
+        this.#presenceGlowByLabel.clear()
+      }
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // listen for pivot mode toggle (loads pre-rotated snapshots + rotated labels)
+    this.onEffect<{ pivot: boolean }>('render:set-pivot', (payload) => {
+      if (this.#pivot !== payload.pivot) {
+        this.#pivot = payload.pivot
+        this.atlas?.setPivot(payload.pivot)
+        this.renderedCellsKey = ''
+        this.requestRender()
+      }
+    })
+
+    this.onEffect<{ textOnly: boolean }>('render:set-text-only', (payload) => {
+      if (this.#textOnly !== payload.textOnly) {
+        this.#textOnly = payload.textOnly
+        this.shader?.setImageMix(payload.textOnly ? 0.0 : 1.0)
+        cancelAnimationFrame(this.#substrateFadeRaf)
+        this.#substrateFadeStart = null
+        // The mode decides whether a hideText tile hides anything (#hidesName),
+        // so every labelUV has to be re-derived — the cells themselves are
+        // unchanged, so clear the key the way the pivot toggle does or the
+        // render short-circuits and hidden names stay hidden with no image
+        // behind them.
+        this.renderedCellsKey = ''
+        this.requestRender()
+      }
+    })
+
+    // substrate fade-in: when substrate config changes, animate images from 0 → 1
+    this.onEffect('substrate:changed', () => {
+      this.#startSubstrateFade()
+    })
+
+    // substrate:ready — substrate.service.warmUp() has finished and the props
+    // pool is populated. Force a render that re-emits render:cell-count with
+    // the current noImageLabels; substrate.drone listens for that and assigns
+    // images to every still-blank cell, then emits substrate:applied (below).
+    //
+    // Clearing renderedCellsKey is critical: without it, the next render
+    // would short-circuit at the cellsKey-equality check because no cell has
+    // gained an imageSig yet (chicken-and-egg with substrate apply), and
+    // render:cell-count would never re-fire.
+    this.onEffect('substrate:ready', () => {
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // SwarmDrone fires this when a peer arrives or its layer changes
+    // (and again on mesh-public toggling off, with reason='mode-private',
+    // so the cleared peer state surfaces as an empty TileSourceRegistry
+    // contribution and temp shared tiles disappear). show-cell's mesh
+    // callback no longer reacts to swarm-kind events directly — this
+    // drone-to-drone effect is the explicit handoff that triggers the
+    // repaint exactly when peer state actually changed.
+    //
+    // Aggressive invalidation: clearing cellsKey alone wasn't enough —
+    // the back-nav fast path matches by locationKey and serves a stale
+    // cells cache that doesn't reflect the new peer entries. Clear the
+    // location key + layer-cells cache for the current location so the
+    // next render runs the full path (lists local cells, queries the
+    // registry, includes peer additions, re-seeds the slot machine).
+    this.onEffect('swarm:peers-changed', () => {
+      // A newly-published (or retracted) peer tile must repaint without a
+      // reload. The render reads its cell-name list from the SLOT STATE
+      // MACHINE (#slots), seeded once and reused across passes — so clearing
+      // only the layer/source caches wasn't enough: requestRender re-read
+      // the stale slot snapshot and the new peer tile never appeared (and a
+      // retracted one lingered) — the "can't adopt a newly-offered swarm
+      // tile" bug. This mirrors the proven `fs:changed` handler EXACTLY,
+      // whose `#slots.clear()` is the piece that forces a fresh seed.
+      // #layerCellsCache/#sourceEntriesCache are cleared unconditionally
+      // (not keyed by the often-empty renderedLocationKey) so the next pass
+      // takes the full path and re-resolves peers; the emit is debounced
+      // ~150ms upstream, so this is one rebuild per burst.
+      this.#layerCellsCache.clear()
+      this.#sourceEntriesCache.clear()
+      this.renderedCellsKey = ''
+      this.#slots.clear()
+      this.requestRender()
+    })
+
+    // Participant filter toggled — the peer tile set changes exactly like
+    // a peers-changed burst, so mirror that handler's FULL invalidation
+    // (slot machine included): anything less and a stale slot snapshot
+    // keeps unselected peers painted, or a re-selected peer never
+    // reappears. The source-side filter (swarm.drone) reads the service
+    // directly, so clearing the caches is all the render needs.
+    this.onEffect<{ participants?: readonly string[] }>('swarm:filter', (payload) => {
+      const next = new Set((payload?.participants ?? []).map(p => String(p)).filter(Boolean))
+      const same = next.size === this.#participantFilter.size
+        && [...next].every(p => this.#participantFilter.has(p))
+      if (same) return
+      this.#participantFilter = next
+      this.#layerCellsCache.clear()
+      this.#sourceEntriesCache.clear()
+      this.renderedCellsKey = ''
+      this.#slots.clear()
+      this.requestRender()
+    })
+
+    // Spotlight changes — a peer's layer was surfaced (or dismissed
+    // back to merged). This is a LAYER move, not a tint: a surfaced
+    // participant supplies their own version of every tile you both
+    // hold, at their own slot indices, so membership and ordering are
+    // recomputed and not just the borderColor path. Clear the derived
+    // caches the same way the participant filter does — leaving
+    // #layerCellsCache/#slots warm would paint the new layer's pictures
+    // into the old layer's arrangement.
+    this.onEffect<{ activePeer: string | null }>('spotlight:changed', (payload) => {
+      this.#spotlightPubkey = payload?.activePeer ?? null
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.#slots.clear()
+      this.requestRender()
+    })
+
+    // Peer presence/interest moved — someone entered (or left) one of the
+    // child tiles at this location. Recompute the presence glow and force
+    // a rebuild so the heat ring updates. Cheap: same cells, only the heat
+    // attribute changes. renderedCellsKey is cleared because buildCellsKey
+    // doesn't hash heat, so without this the pass would short-circuit.
+    this.onEffect('swarm:interest-changed', () => {
+      if (!this.#publicMode) return
+      this.#refreshPresenceGlow()
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // Location change — different lineage means different cell set;
+    // the session slot cache is keyed by label and the new cells may
+    // share names with the old ones (rare but possible at deep
+    // navigations). Wipe the cache on every lineage change to keep
+    // slot assignments scoped per location.
+    this.onEffect('fs:changed', () => {
+      // fs:changed fires on navigation as well as data mutations;
+      // gating on locationKey change keeps it cheap.
+      const lineage = this.resolve<any>('lineage')
+      const here = String(lineage?.explorerLabel?.() ?? '/')
+      if (here !== this.renderedLocationKey) {
+        this.#sessionSlotByLabel.clear()
+      }
+    })
+
+    // substrate:applied — substrate has just written a new propsSig for this
+    // cell. Only this one cell's imageSig changed; route through the in-place
+    // buffer update so the rest of the grid never repaints. If the cell isn't
+    // currently indexed (e.g. first-render race), fall back to incremental.
+    //
+    // Cache invalidation must NOT precede the reload. Deleting
+    // cellImageCache[cell] up front and then awaiting loadCellImages
+    // leaves a window where any concurrent render (another effect
+    // fires, requestRender runs) reads an empty cache, produces
+    // `cell.imageSig = undefined`, and buildFillQuadGeometry bakes
+    // `hasImage = 0` into the buffer — permanently, because subsequent
+    // renders see the same cellsKey and skip the rebuild. Keep the old
+    // cache entry live until #tryInPlaceCellUpdate has re-read props
+    // and re-populated it; any concurrent render then sees the stale-
+    // but-valid sig and renders the previous image instead of an empty
+    // tile. When the update finishes, the buffer is patched in place
+    // with the new sig.
+    this.onEffect<{ cell: string }>('substrate:applied', (payload) => {
+      if (!payload?.cell) return
+      void this.#tryInPlaceCellUpdate(payload.cell, { dir: null }).then(done => {
+        this.cellSubstrateCache.delete(payload.cell)
+        if (!done && this.#slots.seeded) {
+          this.cellImageCache.delete(payload.cell)
+          void this.renderIncremental({ changedContent: [payload.cell] })
+        }
+      })
+    })
+
+    // tile:hidden / tile:unhidden — instant local response to the
+    // user clicking the hide icon. localStorage has already been
+    // written by tile-actions; show-cell wipes its render caches and
+    // re-renders so the tile disappears (or reappears) without the
+    // user waiting for the swarm round-trip. The mesh publish + relay
+    // echo arrive moments later via swarm:hide-changed and are no-op
+    // because the cache is already clear. Pattern matches the delete
+    // path (cell:removed handler) — instant repaint, no waiting on
+    // network or processor pulse.
+    const invalidateForHide = (): void => {
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.requestRender()
+    }
+    this.onEffect<{ cell: string; location: string }>('tile:hidden', invalidateForHide)
+    this.onEffect<{ cell: string; location: string }>('tile:unhidden', invalidateForHide)
+
+    // swarm:hide-changed — a hide event for the current lineage just
+    // landed (could be our own echo on first reload, or a multi-device
+    // sync from another tab signed by the same pubkey). Same render
+    // path as the local tile:hidden — the union read picks up
+    // whichever source has new names.
+    this.onEffect<{ sig: string; pubkey: string }>('swarm:hide-changed', invalidateForHide)
+
+    // swarm:resource-arrived — the swarm pipeline just wrote a peer's
+    // image bytes (or nested propsSig blob) to local OPFS. A tile whose
+    // image was previously unresolved (referenced sig wasn't yet on
+    // disk, so the renderer drew a blank) can now be painted.
+    //
+    // Two patterns of stale per-cell state need to be cleared so the
+    // next render actually picks up the freshly-streamed bytes:
+    //
+    //   1. cellImageCache[label] === arrivedSig — the cell knows its
+    //      image sig, the atlas just didn't have it. After clearing,
+    //      the slow path will re-call loadImageOnce(sig) and bind the
+    //      atlas slot. The buildCellsKey hash includes imageSig and
+    //      the atlas eviction generation, so applyGeometry will see
+    //      a changed key and rebuild the UV buffer.
+    //
+    //   2. cellImageCache[label] === null — the previous resolve gave
+    //      up (no propsIndex, or propsBlob fetch failed). The arriving
+    //      sig may be the propsBlob a peer just published, or the
+    //      small.image bytes inside one. Either way, the next slow
+    //      path needs a chance to re-resolve, so clearing the null
+    //      entry is the unblock.
+    //
+    // Plain `requestRender()` alone is insufficient because the
+    // fast-path skip in renderFromSynchronize honors renderedCellsKey;
+    // if a render is in flight when this effect fires, the in-flight
+    // render writes renderedCellsKey at completion and the do-while
+    // re-render sees it non-empty and returns early. Setting
+    // #forceNextRender carries the invalidation across that race.
+    this.onEffect<{ sig: string }>('swarm:resource-arrived', ({ sig }) => {
+      if (sig) {
+        for (const [label, cached] of this.cellImageCache) {
+          if (cached === sig || cached === null) {
+            this.cellImageCache.delete(label)
+          }
+        }
+      }
+      if (this.renderedLocationKey) {
+        this.#layerCellsCache.delete(this.renderedLocationKey)
+      }
+      this.renderedCellsKey = ''
+      this.#forceNextRender = true
+      this.requestRender()
+    })
+
+    // substrate:rerolled — user rerolled a tile's substrate (single click or
+    // bulk). The old in-place / incremental fast path here had the EXACT bug
+    // tile:saved already learned from: it races concurrent synchronize
+    // renders and leaves the tile showing the OLD image until a manual
+    // refresh. Use the same robust recipe as tile:saved — drop the cached
+    // derivation, evict the stale atlas slot, then run a locked full render
+    // that re-reads the freshly-written propsSig from OPFS and paints the new
+    // image immediately. Reroll is an explicit user gesture, and requestRender
+    // coalesces a bulk burst into a single pass, so the full render is cheap.
+    this.onEffect<{ cell: string }>('substrate:rerolled', (payload) => {
+      if (payload?.cell) {
+        const oldSig = this.cellImageCache.get(payload.cell)
+        this.cellImageCache.delete(payload.cell)
+        this.cellSubstrateCache.delete(payload.cell)
+        if (oldSig && this.imageAtlas) this.imageAtlas.invalidate(oldSig)
+      }
+      this.#layerCellsCache.delete(this.renderedLocationKey)
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // toggle tile label text visibility via shader uniform
+    this.onEffect('tile:toggle-text', () => {
+      this.#labelsVisible = !this.#labelsVisible
+      this.shader?.setLabelMix(this.#labelsVisible ? 1.0 : 0.0)
+    })
+
+    // show hidden items grayed out when eye toggle is active
+    this.onEffect<{ active: boolean }>('visibility:show-hidden', ({ active }) => {
+      this.#showHiddenItems = active
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // World mode toggle from the command bar — dims unshared tiles (no filter).
+    this.onEffect<{ active: boolean }>('world:mode', ({ active }) => {
+      this.#worldMode = !!active
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // A tile's public/private flag flipped.
+    this.onEffect('tile:public-changed', () => {
+      // Re-publish the kind-29010 cell list so the flip propagates NOW. The
+      // heartbeat key (locationKey:fsRev:grammar) doesn't move on a public
+      // flip — public state is participant-local (localStorage), not the
+      // signed layer — so without this nudge the mesh wouldn't republish
+      // until the next navigation or periodic refresh. forceResnapshot posts
+      // a fresh authoritative snapshot so the latest-snapshot-wins consumer
+      // drops a now-private tile at once instead of unioning it for ~10 min.
+      void this.refreshMeshCells('', true)
+      // Render changes in world mode (the dim state of unshared tiles) AND
+      // inside a swarm, where the flag decides MEMBERSHIP: the swarm-privacy
+      // filter drops an unshared tile from the pass, so a flip either adds it
+      // back or takes it away. Everywhere else the flag is invisible.
+      if (!this.#worldMode && !(this.#publicMode && this.#space && this.#secret)) return
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    this.onEffect<{ cell: string; index: number }>('cell:place-at', (payload) => {
+      void this.#handlePlaceAt(payload.cell, payload.index)
+    })
+
+    this.onEffect<{ labels: string[] }>('cell:reorder', (payload) => {
+      void this.#handleReorder(payload.labels)
+    })
+
+    // Arrangement activation is presentation-first. Apply its sparse slot map
+    // through the same zero-I/O mesh path as drag preview while the sequence
+    // controller writes canonical indices in the background.
+    this.onEffect<{ location: string; names: string[] | null }>('arrange:preview', (payload) => {
+      if (!payload || typeof payload.location !== 'string') return
+      if (payload.names) this.#arrangePreviewNames.set(payload.location, payload.names)
+      else this.#arrangePreviewNames.delete(payload.location)
+      if (payload.location !== this.#currentLocationKey()) return
+
+      this.renderedCellsKey = ''
+      if (payload.names && this.cachedCellNames) this.renderMovePreview()
+      else this.requestRender()
+    })
+
+    // layout:mode and layout:swirl are legacy — the renderer now
+    // operates only in pinned mode. Any incoming event is a no-op so
+    // historical layers that still carry `mode: 'dense'` or a stray
+    // /swirl command don't resurrect the spiral layout.
+
+    this.onEffect<{ gapPx: number }>('render:set-gap', (payload) => {
+      if (this.#hexGeo.gapPx !== payload.gapPx) {
+        this.#hexGeo = createHexGeometry(this.#hexGeo.circumRadiusPx, payload.gapPx, this.#hexGeo.padPx)
+        this.emitEffect('render:geometry-changed', this.#hexGeo)
+        this.renderedCellsKey = ''
+        this.requestRender()
+      }
+    })
+
+    // How tall the hovered tile's label band has to be, in rows. The OVERLAY
+    // owns this because it does the icon wrapping; the shader only draws what
+    // it is told, so a tile whose icons fit one row keeps the text's own band
+    // height instead of growing for nothing.
+    this.onEffect<{ rows?: number; label?: string | null }>('overlay:band-rows', (payload) => {
+      const owner = typeof payload?.label === 'string' ? payload.label : null
+      this.#bandRowsLabel = owner
+      this.#bandRows = Math.max(1, payload?.rows ?? 1)
+
+      // THE OVERLAY OWNS HOVER — it does the hit-testing and the wrapping, and
+      // this message is it naming the tile whose menu is up and how tall that
+      // menu is. Take the hovered tile from it, not just the height.
+      //
+      // The hovered index used to come from `tile:hover` ALONE, which the
+      // overlay emits only when the hovered HEX CHANGES. Every other path that
+      // re-lays the menu out — arriving on a new level, an icon registering, a
+      // notes or decoration update — left the renderer holding the index a
+      // geometry rebuild had already reset to -1. The shader draws the tall
+      // band only for the hovered cell, so the icons stayed up on two rows over
+      // a background that had snapped back to the resting one-row pill: the
+      // rows collapsing, most visibly on the way into a tile.
+      this.#applyHover(owner !== null && this.renderedCells.has(owner) ? owner : null)
+    })
+
+    // q/r and label are absent on the "nothing hovered" broadcast (pointer
+    // over chrome), which clears the ring and reveal: chrome is not the hive.
+    this.onEffect<{ q?: number; r?: number; label?: string | null; bandRows?: number }>('tile:hover', (payload) => {
+      // The overlay already resolved the occupied tile. Prefer its
+      // authoritative label: while geometry and occupancy are being replaced,
+      // deriving it again from q/r can briefly miss and leave a hideText tile
+      // visibly hovered with its name still hidden.
+      const payloadLabel = typeof payload.label === 'string' ? payload.label : null
+      let hoverLabel = payloadLabel && this.renderedCells.has(payloadLabel)
+        ? payloadLabel
+        : null
+
+      // Compatibility for older emitters that only carry axial coordinates.
+      if (!hoverLabel && payload.q !== undefined && payload.r !== undefined) {
+        for (const [label, cell] of this.renderedCells) {
+          if (cell.q === payload.q && cell.r === payload.r) { hoverLabel = label; break }
+        }
+      }
+
+      // The band geometry and the hover target are one visual state. The hover
+      // carries its own row count, so the background reaches its final height
+      // in the same update the hover lands in — the label and icons never paint
+      // into a one-row band that grows underneath them a frame later. Recorded
+      // against the arriving label, so it cannot be read for any other tile.
+      if (hoverLabel && payload.bandRows !== undefined) {
+        this.#bandRowsLabel = hoverLabel
+        this.#bandRows = Math.max(1, payload.bandRows)
+      }
+
+      // Same single path the band-rows message goes through, so the two can
+      // never leave the reveal, the band height and the lit cell disagreeing.
+      // (The old axial-index fallback here is gone: #axialToIndex and
+      // renderedCells are built from the same array in the same pass, so it
+      // could only ever fire when the q/r → label loop above had already found
+      // the tile.)
+      this.#applyHover(hoverLabel)
+      if (!this.shader) return
+
+      // Drive the shimmer clock only while a reference/portal tile is hovered,
+      // so u_time (and the magical hover animation) idles the rest of the time.
+      this.#setPortalShimmer(hoverLabel !== null && referenceTargetForLabel(hoverLabel) !== null)
+
+      // Emit hovered tile's tags for UI highlight
+      this.emitEffect('tile:hover-tags', { tags: hoverLabel ? this.#tagsFor(hoverLabel) : [] })
+    })
+
+    // accent color presets: glacier, bloom, aurora, ember, nebula
+    const ACCENT_COLORS: [number, number, number][] = [
+      [0.4, 0.85, 1.0],    // glacier — cyan
+      [1.0, 0.4, 0.7],     // bloom — magenta-pink
+      [0.2, 1.0, 0.6],     // aurora — green
+      [1.0, 0.6, 0.15],    // ember — warm amber
+      [0.65, 0.35, 1.0],   // nebula — violet
+    ]
+
+    // restore persisted accent color
+    const stored = parseInt(localStorage.getItem('hc:neon-color') ?? '0', 10)
+    if (stored >= 0 && stored < ACCENT_COLORS.length) {
+      this.#accentColor = ACCENT_COLORS[stored]
+    }
+    if (this.shader) {
+      const [r, g, b] = this.#accentColor
+      this.shader.setAccentColor(r, g, b)
+    }
+
+    this.onEffect<{ index: number }>('overlay:neon-color', ({ index }) => {
+      this.#accentColor = ACCENT_COLORS[index] ?? ACCENT_COLORS[0]
+      if (!this.shader) return
+      const [r, g, b] = this.#accentColor
+      this.shader.setAccentColor(r, g, b)
+    })
+
+    ; (window as any).showCellsPoc = {
+      publishCells: async (cells: string[]) => this.publishExplicitCellList(cells),
+      signature: async () => {
+        const lineage = this.resolve<any>('lineage')
+        return await this.computeSignatureLocation(lineage)
+      }
+    }
+  }
+
+  /**
+   * Apply the layer's layout state to the live renderer. Called on every
+   * cursor move (undo/redo/seek) so the visible configuration always
+   * matches the layer at the current cursor position. At head this is a
+   * no-op because every user intent commits and the live state already
+   * matches — we still run it for symmetry so returning to head after a
+   * rewound view restores whatever the layout was at head.
+   *
+   * Emits absolute-value events so the rest of the system (LayerCommitter,
+   * atlases, shader subscribers) stays in lock-step. commitLayer dedupes
+   * identical layouts, so redundant emits do not grow history.
+   *
+   * Fields with default-equivalent values in older layers (empty string,
+   * zero gap) are skipped so legacy entries do not regress the live view
+   * — the "crunched tiles" regression happened when historical layers
+   * without populated layout were applied verbatim.
+   */
+  /**
+   * Drop every label-keyed derived-state cache in one call. These six
+   * maps are views of the same identity (facts derived from a
+   * propsSig), so invalidation always happens together. Centralising
+   * the clear keeps the cursor-change and explorer-ready paths from
+   * having to list each map individually.
+   */
+  #invalidateAllLabelDerivedState = (): void => {
+    // A REPLACED atlas restarts its eviction counter at 0, so a remembered
+    // generation of 0 would read as "already applied" against a brand-new,
+    // empty atlas and hold the early-return over an unbaked grid. -1 is never
+    // a live generation, so the next pass always rebuilds.
+    this.#bakedImageAtlasGen = -1
+    this.#bakedLabelAtlasGen = -1
+    this.cellImageCache.clear()
+    this.cellBorderColorCache.clear()
+    this.cellTagsCache.clear()
+    this.cellLinkCache.clear()
+    this.cellSubstrateCache.clear()
+    this.cellHideTextCache.clear()
+    this.#externallyPaintedLabels.clear()
+  }
+
+  /** Drop every presentation fact derived from one participant variant. These
+   *  caches are one coherent projection: invalidating only its image creates a
+   *  tile that combines a new head with an old participant's other fields. */
+  #invalidateLabelDerivedState = (label: string): void => {
+    this.#externallyPaintedLabels.delete(label)
+    this.cellImageCache.delete(label)
+    this.cellBorderColorCache.delete(label)
+    this.cellTagsCache.delete(label)
+    this.cellLinkCache.delete(label)
+    this.cellSubstrateCache.delete(label)
+    this.cellHideTextCache.delete(label)
+    this.peerImageSourceByLabel.delete(label)
+  }
+
+  /** Move the label-keyed projection caches to one lineage. Per-location cell
+   * snapshots remain warm; they already contain their own imageSig and must
+   * never be overwritten by the page we just left. */
+  #enterDerivedLocation = (locationKey: string): void => {
+    if (locationKey === this.#derivedLocationKey) return
+    if (this.#derivedLocationKey) {
+      this.#derivedStateByLocation.set(this.#derivedLocationKey, {
+        images: new Map(this.cellImageCache),
+        borders: new Map(this.cellBorderColorCache),
+        tags: new Map(this.cellTagsCache),
+        links: new Map(this.cellLinkCache),
+        substrates: new Map(this.cellSubstrateCache),
+        hiddenText: new Map(this.cellHideTextCache),
+        external: new Set(this.#externallyPaintedLabels),
+      })
+      if (this.#derivedStateByLocation.size > ShowCellDrone.#PREPARED_VIEW_CAP) {
+        const oldest = this.#derivedStateByLocation.keys().next().value
+        if (oldest !== undefined) this.#derivedStateByLocation.delete(oldest)
+      }
+    }
+    this.#derivedLocationKey = locationKey
+    // The cell snapshot and its derived projection are one cache entry. If
+    // the former was invalidated, never restore stale presentation facts.
+    const state = this.#layerCellsCache.has(locationKey)
+      ? this.#derivedStateByLocation.get(locationKey)
+      : undefined
+    if (!state) this.#derivedStateByLocation.delete(locationKey)
+    this.#invalidateAllLabelDerivedState()
+    if (!state) return
+    for (const [label, value] of state.images) this.cellImageCache.set(label, value)
+    for (const [label, value] of state.borders) this.cellBorderColorCache.set(label, value)
+    for (const [label, value] of state.tags) this.cellTagsCache.set(label, value)
+    for (const [label, value] of state.links) this.cellLinkCache.set(label, value)
+    for (const [label, value] of state.substrates) this.cellSubstrateCache.set(label, value)
+    for (const [label, value] of state.hiddenText) this.cellHideTextCache.set(label, value)
+    for (const label of state.external) this.#externallyPaintedLabels.add(label)
+  }
+
+  // Layout reconstruction was layer-driven via `content.layoutSig`.
+  // The slim layer doesn't carry that field — layout is the live
+  // bee's own state, owned by the layout drone, not embedded in
+  // the lineage's history snapshot. If past-layout playback is
+  // wanted, the layout bee should commit its own per-state
+  // primitive (its own array of properties) and a reader should
+  // ask THAT primitive at the cursor's position.
+  #applyCursorLayout = async (): Promise<void> => { /* no-op under slim layer */ }
+
+  protected override dispose = (): void => {
+    window.removeEventListener('synchronize', this.onSynchronize)
+    window.removeEventListener('navigate', this.onNavigate)
+    window.removeEventListener('hex-image-atlas:evicted', this.#onAtlasEvicted)
+    window.removeEventListener('hex-image-atlas:retry', this.#onAtlasEvicted)
+    window.removeEventListener('hex-label-atlas:evicted', this.#onLabelAtlasEvicted)
+
+    if (this.#clusterRetryTimer) { clearTimeout(this.#clusterRetryTimer); this.#clusterRetryTimer = null }
+    if (this.#readinessRepaintTimer) { clearTimeout(this.#readinessRepaintTimer); this.#readinessRepaintTimer = null }
+
+    if (this.#newCellFadeRaf) {
+      cancelAnimationFrame(this.#newCellFadeRaf)
+      this.#newCellFadeRaf = 0
+    }
+    this.#newCellFadeStart.clear()
+
+    this.#driftActive = false
+    if (this.#driftRaf) {
+      cancelAnimationFrame(this.#driftRaf)
+      this.#driftRaf = 0
+    }
+
+    this.#portalShimmerActive = false
+    if (this.#portalShimmerRaf) {
+      cancelAnimationFrame(this.#portalShimmerRaf)
+      this.#portalShimmerRaf = 0
+    }
+
+    if (this.lineageChangeListening) {
+      const lineage = this.resolve<EventTarget>('lineage')
+      lineage?.removeEventListener('change', this.onLineageChange)
+      this.lineageChangeListening = false
+    }
+
+    if (this.#viewModeSource) {
+      this.#viewModeSource.removeEventListener('change', this.#onViewModeChange)
+      this.#viewModeSource = null
+    }
+
+    if (this.#missWindowTimer !== null) {
+      clearTimeout(this.#missWindowTimer)
+      this.#missWindowTimer = null
+      this.#missWindowFireAt = 0
+    }
+  }
+
+  // Re-open the completeness gates and force a repaint — shared by the
+  // content:arrived effect and the miss-window timer. Drops the back-nav
+  // cell caches of placeholder locations so the fast path can't restore a
+  // stale placeholder set after the content heals.
+  #rearmResolveGates = (): void => {
+    this.#incompleteResolveAttempts.clear()
+    this.#resolveGateExhausted.clear()
+    for (const loc of this.#placeholderLocations) this.#layerCellsCache.delete(loc)
+    this.#forceNextRender = true
+    this.requestRender()
+  }
+
+  // Schedule ONE coalesced re-render shortly after the earliest miss-window
+  // expiry among the given unresolved sigs. Reads the optional
+  // ContentBrokerDrone.missUntil(sig) defensively — an absent broker or
+  // method means no timer (content:arrived remains the re-arm). Bounded: a
+  // timer is only armed from a placeholder paint, and each expiry fires
+  // exactly one render pass; a still-incomplete pass re-arms for the NEXT
+  // window, so the cadence follows the broker's own miss windows — never a
+  // polling loop, never a retry storm.
+  #armMissWindowRetry = (unresolvedSigs: readonly string[]): void => {
+    let broker: { missUntil?: (sig: string) => number | undefined } | undefined
+    try {
+      broker = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ContentBrokerDrone')
+    } catch { /* broker not registered — content:arrived remains the re-arm */ }
+    if (typeof broker?.missUntil !== 'function') return
+    const now = Date.now()
+    let earliest = Infinity
+    for (const sig of unresolvedSigs) {
+      let until: number | undefined
+      try { until = broker.missUntil(sig) } catch { continue }
+      if (typeof until === 'number' && until > now && until < earliest) earliest = until
+    }
+    if (earliest === Infinity) return
+    // Fire shortly AFTER the expiry so the window is genuinely open when
+    // the re-render's reads reach the broker.
+    const fireAt = earliest + 250
+    // Coalesce onto a single timer: keep an already-armed EARLIER one (its
+    // render pass re-arms for whatever is still missing); replace a later one.
+    if (this.#missWindowTimer !== null && this.#missWindowFireAt <= fireAt) return
+    if (this.#missWindowTimer !== null) clearTimeout(this.#missWindowTimer)
+    this.#missWindowFireAt = fireAt
+    this.#missWindowTimer = setTimeout(() => {
+      this.#missWindowTimer = null
+      this.#missWindowFireAt = 0
+      this.#rearmResolveGates()
+    }, Math.max(0, fireAt - Date.now()))
+  }
+
+  // Briefly glow a newly created tile so the user can spot it, then ease out
+  // to normal. Reuses the existing #heatByLabel pathway consumed by the SDF
+  // shader's heat ring.
+  #startNewCellFade = (label: string): void => {
+    this.#newCellFadeStart.set(label, performance.now())
+    this.#heatByLabel.set(label, 1.0)
+    // Don't force a full render — the incremental render kicked off by
+    // cell:added will put the cell on screen; we just need to drive the heat
+    // attribute each frame. If the cell isn't indexed yet this frame, the
+    // next RAF will pick it up.
+    this.#updateCellHeat(label, 1.0)
+    if (this.#newCellFadeRaf) return
+
+    const tick = (): void => {
+      const now = performance.now()
+      let alive = false
+      for (const [cell, start] of this.#newCellFadeStart) {
+        const elapsed = now - start
+        if (elapsed >= ShowCellDrone.#NEW_CELL_FADE_MS) {
+          this.#newCellFadeStart.delete(cell)
+          this.#heatByLabel.delete(cell)
+          this.#updateCellHeat(cell, 0)
+          continue
+        }
+        const t = 1 - (elapsed / ShowCellDrone.#NEW_CELL_FADE_MS)
+        const eased = t * t * t
+        this.#heatByLabel.set(cell, eased)
+        this.#updateCellHeat(cell, eased)
+        alive = true
+      }
+      this.#newCellFadeRaf = alive ? requestAnimationFrame(tick) : 0
+    }
+    this.#newCellFadeRaf = requestAnimationFrame(tick)
+  }
+
+  /** Turn the launcher "cloud" drift on/off for the current page. When active,
+   *  sets the shader's drift amplitude (a fraction of the hex radius) and runs a
+   *  single rAF that advances u_time; the vertex shader does the rest. When
+   *  inactive, zeroes the amplitude and stops the clock. Idempotent — safe to
+   *  call on every render; the rAF is started once and reused. */
+  #setDrift = (active: boolean, circumRadiusPx: number): void => {
+    this.shader?.setDriftAmp(active ? circumRadiusPx * LAUNCHER_DRIFT_FRACTION : 0)
+    if (active) {
+      if (!this.#driftActive) { this.#driftActive = true; this.#driftStart = performance.now() }
+      if (!this.#driftRaf) {
+        const tick = (): void => {
+          if (!this.#driftActive) { this.#driftRaf = 0; return }
+          this.shader?.setTime((performance.now() - this.#driftStart) / 1000)
+          this.#driftRaf = requestAnimationFrame(tick)
+        }
+        this.#driftRaf = requestAnimationFrame(tick)
+      }
+    } else {
+      this.#driftActive = false
+      if (this.#driftRaf) { cancelAnimationFrame(this.#driftRaf); this.#driftRaf = 0 }
+    }
+  }
+
+  /** Start/stop the portal shimmer clock. A reference/portal tile's hover ring
+   *  breathes and spins (fragment shader, keyed on u_time); u_time is otherwise
+   *  frozen on a normal hive page, so we tick it only while a portal is hovered.
+   *  No-op when launcher drift already owns the clock (u_time is live there).
+   *  Idempotent. */
+  #setPortalShimmer = (active: boolean): void => {
+    if (active === this.#portalShimmerActive) return
+    this.#portalShimmerActive = active
+    if (active) {
+      if (this.#driftActive) return                    // drift already advances u_time
+      if (!this.#driftStart) this.#driftStart = performance.now()
+      if (!this.#portalShimmerRaf) {
+        const tick = (): void => {
+          if (!this.#portalShimmerActive || this.#driftActive) { this.#portalShimmerRaf = 0; return }
+          this.shader?.setTime((performance.now() - this.#driftStart) / 1000)
+          this.#portalShimmerRaf = requestAnimationFrame(tick)
+        }
+        this.#portalShimmerRaf = requestAnimationFrame(tick)
+      }
+    } else {
+      if (this.#portalShimmerRaf) { cancelAnimationFrame(this.#portalShimmerRaf); this.#portalShimmerRaf = 0 }
+    }
+  }
+
+  /** Resolve the treatment's marks against this page and paint the answer.
+   *
+   *  TWO askers, one buffer, one ramp — a live hover outranks the standing
+   *  armed bouquet, and each has its own matching rule:
+   *    • hover (`tags:preview`): who carries ANY of these? — the carriers
+   *      light, the rest recede;
+   *    • armed (`tags:apply-pending`): who already wears ALL of it? — those
+   *      stay lit as settled ground, and everything still missing part of the
+   *      set recedes: exactly the tiles a click will scent.
+   *  While armed, the treatment stays ON even with zero matches — a fully
+   *  receded page IS the honest answer ("nothing wears this yet; click tiles
+   *  to scent them"), where the hover with no carriers just stays dark.
+   *
+   *  The carrier set goes STRAIGHT into the divergence buffer and is pushed to
+   *  the GPU — a hover must never cost a render pass, and nothing here belongs
+   *  in one: no geometry moves and no cell record changes. The flag value (3)
+   *  is deliberately outside the divergence vocabulary (0/1/2), so a rebuild
+   *  bakes the tile's REAL divergence and the treatment simply repaints itself
+   *  over the fresh buffer (see #markPreviewGeom). */
+  #refreshMarkPreview(): void {
+    const dragged = this.#dragShadeMarks
+    const hovered = this.#markPreviewMarks
+    const armed = this.#armedApplyMarks
+    // The live drag outranks the hover, the hover outranks the standing armed
+    // set. Drag and armed share the ALL-match rule (what would the landing
+    // change?); the hover keeps ANY-match (who carries this?).
+    const all = dragged.length > 0 ? dragged : (hovered.length > 0 ? null : armed)
+    const next = new Set<string>()
+    if (all === null) {
+      const marks = new Set(hovered)
+      for (const label of this.renderedCells.keys()) {
+        for (const t of this.#tagsFor(label)) if (marks.has(t)) { next.add(label); break }
+      }
+    } else if (all.length > 0) {
+      for (const label of this.renderedCells.keys()) {
+        const worn = this.#tagsFor(label)
+        if (all.every(t => worn.includes(t))) next.add(label)
+      }
+      const tint = dragged.length > 0 ? this.#dragShadeColor : this.#armedApplyColor
+      if (tint) this.#markPreviewColor = tint
+    }
+    this.#markPreviewLabels = next
+    const active = all === null ? next.size > 0 : all.length > 0
+    if (active) this.#paintMarkPreviewBuffer()
+    this.#setMarkPreview(active)
+  }
+
+  /** Write the carrier flag for every cell in the current buffer. Non-carriers
+   *  are restored to their BAKED divergence (from the cell record), which is
+   *  what makes moving from one mark to the next a single push rather than a
+   *  clear-then-paint. */
+  #paintMarkPreviewBuffer(): void {
+    if (!this.#buf.divergence || !this.geom) return
+    for (const [label, i] of this.#labelToIndex) {
+      const baked = this.renderedCells.get(label)?.divergence ?? 0
+      this.#writeCellScalar(this.#buf.divergence, i, this.#markPreviewLabels.has(label) ? 3 : baked)
+    }
+    this.#pushBuffer('aDivergence')
+    this.#markPreviewGeom = this.geom
+  }
+
+  /** Put every cell back to its baked divergence. Runs at the END of the fade
+   *  out, not at the moment the cursor leaves: u_markPreview is already ramping
+   *  to 0, so restoring the flags early would snap the lit tiles dark while the
+   *  rest of the page was still fading back. */
+  #restoreMarkPreviewBuffer(): void {
+    this.#markPreviewGeom = null
+    if (!this.#buf.divergence || !this.geom) return
+    for (const [label, i] of this.#labelToIndex) {
+      this.#writeCellScalar(this.#buf.divergence, i, this.renderedCells.get(label)?.divergence ?? 0)
+    }
+    this.#pushBuffer('aDivergence')
+  }
+
+  /** Ramp the preview in or out. The rAF runs for as long as the treatment is
+   *  showing — it owns three things at once: the 0..1 strength ramp, the breath
+   *  clock (u_time, frozen on a normal hive page), and re-pushing the uniforms
+   *  after a shader swap, which is why it reads `this.shader` every frame
+   *  instead of capturing it. */
+  #setMarkPreview = (active: boolean): void => {
+    this.#markPreviewTarget = active ? 1 : 0
+    if (!this.#markPreviewRaf) this.#markPreviewRaf = requestAnimationFrame(this.#markPreviewTick)
+  }
+
+  #markPreviewTick = (): void => {
+    const target = this.#markPreviewTarget
+    const step = 0.11                                   // ≈ 150ms edge to edge
+    const k = target > this.#markPreviewK
+      ? Math.min(target, this.#markPreviewK + step)
+      : Math.max(target, this.#markPreviewK - step)
+    this.#markPreviewK = k
+    const shader = this.shader
+    shader?.setMarkPreview(k)
+    if (k > 0) {
+      shader?.setMarkColor(this.#markPreviewColor[0], this.#markPreviewColor[1], this.#markPreviewColor[2])
+      // The breath needs a clock. u_time is frozen on an ordinary hive page and
+      // shared with launcher drift, which owns it whenever it is running.
+      if (!this.#driftActive) {
+        if (!this.#driftStart) this.#driftStart = performance.now()
+        shader?.setTime((performance.now() - this.#driftStart) / 1000)
+      }
+      // A repaint or a navigation replaced the buffer under us — paint again.
+      if (this.geom !== this.#markPreviewGeom) this.#refreshMarkPreview()
+    }
+    if (k === 0 && target === 0) {
+      this.#markPreviewRaf = 0
+      this.#restoreMarkPreviewBuffer()
+      return
+    }
+    this.#markPreviewRaf = requestAnimationFrame(this.#markPreviewTick)
+  }
+
+  // settledEmpty: TRUE only when the caller has confirmed the render pipeline
+  // was READY (pixi + axial + lineage up) and the location genuinely resolved
+  // to zero tiles — i.e. this is a real "empty layer", not a "not ready yet"
+  // bail. It rides out on the render:cell-count payload so the loading splash
+  // can tell the two apart: a settled empty layer means the hive is ready to
+  // reveal (there are simply no tiles), whereas a not-ready count:0 (pixi still
+  // warming) must be ignored so a populated hive never flashes blank before its
+  // tiles paint. Default false — an unclassified clear is treated as not-ready.
+  private clearMesh = (reason: string, settledEmpty = false): void => {
+    const retainWarmMesh = settledEmpty && !!this.hexMesh && !!this.geom && !!this.layer
+    if (this.hexMesh && this.layer) {
+      // A live-mesh teardown must NEVER be silent. Every "tiles rendered
+      // and then vanished" bug funnels through here, and an unexplained
+      // clear is indistinguishable from a legitimate empty-layer render.
+      // The reason names the bail site so a vanish in the field is
+      // diagnosable straight from the console.
+      console.warn(`[render] clearMesh: clearing ${this.renderedCount} rendered cell(s) — ${reason}`)
+      // Capture the centering offset before destroying the mesh so the
+      // next mesh (e.g. when redo brings tiles back from empty) can
+      // restore it instead of starting at (0,0).
+      this.#lastMeshOffset = { x: this.hexMesh.position.x, y: this.hexMesh.position.y }
+      if (retainWarmMesh) {
+        this.hexMesh.visible = false
+      } else {
+        try { this.layer.removeChild(this.hexMesh as any) } catch { /* ignore */ }
+        try { this.hexMesh.destroy?.(true) } catch { /* ignore */ }
+      }
+    }
+
+    if (this.geom && !retainWarmMesh) {
+      try { this.geom.destroy(true) } catch { /* ignore */ }
+    }
+
+    // No mesh on screen → no launcher page to drift, no portal to shimmer.
+    this.#setDrift(false, 0)
+    this.#setPortalShimmer(false)
+
+    if (!retainWarmMesh) {
+      this.hexMesh = null
+      this.geom = null
+    }
+    this.renderedCellsKey = ''
+    // No buffer left, so no generation has been applied to one.
+    this.#bakedImageAtlasGen = -1
+    this.#bakedLabelAtlasGen = -1
+    this.renderedCount = 0
+    this.renderedCells.clear()
+    this.cachedCellNames = null
+    this.cachedLocalCellSet = null
+    this.cachedBranchSet = null
+    // Clear any pending position-restore flags. The mesh is gone; whoever
+    // creates the next one is responsible for setting fresh values. Without
+    // this, a layer that bailed via clearMesh (empty branch) used to leak
+    // pendingRecenter=true into the NEXT layer change, which then ignored
+    // the saved meshOffset and recentered → tiles + overlay misaligned.
+    this.#pendingRecenter = false
+    this.#pendingMeshOffsetRestore = null
+    // The pointer is not on any tile of a mesh that no longer exists. Left
+    // set, a same-named tile on the NEXT layer would bake in revealed — and
+    // would inherit its band height with it, so drop the row count's owner on
+    // the same breath. The arriving level's own layout re-establishes both.
+    this.#hoverRevealLabel = null
+    this.#bandRowsLabel = null
+    this.emitEffect('render:cell-count', { ...this.#buildCellCountPayload([]), settled: settledEmpty })
+  }
+
+  /**
+   * Attach the i18n label resolver to the label atlas so cell directory names
+   * are rendered as localized display text when a translation is registered.
+   */
+  /** The address→display seam. A cell's directory name is its ADDRESS, and
+   *  what gets BAKED is that address READ IN THE CURRENT LOCALE: this tile's
+   *  own title for the locale, else the shared i18n resolution (`cell.<name>`
+   *  overrides + catalogs), else the address itself. Ordering the tile's own
+   *  title first is what makes a rename a decoration rather than a re-address
+   *  (see decoration-kind-index's title sub-index).
+   *
+   *  `locale` is read per call, not captured: `locale:changed` flushes the
+   *  atlas and every label re-resolves through here, so a language switch
+   *  swaps titles with no extra wiring. */
+  private readonly attachLabelResolver = (atlas: HexLabelAtlas): void => {
+    const i18n = get<I18nProvider>(I18N_IOC_KEY)
+    atlas.setLabelResolver((directoryName: string) => {
+      const locale = i18n?.locale ?? 'en'
+      return this.registryTitlesByLabel.get(directoryName)?.[locale]?.trim()
+        || titleForLabel(directoryName, locale)
+        || (i18n ? i18n.resolveCell(directoryName) : directoryName)
+    })
+  }
+
+  /**
+   * Pay the one-time SDF raster + WebGL pipeline compilation while the window
+   * is still initializing, never on the participant's first add. Chromium's
+   * first HexLabelAtlas.getLabelUV measured 630–730ms even for one short
+   * label; every later label was <1ms. A one-cell offscreen draw also compiles
+   * the exact tile shader/program so empty → first-item can reach the next
+   * painted frame instead of stalling on driver work.
+   */
+  #primeEmptyRenderPipeline = (): void => {
+    if (!this.pixiRenderer || !this.atlas || !this.imageAtlas) return
+    let geom: Geometry | null = null
+    let mesh: Mesh | null = null
+    let retained = false
+    try {
+      const primeLabel = PENDING_CELL_LABEL
+      this.atlas.seed([primeLabel])
+      const { circumRadiusPx, gapPx, padPx } = this.#hexGeo
+      const pointReachPx = circumRadiusPx / 0.8660254
+      const halfW = (this.#flat ? pointReachPx : circumRadiusPx) + padPx
+      const halfH = (this.#flat ? circumRadiusPx : pointReachPx) + padPx
+      geom = this.buildFillQuadGeometry(
+        [{ q: 0, r: 0, label: primeLabel, external: false, plain: true }],
+        circumRadiusPx,
+        gapPx,
+        halfW,
+        halfH,
+      )
+      const warmShader = new HexSdfTextureShader(
+        this.atlas.getAtlasTexture(),
+        this.imageAtlas.getAtlasTexture(),
+        halfW * 2,
+        halfH * 2,
+        circumRadiusPx,
+      )
+      warmShader.setFlat(this.#flat)
+      warmShader.setPivot(this.#pivot)
+      mesh = new Mesh({
+        geometry: geom as any,
+        shader: (warmShader as any).shader,
+        texture: Texture.WHITE as any,
+      } as any)
+      ;(mesh as any).blendMode = 'pre-multiply'
+      // Compile against the application's real framebuffer. An offscreen
+      // target — or geometry clipped outside the viewport — left SwiftShader's
+      // first fragment draw costing 100–240ms. Draw the one-cell prime while
+      // boot chrome still covers the canvas, remove it in the same task, then
+      // clear immediately: no participant-visible frame contains the prime.
+      this.layer?.addChild(mesh as any)
+      if (this.pixiApp) this.pixiRenderer.render({ container: this.pixiApp.stage })
+      mesh.visible = false
+      if (this.pixiApp) this.pixiRenderer.render({ container: this.pixiApp.stage })
+      this.hexMesh = mesh
+      this.geom = geom
+      this.shader = warmShader
+      retained = true
+    } catch (err) {
+      console.warn('[show-cell] render pipeline prime failed', err)
+    } finally {
+      if (!retained) {
+        try { (mesh as any)?.destroy?.(true) } catch { /* best effort */ }
+        try { geom?.destroy(true) } catch { /* mesh may already own it */ }
+      }
+      // buildFillQuadGeometry populates the live update indexes. The priming
+      // cell is never part of the visible projection, so discard those refs.
+      this.#buf = {}
+      this.#labelToIndex.clear()
+      this.#shadedLabels.clear()
+      this.#wandTakingLabels.clear()
+      // No buffer to ramp into any more; a fade that outlived its geometry
+      // would write into the next page's indexes.
+      this.#shadeFadeStartedAt.clear()
+    }
+  }
+
+  private readonly rebuildRenderResources = (renderer: unknown): void => {
+    this.clearMesh("rebuildRenderResources: context restore")
+    this.shader = null
+    this.atlas = new HexLabelAtlas(renderer, 128, 16, 16) // 256 slots (match imageAtlas) so >64-tile hives don't wrap & thrash the render cache
+    this.attachLabelResolver(this.atlas)
+    this.imageAtlas = new HexImageAtlas(renderer, 256, 16, 16)
+    this.#primeEmptyRenderPipeline()
+    this.cellImageCache.clear()
+    this.atlasRenderer = renderer
+  }
+
+  // Per-revision cache. Multiple callers per nav ask for the same dir's
+  // children; the OPFS scan is the same answer until lineage's #fsRevision
+  // listCellFolders retired: tile membership is read exclusively from
+  // the current layer's children slot via history.currentLayerAt +
+  // history.getLayerBySig. The OPFS hierarchy at hypercomb.io/<tile>/
+  // is no longer the source of truth for tile lists.
+
+  // Per-revision branch detection cache. checkCellHasBranch is one OPFS
+  // getDirectoryHandle + entries() iteration per cell — for an N-tile
+  // layer (root often has the most), every full render redid N+ OPFS
+  // calls even though nothing in the dir changed. WeakMap on the dir
+  // handle, keyed by lineage revision so any user FS mutation (which
+  // calls lineage.invalidate) busts the cache automatically. In-flight
+  // dedup mirrors listCellFolders so concurrent renders share one walk.
+  readonly #branchSetCache = new WeakMap<FileSystemDirectoryHandle, { revision: number; result: Set<string> }>()
+  readonly #branchSetPending = new WeakMap<FileSystemDirectoryHandle, { revision: number; promise: Promise<Set<string>> }>()
+
+  #computeBranchSet = async (dir: FileSystemDirectoryHandle, localCells: readonly string[]): Promise<Set<string>> => {
+    const lineage = this.resolve<any>('lineage')
+    const revision = Number(lineage?.changed?.() ?? 0)
+
+    const cached = this.#branchSetCache.get(dir)
+    if (cached?.revision === revision) return cached.result
+
+    const pending = this.#branchSetPending.get(dir)
+    if (pending?.revision === revision) return pending.promise
+
+    const promise = (async (): Promise<Set<string>> => {
+      const out = new Set<string>()
+      await Promise.all(localCells.map(async (name) => {
+        if (await this.checkCellHasBranch(dir, name)) out.add(name)
+      }))
+      if (Number(lineage?.changed?.() ?? 0) === revision) {
+        this.#branchSetCache.set(dir, { revision, result: out })
+      }
+      return out
+    })()
+
+    this.#branchSetPending.set(dir, { revision, promise })
+    promise.finally(() => {
+      const p = this.#branchSetPending.get(dir)
+      if (p?.promise === promise) this.#branchSetPending.delete(dir)
+    })
+
+    return promise
+  }
+
+  // Single source of truth for the render:cell-count payload. Listeners
+  // (TileSelectionDrone, TileOverlayDrone, etc.) read coords[i],
+  // branchLabels, externalLabels, etc. — emitting a stripped payload
+  // makes them store undefined and throw on the next access. Keep every
+  // emit going through this helper so back-nav fast path, tag-flatten,
+  // streaming, and incremental paths all send identical shapes.
+  /** Set on every `navigate`; cleared by the first pass that paints tiles. */
+  #navStartedAt = 0
+  /** Monotonic render ownership token carried by tiles-target and cell-count. */
+  #tileRenderPassId = 0
+
+  #buildCellCountPayload(cells: readonly Cell[]): {
+    locationKey: string
+    renderPassId: number
+    count: number
+    labels: string[]
+    coords: { q: number; r: number }[]
+    branchLabels: string[]
+    externalLabels: string[]
+    swarmTakeLabels: string[]
+    noImageLabels: string[]
+    substrateLabels: string[]
+    linkLabels: string[]
+    hiddenLabels: string[]
+    shadedLabels: string[]
+    flatPaths: Record<string, string[]>
+    filterBlocked: string[]
+  } {
+    // Empty-layer invitation watermark — DISABLED for now. It should be a
+    // genuine-swarm cue, but public mode is the default in some shells, so
+    // it fired on every empty location and read as a default background
+    // rather than a swarm thing. Wiring stays (the app shells still listen
+    // for `swarm:empty-layer`); we emit `false` so the watermark never
+    // shows until it's re-gated on a real swarm session (room + secret +
+    // peers present) instead of just public mode.
+    this.emitEffect('swarm:empty-layer', { active: false })
+
+    // The navigation's own number: click → tiles on screen, and how many of
+    // those tiles still owe the atlas an image at that moment (a high count
+    // means the paint landed but the page keeps filling in after it).
+    if (this.#navStartedAt && cells.length > 0) {
+      const ms = Math.round(performance.now() - this.#navStartedAt)
+      this.#navStartedAt = 0
+      const atlas = this.imageAtlas
+      const pending = atlas
+        ? cells.filter(c => c.imageSig && !atlas.hasImage(c.imageSig) && !atlas.hasFailed(c.imageSig)).length
+        : 0
+      console.log(`[nav] ${cells.length} tiles in ${ms}ms (${pending} image(s) still loading)`)
+    }
+
+    // Peer tiles get marked as branches so tile-overlay routes their
+    // clicks through #navigateInto (URL changes, lineage updates, swarm
+    // re-subscribes). Without this they fall through to the editor's
+    // 'open' action and the user can't browse a peer's tree.
+    return {
+      locationKey: this.renderedLocationKey || '/',
+      renderPassId: this.#tileRenderPassId,
+      count: cells.length,
+      labels: cells.map(c => c.label),
+      coords: cells.map(c => ({ q: c.q, r: c.r })),
+      // In public/swarm mode EVERY tile is a branch: you can navigate into
+      // any tile to explore — even one with no children yet — which is how
+      // you enter an empty space and invite others in. In private mode only
+      // tiles that already have children (or live peer tiles) drill in;
+      // everything else opens the editor on click.
+      branchLabels: this.#publicMode
+        ? cells.map(c => c.label)
+        : cells.filter(c => c.hasBranch || this.#peerCellSet.has(c.label)).map(c => c.label),
+      externalLabels: cells.filter(c => c.external).map(c => c.label),
+      // FIRST CLICK ADOPTS, SECOND CLICK ENTERS (Jaime, 2026-08-20): the
+      // tiles whose next click is a TAKE rather than a walk — external and
+      // still receding. Computed hover-free by construction, because the
+      // click always arrives hovering and the live #cellIsShaded lifts the
+      // hovered tile, which would deny the take exactly when it matters. A
+      // stack variant is YOUR tile seen through a peer's layer, and a
+      // wand-touched tile is already being added — both enter on click.
+      swarmTakeLabels: cells
+        .filter(c => c.external
+          && !this.#stackVariantLabels.has(c.label)
+          && !this.#wandTakingLabels.has(c.label))
+        .map(c => c.label),
+      // Peer / external tiles are NEVER substrate-fillable blanks: their
+      // image is the PUBLISHER's (it just may not have streamed locally yet),
+      // and painting the receiver's random pool pick on a tile they don't own
+      // is wrong (same invariant loadOne enforces). Crucially, this also stops
+      // the adopt-wipes-image bug: a witnessed peer tile whose bytes hadn't
+      // arrived was reported blank → SubstrateDrone wrote a random pick into
+      // index[cellLocationSig(here, name)] → on adopt that random image won
+      // over the publisher's real one ("autogenerated background on adopt").
+      // `pendingProps` is excluded for the same reason: the tile's props blob
+      // hasn't landed locally yet, so "no imageSig" is UNKNOWN, not blank. A
+      // default assigned during that window goes into the local props index,
+      // which is what the render resolves through — it then outranks the tile's
+      // real image on every later pass, and only an editor re-save dislodges it.
+      // A concluded miss clears pendingProps (see loadOne), so a tile whose
+      // bytes never arrive still becomes substrate-fillable.
+      noImageLabels: cells
+        .filter(c => !c.imageSig && !c.external && !this.#peerCellSet.has(c.label) && !c.plain && !c.pendingProps)
+        .map(c => c.label),
+      substrateLabels: cells.filter(c => c.hasSubstrate).map(c => c.label),
+      linkLabels: cells.filter(c => c.hasLink).map(c => c.label),
+      hiddenLabels: this.#showHiddenItems ? [...this.#currentHiddenSet] : [],
+      // READINESS IS INFORMATION, NOT PERMISSION. A dim branch is still
+      // preparing its next view — entering it is allowed and simply makes the
+      // participant wait (TileOverlayDrone diverts the preloader at the tile
+      // being entered instead of refusing the press). Hover may lift opacity,
+      // but #cellIsPreloading ignores hover, so appearance never counterfeits
+      // the honest answer to "has this arrived yet".
+      shadedLabels: cells.filter(c => this.#cellIsPreloading(c)).map(c => c.label),
+      // Tag-flatten only — hence the filterTags guard: several render paths
+      // reach this helper without passing the flatten block, and a stale entry
+      // surviving into an ordinary page would redirect (or refuse) a click on
+      // an unrelated tile that merely shares a name with a past match.
+      // A match can live anywhere, so entering it travels to its absolute path;
+      // appending the label to wherever you're standing mints a phantom segment.
+      flatPaths: this.#narrowing() ? Object.fromEntries(this.#flatPathByLabel) : {},
+      // Matches with children but nothing tagged inside: entering would land on
+      // a blank filtered mesh, so tile-overlay refuses and says why.
+      filterBlocked: this.#narrowing() ? [...this.#filterBlockedLabels] : [],
+    }
+  }
+
+  #layoutModeKey(locationKey: string): string {
+    return `hc:layout-mode:${locationKey}`
+  }
+
+  #readLayoutMode(_locationKey: string): 'dense' | 'pinned' {
+    // Pinned is the canonical default: each cell keeps its slot index
+    // permanently (stored in its 0000 properties). The spiral/contiguous
+    // fill runs only once — to assign an index to a brand-new cell that
+    // has none yet. Removal leaves a gap, never shifts neighbours.
+    return 'pinned'
+  }
+
+  #persistLayoutMode(mode: 'dense' | 'pinned'): void {
+    const lineage = this.resolve<any>('lineage')
+    const locationKey = String(lineage?.explorerLabel?.() ?? '/')
+    localStorage.setItem(this.#layoutModeKey(locationKey), mode)
+  }
+
+  // `navPass`: true when this pass is a layer CHANGE (navigation). During a
+  // nav the viewport still belongs to the OUTGOING page — the destination
+  // pan/zoom is applied later in the pass, and ViewportPersistence/
+  // CenterSlotTracker aren't synced forward on nav at all — so any
+  // viewport-scored placement here would land tiles relative to the page
+  // the user just LEFT. On nav passes, unindexed placement is therefore
+  // deterministic (lowest free slot), never camera-relative. Same-page
+  // passes (tile added while viewing) keep the viewport score: there the
+  // camera is live and correct.
+  // `orderStats.coldIndexNames`: out-param — tiles whose index read was
+  // TRANSIENTLY unresolvable this pass (layer head cold, bytes not pooled).
+  // The caller gates the paint on it: placing a cold tile means painting a
+  // tile that HAS a durable slot at a wrong one.
+  async #orderByIndexPinned(dir: FileSystemDirectoryHandle, names: string[], localCellSet: Set<string>, readOnly = false, peerIndices?: Map<string, number>, passSegments?: readonly string[], navPass = false, orderStats?: { coldIndexNames: string[] }): Promise<string[]> {
+    const axial = this.resolve<any>('axial')
+    const maxSlot = axial?.count ?? 60
+    const sparse: string[] = new Array(maxSlot + 1).fill('')
+
+    const unindexed: string[] = []
+
+    // IndexNurse owns the index read path — layer-slot first, 0000
+    // fallback (the legacy path; consulted only when the layer carries
+    // no properties yet). Caches per cell; invalidates on
+    // `cell:0000-changed` broadcast (both writeTilePropertiesAt and
+    // writeCellProperties emit it). Cold misses fall through to either
+    // the layer's properties slot or the 0000 file; warm reads are
+    // constant-time. Registered eagerly in side-effects.
+    const indexNurse = (window as any).ioc?.get?.('@diamondcoreprocessor.com/IndexNurse') as
+      | { read: (parentSegments: readonly string[], cellName: string, cellDir?: FileSystemDirectoryHandle, cacheKey?: string, stats?: { cold?: boolean }) => Promise<number | undefined> }
+      | undefined
+
+    // Cache key is the cell's lineage signature, never its bare folder
+    // name. Two cells in different parent folders can share a leaf
+    // name (a "Notes" tile is common at many depths) and a name-keyed
+    // cache returns the first-seen index for every subsequent read of
+    // the same leaf — which on cold-load-at-subfolder + nav-back
+    // resolves to the SUBFOLDER's index, collides with the parent's
+    // real occupant, demotes the loser to unindexed, and persists it
+    // to slot 0. The lineage signature is unique per location and the
+    // same address inflate uses, so the in-memory cache, the on-disk
+    // 0000.index, and the inflate tree all agree on which cell is
+    // which.
+    const lineage = this.resolve<any>('lineage')
+    // THE ADDRESS OF THIS PASS. Must come from the render pass that named
+    // the cells (passSegments), never re-resolved from live lineage: the
+    // index wave below spans many awaits, and a navigation mid-pass used
+    // to re-key every read against the NEW location — all misses — then
+    // fire-and-forget persist the OLD layer's every tile against the NEW
+    // location. Each of those commits cascade-attached the old cell into
+    // the new layer's children: the "whole layer copied into the next
+    // layer" graft. Names and address now bind at the same instant.
+    const parentSegments: readonly string[] = passSegments ?? lineage?.explorerSegments?.() ?? []
+
+    // Pass 1 — place LOCAL indexed cells first so they own their persisted
+    // slots before any peer-published index gets a chance to claim them.
+    // Peer tiles deferred to Pass 2 below.
+    //
+    // The per-cell index reads are independent — resolve them in ONE
+    // PARALLEL WAVE. Each read costs up to three awaited roundtrips (dir
+    // probe, location-sig hash, nurse read); doing them serially made
+    // this loop O(cells) in wall-time — measured ~275ms for a 120-tile
+    // layer, the entire pre-stream stall of a navigation. PLACEMENT
+    // stays strictly sequential in `names` order below, so collision
+    // semantics are identical to the serial version.
+    const peerNames: string[] = []
+    const localNames: string[] = []
+    for (const name of names) {
+      if (!localCellSet.has(name)) peerNames.push(name)
+      else localNames.push(name)
+    }
+    const idxByName = new Map<string, number | undefined>()
+    // Per-name cold flags: a read is COLD when it was transiently
+    // unresolvable (head not warmed, bytes not pooled, services booting) —
+    // as opposed to an authoritative "tile has no index". Cold + undefined
+    // means we do NOT know this tile's slot; the caller's index gate holds
+    // the paint rather than score-filling a tile that owns a real slot.
+    const coldByName = new Set<string>()
+    await Promise.all(localNames.map(async (name) => {
+      // The draft owns the release slot for the lifetime of the References
+      // composition. Do not ask the layer for an index it cannot have yet and
+      // do not score-fill it somewhere else.
+      const draft = this.#referenceDraft
+      const isDraftHere = !!draft
+        && draft.name === name
+        && draft.parentSegments.length === parentSegments.length
+        && draft.parentSegments.every((segment, index) => String(segment) === String(parentSegments[index]))
+      if (draft && isDraftHere && draft.index <= maxSlot) {
+        idxByName.set(name, draft.index)
+        return
+      }
+      try {
+        // Layer-slot read with 0000 fallback. cellDir is opportunistic
+        // — the dir may not exist for layer-only tiles, in which case
+        // getDirectoryHandle throws and we still read from the layer.
+        let cellDir: FileSystemDirectoryHandle | undefined
+        try { cellDir = await dir.getDirectoryHandle(name, { create: false }) } catch { /* layer-only tile */ }
+        const cacheKey = await cellLocationSig(parentSegments, name)
+        const readStats = { cold: false }
+        const idx = indexNurse
+          ? await indexNurse.read(parentSegments, name, cellDir, cacheKey, readStats)
+          : await readTilePropertiesAt(parentSegments, name, readStats).then(p =>
+              typeof p['index'] === 'number' ? (p['index'] as number) : undefined,
+            )
+        idxByName.set(name, typeof idx === 'number' ? idx : undefined)
+        if (readStats.cold && typeof idx !== 'number') coldByName.add(name)
+      } catch {
+        idxByName.set(name, undefined)
+        // A throw is never an authoritative "no index" — treat as cold so
+        // the gate retries instead of mis-placing the tile.
+        coldByName.add(name)
+      }
+    }))
+    if (orderStats) orderStats.coldIndexNames = [...coldByName].sort()
+    for (const name of localNames) {
+      const idx = idxByName.get(name)
+      if (typeof idx === 'number' && idx >= 0 && idx <= maxSlot) {
+        // collision detection: if slot is already occupied, demote to unindexed
+        if (sparse[idx] !== '') {
+          unindexed.push(name)
+        } else {
+          sparse[idx] = name
+        }
+      } else {
+        unindexed.push(name)
+      }
+    }
+
+    // Pass 2 — peer tiles. Honor the publisher's `index` when the
+    // matching slot is free locally; otherwise demote to the unindexed
+    // pile and let the score-based fill below pick a slot.
+    //
+    // Why honor it: when the receiver has no conflicting local tile at
+    // the published index, using it preserves the visual identity the
+    // publisher set (a tile at "their" slot 3 sits at slot 3 on every
+    // receiver who has slot 3 free). On a fresh incognito canvas with
+    // zero local tiles every peer index lands clean — exactly the
+    // scenario the user called out: "there are most certainly no
+    // indexes in the way with zero initial tiles."
+    //
+    // Why the collision check is enough: Pass 1 (above) has already
+    // claimed every slot a local indexed tile owns. If a peer index
+    // collides with one of those, sparse[peerIdx] !== '' and we fall
+    // through to the unindexed queue. So local layout stays sovereign;
+    // peer indices are only respected on otherwise-empty slots.
+    //
+    // Deterministic peer order: sort peer names before placement so
+    // multi-peer rendering is stable across reruns and freshness
+    // rotation. Without this, two peers republishing the same name
+    // with different indices could flip the surviving slot every
+    // render based on Map-iteration order.
+    peerNames.sort((a, b) => a.localeCompare(b))
+    for (const name of peerNames) {
+      const peerIdx = peerIndices?.get(name)
+      if (typeof peerIdx === 'number' && peerIdx >= 0 && peerIdx <= maxSlot && sparse[peerIdx] === '') {
+        sparse[peerIdx] = name
+      } else {
+        unindexed.push(name)
+      }
+    }
+
+    // Sort the unindexed pile alphabetically before the score-based
+    // fill below. Same determinism reason: scoreMap is deterministic
+    // (slots evaluate identically given the same viewport), so the
+    // ONLY non-deterministic input is the iteration order of unindexed
+    // — sort it and the whole layout becomes reproducible across
+    // renders. Local-without-index and peers share the queue at this
+    // point; both classes are stable name-keyed, which is what the
+    // user-spec wants.
+    unindexed.sort((a, b) => a.localeCompare(b))
+
+    // Place each unindexed cell at the best free slot. #bestFreeSlotByScore
+    // scores empty slots by off-screen distance, then whitespace, then
+    // center proximity (lowest-free fallback when the viewport tracker isn't
+    // ready) — the SAME helper the pinned incremental-add path uses, so a
+    // cell created via the fast path and one placed in a full render land on
+    // identical slots.
+    const placedUnindexed: string[] = []
+    for (const name of unindexed) {
+      // Session-cache short-circuit. If this tile was already placed in a
+      // prior render (local-no-index path during a persistence race, or any
+      // peer tile) and the slot is still free, drop it back into the same
+      // slot. Pans don't change cached assignments; only manual reorganize
+      // clears this map.
+      const cachedSlot = this.#sessionSlotByLabel.get(name)
+      let placed: number
+      if (typeof cachedSlot === 'number' && cachedSlot >= 0 && cachedSlot <= maxSlot && sparse[cachedSlot] === '') {
+        placed = cachedSlot
+      } else if (navPass) {
+        // Navigation pass: the camera on screen (and the persisted
+        // lastZoom/lastPan the CenterSlotTracker scores derive from) still
+        // belongs to the OUTGOING page — the destination viewport is applied
+        // AFTER ordering. Scoring against it places tiles relative to the
+        // page the user just left. Take the lowest free slot instead:
+        // deterministic, camera-independent, stable across re-renders (the
+        // session cache above pins it for the rest of the tab session).
+        placed = -1
+        for (let i = 0; i <= maxSlot; i++) {
+          const v = sparse[i]
+          if (v === '' || v == null) { placed = i; break }
+        }
+        if (placed < 0) continue  // grid genuinely full
+      } else {
+        placed = this.#bestFreeSlotByScore(sparse, maxSlot)
+        if (placed < 0) continue  // grid genuinely full
+      }
+
+      sparse[placed] = name
+      placedUnindexed.push(`${name}→${placed}`)
+      // TRANSIENT reindex only. The session cache keeps the placement
+      // stable across re-renders (pan, peer churn, synchronize passes)
+      // for the lifetime of the tab — but a render pass must NEVER
+      // persist an index. Score-picked slots are a display decision,
+      // not content: stamping them into the layer made accidental
+      // placements permanent, generated a commit cascade per tile on
+      // every cold render, and was the write vector behind the
+      // cross-layer graft. Durable indexes come only from deliberate
+      // actions — cell creation (#placePinnedCell), explicit
+      // place-at (#handlePlaceAt), and the move drone.
+      this.#sessionSlotByLabel.set(name, placed)
+    }
+
+    // Stage diagnosis: which cells came in with a persisted index vs which
+    // had to be score-filled this pass (lost/never-had index, or slot
+    // collision). A tile in the score-fill list whose slot lands past the
+    // axial map's size is the one that misses the first paint.
+    const indexedPlaced = localNames.filter(n => !unindexed.includes(n)).map(n => `${n}@${idxByName.get(n)}`)
+    console.info('[layout] indexed:', indexedPlaced.join(', ') || '(none)', '| score-filled:', placedUnindexed.join(', ') || '(none)')
+
+    // A FRAME re-reads the whole placement through a pattern. Everything above
+    // still runs, and is still what decides the tiles' RELATIVE ORDER — the
+    // frame only decides where that order lands on screen. Nothing is
+    // persisted here: a frame is a way of reading the layer, and the tiles'
+    // own indexes survive underneath it untouched, so releasing the frame
+    // returns the page exactly as it was arranged.
+    const framed = this.#applyFrame(sparse, parentSegments, maxSlot)
+    return framed ?? sparse
+  }
+
+  /**
+   * Re-pack `sparse` onto the slots of the pattern framing this location, or
+   * null when the location is not framed.
+   *
+   * The frame's slots never move and never resize — that is the whole promise
+   * of it. What moves is the TILES: the ordered list slides through the slots
+   * by the location's scroll offset, so tiles arrive at the leading edge and
+   * leave at the trailing one, and a tile past the frame is simply not
+   * painted this pass. There is no cap on how many tiles a framed layer may
+   * hold; the ones off-frame are waiting, not refused.
+   *
+   * Synchronous by construction: FrameService keeps its resolver hot exactly
+   * so a geometry build can ask it without awaiting, the same discipline the
+   * sequence resolver follows.
+   */
+  /** Is the page being rendered read through a frame? Cheap synchronous
+   *  lookup — the incremental paths ask it before assuming a new tile can be
+   *  slotted without disturbing the others. */
+  #locationIsFramed(): boolean {
+    const frames = (window as any).ioc?.get?.('@FrameService') as
+      | { isFramed?: (segs: readonly string[]) => boolean }
+      | undefined
+    if (!frames?.isFramed) return false
+    const segments = this.resolve<any>('lineage')?.explorerSegments?.() ?? []
+    return frames.isFramed(segments)
+  }
+
+  #applyFrame(sparse: readonly string[], parentSegments: readonly string[], maxSlot: number): string[] | null {
+    const frames = (window as any).ioc?.get?.('@FrameService') as
+      | {
+          activeFrameFor: (segs: readonly string[]) => { order: readonly AxialLike[]; stride: number } | null
+          clampedOffsetFor: (segs: readonly string[], count?: number) => number
+          noteTileCount: (segs: readonly string[], count: number) => void
+        }
+      | undefined
+    const frame = frames?.activeFrameFor?.(parentSegments)
+    if (!frame || frame.order.length === 0) return null
+
+    // Slot order IS the tiles' relative order — the pass above already
+    // resolved persisted indexes, peer indexes and score-fills into it.
+    const ordered: string[] = []
+    for (const name of sparse) if (name) ordered.push(name)
+    if (ordered.length === 0) return null
+
+    // The render is the only thing that knows the TOTAL, and the scroll
+    // ceiling is computed from it. Note it before reading the offset back so
+    // a page that lost tiles is not left scrolled past its last one.
+    frames?.noteTileCount?.(parentSegments, ordered.length)
+    const offset = frames?.clampedOffsetFor?.(parentSegments, ordered.length) ?? 0
+
+    const axial = this.resolve<any>('axial')
+    const items = axial?.items as Map<number, { q: number; r: number }> | undefined
+    if (!items || items.size === 0) return null
+    const indexByCoord = new Map<string, number>()
+    for (const [index, coord] of items) indexByCoord.set(`${coord.q},${coord.r}`, index)
+
+    const out: string[] = new Array(maxSlot + 1).fill('')
+    let placed = 0
+    for (let position = 0; position < ordered.length; position++) {
+      const coord = slotAt(frame.order, frame.stride, position, offset)
+      if (!coord) continue                                   // off-frame — waiting
+      const index = indexByCoord.get(`${coord.q},${coord.r}`)
+      if (index === undefined || index > maxSlot) continue    // slot off the grid
+      out[index] = ordered[position]
+      placed++
+    }
+    // A frame that placed nothing is a broken frame, not an empty page — hand
+    // back the unframed placement rather than blanking the layer.
+    if (placed === 0) return null
+
+    console.info('[layout] framed:', placed, 'of', ordered.length, 'tiles | offset', offset)
+    return out
+  }
+
+  // #segmentsStillCurrent removed — render passes no longer persist ANY
+  // per-tile writes (score-fill reindexing is transient, session-cache
+  // only), so the stale-pass write guard has nothing left to guard.
+
+  /**
+   * Score every free slot in `sparse` and return the best one for a new
+   * cell: minimal off-screen distance, then maximal whitespace, then closest
+   * to center — the placement rule pinned layout uses for any cell without a
+   * persisted index. Falls back to the lowest free slot when the viewport
+   * tracker / axial adjacency isn't ready yet (early boot). Returns -1 when
+   * the grid is full. Pure: no side effects, no persistence.
+   *
+   * Shared by #orderByIndexPinned (batch full-render) and #placePinnedCell
+   * (pinned incremental add) so both place new cells identically. A slot is
+   * free when sparse[i] is '' or absent — the incremental caller passes the
+   * slot machine's sparse array, which may be shorter than maxSlot+1, so
+   * trailing indices are unoccupied.
+   */
+  #bestFreeSlotByScore(sparse: readonly string[], maxSlot: number): number {
+    const free = (i: number): boolean => { const v = sparse[i]; return v === '' || v == null }
+
+    const slotTracker = (window as any).ioc?.get?.('@diamondcoreprocessor.com/CenterSlotTracker') as
+      | { scores: ReadonlyMap<number, { off: number; center: number }> }
+      | undefined
+    const axialAny = (window as any).ioc?.get?.('@diamondcoreprocessor.com/AxialService') as
+      | { Adjacents: Map<number, { index: number }[]> }
+      | undefined
+    const scoreMap = slotTracker?.scores
+    const adjacents = axialAny?.Adjacents
+
+    let placed = -1
+    if (scoreMap && adjacents) {
+      let bestOff = Infinity
+      let bestWhitespace = -1
+      let bestCenter = Infinity
+      for (let i = 0; i <= maxSlot; i++) {
+        if (!free(i)) continue
+        const s = scoreMap.get(i)
+        if (!s) continue
+        // Count neighbours that aren't occupied tiles — off-grid neighbours
+        // at the rim of the grid count as whitespace because the visual area
+        // beyond the grid edge is empty.
+        let whitespace = 0
+        const neighbours = adjacents.get(i) ?? []
+        for (const adj of neighbours) {
+          const ai = adj.index
+          if (!Number.isFinite(ai) || ai < 0 || ai > maxSlot || free(ai)) whitespace++
+        }
+        if (
+          s.off < bestOff ||
+          (s.off === bestOff && whitespace > bestWhitespace) ||
+          (s.off === bestOff && whitespace === bestWhitespace && s.center < bestCenter)
+        ) {
+          bestOff = s.off
+          bestWhitespace = whitespace
+          bestCenter = s.center
+          placed = i
+        }
+      }
+    }
+
+    // Lowest-free fallback — tracker/adjacency missing (very early boot).
+    if (placed < 0) {
+      for (let i = 0; i <= maxSlot; i++) {
+        if (free(i)) { placed = i; break }
+      }
+    }
+    return placed
+  }
+
+  /**
+   * Next free slot dictated by a bound `sequence:target` decoration (self or
+   * an ancestor — cascading, position→leaf), or -1 when none is bound / the
+   * sequence is exhausted. Synchronous: reads SequenceService's in-memory
+   * resolver, which is kept hot off `decorations:changed` + cell-count
+   * hydration. The free-slot guard keeps a stale index from colliding.
+   */
+  #sequenceSlot(
+    eventSegments: readonly string[] | undefined,
+    maxSlot: number,
+    free: (i: number) => boolean,
+  ): number {
+    const seq = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SequenceService') as
+      | { nextFreeIndex?: (segs: readonly string[], isFree: (i: number) => boolean) => number | undefined }
+      | undefined
+    if (!seq?.nextFreeIndex) return -1
+    const lineage = this.resolve<any>('lineage')
+    const parentSegments: readonly string[] = eventSegments ?? lineage?.explorerSegments?.() ?? []
+    const next = seq.nextFreeIndex(parentSegments, (i) => i >= 0 && i <= maxSlot && free(i))
+    return (typeof next === 'number' && next >= 0 && next <= maxSlot && free(next)) ? next : -1
+  }
+
+  /**
+   * Pinned-mode incremental placement for a brand-new cell. Picks a slot the
+   * same way #orderByIndexPinned would for an unindexed cell — reuse the
+   * session-cached slot if still free, else the best free slot by viewport
+   * score — injects it into the slot machine at that index, and persists the
+   * index fire-and-forget so the next full render reads it back from Pass 1
+   * (the tile never jumps). Returns the slot, or -1 when the grid is full /
+   * axial isn't ready, signalling the caller to fall back to a full render.
+   */
+  #placePinnedCell(name: string, eventSegments?: readonly string[]): number {
+    const axial = this.resolve<any>('axial')
+    if (!axial?.items) return -1
+    const maxSlot = axial?.count ?? 60
+    const sparse = this.#slots.snapshot().names
+
+    // Already placed — a re-emitted cell:added for a tile that's already on
+    // screen (e.g. a tag/marker refresh re-fires the event to repaint). Keep
+    // its slot; never relocate or re-persist, or the tile would jump on the
+    // next full render.
+    const existing = sparse.indexOf(name)
+    if (existing >= 0) return existing
+
+    const cachedSlot = this.#sessionSlotByLabel.get(name)
+    const free = (i: number): boolean => { const v = sparse[i]; return v === '' || v == null }
+    // Drop-target sequence (cascading, position→leaf): when this location or
+    // an ancestor is bound to a sequence, a new tile fills the next free
+    // sequence slot before any score-based placement. No-op when nothing is
+    // bound or the sequence is exhausted.
+    const seqSlot = this.#sequenceSlot(eventSegments, maxSlot, free)
+    const slot = seqSlot >= 0
+      ? seqSlot
+      : (typeof cachedSlot === 'number' && cachedSlot >= 0 && cachedSlot <= maxSlot && free(cachedSlot))
+        ? cachedSlot
+        : this.#bestFreeSlotByScore(sparse, maxSlot)
+    if (slot < 0) return -1
+
+    if (!this.#slots.addAt(name, slot, false)) return -1
+    this.#sessionSlotByLabel.set(name, slot)
+
+    // Persist against the EVENT's address (captured synchronously with
+    // the cell:added that triggered this placement), never a live lineage
+    // re-read — the microtask defer between event and here is a real
+    // navigation window, and a wrong-location index write cascades the
+    // cell into the wrong layer's children.
+    const lineage = this.resolve<any>('lineage')
+    const parentSegments: readonly string[] = eventSegments ?? lineage?.explorerSegments?.() ?? []
+    void writeTilePropertiesAt(parentSegments, name, { index: slot }).catch(err =>
+      console.warn('[show-cell] failed to persist index for new cell', name, err),
+    )
+    return slot
+  }
+
+  /**
+   * A cell:added whose location is exactly one level BELOW the current
+   * screen flips its parent tile — visible here — from leaf to branch.
+   * Mark the slot machine and queue an (empty) incremental flush: the
+   * coalesced re-run rebuilds the cells from the marked snapshot, repaints
+   * the branch dot, refreshes the #layerCellsCache entry, and re-emits
+   * render:cell-count so tile-overlay's #branchLabels admits the click.
+   * Purely in-memory — no OPFS, so it cannot race the commit.
+   */
+  #flipParentBranchFor(childSegments: readonly string[]): void {
+    if (childSegments.length === 0 || !this.#slots.seeded) return
+    if (!this.#segmentsAreCurrent(childSegments.slice(0, -1))) return
+    const parent = String(childSegments[childSegments.length - 1] ?? '')
+    if (!parent || !this.#slots.has(parent) || this.#slots.hasBranch(parent)) return
+    this.#slots.markBranch(parent)
+    this.#queueIncremental({})
+  }
+
+  /**
+   * True when `segments` names the location currently rendered. Used to
+   * filter cell:added events so a nested create (which fires one event per
+   * affected ancestor location) only mounts the tile that belongs here.
+   */
+  #segmentsAreCurrent(segments: readonly string[]): boolean {
+    const lineage = this.resolve<any>('lineage')
+    const current: readonly string[] = lineage?.explorerSegments?.() ?? []
+    if (segments.length !== current.length) return false
+    for (let i = 0; i < segments.length; i++) {
+      if (String(segments[i]) !== String(current[i])) return false
+    }
+    return true
+  }
+
+  /**
+   * Central ordering strategy — all render paths route through here.
+   * Pinned is the only mode: each cell sits at its persisted `index`
+   * slot, gaps are preserved, and collision is resolved by moving the
+   * loser to the next free slot (persisted on write). Returns a sparse
+   * array where cellNames[i] → axial position i, with empty-string
+   * entries marking unoccupied slots.
+   */
+  async #resolveCellOrder(
+    _mode: string,
+    dir: FileSystemDirectoryHandle,
+    union: Set<string>,
+    localCellSet: Set<string>,
+    _lineage: any,
+    peerIndices?: Map<string, number>,
+    passSegments?: readonly string[],
+    navPass = false,
+    orderStats?: { coldIndexNames: string[] },
+  ): Promise<string[]> {
+    // When cursor is rewound, use cursor-aware ordering so deletions
+    // that happened later don't leave stale slot indices in OPFS
+    // overlapping the rewound cell set.
+    const cursor = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as
+      HistoryCursorService | undefined
+    const isRewound = cursor?.state?.rewound ?? false
+
+    let cellNames: string[]
+    if (isRewound && cursor) {
+      const content = await cursor.layerContentAtCursor()
+      // Resolve child sigs → names by enumerating parent dir +
+      // matching against each child's bag markers. Falls back to
+      // live disk ordering when the past layer can't be resolved.
+      const historyService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
+      const parentSegments = passSegments ?? (_lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
+      const orderedNames = (content && historyService)
+        ? [...await resolveChildNames(historyService, parentSegments, dir, content)]
+        : []
+      if (orderedNames.length > 0) {
+        const unionSet = new Set(union)
+        const filtered = orderedNames.filter(s => unionSet.has(s))
+        for (const s of union) {
+          if (!filtered.includes(s)) filtered.push(s)
+        }
+        // Slot index is the cell's stable visual position. Even when
+        // rewound, place each cell at its persisted `index` so x/y/scale
+        // don't shift across undo — only membership (which slots are
+        // occupied) changes between history points. readOnly: rewound
+        // viewing must not mutate disk indices.
+        cellNames = await this.#orderByIndexPinned(dir, filtered, localCellSet, true, peerIndices, passSegments, navPass, orderStats)
+      } else {
+        cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet, false, peerIndices, passSegments, navPass, orderStats)
+      }
+    } else {
+      cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet, false, peerIndices, passSegments, navPass, orderStats)
+    }
+
+    if (this.filterKeyword) {
+      const kw = this.filterKeyword
+      // Name OR mark: a pheromone is as good a handle on a tile as its
+      // name, so `>?` narrows on either. Marks come from the decoration
+      // index (already built, location-independent), so this holds on the
+      // very first pass — before any per-cell property read has run.
+      const matches = (s: string): boolean =>
+        s.toLowerCase().includes(kw)
+        || this.#tagsFor(s).some(t => t.toLowerCase().includes(kw))
+      cellNames = cellNames.map(s => s && matches(s) ? s : '')
+    }
+    return cellNames
+  }
+
+  // #orderByIndex (dense-packed) removed — pinned is the only layout
+  // mode. #orderByIndexPinned handles index assignment, collision
+  // detection, and next-available-slot fallback in one pass.
+
+  async #handlePlaceAt(cell: string, targetIndex: number): Promise<void> {
+    // Index is the source of truth. Place this one cell at the target
+    // index — do not renumber anyone else. Render-time collision heal
+    // (in #orderByIndexPinned) demotes any prior occupant to the next
+    // free slot.
+    const lineage = this.resolve<any>('lineage')
+    if (!lineage) return
+
+    const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
+    try {
+      await writeTilePropertiesAt(parentSegments, cell, { index: targetIndex })
+    } catch (err) {
+      console.warn('[show-cell] place-at failed for', cell, err)
+    }
+
+    this.renderedCellsKey = ''
+    this.#layerCellsCache.clear()
+    this.requestRender()
+  }
+
+  async #handleReorder(_labels: string[]): Promise<void> {
+    // Cell index is the source of truth — written per-cell by the move
+    // drone (and similar). This handler only invalidates the renderer's
+    // caches so the next pass re-reads the persisted indices. It MUST
+    // NOT renumber indices densely — that was the snap-back bug.
+    this.renderedCellsKey = ''
+    this.#layerCellsCache.clear()
+    this.requestRender()
+  }
+
+  private checkCellHasBranch = async (parentDir: FileSystemDirectoryHandle, cellName: string): Promise<boolean> => {
+    try {
+      const cellDir = await parentDir.getDirectoryHandle(cellName, { create: false })
+      for await (const [name, handle] of cellDir.entries()) {
+        // A branch is a NAMED child dir. Skip legacy underscore sidecars and
+        // sig-named dirs (64-hex: a sign(meaning) pool or a lineage sigbag)
+        // so a flat-root sibling never registers as a false branch.
+        if (handle.kind === 'directory' && !name.startsWith('__') && !/^[0-9a-f]{64}$/.test(name)) return true
+      }
+    } catch { /* cell doesn't exist or can't be read */ }
+    return false
+  }
+
+  // Rebuild #presenceGlowByLabel from the swarm's interest snapshot at the
+  // current sig. Each child name maps to the set of OTHER peers currently
+  // inside / entering it; we turn that count into a 0..1 glow that ramps
+  // with crowd size and saturates — one visitor is a clear cue, more
+  // people glow brighter. Cheap map walk; no network. Empty (and a fast
+  // exit) in private mode or when the swarm bee isn't loaded.
+  #refreshPresenceGlow = (): void => {
+    this.#presenceGlowByLabel.clear()
+    if (!this.#publicMode) return
+    try {
+      const swarm = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone') as
+        | { presenceGlowSnapshot?: () => ReadonlyMap<string, number> }
+        | undefined
+      const snapshot = swarm?.presenceGlowSnapshot?.()
+      if (!snapshot || snapshot.size === 0) return
+      for (const [name, count] of snapshot) {
+        if (count <= 0) continue
+        // 0.5 floor so a single explorer is plainly visible; +0.16 per
+        // extra head, saturating at full intensity for a crowd.
+        const glow = Math.min(1, 0.5 + (count - 1) * 0.16)
+        this.#presenceGlowByLabel.set(name, glow)
+      }
+    } catch { /* swarm not ready — no glow */ }
+  }
+
+  /** Cluster-island coordinates for an ORDERED launcher page (help), or null to
+   *  fall through to the normal spiral. Engages only once at least one cell
+   *  carries the `header` role — so /games, /websites and every hive page keep
+   *  the spiral untouched. Keyed by LABEL (islands are placed by identity, not
+   *  index). Also returns the header labels for the title-tile border tint. */
+  #launcherClusterCoords = (names: string[]): { coords: Map<string, { q: number; r: number }>; headers: Set<string> } | null => {
+    const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
+    if (!isLauncherLocation(segs)) return null
+
+    // The island id + header role live on each tile's `launch:target` decoration.
+    const groupOf = launchGroupForLabel
+    const roleOf = launchRoleForLabel
+
+    // Gather each island by its GROUP id (carried per tile in the decoration),
+    // NOT by render order — a slot system re-sorts `names`, so a position-delimited
+    // walk would scatter an island's tiles across the field. Each island's header
+    // is its role:'header' tile; islands order by the id's trailing digits.
+    const headers = new Set<string>()
+    const byGroup = new Map<string, { header: string | null; actions: string[]; ord: number }>()
+    for (const label of names) {
+      if (!label) continue
+      const g = groupOf(label)
+      if (!g) continue
+      let bucket = byGroup.get(g)
+      if (!bucket) { bucket = { header: null, actions: [], ord: parseInt(g.replace(/\D/g, ''), 10) || 0 }; byGroup.set(g, bucket) }
+      if (roleOf(label) === 'header') { bucket.header = label; headers.add(label) }
+      else bucket.actions.push(label)
+    }
+    // Nothing grouped yet (cold hydration) or a non-clustered launcher page
+    // (games/websites): keep the spiral. A late-hydrating group normally
+    // re-renders via the `launch:indexed` nudge, but every event path to that
+    // nudge can be swallowed on boot (a stream pass hydrates the index with
+    // nudge=false, consumes the walk memo, then LOSES the supersede race — the
+    // winning pass paints cold and no walk ever re-fires). So a cold cluster
+    // paint also arms the bounded index re-check below.
+    if (byGroup.size === 0) {
+      this.#armClusterRetry(names, groupOf)
+      return null
+    }
+    const groups: ClusterGroup[] = [...byGroup.values()].sort((a, b) => a.ord - b.ord)
+    return { coords: launcherClusterLayout(groups), headers }
+  }
+
+  /** Bounded self-heal for a clustered page painted before its island groups
+   *  hydrated: re-check the group index shortly after the cold paint and
+   *  rebuild geometry once it warms. Three checks with backoff, then give up —
+   *  genuinely non-clustered launcher pages (games, websites) stay cold by
+   *  design and cost only a map lookup per check. */
+  #clusterRetryTimer: ReturnType<typeof setTimeout> | null = null
+  #armClusterRetry = (names: string[], groupOf: (label: string) => string, attempt = 0): void => {
+    if (this.#clusterRetryTimer || attempt > 2) return
+    this.#clusterRetryTimer = setTimeout(() => {
+      this.#clusterRetryTimer = null
+      if (names.some(l => l && groupOf(l))) {
+        this.renderedCellsKey = ''
+        this.requestRender()
+        return
+      }
+      this.#armClusterRetry(names, groupOf, attempt + 1)
+    }, 500 * Math.pow(3, attempt))
+  }
+
+  /** Readiness shade — DIM IS THE DEFAULT, BRIGHT IS EARNED. A cell renders
+   *  bright only on positive proof of readiness: its image bytes are on
+   *  screen, or its resolution CONCLUDED (label-only by design, decode
+   *  failure, or a host fill that concluded empty — the terminal states).
+   *  Everything else — derivation in flight, bytes in flight, or a label
+   *  never resolved at all — shades, so an unknown state can never
+   *  masquerade as clickable. Shaded cells render dimmed (aShaded) and are
+   *  inert (TileOverlayDrone mirrors the set); they brighten IN PLACE when
+   *  their proof lands. The terminal releases are load-bearing: without
+   *  them, unreachable bytes would strand a tile dimmed/inert forever. */
+  /** True once this cell's OWN image/props have settled — present on screen,
+   *  decode-failed, or concluded-missing. The original readiness predicate,
+   *  extracted so the branch gate can require BOTH own-settled and
+   *  children-ready. */
+  #ownImageSettled(c: Cell): boolean {
+    if (c.pendingProps) return false
+    if (c.imageSig) {
+      if (this.imageAtlas?.hasImage(c.imageSig)) return true
+      if (this.imageAtlas?.hasFailed(c.imageSig)) return true
+      return this.#fillMissedSigs.has(c.imageSig)
+    }
+    return this.cellImageCache.has(c.label)
+  }
+
+  #cellIsPreloading(c: Cell): boolean {
+    // Plain launcher cells do not navigate into a preloaded child view.
+    if (!this.imageAtlas || c.plain) return false
+    // The membership is already real to the participant, but its durable
+    // commit is still draining. Keep the tile visible and plainly pending;
+    // never let an old bright-label proof make it look fully settled.
+    if (this.#pendingCellMutations.has(c.label)) return true
+    // This is arrival truth, independent of TILE_SHADE and hover. The
+    // presentation may lift opacity under the pointer; that changes how the
+    // tile LOOKS, never what has actually landed.
+    // Stable per location visit: late branch/props churn does not dim a proven
+    // tile. Exact atlas eviction explicitly removes the proof and bright bit.
+    // A tile may first paint as a leaf while its branch-status is still being
+    // resolved. Leaf brightness proves only its OWN image. If it later gains
+    // a branch dot, that weaker proof must not bypass children readiness.
+    if (
+      this.#brightLabels.has(c.label)
+      && (!CHILD_SHADE || !c.hasBranch || this.#childrenReadyByLabel.get(c.label) === true)
+    ) return false
+    // BRANCH (opt-in, see CHILD_SHADE): shaded until its OWN image settles
+    // AND the tiles INSIDE it (its direct children) all have their images
+    // present-or-concluded — an un-shaded branch means "click me, the inside
+    // is already loaded, the click lands with ZERO latency". LEAF (and every
+    // tile while the flag is off): just its own image. Burden of proof is on
+    // readiness; each release is recorded so the gate only ever opens on
+    // proof. Brightness now means proven, full stop.
+    const own = this.#ownImageSettled(c)
+    const ready = (CHILD_SHADE && c.hasBranch)
+      ? own && this.#childrenReadyByLabel.get(c.label) === true
+      : own
+    if (ready) {
+      this.#brightLabels.add(c.label)
+    }
+    return !ready
+  }
+
+  #cellIsShaded(c: Cell): boolean {
+    // Shade off and hover affect presentation only. Neither can weaken the
+    // independent readiness predicate the payload publishes.
+    if (!TILE_SHADE || this.#hoverOpaqueLabel === c.label) return false
+    // THE SWARM'S SHADE — A STANDING STATE, NOT A MODIFIER PREVIEW (Jaime,
+    // 2026-08-20: "when you go into a swarm there should be tiles shaded").
+    // In a zone, every tile you don't own yet recedes, from the moment you
+    // arrive: the page itself says which tiles are somebody else's and which
+    // ones you have added. A tile a take has touched lifts out (it is
+    // becoming yours) and stays out — the fold that follows paints it
+    // native, permanently and at full brightness. The hover clause above
+    // keeps the one under the pointer bright, which reads as "this is the
+    // one you'd add". Presentation only — the fold, the guards, and
+    // ownership never consult this.
+    // A SPOTLIT PEER'S VERSION OF YOUR OWN TILE is not "somebody else's
+    // tile": under superimposition it is the SAME tile seen through their
+    // layer, and you hold it. It rides the external path for the BYTES
+    // (their streamed image), which must not read as "you don't have this".
+    if (c.external
+      && !this.#stackVariantLabels.has(c.label)
+      && !this.#wandTakingLabels.has(c.label)) return true
+    // A HELD tile a peer is offering something for — "this needs an update" —
+    // recedes exactly like a tile you haven't adopted (Jaime, 2026-08-20:
+    // "things are grayed out when they're not adopted or they need updates").
+    // One shade, one meaning: dim = a click will ACQUIRE here, bright = a
+    // click will enter. The wand's touch lifts it the moment the update is
+    // taken, same as a take.
+    if (!c.external
+      && !this.#wandTakingLabels.has(c.label)
+      && peerDivergesAt(c.label)) return true
+    return this.#cellIsPreloading(c)
+  }
+
+  #preloadingLabels(): string[] {
+    return [...this.renderedCells.values()]
+      .filter(c => this.#cellIsPreloading(c))
+      .map(c => c.label)
+  }
+
+  /** Diagnostic: which tiles on this page are dim right now, split by WHY —
+   *  `swarm` (somebody else's, not yours yet) or `readiness` (yours, still
+   *  loading). Reads the live predicates the geometry write consults, so a
+   *  "the shade isn't showing" report names its half instead of guessing.
+   *  Nothing in the app reads this; the swarm harness does. */
+  public shadeDebug = (): { swarm: string[]; diverged: string[]; readiness: string[] } => {
+    const cells = [...this.renderedCells.values()]
+    return {
+      swarm: cells.filter(c => c.external && this.#cellIsShaded(c)).map(c => c.label),
+      diverged: cells.filter(c => !c.external && this.#cellIsShaded(c) && peerDivergesAt(c.label)).map(c => c.label),
+      readiness: cells.filter(c => !c.external && this.#cellIsShaded(c) && !peerDivergesAt(c.label)).map(c => c.label),
+    }
+  }
+
+  private buildCellsFromAxial = (axial: any, names: string[], max: number, localCellSet: Set<string>, branchSet?: Set<string>): Cell[] => {
+    const out: Cell[] = []
+    // during move drag, use reordered names so labels map to correct indices
+    const effectiveNames = this.#effectivePreviewNames() ?? names
+    // Clustered-island layout for the ordered help page — placed by label, so
+    // grouping reads the committed `names` order (a transient move-drag never
+    // rescrambles the islands). Null on every other page ⇒ the spiral below.
+    const cluster = this.#launcherClusterCoords(names)
+
+    // World mode: tiles that aren't public render dimmed. Resolve the location
+    // once; isCellPublic() is branch-aware (own flag or any ancestor branch).
+    const worldMode = this.#worldMode
+    const worldLocation = worldMode ? String(this.resolve<any>('lineage')?.explorerLabel?.() ?? '/') : ''
+    // Current path once per pass — the collection-rim predicates key on it.
+    const collectionSegs = ((this.resolve<any>('lineage')?.explorerSegments?.() ?? []) as unknown[])
+      .map(s => String(s ?? '').trim()).filter(Boolean)
+
+    // Stage diagnosis: any occupied slot at or past `max` is CUT from this
+    // render entirely — those tiles only appear when a later pass renders
+    // with a bigger axial map. This is the "second stage" of a two-stage
+    // load: a score-filled tile placed past the axial size waits here.
+    const beyondMax = names.slice(max).map((l, off) => l ? `${l}@${max + off}` : '').filter(Boolean)
+    if (beyondMax.length) console.info(`[layout] axial-truncated (slots ≥ ${max}):`, beyondMax.join(', '))
+
+    for (let i = 0; i < max; i++) {
+      const label = effectiveNames[i] ?? names[i]
+      // On a clustered launcher page the tile sits at its island coordinate
+      // (resolved by label); everywhere else it takes the axial spiral slot i.
+      const override = cluster?.coords.get(label)
+      const a = override ?? (axial.items.get(i) as Axial | undefined)
+      if (!a) {
+        const dropped = names.slice(i).map((l, off) => l ? `${l}@${i + off}` : '').filter(Boolean)
+        if (dropped.length) console.info(`[layout] axial-dropped (no coords from slot ${i}):`, dropped.join(', '))
+        break
+      }
+      if (!label) continue
+
+      // Staged-for-removal tiles borrow the future-remove treatment: this
+      // pheromone is about to leave them, which is exactly what that mark
+      // means. Ahead of the cursor divergence marks — an armed removal is
+      // what the participant is looking at right now.
+      const div = this.#tagRemovalStaged.has(label) ? 2
+        : this.#tagApplyPainted.has(label) ? 1
+          : this.#divergenceFutureAdds.has(label) ? 1
+            : this.#divergenceFutureRemoves.has(label) ? 2 : 0
+      // Heat ring = max(transient activity heat, steady peer-presence glow).
+      // The activity pulse (new-cell fade, hover) still plays on top; the
+      // presence glow keeps a tile lit while peers are exploring inside it.
+      const heat = Math.max(this.#heatByLabel.get(label) ?? 0, this.#presenceGlowByLabel.get(label) ?? 0)
+      const unshared = worldMode && !isCellPublic(worldLocation, label)
+      // Category title tiles carry the cold-steel border so an island header
+      // reads as a header — no new tile shape needed.
+      const borderColor = cluster?.headers.has(label) ? HEADER_BORDER : undefined
+      // Clustered help tiles render PLAIN — no photo/substrate imagery — so the
+      // category words and steel headers read cleanly.
+      // A tile showing a spotlit participant's version is external for
+      // this pass even though the name is yours: the bytes on screen
+      // are theirs, so it must take the publisher-image path and skip
+      // the local prop reads that would paint your picture back over
+      // it. Dismissing the spotlight empties the set and the tile is
+      // plainly yours again.
+      const external = !localCellSet.has(label) || this.#stackVariantLabels.has(label)
+      // COLLECTION RIM (see COLLECTED_BORDER): mark what the swarm brought
+      // you vs what it merely shows you. Both predicates are parse-cached
+      // map lookups — render-loop safe.
+      let rim = borderColor
+      if (!rim) {
+        const tilePath = [...collectionSegs, label]
+        if (!external && (visitRecordAt(tilePath) !== null || isWithinAdoptedRoot(tilePath))) rim = COLLECTED_BORDER
+        else if (external) rim = WITNESSED_BORDER
+      }
+      out.push({ q: a.q, r: a.r, label, external, heat, hasBranch: branchSet?.has(label) ?? false, divergence: div, unshared, borderColor: rim, plain: !!cluster })
+    }
+
+    return out
+  }
+
+  /**
+   * Load cell properties from the content-addressed tile-props index
+   * and resolve the small.image signature from __resources__/ into the image atlas.
+   * Standard: any property value matching a 64-char hex signature
+   * refers to a blob in __resources__/{signature}.
+   */
+  private loadCellImages = async (
+    cells: Cell[],
+    _dir: FileSystemDirectoryHandle | null,
+    forceReload?: Set<string>,
+    segmentsOverride?: readonly string[],
+    prepareOnly = false,
+  ): Promise<void> => {
+    const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
+      {
+        getResource: (sig: string) => Promise<Blob | null>
+        getResourceLocal: (sig: string) => Promise<Blob | null>
+        getOptimizedVisual?: (sig: string) => Promise<Blob | null>
+        optimizeVisual?: (sig: string, raw: Blob) => Promise<void>
+      } | undefined
+    if (!store || !this.imageAtlas) return
+    const imageAtlas = this.imageAtlas
+    // Off-screen preparation must never write into the visible lineage's
+    // label-keyed projection caches. Those writes race the foreground render:
+    // a child view resolving the same label (or a temporary miss) could finish
+    // last and erase the image currently on screen. Prepared cells carry their
+    // resolved values themselves, so isolated maps are sufficient here.
+    const cacheOwner = this.#derivedLocationKey
+    const imageCache = prepareOnly ? new Map<string, string | null>() : new Map(this.cellImageCache)
+    const borderCache = prepareOnly ? new Map<string, [number, number, number]>() : new Map(this.cellBorderColorCache)
+    const tagsCache = prepareOnly ? new Map<string, string[]>() : new Map(this.cellTagsCache)
+    const linkCache = prepareOnly ? new Map<string, boolean>() : new Map(this.cellLinkCache)
+    const substrateCache = prepareOnly ? new Map<string, boolean>() : new Map(this.cellSubstrateCache)
+    const hideTextCache = prepareOnly ? new Map<string, boolean>() : new Map(this.cellHideTextCache)
+
+    // Detached host fill — the render path's bytes come from LOCAL reads
+    // only (memory/OPFS); anything missing is fetched off-path through the
+    // full cascade and re-rendered on arrival. The Store negative-caches
+    // misses, so an unresolvable sig costs one bounded cascade per TTL
+    // window instead of a network storm on every synchronize pass.
+    const fillFromHost = (sig: string, label?: string): void => {
+      if (this.#hostFillInFlight.has(sig)) return
+      this.#hostFillInFlight.add(sig)
+      void (async () => {
+        try {
+          const blob = await store.getResource(sig)
+          if (!blob) {
+            // Not yet delivered — egg; retried after the miss TTL. Record
+            // the CONCLUDED miss so the readiness shade releases: the tile
+            // reverts to bright label-only (clickable) instead of staying
+            // dimmed/inert for bytes that may never come.
+            if (!this.#fillMissedSigs.has(sig)) {
+              this.#fillMissedSigs.add(sig)
+              this.#forceNextRender = true
+              this.requestRender()
+            }
+            return
+          }
+          this.#fillMissedSigs.delete(sig)
+          // Fresh bytes for this sig — un-pin any decode-failure record so
+          // the atlas retries with the healed blob instead of skipping it.
+          imageAtlas.clearFailure(sig)
+          // Bytes landed (memory + OPFS write-through). Drop the label's
+          // cached derivation so the next pass re-derives from fresh
+          // bytes, then schedule that pass. The force is required — a
+          // bare requestRender is a no-op at an unchanged location
+          // (fast-path skip on renderedCellsKey), so the landed bytes
+          // would never paint until an unrelated invalidation.
+          if (label && cacheOwner === this.#derivedLocationKey) this.cellImageCache.delete(label)
+          this.#forceNextRender = true
+          this.requestRender()
+        } catch { /* bounded by the Store's miss cache */ }
+        finally { this.#hostFillInFlight.delete(sig) }
+      })()
+    }
+
+    const livePropsIndex: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
+
+    // Index entries are keyed by the tile's FULL-LINEAGE sig (the sigbag
+    // key — tile-properties.ts) so same-named tiles at different hive
+    // locations never read each other's assignment; bare-label entries
+    // remain readable as legacy fallback. The sigs are memoised inside
+    // HistoryService.sign, so this map costs one hash per (location,
+    // label) for the lifetime of the session. Cursor overrides (rewound
+    // view) are label-keyed and take precedence over the live index.
+    const renderLineage = (window as any).ioc?.get?.('@hypercomb.social/Lineage') as
+      { explorerSegments?: () => readonly string[] } | undefined
+    const renderSegments: readonly string[] = segmentsOverride ?? renderLineage?.explorerSegments?.() ?? []
+    // A gathered/flattened tile (orchestrator audit, tag flatten) lives at
+    // its OWN absolute path, not on the page the view was raised from.
+    // Signing the render location for it mints a key no writer ever wrote,
+    // so the props lookup missed and every gathered tile painted imageless.
+    // #flatPathByLabel carries the absolute path (ending in the label) for
+    // exactly those tiles; empty for ordinary renders.
+    const segmentsForLabel = (label: string): readonly string[] => {
+      const flat = this.#flatPathByLabel.get(label)
+      return flat && flat.length > 0 && flat[flat.length - 1] === label
+        ? flat.slice(0, -1)
+        : renderSegments
+    }
+    const indexKeyByLabel = new Map<string, string>()
+    for (const c of cells) {
+      if (!indexKeyByLabel.has(c.label)) {
+        indexKeyByLabel.set(c.label, await cellLocationSig(segmentsForLabel(c.label), c.label))
+      }
+    }
+
+    // Layer-first resolution (visuals-across-lineages.md, Phase A). The
+    // head layer's sig keys an entry that can neither collide nor go
+    // stale: new props = new head = miss; another lineage at this address
+    // = another head = its own entry — so adopt-sync, restore, or a
+    // rolled stack re-serves each lineage's OWN picture instead of the
+    // last writer's. Heads are warm here (the stream that produced
+    // `cells` resolved them); warmHeadSigFor is a map lookup, never an
+    // OPFS read or a marker mint. Fallback stays location → bare label;
+    // a fallback hit queues a re-mint so the NEXT pass hits layer-first.
+    const historyForHeads = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as
+      { warmHeadSigFor?: (l: string) => string | null } | undefined
+    const headSigByLabel = new Map<string, string>()
+    if (historyForHeads?.warmHeadSigFor) {
+      for (const [label, key] of indexKeyByLabel) {
+        const head = key ? historyForHeads.warmHeadSigFor(key) : null
+        if (head) headSigByLabel.set(label, head)
+      }
+    }
+    // Labels whose layer-keyed entry was ABSENT, with the sig the pass
+    // served instead (a location/label fallback) or null (total miss).
+    // Both resolve against CANONICAL after the batch — derive-on-miss
+    // (Phase B, visuals-across-lineages.md): the entry seeds so the next
+    // pass hits layer-first, and a serve that DISAGREES with canonical
+    // repaints this pass, not the next one. No pre-seeded index is ever
+    // required for a tile to show its picture.
+    const unresolvedByLabel = new Map<string, string | null>()
+
+    const propsSigForLabel = (label: string): string | undefined => {
+      const override = this.#cursorPropsOverride?.get(label)
+      if (override) return override
+      const headSig = headSigByLabel.get(label)
+      if (headSig) {
+        const byLayer = livePropsIndex[headSig]
+        if (byLayer) return byLayer
+      }
+      const key = indexKeyByLabel.get(label) ?? ''
+      const sig = (key ? livePropsIndex[key] : undefined) ?? livePropsIndex[label]
+      if (headSig) unresolvedByLabel.set(label, sig ?? null)
+      return sig
+    }
+
+    // Peer-published image sigs for tiles the user hasn't adopted yet.
+    // For each peer-only tile (kind:'peer', `cell.external === true`),
+    // the SwarmDrone may have streamed an imageSig — the publisher's
+    // substrate-cache pointer — which now lives in OPFS via the
+    // resource-pull pipeline. Looking it up here lets the image-load
+    // path treat the peer's sig as if it were a local propsIndex entry
+    // and render the publisher's image as a preview before the user
+    // commits to adopt.
+    const peerImageSigByLabel = new Map<string, string>()
+    try {
+      const swarm = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone') as
+        | { peerTilesAtCurrentSig?: () => readonly { name: string; imageSig?: string }[] }
+        | undefined
+      const peerTiles = swarm?.peerTilesAtCurrentSig?.() ?? []
+      for (const t of peerTiles) {
+        if (typeof t.imageSig === 'string' && !peerImageSigByLabel.has(t.name)) {
+          peerImageSigByLabel.set(t.name, t.imageSig)
+        }
+      }
+    } catch { /* swarm not registered yet — no peer previews */ }
+
+    // Per-batch dedup so cells sharing an image (e.g. substrate fills) only fetch + decode once
+    const inFlightImages = new Map<string, Promise<void>>()
+    const loadImageOnce = (sig: string): Promise<void> => {
+      if (imageAtlas.hasImage(sig) || imageAtlas.hasFailed(sig)) return Promise.resolve()
+      // View preparation resolves the exact image signatures and display
+      // properties, but GPU decode/upload belongs to the sliced idle bake
+      // queue. Decoding every destination cell here via Promise.all monopolized
+      // the main thread while other, already-ready tiles were being clicked.
+      if (prepareOnly) return Promise.resolve()
+      const existing = inFlightImages.get(sig)
+      if (existing) return existing
+      const promise = (async () => {
+        try {
+          // LOCAL only — a miss never stalls the batch; the detached fill
+          // pulls the bytes and a follow-up render atlas-loads them.
+          // Cell-sized optimized visual first: same pixels the atlas would
+          // bake from the raw, pre-downscaled so the decode is milliseconds.
+          const blob = await this.#localDecodeBlob(sig)
+          if (!blob) { fillFromHost(sig); return }
+          await imageAtlas.loadImage(sig, blob)
+        } catch (error) {
+          console.warn(`[show-cell] atlas load failed for ${sig.slice(0, 12)}…`, error)
+        }
+      })()
+      inFlightImages.set(sig, promise)
+      return promise
+    }
+
+    const loadOne = async (cell: Cell): Promise<void> => {
+      // A peer-only tile can become a local same-identity twin between render
+      // passes (paste/adopt). Its previous caches are a projection of the peer,
+      // not reusable facts about the new local head. Clear the whole set once
+      // before entering the ordinary local resolver.
+      if (!cell.external && this.#externallyPaintedLabels.delete(cell.label)) {
+        this.#invalidateLabelDerivedState(cell.label)
+      }
+      // External cells (kind:'peer' from the SwarmDrone) have no local
+      // OPFS dir, so the OPFS-based
+      // tags/link/substrate reads further down would always throw. The
+      // peer path has its OWN content-addressed image source though:
+      // the swarm streamed the publisher's `imageSig` and the bytes are
+      // already in __resources__/. Resolve it the same way local cells
+      // do (propsBlob → small.image → imageAtlas), then return without
+      // touching the OPFS-only caches.
+      if (cell.external) {
+        this.#externallyPaintedLabels.add(cell.label)
+        const publishedProperties = this.registryPropertiesByLabel.get(cell.label)
+        const published = publishedProperties
+          ? participantVariantVisual(publishedProperties, this.#flat)
+          : undefined
+        if (published) {
+          cell.pendingProps = false
+          if (published.borderColor) cell.borderColor = published.borderColor
+          cell.hasLink = published.hasLink
+          cell.hasSubstrate = published.hasSubstrate
+          cell.hideText = published.hideText
+          if (published.borderColor) borderCache.set(cell.label, published.borderColor)
+          else borderCache.delete(cell.label)
+          tagsCache.set(cell.label, [...published.tags])
+          linkCache.set(cell.label, published.hasLink)
+          substrateCache.set(cell.label, published.hasSubstrate)
+          hideTextCache.set(cell.label, published.hideText)
+        }
+        // Peer-only tiles render ONLY the publisher's streamed image — the
+        // sig is content-addressed and the publisher is the authority, so
+        // the CURRENT peerImageSigByLabel value always wins. The cache is a
+        // derivation memo, valid only while its SOURCE sig is unchanged
+        // (peerImageSourceByLabel) — without that check, a stale or
+        // cross-contaminated entry pinned peer tiles to WRONG images
+        // forever (the witness showed shuffled/random tiles even though
+        // the wire carried the exact right sigs per name).
+        // No local-pool fallback in any branch: painting the receiver's
+        // substrate pick on a tile the receiver doesn't own is wrong.
+        // LIVE publisher sig first (swarm visuals); REGISTRY entry sig as
+        // the solo fallback — config-mounted tiles (DCP-adopted branches)
+        // have no live publisher, their canonical image rides the
+        // TileSourceRegistry entry instead. Both are publisher-derived
+        // from the same canonical 0000, so either is exact.
+        const peerSig = publishedProperties
+          ? published?.imageSig
+          : peerImageSigByLabel.get(cell.label) ?? this.registryImageByLabel.get(cell.label)
+        if (peerSig) {
+          const cached = imageCache.get(cell.label)
+          if (cached && this.peerImageSourceByLabel.get(cell.label) === peerSig) {
+            cell.imageSig = cached
+            return
+          }
+          try {
+            // LOCAL only — peer bytes that haven't streamed yet must not
+            // stall the pass; the detached fill re-renders on arrival.
+            // While that fill is IN FLIGHT the tile is readiness-shaded
+            // (pendingProps) — a concluded miss (#fillMissedSigs) releases
+            // it to the bright label-only preview so an offline publisher
+            // can't strand the tile dimmed/inert.
+            const blob = await resolveLocalResourceReference(store, peerSig)
+            if (!blob) {
+              fillFromHost(peerSig, cell.label)
+              cell.pendingProps = !this.#fillMissedSigs.has(peerSig)
+              imageCache.set(cell.label, null)
+              return
+            }
+            // The wire has carried two shapes: a PROPS pointer (JSON blob
+            // whose small.image holds the image sig — the old substrate-
+            // cache pointer) and the DIRECT image sig (current visuals
+            // inline the canonical 0000, whose small.image IS the image).
+            // Parse-as-JSON distinguishes them: parseable → derive; binary
+            // → the sig is the image itself.
+            let finalSig: string | null = null
+            try {
+              const props = JSON.parse(await blob.text())
+              const smallSig = recoverableTileImageSig(props, this.#flat)
+              if (smallSig && isSignature(smallSig)) finalSig = smallSig
+            } catch {
+              finalSig = peerSig
+            }
+            if (finalSig) {
+              await loadImageOnce(finalSig)
+              cell.imageSig = finalSig
+              imageCache.set(cell.label, finalSig)
+              this.peerImageSourceByLabel.set(cell.label, peerSig)
+            } else {
+              imageCache.set(cell.label, null)
+            }
+          } catch {
+            imageCache.set(cell.label, null)
+          }
+          return
+        }
+        // A complete peer projection with no picture means exactly that: this
+        // participant's variant is pictureless. Never reuse the outgoing
+        // participant's image or a local substrate fallback.
+        if (publishedProperties) {
+          cell.imageSig = undefined
+          imageCache.set(cell.label, null)
+          this.peerImageSourceByLabel.delete(cell.label)
+          return
+        }
+        // No CURRENT peer sig (bytes/visual not arrived this pass): reuse a
+        // previously-derived value if one exists — re-render passes must not
+        // strand the tile — otherwise mark null and wait for the next
+        // visuals/resource arrival to re-attempt.
+        const cached = imageCache.get(cell.label)
+        if (cached) { cell.imageSig = cached; return }
+        imageCache.set(cell.label, null)
+        return
+      }
+
+      // load tags + link from OPFS if not cached (independent of image cache).
+      // Sub-layer locations have no on-disk dir under layer-as-primitive; the
+      // image path below still resolves via __resources__, so we just skip
+      // the tags/link folder read when _dir is null.
+      if (!tagsCache.has(cell.label)) {
+        if (_dir) {
+          try {
+            const cellDir = await _dir.getDirectoryHandle(cell.label)
+            const tagProps = await readCellProperties(cellDir)
+            const rawTags = tagProps?.['tags']
+            tagsCache.set(cell.label, Array.isArray(rawTags)
+              ? (rawTags as unknown[]).filter((t): t is string => typeof t === 'string')
+              : [])
+            if (!linkCache.has(cell.label)) {
+              linkCache.set(cell.label, typeof tagProps?.['link'] === 'string' && (tagProps['link'] as string).length > 0)
+            }
+          } catch { tagsCache.set(cell.label, []) }
+        } else {
+          tagsCache.set(cell.label, [])
+        }
+      }
+
+      // check cache first — unless the caller forced a reload for this
+      // label (substrate:applied / substrate:rerolled just wrote a new
+      // propsSig and we need to re-read props instead of serving the
+      // stale cached sig).
+      if (!forceReload?.has(cell.label) && imageCache.has(cell.label)) {
+        const cachedSig = imageCache.get(cell.label) ?? undefined
+        cell.imageSig = cachedSig
+        cell.pendingProps = false
+        cell.borderColor = borderCache.get(cell.label)
+        cell.hasLink = linkCache.get(cell.label) ?? false
+        cell.hasSubstrate = substrateCache.get(cell.label) ?? false
+        cell.hideText = hideTextCache.get(cell.label) ?? false
+        // If the atlas has since evicted this signature (a later
+        // loadImage displaced its slot), re-queue a load so the
+        // render doesn't fall back to label. The blob is almost
+        // certainly in the resource cache, so this is cheap.
+        if (cachedSig) {
+          if (!imageAtlas.hasImage(cachedSig) && !imageAtlas.hasFailed(cachedSig)) {
+            await loadImageOnce(cachedSig)
+          }
+        } else {
+          // cache entry is null — first visit resolved no image. This is
+          // the commonest failure shape: substrate hadn't yet assigned
+          // a propsSig when loadOne first ran, null got cached, and no
+          // later path retries. Fall through to the slow path so we
+          // re-read propsIndex in case substrate has since populated
+          // it.
+          imageCache.delete(cell.label)
+        }
+        if (imageCache.has(cell.label)) return
+      }
+
+      // One invariant for every path: explicit/reference sig first, otherwise
+      // the active substrate set. A props/index timing miss must never turn
+      // "use the default set" into a cached blank tile.
+      //
+      // PROVISIONAL (`cold`): the tile's own props were not readable THIS
+      // pass — the sig is known but its bytes are still arriving (the normal
+      // state on a published site, where every byte comes off the origin).
+      // The default set is the right thing to PAINT now and the wrong thing
+      // to REMEMBER: a cached non-null fallback short-circuits every later
+      // pass (only a cached `null` re-reads), so the tile kept its substrate
+      // stand-in for the whole session and the published picture never
+      // appeared. Paint it, cache nothing, re-derive when the bytes land.
+      const loadDefaultImage = async (cold = false): Promise<void> => {
+        const remember = (sig: string | null): void => {
+          if (cold) { imageCache.delete(cell.label); return }
+          imageCache.set(cell.label, sig)
+        }
+        const faceSig = referenceFaceForLabel(cell.label)
+        if (faceSig && isSignature(faceSig)) {
+          await loadImageOnce(faceSig)
+          cell.imageSig = faceSig
+          remember(faceSig)
+          return
+        }
+        const subSvc = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SubstrateService') as
+          { pickImageForLabel?: (label: string) => string | null } | undefined
+        const fallbackSig = subSvc?.pickImageForLabel?.(cell.label) ?? null
+        if (fallbackSig && isSignature(fallbackSig)) {
+          await loadImageOnce(fallbackSig)
+          cell.imageSig = fallbackSig
+          remember(fallbackSig)
+        } else {
+          remember(null)
+        }
+      }
+
+      // Read tile properties from the content-addressed resource. The index is
+      // a cache, never the authority: edit mode reads the canonical properties
+      // slot, so letting a cache miss become an imageless paint is exactly how
+      // opening edit appeared to "repair" lost pictures. Resolve canonical on
+      // the miss in this paint, including when the warm-head map is cold.
+      // True when this pass could not READ the tile's props (bytes still in
+      // flight), as opposed to reading them and finding no picture. Only the
+      // first is provisional — see loadDefaultImage.
+      let propsCold = false
+      try {
+        let propsSig = propsSigForLabel(cell.label)
+        if (!propsSig) {
+          propsSig = await readTilePropsSigAt(segmentsForLabel(cell.label), cell.label)
+          if (propsSig) {
+            const headSig = headSigByLabel.get(cell.label) ?? ''
+            if (headSig) seedLayerKeyedEntries([[headSig, propsSig]])
+          }
+        }
+        let outerProps: Record<string, unknown> = {}
+        if (propsSig) {
+          // LOCAL first keeps a cold resource out of the render's critical
+          // path. The canonical read below composes the root defaults and can
+          // heal/fetch either incidence; this local projection remains useful
+          // while that composition is transiently unavailable.
+          const blob = await resolveLocalResourceReference(store, propsSig)
+          if (blob) outerProps = JSON.parse(await blob.text()) as Record<string, unknown>
+          else {
+            fillFromHost(propsSig, cell.label)
+            cell.pendingProps = !this.#fillMissedSigs.has(propsSig)
+          }
+        }
+
+        // The effective object is exactly `{ ...rootDefaults,
+        // ...outerOverrides }`. readTilePropertiesAt owns that composition;
+        // artifact values stay as the typed Life incidences carried by each
+        // source object. Do not seed this merged view into the props index —
+        // the index records the outer layer's own canonical incidence only.
+        const effectiveStats = { cold: false }
+        const effectiveProps = this.#cursorPropsOverride?.has(cell.label)
+          ? outerProps
+          : await readTilePropertiesAt(
+              segmentsForLabel(cell.label),
+              cell.label,
+              effectiveStats,
+            )
+        const props: any = Object.keys(effectiveProps).length > 0
+          ? effectiveProps
+          : outerProps
+        if (effectiveStats.cold) propsCold = true
+        if (Object.keys(props).length === 0) {
+          if (effectiveStats.cold) cell.pendingProps = true
+          throw new Error('no props')
+        }
+        if (effectiveStats.cold) cell.pendingProps = true
+
+        if (!effectiveStats.cold) cell.pendingProps = false
+
+        // extract border color from properties
+        const bc = props?.border?.color
+        if (bc && typeof bc === 'string' && /^#?[0-9a-fA-F]{6}$/.test(bc.replace('#', ''))) {
+          const hex = bc.startsWith('#') ? bc : `#${bc}`
+          const r = parseInt(hex.slice(1, 3), 16) / 255
+          const g = parseInt(hex.slice(3, 5), 16) / 255
+          const b = parseInt(hex.slice(5, 7), 16) / 255
+          cell.borderColor = [r, g, b]
+          borderCache.set(cell.label, [r, g, b])
+        }
+
+        // extract tags from properties
+        const cellTags = props?.['tags']
+        if (Array.isArray(cellTags)) {
+          tagsCache.set(cell.label, cellTags.filter((t: unknown) => typeof t === 'string'))
+        } else {
+          tagsCache.set(cell.label, [])
+        }
+
+        // extract link presence
+        const hasLink = typeof props?.link === 'string' && props.link.length > 0
+        linkCache.set(cell.label, hasLink)
+        cell.hasLink = hasLink
+
+        const isSubstrate = props?.substrate === true
+        substrateCache.set(cell.label, isSubstrate)
+        cell.hasSubstrate = isSubstrate
+
+        const hideText = props?.hideText === true
+        hideTextCache.set(cell.label, hideText)
+        cell.hideText = hideText
+
+        const smallSig = recoverableTileImageSig(props, this.#flat)
+        if (smallSig && isSignature(smallSig)) {
+          // Load atlas FIRST, then publish the new sig to the cache.
+          // Any concurrent render observing `cellImageCache` during the
+          // await sees the previous entry (stale-but-valid) rather than
+          // a missing one. The cache transitions from old → new
+          // atomically, and by the time it does, the atlas already
+          // holds the new image.
+          await loadImageOnce(smallSig)
+          cell.imageSig = smallSig
+          imageCache.set(cell.label, smallSig)
+        } else {
+          await loadDefaultImage(propsCold)
+        }
+      } catch {
+        // Missing props/index/resource is a timing state, not a third image
+        // state. Apply the same deterministic default-set projection used by
+        // an image-less props bag; the later fill event retries the explicit
+        // signature when its bytes arrive.
+        await loadDefaultImage(propsCold)
+      }
+    }
+
+    await Promise.all(cells.map(loadOne))
+
+    // Close the decode→geometry eviction window. applyGeometry pins these
+    // signatures too, but background atlas baking can run after this await and
+    // before geometry begins. Pin the just-resolved foreground set now, joined
+    // with the currently rendered set for incremental/probe calls, so a valid
+    // decode cannot disappear between `loadImage` and its first frame.
+    if (!prepareOnly && cacheOwner === this.#derivedLocationKey) {
+      const pins = new Set<string>()
+      for (const rendered of this.renderedCells.values()) {
+        if (rendered.imageSig) pins.add(rendered.imageSig)
+      }
+      for (const cell of cells) {
+        if (cell.imageSig) pins.add(cell.imageSig)
+      }
+      imageAtlas.setPinned(pins)
+    }
+
+    // Publish only the labels this invocation resolved, and only while its
+    // lineage still owns the live caches. An older async render finishing
+    // after navigation must be unable to write into the incoming page.
+    const labels = cells.map(cell => cell.label)
+    const commit = <T>(source: ReadonlyMap<string, T>, target: Map<string, T>, preserveResolvedOnNull = false): void => {
+      publishOwnedProjection({
+        owner: cacheOwner,
+        currentOwner: this.#derivedLocationKey,
+        prepareOnly,
+        source,
+        target,
+        labels,
+        preserveResolvedOnNull,
+      })
+    }
+    commit(imageCache, this.cellImageCache, true)
+    commit(borderCache, this.cellBorderColorCache)
+    commit(tagsCache, this.cellTagsCache)
+    commit(linkCache, this.cellLinkCache)
+    commit(substrateCache, this.cellSubstrateCache)
+    commit(hideTextCache, this.cellHideTextCache)
+
+    // Re-mint absent layer-keyed entries from CANONICAL — never from the
+    // location fallback we just served: a stale location entry frozen
+    // under a head sig it doesn't belong to would outlive every later
+    // correction. Fill-if-empty, so a deliberate head-keyed override
+    // (format-painter's index-only paint) always wins over this. Heads
+    // are warm, so readTilePropsSigAt is map lookups — no resource
+    // fetches. Fire-and-forget: a lost re-mint is just a fallback read
+    // on the next pass.
+    if (unresolvedByLabel.size > 0 && !prepareOnly) {
+      void (async () => {
+        try {
+          const pairs: Array<[string, string]> = []
+          let repaint = false
+          for (const [label, served] of unresolvedByLabel) {
+            const headSig = headSigByLabel.get(label)
+            if (!headSig || this.#propslessHeads.has(headSig)) continue
+            // Heads are warm, so each canonical ask is map lookups — no
+            // resource fetches, no OPFS walks. The tile's OWN location, not
+            // the render's — a gathered tile resolved at the render location
+            // would conclude "propsless" against a page it never lived on.
+            const canonical = await readTilePropsSigAt(segmentsForLabel(label), label)
+            if (!canonical) {
+              // Concluded absence, memoised BY HEAD SIG — an edit mints a
+              // new head, so the memo can never mask a later props write.
+              if (served === null) this.#propslessHeads.add(headSig)
+              continue
+            }
+            pairs.push([headSig, canonical])
+            // The pass painted nothing (total miss) or painted a fallback
+            // that disagrees with canonical (stale location entry — the
+            // adopt-sync/restore shape): shed the cached derivation and
+            // repaint with the canonical answer now, not next pass.
+            if (served !== canonical && cacheOwner === this.#derivedLocationKey) {
+              this.cellImageCache.delete(label)
+              repaint = true
+            }
+          }
+          if (pairs.length > 0) {
+            // Fill-if-empty against a FRESH read, so a deliberate entry
+            // written during the batch always wins over this derivation.
+            const freshIndex = readTilePropsIndex()
+            let dirty = false
+            for (const [headSig, sig] of pairs) {
+              if (!freshIndex[headSig]) { freshIndex[headSig] = sig; dirty = true }
+            }
+            if (dirty) writeTilePropsIndex(freshIndex)
+          }
+          if (repaint) {
+            this.#forceNextRender = true
+            this.requestRender()
+          }
+        } catch { /* cache derivation is best-effort */ }
+      })()
+    }
+
+    // Children-readiness shade: once the visible cells' OWN images resolve,
+    // drive each BRANCH tile's shade off whether the tiles INSIDE it (its
+    // direct children) have their images present — a branch un-shades only
+    // when clicking it would land on an already-bright view. Fire-and-forget;
+    // warms any missing child images and forces one repaint when a readiness
+    // bit flips (buildCellsKey folds the shade bit → rebake).
+    if (!prepareOnly) void this.#computeChildrenReadiness(cells, renderSegments)
+
+    // #computeChildrenReadiness owns click-target baking. Keeping a second
+    // independent pre-bake walk here caused duplicate decode/upload work and
+    // atlas churn after a tile had already become ready.
+  }
+
+  /** Swap children-readiness state to this LOCATION (segments key — known
+   *  synchronously in the render pass, unlike the async parent sig). A
+   *  revisit seeds from the per-location memo so its FIRST bake paints
+   *  bright when its exact target is still resident; a new or evicted target
+   *  starts dim until proven, then releases incrementally, most-used first.
+   *  Parent-sig validation (content changed ⇒ drop + re-verify) lives in the
+   *  compute, which resolves the real head. */
+  #seedChildReadinessForLocation(key: string): void {
+    if (key === this.#readinessLocationKey) return
+    this.#readinessLocationKey = key
+    this.#childrenReadyByLabel.clear()
+    this.#preparedHeadByLabel.clear()
+    this.#brightLabels.clear()
+    // The queue belongs to the location being left. What it actually BAKED
+    // lives in the atlases, which are global and untouched — coming back asks
+    // them again (#clickTargetResident) rather than re-doing the work.
+    this.#bakeQueue.length = 0
+    this.#bakeQueued.clear()
+    const memo = this.#readyByLocation.get(key)
+    // Validate each memo against its own click target. An unrelated atlas
+    // eviction leaves this branch ready; losing one of this target's labels or
+    // images revokes only this branch and queues its repair.
+    if (memo) {
+      const sigsByLabel = this.#childImageSigsByParent.get(memo.parentSig)
+      for (const label of memo.labels) {
+        const target = memo.targets.get(label)
+        // Readiness without an exact click target is not proof. Older code
+        // could mint such entries while a same-location head was changing;
+        // ignoring them forces a clean recompute instead of releasing a branch
+        // that has nothing recorded to validate or repair.
+        if (!target) continue
+        const names = this.#completeChildNamesByParentSig.get(target.headSig)?.names
+        const imageSigs = sigsByLabel?.get(label) ?? target.imageSigs
+        // The proof was BYTES, and bytes don't leave. An atlas eviction between
+        // visits costs a decode, not the promise — so a return releases from
+        // the memo and merely re-warms what moved.
+        this.#childrenReadyByLabel.set(label, true)
+        this.#preparedHeadByLabel.set(label, target.headSig)
+        if (names && !this.#clickTargetResident(names, imageSigs)) {
+          this.#enqueueBake(target.headSig, [...imageSigs], [...names])
+        }
+      }
+    }
+    if (DIAG) console.info(
+      `[diag:readiness] seed key=${key.slice(0, 8)} ` +
+      `resident=${this.#childrenReadyByLabel.size}/${memo?.labels.size ?? 0}`,
+    )
+  }
+
+
+  /** One deferred compute retry. A skipped or aborted readiness run must
+   *  ALWAYS leave a trigger behind — without it, churny navigation (Lineage
+   *  re-emits `navigate`) aborted every run and the location's tiles stayed
+   *  shaded until some unrelated pass happened by (the "stuck shaded" bug). */
+  #queueComputeRetry(): void {
+    if (this.#computeRetryQueued) return
+    this.#computeRetryQueued = true
+    if (DIAG) console.info('[diag:readiness] retry queued')
+    setTimeout(() => { this.#computeRetryQueued = false; this.#scheduleReadinessRepaint() }, 250)
+  }
+
+  /** Resolve a parent's direct-children image sigs (memoised per parent layer
+   *  sig) and release each branch tile INCREMENTALLY — most-used first — the
+   *  moment ALL its children's images are present locally or concluded
+   *  (absent/failed — a permanently-missing child image can never strand its
+   *  parent inert). Missing bytes go through a bounded, usage-ordered warm
+   *  queue (never a simultaneous blast); each completion re-renders, so tiles
+   *  brighten ONE BY ONE as their insides finish loading.
+   *
+   *  ONE LEVEL DOWN IS THE WHOLE PROOF. A click paints the direct children and
+   *  nothing else, so that is all brightness claims — not the subtree, not the
+   *  atlases' current contents. View preparation and atlas baking still run
+   *  from here, in the background, to make that click faster. */
+  #computeChildrenReadiness = async (cells: Cell[], parentSegments: readonly string[]): Promise<void> => {
+    if (!CHILD_SHADE) return
+    if (!this.#readinessNavHooked) {
+      this.#readinessNavHooked = true
+      try {
+        window.addEventListener('navigate', () => {
+          this.#readinessGen++
+          // RE-SEED ON EVERY NAVIGATION, not only on cold render passes. The
+          // pass-stamp lives on the path that resolves a layer from scratch;
+          // a back-navigation takes the WARM path, which skipped it — so the
+          // readiness state stayed pointed at the location just left, its
+          // memo was never restored, and every tile re-shaded on the way back
+          // (the exact bug: "I navigate somewhere and then back and they're
+          // shaded out again"). Content-addressed state means returning is
+          // free; it just has to be asked for.
+          void this.#reseedReadinessFromNavigation()
+        })
+      } catch { /* non-DOM */ }
+    }
+    if (!this.imageAtlas) return
+    // Same location, new content head: invalidate BEFORE filtering out labels
+    // already marked ready. The previous ordering built branchCells first, so
+    // every ready label was skipped and the later parent-sig check was
+    // unreachable—the stale proof survived the edit and could not be repaired
+    // after eviction.
+    const stampedMemo = this.#passLocSig
+      ? this.#readyByLocation.get(this.#passLocSig)
+      : undefined
+    if (
+      stampedMemo
+      && this.#passParentSig
+      && stampedMemo.parentSig !== this.#passParentSig
+    ) {
+      this.#readyByLocation.delete(this.#passLocSig)
+      this.#childrenReadyByLabel.clear()
+      this.#preparedHeadByLabel.clear()
+      this.#brightLabels.clear()
+    }
+    if (this.#childReadinessInFlight) {
+      // A previous location's compute still holds the guard. Retry once it
+      // frees — without this, the skip was permanent and the new location's
+      // tiles stayed shaded forever (nothing else re-triggers the compute).
+      this.#queueComputeRetry()
+      return
+    }
+    const gen = this.#readinessGen
+    // Do NOT filter on c.hasBranch here: the cells array at loadCellImages
+    // time predates branch stamping, so every branch read as false and the
+    // compute exited silently while the final bake (which DOES see hasBranch)
+    // shaded them — tiles stayed shaded forever. Process every pending cell;
+    // the grandkid map below decides: childless → trivially released.
+    const branchCells = cells.filter(c =>
+      !c.plain && this.#childrenReadyByLabel.get(c.label) !== true)
+    if (branchCells.length === 0) return
+    this.#childReadinessInFlight = true
+    try {
+      const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as {
+        getResourceLocal: (sig: string) => Promise<Blob | null>
+        getResource: (sig: string) => Promise<Blob | null>
+        readChildrenManifest?: (sig: string) => Promise<Array<{ sig: string; layer: { name?: string; children?: string[] } }> | null>
+      } | undefined
+      const history = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as {
+        getLayerBySig: (sig: string) => Promise<{ name?: string; children?: string[] } | null>
+        latestMarkerSigFor?: (locSig: string, label: string) => Promise<string | undefined>
+      } | undefined
+      if (!store || !history?.latestMarkerSigFor || !history.getLayerBySig) return
+      // THE PASS'S OWN ADDRESS — stamped with the cells, never re-read here.
+      // Re-reading lineage was the whole disease: currentSig, explorerSegments
+      // and the cursor settle at different moments, so a compute that read
+      // them itself could describe a location the participant had already
+      // left — wiping the revisit memo and stranding tiles shaded. If the pass
+      // has not stamped yet (first frames), leave a retry behind.
+      const locSig = this.#passLocSig
+      const parentLayerSig = this.#passParentSig
+      if (!locSig || !parentLayerSig) { this.#queueComputeRetry(); return }
+      // COHERENCE GATE, now a same-source check: the cells handed to us must
+      // belong to the stamped address. Compare SIGNATURES, not labels
+      // (explorerLabel is a display label, not the segment slug — a label
+      // comparison dead-locked every non-root location). Root has no segments
+      // to derive from — skip.
+      if (parentSegments.join('/') !== this.#passSegments.join('/')) { this.#queueComputeRetry(); return }
+      if (parentSegments.length) {
+        const locFromSegments = await cellLocationSig(
+          parentSegments.slice(0, -1),
+          parentSegments[parentSegments.length - 1],
+        )
+        if (locFromSegments !== locSig) { this.#queueComputeRetry(); return }
+      }
+      if (DIAG) console.info(`[diag:readiness] enter parent=${parentLayerSig.slice(0, 8)} pending=${branchCells.map(c => c.label).join(',')}`)
+
+      // STALE-RUN GATE, before touching any shared state: if the user
+      // navigated while we resolved the parent, this compute belongs to a
+      // location they LEFT — seeding now would wipe the current location's
+      // released state. Queue a retry so the live location's pass re-runs us.
+      if (gen !== this.#readinessGen) { this.#queueComputeRetry(); return }
+      // Label-keyed state must never leak across locations. Seed by the
+      // LOCATION SIG (same source the render pass seeds with), then validate
+      // the memo against the REAL parent sig: head moved ⇒ children may
+      // differ ⇒ drop the memo and re-verify from scratch.
+      const locKey = locSig
+      this.#seedChildReadinessForLocation(locKey)
+      const memoEntry = this.#readyByLocation.get(locKey)
+      if (memoEntry && memoEntry.parentSig !== parentLayerSig) {
+        this.#readyByLocation.delete(locKey)
+        this.#childrenReadyByLabel.clear()
+        this.#brightLabels.clear()
+      }
+
+      // ONE cheap read up front: the children manifest inlines each child's
+      // own children (the grandchild sigs). Everything ELSE resolves PER
+      // TILE, most-used first, below — so the first (most-used) tile's
+      // release never waits on the whole level's resolution. A failure here
+      const grandkidsByLabel = new Map<string, string[]>()
+      // Child label → that child's own LAYER sig: the key its prepared view is
+      // memoised under (see prepareView). Content-addressed, so the preparation
+      // is valid globally and forever.
+      const childLayerSigByLabel = new Map<string, string>()
+      try {
+        const manifest = store.readChildrenManifest ? await store.readChildrenManifest(parentLayerSig).catch(() => null) : null
+        if (manifest) {
+          for (const e of manifest) {
+            const n = String(e.layer?.name ?? '')
+            if (n) {
+              grandkidsByLabel.set(n, Array.isArray(e.layer?.children) ? e.layer.children.map(String) : [])
+              if (isSignature(String(e.sig ?? ''))) childLayerSigByLabel.set(n, String(e.sig))
+            }
+          }
+        } else {
+          const parent = await history.getLayerBySig(parentLayerSig)
+          for (const cs of (Array.isArray(parent?.children) ? parent!.children : [])) {
+            const cl = await history.getLayerBySig(String(cs))
+            const n = String(cl?.name ?? '')
+            if (cl && n) {
+              grandkidsByLabel.set(n, Array.isArray(cl.children) ? cl.children.map(String) : [])
+              if (isSignature(String(cs))) childLayerSigByLabel.set(n, String(cs))
+            }
+          }
+        }
+      } catch { /* unknown structure → fail-open below */ }
+      const livePropsIndex: Record<string, string> = (() => {
+        try { return JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}') } catch { return {} }
+      })()
+      // Per-label sig cache under this parent (content-addressed → stable).
+      let cachedSigs = this.#childImageSigsByParent.get(parentLayerSig)
+      if (!cachedSigs) {
+        cachedSigs = new Map<string, string[]>()
+        this.#childImageSigsByParent.set(parentLayerSig, cachedSigs)
+        if (this.#childImageSigsByParent.size > 64) {
+          const oldest = this.#childImageSigsByParent.keys().next().value
+          if (oldest !== undefined) this.#childImageSigsByParent.delete(oldest)
+        }
+      }
+
+      // MOST-USED FIRST: rank the pending branch tiles by the participant's
+      // local usage of each child location, then check them SERIALLY. A tile
+      // whose children are all present/concluded is released IMMEDIATELY —
+      // its own repaint, not one batch flip at the end — so tiles brighten
+      // one by one, and the ones you actually open brighten first. Misses
+      // enqueue in this same priority order, so the warm queue drains toward
+      // the most-used tile's children before anything else.
+      const ranker = window.ioc?.get?.(USAGE_IOC_KEY) as UsageRanker | undefined
+      const weighted = await Promise.all(branchCells.map(async c => ({
+        c,
+        w: ranker ? ranker.weight(await cellLocationSig(parentSegments, c.label)) : 0,
+      })))
+      weighted.sort((a, b) => b.w - a.w)
+
+      for (const { c } of weighted) {
+        // Superseded by navigation — abort but ALWAYS leave a retry behind.
+        if (gen !== this.#readinessGen) { this.#queueComputeRetry(); return }
+        if (this.#childrenReadyByLabel.get(c.label) === true) continue
+        // PER-TILE structure + presence in ONE bounded-parallel pass (8-way).
+        // Strictly serial, a 145-child branch was ~435 sequential reads —
+        // seconds before the tile could release. Cache the sig list only when
+        // fully known (no cold props); a blocked build re-resolves next pass.
+        let allReady = true
+        let exactTargetImages: string[] | null = null
+        const isBranchTarget =
+          c.hasBranch === true || (grandkidsByLabel.get(c.label)?.length ?? 0) > 0
+        const cached = cachedSigs.get(c.label)
+        if (cached) {
+          let i = 0
+          await Promise.all(Array.from({ length: Math.min(8, cached.length) }, async () => {
+            while (i < cached.length) {
+              if (gen !== this.#readinessGen) return
+              const sig = cached[i++]
+              if (this.#fillMissedSigs.has(sig) || this.imageAtlas?.hasFailed(sig)) continue // concluded → doesn't block
+              const blob = await resolveLocalResourceReference(store, sig)
+              if (!blob) { allReady = false; this.#enqueueChildWarm(sig) }
+            }
+          }))
+        } else {
+          const grandkids = grandkidsByLabel.get(c.label) ?? []
+          const sigs: string[] = []
+          let blocked = false
+          const childSegments = [...parentSegments, c.label]
+          let i = 0
+          await Promise.all(Array.from({ length: Math.min(8, grandkids.length) }, async () => {
+            while (i < grandkids.length) {
+              if (gen !== this.#readinessGen) return
+              const gSig = grandkids[i++]
+              // ORPHAN GUARD: a layer we already CONCLUDED is absent can never
+              // block anything again. Without this the tile below holds the
+              // parent shaded forever on bytes that are never coming — the
+              // same terminal-state rule every other miss here obeys.
+              if (this.#fillMissedSigs.has(gSig)) continue
+              const gl = await history.getLayerBySig(gSig)
+              const gName = String(gl?.name ?? '')
+              if (!gName) {
+                // The child's LAYER itself is not here. Its bytes are what
+                // makes the tile EXIST — without them the click opens onto a
+                // view missing that tile entirely, which is exactly what the
+                // shade promises can't happen. Hold the parent — but QUEUE the
+                // layer, the way every other miss in this loop does. This used
+                // to hold with nothing pending: no fetch, no retry, no arrival
+                // to react to, so a branch missing one grandchild layer stayed
+                // shaded for the rest of the session (an ORPHAN — the tile the
+                // participant watches "never comes in"). The warm queue either
+                // lands the bytes or CONCLUDES the sig, and both outcomes force
+                // a readiness repaint that re-runs this pass.
+                allReady = false
+                blocked = true
+                this.#enqueueChildWarm(gSig)
+                continue
+              }
+              const key = await cellLocationSig(childSegments, gName)
+              const propsSig = livePropsIndex[key] ?? livePropsIndex[gName]
+              if (!propsSig || !isSignature(propsSig)) continue
+              if (this.#fillMissedSigs.has(propsSig)) continue   // concluded-missing props → fail-open
+              const pblob = await resolveLocalResourceReference(store, propsSig)
+              if (!pblob) {
+                // Props not local → the image sig is UNKNOWN. Hold the parent
+                // and queue the props blob; re-resolve once it lands (or a
+                // concluded miss releases it). Don't cache a blocked build.
+                allReady = false
+                blocked = true
+                this.#enqueueChildWarm(propsSig)
+                continue
+              }
+              try {
+                const props = JSON.parse(await pblob.text())
+                const img = recoverableTileImageSig(props, this.#flat)
+                if (typeof img === 'string' && isSignature(img)) {
+                  sigs.push(img)
+                  if (this.#fillMissedSigs.has(img) || this.imageAtlas?.hasFailed(img)) continue
+                  const blob2 = await resolveLocalResourceReference(store, img)
+                  if (!blob2) { allReady = false; this.#enqueueChildWarm(img) }
+                }
+              } catch { /* skip malformed props */ }
+            }
+          }))
+          if (!blocked) cachedSigs.set(c.label, sigs)
+        }
+        // Readiness is exactly the NEXT level, never the whole hierarchy. But
+        // it includes that level's completed first-paint snapshot: bytes alone
+        // still leave membership/order/atlas work at click time. A bright tile
+        // proves its direct children are local, its view cache is optimized,
+        // and the names/images needed immediately are resident. A shaded tile
+        // remains clickable and navigation diverts the preloader to it.
+        if (allReady && isBranchTarget) {
+          // Prepare under the child's OWN HEAD sig — the key the render pass
+          // will look the memo up by when the click lands. NOT the child sig
+          // recorded in the parent's children[]: per-page history leaves that
+          // one behind the moment the child commits anything of its own, so a
+          // memo keyed by it silently never hits (measured: prepared, and the
+          // click still cost 140ms).
+          const childLocSig = await cellLocationSig(parentSegments, c.label)
+          const childHeadSig = childLocSig
+            ? (await history.latestMarkerSigFor(childLocSig, c.label)) ?? childLayerSigByLabel.get(c.label) ?? ''
+            : childLayerSigByLabel.get(c.label) ?? ''
+          if (!childHeadSig) {
+            allReady = false
+            this.#queueComputeRetry()
+          } else {
+            this.#preparedHeadByLabel.set(c.label, childHeadSig)
+            const prepared = await this.prepareView(childHeadSig, [...parentSegments, c.label])
+            if (!prepared) {
+              allReady = false
+              this.#queueComputeRetry()
+            }
+          }
+          // BYTES ARE NOT PIXELS. Even with the view prepared and the bytes
+          // local, the click still pays the atlases: rasterising the children's
+          // NAMES (~106ms for 8, measured — the biggest single cost) and
+          // decoding their images (~22ms for 8). Baked ahead, the same entry
+          // took 12ms. So a branch is only bright once its click target is
+          // baked; the bake runs sliced, in usage order, and both atlases are
+          // keyed by name/sig — global and reusable, like everything else here.
+          if (childHeadSig && allReady) {
+            const names = this.#completeChildNamesByParentSig.get(childHeadSig)?.names ?? []
+            // Use the image signatures on the prepared destination cells—the
+            // exact objects the click fast path will paint. The earlier
+            // properties walk can legitimately differ (fallback substrate,
+            // reference face, or a property that settled while preparing);
+            // storing that approximation made a currently painted view appear
+            // non-resident immediately after Back.
+            const targetKey = [...parentSegments, c.label].length
+              ? `/${[...parentSegments, c.label].join('/')}`
+              : '/'
+            const preparedCells = this.#layerCellsCache.get(targetKey)?.cells ?? []
+            // Null (not an empty array) when the view has not been prepared
+            // yet: the memo below then falls back to the sigs this walk proved,
+            // rather than recording "this target has no images".
+            exactTargetImages = preparedCells.length
+              ? [...new Set(
+                  preparedCells
+                    .map(cell => cell.imageSig)
+                    .filter((sig): sig is string => typeof sig === 'string' && isSignature(sig)),
+                )]
+              : null
+            const imgs = exactTargetImages ?? cachedSigs.get(c.label) ?? []
+            if (!this.#clickTargetResident(names, imgs)) {
+              allReady = false
+              this.#enqueueBake(childHeadSig, imgs, names)
+            }
+          }
+        }
+        if (DIAG) console.info(`[diag:readiness] ${c.label} allReady=${allReady} cached=${!!cached} queue=${this.#childWarmQueue.length}`)
+        if (allReady && isBranchTarget) {
+          this.#childrenReadyByLabel.set(c.label, true)
+          // Remember per LOCATION, proven under this parent sig: the next
+          // visit seeds bright on its FIRST frame — a page shades at most
+          // once per session, until its content (head sig) changes.
+          let entry = this.#readyByLocation.get(locKey)
+          if (!entry || entry.parentSig !== parentLayerSig) {
+            entry = { parentSig: parentLayerSig, labels: new Set<string>(), targets: new Map() }
+            this.#readyByLocation.set(locKey, entry)
+            if (this.#readyByLocation.size > 64) {
+              const oldest = this.#readyByLocation.keys().next().value
+              if (oldest !== undefined) this.#readyByLocation.delete(oldest)
+            }
+          }
+          entry.labels.add(c.label)
+          // The head this tile was prepared under. Read from the per-label map
+          // rather than the `childHeadSig` local — that one lives in the
+          // preparation block above and is out of scope here.
+          const preparedHead = this.#preparedHeadByLabel.get(c.label)
+          if (preparedHead) {
+              entry.targets.set(c.label, {
+                headSig: preparedHead,
+                imageSigs: [...(exactTargetImages ?? cachedSigs.get(c.label) ?? [])],
+              })
+          }
+          // The exact target is resident now. Update the visible shade and
+          // navigation gate immediately; a coalesced/full render can be
+          // swallowed by unrelated render churn, which previously left the
+          // overlay holding a stale "preloading" set after repair completed.
+          this.#writeShadeFor(c.label)
+          this.#shadedLabels.delete(c.label)
+          this.emitEffect('render:tile-readiness', { shadedLabels: this.#preloadingLabels() })
+          // Release this tile via the short-window coalesced repaint: tiles
+          // brighten INDIVIDUALLY as each completes (different child counts ⇒
+          // different completion times), batching only near-simultaneous
+          // completions — never one full render pass per tile.
+          this.#scheduleReadinessRepaint()
+        }
+      }
+    } catch (e) {
+      // best-effort readiness — a cold branch just stays shaded. NEVER let
+      // this swallow silently under diagnostics: a throw here is exactly the
+      // "tiles never release" failure.
+      if (DIAG) console.warn('[diag:readiness] THREW', e)
+    }
+    finally { this.#childReadinessInFlight = false }
+  }
+
+  /** Bounded, usage-ordered child-image warm queue. A few fetches run at a
+   *  time, in the order enqueued (the most-used tile's children first) —
+   *  never a simultaneous blast that floods the host and makes everything
+   *  arrive "all at once". Each completion — bytes landed OR a concluded
+   *  miss — forces a repaint, so the owning tile's readiness re-checks and
+   *  it un-shades the moment its inside finishes loading. */
+  #enqueueChildWarm = (sig: string): void => {
+    if (this.#childWarmQueued.has(sig) || this.#hostFillInFlight.has(sig)) return
+    this.#childWarmQueued.add(sig)
+    this.#childWarmQueue.push(sig)
+    this.#pumpChildWarms()
+  }
+
+  #pumpChildWarms = (): void => {
+    while (this.#childWarmActive < ShowCellDrone.#CHILD_WARM_CONCURRENCY && this.#childWarmQueue.length > 0) {
+      const sig = this.#childWarmQueue.shift()!
+      this.#childWarmQueued.delete(sig)
+      if (this.#hostFillInFlight.has(sig)) continue
+      this.#hostFillInFlight.add(sig)
+      this.#childWarmActive++
+      void (async () => {
+        let landed = false
+        try {
+          const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as { getResource: (s: string) => Promise<Blob | null> } | undefined
+          const blob = await store?.getResource(sig)
+          landed = !!blob
+        } catch { /* treated as a concluded miss below */ }
+        finally {
+          // ANY failure — null, throw, missing store — CONCLUDES the sig so
+          // the parent releases and the presence loop can never re-enqueue it
+          // into an infinite warm→fail→re-render loop.
+          if (landed) this.#fillMissedSigs.delete(sig)
+          else this.#fillMissedSigs.add(sig)
+          this.#hostFillInFlight.delete(sig)
+          this.#childWarmActive--
+          this.#scheduleReadinessRepaint()
+          this.#pumpChildWarms()
+        }
+      })()
+    }
+  }
+
+  /** The cheapest LOCAL bytes for an image sig: the cell-sized optimized
+   *  visual when minted, else the raw resource. Never network. A raw
+   *  fallback heavy enough to matter demands the optimized form for next
+   *  time — minted in the optimize phase (visual-optimizer.drone). */
+  #localDecodeBlob = async (sig: string): Promise<Blob | null> => {
+    // PACK FIRST. The layer's manifest is one file carrying the full array of
+    // what its tiles need to bind their visuals — including these bytes — so a
+    // location that has a pack decodes every image WITHOUT a per-image read.
+    // That is the whole point of a per-LAYER optimization: two reads to paint
+    // a page, not two plus one per tile.
+    const packed = ShowCellDrone.#packVisuals.get(sig)
+    if (packed) return packed
+    const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as {
+      getResourceLocal: (s: string) => Promise<Blob | null>
+      getOptimizedVisual?: (s: string) => Promise<Blob | null>
+    } | undefined
+    if (!store) return null
+    // The atlas remains keyed by the outer incidence sig so lineage identity
+    // is preserved even though decoding needs the terminal shared bytes.
+    const raw = await resolveLocalResourceReference(store, sig, { optimized: true })
+    if (raw && raw.size >= ShowCellDrone.#VISUAL_DEMAND_MIN_BYTES) {
+      this.emitEffect('visual:wanted', { sig })
+    }
+    return raw
+  }
+
+  /** Visuals carried INSIDE a layer's manifest, by source image sig. Filled
+   *  whenever a manifest is read (render path or preloader) and consulted by
+   *  every decode. Static because the pack for one layer serves any pass that
+   *  paints those tiles, and content-addressed keys make that safe forever —
+   *  a sig is its bytes. Bounded: the entries are ~6KB renditions and the map
+   *  is trimmed oldest-first past the cap. */
+  static readonly #packVisuals = new Map<string, Blob>()
+  static readonly #PACK_VISUAL_CAP = 2048
+
+  /** Take a manifest entry's inlined visual into the pack. No-op for entries
+   *  that carry only a sig (source too big to inline, or not local when the
+   *  pack was minted) — those decode from the file as they always did. */
+  public static adoptPackedVisual(entry: { visual?: { sig?: string; webp?: string; type?: string } } | null): void {
+    const v = entry?.visual
+    if (!v?.sig || !v.webp || ShowCellDrone.#packVisuals.has(v.sig)) return
+    try {
+      const binary = atob(v.webp)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+      if (ShowCellDrone.#packVisuals.size >= ShowCellDrone.#PACK_VISUAL_CAP) {
+        const oldest = ShowCellDrone.#packVisuals.keys().next().value
+        if (oldest !== undefined) ShowCellDrone.#packVisuals.delete(oldest)
+      }
+      ShowCellDrone.#packVisuals.set(v.sig, new Blob([bytes], { type: v.type || 'image/webp' }))
+    } catch { /* malformed inline — the file path still works */ }
+  }
+
+  /** Resolve the images a click on this view would paint — each visible
+   *  branch's direct children's images — and queue them for idle atlas
+   *  bakes, most-used branch first. Best-effort and LOCAL throughout:
+   *  props not yet local are skipped (the warm sweep is fetching them; its
+   *  forced repaints re-enter here through loadCellImages). */
+  #prebakeClickTargets = async (cells: Cell[], parentSegments: readonly string[]): Promise<void> => {
+    const imageAtlas = this.imageAtlas
+    if (!imageAtlas || this.#prebakeInFlight) return
+    this.#prebakeInFlight = true
+    try {
+      const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as {
+        getResourceLocal: (sig: string) => Promise<Blob | null>
+        readChildrenManifest?: (sig: string) => Promise<Array<{ sig: string; layer: { name?: string; children?: string[] } }> | null>
+      } | undefined
+      const history = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as {
+        getLayerBySig: (sig: string) => Promise<{ name?: string; children?: string[] } | null>
+        latestMarkerSigFor?: (locSig: string, label: string) => Promise<string | undefined>
+      } | undefined
+      const lineage = (window as any).ioc?.get?.('@hypercomb.social/Lineage') as {
+        currentSig?: () => Promise<string>; explorerSegments?: () => readonly string[]
+      } | undefined
+      if (!store || !history?.latestMarkerSigFor || !history.getLayerBySig) return
+      const locSig = (await lineage?.currentSig?.()) ?? ''
+      if (!locSig) return
+      // The LEAF name, never explorerLabel(): the label is '/'+path.join('/'),
+      // and latestMarkerSigFor AUTO-MINTS `{name: <arg>}` into a COLD bag —
+      // passing the label here minted husk layers literally named
+      // "/delta/tunnel1" at every never-held location this pass touched
+      // (drilled peer paths, cold deep-link boots), which name-relisting
+      // commits then linked into the parent as a phantom child.
+      const prebakeSegs = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+      const prebakeLeaf = prebakeSegs.length ? prebakeSegs[prebakeSegs.length - 1] : '/'
+      const parentLayerSig = (await history.latestMarkerSigFor(locSig, prebakeLeaf)) ?? ''
+      if (!parentLayerSig) return
+      // COHERENCE GATE (same rule as the readiness compute): mid-navigation
+      // segments and currentSig can straddle two locations — baking for a
+      // mismatched pair only wastes slots, so skip; a later pass re-enters.
+      if (parentSegments.length) {
+        const locFromSegments = await cellLocationSig(
+          parentSegments.slice(0, -1),
+          parentSegments[parentSegments.length - 1],
+        )
+        if (locFromSegments !== locSig) return
+      }
+      // A fresh walk owns the queue — supersede whatever a previous
+      // location (or a previous pass here) still had pending.
+      const gen = ++this.#prebakeGen
+      this.#prebakeQueue.length = 0
+      this.#prebakeQueued.clear()
+      // Each location gets its own head start before the queue overrides it.
+      this.#prebakeDeferSince = 0
+
+      // Structure: child label → that child's children (grandchild layer
+      // sigs) — one manifest read, else the per-child fallback walk.
+      const grandkidsByLabel = new Map<string, string[]>()
+      try {
+        const manifest = store.readChildrenManifest ? await store.readChildrenManifest(parentLayerSig).catch(() => null) : null
+        if (manifest) {
+          for (const e of manifest) {
+            const n = String(e.layer?.name ?? '')
+            if (n) grandkidsByLabel.set(n, Array.isArray(e.layer?.children) ? e.layer.children.map(String) : [])
+          }
+        } else {
+          const parent = await history.getLayerBySig(parentLayerSig)
+          for (const cs of (Array.isArray(parent?.children) ? parent!.children : [])) {
+            const cl = await history.getLayerBySig(String(cs))
+            const n = String(cl?.name ?? '')
+            if (cl && n) grandkidsByLabel.set(n, Array.isArray(cl.children) ? cl.children.map(String) : [])
+          }
+        }
+      } catch { /* unknown structure — nothing to pre-bake */ }
+      if (grandkidsByLabel.size === 0) return
+
+      // Most-used first over the VISIBLE branches — same order the
+      // readiness compute releases in, so the branch the participant will
+      // actually open bakes first.
+      const visible = new Set(cells.filter(c => !c.plain).map(c => c.label))
+      const ranker = window.ioc?.get?.(USAGE_IOC_KEY) as UsageRanker | undefined
+      const labels = [...grandkidsByLabel.keys()].filter(l => visible.has(l))
+      const weighted = await Promise.all(labels.map(async label => ({
+        label,
+        w: ranker ? ranker.weight(await cellLocationSig(parentSegments, label)) : 0,
+      })))
+      weighted.sort((a, b) => b.w - a.w)
+
+      const livePropsIndex: Record<string, string> = (() => {
+        try { return JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}') } catch { return {} }
+      })()
+
+      for (const { label } of weighted) {
+        if (gen !== this.#prebakeGen) return
+        if (this.#prebakeQueued.size >= ShowCellDrone.#PREBAKE_MAX_PER_LOCATION) break
+        // Reuse the readiness compute's structure cache when it has a
+        // COMPLETE list for this label; otherwise build locally WITHOUT
+        // caching — the shared cache feeds readiness decisions, and a list
+        // built while props were still cold would freeze incomplete.
+        const cached = this.#childImageSigsByParent.get(parentLayerSig)?.get(label)
+        let sigs: string[]
+        if (cached) {
+          sigs = cached
+        } else {
+          sigs = []
+          const childSegments = [...parentSegments, label]
+          for (const gSig of grandkidsByLabel.get(label) ?? []) {
+            if (gen !== this.#prebakeGen) return
+            const gl = await history.getLayerBySig(gSig)
+            const gName = String(gl?.name ?? '')
+            if (!gName) continue
+            const key = await cellLocationSig(childSegments, gName)
+            const propsSig = livePropsIndex[key] ?? livePropsIndex[gName]
+            if (!propsSig || !isSignature(propsSig)) continue
+            const pblob = await resolveLocalResourceReference(store, propsSig)
+            if (!pblob) continue
+            try {
+              const props = JSON.parse(await pblob.text())
+              const img = recoverableTileImageSig(props, this.#flat)
+              if (typeof img === 'string' && isSignature(img)) sigs.push(img)
+            } catch { /* malformed props — skip */ }
+          }
+        }
+        for (const sig of sigs) {
+          if (this.#prebakeQueued.size >= ShowCellDrone.#PREBAKE_MAX_PER_LOCATION) break
+          if (this.#prebakeQueued.has(sig)) continue
+          if (imageAtlas.hasImage(sig) || imageAtlas.hasFailed(sig)) continue
+          this.#prebakeQueued.add(sig)
+          this.#prebakeQueue.push(sig)
+        }
+      }
+      this.#pumpPrebake()
+    } catch { /* opportunistic — a failed walk changes nothing */ }
+    finally { this.#prebakeInFlight = false }
+  }
+
+  /** Idle-sliced atlas bakes for the pre-bake queue. A couple per slice —
+   *  each is a small decode once the cell-sized visual is minted — so the
+   *  loop never competes with an interaction. Pinned on-screen slots are
+   *  untouchable by the ring allocator, and evicting other stale entries
+   *  is exactly what the ring does on any load. */
+  /** Does the CURRENT view still have a tile whose image isn't in the atlas?
+   *  While that is true, nothing off-screen may touch the atlas. */
+  #currentViewMissingImages = (atlas: { hasImage: (s: string) => boolean; hasFailed: (s: string) => boolean }): boolean => {
+    for (const cell of this.renderedCells.values()) {
+      const sig = cell.imageSig
+      if (!sig) continue
+      if (!atlas.hasImage(sig) && !atlas.hasFailed(sig)) return true
+    }
+    return false
+  }
+
+  /** Set when a slice yielded to the current view — re-check after this,
+   *  rather than spinning the idle queue. */
+  #prebakeDeferUntil = 0
+
+  /** When the current generation of the queue first yielded to the view.
+   *  The yield is bounded by {@link #PREBAKE_DEFER_MAX_MS}: a view holding an
+   *  image that is not local and has not FAILED stays "missing" forever, and
+   *  an unbounded yield to it disables pre-baking for the whole session —
+   *  which is every click paying its own decode. Give the view a clear head
+   *  start, then bake the click targets anyway. */
+  #prebakeDeferSince = 0
+  static readonly #PREBAKE_DEFER_MAX_MS = 3_000
+
+  #pumpPrebake = (): void => {
+    if (this.#prebakePumping || this.#prebakeQueue.length === 0) return
+    const wait = this.#prebakeDeferUntil - performance.now()
+    if (wait > 0) { setTimeout(() => this.#pumpPrebake(), wait); this.#prebakeDeferUntil = 0; return }
+    this.#prebakePumping = true
+    const gen = this.#prebakeGen
+    const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback
+    const schedule = typeof ric === 'function'
+      ? (cb: () => void) => ric(cb, { timeout: 2_000 })
+      : (cb: () => void) => setTimeout(cb, 250)
+    schedule(() => {
+      void (async () => {
+        try {
+          const imageAtlas = this.imageAtlas
+          if (!imageAtlas) return
+          // THE PAGE YOU ARE LOOKING AT COMES FIRST. Every bake here is an
+          // OFF-SCREEN image — a click target — and each one is a decode plus
+          // a GPU upload on the main thread (measured 5-715ms each). Baking
+          // them while the current view is still missing its OWN images meant
+          // an 11-tile page issued 60+ atlas loads and the tiles the
+          // participant was actually waiting on queued behind click targets
+          // they may never use. Wait until this view is whole; re-schedule
+          // otherwise, so the queue drains the moment the page is done.
+          if (this.#currentViewMissingImages(imageAtlas)) {
+            const now = performance.now()
+            if (this.#prebakeDeferSince === 0) this.#prebakeDeferSince = now
+            if (now - this.#prebakeDeferSince < ShowCellDrone.#PREBAKE_DEFER_MAX_MS) {
+              this.#prebakeDeferUntil = now + 400
+              return
+            }
+            // Head start spent — the view is waiting on bytes that may never
+            // arrive, and holding the queue any longer costs every click.
+          }
+          this.#prebakeDeferSince = 0
+          for (let n = 0; n < ShowCellDrone.#PREBAKE_PER_SLICE && this.#prebakeQueue.length > 0; n++) {
+            // Superseded — the fresh walk owns the queue and re-pumps.
+            if (gen !== this.#prebakeGen) return
+            const sig = this.#prebakeQueue.shift()!
+            this.#prebakeQueued.delete(sig)
+            if (imageAtlas.hasImage(sig) || imageAtlas.hasFailed(sig)) continue
+            const blob = await this.#localDecodeBlob(sig)
+            // Not local yet — the warm sweep lands it; a later walk retries.
+            if (!blob) continue
+            await imageAtlas.loadImage(sig, blob)
+            this.#scheduleReadinessRepaint()
+          }
+        } catch { /* opportunistic — drop the slice */ }
+        finally {
+          this.#prebakePumping = false
+          this.#pumpPrebake()
+        }
+      })()
+    })
+  }
+
+  /** Stamp the address of the location just navigated to and seed its
+   *  readiness from the memo, so a revisit paints bright on its FIRST frame
+   *  whichever render path serves it. Generation-gated: a navigation that
+   *  happens while this resolves wins, and this result is dropped. */
+  #reseedReadinessFromNavigation = async (): Promise<void> => {
+    const gen = this.#readinessGen
+    try {
+      const lineage = (window as any).ioc?.get?.('@hypercomb.social/Lineage') as {
+        currentSig?: () => Promise<string>; explorerLabel?: () => string; explorerSegments?: () => readonly string[]
+      } | undefined
+      const history = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as {
+        latestMarkerSigFor?: (locSig: string, label: string) => Promise<string | undefined>
+      } | undefined
+      // SYNCHRONOUS FIRST. Resolving the address costs two awaits, and the
+      // first frame of the new location paints before they land — which showed
+      // as a flash of shade on every back-navigation even though the page was
+      // already proven. A place we have stood before is remembered by its
+      // segments, so the seed can happen in this very tick.
+      const segsNow = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+      const knownLoc = this.#locSigBySegments.get(segsNow.join('/'))
+      if (knownLoc) {
+        // SEED ONLY. The address stamp (parent head + segments the compute
+        // keys on) stays untouched until it is resolved for real, just below:
+        // a remembered head goes stale the moment anything commits, and
+        // stamping a stale one made the compute read the memo as "content
+        // changed" and wipe the very state this seed just restored.
+        this.#seedChildReadinessForLocation(knownLoc)
+      }
+      const locSig = (await lineage?.currentSig?.()) ?? ''
+      if (!locSig || gen !== this.#readinessGen) return
+      // LEAF name, never explorerLabel() — same cold-bag auto-mint trap as
+      // the prebake walk above: the label is a PATH, and passing it minted
+      // path-named husk layers at never-held locations.
+      const head = (await history?.latestMarkerSigFor?.(locSig, segsNow.length ? segsNow[segsNow.length - 1] : '/')) ?? ''
+      if (gen !== this.#readinessGen) return
+      this.#passLocSig = locSig
+      this.#passParentSig = head
+      this.#passSegments = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+      this.#rememberAddress(this.#passSegments, locSig, head)
+      this.#seedChildReadinessForLocation(locSig)
+      this.#scheduleReadinessRepaint()
+    } catch { /* best-effort — the cold path still stamps */ }
+  }
+
+  /** Remember a location's address so a RETURN can seed synchronously — path →
+   *  location sig → the head it was last painted under. Bounded; entries are
+   *  cheap strings and only for places actually visited. */
+  #rememberAddress(segments: readonly string[], locSig: string, parentSig: string): void {
+    if (!locSig) return
+    const key = segments.join('/')
+    this.#locSigBySegments.set(key, locSig)
+    if (parentSig) this.#parentSigByLocSig.set(locSig, parentSig)
+    if (this.#locSigBySegments.size > 256) {
+      const oldest = this.#locSigBySegments.keys().next().value
+      if (oldest !== undefined) this.#locSigBySegments.delete(oldest)
+    }
+  }
+
+  /** Queue a branch's click target for baking: its children's images into the
+   *  image atlas, their names into the label atlas. Enqueued in the order the
+   *  readiness compute proves branches — most-used first. */
+  /** The tile under the pointer shows at full opacity while hovered, and only
+   *  while hovered. Two cells change at most — the one entered and the one
+   *  left — so this writes exactly those, never a pass. */
+  #setHoverOpaque = (label: string | null): void => {
+    const next = label && this.renderedCells.has(label) ? label : null
+    if (next === this.#hoverOpaqueLabel) return
+    const previous = this.#hoverOpaqueLabel
+    this.#hoverOpaqueLabel = next
+    // Attribute writes only — never a render:cell-count emit. That payload
+    // doubles as the overlay's "maps are fresh, release the navigation guard"
+    // signal, and a hover must never be able to say that (see
+    // #repaintReadinessInPlace for the mid-navigation failure it caused).
+    this.#writeShadeFor(previous)   // back to its honest state
+    this.#writeShadeFor(next)       // lifted under the pointer
+  }
+
+  /** A take touched `label`: lift it out of the swarm's shade this frame and
+   *  stamp the bright taking rim — the prominent "this one is now being
+   *  added" the gesture needs while its fold is still landing. Attribute
+   *  writes only; the next full render paints the tile native. */
+  #flashWandTake(label: string): void {
+    this.#wandTakingLabels.add(label)
+    const i = this.#labelToIndex.get(label)
+    if (i === undefined || !this.geom) return
+    const shadedBuf = this.#buf?.shaded
+    if (shadedBuf) {
+      this.#shadedLabels.delete(label)
+      this.#writeCellScalar(shadedBuf, i, 0)
+      this.#pushBuffer('aShaded')
+    }
+    const borderBuf = this.#buf?.borderColor
+    if (borderBuf) {
+      this.#writeCellRgb(borderBuf, i, WAND_TAKING_BORDER[0], WAND_TAKING_BORDER[1], WAND_TAKING_BORDER[2])
+      this.#pushBuffer('aBorderColor')
+    }
+  }
+
+  /** Write one cell's current shade value into the geometry and push it. */
+  #writeShadeFor(label: string | null): boolean {
+    if (!label) return false
+    const cell = this.renderedCells.get(label)
+    const shadedBuf = this.#buf?.shaded
+    const i = this.#labelToIndex.get(label)
+    if (!cell || !shadedBuf || i === undefined || !this.geom) return false
+    const shaded = this.#cellIsShaded(cell)
+    if (shaded) this.#shadedLabels.add(label)
+    else this.#shadedLabels.delete(label)
+    // Hover lifts instantly (it is a pointer response, not an arrival); a real
+    // release fades. #shadeValueFor honours whichever is in play.
+    this.#writeCellScalar(shadedBuf, i, this.#shadeValueFor(cell))
+    return this.#pushBuffer('aShaded')
+  }
+
+  // ── Fade-in ────────────────────────────────────────────────────────────
+  // A tile that has EARNED brightness fades in rather than snapping: the eye
+  // catches which tile just became clickable, and a page warming in gives the
+  // participant a continuous read on what has landed. The ramp is an attribute
+  // write per frame on the fading cells only — never a render pass.
+
+  /** label → the timestamp its release started. Absent = not fading. */
+  readonly #shadeFadeStartedAt = new Map<string, number>()
+  #shadeFadeFrame: number | null = null
+
+  /** Current shade strength for a cell: 1 while it is still preloading, then
+   *  ramping 1 → 0 across SHADE_FADE_MS once it has been released. */
+  #shadeValueFor(c: Cell): number {
+    if (this.#cellIsShaded(c)) return 1
+    const startedAt = this.#shadeFadeStartedAt.get(c.label)
+    if (startedAt === undefined) return 0
+    const elapsed = performance.now() - startedAt
+    if (elapsed >= SHADE_FADE_MS) {
+      this.#shadeFadeStartedAt.delete(c.label)
+      return 0
+    }
+    // ease-out: most of the lift happens early, so arrival reads as arrival.
+    const k = 1 - elapsed / SHADE_FADE_MS
+    return k * k
+  }
+
+  #beginShadeFade(label: string): void {
+    if (this.#shadeFadeStartedAt.has(label)) return
+    this.#shadeFadeStartedAt.set(label, performance.now())
+    this.#pumpShadeFade()
+  }
+
+  #pumpShadeFade = (): void => {
+    if (this.#shadeFadeFrame !== null || this.#shadeFadeStartedAt.size === 0) return
+    this.#shadeFadeFrame = requestAnimationFrame(() => {
+      this.#shadeFadeFrame = null
+      const shadedBuf = this.#buf?.shaded
+      if (!shadedBuf || !this.geom) { this.#shadeFadeStartedAt.clear(); return }
+      for (const label of [...this.#shadeFadeStartedAt.keys()]) {
+        const cell = this.renderedCells.get(label)
+        const i = this.#labelToIndex.get(label)
+        if (!cell || i === undefined) { this.#shadeFadeStartedAt.delete(label); continue }
+        this.#writeCellScalar(shadedBuf, i, this.#shadeValueFor(cell))
+      }
+      this.#pushBuffer('aShaded')
+      this.#pumpShadeFade()
+    })
+  }
+
+  /** Is this click target's paint work actually RESIDENT — every child name in
+   *  the label atlas, every child image decoded (or concluded absent)? Asked
+   *  live: brightness is a promise that this exact first paint is warm. */
+  #clickTargetResident(names: readonly string[], sigs: readonly string[]): boolean {
+    const labelAtlas = this.atlas
+    const imageAtlas = this.imageAtlas
+    if (!labelAtlas || !imageAtlas) return false
+    for (const n of names) {
+      if (!n || labelAtlas.hasLabel(n)) continue
+      if (DIAG) console.info(`[diag:readiness] target not resident: label=${n}`)
+      return false
+    }
+    for (const s of sigs) {
+      if (imageAtlas.hasImage(s)) continue
+      if (imageAtlas.hasFailed(s) || this.#fillMissedSigs.has(s)) continue  // concluded — never arriving
+      if (DIAG) console.info(`[diag:readiness] target not resident: image=${s.slice(0, 8)}`)
+      return false
+    }
+    return true
+  }
+
+  #enqueueBake = (headSig: string, sigs: string[], names: string[]): void => {
+    if (this.#bakeQueued.has(headSig)) return
+    this.#bakeQueued.add(headSig)
+    this.#bakeQueue.push({ headSig, sigs: [...sigs], names: [...names] })
+    this.#pumpBakes()
+  }
+
+  /** An exact click-target asset was displaced. Shading is informational, not
+   *  a navigation lock, so the tile remains clickable while its repair is
+   *  prioritized; it simply stops promising a delay-free click. */
+  #revokeReadinessForRepair = (label: string): void => {
+    if (this.#childrenReadyByLabel.get(label) !== true) return
+    this.#childrenReadyByLabel.delete(label)
+    this.#brightLabels.delete(label)
+    this.#shadeFadeStartedAt.delete(label)
+    this.#writeShadeFor(label)
+    this.emitEffect('render:tile-readiness', { shadedLabels: this.#preloadingLabels() })
+  }
+
+  /** A repair bake can re-earn readiness directly. Waiting for an unrelated
+   *  full render to rediscover the proof left branches shaded indefinitely
+   *  under repeated atlas churn. The memo ties this exact target to the
+   *  current location and parent head; if either moved, a later location seed
+   *  validates the now-resident assets instead. */
+  #releaseRepairedTarget = (headSig: string): void => {
+    const entry = this.#readyByLocation.get(this.#readinessLocationKey)
+    if (!entry || entry.parentSig !== this.#passParentSig) return
+    let changed = false
+    for (const [label, target] of entry.targets) {
+      if (target.headSig !== headSig) continue
+      const names = this.#completeChildNamesByParentSig.get(headSig)?.names
+      if (!names || !this.#clickTargetResident(names, target.imageSigs)) continue
+      this.#childrenReadyByLabel.set(label, true)
+      this.#preparedHeadByLabel.set(label, headSig)
+      this.#writeShadeFor(label)
+      changed = true
+    }
+    if (changed) {
+      this.emitEffect('render:tile-readiness', { shadedLabels: this.#preloadingLabels() })
+    }
+  }
+
+  /** Bake at most ONE expensive asset per idle slice. Rasterising one label is
+   *  ~13ms and image decode/upload can be longer; the previous implementation
+   *  did up to 24 images plus 32 labels in one callback, blocking clicks even
+   *  into destinations that were already fully prepared. */
+  #pumpBakes = (): void => {
+    if (this.#bakePumping || this.#bakeQueue.length === 0) return
+    this.#bakePumping = true
+    const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback
+    // A bounded timeout ensures progress in busy tabs, while isInputPending
+    // below always gives an actual pointer/keyboard event priority.
+    const schedule = typeof ric === 'function'
+      ? (cb: () => void) => ric(cb, { timeout: 500 })
+      : (cb: () => void) => setTimeout(cb, 16)
+    schedule(() => {
+      void (async () => {
+        const job = this.#bakeQueue.shift()
+        try {
+          if (!job) return
+          const inputPending = (() => {
+            try {
+              return Boolean((navigator as any).scheduling?.isInputPending?.({ includeContinuous: true }))
+            } catch { return false }
+          })()
+          if (inputPending) {
+            this.#bakeQueue.unshift(job)
+            return
+          }
+
+          let worked = false
+          const imageAtlas = this.imageAtlas
+          if (imageAtlas) {
+            while (job.sigs.length > 0) {
+              const sig = job.sigs.shift()!
+              if (imageAtlas.hasImage(sig) || imageAtlas.hasFailed(sig)) continue
+              const blob = await this.#localDecodeBlob(sig)
+              if (blob) await imageAtlas.loadImage(sig, blob)
+              // ORPHAN GUARD: the decode is LOCAL-only, so a sig whose bytes
+              // aren't here yet silently produced nothing — and this job had
+              // already shifted it off the list. Residency never arrived, so
+              // the tile stayed shaded while every pass re-queued the same
+              // futile bake. Hand it to the warm queue instead: it lands the
+              // bytes or concludes the sig, and #clickTargetResident accepts
+              // a concluded sig. Reachable for target images the presence
+              // walk never checked (fallback substrate, reference faces) and
+              // for bytes evicted between the check and the bake.
+              else this.#enqueueChildWarm(sig)
+              worked = true
+              break
+            }
+          }
+
+          // Do not combine a label raster with an image decode in one slice.
+          if (!worked) {
+            while (job.names.length > 0) {
+              const name = job.names.shift()!
+              if (!name || this.atlas?.hasLabel(name)) continue
+              try { this.atlas?.seed([name]) } catch { /* rasterisation is best-effort */ }
+              worked = true
+              break
+            }
+          }
+
+          if (job.sigs.length > 0 || job.names.length > 0) {
+            this.#bakeQueue.push(job)
+          } else {
+            this.#bakeQueued.delete(job.headSig)
+            this.#releaseRepairedTarget(job.headSig)
+            this.#scheduleReadinessRepaint()
+          }
+        } catch {
+          // Do not poison the head's dedupe key permanently. A later
+          // readiness pass can enqueue a clean retry.
+          if (job) this.#bakeQueued.delete(job.headSig)
+          this.#scheduleReadinessRepaint()
+        }
+        finally {
+          this.#bakePumping = false
+          this.#pumpBakes()
+        }
+      })()
+    })
+  }
+
+  /** PREPARE A VIEW — build the destination's complete first paint AHEAD of
+   *  the click: membership, durable order, cell display properties, label and
+   *  image atlas entries, cells-cache object, and viewport snapshot.
+   *
+   *  MEASURED, and the reason this exists: with every byte local AND every
+   *  child image already decoded in the atlas, a first entry still cost ~160-190ms
+   *  while a revisit cost 4ms. The difference is not bytes and not pixels — it
+   *  is this resolution. Proving bytes therefore never proved "instant"; the
+   *  shade said ready while the view was still cold. Preparing the view is what
+   *  connects the two.
+   *
+   *  GLOBAL BY CONSTRUCTION: the memo is keyed by the layer's CONTENT SIG, so
+   *  a prepared view is valid from anywhere, forever — content-addressed layers
+   *  are atomic, a changed child set is a different sig and simply misses. So
+   *  this can be run over the whole hive (usage-ordered by the preloader,
+   *  proximity-ordered by the visible branches) and never goes stale.
+   *
+   *  Writes the memo under EXACTLY the render pass's own conditions (complete
+   *  names + settled branch status), using the same resolver — a memo built
+   *  over a cold branch status would paint a branch as a leaf and lock the tile
+   *  out of navigation. */
+  prepareView = async (layerSig: string, segments: readonly string[]): Promise<boolean> => {
+    if (!layerSig || !isSignature(layerSig)) return false
+    const locationKey = segments.length ? `/${segments.join('/')}` : '/'
+    if (
+      this.#completeChildNamesByParentSig.has(layerSig)
+      && this.#layerCellsCache.has(locationKey)
+      && this.#layerViewportCache.has(locationKey)
+    ) return true
+    const existing = this.#viewPrepInFlight.get(layerSig)
+    if (existing) return existing
+    const preparation = this.#prepareView(layerSig, segments, locationKey)
+    this.#viewPrepInFlight.set(layerSig, preparation)
+    try { return await preparation }
+    finally {
+      if (this.#viewPrepInFlight.get(layerSig) === preparation) {
+        this.#viewPrepInFlight.delete(layerSig)
+      }
+    }
+  }
+
+  #prepareView = async (
+    layerSig: string,
+    segments: readonly string[],
+    locationKey: string,
+  ): Promise<boolean> => {
+    try {
+      const history = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
+      const axial = this.resolve<any>('axial')
+      if (!history || !axial?.items || !this.imageAtlas || !this.atlas) return false
+      const content = await history.getLayerBySig(layerSig)
+      if (!content) return false
+      // Nothing inside = nothing to prepare: an empty view is already instant.
+      const expected = Array.isArray(content.children) ? content.children.length : 0
+      if (expected === 0) return true
+
+      let memo = this.#completeChildNamesByParentSig.get(layerSig)
+      if (!memo || memo.names.length !== expected) {
+        const stats = { expected: 0, resolved: 0, unresolvedSigs: [] as string[] }
+        const branches = new Set<string>()
+        const branchStats = { cold: false }
+        const resolved = await resolveChildNames(history, segments, null, content, layerSig, stats, branches, branchStats)
+        const complete = stats.expected > 0 && stats.resolved >= stats.expected
+        if (!complete || branchStats.cold) return false
+        const names: string[] = []
+        for (const n of resolved) if (typeof n === 'string' && n.length > 0) names.push(n)
+        if (this.#completeChildNamesByParentSig.size > ShowCellDrone.#PREPARED_VIEW_CAP) {
+          const oldest = this.#completeChildNamesByParentSig.keys().next().value
+          if (oldest !== undefined) this.#completeChildNamesByParentSig.delete(oldest)
+        }
+        memo = { names, branches: [...branches] }
+        this.#completeChildNamesByParentSig.set(layerSig, memo)
+        this.#preparedViewPath.set(layerSig, segments.join('/'))
+      }
+
+      // "Prepared" must mean the whole first paint, not merely child names.
+      // Resolve durable tile order, hydrate every per-cell display cache, and
+      // build the same cache object the revisit fast path consumes.
+      const localCellSet = new Set(memo.names)
+      const branchSet = new Set(memo.branches)
+      const ordered = await this.#orderByIndexPinned(
+        null as unknown as FileSystemDirectoryHandle,
+        [...memo.names],
+        localCellSet,
+        true,
+        undefined,
+        segments,
+        true,
+      )
+      const axialMax = typeof axial.items.size === 'number' ? axial.items.size : ordered.length
+      const cells = this.buildCellsFromAxial(
+        axial,
+        ordered,
+        Math.min(ordered.length, axialMax),
+        localCellSet,
+        branchSet,
+      )
+      if (cells.length !== memo.names.length) return false
+      await this.loadCellImages(cells, null, undefined, segments, true)
+      this.#layerCellsCache.set(locationKey, {
+        cells: [...cells],
+        cellNames: ordered,
+        localCellSet,
+        branchSet,
+      })
+
+      // The fast path must not discover viewport state after the click. An
+      // absent viewport is still a prepared result; cache an empty snapshot,
+      // while retaining the one-shot adopted-content fit decision.
+      if (!this.#layerViewportCache.has(locationKey)) {
+        const viewport = await readViewportAt(segments)
+        this.#layerViewportCache.set(locationKey, viewport ?? {})
+        if (
+          !viewport
+          && isWithinAdoptedRoot(segments)
+          && !(await hasPersistedViewportAt(segments))
+        ) {
+          this.#preparedFirstVisitFit.add(locationKey)
+        }
+      }
+      if (DIAG) console.info(`[diag:readiness] view prepared ${layerSig.slice(0, 8)} location=${locationKey} names=${ordered.length} fullPaint=1`)
+      return true
+    } catch { return false }
+  }
+
+  /** Coalesced repaint for readiness transitions. Tile releases and warm
+   *  completions request ONE repaint per short window instead of forcing a
+   *  full render pass EACH — per-event forcing at scale stacked dozens of
+   *  back-to-back full passes and pegged the main thread for tens of seconds
+   *  (the frozen-renderer failure). The window is SHORT (60ms) so tiles
+   *  visibly brighten one by one as each completes — only near-simultaneous
+   *  completions share a flip. */
+  #scheduleReadinessRepaint = (): void => {
+    if (this.#readinessRepaintTimer) return
+    this.#readinessRepaintTimer = setTimeout(() => {
+      this.#readinessRepaintTimer = null
+      // ONLY THE TILES THAT CHANGED. Brightening is an attribute flip, not a
+      // geometry change, so a release writes `aShaded` for exactly the cells
+      // that just earned it and pushes that one buffer. Repainting the whole
+      // screen for each of them is what a page of releasing tiles used to
+      // cost — and full passes compete with the very click this is meant to
+      // make instant. Full render only when the in-place write cannot apply
+      // (membership changed, buffers not built yet).
+      if (this.#repaintReadinessInPlace()) return
+      if (DIAG) console.info('[diag:readiness] repaint fire (full pass)')
+      this.#forceNextRender = true
+      this.requestRender()
+    }, 30)
+  }
+
+  /** Flip `aShaded` to bright for every shaded cell that has since earned it,
+   *  push that single attribute buffer, and re-emit the cell payload so the
+   *  overlay's inertness mirror keeps step. Returns false when a full pass is
+   *  genuinely needed. Never flips a cell back to shaded — releases are
+   *  one-way within a visit, so a would-be re-shade means the membership
+   *  changed and the full path owns it. */
+  #repaintReadinessInPlace = (): boolean => {
+    const shadedBuf = this.#buf?.shaded
+    if (!shadedBuf || !this.geom || this.#shadedLabels.size === 0) return false
+    const flipped: string[] = []
+    for (const label of [...this.#shadedLabels]) {
+      const cell = this.renderedCells.get(label)
+      if (!cell) return false
+      if (this.#cellIsShaded(cell)) continue
+      const i = this.#labelToIndex.get(label)
+      if (i === undefined) return false
+      this.#shadedLabels.delete(label)
+      // Start the fade rather than snapping to full — the ramp owns this
+      // cell's attribute from here (see #pumpShadeFade).
+      this.#beginShadeFade(label)
+      this.#writeCellScalar(shadedBuf, i, this.#shadeValueFor(cell))
+      flipped.push(label)
+    }
+    if (flipped.length === 0) return false
+    if (!this.#pushBuffer('aShaded')) return false
+    // Update only the readiness gate. Re-emitting render:cell-count here can
+    // release navigation against a partial renderedCells snapshot.
+    this.emitEffect('render:tile-readiness', { shadedLabels: this.#preloadingLabels() })
+    // NO render:cell-count from here. That payload means "the maps describe
+    // the level on screen — release the navigation guard", and an in-place
+    // shade flip is not that: fired from a retry timer it can land MID-
+    // NAVIGATION with a partial renderedCells snapshot, rebuilding the
+    // overlay's occupancy maps from garbage and releasing the guard early
+    // (observed live: a 1-cell payload while a 12-child page was still
+    // rendering). The narrow readiness event above updates only the gate and
+    // cannot be confused with a completed level render.
+    //
+    // Safe to recompute the WHOLE key only because it describes cells and
+    // nothing else. It must never carry an atlas eviction generation again:
+    // this path re-baked nothing, so adopting one here would retire a pending
+    // rebake and strand the wiped slots (band, no name). See #bakedLabelAtlasGen.
+    this.renderedCellsKey = this.buildCellsKey([...this.renderedCells.values()])
+    if (DIAG) console.info(`[diag:readiness] brightened in place: ${flipped.join(',')}`)
+    return true
+  }
+
+  private buildCellsKey = (cells: Cell[]): string => {
+    const selectionService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
+      { isSelected: (label: string) => boolean } | undefined
+    // NO ATLAS EVICTION GENERATIONS IN HERE. Baked UVs do go stale when an
+    // atlas slot is wiped or reused, and that still forces a rebuild — but the
+    // signal lives in #bakedImageAtlasGen / #bakedLabelAtlasGen, checked
+    // separately by applyGeometry. This key describes the CELLS, and it is
+    // recomputed by paths that only touched one attribute
+    // (#repaintReadinessInPlace, #tryInPlaceCellUpdate); a generation folded in
+    // here is a rebake those paths can mark as done without doing it, which is
+    // how tiles ended up with a label band and no name inside it. Keep them apart.
+    let s = `p${this.#pivot ? 1 : 0}f${this.#flat ? 1 : 0}|`
+    // Fold in whether each cell's image is CURRENTLY resolvable in the
+    // atlas. The sig alone is not enough: an image that arrives late (host
+    // fill, back-nav refill, eviction reload) lands in a FRESH slot, which
+    // bumps no eviction generation — without this bit the key stays
+    // identical and applyGeometry skips the rebuild, leaving hasImage=0
+    // baked in the buffer forever (tile renders label-only although the
+    // atlas holds its image).
+    for (const c of cells) {
+      const ia = c.imageSig && this.imageAtlas?.hasImage(c.imageSig) ? 1 : 0
+      const pf = referenceTargetForLabel(c.label) !== null ? 1 : 0
+      // Readiness-shade bit: shade can flip with an UNCHANGED imageSig/ia
+      // (fill concluded empty → #fillMissedSigs, decode failure) — folding
+      // it in lets the next natural repaint rebake the released shade.
+      const sh = this.#cellIsShaded(c) ? 1 : 0
+      s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${ia}:${c.hasBranch ? 1 : 0}:${c.divergence ?? 0}:${c.hideText ? 1 : 0}:${c.unshared ? 1 : 0}:${pf}:${sh}|`
+    }
+    return s
+  }
+
+  private axialToPixel = (q: number, r: number, s: number, flat = false) => flat
+    ? { x: 1.5 * s * q, y: Math.sqrt(3) * s * (r + q / 2) }
+    : { x: Math.sqrt(3) * s * (q + r / 2), y: s * 1.5 * r }
+
+  private buildFillQuadGeometry(cells: Cell[], r: number, gap: number, hw: number, hh: number): Geometry {
+    const spacing = r + gap
+
+    const selectionService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
+      { isSelected: (label: string) => boolean } | undefined
+
+    // Launcher silhouettes exist ONLY on launch-group aggregator pages. The
+    // shape index is keyed by label alone, and a hive tile can share a label
+    // with a launcher cell (the root tile "susan" vs the websites launcher
+    // "susan") — resolving shapes off `agg-` pages leaked the group theme
+    // onto normal hive tiles. Gate here, the one place aShapeMode is baked.
+    const gateSegs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
+    const onLauncherPage = isLauncherLocation(gateSegs)
+
+    const pos = new Float32Array(cells.length * 8)
+    const uv = new Float32Array(cells.length * 8)
+    const labelUV = new Float32Array(cells.length * 16)
+    const imageUV = new Float32Array(cells.length * 16)
+    const hasImage = new Float32Array(cells.length * 4)
+    const heat = new Float32Array(cells.length * 4)
+    const identityColor = new Float32Array(cells.length * 12)
+    const branch = new Float32Array(cells.length * 4)
+    const borderColor = new Float32Array(cells.length * 12)
+    const cellIndex = new Float32Array(cells.length * 4)
+    const divergence = new Float32Array(cells.length * 4)
+    const unshared = new Float32Array(cells.length * 4)
+    // Readiness shade — 1 while the cell's bytes are still arriving (see
+    // #cellIsShaded). Brightening is an attribute flip on the heal repaint,
+    // never a geometry change, so nothing moves when a tile becomes ready.
+    const shaded = new Float32Array(cells.length * 4)
+    // Per-tile launcher silhouette (0 hex · 2 invader; 1 retired) — lets a
+    // mixed launch-group page render each group's own shape without sharing.
+    const shapeAttr = new Float32Array(cells.length * 4)
+    // Per-tile portal flag — a reference tile (doorway to another lineage) gets
+    // the magical hover shimmer instead of the plain pathway/leaf ring.
+    const portal = new Float32Array(cells.length * 4)
+    const idx = new Uint32Array(cells.length * 6)
+
+    let pv = 0, uvp = 0, luvp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, bcp = 0, cip = 0, dp = 0, ii = 0, base = 0, sap = 0, pp = 0
+    let ci = 0
+
+    this.#shadedLabels.clear()
+
+    for (const c of cells) {
+      const { x, y } = this.axialToPixel(c.q, c.r, spacing, this.#flat)
+
+      const x0 = x - hw, x1 = x + hw
+      const y0 = y - hh, y1 = y + hh
+
+      pos.set([x0, y0, x1, y0, x1, y1, x0, y1], pv)
+      pv += 8
+
+      uv.set([0, 0, 1, 0, 1, 1, 0, 1], uvp)
+      uvp += 8
+
+      const imgUV = c.plain ? null : (c.imageSig ? this.imageAtlas?.getImageUV(c.imageSig) ?? null : null)
+
+      // label UV: collapse to [0,0,0,0] when hideText + image present so the
+      // shader samples a transparent corner and the label is effectively
+      // hidden. The hovered tile is exempt — it reveals its name — so a
+      // rebuild mid-hover does not blink the text back off, and TEXT-ONLY mode
+      // exempts every tile (#hidesName): with no image drawn there is nothing
+      // to hide behind, so a hidden name comes back for as long as the mode is on.
+      const atlasLabel = this.#pendingCellMutations.has(c.label) && !this.atlas!.hasLabel(c.label)
+        ? PENDING_CELL_LABEL
+        : c.label
+      const ruv = (this.#hidesName(c.hideText, !!imgUV) && c.label !== this.#hoverRevealLabel)
+        ? { u0: 0, v0: 0, u1: 0, v1: 0 }
+        : this.atlas!.getLabelUV(atlasLabel)
+      for (let i = 0; i < 4; i++) {
+        labelUV.set([ruv.u0, ruv.v0, ruv.u1, ruv.v1], luvp)
+        luvp += 4
+      }
+
+      const hi = imgUV ? 1 : 0
+      for (let i = 0; i < 4; i++) {
+        imageUV.set(imgUV ? [imgUV.u0, imgUV.v0, imgUV.u1, imgUV.v1] : [0, 0, 0, 0], iuvp)
+        iuvp += 4
+      }
+      hasImage.set([hi, hi, hi, hi], hip)
+      hip += 4
+
+      const h = c.heat ?? 0
+      heat.set([h, h, h, h], hp)
+      hp += 4
+
+      let [cr, cg, cb] = labelToRgb(c.label)
+      // gray out hidden items when show-hidden is active
+      const isHiddenItem = this.#showHiddenItems && this.#currentHiddenSet.has(c.label)
+      if (isHiddenItem) {
+        const gray = cr * 0.3 + cg * 0.3 + cb * 0.3
+        cr = gray * 0.5; cg = gray * 0.5; cb = gray * 0.5
+      }
+      identityColor.set([cr, cg, cb, cr, cg, cb, cr, cg, cb, cr, cg, cb], icp)
+      icp += 12
+
+      const b = c.hasBranch ? 1 : 0
+      branch.set([b, b, b, b], bp)
+      bp += 4
+
+      let [bcr, bcg, bcb] = c.borderColor ?? [0.784, 0.592, 0.353]
+      if (isHiddenItem) {
+        const bgray = bcr * 0.3 + bcg * 0.3 + bcb * 0.3
+        bcr = bgray * 0.5; bcg = bgray * 0.5; bcb = bgray * 0.5
+      }
+      // Group accent for peer tiles — every peer-contributed tile gets
+      // the publisher's deterministic pubkey-derived color as its
+      // border, ALWAYS (not just in spotlight mode). Each contributor
+      // is visually identifiable at a glance: Alice's tiles glow one
+      // hue, Bob's another. Same labelToRgb hash used for label-based
+      // identity colors, just keyed on pubkey — uniform "identity
+      // color" architecture across own tiles and peer groups.
+      //
+      // Spotlight emphasis: when a peer's layer is surfaced via the
+      // layer-cycle strip / alt+scroll, their tiles render at full
+      // brightness; other peer groups dim slightly so the active layer
+      // pops without losing the rest. Own tiles keep their normal
+      // borderColor (label or substrate-derived).
+      const cellPubkey = this.#peerPubkeyByLabel.get(c.label)
+      if (cellPubkey) {
+        const [pr, pg, pb] = labelToRgb(cellPubkey)
+        const brightness = this.#spotlightPubkey === null
+          ? 0.85                                          // no spotlight — all groups at uniform group brightness
+          : (this.#spotlightPubkey === cellPubkey ? 1.0   // this peer is active — full intensity
+            : 0.45)                                       // other peer — recede so the active group pops
+        bcr = pr * brightness
+        bcg = pg * brightness
+        bcb = pb * brightness
+      } else if ((this.#stackDepthByLabel.get(c.label) ?? 0) > 1) {
+        // Yours is the version showing, but other participants hold
+        // this tile too. Mark the depth on the border so a stacked tile
+        // is findable without hovering every hex — this is the whole
+        // affordance for the wheel roll, and an unmarked stack is a
+        // feature nobody discovers.
+        const m = STACK_BORDER_MIX
+        bcr = bcr * (1 - m) + STACK_BORDER[0] * m
+        bcg = bcg * (1 - m) + STACK_BORDER[1] * m
+        bcb = bcb * (1 - m) + STACK_BORDER[2] * m
+      }
+      borderColor.set([bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb], bcp)
+      bcp += 12
+
+      cellIndex.set([ci, ci, ci, ci], cip)
+      cip += 4
+      ci++
+
+      const dv = c.divergence ?? 0
+      divergence.set([dv, dv, dv, dv], dp)
+      const us = c.unshared ? 1 : 0
+      unshared.set([us, us, us, us], dp)
+      // Continuous 0..1 — a tile mid-fade keeps its current fade value across a
+      // geometry rebuild, so a repaint that happens to land during the fade
+      // never snaps it to full.
+      const sh = this.#shadeValueFor(c)
+      shaded.set([sh, sh, sh, sh], dp)
+      if (this.#cellIsShaded(c)) this.#shadedLabels.add(c.label)
+      dp += 4
+
+      // Per-tile launcher silhouette. Only launcher tiles carry a launch:target
+      // `shape`; everything else resolves to 0 (hexagon).
+      const sm = !onLauncherPage ? 0 : launchShapeToMode(launchShapeForLabel(c.label))
+      shapeAttr.set([sm, sm, sm, sm], sap)
+      sap += 4
+
+      // Reference/portal tiles hover with the magical shimmer (see hex-sdf
+      // fragment). referenceTargetForLabel returns the target segments (or null
+      // for a non-reference) from the same decoration index the click path uses.
+      const pv2 = referenceTargetForLabel(c.label) !== null ? 1 : 0
+      portal.set([pv2, pv2, pv2, pv2], pp)
+      pp += 4
+
+      idx.set([base, base + 1, base + 2, base, base + 2, base + 3], ii)
+      ii += 6
+      base += 4
+    }
+
+    const g = new Geometry()
+      ; (g as any).addAttribute('aPosition', pos, 2)
+      ; (g as any).addAttribute('aUV', uv, 2)
+      ; (g as any).addAttribute('aLabelUV', labelUV, 4)
+      ; (g as any).addAttribute('aImageUV', imageUV, 4)
+      ; (g as any).addAttribute('aHasImage', hasImage, 1)
+      ; (g as any).addAttribute('aHeat', heat, 1)
+      ; (g as any).addAttribute('aIdentityColor', identityColor, 3)
+      ; (g as any).addAttribute('aHasBranch', branch, 1)
+      ; (g as any).addAttribute('aBorderColor', borderColor, 3)
+      ; (g as any).addAttribute('aCellIndex', cellIndex, 1)
+      ; (g as any).addAttribute('aDivergence', divergence, 1)
+      ; (g as any).addAttribute('aUnshared', unshared, 1)
+      ; (g as any).addAttribute('aShaded', shaded, 1)
+      ; (g as any).addAttribute('aShapeMode', shapeAttr, 1)
+      ; (g as any).addAttribute('aIsPortal', portal, 1)
+      ; (g as any).addIndex(idx)
+
+    // save buffer references + label→index map so tile:saved can push
+    // in-place attribute updates to the GPU without rebuilding geometry
+    this.#buf = { pos, labelUV, imageUV, hasImage, heat, identityColor, branch, borderColor, divergence, shaded }
+    this.#labelToIndex.clear()
+    for (let i = 0; i < cells.length; i++) this.#labelToIndex.set(cells[i].label, i)
+
+    return g
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Per-cell buffer slice accessors — the standard way to write cell data
+  // into a geometry attribute buffer. All per-cell writes go through these
+  // helpers; the strides are not repeated anywhere else in this file.
+  //
+  // Each hex is a quad with 4 vertices. Attributes come in three shapes:
+  //   - scalar (1 float/vertex) → 4 floats per cell
+  //   - rgb    (3 floats/vertex) → 12 floats per cell
+  //   - vec4   (4 floats/vertex) → 16 floats per cell
+  // ─────────────────────────────────────────────────────────────────────
+
+  #writeCellScalar(buf: Float32Array | undefined, i: number, value: number): void {
+    if (!buf) return
+    const b = i * 4
+    buf[b] = value; buf[b + 1] = value; buf[b + 2] = value; buf[b + 3] = value
+  }
+
+  #writeCellRgb(buf: Float32Array | undefined, i: number, r: number, g: number, bl: number): void {
+    if (!buf) return
+    const b = i * 12
+    for (let v = 0; v < 4; v++) {
+      buf[b + v * 3] = r; buf[b + v * 3 + 1] = g; buf[b + v * 3 + 2] = bl
+    }
+  }
+
+  #writeCellVec4(buf: Float32Array | undefined, i: number, a: number, b: number, c: number, d: number): void {
+    if (!buf) return
+    const base = i * 16
+    for (let v = 0; v < 4; v++) {
+      buf[base + v * 4] = a; buf[base + v * 4 + 1] = b
+      buf[base + v * 4 + 2] = c; buf[base + v * 4 + 3] = d
+    }
+  }
+
+  /** Push a named attribute's CPU-side buffer to the GPU. Returns false if not available. */
+  #pushBuffer(attrName: string): boolean {
+    const g = this.geom as any
+    try {
+      g?.getAttribute?.(attrName)?.buffer?.update?.()
+      return true
+    } catch { return false }
+  }
+
+  /**
+   * Phase 2 fast path for tile:saved — mutate the single cell's attribute
+   * slices directly and push to GPU. Skips geometry rebuild entirely.
+   * Returns true on success; false if the caller should fall back to the
+   * incremental render path.
+   */
+  /** Would this cell's name be hidden right now? True only for a hideText
+   *  tile whose image is actually in the atlas (an image that has not
+   *  landed yet never hid anything) — and never for the hovered tile,
+   *  which is the whole point of the reveal. */
+  #labelIsHidden(label: string): boolean {
+    if (label === this.#hoverRevealLabel) return false
+    const cell = this.renderedCells.get(label)
+    if (!cell?.hideText || cell.plain || !cell.imageSig) return false
+    return this.#hidesName(true, !!this.imageAtlas?.getImageUV(cell.imageSig))
+  }
+
+  /** Point the hover reveal at `next` and repaint just the tiles whose
+   *  hidden-ness actually flipped. Touches one attribute for at most two
+   *  cells, so it is cheap enough to run on every hover change; tiles that
+   *  never hide their text cost nothing but a map lookup. */
+  #setHoverReveal(next: string | null): void {
+    const prev = this.#hoverRevealLabel
+    if (prev === next) return
+
+    // Only a tile that HIDES its text can change appearance here. Resolve
+    // that against the pre-flip state for `prev` and the post-flip state
+    // for `next`, so each is judged as the reveal actually leaves it.
+    const wasHiding = (l: string | null): boolean => {
+      if (!l) return false
+      const cell = this.renderedCells.get(l)
+      if (!cell?.hideText || cell.plain || !cell.imageSig) return false
+      return this.#hidesName(true, !!this.imageAtlas?.getImageUV(cell.imageSig))
+    }
+    const prevFlips = wasHiding(prev)   // prev was revealed → re-hide it
+    const nextFlips = wasHiding(next)   // next was hidden → reveal it
+
+    this.#hoverRevealLabel = next
+    if (!prevFlips && !nextFlips) return
+
+    const labelUV = this.#buf.labelUV
+    if (!labelUV || !this.atlas || !this.geom) return
+
+    for (const l of [prevFlips ? prev : null, nextFlips ? next : null]) {
+      if (!l) continue
+      const i = this.#labelToIndex.get(l)
+      if (i === undefined) continue
+      if (this.#labelIsHidden(l)) {
+        this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
+      } else {
+        const r = this.atlas.getLabelUV(l)
+        this.#writeCellVec4(labelUV, i, r.u0, r.v0, r.u1, r.v1)
+      }
+    }
+    this.#pushBuffer('aLabelUV')
+  }
+
+  readonly #tryInPlaceCellUpdate = async (
+    label: string,
+    _ctx: { dir: FileSystemDirectoryHandle | null },
+  ): Promise<boolean> => {
+    const i = this.#labelToIndex.get(label)
+    if (i === undefined) return false
+    const { imageUV, hasImage, borderColor, labelUV } = this.#buf
+    if (!imageUV || !hasImage || !borderColor || !labelUV) return false
+    if (!this.geom || !this.imageAtlas || !this.atlas) return false
+
+    const lineage = this.resolve<any>('lineage')
+    const dir = _ctx.dir ?? (await lineage?.explorerDir?.())
+    if (!dir) return false
+
+    // Force-reload this cell so the loader bypasses the fast path
+    // (which would otherwise serve the stale cached sig — substrate
+    // has just written a new propsSig for this label).
+    const probe: Cell = { q: 0, r: 0, label, external: false }
+    try { await this.loadCellImages([probe], dir, new Set([label])) } catch { return false }
+
+    const sig = this.cellImageCache.get(label) ?? null
+    const imgUV = sig ? (this.imageAtlas.getImageUV(sig) ?? null) : null
+
+    if (imgUV) {
+      this.#writeCellVec4(imageUV, i, imgUV.u0, imgUV.v0, imgUV.u1, imgUV.v1)
+    } else {
+      this.#writeCellVec4(imageUV, i, 0, 0, 0, 0)
+    }
+    this.#writeCellScalar(hasImage, i, imgUV ? 1 : 0)
+
+    const [bcr, bcg, bcb] = this.cellBorderColorCache.get(label) ?? [0.784, 0.592, 0.353]
+    this.#writeCellRgb(borderColor, i, bcr, bcg, bcb)
+
+    // labelUV: collapse to origin when hideText + image so the label is
+    // hidden — unless this is the hovered tile, which is revealing its name,
+    // or text-only mode is on, where no tile hides its name (#hidesName).
+    const ht = this.cellHideTextCache.get(label) ?? false
+    if (this.#hidesName(ht, !!imgUV) && label !== this.#hoverRevealLabel) {
+      this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
+    } else {
+      const atlasLabel = this.#pendingCellMutations.has(label) && !this.atlas.hasLabel(label)
+        ? PENDING_CELL_LABEL
+        : label
+      const ruv = this.atlas.getLabelUV(atlasLabel)
+      this.#writeCellVec4(labelUV, i, ruv.u0, ruv.v0, ruv.u1, ruv.v1)
+    }
+
+    // Readiness shade follows the fresh image state — brighten (or shade)
+    // in place with the same attribute-only push, and keep the mirrored
+    // inertness set in step.
+    const probeCell = { ...probe, imageSig: sig ?? undefined }
+    const shadedNow = this.#cellIsShaded(probeCell)
+    if (shadedNow) this.#shadedLabels.add(label)
+    else if (this.#shadedLabels.delete(label)) this.#beginShadeFade(label)
+    this.#writeCellScalar(this.#buf.shaded, i, this.#shadeValueFor(probeCell))
+
+    if (!this.#pushBuffer('aImageUV') || !this.#pushBuffer('aHasImage') || !this.#pushBuffer('aBorderColor') || !this.#pushBuffer('aLabelUV') || !this.#pushBuffer('aShaded')) {
+      return false
+    }
+
+    const rec = this.renderedCells.get(label)
+    if (rec) {
+      rec.imageSig = sig ?? undefined
+      rec.borderColor = [bcr, bcg, bcb]
+      rec.hasLink = this.cellLinkCache.get(label) ?? false
+      rec.hasSubstrate = this.cellSubstrateCache.get(label) ?? false
+      rec.hideText = ht
+      const cellsSnapshot = [...this.renderedCells.values()]
+      // One cell's attributes were rewritten, so the cells key may legitimately
+      // be re-stated here. The atlas generations may NOT — every OTHER cell's
+      // label UV is untouched by this path, and claiming a generation it did
+      // not apply is what left tiles with a band and no name inside it.
+      this.renderedCellsKey = this.buildCellsKey(cellsSnapshot)
+      // Shade state may have flipped — refresh tile-overlay's mirrored
+      // sets so click inertness matches what is on screen.
+      this.emitEffect('render:cell-count', this.#buildCellCountPayload(cellsSnapshot))
+    }
+
+    this.#emitRenderTags([...this.renderedCells.values()])
+    return true
+  }
+
+  /**
+   * Phase 2 fast path for heat — mutate just the heat slice for one cell
+   * and push the aHeat buffer. Used by the new-cell fade RAF loop so it
+   * never triggers a full render per frame.
+   * Returns true on success; false if the label isn't currently indexed
+   * (in which case the caller may skip or fall back to requestRender).
+   */
+  #updateCellHeat(label: string, heatValue: number): boolean {
+    const i = this.#labelToIndex.get(label)
+    if (i === undefined) return false
+    if (!this.#buf.heat || !this.geom) return false
+    this.#writeCellScalar(this.#buf.heat, i, heatValue)
+    return this.#pushBuffer('aHeat')
+  }
+}
+const showCell = new ShowCellDrone()
+window.ioc.register('@diamondcoreprocessor.com/ShowCellDrone', showCell)
+console.log('[hypercomb] show-cell: pendingRecenter no longer leaks across layer changes; mesh.position and overlay #meshOffset stay in sync (2026-05-07n)')

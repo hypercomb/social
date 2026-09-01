@@ -205,20 +205,6 @@ homework. Fire-and-forget only works if the return trip is
 machine-shaped; that is what the contract buys, over and above the
 safety gate.
 
-### The mirror is an agent too
-
-Mirroring a creation into the hive (tiles 1:1 with source resources, a
-collection gathering them, pheromones from the declared vocabulary,
-notes on the tile) is itself contract-shaped work. Expressed as a
-contract it becomes **watchable** — a mirror bee you can open and follow
-— and, more usefully, **checkable**: the contract states what a complete
-mirror is, so "done" stops being a judgement call.
-
-**Guardrail:** a mirror agent must be spawned *by* the completing work,
-in the same pass — never queued for later. A mirror that can be deferred
-is a backlog, and same-pass is the whole point of the doctrine. The
-agent makes the mirror observable; it must not make it optional.
-
 ## Safeguards
 
 - **Allowlist first.** The host accepts `ask` records only from pubkeys

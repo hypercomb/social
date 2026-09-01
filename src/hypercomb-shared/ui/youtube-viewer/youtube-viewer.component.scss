@@ -98,7 +98,7 @@
   border-radius: var(--hc-radius-pill);
   padding: 0 1.1rem 0 0.75rem;
   background: rgba(18, 24, 32, 0.82);
-  color: #dfe8f0;
+  color: var(--hc-window-ink-loud);
   box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
   cursor: pointer;
   transition: filter 0.16s ease, opacity 0.5s ease, gap 0.5s ease, padding 0.5s ease;

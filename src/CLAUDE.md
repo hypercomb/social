@@ -107,7 +107,7 @@ src/
 ├── hypercomb-core/             # IoC, EffectBus, Drone base, SignatureService, KeyMap types, I18nProvider
 ├── hypercomb-essentials/       # Drones + services, organized by domain namespace
 │   └── src/
-│       ├── diamondcoreprocessor.com/   # Core processor domain — feature-oriented tree
+│       ├──    # Core processor domain — feature-oriented tree
 │       │   ├── assistant/              # AI assistant integration (ClaudeBridgeWorker)
 │       │   ├── clipboard/              # Copy, cut, paste (ClipboardWorker, ClipboardService)
 │       │   ├── commands/               # Command palette, slash behaviours, help, shortcut sheet

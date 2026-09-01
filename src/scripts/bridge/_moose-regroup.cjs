@@ -59,46 +59,49 @@ async function ask(req, attempts = 8) {
   return { ok: false, error: 'renderer never came back' }
 }
 
-const nameCache = new Map()
-async function childNamesOf(segments) {
-  const layer = await ask({ op: 'layer-at', segments })
-  if (!layer.ok) return null
-  const sigs = (layer.data?.children || []).map(String)
-  const texts = await Promise.all(sigs.map(async s => {
-    if (nameCache.has(s)) return nameCache.get(s)
-    const r = await ask({ op: 'get-resource', sig: s })
-    const v = r.ok ? r.data.text : null
-    nameCache.set(s, v); return v
-  }))
-  const names = []
-  for (const t of texts) { if (!t) continue; try { const n = JSON.parse(t).name; if (n) names.push(n) } catch {} }
-  return names
+// Child reads and child creation come from ONE implementation, shared with
+// every other bridge script: scripts/lib/hive-children.mjs. This file used to
+// decode child names with `get-resource`, which CANNOT work - a parent's
+// `children` slot holds LAYER sigs and a layer sig is not a resource - so it
+// read every parent as empty. The module carries the trap and the two rules.
+let childNamesOf, ensureChildrenSafe
+async function bindHiveHelpers() {
+  const { hiveChildren } = await import('../lib/hive-children.mjs')
+  const h = hiveChildren(ask)
+  childNamesOf = h.childNamesOf
+  ensureChildrenSafe = h.ensureChildren
 }
 
+/**
+ * APPEND mode is the safe path: existence per child path, creation via
+ * `op:'add'`, never a `children:` SET.
+ *
+ * REPLACE mode is a deliberate SET and the only reason this script exists -
+ * step 1 drops /network's 522 flat shells in favour of sub-branches. It stays
+ * a SET, but it now reads the current children CORRECTLY first (childNamesOf
+ * throws rather than under-report), so the drop is announced instead of
+ * happening behind a read that returned nothing.
+ */
 async function setChildren(segments, wanted, { replace = false } = {}) {
+  if (!replace) {
+    const r = await ensureChildrenSafe(segments, wanted, { dry: DRY })
+    if (!r.ok) return { ok: false, reason: r.error, added: r.added }
+    if (!r.missing.length) return { ok: true, added: 0 }
+    return { ok: true, added: DRY ? r.missing.length : r.added, dry: DRY || undefined }
+  }
+
   const have = await childNamesOf(segments)
   if (have === null) return { ok: false, reason: 'no layer' }
-  const target = replace ? wanted : [...have, ...wanted.filter(n => !have.includes(n))]
-  if (!replace && target.length === have.length) return { ok: true, added: 0, total: have.length }
-  if (replace && target.length === have.length && target.every((n, i) => have[i] === n)) return { ok: true, added: 0, total: have.length }
-  if (DRY) return { ok: true, added: target.length - have.length, dry: true }
+  const dropped = have.filter(n => !wanted.includes(n))
+  if (have.length === wanted.length && wanted.every((n, i) => have[i] === n)) {
+    return { ok: true, added: 0, total: have.length }
+  }
+  log(`   REPLACE /${segments.join('/')}: ${have.length} -> ${wanted.length}` +
+      (dropped.length ? `, dropping ${dropped.length} (${dropped.slice(0, 6).join(', ')}${dropped.length > 6 ? '\u2026' : ''})` : ''))
+  if (DRY) return { ok: true, replaced: wanted.length, dropped: dropped.length, dry: true }
   const name = segments[segments.length - 1]
-  const BATCH = 100
-  // A replace must land in ONE commit (a batched replace would transiently
-  // drop children); an append is batched so a huge commit can't freeze the tab.
-  if (replace) {
-    const r = await ask({ op: 'update', segments, layer: { name, children: target } })
-    return r.ok ? { ok: true, replaced: target.length } : { ok: false, reason: r.error }
-  }
-  let running = [...have], added = 0
-  const missing = target.slice(have.length)
-  for (let i = 0; i < missing.length; i += BATCH) {
-    const slice = missing.slice(i, i + BATCH)
-    const r = await ask({ op: 'update', segments, layer: { name, children: [...running, ...slice] } })
-    if (!r.ok) return { ok: false, reason: r.error, added }
-    running = [...running, ...slice]; added += slice.length
-  }
-  return { ok: true, added }
+  const r = await ask({ op: 'update', segments, layer: { name, children: wanted } })
+  return r.ok ? { ok: true, replaced: wanted.length, dropped: dropped.length } : { ok: false, reason: r.error }
 }
 
 async function assertRightHive() {
@@ -110,6 +113,7 @@ async function assertRightHive() {
 
 async function main() {
   const recs = JSON.parse(fs.readFileSync(PLAN, 'utf8'))
+  await bindHiveHelpers()
   await assertRightHive()
 
   const byParent = new Map()

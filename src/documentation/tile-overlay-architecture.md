@@ -4,7 +4,7 @@ The tile overlay is a Pixi.js-based contextual action system that appears when t
 
 ## File Map
 
-All files live under `hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/`:
+All files live under `hypercomb-essentials/src/presentation/tiles/`:
 
 | File | Responsibility |
 |------|---------------|

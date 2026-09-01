@@ -50,6 +50,15 @@
            filled by dragging a tile out of the sidebar. -->
       <span class="chat-subject" [title]="subjectPath() || ('chat.subject.none' | t: { tile: '' })">
         @if (subjectName()) {
+          <!-- THE SAME FACE THE SIDEBAR SHOWED. The rail names a tile by its
+               picture; naming it here by a word alone left the participant to
+               take on trust that the row they lit and the column they are
+               reading are the same tile. Purely additive — a tile with no
+               picture (or a cold index) draws the name exactly as before, and
+               nothing in this row depends on the square being there. -->
+          @if (subjectThumb(); as url) {
+            <img class="chat-subject-img" [src]="url" alt="" aria-hidden="true">
+          }
           <span class="chat-subject-tile">{{ subjectName() }}</span>
         } @else {
           <!-- About no single tile is about the HIVE — the same thing the
@@ -166,10 +175,24 @@
         </div>
       }
       <span class="chat-header-space"></span>
+      <button class="chat-close" type="button" (click)="close()"
+        [attr.aria-label]="'chat.close' | t">×</button>
+    </header>
+
+    <!-- THE WINDOW'S OWN TOOLS, one row down. Fold-away and the providers
+         console are not the header's business: the header says WHAT the
+         request is about, and the corner it used to share with them belongs
+         to the two controls every tool window has — settings and close, at
+         one size. So these two drop into the row underneath, where the chat
+         in hand already keeps its own controls, and every icon in that row
+         is the same icon size. Stamped in both branches (setup has no
+         conversation bar of its own) so folding away and reaching the
+         providers never depends on whether setup is still showing. -->
+    <ng-template #chatTools>
       <!-- FOLD AWAY TO THE HIVE. Not a second shape to choose between — the
            conversation is still here, it is just not in front of the tiles
            while you go and find them. -->
-      <button class="chat-peek" type="button" (click)="togglePeek()"
+      <button class="chat-tool chat-peek" type="button" (click)="togglePeek()"
         [class.on]="peeking()"
         [attr.aria-pressed]="peeking()"
         [title]="(peeking() ? 'chat.peek.off' : 'chat.peek.on') | t"
@@ -178,23 +201,17 @@
       </button>
       <!-- SHOW THE PROVIDERS. The footer line already points at the console,
            but it only reads as a link once you have noticed the model word in
-           it; this is the same console as a standing affordance, in the corner
-           where a window keeps its controls. It sits immediately left of the
-           settings gear (pinned there by hcDockedPanel, out of this flow) —
-           window settings are about THIS window, providers are about what
-           answers in it, and the two belong side by side.
+           it; this is the same console as a standing affordance.
            A TOGGLE, not a launcher: pressed while the console stands, and
            pressing it again shuts it. -->
-      <button class="chat-providers" type="button" (click)="openProviders()"
+      <button class="chat-tool chat-providers" type="button" (click)="openProviders()"
         [class.on]="providersOpen()"
         [attr.aria-pressed]="providersOpen()"
         [title]="(providersOpen() ? 'chat.providers.hide' : 'chat.providers.show') | t"
         [attr.aria-label]="(providersOpen() ? 'chat.providers.hide' : 'chat.providers.show') | t">
         <span class="mat-sym" aria-hidden="true">hub</span>
       </button>
-      <button class="chat-close" type="button" (click)="close()"
-        [attr.aria-label]="'chat.close' | t">×</button>
-    </header>
+    </ng-template>
 
     @if (showSetup()) {
     <!-- THE READING ROW. The header above it and the composer below it still
@@ -207,6 +224,10 @@
          branch would close a div the other branch never opened. -->
     <div class="chat-body">
     <div class="chat-reading">
+      <div class="chat-bar">
+        <span class="chat-bar-space"></span>
+        <ng-container *ngTemplateOutlet="chatTools"></ng-container>
+      </div>
       <!-- GUIDED SETUP — one step at a time, each checked off as it verifies
            itself. Steps 2 and 3 are LIVE: enabling flips the config gate, and
            the broker check completes on the worker's own bridge:status. The
@@ -386,13 +407,16 @@
             <span class="mat-sym" aria-hidden="true">verified</span>
           </button>
         }
+      }
+      <ng-container *ngTemplateOutlet="chatTools"></ng-container>
+      @if (canArchive() && activeId()) {
+        <span class="chat-bar-split" aria-hidden="true"></span>
         <button class="chat-put" type="button"
           (click)="archiveCurrent()"
           [title]="(activeArchived() ? 'chat.archive.restore' : 'chat.archive.put') | t"
           [attr.aria-label]="(activeArchived() ? 'chat.archive.restore' : 'chat.archive.put') | t">
           <span class="mat-sym" aria-hidden="true">{{ activeArchived() ? 'unarchive' : 'archive' }}</span>
         </button>
-        <span class="chat-bar-split" aria-hidden="true"></span>
       }
     </div>
 

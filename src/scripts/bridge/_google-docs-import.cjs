@@ -183,17 +183,31 @@ async function writeTileLayer(segments, { bodySig, props }) {
  * standing in. Reading it as "no children" would make every guarded `add`
  * fire again and duplicate every tile.
  */
+// Child names come from the ONE shared implementation
+// (scripts/lib/hive-children.mjs). This loop decoded them with
+// `get-resource`, which CANNOT work: a parent's `children` slot holds LAYER
+// sigs, and a layer sig is not a resource, so every name was swallowed by the
+// catch and the parent read as empty. `bridge` resolves to the payload and
+// throws on error, so it is wrapped into the {ok,data,error} envelope the
+// module expects.
+const asSend = async (req) => {
+  try { return { ok: true, data: await bridge(req) } }
+  catch (e) { return { ok: false, error: e.message } }
+}
+let namesOfChildSigs
+async function bindHiveHelpers() {
+  const { hiveChildren } = await import('../lib/hive-children.mjs')
+  ;({ namesOfChildSigs } = hiveChildren(asSend))
+}
+
 async function childNames(segments) {
   let layer
   try { layer = await bridge({ op: 'layer-at', segments }) } catch { return null }
-  const names = []
-  for (const sig of (layer.children || [])) {
-    try { names.push(JSON.parse((await bridge({ op: 'get-resource', sig })).text).name) } catch { /* unresolved */ }
-  }
-  return names
+  return namesOfChildSigs(layer.children || [], '/' + segments.join('/'))
 }
 
 async function main() {
+  await bindHiveHelpers()
   const parentCell = normalizeCell(PARENT_LABEL)
   console.log(`[import] parent tile: "${PARENT_LABEL}" -> /${parentCell}`)
 

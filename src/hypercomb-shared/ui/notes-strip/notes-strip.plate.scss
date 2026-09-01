@@ -9,6 +9,7 @@
 // always in — so the cascade is unchanged, and no single sheet carries the
 // whole panel.
 
+@use '../toolwindow' as tw;
 @use './notes-strip-shared' as *;
 
 // ── Identity plate ───────────────────────────────────────
@@ -118,7 +119,7 @@
   white-space: nowrap;
 
   &.is-q { color: color-mix(in srgb, var(--md-secondary) 85%, var(--md-on-surface)); }
-  &.is-a { color: rgb(110, 180, 255); }
+  &.is-a { color: tw.ink(rgb(110, 180, 255)); }
 }
 // Tiny hexagon in front of the child-tile count — the count is about TILES,
 // so it carries the tile glyph rather than a note dot.
@@ -255,7 +256,7 @@
   color: color-mix(in srgb, var(--md-on-surface) 80%, transparent);
 
   &.is-q { color: color-mix(in srgb, var(--md-secondary) 80%, var(--md-on-surface)); }
-  &.is-a { color: rgb(140, 195, 255); }
+  &.is-a { color: tw.ink(rgb(140, 195, 255)); }
 
   .dot { flex: 0 0 auto; transform: translateY(-1px); }
 }

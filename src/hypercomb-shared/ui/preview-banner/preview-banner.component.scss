@@ -4,6 +4,7 @@
 // frosted dark pill, no motion beyond one soft pulse dot. The two
 // buttons are the whole point — keep them unmistakable but cold.
 
+@use '../toolwindow' as tw;
 :host {
   position: fixed;
   // Clear the top header bar (2.5rem desktop, scaled by --hc-header-zoom);
@@ -43,7 +44,7 @@
   pointer-events: auto;
   white-space: nowrap;
   font-size: 0.8rem;
-  color: rgba(245, 245, 245, 0.85);
+  color: var(--hc-window-ink-plain);
 }
 
 .pulse {
@@ -64,7 +65,7 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-size: 0.68rem;
-  color: rgba(245, 245, 245, 0.55);
+  color: var(--hc-window-ink-quiet);
 }
 
 .name {
@@ -75,7 +76,7 @@
 }
 
 .meta {
-  color: rgba(245, 245, 245, 0.45);
+  color: var(--hc-window-ink-quiet);
   font-size: 0.72rem;
 }
 
@@ -86,7 +87,7 @@ button {
   font-size: 0.74rem;
   cursor: pointer;
   background: transparent;
-  color: rgba(245, 245, 245, 0.85);
+  color: var(--hc-window-ink-plain);
   transition: background 120ms ease, border-color 120ms ease;
 
   &:hover { background: rgba(245, 245, 245, 0.08); }
@@ -94,7 +95,7 @@ button {
 
 .adopt {
   border-color: rgba(111, 211, 154, 0.5);
-  color: #6fd39a;
+  color: tw.ink(#6fd39a);
 
   &:hover { background: rgba(111, 211, 154, 0.12); }
 }

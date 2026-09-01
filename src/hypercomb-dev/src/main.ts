@@ -63,7 +63,6 @@ import {
   protectOriginStorage,
 } from '@hypercomb/shared/core'
 import { postCommunityDomainsToServiceWorker } from '@hypercomb/shared/core/sw-domains'
-import { initSentinel, type SentinelBridge } from '../../hypercomb-web/src/setup/sentinel-bridge'
 import { appConfig } from './app/app.config'
 import { App } from './app/app'
 
@@ -239,12 +238,12 @@ const main = async (): Promise<void> => {
   await bootstrapApplication(App, appConfig)
   ;(window as any).__hcBoot('bootstrapApplication done')
 
-  // Dev uses the same explicit, lazy DCP transaction channel as production.
-  // Folder hard-copy and the push queue can request it without making DCP part
-  // of the startup critical path.
-  let sentinelPromise: Promise<SentinelBridge | null> | null = null
-  ;(globalThis as any).__getSentinel = (): Promise<SentinelBridge | null> =>
-    sentinelPromise ??= initSentinel()
+  // No DCP transaction channel is parked here. The transport role is retired
+  // (documentation/install-by-replication.md step 7): content arrives by
+  // replication — anonymous GETs of `<origin>/<sig>` — and web's main.ts
+  // dropped its lazy sentinel in the same pass. Callers that still reach for
+  // `__getSentinel` (the DCP half of /folder-sync) find nothing and take
+  // their bridge-absent path, which is the honest answer now.
 }
 
 main().catch(err => {

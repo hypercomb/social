@@ -61,7 +61,7 @@ course; clicking it sends the bee up.
 
 ## A lesson is an independent piece
 
-`hypercomb-essentials/src/diamondcoreprocessor.com/tutorial/`
+`hypercomb-essentials/src/tutorial/`
 
 | File | Role |
 |---|---|

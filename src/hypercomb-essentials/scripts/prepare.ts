@@ -574,7 +574,9 @@ for (const domain of domains) {
   const hasDeep = computeHasDeepSources(meta)
 
   if (hasDeep(domainRoot)) {
-    rootExports.push(`export * from './${domain}'`)
+    rootExports.push(domain.includes('.')
+      ? `export * from './${domain}'`
+      : `export * as ${toNamespace(domain)} from './${domain}'`)
   }
 
   // collect keys for master file
@@ -632,13 +634,13 @@ else filesSkipped++
   // bare hexagons. The games themselves stay lazy — the frame pulls the
   // chunk in on demand when a tile actually names one.
   const RENDER_CRITICAL_GAME_MODULES = [
-    'diamondcoreprocessor.com/games/game-view.drone.ts',
-    'diamondcoreprocessor.com/games/game.queen.ts',
+    'games/game-view.drone.ts',
+    'games/game.queen.ts',
   ]
   const isPreload = (f: string): boolean => {
     const rel = relFrom(SRC_ROOT, f)
     if (RENDER_CRITICAL_GAME_MODULES.includes(rel)) return false
-    return rel.startsWith('diamondcoreprocessor.com/games/')
+    return rel.startsWith('games/')
   }
   const startupFiles = sideEffectFiles.filter(f => !isPreload(f))
   const preloadFiles = sideEffectFiles.filter(isPreload)

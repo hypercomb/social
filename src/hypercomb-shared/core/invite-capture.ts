@@ -10,7 +10,7 @@
 // Shell-level plumbing imported by BOTH web and dev main.ts right after
 // `ioc.web` (parity). It holds NO essentials import — the only shared contract
 // is the sessionStorage key, mirrored from
-// diamondcoreprocessor.com/sharing/meeting-invite.ts (PENDING_INVITE_KEY).
+// sharing/meeting-invite.ts (PENDING_INVITE_KEY).
 // Keep the two literals in sync.
 
 const PENDING_INVITE_KEY = 'hc:pending-invite' // mirror of essentials meeting-invite.ts

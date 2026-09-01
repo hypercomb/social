@@ -32,7 +32,7 @@ $steel: rgb(126, 182, 214);
   border: 1px solid rgba($steel, 0.4);
   border-radius: var(--hc-radius-floating);
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba($steel, 0.06) inset;
-  color: #eef3f8;
+  color: var(--hc-window-ink-loud);
   font-family: var(--hc-mono, system-ui);
   padding: 0.9rem 1rem 0.75rem;
 
@@ -53,18 +53,18 @@ $steel: rgb(126, 182, 214);
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(206, 224, 240, 0.55);
+  color: var(--hc-window-ink-quiet);
 }
 .ip-close {
   background: none;
   border: none;
   padding: 0;
-  color: rgba(226, 235, 244, 0.55);
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
   display: inline-flex;
   transition: color 120ms ease;
   .mat-sym { font-size: 1.15rem; }
-  &:hover { color: #fff; }
+  &:hover { color: var(--hc-window-ink-loud); }
 }
 
 // ── search field ─────────────────────────────────────────
@@ -97,13 +97,13 @@ $steel: rgb(126, 182, 214);
   min-width: 0;
   font-family: inherit;
   font-size: 0.85rem;
-  color: #eef3f8;
+  color: var(--hc-window-ink-loud);
   background: transparent;
   border: none;
   outline: none;
   padding: 0.5rem 0;
   caret-color: $steel;
-  &::placeholder { color: rgba(226, 235, 244, 0.3); }
+  &::placeholder { color: var(--hc-window-ink-quiet); }
 }
 .ip-search-clear {
   flex-shrink: 0;
@@ -114,10 +114,10 @@ $steel: rgb(126, 182, 214);
   border: none;
   border-radius: 50%;
   cursor: pointer;
-  color: rgba(226, 235, 244, 0.4);
+  color: var(--hc-window-ink-quiet);
   transition: color 120ms ease, background 120ms ease;
   .mat-sym { font-size: 0.95rem; }
-  &:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
+  &:hover { color: var(--hc-window-ink-loud); background: rgba(255, 255, 255, 0.08); }
 }
 
 // ── hive ─────────────────────────────────────────────────
@@ -148,13 +148,13 @@ $steel: rgb(126, 182, 214);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(226, 235, 244, 0.82);
+  color: var(--hc-window-ink-plain);
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
 
   .mat-sym { font-size: 1.25rem; }
 
-  &:hover { background: rgba($steel, 0.30); color: #fff; }
+  &:hover { background: rgba($steel, 0.30); color: var(--hc-window-ink-loud); }
   &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: -2px; }
 }
 
@@ -168,7 +168,7 @@ $steel: rgb(126, 182, 214);
   align-items: center;
   gap: 0.45rem;
   text-align: center;
-  color: rgba(226, 235, 244, 0.45);
+  color: var(--hc-window-ink-quiet);
   font-size: 0.8rem;
   .mat-sym { font-size: 1.6rem; opacity: 0.55; }
 }
@@ -184,6 +184,6 @@ $steel: rgb(126, 182, 214);
   font-size: 0.6rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: rgba(206, 224, 240, 0.4);
+  color: var(--hc-window-ink-quiet);
   font-variant-numeric: tabular-nums;
 }

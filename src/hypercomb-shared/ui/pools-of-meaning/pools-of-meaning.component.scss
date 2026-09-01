@@ -28,13 +28,13 @@ $steel: rgb(126, 182, 214);
 }
 
 .pools-panel.pinned {
-  border-color: rgba($steel, 0.7);
-  box-shadow: 0 16px 50px rgba(var(--hc-panel-shadow), 0.6), 0 0 0 1px rgba($steel, 0.18) inset;
+  border-color: rgba(var(--acc), 0.7);
+  box-shadow: 0 16px 50px rgba(var(--hc-panel-shadow), 0.6), 0 0 0 1px rgba(var(--acc), 0.18) inset;
 }
 
 .pools-header {
   @include tw.header;
-  border-bottom: 1px solid rgba($steel, 0.22);
+  border-bottom: 1px solid rgba(var(--acc), 0.22);
   cursor: grab;
   user-select: none;
   touch-action: none;
@@ -45,7 +45,7 @@ $steel: rgb(126, 182, 214);
 }
 
 .pools-drag-grip {
-  color: rgba(var(--hc-panel-ink), 0.35);
+  color: var(--hc-window-ink-quiet);
   font-size: 0.85rem;
   line-height: 1;
 }
@@ -54,21 +54,21 @@ $steel: rgb(126, 182, 214);
   flex: 1;
   font-size: 0.82rem;
   letter-spacing: 0.05em;
-  color: rgba($steel, 0.95);
+  color: var(--hc-window-accent);
 }
 
 .pools-close {
   flex: 0 0 auto;
   background: transparent;
   border: none;
-  color: rgba(var(--hc-panel-ink), 0.5);
+  color: var(--hc-window-ink-quiet);
   font-size: 1.1rem;
   line-height: 1;
   cursor: pointer;
   padding: 0 0.15rem;
   transition: color 150ms ease;
 
-  &:hover { color: #ffc8c8; }
+  &:hover { color: tw.ink(#ffc8c8); }
 }
 
 .pools-body {
@@ -85,7 +85,7 @@ $steel: rgb(126, 182, 214);
   margin: 0;
   font-size: 0.78rem;
   line-height: 1.45;
-  color: rgba(var(--hc-panel-ink), 0.55);
+  color: var(--hc-window-ink-quiet);
 }
 
 .pools-roots {
@@ -112,12 +112,12 @@ $steel: rgb(126, 182, 214);
   font-family: 'Material Symbols Outlined';
   font-size: 1rem;
   line-height: 1;
-  color: rgba($steel, 0.8);
+  color: var(--hc-window-accent-quiet);
 }
 
 .pools-domain {
   flex: 1;
-  color: rgba(var(--hc-panel-ink), 0.88);
+  color: var(--hc-window-ink-plain);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -130,11 +130,11 @@ $steel: rgb(126, 182, 214);
   padding: 0.1rem 0.4rem;
   border-radius: 999px;
   border: 1px solid rgba(var(--hc-panel-ink), 0.18);
-  color: rgba(var(--hc-panel-ink), 0.55);
+  color: var(--hc-window-ink-quiet);
 
   &.self {
-    border-color: rgba($steel, 0.5);
-    color: rgba($steel, 0.95);
+    border-color: rgba(var(--acc), 0.5);
+    color: var(--hc-window-accent);
   }
 }
 
@@ -144,27 +144,27 @@ $steel: rgb(126, 182, 214);
   cursor: pointer;
   border-radius: 4px;
   padding: 0.22rem 0.45rem;
-  background: rgba($steel, 0.12);
-  border: 1px solid rgba($steel, 0.45);
-  color: $steel;
+  background: rgba(var(--acc), 0.12);
+  border: 1px solid rgba(var(--acc), 0.45);
+  color: var(--hc-window-accent);
   transition: background 150ms ease, color 150ms ease;
 
-  &:hover { background: rgba($steel, 0.24); color: var(--hc-panel-text); }
+  &:hover { background: rgba(var(--acc), 0.24); color: var(--hc-panel-text); }
 
   &.ghost {
     background: transparent;
     border: none;
-    color: rgba(var(--hc-panel-ink), 0.4);
+    color: var(--hc-window-ink-quiet);
     font-size: 0.95rem;
     line-height: 1;
     padding: 0 0.25rem;
 
-    &:hover { color: #ffc8c8; }
+    &:hover { color: tw.ink(#ffc8c8); }
   }
 }
 
 .pools-stick-hint {
   font-size: 0.66rem;
-  color: rgba(var(--hc-panel-ink), 0.4);
+  color: var(--hc-window-ink-quiet);
   letter-spacing: 0.03em;
 }

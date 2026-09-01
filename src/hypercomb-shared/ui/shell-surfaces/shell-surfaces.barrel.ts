@@ -31,10 +31,14 @@ import '../features-viewer/features-viewer.component'
 // The guided tours, as a roster you can read before you fly one. It replaced
 // the rail bee's Ctrl+click flyout — see tutorials-window.component.ts.
 import '../tutorials-window/tutorials-window.component'
+// What is behind the hive and what fills a blank tile, in one window — and the
+// only surface from which a picture of your own can be either.
+import '../backgrounds-window/backgrounds-window.component'
 import '../sequence-viewer/sequence-viewer.component'
 import '../tags-viewer/tags-viewer.component'
 import '../workflow-designer/workflow-designer.component'
 import '../layout-designer/layout-designer.component'
+import '../flex-editor/flex-editor.component'
 import '../pheromone-tiles/pheromone-tiles.component'
 import '../observe-viewer/observe-viewer.component'
 import '../publish-panel/publish-panel.component'

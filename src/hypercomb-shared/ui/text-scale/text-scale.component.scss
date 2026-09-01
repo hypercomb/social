@@ -6,6 +6,9 @@
 
 :host { display: block; }
 
+// Closed, this is one small glyph — it must not hold a row open on its own.
+.text-scale:not(.open) { gap: 0; }
+
 .text-scale {
   display: flex;
   flex-wrap: wrap;   // in a narrow pane the last step wraps; it never clips
@@ -14,6 +17,28 @@
   font-family: var(--hc-mono);
   font-size: 0.68rem;
   letter-spacing: 0.02em;
+}
+
+// The gear. Dim until you want it, and it stays lit while the ladder is open
+// so the row reads as one control rather than as a button and some chips.
+.text-scale-gear {
+  flex: 0 0 auto;
+  padding: 0;
+  margin-right: 0.35rem;
+  background: none;
+  border: none;
+  color: rgba(var(--hc-chrome-ink), 0.38);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 120ms ease, transform 200ms var(--md-easing-standard, ease);
+
+  &:hover { color: rgba(var(--hc-chrome-ink), 0.8); }
+
+  &.on {
+    color: var(--cmd-accent-command, var(--hc-chrome-text));
+    transform: rotate(60deg);   // a gear that turned, not a button that lit
+  }
 }
 
 .text-scale-label {

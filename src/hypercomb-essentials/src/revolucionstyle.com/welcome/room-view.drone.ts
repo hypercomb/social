@@ -15,13 +15,13 @@
 // and this one steps aside.
 
 import { Drone, EffectBus, RESOURCE_URL_PREFIX } from '@hypercomb/core'
-import { titleForLabel } from '../../diamondcoreprocessor.com/commands/decoration-kind-index.js'
-import { defaultViewAt } from '../../diamondcoreprocessor.com/commands/view-default.js'
-import { isFeatureHidden } from '../../diamondcoreprocessor.com/sharing/feature-hidden.js'
-import { rewritePageRefs } from '../../diamondcoreprocessor.com/sharing/decoration-closure.js'
-import { scopeCellPageCss } from '../../diamondcoreprocessor.com/presentation/tiles/cell-page-css-scope.js'
-import { trackScrollGutter } from '../../diamondcoreprocessor.com/presentation/tiles/scroll-gutter.js'
-import type { BackGesture } from '../../diamondcoreprocessor.com/navigation/back-gesture.service.js'
+import { titleForLabel } from '../../commands/decoration-kind-index.js'
+import { defaultViewAt } from '../../commands/view-default.js'
+import { isFeatureHidden } from '../../sharing/feature-hidden.js'
+import { rewritePageRefs } from '../../sharing/decoration-closure.js'
+import { scopeCellPageCss } from '../../presentation/tiles/cell-page-css-scope.js'
+import { trackScrollGutter } from '../../presentation/tiles/scroll-gutter.js'
+import type { BackGesture } from '../../navigation/back-gesture.service.js'
 
 export const ROOM_VIEW = 'revolucion-room'
 /** The room shows the cell's existing page — the website behaviour's kind. */

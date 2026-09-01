@@ -7,7 +7,7 @@ This is the shape all forward feature work takes. It is not a slides quirk; the
 slide model is only the first instance.
 
 The relation itself lives in one place and belongs to no behaviour:
-[pheromones/enrollment.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/pheromones/enrollment.ts),
+[pheromones/enrollment.ts](../hypercomb-essentials/src/pheromones/enrollment.ts),
 driven by one verb, `/enroll`. A website, a slide, a photo, a page and a workflow
 step all enrol the same way, into the same kind of set.
 
@@ -306,9 +306,9 @@ parts:distribute-visual   { segments, parts?, creationId?, place? }
 
 | Piece | Where | What it holds |
 |---|---|---|
-| the frame | [visual-division.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/visual-division.ts) | pure geometry — the spiral, the slots, the derived-visual spec. No IoC, no canvas, no store, so the shape is testable with none of them. |
-| the act | [visual-distribution.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/assistant/visual-distribution.ts) | cuts the bytes, writes each part its picture, seats each part, records the whole's frame. |
-| the door | [visual-distribution.drone.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/assistant/visual-distribution.drone.ts) | the effect any producer emits, allowlisted on the bridge so a responder that created the parts remotely can hand the appearance back to the hive — which is the only place the pixels are. |
+| the frame | [visual-division.ts](../hypercomb-essentials/src/presentation/tiles/visual-division.ts) | pure geometry — the spiral, the slots, the derived-visual spec. No IoC, no canvas, no store, so the shape is testable with none of them. |
+| the act | [visual-distribution.ts](../hypercomb-essentials/src/assistant/visual-distribution.ts) | cuts the bytes, writes each part its picture, seats each part, records the whole's frame. |
+| the door | [visual-distribution.drone.ts](../hypercomb-essentials/src/assistant/visual-distribution.drone.ts) | the effect any producer emits, allowlisted on the bridge so a responder that created the parts remotely can hand the appearance back to the hive — which is the only place the pixels are. |
 
 What lands, and on which side:
 
@@ -426,11 +426,11 @@ thing holding the first" is the container coming back, and wants a mark instead.
    remodel that changes `decorationKind` makes yesterday's content flip straight
    back to hexagons with no error. `seedCohortOn(<cohort>, [KINDS])`, guarded on
    `readGlobalOnKinds()` — see
-   [behavior-enablement.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/sharing/behavior-enablement.ts).
+   [behavior-enablement.ts](../hypercomb-essentials/src/sharing/behavior-enablement.ts).
 2. **Keep the retired kind readable.** Put it in `legacyKinds` and keep the
    children collect as a fallback path. Nothing writes it again.
 3. **Content hops through a meta envelope.** Use
-   [artifact-content.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/artifact-content.ts)
+   [artifact-content.ts](../hypercomb-essentials/src/presentation/tiles/artifact-content.ts)
    — `payload.content` holds an envelope signature, never a raw
    `payload.<x>Sig` and never a raw entry in a list. `content` is a declared
    EDGE field, so closure walkers carry it with no per-feature work. Give the

@@ -6,15 +6,15 @@ let loading: Promise<void> | undefined
 
 export function preloadEffects(): Promise<void> {
   return loading ??= Promise.all([
-  import('./diamondcoreprocessor.com/games/arkanoid/arkanoid.drone'),
-  import('./diamondcoreprocessor.com/games/arkanoid/arkanoid.queen'),
-  import('./diamondcoreprocessor.com/games/arkanoid/theme'),
-  import('./diamondcoreprocessor.com/games/bubble/bubble.drone'),
-  import('./diamondcoreprocessor.com/games/bubble/bubble.queen'),
-  import('./diamondcoreprocessor.com/games/roper/roper.drone'),
-  import('./diamondcoreprocessor.com/games/roper/roper.queen'),
-  import('./diamondcoreprocessor.com/games/solomon/solomon.drone'),
-  import('./diamondcoreprocessor.com/games/solomon/solomon.queen'),
-  import('./diamondcoreprocessor.com/games/tutor/game-registry')
+  import('./games/arkanoid/arkanoid.drone'),
+  import('./games/arkanoid/arkanoid.queen'),
+  import('./games/arkanoid/theme'),
+  import('./games/bubble/bubble.drone'),
+  import('./games/bubble/bubble.queen'),
+  import('./games/roper/roper.drone'),
+  import('./games/roper/roper.queen'),
+  import('./games/solomon/solomon.drone'),
+  import('./games/solomon/solomon.queen'),
+  import('./games/tutor/game-registry')
   ]).then(() => undefined)
 }

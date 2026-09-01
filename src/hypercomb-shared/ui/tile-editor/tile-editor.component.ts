@@ -19,13 +19,13 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import { TextScaleComponent, surfaceScale } from '../text-scale/text-scale.component'
 
 import type { TileEditorService } from
-  '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.service'
+  '@hypercomb/essentials/editor/tile-editor.service'
 import type { ImageEditorService } from
-  '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-editor.service'
+  '@hypercomb/essentials/editor/image-editor.service'
 import type { LinkSafetyService } from
-  '@hypercomb/essentials/diamondcoreprocessor.com/safety/link-safety.service'
+  '@hypercomb/essentials/safety/link-safety.service'
 import type { NotesService, Note } from
-  '@hypercomb/essentials/diamondcoreprocessor.com/notes/notes.drone'
+  '@hypercomb/essentials/notes/notes.drone'
 
 /** Q&A item view-model — pairs a `[Q]`-prefixed note with the
  *  matching `[A:<qId>]` answer note when one exists. The qId is the

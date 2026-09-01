@@ -1,7 +1,7 @@
 // Standalone harness entry: the REAL engine + renderer, drawn to a canvas.
-import { Engine, W, H, BRICK_W, BRICK_X0, COLS } from '../../../../hypercomb-essentials/src/diamondcoreprocessor.com/games/arkanoid/engine.js'
-import { Renderer } from '../../../../hypercomb-essentials/src/diamondcoreprocessor.com/games/arkanoid/renderer.js'
-import { LEVELS, cloneLevel } from '../../../../hypercomb-essentials/src/diamondcoreprocessor.com/games/arkanoid/levels.js'
+import { Engine, W, H, BRICK_W, BRICK_X0, COLS } from '../../../../hypercomb-essentials/src/games/arkanoid/engine.js'
+import { Renderer } from '../../../../hypercomb-essentials/src/games/arkanoid/renderer.js'
+import { LEVELS, cloneLevel } from '../../../../hypercomb-essentials/src/games/arkanoid/levels.js'
 
 const w = window as unknown as Record<string, unknown>
 w['ARK'] = { W, H, BRICK_W, BRICK_X0, COLS, levels: LEVELS.length }

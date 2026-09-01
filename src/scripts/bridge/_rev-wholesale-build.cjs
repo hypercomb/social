@@ -41,15 +41,23 @@ async function ask(req, attempts = 4) {
   return { ok: false, error: 'renderer never came back' }
 }
 
+// Child reads and child creation come from ONE implementation, shared with
+// every other bridge script: scripts/lib/hive-children.mjs. The loops this
+// replaces decoded child names with `get-resource`, which CANNOT work — a
+// parent's `children` slot holds LAYER sigs and a layer sig is not a resource
+// — so every parent read as EMPTY, and that empty read fed a `children:`
+// update, which the committer applies by REPLACING the slot.
+let namesOfChildSigs, childNamesOf, cellExists, ensureChildren
+async function bindHiveHelpers() {
+  const { hiveChildren } = await import('../lib/hive-children.mjs')
+  ;({ namesOfChildSigs, childNamesOf, cellExists, ensureChildren } = hiveChildren(ask))
+}
+
 // ── guard: never write into the wrong hive ────────────────────────────
 async function assertRightHive() {
   const root = await ask({ op: 'layer-at', segments: [] })
   if (!root.ok) throw new Error('cannot read hive root: ' + root.error)
-  const names = []
-  for (const sig of (root.data?.children || []).map(String)) {
-    const r = await ask({ op: 'get-resource', sig })
-    if (r.ok) { try { const nm = JSON.parse(r.data.text).name; if (nm) names.push(nm) } catch {} }
-  }
+  const names = await namesOfChildSigs(root.data?.children || [], '_rev-wholesale-build.cjs')
   if (!names.includes(ROOT)) {
     throw new Error('WRONG HIVE — no /' + ROOT + ' at root.\n  root: ' + names.join(', '))
   }
@@ -58,11 +66,7 @@ async function assertRightHive() {
 async function childNames(segments) {
   const layer = await ask({ op: 'layer-at', segments })
   if (!layer.ok) return null
-  const names = []
-  for (const sig of (layer.data?.children || []).map(String)) {
-    const r = await ask({ op: 'get-resource', sig })
-    if (r.ok) { try { const nm = JSON.parse(r.data.text).name; if (nm) names.push(nm) } catch {} }
-  }
+  const names = await namesOfChildSigs(layer.data?.children || [], '_rev-wholesale-build.cjs')
   return names
 }
 
@@ -77,10 +81,8 @@ async function ensureChild(segments) {
   }
   if (have.includes(name)) return 'present'
   if (DRY) return 'would-create'
-  const u = await ask({
-    op: 'update', segments: parent,
-    layer: { name: parent[parent.length - 1] || ROOT, children: [...have, name] },
-  })
+  // APPEND, never a `children:` SET — see scripts/lib/hive-children.mjs.
+  const u = await ensureChildren(parent, [name])
   return u.ok ? 'created' : 'ERR ' + u.error
 }
 
@@ -305,6 +307,7 @@ const MODEL = [
 // ══════════════════════════════════════════════════════════════════════
 
 async function main() {
+  await bindHiveHelpers()
   console.log(DRY ? '── DRY RUN ──' : '── BUILDING ──')
   await assertRightHive()
   console.log('hive: ok (/' + ROOT + ' present)')

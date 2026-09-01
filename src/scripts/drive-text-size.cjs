@@ -98,8 +98,15 @@ async function main() {
     const base = await page.evaluate(fontPx, '.command-intel')
     check('completion panel renders at a measurable size', base > 0, `${base}px`)
 
+    // The ladder lives behind a gear now — closed, the pane shows one glyph.
+    check('the ladder is CLOSED until the gear is used',
+      await page.locator('.command-intel .text-scale-step').count() === 0)
+    const gear = page.locator('.command-intel .text-scale-gear').first()
+    check('the detail pane carries a gear', await gear.count() > 0)
+    await gear.click(); await page.waitForTimeout(350)
+
     const large = page.locator('.command-intel .text-scale-step', { hasText: 'Large' }).first()
-    check('the ladder is offered in the detail pane', await large.count() > 0)
+    check('the gear opens the ladder', await large.count() > 0)
     await large.click()
     await page.waitForTimeout(500)
     const grown = await page.evaluate(fontPx, '.command-intel')
@@ -122,6 +129,9 @@ async function main() {
     await page.waitForTimeout(500)
     check('Ctrl+- steps back down',
       await page.evaluate(() => localStorage.getItem('hc:panel-text:command-intel')) === '1.15')
+
+    check('the panel stays open while its own setting is used',
+      await page.locator('.command-intel').count() === 1)
 
     await dropOverlay()
     await page.locator('.command-intel').screenshot({ path: path.join(out, 'intel-large.png') })
@@ -158,8 +168,10 @@ async function main() {
     } else {
       await dropOverlay()
       const eBase = await page.evaluate(fontPx, '.editor-panel')
+      await page.locator('.editor-panel .text-scale-gear').first().click()
+      await page.waitForTimeout(350)
       const eLarger = page.locator('.editor-panel .text-scale-step', { hasText: 'Larger' }).first()
-      check('the editor offers the same ladder', await eLarger.count() > 0)
+      check('the editor offers the same gear and ladder', await eLarger.count() > 0)
       await eLarger.click()
       await page.waitForTimeout(500)
       const eGrown = await page.evaluate(fontPx, '.editor-panel')

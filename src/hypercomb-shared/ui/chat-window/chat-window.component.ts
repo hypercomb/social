@@ -1112,6 +1112,41 @@ export class ChatWindowComponent implements OnDestroy {
     return segments[segments.length - 1] ?? ''
   })
 
+  // ── WHAT YOU PICKED, SHOWN AT THE TOP ───────────────────────────────────
+  //
+  // The sidebar says which row is selected; this says the same thing at the
+  // head of the reading column, where your eye already is once you have
+  // stopped choosing and started asking. A NAME alone was not enough — the
+  // rail identifies a tile by its PICTURE, and the header identified the same
+  // tile by a word, so the two did not obviously agree. Now the header wears
+  // the tile's own picture, resolved through the SAME resolver the shelf
+  // squares use, so one tile can never show two faces in one window.
+  //
+  // Best-effort and never load-bearing: no picture (or a cold index) leaves
+  // the header exactly what it was — the name on its own.
+
+  /** The selected tile's picture as a blob: URL, or '' for none. */
+  readonly subjectThumb = signal('')
+  #subjectThumbUrl: string | null = null
+  #subjectThumbToken = 0
+
+  /** Resolve the picture for whatever the window is now about. Every path
+   *  through here revokes the URL it replaces, and a superseding change wins
+   *  the race — the same discipline `#refreshContextThumbs` keeps. */
+  async #refreshSubjectThumb(): Promise<void> {
+    const token = ++this.#subjectThumbToken
+    const path = this.subjectPath()
+    const segments = path.split('/').filter(Boolean)
+    const label = segments[segments.length - 1] ?? ''
+    const url = label
+      ? await resolveEntryImageUrl(label, segments.slice(0, -1), 'large').catch(() => null)
+      : null
+    if (token !== this.#subjectThumbToken) { if (url) URL.revokeObjectURL(url); return }
+    if (this.#subjectThumbUrl) URL.revokeObjectURL(this.#subjectThumbUrl)
+    this.#subjectThumbUrl = url
+    this.subjectThumb.set(url ?? '')
+  }
+
   /** Clear the shelf — the request carries nothing extra again. The tiles
    *  are untouched and the clipboard is left alone: this empties what THIS
    *  question would have carried, nothing more. */
@@ -1603,6 +1638,14 @@ export class ChatWindowComponent implements OnDestroy {
       setTimeout(() => void highlightBlocks(this.scroller()?.nativeElement), 0)
     })
 
+    // The header follows the selection. `subjectPath` is the one signal that
+    // knows what the window is about — it already recomputes as the thread
+    // moves — so reading it here is the whole subscription.
+    effect(() => {
+      this.subjectPath()
+      void this.#refreshSubjectThumb()
+    })
+
     // The left sidebar. Its host `<div>` exists only while the window is open,
     // so this effect re-fires as the window comes and goes; the rail itself is
     // created once and re-mounted, keeping its trail and subject. Essentials
@@ -1852,6 +1895,9 @@ export class ChatWindowComponent implements OnDestroy {
     this.#thumbToken++
     for (const url of this.#thumbUrls.values()) URL.revokeObjectURL(url)
     this.#thumbUrls.clear()
+    this.#subjectThumbToken++
+    if (this.#subjectThumbUrl) URL.revokeObjectURL(this.#subjectThumbUrl)
+    this.#subjectThumbUrl = null
   }
 
   #retryTimer: ReturnType<typeof setInterval> | null = null

@@ -42,7 +42,7 @@ $accent: #a8c8ff;
   font-family: var(--hc-mono, system-ui);
   // Content scale — inner em sizes follow this root font.
   font-size: calc(1rem * var(--hc-panel-scale, 1));
-  color: #f3f3f3;
+  color: var(--hc-window-ink-loud);
   outline: none;
   @include tw.panel($accent, right);
 }
@@ -63,13 +63,13 @@ $accent: #a8c8ff;
 .files-title {
   font-size: 0.9em;
   letter-spacing: 0.05em;
-  color: rgba(var(--acc), 0.95);
+  color: var(--hc-window-accent);
   flex-shrink: 0;
 }
 
 .files-cell {
   font-size: 0.8em;
-  color: rgba(var(--hc-panel-ink), 0.55);
+  color: var(--hc-window-ink-quiet);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -95,13 +95,13 @@ $accent: #a8c8ff;
   background: transparent;
   border: 1px solid transparent;
   border-radius: tw.$radius-control;
-  color: rgba(226, 235, 244, 0.55);
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
   transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
 
   .mat-sym { font-size: 1rem; line-height: 1; }
 
-  &:hover { color: rgba(238, 243, 248, 0.9); }
+  &:hover { color: var(--hc-window-ink-loud); }
 
   &.active {
     color: var(--hc-panel-text);
@@ -113,7 +113,7 @@ $accent: #a8c8ff;
 .files-close {
   background: transparent;
   border: none;
-  color: rgba(var(--hc-panel-ink), 0.7);
+  color: var(--hc-window-ink-quiet);
   font-size: 1.4em;
   line-height: 1;
   cursor: pointer;
@@ -126,7 +126,7 @@ $accent: #a8c8ff;
   margin: 0;
   padding: 1.5em 1em;
   font-size: 0.85em;
-  color: rgba(var(--hc-panel-ink), 0.45);
+  color: var(--hc-window-ink-quiet);
 }
 
 // ── selection response ────────────────────────────────────────────
@@ -141,7 +141,7 @@ $accent: #a8c8ff;
   border: 0;
   border-bottom: 1px solid rgba(var(--acc), 0.18);
   background: rgba(var(--acc), 0.07);
-  color: rgba(222, 234, 255, 0.85);
+  color: var(--hc-window-ink-plain);
   cursor: pointer;
   font: inherit;
   font-size: 0.8em;
@@ -149,7 +149,7 @@ $accent: #a8c8ff;
   transition: background 140ms ease, color 140ms ease;
 
   .mat-sym { font-size: 1.1em; color: rgb(var(--acc)); }
-  &:hover { background: rgba(var(--acc), 0.14); color: #f2f7ff; }
+  &:hover { background: rgba(var(--acc), 0.14); color: var(--hc-window-ink-loud); }
   &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: -1px; }
 }
 
@@ -178,7 +178,7 @@ $accent: #a8c8ff;
   background: rgba(var(--hc-panel-ink), 0.04);
   border: 1px solid rgba(var(--hc-panel-ink), 0.12);
   border-radius: tw.$radius-card;
-  color: rgba(var(--hc-panel-ink), 0.8);
+  color: var(--hc-window-ink-plain);
   font-family: inherit;
   font-size: 0.72em;
   cursor: pointer;
@@ -241,11 +241,11 @@ $accent: #a8c8ff;
   align-items: center;
   gap: 0.3em;
   font-size: 0.7em;
-  color: rgba(var(--hc-panel-ink), 0.4);
+  color: var(--hc-window-ink-quiet);
 }
 
 .files-source {
-  color: rgba(168, 200, 255, 0.7);
+  color: var(--hc-window-accent-quiet);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -284,7 +284,7 @@ $accent: #a8c8ff;
 
 .files-name {
   font-size: 0.85em;
-  color: #f3f3f3;
+  color: var(--hc-window-ink-loud);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -292,7 +292,7 @@ $accent: #a8c8ff;
 
 .files-size {
   font-size: 0.7em;
-  color: rgba(var(--hc-panel-ink), 0.4);
+  color: var(--hc-window-ink-quiet);
 }
 
 .files-actions {
@@ -320,11 +320,11 @@ $accent: #a8c8ff;
   &.remove {
     background: transparent;
     border: none;
-    color: rgba(var(--hc-panel-ink), 0.4);
+    color: var(--hc-window-ink-quiet);
     font-size: 1.1em;
     line-height: 1;
     padding: 0 0.2em;
 
-    &:hover { color: #ffc8c8; }
+    &:hover { color: tw.ink(#ffc8c8); }
   }
 }

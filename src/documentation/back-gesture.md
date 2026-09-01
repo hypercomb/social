@@ -10,7 +10,7 @@ answer it, so a right-click on a welcome page, a website page, a post-it or a
 side panel raised *Reload / View page source* — a menu about the document, in a
 shell whose whole point is that there is no document to think about.
 
-`diamondcoreprocessor.com/navigation/back-gesture.service.ts` is now the ONE
+`navigation/back-gesture.service.ts` is now the ONE
 place that decides what the right button means. IoC key
 `@diamondcoreprocessor.com/BackGesture`.
 

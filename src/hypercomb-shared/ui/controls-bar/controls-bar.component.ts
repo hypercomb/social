@@ -1730,6 +1730,18 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     if (leftTop) root.style.setProperty('--hc-controls-left-top', leftTop)
     else root.style.removeProperty('--hc-controls-left-top')
     this.#paintControlsEdge(side, left, right, stage?.offsetTop ?? 0)
+
+    // SAY THAT THE BAR HAS MOVED.
+    //
+    // Every docked tool window positions itself with a `calc()` over the two
+    // variables just published, so re-docking the bar SLIDES every one of them
+    // — same size, new place. A ResizeObserver reports size and nothing else,
+    // so each panel went on reserving the edge it measured at its old
+    // position: with the bar widened under it, a left-docked panel's true
+    // right edge moved from 375px to 481px while its reservation stayed at
+    // 375, and it covered 106px of the surface beside it. The bar is the only
+    // thing that knows this happened, so the bar is what says so.
+    EffectBus.emit('viewport:controls-edge', { left, right })
   }
 
   // ── THE BAR'S OWN EDGE, WHICH NOTHING GETS TO COVER ─────────────────

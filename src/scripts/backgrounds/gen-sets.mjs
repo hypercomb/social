@@ -117,7 +117,7 @@ const PUBLIC_DIRS = [
   'shared-public/substrate',
 ].filter(d => existsSync(d.split('/substrate')[0]))
 
-const SRC_DIR = 'hypercomb-essentials/src/diamondcoreprocessor.com/presentation/background/textures/sets'
+const SRC_DIR = 'hypercomb-essentials/src/presentation/background/textures/sets'
 
 const TILE = { w: 512, h: 512, dir: '', suffix: '' }                     // per-tile fill raster
 const LAND = { w: 1600, h: 1000, dir: 'screen/', suffix: '' }            // landscape canvas backdrop

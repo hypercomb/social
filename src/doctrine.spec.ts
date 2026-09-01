@@ -168,7 +168,7 @@ describe('doctrine ratchets', () => {
     const actual = filesMatching(/['"`][0-9a-f]{64}['"`]/)
     assertRatchet(actual, [
       'hypercomb-shared/core/store.ts',                                              // EMPTY_CONTENT_SIG
-      'hypercomb-essentials/src/diamondcoreprocessor.com/history/history.service.ts', // EMPTY_LAYER_*_SIG
+      'hypercomb-essentials/src/history/history.service.ts', // EMPTY_LAYER_*_SIG
     ], 'hardcoded signature')
   })
 
@@ -186,17 +186,17 @@ describe('doctrine ratchets', () => {
       'hypercomb-shared/core/initializers/location-parser.ts',
       'hypercomb-shared/core/store.ts',
       'hypercomb-essentials/scripts/copy-content.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/clipboard/clipboard.worker.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/commands/website-archive.queen.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/editor/viewport-store.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/history/history.service.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/move/layout.queen.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/move/layout.service.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/sharing/content-broker.drone.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/sharing/feedback-channel.drone.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/sharing/host-sync.service.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/sharing/push-queue.service.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/sharing/swarm.drone.ts',
+      'hypercomb-essentials/src/clipboard/clipboard.worker.ts',
+      'hypercomb-essentials/src/commands/website-archive.queen.ts',
+      'hypercomb-essentials/src/editor/viewport-store.ts',
+      'hypercomb-essentials/src/history/history.service.ts',
+      'hypercomb-essentials/src/move/layout.queen.ts',
+      'hypercomb-essentials/src/move/layout.service.ts',
+      'hypercomb-essentials/src/sharing/content-broker.drone.ts',
+      'hypercomb-essentials/src/sharing/feedback-channel.drone.ts',
+      'hypercomb-essentials/src/sharing/host-sync.service.ts',
+      'hypercomb-essentials/src/sharing/push-queue.service.ts',
+      'hypercomb-essentials/src/sharing/swarm.drone.ts',
     ], 'typed-folder literal')
   })
 
@@ -235,8 +235,8 @@ describe('doctrine ratchets', () => {
     const actual = filesMatching(/writeChildrenManifest/)
     assertRatchet(actual, [
       'hypercomb-shared/core/store.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/history/manifest-optimizer.drone.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/show-cell.drone.ts',
+      'hypercomb-essentials/src/history/manifest-optimizer.drone.ts',
+      'hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts',
     ], 'children-manifest writer')
   })
 
@@ -322,9 +322,9 @@ describe('doctrine ratchets', () => {
     // 'auto-persist' — do not extend this list.
     const actual = filesMatching(/zoomToFit\s*\?*\.?\s*\(\s*[^)]*['"`]user['"`]/)
     assertRatchet(actual, [
-      'hypercomb-essentials/src/diamondcoreprocessor.com/navigation/zoom/fit.queen.ts',        // /fit
-      'hypercomb-essentials/src/diamondcoreprocessor.com/navigation/zoom/zoom.drone.ts',       // `0`/`r` keymap + pinch-below-min
-      'hypercomb-essentials/src/diamondcoreprocessor.com/sequence/sequence-cycle.drone.ts',    // the `a` recompose keypress
+      'hypercomb-essentials/src/navigation/zoom/fit.queen.ts',        // /fit
+      'hypercomb-essentials/src/navigation/zoom/zoom.drone.ts',       // `0`/`r` keymap + pinch-below-min
+      'hypercomb-essentials/src/sequence/sequence-cycle.drone.ts',    // the `a` recompose keypress
       'hypercomb-shared/ui/controls-bar/controls-bar.component.ts',                            // the fit button
     ], "automatic zoomToFit claiming source 'user'")
   })
@@ -668,10 +668,83 @@ describe('doctrine ratchets', () => {
       // they are a cabinet screen laid over it, with their own vector-juice
       // rules (chunky HUD panels, fat score plates). The ladder governs the
       // hive's interface; it does not govern a game's.
-      'hypercomb-essentials/src/diamondcoreprocessor.com/games/arkanoid/overlay.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/games/bubble/overlay.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/games/roper/overlay.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/games/solomon/overlay.ts',
+      'hypercomb-essentials/src/games/arkanoid/overlay.ts',
+      'hypercomb-essentials/src/games/bubble/overlay.ts',
+      'hypercomb-essentials/src/games/roper/overlay.ts',
+      'hypercomb-essentials/src/games/solomon/overlay.ts',
     ], 'border-radius above the shape ladder')
+  })
+
+  // ─── a tool window never names an INK ────────────────────────────────
+  //
+  // Every panel used to paint its labels from a literal picked against a dark
+  // pane — `#eaf3f9` for a title, `rgba(207, 226, 238, 0.62)` for a lede, the
+  // authored pastel for an icon. Under a bright look the pane goes cream and
+  // the text stays where it was: 625 such declarations, measuring as low as
+  // 1.09:1 — present in the DOM, invisible on screen.
+  //
+  // The vocabulary that replaced them is in `ui/_toolwindow.scss`:
+  //   weight   → var(--hc-window-ink-quiet | -plain | -loud)
+  //   identity → var(--hc-window-accent | -quiet), --hc-window-on-accent
+  //   ground   → var(--hc-window-tint | -strong), --hc-window-wash
+  //   a colour that is the POINT → tw.ink(<colour>)  (the --hc-deepen knob)
+  //
+  // This guards the ink side, which is where the damage was: a `color`,
+  // `fill` or `stroke` set to a LIGHT literal. Dark literals are left alone —
+  // they read correctly on the bright panes and the dark themes measure clean.
+  // 0.28 luminance is the floor because the band from there to 0.35 is where
+  // the semantic violets and reds sit (#b48ad8 is 0.33), light enough to
+  // measure ~3.5:1 on cream while looking safe in the source.
+  //
+  // Empty allowlist, and it stays empty. Proof for the whole surface is
+  // `node scripts/drive-toolwindow-contrast.cjs`, which opens each window in
+  // each theme and composites every run of text over the ground it actually
+  // has; it reported 0 runs under target when this was frozen.
+  it('no tool-window stylesheet paints text from a light literal', () => {
+    const walkStyles = (dir: string, out: string[] = []): string[] => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          if (!SKIP_DIRS.has(entry.name) && !entry.name.startsWith('.')) walkStyles(join(dir, entry.name), out)
+        } else if (entry.name.endsWith('.scss')) out.push(join(dir, entry.name))
+      }
+      return out
+    }
+
+    const parseColour = (raw: string): [number, number, number] | null => {
+      const c = raw.trim()
+      let m = /^#([0-9a-f]{3})$/i.exec(c)
+      if (m) return [parseInt(m[1][0] + m[1][0], 16), parseInt(m[1][1] + m[1][1], 16), parseInt(m[1][2] + m[1][2], 16)]
+      m = /^#([0-9a-f]{6})$/i.exec(c)
+      if (m) return [parseInt(m[1].slice(0, 2), 16), parseInt(m[1].slice(2, 4), 16), parseInt(m[1].slice(4, 6), 16)]
+      m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*[\d.]+\s*)?\)$/i.exec(c)
+      if (m) return [+m[1], +m[2], +m[3]]
+      return null
+    }
+    // WCAG relative luminance — the same number the driver measures with, so
+    // the ratchet and the reading can never disagree about what "light" is.
+    const luminance = ([r, g, b]: [number, number, number]): number => {
+      const chan = (v: number): number => {
+        const x = v / 255
+        return x > 0.03928 ? Math.pow((x + 0.055) / 1.055, 2.4) : x / 12.92
+      }
+      return 0.2126 * chan(r) + 0.7152 * chan(g) + 0.0722 * chan(b)
+    }
+
+    const offenders: string[] = []
+    let files: string[]
+    try { files = walkStyles(join(ROOT, 'hypercomb-shared/ui')) } catch { files = [] }
+    for (const file of files) {
+      const code = stripComments(readFileSync(file, 'utf8'))
+      const decl = /(^|[\s;{])(color|fill|stroke)\s*:\s*(#[0-9a-f]{3,6}|rgba?\([\d.,\s]*\))\s*(?=[;}])/gim
+      let hit
+      while ((hit = decl.exec(code))) {
+        const rgb = parseColour(hit[3])
+        if (rgb && luminance(rgb) > 0.28) {
+          offenders.push(relative(ROOT, file).replace(/\\/g, '/'))
+          break
+        }
+      }
+    }
+    assertRatchet(offenders.sort(), [], 'a light ink literal in a tool window')
   })
 })

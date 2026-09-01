@@ -1,0 +1,212 @@
+// hypercomb-shared/ui/flex-editor/flex-editor.component.scss
+//
+// Right-docked flex editor, opposite the layout palette. Everything structural
+// comes from `_toolwindow.scss` — the shell, the header band, the close button
+// and the accent identity — the same partial every other docked window uses.
+//
+// THE WINDOW DOES NOT SCROLL. Only the shelf of axes does, the same rule the
+// layout designer follows: the heading and the subject stay put so you always
+// know which container you are configuring.
+
+@use '../toolwindow' as tw;
+
+$steel: #7eb6d6;
+$dim: #7f95a3;
+$accent: #c9a227;
+
+:host {
+  position: fixed;
+  inset: 0;
+  z-index: 100002;
+  pointer-events: none;
+}
+
+.fx-panel {
+  pointer-events: auto;
+  position: absolute;
+  z-index: 2;
+  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor, 0px));
+  right: 0;
+  bottom: 0;
+  width: 300px;
+  min-width: 240px;
+  max-width: calc(100vw - 1.5rem);
+  display: flex;
+  flex-direction: column;
+  font-size: calc(0.78rem * var(--hc-panel-scale, 1));
+  @include tw.panel($steel, right);
+  // After the include: the mixin sets its own overflow for a window whose body
+  // is one long column, and this one is not.
+  overflow: hidden;
+}
+
+.fx-header {
+  @include tw.header;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--hc-window-edge);
+}
+
+// `flex: 1`, never `margin-left: auto` — hcDockedPanel pins its gear beside
+// close with an inline margin that would beat `auto`.
+.fx-heading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.fx-title {
+  font-size: 0.82em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hc-window-accent);
+}
+.fx-subject {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--hc-window-ink-quiet);
+}
+.fx-close {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.fx-where {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.4rem 0.75rem;
+  color: var(--hc-window-ink-faint);
+  font-size: 0.72em;
+  letter-spacing: 0.08em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--hc-window-edge);
+}
+
+.fx-shelf {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.5rem 0.6rem 1rem;
+}
+
+// ── the accordion ─────────────────────────────────────────────────────
+
+.fx-axis {
+  margin-bottom: 0.35rem;
+  border: 1px solid var(--hc-window-edge);
+  border-radius: tw.$radius-control;
+  overflow: hidden;
+  &.is-open { border-color: var(--hc-window-edge-firm); }
+}
+
+// Shut, the row is the summary: what the axis is, what it does, what it says.
+.fx-axis-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.15rem 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  &:hover { background: rgba(var(--hc-panel-ink), 0.06); }
+}
+.fx-axis.is-open .fx-axis-head { background: var(--hc-window-wash); }
+
+.fx-axis-name {
+  font-size: 0.66em;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--hc-window-ink-plain);
+}
+.fx-axis-now {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  font-size: 0.68em;
+  color: var(--hc-window-accent);
+  white-space: nowrap;
+}
+.fx-axis-what {
+  grid-column: 1;
+  font-size: 0.66em;
+  line-height: 1.4;
+  color: var(--hc-window-ink-faint);
+}
+
+.fx-values {
+  list-style: none;
+  margin: 0;
+  padding: 0.45rem 0.55rem 0.55rem;
+  display: grid;
+  // Two across at any panel width worth having, with a 32px hard floor so a
+  // narrow panel packs rather than clips. The 46% share is what usually
+  // decides it — a preview much narrower than half the panel stops showing the
+  // difference between the values it is there to compare.
+  grid-template-columns: repeat(auto-fill, minmax(max(32px, 46%), 1fr));
+  gap: 0.35rem;
+}
+
+// The picture is the control. Landscape, because a layout is drawn on a page.
+.fx-option {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  padding: 3px;
+  background: rgba(var(--hc-panel-ink), 0.07);
+  border: 1px solid var(--hc-window-edge);
+  border-radius: tw.$radius-control;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.12s ease, background 0.12s ease;
+
+  &:hover { border-color: var(--hc-window-edge-firm); background: rgba(var(--hc-panel-ink), 0.11); }
+  &.is-on { border-color: var(--hc-window-accent); background: var(--hc-window-wash); }
+}
+
+.fx-preview {
+  display: block;
+  width: 100%;
+  height: 100%;
+  ::ng-deep > div { width: 100%; height: 100%; }
+  ::ng-deep [data-hc-hole] { background: rgba($steel, 0.38); border-radius: 1px; }
+  ::ng-deep [data-hc-self] { background: rgba($accent, 0.55); }
+}
+
+// The value names itself on hover, over the foot of the picture where it
+// covers least — the same bargain the layout chips strike. The chosen one
+// keeps its name showing, because that is the answer.
+.fx-option-name {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 2px 4px;
+  background: rgba($accent, 0.92);
+  color: #17150e;
+  font: 500 0.56rem/1.5 var(--hc-mono, ui-monospace), monospace;
+  letter-spacing: 0.04em;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  pointer-events: none;
+}
+.fx-option:hover .fx-option-name,
+.fx-option:focus-visible .fx-option-name,
+.fx-option.is-on .fx-option-name { opacity: 1; }

@@ -91,7 +91,7 @@ $accent: #7eb6d6;
   gap: 0.5rem;
   max-width: 100%;
   cursor: default;
-  color: rgba(var(--acc), 0.85);
+  color: var(--hc-window-accent);
   font-size: 0.82rem;
 }
 

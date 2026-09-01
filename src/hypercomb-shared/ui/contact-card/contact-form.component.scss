@@ -50,13 +50,13 @@ $accent: #a8ffd8;
 .contact-form-title {
   font-size: 0.9rem;
   letter-spacing: 0.05em;
-  color: rgba(var(--acc), 0.95);
+  color: var(--hc-window-accent);
 }
 
 .contact-form-cell {
   flex: 1;
   font-size: 0.8rem;
-  color: rgba(var(--hc-panel-ink), 0.55);
+  color: var(--hc-window-ink-quiet);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -65,7 +65,7 @@ $accent: #a8ffd8;
 .contact-form-close {
   background: transparent;
   border: none;
-  color: rgba(var(--hc-panel-ink), 0.7);
+  color: var(--hc-window-ink-quiet);
   font-size: 1.4rem;
   line-height: 1;
   cursor: pointer;
@@ -101,14 +101,14 @@ $accent: #a8ffd8;
   font-size: 0.7rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: rgba(var(--hc-panel-ink), 0.5);
+  color: var(--hc-window-ink-quiet);
 }
 
 input,
 textarea {
   font-family: inherit;
   font-size: 0.85rem;
-  color: #f3f3f3;
+  color: var(--hc-window-ink-loud);
   background: rgba(var(--hc-panel-ink), 0.04);
   border: 1px solid rgba(var(--hc-panel-ink), 0.14);
   border-radius: tw.$radius-control;
@@ -151,7 +151,7 @@ textarea { resize: vertical; }
 .contact-import {
   cursor: pointer;
   font-size: 0.75rem;
-  color: rgba(var(--acc), 0.85);
+  color: var(--hc-window-accent);
   border: 1px dashed rgba(var(--acc), 0.4);
   border-radius: tw.$radius-control;
   padding: 0.35rem 0.6rem;
@@ -171,7 +171,7 @@ textarea { resize: vertical; }
   &.ghost {
     background: transparent;
     border: 1px solid rgba(var(--hc-panel-ink), 0.18);
-    color: rgba(var(--hc-panel-ink), 0.7);
+    color: var(--hc-window-ink-quiet);
 
     &:hover { border-color: rgba(var(--hc-panel-ink), 0.4); color: var(--hc-panel-text); }
   }

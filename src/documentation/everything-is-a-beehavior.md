@@ -245,7 +245,7 @@ last.
 These are rewrites, not moves — every panel is a standalone Angular component.
 But each is independent: delete its barrel line, register a custom element
 from essentials in the same order band, done. The working proof is
-`hypercomb-essentials/src/diamondcoreprocessor.com/tutorial/tutorial-overlay.view.ts`
+`hypercomb-essentials/src/tutorial/tutorial-overlay.view.ts`
 (672 LOC, zero Angular, registry `element:` shape), and 47 essentials files
 already build imperative DOM — the muscle exists.
 

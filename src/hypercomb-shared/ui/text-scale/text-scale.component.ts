@@ -78,6 +78,12 @@ export class TextScaleComponent {
 
   readonly #picked = signal<number | null>(null)
 
+  /** Is the ladder showing? Closed is a lone gear — the setting is reached,
+   *  not permanently on display beside the thing it sizes. */
+  readonly open = signal(false)
+
+  toggle(): void { this.open.update(v => !v) }
+
   readonly scale = computed(() => this.#picked() ?? surfaceScale(this.window()))
 
   pick(scale: number): void {

@@ -9,7 +9,7 @@ import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
 
 import type { Toast } from
-  '@hypercomb/essentials/diamondcoreprocessor.com/commands/toast.drone'
+  '@hypercomb/essentials/commands/toast.drone'
 
 @Component({
   selector: 'hc-toast',

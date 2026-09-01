@@ -19,6 +19,7 @@
 // content returns unchanged:true. Safe to re-run after editing page copy.
 
 import WebSocket from 'ws'
+import { hiveChildren } from './lib/hive-children.mjs'
 import { EARN_OF, EARN_RULES, EMBERS_JS, HOUSE_ITEMS, OCHE_NOTE, SALE_ITEMS, STORE_ITEMS } from './lounge3d/store-items.js'
 
 const BRIDGE_PORT = 2401
@@ -48,6 +49,15 @@ async function send(request: Record<string, unknown>): Promise<BridgeRes> {
   }
   return res
 }
+
+// Child reads and child creation come from ONE implementation, shared with
+// every other bridge script: scripts/lib/hive-children.mjs. It carries the
+// trap (a parent's `children` slot holds LAYER sigs, and a layer sig is NOT a
+// resource, so `get-resource` on one answers "resource not found") and the
+// two rules that retire it: existence per CHILD PATH, creation via `op:'add'`,
+// which the committer applies as an APPEND. Never a `children:` SET to grow a
+// parent — that op REPLACES the slot.
+const hive = hiveChildren(send)
 
 // ─── palette ─────────────────────────────────────────────────────────
 // Cigar lounge at dusk: espresso blacks, warm cream, and the existing tile's
@@ -3978,14 +3988,12 @@ async function main(): Promise<void> {
   const missing = REQUIRED.filter(r => !childNames.includes(r.name))
   if (missing.length) {
     console.log(`[site] adding cells ${missing.map(m => m.name).join(', ')} (current children: ${childNames.join(', ')})`)
-    const up = await send({
-      op: 'update',
-      segments: ['revolucion'],
-      layer: { name: rootLayer?.name ?? 'revolucion', children: [...childNames, ...missing.map(m => m.name)] },
-    })
+    // APPEND, never a `children:` SET: `update` with a children array REPLACES
+    // the slot, so it is only ever as safe as the read that fed it. `add` is
+    // turned into an APPEND by the committer. See scripts/lib/hive-children.mjs.
+    const up = await hive.ensureChildren(['revolucion'], missing.map(m => m.name))
     if (!up.ok) { console.error(`[site] cell FAIL: ${up.error}`); process.exit(1) }
     for (const m of missing) {
-      await send({ op: 'update', segments: ['revolucion', m.name], layer: { name: m.name } })
       await send({ op: 'note-add', segments: ['revolucion'], cell: m.name, text: m.note })
       childNames.push(m.name)
     }

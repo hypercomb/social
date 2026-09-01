@@ -41,7 +41,7 @@ const EMBED_SITES = [
     find: /<iframe\b[\s\S]*?>/,
   },
   {
-    file: 'hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/slides-view.drone.ts',
+    file: 'hypercomb-essentials/src/presentation/tiles/slides-view.drone.ts',
     what: 'slides player → embed slide',
     find: /createElement\('iframe'\)[\s\S]*?return frame/,
   },

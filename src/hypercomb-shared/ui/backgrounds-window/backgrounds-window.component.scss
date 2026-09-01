@@ -1,0 +1,397 @@
+// hypercomb-shared/ui/backgrounds-window/backgrounds-window.component.scss
+//
+// A TOOL WINDOW NEVER NAMES A COLOUR. Ink asks for a WEIGHT off the ladder on
+// :root (`--hc-window-ink-quiet` and friends); identity comes through `--acc`,
+// which is the authored pastel already taken deep under a bright look. The one
+// literal here is `$accent`, which is what `tw.panel()` exists to take.
+//
+// The SWATCHES are the exception that proves it: a look's chip is a picture of
+// that look, handed over as a `background` shorthand by the service that draws
+// it. The window never invents one, never lightens one, and never decides what
+// a theme looks like — it asks.
+//
+// Geometry, resize, content-shrink and the header band all come from
+// `hcDockedPanel` + `_toolwindow.scss`. Sizes are in `em` so the body shrinks
+// and grows with `--hc-panel-scale`; dock offsets stay in rem.
+
+@use '../breakpoints' as *;
+@use '../toolwindow' as tw;
+
+// Slate-blue: the screen behind the hive is what this window is about, and
+// steel is the backdrop the app opens on.
+$accent: #7eb6d6;
+
+:host {
+  position: fixed;
+  inset: 0;
+  z-index: 100002;
+  pointer-events: none;
+}
+
+.bg-pan-surface {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  cursor: default;
+  touch-action: none;
+  &.ready { cursor: grab; }
+  &.panning { cursor: grabbing; }
+}
+
+.bg-panel {
+  pointer-events: auto;
+  position: absolute;
+  top: max(calc(2.3rem * var(--hc-header-zoom, 1)), var(--hc-header-anchor));
+  right: 0;
+  bottom: 0;
+  width: 380px;
+  min-width: 300px;
+  max-width: calc(100vw - 1.5rem);
+  display: flex;
+  flex-direction: column;
+  font-size: calc(1rem * var(--hc-panel-scale, 1));
+  @include tw.panel($accent, right);
+}
+
+// ── header ──────────────────────────────────────────────
+.bg-header {
+  @include tw.header;
+  border-bottom: 1px solid rgba(var(--acc), 0.24);
+}
+.bg-mark { color: rgb(var(--acc)); font-size: 1.05em; }
+.bg-title { flex: 1; font-size: 0.9em; letter-spacing: 0.05em; color: var(--hc-window-accent); }
+.bg-close {
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 1.1em;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--hc-window-ink-quiet);
+  &:hover { color: var(--hc-window-ink-loud); }
+}
+
+.bg-status {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.45em 0.9em;
+  font-size: 0.72em;
+  letter-spacing: 0.02em;
+  color: var(--hc-window-ink-quiet);
+  background: var(--hc-window-tint);
+  border-bottom: 1px solid var(--hc-window-line);
+}
+
+.bg-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+// ── sections ────────────────────────────────────────────
+.bg-section + .bg-section { border-top: 1px solid var(--hc-window-line); }
+
+.bg-head {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  padding: 0.6em 0.9em;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: var(--hc-window-ink-plain);
+  &:hover { background: var(--hc-window-tint); }
+}
+.bg-chev {
+  align-self: center;
+  font-size: 1em;
+  color: var(--hc-window-ink-quiet);
+}
+.bg-head-name {
+  font-size: 0.82em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hc-window-accent);
+}
+.bg-head-note {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.7em;
+  color: var(--hc-window-ink-quiet);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bg-body { padding: 0 0.9em 0.9em; }
+
+.bg-note {
+  margin: 0.7em 0 0.4em;
+  font-size: 0.7em;
+  color: var(--hc-window-ink-quiet);
+}
+.bg-empty {
+  margin: 0.6em 0;
+  font-size: 0.72em;
+  color: var(--hc-window-ink-quiet);
+}
+
+// ── the picture behind the hive ─────────────────────────
+.bg-picture {
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  padding: 0.6em;
+  border: 1px solid var(--hc-window-line);
+  border-radius: 3px;
+  background: var(--hc-window-tint);
+  &.set { border-color: var(--hc-window-edge); background: var(--hc-window-wash); }
+}
+.bg-picture-chip {
+  flex: 0 0 auto;
+  width: 4.4em;
+  height: 2.6em;
+  border-radius: 2px;
+  border: 1px solid var(--hc-window-line);
+  background: var(--hc-window-tint-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--hc-window-ink-quiet);
+  .mat-sym { font-size: 1.1em; }
+  // With a picture set the chip is also the drag handle for the shelves.
+  &.grab { cursor: grab; }
+  &.grab:active { cursor: grabbing; }
+}
+.bg-picture-say { display: flex; flex-direction: column; gap: 0.15em; min-width: 0; }
+.bg-picture-name { font-size: 0.78em; color: var(--hc-window-ink-loud); }
+.bg-picture-note { font-size: 0.68em; color: var(--hc-window-ink-quiet); }
+
+.bg-picture-acts {
+  display: flex;
+  gap: 0.4em;
+  margin-top: 0.5em;
+}
+.bg-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0.35em 0.6em;
+  border: 1px solid var(--hc-window-edge);
+  border-radius: 2px;
+  background: none;
+  font: inherit;
+  font-size: 0.72em;
+  cursor: pointer;
+  color: var(--hc-window-ink-plain);
+  &:hover { background: var(--hc-window-wash); color: var(--hc-window-ink-loud); }
+  &.busy { opacity: 0.6; pointer-events: none; }
+  // The file input is the label's own hit area; it must never draw.
+  input[type='file'] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  .mat-sym { font-size: 1.05em; }
+}
+
+.bg-dim {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  margin-top: 0.6em;
+  font-size: 0.72em;
+  color: var(--hc-window-ink-quiet);
+  input[type='range'] { flex: 1; min-width: 0; accent-color: rgb(var(--acc)); }
+}
+.bg-dim-name { flex: 0 0 auto; }
+.bg-dim-value { flex: 0 0 auto; font-variant-numeric: tabular-nums; color: var(--hc-window-ink-plain); }
+
+// ── the saved shelves ───────────────────────────────────
+// Two drop targets, always both visible while a picture can be dragged —
+// a shelf you cannot see is a shelf you cannot drop onto.
+.bg-shelves {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+  margin-top: 0.6em;
+}
+.bg-shelf {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.45em 0.6em;
+  border: 1px dashed var(--hc-window-line);
+  border-radius: 3px;
+  &.over { border-color: rgb(var(--acc)); background: var(--hc-window-wash); }
+}
+.bg-shelf-name {
+  flex: 0 0 3.2em;
+  font-size: 0.7em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hc-window-ink-quiet);
+}
+.bg-shelf-row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35em;
+  // The drop must land on the SHELF even between thumbnails — children
+  // swallowing dragover is how a drop target grows dead spots.
+  > * { pointer-events: auto; }
+}
+.bg-shelf-pic {
+  position: relative;
+  display: inline-flex;
+}
+.bg-shelf-wear {
+  width: 2.6em;
+  height: 1.7em;
+  padding: 0;
+  border: 1px solid var(--hc-window-line);
+  border-radius: 2px;
+  background: var(--hc-window-tint-strong) center / cover no-repeat;
+  cursor: pointer;
+  &:hover { border-color: var(--hc-window-edge); }
+  .bg-shelf-pic.on & { border-color: rgb(var(--acc)); }
+}
+.bg-shelf-x {
+  position: absolute;
+  top: -0.45em;
+  right: -0.45em;
+  width: 1.1em;
+  height: 1.1em;
+  padding: 0;
+  border: 1px solid var(--hc-window-edge);
+  border-radius: 50%;
+  background: var(--hc-window-tint-strong);
+  font: inherit;
+  font-size: 0.7em;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--hc-window-ink-quiet);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  .bg-shelf-pic:hover & { display: inline-flex; }
+  &:hover { color: var(--hc-window-ink-loud); }
+}
+.bg-shelf-empty {
+  font-size: 0.66em;
+  color: var(--hc-window-ink-quiet);
+}
+
+// ── look / group cards ──────────────────────────────────
+.bg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(6.4em, 1fr));
+  gap: 0.45em;
+}
+.bg-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+  padding: 0.4em;
+  border: 1px solid var(--hc-window-line);
+  border-radius: 3px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  &:hover { border-color: var(--hc-window-edge); background: var(--hc-window-tint); }
+  &.on { border-color: rgb(var(--acc)); background: var(--hc-window-wash); }
+}
+.bg-card-chip {
+  height: 2.1em;
+  border-radius: 2px;
+  border: 1px solid var(--hc-window-line);
+  background-size: cover;
+  background-position: center;
+}
+.bg-card-name { font-size: 0.74em; color: var(--hc-window-ink-loud); }
+.bg-card-note { font-size: 0.64em; color: var(--hc-window-ink-quiet); }
+
+// ── the live pool ───────────────────────────────────────
+.bg-pool-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5em;
+}
+.bg-link {
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.68em;
+  cursor: pointer;
+  text-decoration: underline;
+  color: var(--hc-window-accent);
+}
+
+.bg-pool {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2em;
+}
+.bg-pic {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.25em;
+  border-radius: 2px;
+  &:hover { background: var(--hc-window-tint); }
+  // A hidden picture stays legible — it is still a row you have to be able to
+  // read in order to put it back. Only the thumbnail steps down.
+  &.hidden .bg-pic-chip { opacity: 0.28; filter: grayscale(1); }
+  &.hidden .bg-pic-name { color: var(--hc-window-ink-quiet); text-decoration: line-through; }
+}
+.bg-pic-chip {
+  flex: 0 0 auto;
+  width: 2.6em;
+  height: 1.7em;
+  border-radius: 2px;
+  border: 1px solid var(--hc-window-line);
+  background: var(--hc-window-tint-strong) center / cover no-repeat;
+}
+.bg-pic-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.72em;
+  color: var(--hc-window-ink-plain);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bg-pic-act {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  background: none;
+  padding: 0.2em;
+  cursor: pointer;
+  color: var(--hc-window-ink-quiet);
+  &:hover { color: var(--hc-window-ink-loud); }
+  .mat-sym { font-size: 1.05em; }
+}
+
+// ── the world filter ────────────────────────────────────
+.bg-world {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  padding: 0.4em 0.9em;
+  font-size: 0.68em;
+  cursor: pointer;
+  color: var(--hc-window-ink-quiet);
+  border-bottom: 1px solid var(--hc-window-line);
+  &:hover { color: var(--hc-window-ink-plain); }
+  input { accent-color: rgb(var(--acc)); }
+}

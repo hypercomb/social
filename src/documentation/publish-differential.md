@@ -3,7 +3,7 @@
 **Status: BUILT.** Code:
 
 ```
-hypercomb-essentials/src/diamondcoreprocessor.com/sharing/
+hypercomb-essentials/src/sharing/
   publish.queen.ts          ← `/publish` — toggles the surface, nothing else
   publish-status.drone.ts   ← the differential: rows, verdict ladder, actions
   publish-branch.ts         ← publishBranch / unpublishBranch / confirmPublished

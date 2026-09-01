@@ -55,7 +55,7 @@ $quiet: #8ea2b0;
   box-shadow: -10px 0 40px rgba(var(--hc-panel-shadow), 0.5), 0 0 0 1px rgba(var(--acc), 0.06) inset;
   font-family: var(--hc-mono, system-ui);
   font-size: calc(1rem * var(--hc-panel-scale, 1));
-  color: #eef3f6;
+  color: var(--hc-window-ink-loud);
   outline: none;
   @include tw.panel($accent, right);
 }
@@ -69,7 +69,7 @@ $quiet: #8ea2b0;
   flex: 1;
   font-size: 0.9em;
   letter-spacing: 0.05em;
-  color: rgba(var(--acc), 0.95);
+  color: var(--hc-window-accent);
 }
 
 .publish-chip {
@@ -77,7 +77,7 @@ $quiet: #8ea2b0;
   background: rgba(var(--acc), 0.1);
   border: 1px solid rgba(var(--acc), 0.25);
   border-radius: tw.$radius-pill;
-  color: rgba(238, 243, 246, 0.85);
+  color: var(--hc-window-ink-plain);
   font-family: inherit;
   font-size: 0.66em;
   letter-spacing: 0.03em;
@@ -93,7 +93,7 @@ $quiet: #8ea2b0;
   flex: 0 0 auto;
   background: transparent;
   border: none;
-  color: rgba(var(--hc-panel-ink), 0.7);
+  color: var(--hc-window-ink-quiet);
   font-size: 1.4em;
   line-height: 1;
   cursor: pointer;
@@ -120,12 +120,12 @@ $quiet: #8ea2b0;
   color: rgba($amber, 0.9);
 
   // Nothing is wrong — the line is just the age of what we read.
-  &.quiet { color: $quiet; }
+  &.quiet { color: var(--hc-window-ink-quiet); }
 }
 
 .publish-host {
   font-size: 0.68em;
-  color: rgba(var(--hc-panel-ink), 0.35);
+  color: var(--hc-window-ink-quiet);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -150,7 +150,7 @@ $quiet: #8ea2b0;
   padding: 0.7em 1em;
   font-size: 0.76em;
   line-height: 1.45;
-  color: #ffdede;
+  color: var(--hc-window-ink-loud);
   background: rgba($alarm, 0.16);
   border-top: 1px solid rgba($alarm, 0.5);
   border-bottom: 1px solid rgba($alarm, 0.5);
@@ -162,7 +162,7 @@ $quiet: #8ea2b0;
   padding: 0.6em 1em;
   font-size: 0.74em;
   line-height: 1.45;
-  color: #e6d5bd;
+  color: var(--hc-window-ink-loud);
   background: rgba($amber, 0.07);
   border-bottom: 1px solid rgba($amber, 0.28);
 }
@@ -172,7 +172,7 @@ $quiet: #8ea2b0;
   padding: 1.5em 1em;
   font-size: 0.85em;
   line-height: 1.5;
-  color: rgba(var(--hc-panel-ink), 0.45);
+  color: var(--hc-window-ink-quiet);
 }
 
 // ── THE CURRENT PAGE ──────────────────────────────────────
@@ -235,7 +235,7 @@ $quiet: #8ea2b0;
   flex: 0 1 auto;
   min-width: 0;
   font-size: 0.92em;
-  color: #eef3f6;
+  color: var(--hc-window-ink-loud);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -246,7 +246,7 @@ $quiet: #8ea2b0;
   font-size: 0.66em;
   letter-spacing: 0.03em;
   white-space: nowrap;
-  color: rgba(var(--hc-panel-ink), 0.55);
+  color: var(--hc-window-ink-quiet);
 }
 
 .pcur.is-busy .pcur-state { color: rgba($amber, 0.85); }
@@ -256,7 +256,7 @@ $quiet: #8ea2b0;
   background: none;
   border: 1px solid rgba(var(--acc), 0.35);
   border-radius: tw.$radius-control;
-  color: #c6d5e0;
+  color: var(--hc-window-ink-loud);
   font: inherit;
   font-size: 0.68em;
   padding: tw.$button-padding-compact-block tw.$button-padding-compact-inline;
@@ -274,7 +274,7 @@ $quiet: #8ea2b0;
 .pcur[data-state='gone'] .pcur-action,
 .pcur[data-state='unknown'] .pcur-action {
   border-color: rgba($amber, 0.55);
-  color: #f0d9b6;
+  color: tw.ink(#f0d9b6);
 
   &:hover { background: rgba($amber, 0.2); color: var(--hc-panel-text); }
 }
@@ -286,7 +286,7 @@ $quiet: #8ea2b0;
   padding: 0 1em 0.4em 2.15em;
   font-size: 0.68em;
   line-height: 1.35;
-  color: $quiet;
+  color: var(--hc-window-ink-quiet);
 }
 
 // ── the tabs ──────────────────────────────────────────────
@@ -304,7 +304,7 @@ $quiet: #8ea2b0;
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  color: rgba(var(--hc-panel-ink), 0.55);
+  color: var(--hc-window-ink-quiet);
   font: inherit;
   font-size: 0.72em;
   letter-spacing: 0.04em;
@@ -316,7 +316,7 @@ $quiet: #8ea2b0;
   &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: -1px; }
 
   &.active {
-    color: rgba(var(--acc), 0.95);
+    color: var(--hc-window-accent);
     border-bottom-color: rgba(var(--acc), 0.8);
   }
 }
@@ -338,23 +338,23 @@ $quiet: #8ea2b0;
   align-items: center;
   gap: 0.5em;
   font-size: 0.7em;
-  color: rgba(var(--hc-panel-ink), 0.6);
+  color: var(--hc-window-ink-quiet);
 }
 
 .pdet-label {
   flex: 0 0 auto;
   min-width: 3em;
   letter-spacing: 0.04em;
-  color: rgba(var(--acc), 0.75);
+  color: var(--hc-window-accent-quiet);
 }
 
 .pdet-sig {
   font-family: var(--hc-mono, monospace);
   font-size: 0.95em;
-  color: rgba(214, 228, 238, 0.85);
+  color: var(--hc-window-ink-plain);
 }
 
-.pdet-age { color: $quiet; }
+.pdet-age { color: var(--hc-window-ink-quiet); }
 
 // ── the addresses ─────────────────────────────────────────
 //
@@ -455,7 +455,7 @@ $quiet: #8ea2b0;
 
 // The line is the DOMAIN — root level. The tile's name becomes the subdomain
 // on its own, said once in the note rather than repeated down the list.
-.pdet-address { color: rgba(214, 228, 238, 0.6); }
+.pdet-address { color: var(--hc-window-ink-quiet); }
 
 // A domain this branch answers on reads as real; the rest are still offers.
 .pdet-domain.is-chosen .pdet-address { color: var(--hc-panel-text); }
@@ -475,7 +475,7 @@ $quiet: #8ea2b0;
   background: none;
   border: 1px solid transparent;
   border-radius: tw.$radius-control;
-  color: rgba(var(--hc-panel-ink), 0.55);
+  color: var(--hc-window-ink-quiet);
   font: inherit;
   font-size: 0.9em;
   text-decoration: none;
@@ -490,7 +490,7 @@ $quiet: #8ea2b0;
 // WHERE IT WAS DEPLOYED — the only control here that leaves the app, so it is
 // the only one that carries the accent rather than the panel's grey.
 .pdet-domain-go {
-  color: rgba(var(--acc), 0.8);
+  color: var(--hc-window-accent-quiet);
 
   &:hover { background: rgba(var(--acc), 0.18); color: rgb(var(--acc)); }
 }
@@ -515,7 +515,7 @@ $quiet: #8ea2b0;
   padding-left: 0.55em;
   font-size: 0.64em;
   line-height: 1.4;
-  color: $quiet;
+  color: var(--hc-window-ink-quiet);
 }
 
 // The panel is narrow — the line's tips grow inward from the right edge they
@@ -582,7 +582,7 @@ $quiet: #8ea2b0;
     font-family: var(--hc-mono);
     font-size: 0.78rem;
     line-height: 1.4;
-    color: rgba(var(--hc-panel-ink), 0.85);
+    color: var(--hc-window-ink-plain);
     background: rgba(var(--hc-panel-pane), 0.94);
     border: 1px solid rgba(var(--hc-panel-ink), 0.1);
     border-radius: 3px;
@@ -612,10 +612,10 @@ $quiet: #8ea2b0;
   width: 100%;
   height: 100%;
   display: block;
-  stroke: #c6d5e0;
+  stroke: var(--hc-window-ink-loud);
 }
 
-.pdet-view.selected ::ng-deep svg { stroke: #eaf4fb; }
+.pdet-view.selected ::ng-deep svg { stroke: var(--hc-window-ink-loud); }
 
 // ── versions: the ledger, worn as chips ───────────────────
 .pdet-versions {
@@ -638,7 +638,7 @@ $quiet: #8ea2b0;
   padding: 0.25em 0.55em;
   font: inherit;
   font-size: 0.7em;
-  color: rgba(214, 228, 238, 0.85);
+  color: var(--hc-window-ink-plain);
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
 
@@ -651,7 +651,7 @@ $quiet: #8ea2b0;
 
 .pdet-vage {
   margin-left: auto;
-  color: $quiet;
+  color: var(--hc-window-ink-quiet);
 }
 
 .pdet-vlive {
@@ -694,7 +694,7 @@ $quiet: #8ea2b0;
   background: none;
   border: 1px solid rgba(var(--acc), 0.3);
   border-radius: tw.$radius-control;
-  color: #c6d5e0;
+  color: var(--hc-window-ink-loud);
   font: inherit;
   font-size: 0.68em;
   padding: tw.$button-padding-compact-block tw.$button-padding-compact-inline;
@@ -708,7 +708,7 @@ $quiet: #8ea2b0;
 .pdet-link {
   font-family: var(--hc-mono, monospace);
   font-size: 0.66em;
-  color: rgba(var(--acc), 0.7);
+  color: var(--hc-window-accent-quiet);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -719,13 +719,13 @@ $quiet: #8ea2b0;
   margin: 0.25em 0 0;
   font-size: 0.68em;
   line-height: 1.4;
-  color: #a89880;
+  color: var(--hc-window-ink-quiet);
 }
 
 .pdet-unpublish {
   align-self: flex-start;
   border-color: rgba($amber, 0.5);
-  color: #f0d9b6;
+  color: tw.ink(#f0d9b6);
 
   &:hover { background: rgba($amber, 0.2); color: var(--hc-panel-text); }
 }
@@ -777,7 +777,7 @@ $quiet: #8ea2b0;
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: rgba(var(--acc), 0.8);
+  color: var(--hc-window-accent-quiet);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -791,7 +791,7 @@ $quiet: #8ea2b0;
   text-align: center;
   font-size: 0.6em;
   font-family: var(--hc-mono, monospace);
-  color: rgba(var(--acc), 0.85);
+  color: var(--hc-window-accent);
   background: rgba(var(--acc), 0.12);
 }
 
@@ -824,7 +824,7 @@ $quiet: #8ea2b0;
 .publish-row.is-current {
   box-shadow: inset 2px 0 0 rgba(var(--acc), 0.7);
 
-  .prow-path { color: #f4f9fc; }
+  .prow-path { color: var(--hc-window-ink-loud); }
 }
 
 .prow-head {
@@ -901,7 +901,7 @@ $quiet: #8ea2b0;
 .prow-path {
   flex: 1 1 auto;
   font-size: 0.86em;
-  color: #eef3f6;
+  color: var(--hc-window-ink-loud);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -912,7 +912,7 @@ $quiet: #8ea2b0;
   font-size: 0.66em;
   letter-spacing: 0.03em;
   white-space: nowrap;
-  color: rgba(var(--hc-panel-ink), 0.55);
+  color: var(--hc-window-ink-quiet);
 }
 
 // The reason is the one thing that does not fit on the line — it is a
@@ -921,7 +921,7 @@ $quiet: #8ea2b0;
   display: none;
   font-size: 0.68em;
   line-height: 1.35;
-  color: $quiet;
+  color: var(--hc-window-ink-quiet);
 }
 
 .publish-row.expanded {
@@ -939,8 +939,8 @@ $quiet: #8ea2b0;
 // Quiet rows — `unknown`, `cannot-compare`, `comparing`. Nothing was proved,
 // so the row recedes rather than shouting.
 .publish-row.is-quiet {
-  .prow-path { color: rgba(238, 243, 246, 0.62); }
-  .prow-state { color: rgba(var(--hc-panel-ink), 0.38); }
+  .prow-path { color: var(--hc-window-ink-quiet); }
+  .prow-state { color: var(--hc-window-ink-quiet); }
 }
 
 .publish-row.is-busy .prow-state { color: rgba($amber, 0.85); }
@@ -950,7 +950,7 @@ $quiet: #8ea2b0;
   background: none;
   border: 1px solid rgba(var(--acc), 0.35);
   border-radius: tw.$radius-control;
-  color: #c6d5e0;
+  color: var(--hc-window-ink-loud);
   font: inherit;
   font-size: 0.68em;
   padding: tw.$button-padding-compact-block tw.$button-padding-compact-inline;
@@ -967,7 +967,7 @@ $quiet: #8ea2b0;
 .publish-row[data-state='unpublished'] .prow-action,
 .publish-row[data-state='gone'] .prow-action {
   border-color: rgba($amber, 0.55);
-  color: #f0d9b6;
+  color: tw.ink(#f0d9b6);
 
   &:hover { background: rgba($amber, 0.2); color: var(--hc-panel-text); }
 }
@@ -1033,7 +1033,7 @@ $quiet: #8ea2b0;
   width: 100%;
   height: 100%;
   display: block;
-  stroke: #c6d5e0;
+  stroke: var(--hc-window-ink-loud);
 }
 
 // The panel is narrow and its list scrolls, so a centred tip would be clipped
@@ -1051,7 +1051,7 @@ $quiet: #8ea2b0;
   font: inherit;
   font-size: 0.66em;
   letter-spacing: 0.03em;
-  color: rgba(var(--acc), 0.55);
+  color: var(--hc-window-accent-quiet);
   cursor: pointer;
   transition: color 0.12s ease;
 
@@ -1068,7 +1068,7 @@ $quiet: #8ea2b0;
   font-size: 0.62em;
   letter-spacing: 0.02em;
   white-space: nowrap;
-  color: rgba(var(--acc), 0.55);
+  color: var(--hc-window-accent-quiet);
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 11em;

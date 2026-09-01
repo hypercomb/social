@@ -41,11 +41,11 @@ highest marker wins across sources), so **every cell is already a valid
 entrance**. What's missing is
 choice: publishing is hardwired to the publisher's current location
 (`#publishMyLayerAt` reads `lineage.explorerSegments()` in
-[swarm.drone.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/sharing/swarm.drone.ts)).
+[swarm.drone.ts](../hypercomb-essentials/src/sharing/swarm.drone.ts)).
 
 An entrance is `{ label, segments }` — mechanically a named
 `MeetingInviteBundle`
-([meeting-invite.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/sharing/meeting-invite.ts)
+([meeting-invite.ts](../hypercomb-essentials/src/sharing/meeting-invite.ts)
 already encodes `segments + room + secret → reproducible channel sig`).
 
 - **Publisher-side only.** The adopt side is already root-agnostic: it resolves
@@ -146,7 +146,7 @@ whose meaning is its membership.
 
 Because everything uses the layer framework, everything is taggable once an
 interface exists. Notes are already content-addressed layers (`NoteLayer`,
-[notes.drone.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/notes/notes.drone.ts)),
+[notes.drone.ts](../hypercomb-essentials/src/notes/notes.drone.ts)),
 so tags ride the existing mechanism unchanged: a note layer carries its own
 `decorations` slot holding `kind:'tag'` decoration sigs (the appliesTo-empty
 dedup pattern from `decoration-manifest.ts`). No note-specific tag system.

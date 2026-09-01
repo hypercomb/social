@@ -1,0 +1,266 @@
+@if (visible()) {
+  @if (hasPicture()) {
+    <div
+      class="bg-pan-surface"
+      [class.ready]="spacePan()"
+      [class.panning]="panning()"
+      (pointerdown)="startPan($event)"
+      (pointermove)="movePan($event)"
+      (pointerup)="endPan($event)"
+      (pointercancel)="endPan($event)"
+      (wheel)="zoomPicture($event)"
+      (dblclick)="resetPan()"
+      title="Hold Space and drag to pan &middot; mouse wheel to zoom &middot; double-click to recenter"
+    ></div>
+  }
+  <aside
+    class="bg-panel"
+    hcDockInset="right"
+    hcDockedPanel="backgrounds-window"
+    [hcSession]="session"
+    (hcDockedPanelClose)="close()"
+    dockSide="right"
+    [minWidth]="300"
+    [maxWidth]="640"
+    [defaultWidth]="380"
+    data-consumes-wheel
+    tabindex="-1"
+    [attr.aria-label]="'backgrounds.title' | t"
+  >
+    <header class="bg-header">
+      <span class="mat-sym bg-mark" aria-hidden="true">wallpaper</span>
+      <span class="bg-title">{{ 'backgrounds.title' | t }}</span>
+      <button class="bg-close" type="button" (click)="close()" [attr.aria-label]="'backgrounds.close' | t">&times;</button>
+    </header>
+
+    <!-- What is showing RIGHT NOW, in one line. A window about appearance that
+         cannot say what you are currently wearing makes you change something
+         to find out. -->
+    <p class="bg-status">{{ status() }}</p>
+
+    <!-- THE WORLD FILTER. The list follows the chrome: bright looks under a
+         bright theme, dark ones under a dark one. It draws only when it is
+         actually holding something back, because a switch that changes
+         nothing is a switch you have to think about for no reason. -->
+    @if (withheld() > 0) {
+      <label class="bg-world">
+        <input type="checkbox" [checked]="showAllLooks()" (change)="showAllLooks.set(!showAllLooks())" />
+        <span>{{ (lightWorld() ? 'backgrounds.world.light' : 'backgrounds.world.dark') | t: { count: withheld() } }}</span>
+      </label>
+    }
+
+    <div class="bg-scroll">
+      <!-- ── SCREEN ────────────────────────────────────────────────── -->
+      <section class="bg-section" [class.open]="isOpen('screen')">
+        <button class="bg-head" type="button" (click)="section('screen')" [attr.aria-expanded]="isOpen('screen')">
+          <span class="mat-sym bg-chev" aria-hidden="true">{{ isOpen('screen') ? 'expand_more' : 'chevron_right' }}</span>
+          <span class="bg-head-name">{{ 'backgrounds.screen' | t }}</span>
+          <span class="bg-head-note">{{ 'backgrounds.screen.about' | t }}</span>
+        </button>
+
+        @if (isOpen('screen')) {
+          <div class="bg-body">
+            <!-- THE PICTURE. First, because it is the thing people come here
+                 looking for and could not find. -->
+            <div class="bg-picture" [class.set]="hasPicture()">
+              <!-- The chip is the drag handle: pick your picture up here and
+                   drop it on the Light or Dark shelf below to save it. -->
+              <span
+                class="bg-picture-chip"
+                [class.grab]="hasPicture()"
+                [style.background]="pictureSwatch()"
+                [attr.draggable]="hasPicture() ? true : null"
+                (dragstart)="dragPicture($event, activePicture())"
+                (wheel)="zoomPicture($event)"
+                [attr.title]="hasPicture() ? 'Zoom ' + zoom() + '% · mouse wheel' : null"
+                aria-hidden="true"
+              >
+                @if (!hasPicture()) {
+                  <span class="mat-sym">image</span>
+                }
+              </span>
+              <div class="bg-picture-say">
+                <span class="bg-picture-name">{{ (hasPicture() ? 'backgrounds.picture.set' : 'backgrounds.picture.none') | t }}</span>
+                <span class="bg-picture-note">{{ 'backgrounds.picture.about' | t }}</span>
+              </div>
+            </div>
+
+            <div class="bg-picture-acts">
+              <label class="bg-act" [class.busy]="adopting()">
+                <span class="mat-sym" aria-hidden="true">add_photo_alternate</span>
+                <span>{{ (hasPicture() ? 'backgrounds.picture.replace' : 'backgrounds.picture.choose') | t }}</span>
+                <input type="file" accept="image/*" (change)="adopt($event)" [disabled]="adopting()" />
+              </label>
+              @if (hasPicture()) {
+                <button class="bg-act" type="button" (click)="resetPan()" title="Center background" aria-label="Center background">
+                  <span class="mat-sym" aria-hidden="true">center_focus_strong</span>
+                  <span>center</span>
+                </button>
+                <button class="bg-act" type="button" (click)="removePicture()">
+                  <span class="mat-sym" aria-hidden="true">hide_image</span>
+                  <span>{{ 'backgrounds.picture.remove' | t }}</span>
+                </button>
+              }
+            </div>
+
+            <!-- THE ONE NUMBER. 100% is the picture exactly as chosen — and
+                 the default. Anything less washes it toward the palette, for
+                 when a white tile label needs a calmer field to sit on. -->
+            @if (hasPicture()) {
+              <label class="bg-dim">
+                <span class="bg-dim-name">{{ 'backgrounds.opacity' | t }}</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="5"
+                  [value]="opacity()"
+                  (input)="setOpacity($any($event.target).value)"
+                  [attr.aria-label]="'backgrounds.opacity' | t"
+                />
+                <span class="bg-dim-value">{{ opacity() }}%</span>
+              </label>
+            }
+
+            <!-- THE SHELVES. A saved backdrop is SORTED into the world it
+                 suits — and a picture says nothing by default: dragging it
+                 onto Light or Dark IS the sorting. Click a saved one to wear
+                 it; drag it onto the other shelf to re-sort it. -->
+            @if (hasShelves() && (hasPicture() || savedLight().length > 0 || savedDark().length > 0)) {
+              @if (unsorted()) {
+                <p class="bg-note">{{ 'backgrounds.saved.hint' | t }}</p>
+              }
+              <div class="bg-shelves">
+                @for (world of worlds; track world) {
+                  <div
+                    class="bg-shelf"
+                    [class.over]="dragWorld() === world"
+                    (dragover)="dragOver($event, world)"
+                    (dragleave)="dragLeave(world)"
+                    (drop)="dropOnShelf($event, world)"
+                  >
+                    <span class="bg-shelf-name">{{ (world === 'light' ? 'backgrounds.saved.light' : 'backgrounds.saved.dark') | t }}</span>
+                    <div class="bg-shelf-row">
+                      @for (row of shelfRows(world); track row.signature) {
+                        <span class="bg-shelf-pic" [class.on]="row.signature === activePicture()">
+                          <button
+                            class="bg-shelf-wear"
+                            type="button"
+                            [style.background-image]="row.thumb ? 'url(' + row.thumb + ')' : null"
+                            draggable="true"
+                            (dragstart)="dragPicture($event, row.signature)"
+                            (click)="useBehindHive(row.signature)"
+                            [attr.aria-label]="'backgrounds.pool.behind' | t"
+                            [attr.title]="'backgrounds.pool.behind' | t"
+                          ></button>
+                          <button
+                            class="bg-shelf-x"
+                            type="button"
+                            (click)="unsave(row.signature)"
+                            [attr.aria-label]="'backgrounds.saved.remove' | t"
+                            [attr.title]="'backgrounds.saved.remove' | t"
+                          >&times;</button>
+                        </span>
+                      } @empty {
+                        <span class="bg-shelf-empty">{{ 'backgrounds.saved.empty' | t }}</span>
+                      }
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+
+            <!-- THE DRAWN LOOKS. A picture stands in for these while it is
+                 showing, which the note says outright rather than leaving you
+                 to wonder why pressing one changed nothing you can see. -->
+            <p class="bg-note">{{ (hasPicture() ? 'backgrounds.looks.under' : 'backgrounds.looks.about') | t }}</p>
+            <div class="bg-grid">
+              @for (look of screenLooks(); track look.id) {
+                <button class="bg-card" type="button" [class.on]="look.active" (click)="wear(look.id)">
+                  <span class="bg-card-chip" [style.background]="look.swatch" aria-hidden="true"></span>
+                  <span class="bg-card-name">{{ look.label }}</span>
+                  <span class="bg-card-note">{{ look.dresses }}</span>
+                </button>
+              }
+            </div>
+          </div>
+        }
+      </section>
+
+      <!-- ── TILES ─────────────────────────────────────────────────── -->
+      <section class="bg-section" [class.open]="isOpen('tiles')">
+        <button class="bg-head" type="button" (click)="section('tiles')" [attr.aria-expanded]="isOpen('tiles')">
+          <span class="mat-sym bg-chev" aria-hidden="true">{{ isOpen('tiles') ? 'expand_more' : 'chevron_right' }}</span>
+          <span class="bg-head-name">{{ 'backgrounds.tiles' | t }}</span>
+          <span class="bg-head-note">{{ 'backgrounds.tiles.about' | t }}</span>
+        </button>
+
+        @if (isOpen('tiles')) {
+          <div class="bg-body">
+            <div class="bg-grid">
+              @for (group of tileGroups(); track group.id) {
+                <button class="bg-card" type="button" [class.on]="group.active" (click)="wear(group.id)">
+                  <span class="bg-card-chip" [style.background]="group.swatch" aria-hidden="true"></span>
+                  <span class="bg-card-name">{{ group.label }}</span>
+                  <span class="bg-card-note">{{ group.dresses }}</span>
+                </button>
+              }
+            </div>
+
+            <!-- EVERY PICTURE IN THE LIVE GROUP, with an eye. A hidden one is
+                 never handed to a blank tile again — and stays hidden across
+                 a reload, because taking a picture off your wall is a
+                 decision, not a mood. -->
+            <div class="bg-pool-head">
+              <span class="bg-note">{{ 'backgrounds.pool' | t: { count: pictures().length } }}</span>
+              @if (hiddenCount() > 0) {
+                <button class="bg-link" type="button" (click)="showAll()">
+                  {{ 'backgrounds.pool.showall' | t: { count: hiddenCount() } }}
+                </button>
+              }
+            </div>
+
+            @if (loadingPictures() && pictures().length === 0) {
+              <p class="bg-empty">{{ 'backgrounds.pool.loading' | t }}</p>
+            } @else if (pictures().length === 0) {
+              <p class="bg-empty">{{ 'backgrounds.pool.empty' | t }}</p>
+            } @else {
+              <ul class="bg-pool">
+                @for (picture of pictures(); track picture.signature) {
+                  <li class="bg-pic" [class.hidden]="picture.hidden">
+                    <span
+                      class="bg-pic-chip"
+                      [style.background-image]="picture.thumb ? 'url(' + picture.thumb + ')' : null"
+                      aria-hidden="true"
+                    ></span>
+                    <span class="bg-pic-name">{{ picture.name }}</span>
+                    <!-- Straight from the pool to the screen: the bytes are
+                         already a resource, so this is a reference, not a copy. -->
+                    <button
+                      class="bg-pic-act"
+                      type="button"
+                      (click)="useBehindHive(picture.signature)"
+                      [attr.aria-label]="'backgrounds.pool.behind' | t"
+                      [attr.title]="'backgrounds.pool.behind' | t"
+                    >
+                      <span class="mat-sym" aria-hidden="true">wallpaper</span>
+                    </button>
+                    <button
+                      class="bg-pic-act"
+                      type="button"
+                      (click)="setHidden(picture.signature, !picture.hidden)"
+                      [attr.aria-label]="(picture.hidden ? 'backgrounds.pool.show' : 'backgrounds.pool.hide') | t"
+                      [attr.title]="(picture.hidden ? 'backgrounds.pool.show' : 'backgrounds.pool.hide') | t"
+                    >
+                      <span class="mat-sym" aria-hidden="true">{{ picture.hidden ? 'visibility_off' : 'visibility' }}</span>
+                    </button>
+                  </li>
+                }
+              </ul>
+            }
+          </div>
+        }
+      </section>
+    </div>
+  </aside>
+}
