@@ -73,6 +73,14 @@ type HistoryLike = {
  *
  * Dots survive on purpose: the meaning has to round-trip back to a hostname you
  * can visit, which is why this is not `siteSlug` (it folds every dot to `-`).
+ *
+ * A PORT SURVIVES TOO, and loopback is a zone. That is not a convenience: a
+ * machine serving its own hive answers on `localhost:4270`, so without this
+ * there is no way to name the host you are running — the one host a
+ * participant is most certain about. This MUST stay identical to the shim's
+ * `hostZone` (hypercomb-shim/src/bootstrap/hosts.ts): both write the SAME
+ * `community:hosts` pool by address, and a host addable in one shell but not
+ * the other is a pool the two disagree about.
  */
 export const hostZone = (raw: unknown): string => {
   const text = String(raw ?? '').trim().toLowerCase()
@@ -80,8 +88,9 @@ export const hostZone = (raw: unknown): string => {
   const withoutScheme = text.replace(/^[a-z][a-z0-9+.-]*:\/\//, '')
   const hostOnly = withoutScheme.split(/[/?#]/)[0] ?? ''
   const bare = hostOnly.replace(/^content\./, '').replace(/\.+$/, '')
+  if (/^(localhost|127(?:\.\d+){3})(:\d{1,5})?$/.test(bare)) return bare
   // A zone is labels joined by dots. Anything else is a typo, not a host.
-  return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(bare) ? bare : ''
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/.test(bare) ? bare : ''
 }
 
 /** `hypercomb.com` → `host:hypercomb.com`. Empty for anything that is not a

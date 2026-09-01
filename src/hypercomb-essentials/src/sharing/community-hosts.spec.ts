@@ -64,3 +64,30 @@ describe('community hosts — the identity half', () => {
     expect(JSON.stringify(record)).not.toMatch(/at"|createdAt|Date/)
   })
 })
+
+// The shim and the app write the SAME `community:hosts` pool by address, so
+// they must agree byte-for-byte on what a host IS. They did not: the shim
+// accepted `localhost:4270` and the app silently refused it, which made the
+// one host a participant is most certain about — the one on their own machine
+// — unaddable from the app.
+describe('hostZone matches the shim', () => {
+  it('carries loopback with a port, so a node can name itself', () => {
+    expect(hostZone('localhost:4270')).toBe('localhost:4270')
+    expect(hostZone('http://localhost:4270/')).toBe('localhost:4270')
+    expect(hostZone('127.0.0.1:4270')).toBe('127.0.0.1:4270')
+  })
+
+  it('carries a port on a real zone too', () => {
+    expect(hostZone('example.com:8443')).toBe('example.com:8443')
+  })
+
+  it('still refuses what is not a host', () => {
+    expect(hostZone('not a host')).toBe('')
+    expect(hostZone('')).toBe('')
+    expect(hostZone('localhost:999999')).toBe('')
+  })
+
+  it('still folds scheme, case, path and content. plumbing', () => {
+    expect(hostZone('https://CONTENT.Jwize.com/x')).toBe('jwize.com')
+  })
+})

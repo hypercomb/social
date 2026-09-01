@@ -27,6 +27,8 @@
 // possible boot.
 
 import { showHostPanel } from './host-panel'
+import { acquire, installedPackageSig, listHostPackages } from './replicate'
+import { addHostZone, listHostZones } from './hosts'
 
 export type BootstrapContext = {
   /** Why the shim loaded us: 'cold' when nothing mounted, 'warm' otherwise.
@@ -49,9 +51,32 @@ export type Acquisition = {
  * asks; the icon is the answer; the human decides"), so the only thing that
  * ever writes to the heap is a person clicking a package.
  */
-export const boot = (_context: BootstrapContext = {}): Acquisition => ({
-  prompt: showHostPanel,
-})
+export const boot = (_context: BootstrapContext = {}): Acquisition => {
+  // A HAND ON THE MECHANISM. Acquisition is consumer-requested, and sometimes
+  // the consumer is a person at a console who knows exactly which signature
+  // they want and which domains carry it:
+  //
+  //   await hypercomb.acquire('<64-hex sig>', ['jwize.com'])
+  //   await hypercomb.acquire('<sig>')            // the domains you carry
+  //   await hypercomb.hosts()                     // what those are
+  //
+  // Deliberately the same call the UI makes, not a debug back door — a second
+  // path into the heap is a second thing that can be wrong. It writes only
+  // what verifies, and it is complete-or-absent like every other acquisition.
+  try {
+    ;(window as unknown as Record<string, unknown>).hypercomb = {
+      acquire: async (sig: string, zones?: string[]) =>
+        acquire(sig, zones?.length ? zones : await listHostZones()),
+      offers: listHostPackages,
+      hosts: listHostZones,
+      addHost: addHostZone,
+      installed: installedPackageSig,
+      prompt: showHostPanel,
+    }
+  } catch { /* no window (tests) — the exports below still work */ }
 
-export { installPackage, installedPackageSig, listHostPackages } from './replicate'
+  return { prompt: showHostPanel }
+}
+
+export { acquire, installPackage, installedPackageSig, listHostPackages } from './replicate'
 export { addHostZone, hostZone, listHostZones, removeHostZone } from './hosts'

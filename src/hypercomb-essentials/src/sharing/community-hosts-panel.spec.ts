@@ -86,9 +86,11 @@ describe('hosts panel — the set, apart from the publishing', () => {
 
     expect(runtime).toMatch(/export const listHostPackages/)
     expect(runtime).toMatch(/export const hostBases/)
-    // The shim IMPORTS it now; it must not carry its own implementation.
-    expect(shimReplicate).toMatch(/from '@hypercomb\/runtime\/host-packages'/)
+    // ACQUISITION ITSELF moved to runtime too, so both shells share one
+    // implementation. The shim file is now nothing but a re-export.
+    expect(shimReplicate).toMatch(/from '@hypercomb\/runtime\/acquire'/)
     expect(shimReplicate).not.toMatch(/export const listHostPackages = async/)
+    expect(shimReplicate).not.toMatch(/export const installPackage = async/)
     expect(shimReplicate).not.toMatch(/const basesFor =/)
     // The panel uses the same one — NOT a drone, because essentials imports
     // core and nothing else and so cannot reach runtime.

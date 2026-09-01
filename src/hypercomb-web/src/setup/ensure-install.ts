@@ -13,6 +13,11 @@ import { isComplete, resolveInventory, Store, validateSealedPackage, type Replic
 import { seedDarkOnFreshInstall } from '@hypercomb/shared/ui/features-viewer/behavior-enablement'
 import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
 import { isVisitorSession } from './visitor-session'
+// Cold-boot acquisition. Same implementation the shim uses and the same one
+// behind window.hypercomb.acquire — there is one acquisition, not three.
+import { acquire, listHostPackages } from '@hypercomb/runtime/acquire'
+import { DEFAULT_HOST_ZONES, listHostZones } from '@hypercomb/runtime/host-zones'
+import { cacheImportMap } from './resolve-import-map'
 
 export type BootStatus =
   | { kind: 'cached' }
@@ -230,11 +235,125 @@ export const ensureInstall = async (): Promise<void> => {
     await purgeStaleOpfsArtifacts(store)
   }
 
-  // Cold boot / cache miss. There is no second content machine to consult:
-  // content arrives ONLY by replicating a root signature. Surface the state
-  // and let the participant start it explicitly.
+  // Cold boot / cache miss. Nothing is installed, so there is nothing to
+  // protect and nothing to swap under: this is the ONE moment where reaching
+  // for content on the participant's behalf is not a policy change but the
+  // only way the shell can be useful at all.
+  //
+  // WHY THIS IS NOT A REVERSAL OF THE PUSH-ONLY CONTRACT. That contract exists
+  // so a WARM hive is never re-versioned underneath someone who did not ask —
+  // "the user initiates upgrades, boot never does". A cold shell has no
+  // version to change and no hive to disturb; the alternative is a welcome
+  // card that can only say "you have nothing, and I know where to get it, and
+  // I will not." Warm boots are untouched by this and still go through the
+  // upgrade affordance.
+  const acquired = await autoloadFromHosts()
+  if (acquired) return
+
   console.log('[ensure-install] no cached content — surfacing install-needed')
   EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-source' } as BootStatus)
+}
+
+/**
+ * COLD-BOOT ACQUISITION from the domains this participant carries.
+ *
+ * Asks every carried domain what it publishes and takes the newest package
+ * anyone offers. No signature has to be known in advance — on a cold boot
+ * there is none to know — so "newest" is the only available answer, and the
+ * manifest's own `generation` counter is what orders it.
+ *
+ * Silent on every failure. No carried domains, none reachable, none
+ * publishing, an incomplete walk — all of them fall through to the welcome
+ * card, which is the honest surface for "you have nothing yet". A cold boot
+ * that cannot reach the network must not become an error message about hosts.
+ *
+ * Returns true only when a package was actually installed, which by the
+ * complete-or-absent gate means its whole closure is on disk.
+ */
+/**
+ * Resolve once the service worker is in control, or give up after a bounded
+ * wait. Never rejects and never blocks a boot indefinitely: a browser with no
+ * service-worker support, a registration that fails for its own reasons, or a
+ * worker that is simply slow all end the same way — we reload anyway, because
+ * a reload that might be early is better than a boot that never happens.
+ *
+ * `navigator.serviceWorker.ready` alone is not enough: it never settles when
+ * no registration exists at all, which is precisely the first-load case.
+ */
+const serviceWorkerSettled = async (timeoutMs = 4000): Promise<void> => {
+  try {
+    if (!('serviceWorker' in navigator)) return
+    await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise(resolve => setTimeout(resolve, timeoutMs)),
+    ])
+  } catch { /* a worker we cannot wait for is one we do not wait for */ }
+}
+
+const autoloadFromHosts = async (): Promise<boolean> => {
+  try {
+    // A COLD CLIENT CARRIES NOTHING. The pool that holds the domains you have
+    // added is empty on a first run, and the drone that seeds it ships inside
+    // the package we are trying to fetch — so falling back to the one known
+    // host is not a convenience here, it is the only way the cycle opens.
+    const carried = await listHostZones()
+    const zones = carried.length ? carried : [...DEFAULT_HOST_ZONES]
+    if (!zones.length) return false
+
+    const offers = (await Promise.all(zones.map(async zone => {
+      try { return await listHostPackages(zone) } catch { return [] }
+    }))).flat()
+    if (!offers.length) return false
+
+    // Newest wins. Every offer is content-addressed, so "which host" is not a
+    // trust question — whoever answers, the bytes verify or they are refused.
+    const newest = offers.sort((a, b) => (b.generation ?? 0) - (a.generation ?? 0))[0]!
+
+    EffectBus.emit('boot:status', { kind: 'installing' } as BootStatus)
+    console.log(`[ensure-install] cold boot — acquiring ${newest.packageSig.slice(0, 12)}… from ${zones.join(', ')}`)
+
+    // Every domain that publishes it is a byte source for it.
+    const outcome = await acquire(newest.packageSig, zones)
+    if (!outcome.ok) {
+      console.warn('[ensure-install] cold acquisition incomplete —', outcome.error ?? `${outcome.holes.length} hole(s)`)
+      return false
+    }
+
+    // WAIT FOR THE SERVICE WORKER BEFORE RELOADING.
+    //
+    // Reloading the instant the bytes land looks harmless and is not: on the
+    // very FIRST load of an origin the service worker is still registering,
+    // the navigation aborts it, and the failure then sticks for that origin —
+    // `register()` keeps answering "unknown error when fetching the script".
+    // Nothing recovers on its own, and the symptom is far from the cause: the
+    // package is installed and correct, `hypercomb.installed` is true, 124
+    // bees are on disk, and the hive still comes up blank forever, because
+    // every `/opfs/<sig>` module URL 404s without a worker to answer it.
+    //
+    // Observed on two virgin origins; the manual path never hit it only
+    // because a person takes seconds to reload and the worker wins that race.
+    await serviceWorkerSettled()
+
+    // CACHE THE IMPORT MAP THE ACQUISITION JUST MADE RESOLVABLE.
+    //
+    // The map is built from the dependency pool and then FROZEN by the browser
+    // at first module evaluation, so a reload that boots before the map is
+    // cached gets a map missing the very deps we just wrote. The bees land,
+    // the pool is right, and `Settings` never registers — which fails
+    // `PixiHostWorker.ready()`'s resolve('settings') gate and paints an
+    // empty hive with no error anywhere. The bundled-upgrade path has always
+    // done this for the same reason; the cold path needs it just as much.
+    try { await cacheImportMap() } catch (error) {
+      console.warn('[ensure-install] import map not cached before reload', error)
+    }
+
+    console.log(`[ensure-install] acquired ${outcome.fetched} atom(s) — reloading onto the package`)
+    location.reload()
+    return true
+  } catch (error) {
+    console.warn('[ensure-install] cold acquisition failed', error)
+    return false
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────

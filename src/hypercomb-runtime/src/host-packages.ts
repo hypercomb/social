@@ -11,9 +11,11 @@
 // would then disagree about what a host publishes, which is the one thing they
 // must never do.
 //
-// So it lives here, in runtime: the layer both the shim and shared can reach.
-// Essentials cannot (it imports core and nothing else, by doctrine), which is
-// why the app-side caller is the hosts PANEL rather than a drone.
+// So it lives here, in runtime: the layer that owns io. Essentials cannot
+// import it — a module imports core and nothing else, by doctrine — so this
+// registers itself under the key CORE declares (`HOST_IOC_KEY`, host.types.ts)
+// and a drone reaches it through IoC. Core holds the contract and stays free
+// of io; runtime holds the fetch. Same split as I18nProvider.
 //
 // THE MANIFEST IS THE DOMAIN'S OWN VOICE — the one legitimate mutable pointer
 // in the chain, because that is what a domain IS. Everything it names is
@@ -22,6 +24,8 @@
 // publisher identity is the signed sentinel's job, not this file's.
 //
 // It reads nothing but public URLs and writes nothing anywhere.
+
+import { HOST_IOC_KEY, type HostProvider } from '@hypercomb/core'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
@@ -114,3 +118,19 @@ export const listHostPackages = async (zone: string): Promise<HostPackage[]> => 
   }
   return []
 }
+
+// ── the port ────────────────────────────────────────────────────────────────
+// Registered under the key CORE declares, so a module that imports core and
+// nothing else (which is every module, by doctrine) can still ask a domain what
+// it publishes. Core holds the contract and does no io; the io is here.
+const provider: HostProvider = {
+  listPackages: listHostPackages,
+  bases: hostBases,
+}
+
+try {
+  ;(globalThis as { ioc?: { register?: (k: string, v: unknown) => void } })
+    .ioc?.register?.(HOST_IOC_KEY, provider)
+} catch { /* no ioc in this environment — direct importers still work */ }
+
+export { provider as hostProvider }
