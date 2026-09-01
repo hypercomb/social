@@ -75,6 +75,17 @@ async function build() {
     }
     console.log(`  ${p.padEnd(12)} order=${order} page=${(pl.website || []).length ? 'yes' : 'NO'}`)
   }
+
+  // ONE BUILD REVISION FOR THE WHOLE PASS (documentation/build-revisions.md).
+  //
+  // Four anchors get stamped here — the whole's page and one for each part —
+  // in a real hive, over the bridge. A pass that mints resources and touches
+  // more than one anchor has to end as ONE restorable step, or the only way
+  // back out is four separate undos in the right order.
+  const rev = await send({ op: 'build-record', segments: [W], label: 'page-proof build' })
+  console.log(rev && rev.ok
+    ? `build revision: ${rev.data.label} seal=${String(rev.data.seal).slice(0, 12)}${rev.data.unchanged ? ' (unchanged)' : ''}`
+    : `build revision FAILED: ${rev && rev.error}`)
 }
 
 const enter = async () => {

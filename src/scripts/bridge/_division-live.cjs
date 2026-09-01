@@ -78,6 +78,21 @@ async function build() {
   }
   console.log(`distinct pictures: ${seen.size}/${PARTS.length}`,
     seen.has(wholePic?.img) ? ' — one is the WHOLE\'S (duplicated)' : ' — none is the whole\'s (divided)')
+
+  // ONE BUILD REVISION FOR THE WHOLE PASS (documentation/build-revisions.md).
+  //
+  // This runs against a real hive over the bridge, and it stamps eight anchors
+  // on the way through — the whole's properties, then a creation mark on each
+  // of the seven parts — before the distribute writes more again. Without a
+  // record that is eight-plus separate entries in somebody's history and no
+  // single step to go back to, which is the whole reason the standard exists.
+  //
+  // AFTER the distribute has settled, not before: the seal should capture the
+  // divided visual, which is the state this pass exists to produce.
+  const rev = await send({ op:'build-record', segments:[WHOLE], label:'division-live build' })
+  console.log(rev && rev.ok
+    ? `build revision: ${rev.data.label} seal=${String(rev.data.seal).slice(0, 12)}${rev.data.unchanged ? ' (unchanged)' : ''}`
+    : `build revision FAILED: ${rev && rev.error}`)
 }
 
 const show = async () => { await ok({ op:'submit', cell: WHOLE }, 'navigate'); console.log(`hive navigated into /${WHOLE}`) }
