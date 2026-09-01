@@ -283,13 +283,17 @@ jobs:
       # and the shell rendered — the whole chain, asserted from outside the
       # window, which is the only place a runner can look.
       #
-      # Non-blocking for now: this is the first time it runs on macOS and a
-      # runner-environment quirk (no window server for a background process)
-      # would otherwise mask the build artifacts. Flip to a hard gate once a
-      # green run confirms the step itself is sound.
+      # A HARD GATE, as of runs 33456727903 and 33458029136 — both reached
+      # boot milestone #13, "bootstrapApplication done (Angular first paint)",
+      # which settles the question that kept it non-blocking: whether a runner
+      # with no window server could boot the bundle at all. It can.
+      #
+      # Windows already paid for leaving one of these unblocking: a run went
+      # green while its own log read `no Hypercomb.exe was built`, because
+      # continue-on-error swallowed it. A smoke test nobody is forced to read
+      # is a smoke test that reports nothing.
       - name: Smoke test — launch and confirm first paint
         id: smoke
-        continue-on-error: true
         working-directory: src/hypercomb-client
         run: |
           set -uo pipefail
@@ -361,9 +365,9 @@ jobs:
           path: /Users/runner/Library/Application Support/io.hypercomb.client/**/renderer.log
           if-no-files-found: ignore
 
-      # The smoke test is deliberately non-blocking (see its comment), which
-      # means a failure there would otherwise leave the run green and the
-      # finding buried in the log. Say it plainly in the summary instead.
+      # The smoke test fails the run now, but a red X names the step, not what
+      # the step proves. Say it in words too — and `if: always()` is what keeps
+      # this running once the gate can trip.
       - name: Summarise
         if: always()
         run: |
