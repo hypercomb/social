@@ -47,4 +47,15 @@ export function ensureViewportInsetVars(): void {
 
   // Seed the vars at 0px so consumers' calc() has a concrete value from frame one.
   apply()
+
+  // ASK, RATHER THAN WAIT TO BE TOLD.
+  //
+  // A reservation is announced when a panel measures, and the bus replays only
+  // the LAST announcement to a late subscriber — one slot, not one per owner.
+  // So an aggregator that started after two panels were already open would
+  // learn about one of them and paint the fixed chrome underneath the other.
+  // One request on the way up makes the vars right for every start order,
+  // which is what stops this being a mechanism you have to bootstrap in the
+  // correct place.
+  EffectBus.emitTransient('viewport:inset-poll', {})
 }

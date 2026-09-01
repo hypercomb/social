@@ -1739,9 +1739,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // so each panel went on reserving the edge it measured at its old
     // position: with the bar widened under it, a left-docked panel's true
     // right edge moved from 375px to 481px while its reservation stayed at
-    // 375, and it covered 106px of the surface beside it. The bar is the only
-    // thing that knows this happened, so the bar is what says so.
-    EffectBus.emit('viewport:controls-edge', { left, right })
+    // 375, and it covered 106px of the surface beside it.
+    //
+    // TRANSIENT, because this is a request and not a state. Replaying it to a
+    // panel that opens later would ask it to measure a second time for no
+    // reason — mounting already does that.
+    EffectBus.emitTransient('viewport:inset-poll', {})
   }
 
   // ── THE BAR'S OWN EDGE, WHICH NOTHING GETS TO COVER ─────────────────

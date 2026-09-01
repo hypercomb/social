@@ -35,6 +35,7 @@
 // Module scope, no service — the directive is already self-contained chrome,
 // exactly as panel-groups.ts is for the group text.
 
+import { EffectBus } from '@hypercomb/core'
 import { isPhoneViewport } from '../breakpoints'
 
 export type LaneSide = 'left' | 'right'
@@ -95,6 +96,18 @@ export const layoutLane = (side: LaneSide): void => {
     member.placeInLane(offset)
     offset += Math.max(0, member.laneWidth())
   }
+  // PLACING A WINDOW MOVES IT WITHOUT RESIZING IT.
+  //
+  // What a window reserves of the screen edge is measured from where it sits,
+  // so the inner occupant of a two-window lane is wrong the moment the outer
+  // one is dragged wider or closed — it slides, at exactly the same size, and
+  // a ResizeObserver has nothing to report. Left alone it went on reserving
+  // the edge it held before, which covers the surface when the lane grows and
+  // strands a dead strip beside the window when the lane shrinks.
+  //
+  // We cannot say what the new reservation is; only that everything here has
+  // been put somewhere. Asking is the whole message.
+  EffectBus.emitTransient('viewport:inset-poll', {})
 }
 
 /** Take a place in the lane. Already in it → just re-layout (a width changed).

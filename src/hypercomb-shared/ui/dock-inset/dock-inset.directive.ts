@@ -37,7 +37,7 @@ export class DockInsetDirective implements OnDestroy {
   readonly #host = inject(ElementRef) as ElementRef<HTMLElement>
   readonly #owner = `dock-${++_counter}`
   #ro: ResizeObserver | null = null
-  #offControlsEdge: (() => void) | null = null
+  #offPoll: (() => void) | null = null
   #raf = 0
   #timer = 0
   #side: DockSide = 'right'
@@ -64,24 +64,32 @@ export class DockInsetDirective implements OnDestroy {
     this.#ro.observe(this.#host.nativeElement)
     window.addEventListener('resize', this.#schedule)
 
-    // A PANEL CAN MOVE WITHOUT RESIZING, and then nothing above notices.
+    // A PANEL CAN MOVE WITHOUT RESIZING, and then nothing here notices.
     //
-    // A docked panel is placed with a `calc()` over `--hc-controls-<side>`, so
-    // re-docking the control bar slides it sideways at exactly the same size.
-    // A ResizeObserver reports size, `window.resize` never fires, and the
-    // reservation is measured from a POSITION — `innerWidth - left` for a
-    // right-docked panel — so it goes quietly stale and the panel covers what
-    // it was supposed to sit beside. The bar announces its own edge for this
-    // reason; measuring again is all we have to do about it.
-    this.#offControlsEdge = EffectBus.on('viewport:controls-edge', this.#schedule)
+    // What a panel reserves is measured from a POSITION — `innerWidth - left`
+    // for a right-docked one — and two ordinary things move a panel without
+    // changing its size by a pixel. Re-docking the control bar slides every
+    // panel, because each is placed with a `calc()` over `--hc-controls-<side>`.
+    // And a lane holding two windows re-places the inner one whenever the
+    // outer is resized or closed. A ResizeObserver reports size and nothing
+    // else, and `window.resize` never fires for either — so the reservation
+    // went quietly stale, and the panel either covered what it was meant to
+    // sit beside or left a dead strip where it used to be.
+    //
+    // Neither mover can work out what the new number should be, and it should
+    // not have to: it knows only that it moved something. So there is ONE
+    // request, carrying nothing, and every live panel answers it by measuring
+    // itself again. A panel that did not move re-announces the number it
+    // already had, which costs one `getBoundingClientRect` and no repaint.
+    this.#offPoll = EffectBus.on('viewport:inset-poll', this.#schedule)
   }
 
   ngOnDestroy(): void {
     this.#ro?.disconnect()
     this.#ro = null
     window.removeEventListener('resize', this.#schedule)
-    this.#offControlsEdge?.()
-    this.#offControlsEdge = null
+    this.#offPoll?.()
+    this.#offPoll = null
     if (this.#raf) cancelAnimationFrame(this.#raf)
     if (this.#timer) clearTimeout(this.#timer)
     // @if-unmounted panels clear their reservation here.
