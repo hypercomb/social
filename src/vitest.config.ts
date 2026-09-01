@@ -26,6 +26,13 @@ export default defineConfig({
     alias: {
       '@hypercomb/core': src('./hypercomb-core/src/index.ts'),
       '@hypercomb/essentials': src('./hypercomb-essentials/src/index.ts'),
+      // `@hypercomb/runtime` is in tsconfig.base.json's paths but was never
+      // added here, so any spec that reached it — directly or through the
+      // `@hypercomb/shared/core/*` stubs that re-export it — failed to LOAD,
+      // with a resolver error rather than a test failure. That is why
+      // ensure-install's own native branch could only be imported
+      // dynamically, inside a try/catch, to keep the suite loading at all.
+      '@hypercomb/runtime': src('./hypercomb-runtime/src'),
       '@hypercomb/shared/core': src('./hypercomb-shared/core'),
       // Deep UI imports resolve too — the shell reaches past the barrel for
       // single lenses (`ui/features-viewer/behavior-enablement`), and without

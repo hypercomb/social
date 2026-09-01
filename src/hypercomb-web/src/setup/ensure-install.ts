@@ -11,6 +11,7 @@
 import { EffectBus, SignatureStore } from '@hypercomb/core'
 import { isComplete, resolveInventory, Store, validateSealedPackage, type ReplicationIo } from '@hypercomb/shared/core'
 import { seedDarkOnFreshInstall } from '@hypercomb/shared/ui/features-viewer/behavior-enablement'
+import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
 import { isVisitorSession } from './visitor-session'
 
 export type BootStatus =
@@ -27,8 +28,17 @@ export type BootStatus =
  *  message — the worst first-run stall we know of. One prototype check turns
  *  that loop into an honest "update your browser" card. */
 export const opfsWritable = (): boolean =>
-  typeof FileSystemFileHandle !== 'undefined' &&
-  typeof FileSystemFileHandle.prototype.createWritable === 'function'
+  // THE NATIVE SHELL HAS NO OPFS TO BE TOO OLD FOR. Its hive is a real
+  // directory reached over IPC, and its writes never touch
+  // FileSystemFileHandle — so this global-prototype probe asks a question
+  // about a storage backend it is not using. WebKitGTK answers it the way
+  // iOS 16.4 does (the handle exists, createWritable does not), and the Linux
+  // client refused to install its own bundled content: an empty shell, every
+  // launch, with 'browser too old' in the log. macOS and Windows were never
+  // asked, because their webviews happen to have createWritable.
+  nativeAvailable() ||
+  (typeof FileSystemFileHandle !== 'undefined' &&
+   typeof FileSystemFileHandle.prototype.createWritable === 'function')
 
 const MANIFEST_KEY = 'core-adapter.installed-manifest'
 const SIG_STORE_KEY = 'hypercomb.signature-store'

@@ -75,6 +75,7 @@ import {
   protectOriginStorage,
 } from '@hypercomb/shared/core'
 import { postCommunityDomainsToServiceWorker } from '@hypercomb/shared/core/sw-domains'
+import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
 
 // Ensure side-effect registration
 const _deps = [DependencyLoader]
@@ -319,7 +320,12 @@ const bootstrap = async (): Promise<void> => {
     // fails and the card loops Start → Starting…. Private
     // windows and pre-16.4 Safari lack navigator.storage.getDirectory;
     // detect that up front and explain instead of attempting.
-    if (typeof navigator.storage?.getDirectory !== 'function') {
+    // Native excepted: its hive is a real directory reached over IPC, and it
+    // has no navigator.storage.getDirectory to offer. WebKitGTK exposes none,
+    // so the Linux client refused to unpack the content it shipped with and
+    // came up empty every launch — while app.ts, seeing install-needed, kept
+    // auto-firing this same handler into the same refusal.
+    if (!nativeAvailable() && typeof navigator.storage?.getDirectory !== 'function') {
       console.warn('[main] persistent storage unavailable — install cannot proceed')
       EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-storage' } as BootStatus)
       return
