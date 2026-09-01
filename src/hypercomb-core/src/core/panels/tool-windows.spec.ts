@@ -21,9 +21,9 @@
 // to that field. Anywhere else and the press is not about one window at all.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { toolWindows } from './tool-windows'
-import { holdToolWindow, resetWindowRule } from './window-rule'
-import { holdWindow, isWindowShowing, resetWindowSession, type WindowSession } from './window-session'
+import { toolWindows } from './tool-windows.js'
+import { holdToolWindow, resetWindowRule } from './window-rule.js'
+import { holdWindow, isWindowShowing, resetWindowSession, type WindowSession } from './window-session.js'
 
 /** A window that joins BOTH registries while it shows and drops out of them
  *  when it is put away — the round trip `hcDockedPanel` performs off its own

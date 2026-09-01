@@ -27,6 +27,16 @@ export interface LedgerPublisher {
   readonly publishedAt: number | null
 }
 
+/** One address a creation answers on. A creation reachable through two zones
+ *  has two of these; `primary` is the first, and equals the site's own `host`. */
+export interface LedgerDoor {
+  readonly host: string
+  readonly url: string
+  readonly primary: boolean
+  /** Brought to life by the wildcard rule rather than bound by hand. */
+  readonly implicit: boolean
+}
+
 /** One bound site in the directory host's `SITE_BINDINGS`. */
 export interface LedgerSite {
   readonly host: string
@@ -34,6 +44,9 @@ export interface LedgerSite {
   readonly title: string
   readonly lineage: string
   readonly publishers: readonly LedgerPublisher[]
+  /** Every door, primary first. Absent from a worker that predates the field —
+   *  read it through `doorsOf`, never directly. */
+  readonly hosts?: readonly LedgerDoor[]
 }
 
 /** One plate on the directory page — a site somebody has actually
@@ -47,6 +60,9 @@ export interface PublicationCard {
   readonly publisherLabel: string
   /** Unix seconds. */
   readonly publishedAt: number | null
+  /** Every address this creation answers on, primary first — never empty, and
+   *  `hosts[0].host === host` always. */
+  readonly hosts: readonly LedgerDoor[]
 }
 
 /** The public directory this beehavior reads when its own origin has no
@@ -65,10 +81,23 @@ const publishedBy = (site: LedgerSite): LedgerPublisher | null => {
   return published.find(p => p.primary) ?? published[0]
 }
 
+/** A site's doors, primary first. A worker that predates `hosts` reports one
+ *  address in `host`; that is still a door, so it becomes the whole list rather
+ *  than an empty one. Anything malformed falls back the same way. */
+export function doorsOf(site: LedgerSite): readonly LedgerDoor[] {
+  const doors = Array.isArray(site.hosts)
+    ? site.hosts.filter((d): d is LedgerDoor => typeof d?.host === 'string' && typeof d?.url === 'string')
+    : []
+  if (doors.length) return doors
+  return [{ host: site.host, url: site.url, primary: true, implicit: false }]
+}
+
 /** Ledger JSON → plates. Pure — the fetch stays at the edge so this shape
  *  is provable without a network. `exclude` names the directory itself
  *  (its own host, and the lineage the view is standing on): the page is
- *  the door, never a door to itself. */
+ *  the door, never a door to itself — and a directory reached through its
+ *  SECOND name must exclude itself just as surely, which is why this tests
+ *  every door and not only the primary. */
 export function shapePublications(
   sites: readonly unknown[],
   exclude: { host?: string; lineage?: string } = {},
@@ -79,13 +108,15 @@ export function shapePublications(
     if (typeof site?.host !== 'string' || typeof site.url !== 'string'
       || typeof site.title !== 'string' || typeof site.lineage !== 'string'
       || !Array.isArray(site.publishers)) continue
-    if (site.host === exclude.host) continue
+    const doors = doorsOf(site as LedgerSite)
+    if (exclude.host && doors.some(d => d.host === exclude.host)) continue
     if (exclude.lineage && site.lineage === exclude.lineage) continue
     const publisher = publishedBy(site as LedgerSite)
     if (!publisher) continue
     cards.push({
       host: site.host,
       url: site.url,
+      hosts: doors,
       title: site.title,
       lineage: site.lineage,
       publisherLabel: publisher.label || publisher.pubkey.slice(0, 12) + '…',

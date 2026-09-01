@@ -6,9 +6,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Hypercomb — signature-addressed, presence-based, decentralized. The complete reference.">
 
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify@4/lib/themes/vue.css">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+  <!-- Everything below is served from THIS origin. A CDN <script> is arbitrary
+       code execution by a third party and a font/style link hands them the
+       reader's IP, UA and Referer. Vendored copies live in vendor/ at pinned
+       versions (vendor/VERSIONS.txt) — never a floating @4/@1 range, which
+       lets the bytes change under us. See no-third-party-requests.md. -->
+  <link rel="stylesheet" href="vendor/vue.css">
+  <link rel="stylesheet" href="vendor/fonts/fonts.css">
 
   <script>
     // Resolve and apply the theme before first paint so the page never flashes
@@ -444,11 +448,11 @@
       ],
     }
   </script>
-  <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/plugins/search.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/docsify-copy-code@3/dist/docsify-copy-code.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-typescript.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-bash.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-json.min.js"></script>
+  <script src="vendor/docsify.min.js"></script>
+  <script src="vendor/search.min.js"></script>
+  <script src="vendor/docsify-copy-code.min.js"></script>
+  <script src="vendor/prism-typescript.min.js"></script>
+  <script src="vendor/prism-bash.min.js"></script>
+  <script src="vendor/prism-json.min.js"></script>
 </body>
 </html>

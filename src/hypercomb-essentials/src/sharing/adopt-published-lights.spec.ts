@@ -78,4 +78,20 @@ describe('adoptPublishedLights', () => {
     expect(read(GLOBAL_ON_KEY)).toEqual([])
     expect(isKindGloballyOff('a')).toBe(true)
   })
+
+  // ...and the filtering the comment above promises is REAL. `[]` is truthy,
+  // so `if (lights)` adopted it and blanked the visitor's whole roster — every
+  // kind off, where an absent list means all-on. A published site then rendered
+  // as bare hexagons in default art. Observed live on replication.hypercomb.com
+  // (2026-09-01): `hc:behavior-global-on` came back `[]` against a mark that
+  // correctly named `visual:website:page`.
+  it('is only ever called by the visit path with something to light', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    const { dirname, join } = await import('node:path')
+    const src = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), 'hive-visit.drone.ts'), 'utf8')
+    expect(src).toMatch(/if \(lights\?\.length\) adoptPublishedLights\(lights\)/)
+    expect(src).not.toMatch(/if \(lights\) adoptPublishedLights/)
+  })
 })

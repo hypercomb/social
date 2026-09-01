@@ -217,48 +217,4 @@ $accent: #7eb6d6;
   color: var(--hc-window-ink-quiet);
 }
 
-// ── the switch ──────────────────────────────────────────────────────────────
-// The one global state in this window: bytes go to a public host, or they do
-// not. Given the accent when ON because it is the single fact here that IS a
-// claim about the world — everything below it is just a list.
-.hosts-switch {
-  display: flex;
-  align-items: center;
-  gap: 0.5em;
-  width: 100%;
-  margin: 0 0 0.7em;
-  padding: 0.45em 0.55em;
-  font: inherit;
-  font-size: 0.8em;
-  text-align: left;
-  color: var(--hc-window-ink-quiet);
-  background: color-mix(in srgb, var(--hc-panel-text) 4%, transparent);
-  border: 1px solid rgba(var(--acc), 0.18);
-  border-radius: 4px;
-  cursor: pointer;
 
-  &:hover { border-color: rgba(var(--acc), 0.34); }
-  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
-
-  &.on {
-    color: var(--hc-window-ink-loud);
-    background: rgba(var(--acc), 0.1);
-    border-color: rgba(var(--acc), 0.4);
-  }
-}
-
-.hosts-switch-dot {
-  flex: 0 0 auto;
-  width: 0.62em;
-  height: 0.62em;
-  border-radius: 50%;
-  background: transparent;
-  border: 1px solid currentColor;
-
-  .hosts-switch.on & {
-    background: var(--hc-window-accent);
-    border-color: var(--hc-window-accent);
-  }
-}
-
-.hosts-switch-label { flex: 1 1 auto; }

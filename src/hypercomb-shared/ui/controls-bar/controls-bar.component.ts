@@ -130,6 +130,16 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // changed here since. Slash-first (`/publish`), so like `sequences` it stays
   // off the rail until the participant enables it from inside its own window.
   { id: 'publish',      label: 'controls.publish',      action: 'togglePublish',      visibleWhen: 'always' },
+  // THREE WINDOWS THAT DECLARED A LAUNCHER AND HAD NOWHERE TO LAND.
+  // `hcDockedPanel`'s settings gear offers "Add to controls" for any window
+  // carrying a `launcherControlId`, and writes `hc:controls-enabled-map[<id>]`.
+  // hosts, comfy and aliases all declared one — with no entry here the map was
+  // written, the switch read as ON, and nothing ever appeared on the rail. Off
+  // by default like sequences and publish: the window's own gear is what puts
+  // it there.
+  { id: 'hosts',        label: 'hosts.title',           action: 'toggleHosts',        visibleWhen: 'always' },
+  { id: 'comfy',        label: 'comfy.title',           action: 'openComfy',          visibleWhen: 'always' },
+  { id: 'aliases',      label: 'aliases.title',         action: 'openAliases',        visibleWhen: 'always' },
   // Selection verbs — the floating vertical selection menu is retired
   // (documentation/selection-tool-windows.md); one-shot verbs live here on the
   // registry (user-toggleable like every control) while windowed responses
@@ -172,6 +182,9 @@ const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   'chat': false,
   'sequences': false,
   'publish': false,
+  'hosts': false,
+  'comfy': false,
+  'aliases': false,
   // Selection verbs default ON (they only appear while a selection exists;
   // the retired floating menu was the old primary path).
   'promote-to-parent': true,
@@ -741,6 +754,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     toggleChat: () => EffectBus.emit('chat:toggle', {}),
     openSequences: () => EffectBus.emit('sequence:view-open', {}),
     togglePublish: () => EffectBus.emit('publish:view-toggle', {}),
+    toggleHosts: () => EffectBus.emit('hosts:view-toggle', {}),
+    // comfy and aliases have no toggle effect — only open/close, which their
+    // own close buttons already own. Opening an open window is a no-op.
+    openComfy: () => EffectBus.emit('comfy:open', {}),
+    openAliases: () => EffectBus.emit('aliases:open', {}),
     cut: () => this.cut(),
     copy: () => this.copy(),
     remove: () => this.remove(),
@@ -804,6 +822,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'chat':         return 'chat'
       case 'sequences':    return 'schema'
       case 'publish':      return 'cloud_upload'
+      // All three already ship in the icon subset (scripts/icon-names.cjs reads
+      // this file), so they cost no new glyph. A name that is NOT in the subset
+      // renders BLANK and says nothing about it — check before inventing one.
+      case 'hosts':        return 'dns'
+      case 'comfy':        return 'palette'
+      // NOT `label` — the pheromone panel's button already wears it, and two
+      // rail icons with the same glyph are two controls nobody can tell apart.
+      case 'aliases':      return 'tag'
       case 'promote-to-parent': return 'arrow_upward'
       case 'clipboard':    return 'content_paste'
       case 'voice':        return 'mic'

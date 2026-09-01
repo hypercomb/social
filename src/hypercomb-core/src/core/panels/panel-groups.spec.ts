@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   type GroupAttrs, type GroupMember, TEXT_SIZES,
   members, publishAttrs, readGroupAttrs, readMembership, readTextScale, writeMembership, writeTextScale,
-} from './panel-groups'
+} from './panel-groups.js'
 
 /** A tool window as the sharing sees one: a width and a text size, plus its own
  *  limits to clamp an incoming width against — the directive's `adopt`, minus

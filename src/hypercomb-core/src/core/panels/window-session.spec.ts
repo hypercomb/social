@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import {
   holdWindow, parkWindows, unparkWindows, windowsParked, parkedWindowIds,
   resetWindowSession, signalSession, type BooleanSignal,
-} from './window-session'
+} from './window-session.js'
 
 /** A window that is nothing but a boolean, the way most of them are. */
 const fakeSignal = (initial: boolean): BooleanSignal => {

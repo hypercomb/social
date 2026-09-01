@@ -137,6 +137,13 @@ console.log(
 // at build time, and hand the number in. It tracks the barrel as it shrinks
 // and can never quietly disagree with it. A missing barrel counts 0 — which by
 // then is the true answer.
+//
+// REPORTING is not ENFORCEMENT: this printed 47, then 48, then 52 across three
+// sessions and nothing stopped it, because a number in build output is only
+// read by whoever is looking. The same lines are now a frozen allowlist in
+// `doctrine.spec.ts` ("the shell-surface barrel may only shrink"), so growth
+// fails the suite. This line stays as the human-facing half — it says how far
+// there is to go; the ratchet says which direction you are allowed to move.
 const barrelPath = resolve(here, '..', 'hypercomb-shared', 'ui', 'shell-surfaces', 'shell-surfaces.barrel.ts')
 let barrelEntries = 0
 try {

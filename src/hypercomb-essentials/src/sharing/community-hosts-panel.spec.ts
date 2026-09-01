@@ -127,20 +127,26 @@ describe('hosts panel — the set, apart from the publishing', () => {
     expect(gesture).not.toMatch(/HostQueenBee/)
   })
 
-  it('turns hosting on and off globally, from the hosts window', () => {
-    expect(HOSTS_DRONE).toMatch(/onEffect<\{ on\?: boolean \}>\('hosts:set-hosting'/)
-    expect(HOSTS_DRONE).toMatch(/enablePublicHost/)
-    expect(HOSTS_DRONE).toMatch(/disablePublicHost/)
-    expect(HOSTS_HTML).toMatch(/\(click\)="toggleHosting\(\)"/)
-    expect(HOSTS_HTML).toMatch(/role="switch"/)
+  it('has NO hosting switch — publishing is the gesture', () => {
+    // It was redundant in one direction and untrue in the other. ON armed
+    // something `publishBranch` arms itself (`enablePublicHost()`), so it
+    // could only ever be already-on by the time it mattered. OFF read as
+    // "my sites come down" and did nothing of the kind: bytes already on a
+    // host stay (no delete surface, deliberately), the signed index still
+    // names the head, every published site keeps serving — and the next
+    // publish silently flipped the flag back on, so even the one thing it
+    // did do never survived. Taking something down is `unpublishBranch`.
+    expect(HOSTS_HTML).not.toMatch(/toggleHosting/)
+    expect(HOSTS_HTML).not.toMatch(/role="switch"/)
+    expect(HOSTS_HTML).not.toMatch(/hosts-switch/)
+    expect(HOSTS_TS).not.toMatch(/toggleHosting/)
+    expect(HOSTS_TS).not.toMatch(/hosting/)
+    expect(HOSTS_DRONE).not.toMatch(/hosts:set-hosting/)
+    expect(HOSTS_DRONE).not.toMatch(/disablePublicHost/)
   })
 
-  it('asks before turning hosting ON, and asks nothing to turn it off', () => {
-    // Publishing bytes under your signing key is not a preference toggle.
-    // Stopping never is the dangerous direction.
-    expect(HOSTS_DRONE).toMatch(/if \(wanted\) \{[\s\S]{0,400}?requestConfirm\(/)
-    expect(HOSTS_DRONE).toMatch(/hosts\.hosting\.confirm\.title/)
-    expect(EN['hosts.hosting.confirm.message']).toBeTruthy()
+  it('leaves no orphan strings behind for a control that is gone', () => {
+    for (const key of Object.keys(EN)) expect(key.startsWith('hosts.hosting.')).toBe(false)
   })
 
   it('seeds ONE known host into an empty pool, and only ever once', () => {

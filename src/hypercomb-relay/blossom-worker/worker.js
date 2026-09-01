@@ -34,6 +34,12 @@
 import { schnorr } from '@noble/curves/secp256k1'
 
 const SIG_RE = /^[0-9a-f]{64}$/
+// A hostname LABEL, per DNS. A lineage is only a name the wildcard can bring to
+// life if it is one of these: `install:essentials` is a perfectly good creation
+// and not a hostname, and the ledger must never advertise an address DNS refuses
+// before the router ever sees it. Checked here, in the one place that decides
+// what an implicit name is, so the router and the directory cannot disagree.
+const DNS_LABEL_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
 const NIP98_KIND = 27235      // NIP-98 HTTP auth (hypercomb host-sync PUTs)
 const BLOSSOM_KIND = 24242    // Blossom BUD-02 upload auth
 const HIVE_KIND = 30564       // hive index — publisher-signed {lineageKey → head sig} manifest
@@ -56,7 +62,20 @@ const HIVE_MAX_BYTES = 65_536 // a hive index is a small map, never a byte store
 //     "publishers":[{"pubkey":"<64-hex>","label":"Jaime","primary":true}]
 // } }
 
+// Parsed once per env. `resolveSite` calls this, the ledger calls `resolveSite`
+// once per candidate door, and a directory read would otherwise re-parse the
+// whole binding blob tens of times to answer one request.
+const bindingCache = new WeakMap()
+
 function siteBindings(env) {
+  const cached = bindingCache.get(env)
+  if (cached) return cached
+  const parsed = parseBindings(env)
+  bindingCache.set(env, parsed)
+  return parsed
+}
+
+function parseBindings(env) {
   let rawBindings
   try { rawBindings = JSON.parse(String(env.SITE_BINDINGS || '{}')) } catch { return {} }
   const bindings = {}
@@ -76,6 +95,16 @@ function siteBindings(env) {
       title: String(raw.title || lineage.split('/').at(-1) || 'Published Hypercomb').trim(),
       lineage,
       publishers,
+      // WHAT IS DEPLOYED, which the script cannot see: Cloudflare does not hand
+      // a worker its own routes, and a binding whose route is commented out
+      // resolves here and is never reached. Both default true — saying nothing
+      // keeps today's answer.
+      //
+      // These gate what the directory ADVERTISES, never what `resolveSite`
+      // serves. If a request somehow arrives, answer it; routing is the edge's
+      // job. Advertising a door that cannot be dialled is this file's job.
+      routed: raw.routed !== false,      // is THIS host served?
+      wildcard: raw.wildcard !== false,  // is `*.<host>` served?
     }
   }
   return bindings
@@ -98,7 +127,7 @@ function resolveSite(env, hostname) {
   const zone = Object.keys(bindings).find(h => host !== h && host.endsWith('.' + h))
   if (!zone || host === `content.${zone}`) return { site: null, implicit: false, zone: zone ?? null }
   const label = host.slice(0, -(zone.length + 1))
-  if (!label || label.includes('.')) return { site: null, implicit: false, zone }
+  if (!DNS_LABEL_RE.test(label)) return { site: null, implicit: false, zone }
   return {
     site: { title: label, lineage: label, publishers: bindings[zone].publishers },
     implicit: true,
@@ -106,9 +135,9 @@ function resolveSite(env, hostname) {
   }
 }
 
-async function anyPublishedRoot(env, site) {
+async function anyPublishedRoot(env, site, read = indexReader(env)) {
   for (const publisher of site.publishers ?? []) {
-    if (await publishedRoot(env, publisher, site.lineage)) return true
+    if (await publishedRoot(env, publisher, site.lineage, read)) return true
   }
   return false
 }
@@ -179,9 +208,21 @@ async function serveSiteDescriptor(request, env, site) {
 /** One site as the ledger reports it — the same shape for a hand-bound host
  *  and for one the naming rule brought to life. */
 async function ledgerEntry(env, read, protocol, host, site) {
+  // `host`/`url` stay what they have always been — the primary door — so a
+  // reader that never learns about `hosts` keeps working unchanged. The entry's
+  // own host leads the list by force rather than by argument: an invariant a
+  // consumer can rely on should not depend on two orderings agreeing.
+  const doors = await hostsOfLineage(env, read, site.lineage)
+  const ordered = [...doors.filter((d) => d.host === host), ...doors.filter((d) => d.host !== host)]
   return {
     host,
     url: `${protocol}//${host}/`,
+    hosts: ordered.map((door, i) => ({
+      host: door.host,
+      url: `${protocol}//${door.host}/`,
+      primary: i === 0,
+      implicit: door.implicit,
+    })),
     title: site.title,
     lineage: site.lineage,
     publishers: await Promise.all(site.publishers.map(async (publisher) => {
@@ -198,11 +239,68 @@ async function ledgerEntry(env, read, protocol, host, site) {
 }
 
 /** The hosts a wildcard label can hang off: a bound host that is not itself a
- *  subdomain of another bound host. This is the apex the zone's `*` DNS record
- *  covers, so it is the only place an implicit name actually answers. */
+ *  subdomain of another bound host, and whose `*` route is deployed. This is the
+ *  apex the zone's `*` DNS record covers, so it is the only place an implicit
+ *  name actually answers — and `wildcard: false` says the route is not up yet,
+ *  which is the difference between a name being live and a name 404ing. */
 function wildcardZones(bindings) {
   const hosts = Object.keys(bindings)
-  return hosts.filter((h) => !hosts.some((g) => g !== h && h.endsWith('.' + g)))
+  return hosts.filter((h) => bindings[h].wildcard && !hosts.some((g) => g !== h && h.endsWith('.' + g)))
+}
+
+/** The zone a host hangs off — itself when it IS one. */
+const zoneOfHost = (zones, host) => zones.find((z) => host === z || host.endsWith('.' + z)) ?? null
+
+/**
+ * EVERY address the router serves this lineage at, primary first.
+ *
+ * One creation answers on as many doors as there are zones carrying it, and
+ * reporting only the first was the directory saying `dylan.pluginthematrix.com`
+ * while `dylan.hypercomb.com` served the same bytes. A consumer that wanted the
+ * other door had to re-derive `<lineage>.<zone>` and probe for it — worker logic
+ * living somewhere else, which is how the two drift.
+ *
+ * Two ways a door exists, in that order of authority:
+ *   • an explicit binding naming this lineage — a hand-bound door, and the
+ *     primary when there is one;
+ *   • the wildcard rule — `<lineage>.<zone>`, for a TOP-LEVEL lineage only. A
+ *     nested one (`games/arkanoid`) needs its own binding, because the wildcard
+ *     maps a single label and never a path.
+ *
+ * Four rules keep this honest, and each of them is a door the list must NOT
+ * contain:
+ *   • every candidate goes back through `resolveSite` — the directory may never
+ *     advertise an address the router would refuse;
+ *   • the route has to be deployed (`routed` / `wildcard` on the binding). A
+ *     commented-out route resolves here and is never reached from the outside;
+ *   • the lineage must actually be PUBLISHED at that door. A zone whose
+ *     allowlist does not carry the publisher resolves fine and then serves
+ *     "nothing published here", so structure alone is not a door;
+ *   • at most one door per zone. A creation bound at a zone's apex is already
+ *     there, and `hypercomb.hypercomb.com` is noise, not a second address.
+ */
+async function hostsOfLineage(env, read, lineage) {
+  const bindings = siteBindings(env)
+  const zones = wildcardZones(bindings)
+  const doors = []
+  const claimed = new Set()
+  const consider = async (candidate) => {
+    const host = String(candidate || '').toLowerCase()
+    const zone = zoneOfHost(zones, host)
+    if (zone && claimed.has(zone)) return
+    const { site, implicit } = resolveSite(env, host)
+    if (!site || site.lineage !== lineage) return
+    if (!(await anyPublishedRoot(env, site, read))) return
+    if (zone) claimed.add(zone)
+    doors.push({ host, implicit })
+  }
+  for (const [host, bound] of Object.entries(bindings)) {
+    if (bound.lineage === lineage && bound.routed) await consider(host)
+  }
+  if (lineage && !lineage.includes('/') && DNS_LABEL_RE.test(lineage)) {
+    for (const zone of zones) await consider(`${lineage}.${zone}`)
+  }
+  return doors
 }
 
 // Publishing IS the naming step, so the ledger must report the sites that rule
@@ -217,13 +315,18 @@ async function servePublications(request, env) {
   const read = indexReader(env)
   const bindings = siteBindings(env)
   const sites = []
+  // One plate per creation, on BOTH loops. Two bindings naming one lineage used
+  // to earn two entries; now that an entry carries every door the creation
+  // answers on, they would be the same plate twice.
+  const named = new Set()
   for (const [host, site] of Object.entries(bindings)) {
+    if (named.has(site.lineage)) continue
+    named.add(site.lineage)
     sites.push(await ledgerEntry(env, read, protocol, host, site))
   }
 
-  // One plate per creation: an explicit binding already names its lineage, and
-  // the first zone to name an implicit one keeps it.
-  const named = new Set(Object.values(bindings).map((s) => s.lineage))
+  // The names publishing brought to life. An explicit binding already claimed
+  // its lineage above; the first zone to name an implicit one keeps it.
   for (const zone of wildcardZones(bindings)) {
     for (const publisher of bindings[zone].publishers) {
       const index = await read(publisher.pubkey)

@@ -1,19 +1,22 @@
-// hypercomb-shared/ui/docked-panel/dock-lanes.spec.ts
+// hypercomb-core/src/core/panels/dock-lanes.spec.ts
 //
 // Dock LANES: an edge holds more than one tool window, they stack inward from
 // it in the order they were opened, and a window pushed out of a full lane is
-// PARKED rather than closed. The chrome that drives this lives in
-// hc-docked-panel.directive.ts — an Angular directive, so it can't be imported
-// under JIT; this covers the model it drives, exactly as panel-groups.spec.ts
-// does for the group text.
+// PARKED rather than closed. This covers the MODEL — a lane member with no DOM
+// — which is why it never needed the chrome to be importable.
+//
+// It used to say the chrome could not be imported at all: it was an Angular
+// directive and its field decorators threw under JIT. That is no longer true
+// (2026-09-01) — `docked-panel.ts` is a plain class in this folder now, and
+// `docked-panel.spec.ts` drives it against a real element.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus } from '../../index.js'
 import {
   type LaneMember, type LaneSide,
   LANE_SLOTS, TWO_LANE_MIN_WIDTH,
   claimLane, clearLaneWithUndo, laneHasRoom, laneOccupants, layoutLane, reflowLanes, releaseLane, resetLanes,
-} from './dock-lanes'
+} from './dock-lanes.js'
 
 /** A tool window as the lane sees one: a width, where it was placed, and
  *  whether it was pushed out — the directive's LaneMember, minus the DOM. */

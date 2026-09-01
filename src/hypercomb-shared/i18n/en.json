@@ -2519,11 +2519,5 @@
   "hosts.probing": "asking…",
   "hosts.offer.meta": "{bees} bees · {layers} layers",
   "hosts.offer.more": "and {count} more",
-  "hosts.offer.none": "publishes nothing here, or does not answer",
-  "hosts.hosting.on": "Public hosting is on",
-  "hosts.hosting.off": "Public hosting is off",
-  "hosts.hosting.confirm.title": "Turn on public hosting?",
-  "hosts.hosting.confirm.message": "Branches you publish will have their bytes uploaded to a public host and signed with your key. Anyone with the link can read them. You can turn this off again at any time — but bytes already uploaded stay where they are.",
-  "hosts.hosting.confirm.allow": "Turn it on",
-  "hosts.hosting.confirm.deny": "Not now"
+  "hosts.offer.none": "publishes nothing here, or does not answer"
 }

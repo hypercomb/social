@@ -256,6 +256,92 @@ describe('doctrine ratchets', () => {
     }
   })
 
+  it('the shell-surface barrel may only shrink — new chrome is an element drone, not a component', () => {
+    // THE MIGRATION SCOREBOARD, made mechanical.
+    //
+    // Every entry here is a shell surface that still lives in the Angular
+    // shell instead of being an `element:` drone in essentials, and is
+    // therefore UNREACHABLE from the framework-free harness
+    // (hypercomb-shim). The shim boots, acquires signed content and runs
+    // every behaviour — but mounts none of this chrome, because it cannot
+    // load Angular at all (field decorators throw in JIT and the build
+    // guard fails the bundle).
+    //
+    // The list went 47 -> 48 -> 52 across three sessions while exactly ONE
+    // element-shaped surface existed in all of essentials
+    // (tutorial/tutorial-overlay.view.ts). Migration that loses ground is
+    // not migration, and nothing was watching. Now something is:
+    //
+    //   a new entry  -> NEW DRIFT. Contribute the surface as a custom
+    //                   element through the ShellSurfaceRegistry
+    //                   (`element:` shape) from essentials instead. If it
+    //                   genuinely cannot be one yet, adding a line here is
+    //                   a deliberate act with a reason, not a default.
+    //   a gone entry -> DEBT PAID. Remove it so the ratchet clicks tight.
+    //
+    // `hypercomb-shim/build.mjs` counts the same lines and prints them as
+    // the scoreboard on every shim build; this makes the count a test.
+    const barrel = readFileSync(
+      join(ROOT, 'hypercomb-shared/ui/shell-surfaces/shell-surfaces.barrel.ts'), 'utf8')
+    const entries = [...barrel.matchAll(/^import '([^']+)'/gm)]
+      .map(m => m[1].replace(/^\.\.\//, ''))
+      .sort()
+    assertRatchet(entries, [
+      "action-card/action-card.component",
+      "activity-log/activity-log.component",
+      "aggregate-index/aggregate-index.component",
+      "aggregate-index/sources/collections.source",
+      "aggregate-index/sources/websites.source",
+      "aliases-panel/aliases-panel.component",
+      "backgrounds-window/backgrounds-window.component",
+      "camera-capture/camera-capture.component",
+      "chat-window/chat-window.component",
+      "clipboard-panel/clipboard-panel.component",
+      "comfy-panel/comfy-panel.component",
+      "command-palette/command-palette.component",
+      "confirm-dialog/confirm-dialog.component",
+      "contact-card/contact-form.component",
+      "contact-card/contact-hover.component",
+      "context-window/context-window.component",
+      "docs-overlay/docs-overlay.component",
+      "example-hives/example-hives-offer.component",
+      "features-viewer/features-viewer.component",
+      "feedback-viewer/feedback-viewer.component",
+      "files-viewer/files-viewer.component",
+      "flex-editor/flex-editor.component",
+      "format-painter/format-painter.component",
+      "history-viewer/history-viewer.component",
+      "hosts-panel/hosts-panel.component",
+      "icon-picker/icon-picker.component",
+      "landing-badge/landing-badge.component",
+      "layer-cycle-strip/layer-cycle-strip.component",
+      "layout-designer/layout-designer.component",
+      "markup-overlay/markup-overlay.component",
+      "mesh-modal/mesh-modal.component",
+      "notes-strip/notes-strip.component",
+      "notes-viewer/notes-viewer.component",
+      "observe-viewer/observe-viewer.component",
+      "pheromone-tiles/pheromone-tiles.component",
+      "portal/portal-overlay.component",
+      "presence-banner/presence-banner.component",
+      "preview-banner/preview-banner.component",
+      "publish-panel/publish-panel.component",
+      "references-window/references-window.component",
+      "rewind-window/rewind-window.component",
+      "sensitivity-bar/sensitivity-bar.component",
+      "sequence-viewer/sequence-viewer.component",
+      "shortcut-sheet/shortcut-sheet.component",
+      "tags-viewer/tags-viewer.component",
+      "tile-editor/tile-editor.component",
+      "toast/toast.component",
+      "trust-prompt/trust-prompt.component",
+      "tutorials-window/tutorials-window.component",
+      "website-nav/website-nav.component",
+      "workflow-designer/workflow-designer.component",
+      "youtube-viewer/youtube-viewer.component",
+    ], 'Angular-shaped shell surface')
+  })
+
   it('derived-cache manifests are written only by the store, the optimize phase, and the render backfill', () => {
     // The commit path mints truth only. writeChildrenManifest is called
     // from the ManifestOptimizerDrone (processor optimize phase) and the

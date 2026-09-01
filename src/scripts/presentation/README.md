@@ -13,6 +13,7 @@ without touching the rest.
 | The recipe | `production.md`, mirrored onto the `presentation` tile | what a scene may contain |
 | Shell (styles, chrome, player) | `template.html` | the look and the controls, never a scene |
 | Live-capture clips | `media/*.mp4` | replace a clip, keep the filename |
+| The splash directory | `hosts.json` | never by hand — `hosts.cjs` derives it |
 | Pronunciation rules | `pronunciations.json` | how a word is said (`say`) and heard (`hear`) |
 | Narration audio | `audio-cache/<h16>.mp3` | never by hand — `record.cjs` or `voice.cjs` |
 | Deliverable | `dist/hypercomb-presentation.html` | never by hand — build output |
@@ -69,6 +70,29 @@ beats are timed to the narration's own sentence boundaries — measured from the
 cached mp3 with silencedetect, matched by word-count expectation. Editing a
 scene's `say` re-times the clip on the next run; `film:vocabulary` /
 `film:integrity` / `film:time` in the scene instruction is what mounts them.
+
+## The directory of hives
+
+hypercomb.com is a wildcard host: publishing a creation named `susan` makes
+`susan.hypercomb.com` its website, with nobody configuring the address. The
+splash therefore cannot carry a hand-written list — it would be wrong the moment
+somebody publishes. `hosts.cjs` reads the worker's publication ledger
+(`/publications.json`, derived from the publishers' signed indexes), keeps the
+names the wildcard can actually answer, **proves each one answers**, and writes
+`hosts.json`. `build.cjs` substitutes that into the template's `{{DOORS}}`.
+
+```bash
+node hosts.cjs           # refresh hosts.json + stamp the pages that carry it
+```
+
+The build refreshes it on every run and falls back to the committed `hosts.json`
+if the ledger is unreachable, so a build with no network produces the same page.
+Resolved here and not in the reader's browser on purpose: the deliverable is one
+self-contained file that contacts nobody (`documentation/no-third-party-requests.md`).
+
+The same list is stamped into `documentation/hypercomb.com/index.html` between
+its `doors:begin` / `doors:end` markers — that page is hand-authored and has no
+build of its own.
 
 ## Narrating it yourself
 

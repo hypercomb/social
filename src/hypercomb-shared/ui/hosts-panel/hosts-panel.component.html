@@ -21,21 +21,14 @@
     </header>
 
     <div class="hosts-body">
-      <!-- THE SWITCH. Hosting is one global state, not a verb and not a
-           per-branch setting: either this participant puts bytes on a public
-           host or they do not. A branch is then published from its own line
-           item in the publish panel. -->
-      <button
-        class="hosts-switch"
-        type="button"
-        role="switch"
-        [class.on]="hosting()"
-        [attr.aria-checked]="hosting()"
-        (click)="toggleHosting()"
-      >
-        <span class="hosts-switch-dot" aria-hidden="true"></span>
-        <span class="hosts-switch-label">{{ (hosting() ? 'hosts.hosting.on' : 'hosts.hosting.off') | t }}</span>
-      </button>
+      <!-- NO HOSTING SWITCH. Publishing IS the gesture: `publishBranch` calls
+           `enablePublicHost()` itself, so the ON position was arming something
+           already armed. And OFF never meant what a switch means — bytes
+           already on a host stay (a host has no delete surface, deliberately),
+           the signed index still names your head, and every published site
+           keeps serving; it only stopped the NEXT push, which the next publish
+           silently turned back on. To take something down, unpublish that
+           branch from the publish panel, which actually takes it down. -->
 
       <!-- YOUR COMMUNITY — the hosts you have been given, or given yourself.
            Not a place to choose an address: each of these is an artifact you

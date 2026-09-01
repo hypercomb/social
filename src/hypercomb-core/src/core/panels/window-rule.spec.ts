@@ -6,8 +6,8 @@
 // as dock-lanes.spec.ts and panel-groups.spec.ts do for theirs.
 
 import { beforeEach, describe, expect, it } from 'vitest'
-import { holdToolWindow, resetWindowRule, toolWindowIds, windowsToKeep } from './window-rule'
-import type { WindowSession } from './window-session'
+import { holdToolWindow, resetWindowRule, toolWindowIds, windowsToKeep } from './window-rule.js'
+import type { WindowSession } from './window-session.js'
 
 /** A tool window as the rule sees one: something that can be put away, and a
  *  note of whether it was.

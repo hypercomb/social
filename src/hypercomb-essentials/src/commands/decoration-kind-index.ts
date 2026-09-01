@@ -322,6 +322,13 @@ export function referenceTargetForLabel(label: string): readonly string[] | null
   return referenceTargetByKey.get(keyForLabel(label)) ?? null
 }
 
+/** The same route by FULL PATH — for a cell that is not on the page being
+ *  rendered (the wave view's dive shows a deeper generation and routes a
+ *  click on it exactly as tile-overlay would route the real tile). */
+export function referenceTargetAt(segments: readonly string[]): readonly string[] | null {
+  return referenceTargetByKey.get(locationKey(segments)) ?? null
+}
+
 /** Map<locationKey, targetSig> — the target's LINEAGE signature (bag address).
  *  Absent for every reference written before the field existed, which is the
  *  normal case rather than a fault. */

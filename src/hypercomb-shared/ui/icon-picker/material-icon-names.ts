@@ -1,10 +1,25 @@
 // hypercomb-shared/ui/icon-picker/material-icon-names.ts
 //
 // Curated set of Material Symbols (Outlined) ligature names for the icon-hive
-// picker. The font itself is loaded from Google Fonts (see index.html); there
-// is no codepoints asset bundled, so this is a hand-picked, broadly useful set
-// rather than the full ~3.5k catalog. Expand later (e.g. generate from the
-// Material Symbols codepoints file in a build step) without touching the picker.
+// picker, hand-picked rather than the full ~4.3k catalog.
+//
+// THIS LIST IS LOAD-BEARING FOR THE FONT BUILD. The font is self-hosted and
+// SUBSET (documentation/no-third-party-requests.md) — it is no longer the whole
+// catalog fetched from Google — and a glyph outside the subset renders as BLANK
+// SPACE *in this component*, which re-declares `.mat-sym` with no fallback
+// family. Everywhere else the global stack ends in system-ui and the same miss
+// renders the ligature NAME as a word. scripts/icon-names.cjs reads this file as an
+// authoritative input precisely because every name here is selectable at
+// runtime and may already sit on a tile.
+//
+// So: after adding a name, re-run
+//   node scripts/fetch-fonts.cjs hypercomb-web/public/fonts inter material-symbols
+// (and the same for hypercomb-shim / hypercomb-dev), or the new icon is invisible.
+// scripts/check-icon-render.cjs fails the build if you forget.
+//
+// Growing this toward the full catalog is NOT free any more: Google ignores
+// ?icon_names= past ~4.3KB of URL and silently serves the whole 3.9MB font.
+// Roughly 430 names is the ceiling; past it, subset locally instead.
 
 export const MATERIAL_ICON_NAMES: readonly string[] = [
   // navigation + chrome

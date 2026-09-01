@@ -111,4 +111,6 @@ div.awn-popup-title {
 }
 
 html, body { height: 100%; }
-body { margin: 0; font-family: Roboto, "Helvetica Neue", sans-serif; }
+// system-ui first so this reads native rather than falling to Helvetica/Arial
+// now that the Roboto web font is gone (Roboto IS system-ui on Android).
+body { margin: 0; font-family: system-ui, Roboto, "Helvetica Neue", sans-serif; }

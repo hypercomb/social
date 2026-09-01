@@ -39,7 +39,7 @@ import { Worker, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/c
 import type { VisualBeeRegistry, VisualBeeDescriptor } from './visual-bee-registry.js'
 import { WEBSITE_SLOT } from './website-slot.js'
 import { isFeatureHidden, isFeatureHiddenWithin } from '../sharing/feature-hidden.js'
-import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../sharing/behavior-enablement.js'
+import { isBehaviorDormant, ENABLEMENT_CHANGED, isPublishedVisitorShell } from '../sharing/behavior-enablement.js'
 import { DEFAULT_VIEW_DECORATION_KIND, normalizeViewToken } from './decoration-kind-index.js'
 import { defaultViewWithinAt } from './view-default.js'
 
@@ -48,6 +48,14 @@ const SIG_RE = /^[0-9a-f]{64}$/
 const FALLBACK_TOGGLE_ICON = 'visibility'
 /** The render surface websites toggle against. */
 const DEFAULT_SURFACE = 'hexagons'
+/** The view a published leaf falls back to opening as — see #recompute. */
+const WEBSITE_VIEW = 'website'
+
+/** Does this layer hold any child tiles? A publication whose root does not is
+ *  a single page with nothing to render as hexagons. */
+const hasChildren = (layer: LayerLike | null): boolean =>
+  Array.isArray(layer?.['children'])
+  && (layer['children'] as unknown[]).some(s => typeof s === 'string' && SIG_RE.test(s))
 
 /** Joins a path into one latch key. A separator no tile name can contain, so
  *  `['a','b']` and `['a/b']` are never the same address. */
@@ -342,7 +350,23 @@ export class ViewBee extends Worker {
     // deliberately so" — it must also RELEASE an inherited arrival surface
     // that would otherwise ride along (see #openDefaultView).
     const optedOut = resolved === DEFAULT_SURFACE
-    const defaultView = optedOut ? '' : resolved
+    // A PUBLISHED LEAF OPENS AS ITS PAGE. A visitor landing on a publication
+    // whose root has no children has nothing to draw — hexagons of nothing —
+    // and no tile to click to reach the page the publication exists to show,
+    // so the site is a blank screen. A branch WITH children is untouched: its
+    // hexagons are the site, and you enter a tile to read its page.
+    //
+    // Visitor shell only. In an authoring hive a childless page tile must keep
+    // opening as hexagons — walking into one and having it take the screen is
+    // a navigation change nobody asked for, and Escape is the way out of a
+    // view, not into a tile. Publishing is what makes the page the point.
+    //
+    // Never overrides a mark: `resolved` empty means no `view:default` here or
+    // above, and an explicit `hexagons` mark opts out through `optedOut`.
+    // #openDefaultView still gates on the toggle actually being present, so
+    // this can only fire where the website view really has content to mount.
+    const leafPublication = !resolved && isPublishedVisitorShell() && !hasChildren(layer)
+    const defaultView = optedOut ? '' : (resolved || (leafPublication ? WEBSITE_VIEW : ''))
 
     const toggles: ViewToggle[] = []
     for (const v of views) {

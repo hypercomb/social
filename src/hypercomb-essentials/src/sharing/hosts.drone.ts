@@ -38,7 +38,6 @@ import {
 } from './community-hosts.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
-const HOST_SYNC_KEY = '@diamondcoreprocessor.com/HostSyncService'
 
 /**
  * THE HOST A COLD CLIENT ALREADY KNOWS.
@@ -64,14 +63,6 @@ const SEED_HOST = 'jwize.com'
  *  host you deleted must stay deleted, even this one. */
 const SEEDED_KEY = 'hc:hosts:seeded'
 
-/** The slice of HostSyncService this drone drives. Structural, so the drone
- *  does not depend on the service's shape beyond the switch it owns. */
-type HostSyncLike = {
-  isPublicHostEnabled?: () => boolean
-  enablePublicHost?: () => void
-  disablePublicHost?: () => void
-}
-
 export interface HostsRenderPayload {
   open: boolean
   /** The hosts you carry, in the pool's own stable order. */
@@ -80,9 +71,6 @@ export interface HostsRenderPayload {
    *  "not read yet" and never flash an empty-state over a list that is
    *  about to arrive. */
   loaded: boolean
-  /** THE SWITCH. Whether this participant publishes bytes to a public host at
-   *  all — one global state, not a per-branch setting. */
-  hosting: boolean
 }
 
 export class HostsDrone extends Drone {
@@ -95,7 +83,6 @@ export class HostsDrone extends Drone {
 
   protected override listens: string[] = [
     'hosts:view-toggle', 'hosts:close', 'hosts:refresh', 'hosts:add', 'hosts:remove',
-    'hosts:set-hosting',
   ]
   protected override emits: string[] = ['hosts:render', 'publish:refresh', 'activity:log']
 
@@ -150,46 +137,9 @@ export class HostsDrone extends Drone {
         await this.#read()
       })()
     })
-
-    // THE SWITCH. Hosting is not a verb you type — there is no `/host`
-    // behaviour any more. It is one global state: either this participant
-    // puts bytes on a public host or they do not, and a branch is then
-    // published from its own line item in the publish panel.
-    //
-    // Turning it ON asks first. Publishing bytes to a public endpoint under
-    // your own signing key is not a preference toggle, and the service's
-    // contract has always been that the CALLER takes consent before
-    // `enablePublicHost`. Turning it OFF asks nothing: stopping is never the
-    // dangerous direction.
-    this.onEffect<{ on?: boolean }>('hosts:set-hosting', (p) => {
-      const wanted = p?.on === true
-      void (async () => {
-        const sync = get<HostSyncLike>(HOST_SYNC_KEY)
-        if (!sync) return
-        if (wanted === (sync.isPublicHostEnabled?.() === true)) return
-
-        if (wanted) {
-          const confirmed = await requestConfirm({
-            title: 'hosts.hosting.confirm.title',
-            message: 'hosts.hosting.confirm.message',
-            confirmLabel: 'hosts.hosting.confirm.allow',
-            cancelLabel: 'hosts.hosting.confirm.deny',
-          })
-          if (!confirmed) { this.#emit(); return }
-          sync.enablePublicHost?.()
-        } else {
-          // Not destructive: queued entries and `.public` markers stay on
-          // disk, and bytes already on a host remain there — a host has no
-          // delete surface, deliberately. This stops FUTURE pushes.
-          sync.disablePublicHost?.()
-        }
-        this.#emit()
-        this.emitEffect('activity:log', {
-          message: wanted ? 'public hosting on' : 'public hosting off',
-        })
-        EffectBus.emit('publish:refresh', {})
-      })()
-    })
+    // There is deliberately no hosting switch here, and no effect for one.
+    // Publishing arms the gate itself, and switching it off never took a
+    // published site down — see the ratchet in community-hosts-panel.spec.ts.
 
     // First read is eager rather than deferred to the first open: the publish
     // picker offers this same list, and it must not be empty just because
@@ -261,7 +211,6 @@ export class HostsDrone extends Drone {
       open: this.#open,
       zones: [...this.#zones],
       loaded: this.#loaded,
-      hosting: get<HostSyncLike>(HOST_SYNC_KEY)?.isPublicHostEnabled?.() === true,
     }
     this.emitEffect('hosts:render', payload)
   }

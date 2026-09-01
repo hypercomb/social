@@ -15,6 +15,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const { FRAUNCES_FACE, UI_STACK } = require('../_site-fonts.cjs')
 
 // ─── image manifest (tree path → full sig) ──────────────────────────
 const MANIFEST = JSON.parse(
@@ -97,7 +98,7 @@ const CSS = `
   --shadow:0 18px 50px rgba(60,40,20,.10); --shadow-lg:0 30px 80px rgba(50,32,14,.16);
   --radius:1.25rem; --radius-lg:1.8rem; --radius-pill:999px;
   --serif:"Fraunces","Spectral",Georgia,"Iowan Old Style","Palatino Linotype",serif;
-  --sans:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --sans:${UI_STACK};
   --ease:cubic-bezier(.22,.7,.2,1);
   --maxw:74rem;
   color-scheme:light;
@@ -501,7 +502,10 @@ function renderPage(page, mode, labels) {
     ? `<link rel="stylesheet" href="${CHROME_REF}">`
     : `<link rel="stylesheet" href="chrome.css">`
   // Request the variable axes so the intermediate weights (540/560/580) resolve.
-  const fonts = `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..600&family=Inter:wght@400..600&display=swap">`
+  // Fraunces travels IN the page as a data: URI — a Google Fonts link would
+  // hand them every reader's IP, UA and Referer. Inter's role falls to the
+  // system stack in --sans. See documentation/no-third-party-requests.md.
+  const fonts = `<style>${FRAUNCES_FACE()}</style>`
   const crumbs = page.segments.length > 1 ? renderCrumbs(page.segments, refs, labels) : ''
   const kicker = page.kicker ? `<div class="hc-kicker">${icon(page.kickerIcon || 'leaf')}${esc(page.kicker)}</div>` : ''
   const body = (page.sections || []).map(b => renderBlock(b, refs)).join('\n')

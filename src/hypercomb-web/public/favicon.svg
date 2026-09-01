@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Hypercomb">
+  <defs><linearGradient id="g" gradientUnits="userSpaceOnUse"
+      x1="6" y1="1" x2="26" y2="31">
+    <stop offset="0" stop-color="#ffe08a"/><stop offset=".42" stop-color="#f8b73a"/>
+    <stop offset="1" stop-color="#d9860b"/></linearGradient>
+  <linearGradient id="r" gradientUnits="userSpaceOnUse" x1="16" y1="1" x2="16" y2="17">
+    <stop offset="0" stop-color="#fff6d8" stop-opacity=".95"/>
+    <stop offset="1" stop-color="#fff6d8" stop-opacity="0"/></linearGradient><mask id="h">
+    <polygon points="16,1.2 28.6,8.6 28.6,23.4 16,30.8 3.4,23.4 3.4,8.6" fill="#fff"/>
+    <g fill="#000">
+      <rect x="9.7" y="8.6" width="4.1" height="14.8" rx=".5"/>
+      <rect x="18.2" y="8.6" width="4.1" height="14.8" rx=".5"/>
+      <rect x="9.7" y="14.3" width="12.6" height="3.4"/>
+    </g></mask></defs>
+  <polygon points="16,1.2 28.6,8.6 28.6,23.4 16,30.8 3.4,23.4 3.4,8.6" fill="url(#g)" stroke="url(#g)"
+             stroke-width="1.6" stroke-linejoin="round" mask="url(#h)"/>
+  <polygon points="16,1.2 28.6,8.6 28.6,23.4 16,30.8 3.4,23.4 3.4,8.6" fill="none" stroke="url(#r)"
+             stroke-width="1.1" stroke-linejoin="round" mask="url(#h)"/>
+</svg>

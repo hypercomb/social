@@ -68,7 +68,7 @@ function bgStyle(slug, brand, accent) {
 const { AI_INSIDE_CHROME_CSS: CHROME_CSS } = require('../bridge/_chrome-bytes.cjs')
 
 // ---- page templates ------------------------------------------------------
-const FONTS = `<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet"><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet">`
+const FONTS = `<!-- No web fonts: a Google link hands them every reader IP, UA and Referer. See documentation/no-third-party-requests.md -->`
 
 function pageShell(chromeSig, title, accentColor, bgUri, body) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`+

@@ -12,9 +12,11 @@
 //   5. newest shared first
 //   6. a head that is not a 64-hex signature never becomes a plate, and
 //      malformed ledger rows are dropped whole
+//   7. a creation carries EVERY door it answers on, and a directory reached
+//      through its second name still refuses to list itself
 
 import { describe, expect, it } from 'vitest'
-import { shapePublications } from './publications-ledger.js'
+import { doorsOf, shapePublications } from './publications-ledger.js'
 
 const SIG_A = 'a'.repeat(64)
 const SIG_B = 'b'.repeat(64)
@@ -29,6 +31,9 @@ const site = (over: Record<string, unknown> = {}) => ({
   ],
   ...over,
 })
+
+const door = (host: string, primary = false, implicit = true) =>
+  ({ host, url: `https://${host}/`, primary, implicit })
 
 describe('shapePublications', () => {
   it('a verified publication is a plate', () => {
@@ -68,6 +73,51 @@ describe('shapePublications', () => {
     })
     expect(shapePublications([directory, site()], { host: 'pluginthematrix.com' })).toHaveLength(1)
     expect(shapePublications([directory, site()], { lineage: 'pluginthematrix' })).toHaveLength(1)
+  })
+
+  it('a plate carries every door the creation answers on', () => {
+    const cards = shapePublications([site({
+      hosts: [
+        door('revolucion.pluginthematrix.com', true, false),
+        door('revolucion.hypercomb.com'),
+      ],
+    })])
+    expect(cards[0].hosts.map(d => d.host)).toEqual([
+      'revolucion.pluginthematrix.com',
+      'revolucion.hypercomb.com',
+    ])
+    // The primary is the plate's own address — a consumer may rely on that.
+    expect(cards[0].hosts[0].host).toBe(cards[0].host)
+  })
+
+  it('a ledger with no doors still yields one — the host it named', () => {
+    // An older worker reports `host` alone. That is a door, so it becomes the
+    // whole list; a plate with nowhere to go would be worse than a short list.
+    expect(doorsOf(site() as never)).toEqual([{
+      host: 'revolucion.pluginthematrix.com',
+      url: 'https://revolucion.pluginthematrix.com/',
+      primary: true,
+      implicit: false,
+    }])
+    expect(doorsOf(site({ hosts: 'nonsense' }) as never)).toHaveLength(1)
+    expect(doorsOf(site({ hosts: [{ host: 7 }] }) as never)).toHaveLength(1)
+  })
+
+  it('a directory reached through its second name still never lists itself', () => {
+    // The plate's own `host` is the pluginthematrix door; the page is being
+    // served from the hypercomb one. Testing only the primary would have let
+    // the directory list itself.
+    const directory = site({
+      host: 'pluginthematrix.com',
+      url: 'https://pluginthematrix.com/',
+      title: 'Plugin the Matrix',
+      lineage: 'pluginthematrix',
+      hosts: [door('pluginthematrix.com', true, false), door('pluginthematrix.hypercomb.com')],
+    })
+    expect(shapePublications([directory, site()], { host: 'pluginthematrix.hypercomb.com' }))
+      .toHaveLength(1)
+    expect(shapePublications([directory, site()], { host: 'pluginthematrix.com' }))
+      .toHaveLength(1)
   })
 
   it('newest shared first', () => {

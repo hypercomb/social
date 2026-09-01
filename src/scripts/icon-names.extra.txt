@@ -1,0 +1,40 @@
+# Defensive icon-subset margin — SMALL ON PURPOSE.
+#
+# The icon font ships SUBSET (documentation/no-third-party-requests.md) and a
+# name outside the subset does NOT go quietly missing. The global `.mat-sym`
+# stack ends in system-ui, so the ligature NAME renders as a readable word in
+# the middle of the UI — that is how `nearby` and `subject` shipped, looking
+# like a layout bug. Only the icon picker blanks, because it re-declares
+# `.mat-sym` without a fallback family.
+#
+# THERE IS A HARD CEILING. Google ignores ?icon_names= once the URL passes
+# ~4.3KB and silently serves the full 3.9MB font instead. fetch-fonts.cjs
+# refuses to ship that, so the subset cannot grow without bound:
+#
+#   load-bearing today  ~367 names / ~3.6KB of URL
+#   ceiling             ~430 names / 4.0KB (URL_LIMIT in fetch-fonts.cjs)
+#
+# The load-bearing names come from two sources and are NOT optional:
+#   1. hypercomb-shared/ui/icon-picker/material-icon-names.ts — every name the
+#      picker offers is selectable at runtime and may already sit on a tile.
+#   2. names icon-names.cjs can statically prove a template renders.
+#
+# This file is only for icons built in ways the extractor cannot see
+# (el.textContent = ..., data tables). Compound names are kept because a name
+# with an underscore is almost certainly an icon; bare English words that merely
+# collide with an icon name are NOT worth the ceiling budget.
+#
+# If the picker ever grows past the ceiling, the fix is a local subsetter
+# (harfbuzz/fontTools) rather than a bigger URL.
+#
+# Regenerate candidates with:  node scripts/audit-icon-coverage.cjs
+# Blank lines and # comments are ignored.
+
+add_box
+article_person
+bubble_chart
+conversion_path
+edit_document
+sports_tennis
+touch_app
+view_carousel

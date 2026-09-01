@@ -54,6 +54,12 @@ const MIC_LONG_PRESS_MS = 450
 /** How long the lock indicator stays lit after a pan/zoom-while-locked attempt. */
 const LOCKED_FLASH_MS = 1100
 
+/** How long "immediately after" lasts for the line Escape just cleared. Long
+ *  enough for the second press of a deliberate double-tap and for "wait, no —
+ *  give that back", short enough that a press about something else can never
+ *  find it. The window sweep's memory uses the same three seconds. */
+const LINE_REMEMBERED_FOR_MS = 3000
+
 /** Matches label:tagName or label:tagName(#color) (plain colon syntax, no brackets). */
 const TAG_ASSIGN_RE = /^([^:]+):([^(]+)(?:\(([^)]+)\))?$/
 
@@ -2002,6 +2008,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     window.addEventListener('navigate', this.#onNavigate)
     window.addEventListener('popstate', this.#onNavigate)
+    window.addEventListener('pointerdown', this.#forgetClearedLine, true)
+    window.addEventListener('keydown', this.#forgetClearedLineOnKey, true)
 
     this.#mobileQuery = window.matchMedia('(max-width: 599px), (max-height: 449px)')
     this.isMobile.set(this.#mobileQuery.matches)
@@ -2591,6 +2599,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     for (const unsub of this.#indicatorUnsubs) unsub()
     window.removeEventListener('navigate', this.#onNavigate)
     window.removeEventListener('popstate', this.#onNavigate)
+    window.removeEventListener('pointerdown', this.#forgetClearedLine, true)
+    window.removeEventListener('keydown', this.#forgetClearedLineOnKey, true)
     this.#mobileQuery?.removeEventListener('change', this.#mobileQueryHandler)
   }
 
@@ -3119,6 +3129,40 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   private lastFilterKeyword = ''
 
+  /** THE LINE ESCAPE JUST TOOK AWAY. One slot, deliberately not a stack:
+   *  "press it again" means what just went. It is alive for a moment only and
+   *  dropped the instant anything else happens — the put-back is for the press
+   *  you make because the last one was a mistake, and for nothing else. Same
+   *  contract as the window sweep's memory, kept local: this is shared UI and
+   *  the cascade's slot lives in an essentials module. */
+  #clearedLine: { text: string; at: number } | null = null
+
+  /** Record the line this press took away. */
+  #rememberClearedLine(text: string): void {
+    this.#clearedLine = { text, at: Date.now() }
+  }
+
+  /** Put back the line the last press took. True = the press was consumed.
+   *  Un-suppressed on the way back in, so the autocomplete returns with it —
+   *  "exactly as it was" includes the helper that was open over it. */
+  #recallClearedLine(): boolean {
+    const held = this.#clearedLine
+    this.#clearedLine = null
+    if (!held) return false
+    if (Date.now() - held.at > LINE_REMEMBERED_FOR_MS) return false
+    this.#setShellValue(held.text, false)
+    this.shell?.focus()
+    return true
+  }
+
+  /** Anything at all that is not the put-back ends "immediately after".
+   *  Capture phase so it is seen however the press is routed; Escape is
+   *  exempt because that press IS the put-back. */
+  readonly #forgetClearedLine = (): void => { this.#clearedLine = null }
+  readonly #forgetClearedLineOnKey = (e: KeyboardEvent): void => {
+    if (e.key !== 'Escape') this.#clearedLine = null
+  }
+
   /** Bridge: shell forwarded a keydown it didn't consume (not Escape/Up/Down/Tab/Enter). */
   public onShellKeydown = (e: KeyboardEvent): void => {
     const v = this.value()
@@ -3224,14 +3268,27 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
-    // Escape peels back one path segment so the user can drop back up a
-    // level and keep adding cells there. With no '/' left, it clears.
+    // ONE PRESS TAKES THE LINE, THE NEXT ONE GIVES IT BACK.
+    //
+    // Escape used to peel back one path segment (`a/b/c` -> `a/b/`), so
+    // clearing a long line cost a press per level, the text was still sitting
+    // there after the press that was meant to get rid of it, and the dropdown
+    // simply recomputed on the shortened line. It takes the WHOLE line now,
+    // and the helper with it — the same contract Escape carries everywhere
+    // else in the app: one press takes what is in front of you, and a press
+    // IMMEDIATELY after gives it back exactly as it was.
     if (e.key === 'Escape' && v.length > 0) {
       e.preventDefault()
-      const trimmed = v.endsWith('/') ? v.slice(0, -1) : v
-      const lastSlash = trimmed.lastIndexOf('/')
-      const next = lastSlash >= 0 ? trimmed.slice(0, lastSlash + 1) : ''
-      this.#setShellValue(next, true)
+      this.#rememberClearedLine(v)
+      this.#setShellValue('', true)
+      return
+    }
+
+    // ...and that press. Spent either way — a memory that has been used is
+    // gone, so the press after it means the empty line again (blur) rather
+    // than a stale line coming back long after it was let go.
+    if (e.key === 'Escape' && this.#recallClearedLine()) {
+      e.preventDefault()
       return
     }
 

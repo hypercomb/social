@@ -83,8 +83,21 @@ const occurrences = bundled.split(PROBE_V1).length - 1
 if (occurrences !== 1) {
   throw new Error(`[shim-vendor] expected exactly 1 isWebGLSupported probe to patch, found ${occurrences} — pixi changed; re-check whether the WebGL2 probe patch is still needed`)
 }
-writeFileSync(pixiFile, bundled.replace(PROBE_V1, PROBE_V2))
-console.log('[shim-vendor] ✔ pixi → public/vendor/pixi.runtime.js (WebGL2 probe patched)')
+// pixi ships CDN URLs for the KTX/Basis transcoders and would fetch them from
+// jsdelivr the first time a compressed texture is loaded — a third-party
+// request from inside our own bundle (documentation/no-third-party-requests.md).
+// Nothing loads such a texture today, so this is latent rather than live;
+// rewriting the URLs local means that if one ever IS loaded it fails visibly
+// here instead of quietly reaching out. Counted, so a pixi change fails loudly.
+const CDN = 'https://cdn.jsdelivr.net/npm/pixi.js/transcoders/'
+const LOCAL = '/vendor/transcoders/'
+const patched = bundled.replace(PROBE_V1, PROBE_V2)
+const cdnHits = patched.split(CDN).length - 1
+if (cdnHits !== 4) {
+  throw new Error(`[shim-vendor] expected exactly 4 CDN transcoder URLs to localise, found ${cdnHits} — pixi changed; re-check the transcoder wiring`)
+}
+writeFileSync(pixiFile, patched.replaceAll(CDN, LOCAL))
+console.log('[shim-vendor] ✔ pixi → public/vendor/pixi.runtime.js (WebGL2 probe patched, transcoder URLs localised)')
 
 // ── env stub ─────────────────────────────────────────────────────────────────
 writeFileSync(

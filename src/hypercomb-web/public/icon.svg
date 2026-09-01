@@ -1,19 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Hypercomb">
-  <defs>
-    <radialGradient id="bg" cx="50%" cy="42%" r="90%">
-      <stop offset="0" stop-color="#0c1018"/>
-      <stop offset="0.6" stop-color="#05060a"/>
-      <stop offset="1" stop-color="#030409"/>
-    </radialGradient>
-    <linearGradient id="comb" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffd35a"/>
-      <stop offset="1" stop-color="#f5a623"/>
-    </linearGradient>
-  </defs>
-  <rect width="512" height="512" fill="url(#bg)"/>
-  <g fill="none" stroke="url(#comb)" stroke-width="16" stroke-linejoin="round">
-    <polygon points="406,256 331,386 181,386 106,256 181,126 331,126"/>
-    <polygon points="336,256 296,325 216,325 176,256 216,187 296,187"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Hypercomb">
+  <defs><linearGradient id="g" gradientUnits="userSpaceOnUse"
+      x1="6" y1="1" x2="26" y2="31">
+    <stop offset="0" stop-color="#ffe08a"/><stop offset=".42" stop-color="#f8b73a"/>
+    <stop offset="1" stop-color="#d9860b"/></linearGradient>
+  <linearGradient id="r" gradientUnits="userSpaceOnUse" x1="16" y1="1" x2="16" y2="17">
+    <stop offset="0" stop-color="#fff6d8" stop-opacity=".95"/>
+    <stop offset="1" stop-color="#fff6d8" stop-opacity="0"/></linearGradient><mask id="h">
+    <polygon points="16,1.2 28.6,8.6 28.6,23.4 16,30.8 3.4,23.4 3.4,8.6" fill="#fff"/>
+    <g fill="#000">
+      <rect x="9.7" y="8.6" width="4.1" height="14.8" rx=".5"/>
+      <rect x="18.2" y="8.6" width="4.1" height="14.8" rx=".5"/>
+      <rect x="9.7" y="14.3" width="12.6" height="3.4"/>
+    </g></mask>
+    <radialGradient id="bg" cx=".5" cy=".42" r=".9">
+      <stop offset="0" stop-color="#0c1018"/><stop offset=".6" stop-color="#05060a"/>
+      <stop offset="1" stop-color="#030409"/></radialGradient></defs>
+  <rect width="32" height="32" fill="url(#bg)"/>
+  <g transform="translate(16 16) scale(.62) translate(-16 -16)">
+    <polygon points="16,1.2 28.6,8.6 28.6,23.4 16,30.8 3.4,23.4 3.4,8.6" fill="url(#g)" stroke="url(#g)"
+             stroke-width="1.6" stroke-linejoin="round" mask="url(#h)"/>
+  <polygon points="16,1.2 28.6,8.6 28.6,23.4 16,30.8 3.4,23.4 3.4,8.6" fill="none" stroke="url(#r)"
+             stroke-width="1.1" stroke-linejoin="round" mask="url(#h)"/>
   </g>
-  <polygon points="282,256 269,278 243,278 230,256 243,234 269,234" fill="url(#comb)"/>
 </svg>
