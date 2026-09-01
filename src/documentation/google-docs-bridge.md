@@ -14,8 +14,6 @@ signed hive content, and pushes edits back to Google.
 >   view drone). 34 passing specs, clean typecheck.
 > - **Not built** — no sync worker, no tiles, no pool records, no connect panel.
 >   Nothing yet imports a Doc into the hive; the view has no document to open.
-> - **Mirror owed** — `google-docs-bridge` and `document-view`
->   (`npm run mirror:queue -- list`).
 
 ## Why Apps Script and not the Drive API
 

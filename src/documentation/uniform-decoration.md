@@ -75,10 +75,10 @@ strangers' keys — are `pheromones:deposits`, a different thing
 (`pheromones.md`). Derived speed layers (bouquet → targets indexes) belong
 in the optimize phase, keyed by source sigs, never load-bearing.
 
-Behaviors decorate via their MIRROR TILES (the behaviors deck) — the mirror
-SKELETON (one derivable address per behavior) is first-class; the FLESH
-(notes, parts) stays delay-mapped and may drift. Runtime may read marks
-from a derived address; it may NEVER depend on the mirror pass having run.
+Behaviors decorate via their tiles in the behaviors deck — one derivable
+address per behavior is first-class; anything else on those tiles stays
+delay-mapped and may drift. Runtime may read marks from a derived address;
+it may NEVER depend on any of those tiles existing.
 Absence collapses to the declared default — marks modulate, they are never
 required for baseline function.
 

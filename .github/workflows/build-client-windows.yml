@@ -16,6 +16,22 @@ on:
     branches: [development, main]
     paths:
       - 'src/hypercomb-client/**'
+      # This workflow builds the client out of the WHOLE monorepo and bakes
+      # hypercomb-web's dist into it, and `app/frontend/` is gitignored — so
+      # every package that build compiles is a client path no client path can
+      # see. Web alone is not enough: an essentials bee, a shared service or a
+      # core primitive changes the app that gets launched just as surely, and
+      # none of them triggered a build. That is how the installed exe drifted
+      # 248 commits stale once already, and why "it works on the web but not
+      # in the app" kept being the same bug wearing a different feature.
+      - 'src/hypercomb-web/**'
+      - 'src/hypercomb-shared/**'
+      - 'src/hypercomb-essentials/**'
+      - 'src/hypercomb-core/**'
+      - 'src/hypercomb-runtime/**'
+      - 'src/hypercomb-shim/**'
+      - 'src/package.json'
+      - 'src/package-lock.json'
       - '.github/workflows/build-client-windows.yml'
 
 concurrency:
@@ -106,13 +122,13 @@ jobs:
       # durability is actually covered somewhere.
       - name: Conformance and unit tests
         working-directory: src/hypercomb-client
-        run: cargo test --release -p hypercomb-protocol -p hypercomb-store -p hypercomb-host
+        run: cargo test --release -p hypercomb-protocol -p hypercomb-store -p hypercomb-host -p hypercomb-serve
 
       - name: Lint the library crates
         working-directory: src/hypercomb-client
         run: |
           cargo clippy --release --all-targets \
-            -p hypercomb-protocol -p hypercomb-store -p hypercomb-host -- -D warnings
+            -p hypercomb-protocol -p hypercomb-store -p hypercomb-host -p hypercomb-serve -- -D warnings
 
       # ── The frontend the window actually shows ────────────────────────────
 
@@ -129,6 +145,37 @@ jobs:
       - name: Build essentials modules
         working-directory: src
         run: npm run build:essentials
+
+      # The shell a VISITOR boots when this machine serves its hive — a
+      # different artifact from the app's own frontend, for a different reader.
+      # See scripts/stage-host-shell.mjs. Without it the shipped app's
+      # Hive > Serve This Hive has nothing to serve.
+      - name: Build the shim
+        working-directory: src
+        run: npm run build:shim
+
+      - name: Stage the host shell into the client
+        working-directory: src
+        run: node hypercomb-client/scripts/stage-host-shell.mjs
+
+      # The host contract, mechanically, against the real binary: eleven rules
+      # that each fail silently and expensively in production. A HARD GATE — a
+      # host that fails the contract is not a host.
+      - name: Host conformance — check-host.mjs against the real binary
+        working-directory: src
+        run: |
+          set -euo pipefail
+          cargo build --release -p hypercomb-serve --bin hypercomb-serve --manifest-path hypercomb-client/Cargo.toml
+          HIVE="$(mktemp -d)"
+          HOST=hypercomb-client/target/release/hypercomb-serve.exe
+          "$HOST" --hive "$HIVE" --shell hypercomb-client/app/host-shell --port 4271 --local &
+          HOST_PID=$!
+          trap 'kill $HOST_PID 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:4271/pin >/dev/null 2>&1 && break
+            sleep 1
+          done
+          node hypercomb-shim/host/check-host.mjs http://localhost:4271
 
       # The baked import map resolves 'pixi.js' to /vendor/pixi.runtime.js, so
       # the vendor bundle has to exist before the web build copies public/.
@@ -385,9 +432,9 @@ jobs:
           name: renderer-log-windows
           if-no-files-found: ignore
 
-      # The smoke test is deliberately non-blocking (see its comment), which
-      # means a failure there would otherwise leave the run green and the
-      # finding buried in the log. Say it plainly in the summary instead.
+      # The smoke test fails the run, but a red X names the step, not what the
+      # step proves. Say it in words too — and `if: always()` is what keeps
+      # this running when the gate trips.
       - name: Summarise
         if: always()
         run: |

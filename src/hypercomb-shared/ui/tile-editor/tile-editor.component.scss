@@ -1,3 +1,4 @@
+@use '../toolwindow' as tw;
 @use '../breakpoints' as *;
 
 :host {
@@ -49,6 +50,10 @@
   border-radius: var(--hc-radius-floating);
   box-shadow: var(--md-elev-4);
   font-family: var(--hc-font);
+  // ONE number moves the whole dialog: every size inside it is in `em`, and
+  // the width is `28em`, so a larger text size also gives the text room to be
+  // larger in. Same var, same ladder, same record as a docked panel's.
+  font-size: calc(1rem * var(--hc-panel-scale, 1));
 }
 
 // ── header ──────────────────────────────────────────────
@@ -71,6 +76,14 @@
     color: var(--md-on-surface-strong);
     cursor: text;             // it IS the rename control
   }
+}
+
+// The text-size row closes the fields column — full width, so the ladder can
+// lay out without competing with anything.
+.text-size-row {
+  margin-top: 0.2em;
+  padding-top: 0.6em;
+  border-top: 1px solid var(--md-outline-variant);
 }
 
 // Sits exactly where the heading was — same metrics, so revealing the field
@@ -118,7 +131,7 @@
   transition: color 0.15s, background 0.15s;
 
   &:hover {
-    color: #ff6666;
+    color: tw.ink(#ff6666);
     background: rgba(255, 100, 100, 0.1);
   }
 }
@@ -173,7 +186,7 @@
   pointer-events: none;
 
   span {
-    color: #888;
+    color: var(--hc-window-ink-quiet);
     font-size: 0.8em;
   }
 }
@@ -192,7 +205,7 @@
   transform: translate(-50%, -50%);
   pointer-events: none;
   z-index: 2;
-  color: #fff;
+  color: var(--hc-window-ink-loud);
   font-family: var(--hc-font);
   font-size: 0.95em;
   letter-spacing: 0.04em;
@@ -237,7 +250,7 @@
   background: #252528;
   border: 1px solid #3a3a3e;
   border-radius: var(--hc-radius-floating);
-  color: #ccc;
+  color: var(--hc-window-ink-loud);
   cursor: pointer;
   font-size: 0.64em;
   padding: 0.45em 1em;
@@ -245,7 +258,7 @@
 
   .hci {
     font-size: 1.1em;
-    color: #c8975a;
+    color: tw.ink(#c8975a);
   }
 
   &:hover {
@@ -260,20 +273,20 @@
   justify-content: center;
   background: none;
   border: none;
-  color: #666;
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
   padding: 0.2em;
   transition: color 0.15s;
 
   &:hover {
-    color: #999;
+    color: var(--hc-window-ink-quiet);
   }
 
   &.linked {
-    color: #c8975a;
+    color: tw.ink(#c8975a);
 
     &:hover {
-      color: #d4a76a;
+      color: tw.ink(#d4a76a);
     }
   }
 }
@@ -409,7 +422,7 @@
   border-radius: 50%;
   border: none;
   background: rgba(255, 255, 255, 0.15);
-  color: #fff;
+  color: var(--hc-window-ink-loud);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -439,7 +452,7 @@
   grid-column: 1;
   white-space: nowrap;
   font-size: 0.8em;
-  color: #888;
+  color: var(--hc-window-ink-quiet);
   display: flex;
   align-items: center;
   gap: 0.3em;
@@ -448,7 +461,7 @@
 
   .hci {
     font-size: 1.1em;
-    color: #c8975a;
+    color: tw.ink(#c8975a);
   }
 }
 
@@ -462,7 +475,7 @@
 
   &.link-warned {
     border-color: #d4a843;
-    color: #d4a843;
+    color: tw.ink(#d4a843);
   }
 }
 
@@ -470,7 +483,7 @@
   background: #1e1e22;
   border: 1px solid #333;
   border-radius: var(--hc-radius-floating);
-  color: #e0e0e0;
+  color: var(--hc-window-ink-loud);
   padding: 0.35em 0.5em;
   font-size: 0.8em;
   transition: border-color 0.15s;
@@ -501,7 +514,7 @@
   align-items: center;
   gap: 0.25em;
   padding: 0.2em 0.4em 0.2em 0;
-  color: #ccc;
+  color: var(--hc-window-ink-loud);
   font-size: 0.8em;
   white-space: nowrap;
   cursor: default;
@@ -509,7 +522,7 @@
 
   .hci {
     font-size: 1.1em;
-    color: #c8975a;
+    color: tw.ink(#c8975a);
   }
 }
 
@@ -551,7 +564,7 @@
     border-radius: var(--hc-radius-floating);
     border: 1px solid #3a3a3e;
     background: #252528;
-    color: #ccc;
+    color: var(--hc-window-ink-loud);
     cursor: pointer;
     font-size: 0.8em;
     transition: background 0.15s, border-color 0.15s;
@@ -589,14 +602,14 @@
   border-radius: var(--hc-radius-floating);
   border: 1px solid #3a3a3e;
   background: #252528;
-  color: #888;
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 
   &:hover {
     background: #333336;
     border-color: #555;
-    color: #c8975a;
+    color: tw.ink(#c8975a);
   }
 }
 
@@ -764,7 +777,7 @@
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  color: #ffe14a;
+  color: tw.ink(#ffe14a);
 
   h4 {
     margin: 0;
@@ -772,12 +785,12 @@
     font-weight: 600;
     letter-spacing: 0.14em;
     text-transform: uppercase;
-    color: rgba(255, 225, 74, 0.78);
+    color: tw.ink(rgba(255, 225, 74, 0.78));
   }
 
   .qa-icon {
     font-size: 0.85rem;
-    color: rgba(255, 225, 74, 0.78);
+    color: tw.ink(rgba(255, 225, 74, 0.78));
   }
 }
 
@@ -806,7 +819,7 @@
   padding: 0.55rem 0.7rem;
   font-size: 0.92rem;
   line-height: 1.45;
-  color: #f7eecf;
+  color: var(--hc-window-ink-loud);
   background: rgba(255, 225, 74, 0.13);
   border: 1px solid rgba(255, 225, 74, 0.32);
   border-left-width: 3px;
@@ -821,7 +834,7 @@
   padding: 0.5rem 0.7rem;
   font-size: 0.88rem;
   line-height: 1.45;
-  color: rgba(232, 232, 232, 0.85);
+  color: var(--hc-window-ink-plain);
   background: rgba(110, 180, 255, 0.08);
   border: 1px solid rgba(110, 180, 255, 0.22);
   border-left-width: 3px;
@@ -860,7 +873,7 @@
   background: rgba(110, 180, 255, 0.18);
   border: 1px solid rgba(110, 180, 255, 0.45);
   border-radius: var(--hc-radius-control);
-  color: #b6d4ff;
+  color: tw.ink(#b6d4ff);
   font-size: 0.84rem;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -870,6 +883,6 @@
   &:hover {
     background: rgba(110, 180, 255, 0.28);
     border-color: rgba(110, 180, 255, 0.65);
-    color: #d4e6ff;
+    color: var(--hc-window-ink-loud);
   }
 }

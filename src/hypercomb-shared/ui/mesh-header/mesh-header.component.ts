@@ -95,11 +95,11 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
   readonly shieldColor = computed(() => {
     const draft = this.#draft()
     const secret = (draft !== null ? draft : this.#secret$()).trim()
-    if (!secret) return 'rgba(245, 245, 245, 0.45)'
+    if (!secret) return 'rgba(var(--hc-chrome-ink), var(--hc-ink-a-faint))'
     const provider = get('@hypercomb.social/SecretStrengthProvider') as SecretStrengthProvider | undefined
     const score = provider?.evaluate(secret) ?? 0.5
     const hue = Math.round(score * 130)
-    return `hsl(${hue}, 70%, 50%)`
+    return `hsl(${hue} 70% var(--hc-shield-l, 50%))`
   })
 
   ngOnInit(): void {

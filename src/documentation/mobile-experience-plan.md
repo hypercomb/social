@@ -32,7 +32,7 @@ sweep now emits `mobile:marks-changed` and show-cell restales the reach scan on 
 - **PWA** — `hypercomb-web/public/manifest.webmanifest` + `icon.svg` (maskable
   hexagon mark); `index.html` manifest link + `theme-color` + apple-touch metas;
   `staticwebapp.config.json` gets a `.webmanifest` MIME mapping + fallback excludes.
-- **MobileModeService** — `diamondcoreprocessor.com/preferences/mobile-mode.service.ts`.
+- **MobileModeService** — `preferences/mobile-mode.service.ts`.
   Active when `(pointer: coarse)` AND `(max-width: 599px)`, unless overridden.
   Emits `mobile:mode {active}` (EffectBus, replayed). IoC `@diamondcoreprocessor.com/MobileMode`.
 - **`/mobile` queen** — `commands/mobile.queen.ts`: `on|off|auto` override + `sweep`
@@ -162,7 +162,7 @@ re-verify before editing.
 
 - A pheromone today is a decoration `kind:'tag'`, payload `{ name }`, `appliesTo: []`
   → identical names hash to one content-addressed resource shared across cells.
-  `hypercomb-essentials/src/diamondcoreprocessor.com/commands/decoration.service.ts`
+  `hypercomb-essentials/src/commands/decoration.service.ts`
   (`addTag` ~L58, `removeTag`).
 - Stored in the layer's `decorations` slot (array of record sigs) → **travels with
   adoption**, part of the layer signature.
@@ -172,7 +172,7 @@ re-verify before editing.
 - Painter flow (pick set → Paint → tap tiles):
   `hypercomb-shared/ui/tags-viewer/tags-viewer.component.ts` (`openPainter` ~L413,
   `startPaint` ~L442 emits `tags:apply-begin`) →
-  `hypercomb-essentials/src/diamondcoreprocessor.com/pheromones/pheromone-tiles.drone.ts`
+  `hypercomb-essentials/src/pheromones/pheromone-tiles.drone.ts`
   (handles `tags:apply-begin/toggle/end` ~L159, `pheromone:drop` ~L195, calls
   `DecorationService.addTag`) → on-tile chip card
   `hypercomb-shared/ui/pheromone-tiles/pheromone-tiles.component.ts`.
@@ -185,7 +185,7 @@ re-verify before editing.
 ### 3.2 Touch, responsive, PWA
 
 - Touch is essentially complete:
-  `hypercomb-essentials/src/diamondcoreprocessor.com/navigation/touch/touch-gesture.coordinator.ts`
+  `hypercomb-essentials/src/navigation/touch/touch-gesture.coordinator.ts`
   — one-finger pan, two-finger pinch (`navigation/zoom/pinch-zoom.input.ts`),
   sensitivity swipe with haptics, momentum coasting.
 - Shell responsiveness is real: `hypercomb-shared/ui/controls-bar/controls-bar.component.ts`
@@ -199,7 +199,7 @@ re-verify before editing.
 
 ### 3.3 The load-gate choke point
 
-`hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/show-cell.drone.ts`,
+`hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts`,
 inside `#renderFromSynchronizeInner` (~L2103): children resolve to a `union` name
 set, then every hide/privacy source deletes from it **before ordering and before any
 image fetch** (~L2985–3107): blocked tiles, `hc:hidden-tiles`, session hides,
@@ -214,7 +214,7 @@ not mounted — no scripts run, no resources stream).
 
 ### 3.4 View behaviors and the registry
 
-`hypercomb-essentials/src/diamondcoreprocessor.com/commands/visual-bee-registry.ts` —
+`hypercomb-essentials/src/commands/visual-bee-registry.ts` —
 `VisualBeeRegistry.register({ view, slashCommand, iconName, decorationKind,
 behavior:'render'|'navigation', slot?, opensOnTileClick?, adoptable?, cascades?,
 adoptScope? })`, IoC key `@diamondcoreprocessor.com/VisualBeeRegistry`. Registered

@@ -106,13 +106,10 @@ anything.
 
 | File | Role |
 |---|---|
-| `hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/show-cell.drone.ts` | the hold + the cascade measure |
-| `hypercomb-essentials/src/diamondcoreprocessor.com/assistant/claude-bridge.worker.ts` | the window |
+| `hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts` | the hold + the cascade measure |
+| `hypercomb-essentials/src/assistant/claude-bridge.worker.ts` | the window |
 | `hypercomb-shared/ui/landing-badge/` | the badge |
 | `hypercomb-shared/ui/shell-surfaces/shell-surfaces.barrel.ts` | the mount |
-
-Mirrored in the hive at `behaviors/assistant/quiet-landing`
-(`scripts/mirror-quiet-landing.ts`).
 
 ## Proving it
 

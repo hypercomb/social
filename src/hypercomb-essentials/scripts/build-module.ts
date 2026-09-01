@@ -13,8 +13,8 @@
 //   dist/.cache/            build cache — never copied or deployed
 // Consumers fetch `<base>/<sig>` flat-first and fall back to the legacy
 // `__layers__/<sig>.json` | `__bees__/<sig>.js` | `__dependencies__/<sig>.js`
-// URL shapes only for OLD deployed content (live Azure stays old-layout
-// until redeployed; those legacy blobs are never deleted).
+// URL shapes only for OLD deployed content already in the wild; nothing new
+// is ever emitted in that layout.
 
 import { spawnSync } from 'child_process'
 import { fileURLToPath } from 'url'
@@ -59,9 +59,12 @@ const TARGET = 'es2022'
 // domains to exclude from the build output
 const EXCLUDED_DOMAINS: string[] = ['revolucionstyle.com']
 const NAMESPACE_SEGMENTS_MAX = 3
+const PACKAGE_SPECIFIER = '@hypercomb/essentials'
 const PLATFORM_EXTERNALS = ['@hypercomb/core', 'pixi.js']
 
-// hard rule: never generate @<domain> root aggregator
+// Separately owned capability packs may still use domain-shaped roots. The
+// package's own capabilities live directly under src/ and publish beneath the
+// package specifier instead of pretending to be domains.
 const EMIT_DOMAIN_ROOT_NAMESPACE = false
 
 // content manifest (replaces latest.json — supports multiple entry points)
@@ -225,29 +228,6 @@ const computeRootHash = async (unitSigs: string[]): Promise<string> =>
 
 const ensureDir = (dir: string): void => {
   mkdirSync(dir, { recursive: true })
-}
-
-const deployToAzure = (): void => {
-  if (process.argv.includes('--local')) return
-
-  const ps1 = resolve(__dirname, 'deploy-azure.ps1')
-  if (!existsSync(ps1)) return
-
-  // PowerShell binary name differs by platform: Windows ships `powershell`
-  // (Windows PowerShell 5.1) and may also have `pwsh` (PowerShell 7+);
-  // Linux/macOS only have `pwsh`. Pick the one that exists so the same
-  // script works in CI (Ubuntu runners) and on developer Windows boxes.
-  // `-NonInteractive` suppresses console-title operations that fail when
-  // running under npm/tsx without a real TTY.
-  const psBinary = process.platform === 'win32' ? 'powershell' : 'pwsh'
-
-  const result = spawnSync(
-    psBinary,
-    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', ps1],
-    { stdio: 'inherit' }
-  )
-
-  if (result.status !== 0) throw new Error('deployment failed')
 }
 
 const relPosix = (from: string, to: string): string =>
@@ -476,13 +456,20 @@ const namespaceRelDirFromRelDir = (relDir: string): string => {
   return parts.slice(0, Math.min(NAMESPACE_SEGMENTS_MAX, parts.length)).join('/')
 }
 
+const isDomainNamespace = (namespaceRelDir: string): boolean =>
+  splitPath(namespaceRelDir)[0]?.includes('.') ?? false
+
 const specifierFromNamespaceRelDir = (namespaceRelDir: string): string =>
-  `@${namespaceRelDir}`
+  isDomainNamespace(namespaceRelDir)
+    ? `@${namespaceRelDir}`
+    : `${PACKAGE_SPECIFIER}/${namespaceRelDir}`
 
 const prefixesForNamespaceRelDir = (nsRelDir: string): string[] => {
   const parts = splitPath(nsRelDir)
   const out: string[] = []
-  const start = EMIT_DOMAIN_ROOT_NAMESPACE ? 1 : 2
+  const start = isDomainNamespace(nsRelDir)
+    ? (EMIT_DOMAIN_ROOT_NAMESPACE ? 1 : 2)
+    : 1
   for (let i = start; i <= Math.min(parts.length, NAMESPACE_SEGMENTS_MAX); i++) {
     out.push(parts.slice(0, i).join('/'))
   }
@@ -827,19 +814,12 @@ const main = async (): Promise<void> => {
   // --- Early exit: nothing changed at all ---
   if (!anyMtimeChanged && cache) {
     const manifestFile = join(DIST_ROOT, MANIFEST_FILE)
-    const skipDeploy = process.argv.includes('--local')
 
     // Verify output still exists (not wiped externally)
     if (existsSync(manifestFile)) {
       const elapsed = ((performance.now() - t0) / 1000).toFixed(3)
       console.log(`[build-module] Merkle root unchanged — skipping build entirely`)
       console.log(`[build-module] root signature: ${cache.rootLayerSig}`)
-      if (skipDeploy) {
-        console.log(`[build-module] --local: skipping Azure deploy`)
-      } else {
-        console.log(`[build-module] deploying cached output to Azure`)
-        deployToAzure()
-      }
       console.log(`[build-module] completed in ${elapsed}s`)
       return
     }
@@ -1300,16 +1280,15 @@ const main = async (): Promise<void> => {
 
   const elapsed = ((performance.now() - t0) / 1000).toFixed(2)
 
-  // deploy (skip with --local flag)
-  const skipDeploy = process.argv.includes('--local')
-  if (skipDeploy) {
-    console.log(`[build-module] --local: skipping Azure deploy`)
-    console.log(`[build-module] root signature: ${rootLayerSig}`)
-    console.log(`[build-module] output: ${DIST_ROOT}`)
-    console.log(`[build-module] completed in ${elapsed}s`)
-  } else {
-    deployToAzure()
-  }
+  // The build's only job is to produce dist/. DELIVERY is copy-content.ts
+  // (the host's content dir — the relay serves it) plus stamp-install-channel
+  // .ts (the root into the publisher-signed hive index). There is no separate
+  // deploy step and no second destination: Azure blob storage was the ORIGINAL
+  // delivery standard and is not a host — it holds no publisher key and signs
+  // no sentinel, so it can never vouch for a root.
+  console.log(`[build-module] root signature: ${rootLayerSig}`)
+  console.log(`[build-module] output: ${DIST_ROOT}`)
+  console.log(`[build-module] completed in ${elapsed}s`)
 }
 
 main().catch(err => {

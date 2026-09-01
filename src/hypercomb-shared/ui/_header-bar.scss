@@ -6,6 +6,16 @@
 
 @use 'breakpoints' as *;
 
+// ── CHROME IS A ROLE, NOT A COLOUR ────────────────────────────────────────
+// The tuples below used to be literals here — one dark glass, one steel
+// hairline, one white ink — which is why the bar stayed dark under every
+// theme. They are now `--hc-chrome-*` roles answered by each theme in
+// `styles/_material-tokens.scss`; dark answers them with EXACTLY the values
+// that used to be written here, so the cold-chrome look is unchanged and a
+// bright theme simply gets a bright bar. Alphas stay inline — the roles are
+// r,g,b triples for precisely that reason. Never reintroduce a literal.
+
+
 // ── suppress mouse-click focus on all header buttons ─────
 .header-bar button:focus:not(:focus-visible) {
   outline: none;
@@ -22,12 +32,10 @@
 .header-bar {
   display: flex;
   align-items: stretch;
-  // min-height, not height: the icon rail WRAPS (see command-shell
-  // `.action-group`), and a cell carrying several branch-scoped behaviours
-  // takes two or three rows. The bar grows to hold them and everything below
-  // follows via `--hc-header-anchor` (styles/_header-size.scss). A one-row
-  // rail — the common case — renders at exactly this height: the rail button
-  // (1.85rem) plus a hair of air, and nothing else.
+  // min-height, not height: the command surface may grow for a dedicated
+  // portrait-phone rail, while the icon rail itself always stays one line.
+  // Everything below follows via `--hc-header-anchor`
+  // (styles/_header-size.scss).
   min-height: 2.2rem;
 
   // ── the icon rail's metrics ────────────────────────────
@@ -43,10 +51,9 @@
   --hc-rail-btn: 1.6rem;
   --hc-rail-glyph: 1.05rem;
   --hc-rail-gap: 0.3rem;
-  // How many icon boxes THE WHOLE RAIL fits before it wraps to the next row.
-  // The rail NEVER shrinks an icon to make room (that raggedness is what the
-  // rail exists to prevent) — it takes another row instead, same box, same
-  // gap, same baseline. Matches the tile icon band's rhythm.
+  // How many icon boxes THE WHOLE RAIL shows before horizontal overflow.
+  // The rail never shrinks or wraps an icon to make room; its single baseline
+  // matches the tile icon band's rhythm.
   //
   // Counted over the rail, NOT per group: when each group wrapped on its own
   // budget the groups ended up different heights, and two centred blocks of
@@ -77,7 +84,7 @@
   // (`--hc-header-bottom`, controls-bar's ResizeObserver).
   margin: 0;
   padding: 0 0.2rem;
-  background: rgba(8, 16, 26, 0.78);
+  background: rgba(var(--hc-chrome-glass), var(--hc-chrome-glass-a));
   // Resting border is a faint steel hairline; it firms up — never glares —
   // when the command line is active. `.input-open` is mobile-only (app.ts:
   // inputOpen = mobile && visible), so `:focus-within` is the real "active"
@@ -91,9 +98,23 @@
   // to one device pixel, so `0.5px` and `1px` paint the same row — the only
   // lever that actually thins the rule is lowering its contrast against the
   // bar. Reach for these alphas, never a smaller px value.
-  border: 0.5px solid rgba(72, 104, 124, 0.16);
-  border-top-color: rgba(72, 104, 124, 0.38);
-  border-bottom-color: rgba(72, 104, 124, 0.38);
+  //
+  // THE BOTTOM EDGE IS THE SEAM THAT MATTERS. Everything the shell docks —
+  // tool windows, the notes strip, the hint bar, the breadcrumb — hangs off
+  // the MEASURED bottom of this bar, so that one line is the only thing
+  // saying where chrome ends and the workspace begins. At the steel rule's
+  // resting alpha it read as another faint hairline among the panel edges
+  // below it and the separation vanished. It now carries the theme's own
+  // `--hc-chrome-accent` — a role every theme already answers, so the seam
+  // is blue under dark, ink-blue under light, amber under honey — at full
+  // alpha, which is what does most of the work. It is the ONE edge allowed
+  // a width of its own, and only barely: 1px against the sides' 0.5px, a
+  // single device pixel more on a 2x screen. A rule, not a bar — 2px read
+  // as a band of chrome in its own right. Colour states the seam; the extra
+  // pixel only keeps it from dissolving into the panel edges below.
+  border: 0.5px solid rgba(var(--hc-chrome-rule), 0.16);
+  border-top-color: rgba(var(--hc-chrome-rule), 0.38);
+  border-bottom: 1px solid rgba(var(--hc-chrome-accent), 1);
   border-radius: 0;
   // Clip children's hover fills to the frame. Safe for the intellisense
   // dropdown + hint surfaces — they position `fixed` and escape the clip,
@@ -126,9 +147,20 @@
 // little brighter is the whole "active" signal on a bar this thin.
 .header-bar:focus-within,
 .header-bar.input-open {
-  border-color: rgba(84, 122, 146, 0.24);
-  border-top-color: rgba(84, 122, 146, 0.55);
-  border-bottom-color: rgba(84, 122, 146, 0.55);
+  border-color: rgba(var(--hc-chrome-rule-firm), 0.24);
+  border-top-color: rgba(var(--hc-chrome-rule-firm), 0.55);
+  // The accent seam stays the accent when the line is active — it just goes
+  // fully opaque. Firming it into the steel rule would erase the boundary at
+  // the exact moment the bar has the user's attention.
+  border-bottom-color: rgba(var(--hc-chrome-accent), 1);
+}
+
+// Dark and System carry the hive's gold seam. System is represented by no
+// explicit data-theme attribute, regardless of the OS colour scheme. Keeping
+// this after the active state means focus never turns the seam back to steel.
+:root[data-theme='dark'] .header-bar,
+:root:not([data-theme]) .header-bar {
+  border-bottom-color: #ffe14a;
 }
 
 // ── hci icon font ────────────────────────────────────────
@@ -161,7 +193,7 @@
 
 .status-icon {
   font-size: 0.95rem;
-  color: rgba(245, 245, 245, 0.3);
+  color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-faint));
   pointer-events: none;
   user-select: none;
 }
@@ -175,22 +207,22 @@
   flex-shrink: 0;
   padding: 0 1.2rem;
   border: none;
-  border-left: 1px solid rgba(126, 182, 214, 0.28);
+  border-left: 1px solid rgba(var(--hc-chrome-accent), 0.28);
   border-radius: 0;
   background: transparent;
   cursor: pointer;
   transition: background 200ms ease;
 
   &:hover {
-    background: rgba(245, 245, 245, 0.04);
+    background: rgba(var(--hc-chrome-ink), 0.04);
   }
 
   &:active {
-    background: rgba(245, 245, 245, 0.06);
+    background: rgba(var(--hc-chrome-ink), 0.06);
   }
 
   &:focus-visible {
-    outline: 1px solid rgba(245, 245, 245, 0.3);
+    outline: 1px solid rgba(var(--hc-chrome-ink), 0.3);
     outline-offset: -1px;
   }
 
@@ -200,20 +232,20 @@
 
   // ── solo ──
   &.solo-mode {
-    color: rgba(255, 45, 138, 0.8);
+    color: var(--hc-status-solo);
 
     &:hover {
-      color: rgba(255, 45, 138, 0.95);
+      color: var(--hc-status-solo);
     }
 
     &:active {
-      background: rgba(255, 45, 138, 0.08);
+      background: color-mix(in srgb, var(--hc-status-solo) 10%, transparent);
     }
   }
 
   // ── shield ──
   &.shield-mode {
-    color: var(--shield-color, rgba(245, 245, 245, 0.45));
+    color: var(--shield-color, rgba(var(--hc-chrome-ink), var(--hc-ink-a-faint)));
   }
 
   // ── prep / privacy review (world view on, swarm NOT started) ──
@@ -222,15 +254,15 @@
   // so it reads as "armed, one step from entering" rather than solo pink.
   // Declared after .solo-mode so it wins — both classes are on in prep.
   &.prep-mode {
-    color: rgba(126, 182, 214, 0.95);
+    color: rgba(var(--hc-chrome-accent), 0.95);
 
     &:hover {
-      color: rgba(126, 182, 214, 1);
-      background: rgba(126, 182, 214, 0.08);
+      color: rgba(var(--hc-chrome-accent), 1);
+      background: rgba(var(--hc-chrome-accent), 0.08);
     }
 
     &:active {
-      background: rgba(126, 182, 214, 0.12);
+      background: rgba(var(--hc-chrome-accent), 0.12);
     }
   }
 
@@ -239,14 +271,14 @@
   // Muted steel by default; lifts to the command-shell accent when active so
   // it reads as "on" against the cold chrome without glaring.
   &.world-toggle {
-    color: rgba(245, 245, 245, 0.45);
+    color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-faint));
 
     &:hover {
-      color: rgba(245, 245, 245, 0.7);
+      color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-plain));
     }
 
     &.active {
-      color: rgba(126, 182, 214, 0.95);
+      color: rgba(var(--hc-chrome-accent), 0.95);
     }
   }
 
@@ -267,7 +299,7 @@
   min-width: 0;
   padding: 0 0.6rem;
   border: none;
-  border-left: 1px solid rgba(126, 182, 214, 0.28);
+  border-left: 1px solid rgba(var(--hc-chrome-accent), 0.28);
   background: transparent;
   font: 600 0.6rem/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
   letter-spacing: 0.12em;
@@ -278,7 +310,7 @@
   transition: background 200ms ease;
 
   &:hover {
-    background: rgba(245, 245, 245, 0.04);
+    background: rgba(var(--hc-chrome-ink), 0.04);
   }
 }
 

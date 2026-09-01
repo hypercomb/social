@@ -14,7 +14,10 @@
      (its Pixi pointer-events:auto otherwise eats site clicks at z 59989, above
      the site overlay's 59988). Single source of truth — see styles.scss. -->
 <div id="pixi-host" style="z-index: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
-<hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" [style.visibility]="viewActive() ? 'hidden' : null"></hc-controls-bar>
+<!-- ControlsBar consumes the owner-counted view modes itself. In particular,
+     chat reserves the left rail and announces `view:keeps-controls`; hiding
+     the host here erased the bar while leaving that reservation behind. -->
+<hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()"></hc-controls-bar>
 <hc-edit-actions [style.visibility]="viewActive() ? 'hidden' : null"></hc-edit-actions>
 <!-- Every other shell surface is registry-fed: registered in
      shared/ui/shell-surfaces/shell-surfaces.barrel.ts, mounted here in `order`

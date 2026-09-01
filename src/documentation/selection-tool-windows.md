@@ -50,16 +50,36 @@ pattern.
   latch their own boolean off it. For mutual exclusivity between takeovers,
   claim through `@diamondcoreprocessor.com/ModeRegistry` (owner-counted) —
   do not hand-wire pairwise exclusion between windows.
-- **Escape** has ONE owner: the cascade (`keyboard/escape-cascade.ts`), and it
-  is gated on FOCUS. A window never registers its own Escape listener. It
-  declares `dismiss()` (unwind one level of its own state — field, armed mode,
-  drill) and `close()` on its `WindowSession`, and the cascade calls them only
-  while the focus is inside that window. Focus out on the canvas means the press
-  belongs to the cascade's own rungs, so a live selection or a stuck InputGate
-  can always be cleared with a panel open. The order is: window dismiss
-  (priority 2e) → clear selection (3) → window close (3b). The selection clear
-  sits BETWEEN the two deliberately: backing out of a panel's inner state must
-  not cost a selection, and a window must not close while one is still up.
+- **Escape** has ONE owner: the cascade (`keyboard/escape-cascade.ts`), and one
+  door into the windows (`shared/ui/tool-windows.ts`). A window never registers
+  its own Escape listener; it declares `dismiss()` (unwind one level of its own
+  state — field, armed mode, drill) and `close()` on its `WindowSession`. The
+  rungs are: dismiss the window the focus is INSIDE (2) → **the sweep** (3) →
+  put back (4) → clear selection (5) → InputGate (6). `dismiss` is focus-only —
+  a press inside a window's own field belongs to that field; a press anywhere
+  else is not about one window at all.
+- **ONE PRESS TAKES EVERYTHING.** The sweep parks *every showing surface* —
+  panels, the companion palette, pinned cards, the notes reader, the clipboard
+  window — in a single press. Escape used to be a ladder (viewer, then card,
+  then inner level, then panel), so getting back to the tiles could cost four
+  presses with the hive covered the whole way down. A new surface needs no
+  wiring to take part: joining the window session (which `hcDockedPanel` does
+  for you) is the whole contract.
+- **And the next press gives it all back — if it comes immediately.** The
+  cascade remembers what the press took and puts it back on the very next
+  press: tiles, then everything back exactly as it was, then tiles again. That
+  is why the sweep can be indiscriminate — `park()` keeps the scroll, the drill
+  level, the half-typed field, so an unwanted press costs nothing. `close()` is
+  still the ×, and is read here only as a legacy declaration. The memory is ONE
+  slot; it is spent when used; it is PLACED (a memory that travelled to another
+  page is dropped, never replayed under a different tile's name); and it lasts
+  **3 seconds, ending the moment anything else happens** — any click, any other
+  key. The put-back is for the press you make because the last one was a
+  mistake, and for nothing else.
+- **A press never costs you both.** The selection clear sits BELOW the sweep:
+  whatever was covering the hive goes first, and the selection is still there
+  when you get back to it. A cleared selection is itself remembered, and comes
+  back tile for tile on an immediate second press.
 
 ## Adding a selection response to a new window
 

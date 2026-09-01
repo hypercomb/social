@@ -926,7 +926,7 @@ const PUBLIC_DIRS = [
   'hypercomb-dev/public/substrate',
   'shared-public/substrate',
 ].filter(d => existsSync(d.split('/substrate')[0]))
-const SRC_DIR = 'hypercomb-essentials/src/diamondcoreprocessor.com/presentation/background/textures/tile-themes'
+const SRC_DIR = 'hypercomb-essentials/src/presentation/background/textures/tile-themes'
 
 const run = async () => {
   const browser = await chromium.launch()

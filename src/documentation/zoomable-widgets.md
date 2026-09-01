@@ -40,7 +40,7 @@ itself is neutral; this is a placement decision (where you add it), not a flag.
 | Piece | Where | Role |
 |---|---|---|
 | `HcWidgetDirective` | `hypercomb-shared/ui/widget-zoom/hc-widget.directive.ts` | Opt-in carrier. Stamps `[data-widget]`, applies scale as inline `zoom`, listens for live changes. |
-| `WidgetZoomDrone` | `hypercomb-essentials/src/diamondcoreprocessor.com/widgets/widget-zoom.drone.ts` | The capability. Global Shift+hover detection, the imperative slider, persistence, broadcast. |
+| `WidgetZoomDrone` | `hypercomb-essentials/src/widgets/widget-zoom.drone.ts` | The capability. Global Shift+hover detection, the imperative slider, persistence, broadcast. |
 
 They never import each other (shared must not import essentials). They coordinate
 purely through a small wire contract:

@@ -49,9 +49,9 @@ first frame back. That is one TCP connect + one HTTP Upgrade + one close per
 logical op — and via `bridge-cli` also one `node` process each.
 
 This is a client convention, **not a protocol constraint**. The broker already
-routes by `id` (`run-bridge.cjs:95,107`), and **eight scripts in the same
+routes by `id` (`run-bridge.cjs:95,107`), and **several scripts in the same
 directory already multiplex** many concurrent ops over one socket
-(`_moose-paint.cjs`, `_mirror-welcome.cjs`, `_welcome-decorate.cjs`, …).
+(`_moose-paint.cjs`, `_welcome-decorate.cjs`, …).
 
 Measured, resolving the 16 root tiles to names:
 
@@ -159,5 +159,3 @@ silently dropped (`run-bridge.cjs:106-113`). Adding renderer→client fanout is
 
 1–3 are the ones that pay immediately. 5 is what makes the tier feel live.
 
-*If any of this gets built, it owes a mirror pass (tiles + collection +
-pheromones + notes) or a queue entry naming it.*

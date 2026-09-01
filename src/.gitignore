@@ -2,6 +2,7 @@ node_modules
 scripts/.build-state.json
 **/public/env.js
 .dev-relay-content/
+hypercomb-relay/blossom-worker/.wrangler/
 
 # relay ops diagnostics (local transcripts + staged dev content)
 hypercomb-relay/fix-result.txt
@@ -21,6 +22,14 @@ hypercomb-client/target/
 # its ~800-file output is not, and committing it would duplicate every web
 # asset (content, substrate, documentation) inside the client.
 hypercomb-client/app/frontend/
+
+# The client's staged HOST SHELL: a copy of hypercomb-shim/dist, produced by
+# `node hypercomb-client/scripts/stage-host-shell.mjs`, bundled as a Tauri
+# resource and served to visitors by Hive > Serve This Hive. Same reasoning as
+# the frontend below — the script is the source, the 24MB of build output is
+# not. The README is kept so the bundler's resource glob always matches.
+hypercomb-client/app/host-shell/*
+!hypercomb-client/app/host-shell/README.md
 
 # Baked client frontend — a fresh copy of hypercomb-web/dist with a static
 # import map written into index.html, produced by

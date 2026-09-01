@@ -204,20 +204,6 @@
     }
 
     <div class="action-group tools">
-      <!-- chat — the default companion view, so its switch leads the rail.
-           Lights while the window is up. -->
-      <button
-        class="rail-btn chat-toggle-btn"
-        [class.on]="chatPanelOpen()"
-        type="button"
-        (mousedown)="$event.preventDefault(); chatToggle.emit()"
-        [attr.aria-label]="chatLabel()"
-        [attr.aria-pressed]="chatPanelOpen()"
-        [title]="chatLabel()"
-      >
-        <span class="mat-sym" aria-hidden="true">chat</span>
-      </button>
-
       @if (showOpenForSubscribersToggle()) {
         <button
           class="rail-btn open-for-subscribers-btn"
@@ -263,6 +249,24 @@
         <span class="mat-sym" aria-hidden="true">extension</span>
       </button>
 
+      <!-- THE ASSISTANT, back where the words are. It lived out on the
+           control bar, which is the rail of how-you-SEE controls — fit, zoom,
+           pin, fullscreen — and talking is not one of those: it is what this
+           box is for, so the control belongs on the box. `c` opens it from
+           anywhere (keyboard/default-keymap.ts), landing in the same act as
+           the press. -->
+      <button
+        class="rail-btn chat-toggle-btn"
+        [class.on]="chatPanelOpen()"
+        type="button"
+        (mousedown)="$event.preventDefault(); chatToggle.emit()"
+        [attr.aria-label]="chatLabel()"
+        [attr.aria-pressed]="chatPanelOpen()"
+        [title]="chatLabel()"
+      >
+        <span class="mat-sym" aria-hidden="true">chat</span>
+      </button>
+
       <button
         class="rail-btn notes-toggle-btn"
         [class.on]="notesPanelOpen()"
@@ -292,12 +296,11 @@
         <span class="mat-sym" aria-hidden="true">{{ pheromoneScopeIcon() }}</span>
       </button>
 
-      <!-- MIC — LAST, the far right end of the rail. Dictation lands in the
-           text box this rail sits on, and the far end is where the hand
-           rests: hold to talk, release to send. A tap toggles listening for
-           a longer dictation. The parent owns that machine — this only
-           reports the press, and pointer events (not click) are what make a
-           hold knowable. -->
+      <!-- MIC — LAST, at the far-right end of the rail. Dictation lands in
+           the text box this rail sits on: hold to talk, release to send. A
+           tap toggles listening for a longer dictation. The parent owns that
+           machine — this only reports the press, and pointer events (not
+           click) are what make a hold knowable. -->
       @if (showMic()) {
         <button
           class="rail-btn mic-rail-btn"
@@ -317,13 +320,14 @@
 
       <!-- feedback left this rail for the bottom-right document cluster
            (edit-actions, beside the rotate icon) — the forum glyph went with
-           it, freeing the chat toggle to lead this group. -->
+           it. -->
     </div>
 
   </div>
 
   @if (effectiveShowCompletions()) {
-    <div class="command-intel" [class.has-detail]="!!activeDetail()">
+    <div class="command-intel" [class.has-detail]="!!activeDetail()"
+      [style.--hc-panel-scale]="textScale()">
       <ul class="command-results" role="listbox" [class.wide-swatches]="wideSwatches()">
         @for (s of suggestions(); track $index; let i = $index) {
           <li
@@ -331,11 +335,26 @@
             [class.active]="i === getActiveIndex()"
             (mousedown)="onSuggestionMouseDown($event, s, i)"
           >
-            @if (colorFor(s); as color) {
-              <span class="color-dot" [style.background]="color"></span>
-            }
-            <span class="typed">{{ typedPart(s) }}</span
-            ><span class="rest">{{ restPart(s) }}</span>
+            <!-- TWO CELLS, one per subgrid column: the option's own name, then
+                 its description. Both ellipsize inside their column, so the row
+                 never widens the panel past its viewport cap (which used to
+                 shove the detail pane off the right edge and clip it). -->
+            <span class="opt-label">
+              @if (colorFor(s); as color) {
+                <span class="color-dot" [style.background]="color"></span>
+              }
+              <span class="opt-name"
+                ><span class="typed">{{ typedPart(s) }}</span
+                ><span class="rest">{{ restPart(s) }}</span
+              ></span>
+              <!-- The other spellings that reach this same behaviour. Same
+                   chip the /help reference uses, for the same reason: one row
+                   that answers to three names beats three rows repeating one
+                   sentence. -->
+              @for (alias of aliasesFor(s); track alias) {
+                <span class="opt-alias">{{ alias }}</span>
+              }
+            </span>
             @if (descriptionFor(s); as desc) {
               <span class="slash-desc">{{ desc }}</span>
             }
@@ -372,6 +391,13 @@
               </ul>
             </div>
           }
+
+          <!-- The panel's own text size, at the foot of the pane that has room
+               for it. Ctrl/Cmd +/- does the same thing from the keyboard, for
+               the single-column and phone cases where this pane is absent. -->
+          <div class="detail-text-scale">
+            <hc-text-size [window]="textScaleWindow" (scaleChange)="textScale.set($event)" />
+          </div>
         </aside>
       }
     </div>

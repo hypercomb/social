@@ -18,7 +18,7 @@
 // back within the edge snap zone to re-anchor.
 .cv2-dragbar {
   @include tw.header;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(var(--hc-panel-ink), 0.02);
   border-bottom: 1px solid rgba($steel, 0.25);
   border-radius: 0;
   user-select: none;
@@ -35,7 +35,7 @@
   font-size: scaled(0.85rem);
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: rgba(206, 224, 240, 0.96);
+  color: var(--hc-window-ink-loud);
 }
 
 .cv2-dragbar-sep { color: var(--md-on-surface-faint); }
@@ -78,7 +78,7 @@
   padding: 1px 5px;
   border: 1px solid rgba($steel, 0.55);
   border-radius: var(--hc-radius-floating);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(var(--hc-panel-ink), 0.04);
   color: var(--md-on-surface);
   font-family: var(--hc-notes-face);
   font-size: scaled(0.82rem);
@@ -98,7 +98,7 @@
   gap: 0.15rem;
   padding: 0 0.35rem;
   border-bottom: 1px solid rgba($steel, 0.25);
-  background: rgba(255, 255, 255, 0.015);
+  background: rgba(var(--hc-panel-ink), 0.015);
 }
 
 .cv2-tab {
@@ -111,15 +111,15 @@
   font-size: scaled(0.78rem);
   font-weight: 600;
   letter-spacing: 0.03em;
-  color: rgba(206, 224, 240, 0.55);
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
   border-bottom: 2px solid transparent;
 
-  &:hover { color: rgba(206, 224, 240, 0.85); }
+  &:hover { color: var(--hc-window-ink-plain); }
   &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: -1px; }
 
   &.is-active {
-    color: rgba(206, 224, 240, 0.96);
+    color: var(--hc-window-ink-loud);
     border-bottom-color: rgba($steel, 0.8);
   }
 }
@@ -132,7 +132,7 @@
   justify-content: center;
   background: transparent;
   border: 1px solid transparent;
-  color: rgba(226, 235, 244, 0.6);
+  color: var(--hc-window-ink-quiet);
   border-radius: var(--hc-radius-floating);
   cursor: pointer;
   padding: 0;
@@ -140,12 +140,12 @@
   transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
 
   &:hover {
-    color: #fff;
+    color: var(--hc-panel-text);
     background: rgba($steel, 0.16);
     border-color: rgba($steel, 0.4);
   }
 
-  &.ghost { color: rgba(226, 235, 244, 0.4); }
+  &.ghost { color: var(--hc-window-ink-quiet); }
 }
 
 // Labeled exit pill — sits in the dragbar when see-all mode is on.

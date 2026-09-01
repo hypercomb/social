@@ -1,0 +1,83 @@
+[
+  {
+    "name": "the drone emitted an opens-as strip",
+    "ok": true,
+    "detail": "choices=16"
+  },
+  {
+    "name": "every choice the roster has not lit is marked dormant",
+    "ok": true,
+    "detail": "dormant=0/16, roster expects 0"
+  },
+  {
+    "name": "the hexagons ground is never put out",
+    "ok": true
+  },
+  {
+    "name": "putting a view out restates the strip at once (no sweep)",
+    "ok": true,
+    "detail": "living-brief → dormant=true"
+  },
+  {
+    "name": "the panel painted the differential",
+    "ok": true,
+    "detail": "rows=2"
+  },
+  {
+    "name": "every closed row is one line",
+    "ok": true,
+    "detail": "heights=29,29px"
+  },
+  {
+    "name": "no reason sentence on a closed row",
+    "ok": true
+  },
+  {
+    "name": "opening a row stacks it out",
+    "ok": true,
+    "detail": "open=46px vs closed=29px"
+  },
+  {
+    "name": "the rows beside it stay one line",
+    "ok": true,
+    "detail": "heights=29px"
+  },
+  {
+    "name": "the strip offers only the lit faces",
+    "ok": true,
+    "detail": "chips=15, lit=15 of 16"
+  },
+  {
+    "name": "no native title on a face — it is the slow one",
+    "ok": true
+  },
+  {
+    "name": "every face carries its message",
+    "ok": true
+  },
+  {
+    "name": "a face already pinned to a put-out view is still shown",
+    "ok": true,
+    "detail": "dormant chips=1"
+  },
+  {
+    "name": "and it reads as switched off, not as a choice",
+    "ok": true,
+    "detail": "16 chips, 1 put out"
+  },
+  {
+    "name": "the message is the mark's own text",
+    "ok": true,
+    "detail": "\"hexagons\""
+  },
+  {
+    "name": "it waits for nothing",
+    "ok": true,
+    "detail": "delay=0s"
+  },
+  {
+    "name": "it is fully up inside 160ms",
+    "ok": true,
+    "detail": "opacity=1 after 160ms (fade=0.09s)"
+  }
+]

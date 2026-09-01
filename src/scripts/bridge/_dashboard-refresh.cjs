@@ -7,7 +7,7 @@
 // One child cell is minted under /dashboard per open Q so the hex
 // grid shows pending work spatially. Clicking a child tile in the
 // hex grid does NOT navigate — `DashboardQOpenWorker` (in
-// essentials/diamondcoreprocessor.com/dashboard) intercepts the
+// essentials/dashboard) intercepts the
 // `tile:action open` effect, looks up the matching
 // `dashboard-q-binding` optimization, and opens `QaModalView` — a
 // shell-level DOM modal that holds the question and an answer

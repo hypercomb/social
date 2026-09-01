@@ -1,0 +1,15 @@
+[package]
+name = "hypercomb-serve"
+description = "The host contract, served live from a hive."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+hypercomb-host.workspace = true
+
+[dev-dependencies]
+hypercomb-protocol.workspace = true
+hypercomb-store.workspace = true
+tempfile.workspace = true

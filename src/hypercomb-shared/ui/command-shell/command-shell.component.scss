@@ -3,6 +3,7 @@
 // Shared dark command shell — fixed height, same on all screen sizes.
 // Mobile styling is the source of truth.
 
+@use '../toolwindow' as tw;
 $bp-phone-max: 599px;
 
 :host {
@@ -20,7 +21,12 @@ $bp-phone-max: 599px;
   // light-mode value automatically; the -rgb tuple stays on dark-mode
   // values, which is a fine fallback for the glow effects below.
   --glow-color: var(--md-primary);
-  --glow-color-rgb: 126, 182, 214;
+  // The tuple used to be frozen on dark-mode steel with a comment calling it
+  // "a fine fallback". It is not: the placeholder, the focus rings and every
+  // translucent overlay in this file are drawn from it, so on a bright theme
+  // the most-read line in the app was pale blue on cream. It is now the
+  // chrome accent role — the same value on dark, its own on every other look.
+  --glow-color-rgb: var(--hc-chrome-accent);
   --shell-bg: color-mix(in srgb, var(--md-surface-c-low) 85%, transparent);
   --shell-border: rgba(var(--glow-color-rgb), 0.45);
   --shell-border-focus: rgba(var(--glow-color-rgb), 0.65);
@@ -39,7 +45,23 @@ $bp-phone-max: 599px;
   // little more without the full glare; text and icon stay one cohesive
   // cold family. Tracks the theme primary via --glow-color (adapts in
   // light mode too).
-  --cmd-fg: color-mix(in srgb, var(--glow-color) 60%, ghostwhite);
+  // Mixed toward the CHROME TEXT, not toward ghostwhite: "60% of the way to
+  // white from the accent" is a bright reading only while the bar behind it
+  // is dark. Against the chrome's own text colour the same 60% lands legible
+  // either way, and stays one cohesive family with the icon beside it.
+  --cmd-fg: color-mix(in srgb, var(--glow-color) 60%, var(--hc-chrome-text));
+
+  // THE COMMAND REGISTER'S COLOUR. It was written out as `#ecbc57` in four
+  // places — the caret, the slash sigil, the reading's action segments — and
+  // the completion list, which is that same register's list, was wearing the
+  // shell's steel blue instead. One name, one hue, every surface the register
+  // touches. (`--cmd-accent` is its opposite number for the find register.)
+  // GROUNDED in the chrome's own ink so it is legible on either ground: on
+  // dark that lightens the honey a touch, on a bright theme it deepens to an
+  // amber that actually reads against cream. Raw #ecbc57 on white is a ~1.9:1
+  // glyph — fine as a 2px rule, not fine as a word. No theme selector needed:
+  // --hc-chrome-text already flips, so this flips with it.
+  --cmd-accent-command: color-mix(in srgb, #ecbc57 78%, var(--hc-chrome-text));
 }
 
 // The icon rail is a SIBLING of the shell, not a child of it (see the
@@ -164,8 +186,8 @@ $bp-phone-max: 599px;
 .command-shell.stance-command {
   background: color-mix(in srgb, var(--glow-color) 12%, transparent);
 
-  .command-input { caret-color: #ecbc57; }
-  .prompt-slash { color: #ecbc57; }
+  .command-input { caret-color: var(--cmd-accent-command); }
+  .prompt-slash { color: var(--cmd-accent-command); }
 }
 
 // While the reading paints, the input's own glyphs stand down — one text,
@@ -303,12 +325,12 @@ $bp-phone-max: 599px;
   white-space: pre;
 
   .seg-action {
-    color: #ecbc57;
+    color: var(--cmd-accent-command);
     text-decoration: underline;
     text-underline-offset: 0.22em;
   }
   .seg-ambiguity {
-    color: #b48ad8;
+    color: tw.ink(#b48ad8);
     text-decoration: underline dashed;
     text-underline-offset: 0.22em;
   }
@@ -366,12 +388,25 @@ $bp-phone-max: 599px;
   border-radius: var(--hc-radius-floating);
   background: color-mix(in srgb, var(--md-surface-c-lowest) 92%, transparent);
   backdrop-filter: blur(12px);
-  border: 1.5px solid var(--shell-border);
+  // A NEUTRAL hairline, not the shell's steel. `--shell-border` is right for
+  // the bar — it is the app's cold chrome — but this panel is the command
+  // register's own surface, and a blue frame around warm mono text was the
+  // last thing holding it to the wrong palette. Same choice the /help sheet
+  // makes: a plain light hairline, and the accent spent only on meaning.
+  border: 1.5px solid rgba(var(--hc-chrome-ink), 0.16);
   box-shadow: var(--md-elev-3);
   overflow: hidden;
-  font-family: var(--terminal-font);
-  font-size: 0.85em;
-  letter-spacing: 0.02em;
+  // THE REFERENCE SHEET'S TYPEFACE. `/help` and this dropdown answer the same
+  // question — "what can I type, and what does it do" — so they are one
+  // surface in two places, and a mono column is what makes a list of commands
+  // scan as a list of commands. --hc-mono is the UI mono (chips, labels), not
+  // the reading mono.
+  font-family: var(--hc-mono);
+  // ONE number moves the whole panel — rows, chips, detail pane. Same ladder,
+  // same `--hc-panel-scale` contract, same storage as a docked panel's gear;
+  // this surface just isn't a docked panel, so it carries its own control.
+  font-size: calc(0.85em * var(--hc-panel-scale, 1));
+  letter-spacing: 0;
 
   // Anchored to the caret (see command-shell.ts #positionIntel), so it's
   // content-sized rather than the full bar width — a compact list under the
@@ -379,8 +414,25 @@ $bp-phone-max: 599px;
   &:not(.has-detail) { min-width: 13rem; }
 }
 
+// TWO ALIGNED COLUMNS, not two ragged halves of a row. The list is a grid
+// (name | description) and every row is a `subgrid` spanning both tracks, so
+// descriptions start on ONE shared x across the whole list instead of each
+// row flushing its own text to its own right edge. That ragged staircase is
+// what read as unfinished.
+//
+// It must also SHRINK: `flex: 0 0 auto` sized this column to the longest row's
+// max-content, which blew past the panel's viewport cap and pushed the detail
+// pane out under `overflow: hidden` — the clipped "BEHAVIOU" badge and the
+// half-eaten sentence beside it. `flex: 0 1 auto` + a max-width lets the
+// description track ellipsize instead.
 .command-results {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  display: grid;
+  // fit-content caps how much of the panel the name column may claim, so a
+  // long name + two chips can never squeeze the sentence beside it to nothing.
+  grid-template-columns: fit-content(11rem) minmax(0, 1fr);
+  align-content: start;
+  row-gap: 0;
   min-width: 13rem;
   margin: 0;
   padding: 0.4rem;
@@ -389,45 +441,99 @@ $bp-phone-max: 599px;
   overflow-y: auto;
   overflow-x: hidden;
 
+  .command-intel.has-detail & { max-width: 30rem; }
   .command-intel:not(.has-detail) & { flex: 1 1 auto; }
 
   &::-webkit-scrollbar { width: 4px; }
   &::-webkit-scrollbar-track { background: transparent; }
   &::-webkit-scrollbar-thumb {
-    background: rgba(var(--glow-color-rgb), 0.2);
+    background: rgba(var(--hc-chrome-ink), 0.2);
     border-radius: 2px;
-    &:hover { background: rgba(var(--glow-color-rgb), 0.35); }
+    &:hover { background: rgba(var(--hc-chrome-ink), 0.35); }
   }
 }
 
 .command-results li {
-  display: flex;
-  padding: 0.5rem 0.6rem;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  padding: 0.4rem 0.5rem;
   border-radius: var(--md-shape-xs);
   user-select: none;
   cursor: pointer;
-  white-space: nowrap;
   transition: background var(--transition-speed) var(--md-easing-standard);
 }
 
-.command-results li:hover { background: rgba(var(--glow-color-rgb), 0.06); }
-.command-results li.active { background: rgba(var(--glow-color-rgb), 0.1); box-shadow: inset 2px 0 0 var(--glow-color); }
+// The option's own name — swatch, name, then the other spellings that reach
+// it. Wraps within its own column so a behaviour with two aliases stacks its
+// chips instead of stealing the description's width.
+.opt-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.opt-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+// The reference sheet's alias chip, to the letter: an outline, no fill, and
+// dimmer than the name it stands in for.
+.opt-alias {
+  flex: 0 0 auto;
+  padding: 0.05rem 0.3rem;
+  border: 1px solid rgba(var(--hc-chrome-ink), 0.16);
+  border-radius: 3px;
+  color: rgba(var(--hc-chrome-ink), 0.42);
+  font-size: 0.88em;
+  white-space: nowrap;
+}
+
+// The highlight is a LIFT, not a colour. A tinted wash under mono text reads
+// as generic editor chrome and fought the warm, near-neutral panel; lifting
+// the row off the surface with the page's own ink, and marking it with a
+// single warm rule in the command register's colour, says the same thing more
+// quietly and belongs to this surface.
+.command-results li:hover {
+  background: color-mix(in srgb, var(--hc-chrome-text) 4%, transparent);
+}
+
+.command-results li.active {
+  background: color-mix(in srgb, var(--hc-chrome-text) 8%, transparent);
+  box-shadow: inset 2px 0 0 var(--cmd-accent-command);
+
+  // The row you are on says its name a little louder — the only weight change
+  // in the list, so it reads as focus rather than as decoration.
+  .opt-name { color: var(--hc-chrome-text); }
+  .slash-desc { color: rgba(var(--hc-chrome-ink), 0.72); }
+}
 
 // ── detail pane (right) — info + sub-options for the active item ──────
 .command-detail {
-  flex: 1 1 auto;
-  min-width: 15rem;
+  // `1 1 15rem` (not min-width: 15rem) — it PREFERS 15rem but may shrink on a
+  // narrow viewport rather than overflow the panel and get clipped.
+  flex: 1 1 13rem;
+  min-width: 0;
   max-width: 30rem;
   max-height: min(60vh, 26rem);
   overflow-y: auto;
   padding: 0.7rem 0.85rem;
-  border-left: 1px solid var(--shell-border);
-  background: rgba(var(--glow-color-rgb), 0.03);
-  color: whitesmoke;
+  border-left: 1px solid rgba(var(--hc-chrome-ink), 0.12);
+  // The pane is a hair lighter than the list beside it — a LIFT, the same
+  // move the active row makes, rather than a blue wash over half the panel.
+  background: rgba(var(--hc-chrome-ink), 0.03);
+  color: var(--hc-chrome-text);
 
   &::-webkit-scrollbar { width: 4px; }
   &::-webkit-scrollbar-thumb {
-    background: rgba(var(--glow-color-rgb), 0.2);
+    background: rgba(var(--hc-chrome-ink), 0.2);
     border-radius: 2px;
   }
 }
@@ -436,25 +542,34 @@ $bp-phone-max: 599px;
   display: flex;
   align-items: center;
   gap: 0.4rem;
+  min-width: 0;
 }
 
 .detail-icon {
+  flex: 0 0 auto;
   font-size: 1.1em;
   line-height: 1;
-  color: var(--glow-color);
+  color: var(--cmd-accent-command);
 }
 
 .detail-name {
-  color: var(--cmd-fg);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  // The panel's own ink, not the bar's blue-white mix — the name of the thing
+  // you are reading about should be the brightest plain text here, and plain.
+  color: var(--hc-chrome-text);
   font-weight: 600;
 }
 
 .detail-kind {
+  flex: 0 0 auto;   // the badge is never the thing that gets cut off
   margin-left: auto;
   padding: 0.05rem 0.4rem;
   border-radius: var(--md-shape-xs);
-  background: rgba(var(--glow-color-rgb), 0.12);
-  color: rgba(var(--glow-color-rgb), 0.75);
+  background: color-mix(in srgb, var(--cmd-accent-command) 16%, transparent);
+  color: var(--cmd-accent-command);
   font-size: 0.78em;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -462,24 +577,34 @@ $bp-phone-max: 599px;
 
 .detail-desc {
   margin: 0.5rem 0 0;
-  color: rgba(245, 245, 245, 0.72);
+  color: rgba(var(--hc-chrome-ink), 0.72);
   line-height: 1.45;
   white-space: normal;
+  overflow-wrap: anywhere;   // a long unbroken token wraps, never overflows
+}
+
+// The size control sits at the FOOT of the pane, after everything the pane is
+// actually for — a setting you reach for occasionally must not be the first
+// thing in the reading path.
+.detail-text-scale {
+  margin-top: 0.9rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid rgba(var(--hc-chrome-ink), 0.1);
 }
 
 .detail-meta {
   margin-top: 0.5rem;
-  color: rgba(var(--glow-color-rgb), 0.55);
+  color: rgba(var(--hc-chrome-ink), 0.5);
   font-size: 0.85em;
 
-  .detail-count { color: var(--glow-color); font-weight: 600; }
+  .detail-count { color: var(--cmd-accent-command); font-weight: 600; }
 }
 
 .detail-options {
   margin-top: 0.6rem;
 
   .detail-options-label {
-    color: rgba(var(--glow-color-rgb), 0.5);
+    color: rgba(var(--hc-chrome-ink), 0.45);
     font-size: 0.78em;
     letter-spacing: 0.1em;
     text-transform: uppercase;
@@ -493,8 +618,10 @@ $bp-phone-max: 599px;
 
   li {
     padding: 0.2rem 0.1rem;
-    color: rgba(245, 245, 245, 0.66);
+    color: rgba(var(--hc-chrome-ink), 0.66);
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 
@@ -515,25 +642,35 @@ $bp-phone-max: 599px;
   width: 2.6em;
   height: 1.25em;
   border-radius: 3px;
-  border: 1px solid rgba(245, 245, 245, 0.18);
+  border: 1px solid rgba(var(--hc-chrome-ink), 0.18);
   margin-right: 0.6em;
 }
 
-.typed { color: var(--glow-color); }
-.rest { color: whitesmoke; opacity: 0.6; }
+.typed { color: var(--cmd-accent-command); }
+.rest { color: var(--hc-chrome-text); opacity: 0.6; }
 
+// Second subgrid column. LEFT-aligned on the shared column edge — the old
+// `margin-left: auto` flushed each description to its own row's right edge,
+// which is what made the list look ragged.
+//
+// It WRAPS, like the reference sheet's does: a sentence cut at "requires your
+// AI host or…" is a sentence you have to click to finish reading. Clamped to
+// three lines so a 24-row list is still a list — the detail pane on the right
+// carries the remainder for the row you are actually on.
 .slash-desc {
-  margin-left: auto;
-  padding-left: 1rem;
-  color: rgba(var(--glow-color-rgb), 0.35);
-  font-size: 0.85em;
-  white-space: nowrap;
-  // Shrink + ellipsis rather than forcing the row (and the whole panel) wider
-  // than the viewport-capped max-width.
-  flex: 0 1 auto;
   min-width: 0;
+  // The column gutter lives here, not as a grid `column-gap`: a row with no
+  // description then contributes NO empty second track and no stray gutter.
+  padding-left: 1.1rem;
+  color: rgba(var(--hc-chrome-ink), 0.55);
+  font-size: 0.9em;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 // ── status indicators (right side of input) ──────────────
@@ -555,7 +692,7 @@ $bp-phone-max: 599px;
   margin-right: 0.3rem;
   font-size: 1.05em;
   line-height: 1;
-  color: rgb(235, 170, 90);
+  color: tw.ink(rgb(235, 170, 90));
   text-shadow: 0 0 8px rgba(235, 170, 90, 0.7);
   pointer-events: none;
   user-select: none;
@@ -627,12 +764,12 @@ $bp-phone-max: 599px;
 }
 
 .indicator-pill.action {
-  color: #f4bf75;
+  color: tw.ink(#f4bf75);
   border-color: rgba(244, 191, 117, 0.48);
   background: rgba(244, 191, 117, 0.12);
 
   &:hover {
-    color: #ffd89f;
+    color: tw.ink(#ffd89f);
     border-color: rgba(244, 191, 117, 0.75);
     background: rgba(244, 191, 117, 0.2);
   }
@@ -672,26 +809,39 @@ $bp-phone-max: 599px;
 // ragged baselines — the behaviours floating half a row above a lone orphaned
 // icon. There is no per-group budget to get out of step now.
 //
-// The rail wraps rather than squeezing: `--hc-rail-cols` boxes per row, then
-// the next row, same box, same gap, same baseline. Rows fill from the RIGHT
-// (`justify-content: flex-end`) so the rail stays flush against the edge it
-// lives on and a half-full last row reads as part of the same block instead of
-// a stray icon adrift on the left. `align-content` keeps a multi-row rail
-// centred in the bar — `align-items` only centres within a row.
+// The rail neither wraps nor squeezes. `--hc-rail-cols` caps its visible width;
+// any further controls remain on the same baseline and are reached by
+// horizontal scrolling. The run fills from the right so it stays flush with
+// the edge it belongs to.
 .shell-actions {
   display: flex;
-  flex-wrap: wrap;
+  // The rail is one line at every size. Wrapping turns a short viewport into
+  // a double-height header and makes related controls look like separate,
+  // misaligned groups. When the line cannot fit, keep its geometry intact and
+  // let the user pan the rail horizontally instead.
+  flex-wrap: nowrap;
   justify-content: flex-end;
   align-items: center;
   align-content: center;
-  flex-shrink: 0;
+  // Yield to the viewport once the command field and the fixed privacy cells
+  // have taken their space. The controls keep their natural size and scroll
+  // inside this rail; the rail itself must not push later header cells beyond
+  // `.header-bar`'s overflow clip.
+  flex-shrink: 1;
+  min-width: 0;
   gap: var(--hc-rail-gap, 0.3rem);
   margin-left: var(--hc-rail-gap, 0.3rem);
   // Keep the last button's circular hover surface clear of the divider that
   // follows the command line. Match the rail's leading gap so the row is
   // visually balanced at both ends.
   padding-right: var(--hc-rail-gap, 0.3rem);
-  // The wrap point, expressed in the rail's own metrics so it can never
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+
+  &::-webkit-scrollbar { display: none; }
+  // The visible-width cap, expressed in the rail's own metrics so it can never
   // drift from the button size: N boxes + (N − 1) gaps.
   max-width: calc(
     var(--hc-rail-cols, 10) * var(--hc-rail-btn, 1.6rem) +
@@ -734,7 +884,13 @@ $bp-phone-max: 599px;
   background: transparent;
   border: none;
   border-radius: 50%;
-  color: rgba(var(--glow-color-rgb), 0.42);
+  // REST IS INK, LIT IS ACCENT. Resting on the accent looked deliberate on
+  // the old steel bar, but an accent is a mid-value colour by definition —
+  // honey's amber tops out near 3.9:1 on its own ground no matter how far the
+  // alpha is pushed, so a resting icon painted in it can never be as legible
+  // as the ink beside it. Ink at rest also says the right thing: the button is
+  // chrome until it is on.
+  color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-faint));
   cursor: pointer;
   transition: color var(--md-dur-short) var(--md-easing-standard),
               background var(--md-dur-short) var(--md-easing-standard),
@@ -781,24 +937,47 @@ $bp-phone-max: 599px;
 // glyph — so it still reads as a sticky note among the steel. Box, glyph
 // size and gap stay on the rail; identity comes from colour alone.
 .notes-toggle-btn {
-  color: rgba(255, 213, 79, 0.55);
+  color: color-mix(in srgb, var(--hc-status-warn) 78%, transparent);
 
   .mat-sym { font-variation-settings: 'FILL' 1; }
 
   &:hover {
-    color: rgba(255, 213, 79, 0.9);
-    background: rgba(255, 213, 79, 0.1);
+    color: var(--hc-status-warn);
+    background: color-mix(in srgb, var(--hc-status-warn) 12%, transparent);
   }
 
   &.on {
-    color: rgb(255, 213, 79);
-    background: rgba(255, 213, 79, 0.16);
-    box-shadow: 0 0 4px rgba(255, 213, 79, 0.5);
+    color: var(--hc-status-warn);
+    background: color-mix(in srgb, var(--hc-status-warn) 18%, transparent);
+    box-shadow: 0 0 4px color-mix(in srgb, var(--hc-status-warn) 50%, transparent);
   }
 
   &.on:hover {
-    background: rgba(255, 213, 79, 0.26);
+    background: color-mix(in srgb, var(--hc-status-warn) 28%, transparent);
   }
+}
+
+// THE ASSISTANT. It takes the rail's own accent and dimensions — it is not
+// a second colour to learn — and says "open" the way a window toggle should:
+// a FILLED bubble. That was the cue it wore on the control bar, and the one
+// thing worth carrying over from there.
+.chat-toggle-btn {
+  // OPTICALLY CENTRED, not geometrically. The speech bubble's tail hangs
+  // below the body, so the glyph's BOX is centred while the shape reads high
+  // — it sits a hair above every flat-topped neighbour on the rail. Nudging
+  // the glyph down by a fraction of its own height puts the bubble's mass
+  // nearer the line the others sit on, which is what the eye is measuring.
+  //
+  // 6%, not the 12% that lands the body dead on the rule: correcting an
+  // optical illusion all the way reads as an error in the other direction,
+  // because the tail is still part of what the eye weighs. Half the
+  // geometric correction is the whole of the perceived one.
+  //
+  // On the glyph, never the button: the press target and the hover ring stay
+  // exactly where they were.
+  .mat-sym { transform: translateY(6%); }
+
+  &.on .mat-sym { font-variation-settings: 'FILL' 1; }
 }
 
 // Beehaviors is the doorway to a whole tool window, so its active state needs
@@ -878,12 +1057,12 @@ $default-face: #c8b8ff;
   user-select: none;
 
   &:hover {
-    color: rgba(255, 120, 120, 0.9);
+    color: tw.ink(rgba(255, 120, 120, 0.9));
     background: rgba(255, 68, 68, 0.1);
   }
 
   &.on {
-    color: rgb(255, 92, 92);
+    color: tw.ink(rgb(255, 92, 92));
     background: rgba(255, 68, 68, 0.18);
     box-shadow: 0 0 4px rgba(255, 68, 68, 0.45);
 
@@ -908,19 +1087,22 @@ $default-face: #c8b8ff;
   // and the inline right-aligned description carries the per-row info.
   .command-intel { width: var(--intel-width, 100vw); max-width: none; }
   .command-detail { display: none; }
+  // No side pane here, so the list owns the whole width — the two-pane cap
+  // (.command-intel.has-detail .command-results) must not follow it to phone.
+  .command-intel.has-detail .command-results { max-width: none; }
   .command-results { max-height: 60vh; flex: 1 1 auto; }
 
   // Mobile portrait — command line is a full-width prompt at ~11vh.
   // Brighten the input text on dark background.
   .command-input {
-    color: #fafafa;
+    color: var(--hc-window-ink-loud);
     font-size: 1.4em;
   }
   .command-input::placeholder {
-    color: rgba(180, 215, 255, 0.78);
+    color: rgba(var(--hc-chrome-accent), 0.85);
   }
   .ghost {
-    color: rgba(180, 215, 255, 0.55);
+    color: tw.ink(rgba(180, 215, 255, 0.55));
     font-size: 1.4em;
   }
   .reading { font-size: 1.4em; }   // the marks mirror the input's metrics, always

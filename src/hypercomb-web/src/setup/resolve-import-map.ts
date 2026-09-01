@@ -1,6 +1,7 @@
 // hypercomb-web/src/setup/resolve-import-map.ts
 
-import { environment, Store } from '@hypercomb/shared'
+import { environment } from '@hypercomb/shared/environments/environment'
+import { Store } from '@hypercomb/shared/core/store'
 
 export type ResolvedImports = Record<string, string>
 
@@ -56,6 +57,13 @@ export const IMPORT_MAP_STORAGE_KEY = 'hc:importmap'
  * already resolvable.
  */
 export const cacheImportMap = async (): Promise<void> => {
+  // A visitor's map points at blob: URLs (see the XCOPY note in
+  // resolveImportMap). Those die with the session, so caching them would
+  // replay a map of dead specifiers into the NEXT boot's pre-module script
+  // and break every bare import before anything could re-derive. The visitor
+  // has no persistence to speak for anyway — it re-derives from scratch every
+  // load, which is exactly what this cache exists to avoid for participants.
+  if ((window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__ === true) return
   try {
     const imports = await resolveImportMap()
     localStorage.setItem(IMPORT_MAP_STORAGE_KEY, JSON.stringify({ imports }))
@@ -84,11 +92,14 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
     return imports
   }
 
-  // Import-map URLs are pool-addressed: `/opfs/<sign('dependencies')>/<sig>`.
-  // The SW resolves them from the pool with the legacy dir as read
-  // fallback, and keeps serving the legacy `/opfs/__dependencies__/` URL
-  // shape for pages that froze an old import map.
-  const dependencyBasePath = `/opfs/${await Store.poolSignature(Store.DEPENDENCIES_MEANING)}`
+  // Participant imports are pool-addressed and served by the OPFS service
+  // worker. A published website deliberately has neither real OPFS nor that
+  // worker: its verified dependency bytes remain at immutable
+  // `/content/<signature>` URLs on the same origin.
+  const readonlyVisitor = (window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__ === true
+  const dependencyBasePath = readonlyVisitor
+    ? '/content'
+    : `/opfs/${await Store.poolSignature(Store.DEPENDENCIES_MEANING)}`
 
   // Pool first, legacy drain dir second — union, not either/or.
   const depDirs = [store.dependencies, store.legacyDependencies]
@@ -198,6 +209,43 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
   // Cache the alias map for in-session reuse by DependencyLoader.
   // NOT consulted on the next boot — every cold boot re-derives from OPFS.
   ;(globalThis as any).__hypercombAliasMap = aliasSource
+
+  // THE XCOPY CONTRACT. A published site must run from ANY static host —
+  // plain nginx/Apache/cPanel, no config. Dependencies are sig-named and
+  // therefore EXTENSIONLESS, and the map above resolves an alias straight
+  // to a `/content/<sig>` URL, so `import(alias)` is a MODULE SCRIPT LOAD
+  // against the host. Browsers enforce strict MIME on those: a host that
+  // answers `application/octet-stream` (which every dumb host does for an
+  // unknown extension) gets the whole dependency set refused —
+  //   "Expected a JavaScript-or-Wasm module script but the server
+  //    responded with a MIME type of application/octet-stream"
+  // — and the site boots to a blank page. Only a host that special-cases
+  // `Sec-Fetch-Dest` (our Cloudflare worker does) makes URL imports work,
+  // which silently made the deployment host-dependent.
+  //
+  // So the visitor fetches the bytes and imports a BLOB carrying the right
+  // type. The server is then only ever a byte source — never a MIME
+  // authority — which is the same posture the rest of the system already
+  // takes (sha256 gates the bytes; the host is not trusted for anything).
+  // Alias→alias imports inside a dep still resolve through this map, so
+  // the whole graph stays blob-resolved.
+  //
+  // Participants are untouched: their deps come from `/opfs/<poolSig>`,
+  // served by our own service worker, which sets the type itself.
+  if (readonlyVisitor && aliasSource.size > 0) {
+    await Promise.all([...aliasSource].map(async ([alias, sig]) => {
+      try {
+        const res = await fetch(`${dependencyBasePath}/${sig}`)
+        if (!res.ok) return // leave the URL form; the loader reports the failure
+        const source = await res.text()
+        imports[alias] = URL.createObjectURL(
+          new Blob([source], { type: 'text/javascript' }),
+        )
+      } catch {
+        // Offline/blocked — keep the URL form so the existing error path runs.
+      }
+    }))
+  }
 
   return imports
 }

@@ -485,4 +485,24 @@ const PAGES = [
     }
   }
   console.log(`\nDone. chrome=${chromeSig.slice(0, 12)}, ${ok} pages stamped, ${failed} failed.`)
+
+  // ONE BUILD REVISION FOR THE WHOLE PASS (documentation/build-revisions.md).
+  //
+  // Nine anchors, all inside one tree: ['dolphin'] itself and its eight
+  // branches. A record seals the subtree at its root, so one at ['dolphin']
+  // holds the lot. Its sibling _dolphin-revision.cjs records for ['dolphin']
+  // AND ['dashboard'] because that pass genuinely touches two independent
+  // trees; this one never leaves dolphin, so a second root would seal a tree
+  // it did not write to.
+  // Reported, never thrown — and that needs the guard, not just the shape of
+  // the log. `send` rejects on a bridge timeout and this IIFE carries no
+  // top-level catch at all, so on a bridge that drops at the very end this
+  // call would become an unhandled rejection after all nine pages had already
+  // been stamped.
+  let rev
+  try { rev = await send({ op: 'build-record', segments: ['dolphin'], label: 'dolphin pages build' }) }
+  catch (err) { rev = { ok: false, error: err.message } }
+  console.log(rev.ok
+    ? `build revision: ${rev.data.label} seal=${String(rev.data.seal).slice(0, 12)}${rev.data.unchanged ? ' (unchanged)' : ''}`
+    : `build revision FAILED: ${rev.error}`)
 })()

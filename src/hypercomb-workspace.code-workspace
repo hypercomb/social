@@ -91,25 +91,9 @@
         }
       },
       {
-        "label": "dcp",
-        "type": "shell",
-        "command": "npm run start:dcp",
-        "options": {
-          "cwd": "${workspaceFolder:hypercomb-dev}/.."
-        },
-        "isBackground": true,
-        "problemMatcher": [],
-        "presentation": {
-          "reveal": "always",
-          "panel": "dedicated",
-          "group": "servers"
-        }
-      },
-      {
         "label": "dev",
         "dependsOn": [
-          "dev app",
-          "dcp"
+          "dev app"
         ],
         "dependsOrder": "parallel",
         "problemMatcher": []

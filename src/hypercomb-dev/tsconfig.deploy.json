@@ -1,0 +1,31 @@
+// hypercomb-dev/tsconfig.deploy.json
+//
+// The type-check program for the DEPLOYABLE configuration. It deliberately
+// does NOT include this project's own `src/app` or `src/main.ts`: those are
+// the dev-time shell, they bundle essentials through a direct source import,
+// and none of it may reach the shipped artifact. Keeping them out of the
+// program is the mechanical guarantee — a deploy build cannot compile what it
+// cannot see, so the dev entry can never leak into production by accident.
+//
+// What it DOES include is hypercomb-web/src, because src/main.deploy.ts is a
+// one-line re-export of that boot. Same source, same compiler, same output.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./out-tsc/deploy",
+    "types": [],
+    // Sources span two sibling projects, so the program root is the monorepo
+    // level above both — matching hypercomb-web/tsconfig.app.json.
+    "rootDir": "..",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  },
+  "files": ["src/main.deploy.ts"],
+  "include": [
+    "../hypercomb-web/src/**/*.ts",
+    "../hypercomb-shared/**/*.ts"
+  ],
+  "exclude": [
+    "../hypercomb-web/src/**/*.spec.ts",
+    "../hypercomb-shared/**/*.spec.ts"
+  ]
+}

@@ -34,12 +34,12 @@ $mint: #6fbf94;
   max-width: calc(100vw - 1.5rem);
   display: flex;
   flex-direction: column;
-  background: rgba(14, 14, 22, 0.96);
-  border-left: 1px solid rgba($steel, 0.5);
-  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba($steel, 0.06) inset;
+  background: rgba(var(--hc-panel-pane), 0.96);
+  border-left: 1px solid rgba(var(--acc), 0.5);
+  box-shadow: -10px 0 40px rgba(var(--hc-panel-shadow), 0.5), 0 0 0 1px rgba(var(--acc), 0.06) inset;
   font-family: var(--hc-mono, system-ui);
   font-size: calc(1rem * var(--hc-panel-scale, 1));
-  color: #eaf0f4;
+  color: var(--hc-window-ink-loud);
   outline: none;
   @include tw.panel($steel, right);
 }
@@ -63,9 +63,9 @@ $mint: #6fbf94;
     max-width: none;
     max-height: min(62vh, 30rem);
     border-left: none;
-    border-top: 1px solid rgba($steel, 0.5);
+    border-top: 1px solid rgba(var(--acc), 0.5);
     border-radius: tw.$radius-floating tw.$radius-floating 0 0;
-    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba($steel, 0.06) inset;
+    box-shadow: 0 -10px 40px rgba(var(--hc-panel-shadow), 0.55), 0 0 0 1px rgba(var(--acc), 0.06) inset;
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
@@ -88,7 +88,7 @@ $mint: #6fbf94;
 .tags-header {
   @include tw.header;
   justify-content: space-between;
-  border-bottom: 1px solid rgba($steel, 0.25);
+  border-bottom: 1px solid rgba(var(--acc), 0.25);
 }
 
 .tags-heading {
@@ -106,8 +106,8 @@ $mint: #6fbf94;
 
 .tags-total {
   font-size: 0.75em;
-  color: rgba($steel, 0.85);
-  background: rgba($steel, 0.12);
+  color: var(--hc-window-accent);
+  background: rgba(var(--acc), 0.12);
   border-radius: 999px;
   padding: 0.05em 0.55em;
 }
@@ -119,8 +119,8 @@ $mint: #6fbf94;
   gap: 0.2rem;
   margin-left: auto;
   padding: 0.15rem;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(var(--hc-panel-ink), 0.03);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.08);
   border-radius: tw.$radius-control;
 }
 
@@ -132,36 +132,36 @@ $mint: #6fbf94;
   background: transparent;
   border: 1px solid transparent;
   border-radius: tw.$radius-control;
-  color: rgba(226, 235, 244, 0.55);
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
   transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
 
   .mat-sym { font-size: 1rem; line-height: 1; }
 
-  &:hover { color: rgba(238, 243, 248, 0.9); }
+  &:hover { color: var(--hc-window-ink-loud); }
 
   &.active {
-    color: #fff;
-    background: rgba($steel, 0.16);
-    border-color: rgba($steel, 0.45);
+    color: var(--hc-panel-text);
+    background: rgba(var(--acc), 0.16);
+    border-color: rgba(var(--acc), 0.45);
   }
 }
 
 .tags-close {
   background: none;
   border: none;
-  color: #9fb3c2;
+  color: var(--hc-window-ink-loud);
   font-size: 1.2em;
   line-height: 1;
   cursor: pointer;
   padding: 0 0.2em;
 
-  &:hover { color: #eaf0f4; }
+  &:hover { color: var(--hc-window-ink-loud); }
 }
 
 .tags-empty {
   padding: 1.4em 1.2em;
-  color: #8ea2b0;
+  color: var(--hc-window-ink-quiet);
   font-size: 0.85em;
   line-height: 1.5;
 }
@@ -182,7 +182,7 @@ $mint: #6fbf94;
 .tags-section-title {
   margin: 0;
   padding: 0.6em 1em 0.35em;
-  color: rgba($steel, 0.8);
+  color: var(--hc-window-accent-quiet);
   font-size: 0.68em;
   font-weight: 600;
   letter-spacing: 0.09em;
@@ -201,8 +201,8 @@ $mint: #6fbf94;
   gap: 0.5em;
   flex-wrap: wrap;
   padding: 0.6em 1em;
-  border-top: 1px solid rgba($steel, 0.12);
-  border-bottom: 1px solid rgba($steel, 0.12);
+  border-top: 1px solid rgba(var(--acc), 0.12);
+  border-bottom: 1px solid rgba(var(--acc), 0.12);
 }
 
 .active-line {
@@ -216,13 +216,13 @@ $mint: #6fbf94;
 
 .active-label {
   font-size: 0.72em;
-  color: #8ea2b0;
+  color: var(--hc-window-ink-quiet);
 }
 
 .active-chip {
   font-size: 0.74em;
-  color: #eaf5fb;
-  background: rgba($steel, 0.18);
+  color: var(--hc-window-ink-loud);
+  background: rgba(var(--acc), 0.18);
   border-radius: 999px;
   padding: 0.1em 0.6em;
 }
@@ -230,22 +230,22 @@ $mint: #6fbf94;
 .active-none {
   margin: 0;
   font-size: 0.74em;
-  color: #8ea2b0;
+  color: var(--hc-window-ink-quiet);
 }
 
 .tags-clear {
   flex: 0 0 auto;
   background: none;
-  border: 1px solid rgba($steel, 0.35);
+  border: 1px solid rgba(var(--acc), 0.35);
   border-radius: 3px;
-  color: #c6d5e0;
+  color: var(--hc-window-ink-loud);
   font: inherit;
   font-size: 0.72em;
   padding: 0.15em 0.6em;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
 
-  &:hover { background: rgba($steel, 0.16); color: #fff; }
+  &:hover { background: rgba(var(--acc), 0.16); color: var(--hc-panel-text); }
 }
 
 // ── armed removal ─────────────────────────────────────────
@@ -268,7 +268,7 @@ $mint: #6fbf94;
   padding: 0 1em 0.5em;
   font-size: 0.72em;
   line-height: 1.45;
-  color: #a89880;
+  color: var(--hc-window-ink-quiet);
 }
 
 .removal-empty { color: rgba($amber, 0.8); }
@@ -287,7 +287,7 @@ $mint: #6fbf94;
   gap: 0.4em;
   padding: 0.12em 0;
   font-size: 0.76em;
-  color: #e6d5bd;
+  color: var(--hc-window-ink-loud);
 }
 
 .removal-cell-icon {
@@ -317,29 +317,29 @@ $mint: #6fbf94;
 .removal-all,
 .removal-cancel {
   background: none;
-  border: 1px solid rgba($steel, 0.35);
+  border: 1px solid rgba(var(--acc), 0.35);
   border-radius: 3px;
-  color: #c6d5e0;
+  color: var(--hc-window-ink-loud);
   font: inherit;
   font-size: 0.72em;
   padding: 0.2em 0.65em;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 
-  &:hover { background: rgba($steel, 0.16); color: #fff; }
+  &:hover { background: rgba(var(--acc), 0.16); color: var(--hc-panel-text); }
 }
 
 .removal-commit {
   border-color: rgba($amber, 0.6);
-  color: #f0d9b6;
+  color: tw.ink(#f0d9b6);
 
-  &:hover:not(:disabled) { background: rgba($amber, 0.22); color: #fff; }
+  &:hover:not(:disabled) { background: rgba($amber, 0.22); color: var(--hc-panel-text); }
 
   &:disabled {
     opacity: 0.4;
     cursor: default;
-    border-color: rgba($steel, 0.2);
-    color: #8ea2b0;
+    border-color: rgba(var(--acc), 0.2);
+    color: var(--hc-window-ink-quiet);
   }
 }
 
@@ -349,7 +349,7 @@ $mint: #6fbf94;
   background: none;
   border: none;
   padding: 0;
-  color: #8ea2b0;
+  color: var(--hc-window-ink-quiet);
   font: inherit;
   font-size: 0.68em;
   text-decoration: underline;
@@ -395,7 +395,7 @@ $mint: #6fbf94;
   background: rgba($mint, 0.1);
   border: 1px solid rgba($mint, 0.38);
   font-size: 0.74em;
-  color: #dff2e8;
+  color: var(--hc-window-ink-loud);
 }
 
 .painter-chip-swatch {
@@ -403,7 +403,7 @@ $mint: #6fbf94;
   width: 0.95em;
   height: 0.95em;
   border-radius: 3px;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45) inset;
+  box-shadow: 0 0 0 1px rgba(var(--hc-panel-shadow), 0.45) inset;
 }
 
 .painter-chip-drop {
@@ -415,7 +415,7 @@ $mint: #6fbf94;
   line-height: 1;
   cursor: pointer;
 
-  &:hover { color: #fff; }
+  &:hover { color: var(--hc-panel-text); }
 }
 
 // ── selection response — scent the whole canvas selection in one press ──
@@ -429,7 +429,7 @@ $mint: #6fbf94;
   border: 1px dashed rgba($mint, 0.45);
   border-radius: tw.$radius-card;
   background: rgba($mint, 0.06);
-  color: rgba(214, 238, 226, 0.85);
+  color: var(--hc-window-ink-plain);
   cursor: pointer;
   font: inherit;
   font-size: 0.8em;
@@ -437,7 +437,7 @@ $mint: #6fbf94;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
 
   .mat-sym { font-size: 1.1em; color: $mint; }
-  &:hover { background: rgba($mint, 0.13); border-color: rgba($mint, 0.7); color: #eefaf4; }
+  &:hover { background: rgba($mint, 0.13); border-color: rgba($mint, 0.7); color: var(--hc-window-ink-loud); }
   &:focus-visible { outline: 1px solid rgba($mint, 0.7); outline-offset: 1px; }
 }
 
@@ -453,16 +453,16 @@ $mint: #6fbf94;
 // was clicked, so the only verb left is letting go of the bouquet.
 .painter-close {
   background: none;
-  border: 1px solid rgba($steel, 0.35);
+  border: 1px solid rgba(var(--acc), 0.35);
   border-radius: 3px;
-  color: #c6d5e0;
+  color: var(--hc-window-ink-loud);
   font: inherit;
   font-size: 0.72em;
   padding: 0.2em 0.65em;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 
-  &:hover { background: rgba($steel, 0.16); color: #fff; }
+  &:hover { background: rgba(var(--acc), 0.16); color: var(--hc-panel-text); }
 }
 
 // ── bouquets — the gathered set, named ────────────────────
@@ -487,13 +487,13 @@ $mint: #6fbf94;
 
 .bouquet-in-hand-label {
   font-weight: 600;
-  color: #dff2e8;
+  color: var(--hc-window-ink-loud);
 }
 
 .bouquet-in-hand-sig {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.9em;
-  color: rgba(214, 228, 238, 0.5);
+  color: var(--hc-window-ink-quiet);
 }
 
 // The offer to name what is picked. Dashed, like the other "there is more you
@@ -508,7 +508,7 @@ $mint: #6fbf94;
   background: none;
   border: 1px dashed rgba($mint, 0.4);
   border-radius: tw.$radius-card;
-  color: rgba(214, 238, 226, 0.85);
+  color: var(--hc-window-ink-plain);
   font: inherit;
   font-size: 0.74em;
   text-align: left;
@@ -516,7 +516,7 @@ $mint: #6fbf94;
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 
   .mat-sym { font-size: 1.05em; color: $mint; }
-  &:hover { background: rgba($mint, 0.13); border-color: rgba($mint, 0.7); color: #eefaf4; }
+  &:hover { background: rgba($mint, 0.13); border-color: rgba($mint, 0.7); color: var(--hc-window-ink-loud); }
 }
 
 .bouquet-name-form {
@@ -530,14 +530,14 @@ $mint: #6fbf94;
   flex: 1 1 auto;
   min-width: 0;
   padding: 0.3em 0.5em;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--hc-window-tint-strong);
   border: 1px solid rgba($mint, 0.45);
   border-radius: 3px;
-  color: #eaf4ee;
+  color: var(--hc-window-ink-loud);
   font: inherit;
   font-size: 0.76em;
 
-  &::placeholder { color: rgba(226, 235, 244, 0.4); }
+  &::placeholder { color: var(--hc-window-ink-quiet); }
   &:focus { outline: none; border-color: rgba($mint, 0.8); }
 }
 
@@ -545,27 +545,27 @@ $mint: #6fbf94;
 .bouquet-name-cancel {
   flex: 0 0 auto;
   background: none;
-  border: 1px solid rgba($steel, 0.35);
+  border: 1px solid rgba(var(--acc), 0.35);
   border-radius: 3px;
-  color: #c6d5e0;
+  color: var(--hc-window-ink-loud);
   font: inherit;
   font-size: 0.72em;
   padding: 0.25em 0.6em;
   cursor: pointer;
 
-  &:hover { background: rgba($steel, 0.16); color: #fff; }
+  &:hover { background: rgba(var(--acc), 0.16); color: var(--hc-panel-text); }
 }
 
 .bouquet-name-commit {
   border-color: rgba($mint, 0.6);
-  color: #cdead9;
+  color: var(--hc-window-ink-loud);
 
-  &:hover { background: rgba($mint, 0.22); color: #fff; }
+  &:hover { background: rgba($mint, 0.22); color: var(--hc-panel-text); }
 }
 
 .tags-bouquets-section {
   flex: 0 0 auto;
-  border-top: 1px solid rgba($steel, 0.18);
+  border-top: 1px solid rgba(var(--acc), 0.18);
 }
 
 .bouquet-title { color: rgba($mint, 0.95); }
@@ -612,11 +612,11 @@ $mint: #6fbf94;
   background: none;
   border: none;
   padding: 0 0.1em;
-  color: rgba(158, 179, 194, 0.7);
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
 
   .mat-sym { font-size: 1.05em; }
-  &:hover { color: #eaf0f4; }
+  &:hover { color: var(--hc-window-ink-loud); }
 }
 
 // Its marks, as ordinary rows. Indented and hairlined to the left so the
@@ -628,7 +628,7 @@ $mint: #6fbf94;
 .tags-list.bouquet-contents {
   margin: 0.2em 0 0.35em 0.9em;
   padding: 0;
-  border-left: 1px solid rgba($steel, 0.22);
+  border-left: 1px solid rgba(var(--acc), 0.22);
   overflow: visible;
 
   .tags-row { padding-left: 0.7em; }
@@ -648,9 +648,9 @@ $mint: #6fbf94;
   row-gap: 0.25em;
   padding: 0.35em 0.5em;
   background: none;
-  border: 1px solid rgba($steel, 0.25);
+  border: 1px solid rgba(var(--acc), 0.25);
   border-radius: tw.$radius-card;
-  color: #d6e4ee;
+  color: var(--hc-window-ink-loud);
   font: inherit;
   text-align: left;
   // Drag affordance: the row is a handle you can pull onto a tile — and a
@@ -682,9 +682,9 @@ $mint: #6fbf94;
   gap: 0.3em;
   padding: 0.1em 0.3em 0.1em 0.22em;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(var(--hc-panel-ink), 0.04);
   font-size: 0.68em;
-  color: rgba(214, 228, 238, 0.85);
+  color: var(--hc-window-ink-plain);
 }
 
 .bouquet-mark-swatch {
@@ -692,7 +692,7 @@ $mint: #6fbf94;
   width: 0.8em;
   height: 0.8em;
   border-radius: 2px;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45) inset;
+  box-shadow: 0 0 0 1px rgba(var(--hc-panel-shadow), 0.45) inset;
 }
 
 .bouquet-forget {
@@ -701,12 +701,12 @@ $mint: #6fbf94;
   background: none;
   border: none;
   padding: 0 0.25em;
-  color: rgba(158, 179, 194, 0.6);
+  color: var(--hc-window-ink-quiet);
   font: inherit;
   line-height: 1;
   cursor: pointer;
 
-  &:hover { color: #eaf0f4; }
+  &:hover { color: var(--hc-window-ink-loud); }
 }
 
 // ── the search ────────────────────────────────────────────
@@ -716,7 +716,7 @@ $mint: #6fbf94;
 // touches the hive.
 .tags-search-block {
   padding: 0.5em 1em 0.45em;
-  border-top: 1px solid rgba($steel, 0.12);
+  border-top: 1px solid rgba(var(--acc), 0.12);
 }
 
 .tags-search-field {
@@ -724,17 +724,17 @@ $mint: #6fbf94;
   align-items: center;
   gap: 0.4em;
   padding: 0.25em 0.5em;
-  background: rgba(0, 0, 0, 0.25);
-  border: 1px solid rgba($steel, 0.3);
+  background: var(--hc-window-tint-strong);
+  border: 1px solid rgba(var(--acc), 0.3);
   border-radius: tw.$radius-control;
 
-  &:focus-within { border-color: rgba($steel, 0.6); }
+  &:focus-within { border-color: rgba(var(--acc), 0.6); }
 }
 
 .tags-search-icon {
   flex: 0 0 auto;
   font-size: 1em;
-  color: rgba(158, 179, 194, 0.7);
+  color: var(--hc-window-ink-quiet);
 }
 
 .tags-search-input {
@@ -742,12 +742,12 @@ $mint: #6fbf94;
   min-width: 0;
   background: none;
   border: none;
-  color: #eaf0f4;
+  color: var(--hc-window-ink-loud);
   font: inherit;
   font-size: 0.78em;
   padding: 0.1em 0;
 
-  &::placeholder { color: rgba(226, 235, 244, 0.4); }
+  &::placeholder { color: var(--hc-window-ink-quiet); }
   &:focus { outline: none; }
 }
 
@@ -757,10 +757,10 @@ $mint: #6fbf94;
   border: none;
   padding: 0 0.1em;
   font-size: 1em;
-  color: rgba(158, 179, 194, 0.7);
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
 
-  &:hover { color: #eaf0f4; }
+  &:hover { color: var(--hc-window-ink-loud); }
 }
 
 
@@ -781,7 +781,7 @@ $mint: #6fbf94;
 // so they read as the panel's quiet furniture and stay folded until asked for.
 .tags-namespaces-section {
   flex: 0 0 auto;
-  border-top: 1px solid rgba($steel, 0.18);
+  border-top: 1px solid rgba(var(--acc), 0.18);
   padding-bottom: 0.4em;
 }
 
@@ -790,10 +790,10 @@ $mint: #6fbf94;
   padding: 0 1em 0.5em;
   font-size: 0.72em;
   line-height: 1.45;
-  color: #8ea2b0;
+  color: var(--hc-window-ink-quiet);
 }
 
-.namespace-group + .namespace-group { border-top: 1px solid rgba($steel, 0.07); }
+.namespace-group + .namespace-group { border-top: 1px solid rgba(var(--acc), 0.07); }
 
 .namespace-head {
   width: 100%;
@@ -803,14 +803,14 @@ $mint: #6fbf94;
   padding: 0.35em 1em;
   background: none;
   border: none;
-  color: #b9cbd8;
+  color: var(--hc-window-ink-loud);
   font: inherit;
   font-size: 0.8em;
   text-align: left;
   cursor: pointer;
 
-  .mat-sym { font-size: 1.05em; color: rgba(158, 179, 194, 0.7); }
-  &:hover { background: rgba($steel, 0.06); color: #eaf0f4; }
+  .mat-sym { font-size: 1.05em; color: var(--hc-window-ink-quiet); }
+  &:hover { background: rgba(var(--acc), 0.06); color: var(--hc-window-ink-loud); }
 }
 
 .namespace-name {
@@ -826,7 +826,7 @@ $mint: #6fbf94;
 .namespace-count {
   flex: 0 0 auto;
   font-size: 0.85em;
-  color: rgba(158, 179, 194, 0.7);
+  color: var(--hc-window-ink-quiet);
   font-variant-numeric: tabular-nums;
 }
 
@@ -835,7 +835,7 @@ $mint: #6fbf94;
 .tags-list.namespace-contents {
   margin: 0 0 0.3em 1.6em;
   padding: 0;
-  border-left: 1px solid rgba($steel, 0.22);
+  border-left: 1px solid rgba(var(--acc), 0.22);
   overflow: visible;
 
   .tags-row { padding-left: 0.7em; }
@@ -847,10 +847,10 @@ $mint: #6fbf94;
   align-items: center;
   gap: 0.6em;
   padding: 0.4em 1em;
-  border-bottom: 1px solid rgba($steel, 0.07);
+  border-bottom: 1px solid rgba(var(--acc), 0.07);
 
-  &:hover { background: rgba($steel, 0.06); }
-  &.filtered { background: rgba($steel, 0.14); }
+  &:hover { background: rgba(var(--acc), 0.06); }
+  &.filtered { background: rgba(var(--acc), 0.14); }
   // the row whose removal is armed carries the same amber as its section
   &.staging { background: rgba($amber, 0.16); }
   // picked for the brush but not yet painting — the quiet half of mint
@@ -895,7 +895,7 @@ $mint: #6fbf94;
 
   .tag-name,
   .bouquet-name,
-  .painter-chip-name { color: #fff; }
+  .painter-chip-name { color: var(--hc-panel-text); }
 }
 
 .tag-swatch {
@@ -903,7 +903,7 @@ $mint: #6fbf94;
   width: 1.1em;
   height: 1.1em;
   border-radius: 3px;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4) inset;
+  box-shadow: 0 0 0 1px rgba(var(--hc-panel-shadow), 0.4) inset;
   cursor: pointer;
   position: relative;
   overflow: hidden;
@@ -939,13 +939,13 @@ $mint: #6fbf94;
   gap: 0.45em;
   padding: 0.3em 0.6em 0.3em 0.35em;
   border-radius: tw.$radius-control;
-  background: rgba(14, 17, 24, 0.96);
-  border: 1px solid rgba($steel, 0.5);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+  background: rgba(var(--hc-panel-pane), 0.96);
+  border: 1px solid rgba(var(--acc), 0.5);
+  box-shadow: 0 8px 22px rgba(var(--hc-panel-shadow), 0.55);
   font-family: var(--hc-mono, system-ui);
   font-size: 0.78rem;
   line-height: 1.2;
-  color: #e8eef5;
+  color: var(--hc-window-ink-loud);
   white-space: nowrap;
 }
 
@@ -956,14 +956,14 @@ $mint: #6fbf94;
   border-radius: 3px;
   // Same inset hairline the list swatch carries, so a pale colour still reads
   // as a distinct square rather than bleeding into the chip.
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45) inset;
+  box-shadow: 0 0 0 1px rgba(var(--hc-panel-shadow), 0.45) inset;
 }
 
 // A dragged BOUQUET says how many marks it is carrying.
 .tag-drag-count {
   flex: 0 0 auto;
   font-size: 0.85em;
-  color: rgba(158, 179, 194, 0.85);
+  color: var(--hc-window-ink-plain);
   font-variant-numeric: tabular-nums;
 }
 
@@ -993,14 +993,14 @@ $mint: #6fbf94;
   text-overflow: ellipsis;
 
   &:active { cursor: grabbing; }
-  &:hover { color: #fff; }
-  &[aria-pressed="true"] { color: $steel; font-weight: 600; }
+  &:hover { color: var(--hc-panel-text); }
+  &[aria-pressed="true"] { color: var(--hc-window-accent); font-weight: 600; }
 }
 
 .tag-count {
   flex: 0 0 auto;
   font-size: 0.78em;
-  color: #8ea2b0;
+  color: var(--hc-window-ink-quiet);
   min-width: 1.4em;
   text-align: right;
 }
@@ -1009,7 +1009,7 @@ $mint: #6fbf94;
   flex: 0 0 auto;
   background: none;
   border: none;
-  color: #6e8290;
+  color: var(--hc-window-ink-quiet);
   font-size: 1em;
   line-height: 1;
   cursor: pointer;
@@ -1026,7 +1026,7 @@ $mint: #6fbf94;
     opacity: 1;
     color: $amber;
 
-    &:hover { color: #f0d9b6; }
+    &:hover { color: tw.ink(#f0d9b6); }
   }
 }
 
@@ -1034,7 +1034,7 @@ $mint: #6fbf94;
   flex: 0 0 auto;
   background: none;
   border: none;
-  color: #6e8290;
+  color: var(--hc-window-ink-quiet);
   font-size: 1em;
   line-height: 1;
   cursor: pointer;
@@ -1054,7 +1054,7 @@ $mint: #6fbf94;
     opacity: 1;
     color: rgba($mint, 0.8);
 
-    &:hover { color: #cdead9; }
+    &:hover { color: var(--hc-window-ink-loud); }
   }
 
   // armed: picked AND painting — full mint, the loudest the row gets.
@@ -1062,7 +1062,7 @@ $mint: #6fbf94;
     opacity: 1;
     color: $mint;
 
-    &:hover { color: #cdead9; }
+    &:hover { color: var(--hc-window-ink-loud); }
   }
 }
 

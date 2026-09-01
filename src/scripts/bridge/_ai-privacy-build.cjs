@@ -196,6 +196,24 @@ async function main() {
     try { await buildOne(e) } catch (err) { console.log(`  [${e.slug}] ERROR:`, err.message) }
   }
   console.log('\nDone.')
+
+  // ONE BUILD REVISION FOR THE WHOLE PASS (documentation/build-revisions.md).
+  //
+  // Every profile lands under ['ai-inside', <slug>], and a record seals the
+  // SUBTREE at its root, so one record at ['ai-inside'] covers all of them.
+  // One per company would be the opposite of the point: this pass is a single
+  // thing somebody did, and it should be a single thing to go back from —
+  // including the `--slugs` case, which is the same pass over fewer of them.
+  // Reported, never thrown — and that needs the guard, not just the shape of
+  // the log. `ask` re-throws the transport error on its last attempt, so a
+  // bridge that drops at the very end would exit(2) through main().catch
+  // after every anchor in the pass had already committed.
+  let rev
+  try { rev = await ask({ op: 'build-record', segments: ['ai-inside'], label: 'ai-inside data-privacy build' }) }
+  catch (err) { rev = { ok: false, error: err.message } }
+  console.log(rev.ok
+    ? `build revision: ${rev.data.label} seal=${String(rev.data.seal).slice(0, 12)}${rev.data.unchanged ? ' (unchanged)' : ''}`
+    : `build revision FAILED: ${rev.error}`)
 }
 
 main().catch(e => { console.error(e); process.exit(2) })

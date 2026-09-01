@@ -10,6 +10,7 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import type { ScriptPreloader } from '../../core/script-preloader'
 import { LocationParser } from '../../core/initializers/location-parser'
 import { RuntimeMediator } from '../runtime-mediator'
+import { isComplete, resolveInventory, type ReplicationIo } from '../../core/replication-walker'
 
 
 interface ExplorerEntry {
@@ -473,53 +474,52 @@ export class OpfsExplorerComponent extends hypercomb {
     const sig = this.newName.trim()
     if (!sig) return
 
-    const bridge = (globalThis as any).__sentinelBridge
-    let bytes: ArrayBuffer | null = null
-
-    if (bridge?.fetchContent) {
-      try {
-        bytes = await bridge.fetchContent(sig, 'dependency', '')
-      } catch {
-        console.error('[opfs-explorer] sentinel fetch failed for dependency', sig)
-      }
-    }
-
-    // Fallback to direct fetch only in dev (no sentinel available):
-    // flat sig URL first (new delivery layout), then the legacy
-    // `__dependencies__/` URL shape while live Azure content is
-    // old-layout (until the next deploy).
-    if (!bytes && !bridge) {
-      const base = 'https://storagehypercomb.blob.core.windows.net/dcp/'
-      for (const url of [`${base}${sig}`, `${base}__dependencies__/${sig}`]) {
-        try {
-          const res = await fetch(url)
-          if (res.ok) { bytes = await res.arrayBuffer(); break }
-        } catch { /* try the next URL shape */ }
-      }
-    }
-
-    if (!bytes) {
-      console.error('failed to fetch dependency', sig)
-      return
-    }
-
-    // Write into the sign('dependencies') pool — store.dependencies
-    // already points at it. Never the legacy `__dependencies__` dir.
+    // ONE VERB: replicate(sig). This used to ask the DCP sentinel bridge for
+    // the bytes and, failing that, fetch a hardcoded Azure blob container
+    // (`…/dcp/<sig>`, plus its legacy `__dependencies__/` shape) and write
+    // whatever came back — UNVERIFIED. Both are retired: that container was
+    // the ORIGINAL deployment standard and we deploy via host now, so the
+    // origin is simply where you stand — `/content/<sig>`, the same shape
+    // the shell's bundled package is served at. The walker is the request
+    // asked properly: reuse a verified local copy, else fetch, else refuse.
+    // Every byte is sha256-checked against its name before admission, so a
+    // wrong or tampered answer cannot land in the pool.
     const depsDir = this.store.dependencies
     if (!depsDir) {
       console.error('[opfs-explorer] dependencies pool unavailable — dependency not stored', sig)
       return
     }
 
-    const fileHandle = await depsDir.getFileHandle(sig, { create: true })
-    const writable = await fileHandle.createWritable()
-
-    try {
-      await writable.write(bytes)
-    } finally {
-      await writable.close()
+    const origin = `${location.origin}/content/`
+    const io: ReplicationIo = {
+      read: async (signature) => {
+        try {
+          const handle = await depsDir.getFileHandle(signature, { create: false })
+          return new Uint8Array(await (await handle.getFile()).arrayBuffer()) as Uint8Array<ArrayBuffer>
+        } catch { return null }
+      },
+      fetch: async (signature) => {
+        try {
+          const res = await fetch(`${origin}${signature}`)
+          if (!res.ok) return null
+          return new Uint8Array(await res.arrayBuffer()) as Uint8Array<ArrayBuffer>
+        } catch { return null }
+      },
+      write: async (signature, bytes) => {
+        const handle = await depsDir.getFileHandle(signature, { create: true })
+        const writable = await handle.createWritable()
+        try { await writable.write(bytes) } finally { await writable.close() }
+      },
     }
 
+    const result = await resolveInventory(sig, [sig], io)
+    if (!isComplete(result)) {
+      console.error(
+        `[opfs-explorer] could not resolve dependency ${sig} —`,
+        result.refused.length ? 'the origin served bytes that do not hash to it' : 'not found at the content origin',
+      )
+      return
+    }
     this.newName = ''
     void this.runProcessor()
   }

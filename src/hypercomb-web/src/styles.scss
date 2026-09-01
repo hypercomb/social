@@ -30,6 +30,28 @@ body {
   font-family: var(--hc-font);
 }
 
+// Published websites use the same renderer with none of the participant
+// shell. main.visitor.ts sets this before Angular imports, so authoring chrome
+// never flashes during boot. The Pixi host and creation-owned views remain.
+html[data-hypercomb-mode='visitor'] {
+  // The hive's surface tonal is shell dressing — a published site owns its
+  // own ground. Hold the visitor HTML's neutral black until the creation's
+  // view paints; nothing hive-colored may show before the site loads.
+  &,
+  body {
+    background-color: #08090c;
+  }
+
+  .header-bar,
+  hc-controls-bar,
+  .update-status-dock,
+  hc-edit-actions,
+  hc-shell-surfaces,
+  .install-prompt {
+    display: none !important;
+  }
+}
+
 // ── safe-area insets + touch detection ────────────────────
 :root {
   --hc-safe-bottom: env(safe-area-inset-bottom, 0px);

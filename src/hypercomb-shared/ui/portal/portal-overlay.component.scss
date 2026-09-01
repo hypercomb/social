@@ -1,3 +1,4 @@
+@use '../toolwindow' as tw;
 @use '../breakpoints' as *;
 
 /* src/app/common/portal/portal-overlay.component.scss */
@@ -58,7 +59,7 @@
   border-radius: 4px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 
-  color: rgba(245, 245, 245, 0.85);
+  color: var(--hc-window-ink-plain);
   font-family: var(--hc-mono);
   font-size: 0.62rem;
   font-weight: 600;
@@ -150,8 +151,8 @@
   pointer-events: none;
 }
 
-.diff-add    { color: #6ec96e; }
-.diff-remove { color: #d98a8a; }
+.diff-add    { color: tw.ink(#6ec96e); }
+.diff-remove { color: tw.ink(#d98a8a); }
 
 // ═══════════════════════════════════════════════════════════
 // RESPONSIVE OVERRIDES

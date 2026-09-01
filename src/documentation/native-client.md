@@ -1,7 +1,7 @@
-# The native client (Windows and macOS)
+# The native client (Windows, macOS and Linux)
 
 `src/hypercomb-client` is one Tauri 2 project that builds a native window on
-the hive for both Windows and macOS. There is no per-platform fork, and there
+the hive for Windows, macOS and Linux. There is no per-platform fork, and there
 should not be one.
 
 ## Why one project
@@ -111,6 +111,40 @@ stays in it.
 | A restore reloads | The running shell holds the pre-restore head in memory and would keep painting it. A restore you cannot see reads as a restore that did not happen. |
 | The parent folder is fine | A picked folder with no hive in it, holding exactly one subfolder that has one, restores from that subfolder. Two candidates restore nothing rather than guess which hive was meant. |
 
+## Serving the hive
+
+**Hive ▸ Serve This Hive** turns this machine into a host: other people's
+browsers open it, and other nodes replicate from it. It binds every interface on
+the first free port in 4270–4279 and reports the address; **Stop Serving** ends
+it, and so does quitting.
+
+Nothing is exported first. `hypercomb-serve` (`crates/serve`) answers the host
+contract live out of the open store — `/<sig>` is a content read, `/<bagSig>/
+00000007` is a marker, `/<poolSig>/<member>` is a pool member — so the hive
+being served is the hive as it is, not a copy that was current when someone last
+remembered to publish. Full picture:
+[hosting-from-a-machine.md](hosting-from-a-machine.md).
+
+Three things about it are deliberate and should stay that way:
+
+- **The renderer cannot reach any of it.** Serving is a native menu action, like
+  backup. Page script chooses no port, learns no address, and cannot turn the
+  host on. Adopted content runs in that renderer.
+- **The store is not opened twice.** redb is single-writer and the app holds it
+  open, so the host reads through the `Host` already in app state (an
+  `AppHandle`, which is `Send + Sync + 'static`; a `State` guard could never
+  be). Never open a second store for serving — including from the headless
+  binary, which must be pointed at a hive nothing else has open.
+- **The shell is the shim, not this app's frontend.** They are different
+  artifacts for different readers: `app/frontend` is the Angular shell THIS
+  window shows, baked for its webview with a static import map and no `/pin`.
+  `app/host-shell` is what a stranger's browser boots, and only a shim build
+  mints the `/pin` → bootstrap-bundle pair the contract requires. Stage it with
+  `node scripts/stage-host-shell.mjs` after `npm run build:shim`; all three CI
+  workflows do it before bundling.
+
+There is no write path, on purpose. A host publishes; it does not accept.
+
 ## Nothing in the shell may navigate the document
 
 A native window has no address bar. Three behaviours were measured in
@@ -135,13 +169,20 @@ it is a reboot — drones unload, the store re-opens, every bee re-instantiates.
 
 ## What differs per platform
 
-| | Windows | macOS |
-|---|---|---|
-| Bundle | `msi`, `nsis` | `app`, `dmg` |
-| Config | `app/tauri.windows.conf.json` | `app/tauri.macos.conf.json` |
-| Icon | `icons/icon.ico` | `icons/icon.icns` |
-| Webview | WebView2 (Chromium) | WKWebView (WebKit) |
-| Hive lives at | `%APPDATA%\io.hypercomb.client\hive` | `~/Library/Application Support/io.hypercomb.client/hive` |
+| | Windows | macOS | Linux |
+|---|---|---|---|
+| Bundle | `msi`, `nsis` | `app`, `dmg` | `deb`, `appimage` |
+| Config | `app/tauri.windows.conf.json` | `app/tauri.macos.conf.json` | `app/tauri.linux.conf.json` |
+| Icon | `icons/icon.ico` | `icons/icon.icns` | the PNG set |
+| Webview | WebView2 (Chromium) | WKWebView (WebKit) | WebKitGTK 4.1 |
+| Hive lives at | `%APPDATA%\io.hypercomb.client\hive` | `~/Library/Application Support/io.hypercomb.client/hive` | `~/.local/share/io.hypercomb.client/hive` |
+
+Linux is the platform that matters for HOSTING — see *Serving the hive* above —
+so its workflow also builds and ships `hypercomb-serve`, the headless host, as
+a separate artifact. The webview there is versioned in the distro rather than
+shipped with the OS: Tauri 2 targets WebKitGTK **4.1**, which is what Ubuntu
+24.04 carries. A 4.0 image fails at link time, which is the good failure; the
+bad one is a mismatched libsoup that only shows up as a blank window.
 
 Tauri merges `tauri.<platform>.conf.json` over `tauri.conf.json` automatically
 for whichever target is being built. No flag selects it. Everything common —
@@ -305,6 +346,105 @@ additions:
   nothing.
 - The bundle is **msi + nsis**, selected by `tauri.windows.conf.json`.
 
+### What the workflow watches
+
+The client is built from the **whole monorepo** — `build:core`,
+`build:essentials`, `build:shim`, the vendored runtimes, `build:web` — and
+that result is baked into the binary. `app/frontend/` is gitignored, so none of
+it ever appears in a commit: a path filter that watches only
+`src/hypercomb-client/**` sees a client that never changes while the app it
+produces changes every day.
+
+That is the mechanism behind the entire "works on the web, broken in the app"
+class of report. It is not a webview quirk and it is rarely the feature: the
+binary simply predates the feature. Measured once at 248 commits stale.
+
+So the trigger names every package the build actually compiles —
+`hypercomb-web`, `hypercomb-shared`, `hypercomb-essentials`,
+`hypercomb-core`, `hypercomb-runtime`, `hypercomb-shim` — plus the root
+lockfile that pins what they compile against. All three platform workflows carry
+the same list; an asymmetric trigger is the same trap wearing a different OS.
+
+The rule for anything added later: **if the bundle would differ, the trigger
+must fire.** A new workspace consumed by the shell belongs in that list on the
+same commit that introduces it.
+
+## Keeping the installed app current
+
+CI builds it; nothing installs it. Because Smart App Control makes CI the only
+builder, every refresh used to be a manual `gh run download` and a click, and
+an app nobody remembers to update is an app that silently drifts — which lands
+back in exactly the stale-binary failure above, now as a habit rather than a
+config bug.
+
+`scripts/client/windows-client.mjs` closes it:
+
+```bash
+npm run client:windows          # update to the newest green build, then launch
+npm run client:windows:update   # update only
+```
+
+It asks `gh` for the newest **successful** `build-client-windows.yml` run on
+`development`, compares that run's commit against `installed-build.json` beside
+the exe, and if they differ downloads the artifact and runs the NSIS installer
+with `/S` — per-user, no elevation. Fetched through `gh` the installer carries
+no Mark-of-the-Web, which is what lets an unsigned build install on a machine
+with SAC enforced.
+
+Three things it deliberately does:
+
+- **Launching is never blocked by updating.** No `gh`, no network, no artifact,
+  a red run — every failure path falls through to starting whatever is already
+  installed. An updater that can stop you opening your own hive is worse than a
+  stale build.
+- **It refuses to install over a running app** and says so, rather than half
+  writing an exe that is open.
+- **It waits for the exe to change**, not for the installer to exit. NSIS `/S`
+  returns before it has finished writing, so the exit code is not the witness.
+
+- **It finds the install rather than assuming one.** `%LOCALAPPDATA%hypercomb`
+  is not a constant. A Claude Code session runs inside the desktop app's MSIX
+  container, where `AppDataLocal` is redirected into
+  `Packages<pkg>LocalCacheLocal` — so an install done from a session lands
+  there, while the scheduled task, running outside the container, sees the real
+  `AppDataLocal` and finds nothing. Assuming the path installs a SECOND copy
+  that nothing launches, and reports success while the shortcut goes stale. So
+  the updater looks for the binary — explicit `--dir=`, then
+  `%LOCALAPPDATA%hypercomb`, then any `Packages*LocalCacheLocalhypercomb`
+  — passes the winner to NSIS as `/D=`, and names it on every run.
+- **It writes `update.log` beside the exe.** A scheduled run has nobody watching
+  it; the log is the only way it can report.
+
+`install-launcher.ps1` wires three pieces into the shell, each removable on its
+own and none of them a system change:
+
+| | What | Why |
+|---|---|---|
+| Desktop shortcut | update, then launch | covers the machine being off when the build landed |
+| Startup shortcut | update only, at logon | by the time the app is opened it is already current |
+| Scheduled task | update only, every 3h | closes the gap where a build goes green *after* logon |
+
+The task can never interrupt anything: the updater refuses to install over a
+running app, so in practice it installs while the app is shut. It goes through
+`update-quiet.vbs` — Task Scheduler shows a console for anything it starts under
+the Interactive logon type, and S4U, which would not, needs a privilege this
+machine does not grant. `wscript` with window style 0 always works and costs
+nothing now the log exists.
+
+A pinned taskbar shortcut needs no maintenance: NSIS installs per-user to a
+fixed path with no version in it, so every update overwrites in place and the
+pin always points at the newest build. What a pin does not do is *trigger* an
+update — that is what the Startup shortcut and the task are for.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scriptsclientinstall-launcher.ps1
+powershell -ExecutionPolicy Bypass -File scriptsclientinstall-launcher.ps1 -Remove
+```
+
+Neither shortcut is a system change, and deleting either by hand leaves the
+other working.
+
+
 ## Signing, notarization, distribution
 
 The CI build is **unsigned and un-notarized** — no Apple Developer credentials
@@ -405,3 +545,9 @@ client to anyone else needs a certificate.
 - Windows builds x64 only; there is no ARM64 target in the workflow.
 - No macOS-native window chrome work has been done — the window is the same
   1280x800 dark-themed window as on Windows.
+- The Linux workflow has never run. The serving crate's own tests and the host
+  conformance check pass locally on Windows; the .deb, the AppImage and the
+  Xvfb smoke test are unexercised until its first green run.
+- Serving speaks plain HTTP and holds no certificate. Reaching a host from the
+  internet is a port forward, a tunnel or a reverse proxy — the app does not
+  try to arrange one, and there is no UPnP or hole-punching anywhere in it.

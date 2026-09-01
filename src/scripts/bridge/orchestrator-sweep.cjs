@@ -6,9 +6,6 @@
 // actually goes rogue quietly:
 //
 //   logs        stray *.log / debug output a run left behind in the repo
-//   mirrors     a registered behaviour with no tile under `behaviors/`
-//               (the mirror doctrine: every creation is mirrored in the hive)
-//   drift       a mirror tile whose note cites `source: <path>` that is gone
 //
 // Findings are printed as JSON (so a parked Claude Code can act on them) AND
 // pushed onto the orchestrator's bee via the `agent-progress` bridge op, so
@@ -24,8 +21,8 @@
 
 const WebSocket = require('ws')
 const { execSync } = require('node:child_process')
-const { existsSync, readdirSync, statSync } = require('node:fs')
-const { join, resolve } = require('node:path')
+const { readdirSync, statSync } = require('node:fs')
+const { resolve } = require('node:path')
 
 const BRIDGE = process.env.BRIDGE_URL || 'ws://localhost:2401'
 const TOKEN = String(process.env.HYPERCOMB_BRIDGE_TOKEN || '').trim()
@@ -70,46 +67,6 @@ function strayLogs() {
     .filter(path => !path.includes('node_modules/'))
 }
 
-// ── mirrors ───────────────────────────────────────────────────────────
-
-async function mirrorGaps() {
-  const behaviors = await send({ op: 'behaviors-list' })
-  if (!behaviors.ok) return { gaps: [], drift: [], error: behaviors.error }
-
-  const tree = await send({ op: 'inflate', segments: ['behaviors'] })
-  if (!tree.ok) return { gaps: [], drift: [], error: tree.error }
-
-  // Every cell name anywhere in the mirror, and every `source:` path a note
-  // cites — walked once.
-  const named = new Set()
-  const sources = []
-  const walk = (node, path) => {
-    if (!node || typeof node !== 'object') return
-    const here = node.name ? [...path, node.name] : path
-    if (node.name) named.add(String(node.name))
-    for (const note of node.notes ?? []) {
-      for (const match of String(note.note ?? '').matchAll(/source:\s*([^\s,()]+)/g)) {
-        sources.push({ cell: here.join('/'), path: match[1] })
-      }
-    }
-    for (const child of node.children ?? []) walk(child, here)
-  }
-  walk(tree.data, [])
-
-  const gaps = (behaviors.data ?? [])
-    .map(b => String(b.view || ''))
-    .filter(Boolean)
-    .filter(view => !named.has(view))
-
-  const drift = sources
-    .filter(s => /[\\/]/.test(s.path) && !s.path.startsWith('http'))
-    // A cited path may name a symbol after the file (`file.ts (thing)`) — the
-    // regex already stops at whitespace, so this is the bare path.
-    .filter(s => !existsSync(join(ROOT, s.path)))
-
-  return { gaps, drift }
-}
-
 // ── report ────────────────────────────────────────────────────────────
 
 async function push(text) {
@@ -130,20 +87,8 @@ async function main() {
   const findings = []
   for (const path of strayLogs()) findings.push({ kind: 'logs', text: `stray log file in the repo: ${path}` })
 
-  let mirrors = { gaps: [], drift: [] }
-  try { mirrors = await mirrorGaps() } catch (e) { console.error('[sweep] hive unreachable:', e.message) }
-  if (mirrors.error) console.error('[sweep] hive read failed:', mirrors.error)
-  for (const view of mirrors.gaps) {
-    findings.push({ kind: 'mirrors', text: `behaviour "${view}" has no tile in the behaviors mirror` })
-  }
-  for (const item of mirrors.drift) {
-    findings.push({ kind: 'drift', text: `${item.cell} cites a source that no longer exists: ${item.path}` })
-  }
-
   console.log(JSON.stringify({ findings, counts: {
     logs: findings.filter(f => f.kind === 'logs').length,
-    mirrors: findings.filter(f => f.kind === 'mirrors').length,
-    drift: findings.filter(f => f.kind === 'drift').length,
   } }, null, 2))
 
   // Clear first so a fixed finding actually disappears, then push what stands.

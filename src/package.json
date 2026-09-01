@@ -3,13 +3,14 @@
   "version": "0.0.1",
   "private": true,
   "workspaces": [
-    "diamond-core-processor",
     "hypercomb-avatars",
     "hypercomb-cli",
     "hypercomb-core",
     "hypercomb-dev",
     "hypercomb-essentials",
     "hypercomb-sdk",
+    "hypercomb-runtime",
+    "hypercomb-shim",
     "hypercomb-shared",
     "hypercomb-web",
     "meadowverse"
@@ -30,11 +31,12 @@
     "docs:links": "node documentation/check-links.mjs",
     "build:core": "npm --prefix hypercomb-core run build",
     "build:essentials": "npm --prefix hypercomb-essentials run build && npm run build:module && npm --prefix hypercomb-web run runtime:core",
-    "build:packages": "npm run build:core && npm run build:essentials",
-    "build:all": "npm run build:core && npm run build:sdk && npm run build:cli && npm run build:essentials && npm run build:web && npm run build:dev && npm run build:dcp && npm run build:avatars && npm run build:meadowverse",
+    "build:packages": "npm run build:core && npm run build:runtime && npm run build:essentials",
+    "build:all": "npm run build:core && npm run build:sdk && npm run build:cli && npm run build:essentials && npm run build:web && npm run build:dev && npm run build:avatars && npm run build:meadowverse",
     "build:web": "npm --prefix hypercomb-web run build",
+    "build:shim": "npm --prefix hypercomb-shim run build:vendor && npm --prefix hypercomb-shim run build",
+    "start:shim": "npm --prefix hypercomb-shim run start",
     "build:dev": "npm --prefix hypercomb-dev run build",
-    "build:dcp": "npm --prefix diamond-core-processor run build",
     "build:avatars": "npm --prefix hypercomb-avatars run build",
     "build:meadowverse": "npm --prefix meadowverse run build",
     "bump": "tsx scripts/bump-version.ts",
@@ -46,7 +48,7 @@
     "publish:content": "tsx scripts/publish-content.ts",
     "mirror:content": "pwsh hypercomb-relay/mirror-content-to-azure.ps1",
     "mirror:content:setup": "pwsh hypercomb-relay/mirror-content-to-azure.ps1 -SetupCors",
-    "runtime:essentials": "npm run build:module && npm --prefix hypercomb-essentials run copy-to-dcp",
+    "runtime:essentials": "npm run build:module && npm --prefix hypercomb-essentials run copy-content",
     "prebuild:web": "tsx scripts/prebuild.ts --target web",
     "prebuild:dev": "tsx scripts/prebuild.ts --target dev",
     "build:sdk": "npm --prefix hypercomb-sdk run build",
@@ -54,7 +56,6 @@
     "start": "concurrently --names web,dev --prefix-colors blue,green \"npm --prefix hypercomb-web start\" \"npm --prefix hypercomb-dev start\"",
     "start:web": "npm --prefix hypercomb-web start",
     "start:dev": "npm --prefix hypercomb-dev start",
-    "start:dcp": "npm --prefix diamond-core-processor start",
     "start:relay": "node hypercomb-relay/setup.js",
     "sync:angular": "tsx scripts/sync-angular.ts",
     "intel:extract": "tsx scripts/intel-extract.ts",
@@ -67,9 +68,10 @@
     "intel:build-hive": "tsx scripts/intel-build-hive.ts",
     "revolucion:preview": "tsx scripts/intel-build-revolucion-site.ts --preview site-preview && npx -y http-server site-preview -p 4336 -c-1 -o /revolucion.html",
     "revolucion:deploy": "tsx scripts/intel-build-revolucion-site.ts",
-    "mirror:queue": "tsx scripts/mirror-queue.ts",
-    "mirror:queue:run": "tsx scripts/mirror-queue.ts run",
-    "shot": "node scripts/shot.cjs"
+    "shot": "node scripts/shot.cjs",
+    "client:windows": "node scripts/client/windows-client.mjs --launch",
+    "client:windows:update": "node scripts/client/windows-client.mjs",
+    "build:runtime": "npm --prefix hypercomb-runtime run build"
   },
   "dependencies": {
     "@angular/animations": "21.2.4",
@@ -117,6 +119,7 @@
     "fast-check": "^4.3.0",
     "jasmine-core": "~4.0.0",
     "js-logger": "^1.6.1",
+    "jsdom": "^27.1.0",
     "karma": "~6.4.0",
     "karma-chrome-launcher": "~3.1.0",
     "karma-coverage": "~2.1.0",
@@ -127,6 +130,7 @@
     "rimraf": "^6.0.1",
     "ts-morph": "^26.0.0",
     "tsx": "^4.21.0",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "vitest": "^4.0.8"
   }
 }

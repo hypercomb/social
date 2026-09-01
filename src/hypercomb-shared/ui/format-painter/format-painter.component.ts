@@ -10,7 +10,7 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
 
 import type { FormatPainterState } from
-  '@hypercomb/essentials/diamondcoreprocessor.com/format/format-painter.drone'
+  '@hypercomb/essentials/format/format-painter.drone'
 
 const EMPTY: FormatPainterState = { open: false, sourceCell: null, entries: [] }
 

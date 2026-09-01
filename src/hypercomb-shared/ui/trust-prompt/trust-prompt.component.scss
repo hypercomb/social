@@ -113,7 +113,7 @@
 
 .trust-prompt-btn.allow-always {
   background: #1a1a1a;
-  color: #fff;
+  color: var(--hc-window-ink-loud);
   border-color: #1a1a1a;
 }
 .trust-prompt-btn.allow-always:hover { background: #333; }

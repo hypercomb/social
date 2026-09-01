@@ -42,9 +42,6 @@ $types: (
   gap: 0.45rem;
   padding: 0.25rem 0.55rem;
   pointer-events: auto;
-  white-space: nowrap;
-  overflow: hidden;
-
   // A dark translucent plate, not a solid chip: the hive still shows
   // through, but nothing bright behind a toast bleeds into its type. The
   // shadow doubles as a soft skirt so the strip separates from busy art.
@@ -58,7 +55,7 @@ $types: (
   font-family: var(--hc-mono);
   font-size: 0.7rem;
   line-height: 1.5;
-  color: rgba(245, 245, 245, 0.9);
+  color: var(--hc-window-ink-loud);
 
   animation: toast-enter 220ms ease-out forwards;
   transition: opacity 200ms ease, transform 200ms ease;
@@ -97,9 +94,9 @@ $types: (
 .toast-message {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: rgba(245, 245, 245, 0.82);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: var(--hc-window-ink-plain);
 }
 
 .toast-action {
@@ -155,12 +152,12 @@ $types: (
 
   &.secondary {
     background: transparent;
-    color: rgba(245, 245, 245, 0.75);
+    color: var(--hc-window-ink-quiet);
     border: 1px solid transparent;
 
     &:hover {
       background: rgba(245, 245, 245, 0.06);
-      color: rgba(245, 245, 245, 0.95);
+      color: var(--hc-window-ink-loud);
     }
   }
 }
@@ -175,13 +172,13 @@ $types: (
   background: none;
   border: none;
   border-radius: 2px;
-  color: rgba(245, 245, 245, 0.25);
+  color: var(--hc-window-ink-quiet);
   font-size: 0.85rem;
   cursor: pointer;
   transition: color 120ms ease, background 120ms ease;
 
   &:hover {
-    color: rgba(245, 245, 245, 0.6);
+    color: var(--hc-window-ink-quiet);
     background: rgba(255, 255, 255, 0.06);
   }
 }

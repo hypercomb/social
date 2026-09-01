@@ -1,0 +1,36 @@
+// hypercomb-shim/tsconfig.json
+//
+// STANDALONE ON PURPOSE. Nothing in hypercomb-web references this file, and
+// hypercomb-web/tsconfig.app.json does not include this directory — the shim
+// lives outside `hypercomb-web/src` precisely so `ng build` can neither
+// bundle it (unreachable from src/main.ts) nor type-check it (outside the
+// include glob). The live deploy cannot see the shim.
+//
+// The include list no longer reaches into hypercomb-web either: the shim
+// carries its own copy of the import-map resolver (src/import-map.ts), so
+// the dependency runs in one direction only — shim → shared → core.
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": [],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  // Only the shim's OWN sources are roots. tsc follows imports from there, so
+  // the shared modules the shim actually reaches are still checked — and the
+  // ones it does not reach (including shared's node-flavoured .spec files,
+  // which a `**/*.spec.ts` exclude cannot filter because `**` does not
+  // traverse upward past this directory) stay out of the graph. What the shim
+  // compiles IS what the shim depends on.
+  "include": [
+    "src/**/*.ts",
+    // The ambient shell contract: `window.ioc`, and the bare `register()` /
+    // `get()` globals that shared modules register themselves through at
+    // module scope. Not reachable by import — it has to be a root.
+    "../hypercomb-shared/global.d.ts"
+  ]
+}

@@ -236,7 +236,7 @@ granularity ever matters, that is a separate decision.
   primitive (deposits, intensity, decay; pinned design). Today's
   relationship layer is tag decorations + reference tiles (see "The
   atomic-render invariant" above).
-- `documentation/mirror-paradigm.md` — pheromone vocabulary and
+- `documentation/pheromones.md` — pheromone vocabulary and
   membership-by-mark in practice.
 - `documentation/signature-primitive-audit-2026-07.md` — the platform
   conformance audit this extends with the build-grouping rule.

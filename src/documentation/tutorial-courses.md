@@ -5,33 +5,67 @@ hive works — not once, as a scripted tour, but as a growing set of independent
 lessons organised into four courses.
 
 ```
-/tutorial                  the starter course — move, make, get home
+/tutorial                  open the TUTORIALS WINDOW — every course, every lesson
+/tutorial start            fly the starter course straight away
 /tutorial beginner         the everyday verbs
 /tutorial intermediate     meaning: marks, filters, titles, references, filing, history
 /tutorial expert           THE WINDOWS — one lesson per primary window
 /tutorial <lesson>         one lesson on its own (e.g. /tutorial go-in)
-/tutorial list             what is on offer
+/tutorial list             what is on offer, in the activity log
 /tutorial stop             end a running tour
 ```
+
+## The bare word opens the window, it does not fly
+
+`/tutorial` used to launch the starter course on the spot. That made it the one
+command in the hive whose plain form committed you to a five-minute flight
+before showing you what else was on offer — and forty-odd lessons across four
+courses cannot be chosen from a command whose argument you have to already
+know. So the bare word opens the roster, and every argument that NAMES
+something still flies it directly, unchanged.
+
+`hypercomb-shared/ui/tutorials-window/` — a **tool window** like every other:
+docked in the lane, drag-resized with content-shrink, the common header band,
+the shared settings gear (group, text size, and the reading face, because half
+of what it shows is prose), parked and unparked with the rest, and Escape
+unwound one level at a time through the cascade. It is fed by
+`TutorialLessonRegistry` over IoC and never imports essentials, so a build
+without the tutorial module simply has no window, and a community module that
+registers a lesson appears in it for free.
+
+What it shows, in one screen:
+
+| | |
+|---|---|
+| **The cartridge** | ONE sticky slot at the head of the list holding the one lesson you are on: the next unflown one by default, the row you pressed once you press one, the tour itself while a tour runs (the Stop lives in it). Whatever is in it is LIFTED OUT of the list — a lesson named at the top and again three rows down is the same lesson twice. It stands down while you are searching, because the list is then the answer to what you typed |
+| **The active course** | the course the cartridge's lesson belongs to draws as ONE shaded line, blurb dropped — the slot above already names it |
+| **Progress** | a bar over the whole roster; per course a pill (`3/8`) and a hexagon that FILLS as you fly it, numbered with the course's step in the ramp |
+| **Search** | narrows by title, blurb, topic mark or id, and opens every course it matched |
+| **Courses** | title, one-line blurb, and a play button that flies the whole thing. ONE open at a time (`ui/accordion.ts`), and the window opens with all four closed — all four headers fit on screen, and where you are is already said by the Continue row and each course's pill |
+| **Lessons** | curriculum number, title, one-line blurb, topic marks (click one to search it), a tick once flown |
+| **Flying** | while a tour is up: which lesson, and a Stop |
+
+Progress is a participant preference, not content — `hc:tutorial:flown` in
+localStorage, never a layer, the same call the help launcher's reached-tier
+makes. The drone announces `tutorial:flown` only for a lesson that ran to the
+END (one that threw is deliberately not ticked) and `tutorial:flying` for what
+is in the air; those two effects are what make Stop and Continue possible.
+
+The rail's bee toggles the same window — **one door, not two**. It used to fly
+the starter course on a plain click and open a fixed-position course flyout on
+Ctrl/⌘+click; the flyout showed an id and a count, said nothing about what a
+lesson was for, and the first click anywhere dismissed it. It is gone.
 
 The Help page (`/help`) leads with a **Guided Tours** island — one tile per
 course; clicking it sends the bee up.
 
-The rail's bee is the other way in. Plain click flies the starter tour;
-**Ctrl/⌘+click opens the picker**, which is two levels deep: the course row
-flies the whole course, and its caret opens **every lesson underneath, each
-startable on its own**. That is not a convenience — a lesson is an independent
-piece by construction, so "just show me the tags window" has to be one click,
-not a slash command you have to know the id for. The deepest course opens
-expanded, because that is the one whose lessons are looked for by name.
-
 ## A lesson is an independent piece
 
-`hypercomb-essentials/src/diamondcoreprocessor.com/tutorial/`
+`hypercomb-essentials/src/tutorial/`
 
 | File | Role |
 |---|---|
-| `tutorial-lesson.ts` | the lesson primitive + registry, the declared pheromone vocabulary, each course's group signature |
+| `tutorial-lesson.ts` | the lesson primitive + registry, the declared pheromone vocabulary, each course's group signature and blurb (`TUTORIAL_COURSES`) |
 | `tutorial-stage.ts` | the stage contract — the only surface a lesson may touch |
 | `bee-tutorial.drone.ts` | the course runner — owns the stage, runs lessons in order |
 | `lessons/*.lessons.ts` | the courses: one registration per lesson |
@@ -43,6 +77,7 @@ tutorialLessons.register({
   level: 'beginner',
   order: 10,                                   // the curriculum IS this number
   title: 'Select tiles',
+  summary: 'Ctrl+click picks tiles without going in, and Ctrl+drag paints a run.',
   pheromones: ['tutorial', 'lesson', 'beginner', 'editing'],
   requires: () => hasBehaviour('keyword'),     // dormant behaviour → lesson drops out
   async run(stage) { /* fly, talk, demonstrate */ },
@@ -58,8 +93,7 @@ Four properties make this work:
    lesson that throws is logged and stepped over — one broken lesson never takes
    the course down.
 2. **Marked.** `pheromones` come from the DECLARED vocabulary in
-   `tutorial-lesson.ts`; the registry refuses a lesson that invents a word. The
-   hive mirror paints exactly these marks, so tile and code cannot drift.
+   `tutorial-lesson.ts`; the registry refuses a lesson that invents a word.
 3. **Grouped by signature.** Every course is a group —
    `sign('group:tutorial:course:<level>')` — carried by everything the course
    mints. See `group-signatures.md`.
@@ -153,32 +187,3 @@ and a lesson cannot demonstrate something that would not really happen.
 2. **Nothing is ever published.** Going public is always the participant's own
    deliberate act. A tutorial that shared your hive to teach you sharing would
    be the exact opposite of the lesson.
-
-## The mirror
-
-`scripts/mirror-tutorials.ts` builds the hive mirror: `tutorials` at the root,
-one collection per course, one tile per lesson, notes carrying what each teaches
-and how to run it alone, pheromones taken verbatim from the lesson
-declarations, and the course group signature on every tile. It also spreads the
-implementation files as `part` cells under `behaviors/guidance/tutorial` (the
-1:1 rule — see `mirror-paradigm.md`).
-
-Run it against a live renderer with the bridge open:
-
-```bash
-npx tsx scripts/mirror-tutorials.ts
-```
-
-**When a lesson ships, extend the mirror in the same pass** — add its tile under
-the right course, paint its marks, note what it teaches. And when a lesson is
-RETIRED, take its tile out in the same pass; the roster rots in both directions.
-
-⚠ The script's roster is **hand-transcribed**. It is a bridge CLI and never
-imports the tutorial sources, so nothing in it is checked against
-`TutorialLessonRegistry` or the declared pheromone vocabulary at build time —
-which is precisely how six lessons went unmirrored and five notes went stale in
-under three weeks. Read `lessons/*.lessons.ts` beside the `COURSES` array
-whenever you touch either. The lasting fix is to stop transcribing: have the
-renderer hand back `tutorialLessons.all()` over the bridge and drive structure,
-notes and marks from that, so the mirror can only ever be one bridge run behind
-the code instead of one hand edit behind it.

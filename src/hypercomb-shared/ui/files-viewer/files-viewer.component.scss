@@ -10,6 +10,7 @@
 // as it widens. Dock GEOMETRY (top offset) stays in rem so position is fixed.
 
 @use '../toolwindow' as tw;
+@use '../panel-identity' as identity;
 
 $accent: #a8c8ff;
 
@@ -35,13 +36,13 @@ $accent: #a8c8ff;
   max-width: calc(100vw - 1.5rem);
   display: flex;
   flex-direction: column;
-  background: rgba(14, 14, 22, 0.96);
-  border-left: 1px solid rgba($accent, 0.5);
-  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba($accent, 0.06) inset;
+  background: rgba(var(--hc-panel-pane), 0.96);
+  border-left: 1px solid rgba(var(--acc), 0.5);
+  box-shadow: -10px 0 40px rgba(var(--hc-panel-shadow), 0.5), 0 0 0 1px rgba(var(--acc), 0.06) inset;
   font-family: var(--hc-mono, system-ui);
   // Content scale — inner em sizes follow this root font.
   font-size: calc(1rem * var(--hc-panel-scale, 1));
-  color: #f3f3f3;
+  color: var(--hc-window-ink-loud);
   outline: none;
   @include tw.panel($accent, right);
 }
@@ -49,7 +50,7 @@ $accent: #a8c8ff;
 .files-header {
   @include tw.header;
   justify-content: space-between;
-  border-bottom: 1px solid rgba($accent, 0.25);
+  border-bottom: 1px solid rgba(var(--acc), 0.25);
 }
 
 .files-heading {
@@ -62,13 +63,13 @@ $accent: #a8c8ff;
 .files-title {
   font-size: 0.9em;
   letter-spacing: 0.05em;
-  color: rgba($accent, 0.95);
+  color: var(--hc-window-accent);
   flex-shrink: 0;
 }
 
 .files-cell {
   font-size: 0.8em;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--hc-window-ink-quiet);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -81,8 +82,8 @@ $accent: #a8c8ff;
   gap: 0.2rem;
   margin-left: auto;
   padding: 0.15rem;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(var(--hc-panel-ink), 0.03);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.08);
   border-radius: tw.$radius-control;
 }
 
@@ -94,38 +95,38 @@ $accent: #a8c8ff;
   background: transparent;
   border: 1px solid transparent;
   border-radius: tw.$radius-control;
-  color: rgba(226, 235, 244, 0.55);
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
   transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
 
   .mat-sym { font-size: 1rem; line-height: 1; }
 
-  &:hover { color: rgba(238, 243, 248, 0.9); }
+  &:hover { color: var(--hc-window-ink-loud); }
 
   &.active {
-    color: #fff;
-    background: rgba($accent, 0.16);
-    border-color: rgba($accent, 0.45);
+    color: var(--hc-panel-text);
+    background: rgba(var(--acc), 0.16);
+    border-color: rgba(var(--acc), 0.45);
   }
 }
 
 .files-close {
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--hc-window-ink-quiet);
   font-size: 1.4em;
   line-height: 1;
   cursor: pointer;
   padding: 0 0.25em;
 
-  &:hover { color: $accent; }
+  &:hover { color: rgb(var(--acc)); }
 }
 
 .files-empty {
   margin: 0;
   padding: 1.5em 1em;
   font-size: 0.85em;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--hc-window-ink-quiet);
 }
 
 // ── selection response ────────────────────────────────────────────
@@ -138,18 +139,18 @@ $accent: #a8c8ff;
   width: 100%;
   padding: 0.45em 0.85em;
   border: 0;
-  border-bottom: 1px solid rgba($accent, 0.18);
-  background: rgba($accent, 0.07);
-  color: rgba(222, 234, 255, 0.85);
+  border-bottom: 1px solid rgba(var(--acc), 0.18);
+  background: rgba(var(--acc), 0.07);
+  color: var(--hc-window-ink-plain);
   cursor: pointer;
   font: inherit;
   font-size: 0.8em;
   text-align: left;
   transition: background 140ms ease, color 140ms ease;
 
-  .mat-sym { font-size: 1.1em; color: $accent; }
-  &:hover { background: rgba($accent, 0.14); color: #f2f7ff; }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: -1px; }
+  .mat-sym { font-size: 1.1em; color: rgb(var(--acc)); }
+  &:hover { background: rgba(var(--acc), 0.14); color: var(--hc-window-ink-loud); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: -1px; }
 }
 
 .files-selection-label {
@@ -165,7 +166,7 @@ $accent: #a8c8ff;
   flex-wrap: wrap;
   gap: 0.3em;
   padding: 0.55em 0.85em;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.06);
 }
 
 .ftype-chip {
@@ -174,21 +175,21 @@ $accent: #a8c8ff;
   align-items: center;
   justify-content: center;
   padding: 0.25em 0.4em;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(var(--hc-panel-ink), 0.04);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.12);
   border-radius: tw.$radius-card;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--hc-window-ink-plain);
   font-family: inherit;
   font-size: 0.72em;
   cursor: pointer;
   transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
 
-  &:hover { background: rgba(255, 255, 255, 0.08); }
+  &:hover { background: rgba(var(--hc-panel-ink), 0.08); }
 
   &.active {
-    border-color: color-mix(in srgb, var(--c, $accent) 70%, transparent);
-    background: color-mix(in srgb, var(--c, $accent) 16%, transparent);
-    color: #fff;
+    border-color: color-mix(in srgb, var(--c, rgb(var(--acc))) 70%, transparent);
+    background: color-mix(in srgb, var(--c, rgb(var(--acc))) 16%, transparent);
+    color: var(--hc-panel-text);
   }
 }
 
@@ -204,7 +205,7 @@ $accent: #a8c8ff;
   align-items: center;
   justify-content: center;
   border-radius: tw.$radius-card;
-  background: $accent;
+  background: rgb(var(--acc));
   color: #0e0e16;
   font-size: 0.58em;
   font-weight: 700;
@@ -240,11 +241,11 @@ $accent: #a8c8ff;
   align-items: center;
   gap: 0.3em;
   font-size: 0.7em;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--hc-window-ink-quiet);
 }
 
 .files-source {
-  color: rgba(168, 200, 255, 0.7);
+  color: var(--hc-window-accent-quiet);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -268,9 +269,9 @@ $accent: #a8c8ff;
   align-items: center;
   gap: 0.5em;
   padding: 0.55em 1em;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.05);
 
-  &:hover { background: rgba($accent, 0.06); }
+  &:hover { background: rgba(var(--acc), 0.06); }
 }
 
 .files-meta {
@@ -283,7 +284,7 @@ $accent: #a8c8ff;
 
 .files-name {
   font-size: 0.85em;
-  color: #f3f3f3;
+  color: var(--hc-window-ink-loud);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -291,7 +292,7 @@ $accent: #a8c8ff;
 
 .files-size {
   font-size: 0.7em;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--hc-window-ink-quiet);
 }
 
 .files-actions {
@@ -307,23 +308,23 @@ $accent: #a8c8ff;
 
   &.download {
     padding: 0.3em 0.7em;
-    background: rgba($accent, 0.12);
-    border: 1px solid rgba($accent, 0.5);
+    background: rgba(var(--acc), 0.12);
+    border: 1px solid rgba(var(--acc), 0.5);
     border-radius: 4px;
-    color: $accent;
+    color: rgb(var(--acc));
     font-size: 0.78em;
 
-    &:hover { background: rgba($accent, 0.25); color: #fff; border-color: $accent; }
+    &:hover { background: rgba(var(--acc), 0.25); color: var(--hc-panel-text); border-color: rgb(var(--acc)); }
   }
 
   &.remove {
     background: transparent;
     border: none;
-    color: rgba(255, 255, 255, 0.4);
+    color: var(--hc-window-ink-quiet);
     font-size: 1.1em;
     line-height: 1;
     padding: 0 0.2em;
 
-    &:hover { color: #ffc8c8; }
+    &:hover { color: tw.ink(#ffc8c8); }
   }
 }

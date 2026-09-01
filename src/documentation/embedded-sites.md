@@ -299,17 +299,17 @@ primitives as everything else (see [dna.md](dna.md)):
   — `CELL_WEBSITE_PROPERTY` (read only on the export side), `RESOURCE_URL_PREFIX`,
   `SITE_VIEW_IOC_KEY`. `WebsiteManifest` / `parseBundle` here are vestigial —
   no live path calls them after the bundle removal.
-- [hypercomb-essentials/.../presentation/tiles/site-view.drone.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/site-view.drone.ts)
+- [hypercomb-essentials/.../presentation/tiles/site-view.drone.ts](../hypercomb-essentials/src/presentation/tiles/site-view.drone.ts)
   — the renderer: ViewMode gate, per-cell `website` slot lookup
   (then `decorations` → `visual:website:page` → `payload.htmlSig`, then
   legacy `context` fallback), inline mount, lineage-as-routing navigation.
-- [hypercomb-essentials/.../commands/website-slot.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/commands/website-slot.ts)
+- [hypercomb-essentials/.../commands/website-slot.ts](../hypercomb-essentials/src/commands/website-slot.ts)
   — `WEBSITE_SLOT` constant + passive `LayerSlotRegistry`
   registration for the explicit `website` page slot.
-- [hypercomb-essentials/.../commands/website.queen.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/commands/website.queen.ts)
+- [hypercomb-essentials/.../commands/website.queen.ts](../hypercomb-essentials/src/commands/website.queen.ts)
   — `/website` global view toggle, `here`/`mark`, `list`, `export`,
   `save`/`load`, `upgrade`/`new`/`build`. Bundle stamp/clear now error.
-- [hypercomb-essentials/.../sharing/decoration-closure.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/sharing/decoration-closure.ts)
+- [hypercomb-essentials/.../sharing/decoration-closure.ts](../hypercomb-essentials/src/sharing/decoration-closure.ts)
   — `rewritePageRefs` / `extractPageRefSigs`: the single source of truth for
   the resource-ref forms the renderer rewrites and the closure walk carries.
 - `.claude/skills/website-build/`

@@ -8,6 +8,7 @@
 // does for the group text.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { EffectBus } from '@hypercomb/core'
 import {
   type LaneMember, type LaneSide,
   LANE_SLOTS, TWO_LANE_MIN_WIDTH,
@@ -347,5 +348,74 @@ describe('dock lanes', () => {
     reflowLanes()
     expect(spy).not.toHaveBeenCalled()
     expect(inner.offset).toBe(340)
+  })
+})
+
+// ── PLACING A WINDOW MOVES IT, AND A MOVE IS INVISIBLE FROM ABOVE ──────
+//
+// What a docked window reserves of the screen edge is measured from where it
+// SITS, so the inner occupant of a two-window lane is wrong the moment the
+// outer one is dragged wider or closed. It slides at exactly the same size, so
+// a ResizeObserver has nothing to report and `window.resize` never fires — the
+// stale reservation then covers the surface when the lane grows, and strands a
+// dead strip beside the window when it shrinks.
+//
+// The lane cannot say what the new reservation is; only that everything in it
+// has been put somewhere. So it asks, and every panel measures itself again.
+
+describe('layoutLane — asking the panels to measure again', () => {
+  /** Every `viewport:inset-poll` raised while `run` executes. */
+  const pollsDuring = (run: () => void): number => {
+    let polls = 0
+    const off = EffectBus.on('viewport:inset-poll', () => { polls++ })
+    try { run() } finally { off() }
+    return polls
+  }
+
+  it('asks when a lane is laid out', () => {
+    expect(pollsDuring(() => layoutLane('right'))).toBe(1)
+  })
+
+  it('asks when a window joins a lane, because the others may have moved', () => {
+    const outer = new FakeWindow('outer', 'right', 300)
+    expect(pollsDuring(() => claimLane(outer))).toBe(1)
+  })
+
+  it('asks when the OUTER window is resized — the inner one slides', () => {
+    const outer = new FakeWindow('outer', 'right', 300)
+    const inner = new FakeWindow('inner', 'right', 260)
+    claimLane(outer)
+    claimLane(inner)
+    expect(inner.offset).toBe(300)
+
+    // Drag the outer window wider. Nothing about the inner window's SIZE
+    // changes; it is simply somewhere else now.
+    outer.width = 420
+    const polls = pollsDuring(() => claimLane(outer))
+    expect(inner.offset).toBe(420)
+    expect(polls).toBe(1)
+  })
+
+  it('asks when the outer window closes and the inner slides outward', () => {
+    const outer = new FakeWindow('outer', 'right', 300)
+    const inner = new FakeWindow('inner', 'right', 260)
+    claimLane(outer)
+    claimLane(inner)
+    expect(inner.offset).toBe(300)
+
+    const polls = pollsDuring(() => releaseLane(outer))
+    // Flush to the edge now — reserving 300px less than it was.
+    expect(inner.offset).toBe(0)
+    expect(polls).toBe(1)
+  })
+
+  it('does not replay the request to a panel that subscribes later', () => {
+    // A request is not a state. A panel that mounts afterwards measures on
+    // mount anyway, and replaying would only ask it to do so twice.
+    layoutLane('right')
+    let polls = 0
+    const off = EffectBus.on('viewport:inset-poll', () => { polls++ })
+    off()
+    expect(polls).toBe(0)
   })
 })

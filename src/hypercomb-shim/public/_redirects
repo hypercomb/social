@@ -1,0 +1,11 @@
+# SPA fallback. The shim is one page; a deep link like /revolucion/lounge is a
+# LOCATION inside the hive, not a file, so an unknown path must serve the shell
+# and let Navigation read the pathname.
+#
+# Order matters and existing files win: Cloudflare Pages serves a real asset
+# before it consults this file, so /<sig>, /content/<sig>, /pin and every built
+# asset are answered directly and never reach the rule below. That is what
+# keeps a host able to serve its OWN content — a blanket 200-rewrite would
+# hand index.html to every signature request and make the origin's heap
+# invisible to the nodes replicating from it.
+/*    /index.html   200

@@ -89,7 +89,7 @@
   border-radius: 50%;
   border: none;
   background: rgba(255, 255, 255, 0.15);
-  color: #fff;
+  color: var(--hc-window-ink-loud);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -109,6 +109,6 @@
   text-align: center;
   font-size: 0.8rem;
   letter-spacing: 0.04em;
-  color: rgba(255, 255, 255, 0.72);
+  color: var(--hc-window-ink-quiet);
   pointer-events: none;
 }

@@ -3,7 +3,7 @@
 **Status: BUILT.** Code:
 
 ```
-hypercomb-essentials/src/diamondcoreprocessor.com/sharing/
+hypercomb-essentials/src/sharing/
   publish.queen.ts          ← `/publish` — toggles the surface, nothing else
   publish-status.drone.ts   ← the differential: rows, verdict ladder, actions
   publish-branch.ts         ← publishBranch / unpublishBranch / confirmPublished
@@ -352,7 +352,8 @@ These are gaps, written down rather than papered over.
   for both. There is no resolution mechanism — naming it is the whole remedy
   today.
 - **The panel reads one host; a link may prefer another.** Both the sweep and
-  `publishBranch` use `PUBLIC_CONTENT_HOSTS[0]` (`content.jwize.com`) as the
+  `publishBranch` use `PUBLIC_CONTENT_HOSTS[0]`
+  (`content.pluginthematrix.com`) as the
   index host, while the link bundle lists `[selfDomain, ...PUBLIC_CONTENT_HOSTS]`
   when host sync is enabled. A self-domain-first visitor can therefore resolve
   bytes from a host the differential never probed, and a row can read `gone`

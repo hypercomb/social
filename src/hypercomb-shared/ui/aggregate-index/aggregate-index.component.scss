@@ -40,22 +40,23 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   max-width: calc(100vw - 1.5rem);
   display: flex;
   flex-direction: column;
-  background: rgba(14, 14, 22, 0.96);
-  border-right: 1px solid rgba($steel, 0.5);
-  box-shadow: 10px 0 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba($steel, 0.06) inset;
+  background: rgba(var(--hc-panel-pane), 0.96);
+  border-right: 1px solid rgba(var(--acc), 0.5);
+  box-shadow: 10px 0 40px rgba(var(--hc-panel-shadow), 0.5), 0 0 0 1px rgba(var(--acc), 0.06) inset;
   font-family: var(--hc-mono, system-ui);
   font-size: calc(1rem * var(--hc-panel-scale, 1));
-  color: #eaf0f4;
+  color: var(--hc-window-ink-loud);
   outline: none;
   @include tw.panel($steel, left);
 }
+
 
 // ── header ───────────────────────────────────────────────────────────────────
 
 .ai-header {
   @include tw.header;
   justify-content: space-between;
-  border-bottom: 1px solid rgba($steel, 0.25);
+  border-bottom: 1px solid rgba(var(--acc), 0.25);
 }
 
 .ai-heading {
@@ -65,13 +66,13 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   min-width: 0;
 }
 
-.ai-icon { font-size: 1.05rem; color: $steel; }
+.ai-icon { font-size: 1.05rem; color: var(--hc-window-accent); }
 
 .ai-title {
   font-size: 0.95rem;
   font-weight: 600;
   letter-spacing: 0.4px;
-  color: #eaf3f9;
+  color: var(--hc-window-ink-loud);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -80,9 +81,9 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 .ai-total {
   font-size: 0.7rem;
   font-weight: 600;
-  color: $steel;
-  background: rgba($steel, 0.12);
-  border: 1px solid rgba($steel, 0.3);
+  color: var(--hc-window-accent);
+  background: rgba(var(--acc), 0.12);
+  border: 1px solid rgba(var(--acc), 0.3);
   border-radius: 999px;
   padding: 0.05rem 0.45rem;
   line-height: 1.5;
@@ -98,12 +99,12 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   border: 0;
   border-radius: tw.$radius-control;
   background: none;
-  color: rgba(207, 226, 238, 0.62);
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
   font-size: 1.05rem;
 
-  &:hover { background: rgba($steel, 0.16); color: #f4fafd; }
-  &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: 1px; }
+  &:hover { background: rgba(var(--acc), 0.16); color: var(--hc-window-ink-loud); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
 }
 
 // ── filter ───────────────────────────────────────────────────────────────────
@@ -111,7 +112,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 .ai-filter {
   flex: 0 0 auto;
   padding: 0.55em 0.7em;
-  border-bottom: 1px solid rgba($steel, 0.16);
+  border-bottom: 1px solid rgba(var(--acc), 0.16);
 }
 
 // Field and its + on one line: search on the left, create on the right, so the
@@ -129,15 +130,15 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   align-items: center;
   gap: 0.35em;
   padding: 0.3em 0.5em;
-  border: 1px solid rgba($steel, 0.28);
+  border: 1px solid rgba(var(--acc), 0.28);
   border-radius: tw.$radius-control;
-  background: rgba(12, 17, 24, 0.6);
+  background: rgba(var(--hc-panel-pane), 0.6);
   transition: border-color 150ms ease, background 150ms ease;
 
-  &:focus-within { border-color: rgba($steel, 0.7); }
+  &:focus-within { border-color: rgba(var(--acc), 0.7); }
 
   // Naming a new member — the same box, marked as no longer a search.
-  &.is-creating { border-color: rgba($steel, 0.7); background: rgba($steel, 0.07); }
+  &.is-creating { border-color: rgba(var(--acc), 0.7); background: rgba(var(--acc), 0.07); }
 }
 
 .ai-filter-add {
@@ -147,32 +148,32 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   justify-content: center;
   width: 1.85em;
   padding: 0;
-  border: 1px solid rgba($steel, 0.28);
+  border: 1px solid rgba(var(--acc), 0.28);
   border-radius: tw.$radius-control;
-  background: rgba(12, 17, 24, 0.6);
-  color: rgba(207, 226, 238, 0.7);
+  background: rgba(var(--hc-panel-pane), 0.6);
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
   font-size: 1em;
   transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
 
-  &:hover { background: rgba($steel, 0.16); border-color: rgba($steel, 0.6); color: #f4fafd; }
-  &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: 1px; }
-  &.is-active { background: rgba($steel, 0.22); border-color: rgba($steel, 0.75); color: #f4fafd; }
+  &:hover { background: rgba(var(--acc), 0.16); border-color: rgba(var(--acc), 0.6); color: var(--hc-window-ink-loud); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
+  &.is-active { background: rgba(var(--acc), 0.22); border-color: rgba(var(--acc), 0.75); color: var(--hc-window-ink-loud); }
 }
 
-.ai-filter-icon { font-size: 1em; color: rgba($steel, 0.7); flex: 0 0 auto; }
+.ai-filter-icon { font-size: 1em; color: var(--hc-window-accent-quiet); flex: 0 0 auto; }
 
 .ai-filter-input {
   flex: 1;
   min-width: 0;
   border: 0;
   background: none;
-  color: #eaf3f9;
+  color: var(--hc-window-ink-loud);
   font: inherit;
   font-size: 0.82em;
   outline: none;
 
-  &::placeholder { color: rgba(207, 226, 238, 0.38); }
+  &::placeholder { color: var(--hc-window-ink-quiet); }
 }
 
 .ai-filter-clear {
@@ -183,12 +184,12 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   border: 0;
   border-radius: 50%;
   background: none;
-  color: rgba(207, 226, 238, 0.55);
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
   font-size: 0.95em;
   line-height: 1;
 
-  &:hover { color: #f4fafd; }
+  &:hover { color: var(--hc-window-ink-loud); }
 }
 
 // (The `.ai-tags` keyword cloud was removed with the markup — marks are
@@ -225,7 +226,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   margin: 0 0 0.7em;
   font-size: 0.78em;
   line-height: 1.6;
-  color: rgba(207, 226, 238, 0.62);
+  color: var(--hc-window-ink-quiet);
 }
 
 .ai-empty,
@@ -235,7 +236,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   text-align: center;
   font-size: 0.76em;
   line-height: 1.5;
-  color: rgba(207, 226, 238, 0.42);
+  color: var(--hc-window-ink-quiet);
 }
 
 // ── rows ─────────────────────────────────────────────────────────────────────
@@ -260,13 +261,13 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   border-radius: tw.$radius-card;
   transition: background 140ms ease;
 
-  &:hover { background: rgba($steel, 0.08); }
+  &:hover { background: rgba(var(--acc), 0.08); }
 
   // The collection you stepped INTO to manage. A quiet left tick in the item's
   // own accent — enough to say "you are in this one", nothing flashy. Pairs
   // with the return control above the list, which is how you step back out.
   &.is-selected {
-    background: rgba($steel, 0.1);
+    background: rgba(var(--acc), 0.1);
     box-shadow: inset 2px 0 0 var(--accent, #{$steel});
   }
 
@@ -274,11 +275,11 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   // drop zone, and the one under the pointer says so louder. Quiet chrome —
   // an inset line, no glow.
   &.is-portal-drop {
-    box-shadow: inset 0 0 0 1px rgba($steel, 0.35);
+    box-shadow: inset 0 0 0 1px rgba(var(--acc), 0.35);
 
     &:hover {
-      background: rgba($steel, 0.14);
-      box-shadow: inset 0 0 0 1px rgba($steel, 0.8);
+      background: rgba(var(--acc), 0.14);
+      box-shadow: inset 0 0 0 1px rgba(var(--acc), 0.8);
     }
   }
 }
@@ -292,7 +293,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   padding: 0.35em 0.4em;
   border: 0;
   background: none;
-  color: #eaf3f9;
+  color: var(--hc-window-ink-loud);
   cursor: grab;
   font: inherit;
   text-align: left;
@@ -303,7 +304,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 
   &:active { cursor: grabbing; }
   &:focus-visible { outline: none; }
-  &:focus-visible .ai-hex { outline: 2px solid rgba($steel, 0.75); outline-offset: 2px; }
+  &:focus-visible .ai-hex { outline: 2px solid rgba(var(--acc), 0.75); outline-offset: 2px; }
 }
 
 .ai-hex {
@@ -312,7 +313,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   width: 1.75em;
   aspect-ratio: 0.866;   // √3 / 2 — a regular point-top hexagon
   clip-path: $hex-clip;
-  background: color-mix(in srgb, var(--accent, #{$steel}) 26%, rgba($steel, 0.18));
+  background: color-mix(in srgb, var(--accent, #{$steel}) 26%, rgba(var(--acc), 0.18));
   padding: 1px;
   box-sizing: border-box;
   display: grid;
@@ -321,7 +322,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 }
 
 .ai-row:hover .ai-hex {
-  background: color-mix(in srgb, var(--accent, #{$steel}) 58%, rgba($steel, 0.28));
+  background: color-mix(in srgb, var(--accent, #{$steel}) 58%, rgba(var(--acc), 0.28));
 }
 
 .ai-hex-img,
@@ -359,13 +360,13 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 .ai-label {
   min-width: 0;
   font-size: 0.82em;
-  color: rgba(234, 243, 249, 0.86);
+  color: var(--hc-window-ink-plain);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ai-row:hover .ai-label { color: #f4fafd; }
+.ai-row:hover .ai-label { color: var(--hc-window-ink-loud); }
 
 // ── rename ───────────────────────────────────────────────────────────────────
 
@@ -375,15 +376,15 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   width: 100%;
   box-sizing: border-box;
   padding: 0.25em 0.4em;
-  border: 1px solid rgba($steel, 0.6);
+  border: 1px solid rgba(var(--acc), 0.6);
   border-radius: tw.$radius-control;
-  background: rgba(12, 17, 24, 0.8);
-  color: #eaf3f9;
+  background: rgba(var(--hc-panel-pane), 0.8);
+  color: var(--hc-window-ink-loud);
   font: inherit;
   font-size: 0.78em;
   outline: none;
 
-  &:focus { border-color: rgba($steel, 0.9); }
+  &:focus { border-color: rgba(var(--acc), 0.9); }
 }
 
 // ── return to the page this panel was opened from ────────────────────────────
@@ -398,19 +399,19 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   width: 100%;
   padding: 0.45em 0.75em;
   border: 0;
-  border-bottom: 1px solid rgba($steel, 0.16);
-  background: rgba($steel, 0.07);
-  color: rgba(207, 226, 238, 0.8);
+  border-bottom: 1px solid rgba(var(--acc), 0.16);
+  background: rgba(var(--acc), 0.07);
+  color: var(--hc-window-ink-plain);
   cursor: pointer;
   font: inherit;
   font-size: 0.78em;
   text-align: left;
   transition: background 140ms ease, color 140ms ease;
 
-  .mat-sym { font-size: 1.05em; color: $steel; }
+  .mat-sym { font-size: 1.05em; color: var(--hc-window-accent); }
 
-  &:hover { background: rgba($steel, 0.14); color: #f4fafd; }
-  &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: -1px; }
+  &:hover { background: rgba(var(--acc), 0.14); color: var(--hc-window-ink-loud); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: -1px; }
 }
 
 .ai-return-label {
@@ -430,19 +431,19 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   width: 100%;
   padding: 0.45em 0.75em;
   border: 0;
-  border-bottom: 1px solid rgba($steel, 0.16);
-  background: rgba($steel, 0.07);
-  color: rgba(207, 226, 238, 0.8);
+  border-bottom: 1px solid rgba(var(--acc), 0.16);
+  background: rgba(var(--acc), 0.07);
+  color: var(--hc-window-ink-plain);
   cursor: pointer;
   font: inherit;
   font-size: 0.78em;
   text-align: left;
   transition: background 140ms ease, color 140ms ease;
 
-  .mat-sym { font-size: 1.05em; color: $steel; }
+  .mat-sym { font-size: 1.05em; color: var(--hc-window-accent); }
 
-  &:hover { background: rgba($steel, 0.14); color: #f4fafd; }
-  &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: -1px; }
+  &:hover { background: rgba(var(--acc), 0.14); color: var(--hc-window-ink-loud); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: -1px; }
 }
 
 .ai-add-here-label {
@@ -461,8 +462,8 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 .ai-staged {
   flex: 0 0 auto;
   padding: 0.4em 0.55em 0.5em;
-  border-bottom: 1px solid rgba($steel, 0.16);
-  background: rgba($steel, 0.05);
+  border-bottom: 1px solid rgba(var(--acc), 0.16);
+  background: rgba(var(--acc), 0.05);
 }
 
 .ai-staged-list {
@@ -478,10 +479,10 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   align-items: center;
   gap: 0.4em;
   padding: 0.18em 0.2em;
-  color: rgba(207, 226, 238, 0.72);
+  color: var(--hc-window-ink-quiet);
   font-size: 0.78em;
 
-  .ai-staged-icon { font-size: 1em; color: rgba($steel, 0.75); }
+  .ai-staged-icon { font-size: 1em; color: var(--hc-window-accent-quiet); }
 }
 
 .ai-staged-name {
@@ -494,17 +495,17 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 .ai-staged-add {
   width: 100%;
   padding: 0.4em 0.6em;
-  border: 1px dashed rgba($steel, 0.5);
+  border: 1px dashed rgba(var(--acc), 0.5);
   border-radius: 3px;
   background: transparent;
-  color: rgba(207, 226, 238, 0.88);
+  color: var(--hc-window-ink-plain);
   cursor: pointer;
   font: inherit;
   font-size: 0.78em;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
 
-  &:hover { background: rgba($steel, 0.14); border-color: rgba($steel, 0.8); color: #f4fafd; }
-  &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: 1px; }
+  &:hover { background: rgba(var(--acc), 0.14); border-color: rgba(var(--acc), 0.8); color: var(--hc-window-ink-loud); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
 }
 
 // ── carrying — picked here, applied there ────────────────────────────────────
@@ -522,7 +523,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   gap: 0.15rem;
   font-size: 0.7rem;
   font-weight: 600;
-  color: #d9c39a;
+  color: tw.ink(#d9c39a);
   background: rgba(214, 176, 110, 0.14);
   border: 1px solid rgba(214, 176, 110, 0.45);
   border-radius: 999px;
@@ -535,7 +536,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 .ai-carry {
   flex: 0 0 auto;
   padding: 0.4em 0.55em 0.5em;
-  border-bottom: 1px solid rgba($steel, 0.16);
+  border-bottom: 1px solid rgba(var(--acc), 0.16);
   border-left: 2px solid rgba(214, 176, 110, 0.6);
   background: rgba(214, 176, 110, 0.06);
 }
@@ -553,10 +554,10 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   align-items: center;
   gap: 0.4em;
   padding: 0.18em 0.2em;
-  color: rgba(226, 214, 190, 0.9);
+  color: var(--hc-window-ink-loud);
   font-size: 0.78em;
 
-  .ai-carry-icon { font-size: 1em; color: rgba(214, 176, 110, 0.8); }
+  .ai-carry-icon { font-size: 1em; color: tw.ink(rgba(214, 176, 110, 0.8)); }
 }
 
 .ai-carry-name {
@@ -572,12 +573,12 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   background: none;
   border: none;
   padding: 0 0.2em;
-  color: rgba(226, 214, 190, 0.55);
+  color: var(--hc-window-ink-quiet);
   font: inherit;
   line-height: 1;
   cursor: pointer;
 
-  &:hover { color: #f4fafd; }
+  &:hover { color: var(--hc-window-ink-loud); }
 }
 
 // What the bouquet in hand will do to this batch. Said BEFORE the press, never
@@ -589,7 +590,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   gap: 0.35em;
   margin: 0 0 0.4em;
   font-size: 0.72em;
-  color: #8fbfa4;
+  color: tw.ink(#8fbfa4);
 
   .mat-sym { font-size: 1.1em; }
 }
@@ -606,36 +607,36 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   border: 1px solid rgba(214, 176, 110, 0.6);
   border-radius: 3px;
   background: transparent;
-  color: #f0e3c9;
+  color: var(--hc-window-ink-loud);
   cursor: pointer;
   font: inherit;
   font-size: 0.78em;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
 
-  &:hover { background: rgba(214, 176, 110, 0.18); border-color: rgba(214, 176, 110, 0.9); color: #fff; }
+  &:hover { background: rgba(214, 176, 110, 0.18); border-color: rgba(214, 176, 110, 0.9); color: var(--hc-panel-text); }
   &:focus-visible { outline: 1px solid rgba(214, 176, 110, 0.8); outline-offset: 1px; }
 }
 
 .ai-carry-clear {
   flex: 0 0 auto;
   padding: 0.4em 0.55em;
-  border: 1px solid rgba($steel, 0.3);
+  border: 1px solid rgba(var(--acc), 0.3);
   border-radius: 3px;
   background: transparent;
-  color: rgba(207, 226, 238, 0.7);
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
   font: inherit;
   font-size: 0.78em;
 
-  &:hover { background: rgba($steel, 0.14); color: #f4fafd; }
-  &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: 1px; }
+  &:hover { background: rgba(var(--acc), 0.14); color: var(--hc-window-ink-loud); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
 }
 
 // The row control, lit while that row is in the basket.
 .ai-action-carry.is-carried {
   background: rgba(214, 176, 110, 0.22);
   border-color: rgba(214, 176, 110, 0.85);
-  color: #f0e3c9;
+  color: var(--hc-window-ink-loud);
 }
 
 // HOME — lit on the one portal pinned as home. Exactly one row in the list can
@@ -644,7 +645,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 .ai-action-home.is-home {
   background: rgba(214, 176, 110, 0.22);
   border-color: rgba(214, 176, 110, 0.85);
-  color: #f0e3c9;
+  color: var(--hc-window-ink-loud);
 }
 
 // ── PORTALS: actions on the hovered row only ─────────────────────────────────
@@ -710,10 +711,10 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   width: 100%;
   margin-top: 0.35em;
   padding: 0.4em 0.6em;
-  border: 1px solid rgba($steel, 0.5);
+  border: 1px solid rgba(var(--acc), 0.5);
   border-radius: 3px;
   background: transparent;
-  color: rgba(207, 226, 238, 0.88);
+  color: var(--hc-window-ink-plain);
   cursor: pointer;
   font: inherit;
   font-size: 0.78em;
@@ -721,8 +722,8 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 
   .mat-sym { font-size: 1.15em; line-height: 1; }
 
-  &:hover { background: rgba($steel, 0.14); border-color: rgba($steel, 0.8); color: #f4fafd; }
-  &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: 1px; }
+  &:hover { background: rgba(var(--acc), 0.14); border-color: rgba(var(--acc), 0.8); color: var(--hc-window-ink-loud); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
 }
 
 .ai-staged-move-label { min-width: 0; }
@@ -757,21 +758,21 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   width: 1.4em;
   height: 1.4em;
   padding: 0;
-  border: 1px solid rgba($steel, 0.35);
+  border: 1px solid rgba(var(--acc), 0.35);
   border-radius: 50%;
-  background: rgba(12, 17, 24, 0.86);
-  color: #cfe2ee;
+  background: rgba(var(--hc-panel-pane), 0.86);
+  color: var(--hc-window-ink-loud);
   cursor: pointer;
 
   .mat-sym { font-size: 0.72em; }
-  &:hover { background: rgba($steel, 0.2); border-color: rgba($steel, 0.75); color: #f4fafd; }
-  &:focus-visible { outline: 1px solid rgba($steel, 0.8); outline-offset: 1px; }
+  &:hover { background: rgba(var(--acc), 0.2); border-color: rgba(var(--acc), 0.75); color: var(--hc-window-ink-loud); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.8); outline-offset: 1px; }
 }
 
 .ai-action.is-active {
-  background: rgba($steel, 0.24);
-  border-color: rgba($steel, 0.8);
-  color: #f4fafd;
+  background: rgba(var(--acc), 0.24);
+  border-color: rgba(var(--acc), 0.8);
+  color: var(--hc-window-ink-loud);
 }
 
 // ── version chain ────────────────────────────────────────────────────────────
@@ -800,7 +801,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: rgba(207, 226, 238, 0.55);
+  color: var(--hc-window-ink-quiet);
 }
 
 .ai-version-list {
@@ -826,20 +827,20 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   border: 1px solid transparent;
   border-radius: tw.$radius-control;
   background: none;
-  color: #cfe2ee;
+  color: var(--hc-window-ink-loud);
   font: inherit;
   font-size: 0.74em;
   text-align: left;
   cursor: pointer;
 
-  &:hover:not(:disabled) { background: rgba($steel, 0.14); border-color: rgba($steel, 0.4); }
-  &:focus-visible { outline: 1px solid rgba($steel, 0.8); outline-offset: 1px; }
+  &:hover:not(:disabled) { background: rgba(var(--acc), 0.14); border-color: rgba(var(--acc), 0.4); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.8); outline-offset: 1px; }
 
   // The one in effect is not a target — it is the state you are already in.
   &.is-active {
-    background: rgba($steel, 0.16);
-    border-color: rgba($steel, 0.55);
-    color: #f4fafd;
+    background: rgba(var(--acc), 0.16);
+    border-color: rgba(var(--acc), 0.55);
+    color: var(--hc-window-ink-loud);
     cursor: default;
   }
 
@@ -867,7 +868,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   white-space: nowrap;
   font-family: var(--hc-mono, system-ui);
   font-size: 0.85em;
-  color: rgba(207, 226, 238, 0.5);
+  color: var(--hc-window-ink-quiet);
 }
 
 .ai-version-flag {
@@ -882,7 +883,7 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 .ai-action-danger:hover {
   background: rgba(214, 126, 126, 0.22);
   border-color: rgba(214, 126, 126, 0.7);
-  color: #f6dede;
+  color: var(--hc-window-ink-loud);
 }
 
 // ── drag ghost ───────────────────────────────────────────────────────────────
@@ -898,19 +899,23 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   align-items: center;
   gap: 0.4rem;
   padding: 0.25rem 0.5rem 0.25rem 0.3rem;
-  border: 1px solid rgba($steel, 0.55);
+  border: 1px solid rgba(var(--acc), 0.55);
   border-radius: 999px;
-  background: rgba(14, 14, 22, 0.92);
+  background: rgba(var(--hc-panel-pane), 0.92);
   font-family: var(--hc-mono, system-ui);
   font-size: 0.78rem;
-  color: #eaf3f9;
+  color: var(--hc-window-ink-loud);
+
+  // On the hive, the real-size image tile snapped to the hovered hex is the
+  // preview. Keeping this chip too would bring back a detached hover ghost.
+  &.is-over-hive { opacity: 0; }
 }
 
 .ai-ghost-hex {
   width: 1.5rem;
   aspect-ratio: 0.866;
   clip-path: $hex-clip;
-  background: color-mix(in srgb, var(--accent, #{$steel}) 45%, rgba($steel, 0.2));
+  background: color-mix(in srgb, var(--accent, #{$steel}) 45%, rgba(var(--acc), 0.2));
   padding: 1px;
   box-sizing: border-box;
   display: grid;

@@ -2,6 +2,7 @@
   "use strict";
 
   let settings = SmartAutolinkerDefaults;
+  let hive = null;
   let timer = null;
   let applying = false;
   let activeChooser = null;
@@ -36,6 +37,24 @@
     chrome.storage.sync.get(SmartAutolinkerDefaults, (stored) => {
       settings = stored;
     });
+    chrome.storage.local?.get({ hive: null }, (stored) => {
+      hive = stored.hive;
+    });
+  }
+
+  // Replacements synced from published Hypercomb domains live in local
+  // storage (trees outgrow the sync quota) under the synthetic "hive" group.
+  function hiveReplacements() {
+    if (!hive || !Array.isArray(hive.replacements)) return [];
+    const enabledSites = new Set((hive.sites || [])
+      .filter((site) => site.enabled !== false).map((site) => site.host));
+    return hive.replacements.filter((item) => item.enabled !== false && enabledSites.has(item.siteHost));
+  }
+
+  function effectiveGroups() {
+    const groups = settings.groups?.length ? settings.groups : SmartAutolinkerDefaults.groups;
+    if (groups.some((group) => group.id === "hive")) return groups;
+    return [...groups, { id: "hive", name: "Hypercomb", enabled: true }];
   }
 
   function editableRoot(target) {
@@ -105,7 +124,7 @@
 
   function showChoice(root, phrase, candidates, decisionKey) {
     activeChooser?.remove();
-    const groupNames = new Map((settings.groups || []).map((group) => [group.id, group.name]));
+    const groupNames = new Map(effectiveGroups().map((group) => [group.id, group.name]));
     const menu = document.createElement("div");
     menu.setAttribute("role", "dialog");
     menu.setAttribute("aria-label", `Choose a link for ${phrase}`);
@@ -173,12 +192,12 @@
 
   function linkEditor(root, decisions = new Map()) {
     if (applying || !settings.enabled || !domainEnabled(location.hostname, settings.domains)) return;
-    const enabledGroups = new Set((settings.groups || SmartAutolinkerDefaults.groups)
+    const enabledGroups = new Set(effectiveGroups()
       .filter((group) => group.enabled !== false).map((group) => group.id));
     const site = matchingDomain(location.hostname, settings.domains);
     const siteRule = site && settings.domainGroups?.[site];
     const allowedGroups = Array.isArray(siteRule) ? new Set(siteRule) : null;
-    const items = (settings.replacements || []).filter((item) => {
+    const items = [...(settings.replacements || []), ...hiveReplacements()].filter((item) => {
       const groupId = item.groupId || "general";
       return item.enabled !== false && item.phrase && item.url && enabledGroups.has(groupId) && (!allowedGroups || allowedGroups.has(groupId));
     });
@@ -265,7 +284,7 @@
   });
   observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true });
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === "sync") loadSettings();
+    if (area === "sync" || (area === "local" && changes.hive)) loadSettings();
   });
   loadSettings();
 })();

@@ -4,7 +4,7 @@ Speed is the currency of Hypercomb. This document is the living ledger of tile-r
 performance: what the engine already does right (don't regress it), what should be fixed
 (ranked by expected impact), and a parking lot of overkill ideas kept for future
 configurations. Findings dated 2026-07-28 from a full audit of 
-`hypercomb-essentials/src/diamondcoreprocessor.com/presentation/`.
+`hypercomb-essentials/src/presentation/`.
 
 Related docs: `optimize-phase.md` (derived-cache doctrine), `streamline-audit-2026-07.md`,
 `mobile-usable-first-plan.md`.

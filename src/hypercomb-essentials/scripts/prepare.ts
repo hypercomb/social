@@ -574,7 +574,9 @@ for (const domain of domains) {
   const hasDeep = computeHasDeepSources(meta)
 
   if (hasDeep(domainRoot)) {
-    rootExports.push(`export * from './${domain}'`)
+    rootExports.push(domain.includes('.')
+      ? `export * from './${domain}'`
+      : `export * as ${toNamespace(domain)} from './${domain}'`)
   }
 
   // collect keys for master file
@@ -622,8 +624,24 @@ else filesSkipped++
   // modules out of the initial dev bundle and preload their generated chunk
   // after the first settled render. Classification is path-derived so adding
   // a new game requires no barrel or signature upkeep.
-  const isPreload = (f: string): boolean =>
-    relFrom(SRC_ROOT, f).startsWith('diamondcoreprocessor.com/games/')
+  //
+  // EXCEPT the frame that makes a game a PLACE. `game-view.drone` and
+  // `game.queen` are not a game — they are the view a tile can OPEN AS, and
+  // the arrival arbitration that decides that runs PRE-PAINT. Left in the
+  // lazy lane they deadlock: the post-render preload waits for
+  // `render:cell-count`, an arrival face SKIPS the hexagon paint that emits
+  // it, so the view would never register and a published game would open on
+  // bare hexagons. The games themselves stay lazy — the frame pulls the
+  // chunk in on demand when a tile actually names one.
+  const RENDER_CRITICAL_GAME_MODULES = [
+    'games/game-view.drone.ts',
+    'games/game.queen.ts',
+  ]
+  const isPreload = (f: string): boolean => {
+    const rel = relFrom(SRC_ROOT, f)
+    if (RENDER_CRITICAL_GAME_MODULES.includes(rel)) return false
+    return rel.startsWith('games/')
+  }
   const startupFiles = sideEffectFiles.filter(f => !isPreload(f))
   const preloadFiles = sideEffectFiles.filter(isPreload)
 

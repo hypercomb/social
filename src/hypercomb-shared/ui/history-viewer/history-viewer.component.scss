@@ -33,7 +33,7 @@
   // this aside, so they keep their own fixed px sizing.
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: calc(12px * var(--hc-panel-scale, 1));
-  color: rgba(235, 240, 250, 0.85);
+  color: var(--hc-window-ink-plain);
 }
 
 .history-viewer-header {
@@ -41,7 +41,7 @@
   // This panel's root font is 12px-based (dense); the shared band anchors to
   // the root rem, so keep the padding a touch tighter here to match.
   padding: 0 0.833rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.06);
 }
 
 .history-viewer-header .title {
@@ -54,14 +54,14 @@
 
 .history-viewer-header .count {
   font-variant-numeric: tabular-nums;
-  color: rgba(180, 190, 210, 0.7);
+  color: var(--hc-window-ink-quiet);
   margin-right: auto; // push the close button to the right edge
 }
 
 .history-viewer-header .close {
   background: transparent;
   border: none;
-  color: rgba(200, 210, 230, 0.65);
+  color: var(--hc-window-ink-quiet);
   font-size: 1.5em;
   line-height: 1;
   cursor: pointer;
@@ -75,14 +75,14 @@
   z-index: 2;
 }
 .history-viewer-header .close:hover {
-  color: rgba(255, 255, 255, 1);
-  background: rgba(255, 255, 255, 0.06);
+  color: var(--hc-window-ink-loud);
+  background: rgba(var(--hc-panel-ink), 0.06);
 }
 
 .history-viewer-header .group-step-toggle {
   background: transparent;
   border: 1px solid transparent;
-  color: rgba(200, 210, 230, 0.45);
+  color: var(--hc-window-ink-quiet);
   font-size: 1.167em;
   line-height: 1;
   cursor: pointer;
@@ -94,12 +94,12 @@
   opacity: 0.6;
 }
 .history-viewer-header .group-step-toggle:hover {
-  color: rgba(255, 255, 255, 1);
-  background: rgba(255, 255, 255, 0.05);
+  color: var(--hc-window-ink-loud);
+  background: rgba(var(--hc-panel-ink), 0.05);
   opacity: 1;
 }
 .history-viewer-header .group-step-toggle.active {
-  color: rgba(110, 180, 255, 1);
+  color: var(--hc-window-accent);
   background: rgba(110, 180, 255, 0.12);
   border-color: rgba(110, 180, 255, 0.35);
   opacity: 1;
@@ -114,7 +114,7 @@
   min-height: 0;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  scrollbar-color: rgba(180, 190, 210, 0.45) rgba(255, 255, 255, 0.04);
+  scrollbar-color: rgba(180, 190, 210, 0.45) rgba(var(--hc-panel-ink), 0.04);
   scrollbar-gutter: stable;
   pointer-events: auto;
 }
@@ -123,7 +123,7 @@
   width: 10px;
 }
 .rows::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(var(--hc-panel-ink), 0.04);
 }
 .rows::-webkit-scrollbar-thumb {
   background: rgba(180, 190, 210, 0.45);
@@ -156,7 +156,7 @@
 .row .row-action {
   background: transparent;
   border: none;
-  color: rgba(200, 210, 230, 0.55);
+  color: var(--hc-window-ink-quiet);
   font-size: 1.167em;
   line-height: 1;
   cursor: pointer;
@@ -172,8 +172,8 @@
 
 .row .row-action:hover {
   opacity: 1;
-  color: rgba(255, 255, 255, 1);
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--hc-window-ink-loud);
+  background: rgba(var(--hc-panel-ink), 0.08);
 }
 
 // Anchor rows have no real entry behind them, so there's nothing to
@@ -188,7 +188,7 @@
   pointer-events: auto;
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(var(--hc-panel-pane), 0.55);
   backdrop-filter: blur(3px);
   z-index: 60000;
 }
@@ -202,13 +202,13 @@
   min-width: 480px;
   max-width: 80vw;
   max-height: 80vh;
-  background: rgba(16, 18, 26, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(var(--hc-panel-pane), 0.98);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.12);
   border-radius: tw.$radius-card;
-  color: rgba(240, 245, 255, 0.9);
+  color: var(--hc-window-ink-loud);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   z-index: 60001;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 20px 60px rgba(var(--hc-panel-shadow), 0.6);
   display: flex;
   flex-direction: column;
 }
@@ -218,7 +218,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.08);
   font-size: 12px;
   gap: 12px;
 }
@@ -227,13 +227,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba(220, 230, 245, 0.85);
+  color: var(--hc-window-ink-plain);
 }
 
 .slice-modal .slice-copy {
   background: rgba(60, 80, 110, 0.45);
   border: 1px solid rgba(120, 140, 170, 0.4);
-  color: rgba(220, 230, 245, 0.9);
+  color: var(--hc-window-ink-loud);
   border-radius: 4px;
   font: inherit;
   font-size: 11px;
@@ -247,25 +247,25 @@
 }
 .slice-modal .slice-copy:hover {
   background: rgba(80, 105, 140, 0.6);
-  color: rgba(255, 255, 255, 1);
+  color: var(--hc-window-ink-loud);
 }
 .slice-modal .slice-copy.copied {
   background: rgba(60, 140, 90, 0.55);
   border-color: rgba(120, 200, 150, 0.6);
-  color: rgba(230, 255, 235, 1);
+  color: var(--hc-window-ink-loud);
 }
 
 .slice-modal .slice-close {
   background: transparent;
   border: none;
-  color: rgba(200, 210, 230, 0.8);
+  color: var(--hc-window-ink-plain);
   font-size: 20px;
   cursor: pointer;
   padding: 0 6px;
   line-height: 1;
 }
 .slice-modal .slice-close:hover {
-  color: rgba(255, 255, 255, 1);
+  color: var(--hc-window-ink-loud);
 }
 
 // Drill-down back button — only present when the user has navigated
@@ -274,7 +274,7 @@
 .slice-modal .slice-back {
   background: transparent;
   border: 1px solid rgba(120, 140, 170, 0.35);
-  color: rgba(220, 230, 245, 0.85);
+  color: var(--hc-window-ink-plain);
   border-radius: 4px;
   font: inherit;
   font-size: 13px;
@@ -286,7 +286,7 @@
 .slice-modal .slice-back:hover {
   background: rgba(80, 105, 140, 0.5);
   border-color: rgba(140, 170, 200, 0.6);
-  color: rgba(255, 255, 255, 1);
+  color: var(--hc-window-ink-loud);
 }
 
 .slice-modal .slice-json {
@@ -296,7 +296,7 @@
   line-height: 1.45;
   overflow: auto;
   white-space: pre;
-  color: rgba(230, 235, 245, 0.92);
+  color: var(--hc-window-ink-loud);
 }
 
 // 0000 visual-properties section. Lives below the layer's slot bag,
@@ -305,7 +305,7 @@
 // of the cell). Header label calls it out so the user knows what
 // they're looking at.
 .slice-modal .slice-section {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(var(--hc-panel-ink), 0.08);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -316,13 +316,13 @@
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: rgba(180, 188, 200, 0.7);
-  background: rgba(0, 0, 0, 0.25);
+  color: var(--hc-window-ink-quiet);
+  background: var(--hc-window-tint-strong);
 }
 
 .slice-modal .slice-props {
-  color: rgba(220, 226, 238, 0.88);
-  background: rgba(0, 0, 0, 0.1);
+  color: var(--hc-window-ink-plain);
+  background: var(--hc-window-tint);
 }
 
 // Per-line diff highlight inside the slice inspector. `same` lines
@@ -339,13 +339,13 @@
 .slice-line[data-status="add"] {
   background: rgba(109, 192, 119, 0.12);
   border-left-color: rgba(109, 192, 119, 0.75);
-  color: rgba(210, 240, 218, 0.98);
+  color: var(--hc-window-ink-loud);
 }
 
 .slice-line[data-status="remove"] {
   background: rgba(217, 98, 98, 0.12);
   border-left-color: rgba(217, 98, 98, 0.75);
-  color: rgba(240, 210, 210, 0.85);
+  color: var(--hc-window-ink-plain);
   text-decoration: line-through;
   text-decoration-color: rgba(217, 98, 98, 0.6);
 }
@@ -363,7 +363,7 @@
 .slice-line.slice-sig:hover {
   background: rgba(110, 180, 255, 0.16);
   border-bottom-color: rgba(110, 180, 255, 0.55);
-  color: rgba(245, 250, 255, 1);
+  color: var(--hc-window-ink-loud);
 }
 .slice-line.slice-sig:focus-visible {
   outline: 1px solid rgba(110, 180, 255, 0.7);
@@ -371,13 +371,13 @@
 }
 
 .row:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(var(--hc-panel-ink), 0.05);
 }
 
 .row.active {
   background: rgba(100, 170, 255, 0.12);
   border-left-color: rgba(110, 180, 255, 0.9);
-  color: rgba(255, 255, 255, 0.98);
+  color: var(--hc-window-ink-loud);
 }
 
 // Selected (multi-select via Cmd/Ctrl-click or Shift-click).
@@ -387,7 +387,7 @@
 .row.selected {
   background: rgba(180, 150, 255, 0.18);
   border-left-color: rgba(180, 150, 255, 0.9);
-  color: rgba(255, 255, 255, 0.98);
+  color: var(--hc-window-ink-loud);
 }
 
 .row.active.selected {
@@ -402,29 +402,29 @@
   width: 0.667em;
   height: 0.667em;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(var(--hc-panel-ink), 0.18);
   display: inline-block;
 }
 
 .row .row-icon {
   width: 1.167em;
   height: 1.167em;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--hc-window-ink-quiet);
 }
 
 .row[data-category="cells"]       .indicator { background: #6dc077; }
-.row[data-category="cells"]       .row-icon  { color:      #6dc077; }
+.row[data-category="cells"]       .row-icon  { color: tw.ink(#6dc077); }
 .row[data-category="content"]     .indicator { background: #5f8bd9; }
 .row[data-category="content"]     .row-icon  { color:      #5f8bd9; }
 .row[data-category="tags"]        .indicator { background: #d9c25f; }
-.row[data-category="tags"]        .row-icon  { color:      #d9c25f; }
+.row[data-category="tags"]        .row-icon  { color: tw.ink(#d9c25f); }
 .row[data-category="notes"]       .indicator { background: #b37dd4; }
-.row[data-category="notes"]       .row-icon  { color:      #b37dd4; }
+.row[data-category="notes"]       .row-icon  { color: tw.ink(#b37dd4); }
 .row[data-category="visibility"]  .indicator { background: #b1b7c2; }
-.row[data-category="visibility"]  .row-icon  { color:      #b1b7c2; }
+.row[data-category="visibility"]  .row-icon  { color: var(--hc-window-ink-loud); }
 .row[data-category="system"]      .indicator { background: #e08c4d; }
-.row[data-category="system"]      .row-icon  { color:      #e08c4d; }
-.row[data-category="none"]        .indicator { background: rgba(255, 255, 255, 0.10); }
+.row[data-category="system"]      .row-icon  { color: tw.ink(#e08c4d); }
+.row[data-category="none"]        .indicator { background: rgba(var(--hc-panel-ink), 0.10); }
 
 .filter-bar {
   display: flex;
@@ -432,8 +432,8 @@
   flex-wrap: wrap;
   gap: 0.167em;
   padding: 0.333em 0.5em;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.06);
+  background: rgba(var(--hc-panel-ink), 0.02);
 }
 
 .filter-toggle {
@@ -458,21 +458,21 @@
 
 .filter-toggle:hover {
   opacity: 0.75;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(var(--hc-panel-ink), 0.04);
 }
 
 .filter-toggle.active {
   opacity: 1;
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(var(--hc-panel-ink), 0.06);
+  border-color: rgba(var(--hc-panel-ink), 0.12);
 }
 
-.filter-toggle[data-category="cells"]       { color: #6dc077; }
+.filter-toggle[data-category="cells"]       { color: tw.ink(#6dc077); }
 .filter-toggle[data-category="content"]     { color: #5f8bd9; }
-.filter-toggle[data-category="tags"]        { color: #d9c25f; }
-.filter-toggle[data-category="notes"]       { color: #b37dd4; }
-.filter-toggle[data-category="visibility"]  { color: #b1b7c2; }
-.filter-toggle[data-category="system"]      { color: #e08c4d; }
+.filter-toggle[data-category="tags"]        { color: tw.ink(#d9c25f); }
+.filter-toggle[data-category="notes"]       { color: tw.ink(#b37dd4); }
+.filter-toggle[data-category="visibility"]  { color: var(--hc-window-ink-loud); }
+.filter-toggle[data-category="system"]      { color: tw.ink(#e08c4d); }
 
 // Selection-scoped actions appear in the viewer header when any rows
 // are selected. The selection-gap separates the count + buttons from
@@ -482,25 +482,25 @@
 .selection-gap {
   width: 1px;
   align-self: stretch;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(var(--hc-panel-ink), 0.08);
   margin: 0 4px;
 }
 
 .selection-count {
   align-self: center;
   font-size: 0.833em;
-  color: rgba(200, 210, 230, 0.65);
+  color: var(--hc-window-ink-quiet);
   padding: 0 0.167em;
   font-variant-numeric: tabular-nums;
 }
 
 .selection-action {
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.12);
   border-radius: 4px;
   padding: 0.25em 0.667em;
   cursor: pointer;
-  color: rgba(210, 220, 240, 0.85);
+  color: var(--hc-window-ink-plain);
   font-family: inherit;
   font-size: 0.917em;
   font-weight: 500;
@@ -517,22 +517,22 @@
 
 .selection-action.save-as-head {
   border-color: rgba(255, 170, 60, 0.45);
-  color: rgba(255, 200, 120, 0.95);
+  color: tw.ink(rgba(255, 200, 120, 0.95));
 }
 
 .selection-action:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 1);
+  background: rgba(var(--hc-panel-ink), 0.08);
+  color: var(--hc-window-ink-loud);
 }
 
 .row .idx {
   font-variant-numeric: tabular-nums;
-  color: rgba(200, 210, 230, 0.85);
+  color: var(--hc-window-ink-plain);
   min-width: 2.333em;
 }
 
 .row .summary {
-  color: rgba(230, 235, 245, 0.92);
+  color: var(--hc-window-ink-loud);
   white-space: nowrap;
   // Let this column give up horizontal space so the make-head /
   // timestamp / delete columns to its right stay visible even when
@@ -544,7 +544,7 @@
 }
 
 .row .when {
-  color: rgba(160, 170, 190, 0.7);
+  color: var(--hc-window-ink-quiet);
   font-size: 0.833em;
   font-variant-numeric: tabular-nums;
 }
@@ -563,7 +563,7 @@
   cursor: default;
   pointer-events: none;
   opacity: 0.35;
-  color: rgba(180, 190, 210, 0.6);
+  color: var(--hc-window-ink-quiet);
   border-left-color: transparent !important;
   background: transparent !important;
 }
@@ -577,24 +577,24 @@
 }
 .row.anchor.anchor-start:hover {
   opacity: 0.9;
-  background: rgba(255, 255, 255, 0.04) !important;
+  background: rgba(var(--hc-panel-ink), 0.04) !important;
 }
 .row.anchor.anchor-start.active {
   opacity: 1;
   background: rgba(100, 170, 255, 0.12) !important;
   border-left-color: rgba(110, 180, 255, 0.9) !important;
-  color: rgba(235, 240, 250, 0.9);
+  color: var(--hc-window-ink-loud);
 }
 
 .row.anchor .idx {
-  color: rgba(160, 170, 190, 0.45);
+  color: var(--hc-window-ink-quiet);
 }
 
 .row.anchor .summary {
   text-transform: uppercase;
   font-size: 0.833em;
   letter-spacing: 0.4px;
-  color: rgba(170, 180, 200, 0.55);
+  color: var(--hc-window-ink-quiet);
 }
 
 // ── marks + names ────────────────────────────────────────────────────
@@ -604,7 +604,7 @@
 .history-viewer-header .marked-toggle {
   background: transparent;
   border: 1px solid transparent;
-  color: rgba(200, 210, 230, 0.45);
+  color: var(--hc-window-ink-quiet);
   font-size: 1.05em;
   line-height: 1;
   cursor: pointer;
@@ -616,12 +616,12 @@
   opacity: 0.6;
 }
 .history-viewer-header .marked-toggle:hover {
-  color: rgba(255, 210, 130, 1);
+  color: tw.ink(rgba(255, 210, 130, 1));
   background: rgba(255, 190, 90, 0.08);
   opacity: 1;
 }
 .history-viewer-header .marked-toggle.active {
-  color: rgba(255, 200, 110, 1);
+  color: tw.ink(rgba(255, 200, 110, 1));
   background: rgba(255, 190, 90, 0.14);
   border-color: rgba(255, 190, 90, 0.4);
   opacity: 1;
@@ -637,7 +637,7 @@
 // the row-action group, so it inherits the hover/opacity treatment.
 .row .row-mark.on {
   opacity: 1;
-  color: rgba(255, 200, 110, 1);
+  color: tw.ink(rgba(255, 200, 110, 1));
 }
 .row:hover .row-mark.on {
   opacity: 1;
@@ -646,24 +646,24 @@
 // Saved name shown in place of the auto summary — slightly brighter and
 // roman (not the dim grey summary) so a named point reads as deliberate.
 .row .summary.mark-name {
-  color: rgba(255, 224, 170, 0.95);
+  color: tw.ink(rgba(255, 224, 170, 0.95));
   font-style: normal;
 }
 
 // Inline rename input — borderless, sits in the summary column.
 .row .row-rename {
   min-width: 0;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--hc-window-tint-strong);
   border: 1px solid rgba(255, 190, 90, 0.45);
   border-radius: 3px;
-  color: rgba(255, 235, 200, 0.98);
+  color: tw.ink(rgba(255, 235, 200, 0.98));
   font: inherit;
   font-size: 0.92em;
   padding: 0.1em 0.4em;
   outline: none;
 }
 .row .row-rename::placeholder {
-  color: rgba(200, 190, 170, 0.45);
+  color: var(--hc-window-ink-quiet);
 }
 
 // ── marked-places list (cross-tree) ──────────────────────────────────
@@ -677,7 +677,7 @@
 .marked-empty {
   padding: 1em 0.833em;
   font-size: 0.917em;
-  color: rgba(180, 190, 210, 0.6);
+  color: var(--hc-window-ink-quiet);
 }
 
 .marked-row {
@@ -698,11 +698,11 @@
 }
 .marked-row .marked-star {
   grid-area: star;
-  color: rgba(255, 200, 110, 1);
+  color: tw.ink(rgba(255, 200, 110, 1));
 }
 .marked-row .marked-name {
   grid-area: name;
-  color: rgba(255, 224, 170, 0.95);
+  color: tw.ink(rgba(255, 224, 170, 0.95));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -710,7 +710,7 @@
 .marked-row .marked-path {
   grid-area: path;
   font-size: 0.8em;
-  color: rgba(160, 170, 190, 0.7);
+  color: var(--hc-window-ink-quiet);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -725,7 +725,7 @@
 .history-viewer-header .prune-toggle {
   background: transparent;
   border: 1px solid transparent;
-  color: rgba(200, 210, 230, 0.45);
+  color: var(--hc-window-ink-quiet);
   font-size: 1.05em;
   line-height: 1;
   cursor: pointer;
@@ -740,12 +740,12 @@
   gap: 0.25em;
 }
 .history-viewer-header .prune-toggle:hover {
-  color: rgba(255, 255, 255, 1);
-  background: rgba(255, 255, 255, 0.05);
+  color: var(--hc-window-ink-loud);
+  background: rgba(var(--hc-panel-ink), 0.05);
   opacity: 1;
 }
 .history-viewer-header .prune-toggle.active {
-  color: rgba(255, 130, 130, 1);
+  color: tw.ink(rgba(255, 130, 130, 1));
   background: rgba(255, 90, 90, 0.12);
   border-color: rgba(255, 90, 90, 0.4);
   opacity: 1;

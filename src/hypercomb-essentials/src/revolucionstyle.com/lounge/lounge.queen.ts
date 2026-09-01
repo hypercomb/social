@@ -16,15 +16,15 @@
 // second record on a second tile. Same logical piece, different world.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
-import type { VisualBeeRegistry } from '../../diamondcoreprocessor.com/commands/visual-bee-registry.js'
+import type { VisualBeeRegistry } from '../../commands/visual-bee-registry.js'
 import {
   listDecorations,
   removeDecorationAndWait,
   replaceDecoration,
-} from '../../diamondcoreprocessor.com/commands/decoration-manifest.js'
+} from '../../commands/decoration-manifest.js'
 import {
   ENABLEMENT_CHANGED, readGlobalOnKinds, seedCohortOn,
-} from '../../diamondcoreprocessor.com/sharing/behavior-enablement.js'
+} from '../../sharing/behavior-enablement.js'
 import { LOUNGE_KIND, LOUNGE_VIEW, type LoungeRoomPayload } from './lounge-room.js'
 
 const HEXAGONS = 'hexagons'

@@ -3,7 +3,7 @@ import { type Bee, EffectBus, hypercomb } from '@hypercomb/core';
 import {
   DEFAULT_HEX_ORIENTATION,
   type HexOrientation,
-} from '@hypercomb/essentials/diamondcoreprocessor.com/preferences/settings';
+} from '@hypercomb/essentials/preferences/settings';
 import { RouterOutlet } from '@angular/router';
 import { CommandLineComponent, isTransientMode } from '@hypercomb/shared';
 import { MeshHeaderComponent } from '@hypercomb/shared/ui';

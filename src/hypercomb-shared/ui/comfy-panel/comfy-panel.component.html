@@ -1,0 +1,209 @@
+@if (visible()) {
+  <aside
+    class="comfy-panel"
+    hcDockInset="right"
+    hcDockedPanel="comfy-panel"
+    [hcSession]="session"
+    (hcDockedPanelClose)="close()"
+    dockSide="right"
+    [minWidth]="300"
+    [maxWidth]="560"
+    [defaultWidth]="360"
+    launcherControlId="comfy"
+    data-consumes-wheel
+    tabindex="-1"
+    role="dialog"
+    [attr.aria-label]="'comfy.title' | t"
+  >
+    <header class="comfy-header">
+      <span class="comfy-title">{{ 'comfy.title' | t }}</span>
+      <button class="comfy-close" type="button" (click)="close()" [attr.aria-label]="'comfy.close' | t">×</button>
+    </header>
+
+    <div class="comfy-body">
+
+      <!-- THE MACHINE. First, because nothing below it means anything until
+           this is green — and the two failures that matter are both fixable,
+           so each is named instead of reported as "unreachable". -->
+      <section class="comfy-block">
+        <div class="comfy-section">{{ 'comfy.host' | t }}</div>
+        <div class="comfy-row">
+          <span class="comfy-dot" [class.on]="reachOk()" aria-hidden="true"></span>
+          <input
+            #host
+            class="comfy-input"
+            type="text"
+            spellcheck="false"
+            placeholder="127.0.0.1:8188"
+            [value]="endpoint()"
+            (change)="setEndpoint(host)"
+            [attr.aria-label]="'comfy.host' | t"
+          />
+          <button class="comfy-chip" type="button" (click)="discover()">{{ 'comfy.find' | t }}</button>
+        </div>
+        @if (reachAsking()) {
+          <p class="comfy-note">{{ 'comfy.asking' | t }}</p>
+        } @else if (!reachOk() && reachReason()) {
+          <p class="comfy-warn">{{ reachReason() }}</p>
+        }
+      </section>
+
+      <!-- THE FOLDER. Optional, and worth its own row: with it, pictures are
+           read where they lie and the whole output folder can be looked
+           through with nothing copied into the hive. -->
+      @if (folderSupported()) {
+        <section class="comfy-block">
+          <div class="comfy-section">{{ 'comfy.folder' | t }}</div>
+          <div class="comfy-row">
+            <span class="comfy-state">
+              {{ folderLinked() ? (folderLabel() || ('comfy.folder-linked' | t)) : ('comfy.folder-none' | t) }}
+            </span>
+            <button class="comfy-chip" type="button" (click)="linkFolder()">
+              {{ (folderLinked() ? 'comfy.folder-change' : 'comfy.folder-link') | t }}
+            </button>
+            @if (folderLinked()) {
+              <button class="comfy-chip" type="button" (click)="browse()">
+                {{ (browsing() ? 'comfy.folder-hide' : 'comfy.folder-browse') | t }}
+              </button>
+            }
+          </div>
+          <p class="comfy-note">{{ 'comfy.folder-note' | t }}</p>
+
+          @if (browsing()) {
+            @if (folderPictures().length) {
+              <div class="comfy-strip">
+                @for (picture of folderPictures(); track picture.url; let i = $index) {
+                  <button
+                    class="comfy-thumb"
+                    type="button"
+                    (click)="keep(i)"
+                    [title]="picture.filename + ' — ' + megabytes(picture.size)"
+                  >
+                    <img [src]="picture.url" [alt]="picture.filename" />
+                  </button>
+                }
+              </div>
+            } @else {
+              <p class="comfy-note">{{ 'comfy.folder-empty' | t }}</p>
+            }
+          }
+        </section>
+      }
+
+      <!-- THE RECIPE. -->
+      <section class="comfy-block">
+        <div class="comfy-section">{{ 'comfy.workflow' | t }}</div>
+        <div class="comfy-row">
+          <select #pick class="comfy-pick" (change)="pickWorkflow(pick)" [attr.aria-label]="'comfy.workflow' | t">
+            @for (workflow of workflows(); track workflow.id) {
+              <option [value]="workflow.id" [selected]="workflow.id === active()">{{ workflow.label }}</option>
+            }
+          </select>
+          <button class="comfy-chip" type="button" (click)="togglePaste()" [title]="'comfy.add-title' | t">
+            {{ 'comfy.add' | t }}
+          </button>
+        </div>
+
+        @if (pasteOpen()) {
+          <textarea
+            #paste
+            class="comfy-paste"
+            rows="5"
+            spellcheck="false"
+            [attr.placeholder]="'comfy.paste-placeholder' | t"
+          ></textarea>
+          <button class="comfy-run" type="button" (click)="addWorkflow(paste)">{{ 'comfy.paste-add' | t }}</button>
+          @if (importError()) {
+            <p class="comfy-warn">{{ importError() }}</p>
+          }
+        }
+      </section>
+
+      <!-- ONE CONTROL PER SEAM — the form is what this workflow OFFERS, never
+           a fixed list, so a knob that would turn nothing is never drawn. -->
+      <section class="comfy-block">
+        @if (offers('positive')) {
+          <textarea
+            class="comfy-prompt"
+            rows="3"
+            [value]="positive()"
+            (input)="positive.set($any($event.target).value)"
+            [attr.placeholder]="'comfy.prompt' | t"
+            [attr.aria-label]="'comfy.prompt' | t"
+          ></textarea>
+        }
+        @if (offers('negative')) {
+          <input
+            class="comfy-input"
+            type="text"
+            [value]="negative()"
+            (input)="negative.set($any($event.target).value)"
+            [attr.placeholder]="'comfy.negative' | t"
+            [attr.aria-label]="'comfy.negative' | t"
+          />
+        }
+
+        @if (numberKnobs().length) {
+          <div class="comfy-numbers">
+            @for (knob of numberKnobs(); track knob) {
+              <label class="comfy-number">
+                <span>{{ numberKey(knob) | t }}</span>
+                <input #n type="number" [value]="numberOf(knob)" (input)="setNumber(knob, n)" />
+              </label>
+            }
+          </div>
+        }
+
+        @if (offers('seed')) {
+          <input
+            class="comfy-input"
+            type="text"
+            [value]="seed()"
+            (input)="seed.set($any($event.target).value)"
+            [attr.placeholder]="'comfy.seed-hint' | t"
+            [attr.aria-label]="'comfy.seed' | t"
+          />
+        }
+      </section>
+
+      <!-- THE RUN. -->
+      <section class="comfy-block">
+        <p class="comfy-target">
+          {{ target() ? (('comfy.onto' | t) + ' "' + target() + '"') : ('comfy.no-tile' | t) }}
+        </p>
+        <button class="comfy-run" type="button" (click)="run()">
+          {{ (busy() ? 'comfy.stop' : 'comfy.generate') | t }}
+        </button>
+        @if (busy() && jobFraction() !== null) {
+          <div class="comfy-bar" role="progressbar" [attr.aria-valuenow]="percent()">
+            <div class="comfy-fill" [style.width.%]="percent()"></div>
+          </div>
+        }
+        @if (jobMessage()) {
+          <p [class]="jobState() === 'error' ? 'comfy-warn' : 'comfy-note'">{{ jobMessage() }}</p>
+        }
+      </section>
+
+      <!-- THE PICTURES. -->
+      @if (results().length) {
+        <section class="comfy-block">
+          <div class="comfy-section">{{ 'comfy.results' | t }}</div>
+          <div class="comfy-strip">
+            @for (result of results(); track result.url; let i = $index) {
+              <button
+                class="comfy-thumb"
+                type="button"
+                (click)="attach(i)"
+                [title]="('comfy.seed' | t) + ' ' + result.seed"
+              >
+                <img [src]="result.url" [alt]="result.filename" />
+              </button>
+            }
+          </div>
+          <p class="comfy-note">{{ 'comfy.keep-note' | t }}</p>
+        </section>
+      }
+
+    </div>
+  </aside>
+}

@@ -11,6 +11,7 @@
 // marks it as its own group, the same tick the shell uses between the
 // behaviour toggles and the standing tools.
 
+@use '../toolwindow' as tw;
 :host { display: inline-flex; align-items: center; }
 
 .pinned-entrances {
@@ -42,7 +43,7 @@
   // Circle + steel tone + the rail's resting/hover alphas — the shell's
   // `.rail-btn`, restated here because the two live in separate components.
   border-radius: 50%;
-  color: rgba(126, 182, 214, 0.42);
+  color: tw.ink(rgba(126, 182, 214, 0.42));
   cursor: pointer;
   transition: color 150ms ease, background 150ms ease, opacity 150ms ease;
 
@@ -52,7 +53,7 @@
     line-height: 1;
   }
 
-  &:hover { color: rgba(126, 182, 214, 0.85); background: rgba(126, 182, 214, 0.1); }
+  &:hover { color: tw.ink(rgba(126, 182, 214, 0.85)); background: rgba(126, 182, 214, 0.1); }
   &:active { transform: scale(0.94); }
   &:focus-visible { outline: 1px solid rgba(126, 182, 214, 0.6); outline-offset: 2px; }
 
@@ -72,7 +73,7 @@
   // Standing on the group page this pin opened — lit like any on-state
   // switch, and a click goes back. Same steel family, full strength.
   &.at-aggregate {
-    color: rgba(126, 182, 214, 0.95);
+    color: tw.ink(rgba(126, 182, 214, 0.95));
     background: rgba(126, 182, 214, 0.16);
   }
 }

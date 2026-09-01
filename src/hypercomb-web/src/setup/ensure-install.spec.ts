@@ -21,6 +21,10 @@ describe('ensureInstall install-state validation', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks()
+    // Globals stubbed by one case must not decide the next one — __TAURI__
+    // below flips the native branch on, and a leaked one would silently
+    // exempt every later case from the browser gates it is asserting.
+    vi.unstubAllGlobals()
     emit.mockReset()
     store.initialize.mockReset().mockResolvedValue(undefined)
     store.opfsAvailable = true
@@ -38,13 +42,13 @@ describe('ensureInstall install-state validation', () => {
   it('clears an installed claim when its required manifest is absent', async () => {
     localStorage.setItem('hypercomb.installed', 'true')
 
-    await ensureInstall(null)
+    await ensureInstall()
 
     expect(store.initialize).toHaveBeenCalledOnce()
     expect(localStorage.getItem('hypercomb.installed')).toBeNull()
     expect(emit).toHaveBeenCalledWith('boot:status', {
       kind: 'install-needed',
-      reason: 'no-sentinel',
+      reason: 'no-source',
     })
   })
 
@@ -55,7 +59,7 @@ describe('ensureInstall install-state validation', () => {
     store.opfsAvailable = false
     localStorage.setItem('hypercomb.installed', 'true')
 
-    await ensureInstall(null)
+    await ensureInstall()
 
     expect(localStorage.getItem('hypercomb.installed')).toBeNull()
     expect(emit).toHaveBeenCalledWith('boot:status', {
@@ -68,12 +72,36 @@ describe('ensureInstall install-state validation', () => {
     vi.stubGlobal('FileSystemFileHandle', class FileSystemFileHandle {})
     localStorage.setItem('hypercomb.installed', 'true')
 
-    await ensureInstall(null)
+    await ensureInstall()
 
     expect(localStorage.getItem('hypercomb.installed')).toBeNull()
     expect(emit).toHaveBeenCalledWith('boot:status', {
       kind: 'install-needed',
       reason: 'no-writable',
+    })
+  })
+
+  // THE NATIVE SHELL HAS NO OPFS TO BE TOO OLD FOR. WebKitGTK presents the
+  // very shape the case above describes — FileSystemFileHandle without
+  // createWritable — so the Linux client refused to unpack the content it
+  // ships with and came up empty on every launch. Its hive is a real
+  // directory reached over IPC and its writes never touch that prototype, so
+  // the probe is asking about a backend it does not use. Reaching 'no-source'
+  // is the point: it got to the real decision instead of refusing at the gate.
+  it('does not apply the createWritable gate to the native shell', async () => {
+    vi.stubGlobal('FileSystemFileHandle', class FileSystemFileHandle {})
+    vi.stubGlobal('__TAURI__', { core: { invoke: vi.fn() } })
+    localStorage.setItem('hypercomb.installed', 'true')
+
+    await ensureInstall()
+
+    expect(emit).not.toHaveBeenCalledWith('boot:status', {
+      kind: 'install-needed',
+      reason: 'no-writable',
+    })
+    expect(emit).toHaveBeenCalledWith('boot:status', {
+      kind: 'install-needed',
+      reason: 'no-source',
     })
   })
 })

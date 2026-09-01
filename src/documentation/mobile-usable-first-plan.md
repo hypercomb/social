@@ -198,9 +198,7 @@ every phase's acceptance.
 
 ## 3. Phases
 
-Ordering: SEE → TYPE → JOIN → DURABLE. Each phase lands with its **mirror pass in the
-hive** (tiles for the parts, a collection, pheromones from the declared vocabulary,
-notes) in the same PR — per the mirror doctrine, not after the fact.
+Ordering: SEE → TYPE → JOIN → DURABLE.
 
 ### Phase 0 — Ground truth (half a day, before any code)
 
@@ -354,4 +352,3 @@ mesh glyph framing.
   `mobile.empty.*` precedent.
 - Resting styles describe final state; animations additive; reduced-motion guarded.
 - Web/dev shell parity for every viewport-meta or template-adjacent change.
-- Mirror pass ships in the same PR as the behaviour, every phase.

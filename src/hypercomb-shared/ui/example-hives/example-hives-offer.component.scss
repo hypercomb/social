@@ -1,5 +1,6 @@
 // First-run welcome, not a utility modal. The hive remains legible around a
 // generous two-part surface: orientation first, visual starting points second.
+@use '../toolwindow' as tw;
 :host {
   position: fixed;
   inset: 0;
@@ -73,7 +74,7 @@
   border: 1px solid rgba(216, 230, 238, 0.12);
   box-shadow: 0 2rem 6rem rgba(0, 0, 0, 0.42), 0 0 0 1px rgba(0, 0, 0, 0.18);
   backdrop-filter: blur(18px) saturate(1.1);
-  color: #d8e6ee;
+  color: var(--hc-window-ink-loud);
   pointer-events: auto;
 
   h2 {
@@ -100,7 +101,7 @@
 .section-kicker {
   display: block;
   margin-bottom: 0.9rem;
-  color: #7eb6d6;
+  color: tw.ink(#7eb6d6);
   font-size: 0.68rem;
   font-weight: 750;
   letter-spacing: 0.16em;
@@ -112,7 +113,7 @@
   max-width: 30rem;
   font-size: 0.94rem;
   line-height: 1.6;
-  color: rgba(216, 230, 238, 0.62);
+  color: var(--hc-window-ink-quiet);
 }
 
 .first-actions {
@@ -131,7 +132,7 @@
     border: 1px solid rgba(126, 182, 214, 0.28);
     border-radius: var(--hc-radius-control);
     background: rgba(126, 182, 214, 0.08);
-    color: #d8e6ee;
+    color: var(--hc-window-ink-loud);
     text-align: left;
 
     &:hover {
@@ -157,8 +158,8 @@
 .action-mark-add { font-size: 1.5rem; font-weight: 400; }
 .action-copy { display: grid; gap: 0.16rem; }
 .action-copy strong { font-size: 0.88rem; }
-.action-copy small { color: rgba(216, 230, 238, 0.5); font-size: 0.71rem; }
-.action-arrow { color: #7eb6d6; font-size: 1.1rem; }
+.action-copy small { color: var(--hc-window-ink-quiet); font-size: 0.71rem; }
+.action-arrow { color: tw.ink(#7eb6d6); font-size: 1.1rem; }
 
 .examples {
   min-width: 0;
@@ -175,8 +176,8 @@
   h3 { margin: 0; font-size: 1.2rem; font-weight: 650; }
 }
 
-.section-kicker { margin-bottom: 0.35rem; color: rgba(216, 230, 238, 0.42); }
-.section-note { max-width: 13rem; color: rgba(216, 230, 238, 0.38); font-size: 0.7rem; line-height: 1.4; text-align: right; }
+.section-kicker { margin-bottom: 0.35rem; color: var(--hc-window-ink-quiet); }
+.section-note { max-width: 13rem; color: var(--hc-window-ink-quiet); font-size: 0.7rem; line-height: 1.4; text-align: right; }
 
 .rows {
   list-style: none;
@@ -234,7 +235,7 @@
 .description {
   font-size: 0.78rem;
   line-height: 1.4;
-  color: rgba(216, 230, 238, 0.5);
+  color: var(--hc-window-ink-quiet);
 }
 
 .meta {
@@ -245,7 +246,7 @@
   border-radius: 999px;
   background: rgba(8, 13, 19, 0.78);
   font-size: 0.7rem;
-  color: rgba(216, 230, 238, 0.68);
+  color: var(--hc-window-ink-quiet);
 }
 
 button {
@@ -256,7 +257,7 @@ button {
   font-size: 0.78rem;
   cursor: pointer;
   background: transparent;
-  color: rgba(216, 230, 238, 0.85);
+  color: var(--hc-window-ink-plain);
   transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
 
   &:hover { background: rgba(216, 230, 238, 0.08); }
@@ -267,7 +268,7 @@ button {
   justify-self: start;
   margin: 0 0.9rem 0.9rem;
   border-color: rgba(126, 182, 214, 0.38);
-  color: #a8d0e7;
+  color: tw.ink(#a8d0e7);
 
   &:hover { background: rgba(126, 182, 214, 0.12); }
 }
@@ -278,11 +279,11 @@ button {
   justify-self: start;
   margin: 0 0.9rem 0.9rem;
   font-size: 0.74rem;
-  color: rgba(216, 230, 238, 0.55);
+  color: var(--hc-window-ink-quiet);
   white-space: nowrap;
 }
 
-.added { color: #6fd39a; }
+.added { color: tw.ink(#6fd39a); }
 
 .actions {
   grid-column: 1 / -1;
@@ -294,10 +295,10 @@ button {
 
 .dismiss {
   border: 0;
-  color: rgba(216, 230, 238, 0.48);
+  color: var(--hc-window-ink-quiet);
   background: transparent;
 
-  &:hover { color: rgba(216, 230, 238, 0.8); background: transparent; }
+  &:hover { color: var(--hc-window-ink-plain); background: transparent; }
 }
 
 @media (max-width: 760px) {

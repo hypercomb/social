@@ -18,7 +18,7 @@
 //    transform-centred modals; doesn't fight enter-animation transforms)
 //  - reflects live scale changes the drone broadcasts over EffectBus
 //
-// Contract shared with diamondcoreprocessor.com/widgets/widget-zoom.drone.ts
+// Contract shared with widgets/widget-zoom.drone.ts
 // (coordinated purely via the DOM attribute + EffectBus — shared must never
 // statically import essentials):
 //   localStorage key : 'hc:widget-scale'      → { [id]: number }

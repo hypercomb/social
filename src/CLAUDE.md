@@ -6,16 +6,11 @@ Minimalism. Small surface area. No unnecessary abstractions. Signatures (SHA-256
 
 **Externalize everything.** All features and functionality must be externally loadable as drone modules. Code may live in Angular/shared projects during early development, but the strategy is to migrate anything that can live outside the web shell into interchangeable, signature-addressed modules. The community can fork, improve, and share modules via the merkle tree sharing pattern — signatures ensure integrity and deduplication across the network.
 
-**Mirror every creation into the hive (PERMANENT, all forward development).** Building a behaviour is only half the work. The other half is building its **mirror structure in the hive**: tiles for the parts, a collection that gathers them, pheromones marking what each part *is* (so render and behaviour resolve from the mark, not from code), and notes explaining what it does. We are constantly building a prototype out of hexagons, notes, and pheromones — the hive is the living specification of the code.
+**Atomic units, broken apart.** A creation starts as ONE artifact that carries what it is. When it needs to be finer-grained, it is BROKEN APART into parts, and each part is an artifact in its own right — it stands alone, carries its own appearance, and depends on no other artifact. Relations between artifacts are marks the members wear, never a parent that holds them. Full doctrine: `src/documentation/website-artifact-paradigm.md`.
 
-- **Tiles** — one per meaningful part of the creation, **1:1 with source resources**: a multi-file creation spreads its implementation files across child cells (marked `part`) instead of hiding internal dependencies behind one tile.
-- **Collections** — every creation gets a collection gathering its tiles, so it can be navigated, shared, and adopted as a unit.
-- **Pheromones** — mark each tile for what it belongs to and what it is. Rendering and behaviour read the mark; nothing is hardcoded per-feature. Never mint keywords on the fly — use the declared vocabulary.
-- **Notes** — the explanation lives on the tile, not only in a markdown file.
+**Retired: the mirror paradigm.** There is no longer a second structure to build alongside the code — no per-creation mirror pass, no mirror queue, no `scripts/mirror-*`. Do not reintroduce one, and do not treat "and now mirror it into the hive" as owed work. The hive holds artifacts that were made by breaking things apart, not a parallel copy of the source tree.
 
-- **Run or queued, never neither.** A mirror pass needs a live renderer on the bridge, so it cannot always happen in the same change. When it cannot, the same change adds an entry to the **mirror queue** (`npm run mirror:queue -- add …`, drained by `npm run mirror:queue:run`) naming what is owed and how to run it — and the commit says so. Shipping code with no mirror *and* no entry is how the hive falls behind; that is the one thing that must not happen. The queue is a repo file because the blocked case is "no bridge"; the hive is still the truth. It drains on its own after 10 minutes idle (`hypercomb-mirror-queue`) — so a pass that is **not** safely re-runnable (`note-add` is additive) must be queued `--manual`, or it lands the same note twice.
-
-Consequence: features are **data-driven from pools of meaning and pheromones**. If a change would require editing code to change how something is classified, grouped, or rendered, that classification belongs on a tile as a pheromone instead. The mirror is not documentation-after-the-fact — it is created alongside the behaviour, in the same pass, so the hive is built as the code is built. Full doctrine: `src/documentation/mirror-paradigm.md`; first instance: `scripts/mirror-behaviors.ts` (the `behaviors` root mirror).
+Features remain **data-driven from pools of meaning and pheromones**. If a change would require editing code to change how something is classified, grouped, or rendered, that classification belongs on a tile as a pheromone instead.
 
 ## Project Roles
 
@@ -77,7 +72,7 @@ hypercomb-core → hypercomb-essentials → hypercomb-web / hypercomb-dev
 npm run build:packages          # Build core + essentials in order
 npm run build:core              # Build core only
 npm run build:essentials        # Build essentials (tsup + esbuild modules + copy to web)
-npm run deploy:essentials       # Build essentials + deploy to Azure (production)
+npm run deploy:essentials       # Build essentials + advance the signed install sentinel (moves no bytes)
 ```
 
 From `hypercomb-web/`:
@@ -92,7 +87,7 @@ npm run runtime:core            # Copy core dist to public/core/
 Essentials are built as **signature-addressed modules** and auto-installed into OPFS at runtime:
 
 1. **Build** (`npm run build:essentials`): esbuild bundles drones into flat `dist/` as **sig-named files** (layers, bees, dependencies — no typed dirs) plus `manifest.json`. Then `copy-to-web.ts` copies output to `hypercomb-web/public/content/`. *(Legacy note: already-deployed content may still use the retired `__layers__/`/`__bees__/`/`__dependencies__/` URL layout; fetchers try the flat `/<sig>` URL first and fall back to the legacy typed URL — new builds never emit those dirs.)*
-2. **Deploy** (`npm run deploy:essentials`): Same build, but uploads flat content to Azure blob storage (`storagehypercomb`) instead of copying locally. Uploads `manifest.json` for discovery.
+2. **Deploy** (`npm run deploy:essentials`): Same build and the same local copies, plus `stamp-install-channel.ts` — which asks the authoring browser over the bridge to advance the signed `install:essentials` pointer to the new package signature. It uploads NOTHING; Azure blob storage was dropped. Bytes reach a reader by REPLICATION from a host (a web deploy, a Pages deployment, or a machine running `hypercomb-serve` — see `documentation/hosting-from-a-machine.md`).
 3. **Runtime auto-install**: On app load, `ensureInstall()` uses sentinel sync or `LayerInstaller` fetches `manifest.json` → looks up package by signature → downloads all listed layers/bees/deps → writes sig-named files to the OPFS root and the `sign('bees')`/`sign('dependencies')` pools. Skips if already installed (checked via `localStorage` + OPFS presence).
 4. **Import map**: `resolveImportMap()` reads the `sign('dependencies')` pool from OPFS (union-reading the legacy `__dependencies__/` dir as a read-only fallback while it drains), extracts aliases from first-line comments (`// @scope/name`), and injects a dynamic `<script type="importmap">`.
 5. **Module loading**: `DependencyLoader` imports dependencies via the import map. `ScriptPreloader` loads bees from OPFS, instantiates them, and registers in IoC.
@@ -112,7 +107,7 @@ src/
 ├── hypercomb-core/             # IoC, EffectBus, Drone base, SignatureService, KeyMap types, I18nProvider
 ├── hypercomb-essentials/       # Drones + services, organized by domain namespace
 │   └── src/
-│       ├── diamondcoreprocessor.com/   # Core processor domain — feature-oriented tree
+│       ├──    # Core processor domain — feature-oriented tree
 │       │   ├── assistant/              # AI assistant integration (ClaudeBridgeWorker)
 │       │   ├── clipboard/              # Copy, cut, paste (ClipboardWorker, ClipboardService)
 │       │   ├── commands/               # Command palette, slash behaviours, help, shortcut sheet

@@ -11,7 +11,7 @@ function wait(ms = 180) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function createPage({ hostname = "www.linkedin.com", settings = {}, html = "" } = {}) {
+async function createPage({ hostname = "www.linkedin.com", settings = {}, hive = null, html = "" } = {}) {
   const dom = new JSDOM(
     `<!doctype html><body><div id="editor" contenteditable="true">${html}</div></body>`,
     { runScripts: "dangerously", url: `https://${hostname}/article/edit`, pretendToBeVisual: true }
@@ -33,6 +33,9 @@ async function createPage({ hostname = "www.linkedin.com", settings = {}, html =
     storage: {
       sync: {
         get(_defaults, callback) { callback(structuredClone(stored)); }
+      },
+      local: {
+        get(_defaults, callback) { callback({ hive: structuredClone(hive) }); }
       },
       onChanged: {
         addListener(listener) { changeListeners.push(listener); }
@@ -98,6 +101,30 @@ async function run() {
     page.editor.dispatchEvent(new page.dom.window.InputEvent("input", { bubbles: true }));
     await wait();
     assert.equal(page.editor.querySelector("a")?.href, "https://hypercomb.io/");
+  }
+
+  {
+    // Synced hive replacements (local storage) link alongside manual ones,
+    // and a disabled site's items stay inert.
+    const page = await createPage({
+      hive: {
+        sites: [
+          { host: "revolucion.test", title: "Revolución", enabled: true },
+          { host: "dark.test", title: "Dark", enabled: false }
+        ],
+        replacements: [
+          { id: "hive:revolucion.test:flavor-wheel", phrase: "Flavor Wheel", url: "https://revolucion.test/flavor-wheel", groupId: "hive", siteHost: "revolucion.test", enabled: true },
+          { id: "hive:dark.test:root", phrase: "Dark", url: "https://dark.test/", groupId: "hive", siteHost: "dark.test", enabled: true }
+        ]
+      },
+      html: "The flavor wheel beats Dark and hypercomb agrees."
+    });
+    page.editor.dispatchEvent(new page.dom.window.InputEvent("input", { bubbles: true }));
+    await wait();
+    const links = [...page.editor.querySelectorAll("a")].map((a) => a.href);
+    assert.ok(links.includes("https://revolucion.test/flavor-wheel"), "hive item links");
+    assert.ok(links.includes("https://hypercomb.io/"), "manual item still links");
+    assert.ok(!links.includes("https://dark.test/"), "disabled site stays inert");
   }
 
   console.log("Smart Autolinker content tests passed.");

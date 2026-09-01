@@ -1,15 +1,13 @@
 # Claude Skills — census and the lazy-load contract
 
-Censused 2026-07-31. Mirror: `behaviors/assistant/skills` (built by
-`scripts/mirror-claude-skills.cjs`, extends the behaviors mirror — never
-re-run mirror-behaviors).
+Censused 2026-07-31. The census tiles live at `behaviors/assistant/skills`.
 
 A **skill** is the unit of *taught* behaviour: a `SKILL.md` instruction file
 with a trigger description, loaded into a Claude session only when its
 situation matches. Skills are to sessions what drones are to the hive —
 packaged, addressable, interchangeable capability.
 
-## The three origins (three collections in the mirror)
+## The three origins (three collections)
 
 ### hive-skills — this repo's own (`.claude/skills/`)
 Every one of them drives the hive through the Claude Bridge (`ws://localhost:2401`):
@@ -33,8 +31,8 @@ Recurring execution (`loop`), app driving (`run`), review passes (`review`,
 `keybindings-help`, `fewer-permission-prompts`), reference (`claude-api`),
 scaffolding (`init`), plugin `automation-recommender`.
 
-### community-skills — the ecosystem's top 100 (`mirror-community-skills.cjs`)
-There are thousands of published skills; the mirror carries the ~100 the
+### community-skills — the ecosystem's top 100
+There are thousands of published skills; the census carries the ~100 the
 ecosystem itself ranks highest — by stars (superpowers ~94K, karpathy-guard
 ~144K), installs (frontend-design 277K+, code-reviewer #1 on Agensi), author
 credibility (Trail of Bits, Expo, Anthropic official) and singular capability
@@ -61,7 +59,7 @@ re-running (idempotent).
 
 ## The lazy-load contract (Claude Bridge incorporation)
 
-The mirror tiles hold **name + trigger + source — never the instructions**.
+The census tiles hold **name + trigger + source — never the instructions**.
 Nothing is preloaded into any session. The dispatch shape:
 
 1. An ask (or feedback item, or routine trigger) arrives over the bridge.
@@ -80,9 +78,6 @@ tile to the census — no dispatcher code changes.
 
 ## Extending the census
 
-Add the skill to the appropriate array in
-`scripts/mirror-claude-skills.cjs` and re-run it (idempotent: children
-union, notes only written where absent). New skills for the hive itself go
-in `.claude/skills/<name>/SKILL.md` — write the trigger description
-carefully; it is both Claude's activation matcher and the bridge's routing
-entry.
+New skills for the hive itself go in `.claude/skills/<name>/SKILL.md` —
+write the trigger description carefully; it is both Claude's activation
+matcher and the bridge's routing entry.

@@ -260,3 +260,174 @@ model.
 If you add an archetype, give it a case in both `cssFor` (the live look) and
 `swatchFor` (the chip), and — if it is a lattice — an entry in `LINE_KINDS` and
 an alpha in `lineAlpha` so `GridLinesDrone` draws it.
+
+## The Backgrounds window
+
+`/background` with nothing after it opens a tool window rather than printing
+the list into the activity log — a list you cannot look at while you choose
+from it, and whose lines could never show you what a look actually was.
+
+It has TWO SECTIONS, because there are exactly two things being dressed, and
+they are peer sections over one subject so exactly one is open at a time
+(`ui/accordion.ts`):
+
+- **SCREEN** — what is behind the hive. Your own picture first, then the drawn
+  looks.
+- **TILES** — the groups that fill blank tiles, and every picture in the live
+  group with an eye beside it.
+
+`/background screen` and `/background tiles` open the window ON that section,
+so the command line and the surface land in the same place.
+
+## A picture behind the hive
+
+Until now the screen could only ever be a drawn pattern, so the answer to "how
+do I set a backdrop image?" was, correctly, that you could not. Now you can:
+choose a file, or press the wallpaper icon beside any picture in the tiles
+pool.
+
+It is held the way every other piece of content is held. **The preference
+stores a SIGNATURE**; the bytes live at the content root; the object URL is a
+session handle on them. A file you bring in is downscaled to 2560px on its long
+edge and becomes a signed resource first, so the same picture behind the hive,
+on a tile and in the references pool is one file with three references. Nothing
+is copied into localStorage and nothing is written to a layer — a peer opening
+the same hive sees their own screen.
+
+**A picture stands in for the pattern.** Contour rings over a photograph are
+two backdrops fighting for one screen, so while a picture is showing the
+patterned half steps aside whole: the body carries the base colour, the lattice
+layer is told there is nothing to draw, and the palette survives as the wash
+the picture is read through. Remove the picture and the drawn look comes back.
+
+**The opacity is the one number.** The picture arrives exactly as chosen —
+**100% opacity is the default**, no wash taken up front. Anything less washes
+it toward the palette, for when a white tile label needs a calmer field to sit
+on — a slider in the window, 0–100, and `/background screen.opacity.60` from
+the line (`screen.wash` still parses, unoffered: wash 60 = opacity 40). A
+bright look washes toward white and a dark one toward its own deep: dimming a
+photograph to black under cream panels reads as a hole.
+
+**Saved backdrops sort into light and dark.** Below the slider sit two
+shelves, Light and Dark. A picture says NOTHING by default — dragging the
+active picture's chip onto a shelf IS the sorting, and a picture already on
+the other shelf moves rather than copies. Click a saved one to wear it; the ×
+takes it off its shelf (the bytes, as ever, are content and are left alone).
+
+**The shelves live in a pool of meaning** — `backgrounds:saved`, one
+content-addressed doc `{ light: [sigs], dark: [sigs] }` (seeded in
+`pool-registry.ts`). Anything that should be queryable across the network
+belongs in a pool — domains then become gates for discovering that content.
+Shelf entries an interim build left in the pref are adopted into the pool once
+and never written back.
+
+**And so does the screen itself** — `backgrounds:screen`, one doc naming the
+picture's signature plus how it is washed, zoomed and offset. What is showing
+is still a participant-local CHOICE, but participant-local never meant
+localStorage-only here (the viewport is participant-local and lives in a pool),
+and keeping it there alone cost two things:
+
+- **Reachability.** Nothing in the hive referenced the backdrop's bytes. A
+  resource no marker and no pool member names is, to every collector in this
+  system, litter from an abandoned gesture — indistinguishable from a paste
+  that was escaped. A pool member naming the signature makes it referenced
+  content, which is what it always was.
+- **Travel.** A replicated hive, a second origin, a browser that dropped its
+  storage — each arrived with the picture present in the store and no idea it
+  was the backdrop.
+
+`hc:canvas-bg` (carrying `v: 2`) stays as the instant read, because the first
+paint cannot wait for OPFS; the pool is the durable half. The pref WINS
+whenever it names a picture, or says the backdrop is off — the pool only
+speaks where nothing local does.
+
+Three traps this cost, all worth keeping written down:
+
+- **The boot read was TIMED rather than waited for.** The picture resolved on
+  a fixed eight-second ladder, and on a large hive the store settles after
+  that: the read gave up, the screen fell back to a pattern, and the
+  preference went on naming a picture that was sitting right there. That is
+  what "I keep losing my background" was. The wait is exact now — the
+  registration is polled (a service locator cannot announce a registration
+  that already happened, which is why `whenReady` never settles here) and
+  readiness is the store's own idempotent `initialize()`. A signature that
+  resolves to nothing is KEPT and said out loud once, never cleared.
+
+- It was briefly its own fixed element so the blur could be live CSS. That
+  element measured **0×0** on the shell's real page — a `position: fixed` box
+  whose containing block is not the viewport is a whole class of bug this file
+  had already avoided by never leaving the body. It is body background layers
+  now, like every other backdrop here.
+- **The store answers before it is ready.** It registers in IoC while OPFS is
+  still opening, so one read at boot came back null for a picture that was
+  plainly there, and the backdrop stayed a pattern until the next change. The
+  boot resolve now asks again on a short ladder (`RESOLVE_LADDER`, six tries
+  over about eight seconds).
+
+## The light and dark worlds
+
+A wall of deep-space plates under cream panels is not a choice anyone makes on
+purpose, and neither is a set of paper washes under near-black chrome. **The
+list follows the chrome**: under a bright theme you are offered the looks that
+go with a bright theme, and under a dark one the dark ones.
+
+- A **screen** look never declares which world it is in — its palette already
+  knows, and `mood()` reads it from there. Asking twice is a second source of
+  truth that can only drift.
+- A **tile** group has no palette, so it says so in its own entry:
+  `mood: 'light' | 'dark'`. A group that says nothing suits BOTH, which is the
+  honest answer for a mixed collection like `photos` rather than a coin toss.
+
+Two rules keep the filter from becoming a cage:
+
+- **The look you are wearing is always on its own list.** Nature is the ship
+  default and is a dark group, so under a bright chrome the filter took the
+  active group off the list — leaving six groups, none of them marked, above
+  the twenty pictures the seventh was actually handing out.
+- **`half(which, all)` has an escape hatch**, and the window draws it as a
+  checkbox that only appears when something is actually being held back.
+  Typing a name still applies it either way: the filter is about what is
+  OFFERED, never about what is allowed.
+
+One rule, asked of one service, so the window and the command dropdown cannot
+drift into offering different lists.
+
+## Hiding a picture
+
+A group of twenty scenes will always contain two you do not want on your wall.
+The eye beside each picture takes it out of the rotation — it is never handed
+to a blank tile again — and `/background tiles.hidden` lists what you have
+taken out, `tiles.hidden.clear` puts them all back.
+
+The hidden set is **persisted** now (`hc:substrate-hidden`). It used to live
+only in memory and came back on every reload, which made "hide the ones I don't
+want" a thing you did again every morning. Participant-local, never a layer,
+never a peer's — the same rule the colour theme and the screen backdrop keep.
+
+## The grammar
+
+```
+/background                          — open the window
+/background screen                   — the screen half, in the window
+/background screen.<look>            — dress the screen
+/background screen.picture           — choose a picture of your own
+/background screen.picture.remove    — back to a drawn look
+/background screen.opacity.<0-100>   — how much of the picture shows
+/background screen.off               — bare surface
+/background tiles                    — the tiles half, in the window
+/background tiles.<group>            — fill blank tiles from that group
+/background tiles.<group>.items      — show the group's pictures
+/background tiles.<group>.<picture>  — pin ONE picture onto every tile
+/background tiles.<group>.force      — also re-dress this layer's tiles
+/background tiles.<group>.force.global — … every tile in the hive
+/background tiles.hidden             — the pictures you have taken out
+/background tiles.hidden.clear       — put them all back
+```
+
+**The two halves are the first fork now.** Until this pass the only place the
+screen/tiles distinction appeared was a description string in the dropdown, so
+someone looking for a backdrop image found a flat list of theme names with no
+way to tell which of them was even about the screen.
+
+A bare theme name still applies — `/background ember` lands exactly as it
+always did. It is simply not what the dropdown teaches any more.

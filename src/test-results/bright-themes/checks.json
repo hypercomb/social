@@ -1,0 +1,117 @@
+[
+  {
+    "name": "a fresh shell opens as honey",
+    "ok": true,
+    "detail": "data-theme=honey"
+  },
+  {
+    "name": "the service agrees with the pre-paint stamp",
+    "ok": true,
+    "detail": "service=honey attr=honey"
+  },
+  {
+    "name": "and it is genuinely bright",
+    "ok": true,
+    "detail": "surface=#fff8e7 luminance=0.97"
+  },
+  {
+    "name": "text on it is ink, not grey",
+    "ok": true,
+    "detail": "on-surface=#2b1e06 luminance=0.12"
+  },
+  {
+    "name": "the page itself is painted bright",
+    "ok": true,
+    "detail": "body=rgb(253, 243, 221)"
+  },
+  {
+    "name": "the empty-hive card kept a ground to sit on",
+    "ok": true,
+    "detail": "card bg=rgba(255, 250, 236, 0.94)"
+  },
+  {
+    "name": "and its text contrasts with that ground",
+    "ok": true,
+    "detail": "bg=rgba(255, 250, 236, 0.94) fg=rgb(43, 30, 6)"
+  },
+  {
+    "name": "elevation is lit, not sooty",
+    "ok": true,
+    "detail": "0 1px 2px rgba(120, 80, 10, 0.12), 0 2px 6px 2px"
+  },
+  {
+    "name": "the motion has a little spring",
+    "ok": true,
+    "detail": "emphasized=cubic-bezier(0.2, 0.9, 0.25, 1.06)"
+  },
+  {
+    "name": "and it is quicker than the baseline",
+    "ok": true,
+    "detail": "medium=220ms"
+  },
+  {
+    "name": "the theme says it is light",
+    "ok": true,
+    "detail": "--md-is-light=1"
+  },
+  {
+    "name": "so the backdrop is bright too — on a DARK-OS machine",
+    "ok": true,
+    "detail": "resolvedPalette=honey"
+  },
+  {
+    "name": "/theme offers the three looks beside light and dark",
+    "ok": true,
+    "detail": "light, dark, honey, bloom, sherbet"
+  },
+  {
+    "name": "/background bloom dresses the chrome",
+    "ok": true,
+    "detail": "data-theme=bloom"
+  },
+  {
+    "name": "/background bloom dresses the screen with it",
+    "ok": true,
+    "detail": "bloom/mesh"
+  },
+  {
+    "name": "bloom is bright",
+    "ok": true,
+    "detail": "surface=#f2fbf7"
+  },
+  {
+    "name": "/background sherbet dresses the chrome",
+    "ok": true,
+    "detail": "data-theme=sherbet"
+  },
+  {
+    "name": "/background sherbet dresses the screen with it",
+    "ok": true,
+    "detail": "sherbet/dots"
+  },
+  {
+    "name": "sherbet is bright",
+    "ok": true,
+    "detail": "surface=#fdf6ff"
+  },
+  {
+    "name": "a theme that names no chrome does not touch the panels",
+    "ok": true,
+    "detail": "stayed on sherbet (was sherbet)"
+  },
+  {
+    "name": "dark is still one word away",
+    "ok": true,
+    "detail": "data-theme=dark is-light=0"
+  },
+  {
+    "name": "and the surface went dark with it",
+    "ok": true,
+    "detail": "surface=#0e161c"
+  },
+  {
+    "name": "the card is still readable in dark",
+    "ok": true,
+    "detail": "bg=rgba(8, 16, 26, 0.94) fg=rgb(238, 242, 245)"
+  }
+]

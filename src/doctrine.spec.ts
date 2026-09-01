@@ -19,10 +19,21 @@ import { BARE_WORD_POOL_MEANINGS } from '@hypercomb/core'
 
 const ROOT = __dirname
 
-// the five-tier packages + shells; worktrees/dist/node_modules excluded
+// Every package + shell; worktrees/dist/node_modules excluded.
+//
+// A RATCHET ONLY HOLDS WHAT IT CAN SEE, so a package missing from this list is
+// not merely unchecked — it is an exit. When `hypercomb-runtime` was split out
+// of `hypercomb-shared/core` and this list was not extended with it, three
+// ratchets reported their `store.ts` entries as DEBT PAID: the file had not
+// been cleaned up, it had walked out of the room, and pruning those entries as
+// the message invites would have sealed the debt in permanently. Adding a
+// package here is part of creating one.
 const SCAN_DIRS = [
   'hypercomb-core/src',
   'hypercomb-shared',
+  'hypercomb-runtime/src',
+  'hypercomb-shim/src',
+  'hypercomb-legacy/src',
   'hypercomb-essentials/src',
   'hypercomb-essentials/scripts',
   'hypercomb-web/src',
@@ -89,6 +100,69 @@ const assertRatchet = (actual: string[], allowed: string[], rule: string): void 
 
 describe('doctrine ratchets', () => {
 
+  // ─── bridge scripts: a child sig is a LAYER sig, not a resource ──────
+  //
+  // `scripts/` is scanned on its own here (NOT added to SCAN_DIRS — the other
+  // ratchets are about shipped source). Two patterns, one bug, verified live
+  // 2026-08-30 against the authoring hive:
+  //
+  //   1. Decoding a child's NAME with `get-resource`. A parent's `children`
+  //      slot holds LAYER sigs; `get-resource` on one answers "resource not
+  //      found" for every entry, so the reader reports an EMPTY parent for a
+  //      healthy hive — silently, and positively.
+  //   2. Growing a parent with `update(..., { children: [...] })`. That is a
+  //      SET op; the committer REPLACES the slot. It is only ever as safe as
+  //      the read that fed it, and (1) made every such read a lie.
+  //
+  // Both are retired by scripts/lib/hive-children.mjs: existence per CHILD
+  // PATH, creation via `op:'add'` (an APPEND). Anything matching below is a
+  // new copy of the bug.
+
+  const scriptFiles = (): string[] => {
+    const out: string[] = []
+    const walkScripts = (dir: string): void => {
+      let entries
+      try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          if (!SKIP_DIRS.has(entry.name) && !entry.name.startsWith('.')) walkScripts(join(dir, entry.name))
+        } else if (/\.(ts|cjs|mjs|js)$/.test(entry.name) && !entry.name.endsWith('.d.ts')) {
+          out.push(join(dir, entry.name))
+        }
+      }
+    }
+    walkScripts(join(ROOT, 'scripts'))
+    return out
+  }
+
+  const scriptsMatching = (pattern: RegExp): string[] => {
+    const hits = new Set<string>()
+    for (const file of scriptFiles()) {
+      const code = stripComments(readFileSync(file, 'utf8'))
+      if (pattern.test(code)) hits.add(relative(ROOT, file).replace(/\\/g, '/'))
+    }
+    return [...hits].sort()
+  }
+
+  it('no bridge script decodes a CHILD signature with get-resource', () => {
+    // A `children` entry is a LAYER sig. Resolve it with `layer-by-sig` (one
+    // hop) or `inflate` (whole subtree) — never `get-resource`, which cannot
+    // answer for a layer and whose failure is indistinguishable from an empty
+    // parent. Twelve scripts had this, several feeding the empty result into
+    // an `update` carrying `children`, which the committer applies by
+    // REPLACING the slot. All now read through scripts/lib/hive-children.mjs,
+    // which throws rather than under-report.
+    //
+    // This matches only a LOOP OVER a children array that calls get-resource
+    // inside it — `get-resource` on a properties or decoration sig is correct
+    // and common, and is not matched.
+    const actual = scriptsMatching(
+      /(?:of|in)\s*\(?[^\n]{0,60}children[^\n]{0,40}\)?\s*\)?\s*\{?[\s\S]{0,160}?op:\s*['"`]get-resource['"`]/,
+    )
+    assertRatchet(actual, [], 'child sig decoded as a resource')
+  })
+
+
   it('synchronize is dispatched only by the processor (plus frozen boot-kick debt)', () => {
     // hypercomb.act()'s finally block is the sole sanctioned dispatcher.
     // (The three shell boot kicks were routed through act('') — debt paid.)
@@ -104,8 +178,8 @@ describe('doctrine ratchets', () => {
     // documented sha256-of-empty sentinels only.
     const actual = filesMatching(/['"`][0-9a-f]{64}['"`]/)
     assertRatchet(actual, [
-      'hypercomb-shared/core/store.ts',                                              // EMPTY_CONTENT_SIG
-      'hypercomb-essentials/src/diamondcoreprocessor.com/history/history.service.ts', // EMPTY_LAYER_*_SIG
+      'hypercomb-runtime/src/store.ts',                                              // EMPTY_CONTENT_SIG
+      'hypercomb-essentials/src/history/history.service.ts', // EMPTY_LAYER_*_SIG
     ], 'hardcoded signature')
   })
 
@@ -121,20 +195,19 @@ describe('doctrine ratchets', () => {
     const actual = filesMatching(/['"`]__[a-z][a-z0-9_-]*__['"`]/)
     assertRatchet(actual, [
       'hypercomb-shared/core/initializers/location-parser.ts',
-      'hypercomb-shared/core/store.ts',
-      'hypercomb-essentials/scripts/copy-to-dcp.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/assistant/structure-drop.worker.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/clipboard/clipboard.worker.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/commands/website-archive.queen.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/editor/viewport-store.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/history/history.service.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/move/layout.queen.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/move/layout.service.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/sharing/content-broker.drone.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/sharing/feedback-channel.drone.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/sharing/host-sync.service.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/sharing/push-queue.service.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/sharing/swarm.drone.ts',
+      'hypercomb-runtime/src/store.ts',
+      'hypercomb-essentials/scripts/copy-content.ts',
+      'hypercomb-essentials/src/clipboard/clipboard.worker.ts',
+      'hypercomb-essentials/src/commands/website-archive.queen.ts',
+      'hypercomb-essentials/src/editor/viewport-store.ts',
+      'hypercomb-essentials/src/history/history.service.ts',
+      'hypercomb-essentials/src/move/layout.queen.ts',
+      'hypercomb-essentials/src/move/layout.service.ts',
+      'hypercomb-essentials/src/sharing/content-broker.drone.ts',
+      'hypercomb-essentials/src/sharing/feedback-channel.drone.ts',
+      'hypercomb-essentials/src/sharing/host-sync.service.ts',
+      'hypercomb-essentials/src/sharing/push-queue.service.ts',
+      'hypercomb-essentials/src/sharing/swarm.drone.ts',
     ], 'typed-folder literal')
   })
 
@@ -172,9 +245,9 @@ describe('doctrine ratchets', () => {
     // show-cell resolveChildNames backfill; store.ts defines it.
     const actual = filesMatching(/writeChildrenManifest/)
     assertRatchet(actual, [
-      'hypercomb-shared/core/store.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/history/manifest-optimizer.drone.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/show-cell.drone.ts',
+      'hypercomb-runtime/src/store.ts',
+      'hypercomb-essentials/src/history/manifest-optimizer.drone.ts',
+      'hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts',
     ], 'children-manifest writer')
   })
 
@@ -260,9 +333,9 @@ describe('doctrine ratchets', () => {
     // 'auto-persist' — do not extend this list.
     const actual = filesMatching(/zoomToFit\s*\?*\.?\s*\(\s*[^)]*['"`]user['"`]/)
     assertRatchet(actual, [
-      'hypercomb-essentials/src/diamondcoreprocessor.com/navigation/zoom/fit.queen.ts',        // /fit
-      'hypercomb-essentials/src/diamondcoreprocessor.com/navigation/zoom/zoom.drone.ts',       // `0`/`r` keymap + pinch-below-min
-      'hypercomb-essentials/src/diamondcoreprocessor.com/sequence/sequence-cycle.drone.ts',    // the `a` recompose keypress
+      'hypercomb-essentials/src/navigation/zoom/fit.queen.ts',        // /fit
+      'hypercomb-essentials/src/navigation/zoom/zoom.drone.ts',       // `0`/`r` keymap + pinch-below-min
+      'hypercomb-essentials/src/sequence/sequence-cycle.drone.ts',    // the `a` recompose keypress
       'hypercomb-shared/ui/controls-bar/controls-bar.component.ts',                            // the fit button
     ], "automatic zoomToFit claiming source 'user'")
   })
@@ -277,6 +350,10 @@ describe('doctrine ratchets', () => {
     // producers where a build record is n/a by design, and KNOWN DEBT —
     // multi-anchor producers not yet wired. Wiring one = remove it here
     // AND in scripts/audit-atomicity.cjs (the live twin) so both click.
+    // The debt tier is now EMPTY: every multi-anchor producer in the tree
+    // ends its pass with a record, so what remains below is only the
+    // single-anchor set. A new name in either list means a producer shipped
+    // unsealed.
     const scriptsDir = join(ROOT, 'scripts')
     const files: string[] = []
     const walkScripts = (dir: string): void => {
@@ -307,11 +384,6 @@ describe('doctrine ratchets', () => {
       'scripts/bridge/_tutor-deck.cjs',
       'scripts/build-hypercomb-articles.cjs',
       'scripts/meaning-loop-phase1.ts',
-      // KNOWN DEBT — multi-anchor producers awaiting their end-of-pass build-record
-      'scripts/bridge/_ai-privacy-build.cjs',
-      'scripts/bridge/_ai-privacy-chart.cjs',
-      'scripts/bridge/_generate-dolphin-pages.cjs',
-      'scripts/bridge/_pheromone-workflow.cjs',
     ].sort(), 'unwired multi-anchor producer')
   })
 
@@ -606,10 +678,83 @@ describe('doctrine ratchets', () => {
       // they are a cabinet screen laid over it, with their own vector-juice
       // rules (chunky HUD panels, fat score plates). The ladder governs the
       // hive's interface; it does not govern a game's.
-      'hypercomb-essentials/src/diamondcoreprocessor.com/games/arkanoid/overlay.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/games/bubble/overlay.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/games/roper/overlay.ts',
-      'hypercomb-essentials/src/diamondcoreprocessor.com/games/solomon/overlay.ts',
+      'hypercomb-essentials/src/games/arkanoid/overlay.ts',
+      'hypercomb-essentials/src/games/bubble/overlay.ts',
+      'hypercomb-essentials/src/games/roper/overlay.ts',
+      'hypercomb-essentials/src/games/solomon/overlay.ts',
     ], 'border-radius above the shape ladder')
+  })
+
+  // ─── a tool window never names an INK ────────────────────────────────
+  //
+  // Every panel used to paint its labels from a literal picked against a dark
+  // pane — `#eaf3f9` for a title, `rgba(207, 226, 238, 0.62)` for a lede, the
+  // authored pastel for an icon. Under a bright look the pane goes cream and
+  // the text stays where it was: 625 such declarations, measuring as low as
+  // 1.09:1 — present in the DOM, invisible on screen.
+  //
+  // The vocabulary that replaced them is in `ui/_toolwindow.scss`:
+  //   weight   → var(--hc-window-ink-quiet | -plain | -loud)
+  //   identity → var(--hc-window-accent | -quiet), --hc-window-on-accent
+  //   ground   → var(--hc-window-tint | -strong), --hc-window-wash
+  //   a colour that is the POINT → tw.ink(<colour>)  (the --hc-deepen knob)
+  //
+  // This guards the ink side, which is where the damage was: a `color`,
+  // `fill` or `stroke` set to a LIGHT literal. Dark literals are left alone —
+  // they read correctly on the bright panes and the dark themes measure clean.
+  // 0.28 luminance is the floor because the band from there to 0.35 is where
+  // the semantic violets and reds sit (#b48ad8 is 0.33), light enough to
+  // measure ~3.5:1 on cream while looking safe in the source.
+  //
+  // Empty allowlist, and it stays empty. Proof for the whole surface is
+  // `node scripts/drive-toolwindow-contrast.cjs`, which opens each window in
+  // each theme and composites every run of text over the ground it actually
+  // has; it reported 0 runs under target when this was frozen.
+  it('no tool-window stylesheet paints text from a light literal', () => {
+    const walkStyles = (dir: string, out: string[] = []): string[] => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          if (!SKIP_DIRS.has(entry.name) && !entry.name.startsWith('.')) walkStyles(join(dir, entry.name), out)
+        } else if (entry.name.endsWith('.scss')) out.push(join(dir, entry.name))
+      }
+      return out
+    }
+
+    const parseColour = (raw: string): [number, number, number] | null => {
+      const c = raw.trim()
+      let m = /^#([0-9a-f]{3})$/i.exec(c)
+      if (m) return [parseInt(m[1][0] + m[1][0], 16), parseInt(m[1][1] + m[1][1], 16), parseInt(m[1][2] + m[1][2], 16)]
+      m = /^#([0-9a-f]{6})$/i.exec(c)
+      if (m) return [parseInt(m[1].slice(0, 2), 16), parseInt(m[1].slice(2, 4), 16), parseInt(m[1].slice(4, 6), 16)]
+      m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*[\d.]+\s*)?\)$/i.exec(c)
+      if (m) return [+m[1], +m[2], +m[3]]
+      return null
+    }
+    // WCAG relative luminance — the same number the driver measures with, so
+    // the ratchet and the reading can never disagree about what "light" is.
+    const luminance = ([r, g, b]: [number, number, number]): number => {
+      const chan = (v: number): number => {
+        const x = v / 255
+        return x > 0.03928 ? Math.pow((x + 0.055) / 1.055, 2.4) : x / 12.92
+      }
+      return 0.2126 * chan(r) + 0.7152 * chan(g) + 0.0722 * chan(b)
+    }
+
+    const offenders: string[] = []
+    let files: string[]
+    try { files = walkStyles(join(ROOT, 'hypercomb-shared/ui')) } catch { files = [] }
+    for (const file of files) {
+      const code = stripComments(readFileSync(file, 'utf8'))
+      const decl = /(^|[\s;{])(color|fill|stroke)\s*:\s*(#[0-9a-f]{3,6}|rgba?\([\d.,\s]*\))\s*(?=[;}])/gim
+      let hit
+      while ((hit = decl.exec(code))) {
+        const rgb = parseColour(hit[3])
+        if (rgb && luminance(rgb) > 0.28) {
+          offenders.push(relative(ROOT, file).replace(/\\/g, '/'))
+          break
+        }
+      }
+    }
+    assertRatchet(offenders.sort(), [], 'a light ink literal in a tool window')
   })
 })

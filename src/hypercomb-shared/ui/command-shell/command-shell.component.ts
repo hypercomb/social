@@ -6,15 +6,24 @@
 
 import { Component, computed, effect, ElementRef, inject, input, output, signal, ViewChild, type AfterViewInit, type OnDestroy } from '@angular/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { TextScaleComponent, surfaceScale, stepSurfaceScale } from '../text-scale/text-scale.component'
 
 /** How long a view toggle must be held (no modifier) to count as a disable —
  *  the touch-friendly equivalent of a cmd/ctrl-click. */
 const VIEW_TOGGLE_LONG_PRESS_MS = 500
 
+/** One frozen empty array for rows with no other spellings — a fresh `[]` per
+ *  call would hand `@for` a new identity on every change-detection pass. */
+const EMPTY_ALIASES: readonly string[] = Object.freeze([])
+
+/** The completion panel's window id for the text-size record. A plain
+ *  string, not a signature: this is a settings key, not content. */
+const COMPLETION_WINDOW = 'command-intel'
+
 @Component({
   selector: 'hc-command-shell',
   standalone: true,
-  imports: [TranslatePipe],
+  imports: [TranslatePipe, TextScaleComponent],
   templateUrl: './command-shell.component.html',
   styleUrls: ['./command-shell.component.scss']
 })
@@ -66,6 +75,29 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
 
   /** Last list fingerprint seen by the highlight-reset effect. */
   #lastListKey = ''
+
+  /** The window id the completion panel's text size is recorded under. Same
+   *  vocabulary and same storage as a docked panel's — see text-scale. */
+  readonly textScaleWindow = COMPLETION_WINDOW
+
+  /** Multiplier on the panel's own font-size. Everything in the panel is sized
+   *  in em off that, so one number moves the list, the chips and the detail. */
+  readonly textScale = signal(surfaceScale(COMPLETION_WINDOW))
+
+  /** Ctrl/Cmd + `=` / `-` steps the ladder while the panel is open — the
+   *  keyboard path for a surface you reached from the keyboard. The segmented
+   *  control in the detail pane is the same setting for the pointer. */
+  #handleTextScaleKeys(e: KeyboardEvent): boolean {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return false
+    if (!this.effectiveShowCompletions()) return false
+    const direction = (e.key === '=' || e.key === '+') ? 1
+      : (e.key === '-' || e.key === '_') ? -1
+      : 0
+    if (!direction) return false
+    e.preventDefault()
+    this.textScale.set(stepSurfaceScale(COMPLETION_WINDOW, direction as 1 | -1))
+    return true
+  }
 
   /** Compute the dropdown's fixed screen coordinates from the command bar's
    *  rect and feed them in as CSS vars. Opens DOWN when the bar is in the top
@@ -163,8 +195,17 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   /** Prefix of each suggestion that the user has typed (for highlight split). */
   readonly typedPrefix = input('')
 
-  /** Optional descriptions keyed by suggestion name (shown right-aligned). */
+  /** Optional descriptions keyed by suggestion name (second column). */
   readonly descriptionMap = input<ReadonlyMap<string, string>>(new Map())
+
+  /**
+   * Other spellings that reach the SAME behaviour, keyed by the row that
+   * absorbed them — rendered as chips beside the name, exactly as the /help
+   * reference sheet lists them. The parent folds those rows away and hands
+   * them here, so three rows repeating one sentence become one row that says
+   * what else it answers to.
+   */
+  readonly aliasMap = input<ReadonlyMap<string, readonly string[]>>(new Map())
 
   /**
    * Detail for the CURRENTLY-ACTIVE suggestion, rendered in the right-hand
@@ -223,9 +264,9 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   readonly notesLabel = input<string>('notes')
 
 
-  /** The chat window's open state — its toggle LEADS the standing-tools group
-   *  (the chat window is the default companion view, so its switch comes
-   *  first; the per-cell behaviour icons stay in their own group to the left). */
+  /** The chat window's open state. THIS rail owns the launcher again — the
+   *  control bar's copy is gone, so there is one opener and it sits on the
+   *  box the question is typed into. */
   readonly chatPanelOpen = input<boolean>(false)
   readonly chatLabel = input<string>('chat')
 
@@ -694,6 +735,10 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
     return this.descriptionMap().get(suggestion) ?? ''
   }
 
+  aliasesFor = (suggestion: string): readonly string[] => {
+    return this.aliasMap().get(suggestion) ?? EMPTY_ALIASES
+  }
+
   colorFor = (suggestion: string): string => {
     return this.colorMap().get(suggestion) ?? ''
   }
@@ -720,6 +765,8 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   }
 
   onKeyDown = (e: KeyboardEvent): void => {
+    if (this.#handleTextScaleKeys(e)) return
+
     // The two ACCEPT keys are handled first and independently of the shell's
     // (change-detection-lagged) copy of the suggestion list — see handleTab.
     if (e.key === 'Tab') {

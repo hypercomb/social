@@ -33,7 +33,17 @@
   console.log(`[nav] +${(now - t0).toFixed(0)}ms ${label}${extra ? ` ${extra}` : ''}`)
 }
 
+// The shipped locale catalogs. They used to live inside runtime-initializer;
+// that module is in @hypercomb/runtime now and ships none of its own, because
+// a locale is content and which languages exist is the host's answer. Web and
+// dev still bundle theirs — Angular lazy-chunks them — so pass them in
+// explicitly and nothing about these shells changes.
+import { bundledCatalogs, bundledLocales } from '@hypercomb/shared/core/bundled-catalogs'
 import '@hypercomb/shared/core/ioc.web'
+// The escape cascade's door. This used to ride into every shell inside
+// runtime-initializer; the runtime package cannot reach hypercomb-shared/ui,
+// so the shell that wants tool windows imports them itself.
+import '@hypercomb/shared/ui/tool-windows'
 // NATIVE SHELL: route every OPFS acquisition to the one native hive BEFORE
 // anything can capture the original — nine files call
 // navigator.storage.getDirectory() directly, and WebView2 has a real OPFS
@@ -55,8 +65,7 @@ import { EffectBus } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared'
 import { PACKED_STORE_MEANING } from '@hypercomb/shared/core/packed-store-engine'
 import { packedStoreBlocksBoot } from '@hypercomb/shared/core/packed-store-gate'
-import { ensureInstall, opfsWritable, resyncFromSentinel, upgradeFromBundled, type BootStatus } from './setup/ensure-install'
-import { initSentinel, type SentinelBridge } from './setup/sentinel-bridge'
+import { ensureInstall, opfsWritable, upgradeFromBundled, type BootStatus } from './setup/ensure-install'
 import { cacheImportMap, IMPORT_MAP_STORAGE_KEY, resolveImportMap } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
 import { App } from './app/app'
@@ -66,6 +75,7 @@ import {
   protectOriginStorage,
 } from '@hypercomb/shared/core'
 import { postCommunityDomainsToServiceWorker } from '@hypercomb/shared/core/sw-domains'
+import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
 
 // Ensure side-effect registration
 const _deps = [DependencyLoader]
@@ -79,8 +89,25 @@ const ensureSwControl = async (): Promise<void> => {
   // active). A versioned URL makes every worker change a fresh registration.
   // Web is untouched: __hcSwV is undefined there.
   const swV = (window as any).__hcSwV
-  await navigator.serviceWorker.register('/hypercomb.worker.js' + (swV ? '?v=' + swV : ''), { scope: '/' })
-  const reg = await navigator.serviceWorker.ready
+
+  // A worker that CANNOT be registered is a missing feature, not a failed
+  // boot. WebKitGTK — the Linux native shell's webview — exposes
+  // navigator.serviceWorker on the tauri:// custom scheme, so the guard above
+  // passes, and then rejects register() outright. This sits one statement
+  // before bootstrapApplication, so the rejection took the whole shell down:
+  // boot stopped at milestone #11 and never painted, on the one platform
+  // whose smoke test is a hard gate. Nothing on the first-paint path needs a
+  // worker — its /@resource/ route serves embedded-site composition only,
+  // exactly as the controller gate below already notes — so degrade loudly
+  // and carry on. macOS and WebView2 register normally and are unaffected.
+  let reg: ServiceWorkerRegistration | null = null
+  try {
+    await navigator.serviceWorker.register('/hypercomb.worker.js' + (swV ? '?v=' + swV : ''), { scope: '/' })
+    reg = await navigator.serviceWorker.ready
+  } catch (error) {
+    console.warn('[main] service worker unavailable — embedded-site resources will not stream from a host', error)
+  }
+  if (!reg) return
 
   if (navigator.serviceWorker.controller) return
 
@@ -112,6 +139,22 @@ const ensureSwControl = async (): Promise<void> => {
 //   - here we keep that cache truthful against OPFS, and when what landed early
 //     doesn't match what this session actually needs, reload ONCE so the early
 //     script wins. Steady-state boots match and never reload.
+/** A published website must NEVER reload itself. Its store is session memory,
+ *  so every boot legitimately re-installs the bundled renderer and re-derives
+ *  the import map — conditions the participant shell only ever hits once, and
+ *  answers with a reload. On the visitor that turns into an endless boot loop
+ *  the visitor can never exit, because nothing it learns survives the reload.
+ *  Reload sites all route through here; the visitor simply carries on with
+ *  the late-appended map (proven to resolve every dep in one pass). */
+const reloadUnlessVisitor = (why: string): boolean => {
+  if ((window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__ === true) {
+    console.log(`[main] visitor: skipping reload (${why}) — a published website never reloads itself`)
+    return false
+  }
+  location.reload()
+  return true
+}
+
 const appendImportMap = (json: string): void => {
   const script = document.createElement('script')
   script.type = 'importmap'
@@ -147,13 +190,14 @@ const attachImportMap = async (): Promise<void> => {
 
   try { sessionStorage.setItem(IMPORT_MAP_STORAGE_KEY, json) } catch { return }
   console.warn('[main] import map was not live at module load — reloading once to apply it early')
-  location.reload()
+  if (!reloadUnlessVisitor('import map not live')) return
   // Stop boot here; the reload is in flight and nothing below should run.
   await new Promise<never>(() => {})
 }
 
 const bootstrap = async (): Promise<void> => {
   ;(window as any).__hcBoot('bootstrap() started')
+  const readonlyVisitor = (window as Window & { __HC_READONLY__?: boolean }).__HC_READONLY__ === true
   // ONE-WAY DOOR GATE. Must be the FIRST thing in ${0,0}main — before any module can
   // acquire OPFS. A hive drained into the packed store is not fully present in
   // the flat layout, and booting on it would silently build atop a partial
@@ -179,7 +223,9 @@ const bootstrap = async (): Promise<void> => {
   // OPFS starts as best-effort storage. Check its eviction protection without
   // delaying boot, then request persistence inside the participant's first
   // trusted interaction (Firefox may prompt; Chromium/Safari decide silently).
-  void protectOriginStorage()
+  if (!readonlyVisitor) {
+    void protectOriginStorage()
+  }
 
   // SW readiness runs OVERLAPPED with the install chain instead of gating it.
   // ensureSwControl can block up to 1500ms waiting for controllerchange on a
@@ -191,25 +237,39 @@ const bootstrap = async (): Promise<void> => {
   // so the message reaches the controlling/active worker as before. The chain
   // is awaited below, before bootstrapApplication, so the end state at first
   // paint is unchanged.
-  const swChain = (async () => {
-    await ensureSwControl()
-    // Hand the service worker the host domains (self + community) so an
-    // embedded-site /@resource/<sig> request can stream from a host on an OPFS
-    // miss. The SW has no localStorage/IoC, so the page must post them.
-    await postCommunityDomainsToServiceWorker()
-    ;(window as any).__hcBoot('ensureSwControl + sw-domains done')
-  })()
+  const swChain = readonlyVisitor
+    // Published trees use ordinary immutable HTTP GETs. They neither register
+    // the participant service worker nor teach one about community hosts.
+    ? Promise.resolve()
+    : (async () => {
+        await ensureSwControl()
+        // Hand the service worker the host domains (self + community) so an
+        // embedded-site /@resource/<sig> request can stream from a host on an OPFS
+        // miss. The SW has no localStorage/IoC, so the page must post them.
+        await postCommunityDomainsToServiceWorker()
+        ;(window as any).__hcBoot('ensureSwControl + sw-domains done')
+      })()
   // Keep a handler attached from the start so a rejection during the install
   // overlap can't surface as an unhandledrejection; the real `await swChain`
   // below rethrows it, preserving the serial chain's abort-boot semantics.
   swChain.catch(() => {})
 
-  // Push-only contract: NO DCP iframe is mounted at boot. Boot reads
-  // OPFS only. The sentinel bridge is created lazily on the first
-  // explicit user action that needs DCP — opening the installer from
-  // the menu, the install-needed prompt, or the in-app DCP portal.
-  await ensureInstall(null)
+  // Boot reads OPFS only. Content arrives by replicating a root signature
+  // (documentation/install-by-replication.md) — there is no installer to
+  // consult and no cross-origin bridge to mount.
+  await ensureInstall()
   ;(window as any).__hcBoot('ensureInstall done')
+
+  // Every visitor refresh starts with a new memory filesystem. Seed the
+  // generic renderer from this deployment's hash-addressed /content package
+  // before resolving the import map. ensureInstall
+  // above has already initialized Store and corrected any stale localStorage
+  // claim left by the previous, now-discarded session root.
+  if (readonlyVisitor && localStorage.getItem('hypercomb.installed') !== 'true') {
+    const installed = await upgradeFromBundled()
+    if (!installed) throw new Error('visitor renderer package is unavailable')
+    ;(window as any).__hcBoot('visitor bundled renderer installed in memory')
+  }
 
   // Capture install state only AFTER ensureInstall has initialized the store
   // and normalized localStorage against the real cache. Reading the flag first
@@ -219,12 +279,6 @@ const bootstrap = async (): Promise<void> => {
 
   await attachImportMap()
   ;(window as any).__hcBoot('attachImportMap (resolveImportMap) done')
-
-  // Snapshot the sync signature applied at boot. Anything that drifts
-  // from this (toggles in DCP, intake from web→DCP, etc.) means the
-  // running shell is showing stale state — when the user leaves DCP
-  // we reload to commit the new state.
-  const bootSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
 
   // Load dependency namespaces so services self-register before Angular renders
   const loader = get('@hypercomb.social/DependencyLoader') as DependencyLoader | undefined
@@ -239,7 +293,7 @@ const bootstrap = async (): Promise<void> => {
   // tick, triggering ExpressionChangedAfterItHasBeenCheckedError on every
   // boot. Dev shell already does this (see hypercomb-dev/src/main.ts);
   // web didn't, which is why the error showed on 4200 but not 4250.
-  await initializeRuntime({ logOpfs: false })
+  await initializeRuntime({ logOpfs: false, catalogs: bundledCatalogs, locales: bundledLocales })
   ;(window as any).__hcBoot('initializeRuntime done')
 
   // Join the overlapped SW chain before Angular boots: same guarantee as the
@@ -250,191 +304,28 @@ const bootstrap = async (): Promise<void> => {
 
   const appRef = await bootstrapApplication(App, appConfig)
   ;(window as any).__hcBoot('bootstrapApplication done (Angular first paint)')
-
-  // Lazy sentinel: no iframe until the user explicitly opens DCP. The
-  // first call to getSentinel() mounts the hidden iframe at /sentinel
-  // and performs the handshake; subsequent calls reuse the same bridge.
-  let sentinelPromise: Promise<SentinelBridge | null> | null = null
-  const getSentinel = (): Promise<SentinelBridge | null> => {
-    if (!sentinelPromise) {
-      sentinelPromise = initSentinel().then(bridge => {
-        if (bridge) {
-          // Per-toggle resync is DELIBERATELY not wired. Toggling a feature in
-          // DCP (embedded installer OR standalone tab — both broadcast over the
-          // same-origin dcp-toggle-state channel) must NOT pull or run anything
-          // in the live session: nothing activates before the participant is
-          // done. The host syncs DCP's FINAL enabled set only on an explicit
-          // accept (→ actions:available, below — the embedded installer's own
-          // confirm, never its Done button, which only leaves) or closing a
-          // standalone DCP tab (onDcpClosed). First-run "Start"
-          // (hypercomb:start-install) is the cold-install equivalent. Leaving
-          // onToggleChanged unset means the sentinel still relays toggle events
-          // but the host ignores them.
-          bridge.onDcpClosed = () => reloadIfDrifted('dcp tab closed')
-        }
-        return bridge
-      })
-    }
-    return sentinelPromise
-  }
-  ;(globalThis as any).__getSentinel = getSentinel
-
-  // The resync pass: pull DCP's enabled set into OPFS, then either reload
-  // (cold install) or load + run the enabled drones in place. It runs ONLY
-  // on an explicit done (accept / tab-close / first-run Start), never per
-  // toggle — the running shell keeps its currently loaded drones until the
-  // participant authorizes the change.
-  //
-  // SINGLE-FLIGHT + COALESCE. A done can still overlap an in-flight pass
-  // (e.g. accept landing while a first-run install is still streaming).
-  // Two passes racing means one pass's removeDisabled/write can yank a bee
-  // file out from under another pass's getBee() — the preloader logs
-  // "returned null", that drone never registers, and the session runs
-  // without it (dead selection, missing critical sigs) until a reload. One
-  // pass runs at a time; calls that arrive mid-pass coalesce into a single
-  // trailing rerun.
-  const runResyncPass = async () => {
-    const sentinel = await getSentinel()
-    if (!sentinel) return
-    await resyncFromSentinel(sentinel)
-
-    // Cold-install reload: we booted into install-needed state. The first
-    // resync that produces content flips hypercomb.installed → true. Reload
-    // immediately so the user sees the populated shell rather than the
-    // install prompt.
-    if (!wasInstalledAtBoot && localStorage.getItem('hypercomb.installed') === 'true') {
-      console.log('[main] cold install completed — reloading')
-      // Cache the map the install just made resolvable, so the reload boots
-      // with it live before the module graph (see attachImportMap).
-      await cacheImportMap()
-      location.reload()
-      return
-    }
-
-    const preloader = get('@hypercomb.social/ScriptPreloader') as any
-    if (preloader?.find) await preloader.find('')
-    appRef.tick()
-  }
-  let syncInFlight: Promise<void> | null = null
-  let syncQueued = false
-  const resyncAndEnforce = (): Promise<void> => {
-    if (syncInFlight) { syncQueued = true; return syncInFlight }
-    syncInFlight = (async () => {
-      try {
-        do {
-          syncQueued = false
-          await runResyncPass()
-        } while (syncQueued)
-      } finally {
-        syncInFlight = null
-      }
-    })()
-    return syncInFlight
-  }
-
-  const reloadIfDrifted = async (source: string) => {
-    // Route through the same single-flight gate — a direct
-    // resyncFromSentinel here would race a toggle-changed pass's
-    // preloader exactly like concurrent toggle events did.
-    await resyncAndEnforce()
-    const currentSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
-    if (currentSyncSig && currentSyncSig !== bootSyncSig) {
-      console.log(`[main] ${source} with drift — reloading`)
-      await cacheImportMap()
-      location.reload()
-    }
-  }
-
-  // Mount the sentinel iframe ONLY on explicit user actions that
-  // signal DCP is in use: opening the installer / portal from a menu,
-  // or DCP-driven events that imply the user is actively engaging with
-  // the installer surface. Until one of these fires, no cross-origin
-  // request goes out at all.
-  window.addEventListener('portal:open', (e) => {
-    if ((e as CustomEvent).detail?.target === 'dcp') void getSentinel()
-  })
-  // Install/resync ONLY on the participant's explicit accept
-  // (`actions:available`). Every installer EXIT — the Done button, the
-  // backdrop, Escape, a touch-drag — fires `dcp:embed-closed` instead, and
-  // that must NOT pull bytes or activate anything: nothing runs before
-  // authorization. reloadIfDrifted resyncs and reloads the shell only if the
-  // accepted change advanced the sync sig.
-  window.addEventListener('actions:available', event => {
-    const detail = (event as CustomEvent<{ contentChanges?: number; transactionId?: string }>).detail
-    const expectedContentChanges = Math.max(0, Number(detail?.contentChanges ?? 0))
-    const transactionId = String(detail?.transactionId ?? '')
-
-    // Subscribe before the first await: SwarmAdoptDrone receives the same
-    // window event and may finish a small fold quickly. The update is not
-    // complete until BOTH the package resync and the website/content fold
-    // report success.
-    const foldDone = expectedContentChanges > 0
-      ? new Promise<void>((resolve, reject) => {
-          let unsub: (() => void) | null = null
-          const timer = window.setTimeout(() => {
-            unsub?.()
-            reject(new Error('content adoption did not finish in time'))
-          }, 60_000)
-          unsub = EffectBus.on<{ unavailable?: number; transactionId?: string }>('fold:receipt', receipt => {
-            if (transactionId && receipt?.transactionId !== transactionId) return
-            window.clearTimeout(timer)
-            unsub?.()
-            if ((receipt?.unavailable ?? 0) > 0) {
-              reject(new Error(`${receipt.unavailable} adopted item(s) are still unavailable`))
-            } else {
-              resolve()
-            }
-          })
-        })
-      : Promise.resolve()
-
-    void (async () => {
-      try {
-        EffectBus.emit('update:status', { phase: 'applying', message: 'Adopting packages and website…' })
-        // Content first, then package/code. If the website fold cannot finish,
-        // no new executable package is loaded into the live session. If the
-        // later package leg fails, the already-committed named restore point
-        // still provides a one-gesture return path for the content leg.
-        await foldDone
-        await resyncAndEnforce()
-
-        const currentSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
-        const drifted = !!currentSyncSig && currentSyncSig !== bootSyncSig
-        if (drifted) await cacheImportMap()
-
-        // Persisted by the indicator so the check survives a required reload.
-        EffectBus.emit('update:status', { phase: 'complete', message: 'Everything is updated' })
-        if (drifted) {
-          console.log('[main] installer accepted with drift — reloading after all adoption work completed')
-          location.reload()
-        }
-      } catch (err) {
-        console.error('[main] accepted DCP update failed safely', err)
-        EffectBus.emit('update:status', {
-          phase: 'error',
-          message: 'Update incomplete — your restore point is safe',
-        })
-      }
-    })()
-  })
+  // Visitor builds wait for this boundary before handing the signed site
+  // descriptor to HiveVisitDrone. By here dependencies and bees are loaded,
+  // Angular is painted, and the existing preview path can receive the root.
+  window.dispatchEvent(new Event('hypercomb:runtime-ready'))
 
   // First-run "Start" — the welcome card's single button, fully unattended.
-  // Mount the hidden sentinel and pull DCP's enabled set: DCP resolves
-  // everything from its content domains, so a sig (or several) + the
-  // domain is the entire barrier to entry. resyncAndEnforce already
-  // reloads the shell when the cold install lands. If DCP is unreachable
-  // (no installer deployed, offline), fall back silently to the package
-  // bundled with this shell — same contract either way, every byte
-  // sha256-verified against its signature. Only when BOTH sources come
-  // up empty does the card re-arm (boot:status install-needed).
+  // One source, one contract: the package bundled with this shell, every
+  // byte sha256-verified against its signature before it is admitted. When
+  // it comes up empty the card re-arms (boot:status install-needed).
   window.addEventListener('hypercomb:start-install', () => {
+    if (readonlyVisitor) return
     console.log('[main] start-install received')
-    // Persistent storage is the install's substrate — without OPFS every
-    // source fails (slowly: sentinel timeout → resync no-op → bundled
-    // write failure) and the card loops Start → Starting…. Private
+    // Persistent storage is the substrate — without OPFS the bundled write
+    // fails and the card loops Start → Starting…. Private
     // windows and pre-16.4 Safari lack navigator.storage.getDirectory;
     // detect that up front and explain instead of attempting.
-    if (typeof navigator.storage?.getDirectory !== 'function') {
+    // Native excepted: its hive is a real directory reached over IPC, and it
+    // has no navigator.storage.getDirectory to offer. WebKitGTK exposes none,
+    // so the Linux client refused to unpack the content it shipped with and
+    // came up empty every launch — while app.ts, seeing install-needed, kept
+    // auto-firing this same handler into the same refusal.
+    if (!nativeAvailable() && typeof navigator.storage?.getDirectory !== 'function') {
       console.warn('[main] persistent storage unavailable — install cannot proceed')
       EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-storage' } as BootStatus)
       return
@@ -476,73 +367,6 @@ const bootstrap = async (): Promise<void> => {
         console.warn('[main] could not verify the installed flag', err)
       }
 
-      try {
-        // NATIVE SHELL: bundled-only, deliberately. The DCP sentinel
-        // handshake requires DCP to recognise the embedding origin, and it
-        // does not know `tauri.localhost` — the iframe loads, the handshake
-        // neither succeeds nor fails, and getSentinel() waits forever with
-        // "Starting…" on screen. Skipping DCP entirely (rather than racing
-        // it) makes the native first-run deterministic: the client installs
-        // from its own bundled content, which is the right contract for a
-        // self-contained desktop install anyway. DCP returns when its
-        // allowlist learns the native origin.
-        const { nativeAvailable } = await import('@hypercomb/shared/core/native-filesystem')
-        console.log('[main] resolving sentinel (native skips DCP)')
-        const sentinel = nativeAvailable() ? null : await getSentinel()
-        console.log('[main] sentinel:', sentinel ? 'present' : 'skipped/absent')
-        if (sentinel) {
-          // DCP-FIRST: the installer fetches + verifies + RECORDS the
-          // baseline package in its registry (so every feature is
-          // visible and toggleable in the installer from the start),
-          // offering the shell's own bundled /content/ as the
-          // last-resort content domain. The sync below then streams the
-          // recorded, enabled set into this shell's OPFS.
-          try {
-            // Bounded: the bridge promise only settles when DCP replies — a
-            // handler that dies mid-request would otherwise pin the card at
-            // "Starting…" forever. On timeout, fall through to the sync +
-            // bundled fallback; a slow-but-alive install keeps streaming in
-            // the background and the resync picks its results up.
-            const INSTALL_TIMEOUT_MS = 180_000
-            try {
-              await Promise.race([
-                sentinel.install(
-                  undefined,
-                  // Stream install progress into the sync-indicator's
-                  // 'install' lane. Each producer gets its own lane so
-                  // the resync that follows can't wipe these counts or
-                  // end the cue while this is still streaming.
-                  ({ phase, current, total }) =>
-                    EffectBus.emit('install:sync', { active: true, source: 'install', phase, current, total }),
-                  `${location.origin}/content`,
-                ),
-                new Promise(resolve => setTimeout(resolve, INSTALL_TIMEOUT_MS)),
-              ])
-            } finally {
-              // Terminate the lane on completion AND on timeout — a
-              // timed-out install may keep streaming in the background,
-              // but the resync that follows owns the visible cue from
-              // here (its lane re-activates the indicator).
-              EffectBus.emit('install:sync', { active: false, source: 'install' })
-            }
-          } catch (err) {
-            console.warn('[main] first-run dcp install failed', err)
-          }
-        }
-        // NATIVE: skip the sentinel resync as well — resyncFromSentinel
-        // mounts the DCP iframe itself, and awaiting a handshake DCP will
-        // never answer for the native origin is exactly the hang the sentinel
-        // skip above exists to avoid. Verified live over CDP: "resyncAndEnforce
-        // starting" was the last line the install ever printed. Bundled is the
-        // native install path, and it is next.
-        if (!nativeAvailable()) {
-          console.log('[main] resyncAndEnforce starting')
-          await resyncAndEnforce()   // reloads on cold-install success
-          console.log('[main] resyncAndEnforce done')
-        }
-      } catch (err) {
-        console.warn('[main] first-run sentinel install failed', err)
-      }
       if (localStorage.getItem('hypercomb.installed') === 'true') return
       // Log the failure rather than swallowing it. A bundled install that
       // throws is the difference between "no content available" and "the
@@ -552,9 +376,9 @@ const bootstrap = async (): Promise<void> => {
         console.warn('[main] bundled install threw', err)
         return false
       })
-      if (ok) { await cacheImportMap(); location.reload(); return }
-      console.warn('[main] first-run install exhausted both sources (sentinel + bundled)')
-      EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-sentinel' } as BootStatus)
+      if (ok) { await cacheImportMap(); reloadUnlessVisitor('first-run bundled install'); return }
+      console.warn('[main] first-run install found no bundled package')
+      EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-source' } as BootStatus)
     })()
   })
 

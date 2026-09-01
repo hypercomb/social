@@ -81,6 +81,44 @@ export const BARE_WORD_POOL_MEANINGS: readonly string[] = Object.freeze([
  *  is the expensive half: `sign()` of a typo mints a different address forever,
  *  so a later correction is a data migration, not an edit. */
 export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
+  // The participant's saved screen backdrops, sorted into the world they
+  // suit — one content-addressed doc { light: [sigs], dark: [sigs] } written
+  // by CanvasBackgroundService (presentation/background). The sigs point at
+  // ordinary content-root resources; the pool is what makes the collection
+  // queryable across the network, while WHICH picture is showing (and how
+  // washed) stays a localStorage pref — that is the distinction. TRUTH POOL,
+  // never minted from the optimize phase: a sorting is the participant's
+  // hand, not derivable from layers (optimize-phase.md litmus). Colon-scoped
+  // so it can never collide with a tile slugged 'backgrounds'.
+  'backgrounds:saved',
+  // WHAT IS BEHIND THE HIVE right now — one record naming the picture's
+  // signature plus how it is washed, zoomed and offset
+  // (essentials/presentation/background/canvas-background.service.ts).
+  // localStorage still holds the same record for the instant first paint;
+  // this pool is the durable half, and the reason it exists is REACHABILITY:
+  // a backdrop no marker and no pool member names is litter to every
+  // collector in this system. TRUTH POOL — a choice, never derived, so never
+  // minted from the optimize phase. Colon-scoped like its sibling.
+  'backgrounds:screen',
+  // WHAT MADE A PICTURE — one record per IMAGE SIGNATURE, the member named by
+  // that sig (the sig-keyed pattern: the pool listing IS the index, lookup is
+  // O(1) by the bytes you are holding). Prompt, seed, workflow and model for
+  // anything ComfyUI generated into this hive
+  // (essentials/comfy/comfy.service.ts), which is what makes `/comfy reroll`
+  // possible from a tile alone. TRUTH POOL — an act, not a derivation; no
+  // cold client could rebuild "I asked for this" from layers, so it is never
+  // minted from the optimize phase. The ComfyUI ADDRESS is deliberately NOT
+  // in it: a machine address is device-local (hc:comfy:endpoint), and a
+  // record that travels must not name a host the reader does not have.
+  'comfy:generations',
+  // COMFYUI WORKFLOWS THIS HIVE HOLDS — sig-named `comfy-workflow@1` specs
+  // (the API-format node graph plus its inferred seams), swept at boot by
+  // essentials/comfy/comfy-workflows.ts and probed for on every domain the
+  // participant learns (sharing/published-pools.ts claims this meaning), so a
+  // host can offer workflows exactly the way it can offer provider specs.
+  // Content, and small by construction: a workflow is a recipe, never a
+  // model — no checkpoint, LoRA or output ever enters the hive through it.
+  'comfy:workflows',
   // How this participant actually TALKS to the command line — one record
   // holding the lead-in→behaviour phrasings learned from utterances that RAN,
   // plus per-behaviour run counts (essentials/commands/utterance/

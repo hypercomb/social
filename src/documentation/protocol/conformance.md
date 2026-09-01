@@ -68,7 +68,7 @@ A lineage sigbag's identity IS its ancestry. The bag address is
 `sha256(lineageKey(segments))`.
 
 Source of truth:
-`hypercomb-essentials/src/diamondcoreprocessor.com/history/lineage-key.ts`.
+`hypercomb-essentials/src/history/lineage-key.ts`.
 
 ### Canonicalization rule
 
@@ -176,7 +176,7 @@ A layer is the unit of mutation. Its signature is the SHA-256 of its **canonical
 JSON bytes**.
 
 Source of truth:
-`hypercomb-essentials/src/diamondcoreprocessor.com/history/canonical-layer.ts`.
+`hypercomb-essentials/src/history/canonical-layer.ts`.
 
 ### Canonical form
 

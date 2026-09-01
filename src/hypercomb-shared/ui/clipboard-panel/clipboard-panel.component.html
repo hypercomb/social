@@ -1,6 +1,7 @@
 @if (visible()) {
   <aside
     class="clipboard-panel"
+    [class.ctrl-held]="ctrlHeld()"
     hcDockInset="right"
     hcDockedPanel="clipboard-panel" dockSide="right"
     [hcSession]="session"
@@ -83,6 +84,14 @@
                   <span class="item-glyph" aria-hidden="true">⬢</span>
                 }
                 <span class="item-label">{{ row.label }}</span>
+                <!-- What THIS click does, named on the row in the same
+                     grammar the hovered tile uses on the hive: `place` (the
+                     tile leaves this window) or, with ctrl held, `walk in`.
+                     Both are rendered; the panel's ctrl-held class picks. -->
+                <span class="item-verb" aria-hidden="true">
+                  <span class="verb-place">{{ 'clipboard.verb.place' | t }} ›</span>
+                  <span class="verb-walk">{{ 'clipboard.verb.walk' | t }} ›</span>
+                </span>
               </button>
               <!-- The count badge doubles as the walk-in handle — the whole
                    affordance a finger has, since ctrl is a keyboard word. -->
@@ -124,4 +133,19 @@
       <p class="clipboard-hint">{{ 'clipboard.hint' | t }}</p>
     }
   </aside>
+
+  <!-- THE MODE MARKER. While this window is up, a click on the hive TAKES a
+       tile — so the hive says so, at its edges, where there is nothing to
+       obscure. Replaces the old centre-of-screen "clipboard" watermark; same
+       job, out of the way. Decoration only: aria-hidden, pointer-events
+       none, and the panel's own title/hint carry the same words for anyone
+       reading the window. -->
+  <div class="swap-stage" aria-hidden="true" [style.right.px]="width()">
+    <span class="swap-stage-legend">
+      {{ 'clipboard.title' | t }}
+      @if (items().length > 0) {
+        <span class="swap-stage-count">{{ items().length }}</span>
+      }
+    </span>
+  </div>
 }

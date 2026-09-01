@@ -22,6 +22,9 @@
       "@hypercomb/essentials": ["src/hypercomb-essentials/src/index.ts"],
       "@hypercomb/essentials/*": ["src/hypercomb-essentials/src/*"],
 
+      "@hypercomb/runtime": ["src/hypercomb-runtime/src/index.ts"],
+      "@hypercomb/runtime/*": ["src/hypercomb-runtime/src/*"],
+
       "@hypercomb/shared": ["src/hypercomb-shared/index.ts"],
       "@hypercomb/shared/*": ["src/hypercomb-shared/*"],
 

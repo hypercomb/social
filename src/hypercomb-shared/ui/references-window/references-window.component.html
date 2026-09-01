@@ -1,0 +1,31 @@
+@if (visible() && composition(); as draft) {
+  <aside class="ref-panel" hcDockInset="right" hcDockedPanel="references-window" [hcSession]="session"
+    (hcDockedPanelClose)="cancel()" dockSide="right" [minWidth]="260" [maxWidth]="560" [defaultWidth]="340"
+    data-consumes-wheel tabindex="-1" [attr.aria-label]="'references.title' | t">
+    <header class="ref-header"><div class="ref-heading"><span class="mat-sym">link</span><span>{{ 'references.title' | t }}</span></div>
+      <button type="button" class="ref-close" (click)="cancel()">×</button></header>
+    <form class="ref-details" (submit)="$event.preventDefault(); save()">
+      <div class="ref-state"><span>{{ 'references.details' | t }}</span><small>{{ 'references.unsaved' | t }}</small></div>
+      <div class="ref-target"><span class="ref-tile"><span>{{ (targetName() || draft.portal.label).slice(0, 2).toUpperCase() }}</span></span>
+        <span class="ref-target-copy"><strong>{{ targetName() || draft.portal.label }}</strong><small>{{ 'references.temporary-target' | t }}</small></span></div>
+      @if (draft.createTile) {
+        <label for="ref-name">{{ 'references.name' | t }}</label>
+        <input id="ref-name" class="ref-name" type="text" autocomplete="off" [value]="name()" (input)="updateName($any($event.target).value)" />
+        @if (nameTaken()) { <p class="ref-error">{{ 'references.name-taken' | t }}</p> }
+      } @else {
+        <p class="ref-landing">{{ 'references.parent-target' | t: { name: draft.parentSegments[draft.parentSegments.length - 1] } }}</p>
+      }
+      <label>{{ 'references.items' | t }}</label>
+      <div class="ref-types">
+        @for (item of selected(); track item.label) { <button type="button" (click)="remove(item)">{{ item.label }} ×</button> }
+        @if (selected().length === 0) { <span>{{ 'references.items-empty' | t }}</span> }
+      </div>
+      <p class="ref-hint">{{ 'references.picker-hint' | t }}</p>
+      @if (!choosing()) {
+        <button type="button" class="ref-save" (click)="beginSelection()">{{ 'references.choose-items' | t }}</button>
+      }
+      <div class="ref-actions"><button type="button" class="ref-cancel" (click)="cancel()">{{ 'references.cancel' | t }}</button>
+        <button type="submit" class="ref-save" [disabled]="(draft.createTile && (!targetName() || nameTaken())) || selected().length === 0 || saving()">{{ (saving() ? 'references.saving' : 'references.save') | t }}</button></div>
+    </form>
+  </aside>
+}

@@ -112,7 +112,7 @@ contribution behind a registry that the drone populates from its constructor.
 
 ## Canonical example
 
-`hypercomb-essentials/src/diamondcoreprocessor.com/editor/tile-editor.drone.ts`
+`hypercomb-essentials/src/editor/tile-editor.drone.ts`
 is the reference implementation. It contributes the pencil-edit icon to
 tiles, listens for `tile:action`, opens the editor service, and writes
 properties on save — all from a single constructed instance. Toggling the

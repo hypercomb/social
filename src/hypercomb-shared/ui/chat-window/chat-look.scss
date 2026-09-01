@@ -1,0 +1,131 @@
+// hypercomb-shared/ui/chat-window/chat-look.scss
+//
+// LOOK — a shelf picture, full size, without leaving.
+//
+// The shelf shows each reference's picture shrunk to a 0.9rem mark. That
+// answers WHICH reference this is and never WHAT it shows, so a picture you
+// gathered is one you have to take on trust until the answer comes back.
+//
+// WHY IT LIVES INSIDE THE PANEL. A new tab, or anything that navigates the
+// document, is the expensive move: the composer is holding an unsent question
+// and the shelf is holding what you assembled, and on the native shell a
+// document navigation takes the window with it — a view may never link out.
+// So the overlay is a child of `.chat-panel` and covers only it. Nothing is
+// put down to look at something.
+//
+// A FOURTH SHEET, deliberately. Angular's component style budget is measured
+// per compiled stylesheet and one output is emitted per `styleUrls` entry, so
+// splitting is the only thing that lowers the number a `@use`'d partial
+// cannot — the same reason chat-peek.scss stands apart.
+
+$accent: #7eb6d6;
+
+// THE PRESS TARGET ON THE SHELF. It replaces the <img> as the flex item, so
+// it inherits the mark's job of holding its own width; the picture inside
+// keeps its own 0.9rem rule from the main sheet.
+//
+// zoom-in, not pointer: the box around it is a drag handle and the × beside it
+// drops the reference, so three gestures share one chip and the cursor is
+// what tells them apart before you commit to any of them.
+.chat-box-look {
+  flex: 0 0 auto;
+  display: block;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  line-height: 0;
+  cursor: zoom-in;
+
+  &:focus-visible {
+    outline: 1px solid rgba(var(--acc), 0.7);
+    outline-offset: 1px;
+  }
+}
+
+// THE GROUND. Covers the panel and nothing beyond it — the hive keeps its own
+// screen, which is what makes this cheap to open and cheap to leave.
+//
+// Opaque enough that the picture is read against a flat field rather than
+// against the transcript; no blur, because a frosted layer would become a
+// containing block for anything fixed inside the panel and the header carries
+// the clipboard flyout.
+.chat-look {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 1.2rem;
+  box-sizing: border-box;
+  background: rgba(var(--hc-panel-pane), 0.94);
+  cursor: zoom-out;
+
+  &:focus { outline: none; }
+}
+
+// CONTAIN, never cover. A picture cropped to fill the frame is a picture you
+// still cannot see — the whole reason for opening it is that the mark on the
+// shelf was already a crop.
+.chat-look-img {
+  max-width: 100%;
+  min-height: 0;
+  flex: 0 1 auto;
+  object-fit: contain;
+  border-radius: var(--hc-radius-card, 3px);
+  cursor: default;
+  // A picture with transparency reads against the ground, not against
+  // whatever the panel was showing.
+  background: rgba(var(--hc-panel-pane), 0.9);
+}
+
+// THE BAR — what it is, where it sits in the set, and the ways out. One row,
+// under the picture, so the picture itself is never covered by chrome.
+.chat-look-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 100%;
+  cursor: default;
+  color: var(--hc-window-accent);
+  font-size: 0.82rem;
+}
+
+.chat-look-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--hc-mono, monospace);
+}
+
+.chat-look-count {
+  flex: 0 0 auto;
+  font-family: var(--hc-mono, monospace);
+  opacity: 0.6;
+}
+
+.chat-look-step,
+.chat-look-off {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  padding: 0.2rem;
+  border: 0;
+  border-radius: var(--hc-radius-control, 2px);
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  opacity: 0.8;
+  cursor: pointer;
+
+  .mat-sym { font-size: 1.15rem; }
+
+  &:hover { opacity: 1; background: rgba(var(--acc), 0.14); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
+}

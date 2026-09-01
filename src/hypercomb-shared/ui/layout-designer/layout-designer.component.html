@@ -1,0 +1,229 @@
+@if (visible()) {
+  <!-- THE WORKSPACE. Flush to whatever the docked panel has left, like a
+       canvas application: its left edge IS the panel's right edge, so the two
+       can never overlap and everything inside centres in the space actually
+       available. Dropping a layout on the ground sets the root. -->
+  <div
+    class="ld-workspace"
+    data-consumes-wheel
+    (dragover)="allowDrop($event)"
+    (drop)="dropOnPane($event)"
+  >
+    <!-- THE PANE — the target container you are designing. Centred in the
+         workspace, resizable from every corner and every edge. -->
+    <div
+      class="ld-pane"
+      tabindex="0"
+      (keydown)="onKey($event)"
+      (wheel)="onWheel($event)"
+      (focusin)="paneFocus()"
+      (focusout)="paneBlur($event)"
+      [style.width]="paneStyle().width"
+      [style.height]="paneStyle().height"
+      [class.is-dragging]="dragging() !== null"
+      [class.is-empty]="!bound()"
+      (dragover)="allowDrop($event)"
+      (drop)="dropOnPane($event)"
+    >
+      <div class="ld-pane-head">
+        <span class="ld-pane-name">{{ cell() || ('layout.hive' | t) }}</span>
+        <span class="ld-pane-layout">{{ layout() }}</span>
+      </div>
+
+      <!-- The arrangement itself, mounted imperatively so its inline custom
+           properties survive. Empty until something is plugged in — an empty
+           pane is where a design starts, not an error. -->
+      <div class="ld-stage" #stage></div>
+
+      @if (!bound()) {
+        <p class="ld-empty-hint">{{ 'layout.empty' | t }}</p>
+      }
+
+      @for (handle of handles; track handle) {
+        <button
+          [class]="'ld-grip is-' + handle"
+          type="button"
+          [attr.aria-label]="'layout.resize' | t"
+          (pointerdown)="grabHandle(handle, $event)"
+        ></button>
+      }
+    </div>
+  </div>
+
+  <!-- THE PANEL. Last in tree order so it can never be painted over by the
+       workspace, and it reserves its own width through hcDockInset. -->
+  <aside
+    class="ld-panel"
+    hcDockInset="left"
+    hcDockedPanel="layout-designer"
+    [hcSession]="session"
+    (hcDockedPanelClose)="close()"
+    dockSide="left"
+    [minWidth]="260"
+    [maxWidth]="520"
+    [defaultWidth]="320"
+    [ownSettings]="settingsRows"
+    data-consumes-wheel
+    tabindex="-1"
+    [attr.aria-label]="'layout.title' | t"
+  >
+    <header class="ld-header">
+      <div class="ld-heading">
+        <span class="ld-title">{{ 'layout.title' | t }}</span>
+        @if (cell()) { <span class="ld-subject">{{ cell() }}</span> }
+      </div>
+      <button class="ld-close" type="button" (click)="close()" [attr.aria-label]="'layout.close' | t">×</button>
+    </header>
+
+    @if (dormant()) {
+      <p class="ld-still">{{ 'layout.dormant' | t }}</p>
+    }
+
+    <!-- THE TOP HALF. The layouts, and the only thing in this window that
+         scrolls. They are also the only draggable thing here: an arrangement
+         is a shape, and what fills it is a separate question asked later. Drop
+         one on the workspace to start a design, or on any hole to nest it. -->
+    <div class="ld-shelf">
+    <section class="ld-section">
+      <h3 class="ld-section-title">{{ 'layout.layouts' | t }}</h3>
+      <ul class="ld-assets" [style.grid-template-columns]="columnTemplate()">
+        @for (asset of assets(); track asset.name) {
+          <li>
+            <!-- THE PICTURE IS THE LABEL. A name under every chip is twenty
+                 lines of text competing with twenty drawings of the thing the
+                 text is trying to describe; the drawing wins, so the name
+                 waits for the pointer. -->
+            <button
+              type="button"
+              class="ld-asset"
+              [class.is-on]="asset.name === layout()"
+              draggable="true"
+              [attr.aria-label]="asset.name"
+              (dragstart)="startDrag(asset, $event)"
+              (dragend)="endDrag($event)"
+              (click)="plug(asset.name)"
+            >
+              <!-- The miniature is drawn by the same pure builder as the real
+                   container, so it can never advertise a shape the layout does
+                   not make. It is mounted RAW: an [innerHTML] binding strips
+                   the style and data-hc-* attributes that ARE the picture. -->
+              <span class="ld-glyph" [hcRawHtml]="asset.glyph"></span>
+              <span class="ld-asset-name">{{ asset.name }}<span class="ld-asset-note">{{ asset.holes }}</span></span>
+            </button>
+          </li>
+        }
+      </ul>
+    </section>
+    </div>
+
+    <!-- THE GRIP BETWEEN THE HALVES. The window still does not scroll as a
+         whole; this moves where the shelf stops and the properties start, so
+         a deep arrangement can be given the room it needs without the library
+         above it losing its place. Double-click puts it back. -->
+    <div class="ld-split" role="separator" aria-orientation="horizontal"
+      tabindex="0"
+      [attr.aria-label]="'layout.split' | t"
+      [title]="'layout.split' | t"
+      (pointerdown)="grabSplit($event)"
+      (dblclick)="resetSplit()"
+      (keydown)="onSplitKey($event)"></div>
+
+    <!-- THE BOTTOM HALF. The properties of the active container. -->
+    <div class="ld-inspector" #inspector [style.height]="inspectorStyle()">
+    @if (bound() && selectedLevel(); as level) {
+      <!-- THE PROPERTIES of whichever level is selected. Dragging writes the
+           custom property straight onto that level; letting go commits it. -->
+      <section class="ld-section">
+        <h3 class="ld-section-title">{{ 'layout.options' | t }}</h3>
+        <p class="ld-level">
+          <span class="ld-level-layout">{{ level.layout }}</span>
+          <span class="ld-level-path">{{ level.path.length ? level.path.join(' › ') : ('layout.root' | t) }}</span>
+        </p>
+
+        <!-- THE ACTIVE CONTAINER, HERE, WITH ITS PANES SELECTABLE.
+             The properties used to be a column of sliders — one per
+             measurement, all of them present whether or not you were pointing
+             at anything. The container itself is a better index of its own
+             measurements than a list of their names: press a pane and the one
+             slider below is on that pane. Drop a layout on a pane and it
+             nests there, the same as on the workspace, because a pane in here
+             and a hole out there are the same hole. -->
+        <div class="ld-map" #map [attr.aria-label]="'layout.map' | t"></div>
+
+        <!-- THE TWO TYPES, IN ONE ROW. Left of the rule are the container's
+             own flexbox measurements; right of it is the pane being pointed
+             at. One row, because they are the same question asked of two
+             different things, and one slider serves both. -->
+        <div class="ld-measures" role="group" [attr.aria-label]="'layout.measures' | t">
+          @for (measure of containerMeasures(); track measure.name) {
+            <button class="ld-measure" type="button"
+              [class.is-on]="activeVariable()?.name === measure.name && !divisionMeasure()?.measured"
+              [attr.aria-pressed]="activeVariable()?.name === measure.name && !divisionMeasure()?.measured"
+              (click)="pickMeasure(measure.name)">
+              <span class="ld-measure-name">{{ measure.name }}</span>
+              <span class="ld-measure-value">{{ measure.value || ('layout.inherited' | t) }}</span>
+            </button>
+          }
+          @if (divisionMeasure(); as division) {
+            <span class="ld-measure-rule" aria-hidden="true"></span>
+            <!-- A pane that takes the remainder has nothing to move. It still
+                 shows, greyed, because "this one has no measurement" is an
+                 answer and a missing chip is not. -->
+            <span class="ld-measure is-division"
+              [class.is-on]="division.measured"
+              [class.is-still]="!division.measured"
+              [title]="(division.measured ? 'layout.wall.fixed' : 'layout.wall.fluid') | t">
+              <span class="ld-measure-name">{{ division.name }}</span>
+              <span class="ld-measure-value">{{ division.measured ? (division.value || ('layout.inherited' | t)) : ('layout.unmeasured' | t) }}</span>
+            </span>
+          }
+        </div>
+
+        <!-- ONE SLIDER, on whatever is active. -->
+        @if (activeVariable(); as variable) {
+          <div class="ld-var">
+            <div class="ld-var-head">
+              <span class="ld-var-name">{{ variable.name }}</span>
+              <span class="ld-var-value">{{ variable.value || ('layout.inherited' | t) }}</span>
+            </div>
+            <input
+              class="ld-slider"
+              type="range"
+              step="0.25"
+              [min]="min(variable.name)"
+              [max]="max(variable.name)"
+              [value]="amount(variable.value)"
+              (input)="previewVar(variable.name, $event, variable.value)"
+              (change)="commitVar(variable.name, $event, variable.value)"
+            />
+          </div>
+        }
+
+
+        <!-- The inheritance rule used to be three lines of prose here. It is
+             the largest single thing in a half of a window that may not
+             scroll, and it explains something the sliders already show: a
+             nested level reads "inherited" until you move it. It lives in the
+             documentation now. -->
+        <button class="ld-remove" type="button" (click)="removeLevel()">
+          {{ (level.path.length ? 'layout.unnest' : 'layout.unplug') | t }}
+        </button>
+      </section>
+
+      <!-- THE WALLS. What a border is telling you about a hole — four
+           specimens of the actual border, each naming itself on hover. Five
+           lines of prose was the single largest thing in a half of a window
+           that is not allowed to scroll, and a border is a thing you recognise
+           rather than read. -->
+      <section class="ld-section ld-legend">
+        <span class="ld-wall is-fluid" [attr.data-name]="'layout.wall.fluid' | t"><i></i></span>
+        <span class="ld-wall is-fixed" [attr.data-name]="'layout.wall.fixed' | t"><i></i></span>
+        <span class="ld-wall is-band" [attr.data-name]="'layout.wall.band' | t"><i></i></span>
+        <span class="ld-wall is-page" [attr.data-name]="'layout.wall.page' | t"><i></i></span>
+      </section>
+    } @else {
+      <p class="ld-still">{{ 'layout.intro' | t }}</p>
+    }
+    </div>
+  </aside>
+}

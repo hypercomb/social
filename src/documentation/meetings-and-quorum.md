@@ -32,10 +32,10 @@ There are two distinct things happening when a meeting runs, and they live in tw
 
 | Concern | What it does | Drone |
 |---|---|---|
-| **Room identity + signaling** | Derives a room signature from the cell, subscribes to the Nostr mesh for that sig, manages WebRTC offer/answer/ICE, assigns slots, handles spatial audio per-slot | [`HypercombMeetingDrone`](../hypercomb-essentials/src/diamondcoreprocessor.com/meeting/meeting.drone.ts) |
-| **Quorum gathering** | Publishes "I'm available" heartbeats, tracks peer availability with TTL expiry, runs the state machine, decides *when* the meeting actually starts | [`HiveMeetingDrone`](../hypercomb-essentials/src/diamondcoreprocessor.com/meeting/hive-meeting.drone.ts) |
+| **Room identity + signaling** | Derives a room signature from the cell, subscribes to the Nostr mesh for that sig, manages WebRTC offer/answer/ICE, assigns slots, handles spatial audio per-slot | [`HypercombMeetingDrone`](../hypercomb-essentials/src/meeting/meeting.drone.ts) |
+| **Quorum gathering** | Publishes "I'm available" heartbeats, tracks peer availability with TTL expiry, runs the state machine, decides *when* the meeting actually starts | [`HiveMeetingDrone`](../hypercomb-essentials/src/meeting/hive-meeting.drone.ts) |
 
-The user-facing entry point is the `/meeting` slash behaviour, handled by [`MeetingQueenBee`](../hypercomb-essentials/src/diamondcoreprocessor.com/meeting/meeting.queen.ts).
+The user-facing entry point is the `/meeting` slash behaviour, handled by [`MeetingQueenBee`](../hypercomb-essentials/src/meeting/meeting.queen.ts).
 
 ---
 
@@ -68,7 +68,7 @@ The room has a deterministic, content-addressed identity:
 roomSig = sha256(cell + '/meeting')
 ```
 
-See `deriveRoomSig()` in [meeting.drone.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/meeting/meeting.drone.ts) — it encodes `cell + '/meeting'` as UTF-8 and runs one `crypto.subtle.digest('SHA-256', …)`.
+See `deriveRoomSig()` in [meeting.drone.ts](../hypercomb-essentials/src/meeting/meeting.drone.ts) — it encodes `cell + '/meeting'` as UTF-8 and runs one `crypto.subtle.digest('SHA-256', …)`.
 
 This is a clean, self-contained illustration of the Hypercomb [content-addressing model](dna.md): the address **is** a SHA-256 hash of the canonical content, so identity is derived, never assigned. The room signature is not stored in a registry and handed out — it is *computed* from the only input that matters (the cell name plus the `/meeting` discriminant), and any two participants feeding the same input get bit-for-bit the same 64-hex address.
 
@@ -82,7 +82,7 @@ The meeting room is a lightweight example of the broader doctrine: a signature n
 
 ### 4. Gather quorum
 
-This is where [`HiveMeetingDrone`](../hypercomb-essentials/src/diamondcoreprocessor.com/meeting/hive-meeting.drone.ts) takes over.
+This is where [`HiveMeetingDrone`](../hypercomb-essentials/src/meeting/hive-meeting.drone.ts) takes over.
 
 When a participant toggles availability (camera permission + "I'm in"), their drone starts publishing a `meeting-availability` heartbeat on the room signature every **5 seconds**:
 
@@ -115,7 +115,7 @@ Threshold is tunable via `localStorage.setItem('hc:meeting:threshold', '3')` for
    │  threshold)       │  available)         │  then idle)         │
 ```
 
-See `#evaluateState()` in [hive-meeting.drone.ts:230](../hypercomb-essentials/src/diamondcoreprocessor.com/meeting/hive-meeting.drone.ts#L230).
+See `#evaluateState()` in [hive-meeting.drone.ts:230](../hypercomb-essentials/src/meeting/hive-meeting.drone.ts#L230).
 
 Transitions emit `meeting:state` on the effect bus and a matching `window` CustomEvent so the Angular controls bar can update its UI.
 
@@ -141,7 +141,7 @@ No TURN relay — pure peer-to-peer. If NAT traversal fails, the connection simp
 The slot drives two things:
 
 - **Video placement** — the overlay renderer uses the slot to position the remote video on the correct neighbour hex.
-- **Spatial audio** — [`MeetingSpatialAudio`](../hypercomb-essentials/src/diamondcoreprocessor.com/meeting/meeting-audio.ts) uses the slot to pan and position each participant's audio in 3D space, so voices come from the direction their face is on the grid.
+- **Spatial audio** — [`MeetingSpatialAudio`](../hypercomb-essentials/src/meeting/meeting-audio.ts) uses the slot to pan and position each participant's audio in 3D space, so voices come from the direction their face is on the grid.
 
 Slot assignment emits `meeting:slot-assigned` on the effect bus so overlays and audio can react independently.
 
@@ -169,7 +169,7 @@ If a meeting needs to grow, the host (or anyone) can re-tag the tile `cascade:19
 
 The **live A/V session** leaves no trace. There is no persisted participant list, no call history, no recording. When the last person leaves, the room signature falls silent on the mesh and the session effectively stops existing. Re-tagging the cell later opens a new, empty session with the same signature — peers who happen to be listening will just hear silence until someone new joins.
 
-What *does* persist is the **meeting tag itself**: the `cascade` value written by `/meeting` is merged into the `tags` array of the cell's `0000` props file in OPFS (see `writeProps()` in [meeting.queen.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/meeting/meeting.queen.ts)). That write is durable and local by default — the tile stays a meeting room across reloads. So the *capability* (this tile hosts a room) is persisted content addressed in the cell's props; the *ephemeral A/V presence* (who is on camera right now, slots, ICE state) is not — like presence, cursor, clipboard, and selection, it is kept out of the signed layer so it never skews the lineage signature.
+What *does* persist is the **meeting tag itself**: the `cascade` value written by `/meeting` is merged into the `tags` array of the cell's `0000` props file in OPFS (see `writeProps()` in [meeting.queen.ts](../hypercomb-essentials/src/meeting/meeting.queen.ts)). That write is durable and local by default — the tile stays a meeting room across reloads. So the *capability* (this tile hosts a room) is persisted content addressed in the cell's props; the *ephemeral A/V presence* (who is on camera right now, slots, ICE state) is not — like presence, cursor, clipboard, and selection, it is kept out of the signed layer so it never skews the lineage signature.
 
 This is consistent with the Hypercomb [security model](security.md): presence-first, the live session expires when participants leave, while authored state is content-addressed and versioned locally.
 
@@ -190,14 +190,14 @@ A simpler design would let any two people with cameras on start talking the mome
 
 | File | Role |
 |---|---|
-| [meeting.queen.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/meeting/meeting.queen.ts) | `/meeting` slash behaviour — tags tile, triggers join |
-| [meeting.drone.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/meeting/meeting.drone.ts) | Per-cell room management, slot assignment, room sig derivation |
-| [hive-meeting.drone.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/meeting/hive-meeting.drone.ts) | Availability heartbeats, quorum state machine, WebRTC orchestration |
-| [meeting-signaling.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/meeting/meeting-signaling.ts) | Signal parsing, Nostr tag helpers, peer id generation |
-| [meeting-peer.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/meeting/meeting-peer.ts) | `RTCPeerConnection` wrapper — offer, answer, ICE |
-| [meeting-audio.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/meeting/meeting-audio.ts) | Slot-positioned spatial audio mixer |
-| [meeting-video.drone.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/meeting/meeting-video.drone.ts) | Renders remote/local streams onto the correct ring-1 hex |
-| [meeting-controls.worker.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/meeting/meeting-controls.worker.ts) | Camera toggle and availability UI |
+| [meeting.queen.ts](../hypercomb-essentials/src/meeting/meeting.queen.ts) | `/meeting` slash behaviour — tags tile, triggers join |
+| [meeting.drone.ts](../hypercomb-essentials/src/meeting/meeting.drone.ts) | Per-cell room management, slot assignment, room sig derivation |
+| [hive-meeting.drone.ts](../hypercomb-essentials/src/meeting/hive-meeting.drone.ts) | Availability heartbeats, quorum state machine, WebRTC orchestration |
+| [meeting-signaling.ts](../hypercomb-essentials/src/meeting/meeting-signaling.ts) | Signal parsing, Nostr tag helpers, peer id generation |
+| [meeting-peer.ts](../hypercomb-essentials/src/meeting/meeting-peer.ts) | `RTCPeerConnection` wrapper — offer, answer, ICE |
+| [meeting-audio.ts](../hypercomb-essentials/src/meeting/meeting-audio.ts) | Slot-positioned spatial audio mixer |
+| [meeting-video.drone.ts](../hypercomb-essentials/src/meeting/meeting-video.drone.ts) | Renders remote/local streams onto the correct ring-1 hex |
+| [meeting-controls.worker.ts](../hypercomb-essentials/src/meeting/meeting-controls.worker.ts) | Camera toggle and availability UI |
 
 ---
 

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Smart Autolinker",
-  "version": "1.2.0",
-  "description": "Automatically link configured words while typing or pasting in enabled sites.",
+  "version": "1.3.0",
+  "description": "Automatically link configured words and your published Hypercomb creations while typing or pasting in enabled sites.",
   "permissions": ["storage"],
   "host_permissions": ["<all_urls>"],
   "action": {

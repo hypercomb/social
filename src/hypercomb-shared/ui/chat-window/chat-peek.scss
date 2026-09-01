@@ -25,6 +25,8 @@
 // makes the element a containing block for fixed descendants, and the header
 // carries the clipboard flyout.
 
+@use '../toolwindow' as tw;
+
 $accent: #7eb6d6;
 
 .chat-panel.peeking {
@@ -39,25 +41,31 @@ $accent: #7eb6d6;
 
   // The reading half. Hidden, not removed.
   .chat-rail,
-  .chat-bar,
   .chat-list,
   .chat-threadwrap,
   .chat-setup {
     display: none;
   }
 
+  // THE TOOL ROW SURVIVES THE FOLD. Its reading half — which conversation,
+  // and the acts on that conversation — goes with the transcript, but the
+  // two window tools in it do not: one of them is the way BACK from the
+  // fold, and a control that hides itself the moment you press it is a trap.
+  // So the row stays, emptied down to its tools, reading as a second line of
+  // the header rather than as a bar of its own.
   // Header at the top, footer at the bottom, hive in between.
   .chat-foot {
     margin-top: auto;
   }
 
   .chat-header,
+  .chat-bar,
   .chat-foot {
     pointer-events: auto;
     position: relative;
     isolation: isolate;
     background: none;
-    border-color: rgba($accent, 0.3);
+    border-color: rgba(var(--acc), 0.3);
 
     // The bars need a ground of their own now that the panel has none —
     // otherwise they read as text lying loose on the hexagons.
@@ -66,34 +74,51 @@ $accent: #7eb6d6;
       position: absolute;
       inset: 0;
       z-index: -1;
-      background: rgba(6, 10, 16, 0.82);
+      background: rgba(var(--hc-panel-pane), 0.82);
       backdrop-filter: blur(10px) saturate(1.1);
     }
   }
 
-  .chat-header::before {
-    border-bottom: 1px solid rgba($accent, 0.28);
+  // One underline, under the PAIR — the header and the tool row are one band
+  // while folded, and two accent lines would say they are two.
+  .chat-bar {
+    justify-content: flex-end;
+    border-bottom: none;
+
+    > *:not(.chat-tool) {
+      display: none;
+    }
+
+    &::before {
+      border-bottom: 1px solid rgba(var(--acc), 0.28);
+    }
   }
 
   .chat-foot::before {
-    border-top: 1px solid rgba($accent, 0.28);
+    border-top: 1px solid rgba(var(--acc), 0.28);
   }
 }
 
 // The fold control itself. Lit while folded, because that is a state you can
 // otherwise only infer from the absence of the transcript.
-.chat-peek {
+//
+// The providers toggle beside it is the SAME KIND of control — a header press
+// whose state is visible — so it is drawn from this one rule rather than a
+// second copy that would drift a pixel at a time.
+// ONE ICON SIZE PER ROW. These sit beside the conversation's own archive
+// control now, so they take that control's box (`tw.icon-button`, rem — the
+// row's font-size must not decide how big a window control is) instead of the
+// em box they wore while they were header chrome.
+.chat-peek,
+.chat-providers {
   flex: 0 0 auto;
+  @include tw.icon-button;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.9em;
-  height: 1.9em;
-  padding: 0;
   border: 1px solid transparent;
-  border-radius: 0.35em;
   background: none;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
   transition: color 0.14s ease, background 0.14s ease, border-color 0.14s ease;
 
@@ -103,13 +128,13 @@ $accent: #7eb6d6;
 
   &:hover,
   &:focus-visible {
-    color: rgba($accent, 0.95);
-    background: rgba($accent, 0.12);
+    color: var(--hc-window-accent);
+    background: rgba(var(--acc), 0.12);
   }
 
   &.on {
-    color: rgba($accent, 0.95);
-    background: rgba($accent, 0.16);
-    border-color: rgba($accent, 0.4);
+    color: var(--hc-window-accent);
+    background: rgba(var(--acc), 0.16);
+    border-color: rgba(var(--acc), 0.4);
   }
 }

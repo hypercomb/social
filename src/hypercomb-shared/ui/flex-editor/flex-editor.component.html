@@ -1,0 +1,67 @@
+@if (visible()) {
+  <aside
+    class="fx-panel"
+    hcDockInset="right"
+    hcDockedPanel="flex-editor"
+    [hcSession]="session"
+    (hcDockedPanelClose)="close()"
+    dockSide="right"
+    [minWidth]="240"
+    [maxWidth]="460"
+    [defaultWidth]="300"
+    data-consumes-wheel
+    tabindex="-1"
+    [attr.aria-label]="'flex.title' | t"
+  >
+    <header class="fx-header">
+      <div class="fx-heading">
+        <span class="fx-title">{{ 'flex.title' | t }}</span>
+        <span class="fx-subject">{{ layout() }}</span>
+      </div>
+      <button class="fx-close" type="button" (click)="close()" [attr.aria-label]="'flex.close' | t">×</button>
+    </header>
+
+    <!-- WHICH container this is configuring. The designer lights the same one
+         on the canvas; this says it in words. -->
+    <p class="fx-where">{{ where() || ('flex.root' | t) }}</p>
+
+    <!-- THE ONLY SCROLLER. Five axes as an accordion: shut, a row says what the
+         axis does and what it is set to; open, it shows you. -->
+    <div class="fx-shelf">
+      @for (axis of axes(); track axis.name) {
+        <section class="fx-axis" [class.is-open]="openAxis() === axis.name">
+          <button
+            type="button"
+            class="fx-axis-head"
+            [attr.aria-expanded]="openAxis() === axis.name"
+            (click)="toggleAxis(axis.name)"
+          >
+            <span class="fx-axis-name">{{ axis.name }}</span>
+            <span class="fx-axis-what">{{ 'flex.axis.' + axis.name | t }}</span>
+            <span class="fx-axis-now">{{ current(axis) }}</span>
+          </button>
+
+          @if (openAxis() === axis.name) {
+            <ul class="fx-values">
+              @for (option of axis.values; track option.value) {
+                <li>
+                  <button
+                    type="button"
+                    class="fx-option"
+                    [class.is-on]="option.active"
+                    [attr.aria-label]="axis.name + ': ' + option.value"
+                    [attr.aria-pressed]="option.active"
+                    (click)="choose(axis.name, option.value)"
+                  >
+                    <span class="fx-preview" [hcRawHtml]="option.preview"></span>
+                    <span class="fx-option-name">{{ option.value }}</span>
+                  </button>
+                </li>
+              }
+            </ul>
+          }
+        </section>
+      }
+    </div>
+  </aside>
+}

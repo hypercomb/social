@@ -81,13 +81,20 @@ export interface FocusSnapshot { key: string; start: number | null; end: number 
  *  so no component's (encapsulated) SCSS would ever reach them.
  *
  *  The gear's RESTING colour stays a custom property set inline by the
- *  directive (a grouped window's gear is steel, an ungrouped one dim); an
- *  inline `color` would outrank the `:hover` rule and kill the effect. */
+ *  directive (a grouped window's gear carries the accent, an ungrouped one is
+ *  quiet ink); an inline `color` would outrank the `:hover` rule and kill the
+ *  effect.
+ *
+ *  ROLES, NOT LITERALS. This sheet is injected into the document once and
+ *  reaches EVERY tool window, so a literal here is a contrast bug in every
+ *  panel at the same time — the dim `#6e8290` measured 3.9:1 on a honey pane
+ *  in all eleven of them. `--hc-window-ink-*` is the panel ink at the weight
+ *  this theme says that weight costs. */
 const SETTINGS_CSS = `
-[data-hc-panel-settings] { color: var(--hc-gear, #6e8290); opacity: 1; pointer-events: auto; }
+[data-hc-panel-settings] { color: var(--hc-gear, var(--hc-window-ink-quiet)); opacity: 1; pointer-events: auto; }
 [data-hc-panel-settings]:hover,
 [data-hc-panel-settings]:focus-visible,
-[data-hc-panel-settings][aria-expanded='true'] { color: #cfe3ef; background-color: rgba(${STEEL}, 0.09) !important; }
+[data-hc-panel-settings][aria-expanded='true'] { color: var(--hc-window-ink-loud); background-color: rgba(${STEEL}, 0.09) !important; }
 [data-hc-panel-settings]:focus-visible { outline: 1px solid rgba(${STEEL}, 0.72); outline-offset: 1px; }
 /* Touch: widen the target into space the header ALREADY reserves for it (the
    close button's margin is one gear slot), so nothing moves a pixel and the

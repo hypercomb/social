@@ -220,7 +220,7 @@ function purgeStaleAngularCache(projectDir: string): void {
 
 function generateEnvJs(): void {
   const content = '// env.js stub — no secrets are embedded in shipped builds\n'
-  for (const app of ['hypercomb-web', 'hypercomb-dev', 'diamond-core-processor']) {
+  for (const app of ['hypercomb-web', 'hypercomb-dev']) {
     const pubDir = join(ROOT, app, 'public')
     if (existsSync(pubDir)) {
       writeFileSync(join(pubDir, 'env.js'), content, 'utf8')
@@ -234,7 +234,7 @@ function generateEnvJs(): void {
 // into the folder without touching any code.
 function generateSubstrateManifests(): void {
   const imageExts = new Set(['.webp', '.png', '.jpg', '.jpeg', '.gif', '.avif', '.bmp'])
-  for (const app of ['hypercomb-web', 'hypercomb-dev', 'diamond-core-processor']) {
+  for (const app of ['hypercomb-web', 'hypercomb-dev']) {
     const substrateDir = join(ROOT, app, 'public', 'substrate')
     if (!existsSync(substrateDir)) continue
     const images = readdirSync(substrateDir)
@@ -355,11 +355,11 @@ async function main() {
     if (!moduleUpToDate) {
       console.log(`${TAG} building essentials modules...`)
       run(nodeRun('./scripts/run-prepare.cjs'), essentialsDir)
-      run(tsxRun('./scripts/build-module.ts', ['--local']), essentialsDir)
+      run(tsxRun('./scripts/build-module.ts'), essentialsDir)
       recordBuild(state, 'essentials:module', essentialsSrc)
 
-      console.log(`${TAG} copying modules to dcp...`)
-      run(tsxRun('./scripts/copy-to-dcp.ts'), essentialsDir)
+      console.log(`${TAG} copying modules to the content targets...`)
+      run(tsxRun('./scripts/copy-content.ts'), essentialsDir)
     } else {
       console.log(`${TAG} essentials modules — up to date`)
     }

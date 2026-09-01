@@ -113,3 +113,20 @@ export function resetWindowRule(): void { windows.clear() }
 /** The showing tool windows, in open order — for tests and for anything that
  *  wants to say what is up. */
 export function toolWindowIds(): readonly string[] { return [...windows.keys()] }
+
+/** The showing tool window Escape acts on when the focus is in none of them —
+ *  the last one opened, because the last thing you opened is the first thing
+ *  Escape should take away.
+ *
+ *  This exists because ESCAPE MEANS "SHOW ME THE HEXAGONS AGAIN". A window
+ *  opened by a slash command leaves the focus on `<body>`, so a focus-only
+ *  rule answered "no window is involved" for exactly the windows most likely
+ *  to be open — you pressed Escape over a panel covering the hive and nothing
+ *  happened. Focus still WINS when there is any (a press inside a window
+ *  belongs to that window, never to a sibling); this is the fallback for when
+ *  there is none. */
+export function newestToolWindow(): { id: string; session: WindowSession } | null {
+  let last: { id: string; session: WindowSession } | null = null
+  for (const [id, session] of windows) last = { id, session }
+  return last
+}

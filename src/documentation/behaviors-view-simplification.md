@@ -1,8 +1,8 @@
 # Behaviors View Simplification — the store, the light, the badge
 
 Status: **built** (2026-08-06 — panel, drone and i18n reworked; verified on dev.
-Still owed: essentials rebuild/deploy for the web shell, the website view's
-revision list, and the mirror pass — queued `behaviors-store-simplification`).
+Still owed: essentials rebuild/deploy for the web shell, and the website
+view's revision list).
 
 The Beehaviors panel (`hypercomb-shared/ui/features-viewer/`, ~1,540 lines) tries to
 answer three different questions in one window — what do I have, what is enabled,
@@ -97,8 +97,6 @@ adopted-first ordering.
 
 - Rework of `features-viewer.component.{ts,html,scss}` into the two surfaces
 - Revision list in the website's view (jump-between-versions)
-- Mirror pass: update the behaviors mirror tiles/notes to the new model
-  (run or queued — never neither)
 
 ## 2026-08-19 — One control: the bulb (opt-in polarity + deposit-and-wait)
 
@@ -283,8 +281,6 @@ one later without a new surface.
 
 ### Owed
 
-- Mirror pass — QUEUED (`behaviors-default-view`, `--manual`: note-add is
-  additive and would land twice).
 - Essentials rebuild + web deploy, as ever.
 
 ### One gutter (the same pass)

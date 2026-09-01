@@ -7,6 +7,7 @@
 // Same structural shape as the contact hover panel; the hive stays
 // interactive behind it. Cold and still: no motion, no glow.
 
+@use '../toolwindow' as tw;
 $steel: rgb(126, 182, 214);
 
 :host {
@@ -28,7 +29,7 @@ $steel: rgb(126, 182, 214);
   border-radius: var(--hc-radius-floating);
   box-shadow: 0 18px 54px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba($steel, 0.07) inset;
   font-family: var(--hc-mono, system-ui);
-  color: #f3f3f3;
+  color: var(--hc-window-ink-loud);
   overflow: hidden;
 }
 
@@ -53,7 +54,7 @@ $steel: rgb(126, 182, 214);
 }
 
 .action-drag-grip {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--hc-window-ink-quiet);
   font-size: 0.85rem;
   line-height: 1;
 }
@@ -63,7 +64,7 @@ $steel: rgb(126, 182, 214);
   font-size: 0.95rem;
   font-weight: 600;
   letter-spacing: 0.01em;
-  color: #fff;
+  color: var(--hc-window-ink-loud);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -84,14 +85,14 @@ $steel: rgb(126, 182, 214);
   flex: 0 0 auto;
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--hc-window-ink-quiet);
   font-size: 1.1rem;
   line-height: 1;
   cursor: pointer;
   padding: 0 0.15rem;
   transition: color 150ms ease;
 
-  &:hover { color: #ffc8c8; }
+  &:hover { color: tw.ink(#ffc8c8); }
 }
 
 .action-card-body {
@@ -115,7 +116,7 @@ $steel: rgb(126, 182, 214);
   font-size: 0.6rem;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: rgba(255, 255, 255, 0.42);
+  color: var(--hc-window-ink-quiet);
 }
 
 .action-combo {
@@ -134,14 +135,14 @@ $steel: rgb(126, 182, 214);
   background: linear-gradient(180deg, rgba($steel, 0.16), rgba($steel, 0.05));
   border: 1px solid rgba($steel, 0.5);
   border-bottom-width: 2px;
-  color: #eaf5fb;
+  color: var(--hc-window-ink-loud);
 }
 
 .action-then {
   font-size: 0.62rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--hc-window-ink-quiet);
   padding: 0 0.1rem;
 }
 
@@ -149,7 +150,7 @@ $steel: rgb(126, 182, 214);
   margin: 0;
   font-size: 0.84rem;
   line-height: 1.5;
-  color: rgba(255, 255, 255, 0.92);
+  color: var(--hc-window-ink-loud);
 }
 
 // The behavior's detail — set apart from the one-liner by a steel hairline,
@@ -160,7 +161,7 @@ $steel: rgb(126, 182, 214);
   border-top: 1px solid rgba($steel, 0.16);
   font-size: 0.78rem;
   line-height: 1.55;
-  color: rgba(255, 255, 255, 0.64);
+  color: var(--hc-window-ink-quiet);
 }
 
 // ── slash usage / options / aliases ──
@@ -171,12 +172,12 @@ $steel: rgb(126, 182, 214);
   border-radius: 4px;
   background: rgba($steel, 0.1);
   border: 1px solid rgba($steel, 0.4);
-  color: #eaf5fb;
+  color: var(--hc-window-ink-loud);
 
   &.muted {
     background: rgba(255, 255, 255, 0.04);
     border-color: rgba(255, 255, 255, 0.12);
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--hc-window-ink-quiet);
   }
 }
 
@@ -211,7 +212,7 @@ $steel: rgb(126, 182, 214);
   flex: 1;
   font-size: 0.8rem;
   line-height: 1.45;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--hc-window-ink-loud);
 }
 
 .action-example {
@@ -228,14 +229,14 @@ $steel: rgb(126, 182, 214);
   border-radius: 4px;
   background: rgba($steel, 0.1);
   border: 1px solid rgba($steel, 0.35);
-  color: #eaf5fb;
+  color: var(--hc-window-ink-loud);
 }
 
 .action-example-arrow {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--hc-window-ink-quiet);
 }
 
 .action-example-result {
-  color: rgba(255, 255, 255, 0.62);
+  color: var(--hc-window-ink-quiet);
   line-height: 1.4;
 }

@@ -135,6 +135,81 @@ document.querySelector("#domainForm").addEventListener("submit", (event) => {
   renderDomains();
 });
 
+// ── Hypercomb publications ─────────────────────────────────────────────────
+// Synced trees live in chrome.storage.local (they outgrow the sync quota);
+// the "hive" group is added to the regular groups so site rules and popup
+// toggles govern them like any other replacements.
+const hiveApi = globalThis.SmartAutolinkerHive;
+let hiveState = hiveApi.emptyState();
+
+const hiveIo = {
+  json: async (url) => {
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) throw new Error(`${response.status} for ${url}`);
+    return JSON.parse(await response.text());
+  }
+};
+
+function renderHive() {
+  const status = document.querySelector("#hiveStatus");
+  const container = document.querySelector("#hiveSites");
+  container.replaceChildren();
+  if (!hiveState.syncedAt) {
+    status.textContent = "Not synced yet.";
+    return;
+  }
+  const total = hiveState.replacements.length;
+  status.textContent = `${hiveState.sites.length} sites · ${total} linkable creations · synced ${new Date(hiveState.syncedAt).toLocaleString()}`;
+  for (const site of hiveState.sites) {
+    const card = document.createElement("div");
+    card.className = "domain-rule";
+    const label = document.createElement("label");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = site.enabled !== false;
+    checkbox.addEventListener("change", () => {
+      site.enabled = checkbox.checked;
+      chrome.storage.local.set({ hive: hiveState });
+    });
+    label.append(checkbox, ` ${site.title} — ${site.host} (${site.count})`);
+    card.append(label);
+    container.append(card);
+  }
+}
+
+function ensureHiveGroup() {
+  if ([...groupList.querySelectorAll(".group-row")].some((row) => row.dataset.id === "hive")) return;
+  addGroup({ id: "hive", name: "Hypercomb", enabled: true });
+  refreshGroupReferences();
+}
+
+async function syncHive() {
+  const status = document.querySelector("#hiveStatus");
+  const ledger = document.querySelector("#hiveLedger").value.trim() || hiveApi.DEFAULT_LEDGER;
+  status.textContent = "Syncing publications…";
+  status.className = "";
+  try {
+    hiveState = await hiveApi.syncPublications(ledger, hiveIo, hiveState);
+    chrome.storage.local.set({ hive: hiveState });
+    ensureHiveGroup();
+    renderHive();
+  } catch (error) {
+    status.textContent = `Sync failed: ${error.message}`;
+    status.className = "error";
+  }
+}
+
+chrome.storage.local.get({ hive: null }, ({ hive }) => {
+  if (hive) hiveState = hive;
+  document.querySelector("#hiveLedger").value = hiveState.ledger || hiveApi.DEFAULT_LEDGER;
+  renderHive();
+});
+document.querySelector("#syncHive").addEventListener("click", syncHive);
+document.querySelector("#hiveForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  syncHive();
+});
+
 document.querySelector("#save").addEventListener("click", () => {
   const groups = currentGroups();
   const validGroupIds = new Set(groups.map((group) => group.id));

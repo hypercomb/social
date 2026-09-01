@@ -1,0 +1,47 @@
+# Cloudflare static-asset headers for the published visitor engine.
+#
+# These files are served DIRECTLY by Cloudflare's asset server (see
+# `run_worker_first` in wrangler.pluginthematrix.toml) so they never invoke the
+# Worker and never count against the Workers request quota. Because the Worker
+# no longer touches them, the security headers it used to attach have to be
+# declared here instead. The HTML document still runs the Worker, so the CSP
+# that actually governs the page is unchanged and stays in worker.js.
+#
+# Angular copies public/ into the dist verbatim (angular.json assets glob), so
+# this file survives every rebuild — do not put it in dist/ directly.
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+
+# Content-hashed bundle output: the hash IS the version, so these can never go
+# stale under a fixed name. Immutable kills the revalidation 304s that were
+# costing a request each on every page load.
+/chunk-*.js
+  Cache-Control: public, max-age=31536000, immutable
+/main-*.js
+  Cache-Control: public, max-age=31536000, immutable
+/worker-*.js
+  Cache-Control: public, max-age=31536000, immutable
+/polyfills-*.js
+  Cache-Control: public, max-age=31536000, immutable
+/styles-*.css
+  Cache-Control: public, max-age=31536000, immutable
+
+# Stable public assets that are not content-hashed: cache hard but keep a
+# revalidation path, since these can be replaced under the same name.
+/substrate/*
+  Cache-Control: public, max-age=604800
+/vendor/*
+  Cache-Control: public, max-age=604800
+/core/*
+  Cache-Control: public, max-age=86400
+/media/*
+  Cache-Control: public, max-age=604800
+
+# The service worker must never be cached hard — a stale one strands clients on
+# an old runtime with no way to update.
+/hypercomb.worker.js
+  Cache-Control: public, max-age=0, must-revalidate
+/env.js
+  Cache-Control: public, max-age=0, must-revalidate

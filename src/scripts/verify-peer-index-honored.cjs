@@ -74,7 +74,7 @@ async function addTileAt(page, name, index) {
     // Write the explicit index property via the canonical writer.
     const lineage = window.ioc?.get?.('@hypercomb.social/Lineage')
     const segs = lineage?.explorerSegments?.() ?? []
-    const mod = await import('/@fs/C:/Projects/hypercomb/social/src/hypercomb-essentials/src/diamondcoreprocessor.com/editor/tile-properties.ts').catch(() => null)
+    const mod = await import('/@fs/C:/Projects/hypercomb/social/src/hypercomb-essentials/src/editor/tile-properties.ts').catch(() => null)
     if (mod?.writeTilePropertiesAt) {
       await mod.writeTilePropertiesAt(segs, cellName, { index: idx })
     }

@@ -70,7 +70,7 @@ Because every file is addressed by its signature, the host cannot serve tampered
 
 ### How a pollination is announced
 
-The manifest URL is announced over the existing Nostr sharing channel used by [diamondcoreprocessor.com/sharing/](../hypercomb-essentials/src/diamondcoreprocessor.com/sharing/). Nostr carries the pointer (`{ manifestUrl, manifestSig, target }`); the actual content stays on the contributor's host. This keeps the protocol a thin layer on top of what already works for sharing.
+The manifest URL is announced over the existing Nostr sharing channel used by [sharing/](../hypercomb-essentials/src/sharing/). Nostr carries the pointer (`{ manifestUrl, manifestSig, target }`); the actual content stays on the contributor's host. This keeps the protocol a thin layer on top of what already works for sharing.
 
 ## The Stigma — Boundary Filter
 

@@ -5,8 +5,14 @@
 // surface, steel hairline, no flashy effects.
 
 @use '../toolwindow' as tw;
+@use '../panel-identity' as identity;
 
 $accent: #a8ffd8;
+
+
+// The identity as a triple — a bright theme takes the same hue deep.
+// These panels do not come through `tw.panel()`, so they say it here.
+:host { @include identity.accent($accent); }
 
 :host {
   position: fixed;
@@ -38,19 +44,19 @@ $accent: #a8ffd8;
 
 .contact-form-header {
   @include tw.header;
-  border-bottom: 1px solid rgba($accent, 0.22);
+  border-bottom: 1px solid rgba(var(--acc), 0.22);
 }
 
 .contact-form-title {
   font-size: 0.9rem;
   letter-spacing: 0.05em;
-  color: rgba($accent, 0.95);
+  color: var(--hc-window-accent);
 }
 
 .contact-form-cell {
   flex: 1;
   font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--hc-window-ink-quiet);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -59,13 +65,13 @@ $accent: #a8ffd8;
 .contact-form-close {
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--hc-window-ink-quiet);
   font-size: 1.4rem;
   line-height: 1;
   cursor: pointer;
   padding: 0 0.25rem;
 
-  &:hover { color: $accent; }
+  &:hover { color: rgb(var(--acc)); }
 }
 
 .contact-form-body {
@@ -95,24 +101,24 @@ $accent: #a8ffd8;
   font-size: 0.7rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--hc-window-ink-quiet);
 }
 
 input,
 textarea {
   font-family: inherit;
   font-size: 0.85rem;
-  color: #f3f3f3;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--hc-window-ink-loud);
+  background: rgba(var(--hc-panel-ink), 0.04);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.14);
   border-radius: tw.$radius-control;
   padding: 0.45rem 0.55rem;
   outline: none;
   transition: border-color 150ms ease, background 150ms ease;
 
   &:focus {
-    border-color: rgba($accent, 0.7);
-    background: rgba($accent, 0.06);
+    border-color: rgba(var(--acc), 0.7);
+    background: rgba(var(--acc), 0.06);
   }
 }
 
@@ -122,11 +128,11 @@ textarea { resize: vertical; }
 .contact-name-value {
   font-size: 1rem;
   font-weight: 600;
-  color: #fff;
+  color: var(--hc-panel-text);
   padding: 0.4rem 0.55rem;
   border-radius: tw.$radius-control;
-  background: rgba($accent, 0.08);
-  border: 1px solid rgba($accent, 0.22);
+  background: rgba(var(--acc), 0.08);
+  border: 1px solid rgba(var(--acc), 0.22);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -137,7 +143,7 @@ textarea { resize: vertical; }
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(var(--hc-panel-ink), 0.08);
 }
 
 .contact-form-spacer { flex: 1; }
@@ -145,13 +151,13 @@ textarea { resize: vertical; }
 .contact-import {
   cursor: pointer;
   font-size: 0.75rem;
-  color: rgba($accent, 0.85);
-  border: 1px dashed rgba($accent, 0.4);
+  color: var(--hc-window-accent);
+  border: 1px dashed rgba(var(--acc), 0.4);
   border-radius: tw.$radius-control;
   padding: 0.35rem 0.6rem;
   transition: background 150ms ease, border-color 150ms ease;
 
-  &:hover { background: rgba($accent, 0.1); border-color: rgba($accent, 0.7); }
+  &:hover { background: rgba(var(--acc), 0.1); border-color: rgba(var(--acc), 0.7); }
 }
 
 .contact-btn {
@@ -164,18 +170,18 @@ textarea { resize: vertical; }
 
   &.ghost {
     background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    color: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(var(--hc-panel-ink), 0.18);
+    color: var(--hc-window-ink-quiet);
 
-    &:hover { border-color: rgba(255, 255, 255, 0.4); color: #fff; }
+    &:hover { border-color: rgba(var(--hc-panel-ink), 0.4); color: var(--hc-panel-text); }
   }
 
   &.primary {
-    background: rgba($accent, 0.16);
-    border: 1px solid rgba($accent, 0.6);
-    color: $accent;
+    background: rgba(var(--acc), 0.16);
+    border: 1px solid rgba(var(--acc), 0.6);
+    color: rgb(var(--acc));
 
-    &:hover:not(:disabled) { background: rgba($accent, 0.28); color: #fff; border-color: $accent; }
+    &:hover:not(:disabled) { background: rgba(var(--acc), 0.28); color: var(--hc-panel-text); border-color: rgb(var(--acc)); }
     &:disabled { opacity: 0.4; cursor: not-allowed; }
   }
 }

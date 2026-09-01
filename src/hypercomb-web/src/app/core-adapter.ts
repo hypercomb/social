@@ -1,11 +1,17 @@
 // hypercomb-web/src/app/core/core-adapter.ts
 
+// The shipped locale catalogs. They used to live inside runtime-initializer;
+// that module is in @hypercomb/runtime now and ships none of its own, because
+// a locale is content and which languages exist is the host's answer. Web and
+// dev still bundle theirs — Angular lazy-chunks them — so pass them in
+// explicitly and nothing about these shells changes.
+import { bundledCatalogs, bundledLocales } from '@hypercomb/shared/core/bundled-catalogs'
 import { Injectable, signal } from "@angular/core"
 import { EffectBus } from "@hypercomb/core"
-import { Store, LayerInstaller, DependencyLoader, DroneRegistry, IconProviderRegistry, initializeRuntime } from "@hypercomb/shared/core"
+import { Store, DependencyLoader, DroneRegistry, IconProviderRegistry, initializeRuntime } from "@hypercomb/shared/core"
 import { LayerService } from "./layer-service"
 
-const _ = [DependencyLoader, DroneRegistry, IconProviderRegistry, LayerInstaller, LayerService, Store]
+const _ = [DependencyLoader, DroneRegistry, IconProviderRegistry, LayerService, Store]
 
 const MESH_PUBLIC_KEY = 'hc:mesh-public'
 
@@ -60,7 +66,7 @@ export class CoreAdapter {
     if (this.initialized) return
     this.initialized = true
 
-    await initializeRuntime({ logOpfs: false })
+    await initializeRuntime({ logOpfs: false, catalogs: bundledCatalogs, locales: bundledLocales })
 
     // REFRESH → PRIVATE: every boot starts disconnected (the module-scope
     // force-write is the flag's truth); membership never survives a reload.

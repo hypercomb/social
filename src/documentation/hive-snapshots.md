@@ -182,9 +182,9 @@ which the dev shell cannot exercise.
 
 | File | Role |
 |---|---|
-| `hypercomb-essentials/src/diamondcoreprocessor.com/history/snapshots-slot.ts` | slot registration, `SnapshotRecord`, `readSnapshots`, `findSnapshot` |
-| `hypercomb-essentials/src/diamondcoreprocessor.com/commands/snapshot.queen.ts` | `/snapshot` — seal, push closure, record, commit, name in DCP |
-| `hypercomb-essentials/src/diamondcoreprocessor.com/commands/restore.queen.ts` | `/restore` — confirm, auto restore point, apply seal, repaint |
+| `hypercomb-essentials/src/history/snapshots-slot.ts` | slot registration, `SnapshotRecord`, `readSnapshots`, `findSnapshot` |
+| `hypercomb-essentials/src/commands/snapshot.queen.ts` | `/snapshot` — seal, push closure, record, commit, name in DCP |
+| `hypercomb-essentials/src/commands/restore.queen.ts` | `/restore` — confirm, auto restore point, apply seal, repaint |
 | `diamond-core-processor/src/app/core/dcp-domain-storage.service.ts` | `HIVE_LINEAGE`, `saveHiveSnapshot`, `loadHiveSnapshots` |
 | `diamond-core-processor/src/app/sentinel/sentinel-handler.ts` | `save-branch` routes on `sealSig` |
 | `hypercomb-web/src/setup/sentinel-bridge.ts` | `saveBranch(name, sealSig?)` |

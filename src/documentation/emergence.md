@@ -194,4 +194,4 @@ Events and effects that cause re-emergence:
 | `presentation/tiles/move-preview.drone.ts` | Move swap indicator overlays |
 | `navigation/hex-detector.ts` | Pixel → axial coordinate hit detection |
 
-All paths relative to `hypercomb-essentials/src/diamondcoreprocessor.com/`.
+All paths relative to `hypercomb-essentials/src/`.

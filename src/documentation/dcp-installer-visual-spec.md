@@ -1903,20 +1903,7 @@ Four CSS durations are hand-synced to TypeScript constants. **Every duration use
 - **Every non-essential animation collapses under `prefers-reduced-motion: reduce`** (§3.5), and the three that must be *absent* rather than instant are named there.
 
 ---
-
-# 10. HIVE MIRROR OBLIGATION
-
-Per project doctrine this creation owes a mirror pass — tiles per surface, a collection gathering them, pheromones marking what each is, and notes. The natural shape:
-
-- **Collection:** `dcp-caliper` gathering one tile per surface in §6 (one tile per file, 1:1 with source resources).
-- **Pheromones:** mark each tile for what it is — `visual:token-layer`, `visual:motion-system`, `visual:illustration`, `visual:primitive`, `visual:copy` — so render and behaviour resolve from the mark, not from code. Use the declared vocabulary; do not mint keywords on the fly.
-- **Notes:** the explanation lives on the tile — each surface's *why*, not just its *what*.
-
-**If no live bridge is available during the work, this must be queued in the same change** (`npm run mirror:queue -- add …`) naming what is owed and how to run it, and **the commit message must say so.** The mirror pass is additive (`note-add`), so it may be queued normally — but if any step is not safely re-runnable, queue it `--manual` or the 10-minute idle drain will land the same note twice. Shipping this with no mirror *and* no queue entry is the one thing that must not happen.
-
----
-
-# 11. ONE-PAGE SUMMARY FOR THE IMPLEMENTER WHO READS NOTHING ELSE
+# 10. ONE-PAGE SUMMARY FOR THE IMPLEMENTER WHO READS NOTHING ELSE
 
 1. **`styles.scss` first, alone.** Radius `0px → 3/6/10/16 + pill`. Surfaces re-cast cool with a ~7 L hover step. Accent **splits**: steel `#8fb4e8` for everything you can touch, champagne `#e8c98a` for **live only**. `--dcp-accent-tint` stops being `#3a2c12` brown. `--dcp-border` gets defined (it was referenced and did not exist). `--dcp-ink-4` is redeclared non-text. Elevation becomes inset-highlight + wide ambient. All keyframes, all motion tokens, all five primitives, and the reduced-motion block live here at zero component budget.
 2. **Split `home.component.scss` into nine sheets second**, byte-for-byte, before writing one line of new CSS. Delete the eight dead selectors.

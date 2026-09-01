@@ -1,0 +1,309 @@
+<style>
+  :host{all:initial}
+  .sfs{display:block;min-height:100vh;
+    --bg:#F4F2ED;--panel:#FCFBF8;--ink:#1F1B12;--muted:#6E6754;--line:#DDD8C9;
+    --amber:#B37400;--amber-soft:rgba(179,116,0,.12);--ok:#2F7D4E;
+    background:var(--bg);color:var(--ink);
+    font:16px/1.6 'Segoe UI',system-ui,-apple-system,sans-serif}
+  .sfs *{box-sizing:border-box;margin:0}
+  .sfs .wrap{max-width:1020px;margin:0 auto;padding:0 24px 96px}
+  .sfs .prose{max-width:68ch}
+
+  .sfs header{padding:72px 0 20px}
+  .sfs .eyebrow{font:12px/1.4 Consolas,'Cascadia Mono',monospace;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--amber);margin:0 0 14px}
+  .sfs h1{font-size:clamp(38px,6vw,58px);font-weight:800;line-height:1.04;
+    letter-spacing:-.02em;margin:0 0 18px;text-wrap:balance}
+  .sfs .lede{font-size:18px;color:var(--muted)}
+  .sfs .lede b{color:var(--ink);font-weight:600}
+
+  .sfs .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+    gap:14px;margin:44px 0 8px}
+  .sfs .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:18px 20px 16px}
+  .sfs .stat b{display:block;font-size:30px;font-weight:800;line-height:1;
+    margin-bottom:8px;font-variant-numeric:tabular-nums}
+  .sfs .stat.hot b{color:var(--amber)}
+  .sfs .stat span{font-size:13px;color:var(--muted);line-height:1.45;display:block}
+
+  .sfs h2{font-size:27px;font-weight:700;letter-spacing:-.01em;margin:64px 0 8px;text-wrap:balance}
+  .sfs .kicker{font:11px/1.4 Consolas,'Cascadia Mono',monospace;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--muted);margin:60px 0 -54px}
+  .sfs p.intro{max-width:68ch;color:var(--muted);margin:0 0 26px}
+  .sfs p.intro code,.sfs figcaption code,.sfs .why code{
+    font:.88em/1.5 Consolas,'Cascadia Mono',monospace;color:var(--ink)}
+
+  .sfs figure{margin:0 0 12px}
+  .sfs .figscroll{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+  .sfs .figscroll svg{display:block;min-width:860px;width:100%;height:auto}
+  .sfs figcaption{font-size:13.5px;color:var(--muted);max-width:78ch;padding:12px 4px 0;line-height:1.55}
+  .sfs figcaption .amb{color:var(--amber);font-weight:600}
+
+  .sfs .why{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+    gap:26px 34px;margin-top:26px}
+  .sfs .why h3{font-size:17px;font-weight:700;margin:0 0 8px}
+  .sfs .why p{font-size:14.5px;color:var(--muted)}
+  .sfs .why p b{color:var(--ink);font-weight:600}
+
+  .sfs footer{margin-top:72px;padding-top:18px;border-top:1px solid var(--line);
+    font:11.5px/1.5 Consolas,'Cascadia Mono',monospace;color:var(--muted)}
+
+  .sfs svg text{font-family:'Segoe UI',system-ui,sans-serif;fill:currentColor}
+  .sfs svg .mono{font-family:Consolas,'Cascadia Mono',monospace}
+  .sfs svg .mut{fill:var(--muted)}
+  .sfs svg .amb{fill:var(--amber)}
+  .sfs svg .okc{fill:var(--ok)}
+</style>
+<div class="sfs">
+<div class="wrap">
+<header>
+  <p class="eyebrow">Hypercomb · content-addressed publishing</p>
+  <h1>Publish by Signature</h1>
+  <p class="lede prose">Every hosted subdomain is a window onto <b>one shared, signature-addressed file system</b>. A file's name is the SHA-256 of its bytes — so publishing any project means uploading <b>only the signatures the store doesn't already hold</b>, and duplication is structurally impossible.</p>
+</header>
+
+<div class="stats">
+  <div class="stat"><b>1</b><span>content store behind every hostname — sites are head pointers, not copies</span></div>
+  <div class="stat hot"><b>Δ only</b><span>a publish uploads just the cells whose signature the store lacks</span></div>
+  <div class="stat"><b>0</b><span>duplicate bytes possible — same content, same signature, same file</span></div>
+  <div class="stat"><b>∞</b><span>cache lifetime — a signed cell can never change, so a cache hit is always safe</span></div>
+</div>
+
+<p class="kicker">Figure 1 — the shared file system</p>
+<h2>Six hostnames, one store</h2>
+<p class="intro">One worker script answers for every hostname. Each site is nothing but a <em>lineage head</em> — a pointer at a root cell inside the same store. Where two sites use the same content, they reference the same cell.</p>
+
+<figure>
+<div class="figscroll">
+<svg viewBox="0 0 960 470" role="img" aria-label="Five hostnames route through one worker into a single signature-addressed content store; each site's head points at a root cell, and a cell referenced by two trees is stored once.">
+  <defs>
+    <marker id="ar1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+    <path id="hex26" d="M0,-26 L23,-13 L23,13 L0,26 L-23,13 L-23,-13 Z"/>
+  </defs>
+  <g>
+    <rect x="8"   y="16" width="176" height="52" rx="8" fill="var(--panel)" stroke="var(--line)"/>
+    <rect x="200" y="16" width="176" height="52" rx="8" fill="var(--panel)" stroke="var(--line)"/>
+    <rect x="392" y="16" width="176" height="52" rx="8" fill="var(--panel)" stroke="var(--line)"/>
+    <rect x="584" y="16" width="176" height="52" rx="8" fill="var(--panel)" stroke="var(--line)"/>
+    <rect x="776" y="16" width="176" height="52" rx="8" fill="var(--panel)" stroke="var(--line)"/>
+    <text x="96"  y="40" text-anchor="middle" font-size="12" font-weight="600">pluginthematrix.com</text>
+    <text x="96"  y="57" text-anchor="middle" font-size="10" class="mut">the root site</text>
+    <text x="288" y="40" text-anchor="middle" font-size="12" font-weight="600">revolucion</text>
+    <text x="288" y="57" text-anchor="middle" font-size="10" class="mut">.pluginthematrix.com</text>
+    <text x="480" y="40" text-anchor="middle" font-size="12" font-weight="600">arkanoid</text>
+    <text x="480" y="57" text-anchor="middle" font-size="10" class="mut">.pluginthematrix.com</text>
+    <text x="672" y="40" text-anchor="middle" font-size="12" font-weight="600">meetup</text>
+    <text x="672" y="57" text-anchor="middle" font-size="10" class="mut">.pluginthematrix.com</text>
+    <text x="864" y="40" text-anchor="middle" font-size="12" font-weight="600">*</text>
+    <text x="864" y="57" text-anchor="middle" font-size="10" class="mut">any published creation</text>
+  </g>
+  <g stroke="currentColor" marker-end="url(#ar1)">
+    <line x1="96"  y1="68" x2="96"  y2="104"/>
+    <line x1="288" y1="68" x2="288" y2="104"/>
+    <line x1="480" y1="68" x2="480" y2="104"/>
+    <line x1="672" y1="68" x2="672" y2="104"/>
+    <line x1="864" y1="68" x2="864" y2="104"/>
+  </g>
+  <rect x="80" y="110" width="800" height="42" rx="8" fill="var(--panel)" stroke="currentColor"/>
+  <text x="480" y="136" text-anchor="middle" font-size="12.5" font-weight="600">one worker script — every hostname resolves against the same store</text>
+  <rect x="80" y="230" width="800" height="220" rx="10" fill="var(--panel)" stroke="var(--line)"/>
+  <text x="100" y="260" font-size="11" letter-spacing="1.5" class="mut">THE SHARED STORE</text>
+  <g stroke="currentColor" marker-end="url(#ar1)">
+    <line x1="342" y1="152" x2="342" y2="281"/>
+    <line x1="480" y1="152" x2="480" y2="281"/>
+    <line x1="618" y1="152" x2="618" y2="281"/>
+  </g>
+  <text x="350" y="182" font-size="10" class="mono mut">revolucion head → 91ab…</text>
+  <text x="488" y="210" font-size="10" class="mono mut">arkanoid head → c044…</text>
+  <text x="626" y="182" font-size="10" class="mono mut">meetup head → 7e5d…</text>
+  <g fill="var(--bg)" stroke="var(--muted)">
+    <use href="#hex26" x="296" y="310"/>
+    <use href="#hex26" x="342" y="310" stroke="currentColor" stroke-width="2"/>
+    <use href="#hex26" x="388" y="310"/>
+    <use href="#hex26" x="434" y="310"/>
+    <use href="#hex26" x="480" y="310" stroke="currentColor" stroke-width="2"/>
+    <use href="#hex26" x="526" y="310"/>
+    <use href="#hex26" x="572" y="310"/>
+    <use href="#hex26" x="618" y="310" stroke="currentColor" stroke-width="2"/>
+    <use href="#hex26" x="664" y="310"/>
+  </g>
+  <g fill="var(--bg)" stroke="var(--muted)">
+    <use href="#hex26" x="319" y="350"/>
+    <use href="#hex26" x="365" y="350"/>
+    <use href="#hex26" x="411" y="350"/>
+    <use href="#hex26" x="457" y="350"/>
+    <use href="#hex26" x="503" y="350"/>
+    <use href="#hex26" x="549" y="350" fill="var(--amber-soft)" stroke="var(--amber)" stroke-width="2"/>
+    <use href="#hex26" x="595" y="350"/>
+    <use href="#hex26" x="641" y="350"/>
+  </g>
+  <g fill="var(--bg)" stroke="var(--muted)">
+    <use href="#hex26" x="296" y="390"/>
+    <use href="#hex26" x="342" y="390"/>
+    <use href="#hex26" x="388" y="390"/>
+    <use href="#hex26" x="434" y="390"/>
+    <use href="#hex26" x="480" y="390"/>
+    <use href="#hex26" x="526" y="390"/>
+    <use href="#hex26" x="572" y="390"/>
+    <use href="#hex26" x="618" y="390"/>
+    <use href="#hex26" x="664" y="390"/>
+  </g>
+  <g font-size="9" text-anchor="middle" class="mono mut">
+    <text x="296" y="313">5d0e</text><text x="388" y="313">2c77</text><text x="434" y="313">08d1</text>
+    <text x="526" y="313">6b3f</text><text x="572" y="313">dd2a</text><text x="664" y="313">4f90</text>
+    <text x="319" y="353">13be</text><text x="365" y="353">90cf</text><text x="411" y="353">5aa1</text>
+    <text x="457" y="353">77e2</text><text x="503" y="353">0b64</text><text x="595" y="353">f18c</text><text x="641" y="353">862d</text>
+    <text x="296" y="393">3e5b</text><text x="342" y="393">21d0</text><text x="388" y="393">9c4e</text>
+    <text x="434" y="393">b7a2</text><text x="480" y="393">60ff</text><text x="526" y="393">2f4d</text>
+    <text x="572" y="393">1a08</text><text x="618" y="393">44c9</text><text x="664" y="393">8d17</text>
+  </g>
+  <g font-size="9" font-weight="600" text-anchor="middle" class="mono">
+    <text x="342" y="313">91ab</text>
+    <text x="480" y="313">c044</text>
+    <text x="618" y="313">7e5d</text>
+  </g>
+  <text x="549" y="353" font-size="9" font-weight="600" text-anchor="middle" class="mono amb">a3f9</text>
+  <g stroke="var(--amber)" stroke-width="1.5" stroke-dasharray="4 3">
+    <line x1="504" y1="324" x2="525" y2="336"/>
+    <line x1="594" y1="324" x2="573" y2="336"/>
+  </g>
+  <text x="480" y="436" text-anchor="middle" font-size="10.5" class="mut">cell <tspan class="mono amb" font-weight="600">a3f9</tspan> sits in both the arkanoid tree and the meetup tree — same signature, stored once, never copied</text>
+</svg>
+</div>
+<figcaption>Every hostname is served by the same worker from the same store of sig-named cells. A "site" is only a head pointer at a root cell — bold outlines mark the three roots — and when two trees use the same content, both simply reference the <span class="amb">one cell</span> that carries that signature.</figcaption>
+</figure>
+
+<p class="kicker">Figure 2 — an incremental publish</p>
+<h2>A publish is a set difference</h2>
+<p class="intro">You edit one file in one project. Signing the build shows exactly what changed: the edited layer gets a new signature, the root recomposes above it, and everything else keeps the signature it always had. The store is asked one question per cell — <code>do you already hold this sig?</code></p>
+
+<figure>
+<div class="figscroll">
+<svg viewBox="0 0 960 470" role="img" aria-label="Six signed files are diffed against the store by signature; four already exist and are skipped, only two new cells upload, then one lineage head marker flips to make the new root live.">
+  <defs>
+    <marker id="ar2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+    <marker id="ar2ok" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--ok)"/>
+    </marker>
+    <marker id="ar2amb" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--amber)"/>
+    </marker>
+    <path id="hex15" d="M0,-15 L13,-7.5 L13,7.5 L0,15 L-13,7.5 L-13,-7.5 Z"/>
+    <path id="hex20" d="M0,-20 L17,-10 L17,10 L0,20 L-17,10 L-17,-10 Z"/>
+  </defs>
+  <text x="24" y="46" font-size="11" letter-spacing="1.5" class="mut">A CHANGE TO ONE PROJECT</text>
+  <rect x="24" y="64" width="260" height="350" rx="10" fill="var(--panel)" stroke="var(--line)"/>
+  <text x="44" y="94" font-size="12.5" font-weight="600">6 files → 6 signatures</text>
+  <g fill="var(--bg)" stroke="var(--muted)">
+    <use href="#hex15" x="70" y="130"/>
+    <use href="#hex15" x="70" y="230"/>
+    <use href="#hex15" x="70" y="280"/>
+    <use href="#hex15" x="70" y="330"/>
+  </g>
+  <g fill="var(--amber-soft)" stroke="var(--amber)" stroke-width="1.5">
+    <use href="#hex15" x="70" y="180"/>
+    <use href="#hex15" x="70" y="380"/>
+  </g>
+  <g font-size="11" class="mono">
+    <text x="96" y="134">7e5d</text>
+    <text x="96" y="184" class="amb" font-weight="600">b21c</text>
+    <text x="96" y="234">a3f9</text>
+    <text x="96" y="284">91ab</text>
+    <text x="96" y="334">c044</text>
+    <text x="96" y="384" class="amb" font-weight="600">e6f2</text>
+  </g>
+  <g font-size="10" class="mut">
+    <text x="150" y="134">layer — untouched</text>
+    <text x="150" y="184">layer — edited</text>
+    <text x="150" y="234">tile picture</text>
+    <text x="150" y="284">note</text>
+    <text x="150" y="334">resource</text>
+    <text x="150" y="384">root — recomposed</text>
+  </g>
+  <text x="430" y="46" text-anchor="middle" font-size="11" letter-spacing="1.5" class="mut">DIFF BY SIGNATURE</text>
+  <rect x="406" y="64" width="48" height="350" rx="10" fill="var(--panel)" stroke="var(--line)"/>
+  <text transform="rotate(-90 430 239)" x="430" y="243" text-anchor="middle" font-size="10" class="mono mut">sig already in store ?</text>
+  <g stroke="var(--ok)" stroke-dasharray="5 4" marker-end="url(#ar2ok)">
+    <line x1="288" y1="130" x2="398" y2="130"/>
+    <line x1="288" y1="230" x2="398" y2="230"/>
+    <line x1="288" y1="280" x2="398" y2="280"/>
+    <line x1="288" y1="330" x2="398" y2="330"/>
+  </g>
+  <text x="343" y="120" text-anchor="middle" font-size="9.5" class="okc" font-weight="600">already present → skip (4 of 6)</text>
+  <g stroke="var(--amber)" stroke-width="1.8">
+    <line x1="288" y1="180" x2="402" y2="180"/>
+    <line x1="288" y1="380" x2="402" y2="380"/>
+  </g>
+  <text x="466" y="212" font-size="9.5" class="amb" font-weight="600">upload — 2 of 6</text>
+  <text x="560" y="46" font-size="11" letter-spacing="1.5" class="mut">THE SHARED STORE — AFTER</text>
+  <rect x="560" y="64" width="376" height="230" rx="10" fill="var(--panel)" stroke="var(--line)"/>
+  <g stroke="var(--amber)" stroke-width="1.8" marker-end="url(#ar2amb)">
+    <line x1="458" y1="180" x2="599" y2="142"/>
+    <line x1="458" y1="380" x2="600" y2="214"/>
+  </g>
+  <g fill="var(--bg)" stroke="var(--muted)">
+    <use href="#hex20" x="660" y="140"/><use href="#hex20" x="700" y="140"/><use href="#hex20" x="740" y="140"/>
+    <use href="#hex20" x="780" y="140"/><use href="#hex20" x="820" y="140"/><use href="#hex20" x="860" y="140"/><use href="#hex20" x="900" y="140"/>
+  </g>
+  <use href="#hex20" x="620" y="140" fill="var(--amber-soft)" stroke="var(--amber)" stroke-width="1.8"/>
+  <g fill="var(--bg)" stroke="var(--muted)">
+    <use href="#hex20" x="640" y="174"/><use href="#hex20" x="680" y="174"/><use href="#hex20" x="720" y="174"/>
+    <use href="#hex20" x="760" y="174"/><use href="#hex20" x="800" y="174"/><use href="#hex20" x="840" y="174"/><use href="#hex20" x="880" y="174"/>
+  </g>
+  <g fill="var(--bg)" stroke="var(--muted)">
+    <use href="#hex20" x="660" y="208"/><use href="#hex20" x="700" y="208"/><use href="#hex20" x="740" y="208"/>
+    <use href="#hex20" x="780" y="208"/><use href="#hex20" x="820" y="208"/><use href="#hex20" x="860" y="208"/><use href="#hex20" x="900" y="208"/>
+  </g>
+  <use href="#hex20" x="620" y="208" fill="var(--amber-soft)" stroke="var(--amber)" stroke-width="1.8"/>
+  <g font-size="8.5" text-anchor="middle" class="mono mut">
+    <text x="660" y="143">5d0e</text><text x="700" y="143">91ab</text><text x="740" y="143">2c77</text>
+    <text x="780" y="143">c044</text><text x="820" y="143">6b3f</text><text x="860" y="143">7e5d</text><text x="900" y="143">a3f9</text>
+    <text x="640" y="177">13be</text><text x="680" y="177">90cf</text><text x="720" y="177">77e2</text>
+    <text x="760" y="177">0b64</text><text x="800" y="177">f18c</text><text x="840" y="177">44c9</text><text x="880" y="177">8d17</text>
+    <text x="660" y="211">3e5b</text><text x="700" y="211">21d0</text><text x="740" y="211">9c4e</text>
+    <text x="780" y="211">b7a2</text><text x="820" y="211">60ff</text><text x="860" y="211">2f4d</text><text x="900" y="211">1a08</text>
+  </g>
+  <text x="620" y="143" font-size="8.5" font-weight="600" text-anchor="middle" class="mono amb">b21c</text>
+  <text x="620" y="211" font-size="8.5" font-weight="600" text-anchor="middle" class="mono amb">e6f2</text>
+  <text x="748" y="264" text-anchor="middle" font-size="10" class="mut">two new cells join — every existing signature untouched</text>
+  <rect x="560" y="330" width="376" height="84" rx="10" fill="var(--panel)" stroke="var(--line)"/>
+  <text x="580" y="356" font-size="11.5" font-weight="600">seal — flip the lineage head</text>
+  <g font-size="10.5" class="mono">
+    <rect x="580" y="372" width="52" height="26" rx="5" fill="var(--bg)" stroke="var(--line)"/>
+    <rect x="644" y="372" width="52" height="26" rx="5" fill="var(--bg)" stroke="var(--line)"/>
+    <rect x="708" y="372" width="52" height="26" rx="5" fill="var(--amber-soft)" stroke="var(--amber)" stroke-width="1.5"/>
+    <text x="606" y="389" text-anchor="middle" class="mut">0006</text>
+    <text x="670" y="389" text-anchor="middle" class="mut">0007</text>
+    <text x="734" y="389" text-anchor="middle" class="amb" font-weight="600">0008</text>
+    <text x="774" y="389" font-size="9.5" class="mut">→ names new root e6f2</text>
+  </g>
+  <polyline points="430,418 430,444 610,444 610,420" fill="none" stroke="currentColor" marker-end="url(#ar2)"/>
+  <text x="448" y="438" font-size="9.5" class="mut">after the upload lands</text>
+</svg>
+</div>
+<figcaption>Six files, six signatures. Four of them (<code>7e5d</code>, <code>a3f9</code>, <code>91ab</code>, <code>c044</code>) already exist in the store — they are skipped without transferring a byte. Only the <span class="amb">two new signatures</span> upload; then a single head marker (<code>0007 → 0008</code>) names the new root, and the change is live on every hostname that references it.</figcaption>
+</figure>
+
+<h2>Why this is fast — and can't be redundant</h2>
+<div class="why">
+  <div>
+    <h3>Deduplication is structural</h3>
+    <p>The file's name <b>is</b> the hash of its bytes. If two projects — or two hundred — use the same picture, layer, or note, they hold the same signature and reference the <b>same single cell</b>. There is no copy to make, so there is no copy to drift, and no cleanup pass to run.</p>
+  </div>
+  <div>
+    <h3>Publishing is a set difference</h3>
+    <p>The publisher never asks "what changed?" — it asks the store <b>"which of these signatures do you lack?"</b> Unchanged files keep their signatures forever, so most publishes are a handful of cells and a marker flip, no matter how large the project has grown.</p>
+  </div>
+  <div>
+    <h3>Immutable means cacheable forever</h3>
+    <p>A sig-named cell can <b>never change</b> — new content is a new signature. Edges and browsers can cache every cell indefinitely with zero risk of staleness; going live is just one tiny head marker pointing at a new root.</p>
+  </div>
+</div>
+
+<footer>hostnames from the live worker config — one script, one store, every *.pluginthematrix.com</footer>
+</div>
+</div>

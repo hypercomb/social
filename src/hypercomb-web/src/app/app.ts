@@ -2,6 +2,8 @@ import { AfterViewInit, Component, computed, effect, HostBinding, inject, signal
 import { type Bee, EffectBus, hypercomb } from '@hypercomb/core'
 import { upgradeFromBundled, checkForUpdate, type BootStatus } from '../setup/ensure-install'
 import { cacheImportMap } from '../setup/resolve-import-map'
+import { acquire, installedPackageSig, listHostPackages } from '@hypercomb/runtime/acquire'
+import { addHostZone, listHostZones } from '@hypercomb/runtime/host-zones'
 import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
 import { isTransientMode } from '@hypercomb/shared/core/view-mode.service'
 import { buildRevisionName } from '@hypercomb/core'
@@ -35,15 +37,16 @@ export class App implements AfterViewInit {
   protected readonly inputOpen = signal(false)
   public showHeader = true
   public readonly viewActive = signal(false)
+  /** A canvas-taking view can deliberately preserve the controls rail when it
+   *  has reserved that rail's edge, as the chat window does. */
   readonly moveMode = signal(false)
   // Empty-layer swarm watermark — set when show-cell reports the current
   // public/swarm location has zero tiles. Drives a faint full-bleed
   // "invite others" watermark, mirroring clipboard-mode.
   readonly swarmEmpty = signal(false)
   protected readonly bootStatus = signal<BootStatus | null>(null)
-  protected readonly dcpPortalOpen = signal(false)
   protected readonly installNeeded = computed(() =>
-    this.bootStatus()?.kind === 'install-needed' && !this.dcpPortalOpen()
+    this.bootStatus()?.kind === 'install-needed'
   )
   /** Persistent storage (OPFS) is missing — private window, or a Safari
    *  before 16.4. Installing is impossible, so the welcome card explains
@@ -166,6 +169,32 @@ export class App implements AfterViewInit {
     // "Upgrade Hypercomb" in the install-needed prompt.
     ;(window as any).upgradeHypercomb = () => this.upgradeFromBundledClicked()
 
+    // ACQUISITION FROM A DOMAIN — the same call the shim makes, from the same
+    // implementation (`@hypercomb/runtime/acquire`).
+    //
+    // `upgradeHypercomb` above can only ever reach THIS origin's bundled
+    // `/content/`, so a shell whose own bundle is behind can never catch up
+    // from it — which is exactly the state hypercomb.io was in, serving one
+    // package at generation 1 while a host carried 172. This reaches a domain
+    // instead:
+    //
+    //   await hypercomb.acquire('<64-hex sig>', ['jwize.com'])
+    //   await hypercomb.acquire('<sig>')        // every domain you carry
+    //   await hypercomb.offers('jwize.com')     // what one publishes
+    //
+    // Complete-or-absent like every acquisition: holes or refusals leave the
+    // install untouched, and the next call repairs the delta. On success it
+    // writes `core-adapter.installed-manifest`, which is the pointer THIS
+    // shell's boot reads — so the package is live on the next load.
+    ;(window as any).hypercomb = {
+      acquire: async (sig: string, zones?: string[]) =>
+        acquire(sig, zones?.length ? zones : await listHostZones()),
+      offers: listHostPackages,
+      hosts: listHostZones,
+      addHost: addHostZone,
+      installed: installedPackageSig,
+    }
+
     EffectBus.on<BootStatus>('boot:status', (status) => {
       this.bootStatus.set(status)
       // A fresh install-needed while "Starting…" means the unattended
@@ -240,11 +269,6 @@ export class App implements AfterViewInit {
       this.viewMode.set('hexagons')
       EffectBus.emit('nav:to-hive', { reason: 'adopt-complete' })
     })
-
-    window.addEventListener('portal:open', (e) => {
-      if ((e as CustomEvent).detail?.target === 'dcp') this.dcpPortalOpen.set(true)
-    })
-    window.addEventListener('dcp:embed-closed', () => this.dcpPortalOpen.set(false))
 
     // "New features" indicator → just apply. We're in alpha; the eggs
     // (negative-cache + render guards) protect the canvas, so a deployed

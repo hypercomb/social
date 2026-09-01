@@ -26,6 +26,7 @@
 
 @use './notes-strip-shared' as *;
 @use '../../styles/notes-shapes';
+@use '../toolwindow' as tw;
 
 :host {
   // ── The three faces, captured OUT HERE ────────────────────
@@ -193,14 +194,17 @@
 
   display: flex;
   flex-direction: column;
-  background: rgba(14, 14, 22, 0.96);
+
+  // THE SHARED SHELL, taken rather than re-typed. This panel used to paint
+  // its own pane (`rgba(14, 14, 22, 0.96)`), its own steel edge and a black
+  // shadow — a dark window that stayed dark while its ink followed the theme,
+  // so under sherbet its own title sat at 1.01:1: near-black text on a
+  // near-black pane. The mixin brings the pane, the edge, the elevation and
+  // the identity triple, all of which answer the theme.
+  @include tw.panel($steel, right);
   backdrop-filter: blur(18px);
-  font-family: var(--hc-mono, system-ui);
-  color: #eaf0f4;
   border: none;
-  border-left: 1px solid rgba($steel, 0.5);
-  border-radius: 0;
-  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba($steel, 0.06) inset;
+  border-left: 1px solid rgba(var(--acc), 0.5);
   // The strip docks vertically: full height of :host (which already
   // reserves space for header + pill) so the footer always sits at
   // viewport bottom (minus pill clearance). Width + height are

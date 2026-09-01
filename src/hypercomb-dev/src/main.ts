@@ -33,7 +33,25 @@
   console.log(`[nav] +${(now - t0).toFixed(0)}ms ${label}${extra ? ` ${extra}` : ''}`)
 }
 
+// The shipped locale catalogs. They used to live inside runtime-initializer;
+// that module is in @hypercomb/runtime now and ships none of its own, because
+// a locale is content and which languages exist is the host's answer. Web and
+// dev still bundle theirs — Angular lazy-chunks them — so pass them in
+// explicitly and nothing about these shells changes.
+import { bundledCatalogs, bundledLocales } from '@hypercomb/shared/core/bundled-catalogs'
 import '@hypercomb/shared/core/ioc.web'
+// The escape cascade's door. This used to ride into every shell inside
+// runtime-initializer; the runtime package cannot reach hypercomb-shared/ui,
+// so the shell that wants tool windows imports them itself.
+//
+// BELOW `ioc.web`, which is what installs `window.ioc` — this line sat above
+// it here (and only here; web had it the right way round), so the door
+// registered into nothing and every window rung of the Escape cascade was
+// dead in this shell. It read exactly like the bug the cascade was written to
+// fix: you pressed Escape over a panel covering the hive and nothing at all
+// happened. The registration retries on a microtask now so the order cannot
+// silently cost that again, but the order is still the honest one.
+import '@hypercomb/shared/ui/tool-windows'
 // Capture a `/<sig>` meeting-place invite link before navigation parses the
 // URL — stashes the sig for the receive-side MeetingInviteWorker.
 import '@hypercomb/shared/core/invite-capture'
@@ -53,7 +71,6 @@ import {
   protectOriginStorage,
 } from '@hypercomb/shared/core'
 import { postCommunityDomainsToServiceWorker } from '@hypercomb/shared/core/sw-domains'
-import { initSentinel, type SentinelBridge } from '../../hypercomb-web/src/setup/sentinel-bridge'
 import { appConfig } from './app/app.config'
 import { App } from './app/app'
 
@@ -85,7 +102,7 @@ const renderBootFailure = (error: unknown): void => {
       'color:#dce7ef',
       'background:rgba(8,13,19,.94)',
       'border:1px solid rgba(126,182,214,.38)',
-      'border-radius:6px',
+      'border-radius:4px',
       'font:14px/1.55 system-ui,sans-serif',
     ].join(';')
 
@@ -174,7 +191,7 @@ const main = async (): Promise<void> => {
   // OPFS miss. The SW has no localStorage/IoC, so the page must post them.
   await postCommunityDomainsToServiceWorker()
   ;(window as any).__hcBoot('ensureSwControl done')
-  await initializeRuntime()
+  await initializeRuntime({ catalogs: bundledCatalogs, locales: bundledLocales })
   ;(window as any).__hcBoot('initializeRuntime done')
 
   // ── the accepted install reports that it FINISHED ────────────────────
@@ -229,12 +246,12 @@ const main = async (): Promise<void> => {
   await bootstrapApplication(App, appConfig)
   ;(window as any).__hcBoot('bootstrapApplication done')
 
-  // Dev uses the same explicit, lazy DCP transaction channel as production.
-  // Folder hard-copy and the push queue can request it without making DCP part
-  // of the startup critical path.
-  let sentinelPromise: Promise<SentinelBridge | null> | null = null
-  ;(globalThis as any).__getSentinel = (): Promise<SentinelBridge | null> =>
-    sentinelPromise ??= initSentinel()
+  // No DCP transaction channel is parked here. The transport role is retired
+  // (documentation/install-by-replication.md step 7): content arrives by
+  // replication — anonymous GETs of `<origin>/<sig>` — and web's main.ts
+  // dropped its lazy sentinel in the same pass. Callers that still reach for
+  // `__getSentinel` (the DCP half of /folder-sync) find nothing and take
+  // their bridge-absent path, which is the honest answer now.
 }
 
 main().catch(err => {

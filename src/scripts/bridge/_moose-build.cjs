@@ -53,20 +53,15 @@ async function ask(req, attempts = 5) {
 
 // ── read helpers ──────────────────────────────────────────────────────
 
-async function childNamesOf(segments) {
-  const layer = await ask({ op: 'layer-at', segments })
-  if (!layer.ok) return []
-  const sigs = Array.isArray(layer.data && layer.data.children) ? layer.data.children.map(String) : []
-  const names = []
-  for (const sig of sigs) {
-    const res = await ask({ op: 'get-resource', sig })
-    if (!res.ok) continue
-    try {
-      const name = JSON.parse(res.data.text).name
-      if (typeof name === 'string' && name.trim()) names.push(name.trim())
-    } catch { /* not a layer */ }
-  }
-  return names
+// Child reads and child creation come from ONE implementation, shared with
+// every other bridge script: scripts/lib/hive-children.mjs. It carries the
+// trap this file fell into (a child sig is a LAYER sig, not a resource) and
+// the two rules that retire it. Bound to this file's own `ask` client, which
+// already retries past a renderer that has not attached yet.
+let childNamesOf, cellExists, ensureChildren
+async function bindHiveHelpers() {
+  const { hiveChildren } = await import('../lib/hive-children.mjs')
+  ;({ childNamesOf, cellExists, ensureChildren } = hiveChildren(ask))
 }
 
 async function noteFirstLines(segments) {
@@ -90,15 +85,15 @@ async function currentProps(segments) {
 
 // ── write helpers ─────────────────────────────────────────────────────
 
-/** Merge `wanted` into the children at `segments` — never drops what is there. */
-async function ensureChildren(segments, name, wanted) {
-  const have = await childNamesOf(segments)
-  const missing = wanted.filter(n => !have.includes(n))
-  if (!missing.length) { log(`  = /${segments.join('/')} (${have.length} children, all present)`); return }
-  if (DRY) { log(`  + /${segments.join('/')} would add ${missing.join(', ')}`); return }
-  const merged = [...have, ...missing]
-  const r = await ask({ op: 'update', segments, layer: { name, children: merged } })
-  log(`  ${r.ok ? '+' : '!'} /${segments.join('/')} ← ${missing.length} new (${missing.slice(0, 4).join(', ')}${missing.length > 4 ? '…' : ''})${r.ok ? '' : ' ' + r.error}`)
+/** Append-only child creation (shared module) + this script's logging. */
+async function ensureCells(parent, wanted) {
+  const r = await ensureChildren(parent, wanted, { dry: DRY })
+  const path = `/${parent.join('/') || '(root)'}`
+  if (!r.missing.length) { log(`  = ${path} (all ${wanted.length} present)`); return }
+  if (DRY) { log(`  + ${path} would add ${r.missing.join(', ')}`); return }
+  const shown = r.missing.slice(0, 4).join(', ') + (r.missing.length > 4 ? '\u2026' : '')
+  log(`  ${r.ok ? '+' : '!'} ${path} <- ${r.added} new (${shown})${r.ok ? '' : ' ' + r.error}`)
+  if (!r.ok) process.exit(1)
 }
 
 /** Add a note unless one with the same first line already sits on the cell. */
@@ -445,22 +440,24 @@ const CARNEY_NOTE = [
 
 async function main() {
   log(DRY ? '— DRY RUN —' : '— building Moose on the Loose —')
+  await bindHiveHelpers()
 
   // 0. sanity: are we in the hive we think we are?
   const rootKids = await childNamesOf([])
+  if (rootKids === null) { log('ABORT: no layer at the root - renderer not ready'); process.exit(2) }
   log('hive root:', rootKids.join(', ') || '(empty)')
   if (!rootKids.length) { log('ABORT: root has no children — wrong OPFS or renderer not ready'); process.exit(2) }
 
   // 1. spine
   log('\n[structure]')
-  await ensureChildren([], '/', [ROOT])
-  await ensureChildren([ROOT], ROOT, ['people', 'companies', 'miro-board'])
-  await ensureChildren([ROOT, 'people'], 'people', ['mark-carney'])
-  await ensureChildren([ROOT, 'people', 'mark-carney'], 'mark-carney', ['conflicts-of-interest'])
+  await ensureCells([], [ROOT])
+  await ensureCells([ROOT], ['people', 'companies', 'miro-board'])
+  await ensureCells([ROOT, 'people'], ['mark-carney'])
+  await ensureCells([ROOT, 'people', 'mark-carney'], ['conflicts-of-interest'])
   const coiPath = [ROOT, 'people', 'mark-carney', 'conflicts-of-interest']
-  await ensureChildren(coiPath, 'conflicts-of-interest', CONFLICTS.map(c => c.name))
-  await ensureChildren([ROOT, 'companies'], 'companies', COMPANIES.map(c => c[0]))
-  await ensureChildren([ROOT, 'miro-board'], 'miro-board', CAPTURES.map(c => c[0]))
+  await ensureCells(coiPath, CONFLICTS.map(c => c.name))
+  await ensureCells([ROOT, 'companies'], COMPANIES.map(c => c[0]))
+  await ensureCells([ROOT, 'miro-board'], CAPTURES.map(c => c[0]))
 
   // 2. the root, the person, the two collections
   log('\n[root + person]')

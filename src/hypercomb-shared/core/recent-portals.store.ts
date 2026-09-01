@@ -9,7 +9,7 @@
 //
 // ── home is MARKED, never inferred ────────────────────────────────────
 //
-// Home is the portal you MARKED as home, from the Portals toolwindow. It does
+// Home is the lineage you MARKED with Ctrl/⌘+click on the global Home icon. It does
 // not follow where you walk. Walking is how you look around, and a home that
 // moved every time you looked at something was a home you could lose by
 // accident — you dip into one thing and home is no longer what you meant.
@@ -23,8 +23,7 @@
 //
 // ── the recent list ───────────────────────────────────────────────────
 //
-// Walking still leaves a trail, and Ctrl/⌘+click on Home shows it: somewhere you
-// were a moment ago is one click away instead of a walk back down the tree.
+// Walking still leaves a trail for navigation surfaces that choose to show it.
 // Jumping to one of those TRAVELS, it does not re-home — that is what the mark
 // is for. The hive root is always the last row, and the leading breadcrumb crumb
 // still goes there directly, so marking a portal never strands the root.

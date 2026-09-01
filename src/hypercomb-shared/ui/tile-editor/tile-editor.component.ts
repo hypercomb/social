@@ -16,15 +16,16 @@ import { FormsModule } from '@angular/forms'
 import { EffectBus, type I18nProvider, I18N_IOC_KEY } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { TextScaleComponent, surfaceScale } from '../text-scale/text-scale.component'
 
 import type { TileEditorService } from
-  '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.service'
+  '@hypercomb/essentials/editor/tile-editor.service'
 import type { ImageEditorService } from
-  '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-editor.service'
+  '@hypercomb/essentials/editor/image-editor.service'
 import type { LinkSafetyService } from
-  '@hypercomb/essentials/diamondcoreprocessor.com/safety/link-safety.service'
+  '@hypercomb/essentials/safety/link-safety.service'
 import type { NotesService, Note } from
-  '@hypercomb/essentials/diamondcoreprocessor.com/notes/notes.drone'
+  '@hypercomb/essentials/notes/notes.drone'
 
 /** Q&A item view-model — pairs a `[Q]`-prefixed note with the
  *  matching `[A:<qId>]` answer note when one exists. The qId is the
@@ -45,11 +46,21 @@ const A_NOTE_RE = /^\[A:([a-zA-Z0-9_-]+)\]\s*([\s\S]+)$/
 @Component({
   selector: 'hc-tile-editor',
   standalone: true,
-  imports: [FormsModule, TranslatePipe],
+  imports: [FormsModule, TranslatePipe, TextScaleComponent],
   templateUrl: './tile-editor.component.html',
   styleUrls: ['./tile-editor.component.scss'],
 })
 export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
+
+  /** The window id this surface's text size is recorded under — the same
+   *  vocabulary a docked panel uses, so the app has one answer to "how big is
+   *  the text" rather than a private one per surface kind. */
+  readonly textScaleWindow = 'tile-editor'
+
+  /** Multiplier for every `em` in the dialog. The panel's own font-size is
+   *  `calc(1rem * var(--hc-panel-scale))` and everything inside it is sized in
+   *  em, so this one number moves the whole editor. */
+  readonly textScale = signal(surfaceScale('tile-editor'))
 
   @ViewChild('imageCanvas', { static: false }) imageCanvas!: ElementRef<HTMLDivElement>
   @ViewChild('cameraVideo', { static: false }) cameraVideo!: ElementRef<HTMLVideoElement>

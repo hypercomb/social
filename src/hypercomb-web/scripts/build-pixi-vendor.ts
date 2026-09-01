@@ -14,7 +14,16 @@ import { rmSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
   mkdirSync(OUT_DIR, { recursive: true })
 
   await build({
-    entryPoints: ['pixi.js'],
+    // `pixi.js/unsafe-eval` swaps the new-Function uniform-sync for a static
+    // parser, so the renderer constructs under a CSP with no 'unsafe-eval' —
+    // the published visitor hosts (worker.js serveVisitorAsset) serve exactly
+    // that CSP, and without this import PixiHostWorker dies at Application.init.
+    stdin: {
+      contents: "import 'pixi.js/unsafe-eval'\nexport * from 'pixi.js'\n",
+      resolveDir: process.cwd(),
+      sourcefile: 'pixi-vendor-entry.js',
+      loader: 'js',
+    },
     bundle: true,
     format: 'esm',
     platform: 'browser',

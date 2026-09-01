@@ -11,8 +11,14 @@
 // bullet — at three sizes off one shape. That is the whole visual idea: the
 // hive is hexagons, so a note's place in a tree should look like one too.
 @use '../toolwindow' as tw;
+@use '../panel-identity' as identity;
 
 $accent: #ffe14a;
+
+
+// The identity as a triple — a bright theme takes the same hue deep.
+// These panels do not come through `tw.panel()`, so they say it here.
+:host { @include identity.accent($accent); }
 
 // The hive's hexagon. Same polygon the shared shape glyphs use, so a
 // hexagon here and a hexagon in the strip are the same hexagon.
@@ -132,7 +138,7 @@ $hex: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
 .viewer-header {
   @include tw.header;
   justify-content: space-between;
-  border-bottom: 1px solid rgba($accent, 0.22);
+  border-bottom: 1px solid rgba(var(--acc), 0.22);
 }
 
 .viewer-cell {
@@ -166,7 +172,7 @@ $hex: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
   .mat-sym { font-size: 16px; }
 
   &:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: rgba(var(--hc-panel-ink), 0.06);
     color: var(--md-on-surface);
   }
 
@@ -197,7 +203,7 @@ $hex: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
   gap: 2px;
   padding: 8px 6px;
   overflow-y: auto;
-  border-right: 1px solid rgba(255, 255, 255, 0.07);
+  border-right: 1px solid rgba(var(--hc-panel-ink), 0.07);
 }
 
 .viewer-rail-tab {
@@ -215,7 +221,7 @@ $hex: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
   text-align: left;
   cursor: pointer;
 
-  &:hover { background: rgba(255, 255, 255, 0.05); }
+  &:hover { background: rgba(var(--hc-panel-ink), 0.05); }
 
   &.is-active {
     background: color-mix(in srgb, var(--md-secondary) 14%, transparent);
@@ -270,7 +276,7 @@ $hex: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
   margin: 0;
   font-size: 1.06rem;
   line-height: 1.55;
-  color: #eef2f5;
+  color: var(--hc-panel-text);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -313,7 +319,7 @@ $hex: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
   cursor: pointer;
 
   &:hover {
-    background: rgba(255, 255, 255, 0.12);
+    background: rgba(var(--hc-panel-ink), 0.12);
     color: var(--md-on-surface);
   }
 }
@@ -332,7 +338,7 @@ $hex: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
   justify-content: center;
   gap: 10px;
   padding: 6px 18px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.06);
 }
 
 .viewer-cycle-btn {
@@ -342,8 +348,8 @@ $hex: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
   width: 28px;
   height: 24px;
   padding: 0;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(var(--hc-panel-ink), 0.04);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.1);
   border-radius: tw.$radius-control;
   color: color-mix(in srgb, var(--md-on-surface) 78%, transparent);
   cursor: pointer;
@@ -388,7 +394,7 @@ $hex: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
   color: color-mix(in srgb, var(--md-on-surface) 80%, transparent);
   cursor: pointer;
 
-  &:hover { background: rgba(255, 255, 255, 0.045); }
+  &:hover { background: rgba(var(--hc-panel-ink), 0.045); }
 
   // The row the big hexagon is currently showing.
   &.is-focused {
@@ -426,13 +432,13 @@ $hex: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
   display: flex;
   gap: 6px;
   padding: 8px 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 1px solid rgba(var(--hc-panel-ink), 0.07);
 }
 
 .action {
   padding: tw.$button-padding-compact-block tw.$button-padding-compact-inline;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(var(--hc-panel-ink), 0.05);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.12);
   border-radius: tw.$radius-control;
   color: color-mix(in srgb, var(--md-on-surface) 82%, transparent);
   font: inherit;
@@ -461,7 +467,7 @@ $hex: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
     overflow-x: auto;
     overflow-y: hidden;
     border-right: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.07);
   }
 
   .viewer-rail-tab { width: auto; flex: 0 0 auto; max-width: 168px; }

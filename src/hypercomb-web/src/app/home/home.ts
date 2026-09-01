@@ -1,6 +1,9 @@
-import { Component, OnDestroy } from '@angular/core';
-import type { ResourceMessageHandler } from '@hypercomb/shared/core/resource-message-handler';
+import { Component } from '@angular/core';
 
+/** The catch-all lineage route's component. The shell renders the hive from
+ *  the Pixi host and the registry-fed surfaces, so this template is empty by
+ *  design — the route exists to consume the URL segments (see
+ *  `lineageMatcher`), not to draw anything. */
 @Component({
   selector: 'app-home',
   standalone: true,
@@ -8,10 +11,4 @@ import type { ResourceMessageHandler } from '@hypercomb/shared/core/resource-mes
   templateUrl: './home.html',
   styleUrl: './home.scss',
 })
-export class Home implements OnDestroy {
-  private get handler(): ResourceMessageHandler { return get('@hypercomb.social/ResourceMessageHandler') as ResourceMessageHandler }
-
-  ngOnDestroy(): void {
-    this.handler.destroy()
-  }
-}
+export class Home {}

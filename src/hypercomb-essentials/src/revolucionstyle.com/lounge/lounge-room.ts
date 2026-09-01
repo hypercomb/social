@@ -26,7 +26,7 @@
 // behaviour, different world.
 
 import { RESOURCE_URL_PREFIX } from '@hypercomb/core'
-import { listDecorations } from '../../diamondcoreprocessor.com/commands/decoration-manifest.js'
+import { listDecorations } from '../../commands/decoration-manifest.js'
 
 /** The ViewMode token this room opens as. */
 export const LOUNGE_VIEW = 'lounge'

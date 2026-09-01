@@ -1,0 +1,37 @@
+<!-- hypercomb-shared/ui/text-scale/text-scale.component.html -->
+<!--
+  A GEAR that opens the ladder, the way a tool window's does — the setting is
+  reached, not permanently on display. It discloses INLINE rather than into a
+  floating popover: both hosts sit inside an `overflow: hidden` box (the
+  completion panel clips its panes; the editor clips its body), so a popover
+  would be cut off at the edge it opened past. Opening in place cannot be.
+
+  `mousedown.prevent` throughout: the completion panel is driven from an input
+  that must not blur, or the panel closes as you reach for its own setting.
+-->
+<div class="text-scale" [class.open]="open()">
+  <button
+    type="button"
+    class="text-scale-gear mat-sym"
+    [class.on]="open()"
+    [attr.aria-expanded]="open()"
+    [attr.aria-label]="'panel.text.label' | t"
+    [title]="'panel.text.label' | t"
+    (mousedown)="$event.preventDefault()"
+    (click)="toggle()"
+  >settings</button>
+
+  @if (open()) {
+    <span class="text-scale-label">{{ 'panel.text.label' | t }}</span>
+    @for (size of sizes; track size.key) {
+      <button
+        type="button"
+        class="text-scale-step"
+        [class.on]="size.scale === scale()"
+        [attr.aria-pressed]="size.scale === scale()"
+        (mousedown)="$event.preventDefault()"
+        (click)="pick(size.scale)"
+      >{{ 'panel.text.' + size.key | t }}</button>
+    }
+  }
+</div>

@@ -78,6 +78,14 @@
         }
       </span>
       <span class="cv2-dragbar-spacer"></span>
+      <!-- MARK UP THE SCREEN. An annotation you draw ON the app is still an
+           annotation, and the one reader it is written for is the agent: the
+           sheet takes ink, photographs the screen with the ink on it, and puts
+           the picture on the chat's shelf as context (markup-overlay). -->
+      <button type="button" class="cv2-mini-btn" (click)="markUp()"
+              [attr.aria-label]="'annotations.markup' | t" [title]="'annotations.markup' | t">
+        <span class="mat-sym">draw</span>
+      </button>
       <!-- Open the READER on this tile. The strip is for authoring — a dense
            tree you edit in place; the reader is for reading one note at a
            time, big, with the hierarchy around it. Only offered when a tile

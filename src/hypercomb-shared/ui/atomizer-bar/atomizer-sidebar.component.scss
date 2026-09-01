@@ -1,5 +1,6 @@
 // hypercomb-shared/ui/atomizer-bar/atomizer-sidebar.component.scss
 
+@use '../toolwindow' as tw;
 :host {
   display: contents;
 }
@@ -53,7 +54,7 @@
 .sidebar-title {
   font-size: calc(11px * var(--s));
   font-family: var(--hc-mono);
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--hc-window-ink-quiet);
   font-weight: 600;
 }
 
@@ -65,14 +66,14 @@
 .sidebar-btn {
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
   font-size: calc(13px * var(--s));
   padding: calc(2px * var(--s)) calc(4px * var(--s));
   border-radius: 3px;
 
   &:hover {
-    color: rgba(255, 255, 255, 0.7);
+    color: var(--hc-window-ink-quiet);
     background: rgba(255, 255, 255, 0.05);
   }
 }
@@ -94,13 +95,13 @@
 .target-label {
   font-size: calc(10px * var(--s));
   font-family: var(--hc-mono);
-  color: rgba(0, 229, 255, 0.6);
+  color: tw.ink(rgba(0, 229, 255, 0.6));
 }
 
 .target-type {
   font-size: calc(9px * var(--s));
   font-family: var(--hc-mono);
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--hc-window-ink-quiet);
   margin-left: auto;
 }
 
@@ -123,7 +124,7 @@
   font-family: var(--hc-mono);
   text-transform: uppercase;
   letter-spacing: 0.8px;
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--hc-window-ink-quiet);
   margin-bottom: calc(6px * var(--s));
   padding-bottom: calc(3px * var(--s));
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
@@ -141,7 +142,7 @@
 .property-label {
   font-size: calc(10px * var(--s));
   font-family: var(--hc-mono);
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--hc-window-ink-quiet);
   flex-shrink: 0;
   max-width: calc(100px * var(--s));
   overflow: hidden;
@@ -171,7 +172,7 @@
   padding: 0 calc(6px * var(--s));
   font-size: calc(10px * var(--s));
   font-family: var(--hc-mono);
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--hc-window-ink-quiet);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 3px;
@@ -203,7 +204,7 @@
 .range-value {
   font-size: calc(9px * var(--s));
   font-family: var(--hc-mono);
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--hc-window-ink-quiet);
   min-width: calc(24px * var(--s));
   text-align: right;
 }
@@ -214,7 +215,7 @@
   padding: 0 calc(4px * var(--s));
   font-size: calc(10px * var(--s));
   font-family: var(--hc-mono);
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--hc-window-ink-quiet);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 3px;

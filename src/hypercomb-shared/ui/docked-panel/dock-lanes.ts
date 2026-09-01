@@ -35,6 +35,7 @@
 // Module scope, no service — the directive is already self-contained chrome,
 // exactly as panel-groups.ts is for the group text.
 
+import { EffectBus } from '@hypercomb/core'
 import { isPhoneViewport } from '../breakpoints'
 
 export type LaneSide = 'left' | 'right'
@@ -95,6 +96,18 @@ export const layoutLane = (side: LaneSide): void => {
     member.placeInLane(offset)
     offset += Math.max(0, member.laneWidth())
   }
+  // PLACING A WINDOW MOVES IT WITHOUT RESIZING IT.
+  //
+  // What a window reserves of the screen edge is measured from where it sits,
+  // so the inner occupant of a two-window lane is wrong the moment the outer
+  // one is dragged wider or closed — it slides, at exactly the same size, and
+  // a ResizeObserver has nothing to report. Left alone it went on reserving
+  // the edge it held before, which covers the surface when the lane grows and
+  // strands a dead strip beside the window when the lane shrinks.
+  //
+  // We cannot say what the new reservation is; only that everything here has
+  // been put somewhere. Asking is the whole message.
+  EffectBus.emitTransient('viewport:inset-poll', {})
 }
 
 /** Take a place in the lane. Already in it → just re-layout (a width changed).
@@ -209,3 +222,40 @@ if (typeof window !== 'undefined') {
     queued = requestAnimationFrame(() => { queued = 0; reflowLanes() })
   })
 }
+
+// ── THE LANE, FOR WINDOWS THAT ARE NOT ANGULAR ────────────────────────
+//
+// `hcDockedPanel` is a directive, so only a component in shared/web/dev can
+// take a place in a lane by wearing it. Cold chrome — a drone's own DOM
+// window, mounted straight onto the body — has no way to say "I am a tool
+// window too", and the result was a panel that sat ON TOP of the docked ones
+// instead of beside them: the same edge, the same pixels, no stacking, and
+// the control bar's own reservation respected by one of them and not the
+// other.
+//
+// So the lane itself is offered over IoC. A window implements LaneMember —
+// four small methods, no framework — resolves this, and claims a place the
+// same way the directive does. The lane does not care what drew the window.
+export const DOCK_LANES_KEY = '@hypercomb.social/DockLanes'
+
+/** What a non-Angular window needs of the lane. Deliberately the whole of it:
+ *  claim on open, release on close, and the two questions a window asks before
+ *  bringing anything else up beside it. */
+export interface DockLanesApi {
+  claim(member: LaneMember): void
+  release(member: LaneMember): void
+  hasRoom(side: LaneSide): boolean
+  reflow(): void
+}
+
+// Through `window.ioc` rather than the ambient `register`, and guarded: this
+// module is imported by a plain unit spec with no shell around it, and a lane
+// model that cannot be pinned without booting the app is a lane model nobody
+// will pin.
+;(window as unknown as { ioc?: { register?: (key: string, value: unknown) => void } })
+  .ioc?.register?.(DOCK_LANES_KEY, {
+    claim: claimLane,
+    release: releaseLane,
+    hasRoom: laneHasRoom,
+    reflow: reflowLanes,
+  } satisfies DockLanesApi)

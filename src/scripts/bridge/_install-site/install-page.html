@@ -1,0 +1,213 @@
+<style>
+  :host{all:initial}
+  .iv{display:block;min-height:100vh;background:#08090c;color:#e8e4d8;
+      font:16px/1.65 -apple-system,'Segoe UI',system-ui,sans-serif}
+  .iv *{box-sizing:border-box;margin:0}
+  .iv a{color:#7eb6d6;text-decoration:none}
+  .iv a:hover{text-decoration:underline}
+  .iv code{font:0.86em/1.5 Consolas,'Cascadia Mono',monospace;background:#161b24;
+      border-radius:4px;padding:.1em .38em;color:#f2edda}
+  .iv pre{font:13px/1.6 Consolas,'Cascadia Mono',monospace;background:#10141b;
+      border:1px solid #1e2530;border-radius:8px;padding:14px 18px;overflow-x:auto;
+      color:#d7d2c2;margin:14px 0}
+  .iv pre b{color:#f6d109;font-weight:600}
+  .iv pre i{color:#6d7686;font-style:normal}
+
+  .iv-wrap{max-width:880px;margin:0 auto;padding:0 22px 90px}
+
+  .iv-hero{padding:84px 0 46px;border-bottom:1px solid #1e2530}
+  .iv-dot{width:10px;height:10px;border-radius:50%;background:#f6d109;
+      box-shadow:0 0 24px #f6d109;display:inline-block;margin-bottom:26px}
+  .iv-hero h1{font-size:clamp(38px,7vw,62px);font-weight:800;letter-spacing:-.02em;
+      line-height:1.04;color:#fdfbf3}
+  .iv-hero h1 span{color:#f6d109}
+  .iv-lede{margin-top:18px;font-size:19px;color:#a7a294;max-width:600px}
+  .iv-lede b{color:#e8e4d8;font-weight:600}
+
+  .iv h2{font-size:24px;font-weight:700;color:#fdfbf3;margin:64px 0 6px;letter-spacing:-.01em}
+  .iv .iv-sub{color:#8d8879;font-size:15px;margin-bottom:12px}
+
+  .iv-fig{margin:26px 0;background:#0b0f15;border:1px solid #1e2530;border-radius:10px;
+      padding:20px;overflow-x:auto}
+  .iv-fig svg{display:block;min-width:640px;max-width:100%;height:auto;margin:0 auto}
+  .iv-cap{font-size:13.5px;color:#8d8879;margin-top:12px;max-width:640px}
+
+  .iv-step{display:grid;grid-template-columns:56px 1fr;gap:18px;padding:26px 0;
+      border-top:1px solid #171c26}
+  .iv-step:first-of-type{border-top:none}
+  .iv-num{font-size:30px;font-weight:800;color:#f6d109;line-height:1.1}
+  .iv-step h3{font-size:18.5px;font-weight:700;color:#fdfbf3;margin-bottom:6px}
+  .iv-step p{margin:.5em 0;color:#c9c4b4}
+  .iv-step p b{color:#e8e4d8}
+
+  .iv-cta{display:inline-block;margin:10px 0 4px;background:#f6d109;color:#08090c;
+      font-weight:700;font-size:15px;padding:10px 22px;border-radius:6px}
+  .iv-cta:hover{text-decoration:none;filter:brightness(1.08)}
+
+  .iv-traps{list-style:none;padding:0;margin:18px 0 0}
+  .iv-traps li{position:relative;padding:12px 16px 12px 40px;margin:10px 0;
+      background:#10141b;border:1px solid #1e2530;border-radius:8px;color:#c9c4b4;font-size:15px}
+  .iv-traps li::before{content:'!';position:absolute;left:15px;top:11px;color:#f6d109;
+      font-weight:800;font-size:17px}
+  .iv-traps b{color:#e8e4d8}
+
+  .iv-foot{margin-top:72px;padding-top:18px;border-top:1px solid #1e2530;
+      font-size:13.5px;color:#6d7686}
+  .iv-foot a{color:#8d8879}
+  @media(max-width:560px){.iv-step{grid-template-columns:36px 1fr;gap:12px}}
+</style>
+<div class="iv"><div class="iv-wrap">
+
+  <header class="iv-hero">
+    <span class="iv-dot"></span>
+    <h1>Run your own<br>corner of the internet<span>.</span></h1>
+    <p class="iv-lede">Everything you need to install Hypercomb and host it yourself —
+      the <b>same setup that serves this very page</b>. Five steps, no getting stuck:
+      every trap we hit is written down below so you don't have to hit it too.</p>
+  </header>
+
+  <h2>The shape of what you're building</h2>
+  <p class="iv-sub">One machine, one tunnel, one worker. Nothing rented but the domain.</p>
+  <div class="iv-fig">
+    <svg viewBox="0 0 860 300" role="img" aria-label="A visitor reaches yourname.yourdomain.com through Cloudflare, where a worker serves signed content from R2, while your domain rides a tunnel down to the Hypercomb app on your own machine." font-family="Consolas,monospace" font-size="12.5">
+      <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8d8879"/></marker>
+      <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f6d109"/></marker></defs>
+      <rect x="14" y="112" width="132" height="66" rx="7" fill="none" stroke="#8d8879" stroke-width="1.4"/>
+      <text x="80" y="141" text-anchor="middle" fill="#e8e4d8" font-weight="600">visitor</text>
+      <text x="80" y="160" text-anchor="middle" fill="#6d7686">any browser</text>
+      <rect x="240" y="26" width="330" height="248" rx="10" fill="none" stroke="#3a4150" stroke-width="1" stroke-dasharray="6 5"/>
+      <text x="256" y="50" fill="#8d8879" font-weight="600">CLOUDFLARE (free tier)</text>
+      <rect x="268" y="66" width="274" height="62" rx="7" fill="none" stroke="#f6d109" stroke-width="1.6"/>
+      <text x="405" y="92" text-anchor="middle" fill="#f6d109" font-weight="600">worker · your content host</text>
+      <text x="405" y="112" text-anchor="middle" fill="#a7a294">*.yourdomain.com → sites</text>
+      <rect x="268" y="176" width="274" height="62" rx="7" fill="none" stroke="#8d8879" stroke-width="1.4"/>
+      <text x="405" y="202" text-anchor="middle" fill="#e8e4d8" font-weight="600">tunnel · cloudflared</text>
+      <text x="405" y="222" text-anchor="middle" fill="#6d7686">yourdomain.com → your machine</text>
+      <rect x="650" y="26" width="196" height="62" rx="7" fill="none" stroke="#f6d109" stroke-width="1.6"/>
+      <text x="748" y="52" text-anchor="middle" fill="#f6d109" font-weight="600">R2 · signed bytes</text>
+      <text x="748" y="72" text-anchor="middle" fill="#a7a294">object key = signature</text>
+      <rect x="650" y="160" width="196" height="114" rx="10" fill="none" stroke="#3a4150" stroke-width="1" stroke-dasharray="6 5"/>
+      <text x="666" y="184" fill="#8d8879" font-weight="600">YOUR MACHINE</text>
+      <rect x="668" y="198" width="160" height="58" rx="7" fill="none" stroke="#8d8879" stroke-width="1.4"/>
+      <text x="748" y="222" text-anchor="middle" fill="#e8e4d8" font-weight="600">Hypercomb app</text>
+      <text x="748" y="241" text-anchor="middle" fill="#6d7686">hive · relay · publisher</text>
+      <g fill="none" stroke="#f6d109" stroke-width="1.6">
+        <path d="M146 130 C 190 118, 200 102, 264 97" marker-end="url(#ag)"/>
+        <line x1="542" y1="80" x2="646" y2="66" marker-end="url(#ag)"/>
+      </g>
+      <text x="150" y="98" fill="#f6d109">yourname.yourdomain.com</text>
+      <g fill="none" stroke="#8d8879" stroke-width="1.4">
+        <path d="M146 152 C 195 168, 205 192, 264 202" marker-end="url(#a)"/>
+        <line x1="542" y1="210" x2="664" y2="222" marker-end="url(#a)"/>
+      </g>
+      <text x="168" y="192" fill="#8d8879">yourdomain.com</text>
+      <text x="588" y="200" fill="#6d7686">proxies</text>
+    </svg>
+    <p class="iv-cap">The gold path is public content: a Cloudflare worker answering every subdomain
+      of your domain from a bucket of signed, immutable files. The grey path is you: your own
+      domain riding a tunnel straight to the app on your machine. Publishing a hive branch named
+      <code>garden</code> makes <code>garden.yourdomain.com</code> its website — no per-site setup, ever.</p>
+  </div>
+
+  <h2>The five steps</h2>
+  <p class="iv-sub">Steps 1–2 get you running. Steps 3–5 put you on your own domain.</p>
+
+  <div class="iv-step">
+    <div class="iv-num">1</div>
+    <div>
+      <h3>Install the app</h3>
+      <p>One link, always the latest build. Run it — the app is the whole host:
+        your hive, your relay, your publisher. Nothing else to install.</p>
+      <a class="iv-cta" href="https://jwize.com/installer">Download for Windows</a>
+      <p style="font-size:13.5px;color:#8d8879">The link 302s to the newest signed build.
+        Your data lives on your machine from the first minute — there is no account to create.</p>
+    </div>
+  </div>
+
+  <div class="iv-step">
+    <div class="iv-num">2</div>
+    <div>
+      <h3>Get a domain onto Cloudflare</h3>
+      <p>A free Cloudflare account and any domain. Add the domain as a zone, then create
+        <b>one wildcard record</b> so every future site name already resolves:</p>
+      <pre><i># DNS → Records → Add record</i>
+Type <b>CNAME</b>   Name <b>*</b>   Target <b>yourdomain.com</b>   Proxy <b>ON (orange cloud)</b></pre>
+      <p style="font-size:13.5px;color:#8d8879">The wildcard certificate covers one label deep:
+        <code>garden.yourdomain.com</code> is covered, <code>a.b.yourdomain.com</code> is not.</p>
+    </div>
+  </div>
+
+  <div class="iv-step">
+    <div class="iv-num">3</div>
+    <div>
+      <h3>Point the tunnel at your machine</h3>
+      <p>The app can connect Cloudflare for you (Host → Connect Cloudflare — it logs in,
+        creates the tunnel, and sets the DNS route). The manual recipe, if you'd rather see it:</p>
+      <pre><i># ~/.cloudflared/config.yml</i>
+tunnel: <b>&lt;your-tunnel-id&gt;</b>
+ingress:
+  - hostname: <b>yourdomain.com</b>
+    service: http://localhost:7777
+  - service: http_status:404</pre>
+      <p>Run <code>cloudflared tunnel run</code> as a service so it survives reboots.
+        Traffic to your domain now lands on the app — no open ports, no fixed IP.</p>
+    </div>
+  </div>
+
+  <div class="iv-step">
+    <div class="iv-num">4</div>
+    <div>
+      <h3>Deploy the content worker</h3>
+      <p>This is the public face — it serves your published sites even when your machine
+        is off. From the <code>blossom-worker</code> folder, once:</p>
+      <pre>wrangler r2 bucket create hypercomb-content
+wrangler kv namespace create GRANTS     <i># paste the id into wrangler.toml</i>
+wrangler kv namespace create HIVES      <i># paste the id into wrangler.toml</i>
+<i># edit the two route lines to your domain, then</i>
+wrangler deploy</pre>
+      <p>The worker's wildcard route makes <b>every subdomain a site address</b> from day one.
+        <code>content.yourdomain.com</code> becomes the write face your app publishes to —
+        it is never a site itself.</p>
+    </div>
+  </div>
+
+  <div class="iv-step">
+    <div class="iv-num">5</div>
+    <div>
+      <h3>Publish</h3>
+      <p>In the hive: mark a branch public, open <b>Publish</b>, press it. The name is the
+        address — a branch called <code>garden</code> goes live at
+        <code>garden.yourdomain.com</code> the moment your signed index carries it.</p>
+      <p>Publish seals the branch, pushes the signed bytes, <b>waits until the host actually
+        serves them back</b>, and only then moves the pointer. "Confirmed" means the world
+        can see it — not that a server accepted an upload.</p>
+    </div>
+  </div>
+
+  <h2>Without getting stuck</h2>
+  <p class="iv-sub">Every one of these cost us real time once. They don't have to cost you any.</p>
+  <ul class="iv-traps">
+    <li><b>Check headers before blaming routing.</b> A 404 from your content host that carries
+      <code>X-Reason: sig not held</code> is the worker answering honestly — the object is
+      missing, the routing is fine. <code>curl -sI</code> first; we lost an hour to this one.</li>
+    <li><b>Node 24 + npx don't mix here.</b> <code>npx wrangler</code> can die with
+      <code>EINVAL</code> on Windows. Call it directly:
+      <code>node node_modules/wrangler/bin/wrangler.js …</code></li>
+    <li><b>Git Bash eats leading-slash arguments.</b> It rewrites <code>/branch</code> into a
+      Windows path before your script ever sees it. Pass the bare name, or use PowerShell.</li>
+    <li><b>One tab.</b> Your hive has exactly one writer. Opening it in a second tab gives the
+      second tab a dead store — close it, don't fight it.</li>
+    <li><b>"Unconfirmed" is patience, not failure.</b> The edge sometimes takes a moment to
+      serve a fresh publish back. The row re-checks itself — don't republish in a loop.</li>
+    <li><b>The wildcard covers one label.</b> Nested names like <code>a.b.yourdomain.com</code>
+      need their own explicit setup; flat names never do.</li>
+  </ul>
+
+  <footer class="iv-foot">
+    <p>This page practices what it preaches: it is a post-it on a hive branch named
+      <code>dylan</code>, published with exactly the flow above, and served to you by the
+      worker in step 4. &nbsp;·&nbsp; <a href="https://pluginthematrix.com/">pluginthematrix.com</a>
+      &nbsp;·&nbsp; <a href="https://jwize.com/installer">get the app</a></p>
+  </footer>
+
+</div></div>

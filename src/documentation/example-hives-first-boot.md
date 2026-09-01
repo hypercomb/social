@@ -4,7 +4,7 @@
 art from `scripts/example-hives-art.cjs`), published to content.jwize.com
 (all three heads + covers verified 200), offered by
 `sharing/example-hives.worker.ts` + the `hc-example-hives-offer` shell surface,
-mirrored at `behaviors/swarm/example-hives`. Verified on a fresh empty-root
+with its behaviour tile at `behaviors/swarm/example-hives`. Verified on a fresh empty-root
 origin: offer appears, Add folds honey-garden (7 tiles, images stream from the
 CDN, in-layer marks travel), dismiss persists, reload re-offers nothing and the
 adopted content is durable.
@@ -137,8 +137,6 @@ SwarmAdoptDrone.adoptResolvedBranch(
   localStorage.
 - **No hardcoded 64-hex sigs in code** — heads live in `examples.json`.
 - **Adopt is adopt** — one gesture folds; no merge surface, no target picker.
-- **Mirror**: the feature's parts are mirrored into the hive (tiles +
-  collection + pheromones + notes) in the same pass as the code.
 
 ## 7. Authoring notes
 

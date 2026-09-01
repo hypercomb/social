@@ -1,0 +1,823 @@
+// hypercomb-shared/ui/layout-designer/layout-designer.component.scss
+//
+// Left-docked palette, and the workspace it points at.
+//
+// THE WORKSPACE IS FLUSH. Its left edge is `--hc-inset-left` — the width the
+// docked panel reserved for itself — so the panel pushes it in and the two can
+// never overlap. Everything inside centres in the space that is actually
+// available, not in the viewport, which would put the middle of the design
+// underneath the palette.
+//
+// The hex canvas is COVERED, not suppressed: the workspace is opaque and the
+// surface host already sits above the reparented canvas. Suppressing it would
+// mean claiming `view:active`, which takes the header and the command line
+// with it — and this is a place you work, not a place you are trapped. Nothing
+// here is a hand-rolled `#pixi-host` rule, which `_canvas-suppress.scss`
+// forbids outright.
+//
+// Everything structural comes from `_toolwindow.scss` — the same partial
+// nineteen other windows include. Hand-rolling it cost the shared band height,
+// the theme-aware accent, the standard close button and the focus ring, and it
+// broke the close button's alignment the moment `hcDockedPanel` injected its
+// settings gear beside it.
+//
+// It is a draughting board, not a picture: hairline strokes, walls that state
+// what a hole does, one accent for what the pointer is over. Nothing here
+// competes with the layout being designed.
+//
+// Radii stay on the shape ladder (control 2 / card 3 / floating 4) —
+// `_shape.scss`, held by a doctrine ratchet.
+
+@use '../toolwindow' as tw;
+
+$steel: #7eb6d6;
+$dim: #7f95a3;
+$accent: #c9a227;
+
+:host {
+  position: fixed;
+  inset: 0;
+  z-index: 100002;
+  pointer-events: none;
+}
+
+// LEFT-docked, the same side the workflow designer takes: you drag OUT of the
+// palette and INTO the canvas, so the source sits before the target.
+.ld-panel {
+  pointer-events: auto;
+  position: absolute;
+  // Above the workspace unconditionally. The inset already keeps them apart;
+  // this is the guarantee that survives a frame where the inset is still 0.
+  z-index: 2;
+  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  left: 0;
+  bottom: 0;
+  width: 320px;
+  min-width: 260px;
+  max-width: calc(100vw - 1.5rem);
+  display: flex;
+  flex-direction: column;
+  // Content scale: inner `em` sizes follow this root font. The geometry above
+  // stays in `rem` so the dock position never moves with it.
+  font-size: calc(0.78rem * var(--hc-panel-scale, 1));
+  // Material, edge, elevation, typography, shape AND the accent identity —
+  // including the `--hc-window-*` roles the rest of this sheet reads.
+  @include tw.panel($steel, left);
+  // AFTER the include, deliberately: the mixin sets its own `overflow-y: auto`
+  // for a window whose body is one long column, and this one is not. THE
+  // WINDOW DOES NOT SCROLL — only the shelf does. A window that scrolls as a
+  // whole carries the properties off the bottom of the screen exactly when you
+  // are reaching for them.
+  overflow: hidden;
+}
+
+.ld-header {
+  @include tw.header;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--hc-window-edge);
+}
+
+// `flex: 1`, never `margin-left: auto` on the close button: hcDockedPanel pins
+// its settings gear beside close and reserves the slot with an inline
+// `margin-left`, which would silently beat `auto` and strand close mid-band.
+.ld-heading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.ld-title {
+  font-size: 0.82em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hc-window-accent);
+}
+.ld-subject {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--hc-window-ink-quiet);
+}
+// Size, glyph, rest colour and hover all come from tw.header's own close rule.
+.ld-close {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+// THE TOP HALF holds the layouts, and is the ONE thing in this window that
+// scrolls. It takes the slack, so the inspector below keeps its place however
+// far the library grows.
+.ld-shelf {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+// THE LINE BETWEEN THE HALVES, and a grip on it.
+//
+// How much room the properties need is not something the window can be asked:
+// a root container with two measurements and a five-deep arrangement with a
+// map full of panes want different amounts of it. So the line moves. It is a
+// full-width band with a hair of a rule drawn inside it — a 1px target is a
+// target nobody hits, and a 6px border is a border nobody believes.
+.ld-split {
+  flex: 0 0 auto;
+  position: relative;
+  height: 0.5rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: row-resize;
+  touch-action: none;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: auto 0 0;
+    height: 1px;
+    background: var(--hc-window-edge);
+    transition: background 0.14s ease;
+  }
+  // The handle itself: a short bar in the middle, so the band reads as
+  // something you take hold of rather than as a gap.
+  &::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: 0.15rem;
+    width: 2rem;
+    height: 2px;
+    transform: translateX(-50%);
+    border-radius: 2px;
+    background: rgba($steel, 0.45);
+    transition: background 0.14s ease;
+  }
+  &:hover::after, &:focus-visible::after { background: rgba($accent, 0.85); }
+  &:hover::before { background: rgba($accent, 0.5); }
+  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: -1px; }
+}
+
+// THE BOTTOM HALF is the properties. Their natural height until the split is
+// dragged, and then exactly the height they were given — which is the only
+// case where they scroll, because it is the only case where somebody has said
+// they may be shorter than what is in them.
+.ld-inspector {
+  // `0 0 auto`, not `0 1 auto`: it keeps its natural height and the shelf gives
+  // up the difference. Letting it shrink put its own last rows out of reach in
+  // a half of the window that is not allowed to scroll.
+  flex: 0 0 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba($steel, 0.45) transparent;
+}
+
+.ld-section { padding: 0.7rem 0.75rem 0.2rem; }
+.ld-section-title {
+  margin: 0 0 0.5rem;
+  font-size: calc(0.62rem * var(--hc-panel-scale, 1));
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba($dim, 0.9);
+  font-weight: 500;
+}
+
+// ── the assets ────────────────────────────────────────────────────────
+
+// TWO OR THREE ACROSS, WHATEVER THE PANEL IS DRAGGED TO.
+//
+// `minmax(max(110px, 31%), 1fr)` does the whole job with no query of any kind.
+// The percentage is of the LIST, not the viewport — which matters, because a
+// docked panel is resized by hand and a viewport media query would answer a
+// question nobody asked. Three columns need 93% plus gaps, so three is the
+// ceiling; 110px is the floor below which two is the honest answer.
+//
+// Every cell is the same size and every row is full, so the grid reads as a
+// grid rather than as a list that happens to wrap.
+.ld-assets {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(max(110px, 31%), 1fr));
+  gap: 0.4rem;
+}
+
+// LANDSCAPE, always. A layout is drawn on a page and a page is wider than it
+// is tall; a square chip makes a row of columns look like a stack of rows.
+.ld-asset {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  padding: 4px;
+  background: rgba(var(--hc-panel-ink), 0.07);
+  border: 1px solid rgba($steel, 0.24);
+  border-radius: tw.$radius-control;
+  cursor: grab;
+  overflow: hidden;
+  transition: border-color 0.12s ease, background 0.12s ease;
+
+  &:hover { border-color: rgba($steel, 0.65); background: rgba(var(--hc-panel-ink), 0.11); }
+  &:active { cursor: grabbing; }
+  &.is-on { border-color: rgba($accent, 0.85); background: rgba($accent, 0.1); }
+}
+
+// The name waits for the pointer, then states itself over the foot of the
+// chip — where it covers the least of the drawing it is naming.
+.ld-asset-name {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 2px 4px;
+  background: rgba($accent, 0.92);
+  color: #17150e;
+  font: 500 0.58rem/1.5 var(--hc-mono, ui-monospace), monospace;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  pointer-events: none;
+}
+.ld-asset:hover .ld-asset-name,
+.ld-asset:focus-visible .ld-asset-name { opacity: 1; }
+
+.ld-asset-note { color: rgba(23, 21, 14, 0.6); }
+
+// The layout miniature is built by the same pure function that builds the real
+// container, so it can never drift from the arrangement it advertises. It
+// arrives through [innerHTML], which puts it outside this component's style
+// scope — ::ng-deep is the only way to reach it.
+.ld-glyph {
+  display: block;
+  width: 100%;
+  height: 100%;
+  ::ng-deep > div { width: 100%; height: 100%; }
+  ::ng-deep [data-hc-hole] {
+    background: rgba($steel, 0.35);
+    border-radius: 1px;
+  }
+  // NO OVERRIDE HERE. There used to be one — a rule that string-matched the
+  // generator's own style attribute to force fixed holes to 22%. It worked
+  // until the generator changed a character, and it hid the real defect:
+  // a layout that only fits at one size is not finished. The chip now asks
+  // for measurements suited to a chip (`glyphVars`), and every hole shrinks
+  // to fit besides. Do not put a compensating rule back.
+  ::ng-deep [data-hc-self] { background: rgba($accent, 0.55); }
+}
+
+// ── the properties ────────────────────────────────────────────────────
+
+// THE ACTIVE CONTAINER, DRAWN SMALL, INSIDE THE PROPERTIES.
+//
+// It is the same miniature the palette chip uses — the pure builder's own
+// output, so it can never advertise a shape the layout does not make. Its
+// panes are the index: press one and the single slider below is on it. That
+// is what replaced a column of one slider per measurement, and it is why the
+// properties fit in a half of a window that used to overflow.
+.ld-map {
+  display: block;
+  width: 100%;
+  height: 5.5rem;
+  margin: 0 0 0.7rem;
+  padding: 0.25rem;
+  box-sizing: border-box;
+  border: 1px solid rgba($steel, 0.28);
+  border-radius: 3px;
+  background: rgba($steel, 0.07);
+
+  // Mounted imperatively, so it carries no component scope attribute.
+  ::ng-deep > div { width: 100%; height: 100%; }
+}
+
+// A PANE OF THE ACTIVE CONTAINER. Selectable, and a drop target — a pane in
+// here and a hole out on the workspace are the same hole, so they take the
+// same drag.
+:host ::ng-deep .ld-map-pane {
+  border: 1px solid rgba(126, 182, 214, 0.28);
+  border-radius: 2px;
+  background: rgba(126, 182, 214, 0.09);
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease;
+  min-width: 2px;
+  min-height: 2px;
+
+  &:hover { border-color: rgba(126, 182, 214, 0.65); }
+  &.is-over {
+    border-color: rgba(214, 182, 126, 0.9);
+    background: rgba(214, 182, 126, 0.2);
+  }
+  &.is-picked {
+    border-color: rgba(126, 182, 214, 0.95);
+    background: rgba(126, 182, 214, 0.28);
+    box-shadow: inset 0 0 0 1px rgba(126, 182, 214, 0.5);
+  }
+}
+
+// THE TWO TYPES, IN ONE ROW. The container's own flexbox measurements, a
+// rule, then the pane being pointed at. One slider serves both, so this row
+// is a SELECTOR and never a second set of controls.
+.ld-measures {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.3rem;
+  margin: 0 0 0.6rem;
+}
+
+.ld-measure {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid rgba($steel, 0.28);
+  border-radius: 2px;
+  background: none;
+  color: var(--hc-window-ink-quiet);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
+
+  &:hover { border-color: rgba($steel, 0.6); color: rgb(var(--hc-panel-ink)); }
+  &.is-on {
+    border-color: rgba($accent, 0.75);
+    background: rgba(126, 182, 214, 0.14);
+    color: rgb(var(--hc-panel-ink));
+  }
+  // A pane that takes the remainder has nothing to move. It shows, greyed,
+  // because "no measurement" is an answer.
+  &.is-still {
+    cursor: default;
+    opacity: 0.55;
+    &:hover { border-color: rgba($steel, 0.28); color: var(--hc-window-ink-quiet); }
+  }
+  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: 1px; }
+}
+.ld-measure-name {
+  font-size: 0.92em;
+  letter-spacing: 0.04em;
+}
+.ld-measure-value {
+  font-size: 0.8em;
+  color: rgba($accent, 0.9);
+}
+.ld-measure.is-still .ld-measure-value { color: rgba($dim, 0.9); }
+
+// Which side of the rule a chip is on IS which type it is.
+.ld-measure-rule {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 1px;
+  margin: 0.15rem 0.15rem;
+  background: rgba($steel, 0.3);
+}
+
+.ld-var { margin-bottom: 0.5rem; }
+.ld-var-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.1rem;
+}
+.ld-var-name { color: var(--hc-window-ink-plain); }
+.ld-var-value { color: rgba($accent, 0.95); font-size: 0.92em; }
+.ld-slider { width: 100%; accent-color: $accent; cursor: pointer; }
+
+.ld-note {
+  margin: 0.9rem 0 0.6rem;
+  color: rgba($dim, 0.85);
+  line-height: 1.55;
+}
+.ld-remove {
+  margin-bottom: 0.8rem;
+  padding: 0.3rem 0.6rem;
+  background: none;
+  border: 1px solid rgba($steel, 0.3);
+  border-radius: 2px;
+  color: var(--hc-window-ink-quiet);
+  font: inherit;
+  cursor: pointer;
+  &:hover { border-color: rgba($steel, 0.6); color: rgb(var(--hc-panel-ink)); }
+}
+.ld-still {
+  margin: 0;
+  padding: 0.7rem 0.75rem;
+  color: rgba($dim, 0.9);
+  line-height: 1.6;
+}
+
+// ── the workspace ─────────────────────────────────────────────────────
+//
+// Flush to the remaining viewport. `--hc-inset-left` is published by the
+// docked panel through `hcDockInset` (viewport-inset-vars.ts writes the four
+// edges on :root), so this box starts exactly where the palette ends. No
+// width or height: the four edges drive the size, and the browser recomputes
+// on a window resize for free — the same shape the Pixi host uses.
+
+.ld-workspace {
+  pointer-events: auto;
+  position: absolute;
+  z-index: 1;
+  // BELOW THE HEADER, not over it. The header carries the command line, and
+  // this is a place you work rather than a place you are trapped — so it stays
+  // above and the workspace nests in what is left, on the same anchor the
+  // panel uses so the two line up exactly.
+  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor, 0px));
+  bottom: var(--hc-inset-bottom, 0px);
+  left: var(--hc-inset-left, 0px);
+  right: var(--hc-inset-right, 0px);
+  overflow: hidden;
+  // OPAQUE, and that is load-bearing: it is what covers the hex canvas. The
+  // surface host sits above the reparented canvas already, so a ground is all
+  // it takes — nothing here suppresses the canvas, it simply is not on top.
+  // Fallback first, for an engine without color-mix.
+  background: rgb(var(--hc-panel-pane));
+  background: color-mix(in srgb, rgb(var(--hc-panel-pane)) 72%, rgb(var(--hc-panel-shadow)));
+}
+
+// ── the pane ──────────────────────────────────────────────────────────
+//
+// Centred in the WORKSPACE, sized as a fraction of it. The grips change the
+// SIZE only — the translate is what keeps it in the middle no matter what the
+// size becomes (canvas-box.ts).
+
+.ld-pane {
+  pointer-events: auto;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  background: rgb(var(--hc-panel-pane));
+  border: 1px solid rgba($steel, 0.4);
+  border-radius: 3px;
+  box-shadow: 0 24px 70px rgba(var(--hc-panel-shadow), 0.55);
+  font-family: var(--hc-mono, system-ui);
+  color: rgb(var(--hc-panel-ink));
+  &.is-dragging { border-color: rgba($accent, 0.7); }
+}
+
+// The pane takes the keyboard, so it says so — quietly, on the frame rather
+// than a focus ring around the whole workspace. Tab and the arrows move the
+// selection only while this is showing.
+.ld-pane:focus-visible {
+  outline: none;
+  border-color: rgba($accent, 0.55);
+}
+
+.ld-pane-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.4rem 0.65rem;
+  border-bottom: 1px solid rgba($steel, 0.2);
+  font-size: 0.72rem;
+}
+.ld-pane-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ld-pane-layout { color: rgba($dim, 0.9); letter-spacing: 0.08em; }
+
+.ld-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0.5rem;
+  display: flex;
+  // The container is mounted imperatively (native innerHTML), so it carries no
+  // component scope attribute and ::ng-deep is the only way to reach it.
+  ::ng-deep > div { flex: 1 1 auto; min-width: 0; }
+}
+
+:host ::ng-deep .ld-hole {
+  position: relative;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed rgba(126, 182, 214, 0.35);
+  border-radius: 3px;
+  background: rgba(126, 182, 214, 0.05);
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.14s ease, background 0.14s ease;
+
+  &:hover { border-color: rgba(126, 182, 214, 0.6); }
+  &.is-over {
+    border-style: solid;
+    border-color: rgba(201, 162, 39, 0.95);
+    background: rgba(201, 162, 39, 0.12);
+  }
+  &.is-picked { border-style: solid; border-color: rgba(201, 162, 39, 0.6); }
+  &.is-self {
+    border-style: solid;
+    border-color: rgba(126, 182, 214, 0.45);
+    background: rgba(126, 182, 214, 0.1);
+    cursor: default;
+  }
+}
+
+// A ring drawn OUTSIDE a nested container falls in its hole's margin, and the
+// hole clips. So while a selection is anywhere inside it, the hole stops
+// clipping — no layout moves, and the ring is visible at every depth. Safe
+// because a container always fits its hole: there is nothing else to spill.
+:host ::ng-deep .ld-hole:has([data-hc-container].is-selected) {
+  overflow: visible;
+}
+
+// ── WHICH CONTAINER AM I IN ───────────────────────────────────────────
+//
+// Nesting is the whole point, and nesting is invisible if every level looks
+// like every other. So each container carries a hairline dashed rule at rest —
+// enough to read the separation, not enough to compete with the holes — and
+// the one under the pointer states itself: a solid accent rule and its own
+// name at the corner.
+//
+// ONLY the innermost. `:hover` matches every ancestor of the pointer, which
+// would light the whole chain and answer the question with "all of them".
+// `:not(:has([data-hc-container]:hover))` keeps the deepest one, which is the
+// one you are actually pointing at.
+//
+// The badge reads `attr(data-hc-container)` — the layout's own name, already
+// on the element. Nothing here needs a class the generator has to remember to
+// write.
+:host ::ng-deep [data-hc-container] {
+  position: relative;
+  outline: 1px dashed rgba($steel, 0.3);
+  outline-offset: -1px;
+  border-radius: 2px;
+  transition: outline-color 0.12s ease;
+}
+
+:host ::ng-deep [data-hc-container].is-selected {
+  // THE SELECTED CONTAINER, UNMISTAKABLY. Not a slightly different hairline:
+  // this is the thing both the properties below and the flex editor opposite
+  // are pointed at, so it is stated rather than hinted.
+  // AROUND it, not within it. A ring drawn inside the box shares a line with
+  // the box's own wall and with whatever is nested one level in, so at a
+  // glance it can read as belonging to the child. Outside, it can only mean
+  // the division as a whole — which is the question being answered.
+  //
+  // `$accent`, NOT `--hc-window-accent`. The role tokens are minted by
+  // `tw.panel` ON THE PANEL, and the stage is not inside it — it lives in the
+  // workspace, a sibling. A `var()` that resolves to nothing makes the WHOLE
+  // shorthand invalid at computed-value time, so `outline` fell back to
+  // `style: none` and the selected container wore no ring at all. Every other
+  // rule that reaches into the stage already names its colour for this reason.
+  outline: 2px solid rgba($accent, 0.95);
+  outline-offset: 2px;
+  background: rgba($accent, 0.08);
+
+  // Its name, kept — the hover badge is a question answered while you point,
+  // this is the answer standing still.
+  &::after {
+    content: attr(data-hc-container);
+    position: absolute;
+    z-index: 4;
+    top: 0;
+    right: 0;
+    padding: 1px 5px;
+    background: rgba($accent, 0.95);
+    color: #17150e;
+    font: 600 0.56rem/1.5 var(--hc-mono, ui-monospace), monospace;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    border-radius: 0 2px 0 2px;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+}
+
+// Everything that is NOT the selection stands back a little, so the one that
+// is reads at a glance rather than by comparison.
+:host ::ng-deep .ld-stage:has([data-hc-container].is-selected)
+  [data-hc-container]:not(.is-selected) {
+  opacity: 0.55;
+}
+
+:host ::ng-deep [data-hc-container]:hover:not(:has([data-hc-container]:hover)) {
+  outline: 1px solid rgba($accent, 0.85);
+
+  &::before {
+    content: attr(data-hc-container);
+    position: absolute;
+    z-index: 3;
+    top: 0;
+    left: 0;
+    padding: 1px 5px;
+    background: rgba($accent, 0.92);
+    color: #17150e;
+    font: 500 0.56rem/1.5 var(--hc-mono, ui-monospace), monospace;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    border-radius: 2px 0 2px 0;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+}
+
+// The glyph is a picture, not a surface — it takes no rules and answers no
+// pointer.
+.ld-glyph ::ng-deep [data-hc-container] { outline: 0; border-radius: 0; }
+
+:host ::ng-deep .ld-hole > [data-hc-container] {
+  // A NESTED CONTAINER FILLS ITS HOLE.
+  //
+  // `.ld-hole` makes the hole a flex CONTAINER so its label can be centred —
+  // which turns the arrangement inside it into a flex ITEM, and a flex item
+  // shrinks to its content. The nested layout then drew as a postage stamp in
+  // the middle of the space it is supposed to occupy.
+  //
+  // Designer-only: in a published page the hole is a flex item, not a flex
+  // container, so a nested container fills the width by normal flow and takes
+  // intrinsic height — which is the rule the whole model rests on.
+  flex: 1 1 auto;
+  align-self: stretch;
+  min-width: 0;
+  min-height: 0;
+}
+
+:host ::ng-deep .ld-hole:has(> [data-hc-container]) {
+  // Nothing to centre once something is in it — stop centring, and give the
+  // nested walls a hairline of room so two borders never sit on one pixel.
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 2px;
+}
+
+:host ::ng-deep .ld-hole-name {
+  font-size: 0.58rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--hc-window-ink-quiet);
+}
+:host ::ng-deep .ld-hole-fill {
+  pointer-events: auto;
+  max-width: 100%;
+  padding: 0.1rem 0.35rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.74rem;
+  color: rgb(var(--hc-panel-ink));
+  pointer-events: none;
+}
+
+// ONE grip, bottom right. Square and on the ladder. It changes the SIZE about
+// a fixed centre — the pane never moves — so there is exactly one thing to take
+// hold of, and no reason to draw it eight times around the edges of the very
+// thing being looked at.
+.ld-grip {
+  position: absolute;
+  padding: 0;
+  background: rgba(var(--hc-panel-pane), 0.98);
+  border: 1px solid rgba($steel, 0.75);
+  border-radius: 2px;
+  touch-action: none;
+  &:hover { border-color: rgba($accent, 0.95); }
+
+  width: 14px;
+  height: 14px;
+  // INSIDE the border: at full size there is no outside left to put it in,
+  // and a grip clipped by the workspace edge is a grip you cannot take hold
+  // of.
+  bottom: 3px;
+  right: 3px;
+  cursor: nwse-resize;
+}
+
+// ── the walls ─────────────────────────────────────────────────────────
+//
+// A hole's border states its behaviour, read off the attributes the composer
+// writes onto the element. The border and the flex therefore cannot disagree:
+// there is one source for both.
+
+:host ::ng-deep .ld-hole[data-hc-fill='fluid'] {
+  border-style: dashed;
+  border-color: rgba(111, 191, 148, 0.55);
+}
+:host ::ng-deep .ld-hole[data-hc-fill='fixed'] {
+  border-style: solid;
+  border-color: rgba(217, 154, 78, 0.6);
+}
+:host ::ng-deep .ld-hole[data-hc-band] {
+  border-style: double;
+  border-width: 3px;
+  border-color: rgba(126, 182, 214, 0.6);
+}
+:host ::ng-deep .ld-hole[data-hc-self] {
+  border-style: solid;
+  border-color: rgba(126, 182, 214, 0.5);
+  background: rgba(126, 182, 214, 0.12);
+}
+
+// Four specimens in one row, each drawn in the border it names. The name
+// waits for the pointer — the same bargain the layout chips strike, and for
+// the same reason: you recognise a border, you do not read it.
+.ld-legend {
+  display: flex;
+  gap: 0.4rem;
+  padding-bottom: 0.8rem;
+}
+.ld-wall {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 1.4rem;
+  font-size: 0;              // the label is revealed, not laid out
+  cursor: default;
+
+  // The specimen itself: a box wearing the wall it stands for.
+  > i {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 1px solid transparent;
+    border-radius: tw.$radius-control;
+  }
+  &.is-fluid > i { border-style: dashed; border-color: rgba(111, 191, 148, 0.75); }
+  &.is-fixed > i { border-style: solid; border-color: rgba(217, 154, 78, 0.85); }
+  &.is-band > i { border-style: double; border-width: 3px; border-color: rgba(126, 182, 214, 0.8); }
+  &.is-page > i {
+    border-style: solid;
+    border-color: rgba(126, 182, 214, 0.6);
+    background: rgba(126, 182, 214, 0.14);
+  }
+
+  // The name, on hover, over the whole legend rather than over one swatch —
+  // four names in a 260px row would each be three characters wide.
+  &:hover::after {
+    content: attr(data-name);
+    position: absolute;
+    z-index: 3;
+    bottom: calc(100% + 3px);
+    left: 0;
+    white-space: nowrap;
+    padding: 2px 5px;
+    border-radius: tw.$radius-control;
+    background: rgba($accent, 0.94);
+    color: #17150e;
+    font-size: 0.58rem;
+    line-height: 1.5;
+    letter-spacing: 0.04em;
+    pointer-events: none;
+  }
+}
+
+.ld-level {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+}
+.ld-level-layout { color: rgba($accent, 0.95); letter-spacing: 0.04em; }
+.ld-level-path {
+  color: rgba($dim, 0.9);
+  font-size: 0.9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ld-empty-hint {
+  position: absolute;
+  inset: auto 1.5rem 1.5rem;
+  margin: 0;
+  text-align: center;
+  color: rgba($dim, 0.75);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+.ld-pane.is-empty .ld-stage {
+  border: 1px dashed rgba($steel, 0.3);
+  border-radius: 3px;
+  margin: 0.5rem;
+  padding: 0;
+}
+.ld-pane.is-dragging .ld-stage { border-color: rgba($accent, 0.7); }
+
+@media (prefers-reduced-motion: reduce) {
+  :host ::ng-deep .ld-hole { transition: none; }
+}

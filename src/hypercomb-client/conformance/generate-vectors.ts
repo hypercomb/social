@@ -21,12 +21,12 @@ import {
   lineageKey,
   rawLineageKey,
   canonicalizeLineageSegment,
-} from '../../hypercomb-essentials/src/diamondcoreprocessor.com/history/lineage-key.js'
+} from '../../hypercomb-essentials/src/history/lineage-key.js'
 import {
   canonicalizeLayer,
   canonicalLayerJson,
   type CanonicalLayerContent,
-} from '../../hypercomb-essentials/src/diamondcoreprocessor.com/history/canonical-layer.js'
+} from '../../hypercomb-essentials/src/history/canonical-layer.js'
 import {
   BARE_WORD_POOL_MEANINGS,
   SCOPED_POOL_MEANINGS,

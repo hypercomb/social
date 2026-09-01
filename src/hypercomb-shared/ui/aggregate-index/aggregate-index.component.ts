@@ -30,7 +30,6 @@
 import { ChangeDetectorRef, Component, computed, inject, signal, type OnDestroy } from '@angular/core'
 import { EffectBus, hypercomb } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import type { RecentPortalsStore } from '../../core/recent-portals.store'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
@@ -39,7 +38,8 @@ import {
   aggregateSources, getAggregateSource, sourceForLocation,
   type AddedRows, type AggregateItem, type AggregateSource, type AggregateVersion, type StagedEntry,
 } from './aggregate-source'
-import { dropContextOnTile, dropReferenceTile, dropTagsOnTile, safeCellName } from './aggregate-drop'
+import { dropReferenceTile, dropTagsOnTile, safeCellName } from './aggregate-drop'
+import type { DropTarget } from './aggregate-drop'
 import { onSelection, withSelectionService } from '../../core/selection-context'
 
 /** Movement before a press counts as a drag rather than a click — small enough
@@ -53,7 +53,15 @@ const DRAG_THRESHOLD = 5
 const PORTALS_SOURCE_ID = 'collections'
 
 type LineageLike = EventTarget & { explorerSegments?: () => readonly string[] }
-type OverlayLike = { labelAtClient(x: number, y: number): string | null }
+type OverlayLike = {
+  labelAtClient(x: number, y: number): string | null
+  dropTargetAtClient?(x: number, y: number): DropTarget | null
+}
+type NavigationLike = { goRaw?(segments: readonly string[]): void; segmentsRaw?(): readonly string[] }
+type SelectModeLike = { arm?(): void; disarm?(): void }
+type LayerCommitterLike = {
+  importTree?(updates: Array<{ segments: readonly string[]; layer: { name?: string; [slot: string]: unknown } }>): Promise<void>
+}
 
 const ioc = (): { get(k: string): unknown } | undefined =>
   (globalThis as { ioc?: { get(k: string): unknown } }).ioc
@@ -92,6 +100,9 @@ export class AggregateIndexComponent implements OnDestroy {
   /** The item currently being dragged, and where the ghost sits. */
   readonly dragging = signal<AggregateItem | null>(null)
   readonly dragPos = signal<{ x: number; y: number }>({ x: 0, y: 0 })
+  /** Once the pointer is over the hive, the full-size target tile is the drag
+   *  preview. Hide the little cursor chip so there is only one visual answer. */
+  readonly dragOverHive = signal(false)
 
   readonly source = signal<AggregateSource | null>(null)
 
@@ -186,6 +197,16 @@ export class AggregateIndexComponent implements OnDestroy {
    *  navigation, and resolving `here + label` later would name whatever tile
    *  happens to share the name on the page you have since walked to. */
   readonly selection = signal<readonly StagedEntry[]>([])
+
+  /** A Portal dropped onto a tile turns the canvas into a reference picker.
+   *  The target's real page is opened, while this remembers where the chosen
+   *  children will be applied and where Done must return. */
+  readonly referencePick = signal<{
+    portal: AggregateItem
+    parentSegments: readonly string[]
+    originSegments: readonly string[]
+  } | null>(null)
+  readonly referenceContainerName = signal('')
 
   /** The collection we are STANDING IN, if the current location is one of our
    *  rows. This is what makes "drill into a collection and add tiles" work: the
@@ -299,7 +320,10 @@ export class AggregateIndexComponent implements OnDestroy {
    *  doesn't leave us listening to the old one. */
   #boundSource: AggregateSource | null = null
   #pending: { item: AggregateItem; x: number; y: number } | null = null
+  #dropTarget: DropTarget | null = null
+  #renderedLabels = new Set<string>()
   #swallowClick = false
+  #trailingClickCleanup: (() => void) | null = null
 
   constructor() {
     // Selection is last-value replayed, so opening the panel after selecting
@@ -330,6 +354,13 @@ export class AggregateIndexComponent implements OnDestroy {
         this.#cdr.markForCheck()
       }))
     this.#cleanups.push(EffectBus.on<{ id?: string }>('aggregate:view-open', (p) => this.openPanel(p?.id)))
+    this.#cleanups.push(EffectBus.on<DropTarget>('drop:target', target => {
+      this.#dropTarget = target
+      this.dragOverHive.set(this.dragging() !== null && target?.over !== false)
+    }))
+    this.#cleanups.push(EffectBus.on<{ labels?: readonly string[] }>('render:cell-count', payload => {
+      this.#renderedLabels = new Set((payload?.labels ?? []).map(String).filter(Boolean))
+    }))
     // A tile is riding the pointer (the drag handle PortalCarryDrone owns) —
     // light the portal rows as drop zones while it does, and land the drop.
     this.#cleanups.push(EffectBus.on('portal-carry:drag-start', () => {
@@ -365,6 +396,7 @@ export class AggregateIndexComponent implements OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.#trailingClickCleanup?.()
     for (const off of this.#cleanups) off()
     aggregateSources.removeEventListener('change', this.#sourceChanged)
     this.#boundSource?.changed?.removeEventListener('change', this.#sourceChanged)
@@ -434,6 +466,49 @@ export class AggregateIndexComponent implements OnDestroy {
   #dropStaged(): void {
     withSelectionService(s => s.clear())
     this.selection.set([])
+  }
+
+  /** Finish a reference-picking trip. Without a name, the dropped-on tile is
+   *  the referencer. With a name, a new child container is created first and
+   *  the chosen references live beneath it. */
+  async finishReferencePick(containerName = ''): Promise<void> {
+    const pick = this.referencePick()
+    const chosen = this.selection()
+    if (!pick || chosen.length === 0) return
+
+    let parent = [...pick.parentSegments]
+    const name = safeCellName(containerName)
+    if (name) {
+      const committer = ioc()?.get('@diamondcoreprocessor.com/LayerCommitter') as LayerCommitterLike | undefined
+      if (!committer?.importTree) return
+      parent = [...parent, name]
+      await committer.importTree([{ segments: parent, layer: { name } }])
+    }
+
+    for (const entry of chosen) {
+      await dropReferenceTile(
+        { key: entry.label, label: entry.label, segments: entry.segments },
+        parent,
+      )
+    }
+    await new hypercomb().act()
+    const back = [...pick.originSegments]
+    this.referencePick.set(null)
+    this.referenceContainerName.set('')
+    this.#dropStaged()
+    ;(ioc()?.get('@diamondcoreprocessor.com/SelectModeDrone') as SelectModeLike | undefined)?.disarm?.()
+    ;(ioc()?.get('@hypercomb.social/Navigation') as NavigationLike | undefined)?.goRaw?.(back)
+  }
+
+  cancelReferencePick(): void {
+    const pick = this.referencePick()
+    if (!pick) return
+    const back = [...pick.originSegments]
+    this.referencePick.set(null)
+    this.referenceContainerName.set('')
+    this.#dropStaged()
+    ;(ioc()?.get('@diamondcoreprocessor.com/SelectModeDrone') as SelectModeLike | undefined)?.disarm?.()
+    ;(ioc()?.get('@hypercomb.social/Navigation') as NavigationLike | undefined)?.goRaw?.(back)
   }
 
   /** Whether this row is the collection currently being managed (the hive is
@@ -670,39 +745,6 @@ export class AggregateIndexComponent implements OnDestroy {
     this.carried.set([])
   }
 
-  // ── pin as home ─────────────────────────────────────────────────────────────
-  //
-  // Home follows the last portal you walked, which is right while you are still
-  // finding the thing and wrong once you have found it — dip into something
-  // else and home moves off what you meant. Pinning stops the drift: the pin
-  // outranks the walk.
-  //
-  // Portals only. Every source's `segments` is "what this row points at", so
-  // the mechanism would work anywhere, but a home that is a tag row or a search
-  // hit is not a place you meant to keep.
-
-  private get portals(): RecentPortalsStore | undefined {
-    return get('@hypercomb.social/RecentPortalsStore') as RecentPortalsStore | undefined
-  }
-
-  /** Whether this view's rows can be pinned as home. */
-  canPinHome(): boolean {
-    return this.source()?.id === PORTALS_SOURCE_ID && !!this.portals
-  }
-
-  isHome(item: AggregateItem): boolean {
-    return !!this.portals?.isPinned(item.segments)
-  }
-
-  /** Pin this row as home, or release it if it already is. Mutually exclusive
-   *  by construction — the store holds ONE pin, so pinning another is what
-   *  releases this one; nothing here has to hunt down the previous row. */
-  toggleHome(item: AggregateItem, event?: Event): void {
-    event?.stopPropagation()
-    this.portals?.togglePin(item.label, item.segments)
-    this.#cdr.markForCheck()
-  }
-
   /**
    * Apply everything carried, here — one reference per item, at the page in
    * front of you.
@@ -847,10 +889,19 @@ export class AggregateIndexComponent implements OnDestroy {
   async #onPortalCarryDrop(p: { label?: string; segments?: string[]; targetKey?: string } | null): Promise<void> {
     const src = this.source()
     if (!src?.add || !this.portalDropView()) return
-    const item = this.items().find(i => i.key === String(p?.targetKey ?? ''))
     const label = String(p?.label ?? '').trim()
     const segments = (p?.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
-    if (!item || !label || segments.length === 0) return
+    if (!label || segments.length === 0) return
+    const targetKey = String(p?.targetKey ?? '')
+    if (!targetKey) {
+      // Dropped on the panel itself: expose the pending reference and wait for
+      // an explicit + on a pool. Nothing is written until that target is clear.
+      this.selection.set([{ label, segments }])
+      this.#cdr.markForCheck()
+      return
+    }
+    const item = this.items().find(i => i.key === targetKey)
+    if (!item) return
     if (sameSegments(segments, item.segments) || sameSegments(segments.slice(0, -1), item.segments)) {
       EffectBus.emit('activity:log', { message: `"${label}" is already in "${item.label}"`, icon: '○' })
       return
@@ -859,6 +910,24 @@ export class AggregateIndexComponent implements OnDestroy {
     catch { return }
     EffectBus.emit('activity:log', { message: `added "${label}" to "${item.label}"`, icon: '◈' })
     void this.reload()
+  }
+
+  /** The Portals row's sole action. With a tile staged, + adds its reference to
+   *  this pool. With nothing staged it retains the existing carry gesture for
+   *  applying the pool elsewhere. */
+  async addToPortal(item: AggregateItem, event?: Event): Promise<void> {
+    event?.stopPropagation()
+    const src = this.source()
+    const entries = this.selection().filter(entry =>
+      !sameSegments(entry.segments, item.segments)
+      && !sameSegments(entry.segments.slice(0, -1), item.segments))
+    if (src?.add && entries.length > 0) {
+      try { await src.add(entries, item) } catch { return }
+      this.#dropStaged()
+      void this.reload()
+      return
+    }
+    this.toggleCarry(item, event)
   }
 
   /** File the staged tiles away INTO the collection we are standing in — they
@@ -946,6 +1015,7 @@ export class AggregateIndexComponent implements OnDestroy {
     this.#detachDrag()
     if (this.dragging()) {
       this.dragging.set(null)
+      this.dragOverHive.set(false)
       EffectBus.emit('drop:dragging', { active: false })
       this.#cdr.detectChanges()
     }
@@ -957,7 +1027,15 @@ export class AggregateIndexComponent implements OnDestroy {
     if (!this.dragging()) {
       if (Math.hypot(event.clientX - p.x, event.clientY - p.y) < DRAG_THRESHOLD) return
       this.dragging.set(p.item)
-      EffectBus.emit('drop:dragging', { active: true })
+      this.dragOverHive.set(false)
+      EffectBus.emit('drop:dragging', {
+        active: true,
+        emptyOnly: true,
+        targetTile: {
+          label: safeCellName(p.item.label) || p.item.label,
+          imageSig: p.item.imageSig,
+        },
+      })
     }
     this.dragPos.set({ x: event.clientX, y: event.clientY })
     this.#cdr.detectChanges()
@@ -971,94 +1049,99 @@ export class AggregateIndexComponent implements OnDestroy {
     if (!wasDragging || !p) return
 
     this.dragging.set(null)
+    this.dragOverHive.set(false)
     EffectBus.emit('drop:dragging', { active: false })
     this.#cdr.detectChanges()
     this.#swallowClick = true
+    this.#suppressTrailingClick()
 
     // RELEASE POINT, not a remembered hover — see the header note.
     const overlay = ioc()?.get('@diamondcoreprocessor.com/TileOverlayDrone') as OverlayLike | undefined
-    const label = overlay?.labelAtClient?.(event.clientX, event.clientY) ?? null
-
     // A release still over this panel is a cancelled drag, not a drop on the
     // hive — otherwise letting go on the list would silently write.
     const el = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null
     if (el?.closest?.('hc-aggregate-index')) return
 
-    void this.#applyDrop(p.item, label)
+    // Commit from the RELEASE POINT. Pointermove is allowed to coalesce, so
+    // #dropTarget can legitimately describe the preview's preceding hex when
+    // a quick drag ends. Asking the overlay again here makes the cursor hex the
+    // one value shared by the temporary target and the persisted tile.
+    const exactTarget = overlay?.dropTargetAtClient?.(event.clientX, event.clientY) ?? null
+    const label = exactTarget?.label ?? overlay?.labelAtClient?.(event.clientX, event.clientY) ?? null
+
+    void this.#applyDrop(p.item, label, exactTarget)
   }
 
-  async #applyDrop(item: AggregateItem, label: string | null): Promise<void> {
+  async #applyDrop(item: AggregateItem, label: string | null, target: DropTarget | null): Promise<void> {
     const here = (this.#lineage?.explorerSegments?.() ?? []).map(String)
-    if (label) {
-      // ── Dropped ON a tile → the item becomes that tile's CONTEXT ──────────
-      //
-      // There is no room on an occupied hex, so this drop cannot mean "put it
-      // here"; it says something about the TILE — that answering questions
-      // about it means knowing about the dropped place too. Written as a live
-      // pointer (see `dropContextOnTile`), so the context follows the source
-      // rather than freezing a copy of it.
-      //
-      // This used to copy the item's KEYWORDS onto the tile (membership). That
-      // meaning moved out entirely rather than being kept behind a modifier:
-      // marks belong to the pheromone panel, where painting one is deliberate.
-      const attached = await dropContextOnTile(item, [...here, label])
-      await new hypercomb().act()
-      this.#toast(
-        attached ? 'aggregate.context.added.title' : 'aggregate.context.failed.title',
-        attached ? 'aggregate.context.added.message' : 'aggregate.context.failed.message',
-        { name: item.label, cell: label },
-        attached ? 'Context attached' : 'Could not attach',
-        attached
-          ? `"${item.label}" now informs questions about "${label}".`
-          : `"${item.label}" could not be attached to "${label}".`,
-      )
+    // `here` is the effective layer being painted (and therefore the write
+    // target). The address can differ at Home, where `/` may display a marked
+    // portal. Keep the raw address separately so Done returns to exactly the
+    // page the participant dropped from rather than to the effective source.
+    const origin = ((ioc()?.get('@hypercomb.social/Navigation') as NavigationLike | undefined)
+      ?.segmentsRaw?.() ?? here).map(String)
+    if (label || target?.occupied) {
+      EffectBus.emit('toast:show', {
+        type: 'info', title: 'Reference needs an empty hex',
+        message: 'Nothing changed — drop the Portal on an empty place in the hive.',
+      })
       return
     }
-    // ── Dropped on empty hive → THE NAME IS ASKED FOR ──────────────────────
-    //
-    // A reference mints a new LOCATION, and a location's name IS its address
-    // (`sha256(lineageKey(segments))`). So the name cannot be an afterthought:
-    // renaming later is a title decoration, which changes the reading and not
-    // the address, and dropping the same target twice under one parent would
-    // land on the same bag instead of making two references.
-    //
-    // Rather than grow a dialog mid-gesture, the drop COMPOSES the command that
-    // already does this correctly and hands it over with the name selected:
-    // Enter takes the target's own name, typing replaces it. One writer
-    // (`/reference <name> = <path>`, race-free create+decorate in essentials),
-    // one place where the name is decided, and the composable path stays open —
-    // whatever else you can type on that line still works.
-    //
-    // ── THE FILTER, AND WHY IT IS PRE-WRITTEN ────────────────────────────────
-    //
-    // A portal can demand pheromones of what it shows ("People, but only
-    // family"), and the line is where that is said: `+ family, @field-notes`,
-    // completed live from the pheromone and bouquet pools (see
-    // `ReferenceQueenBee.slashComplete`).
-    //
-    // A tail nobody knows about is a tail nobody types, so the BRUSH writes the
-    // first one. If the pheromone panel has marks in hand at the moment of the
-    // drop, they arrive already spelled out on the line — the same marks
-    // `applyCarried` lands on a batch, said out loud instead of applied
-    // invisibly. You can delete them; what you cannot do is fail to notice that
-    // the syntax exists.
-    const path = item.segments.map(s => String(s ?? '')).filter(Boolean).join('/')
-    const name = safeCellName(item.label) || (item.segments[item.segments.length - 1] ?? '')
-    if (!path || !name) return
-    const head = '/reference '
-    const marks = this.#brushMarks()
-    const tail = marks.length ? ` + ${marks.join(', ')}` : ''
-    EffectBus.emit('search:prefill', {
-      value: `${head}${name} = ${path}${tail}`,
-      focus: true,
-      // The NAME is selected, never the tail: naming is the decision the drop
-      // could not make for you, and the filter is one you have already made (or
-      // left empty). Enter accepts both.
-      select: [head.length, head.length + name.length],
-      // The dragged row's own face, in the glyph slot — so the line says WHAT
-      // it is about while you are busy deciding what to call it.
-      subject: { previewUrl: item.image, label: item.label, icon: 'conversion_path' },
+    if (!target) return
+    let targetIndex = target.index
+    if (targetIndex < 0) {
+      const items = (ioc()?.get('@diamondcoreprocessor.com/AxialService') as
+        { items?: Map<number, { q: number; r: number }> } | undefined)?.items
+      for (const [candidate, axial] of items ?? []) {
+        if (axial.q === target.q && axial.r === target.r) { targetIndex = candidate; break }
+      }
+    }
+    if (targetIndex < 0) {
+      EffectBus.emit('toast:show', {
+        type: 'info', title: 'Reference needs a hive hex',
+        message: 'Nothing changed — move the Portal onto a visible hex in the hive.',
+      })
+      return
+    }
+    EffectBus.emit('references:compose', {
+      portal: item,
+      parentSegments: here,
+      originSegments: origin,
+      createTile: true,
+      targetIndex,
+      targetQ: target.q,
+      targetR: target.r,
+      existingLabels: [...this.#renderedLabels],
     })
+  }
+
+  /** A pointer drag synthesizes a click after pointerup. The source-row click
+   *  guard cannot catch that click after the pointer has crossed onto canvas,
+   *  so swallow exactly that one event at capture phase. Without this an
+   *  occupied refusal also selects/opens the tile it correctly refused. */
+  #suppressTrailingClick(): void {
+    this.#trailingClickCleanup?.()
+    let armed = true
+    const cleanup = (): void => {
+      if (!armed) return
+      armed = false
+      window.removeEventListener('click', swallow, true)
+      window.removeEventListener('pointerdown', disarm, true)
+      if (this.#trailingClickCleanup === cleanup) this.#trailingClickCleanup = null
+    }
+    const swallow = (event: MouseEvent): void => {
+      if (!armed) return
+      cleanup()
+      event.stopImmediatePropagation()
+      event.preventDefault()
+    }
+    // Some engines synthesize the click in a later task. Keep the guard until
+    // that click arrives; if no click is synthesized, the participant's next
+    // real press disarms it before that new gesture can produce a click.
+    const disarm = (): void => cleanup()
+    window.addEventListener('click', swallow, true)
+    window.addEventListener('pointerdown', disarm, true)
+    this.#trailingClickCleanup = cleanup
   }
 
   // ── activation ──────────────────────────────────────────────────────────────
@@ -1087,6 +1170,13 @@ export class AggregateIndexComponent implements OnDestroy {
   #onLineage = (): void => {
     this.#dropStaged()
     this.#refresh()
+    const pick = this.referencePick()
+    if (pick && sameSegments(this.#segments(), pick.portal.segments)) {
+      // Navigation's guard disarms selection modes, so arm only after arrival.
+      setTimeout(() => {
+        ;(ioc()?.get('@diamondcoreprocessor.com/SelectModeDrone') as SelectModeLike | undefined)?.arm?.()
+      }, 0)
+    }
   }
 
   /** Arriving at a source's own location opens its index; leaving does NOT close

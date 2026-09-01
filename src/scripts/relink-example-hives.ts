@@ -10,6 +10,7 @@
 //   then: npx tsx scripts/publish-content.ts examples/<name> --r2 --no-relink
 
 import WebSocket from 'ws'
+import { hiveChildren } from './lib/hive-children.mjs'
 
 const BRIDGE_PORT = 2401
 const TIMEOUT = 180_000
@@ -31,27 +32,48 @@ function send(request: Record<string, unknown>): Promise<BridgeRes> {
   })
 }
 
-/** Child names via raw layer bytes — no recursive inflate. */
+// Relink is the ONE pass that legitimately re-SETs a children slot: it writes
+// the SAME names back so each parent re-resolves fresh child heads. That makes
+// it entirely hostage to the read — and the read was broken. It decoded child
+// names with `get-resource`, which CANNOT work: a parent's `children` slot
+// holds LAYER sigs, and a layer sig is not a resource. Every call returned
+// `[]`, so this script would have walked `/examples` writing `children: []`
+// into every node and then done the same to the HIVE ROOT.
+//
+// The shared reader (scripts/lib/hive-children.mjs) throws rather than
+// under-report, and `relink` below re-checks the count against the parent's
+// own slot before writing. A relink that would shrink a parent is a bug, not
+// an instruction.
+const hive = hiveChildren(send)
+
+/** Child NAMES, or `[]` when there is no layer at `segments` at all. */
 async function childrenOf(segments: string[]): Promise<string[]> {
-  const layer = await send({ op: 'layer-at', segments })
-  if (!layer.ok) return []
-  const sigs: string[] = Array.isArray(layer.data?.children) ? layer.data.children.map(String) : []
-  const names: string[] = []
-  for (const sig of sigs) {
-    const res = await send({ op: 'get-resource', sig })
-    if (!res.ok) continue
-    try {
-      const name = JSON.parse(res.data.text)?.name
-      if (typeof name === 'string' && name.trim()) names.push(name.trim())
-    } catch { /* skip unreadable child */ }
-  }
-  return names
+  return (await hive.childNamesOf(segments)) ?? []
+}
+
+/**
+ * Refuse any relink that would not write back exactly what the parent already
+ * holds. `slotCount` is the parent's own `children` array length; `names` is
+ * what we decoded from it. A relink is a pointer move — same names, same
+ * order, same count — so a mismatch means the READ failed, and writing the
+ * short list would delete the difference.
+ */
+function assertSameShape(segments: string[], slotCount: number, names: string[]): void {
+  if (names.length === slotCount) return
+  console.error(
+    `[relink] REFUSING to write /${segments.join('/') || '(root)'}: the layer holds ` +
+    `${slotCount} children but only ${names.length} names decoded. A relink writes the ` +
+    'slot back verbatim, so this would delete the difference. Fix the read, not this check.',
+  )
+  process.exit(1)
 }
 
 async function relink(segments: string[], expectedName: string): Promise<void> {
   const layer = await send({ op: 'layer-at', segments })
   if (!layer.ok) { console.error(`no layer at /${segments.join('/')}: ${layer.error}`); process.exit(1) }
+  const slotCount = Array.isArray(layer.data?.children) ? layer.data.children.length : 0
   const names = await childrenOf(segments)
+  assertSameShape(segments, slotCount, names)
   // Post-order: children first, so this node re-resolves fresh heads.
   for (const name of names) await relink([...segments, name], name)
   process.stdout.write(`[relink] /${segments.join('/') || ''} (${names.length} children) ... `)
@@ -65,7 +87,9 @@ async function main(): Promise<void> {
   // The root: same names, same order — pointer move only, no subtree descent.
   const rootLayer = await send({ op: 'layer-at', segments: [] })
   if (!rootLayer.ok) { console.error(`no root layer: ${rootLayer.error}`); process.exit(1) }
+  const rootSlot = Array.isArray(rootLayer.data?.children) ? rootLayer.data.children.length : 0
   const rootNames = await childrenOf([])
+  assertSameShape([], rootSlot, rootNames)
   process.stdout.write(`[relink] / (${rootNames.length} children) ... `)
   const res = await send({ op: 'update', segments: [], layer: { name: rootLayer.data?.name ?? '/', children: rootNames } })
   console.log(res.ok ? 'ok' : `FAIL: ${res.error}`)

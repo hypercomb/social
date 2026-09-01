@@ -15,17 +15,31 @@ ws.on('open',()=>ws.send(JSON.stringify({...req,id:'pr'+(++n)})));
 ws.on('message',(raw)=>{clearTimeout(t);const p=JSON.parse(String(raw));try{ws.close()}catch{};p.ok?res(p.data):rej(new Error(p.error))});
 ws.on('error',e=>{clearTimeout(t);rej(e)})});
 const bridge=async(req,tries=30)=>{for(let i=0;;i++){try{return await once(req)}catch(e){if(!/no renderer|timeout/i.test(e.message)||i>=tries)throw e;await new Promise(r=>setTimeout(r,4000))}}};
+
+// Child names come from the ONE shared implementation
+// (scripts/lib/hive-children.mjs). These loops decoded them with
+// `get-resource`, which CANNOT work: a parent's `children` slot holds LAYER
+// sigs, and a layer sig is not a resource, so every name came back null.
+// `bridge` here resolves to the payload and throws on error, so it is wrapped
+// into the {ok,data,error} envelope the module expects.
+const asSend = async (req) => {
+  try { return { ok: true, data: await bridge(req) } }
+  catch (e) { return { ok: false, error: e.message } }
+}
+let namesOfChildSigs
+async function bindHiveHelpers() {
+  const { hiveChildren } = await import('../lib/hive-children.mjs')
+  ;({ namesOfChildSigs } = hiveChildren(asSend))
+}
+
 async function childNames(segments){
   const L=await bridge({op:'layer-at',segments});
-  const out=[];
-  for(const sig of (L.children||[])){
-    try{const r=await bridge({op:'get-resource',sig});out.push(JSON.parse(r.text).name)}catch{out.push(null)}
-  }
-  return {layer:L,names:out};
+  return {layer:L,names:await namesOfChildSigs(L.children||[],'/'+segments.join('/'))};
 }
 const KEEP=process.argv.slice(2).filter(a=>!a.startsWith('--'));
 const DRY=process.argv.includes('--dry');
 (async()=>{
+  await bindHiveHelpers();
   const {names}=await childNames(['google-docs']);
   console.log('before:',names.length,'tiles');
   const unresolved=names.filter(x=>!x).length;

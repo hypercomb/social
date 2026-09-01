@@ -95,18 +95,8 @@ interface ControlItem {
   visibleWhen: 'always' | 'voiceSupported' | 'public' | 'hasSelection'
 }
 
-/** A row in the tour picker: the course, and the individual lessons under it.
- *  Read from the tutorial's own registry over IoC — see #openTourMenu. */
-interface TourCourse {
-  level: string
-  label: string
-  count: number
-  lessons: { id: string; label: string }[]
-}
-
 const CONTROL_REGISTRY: readonly ControlItem[] = [
   { id: 'back',         label: 'controls.back',         action: 'goBack',             visibleWhen: 'always' },
-  { id: 'dcp',          label: 'controls.dcp',          action: 'openDcp',            visibleWhen: 'always' },
   // Portals sits DIRECTLY after the installer: both are ways OUT of the current
   // page — DCP into other domains, Portals into the collections index — so they
   // read as one pair at the head of the rail, before the viewport controls.
@@ -114,10 +104,12 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // documentation/entrances-and-sets.md). Not among the header aggregates — it
   // manages referenced hives on different roots; it is not a launch group.
   { id: 'pools',        label: 'collections-landing.title', action: 'openPools',      visibleWhen: 'always' },
-  // The chat window boots open (the default companion view). Its PRIMARY
-  // switch is the leading icon of the command line's tools rail; this rail
-  // entry is the optional second opener, off by default like the magnifiers.
-  { id: 'chat',         label: 'controls.chat',         action: 'toggleChat',         visibleWhen: 'always' },
+  // NO CHAT ENTRY. This bar is how-you-SEE — fit, zoom, pin, fullscreen,
+  // orientation — and talking is not one of those; the assistant sits on the
+  // command line beside the box you type into (command-shell's
+  // chat-toggle-btn), reachable from anywhere with `c`. Leaving a registry
+  // entry here would put a second opener on a bar that no longer owns the
+  // act, in a place that says nothing about what it does.
   { id: 'fit',          label: 'controls.fit-content',  action: 'fitOrCenter',        visibleWhen: 'always' },
   { id: 'zoom-out',     label: 'controls.zoom-out',     action: 'zoomOut',            visibleWhen: 'always' },
   { id: 'zoom-in',      label: 'controls.zoom-in',      action: 'zoomIn',             visibleWhen: 'always' },
@@ -174,7 +166,7 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
 const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   // The magnifiers default OFF: the wheel owns zoom, and their verbs live in
   // the fit flyout now. Edit mode re-enables them for trackpad-less setups.
-  'back': true, 'dcp': true, 'fit': true, 'zoom-out': false, 'zoom-in': false, 'pin': true, 'fullscreen': true,
+  'back': true, 'fit': true, 'zoom-out': false, 'zoom-in': false, 'pin': true, 'fullscreen': true,
   'text-only': false,
   'pools': true,
   'chat': false,
@@ -431,6 +423,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #clipboardItems = signal<string[]>([])
   #roomOpen = signal(false)
   #beesVisible = signal(localStorage.getItem('hc:bees-visible') === 'true')
+  #agentsVisible = signal(localStorage.getItem('hc:agents-visible') !== 'false')
   #showHidden = signal(localStorage.getItem('hc:show-hidden') === '1')
   // Fit button is a two-state switch:
   //  - 'off'    (white): regular click performs a one-shot fit; nothing sticks
@@ -498,7 +491,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #clipboardPanelOpen = signal(false)
   // Whether the chat window is showing — its `chat:window-state` announcement,
   // so the launcher lights while the default view is up.
-  #chatOpen = signal(false)
   #hasSelection = signal(false)
   #textOnly = signal(false)
   #layoutPinned = signal(false)
@@ -585,9 +577,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  the rail) so it stays reachable no matter how long the icon list grows
    *  and is never user-mutable in edit mode. */
   readonly railControls = computed((): ControlItem[] => {
-    // On the left dock, pin is lifted out of the scrollable list and rendered
-    // as a fixed action at the very top (above home) — drop it here so it
-    // isn't duplicated. Every other dock/layout keeps pin inline in the list.
+    // On the left dock, pin is lifted into a structural position — drop its
+    // registry entry here so it cannot render twice. Every other dock/layout
+    // keeps the customizable entries inline in the list.
     const onLeftRail = this.#dockSide() === 'left' && !this.isMobile()
     return this.visibleControls().filter(ctrl =>
       ctrl.id !== 'back' && !(onLeftRail && ctrl.id === 'pin'),
@@ -739,7 +731,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Action dispatch map — routes control actions to existing methods. */
   readonly #actions: Record<string, (e?: MouseEvent) => void> = {
     goBack: () => this.goBack(),
-    openDcp: () => this.openDcp(),
     fitOrCenter: (e) => this.fitOrCenter(e!),
     zoomOut: () => this.zoomOut(),
     zoomIn: () => this.zoomIn(),
@@ -770,7 +761,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly isActive = (ctrl: ControlItem): boolean => {
     switch (ctrl.id) {
       case 'clipboard': return this.#clipboardPanelOpen()
-      case 'chat': return this.#chatOpen()
       case 'pin': return this.pinnedHere()
       case 'fit': return this.fitLocked()
       case 'text-only': return this.#textOnly()
@@ -798,7 +788,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly #rawIconSymbol = (ctrl: ControlItem): string => {
     switch (ctrl.id) {
       case 'back':         return 'arrow_back'
-      case 'dcp':          return 'dashboard_customize'
       case 'fit':          return 'center_focus_strong'
       // zoom_in/zoom_out is the lens-style magnifying glass (circle +
       // handle). Visually off-centre by default because the handle
@@ -970,6 +959,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #touchDragging = signal(false)
   #viewActiveUnsub: (() => void) | null = null
   #viewActive = signal(false)
+  #keepsControlsUnsub: (() => void) | null = null
+  #keepsControls = signal(false)
   readonly #IDLE_DELAY = 3000
 
   // ── swipe-to-go-back gesture ────────────────────────────
@@ -1052,11 +1043,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly shieldColor = computed(() => {
     const secret = this.#secret$().trim()
-    if (!secret) return 'rgba(245, 245, 245, 0.35)'
+    if (!secret) return 'rgba(var(--hc-chrome-ink), var(--hc-ink-a-faint))'
     const provider = get('@hypercomb.social/SecretStrengthProvider') as { evaluate: (s: string) => number } | undefined
     const score = provider?.evaluate(secret) ?? 0.5
     const hue = Math.round(160 + score * 30)
-    return `hsl(${hue}, 65%, 50%)`
+    return `hsl(${hue} 65% var(--hc-shield-l, 50%))`
   })
 
   readonly hasPrefixPath = computed(() => this.prefixPath().length > 0)
@@ -1309,9 +1300,32 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // deterministic vibrant color from tag name — no grays
     return tagNameToColor(name)
   }
-  readonly visible = computed(() => !this.#touchDragging() && !this.#viewActive())
+  // A view covering the canvas puts this bar away — that is what a takeover
+  // means. But a view can also cover the canvas and LEAVE THE BAR ITS EDGE:
+  // the chat window lays itself out against the same reservation every docked
+  // toolwindow does (`--hc-controls-<side>`), so there is a bar-shaped strip it
+  // never paints on. Hiding the bar there took away every control on it for as
+  // long as a conversation was open, and left only the bar's own edge line
+  // showing — a stray rule down the side of the window with nothing beside it.
+  //
+  // So the view says which kind it is, by holding `view:keeps-controls`
+  // (owner-counted, same as `view:active`). Nothing here knows any window's
+  // name; a view that leaves room keeps the bar, and any that does not still
+  // takes the screen whole.
+  readonly visible = computed(() =>
+    !this.#touchDragging() && (!this.#viewActive() || this.#keepsControls()))
+
+  /** Kept on screen WHILE a view covers the canvas — the bar is standing beside
+   *  a window that reserved its edge, not on the bare hive. Its own band
+   *  (59999–60003) sits under the docked-window band (100002+), which is right
+   *  when the bar is chrome ON the canvas and wrong here: the rail is visible
+   *  and pressable, but anything it opens anchored to itself would render
+   *  behind the very window it is standing beside. Lifted only for as long as
+   *  that is true. */
+  readonly overView = computed(() => this.#viewActive() && this.#keepsControls())
   readonly roomOpen = this.#roomOpen.asReadonly()
   readonly beesVisible = this.#beesVisible.asReadonly()
+  readonly agentsVisible = this.#agentsVisible.asReadonly()
   readonly showHidden = this.#showHidden.asReadonly()
   readonly voiceActive = signal(false)
   readonly voiceSupported = VoiceInputService.supported()
@@ -1337,7 +1351,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #textOnlyUnsub: (() => void) | null = null
   #clipboardAvailableUnsub: (() => void) | null = null
   #clipboardOpenUnsub: (() => void) | null = null
-  #chatOpenUnsub: (() => void) | null = null
+  #tutorialsOpenUnsub: (() => void) | null = null
   #atomizeModeUnsub: (() => void) | null = null
   #atomizeAtomsUnsub: (() => void) | null = null
   #atomizeStrategyUnsub: (() => void) | null = null
@@ -1355,6 +1369,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // reaches an icon. On the host (not the list) because the list is
     // created and destroyed by the mode/dock branches.
     this.#installClickSwallow()
+
+    // Participant chrome, restored before the renderer mounts. EffectBus
+    // replays this value to a late AgentBeeDrone, so boot never flashes agents
+    // that the participant has chosen to hide.
+    EffectBus.emit('render:set-agents-visible', { visible: this.#agentsVisible() })
 
     // Hand the zoom drone this page's partial-pin hold, so every fit path —
     // including resize refits that originate inside the drone — respects
@@ -1526,10 +1545,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       this.#clipboardPanelOpen.set(!!open)
     })
 
-    // Chat-window state light. Last-value replayed, so a bar mounting after
-    // the window's boot-open still shows it lit.
-    this.#chatOpenUnsub = EffectBus.on<{ open?: boolean }>('chat:window-state', ({ open }) => {
-      this.#chatOpen.set(!!open)
+    // The bee lights while the tutorials window is showing — the window
+    // announces itself, the same bar/panel pair every other icon uses.
+    this.#tutorialsOpenUnsub = EffectBus.on<{ open?: boolean }>('tutorials:state', ({ open }) => {
+      this.tutorialsOpen.set(!!open)
     })
 
     this.#moveModeUnsub = EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
@@ -1552,6 +1571,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
     this.#viewActiveUnsub = EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {
       this.#viewActive.set(active)
+    })
+
+    this.#keepsControlsUnsub = EffectBus.on<{ active: boolean }>('view:keeps-controls', ({ active }) => {
+      this.#keepsControls.set(active)
     })
 
     this.#tagsUnsub = EffectBus.on<{ tags: { name: string; count: number }[] }>('render:tags', ({ tags }) => {
@@ -1706,6 +1729,79 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // fallback value, which a `0px` would override.
     if (leftTop) root.style.setProperty('--hc-controls-left-top', leftTop)
     else root.style.removeProperty('--hc-controls-left-top')
+    this.#paintControlsEdge(side, left, right, stage?.offsetTop ?? 0)
+
+    // SAY THAT THE BAR HAS MOVED.
+    //
+    // Every docked tool window positions itself with a `calc()` over the two
+    // variables just published, so re-docking the bar SLIDES every one of them
+    // — same size, new place. A ResizeObserver reports size and nothing else,
+    // so each panel went on reserving the edge it measured at its old
+    // position: with the bar widened under it, a left-docked panel's true
+    // right edge moved from 375px to 481px while its reservation stayed at
+    // 375, and it covered 106px of the surface beside it.
+    //
+    // TRANSIENT, because this is a request and not a state. Replaying it to a
+    // panel that opens later would ask it to measure a second time for no
+    // reason — mounting already does that.
+    EffectBus.emitTransient('viewport:inset-poll', {})
+  }
+
+  // ── THE BAR'S OWN EDGE, WHICH NOTHING GETS TO COVER ─────────────────
+  //
+  // A docked bar closes itself against the canvas with a 1px border on its
+  // inner side, and that line kept disappearing the moment anything opened
+  // beside it. The border belongs to the rail, so it paints in the BAR's
+  // stacking context (z-index 59999) — and a tool window docking flush against
+  // it paints at 100002, with a drop shadow tens of pixels wide. The window
+  // never covers the bar's BOX (it starts at the reservation this same measure
+  // publishes), but its shadow washes straight over that one pixel, and a 1px
+  // line under a 60px blur is gone.
+  //
+  // Raising the whole bar over the panels would fix it and break more: things
+  // are meant to be able to cover the bar (a takeover, a modal). So only the
+  // LINE is lifted — one fixed, pointer-transparent pixel at the bar's inner
+  // edge, above the docked-window band. It is the bar's edge, drawn where
+  // nothing can put anything on top of it.
+  //
+  // Body-level rather than a pseudo-element for exactly that reason: a child
+  // of the rail shares the rail's stacking context and would be painted over
+  // with it.
+  #edgeLine: HTMLDivElement | null = null
+
+  #paintControlsEdge(side: 'left' | 'right' | null, left: number, right: number, top: number): void {
+    // Undocked, mobile, or torn down: no edge to draw. The floating pill closes
+    // itself with its own border on all four sides and reserves nothing.
+    // Nothing measured yet is the same as nothing docked: a line at -1px is a
+    // line off the screen, and one drawn before the rail has a width would sit
+    // wherever the fallback put it.
+    const edge = side === 'left' ? left : right
+    if (!side || this.isMobile() || edge <= 0) {
+      this.#edgeLine?.remove()
+      this.#edgeLine = null
+      return
+    }
+    const line = this.#edgeLine ?? document.createElement('div')
+    if (!this.#edgeLine) {
+      line.className = 'hc-controls-edge'
+      line.setAttribute('aria-hidden', 'true')
+      line.style.cssText =
+        'position:fixed;width:1px;pointer-events:none;z-index:100003;' +
+        'background:color-mix(in srgb, var(--md-outline-variant) 70%, transparent);'
+      document.body.appendChild(line)
+      this.#edgeLine = line
+    }
+    // The rail starts below the header and runs to the bottom; the same top the
+    // reservation publishes, so the line and the panels beside it agree.
+    line.style.top = `${Math.round(Math.max(0, top))}px`
+    line.style.bottom = '0'
+    if (side === 'left') {
+      line.style.left = `${Math.round(left) - 1}px`
+      line.style.right = 'auto'
+    } else {
+      line.style.right = `${Math.round(right) - 1}px`
+      line.style.left = 'auto'
+    }
   }
 
   /** Re-measure whenever the bar changes edge (or mobile flips) — a dock swap
@@ -1756,8 +1852,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     // The pickers' window listeners are capture-phase and live only while
-    // open — closing releases them.
-    this.closeTourMenu()
+    // open — closing releases them. (The tour picker is not among them any
+    // more: it is a tool window, which tears itself down.)
     this.closeFitMenu()
     this.closeHomeMenu()
     // Never leave the gate locked behind a torn-down bar — the pin would be
@@ -1774,6 +1870,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     document.documentElement.style.setProperty('--hc-controls-left', '0px')
     document.documentElement.style.setProperty('--hc-controls-right', '0px')
     document.documentElement.style.removeProperty('--hc-controls-left-top')
+    this.#edgeLine?.remove()
+    this.#edgeLine = null
     window.removeEventListener('resize', this.#onResize)
     document.removeEventListener('fullscreenchange', this.#fullscreenHandler)
     window.removeEventListener('pointermove', this.#onActivity)
@@ -1798,13 +1896,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#layoutModeUnsub?.()
     this.#touchDraggingUnsub?.()
     this.#viewActiveUnsub?.()
+    this.#keepsControlsUnsub?.()
     this.#beesUnsub?.()
     this.#voiceActiveUnsub?.()
     this.#showHiddenUnsub?.()
     this.#textOnlyUnsub?.()
     this.#clipboardAvailableUnsub?.()
     this.#clipboardOpenUnsub?.()
-    this.#chatOpenUnsub?.()
+    this.#tutorialsOpenUnsub?.()
     this.#tagsUnsub?.()
     this.#tagFilterUnsub?.()
     this.#hoverTagsUnsub?.()
@@ -1877,10 +1976,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // something else cannot cost you your home. It survives a refresh, because
   // the focus is the point and a reload must not cost you it either.
   //
-  // Ctrl/⌘+click still opens the RECENT list — travelling somewhere you were a
-  // moment ago is a different act from choosing where home is, and only the
-  // second one is a decision. The root is never stranded: the leading
-  // breadcrumb crumb goes there, and it is the last row of that menu.
+  // Ctrl/⌘+click marks the place you are standing as Home. Repeating the
+  // gesture there releases it. The one-slot mark is persisted by
+  // RecentPortalsStore, so this is both a toggle and sticky across reloads.
 
   private get recentPortals(): RecentPortalsStore | undefined {
     return get('@hypercomb.social/RecentPortalsStore') as RecentPortalsStore | undefined
@@ -1909,12 +2007,24 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     return portal.label || '/' + portal.segments.join('/')
   })
 
-  /** Home. Plain click flies to the marked portal (hive root until one is
-   *  marked); Ctrl/⌘+click opens the recent list, so somewhere you were a
-   *  moment ago is one click away instead of a walk back down the tree. */
+  /** Home. Plain click flies to the marked location (hive root until one is
+   *  marked). Ctrl/⌘+click toggles the CURRENT location as Home. Home-setting
+   *  belongs on the global control because it works at every lineage, not only
+   *  for rows which happen to be listed in the Portals window. */
   readonly goHome = (event?: MouseEvent): void => {
     if (event && (event.ctrlKey || event.metaKey)) {
-      this.#openHomeMenu(event)
+      event.preventDefault()
+      event.stopPropagation()
+      this.closeHomeMenu()
+      const segments = this.navigation.segmentsRaw()
+      if (segments.length === 0) {
+        // The unmarked state already means the hive root; Ctrl+clicking Home at
+        // root therefore releases any saved override instead of persisting a
+        // redundant empty-path pin.
+        this.recentPortals?.unpin()
+      } else {
+        this.recentPortals?.togglePin(segments[segments.length - 1], segments)
+      }
       return
     }
     this.closeHomeMenu()
@@ -2042,153 +2152,21 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.closeHomeMenu()
   }
 
-  /** Start the guided beeing tour — the same entry point /tutorial uses, so
-   *  the rail's bee and the slash behaviour run one identical tour. The drone
-   *  ignores a second start while one is already running.
+  /** THE BEE OPENS THE ROSTER.
    *
-   *  CTRL (or ⌘) + click opens the COURSE PICKER instead: the tour is four
-   *  courses now (starter, then beginner → intermediate → expert), and the
-   *  deeper ones need a way in that isn't typing a slash command. Plain click
-   *  keeps meaning "just show me" — the starter tour, unchanged. */
-  readonly startTutorial = (event?: MouseEvent): void => {
-    if (event && (event.ctrlKey || event.metaKey)) {
-      this.#openTourMenu(event)
-      return
-    }
-    this.closeTourMenu()
-    EffectBus.emit('tutorial:start', {})
+   *  It used to fly the starter course on a plain click and open a
+   *  fixed-position course flyout on Ctrl+click — two doors onto one feature,
+   *  and the only one that listed the courses was the one nobody found. The
+   *  roster is a tool window now (hc-tutorials-window), which is the same
+   *  thing `/tutorial` opens, so the icon and the command are one path again.
+   *  Its first row is Continue: one more click still flies. */
+  readonly startTutorial = (): void => {
+    EffectBus.emit('tutorials:toggle', {})
   }
 
-  // ── the course picker ─────────────────────────────────
-  //
-  // Fed by the tutorial's OWN lesson registry over IoC (never imported — a
-  // shell surface must not depend on essentials), so the list is whatever
-  // courses this build actually ships: a level with no lessons is not offered,
-  // and a module that registers its own lessons shows up here for free.
-
-  readonly tourMenuOpen = signal(false)
-  readonly tourMenuPos = signal<{ x: number; y: number; flip: boolean }>({ x: 0, y: 0, flip: false })
-  readonly tourCourses = signal<TourCourse[]>([])
-
-  /** Which courses are showing their lessons. The picker is two levels: the
-   *  row flies the whole course, the caret opens the individual lessons — a
-   *  lesson is an independent piece and has to be startable on its own. The
-   *  deepest course opens EXPANDED, because that is the one whose lessons are
-   *  looked for by name (one per window). */
-  readonly tourExpanded = signal<readonly string[]>([])
-
-  #openTourMenu(event: MouseEvent): void {
-    const registry = get<{
-      levels?: () => string[]
-      course?: (l: string) => { id: string; title: string }[]
-    }>('@diamondcoreprocessor.com/TutorialLessonRegistry')
-    const levels = registry?.levels?.() ?? []
-    if (levels.length === 0) {
-      // No roster (the tutorial module isn't loaded) — fall back to the tour
-      // rather than opening an empty menu.
-      EffectBus.emit('tutorial:start', {})
-      return
-    }
-    this.tourCourses.set(levels.map(level => {
-      const lessons = registry?.course?.(level) ?? []
-      return {
-        level,
-        label: this.#tourLabel(level),
-        count: lessons.length,
-        lessons: lessons.map(l => ({ id: l.id, label: this.#lessonLabel(l) })),
-      }
-    }))
-    this.tourExpanded.set(levels.length ? [levels[levels.length - 1]] : [])
-
-    // Fixed positioning off the button's own rect: the rail is a scrolling,
-    // overflow-hidden box, so a menu rendered inside it would be clipped.
-    const rect = (event.currentTarget as HTMLElement | null)?.getBoundingClientRect()
-    const width = 232
-    const x = rect ? rect.right + 10 : 12
-    const flip = x + width > window.innerWidth - 8
-    // Keep the whole menu on screen. It is two levels deep now, so its height
-    // is the CSS cap (min(70vh, 620px)) rather than a few rows — clamping to a
-    // fixed 260 would have let the expanded course run off the bottom.
-    const maxHeight = Math.min(window.innerHeight * 0.7, 620)
-    const menuX = flip ? Math.max(8, (rect?.left ?? 12) - width - 10) : x
-    this.tourMenuPos.set({
-      x: menuX,
-      y: Math.min(Math.max(8, rect?.top ?? 12), Math.max(8, window.innerHeight - maxHeight - 8)),
-      flip,
-    })
-    this.#clearLaneForMenu(menuX)
-    this.tourMenuOpen.set(true)
-    window.addEventListener('pointerdown', this.#onTourMenuOutside, true)
-    window.addEventListener('keydown', this.#onTourMenuKey, true)
-  }
-
-  readonly closeTourMenu = (): void => {
-    this.#restoreLane()
-    if (!this.tourMenuOpen()) return
-    this.tourMenuOpen.set(false)
-    window.removeEventListener('pointerdown', this.#onTourMenuOutside, true)
-    window.removeEventListener('keydown', this.#onTourMenuKey, true)
-  }
-
-  /** Fly the picked course. Same effect the slash behaviour raises, so the
-   *  picker and `/tutorial <level>` are one path. */
-  readonly pickTour = (level: string): void => {
-    this.closeTourMenu()
-    EffectBus.emit('tutorial:start', { level })
-  }
-
-  /** Fly ONE lesson. Same effect `/tutorial <lesson>` raises — a lesson is
-   *  independent by construction (it makes whatever it needs on the practice
-   *  page), so starting it alone is a first-class way in, not a shortcut. */
-  readonly pickLesson = (id: string): void => {
-    this.closeTourMenu()
-    EffectBus.emit('tutorial:start', { lesson: id })
-  }
-
-  readonly toggleTourCourse = (level: string, event?: MouseEvent): void => {
-    event?.stopPropagation()
-    const open = this.tourExpanded()
-    this.tourExpanded.set(open.includes(level)
-      ? open.filter(l => l !== level)
-      : [...open, level])
-  }
-
-  readonly isTourExpanded = (level: string): boolean => this.tourExpanded().includes(level)
-
-  /** A lesson's own title, localized. `tutorial.lesson.<id>` if the catalog
-   *  carries it, otherwise the title the lesson declared in code. */
-  #lessonLabel(lesson: { id: string; title: string }): string {
-    const key = `tutorial.lesson.${lesson.id}`
-    const i18n = get<{ t?: (k: string) => string }>('@hypercomb.social/I18n')
-    const resolved = i18n?.t?.(key)
-    return resolved && resolved !== key ? resolved : lesson.title
-  }
-
-  #tourLabel(level: string): string {
-    const fallback: Record<string, string> = {
-      starter: 'Starter tour', beginner: 'Beginner',
-      intermediate: 'Intermediate', expert: 'Expert',
-    }
-    const key = `tutorial.level.${level}`
-    const i18n = get<{ t?: (k: string) => string }>('@hypercomb.social/I18n')
-    const resolved = i18n?.t?.(key)
-    return resolved && resolved !== key ? resolved : (fallback[level] ?? level)
-  }
-
-  readonly #onTourMenuOutside = (event: PointerEvent): void => {
-    const target = event.target as HTMLElement | null
-    if (target?.closest?.('.tour-menu, .rail-tutorial')) return
-    this.closeTourMenu()
-  }
-
-  readonly #onTourMenuKey = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape') return
-    // Take Escape before the global cascade — the menu is the innermost thing
-    // open, so it is what Escape must close.
-    event.stopPropagation()
-    event.preventDefault()
-    this.closeTourMenu()
-  }
+  /** Lit while the tutorials window is showing — the window announces itself
+   *  (`tutorials:state`), the same shape every other panel/bar pair uses. */
+  readonly tutorialsOpen = signal(false)
 
   // ── fit flyout ────────────────────────────────────────
   //
@@ -2278,10 +2256,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   // ── view actions ──────────────────────────────────────
-
-  readonly openDcp = (): void => {
-    window.dispatchEvent(new CustomEvent('portal:open', { detail: { target: 'dcp' } }))
-  }
 
   readonly centerView = (): void => {
     const host = this.pixiHost
@@ -2841,6 +2815,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#beesVisible.set(next)
     localStorage.setItem('hc:bees-visible', String(next))
     EffectBus.emit('render:set-bees-visible', { visible: next })
+  }
+
+  readonly toggleAgents = (): void => {
+    const next = !this.#agentsVisible()
+    this.#agentsVisible.set(next)
+    localStorage.setItem('hc:agents-visible', String(next))
+    EffectBus.emit('render:set-agents-visible', { visible: next })
   }
 
   // ── show hidden items ────────────────────────────────

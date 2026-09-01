@@ -15,6 +15,33 @@ export class Navigation extends hypercomb {
   private listening = false
 
   // ----------------------------------
+  // URL base (published visitor)
+  //
+  // On a published site the subdomain NAMES the creation, so the URL omits
+  // the creation's root segment(s): meetup.example.com/ IS /meetup. Both
+  // halves live here — parsePath PREPENDS the base when reading, the
+  // writers STRIP it when writing — so navigation is symmetric and no
+  // shell has to monkey-patch history.pushState (a one-way strip made
+  // go() a no-op: it wrote '/', then re-parsed '/' back to the hive root).
+  // ----------------------------------
+
+  #urlBase: string[] = []
+
+  public setUrlBase = (segments: readonly string[]): void => {
+    this.#urlBase = segments.map(this.cleanSegment).filter(Boolean)
+  }
+
+  /** The written URL for `clean`: the base prefix is implied by the host,
+   *  so it never appears in the path. Non-matching paths pass through —
+   *  navigating outside the base keeps an explicit URL. */
+  #stripUrlBase = (clean: readonly string[]): readonly string[] => {
+    const base = this.#urlBase
+    if (base.length === 0 || clean.length < base.length) return clean
+    const matches = base.every((b, i) => this.cleanSegment(clean[i] ?? '') === b)
+    return matches ? clean.slice(base.length) : clean
+  }
+
+  // ----------------------------------
   // reads
   // ----------------------------------
 
@@ -60,7 +87,10 @@ export class Navigation extends hypercomb {
   // Parse current pathname into { pathSegments (no bracket), bracket (names or null) }.
   // Query-string form wins; falls back to legacy path-tail form.
   private readonly parsePath = (): { pathSegments: string[]; bracket: string[] | null } => {
-    const raw = window.location.pathname.split('/').filter(Boolean)
+    // The base is host-implied, never present in the pathname — prepend it
+    // so every reader sees the full lineage. Bracket detection still works:
+    // a bracket tail stays the LAST element after the prefix.
+    const raw = [...this.#urlBase, ...window.location.pathname.split('/').filter(Boolean)]
 
     // Query-string form: pathname stays as-is, bracket comes from `?[...]`.
     const queryBracket = this.parseQueryBracket()
@@ -133,7 +163,10 @@ export class Navigation extends hypercomb {
     // so we don't end up doubling the bracket each time the selection is
     // re-written.
     const { pathSegments } = this.parsePath()
-    const basePath = pathSegments.length === 0 ? '' : '/' + pathSegments.join('/')
+    // parsePath prepends the host-implied URL base — strip it again for the
+    // written form, or every selection write would resurface the base path.
+    const writable = this.#stripUrlBase(pathSegments)
+    const basePath = writable.length === 0 ? '' : '/' + writable.join('/')
 
     // Search may legitimately carry app params unrelated to selection.
     // Drop it only if it's the `?[…]` legacy form; preserve otherwise.
@@ -196,7 +229,7 @@ export class Navigation extends hypercomb {
 
   public go = (segments: readonly string[]): void => {
     const clean = segments.map(this.cleanSegment).filter(Boolean)
-    const path = '/' + clean.join('/')
+    const path = '/' + this.#stripUrlBase(clean).join('/')
     const hash = window.location.hash ?? ''
 
     window.history.pushState({}, '', path + hash)
@@ -205,7 +238,7 @@ export class Navigation extends hypercomb {
 
   public replace = (segments: readonly string[]): void => {
     const clean = segments.map(this.cleanSegment).filter(Boolean)
-    const path = '/' + clean.join('/')
+    const path = '/' + this.#stripUrlBase(clean).join('/')
     const hash = window.location.hash ?? ''
 
     window.history.replaceState({}, '', path + hash)
@@ -218,7 +251,7 @@ export class Navigation extends hypercomb {
 
   public goRaw = (segments: readonly string[]): void => {
     const clean = segments.map(s => (s ?? '').trim()).filter(Boolean)
-    const path = '/' + clean.map(encodeURIComponent).join('/')
+    const path = '/' + this.#stripUrlBase(clean).map(encodeURIComponent).join('/')
     const hash = window.location.hash ?? ''
 
     window.history.pushState({}, '', path + hash)
@@ -227,7 +260,7 @@ export class Navigation extends hypercomb {
 
   public replaceRaw = (segments: readonly string[]): void => {
     const clean = segments.map(s => (s ?? '').trim()).filter(Boolean)
-    const path = '/' + clean.map(encodeURIComponent).join('/')
+    const path = '/' + this.#stripUrlBase(clean).map(encodeURIComponent).join('/')
     const hash = window.location.hash ?? ''
 
     window.history.replaceState({}, '', path + hash)

@@ -10,16 +10,19 @@ License: CC BY-SA 4.0.
 
 ## TL;DR
 
-The network is **four orthogonal roles** any domain can play:
+The network has **five orthogonal roles** any domain can play:
 
 | Role | What it does | Trust level |
 |---|---|---|
+| **Application/Core** | Resolves and expresses signed creations through Hypercomb Core | Required for every Hypercomb application host; authority is limited by its capability profile |
 | **Installer** | Serves the DCP Angular app (the installer UI) | Single canonical build; many possible mirrors; sig-verified |
 | **Mesh** | Runs a WSS relay for swarm meetings; passes layer-sig meta plus a bounded ≤256 KB image-preview channel | Per-operator; signed events; sha256 gates every preview byte, so it can't forge durable content |
 | **Storage** | Serves `/<sig>` byte content over HTTP | Single-tenant per host; sha256 makes tampering impossible |
 | **Identity** | DNS + pubkey attestation; community-graph vertex | Per-domain; community-vouched |
 
-Domains pick whichever subset of roles they want. **Storage and mesh are
+Domains pick whichever subset of infrastructure roles they want, but a domain
+is a Hypercomb application host only when it performs the Application/Core
+role. A `GET /<sig>` endpoint without Core is a content mirror. **Storage and mesh are
 operator-controlled. Installer is canonical (or a sig-verified mirror).
 Identity is the operator's domain itself.**
 
@@ -30,7 +33,20 @@ canonical build signature.
 
 ---
 
-## The four roles, in detail
+## The five roles, in detail
+
+### Application/Core
+
+To participate in Hypercomb's Tree of Life, a node must have Core. Core is the
+minimum machinery that resolves and verifies signed trees, interprets their
+meaning, registers beehaviors and expresses permitted effects. Stores hold the
+DNA and relays carry signals; neither is a participant until a Core acts on
+those signatures.
+
+Every Hypercomb application domain therefore boots the same Core with a scoped
+capability profile. Personal, published, provider and DCP hosts differ in
+authority, not in their tree model. See
+[tree-of-life-core.md](tree-of-life-core.md) for the normative doctrine.
 
 ### Installer (code)
 
@@ -303,7 +319,7 @@ The complete trip from "click adopt on a peer's tile in a swarm" to
    window.dispatchEvent('portal:open', { branchSig, at, publisher-domain })
 
 4. PORTAL OVERLAY opens an iframe to the canonical installer
-   URL: https://diamondcoreprocessor.com/#branch=<sig>&at=<path>&from=<domain>
+   URL: https://#branch=<sig>&at=<path>&from=<domain>
    ─ canonical = the project's published installer
    ─ buildSig verifiable via /.well-known/hypercomb-installer.json
 
@@ -487,7 +503,7 @@ What it does:
 **To verify your mirror serves canonical-equivalent code:**
 
 ```bash
-curl https://diamondcoreprocessor.com/.well-known/hypercomb-installer.json
+curl https://.well-known/hypercomb-installer.json
 curl https://your-mirror.dev/.well-known/hypercomb-installer.json
 # Compare buildSig fields — if equal, your mirror is byte-equal canonical.
 ```

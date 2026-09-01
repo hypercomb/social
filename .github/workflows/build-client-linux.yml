@@ -1,0 +1,330 @@
+name: Build Client (Linux)
+
+# The Linux twin of build-client-windows.yml and build-client-macos.yml — and
+# the platform that matters most for HOSTING, because a server is where a hive
+# is served from. Two things come out of this run:
+#
+#   1. the desktop client (.deb and .AppImage), same as the other two;
+#   2. `hypercomb-serve`, the headless host — one static-ish binary that serves
+#      a hive over HTTP with no window, no runtime and no config file.
+#
+# It also runs the HOST CONFORMANCE check: it starts the headless host against
+# a fresh hive and the staged shim shell, and holds it to
+# `hypercomb-shim/host/check-host.mjs` — the same eleven-point contract every
+# other Hypercomb host is held to. That check is the acceptance test for the
+# serving crate, and it belongs here rather than in a doc.
+#
+# It does not deploy anything. The bundles land as run artifacts.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [development, main]
+    paths:
+      - 'src/hypercomb-client/**'
+      # This workflow builds the client out of the WHOLE monorepo and bakes
+      # hypercomb-web's dist into it, and `app/frontend/` is gitignored — so
+      # every package that build compiles is a client path no client path can
+      # see. Web alone is not enough: an essentials bee, a shared service or a
+      # core primitive changes the app that gets launched just as surely, and
+      # none of them triggered a build. That is how the installed exe drifted
+      # 248 commits stale once already, and why "it works on the web but not
+      # in the app" kept being the same bug wearing a different feature.
+      - 'src/hypercomb-web/**'
+      - 'src/hypercomb-shared/**'
+      - 'src/hypercomb-essentials/**'
+      - 'src/hypercomb-core/**'
+      - 'src/hypercomb-runtime/**'
+      - 'src/hypercomb-shim/**'
+      - 'src/package.json'
+      - 'src/package-lock.json'
+      - '.github/workflows/build-client-linux.yml'
+
+concurrency:
+  group: client-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: Build and test the Linux client
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          lfs: false
+
+      # WebKitGTK is the engine here, the way WebView2 is on Windows. Unlike
+      # WebView2 it is not preinstalled, and unlike macOS's WebKit it is
+      # versioned in the distro: Ubuntu 24.04 carries 4.1, and Tauri 2 targets
+      # exactly that. A 4.0 image would fail at link time, which is the good
+      # failure — the bad one is building against a mismatched soup version and
+      # discovering it in a blank window.
+      - name: Install the system libraries Tauri links against
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            build-essential \
+            patchelf \
+            file \
+            wget \
+            curl \
+            xvfb
+
+      - name: Use Node 24.14.1
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.1'
+          cache: 'npm'
+          cache-dependency-path: src/package-lock.json
+
+      - name: Install the Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src/hypercomb-client/target
+          key: hc-client-linux-${{ hashFiles('src/hypercomb-client/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            hc-client-linux-${{ hashFiles('src/hypercomb-client/Cargo.lock') }}-
+            hc-client-linux-
+
+      # ── The native side, first ────────────────────────────────────────────
+      #
+      # Ahead of the ~10 minutes of Angular below, for the reason the Windows
+      # twin gives: if the store, the protocol or the host behaves differently
+      # here, that is the finding, and waiting on a frontend build to hear it
+      # wastes the run.
+      #
+      # The LIBRARY crates only — the app crate cannot compile until the
+      # frontend is baked, because `generate_context!` reads frontendDist at
+      # macro-expansion time.
+      - name: Conformance and unit tests
+        working-directory: src/hypercomb-client
+        run: cargo test --release -p hypercomb-protocol -p hypercomb-store -p hypercomb-host -p hypercomb-serve
+
+      - name: Lint the library crates
+        working-directory: src/hypercomb-client
+        run: |
+          cargo clippy --release --all-targets \
+            -p hypercomb-protocol -p hypercomb-store -p hypercomb-host -p hypercomb-serve -- -D warnings
+
+      # ── The shell a VISITOR boots ─────────────────────────────────────────
+      #
+      # Not the app's own frontend — a different artifact for a different
+      # reader. See scripts/stage-host-shell.mjs.
+      - name: Install workspace dependencies
+        working-directory: src
+        run: npm install
+
+      - name: Build hypercomb-core
+        working-directory: src
+        run: npm run build:core
+
+      - name: Build essentials modules
+        working-directory: src
+        run: npm run build:essentials
+
+      - name: Build the shim
+        working-directory: src
+        run: npm run build:shim
+
+      - name: Stage the host shell into the client
+        working-directory: src
+        run: node hypercomb-client/scripts/stage-host-shell.mjs
+
+      # ── DOES IT ACTUALLY HOST? ────────────────────────────────────────────
+      #
+      # The headless binary, a fresh empty hive, the staged shell, and the
+      # checker. Eleven rules, each of which fails silently and expensively in
+      # production: a swallowed signature path makes an origin's heap invisible
+      # to every node replicating from it; a missing CORS header looks exactly
+      # like a host that publishes nothing; a hard-cached service worker
+      # strands clients on an old runtime with no way back.
+      #
+      # A HARD GATE. This is the whole point of the crate, and a host that
+      # fails the contract is not a host.
+      - name: Build the headless host
+        working-directory: src/hypercomb-client
+        run: cargo build --release -p hypercomb-serve --bin hypercomb-serve
+
+      - name: Host conformance — check-host.mjs against the real binary
+        working-directory: src
+        run: |
+          set -euo pipefail
+          HIVE="$(mktemp -d)"
+          ./hypercomb-client/target/release/hypercomb-serve \
+            --hive "$HIVE" \
+            --shell hypercomb-client/app/host-shell \
+            --port 4271 --local &
+          HOST_PID=$!
+          trap 'kill $HOST_PID 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:4271/pin >/dev/null 2>&1 && break
+            sleep 1
+          done
+          node hypercomb-shim/host/check-host.mjs http://localhost:4271
+
+      # ── The frontend the window shows ─────────────────────────────────────
+
+      - name: Build the vendored runtimes
+        working-directory: src/hypercomb-web
+        run: npm run runtime
+
+      - name: Build hypercomb-web
+        working-directory: src
+        run: npm run build:web
+
+      - name: Bake the client frontend
+        working-directory: src
+        run: node hypercomb-client/scripts/bake-frontend.mjs
+
+      - name: Verify the baked frontend
+        working-directory: src/hypercomb-client/app/frontend
+        run: |
+          set -euo pipefail
+          test -f index.html || { echo "MISSING index.html"; exit 1; }
+          grep -q '"importmap"' index.html || { echo "import map was not baked in"; exit 1; }
+          test -f content/manifest.json || { echo "MISSING content/manifest.json"; exit 1; }
+          SIGS=$(find content -maxdepth 1 -type f -name '????????????????????????????????????????????????????????????????' | wc -l)
+          echo "OK: import map baked; $SIGS flat content files."
+          test "$SIGS" -gt 0 || { echo "no content shipped"; exit 1; }
+
+      - name: Lint the app crate
+        working-directory: src/hypercomb-client
+        run: cargo clippy --release --all-targets -p hypercomb-client -- -D warnings
+
+      # ── Bundle ────────────────────────────────────────────────────────────
+      #
+      # No signing on this platform: a .deb is verified by the repository it
+      # came from, and an AppImage by whatever the user chooses to trust. There
+      # is no store-level gate to satisfy, so unlike the other two workflows
+      # there is no certificate branch here.
+      #
+      # Run from `app/`, which holds both tauri.conf.json and the crate's
+      # Cargo.toml — the CLI resolves the project from its working directory
+      # and merges the platform overlay (tauri.linux.conf.json) from there.
+      - name: Build the app bundle
+        id: bundle
+        working-directory: src/hypercomb-client/app
+        run: npx --yes @tauri-apps/cli@^2 build
+
+      - name: Report what was produced
+        if: always()
+        working-directory: src/hypercomb-client
+        run: |
+          find target -type f \( -name '*.deb' -o -name '*.AppImage' \) | sed 's/^/  /' || true
+
+      # ── Does it BOOT? ─────────────────────────────────────────────────────
+      #
+      # A headless runner has no display, so the window opens under Xvfb. The
+      # two WEBKIT_ variables are not superstition: WebKitGTK's compositing and
+      # dmabuf paths both assume a GPU, and without them the window comes up
+      # blank or the process dies in the driver — which would read here as "the
+      # shell is broken" rather than "there is no GPU".
+      #
+      # Reaching Angular's first paint means the import map resolved, the
+      # dependencies loaded and the shell rendered: the whole chain, asserted
+      # from outside the window, which is the only place a runner can look.
+      - name: Smoke test — launch and confirm first paint
+        id: smoke
+        working-directory: src/hypercomb-client
+        env:
+          WEBKIT_DISABLE_COMPOSITING_MODE: '1'
+          WEBKIT_DISABLE_DMABUF_RENDERER: '1'
+        run: |
+          set -uo pipefail
+          BIN=target/release/hypercomb-client
+          test -x "$BIN" || { echo "no client binary was built"; exit 1; }
+          LOG="$HOME/.local/share/io.hypercomb.client/hive/renderer.log"
+          rm -f "$LOG"
+
+          xvfb-run -a "$BIN" > launch-stdout.txt 2> launch-stderr.txt &
+          APP_PID=$!
+
+          PAINTED=0
+          for _ in $(seq 1 60); do
+            if [ -f "$LOG" ] && grep -q 'Angular first paint' "$LOG"; then PAINTED=1; break; fi
+            if ! kill -0 $APP_PID 2>/dev/null; then echo "process exited early"; break; fi
+            sleep 5
+          done
+          kill $APP_PID 2>/dev/null || true
+
+          echo "───────── renderer.log ─────────"
+          cat "$LOG" 2>/dev/null || echo "(no renderer log was written)"
+          echo "───────── stdout ─────────"
+          cat launch-stdout.txt || true
+          echo "───────── stderr ─────────"
+          cat launch-stderr.txt || true
+          echo "──────────────────────────"
+
+          if [ "$PAINTED" != "1" ]; then
+            echo "DID NOT REACH FIRST PAINT — the milestone trace above shows how far it got."
+            exit 1
+          fi
+          if grep -q '\[renderer:csp\]' "$LOG"; then
+            echo "::warning::CSP violations were reported — see the csp lines above."
+          fi
+          echo "PASS: the Linux client booted to Angular first paint."
+
+      - name: Upload the client
+        if: always() && steps.bundle.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: hypercomb-client-linux-x64
+          path: |
+            src/hypercomb-client/target/release/bundle/deb/*.deb
+            src/hypercomb-client/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+
+      # The headless host is the artifact a SERVER wants, and it is useless
+      # inside a .deb built for a desktop. Shipped on its own, next to the
+      # shim build it has to be pointed at.
+      - name: Upload the headless host
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hypercomb-serve-linux-x64
+          path: src/hypercomb-client/target/release/hypercomb-serve
+          if-no-files-found: ignore
+
+      - name: Upload renderer diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          path: ~/.local/share/io.hypercomb.client/**/renderer.log
+          name: renderer-log-linux
+          if-no-files-found: ignore
+
+      - name: Summarise
+        if: always()
+        run: |
+          if [ "${{ steps.smoke.outcome }}" = "success" ]; then
+            echo "### Linux client: booted to first paint" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### Linux client: BUILT, but did not confirm first paint" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The bundles are attached as artifacts. Check the smoke-test step's" >> $GITHUB_STEP_SUMMARY
+            echo "milestone trace to see how far boot got before it stalled." >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`hypercomb-serve\` (the headless host) is attached separately — it is what" >> $GITHUB_STEP_SUMMARY
+          echo "a server runs. Point it at a hive and a shim build:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "    hypercomb-serve --hive /var/lib/hypercomb/hive --shell /srv/hypercomb/shell" >> $GITHUB_STEP_SUMMARY
