@@ -93,6 +93,9 @@ const SHOW_HIDDEN_KEY = 'hc:show-hidden'
 export class VerifyHistoryQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'verify-history'
+  // A QA harness that prints console.tables — meaningless to a participant,
+  // so it never surfaces in autocomplete. Still invokable typed in full.
+  override slashHidden = true
   override description =
     "Walk the current location's history forward and backward; verify undo and redo render the same tile count at every position"
   override examples = [

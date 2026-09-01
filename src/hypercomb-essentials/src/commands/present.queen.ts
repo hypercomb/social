@@ -45,10 +45,6 @@ import {
 
 export { SLIDE_KIND, SITE_ARTIFACT_KIND, LEGACY_DECK_KIND }
 
-/** RETIRED alias. `visual:diagram:deck` is read-only legacy — kept exported so
- *  nothing that imported it breaks, never written. */
-export const DECK_KIND = LEGACY_DECK_KIND
-
 const get = <T,>(key: string): T | undefined => (window as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
 
 const ON_KEYWORDS = new Set(['on', 'open', 'go', 'play', 'view', 'present'])
@@ -205,6 +201,10 @@ window.ioc.register('@diamondcoreprocessor.com/PresentQueenBee', _present)
       toggleIcon: 'slideshow',
       behavior: 'render',
       decorationKind: SLIDE_KIND,
+      // SITE_ARTIFACT_KIND is also claimed by lightbox's alsoKinds, and
+      // byDecorationKind answers first-registered — lightbox, by import
+      // order in side-effects.ts. Deliberate: both toggles surface via
+      // presence checks, so the winner only names the row.
       alsoKinds: [SITE_ARTIFACT_KIND],
       legacyKinds: [LEGACY_DECK_KIND],
       labelKey: 'view.slides',

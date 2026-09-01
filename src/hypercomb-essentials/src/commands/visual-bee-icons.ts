@@ -22,11 +22,9 @@
 // ── Visibility predicate ──────────────────────────────────────────────
 //
 // `visibleWhen` is synchronous. The renderer can't await an OPFS read
-// for each tile each frame. So we pre-compute a per-cell map of which
-// decoration kinds are present locally, updated when the layer changes.
-// Today we return `true` unconditionally as a scaffold — the per-cell
-// kind index is the natural next step (mirror the substrate
-// `hasSubstrate` pattern; see substrate.drone.ts).
+// for each tile each frame, so the per-cell decoration-kind index
+// (decoration-kind-index.ts) answers presence from memory, updated
+// reactively as layers change.
 //
 // ── Per-feature adoption flow ─────────────────────────────────────────
 //

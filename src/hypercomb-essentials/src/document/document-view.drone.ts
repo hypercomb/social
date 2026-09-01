@@ -33,10 +33,12 @@ const DOCUMENT_VIEW = 'document'
  * This behaviour's feature identity — what the Beehaviors panel switches off
  * and what the hidden/dormant gates key on.
  *
- * NOT `visual:google:doc`. That mark records where a body came FROM; this one
- * names the view that opens any body. Conflating them would switch off every
- * document when someone disconnected Google, and would leave a document the
- * participant typed themselves with no behaviour identity at all.
+ * NOT a source mark. A sync adapter's mark would record where a body came
+ * FROM; this one names the view that opens any body. Conflating them would
+ * switch off every document when someone disconnected a remote source, and
+ * would leave a document the participant typed themselves with no behaviour
+ * identity at all. (The unwired Google Docs adapter was removed 2026-09-01;
+ * the slot stays source-agnostic so any adapter can plug in later.)
  */
 export const DOCUMENT_KIND = 'visual:document:body'
 

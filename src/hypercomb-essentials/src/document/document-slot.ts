@@ -5,13 +5,13 @@
 //
 // ── Why source-agnostic ───────────────────────────────────────────────
 //
-// The slot holds a document, not "a Google Doc". Where the body CAME from
-// is recorded separately (a `visual:google:doc` decoration marks the tile,
-// and the sync record in the sign('google:docs') pool remembers which
-// remote it mirrors). That split is deliberate: the editor works on any
-// document, and Google is one adapter behind it rather than a branch
-// inside it. A second source later adds a mark and a record — never a
-// change to this slot or to the view that reads it.
+// The slot holds a document, not "a Google Doc". Where a body CAME from
+// would be recorded separately — a source-adapter decoration on the tile,
+// its sync record in a participant-local pool. That split is deliberate:
+// the editor works on any document, and a remote source is one adapter
+// behind it rather than a branch inside it. Each source adds a mark and a
+// record — never a change to this slot or to the view that reads it.
+// (The unwired Google Docs adapter was removed 2026-09-01; the seam stays.)
 //
 // Same rule as `tutor` / `website`: an explicit named array per concern,
 // never the polymorphic `decorations` bucket, never a `{ kind, ... }` bag.
@@ -39,12 +39,12 @@
 //
 // ── What is NOT here ──────────────────────────────────────────────────
 //
-// SYNC STATE (which remote this mirrors, the version last pulled, the sig
-// Google's copy corresponds to) is participant-local and lives in the
-// sign('google:docs') pool — NEVER the layer. Same rule that keeps tutor
-// progress and clipboard out of layers: layer state must be identical
-// across peers or the lineage signature skews, and a peer who receives
-// this document shares the text but emphatically not your Google account.
+// SYNC STATE (which remote a body mirrors, the version last pulled) is
+// participant-local and would live in its adapter's own pool — NEVER the
+// layer. Same rule that keeps tutor progress and clipboard out of layers:
+// layer state must be identical across peers or the lineage signature
+// skews, and a peer who receives this document shares the text but
+// emphatically not your account with any remote source.
 //
 // ── Registration ──────────────────────────────────────────────────────
 //

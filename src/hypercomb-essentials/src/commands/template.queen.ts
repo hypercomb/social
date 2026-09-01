@@ -272,7 +272,7 @@ lightTemplatesOnce()
 EffectBus.on(ENABLEMENT_CHANGED, lightTemplatesOnce)
 
 const _template = new TemplateQueenBee()
-window.ioc.register('@TemplateQueenBee', _template)
+window.ioc.register('@diamondcoreprocessor.com/TemplateQueenBee', _template)
 
 ;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<VisualBeeRegistry>(
   '@diamondcoreprocessor.com/VisualBeeRegistry',
@@ -282,11 +282,11 @@ window.ioc.register('@TemplateQueenBee', _template)
     iconName: 'dashboard',
     toggleIcon: 'dashboard',
     behavior: 'navigation',
-    controllerKey: '@TemplateQueenBee',
+    controllerKey: '@diamondcoreprocessor.com/TemplateQueenBee',
     decorationKind: TEMPLATE_TARGET_KIND,
     labelKey: 'view.templates',
     descriptionKey: 'view.templates.description',
-    queenKey: '@TemplateQueenBee',
+    queenKey: '@diamondcoreprocessor.com/TemplateQueenBee',
     adoptable: true,
     attachable: true,
     pheromones: ['platform:desktop'],
