@@ -69,7 +69,6 @@ $mint: #6fbf94;
 .tags-header {
   @include tw.header;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(var(--acc), 0.25);
 }
 
 .tags-heading {
@@ -474,7 +473,6 @@ $mint: #6fbf94;
 }
 
 .bouquet-in-hand-sig {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.9em;
   color: var(--hc-window-ink-quiet);
 }

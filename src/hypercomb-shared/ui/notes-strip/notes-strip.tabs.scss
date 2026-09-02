@@ -19,7 +19,6 @@
 .cv2-dragbar {
   @include tw.header;
   background: rgba(var(--hc-panel-ink), 0.02);
-  border-bottom: 1px solid rgba($steel, 0.25);
   border-radius: 0;
   user-select: none;
   cursor: grab;

@@ -52,7 +52,6 @@ $accent: #d9a441;
 // ── header ──────────────────────────────────────────────
 .tut-header {
   @include tw.header;
-  border-bottom: 1px solid rgba(var(--acc), 0.24);
 }
 .tut-mark { color: rgb(var(--acc)); font-size: 1.05em; }
 .tut-title { flex: 1; font-size: 0.9em; letter-spacing: 0.05em; color: var(--hc-window-accent); }

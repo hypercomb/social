@@ -34,7 +34,6 @@ $steel: rgb(126, 182, 214);
 
 .pools-header {
   @include tw.header;
-  border-bottom: 1px solid rgba(var(--acc), 0.22);
   cursor: grab;
   user-select: none;
   touch-action: none;

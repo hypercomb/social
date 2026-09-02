@@ -31,7 +31,6 @@
   // from the dragged width, so rows/header shrink to fit a narrowed panel
   // instead of truncating. The centered slice/merge modals are SIBLINGS of
   // this aside, so they keep their own fixed px sizing.
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: calc(12px * var(--hc-panel-scale, 1));
   color: var(--hc-window-ink-plain);
 }
@@ -41,7 +40,6 @@
   // This panel's root font is 12px-based (dense); the shared band anchors to
   // the root rem, so keep the padding a touch tighter here to match.
   padding: 0 0.833rem;
-  border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.06);
 }
 
 .history-viewer-header .title {

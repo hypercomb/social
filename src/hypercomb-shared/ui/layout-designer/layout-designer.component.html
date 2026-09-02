@@ -72,7 +72,7 @@
         <span class="ld-title">{{ 'layout.title' | t }}</span>
         @if (cell()) { <span class="ld-subject">{{ cell() }}</span> }
       </div>
-      <button class="ld-close" type="button" (click)="close()" [attr.aria-label]="'layout.close' | t">×</button>
+      <button class="ld-close" type="button" (click)="close()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
     </header>
 
     @if (dormant()) {

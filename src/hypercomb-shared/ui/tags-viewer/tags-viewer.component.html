@@ -23,7 +23,7 @@
         <span class="tags-title">{{ 'tags.viewer.title' | t }}</span>
         <span class="tags-total">{{ totalTags() }}</span>
       </div>
-      <button class="tags-close" type="button" (click)="close()" [attr.aria-label]="'tags.close' | t">×</button>
+      <button class="tags-close" type="button" (click)="close()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
     </header>
 
     <!-- Armed removal: the review surface. The hive is filtered to this

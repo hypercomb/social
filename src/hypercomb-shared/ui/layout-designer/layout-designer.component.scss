@@ -74,7 +74,6 @@ $accent: #c9a227;
 .ld-header {
   @include tw.header;
   flex: 0 0 auto;
-  border-bottom: 1px solid var(--hc-window-edge);
 }
 
 // `flex: 1`, never `margin-left: auto` on the close button: hcDockedPanel pins

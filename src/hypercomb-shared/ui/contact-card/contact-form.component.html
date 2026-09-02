@@ -12,7 +12,7 @@
     <header class="contact-form-header">
       <span class="contact-form-title">{{ 'contact.form.title' | t }}</span>
       <span class="contact-form-cell">{{ cellLabel() }}</span>
-      <button class="contact-form-close" type="button" (click)="close()" [attr.aria-label]="'contact.form.cancel' | t">×</button>
+      <button class="contact-form-close" type="button" (click)="close()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
     </header>
 
     <div class="contact-form-body">

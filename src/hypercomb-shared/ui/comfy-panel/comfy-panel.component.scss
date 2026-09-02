@@ -48,7 +48,6 @@ $accent: #7eb6d6;
 
 .comfy-header {
   @include tw.header;
-  border-bottom: 1px solid rgba(var(--acc), 0.22);
 }
 
 .comfy-title {
@@ -151,7 +150,6 @@ $accent: #7eb6d6;
 }
 
 .comfy-paste {
-  font-family: ui-monospace, monospace;
   font-size: 0.7em;
 }
 

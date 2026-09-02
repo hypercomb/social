@@ -54,7 +54,6 @@ $steel: rgb(126, 182, 214);
 
 .fv-header {
   @include tw.header;
-  border-bottom: 1px solid color-mix(in srgb, var(--fv-accent) 30%, transparent);
   background: linear-gradient(90deg,
     color-mix(in srgb, var(--fv-accent) 10%, transparent),
     transparent 62%);

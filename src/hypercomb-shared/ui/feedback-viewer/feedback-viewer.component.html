@@ -1,5 +1,5 @@
 @if (visible()) {
-  <section
+  <aside
     class="feedback-viewer-panel"
     hcDockInset="right"
     hcDockedPanel="feedback-viewer"
@@ -19,7 +19,7 @@
     <header class="fv-header">
       <span class="fv-header-icon mat-sym" aria-hidden="true">forum</span>
       <span class="fv-title">{{ 'feedback.viewer.title' | t }}</span>
-      <button class="fv-close" type="button" (click)="close()" [attr.aria-label]="'feedback.viewer.close' | t">×</button>
+      <button class="fv-close" type="button" (click)="close()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
     </header>
 
     <!-- Reach row — sits under the header, just before the items it narrows.
@@ -259,5 +259,5 @@
         </button>
       </div>
     </footer>
-  </section>
+  </aside>
 }

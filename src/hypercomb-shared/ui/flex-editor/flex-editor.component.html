@@ -18,7 +18,7 @@
         <span class="fx-title">{{ 'flex.title' | t }}</span>
         <span class="fx-subject">{{ layout() }}</span>
       </div>
-      <button class="fx-close" type="button" (click)="close()" [attr.aria-label]="'flex.close' | t">×</button>
+      <button class="fx-close" type="button" (click)="close()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
     </header>
 
     <!-- WHICH container this is configuring. The designer lights the same one

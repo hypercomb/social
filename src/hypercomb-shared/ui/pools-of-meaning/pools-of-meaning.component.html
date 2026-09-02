@@ -27,7 +27,8 @@
           type="button"
           (click)="closePanel(panel.id)"
           (pointerdown)="$event.stopPropagation()"
-          [attr.aria-label]="'pools.close' | t"
+          [attr.aria-label]="'panel.close' | t"
+          [title]="'panel.close' | t"
         >×</button>
       }
     </header>

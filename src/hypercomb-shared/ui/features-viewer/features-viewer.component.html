@@ -38,9 +38,7 @@
           }
         </span>
       </div>
-      <button class="features-close" type="button" (click)="close()" [attr.aria-label]="'features.close' | t">
-        <span class="mat-sym" aria-hidden="true">close</span>
-      </button>
+      <button class="features-close" type="button" (click)="close()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
     </header>
 
     <!-- KIND, then SCOPE. Two questions, two controls, never one icon

@@ -7,7 +7,7 @@
     data-consumes-wheel tabindex="-1" [attr.aria-label]="'sequences.aria' | t">
     <header class="sequence-header">
       <div><span class="sequence-title">{{ 'sequences.title' | t }}</span><span class="sequence-count">{{ savedCount() }}</span></div>
-      <button class="close mat-sym" type="button" (click)="close()" [attr.aria-label]="'sequences.close' | t">close</button>
+      <button class="close" type="button" (click)="close()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
     </header>
     <p class="intro">{{ 'sequences.intro' | t }}</p>
     <div class="list">

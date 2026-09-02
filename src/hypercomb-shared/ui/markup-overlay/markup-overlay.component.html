@@ -48,7 +48,7 @@
           <button type="button" class="mk-swatch" [class.is-on]="ink() === colour"
                   [style.background]="colour"
                   (click)="pickInk(colour)"
-                  [attr.aria-label]="'markup.colour' | t"></button>
+                  [attr.aria-label]="'markup.colour' | t" [title]="'markup.colour' | t"></button>
         }
       </div>
 
@@ -70,15 +70,13 @@
       <!-- The act. Everything left of here is preparation for this one press:
            photograph the screen and put the picture on the chat's shelf. -->
       <button type="button" class="mk-send" (click)="send()" [disabled]="busy()"
-              [title]="'markup.send.hint' | t">
+              [title]="'markup.send.hint' | t" [attr.aria-label]="'markup.send.hint' | t">
         <span class="mat-sym">photo_camera</span>
         <span class="mk-send-text">{{ 'markup.send' | t }}</span>
       </button>
 
       <button type="button" class="mk-btn mk-close" (click)="close()"
-              [title]="'markup.close' | t" [attr.aria-label]="'markup.close' | t">
-        <span class="mat-sym">close</span>
-      </button>
+              [title]="'panel.close' | t" [attr.aria-label]="'panel.close' | t">×</button>
     </div>
 
     <div class="mk-hint">{{ 'markup.hint' | t }}</div>

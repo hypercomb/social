@@ -783,11 +783,6 @@ export class FeedbackViewerComponent implements OnDestroy {
     this.#toast('success', 'feedback.request.title', 'feedback.request.message')
   }
 
-  onKey(event: KeyboardEvent): void {
-    if (event.key === 'Escape') { event.preventDefault(); this.close() }
-    else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void this.submit() }
-  }
-
   // ── template helpers ────────────────────────────────────
 
   icon(item: FeedbackItem): string {

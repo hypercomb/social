@@ -351,13 +351,15 @@ describe('the screen backdrop', () => {
       expect(showing[0].image).toContain('blob:mirror')
 
       // AND THE STRIP IS BUILT FOR THE SCREEN. A 1200×800 picture on jsdom's
-      // 1024×768 viewport is shown 1152 wide at the whole-picture fit, so the
-      // two-panel strip is ~2304 — not the 2400 the file itself would give,
-      // and for a photograph off a camera not the 12000 it would have been.
+      // 1024×768 viewport is shown 1152 wide at the FILLING fit (cover: the
+      // larger of the two ratios, so the picture is cropped rather than
+      // letterboxed), so the two-panel strip is ~2304 — not the 2400 the file
+      // itself would give, and for a photograph off a camera not the 12000 it
+      // would have been.
       // WebP, because a paint buffer is not a stored picture.
       expect(strips.length).toBe(1)
       expect(strips[0].width).toBeLessThanOrEqual(1200 * 2)
-      expect(strips[0].width).toBe(2 * Math.round(1200 * Math.min(1024 / 1200, 768 / 800)))
+      expect(strips[0].width).toBe(2 * Math.round(1200 * Math.max(1024 / 1200, 768 / 800)))
       expect(strips[0].type).toBe('image/webp')
     } finally {
       images.restore()

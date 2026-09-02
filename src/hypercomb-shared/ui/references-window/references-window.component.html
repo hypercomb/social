@@ -3,7 +3,7 @@
     (hcDockedPanelClose)="cancel()" dockSide="right" [minWidth]="260" [maxWidth]="560" [defaultWidth]="340"
     data-consumes-wheel tabindex="-1" [attr.aria-label]="'references.title' | t">
     <header class="ref-header"><div class="ref-heading"><span class="mat-sym">link</span><span>{{ 'references.title' | t }}</span></div>
-      <button type="button" class="ref-close" (click)="cancel()">×</button></header>
+      <button type="button" class="ref-close" (click)="cancel()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button></header>
     <form class="ref-details" (submit)="$event.preventDefault(); save()">
       <div class="ref-state"><span>{{ 'references.details' | t }}</span><small>{{ 'references.unsaved' | t }}</small></div>
       <div class="ref-target"><span class="ref-tile"><span>{{ (targetName() || draft.portal.label).slice(0, 2).toUpperCase() }}</span></span>

@@ -51,7 +51,6 @@ $accent: #ffa866;
 .ctx-header {
   @include tw.header;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(var(--acc), 0.25);
 }
 
 .ctx-heading {
