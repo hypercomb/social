@@ -26,7 +26,8 @@
     // Three header bands, then the columns. The tabs and the rail used to
     // be auto-placed, which dropped them into an implicit row BELOW the
     // navigator; naming every band's row is what keeps the header a header.
-    grid-template-rows: auto auto auto minmax(0, 1fr);
+    // Three header bands, the columns, then the composer along the foot.
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   }
   // Every header band spans all three columns; the resize grips are
   // absolutely positioned (and hidden in fullscreen), so they need none.
@@ -43,6 +44,10 @@
     min-height: 0;
     overflow: hidden;
   }
+
+  // The composer runs the width of the desk, under every column: one line
+  // for the whole surface, wherever you were reading when you thought of it.
+  :host .cv2-composer { grid-column: 1 / -1; grid-row: 5; }
 
   :host .cv2-tilelist {
     grid-column: 1;

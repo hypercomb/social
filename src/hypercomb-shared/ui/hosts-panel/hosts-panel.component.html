@@ -90,7 +90,7 @@
                       {{ 'hosts.offer.newest' | t: { generation: newest.generation ?? newest.packageSig.slice(0, 8) } }}
                       <span class="hosts-when">{{ when(newest) }}</span>
                       <span class="hosts-offer-meta">{{ 'hosts.offer.meta' | t: {
-                        bees: newest.bees.length, layers: newest.layers.length
+                        bees: newest.beeCount ?? newest.bees.length, layers: newest.layerCount ?? newest.layers.length
                       } }}</span>
                     </span>
                     @if (intakeOf(newest); as state) {
@@ -155,7 +155,7 @@
                             }
                           </div>
                           <span class="hosts-offer-meta">{{ 'hosts.offer.meta' | t: {
-                            bees: pkg.bees.length, layers: pkg.layers.length
+                            bees: pkg.beeCount ?? pkg.bees.length, layers: pkg.layerCount ?? pkg.layers.length
                           } }}</span>
                           @if (intakeOf(pkg); as state) {
                             @if (state.detail) {

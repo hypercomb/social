@@ -23,7 +23,7 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
-import { chainManifest, chainScore, type ContentManifest } from './chain-manifest.js'
+import { chainManifest, chainScore, projectionOf, type ContentManifest } from './chain-manifest.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -57,6 +57,31 @@ const SIG_NAME = /^[0-9a-f]{64}$/i
 const LEGACY_BUILD_DIRS = ['__layers__', '__bees__', '__dependencies__']
 const LEGACY_RESOURCES_DIR = '__resources__'
 const MANIFEST_FILE = 'manifest.json'
+
+// THE PROJECTION (documentation/host-packages-pool.md). What a domain
+// publishes, rendered small: one entry per package, newest first, carrying
+// only what a client cannot work out for itself.
+//
+// It is a RENDERING, never the truth — regenerated from the chain on every
+// ship, never hand-edited, and if it ever disagreed with the packages a host
+// holds, the packages win. Every inventory array stayed behind in
+// manifest.json on purpose: layers, bees, dependencies and beeDeps are all
+// derivable from the sealed root (measured across the whole published chain),
+// and deriving them is what stops an unsigned document from choosing which
+// modules execute.
+//
+// What survives, and why each one had to:
+//   sig            — the package. Everything else hangs off it.
+//   label, at      — display marks. A picker must be able to name its rows
+//                    without 176 round trips.
+//   beeCount,
+//   layerCount     — display marks. Counts cannot decide what installs.
+//   beesBag,
+//   dependenciesBag— NOT derivable: a bag signature is minted from the bag's
+//                    own entries, so a client cannot know it before fetching
+//                    the bag it names. Without these the import map has no
+//                    aliases.
+const PACKAGES_FILE = 'packages.json'
 
 const copyDirRecursive = (srcDir: string, tgtDir: string): void => {
   mkdirSync(tgtDir, { recursive: true })
@@ -183,6 +208,7 @@ const syncTarget = (
   targetDir: string,
   additive: boolean,
   manifestJson: string,
+  packagesJson: string,
   keep: Set<string>,
   peers: string[],
 ): { copied: number; skipped: number; removed: number; drained: number; healed: number } => {
@@ -248,14 +274,19 @@ const syncTarget = (
   // sigs BEFORE the manifest swap — a reader in that window fetched a
   // manifest that advertised just-deleted bytes, failed the install, and the
   // installer row fossilized "No content found" (2026-08-14).
-  const tgtManifest = join(targetDir, MANIFEST_FILE)
-  const existing = existsSync(tgtManifest) ? readFileSync(tgtManifest, 'utf8') : null
-  if (existing === manifestJson) {
-    skipped++
-  } else {
-    writeFileSync(tgtManifest, manifestJson, 'utf8')
+  const writeDoc = (name: string, json: string): void => {
+    const path = join(targetDir, name)
+    const existing = existsSync(path) ? readFileSync(path, 'utf8') : null
+    if (existing === json) { skipped++; return }
+    writeFileSync(path, json, 'utf8')
     copied++
   }
+  writeDoc(MANIFEST_FILE, manifestJson)
+  // The projection rides in the same window as the manifest — after every
+  // file it can name, before anything is removed — so a reader that lands
+  // mid-ship resolves whichever of the two it prefers against bytes that are
+  // already present.
+  writeDoc(PACKAGES_FILE, packagesJson)
 
   // remove stale entries (signatures no longer in source) — STRICTLY
   // whitelisted to 64-hex names so app assets sharing the target root
@@ -316,6 +347,7 @@ const main = () => {
   }
   const chained = chainManifest(localManifest, authority, new Date())
   const manifestJson = JSON.stringify(chained.manifest, null, 2) + '\n'
+  const packagesJson = projectionOf(chained.manifest)
   if (chained.generation) {
     console.log(`[copy-content] manifest version: v${chained.generation} '${chained.label}'${chained.minted ? '' : ' (unchanged re-deploy)'}`)
   }
@@ -328,7 +360,7 @@ const main = () => {
 
   for (const { dir, additive } of TARGETS) {
     const peers = sourceOrder.filter(d => d !== dir && existsSync(d))
-    const { copied, skipped, removed, drained, healed } = syncTarget(dir, additive, manifestJson, keep, peers)
+    const { copied, skipped, removed, drained, healed } = syncTarget(dir, additive, manifestJson, packagesJson, keep, peers)
     console.log(`[copy-content] ${dir}${additive ? ' (additive/persistent)' : ''}`)
     console.log(`  ${copied} copied, ${skipped} unchanged, ${removed} removed${healed ? `, ${healed} backfilled for older versions` : ''}${drained ? `, ${drained} drained from legacy dirs` : ''}`)
   }

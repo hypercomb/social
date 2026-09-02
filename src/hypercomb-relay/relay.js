@@ -686,11 +686,19 @@ function tryServeContent(req, res) {
 
   try {
     const bytes = readFileSync(resolved)
+    // IMMUTABLE MEANS SIG-ADDRESSED, AND NOTHING ELSE. A signature names one
+    // closure forever, so those bytes can be pinned for a year. A NAMED file
+    // — manifest.json, packages.json — is the domain's mutable voice: the one
+    // thing on this wire that changes at the same URL. Serving those with the
+    // sig header (which is what the typed-path branch used to do to
+    // everything) invites any intermediary to pin a year-old view of what a
+    // host publishes, which reads exactly like a host that stopped shipping.
+    const sigAddressed = /[a-f0-9]{64}/i.test(urlPath)
     res.writeHead(200, {
       'Content-Type': contentType,
       'Content-Length': String(bytes.length),
       'Access-Control-Allow-Origin': '*',
-      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Cache-Control': sigAddressed ? 'public, max-age=31536000, immutable' : 'no-store',
       'Permissions-Policy': PERMISSIONS_POLICY,
     })
     if (req.method === 'HEAD') { res.end(); return true }

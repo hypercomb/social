@@ -29,6 +29,13 @@ import { HOST_IOC_KEY, type HostProvider } from '@hypercomb/core'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
+/** The projection a host publishes, preferred over the manifest it is rendered
+ *  from (documentation/host-packages-pool.md). Both are MUTABLE pointers, so
+ *  both are fetched `no-store` — a sig-addressed URL is the only thing on this
+ *  wire that may be cached. */
+const PACKAGES_FILE = 'packages.json'
+const MANIFEST_FILE = 'manifest.json'
+
 const isLoopback = (zone: string): boolean =>
   /^(localhost|127(?:\.\d+){3})(:\d{1,5})?$/i.test(zone)
 
@@ -57,16 +64,20 @@ export type HostPackage = {
   layers: string[]
   bees: string[]
   dependencies: string[]
-  beeDeps: Record<string, string[]>
   beesBag?: string
   dependenciesBag?: string
+  /** Display-only sizes. The projection states them (a picker cannot count an
+   *  inventory it deliberately does not carry); the manifest fallback fills
+   *  them in from the arrays it still ships. Neither can decide what installs
+   *  — admission derives its own sets from the sealed root. */
+  layerCount?: number
+  beeCount?: number
 }
 
 type ManifestEntry = {
   bees?: string[]
   dependencies?: string[]
   layers?: string[]
-  beeDeps?: Record<string, string[]>
   beesBag?: string
   dependenciesBag?: string
   label?: string
@@ -85,38 +96,93 @@ type ManifestEntry = {
  */
 export const listHostPackages = async (zone: string): Promise<HostPackage[]> => {
   for (const base of hostBases(zone)) {
-    let manifest: { packages?: Record<string, ManifestEntry> } | null = null
-    try {
-      const res = await fetch(`${base}/manifest.json`, { cache: 'no-store' })
-      if (!res.ok) continue
-      manifest = await res.json() as { packages?: Record<string, ManifestEntry> }
-    } catch { continue }
+    const projected = await readProjection(zone, base)
+    if (projected.length) return projected
+    const declared = await readManifest(zone, base)
+    if (declared.length) return declared
+  }
+  return []
+}
 
-    const packages = Object.entries(manifest?.packages ?? {})
-      .filter(([sig]) => SIG_RE.test(sig))
-      .map(([packageSig, entry]): HostPackage => ({
+/** `packages.json` — the projection. Ordered by the host, newest first, and
+ *  carrying no inventory at all: what installs is derived from the sealed
+ *  root at admission, so there is nothing here for a host to get wrong. */
+const readProjection = async (zone: string, base: string): Promise<HostPackage[]> => {
+  type Entry = {
+    sig?: unknown
+    label?: unknown
+    at?: unknown
+    layerCount?: unknown
+    beeCount?: unknown
+    beesBag?: unknown
+    dependenciesBag?: unknown
+  }
+  let doc: { packages?: Entry[] } | null = null
+  try {
+    const res = await fetch(`${base}/${PACKAGES_FILE}`, { cache: 'no-store' })
+    if (!res.ok) return []
+    doc = await res.json() as { packages?: Entry[] }
+  } catch { return [] }
+
+  const entries = Array.isArray(doc?.packages) ? doc.packages : []
+  return entries
+    .filter(entry => SIG_RE.test(String(entry?.sig ?? '')))
+    .map((entry): HostPackage => {
+      const packageSig = String(entry.sig)
+      return {
         zone,
         base,
         packageSig,
         label: String(entry.label ?? '').trim() || packageSig.slice(0, 12),
         at: String(entry.at ?? ''),
-        generation: typeof entry.generation === 'number' ? entry.generation : null,
-        layers: entry.layers ?? [],
-        bees: entry.bees ?? [],
-        dependencies: entry.dependencies ?? [],
-        beeDeps: entry.beeDeps ?? {},
-        beesBag: entry.beesBag,
-        dependenciesBag: entry.dependenciesBag,
-      }))
+        // The projection's ORDER is the answer; there is no counter to rank by
+        // and nothing to re-sort. Ranking data was per-host bookkeeping that
+        // only ever existed to be sorted on — the list arrives sorted instead.
+        generation: null,
+        layers: [],
+        bees: [],
+        dependencies: [],
+        layerCount: typeof entry.layerCount === 'number' ? entry.layerCount : undefined,
+        beeCount: typeof entry.beeCount === 'number' ? entry.beeCount : undefined,
+        beesBag: typeof entry.beesBag === 'string' ? entry.beesBag : undefined,
+        dependenciesBag: typeof entry.dependenciesBag === 'string' ? entry.dependenciesBag : undefined,
+      }
+    })
+}
 
-    if (packages.length) {
-      // `generation` is the counter the build stamps; `at` breaks ties for
-      // manifests old enough to predate it.
-      packages.sort((a, b) => (b.generation ?? 0) - (a.generation ?? 0) || b.at.localeCompare(a.at))
-      return packages
-    }
-  }
-  return []
+/** `manifest.json` — the drain-window fallback for hosts that have not shipped
+ *  since the projection landed. Its inventory arrays are read for nothing but
+ *  the display counts and the divergence warning: admission derives. */
+const readManifest = async (zone: string, base: string): Promise<HostPackage[]> => {
+  let manifest: { packages?: Record<string, ManifestEntry> } | null = null
+  try {
+    const res = await fetch(`${base}/${MANIFEST_FILE}`, { cache: 'no-store' })
+    if (!res.ok) return []
+    manifest = await res.json() as { packages?: Record<string, ManifestEntry> }
+  } catch { return [] }
+
+  const packages = Object.entries(manifest?.packages ?? {})
+    .filter(([sig]) => SIG_RE.test(sig))
+    .map(([packageSig, entry]): HostPackage => ({
+      zone,
+      base,
+      packageSig,
+      label: String(entry.label ?? '').trim() || packageSig.slice(0, 12),
+      at: String(entry.at ?? ''),
+      generation: typeof entry.generation === 'number' ? entry.generation : null,
+      layers: entry.layers ?? [],
+      bees: entry.bees ?? [],
+      dependencies: entry.dependencies ?? [],
+      layerCount: entry.layers?.length,
+      beeCount: entry.bees?.length,
+      beesBag: entry.beesBag,
+      dependenciesBag: entry.dependenciesBag,
+    }))
+
+  // `generation` is the counter the build stamps; `at` breaks ties for
+  // manifests old enough to predate it.
+  packages.sort((a, b) => (b.generation ?? 0) - (a.generation ?? 0) || b.at.localeCompare(a.at))
+  return packages
 }
 
 // ── the port ────────────────────────────────────────────────────────────────

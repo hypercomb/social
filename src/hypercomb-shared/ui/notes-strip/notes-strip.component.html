@@ -13,24 +13,41 @@
            component SCSS) instead of reserving an edge itself — reserving one
            would feed its own yield variable and collapse the desk against
            itself, dragging the control bar and the left toolwindow out of line;
-         • it takes no place in the right LANE, which is also what frees the
-           slot the pheromone panel docks into;
+         • it takes NO PLACE IN THE RIGHT LANE (`dockExclusive` false),
+           because it owns its whole geometry: a lane offset written on top of
+           that pushes the desk's left column off the screen, and the paired
+           pheromone panel — placed against the lane — lands at the desk's
+           right edge instead of the viewport's, reserving the difference and
+           squashing the desk against itself. Leaving the lane is also what
+           frees the slot that panel docks into;
          • it is PAIRED with the pheromone panel, which is the desk's other
-           half: marks drag from the panel onto note rows and list lines.
+           half: marks drag from the panel onto note rows and list lines —
+           but only where the desk is WIDE enough to yield room beside it.
+           This was bound to "is the strip fullscreen", which was the same
+           question while notes had a second shape; now that it is always
+           fullscreen, the width is what the condition always really meant.
+           Below the break a panel is a full-width sheet, so pairing there
+           stacks a second sheet over the notes instead of beside them.
        `hcDockedPanel` stays for what it still gives — the close pairing, the
-       session, the settings rows and the group's text size (`sizeOwner`). -->
+       session, the settings rows and the group's text size (`sizeOwner`).
+       `data-hc-sheet="full"` is the toolwindow mixin's opt-in for a sheet that
+       must be the WHOLE phone screen: every docked panel becomes a 62vh bottom
+       sheet there, and a desk that is always full screen is exactly the case
+       the opt-in exists for. It keeps the bar's bottom clearance either way. -->
   <div class="notes-strip cv2-panel"
        [class.mode-chips]="mode() === 'chips'" [class.mode-rows]="mode() === 'rows'"
        #panel
        data-consumes-wheel
+       data-hc-sheet="full"
        hcDockedPanel="notes-strip" dockSide="right"
        [ownsSize]="false" [sizeOwner]="this" [defaultWidth]="500" [defaultText]="1"
        [ownSettings]="settingsRows"
        [attr.data-face]="face()"
+       [dockExclusive]="false"
        [hcSession]="session"
     (hcDockedPanelClose)="hide()"
        pairWindow="tags-viewer" pairOpenEffect="tags:view-open"
-       pairCloseEffect="tags:view-close" [pairWhen]="true"
+       pairCloseEffect="tags:view-close" [pairWhen]="deskWide()"
        [pairLabel]="'tags.viewer.title' | t"
        [minWidth]="256" [maxWidth]="900"
        role="list" [attr.aria-label]="'notes.strip.aria' | t"
@@ -328,11 +345,15 @@
       </section>
 
 
-      <!-- Docked / narrow fullscreen: the form lives here in the column.
-           On the desk it renders in the READING PANE instead — the template
-           itself is defined once at the panel's top level (formTpl), since
-           an @if block's refs are invisible to its sibling blocks. -->
-      @if (!formInPane()) {
+      <!-- Narrow screens: the EDITOR lives here in the column, because there
+           is no reading pane to hold it. The template itself is defined once
+           at the panel's top level (formTpl), since an @if block's refs are
+           invisible to its sibling blocks.
+           ADDING is not its job any more — the composer at the foot of the
+           surface is, on every width. This used to render unconditionally,
+           which after the composer landed put two note inputs on the same
+           narrow screen, one above the other, doing the same thing. -->
+      @if (!formInPane() && editingNoteId()) {
         <ng-container *ngTemplateOutlet="formTpl"></ng-container>
       }
 
@@ -877,6 +898,43 @@
         </div>
       }
     </div>
+
+    <!-- ── THE COMPOSER: the command line, at the foot of the desk ─────────
+         Writing a note is typing a line, so the thing you type it into is the
+         line the participant already types everything into — the SAME
+         `hc-command-shell` the shell's own command line is built from, not a
+         second input that looks like it and behaves differently. Notes owns
+         the grammar (hyphens go deeper, Escape comes back out — see
+         `commitComposer`); the shell owns the box, the caret and the keys.
+
+         No suggestion list is fed in, and that is what lets Escape through:
+         the shell keeps Escape for closing its dropdown only when it has one,
+         and forwards it to us otherwise.
+
+         It spans the desk's full width, below every column, and only appears
+         with a tile in hand — there is nothing to write a note ON otherwise,
+         and the navigator above is how you pick one. -->
+    @if (cell()) {
+      <div class="cv2-composer">
+        @if (composerDepth() > 0) {
+          <!-- WHERE THE NEXT LINE LANDS, said before it is typed. A depth you
+               cannot see is a depth you will be surprised by. -->
+          <span class="cv2-composer-depth"
+                [title]="'notes.composerDepthHint' | t">
+            <span class="mat-sym" aria-hidden="true">subdirectory_arrow_right</span>
+            <span>{{ composerDepth() }}</span>
+          </span>
+        }
+        <hc-command-shell
+          #composer
+          class="cv2-composer-shell"
+          [embedded]="true"
+          [placeholder]="'notes.composerPlaceholder' | t"
+          (valueChange)="composerText.set($event)"
+          (commit)="commitComposer($event)"
+          (shellKeydown)="onComposerKeydown($event)" />
+      </div>
+    }
 
   </div>
 

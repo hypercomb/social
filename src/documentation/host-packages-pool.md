@@ -87,8 +87,23 @@ never authoritative. If it disagrees with the pool, the pool wins. Same
 relationship the mobile rails have to layer order: a rendering, never a
 commit.
 
-The projection carries *signatures only*. No inventories: ~176 × 65 bytes
-≈ 11 KB, against 3.5 MB today. Every cold client currently downloads 3.5 MB
+The projection carries no inventory. Every field it does carry had to earn
+its place by being either **display-only** (it cannot decide what installs) or
+**underivable** (a client cannot work it out from bytes it has not fetched
+yet):
+
+| Field | Why it survives |
+|---|---|
+| `sig` | the package; everything else hangs off it |
+| `label`, `at` | display marks — a picker must name its rows without one round trip per row |
+| `layerCount`, `beeCount` | display marks; a count cannot widen or narrow what installs |
+| `beesBag`, `dependenciesBag` | **not derivable** — a bag signature is minted from the bag's own entries, so a client cannot know it before fetching the bag it names. Without these the import map has no aliases |
+
+Order replaces `generation`: the list arrives ranked, so there is no counter to
+sort on and none to disagree about.
+
+Measured on the real chain (176 packages): **3,566,200 → 67,384 bytes, 53×
+smaller**, same head, same order. Every cold client currently downloads 3.5 MB
 to learn one head signature.
 
 ### Do not serve it at a 64-hex URL
@@ -102,9 +117,13 @@ exception punches a hole in *sig-shaped means immutable*, which is the one
 wire invariant worth keeping absolute.
 
 Serve the projection at a non-sig well-known name with `no-store`. Same win,
-no hole. (`manifest.json` is served immutable today for exactly this reason —
-it falls through the typed-path branch and inherits the sig-file header. It
-works only because Cloudflare does not cache `.json` by default.)
+no hole.
+*FIXED 2026-09-01:* the relay used to hand the sig-file header to everything
+that resolved, including `manifest.json` — it worked only because Cloudflare
+does not cache `.json` by default. The rule is now stated where it belongs:
+**immutable means sig-addressed, and nothing else.** A named file is the
+domain's mutable voice and is served `no-store`. Readers ask `no-store` too,
+so a host still running the old relay is safe either way.
 
 ## `beeDeps` is published by nobody
 
@@ -120,11 +139,19 @@ wire:
 
 That is precisely a derived cache: a pure derivation of sig-addressed inputs,
 keyed by the package signature, recomputable, wipe-safe, never load-bearing,
-complete-or-absent. It belongs in the optimize phase
-([optimize-phase.md](optimize-phase.md)), minted on the client. It passes the
-litmus test — a cold client rebuilds it from atoms alone — and the
-brittleness stops mattering, because a missed match costs eager loading rather
-than a wrong install.
+complete-or-absent. It passes the litmus test — a cold client rebuilds it from
+atoms alone — and the brittleness stops mattering, because a missed match
+costs eager loading rather than a wrong install.
+
+**Derived at ADMISSION, not in the optimize phase.** This chip first said the
+optimize phase, on the reasoning that a derived cache belongs in the idle pass
+that mints derived caches. Building it showed a better moment: at admission
+every bee and dependency is already in hand and already verified, so the
+derivation is one pass over local bytes and the answer is ready for the FIRST
+boot. Deferring it to an idle pass would have bought nothing and cost the
+participant one heavy boot per install — measured at 0.96 MB across 11 of 55
+dependencies on the live chain. The doctrine is unchanged (derived, never
+published); only the moment moved.
 
 ## Work
 
@@ -149,17 +176,56 @@ than a wrong install.
    fetches — it cannot, since the bee set is not known until the layers are
    read — and each held layer is re-read once from the local heap to union
    its declarations.*
+   *WEB PATH 2026-09-01: **BUILT.** `installFromBundled` in
+   [ensure-install.ts](../hypercomb-web/src/setup/ensure-install.ts) — the
+   shell's own `/content/` package — derives through the same
+   `deriveInventory`, seals against the derived sets, and feeds them to the
+   bag arity, the cached manifest record and `sigStore.trustAll`. The host
+   path there already went through `acquire`, so both of the web shell's
+   admission routes now read the signed tree.
+   One consequence worth its own line: `checkForUpdate` compared the cached
+   arrays against the bundled manifest's assertion, and those are no longer
+   the same kind of thing — an asserted set that drifted from the tree would
+   have raised a phantom upgrade pill every boot. It now short-circuits on
+   package SIGNATURE equality first, which is the only comparison that
+   actually answers "is this the same tree". Two specs pin it.*
 2. **Mint the pool.** `host:packages` members in the community-hosts shape;
    `registerPoolMeaning` derives the address (the meaning carries a colon, so
    it cannot collide with a lineage bag).
 3. **Move ordering onto marks.** `generation` / `previous` / `at` / `label`
    become marks on the member; `chain-manifest.ts`'s per-host counter retires
    with the document it chains.
-4. **Serve the projection.** Signatures only, non-sig well-known path,
-   `no-store`. `listHostPackages` reads it and returns `{zone, base,
-   packageSig}` — the inventory fields leave `HostPackage`.
-5. **`beeDeps` to the optimize phase.** Derived cache keyed by package sig;
-   drop it from the published record and from `HostPackage`.
+4. **Serve the projection.** Non-sig well-known path, `no-store`.
+   `listHostPackages` reads it; the inventory fields stop travelling.
+   *Status 2026-09-01: **BUILT — ahead of 2 and 3**, because the projection is
+   where the win lands and it does not depend on where the truth lives. It is
+   rendered from the chained manifest by `projectionOf`
+   ([chain-manifest.ts](../hypercomb-essentials/scripts/chain-manifest.ts)) and
+   written to every target beside the manifest, inside the same
+   after-the-files/before-the-removals window, so a reader landing mid-ship
+   resolves whichever document it prefers against bytes already present.
+   `listHostPackages` prefers `packages.json` per base and falls back to
+   `manifest.json` for hosts that have not shipped since — the fallback is the
+   drain window, not a second dialect. `reportDivergence` stays quiet when a
+   source asserts nothing, which is the projection's normal condition.
+   Strictly additive: deployed clients keep reading the manifest. Specs:
+   `host-packages.spec.ts` (7) + `projectionOf` in `chain-manifest.spec.ts` (5).
+   Still owed here: steps 2 and 3 replace the manifest as what the projection
+   is rendered FROM, and only then can the manifest stop being written.*
+5. **`beeDeps` derived, not published.** Drop it from the published record and
+   from `HostPackage`.
+   *Status 2026-09-01: **BUILT.** `deriveBeeDeps`
+   ([bee-deps.ts](../hypercomb-runtime/src/bee-deps.ts)) runs at admission in
+   both install paths, over the bytes just verified, and its result is what
+   reaches `INSTALL_MANIFEST_KEY` and `__hypercombBeeDeps`. Verified against
+   the five most recent published packages: 5/5 derive their map exactly.
+   The host's assertion is gone from the wire AND from the types —
+   `HostPackageInfo` (core), `HostPackage` (runtime) and `BundledPackage` (web)
+   no longer carry it, so there is no path by which a domain's claim about a
+   bee's dependencies can reach a client. It is also no longer part of the
+   seal: the seal is about the sets that are ABOUT to resolve, and a hint
+   cannot seal anything. Specs: `bee-deps.spec.ts` (7), every one of them
+   about degrading rather than failing.*
 6. **Retire `manifest.json`.** Read-fallback while hosts drain, exactly as the
    legacy typed URLs are handled — never migrated into the protocol.
 

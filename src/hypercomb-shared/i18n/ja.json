@@ -328,6 +328,8 @@
   "notes.lists.deleteConfirm": "リストを削除しますか？",
   "notes.lists.addLine": "行を追加 — Enter で確定",
   "notes.capturePlaceholder": "メモを入力してEnterを押してください...",
+  "notes.composerPlaceholder": "ノートを書く — 「- 」で深く",
+  "notes.composerDepthHint": "次の行はこの深さに入ります — Esc で一段戻る",
   "notes.capturePlaceholderQ": "質問を入力してEnterを押してください...",
   "notes.capturePlaceholder.targeted": "「{tile}」へのメモを入力してEnterを押してください...",
   "notes.add": "メモを追加",

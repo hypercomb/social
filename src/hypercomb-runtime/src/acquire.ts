@@ -56,6 +56,7 @@ export { installedPackageSig }
 // import the shim); nothing about the shape changed.
 export { hostBases, listHostPackages, type HostPackage }
 import { validateSealedPackage } from './sealed-package.js'
+import { deriveBeeDeps } from './bee-deps.js'
 
 // Store is reached STRUCTURALLY, never imported. Importing the module would
 // bundle a second Store class AND run its module-scope
@@ -248,6 +249,12 @@ export const reportDivergence = (
   claimed: { layers?: string[]; bees?: string[]; dependencies?: string[] },
   inventory: PackageInventory,
 ): void => {
+  // A source that asserts NOTHING is not diverging — it is the projection,
+  // which carries no inventory by design. Only a host still shipping arrays
+  // can disagree with its own layers.
+  const asserts = (claimed.layers?.length ?? 0) + (claimed.bees?.length ?? 0) + (claimed.dependencies?.length ?? 0)
+  if (!asserts) return
+
   const kinds: [string, string[], string[]][] = [
     ['layers', claimed.layers ?? [], inventory.layers],
     ['bees', claimed.bees ?? [], inventory.bees],
@@ -393,7 +400,10 @@ export const installPackage = async (
     }
   }
 
-  const sealed = validateSealedPackage(pkg.packageSig, { ...inventory, beeDeps: pkg.beeDeps })
+  // The seal is about the sets ABOUT TO RESOLVE, so it is checked against the
+  // derived inventory alone. `beeDeps` is no longer part of it: it is derived
+  // from the admitted bytes further down, and a hint cannot seal anything.
+  const sealed = validateSealedPackage(pkg.packageSig, inventory)
   if (!sealed.valid) return fail(`package is not sealed: ${sealed.errors.join('; ')}`)
 
   reportDivergence(pkg.zone, pkg, inventory)
@@ -426,12 +436,21 @@ export const installPackage = async (
     }
   }
 
+  // beeDeps, worked out from the bytes just admitted rather than taken from
+  // anything a host said (bee-deps.ts). A HINT: an empty map means every
+  // dependency loads eagerly, which is correct and merely heavier at boot.
+  const beeDeps = await deriveBeeDeps(
+    inventory.bees,
+    inventory.dependencies,
+    readFrom([store.bees, store.dependencies], sig => [`${sig}.js`, sig]),
+  )
+
   // The bags. Each is a sig-named dir INSIDE the pool whose entries carry the
   // alias→sig pairs the import map is assembled from — legitimate structure,
   // not a typed folder.
   await writeBags(store, inventory, pkg, origins)
 
-  activate(pkg, inventory, held.held)
+  activate(pkg, inventory, beeDeps, held.held)
   return {
     ok: true,
     packageSig: pkg.packageSig,
@@ -455,7 +474,12 @@ const SIG_STORE_KEY = 'hypercomb.signature-store'
  * one place where "held" becomes "running", kept separate for exactly that
  * reason.
  */
-const activate = (pkg: HostPackage, inventory: PackageInventory, held: string[]): void => {
+const activate = (
+  pkg: HostPackage,
+  inventory: PackageInventory,
+  beeDeps: Record<string, string[]>,
+  held: string[],
+): void => {
   try {
     stampInstalledPackage(pkg.packageSig)
     localStorage.setItem(INSTALL_MANIFEST_KEY, JSON.stringify({
@@ -463,7 +487,7 @@ const activate = (pkg: HostPackage, inventory: PackageInventory, held: string[])
       layers: inventory.layers,
       bees: inventory.bees,
       dependencies: inventory.dependencies,
-      beeDeps: pkg.beeDeps,
+      beeDeps,
       dependenciesBag: pkg.dependenciesBag,
       beesBag: pkg.beesBag,
       // Provenance: a HOST produced this install, so the shell's own bundled
@@ -477,7 +501,7 @@ const activate = (pkg: HostPackage, inventory: PackageInventory, held: string[])
     // Per-bee dependency closure, read by the preloader when it lazy-loads a
     // bee's deps. A global rather than storage because it is re-derived every
     // boot from the manifest above.
-    if (pkg.beeDeps) (globalThis as { __hypercombBeeDeps?: unknown }).__hypercombBeeDeps = pkg.beeDeps
+    if (Object.keys(beeDeps).length) (globalThis as { __hypercombBeeDeps?: unknown }).__hypercombBeeDeps = beeDeps
     // Every admitted signature is trusted BY CONSTRUCTION — its bytes hashed
     // to its name at the admission boundary. Runtime performs zero
     // verification, which is the design, not an optimization. Serialized

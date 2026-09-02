@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
-import { ensureInstall } from './ensure-install'
+import { checkForUpdate, ensureInstall } from './ensure-install'
 
 vi.mock('@hypercomb/core', () => ({
   EffectBus: { emit: vi.fn() },
@@ -8,6 +8,15 @@ vi.mock('@hypercomb/core', () => ({
 }))
 
 vi.mock('@hypercomb/shared/core', () => ({
+  Store: class Store {},
+}))
+
+// The DEEP specifier is a different module to vitest, and the mock above does
+// not cover it: resolve-import-map imports `@hypercomb/shared/core/store`,
+// whose module scope calls the `register` global that only ioc.web installs in
+// a browser. Without this the whole spec file fails to load — a suite that
+// reports "0 tests" rather than a failure, which is how it went unnoticed.
+vi.mock('@hypercomb/shared/core/store', () => ({
   Store: class Store {},
 }))
 
@@ -103,5 +112,62 @@ describe('ensureInstall install-state validation', () => {
       kind: 'install-needed',
       reason: 'no-source',
     })
+  })
+})
+
+// The bundled manifest ASSERTS an inventory; the install now DERIVES one from
+// the signed layer tree (documentation/host-packages-pool.md). The two agree
+// for every package the build emits, but they are no longer the same array —
+// so the update check compares the thing that actually answers the question:
+// a package signature IS the closure it names.
+describe('checkForUpdate — merkle before set comparison', () => {
+  const INSTALLED = 'a'.repeat(64)
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    emit.mockReset()
+    localStorage.clear()
+  })
+
+  const bundledManifest = (packageSig: string, bees: string[]): Response => ({
+    ok: true,
+    json: async () => ({ packages: { [packageSig]: { bees, dependencies: [], layers: [packageSig] } } }),
+  }) as unknown as Response
+
+  it('offers nothing when the bundled signature is the one installed', async () => {
+    // Deliberately mismatched bee arrays: the OLD comparison would call this
+    // an update. The signature says the tree is the same one, and it wins.
+    localStorage.setItem('core-adapter.installed-manifest', JSON.stringify({
+      version: 2, layers: [INSTALLED], bees: ['b'.repeat(64)], dependencies: [], source: 'bundled',
+    }))
+    localStorage.setItem('sentinel.sync-signature', INSTALLED)
+    vi.stubGlobal('fetch', vi.fn(async () => bundledManifest(INSTALLED, ['c'.repeat(64)])))
+
+    await checkForUpdate()
+
+    expect(emit).toHaveBeenCalledWith('update:available', expect.objectContaining({
+      available: false,
+      newCount: 0,
+      packageSig: INSTALLED,
+    }))
+  })
+
+  it('still reports an update when the bundled signature differs', async () => {
+    const NEWER = 'd'.repeat(64)
+    const newBee = 'e'.repeat(64)
+    localStorage.setItem('core-adapter.installed-manifest', JSON.stringify({
+      version: 2, layers: [INSTALLED], bees: ['b'.repeat(64)], dependencies: [], source: 'bundled',
+    }))
+    localStorage.setItem('sentinel.sync-signature', INSTALLED)
+    vi.stubGlobal('fetch', vi.fn(async () => bundledManifest(NEWER, ['b'.repeat(64), newBee])))
+
+    await checkForUpdate()
+
+    expect(emit).toHaveBeenCalledWith('update:available', expect.objectContaining({
+      available: true,
+      newBees: [newBee],
+      packageSig: NEWER,
+    }))
   })
 })

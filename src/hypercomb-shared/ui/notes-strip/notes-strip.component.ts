@@ -5,11 +5,11 @@
 // viewer; click the plus to enter capture mode for that tile. Collapses
 // entirely when the active tile has no notes.
 
-import { Component, ElementRef, HostBinding, HostListener, computed, effect, inject, signal, untracked, viewChild, type OnDestroy } from '@angular/core'
+import { Component, ElementRef, HostListener, computed, effect, inject, signal, untracked, viewChild, type OnDestroy } from '@angular/core'
 import { NgTemplateOutlet } from '@angular/common'
 import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
+import { CommandShellComponent } from '../command-shell/command-shell.component'
 // Settings-only: the gear + group chrome every tool window carries. The strip
 // keeps its own edge handles and width store (`ownsSize` false) — see the
 // directive's header — and hands the directive its width as a `sizeOwner`.
@@ -119,6 +119,35 @@ const NOTES_STRIP_FACE_KEY = 'hc:notes-face'
 const NOTES_FACES = ['mono', 'sans', 'serif'] as const
 type NotesFace = typeof NOTES_FACES[number]
 
+/** This window's name in the two owner-counted view modes below. */
+const SURFACE_OWNER = 'notes-strip'
+
+/** THE DESK TAKES THE SURFACE, AND LEAVES THE BAR ITS EDGE.
+ *
+ *  `view:active` means "a view is covering the canvas, put the chrome away".
+ *  The desk is a view covering the canvas by any honest reading — it fills the
+ *  screen and nothing behind it can be reached — and saying so is what stands
+ *  the COMMAND LINE down while notes are open, the same handover the chat
+ *  window makes. (A command line over the desk is a second place to type with
+ *  none of the note grammar; the desk's own line at the bottom is the one that
+ *  writes notes.)
+ *
+ *  `view:keeps-controls` is the other half. On its own, `view:active` also
+ *  hides the CONTROL BAR — right for a full takeover, wrong for this one: the
+ *  desk stops at the bar's reservation (see the component SCSS's
+ *  `--hc-controls-*` box), so the bar has a place to be, and hiding it would
+ *  cost the participant every control on it — on a phone, the whole of the
+ *  navigation. Any view that leaves the bar its edge can hold the mode, and
+ *  the bar stays while ANY owner does. Claimed and released in lockstep. */
+const KEEPS_CONTROLS = 'view:keeps-controls'
+
+const MODE_REGISTRY_IOC_KEY = '@diamondcoreprocessor.com/ModeRegistry'
+
+type ModeRegistryLike = {
+  enter(mode: string, owner: string): void
+  exit(mode: string, owner: string): void
+}
+
 /** Fixed shape set — six CSS-drawn glyphs. The shape is the only
  *  visual category a note carries. Names map 1:1 to .hc-shape-X
  *  classes defined in hypercomb-shared/styles/_notes-shapes.scss. */
@@ -198,7 +227,7 @@ type InputModeStackLike = {
 @Component({
   selector: 'hc-notes-strip',
   standalone: true,
-  imports: [TranslatePipe, NgTemplateOutlet, DockInsetDirective, HcDockedPanelDirective],
+  imports: [TranslatePipe, NgTemplateOutlet, HcDockedPanelDirective, CommandShellComponent],
   templateUrl: './notes-strip.component.html',
   // One stylesheet per surface, in the order the rules were always in — the
   // cascade is the concatenation of these, so the order here IS the order in
@@ -1693,6 +1722,39 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     return false
   }
 
+  /** Enter / leave the two view modes as one gesture — see KEEPS_CONTROLS.
+   *  Both are owner-counted, so releasing ours never stands another view's
+   *  claim down. */
+  #claimSurface(active: boolean): void {
+    this.#surfaceWanted = active
+    const modes = get<ModeRegistryLike>(MODE_REGISTRY_IOC_KEY)
+    if (!modes) {
+      // The registry is an essentials bee and the desk can boot open before it
+      // lands. Claim on the SETTLED intent when it arrives, never on the intent
+      // that was current when this call was made.
+      if (active) {
+        (globalThis as { ioc?: { whenReady?: (k: string, cb: (v: unknown) => void) => void } }).ioc
+          ?.whenReady?.(MODE_REGISTRY_IOC_KEY, value => {
+            if (!this.#surfaceWanted) return
+            const late = value as ModeRegistryLike
+            late.enter('view:active', SURFACE_OWNER)
+            late.enter(KEEPS_CONTROLS, SURFACE_OWNER)
+          })
+      }
+      return
+    }
+    if (active) {
+      modes.enter('view:active', SURFACE_OWNER)
+      modes.enter(KEEPS_CONTROLS, SURFACE_OWNER)
+    } else {
+      modes.exit('view:active', SURFACE_OWNER)
+      modes.exit(KEEPS_CONTROLS, SURFACE_OWNER)
+    }
+  }
+
+  /** Is the surface claimed, as far as this window is concerned. */
+  #surfaceWanted = false
+
   /** Click anywhere outside the strip closes the kebab popover and
    *  picker. Clicks inside the strip itself are handled by the buttons'
    *  own stopPropagation so opening doesn't immediately close. */
@@ -2646,6 +2708,9 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
       this.#version.update(v => v + 1)
       // A line indented mid-edit waits here for its text to land.
       this.#applyPendingIndent()
+      // …and so does a composer line whose parent was still optimistic. This
+      // reconcile is what just gave that parent its real id.
+      this.#drainComposer()
     }))
 
     // Track command-line capture state so the strip pops in for the target
@@ -2730,6 +2795,11 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
       // the button doesn't sit lit for a strip that isn't on screen.
       EffectBus.emit('notes:panel-state', { open: this.#open() && !this.#parked() })
     })
+
+    // The surface claim follows what is ON SCREEN, not the intent: a parked
+    // desk is covered by the installer and holds nothing, and a desk waiting
+    // on a tile is still the desk. `visible()` is exactly that reading.
+    effect(() => this.#claimSurface(this.visible()))
 
     // Warm the decoded-set cache for the active cell AND every tile in the
     // layer (the navigator lists them all) so notes(), the navigator counts,
@@ -2868,6 +2938,9 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     // stack if the component is destroyed mid-hover (e.g. selection
     // change triggers re-render while cursor is over the strip).
     this.#popNotesMode()
+    // A leaked enter() strands `view:active` on forever — the canvas and the
+    // command line would never come back. Release both on the way out.
+    this.#claimSurface(false)
   }
 
   // ── resize wiring ─────────────────────────────────────────
@@ -3135,6 +3208,158 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     // doesn't briefly flag it, and bump #version like the reconcile path does.
     this.#warmed.update(prev => { if (prev.has(cell)) return prev; const n = new Set(prev); n.add(cell); return n })
     this.#version.update(v => v + 1)
+  }
+
+  // ── THE COMPOSER: the command line, at the foot of the desk ────────────
+  //
+  // Writing a note is TYPING A LINE, so the thing you type it into is the
+  // line the participant already types everything into — `hc-command-shell`,
+  // the same component the shell's own command line is built from, not a
+  // second input that looks like it and behaves differently. Notes owns the
+  // grammar; the shell owns the box, the caret, the ghost and the keys.
+  //
+  // THE GRAMMAR — hyphens go deeper, Escape comes back out:
+  //
+  //     milk                 → a note at the top
+  //     - semi-skimmed       → one level under it; the cursor is now depth 1
+  //     - whole              → a sibling of it (no hyphens needed again)
+  //     -- from the farm     → one deeper still
+  //     <Escape>             → back out one level
+  //
+  // The depth is a CURSOR, not a per-line decoration: hyphens SET it, and it
+  // stays where they left it, so a list is typed as a list instead of retyped
+  // as a prefix every line. Escape on an empty line walks it back out; at the
+  // top it is not ours and falls through to the shell's own cascade.
+  //
+  // WHY A QUEUE. A nested line needs its parent's SIGNATURE-BACKED id, and a
+  // line committed a moment ago is still an optimistic `pending-…` row until
+  // the write, the layer cascade and the `notes:changed` re-read have landed.
+  // Typing does not wait for storage, so lines are queued and drained one at
+  // a time: each drain resolves the parent from the live tree and stops if it
+  // is still pending, and the reconcile that replaces it kicks the drain
+  // again. Type six lines as fast as you like — they land in order, at the
+  // depths you gave them.
+
+  /** What is in the composer right now (mirrored for the submit affordance). */
+  readonly composerText = signal('')
+
+  /** The depth the next un-prefixed line lands at. */
+  readonly composerDepth = signal(0)
+
+  /** Lines accepted but not yet written, oldest first. */
+  readonly #composerQueue = signal<readonly { text: string; depth: number; mark: string | null }[]>([])
+
+  /** True while a line is waiting on its parent to become real. */
+  readonly composerPending = computed<boolean>(() => this.#composerQueue().length > 0)
+
+  /** The composer's own view of the shell, so a commit can clear it. */
+  readonly composerShell = viewChild<CommandShellComponent>('composer')
+
+  /** Read a typed line: a leading run of hyphens is the depth it asks for,
+   *  and everything after the first space is the note. No hyphens = the
+   *  cursor's current depth. A line of nothing but hyphens is not a note. */
+  #readComposerLine(raw: string): { depth: number; text: string } | null {
+    const line = raw.trim()
+    if (!line) return null
+    const run = /^(-+)\s+(.*)$/.exec(line)
+    if (!run) return { depth: this.composerDepth(), text: line }
+    const text = run[2].trim()
+    if (!text) return null
+    return { depth: run[1].length, text }
+  }
+
+  /** Enter in the composer. */
+  commitComposer(raw: string): void {
+    const cell = this.cell()
+    if (!cell) return
+    const line = this.#readComposerLine(raw)
+    if (!line) return
+    // Never skip a level: a depth with no parent above it becomes the
+    // deepest depth that HAS one. Typing `--- x` into an empty tile writes
+    // a top-level note rather than nothing at all.
+    const depth = Math.min(line.depth, this.#deepestComposerDepth() + 1)
+    this.composerDepth.set(depth)
+    // FOLLOW WHAT YOU WROTE. A note that has children IS a list here
+    // (`#isListRoot`), so the moment a line goes under one the root it hangs
+    // from leaves the notes tab for the lists tab — and the participant, still
+    // looking at notes, watches the thing they are building disappear. Going
+    // deeper is the gesture that says "this is a list"; the tab follows it.
+    if (depth > 0) this.setTab('lists')
+    this.#composerQueue.update(q => [...q, { text: line.text, depth, mark: this.draftMark() }])
+    this.composerText.set('')
+    this.composerShell()?.clear()
+    this.#drainComposer()
+  }
+
+  /** Keys the shell did not consume. Escape is the only one we want: it walks
+   *  the depth cursor back out. Stopping propagation on a press we HANDLED is
+   *  what keeps the shell's own escape cascade (blur, then the global
+   *  show-the-hexagons sweep) from firing on the same press and taking the
+   *  desk away mid-list. */
+  onComposerKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'Escape') return
+    if (!this.composerEscape()) return
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
+  /** Escape in the composer — one level back out. Answers whether it was
+   *  ours to take, so the caller can let the shell have it otherwise. */
+  composerEscape(): boolean {
+    if (this.composerText().trim()) return false
+    if (this.composerDepth() === 0) return false
+    this.composerDepth.update(d => Math.max(0, d - 1))
+    return true
+  }
+
+  /** How deep the tile's tree actually goes right now (-1 = no notes). */
+  #deepestComposerDepth(): number {
+    let deepest = -1
+    const walk = (nodes: readonly Note[], depth: number): void => {
+      for (const n of nodes) {
+        if (depth > deepest) deepest = depth
+        walk(n.children, depth + 1)
+      }
+    }
+    walk(this.#allForCell(this.cell()), 0)
+    return deepest
+  }
+
+  /** The note a line at `depth` hangs under: the LAST node at `depth - 1` in
+   *  document order, which is the one the participant just wrote. Null at
+   *  depth 0 (nothing to hang under) and when the tree has no such row. */
+  #composerParentAt(depth: number): Note | null {
+    if (depth <= 0) return null
+    let found: Note | null = null
+    const walk = (nodes: readonly Note[], d: number): void => {
+      for (const n of nodes) {
+        if (d === depth - 1) found = n
+        else if (d < depth - 1) walk(n.children, d + 1)
+      }
+    }
+    walk(this.#allForCell(this.cell()), 0)
+    return found
+  }
+
+  /** Write the head of the queue, if its parent is real. One line per pass:
+   *  the write it makes is what un-blocks the next. */
+  #drainComposer(): void {
+    const cell = this.cell()
+    const head = this.#composerQueue()[0]
+    if (!cell || !head) return
+    if (head.depth === 0) {
+      EffectBus.emit('note:commit', { cellLabel: cell, text: head.text, mark: head.mark })
+      this.#paintOptimistic(cell, head.text, null, head.mark)
+      this.#composerQueue.update(q => q.slice(1))
+      return
+    }
+    const parent = this.#composerParentAt(head.depth)
+    // No parent yet, or a parent that is still this session's optimistic row:
+    // hold the line. The reconcile that gives it a real id calls back here.
+    if (!parent || parent.id.startsWith('pending-')) return
+    EffectBus.emit('note:add-child', { cellLabel: cell, parentId: parent.id, text: head.text, mark: head.mark })
+    this.#paintChildOptimistic(cell, parent.id, head.text)
+    this.#composerQueue.update(q => q.slice(1))
   }
 
   /** Drop out of edit mode back to a blank add form — and, in the pane,
