@@ -155,3 +155,24 @@ export const chainManifest = (
     label: typeof head.label === 'string' ? head.label : '',
   }
 }
+
+/** Render the chained manifest as the discovery projection. Newest first —
+ *  `generation` is the counter the ship stamps, `at` breaks ties for entries
+ *  old enough to predate it, exactly the order `listHostPackages` applied to
+ *  the manifest before this file existed. */
+export const projectionOf = (manifest: ContentManifest): string => {
+  const entries = Object.entries(manifest.packages ?? {})
+    .filter(([sig]) => /^[a-f0-9]{64}$/.test(sig))
+    .sort((a, b) => (Number(b[1].generation ?? 0) - Number(a[1].generation ?? 0))
+      || String(b[1].at ?? '').localeCompare(String(a[1].at ?? '')))
+    .map(([sig, entry]) => ({
+      sig,
+      label: typeof entry.label === 'string' ? entry.label : undefined,
+      at: typeof entry.at === 'string' ? entry.at : undefined,
+      layerCount: Array.isArray(entry['layers']) ? (entry['layers'] as unknown[]).length : undefined,
+      beeCount: Array.isArray(entry['bees']) ? (entry['bees'] as unknown[]).length : undefined,
+      beesBag: typeof entry['beesBag'] === 'string' ? entry['beesBag'] : undefined,
+      dependenciesBag: typeof entry['dependenciesBag'] === 'string' ? entry['dependenciesBag'] : undefined,
+    }))
+  return JSON.stringify({ packages: entries }, null, 2) + '\n'
+}

@@ -16,6 +16,7 @@ import { isVisitorSession } from './visitor-session'
 // Cold-boot acquisition. Same implementation the shim uses and the same one
 // behind window.hypercomb.acquire — there is one acquisition, not three.
 import { acquire, deriveInventory, listHostPackages, reportDivergence } from '@hypercomb/runtime/acquire'
+import { deriveBeeDeps } from '@hypercomb/runtime/bee-deps'
 import { stampInstalledPackage } from '@hypercomb/runtime/installed-package'
 import { DEFAULT_HOST_ZONES, listHostZones } from '@hypercomb/runtime/host-zones'
 import { cacheImportMap } from './resolve-import-map'
@@ -375,6 +376,24 @@ export const checkForUpdate = async (): Promise<void> => {
   // No bundled manifest (dev shell has no /content/, or offline) — stay quiet.
   if (!bundled) return
 
+  // MERKLE FIRST. A package signature IS the closure it names, so equal sigs
+  // mean equal trees and there is nothing to offer — no set comparison can say
+  // more than that. It also keeps the comparisons below honest now that the
+  // cached arrays are DERIVED from the signed tree while `bundled.*` is still
+  // what /content/manifest.json asserts: the two are only ever put side by side
+  // when the packages genuinely differ.
+  if (localStorage.getItem(SYNC_SIG_KEY) === bundled.packageSig) {
+    EffectBus.emit('update:available', {
+      available: false,
+      newCount: 0,
+      newBees: [],
+      packageSig: bundled.packageSig,
+      previous: bundled.previous ?? null,
+      label: bundled.label,
+    })
+    return
+  }
+
   // ── Update-authority gate ────────────────────────────────────────────
   // The shell's bundled `/content/` is the update reference ONLY for installs
   // that came FROM the bundle. A DCP/sentinel-sourced install is a logical
@@ -517,7 +536,6 @@ type BundledPackage = {
   bees: string[]
   dependencies: string[]
   layers: string[]
-  beeDeps?: Record<string, string[]>
   // Sigbag (Phase 1 additive): when present, the bundle ships a
   // `<bagSig>/0000…` dir alongside the flat leaves. New flat builds put
   // the bag dir at the content root; legacy bundles nested it inside the
@@ -535,7 +553,7 @@ const fetchBundledPackage = async (): Promise<BundledPackage | null> => {
   try {
     const res = await fetch('/content/manifest.json', { cache: 'no-store' })
     if (!res.ok) return null
-    const content = await res.json() as { packages?: Record<string, { bees?: string[]; dependencies?: string[]; layers?: string[]; beeDeps?: Record<string, string[]>; dependenciesBag?: string; beesBag?: string; label?: string; at?: string; previous?: string | null }> }
+    const content = await res.json() as { packages?: Record<string, { bees?: string[]; dependencies?: string[]; layers?: string[]; dependenciesBag?: string; beesBag?: string; label?: string; at?: string; previous?: string | null }> }
     const sig = Object.keys(content.packages ?? {})[0]
     if (!sig) return null
     const pkg = content.packages![sig]
@@ -544,7 +562,6 @@ const fetchBundledPackage = async (): Promise<BundledPackage | null> => {
       bees: pkg.bees ?? [],
       dependencies: pkg.dependencies ?? [],
       layers: pkg.layers ?? [],
-      beeDeps: pkg.beeDeps,
       dependenciesBag: pkg.dependenciesBag,
       beesBag: pkg.beesBag,
       // Sidecar branch metadata — carried through so the post-boot update
@@ -661,7 +678,7 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   // DERIVED sets: root declared in its own layer set, every sig well-formed,
   // beeDeps closed over what the tree actually holds. Nothing outside it is
   // ever fetched.
-  const sealed = validateSealedPackage(bundled.packageSig, { ...inventory, beeDeps: bundled.beeDeps })
+  const sealed = validateSealedPackage(bundled.packageSig, inventory)
   if (!sealed.valid) {
     console.warn(`[ensure-install] bundled package ${bundled.packageSig.slice(0, 12)} is not sealed: ${sealed.errors.join('; ')}`)
     return false
@@ -686,6 +703,15 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
       write: writeTo(store.bees, sig => `${sig}.js`, sig => `${beesUrlBase}/${sig}.js`, 'application/javascript; charset=utf-8'),
     } satisfies ReplicationIo),
   ])
+
+  // beeDeps, worked out from the bytes just admitted rather than taken from
+  // the bundled manifest (bee-deps.ts). A HINT: an empty map means every
+  // dependency loads eagerly, which is correct and merely heavier at boot.
+  const beeDeps = await deriveBeeDeps(
+    inventory.bees,
+    inventory.dependencies,
+    readFrom([store.bees, store.legacyBees, store.dependencies, store.legacyDependencies], sig => [`${sig}.js`, sig]),
+  )
 
   // Sigbag fetch (additive): when the bundle declares a bag sig, fetch each
   // indexed entry and write under <bagSig>/<index>. The bag dir is a
@@ -763,7 +789,7 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     layers: inventory.layers,
     bees: inventory.bees,
     dependencies: inventory.dependencies,
-    beeDeps: bundled.beeDeps,
+    beeDeps,
     dependenciesBag: bundled.dependenciesBag,
     beesBag: bundled.beesBag,
     // Came from the shell's bundled package → the bundle IS this install's
@@ -789,7 +815,7 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   // to say which build this shell is on.
   stampInstalledPackage(bundled.packageSig)
   localStorage.setItem(INSTALLED_FLAG_KEY, 'true')
-  if (bundled.beeDeps) (globalThis as any).__hypercombBeeDeps = bundled.beeDeps
+  if (Object.keys(beeDeps).length) (globalThis as any).__hypercombBeeDeps = beeDeps
   sigStore.trustAll([...inventory.bees, ...inventory.dependencies, ...inventory.layers])
   localStorage.setItem(SIG_STORE_KEY, JSON.stringify(sigStore.toJSON()))
   const held = (r: { present: number; fetched: number; total: number }): string => `${r.present + r.fetched}/${r.total}`

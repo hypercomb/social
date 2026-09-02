@@ -2,7 +2,7 @@
 // deploy-azure.ps1 Phase 1 established, now shared by every deploy target.
 
 import { describe, expect, it } from 'vitest'
-import { chainManifest, chainScore, deployStamp, maxGeneration, type ContentManifest } from './chain-manifest.js'
+import { chainManifest, chainScore, deployStamp, maxGeneration, projectionOf, type ContentManifest } from './chain-manifest.js'
 
 const SIG_A = 'a'.repeat(64)
 const SIG_B = 'b'.repeat(64)
@@ -126,5 +126,86 @@ describe('chainScore / maxGeneration', () => {
     const v10: ContentManifest = { packages: { [SIG_A]: { generation: 10 } } }
     expect(chainScore(v10)).toBeGreaterThan(chainScore(legacyPile))
     expect(chainScore(null)).toBe(0)
+  })
+})
+
+// ── the projection ──────────────────────────────────────────────────────────
+// `packages.json` is what a client actually reads (documentation/host-packages-pool.md).
+// It renders the chain small: order instead of a counter, and nothing a host
+// could get wrong about what installs.
+describe('projectionOf', () => {
+
+  const parse = (json: string): { packages: Record<string, unknown>[] } =>
+    JSON.parse(json) as { packages: Record<string, unknown>[] }
+
+  it('orders newest first and states the order rather than a counter', () => {
+    const manifest: ContentManifest = {
+      packages: {
+        [SIG_A]: { generation: 1, label: 'first', at: '2026-01-01T00:00:00' },
+        [SIG_C]: { generation: 3, label: 'third', at: '2026-03-01T00:00:00' },
+        [SIG_B]: { generation: 2, label: 'second', at: '2026-02-01T00:00:00' },
+      },
+    }
+
+    const { packages } = parse(projectionOf(manifest))
+
+    expect(packages.map(p => p['sig'])).toEqual([SIG_C, SIG_B, SIG_A])
+    expect(packages.every(p => !('generation' in p))).toBe(true)
+  })
+
+  it('breaks ties on `at` for entries minted before the counter existed', () => {
+    const manifest: ContentManifest = {
+      packages: {
+        [SIG_A]: { at: '2026-01-01T00:00:00' },
+        [SIG_B]: { at: '2026-05-01T00:00:00' },
+      },
+    }
+
+    expect(parse(projectionOf(manifest)).packages.map(p => p['sig'])).toEqual([SIG_B, SIG_A])
+  })
+
+  it('carries no inventory — only what a client cannot derive or display', () => {
+    const manifest: ContentManifest = {
+      packages: {
+        [SIG_A]: {
+          generation: 1,
+          label: 'ship',
+          at: '2026-01-01T00:00:00',
+          layers: [SIG_A, SIG_B],
+          bees: [SIG_C],
+          dependencies: [SIG_B],
+          beeDeps: { [SIG_C]: [SIG_B] },
+          beesBag: SIG_B,
+          dependenciesBag: SIG_C,
+        },
+      },
+    }
+
+    const entry = parse(projectionOf(manifest)).packages[0]!
+
+    expect(entry).toEqual({
+      sig: SIG_A,
+      label: 'ship',
+      at: '2026-01-01T00:00:00',
+      layerCount: 2,
+      beeCount: 1,
+      beesBag: SIG_B,
+      dependenciesBag: SIG_C,
+    })
+    // The arrays are the part that stayed behind: admission derives them from
+    // the sealed root, which is what stops a host choosing what executes.
+    for (const gone of ['layers', 'bees', 'dependencies', 'beeDeps']) {
+      expect(entry).not.toHaveProperty(gone)
+    }
+  })
+
+  it('ignores keys that are not signatures', () => {
+    const manifest = { packages: { 'not-a-sig': { label: 'junk' }, [SIG_A]: { label: 'real' } } } as ContentManifest
+
+    expect(parse(projectionOf(manifest)).packages.map(p => p['sig'])).toEqual([SIG_A])
+  })
+
+  it('renders an empty chain as an empty list, never as absent', () => {
+    expect(parse(projectionOf({ packages: {} })).packages).toEqual([])
   })
 })

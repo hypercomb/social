@@ -19,10 +19,17 @@
 // `get(HOST_IOC_KEY)` — and acquisition stops being something only a shell can
 // do.
 //
-// THE MANIFEST IS THE DOMAIN'S OWN VOICE: the one legitimate mutable pointer,
-// because that is what a domain IS. Everything it names is content-addressed
-// and verified on admission, so a hostile host can offer a different tree but
-// never wrong bytes.
+// A DOMAIN'S OWN VOICE IS ONE MUTABLE POINTER, because that is what a domain
+// IS. Everything it names is content-addressed and verified on admission, so a
+// hostile host can offer a different tree but never wrong bytes.
+//
+// WHAT IT NO LONGER SAYS: the inventory. A package's layers, bees and
+// dependencies are DERIVED from its sealed root at admission — measured
+// identical to the arrays hosts used to assert, across the whole published
+// chain — so nothing a domain says can decide which modules run
+// (documentation/host-packages-pool.md). The fields below survive only for the
+// drain window, while hosts that have not shipped since are still read through
+// their manifest.
 
 /** IoC key for the host reader. Implemented in runtime, resolved anywhere. */
 export const HOST_IOC_KEY = '@hypercomb.social/HostPackages'
@@ -36,12 +43,20 @@ export interface HostPackageInfo {
   packageSig: string
   label: string
   at: string
-  /** The version counter the build stamps; null on manifests that predate it. */
+  /** The counter a manifest stamps; null from the projection, which states its
+   *  order instead of a number to sort by. */
   generation: number | null
+  /** Inventory, and ONLY from a manifest — the projection carries none and
+   *  admission derives its own. Empty is the normal, correct answer. */
   layers: string[]
   bees: string[]
   dependencies: string[]
-  beeDeps: Record<string, string[]>
+  /** Display-only sizes. A count cannot widen or narrow what installs. */
+  layerCount?: number
+  beeCount?: number
+  /** NOT derivable: a bag signature is minted from the bag's own entries, so a
+   *  client cannot know it before fetching the bag it names. Without these the
+   *  import map has no aliases. */
   beesBag?: string
   dependenciesBag?: string
 }
