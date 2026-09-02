@@ -70,12 +70,28 @@
 
 // Fullscreen mode — covers everything below the command-line strip
 // (header-bar at top stays visible). Releases the width cap and the
-// user's drag offset so the strip fills the canvas. The pill
-// toolbar at the bottom IS covered intentionally — users asked for
-// "everything except the command line".
+// user's drag offset so the strip fills the canvas.
+//
+// BESIDE THE BAR, NEVER OVER IT — the same rule the chat window follows.
+// This used to end at `bottom: 0` and cover the control bar outright ("everything
+// except the command line"), which cost the participant every control on the bar
+// for as long as notes were open — on a phone, where the bar IS the bottom strip,
+// that is the whole navigation. The bar is the anchor: it publishes what it
+// occupies as `--hc-controls-left` / `--hc-controls-right` / `--hc-controls-bottom`
+// (0px on the edges it does not own — a free-floating desktop pill owns none),
+// so reserving all three is a no-op wherever the bar is not there and exact
+// wherever it is: bottom on a portrait phone, left on a landscape phone or a
+// left-docked desktop rail, right when it is docked right.
 :host.is-fullscreen {
   top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
-  bottom: 0;
+  // max(), not +: the published number is measured from the viewport's bottom
+  // and already contains the safe inset. The mobile view row lifts the bar, so
+  // its lift is added on top — same expression the tool-window sheet mixin uses.
+  bottom: calc(
+    max(var(--hc-controls-bottom, 0px), var(--hc-safe-bottom, 0px))
+    + var(--hc-mobile-row-lift, 0px)
+  );
+  left: var(--hc-controls-left, 0px);
   padding: 0;
 }
 // The desk YIELDS to a right-docked toolwindow. Docked panels reserve their
@@ -93,7 +109,10 @@
 // reports nothing at all), so the fence is gone and the desk yields correctly
 // at every size. On a phone the sheet reserves 0, the desk stays full width,
 // and the sheet sits over it — exactly what the sheet's own styling asks for.
-:host.is-fullscreen { right: var(--hc-inset-right, 0px); }
+//
+// The bar's right edge is reserved here too (max(), not a second rule — either
+// reservation alone must still hold when the other is zero).
+:host.is-fullscreen { right: max(var(--hc-inset-right, 0px), var(--hc-controls-right, 0px)); }
 // FILL THE HOST, do not re-anchor to the viewport.
 //
 // The docked panel is `position: fixed`, so its containing block is the
