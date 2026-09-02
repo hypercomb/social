@@ -548,6 +548,7 @@
   "collections.empty.title": "最初のタイルを追加",
   "collections.empty.body": "タイルに名前を付ける、ファイルをドロップする、何かを貼り付けて、このコレクションを始めましょう。",
   "collections.empty.action": "タイルを追加",
+  "panel.close": "閉じる",
   "panel.settings": "ウィンドウ設定",
   "panel.settings.eyebrow": "設定",
   "panel.settings.grouped": "ウィンドウ設定 — {group}",

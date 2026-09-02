@@ -620,7 +620,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * fills in once the shared ranking pass lands.
    */
   readonly activeDetail = computed<{
-    name: string; kind?: string; description?: string; icon?: string; count?: number; options?: readonly string[]
+    name: string; kind?: string; description?: string; icon?: string; count?: number
+    options?: readonly string[]; swatch?: string
   } | null>(() => {
     if (this.shell?.suppressed()) return null
     // An utterance choice carries its whole story in the rows — a detail pane
@@ -646,10 +647,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const inside = member?.leaf ? [] : active.root.members(path).map(m => m.name)
       return {
         name: path[path.length - 1] ?? name,
-        kind: path.length > 1 ? 'member' : 'object',
+        // An OBJECT is a thing you can walk into. A leaf never is, however
+        // shallow it sits — `/theme dark` is a member at depth one, and
+        // calling it an object promised a walk that offers nothing.
+        kind: member?.leaf || path.length > 1 ? 'member' : 'object',
         description: member?.description,
         icon: member?.icon ?? (member?.leaf ? 'tune' : 'category'),
         options: inside.length ? inside : undefined,
+        // The chip beside the name is a stamp; the pane has room to show the
+        // thing itself. Same swatch, drawn big enough to actually read — a
+        // theme's palette, a backdrop's look — for the row you are on.
+        swatch: member?.swatch,
       }
     }
 

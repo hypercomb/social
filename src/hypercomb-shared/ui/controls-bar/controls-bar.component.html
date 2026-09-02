@@ -100,6 +100,20 @@
   </div>
 }
 
+<!-- RAIL ROLLOVER — the one tip every rail button shares, at the component
+     root so it escapes the icon list's scroll clip and the pill's containing
+     block. Placed from the hovered button's box (onCtlEnter): beside a docked
+     rail it takes the button's exact top and bottom and sits flush against
+     the rail on the canvas side; above the icon on the floating pill. -->
+@if (railTip(); as tip) {
+  <div class="rail-tip show"
+       [class.beside-right]="tip.side === 'beside-right'"
+       [class.beside-left]="tip.side === 'beside-left'"
+       [class.above]="tip.side === 'above'"
+       [style]="tip.style"
+       role="tooltip">{{ tip.text }}</div>
+}
+
 <!-- breadcrumb: below header, right-aligned -->
 <button class="agent-visibility-toggle"
         [class.rail-left]="dockSide() === 'left'"
@@ -164,13 +178,17 @@
        [class.rail-left]="dockSide() === 'left' && !isMobile()"
        [class.mobile]="isMobile()"
        [class.expanded]="tagsExpanded()">
-    <!-- Opens the pheromone panel. Always visible (it used to fade in only on
-         hover, so the reach control was invisible until you found it) and the
-         glyph reads out the current reach: page → children → global. -->
+    <!-- REACH — one glyph, and only one. It reads out the current reach and
+         steps it on click: page → children → global, wrapping. It used to
+         open the pheromone panel while merely DISPLAYING the reach, and the
+         opened-out strip carried a second identical glyph that did the
+         stepping — two globes side by side saying the same word. The panel
+         has its own doors (the command rail's pheromone button, /tags, the
+         layer deck); this spot belongs to the reach. -->
     <button class="tag-scope" [attr.data-scope]="tagScope()"
-            (click)="openPheromones()"
-            [attr.aria-label]="'tags.panel.open' | t"
-            [title]="('tags.panel.open' | t) + ' — ' + ('tags.scope-' + tagScope() | t)">
+            (click)="cycleTagScope()"
+            [attr.aria-label]="'tags.scope-' + tagScope() | t"
+            [title]="'tags.scope-' + tagScope() | t">
       <span class="mat-sym">{{ scopeIcon() }}</span>
     </button>
 
@@ -180,21 +198,6 @@
          the wheel while the pointer is over it so scrolling the list never
          zooms the hive underneath. -->
     <div class="tag-strip" data-consumes-wheel>
-      @if (tagsExpanded()) {
-        <!-- Reach lives INSIDE the opened-out strip: the tags you're looking at
-             are the ones this reach admits, so the control that changes which
-             ones those are belongs beside them, not only in the panel. A
-             three-stage toggle like everywhere else reach appears: one glyph,
-             stepping page → children → global and wrapping. -->
-        <span class="tag-scope-set">
-          <button class="tag-scope-opt selected"
-                  (click)="cycleTagScope()"
-                  [attr.aria-label]="'tags.scope-' + tagScope() | t"
-                  [title]="'tags.scope-' + tagScope() | t">
-            <span class="mat-sym">{{ scopeIcon() }}</span>
-          </button>
-        </span>
-      }
       @for (tag of tags(); track tag.name) {
         <button class="tag-crumb"
                 [class.tag-active]="isTagFilterActive(tag.name)"
@@ -419,7 +422,8 @@
                release; touch is left to scroll the box natively. -->
           <div class="controls-row"
                [class.drag-scrolling]="dragScrolling()"
-               (pointerdown)="onListDragStart($event)">
+               (pointerdown)="onListDragStart($event)"
+               (scroll)="onCtlLeave()">
             @if (dockSide() === 'left') {
               <!-- CHAT IS NOT HERE ANY MORE. This rail is how-you-SEE — fit,
                    zoom, pin, fullscreen, orientation — and talking is not one
@@ -432,7 +436,8 @@
                       [class.active]="tutorialsOpen()"
                       (click)="startTutorial()"
                       [attr.aria-label]="'controls.tutorial' | t"
-                      [title]="('controls.tutorial' | t) + ' — ' + ('controls.tutorial.pick' | t)"
+                      (pointerenter)="onCtlEnter($event)"
+                      (pointerleave)="onCtlLeave()"
                       data-ctrl-id="tutorial">
                 <span class="mat-sym">emoji_nature</span>
               </button>
@@ -447,6 +452,8 @@
                       [class.lock-bump]="lockBump()"
                       (click)="togglePin()"
                       [attr.aria-label]="'controls.pin' | t"
+                      (pointerenter)="onCtlEnter($event)"
+                      (pointerleave)="onCtlLeave()"
                       data-ctrl-id="pin">
                 <span class="mat-sym" [class.filled]="locked()">push_pin</span>
               </button>
@@ -462,9 +469,8 @@
                       [attr.aria-label]="homePortal()
                         ? ('controls.home.portal' | t: { portal: homeLabel() })
                         : ('controls.home' | t)"
-                      [title]="homePortal()
-                        ? ('controls.home.portal' | t: { portal: homeLabel() })
-                        : ('controls.home' | t)">
+                      (pointerenter)="onCtlEnter($event)"
+                      (pointerleave)="onCtlLeave()">
                 <span class="mat-sym">{{ homePortal() ? 'home_pin' : 'home' }}</span>
               </button>
             }
@@ -487,7 +493,8 @@
                       (contextmenu)="onCtrlContext(ctrl, $event)"
                       (pointerdown)="onCtrlPointerDown(ctrl, $event)"
                       (pointerup)="onIconPressUp()"
-                      (pointerleave)="onIconPressUp()"
+                      (pointerenter)="onCtlEnter($event)"
+                      (pointerleave)="onIconPressUp(); onCtlLeave()"
                       [attr.aria-label]="ctrl.label | t"
                       [attr.data-ctrl-id]="ctrl.id">
                 <!-- Material Symbols Outlined — every desktop control
@@ -528,6 +535,8 @@
                     [class.editing]="editMode()"
                     (click)="toggleEditMode()"
                     (contextmenu)="onEditToggleContext($event)"
+                    (pointerenter)="onCtlEnter($event)"
+                    (pointerleave)="onCtlLeave()"
                     [attr.aria-label]="editMode() ? ('controls.collapse' | t) : ('controls.expand' | t)">
               <span class="expand-chevron" [class.up]="editMode()">&#x25B8;</span>
             </button>
@@ -536,6 +545,8 @@
                     [class.disabled]="!canGoBack()"
                     [disabled]="!canGoBack()"
                     (click)="goBack()"
+                    (pointerenter)="onCtlEnter($event)"
+                    (pointerleave)="onCtlLeave()"
                     [attr.aria-label]="'controls.go-back' | t">
               <span class="mat-sym">arrow_back</span>
             </button>

@@ -75,46 +75,25 @@
   // (breadcrumb, dock-left rail, hint-bar, notes-strip, history-viewer,
   // format-painter) read the same factor so they stay flush at any size.
   zoom: var(--hc-header-zoom, 1.0);
-  // RULED BAR, not a floating pill: the prompt runs edge to edge and is
-  // separated from the hive by hairlines alone — one above, one below, and the
-  // same hairline down each side where the viewport doesn't already cut it off.
-  // No inset margin, no rounded corners, no drop shadow: the frame is the
-  // thinnest mark that still says "this row is chrome". Every below-the-bar
-  // offset follows automatically — the anchor is the MEASURED bottom edge
-  // (`--hc-header-bottom`, controls-bar's ResizeObserver).
+  // FLUSH BAR, edge to edge. No inset margin, no side padding, no side
+  // borders, no rounded corners, no drop shadow: the command line begins at
+  // the viewport's left edge and the icon rail ends at its right. The side
+  // padding and half-pixel side rules that used to frame it read as a small
+  // margin the prompt did not fill (Jaime, 2026-09-02) — gone.
+  //
+  // NO SEAM UNDER THE COMMAND LINE EITHER. The bar used to carry a 1px accent
+  // rule along its bottom as "the one edge that says where chrome ends"; on
+  // screen it was a horizontal division cutting the workspace off from the
+  // prompt, and with the theme's own ground showing through the frost the bar
+  // separates itself. Everything that docks below still hangs off the
+  // MEASURED bottom (`--hc-header-bottom`, controls-bar's ResizeObserver),
+  // which needs no rule to be measurable. The top hairline stays: it meets
+  // the browser's own chrome, never the hive.
   margin: 0;
-  padding: 0 0.2rem;
+  padding: 0;
   background: rgba(var(--hc-chrome-glass), var(--hc-chrome-glass-a));
-  // Resting border is a faint steel hairline; it firms up — never glares —
-  // when the command line is active. `.input-open` is mobile-only (app.ts:
-  // inputOpen = mobile && visible), so `:focus-within` is the real "active"
-  // signal on desktop.
-  // Sub-pixel rules: half a pixel of a DARKER steel than the shell's accent
-  // (126,182,214 scaled down) — the line reads as a seam in the chrome rather
-  // than a lit edge drawn on top of it. The top and bottom carry the whole
-  // separation, so they sit a touch stronger than the sides.
-  //
-  // WEIGHT IS CARRIED BY ALPHA, NOT WIDTH. Chrome snaps a hairline border up
-  // to one device pixel, so `0.5px` and `1px` paint the same row — the only
-  // lever that actually thins the rule is lowering its contrast against the
-  // bar. Reach for these alphas, never a smaller px value.
-  //
-  // THE BOTTOM EDGE IS THE SEAM THAT MATTERS. Everything the shell docks —
-  // tool windows, the notes strip, the hint bar, the breadcrumb — hangs off
-  // the MEASURED bottom of this bar, so that one line is the only thing
-  // saying where chrome ends and the workspace begins. At the steel rule's
-  // resting alpha it read as another faint hairline among the panel edges
-  // below it and the separation vanished. It now carries the theme's own
-  // `--hc-chrome-accent` — a role every theme already answers, so the seam
-  // is blue under dark, ink-blue under light, amber under honey — at full
-  // alpha, which is what does most of the work. It is the ONE edge allowed
-  // a width of its own, and only barely: 1px against the sides' 0.5px, a
-  // single device pixel more on a 2x screen. A rule, not a bar — 2px read
-  // as a band of chrome in its own right. Colour states the seam; the extra
-  // pixel only keeps it from dissolving into the panel edges below.
-  border: 0.5px solid rgba(var(--hc-chrome-rule), 0.16);
-  border-top-color: rgba(var(--hc-chrome-rule), 0.38);
-  border-bottom: 1px solid rgba(var(--hc-chrome-accent), 1);
+  border: 0;
+  border-top: 0.5px solid rgba(var(--hc-chrome-rule), 0.38);
   border-radius: 0;
   // Clip children's hover fills to the frame. Safe for the intellisense
   // dropdown + hint surfaces — they position `fixed` and escape the clip,
@@ -147,20 +126,7 @@
 // little brighter is the whole "active" signal on a bar this thin.
 .header-bar:focus-within,
 .header-bar.input-open {
-  border-color: rgba(var(--hc-chrome-rule-firm), 0.24);
   border-top-color: rgba(var(--hc-chrome-rule-firm), 0.55);
-  // The accent seam stays the accent when the line is active — it just goes
-  // fully opaque. Firming it into the steel rule would erase the boundary at
-  // the exact moment the bar has the user's attention.
-  border-bottom-color: rgba(var(--hc-chrome-accent), 1);
-}
-
-// Dark and System carry the hive's gold seam. System is represented by no
-// explicit data-theme attribute, regardless of the OS colour scheme. Keeping
-// this after the active state means focus never turns the seam back to steel.
-:root[data-theme='dark'] .header-bar,
-:root:not([data-theme]) .header-bar {
-  border-bottom-color: #ffe14a;
 }
 
 // ── hci icon font ────────────────────────────────────────

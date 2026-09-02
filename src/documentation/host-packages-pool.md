@@ -195,6 +195,31 @@ published); only the moment moved.
 3. **Move ordering onto marks.** `generation` / `previous` / `at` / `label`
    become marks on the member; `chain-manifest.ts`'s per-host counter retires
    with the document it chains.
+
+   *A FORK FOUND WHILE STARTING 2 (2026-09-01), stated before it is built. The
+   community-hosts primitive this chip points at is not portable as written:
+   an artifact is a record in an OPFS pool and a mark is an ENROLLMENT worn by
+   a cell (`wearEnrollment` / `enrollmentsIn`, over Store and the lineage). All
+   of that presumes a hive. A publishing host has two quite different shapes:*
+
+   - *A **store-backed host** — the desktop client, `hypercomb-serve` — has a
+     hive, so `host:packages` is the primitive verbatim: members in the pool,
+     marks carrying order, projection rendered by enumerating them. This is
+     where step 2 belongs, and its crates are not in the main checkout.*
+   - *A **static host** — a content directory behind a relay, Pages, a bucket
+     — has no store and never will. Its honest form of "the pool IS the set"
+     is the DIRECTORY as the set: one member file per package under
+     `sign('host:packages')/`, minted by the ship. That still buys what the
+     roster cannot — adding twice is a no-op, un-publishing is removing one
+     file, and an interrupted ship costs one member instead of corrupting the
+     whole catalog, which is exactly the failure a single merged
+     `manifest.json` invites today.*
+
+   *Both render the SAME projection, which is why step 4 could land first and
+   why it will not need revisiting. What must not happen is a Node-side
+   reimplementation of enrollments to make the build script look like the app:
+   that is the second dialect the walker's squeaky-clean rule exists to
+   prevent.*
 4. **Serve the projection.** Non-sig well-known path, `no-store`.
    `listHostPackages` reads it; the inventory fields stop travelling.
    *Status 2026-09-01: **BUILT — ahead of 2 and 3**, because the projection is
@@ -212,6 +237,13 @@ published); only the moment moved.
    `host-packages.spec.ts` (7) + `projectionOf` in `chain-manifest.spec.ts` (5).
    Still owed here: steps 2 and 3 replace the manifest as what the projection
    is rendered FROM, and only then can the manifest stop being written.*
+   *LIVE on `jwize.com` 2026-09-01, verified end to end: `GET /packages.json`
+   → 200, 67,384 bytes byte-identical to the local render, 176 entries, head
+   `8747453970b3…` matching the manifest's v176. The cache rule is live with
+   it — `manifest.json` and `packages.json` both answer `no-store`, `/<sig>`
+   still answers `immutable`. No deployed client reads the projection yet, so
+   publishing it changed nothing for anyone already running: it is additive
+   until a shell shipping the new reader arrives.*
 5. **`beeDeps` derived, not published.** Drop it from the published record and
    from `HostPackage`.
    *Status 2026-09-01: **BUILT.** `deriveBeeDeps`

@@ -256,9 +256,14 @@ $header-action-gap: 0.25rem;
   outline: none;
 }
 
-/// The shared header band: fixed height, centered content, consistent padding.
-/// Panels add their own `border-bottom` (accent) and, where the close button
-/// must sit hard-right, a `justify-content` / a flex:1 title.
+/// The shared header band: fixed height, centered content, consistent padding,
+/// and ONE divider under it — the identity hairline (`--hc-window-edge`, the
+/// panel's accent at hairline weight, deepened under bright looks). It used to
+/// be left to each panel, and twenty-two panels drew it twenty-two ways:
+/// `rgba(var(--acc), 0.22)`, `.25`, `.35`, an ink hairline, a local
+/// `--fv-accent`, the raw SCSS pastel, and one panel with no line at all. A
+/// panel says nothing about its divider now; where the close button must sit
+/// hard-right it still adds a `justify-content` / a flex:1 title.
 @mixin header {
   flex: 0 0 auto;
   box-sizing: border-box;
@@ -268,6 +273,7 @@ $header-action-gap: 0.25rem;
   height: $header-height;
   min-height: $header-height;
   padding: 0 $header-padding-inline;
+  border-bottom: 1px solid var(--hc-window-edge);
   line-height: 1;
   background: linear-gradient(180deg, rgba(var(--hc-panel-sheen), 0.018), rgba(var(--hc-panel-sheen), 0.006));
 

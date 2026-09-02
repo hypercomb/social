@@ -214,11 +214,13 @@
     </ng-template>
 
     @if (showSetup()) {
-    <!-- THE READING ROW. The header above it and the composer below it still
-         span the whole window — they are about the window, not about what is
-         being read in it. Only this row splits, so the providers console can
-         stand INSIDE the chat as a third column rather than shoving the
-         window's own chrome leftward to make room for itself.
+    <!-- THE READING ROW. The header above it spans the whole window — it is
+         about the window, not about what is being read in it. Everything else,
+         the composer included, is the FIRST COLUMN of this row, so the
+         providers console stands INSIDE the chat as a second column rather
+         than shoving the window's own chrome leftward to make room for itself.
+         The column is the ONLY place the console's width is reserved — nothing
+         inside it may subtract that width a second time.
          Written once per branch because the composer lives inside the `@else`:
          the setup checklist has no composer, and a wrapper that straddled the
          branch would close a div the other branch never opened. -->
@@ -366,11 +368,13 @@
     <div class="chat-providers-host" [class.on]="providersOpen()"></div>
     </div>
     } @else {
-    <!-- THE READING ROW. The header above it and the composer below it still
-         span the whole window — they are about the window, not about what is
-         being read in it. Only this row splits, so the providers console can
-         stand INSIDE the chat as a third column rather than shoving the
-         window's own chrome leftward to make room for itself.
+    <!-- THE READING ROW. The header above it spans the whole window — it is
+         about the window, not about what is being read in it. Everything else,
+         the composer included, is the FIRST COLUMN of this row, so the
+         providers console stands INSIDE the chat as a second column rather
+         than shoving the window's own chrome leftward to make room for itself.
+         The column is the ONLY place the console's width is reserved — nothing
+         inside it may subtract that width a second time.
          Written once per branch because the composer lives inside the `@else`:
          the setup checklist has no composer, and a wrapper that straddled the
          branch would close a div the other branch never opened. -->

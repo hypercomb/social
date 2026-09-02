@@ -303,12 +303,23 @@ export class HostsPanelComponent implements OnDestroy {
     return !!newest && !this.isCurrent(newest)
   }
 
-  /** The line that says where you stand, and its params. One of three keys:
-   *  on a listed build, on a build this host does not list, or no build
-   *  recorded here at all (the dev shell imports modules directly). */
+  /** A GENERATION AND A SIGNATURE ARE NOT THE SAME KIND OF THING.
+   *
+   *  A build carries a generation only when the build that cut it stamped
+   *  one; a package from a host that does not count them carries none. Both
+   *  of these lines used to drop `generation ?? packageSig.slice(0, 8)` into
+   *  a slot in a sentence that already said the word "build" — so a host with
+   *  no generations rendered "Newest here: build 87474539", naming a build by
+   *  eight characters of a hash as though that were its number, and the line
+   *  above it read "You are on build" with nothing after it at all, because
+   *  `null ?? ''` is a blank. Neither is a formatting slip: one states a
+   *  falsehood and the other states half a sentence. The fix is a second key
+   *  per line, chosen by whether the fact exists. */
   yoursKey(zone: string): string {
     if (!this.installed()) return 'hosts.offer.yours-none'
-    return this.installedOn(zone) ? 'hosts.offer.yours' : 'hosts.offer.yours-elsewhere'
+    const mine = this.installedOn(zone)
+    if (!mine) return 'hosts.offer.yours-elsewhere'
+    return mine.generation !== null ? 'hosts.offer.yours' : 'hosts.offer.yours-sig'
   }
 
   yoursParams(zone: string): Record<string, string | number> {
@@ -316,6 +327,22 @@ export class HostsPanelComponent implements OnDestroy {
     return {
       generation: mine?.generation ?? '',
       sig: (this.installed() ?? '').slice(0, 8),
+    }
+  }
+
+  /** The same split for the host's newest build. */
+  newestKey(zone: string): string {
+    const newest = this.newestOf(zone)
+    return newest && newest.generation !== null
+      ? 'hosts.offer.newest'
+      : 'hosts.offer.newest-sig'
+  }
+
+  newestParams(zone: string): Record<string, string | number> {
+    const newest = this.newestOf(zone)
+    return {
+      generation: newest?.generation ?? '',
+      sig: (newest?.packageSig ?? '').slice(0, 8),
     }
   }
 

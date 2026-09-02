@@ -148,6 +148,17 @@
   letter-spacing: 0.03em;
 }
 
+// The zone's word pair — the breadcrumb's secret crumb, restated here. Same
+// token, same separators, so the eye links the two.
+.mesh-modal-words {
+  margin: 0.5rem 0 0;
+  font-family: var(--hc-mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+  .mesh-modal-words-sep { color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-ghost)); font-size: 0.55em; vertical-align: middle; padding: 0 0.3em; }
+  .mesh-modal-words-pair { color: var(--hc-status-secret); }
+}
+
 // ── secret row (input + eye toggle) ───────────────────
 .mesh-modal-secret-row {
   display: flex;

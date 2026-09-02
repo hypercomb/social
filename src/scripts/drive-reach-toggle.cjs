@@ -179,13 +179,12 @@ async function main() {
     await page.evaluate(() => window.__hypercombEffectBus.emit('files:viewer-close', {}))
   })
 
-  // ── 4. bottom tag strip, opened out ──────────────────────────────────────
+  // ── 4. bottom tag strip ──────────────────────────────────────────────────
+  // ONE glyph at the head of the strip carries the reach, expanded or not —
+  // the opened-out strip used to repeat it, two identical globes side by side.
   await stage('tag strip', async () => {
     await page.evaluate(() => window.__reachLog.filter.splice(0))
-    const expand = page.locator('.tag-expand')
-    await expand.waitFor({ state: 'visible', timeout: 8000 })
-    if (!await page.locator('.tag-scope-set .tag-scope-opt').count()) await expand.click()
-    const stripBtn = page.locator('.tag-scope-set .tag-scope-opt')
+    const stripBtn = page.locator('.tag-float .tag-scope')
     await stripBtn.waitFor({ state: 'visible', timeout: 8000 })
     results.strip = await lap(page, stripBtn)
     stripScopes = await page.evaluate(() => window.__reachLog.filter.splice(0))

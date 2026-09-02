@@ -232,6 +232,14 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
 
     this.#unsubs.push(
       EffectBus.on<PresencePayload>('swarm:presence-changed', (payload) => {
+        // The swarm exists by the time it reports presence. On the web
+        // shell the drones arrive from OPFS AFTER this strip mounted, so
+        // the one-time read in ngOnInit found no swarm and left the label
+        // empty for the whole session — the badge offered "+" to someone
+        // who had named themselves. Seed it here once the swarm is there.
+        if (!this.#myLabel()) {
+          try { const l = this.#swarm()?.myLabel?.() ?? ''; if (l) this.#myLabel.set(l) } catch { /* default empty */ }
+        }
         const peers = Array.isArray(payload?.peers) ? payload.peers : []
         const alone = payload?.alone ?? peers.length === 0
         this.#peers.set(peers)
@@ -242,8 +250,11 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
         if (alone) this.expanded.set(false)
       }),
 
-      // A peer's label arrived (or changed) — force badge/row recompute.
-      EffectBus.on('swarm:label-changed', () => {
+      // A label arrived (or changed) — force badge/row recompute. Our OWN
+      // rename lands here too (`self`) when it was saved through the mesh
+      // selector rather than this strip's inline field.
+      EffectBus.on<{ label?: string; self?: boolean }>('swarm:label-changed', (p) => {
+        if (p?.self && typeof p.label === 'string') this.#myLabel.set(p.label)
         this.#labelVersion.update(v => v + 1)
       }),
 

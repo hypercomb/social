@@ -86,12 +86,18 @@
                     <span class="hosts-yours" [class.behind]="updateAvailable(zone)">
                       {{ yoursKey(zone) | t: yoursParams(zone) }}
                     </span>
+                    <!-- The sentence, then the facts under it. A build's
+                         generation and a package's signature are not the same
+                         kind of thing, so they do not share a slot: see
+                         newestKey. -->
                     <span class="hosts-newest">
-                      {{ 'hosts.offer.newest' | t: { generation: newest.generation ?? newest.packageSig.slice(0, 8) } }}
-                      <span class="hosts-when">{{ when(newest) }}</span>
-                      <span class="hosts-offer-meta">{{ 'hosts.offer.meta' | t: {
-                        bees: newest.beeCount ?? newest.bees.length, layers: newest.layerCount ?? newest.layers.length
-                      } }}</span>
+                      <span class="hosts-newest-head">{{ newestKey(zone) | t: newestParams(zone) }}</span>
+                      <span class="hosts-newest-facts">
+                        <span class="hosts-when">{{ when(newest) }}</span>
+                        <span class="hosts-offer-meta">{{ 'hosts.offer.meta' | t: {
+                          bees: newest.beeCount ?? newest.bees.length, layers: newest.layerCount ?? newest.layers.length
+                        } }}</span>
+                      </span>
                     </span>
                     @if (intakeOf(newest); as state) {
                       @if (state.detail) {

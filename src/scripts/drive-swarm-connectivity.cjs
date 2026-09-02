@@ -66,8 +66,14 @@ const ts = () => new Date().toISOString().slice(11, 23)
 const log = (tag, ...a) => console.log(`[${ts()}] [${tag}]`, ...a)
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
-async function newClient(browser, label) {
+async function newClient(browser, label, zone = { room: ROOM, secret: SECRET, relay: RELAY }) {
   const ctx = await browser.newContext()
+  // Never let the dev server's live-reload client into a harness page. The
+  // source tree is shared with other live sessions; every rebuild reloads the
+  // page, and a refresh lands PRIVATE — the join evaporates mid-scenario and
+  // reads as a dead swarm. Aborting the module is not an option — the dev
+  // bundle's entry imports injectQuery from it — so serve an inert stub.
+  await ctx.route('**/@vite/client*', r => r.fulfill({ status: 200, contentType: 'text/javascript', body: 'export const injectQuery = (url) => url; export const createHotContext = () => ({ accept() {}, dispose() {}, prune() {}, on() {}, send() {}, invalidate() {} }); export function updateStyle() {}; export function removeStyle() {}' }))
   // Seed the zone BEFORE any page script runs, on every navigation.
   //
   // Writing localStorage after goto() races the boot: RoomStore/SecretStore
@@ -77,14 +83,15 @@ async function newClient(browser, label) {
   // same room, different sig, no swarm — which reads exactly like a broken
   // relay. addInitScript puts the values in place before the stores exist,
   // which is also the state a returning client actually boots into.
-  await ctx.addInitScript(({ room, secret, relay }) => {
+  await ctx.addInitScript(({ room, secret, relay, seed }) => {
     localStorage.setItem('hc:room', room)
     localStorage.setItem('hc:secret', secret)
     if (relay) {
       localStorage.setItem('hc:nostrmesh:relays', JSON.stringify([relay]))
       localStorage.setItem('hc:nostrmesh:allow-loopback', '1')
     }
-  }, { room: ROOM, secret: SECRET, relay: RELAY })
+    for (const [k, v] of Object.entries(seed ?? {})) localStorage.setItem(k, v)
+  }, { room: zone.room, secret: zone.secret, relay: zone.relay ?? null, seed: zone.seed ?? {} })
   const page = await ctx.newPage()
   page.on('pageerror', e => log(label, 'PAGE ERROR:', String(e).slice(0, 200)))
   // The shell fires several router navigations while it boots, and IoC is
@@ -880,4 +887,13 @@ async function finish(browsers) {
   process.exit(failed.length ? 1 : 0)
 }
 
-main().catch(e => { console.error('[fatal]', e); process.exit(1) })
+if (require.main === module) main().catch(e => { console.error('[fatal]', e); process.exit(1) })
+
+// The helpers double as a library for the other swarm harnesses
+// (drive-swarm-join-order.cjs) — same clients, same join gesture, same probes.
+module.exports = {
+  URL_, RELAY, HEADED, KEEP, launcherFor, log, sleep, check, results, finish,
+  newClient, newClientNoZone, waitForShell, waitForReady, installIfNeeded, settle,
+  joinSwarm, meshState, swarmState, pubkeyOf, addTile, ownChildren, navTo,
+  locationNow, peerTilesNow, waitFor, evalSafe,
+}

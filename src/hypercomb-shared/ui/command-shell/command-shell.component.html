@@ -377,6 +377,11 @@
               <span class="detail-kind">{{ d.kind }}</span>
             }
           </div>
+          @if (d.swatch) {
+            <!-- THE SAMPLE. The row's chip is a stamp; here there is room to
+                 see what the word actually means before it is applied. -->
+            <div class="detail-swatch" [style.background]="d.swatch" aria-hidden="true"></div>
+          }
           @if (d.description) {
             <p class="detail-desc">{{ d.description }}</p>
           }

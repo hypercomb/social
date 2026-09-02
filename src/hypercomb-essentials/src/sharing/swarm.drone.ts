@@ -221,6 +221,11 @@ const PEER_STALE_SWEEP_INTERVAL_MS = 30_000
 // re-ask the mesh for every held tile's child slot.
 const PRIME_COOLDOWN_MS = 60_000
 
+// STICKY MODE — how many visited pages a participant keeps announced at
+// once. Each costs one replaceable layer event per ~LAYER_REFRESH_MS on the
+// heartbeat; the oldest visit falls off first.
+const VISITED_PAGES_MAX = 64
+
 // Resource events get a longer TTL than layer events — image bytes
 // are heavier and don't change with every navigation, so we want
 // them to persist longer in the relay's cache for new joiners. A
@@ -562,6 +567,26 @@ export class SwarmDrone extends Drone {
   // fetchVisualsAt, so concurrent #syncForSig passes don't double-fetch.
   #visualsRecoveryInFlight = new Set<string>()
 
+  // STICKY MODE (Jaime, 2026-09-02: "as soon as you visited the tile once it
+  // should be in memory for all of the participants until the end of the
+  // swarm or leaving and coming back"). Receivers already RETAIN what they
+  // witnessed across navigation; the gap was the PUBLISHER, which only kept
+  // the page it stood on alive — everything left behind lapsed on the relay
+  // at EVENT_TTL_SECS, so whoever arrived after that found nothing. This is
+  // every page this participant stood on in the current swarm session,
+  // keyed by lineageKey with the raw segments the walk needs; the heartbeat
+  // re-announces each one (#refreshVisitedPages) until the session ends —
+  // leave or zone change clears it. Ephemeral mode leaves it empty.
+  #visitedPages = new Map<string, readonly string[]>()
+
+  /** Sticky (default) keeps every page you visited announced for the life
+   *  of the session; ephemeral announces only where you stand, so what you
+   *  leave lapses for the people there. Participant-local like the public
+   *  list — never in a layer. `/swarm-mode` flips it. */
+  public stickyMode = (): boolean => {
+    try { return localStorage.getItem('hc:swarm:sticky') !== '0' } catch { return true }
+  }
+
   // Per-lineage peer state. Outer key = lineage sig, inner key = peer
   // pubkey. Updated on every incoming event; replaceability means the
   // last write wins per peer, which matches what we want at render.
@@ -807,6 +832,8 @@ export class SwarmDrone extends Drone {
         return
       }
       void this.#syncForCurrentLineage()
+      // Sticky mode — keep every page visited this session on the relay.
+      void this.#refreshVisitedPages()
       // Re-assert our own hide list — the same heartbeat cadence as
       // layer events. Without this, a user who hides a tile and then
       // sits idle would let their hide-event NIP-40 expiration lapse,
@@ -1187,6 +1214,7 @@ export class SwarmDrone extends Drone {
         this.#foreignPathKeys.clear()
         this.#myDrillSentMs.clear()
         this.#drillServedMs.clear()
+        this.#visitedPages.clear()
         // Drop the zone key so hide reads/writes fall back to
         // device-scoped storage while in private mode.
         this.#updateZoneKey()
@@ -1218,6 +1246,8 @@ export class SwarmDrone extends Drone {
     lastVisitSignal: this.#lastVisitSignal,
     lastDrillRequest: this.#lastDrillRequest,
     lastDrillServed: this.#lastDrillServed,
+    stickyMode: this.stickyMode(),
+    visitedPages: [...this.#visitedPages.keys()],
     currentSig: this.#currentSig.slice(0, 12),
     myPubkey: this.#myPubkey?.slice(0, 8) ?? null,
     room: this.#getRoomStore()?.value ?? null,
@@ -1552,6 +1582,11 @@ export class SwarmDrone extends Drone {
       if (evicted > 0) {
         slog(`[swarm] resolved myPubkey ${this.#myPubkey.slice(0, 8)}; evicted ${evicted} self-echo entr${evicted === 1 ? 'y' : 'ies'} from peer cache`)
       }
+      // Everything stamped with our identity (alive beacon, drill request,
+      // presence channel, withheld list) bails silently while the key is
+      // unknown. If a zone sync already ran, re-run it now so those go out
+      // immediately instead of on the next heartbeat tick.
+      if (this.#currentSig) void this.#syncForCurrentLineage()
       return true
     } catch {
       return false
@@ -1667,6 +1702,17 @@ export class SwarmDrone extends Drone {
     if (!composedSig) return
 
     this.#lastSyncInput = { segments, room, secretLen: secret.length, key: `${pathKey}\0${room}\0${secret}` }
+    if (this.stickyMode()) {
+      // Re-insert so the freshest visit sits last; the FIFO trim drops the
+      // page visited longest ago.
+      this.#visitedPages.delete(pathKey)
+      this.#visitedPages.set(pathKey, segments)
+      while (this.#visitedPages.size > VISITED_PAGES_MAX) {
+        const oldest = this.#visitedPages.keys().next().value
+        if (oldest === undefined) break
+        this.#visitedPages.delete(oldest)
+      }
+    }
     
     await this.#syncForSig(composedSig)
 
@@ -1737,6 +1783,35 @@ export class SwarmDrone extends Drone {
     })
   }
 
+  // STICKY MODE refresh — rides the heartbeat and re-announces every page
+  // this participant visited in the session except the current one (the
+  // normal sync owns that). Each is the same page-only walk the current page
+  // gets (dir=null reads the children from the layer); #publishSubtree's own
+  // memo dedupes unchanged content to one publish per LAYER_REFRESH_MS, so N
+  // visited pages cost N replaceable events per ~60s, and pictures ride their
+  // own 24h memo. The public filter and the availability gate apply exactly
+  // as they do for the current page — this changes WHEN a page is announced,
+  // never WHAT.
+  #refreshVisitedPages = async (): Promise<void> => {
+    if (!this.stickyMode() || this.#visitedPages.size === 0) return
+    let meshPublic = false
+    try { meshPublic = localStorage.getItem('hc:mesh-public') === 'true' } catch { /* privacy-safe default: off */ }
+    if (!meshPublic) return
+    const sigStore = this.#getSignatureStore()
+    const mesh = this.#getMesh()
+    if (!sigStore || !mesh?.publish) return
+    const room = this.#getRoomStore()?.value?.trim() ?? ''
+    const secret = this.#getSecretStore()?.value?.trim() ?? ''
+    if (!room || !secret) return
+    const currentKey = this.#lastSyncInput ? lineageKey(this.#lastSyncInput.segments) : ''
+    for (const [key, segments] of [...this.#visitedPages]) {
+      if (key === currentKey) continue
+      const counter = { count: 0 }
+      try { await this.#publishSubtree(null, segments, MAX_PUBLISH_DEPTH, counter, sigStore, mesh, room, secret) }
+      catch { /* next heartbeat */ }
+    }
+  }
+
   // Tear down all per-sig state at the OLD #currentSig (subscriptions,
   // peer cache, last-published memo) and re-run sync at the new
   // composed sig. Called on room/secret changes. Emits
@@ -1774,6 +1849,7 @@ export class SwarmDrone extends Drone {
     this.#foreignPathKeys.clear()
     this.#myDrillSentMs.clear()
     this.#drillServedMs.clear()
+    this.#visitedPages.clear()
     // Tear down resource subs and the published-resource memo too —
     // a zone change means a different audience for our resources, so
     // we want to re-assert them in the new zone (and stop fetching
@@ -3426,13 +3502,20 @@ const payload: SwarmLayerPayload = myLabel
   #lastDrillServed: Record<string, unknown> | null = null
 
   #publishDrillRequest = async (segments: readonly string[]): Promise<void> => {
-    if (segments.length === 0) return
     const mesh = this.#getMesh()
     if (!mesh?.publish) return
     const myPubkey = this.#myPubkey
     if (!myPubkey) return
-    const share = this.#broadcastablePrefix(segments)
-    if (share.length === 0) {
+    // ROOT IS A PAGE TOO. Publishing is page-only (MAX_PUBLISH_DEPTH), so a
+    // publisher who has walked into a tile stops refreshing their ROOT slot
+    // and the relay forgets it at EVENT_TTL_SECS. A member arriving at root
+    // after that has nothing to replay — and with root excluded here, no
+    // way to ask. Whether you saw a publisher's root then depended on who
+    // got there first. An empty path IS the root drill: it names nothing,
+    // so there is no privacy prefix to compute, and every holder answers
+    // with their public root subset exactly like any other page.
+    const share = segments.length === 0 ? [] : this.#broadcastablePrefix(segments)
+    if (segments.length > 0 && share.length === 0) {
       this.#lastDrillRequest = { stage: 'no-sharable-prefix', at: [...segments], atMs: Date.now() }
       return
     }
@@ -3476,13 +3559,14 @@ const payload: SwarmLayerPayload = myLabel
     if (!from || (this.#myPubkey && from === this.#myPubkey)) return
     const payload = evt.payload as { pathSegments?: unknown } | undefined
     const rawSegs = payload?.pathSegments
-    const segments: string[] = Array.isArray(rawSegs)
-      ? rawSegs
-          .map(s => (typeof s === 'string' ? s.trim() : ''))
-          .filter(s => s.length > 0 && s.length <= 256)
-          .slice(0, 16)
-      : []
-    if (segments.length === 0) return
+    if (!Array.isArray(rawSegs)) return
+    const segments: string[] = rawSegs
+      .map(s => (typeof s === 'string' ? s.trim() : ''))
+      .filter(s => s.length > 0 && s.length <= 256)
+      .slice(0, 16)
+    // An explicit EMPTY list is the root drill (see #publishDrillRequest);
+    // a list that filtered down to nothing was malformed — never answer it.
+    if (segments.length === 0 && rawSegs.length > 0) return
 
     // Only answer for paths that are public from OUR side, at every level.
     for (let i = 0; i < segments.length; i++) {
@@ -3608,6 +3692,11 @@ const payload: SwarmLayerPayload = myLabel
   public setMyLabel = (label: string): void => {
     const clean = String(label ?? '').trim().slice(0, 64).replace(/[\x00-\x1f]/g, '')
     try { localStorage.setItem('hc:user-label', clean) } catch { /* ignore */ }
+    // Tell the shell too. The presence strip mirrors its own label from a
+    // one-time read at mount, and the mesh selector saves through THIS
+    // method — without a self-tagged emit a name typed in the selector
+    // never reached the badge, which kept offering "+" until a reload.
+    this.emitEffect('swarm:label-changed', { pubkey: this.#myPubkey ?? '', label: clean, self: true })
     // Invalidate publish memo so the next sync re-emits with the new label
     // (the publish dedup compares serialized payload; changing label
     // changes the bytes, so this is belt-and-braces).

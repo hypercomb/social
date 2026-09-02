@@ -250,6 +250,9 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
     count?: number
     /** Sub-options for a behaviour, listed vertically under the detail. */
     options?: readonly string[]
+    /** The member's own swatch, drawn as a specimen band — a theme's palette,
+     *  a backdrop's look — at a size the row's chip has no room for. */
+    swatch?: string
   } | null>(null)
 
   /** Optional color swatches keyed by suggestion name (CSS color string). */
