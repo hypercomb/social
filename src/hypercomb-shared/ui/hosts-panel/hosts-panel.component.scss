@@ -134,10 +134,12 @@ $accent: #7eb6d6;
   line-height: 1;
   color: var(--hc-window-ink-quiet);
   cursor: pointer;
-  opacity: 0.55;
+  opacity: 0.4;
+  transition: opacity 0.12s ease;
 
+  .hosts-row:hover &,
   &:hover { opacity: 1; color: var(--hc-window-ink-loud); }
-  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+  &:focus-visible { opacity: 1; outline: 1px solid var(--hc-accent); outline-offset: 1px; }
 }
 
 .hosts-empty {
@@ -261,19 +263,30 @@ $accent: #7eb6d6;
   padding: 0;
 }
 
+// ONE ROW, HOWEVER MANY CONTROLS IT CARRIES.
+//
+// This was a two-column grid, and the row has never had two children: copy +
+// Apply + hide is three, and in the delete area copy + Unhide + Delete is
+// three again. The third landed in an implicit SECOND ROW under the copy, so
+// every build in the ledger was followed by a stray floating ✕ that belonged
+// to it and did not look like it. A flex row takes any number of controls and
+// cannot grow a row that was never declared — the copy is the only thing that
+// flexes, everything after it is intrinsic and never wraps.
 .hosts-offer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
-  gap: 0.65em;
-  padding: 0.45em 0;
+  gap: 0.5em;
+  padding: 0.4em 0;
   border-bottom: 1px solid rgba(var(--acc), 0.07);
 
   &:last-child { border-bottom: none; }
+
+  > :not(.hosts-offer-copy) { flex: 0 0 auto; }
 }
 
 .hosts-offer-copy {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   min-width: 0;
   gap: 0.08em;
@@ -324,34 +337,55 @@ $accent: #7eb6d6;
 .hosts-standing {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  // Top, not centre. The copy is three lines and the button is one, so
+  // centring floated it against the SECOND line and it read as belonging to
+  // "Newest here" rather than to the standing as a whole.
+  align-items: start;
   gap: 0.65em;
-  padding: 0.2em 0 0.45em;
+  padding: 0.25em 0 0.5em;
 }
 
 .hosts-standing-copy {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  gap: 0.12em;
+  gap: 0.25em;
 }
 
 .hosts-yours {
   font-size: 0.8em;
+  line-height: 1.3;
   color: var(--hc-window-ink-plain);
 
   &.behind { color: var(--hc-window-accent); }
 }
 
+// ONE SENTENCE, THEN ITS FACTS. The phrase and the two facts under it used to
+// be three inline children of a wrapping flex line, and each carried its OWN
+// em size on top of this one — 0.68em of 0.74em is half a step, so the date
+// and the counts rendered at roughly seven pixels and ran together into an
+// unreadable smear. Sizes are set ONCE here; the children ride it at 1em, and
+// the break between the phrase and the facts is a declared row rather than
+// wherever the words happened to run out of width.
 .hosts-newest {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.15em;
+  font-size: 0.74em;
+  line-height: 1.35;
+  color: var(--hc-window-ink-quiet);
+
+  .hosts-when,
+  .hosts-offer-meta { font-size: 1em; }
+}
+
+.hosts-newest-facts {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 0.45em;
-  font-size: 0.74em;
-  color: var(--hc-window-ink-quiet);
-
-  .hosts-offer-meta { font-size: 0.92em; }
+  gap: 0.15em 0.5em;
+  opacity: 0.85;
 }
 
 .hosts-update {
@@ -426,10 +460,12 @@ $accent: #7eb6d6;
   line-height: 1;
   color: var(--hc-window-ink-quiet);
   cursor: pointer;
-  opacity: 0.5;
+  opacity: 0.4;
+  transition: opacity 0.12s ease;
 
+  .hosts-offer:hover &,
   &:hover { opacity: 1; color: var(--hc-window-ink-loud); }
-  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+  &:focus-visible { opacity: 1; outline: 1px solid var(--hc-accent); outline-offset: 1px; }
 }
 
 .hosts-hidden-note {
@@ -468,15 +504,23 @@ $accent: #7eb6d6;
 }
 
 .hosts-line {
-  margin: 0.55em 0 0.1em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  margin: 0.75em 0 0.15em;
   font-size: 0.7em;
-  letter-spacing: 0.04em;
-  color: var(--hc-window-ink-plain);
+  letter-spacing: 0.05em;
+  color: var(--hc-window-accent-quiet);
 
-  &:first-of-type { margin-top: 0.25em; }
+  &:first-of-type { margin-top: 0.35em; }
+
+  // The clip belongs to the TEXT, not to the row. `text-overflow` on a flex
+  // container does nothing at all, so a long branch name pushed its own hide
+  // control off the edge instead of trimming itself.
+  > span:first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 .hosts-offer-add,
@@ -499,8 +543,16 @@ $accent: #7eb6d6;
   &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
 }
 
+// A FOLD SITS ON THE SAME LEFT EDGE AS WHAT IT FOLDS. These carry padding so
+// they have a hit area, and the padding was pushing their words a few pixels
+// in from every heading and every row around them — enough that the panel
+// read as three different left margins stacked on top of each other. The
+// negative inline start gives the words back their column and keeps the box.
 .hosts-more {
-  padding: 0.22em 0.4em;
+  display: block;
+  margin-inline-start: -0.4em;
+  padding: 0.25em 0.4em;
+  text-align: left;
   font-size: 0.72em;
   background: none;
   border: 1px solid transparent;

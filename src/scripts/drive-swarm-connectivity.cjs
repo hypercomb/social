@@ -66,7 +66,7 @@ const ts = () => new Date().toISOString().slice(11, 23)
 const log = (tag, ...a) => console.log(`[${ts()}] [${tag}]`, ...a)
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
-async function newClient(browser, label) {
+async function newClient(browser, label, zone = { room: ROOM, secret: SECRET, relay: RELAY }) {
   const ctx = await browser.newContext()
   // Seed the zone BEFORE any page script runs, on every navigation.
   //
@@ -84,7 +84,7 @@ async function newClient(browser, label) {
       localStorage.setItem('hc:nostrmesh:relays', JSON.stringify([relay]))
       localStorage.setItem('hc:nostrmesh:allow-loopback', '1')
     }
-  }, { room: ROOM, secret: SECRET, relay: RELAY })
+  }, { room: zone.room, secret: zone.secret, relay: zone.relay ?? null })
   const page = await ctx.newPage()
   page.on('pageerror', e => log(label, 'PAGE ERROR:', String(e).slice(0, 200)))
   // The shell fires several router navigations while it boots, and IoC is
@@ -880,4 +880,13 @@ async function finish(browsers) {
   process.exit(failed.length ? 1 : 0)
 }
 
-main().catch(e => { console.error('[fatal]', e); process.exit(1) })
+if (require.main === module) main().catch(e => { console.error('[fatal]', e); process.exit(1) })
+
+// The helpers double as a library for the other swarm harnesses
+// (drive-swarm-join-order.cjs) — same clients, same join gesture, same probes.
+module.exports = {
+  URL_, RELAY, HEADED, KEEP, launcherFor, log, sleep, check, results, finish,
+  newClient, newClientNoZone, waitForShell, waitForReady, installIfNeeded, settle,
+  joinSwarm, meshState, swarmState, pubkeyOf, addTile, ownChildren, navTo,
+  locationNow, peerTilesNow, waitFor, evalSafe,
+}

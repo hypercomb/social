@@ -27,7 +27,15 @@ $mint: #6fbf94;
 .tags-panel {
   pointer-events: auto;
   position: absolute;
-  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  // Normally the shared toolwindow anchor, under the header bar. The ONE
+  // exception is the notes desk, which this panel is the other half of: the
+  // desk covers the header (there is nothing in it while a view has the
+  // surface) and a panel still starting 42px down leaves a stripe of hive
+  // showing above it, with a step where the two headers should meet. The desk
+  // publishes `--hc-desk-top` for exactly as long as it holds the surface;
+  // unset — which is every other time this panel is open — this is the
+  // anchor it always was.
+  top: var(--hc-desk-top, max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor)));
   right: 0;
   bottom: 0;
   width: 320px;
@@ -85,12 +93,13 @@ $mint: #6fbf94;
   padding: 0.05em 0.55em;
 }
 
-// ── reach, in the header (mirrors the feedback panel) ─────
+// ── reach, at the right end of the search row ─────────────
+// It used to sit in the header. Reach and search narrow the same list, so
+// the two controls stand together; `.tags-search-block` is the flex row.
 .tags-scope {
-  flex-shrink: 0;
+  flex: 0 0 auto;
   display: flex;
   gap: 0.2rem;
-  margin-left: auto;
   padding: 0.15rem;
   background: rgba(var(--hc-panel-ink), 0.03);
   border: 1px solid rgba(var(--hc-panel-ink), 0.08);
@@ -162,9 +171,10 @@ $mint: #6fbf94;
   text-transform: uppercase;
 }
 
-// Reach used to be a full-width list of three named + described rows here.
-// It now rides in the header as the segmented trio (see `.tags-scope` above),
-// so every panel that has a reach shows it in the same place.
+// Reach used to be a full-width list of three named + described rows here,
+// then a header control. It now rides at the right end of the search row
+// (see `.tags-scope` above) — one glyph, beside the other control that
+// narrows this list.
 
 // ── current filter state ──────────────────────────────────
 
@@ -688,11 +698,16 @@ $mint: #6fbf94;
 // tag cloud. Cold chrome: this is a lens on the lists, not a state that
 // touches the hive.
 .tags-search-block {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
   padding: 0.5em 1em 0.45em;
   border-top: 1px solid rgba(var(--acc), 0.12);
 }
 
 .tags-search-field {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 0.4em;

@@ -14,26 +14,14 @@
     tabindex="-1"
     [attr.aria-label]="'tags.viewer.title' | t"
   >
-    <!-- Reach rides in the header as a THREE-STAGE TOGGLE, the same cycle the
-         feedback and files panels and the bottom strip use — one glyph that
-         reads out the current reach and steps to the next on click:
-         page → children → global, wrapping. The tooltip names the stage and
-         says where the next click goes. -->
     <!-- What the panel IS lives on hover, not in a paragraph — the title
-         carries the old intro line. Totally clean at rest. -->
+         carries the old intro line. Totally clean at rest. Reach is NOT
+         here: it rides beside the search (below), because reach and search
+         narrow the same list and belong within reach of each other. -->
     <header class="tags-header">
       <div class="tags-heading" [attr.title]="'tags.intro' | t">
         <span class="tags-title">{{ 'tags.viewer.title' | t }}</span>
         <span class="tags-total">{{ totalTags() }}</span>
-      </div>
-      <div class="tags-scope">
-        <button
-          type="button"
-          class="tags-scope-btn active"
-          [title]="'tags.scope-' + scope() | t"
-          [attr.aria-label]="'tags.scope-' + scope() | t"
-          (click)="cycleScope()"
-        ><span class="mat-sym">{{ scopeIcon() }}</span></button>
       </div>
       <button class="tags-close" type="button" (click)="close()" [attr.aria-label]="'tags.close' | t">×</button>
     </header>
@@ -153,10 +141,17 @@
       </section>
     }
 
-    <!-- ── the search ───────────────────────────────────────────────────────
+    <!-- ── the search, and reach beside it ─────────────────────────────────
          One field over the whole vocabulary — bouquets, loose keywords and
          namespace groups alike. Just the search; no type chips, no tag cloud.
-         View state only: nothing here touches the hive. -->
+         View state only: nothing here touches the hive.
+
+         REACH sits at the right end of this row, not up in the header: both
+         controls narrow the same list — the search by spelling, the reach by
+         how far out to look — so they belong side by side. A THREE-STAGE
+         TOGGLE, the same cycle the feedback and files panels and the bottom
+         strip use: one glyph that reads out the current reach and steps to
+         the next on click, page → children → global, wrapping. -->
     <div class="tags-search-block">
       <div class="tags-search-field">
         <span class="mat-sym tags-search-icon" aria-hidden="true">search</span>
@@ -178,6 +173,15 @@
             [title]="'tags.search.clear' | t"
           >close</button>
         }
+      </div>
+      <div class="tags-scope">
+        <button
+          type="button"
+          class="tags-scope-btn active"
+          [title]="'tags.scope-' + scope() | t"
+          [attr.aria-label]="'tags.scope-' + scope() | t"
+          (click)="cycleScope()"
+        ><span class="mat-sym">{{ scopeIcon() }}</span></button>
       </div>
     </div>
 

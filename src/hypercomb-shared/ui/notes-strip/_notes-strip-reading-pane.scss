@@ -23,9 +23,15 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  // A RECESS, not a colour. This was `rgba(9, 9, 15, 0.5)` — a near-black
+  // named outright, from when every tool window was dark glass. On the paper
+  // theme the desk's own ground is `rgba(255, 252, 244, …)`, so a half-opaque
+  // near-black turned the widest column of the surface into a grey slab.
+  // `--hc-window-tint` is the sanctioned rung for exactly this: the window's
+  // own ink at a whisper, which recedes in either theme without naming one.
   background:
     radial-gradient(120% 70% at 50% 0%, rgba($steel, 0.06), transparent 60%),
-    rgba(9, 9, 15, 0.5);
+    var(--hc-window-tint);
 
   .cv2-reading-scroll {
     flex: 1 1 auto;

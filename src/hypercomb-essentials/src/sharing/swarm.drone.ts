@@ -1552,6 +1552,11 @@ export class SwarmDrone extends Drone {
       if (evicted > 0) {
         slog(`[swarm] resolved myPubkey ${this.#myPubkey.slice(0, 8)}; evicted ${evicted} self-echo entr${evicted === 1 ? 'y' : 'ies'} from peer cache`)
       }
+      // Everything stamped with our identity (alive beacon, drill request,
+      // presence channel, withheld list) bails silently while the key is
+      // unknown. If a zone sync already ran, re-run it now so those go out
+      // immediately instead of on the next heartbeat tick.
+      if (this.#currentSig) void this.#syncForCurrentLineage()
       return true
     } catch {
       return false
@@ -3426,13 +3431,20 @@ const payload: SwarmLayerPayload = myLabel
   #lastDrillServed: Record<string, unknown> | null = null
 
   #publishDrillRequest = async (segments: readonly string[]): Promise<void> => {
-    if (segments.length === 0) return
     const mesh = this.#getMesh()
     if (!mesh?.publish) return
     const myPubkey = this.#myPubkey
     if (!myPubkey) return
-    const share = this.#broadcastablePrefix(segments)
-    if (share.length === 0) {
+    // ROOT IS A PAGE TOO. Publishing is page-only (MAX_PUBLISH_DEPTH), so a
+    // publisher who has walked into a tile stops refreshing their ROOT slot
+    // and the relay forgets it at EVENT_TTL_SECS. A member arriving at root
+    // after that has nothing to replay — and with root excluded here, no
+    // way to ask. Whether you saw a publisher's root then depended on who
+    // got there first. An empty path IS the root drill: it names nothing,
+    // so there is no privacy prefix to compute, and every holder answers
+    // with their public root subset exactly like any other page.
+    const share = segments.length === 0 ? [] : this.#broadcastablePrefix(segments)
+    if (segments.length > 0 && share.length === 0) {
       this.#lastDrillRequest = { stage: 'no-sharable-prefix', at: [...segments], atMs: Date.now() }
       return
     }
@@ -3476,13 +3488,14 @@ const payload: SwarmLayerPayload = myLabel
     if (!from || (this.#myPubkey && from === this.#myPubkey)) return
     const payload = evt.payload as { pathSegments?: unknown } | undefined
     const rawSegs = payload?.pathSegments
-    const segments: string[] = Array.isArray(rawSegs)
-      ? rawSegs
-          .map(s => (typeof s === 'string' ? s.trim() : ''))
-          .filter(s => s.length > 0 && s.length <= 256)
-          .slice(0, 16)
-      : []
-    if (segments.length === 0) return
+    if (!Array.isArray(rawSegs)) return
+    const segments: string[] = rawSegs
+      .map(s => (typeof s === 'string' ? s.trim() : ''))
+      .filter(s => s.length > 0 && s.length <= 256)
+      .slice(0, 16)
+    // An explicit EMPTY list is the root drill (see #publishDrillRequest);
+    // a list that filtered down to nothing was malformed — never answer it.
+    if (segments.length === 0 && rawSegs.length > 0) return
 
     // Only answer for paths that are public from OUR side, at every level.
     for (let i = 0; i < segments.length; i++) {
@@ -3608,6 +3621,11 @@ const payload: SwarmLayerPayload = myLabel
   public setMyLabel = (label: string): void => {
     const clean = String(label ?? '').trim().slice(0, 64).replace(/[\x00-\x1f]/g, '')
     try { localStorage.setItem('hc:user-label', clean) } catch { /* ignore */ }
+    // Tell the shell too. The presence strip mirrors its own label from a
+    // one-time read at mount, and the mesh selector saves through THIS
+    // method — without a self-tagged emit a name typed in the selector
+    // never reached the badge, which kept offering "+" until a reload.
+    this.emitEffect('swarm:label-changed', { pubkey: this.#myPubkey ?? '', label: clean, self: true })
     // Invalidate publish memo so the next sync re-emits with the new label
     // (the publish dedup compares serialized payload; changing label
     // changes the bytes, so this is belt-and-braces).

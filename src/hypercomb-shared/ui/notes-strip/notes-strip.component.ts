@@ -1727,6 +1727,16 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
    *  claim down. */
   #claimSurface(active: boolean): void {
     this.#surfaceWanted = active
+    // AND SAY WHERE THE DESK'S TOP EDGE IS, for exactly as long as it holds
+    // the surface. The desk covers the header bar (`top: 0` — the bar has
+    // nothing in it while a view is up); the pheromone panel it pairs with is
+    // a normal toolwindow anchored UNDER that bar, so without this the two
+    // halves meet at a 42px step with a stripe of hive above the panel.
+    // Unset again on release, so the panel is back on the shared anchor the
+    // moment it is on its own.
+    const root = document.documentElement.style
+    if (active) root.setProperty('--hc-desk-top', '0px')
+    else root.removeProperty('--hc-desk-top')
     const modes = get<ModeRegistryLike>(MODE_REGISTRY_IOC_KEY)
     if (!modes) {
       // The registry is an essentials bee and the desk can boot open before it
@@ -1966,9 +1976,34 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   readonly railMounted = signal(false)
   #rail: TilesRailLike | null = null
 
+  /** Ask for the rail, and WAIT for it if essentials has not landed yet.
+   *  The web shell loads its bees from OPFS, so the desk can be on screen
+   *  before the factory registers — a single synchronous miss used to leave
+   *  the tile list as the fallback chips for the rest of the session, which is
+   *  exactly the list the rail was brought in to replace. The chat window has
+   *  waited on this key from the start; this is the same wait. */
   #mountRail(host: HTMLElement): void {
+    if (this.#rail || this.#railPending) return
+    const key = '@diamondcoreprocessor.com/AgentTilesRailFactory'
+    const now = get<TilesRailFactoryLike>(key)
+    if (now) { this.#bringRail(now, host); return }
+    this.#railPending = true
+    window.ioc?.whenReady?.<TilesRailFactoryLike>(key, factory => {
+      this.#railPending = false
+      // The host captured above may have been replaced by the time a late
+      // factory lands (the panel rebuilds its DOM) — mount into whatever is
+      // on screen NOW.
+      const live = this.railHost()?.nativeElement
+      if (live) this.#bringRail(factory, live)
+    })
+  }
+
+  /** True between asking for a late factory and its arrival — without it every
+   *  re-run of the mount effect would queue another `whenReady`. */
+  #railPending = false
+
+  #bringRail(factory: TilesRailFactoryLike | undefined, host: HTMLElement): void {
     if (this.#rail) return
-    const factory = get<TilesRailFactoryLike>('@diamondcoreprocessor.com/AgentTilesRailFactory')
     // `walk` is the load-bearing one: an older essentials build ignores the
     // profile entirely and would give a rail that walks INTO tiles, whose rows
     // name cells at another location — and this panel resolves a tile's notes
