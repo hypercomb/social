@@ -18,11 +18,16 @@
          • it is PAIRED with the pheromone panel, which is the desk's other
            half: marks drag from the panel onto note rows and list lines.
        `hcDockedPanel` stays for what it still gives — the close pairing, the
-       session, the settings rows and the group's text size (`sizeOwner`). -->
+       session, the settings rows and the group's text size (`sizeOwner`).
+       `data-hc-sheet="full"` is the toolwindow mixin's opt-in for a sheet that
+       must be the WHOLE phone screen: every docked panel becomes a 62vh bottom
+       sheet there, and a desk that is always full screen is exactly the case
+       the opt-in exists for. It keeps the bar's bottom clearance either way. -->
   <div class="notes-strip cv2-panel"
        [class.mode-chips]="mode() === 'chips'" [class.mode-rows]="mode() === 'rows'"
        #panel
        data-consumes-wheel
+       data-hc-sheet="full"
        hcDockedPanel="notes-strip" dockSide="right"
        [ownsSize]="false" [sizeOwner]="this" [defaultWidth]="500" [defaultText]="1"
        [ownSettings]="settingsRows"

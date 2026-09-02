@@ -5,11 +5,10 @@
 // viewer; click the plus to enter capture mode for that tile. Collapses
 // entirely when the active tile has no notes.
 
-import { Component, ElementRef, HostBinding, HostListener, computed, effect, inject, signal, untracked, viewChild, type OnDestroy } from '@angular/core'
+import { Component, ElementRef, HostListener, computed, effect, inject, signal, untracked, viewChild, type OnDestroy } from '@angular/core'
 import { NgTemplateOutlet } from '@angular/common'
 import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 // Settings-only: the gear + group chrome every tool window carries. The strip
 // keeps its own edge handles and width store (`ownsSize` false) — see the
 // directive's header — and hands the directive its width as a `sizeOwner`.
@@ -119,6 +118,35 @@ const NOTES_STRIP_FACE_KEY = 'hc:notes-face'
 const NOTES_FACES = ['mono', 'sans', 'serif'] as const
 type NotesFace = typeof NOTES_FACES[number]
 
+/** This window's name in the two owner-counted view modes below. */
+const SURFACE_OWNER = 'notes-strip'
+
+/** THE DESK TAKES THE SURFACE, AND LEAVES THE BAR ITS EDGE.
+ *
+ *  `view:active` means "a view is covering the canvas, put the chrome away".
+ *  The desk is a view covering the canvas by any honest reading — it fills the
+ *  screen and nothing behind it can be reached — and saying so is what stands
+ *  the COMMAND LINE down while notes are open, the same handover the chat
+ *  window makes. (A command line over the desk is a second place to type with
+ *  none of the note grammar; the desk's own line at the bottom is the one that
+ *  writes notes.)
+ *
+ *  `view:keeps-controls` is the other half. On its own, `view:active` also
+ *  hides the CONTROL BAR — right for a full takeover, wrong for this one: the
+ *  desk stops at the bar's reservation (see the component SCSS's
+ *  `--hc-controls-*` box), so the bar has a place to be, and hiding it would
+ *  cost the participant every control on it — on a phone, the whole of the
+ *  navigation. Any view that leaves the bar its edge can hold the mode, and
+ *  the bar stays while ANY owner does. Claimed and released in lockstep. */
+const KEEPS_CONTROLS = 'view:keeps-controls'
+
+const MODE_REGISTRY_IOC_KEY = '@diamondcoreprocessor.com/ModeRegistry'
+
+type ModeRegistryLike = {
+  enter(mode: string, owner: string): void
+  exit(mode: string, owner: string): void
+}
+
 /** Fixed shape set — six CSS-drawn glyphs. The shape is the only
  *  visual category a note carries. Names map 1:1 to .hc-shape-X
  *  classes defined in hypercomb-shared/styles/_notes-shapes.scss. */
@@ -198,7 +226,7 @@ type InputModeStackLike = {
 @Component({
   selector: 'hc-notes-strip',
   standalone: true,
-  imports: [TranslatePipe, NgTemplateOutlet, DockInsetDirective, HcDockedPanelDirective],
+  imports: [TranslatePipe, NgTemplateOutlet, HcDockedPanelDirective],
   templateUrl: './notes-strip.component.html',
   // One stylesheet per surface, in the order the rules were always in — the
   // cascade is the concatenation of these, so the order here IS the order in
@@ -1693,6 +1721,39 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     return false
   }
 
+  /** Enter / leave the two view modes as one gesture — see KEEPS_CONTROLS.
+   *  Both are owner-counted, so releasing ours never stands another view's
+   *  claim down. */
+  #claimSurface(active: boolean): void {
+    this.#surfaceWanted = active
+    const modes = get<ModeRegistryLike>(MODE_REGISTRY_IOC_KEY)
+    if (!modes) {
+      // The registry is an essentials bee and the desk can boot open before it
+      // lands. Claim on the SETTLED intent when it arrives, never on the intent
+      // that was current when this call was made.
+      if (active) {
+        (globalThis as { ioc?: { whenReady?: (k: string, cb: (v: unknown) => void) => void } }).ioc
+          ?.whenReady?.(MODE_REGISTRY_IOC_KEY, value => {
+            if (!this.#surfaceWanted) return
+            const late = value as ModeRegistryLike
+            late.enter('view:active', SURFACE_OWNER)
+            late.enter(KEEPS_CONTROLS, SURFACE_OWNER)
+          })
+      }
+      return
+    }
+    if (active) {
+      modes.enter('view:active', SURFACE_OWNER)
+      modes.enter(KEEPS_CONTROLS, SURFACE_OWNER)
+    } else {
+      modes.exit('view:active', SURFACE_OWNER)
+      modes.exit(KEEPS_CONTROLS, SURFACE_OWNER)
+    }
+  }
+
+  /** Is the surface claimed, as far as this window is concerned. */
+  #surfaceWanted = false
+
   /** Click anywhere outside the strip closes the kebab popover and
    *  picker. Clicks inside the strip itself are handled by the buttons'
    *  own stopPropagation so opening doesn't immediately close. */
@@ -2731,6 +2792,11 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
       EffectBus.emit('notes:panel-state', { open: this.#open() && !this.#parked() })
     })
 
+    // The surface claim follows what is ON SCREEN, not the intent: a parked
+    // desk is covered by the installer and holds nothing, and a desk waiting
+    // on a tile is still the desk. `visible()` is exactly that reading.
+    effect(() => this.#claimSurface(this.visible()))
+
     // Warm the decoded-set cache for the active cell AND every tile in the
     // layer (the navigator lists them all) so notes(), the navigator counts,
     // and the name-or-text filter classify accurately on first paint.
@@ -2868,6 +2934,9 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     // stack if the component is destroyed mid-hover (e.g. selection
     // change triggers re-render while cursor is over the strip).
     this.#popNotesMode()
+    // A leaked enter() strands `view:active` on forever — the canvas and the
+    // command line would never come back. Release both on the way out.
+    this.#claimSurface(false)
   }
 
   // ── resize wiring ─────────────────────────────────────────
