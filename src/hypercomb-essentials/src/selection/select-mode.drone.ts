@@ -282,10 +282,14 @@ export class SelectModeDrone extends Drone {
     // it reads as a statement about the page rather than another bar control.
     host.style.cssText =
       `position:fixed;left:50%;transform:translateX(-50%);z-index:${PILL_Z};` +
-      // --hc-mobile-row-lift is published by the controls bar while its view
-      // row is up: the pill rises with the row and drops back when it closes,
-      // so the two never stack on the same band of screen.
-      'bottom:calc(6.2rem + var(--hc-mobile-row-lift, 0px) + env(safe-area-inset-bottom,0px));' +
+      // The controls bar publishes where its top edge is as
+      // `--hc-controls-bottom` (distance from the viewport's bottom, safe inset
+      // included — hence max() against the inset rather than a sum, and the
+      // inset alone when the bar is a landscape rail and publishes 0px) and
+      // lifts `--hc-mobile-row-lift` while its view row is up: the pill sits
+      // just above whatever the bar occupies, measured rather than guessed
+      // (the old 6.2rem was a guess, and wrong the moment the bar grew).
+      'bottom:calc(max(var(--hc-controls-bottom, 0px), env(safe-area-inset-bottom,0px)) + var(--hc-mobile-row-lift, 0px) + 0.6rem);' +
       'display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.5rem;' +
       'border-radius:var(--hc-radius-floating, 4px);background:rgba(12,17,24,0.92);backdrop-filter:blur(10px);' +
       'border:1px solid rgba(126,182,214,0.35);box-shadow:0 10px 30px rgba(0,0,0,0.45);' +

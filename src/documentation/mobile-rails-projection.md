@@ -1,6 +1,14 @@
 # Mobile rails — the phone reads the hive as a strip, and never writes it
 
-**Status: DESIGN 2026-09-01, building.** Supersedes the lane half of
+**Status: BUILT 2026-09-01.** §1–§3 in `ef26fca02` (proof
+`scripts/drive-mobile-rails.cjs` 23/23); §4–§9 in the commit after it (proofs
+`drive-layer-deck.cjs` 15/15, `drive-mobile-scroller.cjs` 16/16,
+`drive-view-back.cjs` 10/10, the sheets harness 38/38, `drive-mobile-deck.cjs`
+both orientations). Still owed, blocked on files another session holds:
+share publishes the tapped tile (`host-gesture.ts`), publish's copy-link
+through the share sheet (`publish-status.drone.ts`), the hosts sheet's
+hover-only remove (`hosts-panel.component.scss`), the pin plate (no door
+outside the bar). Supersedes the lane half of
 `mobile-grand-master-plan.md` (P1/P1b are kept as pure geometry; the
 "lanes are an explicit act that commits" doctrine is retired for the phone).
 Jaime's brief, 2026-09-01:

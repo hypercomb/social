@@ -93,6 +93,23 @@ export type BehaviourParameter = {
   readonly fallbackDescription?: string
 }
 
+/**
+ * What a bee is told about a tile when asked whether it OFFERS itself there
+ * — the synchronous facts the overlay already knows per tile (the shape of
+ * `OverlayTileContext`, narrowed to what a view can honestly decide on).
+ */
+export type VisualBeeOfferContext = {
+  readonly label: string
+  /** The tile has children of its own — a branch, not a leaf. */
+  readonly isBranch: boolean
+  /** The tile points somewhere (a `link` property). */
+  readonly hasLink: boolean
+  /** The tile paints no picture of its own. */
+  readonly noImage: boolean
+  /** The tile carries notes. */
+  readonly hasNotes: boolean
+}
+
 export type VisualBeeDescriptor = {
   /**
    * Unique identity. e.g. `'website'`, `'audio'`, `'story'`. Used as the
@@ -357,6 +374,23 @@ export type VisualBeeDescriptor = {
    * from their distinct `view-enter:*` icons.
    */
   readonly opensOnTileClick?: boolean
+
+  /**
+   * Does this view OFFER itself on a tile that does NOT carry its kind?
+   *
+   * A view normally opens only where its mark is (`view-enter:<view>`, shown
+   * by `hasDecorationKind`). Some views make sense on a tile from what it
+   * already IS — the scroller on any BRANCH, because the feed is simply the
+   * children — and asking the participant to type a mark first is the wrong
+   * door on a phone. Declare this and visual-bee-icons mints a third icon
+   * family, `view-open:<view>`, visible where the predicate holds, the kind
+   * is absent and the behaviour is not dormant; it opens the view exactly as
+   * the enter icon does. The close-up lists both under "open as".
+   *
+   * Synchronous and cheap — it runs per tile on every overlay pass. Omit for
+   * views whose content has to be attached or authored first.
+   */
+  readonly offersFor?: (ctx: VisualBeeOfferContext) => boolean
 
   /**
    * Legacy ordering hint retained for descriptor compatibility. Defaults no

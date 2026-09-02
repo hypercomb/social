@@ -33,6 +33,7 @@
 
 @use './shape' as shape;
 @use './panel-identity' as identity;
+@use './breakpoints' as bp;
 
 /// ── A TOOL WINDOW NEVER NAMES A COLOUR ───────────────────────────────────
 ///
@@ -149,6 +150,90 @@ $header-action-gap: 0.25rem;
     border-right: 0;
     border-left: 1px solid rgba(var(--acc), 0.38);
     box-shadow: -14px 0 44px rgba(var(--hc-panel-shadow), 0.46), inset 1px 0 rgba(var(--hc-panel-sheen), 0.025);
+  }
+
+  // ── ON A PHONE, EVERY TOOL WINDOW IS A BOTTOM SHEET ──────────────────────
+  //
+  // ONE rule set, here, because every docked panel comes through this mixin
+  // and none of them has room to dock beside the hive on a phone (a 300–400px
+  // slab on a 375px screen left a 24px strip of hexagons, with its bottom edge
+  // under the control bar's discs). The panel's own SCSS keeps saying
+  // `right: 0; bottom: 0; width: NNNpx` for the desktop; this block outranks
+  // it on phone-shaped viewports (EITHER axis — a landscape phone is wide and
+  // short and still has no room for a dock), and `!important` on the geometry
+  // is deliberate: the docked-panel primitive writes the width, the docked
+  // side and the lane offset as INLINE styles, and a panel's own later
+  // declarations are emitted after this block (Dart Sass keeps declaration
+  // order), so nothing weaker than `!important` reaches all twenty-two.
+  //
+  // GEOMETRY. Full width, capped height, so the hive stays visible above the
+  // sheet; its bottom edge sits on the control bar's clearance
+  // (`--hc-controls-bottom`, published by the bar as the distance from the
+  // viewport's bottom to the bar's TOP — it already contains the safe inset,
+  // which is why it is max()ed against `--hc-safe-bottom` rather than added
+  // to it) plus whatever the bar's view row lifts, so every disc stays under
+  // `elementFromPoint` while a sheet is open.
+  //
+  // LANDSCAPE. The bar is a LEFT rail there and publishes its width as
+  // `--hc-controls-left`; the sheet must start inboard of it or it covers the
+  // Back disc. It does NOT do that by moving its left edge: `hcDockInset`
+  // measures a panel whose box does not span the viewport as a RIGHT DOCK
+  // and reserves `innerWidth - left` — the canvas owner then shrinks
+  // `#pixi-host` to the rail's width. So the box stays full-bleed (reservation
+  // 0, the hive untouched) and the rail's column is CUT OUT of it: a
+  // transparent left border the width of the rail keeps the content inboard,
+  // and `clip-path` removes that column from both the paint and the hit-test.
+  // Portrait publishes 0px, so there the clip is a no-op (its negative top
+  // only keeps the upward shadow).
+  //
+  // TYPE. `--hc-panel-scale` is width ÷ default width, and the primitive caps
+  // the width at innerWidth − 24 — so on a phone the scale went BELOW one,
+  // shrinking text exactly where it should grow. Floor it at one; a text size
+  // the participant picked from the gear still applies above that.
+  //
+  // FULL PAGES. A sheet that must be the whole screen (a conversation, a
+  // decision being reviewed) opts in with `data-hc-sheet="full"` on its panel
+  // element, or with the same two declarations in its own stylesheet after
+  // this block — it keeps the bottom clearance either way.
+  @include bp.phone {
+    position: fixed !important;
+    top: auto !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: calc(max(var(--hc-controls-bottom, 0px), var(--hc-safe-bottom, 0px)) + var(--hc-mobile-row-lift, 0px)) !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    max-height: min(62vh, 30rem);
+    box-sizing: border-box;
+    border-right: 0 !important;
+    border-left: var(--hc-controls-left, 0px) solid transparent !important;
+    border-top: 1px solid rgba(var(--acc), 0.5);
+    border-radius: #{$radius-floating} #{$radius-floating} 0 0;
+    background-clip: padding-box;
+    clip-path: inset(-4rem 0 0 var(--hc-controls-left, 0px));
+    box-shadow: 0 -10px 40px rgba(var(--hc-panel-shadow), 0.55), 0 0 0 1px rgba(var(--acc), 0.06) inset;
+    font-size: calc(1rem * max(1, var(--hc-panel-scale, 1))) !important;
+
+    // Thumb-sized controls. Scoped to the sheet's own buttons; an icon button
+    // that sets an explicit height (the header's close, a chip) is unaffected
+    // because min-height only raises what is shorter.
+    button,
+    [role='button'] { min-height: 2.5em; }
+
+    // The resize grip the primitive injects on the panel's inner edge: a sheet
+    // is not resized from its side. `::ng-deep` because the grip is created
+    // imperatively — it never gets the component's `_ngcontent` attribute,
+    // so a scoped selector cannot see it (measured: `display: block` with
+    // the plain selector).
+    & ::ng-deep [data-hc-grip] { display: none !important; }
+
+    &[data-hc-sheet='full'] {
+      top: 0 !important;
+      max-height: none;
+      border-top: 0;
+      border-radius: 0;
+    }
   }
 }
 

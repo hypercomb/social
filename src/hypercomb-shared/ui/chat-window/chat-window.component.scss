@@ -13,6 +13,7 @@
 
 @use '../toolwindow' as tw;
 @use '../panel-identity' as identity;
+@use '../breakpoints' as bp;
 
 $accent: #7eb6d6;
 
@@ -110,6 +111,27 @@ $accent: #7eb6d6;
 // is the conversation alone, and tiles are chosen by selecting on the canvas.
 @media (max-width: 700px) {
   .chat-panel { padding-left: 0; }
+  .chat-rail,
+  .chat-rail-grip { display: none; }
+}
+
+// ── phone: a FULL page, above the control bar ───────────────────────
+// On a phone every tool window is a bottom sheet (`tw.panel`,
+// _toolwindow.scss): fixed, full width, its bottom edge on the bar's
+// clearance so Back · camera · share stay tappable — which is what used to be
+// missing here, where `inset: 0` painted the composer straight over the bar.
+// A conversation is the one sheet that should take the whole screen, so it
+// opts back into the top and lets go of the height cap, keeping that bottom.
+// Either-axis query: a landscape phone (wider than the 700px rule above) has
+// no room for the tiles rail either.
+@include bp.phone {
+  .chat-panel {
+    top: 0 !important;
+    max-height: none;
+    border-top: 0;
+    border-radius: 0;
+    padding-left: 0;
+  }
   .chat-rail,
   .chat-rail-grip { display: none; }
 }

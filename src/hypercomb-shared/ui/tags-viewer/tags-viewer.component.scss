@@ -7,6 +7,7 @@
 // the features panel.
 
 @use '../toolwindow' as tw;
+@use '../breakpoints' as bp;
 
 $steel: #7eb6d6;
 // The one warm accent in a cold panel — used only by the armed-removal
@@ -44,44 +45,16 @@ $mint: #6fbf94;
   @include tw.panel($steel, right);
 }
 
-// ── phone: bottom sheet ───────────────────────────────────
-// Pheromones are a FIRST-CLASS mobile feature (marking what shows on mobile is
-// the core authoring act), but a 320px right-docked column is unreachable on a
-// phone. Here the panel becomes a bottom sheet: full width, capped height, so
-// the hive stays visible above it and every control is in thumb reach. Matches
-// the app's phone detection (small in EITHER dimension) so landscape phones —
-// wide but short — get the sheet too, where a side dock would eat the screen.
-@media (max-width: 599px), (max-height: 449px) {
-  .tags-panel {
-    top: auto;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    // Inline width from the resize directive must not win on a phone.
-    width: 100% !important;
-    min-width: 0;
-    max-width: none;
-    max-height: min(62vh, 30rem);
-    border-left: none;
-    border-top: 1px solid rgba(var(--acc), 0.5);
-    border-radius: tw.$radius-floating tw.$radius-floating 0 0;
-    box-shadow: 0 -10px 40px rgba(var(--hc-panel-shadow), 0.55), 0 0 0 1px rgba(var(--acc), 0.06) inset;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-  }
-
-  // Bigger touch targets for the sheet's own controls.
-  .tags-panel .tag-scope-opt,
-  .tags-panel .tag-row-btn,
-  .tags-panel button {
-    min-height: 2.5em;
-  }
-
-  // ── phone: only the DRAG is withheld ────────────────────
-  // Everything else in this panel works by TAP now: ＋ gathers a pheromone (or
-  // tap a bouquet), the hive shades every tile missing the set, and tapping a
-  // shaded tile scents it. Only drag-to-scent needs a pointer — on touch a
-  // drag IS the scroll gesture — so the ghost never appears here (the drag is
-  // also disabled in the component; see #isPhone in the .ts).
+// ── phone ─────────────────────────────────────────────────
+// The bottom sheet this panel used to draw for itself — full width, capped
+// height, above the control bar, thumb-sized buttons — now comes from
+// `tw.panel` (every tool window is a sheet on a phone, one rule set in
+// _toolwindow.scss). Only the DRAG is withheld here: everything else in this
+// panel works by TAP (＋ gathers a pheromone or tap a bouquet, the hive shades
+// every tile missing the set, tapping a shaded tile scents it). Drag-to-scent
+// needs a pointer — on touch a drag IS the scroll gesture — so the ghost never
+// appears (the drag is also disabled in the component; see #isPhone in the .ts).
+@include bp.phone {
   .tag-drag-ghost { display: none !important; }
 }
 

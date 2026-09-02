@@ -213,6 +213,6 @@ $accent: #7eb6d6;
   .observe-panel { top: max(calc(3.65rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 1.02rem)); }
 }
 
-@include phone-only {
-  .observe-panel { top: 0; }
-}
+// Phone: a bottom sheet, from `tw.panel` (_toolwindow.scss). The width-only
+// `top: 0` that used to sit here made the panel a full-height slab on
+// portrait phones and did nothing for landscape ones.

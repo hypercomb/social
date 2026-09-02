@@ -12,6 +12,8 @@ import { cellLocationSig } from '../../editor/tile-properties.js'
 import { peerDivergesAt } from '../../sharing/peer-divergence.js'
 import type { IconRegistryEntry } from './tile-actions.drone.js'
 import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-actions.drone.js'
+import { openTileMenu, openView, viewsFor } from './viewer-walk.js'
+import { viewDoorFor } from './app-deck.js'
 
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; swarmTakeLabels?: string[]; noImageLabels?: string[]; substrateLabels?: string[]; linkLabels?: string[]; hiddenLabels?: string[]; shadedLabels?: string[]; flatPaths?: Record<string, string[]>; filterBlocked?: string[] }
 
@@ -3283,6 +3285,15 @@ export class TileOverlayDrone extends Drone {
       // Mouse/pen keep the old behaviour: on desktop the hover band carries
       // every action and a fullscreen takeover would be in the way.
       if ((this.#pressWasTouch || this.#mobileMode()) && !this.#linkLabels.has(entry.label)) {
+        // A TILE THAT CARRIES A VIEW IS AN ICON THAT OPENS IT. Registry-pure:
+        // every render view the tile wears (`viewsFor`). One → open it,
+        // through the same `view-enter:` door the on-tile icon uses; several
+        // → the close-up on its "open as" page, the screen for choosing;
+        // none → the tap goes inside, as it always did.
+        const views = viewsFor(entry.label)
+        const door = viewDoorFor(views)
+        if (door === 'view') { openView(views[0]!, entry.label); return }
+        if (door === 'menu') { openTileMenu(entry.label); return }
         this.#navigateInto(entry.label)
         return
       }

@@ -5,6 +5,8 @@
 // badges, name field, and panel rows accept input — clicks outside
 // the interactive elements never hit the host.
 
+@use '../breakpoints' as *;
+
 :host {
   position: fixed;
   // Sit just BELOW the top header bar (2.5rem desktop, scaled by the
@@ -264,6 +266,82 @@
   background: #6ec96e;
   border-color: #6ec96e;
   box-shadow: 0 0 5px rgba(110, 201, 110, 0.45);
+}
+
+// ── phone: the expanded panel is a sheet ──────────────
+// The badge strip stays the collapsed state (small on purpose — it is a
+// glance). The EXPANDED panel was a 60vw pop-under with 1.7em round toggles
+// around 14px glyphs — ~24px targets carrying their meaning only in a hover
+// title a phone never shows. On a phone it becomes a sheet parked above the
+// controls bar: full width, rows at least 2.75rem, and the two toggles become
+// real labelled buttons. The label is painted from the toggle's own
+// aria-label (bound in the template through the `t` pipe), so it is the
+// localized word and never a second string. Geometry only — no colour named.
+@include phone {
+  // A transform on the host would make it the containing block for the
+  // fixed sheet below (and cap it at the host's 70vw) — drop it and let the
+  // wrapper's align-items:center keep the strip centred instead.
+  :host {
+    left: 0;
+    right: 0;
+    transform: none;
+    max-width: none;
+  }
+
+  .participant-panel {
+    position: fixed;
+    left: 0.6rem;
+    right: 0.6rem;
+    bottom: calc(var(--hc-controls-bottom, 0px) + var(--hc-safe-bottom, 0px) + 0.6rem);
+    margin-top: 0;
+    min-width: 0;
+    max-width: none;
+    max-height: min(50vh, 22rem);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0.5rem;
+  }
+
+  .participant-row {
+    flex-wrap: wrap;
+    min-height: 2.75rem;
+    padding: 0.5rem 0.6rem;
+    row-gap: 0.45rem;
+  }
+
+  .participant-label {
+    flex: 1 1 100%;
+    font-size: 0.95rem;
+  }
+
+  .participant-actions {
+    flex: 1 1 100%;
+    gap: 0.5rem;
+  }
+
+  .row-toggle {
+    flex: 1 1 0;
+    width: auto;
+    height: auto;
+    min-height: 2.75rem;
+    padding: 0.35rem 0.7rem;
+    gap: 0.45rem;
+    justify-content: flex-start;
+    border-radius: var(--hc-radius-control);
+    border-color: color-mix(in srgb, currentColor 35%, transparent);
+
+    &::after {
+      content: attr(aria-label);
+      font-family: var(--hc-font);
+      font-size: 0.8rem;
+      line-height: 1.15;
+      letter-spacing: 0.02em;
+      text-align: left;
+      white-space: normal;
+    }
+
+    svg { flex: 0 0 auto; }
+  }
 }
 
 // ── animations ────────────────────────────────────────

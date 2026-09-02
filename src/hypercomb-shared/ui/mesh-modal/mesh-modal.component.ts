@@ -13,9 +13,15 @@ import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
 import type { SecretStrengthProvider } from '../../core/secret-strength'
 import type { SavedLocationsStore } from '../../core/saved-locations-store'
-import { encodeAddress } from '../../core/address-record'
 
 const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
+/** The /invite queen (essentials sharing/invite.queen.ts) — reached through
+ *  IoC at runtime, never imported: shared is downstream of no module. */
+const INVITE_QUEEN_KEY = '@diamondcoreprocessor.com/InviteQueenBee'
+const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
+
+interface InviteQueenLike { invoke: (args: string) => Promise<void> }
+interface SwarmLabelApi { myLabel?: () => string; setMyLabel?: (s: string) => void }
 
 /** Normalize a host string the same way the rest of the codebase does:
  *  strip protocol prefix, trailing slashes, lowercase. Keeps localStorage
@@ -161,27 +167,60 @@ export class MeshModalComponent implements OnInit, OnDestroy {
     this.hostDraft.set((event.target as HTMLInputElement).value)
   }
 
-  /** Compose the four draft fields into a share-link URL and copy it
-   *  to the clipboard. Uses the navigator clipboard API; falls back
-   *  silently if unavailable. The URL never contains the secret in
-   *  the path or query — secret lives only in the hash fragment, which
-   *  isn't sent to the server. */
+  /** SHARE THIS MEETING PLACE — as an invite a cold stranger can open.
+   *
+   *  This button used to mint an ADDRESS link (`https://host/location
+   *  #alias=&secret=`, address-record.ts) and write it to the clipboard.
+   *  Nothing decodes that shape on landing — the boot capture
+   *  (invite-capture.ts) only stashes a lone `/<sig>` path, and parseAddress
+   *  has no caller — so the recipient landed on a plain page with the secret
+   *  sitting unread in the hash. The one link that DOES land is the /invite
+   *  bundle: a content-addressed `{segments, room, secret}` resource, served
+   *  by the host, resolved by MeetingInviteWorker at boot and joined through
+   *  the confirm dialog. InviteQueenBee mints it for the room + secret in the
+   *  credential stores and delivers it itself (share sheet → clipboard →
+   *  fresh-tap toast, deliver-link.ts), so the drafts are committed first and
+   *  the queen is invoked; its own toasts report the outcome, including the
+   *  honest refusals (no hosting, no room/secret).
+   *
+   *  The method keeps its name: the template binds `copyShareLink()`. */
   readonly copyShareLink = async (): Promise<void> => {
-    try {
-      const url = encodeAddress({
-        alias:    this.labelDraft().trim() || undefined,
-        host:     this.hostDraft().trim(),
-        location: this.roomDraft().trim() || undefined,
-        secret:   this.secretDraft().trim() || undefined,
-      })
-      await navigator.clipboard.writeText(url)
-      this.copiedFlash.set(true)
-      setTimeout(() => this.copiedFlash.set(false), 1500)
-    } catch (e) {
-      console.warn('[mesh-modal] copyShareLink failed:', e)
+    const room = this.roomDraft().trim()
+    const secret = this.secretDraft().trim()
+    // An invite IS (room, secret) — without both there is nothing to share.
+    // Same in-field callout the join path uses, instead of a silent no-op.
+    if (!room || !secret) {
+      this.missingField.set(!room ? 'room' : 'secret')
+      return
     }
+    this.missingField.set(null)
+    if (this.#sharing) return
+    const invite = get(INVITE_QUEEN_KEY) as InviteQueenLike | undefined
+    if (typeof invite?.invoke !== 'function') {
+      const i18n = get('@hypercomb.social/I18n') as { t: (k: string) => string } | undefined
+      EffectBus.emit('toast:show', {
+        type: 'error',
+        title: i18n?.t('invite.title') ?? 'Invite',
+        message: i18n?.t('mesh-modal.share-unavailable') ?? 'The invite behaviour is not loaded yet — try again in a moment.',
+      })
+      return
+    }
+    // The invite names the credentials in the STORES; make them the ones on
+    // screen so the link never points at a stale pair.
+    this.#commitDrafts()
+    this.#sharing = true
+    try { await invite.invoke('') }
+    catch (e) { console.warn('[mesh-modal] invite mint failed:', e) }
+    finally { this.#sharing = false }
   }
 
+  /** Re-entrancy latch for the share button — one mint at a time. */
+  #sharing = false
+
+  /** Template hook retained (`[class.copied]` / the "copied!" label). The
+   *  address-link path that flashed it is gone; the invite queen reports its
+   *  own delivery (shared / copied / offered) through a toast, so this never
+   *  flips. Retire the binding with the template. */
   readonly copiedFlash = signal(false)
 
   /** Read the persisted swarm label, preferring the SwarmDrone's
@@ -191,11 +230,42 @@ export class MeshModalComponent implements OnInit, OnDestroy {
    *  modal can still surface and save without a hard swarm
    *  dependency. */
   #readMyLabel = (): string => {
-    interface SwarmLabelApi { myLabel: () => string }
-    const swarm = get('@diamondcoreprocessor.com/SwarmDrone') as SwarmLabelApi | undefined
+    const swarm = get(SWARM_KEY) as SwarmLabelApi | undefined
     if (swarm?.myLabel) return swarm.myLabel()
     try { return String(localStorage.getItem('hc:user-label') ?? '').trim().slice(0, 64) }
     catch { return '' }
+  }
+
+  /** Persist the four drafts exactly as Save does — the credential stores,
+   *  the `mesh:*` effects, the saved-locations chip, the swarm label —
+   *  WITHOUT joining or closing. Save and Share both come through here so
+   *  the two can never write the location differently. */
+  #commitDrafts = (): void => {
+    const room = this.roomDraft().trim()
+    const secret = this.secretDraft().trim()
+    const label = this.labelDraft().trim().slice(0, 64)
+    const host = this.hostDraft().trim()
+    this.#roomStore?.set(room)
+    this.#secretStore?.set(secret)
+    // Host writes directly to localStorage — single canonical key, no
+    // wrapper. Empty save doesn't unset it (the runtime bootstrap default
+    // of window.location.origin stays), so we only write on non-empty.
+    if (host) this.#writeHost(host)
+    EffectBus.emit('mesh:room', { room })
+    EffectBus.emit('mesh:secret', { secret })
+    EffectBus.emit('mesh:host', { host: this.#readHost() })
+    if (room) this.#savedStore?.add(room)
+
+    // Label routes through swarm.setMyLabel when available — it
+    // clears the publish memo + triggers re-sync so the new label
+    // propagates immediately. localStorage fallback covers the case
+    // where the swarm bee hasn't loaded yet.
+    const swarm = get(SWARM_KEY) as SwarmLabelApi | undefined
+    if (swarm?.setMyLabel) {
+      swarm.setMyLabel(label)
+    } else {
+      try { localStorage.setItem('hc:user-label', label) } catch { /* ignore */ }
+    }
   }
 
   readonly toggleSecretVisible = (): void => {
@@ -236,8 +306,6 @@ export class MeshModalComponent implements OnInit, OnDestroy {
   readonly save = (): void => {
     const room = this.roomDraft().trim()
     const secret = this.secretDraft().trim()
-    const label = this.labelDraft().trim().slice(0, 64)
-    const host = this.hostDraft().trim()
 
     // START with a half-set zone used to join anyway, and the swarm then
     // refused to subscribe or publish (it composes its sig from BOTH
@@ -250,28 +318,7 @@ export class MeshModalComponent implements OnInit, OnDestroy {
       return
     }
     this.missingField.set(null)
-    this.#roomStore?.set(room)
-    this.#secretStore?.set(secret)
-    // Host writes directly to localStorage — single canonical key, no
-    // wrapper. Empty save doesn't unset it (the runtime bootstrap default
-    // of window.location.origin stays), so we only write on non-empty.
-    if (host) this.#writeHost(host)
-    EffectBus.emit('mesh:room', { room })
-    EffectBus.emit('mesh:secret', { secret })
-    EffectBus.emit('mesh:host', { host: this.#readHost() })
-    if (room) this.#savedStore?.add(room)
-
-    // Label routes through swarm.setMyLabel when available — it
-    // clears the publish memo + triggers re-sync so the new label
-    // propagates immediately. localStorage fallback covers the case
-    // where the swarm bee hasn't loaded yet.
-    interface SwarmLabelApi { setMyLabel: (s: string) => void }
-    const swarm = get('@diamondcoreprocessor.com/SwarmDrone') as SwarmLabelApi | undefined
-    if (swarm?.setMyLabel) {
-      swarm.setMyLabel(label)
-    } else {
-      try { localStorage.setItem('hc:user-label', label) } catch { /* ignore */ }
-    }
+    this.#commitDrafts()
 
     // JOIN mode: confirming the location IS the act of going public — the
     // controls-bar listens for 'mesh:join' and flips solo → swarm.

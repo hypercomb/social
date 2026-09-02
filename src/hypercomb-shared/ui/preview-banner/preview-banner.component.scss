@@ -5,6 +5,7 @@
 // buttons are the whole point — keep them unmistakable but cold.
 
 @use '../toolwindow' as tw;
+@use '../breakpoints' as *;
 :host {
   position: fixed;
   // Clear the top header bar (2.5rem desktop, scaled by --hc-header-zoom);
@@ -98,4 +99,51 @@ button {
   color: tw.ink(#6fd39a);
 
   &:hover { background: rgba(111, 211, 154, 0.12); }
+}
+
+// ── phone: a bottom sheet above the bar ───────────────────────────────────
+// One nowrap pill carrying five items and two 0.74rem buttons cannot fit a
+// phone — it clipped, and Adopt / Dismiss (the preview's ONLY two exits) were
+// the part that fell off. On a phone the strip parks above the controls bar
+// instead (the bar publishes --hc-controls-bottom; the safe inset rides on
+// top), wraps, gives the name its own line and stacks two full-width
+// thumb-sized buttons. Desktop keeps the pill. Geometry only — every mark
+// keeps the ink role it already wears; no colour is named here.
+@include phone {
+  :host {
+    top: auto;
+    bottom: calc(var(--hc-controls-bottom, 0px) + var(--hc-safe-bottom, 0px) + 0.6rem);
+    left: 0.6rem;
+    right: 0.6rem;
+    transform: none;
+    max-width: none;
+  }
+
+  .preview-banner {
+    flex-wrap: wrap;
+    white-space: normal;
+    row-gap: 0.55rem;
+    column-gap: 0.5rem;
+    padding: 0.85rem 0.95rem;
+    border-radius: var(--hc-radius-floating);
+    font-size: 0.95rem;
+  }
+
+  // The name is the line: full width, still one line (ellipsis needs nowrap).
+  .name {
+    flex: 0 0 100%;
+    max-width: none;
+    white-space: nowrap;
+    font-size: 1.05rem;
+  }
+
+  .meta { font-size: 0.82rem; }
+
+  button {
+    flex: 0 0 100%;
+    min-height: 2.75rem;
+    padding: 0 1rem;
+    border-radius: var(--hc-radius-control);
+    font-size: 0.95rem;
+  }
 }
