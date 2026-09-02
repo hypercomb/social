@@ -105,6 +105,13 @@
         @if (missingField() === 'secret') {
           <p class="mesh-modal-missing" role="alert">{{ 'mesh-modal.needs-secret' | t }}</p>
         }
+        <!-- The same two words the breadcrumb shows for this zone, live as
+             the fields change — dressed like the crumb (◆ pair ◆) so the pair
+             up top is recognisably THIS location + secret once the window
+             closes. -->
+        @if (zoneWords()) {
+          <p class="mesh-modal-words" aria-live="polite"><span class="mesh-modal-words-sep">◆</span><span class="mesh-modal-words-pair">{{ zoneWords() }}</span><span class="mesh-modal-words-sep">◆</span></p>
+        }
       </section>
 
     </div>

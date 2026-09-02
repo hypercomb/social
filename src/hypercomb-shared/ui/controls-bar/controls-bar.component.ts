@@ -3008,6 +3008,52 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly onBarEnter = (): void => { this.#hovered.set(true) }
   readonly onBarLeave = (): void => { this.#hovered.set(false) }
 
+  // ── rail rollover ─────────────────────────────────────
+  //
+  // ONE tip, at the component root, placed from the hovered button's box. It
+  // cannot be a CSS ::after on the button: the icon list scrolls and clips its
+  // overflow, and the pill's backdrop-filter is the containing block for
+  // anything fixed inside it — so the old attr(aria-label) tooltip was never
+  // visible on a docked rail. The text is the button's own aria-label, so a
+  // control that changes its label (text-only, home-as-portal) says the right
+  // thing without a second binding.
+  //
+  // Beside a docked rail the tip takes the button's exact top and bottom and
+  // stands on the canvas side, overlapping the rail's hairline by one pixel
+  // so nothing separates the two; the floating horizontal pill keeps a chip
+  // above the icon. Touch never shows it — there is no hover to show it on.
+  readonly railTip = signal<{
+    text: string
+    side: 'beside-right' | 'beside-left' | 'above'
+    style: Record<string, string>
+  } | null>(null)
+
+  readonly onCtlEnter = (event: PointerEvent): void => {
+    if (this.isMobile() || event.pointerType === 'touch') return
+    const btn = event.currentTarget as HTMLElement | null
+    const text = btn?.getAttribute('aria-label')?.trim()
+    if (!btn || !text) return
+    const pill = this.#host.nativeElement.querySelector('.controls-pill') as HTMLElement | null
+    const b = btn.getBoundingClientRect()
+    const p = (pill ?? btn).getBoundingClientRect()
+    const side = this.#dockSide()
+    if (side === 'left') {
+      this.railTip.set({ text, side: 'beside-right', style: {
+        top: `${b.top}px`, height: `${b.height}px`, left: `${p.right - 1}px`,
+      } })
+    } else if (side === 'right') {
+      this.railTip.set({ text, side: 'beside-left', style: {
+        top: `${b.top}px`, height: `${b.height}px`, right: `${window.innerWidth - p.left - 1}px`,
+      } })
+    } else {
+      this.railTip.set({ text, side: 'above', style: {
+        left: `${b.left + b.width / 2}px`, bottom: `${window.innerHeight - b.top + 4}px`,
+      } })
+    }
+  }
+
+  readonly onCtlLeave = (): void => { this.railTip.set(null) }
+
   // ── wheel ─────────────────────────────────────────────
   // The whole bar is [data-consumes-wheel], so the wheel never reaches the
   // hive while the pointer is over it. Inside the icon list the browser

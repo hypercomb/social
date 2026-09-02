@@ -100,6 +100,20 @@
   </div>
 }
 
+<!-- RAIL ROLLOVER — the one tip every rail button shares, at the component
+     root so it escapes the icon list's scroll clip and the pill's containing
+     block. Placed from the hovered button's box (onCtlEnter): beside a docked
+     rail it takes the button's exact top and bottom and sits flush against
+     the rail on the canvas side; above the icon on the floating pill. -->
+@if (railTip(); as tip) {
+  <div class="rail-tip show"
+       [class.beside-right]="tip.side === 'beside-right'"
+       [class.beside-left]="tip.side === 'beside-left'"
+       [class.above]="tip.side === 'above'"
+       [style]="tip.style"
+       role="tooltip">{{ tip.text }}</div>
+}
+
 <!-- breadcrumb: below header, right-aligned -->
 <button class="agent-visibility-toggle"
         [class.rail-left]="dockSide() === 'left'"
@@ -408,7 +422,8 @@
                release; touch is left to scroll the box natively. -->
           <div class="controls-row"
                [class.drag-scrolling]="dragScrolling()"
-               (pointerdown)="onListDragStart($event)">
+               (pointerdown)="onListDragStart($event)"
+               (scroll)="onCtlLeave()">
             @if (dockSide() === 'left') {
               <!-- CHAT IS NOT HERE ANY MORE. This rail is how-you-SEE — fit,
                    zoom, pin, fullscreen, orientation — and talking is not one
@@ -421,7 +436,8 @@
                       [class.active]="tutorialsOpen()"
                       (click)="startTutorial()"
                       [attr.aria-label]="'controls.tutorial' | t"
-                      [title]="('controls.tutorial' | t) + ' — ' + ('controls.tutorial.pick' | t)"
+                      (pointerenter)="onCtlEnter($event)"
+                      (pointerleave)="onCtlLeave()"
                       data-ctrl-id="tutorial">
                 <span class="mat-sym">emoji_nature</span>
               </button>
@@ -436,6 +452,8 @@
                       [class.lock-bump]="lockBump()"
                       (click)="togglePin()"
                       [attr.aria-label]="'controls.pin' | t"
+                      (pointerenter)="onCtlEnter($event)"
+                      (pointerleave)="onCtlLeave()"
                       data-ctrl-id="pin">
                 <span class="mat-sym" [class.filled]="locked()">push_pin</span>
               </button>
@@ -451,9 +469,8 @@
                       [attr.aria-label]="homePortal()
                         ? ('controls.home.portal' | t: { portal: homeLabel() })
                         : ('controls.home' | t)"
-                      [title]="homePortal()
-                        ? ('controls.home.portal' | t: { portal: homeLabel() })
-                        : ('controls.home' | t)">
+                      (pointerenter)="onCtlEnter($event)"
+                      (pointerleave)="onCtlLeave()">
                 <span class="mat-sym">{{ homePortal() ? 'home_pin' : 'home' }}</span>
               </button>
             }
@@ -476,7 +493,8 @@
                       (contextmenu)="onCtrlContext(ctrl, $event)"
                       (pointerdown)="onCtrlPointerDown(ctrl, $event)"
                       (pointerup)="onIconPressUp()"
-                      (pointerleave)="onIconPressUp()"
+                      (pointerenter)="onCtlEnter($event)"
+                      (pointerleave)="onIconPressUp(); onCtlLeave()"
                       [attr.aria-label]="ctrl.label | t"
                       [attr.data-ctrl-id]="ctrl.id">
                 <!-- Material Symbols Outlined — every desktop control
@@ -517,6 +535,8 @@
                     [class.editing]="editMode()"
                     (click)="toggleEditMode()"
                     (contextmenu)="onEditToggleContext($event)"
+                    (pointerenter)="onCtlEnter($event)"
+                    (pointerleave)="onCtlLeave()"
                     [attr.aria-label]="editMode() ? ('controls.collapse' | t) : ('controls.expand' | t)">
               <span class="expand-chevron" [class.up]="editMode()">&#x25B8;</span>
             </button>
@@ -525,6 +545,8 @@
                     [class.disabled]="!canGoBack()"
                     [disabled]="!canGoBack()"
                     (click)="goBack()"
+                    (pointerenter)="onCtlEnter($event)"
+                    (pointerleave)="onCtlLeave()"
                     [attr.aria-label]="'controls.go-back' | t">
               <span class="mat-sym">arrow_back</span>
             </button>

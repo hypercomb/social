@@ -595,6 +595,18 @@ $bp-phone-max: 599px;
   text-transform: uppercase;
 }
 
+// THE SAMPLE. A specimen band of the highlighted member's own look — a theme's
+// palette, a backdrop's picture — sized so the bands are actually separable,
+// where the row's chip only had room to stamp. Hairline-framed for the same
+// reason the chip is: a pale ground needs an edge against a pale pane, and a
+// dark one against a dark pane.
+.detail-swatch {
+  margin-top: 0.6rem;
+  height: 2.4rem;
+  border-radius: var(--md-shape-xs);
+  border: 1px solid rgba(var(--hc-chrome-ink), 0.18);
+}
+
 .detail-desc {
   margin: 0.5rem 0 0;
   color: rgba(var(--hc-chrome-ink), 0.72);

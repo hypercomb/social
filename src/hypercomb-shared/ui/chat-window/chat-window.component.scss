@@ -1171,17 +1171,18 @@ $accent: #7eb6d6;
   // mark tucked into the corner. The one rule in here is the one that does
   // work: between the standing fact and the choices under it.
   background: rgba(var(--hc-panel-ink), 0.015);
-  // THE INPUT STOPS WHERE THE CONSOLE STARTS. The reading area already gives
-  // the console its column (`.chat-providers-host`, inside `.chat-body`), but
-  // the footer sits OUTSIDE that row — deliberately, so the window's own
-  // chrome keeps the full width — and the composer therefore ran on underneath
-  // the console. A line you type into that continues behind a panel is the one
-  // place "beside, not over" visibly failed. The same reserved width, applied
-  // where it is the composer's own right edge rather than a column beside it.
-  padding-right: calc(0.75em + var(--hc-providers-width, 0px));
-  // It PULLS OUT rather than jumping: the console slides, and the composer's
-  // edge travels with it.
-  transition: padding-right 0.16s ease;
+  // THE CONSOLE IS RESERVED ONCE, BY THE COLUMN — never again here.
+  //
+  // The composer lives INSIDE `.chat-reading`, which is the flex sibling of
+  // `.chat-providers-host`: when the console opens, that column has already
+  // given up exactly the console's width, so the footer's own right edge IS
+  // the console's left edge. Subtracting `--hc-providers-width` a second time
+  // (which this rule used to do, from when the footer really did sit outside
+  // the row) reserved the console twice and left the box you type in standing
+  // on about half the space with dead ground beside it.
+  //
+  // Nothing to transition either: the column resizes with the grip, so the
+  // send button travels with the console's edge as it moves in and out.
 }
 
 // WHO ANSWERS. LEADS the availability line: shortest thing on the row and the
@@ -1318,10 +1319,12 @@ $accent: #7eb6d6;
   // shrink with the text and begin left of the full-size composer below it.
   // Scale the left inset back to the footer's 0.75em content line.
   padding-left: 1.15385em;
-  padding-right: calc(0.75em + var(--hc-providers-width, 0px));
+  // The same scaling on the other side, so this line ends where the composer
+  // below it ends. The console's width is NOT subtracted here: this row is
+  // inside the reading column too, and that column has already stepped aside.
+  padding-right: 1.15385em;
   font-size: 0.65em;
   color: tw.ink(rgba(140, 220, 170, 0.85));
-  transition: padding-right 0.16s ease;
 
   &.down { color: var(--hc-window-ink-quiet); }
   &.waiting { color: tw.ink(rgba(224, 180, 92, 0.88)); }

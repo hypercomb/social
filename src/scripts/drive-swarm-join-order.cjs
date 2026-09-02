@@ -27,6 +27,10 @@
 const H = require('./drive-swarm-connectivity.cjs')
 
 const SLOW = process.argv.includes('--slow')
+// --mode sticky|ephemeral — seeds hc:swarm:sticky in every client. Sticky
+// (the default) keeps visited pages announced, so scenario 3 passes on the
+// re-announce alone; ephemeral makes the ROOT DRILL the only way back.
+const MODE = (() => { const i = process.argv.indexOf('--mode'); return i >= 0 ? String(process.argv[i + 1]) : 'sticky' })()
 const ENGINE = (() => { const i = process.argv.indexOf('--engine-a'); return i >= 0 ? process.argv[i + 1] : 'chromium' })()
 
 function zone(tag) {
@@ -34,6 +38,7 @@ function zone(tag) {
     room: `join-order-${tag}-${Date.now().toString(36)}`,
     secret: 'secret-' + Math.random().toString(36).slice(2, 10),
     relay: H.RELAY,
+    seed: { 'hc:swarm:sticky': MODE === 'ephemeral' ? '0' : '1' },
   }
 }
 
@@ -53,6 +58,7 @@ async function join(c) {
   const open = await H.waitFor(() => H.meshState(c.page), s => (s.sockets ?? []).some(x => x.readyState === 1), 30000)
   const sig = await H.waitFor(() => H.swarmState(c.page), s => !!s.currentSig, 15000)
   H.log(c.label, `socket=${open.ok} sig=${sig.value?.currentSig ?? '(none)'} key=${JSON.stringify(sig.value?.syncKey ?? null)}`)
+  if (!open.ok) H.log(c.label, 'mesh at failure:', JSON.stringify(open.value))
   return open.ok && sig.ok
 }
 
@@ -100,7 +106,7 @@ async function scenario(name, fn) {
 }
 
 async function main() {
-  H.log('boot', `url=${H.URL_} relay=${H.RELAY ?? '(shell default)'} slow=${SLOW} engine=${ENGINE}`)
+  H.log('boot', `url=${H.URL_} relay=${H.RELAY ?? '(shell default)'} slow=${SLOW} mode=${MODE} engine=${ENGINE}`)
   const la = H.launcherFor(ENGINE)
   const browser = await la.type.launch({ headless: !H.HEADED, ...la.opts })
 
@@ -155,7 +161,7 @@ async function main() {
     const B = await boot(browser, 'B3', z)
     H.check('3: B joins at root while A is deep', await join(B))
     const got = await sees(B, ['date', 'dill'], 60000)
-    H.check(`3: B recovers the root through the root drill${SLOW ? ' (after the slot expired)' : ''}`, got.ok,
+    H.check(`3: B recovers the root (${MODE === 'ephemeral' ? 'root drill only' : 'sticky re-announce + root drill'})${SLOW ? ' after the slot expired' : ''}`, got.ok,
       got.ok ? `${got.waitedMs}ms` : tiles(got.value))
     const dA = await drillState(A.page)
     const dB = await drillState(B.page)

@@ -596,6 +596,7 @@
   "collections.empty.title": "Add your first tile",
   "collections.empty.body": "Start this collection by naming a tile, dropping a file, or pasting something here.",
   "collections.empty.action": "Add a tile",
+  "panel.close": "close",
   "panel.settings": "Window settings",
   "panel.settings.eyebrow": "Settings",
   "panel.settings.grouped": "Window settings — {group}",

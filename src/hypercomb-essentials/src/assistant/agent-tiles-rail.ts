@@ -136,9 +136,11 @@ type RailRow = {
  *  rail keeps mounting it unchanged. */
 export type RailProfile = {
   /** Can the list move? False keeps it on ONE level: no hold-to-enter, no
-   *  back, no right-click out. The notes panel writes on the tiles of the
-   *  location it is standing at — a row from a level below would open some
-   *  other tile's notes under its name. */
+   *  back, no right-click out. A surface whose rows must name tiles of ONE
+   *  place either turns this off or follows `onLevelChanged` and MOVES with
+   *  the list — what the notes desk does, so a row it walks to is a tile it
+   *  can honestly write on. Off with no follower, the rows would name cells at
+   *  a level the surface is not standing at. */
   readonly walk?: boolean
   /** Chat furniture: the › that unfolds a tile's conversations, the spoken /
    *  unread / draft marks, the live-agent count. */
@@ -627,6 +629,15 @@ export class AgentTilesRail {
   /** The surface listens here to follow the participant into a conversation. */
   onSubjectChanged: (subject: RailPick | null) => void = () => {}
 
+  /** THE LIST MOVED, and here is the level it moved to. Fired only by the
+   *  rail's own walk (the ‹ , the ›, → and ←) — never by `showLevel`, which is
+   *  the surface telling the rail where it already is and would bounce
+   *  straight back. A surface that must AGREE with the level in hand (the
+   *  notes desk writes on the tiles of one place) follows this; the chat
+   *  window, which walks the hive freely while the participant stays put,
+   *  simply leaves it unset. */
+  onLevelChanged: (segments: readonly string[]) => void = () => {}
+
   readonly #onRegistryChange = (): void => this.#paintStatus()
   #dropDraftWatch: (() => void) | null = null
   #dropChatWatch: (() => void) | null = null
@@ -917,6 +928,7 @@ export class AgentTilesRail {
     this.#query = ''
     if (this.#find) this.#find.value = ''
     this.#trail.push([...segments])
+    this.onLevelChanged(this.#here())
     void this.#load(1)
   }
 
@@ -925,6 +937,7 @@ export class AgentTilesRail {
     this.#query = ''
     if (this.#find) this.#find.value = ''
     this.#trail.pop()
+    this.onLevelChanged(this.#here())
     void this.#load(-1)
   }
 

@@ -62,11 +62,16 @@ const HOVER_LIST_MAX = 10
  *  rail arrives structurally through the factory it registers in IoC, exactly
  *  as the chat window takes it. The profile is how one list serves two
  *  surfaces; `showLevel` is also the feature test — an essentials build
- *  predating it hands back a rail that walks, which this panel cannot use. */
+ *  predating it hands back a rail whose profile is ignored entirely. */
 type RailPickLike = { readonly name: string; readonly path: readonly string[]; readonly sig?: string }
 type RailRowLike = { readonly name: string; readonly segments: readonly string[] }
 type TilesRailLike = {
   onSubjectChanged: (subject: RailPickLike | null) => void
+  /** The list WALKED — to this level. Absent on an essentials build that
+   *  predates the hook, which is why `walk` is asked for defensively (see
+   *  `#bringRail`): a list that could move with nobody following it would
+   *  name tiles at a level the desk is not standing at. */
+  onLevelChanged?: (segments: readonly string[]) => void
   mount(host: HTMLElement): void
   showLevel?(segments: readonly string[]): void
   showCurrent?(name: string | null): void
@@ -211,6 +216,12 @@ type CellFacts = {
 
 type LineageLike = {
   explorerSegments?: () => readonly string[]
+}
+
+/** The shell's navigator — how the desk moves when its tile list walks.
+ *  Structural, like every other cross-service lookup here. */
+type NavigationLike = {
+  goRaw?: (segments: readonly string[]) => void
 }
 
 /** Structural type for the InputModeStack lookup — avoids a build-time
@@ -1965,10 +1976,16 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   // used to draw letter hexagons off its own read and drifted from the rail in
   // both looks and content.
   //
-  // What differs is a PROFILE, not a second list: the notes panel writes on
-  // the tiles of ONE location, so the list does not walk; it has no chats, so
-  // no › and no bee counts; its badge counts NOTES; and its find box searches
-  // what is written on a tile as well as what it is called.
+  // What differs is a PROFILE, not a second list: it has no chats, so no › and
+  // no bee counts; its badge counts NOTES; and its find box searches what is
+  // written on a tile as well as what it is called.
+  //
+  // It WALKS, like the chat window's. The difference is what the walk means:
+  // the chat rail walks the hive while the participant stays put, because it
+  // is only naming a subject to talk about. This desk WRITES on the tiles of
+  // the place it is standing at, so going inside a tile in the list takes the
+  // desk inside it too (`#followRailLevel`). The list and the place it names
+  // are one thing.
 
   readonly railHost = viewChild<ElementRef<HTMLElement>>('railHost')
   /** True once the rail is mounted — until then (and on a shell whose
@@ -2004,13 +2021,20 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
 
   #bringRail(factory: TilesRailFactoryLike | undefined, host: HTMLElement): void {
     if (this.#rail) return
-    // `walk` is the load-bearing one: an older essentials build ignores the
-    // profile entirely and would give a rail that walks INTO tiles, whose rows
-    // name cells at another location — and this panel resolves a tile's notes
-    // by NAME against the location it stands at. Rather than open the wrong
-    // tile's notes, keep the panel's own chips.
+    // THE LIST WALKS, AND THE DESK WALKS WITH IT. This panel resolves a
+    // tile's notes by NAME against the location it stands at, so a list that
+    // moved on its own would name cells the desk cannot honestly write on —
+    // which is why the list used to be pinned to one level. It is not pinned
+    // any more: `onLevelChanged` moves the DESK to whatever level the list
+    // walks to (see `#followRailLevel`), so the two can never disagree.
+    //
+    // That makes the hook load-bearing. An essentials build that predates it
+    // hands back a list that walks with nobody following, so the capability
+    // test below refuses that rail and the panel's own chips stand in — the
+    // same refusal `walk: false` used to buy, now on the thing that is
+    // actually missing.
     const rail = factory?.create?.({
-      walk: false,
+      walk: true,
       chats: false,
       choose: false,
       badge: row => this.#cellCount(row.name),
@@ -2027,11 +2051,12 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
         else this.onChipLeave()
       },
     })
-    if (!rail || typeof rail.showLevel !== 'function') return
+    if (!rail || typeof rail.showLevel !== 'function' || !('onLevelChanged' in rail)) return
     this.#rail = rail
     rail.onSubjectChanged = subject => {
       if (subject?.name) this.activateCell(subject.name)
     }
+    rail.onLevelChanged = segments => this.#followRailLevel(segments)
     rail.mount(host)
     rail.showLevel?.(this.platePath())
     rail.showCurrent?.(this.cell())
@@ -2040,12 +2065,38 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
   }
 
   /** Put the rail on the level the panel is standing at, and re-read it. The
-   *  panel's own polls already run on lineage change and `synchronize`. */
+   *  panel's own polls already run on lineage change and `synchronize`.
+   *
+   *  Safe to call straight after the rail's OWN walk: `showLevel` on the level
+   *  already in hand is a refresh, not a re-seat, so the round trip through
+   *  navigation lands as a no-op rather than a fight. */
   #syncRail(): void {
     const rail = this.#rail
     if (!rail) return
     rail.showLevel?.(this.platePath())
     rail.showCurrent?.(this.cell())
+  }
+
+  /** THE LIST WALKED — take the desk with it.
+   *
+   *  Going inside a tile in the list is going inside it, full stop: the desk
+   *  writes on the tiles of the place it is standing at, so the place has to
+   *  move or the rows below name tiles the desk would open the wrong notes
+   *  for. `goRaw` pushes, so the browser's (and the phone's) Back walks the
+   *  excursion out the way it walked in, and closing the desk leaves the
+   *  participant where they actually went rather than snapping them back to
+   *  somewhere they have stopped thinking about.
+   *
+   *  The active tile does NOT survive the move — a name resolves per level, so
+   *  carrying it across would open a different tile's notes under the name you
+   *  were just reading. */
+  #followRailLevel(segments: readonly string[]): void {
+    const next = [...segments].map(s => String(s ?? '').trim()).filter(Boolean)
+    const here = [...this.platePath()].map(s => String(s ?? '').trim()).filter(Boolean)
+    if (next.length === here.length && next.every((s, i) => s === here[i])) return
+    this.#clearSubject()
+    this.#activeCell.set(null)
+    get<NavigationLike>('@hypercomb.social/Navigation')?.goRaw?.(next)
   }
 
   /** First letter of a tile's name, for the hexagon on its row. Mirrors the
@@ -2059,12 +2110,20 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
    *  list-click counterpart to clicking the tile on the canvas. */
   activateCell(cell: string): void {
     if (!cell) return
+    this.#clearSubject()
+    this.#activeCell.set(cell)
+  }
+
+  /** Put down whatever tile is in hand, and everything that was only true
+   *  ABOUT that tile. A different tile is a different document: back to its
+   *  first list, its first note, and no half-typed line carried across.
+   *  Shared with `#followRailLevel`, where the tile is not being swapped for
+   *  another but let go of entirely — a name resolves per level, so it cannot
+   *  travel. */
+  #clearSubject(): void {
     this.#capturingFor.set(null)
     this.editingNoteId.set(null)
     this.draftText.set('')
-    this.#activeCell.set(cell)
-    // A different tile is a different document: back to its first list, its
-    // first note, and no half-typed line carried across.
     this.listPathIdx.set([])
     this.readingIndex.set(0)
     this.newItemDepth.set(0)

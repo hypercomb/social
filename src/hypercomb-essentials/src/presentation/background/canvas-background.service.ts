@@ -1184,7 +1184,7 @@ export class CanvasBackgroundService extends EventTarget {
 
   #pictureBackgroundSize(): string {
     const metrics = this.#pictureMetrics()
-    if (!metrics) return 'contain'
+    if (!metrics) return 'cover'
     return `${Math.round(metrics.width * (this.#mirrorUrl ? 2 : 1))}px ${Math.round(metrics.height)}px`
   }
 
@@ -1247,15 +1247,23 @@ export class CanvasBackgroundService extends EventTarget {
     }
   }
 
-  /** The whole-picture (`contain`) fit for this viewport — the scale at which
-   *  neither portrait nor landscape is stretched or cropped. A viewport that
-   *  measures nothing (a window not yet laid out, a hidden host) is not a fit
-   *  of zero: the picture keeps its own scale until a resize says otherwise. */
+  /** The FILLING (`cover`) fit for this viewport — the scale at which the
+   *  picture covers the whole screen with nothing stretched. It was the
+   *  whole-picture `contain` fit, and on a screen wider than the photograph
+   *  that left a band of the theme's ground above and below it: under a
+   *  bright look, two cream bars across the top and bottom of the workspace,
+   *  read as chrome cramping the hive (Jaime, 2026-09-02: "the bottom of the
+   *  screen should not have any horizontal background for any of the
+   *  themes"). A picture is cropped at its edges now, never letterboxed;
+   *  the participant's zoom and pan still move it from here. A viewport that
+   *  measures nothing (a window not yet laid out, a hidden host) is not a
+   *  fit of zero: the picture keeps its own scale until a resize says
+   *  otherwise. */
   #fitFor(size: { width: number; height: number }): number {
     const width = window.innerWidth
     const height = window.innerHeight
     if (!(width > 0) || !(height > 0)) return 1
-    return Math.min(width / size.width, height / size.height)
+    return Math.max(width / size.width, height / size.height)
   }
 
   /** The strip owes more pixels than it was built with — zoomed in, or a

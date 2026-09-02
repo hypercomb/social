@@ -50,6 +50,27 @@ export interface ThemeProvider {
    * predates it.
    */
   reassert?(): boolean
+  /**
+   * A CSS `background` value that SHOWS what a theme looks like — its own
+   * ground, its own panel, its own accent chord, laid out as a strip.
+   *
+   * A theme name is not a look: `sherbet` is a word you had to APPLY to find
+   * out what it was. The swatch is what lets the command line offer the choice
+   * by eye. The values are READ from the live stylesheet (the theme's own
+   * tokens), never a second copy of the palettes kept in code.
+   *
+   * `'system'` samples whichever end the machine is currently asking for.
+   * Returns '' when the theme is unknown or its tokens cannot be read.
+   *
+   * Optional so a module still runs against an older shell.
+   */
+  swatch?(name: string): string
+  /**
+   * Whether a theme is a bright or a dark value-set, taken from its own
+   * `--md-is-light` token — the same declaration derived surfaces read, so
+   * nothing here keeps a list of which themes are which.
+   */
+  mood?(name: string): 'light' | 'dark' | ''
 }
 
 export const THEME_IOC_KEY = '@hypercomb.social/Theme'
