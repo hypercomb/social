@@ -156,23 +156,15 @@ export const chainManifest = (
   }
 }
 
-/** Render the chained manifest as the discovery projection. Newest first —
- *  `generation` is the counter the ship stamps, `at` breaks ties for entries
- *  old enough to predate it, exactly the order `listHostPackages` applied to
- *  the manifest before this file existed. */
-export const projectionOf = (manifest: ContentManifest): string => {
-  const entries = Object.entries(manifest.packages ?? {})
+/** The chain's package signatures in SHIP ORDER, oldest first — the order the
+ *  host appended them, and therefore the order the `host:packages` pool holds
+ *  them in. `generation` is the counter a ship stamps; `at` breaks ties for
+ *  entries old enough to predate it. Oldest-first is not cosmetic: pool entries
+ *  are append-only, so index i must mean the same package on every future run,
+ *  and only a stable prefix can promise that. */
+export const orderedPackageSigs = (manifest: ContentManifest): string[] =>
+  Object.entries(manifest.packages ?? {})
     .filter(([sig]) => /^[a-f0-9]{64}$/.test(sig))
-    .sort((a, b) => (Number(b[1].generation ?? 0) - Number(a[1].generation ?? 0))
-      || String(b[1].at ?? '').localeCompare(String(a[1].at ?? '')))
-    .map(([sig, entry]) => ({
-      sig,
-      label: typeof entry.label === 'string' ? entry.label : undefined,
-      at: typeof entry.at === 'string' ? entry.at : undefined,
-      layerCount: Array.isArray(entry['layers']) ? (entry['layers'] as unknown[]).length : undefined,
-      beeCount: Array.isArray(entry['bees']) ? (entry['bees'] as unknown[]).length : undefined,
-      beesBag: typeof entry['beesBag'] === 'string' ? entry['beesBag'] : undefined,
-      dependenciesBag: typeof entry['dependenciesBag'] === 'string' ? entry['dependenciesBag'] : undefined,
-    }))
-  return JSON.stringify({ packages: entries }, null, 2) + '\n'
-}
+    .sort((a, b) => (Number(a[1].generation ?? 0) - Number(b[1].generation ?? 0))
+      || String(a[1].at ?? '').localeCompare(String(b[1].at ?? '')))
+    .map(([sig]) => sig)

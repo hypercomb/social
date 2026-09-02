@@ -79,51 +79,49 @@ So `host:packages` takes the same living-primitive shape as `community:hosts`:
   questions, and the manifest conflates them today.
 - **`label` is a mark too**, not a field of identity.
 
-### The wire form is a projection
+### The wire form is the pool itself
 
-HTTP has no directory listing, so one enumerable document must still be
-served. It is a **projection of the pool** — regenerated, never authored,
-never authoritative. If it disagrees with the pool, the pool wins. Same
-relationship the mobile rails have to layer order: a rendering, never a
-commit.
+There is no document. A client works out WHERE to ask the same way it works
+out every other pool address — `sign('host:packages')` — so nothing is
+published saying where to look, and there is no filename two parties had to
+agree on. A host that holds nothing answers 404.
 
-The projection carries no inventory. Every field it does carry had to earn
-its place by being either **display-only** (it cannot decide what installs) or
-**underivable** (a client cannot work it out from bytes it has not fetched
-yet):
+The pool holds **one package signature per entry**, at an 8-digit index,
+appended in ship order. **The max index is the head**, the same rule a lineage
+sigbag already uses. No counter to sort by, no `previous` to chase, no
+catalogue to corrupt: an interrupted ship costs one entry, never the list.
 
-| Field | Why it survives |
-|---|---|
-| `sig` | the package; everything else hangs off it |
-| `label`, `at` | display marks — a picker must name its rows without one round trip per row |
-| `layerCount`, `beeCount` | display marks; a count cannot widen or narrow what installs |
-| `beesBag`, `dependenciesBag` | **not derivable** — a bag signature is minted from the bag's own entries, so a client cannot know it before fetching the bag it names. Without these the import map has no aliases |
+And a head signature is all a client needs, because everything else derives
+from it — the table above, plus the import-map bag, which is each dependency's
+own first line paired with its file name.
 
-Order replaces `generation`: the list arrives ranked, so there is no counter to
-sort on and none to disagree about.
+**A CORRECTION, kept here because the wrong turn is instructive.** This section
+first described a *projection*: a small `packages.json` rendered from the
+chain, carrying a signature plus a few display marks. It shipped, it was 53×
+smaller than the manifest, and it was still a manifest — a document stating
+what content already says, at a filename someone had to know. The fields it
+kept were justified by calling the import-map bags "not derivable", which
+measurement then disproved: a bag entry is `@alias
+<sig>`, and both halves are
+in the dependency's own bytes. Nothing survived the check. The document was
+withdrawn from the live host the same day.
 
-Measured on the real chain (176 packages): **3,566,200 → 67,384 bytes, 53×
-smaller**, same head, same order. Every cold client currently downloads 3.5 MB
-to learn one head signature.
+### Probing, not an index the host renders
 
-### Do not serve it at a 64-hex URL
+HTTP cannot list a directory, so reading a pool is a walk. Two ways, and the
+choice is already settled by the host contract: serving `/<pool>/00000007` is
+serving a file, which a bucket, a Pages deployment and a relay all do
+identically, while an index a host RENDERS makes the host a program and
+excludes every static host from being one.
 
-`sign('host:packages')` is a stable address (derived from meaning, not
-content), which is exactly what discovery needs — but the relay serves every
-`/<sig>` with `Cache-Control: public, max-age=31536000, immutable`
-([relay.js:693](../hypercomb-relay/relay.js)). A mutable document at a
-sig-shaped path is pinned for a year by any intermediary, and carving an
-exception punches a hole in *sig-shaped means immutable*, which is the one
-wire invariant worth keeping absolute.
+So: double until the probe misses, then bisect — `~2·log2(n)` requests.
+**Measured live against `jwize.com`: 18 requests, 926 ms, over a pool of 179
+entries**, agreeing with the manifest's newest.
 
-Serve the projection at a non-sig well-known name with `no-store`. Same win,
-no hole.
-*FIXED 2026-09-01:* the relay used to hand the sig-file header to everything
-that resolved, including `manifest.json` — it worked only because Cloudflare
-does not cache `.json` by default. The rule is now stated where it belongs:
-**immutable means sig-addressed, and nothing else.** A named file is the
-domain's mutable voice and is served `no-store`. Readers ask `no-store` too,
-so a host still running the old relay is safe either way.
+Entries are append-only, which is what makes the bisect sound (`has(i)` is
+monotonic, so the boundary IS the head) and what lets them be served
+`immutable` — entry *i* is the same bytes forever. The named documents are the
+only mutable things on the wire, and they are the ones being retired.
 
 ## `beeDeps` is published by nobody
 
@@ -220,30 +218,27 @@ published); only the moment moved.
    reimplementation of enrollments to make the build script look like the app:
    that is the second dialect the walker's squeaky-clean rule exists to
    prevent.*
-4. **Serve the projection.** Non-sig well-known path, `no-store`.
-   `listHostPackages` reads it; the inventory fields stop travelling.
-   *Status 2026-09-01: **BUILT — ahead of 2 and 3**, because the projection is
-   where the win lands and it does not depend on where the truth lives. It is
-   rendered from the chained manifest by `projectionOf`
-   ([chain-manifest.ts](../hypercomb-essentials/scripts/chain-manifest.ts)) and
-   written to every target beside the manifest, inside the same
-   after-the-files/before-the-removals window, so a reader landing mid-ship
-   resolves whichever document it prefers against bytes already present.
-   `listHostPackages` prefers `packages.json` per base and falls back to
-   `manifest.json` for hosts that have not shipped since — the fallback is the
-   drain window, not a second dialect. `reportDivergence` stays quiet when a
-   source asserts nothing, which is the projection's normal condition.
-   Strictly additive: deployed clients keep reading the manifest. Specs:
-   `host-packages.spec.ts` (7) + `projectionOf` in `chain-manifest.spec.ts` (5).
-   Still owed here: steps 2 and 3 replace the manifest as what the projection
-   is rendered FROM, and only then can the manifest stop being written.*
-   *LIVE on `jwize.com` 2026-09-01, verified end to end: `GET /packages.json`
-   → 200, 67,384 bytes byte-identical to the local render, 176 entries, head
-   `8747453970b3…` matching the manifest's v176. The cache rule is live with
-   it — `manifest.json` and `packages.json` both answer `no-store`, `/<sig>`
-   still answers `immutable`. No deployed client reads the projection yet, so
-   publishing it changed nothing for anyone already running: it is additive
-   until a shell shipping the new reader arrives.*
+4. **Publish the pool.** `sign('host:packages')`, one signature per index,
+   append-only; the client derives the address and bisects for the head.
+   *Status 2026-09-02: **BUILT AND LIVE.** The ship appends entries
+   ([copy-content.ts](../hypercomb-essentials/scripts/copy-content.ts)); the
+   client walks them ([host-pool.ts](../hypercomb-runtime/src/host-pool.ts))
+   and `headPackage` is what cold boot now asks
+   ([ensure-install.ts](../hypercomb-web/src/setup/ensure-install.ts)).
+   Verified against `jwize.com`: head found in 18 requests / 926 ms over 179
+   entries, agreeing with the manifest's newest.
+   Two things this changed that are worth naming. The pool's address is a
+   64-hex root name, so the ship's stale-removal — which deletes unadvertised
+   64-hex entries RECURSIVELY — would have destroyed the whole of discovery on
+   the next run; it is now held in the retention set explicitly. And cold boot
+   no longer ranks offers ACROSS hosts by `generation`: a counter is per-host
+   bookkeeping and comparing two hosts by it was always a fiction. The first
+   carried domain that answers wins, and ranking across hosts is the signed
+   sentinel's job. Nothing is risked — every answer is content-addressed.
+   Specs: `host-pool.spec.ts` (11), `host-packages.spec.ts` (11),
+   `orderedPackageSigs` in `chain-manifest.spec.ts` (5).
+   Still read from the manifest: the BROWSE list, because a name is a mark and
+   the static-host form of marks is steps 2-3.*
 5. **`beeDeps` derived, not published.** Drop it from the published record and
    from `HostPackage`.
    *Status 2026-09-01: **BUILT.** `deriveBeeDeps`

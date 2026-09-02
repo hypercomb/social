@@ -15,7 +15,7 @@ import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
 import { isVisitorSession } from './visitor-session'
 // Cold-boot acquisition. Same implementation the shim uses and the same one
 // behind window.hypercomb.acquire — there is one acquisition, not three.
-import { acquire, deriveInventory, listHostPackages, reportDivergence } from '@hypercomb/runtime/acquire'
+import { acquire, deriveInventory, headPackage, listHostPackages, reportDivergence } from '@hypercomb/runtime/acquire'
 import { deriveBeeDeps } from '@hypercomb/runtime/bee-deps'
 import { stampInstalledPackage } from '@hypercomb/runtime/installed-package'
 import { DEFAULT_HOST_ZONES, listHostZones } from '@hypercomb/runtime/host-zones'
@@ -302,14 +302,24 @@ const autoloadFromHosts = async (): Promise<boolean> => {
     const zones = carried.length ? carried : [...DEFAULT_HOST_ZONES]
     if (!zones.length) return false
 
-    const offers = (await Promise.all(zones.map(async zone => {
-      try { return await listHostPackages(zone) } catch { return [] }
-    }))).flat()
-    if (!offers.length) return false
+    // ASK EACH DOMAIN FOR ITS HEAD. Discovery is the pool at
+    // `sign('host:packages')` — an address every client derives for itself, so
+    // there is nothing published saying where to look and no catalogue to read
+    // (documentation/host-packages-pool.md).
+    //
+    // THE FIRST CARRIED DOMAIN THAT ANSWERS WINS, and the order is the
+    // participant's own. This used to be "newest wins", ranked by a counter
+    // the manifest stamped — but a counter is per-host bookkeeping, and asking
+    // two hosts to be comparable by it was always a fiction. Ranking ACROSS
+    // hosts is the signed sentinel's job; a host can only answer for itself.
+    // Nothing is risked by the simpler rule: every answer is content-addressed,
+    // so whichever host replies, the bytes verify or they are refused.
+    const heads = (await Promise.all(zones.map(async zone => {
+      try { return await headPackage(zone) } catch { return null }
+    }))).filter((offer): offer is NonNullable<typeof offer> => offer !== null)
+    if (!heads.length) return false
 
-    // Newest wins. Every offer is content-addressed, so "which host" is not a
-    // trust question — whoever answers, the bytes verify or they are refused.
-    const newest = offers.sort((a, b) => (b.generation ?? 0) - (a.generation ?? 0))[0]!
+    const newest = heads[0]!
 
     EffectBus.emit('boot:status', { kind: 'installing' } as BootStatus)
     console.log(`[ensure-install] cold boot — acquiring ${newest.packageSig.slice(0, 12)}… from ${zones.join(', ')}`)

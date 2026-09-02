@@ -25,15 +25,14 @@
 //
 // It reads nothing but public URLs and writes nothing anywhere.
 
-import { HOST_IOC_KEY, type HostProvider } from '@hypercomb/core'
+import { HOST_IOC_KEY, registerPoolMeaning, type HostProvider } from '@hypercomb/core'
+import { HOST_PACKAGES_MEANING, headPackageSig, poolEntryName } from './host-pool.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
-/** The projection a host publishes, preferred over the manifest it is rendered
- *  from (documentation/host-packages-pool.md). Both are MUTABLE pointers, so
- *  both are fetched `no-store` — a sig-addressed URL is the only thing on this
- *  wire that may be cached. */
-const PACKAGES_FILE = 'packages.json'
+/** The one document left, and only while hosts drain onto the pool. It is a
+ *  MUTABLE pointer, so it is fetched `no-store`; a sig-addressed URL is the
+ *  only thing on this wire that may be cached. */
 const MANIFEST_FILE = 'manifest.json'
 
 const isLoopback = (zone: string): boolean =>
@@ -94,60 +93,67 @@ type ManifestEntry = {
  * case, and the distinctions that matter (is it a host? is CORS set? does the
  * pin resolve?) belong to the host check, not to a picker.
  */
-export const listHostPackages = async (zone: string): Promise<HostPackage[]> => {
+/**
+ * THE HEAD PACKAGE A DOMAIN PUBLISHES — the whole of discovery.
+ *
+ * The address is DERIVED (`sign('host:packages')`), never named, so nothing
+ * had to be published saying where to look. The max index in that pool is the
+ * head, and that one signature expands into everything else at admission.
+ *
+ * Falls back to the manifest's newest entry for a host that has not shipped
+ * the pool yet — the drain window, not a second dialect.
+ */
+export const headPackage = async (zone: string): Promise<HostPackage | null> => {
+  const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
+
   for (const base of hostBases(zone)) {
-    const projected = await readProjection(zone, base)
-    if (projected.length) return projected
-    const declared = await readManifest(zone, base)
-    if (declared.length) return declared
-  }
-  return []
-}
-
-/** `packages.json` — the projection. Ordered by the host, newest first, and
- *  carrying no inventory at all: what installs is derived from the sealed
- *  root at admission, so there is nothing here for a host to get wrong. */
-const readProjection = async (zone: string, base: string): Promise<HostPackage[]> => {
-  type Entry = {
-    sig?: unknown
-    label?: unknown
-    at?: unknown
-    layerCount?: unknown
-    beeCount?: unknown
-    beesBag?: unknown
-    dependenciesBag?: unknown
-  }
-  let doc: { packages?: Entry[] } | null = null
-  try {
-    const res = await fetch(`${base}/${PACKAGES_FILE}`, { cache: 'no-store' })
-    if (!res.ok) return []
-    doc = await res.json() as { packages?: Entry[] }
-  } catch { return [] }
-
-  const entries = Array.isArray(doc?.packages) ? doc.packages : []
-  return entries
-    .filter(entry => SIG_RE.test(String(entry?.sig ?? '')))
-    .map((entry): HostPackage => {
-      const packageSig = String(entry.sig)
+    // DEFAULT CACHE MODE, deliberately: a pool entry is append-only, so entry
+    // N is the same bytes forever and the HTTP cache is free bandwidth. A 404
+    // for an index nobody has shipped yet is not cached, which is what keeps
+    // the head probe honest.
+    const read = async (index: number): Promise<string | null> => {
+      try {
+        const res = await fetch(`${base}/${pool}/${poolEntryName(index)}`)
+        if (!res.ok) return null
+        const text = await res.text()
+        return text.includes('<') ? null : text   // an SPA fallback is not an entry
+      } catch { return null }
+    }
+    const packageSig = await headPackageSig(read)
+    if (packageSig) {
       return {
         zone,
         base,
         packageSig,
-        label: String(entry.label ?? '').trim() || packageSig.slice(0, 12),
-        at: String(entry.at ?? ''),
-        // The projection's ORDER is the answer; there is no counter to rank by
-        // and nothing to re-sort. Ranking data was per-host bookkeeping that
-        // only ever existed to be sorted on — the list arrives sorted instead.
+        label: packageSig.slice(0, 12),
+        at: '',
         generation: null,
         layers: [],
         bees: [],
         dependencies: [],
-        layerCount: typeof entry.layerCount === 'number' ? entry.layerCount : undefined,
-        beeCount: typeof entry.beeCount === 'number' ? entry.beeCount : undefined,
-        beesBag: typeof entry.beesBag === 'string' ? entry.beesBag : undefined,
-        dependenciesBag: typeof entry.dependenciesBag === 'string' ? entry.dependenciesBag : undefined,
       }
-    })
+    }
+  }
+
+  return (await listHostPackages(zone))[0] ?? null
+}
+
+/**
+ * Everything a domain publishes, newest first — the BROWSE surface, still read
+ * from the manifest.
+ *
+ * The pool answers "which package", which is what installing needs. It cannot
+ * yet answer "and what is each one called", because a name is a mark and the
+ * static-host form of marks is not built (documentation/host-packages-pool.md,
+ * steps 2-3). Until it is, a picker reads the manifest and a cold boot does
+ * not.
+ */
+export const listHostPackages = async (zone: string): Promise<HostPackage[]> => {
+  for (const base of hostBases(zone)) {
+    const declared = await readManifest(zone, base)
+    if (declared.length) return declared
+  }
+  return []
 }
 
 /** `manifest.json` — the drain-window fallback for hosts that have not shipped

@@ -44,7 +44,7 @@ import { registerPoolMeaning, SignatureStore } from '@hypercomb/core'
 // module state — which is the entire reason they may be bundled in here. The
 // walker IS the protocol; only the io wiring below is ours.
 import { isComplete, resolveInventory, resolveSignatureClosure, type ReplicationIo, type ReplicationResult } from './replication-walker.js'
-import { hostBases, listHostPackages, type HostPackage } from './host-packages.js'
+import { headPackage, hostBases, listHostPackages, type HostPackage } from './host-packages.js'
 // The live-package stamp lives in installed-package.ts so the web shell's bundled
 // install can leave the SAME mark — one key, one reader, one answer to "which
 // build am I on". Re-exported so existing callers keep their import site.
@@ -54,7 +54,7 @@ export { installedPackageSig }
 // Re-exported so the shim's own callers keep one import site. The
 // IMPLEMENTATION moved to runtime (the app needs the same answer and cannot
 // import the shim); nothing about the shape changed.
-export { hostBases, listHostPackages, type HostPackage }
+export { headPackage, hostBases, listHostPackages, type HostPackage }
 import { validateSealedPackage } from './sealed-package.js'
 import { deriveBeeDeps } from './bee-deps.js'
 

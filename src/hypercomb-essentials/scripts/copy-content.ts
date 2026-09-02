@@ -23,7 +23,8 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
-import { chainManifest, chainScore, projectionOf, type ContentManifest } from './chain-manifest.js'
+import { createHash } from 'node:crypto'
+import { chainManifest, chainScore, orderedPackageSigs, type ContentManifest } from './chain-manifest.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -58,30 +59,21 @@ const LEGACY_BUILD_DIRS = ['__layers__', '__bees__', '__dependencies__']
 const LEGACY_RESOURCES_DIR = '__resources__'
 const MANIFEST_FILE = 'manifest.json'
 
-// THE PROJECTION (documentation/host-packages-pool.md). What a domain
-// publishes, rendered small: one entry per package, newest first, carrying
-// only what a client cannot work out for itself.
+// DISCOVERY IS A POOL OF MEANING (documentation/host-packages-pool.md). A host
+// publishes its packages by APPENDING one signature per entry to the pool at
+// `sign('host:packages')`; the max index is the head. There is no catalogue,
+// no filename anyone had to agree on, and nothing stated that the content does
+// not already say — a client derives this same address from the same meaning
+// and asks for it.
 //
-// It is a RENDERING, never the truth — regenerated from the chain on every
-// ship, never hand-edited, and if it ever disagreed with the packages a host
-// holds, the packages win. Every inventory array stayed behind in
-// manifest.json on purpose: layers, bees, dependencies and beeDeps are all
-// derivable from the sealed root (measured across the whole published chain),
-// and deriving them is what stops an unsigned document from choosing which
-// modules execute.
-//
-// What survives, and why each one had to:
-//   sig            — the package. Everything else hangs off it.
-//   label, at      — display marks. A picker must be able to name its rows
-//                    without 176 round trips.
-//   beeCount,
-//   layerCount     — display marks. Counts cannot decide what installs.
-//   beesBag,
-//   dependenciesBag— NOT derivable: a bag signature is minted from the bag's
-//                    own entries, so a client cannot know it before fetching
-//                    the bag it names. Without these the import map has no
-//                    aliases.
-const PACKAGES_FILE = 'packages.json'
+// The address is DERIVED, never hardcoded: this is `sign(meaning)`, byte for
+// byte what core's `registerPoolMeaning` mints, and it must stay that way or
+// the two sides address different directories. The colon is the collision
+// rule — `lineageKey` folds every non-alphanumeric to `-`, so no location can
+// ever produce this address.
+const HOST_PACKAGES_MEANING = 'host:packages'
+const HOST_PACKAGES_POOL = createHash('sha256').update(HOST_PACKAGES_MEANING, 'utf8').digest('hex')
+const poolEntryName = (index: number): string => String(index).padStart(8, '0')
 
 const copyDirRecursive = (srcDir: string, tgtDir: string): void => {
   mkdirSync(tgtDir, { recursive: true })
@@ -208,7 +200,7 @@ const syncTarget = (
   targetDir: string,
   additive: boolean,
   manifestJson: string,
-  packagesJson: string,
+  poolOrder: string[],
   keep: Set<string>,
   peers: string[],
 ): { copied: number; skipped: number; removed: number; drained: number; healed: number } => {
@@ -282,11 +274,29 @@ const syncTarget = (
     copied++
   }
   writeDoc(MANIFEST_FILE, manifestJson)
-  // The projection rides in the same window as the manifest — after every
-  // file it can name, before anything is removed — so a reader that lands
-  // mid-ship resolves whichever of the two it prefers against bytes that are
-  // already present.
-  writeDoc(PACKAGES_FILE, packagesJson)
+
+  // THE POOL, APPENDED. Same window as the manifest — after every file it can
+  // name, before anything is removed — so a client that lands mid-ship walks
+  // to a head whose bytes are already there.
+  //
+  // Append-only, and that is load-bearing: the head probe bisects on the
+  // promise that entries are gapless and that index i never changes meaning.
+  // An entry that is already present is therefore left exactly as it is; if it
+  // ever disagreed with the chain that is a fault to report, not to paper over
+  // by rewriting history under a client that may be mid-walk.
+  const poolDir = join(targetDir, HOST_PACKAGES_POOL)
+  mkdirSync(poolDir, { recursive: true })
+  poolOrder.forEach((sig, index) => {
+    const entry = join(poolDir, poolEntryName(index))
+    if (existsSync(entry)) {
+      const held = readFileSync(entry, 'utf8').trim()
+      if (held !== sig) console.warn(`[copy-content] pool entry ${poolEntryName(index)} holds ${held.slice(0, 12)}, chain says ${sig.slice(0, 12)} — left as written`)
+      skipped++
+      return
+    }
+    writeFileSync(entry, sig, 'utf8')
+    copied++
+  })
 
   // remove stale entries (signatures no longer in source) — STRICTLY
   // whitelisted to 64-hex names so app assets sharing the target root
@@ -347,7 +357,7 @@ const main = () => {
   }
   const chained = chainManifest(localManifest, authority, new Date())
   const manifestJson = JSON.stringify(chained.manifest, null, 2) + '\n'
-  const packagesJson = projectionOf(chained.manifest)
+  const poolOrder = orderedPackageSigs(chained.manifest)
   if (chained.generation) {
     console.log(`[copy-content] manifest version: v${chained.generation} '${chained.label}'${chained.minted ? '' : ' (unchanged re-deploy)'}`)
   }
@@ -356,11 +366,16 @@ const main = () => {
   // be able to serve. Backfill sources are ordered additive-first: those pools
   // never prune, so they carry the full deploy history.
   const keep = advertisedSigs(chained.manifest)
+  // The pool's address is a 64-hex root name, and stale removal deletes those
+  // recursively when nothing advertises them. Nothing does — the pool is not
+  // content — so without this line the next ship would delete the whole of
+  // discovery. Exactly the collision the pool registry exists to warn about.
+  keep.add(HOST_PACKAGES_POOL)
   const sourceOrder = [...TARGETS].sort((a, b) => Number(b.additive) - Number(a.additive)).map(t => t.dir)
 
   for (const { dir, additive } of TARGETS) {
     const peers = sourceOrder.filter(d => d !== dir && existsSync(d))
-    const { copied, skipped, removed, drained, healed } = syncTarget(dir, additive, manifestJson, packagesJson, keep, peers)
+    const { copied, skipped, removed, drained, healed } = syncTarget(dir, additive, manifestJson, poolOrder, keep, peers)
     console.log(`[copy-content] ${dir}${additive ? ' (additive/persistent)' : ''}`)
     console.log(`  ${copied} copied, ${skipped} unchanged, ${removed} removed${healed ? `, ${healed} backfilled for older versions` : ''}${drained ? `, ${drained} drained from legacy dirs` : ''}`)
   }
