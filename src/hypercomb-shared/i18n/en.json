@@ -355,6 +355,8 @@
   "notes.lists.deleteConfirm": "delete list?",
   "notes.lists.addLine": "add a line — press Enter",
   "notes.capturePlaceholder": "type a note and press Enter...",
+  "notes.composerPlaceholder": "write a note — “- ” goes deeper",
+  "notes.composerDepthHint": "the next line lands at this depth — Esc steps back out",
   "notes.capturePlaceholderQ": "ask a question and press Enter...",
   "notes.capturePlaceholder.targeted": "add a note for \"{tile}\" — press Enter...",
   "notes.add": "add a note",

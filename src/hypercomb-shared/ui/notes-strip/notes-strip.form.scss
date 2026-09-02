@@ -227,3 +227,49 @@
   &.n   { background: var(--md-tertiary); }
 }
 
+
+// ── THE COMPOSER: the command line, at the foot of the desk ──────────────
+//
+// A band, not a card: it is the surface's own bottom edge, the way the chat
+// window's line is. One hairline above it separates it from whatever column
+// it happens to be under; nothing else, because the shell inside already
+// draws its own box and two frames around one input read as a mistake.
+//
+// It sits OUTSIDE the scrolling columns (a grid row of its own on the desk,
+// the last flex child below them on a narrow screen), so it never scrolls
+// away from the list it is adding to.
+.cv2-composer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 0.45rem 0.7rem;
+  border-top: 1px solid color-mix(in srgb, var(--md-on-surface) 12%, transparent);
+  background: color-mix(in srgb, var(--md-on-surface) 3%, transparent);
+}
+
+// The shell takes the whole band; `min-width: 0` because a flex child with an
+// input in it will happily refuse to shrink below the input's intrinsic width
+// and push the depth chip off the edge.
+.cv2-composer-shell {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+// WHERE THE NEXT LINE LANDS, said before it is typed. Only rendered below the
+// top level (at depth 0 there is nothing to warn about), so its presence IS
+// the signal and the number is the detail.
+.cv2-composer-depth {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  flex: 0 0 auto;
+  padding: 0.15rem 0.4rem;
+  border-radius: 999px;
+  font: 600 scaled(0.72rem)/1 var(--hc-face-mono);
+  color: var(--md-on-surface-var);
+  background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+
+  .mat-sym { font-size: 14px; }
+}

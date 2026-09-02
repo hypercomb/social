@@ -1230,3 +1230,42 @@ $default-face: #c8b8ff;
   // pans the hive underneath it.
   .shell-actions { touch-action: pan-x; }
 }
+
+// ── EMBEDDED: this line is inside another surface ────────────────────────
+//
+// See the `embedded` input for why. Two things go, and only two: the icon
+// rail (ways to reach OTHER surfaces, meaningless inside one) and the
+// portrait phone's full-bleed slab (how the command line reads as the bottom
+// of the SCREEN — inside a panel it reads as a hole cut in the panel).
+//
+// Last in the sheet on purpose: the phone block above is where the slab is
+// declared, and this has to outrank it at the same specificity.
+:host(.is-embedded) {
+  .shell-actions { display: none; }
+
+  // The host panel owns the ground; the line only draws its own edge on it.
+  .command-shell {
+    background: color-mix(in srgb, var(--md-on-surface) 5%, transparent);
+    border: 1px solid color-mix(in srgb, var(--md-on-surface) 18%, transparent);
+    // The shape ladder, not a rounded pill: a text box is a box.
+    border-radius: var(--md-shape-xs);
+    padding-right: 0;
+    min-height: 2.25rem;
+  }
+}
+
+@media (max-width: $bp-phone-max) and (orientation: portrait) {
+  // Same two removals, restated where the phone block would otherwise win.
+  :host(.is-embedded) {
+    .shell-actions { display: none; }
+
+    .command-shell {
+      background: color-mix(in srgb, var(--md-on-surface) 5%, transparent);
+      border: 1px solid color-mix(in srgb, var(--md-on-surface) 18%, transparent);
+      border-radius: var(--md-shape-xs);
+      // The GO button belongs to the command line's own mobile layout; there
+      // is no room reserved for one here, so the text runs the full width.
+      padding-right: 0;
+    }
+  }
+}

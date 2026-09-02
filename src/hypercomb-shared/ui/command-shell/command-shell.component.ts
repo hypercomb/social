@@ -4,7 +4,7 @@
 // ghost text, suggestion dropdown, keyboard navigation) while delegating
 // all business logic to the parent via inputs/outputs.
 
-import { Component, computed, effect, ElementRef, inject, input, output, signal, ViewChild, type AfterViewInit, type OnDestroy } from '@angular/core'
+import { Component, computed, effect, ElementRef, HostBinding, inject, input, output, signal, ViewChild, type AfterViewInit, type OnDestroy } from '@angular/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { TextScaleComponent, surfaceScale, stepSurfaceScale } from '../text-scale/text-scale.component'
 
@@ -194,6 +194,29 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
 
   /** Prefix of each suggestion that the user has typed (for highlight split). */
   readonly typedPrefix = input('')
+
+  /**
+   * EMBEDDED — this shell is a line INSIDE another surface, not the shell's
+   * own command line.
+   *
+   * The notes desk composes notes with this component, because writing a note
+   * is typing a line and there should be one line-typing thing in the app, not
+   * two that look alike and behave differently. But two parts of the standard
+   * presentation belong to the command line's PLACE rather than to typing:
+   *   • the icon rail — Beehaviors, Chat, notes, pheromones — which are ways
+   *     to reach other surfaces, meaningless inside one of them (and on a
+   *     portrait phone the rail is a whole second strip);
+   *   • the portrait phone's full-bleed dark slab, which is how the command
+   *     line reads as the bottom of the SCREEN. Inside a panel it reads as a
+   *     hole cut in the panel.
+   * Embedded drops both. Everything about typing — the caret, the ghost, the
+   * keys, the completion panel — is untouched, which is the whole point of
+   * using this component rather than a lookalike.
+   */
+  readonly embedded = input(false)
+
+  @HostBinding('class.is-embedded')
+  get embeddedClass(): boolean { return this.embedded() }
 
   /** Optional descriptions keyed by suggestion name (second column). */
   readonly descriptionMap = input<ReadonlyMap<string, string>>(new Map())
