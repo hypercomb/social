@@ -188,79 +188,10 @@
 // header usable; max bounds keep the panel inside the viewport. The
 // host's pointer-events:none lets clicks fall through to the canvas
 // everywhere except the panel itself, so the grip stays interactive.
-// User-controlled resize via a custom corner grip (see
-// .cv2-resize-handle below). The native `resize: both` is dropped
-// because Chrome ignores it when overflow is visible — which we
-// need so the tool palette can overhang the strip's bottom. The
-// custom handle works regardless and gives us styling control.
 .notes-strip.mode-rows {
   min-width: 16rem;
   min-height: 5rem;
 }
-
-// Custom resize grip — small triangle at the bottom-right corner.
-// Hidden in fullscreen (size is forced). Sits inside the strip's
-// padding zone via position: absolute; the strip is position:
-// relative (set on the base rule).
-.cv2-resize-handle {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 16px;
-  height: 16px;
-  cursor: nwse-resize;
-  z-index: 5;
-  user-select: none;
-  touch-action: none;
-}
-// Diagonal lines drawn via repeating gradient so we never inject
-// any DOM from user content.
-.cv2-resize-handle::before {
-  content: "";
-  position: absolute;
-  inset: 3px;
-  background:
-    linear-gradient(135deg,
-      transparent 0%,
-      transparent 40%,
-      var(--md-on-surface-faint) 40%,
-      var(--md-on-surface-faint) 50%,
-      transparent 50%,
-      transparent 70%,
-      var(--md-on-surface-faint) 70%,
-      var(--md-on-surface-faint) 80%,
-      transparent 80%);
-  opacity: 0.5;
-  border-bottom-right-radius: 11px;
-  transition: opacity var(--md-dur-short) var(--md-easing-standard);
-}
-.cv2-resize-handle:hover::before { opacity: 1; }
-:host.is-fullscreen .cv2-resize-handle { display: none; }
-
-// Invisible edge resize handles — transparent hit strips along the panel
-// edges (no glyph; the cursor signals affordance). The left edge is the live
-// resize edge when docked right; bottom for the floating panel's height.
-.cv2-resize-edge {
-  position: absolute;
-  z-index: 5;
-  user-select: none;
-  touch-action: none;
-}
-.cv2-resize-edge-left {
-  top: 0;
-  bottom: 0;
-  left: -3px;
-  width: 8px;
-  cursor: ew-resize;
-}
-.cv2-resize-edge-bottom {
-  left: 0;
-  right: 0;
-  bottom: -3px;
-  height: 8px;
-  cursor: ns-resize;
-}
-:host.is-fullscreen .cv2-resize-edge { display: none; }
 
 // ── accessibility helpers ──────────────────────────────
 .visually-hidden {

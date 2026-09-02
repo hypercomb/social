@@ -1,11 +1,9 @@
 // hypercomb-shared/ui/notes-strip/_notes-strip-reading-pane.scss
 //
-// The reading pane, shared by both layouts.
-// One note, given the room. The docked window and the desk are the SAME
-// pane at two sizes, so it lives here as a mixin taking its scale as
-// arguments — included by notes-strip.reading.scss (compact) and
-// notes-strip.desk.scss (desk). Sizes are the only difference; behaviour,
-// colour and structure are not allowed to drift apart between them.
+// The reading pane. One note, given the room.
+// A mixin taking its scale as arguments — included by notes-strip.desk.scss.
+// It read at two sizes while notes had a second, docked shape; the mixin
+// stays parameterised so a second scale costs an include, not a fork.
 
 @use './notes-strip-shared' as *;
 

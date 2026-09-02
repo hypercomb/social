@@ -15,7 +15,7 @@ import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
 import { isVisitorSession } from './visitor-session'
 // Cold-boot acquisition. Same implementation the shim uses and the same one
 // behind window.hypercomb.acquire — there is one acquisition, not three.
-import { acquire, listHostPackages } from '@hypercomb/runtime/acquire'
+import { acquire, deriveInventory, listHostPackages, reportDivergence } from '@hypercomb/runtime/acquire'
 import { stampInstalledPackage } from '@hypercomb/runtime/installed-package'
 import { DEFAULT_HOST_ZONES, listHostZones } from '@hypercomb/runtime/host-zones'
 import { cacheImportMap } from './resolve-import-map'
@@ -571,23 +571,6 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   const store = get('@hypercomb.social/Store') as Store | undefined
   if (!store) return false
 
-  // SEALED RECORD FIRST (install-by-replication step 3). Placement is a read
-  // of the RECORD — which declared set a signature belongs to — never a
-  // property of how the bytes travelled. The record must be sealed before any
-  // of it is a candidate: root declared in its own layer set, every sig
-  // well-formed, beeDeps closed over the declared sets. Nothing outside it is
-  // ever fetched.
-  const sealed = validateSealedPackage(bundled.packageSig, {
-    layers: bundled.layers,
-    bees: bundled.bees,
-    dependencies: bundled.dependencies,
-    beeDeps: bundled.beeDeps,
-  })
-  if (!sealed.valid) {
-    console.warn(`[ensure-install] bundled package ${bundled.packageSig.slice(0, 12)} is not sealed: ${sealed.errors.join('; ')}`)
-    return false
-  }
-
   const fetchBytes = async (path: string): Promise<Uint8Array<ArrayBuffer> | null> => {
     try {
       // Default cache mode, NOT 'no-store': every URL through here is
@@ -659,23 +642,45 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   const beesUrlBase = `/opfs/${await Store.poolSignature(Store.BEES_MEANING)}`
   const depsUrlBase = `/opfs/${await Store.poolSignature(Store.DEPENDENCIES_MEANING)}`
 
-  // One call per declared set. `resolveInventory` is the EXACT-inventory
-  // shape: no mining, no recursion — the sealed record that named these
-  // signatures IS the inventory identity. Every byte is sha256-verified
-  // against its name before admission, a present-and-correct file is reused,
-  // and a repeat call is an idempotent delta repair.
-  const [layersResult, depsResult, beesResult] = await Promise.all([
-    resolveInventory(bundled.packageSig, bundled.layers, {
-      read: readFrom([store.hypercombRoot, store.legacyHive, store.legacyHypercombIo, store.layers], sig => [sig, `${sig}.json`]),
-      fetch: fetchFirst(sig => [`/content/${sig}`, `/content/__layers__/${sig}.json`]),
-      write: writeTo(store.hypercombRoot, sig => sig, sig => `/opfs/__layers__/${sig}.json`, 'application/json; charset=utf-8'),
-    } satisfies ReplicationIo),
-    resolveInventory(bundled.packageSig, bundled.dependencies, {
+  // DERIVE THE INVENTORY FROM THE SEALED ROOT (documentation/host-packages-pool.md).
+  // `bundled.layers` / `.bees` / `.dependencies` are what /content/manifest.json
+  // ASSERTS; the layer closure is what the signed bytes SAY. The two agree for
+  // every package the build has ever emitted — which is exactly why the
+  // assertion can go: it was a copy, and it was the only unsigned thing
+  // deciding which modules the preloader would run. Same derivation the shim
+  // and window.hypercomb.acquire use; there is one acquisition, not three.
+  const layersIo = {
+    read: readFrom([store.hypercombRoot, store.legacyHive, store.legacyHypercombIo, store.layers], sig => [sig, `${sig}.json`]),
+    fetch: fetchFirst(sig => [`/content/${sig}`, `/content/__layers__/${sig}.json`]),
+    write: writeTo(store.hypercombRoot, sig => sig, sig => `/opfs/__layers__/${sig}.json`, 'application/json; charset=utf-8'),
+  } satisfies ReplicationIo
+
+  const { inventory, result: layersResult } = await deriveInventory(bundled.packageSig, layersIo)
+
+  // SEALED RECORD (install-by-replication step 3), now checked against the
+  // DERIVED sets: root declared in its own layer set, every sig well-formed,
+  // beeDeps closed over what the tree actually holds. Nothing outside it is
+  // ever fetched.
+  const sealed = validateSealedPackage(bundled.packageSig, { ...inventory, beeDeps: bundled.beeDeps })
+  if (!sealed.valid) {
+    console.warn(`[ensure-install] bundled package ${bundled.packageSig.slice(0, 12)} is not sealed: ${sealed.errors.join('; ')}`)
+    return false
+  }
+
+  reportDivergence('the bundled package', bundled, inventory)
+
+  // One call per derived set. `resolveInventory` is the EXACT-inventory
+  // shape: no mining, no recursion — the closure that named these signatures
+  // IS the inventory identity. Every byte is sha256-verified against its name
+  // before admission, a present-and-correct file is reused, and a repeat call
+  // is an idempotent delta repair.
+  const [depsResult, beesResult] = await Promise.all([
+    resolveInventory(bundled.packageSig, inventory.dependencies, {
       read: readFrom([store.dependencies, store.legacyDependencies], sig => [`${sig}.js`, sig]),
       fetch: fetchFirst(sig => [`/content/${sig}`, `/content/__dependencies__/${sig}.js`]),
       write: writeTo(store.dependencies, sig => `${sig}.js`, sig => `${depsUrlBase}/${sig}`, 'application/javascript; charset=utf-8'),
     } satisfies ReplicationIo),
-    resolveInventory(bundled.packageSig, bundled.bees, {
+    resolveInventory(bundled.packageSig, inventory.bees, {
       read: readFrom([store.bees, store.legacyBees], sig => [`${sig}.js`, sig]),
       fetch: fetchFirst(sig => [`/content/${sig}`, `/content/__bees__/${sig}.js`]),
       write: writeTo(store.bees, sig => `${sig}.js`, sig => `${beesUrlBase}/${sig}.js`, 'application/javascript; charset=utf-8'),
@@ -740,10 +745,10 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   let depBagCount = 0
   let beeBagCount = 0
   if (bundled.dependenciesBag) {
-    depBagCount = await writeBag(store.dependencies, bundled.dependenciesBag, bundled.dependencies.length, '/content/__dependencies__')
+    depBagCount = await writeBag(store.dependencies, bundled.dependenciesBag, inventory.dependencies.length, '/content/__dependencies__')
   }
   if (bundled.beesBag) {
-    beeBagCount = await writeBag(store.bees, bundled.beesBag, bundled.bees.length, '/content/__bees__')
+    beeBagCount = await writeBag(store.bees, bundled.beesBag, inventory.bees.length, '/content/__bees__')
   }
 
   // COMPLETE OR ABSENT (install-by-replication step 4). The gate reads the
@@ -755,9 +760,9 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   const complete = [layersResult, depsResult, beesResult].every(isComplete)
   const manifest = {
     version: 2,
-    layers: bundled.layers,
-    bees: bundled.bees,
-    dependencies: bundled.dependencies,
+    layers: inventory.layers,
+    bees: inventory.bees,
+    dependencies: inventory.dependencies,
     beeDeps: bundled.beeDeps,
     dependenciesBag: bundled.dependenciesBag,
     beesBag: bundled.beesBag,
@@ -785,7 +790,7 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   stampInstalledPackage(bundled.packageSig)
   localStorage.setItem(INSTALLED_FLAG_KEY, 'true')
   if (bundled.beeDeps) (globalThis as any).__hypercombBeeDeps = bundled.beeDeps
-  sigStore.trustAll([...bundled.bees, ...bundled.dependencies, ...bundled.layers])
+  sigStore.trustAll([...inventory.bees, ...inventory.dependencies, ...inventory.layers])
   localStorage.setItem(SIG_STORE_KEY, JSON.stringify(sigStore.toJSON()))
   const held = (r: { present: number; fetched: number; total: number }): string => `${r.present + r.fetched}/${r.total}`
   console.log(

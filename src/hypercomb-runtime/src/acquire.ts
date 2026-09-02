@@ -243,19 +243,23 @@ export const deriveInventory = async (
  *  — the derived set is simply the one that installs — but said out loud,
  *  because a host whose manifest names atoms its layers do not is either
  *  stale or trying. */
-const reportDivergence = (pkg: HostPackage, inventory: PackageInventory): void => {
+export const reportDivergence = (
+  source: string,
+  claimed: { layers?: string[]; bees?: string[]; dependencies?: string[] },
+  inventory: PackageInventory,
+): void => {
   const kinds: [string, string[], string[]][] = [
-    ['layers', pkg.layers ?? [], inventory.layers],
-    ['bees', pkg.bees ?? [], inventory.bees],
-    ['dependencies', pkg.dependencies ?? [], inventory.dependencies],
+    ['layers', claimed.layers ?? [], inventory.layers],
+    ['bees', claimed.bees ?? [], inventory.bees],
+    ['dependencies', claimed.dependencies ?? [], inventory.dependencies],
   ]
-  for (const [kind, claimed, derived] of kinds) {
+  for (const [kind, asserted, derived] of kinds) {
     const held = new Set(derived)
-    const extra = [...new Set(claimed.map(bare))].filter(sig => SIG_RE.test(sig) && !held.has(sig))
-    const missing = derived.filter(sig => !claimed.some(c => bare(c) === sig))
+    const extra = [...new Set(asserted.map(bare))].filter(sig => SIG_RE.test(sig) && !held.has(sig))
+    const missing = derived.filter(sig => !asserted.some(c => bare(c) === sig))
     if (!extra.length && !missing.length) continue
     console.warn(
-      `[acquire] ${pkg.zone} declares a ${kind} set its layers do not:`,
+      `[acquire] ${source} declares a ${kind} set its layers do not:`,
       `${extra.length} not in the signed tree (ignored), ${missing.length} it failed to declare (installed anyway)`,
     )
   }
@@ -392,7 +396,7 @@ export const installPackage = async (
   const sealed = validateSealedPackage(pkg.packageSig, { ...inventory, beeDeps: pkg.beeDeps })
   if (!sealed.valid) return fail(`package is not sealed: ${sealed.errors.join('; ')}`)
 
-  reportDivergence(pkg, inventory)
+  reportDivergence(pkg.zone, pkg, inventory)
 
   const results = await Promise.all([
     resolveInventory(pkg.packageSig, inventory.dependencies, {

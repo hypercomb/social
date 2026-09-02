@@ -215,7 +215,6 @@ type InputModeStackLike = {
     './notes-strip.tree.scss',
     './notes-strip.navigator.scss',
     './notes-strip.plate.scss',
-    './notes-strip.reading.scss',
     './notes-strip.lists.scss',
     './notes-strip.desk.scss',
   ],

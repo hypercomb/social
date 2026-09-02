@@ -1,11 +1,10 @@
 // hypercomb-shared/ui/notes-strip/notes-strip.desk.scss
 //
-// The fullscreen desk — three columns, at desk scale.
-// The wrapping tag cloud earns its keep in the narrow dock, where chips fill
-// the width. At full screen width it becomes a wide band that strands the
-// notes far down the page, so the navigator turns into a vertical list pinned
-// to the LEFT and the editor takes the whole right side. Narrow screens and
-// the docked strip keep the cloud.
+// The desk at its full three-column width.
+// The wrapping tag cloud earns its keep on a narrow screen, where chips fill
+// the width. Given room it becomes a wide band that strands the notes far down
+// the page, so the navigator turns into a vertical list pinned to the LEFT and
+// the editor takes the whole right side. Narrow screens keep the cloud.
 //
 // This sheet is LAST in `styleUrls` on purpose: its rules override the
 // cloud/chip base styles in specificity AND source order, so hover and
@@ -21,7 +20,7 @@
 
 @media (min-width: $bp-tablet-land) {
   // Three columns: navigator | tree | reading pane. The desk.
-  :host.is-fullscreen .notes-strip {
+  :host .notes-strip {
     display: grid;
     grid-template-columns: clamp(200px, 17%, 300px) minmax(0, 1fr) minmax(0, 1.1fr);
     // Three header bands, then the columns. The tabs and the rail used to
@@ -31,11 +30,11 @@
   }
   // Every header band spans all three columns; the resize grips are
   // absolutely positioned (and hidden in fullscreen), so they need none.
-  :host.is-fullscreen .cv2-dragbar { grid-column: 1 / -1; grid-row: 1; }
-  :host.is-fullscreen .cv2-tabs { grid-column: 1 / -1; grid-row: 2; }
-  :host.is-fullscreen .cv2-rail { grid-column: 1 / -1; grid-row: 3; }
+  :host .cv2-dragbar { grid-column: 1 / -1; grid-row: 1; }
+  :host .cv2-tabs { grid-column: 1 / -1; grid-row: 2; }
+  :host .cv2-rail { grid-column: 1 / -1; grid-row: 3; }
 
-  :host.is-fullscreen .cv2-main {
+  :host .cv2-main {
     display: flex;
     flex-direction: column;
     grid-column: 2;
@@ -45,7 +44,7 @@
     overflow: hidden;
   }
 
-  :host.is-fullscreen .cv2-tilelist {
+  :host .cv2-tilelist {
     grid-column: 1;
     grid-row: 4;
     min-width: 0;
@@ -58,7 +57,7 @@
   // Fullscreen is the one place with room to spare: the identity plate takes
   // the masthead treatment — a big hexagon the user can read across the room,
   // with the tile's details set beside it.
-  :host.is-fullscreen .cv2-plate.is-wide {
+  :host .cv2-plate.is-wide {
     gap: 1.1rem;
     padding: 1rem 1.2rem;
 
@@ -72,7 +71,7 @@
   // ── The reading pane — the desk scale of the shared pane (see the
   //    reading-pane mixin above; the docked window is the same pane,
   //    compact). Only the grid placement and the sizes differ.
-  :host.is-fullscreen .cv2-reading {
+  :host .cv2-reading {
     @include reading-pane(
       $pad: 2.2rem 2.4rem 1.4rem,
       $hex-w: 108px,
@@ -92,11 +91,11 @@
 
   // The lists interface gets the desk scale too — a list read across a
   // room is still a list, just with room for longer lines.
-  :host.is-fullscreen .cv2-list-lines { padding: 0.8rem 1.2rem 1.6rem; }
-  :host.is-fullscreen .cv2-listfoot { padding: 0.45rem 1.2rem; }
-  :host.is-fullscreen .cv2-line { margin-left: calc(min(var(--depth, 0), 6) * 20px); }
-  :host.is-fullscreen .cv2-line-text,
-  :host.is-fullscreen .cv2-line-input { font-size: scaled(0.95rem); }
+  :host .cv2-list-lines { padding: 0.8rem 1.2rem 1.6rem; }
+  :host .cv2-listfoot { padding: 0.45rem 1.2rem; }
+  :host .cv2-line { margin-left: calc(min(var(--depth, 0), 6) * 20px); }
+  :host .cv2-line-text,
+  :host .cv2-line-input { font-size: scaled(0.95rem); }
 }
 
 
