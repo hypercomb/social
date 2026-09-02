@@ -146,4 +146,31 @@ describe('replication walker', () => {
     expect(mineSignatures(encode(`{"cell":"${sig}"}`))).toEqual([sig])
     expect(mineSignatures(new Uint8Array([0xff, 0xfe, 0x00, 0x81]))).toEqual([])
   })
+
+  it('takes a children selector: the caller owns the frontier, not the miner', async () => {
+    const w = world()
+    const leaf = encode('leaf')
+    const leafSig = await sigOf(leaf)
+    // Names the leaf twice — once where the selector looks, once where only
+    // blind mining would find it. A structured walk follows `cells` alone.
+    const strayBytes = encode('stray')
+    const straySig = await sigOf(strayBytes)
+    const rootBytes = encode(JSON.stringify({ cells: [leafSig], mentions: [straySig] }))
+    const root = await sigOf(rootBytes)
+    w.origin.set(root, rootBytes).set(leafSig, leaf).set(straySig, strayBytes)
+
+    const cells = (bytes: Uint8Array<ArrayBuffer>): string[] => {
+      try { return (JSON.parse(new TextDecoder().decode(bytes)) as { cells?: string[] }).cells ?? [] }
+      catch { return [] }
+    }
+
+    const structured = await resolveSignatureClosure(root, w.io, { children: cells })
+    expect(new Set(structured.held)).toEqual(new Set([root, leafSig]))
+
+    // The default frontier still mines every literal — the option narrows the
+    // walk, it does not change what mining means.
+    const mined = await resolveSignatureClosure(root, w.io)
+    expect(new Set(mined.held)).toEqual(new Set([root, leafSig, straySig]))
+  })
+
 })

@@ -32,7 +32,7 @@
 // essentials, so everything crosses as `publish:render` payloads and comes
 // back as intents (publish:run, publish:unpublish, publish:inspect, …).
 
-import { Drone, EffectBus, get, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { Drone, EffectBus, get, I18N_IOC_KEY, isWindowShowing, type I18nProvider } from '@hypercomb/core'
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 import { fetchHiveIndex } from './hive-pointer.js'
 import { publishVerdict, type PublishIndexState, type PublishRowState } from './publish-verdict.js'
@@ -249,6 +249,8 @@ export class PublishStatusDrone extends Drone {
     keyMismatch: false, refreshing: false, rows: [], collisions: [], views: [],
   }
   #debounce: ReturnType<typeof setTimeout> | null = null
+  /** Something changed while a sweep was in flight — sweep again after it. */
+  #again = false
   /** The row shown in the properties pane. Gap enumeration is expensive, so
    *  it follows this one subject instead of running for every list row. */
   #inspectedKey = ''
@@ -257,7 +259,16 @@ export class PublishStatusDrone extends Drone {
     super()
 
     this.onEffect('publish:view-toggle', () => {
-      this.#open = !this.#open
+      // THE ICON ASKS THE SCREEN, NEVER THE FLAG.
+      //
+      // A docked panel is PARKED — not closed — whenever another window opens
+      // (window-rule.ts): its DOM goes, this drone is never told, and `#open`
+      // stays true over an empty edge. The next press on the glyph then only
+      // cleared a flag nobody could see, and it took a SECOND press to get the
+      // panel back. `isWindowShowing` is the panel's own registration in the
+      // window session, dropped the moment it stops showing — so parked and
+      // closed read alike, which is exactly what the participant means.
+      this.#open = !isWindowShowing('publish-panel')
       this.#emit()
       if (this.#open) void this.#refresh()
     })
@@ -310,11 +321,7 @@ export class PublishStatusDrone extends Drone {
     // A commit anywhere bumps the tree epoch, which invalidates every seal —
     // so every row's local side is stale. Coalesce: a burst of commits must
     // not restart the sweep once per commit.
-    const invalidate = (): void => {
-      if (!this.#open) return
-      if (this.#debounce) clearTimeout(this.#debounce)
-      this.#debounce = setTimeout(() => { this.#debounce = null; void this.#refresh() }, REFRESH_DEBOUNCE_MS)
-    }
+    const invalidate = (): void => this.#invalidate()
     this.onEffect('history:head-changed', invalidate)
     this.onEffect('share:receipt-revoked', invalidate)
     // The panel describes THE CURRENT PAGE, so walking is what changes its
@@ -330,11 +337,35 @@ export class PublishStatusDrone extends Drone {
     })
   }
 
+  /** Coalesced re-sweep. A burst of reasons to look again is ONE look. */
+  #invalidate(): void {
+    if (!this.#open) return
+    if (this.#debounce) clearTimeout(this.#debounce)
+    this.#debounce = setTimeout(() => { this.#debounce = null; void this.#refresh() }, REFRESH_DEBOUNCE_MS)
+  }
+
+  /** Restate one branch's hosts in the read-model and say so AT ONCE. The
+   *  marks remain the truth — this only moves the picture forward to the
+   *  choice already made, so the next sweep reads back what is shown. */
+  #paintZones(key: string, zones: readonly string[]): void {
+    this.#branchHosts.set(key, [...zones])
+    // The door a row is proven through follows its primary host, so a
+    // re-ordered list must not keep probing the door it just left.
+    this.#hostByKey.delete(key)
+    const row = this.#rows.find(candidate => candidate.key === key)
+    if (row) row.zones = this.#zonesFor(key)
+    this.#emit()
+  }
+
   // ── the sweep ─────────────────────────────────────────────────────────
 
   async #refresh(): Promise<void> {
-    if (this.#refreshing) return
+    // A sweep already running answers for the state it read on the way in.
+    // Anything that changed since — a host ticked mid-sweep — is owed ANOTHER
+    // look, or the panel settles on a reading taken before the choice.
+    if (this.#refreshing) { this.#again = true; return }
     this.#refreshing = true
+    this.#again = false
     this.#payload = { ...this.#payload, refreshing: true }
     this.#emit()
     try {
@@ -546,6 +577,7 @@ export class PublishStatusDrone extends Drone {
         this.#payload = { ...this.#payload, refreshing: false }
         this.#emit()
       }
+      if (this.#again) { this.#again = false; this.#invalidate() }
     }
   }
 
@@ -618,22 +650,39 @@ export class PublishStatusDrone extends Drone {
       return
     }
     const ordered = [...new Set(zones)]
+    // PAINT THE CHOICE FIRST. Wearing the enrollment marks is a commit per
+    // host, and the sweep behind it re-reads every door over the network —
+    // a tick that waits for either reads as a control that did not take. The
+    // row states the choice now; the only correction that can arrive is a
+    // refusal, and that restates the truth here too.
+    this.#paintZones(key, ordered)
     const written = await setBranchHosts(row.segments, ordered)
+    if (written.join(',') !== ordered.join(',')) this.#paintZones(key, written)
     this.emitEffect('activity:log', {
       message: `${key} publishes at ${written.length > 0 ? written.join(', ') : this.#zone}`,
     })
-    if (this.#open) void this.#refresh()
+    // Coalesced, never immediate: ticking three hosts in a row is one sweep,
+    // and the sweep is a re-observation, not part of making the choice.
+    this.#invalidate()
   }
 
   async #setOpensAs(key: string, view: string): Promise<void> {
     const row = this.#rows.find(r => r.key === key)
     if (!row || row.segments.length === 0) return
+    // Same discipline as the host ticks: the pick paints now, because the
+    // write behind it is a commit and a face that changes a beat later reads
+    // as a control that missed the click. A failed write puts it back.
+    const before = row.opensAs
+    row.opensAs = view
+    this.#emit()
     try {
       if (view) await writeDefaultView(row.segments, view)
       else await clearDefaultView(row.segments)
-      row.opensAs = view
+    } catch {
+      // cold layer — restate the truth we had; the next refresh re-reads it
+      row.opensAs = before
       this.#emit()
-    } catch { /* cold layer — the next refresh re-reads the truth */ }
+    }
   }
 
   /** Gap enumeration for the inspected row. Reads local bytes across the

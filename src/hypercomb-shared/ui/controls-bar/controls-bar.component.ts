@@ -41,14 +41,29 @@ const ENABLED_MAP_KEY = 'hc:controls-enabled-map'
  *  neighbour they were authored next to — see #orderedRegistry — so a new
  *  control still lands where its author put it instead of at the far end. */
 const ORDER_KEY = 'hc:controls-order'
+/** Bumped when a control MOVES in the registry and that move has to reach an
+ *  order written before it. The stored permutation already names the id, so
+ *  #orderedRegistry's beside-the-neighbour placement never runs for it and the
+ *  icon stays where it always was. Releasing the id from the stored order hands
+ *  it back to that placement — once, per rev.
+ *  Rev 1: `hosts` moved up beside `pools`. */
+const ORDER_REV_KEY = 'hc:controls-order-rev'
+const ORDER_REV = 1
+const RELEASED_BY_ORDER_REV: Record<number, readonly string[]> = {
+  1: ['hosts'],
+}
 /** Bumped when a default flip has to reclaim ids a legacy FULL map froze.
  *  Rev 1: the magnifiers came off the rail (bab6045d), but every map written
  *  before that carried `zoom-in`/`zoom-out: true`, so the flip never reached
  *  anyone who had ever opened edit mode — the icons kept coming back. */
 const ENABLED_REV_KEY = 'hc:controls-enabled-rev'
-const ENABLED_REV = 1
+const ENABLED_REV = 2
 const RECLAIMED_BY_REV: Record<number, readonly string[]> = {
   1: ['zoom-in', 'zoom-out'],
+  // Rev 2: `hosts` went from off-by-default to on. A map written before the
+  // flip carries `hosts: false` — a genuine override under the current
+  // default, so it would survive forever and the icon would never appear.
+  2: ['hosts'],
 }
 /** Page keys (lineage paths) whose viewport is pinned. The pin is per LAYER. */
 const PINNED_PAGES_KEY = 'hc:pinned-pages'
@@ -104,6 +119,12 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // documentation/entrances-and-sets.md). Not among the header aggregates — it
   // manages referenced hives on different roots; it is not a launch group.
   { id: 'pools',        label: 'collections-landing.title', action: 'openPools',      visibleWhen: 'always' },
+  // HOSTS sits DIRECTLY under Portals, completing that opening pair: Portals
+  // is the way out into the collections index, the host directory is the way
+  // out onto the network — the machines serving what you publish. It is a
+  // toggle, not a one-shot: the glyph lights while the directory is up
+  // (`hosts:render` announces its own open state, mirrored below).
+  { id: 'hosts',        label: 'hosts.title',           action: 'toggleHosts',        visibleWhen: 'always' },
   // NO CHAT ENTRY. This bar is how-you-SEE — fit, zoom, pin, fullscreen,
   // orientation — and talking is not one of those; the assistant sits on the
   // command line beside the box you type into (command-shell's
@@ -130,14 +151,14 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // changed here since. Slash-first (`/publish`), so like `sequences` it stays
   // off the rail until the participant enables it from inside its own window.
   { id: 'publish',      label: 'controls.publish',      action: 'togglePublish',      visibleWhen: 'always' },
-  // THREE WINDOWS THAT DECLARED A LAUNCHER AND HAD NOWHERE TO LAND.
+  // TWO WINDOWS THAT DECLARED A LAUNCHER AND HAD NOWHERE TO LAND.
   // `hcDockedPanel`'s settings gear offers "Add to controls" for any window
   // carrying a `launcherControlId`, and writes `hc:controls-enabled-map[<id>]`.
-  // hosts, comfy and aliases all declared one — with no entry here the map was
+  // comfy and aliases both declared one — with no entry here the map was
   // written, the switch read as ON, and nothing ever appeared on the rail. Off
   // by default like sequences and publish: the window's own gear is what puts
-  // it there.
-  { id: 'hosts',        label: 'hosts.title',           action: 'toggleHosts',        visibleWhen: 'always' },
+  // it there. (`hosts` was the third; it has since been promoted onto the rail
+  // beside Portals — see its entry up there.)
   { id: 'comfy',        label: 'comfy.title',           action: 'openComfy',          visibleWhen: 'always' },
   { id: 'aliases',      label: 'aliases.title',         action: 'openAliases',        visibleWhen: 'always' },
   // Selection verbs — the floating vertical selection menu is retired
@@ -182,7 +203,10 @@ const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   'chat': false,
   'sequences': false,
   'publish': false,
-  'hosts': false,
+  // The host directory rides the rail by default, beside Portals. It is not a
+  // slash-first window like sequences/publish: which machines carry your work
+  // is something you glance at, so it gets a permanent switch.
+  'hosts': true,
   'comfy': false,
   'aliases': false,
   // Selection verbs default ON (they only appear while a selection exists;
@@ -520,6 +544,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // `clipboard:open` state event so the toolbar button can both toggle it
   // and light up while it's showing.
   #clipboardPanelOpen = signal(false)
+  // Whether the host directory is up. `hosts:render` carries its own `open`
+  // flag from the drone's single state chokepoint, so the rail icon lights
+  // however the window was opened — the rail, `/hosts`, or Publish.
+  #hostsPanelOpen = signal(false)
   // Whether the chat window is showing — its `chat:window-state` announcement,
   // so the launcher lights while the default view is up.
   #hasSelection = signal(false)
@@ -590,13 +618,35 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       const raw = localStorage.getItem(ORDER_KEY)
       if (!raw) return []
       const parsed = JSON.parse(raw)
-      return Array.isArray(parsed) ? parsed.filter(id => typeof id === 'string') : []
+      if (!Array.isArray(parsed)) return []
+      return this.#releaseMovedControls(parsed.filter(id => typeof id === 'string'))
     } catch { return [] }
+  }
+
+  /** One-time sweep per order rev: drop the ids a registry MOVE reclaimed from
+   *  an order written before it, so #orderedRegistry re-places them beside the
+   *  neighbour they were authored next to. Runs from a field initializer, so it
+   *  must not touch `#order`. */
+  #releaseMovedControls(order: string[]): string[] {
+    let seen = 0
+    try { seen = Number(localStorage.getItem(ORDER_REV_KEY)) || 0 } catch { /* ignore */ }
+    if (seen >= ORDER_REV) return order
+    const released = new Set<string>()
+    for (let rev = seen + 1; rev <= ORDER_REV; rev++) {
+      for (const id of RELEASED_BY_ORDER_REV[rev] ?? []) released.add(id)
+    }
+    const kept = order.filter(id => !released.has(id))
+    try {
+      localStorage.setItem(ORDER_KEY, JSON.stringify(kept))
+      localStorage.setItem(ORDER_REV_KEY, String(ORDER_REV))
+    } catch { /* ignore */ }
+    return kept
   }
 
   #persistOrder(): void {
     try {
       localStorage.setItem(ORDER_KEY, JSON.stringify(this.#orderedRegistry().map(c => c.id)))
+      localStorage.setItem(ORDER_REV_KEY, String(ORDER_REV))
     } catch { /* ignore */ }
   }
 
@@ -794,6 +844,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly isActive = (ctrl: ControlItem): boolean => {
     switch (ctrl.id) {
       case 'clipboard': return this.#clipboardPanelOpen()
+      case 'hosts': return this.#hostsPanelOpen()
       case 'pin': return this.pinnedHere()
       case 'fit': return this.fitLocked()
       case 'text-only': return this.#textOnly()
@@ -1415,6 +1466,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #textOnlyUnsub: (() => void) | null = null
   #clipboardAvailableUnsub: (() => void) | null = null
   #clipboardOpenUnsub: (() => void) | null = null
+  #hostsOpenUnsub: (() => void) | null = null
   #tutorialsOpenUnsub: (() => void) | null = null
   #meshModalUnsub: (() => void) | null = null
   #lanesUnsub: (() => void) | null = null
@@ -1606,6 +1658,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // replayed, so a late mount reflects the current panel state.
     this.#clipboardOpenUnsub = EffectBus.on<{ open?: boolean }>('clipboard:open', ({ open }) => {
       this.#clipboardPanelOpen.set(!!open)
+    })
+
+    // Same pair for the host directory — the drone re-emits `hosts:render` on
+    // every open/close, and the bus replays the last value, so a late mount
+    // reflects whatever is on screen right now.
+    this.#hostsOpenUnsub = EffectBus.on<{ open?: boolean }>('hosts:render', ({ open }) => {
+      this.#hostsPanelOpen.set(!!open)
     })
 
     // The bee lights while the tutorials window is showing — the window
@@ -1998,6 +2057,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#textOnlyUnsub?.()
     this.#clipboardAvailableUnsub?.()
     this.#clipboardOpenUnsub?.()
+    this.#hostsOpenUnsub?.()
     this.#tutorialsOpenUnsub?.()
     this.#tagsUnsub?.()
     this.#tagFilterUnsub?.()

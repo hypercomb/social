@@ -200,6 +200,37 @@ if (!manifest) {
   }
 }
 
+// ── 9. the mark ──────────────────────────────────────────────────────────────
+// A host is a door onto a hive, and a door with no icon paints the browser's
+// blank globe. The shim ships the Hypercomb hexagon at these paths, so the
+// default costs a host nothing; a host that has replaced it with its own
+// passes just the same — what is checked is that SOMETHING image-shaped
+// answers, not whose mark it is.
+//
+// The interesting failure is neither: a 200 of text/html means the SPA
+// fallback swallowed the request, which is the same misconfiguration that
+// makes signature paths invisible (check 4) wearing a different hat.
+{
+  const marks = []
+  for (const path of ['/favicon.svg', '/favicon.ico', '/icon.svg', '/apple-touch-icon.png']) {
+    const res = await get(path)
+    if (res.error || !res.ok) continue
+    marks.push({ path, type: (res.headers.get('content-type') ?? '').toLowerCase() })
+  }
+  const images = marks.filter(m => m.type.startsWith('image/'))
+  const html = marks.filter(m => m.type.includes('text/html'))
+  if (images.length > 0) {
+    record(true, 'wears a mark', images.map(m => m.path).join(', '))
+  } else if (html.length > 0) {
+    record(false, 'wears a mark', `${html[0].path} answered text/html`,
+      'the SPA fallback is answering icon paths — a real file must win before any rewrite')
+  } else {
+    record(null, 'wears a mark', 'no icon answered',
+      'ship the shim public/ icons (node scripts/build-favicons.cjs) or your own — ' +
+      'without one every tab on this host shows the browser default')
+  }
+}
+
 // ── verdict ──────────────────────────────────────────────────────────────────
 const failed = results.filter(r => r.ok === false)
 const warned = results.filter(r => r.ok === null)

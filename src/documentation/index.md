@@ -79,6 +79,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 - [publishing.md](publishing.md) — How to publish today: content, modules, and apps — three rails and their gotchas
 - [infrastructure.md](infrastructure.md) — Decentralized design: two relays, no centralized hosting
 - [hosting-from-a-machine.md](hosting-from-a-machine.md) — Being a host: the desktop client and the headless `hypercomb-serve` answer the host contract live out of the store, with no export step
+- [host-packages-pool.md](host-packages-pool.md) — Retiring `manifest.json`: a host's packages as a living primitive, with the measurement showing every inventory field is derivable from signed content
 - [lets-discover-meadowverse-pipeline.md](lets-discover-meadowverse-pipeline.md) — Authoring-runtime split: hypercomb.io → meadowverse.ca
 - [feedback-channel.md](feedback-channel.md) — Durable feedback transport — the loop routed through jwize.com
 

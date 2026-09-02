@@ -23,7 +23,7 @@
     "prebuild": "node ./scripts/run-prepare.cjs",
     "build": "tsup",
     "build:module": "tsx ./scripts/build-module.ts && tsx ./scripts/copy-content.ts",
-    "build:module:deploy": "tsx ./scripts/build-module.ts && tsx ./scripts/copy-content.ts && tsx ./scripts/stamp-install-channel.ts",
+    "build:module:deploy": "tsx ./scripts/build-module.ts && tsx ./scripts/copy-content.ts && tsx ./scripts/stamp-install-channel.ts --require",
     "copy-content": "tsx ./scripts/copy-content.ts",
     "build:watch": "tsx watch --include \"./src/**/*\" --include \"./scripts/**/*\" ./scripts/build-module.ts",
     "test:preload-e2e": "node ./scripts/verify-tile-preload.mjs",

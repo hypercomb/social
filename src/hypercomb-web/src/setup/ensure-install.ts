@@ -16,6 +16,7 @@ import { isVisitorSession } from './visitor-session'
 // Cold-boot acquisition. Same implementation the shim uses and the same one
 // behind window.hypercomb.acquire — there is one acquisition, not three.
 import { acquire, listHostPackages } from '@hypercomb/runtime/acquire'
+import { stampInstalledPackage } from '@hypercomb/runtime/installed-package'
 import { DEFAULT_HOST_ZONES, listHostZones } from '@hypercomb/runtime/host-zones'
 import { cacheImportMap } from './resolve-import-map'
 
@@ -779,6 +780,9 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
 
   localStorage.setItem(MANIFEST_KEY, JSON.stringify(manifest))
   localStorage.setItem(SYNC_SIG_KEY, bundled.packageSig)
+  // The one stamp every activation path leaves — what the host directory reads
+  // to say which build this shell is on.
+  stampInstalledPackage(bundled.packageSig)
   localStorage.setItem(INSTALLED_FLAG_KEY, 'true')
   if (bundled.beeDeps) (globalThis as any).__hypercombBeeDeps = bundled.beeDeps
   sigStore.trustAll([...bundled.bees, ...bundled.dependencies, ...bundled.layers])

@@ -29,7 +29,7 @@
 // essentials, so the list crosses as a `hosts:render` payload and comes back
 // as intents (hosts:add, hosts:remove).
 
-import { Drone } from '@hypercomb/core'
+import { Drone, isWindowShowing } from '@hypercomb/core'
 import {
   addCommunityHost,
   hostZone,
@@ -94,7 +94,16 @@ export class HostsDrone extends Drone {
     super()
 
     this.onEffect('hosts:view-toggle', () => {
-      this.#open = !this.#open
+      // THE ICON ASKS THE SCREEN, NEVER THE FLAG.
+      //
+      // A docked panel is PARKED — not closed — whenever another window opens
+      // (window-rule.ts): its DOM goes, this drone is never told, and `#open`
+      // stays true over an empty edge. The next press on the glyph then only
+      // cleared a flag nobody could see, and it took a SECOND press to get the
+      // panel back. `isWindowShowing` is the panel's own registration in the
+      // window session, dropped the moment it stops showing — so parked and
+      // closed read alike, which is exactly what the participant means.
+      this.#open = !isWindowShowing('hosts-panel')
       this.#emit()
       if (this.#open) void this.#read()
     })

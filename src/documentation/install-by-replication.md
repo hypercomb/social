@@ -155,6 +155,10 @@ DCP the *transport* dies. DCP the *ledger* is promoted:
    one signature, one verification. Remaining: the producer stamp at
    essentials deploy (custody fork below) and the consumers (step 5 icon,
    meadowverse/web discovery).*
+   *SHAPE DECIDED 2026-09-01 — the retirement half of this step is chipped in
+   [host-packages-pool.md](host-packages-pool.md) (step 8): all four manifest
+   inventory fields measured derivable from signed content, so the document is
+   a copy, and the copy is what nothing checks.*
 3. **Pool placement moves post-resolution.** The installer routes bees to
    `sign('bees')` and deps to `sign('dependencies')` by which manifest array a
    sig rode in — transport-time classification. Replace with a thin
@@ -198,9 +202,11 @@ DCP the *transport* dies. DCP the *ledger* is promoted:
    (5 specs — one-key merge, 404-only empty baseline, refuse-on-unreadable,
    unchanged no-op), bridge verb `hive-root-set` in the worker (colon gate),
    and `stamp-install-channel.ts` as the last step of `build:module:deploy`
-   — best-effort with an unmissable SENTINEL STAMP OWED box + paste-ready
-   retry when the bridge is closed (`--require` to hard-fail instead). The
-   first real stamp happens on the next deploy with the hive open.*
+   — passing `--require`, so a deploy whose sentinel did not advance FAILS
+   (unmissable SENTINEL STAMP OWED box + paste-ready retry when the bridge is
+   closed). A deploy nobody receives does not report success; a HAND
+   invocation of the retry stays best-effort. The first real stamp happens on
+   the next deploy with the hive open.*
 7. **Retire `LayerInstaller` and the DCP transport role.**
    *Status 2026-08-30 — DONE for the web shell and the DCP app itself.
    THERE IS NO INSTALL CONCEPT LEFT IN THE SHELL. Deleted: the
@@ -237,6 +243,14 @@ DCP the *transport* dies. DCP the *ledger* is promoted:
    bootstrap client until it adopts the walker (step 1). The DCP app's
    mirrored copy and its transport role remain — they retire with steps
    2/5/6.*
+
+8. **Retire `manifest.json`.** The catalog's inventory arrays are a copy of
+   what the sealed root already states, and the copy is the only unsigned
+   thing deciding which modules execute. Replace with a `host:packages` pool
+   in the community-hosts living-primitive shape, served on the wire as a
+   signatures-only projection. Full chip, with the measurement:
+   [host-packages-pool.md](host-packages-pool.md).
+   *Status 2026-09-01: SPECIFIED, not built.*
 
 ## Doctrine rules
 

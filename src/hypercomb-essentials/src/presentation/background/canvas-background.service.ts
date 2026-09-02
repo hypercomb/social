@@ -197,17 +197,33 @@ const SCREEN_POOL_MEANING = 'backgrounds:screen'
 // gradients (percentage-positioned, so they adapt to any aspect ratio) plus —
 // for honeycomb only — a tiny inline-SVG pattern tile.
 type Pal = { light: boolean; base: string; base2: string; deep: string; accent: string; accent2: string }
+// TWO RULES HOLD THIS TABLE TOGETHER, and every palette that broke one of them
+// read as a cheaper look than the ones that didn't:
+//
+//   • `deep` IS THE PALETTE'S OWN DARKEST TONE, never a neutral. It is the
+//     vignette and the aurora's far corner; a beige `deep` under a paper
+//     ground is the same soot-instead-of-daylight mistake the chrome tokens
+//     name, seen from the other side.
+//   • `accent2` IS A DIFFERENT HUE, not the accent one step darker. Four of
+//     these used to be one hue at two values, so a mesh with two blobs looked
+//     like one blob out of focus. bloom and sherbet were already right —
+//     primary plus the second note of that look's chord — and the rest follow
+//     them now.
+//
+// `steel` and `daylight` are the NEUTRAL PAIR: the backdrops for the plain
+// dark and light chrome, carrying the same azure / clay chord those two wear.
+// Before this, dark had a neutral backdrop and light did not — `daylight` was
+// a beige office under paper panels.
 const PAL: Record<Palette, Pal> = {
-  steel:    { light: false, base: '#0e161c', base2: '#15242f', deep: '5,8,12',      accent: '126,182,214', accent2: '31,79,118' },
-  daylight: { light: true,  base: '#f4ecde', base2: '#fdf7ea', deep: '199,183,154', accent: '31,67,118',   accent2: '111,158,201' },
-  indigo:   { light: false, base: '#0d1226', base2: '#161d3a', deep: '4,6,15',      accent: '123,139,224', accent2: '36,48,121' },
-  teal:     { light: false, base: '#07201c', base2: '#0c2e28', deep: '2,15,12',     accent: '69,199,165',  accent2: '13,77,64' },
-  ember:    { light: false, base: '#1a1410', base2: '#2a1d12', deep: '11,7,4',      accent: '211,164,122', accent2: '90,58,24' },
-  // The three bright looks. `daylight` was the only light palette here, and it
-  // is a beige office — these are the backdrops that go with the honey / bloom
-  // / sherbet chrome, each carrying that theme's own primary as its accent so
+  steel:    { light: false, base: '#0d151e', base2: '#1b2836', deep: '2,8,14',      accent: '126,195,238', accent2: '235,167,107' },
+  daylight: { light: true,  base: '#f2f4f8', base2: '#fdfeff', deep: '120,134,155', accent: '22,104,196',  accent2: '180,90,34' },
+  indigo:   { light: false, base: '#0d1226', base2: '#181f3d', deep: '4,6,15',      accent: '123,139,224', accent2: '214,120,190' },
+  teal:     { light: false, base: '#07201c', base2: '#0c2e28', deep: '2,15,12',     accent: '69,199,165',  accent2: '226,170,92' },
+  ember:    { light: false, base: '#1a1410', base2: '#2a1d12', deep: '11,7,4',      accent: '211,164,122', accent2: '104,142,186' },
+  // The three bright looks — the backdrops that go with the honey / bloom /
+  // sherbet chrome, each carrying that theme's own primary as its accent so
   // the screen behind the hive and the panels over it are the same colour.
-  honey:    { light: true,  base: '#fdf3dd', base2: '#fffaf0', deep: '196,160,86',  accent: '181,115,10',  accent2: '240,196,102' },
+  honey:    { light: true,  base: '#fdf3dd', base2: '#fffaf0', deep: '196,160,86',  accent: '181,115,10',  accent2: '212,86,47' },
   bloom:    { light: true,  base: '#eefaf4', base2: '#fbfffd', deep: '150,190,175', accent: '13,122,95',   accent2: '224,86,63' },
   sherbet:  { light: true,  base: '#faf0fc', base2: '#fffdff', deep: '196,168,208', accent: '194,17,143',  accent2: '10,165,201' },
 }
@@ -267,12 +283,11 @@ const cssFor = (arch: string, p: Pal): Css => {
       return L([VIG(p, p.light ? 0.1 : 0.2), `linear-gradient(135deg, transparent 32%, ${band} 50%, transparent 68%)`, `linear-gradient(135deg, ${p.base} 0%, ${p.base2} 100%)`],
         ['cover', 'cover', 'cover'], ['no-repeat', 'no-repeat', 'no-repeat'], ['center', 'center', 'center'])
     }
-    case 'mesh':
-      return p.light
-        ? L([`radial-gradient(60% 60% at 20% 18%, rgba(204,224,242,0.55) 0%, transparent 70%)`, `radial-gradient(62% 62% at 82% 84%, rgba(243,220,192,0.6) 0%, transparent 70%)`, VIG(p, 0.1)],
-            ['cover', 'cover', 'cover'], ['no-repeat', 'no-repeat', 'no-repeat'], ['center', 'center', 'center'])
-        : L([`radial-gradient(55% 55% at 20% 16%, rgba(${p.accent},0.14) 0%, transparent 70%)`, `radial-gradient(62% 62% at 84% 82%, rgba(${p.accent2},0.42) 0%, transparent 70%)`, `radial-gradient(46% 46% at 60% 28%, rgba(${p.accent},0.12) 0%, transparent 70%)`, VIG(p, 0.22)],
-            ['cover', 'cover', 'cover', 'cover'], ['no-repeat', 'no-repeat', 'no-repeat', 'no-repeat'], ['center', 'center', 'center', 'center'])
+    // NO `mesh` CASE. Mesh is the animated aurora and returns from `#apply`
+    // before this function is reached — it is painted by `#showAurora`, which
+    // is where its colours are. A static mesh branch lived here for a while
+    // and was pure decoy: unreachable, and exactly the place someone goes to
+    // "fix" a mesh backdrop that is actually broken in the aurora.
     case 'contour': {
       const ring = `rgba(${p.accent},0.11)`
       return L([`radial-gradient(60% 60% at 50% 50%, ${glowC(p, p.light ? 0.45 : 0.06)} 0%, transparent 70%)`, `repeating-radial-gradient(circle at 50% 50%, transparent 0 39px, ${ring} 39px 40px)`, VIG(p)],
@@ -298,7 +313,14 @@ const cssFor = (arch: string, p: Pal): Css => {
 // likewise fixed in chip pixels (4–5px, three to eight repeats across) rather
 // than inherited from the live backdrop.
 const swatchFor = (arch: string, p: Pal): string => {
-  const a = (alpha: number) => (p.light ? `rgba(${p.accent2},${alpha})` : `rgba(${p.accent},${alpha})`)
+  // ALWAYS THE ACCENT — the lattice, the sheen band and the contour ring are
+  // all drawn in `accent` on the real screen, so a chip drawn in `accent2` was
+  // showing a colour that appears nowhere in the look it stands for. It read
+  // as tolerable only because the light palettes' accent2 used to be their own
+  // accent lightened; now that accent2 is a second HUE, the chip would be
+  // plainly wrong. (`mesh` still names accent2 for its second blob, which is
+  // exactly what the backdrop does.)
+  const a = (alpha: number) => `rgba(${p.accent},${alpha})`
   // base2 on top, base at the bottom — a visible ramp even with no pattern.
   const base = `linear-gradient(160deg, ${p.base2} 0%, ${p.base} 100%) ${p.base}`
   const lit = `radial-gradient(120% 120% at 50% -10%, ${glowC(p, p.light ? 0.65 : 0.42)} 0%, transparent 72%) 0 0/cover no-repeat`
@@ -824,7 +846,16 @@ export class CanvasBackgroundService extends EventTarget {
     // static gradient. Render it in its own element; the body just carries the
     // base colour behind it. No content-space lines.
     if (this.#archetype === 'mesh') {
-      s.backgroundColor = p.base
+      // THE BODY MUST NOT PAINT HERE, and this is the whole reason the aurora
+      // was never once seen: `#hc-aurora` is `position:fixed; z-index:-1`, and
+      // a negative-z element paints after the ROOT's background but BEFORE the
+      // background of any in-flow block descendant — body included. `html, body`
+      // both carry `background-color: var(--md-surface)` in the shell's
+      // styles.scss, so body's background does not propagate to the canvas; it
+      // paints in place, opaquely, directly over the blooms. Every mesh look
+      // (bloom, indigo) has been a flat rectangle. The aurora element sets
+      // `p.base` on itself, so handing it the ground costs nothing.
+      s.backgroundColor = 'transparent'
       this.#showAurora(p)
       this.#hideGlow()
       EffectBus.emit('canvas:lines', { kind: null, accent: '', alpha: 0 })
@@ -933,8 +964,13 @@ export class CanvasBackgroundService extends EventTarget {
     el.style.display = 'block'
     el.style.backgroundColor = p.base
     const blend = p.light ? 'multiply' : 'screen'
+    // Same fix as the light `mesh` in cssFor: these were a pale blue and a
+    // cream regardless of palette. Under `multiply` a saturated accent only
+    // needs a fifth of the alpha to land where those washed literals did —
+    // 0.22 of #1668c4 multiplies paper to about the blue the old 0.7 of
+    // #ccE0f2 did, but in whichever hue the look actually chose.
     const cols = p.light
-      ? ['rgba(204,224,242,0.7)', 'rgba(243,220,192,0.7)', 'rgba(214,226,242,0.6)']
+      ? [`rgba(${p.accent},0.22)`, `rgba(${p.accent2},0.20)`, `rgba(${p.accent},0.14)`]
       : [`rgba(${p.accent},0.45)`, `rgba(${p.accent2},0.6)`, `rgba(${p.accent},0.35)`]
     el.querySelectorAll('.blob').forEach((b, i) => {
       const d = b as HTMLDivElement

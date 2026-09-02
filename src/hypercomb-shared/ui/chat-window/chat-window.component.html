@@ -601,7 +601,14 @@
            NAMED, NOT ASSUMED. The bridge is one socket that any frontier CLI
            can park on, so the line says WHO the designation put behind it
            rather than the one vendor that used to be the only answer. With
-           nothing designated it says only what it knows: the link's state. -->
+           nothing designated it says only what it knows: the link's state.
+
+           AND NOT A BRIDGE UNLESS THERE IS ONE. A key, or this machine's own
+           server, answers with no socket parked anywhere — the line said
+           "Bridge connected" for those too, which was false twice over when
+           the local server was not even running. The key comes from the
+           component (linkKey/linkKeyAny) because the choice now has four
+           inputs, and a nested ternary in a template is where a lie hides. -->
     <div class="chat-link" [class.waiting]="!linkUp()">
         <!-- WHO ANSWERS — reported, not asked. It leads the line because it is
              the shortest thing on it and the one most often looked for: the
@@ -617,9 +624,9 @@
         <span class="mat-sym" aria-hidden="true">auto_awesome</span>{{ answering() }}
       </button>
       @if (designated(); as who) {
-        <span>{{ (linkUp() ? 'chat.link.ready' : hostConfigured() ? 'chat.link.host' : 'chat.link.pending') | t: { provider: who.label } }}</span>
+        <span>{{ linkKey() | t: { provider: who.label } }}</span>
       } @else {
-        <span>{{ (linkUp() ? 'chat.link.ready.any' : hostConfigured() ? 'chat.link.host' : 'chat.link.pending.any') | t }}</span>
+        <span>{{ linkKeyAny() | t }}</span>
       }
     </div>
 

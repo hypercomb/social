@@ -204,6 +204,13 @@ function doorsHtml(doors) {
 
 function assemble(doors) {
   let html = fs.readFileSync(path.join(ROOT, 'template.html'), 'utf8')
+  // One master mark for the whole platform — the shells link the built files,
+  // this page carries the same bytes inline so the standalone deliverable is
+  // still marked when opened from disk. Rebuilt by scripts/build-favicons.cjs.
+  const mark = path.join(ROOT, '..', '..', 'hypercomb-web', 'public', 'favicon.svg')
+  if (!fs.existsSync(mark)) throw new Error('the mark is missing — run `node scripts/build-favicons.cjs`')
+  html = html.replace('{{FAVICON}}', () =>
+    'data:image/svg+xml;base64,' + fs.readFileSync(mark).toString('base64'))
   html = html.replace('{{SCENES}}', () => JSON.stringify(scenes.map(sceneObject), null, 1))
   html = html.replace('{{DOORS}}', () => doorsHtml(doors))
   const vuri = f => 'data:video/mp4;base64,' + fs.readFileSync(path.join(ROOT, 'media', f)).toString('base64')

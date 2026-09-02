@@ -119,26 +119,6 @@ const NOTES_STRIP_FACE_KEY = 'hc:notes-face'
 const NOTES_FACES = ['mono', 'sans', 'serif'] as const
 type NotesFace = typeof NOTES_FACES[number]
 
-// Translate delta from the panel's natural (centered) position. Persisted
-// across reloads so the strip stays where the user dropped it.
-const NOTES_STRIP_OFFSET_KEY = 'hc:notes-strip-offset'
-
-// Dock side — 'right' snaps the strip to a full-height rail on the right
-// edge (so it never fights the left-docked control bar); 'float' is the
-// free, draggable, centred-baseline mode. Persisted across reloads.
-const NOTES_STRIP_DOCK_KEY = 'hc:notes-strip-dock'
-
-// Right-edge snap thresholds (mirror the controls-bar hysteresis): enter
-// the dock within SNAP_ZONE of the right edge; only leave it once the
-// cursor pulls back past SNAP_EXIT, so the dock doesn't flicker on/off.
-const SNAP_ZONE = 72
-const SNAP_EXIT = 120
-
-// Travel (px) a dragbar press must cover before it counts as a drag. Below it
-// the press is still a click: a docked panel must not tear off its rail because
-// the pointer twitched a pixel while the user reached for the close button.
-const DRAG_THRESHOLD = 6
-
 /** Fixed shape set — six CSS-drawn glyphs. The shape is the only
  *  visual category a note carries. Names map 1:1 to .hc-shape-X
  *  classes defined in hypercomb-shared/styles/_notes-shapes.scss. */
@@ -401,21 +381,12 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
 
   panelWidth(): number { return this.#dockWidth }
 
-  /** Take a width from the group. Clamped and persisted exactly as the edge
-   *  drag does — the store stays this window's, which is the whole point of
-   *  owning the size. Ignored while fullscreen, where the width is forced by
-   *  the desk's rules and would be written back as a preference nobody set. */
-  setPanelWidth(width: number): void {
-    if (this.isFullscreen()) return
-    const el = this.panel()?.nativeElement
-    const max = Math.max(MIN_PANEL_WIDTH, window.innerWidth - 32)
-    const next = Math.round(Math.max(MIN_PANEL_WIDTH, Math.min(width, max)))
-    if (next === this.#dockWidth && el?.style.width) return
-    this.#dockWidth = next
-    if (el) el.style.width = `${next}px`
-    this.#measurePanel()
-    try { localStorage.setItem(NOTES_STRIP_WIDTH_KEY, String(next)) } catch { /* ignore */ }
-  }
+  /** Take a width from the group — a NO-OP for the desk, which owns its whole
+   *  geometry. The `sizeOwner` contract is still honoured because the shared
+   *  chrome reads `panelWidth()` for the group's auto text size; there is just
+   *  no width for the group to give a surface that is always the screen, and
+   *  writing one back would record a preference nobody set. */
+  setPanelWidth(_width: number): void { /* the desk's size is forced */ }
 
   // ── Reading pane (fullscreen) ─────────────────────────────
   // Fullscreen is the desk: navigator left, tree centre, and THIS on the
@@ -561,7 +532,7 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
    *  given the room), then the tree as the selector along the bottom. The
    *  only layout without a pane is NARROW fullscreen, where there isn't
    *  width for one — there the form stays in the column. */
-  readonly formInPane = computed<boolean>(() => !this.isFullscreen() || this.deskWide())
+  readonly formInPane = computed<boolean>(() => this.deskWide())
 
   /** Pane mode: false = reading, true = the editor fills the pane. */
   readonly paneEditorOpen = signal(false)
@@ -1182,7 +1153,7 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
 
   onMarkPointerDown(icon: string, event: PointerEvent): void {
     if (event.button !== 0) return
-    if (this.#dragPointerId !== null || this.#noteDragPointerId !== null) return
+    if (this.#noteDragPointerId !== null) return
     this.#markDragPointerId = event.pointerId
     this.#markDragOrigin = { x: event.clientX, y: event.clientY, icon }
     this.#markDragMoved = false
@@ -1448,26 +1419,6 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     return out
   }
 
-  /** Fullscreen toggle — sets `isFullscreen`; the HostBinding adds
-   *  `is-fullscreen` to the host element and the SCSS releases the
-   *  width cap + panel-offset transform so the strip fills the
-   *  canvas area between the header and the controls-bar pill. */
-  readonly isFullscreen = signal<boolean>(false)
-
-  @HostBinding('class.is-fullscreen')
-  get fullscreenClass(): boolean { return this.isFullscreen() }
-
-  toggleFullscreen(): void {
-    this.isFullscreen.update(v => !v)
-    // An edit in flight rides across the switch: the pane exists on both
-    // sides now, so it stays open. Only narrow fullscreen has no pane —
-    // there the form is back in the column and the flag has to be off.
-    this.paneEditorOpen.set(this.formInPane() && !!this.editingNoteId())
-    EffectBus.emit('notes:expand-to-index', { cellLabel: this.cell(), fullscreen: this.isFullscreen() })
-    // Fullscreen changes the panel width by the largest jump there is —
-    // re-measure once the class has landed so the plate follows immediately.
-    queueMicrotask(() => this.#measurePanel())
-  }
 
   // Every tile in the current layer, sourced from CellSuggestionProvider's
   // ROSTER — core's `levelRoster`, the same read the chat window's tiles rail
@@ -1560,321 +1511,6 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     EffectBus.emit('markup:open', { cellLabel: this.cell() })
   }
 
-  // ── Panel drag-to-reposition ─────────────────────────────
-  // Translate delta from the natural centered baseline. {0,0} = the
-  // CSS-default position; any non-zero delta is a user drag we persist.
-  // The transform sits on top of `:host { justify-content: center }` so
-  // we never have to reach for absolute positioning math.
-
-  readonly panelOffset = signal<{ x: number; y: number }>(((): { x: number; y: number } => {
-    try {
-      const raw = localStorage.getItem(NOTES_STRIP_OFFSET_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        if (parsed && typeof parsed.x === 'number' && typeof parsed.y === 'number') {
-          return { x: parsed.x, y: parsed.y }
-        }
-      }
-    } catch { /* corrupt entry — fall through */ }
-    return { x: 0, y: 0 }
-  })())
-
-  readonly panelTransform = computed<string>(() => {
-    const { x, y } = this.panelOffset()
-    return `translate(${x}px, ${y}px)`
-  })
-
-  /** Dock side — 'right' = snapped to the right-edge rail, null = floating.
-   *  Defaults to the right rail (notes belong opposite the left control
-   *  bar). Restored from / persisted to localStorage. */
-  readonly dockSide = signal<'right' | null>(((): 'right' | null => {
-    try {
-      const raw = localStorage.getItem(NOTES_STRIP_DOCK_KEY)
-      if (raw === 'float') return null
-      if (raw === 'right') return 'right'
-    } catch { /* corrupt entry — fall through */ }
-    return 'right'
-  })())
-
-  /** Transform binding — suppressed while docked (the rail is laid out by
-   *  CSS, not the float offset). */
-  readonly panelTransformActive = computed<string | null>(() =>
-    this.dockSide() ? null : this.panelTransform()
-  )
-
-  #persistDock(): void {
-    try { localStorage.setItem(NOTES_STRIP_DOCK_KEY, this.dockSide() ?? 'float') } catch { /* ignore */ }
-  }
-
-  // Drag bookkeeping — pointerId guards against a second finger
-  // hijacking the active drag; #dragStart captures the pixel offset
-  // between cursor and panel-baseline so the delta math is stable
-  // even when the cursor sweeps far from the grip element.
-  #dragPointerId: number | null = null
-  #dragStart: { px: number; py: number; ox: number; oy: number } | null = null
-  /** True once a press has travelled past DRAG_THRESHOLD. Until then no dock
-   *  change and no offset write happens, so a click on the header is a click. */
-  #dragMoved = false
-
-  // Input mode pushed during the drag — suspends the underlying
-  // zoom/pan listeners just like 'notes-hover' does. Empty mount/
-  // unmount because the suspension is purely structural (top-of-stack
-  // wins). Mirrors the #notesHoverMode template above.
-  readonly #notesDragMode = {
-    name: 'notes-drag',
-    mount: (): void => { /* no listeners — suspension is structural */ },
-    unmount: (): void => { /* nothing to tear down */ },
-  }
-  #dragModeActive = false
-
-  onDragStart(event: PointerEvent): void {
-    // Don't initiate drag from mini-buttons (expand / hide) — they
-    // share the dragbar element. The buttons themselves stop
-    // propagation, but a primary-button-down on a button still fires
-    // the dragbar's pointerdown handler.
-    const tgt = event.target as HTMLElement | null
-    if (tgt && tgt.closest('button, [role="button"]')) return
-    // Only primary mouse button or pen/touch primary.
-    if (event.button !== 0) return
-    if (this.isFullscreen()) return  // position is forced; no-op
-    event.preventDefault()
-    this.#dragPointerId = event.pointerId
-    this.#dragMoved = false
-    const offset = this.panelOffset()
-    this.#dragStart = {
-      px: event.clientX,
-      py: event.clientY,
-      ox: offset.x,
-      oy: offset.y,
-    }
-    window.addEventListener('pointermove', this.#onDragMove)
-    window.addEventListener('pointerup', this.#onDragEnd)
-    window.addEventListener('pointercancel', this.#onDragEnd)
-    const stack = this.#stack()
-    if (stack && !this.#dragModeActive) {
-      stack.push(this.#notesDragMode)
-      this.#dragModeActive = true
-    }
-  }
-
-  #onDragMove = (event: PointerEvent): void => {
-    if (event.pointerId !== this.#dragPointerId) return
-    const start = this.#dragStart
-    if (!start) return
-    if (!this.#dragMoved) {
-      if (Math.hypot(event.clientX - start.px, event.clientY - start.py) < DRAG_THRESHOLD) return
-      this.#dragMoved = true
-    }
-    const vw = window.innerWidth
-    const docked = this.dockSide() === 'right'
-
-    // Right-edge snap with hysteresis.
-    if (event.clientX >= vw - SNAP_ZONE) {
-      if (!docked) this.dockSide.set('right')
-      return                                   // docked layout is CSS-driven
-    }
-    if (docked && event.clientX > vw - SNAP_EXIT) return   // hysteresis band
-
-    if (docked) {
-      // Leaving the rail → float. Re-baseline so the panel keeps its
-      // current right-flush position instead of jumping to the stale float
-      // offset, then tracks the cursor from here.
-      const rebaseX = this.#rightDockOffsetX()
-      this.dockSide.set(null)
-      this.panelOffset.set({ x: rebaseX, y: 0 })
-      start.px = event.clientX
-      start.py = event.clientY
-      start.ox = rebaseX
-      start.oy = 0
-      return
-    }
-
-    // Compute the candidate offset, then clamp it against the current
-    // viewport BEFORE writing the signal. Clamping live (vs. on release)
-    // is what prevents the panel from flying off-screen mid-drag.
-    const candidate = {
-      x: start.ox + (event.clientX - start.px),
-      y: start.oy + (event.clientY - start.py),
-    }
-    this.panelOffset.set(this.#clampOffsetCandidate(candidate))
-  }
-
-  /** Float-offset X that reproduces the docked (right-flush) position — used
-   *  to hand off smoothly from rail → float. The host centres the panel, so
-   *  flush-right sits (hostContentWidth - panelWidth)/2 right of centre. */
-  #rightDockOffsetX(): number {
-    const host = this.#host.nativeElement
-    const el = this.panel()?.nativeElement
-    if (!el) return 0
-    const cs = getComputedStyle(host)
-    const padL = parseFloat(cs.paddingLeft) || 0
-    const padR = parseFloat(cs.paddingRight) || 0
-    const hostContentW = host.clientWidth - padL - padR
-    const panelW = el.getBoundingClientRect().width
-    return Math.max(0, (hostContentW - panelW) / 2)
-  }
-
-  #onDragEnd = (event: PointerEvent): void => {
-    if (event.pointerId !== this.#dragPointerId) return
-    const moved = this.#dragMoved
-    this.#dragPointerId = null
-    this.#dragStart = null
-    this.#dragMoved = false
-    window.removeEventListener('pointermove', this.#onDragMove)
-    window.removeEventListener('pointerup', this.#onDragEnd)
-    window.removeEventListener('pointercancel', this.#onDragEnd)
-    if (this.#dragModeActive) {
-      this.#stack()?.pop(this.#notesDragMode.name)
-      this.#dragModeActive = false
-    }
-    // A press that never crossed the threshold changed nothing — don't rewrite
-    // the stores (and don't let a header click count as a reposition).
-    if (!moved) return
-    // Persist final position + dock side. Offset already clamped during drag.
-    const off = this.panelOffset()
-    try {
-      localStorage.setItem(NOTES_STRIP_OFFSET_KEY, JSON.stringify(off))
-    } catch { /* ignore */ }
-    this.#persistDock()
-  }
-
-  /** Given a candidate offset, return the closest offset that keeps the
-   *  ENTIRE panel inside the viewport (with a small margin). Previously
-   *  this only enforced a tiny visible corner, which let the footer slip
-   *  below the viewport when the dragbar was dragged downward — the
-   *  user couldn't see (or click) the footer anymore.
-   *
-   *  If the panel is larger than the viewport in either axis, the top-
-   *  left edges take priority — the user can still scroll the list
-   *  body (overflow-y: auto) to see the rest of the strip. */
-  #clampOffsetCandidate(candidate: { x: number; y: number }): { x: number; y: number } {
-    const el = this.panel()?.nativeElement
-    if (!el) return candidate
-    const rect = el.getBoundingClientRect()
-    const current = this.panelOffset()
-
-    // Resolve the panel's "natural" top-left (at zero offset) by
-    // backing the current offset out of the rendered rect.
-    const panelWidth  = rect.right  - rect.left
-    const panelHeight = rect.bottom - rect.top
-    const naturalLeft = rect.left - current.x
-    const naturalTop  = rect.top  - current.y
-
-    // Apply the candidate offset to that natural rect.
-    const newLeft = naturalLeft + candidate.x
-    const newTop  = naturalTop  + candidate.y
-
-    // Clamp within the HOST's box, not the raw viewport. The host already
-    // starts below the header bar and ends above the controls pill, so
-    // confining the panel to it stops a float-drag from sliding up into the
-    // header / command line or down into the controls. maxX/Y are floored at
-    // minX/Y so an oversized panel pins to the top-left instead of inverting.
-    const host = this.#host.nativeElement.getBoundingClientRect()
-    const margin = 8
-
-    const minLeft = host.left + margin
-    const maxLeft = Math.max(minLeft, host.right - margin - panelWidth)
-    const allowedLeft = Math.max(minLeft, Math.min(maxLeft, newLeft))
-
-    // No top/bottom margin: the host already clears the header (top) and the
-    // controls pill (bottom), so the float panel should reach flush against
-    // the command line and the bottom, matching the docked rail's extent.
-    const minTop = host.top
-    const maxTop = Math.max(minTop, host.bottom - panelHeight)
-    const allowedTop = Math.max(minTop, Math.min(maxTop, newTop))
-
-    return {
-      x: candidate.x + (allowedLeft - newLeft),
-      y: candidate.y + (allowedTop  - newTop),
-    }
-  }
-
-  /** Double-click the dragbar → reset a float back to the centered default.
-   *  Ignores double-clicks that land on the bar's buttons (fullscreen/close)
-   *  and does nothing while docked (the rail is CSS-laid-out). */
-  resetPanelOffset(event?: Event): void {
-    const tgt = event?.target as HTMLElement | null
-    if (tgt?.closest('button, [role="button"]')) return
-    if (this.dockSide()) return
-    this.panelOffset.set({ x: 0, y: 0 })
-    try { localStorage.removeItem(NOTES_STRIP_OFFSET_KEY) } catch { /* ignore */ }
-  }
-
-  // ── Custom corner-resize handle ──────────────────────────
-  // The browser-native `resize: both` is ignored when overflow is
-  // visible (which we need so the palette popover can overhang
-  // below the strip). This custom handle gives us the same UX
-  // independent of overflow + persists via the existing
-  // ResizeObserver path.
-  #resizePointerId: number | null = null
-  #resizeStart: { px: number; py: number; w: number; h: number } | null = null
-  // Which edge the active resize was started from. 'corner' = bottom-right
-  // (w+h), 'left' = width only (the live edge when docked right), 'bottom'
-  // = height only.
-  #resizeEdge: 'corner' | 'left' | 'bottom' = 'corner'
-
-  onResizeStart(event: PointerEvent, edge: 'corner' | 'left' | 'bottom' = 'corner'): void {
-    if (event.button !== 0) return
-    if (this.#dragPointerId !== null || this.#noteDragPointerId !== null) return
-    if (this.isFullscreen()) return  // size is forced; no-op
-    event.preventDefault()
-    event.stopPropagation()
-    const el = this.panel()?.nativeElement
-    if (!el) return
-    const rect = el.getBoundingClientRect()
-    this.#resizePointerId = event.pointerId
-    this.#resizeEdge = edge
-    this.#resizeStart = {
-      px: event.clientX,
-      py: event.clientY,
-      w: rect.width,
-      h: rect.height,
-    }
-    window.addEventListener('pointermove', this.#onResizeMove)
-    window.addEventListener('pointerup', this.#onResizeEnd)
-    window.addEventListener('pointercancel', this.#onResizeEnd)
-  }
-
-  #onResizeMove = (event: PointerEvent): void => {
-    if (event.pointerId !== this.#resizePointerId) return
-    const start = this.#resizeStart
-    const el = this.panel()?.nativeElement
-    if (!start || !el) return
-    // Clamp to the host's available area so the user can't drag
-    // the strip past its dock bounds.
-    const host = this.#host.nativeElement
-    const hostRect = host.getBoundingClientRect()
-    const minW = MIN_PANEL_WIDTH  // matches the .notes-strip CSS min-width floor
-    const minH = 80   // ~5rem
-    const maxW = Math.max(minW, hostRect.width - 16)
-    const maxH = Math.max(minH, hostRect.height - 4)
-    const dx = event.clientX - start.px
-    const dy = event.clientY - start.py
-    const edge = this.#resizeEdge
-    // 'left' grows width as the cursor moves left (toward the panel's
-    // interior the right edge is pinned when docked, so only the left moves).
-    let w = edge === 'left' ? start.w - dx : start.w + dx
-    let h = start.h + dy
-    w = Math.max(minW, Math.min(maxW, w))
-    h = Math.max(minH, Math.min(maxH, h))
-    if (edge !== 'bottom') el.style.width = `${Math.round(w)}px`
-    if (edge !== 'left') el.style.height = `${Math.round(h)}px`
-    // Publish the new width as the drag happens, so the identity plate grows
-    // and shrinks under the user's hand rather than a frame later.
-    this.#measurePanel()
-  }
-
-  #onResizeEnd = (event: PointerEvent): void => {
-    if (event.pointerId !== this.#resizePointerId) return
-    this.#resizePointerId = null
-    this.#resizeStart = null
-    window.removeEventListener('pointermove', this.#onResizeMove)
-    window.removeEventListener('pointerup', this.#onResizeEnd)
-    window.removeEventListener('pointercancel', this.#onResizeEnd)
-    // The ResizeObserver in #observePanelResize will catch the
-    // final size and persist it; no extra work here.
-  }
-
   // ── Note-row drag-reorder ─────────────────────────────────
   // Pointer-based (not HTML5 DnD) so we keep tight control over the
   // visual ghost + drop indicator and don't have to fight the
@@ -1898,7 +1534,6 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     // Primary mouse button / pen / touch primary only. Don't initiate
     // if the user is already mid-panel-drag.
     if (event.button !== 0) return
-    if (this.#dragPointerId !== null) return
     event.preventDefault()
     event.stopPropagation()
     const from = event.currentTarget as HTMLElement | null
@@ -2056,7 +1691,6 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     if (!this.visible()) return false
     if (this.pickerOpenForId() !== null) { this.closePicker(); return true }
     if (this.kebabOpenId() !== null) { this.closeKebab(); return true }
-    if (this.isFullscreen()) { this.isFullscreen.set(false); return true }
     return false
   }
 
@@ -2516,18 +2150,16 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
    * cannot click a row in: the moment you set off towards it you have left
    * the row that opened it. So selection pins it.
    */
-  readonly peekCell = computed<string | null>(
-    () => this.hoverCell() ?? (this.isFullscreen() ? null : this.cell()))
+  readonly peekCell = computed<string | null>(() => this.hoverCell())
 
-  /** True when the card belongs to the selected tile — pointer-events on,
-   *  rows clickable, no truncation.
-   *
-   *  NEVER on the desk. Fullscreen already shows the whole tree in its own
-   *  column, so a card of the same notes floating over it is a second copy
-   *  of the answer. (The HOVER peek stays: that is a look at a tile you have
-   *  NOT selected, which the desk has no other way to give you.) */
-  readonly peekPinned = computed<boolean>(
-    () => !this.hoverCell() && !!this.cell() && !this.isFullscreen())
+  /** The card is NEVER pinned. It was pinned only for the docked strip, whose
+   *  narrow column had no room to list a tile's notes — the desk shows the
+   *  whole tree in its own column, so a card of the same notes floating over
+   *  it is a second copy of the answer. What survives is the HOVER peek: a
+   *  look at a tile you have NOT selected, which the desk has no other way to
+   *  give you. Hover-only means capped rows, no pointer events, no selection.
+   *  Kept as a method so the template reads the same as the other flags. */
+  peekPinned(): boolean { return false }
 
   readonly hoverNotes = computed<readonly { id: string; text: string; kind: 'q' | 'a' | 'note'; mark: string | null; depth: number }[]>(() => {
     const cell = this.peekCell()
@@ -3237,19 +2869,6 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     // stack if the component is destroyed mid-hover (e.g. selection
     // change triggers re-render while cursor is over the strip).
     this.#popNotesMode()
-    // Same safety for an interrupted drag — release the window listeners
-    // and pop the drag mode so we don't leak handlers across remounts.
-    if (this.#dragPointerId !== null) {
-      window.removeEventListener('pointermove', this.#onDragMove)
-      window.removeEventListener('pointerup', this.#onDragEnd)
-      window.removeEventListener('pointercancel', this.#onDragEnd)
-      this.#dragPointerId = null
-      this.#dragStart = null
-    }
-    if (this.#dragModeActive) {
-      this.#stack()?.pop(this.#notesDragMode.name)
-      this.#dragModeActive = false
-    }
   }
 
   // ── resize wiring ─────────────────────────────────────────
@@ -3307,10 +2926,6 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
       const last = entries[entries.length - 1]
       if (last) this.#panelWidth.set(Math.round(last.contentRect.width))
       if (this.#applyingDimensions) return
-      // Never persist while fullscreen — the size is forced by the
-      // !important rules, not the user's docked preference, and
-      // writing it would clobber their last-set docked dimensions.
-      if (this.isFullscreen()) return
       if (savePending) return
       savePending = true
       requestAnimationFrame(() => {

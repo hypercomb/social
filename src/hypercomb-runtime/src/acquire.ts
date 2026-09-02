@@ -43,8 +43,13 @@ import { registerPoolMeaning, SignatureStore } from '@hypercomb/core'
 // These two are PURE — stateless functions over bytes, no IoC registration, no
 // module state — which is the entire reason they may be bundled in here. The
 // walker IS the protocol; only the io wiring below is ours.
-import { isComplete, resolveInventory, type ReplicationIo, type ReplicationResult } from './replication-walker.js'
+import { isComplete, resolveInventory, resolveSignatureClosure, type ReplicationIo, type ReplicationResult } from './replication-walker.js'
 import { hostBases, listHostPackages, type HostPackage } from './host-packages.js'
+// The live-package stamp lives in installed-package.ts so the web shell's bundled
+// install can leave the SAME mark — one key, one reader, one answer to "which
+// build am I on". Re-exported so existing callers keep their import site.
+import { installedPackageSig, stampInstalledPackage } from './installed-package.js'
+export { installedPackageSig }
 
 // Re-exported so the shim's own callers keep one import site. The
 // IMPLEMENTATION moved to runtime (the app needs the same answer and cannot
@@ -75,11 +80,6 @@ const DEPENDENCIES_MEANING = 'dependencies'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
-/** The package sig currently installed, so a warm boot skips straight past
- *  acquisition. A HINT — OPFS presence is the truth, and the walker
- *  re-derives it on any call. */
-const INSTALLED_KEY = 'hc:shim:installed-package'
-
 export type InstallOutcome = {
   ok: boolean
   packageSig: string
@@ -88,13 +88,6 @@ export type InstallOutcome = {
   holes: string[]
   refused: string[]
   error?: string
-}
-
-export const installedPackageSig = (): string | null => {
-  try {
-    const sig = localStorage.getItem(INSTALLED_KEY)
-    return sig && SIG_RE.test(sig) ? sig : null
-  } catch { return null }
 }
 
 /** The shim's OWN origin is always a byte source, so a node that serves its
@@ -172,6 +165,102 @@ const merge = (root: string, parts: ReplicationResult[]): ReplicationResult =>
     limited: acc.limited || r.limited,
   }), { root, total: 0, present: 0, fetched: 0, held: [], holes: [], refused: [], limited: false })
 
+/** The three sets an install resolves — layers, bees, dependencies. Derived
+ *  from the sealed root every time; never taken from what a host asserted. */
+export type PackageInventory = {
+  layers: string[]
+  bees: string[]
+  dependencies: string[]
+}
+
+/** Records name atoms with the suffix the WRITER used (`<sig>.js` inside a
+ *  layer, bare on the wire). Identity is the signature, so the suffix is
+ *  folded out before anything compares or fetches. */
+const bare = (value: unknown): string =>
+  String(value ?? '').trim().toLowerCase().replace(/\.(?:js|json)$/, '')
+
+/** A layer names its child layers in `cells` — that, and only that, is the
+ *  frontier of the layer walk. The `bees` and `dependencies` a layer declares
+ *  are INVENTORY, not frontier: they are leaves here and resolve into their
+ *  own pools afterwards. A record that will not parse is a leaf too. */
+const childLayers = (bytes: Uint8Array<ArrayBuffer>): string[] => {
+  try {
+    const record = JSON.parse(new TextDecoder().decode(bytes)) as { cells?: unknown[] }
+    return (record?.cells ?? [])
+      .map(cell => bare(typeof cell === 'string' ? cell : (cell as { sig?: unknown })?.sig))
+      .filter(sig => SIG_RE.test(sig))
+  } catch { return [] }
+}
+
+/**
+ * THE INVENTORY, READ OUT OF THE SIGNED TREE.
+ *
+ * Walk the layer closure from the package root (`cells`, structurally — not
+ * by mining every 64-hex literal, which would sweep bees and deps into the
+ * layer pool), then union what those layers themselves declare: `bees` and
+ * `dependencies`. Every layer is admitted through the same verify-before-write
+ * boundary as any other atom, so the sets come out of bytes that hashed to
+ * their own names.
+ *
+ * Measured against the full published chain (176 packages, 2026-09-01): the
+ * derived sets match the manifest's arrays exactly, every generation. The
+ * arrays were always a copy — this reads the original instead.
+ */
+export const deriveInventory = async (
+  rootSig: string,
+  io: ReplicationIo,
+): Promise<{ inventory: PackageInventory; result: ReplicationResult }> => {
+  const result = await resolveSignatureClosure(rootSig, io, { children: childLayers })
+  const bees = new Set<string>()
+  const dependencies = new Set<string>()
+
+  for (const sig of result.held) {
+    const bytes = await io.read(sig)
+    if (!bytes) continue
+    let record: { bees?: unknown[]; dependencies?: unknown[] }
+    try { record = JSON.parse(new TextDecoder().decode(bytes)) as typeof record } catch { continue }
+    for (const bee of record?.bees ?? []) {
+      const value = bare(typeof bee === 'string' ? bee : (bee as { sig?: unknown })?.sig)
+      if (SIG_RE.test(value)) bees.add(value)
+    }
+    for (const dep of record?.dependencies ?? []) {
+      const value = bare(typeof dep === 'string' ? dep : (dep as { sig?: unknown })?.sig)
+      if (SIG_RE.test(value)) dependencies.add(value)
+    }
+  }
+
+  return {
+    inventory: {
+      layers: [...result.held],
+      bees: [...bees].sort(),
+      dependencies: [...dependencies].sort(),
+    },
+    result,
+  }
+}
+
+/** What the host CLAIMED, against what its own signed layers say. Never fatal
+ *  — the derived set is simply the one that installs — but said out loud,
+ *  because a host whose manifest names atoms its layers do not is either
+ *  stale or trying. */
+const reportDivergence = (pkg: HostPackage, inventory: PackageInventory): void => {
+  const kinds: [string, string[], string[]][] = [
+    ['layers', pkg.layers ?? [], inventory.layers],
+    ['bees', pkg.bees ?? [], inventory.bees],
+    ['dependencies', pkg.dependencies ?? [], inventory.dependencies],
+  ]
+  for (const [kind, claimed, derived] of kinds) {
+    const held = new Set(derived)
+    const extra = [...new Set(claimed.map(bare))].filter(sig => SIG_RE.test(sig) && !held.has(sig))
+    const missing = derived.filter(sig => !claimed.some(c => bare(c) === sig))
+    if (!extra.length && !missing.length) continue
+    console.warn(
+      `[acquire] ${pkg.zone} declares a ${kind} set its layers do not:`,
+      `${extra.length} not in the signed tree (ignored), ${missing.length} it failed to declare (installed anyway)`,
+    )
+  }
+}
+
 /**
  * ACQUIRE ONE SIGNATURE FROM THE DOMAINS YOU CARRY.
  *
@@ -245,11 +334,6 @@ export const installPackage = async (
   await store.initialize()
   if (!store.opfsAvailable) return fail('OPFS unavailable')
 
-  const sealed = validateSealedPackage(pkg.packageSig, {
-    layers: pkg.layers, bees: pkg.bees, dependencies: pkg.dependencies, beeDeps: pkg.beeDeps,
-  })
-  if (!sealed.valid) return fail(`package is not sealed: ${sealed.errors.join('; ')}`)
-
   // BYTE SOURCES: the host that offered it, then every other domain that
   // publishes the same signature, then the shim's own origin.
   //
@@ -278,25 +362,52 @@ export const installPackage = async (
   const beesUrlBase = `/opfs/${await registerPoolMeaning(BEES_MEANING)}`
   const depsUrlBase = `/opfs/${await registerPoolMeaning(DEPENDENCIES_MEANING)}`
 
+  const layersIo = {
+    read: readFrom([store.hypercombRoot], sig => [sig, `${sig}.json`]),
+    fetch: fetchFrom,
+    write: writeTo(store.hypercombRoot, sig => sig, sig => `/opfs/${sig}`, 'application/json; charset=utf-8'),
+  } satisfies ReplicationIo
+
+  // DERIVE, THEN SEAL. The inventory is read out of the layer closure the
+  // package root names — never out of the arrays the host handed us. Those
+  // arrays are a COPY of what the layers already state, and the copy is the
+  // one link in the chain nothing verifies: a host that shortens or pads the
+  // bee list is choosing which modules `activate()` will run. Walking the
+  // signed tree removes the choice (documentation/host-packages-pool.md).
+  const { inventory, result: layerResult } = await deriveInventory(pkg.packageSig, layersIo)
+  if (!isComplete(layerResult)) {
+    return {
+      ok: false,
+      packageSig: pkg.packageSig,
+      fetched: layerResult.fetched,
+      present: layerResult.present,
+      holes: layerResult.holes,
+      refused: layerResult.refused,
+      error: layerResult.refused.length
+        ? `${layerResult.refused.length} layer(s) refused — served bytes did not hash to their name`
+        : `${layerResult.holes.length} layer(s) unreachable — the root's closure has holes`,
+    }
+  }
+
+  const sealed = validateSealedPackage(pkg.packageSig, { ...inventory, beeDeps: pkg.beeDeps })
+  if (!sealed.valid) return fail(`package is not sealed: ${sealed.errors.join('; ')}`)
+
+  reportDivergence(pkg, inventory)
+
   const results = await Promise.all([
-    resolveInventory(pkg.packageSig, pkg.layers, {
-      read: readFrom([store.hypercombRoot], sig => [sig, `${sig}.json`]),
-      fetch: fetchFrom,
-      write: writeTo(store.hypercombRoot, sig => sig, sig => `/opfs/${sig}`, 'application/json; charset=utf-8'),
-    } satisfies ReplicationIo),
-    resolveInventory(pkg.packageSig, pkg.dependencies, {
+    resolveInventory(pkg.packageSig, inventory.dependencies, {
       read: readFrom([store.dependencies], sig => [`${sig}.js`, sig]),
       fetch: fetchFrom,
       write: writeTo(store.dependencies, sig => `${sig}.js`, sig => `${depsUrlBase}/${sig}`, 'application/javascript; charset=utf-8'),
     } satisfies ReplicationIo),
-    resolveInventory(pkg.packageSig, pkg.bees, {
+    resolveInventory(pkg.packageSig, inventory.bees, {
       read: readFrom([store.bees], sig => [`${sig}.js`, sig]),
       fetch: fetchFrom,
       write: writeTo(store.bees, sig => `${sig}.js`, sig => `${beesUrlBase}/${sig}.js`, 'application/javascript; charset=utf-8'),
     } satisfies ReplicationIo),
   ])
 
-  const held = merge(pkg.packageSig, results)
+  const held = merge(pkg.packageSig, [layerResult, ...results])
   if (!isComplete(held)) {
     return {
       ok: false,
@@ -314,9 +425,9 @@ export const installPackage = async (
   // The bags. Each is a sig-named dir INSIDE the pool whose entries carry the
   // alias→sig pairs the import map is assembled from — legitimate structure,
   // not a typed folder.
-  await writeBags(store, pkg, origins)
+  await writeBags(store, inventory, pkg, origins)
 
-  activate(pkg, held.held)
+  activate(pkg, inventory, held.held)
   return {
     ok: true,
     packageSig: pkg.packageSig,
@@ -340,14 +451,14 @@ const SIG_STORE_KEY = 'hypercomb.signature-store'
  * one place where "held" becomes "running", kept separate for exactly that
  * reason.
  */
-const activate = (pkg: HostPackage, held: string[]): void => {
+const activate = (pkg: HostPackage, inventory: PackageInventory, held: string[]): void => {
   try {
-    localStorage.setItem(INSTALLED_KEY, pkg.packageSig)
+    stampInstalledPackage(pkg.packageSig)
     localStorage.setItem(INSTALL_MANIFEST_KEY, JSON.stringify({
       version: 2,
-      layers: pkg.layers,
-      bees: pkg.bees,
-      dependencies: pkg.dependencies,
+      layers: inventory.layers,
+      bees: inventory.bees,
+      dependencies: inventory.dependencies,
       beeDeps: pkg.beeDeps,
       dependenciesBag: pkg.dependenciesBag,
       beesBag: pkg.beesBag,
@@ -378,7 +489,7 @@ const activate = (pkg: HostPackage, held: string[]): void => {
   } catch { /* storage unavailable — OPFS presence is still the truth */ }
 }
 
-const writeBags = async (store: StoreLike, pkg: HostPackage, origins: string[]): Promise<void> => {
+const writeBags = async (store: StoreLike, inventory: PackageInventory, pkg: HostPackage, origins: string[]): Promise<void> => {
   // Single-bag invariant: evict any prior bag before writing the new one, so
   // the import map's readdir finds exactly one and needs no pointer file.
   // Scoped STRICTLY to the install-owned pools — at the OPFS root the same
@@ -415,9 +526,9 @@ const writeBags = async (store: StoreLike, pkg: HostPackage, origins: string[]):
   }
 
   if (pkg.dependenciesBag && SIG_RE.test(pkg.dependenciesBag)) {
-    await writeBag(store.dependencies, pkg.dependenciesBag, pkg.dependencies.length)
+    await writeBag(store.dependencies, pkg.dependenciesBag, inventory.dependencies.length)
   }
   if (pkg.beesBag && SIG_RE.test(pkg.beesBag)) {
-    await writeBag(store.bees, pkg.beesBag, pkg.bees.length)
+    await writeBag(store.bees, pkg.beesBag, inventory.bees.length)
   }
 }

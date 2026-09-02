@@ -123,8 +123,15 @@ export const BACKGROUND_THEMES: readonly BackgroundTheme[] = [
   // Nature is the SHIP DEFAULT — twenty scenes, first in the list, and what an
   // unchosen `active` reads as. Its tiles set is the substrate's default too.
   { id: 'nature',    label: 'Nature',    tiles: 'builtin:theme-nature',    preview: '/substrate/theme-nature/1.jpg', mood: 'dark' },
-  { id: 'steel',     label: 'Steel',     screen: { archetype: 'contour', palette: 'steel' },      tiles: 'builtin:steel' },
-  { id: 'daylight',  label: 'Daylight',  screen: { archetype: 'honeycomb', palette: 'daylight' }, tiles: 'builtin:daylight' },
+  // THE NEUTRAL PAIR. steel and daylight are the backdrops for the plain dark
+  // and light chrome — same azure/clay chord, same grounds — so they name that
+  // chrome for the same reason the bright three do: typed by name, a paper
+  // backdrop under honey panels (or a slate one under bloom) is not a choice
+  // anyone makes on purpose. The five below have no chrome theme of their own
+  // and leave the panels alone, which is right — they are a dressed screen,
+  // not a look.
+  { id: 'steel',     label: 'Steel',     screen: { archetype: 'contour', palette: 'steel' },      tiles: 'builtin:steel',    chrome: 'dark' },
+  { id: 'daylight',  label: 'Daylight',  screen: { archetype: 'honeycomb', palette: 'daylight' }, tiles: 'builtin:daylight', chrome: 'light' },
   { id: 'indigo',    label: 'Indigo',    screen: { archetype: 'mesh', palette: 'indigo' },        tiles: 'builtin:indigo' },
   { id: 'teal',      label: 'Teal',      screen: { archetype: 'dots', palette: 'teal' },          tiles: 'builtin:teal' },
   { id: 'ember',     label: 'Ember',     screen: { archetype: 'sheen', palette: 'ember' },        tiles: 'builtin:ember' },

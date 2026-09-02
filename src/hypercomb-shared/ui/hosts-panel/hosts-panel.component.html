@@ -70,78 +70,211 @@
           >✕</button>
         </div>
 
-        <!-- WHAT THIS DOMAIN PUBLISHES. Asked only when looked at — a manifest
+        <!-- WHAT THIS HOST OFFERS YOU. Asked only when looked at — a manifest
              runs to megabytes, so opening the panel must not fetch every
-             host's. -->
+             host's. Two facts and one act: the build you are on, the build
+             that is newest here, and Update. The whole ledger is a fold away
+             for pinning and rollback — every root stays valid forever. -->
         @if (selectedZone() === zone) {
           <section class="hosts-inspector" [attr.aria-label]="'hosts.offer.title' | t: { host: zone }">
-            <div class="hosts-inspector-head">
-              <span>{{ 'hosts.offer.title' | t: { host: zone } }}</span>
-              @if (offerOf(zone); as offer) {
-                <span class="hosts-total">{{ offer.packages.length }}</span>
-              }
-            </div>
-
             @if (isProbing(zone)) {
               <p class="hosts-probing" aria-live="polite">{{ 'hosts.probing' | t }}</p>
             } @else if (offerOf(zone); as offer) {
-              @if (offer.packages.length) {
-                <ul class="hosts-offers">
-                  @for (pkg of packagesShown(zone); track pkg.packageSig) {
-                    <li class="hosts-offer">
-                      <div class="hosts-offer-copy" [id]="'host-package-' + pkg.packageSig">
-                        <div class="hosts-offer-name">
-                          <span class="hosts-offer-label" [title]="pkg.label">{{ pkg.label }}</span>
-                          @if (pkg.generation !== null) {
-                            <span class="hosts-offer-generation">
-                              {{ 'hosts.offer.build' | t: { generation: pkg.generation } }}
-                            </span>
-                          } @else {
-                            <code class="hosts-offer-generation" [title]="pkg.packageSig">
-                              {{ pkg.packageSig.slice(0, 8) }}
-                            </code>
+              @if (newestOf(zone); as newest) {
+                <div class="hosts-standing">
+                  <div class="hosts-standing-copy">
+                    <span class="hosts-yours" [class.behind]="updateAvailable(zone)">
+                      {{ yoursKey(zone) | t: yoursParams(zone) }}
+                    </span>
+                    <span class="hosts-newest">
+                      {{ 'hosts.offer.newest' | t: { generation: newest.generation ?? newest.packageSig.slice(0, 8) } }}
+                      <span class="hosts-when">{{ when(newest) }}</span>
+                      <span class="hosts-offer-meta">{{ 'hosts.offer.meta' | t: {
+                        bees: newest.bees.length, layers: newest.layers.length
+                      } }}</span>
+                    </span>
+                    @if (intakeOf(newest); as state) {
+                      @if (state.detail) {
+                        <span
+                          class="hosts-offer-state"
+                          [class.failed]="state.phase === 'failed'"
+                          aria-live="polite"
+                        >{{ state.detail }}</span>
+                      }
+                    }
+                  </div>
+                  <!-- THE ONE BUTTON. Disabled reads "up to date": there is
+                       nothing to press, and saying so is the answer. -->
+                  <button
+                    class="hosts-update"
+                    type="button"
+                    [class.current]="!updateAvailable(zone)"
+                    [disabled]="updateDisabled(zone)"
+                    (click)="update(zone)"
+                  >{{ updateKey(zone) | t }}</button>
+                </div>
+
+                <!-- EVERY BUILD — closed by default. A version is a signature
+                     and old ones never stop being valid, so any of them can be
+                     taken: that is pinning, and taking an older one is
+                     rollback. -->
+                <button
+                  class="hosts-more hosts-ledger-toggle"
+                  type="button"
+                  [attr.aria-expanded]="ledgerOpen()"
+                  (click)="toggleLedger()"
+                >{{ (ledgerOpen() ? 'hosts.offer.ledger-close' : 'hosts.offer.ledger-open') | t: { count: offeredCount(zone) } }}</button>
+
+                @if (ledgerOpen()) {
+                  @for (group of groupsOf(zone); track group.name) {
+                  <!-- THE NAME, once. Every build under it is a date, and the
+                       dates are the items — the name is not one of them. A
+                       rename starts a new heading; nothing else changes.
+                       Its control acts on the dates underneath: a name you
+                       stopped using is a run you want gone, not fifteen
+                       presses. -->
+                  <div class="hosts-line hosts-group">
+                    <span>{{ group.name }}</span>
+                    @if (groupHideable(group); as many) {
+                      <button
+                        class="hosts-group-hide"
+                        type="button"
+                        [attr.data-tip]="'hosts.hidden.hide-group' | t: { count: many }"
+                        (click)="hideGroup(group)"
+                      >{{ 'hosts.hidden.hide-group' | t: { count: many } }}</button>
+                    }
+                  </div>
+                  <ul class="hosts-offers">
+                    @for (pkg of group.packages; track pkg.packageSig) {
+                      <li class="hosts-offer" [class.current]="isCurrent(pkg)">
+                        <div class="hosts-offer-copy" [id]="'host-package-' + pkg.packageSig">
+                          <div class="hosts-offer-name">
+                            <span class="hosts-offer-label" [title]="pkg.packageSig">{{ when(pkg) || pkg.packageSig.slice(0, 8) }}</span>
+                            @if (pkg.generation !== null) {
+                              <span class="hosts-when">{{ 'hosts.offer.build' | t: { generation: pkg.generation } }}</span>
+                            }
+                          </div>
+                          <span class="hosts-offer-meta">{{ 'hosts.offer.meta' | t: {
+                            bees: pkg.bees.length, layers: pkg.layers.length
+                          } }}</span>
+                          @if (intakeOf(pkg); as state) {
+                            @if (state.detail) {
+                              <span
+                                class="hosts-offer-state"
+                                [class.failed]="state.phase === 'failed'"
+                                aria-live="polite"
+                              >{{ state.detail }}</span>
+                            }
                           }
                         </div>
-                        <span class="hosts-offer-meta">{{ 'hosts.offer.meta' | t: {
-                          bees: pkg.bees.length, layers: pkg.layers.length
-                        } }}</span>
-                        @if (intakeOf(pkg); as state) {
-                          @if (state.detail) {
-                            <span
-                              class="hosts-offer-state"
-                              [class.failed]="state.phase === 'failed'"
-                              aria-live="polite"
-                            >{{ state.detail }}</span>
-                          }
+                        @if (isCurrent(pkg)) {
+                          <span class="hosts-offer-current">{{ 'hosts.offer.this-one' | t }}</span>
+                        } @else {
+                          <button
+                            class="hosts-offer-add"
+                            type="button"
+                            [disabled]="intakeDisabled(pkg)"
+                            [attr.aria-describedby]="'host-package-' + pkg.packageSig"
+                            (click)="apply(pkg)"
+                          >{{ intakeActionKey(pkg) | t }}</button>
+                          <!-- HIDE, never delete. This is a list of things you
+                               did not choose, so the act it offers is the one
+                               that costs nothing to get wrong. Deleting is in
+                               the delete area, on a row you went looking for. -->
+                          <button
+                            class="hosts-offer-hide"
+                            type="button"
+                            [attr.data-tip]="'hosts.hidden.hide' | t"
+                            [attr.aria-label]="'hosts.hidden.hide' | t"
+                            (click)="hide(pkg)"
+                          >✕</button>
                         }
-                      </div>
-                      <button
-                        class="hosts-offer-add"
-                        type="button"
-                        [disabled]="intakeDisabled(pkg)"
-                        [attr.aria-describedby]="'host-package-' + pkg.packageSig"
-                        (click)="take(pkg)"
-                      >{{ intakeActionKey(pkg) | t }}</button>
-                    </li>
+                      </li>
+                    }
+                  </ul>
                   }
-                </ul>
-                @if (moreCount(zone); as more) {
-                  <button
-                    class="hosts-more"
-                    type="button"
-                    [attr.aria-expanded]="expandedZone() === zone"
-                    (click)="toggleAll(zone)"
-                  >{{ 'hosts.offer.show-all' | t: { count: more } }}</button>
-                } @else if (hasFold(zone) && expandedZone() === zone) {
-                  <button
-                    class="hosts-more"
-                    type="button"
-                    aria-expanded="true"
-                    (click)="toggleAll(zone)"
-                  >{{ 'hosts.offer.show-less' | t }}</button>
+                  @if (moreCount(zone); as more) {
+                    <button
+                      class="hosts-more"
+                      type="button"
+                      [attr.aria-expanded]="expandedZone() === zone"
+                      (click)="toggleAll(zone)"
+                    >{{ 'hosts.offer.show-all' | t: { count: more } }}</button>
+                  } @else if (hasFold(zone) && expandedZone() === zone) {
+                    <button
+                      class="hosts-more"
+                      type="button"
+                      aria-expanded="true"
+                      (click)="toggleAll(zone)"
+                    >{{ 'hosts.offer.show-less' | t }}</button>
+                  }
                 }
+
               } @else if (wasAsked(zone)) {
-                <p class="hosts-probing">{{ 'hosts.offer.none' | t }}</p>
+                <!-- "Nothing here" and "you hid everything here" are different
+                     facts, and only one of them is about the host. -->
+                @if (allHidden(zone)) {
+                  <p class="hosts-probing">{{ 'hosts.hidden.all' | t }}</p>
+                } @else {
+                  <p class="hosts-probing">{{ 'hosts.offer.none' | t }}</p>
+                }
+              }
+
+              <!-- THE DELETE AREA — only what you put away, and the only
+                   place deleting is on the table. Closed by default: it is
+                   somewhere you GO, not something you pass. Deleting here is
+                   a local forget; the build stays on the host, still valid,
+                   still fetchable by anyone who names its signature. -->
+              @if (hiddenFor(zone); as put) {
+                @if (put.length > 0) {
+                  <button
+                    class="hosts-more hosts-hidden-toggle"
+                    type="button"
+                    [attr.aria-expanded]="hiddenOpen()"
+                    (click)="toggleHiddenArea()"
+                  >{{ (hiddenOpen() ? 'hosts.hidden.close' : 'hosts.hidden.open') | t: { count: put.length } }}</button>
+
+                  @if (hiddenOpen()) {
+                    <p class="hosts-hidden-note">{{ 'hosts.hidden.note' | t }}</p>
+                    @for (group of hiddenGroupsFor(zone); track group.name) {
+                      <div class="hosts-line hosts-group">
+                        <span>{{ group.name }}</span>
+                        <button
+                          class="hosts-group-hide"
+                          type="button"
+                          (click)="restoreGroup(group.rows)"
+                        >{{ 'hosts.hidden.restore-all' | t: { count: group.rows.length } }}</button>
+                      </div>
+                      <ul class="hosts-offers hosts-hidden-list">
+                        @for (row of group.rows; track row.item.sig) {
+                          <li class="hosts-offer">
+                            <div class="hosts-offer-copy">
+                              <div class="hosts-offer-name">
+                                <span class="hosts-offer-label" [attr.title]="row.item.sig">{{ hiddenWhen(row) }}</span>
+                                @if (row.pkg && row.pkg.generation !== null) {
+                                  <span class="hosts-when">{{ 'hosts.offer.build' | t: { generation: row.pkg.generation } }}</span>
+                                }
+                              </div>
+                            </div>
+                            <button
+                              class="hosts-offer-add"
+                              type="button"
+                              (click)="restore(row.item)"
+                            >{{ 'hosts.hidden.restore' | t }}</button>
+                            @if (row.item.deletable) {
+                              <button
+                                class="hosts-offer-delete"
+                                type="button"
+                                [attr.data-tip]="'hosts.hidden.delete-tip' | t"
+                                (click)="destroy(row.item)"
+                              >{{ 'hosts.hidden.delete' | t }}</button>
+                            }
+                          </li>
+                        }
+                      </ul>
+                    }
+                  }
+                }
               }
             }
           </section>

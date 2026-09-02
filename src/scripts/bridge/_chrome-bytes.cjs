@@ -38,36 +38,36 @@ const DOLPHIN_CHROME_CSS = `
 :root {
   /* Surface system (LIGHT default — per /instructions/styles doctrine).
    * Fresh sites default to light; dark is the explicit override below. */
-  --md-surface:           #f5ede0;
-  --md-surface-dim:       #e8dec6;
-  --md-surface-bright:    #fdf7ea;
+  --md-surface:           #f7f8fa;
+  --md-surface-dim:       #e7eaef;
+  --md-surface-bright:    #fdfeff;
   --md-surface-c-lowest:  #ffffff;
-  --md-surface-c-low:     #efe7d4;
-  --md-surface-c:         #e9ddc4;
-  --md-surface-c-high:    #e0d3b6;
-  --md-surface-c-highest: #d7c9a6;
-  --md-on-surface:        #1a1f2c;
+  --md-surface-c-low:     #f2f4f8;
+  --md-surface-c:         #eceff4;
+  --md-surface-c-high:    #e3e7ee;
+  --md-surface-c-highest: #d8dee7;
+  --md-on-surface:        #1a2130;
   --md-on-surface-strong: #0a1020;
-  --md-on-surface-var:    #4f566a;
-  --md-on-surface-faint:  #8c8a82;
+  --md-on-surface-var:    #4b5468;
+  --md-on-surface-faint:  #7c8697;
 
   /* Primary / secondary (Material's accent roles) */
-  --md-primary:           #1f4376;
+  --md-primary:           #1668c4;
   --md-on-primary:        #ffffff;
-  --md-primary-container: #cce0f2;
-  --md-on-primary-c:      #062340;
+  --md-primary-container: #d4e6fb;
+  --md-on-primary-c:      #06294f;
 
-  --md-secondary:         #794c1e;
+  --md-secondary:         #b45a22;
   --md-on-secondary:      #ffffff;
-  --md-secondary-c:       #f4dcc1;
-  --md-on-secondary-c:    #2a1a08;
+  --md-secondary-c:       #fbdfcc;
+  --md-on-secondary-c:    #3d1806;
 
-  --md-tertiary:          #5a3d68;
-  --md-tertiary-c:        #ead0f1;
+  --md-tertiary:          #5b4bc4;
+  --md-tertiary-c:        #ddd8fb;
 
   /* Outline / divider */
-  --md-outline:           rgba(26, 31, 44, 0.24);
-  --md-outline-variant:   rgba(26, 31, 44, 0.10);
+  --md-outline:           rgba(26, 33, 48, 0.20);
+  --md-outline-variant:   rgba(26, 33, 48, 0.09);
 
   /* State layers (Material's hover/focus/pressed overlay opacities) */
   --md-state-hover:    0.08;
@@ -82,12 +82,14 @@ const DOLPHIN_CHROME_CSS = `
   --md-shape-xl:   28px;
   --md-shape-full: 999px;
 
-  /* Elevation (Material 3 box-shadow sets, tuned for light surfaces) */
+  /* Elevation — daylight, not soot: the shadow carries the ground's own
+   * deep slate instead of black, so a lifted card reads as lit rather than
+   * dirty. Mirrors --md-elev-* in _material-tokens.scss. */
   --md-elev-0: none;
-  --md-elev-1: 0 1px 2px rgba(0,0,0,.06), 0 1px 3px 1px rgba(0,0,0,.04);
-  --md-elev-2: 0 1px 2px rgba(0,0,0,.06), 0 2px 6px 2px rgba(0,0,0,.04);
-  --md-elev-3: 0 4px 8px 3px rgba(0,0,0,.06), 0 1px 3px rgba(0,0,0,.10);
-  --md-elev-4: 0 6px 10px 4px rgba(0,0,0,.06), 0 2px 3px rgba(0,0,0,.10);
+  --md-elev-1: 0 1px 2px rgba(18,34,58,.10), 0 1px 3px 1px rgba(18,34,58,.06);
+  --md-elev-2: 0 1px 2px rgba(18,34,58,.12), 0 2px 6px 2px rgba(18,34,58,.07);
+  --md-elev-3: 0 4px 8px 3px rgba(18,34,58,.10), 0 1px 3px rgba(18,34,58,.15);
+  --md-elev-4: 0 6px 10px 4px rgba(18,34,58,.10), 0 2px 3px rgba(18,34,58,.15);
 
   /* Typography — serif for editorial, sans for UI/chips */
   --md-font-display: "Source Serif 4", "Iowan Old Style", Georgia, "Times New Roman", serif;
@@ -103,67 +105,67 @@ const DOLPHIN_CHROME_CSS = `
 }
 
 [data-theme="dark"] {
-  --md-surface:           #0c1622;
-  --md-surface-dim:       #07101b;
-  --md-surface-bright:    #19283a;
-  --md-surface-c-lowest:  #050b13;
-  --md-surface-c-low:     #0e1b29;
-  --md-surface-c:         #142233;
-  --md-surface-c-high:    #1b2c41;
-  --md-surface-c-highest: #233650;
-  --md-on-surface:        #e8e2d6;
-  --md-on-surface-strong: #f6f0e2;
-  --md-on-surface-var:    #b6a99a;
-  --md-on-surface-faint:  #7a7060;
+  --md-surface:           #0d151e;
+  --md-surface-dim:       #080f16;
+  --md-surface-bright:    #1b2836;
+  --md-surface-c-lowest:  #050a0f;
+  --md-surface-c-low:     #101a25;
+  --md-surface-c:         #16222f;
+  --md-surface-c-high:    #1e2c3b;
+  --md-surface-c-highest: #27384a;
+  --md-on-surface:        #e3ecf3;
+  --md-on-surface-strong: #f5fafd;
+  --md-on-surface-var:    #a3b4c4;
+  --md-on-surface-faint:  #6c7e8f;
 
-  --md-primary:           #7eb6d6;
+  --md-primary:           #7ec3ee;
   --md-on-primary:        #06121c;
-  --md-primary-container: #1f4f76;
-  --md-on-primary-c:      #c8e1f0;
+  --md-primary-container: #1c4f7a;
+  --md-on-primary-c:      #cde5f8;
 
-  --md-secondary:         #d3a47a;
+  --md-secondary:         #eba76b;
   --md-on-secondary:      #2a1a08;
-  --md-secondary-c:       #5a3a18;
-  --md-on-secondary-c:    #f3d8b6;
+  --md-secondary-c:       #633a17;
+  --md-on-secondary-c:    #f8dcbe;
 
-  --md-tertiary:          #b297c2;
-  --md-tertiary-c:        #4a3a55;
+  --md-tertiary:          #b0a4f0;
+  --md-tertiary-c:        #3a3470;
 
-  --md-outline:           rgba(232, 226, 214, 0.20);
-  --md-outline-variant:   rgba(232, 226, 214, 0.10);
+  --md-outline:           rgba(227, 237, 245, 0.18);
+  --md-outline-variant:   rgba(227, 237, 245, 0.09);
 
-  --md-elev-1: 0 1px 2px rgba(0,0,0,.30), 0 1px 3px 1px rgba(0,0,0,.15);
-  --md-elev-2: 0 1px 2px rgba(0,0,0,.30), 0 2px 6px 2px rgba(0,0,0,.15);
-  --md-elev-3: 0 4px 8px 3px rgba(0,0,0,.15), 0 1px 3px rgba(0,0,0,.30);
-  --md-elev-4: 0 6px 10px 4px rgba(0,0,0,.15), 0 2px 3px rgba(0,0,0,.30);
+  --md-elev-1: 0 1px 2px rgba(2,8,14,.44), 0 1px 3px 1px rgba(2,8,14,.28);
+  --md-elev-2: 0 1px 2px rgba(2,8,14,.48), 0 2px 6px 2px rgba(2,8,14,.30);
+  --md-elev-3: 0 4px 10px 3px rgba(2,8,14,.34), 0 1px 3px rgba(2,8,14,.50);
+  --md-elev-4: 0 8px 16px 4px rgba(2,8,14,.34), 0 2px 4px rgba(2,8,14,.50);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
-    --md-surface:           #0c1622;
-    --md-surface-dim:       #07101b;
-    --md-surface-bright:    #19283a;
-    --md-surface-c-lowest:  #050b13;
-    --md-surface-c-low:     #0e1b29;
-    --md-surface-c:         #142233;
-    --md-surface-c-high:    #1b2c41;
-    --md-surface-c-highest: #233650;
-    --md-on-surface:        #e8e2d6;
-    --md-on-surface-strong: #f6f0e2;
-    --md-on-surface-var:    #b6a99a;
-    --md-on-surface-faint:  #7a7060;
-    --md-primary:           #7eb6d6;
+    --md-surface:           #0d151e;
+    --md-surface-dim:       #080f16;
+    --md-surface-bright:    #1b2836;
+    --md-surface-c-lowest:  #050a0f;
+    --md-surface-c-low:     #101a25;
+    --md-surface-c:         #16222f;
+    --md-surface-c-high:    #1e2c3b;
+    --md-surface-c-highest: #27384a;
+    --md-on-surface:        #e3ecf3;
+    --md-on-surface-strong: #f5fafd;
+    --md-on-surface-var:    #a3b4c4;
+    --md-on-surface-faint:  #6c7e8f;
+    --md-primary:           #7ec3ee;
     --md-on-primary:        #06121c;
-    --md-primary-container: #1f4f76;
-    --md-on-primary-c:      #c8e1f0;
-    --md-secondary:         #d3a47a;
+    --md-primary-container: #1c4f7a;
+    --md-on-primary-c:      #cde5f8;
+    --md-secondary:         #eba76b;
     --md-on-secondary:      #2a1a08;
-    --md-secondary-c:       #5a3a18;
-    --md-on-secondary-c:    #f3d8b6;
-    --md-tertiary:          #b297c2;
-    --md-tertiary-c:        #4a3a55;
-    --md-outline:           rgba(232, 226, 214, 0.20);
-    --md-outline-variant:   rgba(232, 226, 214, 0.10);
+    --md-secondary-c:       #633a17;
+    --md-on-secondary-c:    #f8dcbe;
+    --md-tertiary:          #b0a4f0;
+    --md-tertiary-c:        #3a3470;
+    --md-outline:           rgba(227, 237, 245, 0.18);
+    --md-outline-variant:   rgba(227, 237, 245, 0.09);
   }
 }
 

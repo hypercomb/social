@@ -59,26 +59,27 @@ function writePrompter({ title, intro, out, lines }) {
   :root{--bg:#0f1115;--ink:#f2efe6;--dim:#8b93a0;--honey:#f2b632;--line:#242a33;--ok:#7bd6a0}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.5 "Segoe UI",system-ui,sans-serif;
-    height:100vh;display:grid;grid-template-rows:auto 1fr auto;overflow:hidden}
+    height:100vh;display:grid;grid-template-rows:auto 1fr 3px auto;overflow:hidden}
   header{padding:16px 5vw 10px;border-bottom:1px solid var(--line);display:flex;gap:18px;align-items:baseline;flex-wrap:wrap}
   h1{margin:0;font-size:17px;font-weight:600}
   .how{color:var(--dim);font-size:13px;max-width:76ch}
   .how b{color:var(--honey);font-weight:600}
-  main{position:relative;display:flex;align-items:center;justify-content:center;padding:2vh 6vw;overflow:hidden}
-  #line{max-width:26ch;font:300 clamp(30px,4.2vw,60px)/1.4 "Iowan Old Style",Georgia,serif;text-align:left}
+  main{position:relative;display:flex;align-items:center;justify-content:center;padding:6vh 6vw;overflow-y:auto;scroll-behavior:smooth;scrollbar-width:none}
+  main::-webkit-scrollbar{display:none}
+  #line{max-width:30ch;font:300 46px/1.45 "Iowan Old Style",Georgia,serif;text-align:left;margin:auto}
   #line span{color:#4a5361;transition:color .12s linear}
   #line span.said{color:var(--ink)}
   #line span.now{color:var(--honey)}
   #line .hold{display:inline-block;margin:0 .25em;padding:0 .4em;border:1px dashed var(--honey);border-radius:6px;
     color:var(--honey);font:600 .32em/1.9 ui-monospace,monospace;letter-spacing:.1em;vertical-align:middle}
-  #count{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+  #count{position:fixed;inset:0;z-index:3;display:none;align-items:center;justify-content:center;
     font:200 22vh/1 "Iowan Old Style",Georgia,serif;color:var(--honey);background:rgba(15,17,21,.86)}
   #count.on{display:flex}
   footer{padding:12px 5vw 18px;border-top:1px solid var(--line);display:flex;gap:18px;align-items:center;flex-wrap:wrap;
     font:600 11px/1 ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
   .who{color:var(--honey)} .file{text-transform:none;letter-spacing:.04em}
   .tick{color:var(--ok)}
-  #rail{position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--line)}
+  #rail{background:var(--line)}
   #fill{height:100%;width:0;background:var(--honey)}
   button{background:#1a1f27;color:var(--ink);border:1px solid var(--line);border-radius:7px;
     padding:8px 14px;font:600 11px/1 ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;cursor:pointer}
@@ -95,8 +96,8 @@ function writePrompter({ title, intro, out, lines }) {
 <main>
   <div id="line"></div>
   <div id="count"></div>
-  <div id="rail"><div id="fill"></div></div>
 </main>
+<div id="rail"><div id="fill"></div></div>
 <footer>
   <span class="who" id="who"></span>
   <span class="file" id="file"></span>
@@ -113,18 +114,23 @@ function writePrompter({ title, intro, out, lines }) {
 const LINES = ${JSON.stringify(cards)};
 const line = document.getElementById('line'), count = document.getElementById('count');
 const fill = document.getElementById('fill');
-let i = 0, running = false, t0 = 0, raf = 0, pace = 1;
+let i = 0, running = false, t0 = 0, raf = 0, pace = 1, lastNow = -1;
 
+// A sentence can be large; a paragraph has to be smaller or none of it is on
+// screen at once. Either way the word that is due is scrolled to the middle.
 function paint() {
   const l = LINES[i];
+  line.style.fontSize = (l.cues.length <= 20 ? 46 : l.cues.length <= 45 ? 38 : l.cues.length <= 80 ? 32 : 28) + 'px';
   document.getElementById('who').textContent = l.name;
-  document.getElementById('file').textContent = l.file;
+  document.getElementById('file').textContent = stream ? l.file.replace(/\.[^.]+$/, '.webm') : l.file;
   document.getElementById('target').textContent = (l.seconds * pace).toFixed(1) + 's' + (l.done ? '' : '');
   document.getElementById('rec').innerHTML = l.done ? '<span class="tick">take on file</span>' : '';
   line.innerHTML = l.cues.map((c, k) => c.hold != null
     ? '<span data-k="' + k + '" class="hold">hold ' + c.hold.toFixed(1) + 's</span>'
     : '<span data-k="' + k + '">' + c.w.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</span>').join(' ');
   fill.style.width = '0%';
+  lastNow = -1;
+  line.scrollIntoView({ block: 'start' });
 }
 
 function tick() {
@@ -136,9 +142,19 @@ function tick() {
     const k = +el.dataset.k;
     el.className = (el.classList.contains('hold') ? 'hold ' : '') + (k < now ? 'said' : k === now ? 'now' : '');
   }
+  if (now !== lastNow) {
+    lastNow = now;
+    const el = line.children[now];
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+  }
   fill.style.width = Math.min(100, t / span * 100) + '%';
   if (t < span + 0.6) raf = requestAnimationFrame(tick);
-  else { running = false; document.getElementById('go').textContent = 'space — read'; }
+  else {
+    // The line ending IS the end of the take — a reader should not have to
+    // press anything to be handed the file they just read.
+    running = false; stopRec();
+    document.getElementById('go').textContent = 'space — read';
+  }
 }
 
 function start() {
@@ -180,6 +196,7 @@ document.getElementById('mic').onclick = async () => {
       echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
     document.getElementById('mic').textContent = 'mic held';
     document.getElementById('mic').disabled = true;
+    paint();   // the name changes with it — a browser can only give back webm
   } catch (e) {
     document.getElementById('rec').innerHTML =
       '<span style="color:#e07a5f;text-transform:none;letter-spacing:.04em">no mic (' + e.name +

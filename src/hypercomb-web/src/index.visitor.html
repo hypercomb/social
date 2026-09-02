@@ -23,6 +23,22 @@
     />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#08090c" />
+
+    <!-- The mark answers on every published door. A site is a Hypercomb
+         creation wherever it is served from, so the hexagon is the DEFAULT
+         tab icon on every subdomain and custom domain — the browser's blank
+         globe says nothing true about the page. Built by
+         `node scripts/build-favicons.cjs`; the files ride the visitor build's
+         own asset root, so they are same-origin on every host (see
+         documentation/no-third-party-requests.md).
+
+         A site that wants its OWN icon says so in its descriptor: site.json
+         may carry `icon`, a same-origin absolute path (typically a
+         content-addressed `/<sig>/name.svg`), and main.visitor.ts REPLACES
+         these links at boot. Absent that, the mark stands. -->
+    <link rel="icon" href="favicon.ico" sizes="48x48" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
     <style>
       html,body{margin:0;width:100%;height:100%;background:#08090c}
       .site-loading{position:fixed;inset:0;display:grid;place-items:center;background:#08090c}

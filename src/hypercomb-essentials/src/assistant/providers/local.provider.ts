@@ -20,15 +20,49 @@ import type { LlmProviderDescriptor } from './llm-provider.types.js'
 import { openAiRequest, openAiResponse, openAiStreamEvent } from './openai-shape.js'
 
 export const LOCAL_HOST_STORAGE_KEY = 'hc:llm:local:host'
-const DEFAULT_HOST = 'http://localhost:11434'
 
-/** The participant's local server, or Ollama's default port. */
-export const localLlmHost = (): string => {
-  try {
-    const stored = (globalThis.localStorage?.getItem(LOCAL_HOST_STORAGE_KEY) ?? '').trim()
-    if (stored) return stored.replace(/\/+$/, '')
-  } catch { /* storage unavailable — the default is right often enough */ }
-  return DEFAULT_HOST
+// 127.0.0.1, NOT localhost. On Windows `localhost` resolves to ::1 first and
+// Ollama binds 127.0.0.1 only, so the friendlier spelling is the one that
+// hangs: the fetch waits out a dead IPv6 connection before anything else can
+// happen, and the participant sees "not running" for a server that is running
+// fine. The numeric address is the one the server actually printed.
+const DEFAULT_HOST = 'http://127.0.0.1:11434'
+
+/** Every loopback spelling a local server might be listening on, in the order
+ *  worth trying. The probe (local-liveness.ts) walks these ONLY when the
+ *  primary answers nothing and the participant has set no address of their
+ *  own — a server bound to ::1 is rare, and never worth a second request once
+ *  the first one works. */
+export const LOCAL_HOST_CANDIDATES: readonly string[] = [
+  'http://127.0.0.1:11434',
+  'http://localhost:11434',
+  'http://[::1]:11434',
+]
+
+/** Where the probe last found a server, when the participant named none.
+ *  Device-local like the override itself, and never allowed to outrank it. */
+const FOUND_HOST_KEY = 'hc:llm:local:host:found'
+
+const read = (key: string): string => {
+  try { return (globalThis.localStorage?.getItem(key) ?? '').trim().replace(/\/+$/, '') }
+  catch { return '' }
+}
+
+/** Has the participant named the address themselves? Their answer is final —
+ *  discovery may never overwrite it. */
+export const hasExplicitLocalHost = (): boolean => !!read(LOCAL_HOST_STORAGE_KEY)
+
+/** The participant's local server: what they typed, else where one was last
+ *  found, else the default port. */
+export const localLlmHost = (): string =>
+  read(LOCAL_HOST_STORAGE_KEY) || read(FOUND_HOST_KEY) || DEFAULT_HOST
+
+/** The probe found a server at this spelling. Remembered so the next boot
+ *  asks the right door first — never written over a participant's own. */
+export const rememberLocalLlmHost = (host: string): void => {
+  const found = String(host ?? '').trim().replace(/\/+$/, '')
+  if (!found || hasExplicitLocalHost()) return
+  try { globalThis.localStorage?.setItem(FOUND_HOST_KEY, found) } catch { /* session-only */ }
 }
 
 export const LOCAL_PROVIDER: LlmProviderDescriptor = {

@@ -82,7 +82,7 @@
 // so reserving all three is a no-op wherever the bar is not there and exact
 // wherever it is: bottom on a portrait phone, left on a landscape phone or a
 // left-docked desktop rail, right when it is docked right.
-:host.is-fullscreen {
+:host {
   top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
   // max(), not +: the published number is measured from the viewport's bottom
   // and already contains the safe inset. The mobile view row lifts the bar, so
@@ -112,7 +112,7 @@
 //
 // The bar's right edge is reserved here too (max(), not a second rule — either
 // reservation alone must still hold when the other is zero).
-:host.is-fullscreen { right: max(var(--hc-inset-right, 0px), var(--hc-controls-right, 0px)); }
+:host { right: max(var(--hc-inset-right, 0px), var(--hc-controls-right, 0px)); }
 // FILL THE HOST, do not re-anchor to the viewport.
 //
 // The docked panel is `position: fixed`, so its containing block is the
@@ -126,8 +126,8 @@
 // `absolute` + `inset: 0` makes the host the containing block instead: one
 // element owns the fullscreen geometry — the host, which is where the yield is
 // expressed — and the desk simply fills whatever it is given, at every size.
-:host.is-fullscreen .notes-strip,
-:host.is-fullscreen .notes-strip.dock-right {
+:host .notes-strip,
+:host .notes-strip.dock-right {
   position: absolute;
   inset: 0;
   // !important to override the inline width/height the resize observer writes
@@ -139,7 +139,7 @@
   border-radius: 0;
   transform: none !important; // override panel-offset translate
 }
-:host.is-fullscreen .cv2-list {
+:host .cv2-list {
   max-height: none;
   flex: 1 1 auto;
 }
@@ -148,45 +148,13 @@
 // one, so the strip stays the single authoring column it has always been.
 // (Higher specificity than the base `.cv2-reading` display below, so it wins
 // wherever it applies; the desk's media block turns the pane back on.)
-:host.is-fullscreen .cv2-reading { display: none; }
+:host .cv2-reading { display: none; }
 
 // Editor-column wrapper. `display: contents` is the fallback for narrow
 // fullscreen, where the form / filter / tree / footer are direct flex
 // children of the panel. Both layouts WITH a pane give it a real box: the
 // desk as the centre column, the docked stack as the bottom pane.
 .cv2-main { display: contents; }
-
-// ── The docked window: a header and TWO panes ─────────────
-// header — which tile (and, on the lists tab, which list), which tab, and
-//          the mark hexagons. Nothing that lists notes: the pinned card
-//          beside the window is the selector.
-// pane   — the selected note, read and written, or the open LIST.
-// bottom — the tile filter: search a tile, pick a tile. Both tabs.
-//
-// Two panes and a header. Nothing else: no third column, no second list,
-// no search over a handful of notes you can already see.
-:host(:not(.is-fullscreen)) {
-  .cv2-dragbar { order: 1; }
-  .cv2-tabs { order: 2; }
-  .cv2-rail { order: 3; flex: 0 0 auto; }
-
-  .cv2-reading {
-    order: 4;
-    flex: 1.7 1 55%;
-    min-height: 160px;
-    border-bottom: 1px solid color-mix(in srgb, var(--md-on-surface) 10%, transparent);
-  }
-
-  // The tile filter — the bottom pane, always there, never a cloud.
-  .cv2-tilelist {
-    order: 5;
-    flex: 1 1 32%;
-    min-height: 120px;
-  }
-
-  // The tree column is the DESK's. Docked, the pinned card is the selector.
-  .cv2-main { display: none; }
-}
 
 .notes-strip {
   pointer-events: auto;
@@ -244,32 +212,4 @@
   overflow: visible; // palette overhangs below the strip
 }
 
-// ── Right-edge rail (docked) ──────────────────────────────
-// Mirrors the control bar's dock: fixed to the VIEWPORT edge (right:0), not
-// the host's padded content box — so it snaps crisply flush to the screen
-// like the left rail instead of floating 16px in. Full height between the
-// header and the viewport bottom. The float offset is suppressed (transform
-// bound to null while docked); width stays the user's resized inline width
-// (the left edge is the live resize edge), and height is forced full so a
-// prior float-resize height can't leave a gap.
-.notes-strip.dock-right {
-  position: fixed;
-  right: 0;
-  // Match the pheromone / feedback panels' header clearance so the docked
-  // column's tops line up.
-  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
-  bottom: 0;
-  margin: 0;
-  height: auto !important;
-  max-height: none !important;
-  // Flush against the viewport edge — no rounded corners on a full-height
-  // dock (they read as a floating card that doesn't "fit").
-  border-radius: 0;
-}
-
-// The visible corner + bottom resize grips are float-mode affordances; a
-// full-height right dock resizes from its left edge only (the invisible
-// .cv2-resize-edge-left strip), exactly like the pheromone panel.
-.notes-strip.dock-right .cv2-resize-handle,
-.notes-strip.dock-right .cv2-resize-edge-bottom { display: none; }
 
