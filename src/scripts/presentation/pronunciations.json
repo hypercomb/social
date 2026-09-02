@@ -8,5 +8,20 @@
     "match": "Hypercomb",
     "hear": ["hypercom", "hypercome", "hypercomb", "hypercone", "hyper com", "hyper comb"],
     "note": "no `say` — every voice we use already says this correctly. The rule is for the ear, not the mouth: transcription cannot spell a coined noun, and the neural narration already on the published presentation comes back as 'Hypercom' too. Without it, every take of a line carrying the name scores as wrong, and the one take that DROPPED the word outright wins on likeness. These are spellings we accept back, not pronunciations we endorse."
+  },
+  {
+    "match": "sign(meaning)",
+    "say": "sign of the meaning",
+    "note": "the address of a pool is a call, not a word — read it as one"
+  },
+  {
+    "match": "↕",
+    "say": "up and down",
+    "note": "an arrow is a glyph on screen; the voice needs the movement it stands for"
+  },
+  {
+    "match": "↔",
+    "say": "side to side",
+    "note": "as above — the caption keeps the arrow"
   }
 ]

@@ -71,6 +71,58 @@ cached mp3 with silencedetect, matched by word-count expectation. Editing a
 scene's `say` re-times the clip on the next run; `film:vocabulary` /
 `film:integrity` / `film:time` in the scene instruction is what mounts them.
 
+## The ecosystem composition, narrated
+
+`ecosystem.cjs` gives the Hypercomb ecosystem canvas a voice. The composition
+is a Claude Design piece — ten scenes, 1920x1080, one continuous camera move —
+exported as a self-extracting bundle that carries React, Babel and the fonts
+inlined. It had captions and no narrator.
+
+```bash
+node ecosystem.cjs           # narrate + assemble
+node ecosystem.cjs --check   # stale audio, no network
+node ecosystem.cjs --times   # the retiming, scene by scene
+```
+
+| Piece | Where |
+|---|---|
+| The composition | `ecosystem/hypercomb-story-bloom.jsx` |
+| The bundle shell (React, Babel, fonts) | `ecosystem/bloom-shell.html` |
+| The narration | one line per scene, in `ecosystem.cjs` |
+| The audio | `audio-cache/<h16>.mp3` — the SAME cache, the SAME key |
+| Deliverable | `dist/hypercomb-ecosystem-bloom.html` |
+
+The narration **is** the caption — one place for the words. `ecosystem.cjs`
+holds them, speaks them in the same narrator's voice at the same rate, keyed by
+`sha256(voice|rate|spoken(say))`, and hands them back to the composition, which
+renders each one as its own caption. A line the full presentation already says
+costs no audio here at all.
+
+**The silence is what gets cut, never the speech.** A scene keeps its authored
+length as `nat`, so every beat it was drawn with still happens, and is given
+`dur` — the real seconds it gets — by the line it carries: `LEAD`, the line,
+`TAIL`, and nothing else. The stage warps one onto the other, so a scene with
+more picture than words simply plays it a little quicker, up to `MAX_RATE`.
+The words never speed up: an mp3 is an mp3. Between lines there is now 0.7s of
+quiet instead of two to four seconds, and 90s of drawing plays in 76.9s — of
+which 64.9s is someone talking.
+
+Give a line `lead:` of its own only when the picture has to arrive before the
+sentence makes sense (the opening cell, the swarm assembling); `caption: ''`
+narrates a scene without printing the words under a headline that already says
+them.
+
+In the composition, `<Narration>` reads `window.OM_NARRATION` — `{at, dur,
+src}` per scene, mp3s inlined as data uris — and puts each clip where the
+playback clock is. Seeking, pausing and looping are one operation for the voice
+and the picture. With no `OM_NARRATION` present the composition is exactly what
+the canvas exported: silent. The build patches two things into the bundle and
+nothing else — the story asset, and that one global beside `OM_SCENES`.
+
+The canvas is the upstream author of `ecosystem/*.jsx`. Re-exporting it
+overwrites the working copies here, so carry `<Narration>` back into the canvas
+(or re-apply it) before taking a fresh export as the shell.
+
 ## The directory of hives
 
 hypercomb.com is a wildcard host: publishing a creation named `susan` makes
@@ -199,7 +251,9 @@ get spelled out letter by letter, so keep emphasis in the headline and write
 To use a human voice instead, drop a take at the scene's cache path — the
 builder embeds whatever mp3 sits at the scene's hash.
 
-A local voice clone is prepared but not wired: `voice/.venv` has Python 3.11 and
-PyTorch 2.11+cu128, verified against the RTX 5060 (`sm_120`, CUDA live). The
-intended model is **Chatterbox** (Resemble AI) — MIT weights, so commercially
-usable, unlike XTTS-v2 or F5-TTS. It needs 10–30 seconds of reference audio.
+The local voice clone is wired and runs on the GPU. **Chatterbox** (Resemble AI,
+MIT weights — commercially usable, unlike XTTS-v2 or F5-TTS) speaks lines in your
+voice from 10–30 seconds of reference audio, and converts a line you read into
+another voice while keeping your timing and stress. Both live in
+`~/.hcvoice/venv` on torch 2.11+cu128, verified against the RTX 5060 (`sm_120`).
+Setup, measurements and caveats: `voice/README.md`.
