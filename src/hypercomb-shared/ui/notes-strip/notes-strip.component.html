@@ -4,47 +4,41 @@
        The strip is no longer driven by selection — the list is the primary way
        to find a tile to update; clicking a tile on the canvas just activates
        its row here (auxiliary, and unavailable for hidden tiles). -->
-  <!-- FULLSCREEN is the desk, not a docked panel, and the three bindings below
-       all turn on that difference:
+  <!-- THE DESK IS THE ONLY SHAPE. Notes used to have a second one — a
+       right-docked rail you could tear off and float — and everything that
+       shape needed (a dock side, a lane, a drag offset, resize edges, a
+       fullscreen toggle to escape it) is gone with it. What is left owns its
+       whole geometry:
          • it YIELDS to whatever docks beside it (`--hc-inset-right`, see the
            component SCSS) instead of reserving an edge itself — reserving one
            would feed its own yield variable and collapse the desk against
            itself, dragging the control bar and the left toolwindow out of line;
-         • it takes no place in the right LANE, because it owns its whole
-           geometry and a lane offset written on top of that pushes the desk's
-           left column off the screen — leaving the lane is also what frees the
+         • it takes no place in the right LANE, which is also what frees the
            slot the pheromone panel docks into;
-         • it is the ONE mode paired with the pheromone panel, which is the
-           desk's other half: marks drag from the panel onto note rows and list
-           lines. Docked, there is no room to yield and no pairing. -->
+         • it is PAIRED with the pheromone panel, which is the desk's other
+           half: marks drag from the panel onto note rows and list lines.
+       `hcDockedPanel` stays for what it still gives — the close pairing, the
+       session, the settings rows and the group's text size (`sizeOwner`). -->
   <div class="notes-strip cv2-panel"
        [class.mode-chips]="mode() === 'chips'" [class.mode-rows]="mode() === 'rows'"
-       [class.dock-right]="dockSide() === 'right'"
        #panel
        data-consumes-wheel
-       hcDockInset="right"
-       [hcDockInsetActive]="dockSide() === 'right' && !isFullscreen()"
        hcDockedPanel="notes-strip" dockSide="right"
        [ownsSize]="false" [sizeOwner]="this" [defaultWidth]="500" [defaultText]="1"
        [ownSettings]="settingsRows"
        [attr.data-face]="face()"
-       [dockExclusive]="dockSide() === 'right' && !isFullscreen()"
        [hcSession]="session"
     (hcDockedPanelClose)="hide()"
        pairWindow="tags-viewer" pairOpenEffect="tags:view-open"
-       pairCloseEffect="tags:view-close" [pairWhen]="isFullscreen()"
+       pairCloseEffect="tags:view-close" [pairWhen]="true"
        [pairLabel]="'tags.viewer.title' | t"
        [minWidth]="256" [maxWidth]="900"
        role="list" [attr.aria-label]="'notes.strip.aria' | t"
-       [style.transform]="panelTransformActive()"
        (pointerenter)="onNotesEnter()" (pointerleave)="onNotesLeave()">
 
-    <!-- Toolwindow header — title left, actions right. Also the drag handle:
-         pull it off the right rail to float the strip, drop it back within
-         the edge snap zone to re-anchor. Double-click recentres a float. -->
-    <div class="cv2-dragbar"
-         (pointerdown)="onDragStart($event)"
-         (dblclick)="resetPanelOffset($event)">
+    <!-- Toolwindow header — title left, actions right. A header, nothing
+         more: there is no other place to drag the desk to. -->
+    <div class="cv2-dragbar">
       <!-- WHICH tile, and — on the lists tab — WHICH LIST, right of it.
            A list's name belongs with the window's identity, not stacked on
            top of its own lines: it reads here once, and the pane below is
@@ -96,10 +90,6 @@
           <span class="mat-sym">menu_book</span>
         </button>
       }
-      <button type="button" class="cv2-mini-btn" (click)="toggleFullscreen()"
-              [title]="(isFullscreen() ? 'notes.exitFullscreen' : 'notes.fullscreen') | t">
-        <span class="mat-sym">{{ isFullscreen() ? 'close_fullscreen' : 'open_in_full' }}</span>
-      </button>
       <button type="button" class="cv2-mini-btn" (click)="hide()"
               [attr.aria-label]="'notes.hide' | t" [title]="'notes.hide' | t">
         <span class="mat-sym">close</span>
@@ -382,7 +372,7 @@
                  [class.is-open-list]="tab() === 'lists' && listRoot()?.id === note.id"
                  [class.is-heading]="roleOf(note) === 'heading'"
                  [class.is-prose]="roleOf(note) === 'prose'"
-                 [class.is-reading]="isFullscreen() && readingRow()?.note?.id === note.id"
+                 [class.is-reading]="readingRow()?.note?.id === note.id"
                  [class.cv2-note-q]="noteKind(note) === 'q'"
                  [class.cv2-note-a]="noteKind(note) === 'a'"
                  [class.is-editing]="editingNoteId() === note.id"
@@ -888,17 +878,6 @@
       }
     </div>
 
-    <!-- Invisible edge drag-handles. The left edge is the live resize
-         edge when docked right; bottom + corner handle the floating panel. -->
-    <span class="cv2-resize-edge cv2-resize-edge-left"
-          (pointerdown)="onResizeStart($event, 'left')"
-          aria-hidden="true"></span>
-    <span class="cv2-resize-edge cv2-resize-edge-bottom"
-          (pointerdown)="onResizeStart($event, 'bottom')"
-          aria-hidden="true"></span>
-    <span class="cv2-resize-handle"
-          (pointerdown)="onResizeStart($event, 'corner')"
-          aria-hidden="true"></span>
   </div>
 
   <!-- Mark drag ghost — the icon riding the pointer between the rail and

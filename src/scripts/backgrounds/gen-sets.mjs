@@ -16,12 +16,19 @@ import { chromium } from 'playwright'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 
+// MIRRORS `PAL` in
+// hypercomb-essentials/src/presentation/background/canvas-background.service.ts
+// — the screen backdrops are drawn from that table in CSS, these rasters dress
+// the TILES in the same palette so the two halves agree. Change one, change
+// both, and re-run this script or the tiles fall a step behind the screen.
+// (The `screen/` rasters this also emits are unused: the live backdrop has been
+// CSS since /canvas, and the manifest lists only the 512×512 tile set.)
 const SETS = [
-  { id: 'steel',    label: 'Steel',    light: false, base: '#0e161c', base2: '#15242f', deep: '#05080c', accent: '#7eb6d6', accent2: '#1f4f76' },
-  { id: 'daylight', label: 'Daylight', light: true,  base: '#f4ecde', base2: '#fdf7ea', deep: '#c7b79a', accent: '#1f4376', accent2: '#6f9ec9' },
-  { id: 'indigo',   label: 'Indigo',   light: false, base: '#0d1226', base2: '#161d3a', deep: '#04060f', accent: '#7b8be0', accent2: '#243079' },
-  { id: 'teal',     label: 'Teal',     light: false, base: '#07201c', base2: '#0c2e28', deep: '#020f0c', accent: '#45c7a5', accent2: '#0d4d40' },
-  { id: 'ember',    label: 'Ember',    light: false, base: '#1a1410', base2: '#2a1d12', deep: '#0b0704', accent: '#d3a47a', accent2: '#5a3a18' },
+  { id: 'steel',    label: 'Steel',    light: false, base: '#0d151e', base2: '#1b2836', deep: '#02080e', accent: '#7ec3ee', accent2: '#eba76b' },
+  { id: 'daylight', label: 'Daylight', light: true,  base: '#f2f4f8', base2: '#fdfeff', deep: '#78869b', accent: '#1668c4', accent2: '#b45a22' },
+  { id: 'indigo',   label: 'Indigo',   light: false, base: '#0d1226', base2: '#181f3d', deep: '#04060f', accent: '#7b8be0', accent2: '#d678be' },
+  { id: 'teal',     label: 'Teal',     light: false, base: '#07201c', base2: '#0c2e28', deep: '#020f0c', accent: '#45c7a5', accent2: '#e2aa5c' },
+  { id: 'ember',    label: 'Ember',    light: false, base: '#1a1410', base2: '#2a1d12', deep: '#0b0704', accent: '#d3a47a', accent2: '#688eba' },
 ]
 
 const HEX = [

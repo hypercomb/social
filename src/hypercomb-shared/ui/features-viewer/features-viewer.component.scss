@@ -1117,28 +1117,18 @@ $path-fail: #e08a8a;     // failed terminal
 // ── phone: THE WHOLE PAGE, not a docked slab or a peeking sheet ────
 // Turning features on and off, and deciding whether to allow a foreign
 // one, are decisions — they get the screen while they are being made, and
-// the hive is one tap behind them. Landscape phones (wide but SHORT) are
-// covered too: the `phone-only` mixin is width-only and would miss them,
-// which is why the query is spelled out.
-@media (max-width: 599px), (max-height: 449px) {
+// the hive is one tap behind them. The sheet itself — fixed, full width,
+// its bottom edge on the control bar's clearance, the grip gone, text at
+// 1rem — comes from `tw.panel` (_toolwindow.scss); this only takes the top
+// of the screen as well and lets go of the sheet's height cap. Either-axis
+// query (`phone`, not `phone-only`) so landscape phones get it too.
+@include phone {
   .features-panel {
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    width: 100% !important;
-    min-width: 0;
-    max-width: none;
+    top: 0 !important;
     max-height: none;
-    border: none;
+    border-top: 0;
     border-radius: 0;
-    box-shadow: none;
     padding-top: env(safe-area-inset-top, 0px);
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-    // The panel scales its own text DOWN as it narrows (`--hc-panel-scale`,
-    // min 0.82), which on a phone shrinks controls that are already small.
-    // Full width means it never needs to.
-    font-size: 1rem;
   }
 
   .features-header {
@@ -1163,7 +1153,7 @@ $path-fail: #e08a8a;     // failed terminal
 
   .features-scroll { flex: 1 1 auto; min-height: 0; }
 
-  .features-panel button,
+  // Buttons are already thumb-sized by the sheet rule; rows are not buttons.
   .features-panel .features-row { min-height: 2.5em; }
 
   // Multi-select rides ctrl/shift-click, so the bulk bar it feeds cannot be

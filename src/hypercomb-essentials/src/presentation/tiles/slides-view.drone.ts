@@ -94,11 +94,23 @@
 // drag through to it) — the vertical axis is simply real physics now. Desktop
 // keeps the stage: a mouse steps, a thumb scrolls.
 //
+// ── THE SCROLLER SURFACE ─────────────────────────────────────────────
+//
+// `scroller` (ScrollerQueenBee, `visual:scroller:feed`) is the third surface:
+// THE FEED. It ALWAYS mounts the native scroller — phone or not, the flick is
+// the point — and sources the branch's CHILDREN with pictures allowed, giving
+// EVERY child one section so the counter never lies: a video link plays in
+// place (`playsinline`), a picture paints, YouTube / Vimeo embed on tap, an
+// extensionless link is probed for an image as its section nears, and
+// anything else becomes a CARD — the child's name, its tile picture, `open`.
+// The chrome keeps clear of the device's safe areas and a top-left back plate
+// leaves it. Slides and lightbox on a desktop are untouched by any of this.
+//
 // Uses lineage + ViewMode listeners, re-entrancy
 // guard, fixed host below the Pixi layer, `view:active` canvas/chrome hiding —
 // zero shell edits) and PhotoView's image fit (object-fit:contain, max vw/vh).
 
-import { Drone, RESOURCE_URL_PREFIX, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { Drone, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { childSigsOf } from '../../history/layer-placement.js'
 import { isFeatureHidden } from '../../sharing/feature-hidden.js'
 import {
@@ -121,8 +133,10 @@ import {
   type SlidePayload,
 } from './slide-artifact.js'
 import { GALLERY_KIND, LIGHTBOX_VIEW } from '../../commands/lightbox.queen.js'
-import { isImageUrl, sniffImageMime } from '../../link/photo.js'
-import { embedUrlFor, mediaKindForUrl, kindForMime, type PlayableKind } from '../../link/media.js'
+import { SCROLLER_KIND, SCROLLER_VIEW } from '../../commands/scroller.queen.js'
+import { fetchImageBlob, sniffImageMime } from '../../link/photo.js'
+import { kindForMime, type PlayableKind } from '../../link/media.js'
+import { classifyLink } from './scroller-sections.js'
 import { TAG_DECORATION_KIND } from '../../commands/decoration-kind-index.js'
 import { readTilePropsIndex, lookupTilePropsSig, cellLocationSig, readTilePropertiesAt } from '../../editor/tile-properties.js'
 import { bindAxes, walkFrom, landOnWalkTarget } from './viewer-walk.js'
@@ -133,18 +147,23 @@ import { MOBILE_MODE_IOC_KEY, MOBILE_MODE_EFFECT } from '../../preferences/mobil
 const SLIDES_VIEW = 'slides'
 const SIG = /^[0-9a-f]{64}$/
 
-/** The two surfaces this one engine renders. SLIDES plays a deck's CHILDREN;
+/** The three surfaces this one engine renders. SLIDES plays a presentation;
  *  LIGHTBOX shows the pictures a tile HOLDS (its gallery images, its own
- *  picture, then its children's pictures). Same stage, same keys, same exit —
- *  a lightbox is a deck whose source is the tile itself. */
-type Surface = typeof SLIDES_VIEW | typeof LIGHTBOX_VIEW
+ *  picture, then its children's pictures); SCROLLER is the feed — every child
+ *  of a branch, one full screen each, flicked through natively. Same
+ *  resolution, same keys, same exit. */
+type Surface = typeof SLIDES_VIEW | typeof LIGHTBOX_VIEW | typeof SCROLLER_VIEW
 
 /** The decoration kind that GATES each surface — what the Beehaviors panel's
  *  off-switch hides, and what the tile must carry for the view to mount. */
 const GATE_KIND: Readonly<Record<Surface, string>> = {
   [SLIDES_VIEW]: SLIDE_KIND,
   [LIGHTBOX_VIEW]: GALLERY_KIND,
+  [SCROLLER_VIEW]: SCROLLER_KIND,
 }
+
+const isSurface = (mode: unknown): mode is Surface =>
+  mode === SLIDES_VIEW || mode === LIGHTBOX_VIEW || mode === SCROLLER_VIEW
 
 /** How deep a site enrolled inside another site expands. Two is enough for a
  *  site of sites; beyond that a set is describing structure the tree already
@@ -181,13 +200,27 @@ type StoreShape = {
 
 /** How a slide renders. `auto` = content-addressed bytes whose real kind is
  *  read from the blob's MIME at paint time (a signature carries no extension);
- *  every other kind is decided up-front from the link. */
-type SlideKind = 'auto' | PlayableKind
+ *  every other kind is decided up-front from the link. `card` is the feed's
+ *  catch-all: a child that neither plays nor paints, shown as its name, its
+ *  tile picture and a way in. */
+type SlideKind = 'auto' | PlayableKind | 'card'
 
 // `src` is EITHER a 64-hex resource signature (content in OPFS → object URL +
 // MIME) OR a full URL: an external image, a direct media file, or a provider
 // EMBED url. ONE stage renders all of them — that's the universal player.
-type Slide = { kind: SlideKind; src: string; title: string; caption?: string }
+// A CARD carries the child's `label`, its `link` (when it has one; the card's
+// `open` follows it), its tile `picture` sig, and `probe` when the link is an
+// extensionless address that may still turn out to be an image.
+type Slide = {
+  kind: SlideKind
+  src: string
+  title: string
+  caption?: string
+  label?: string
+  link?: string
+  picture?: string
+  probe?: boolean
+}
 
 type MountState = {
   host: HTMLDivElement
@@ -253,7 +286,7 @@ export class SlidesViewDrone extends Drone {
     store: '@hypercomb.social/Store',
   }
   protected override listens: string[] = []
-  protected override emits = ['view:active']
+  protected override emits = ['view:active', 'tile:action']
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#registered) {
@@ -323,7 +356,7 @@ export class SlidesViewDrone extends Drone {
       // Beehaviors panel's Open was used. Play THAT deck in place.
       this.onEffect<{ view?: string; segments?: string[] }>('view:open-for-tile', (p) => {
         const view = String(p?.view ?? '')
-        if (view !== SLIDES_VIEW && view !== LIGHTBOX_VIEW) return
+        if (!isSurface(view)) return
         const segments = Array.isArray(p?.segments)
           ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean)
           : []
@@ -351,7 +384,7 @@ export class SlidesViewDrone extends Drone {
   /** Which of our surfaces is up right now (null = neither — we're inert). */
   #surface(): Surface | null {
     const mode = this.#vm()?.mode
-    return mode === SLIDES_VIEW || mode === LIGHTBOX_VIEW ? mode : null
+    return isSurface(mode) ? mode : null
   }
 
   readonly #onContextMenu = (e: MouseEvent): void => {
@@ -626,6 +659,13 @@ export class SlidesViewDrone extends Drone {
     store: StoreShape,
     surface: Surface = SLIDES_VIEW,
   ): Promise<{ slides: Slide[]; index: number }> {
+    // THE FEED reads the branch's CHILDREN, every one of them, and nothing
+    // else — pictures allowed, and a card for whatever neither plays nor
+    // paints. No enrolment walk: a feed is what the branch holds.
+    if (surface === SCROLLER_VIEW) {
+      return { slides: await this.#collectSlides(segments, history, store, true, true), index: 0 }
+    }
+
     try {
       const here = await history.currentLayerAt(await history.sign({ explorerSegments: () => segments }))
       const cell = await readCell(store, here, segments)
@@ -774,6 +814,9 @@ export class SlidesViewDrone extends Drone {
      *  or linked); a lightbox is about the pictures, so a plain image tile
      *  belongs in it. */
     picturesToo = false,
+    /** FEED pass: a child that resolves to nothing at all still gets a CARD,
+     *  so every child owns exactly one section. */
+    cards = false,
   ): Promise<Slide[]> {
     const out: Array<Slide & { order: number }> = []
     try {
@@ -799,13 +842,13 @@ export class SlidesViewDrone extends Drone {
             if (fresh) child = fresh
           } catch { /* keep the ref layer */ }
         }
-        const found = await this.#slidesFromChild(child, name, childIndex, store, segments, picturesToo)
+        const found = await this.#slidesFromChild(child, name, childIndex, store, segments, picturesToo, cards)
         out.push(...found)
         childIndex++
       }
     } catch { /* cold read — render the empty guide, retry on next reconcile */ }
     out.sort((a, b) => a.order - b.order)
-    return out.map(({ kind, src, title, caption }) => ({ kind, src, title, caption }))
+    return out.map(({ order: _order, ...slide }) => slide)
   }
 
   /** Resolve one child layer to its slide(s): slide-decoration → gallery → link. */
@@ -816,6 +859,7 @@ export class SlidesViewDrone extends Drone {
     store: StoreShape,
     deckSegments: readonly string[],
     picturesToo = false,
+    cards = false,
   ): Promise<Array<Slide & { order: number }>> {
     const decorationSigs = Array.isArray(child['decorations'])
       ? (child['decorations'] as unknown[]).map(s => String(s)).filter(s => SIG.test(s))
@@ -881,31 +925,43 @@ export class SlidesViewDrone extends Drone {
     const slide = this.#slideFromLink(link, name, childIndex)
     if (slide) return [slide]
 
-    // 4 (lightbox only): the child's own DISPLAY picture. An image tile made
-    // before drops set the link still belongs in its container's lightbox.
-    if (picturesToo) {
-      const picture = await this.#tilePictureSig(child, name, deckSegments, store)
-      if (picture) return [{ kind: 'auto', src: picture, title: name, order: childIndex }]
+    // 4 (lightbox + feed): the child's own DISPLAY picture. An image tile made
+    // before drops set the link still belongs in its container's lightbox. In
+    // the FEED a child that POINTS somewhere keeps its link on a card instead
+    // — the picture rides on the card, and `open` still follows the link.
+    const picture = picturesToo ? await this.#tilePictureSig(child, name, deckSegments, store) : ''
+    if (picture && !(cards && link)) return [{ kind: 'auto', src: picture, title: name, order: childIndex }]
+
+    // 5 (feed only): THE CARD. Nothing played and nothing painted, but the
+    // child is still a child — its name, its picture if it has one, its link
+    // if it points somewhere (probed for an image as the section nears when
+    // the address is extensionless), and `open`.
+    if (cards) {
+      const classed = classifyLink(link)
+      return [{
+        kind: 'card',
+        src: link,
+        title: name,
+        label: name,
+        ...(link ? { link } : {}),
+        ...(picture ? { picture } : {}),
+        probe: classed.kind === 'card' && classed.probe,
+        order: childIndex,
+      }]
     }
     return []
   }
 
   /** Classify a link into a playable slide — the whole point of the universal
-   *  player. Order matters: a content-addressed resource wins (its kind comes
-   *  from the blob's MIME, so an attached mp4 plays and an svg paints); then a
-   *  provider EMBED (YouTube → nocookie iframe); then a direct image; then a
-   *  direct media file. Null for anything else — a plain hyperlink is
-   *  navigation, not a slide, and contributes nothing. */
+   *  player (scroller-sections.ts decides: a content-addressed resource wins,
+   *  then a provider EMBED, then a direct image, then a direct media file).
+   *  Null for anything else — a plain hyperlink is navigation, not a slide,
+   *  and contributes nothing to a deck; the feed turns it into a card. */
   #slideFromLink(link: string, title: string, order: number): (Slide & { order: number }) | null {
     if (!link) return null
-    const sig = this.#resourceSig(link)
-    if (sig) return { kind: 'auto', src: sig, title, order }
-    const embed = embedUrlFor(link)
-    if (embed) return { kind: 'embed', src: embed, title, order }
-    if (isImageUrl(link)) return { kind: 'image', src: link, title, order }
-    const media = mediaKindForUrl(link)
-    if (media) return { kind: media, src: link, title, order }
-    return null
+    const classed = classifyLink(link)
+    if (classed.kind === 'card') return null
+    return { kind: classed.kind, src: classed.src, title, order }
   }
 
   /** The child tile's link — resolved through the SAME sources the renderer
@@ -964,28 +1020,14 @@ export class SlidesViewDrone extends Drone {
     return typeof child['link'] === 'string' ? (child['link'] as string).trim() : ''
   }
 
-  /** The 64-hex content sig a link value points at, when it is a resource link:
-   *  a bare sig, or a `/@resource/<sig>` URL in ANY form — RELATIVE
-   *  (`/@resource/<sig>`) or ABSOLUTE (`http://host/@resource/<sig>[/name.ext]`).
-   *  Matches link/photo.ts's includes-based resolver; a startsWith check missed
-   *  absolute links a tile can legitimately store. Null for non-resource links. */
-  #resourceSig(link: string): string | null {
-    if (!link) return null
-    if (SIG.test(link)) return link
-    const at = link.indexOf(RESOURCE_URL_PREFIX)
-    if (at >= 0) {
-      const tail = link.slice(at + RESOURCE_URL_PREFIX.length).split(/[/?#]/)[0] ?? ''
-      return SIG.test(tail) ? tail : null
-    }
-    return null
-  }
-
   /** Resolve a slide to the concrete { kind, url } the stage renders. An
    *  `auto` slide is content-addressed: fetch the bytes once and let the blob's
    *  own MIME decide image vs video vs audio. Every other kind was already
    *  settled from the link and its src is directly usable (an external image or
-   *  media file needs no CORS to DISPLAY/PLAY, only to read pixels/samples). */
+   *  media file needs no CORS to DISPLAY/PLAY, only to read pixels/samples).
+   *  A CARD is not media at all — it builds its own element (#cardElement). */
   async #resolveSlide(slide: Slide): Promise<{ kind: PlayableKind; url: string } | null> {
+    if (slide.kind === 'card') return null
     if (slide.kind !== 'auto') return { kind: slide.kind, url: slide.src }
     const { url, mime } = await this.#resolveSig(slide.src)
     return url ? { kind: kindForMime(mime), url } : null
@@ -1037,11 +1079,12 @@ export class SlidesViewDrone extends Drone {
 
   #mountDeck(deckKey: string, slides: Slide[], surface: Surface = SLIDES_VIEW, startIndex = 0): void {
     this.#teardown()
-    const scrolling = this.#scrollerMode()
+    const scrolling = this.#scrollerMode(surface)
     const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
 
     const host = document.createElement('div')
     host.id = 'hc-slides-view-host'
+    host.dataset['surface'] = surface
     host.style.cssText =
       // Inset by any docked panel's reservation (`--hc-inset-<side>`) so the
       // Views window can stay open beside the deck.
@@ -1091,18 +1134,29 @@ export class SlidesViewDrone extends Drone {
       host.appendChild(stage)
     }
 
+    // SAFE AREAS. Every chrome offset carries the device's own inset — a
+    // notch, the home indicator, a rounded corner — which on a desktop is
+    // simply 0px, so nothing moves there.
+    const top = (px: number): string => `calc(${px}px + env(safe-area-inset-top, 0px))`
+    const bottom = (px: number): string => `calc(${px}px + env(safe-area-inset-bottom, 0px))`
+    const left = (px: number): string => `calc(${px}px + env(safe-area-inset-left, 0px))`
+    const right = (px: number): string => `calc(${px}px + env(safe-area-inset-right, 0px))`
+
     // Title (top) + caption (bottom). Phone-width padding when scrolling —
-    // the desktop 96px gutters would squeeze a title to a word a line.
-    const textPad = scrolling ? '0 16px' : '0 96px'
+    // the desktop 96px gutters would squeeze a title to a word a line — but
+    // enough of it to clear the back plate on the left and the counter on the
+    // right.
+    const textPad = scrolling ? '0 3.5rem' : '0 96px'
     const titleEl = document.createElement('div')
     titleEl.style.cssText =
-      'position:absolute;top:18px;left:0;right:0;text-align:center;color:#eaf3f9;' +
-      `font-size:16px;font-weight:600;letter-spacing:.01em;pointer-events:none;padding:${textPad};`
+      `position:absolute;top:${top(18)};left:0;right:0;text-align:center;color:#eaf3f9;` +
+      `font-size:16px;font-weight:600;letter-spacing:.01em;pointer-events:none;padding:${textPad};` +
+      'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
     host.appendChild(titleEl)
 
     const captionEl = document.createElement('div')
     captionEl.style.cssText =
-      `position:absolute;bottom:52px;left:0;right:0;text-align:center;color:${DIM};` +
+      `position:absolute;bottom:${bottom(52)};left:0;right:0;text-align:center;color:${DIM};` +
       `font-size:13px;line-height:1.5;pointer-events:none;padding:${textPad};`
     host.appendChild(captionEl)
 
@@ -1113,20 +1167,22 @@ export class SlidesViewDrone extends Drone {
       host.appendChild(this.#chevron('›', 'right', () => this.#step(1)))
     }
 
-    // Counter (top-right) + exit (bottom-right).
+    // Counter (top-right) + exit (bottom-right) — and, on the scroller, a BACK
+    // PLATE top-left, thumb-sized, where a phone expects the way out to be.
     const counterEl = document.createElement('div')
     counterEl.style.cssText =
-      `position:absolute;top:18px;right:20px;color:${DIM};font-size:13px;` +
+      `position:absolute;top:${top(18)};right:${right(20)};color:${DIM};font-size:13px;` +
       'font-variant-numeric:tabular-nums;pointer-events:none;'
     host.appendChild(counterEl)
 
-    host.appendChild(this.#exitButton())
+    if (scrolling) host.appendChild(this.#backPlate(top(10), left(12)))
+    host.appendChild(this.#exitButton(bottom(16), right(20)))
 
     // Dot strip (bottom center).
     const dots = document.createElement('div')
     dots.style.cssText =
-      'position:absolute;bottom:22px;left:0;right:0;display:flex;gap:8px;' +
-      'justify-content:center;align-items:center;flex-wrap:wrap;padding:0 120px;'
+      `position:absolute;bottom:${bottom(22)};left:0;right:0;display:flex;gap:8px;` +
+      `justify-content:center;align-items:center;flex-wrap:wrap;padding:${scrolling ? '0 3.5rem' : '0 120px'};`
     host.appendChild(dots)
 
     // Empty-state guide (shown when the deck has no diagram tiles yet).
@@ -1134,7 +1190,9 @@ export class SlidesViewDrone extends Drone {
     empty.style.cssText = `color:${DIM};font-size:15px;line-height:1.6;text-align:center;max-width:34rem;padding:2rem;`
     empty.textContent = surface === LIGHTBOX_VIEW
       ? (i18n?.t('lightbox.empty') ?? 'No pictures here yet. Run /lightbox add to hold images on this tile, or /enroll <website> to show the pictures related to it.')
-      : (i18n?.t('slides.empty') ?? 'Nothing is related to this presentation yet. Run /present slide on a tile to make it a slide, then /present <website> to relate it in.')
+      : surface === SCROLLER_VIEW
+        ? (i18n?.t('scroller.empty') ?? 'Nothing to flick through yet. Put pictures, videos or links inside this tile, then open the scroller.')
+        : (i18n?.t('slides.empty') ?? 'Nothing is related to this presentation yet. Run /present slide on a tile to make it a slide, then /present <website> to relate it in.')
     host.appendChild(empty)
 
     this.#mount = { host, deckKey, slides, stage, scroller, titleEl, captionEl, counterEl, dots, empty, emptyDefault: empty.textContent ?? '' }
@@ -1148,25 +1206,138 @@ export class SlidesViewDrone extends Drone {
   }
 
   /** The scroller replaces the paged stage while the mobile experience is
-   *  active — the phone's native gesture owns ↕ (see THE MOBILE SCROLLER). */
-  #scrollerMode(): boolean {
+   *  active (the phone's native gesture owns ↕ — see THE MOBILE SCROLLER), and
+   *  ALWAYS for the scroller surface: the feed is the point of that view,
+   *  phone or not. */
+  #scrollerMode(surface: Surface): boolean {
+    if (surface === SCROLLER_VIEW) return true
     return window.ioc?.get<{ active?: boolean }>(MOBILE_MODE_IOC_KEY)?.active === true
   }
 
   /** Project the slide set into scroller sections — same identity, same
    *  resolution pipeline as the stage. An EMBED defers to tap: a full-viewport
    *  iframe swallows the scroll gesture and only stops when it leaves the DOM,
-   *  so the scroller mounts it on demand and unmounts it on leave. */
+   *  so the scroller mounts it on demand and unmounts it on leave. A CARD
+   *  resolves to its own element — after one lazy image probe when its link is
+   *  an extensionless address, which the scroller's near-viewport resolve
+   *  makes free until the section is about to be seen. */
   #sectionsFor(slides: Slide[]): ScrollerSection[] {
     return slides.map(slide => ({
-      key: `${slide.kind}:${slide.src}`,
+      key: slide.kind === 'card' ? `card:${slide.label ?? slide.title}:${slide.src}` : `${slide.kind}:${slide.src}`,
       title: slide.title,
       deferToTap: slide.kind === 'embed',
       resolve: async () => {
+        if (slide.kind === 'card') {
+          const probed = slide.probe && slide.link ? await this.#probeImage(slide.link) : ''
+          return probed ? this.#mediaElement('image', probed) : this.#cardElement(slide)
+        }
         const res = await this.#resolveSlide(slide)
         return res ? this.#mediaElement(res.kind, res.url) : null
       },
     }))
+  }
+
+  /** Ask the server whether an extensionless link is a picture after all —
+   *  `fetchImageBlob` (a HEAD probe, then the bytes with a forced image MIME).
+   *  Cached by link and revoked with the rest on teardown; '' when it is not. */
+  async #probeImage(link: string): Promise<string> {
+    const cached = this.#resolved.get(link)
+    if (cached) return cached.url
+    try {
+      const blob = await fetchImageBlob(link)
+      if (!blob) return ''
+      const entry = { url: URL.createObjectURL(blob), mime: blob.type }
+      this.#resolved.set(link, entry)
+      return entry.url
+    } catch { return '' }
+  }
+
+  /** THE CARD — a child that neither plays nor paints still owns a section:
+   *  its name, its tile picture when it has one, where its link points, and
+   *  `open`. That is what keeps the counter honest — `3 / 9` means nine
+   *  children, not nine pictures. */
+  async #cardElement(slide: Slide): Promise<HTMLElement> {
+    const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
+    const card = document.createElement('div')
+    card.dataset['card'] = slide.label ?? ''
+    card.style.cssText =
+      'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.1rem;' +
+      'width:100%;height:100%;box-sizing:border-box;padding:4rem 1.25rem;' +
+      'color:#eaf3f9;text-align:center;font-family:inherit;'
+
+    if (slide.picture) {
+      const { url } = await this.#resolveSig(slide.picture)
+      if (url) {
+        const picture = document.createElement('div')
+        picture.style.cssText =
+          'width:min(82vw,30rem);height:min(44vh,30rem);flex:0 1 auto;' +
+          'border-radius:var(--hc-radius-card, 3px);' +
+          'background-position:center;background-repeat:no-repeat;background-size:contain;'
+        picture.style.backgroundImage = `url("${url}")`
+        card.appendChild(picture)
+      }
+    }
+
+    const name = document.createElement('div')
+    name.textContent = slide.title
+    name.style.cssText = 'font-size:1.25rem;font-weight:600;line-height:1.3;max-width:100%;overflow-wrap:anywhere;'
+    card.appendChild(name)
+
+    if (slide.link) {
+      const where = document.createElement('div')
+      let host = slide.link
+      try { host = new URL(slide.link).hostname.replace(/^www\./, '') } catch { /* keep the raw link */ }
+      where.textContent = host
+      where.style.cssText = `font-size:.85rem;color:${DIM};max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`
+      card.appendChild(where)
+    }
+
+    const open = document.createElement('button')
+    open.type = 'button'
+    open.dataset['role'] = 'open'
+    open.textContent = i18n?.t('scroller.open') ?? 'open'
+    open.style.cssText =
+      'min-height:2.75rem;min-width:7.5rem;padding:0 1.6rem;margin-top:.4rem;' +
+      'border:1px solid rgba(126,182,214,0.55);border-radius:var(--hc-radius-card, 3px);' +
+      'background:rgba(126,182,214,0.14);color:#eaf3f9;cursor:pointer;' +
+      'font-family:inherit;font-size:1rem;font-weight:600;letter-spacing:.04em;'
+    open.addEventListener('click', () => this.#openCard(slide))
+    card.appendChild(open)
+    return card
+  }
+
+  /** `open` on a card does what opening the tile would. A child that POINTS
+   *  somewhere follows its link through the tile's own `open` action when the
+   *  feed is the layer you are standing on (link-open resolves the link from
+   *  the current lineage, so it is honest there) and straight to the address
+   *  otherwise — the same terminal branch link-open takes for a link that is
+   *  neither a picture nor a video. A child that points nowhere is ENTERED:
+   *  the feed closes and the lineage steps inside it. */
+  #openCard(slide: Slide): void {
+    const label = slide.label ?? ''
+    if (!label) return
+    const deck = this.#deckSegments()
+    if (slide.link) {
+      const here = this.#lineageSegments()
+      const sameLayer = here.length === deck.length && here.every((s, i) => s === deck[i])
+      if (sameLayer) this.emitEffect('tile:action', { action: 'open', label })
+      else window.open(slide.link, '_blank', 'noopener,noreferrer')
+      return
+    }
+    this.#targetSegments = null
+    this.#vm()?.setMode('hexagons')
+    window.ioc?.get<{ goRaw?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')
+      ?.goRaw?.([...deck, label])
+  }
+
+  /** The branch the feed is reading — the targeted one, else where you stand. */
+  #deckSegments(): string[] {
+    return this.#targetSegments ? [...this.#targetSegments] : this.#lineageSegments()
+  }
+
+  #lineageSegments(): string[] {
+    const lineage = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
+    return (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
   }
 
   #chevron(glyph: string, side: 'left' | 'right', onClick: () => void): HTMLButtonElement {
@@ -1184,7 +1355,7 @@ export class SlidesViewDrone extends Drone {
     return btn
   }
 
-  #exitButton(): HTMLButtonElement {
+  #exitButton(bottom: string, right: string): HTMLButtonElement {
     const btn = document.createElement('button')
     btn.type = 'button'
     btn.textContent = 'grid_view'
@@ -1193,7 +1364,7 @@ export class SlidesViewDrone extends Drone {
     btn.title = exitLabel
     btn.setAttribute('aria-label', exitLabel)
     btn.style.cssText =
-      'position:absolute;bottom:16px;right:20px;width:3rem;height:3rem;' +
+      `position:absolute;bottom:${bottom};right:${right};width:3rem;height:3rem;` +
       'display:flex;align-items:center;justify-content:center;border:none;border-radius:50%;' +
       `background:${STEEL};color:#0c1118;cursor:pointer;` +
       "font-family:'Material Symbols Outlined';font-size:1.5rem;line-height:1;padding:0;" +
@@ -1201,6 +1372,38 @@ export class SlidesViewDrone extends Drone {
     btn.addEventListener('click', () => this.#vm()?.setMode('hexagons'))
     btn.addEventListener('pointerenter', () => { btn.style.filter = 'brightness(1.12)' })
     btn.addEventListener('pointerleave', () => { btn.style.filter = 'none' })
+    return btn
+  }
+
+  /** THE BACK PLATE — top-left, thumb-sized, `arrow_back`: where a phone
+   *  expects the way out. Leaves through the back gesture (the arrival face
+   *  navigates back, a participant-opened view peels to hexagons), the same
+   *  door right-click and the hardware BACK button use. */
+  #backPlate(top: string, left: string): HTMLButtonElement {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.textContent = 'arrow_back'
+    btn.dataset['role'] = 'back'
+    const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
+    const exitLabel = i18n?.t('slides.exit') ?? 'Back to the hive'
+    btn.title = exitLabel
+    btn.setAttribute('aria-label', exitLabel)
+    btn.style.cssText =
+      `position:absolute;top:${top};left:${left};width:2.75rem;height:2.75rem;z-index:1;` +
+      'display:flex;align-items:center;justify-content:center;border:none;border-radius:50%;' +
+      'background:rgba(255,255,255,0.1);color:#eaf3f9;cursor:pointer;' +
+      "font-family:'Material Symbols Outlined';font-size:1.5rem;line-height:1;padding:0;" +
+      'transition:background .16s ease;'
+    btn.addEventListener('click', () => {
+      const vm = this.#vm()
+      if (!vm) return
+      const gesture = window.ioc?.get<{ backOutOfView?(peel: () => void): void }>('@diamondcoreprocessor.com/BackGesture')
+      const peel = (): void => vm.setMode('hexagons')
+      if (gesture?.backOutOfView) gesture.backOutOfView(peel)
+      else peel()
+    })
+    btn.addEventListener('pointerenter', () => { btn.style.background = 'rgba(126,182,214,0.28)' })
+    btn.addEventListener('pointerleave', () => { btn.style.background = 'rgba(255,255,255,0.1)' })
     return btn
   }
 
@@ -1275,6 +1478,15 @@ export class SlidesViewDrone extends Drone {
 
     const slide = m.slides[this.#index]
     const token = ++this.#showToken
+    // A card on the paged stage — only ever a feed remounted on the stage,
+    // which the scroller surface never does; kept honest all the same.
+    if (slide.kind === 'card') {
+      void this.#cardElement(slide).then(card => {
+        if (token !== this.#showToken || this.#mount !== m) return
+        m.stage.appendChild(card)
+      })
+      return
+    }
     void this.#resolveSlide(slide).then(res => {
       if (token !== this.#showToken || this.#mount !== m) return // superseded / torn down
       if (!res) return
@@ -1361,6 +1573,13 @@ export class SlidesViewDrone extends Drone {
       media.src = url
       media.controls = true
       media.preload = 'metadata'
+      if (kind === 'video') {
+        // IN PLACE, in the feed. Without these iOS Safari hijacks playback
+        // into its own full-screen player, and the section you were flicking
+        // through is gone the moment you press play.
+        media.setAttribute('playsinline', '')
+        media.setAttribute('webkit-playsinline', '')
+      }
       media.style.cssText = kind === 'video'
         ? 'max-width:100%;max-height:100%;background:#000;outline:none;'
         : 'width:min(38rem,90%);outline:none;'

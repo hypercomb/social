@@ -310,6 +310,9 @@ type RoutedChunkLike = {
 
 type LlmRouterLike = {
   ready?(call?: { providerId?: string; model?: string; preferModel?: string; need?: { tier?: string; streaming?: boolean } }): boolean
+  /** Why nothing can answer, as a token this shell turns into words of its
+   *  own. The router never sends a sentence: the catalog owns the language. */
+  reason?(): string
   stream?(call: {
     providerId?: string
     model?: string
@@ -561,6 +564,40 @@ export class ChatWindowComponent implements OnDestroy {
   readonly linkUp = computed(() => this.networkOnline() && (
     this.providerReady() || (this.bridgeUp() && !!this.designated())
   ))
+
+  /** WHY THE LINE IS DOWN, when the router has something worth saying — one
+   *  token ('local-down', 'local-blocked'), localized here. The local tier is
+   *  the only one whose readiness is a running process rather than a stored
+   *  key, so it is the only one that can be off without the participant
+   *  having decided anything. */
+  readonly linkReason = signal('')
+
+  /** The link is up because a PROVIDER answers — a key, or this machine's own
+   *  server — rather than because a bridge session is parked on the socket.
+   *  The distinction is the whole difference between "Bridge connected" and a
+   *  sentence that is true: a direct provider needs no bridge, and saying one
+   *  is connected when none is was the line's oldest lie. */
+  readonly directLink = computed(() => this.providerReady() && !this.bridgeUp())
+
+  /** The availability line's key, for the branch that knows who answers. */
+  readonly linkKey = computed(() =>
+    this.linkUp() ? (this.directLink() ? 'chat.link.direct' : 'chat.link.ready')
+      : this.#linkDownKey() || 'chat.link.pending')
+
+  /** The same line with nobody designated: no {provider} to interpolate. */
+  readonly linkKeyAny = computed(() =>
+    this.linkUp() ? (this.directLink() ? 'chat.link.direct.any' : 'chat.link.ready.any')
+      : this.#linkDownKey() || 'chat.link.pending.any')
+
+  /** Shared by both: a host, or a local server that is off, is the same
+   *  sentence whoever was designated. '' means "say the waiting line". */
+  #linkDownKey(): string {
+    if (this.hostConfigured()) return 'chat.link.host'
+    if (this.linkReason() === 'local-permission') return 'chat.link.local.permission'
+    if (this.linkReason() === 'local-blocked') return 'chat.link.local.blocked'
+    if (this.linkReason() === 'local-down') return 'chat.link.local.down'
+    return ''
+  }
 
   /** THE MODEL SOMEBODY NAMED, for this conversation. `''` is the normal
    *  case: nobody named one, and the policy designates instead. Naming still
@@ -2782,6 +2819,7 @@ export class ChatWindowComponent implements OnDestroy {
       preferModel: !this.modelExplicit() ? this.model() || undefined : undefined,
       need,
     }))
+    this.linkReason.set(router?.reason?.() ?? '')
   }
 
   // ── context ─────────────────────────────────────────────────────────────

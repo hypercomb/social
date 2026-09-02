@@ -11,6 +11,18 @@
 //   node voice.cjs --posts protocol    # speak one post's beats (omit id: all posts)
 //   node voice.cjs --check             # which slots are spoken, and how close
 //
+// Or keep your performance and change only the voice. Read the line yourself —
+// your timing, your emphasis — and have it rendered in another voice:
+//
+//   node voice.cjs --convert --scenes 1,4,7          # your reads → the narrator
+//   node voice.cjs --convert --scenes 1 --voice mine # someone else's read → you
+//   node voice.cjs --convert --teaser --voice "…\some-voice.wav"
+//
+// A clone guesses intonation from text. A conversion never has to: the words,
+// the timing and the stress are the ones you gave it. Takes go in record/ under
+// the same names record.cjs uses, so the two are interchangeable — read once,
+// then decide whose voice says it.
+//
 // Short lines are where a clone is weakest — there is barely any line for it to
 // settle into the voice. Re-roll one without redoing the rest:
 //
@@ -101,6 +113,88 @@ function sceneLines(which) {
                  cache, slot: keyOf(voice, rate, spokenOf(s.say)) }))
 }
 
+// ---------- your performance, another voice ----------------------------------
+// Source takes sit in record/ under the id, which for a scene is exactly the
+// name record.cjs already looks for — so a read take can go either way without
+// being moved or renamed.
+const TAKES = path.join(ROOT, 'record')
+const AUDIO_EXT = ['.wav', '.flac', '.m4a', '.mp3', '.aac', '.ogg', '.webm']
+const sourceFor = id => AUDIO_EXT
+  .map(e => path.join(TAKES, id.replace(':', '-') + e)).find(fs.existsSync) || null
+
+// The target is a voice, not a model: ten clean seconds of anyone. `narrator`
+// takes them from the line set's own cache — whoever is already speaking it.
+function targetVoice(lines) {
+  const want = arg('voice') || 'narrator'
+  if (want === 'mine') {
+    if (!fs.existsSync(REFERENCE)) throw new Error('no reference of you yet — node voice.cjs --reference "…"')
+    return REFERENCE
+  }
+  if (want !== 'narrator') {
+    if (!fs.existsSync(want)) throw new Error(`no such voice: ${want}`)
+    return prepareVoice(want)
+  }
+  const cache = lines[0].cache
+  const spoken = fs.existsSync(cache) ? fs.readdirSync(cache).filter(f => f.endsWith('.mp3')) : []
+  if (!spoken.length) throw new Error(`nothing in ${path.relative(ROOT, cache)} to take a voice from — build once first`)
+  // the longest line the narrator has said is the most it can be conditioned on
+  const best = spoken.map(f => path.join(cache, f))
+    .sort((a, b) => durationOf(b) - durationOf(a))[0]
+  return prepareVoice(best)
+}
+
+// Conditioning wants the voice as it is — clean the room out of it, leave the
+// dynamics alone, and hand over ten seconds, which is all the decoder reads.
+function prepareVoice(file) {
+  const out = path.join(VOICE_DIR, 'target.wav')
+  execFileSync('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', '-i', file,
+    '-af', 'highpass=f=80,afftdn=nf=-25,loudnorm=I=-18:TP=-2:LRA=11',
+    '-t', '10', '-ar', '24000', '-ac', '1', out], { stdio: ['ignore', 'ignore', 'inherit'] })
+  return out
+}
+
+function convert(lines) {
+  if (!fs.existsSync(PYTHON)) {
+    console.error(`no local voice environment at ${HOME}\nSee voice/README.md — it is a one-time, free setup.`)
+    process.exit(1)
+  }
+  const jobs = lines.map(l => ({ ...l, source: sourceFor(l.id) }))
+  const missing = jobs.filter(j => !j.source)
+  const ready = jobs.filter(j => j.source)
+  for (const j of missing) console.log(`  ${j.id.padEnd(18)} no take in record/ — skipped`)
+  if (!ready.length) {
+    console.error('\nNothing to convert. Read the lines first: node record.cjs --prompt')
+    process.exit(1)
+  }
+  const target = targetVoice(lines)
+  const listPath = path.join(VOICE_DIR, 'jobs.json')
+  fs.writeFileSync(listPath, JSON.stringify(ready.map(j =>
+    ({ id: j.id.replace(':', '-'), text: j.text, source: j.source })), null, 2))
+
+  console.log(`converting ${ready.length} take(s) into ${path.basename(target)}`)
+  execFileSync(PYTHON, [path.join(VOICE_DIR, 'convert.py'), target, listPath, RAW], { stdio: 'inherit' })
+
+  const scores = JSON.parse(fs.readFileSync(path.join(RAW, 'scores.json'), 'utf8'))
+  console.log('\nmastering…')
+  for (const line of ready) {
+    const raw = path.join(RAW, `${line.id.replace(':', '-')}.wav`)
+    if (!fs.existsSync(raw)) { console.log(`  ${line.id}: nothing came back — skipped`); continue }
+    fs.mkdirSync(line.cache, { recursive: true })
+    const out = path.join(line.cache, `${line.slot}.mp3`)
+    const m = master(raw, out)
+    const score = scores[line.id.replace(':', '-')] || {}
+    ledger[line.id] = { slot: line.slot, via: 'convert', from: path.basename(line.source),
+                        voice: path.basename(target), wer: score.wer,
+                        seconds: +durationOf(out).toFixed(2), at: new Date().toISOString().slice(0, 10),
+                        text: line.text, ...(score.flagged ? { flagged: score.flagged, heard: score.heard } : {}) }
+    console.log(`  ${line.id.padEnd(18)} ${durationOf(out).toFixed(1)}s  ` +
+      `${(+m.input_i).toFixed(1)} → -16 LUFS   WER ${score.wer === undefined ? '—' : (score.wer * 100).toFixed(1) + '%'}` +
+      (score.flagged ? `   ⚠ ${score.flagged}` : ''))
+  }
+  fs.writeFileSync(SPOKEN, JSON.stringify(ledger, null, 2))
+  console.log(`\n${ready.length} take(s) converted, mastered and seeded. Run the target build — it will use yours.`)
+}
+
 // ---------- prepare the reference --------------------------------------------
 // Deliberately NOT the mastering chain: conditioning wants the voice as it is,
 // with its dynamics intact. Clean the room out of it and level it, no more.
@@ -170,7 +264,7 @@ try {
     const rows = Object.entries(ledger)
     if (!rows.length) console.log('nothing spoken yet.')
     for (const [id, r] of rows) {
-      console.log(`  ${id.padEnd(18)} ${String(r.seconds).padStart(5)}s  likeness ${r.similarity ?? '—'}` +
+      console.log(`  ${id.padEnd(18)} ${String(r.seconds).padStart(5)}s  ${r.via === 'convert' ? `read → ${r.voice}` : `likeness ${r.similarity ?? '—'}`}` +
         `  WER ${r.wer === undefined ? '—' : (r.wer * 100).toFixed(1) + '%'}  ${r.at}` +
         (r.flagged ? `   ⚠ heard "${r.heard}"` : ''))
     }
@@ -178,14 +272,14 @@ try {
       ? `\nreference: ${durationOf(REFERENCE).toFixed(1)}s`
       : '\nno reference yet — node voice.cjs --reference "…"')
   } else if (has('teaser')) {
-    speak(teaserLines())
+    (has('convert') ? convert : speak)(teaserLines())
   } else if (has('posts')) {
     const which = String(arg('posts') || '').split(',').map(s => s.trim())
       .filter(s => s && !s.startsWith('--'))
-    speak(postLines(which))
+    ;(has('convert') ? convert : speak)(postLines(which))
   } else if (has('scenes')) {
     const which = String(arg('scenes') || '').split(',').map(n => parseInt(n, 10)).filter(Number.isFinite)
-    speak(sceneLines(which))
+    ;(has('convert') ? convert : speak)(sceneLines(which))
   } else {
     console.log(fs.readFileSync(__filename, 'utf8').split('\n').filter(l => l.startsWith('//')).join('\n'))
   }

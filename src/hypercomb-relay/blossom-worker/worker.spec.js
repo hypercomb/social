@@ -287,3 +287,55 @@ test('ordinary content hosts retain their existing landing', async () => {
   const response = await worker.fetch(new Request('https://content.pluginthematrix.com/'), env)
   assert.match(await response.text(), /public content endpoint/)
 })
+
+// ── the mark ────────────────────────────────────────────────────────────────
+// Every door under a bound zone is Hypercomb, whether or not a creation has
+// landed on it yet. The browser asks for these paths unprompted and paints
+// its blank globe on a 404, so the shell's icons answer everywhere.
+
+test('an unpublished name still wears the mark', async () => {
+  const { env, assetRequests } = await fixture()
+  const icon = await worker.fetch(new Request('https://ghost.pluginthematrix.com/favicon.svg'), env)
+  const page = await worker.fetch(new Request('https://ghost.pluginthematrix.com/'), env)
+  assert.equal(icon.status, 200)
+  assert.equal(icon.headers.get('cache-control'), 'public, max-age=3600')
+  assert.deepEqual(assetRequests, ['/favicon.svg'])
+  // the name itself is still honestly unpublished
+  assert.equal(page.status, 404)
+  assert.match(await page.text(), /rel="icon" href="\/favicon\.svg"/)
+})
+
+test('the relay face and published sites answer the mark too', async () => {
+  const { env, assetRequests } = await fixture()
+  const relay = await worker.fetch(new Request('https://content.pluginthematrix.com/favicon.ico'), env)
+  const site = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/apple-touch-icon.png'), env)
+  assert.equal(relay.status, 200)
+  assert.equal(site.status, 200)
+  assert.deepEqual(assetRequests, ['/favicon.ico', '/apple-touch-icon.png'])
+})
+
+test('the mark list is closed — it is not a directory of shell assets', async () => {
+  const { env, assetRequests } = await fixture()
+  const smuggled = await worker.fetch(new Request('https://content.pluginthematrix.com/env.js'), env)
+  assert.equal(smuggled.status, 404)
+  assert.deepEqual(assetRequests, [])
+})
+
+test('a site may declare its own icon, and only a same-origin one', async () => {
+  const own = { ...ONE_ZONE }
+  own['revolucion.pluginthematrix.com'] = {
+    ...ONE_ZONE['revolucion.pluginthematrix.com'],
+    icon: `/${'c'.repeat(64)}/mark.svg`,
+  }
+  own['pluginthematrix.com'] = {
+    ...ONE_ZONE['pluginthematrix.com'],
+    icon: 'https://cdn.example.com/mark.png',
+  }
+  const { env } = await fixture(undefined, own)
+  const declared = await (await worker.fetch(new Request('https://revolucion.pluginthematrix.com/site.json'), env)).json()
+  const offOrigin = await (await worker.fetch(new Request('https://pluginthematrix.com/site.json'), env)).json()
+  assert.equal(declared.icon, `/${'c'.repeat(64)}/mark.svg`)
+  // Refused, not passed through: the visitor keeps the Hypercomb mark rather
+  // than fetching an icon from a third party on every page load.
+  assert.equal('icon' in offOrigin, false)
+})

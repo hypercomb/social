@@ -47,6 +47,7 @@ import { hasDecorationKind, defaultViewForSegments } from './decoration-kind-ind
 import { visualBeeIconSvg } from './visual-bee-icon-svg.js'
 import { resolveViewEntrance } from './view-entrance.js'
 import { VIEW_SPAWN_EFFECT } from '../presentation/tiles/view-spawn.js'
+import { VIEW_ENTER_PREFIX, VIEW_OPEN_PREFIX, kindsOf } from '../presentation/tiles/viewer-walk.js'
 import { isBehaviorDormant } from '../sharing/behavior-enablement.js'
 
 /** IoC key for the shell-side icon registry. */
@@ -61,7 +62,15 @@ const VIEW_ACTION_PREFIX = 'view:'
  *  goes to the tile and opens the view there — "go to the tile, click the
  *  website, and you're on the website". Complementary to `view:*` (the adopt
  *  opt-in shown when the content is absent). */
-const ENTER_ACTION_PREFIX = 'view-enter:'
+const ENTER_ACTION_PREFIX = VIEW_ENTER_PREFIX
+
+/** Action-name prefix for OPEN icons — a view OFFERED on a tile that does not
+ *  carry its kind, because the bee's own `offersFor(ctx)` says the tile is
+ *  already the right shape (the scroller on any branch: the feed is simply
+ *  the children). Pressed, it opens exactly as `view-enter:` does; it is a
+ *  different name so the overlay can tint present and offered apart while the
+ *  close-up lists both under "open as". */
+const OPEN_ACTION_PREFIX = VIEW_OPEN_PREFIX
 
 /** Action-name prefix for ASLEEP icons — the mark a tile wears while it is
  *  standing in for a TAKEOVER view whose behaviour is switched off.
@@ -142,9 +151,27 @@ function enterIconNameForBee(bee: VisualBeeDescriptor): string {
   return `${ENTER_ACTION_PREFIX}${bee.view}`
 }
 
+/** Compose the IconProviderRegistry name for a bee's OPEN (offered) icon. */
+function openIconNameForBee(bee: VisualBeeDescriptor): string {
+  return `${OPEN_ACTION_PREFIX}${bee.view}`
+}
+
 /** Compose the IconProviderRegistry name for a bee's ASLEEP icon. */
 function asleepIconNameForBee(bee: VisualBeeDescriptor): string {
   return `${ASLEEP_ACTION_PREFIX}${bee.view}`
+}
+
+/** Does this tile carry ANY kind the bee answers for, with the behaviour awake
+ *  there? A website artifact opens the slides (`alsoKinds`), a retired deck
+ *  cell still plays (`legacyKinds`) — the enter icon honours the same list
+ *  ViewBee's presence checks and the sideways walk do. */
+function carriesAwake(ctx: unknown, label: string, bee: VisualBeeDescriptor): boolean {
+  return kindsOf(bee).some(kind => hasDecorationKind(label, kind) && !dormantHere(ctx, kind))
+}
+
+/** Does this tile carry ANY kind the bee answers for, awake or not? */
+function carriesAny(label: string, bee: VisualBeeDescriptor): boolean {
+  return kindsOf(bee).some(kind => hasDecorationKind(label, kind))
 }
 
 /** Enablement lens for the sync `visibleWhen` predicates: is this bee's
@@ -256,11 +283,53 @@ function syncIcons(): void {
       tintWhen: (ctx) => isPreferredView(ctx, bee.view) ? VIEW_DEFAULT_TINT : VIEW_TINT,
       labelKey: bee.labelKey,
       descriptionKey: bee.descriptionKey,
+      // ANY kind the bee answers for — its own, a further-live peer
+      // (`alsoKinds`) or a retired spelling (`legacyKinds`) — as long as the
+      // behaviour is awake for that kind here.
       visibleWhen: (ctx) => {
         const label = (ctx as { label?: string })?.label
-        return typeof label === 'string'
-          && hasDecorationKind(label, bee.decorationKind)
-          && !dormantHere(ctx, bee.decorationKind)
+        return typeof label === 'string' && carriesAwake(ctx, label, bee)
+      },
+    })
+    REGISTERED_ICONS.add(name)
+  }
+
+  // OPEN icons — a view OFFERED where its kind is absent, because the bee's
+  // own `offersFor(ctx)` says the tile already has the right shape. Same
+  // family blue as the enter icon (it is a real door, not an "add"), shown
+  // only while the tile lacks every kind the bee answers for (the moment the
+  // mark lands, the enter icon takes over) and the behaviour is awake here.
+  for (const bee of visualBees.all()) {
+    if (bee.behavior === 'navigation' || typeof bee.offersFor !== 'function') continue
+    const name = openIconNameForBee(bee)
+    want.add(name)
+    if (REGISTERED_ICONS.has(name)) continue
+    const offers = bee.offersFor
+    iconRegistry.add({
+      name,
+      owner: '@diamondcoreprocessor.com/visual-bee-icons',
+      svgMarkup: visualBeeIconSvg(bee.toggleIcon, bee.view),
+      profiles: ['private', 'public-own', 'public-external'],
+      defaultActive: true,
+      featureRow: false,
+      hoverTint: VIEW_HOVER_TINT,
+      tintWhen: () => VIEW_TINT,
+      labelKey: bee.labelKey,
+      descriptionKey: bee.descriptionKey,
+      visibleWhen: (ctx) => {
+        const c = ctx as { label?: string; isBranch?: boolean; hasLink?: boolean; noImage?: boolean; hasNotes?: boolean } | null
+        const label = c?.label
+        if (typeof label !== 'string' || !label) return false
+        if (carriesAny(label, bee) || dormantHere(ctx, bee.decorationKind)) return false
+        try {
+          return offers({
+            label,
+            isBranch: c?.isBranch === true,
+            hasLink: c?.hasLink === true,
+            noImage: c?.noImage === true,
+            hasNotes: c?.hasNotes === true,
+          }) === true
+        } catch { return false }
       },
     })
     REGISTERED_ICONS.add(name)
@@ -304,16 +373,25 @@ function syncIcons(): void {
   }
 }
 
-/** Dispatch a click on a visual-bee icon. Two paths:
+/** Dispatch a click on a visual-bee icon — the ADOPT / CREATION door. Three
+ *  paths:
  *
- *   1. If the bee declares a `queenKey`, look up that QueenBee in IoC
- *      and call `invoke(label)` — same as if the user typed
+ *   1. An ATTACHABLE bee is fully installed by writing its kind at the
+ *      tile, so the click emits `feature:apply` for `[...here, label]` —
+ *      the one seam the command line's `name@view` and the Beehaviors panel
+ *      already use (show-features' #applyFeature is the only writer). It
+ *      must NOT fall through to the queen: a view bee's bare command TOGGLES
+ *      the view, so the close-up's "Slides" plate used to flip the whole
+ *      layer into slides mode instead of marking the tile it was pressed on.
+ *
+ *   2. Otherwise, if the bee declares a `queenKey`, look up that QueenBee
+ *      in IoC and call `invoke(label)` — same as if the user typed
  *      `/<view> <label>` in the command palette. The bee runs locally
  *      and (in the migrated world) writes a decoration via
  *      writeDecoration → cascades the sig into the local
  *      `decorations` slot.
  *
- *   2. If no `queenKey`, broadcast `visual-bee:adopt-request` carrying
+ *   3. If no `queenKey`, broadcast `visual-bee:adopt-request` carrying
  *      the view name + label. The bee's own module can listen for this
  *      and react however it wants (custom-rolled adoption path).
  *
@@ -325,6 +403,14 @@ function dispatchViewAction(action: string, label: string | undefined): void {
   const visualBees = window.ioc.get<VisualBeeRegistry>('@diamondcoreprocessor.com/VisualBeeRegistry')
   const bee = visualBees?.get(view)
   if (!bee) return
+
+  const cell = String(label ?? '').trim()
+  if (bee.attachable && cell) {
+    const lineage = window.ioc.get<LineageLike>('@hypercomb.social/Lineage')
+    const here = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    EffectBus.emit('feature:apply', { view: bee.view, segments: [...here, cell], remove: false })
+    return
+  }
 
   if (bee.queenKey) {
     const queen = window.ioc.get<{ invoke: (args: string) => Promise<void> | void }>(bee.queenKey)
@@ -355,8 +441,8 @@ type ViewModeLike = { mode?: string; setMode?: (next: string) => void }
  *  page-less cell and website mode came up empty — the home page lives at the
  *  root. `resolveViewEntrance` walks up to that root; a node-scoped behaviour
  *  resolves to the clicked cell unchanged. */
-function dispatchEnterAction(action: string, label: string | undefined): void {
-  const view = action.slice(ENTER_ACTION_PREFIX.length)
+function dispatchEnterAction(action: string, label: string | undefined, prefix: string = ENTER_ACTION_PREFIX): void {
+  const view = action.slice(prefix.length)
   if (!view || !label) return
   const visualBees = window.ioc.get<VisualBeeRegistry>('@diamondcoreprocessor.com/VisualBeeRegistry')
   const bee = visualBees?.get(view)
@@ -441,6 +527,11 @@ EffectBus.on<{ action?: string; label?: string }>('tile:action', (detail) => {
   }
   if (detail.action.startsWith(ENTER_ACTION_PREFIX)) {
     dispatchEnterAction(detail.action, detail.label)
+    return
+  }
+  // An OFFERED view opens through the very same door as a carried one.
+  if (detail.action.startsWith(OPEN_ACTION_PREFIX)) {
+    dispatchEnterAction(detail.action, detail.label, OPEN_ACTION_PREFIX)
     return
   }
   if (detail.action.startsWith(VIEW_ACTION_PREFIX)) {

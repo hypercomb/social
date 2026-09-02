@@ -66,18 +66,37 @@ interface HeldWindow {
   root?: () => HTMLElement | null
 }
 
-/** Currently-showing windows, by id. One entry per window — a re-registration
- *  under the same id replaces the old one (a window remounting is the same
- *  window, not a second one).
- *
- *  Insertion order matters and is subtler than it looks: `Map.set` on an
- *  EXISTING key keeps the original index, so a park→unpark round trip returns a
- *  window to the rank it held before, rather than to the end. That is the
- *  wanted behaviour — say so here rather than let someone rediscover it. */
-const showing = new Map<string, HeldWindow>()
+interface SessionState {
+  /** Currently-showing windows, by id. One entry per window — a
+   *  re-registration under the same id replaces the old one (a window
+   *  remounting is the same window, not a second one).
+   *
+   *  Insertion order matters and is subtler than it looks: `Map.set` on an
+   *  EXISTING key keeps the original index, so a park→unpark round trip
+   *  returns a window to the rank it held before, rather than to the end. That
+   *  is the wanted behaviour — say so here rather than let someone
+   *  rediscover it. */
+  showing: Map<string, HeldWindow>
+  /** The parked set, in the order it was parked. Empty = we are in the hive. */
+  parked: { id: string; session: WindowSession }[]
+}
 
-/** The parked set, in the order it was parked. Empty = we are in the hive. */
-let parked: { id: string; session: WindowSession }[] = []
+/** PINNED ON globalThis, for the same reason EffectBus is (effect-bus.ts).
+ *
+ *  Core is compiled from source INTO the Angular shell and, separately, served
+ *  as an external module to the runtime-loaded drones through the import map.
+ *  Two module instances, so a plain module-level `const` is two registries that
+ *  never meet: `holdWindow` runs in the shell's copy (the docked-panel adapter
+ *  is Angular), so a drone asking would read an empty one and be told, always,
+ *  that nothing is showing — worse than not asking, because it reads as an
+ *  answer.
+ *
+ *  What is on screen is a fact about the DOCUMENT, not about a module graph,
+ *  so it is held where the document is. */
+const state: SessionState =
+  ((globalThis as { __hypercombWindowSession?: SessionState }).__hypercombWindowSession ??=
+    { showing: new Map(), parked: [] })
+const showing = state.showing
 
 /** Register a window as SHOWING. Call when it opens; call the returned release
  *  when it closes (or is parked — parking takes its DOM with it, and the parked
@@ -120,21 +139,21 @@ export function focusedWindow(): { id: string; session: WindowSession } | null {
  *  visible) must never overwrite the remembered set with the empty one that is
  *  on screen by then. Returns how many were parked. */
 export function parkWindows(): number {
-  if (parked.length) return 0
-  parked = [...showing].map(([id, held]) => ({ id, session: held.session }))
-  for (const { session } of parked) {
+  if (state.parked.length) return 0
+  state.parked = [...showing].map(([id, held]) => ({ id, session: held.session }))
+  for (const { session } of state.parked) {
     try { session.park() }
     catch (err) { console.error('[window-session] park failed:', err) }
   }
-  return parked.length
+  return state.parked.length
 }
 
 /** Bring the parked windows back and forget the parked set. A window the
  *  participant opened WHILE parked simply stays open — unparking adds, it never
  *  closes anything. Returns how many came back. */
 export function unparkWindows(): number {
-  const list = parked
-  parked = []
+  const list = state.parked
+  state.parked = []
   for (const { session } of list) {
     try { session.unpark() }
     catch (err) { console.error('[window-session] unpark failed:', err) }
@@ -161,16 +180,16 @@ export function showingWindows(): readonly { id: string; session: WindowSession 
 }
 
 /** True while windows are put away (we are not in the hive). */
-export function windowsParked(): boolean { return parked.length > 0 }
+export function windowsParked(): boolean { return state.parked.length > 0 }
 
 /** The ids currently parked — for tests and for anything that wants to say what
  *  is coming back. */
-export function parkedWindowIds(): readonly string[] { return parked.map(p => p.id) }
+export function parkedWindowIds(): readonly string[] { return state.parked.map(p => p.id) }
 
 /** Test seam: forget everything, park nothing. */
 export function resetWindowSession(): void {
   showing.clear()
-  parked = []
+  state.parked = []
 }
 
 /** The common case — a window whose whole visibility IS one writable boolean

@@ -41,14 +41,29 @@ const ENABLED_MAP_KEY = 'hc:controls-enabled-map'
  *  neighbour they were authored next to — see #orderedRegistry — so a new
  *  control still lands where its author put it instead of at the far end. */
 const ORDER_KEY = 'hc:controls-order'
+/** Bumped when a control MOVES in the registry and that move has to reach an
+ *  order written before it. The stored permutation already names the id, so
+ *  #orderedRegistry's beside-the-neighbour placement never runs for it and the
+ *  icon stays where it always was. Releasing the id from the stored order hands
+ *  it back to that placement — once, per rev.
+ *  Rev 1: `hosts` moved up beside `pools`. */
+const ORDER_REV_KEY = 'hc:controls-order-rev'
+const ORDER_REV = 1
+const RELEASED_BY_ORDER_REV: Record<number, readonly string[]> = {
+  1: ['hosts'],
+}
 /** Bumped when a default flip has to reclaim ids a legacy FULL map froze.
  *  Rev 1: the magnifiers came off the rail (bab6045d), but every map written
  *  before that carried `zoom-in`/`zoom-out: true`, so the flip never reached
  *  anyone who had ever opened edit mode — the icons kept coming back. */
 const ENABLED_REV_KEY = 'hc:controls-enabled-rev'
-const ENABLED_REV = 1
+const ENABLED_REV = 2
 const RECLAIMED_BY_REV: Record<number, readonly string[]> = {
   1: ['zoom-in', 'zoom-out'],
+  // Rev 2: `hosts` went from off-by-default to on. A map written before the
+  // flip carries `hosts: false` — a genuine override under the current
+  // default, so it would survive forever and the icon would never appear.
+  2: ['hosts'],
 }
 /** Page keys (lineage paths) whose viewport is pinned. The pin is per LAYER. */
 const PINNED_PAGES_KEY = 'hc:pinned-pages'
@@ -104,6 +119,12 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // documentation/entrances-and-sets.md). Not among the header aggregates — it
   // manages referenced hives on different roots; it is not a launch group.
   { id: 'pools',        label: 'collections-landing.title', action: 'openPools',      visibleWhen: 'always' },
+  // HOSTS sits DIRECTLY under Portals, completing that opening pair: Portals
+  // is the way out into the collections index, the host directory is the way
+  // out onto the network — the machines serving what you publish. It is a
+  // toggle, not a one-shot: the glyph lights while the directory is up
+  // (`hosts:render` announces its own open state, mirrored below).
+  { id: 'hosts',        label: 'hosts.title',           action: 'toggleHosts',        visibleWhen: 'always' },
   // NO CHAT ENTRY. This bar is how-you-SEE — fit, zoom, pin, fullscreen,
   // orientation — and talking is not one of those; the assistant sits on the
   // command line beside the box you type into (command-shell's
@@ -130,14 +151,14 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // changed here since. Slash-first (`/publish`), so like `sequences` it stays
   // off the rail until the participant enables it from inside its own window.
   { id: 'publish',      label: 'controls.publish',      action: 'togglePublish',      visibleWhen: 'always' },
-  // THREE WINDOWS THAT DECLARED A LAUNCHER AND HAD NOWHERE TO LAND.
+  // TWO WINDOWS THAT DECLARED A LAUNCHER AND HAD NOWHERE TO LAND.
   // `hcDockedPanel`'s settings gear offers "Add to controls" for any window
   // carrying a `launcherControlId`, and writes `hc:controls-enabled-map[<id>]`.
-  // hosts, comfy and aliases all declared one — with no entry here the map was
+  // comfy and aliases both declared one — with no entry here the map was
   // written, the switch read as ON, and nothing ever appeared on the rail. Off
   // by default like sequences and publish: the window's own gear is what puts
-  // it there.
-  { id: 'hosts',        label: 'hosts.title',           action: 'toggleHosts',        visibleWhen: 'always' },
+  // it there. (`hosts` was the third; it has since been promoted onto the rail
+  // beside Portals — see its entry up there.)
   { id: 'comfy',        label: 'comfy.title',           action: 'openComfy',          visibleWhen: 'always' },
   { id: 'aliases',      label: 'aliases.title',         action: 'openAliases',        visibleWhen: 'always' },
   // Selection verbs — the floating vertical selection menu is retired
@@ -182,7 +203,10 @@ const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   'chat': false,
   'sequences': false,
   'publish': false,
-  'hosts': false,
+  // The host directory rides the rail by default, beside Portals. It is not a
+  // slash-first window like sequences/publish: which machines carry your work
+  // is something you glance at, so it gets a permanent switch.
+  'hosts': true,
   'comfy': false,
   'aliases': false,
   // Selection verbs default ON (they only appear while a selection exists;
@@ -321,9 +345,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // ── power key state (ctrl / shift / alt held) ──────────
   readonly powerKey = signal<'ctrl' | 'shift' | 'alt' | null>(null)
 
-  /** True when viewport is phone-shaped (small in either dimension). */
+  /** True in the MOBILE experience — MobileModeService's verdict (a coarse
+   *  pointer AND a phone-shaped viewport, or the `/mobile on|off` override),
+   *  read from its last-value-replayed `mobile:mode` effect. The bar used to
+   *  keep its own media query, so `/mobile on` on a desktop switched on the
+   *  select pill, the rails and the deck while the bar stayed a desktop rail,
+   *  and a narrow desktop window showed the phone bar over a hive that had
+   *  none of them. One definition, and the chrome cannot disagree with it. */
   readonly isMobile = signal(false)
-  /** True when device is in landscape orientation AND mobile-sized. */
+  /** True when device is in landscape orientation AND mobile. */
   readonly isLandscape = signal(false)
   /** Whether the command-line input is currently revealed on mobile. */
   readonly inputVisible = signal(false)
@@ -384,12 +414,22 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     EffectBus.emit('keymap:invoke', { cmd: 'sequence.cycle' })
   }
   #fullscreenHandler = (): void => { this.isFullscreen.set(!!document.fullscreenElement) }
-  #mobileQuery: MediaQueryList | null = null
   #landscapeQuery: MediaQueryList | null = null
-  #mobileHandler = (e: MediaQueryListEvent) => {
-    this.isMobile.set(e.matches)
-    this.isLandscape.set((this.#landscapeQuery?.matches ?? false) && e.matches)
+  #mobileModeUnsub: (() => void) | null = null
+  /** The mobile verdict BEFORE the service's replay lands (in the web shell
+   *  essentials arrive from OPFS after this component mounts): the stamp the
+   *  service leaves on <html>, else the service itself if it is already up. */
+  #seedMobile(): boolean {
+    const stamped = document.documentElement.getAttribute('data-hc-mobile')
+    if (stamped === 'on') return true
+    if (stamped === 'off') return false
+    return !!(get('@diamondcoreprocessor.com/MobileMode') as { active?: boolean } | undefined)?.active
+  }
+  #setMobile = (active: boolean): void => {
+    this.isMobile.set(active)
+    this.isLandscape.set((this.#landscapeQuery?.matches ?? false) && active)
     this.#syncInputVisibility()
+    this.#publishKeyboardInset()
   }
   #landscapeHandler = (e: MediaQueryListEvent) => {
     this.isLandscape.set(e.matches && this.isMobile())
@@ -504,6 +544,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // `clipboard:open` state event so the toolbar button can both toggle it
   // and light up while it's showing.
   #clipboardPanelOpen = signal(false)
+  // Whether the host directory is up. `hosts:render` carries its own `open`
+  // flag from the drone's single state chokepoint, so the rail icon lights
+  // however the window was opened — the rail, `/hosts`, or Publish.
+  #hostsPanelOpen = signal(false)
   // Whether the chat window is showing — its `chat:window-state` announcement,
   // so the launcher lights while the default view is up.
   #hasSelection = signal(false)
@@ -574,13 +618,35 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       const raw = localStorage.getItem(ORDER_KEY)
       if (!raw) return []
       const parsed = JSON.parse(raw)
-      return Array.isArray(parsed) ? parsed.filter(id => typeof id === 'string') : []
+      if (!Array.isArray(parsed)) return []
+      return this.#releaseMovedControls(parsed.filter(id => typeof id === 'string'))
     } catch { return [] }
+  }
+
+  /** One-time sweep per order rev: drop the ids a registry MOVE reclaimed from
+   *  an order written before it, so #orderedRegistry re-places them beside the
+   *  neighbour they were authored next to. Runs from a field initializer, so it
+   *  must not touch `#order`. */
+  #releaseMovedControls(order: string[]): string[] {
+    let seen = 0
+    try { seen = Number(localStorage.getItem(ORDER_REV_KEY)) || 0 } catch { /* ignore */ }
+    if (seen >= ORDER_REV) return order
+    const released = new Set<string>()
+    for (let rev = seen + 1; rev <= ORDER_REV; rev++) {
+      for (const id of RELEASED_BY_ORDER_REV[rev] ?? []) released.add(id)
+    }
+    const kept = order.filter(id => !released.has(id))
+    try {
+      localStorage.setItem(ORDER_KEY, JSON.stringify(kept))
+      localStorage.setItem(ORDER_REV_KEY, String(ORDER_REV))
+    } catch { /* ignore */ }
+    return kept
   }
 
   #persistOrder(): void {
     try {
       localStorage.setItem(ORDER_KEY, JSON.stringify(this.#orderedRegistry().map(c => c.id)))
+      localStorage.setItem(ORDER_REV_KEY, String(ORDER_REV))
     } catch { /* ignore */ }
   }
 
@@ -778,6 +844,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly isActive = (ctrl: ControlItem): boolean => {
     switch (ctrl.id) {
       case 'clipboard': return this.#clipboardPanelOpen()
+      case 'hosts': return this.#hostsPanelOpen()
       case 'pin': return this.pinnedHere()
       case 'fit': return this.fitLocked()
       case 'text-only': return this.#textOnly()
@@ -1248,6 +1315,22 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     EffectBus.emit('camera:capture-open', undefined)
   }
 
+  /** VIEWS — the layer deck: a sheet of big plates for this layer's views,
+   *  the creations offered here, and the how-you-see controls (rung,
+   *  fullscreen, pheromones, pin, undo/redo, library) that the pop-up view
+   *  row used to hold behind an unlabeled chevron. The deck is a drone-owned
+   *  shell surface that listens for this; the bar only asks. */
+  readonly openViews = (): void => {
+    EffectBus.emit('layer:deck-open', {})
+  }
+
+  /** SHARE — the publish sheet for the current page (publish, links, community
+   *  hosts). Took the fit disc's slot: on a phone the rails own the fit, and
+   *  sharing what you made is the act a phone has to reach in one press. */
+  readonly openShare = (): void => {
+    EffectBus.emit('publish:view-toggle', {})
+  }
+
   /** The lane button is the phone's zoom. Tap walks the ladder toward
    *  reading (3 → 2 → 1) and wraps back to scan at the end, so one thumb
    *  reaches every rung without a second control. Off ⇒ the first tap
@@ -1340,6 +1423,16 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly visible = computed(() =>
     !this.#touchDragging() && (!this.#viewActive() || this.#keepsControls()))
 
+  /** THE BAR HIDES UNDER A VIEW ON A PHONE. `.faded` only DIMS (and is put
+   *  back to full opacity on touch, where it stood for the idle fade that has
+   *  no hover to recover from), so on a phone the bar stayed painted and
+   *  tappable at z 60000 over every takeover — the close-up, the slides — at
+   *  59988–59990, with its discs live on top of somebody's page. A view that
+   *  holds `view:keeps-controls` has laid itself out beside the bar and keeps
+   *  it. */
+  readonly viewHidden = computed(() =>
+    this.isMobile() && this.#viewActive() && !this.#keepsControls())
+
   /** Kept on screen WHILE a view covers the canvas — the bar is standing beside
    *  a window that reserved its edge, not on the bare hive. Its own band
    *  (59999–60003) sits under the docked-window band (100002+), which is right
@@ -1373,6 +1466,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #textOnlyUnsub: (() => void) | null = null
   #clipboardAvailableUnsub: (() => void) | null = null
   #clipboardOpenUnsub: (() => void) | null = null
+  #hostsOpenUnsub: (() => void) | null = null
   #tutorialsOpenUnsub: (() => void) | null = null
   #meshModalUnsub: (() => void) | null = null
   #lanesUnsub: (() => void) | null = null
@@ -1471,25 +1565,27 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       },
     )
 
-    // ── mobile detection via matchMedia ──
-    // A phone is small in EITHER dimension: ≤599px WIDE (portrait) OR ≤449px
-    // TALL (landscape — a phone on its side is wide but short). Both collapse
-    // the command line and show the mobile control strip — a bottom bar in
-    // portrait, a right-edge sidebar in landscape. Tablets/laptops/desktops
-    // exceed both thresholds and keep the full desktop shell. (A very short
-    // desktop window also reads as mobile — an acceptable edge.)
     this.#inputVisibleMirrorUnsub = EffectBus.on<{ visible: boolean; mobile: boolean }>(
       'mobile:input-visible',
       ({ visible, mobile }) => this.inputVisible.set(mobile ? visible : true),
     )
 
-    this.#mobileQuery = window.matchMedia('(max-width: 599px), (max-height: 449px)')
-    this.isMobile.set(this.#mobileQuery.matches)
-    this.#mobileQuery.addEventListener('change', this.#mobileHandler)
-
+    // ── ONE definition of mobile ──
+    // MobileModeService (essentials) decides: a coarse pointer AND a
+    // phone-shaped viewport (≤599px wide, or ≤449px tall — a phone on its side
+    // is wide but short), or the `/mobile on|off` override. Mobile collapses
+    // the command line in landscape and shows the mobile control strip — a
+    // bottom bar in portrait, a LEFT-edge rail in landscape. The effect is
+    // last-value-replayed, so a bar mounting after the service still reads the
+    // current verdict; the seed covers the web shell, where the service
+    // arrives from OPFS after this component does. Orientation stays a media
+    // query — it is a fact about the device, not a mode.
     this.#landscapeQuery = window.matchMedia('(orientation: landscape)')
-    this.isLandscape.set(this.#landscapeQuery.matches && this.isMobile())
     this.#landscapeQuery.addEventListener('change', this.#landscapeHandler)
+    this.#setMobile(this.#seedMobile())
+    this.#mobileModeUnsub = EffectBus.on<{ active?: boolean }>('mobile:mode', ({ active }) => {
+      this.#setMobile(!!active)
+    })
 
     this.#syncInputVisibility()
 
@@ -1562,6 +1658,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // replayed, so a late mount reflects the current panel state.
     this.#clipboardOpenUnsub = EffectBus.on<{ open?: boolean }>('clipboard:open', ({ open }) => {
       this.#clipboardPanelOpen.set(!!open)
+    })
+
+    // Same pair for the host directory — the drone re-emits `hosts:render` on
+    // every open/close, and the bus replays the last value, so a late mount
+    // reflects whatever is on screen right now.
+    this.#hostsOpenUnsub = EffectBus.on<{ open?: boolean }>('hosts:render', ({ open }) => {
+      this.#hostsPanelOpen.set(!!open)
     })
 
     // The bee lights while the tutorials window is showing — the window
@@ -1656,14 +1759,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   /** Publish how much of a screen edge the control bar occupies, into
-   *  `--hc-controls-left` / `--hc-controls-right`, plus the left rail's top edge
-   *  as `--hc-controls-left-top`.
+   *  `--hc-controls-left` / `--hc-controls-right` / `--hc-controls-bottom`,
+   *  plus the left rail's top edge as `--hc-controls-left-top`.
    *
    *  The bar is the ANCHOR: it stays fixed to its edge and docked toolwindows
    *  lay out against it (hcDockedPanel reads these), so a panel opens BESIDE
    *  the bar instead of over it. Only a SIDE-DOCKED bar reserves — a
    *  free-floating pill can be dragged anywhere, so reserving an edge for it
-   *  would strand a permanent gap, and mobile's bottom strip owns no side. */
+   *  would strand a permanent gap. Mobile's portrait strip owns no SIDE — it
+   *  owns the bottom, and its landscape rail owns the left. */
   readonly #measureControlsEdge = (): void => {
     // Re-resolve the stage EVERY time rather than trusting a cached reference.
     // Angular re-creates `.pill-stage` (dock/mobile class swaps, re-render), and
@@ -1681,7 +1785,19 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     const side = this.#dockSide()
     let left = 0
     let right = 0
+    let bottom = 0
     let leftTop = ''
+    // THE PORTRAIT PHONE BAR IS A BOTTOM DOCK. It publishes how far up the
+    // screen its top edge sits, so every sheet, the toast stack and the select
+    // pill can stand ON it instead of guessing its height (the sheets guessed
+    // zero and covered the discs; the pill guessed 6.2rem). Layout box, not
+    // the visual rect — the stage animates a transform (see below). The
+    // number is measured from the viewport's bottom, so it already contains
+    // the safe inset and the bar's own gap: consumers max() it against the
+    // inset, they do not add the two.
+    if (stage && this.isMobile() && !this.isLandscape() && stage.offsetHeight > 0) {
+      bottom = Math.max(0, window.innerHeight - stage.offsetTop)
+    }
     // THE LANDSCAPE PHONE RAIL IS A LEFT DOCK. The bar publishes zero edges on
     // phones because its portrait strip owns no side — but in landscape it IS
     // a column down the left edge, and everything that keeps clear of a dock
@@ -1722,6 +1838,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     const root = document.documentElement
     root.style.setProperty('--hc-controls-left', `${Math.round(left)}px`)
     root.style.setProperty('--hc-controls-right', `${Math.round(right)}px`)
+    root.style.setProperty('--hc-controls-bottom', `${Math.round(bottom)}px`)
     // Removed, not zeroed: panels fall back to their OWN top through the var's
     // fallback value, which a `0px` would override.
     if (leftTop) root.style.setProperty('--hc-controls-left-top', leftTop)
@@ -1808,6 +1925,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #controlsEdgeSync = effect(() => {
     this.#dockSide()
     this.isMobile()
+    this.isLandscape()
     queueMicrotask(this.#measureControlsEdge)
   })
 
@@ -1815,7 +1933,34 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // The ResizeObserver is attached inside the measure itself, so it always
     // follows the CURRENT stage element rather than the one that existed here.
     window.addEventListener('resize', this.#measureControlsEdge)
+    window.visualViewport?.addEventListener('resize', this.#publishKeyboardInset)
+    window.visualViewport?.addEventListener('scroll', this.#publishKeyboardInset)
+    this.#publishKeyboardInset()
     this.#measureControlsEdge()
+  }
+
+  /** THE SOFT KEYBOARD. iOS does not resize the layout viewport when the
+   *  keyboard rises — `innerHeight` stays put, `position: fixed; bottom: 0`
+   *  stays put, and the keyboard simply covers the bar, GO and every sheet.
+   *  What shrinks is the VISUAL viewport, so its height (and its scroll
+   *  offset, which the keyboard also moves) says how much of the bottom is
+   *  gone. Published as `--hc-keyboard-inset`; the bar's own `bottom` reads it
+   *  (max()ed with the safe inset), and because that moves the bar's top
+   *  edge, `--hc-controls-bottom` is re-measured once layout has it. Android
+   *  resizes the layout viewport instead, so the number is ~0 there and the
+   *  fixed bar already moves. Off mobile it is 0px: a desktop pinch-zoom also
+   *  shrinks the visual viewport, and the bar must not chase that. */
+  #keyboardInset = -1
+  #publishKeyboardInset = (): void => {
+    const vv = window.visualViewport
+    let inset = 0
+    if (vv && this.isMobile()) {
+      inset = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop))
+    }
+    if (inset === this.#keyboardInset) return
+    this.#keyboardInset = inset
+    document.documentElement.style.setProperty('--hc-keyboard-inset', `${inset}px`)
+    requestAnimationFrame(this.#measureControlsEdge)
   }
 
   /** Publish the live header-bar bottom edge into `--hc-header-bottom` so the
@@ -1840,7 +1985,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       // is 51.7px. Anchored panels position in viewport pixels, so the rect is
       // the only measure that can be compared against them.
       const bottom = header.getBoundingClientRect().bottom
-      if (bottom > 0) document.documentElement.style.setProperty('--hc-header-bottom', `${bottom}px`)
+      // REMOVED, NOT LEFT BEHIND, when the header is not there. A landscape
+      // phone hides the header (`display: none`, _header-bar.scss) and its
+      // rect collapses to zero; refusing to write zero used to leave the
+      // PORTRAIT value standing, so the landscape rail and every anchored
+      // surface started 90–130px down the screen under a header that was not
+      // painted. `--hc-header-anchor` falls back to its nominal height.
+      const hidden = bottom <= 0 || getComputedStyle(header).display === 'none'
+      if (hidden) document.documentElement.style.removeProperty('--hc-header-bottom')
+      else document.documentElement.style.setProperty('--hc-header-bottom', `${bottom}px`)
     }
     measure()
     this.#headerObserver = new ResizeObserver(measure)
@@ -1858,15 +2011,19 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.gate?.removeEventListener?.('change', this.#onGateChange)
     if (this.gate?.lockedBy?.(PIN_OWNER)) this.gate.unlock(PIN_OWNER)
     this.#inputVisibleMirrorUnsub?.()
-    this.#mobileQuery?.removeEventListener('change', this.#mobileHandler)
+    this.#mobileModeUnsub?.()
     this.#landscapeQuery?.removeEventListener('change', this.#landscapeHandler)
     this.#headerObserver?.disconnect()
     this.#controlsObserver?.disconnect()
     window.removeEventListener('resize', this.#measureControlsEdge)
+    window.visualViewport?.removeEventListener('resize', this.#publishKeyboardInset)
+    window.visualViewport?.removeEventListener('scroll', this.#publishKeyboardInset)
     // Release the reservation — a torn-down bar occupies no edge.
     document.documentElement.style.setProperty('--hc-controls-left', '0px')
     document.documentElement.style.setProperty('--hc-controls-right', '0px')
+    document.documentElement.style.setProperty('--hc-controls-bottom', '0px')
     document.documentElement.style.removeProperty('--hc-controls-left-top')
+    document.documentElement.style.removeProperty('--hc-keyboard-inset')
     this.#edgeLine?.remove()
     this.#edgeLine = null
     window.removeEventListener('resize', this.#onResize)
@@ -1900,6 +2057,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#textOnlyUnsub?.()
     this.#clipboardAvailableUnsub?.()
     this.#clipboardOpenUnsub?.()
+    this.#hostsOpenUnsub?.()
     this.#tutorialsOpenUnsub?.()
     this.#tagsUnsub?.()
     this.#tagFilterUnsub?.()
@@ -1924,8 +2082,29 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // ── navigation actions ────────────────────────────────
 
   readonly goBack = (): void => {
+    // BACK CLOSES THE SHEET FIRST. On a phone a tool window is a sheet over
+    // the hive with no Escape key to take it away, and Back is the one
+    // control a phone reaches for; so before it walks the lineage it does
+    // what Escape's sweep does — parks every showing window (parked, not
+    // closed, so the cascade's put-back still works). Anything showing means
+    // the press is spent here. Desktop keeps Back for the lineage: it has
+    // Escape, and its rail's Back has never meant "close the panel".
+    if (this.isMobile() && this.#putAwayToolWindows()) return
     performance.mark('hypercomb:back:trigger')
     void this.movement.back()
+  }
+
+  /** `@hypercomb.social/ToolWindows.putAwayAll()` returns the put-back when
+   *  anything was showing and null otherwise; any truthy return means the
+   *  screen just changed. Resolved by key: the facade lives in core and
+   *  registers itself. */
+  #putAwayToolWindows(): boolean {
+    try {
+      const tw = get('@hypercomb.social/ToolWindows') as { putAwayAll?: () => unknown } | undefined
+      return !!tw?.putAwayAll?.()
+    } catch {
+      return false
+    }
   }
 
   // Mobile back button fires on pointerdown to save the press duration (~50–150ms)

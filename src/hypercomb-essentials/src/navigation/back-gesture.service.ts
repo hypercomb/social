@@ -117,8 +117,18 @@ export class BackGesture {
 
   /** Who would answer a right-click over `target` right now, and how. Split
    *  out from the handler so it can be reasoned about (and tested) without an
-   *  event. `null` = nothing is registered for it; the lineage answers. */
-  resolve = (target: Element | null): BackGestureEntry | null => {
+   *  event. `null` = nothing is registered for it; the lineage answers.
+   *
+   *  `unregisteredView` is what an OPEN view that never registered an entry
+   *  (slides, the scroller) means to the caller: `'lineage'` — the right
+   *  button's rule, the ladder falls through and the lineage answers — or
+   *  `'peel'` — the hardware BACK button's rule (navigation/view-back.ts): a
+   *  view that is up is the thing to leave, so it peels to hexagons through
+   *  `backOutOfView`, an arrival face navigating as ever. */
+  resolve = (
+    target: Element | null,
+    { unregisteredView = 'lineage' }: { unregisteredView?: 'lineage' | 'peel' } = {},
+  ): BackGestureEntry | null => {
     // 1. Innermost hovered scope.
     let hovered: BackGestureEntry | null = null
     let hoveredDepth = -1
@@ -141,8 +151,13 @@ export class BackGesture {
     const modes = ioc<{ ownersOf(mode: string): readonly string[] }>('@diamondcoreprocessor.com/ModeRegistry')
     const viewOwners = modes?.ownersOf('view:active') ?? []
     for (let i = viewOwners.length - 1; i >= 0; i--) {
-      const entry = this.#entries.get(viewOwners[i])
-      if (!entry || entry.within) continue
+      const owner = viewOwners[i]
+      const entry = this.#entries.get(owner)
+      if (!entry) {
+        if (unregisteredView !== 'peel') continue
+        return { owner, back: () => this.backOutOfView(this.#peelToHexagons) }
+      }
+      if (entry.within) continue
       if (entry.active && !entry.active()) continue
       return { ...entry, back: () => this.backOutOfView(entry.back) }
     }
@@ -165,6 +180,12 @@ export class BackGesture {
     const viewBee = ioc<{ isArrivalSurface?(): boolean }>('@diamondcoreprocessor.com/ViewBee')
     if (viewBee?.isArrivalSurface?.()) this.#lineageBack()
     else peel()
+  }
+
+  /** The peel for a view that registered nothing: the surface comes down and
+   *  the hexagons are what is underneath. */
+  #peelToHexagons = (): void => {
+    ioc<{ setMode?: (mode: string) => void }>('@hypercomb.social/ViewMode')?.setMode?.('hexagons')
   }
 
   /** The default answer: the hive comes back one step. Identical to the canvas

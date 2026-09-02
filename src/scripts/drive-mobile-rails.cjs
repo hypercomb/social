@@ -331,7 +331,24 @@ async function main() {
   }
 }
 
-main().catch(err => {
-  console.error(err)
-  process.exit(2)
-})
+// A dev server shared with another session rebuilds on every one of its
+// saves and reloads the page under a running probe ("Execution context was
+// destroyed"). That is the harness's environment, not the code under test:
+// start over, a bounded number of times.
+const RELOAD_RETRIES = 3
+;(async () => {
+  for (let attempt = 1; attempt <= RELOAD_RETRIES; attempt++) {
+    try {
+      await main()
+      return
+    } catch (err) {
+      const reloaded = /Execution context was destroyed|Target (page|context) .* closed|navigation/i.test(String(err))
+      if (!reloaded || attempt === RELOAD_RETRIES) {
+        console.error(err)
+        process.exit(2)
+      }
+      console.log(`\n(page reloaded under the probe — attempt ${attempt} of ${RELOAD_RETRIES} discarded, starting over)\n`)
+      checks.length = 0
+    }
+  }
+})()

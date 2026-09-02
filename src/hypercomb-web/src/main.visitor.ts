@@ -4,6 +4,7 @@ import { installReadonlyNetwork } from './setup/readonly-network'
 interface SiteDescriptor {
   head?: string
   hosts?: string[]
+  icon?: string
   lineage?: string
   pubkey?: string
   segments?: string[]
@@ -11,6 +12,50 @@ interface SiteDescriptor {
 }
 
 const SIG_RE = /^[a-f0-9]{64}$/
+
+// ── the tab mark ───────────────────────────────────────────────────────────
+// index.visitor.html already carries the Hypercomb hexagon, so every
+// published door has a mark by default. A site that brings its OWN says so
+// with `site.icon`: a SAME-ORIGIN absolute path, in practice a
+// content-addressed `/<sig>/name.svg` the host serves from the creation's own
+// heap with the type the suffix declares.
+//
+// Off-origin icons are refused rather than fetched. An icon is a request
+// every single visit makes, and handing a third party the visitor's IP, UA
+// and Referer that often is exactly what documentation/no-third-party-
+// requests.md forbids. The visitor CSP (img-src 'self' data: blob:) would
+// block it regardless — refusing here keeps the mark instead of trading it
+// for nothing.
+const ICON_TYPES: Record<string, string> = {
+  svg: 'image/svg+xml', png: 'image/png', ico: 'image/x-icon',
+  gif: 'image/gif', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
+}
+
+const applySiteIcon = (icon: string): void => {
+  const href = icon.trim()
+  if (!href.startsWith('/') || href.startsWith('//')) {
+    console.warn('[visitor] site icon ignored — not a same-origin absolute path:', href)
+    return
+  }
+  const type = ICON_TYPES[href.slice(href.lastIndexOf('.') + 1).toLowerCase()]
+  // Replace, never append: browsers pick among the links they are given, and
+  // a leftover hexagon would win on some of them.
+  for (const link of Array.from(document.querySelectorAll('link[rel~="icon"], link[rel="apple-touch-icon"]'))) {
+    link.remove()
+  }
+  const mark = document.createElement('link')
+  mark.rel = 'icon'
+  mark.href = href
+  if (type) mark.type = type
+  document.head.appendChild(mark)
+  // iOS flattens the home-screen icon and will not take an SVG.
+  if (type === 'image/png') {
+    const touch = document.createElement('link')
+    touch.rel = 'apple-touch-icon'
+    touch.href = href
+    document.head.appendChild(touch)
+  }
+}
 
 installMemoryFilesystem()
 installReadonlyNetwork()
@@ -108,6 +153,7 @@ window.addEventListener('hypercomb:runtime-ready', () => {
       throw new Error('site descriptor is incomplete')
     }
     if (site.title) document.title = site.title
+    if (site.icon) applySiteIcon(String(site.icon))
     if (!(await waitForIoc('@diamondcoreprocessor.com/HiveVisitDrone'))) {
       throw new Error('read-only visit engine did not become ready')
     }

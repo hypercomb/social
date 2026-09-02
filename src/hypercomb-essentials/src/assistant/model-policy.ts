@@ -37,7 +37,8 @@
 
 import { EffectBus, llmKeyStore } from '@hypercomb/core'
 import { llmActivation } from './llm-activation.js'
-import { llmProviderRegistry } from './llm-provider-registry.js'
+import { localModelServerUp } from './providers/local-liveness.js'
+import { llmProviderRegistry, publishService } from './llm-provider-registry.js'
 import type { LlmProviderDescriptor, LlmTier } from './providers/llm-provider.types.js'
 
 const PIN_KEY = (tier: LlmTier): string => `hc:llm:pin:${tier}`
@@ -172,7 +173,7 @@ export class LlmPolicyStore extends EventTarget {
 }
 
 export const llmPolicy = new LlmPolicyStore()
-window.ioc?.register?.('@diamondcoreprocessor.com/LlmPolicyStore', llmPolicy)
+publishService('@diamondcoreprocessor.com/LlmPolicyStore', llmPolicy)
 
 // ── selection ─────────────────────────────────────────────────────────────
 
@@ -181,10 +182,14 @@ window.ioc?.register?.('@diamondcoreprocessor.com/LlmPolicyStore', llmPolicy)
 export const availabilityOf = (provider: LlmProviderDescriptor): 'available' | 'limited' | 'exhausted' | 'unknown' =>
   provider.subscription?.status ?? 'unknown'
 
-/** Usable right now: switched on, authenticated, and not known exhausted. */
+/** Usable right now: switched on, authenticated, awake, and not known
+ *  exhausted. A model on this machine is the one tier whose readiness is a
+ *  running process rather than a stored bit — `localModelServerUp` is that
+ *  fact, probed (local-liveness.ts) rather than assumed. */
 const isReady = (provider: LlmProviderDescriptor): boolean =>
   llmActivation.isEnabled(provider.id)
   && (provider.requiresKey === false || llmKeyStore.has(provider.id))
+  && localModelServerUp(provider)
   && availabilityOf(provider) !== 'exhausted'
 
 /** Does this provider offer the tier the work asked for? A provider with no

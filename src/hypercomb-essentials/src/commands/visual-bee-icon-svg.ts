@@ -21,6 +21,10 @@ const GLYPHS: Readonly<Record<string, string>> = {
     '<rect x="3" y="3" width="6" height="5" rx="1"/><rect x="15" y="10" width="6" height="5" rx="1"/><rect x="15" y="18" width="6" height="4" rx="1"/><path d="M6 8v8h9M12 12h3M12 20h3"/>',
   conversion_path:
     '<circle cx="5" cy="5" r="2"/><circle cx="19" cy="19" r="2"/><path d="M7 5h4a3 3 0 0 1 3 3v8a3 3 0 0 0 3 3"/><path d="m10 13 4 3-4 3"/>',
+  // The scroller — pages that turn: an open book, the right-hand page lifting
+  // mid-flick. Material's own `auto_stories` is the same picture.
+  auto_stories:
+    '<path d="M3 6.5c2.8-1.1 6-1.1 9 0v12.5c-3-1.1-6.2-1.1-9 0z"/><path d="M21 6.5c-2.8-1.1-6-1.1-9 0v12.5c3-1.1 6.2-1.1 9 0z"/><path d="M12 6.5c1.8-3 4.4-4.2 7.5-3.8"/>',
   // The hexagons ground itself — the publish panel's opens-as strip offers it
   // beside the registered views, so the un-pinned face has an honest mark.
   hexagon:

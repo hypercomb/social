@@ -7,7 +7,7 @@
 // here means the design language stays unified across both surfaces.
 //
 // IMPORTANT: the same tokens are duplicated as literal CSS in the website
-// generator (`scripts/bridge/_dolphin-revision.cjs`, inside CHROME_CSS).
+// generator (`scripts/bridge/_chrome-bytes.cjs`, inside DOLPHIN_CHROME_CSS).
 // If you change values here, mirror them there too. Drift only matters
 // visually — both files render in different runtimes (Angular shell vs.
 // static HTML resource), so a build-time concat isn't feasible.
@@ -39,36 +39,60 @@
   // Fresh sites and the dev shell default to light. Dark is the explicit
   // override via [data-theme="dark"] or prefers-color-scheme: dark when no
   // explicit user preference is set.
-  --md-surface:           #f5ede0;
-  --md-surface-dim:       #e8dec6;
-  --md-surface-bright:    #fdf7ea;
+  //
+  // LIGHT IS PAPER, NOT BEIGE. The ground used to be #f5ede0 — a warm cream —
+  // while the ink and the entire accent chord were cold navy. That is the one
+  // reason this look read as an office memo: nothing on the screen agreed
+  // about which way the light was coming from, so every panel edge and every
+  // shadow landed a different temperature from the surface under it. HONEY
+  // ALREADY OWNS WARM; light's job in the family is the neutral one. The
+  // ground is a faintly cool paper now and every rung of the grey ladder
+  // carries the same blue-slate undertone the ink does — which is what makes
+  // a stack of surfaces read as one material lit from one place.
+  --md-surface:           #f7f8fa;
+  --md-surface-dim:       #e7eaef;
+  --md-surface-bright:    #fdfeff;
   --md-surface-c-lowest:  #ffffff;
-  --md-surface-c-low:     #efe7d4;
-  --md-surface-c:         #e9ddc4;
-  --md-surface-c-high:    #e0d3b6;
-  --md-surface-c-highest: #d7c9a6;
-  --md-on-surface:        #1a1f2c;
+  --md-surface-c-low:     #f2f4f8;
+  --md-surface-c:         #eceff4;
+  --md-surface-c-high:    #e3e7ee;
+  --md-surface-c-highest: #d8dee7;
+  --md-on-surface:        #1a2130;
   --md-on-surface-strong: #0a1020;
-  --md-on-surface-var:    #4f566a;
-  --md-on-surface-faint:  #8c8a82;
+  --md-on-surface-var:    #4b5468;
+  --md-on-surface-faint:  #7c8697;
 
   // ── primary / secondary / tertiary ────────────────────────────────
-  --md-primary:           #1f4376;
+  // A CHORD — and the same chord dark wears at the other end of the dimmer:
+  // azure, clay, periwinkle. Light and dark are one look at two brightnesses,
+  // so they should not be reaching for different hues; each of the three
+  // named looks holds its own chord and these two share theirs.
+  //
+  // What was here was a navy plus two apologies (#794c1e brown, #5a3d68
+  // mauve) — a panel showing three states looked decorated rather than
+  // composed. And the primary was institutional rather than actionable:
+  // #1f4376 sits at 9:1 against white, so far down the scale that it reads
+  // as a border. The three tuned looks put their primary at 4.6–5.9:1
+  // against white — vivid, still legal — and this now sits with them at 5.5.
+  --md-primary:           #1668c4;
   --md-on-primary:        #ffffff;
-  --md-primary-container: #cce0f2;
-  --md-on-primary-c:      #062340;
+  --md-primary-container: #d4e6fb;
+  --md-on-primary-c:      #06294f;
 
-  --md-secondary:         #794c1e;
+  --md-secondary:         #b45a22;
   --md-on-secondary:      #ffffff;
-  --md-secondary-c:       #f4dcc1;
-  --md-on-secondary-c:    #2a1a08;
+  --md-secondary-c:       #fbdfcc;
+  --md-on-secondary-c:    #3d1806;
 
-  --md-tertiary:          #5a3d68;
-  --md-tertiary-c:        #ead0f1;
+  --md-tertiary:          #5b4bc4;
+  --md-tertiary-c:        #ddd8fb;
 
   // ── outline / divider ─────────────────────────────────────────────
-  --md-outline:           rgba(26, 31, 44, 0.24);
-  --md-outline-variant:   rgba(26, 31, 44, 0.10);
+  // 0.20 / 0.09 — the two weights the tuned looks settled on. A hairline at
+  // 0.24 on paper is a DRAWN LINE; at 0.20 it is an edge, which is all a
+  // divider was ever asked to be.
+  --md-outline:           rgba(26, 33, 48, 0.20);
+  --md-outline-variant:   rgba(26, 33, 48, 0.09);
 
   // ── state-layer overlay opacities ─────────────────────────────────
   --md-state-hover:    0.08;
@@ -84,11 +108,17 @@
   --md-shape-full: 999px;
 
   // ── elevation (Material 3 box-shadow sets, tuned for light surfaces) ──
+  //
+  // DAYLIGHT, NOT SOOT. Black shadow on any coloured ground reads as dirt;
+  // the same shadow carrying the ground's own deep tone reads as light with a
+  // direction. That is the single biggest lever in this file — it is what the
+  // bright three were built on — and there was never a reason light and dark
+  // should have been left out of it. Here the tone is the ink's deep slate.
   --md-elev-0: none;
-  --md-elev-1: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 3px 1px rgba(0, 0, 0, 0.04);
-  --md-elev-2: 0 1px 2px rgba(0, 0, 0, 0.06), 0 2px 6px 2px rgba(0, 0, 0, 0.04);
-  --md-elev-3: 0 4px 8px 3px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.10);
-  --md-elev-4: 0 6px 10px 4px rgba(0, 0, 0, 0.06), 0 2px 3px rgba(0, 0, 0, 0.10);
+  --md-elev-1: 0 1px 2px rgba(18, 34, 58, 0.10), 0 1px 3px 1px rgba(18, 34, 58, 0.06);
+  --md-elev-2: 0 1px 2px rgba(18, 34, 58, 0.12), 0 2px 6px 2px rgba(18, 34, 58, 0.07);
+  --md-elev-3: 0 4px 8px 3px rgba(18, 34, 58, 0.10), 0 1px 3px rgba(18, 34, 58, 0.15);
+  --md-elev-4: 0 6px 10px 4px rgba(18, 34, 58, 0.10), 0 2px 3px rgba(18, 34, 58, 0.15);
 
   // ── typography (role fonts) ───────────────────────────────────────
   //
@@ -136,20 +166,25 @@
   // disabled state is ink at a low alpha, so flipping one triple flips all of
   // them. `sheen` is the 1px inset edge highlight and stays white on purpose —
   // it is a bevel, not text.
-  --hc-panel-pane:       253, 250, 242;
-  --hc-panel-ink:        26, 31, 44;
-  --hc-panel-text:       #1a1f2c;
-  --hc-panel-shadow:     40, 44, 60;
+  // The pane is paper the surface is not — a hair brighter than --md-surface
+  // so a tool window lifts off the hive without a heavier shadow. Both
+  // shadow tones are the ink's deep slate, matching --md-elev-* above: a
+  // chrome bar casting a neutral-grey shadow onto a slate-tinted page was
+  // the last place the old warm/cold split still showed.
+  --hc-panel-pane:       253, 254, 255;
+  --hc-panel-ink:        26, 33, 48;
+  --hc-panel-text:       #1a2130;
+  --hc-panel-shadow:     18, 34, 58;
   --hc-panel-sheen:      255, 255, 255;
 
-  --hc-chrome-glass:     255, 253, 246;
+  --hc-chrome-glass:     250, 251, 253;
   --hc-chrome-glass-a:   0.82;
-  --hc-chrome-rule:      79, 86, 106;
-  --hc-chrome-rule-firm: 26, 31, 44;
-  --hc-chrome-accent:    31, 67, 118;
-  --hc-chrome-ink:       26, 31, 44;
-  --hc-chrome-text:      #1a1f2c;
-  --hc-chrome-shadow:    40, 44, 60;
+  --hc-chrome-rule:      62, 74, 94;
+  --hc-chrome-rule-firm: 26, 33, 48;
+  --hc-chrome-accent:    22, 104, 196;
+  --hc-chrome-ink:       26, 33, 48;
+  --hc-chrome-text:      #1a2130;
+  --hc-chrome-shadow:    18, 34, 58;
   --hc-chrome-sheen:     255, 255, 255;
 
   // ── THE INK LADDER ────────────────────────────────────────────────
@@ -279,21 +314,26 @@
 
 @mixin md-dark-tokens {
   --md-is-light: 0;
-  // Today's chrome, value for value — routing it through the roles is what
-  // lets a theme change it; dark itself is untouched.
+  // DARK IS ONE HUE ALL THE WAY DOWN. It had light's disagreement mirrored:
+  // a cold blue-black ground under warm cream ink (#e8e2d6) with a tan second
+  // (#b6a99a) and a mud third (#7a7060). A warm mark on a cold ground has
+  // nowhere to sit, and at the faint end it stops being a colour and becomes
+  // a stain — which is exactly where a secondary label lives. Every neutral
+  // here carries the ground's own blue-slate now, and the pane went with them
+  // (13,15,21 was a neutral charcoal floating on a blue page).
   --hc-chrome-glass-a:   0.78;
-  --hc-panel-pane:       13, 15, 21;
-  --hc-panel-ink:        238, 244, 248;
-  --hc-panel-text:       #eef2f5;
-  --hc-panel-shadow:     0, 0, 0;
+  --hc-panel-pane:       12, 19, 27;
+  --hc-panel-ink:        227, 237, 245;
+  --hc-panel-text:       #e3ecf3;
+  --hc-panel-shadow:     2, 8, 14;
   --hc-panel-sheen:      255, 255, 255;
   --hc-chrome-glass:     8, 16, 26;
-  --hc-chrome-rule:      72, 104, 124;
-  --hc-chrome-rule-firm: 84, 122, 146;
-  --hc-chrome-accent:    126, 182, 214;
-  --hc-chrome-ink:       245, 245, 245;
-  --hc-chrome-text:      #eef2f5;
-  --hc-chrome-shadow:    0, 0, 0;
+  --hc-chrome-rule:      76, 104, 128;
+  --hc-chrome-rule-firm: 100, 134, 162;
+  --hc-chrome-accent:    126, 195, 238;
+  --hc-chrome-ink:       234, 242, 248;
+  --hc-chrome-text:      #e3ecf3;
+  --hc-chrome-shadow:    2, 8, 14;
 
   // A translucent white subtracts more from near-black than ink does from
   // cream, so every weight costs less here. These are today's values.
@@ -318,34 +358,45 @@
   --hc-status-swarm:  #78c8ff;
   --hc-shield-l: 50%;
 
-  --md-surface:           #0e161c;
-  --md-surface-dim:       #090f15;
-  --md-surface-bright:    #1c2832;
-  --md-surface-c-lowest:  #070a0e;
-  --md-surface-c-low:     #101a23;
-  --md-surface-c:         #16212c;
-  --md-surface-c-high:    #1d2b37;
-  --md-surface-c-highest: #263544;
-  --md-on-surface:        #e8e2d6;
-  --md-on-surface-strong: #f6f0e2;
-  --md-on-surface-var:    #b6a99a;
-  --md-on-surface-faint:  #7a7060;
-  --md-primary:           #7eb6d6;
+  --md-surface:           #0d151e;
+  --md-surface-dim:       #080f16;
+  --md-surface-bright:    #1b2836;
+  --md-surface-c-lowest:  #050a0f;
+  --md-surface-c-low:     #101a25;
+  --md-surface-c:         #16222f;
+  --md-surface-c-high:    #1e2c3b;
+  --md-surface-c-highest: #27384a;
+  --md-on-surface:        #e3ecf3;
+  --md-on-surface-strong: #f5fafd;
+  --md-on-surface-var:    #a3b4c4;
+  --md-on-surface-faint:  #6c7e8f;
+
+  // The other end of light's chord — azure, clay, periwinkle — pale rather
+  // than deep. The hues are the ones dark already had; what they lacked was
+  // saturation: #d3a47a and #b297c2 were so washed out that a chip painted
+  // secondary and a chip painted tertiary were both just "beige-ish".
+  --md-primary:           #7ec3ee;
   --md-on-primary:        #06121c;
-  --md-primary-container: #1f4f76;
-  --md-on-primary-c:      #c8e1f0;
-  --md-secondary:         #d3a47a;
+  --md-primary-container: #1c4f7a;
+  --md-on-primary-c:      #cde5f8;
+  --md-secondary:         #eba76b;
   --md-on-secondary:      #2a1a08;
-  --md-secondary-c:       #5a3a18;
-  --md-on-secondary-c:    #f3d8b6;
-  --md-tertiary:          #b297c2;
-  --md-tertiary-c:        #4a3a55;
-  --md-outline:           rgba(232, 226, 214, 0.20);
-  --md-outline-variant:   rgba(232, 226, 214, 0.10);
-  --md-elev-1: 0 1px 2px rgba(0, 0, 0, 0.30), 0 1px 3px 1px rgba(0, 0, 0, 0.15);
-  --md-elev-2: 0 1px 2px rgba(0, 0, 0, 0.30), 0 2px 6px 2px rgba(0, 0, 0, 0.15);
-  --md-elev-3: 0 4px 8px 3px rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0, 0, 0, 0.30);
-  --md-elev-4: 0 6px 10px 4px rgba(0, 0, 0, 0.15), 0 2px 3px rgba(0, 0, 0, 0.30);
+  --md-secondary-c:       #633a17;
+  --md-on-secondary-c:    #f8dcbe;
+  --md-tertiary:          #b0a4f0;
+  --md-tertiary-c:        #3a3470;
+  --md-outline:           rgba(227, 237, 245, 0.18);
+  --md-outline-variant:   rgba(227, 237, 245, 0.09);
+
+  // A PURE-BLACK SHADOW ON A NEAR-BLACK GROUND SEPARATES NOTHING — dark's
+  // panels have been floating on their 1px sheen alone, which is why a
+  // popover over a tool window read as one flat sheet. Tinted with the
+  // ground's own blue-black, carried deep enough to actually subtract, and a
+  // step larger at the top of the ladder where the lift has to be obvious.
+  --md-elev-1: 0 1px 2px rgba(2, 8, 14, 0.44), 0 1px 3px 1px rgba(2, 8, 14, 0.28);
+  --md-elev-2: 0 1px 2px rgba(2, 8, 14, 0.48), 0 2px 6px 2px rgba(2, 8, 14, 0.30);
+  --md-elev-3: 0 4px 10px 3px rgba(2, 8, 14, 0.34), 0 1px 3px rgba(2, 8, 14, 0.50);
+  --md-elev-4: 0 8px 16px 4px rgba(2, 8, 14, 0.34), 0 2px 4px rgba(2, 8, 14, 0.50);
 }
 
 [data-theme="dark"] { @include md-dark-tokens; }
@@ -356,6 +407,12 @@
 // hive dressed in a colour, not a screen turned up. They exist because the
 // system had exactly one bright value-set and it was a beige office — the
 // shell could be legible or it could be pleasant, never both.
+//
+// The three levers below were then taken back UP the dimmer: light and dark
+// now hold a chord and coloured light of their own (see the notes on each).
+// So the beige office is gone, and what separates the three from the two ends
+// is no longer quality — it is that a LOOK commits to a hue, where light and
+// dark stay neutral on purpose. The spring below is still theirs alone.
 //
 // What makes them read as bright is not the surface hex. It is three things
 // the old sets never did:

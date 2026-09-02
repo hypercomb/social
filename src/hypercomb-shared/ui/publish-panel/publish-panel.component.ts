@@ -84,6 +84,26 @@ interface PublishViewChoice {
   dormant?: boolean
 }
 
+/** Mirrors ConcealedItem in essentials/concealment/concealment.ts — shared
+ *  cannot import essentials, so the shape is kept field-for-field by hand. */
+interface HiddenItem {
+  sig: string
+  scope: string
+  label: string
+  from: string
+  deletable: boolean
+}
+
+/** Mirrors HiddenRenderPayload in concealment/concealment.drone.ts. */
+interface HiddenRenderish {
+  items?: HiddenItem[]
+  gone?: string[]
+}
+
+/** The scope this panel's rows are hidden under, so the delete area can tell
+ *  a published version from a host's build. */
+const VERSION_SCOPE = 'publish-version'
+
 interface PublishCollision {
   key: string
   paths: string[]
@@ -275,7 +295,7 @@ export class PublishPanelComponent implements OnDestroy {
   effectiveTab(row: PublishRow): PublishTab {
     const tab = this.activeTab()
     if (tab === 'opens' && (row.segments.length === 0 || this.viewsFor(row).length === 0)) return 'status'
-    if (tab === 'versions' && row.versions.length === 0) return 'status'
+    if (tab === 'versions' && this.versionsOf(row).length === 0 && this.hiddenFor(row).length === 0) return 'status'
     return tab
   }
 
@@ -295,14 +315,72 @@ export class PublishPanelComponent implements OnDestroy {
    *  A branch with no live head yet has nothing to single out, so it opens
    *  showing its newest — there is no "active" to collapse to. */
   versionsShown(row: PublishRow): { sig: string; at: number }[] {
-    if (this.versionsOpen()) return row.versions
-    const live = row.versions.find(v => v.sig === row.live)
-    return live ? [live] : row.versions.slice(0, 1)
+    const versions = this.versionsOf(row)
+    if (this.versionsOpen()) return versions
+    const live = versions.find(v => v.sig === row.live)
+    return live ? [live] : versions.slice(0, 1)
   }
 
-  /** How many the fold is hiding — 0 means the toggle would say nothing. */
-  versionsHidden(row: PublishRow): number {
-    return Math.max(0, row.versions.length - this.versionsShown(row).length)
+  /**
+   * This branch's versions, minus the ones you put away.
+   *
+   * HIDE FIRST, DELETE SECOND — the same doctrine the host ledger follows, and
+   * the same pool behind it. A version list grows with every publish and old
+   * heads never stop being valid, so putting one away has to be an ordinary,
+   * reversible act; deleting is in the delete area below and nowhere else.
+   */
+  versionsOf(row: PublishRow): { sig: string; at: number }[] {
+    const concealed = this.concealed()
+    return concealed.size === 0 ? row.versions : row.versions.filter(v => !concealed.has(v.sig))
+  }
+
+  /** Versions you have put away, this panel's scope only. */
+  readonly hidden = signal<HiddenItem[]>([])
+  /** Every signature not to list — hidden AND deleted. */
+  readonly concealed = signal<Set<string>>(new Set())
+  /** Is the delete area open? Closed by default: somewhere you go. */
+  readonly hiddenOpen = signal(false)
+
+  /** What you put away on THIS branch. */
+  hiddenFor(row: PublishRow): HiddenItem[] {
+    return this.hidden().filter(i => i.from === row.path)
+  }
+
+  toggleHiddenArea(): void {
+    this.hiddenOpen.set(!this.hiddenOpen())
+  }
+
+  /** Put one version away. The live head is never on offer to hide — the row
+   *  that answers "what is out there right now" cannot be the one you lose. */
+  hideVersion(row: PublishRow, version: { sig: string; at: number }): void {
+    if (version.sig === row.live) return
+    EffectBus.emit('hidden:conceal', {
+      sig: version.sig,
+      scope: VERSION_SCOPE,
+      label: `${this.label(row) || row.path} ${this.age(version.at)}`,
+      from: row.path,
+      // A published head is on the host and in your own history; forgetting
+      // the row forgets a listing, never the version.
+      deletable: true,
+    })
+  }
+
+  restoreVersion(item: HiddenItem): void {
+    EffectBus.emit('hidden:reveal', { sig: item.sig })
+  }
+
+  /** Forget a version listing for good — locally. The pool refuses anything
+   *  that was not hidden first, so this cannot be reached from the list. */
+  destroyVersion(item: HiddenItem): void {
+    if (!item.deletable) return
+    EffectBus.emit('hidden:delete', { sig: item.sig })
+  }
+
+  /** How many the fold is holding back — 0 means the toggle would say
+   *  nothing. NOT the same as hidden: the fold is a view of the list, hiding
+   *  is a thing you did to a version. */
+  versionsFolded(row: PublishRow): number {
+    return Math.max(0, this.versionsOf(row).length - this.versionsShown(row).length)
   }
 
   /** THE PICK-LIST for one branch: every host you know, each saying whether
@@ -353,6 +431,14 @@ export class PublishPanelComponent implements OnDestroy {
   constructor() {
     const ageTimer = setInterval(() => this.renderedAt.set(Date.now()), 15_000)
     this.#cleanups.push(() => clearInterval(ageTimer))
+
+    // WHAT HAS BEEN PUT AWAY — the same pool and the same owner the host
+    // ledger reads, so hiding means one thing across the shell.
+    this.#cleanups.push(EffectBus.on<HiddenRenderish>('hidden:render', (p) => {
+      const items = (p?.items ?? []).filter(i => i?.scope === VERSION_SCOPE)
+      this.hidden.set(items)
+      this.concealed.set(new Set([...items.map(i => i.sig), ...(p?.gone ?? [])]))
+    }))
 
     this.#cleanups.push(EffectBus.on<PublishRenderPayload>('publish:render', (p) => {
       if (!p) return

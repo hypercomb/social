@@ -44,6 +44,12 @@ export type ReplicationResult = {
 export type ReplicationOptions = {
   limit?: number
   concurrency?: number
+  /** How a held atom names its children. Defaults to {@link mineSignatures} —
+   *  every literal signature in the bytes. A caller that knows the record
+   *  shape passes a selector instead, which is how a STRUCTURED closure (a
+   *  layer's declared `cells`, say) is walked without the protocol learning
+   *  anything about that shape. Same dialect, narrower frontier. */
+  children?: (bytes: Uint8Array<ArrayBuffer>) => string[]
 }
 
 export const isComplete = (result: ReplicationResult): boolean =>
@@ -83,8 +89,9 @@ const resolveOne = async (
   return bytes
 }
 
-/** Resolve the reachable signature closure of one root: walk every literal
- *  signature the held atoms name, breadth-first, until the frontier is dry. */
+/** Resolve the reachable signature closure of one root: walk every signature
+ *  the held atoms name, breadth-first, until the frontier is dry. What "name"
+ *  means is the `children` option's business — literal mining by default. */
 export const resolveSignatureClosure = async (
   root: string,
   io: ReplicationIo,
@@ -93,6 +100,7 @@ export const resolveSignatureClosure = async (
   if (!SIGNATURE_RE.test(root)) throw new TypeError('root must be a lowercase 64-hex signature')
   const limit = options.limit ?? DEFAULT_LIMIT
   const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY
+  const childrenOf = options.children ?? mineSignatures
   const seen = new Set([root])
   const queue = [root]
   const result: ReplicationResult = { root, total: 0, present: 0, fetched: 0, held: [], holes: [], refused: [], limited: false }
@@ -104,7 +112,7 @@ export const resolveSignatureClosure = async (
     await Promise.all(frontier.map(async (signature) => {
       const bytes = await resolveOne(signature, io, result)
       if (!bytes) return
-      for (const child of mineSignatures(bytes)) {
+      for (const child of childrenOf(bytes)) {
         if (seen.has(child)) continue
         seen.add(child)
         queue.push(child)

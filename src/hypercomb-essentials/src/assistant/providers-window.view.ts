@@ -37,6 +37,12 @@ import './providers/builtin-providers.js'
 import { importProviderSpec, providerOrigin } from './providers/provider-discovery.js'
 import type { LlmProviderDescriptor } from './providers/llm-provider.types.js'
 import { LOCAL_HOST_STORAGE_KEY, localLlmHost } from './providers/local.provider.js'
+import {
+  checkLocalServer,
+  localServerReport,
+  machineLocalEndpoint,
+  recheckLocalServers,
+} from './providers/local-liveness.js'
 import { modelPalette } from '../presentation/avatars/agent-model.js'
 
 const STYLE_ID = 'hc-providers-styles'
@@ -322,11 +328,16 @@ export class ProvidersWindowView extends EventTarget {
     llmKeyStore.addEventListener('change', rerender)
     llmActivation.addEventListener('change', rerender)
     llmPolicy.addEventListener('change', rerender)
+    // A local server waking or dying moves no descriptor and flips no switch,
+    // so it arrives as the one effect that means "who answers may have
+    // changed" — the same announcement the policy makes.
+    const offBus = EffectBus.on('llm:policy-changed', rerender)
     this.#unlisten = () => {
       registry.removeEventListener('change', rerender)
       llmKeyStore.removeEventListener('change', rerender)
       llmActivation.removeEventListener('change', rerender)
       llmPolicy.removeEventListener('change', rerender)
+      offBus()
     }
 
     this.#render()
@@ -644,7 +655,11 @@ export class ProvidersWindowView extends EventTarget {
     const hasKey = llmKeyStore.has(provider.id)
     const enabled = llmActivation.isEnabled(provider.id)
     const availability = availabilityOf(provider)
-    const usable = enabled && (!needsKey || hasKey) && availability !== 'exhausted'
+    // A machine-local server that is not answering is not usable, whatever
+    // the switches say — the roster filters agree (local-liveness.ts).
+    const localState = machineLocalEndpoint(provider) ? localServerReport(provider).state : ''
+    const localDown = !!localState && localState !== 'awake'
+    const usable = enabled && (!needsKey || hasKey) && !localDown && availability !== 'exhausted'
     // ACTIVE means this provider would answer the chat's ordinary automatic
     // request now. Merely being enabled is permission, not current selection.
     const active = usable && llmPolicy.designate({ tier: 'fast', streaming: true })?.providerId === provider.id
@@ -676,6 +691,12 @@ export class ProvidersWindowView extends EventTarget {
           : this.#t('providers.off', 'off'))
       : availability === 'exhausted'
         ? this.#t('providers.exhausted', 'limit reached')
+      : localState === 'blocked'
+        ? this.#t('providers.localBlockedShort', 'origin blocked')
+      : localState === 'needs-permission'
+        ? this.#t('providers.localPermissionShort', 'needs permission')
+      : localDown
+        ? this.#t('providers.localAsleepShort', 'not running')
       : active
         ? this.#t('providers.active', 'active')
         : !usable
@@ -755,12 +776,21 @@ export class ProvidersWindowView extends EventTarget {
       host.value = localLlmHost()
       host.addEventListener('change', () => {
         try { localStorage.setItem(LOCAL_HOST_STORAGE_KEY, host.value.trim()) } catch { /* session-only */ }
+        // A different address is a different machine: nothing we knew about
+        // the old one is evidence about this one.
+        recheckLocalServers()
       })
       endpoint.append(this.#label(this.#t('providers.endpoint', 'Endpoint')), host)
     } else if (provider.endpoint) {
       endpoint.append(this.#label(this.#t('providers.endpoint', 'Endpoint')), this.#mono(provider.endpoint))
     }
     if (endpoint.childNodes.length) detail.appendChild(endpoint)
+
+    // IS IT ACTUALLY RUNNING? Every other row's readiness is a stored bit —
+    // a key is pasted or it is not. A server on this machine is a process,
+    // and the console is where a participant looks after starting one.
+    const localHost = machineLocalEndpoint(provider)
+    if (localHost) detail.appendChild(this.#localServer(provider, localHost))
 
     // key — the one write into the key store.
     if (needsKey) {
@@ -854,6 +884,69 @@ export class ProvidersWindowView extends EventTarget {
       detail.appendChild(line)
     }
     return detail
+  }
+
+  /**
+   * The live state of a machine-local server, with the fix attached to the
+   * failure. Three of the four states are actionable and each needs a
+   * different action, which is the whole reason the probe separates them.
+   */
+  #localServer(provider: LlmProviderDescriptor, host: string): HTMLElement {
+    const block = document.createElement('div')
+    block.className = 'hc-provider-usage'
+    const report = localServerReport(provider)
+
+    const line = document.createElement('div')
+    line.className = 'hc-provider-usage-line'
+    line.textContent =
+      report.state === 'awake'
+        ? this.#t('providers.localRunning', 'Running — {count} models installed')
+            .replace('{count}', String(report.models.length))
+      : report.state === 'empty'
+        ? this.#t('providers.localEmpty', 'Running, but no model is installed yet — pull one to use it.')
+      : report.state === 'needs-permission'
+        ? this.#t(
+            'providers.localPermission',
+            'Your browser has to allow this page to reach your own machine. '
+            + 'Press Check again and choose Allow.',
+          )
+      : report.state === 'blocked'
+        ? this.#t(
+            'providers.localBlocked',
+            'Running, but it refused this page. Allow this origin — for Ollama, '
+            + 'set OLLAMA_ORIGINS={origin} and restart it.',
+          ).replace('{origin}', globalThis.location?.origin ?? '')
+      : report.state === 'asleep'
+        ? this.#t('providers.localAsleep', 'Not running — start it, then check again.')
+        : this.#t('providers.localChecking', 'Checking…')
+
+    block.append(this.#label(this.#t('providers.localServer', 'This machine')), line)
+
+    const again = document.createElement('button')
+    again.className = 'hc-provider-btn is-quiet'
+    again.textContent = this.#t('providers.recheck', 'Check again')
+    again.addEventListener('click', () => {
+      again.disabled = true
+      again.textContent = this.#t('providers.localChecking', 'Checking…')
+      void checkLocalServer(provider).finally(() => this.#render())
+    })
+    block.appendChild(again)
+
+    const docs = document.createElement('a')
+    docs.className = 'hc-provider-docs'
+    docs.href = provider.docsUrl
+    docs.target = '_blank'
+    docs.rel = 'noopener noreferrer'
+    docs.textContent = this.#t('providers.localGet', 'Install a local server')
+    if (report.state !== 'awake') block.appendChild(docs)
+
+    // The address is part of the answer: "not running" is only useful next to
+    // the door that was knocked on.
+    const where = document.createElement('div')
+    where.className = 'hc-provider-usage-line is-dim'
+    where.textContent = host
+    block.appendChild(where)
+    return block
   }
 
   #label(text: string): HTMLElement {

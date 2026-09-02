@@ -196,10 +196,22 @@
                       <span class="pdet-vlive">{{ 'publish.state.live' | t }}</span>
                     }
                   </button>
+                  <!-- HIDE, never delete. The live head is never on offer:
+                       the row that says what is out there right now is not a
+                       row you can lose. -->
+                  @if (v.sig !== row.live) {
+                    <button
+                      class="pdet-version-hide"
+                      type="button"
+                      [attr.data-tip]="'publish.hidden.hide' | t"
+                      [attr.aria-label]="'publish.hidden.hide' | t"
+                      (click)="hideVersion(row, v)"
+                    >✕</button>
+                  }
                 </li>
               }
             </ul>
-            @if (versionsOpen() || versionsHidden(row) > 0) {
+            @if (versionsOpen() || versionsFolded(row) > 0) {
               <button
                 class="pdet-versions-more"
                 type="button"
@@ -207,7 +219,49 @@
                 (click)="versionsOpen.set(!versionsOpen())"
               >{{ versionsOpen()
                    ? ('publish.row.versions-fewer' | t)
-                   : ('publish.row.versions-more' | t: { count: versionsHidden(row) }) }}</button>
+                   : ('publish.row.versions-more' | t: { count: versionsFolded(row) }) }}</button>
+            }
+
+            <!-- THE DELETE AREA — only what you put away, and the only place
+                 deleting is on the table. Deleting a version here forgets the
+                 listing; the head itself is in your history and on whatever
+                 host it was published to, untouched. -->
+            @if (hiddenFor(row); as put) {
+              @if (put.length > 0) {
+                <button
+                  class="pdet-versions-more"
+                  type="button"
+                  [attr.aria-expanded]="hiddenOpen()"
+                  (click)="toggleHiddenArea()"
+                >{{ (hiddenOpen() ? 'publish.hidden.close' : 'publish.hidden.open') | t: { count: put.length } }}</button>
+
+                @if (hiddenOpen()) {
+                  <p class="pdet-hidden-note">{{ 'publish.hidden.note' | t }}</p>
+                  <ul class="pdet-versions pdet-hidden-list">
+                    @for (item of put; track item.sig) {
+                      <li>
+                        <span class="pdet-version">
+                          <code class="pdet-sig" [attr.title]="item.sig">{{ short(item.sig) }}</code>
+                          <span class="pdet-vage">{{ item.label }}</span>
+                        </span>
+                        <button
+                          class="pdet-version-restore"
+                          type="button"
+                          (click)="restoreVersion(item)"
+                        >{{ 'publish.hidden.restore' | t }}</button>
+                        @if (item.deletable) {
+                          <button
+                            class="pdet-version-delete"
+                            type="button"
+                            [attr.data-tip]="'publish.hidden.delete-tip' | t"
+                            (click)="destroyVersion(item)"
+                          >{{ 'publish.hidden.delete' | t }}</button>
+                        }
+                      </li>
+                    }
+                  </ul>
+                }
+              }
             }
           }
 

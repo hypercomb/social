@@ -22,6 +22,7 @@
 
 import { Drone } from '@hypercomb/core'
 import { kindsForLabel } from '../commands/decoration-kind-index.js'
+import { MOBILE_MODE_IOC_KEY } from '../preferences/mobile-pheromones.js'
 import { deliverLink } from './deliver-link.js'
 import { hostCurrentBranch } from './host-gesture.js'
 
@@ -127,13 +128,16 @@ export class ShareLinkDrone extends Drone {
     return `${window.location.origin}/${path}${intent}`
   }
 
-  /** Is this a phone-shaped session? Same predicate as MobileModeService
-   *  (pointer:coarse + phone-shaped in either dimension), checked inline so
-   *  the answer never depends on service registration order. */
+  /** Is this a phone-shaped session? ONE definition of mobile: the
+   *  MobileModeService (coarse pointer AND phone-shaped in either dimension,
+   *  OR the `/mobile on|off` override). This drone used to keep a private
+   *  media-query copy of that predicate, which ignored the override — so
+   *  `/mobile on` gave the deck, the bar and the rails but left share on the
+   *  desktop path (mobile-rails-projection.md §9). The service is read live
+   *  on every tap, so registration order does not matter either: before it
+   *  registers the answer is simply "not a phone". */
   #phone(): boolean {
-    return typeof window.matchMedia === 'function' &&
-      window.matchMedia('(pointer: coarse)').matches &&
-      window.matchMedia('(max-width: 599px), (max-height: 449px)').matches
+    return this.#ioc()?.get<{ active?: boolean }>(MOBILE_MODE_IOC_KEY)?.active === true
   }
 
   async #mint(label: string): Promise<void> {

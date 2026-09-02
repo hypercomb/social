@@ -387,7 +387,8 @@
 // Orientation survives the soft-keyboard height reduction in portrait.
 @media (max-width: $bp-phone-max) and (orientation: portrait) {
   .header-bar {
-    --hc-rail-btn: 2.6rem;
+    // 2.75rem = 44px at the root size, the thumb floor. 2.6rem was 41.6px.
+    --hc-rail-btn: 2.75rem;
     --hc-rail-glyph: 1.6rem;
     --hc-rail-gap: 0.35rem;
     // Not a wrap budget here — the portrait rail is one scrolled line, never
@@ -416,15 +417,23 @@
 }
 
 // Landscape phones are WIDE but SHORT, so the width-based `phone-only` misses
-// them. Hide the docked command line here too — the mobile control sidebar on
-// the right edge is the input surface in landscape, same as the bottom bar is
-// in portrait. Long-pressing the canvas still reveals it (`.input-open`).
+// them. Hide the docked command line here too — the mobile control rail down
+// the LEFT edge is the input surface in landscape (its keyboard disc reveals
+// this bar), same as the bottom bar is in portrait. Long-pressing the canvas
+// still reveals it (`.input-open`). While hidden, the controls bar drops the
+// measured `--hc-header-bottom` so nothing anchors to a header that is not
+// there.
 @media (max-height: 449px) and (orientation: landscape) {
   .header-bar { display: none; }
 
   .header-bar.input-open {
     display: flex;
     height: clamp(3rem, 24vh, 4.5rem);
+    // The revealed rail is tapped with a thumb too: the desktop metrics
+    // (1.6rem boxes, 25.6px) are far under the 44px floor.
+    --hc-rail-btn: 2.75rem;
+    --hc-rail-glyph: 1.6rem;
+    --hc-rail-gap: 0.35rem;
   }
 
   .header-bar.input-open .mesh-header,

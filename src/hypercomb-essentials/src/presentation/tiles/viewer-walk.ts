@@ -39,7 +39,7 @@
 
 import { EffectBus } from '@hypercomb/core'
 import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
-import type { VisualBeeRegistry } from '../../commands/visual-bee-registry.js'
+import type { VisualBeeDescriptor, VisualBeeRegistry } from '../../commands/visual-bee-registry.js'
 
 /** Where a sideways step lands. */
 export type WalkTarget =
@@ -71,13 +71,22 @@ export function nextTile(label: string, delta: number): string | null {
   return next && next !== label ? next : null
 }
 
+/** EVERY kind a bee answers for: the one it writes, the further-live peers it
+ *  is entered from (`alsoKinds` — a website artifact opens the slides), and
+ *  the retired spellings still on layers in the wild (`legacyKinds`). One
+ *  list, so "does this tile carry this view" is asked the same way everywhere
+ *  — the enter icon, the sideways walk, the close-up. */
+export function kindsOf(bee: Pick<VisualBeeDescriptor, 'decorationKind' | 'alsoKinds' | 'legacyKinds'>): string[] {
+  return [bee.decorationKind, ...(bee.alsoKinds ?? []), ...(bee.legacyKinds ?? [])]
+}
+
 /** Does this tile carry this viewer's content? The registered bee's own
- *  decoration kind, asked of the index — never a per-view special case. */
+ *  kinds, asked of the index — never a per-view special case. */
 export function tileHasView(label: string, view: string): boolean {
   const registry = window.ioc?.get?.<VisualBeeRegistry>('@diamondcoreprocessor.com/VisualBeeRegistry')
   const bee = registry?.get?.(view)
   if (!bee || bee.behavior === 'navigation') return false
-  return hasDecorationKind(label, bee.decorationKind)
+  return kindsOf(bee).some(kind => hasDecorationKind(label, kind))
 }
 
 /** The action name that OPENS a viewer on a tile — the affordance every render
@@ -86,12 +95,19 @@ export function tileHasView(label: string, view: string): boolean {
  *  one side, what acts on it on the other. */
 export const VIEW_ENTER_PREFIX = 'view-enter:'
 
+/** The action name that OPENS a viewer on a tile that does NOT carry it but
+ *  is OFFERED it — a bee's `offersFor(ctx)` said yes (the scroller on any
+ *  branch). Same door as `view-enter:` once pressed; a different name so the
+ *  close-up can list both under "open as" while the overlay keeps them apart
+ *  (present vs offered wear different tints). */
+export const VIEW_OPEN_PREFIX = 'view-open:'
+
 /** Every viewer this tile actually carries — the options its close-up can
  *  offer, and what a sideways step has to choose from. */
 export function viewsFor(label: string): string[] {
   const registry = window.ioc?.get?.<VisualBeeRegistry>('@diamondcoreprocessor.com/VisualBeeRegistry')
   return (registry?.all?.() ?? [])
-    .filter(bee => bee.behavior !== 'navigation' && hasDecorationKind(label, bee.decorationKind))
+    .filter(bee => bee.behavior !== 'navigation' && kindsOf(bee).some(kind => hasDecorationKind(label, kind)))
     .map(bee => bee.view)
 }
 

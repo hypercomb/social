@@ -222,6 +222,7 @@
 <div
   class="pill-stage"
   [class.faded]="!visible()"
+  [class.view-hidden]="viewHidden()"
   [class.over-view]="overView()"
   [class.positioned]="!!pillPos() && !isMobile() && !dockSide()"
   [class.dock-left]="dockSide() === 'left' && !isMobile()"
@@ -268,19 +269,20 @@
     @case ('browsing') {
 
       @if (isMobile()) {
-        <!-- ═══ MOBILE: balanced bar — two buttons each side, fixed center ═══
-             back · fit │ CAMERA │ fullscreen · solo/swarm.
+        <!-- ═══ MOBILE: five labelled discs, fixed centre ═══
+             back · views │ CAMERA │ share · solo/swarm.
              The centre button is the anchor, and on a phone the act that
              belongs under the thumb is CAPTURE: point at something, press,
-             and a tile is created from the photo. FIT (centre the screen) took
-             the mic's old slot: the thing you reach for over and over on a
-             phone is "put the hive back where I can see it", and the mic moved
-             into the command line, where the words it dictates end up anyway.
-             FULLSCREEN takes fit's former slot — a phone screen is small
-             enough that reclaiming the browser chrome is worth a permanent
-             control. Pheromones came off the bar entirely; it lives in the
-             header rail (and in the tag strip's own opener). Every button is
-             evenly spaced across the bar, so the extra landscape control never
+             and a tile is created from the photo. VIEWS opens the layer deck
+             — big plates for this layer's views, what can be added here, and
+             the how-you-see controls (rung, fullscreen, pheromones, pin,
+             undo/redo, library) that used to hide one tap away behind an
+             unlabeled chevron. SHARE opens the publish sheet for this page.
+             FIT left the bar: the rails own the fit on a phone, and a fit
+             disc that double-tapped into "always fit" with no cue was a trap.
+             Every disc carries a word under it (`.ctl-label`) — five glyphs
+             alone read as five abstract marks — and every button is evenly
+             spaced across the bar, so the extra landscape control never
              bunches one side. -->
 
         <div class="controls-section mobile-nav">
@@ -335,24 +337,24 @@
             </div>
           }
           <div class="mobile-side left" data-consumes-wheel>
+            <!-- BACK — fires on pointerdown; on a phone it first puts away any
+                 sheet that is up (goBack), and only then walks the lineage. -->
             <button class="ctl-btn back-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()"
                     (pointerdown)="onBackPointerDown($event)" (click)="onBackClick()"
                     [attr.aria-label]="'controls.go-back' | t">
               <span class="mat-sym">arrow_back</span>
+              <span class="ctl-label" aria-hidden="true">{{ 'controls.back' | t }}</span>
             </button>
-            <!-- FIT — centre the screen. It goes away on a pinned layer, same
-                 as the desktop rail's fit/zoom set; an inert spacer holds the
-                 slot so the row keeps its rhythm. -->
-            @if (pinnedHere()) {
-              <div class="ctl-btn pinned-spacer" aria-hidden="true"></div>
-            } @else {
-              <button class="ctl-btn fit-btn"
-                      [class.fit-global]="fitButtonState() === 'global'"
-                      (click)="fitOrCenter($event)" (dblclick)="lockFit()"
-                      [attr.aria-label]="'controls.fit-content' | t">
-                <span class="mat-sym">center_focus_strong</span>
-              </button>
-            }
+            <!-- VIEWS — opens the layer deck (`layer:deck-open`), a sheet of
+                 big plates: open this layer as one of its views, add a
+                 creation here, and the how-you-see controls. It replaces the
+                 chevron that used to pop a second row of six small discs. -->
+            <button class="ctl-btn views-btn"
+                    (click)="openViews()"
+                    [attr.aria-label]="'controls.views' | t">
+              <span class="mat-sym">apps</span>
+              <span class="ctl-label" aria-hidden="true">{{ 'controls.views' | t }}</span>
+            </button>
             <!-- LANDSCAPE ONLY: portrait pins the command line permanently,
                  so a reveal toggle would be dead weight there. In landscape
                  the bar is collapsed to preserve the short viewport; this
@@ -377,21 +379,22 @@
                   (click)="openCamera()"
                   [attr.aria-label]="'controls.camera' | t">
             <span class="mat-sym">photo_camera</span>
+            <span class="ctl-label" aria-hidden="true">{{ 'camera.title' | t }}</span>
           </button>
 
           <div class="mobile-side right" data-consumes-wheel>
-            <!-- VIEW — the fourth slot. Fullscreen and the lane ladder used to
-                 compete for it; six controls on one phone-width row squeezed
-                 every one of them. They now live one row up, and this opens
-                 that row. The bottom five stay five, with the camera in the
-                 middle where the thumb lands. -->
-            <button class="ctl-btn view-row-btn" [class.active]="viewRowOpen()"
-                    (click)="toggleViewRow($event)"
-                    [attr.aria-label]="'controls.view-row' | t">
-              <span class="mat-sym">{{ viewRowOpen() ? 'expand_more' : 'expand_less' }}</span>
+            <!-- SHARE — the publish sheet for this page (`publish:view-toggle`):
+                 publish it, its links, the community hosts. Community sharing
+                 has to fit on the phone, and this is its one press. -->
+            <button class="ctl-btn share-btn"
+                    (click)="openShare()"
+                    [attr.aria-label]="'controls.share' | t">
+              <span class="mat-sym">ios_share</span>
+              <span class="ctl-label" aria-hidden="true">{{ 'controls.share' | t }}</span>
             </button>
             <button class="ctl-btn mesh-mobile-btn" [class.shield-mode]="meshPublic()" (click)="toggleMeshPublic()" [attr.aria-label]="(meshPublic() ? 'mesh.swarm' : 'mesh.solo') | t">
               <span class="mat-sym" [class.filled]="meshPublic()">{{ meshPublic() ? 'groups' : 'person' }}</span>
+              <span class="ctl-label" aria-hidden="true">{{ (meshPublic() ? 'controls.swarm' : 'controls.solo') | t }}</span>
             </button>
           </div>
         </div>

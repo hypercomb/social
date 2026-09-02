@@ -7,6 +7,11 @@
       "title": "dylan"
     },
     {
+      "host": "favorites.hypercomb.com",
+      "label": "favorites",
+      "title": "favorites"
+    },
+    {
       "host": "pluginthematrix.hypercomb.com",
       "label": "pluginthematrix",
       "title": "Plugin the Matrix"

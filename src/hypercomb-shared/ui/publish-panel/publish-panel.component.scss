@@ -607,6 +607,56 @@ $quiet: #8ea2b0;
 .pdet-view.selected ::ng-deep svg { stroke: var(--hc-window-ink-loud); }
 
 // ── versions: the ledger, worn as chips ───────────────────
+// HIDE AND DELETE — a version row carries the quietest possible put-away, and
+// the delete area below it is the only place the destructive one exists.
+.pdet-versions li {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+}
+
+.pdet-version-hide {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  padding: 0 0.3em;
+  font-size: 0.7em;
+  line-height: 1;
+  color: var(--hc-window-ink-quiet);
+  cursor: pointer;
+  opacity: 0.5;
+
+  &:hover { opacity: 1; color: var(--hc-window-ink-loud); }
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+}
+
+.pdet-hidden-note {
+  margin: 0.4em 0 0.5em;
+  font-size: 0.66em;
+  line-height: 1.45;
+  color: var(--hc-window-ink-quiet);
+}
+
+.pdet-hidden-list .pdet-version { cursor: default; opacity: 0.72; }
+
+.pdet-version-restore,
+.pdet-version-delete {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 0.66em;
+  padding: 0.25em 0.5em;
+  border-radius: tw.$radius-control;
+  cursor: pointer;
+  color: var(--hc-window-ink-plain);
+  background: rgba(var(--hc-panel-ink), 0.04);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.1);
+
+  &:hover { background: rgba(var(--hc-panel-ink), 0.09); }
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+}
+
+.pdet-version-delete { border-color: rgba(var(--hc-panel-ink), 0.22); }
+
 .pdet-versions {
   list-style: none;
   margin: 0;

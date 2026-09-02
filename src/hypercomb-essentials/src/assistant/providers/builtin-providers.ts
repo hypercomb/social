@@ -18,8 +18,16 @@ import './deepseek.provider.js'
 import './mistral.provider.js'
 import './local.provider.js'
 
+// Not a vendor either: the heartbeat that asks the machine's own model server
+// whether it is actually running. Imported AFTER the descriptors so the first
+// sweep sees the whole roster — and here rather than inside local.provider so
+// the descriptor file stays a descriptor.
+import { startLocalLivenessWatch } from './local-liveness.js'
+
 // Not a vendor: the sweep that adds every DISCOVERED provider (specs in the
 // `llm:providers` pool) to the same roster, the moment the store is ready.
 import './provider-discovery.js'
+
+startLocalLivenessWatch()
 
 export {}

@@ -9,11 +9,17 @@
 // (bridge op `hive-root-set`). Custody: browser-over-bridge — the key never
 // leaves the browser's NostrSigner; this script holds no secrets.
 //
-// Best-effort by design: uploads to Azure have already succeeded when this
-// runs, and the stamp is idempotent (an unchanged root no-ops). When the
-// bridge is unreachable the script exits 0 but prints an UNMISSABLE owed
-// line with the paste-ready retry — the sentinel simply lags until stamped.
-// Pass --require to make a failed stamp fail the whole command instead.
+// THE DEPLOY PASSES --require, AND THAT IS THE POINT. copy-content has already
+// published the bytes to every target (the relay's content dir is the jwize.com
+// route) by the time this runs, so a failed stamp leaves a package that is
+// perfectly replicable and that nobody moves to: consumers resolve `current`
+// through the signed sentinel, not through the manifest a domain serves. A
+// deploy whose sentinel did not advance is a deploy nobody receives, so it
+// exits non-zero and says so rather than reporting success.
+//
+// The stamp is idempotent (an unchanged root no-ops), so the printed retry is
+// always safe to run — and a HAND invocation stays best-effort (exit 0) so
+// re-running it while the hive is closed is a nudge, not a failure.
 
 import { readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
@@ -94,8 +100,8 @@ try {
     ? (err.message || (err as { code?: string }).code || 'connection failed')
     : String(err)
   console.error(`  │  reason: ${reason}`)
-  console.error('  │  The deploy itself succeeded; consumers see the OLD root')
-  console.error('  │  until stamped. With the hive open, run:')
+  console.error('  │  Bytes ARE published; consumers see the OLD root until')
+  console.error('  │  stamped. With the hive open, run:')
   console.error(`  │    ${retry}`)
   console.error('  └─────────────────────────────────────────────────────────────┘')
   console.error('')

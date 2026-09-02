@@ -21,6 +21,51 @@ recorded take, and lands in the exact cache slot a recorded take would occupy,
 so `teaser.cjs` and `build.cjs` need no flag and no branch — the audio is simply
 already there.
 
+## Your performance, another voice
+
+The clone above reads a line it has never heard you say — which means it is
+guessing the intonation from the text, and it will never put the stress where
+you would. Conversion is the other way round. You read the line; only the voice
+is exchanged. The words, the timing, the emphasis and the breaths are yours.
+
+```bash
+node record.cjs --prompt                          # read them, paced
+node voice.cjs --convert --scenes 1,4,7           # your reads → the narrator
+node voice.cjs --convert --scenes 1 --voice mine  # someone else's read → you
+node voice.cjs --convert --teaser --voice "…-voice.wav"
+```
+
+Takes live in `record/` under the names `record.cjs` already uses, so one read
+can go either way: keep it as your own voice (`node record.cjs`) or render it in
+another (`node voice.cjs --convert`). Either way it goes through `master.cjs`
+and lands in the same cache slot, and no build knows the difference.
+
+`--voice narrator` (the default) takes ten seconds from the line set's own cache
+— whoever is already speaking those lines. Ten is not a shortcut: the decoder
+reads only the first ten seconds of a reference, so a clean ten beats a ragged
+minute.
+
+There is **nothing to re-roll**. A clone samples, so clone.py generates several
+takes and ranks them; a conversion carries the performance it was given. If it
+came out wrong it came out wrong at the microphone, and the fix is another read.
+What is checked is that the words survived — every result is transcribed and
+scored against the script — and that the length did: conversion preserves
+timing, so a result far off its source is a bad convert however clean it sounds.
+Measured here: a 6.46s read came back 6.48s.
+
+A flag is "go and listen", not a verdict. The ear is hearing a voice it has
+never heard, and it mishears clean conversions more readily than it mishears the
+narrator.
+
+**It runs on the GPU.** Measured on the RTX 5060 (sm_120) with torch
+2.11.0+cu128: a 6.5s line converts in **2s**, a second in **1s** — against 16s
+each on the CPU build this venv shipped with. The whole 13-minute reel is a
+couple of minutes of conversion, not half an hour.
+
+Worth knowing: the line that came back muddy on the CPU (20% WER, "its address"
+heard as "attached to rest") came back clean here. One run is not a law — but
+do not read a single bad convert as a bad take.
+
 ## One-time setup
 
 Python 3.12 and ffmpeg on PATH, then:
@@ -28,8 +73,21 @@ Python 3.12 and ffmpeg on PATH, then:
 ```bash
 python -m venv "%USERPROFILE%\.hcvoice\venv"
 "%USERPROFILE%\.hcvoice\venv\Scripts\python" -m pip install chatterbox-tts "setuptools<81"
+"%USERPROFILE%\.hcvoice\venv\Scripts\python" -m pip install --upgrade ^
+  --index-url https://download.pytorch.org/whl/cu128 torch torchaudio
 ```
 
+- The second install is what puts it on the GPU. `chatterbox-tts` brings a CPU
+  torch, and Blackwell (`sm_120`) needs cu128, which starts at torch 2.7. pip
+  will say chatterbox pins `torch==2.6.0` and call the upgrade "incompatible" —
+  expected: that pin is metadata, and both models run on 2.11. Verified against
+  driver 591.86. To go back: the same command with `.../whl/cpu` and
+  `torch==2.6.0 torchaudio==2.6.0`.
+- Wavs are written with **soundfile**, not `torchaudio.save` — torchaudio 2.11
+  moved saving behind TorchCodec, which has no usable Windows wheel. soundfile
+  is already here for librosa, so this is one fewer thing to install rather than
+  one more. `ImportError: TorchCodec is required for save_with_torchcodec` means
+  something went back to `ta.save`.
 - **Chatterbox** (Resemble AI, MIT) is the zero-shot cloner and **Whisper**
   (`whisper-base.en`, via transformers) is the ear that checks it. First run
   downloads ~1.2 GB of weights from Hugging Face and caches them.
@@ -49,7 +107,9 @@ python -m venv "%USERPROFILE%\.hcvoice\venv"
   be faked, `guvectorize`, raises rather than returning something quietly wrong.
   If your machine imports the real numba, the shim never loads.
 
-No GPU is needed — on a CPU this speaks about one second of audio per nine.
+No GPU is needed — on a CPU this speaks about one second of audio per nine and
+converts at about 2.5× real time. On the 5060 it converts 3-6× FASTER than real
+time, and a 2-take short line clones in 12s.
 
 ## Use
 

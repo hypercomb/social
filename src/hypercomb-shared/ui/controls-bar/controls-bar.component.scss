@@ -470,6 +470,17 @@ $actions-corner: 12rem;
     }
   }
 
+  // Under a takeover view on a phone the bar is GONE, not dimmed — and no
+  // touch override puts this back (the one on `.faded` below exists because
+  // touch has no hover to recover a dimmed bar with, which is the idle
+  // meaning `.faded` keeps). visibility, not display: the stage keeps its
+  // box, so what it publishes (`--hc-controls-bottom`) does not jump when
+  // the view closes.
+  &.view-hidden {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
   // STANDING BESIDE A WINDOW, NOT UNDER THE CANVAS'S CHROME. A view that keeps
   // this bar (`view:keeps-controls`) has laid itself out against the edge the
   // bar reserves, so the two never share a pixel — but the bar's band (60000)
@@ -1431,7 +1442,11 @@ $actions-corner: 12rem;
 // Driven by [class.mobile] (which also catches landscape phones where the
 // width-only @media (max-width: 599px) would miss).
 .pill-stage.mobile {
-  bottom: calc(1.1rem + var(--hc-safe-bottom, 0px));
+  // 1.9rem, not 1.1rem: the discs carry a 0.62rem label under them now, and
+  // that label lives in this gap. The keyboard inset (`--hc-keyboard-inset`,
+  // published by the bar from the visual viewport) lifts the whole bar above
+  // the soft keyboard, which used to simply cover it on iOS.
+  bottom: calc(1.9rem + max(var(--hc-safe-bottom, 0px), var(--hc-keyboard-inset, 0px)));
 
   .controls-pill {
     background: none;
@@ -1475,6 +1490,28 @@ $actions-corner: 12rem;
       opacity: 0.28;
       pointer-events: none;
     }
+  }
+
+  // THE WORD UNDER THE DISC. Five glyphs in a row read as five abstract
+  // marks; a word under each is what makes them the big native icons a phone
+  // expects. Out of the disc's flow (the disc is a circle) and out of the
+  // bar's layout box, so the sheets' clearance still measures the discs and
+  // the labels sit in the gap the bar leaves beneath itself. 0.62rem is what
+  // keeps five of them clear of each other at 375px.
+  .ctl-label {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-top: 0.22rem;
+    font-size: 0.62rem;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    pointer-events: none;
+    color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-plain));
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
   }
 
   // ONE distribution rhythm for the whole bar. It used to be a three-track
@@ -1637,7 +1674,7 @@ $actions-corner: 12rem;
 // the LEFT edge as a vertical strip (Jaime 2026-07-28: "On landscape the
 // buttons go to the left and the back button has to be at the bottom
 // facing to the left"). Same single evenly-spaced run, turned on its side and
-// REMAPPED top→bottom as fullscreen · mesh · camera · fit · keyboard · back — so BACK sits
+// REMAPPED top→bottom as share · mesh · camera · views · keyboard · back — so BACK sits
 // in the bottom-left thumb corner, its arrow pointing left off the edge it
 // exits through. Ordering is per-BUTTON (the groups are display:contents), so
 // the sixth control landscape adds just takes its place in the same rhythm
@@ -1669,7 +1706,7 @@ $actions-corner: 12rem;
   }
 
   // Zone remap: DOM order is [left group, centre, right group] (portrait's
-  // back·fit·keyboard | camera | fullscreen·mesh); read them bottom, middle,
+  // back·views·keyboard | camera | share·mesh); read them bottom, middle,
   // top instead, with back last of all so it is the bottom-most control.
   .mobile-side.right > * { order: 1; }
   .ctl-btn.mobile-center { order: 2; }
@@ -1680,6 +1717,11 @@ $actions-corner: 12rem;
   // itself is vertical.
   .ctl-btn .hci,
   .ctl-btn .mat-sym { transform: none; }
+
+  // No words in the column: six discs already fill a 390px-tall viewport
+  // between the header anchor and the safe inset, and a label under each
+  // would land on the next disc.
+  .ctl-label { display: none; }
 
   // The rail is on the left edge, so the view row pops out to its RIGHT as a
   // column — the same relationship, rotated with everything else.

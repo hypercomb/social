@@ -19,3 +19,5 @@ voice/lines.json
 *.log
 __pycache__/
 walkthrough/
+voice/jobs.json
+voice/target.wav

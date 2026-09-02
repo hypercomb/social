@@ -26,6 +26,18 @@ fs.mkdirSync(stage, { recursive: true })
 fs.copyFileSync(dist, path.join(stage, 'index.html'))
 // the link card social platforms fetch when the URL is posted
 fs.copyFileSync(path.join(ROOT, 'og.png'), path.join(stage, 'og.png'))
+
+// The mark. index.html carries it inline, but browsers probe /favicon.ico
+// unprompted (and so do link unfurlers, feed readers and the OS when a page
+// is pinned) — a 404 there is the blank globe on the apex of a platform whose
+// every other door wears the hexagon. One master, built by
+// `node scripts/build-favicons.cjs`; copied, never re-drawn.
+const shell = path.join(ROOT, '..', '..', 'hypercomb-web', 'public')
+for (const mark of ['favicon.ico', 'favicon.svg', 'apple-touch-icon.png', 'icon.svg']) {
+  const from = path.join(shell, mark)
+  if (!fs.existsSync(from)) throw new Error(`the mark is missing (${mark}) — run \`node scripts/build-favicons.cjs\``)
+  fs.copyFileSync(from, path.join(stage, mark))
+}
 // The Claude Code + bridge checklist is no longer part of this site: hypercomb.com
 // is the pitch, and wiring an AI into a hive is a step you take after you have
 // one. It stays written down — documentation/claude-bridge-setup.md is the full

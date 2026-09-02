@@ -195,7 +195,12 @@ $types: (
 @include phone-only {
   .toast-stack {
     top: auto;
-    bottom: calc(4rem + var(--hc-safe-bottom, 0px));
+    // Above the control bar, by MEASUREMENT: the bar publishes the distance
+    // from the viewport's bottom to its own top as `--hc-controls-bottom`
+    // (it already contains the safe inset) and lifts `--hc-mobile-row-lift`
+    // while its view row is up. The 4rem is only the floor for a narrow
+    // window whose bar is not the mobile one (then the var reads 0px).
+    bottom: calc(max(var(--hc-controls-bottom, 0px), 4rem) + var(--hc-mobile-row-lift, 0px) + 0.5rem);
     right: 0.5rem;
     left: 0.5rem;
     max-width: none;

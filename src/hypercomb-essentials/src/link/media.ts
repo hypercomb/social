@@ -17,8 +17,10 @@ const VIDEO_EXTENSIONS = new Set(['mp4', 'webm', 'ogv', 'm4v', 'mov'])
 const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'ogg', 'oga', 'm4a', 'aac', 'flac', 'opus'])
 
 /** Lowercase extension of a URL's pathname, ignoring query + fragment.
- *  Null when the URL is unparseable or the last segment has no dot. */
-function extensionOf(link: string): string | null {
+ *  Null when the URL is unparseable or the last segment has no dot — which
+ *  is what makes an EXTENSIONLESS link (a CDN image, `picsum.photos/200/300`)
+ *  recognisable as something only a probe can classify. */
+export function linkExtension(link: string): string | null {
   let url: URL
   try { url = new URL(link) } catch { return null }
   const last = url.pathname.split('/').pop() ?? ''
@@ -26,6 +28,8 @@ function extensionOf(link: string): string | null {
   if (dot < 0) return null
   return last.slice(dot + 1).toLowerCase()
 }
+
+const extensionOf = linkExtension
 
 /**
  * Timed media a native `<video>`/`<audio>` can play, decided by file
@@ -41,12 +45,36 @@ export function mediaKindForUrl(link: string): MediaKind | null {
 }
 
 /**
+ * A Vimeo video reference: the numeric id, plus the unlisted-video hash when
+ * the link carries one (`vimeo.com/<id>/<hash>` — without `h=` the player
+ * refuses an unlisted video). Accepts the page (`vimeo.com/<id>`, with or
+ * without a channel/group/showcase prefix) and the player
+ * (`player.vimeo.com/video/<id>`) forms. Null for anything else.
+ */
+export function parseVimeoVideoId(link: string): { id: string; hash: string | null } | null {
+  let url: URL
+  try { url = new URL(link) } catch { return null }
+  const host = url.hostname.toLowerCase().replace(/^www\./, '')
+  if (host !== 'vimeo.com' && host !== 'player.vimeo.com') return null
+  const parts = url.pathname.split('/').filter(Boolean)
+  const at = parts.findIndex(p => /^\d{5,}$/.test(p))
+  if (at < 0) return null
+  const id = parts[at]
+  // The page form puts the unlisted hash as the segment AFTER the id; the
+  // player form carries it as `?h=`.
+  const after = parts[at + 1] ?? ''
+  const hash = url.searchParams.get('h') ?? (/^[0-9a-f]{6,}$/i.test(after) ? after : null)
+  return { id, hash }
+}
+
+/**
  * The EMBED url for a recognised provider link — a page that plays itself in
  * an iframe rather than something a media element can source.
  *
- * YouTube today, via the **nocookie** host: showing a slide should not hand
- * the viewer's session to the tracking domain. Extend by adding providers
- * here; the player needs no change (it just frames whatever url comes back).
+ * YouTube via the **nocookie** host, Vimeo with **dnt** (do not track): showing
+ * a slide should not hand the viewer's session to a tracking domain. Extend
+ * by adding providers here; the player needs no change (it just frames
+ * whatever url comes back).
  *
  * Null when the link is not a recognised embeddable provider.
  */
@@ -61,6 +89,12 @@ export function embedUrlFor(link: string): string | null {
     const origin = globalThis.location?.origin
     const base = `https://www.youtube-nocookie.com/embed/${youTubeId}`
     return origin ? `${base}?origin=${encodeURIComponent(origin)}` : base
+  }
+  const vimeo = parseVimeoVideoId(link)
+  if (vimeo) {
+    const params = new URLSearchParams({ dnt: '1' })
+    if (vimeo.hash) params.set('h', vimeo.hash)
+    return `https://player.vimeo.com/video/${vimeo.id}?${params.toString()}`
   }
   return null
 }

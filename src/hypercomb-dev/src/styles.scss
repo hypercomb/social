@@ -40,6 +40,13 @@ body {
   :root { --hc-touch: 1; }
 }
 
+// One definition of "mobile": MobileModeService stamps data-hc-mobile on <html>
+// (`/mobile on|off` drives it; a media query never can). Key phone rules on
+// `:root[data-hc-mobile='on']`; --hc-mobile is the same fact as a number, the
+// way --hc-touch is for the pointer. data-hc-orientation rides beside it.
+:root { --hc-mobile: 0; }
+:root[data-hc-mobile='on'] { --hc-mobile: 1; }
+
 // ── view-mode: website (global rules) ────────────────────────
 // Hide every hex-mode artifact (including those that portal to body
 // at runtime — history-viewer etc) when ViewMode is 'website'.

@@ -19,15 +19,20 @@
 //
 // One module owns this so no mint site ever hand-rolls the ladder again.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, get, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 
 export type LinkDelivery = 'shared' | 'copied' | 'offered'
+
+/** The effect the sticky toast's button emits — its handler below re-runs
+ *  the ladder INSIDE that click. Exported so a mint site that already holds a
+ *  URL (a panel's own Share button) can ride the same fresh-tap path. */
+export const SHARE_DELIVER_EFFECT = 'share:deliver'
 
 type ShareCapable = Navigator & { share?: (data: { url: string; title?: string }) => Promise<void> }
 
 /** The re-anchored attempt, run INSIDE the toast button's click. Synchronous
  *  distance from the tap is what makes the sheet legal here. */
-EffectBus.on<{ url?: unknown; title?: unknown }>('share:deliver', payload => {
+EffectBus.on<{ url?: unknown; title?: unknown }>(SHARE_DELIVER_EFFECT, payload => {
   const url = typeof payload?.url === 'string' ? payload.url : ''
   if (!url) return
   const title = typeof payload?.title === 'string' ? payload.title : undefined
@@ -59,12 +64,13 @@ export async function deliverLink(url: string, title?: string): Promise<LinkDeli
     await navigator.clipboard.writeText(url)
     return 'copied'
   } catch { /* stale activation or no permission — offer a fresh tap */ }
+  const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
   EffectBus.emit('toast:show', {
     type: 'info',
     message: url,
     duration: 0,
-    actionLabel: 'Share',
-    actionEffect: 'share:deliver',
+    actionLabel: i18n?.t('share.offer') ?? 'Share',
+    actionEffect: SHARE_DELIVER_EFFECT,
     actionPayload: { url, title },
   })
   return 'offered'

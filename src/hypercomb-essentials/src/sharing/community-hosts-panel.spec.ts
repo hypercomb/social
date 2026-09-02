@@ -117,13 +117,52 @@ describe('hosts panel — the set, apart from the publishing', () => {
     expect(HOSTS_HTML).toMatch(/hosts\.offer\.show-less/)
   })
 
-  it('adds an offered package through verified runtime acquisition, then restarts', () => {
-    expect(HOSTS_HTML).toMatch(/\(click\)="take\(pkg\)"/)
+  it('applies a build through verified runtime acquisition, then restarts', () => {
+    expect(HOSTS_HTML).toMatch(/\(click\)="apply\(pkg\)"/)
     expect(HOSTS_TS).toMatch(/import\('@hypercomb\/runtime\/acquire'\)/)
     expect(HOSTS_TS).toMatch(/await acquire\(sig, sources\)/)
     expect(HOSTS_TS).toMatch(/setTimeout\(\(\) => location\.reload\(\)/)
-    expect(EN['hosts.offer.add']).toBe('Add')
-    expect(EN['hosts.offer.added']).toMatch(/restarting/i)
+    expect(EN['hosts.offer.applied']).toMatch(/restarting/i)
+  })
+
+  // TWO FACTS AND ONE ACT. A host lists hundreds of builds and every one of
+  // them is a valid root forever — but 175 identical rows each with its own
+  // button is not a choice. The question is "am I current, and if not make me
+  // current": the build you are on, the newest here, and ONE Update button.
+  // The ledger stays behind a fold for pinning and rollback.
+  it('says which build you are on, from the ONE stamp both install paths leave', () => {
+    const root = join(here, '..', '..', '..')
+    const runtime = readFileSync(join(root, 'hypercomb-runtime', 'src', 'installed-package.ts'), 'utf8')
+    const acquire = readFileSync(join(root, 'hypercomb-runtime', 'src', 'acquire.ts'), 'utf8')
+    const ensureInstall = readFileSync(join(root, 'hypercomb-web', 'src', 'setup', 'ensure-install.ts'), 'utf8')
+    expect(runtime).toMatch(/export const installedPackageSig/)
+    expect(runtime).toMatch(/export const stampInstalledPackage/)
+    // Both activation paths stamp it; nothing else writes the key.
+    expect(acquire).toMatch(/stampInstalledPackage\(pkg\.packageSig\)/)
+    expect(acquire).not.toMatch(/localStorage\.setItem\(INSTALLED_KEY/)
+    expect(ensureInstall).toMatch(/stampInstalledPackage\(bundled\.packageSig\)/)
+    expect(HOSTS_TS).toMatch(/from '@hypercomb\/runtime\/installed-package'/)
+    expect(HOSTS_HTML).toMatch(/yoursKey\(zone\)/)
+    expect(EN['hosts.offer.yours']).toMatch(/build \{generation\}/)
+  })
+
+  it('offers ONE Update button, which applies the newest build', () => {
+    expect(HOSTS_TS).toMatch(/newestOf\(zone: string\): HostPackage \| null \{[\s\S]{0,60}?return this\.offeredOf\(zone\)\[0\]/)
+    expect(HOSTS_TS).toMatch(/offeredOf\(zone: string\): HostPackage\[\]/)
+    expect(HOSTS_TS).toMatch(/concealed\.has\(p\.packageSig\)/)
+  })
+
+  it('says "you hid everything" rather than "publishes nothing"', () => {
+    expect(HOSTS_TS).toMatch(/allHidden\(zone: string\): boolean/)
+    expect(HOSTS_HTML).toMatch(/hosts\.hidden\.all/)
+    expect(EN['hosts.hidden.all']).toBeTruthy()
+  })
+
+  it('promises only what a local forget can deliver', () => {
+    // Deleting reaches nothing across the network — the build stays on the
+    // host that published it, fetchable by anyone who names its signature.
+    expect(EN['hosts.hidden.note']).toMatch(/stays published on the host/i)
+    expect(EN['hosts.hidden.delete-tip']).toMatch(/stays on the host/i)
   })
 
   it('links Publish to the host directory without mixing the two surfaces', () => {

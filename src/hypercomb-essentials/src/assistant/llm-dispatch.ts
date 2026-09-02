@@ -29,8 +29,14 @@
 
 import { EffectBus, llmKeyStore } from '@hypercomb/core'
 import { llmActivation } from './llm-activation.js'
+import {
+  localModelServerUp,
+  localTierReason,
+  machineLocalEndpoint,
+  noteLocalServerUnreachable,
+} from './providers/local-liveness.js'
 import { chooseProvider, modelForTier, rankProviders, type ModelNeed } from './model-policy.js'
-import { llmProviderRegistry, type LlmProviderRegistry } from './llm-provider-registry.js'
+import { llmProviderRegistry, publishService, type LlmProviderRegistry } from './llm-provider-registry.js'
 import './providers/builtin-providers.js'
 import type {
   LlmCallResult,
@@ -139,6 +145,7 @@ export const configuredProviders = (): LlmProviderDescriptor[] =>
   registry().all().filter(p =>
     isCallable(p) && llmActivation.isEnabled(p.id)
     && (p.transport !== 'peer-swarm' || !!peerCaller)
+    && localModelServerUp(p)
     && (p.requiresKey === false || llmKeyStore.has(p.id)))
 
 /** Every ACTIVE provider whatever its transport — what the orchestrator picks
@@ -146,7 +153,7 @@ export const configuredProviders = (): LlmProviderDescriptor[] =>
  *  belong here: they are the only tier that can read the hive. */
 export const activeProviders = (): LlmProviderDescriptor[] =>
   registry().all().filter(p =>
-    llmActivation.isEnabled(p.id)
+    llmActivation.isEnabled(p.id) && localModelServerUp(p)
     && (!isCallable(p) || p.requiresKey === false || llmKeyStore.has(p.id)))
 
 /**
@@ -227,17 +234,46 @@ export const buildRequest = (
   }
 }
 
+/**
+ * A LOCAL SERVER FAILS DIFFERENTLY, and the browser will not say how: a
+ * process that is down and a process that refused this origin both arrive as
+ * one rejected fetch. `noteLocalServerUnreachable` re-probes (which CAN tell
+ * them apart, see local-liveness.ts) so the availability line corrects itself
+ * within a moment; the sentence thrown here says the actionable half straight
+ * away rather than surfacing "Failed to fetch" to a participant.
+ */
+const localFailure = (provider: LlmProviderDescriptor, host: string, model: string): LlmDispatchError => {
+  noteLocalServerUnreachable(provider)
+  return new LlmDispatchError(
+    `${provider.label} did not answer at ${host} — start your local model server, `
+    + `or allow this page's origin (Ollama: OLLAMA_ORIGINS)`,
+    provider.id, model,
+  )
+}
+
 const send = async (
   provider: LlmProviderDescriptor,
   request: LlmRequest,
   signal?: AbortSignal,
 ): Promise<Response> => {
   const { url, init } = provider.toRequest(request)
-  const response = await fetch(url, { ...init, signal })
+  const local = machineLocalEndpoint(provider)
+  let response: Response
+  try {
+    response = await fetch(url, { ...init, signal })
+  } catch (error) {
+    if (!local || signal?.aborted) throw error
+    throw localFailure(provider, local, request.model)
+  }
   if (!response.ok) {
     const body = await response.text().catch(() => '')
+    // A model the participant never pulled is the one local failure that
+    // arrives as a clean HTTP status, and "404" alone hides the one-line fix.
+    const hint = local && response.status === 404
+      ? ` — pull it first (ollama pull ${request.model})`
+      : ''
     throw new LlmDispatchError(
-      `${provider.label} API ${response.status}: ${body.slice(0, MAX_ERROR_BODY)}`,
+      `${provider.label} API ${response.status}: ${body.slice(0, MAX_ERROR_BODY)}${hint}`,
       provider.id,
       request.model,
       response.status,
@@ -462,9 +498,18 @@ export async function* streamModel(call: LlmCall): AsyncGenerator<string> {
 /** Structural seam for shells that may not import essentials. */
 export const LLM_ROUTER_IOC_KEY = '@diamondcoreprocessor.com/LlmRouter'
 export const llmRouter = {
+  /** Is there somebody who can answer RIGHT NOW? A machine-local provider is
+   *  only counted while its server is answering — an explicit choice still
+   *  reaches `routeCandidates`, so naming a stopped server attempts the call
+   *  and gets the honest error rather than being quietly unavailable. */
   ready: (call: Pick<LlmCall, 'providerId' | 'model' | 'preferModel' | 'need'> = {}): boolean => {
-    try { return routeCandidates(call).length > 0 } catch { return false }
+    try { return routeCandidates(call).some(provider => localModelServerUp(provider)) } catch { return false }
+  },
+  /** Why the silence, when there is one thing worth saying about it. A token,
+   *  not a sentence: the shell owns the words. */
+  reason: (): '' | 'local-down' | 'local-blocked' | 'local-permission' => {
+    try { return localTierReason() } catch { return '' }
   },
   stream: (call: LlmCall): AsyncGenerator<LlmRoutedChunk> => streamRoutedModel(call),
 }
-window.ioc?.register?.(LLM_ROUTER_IOC_KEY, llmRouter)
+publishService(LLM_ROUTER_IOC_KEY, llmRouter)

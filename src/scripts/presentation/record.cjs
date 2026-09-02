@@ -5,6 +5,7 @@
 // can convert the whole thing one scene at a time.
 //
 //   node record.cjs --script     # a teleprompter to read from (record/script.html)
+//   node record.cjs --prompt     # the same lines, PACED — read with the light
 //   node record.cjs --check      # which scenes have takes, which drifted
 //   node record.cjs              # master every take and seed it into the cache
 //
@@ -96,6 +97,33 @@ function writeScript() {
 
 // ---------- run --------------------------------------------------------------
 if (process.argv.includes('--script')) { writeScript(); return }
+
+// The paced prompter — the same script, read against the length the build
+// expects, so a take lands without a second pass. It needs the built audio to
+// know how long a line runs; a line with none yet is paced off its words.
+if (process.argv.includes('--prompt')) {
+  const { writePrompter } = require('./prompter.cjs')
+  const seconds = s => {
+    const f = path.join(CACHE, hashOf(s.say) + '.mp3')
+    return fs.existsSync(f) ? durationOf(f) : Math.max(2.5, s.say.split(/\s+/).length / 2.6)
+  }
+  const r = writePrompter({
+    title: 'Read the reel — Hypercomb narration',
+    intro: 'Press <b>space</b>, wait for the count, and read with the light. Where you see ' +
+      '<b>hold</b>, actually hold it — the silence is part of the line. Save each take as the ' +
+      'filename shown, in <b>record/</b>, then run <b>node record.cjs</b>.',
+    out: path.join(TAKES, 'prompter.html'),
+    lines: scenes.map(s => ({
+      name: `${s.n} · ${s.name}`,
+      say: s.say,
+      seconds: seconds(s),
+      file: `record/scene-${String(s.n).padStart(2, '0')}.wav`,
+      done: !!takeFor(s.n),
+    })),
+  })
+  console.log(`record/prompter.html — ${r.lines} scenes, ${Math.round(r.seconds / 60)} min of reading`)
+  return
+}
 
 const rows = scenes.map(s => {
   const take = takeFor(s.n)

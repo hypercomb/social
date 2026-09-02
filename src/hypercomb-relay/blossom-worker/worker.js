@@ -93,6 +93,12 @@ function parseBindings(env) {
       .filter((p) => SIG_RE.test(p.pubkey))
     bindings[host] = {
       title: String(raw.title || lineage.split('/').at(-1) || 'Published Hypercomb').trim(),
+      // A site's OWN tab mark, when it has one. Same-origin absolute path
+      // only — in practice a content-addressed `/<sig>/name.svg`, which this
+      // worker already serves with the type the suffix declares. Saying
+      // nothing means the Hypercomb hexagon, which every door carries by
+      // default; this is the opt-OUT, not the source of the icon.
+      icon: iconPath(raw.icon),
       lineage,
       publishers,
       // WHAT IS DEPLOYED, which the script cannot see: Cloudflare does not hand
@@ -108,6 +114,17 @@ function parseBindings(env) {
     }
   }
   return bindings
+}
+
+/** An operator-declared site icon, or null. Off-origin is refused rather than
+ *  passed through: the visitor fetches this on every load, so an absolute URL
+ *  would hand a third party the reader's IP on every page view (see
+ *  documentation/no-third-party-requests.md) — and the visitor CSP would block
+ *  it anyway, costing the site its mark for nothing. */
+function iconPath(raw) {
+  const icon = String(raw || '').trim()
+  if (!icon.startsWith('/') || icon.startsWith('//')) return null
+  return icon
 }
 
 function siteBinding(env, hostname) {
@@ -142,10 +159,19 @@ async function anyPublishedRoot(env, site, read = indexReader(env)) {
   return false
 }
 
+// The icon files the shells link and browsers probe unasked. A closed list:
+// this hands out shell assets on hosts that otherwise serve only signed
+// content, so it names exactly the marks rather than opening a directory.
+const MARK_PATHS = new Set([
+  '/favicon.ico', '/favicon.svg', '/favicon-16.png', '/favicon-32.png',
+  '/favicon-48.png', '/apple-touch-icon.png', '/icon.svg',
+  '/icon-192.png', '/icon-512.png',
+])
+
 function nothingHere(hostname, zone) {
   const name = zone ? hostname.slice(0, -(zone.length + 1)) : hostname
   return new Response(
-    `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>nothing here yet</title><body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#0b1218;color:#dce7ef;font:16px/1.6 system-ui,sans-serif"><main style="text-align:center;padding:2rem"><h1 style="font-size:1.3rem;margin:0 0 .5rem">nothing published at ${name}${zone ? '.' + zone : ''}</h1><p style="opacity:.7;margin:0">Publishing a hive named “${name}” makes this address its website. <a href="https://${zone ?? hostname}/" style="color:#7eb6d6">${zone ?? hostname}</a></p></main>`,
+    `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="/favicon.ico" sizes="48x48"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><title>nothing here yet</title><body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#0b1218;color:#dce7ef;font:16px/1.6 system-ui,sans-serif"><main style="text-align:center;padding:2rem"><h1 style="font-size:1.3rem;margin:0 0 .5rem">nothing published at ${name}${zone ? '.' + zone : ''}</h1><p style="opacity:.7;margin:0">Publishing a hive named “${name}” makes this address its website. <a href="https://${zone ?? hostname}/" style="color:#7eb6d6">${zone ?? hostname}</a></p></main>`,
     { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...CORS } },
   )
 }
@@ -196,6 +222,8 @@ async function serveSiteDescriptor(request, env, site) {
   if (!publication) return json(404, { error: 'the approved publisher has not published this lineage yet' }, { 'Cache-Control': 'no-store' })
   return json(200, {
     title: site.title,
+    // Absent ⇒ the visitor keeps the Hypercomb mark its shell already links.
+    ...(site.icon ? { icon: site.icon } : {}),
     pubkey: publication.pubkey,
     head: publication.head,
     lineage: site.lineage,
@@ -1037,6 +1065,28 @@ export default {
       }
       if (method === 'PUT' && !isAlias && !named) return putSig(request, env, sigMatch[2])
       return text(405, 'method not allowed')
+    }
+
+    // The mark answers on EVERY door under a bound zone — a published site, a
+    // name with nothing published yet, the relay face, an error page. All of
+    // them are Hypercomb, and a browser that gets a 404 here paints the blank
+    // globe, which says something untrue about the page. The bytes come from
+    // the visitor engine's own asset root (built by
+    // `node scripts/build-favicons.cjs`), so they are same-origin everywhere.
+    //
+    // This is only the DEFAULT: a site that declares its own icon in its
+    // descriptor has the visitor replace the <link> tags at boot, and never
+    // asks for these paths.
+    if (MARK_PATHS.has(pathname) && (method === 'GET' || method === 'HEAD') && env.ASSETS?.fetch) {
+      const markUrl = new URL(requestUrl)
+      markUrl.search = ''
+      const mark = await env.ASSETS.fetch(new Request(markUrl, request))
+      if (mark.status === 200) {
+        const headers = new Headers(mark.headers)
+        headers.set('Cache-Control', 'public, max-age=3600')
+        headers.set('Access-Control-Allow-Origin', '*')
+        return new Response(mark.body, { status: 200, headers })
+      }
     }
 
     if (!site && pathname === '/upload') {

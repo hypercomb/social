@@ -222,6 +222,42 @@ export const llmProviderRegistry = (): LlmProviderRegistry => {
   return _llmProviderRegistry
 }
 
+/**
+ * REGISTER A SERVICE INTO THE SHELL'S MAP, EVEN IF THERE ISN'T ONE YET.
+ *
+ * `window.ioc?.register?.(…)` at module load is a SILENT NO-OP when the map
+ * has not been installed — optional chaining swallows the whole call — and
+ * the modules in this folder are among the first a shell evaluates. The
+ * symptom is not an error anywhere: the key simply never resolves, so a
+ * `whenReady` parked on it never fires and every surface behaves as though
+ * the service does not exist (a hive whose only model is a local one could
+ * never enable its chat, because the router it asks was never published).
+ *
+ * The registry above heals itself on ACCESS because it has an accessor
+ * everything goes through. A plain object registered under a key has no such
+ * seam, so it is published here: once now, then on a short poll until the map
+ * holds it, given up after a bounded window so a shell that never installs
+ * one costs nothing. `register` is first-wins, so a re-publish can never
+ * displace whatever got there first.
+ */
+const PUBLISH_POLL_MS = 250
+const PUBLISH_GIVE_UP_MS = 30_000
+
+export const publishService = (key: string, value: unknown): void => {
+  const started = Date.now()
+  const tick = (): void => {
+    try {
+      const ioc = window.ioc
+      if (ioc?.get?.(key) !== undefined) return
+      ioc?.register?.(key, value)
+      if (ioc?.get?.(key) !== undefined) return
+    } catch { /* no shell map yet */ }
+    if (Date.now() - started > PUBLISH_GIVE_UP_MS) return
+    setTimeout(tick, PUBLISH_POLL_MS)
+  }
+  tick()
+}
+
 /** Colocation helper — what a vendor adapter calls at module load. */
 export const registerLlmProvider = (provider: LlmProviderDescriptor): void => {
   llmProviderRegistry().register(provider)
