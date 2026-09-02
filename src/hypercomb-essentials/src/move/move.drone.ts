@@ -6,6 +6,7 @@ import type { OrderProjection } from '../history/order-projection.js'
 import { writeTilePropertiesAt, seedLayerKeyedEntries } from '../editor/tile-properties.js'
 import { childNamesOfStrict, childEntriesOf, childLayerOf, resolveLayerAt, captureCollectionSig, flattenLayerTree } from '../history/layer-placement.js'
 import type { PlacementHistory, PlacementLayer } from '../history/layer-placement.js'
+import { getLaneScrollAxis } from '../sequence/lane-viewport-mode.js'
 
 // Committer/store shapes for the Ctrl-drag COPY path — it re-homes a dragged
 // cell's whole subtree under a fresh sibling name using the SAME signature-
@@ -1326,7 +1327,8 @@ export class MoveDrone extends Drone {
   // handler MUST NOT renumber indices on receipt.
 
   async #commitPlacements(placements: Map<string, Axial>): Promise<void> {
-    const denseOrder = this.#reorderNames(placements).filter(n => n !== '')
+    const sparse = this.#reorderNames(placements)
+    const denseOrder = sparse.filter(n => n !== '')
 
     const orderProjection = window.ioc.get<OrderProjection>('@diamondcoreprocessor.com/OrderProjection')
     if (orderProjection) {
@@ -1336,11 +1338,40 @@ export class MoveDrone extends Drone {
     // Authoritative write: each placed tile's `index` property = its
     // grid index. Gaps are preserved. Render-time collision heal in
     // #orderByIndexPinned demotes any duplicate to the next free slot.
-    await this.#persistPinnedIndices(placements)
+    //
+    // ON A PHONE IN RAILS the grid is the rail matrix and what was rendered
+    // were dense RANKS of the layer's sparse indices (show-cell #railRanks).
+    // A drag there is the one gesture that writes order, and it must write
+    // the WHOLE order: writing only the moved tiles' rail slots against
+    // untouched sparse indices interleaves wrongly (index 3 written between
+    // untouched 2 and 5 lands where rank 2 was, not where the finger left
+    // it). So every rendered tile gets index = its rank in the strip — one
+    // deliberate act, every tile written once, the same shape as an
+    // arrangement commit.
+    if (getLaneScrollAxis()) await this.#persistDenseRanks(sparse)
+    else await this.#persistPinnedIndices(placements)
 
     this.emitEffect('cell:reorder', { labels: denseOrder })
     this.emitEffect('move:preview', null)
     this.emitEffect('move:committed', { order: denseOrder })
+  }
+
+  /** The rail commit: walk the strip's slot array in order and give every
+   *  occupied slot the next rank as its `index`, so the committed order IS
+   *  the order on screen and the desktop's spiral reads it back dense. */
+  async #persistDenseRanks(sparse: readonly string[]): Promise<void> {
+    const lineage = this.resolve<any>('lineage')
+    const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
+    let rank = 0
+    for (const label of sparse) {
+      if (!label) continue
+      const index = rank++
+      try {
+        await writeTilePropertiesAt(parentSegments, label, { index })
+      } catch (err) {
+        console.warn('[move] failed to persist rank for', label, err)
+      }
+    }
   }
 
   async #persistPinnedIndices(placements: Map<string, Axial>): Promise<void> {

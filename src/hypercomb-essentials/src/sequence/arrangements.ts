@@ -272,8 +272,11 @@ export interface BuiltinArrangement {
   readonly generate: (count: number, coordToIndex: Map<string, number>) => number[]
 }
 
+// Lanes are NOT an arrangement any more: on a phone they are a projection of
+// the layer's order (presentation/grid/rail-grid.ts, RailProjectionDrone) and
+// never a commit, so the cycle no longer carries a `three-lanes` entry. The
+// packer below survives for the specs that pin its geometry.
 export const BUILTIN_ARRANGEMENTS: readonly BuiltinArrangement[] = [
-  { id: 'three-lanes', label: 'Three lanes', labelKey: 'arrange.threeLanes', generate: threeLaneIndexes },
   { id: 'rectangle', label: 'Rectangle', labelKey: 'arrange.rectangle', generate: rectangleIndexes },
   { id: 'flower', label: 'Flowers', labelKey: 'arrange.flower', generate: flowerIndexes },
 ]

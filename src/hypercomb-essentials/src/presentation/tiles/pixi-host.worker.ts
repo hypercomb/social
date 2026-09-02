@@ -1,5 +1,6 @@
 // pixi/pixi-host.worker.ts
 import { Worker, EffectBus } from '@hypercomb/core'
+import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
 import { Application, Container } from 'pixi.js'
 import {
   computeStageCenter,
@@ -349,6 +350,18 @@ export class PixiHostWorker extends Worker {
       }
       pinnedAnchor = null
       lastOrigin = originNow
+
+      // A ROTATED STRIP FORGETS ITS CROSS-AXIS SCROLL. In rails the finger
+      // only ever travels along the strip, so the pan on the other axis is
+      // always zero — until the device turns and the axes swap: a portrait
+      // scroll offset would become a landscape cross-axis offset that panBy
+      // refuses to let the finger correct. Drop it before recentring.
+      const laneAxis = getLaneScrollAxis()
+      if (laneAxis && vp?.lastPan) {
+        const keepX = laneAxis === 'x' ? vp.lastPan.dx : 0
+        const keepY = laneAxis === 'y' ? vp.lastPan.dy : 0
+        if (keepX !== vp.lastPan.dx || keepY !== vp.lastPan.dy) vp.setPan?.(keepX, keepY, 'auto')
+      }
 
       const pos = computeStageCenter(app.renderer.screen, vp?.lastPan)
       app.stage.position.set(pos.x, pos.y)

@@ -28,15 +28,11 @@
       <button class="publish-close" type="button" (click)="close()" [attr.aria-label]="'publish.title' | t">×</button>
     </header>
 
-    <!-- ONE quiet status line: the index verdict, the standing zone, and the
-         public-hosting gate — the facts true of the whole hive. -->
+    <!-- ONE quiet status line: the index verdict and standing zone. -->
     <div class="publish-status">
       <span class="publish-index" [class.quiet]="indexQuiet()">{{ indexKey() | t: indexParams() }}</span>
       @if (zone()) {
         <span class="publish-host">{{ zone() }}</span>
-      }
-      @if (!gateActive()) {
-        <span class="publish-gate">{{ 'publish.header.gate-off' | t }}</span>
       }
     </div>
 
@@ -79,7 +75,13 @@
            fact about THIS branch and nothing else. Several may be ticked: a
            branch answers on every host it names, and the first is the door the
            index write goes through. The choices are the hosts you carry; the
-           Community tab is where that set is kept. -->
+           Hosts panel is where that set is kept. -->
+      <div class="pcur-hosts-head">
+        <span>{{ 'publish.row.hosts' | t }}</span>
+        <button class="pcur-hosts-manage" type="button" (click)="openHosts()">
+          {{ 'publish.action.manage-hosts' | t }}
+        </button>
+      </div>
       <div class="pdet-domains pcur-hosts" role="group" [attr.aria-label]="'publish.row.hosts' | t">
         @for (choice of hostChoices(row); track choice.zone) {
           <span class="pdet-domain" [class.is-chosen]="choice.chosen" [class.is-primary]="choice.primary">
@@ -287,17 +289,15 @@
                 class="publish-row is-quiet"
                 [class.is-current]="row.key === currentKey()"
                 [class.is-subject]="row.key === subject()?.key"
-                [class.expanded]="row.expanded"
                 [attr.data-state]="row.state"
               >
                 <div
                   class="prow-head"
                   role="button"
                   tabindex="0"
-                  [attr.aria-expanded]="row.expanded"
-                  (click)="select(row); toggle(row)"
-                  (keydown.enter)="select(row); toggle(row)"
-                  (keydown.space)="select(row); toggle(row); $event.preventDefault()"
+                  (click)="select(row)"
+                  (keydown.enter)="select(row)"
+                  (keydown.space)="select(row); $event.preventDefault()"
                 >
                   <span class="prow-light" aria-hidden="true"></span>
                   <div class="prow-meta">
@@ -306,37 +306,6 @@
                   </div>
                 </div>
 
-                @if (row.expanded) {
-                  <div class="prow-detail">
-                    @if (row.live) {
-                      <div class="pdet-line">
-                        <span class="pdet-label">{{ 'publish.row.live-head' | t }}</span>
-                        <code class="pdet-sig" [attr.title]="row.live">{{ short(row.live) }}</code>
-                      </div>
-                    }
-                    @if (row.publishedAt) {
-                      <div class="pdet-line pdet-age">{{ 'publish.row.published-at' | t: { age: age(row.publishedAt) } }}</div>
-                    }
-
-                    <div class="pdet-actions">
-                      @if (row.link) {
-                        <button class="pdet-btn" type="button" (click)="copyLink(row)">{{ 'publish.action.copy-link' | t }}</button>
-                      }
-                      @if (row.segments.length > 0) {
-                        <button class="pdet-btn" type="button" (click)="visit(row)">{{ 'publish.action.visit' | t }}</button>
-                      }
-                    </div>
-
-                    @if (row.segments.length > 0 && row.live) {
-                      <p class="pdet-warn">{{ 'publish.unpublish-warning' | t }}</p>
-                      <button
-                        class="pdet-btn pdet-unpublish"
-                        type="button"
-                        (click)="unpublish(row)"
-                      >{{ 'publish.action.unpublish' | t }}</button>
-                    }
-                  </div>
-                }
               </li>
             }
           </ul>
@@ -354,19 +323,17 @@
                   class="publish-row"
                   [class.is-quiet]="isQuiet(row)"
                   [class.is-current]="row.key === currentKey()"
-                [class.is-subject]="row.key === subject()?.key"
+                  [class.is-subject]="row.key === subject()?.key"
                   [class.is-busy]="!!row.busyPhase"
-                  [class.expanded]="row.expanded"
                   [attr.data-state]="row.state"
                 >
                   <div
                     class="prow-head"
                     role="button"
                     tabindex="0"
-                    [attr.aria-expanded]="row.expanded"
-                    (click)="select(row); toggle(row)"
-                    (keydown.enter)="select(row); toggle(row)"
-                    (keydown.space)="select(row); toggle(row); $event.preventDefault()"
+                    (click)="select(row)"
+                    (keydown.enter)="select(row)"
+                    (keydown.space)="select(row); $event.preventDefault()"
                   >
                     <span
                       class="prow-light"
@@ -384,9 +351,6 @@
                         <span class="prow-zone" [title]="addressUrl(row, zone)">{{ zone }}</span>
                       }
                       <span class="prow-state">{{ ('publish.state.' + row.state) | t }}</span>
-                      @if (whyKey(row)) {
-                        <span class="prow-why">{{ whyKey(row) | t: whyParams(row) }}</span>
-                      }
                     </div>
                     @if (opensAsIcon(row); as face) {
                       <span
@@ -405,117 +369,6 @@
                     }
                   </div>
 
-                  @if (row.expanded) {
-                    <div class="prow-detail">
-
-                      <!-- OPENS AS — the branch root's face, the one thing a
-                           visitor lands on. One atomic view:default decorator:
-                           picking here is the same write every arrival surface
-                           reads, and it changes the head — the differential
-                           then shows the republish this pin owes. -->
-                      @if (row.segments.length > 0 && viewsFor(row).length > 0) {
-                        <div class="pdet-block">
-                          <span class="pdet-label">{{ 'publish.row.opens-as' | t }}</span>
-                          <div class="pdet-views" role="radiogroup" [attr.aria-label]="'publish.row.opens-as' | t">
-                            @for (v of viewsFor(row); track v.view) {
-                              <button
-                                class="pdet-view"
-                                type="button"
-                                role="radio"
-                                [class.selected]="row.opensAs === v.view"
-                                [class.dormant]="v.dormant"
-                                [attr.aria-checked]="row.opensAs === v.view"
-                                [attr.aria-label]="v.label"
-                                [attr.data-tip]="v.label"
-                                (click)="pickView(row, v.view); $event.stopPropagation()"
-                                [innerHTML]="v.icon"
-                              ></button>
-                            }
-                          </div>
-                        </div>
-                      }
-
-                      @if (row.live) {
-                        <div class="pdet-line">
-                          <span class="pdet-label">{{ 'publish.row.live-head' | t }}</span>
-                          <code class="pdet-sig" [attr.title]="row.live">{{ short(row.live) }}</code>
-                        </div>
-                      }
-                      @if (row.here) {
-                        <div class="pdet-line">
-                          <span class="pdet-label">{{ 'publish.row.here-head' | t }}</span>
-                          <code class="pdet-sig" [attr.title]="row.here">{{ short(row.here) }}</code>
-                        </div>
-                      }
-                      @if (row.publishedAt) {
-                        <div class="pdet-line pdet-age">{{ 'publish.row.published-at' | t: { age: age(row.publishedAt) } }}</div>
-                      }
-
-                      <!-- VERSIONS — every head this branch ever published,
-                           newest first, straight from the immutable ledger.
-                           A version IS a signature; tapping one copies it. -->
-                      @if (row.versions.length > 0) {
-                        <div class="pdet-block">
-                          <span class="pdet-label">{{ 'publish.row.versions' | t }}</span>
-                          <ul class="pdet-versions">
-                            @for (v of row.versions; track v.sig) {
-                              <li>
-                                <button
-                                  class="pdet-version"
-                                  type="button"
-                                  [class.current]="v.sig === row.live"
-                                  [attr.title]="v.sig"
-                                  (click)="copySig(v.sig); $event.stopPropagation()"
-                                >
-                                  <code class="pdet-sig">{{ short(v.sig) }}</code>
-                                  <span class="pdet-vage">{{ age(v.at) }}</span>
-                                  @if (v.sig === row.live) {
-                                    <span class="pdet-vlive">{{ 'publish.state.live' | t }}</span>
-                                  }
-                                </button>
-                              </li>
-                            }
-                          </ul>
-                        </div>
-                      }
-
-                      <!-- Objects in the published closure that are not served:
-                           a visitor following this branch would get a 404. -->
-                      @if (row.gaps.length > 0) {
-                        <div class="pdet-line pdet-gaps">{{ 'publish.why.gaps' | t: { count: row.gaps.length } }}</div>
-                        <ul class="pdet-gaplist">
-                          @for (gap of gapsShown(row); track gap) {
-                            <li><code class="pdet-sig" [title]="gap">{{ short(gap) }}</code></li>
-                          }
-                        </ul>
-                      }
-
-                      <div class="pdet-actions">
-                        @if (row.link) {
-                          <button class="pdet-btn" type="button" (click)="copyLink(row)">{{ 'publish.action.copy-link' | t }}</button>
-                        }
-                        @if (row.segments.length > 0) {
-                          <button class="pdet-btn" type="button" (click)="visit(row)">{{ 'publish.action.visit' | t }}</button>
-                        }
-                      </div>
-
-                      @if (row.link) {
-                        <code class="pdet-link" [attr.title]="row.link">{{ row.link }}</code>
-                      }
-
-                      <!-- Unpublish states its honest limit ABOVE the button,
-                           every time: it stops the branch being advertised, it
-                           does not un-share what has already been shared. -->
-                      @if (row.segments.length > 0 && row.live) {
-                        <p class="pdet-warn">{{ 'publish.unpublish-warning' | t }}</p>
-                        <button
-                          class="pdet-btn pdet-unpublish"
-                          type="button"
-                          (click)="unpublish(row)"
-                        >{{ 'publish.action.unpublish' | t }}</button>
-                      }
-                    </div>
-                  }
                 </li>
               }
             </ul>

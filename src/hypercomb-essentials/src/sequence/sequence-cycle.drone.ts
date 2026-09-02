@@ -10,17 +10,17 @@
 //
 // The cycle is:
 //   [ Rectangle, Flowers, …every set saved via /sequence ]
-// Three lanes is deliberately NOT part of that per-location cycle. It is a
-// mobile-only global action reached through `/lanes`; treating it like a
-// location preference made navigation restore the lane viewport constraint,
-// which disabled zoom and one pan axis on ordinary desktop pages.
+// The phone's rails are deliberately NOT an arrangement at all any more: they
+// are a PROJECTION of the layer's order owned by RailProjectionDrone
+// (documentation/mobile-rails-projection.md), never a commit, so nothing
+// here knows about lanes.
 // The built-ins (commands/../arrangements.ts) are computed live from
 // the current tile count, so they always fit. The saved sets are the ones
 // "we have already created" — authored with the SequenceEditorBee and held
 // by SequenceService (content-addressed, shareable, bound per-location via
 // the cascading `sequence:target` decoration).
 //
-// The active position in the ordinary cycle is participant-local (localStorage,
+// The active position in the cycle is participant-local (localStorage,
 // keyed by location) — it is a view preference, like the viewport, not
 // shared content. The arrangement itself IS committed: the reorder goes
 // through `writeTilePropertiesAt({ index })` per tile exactly like a drag,
@@ -42,22 +42,12 @@ import {
   buildCoordToIndex,
   applyToExisting,
   BUILTIN_ARRANGEMENTS,
-  laneIndexes,
 } from './arrangements.js'
 import {
   writeSequenceTarget,
   listSequenceTargetHere,
   removeSequenceTarget,
 } from './sequence-target.js'
-import {
-  setLaneViewport,
-  getLaneScrollAxis,
-  laneStripHorizontal,
-  getLaneCount,
-  setLaneCount,
-  stepLaneCount,
-  laneCountAtEdge,
-} from './lane-viewport-mode.js'
 
 type CellCountPayload = { count: number; labels: string[]; coords?: Axial[] }
 
@@ -90,12 +80,10 @@ export class SequenceCycleDrone extends Drone {
     sequences: '@diamondcoreprocessor.com/SequenceService',
   }
   protected override listens = [
-    'render:cell-count', 'render:set-orientation',
-    'keymap:invoke', 'sequence:select', 'sequence:edit', 'mobile:mode',
-    'lanes:set', 'lanes:step', 'lanes:off',
+    'render:cell-count', 'keymap:invoke', 'sequence:select', 'sequence:edit',
   ]
   protected override emits = [
-    'arrange:preview', 'cell:reorder', 'toast:show', 'lanes:changed',
+    'arrange:preview', 'cell:reorder', 'toast:show',
   ]
 
   // Live snapshot of the current location's tiles (label ↔ axial coord),
@@ -108,21 +96,6 @@ export class SequenceCycleDrone extends Drone {
   #fitTimer: ReturnType<typeof setTimeout> | null = null
   #commitTail: Promise<void> = Promise.resolve()
   readonly #commitRevision = new Map<string, number>()
-  // Runtime-only owner of the lane viewport. This is intentionally not read
-  // from hc:arrange-active and not restored on navigation/reload: /lanes is a
-  // global action, never a property of the tile/location being visited.
-  #laneLocation: string | null = null
-  #flat = localStorage.getItem('hc:hex-orientation') === 'flat-top'
-  // The participant's standing hex orientation, parked while lanes borrows it.
-  #orientationBeforeLanes: boolean | null = null
-  // Set when WE emit render:set-orientation, so the handler ignores its own
-  // echo instead of re-entering the cycle it was already inside.
-  #orientationEcho = false
-  // Which way the strip was last PACKED. Written only once a re-pack actually
-  // ran, so a pass that bailed is retried rather than remembered as done.
-  #laneHorizontalApplied: boolean | null = null
-  #laneReflowTimer: ReturnType<typeof setTimeout> | null = null
-  #laneReflowTries = 0
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
@@ -131,63 +104,11 @@ export class SequenceCycleDrone extends Drone {
     this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
       this.#cellLabels = payload.labels ?? []
       this.#cellCoords = payload.coords ?? []
-      this.#dropLaneModeOutsideOwner()
-    })
-    this.onEffect<{ flat?: boolean }>('render:set-orientation', ({ flat }) => {
-      this.#flat = !!flat
-      // Our own alignment already re-packs; re-entering here would arrange
-      // twice and commit twice for one act.
-      if (this.#orientationEcho) {
-        this.#orientationEcho = false
-        return
-      }
-      if (!this.#mobileMode() || this.#laneLocation !== this.#locationKey()) return
-      setLaneViewport(true)
-      void this.#cycle(+1, 'three-lanes')
-    })
-    // Window resize covers most rotations. `orientationchange` and
-    // `screen.orientation` cover the ones where it fires late, inconsistently,
-    // or (iOS) with the pre-rotation metrics still reported — the same three
-    // signals the pixi host recenters on, for the same reason.
-    window.addEventListener('resize', this.#onViewportResize)
-    window.addEventListener('orientationchange', this.#onViewportResize)
-    if (screen.orientation && typeof screen.orientation.addEventListener === 'function') {
-      screen.orientation.addEventListener('change', this.#onViewportResize)
-    }
-    this.onEffect<{ active?: boolean }>('mobile:mode', ({ active }) => {
-      if (active) return
-      this.#clearLaneMode()
-    })
-
-    // ── the legibility ladder ─────────────────────────────────────────
-    // Fewer lanes ⇒ wider hexes ⇒ readable name, picture and notes; more
-    // lanes ⇒ scan. The rung is a participant preference, but the
-    // arrangement it produces is ordinary tile truth committed once per
-    // step — so the ladder is stepped by deliberate acts (a button, a
-    // settled pinch, `/lanes 1`), never continuously by a moving finger.
-    this.onEffect<{ lanes?: number }>('lanes:set', ({ lanes }) => {
-      if (!this.#requireMobile()) return
-      setLaneCount(Number(lanes))
-      void this.#cycle(+1, 'three-lanes')
-    })
-    this.onEffect<{ dir?: number }>('lanes:step', ({ dir }) => {
-      if (!this.#requireMobile()) return
-      const step = Number(dir) < 0 ? -1 : +1
-      if (laneCountAtEdge(step)) {
-        this.#publishLanes(true)
-        return
-      }
-      stepLaneCount(step)
-      void this.#cycle(+1, 'three-lanes')
-    })
-    this.onEffect('lanes:off', () => {
-      this.#clearLaneMode()
     })
 
     this.onEffect<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
       if (cmd === 'sequence.cycle') void this.#cycle(+1)
       else if (cmd === 'sequence.cyclePrev') void this.#cycle(-1)
-      else if (cmd === 'sequence.threeLanes') void this.#cycle(+1, 'three-lanes')
     })
     this.onEffect<{ id?: string }>('sequence:select', ({ id }) => {
       if (id) void this.#cycle(+1, id)
@@ -200,7 +121,6 @@ export class SequenceCycleDrone extends Drone {
       )
       void editor?.openEditor?.((name || 'default').trim() || 'default', segments)
     })
-
   }
 
   // ── cycle ───────────────────────────────────────────────────────────
@@ -208,20 +128,11 @@ export class SequenceCycleDrone extends Drone {
   #cycle = async (dir: number, requestedId?: string): Promise<void> => {
     if (this.#busy) return
 
-    const requestedLanes = requestedId === 'three-lanes'
-    if (requestedLanes && !this.#mobileMode()) {
-      // Defense in depth: /lanes is intentionally a mobile global action.
-      // A stale command invocation must never install the axis lock on desktop.
-      this.#clearLaneMode()
-      this.#toastLanesMobileOnly()
-      return
-    }
-
     const axialSvc = this.resolve<AxialServiceLike>('axial')
     if (!axialSvc?.items?.size) return
 
     // Current tiles → name → existing index, read from the live render
-    // snapshot via the spiral reverse map (coord → index).
+    // snapshot via the grid's reverse map (coord → index).
     const coordToIndex = buildCoordToIndex(axialSvc.items)
     const current = new Map<string, number>()
     for (let i = 0; i < this.#cellLabels.length; i++) {
@@ -255,21 +166,9 @@ export class SequenceCycleDrone extends Drone {
         : -1
       const nextIdx = requestedIdx >= 0
         ? requestedIdx
-        : this.#nextOrdinaryIndex(cycle, active, dir)
+        : ((active + dir) % cycle.length + cycle.length) % cycle.length
       if (nextIdx < 0) return
       const entry = cycle[nextIdx]
-      const threeLanes = entry.kind === 'builtin' && entry.id === 'three-lanes'
-      if (threeLanes) {
-        // Point-top is the default vertical strip. Flat-top remains available
-        // only when the participant explicitly rotates the hive.
-        this.#laneLocation = locationKey
-        this.#alignOrientation()
-        this.#laneHorizontalApplied = this.#laneHorizontal()
-        setLaneViewport(true)
-        this.#publishLanes(true)
-      } else {
-        this.#clearLaneMode()
-      }
 
       const indexes = this.#indexesFor(entry, orderedNames.length, coordToIndex)
       if (!indexes || indexes.length === 0) return
@@ -282,9 +181,7 @@ export class SequenceCycleDrone extends Drone {
       // renderer's in-memory geometry path. No layer/resource read or write is
       // on the activation path. The scoped preview remains authoritative for
       // this location until the background commit catches up.
-      // Ordinary arrangements remember where this location stopped in the
-      // cycle. Lanes never does: it is a runtime global action, not tile state.
-      if (!threeLanes) this.#writeActive(locationKey, nextIdx)
+      this.#writeActive(locationKey, nextIdx)
       this.emitEffect('sequence:selected', { id: entry.id, kind: entry.kind, location: locationKey })
       this.emitEffect('arrange:preview', {
         location: locationKey,
@@ -317,166 +214,16 @@ export class SequenceCycleDrone extends Drone {
   // `a` presses coalesce: the pending fit is cancelled and rescheduled so
   // only the final arrangement is fitted, once it settles. Source 'user'
   // so the recomposed view persists like the `0` / `r` fit shortcuts.
+  // (A phone in rails fits across its strip — zoomToFit derives that itself.)
   #fitToCenter = (): void => {
     if (this.#fitTimer !== null) clearTimeout(this.#fitTimer)
     this.#fitTimer = setTimeout(() => {
       this.#fitTimer = null
       const zoom = window.ioc.get<{
-        zoomToFit?: (
-          snap?: boolean,
-          source?: 'user' | 'auto',
-          fitAxis?: 'both' | 'x' | 'y',
-        ) => void
+        zoomToFit?: (snap?: boolean, source?: 'user' | 'auto') => void
       }>('@diamondcoreprocessor.com/ZoomDrone')
-      // Fit ACROSS the strip, leaving its length free to scroll. Read live —
-      // by the time this deferred fit runs the device may have turned again.
-      const laneAxis = getLaneScrollAxis()
-      const fitAxis = laneAxis === 'y'
-        ? 'x'
-        : laneAxis === 'x' ? 'y' : 'both'
-      zoom?.zoomToFit?.(false, 'user', fitAxis)
+      zoom?.zoomToFit?.(false, 'user')
     }, 80)
-  }
-
-  // ── lane direction follows the DEVICE, not the hex preference ───────
-  //
-  // Lanes run across the short axis; the strip scrolls along the long one.
-  // Portrait ⇒ point-top columns, scroll y. Landscape ⇒ the same lanes
-  // rotated: flat-top columns packed into a left↔right strip, scroll x.
-  // Keeping the portrait packing in landscape gave very wide tiles that
-  // still only moved up and down — the strip pointing the wrong way.
-  //
-  // The direction comes from lane-viewport-mode, which is also what the pan
-  // and zoom lock reads. One definition: the packing and the lock cannot drift
-  // apart, whatever order the rotation's events arrive in.
-  #laneHorizontal = (): boolean => laneStripHorizontal()
-
-  /** Lanes owns the hex orientation while it owns the viewport: a horizontal
-   *  strip is only straight with flat-top hexes, a vertical one only with
-   *  point-top. The participant's standing choice is remembered and put back
-   *  when lane mode is released. */
-  #alignOrientation = (): void => {
-    const wantFlat = this.#laneHorizontal()
-    if (this.#flat === wantFlat) return
-    if (this.#orientationBeforeLanes === null) this.#orientationBeforeLanes = this.#flat
-    this.#flat = wantFlat
-    this.#orientationEcho = true
-    try {
-      localStorage.setItem('hc:hex-orientation', wantFlat ? 'flat-top' : 'point-top')
-    } catch {
-      /* storage disabled — the orientation still applies for this session */
-    }
-    this.emitEffect('render:set-orientation', { flat: wantFlat })
-  }
-
-  #restoreOrientation = (): void => {
-    const previous = this.#orientationBeforeLanes
-    this.#orientationBeforeLanes = null
-    if (previous === null || previous === this.#flat) return
-    this.#flat = previous
-    this.#orientationEcho = true
-    try {
-      localStorage.setItem('hc:hex-orientation', previous ? 'flat-top' : 'point-top')
-    } catch {
-      /* ignore */
-    }
-    this.emitEffect('render:set-orientation', { flat: previous })
-  }
-
-  /** Device rotation re-lays the strip. The viewport flip is the signal —
-   *  MediaQueryList change events are not delivered under an emulated
-   *  resize, and a resize is exactly what a rotation is.
-   *
-   *  A rotation is a BURST, not an event: the bar collapses, the renderer
-   *  re-lays out, and the first notification can still carry the old metrics.
-   *  So the check is DEFERRED to the settled size and RE-ARMED until the strip
-   *  is actually packed the way the device is held — reading once, on the
-   *  earliest signal, is how landscape ended up wearing the portrait packing.
-   *  The axis lock never waits for any of this (it is derived per read); this
-   *  is only about the hexes catching up. */
-  #onViewportResize = (): void => {
-    this.#laneReflowTries = 0
-    this.#scheduleLaneReflow(160)
-  }
-
-  #scheduleLaneReflow = (delay: number): void => {
-    if (this.#laneReflowTimer !== null) clearTimeout(this.#laneReflowTimer)
-    this.#laneReflowTimer = setTimeout(this.#reflowLanes, delay)
-  }
-
-  #reflowLanes = (): void => {
-    this.#laneReflowTimer = null
-    if (!this.#mobileMode() || this.#laneLocation !== this.#locationKey()) return
-    if (this.#laneHorizontal() === this.#laneHorizontalApplied) return
-    void this.#cycle(+1, 'three-lanes')
-    // `#cycle` records the direction only when it really re-packed. If it bailed
-    // — no tiles in the render snapshot yet, mid re-render — come back for it,
-    // a bounded number of times, so a page that simply has nothing to arrange
-    // stops asking.
-    if (this.#laneHorizontal() !== this.#laneHorizontalApplied && ++this.#laneReflowTries < 8) {
-      this.#scheduleLaneReflow(400)
-    }
-  }
-
-  #locationKey = (): string => {
-    const lineage = this.resolve<LineageLike>('lineage')
-    return (lineage?.explorerSegments?.() ?? [])
-      .map((s) => String(s ?? '').trim())
-      .filter(Boolean)
-      .join('/')
-  }
-
-  #mobileMode = (): boolean =>
-    window.ioc.get<{ active?: boolean }>('@diamondcoreprocessor.com/MobileMode')?.active === true
-
-  #clearLaneMode = (): void => {
-    const wasActive = this.#laneLocation !== null
-    this.#laneLocation = null
-    this.#laneHorizontalApplied = null
-    if (this.#laneReflowTimer !== null) {
-      clearTimeout(this.#laneReflowTimer)
-      this.#laneReflowTimer = null
-    }
-    setLaneViewport(false)
-    if (wasActive) {
-      this.#restoreOrientation()
-      this.#publishLanes(false)
-    }
-  }
-
-  /** Lanes is a mobile act. A stale invocation on desktop drops the
-   *  constraint and says so, rather than half-applying the ladder. */
-  #requireMobile = (): boolean => {
-    if (this.#mobileMode()) return true
-    this.#clearLaneMode()
-    this.#toastLanesMobileOnly()
-    return false
-  }
-
-  /** The rung, for anything that shows it (the mobile bar's lane button).
-   *  Replayed by EffectBus, so chrome mounted later still reads it. */
-  #publishLanes = (active: boolean): void => {
-    this.emitEffect('lanes:changed', { active, lanes: getLaneCount() })
-  }
-
-  /** A lane action owns only the view it was explicitly invoked on. Arriving
-   * anywhere else drops the runtime constraint; no tile/location can restore
-   * it from localStorage. */
-  #dropLaneModeOutsideOwner = (): void => {
-    if (!this.#mobileMode() || this.#laneLocation !== this.#locationKey()) {
-      this.#clearLaneMode()
-    }
-  }
-
-  /** `a` / Shift+A walk only the ordinary per-location arrangements. Lanes
-   * is reached solely by the explicit global `/lanes` action. */
-  #nextOrdinaryIndex = (cycle: readonly CycleEntry[], active: number, dir: number): number => {
-    for (let step = 1; step <= cycle.length; step++) {
-      const idx = ((active + dir * step) % cycle.length + cycle.length) % cycle.length
-      const entry = cycle[idx]
-      if (!(entry?.kind === 'builtin' && entry.id === 'three-lanes')) return idx
-    }
-    return -1
   }
 
   /** Built-ins first, then every saved set in the palette. */
@@ -502,11 +249,6 @@ export class SequenceCycleDrone extends Drone {
     coordToIndex: Map<string, number>,
   ): number[] | null => {
     if (entry.kind === 'builtin') {
-      // Lanes is the one built-in whose shape is a live preference: the
-      // ladder rung decides how many columns it packs into.
-      if (entry.id === 'three-lanes') {
-        return laneIndexes(count, coordToIndex, getLaneCount(), this.#laneHorizontal())
-      }
       const builtin = BUILTIN_ARRANGEMENTS.find((b) => b.id === entry.id)
       return builtin ? builtin.generate(count, coordToIndex) : null
     }
@@ -561,11 +303,9 @@ export class SequenceCycleDrone extends Drone {
       .then(async () => {
         await this.#persistPlacement(commit.segments, commit.placement)
 
-        // Bind ordinary arrangements as drop-targets so NEW tiles continue
-        // their pattern. Lanes is a global runtime action, never a cascading
-        // sequence:target decoration on this tile/location.
-        const lanes = commit.entry.kind === 'builtin' && commit.entry.id === 'three-lanes'
-        if (!lanes) await this.#bind(commit.segments, commit.entry, commit.indexes)
+        // Bind the arrangement as a drop-target so NEW tiles continue its
+        // pattern.
+        await this.#bind(commit.segments, commit.entry, commit.indexes)
         void new hypercomb().act()
 
         // A newer gesture at this location owns the preview. Only the newest
@@ -646,16 +386,6 @@ export class SequenceCycleDrone extends Drone {
 
   #toast = (entry: CycleEntry): void => {
     const i18n = window.ioc.get<I18nLike>('@hypercomb.social/I18n')
-    if (entry.kind === 'builtin' && entry.id === 'three-lanes') {
-      // The rung is what changed, so the rung is what the toast names.
-      const count = getLaneCount()
-      const t = i18n?.t ? i18n.t('arrange.lanes', { count }) : ''
-      const message = t && t !== 'arrange.lanes'
-        ? t
-        : count === 1 ? 'One lane — reading' : `${count} lanes`
-      this.emitEffect('toast:show', { type: 'tip', message })
-      return
-    }
     const name =
       entry.labelKey && i18n?.t
         ? (() => {
@@ -666,13 +396,6 @@ export class SequenceCycleDrone extends Drone {
     const prefix = i18n?.t ? i18n.t('arrange.toast', { name }) : ''
     const message = prefix && prefix !== 'arrange.toast' ? prefix : `Arranged: ${name}`
     this.emitEffect('toast:show', { type: 'tip', message })
-  }
-
-  #toastLanesMobileOnly = (): void => {
-    this.emitEffect('toast:show', {
-      type: 'info',
-      message: 'Lanes is available in mobile mode.',
-    })
   }
 }
 

@@ -1,8 +1,17 @@
 // commands/lanes.queen.ts
 //
-// Mobile-only global door to the orientation-aware three-lane arrangement.
-// Unlike the per-location `a` cycle this selects the target directly and never
-// installs a sequence target on the current tile.
+// /lanes — the phone's reading rung, and the one opt-out.
+//
+// On a phone the tiles ALWAYS sit in rails (RailProjectionDrone): three to
+// scan, two to browse, one to read. This command steps that rung, and turns
+// the rails off for a participant who wants the free map back on their phone.
+// Nothing here arranges or commits anything — the rails are a projection of
+// the layer's order, never tile truth.
+//
+//   /lanes          rails on, at the remembered rung
+//   /lanes 1|2|3    that many rails
+//   /lanes off      the free map on this phone (remembered)
+//   /lanes on       rails again
 
 import { EffectBus, QueenBee } from '@hypercomb/core'
 
@@ -10,22 +19,19 @@ export class LanesQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'lanes'
   override description =
-    'In mobile mode, arrange tiles into readable lanes: 3 to scan, 2 to browse, 1 to read'
+    'On a phone, read the hive in rails: 3 to scan, 2 to browse, 1 to read; off for the free map'
   override descriptionKey = 'slash.lanes'
+  override options = ['1', '2', '3', 'off', 'on']
   override examples = [
-    {
-      input: '/lanes',
-      result: 'Fits the current lane count across the screen and leaves the long axis pannable',
-    },
-    {
-      input: '/lanes 1',
-      result: 'One lane — the widest hexagons, for reading',
-    },
-    {
-      input: '/lanes off',
-      result: 'Releases the lane viewport; pan and zoom go back to free',
-    },
+    { input: '/lanes', result: 'Rails on, at the rung you last read at' },
+    { input: '/lanes 1', result: 'One rail — the widest hexagons, for reading' },
+    { input: '/lanes off', result: 'The free map on this phone; pan and zoom go back to free' },
   ]
+
+  override slashComplete(args: string): readonly string[] {
+    const q = args.toLowerCase().trim()
+    return q ? this.options.filter(o => o.startsWith(q)) : this.options
+  }
 
   protected execute(args: string): void {
     const arg = (args ?? '').trim().toLowerCase()
@@ -38,7 +44,7 @@ export class LanesQueenBee extends QueenBee {
       EffectBus.emit('lanes:set', { lanes: n })
       return
     }
-    EffectBus.emit('keymap:invoke', { cmd: 'sequence.threeLanes' })
+    EffectBus.emit('lanes:on', {})
   }
 }
 

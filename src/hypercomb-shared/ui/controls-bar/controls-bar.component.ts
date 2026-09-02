@@ -342,7 +342,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly viewRowOpen = signal(false)
   /** Controls currently in the row. Five per row; the lift below follows it, so
    *  adding a control here is the whole change — nothing else measures. */
-  readonly #viewRowCount = 6
+  readonly #viewRowCount = 4
   /** How far anything floating above the bar must lift to clear the view row.
    *  Published as a CSS variable so body-appended chrome (the select pill)
    *  moves with it without a second event contract. One row is 4.6rem; each
@@ -1682,7 +1682,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     let left = 0
     let right = 0
     let leftTop = ''
-    if (stage && side && !this.isMobile()) {
+    // THE LANDSCAPE PHONE RAIL IS A LEFT DOCK. The bar publishes zero edges on
+    // phones because its portrait strip owns no side — but in landscape it IS
+    // a column down the left edge, and everything that keeps clear of a dock
+    // (the strip's fit, a sheet's inboard edge) must know how wide it is, or
+    // the first rail of hexagons is painted under the buttons.
+    if (stage && this.isMobile() && this.isLandscape()) {
+      const w = stage.offsetWidth
+      if (w > 0) left = Math.max(0, stage.offsetLeft + w)
+    } else if (stage && side && !this.isMobile()) {
       // The LAYOUT box (offsetLeft/Width/Top), never getBoundingClientRect().
       //
       // `.pill-stage` animates `transform` over 200ms, and its undocked base
@@ -2923,6 +2931,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   #onSwipeStart = (e: TouchEvent): void => {
     if (!this.isMobile() || !this.canGoBack()) return
+    // IN LANDSCAPE RAILS A LEFTWARD DRAG IS THE STRIP SCROLL. The rails run
+    // left↔right there and the finger may only travel that way, so an edge
+    // swipe would pan the strip AND walk the lineage back in one gesture.
+    // The Back disc and the hardware button remain the way back.
+    if (this.lanesActive() && this.isLandscape()) return
     const touch = e.touches[0]
     // only start from the right 40px edge of the screen
     if (touch.clientX < window.innerWidth - this.#SWIPE_EDGE_ZONE) return

@@ -1553,7 +1553,7 @@ export class ClaudeBridgeWorker extends Worker {
   // allowlist is the whole contract: intents only, never truth-minting
   // effects, and `synchronize` stays processor-only by doctrine.
   static readonly #REMOTE_INTENTS = new Set([
-    'publish:run', 'publish:unpublish', 'publish:refresh', 'publish:expand',
+    'publish:run', 'publish:unpublish', 'publish:refresh', 'publish:inspect',
     'publish:view-toggle', 'publish:close', 'publish:opens-as',
     // A responder that just created parts over the bridge owes them each an
     // appearance (website-artifact paradigm, rules 10 and 11) and cannot cut

@@ -2,11 +2,10 @@
 //
 // `/hosts` — the hosts you carry.
 //
-// Third verb alongside `/host` and `/publish`, and the split is the same one
-// those two already make. `/host` is the GESTURE (publish this branch, hand me
-// a link). `/publish` is the STATE (what is the world serving, what changed
-// here since). `/hosts` is the SET — who you can reach, before any question of
-// what to send them.
+// Companion to `/publish`, with a clean ownership boundary. Publish is
+// branch-scoped: where this branch goes and what the world serves. Hosts is
+// the durable directory: which domains you carry and which packages they
+// offer, before any branch chooses a destination.
 //
 // Toggling only; the panel owns its lifecycle from `hosts:render`.
 
@@ -15,7 +14,7 @@ import { EffectBus } from '@hypercomb/core'
 export class HostsQueenBee {
   readonly command = 'hosts'
   readonly description =
-    'The hosts you carry — add one you have been given, drop one you no longer want, and see which of your branches name it. The list your branches choose their addresses from.'
+    'Open your host directory — add or remove a host, inspect its packages, and add one to your hive. Publish uses this directory for branch destinations.'
   readonly descriptionKey = 'slash.hosts'
 
   async invoke(_args: string): Promise<void> {

@@ -1,4 +1,12 @@
 // core/axial/axial-service.ts
+//
+// THE SLOT GRID. Slot number → hex coordinate. The renderer places the tile
+// whose `index` is i at `items.get(i)`; drag-to-move, drop landing, the
+// arrangement cycle and the selection marquee all read the same map, and
+// `buildCoordToIndex` inverts it. It is the one place the desktop's spiral
+// and the phone's rails meet: `createMatrix` builds the spiral once, and
+// `project()` swaps a rail matrix in and out (documentation/
+// mobile-rails-projection.md). Nothing downstream knows which answered.
 import { Point } from 'pixi.js';
  import { AxialCoordinate } from './axial-coordinate.js';
 import type { Settings } from '../../preferences/settings.js';
@@ -7,6 +15,17 @@ export const distance = (a: Point, b: Point): number => {
   const dx = a.x - b.x
   const dy = a.y - b.y
   return Math.sqrt(dx * dx + dy * dy)
+}
+
+/** A slot → coordinate map from somewhere else (the rail grid). Plain
+ *  numbers in; this service mints the AxialCoordinate objects itself so the
+ *  static index register and the adjacency lists stay its own business. */
+export type SlotMatrix = ReadonlyMap<number, { q: number; r: number }>
+
+type Parked = {
+  items: Map<number, AxialCoordinate>
+  count: number
+  adjacents: Map<number, AxialCoordinate[]>
 }
 
 export class AxialService {
@@ -18,6 +37,8 @@ export class AxialService {
   private width: number = 0
   private height: number = 0
   private initialized = false
+  /** The spiral, parked while a projection answers instead. */
+  #spiral: Parked | null = null
 
   public initialize = (settings: Settings): void => {
     if (this.initialized) return
@@ -29,6 +50,57 @@ export class AxialService {
 
     this.createMatrix()
     this.initialized = true
+  }
+
+  /** Is a projection (the phone's rails) answering instead of the spiral? */
+  public get projected(): boolean {
+    return this.#spiral !== null
+  }
+
+  /** How many slots the spiral holds — the size any projection should match,
+   *  so every `index` the spiral could have handed out still has a slot. */
+  public get capacity(): number {
+    return (this.#spiral?.items ?? this.items).size
+  }
+
+  /**
+   * Swap the answering matrix. `matrix` = project (slot i → its coordinate);
+   * `null` = the spiral again. Re-registers every coordinate's static index
+   * for the active matrix and rebuilds the adjacency lists, so `.index` reads
+   * and the placement allocator agree with what `items` says. Returns whether
+   * anything changed. A no-op before `initialize` — there is no spiral to
+   * park yet, and the caller retries on `render:host-ready`.
+   */
+  public project = (matrix: SlotMatrix | null): boolean => {
+    if (!this.initialized) return false
+
+    if (matrix === null) {
+      const spiral = this.#spiral
+      if (!spiral) return false
+      this.#spiral = null
+      this.items = spiral.items
+      this.count = spiral.count
+      this.Adjacents = spiral.adjacents
+      for (const [index, coord] of this.items) AxialCoordinate.setIndex(coord, index)
+      return true
+    }
+
+    if (!this.#spiral) {
+      this.#spiral = { items: this.items, count: this.count, adjacents: this.Adjacents }
+    }
+    const items = new Map<number, AxialCoordinate>()
+    let last = -1
+    for (const [slot, { q, r }] of matrix) {
+      const coord = this.newCoordinate(q, r, -q - r)
+      AxialCoordinate.setIndex(coord, slot)
+      items.set(slot, coord)
+      if (slot > last) last = slot
+    }
+    this.items = items
+    this.count = Math.max(0, last)
+    this.Adjacents = new Map<number, AxialCoordinate[]>()
+    this.createAdjacencyList()
+    return true
   }
 
   private createAdjacencyList = (): void => {

@@ -1,11 +1,11 @@
 // sharing/publish-branch.ts
 //
 // THE PUBLISH ROUTINE — one branch, from local head to a link anyone can
-// open. Extracted from the `/host` queen so the queen and the publish panel
-// drive the SAME sequence; there is exactly one implementation of "put a
-// branch into the world", and it is this.
+// open. The share-sheet gesture and the Publish panel drive the SAME sequence;
+// there is exactly one implementation of "put a branch into the world", and
+// it is this.
 //
-// The sequence is unchanged from /host (seal → stage → availability gate →
+// The sequence is unchanged (seal → stage → availability gate →
 // index → link), with two additions that make publishing safe to repeat and
 // honest to report:
 //
@@ -36,6 +36,7 @@ import {
 } from './hive-link.js'
 import { fetchHiveIndex, putHiveManifest } from './hive-pointer.js'
 import { lineageKey } from '../history/lineage-key.js'
+import { hostsOfBranch } from './community-hosts.js'
 import { isBranchPublic, setBranchPublic } from '../presentation/tiles/tile-actions.drone.js'
 import { knownRoots, writePublishRecord, type PublishRecord } from './publish-heads.js'
 import { wornKindsWithin, writePublishLights } from '../commands/publish-lights.js'
@@ -70,12 +71,6 @@ interface HistoryLike {
 }
 interface HostSyncLike {
   isEnabled?: () => boolean
-  isPublicHostEnabled?: () => boolean
-  publicHostDomain?: () => string
-  /** Per-branch targets — primary first. Every zone shares one heap and one
-   *  index, so these differ only in which door the writes go through. */
-  publicHostDomainFor?: (key: string) => string
-  publicHostDomainsFor?: (key: string) => string[]
   enablePublicHost?: () => void
   markPublic?: (sig: string, kind?: string, closure?: boolean) => Promise<void>
   drain?: () => Promise<void>
@@ -144,14 +139,14 @@ const selfDomain = (): string => {
   try { return normalizeHost(localStorage.getItem(SELF_DOMAIN_KEY) ?? '') } catch { return '' }
 }
 
-/** The branch's doors in preference order: its own choices (primary first),
- *  then the standing defaults. Every door fronts ONE shared heap and ONE
- *  per-key index. */
-const doorsFor = (hostSync: HostSyncLike | undefined, key: string): string[] =>
-  [...new Set([
-    ...(hostSync?.publicHostDomainsFor?.(key) ?? []),
-    ...PUBLIC_CONTENT_HOSTS,
-  ])].filter(Boolean)
+/** A root zone's content endpoint. Loopback is already the endpoint: unlike a
+ *  public zone, it has no `content.` DNS label in front of it. */
+const contentDoor = (zone: string): string => LOOPBACK_RE.test(zone) ? zone : `content.${zone}`
+
+/** The branch's doors in preference order: its marks (primary first), then the
+ *  standing defaults. Every door fronts ONE shared heap and ONE per-key index. */
+const doorsFor = (branchZones: readonly string[]): string[] =>
+  [...new Set([...branchZones.map(contentDoor), ...PUBLIC_CONTENT_HOSTS])].filter(Boolean)
 
 /** Walk the doors until one ANSWERS — a verified index or an honest 404. A
  *  branch pointed at a zone whose DNS has not landed yet must still publish:
@@ -263,8 +258,13 @@ export async function publishBranch(
   if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer', sealed }
 
   const key = lineageKey(segs)
+  // The marks the branch wears are the one per-branch routing record. A branch
+  // with no marks rides the standing defaults.
+  let branchZones: string[] = []
+  try { branchZones = await hostsOfBranch(segs) } catch { /* defaults remain available */ }
+  const branchHosts = branchZones.map(contentDoor)
   // The branch's own doors first; the first that ANSWERS carries the write.
-  const { host: indexHost, read } = await resolveIndexDoor(doorsFor(hostSync, key), pubkey)
+  const { host: indexHost, read } = await resolveIndexDoor(doorsFor(branchZones), pubkey)
 
   let existing: Record<string, string>
   if (read.ok) {
@@ -301,7 +301,6 @@ export async function publishBranch(
   // The branch's own doors first (primary leading), then the standing
   // defaults. All of them front the one shared heap, so every advertised
   // host serves the same bytes — the order is preference, not truth.
-  const branchHosts = hostSync.publicHostDomainsFor?.(key) ?? []
   const hosts = [...new Set([
     ...(hostSync.isEnabled?.() && self ? [self] : []),
     ...branchHosts,
@@ -410,10 +409,11 @@ export async function unpublishBranch(
   if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
 
   const key = lineageKey(segs)
-  const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
+  let branchZones: string[] = []
+  try { branchZones = await hostsOfBranch(segs) } catch { /* defaults remain available */ }
   // Withdraw through the first of the branch's doors that answers — the same
   // walk publishing takes, against the same shared index.
-  const { host: indexHost, read } = await resolveIndexDoor(doorsFor(hostSync, key), pubkey)
+  const { host: indexHost, read } = await resolveIndexDoor(doorsFor(branchZones), pubkey)
   // The same guard as publishing, for the same reason: a rewrite we cannot
   // base on a verified read is a rewrite that drops everything we cannot see.
   if (!read.ok) {

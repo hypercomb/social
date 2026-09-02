@@ -30,21 +30,15 @@
 //
 // Shell parity: the panel is a shared Angular component and must not import
 // essentials, so everything crosses as `publish:render` payloads and comes
-// back as intents (publish:run, publish:unpublish, publish:expand, …).
+// back as intents (publish:run, publish:unpublish, publish:inspect, …).
 
 import { Drone, EffectBus, get, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 import { fetchHiveIndex } from './hive-pointer.js'
 import { publishVerdict, type PublishIndexState, type PublishRowState } from './publish-verdict.js'
-// READS the community, and seeds an empty pool once. The two ACTS (add,
-// remove) left with the panel — HostsDrone owns them now, so there is one
-// writer of `community:hosts` and this drone is not it.
-import {
-  addCommunityHost,
-  hostsOfBranch,
-  listCommunityHosts,
-  setBranchHosts,
-} from './community-hosts.js'
+// READS the community. HostsDrone owns its seed, add and remove operations, so
+// there is one writer of `community:hosts` and this drone is not it.
+import { hostZone, hostsOfBranch, listCommunityHosts, setBranchHosts } from './community-hosts.js'
 import { lineageKey } from '../history/lineage-key.js'
 import { readPublicBranches } from '../presentation/tiles/tile-actions.drone.js'
 import {
@@ -90,6 +84,8 @@ const HOST_SYNC_KEY = '@diamondcoreprocessor.com/HostSyncService'
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 
 const SIG_RE = /^[a-f0-9]{64}$/
+const LOOPBACK_RE = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i
+const contentDoor = (zone: string): string => LOOPBACK_RE.test(zone) ? zone : `content.${zone}`
 /** Gap enumeration reads local bytes across a closure — opt-in per row, and
  *  capped: "at least this many holes" is enough to refuse a green light. */
 const GAP_LIMIT = 8
@@ -120,11 +116,7 @@ interface HistoryLike {
   sealSubtree: (segments: readonly string[]) => Promise<string | null>
 }
 interface HostSyncLike {
-  isPublicHostEnabled?: () => boolean
   publicHostDomain?: () => string
-  publicHostDomainFor?: (key: string) => string
-  publicHostDomainsFor?: (key: string) => string[]
-  setPublicHostDomainsFor?: (key: string, domains: readonly string[]) => boolean
   probeServed?: (host: string, sig: string) => Promise<'served' | 'absent' | 'unknown'>
   closureGaps?: (sig: string, kind?: string, closure?: boolean, limit?: number) => Promise<string[]>
   isClosureAvailable?: (sig: string, kind: string, closure: boolean) => Promise<boolean>
@@ -148,15 +140,10 @@ export interface PublishRow {
   publishedAt: number | null
   /** Epoch ms of the last observation we stored, for the offline "as of" line. */
   seenAt: number | null
-  /** Objects in the published closure that are not served. Filled on expand. */
+  /** Objects in the published closure that are not served. Filled on inspect. */
   gaps: string[]
-  expanded: boolean
   /** The shareable link, when a record carries its bundle sig. */
   link: string | null
-  /** The public site URL once the branch is published — the domain a visitor
-   *  actually uses, derived from the lineage's last label on the branch's
-   *  PRIMARY zone. Nested lineages resolve only where the worker binds them. */
-  site: string | null
   /** Every root domain this branch claims, primary first. The name is the
    *  subdomain on each; the first is the door writes and probes go through. */
   zones: string[]
@@ -186,9 +173,6 @@ export interface PublishViewChoice {
 
 export interface PublishRenderPayload {
   open: boolean
-  /** The public-host opt-in. With it off, marking public is inert and every
-   *  row would look broken for the wrong reason — the panel says so instead. */
-  gateActive: boolean
   host: string
   /** The ROOT domain of the target (host minus its `content.` label) — the
    *  only part of an address a participant ever edits: the tile's name is the
@@ -197,15 +181,15 @@ export interface PublishRenderPayload {
   pubkey: string
   /** The row for THE CURRENT PAGE — the nearest branch at or above where the
    *  participant stands, or where they stand itself as the branch a first
-   *  publish would create. The panel is a properties window for this one
-   *  row; there is no list. '' at the hive root. */
+   *  publish would create. The panel opens its properties pane on this row;
+   *  the compact list beneath it still contains every known row. '' at the
+   *  hive root. */
   currentKey: string
   /** THE HOSTS THIS PARTICIPANT HAS — the only addresses a branch can
    *  actually be published to. A domain is not typed: it is one of these, and
    *  a hostname nobody serves is a publication that never answers. Standing
-   *  default first, then every host any branch already claims. A NEW host
-   *  arrives by a consent handshake with whoever runs it (kinds 20410/30411),
-   *  never by someone spelling it into a field. */
+   *  default first, then the rest of the carried community. A NEW host arrives
+   *  through the Hosts panel, never by spelling it into this properties pane. */
   hosts: string[]
   /** How the index read went. `forged` is the loud one. */
   index: PublishIndexState
@@ -234,9 +218,10 @@ export class PublishStatusDrone extends Drone {
 
   protected override listens: string[] = [
     'publish:view-toggle', 'publish:close', 'publish:refresh',
-    'publish:run', 'publish:unpublish', 'publish:expand', 'publish:copy-link',
+    'publish:run', 'publish:unpublish', 'publish:inspect', 'publish:copy-link',
     'publish:opens-as', 'publish:set-target',
     'history:head-changed', 'share:receipt-revoked', 'behavior:enablement-changed',
+    'hosts:render',
   ]
   protected override emits: string[] = ['publish:render', 'toast:show', 'activity:log']
 
@@ -259,14 +244,14 @@ export class PublishStatusDrone extends Drone {
    *  the panel's addresses all read the same resolution. */
   #hostByKey = new Map<string, string>()
   #payload: PublishRenderPayload = {
-    open: false, gateActive: false, host: '', zone: '', pubkey: '', currentKey: '', hosts: [],
+    open: false, host: '', zone: '', pubkey: '', currentKey: '', hosts: [],
     index: 'checking', indexCreatedAt: 0, indexStale: false,
     keyMismatch: false, refreshing: false, rows: [], collisions: [], views: [],
   }
   #debounce: ReturnType<typeof setTimeout> | null = null
-  /** Rows the participant opened. Gap enumeration is expensive; it happens
-   *  only for these, and only once per (row, head). */
-  #expanded = new Set<string>()
+  /** The row shown in the properties pane. Gap enumeration is expensive, so
+   *  it follows this one subject instead of running for every list row. */
+  #inspectedKey = ''
 
   constructor() {
     super()
@@ -294,41 +279,25 @@ export class PublishStatusDrone extends Drone {
     // untouched and says so, because silently keeping the old target after
     // someone typed a new one is how you publish to the wrong place.
     this.onEffect<{ key?: string; domains?: string[] }>('publish:set-target', (p) => {
-      const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
       const key = String(p?.key ?? '')
-      if (!key || !hostSync?.setPublicHostDomainsFor) return
-      const zones = (Array.isArray(p?.domains) ? p.domains : [])
-        .map(z => String(z ?? '').trim().toLowerCase()
-          .replace(/^[a-z][a-z0-9+.-]*:\/\//, '')
-          .replace(/[/?#].*$/, '')
-          .replace(/\.$/, ''))
-        .filter(Boolean)
-      const domains = zones.map(z => z.startsWith('content.') ? z : `content.${z}`)
-      if (!hostSync.setPublicHostDomainsFor(key, domains)) {
-        this.emitEffect('toast:show', { message: `not a domain: ${zones.join(', ')}` })
-        return
-      }
-      const now = (hostSync.publicHostDomainsFor?.(key) ?? [])
-        .map(h => h.replace(/^content\./, ''))
-      // The MARKS are the statement. The host-sync record stays written too, so
-      // the transport that already reads it keeps working while both are true.
-      const segments = this.#rows.find(r => r.key === key)?.segments ?? key.split('/').filter(Boolean)
-      void setBranchHosts(segments, zones).then(() => { if (this.#open) void this.#refresh() })
-      this.emitEffect('activity:log', { message: `${key} publishes at ${now.join(', ')}` })
-      if (this.#open) void this.#refresh()
+      if (!key) return
+      void this.#setTarget(key, Array.isArray(p?.domains) ? p.domains : [])
     })
 
     // ONE row open at a time — the panel shows a single properties pane, so
     // a second selection replaces the first rather than stacking.
-    this.onEffect<{ key?: string }>('publish:expand', (p) => {
+    this.onEffect<{ key?: string }>('publish:inspect', (p) => {
       const key = String(p?.key ?? '')
       if (!key) return
-      const open = !this.#expanded.has(key)
-      this.#expanded.clear()
-      if (open) this.#expanded.add(key)
-      for (const row of this.#rows) row.expanded = this.#expanded.has(row.key)
+      this.#inspectedKey = key
+      void this.#refreshGaps(key)
+    })
+
+    this.onEffect<{ zones?: string[] }>('hosts:render', (p) => {
+      this.#community = Array.isArray(p?.zones) ? p.zones.map(hostZone).filter(Boolean) : []
+      if (!this.#open) return
+      this.#payload = { ...this.#payload, hosts: [...this.#community] }
       this.#emit()
-      if (open) void this.#refreshGaps(key)
     })
 
     this.onEffect<{ key?: string }>('publish:run', (p) => { void this.#run(String(p?.key ?? '')) })
@@ -366,6 +335,8 @@ export class PublishStatusDrone extends Drone {
   async #refresh(): Promise<void> {
     if (this.#refreshing) return
     this.#refreshing = true
+    this.#payload = { ...this.#payload, refreshing: true }
+    this.#emit()
     try {
       const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
       const signer = get<SignerLike>(NOSTR_SIGNER_KEY)
@@ -376,12 +347,10 @@ export class PublishStatusDrone extends Drone {
       // constant is what lets the panel show a target that can change.
       const host = hostSync?.publicHostDomain?.() || PUBLIC_CONTENT_HOSTS[0] || ''
       this.#zone = host.replace(/^content\./, '')
-      const gateActive = hostSync?.isPublicHostEnabled?.() === true
-
       const pubkey = String((await signer?.getPublicKeyHex?.()) ?? '').toLowerCase()
       if (!SIG_RE.test(pubkey)) {
         this.#payload = {
-          ...this.#payload, open: this.#open, gateActive, host, zone: this.#zone, pubkey: '',
+          ...this.#payload, open: this.#open, host, zone: this.#zone, pubkey: '',
           index: 'checking', refreshing: false, rows: [], collisions: [],
         }
         this.#emit()
@@ -420,10 +389,11 @@ export class PublishStatusDrone extends Drone {
         currentKey = lineageKey(here)
         candidates.set(currentKey, here)
       }
-      // The current row's gap check runs without a click — it is the only
-      // row, and its holes are the difference between green and a lie.
-      this.#expanded.clear()
-      if (currentKey) this.#expanded.add(currentKey)
+      // The current row starts as the properties-pane subject, so its gap
+      // check runs without requiring a list click.
+      if (!this.#inspectedKey || currentKey !== this.#payload.currentKey) {
+        this.#inspectedKey = currentKey
+      }
 
       // WHAT YOU CARRY, AND WHAT EACH BRANCH NAMES — read once per refresh so
       // the row build stays synchronous. The marks are the branch's statement;
@@ -433,7 +403,7 @@ export class PublishStatusDrone extends Drone {
         const named = await hostsOfBranch(segments.length > 0 ? segments : key.split('/').filter(Boolean))
         if (named.length > 0) this.#branchHosts.set(key, named)
       }
-      this.#community = await this.#readCommunity(candidates.keys())
+      this.#community = await listCommunityHosts()
 
       // THE DOORS IN USE: the standing default plus every branch's own
       // choice. Every zone fronts the same per-key index, but a row is
@@ -443,7 +413,8 @@ export class PublishStatusDrone extends Drone {
       const hostFor = (key: string): string => {
         let door = this.#hostByKey.get(key)
         if (!door) {
-          door = hostSync?.publicHostDomainFor?.(key) || host
+          const zone = this.#zonesFor(key)[0]
+          door = zone ? contentDoor(zone) : host
           this.#hostByKey.set(key, door)
         }
         return door
@@ -513,8 +484,8 @@ export class PublishStatusDrone extends Drone {
       draft.sort((a, b) => a.path.localeCompare(b.path))
       this.#rows = draft
       this.#payload = {
-        open: this.#open, gateActive, host, zone: this.#zone, pubkey, currentKey,
-        hosts: this.#knownZones(candidates.keys()),
+        open: this.#open, host, zone: this.#zone, pubkey, currentKey,
+        hosts: this.#knownZones(),
         index: indexState, indexCreatedAt, indexStale, keyMismatch,
         refreshing: true, rows: this.#rows, collisions,
         views: this.#viewChoices(),
@@ -525,7 +496,8 @@ export class PublishStatusDrone extends Drone {
       // epoch holds, but after a commit it re-walks live heads across the
       // branch — running N of those concurrently is how a status panel becomes
       // a stall.
-      // The current row is the ONLY one on screen — its verdict lands first.
+      // The current row is the initial properties-pane subject, so its verdict
+      // lands first.
       const sweep = [...this.#rows]
         .sort((a, b) => (b.key === currentKey ? 1 : 0) - (a.key === currentKey ? 1 : 0))
       for (const row of sweep) {
@@ -567,9 +539,13 @@ export class PublishStatusDrone extends Drone {
 
       this.#payload = { ...this.#payload, refreshing: false, rows: this.#rows }
       this.#emit()
-      for (const key of this.#expanded) void this.#refreshGaps(key)
+      if (this.#inspectedKey) void this.#refreshGaps(this.#inspectedKey)
     } finally {
       this.#refreshing = false
+      if (this.#payload.refreshing) {
+        this.#payload = { ...this.#payload, refreshing: false }
+        this.#emit()
+      }
     }
   }
 
@@ -590,11 +566,9 @@ export class PublishStatusDrone extends Drone {
       publishedAt: entry?.record.at ?? null,
       seenAt: null,
       gaps: [],
-      expanded: this.#expanded.has(key),
       link: entry?.record.bundleSig ? this.#linkFor(entry.record.bundleSig) : null,
       // Every row has an address the moment it has a name — an unpublished
       // branch shows where it WILL live, which is where the domain is edited.
-      site: this.#siteFor(key),
       zones: this.#zonesFor(key),
       busyPhase: null,
       opensAs: '',
@@ -633,10 +607,24 @@ export class PublishStatusDrone extends Drone {
     return choices
   }
 
-  /** `publish:opens-as` — pin (or unpin) the branch ROOT's opening face. The
-   *  write is the same atomic `view:default` decorator every surface reads;
-   *  the head changes, so the differential immediately shows the republish
-   *  this pin now owes. */
+  /** Persist one branch's ordered host marks. The marks are the only source
+   *  of truth: there is no parallel lineage-key map to reconcile. */
+  async #setTarget(key: string, rawZones: readonly string[]): Promise<void> {
+    const row = this.#rows.find(candidate => candidate.key === key)
+    if (!row || row.segments.length === 0) return
+    const zones = rawZones.map(hostZone)
+    if (zones.some(zone => !zone)) {
+      this.emitEffect('toast:show', { message: `not a host: ${rawZones.join(', ')}` })
+      return
+    }
+    const ordered = [...new Set(zones)]
+    const written = await setBranchHosts(row.segments, ordered)
+    this.emitEffect('activity:log', {
+      message: `${key} publishes at ${written.length > 0 ? written.join(', ') : this.#zone}`,
+    })
+    if (this.#open) void this.#refresh()
+  }
+
   async #setOpensAs(key: string, view: string): Promise<void> {
     const row = this.#rows.find(r => r.key === key)
     if (!row || row.segments.length === 0) return
@@ -648,23 +636,22 @@ export class PublishStatusDrone extends Drone {
     } catch { /* cold layer — the next refresh re-reads the truth */ }
   }
 
-  /** Gap enumeration for one expanded row. Reads local bytes across the
-   *  published closure, so it is opt-in and capped. */
+  /** Gap enumeration for the inspected row. Reads local bytes across the
+   *  published closure, so it is limited to the properties-pane subject. */
   async #refreshGaps(key: string): Promise<void> {
     const row = this.#rows.find(r => r.key === key)
-    if (!row) return
-    row.expanded = this.#expanded.has(key)
-    if (!row.expanded || !row.live) { row.gaps = []; this.#emit(); return }
-    // Expansion is a UI fact, so render it before the optional closure walk.
-    // A slow/cold store must not make the click look like it was ignored.
-    this.#emit()
+    if (!row || this.#inspectedKey !== key) return
+    if (!row.live) { row.gaps = []; this.#emit(); return }
     const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
     const host = this.#hostByKey.get(key) ?? this.#payload.host
-    row.gaps = await beforeDeadline(
+    const gaps = await beforeDeadline(
       hostSync?.closureGaps?.(row.live, 'layer', true, GAP_LIMIT) ?? Promise.resolve([]),
       [],
     )
+    if (this.#inspectedKey !== key) return
+    row.gaps = gaps
     const observation = await readObservation(row.live, host)
+    if (this.#inspectedKey !== key) return
     row.seenAt = observation?.at ?? null
     this.#emit()
   }
@@ -741,8 +728,6 @@ export class PublishStatusDrone extends Drone {
     }
   }
 
-  /** The root domains a branch claims, primary first — its own choice, else
-   *  the standing default. Zones, not content hosts: the panel's material. */
   /** THE HOSTS YOU KNOW, as zones — the pick-list a branch chooses from.
    *
    *  A domain is not free text. It is a host that exists, that you are
@@ -750,14 +735,9 @@ export class PublishStatusDrone extends Drone {
    *  hostname nobody runs produces an address that never answers. So the
    *  panel offers what this participant actually has:
    *
-   *   • the standing default — the one host every hive starts with;
-   *   • whatever the participant pointed publishing at;
-   *   • every host a branch here already claims — including one granted since,
-   *     because a claim is proof it was offered.
-   *
-   *  Standing default first (it is what an unset branch rides), the rest in
-   *  stable order. Zones, not content hosts: `content.` is plumbing. */
-  #knownZones(_keys: Iterable<string>): string[] {
+   *  HostsDrone owns the pool and its one-time seed. This drone consumes the
+   *  list verbatim; branch marks never silently add entries to it. */
+  #knownZones(): string[] {
     // THE COMMUNITY, verbatim. The old union-of-every-claim is gone: a claim
     // was never withdrawn, so one mistyped hostname stayed in this list
     // forever, on every branch, with nothing anywhere able to remove it. What
@@ -765,63 +745,25 @@ export class PublishStatusDrone extends Drone {
     return [...this.#community]
   }
 
-  /** The hosts you carry. Seeded ONCE from what publishing already knew — the
-   *  standing default and every zone a branch claims — so the first open shows
-   *  the addresses in use rather than an empty list; from then on the pool is
-   *  the answer and anything in it can be dropped. */
-  async #readCommunity(keys: Iterable<string>): Promise<string[]> {
-    const carried = await listCommunityHosts()
-    if (carried.length > 0) return carried
-    const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
-    const bare = (h: string): string => String(h ?? '').trim().toLowerCase().replace(/^content\./, '')
-    const seed = new Set<string>()
-    const standing = bare(this.#zone || hostSync?.publicHostDomain?.() || PUBLIC_CONTENT_HOSTS[0] || '')
-    if (standing) seed.add(standing)
-    for (const key of keys) {
-      for (const claimed of hostSync?.publicHostDomainsFor?.(key) ?? []) {
-        const zone = bare(claimed)
-        if (zone) seed.add(zone)
-      }
-    }
-    for (const zone of seed) await addCommunityHost(zone)
-    const after = await listCommunityHosts()
-    return after.length > 0 ? after : [...seed]
-  }
-
   #zonesFor(key: string): string[] {
-    // THE MARKS FIRST — a branch's own statement of where it publishes. The
-    // host-sync record answers for branches that have not been re-stated yet.
+    // THE MARKS are the branch's one statement of where it publishes. An
+    // unmarked branch rides the standing default.
     const named = this.#branchHosts.get(key) ?? []
     if (named.length > 0) return named
-    const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
-    const zones = (hostSync?.publicHostDomainsFor?.(key) ?? [])
-      .map(h => h.replace(/^content\./, ''))
-      .filter(Boolean)
-    if (zones.length > 0) return zones
     const fallback = this.#zone || PUBLIC_CONTENT_HOSTS[0]?.replace(/^content\./, '') || ''
     return fallback ? [fallback] : []
-  }
-
-  /** The published address for a lineage key: its last label as a subdomain
-   *  of the branch's OWN primary zone. The worker maps a first-level label to
-   *  a top-level lineage implicitly; nested lineages reach here only when an
-   *  explicit binding names the same label. */
-  #siteFor(key: string): string | null {
-    const zone = this.#zonesFor(key)[0]
-    const label = key.split('/').filter(Boolean).pop()
-    return zone && label ? `https://${label}.${zone}` : null
   }
 
   #linkFor(bundleSig: string): string {
     try {
       const host = window.location.host
-      const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
+      const scheme = LOOPBACK_RE.test(host) ? 'http' : 'https'
       return `${scheme}://${host}/${bundleSig}`
     } catch { return '' }
   }
 
   /** Toasts carry RESOLVED text — the bus payload is display copy, and the
-   *  shell must not have to know which fields are keys (the /host queen
+   *  shell must not have to know which fields are keys (the publishing gesture
    *  resolves the same way). */
   #toast(type: string, messageKey: string, fallback: string): void {
     const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
@@ -833,7 +775,7 @@ export class PublishStatusDrone extends Drone {
   }
 
   #emit(): void {
-    this.#payload = { ...this.#payload, open: this.#open, rows: this.#rows, refreshing: this.#refreshing }
+    this.#payload = { ...this.#payload, open: this.#open, rows: this.#rows }
     this.emitEffect<PublishRenderPayload>('publish:render', this.#payload)
   }
 }

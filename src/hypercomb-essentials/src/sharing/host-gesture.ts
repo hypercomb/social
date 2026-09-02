@@ -2,17 +2,17 @@
 //
 // Publish the CURRENT branch as a STATIC hive and mint its link.
 //
-// THERE IS NO `/host` BEHAVIOUR. Hosting is not a verb you type: it is a
-// switch you turn on once, in the hosts window, and then a branch is published
-// from its own line item in the publish panel. This module keeps the GESTURE
-// — consent, progress, the outcome toast, link delivery — because the phone
+// THERE IS NO `/host` BEHAVIOUR. Hosting infrastructure and publishing a
+// branch are different things: a branch is published from its own line in
+// Publish. This module keeps the one-call share-sheet GESTURE — consent,
+// progress, the outcome toast, link delivery — because the phone
 // share sheet still needs exactly one call that puts a branch into the world
 // and hands back a link a cold stranger can open.
 //
 // The publisher side of static hive hosting: no swarm, no relay, no
 // hc:mesh-public — the whole flow rides the HTTPS byte tier.
 //
-// THE SEQUENCE ITSELF LIVES IN `publish-branch.ts`. This queen owns only the
+// THE SEQUENCE ITSELF LIVES IN `publish-branch.ts`. This module owns only the
 // gesture: consent, progress notes, the outcome toast, and link delivery. The
 // publish panel drives the same routine, so there is exactly one
 // implementation of "put a branch into the world" and the two surfaces can
@@ -55,8 +55,8 @@ export const hostCurrentBranch = async (): Promise<void> => {
       .map(s => String(s ?? '').trim()).filter(Boolean)
     if (segments.length === 0) {
       // The whole hive root is not a branch — name the gesture precisely.
-      toast('tip', t(i18n, 'host.title', 'Host branch'),
-        t(i18n, 'host.not-branch', 'Navigate into the branch you want to host, then run /host again.'))
+      toast('tip', t(i18n, 'host.title', 'Publish branch'),
+        t(i18n, 'host.not-branch', 'Navigate into the branch you want to publish, then try again.'))
       return
     }
     const name = segments[segments.length - 1] ?? ''
@@ -92,37 +92,37 @@ export const hostCurrentBranch = async (): Promise<void> => {
     if (!result.ok) {
       switch (result.failure) {
         case 'services':
-          toast('error', t(i18n, 'host.title', 'Host branch'), 'Core services are not ready yet.')
+          toast('error', t(i18n, 'host.title', 'Publish branch'), 'Core services are not ready yet.')
           return
         case 'no-branch':
-          toast('tip', t(i18n, 'host.title', 'Host branch'),
-            t(i18n, 'host.not-branch', 'Navigate into the branch you want to host, then run /host again.'))
+          toast('tip', t(i18n, 'host.title', 'Publish branch'),
+            t(i18n, 'host.not-branch', 'Navigate into the branch you want to publish, then try again.'))
           return
         case 'seal-failed':
-          toast('error', t(i18n, 'host.title', 'Host branch'),
-            t(i18n, 'host.seal-failed', 'The branch could not be sealed (a child is cold or unresolvable) — visit its tiles once, then run /host again.'))
+          toast('error', t(i18n, 'host.title', 'Publish branch'),
+            t(i18n, 'host.seal-failed', 'The branch could not be sealed (a child is cold or unresolvable) — visit its tiles once, then try again.'))
           return
         case 'no-signer':
-          toast('error', t(i18n, 'host.title', 'Host branch'), 'No signing key available — the hive index must be signed.')
+          toast('error', t(i18n, 'host.title', 'Publish branch'), 'No signing key available — the hive index must be signed.')
           return
         case 'not-available':
-          toast('info', t(i18n, 'host.title', 'Host branch'),
-            t(i18n, 'host.failed', 'The branch is still uploading — your hive index was NOT advanced (no dead links). Uploads retry automatically; run /host again once the sync pill clears.'))
+          toast('info', t(i18n, 'host.title', 'Publish branch'),
+            t(i18n, 'host.failed', 'The branch is still uploading — your hive index was NOT advanced (no dead links). Uploads retry automatically; try again once the sync pill clears.'))
           return
         case 'index-unsafe':
           // The refusal that protects every OTHER branch: rewriting the index
           // off a read we could not verify would drop the ones we cannot see.
-          toast('error', t(i18n, 'host.title', 'Host branch'),
+          toast('error', t(i18n, 'host.title', 'Publish branch'),
             t(i18n, 'host.index-unsafe',
-              'Your hive index could not be read back ({reason}), so it was left untouched — the bytes are hosted; run /host again when the host answers.',
+              'Your hive index could not be read back ({reason}), so it was left untouched — the bytes are hosted; try again when the host answers.',
               { reason: result.reason ?? 'unreachable' }))
           return
         case 'index-failed':
-          toast('error', t(i18n, 'host.title', 'Host branch'),
-            t(i18n, 'host.index-failed', 'The bytes are hosted but the hive index update failed ({reason}) — run /host again to retry the index.', { reason: result.reason ?? 'unknown' }))
+          toast('error', t(i18n, 'host.title', 'Publish branch'),
+            t(i18n, 'host.index-failed', 'The bytes are hosted but the hive index update failed ({reason}) — try again to retry the index.', { reason: result.reason ?? 'unknown' }))
           return
         default:
-          toast('error', t(i18n, 'host.title', 'Host branch'), 'Could not create the link bundle resource.')
+          toast('error', t(i18n, 'host.title', 'Publish branch'), 'Could not create the link bundle resource.')
           return
       }
     }
@@ -138,10 +138,10 @@ export const hostCurrentBranch = async (): Promise<void> => {
         ? 'Link copied — anyone who opens it can preview, then adopt.'
         : result.url
     const doneMsg = result.linkReceipted
-      ? t(i18n, 'host.done', 'Branch hosted. {link}', { link: linkText })
-      : t(i18n, 'host.done-pending-link', 'Branch hosted; the link itself is still uploading (retries automatically). {link}', { link: delivery === 'offered' ? result.url : 'Link ready.' })
+      ? t(i18n, 'host.done', 'Branch published. {link}', { link: linkText })
+      : t(i18n, 'host.done-pending-link', 'Branch published; the link itself is still uploading (retries automatically). {link}', { link: delivery === 'offered' ? result.url : 'Link ready.' })
     toast(result.status === 'confirmed' ? 'success' : 'info',
-      t(i18n, 'host.title', 'Host branch'),
+      t(i18n, 'host.title', 'Publish branch'),
       result.status === 'confirmed'
         ? doneMsg
         : t(i18n, 'host.done-unconfirmed',
@@ -152,7 +152,7 @@ export const hostCurrentBranch = async (): Promise<void> => {
     // own ledger names branches the live index does not carry. Reported, never
     // silently re-asserted — republishing them is the participant's call.
     if (result.missingFromIndex.length > 0) {
-      toast('info', t(i18n, 'host.title', 'Host branch'),
+      toast('info', t(i18n, 'host.title', 'Publish branch'),
         t(i18n, 'host.index-gaps',
           '{count} branch(es) you published before are missing from your hive index — open /publish to republish them.',
           { count: result.missingFromIndex.length }))
@@ -160,4 +160,3 @@ export const hostCurrentBranch = async (): Promise<void> => {
 
     console.log(`[host] "${name}" sealed=${result.sealed.slice(0, 12)}… index=${result.host}/hive/${result.pubkey.slice(0, 12)}… link=${result.url} status=${result.status}`)
   }
-

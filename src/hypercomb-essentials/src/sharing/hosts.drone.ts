@@ -29,7 +29,7 @@
 // essentials, so the list crosses as a `hosts:render` payload and comes back
 // as intents (hosts:add, hosts:remove).
 
-import { Drone, EffectBus, get, requestConfirm } from '@hypercomb/core'
+import { Drone } from '@hypercomb/core'
 import {
   addCommunityHost,
   hostZone,
@@ -82,9 +82,9 @@ export class HostsDrone extends Drone {
     'The hosts you carry, as their own surface: the `community:hosts` pool read as a list, with add and remove. The data set the publish picker offers and the shim reads by pool address on a cold boot.'
 
   protected override listens: string[] = [
-    'hosts:view-toggle', 'hosts:close', 'hosts:refresh', 'hosts:add', 'hosts:remove',
+    'hosts:view-toggle', 'hosts:open', 'hosts:close', 'hosts:refresh', 'hosts:add', 'hosts:remove',
   ]
-  protected override emits: string[] = ['hosts:render', 'publish:refresh', 'activity:log']
+  protected override emits: string[] = ['hosts:render', 'activity:log']
 
   #open = false
   #loaded = false
@@ -97,6 +97,15 @@ export class HostsDrone extends Drone {
       this.#open = !this.#open
       this.#emit()
       if (this.#open) void this.#read()
+    })
+
+    // Cross-surface navigation is an OPEN, never a toggle. A docked panel can
+    // be parked while its drone remains open; toggling from Publish would then
+    // close the very directory the participant asked to see.
+    this.onEffect('hosts:open', () => {
+      this.#open = true
+      this.#emit()
+      void this.#read()
     })
 
     this.onEffect('hosts:close', () => {
@@ -166,9 +175,6 @@ export class HostsDrone extends Drone {
     }
     this.#loaded = true
     this.#emit()
-    // Publish offers this list per branch; if its panel is open it should not
-    // keep showing a host that just left.
-    EffectBus.emit('publish:refresh', {})
   }
 
   /**
