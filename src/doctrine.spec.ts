@@ -13,8 +13,9 @@
 // The lists may only shrink.
 
 import { describe, expect, it } from 'vitest'
-import { readdirSync, readFileSync } from 'fs'
+import { readdirSync, readFileSync, existsSync } from 'fs'
 import { join, relative } from 'path'
+import { createRequire } from 'module'
 import { BARE_WORD_POOL_MEANINGS } from '@hypercomb/core'
 
 const ROOT = __dirname
@@ -859,5 +860,33 @@ describe('doctrine ratchets', () => {
       }
     }
     assertRatchet(offenders.sort(), [], 'a light ink literal in a tool window')
+  })
+
+  // ── ICONS RESOLVE BY LIGATURE, AND THE FONT IS A SUBSET ──────────────────
+  //
+  // A `.mat-sym` element's text IS the glyph name, and the shipped Material
+  // Symbols font carries only the names the UI is known to render
+  // (scripts/icon-names.cjs → scripts/fetch-fonts.cjs → public/fonts/icons.txt
+  // per shell). A name that reaches a template without reaching the subset
+  // does not blank: the global `.mat-sym` stack falls back to system-ui and
+  // the ligature renders as a WORD in the middle of the UI — "CABLE" over the
+  // roper row, "AR" and "BJE" clipped in the rail. It has shipped that way
+  // three times. This is the mechanical guard: everything the extractor can
+  // prove is rendered must be in every shell's list, or the fix is
+  // `node scripts/fetch-fonts.cjs <shell>/public/fonts inter … material-symbols`
+  // — never a smaller list.
+  it('every icon the UI renders ships in every shell\'s icon subset', () => {
+    const require = createRequire(import.meta.url)
+    const wanted = require('./scripts/icon-names.cjs') as string[]
+    expect(wanted.length).toBeGreaterThan(100)
+    const shells = ['hypercomb-web', 'hypercomb-dev', 'hypercomb-shim']
+    const stale: string[] = []
+    for (const shell of shells) {
+      const list = join(__dirname, shell, 'public', 'fonts', 'icons.txt')
+      if (!existsSync(list)) { stale.push(`${shell}: no icons.txt`); continue }
+      const have = new Set(readFileSync(list, 'utf8').split('\n').map(s => s.trim()).filter(Boolean))
+      for (const name of wanted) if (!have.has(name)) stale.push(`${shell}: ${name}`)
+    }
+    expect(stale, 'rendered icon names missing from a shipped subset — rerun scripts/fetch-fonts.cjs').toEqual([])
   })
 })

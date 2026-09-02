@@ -93,11 +93,16 @@ for (const root of ROOTS) {
 
     // 3. .ts/.scss that build the markup or name icons in data:
     //    `icon: 'folder'`, `<span class="mat-sym">${x}</span>` neighbours.
-    for (const m of src.matchAll(/\bicons?\s*:\s*'([a-z][a-z0-9_]*)'/g)) names.add(m[1])
-    for (const m of src.matchAll(/\bicons?\s*:\s*"([a-z][a-z0-9_]*)"/g)) names.add(m[1])
+    //    Any key or property whose name ENDS in icon counts — `gameIcon`,
+    //    `scopeIcon`, `railIcon` — not only the bare word. `gameIcon =
+    //    'cable'` and `gameIcon = 'castle'` (roper, solomon) were invisible to
+    //    the bare-word form and shipped as the WORDS "CABLE" and "CASTLE" in
+    //    the behaviours list (2026-09-02).
+    for (const m of src.matchAll(/\b[\w$]*[Ii]cons?\s*:\s*'([a-z][a-z0-9_]*)'/g)) names.add(m[1])
+    for (const m of src.matchAll(/\b[\w$]*[Ii]cons?\s*:\s*"([a-z][a-z0-9_]*)"/g)) names.add(m[1])
     // …and the assignment form of the same thing: `readonly icon = 'nearby'`.
-    for (const m of src.matchAll(/\bicons?\s*=\s*'([a-z][a-z0-9_]*)'/g)) names.add(m[1])
-    for (const m of src.matchAll(/\bicons?\s*=\s*"([a-z][a-z0-9_]*)"/g)) names.add(m[1])
+    for (const m of src.matchAll(/\b[\w$]*[Ii]cons?\s*=\s*'([a-z][a-z0-9_]*)'/g)) names.add(m[1])
+    for (const m of src.matchAll(/\b[\w$]*[Ii]cons?\s*=\s*"([a-z][a-z0-9_]*)"/g)) names.add(m[1])
 
     // 4. Glyph RESOLVERS: a declaration whose own name says icon, returning
     //    string literals. `case 'pools': return 'nearby'` renders a glyph just
@@ -110,7 +115,11 @@ for (const root of ROOTS) {
     //    because `.mat-sym` falls back to `system-ui` rather than blanking.
     //    Scoping to icon-named declarations is what keeps this from swallowing
     //    every string literal in the codebase and blowing the URL ceiling.
-    for (const d of src.matchAll(/[\w$#]*[Ii]con[\w$]*\s*=\s*(?:\([^)]*\))?[^{]*\{/g)) {
+    //
+    //    A METHOD is a resolver too: `icon(item: FeedbackItem): string {`
+    //    returned 'approval' straight into a `.mat-sym` and was missed because
+    //    only the `= (…) =>` form was read. Either shape, same body scan.
+    for (const d of src.matchAll(/[\w$#]*[Ii]con[\w$]*\s*(?:=\s*)?(?:\([^)]*\))?[^{;\n]*\{/g)) {
       const from = d.index + d[0].length
       const to = src.indexOf('\n  }', from)
       const body = src.slice(from, to === -1 ? from + 4000 : to)

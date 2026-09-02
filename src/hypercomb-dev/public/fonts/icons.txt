@@ -13,6 +13,7 @@ album
 analytics
 anchor
 api
+approval
 apps
 archive
 arrow_back
@@ -45,6 +46,7 @@ brush
 bubble_chart
 bug_report
 build
+cable
 cached
 calculate
 calendar_month
@@ -55,6 +57,7 @@ campaign
 cancel
 casino
 cast
+castle
 category
 celebration
 cell_tower
@@ -65,6 +68,7 @@ chat
 chat_bubble
 check
 check_circle
+checklist
 chevron_left
 chevron_right
 circle
@@ -268,6 +272,7 @@ refresh
 remove
 repeat
 replay
+reply
 report
 request_quote
 restore
@@ -368,6 +373,7 @@ watch
 water_drop
 waving_hand
 wb_sunny
+web
 widgets
 wifi
 workspace_premium

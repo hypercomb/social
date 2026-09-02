@@ -5,7 +5,7 @@
 //   node scripts/fetch-fonts.cjs <out-dir> <family...>
 //
 // See documentation/no-third-party-requests.md for the standing rule.
-const fs = require('fs'), path = require('path')
+const fs = require('fs'), path = require('path'), crypto = require('crypto')
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
 // latin + latin-ext only: none of these carry CJK, so Japanese falls
@@ -117,7 +117,15 @@ async function get(url, bin) {
       const file = `${slug}-${subset}${n > 1 ? `-${n}` : ''}.woff2`
       const bytes = await get(m[1], true)
       pending.push({ name: file, bytes })
-      css += body.replace(m[0], `url(./${file})`).replace(/^\s*\n/gm, '').trim() + '\n'
+      // VERSIONED BY CONTENT. The file keeps its name (the directory listing
+      // stays readable) but its URL carries a hash of the bytes, so a client
+      // holding the previous subset fetches the new one the moment the CSS
+      // says so. Without this, a tab that loaded the icon font when the
+      // subset was smaller kept that copy for ever — every name added since
+      // rendered as its own WORD, and only a hard reload fixed it
+      // (memory: project_icon_font_subset_stale_cache; recurred 2026-09-02).
+      const v = crypto.createHash('sha256').update(bytes).digest('hex').slice(0, 10)
+      css += body.replace(m[0], `url(./${file}?v=${v})`).replace(/^\s*\n/gm, '').trim() + '\n'
       console.log(`  ${file}  ${(bytes.length / 1024).toFixed(0)}K`)
     }
   }
@@ -127,4 +135,17 @@ async function get(url, bin) {
   }
   for (const { name, bytes } of pending) fs.writeFileSync(path.join(outDir, name), bytes)
   fs.writeFileSync(path.join(outDir, 'fonts.css'), css)
+
+  // The stylesheet itself is fetched by an unversioned URL from the shell's
+  // index.html, so a cached fonts.css would hide the new woff2 URLs just as
+  // surely. Stamp the link with a hash of the CSS wherever the shell keeps
+  // its index.html (web/dev: ../../src/index.html; the shim: ../../index.html).
+  const cssV = crypto.createHash('sha256').update(css).digest('hex').slice(0, 10)
+  for (const rel of ['../../src/index.html', '../../index.html']) {
+    const html = path.resolve(outDir, rel)
+    if (!fs.existsSync(html)) continue
+    const before = fs.readFileSync(html, 'utf8')
+    const after = before.replace(/fonts\/fonts\.css(?:\?v=[0-9a-f]+)?/g, `fonts/fonts.css?v=${cssV}`)
+    if (after !== before) { fs.writeFileSync(html, after); console.log(`  stamped ${path.relative(process.cwd(), html)} (fonts.css?v=${cssV})`) }
+  }
 })().catch(e => { console.error(e); process.exit(1) })

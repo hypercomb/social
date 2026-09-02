@@ -32,6 +32,8 @@
 
 add_box
 article_person
+# notes-strip #listMark() mints a 'checklist' mark when the palette is empty
+checklist
 bubble_chart
 conversion_path
 edit_document
