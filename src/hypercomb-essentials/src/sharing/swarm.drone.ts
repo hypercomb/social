@@ -579,6 +579,16 @@ export class SwarmDrone extends Drone {
   // leave or zone change clears it. Ephemeral mode leaves it empty.
   #visitedPages = new Map<string, readonly string[]>()
 
+  // DEPARTED — pubkey → created_at (s) of the tombstone we honoured. A
+  // tombstone evicts a participant's tiles, but the relay keeps their last
+  // LAYER slot until it expires (EVENT_TTL_SECS), and any REQ in that window
+  // replays it: our own resubscribe, and the late-joiner recovery that the
+  // eviction's empty bag invites on the next heartbeat. Without a memory of
+  // the tombstone the departed tiles came back ~30s after the leave. Only
+  // an event NEWER than the tombstone is a return (a genuine rejoin beacons
+  // and republishes with fresh timestamps); a cache read never is.
+  #departedAtSec = new Map<string, number>()
+
   /** Sticky (default) keeps every page you visited announced for the life
    *  of the session; ephemeral announces only where you stand, so what you
    *  leave lapses for the people there. Participant-local like the public
@@ -1215,6 +1225,7 @@ export class SwarmDrone extends Drone {
         this.#myDrillSentMs.clear()
         this.#drillServedMs.clear()
         this.#visitedPages.clear()
+        this.#departedAtSec.clear()
         // Drop the zone key so hide reads/writes fall back to
         // device-scoped storage while in private mode.
         this.#updateZoneKey()
@@ -1702,6 +1713,18 @@ export class SwarmDrone extends Drone {
     if (!composedSig) return
 
     this.#lastSyncInput = { segments, room, secretLen: secret.length, key: `${pathKey}\0${room}\0${secret}` }
+    // PRIVATE = SILENT. Only #syncForSig used to read the mesh flag; every
+    // publish after it — the lifecycle beacon, presence, the personal
+    // channel, the drill request, the visit — ran on every navigation and
+    // every heartbeat regardless. So a participant who had LEFT (tombstone
+    // sent, subscriptions closed) was re-armed by the next heartbeat tick:
+    // #ensureLifecycle re-subscribed and beaconed {alive} over its own
+    // tombstone, and it kept answering drill requests — peers saw the
+    // departed tiles come back. Leaving must be the last word.
+    let privateNow = true
+    try { privateNow = localStorage.getItem('hc:mesh-public') !== 'true' } catch { /* privacy-safe default: private */ }
+    if (privateNow) return
+
     if (this.stickyMode()) {
       // Re-insert so the freshest visit sits last; the FIFO trim drops the
       // page visited longest ago.
@@ -1850,6 +1873,7 @@ export class SwarmDrone extends Drone {
     this.#myDrillSentMs.clear()
     this.#drillServedMs.clear()
     this.#visitedPages.clear()
+    this.#departedAtSec.clear()
     // Tear down resource subs and the published-resource memo too —
     // a zone change means a different audience for our resources, so
     // we want to re-assert them in the new zone (and stop fetching
@@ -1987,6 +2011,7 @@ export class SwarmDrone extends Drone {
       const pubkey = String(entry.pubkey ?? '').toLowerCase()
       if (!/^[0-9a-f]{64}$/.test(pubkey)) continue
       if (this.#myPubkey && pubkey === this.#myPubkey) continue   // self-echo
+      if (this.#departedAtSec.has(pubkey)) continue                // tombstoned — a cache read is never a return
       // Live data wins — but only while it's FRESH. A cached entry past
       // PEER_STALE_MS is already invisible to peerTilesAtSig's read-time
       // filter; skipping it here would make a once-primed location
@@ -2209,6 +2234,13 @@ export class SwarmDrone extends Drone {
     // we've already applied from this publisher at this sig. See
     // #peerLayerAppliedAtBySigPubkey for the replay-scramble this closes.
     const createdAtSec = Number(evt?.event?.created_at ?? 0)
+    // Departed guard — see #departedAtSec: the relay replays a departed
+    // participant's last layer slot to any REQ until it expires.
+    const departedAtSec = this.#departedAtSec.get(pubkey)
+    if (departedAtSec !== undefined) {
+      if (createdAtSec > departedAtSec) this.#departedAtSec.delete(pubkey)
+      else { slog('[swarm] onEvent DROPPED: departed (older than tombstone)', { pubkey: pubkey.slice(0, 8), createdAtSec, departedAtSec }); return }
+    }
     if (createdAtSec > 0) {
       const guardKey = `${sig} ${pubkey}`
       const lastApplied = this.#peerLayerAppliedAtBySigPubkey.get(guardKey) ?? 0
@@ -3596,6 +3628,9 @@ const payload: SwarmLayerPayload = myLabel
     const room = this.#getRoomStore()?.value?.trim() ?? ''
     const secret = this.#getSecretStore()?.value?.trim() ?? ''
     if (!room || !secret) return
+    // A private participant answers nobody — the lifecycle subscription is
+    // closed on leave, but a request already in flight must not be served.
+    try { if (localStorage.getItem('hc:mesh-public') !== 'true') return } catch { return }
 
     // Hold the path? Resolve OUR layer there — a location we don't hold
     // is not ours to answer for (and must never be announced as empty).
@@ -4271,6 +4306,7 @@ const payload: SwarmLayerPayload = myLabel
     if (left) {
       // Tombstone — drop everything this participant contributed, at every
       // location, in one shot (evictPubkey walks all sigs + repaints).
+      this.#departedAtSec.set(pubkey, Number(evt.event?.created_at ?? 0) || Math.floor(Date.now() / 1000))
       this.#participantAliveMs.delete(pubkey)
       this.#segmentsByPubkey.delete(pubkey)
       const res = this.evictPubkey(pubkey)
@@ -4289,6 +4325,12 @@ const payload: SwarmLayerPayload = myLabel
     } else {
       const createdAt = Number(evt.event?.created_at ?? 0)
       if (createdAt > 0 && createdAt + EVENT_TTL_SECS < nowSec) return
+    }
+    const departedAt = this.#departedAtSec.get(pubkey)
+    if (departedAt !== undefined) {
+      const aliveAt = Number(evt.event?.created_at ?? 0)
+      if (aliveAt > departedAt) this.#departedAtSec.delete(pubkey)
+      else return  // a replayed beacon older than the tombstone — still gone
     }
     this.#participantAliveMs.set(pubkey, Date.now())
   }
