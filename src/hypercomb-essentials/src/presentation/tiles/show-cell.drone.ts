@@ -18,6 +18,7 @@ import { isBehaviorDormant, ENABLEMENT_CHANGED } from '../../sharing/behavior-en
 import { tagsForLabel, kindsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, ensureDecorationsIndexed, referenceTargetForLabel, referenceFaceForLabel, titleForLabel, defaultViewWithinSegments, HEXAGONS_SURFACE } from '../../commands/decoration-kind-index.js'
 import { defaultViewWithinAt } from '../../commands/view-default.js'
 import { slotAt, type AxialLike } from '../../sequence/pattern.js'
+import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
 import { launcherClusterLayout, type ClusterGroup } from './launcher-cluster-layout.js'
 import { setTileStacks, type StackVariant } from './tile-stack.js'
 import { participantVariantVisual } from './participant-variant.js'
@@ -733,7 +734,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'clipboard:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'clipboard:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'landing:pending', 'render:dive-painted']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -2490,7 +2491,7 @@ export class ShowCellDrone extends Drone {
     const branchSet = this.cachedBranchSet ?? new Set<string>()
 
     const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
-    const previewNames = this.#effectivePreviewNames()
+    const previewNames = this.#effectivePreviewNames() ?? this.#railRanks(cellNames)
     const effectiveLen = previewNames ? previewNames.length : cellNames.length
     const maxCells = Math.min(effectiveLen, axialMax)
     if (maxCells <= 0) return
@@ -2565,6 +2566,26 @@ export class ShowCellDrone extends Drone {
 
   #effectivePreviewNames = (): string[] | null =>
     this.moveNames ?? this.#arrangePreviewNames.get(this.#currentLocationKey()) ?? null
+
+  /** THE PHONE'S RAILS READ DENSE RANKS. The slot array is sparse by `index`
+   *  — removals leave holes, the desktop allocator parks a new tile at the
+   *  free slot nearest the camera (index 30 while 0–9 are used), and a
+   *  flower is gappy by design. Read into a strip those holes are empty
+   *  rails between tiles, and a feed with twenty empty slots is not a feed.
+   *  So while the rail projection is up (the grid is a rail matrix and the
+   *  lane lock is on) the renderer walks the OCCUPIED slots in index order:
+   *  rank r renders at rail slot r. Render-time only — the layer keeps its
+   *  sparse indices; the one gesture that writes order on a phone, a drag,
+   *  commits in this same rank space (MoveDrone). A move or arrangement
+   *  preview, when one is up, is already in rail-slot space and wins, so
+   *  this is consulted only when neither is. Takes the pass's OWN names —
+   *  never a cache, which can still describe the layer just left. Null when
+   *  the array is already dense, so the ordinary walk runs unchanged. */
+  #railRanks = (names: readonly string[]): string[] | null => {
+    if (!getLaneScrollAxis()) return null
+    const dense = names.filter(Boolean)
+    return dense.length === names.length ? null : dense
+  }
 
   /**
    * Incremental render — same-layer tile changes without the full synchronize path.
@@ -6637,6 +6658,16 @@ export class ShowCellDrone extends Drone {
       }
     })
 
+    // THE SLOT GRID CHANGED SHAPE — the phone's rails were projected into (or
+    // released from) AxialService, so slot i now means a different place.
+    // Same invalidation as an orientation flip: every cached placement was
+    // read against the old grid.
+    this.onEffect<{ active?: boolean }>('render:grid-changed', () => {
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
     // listen for space (room) and secret changes — recompute signature.
     // Both also drop #layerCellsCache: room+secret are half the swarm gate,
     // so crossing them changes MEMBERSHIP (the swarm-privacy filter starts or
@@ -8806,7 +8837,7 @@ export class ShowCellDrone extends Drone {
     // shape behind. Symmetrically, walking only to the COMMITTED length cut
     // every tile the new arrangement had placed past it. So the walk is sized
     // by whichever array is authoritative, bounded by the grid.
-    const preview = this.#effectivePreviewNames()
+    const preview = this.#effectivePreviewNames() ?? this.#railRanks(names)
     const effectiveNames = preview ?? names
     const gridMax = typeof axial?.items?.size === 'number' ? axial.items.size : effectiveNames.length
     // A preview array is grid-length (move) or highest-slot-length (arrange);

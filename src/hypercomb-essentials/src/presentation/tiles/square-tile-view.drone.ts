@@ -21,6 +21,7 @@ import { Drone, EffectBus } from '@hypercomb/core'
 import { titleForLabel, kindsForLabel } from '../../commands/decoration-kind-index.js'
 import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
 import { isBehaviorDormant } from '../../sharing/behavior-enablement.js'
+import { MOBILE_MODE_IOC_KEY } from '../../preferences/mobile-pheromones.js'
 import { listDecorations } from '../../commands/decoration-manifest.js'
 import { readTilePropertiesAt, tilePictureCandidates } from '../../editor/tile-properties.js'
 import { resolveLocalResourceReference } from './local-resource-reference.js'
@@ -419,6 +420,18 @@ export class SquareTileViewDrone extends Drone {
     window.ioc?.get<NavigationShape>('@hypercomb.social/Navigation')?.goRaw(segments)
   }
 
+  #mobile(): boolean {
+    return window.ioc?.get<{ active?: boolean }>(MOBILE_MODE_IOC_KEY)?.active === true
+  }
+
+  /** The tile's own screen (tile-view.drone.ts) — opened by the same effect
+   *  the hexagon's hold uses, over this page: it mounts above the sheet, its
+   *  deck reads the band's registry for this very row, and closing it lands
+   *  back on the plates. One menu, whichever face the layer wears. */
+  #openCloseUp(label: string): void {
+    EffectBus.emit('tile:view-open', { label, segments: [...this.#currentSegments()] })
+  }
+
   // ── The dog-ear ──────────────────────────────────────────────────────
   //
   // ONE GESTURE, NEVER THE CLICK. The plain click still navigates, exactly as
@@ -480,7 +493,12 @@ export class SquareTileViewDrone extends Drone {
       timer = setTimeout(() => {
         held = true
         timer = null
-        void this.#toggleBrief(label)
+        // ON A PHONE THE HOLD OPENS THE TILE'S OWN SCREEN — the same close-up
+        // and app deck a hexagon opens, with the same registry-fed menus (open
+        // as · creations · actions), so a plate is never a poorer tile than
+        // the hexagon it stands for. The desktop keeps the corner's brief.
+        if (this.#mobile()) this.#openCloseUp(label)
+        else void this.#toggleBrief(label)
       }, HOLD_MS)
     })
     plate.addEventListener('pointermove', event => {
@@ -705,6 +723,7 @@ const SCENE_CSS = `
  background:linear-gradient(225deg,#d9b96a 46%,rgba(184,147,63,.25) 48%,transparent 50%);
  box-shadow:-1px 1px 2px rgba(58,42,28,.18);transition:width .16s ease,height .16s ease}
 .wv-fold[data-carries]{opacity:.85}
+@media (hover:none){.wv-fold{opacity:.7;width:2.75rem;height:2.75rem}.wv-fold::before{right:11px;top:11px;width:1.2rem;height:1.2rem}}
 .wv-plate:hover .wv-fold,.wv-plate:focus-within .wv-fold,.wv-fold:focus-visible{opacity:1}
 .wv-fold:hover::before,.wv-fold:focus-visible::before{width:1.35rem;height:1.35rem}
 .wv-plate[data-open]{transform:translateY(-5px)}

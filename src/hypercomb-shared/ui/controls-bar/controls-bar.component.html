@@ -310,14 +310,11 @@
                 <span class="mat-sym">view_column</span>
                 <span class="lane-digit" aria-hidden="true">{{ laneCount() }}</span>
               </button>
-              <button class="ctl-btn rotate-btn" (click)="rotateHexes()"
-                      [attr.aria-label]="'controls.rotate' | t">
-                <span class="mat-sym">hexagon</span>
-              </button>
-              <button class="ctl-btn arrange-btn" (click)="cycleArrangement()"
-                      [attr.aria-label]="'controls.arrange' | t">
-                <span class="mat-sym">grid_view</span>
-              </button>
+              <!-- ROTATE and ARRANGE left this row with the rails: the rail
+                   owns the hex orientation (point-top strip in portrait,
+                   flat-top in landscape, turning with the device), and a
+                   pattern order is meaningless in a feed. Both remain
+                   keyboard commands and desktop rail controls. -->
               <button class="ctl-btn pheromone-btn" (click)="openPheromones()"
                       [attr.aria-label]="'tags.panel.open' | t">
                 <span class="mat-sym">label</span>
