@@ -1255,9 +1255,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly tagScope = this.#tagScope.asReadonly()
   readonly tagsExpanded = this.#tagsExpanded.asReadonly()
 
-  /** The three reaches in cycle order — the expanded strip's toggle walks this
-   *  list. Same ids and glyphs as the pheromone panel — one vocabulary for
-   *  reach, wherever you meet it. */
+  /** The three reaches in cycle order — the tag strip's single head glyph
+   *  walks this list. Same ids and glyphs as the pheromone panel — one
+   *  vocabulary for reach, wherever you meet it. */
   readonly tagScopeOptions: readonly { id: 'local' | 'children' | 'global'; icon: string }[] = [
     { id: 'local', icon: 'blur_on' },
     { id: 'children', icon: 'account_tree' },
@@ -1283,14 +1283,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   /** Step to the next reach and wrap — local → children → global → local. The
-   *  expanded strip's three-stage toggle, same walk as the lane ladder. */
+   *  tag strip's three-stage toggle, same walk as the lane ladder. */
   readonly cycleTagScope = (): void => {
     const opts = this.tagScopeOptions
     const at = opts.findIndex(o => o.id === this.#tagScope())
     this.setTagScope(opts[(at + 1) % opts.length].id)
   }
 
-  /** Set the reach from the expanded strip. Always re-broadcasts `tags:filter`
+  /** Set the reach from the tag strip. Always re-broadcasts `tags:filter`
    *  carrying the CURRENT filter set — a live filter must re-scan at the new
    *  width, and with nothing filtered the emit is what keeps the panel and the
    *  readout glyph in step. Mirrors the panel's own `setScope`. */
@@ -1301,10 +1301,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
 
-  /** Open the pheromone panel. This icon used to CYCLE the reach in place —
-   *  three states behind one glyph, explained only by a tooltip, so the reach
-   *  was effectively invisible. The panel names each reach and says what it
-   *  does; the glyph here stays as a readout of the current one. */
+  /** Open the pheromone panel — the mobile control cluster's `label` button.
+   *  The tag strip's head glyph does NOT come here: it carries the reach, and
+   *  when it opened the panel while merely displaying the reach the opened-out
+   *  strip had to add a second, identical globe to do the stepping. The panel
+   *  keeps its own doors — this button, the command rail, `/tags`, the layer
+   *  deck. */
   readonly openPheromones = (): void => {
     EffectBus.emit('tags:view-open', undefined)
   }

@@ -164,13 +164,17 @@
        [class.rail-left]="dockSide() === 'left' && !isMobile()"
        [class.mobile]="isMobile()"
        [class.expanded]="tagsExpanded()">
-    <!-- Opens the pheromone panel. Always visible (it used to fade in only on
-         hover, so the reach control was invisible until you found it) and the
-         glyph reads out the current reach: page → children → global. -->
+    <!-- REACH — one glyph, and only one. It reads out the current reach and
+         steps it on click: page → children → global, wrapping. It used to
+         open the pheromone panel while merely DISPLAYING the reach, and the
+         opened-out strip carried a second identical glyph that did the
+         stepping — two globes side by side saying the same word. The panel
+         has its own doors (the command rail's pheromone button, /tags, the
+         layer deck); this spot belongs to the reach. -->
     <button class="tag-scope" [attr.data-scope]="tagScope()"
-            (click)="openPheromones()"
-            [attr.aria-label]="'tags.panel.open' | t"
-            [title]="('tags.panel.open' | t) + ' — ' + ('tags.scope-' + tagScope() | t)">
+            (click)="cycleTagScope()"
+            [attr.aria-label]="'tags.scope-' + tagScope() | t"
+            [title]="'tags.scope-' + tagScope() | t">
       <span class="mat-sym">{{ scopeIcon() }}</span>
     </button>
 
@@ -180,21 +184,6 @@
          the wheel while the pointer is over it so scrolling the list never
          zooms the hive underneath. -->
     <div class="tag-strip" data-consumes-wheel>
-      @if (tagsExpanded()) {
-        <!-- Reach lives INSIDE the opened-out strip: the tags you're looking at
-             are the ones this reach admits, so the control that changes which
-             ones those are belongs beside them, not only in the panel. A
-             three-stage toggle like everywhere else reach appears: one glyph,
-             stepping page → children → global and wrapping. -->
-        <span class="tag-scope-set">
-          <button class="tag-scope-opt selected"
-                  (click)="cycleTagScope()"
-                  [attr.aria-label]="'tags.scope-' + tagScope() | t"
-                  [title]="'tags.scope-' + tagScope() | t">
-            <span class="mat-sym">{{ scopeIcon() }}</span>
-          </button>
-        </span>
-      }
       @for (tag of tags(); track tag.name) {
         <button class="tag-crumb"
                 [class.tag-active]="isTagFilterActive(tag.name)"

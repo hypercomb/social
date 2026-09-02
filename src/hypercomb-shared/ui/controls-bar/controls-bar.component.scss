@@ -315,42 +315,6 @@ $actions-corner: 12rem;
   }
 }
 
-// Reach, inside the opened-out strip: three glyphs, the active one lit. Same
-// ids and icons as the pheromone panel — one vocabulary for reach.
-.tag-scope-set {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.1rem;
-  margin-right: 0.35rem;
-  padding-right: 0.5rem;
-  border-right: 1px solid rgba(var(--hc-chrome-rule), 0.32);
-}
-
-.tag-scope-opt {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.3rem;
-  height: 1.3rem;
-  padding: 0;
-  border: none;
-  border-radius: 3px;
-  background: none;
-  color: rgba(var(--hc-chrome-accent), var(--hc-ink-a-faint));
-  cursor: pointer;
-  transition: color var(--md-dur-short) var(--md-easing-standard),
-              background var(--md-dur-short) var(--md-easing-standard);
-
-  .mat-sym { font-size: 0.95rem; line-height: 1; }
-
-  &:hover { color: var(--hc-chrome-text); }
-
-  &.selected {
-    color: var(--hc-chrome-text);
-    background: rgba(var(--hc-chrome-accent), 0.16);
-  }
-}
-
 // The open-out arrow, pinned at the right end of the strip.
 .tag-expand {
   display: inline-flex;
@@ -397,13 +361,13 @@ $actions-corner: 12rem;
   &:nth-child(even) { animation-delay: -0.1s; }
 }
 
-// Three-stage filter-scope control (page → children → global). A single bare
-// Material glyph — focus → tree → globe — NO circle, ring, or pill, so it can
-// never be mistaken for a tag. It stays hidden until the tag strip is hovered,
-// keeping the resting row pure tag names; brightness rises a touch with reach.
-// Entry point to the pheromone panel. Held permanently on screen — it used to
-// be width:0/opacity:0 until the tag list was hovered, which hid the only way
-// into the reach control. Rests dim so it stays cold chrome, lifts on hover.
+// Three-stage filter-scope control (page → children → global), and the ONLY
+// reach glyph on the strip — the opened-out row used to carry a second,
+// identical one. A single bare Material glyph — focus → tree → globe — NO
+// circle, ring, or pill, so it can never be mistaken for a tag. Held
+// permanently on screen: it used to be width:0/opacity:0 until the tag list
+// was hovered, which hid the only way into the reach control. Rests dim so it
+// stays cold chrome, lifts on hover; brightness rises a touch with reach.
 .tag-scope {
   display: inline-flex;
   align-items: center;
