@@ -7,6 +7,8 @@ const here = dirname(fileURLToPath(import.meta.url))
 const shared = join(here, '..', '..', '..', 'hypercomb-shared')
 const DRONE = readFileSync(join(here, 'publish-status.drone.ts'), 'utf8')
 const HOSTS_DRONE = readFileSync(join(here, 'hosts.drone.ts'), 'utf8')
+const PUBLISH_BRANCH = readFileSync(join(here, 'publish-branch.ts'), 'utf8')
+const HOST_SYNC = readFileSync(join(here, 'host-sync.service.ts'), 'utf8')
 const HTML = readFileSync(join(shared, 'ui', 'publish-panel', 'publish-panel.component.html'), 'utf8')
 const TS = readFileSync(join(shared, 'ui', 'publish-panel', 'publish-panel.component.ts'), 'utf8')
 const HOSTS_HTML = readFileSync(join(shared, 'ui', 'hosts-panel', 'hosts-panel.component.html'), 'utf8')
@@ -54,7 +56,9 @@ describe('hosts panel — the set, apart from the publishing', () => {
     expect(DRONE).not.toMatch(/publish:community-add/)
     expect(DRONE).not.toMatch(/publish:community-remove/)
     expect(DRONE).not.toMatch(/removeCommunityHost/)
+    expect(DRONE).not.toMatch(/addCommunityHost/)
     expect(HOSTS_DRONE).toMatch(/removeCommunityHost/)
+    expect(HOSTS_DRONE).toMatch(/addCommunityHost/)
   })
 
   it('reads the list eagerly, so the publish picker is never empty for want of a look', () => {
@@ -106,9 +110,27 @@ describe('hosts panel — the set, apart from the publishing', () => {
     expect(HOSTS_HTML).toMatch(/\(click\)="look\(zone\)"/)
   })
 
-  it('never truncates a host offer silently', () => {
+  it('keeps a large host catalog reachable behind an explicit fold', () => {
     expect(HOSTS_TS).toMatch(/OFFERS_SHOWN/)
-    expect(HOSTS_HTML).toMatch(/hosts\.offer\.more/)
+    expect(HOSTS_TS).toMatch(/packagesShown\(zone: string\)/)
+    expect(HOSTS_HTML).toMatch(/hosts\.offer\.show-all/)
+    expect(HOSTS_HTML).toMatch(/hosts\.offer\.show-less/)
+  })
+
+  it('adds an offered package through verified runtime acquisition, then restarts', () => {
+    expect(HOSTS_HTML).toMatch(/\(click\)="take\(pkg\)"/)
+    expect(HOSTS_TS).toMatch(/import\('@hypercomb\/runtime\/acquire'\)/)
+    expect(HOSTS_TS).toMatch(/await acquire\(sig, sources\)/)
+    expect(HOSTS_TS).toMatch(/setTimeout\(\(\) => location\.reload\(\)/)
+    expect(EN['hosts.offer.add']).toBe('Add')
+    expect(EN['hosts.offer.added']).toMatch(/restarting/i)
+  })
+
+  it('links Publish to the host directory without mixing the two surfaces', () => {
+    expect(HTML).toMatch(/\(click\)="openHosts\(\)"/)
+    expect(TS).toMatch(/openHosts\(\): void[\s\S]{0,180}?EffectBus\.emit\('hosts:open'/)
+    expect(HOSTS_DRONE).toMatch(/'hosts:open'/)
+    expect(EN['publish.action.manage-hosts']).toBe('Manage hosts')
   })
 
   // HOSTING IS A SWITCH, NOT A VERB. There is no `/host` behaviour: either
@@ -183,16 +205,35 @@ describe('hosts panel — the set, apart from the publishing', () => {
     expect(HTML).toMatch(/makePrimary\(row, choice\.zone\)/)
   })
 
-  it('the pick-list is the community, never a union of past claims', () => {
-    expect(DRONE).toMatch(/#knownZones\(_keys: Iterable<string>\): string\[\] \{[\s\S]{0,600}?return \[\.\.\.this\.#community\]/)
-    // The claim union survives ONLY as the one-time seed for an empty pool.
-    expect(DRONE).toMatch(/async #readCommunity/)
-    expect(DRONE).toMatch(/const carried = await listCommunityHosts\(\)/)
+  it('renders branch details once, in the properties pane rather than every list row', () => {
+    expect((HTML.match(/class="pdet-domains pcur-hosts"/g) ?? [])).toHaveLength(1)
+    expect(HTML).not.toMatch(/row\.expanded/)
+    expect(HTML).not.toMatch(/class="prow-detail"/)
+    expect(TS).not.toMatch(/expanded: boolean/)
+    expect(DRONE).not.toMatch(/publish:expand/)
+    expect(DRONE).toMatch(/publish:inspect/)
   })
 
-  it('a branch answers with the marks it wears, before any legacy record', () => {
+  it('the pick-list is the community, never a union of past claims', () => {
+    expect(DRONE).toMatch(/#knownZones\(\): string\[\] \{[\s\S]{0,600}?return \[\.\.\.this\.#community\]/)
+    expect(DRONE).toMatch(/this\.#community = await listCommunityHosts\(\)/)
+    expect(DRONE).not.toMatch(/#readCommunity/)
+    expect(DRONE).not.toMatch(/publicHostDomainsFor/)
+  })
+
+  it('a branch answers only with the marks it wears, then the standing fallback', () => {
     expect(DRONE).toMatch(/const named = this\.#branchHosts\.get\(key\) \?\? \[\][\s\S]{0,200}?if \(named\.length > 0\) return named/)
-    expect(DRONE).toMatch(/void setBranchHosts\(segments, zones\)/)
+    expect(DRONE).toMatch(/await setBranchHosts\(row\.segments, ordered\)/)
     expect(DRONE).toMatch(/await hostsOfBranch\(/)
+    expect(PUBLISH_BRANCH).toMatch(/branchZones = await hostsOfBranch\(segs\)/)
+    expect(PUBLISH_BRANCH).not.toMatch(/publicHostDomainsFor/)
+    expect(HOST_SYNC).not.toMatch(/PUBLIC_HOST_DOMAINS_KEY/)
+    expect(HOST_SYNC).not.toMatch(/publicHostDomainFor|publicHostDomainsFor|setPublicHostDomainsFor/)
+  })
+
+  it('updates the publish picker from hosts:render without starting a publish sweep', () => {
+    expect(HOSTS_DRONE).not.toMatch(/publish:refresh/)
+    expect(DRONE).toMatch(/'hosts:render'/)
+    expect(DRONE).toMatch(/hosts: this\.#knownZones\(\)/)
   })
 })

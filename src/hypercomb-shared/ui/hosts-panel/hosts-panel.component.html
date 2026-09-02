@@ -40,16 +40,22 @@
            act with a real consequence, and removing one is a DELETE — the
            artifact goes, and every branch that named it keeps saying so,
            which is the honest state and reads as one. -->
+      <div class="hosts-section-head">
+        <span>{{ 'hosts.directory' | t }}</span>
+        <span class="hosts-total">{{ zones().length }}</span>
+      </div>
+
       @for (zone of zones(); track zone) {
-        <div class="hosts-row">
+        <div class="hosts-row" [class.selected]="selectedZone() === zone">
           <!-- The address IS the control that asks what it publishes: a host
                you carry is a place you can look into, and a separate button
                for that would be a second thing to explain. -->
           <button
             class="hosts-address"
             type="button"
-            [class.open]="offerOf(zone) || isProbing(zone)"
-            [attr.aria-label]="'hosts.look' | t"
+            [class.open]="selectedZone() === zone"
+            [attr.aria-label]="'hosts.look' | t: { host: zone }"
+            [attr.aria-expanded]="selectedZone() === zone"
             (click)="look(zone)"
           >{{ zone }}</button>
           @if (branchCount(zone); as naming) {
@@ -58,8 +64,8 @@
           <button
             class="hosts-drop"
             type="button"
-            [attr.data-tip]="'hosts.remove' | t"
-            [attr.aria-label]="'hosts.remove' | t"
+            [attr.data-tip]="'hosts.remove' | t: { host: zone }"
+            [attr.aria-label]="'hosts.remove' | t: { host: zone }"
             (click)="remove(zone)"
           >✕</button>
         </div>
@@ -67,28 +73,78 @@
         <!-- WHAT THIS DOMAIN PUBLISHES. Asked only when looked at — a manifest
              runs to megabytes, so opening the panel must not fetch every
              host's. -->
-        @if (isProbing(zone)) {
-          <p class="hosts-probing">{{ 'hosts.probing' | t }}</p>
-        } @else if (offerOf(zone); as offer) {
-          @if (offer.packages.length) {
-            <ul class="hosts-offers">
-              @for (pkg of offer.shown; track pkg.packageSig) {
-                <li class="hosts-offer">
-                  <span class="hosts-offer-label">{{ pkg.label }}</span>
-                  <span class="hosts-offer-meta">{{ 'hosts.offer.meta' | t: {
-                    bees: pkg.bees.length, layers: pkg.layers.length
-                  } }}</span>
-                </li>
+        @if (selectedZone() === zone) {
+          <section class="hosts-inspector" [attr.aria-label]="'hosts.offer.title' | t: { host: zone }">
+            <div class="hosts-inspector-head">
+              <span>{{ 'hosts.offer.title' | t: { host: zone } }}</span>
+              @if (offerOf(zone); as offer) {
+                <span class="hosts-total">{{ offer.packages.length }}</span>
               }
-            </ul>
-            <!-- Never a silent truncation: a shortened list that does not say
-                 so reads as the whole of what a host offers. -->
-            @if (moreCount(zone); as more) {
-              <p class="hosts-more">{{ 'hosts.offer.more' | t: { count: more } }}</p>
+            </div>
+
+            @if (isProbing(zone)) {
+              <p class="hosts-probing" aria-live="polite">{{ 'hosts.probing' | t }}</p>
+            } @else if (offerOf(zone); as offer) {
+              @if (offer.packages.length) {
+                <ul class="hosts-offers">
+                  @for (pkg of packagesShown(zone); track pkg.packageSig) {
+                    <li class="hosts-offer">
+                      <div class="hosts-offer-copy" [id]="'host-package-' + pkg.packageSig">
+                        <div class="hosts-offer-name">
+                          <span class="hosts-offer-label" [title]="pkg.label">{{ pkg.label }}</span>
+                          @if (pkg.generation !== null) {
+                            <span class="hosts-offer-generation">
+                              {{ 'hosts.offer.build' | t: { generation: pkg.generation } }}
+                            </span>
+                          } @else {
+                            <code class="hosts-offer-generation" [title]="pkg.packageSig">
+                              {{ pkg.packageSig.slice(0, 8) }}
+                            </code>
+                          }
+                        </div>
+                        <span class="hosts-offer-meta">{{ 'hosts.offer.meta' | t: {
+                          bees: pkg.bees.length, layers: pkg.layers.length
+                        } }}</span>
+                        @if (intakeOf(pkg); as state) {
+                          @if (state.detail) {
+                            <span
+                              class="hosts-offer-state"
+                              [class.failed]="state.phase === 'failed'"
+                              aria-live="polite"
+                            >{{ state.detail }}</span>
+                          }
+                        }
+                      </div>
+                      <button
+                        class="hosts-offer-add"
+                        type="button"
+                        [disabled]="intakeDisabled(pkg)"
+                        [attr.aria-describedby]="'host-package-' + pkg.packageSig"
+                        (click)="take(pkg)"
+                      >{{ intakeActionKey(pkg) | t }}</button>
+                    </li>
+                  }
+                </ul>
+                @if (moreCount(zone); as more) {
+                  <button
+                    class="hosts-more"
+                    type="button"
+                    [attr.aria-expanded]="expandedZone() === zone"
+                    (click)="toggleAll(zone)"
+                  >{{ 'hosts.offer.show-all' | t: { count: more } }}</button>
+                } @else if (hasFold(zone) && expandedZone() === zone) {
+                  <button
+                    class="hosts-more"
+                    type="button"
+                    aria-expanded="true"
+                    (click)="toggleAll(zone)"
+                  >{{ 'hosts.offer.show-less' | t }}</button>
+                }
+              } @else if (wasAsked(zone)) {
+                <p class="hosts-probing">{{ 'hosts.offer.none' | t }}</p>
+              }
             }
-          } @else if (wasAsked(zone)) {
-            <p class="hosts-probing">{{ 'hosts.offer.none' | t }}</p>
-          }
+          </section>
         }
       } @empty {
         <!-- Only once a read has actually completed. Flashing "no hosts" over
@@ -99,6 +155,9 @@
         }
       }
 
+      <div class="hosts-section-head hosts-add-head">
+        <span>{{ 'hosts.add-title' | t }}</span>
+      </div>
       <div class="hosts-add">
         <input
           #hostInput
@@ -107,11 +166,17 @@
           autocomplete="off"
           spellcheck="false"
           [attr.placeholder]="'hosts.placeholder' | t"
-          [attr.aria-label]="'hosts.add' | t"
+          [attr.aria-label]="'hosts.add-title' | t"
+          [attr.aria-invalid]="addError()"
+          (input)="addError.set(false)"
           (keydown.enter)="add(hostInput)"
         />
         <button class="hosts-take" type="button" (click)="add(hostInput)">{{ 'hosts.add' | t }}</button>
       </div>
+
+      @if (addError()) {
+        <p class="hosts-add-error" role="alert">{{ 'hosts.add-invalid' | t }}</p>
+      }
 
       <p class="hosts-note">{{ 'hosts.note' | t }}</p>
     </div>

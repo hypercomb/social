@@ -2,12 +2,10 @@
 //
 // `/publish` — open the publish differential.
 //
-// The counterpart verb to `/host`. `/host` is the GESTURE (publish the branch
-// I am standing in, hand me a link); `/publish` is the STATE (what does the
-// world actually see, and what has changed here since). Keeping them separate
-// keeps each one honest: a gesture that also reported status would have to
-// guess, and a status surface that also published would hide which branch it
-// acted on.
+// Branch-scoped publication: what the world sees, what changed here, where a
+// branch publishes, and the publish/re-publish/unpublish acts for that row.
+// The durable host and package directory stays in `/hosts`; this surface only
+// consumes its destinations.
 //
 // Toggling only — the panel owns its own lifecycle from `publish:render`.
 

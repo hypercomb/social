@@ -7,7 +7,7 @@
 //
 // Shell UI, so it must NOT import essentials. Everything arrives on the
 // `publish:render` payload (the drone owns the read-model, the online proof
-// and every verdict) and leaves as intents: publish:refresh, publish:expand,
+// and every verdict) and leaves as intents: publish:refresh, publish:inspect,
 // publish:run, publish:unpublish, publish:copy-link, publish:close.
 //
 // THE DISCIPLINE THIS SURFACE INHERITS — and the reason its copy is so
@@ -33,7 +33,7 @@
 //
 // One action per row, never a bulk selection bar: bulk selection is
 // pointer-only and dies on a phone, where this panel becomes a bottom sheet.
-// Unpublish lives in the row's expansion, under its honest limit stated in
+// Unpublish lives in the properties pane, under its honest limit stated in
 // full — it stops the branch being advertised, it does not un-share it.
 
 import { registerShellSurface } from '../../core/shell-surface-registry'
@@ -65,10 +65,7 @@ interface PublishRow {
   publishedAt: number | null
   seenAt: number | null
   gaps: string[]
-  expanded: boolean
   link: string | null
-  /** The public site URL once published — where a visitor views the branch. */
-  site: string | null
   /** Every root domain this branch claims, primary first. */
   zones: string[]
   busyPhase: string | null
@@ -94,7 +91,6 @@ interface PublishCollision {
 
 interface PublishRenderPayload {
   open: boolean
-  gateActive: boolean
   host: string
   /** The ROOT domain of the target — the only choosable part of an address:
    *  the tile's name is the subdomain, the content endpoint is plumbing. */
@@ -172,7 +168,6 @@ export class PublishPanelComponent implements OnDestroy {
    *  are hiding a window, not ending an observation. */
   readonly session = signalSession(this.visible, undefined, { close: () => this.close() })
 
-  readonly gateActive = signal(false)
   /** The STANDING default zone — what a branch that never chose rides. */
   readonly zone = signal('')
   /** THE HOSTS YOU KNOW. A domain is not typed — it is one of these. A
@@ -226,10 +221,10 @@ export class PublishPanelComponent implements OnDestroy {
       ?? null
   })
 
-  /** Make a list row the subject. Selection and expansion are one gesture —
-   *  the row you opened is the row the pane is describing. */
+  /** Make a list row the properties-pane subject. */
   select(row: PublishRow): void {
     this.selectedKey.set(row.key)
+    EffectBus.emit('publish:inspect', { key: row.key })
   }
 
   /** THE LIST — every branch, not just the page you are on. The tabbed block
@@ -361,7 +356,6 @@ export class PublishPanelComponent implements OnDestroy {
 
     this.#cleanups.push(EffectBus.on<PublishRenderPayload>('publish:render', (p) => {
       if (!p) return
-      this.gateActive.set(p.gateActive === true)
       this.zone.set(String(p.zone ?? '') || String(p.host ?? '').replace(/^content\./, ''))
       this.hosts.set(Array.isArray(p.hosts) ? p.hosts.map(String).filter(Boolean) : [])
       const nextCurrent = String(p.currentKey ?? '')
@@ -422,10 +416,12 @@ export class PublishPanelComponent implements OnDestroy {
     EffectBus.emit('publish:refresh', {})
   }
 
-  /** Tapping a list row opens its detail — which is also what runs the gap
-   *  check, so it stays opt-in and per row. */
-  toggle(row: PublishRow): void {
-    EffectBus.emit('publish:expand', { key: row.key })
+  /** Leave branch publishing and open the directory that owns the host set.
+   *  Both surfaces dock on the right, so this is a clean hand-off rather than
+   *  two panels stacked over one another. */
+  openHosts(): void {
+    this.close()
+    EffectBus.emit('hosts:open', {})
   }
 
   run(row: PublishRow): void {

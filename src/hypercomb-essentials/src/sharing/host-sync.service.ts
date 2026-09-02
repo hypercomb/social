@@ -155,11 +155,6 @@ const PUBLIC_HOST_KEY = 'hc:public-host'
 // invalidated by re-pointing.
 const PUBLIC_HOST_DOMAIN_KEY = 'hc:public-host:domain'
 const DEFAULT_PUBLIC_HOST_DOMAIN = 'content.pluginthematrix.com'
-// Per-BRANCH targets: lineageKey → content hosts, FIRST entry primary. A
-// branch with no entry rides the standing default. The map's presence is also
-// the one-time migration marker for retiring the global editor (see
-// #migrateDomainChoice).
-const PUBLIC_HOST_DOMAINS_KEY = 'hc:public-host:domains'
 /** A bare hostname: labels joined by dots, no scheme, no path, no port. The
  *  target is concatenated into request URLs, so anything else is refused
  *  rather than normalised — a half-understood value is how you publish to
@@ -236,7 +231,6 @@ export class HostSyncService extends EventTarget {
 
   constructor() {
     super()
-    this.#migrateDomainChoice()
     // Auto-enqueue every committed sig — gated on #isEnabled(). With the
     // gate off, the handler exits before reaching enqueue/signer, so no
     // permission prompt can fire. Subscription stays live so toggling the
@@ -358,72 +352,6 @@ export class HostSyncService extends EventTarget {
   /** The standing default, so a caller can show what "unset" resolves to
    *  without hardcoding it a second time. */
   public readonly defaultPublicHostDomain = (): string => DEFAULT_PUBLIC_HOST_DOMAIN
-
-  // ── per-branch targets ──────────────────────────────────────────────
-  //
-  // The domain is a property of the BRANCH, not of the hive: /susan can live
-  // on one zone while /revolucion lives on another, and a branch may claim
-  // several addresses at once. Every zone served by the Core worker shares
-  // ONE signature heap and ONE signed index per key, so the list is which
-  // addresses a branch claims — the FIRST entry is the door its index write
-  // and probes go through.
-
-  /** One-time migration: the retired global target editor wrote
-   *  PUBLIC_HOST_DOMAIN_KEY, and a value typed there poisoned every branch at
-   *  once. The per-branch map's absence marks a pre-migration store: clear
-   *  the stale global once, then never touch it again. */
-  readonly #migrateDomainChoice = (): void => {
-    try {
-      if (localStorage.getItem(PUBLIC_HOST_DOMAINS_KEY) !== null) return
-      localStorage.removeItem(PUBLIC_HOST_DOMAIN_KEY)
-      localStorage.setItem(PUBLIC_HOST_DOMAINS_KEY, '{}')
-    } catch { /* storage unavailable — in-session defaults apply */ }
-  }
-
-  readonly #hostDomainMap = (): Record<string, string[]> => {
-    try {
-      const parsed: unknown = JSON.parse(localStorage.getItem(PUBLIC_HOST_DOMAINS_KEY) ?? '{}')
-      if (!parsed || typeof parsed !== 'object') return {}
-      const map: Record<string, string[]> = {}
-      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-        const list = (Array.isArray(v) ? v : [v])
-          .map(d => String(d ?? '').trim().toLowerCase())
-          .filter(d => HOST_DOMAIN_RE.test(d))
-        if (list.length > 0) map[k] = list
-      }
-      return map
-    } catch { return {} }
-  }
-
-  /** Every content host a branch claims, primary first. A branch with no
-   *  entry rides the standing target. */
-  public readonly publicHostDomainsFor = (key: string): string[] => {
-    const list = this.#hostDomainMap()[String(key ?? '')] ?? []
-    return list.length > 0 ? list : [this.publicHostDomain()]
-  }
-
-  /** The branch's PRIMARY content host — the door its index write goes
-   *  through and its probes run against. */
-  public readonly publicHostDomainFor = (key: string): string =>
-    this.publicHostDomainsFor(key)[0] ?? this.publicHostDomain()
-
-  /** Point one branch at its own hosts. An empty list clears the entry back
-   *  to the standing default; any invalid hostname refuses the whole write —
-   *  a half-applied list is how you publish to the wrong place. */
-  public readonly setPublicHostDomainsFor = (key: string, domains: readonly string[]): boolean => {
-    const k = String(key ?? '').trim()
-    if (!k) return false
-    const clean = domains.map(d => String(d ?? '').trim().toLowerCase()).filter(Boolean)
-    if (clean.some(d => !HOST_DOMAIN_RE.test(d))) return false
-    const map = this.#hostDomainMap()
-    // De-duplicate, order preserved — the first occurrence keeps primacy.
-    const list = [...new Set(clean)]
-    if (list.length === 0) delete map[k]
-    else map[k] = list
-    try { localStorage.setItem(PUBLIC_HOST_DOMAINS_KEY, JSON.stringify(map)) } catch { return false }
-    this.dispatchEvent(new CustomEvent('change'))
-    return true
-  }
 
   /**
    * Point publishing at a different host. Returns false and changes nothing
@@ -1381,8 +1309,7 @@ export class HostSyncService extends EventTarget {
 
   /** True iff ANY enabled target has confirmed this sig. The honest public
    *  read: `hasReceipt` deliberately tests only the bare self-domain filename,
-   *  so for a CDN-only publisher — which `/host` produces by default, since it
-   *  flips the public gate and never requires a self-domain — it answers false
+   *  so for a CDN-only publication — which needs no self-domain — it answers false
    *  for content the host demonstrably serves. Callers asking "is this
    *  hosted?" (rather than "is it on MY domain?") want this one. */
   public readonly hasAnyReceipt = async (sig: string): Promise<boolean> => {

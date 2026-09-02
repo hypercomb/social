@@ -10,7 +10,8 @@ hypercomb-essentials/src/sharing/
   publish-heads.ts          ← the `publish:heads` pool — the publish ledger
   hive-pointer.ts           ← fetchHiveIndex / putHiveManifest (index client)
   host-sync.service.ts      ← probeServed / closureGaps / hasAnyReceipt / ensureReceipt
-  host.queen.ts             ← `/host` — the publish GESTURE, same routine
+  hosts.queen.ts            ← `/hosts` — toggles the carried-host directory
+  hosts.drone.ts            ← owns the `community:hosts` read model and acts
 ```
 
 Companions: `public-content-endpoint.md` (the CDN tier that serves the bytes
@@ -29,18 +30,19 @@ at their own hive:
 2. **Is it still what I have?** Every commit after the publish moves the local
    head. The published head does not move with it.
 
-`/publish` answers exactly those two questions and nothing else. It is the
-STATE verb; `/host` is the GESTURE verb ("publish the branch I am standing in,
-hand me a link"). They are deliberately separate: a gesture that also reported
-status would have to guess at rows it did not act on, and a status surface that
-also published would obscure which branch it acted on. Both drive the **same**
-routine — `publishBranch()` in `publish-branch.ts` — so the two surfaces cannot
-drift into publishing differently.
+`/publish` answers those questions and owns the row-scoped publish, republish
+and unpublish actions. `/hosts` is deliberately separate: it is the durable set
+of hosts the participant carries, while each branch chooses among those hosts
+from its own line in Publish. A host exists before any branch names it and
+outlives every branch that does, so host/package discovery does not depend on a
+publish sweep.
 
 The drone emits one `publish:render` payload (`PublishRenderPayload`) and
-accepts intents back (`publish:run`, `publish:unpublish`, `publish:expand`,
-`publish:copy-link`, `publish:refresh`, `publish:view-toggle`,
-`publish:close`). It also invalidates on `history:head-changed` and
+accepts intents back (`publish:run`, `publish:unpublish`, `publish:inspect`,
+`publish:copy-link`, `publish:refresh`, `publish:view-toggle`, `publish:close`,
+`publish:opens-as`, `publish:set-target`). It also consumes `hosts:render` so
+the destination picker follows the carried-host directory without starting a
+publish sweep. It invalidates on `history:head-changed` and
 `share:receipt-revoked`, coalesced through a 750 ms debounce — a commit storm
 bumps the tree epoch and invalidates every seal, and restarting the sweep once
 per commit would make the panel a stall.
@@ -246,7 +248,8 @@ a floor, never a ceiling — it cannot know about branches published from
 another device, which is exactly why a failed read-back must REFUSE rather
 than fall back to it.
 
-`/host` surfaces the same signal as a follow-up toast pointing at `/publish`.
+The share-sheet gesture in `host-gesture.ts` surfaces the same signal as a
+follow-up toast pointing at `/publish`.
 
 ## Row states
 
@@ -277,19 +280,18 @@ the last stored observation with its age rather than as a red light. Note the
 last rung: `served === 'unknown'` keeps a matching pair OUT of the green — not
 being able to reach the host is not evidence of service.
 
-Two payload-level flags sit above the rows: `index` (`ok` | `none` | one of the
-four failure reasons | `checking`) — with `forged` the loud one — and
-`gateActive`, the `hc:public-host` opt-in. With the gate off, marking public is
-inert and every row would look broken for the wrong reason, so the panel states
-the gate instead.
+Payload-level state sits above the rows: `index` (`ok` | `none` | one of the
+four failure reasons | `checking`) — with `forged` the loud one — plus index
+freshness, signer-key mismatch and refresh state. Publishing itself enables the
+public-host path; there is no separate hosting switch in either panel.
 
-**Expanding a row** calls `HostSyncService.closureGaps(live, 'layer', true, 8)`:
+**Inspecting a row** calls `HostSyncService.closureGaps(live, 'layer', true, 8)`:
 the same walk the availability check performs, but COLLECTING holes instead of
 short-circuiting on the first. That is what turns "this branch is not fully
 served" into "these three objects are missing", the only form a participant can
 act on. It reads local bytes across the closure, so it is opt-in, capped, and
 never on a render path — "at least n holes" is enough to refuse a green light.
-Expanding is also what fills `seenAt` from the stored observation.
+Inspection is also what fills `seenAt` from the stored observation.
 
 ## Publishing, re-publishing, unpublishing
 
@@ -369,22 +371,18 @@ These are gaps, written down rather than papered over.
   no ledger record and no local mark has empty `segments`; it can be compared
   against the index but not sealed, published, or unpublished. `#run` says so
   explicitly rather than failing oddly; `#unpublish` returns silently.
-- **`seenAt` is only populated on expand.** The offline "as of" line is read in
-  `#refreshGaps`, so an unexpanded row shows `null` even though the observation
-  was written during the sweep.
+- **`seenAt` is only populated for the inspected row.** The offline "as of"
+  line is read in `#refreshGaps`, so another row shows `null` even though the
+  observation was written during the sweep.
 - **`hasAnyReceipt` has no caller yet.** It is the honest public read — unlike
   `hasReceipt`, which tests only the bare self-domain filename and therefore
-  answers false for a CDN-only publisher (which is what `/host` produces by
-  default). The differential currently proves service with `probeServed` and
+  answers false for a CDN-only publication. The differential currently proves
+  service with `probeServed` and
   enumerates holes with `closureGaps`; nothing yet asks the cheap local
   question first.
-- **There is no shell surface for `publish:render` yet.** The drone emits the
-  payload and consumes the intents, but no component is registered in
-  `hypercomb-shared/ui/shell-surfaces/shell-surfaces.barrel.ts`. Per
-  `shell-surfaces.md` the panel must self-register (`registerShellSurface`) and
-  must **not** be added as an `<hc-*>` tag in either `app.html` — a doctrine
-  ratchet fails the suite for that. Until it exists, `/publish` toggles a
-  surface nothing paints.
+- **Hosts and Publish are separate shell surfaces.** Hosts owns add/remove and
+  package inspection for `community:hosts`; Publish consumes that directory and
+  keeps per-branch destinations and publication status on the branch row.
 - **Confirmation windows are short by design and can under-report.** 20 s for
   the index round trip and 12 s for the link receipt; an edge that has not
   caught up returns `unconfirmed`/`linkReceipted: false` even though the

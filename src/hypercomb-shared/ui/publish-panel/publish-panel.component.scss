@@ -132,17 +132,6 @@ $quiet: #8ea2b0;
   max-width: 12em;
 }
 
-.publish-gate {
-  flex: 0 0 auto;
-  font-size: 0.66em;
-  letter-spacing: 0.03em;
-  color: rgba($amber, 0.95);
-  background: rgba($amber, 0.12);
-  border: 1px solid rgba($amber, 0.35);
-  border-radius: tw.$radius-pill;
-  padding: 0.1em 0.55em;
-}
-
 // The one loud thing in the panel.
 .publish-alarm {
   flex: 0 0 auto;
@@ -809,7 +798,6 @@ $quiet: #8ea2b0;
   border-bottom: 1px solid rgba(var(--hc-panel-ink), 0.035);
 
   &:last-child { border-bottom: none; }
-  &.expanded { background: rgba(var(--acc), 0.05); }
 }
 
 // The page you are standing on. Not hidden from the list and not lifted out
@@ -884,11 +872,9 @@ $quiet: #8ea2b0;
   background: transparent;
 }
 
-// ── ONE LINE UNTIL IT IS OPENED ───────────────────────────
-// A closed row is an index entry, not a report: name, verdict, one line. The
-// list is meant to be scanned down, and a three-line stack per branch turned
-// a dozen branches into a scroll. Everything the stacked form said is still
-// said — one row down, once the row is opened.
+// ── ONE LINE PER LIST ROW ─────────────────────────────────
+// A list row is an index entry, not a report: name, verdict, one line. The
+// properties pane above carries the full report for the selected branch.
 .prow-meta {
   flex: 1;
   min-width: 0;
@@ -915,26 +901,7 @@ $quiet: #8ea2b0;
   color: var(--hc-window-ink-quiet);
 }
 
-// The reason is the one thing that does not fit on the line — it is a
-// sentence. It waits for the row to be opened.
-.prow-why {
-  display: none;
-  font-size: 0.68em;
-  line-height: 1.35;
-  color: var(--hc-window-ink-quiet);
-}
-
-.publish-row.expanded {
-  .prow-head { padding-top: 0.5em; padding-bottom: 0.5em; }
-
-  .prow-meta {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.12em;
-  }
-
-  .prow-why { display: block; }
-}
+// The full reason is a sentence, so it stays in the properties pane.
 
 // Quiet rows — `unknown`, `cannot-compare`, `comparing`. Nothing was proved,
 // so the row recedes rather than shouting.
@@ -972,26 +939,11 @@ $quiet: #8ea2b0;
   &:hover { background: rgba($amber, 0.2); color: var(--hc-panel-text); }
 }
 
-// ── the row's expansion ───────────────────────────────────
-.prow-detail {
-  padding: 0.2em 1em 0.75em 2.1em;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3em;
-}
-
-.pdet-block {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3em;
-  padding: 0.2em 0 0.1em;
-}
-
 // ── focus: controls appear when the row is engaged ────────
 //
 // A column of buttons is noise; a row's action belongs to the row you are
 // ON. Hidden with opacity (not display) so the row's geometry never shifts,
-// and revealed for hover, keyboard focus, expansion, and busy rows.
+// and revealed for hover, keyboard focus, and busy rows.
 // Pointerless devices (hover: none) keep every action visible — a control
 // you cannot summon is a control you do not have.
 
@@ -1003,11 +955,9 @@ $quiet: #8ea2b0;
 
 .publish-row:hover .prow-action,
 .publish-row:focus-within .prow-action,
-.publish-row.expanded .prow-action,
 .publish-row.is-busy .prow-action,
 .publish-row:hover .prow-face,
-.publish-row:focus-within .prow-face,
-.publish-row.expanded .prow-face {
+.publish-row:focus-within .prow-face {
   opacity: 1;
 }
 
@@ -1019,7 +969,7 @@ $quiet: #8ea2b0;
   .prow-action, .prow-face { opacity: 1; }
 }
 
-// Collapsed-row face mark: which view this branch opens as, at a glance.
+// Row face mark: which view this branch opens as, at a glance.
 .prow-face {
   flex: 0 0 auto;
   width: 1.35em;
@@ -1120,54 +1070,41 @@ $quiet: #8ea2b0;
    community list — one row per host, ticked when this branch names it — so it
    costs placement and nothing else. Laid out inline: the choices belong to the
    branch above them, not to a page of their own. */
+.pcur-hosts-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.25rem;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--hc-window-accent-quiet);
+}
+
+.pcur-hosts-head > span { flex: 1 1 auto; }
+
+.pcur-hosts-manage {
+  flex: 0 0 auto;
+  padding: 0.25em 0.45em;
+  border: 1px solid rgba(var(--acc), 0.22);
+  border-radius: tw.$radius-control;
+  background: none;
+  color: var(--hc-window-ink-quiet);
+  font: inherit;
+  font-size: 0.95em;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+
+  &:hover { background: rgba(var(--acc), 0.1); color: var(--hc-window-ink-loud); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
+}
+
 .pcur-hosts {
   flex-flow: row wrap;
   gap: 0.15rem 0.6rem;
-  margin: 0.1rem 0 0.35rem;
+  margin: 0.15rem 0 0.35rem;
 }
 .pcur-hosts .pdet-domain { flex: 0 0 auto; }
 .pcur-hosts .pdet-address { font-size: 0.78rem; }
-
-/* THE COMMUNITY — what you carry. A host here is an artifact, so the control
-   on it is a DELETE, and the count says what would be left naming it. */
-.pdet-host-count {
-  margin-left: auto;
-  font-size: 0.72rem;
-  opacity: 0.55;
-  white-space: nowrap;
-}
-.pdet-host-drop:hover { opacity: 1; }
-.pdet-host-empty {
-  margin: 0.2rem 0 0.5rem;
-  font-size: 0.78rem;
-  opacity: 0.6;
-}
-.pdet-host-add {
-  display: flex;
-  gap: 0.4rem;
-  margin: 0.35rem 0 0.2rem;
-}
-.pdet-host-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 0.28rem 0.45rem;
-  font: inherit;
-  font-size: 0.8rem;
-  color: var(--hc-panel-text);
-  background: color-mix(in srgb, var(--hc-panel-text) 6%, transparent);
-  border: 1px solid color-mix(in srgb, var(--hc-panel-text) 18%, transparent);
-  border-radius: 4px;
-}
-.pdet-host-input:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
-.pdet-host-take {
-  flex: 0 0 auto;
-  padding: 0.28rem 0.6rem;
-  font: inherit;
-  font-size: 0.78rem;
-  color: var(--hc-panel-text);
-  background: transparent;
-  border: 1px solid color-mix(in srgb, var(--hc-panel-text) 22%, transparent);
-  border-radius: 4px;
-  cursor: pointer;
-}
-.pdet-host-take:hover { background: color-mix(in srgb, var(--hc-panel-text) 8%, transparent); }

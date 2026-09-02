@@ -75,6 +75,30 @@ $accent: #7eb6d6;
   padding: 0.5em 0.7em 0.8em;
 }
 
+.hosts-section-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  margin: 0.15em 0 0.35em;
+  font-size: 0.66em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hc-window-accent-quiet);
+}
+
+.hosts-total {
+  flex: 0 0 auto;
+  min-width: 1.1em;
+  padding: 0.02em 0.4em;
+  border-radius: tw.$radius-pill;
+  text-align: center;
+  font-size: 0.88em;
+  font-variant-numeric: tabular-nums;
+  color: var(--hc-window-accent);
+  background: rgba(var(--acc), 0.12);
+}
+
 // ── one host ────────────────────────────────────────────────────────────────
 // A host is an artifact you carry, so the control on it is a DELETE and the
 // count says what would be left naming it.
@@ -82,8 +106,16 @@ $accent: #7eb6d6;
   display: flex;
   align-items: center;
   gap: 0.4em;
-  padding: 0.32em 0;
+  padding: 0.38em 0.35em;
+  border-left: 2px solid transparent;
   border-bottom: 1px solid rgba(var(--acc), 0.08);
+  transition: background 0.12s ease, border-color 0.12s ease;
+
+  &:hover { background: rgba(var(--acc), 0.04); }
+  &.selected {
+    background: rgba(var(--acc), 0.07);
+    border-left-color: rgba(var(--acc), 0.65);
+  }
 }
 
 .hosts-count {
@@ -118,8 +150,10 @@ $accent: #7eb6d6;
 .hosts-add {
   display: flex;
   gap: 0.4em;
-  margin: 0.6em 0 0.3em;
+  margin: 0 0 0.3em;
 }
+
+.hosts-add-head { margin-top: 0.9em; }
 
 .hosts-input {
   flex: 1 1 auto;
@@ -130,9 +164,10 @@ $accent: #7eb6d6;
   color: var(--hc-panel-text);
   background: color-mix(in srgb, var(--hc-panel-text) 6%, transparent);
   border: 1px solid color-mix(in srgb, var(--hc-panel-text) 18%, transparent);
-  border-radius: 3px;
+  border-radius: tw.$radius-control;
 
   &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+  &[aria-invalid='true'] { border-color: rgba(218, 141, 113, 0.72); }
 }
 
 .hosts-take {
@@ -143,11 +178,18 @@ $accent: #7eb6d6;
   color: var(--hc-window-ink-plain);
   background: rgba(var(--acc), 0.1);
   border: 1px solid rgba(var(--acc), 0.25);
-  border-radius: tw.$radius-pill;
+  border-radius: tw.$radius-control;
   cursor: pointer;
 
   &:hover { background: rgba(var(--acc), 0.18); }
   &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+}
+
+.hosts-add-error {
+  margin: 0.1em 0 0.35em;
+  font-size: 0.72em;
+  line-height: 1.35;
+  color: #d9a087;
 }
 
 .hosts-note {
@@ -182,22 +224,66 @@ $accent: #7eb6d6;
 
 .hosts-probing,
 .hosts-more {
-  margin: 0.2em 0 0.4em 0.8em;
+  margin: 0.3em 0 0.4em;
   font-size: 0.74em;
   color: var(--hc-window-ink-quiet);
+}
+
+.hosts-inspector {
+  margin: 0 0 0.5em;
+  padding: 0.55em 0.6em 0.5em 0.75em;
+  border-left: 2px solid rgba(var(--acc), 0.28);
+  border-bottom: 1px solid rgba(var(--acc), 0.08);
+  background: rgba(var(--acc), 0.025);
+}
+
+.hosts-inspector-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  margin-bottom: 0.2em;
+  font-size: 0.68em;
+  letter-spacing: 0.025em;
+  color: var(--hc-window-ink-quiet);
+
+  > span:first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 .hosts-offers {
   list-style: none;
   margin: 0.25em 0 0.2em;
-  padding: 0 0 0 0.8em;
+  padding: 0;
 }
 
 .hosts-offer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65em;
+  padding: 0.45em 0;
+  border-bottom: 1px solid rgba(var(--acc), 0.07);
+
+  &:last-child { border-bottom: none; }
+}
+
+.hosts-offer-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.08em;
+}
+
+.hosts-offer-name {
   display: flex;
   align-items: baseline;
-  gap: 0.5em;
-  padding: 0.15em 0;
+  min-width: 0;
+  gap: 0.45em;
 }
 
 .hosts-offer-label {
@@ -210,11 +296,53 @@ $accent: #7eb6d6;
   color: var(--hc-window-ink-plain);
 }
 
-.hosts-offer-meta {
+.hosts-offer-generation {
   flex: 0 0 auto;
+  font-family: var(--hc-mono, monospace);
+  font-size: 0.64em;
+  color: var(--hc-window-ink-quiet);
+}
+
+.hosts-offer-meta {
   font-size: 0.7em;
   font-variant-numeric: tabular-nums;
   color: var(--hc-window-ink-quiet);
 }
 
+.hosts-offer-state {
+  font-size: 0.66em;
+  line-height: 1.3;
+  color: var(--hc-window-accent-quiet);
 
+  &.failed { color: #d9a087; }
+}
+
+.hosts-offer-add,
+.hosts-more {
+  font: inherit;
+  border-radius: tw.$radius-control;
+  cursor: pointer;
+}
+
+.hosts-offer-add {
+  min-width: 4.5em;
+  padding: 0.3em 0.55em;
+  font-size: 0.7em;
+  color: var(--hc-window-ink-plain);
+  background: rgba(var(--acc), 0.1);
+  border: 1px solid rgba(var(--acc), 0.28);
+
+  &:hover:not(:disabled) { background: rgba(var(--acc), 0.18); }
+  &:disabled { cursor: default; opacity: 0.58; }
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+}
+
+.hosts-more {
+  padding: 0.22em 0.4em;
+  font-size: 0.72em;
+  background: none;
+  border: 1px solid transparent;
+
+  &:hover { color: var(--hc-window-ink-loud); background: rgba(var(--acc), 0.07); }
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+}

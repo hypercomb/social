@@ -263,7 +263,7 @@ export interface DockLanesApi {
 // module is imported by a plain unit spec with no shell around it, and a lane
 // model that cannot be pinned without booting the app is a lane model nobody
 // will pin.
-;(window as unknown as { ioc?: { register?: (key: string, value: unknown) => void } })
+;(globalThis as unknown as { ioc?: { register?: (key: string, value: unknown) => void } })
   .ioc?.register?.(DOCK_LANES_KEY, {
     claim: claimLane,
     release: releaseLane,

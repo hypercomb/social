@@ -32,18 +32,24 @@ import { EffectBus } from '@hypercomb/core'
 // cannot reach runtime (it imports core and nothing else), which is why this
 // call sits in the panel rather than in HostsDrone.
 import { listHostPackages, type HostPackage } from '@hypercomb/runtime/host-packages'
+import { hostZone } from '@hypercomb/runtime/host-zones'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { signalSession } from '../window-session'
 
 /** What one host publishes, once asked. `null` while in flight. */
-type Offer = { packages: HostPackage[]; shown: HostPackage[] } | null
+type Offer = { packages: HostPackage[] } | null
 
-/** How many packages a host lists before the row says "and N more". A manifest
+type IntakeState = {
+  phase: 'adding' | 'added' | 'failed'
+  detail?: string
+}
+
+/** How many packages a host shows before the explicit "show all" control. A manifest
  *  can hold hundreds (jwize.com publishes 171), and a picker that printed all
  *  of them would be a scroll, not a choice. The count is always stated — a
- *  silently truncated list reads as "this is everything". */
+ *  collapsed list stays scannable without making package nine unreachable. */
 const OFFERS_SHOWN = 8
 
 /** Mirrors HostsRenderPayload in sharing/hosts.drone.ts — shared cannot import
@@ -75,6 +81,9 @@ export class HostsPanelComponent implements OnDestroy {
 
   readonly zones = signal<string[]>([])
   readonly loaded = signal(false)
+  readonly selectedZone = signal('')
+  readonly expandedZone = signal('')
+  readonly addError = signal(false)
 
   /** zone → how many branches name it. Empty until a publish sweep has been
    *  seen; a missing entry renders as nothing at all. */
@@ -85,8 +94,13 @@ export class HostsPanelComponent implements OnDestroy {
   constructor() {
     this.#cleanups.push(EffectBus.on<HostsRenderPayload>('hosts:render', (p) => {
       this.visible.set(!!p?.open)
-      this.zones.set(Array.isArray(p?.zones) ? p.zones : [])
+      const zones = Array.isArray(p?.zones) ? p.zones : []
+      this.zones.set(zones)
       this.loaded.set(!!p?.loaded)
+      if (this.selectedZone() && !zones.includes(this.selectedZone())) {
+        this.selectedZone.set('')
+        this.expandedZone.set('')
+      }
     }))
 
     // Decoration only — see the note at the top. EffectBus replays the last
@@ -114,8 +128,13 @@ export class HostsPanelComponent implements OnDestroy {
    *  are the one host they obviously are — and a value that is not a
    *  hostname is refused there, with nothing added here. */
   add(input: HTMLInputElement): void {
-    const zone = input.value.trim()
-    if (!zone) return
+    const zone = hostZone(input.value)
+    if (!zone) {
+      this.addError.set(true)
+      input.focus()
+      return
+    }
+    this.addError.set(false)
     EffectBus.emit('hosts:add', { zone })
     input.value = ''
   }
@@ -124,6 +143,10 @@ export class HostsPanelComponent implements OnDestroy {
    *  marks, still saying where they publish, which stays true of a host you no
    *  longer carry. */
   remove(zone: string): void {
+    if (this.selectedZone() === zone) {
+      this.selectedZone.set('')
+      this.expandedZone.set('')
+    }
     EffectBus.emit('hosts:remove', { zone })
   }
 
@@ -156,15 +179,31 @@ export class HostsPanelComponent implements OnDestroy {
     return this.offers()[zone] ?? null
   }
 
-  /** How many were NOT shown, so a truncated list never reads as the whole. */
+  packagesShown(zone: string): HostPackage[] {
+    const packages = this.offers()[zone]?.packages ?? []
+    return this.expandedZone() === zone ? packages : packages.slice(0, OFFERS_SHOWN)
+  }
+
+  /** How many are behind the explicit fold. */
   moreCount(zone: string): number {
     const offer = this.offers()[zone]
-    return offer ? offer.packages.length - offer.shown.length : 0
+    return offer && this.expandedZone() !== zone
+      ? Math.max(0, offer.packages.length - OFFERS_SHOWN)
+      : 0
+  }
+
+  hasFold(zone: string): boolean {
+    return (this.offers()[zone]?.packages.length ?? 0) > OFFERS_SHOWN
+  }
+
+  toggleAll(zone: string): void {
+    this.expandedZone.set(this.expandedZone() === zone ? '' : zone)
   }
 
   /**
-   * Ask a domain what it publishes. Toggles closed if it is already open, so
-   * the same control opens and puts away.
+   * Ask a domain what it publishes. Exactly one host is inspected at a time;
+   * prior answers stay cached so returning to one does not fetch its manifest
+   * again.
    *
    * Unreachable, not-a-host and publishes-nothing all land as an empty list.
    * That is deliberate: this is a picker, and the three have the same thing to
@@ -172,20 +211,102 @@ export class HostsPanelComponent implements OnDestroy {
    * says WHICH rule an origin misses and what to change.
    */
   async look(zone: string): Promise<void> {
-    if (zone in this.offers()) {
-      const next = { ...this.offers() }
-      delete next[zone]
-      this.offers.set(next)
+    if (this.selectedZone() === zone) {
+      this.selectedZone.set('')
+      this.expandedZone.set('')
       return
     }
+    this.selectedZone.set(zone)
+    this.expandedZone.set('')
+    if (zone in this.offers()) return
 
     this.offers.set({ ...this.offers(), [zone]: null })
-    const packages = await listHostPackages(zone)
+    let packages: HostPackage[] = []
+    try { packages = await listHostPackages(zone) } catch { /* empty answer */ }
     this.asked.set(new Set([...this.asked(), zone]))
     this.offers.set({
       ...this.offers(),
-      [zone]: { packages, shown: packages.slice(0, OFFERS_SHOWN) },
+      [zone]: { packages },
     })
+  }
+
+  // Acquisition is loaded only when somebody asks for a package. The host
+  // directory stays light, and the replication machinery does not inflate
+  // the shell's initial bundle merely because this surface is mounted.
+  readonly intake = signal<Record<string, IntakeState>>({})
+  readonly activeIntake = signal('')
+
+  intakeOf(pkg: HostPackage): IntakeState | undefined {
+    return this.intake()[pkg.packageSig]
+  }
+
+  intakeActionKey(pkg: HostPackage): string {
+    switch (this.intakeOf(pkg)?.phase) {
+      case 'adding': return 'hosts.offer.adding'
+      case 'added': return 'hosts.offer.added'
+      case 'failed': return 'hosts.offer.retry'
+      default: return 'hosts.offer.add'
+    }
+  }
+
+  intakeDisabled(pkg: HostPackage): boolean {
+    const state = this.intakeOf(pkg)?.phase
+    return state === 'adding' || state === 'added'
+      || (!!this.activeIntake() && this.activeIntake() !== pkg.packageSig)
+  }
+
+  /**
+   * Make a host's package ours through the one verified acquisition path.
+   * Every carried host is offered as a source for the same signature, so a
+   * missing atom on one can fall through to another. Activation happens only
+   * after the complete-or-absent gate; then we restart because an import map
+   * cannot be replaced underneath a running module graph.
+   */
+  async take(pkg: HostPackage): Promise<void> {
+    if (this.intakeDisabled(pkg)) return
+    const sig = pkg.packageSig
+    this.activeIntake.set(sig)
+    this.intake.set({ ...this.intake(), [sig]: { phase: 'adding' } })
+
+    try {
+      const { acquire } = await import('@hypercomb/runtime/acquire')
+      const sources = [...new Set([pkg.zone, ...this.zones()])]
+      const outcome = await acquire(sig, sources)
+      if (!outcome.ok) {
+        this.intake.set({
+          ...this.intake(),
+          [sig]: { phase: 'failed', detail: outcome.error ?? 'package incomplete' },
+        })
+        return
+      }
+
+      this.intake.set({
+        ...this.intake(),
+        [sig]: {
+          phase: 'added',
+          detail: `${outcome.fetched} fetched / ${outcome.present} already here`,
+        },
+      })
+      EffectBus.emit('activity:log', {
+        message: `${pkg.label} added from ${pkg.zone}; restarting`,
+      })
+      setTimeout(() => location.reload(), 650)
+    } catch (error) {
+      this.intake.set({
+        ...this.intake(),
+        [sig]: {
+          phase: 'failed',
+          detail: error instanceof Error ? error.message : 'package could not be added',
+        },
+      })
+    } finally {
+      // Keep every other Add action locked while a successful acquisition is
+      // waiting for its restart. A second package cannot safely replace the
+      // install manifest in that small interval.
+      if (this.intake()[sig]?.phase !== 'added' && this.activeIntake() === sig) {
+        this.activeIntake.set('')
+      }
+    }
   }
 }
 
