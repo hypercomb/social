@@ -2,9 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
 import { checkForUpdate, ensureInstall } from './ensure-install'
 
+const POOL_ADDRESS = 'f'.repeat(64)
+
 vi.mock('@hypercomb/core', () => ({
   EffectBus: { emit: vi.fn() },
   SignatureStore: class SignatureStore {},
+  // The pool address is DERIVED from the meaning, so the test derives it the
+  // same way the code does — through this port, not by writing a hex down.
+  registerPoolMeaning: async () => POOL_ADDRESS,
 }))
 
 vi.mock('@hypercomb/shared/core', () => ({
@@ -115,13 +120,14 @@ describe('ensureInstall install-state validation', () => {
   })
 })
 
-// The bundled manifest ASSERTS an inventory; the install now DERIVES one from
-// the signed layer tree (documentation/host-packages-pool.md). The two agree
-// for every package the build emits, but they are no longer the same array —
-// so the update check compares the thing that actually answers the question:
-// a package signature IS the closure it names.
-describe('checkForUpdate — merkle before set comparison', () => {
+// The shell's own `/content/` is a host like any other: it carries the
+// `host:packages` pool at the derived address, and the head of that pool is
+// the package this build ships. There is no manifest left to read, so the
+// update check settles on the one thing that answers "is this the same tree" —
+// the signature.
+describe('checkForUpdate — the signature is the answer', () => {
   const INSTALLED = 'a'.repeat(64)
+  const NEWER = 'd'.repeat(64)
 
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -130,44 +136,67 @@ describe('checkForUpdate — merkle before set comparison', () => {
     localStorage.clear()
   })
 
-  const bundledManifest = (packageSig: string, bees: string[]): Response => ({
-    ok: true,
-    json: async () => ({ packages: { [packageSig]: { bees, dependencies: [], layers: [packageSig] } } }),
-  }) as unknown as Response
+  /** `/content/` laid out as a host: a directory listing, and the entry. */
+  const bundledPool = async (packageSig: string, label = 'development') => {
+    const pool = POOL_ADDRESS
+    const routes: Record<string, string> = {
+      [`/content/${pool}/`]: '00000000',
+      [`/content/${pool}/00000000`]: `${packageSig}\n${label}`,
+    }
+    return vi.fn(async (url: string) => {
+      const body = routes[String(url)]
+      if (body === undefined) return { ok: false, status: 404, headers: new Headers() } as unknown as Response
+      return { ok: true, status: 200, headers: new Headers(), text: async () => body } as unknown as Response
+    })
+  }
+
+  const installed = (packageSig: string): void => {
+    localStorage.setItem('core-adapter.installed-manifest', JSON.stringify({
+      version: 2, layers: [], bees: ['b'.repeat(64)], dependencies: [], source: 'bundled',
+    }))
+    localStorage.setItem('sentinel.sync-signature', packageSig)
+  }
 
   it('offers nothing when the bundled signature is the one installed', async () => {
-    // Deliberately mismatched bee arrays: the OLD comparison would call this
-    // an update. The signature says the tree is the same one, and it wins.
-    localStorage.setItem('core-adapter.installed-manifest', JSON.stringify({
-      version: 2, layers: [INSTALLED], bees: ['b'.repeat(64)], dependencies: [], source: 'bundled',
-    }))
-    localStorage.setItem('sentinel.sync-signature', INSTALLED)
-    vi.stubGlobal('fetch', vi.fn(async () => bundledManifest(INSTALLED, ['c'.repeat(64)])))
+    installed(INSTALLED)
+    vi.stubGlobal('fetch', await bundledPool(INSTALLED))
 
     await checkForUpdate()
 
     expect(emit).toHaveBeenCalledWith('update:available', expect.objectContaining({
       available: false,
-      newCount: 0,
       packageSig: INSTALLED,
     }))
   })
 
-  it('still reports an update when the bundled signature differs', async () => {
-    const NEWER = 'd'.repeat(64)
-    const newBee = 'e'.repeat(64)
-    localStorage.setItem('core-adapter.installed-manifest', JSON.stringify({
-      version: 2, layers: [INSTALLED], bees: ['b'.repeat(64)], dependencies: [], source: 'bundled',
-    }))
-    localStorage.setItem('sentinel.sync-signature', INSTALLED)
-    vi.stubGlobal('fetch', vi.fn(async () => bundledManifest(NEWER, ['b'.repeat(64), newBee])))
+  it('reports an update when the bundled signature differs', async () => {
+    installed(INSTALLED)
+    vi.stubGlobal('fetch', await bundledPool(NEWER))
 
     await checkForUpdate()
 
+    // No delta: the count was only ever available because a document
+    // enumerated an inventory, and nothing does now.
     expect(emit).toHaveBeenCalledWith('update:available', expect.objectContaining({
       available: true,
-      newBees: [newBee],
+      newCount: 0,
+      newBees: [],
       packageSig: NEWER,
+      label: 'development',
     }))
+  })
+
+  it('stays silent for an install the bundle is not the authority for', async () => {
+    // A host-sourced install surfaces its own updates; diffing it against the
+    // shell's bundle is what used to raise phantom "New features".
+    localStorage.setItem('core-adapter.installed-manifest', JSON.stringify({
+      version: 2, layers: [], bees: ['b'.repeat(64)], dependencies: [], source: 'sentinel',
+    }))
+    localStorage.setItem('sentinel.sync-signature', INSTALLED)
+    vi.stubGlobal('fetch', await bundledPool(NEWER))
+
+    await checkForUpdate()
+
+    expect(emit).toHaveBeenCalledWith('update:available', expect.objectContaining({ available: false }))
   })
 })

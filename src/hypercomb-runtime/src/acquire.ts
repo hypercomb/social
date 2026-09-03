@@ -57,6 +57,7 @@ export { installedPackageSig }
 export { headPackage, hostBases, listHostPackages, type HostPackage }
 import { validateSealedPackage } from './sealed-package.js'
 import { deriveBeeDeps } from './bee-deps.js'
+import { aliasOf, bagEntryName, bagSignature, beeEntries, dependencyEntries, orderedEntries } from './bags.js'
 
 // Store is reached STRUCTURALLY, never imported. Importing the module would
 // bundle a second Store class AND run its module-scope
@@ -448,7 +449,7 @@ export const installPackage = async (
   // The bags. Each is a sig-named dir INSIDE the pool whose entries carry the
   // alias→sig pairs the import map is assembled from — legitimate structure,
   // not a typed folder.
-  await writeBags(store, inventory, pkg, origins)
+  await writeBags(store, inventory)
 
   activate(pkg, inventory, beeDeps, held.held)
   return {
@@ -488,8 +489,6 @@ const activate = (
       bees: inventory.bees,
       dependencies: inventory.dependencies,
       beeDeps,
-      dependenciesBag: pkg.dependenciesBag,
-      beesBag: pkg.beesBag,
       // Provenance: a HOST produced this install, so the shell's own bundled
       // `/content/` package is NOT this install's update authority. 'sentinel'
       // is the existing spelling for "an external authority is current"; the
@@ -517,11 +516,22 @@ const activate = (
   } catch { /* storage unavailable — OPFS presence is still the truth */ }
 }
 
-const writeBags = async (store: StoreLike, inventory: PackageInventory, pkg: HostPackage, origins: string[]): Promise<void> => {
-  // Single-bag invariant: evict any prior bag before writing the new one, so
-  // the import map's readdir finds exactly one and needs no pointer file.
-  // Scoped STRICTLY to the install-owned pools — at the OPFS root the same
-  // 64-hex dir shape is a user lineage sigbag.
+/**
+ * THE BAGS, BUILT HERE RATHER THAN DOWNLOADED.
+ *
+ * A bag is the index the import map is assembled from, and every input to it
+ * is already on disk once admission completes: a dependency's alias is the
+ * first line of its own bytes, a bee has none, and the bag's address is the
+ * sha256 of those entries. So the client builds both bags itself — no fetch,
+ * no host claim, and nothing left on the wire that a package signature does
+ * not already imply (bags.ts).
+ *
+ * Single-bag invariant: evict any prior bag before writing the new one, so the
+ * import map's readdir finds exactly one and needs no pointer file. Scoped
+ * STRICTLY to the install-owned pools — at the OPFS root the same 64-hex dir
+ * shape is a user lineage sigbag.
+ */
+const writeBags = async (store: StoreLike, inventory: PackageInventory): Promise<void> => {
   const evict = async (parent: FileSystemDirectoryHandle, keep: string): Promise<void> => {
     const stale: string[] = []
     for await (const [name, handle] of parent.entries()) {
@@ -532,31 +542,21 @@ const writeBags = async (store: StoreLike, inventory: PackageInventory, pkg: Hos
     }
   }
 
-  const writeBag = async (parent: FileSystemDirectoryHandle, bagSig: string, count: number): Promise<void> => {
+  const put = async (parent: FileSystemDirectoryHandle | undefined, entries: { sig: string; content: string }[]): Promise<void> => {
+    if (!parent || !entries.length) return
+    const bagSig = await bagSignature(entries)
     await evict(parent, bagSig)
     const bagDir = await parent.getDirectoryHandle(bagSig, { create: true })
-    await Promise.all(Array.from({ length: count }, (_, i) => i).map(async (index) => {
-      // 8 digits is the marker width builds emit; 4 is the read fallback for
-      // dists deployed before the widening. The bag sig is derived from entry
-      // CONTENT, so an old dist presents the SAME bag sig under the old
-      // filenames — without the fallback the fetch 404s and an empty bag is
-      // written, which strands every alias the map needed.
-      for (const name of [String(index).padStart(8, '0'), String(index).padStart(4, '0')]) {
-        for (const base of origins) {
-          const bytes = await fetchBytes(`${base}/${bagSig}/${name}`)
-          if (!bytes) continue
-          const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
-          await writeBytes(bagDir, String(index).padStart(8, '0'), buffer)
-          return
-        }
-      }
+    await Promise.all(orderedEntries(entries).map(async (entry, index) => {
+      const bytes = new TextEncoder().encode(entry.content)
+      await writeBytes(bagDir, bagEntryName(index), bytes.buffer.slice(0, bytes.byteLength) as ArrayBuffer)
     }))
   }
 
-  if (pkg.dependenciesBag && SIG_RE.test(pkg.dependenciesBag)) {
-    await writeBag(store.dependencies, pkg.dependenciesBag, inventory.dependencies.length)
-  }
-  if (pkg.beesBag && SIG_RE.test(pkg.beesBag)) {
-    await writeBag(store.bees, pkg.beesBag, inventory.bees.length)
-  }
+  const readDep = readFrom([store.dependencies], sig => [`${sig}.js`, sig])
+  const aliases = new Map<string, string>()
+  for (const sig of inventory.dependencies) aliases.set(sig, aliasOf(await readDep(sig)))
+
+  await put(store.dependencies, dependencyEntries(inventory.dependencies, sig => aliases.get(sig) ?? ''))
+  await put(store.bees, beeEntries(inventory.bees))
 }

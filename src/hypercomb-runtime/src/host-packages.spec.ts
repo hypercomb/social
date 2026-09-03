@@ -78,19 +78,6 @@ describe('headPackage — discovery', () => {
     expect((await headPackage('host.example'))?.base).toBe('https://host.example/content')
   })
 
-  it('falls back to the manifest for a host that has not shipped the pool', async () => {
-    vi.stubGlobal('fetch', serving({
-      'https://host.example/manifest.json': {
-        packages: {
-          [SIG_A]: { generation: 1, bees: [], layers: [SIG_A], dependencies: [] },
-          [SIG_B]: { generation: 2, bees: [], layers: [SIG_B], dependencies: [] },
-        },
-      },
-    }))
-
-    expect((await headPackage('host.example'))?.packageSig).toBe(SIG_B)   // newest
-  })
-
   it('refuses a head entry that is not a signature, rather than trusting it', async () => {
     const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
     vi.stubGlobal('fetch', serving({
@@ -124,38 +111,31 @@ describe('headPackage — discovery', () => {
 describe('listHostPackages — the browse surface', () => {
   beforeEach(() => { vi.unstubAllGlobals() })
 
-  it('still reads the manifest, because a name is a mark the pool cannot yet wear', async () => {
-    vi.stubGlobal('fetch', serving({
-      'https://host.example/manifest.json': {
-        packages: {
-          [SIG_A]: { generation: 1, bees: [SIG_B], layers: [SIG_A], dependencies: [], label: 'older' },
-          [SIG_B]: { generation: 2, bees: [SIG_A, SIG_B], layers: [SIG_B], dependencies: [], label: 'newer' },
-        },
-      },
-    }))
+  it('walks the pool, newest first, with each row named by its own entry', async () => {
+    vi.stubGlobal('fetch', serving(await poolAt('https://host.example', [SIG_B, SIG_A])))
 
-    const packages = await listHostPackages('host.example')
+    const rows = await listHostPackages('host.example')
 
-    expect(packages.map(p => p.packageSig)).toEqual([SIG_B, SIG_A])
-    expect(packages[0]!.label).toBe('newer')
-    expect(packages[0]!.beeCount).toBe(2)
+    expect(rows.map(r => r.packageSig)).toEqual([SIG_A, SIG_B])   // head first
+    expect(rows[0]!.bees).toEqual([])                             // no inventory travels
   })
 
-  it('reads the manifest past the cache — a named document is a mutable pointer', async () => {
-    const fetchMock = serving({ 'https://host.example/manifest.json': { packages: {} } })
-    vi.stubGlobal('fetch', fetchMock)
+  it('takes a page, not a host’s whole history', async () => {
+    const sigs = Array.from({ length: 40 }, (_, i) => String(i).padStart(64, '0'))
+    vi.stubGlobal('fetch', serving(await poolAt('https://host.example', sigs)))
 
-    await listHostPackages('host.example')
-
-    // Pool ENTRIES are immutable and read with the default cache; the two
-    // mutable things — a directory listing and a named document — are not.
-    const mutable = fetchMock.mock.calls.filter(call =>
-      String(call[0]).endsWith('manifest.json') || String(call[0]).endsWith('/'))
-    expect(mutable.length).toBeGreaterThan(0)
-    for (const call of mutable) expect(call[1]).toMatchObject({ cache: 'no-store' })
+    expect(await listHostPackages('host.example', { limit: 5 })).toHaveLength(5)
   })
 
-  it('answers empty for a domain that publishes nothing', async () => {
+  it('pages further back with `before`', async () => {
+    vi.stubGlobal('fetch', serving(await poolAt('https://host.example', [SIG_A, SIG_B])))
+
+    const page = await listHostPackages('host.example', { before: 1 })
+
+    expect(page.map(r => r.packageSig)).toEqual([SIG_A])   // index 0 only
+  })
+
+  it('answers empty for a domain that publishes no pool at all', async () => {
     vi.stubGlobal('fetch', serving({}))
     expect(await listHostPackages('host.example')).toEqual([])
   })
