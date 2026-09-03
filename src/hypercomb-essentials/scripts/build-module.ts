@@ -17,6 +17,7 @@
 // is ever emitted in that layout.
 
 import { spawnSync } from 'child_process'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'url'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { dirname, extname, join, relative, resolve } from 'path'
@@ -1257,6 +1258,30 @@ const main = async (): Promise<void> => {
   } else {
     console.log(`[build-module] manifest unchanged — skipped write`)
   }
+
+  // ── the package, as a pool member ────────────────────────────────
+  //
+  // What a host PUBLISHES is the `host:packages` pool, not a document
+  // (documentation/host-packages-pool.md). dist carries its one member so the
+  // ship can append it without reading a manifest: the signature, and the
+  // branch it was built from underneath — the only thing about this package
+  // that is not derivable from its own sealed tree.
+  //
+  // manifest.json above stays as the BUILD's own bookkeeping: it is what the
+  // skip-write compare reads, and copy-content never mirrors it to a target
+  // any more, so it does not reach a host.
+  //
+  // The address is DERIVED — sha256 of the meaning, byte for byte what core's
+  // registerPoolMeaning mints and what every client computes for itself.
+  const poolAddress = createHash('sha256').update('host:packages', 'utf8').digest('hex')
+  const poolDir = join(DIST_ROOT, poolAddress)
+  ensureDir(poolDir)
+  const memberBytes = `${rootLayerSig}\n${resolveGenesisLabel()}`
+  const memberPath = join(poolDir, '00000000')
+  if (!existsSync(memberPath) || readFileSync(memberPath, 'utf8') !== memberBytes) {
+    writeFileSync(memberPath, memberBytes, 'utf8')
+  }
+  writeFileSync(join(poolDir, 'index.html'), '00000000', 'utf8')
 
   // --- Phase 5: persist Merkle cache + GC ---
 

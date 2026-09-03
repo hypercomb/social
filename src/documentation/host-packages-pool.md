@@ -279,6 +279,29 @@ published); only the moment moved.
    about degrading rather than failing.*
 6. **Retire `manifest.json`.** Read-fallback while hosts drain, exactly as the
    legacy typed URLs are handled — never migrated into the protocol.
+   *Status 2026-09-03: **DONE.** No client reads one and no ship writes one.*
+
+   *The blocker was never discovery — it was RETENTION. A mirrored target is
+   pruned on every ship, and the manifest was the authority on what may not be
+   deleted. `retention.ts` derives it instead: every pool member's sealed-root
+   closure, plus the two bag addresses recomputed. Measured before it replaced
+   the manifest — 3014 signatures either way, and the five the manifest kept
+   that this does not are phantom bag references no host has ever held. **Real
+   bytes at risk: zero**, and a dry run of the prune deleted nothing the old
+   authority kept. The live ship then confirmed it: 0 removed at both targets,
+   282 historical atoms BACKFILLED, manifest mtimes untouched.*
+
+   *What else went with it: the version chain. `chain-manifest.ts` is deleted —
+   `generation` and `previous` were per-host bookkeeping impersonating a version
+   history, and the pool answers the same question by being ordered. Ship order
+   is now the deepest existing pool plus the package just built, appended if it
+   is not already a member. `build-module` emits dist's own pool member (the
+   signature, and the branch beneath it) and `stamp-install-channel` reads that
+   instead of a document. `dist/manifest.json` survives as the BUILD's private
+   skip-write record; nothing mirrors it to a target, so it never reaches a
+   host. A target that already carries a manifest keeps it — stale removal
+   never touches a non-64-hex name — but nothing refreshes it and no client
+   reads it.*
 
 ## Doctrine rules
 

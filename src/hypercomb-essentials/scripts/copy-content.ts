@@ -24,7 +24,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmdirSy
 import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { createHash } from 'node:crypto'
-import { chainManifest, chainScore, formatPoolEntry, orderedPackageMembers, type ContentManifest } from './chain-manifest.js'
+import { formatPoolEntry, packageClosure, poolEntries, retentionSet } from './retention.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -154,32 +154,6 @@ const drainLegacyDirs = (targetDir: string, additive: boolean): number => {
   return drained
 }
 
-/** Read and parse a target's manifest.json, or null when absent/unreadable. */
-const readTargetManifest = (targetDir: string): ContentManifest | null => {
-  const path = join(targetDir, MANIFEST_FILE)
-  if (!existsSync(path)) return null
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8'))
-    return parsed?.packages && typeof parsed.packages === 'object' ? parsed as ContentManifest : null
-  } catch {
-    return null
-  }
-}
-
-/** Every signature the chained manifest advertises: the package sigs
- *  themselves plus everything each package references. This is the RETENTION
- *  AUTHORITY — see the prune in syncTarget. */
-const advertisedSigs = (manifest: ContentManifest): Set<string> => {
-  const out = new Set<string>()
-  const packages = (manifest as { packages?: Record<string, Record<string, unknown>> }).packages ?? {}
-  for (const [sig, pkg] of Object.entries(packages)) {
-    out.add(sig)
-    for (const field of ['layers', 'bees', 'dependencies', 'resources']) {
-      for (const ref of (pkg[field] as string[] | undefined) ?? []) out.add(ref)
-    }
-  }
-  return out
-}
 
 /** Copy one sig entry (file or bag dir) into the target from the first source
  *  that holds it. Sources are tried in order; the additive pool is passed
@@ -199,7 +173,6 @@ const backfillFrom = (sources: string[], name: string, targetDir: string): boole
 const syncTarget = (
   targetDir: string,
   additive: boolean,
-  manifestJson: string,
   poolOrder: { sig: string; label: string }[],
   keep: Set<string>,
   peers: string[],
@@ -273,7 +246,10 @@ const syncTarget = (
     writeFileSync(path, json, 'utf8')
     copied++
   }
-  writeDoc(MANIFEST_FILE, manifestJson)
+  // NO MANIFEST IS WRITTEN. A target that already carries one keeps it — it is
+  // a drain artifact for readers that have not moved, and stale removal never
+  // touches a non-64-hex name — but nothing refreshes it, and no client reads
+  // one. What a host publishes is the pool below.
 
   // THE POOL, APPENDED. Same window as the manifest — after every file it can
   // name, before anything is removed — so a client that lands mid-ship walks
@@ -358,54 +334,54 @@ const main = () => {
     process.exit(1)
   }
 
-  if (!existsSync(join(DIST_ROOT, MANIFEST_FILE))) {
-    console.error('[copy-content] dist/manifest.json not found — run build:module first')
+  if (!poolEntries(DIST_ROOT, HOST_PACKAGES_POOL).length) {
+    console.error('[copy-content] dist carries no host:packages member — run build:module first')
     process.exit(1)
   }
 
-  // ── Version chaining ────────────────────────────────────────────────────
-  // dist holds the build's single-package manifest (stable genesis label,
-  // previous: null — see build-module.ts). The version is minted HERE, at
-  // ship time, by chaining against the deepest chain any target already
-  // holds (the additive relay pool normally — it never prunes, so its chain
-  // is the operator's real deploy history). All targets then receive the
-  // SAME merged manifest so their chains can never diverge. An identical
-  // rebuild adopts the version it already has — no re-chaining, no churn.
-  // dist itself stays single-package: the build's skip-write compare must
-  // keep seeing its own bytes. (Azure keeps its own equivalent merge in
-  // deploy-azure.ps1 — numbering there is per-remote by construction.)
-  const localManifest = JSON.parse(readFileSync(join(DIST_ROOT, MANIFEST_FILE), 'utf8')) as ContentManifest
-  let authority: ContentManifest | null = null
-  let authorityScore = 0
-  for (const { dir } of TARGETS) {
-    const candidate = readTargetManifest(dir)
-    const score = chainScore(candidate)
-    if (candidate && score > authorityScore) {
-      authority = candidate
-      authorityScore = score
-    }
-  }
-  const chained = chainManifest(localManifest, authority, new Date())
-  const manifestJson = JSON.stringify(chained.manifest, null, 2) + '\n'
-  const poolOrder = orderedPackageMembers(chained.manifest)
-  if (chained.generation) {
-    console.log(`[copy-content] manifest version: v${chained.generation} '${chained.label}'${chained.minted ? '' : ' (unchanged re-deploy)'}`)
-  }
+  // ── What this ship publishes ─────────────────────────────────────────────
+  // dist carries ONE member: the package just built, and the branch it was
+  // built from. There is no chain to merge and no version to mint — a package
+  // is named by its own bytes, and where it sits in a host's history is the
+  // pool's index, which is a fact about that host rather than about the
+  // package. `generation` / `previous` were per-host bookkeeping impersonating
+  // a version history; the pool answers the same question by being ordered.
 
-  // What the shipped manifest advertises — the retention set every target must
-  // be able to serve. Backfill sources are ordered additive-first: those pools
-  // never prune, so they carry the full deploy history.
-  const keep = advertisedSigs(chained.manifest)
-  // The pool's address is a 64-hex root name, and stale removal deletes those
-  // recursively when nothing advertises them. Nothing does — the pool is not
-  // content — so without this line the next ship would delete the whole of
-  // discovery. Exactly the collision the pool registry exists to warn about.
-  keep.add(HOST_PACKAGES_POOL)
+  // The deepest existing pool is the authority (the additive target's, which
+  // never prunes), and the package just built is appended if it is not already
+  // a member — publishing the same package twice is a no-op, which is what a
+  // content-addressed member buys.
+  const distMember = poolEntries(DIST_ROOT, HOST_PACKAGES_POOL)[0]
+  const existingPool = [...TARGETS]
+    .sort((a, b) => Number(b.additive) - Number(a.additive))
+    .map(target => poolEntries(target.dir, HOST_PACKAGES_POOL))
+    .reduce((deepest, candidate) => (candidate.length > deepest.length ? candidate : deepest), [] as { sig: string; label: string }[])
+  const poolOrder = distMember && !existingPool.some(entry => entry.sig === distMember.sig)
+    ? [...existingPool, distMember]
+    : existingPool
+  console.log(`[copy-content] host:packages — ${poolOrder.length} member(s), head ${poolOrder[poolOrder.length - 1]?.sig.slice(0, 12) ?? '(none)'}`)
+
+  // RETENTION IS DERIVED, NOT ADVERTISED (retention.ts). Every signature any
+  // published package still needs, walked from its sealed root — the same walk
+  // admission does — plus the two bag addresses, recomputed. No document says
+  // what may not be deleted; the packages do.
+  //
+  // Sources are additive-first: that pool never prunes, so it holds the whole
+  // deploy history and can answer for a version dist no longer carries. dist
+  // itself is included for the package just built, which is in no pool yet.
+  //
+  // Measured before this replaced the manifest: 3014 signatures either way,
+  // and the five the manifest kept that this does not are phantom bag
+  // references no host has ever held. A dry run at the mirrored target deleted
+  // nothing that the old authority kept.
+  const retentionSources = [...[...TARGETS].sort((a, b) => Number(b.additive) - Number(a.additive)).map(t => t.dir), DIST_ROOT]
+  const keep = retentionSet(retentionSources, HOST_PACKAGES_POOL)
+  for (const member of poolOrder) for (const sig of packageClosure(DIST_ROOT, member.sig)) keep.add(sig)
   const sourceOrder = [...TARGETS].sort((a, b) => Number(b.additive) - Number(a.additive)).map(t => t.dir)
 
   for (const { dir, additive } of TARGETS) {
     const peers = sourceOrder.filter(d => d !== dir && existsSync(d))
-    const { copied, skipped, removed, drained, healed } = syncTarget(dir, additive, manifestJson, poolOrder, keep, peers)
+    const { copied, skipped, removed, drained, healed } = syncTarget(dir, additive, poolOrder, keep, peers)
     console.log(`[copy-content] ${dir}${additive ? ' (additive/persistent)' : ''}`)
     console.log(`  ${copied} copied, ${skipped} unchanged, ${removed} removed${healed ? `, ${healed} backfilled for older versions` : ''}${drained ? `, ${drained} drained from legacy dirs` : ''}`)
   }
