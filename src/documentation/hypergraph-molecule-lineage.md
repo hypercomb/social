@@ -28,22 +28,89 @@ point and must be retired (register: see *Execution order*).
   `sign('people')`. The root level has been in alignment all along
   (`sign('websites')` IS the `/websites` bag — verified live).
 
+## The decided shape (3 designs, 3 judges — unanimous)
+
+Three independent designs were produced (purist / hybrid / skeptic) and judged
+by three lenses (doctrine-fidelity / engineering-correctness / minimalism).
+**All three judges chose the purist design and said build it.** Two of three
+designers voted to swap; the skeptic declined. The shape, with the grafts the
+judges required:
+
+```
+<root>/<sig>                          ATOM — three shapes matter
+   vertex      {name, properties?, decorations?, …}       ← NO children slot, ever
+   envelope    {meta:1, layer:<vertexSig>, root:<canon name>, relation?, slot?}
+   succession  {succession:1, name, author, prev, members:[envelopeSig…], at}
+
+<root>/<sign(canon(name))>/           MOLECULE — the only directory a tile gets
+   <sign(author)>/<headSuccessionSig>     ONE zero-byte entry per author
+```
+
+- **The succession atom IS the meta lineage** — an ordered list of member sigs
+  plus `prev`. `members` order is committed by the sig (canonicalization sorts
+  keys, never elements). The numbered marker directory disappears; `prev` is
+  the chain.
+- **One head pointer per author** (`sign(name)/sign(author)/<headSig>`,
+  written new-before-old). A succession has exactly one appender by
+  definition; a name has as many appenders as tenants — the per-author bucket
+  is what reconciles those two facts. Without it the model is unsound; this is
+  the skeptic's one real objection and its answer.
+- **A parent's succession lists the child's VERTEX, never the child's head** —
+  so commits stay per-page: no cascade, no stale hint. A vertex may never
+  carry a `children` / `cells` / `layers` slot after migration (ratchet it).
+- **`slot` rides the envelope**, not the member — which finally fixes the
+  canonical trap where one `properties.index` per tile has to serve every
+  appearance of that tile.
+- **`hidden:[envelopeSig]` lives in YOUR succession** — the only honest tool
+  against a member you did not author (you cannot un-add what you did not
+  add), and it makes hide-first structural and undoable.
+- **Replication refuses forks**: accept a newer entry for an author only if
+  its `prev` chain contains the entry you hold. History never branches.
+- **The seal is derived** — `{kind:'seal', molecule, head, children:[sealSig]}`
+  minted only in the optimize phase, keyed by the heads it folds,
+  complete-or-absent, never load-bearing.
+- **The mesh keeps (room, secret)**: `sha256(canon(name) ␀ room ␀ secret)`.
+  A channel that is `sign(name)` verbatim would receive every `people` on the
+  relay. Unanimous across all three designs.
+- **One canonicalization rule everywhere**: `canonicalizeLineageSegment` (NFC,
+  non-letter/digit runs → `-`, edge hyphens stripped, case preserved).
+  `controls-bar.component.ts:1158` and `mesh-modal.component.ts:139` hash a
+  RAW join today and already disagree — fix both.
+
 ## Ordering — "just have a meta lineage"
 
-The SET is unordered and shared. Order is a point of view, and every point of
-view is content-addressed:
+**Ordered is right, but the ordered thing is never the molecule.** All three
+judges converged on this independently.
 
-```
-<root>/<sign('people')>/
-    <memberSig>         the set — who is a person (atoms), shared by everyone
-    <metaSig>           ordered snapshots — {name, children:[…], refs:[…]} atoms
-    0000 … 000x         ONE mutable pointer per participant: the latest meta
-```
+The molecule (the directory) is a **SET** and must stay one: `readdir` has no
+order, a union of two authors' sequences has no canonical interleaving, and a
+content-addressed identity for a set must sort to converge. The moment order
+lives in the directory you have one appender and a sigbag with a worse address
+— `host-pool.ts`'s ordered 8-digit pool is the proof; it is a sigbag renamed.
 
-A layer already IS the meta lineage — `{name, children:[sigs]}` — verbatim. No
-new shape. Tenant A's order and tenant B's order are two atoms in the same
-directory; neither clobbers the other. There is **no global head**; only
-participants have sequences.
+Order lives in exactly two places, both already doctrine elsewhere:
+
+1. **The succession atom** — one author's ordered claim at one moment.
+2. **The envelope `slot`** — order rides the incidence, per the artifact
+   paradigm ("one order field cannot serve two websites").
+
+Tenant A's order and tenant B's order are two atoms in the same directory;
+neither clobbers the other. There is **no global head** — the molecule is a
+set, and only participants have sequences.
+
+## The codebase is already walking this way
+
+Three shipped precedents, found by the readers:
+
+- `hives-names-shape.spec.ts` pins a name-keyed head record whose own comment
+  reads *"the entry is name → head; NO lineageKey derivation anywhere."*
+- `tile-art.ts` ships `sign('visual:tile-art')/<name> → signature`.
+- `pool-bag-collision.spec.ts` already proves
+  `sign(bareword) === sign(lineageKey([bareword]))` and that `/flatten` must
+  not destroy pool members.
+- `native-filesystem.ts:34-37` already treats a sig-named directory as *"a bag,
+  a pool, or BOTH"* and classifies **per entry** (8-digit = marker). That is
+  the rule-5 model every other walker should copy.
 
 ## Federation — pools do not live on your computer
 
@@ -141,6 +208,32 @@ every level.
 contention register holds no unaddressed `trap` or `must-change` item — code,
 ratchets, tests and docs — so nothing in the repo can pull a later session
 back to the path-keyed bag.
+
+### The two open items only the owner decides
+
+1. **The mesh transition** (rule 7 above). Old peers converge on
+   `lineageKey(path)`, new peers on `canon(name)`. Either new clients
+   dual-publish to the old channel for a window, or peers partition by
+   version. Every derivation site is flagged in the register; none is decided.
+2. **The same-name collapse.** `/business/people` and `/club/people` become
+   one molecule on one tenant. This is the literal spec — "the name is the
+   grammar" — and there is no purist escape short of putting the route back in
+   the address. It must be *announced*, never silent: the migration reports
+   "N molecules from M paths, K same-name member stacks" before it writes.
+
+### Known costs, stated plainly
+
+- The same-name collapse above.
+- Cold head derivation is O(entries) without the per-author bucket listing —
+  which is why the bucket is not optional.
+- Two host pieces gate the interop claim: a directory branch for live hosts
+  (relay), or a signed `heads: Record<moleculeSig, headSuccessionSig>` map in
+  `/hive/<pubkey>` for static hosts (Pages, buckets). Until one ships,
+  cross-host search is designed but not reachable.
+- Every root walker must learn "the ENTRY decides, never the directory".
+- GC roots become every head entry in every molecule: with no parent→child
+  edge in layer bytes, closure walkers reach child molecules only by route or
+  by seal.
 
 ## Artifacts of the decision
 
