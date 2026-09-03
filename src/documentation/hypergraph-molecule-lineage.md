@@ -77,6 +77,53 @@ judges required:
   `controls-bar.component.ts:1158` and `mesh-modal.component.ts:139` hash a
   RAW join today and already disagree — fix both.
 
+## The array is the canonical signed form (decided 2026-09-02)
+
+A single signature and an array of signatures are **the same type**. The walker
+already works this way — `edgeSigsOf` accepts `string | string[]` on every edge
+field (`edge-registry.ts:93-110`). Made doctrine:
+
+1. **In signed bytes, a collection slot is ALWAYS an array** — even when it
+   holds one member. `{children:['a']}`, never `{children:'a'}`. One preimage
+   per meaning, so two participants making the identical edit mint the
+   identical sig and dedup/convergence hold.
+2. **`sign(array)` is an ADDRESS, never a substitute inside signed bytes.** The
+   array may also live as its own atom at that address, but a record always
+   inlines its members. If both spellings were legal preimages, the same edit
+   would produce two signatures and replication would read a fork.
+3. **`Sig | Sig[]` makes "a molecule is an atom one level up" a type identity**,
+   not an analogy. Inline vs reference is a storage decision; the meaning is
+   identical. That is what makes the model recursive without a special case.
+4. **`content` / `children` / `refs` collapse to one arity-flexible slot** —
+   they were the same edge at different arities. The typed payload hops
+   (`layer`, `resource`, `dependency`, `bee`) stay SCALAR: they are singular by
+   construction — one envelope, one payload — and wrapping them buys nothing.
+
+**Scope boundary — this binds NEW record shapes only.** Normalizing existing
+scalar slots in already-signed bytes would re-sign every atom that has one: a
+merkle cascade re-addressing the whole hive, for no gain. So the rule applies
+to the shapes being minted (succession, the new envelope/vertex forms); legacy
+scalar spellings are read as-is and DRAIN. Never re-sign old data to satisfy a
+canonicalization rule — that is healing, and data never heals.
+
+### When domains arrive, the array becomes orthogonal
+
+A member is identified by its signature; it is *available* at zero or more
+domains. So the community read of a molecule is not a list but an **orthogonal
+array — members × hosts**: rows are member sigs, columns are the domains
+serving them, and a cell says "this host has these bytes."
+
+- **The domain NEVER enters a preimage.** If it did, the same content served
+  from jwize.com and from revolucionstyle.com would carry two signatures and
+  every guarantee — dedup, convergence, verification, share-never-copy —
+  would collapse. Identity is the row; availability is the column.
+- A signed claim (a succession) stays one-dimensional: one author's ordered
+  members. The second axis appears only at READ time, as the union across the
+  hosts you chose to ask.
+- The column is therefore provenance and reachability, never meaning: losing a
+  host removes a column, never a member. A member with no columns left is
+  unreachable, not deleted.
+
 ## Ordering — "just have a meta lineage"
 
 **Ordered is right, but the ordered thing is never the molecule.** All three
