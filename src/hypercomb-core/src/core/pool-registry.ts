@@ -314,8 +314,16 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   //                        and never a walk (search/hive-search.ts)
   //   thumbnails:hex     — hex thumbnails keyed by SOURCE IMAGE SIGNATURE
   //                        (presentation/tiles/thumbnails.ts)
+  //   molecule:index     — the DECLARED VOCABULARY, keyed by the layer sig it
+  //                        derives from: which molecule addresses a subtree's
+  //                        names fold to (molecule/molecule-index.ts). It must
+  //                        be COLON-SCOPED twice over — the bare-word list may
+  //                        only shrink, and the index's whole subject IS
+  //                        bare-word molecule addresses, so a bare `molecule`
+  //                        would land the index on top of a bag it indexes.
   'computed:genome',
   'insights:catalog',
+  'molecule:index',
   'search:index',
   'thumbnails:hex',
   // RESERVED AHEAD OF ITS BUILD, like `pheromones:deposits` above: the hive
@@ -398,6 +406,29 @@ export const poolMeaningOf = async (signature: string): Promise<string | undefin
 export const poolAddresses = async (): Promise<ReadonlySet<string>> => {
   await ensureSeeded()
   return new Set(meaningByAddress.keys())
+}
+
+/**
+ * The RESERVED SYSTEM SCOPES — the words that may legally appear before a
+ * colon, DERIVED from `SCOPED_POOL_MEANINGS` rather than listed again.
+ *
+ * `documentation/address-syntax.md` rule 3: after a colon there is a reserved
+ * system word or a 64-hex signature, never a user word. That rule needs to know
+ * which words are reserved, and a second hand-kept list of them would drift
+ * from this one exactly the way four copies of the pool census once drifted.
+ * Reserving a new scoped meaning above extends this set for free.
+ *
+ * Synchronous and cheap: it reads the frozen build-time array, not the runtime
+ * registry. A scope minted at runtime by a module is not a SYSTEM reservation —
+ * it is that module's own spelling, and it is judged by the same rule.
+ */
+export const reservedColonScopes = (): ReadonlySet<string> => {
+  const scopes = new Set<string>()
+  for (const meaning of SCOPED_POOL_MEANINGS) {
+    const colon = meaning.indexOf(':')
+    if (colon > 0) scopes.add(meaning.slice(0, colon))
+  }
+  return scopes
 }
 
 /** sign(meaning) → meaning for every known pool, for labelling a root

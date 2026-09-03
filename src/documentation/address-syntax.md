@@ -50,10 +50,19 @@ separator, and it costs both things that make colons useful (below).
 word.** This is what keeps the two namespaces apart.
 
 **4. Case is folded for the address; display case is preserved.** The molecule
-address is `sign(canon(name).toLowerCase())`, using the locale-INDEPENDENT
+address is `sign(fold(canon(name) || trim(name)))`, using the locale-INDEPENDENT
 `toLowerCase` — never `toLocaleLowerCase`, whose Turkish dotless-i would make
 one machine's address disagree with another's. Case folding IS the interop: a
 vocabulary where `People` and `people` are different molecules is not shared.
+
+Note the parenthesisation, corrected 2026-09-03 when the rule was made
+executable (`hypercomb-core/src/core/molecule-address.ts`). The fold wraps the
+WHOLE expression, raw-trimmed fallback included. `canon` returns `''` for a name
+carrying no letter and no digit, and `sign('')` IS the empty-content ROOT
+address, so the fallback is not optional — but it is reachable by names that
+still case-fold. `Ⓐ` (U+24B6) is category So, so nothing survives canon's
+filter; under the earlier spelling `fold(canon(name)) || trim(name)` the
+fallback branch went unfolded and `Ⓐ` and `ⓐ` became two molecules of one word.
 
 **5. Plural means an array; singular means a scalar.** The field name tells you
 the arity, so there is exactly one legal spelling and one preimage per meaning.
