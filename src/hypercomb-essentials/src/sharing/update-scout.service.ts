@@ -32,8 +32,13 @@
 //     the EffectBus last-value replay would hide a real bundled update)
 
 import { EffectBus } from '@hypercomb/core'
+import { checkRemoteHiveFormat } from './hive-format.js'
 import { fetchHiveManifestFromAny } from './hive-pointer.js'
 import { installRootOf, PUBLIC_CONTENT_HOSTS } from './hive-link.js'
+// LOAD-BEARING IMPORT. The hive FORMAT check has no registration of its own —
+// it reaches the app by riding this module, which side-effects.ts already
+// imports. Removing it would make the format warning go silent with no error.
+import { announceHiveFormat } from './hive-format.js'
 
 export const INSTALL_FOLLOW_KEY = 'hc:install-follow'
 /** The web shell's installed-package stamp (ensure-install's SYNC_SIG_KEY). */
@@ -100,6 +105,15 @@ export class UpdateScoutService {
     const manifest = await fetchManifest(follow.hosts, follow.pubkey)
     if (!manifest) return null
 
+    // THE FORMAT MARKER'S ONLY CROSS-DEVICE CHANNEL. The local pool crosses no
+    // wire, so a declaration written by a newer client on another device could
+    // never reach this one. This is a verified index of a publisher this client
+    // already follows, which makes it the one place an older client can be told
+    // that the hive it syncs from has moved past it. Fire-and-forget: it never
+    // gates the update check, and it is silent (no roots key, no fetch) for
+    // every hive that declares nothing — which today is all of them.
+    void checkRemoteHiveFormat(manifest.roots, follow.hosts).catch(() => null)
+
     let installed: string | null
     try { installed = storage.getItem(INSTALLED_SIG_KEY) } catch { return null }
     const sig = scoutVerdict(manifest.roots, follow.channel, installed)
@@ -115,5 +129,12 @@ const scout = new UpdateScoutService()
 window.ioc?.register?.('@diamondcoreprocessor.com/UpdateScoutService', scout)
 // One check per boot, well after first paint and the shell's bundled check.
 if (typeof window !== 'undefined') {
-  setTimeout(() => { void scout.check() }, BOOT_CHECK_DELAY_MS)
+  setTimeout(() => {
+    void scout.check()
+    // INDEPENDENT of the follow record: the format check reads this hive's own
+    // declaration and runs on every boot whether or not a channel is followed.
+    // Same discipline as the scout — off the boot path, after first paint, and
+    // silent unless this client genuinely cannot read what the hive holds.
+    void announceHiveFormat()
+  }, BOOT_CHECK_DELAY_MS)
 }

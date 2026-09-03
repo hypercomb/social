@@ -43,6 +43,13 @@ export const HIVE_INDEX_EVENT_KIND = 30564
 // non-letter/number to `-`, so no site lineage can ever produce a key
 // containing `:`. `install:`-prefixed keys are therefore reserved by
 // construction — no allowlist needed, no census to drift.
+//
+// NARROWER THAN IT READS, stated exactly: canonicalizeLineageSegment falls
+// back to the RAW segment when canonicalization empties it, so a tile named
+// exactly `:` does produce a bare colon. The reservation is absolute only for
+// a key carrying letters or digits on BOTH sides of the colon — which
+// `install:<channel>` and `format:hive` both do, and a bare `:` prefix would
+// not. Reserve accordingly.
 
 export const INSTALL_CHANNEL_PREFIX = 'install:'
 
@@ -57,6 +64,33 @@ export function installChannelKey(channel: string): string {
  *  the worker's verifiedIndex) — this helper adds no trust of its own. */
 export function installRootOf(roots: Record<string, string>, channel: string): string | null {
   const sig = String(roots[installChannelKey(channel)] ?? '').trim().toLowerCase()
+  return SIG_RE.test(sig) ? sig : null
+}
+
+// ── The hive FORMAT marker (documentation-free half: see hive-format.ts) ──
+//
+// A reserved roots key, for two reasons that are both hard constraints:
+//
+//   * The index cannot carry an extra TOP-LEVEL field. `putHiveManifest`
+//     re-serializes `{ v, roots }` and its signature accepts only `roots`, so
+//     anything else is erased by the very next publish from ANY client —
+//     including an older one, which is precisely the silent divergence this
+//     marker exists to prevent.
+//   * A roots VALUE must be 64-hex or `fetchHiveIndex` rejects the WHOLE
+//     index as malformed (and the host repeats the rule). So the version can
+//     never be inlined; the key points at a content-addressed declaration.
+//
+// Same spelling as the pool meaning, deliberately: one word to remember, two
+// places it means the same thing. The colon carries word characters on both
+// sides, which is what makes the reservation hold — see the narrower
+// statement of that rule below.
+
+export const HIVE_FORMAT_ROOT_KEY = 'format:hive'
+
+/** The format declaration a hive index publishes, or null. Callers pass the
+ *  `roots` of an ALREADY-VERIFIED index — this helper adds no trust. */
+export function formatRootOf(roots: Record<string, string>): string | null {
+  const sig = String(roots[HIVE_FORMAT_ROOT_KEY] ?? '').trim().toLowerCase()
   return SIG_RE.test(sig) ? sig : null
 }
 

@@ -20,7 +20,7 @@
 // files are skipped, and conflicting files are reported but NEVER overwritten.
 // Root-level sig-named content is sha256-verified before import.
 
-import { EffectBus, SignatureService, poolMeanings } from '@hypercomb/core'
+import { EffectBus, SignatureService, classifyDirectoryEntry, poolMeanings } from '@hypercomb/core'
 import { extractLayerSigFromMarker } from '../history/history.service.js'
 // TYPE ONLY — erased at compile time, so this stays an IoC relationship at
 // runtime and no bundle edge is created between the two drones.
@@ -1297,16 +1297,27 @@ export class FolderSyncService {
     // layer references. Nothing else in the walk would ever pull it local, so
     // without this a hard copy silently omits it.
     const poolReferenced = new Set<string>()
-    const pools = await poolMeanings()
     let markers = 0
     let markersUnread = 0
 
+    // ADDITIVE, NEVER EITHER/OR. This used to `continue` on a registered pool
+    // address, so a directory that is BOTH a pool and a lineage bag — which is
+    // what a bare-word meaning IS — never had its markers walked, its layer
+    // roots never entered `roots`, and the pass then SEALED the copy as
+    // portable because `closure.missing === 0`: the missing roots were never
+    // counted. Loss by omission, discovered only on restore, and invisible to
+    // any grep for a destructive call.
+    //
+    // The registry was wrong in the other direction too: an UNREGISTERED
+    // molecule took the second branch and was treated purely as a bag, so its
+    // pool members were never collected. So: classify per ENTRY, do both for
+    // every sig-named directory, and keep the registry only as a log label.
     for await (const [name, handle] of (source as any).entries()) {
-      if (handle.kind === 'directory' && pools.has(name)) {
-        await this.#collectPoolReferences(handle as FileSystemDirectoryHandle, poolReferenced)
-        continue
-      }
       if (handle.kind !== 'directory' || !SIG_RE.test(name)) continue
+      // Both, for EVERY sig-named directory. An unregistered address may still
+      // be a pool (a molecule anyone mints by typing a word), and a registered
+      // one may still hold markers.
+      await this.#collectPoolReferences(handle as FileSystemDirectoryHandle, poolReferenced)
       for await (const [markerName, markerHandle] of (handle as any).entries()) {
         if (markerHandle.kind !== 'file' || !MARKER_RE.test(markerName)) continue
         markers++
@@ -1443,6 +1454,14 @@ export class FolderSyncService {
     out: Set<string>,
   ): Promise<void> => {
     for await (const entry of walkFiles(pool)) {
+      // A MARKER IS NOT A POOL RECORD. The walk above already reads every
+      // marker and puts the layer it names into `roots`, where it is fetched
+      // as a closure root. Reading it AGAIN here filed the same sig as a loose
+      // pool reference, and a broker with `adopt` but no `adoptResources` then
+      // counted it missing — so a complete hard copy reported itself
+      // `incomplete`. Classify by NAME, the one rule this tree shares.
+      const leaf = entry.path.slice(entry.path.lastIndexOf('/') + 1)
+      if (classifyDirectoryEntry(leaf) === 'marker') continue
       try {
         const text = (await (await entry.handle.getFile()).text()).trim()
         if (!text.startsWith('{') && !text.startsWith('[')) continue

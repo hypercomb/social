@@ -1,5 +1,5 @@
 // core/history.service.ts
-import { CHILD_SLOTS, EffectBus, SignatureService, SignatureStore, USAGE_IOC_KEY, hardDeleteVetoFor, healLegacyLayer, isMetaEnvelope, isPoolAddress, metaPayloadOf, packedStoreEnabled, poolAddresses, poolMeaningOf, type MetaEnvelope, type UsageRanker } from '@hypercomb/core'
+import { CHILD_SLOTS, EffectBus, MARKER_CEILING, SignatureService, SignatureStore, USAGE_IOC_KEY, classifyDirectoryEntry, hardDeleteVetoFor, healLegacyLayer, isMetaEnvelope, isPoolAddress, markerName as markerNameOf, metaPayloadOf, packedStoreEnabled, poolAddresses, poolMeaningOf, type MetaEnvelope, type UsageRanker } from '@hypercomb/core'
 import { lineageKey, rawLineageKey } from './lineage-key.js'
 import { canonicalizeLayer } from './canonical-layer.js'
 import { isBareLayer } from './child-sig-guard.js'
@@ -462,6 +462,8 @@ export class HistoryService {
    *  known meanings — see `#poolSigs`). */
   private readonly enumerateBags = async (): Promise<Map<string, FileSystemDirectoryHandle>> => {
     const pools = await this.#poolSigs()
+    /** Addresses that are ALSO pools of meaning. Diagnostics only. */
+    const poolLabelled = new Set<string>()
     const names = new Set<string>()
     const scan = async (root: FileSystemDirectoryHandle | undefined): Promise<void> => {
       if (!root) return
@@ -469,7 +471,18 @@ export class HistoryService {
         for await (const [name, handle] of (root as any).entries()) {
           if (handle.kind !== 'directory') continue
           if (!HistoryService.#SIG_RE.test(name)) continue
-          if (pools.has(name)) continue
+          // NO REGISTRY SKIP. Skipping every registered pool address hid a
+          // molecule sitting at a bare-word address from `sigsReferencedOutside`
+          // — so prune saw NO references from it and removed content bytes that
+          // were demonstrably live. And the skip was wrong in both directions:
+          // the registry cannot enumerate an UNREGISTERED molecule, which was
+          // then walked as an ordinary bag anyway.
+          //
+          // Markers are markers wherever they sit. Every reader here already
+          // classifies per ENTRY, so a pool that happens to hold none simply
+          // contributes nothing. `pools` survives only as a label for the log
+          // line below.
+          if (pools.has(name)) poolLabelled.add(name)   // label only, never a gate
           names.add(name)
         }
       } catch { /* root unreadable — skip */ }
@@ -757,7 +770,14 @@ export class HistoryService {
 
     const ops: HistoryOp[] = []
     for (const entry of entries) {
-      const index = parseInt(entry.name, 10)
+      // CLASSIFY BY NAME, THEN `Number` — never `parseInt` with an isNaN
+      // reject. `parseInt('4d0f8a11…', 10)` returns the PREFIX 4, so a
+      // digit-leading pool member was read as op index 4 and JSON.parsed as a
+      // HistoryOp; with `upTo` set, one that parsed HIGH fired the break below
+      // and truncated a bounded replay to zero ops. `Number` of the same name
+      // is NaN — the check parseInt's prefix semantics was defeating.
+      if (classifyDirectoryEntry(entry.name) !== 'marker') continue
+      const index = Number(entry.name)
       if (isNaN(index)) continue
       if (upTo !== undefined && index > upTo) break
 
@@ -785,8 +805,11 @@ export class HistoryService {
 
     for (const [signature, handle] of bags) {
       let count = 0
-      for await (const [, child] of (handle as any).entries()) {
-        if (child.kind === 'file') count++
+      for await (const [name, child] of (handle as any).entries()) {
+        // MARKERS ARE THE REVISIONS. Counting every file inflated the number
+        // every history surface shows by the pool members that share a
+        // bare-word address with this bag.
+        if (classifyDirectoryEntry(name, child.kind === 'directory') === 'marker') count++
       }
       result.push({ signature, count })
     }
@@ -810,6 +833,12 @@ export class HistoryService {
 
     for await (const [name, handle] of bag.entries()) {
       if (handle.kind !== 'file') continue
+      // A RAW STRING MAX DOES NOT MERELY TOLERATE MEMBERS, IT PREFERS THEM.
+      // Markers read `000000NN`, and essentially every 64-hex name sorts above
+      // them ('00abc' > '00000012'; '9abc' > '99999999'), so an unguarded max
+      // read the head of the lineage out of a pool member 100% of the time
+      // once one was present.
+      if (classifyDirectoryEntry(name) !== 'marker') continue
       if (name > maxName) {
         maxName = name
         maxHandle = handle as FileSystemFileHandle
@@ -822,7 +851,7 @@ export class HistoryService {
       const file = await maxHandle.getFile()
       const text = await file.text()
       const op = JSON.parse(text) as HistoryOp
-      return { index: parseInt(maxName, 10), op }
+      return { index: Number(maxName), op }
     } catch {
       return null
     }
@@ -999,8 +1028,11 @@ export class HistoryService {
       try {
         const seedList = this.#layerListCache.get(locationSig)
         const seedMarkerName = (seedList && seedList.length > 0)
-          ? String(seedList.reduce((max, e) => Math.max(max, parseInt(e.filename, 10) || 0), 0) + 1).padStart(8, '0')
-          : await this.#nextMarkerName(bag)
+          ? markerNameOf(seedList.reduce((max, e) => Math.max(max, Number(e.filename) || 0), 0) + 1)
+          : await this.#nextMarkerName(bag, locationSig)
+        // Null = past the 8-digit ceiling. Refuse rather than pad-and-hope:
+        // a nine-digit name is written but invisible to every reader.
+        if (!seedMarkerName) throw new Error('[history] seed marker is past the marker ceiling')
         const seedHandle = await bag.getFileHandle(seedMarkerName, { create: true })
         const seedRecord: MarkerRecord = { layer: seeded }
         const seedBytes = new TextEncoder().encode(JSON.stringify(seedRecord))
@@ -1046,8 +1078,9 @@ export class HistoryService {
     // which listLayers' next scan re-warms it.
     const knownList = this.#layerListCache.get(locationSig)
     const markerName = (knownList && knownList.length > 0)
-      ? String(knownList.reduce((max, e) => Math.max(max, parseInt(e.filename, 10) || 0), 0) + 1).padStart(8, '0')
-      : await this.#nextMarkerName(bag)
+      ? markerNameOf(knownList.reduce((max, e) => Math.max(max, Number(e.filename) || 0), 0) + 1)
+      : await this.#nextMarkerName(bag, locationSig)
+    if (!markerName) throw new Error(`[history] lineage ${locationSig.slice(0, 8)}… is at the marker ceiling; refusing to mint an out-of-range name`)
     const markerHandle = await bag.getFileHandle(markerName, { create: true })
     const markerRecord: MarkerRecord = { layer: layerSig }
     const markerBytes = new TextEncoder().encode(JSON.stringify(markerRecord))
@@ -1532,16 +1565,69 @@ export class HistoryService {
    */
   readonly #nextMarkerName = async (
     bag: FileSystemDirectoryHandle,
+    locationSig?: string,
   ): Promise<string> => {
     let max = 0
     for await (const [name, handle] of (bag as any).entries()) {
       if (handle.kind !== 'file') continue
       if (!HistoryService.#MARKER_RE.test(name)) continue
-      const n = parseInt(name, 10)
+      const n = Number(name)
       if (!isNaN(n) && n > max) max = n
     }
-    return String(max + 1).padStart(8, '0')
+    // ARCHIVING MUST NOT REWIND THE COUNTER. `archiveEntries` (/flatten,
+    // /collapse-history) moves markers out of the bag, so a LIVE-ONLY scan
+    // restarts the sequence at 00000001 — and union resolution ("the highest
+    // marker across sources wins") then resurrects the archived chain from
+    // any replica. The high-water bucket is forward-only: it holds the
+    // highest index this lineage has EVER minted, as a marker name, so the
+    // fix adds no deletion and nothing that can be rewound.
+    max = Math.max(max, await this.#archivedHighWater(locationSig))
+    // The ceiling is inexpressible, not merely guarded: padStart(8) is a
+    // no-op above 99999999, and #MARKER_RE rejects the nine-digit name it
+    // produces — permanently, with no repair path short of renaming on disk.
+    const next = markerNameOf(max + 1)
+    if (next === null) {
+      throw new Error(`[history] lineage is at the marker ceiling (${MARKER_CEILING}); refusing to mint an out-of-range name`)
+    }
+    return next
   }
+
+  /** The highest marker index this lineage ever minted, remembered outside
+   *  the bag so archiving cannot rewind the sequence. Read-only here; the
+   *  write is in `archiveEntries`. */
+  readonly #archivedHighWater = async (locationSig?: string): Promise<number> => {
+    if (!locationSig) return 0
+    const bucket = await this.#highWaterBucket(locationSig, false)
+    if (!bucket) return 0
+    let max = 0
+    try {
+      for await (const [name, handle] of (bucket as any).entries()) {
+        if (classifyDirectoryEntry(name, handle?.kind === 'directory') !== 'marker') continue
+        const n = Number(name)
+        if (!isNaN(n) && n > max) max = n
+      }
+    } catch { return 0 }
+    return max
+  }
+
+  /** `sign('history:high-water')/<locationSig>/` — a bucket holding exactly
+   *  the marker names this lineage has retired. Colon-scoped, so the pool
+   *  address can never collide with a tile name. */
+  readonly #highWaterBucket = async (
+    locationSig: string,
+    create: boolean,
+  ): Promise<FileSystemDirectoryHandle | null> => {
+    if (!HistoryService.#SIG_RE.test(locationSig)) return null
+    const store = get<{ getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null> }>('@hypercomb.social/Store')
+    if (!store?.getPool) return null
+    try {
+      const pool = await store.getPool(HistoryService.#HIGH_WATER_MEANING)
+      if (!pool) return null
+      return await pool.getDirectoryHandle(locationSig, { create })
+    } catch { return null }
+  }
+
+  static readonly #HIGH_WATER_MEANING = 'history:high-water'
 
   /**
    * Resolve `layerSig` → parsed layer content.
@@ -3798,20 +3884,26 @@ export class HistoryService {
   readonly #quarantineNonLayerFiles = async (
     locationSig: string,
   ): Promise<void> => {
-    if (await isPoolAddress(locationSig)) {
-      const meaning = await poolMeaningOf(locationSig)
-      console.warn(
-        `[history] refusing to purge ${locationSig.slice(0, 8)}… — it is the ` +
-        `sign('${meaning}') pool sharing an address with this location. ` +
-        `Purging would destroy the pool's members.`,
-      )
-      return
-    }
-
     let bag: FileSystemDirectoryHandle
     try {
       bag = await this.bagForRead(locationSig)
     } catch { return }
+
+    // THE STRUCTURE DECIDES, NOT THE REGISTRY. The old early return asked
+    // `isPoolAddress` — a DENYLIST, which by construction cannot see the
+    // dangerous case: a molecule any participant mints by typing a word. Ask
+    // the directory instead. Any member, any author bucket, any foreign name
+    // and this address is shared with something this pass did not come for.
+    // The registry lookup stays only to NAME the refusal.
+    const shared = await hardDeleteVetoFor(bag)
+    if (shared) {
+      const meaning = await poolMeaningOf(locationSig)
+      console.warn(
+        `[history] refusing to purge ${locationSig.slice(0, 8)}… — it ${shared}` +
+        `${meaning ? ` (it is also the sign('${meaning}') pool)` : ''}.`,
+      )
+      return
+    }
 
     const drop: string[] = []
     for await (const [name, handle] of (bag as any).entries()) {
@@ -3941,6 +4033,13 @@ export class HistoryService {
 
     let removed = 0
     for (const filename of filenames) {
+      // ARBITRARY CALLER-SUPPLIED NAMES, HARD-DELETED. The sole caller passes
+      // marker filenames, but nothing enforced it — and this bag's address may
+      // be a molecule's. A marker is the only thing this primitive owns.
+      if (classifyDirectoryEntry(filename) !== 'marker') {
+        console.warn(`[history] refusing to remove "${filename}" from ${locationSig.slice(0, 8)}… — it is not a marker`)
+        continue
+      }
       try {
         await bag.removeEntry(filename)
         removed++
@@ -3990,8 +4089,39 @@ export class HistoryService {
     const archive = await this.#temporaryPool()
     if (!archive) return 0
 
+    // FORWARD-ONLY HIGH WATER, WRITTEN BEFORE ANYTHING LEAVES. `#nextMarkerName`
+    // scans LIVE markers, so archiving 00000000..NN would restart the sequence
+    // at 00000001 — and union resolution ("the highest marker across sources
+    // wins") then resurrects the archived chain from any replica, which is why
+    // /flatten was not idempotent across devices. Remembering the ceiling
+    // costs one empty marker file and deletes nothing.
+    let peak = 0
+    for (const filename of filenames) {
+      if (classifyDirectoryEntry(filename) !== 'marker') continue
+      const n = Number(filename)
+      if (!isNaN(n) && n > peak) peak = n
+    }
+    if (peak > 0) {
+      try {
+        const bucket = await this.#highWaterBucket(locationSig, true)
+        const name = markerNameOf(peak)
+        if (bucket && name) await bucket.getFileHandle(name, { create: true })
+      } catch { /* best-effort — a missed high water only skips numbers */ }
+    }
+
     let archived = 0
     for (const filename of filenames) {
+      // THE SAME GUARD ITS TWIN `removeEntries` CARRIES, for the same reason.
+      // Arbitrary caller-supplied names, and the last step is a real
+      // `removeEntry`: at `sign('clipboard')` — a bare word, so that bag's
+      // address IS the clipboard pool's — an unguarded name would copy a pool
+      // MEMBER into the archive and then delete it from the pool. "Soft" is no
+      // defence: the pool is what the clipboard, the substrate reference set
+      // and the backgrounds collection each read to know what they hold.
+      if (classifyDirectoryEntry(filename) !== 'marker') {
+        console.warn(`[history] refusing to archive "${filename}" from ${locationSig.slice(0, 8)}… — it is not a marker`)
+        continue
+      }
       try {
         const srcHandle = await bag.getFileHandle(filename, { create: false })
         const file = await srcHandle.getFile()
@@ -4238,10 +4368,30 @@ export class HistoryService {
   public readonly sigsReferencedOutside = async (
     locationSig: string,
     candidates: readonly string[],
-  ): Promise<Set<string>> => {
+  ): Promise<Set<string>> => (await this.referencesOutside(locationSig, candidates)).found
+
+  /**
+   * The same walk, plus whether the answer may be ACTED ON destructively.
+   *
+   * `authoritative` is false when this client could not read everything it
+   * needed to — an unreadable bag, an unreadable marker. A caller that is
+   * about to delete bytes on the strength of "nobody references this" must
+   * refuse on a non-authoritative answer: not-seen is not the same as
+   * not-there, and the bytes are irreversible.
+   *
+   * NOTE THE LIMIT, STATED RATHER THAN IMPLIED: even an authoritative answer
+   * is LOCAL. Under federation the same pool is served by other hosts, and
+   * this walk cannot see their members. It is a floor on what is referenced,
+   * never a proof of what is not.
+   */
+  public readonly referencesOutside = async (
+    locationSig: string,
+    candidates: readonly string[],
+  ): Promise<{ found: Set<string>; authoritative: boolean }> => {
     const found = new Set<string>()
+    let unreadable = 0
     const remaining = new Set(candidates.filter(s => HistoryService.#SIG_RE.test(s)))
-    if (remaining.size === 0) return found
+    if (remaining.size === 0) return { found, authoritative: true }
 
     let sliceStart = performance.now()
     const yieldIfDue = async (): Promise<void> => {
@@ -4254,33 +4404,99 @@ export class HistoryService {
       found.add(sig)
     }
 
-    const bags = await this.enumerateBags()
+    // EVERY REFERENCE, NOT JUST THE MARKERS. The walk used to filter to
+    // `kind === 'file' && MARKER_RE`, which made two whole classes of live
+    // reference invisible while the answer still called itself authoritative:
+    //
+    //   * A POOL MEMBER. Its BYTES may name content (a background record
+    //     naming its picture, a comfy generation naming its image, a clipboard
+    //     entry naming a copied visual), and its NAME may BE the content
+    //     address — that is exactly what `SubstrateService.addReference`
+    //     writes: an EMPTY file named by the image's signature, whose own
+    //     comment says the image bytes "are never touched here". Nothing else
+    //     on disk named that sig, so pruning the tile the picture came from
+    //     deleted the collection's picture.
+    //   * AN AUTHOR BUCKET. `sign(name)/<pubkey>/<claim>` is one directory
+    //     level down, and `kind !== 'file'` skipped it whole — so every atom
+    //     only ANOTHER PARTICIPANT references read as unreferenced to us.
+    //
+    // The packed collector already had this right ("Pool members are not
+    // layers, but they may REFERENCE content ... their referents must
+    // survive"). This is the OPFS path, and it is the one that destroys bytes.
+    const scanText = (text: string): void => {
+      for (const match of text.matchAll(/[0-9a-f]{64}/gi)) hit(match[0].toLowerCase())
+    }
+
+    /** Read one FILE and credit every reference in it. A `marker` additionally
+     *  resolves the layer it points at and credits that layer's children. */
+    const readFile = async (
+      handle: FileSystemFileHandle,
+      kind: 'marker' | 'member',
+    ): Promise<void> => {
+      const file = await handle.getFile()
+      // A pool member is a record, never a payload; content atoms live at the
+      // flat root, not inside a bag. A file too large to be either is not
+      // something this walk can prove anything about, so it costs AUTHORITY
+      // rather than being silently skipped.
+      if (file.size > 4 * 1024 * 1024) { unreadable++; return }
+      const bytes = await file.arrayBuffer()
+      if (kind === 'member') {
+        scanText(new TextDecoder().decode(bytes))
+        return
+      }
+      const { layerSig } = await extractLayerSigFromMarker(bytes)
+      hit(layerSig)
+      // The revision's own children are references too — a sig this
+      // location deleted may still be a live child three branches over.
+      const layer = await this.getLayerBySig(layerSig).catch(() => null)
+      if (!layer) return
+      for (const slot of CHILD_SLOTS) {
+        const value = (layer as Record<string, unknown>)[slot]
+        if (!Array.isArray(value)) continue
+        for (const child of value) hit(String(child))
+      }
+    }
+
+    /** One sig-named directory, classified ENTRY BY ENTRY. `depth` bounds the
+     *  recursion at the level the molecule shape uses; a deeper nest costs
+     *  authority rather than being walked forever. */
+    const walk = async (dir: FileSystemDirectoryHandle, depth: number): Promise<void> => {
+      for await (const [name, handle] of (dir as any).entries()) {
+        if (remaining.size === 0) return
+        await yieldIfDue()
+        const entryKind = classifyDirectoryEntry(name, handle?.kind === 'directory')
+        try {
+          if (entryKind === 'marker' && handle.kind === 'file') {
+            await readFile(handle as FileSystemFileHandle, 'marker')
+          } else if (entryKind === 'member' && handle.kind === 'file') {
+            // The NAME first: under the molecule model a member IS an atom's
+            // address, and an EMPTY member file names content by nothing else.
+            hit(name.toLowerCase())
+            await readFile(handle as FileSystemFileHandle, 'member')
+          } else if (handle.kind === 'directory') {
+            if (depth <= 0) { unreadable++; continue }
+            await walk(handle as FileSystemDirectoryHandle, depth - 1)
+          }
+          // A `foreign` FILE is credited nothing and costs nothing: it is not
+          // a shape this hive writes, and a name that is neither a marker nor
+          // a signature cannot be a content address.
+        } catch {
+          // Cannot prove anything from it — and that is exactly why the
+          // answer stops being safe to delete on.
+          unreadable++
+        }
+      }
+    }
+
+    let bags: Map<string, FileSystemDirectoryHandle>
+    try { bags = await this.enumerateBags() } catch { return { found, authoritative: false } }
     for (const [lineageSig, dirHandle] of bags) {
       if (remaining.size === 0) break
       if (lineageSig === locationSig) continue
-      const bag = dirHandle as FileSystemDirectoryHandle
-      for await (const [name, handle] of (bag as any).entries()) {
-        if (remaining.size === 0) break
-        if (handle.kind !== 'file') continue
-        if (!HistoryService.#MARKER_RE.test(name)) continue
-        await yieldIfDue()
-        try {
-          const bytes = await (await (handle as FileSystemFileHandle).getFile()).arrayBuffer()
-          const { layerSig } = await extractLayerSigFromMarker(bytes)
-          hit(layerSig)
-          // The revision's own children are references too — a sig this
-          // location deleted may still be a live child three branches over.
-          const layer = await this.getLayerBySig(layerSig).catch(() => null)
-          if (!layer) continue
-          for (const slot of CHILD_SLOTS) {
-            const value = (layer as Record<string, unknown>)[slot]
-            if (!Array.isArray(value)) continue
-            for (const child of value) hit(String(child))
-          }
-        } catch { /* unreadable marker — cannot prove anything from it */ }
-      }
+      try { await walk(dirHandle as FileSystemDirectoryHandle, 2) }
+      catch { unreadable++ }
     }
-    return found
+    return { found, authoritative: unreadable === 0 }
   }
 
   /**
@@ -4545,6 +4761,14 @@ export class HistoryService {
     const out: Array<{ sig: string; at: number; filename: string }> = []
     for await (const [name, handle] of (bag as any).entries()) {
       if (handle.kind !== 'file') continue
+      // CLASSIFY THE NAME FIRST. This used to decide marker-ness from the
+      // file TEXT alone, so any pool member whose body is a bare signature
+      // (a pointer record, a head-claim atom, a websites:menu member) was
+      // admitted, its 64-hex FILENAME became the tie-break key, and because
+      // entries are ordered by lastModified a member written after the real
+      // markers landed LAST and won the fold. The content check stays as a
+      // second filter.
+      if (classifyDirectoryEntry(name) !== 'marker') continue
       try {
         const file = await (handle as FileSystemFileHandle).getFile()
         const text = (await file.text()).trim()
@@ -4582,15 +4806,34 @@ export class HistoryService {
     }
   }
 
+  /**
+   * Next marker name for a bag — the same rule as `#nextMarkerName`, which is
+   * the point.
+   *
+   * WHAT THIS USED TO DO. It parsed EVERY entry name with `parseInt(name, 10)`
+   * and rejected only NaN, with no kind filter and no shape filter, so member
+   * FILES and sig-named author-bucket DIRECTORIES both fed the max. A member
+   * named `99999999ab3f…` returned the PREFIX 99999999, and the next name was
+   * `String(100000000).padStart(8, '0')` — NINE digits. `padStart(8)` is a
+   * no-op there, `#MARKER_RE` rejects nine digits everywhere, so the marker
+   * was written and then invisible to every reader; the next call re-read
+   * 100000000, added one, and the bag was permanently unwritable in the
+   * marker sense with no repair path short of renaming on disk.
+   */
   readonly #nextBagMarker = async (
     bag: FileSystemDirectoryHandle,
   ): Promise<string> => {
     let max = 0
-    for await (const [name] of (bag as any).entries()) {
-      const n = parseInt(name, 10)
+    for await (const [name, handle] of (bag as any).entries()) {
+      if (classifyDirectoryEntry(name, handle?.kind === 'directory') !== 'marker') continue
+      const n = Number(name)
       if (!isNaN(n) && n > max) max = n
     }
-    return String(max + 1).padStart(8, '0')
+    const next = markerNameOf(max + 1)
+    if (next === null) {
+      throw new Error(`[history] bag is at the marker ceiling (${MARKER_CEILING}); refusing to mint an out-of-range name`)
+    }
+    return next
   }
 
   /**
@@ -4619,15 +4862,6 @@ export class HistoryService {
   // internal
   // -------------------------------------------------
 
-  private readonly nextIndex = async (bag: FileSystemDirectoryHandle): Promise<number> => {
-    let max = 0
-    for await (const [name, handle] of bag.entries()) {
-      if (handle.kind !== 'file') continue
-      const n = parseInt(name, 10)
-      if (!isNaN(n) && n > max) max = n
-    }
-    return max + 1
-  }
 }
 
 const _historyService = new HistoryService()

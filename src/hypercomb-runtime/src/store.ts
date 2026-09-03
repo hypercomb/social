@@ -6,10 +6,13 @@ import {
   EffectBus,
   PACKED_STORE_FLAG_KEY,
   SignatureService,
+  classifyDirectoryEntry,
+  documentSweepVetoFor,
   isMetaEnvelope,
   isSignature,
   metaPayloadOf,
   mintMetaEnvelope,
+  poolMeaningOf,
   registerPoolMeaning,
   resolveMetaArtifact,
   type ArtifactResolutionKind,
@@ -250,9 +253,34 @@ export class Store extends EventTarget {
       const handle = await target.getFileHandle(sig, { create: true })
       const writable = await handle.createWritable()
       try { await writable.write(bytes) } finally { await writable.close() }
-      // Drop prior document members only — FILES named by a sig. The
-      // `kind === 'file'` guard keeps a mixed pool safe: sign(subKey)
-      // sub-bucket dirs are also 64-hex, and must never be removed here.
+      // THE SWEEP RUNS ONLY ON POSITIVE PROOF THAT THIS IS THE CALLER'S OWN
+      // DOCUMENT SPACE. `kind === 'file'` is NOT a shape guard: a molecule's
+      // succession atoms and gathered members are exactly 64-hex FILES, so
+      // the old sweep erased another participant's set on every write to a
+      // bare-word address.
+      //
+      // Two forms are proof, because a tile name can produce neither:
+      //   1. a `subKey` — the target is a sign(subKey) sub-bucket THIS code
+      //      minted; a molecule address only ever exists at the ROOT.
+      //   2. a colon-carrying meaning — `lineageKey` folds every
+      //      non-letter/digit to `-`, so no tile name reaches a colon.
+      // A bare word, or a meaning the registry has never derived, is NOT
+      // proof and the sweep does not run. The registry is consulted only to
+      // GRANT permission, never to deny it: it fails closed on the unknown.
+      const meaning = subKey ? undefined : await poolMeaningOf(pool.name)
+      const proven = !!subKey || /[\p{L}\p{N}]:[\p{L}\p{N}]/u.test(meaning ?? '')
+      // And the STRUCTURE must independently agree: any marker, any author
+      // bucket, any foreign name and the whole sweep is refused.
+      const veto = proven
+        ? await documentSweepVetoFor(target)
+        : `the pool address ${pool.name.slice(0, 8)}… is a bare word or unregistered meaning`
+      if (veto) {
+        // Not fatal: the new document is already on disk, and `getPoolDoc`
+        // returns the first non-empty member. A refused sweep costs a stale
+        // read; proceeding would cost another participant's molecule.
+        console.warn(`[pool] not sweeping ${target.name.slice(0, 8)}… — ${veto}`)
+        return sig
+      }
       for await (const [name, h] of (target as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
         if (h.kind === 'file' && name !== sig && isSignature(name)) {
           try { await target.removeEntry(name) } catch { /* raced; harmless */ }
@@ -1318,6 +1346,14 @@ export class Store extends EventTarget {
 
   public removeOptimization = async (signature: string): Promise<boolean> => {
     if (!this.optimization) return false
+    // sign('optimization') is a BARE WORD, so this pool's address is also the
+    // address of a tile named `optimization`. A single named removal stays
+    // legal (directory-safety.ts), but only for a MEMBER: never a marker of
+    // somebody's lineage, never an author bucket, never a foreign name.
+    if (classifyDirectoryEntry(signature) !== 'member') {
+      console.warn(`[store] refusing to remove "${signature}" from the optimization pool — it is not a member name`)
+      return false
+    }
     let removed = false
     try { await this.optimization.removeEntry(signature); removed = true } catch { /* not in pool */ }
     if (this.#legacyOptimization) {
@@ -1329,9 +1365,15 @@ export class Store extends EventTarget {
   public listOptimizations = async (): Promise<string[]> => {
     if (!this.optimization) return []
     const sigs = new Set<string>()
+    // Offer MEMBER names only. Callers of this list go on to DELETE what they
+    // do not recognise, so a marker or a sig-named author bucket must never
+    // reach them — fixing it at the source means the next caller cannot
+    // forget. (Consumers see strictly fewer names than before: only member
+    // FILES, which is all the optimize phase and the agent registry ever
+    // wrote here.)
     const collect = async (pool: FileSystemDirectoryHandle): Promise<void> => {
-      for await (const [name] of (pool as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
-        if (/^[0-9a-f]{64}$/.test(name)) sigs.add(name)
+      for await (const [name, handle] of (pool as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+        if (classifyDirectoryEntry(name, handle?.kind === 'directory') === 'member') sigs.add(name)
       }
     }
     await collect(this.optimization)

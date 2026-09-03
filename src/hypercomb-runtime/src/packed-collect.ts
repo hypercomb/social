@@ -46,6 +46,7 @@
 // because the web shell reinstalls on every boot, which makes the window far
 // easier to hit here than it is natively.
 
+import { isSigName } from './packed-store-engine'
 import type { PackedStoreEngine } from './packed-store-engine'
 
 /** What a collection reclaimed. Mirrors the Rust `Collected`. */
@@ -128,6 +129,20 @@ export const collect = async (
   // entry naming a copied image, for one. Their referents must survive.
   for (const pool of engine.pools()) {
     for (const member of engine.poolMembers(pool)) {
+      // The member's NAME is itself a content signature — under the molecule
+      // model a member IS an atom's address. Reading only its BYTES left the
+      // atom unreferenced, so the sweep below deleted `<root>/<sig>` while
+      // the pool still named it.
+      //
+      // AT ANY DEPTH. Pools nest one level and the packed store keys a
+      // sub-bucket member as `<bucket>/<leaf>` (packed-store.worker.ts drains
+      // it that way; native-filesystem.ts documents the same shape), so
+      // testing the whole key missed every `putPoolDoc(pool, bytes, subKey)`
+      // writer — and missed exactly the shape the molecule model puts another
+      // participant's data in, `sign(name)/<pubkey>/<claim>`. The LAST segment
+      // is the member's own name.
+      const leaf = member.slice(member.lastIndexOf('/') + 1)
+      if (isSigName(leaf)) reachable.add(leaf.toLowerCase())
       const bytes = engine.getPool(pool, member)
       if (bytes) collectSignaturesIn(bytes, reachable)
     }

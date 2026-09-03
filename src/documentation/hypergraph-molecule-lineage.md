@@ -809,6 +809,148 @@ and do not conflate it with `skeptic-4 F` (a derived-cache wipe of
 `sign('manifests')` destroying the molecule at the same address), which is also
 live and also out of scope.
 
+## Prune safety by positive proof, and the format marker (step 1 + step 6, landed 2026-09-03)
+
+Two things landed together because they answer the same question from
+opposite ends: *what may this client destroy, and what may it not see?*
+
+### Prune safety — the entry decides, never the directory
+
+`hypercomb-core/src/core/directory-safety.ts` grew three primitives beside
+the landed `classifyDirectoryEntry` / `hardDeleteVeto` / `hardDeleteVetoFor`:
+
+| primitive | question it answers |
+|---|---|
+| `markerName(index)` | may this index BE a marker name at all? |
+| `documentSweepVeto(entries)` | is this directory a one-current-document space, and nothing else? |
+| `planNamedRemoval(entries, own)` | of the names I minted, which may I remove? |
+
+**`markerName` makes the ceiling inexpressible rather than merely guarded.**
+`String(100000000).padStart(8, '0')` is a no-op — nine digits, which every
+reader's `/^\d{8}$/` then rejects forever, so the marker is written and
+immediately invisible and the next mint re-reads it and stays out of range.
+There is no repair path short of renaming on disk. Every minting site now
+goes through `markerName` and refuses on `null`.
+
+**A "current document" pool must declare itself IN SOURCE, and the
+declaration must be a fact the code can PROVE about the address** — never a
+boolean the caller asserts about a directory it does not own. Exactly two
+forms are proof, because a tile name can produce neither:
+
+1. a `subKey` — the target is `sign(subKey)` ONE LEVEL DOWN, space this
+   caller minted; a molecule address only ever exists at the ROOT;
+2. a colon-carrying meaning with word characters on both sides — `lineageKey`
+   folds every non-letter/digit to `-`.
+
+A bare word, or a meaning the registry has never derived, is **not** proof
+and the sweep does not run. This inverts the registry from a denylist (which
+provably cannot enumerate `sign('people')`) into an allowlist that fails
+closed on the unknown.
+
+**And the structure must independently agree.** `documentSweepVetoFor` still
+runs, and refuses on ANY marker, ANY author bucket, ANY foreign name. Two
+conditions, and neither alone may destroy anything.
+
+**No record on disk is ever the authority for a delete.** A manifest inside a
+pool is written by a viewer, a replica, or another author, and a half-synced
+device holding members whose manifest has not arrived is the NORMAL state of
+replication — a widening manifest would delete exactly what it just
+replicated. So a manifest may only ever NARROW a removal set, every name it
+hands over is still classified individually, and the plan is refused WHOLE if
+any of them is a marker or a bucket.
+
+**Deleting is never required for correctness.** `getPoolDoc` returns the first
+non-empty member, so a refused sweep costs a stale read; proceeding costs
+another participant's molecule, irreversibly. Every refusal carries its reason
+to the console — a silent `false` is how the original `/flatten` incident
+stayed invisible.
+
+Two live bare-word document writers moved address, each with a READ-ONLY
+legacy fallback and nothing deleted at the old address: `overrides` gained a
+`sign('i18n')` sub-bucket, and canonical-reference stopped deriving a pool
+address from a raw TILE NAME (`canonical:variants`, keyed by `sign(name)`).
+
+The `parseInt` family is closed. The root cause was never the missing regex:
+`parseInt('99999999ab3f…', 10)` returns the PREFIX, which is precisely the
+input an `isNaN` reject cannot catch, where `Number` of the same name is NaN.
+The sanctioned spelling is `classifyDirectoryEntry(name) === 'marker'` then
+`Number(name)`, and a doctrine ratchet with an EMPTY allowlist now holds it.
+
+A second ratchet holds prune safety as a DEPENDENCY rather than a pattern — a
+recursive `removeEntry` must sit in a file that consults `directory-safety` —
+because a dependency is satisfiable by fixing code, whereas a pattern firing
+on sites that are safe by other means can only be satisfied by growing an
+allowlist. It scans two surfaces the `.ts`-only `SCAN_DIRS` never reached:
+`scripts/` and `hypercomb-relay/`, which between them hold ~35 verbatim
+copies of a full OPFS-root wipe.
+
+### The format marker — turning silent divergence into a sentence
+
+There is **no dual-pointer migration**. New writes will go to new addresses;
+old data stays readable where it lies. The consequence is that an older client
+stops seeing new content, silently. The marker is what makes that legible.
+
+Two constraints shape it:
+
+1. **It ships BEFORE the change it protects against.** A client that predates
+   the check cannot report anything, so it lands now, while the format is
+   still the old one and `SUPPORTED_FORMAT_VERSION` is still `1`. That
+   constant moves in the same change that first writes the new addresses —
+   never earlier, or every hive reports `ahead-of-hive` and the participant
+   learns to ignore it before it has said anything true.
+2. **It is readable by a client that does not understand the new format.**
+   Plain JSON, in the OLD format, in places old clients already read:
+   * `sign('format:hive')` — a colon-scoped root pool holding ONE member;
+   * a reserved `format:hive` key in the kind-30564 hive index, so a VISITOR
+     sees it before adopting.
+
+The index key is a **roots key**, not a top-level content field: `putHiveManifest`
+re-serializes `{ v, roots }` and drops everything else, so a top-level field
+would be erased by the very next publish from any client — the exact silent
+divergence the marker exists to prevent. And a roots VALUE must be 64-hex or
+the whole index is rejected as malformed, so the key points at a
+content-addressed declaration rather than carrying a number.
+
+`core/format-version.ts` is the comparison: zero dependencies, no semver, no
+clock, two integers and `<`. Four verdicts, of which exactly one speaks:
+
+| verdict | when | announces |
+|---|---|---|
+| `undeclared` | no record, or unparseable — every hive that exists today | no |
+| `readable` | `minReader <= supports` | no |
+| `ahead-of-hive` | this client is newer than the hive | no |
+| `unreadable` | `minReader > supports` | **yes** |
+
+The one sentence names both numbers, names the date the format moved, and
+states the consequence as MISSING CONTENT — never as damage, and it offers no
+fix, because the remedy is a newer client or the other device.
+
+**It fails OPEN, and that asymmetry is deliberate.** `hardDeleteVetoFor` fails
+CLOSED because its power is to DESTROY. This marker's only power is to WARN,
+so an absent, unreadable or incoherent declaration means *say nothing*.
+Hardening it into a gate would build a lockout any corrupt byte could trigger.
+An incoherent `minReader > format` is clamped rather than rejected, so a typo
+in a foreign hive's record cannot lock a client out of a hive it can
+demonstrably read; unknown extra fields are ignored, because an older reader
+surviving a newer record is the entire contract.
+
+Monotonicity lives in `advanceFormat`, a pure function that returns `null` for
+a downgrade or a no-op — the underlying pool write is unconditional
+last-write-wins, so making a downgrade *uncomposable* is what stops an older
+device silently turning the warning off on every client.
+
+The surface is the EXISTING sticky toast (`toast:show`, `duration: 0`, no
+action buttons — nothing this client can do about it from inside the app). No
+new component, no barrel line, no `app.html` tag, and no `side-effects.ts`
+edit: `hive-format.ts` is reached transitively through
+`update-scout.service.ts`, which `side-effects.ts` already imports.
+
+**The marker's own storage shape is frozen forever.** One sig-named member in
+a colon-scoped root pool, plain JSON. Anything new goes in ADDITIONAL fields
+of the same record. If a later format change ever relocated or re-shaped the
+declaration itself, it would become unreadable by exactly the clients it
+exists to warn.
+
 ## Artifacts of the decision
 
 - Prototype (node:test, zero deps, purist design by mandate): session

@@ -757,7 +757,49 @@ export const deleteConversation = async (convoId: string): Promise<boolean> => {
 
   try {
     const name = await sha256(new TextEncoder().encode(id).buffer as ArrayBuffer)
-    await pool.removeEntry(name, { recursive: true })
+    // A 64-hex SUBDIRECTORY of a pool is an author bucket as readily as a
+    // conversation. THREADS_POOL is still the bare word `threads` (its
+    // siblings chat:drafts / chat:streams are already colon-scoped), so the
+    // directory must PROVE which it is before anything is removed. Do NOT
+    // re-spell THREADS_POOL to fix this — sign() of a new spelling strands
+    // every existing thread.
+    //
+    // `hardDeleteVetoFor` is the WRONG proof here and refusing on it broke
+    // deletion outright: a conversation's turns are content-hashed files, so
+    // they classify as pool MEMBERS and the veto refuses every real bucket.
+    // The right proof is the one the thread already carries — "a bucket is
+    // named sha256(convoId) … but every turn inside it carries its own
+    // convoId, so the thread describes itself" (see ConversationSummary).
+    // So: read the bucket, require EVERY entry to be this conversation's own,
+    // and delete only then. An author bucket cannot pass — its claims are not
+    // chat turns and do not name this convoId — and neither can a directory
+    // holding anything unaccounted for.
+    const bucket = await pool.getDirectoryHandle(name, { create: false })
+    const own: string[] = []
+    for await (const [entryName, handle] of (bucket as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+      if (handle.kind !== 'file') {
+        console.warn(`[chat] not deleting conversation ${name.slice(0, 8)}… — it holds a subdirectory (${entryName})`)
+        return false
+      }
+      try {
+        const parsed = JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as { kind?: string; convoId?: string }
+        const isOurs = (parsed?.kind === ARCHIVE_MARKER || parsed?.kind === GOAL_MARKER || parsed?.kind === 'chat-turn')
+          && (parsed?.convoId === undefined || parsed.convoId === id)
+        if (!isOurs) {
+          console.warn(`[chat] not deleting conversation ${name.slice(0, 8)}… — ${entryName.slice(0, 8)}… is not this conversation's`)
+          return false
+        }
+      } catch {
+        // Unreadable is UNPROVEN, and unproven is not ours to delete.
+        console.warn(`[chat] not deleting conversation ${name.slice(0, 8)}… — ${entryName.slice(0, 8)}… could not be read`)
+        return false
+      }
+      own.push(entryName)
+    }
+    // Remove only the entries we just proved, then the emptied bucket — never
+    // a recursive sweep over bytes we did not account for.
+    for (const entryName of own) await bucket.removeEntry(entryName)
+    await pool.removeEntry(name)
     return true
   } catch { return false }
 }

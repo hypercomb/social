@@ -11,6 +11,7 @@ import {
   EffectBus,
   buildCanonicalReferenceRecord,
   buildCanonicalVariantRecord,
+  SignatureService,
   canonicalReferenceName,
   canonicalRootSegments,
   type CanonicalReferenceService,
@@ -24,6 +25,9 @@ import {
   type PlacementHistory,
   type PlacementLayer,
 } from '../history/layer-placement.js'
+
+/** Colon-scoped: a tile name can never produce it. */
+const CANONICAL_VARIANTS_MEANING = 'canonical:variants'
 
 type StoreLike = {
   putResource(blob: Blob, options?: { emit?: boolean }): Promise<string>
@@ -67,9 +71,25 @@ export class CanonicalReferenceServiceImpl implements CanonicalReferenceService 
       new Blob([bytes], { type: 'application/json' }),
       { emit: false },
     )
-    const pool = await store.getPool(name)
+    // NOT `getPool(name)`. Deriving a pool address from a RAW TILE NAME put
+    // foreign 64-hex records at the TOP LEVEL of what the molecule model says
+    // is that tile's own molecule — the write half of the bare-word collision,
+    // and the reason `putPoolDoc`'s sibling sweep was live rather than
+    // theoretical. `canonical:variants` carries a colon, which no tile name
+    // can produce, and the name becomes a sub-bucket inside it.
+    //
+    // Nothing is removed at the old address; a reader that still holds records
+    // there keeps them. Data never heals — the address moves forward.
+    const pool = await store.getPool(CANONICAL_VARIANTS_MEANING)
     if (!pool) return
-    const handle = await pool.getFileHandle(recordSig, { create: true })
+    // sign(name) as the SUB-BUCKET, derived not registered: the tile name is
+    // not a pool meaning and must never enter the registry, or `isPoolAddress`
+    // would start answering true for an ordinary tile's own lineage bag.
+    const nameKey = await SignatureService.sign(new TextEncoder().encode(name).buffer as ArrayBuffer)
+    const bucket = await pool.getDirectoryHandle(nameKey, { create: true })
+      .catch(() => null)
+    if (!bucket) return
+    const handle = await bucket.getFileHandle(recordSig, { create: true })
     const writable = await handle.createWritable()
     try { await writable.write(bytes) } finally { await writable.close() }
   }

@@ -195,6 +195,47 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // (optimize-phase.md litmus). It is also what makes the index safe to
   // rewrite — see the wipe guard in publish-branch.ts.
   'publish:heads',
+  // The community's HOSTS — one member per host artifact, the living
+  // primitive behind `host:<zone>` marks (essentials/sharing/community-hosts.ts,
+  // and read back by ADDRESS alone from runtime/host-zones.ts so the runtime
+  // never imports essentials). This pool is why a reader can find bytes at
+  // all: replication has no fixed origin, so the set of machines willing to
+  // serve is itself content. TRUTH POOL — "I know this host" is an act.
+  'community:hosts',
+  // WHAT FORMAT THIS HIVE IS WRITTEN IN — one declaration naming the format
+  // its newest writes use, the lowest reader version that sees all of it, and
+  // when that last moved (see essentials/sharing/hive-format.ts and the pure
+  // comparison in core/format-version.ts). A true one-current-document pool:
+  // one member, replaced forward, never a set.
+  //
+  // ITS SPELLING AND ITS SHAPE ARE FROZEN FOREVER. This is the one artefact
+  // whose entire job is being readable by clients that will never be updated
+  // again — so it lives at a colon-scoped root address, holds plain JSON in
+  // the OLD format, and must never be relocated or re-shaped by a later
+  // format change. If it moved, it would become unreadable by exactly the
+  // clients it exists to warn.
+  'format:hive',
+  // CANONICAL VARIANTS of a reference, keyed by sign(name) sub-bucket
+  // (essentials/commands/canonical-reference.service.ts). Colon-scoped as of
+  // the prune-safety pass: it previously derived its address from a RAW TILE
+  // NAME, which put foreign 64-hex records inside what the molecule model
+  // says is that tile's own molecule. The old address stays a READ-ONLY
+  // fallback; nothing is deleted there. Data never heals.
+  'canonical:variants',
+  // THE FORWARD-ONLY MARKER CEILING per lineage — one bucket named by the
+  // location sig, holding the highest marker name that lineage has ever
+  // retired (essentials/history/history.service.ts). It exists because
+  // archiving markers out of a bag would otherwise REWIND the sequence, and
+  // union resolution across replicas would then resurrect the archived chain.
+  // Holds markers, never members; nothing is ever deleted from it.
+  'history:high-water',
+  // What a HOST is offering — the package pointers a shim publishes for
+  // clients to replicate from (runtime/host-pool.ts, consumed by
+  // web/setup/ensure-install.ts). The address is DERIVED by every client for
+  // itself rather than named in a manifest, which is exactly why it must be
+  // seeded: `ensure-install` reaches it on the BOOT path, and any root walk
+  // that ran first would have met the directory with the registry still cold.
+  'host:packages',
   // The changes repository — one append-only record per act that touched a
   // group of tiles (see assistant/changes.ts). Colon-scoped so it can never
   // collide with a tile slugged 'changes'.
@@ -207,6 +248,14 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // a root walker meeting the directory in a session that has not yet
   // addressed the pool would otherwise take it for a lineage bag.
   'chat:drafts',
+  // A tile's conversation, and the one-line gloss of it that the rail shows
+  // (assistant/chat-thread.ts, assistant/chat-blurb.ts). The blurb is
+  // DERIVED from the thread, the streams are the in-flight halves of turns
+  // that have not landed yet; both sit beside `chat:drafts` and `threads`
+  // and all four are addressed on the same paths, so seeding three of them
+  // and not these two left exactly the gap this registry exists to close.
+  'chat:blurbs',
+  'chat:streams',
   // The context basket — signatures gathered while browsing, handed to an ask
   // as its closure root list (see assistant/context-basket.ts). Colon-scoped
   // so neither can collide with a tile slugged 'context' or 'changes'.
@@ -224,6 +273,58 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // cold client could never rebuild it (optimize-phase.md litmus). Colon-
   // scoped so it can never collide with a tile slugged 'feedback'.
   'feedback:summaries',
+  // WHAT THE PARTICIPANT PUT AWAY — the concealment records behind "hide
+  // first, delete second" (essentials/concealment/concealment.ts). A pool
+  // and not the optimize phase's business by the litmus in optimize-phase.md:
+  // hiding is a hand, not a derivation. Losing it does not lose the tiles,
+  // it UNHIDES them all at once, which is the loudest possible failure.
+  'hidden:items',
+  // The provider specs this hive knows how to talk to
+  // (assistant/providers/provider-discovery.ts), probed for on every domain
+  // the participant learns (sharing/published-pools.ts). Specs only — a
+  // credential never enters a content-addressed write (doctrine.spec.ts
+  // keeps them in LlmKeyStore), so this pool is safe to replicate.
+  'llm:providers',
+  // Which roots a phone opens into (preferences/mobile-pheromones.ts). It
+  // travels with the participant rather than the browser for the same reason
+  // `habits:spoken` does: a choice that did not follow you to your other
+  // machine was not your choice.
+  'mobile:roots',
+  // The note-mark PALETTE — one content-addressed document holding the icons
+  // a note may wear (shared/core/note-marks.store.ts). Its first write is the
+  // seed, which lands while `getPool()` is still in flight; a root walk in
+  // that window is precisely the race the seeding here removes.
+  'notes:marks',
+  // Prune receipts — what a prune took, written before the pass is stamped
+  // (history/prune.service.ts). TRUTH POOL: the record of a DELETION is the
+  // one thing that cannot be re-derived afterwards, so a walker mistaking
+  // this directory for a bag would erase the evidence of the erasure.
+  'receipts:prune',
+  // DERIVED CACHES — recomputable, wipe-safe, GC-able, and minted in the
+  // optimize phase (optimize-phase.md). They are seeded for the same reason
+  // the truth pools are: "safe to wipe DELIBERATELY, by the code that owns
+  // it" is not "safe for a bag-pruner to hard-delete on a name collision",
+  // and a cache silently emptied by a root walk reads as a performance
+  // mystery rather than as damage.
+  //   computed:genome    — the active genome, keyed by the head it derives
+  //                        from (history/active-genome.service.ts)
+  //   insights:catalog   — the tree-insight catalog, one document
+  //                        (presentation/tiles/tree-insight.ts)
+  //   search:index       — sig-keyed search records, so a search is a read
+  //                        and never a walk (search/hive-search.ts)
+  //   thumbnails:hex     — hex thumbnails keyed by SOURCE IMAGE SIGNATURE
+  //                        (presentation/tiles/thumbnails.ts)
+  'computed:genome',
+  'insights:catalog',
+  'search:index',
+  'thumbnails:hex',
+  // RESERVED AHEAD OF ITS BUILD, like `pheromones:deposits` above: the hive
+  // entry point from documentation/known-location-pools.md, name → sealed
+  // head, proved buildable today by history/hives-names-shape.spec.ts. The
+  // spelling is the expensive half — `sign('hives')` would BE the bag of a
+  // root tile called `hives`, which is the collision this whole file exists
+  // to prevent — so the colon-scoped spelling is claimed now, not later.
+  'hives:names',
   'substrate:references',
   'substrate:sources',
   'tutorial:artifacts',

@@ -71,6 +71,7 @@ type HistoryService = {
   getLayerBySig?(layerSig: string): Promise<Content | null>
   promoteToHead?(locationSig: string, layerSig: string): Promise<string | null>
   removeEntries?(locationSig: string, filenames: string[]): Promise<number>
+  archiveEntries?(locationSig: string, filenames: string[]): Promise<number>
   mergeEntries?(locationSig: string, filenames: string[]): Promise<string | null>
   /** Compute the projected merged layer for preview without writing. */
   projectMerge?(locationSig: string, filenames: string[]): Promise<Content | null>
@@ -790,20 +791,28 @@ export class HistoryViewerComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Per-row delete — soft-delete a single entry via HistoryService's
-   * removeEntries (it parks the marker in the history soft-delete area,
-   * restorable for 30 days). If the cursor was pointing at the removed
-   * entry, we nudge it to the nearest neighbour so the canvas doesn't
-   * freeze on a dead position.
+   * Per-row delete — copy-forward into the history soft-delete area.
+   *
+   * THIS COMMENT USED TO BE A LIE, AND THE LIE WAS THE DEFECT. It promised
+   * `removeEntries` "parks the marker in the history soft-delete area,
+   * restorable for 30 days"; `removeEntries` is a hard `bag.removeEntry`. The
+   * participant was told a per-row delete was reversible for a month, and it
+   * was gone immediately and permanently. `archiveEntries` is the primitive
+   * that actually keeps the bytes — it copies each marker into the
+   * sign('temporary') pool before unlinking it — so the row now uses that and
+   * the promise is true.
+   *
+   * If the cursor was pointing at the removed entry, we nudge it to the
+   * nearest neighbour so the canvas doesn't freeze on a dead position.
    */
   readonly deleteRow = async (index: number, event: Event): Promise<void> => {
     event.stopPropagation()
     const history = this.#history()
     const cursor = this.#cursor()
-    if (!history?.removeEntries || !cursor) return
+    if (!history?.archiveEntries || !cursor) return
     const entry = this.#entries()[index]
     if (!entry) return
-    await history.removeEntries(cursor.state.locationSig, [entry.filename])
+    await history.archiveEntries(cursor.state.locationSig, [entry.filename])
     await this.#refreshCursor(cursor)
     await this.#reload()
     const nextTotal = this.#total()

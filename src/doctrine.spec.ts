@@ -17,7 +17,7 @@ import { readdirSync, readFileSync, existsSync } from 'fs'
 import { join, relative } from 'path'
 import { spawnSync } from 'child_process'
 import { createRequire } from 'module'
-import { BARE_WORD_POOL_MEANINGS } from '@hypercomb/core'
+import { BARE_WORD_POOL_MEANINGS, SCOPED_POOL_MEANINGS } from '@hypercomb/core'
 
 const ROOT = __dirname
 const REPO_ROOT = join(ROOT, '..')
@@ -74,6 +74,13 @@ const stripComments = (src: string): string =>
   src
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/(^|[^:'"`])\/\/.*$/gm, '$1')
+
+/** ONE line, minus any trailing `//` comment — for the line-oriented scans.
+ *  `[^:'"\`]` keeps `https://` and a colon-scoped meaning intact. Deliberately
+ *  not `stripComments`: a whole-file `/*…*\/` sweep can span a real block when
+ *  some string happens to hold the opening token, and a scan that silently
+ *  loses a region is worse than one that reads a comment. */
+const lineCode = (line: string): string => line.replace(/(^|[^:'"`])\/\/.*$/, '$1')
 
 type Hit = { file: string }
 
@@ -622,6 +629,124 @@ describe('doctrine ratchets', () => {
     ).toEqual([])
   })
 
+  // ── THE SEED CENSUS MUST BE COMPLETE, NOT MERELY CORRECT ────────────
+  //
+  // The pool registry is IN MEMORY ONLY — two Maps rebuilt from
+  // `SEED_MEANINGS` on every page load, plus whatever `registerPoolMeaning`
+  // happens to derive during that session. Nothing about it persists. So an
+  // unseeded meaning is not "registered a little later": it is INVISIBLE to
+  // `isPoolAddress` for the whole window between boot and the first time
+  // some code path addresses that particular pool — and a `/flatten`, a GC
+  // pass or a consolidation sweep inside that window sees a sig-named
+  // directory it cannot identify and treats it as a lineage sigbag. Pruning
+  // a bag hard-deletes its sig-named members, which for a pool is its whole
+  // contents. That is the incident this registry exists to prevent, and
+  // self-extension alone does not prevent it — self-extension is what makes
+  // the registry survive a module it has never heard of, whereas the SEED is
+  // what makes it correct on the very first call.
+  //
+  // `community:hosts` and `host:packages` were both missing from the seed:
+  // one names every machine willing to serve bytes, the other is reached by
+  // `ensure-install` on the BOOT path. Neither had ever been registered at
+  // the moment a boot-time root walk would meet it.
+  //
+  // These two ratchets close the loop. The first fixes the SPELLING of the
+  // constants so the census below can see them all; the second is the census.
+  // Fix an unseeded meaning by adding it to `SCOPED_POOL_MEANINGS` (with a
+  // colon — the bare-word list may only shrink), never by narrowing a walker
+  // or weakening a prune guard.
+  it('every constant handed to a pool call is named *MEANING* or *POOL*', () => {
+    // What makes the census check COMPLETE rather than best-effort. The
+    // census cannot follow an identifier across files, so it reads
+    // declarations by NAME; this ratchet is the other half of that bargain —
+    // if a meaning reaches `getPool` through a constant, the constant's name
+    // says so, and the census sees it. Lowercase arguments are exempt: a
+    // `getPool(meaning)` pass-through spells nothing, and the caller that
+    // does spell it is covered by the census.
+    const ARG = /(?:registerPoolMeaning|poolSignature|getPool)\s*\??\.?\s*\(\s*([^,)]*)/g
+    const offenders: string[] = []
+    for (const dir of SCAN_DIRS) {
+      let files: string[]
+      try { files = walk(join(ROOT, dir)) } catch { continue }
+      for (const file of files) {
+        const raw = readFileSync(file, 'utf8')
+        if (/^\/\/\s*auto-generated/.test(raw)) continue
+        for (const line of raw.split(/\r?\n/)) {
+          for (const m of lineCode(line).matchAll(ARG)) {
+            // Strip `Store.` / `#` so a static or private field is judged by
+            // its own name.
+            const token = m[1].trim().replace(/^.*[.#]/, '')
+            if (!/^[A-Z][A-Z0-9_]*$/.test(token)) continue   // literal, dynamic, or a declaration
+            if (/MEANING|POOL/.test(token)) continue
+            offenders.push(`${token}  (${relative(ROOT, file).replace(/\\/g, '/')})`)
+          }
+        }
+      }
+    }
+    expect(
+      [...new Set(offenders)].sort(),
+      '\nA POOL MEANING CONSTANT MUST SAY SO IN ITS NAME — rename it to carry\n' +
+      'MEANING or POOL, so the seed-census ratchet below can see its value.\n',
+    ).toEqual([])
+  })
+
+  it('the seed census covers every pool meaning the tree derives', () => {
+    // Same guard as the bare-word ratchet: if the import resolved to a stale
+    // `dist` without these exports, `new Set(undefined)` is empty and every
+    // meaning in the tree reports as unseeded.
+    expect(
+      Array.isArray(SCOPED_POOL_MEANINGS) && SCOPED_POOL_MEANINGS.length > 0,
+      'SCOPED_POOL_MEANINGS did not load from @hypercomb/core — run vitest from `src/`.',
+    ).toBe(true)
+    const seeded = new Set([...BARE_WORD_POOL_MEANINGS, ...SCOPED_POOL_MEANINGS])
+
+    // Two spellings, both line-oriented. A meaning and its quotes are always
+    // on one line here, and matching per line keeps a type annotation
+    // elsewhere in the file from swallowing a declaration — a multi-line
+    // pattern silently ate two real pools while this was being written.
+    const NAMED = /\b([A-Z][A-Z0-9_]*)\s*(?::[^=\n]*)?=\s*'([^']*)'/
+    const INLINE = /(?:registerPoolMeaning|poolSignature|getPool)\s*\??\.?\s*\(\s*'([^']*)'/g
+
+    const found = new Map<string, string>()          // meaning → first file
+    const note = (meaning: string, file: string): void => {
+      // A meaning is a bare word or a colon-scoped one. A slash, an `@` or a
+      // space means an IoC key or a module path — `essentials-keys.ts`
+      // mirrors every exported symbol to its module path, so `*_POOL` names
+      // reappear there as `'@assistant/changes'`, which addresses nothing.
+      if (!meaning || /[@/\s]/.test(meaning)) return
+      if (!found.has(meaning)) found.set(meaning, file)
+    }
+    for (const dir of SCAN_DIRS) {
+      let files: string[]
+      try { files = walk(join(ROOT, dir)) } catch { continue }
+      for (const file of files) {
+        const raw = readFileSync(file, 'utf8')
+        if (/^\/\/\s*auto-generated/.test(raw)) continue
+        const where = relative(ROOT, file).replace(/\\/g, '/')
+        for (const line of raw.split(/\r?\n/)) {
+          const code = lineCode(line)
+          const named = NAMED.exec(code)
+          if (named && /MEANING|POOL/.test(named[1])) note(named[2], where)
+          for (const m of code.matchAll(INLINE)) note(m[1], where)
+        }
+      }
+    }
+    // A floor, so a broken walk reads as a broken ratchet and not as a pass.
+    expect(found.size, 'the pool-meaning census could not be read').toBeGreaterThan(40)
+
+    const unseeded = [...found].filter(([meaning]) => !seeded.has(meaning))
+    expect(
+      unseeded.map(([meaning, file]) => `${meaning}  (${file})`).sort(),
+      '\nPOOL MEANING MISSING FROM THE SEED CENSUS — until some code path\n' +
+      'derives it, `isPoolAddress()` does not know this directory is a pool,\n' +
+      'and a root walk that runs first can prune it as a lineage sigbag.\n' +
+      'Add it to SCOPED_POOL_MEANINGS in hypercomb-core/src/core/pool-registry.ts.\n',
+    ).toEqual([])
+    // The reverse is NOT an error: the seed may hold RESERVED spellings
+    // (`pheromones:deposits`, `hives:names`) that nothing derives yet. A
+    // reservation costs nothing and claims the address before a typo can.
+  })
+
   it('no plaintext credential in a content-addressed write, a decoration payload, or an EffectBus payload', () => {
     // A KEY IS NEVER CONTENT. An API key that reaches `putResource` is
     // signed, deduplicated, and cached forever under an address anyone
@@ -943,5 +1068,199 @@ describe('doctrine ratchets', () => {
       for (const name of wanted) if (!have.has(name)) stale.push(`${shell}: ${name}`)
     }
     expect(stale, 'rendered icon names missing from a shipped subset — rerun scripts/fetch-fonts.cjs').toEqual([])
+  })
+
+  // ── PRUNE SAFETY ─────────────────────────────────────────────────────────
+  //
+  // THE RATCHET THAT REPLACES THE BARE-WORD SPELLING GUARD.
+  //
+  // Under the molecule direction a tile NAME is itself a pool address, minted
+  // by any participant on any host who types a word — so no registry can
+  // enumerate the dangerous case, and no denylist can protect it. What CAN be
+  // held mechanically is the shape of the code: anything that removes a
+  // directory recursively must have consulted `directory-safety.ts` first,
+  // where the rule (THE ENTRY DECIDES, NEVER THE DIRECTORY) lives.
+  //
+  // Phrased as a DEPENDENCY, not as a pattern match, on purpose: a dependency
+  // is satisfiable by fixing the code, whereas a pattern that fires on sites
+  // that are safe by other means can only be satisfied by growing an
+  // allowlist. The allowlist below is therefore FRESH — it names code that is
+  // now SEEN rather than unscanned — and it may only shrink.
+  //
+  // Note the two scan surfaces this adds. `SCAN_DIRS` is `.ts` only, and the
+  // largest concentration of unguarded full-root wipes in the tree is not
+  // TypeScript: ~35 harness files under `scripts/` and `hypercomb-relay/`
+  // each carry a verbatim `for await ([name] of root.entries())
+  // root.removeEntry(name, { recursive: true })`. They are not user-reachable,
+  // but they are the thing a future implementer copy-pastes into a
+  // diagnostic, and until now they were outside every ratchet.
+
+  /** Files a prune-safety scan reads: source in any language the tree ships,
+   *  minus emitted artifacts and specs. Deliberately wider than `isSource`. */
+  const isPruneScannable = (name: string): boolean =>
+    /\.(ts|js|cjs|mjs|html)$/.test(name)
+    && !name.endsWith('.d.ts')
+    && !name.endsWith('.spec.ts')
+    && !name.endsWith('.test.ts')
+
+  const pruneWalk = (dir: string, out: string[] = []): string[] => {
+    const entries = (() => {
+      try { return readdirSync(dir, { withFileTypes: true }) } catch { return [] }
+    })()
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (!SKIP_DIRS.has(entry.name)) pruneWalk(join(dir, entry.name), out)
+      } else if (isPruneScannable(entry.name)) {
+        out.push(join(dir, entry.name))
+      }
+    }
+    return out
+  }
+
+  // `hypercomb-client/app/ui` only: `frontend/` and `host-shell/main.js` are
+  // BUILT BUNDLES (the same category as `dist`), and scanning an artifact
+  // double-counts a source file that is already scanned.
+  const PRUNE_SCAN_DIRS = [
+    ...SCAN_DIRS,
+    'hypercomb-client/app/ui',
+    'hypercomb-dev/public',
+    'hypercomb-relay',
+    'scripts',
+  ]
+
+  const pruneFilesMatching = (pattern: RegExp, exclude: RegExp): string[] => {
+    const hits = new Set<string>()
+    for (const dir of PRUNE_SCAN_DIRS) {
+      let files: string[]
+      try { files = pruneWalk(join(ROOT, dir)) } catch { continue }
+      for (const file of files) {
+        const code = stripComments(readFileSync(file, 'utf8'))
+        if (pattern.test(code) && !exclude.test(code)) {
+          hits.add(relative(ROOT, file).replace(/\\/g, '/'))
+        }
+      }
+    }
+    return [...hits].sort()
+  }
+
+  it('a recursive directory removal consults directory-safety', () => {
+    // The GUARD side: importing the module is not enough, one of its
+    // primitives must actually be named. `hardDeleteVetoFor` is the veto for
+    // "may I remove this whole directory", `planNamedRemovalFor` for "may I
+    // remove the names I minted", `documentSweepVetoFor` for a one-current-
+    // document pool, and `classifyDirectoryEntry` for a per-entry decision.
+    const CONSULTS = /hardDeleteVetoFor|planNamedRemovalFor|documentSweepVetoFor|classifyDirectoryEntry|directory-safety/
+    const RECURSIVE = /removeEntry\([^)]*\{\s*recursive/
+
+    // FRESH allowlist. Every entry below was read in the 2026-09 prune-safety
+    // pass and is listed with the reason it is safe. It may only SHRINK.
+    const allowed = [
+      // ── Verified safe by a different, sufficient guard ──────────────────
+      // (sweep.queen.ts used to sit here on the strength of `isLegitName`
+      // admitting every 64-hex name. It kept its OWN marker regex — 4-hex,
+      // where every other reader uses 8 digits — so a marker minted by
+      // `markerName()` classified as a stray to quarantine. It now calls
+      // `classifyDirectoryEntry` and the allowlist entry is gone.)
+      // The shim's own classifier — the file directory-safety.ts was written
+      // FROM. Its root removeEntry ignores `recursive` entirely and no-ops on
+      // content; only NativeSigDirectory deletes, and by name.
+      'hypercomb-runtime/src/native-filesystem.ts',
+      // Removes only the addresses its own seed() created; its header states
+      // it never enumerates the root looking for things to delete.
+      'hypercomb-shared/core/packed-store-scale-probe.ts',
+      // ── Inert under the current model ───────────────────────────────────
+      // Both resolve a PLAINTEXT label under `lineage.explorerDir()`, and no
+      // plaintext directory exists at the OPFS root, so the call is swallowed
+      // by its own catch. They become live only if plaintext addressing is
+      // ever reintroduced — at which point this ratchet is the reminder.
+      'hypercomb-shared/ui/command-line/command-line.component.ts',
+      'hypercomb-shared/ui/command-line/cut-paste.behavior.ts',
+      // ── The retired Angular app ─────────────────────────────────────────
+      'hypercomb-legacy/src/app/common/opfs/file-explorer/opfs-file-explorer.component.ts',
+      'hypercomb-legacy/src/app/common/opfs/opfs-manager.ts',
+      // ── HARNESS RESET, DRIVEN PROFILE ONLY ──────────────────────────────
+      // Each of these wipes the whole OPFS root to start a scenario from
+      // nothing. Pointed at a real profile instead of a driven one they
+      // destroy a participant's entire hive. They are listed rather than
+      // fixed because they are throwaway drivers — but they are now SEEN, so
+      // the next copy of the pattern shows up as drift.
+      'hypercomb-relay/audit-browser-adopt-image.cjs',
+      'hypercomb-relay/audit-getresource-miss.cjs',
+      'hypercomb-relay/audit-late-join-recovery.cjs',
+      'hypercomb-relay/audit-layerless-visuals.cjs',
+      'hypercomb-relay/audit-live-second-joiner.cjs',
+      'hypercomb-relay/audit-sw-resource-fallback.cjs',
+      'hypercomb-relay/audit-swarm-union-adopt.cjs',
+      'scripts/drive-existing-data-repro.cjs',
+      'scripts/drive-filter-audit.cjs',
+      'scripts/drive-incognito-sync-test.cjs',
+      'scripts/drive-late-joiner-test.cjs',
+      'scripts/drive-local-tiles-test.cjs',
+      'scripts/drive-real-late-joiner.cjs',
+      'scripts/drive-reload-late-joiner.cjs',
+      'scripts/drive-swarm-sync-test.cjs',
+      'scripts/verify-adopt-cross-port.cjs',
+      'scripts/verify-adopt-in-place.cjs',
+      'scripts/verify-double-adopt.cjs',
+      'scripts/verify-exploration-presence.cjs',
+      'scripts/verify-interest-signal.cjs',
+      'scripts/verify-label-auto-adopt.cjs',
+      'scripts/verify-label-input.cjs',
+      'scripts/verify-multi-adopt.cjs',
+      'scripts/verify-open-for-subscribers-toggle.cjs',
+      'scripts/verify-participant-panel.cjs',
+      'scripts/verify-peer-index-honored.cjs',
+      'scripts/verify-presence-banner.cjs',
+      'scripts/verify-readopt-dedup.cjs',
+      'scripts/verify-registry-fix.cjs',
+      'scripts/verify-share-flow.cjs',
+      'scripts/verify-subscribe-and-follow.cjs',
+      'scripts/verify-subscribe-consent-toast.cjs',
+      'scripts/verify-subscribe-trail-and-merkle.cjs',
+      'scripts/verify-toggle-rejoin.cjs',
+    ]
+
+    assertRatchet(
+      pruneFilesMatching(RECURSIVE, CONSULTS),
+      allowed,
+      'a recursive removeEntry must consult directory-safety.ts — THE ENTRY DECIDES, NEVER THE DIRECTORY',
+    )
+  })
+
+  it('no directory entry name is turned into a number by parseInt', () => {
+    // THE ROOT CAUSE IS `parseInt`, NOT THE MISSING REGEX.
+    // `parseInt('99999999ab3f…', 10)` returns the PREFIX 99999999 — it stops
+    // at the first non-digit — so pairing it with an `isNaN` reject is the
+    // exact check its prefix semantics defeats. `Number` of the same name is
+    // NaN. One marker minted from that prefix is `String(100000000)
+    // .padStart(8, '0')` — nine digits, which every reader's /^\d{8}$/ then
+    // rejects forever, with no repair path short of renaming on disk.
+    //
+    // So the sanctioned spelling is `classifyDirectoryEntry(...) === 'marker'`
+    // followed by `Number(name)`, and `parseInt` near a directory walk is
+    // drift. Empty allowlist: every site was fixed in the same pass.
+    const offenders: string[] = []
+    for (const dir of PRUNE_SCAN_DIRS) {
+      let files: string[]
+      try { files = pruneWalk(join(ROOT, dir)) } catch { continue }
+      for (const file of files) {
+        const code = stripComments(readFileSync(file, 'utf8'))
+        // A directory walk anywhere in the file, and a parseInt over
+        // something that reads like an entry name. Deliberately coarse: a
+        // regex that tries to BIND the walk to the parse cannot survive
+        // `of (bag as any).entries()`, which is how every one of these sites
+        // was actually spelled — it would pass vacuously. Verified against
+        // the pre-fix revisions of history.service.ts and
+        // computation.service.ts: both match this pair.
+        if (!/\.(entries|keys)\s*\(\s*\)/.test(code)) continue
+        if (!/parseInt\s*\(\s*(?:\w*[Nn]ame|entry\.name|e\.name)\b/.test(code)) continue
+        offenders.push(relative(ROOT, file).replace(/\\/g, '/'))
+      }
+    }
+    assertRatchet(
+      [...new Set(offenders)].sort(),
+      [],
+      'parseInt over a directory entry name — classify with classifyDirectoryEntry, then use Number',
+    )
   })
 })

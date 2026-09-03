@@ -5,7 +5,7 @@ import { Component, signal, type OnDestroy } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import type { Lineage } from '../../core/lineage'
 import { Store } from '../../core/store'
-import { hypercomb, requestConfirm, poolMeanings } from '@hypercomb/core'
+import { hypercomb, requestConfirm, classifyDirectoryEntry, poolMeanings } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import type { ScriptPreloader } from '../../core/script-preloader'
 import { LocationParser } from '../../core/initializers/location-parser'
@@ -268,6 +268,16 @@ export class OpfsExplorerComponent extends hypercomb {
       (this.isAtRoot() && e.name === Store.LEGACY_HYPERCOMB_IO_DIRECTORY)
     )) {
       console.warn('[opfs explorer] refusing to remove protected entry', e.name)
+      return
+    }
+
+    // THE GUARD ABOVE ONLY FIRES FOR DIRECTORIES. A sig-named FILE at the root
+    // — a layer atom, a resource, a molecule member — fell straight through to
+    // the recursive removeEntry below, and so did a marker-shaped file. Ask
+    // what the ENTRY is, not what kind of handle it is.
+    const kind = classifyDirectoryEntry(e.name, e.kind === 'directory')
+    if (kind !== 'foreign') {
+      console.warn(`[opfs explorer] refusing to remove ${e.name} — it is a ${kind}`)
       return
     }
 

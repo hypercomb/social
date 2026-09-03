@@ -495,7 +495,7 @@ export class ClipboardWorker extends Worker {
     const svc = this.#clipboardSvc
     const store = this.#store
     if (!svc || !store) return
-    if (svc.isEmpty) { await clearDirectory(store.clipboard); return }
+    if (svc.isEmpty) { await clearClipboard(store); return }
     await writeMeta(store, {
       items: svc.items.map(i => ({
         label: i.label,
@@ -844,7 +844,7 @@ export class ClipboardWorker extends Worker {
     this.#clipboardSvc?.clear()
     clearExclusions()
     const store = this.#store
-    if (store) await clearDirectory(store.clipboard)
+    if (store) await clearClipboard(store)
   }
 
   // ── validate ──────────────────────────────────────────
@@ -907,7 +907,7 @@ export class ClipboardWorker extends Worker {
     svc.removeItems(invalid)
 
     if (svc.isEmpty) {
-      await clearDirectory(store.clipboard)
+      await clearClipboard(store)
     } else {
       await writeMeta(store, {
         items: svc.items.map(i => ({
@@ -1077,15 +1077,30 @@ async function readMeta(
   return (await tryParse(LEGACY_META)) ?? (await tryParse(LEGACY_META_TMP))
 }
 
-async function clearDirectory(dir: FileSystemDirectoryHandle): Promise<void> {
-  const entries: string[] = []
-  for await (const [name] of (dir as any).entries()) {
-    entries.push(name)
-  }
-  for (const name of entries) {
-    try {
-      await dir.removeEntry(name, { recursive: true })
-    } catch { /* ignore */ }
+/**
+ * Empty the clipboard.
+ *
+ * WHAT THIS USED TO BE. `clearDirectory(store.clipboard)` enumerated the pool
+ * and `removeEntry(name, { recursive: true })` on EVERY entry — from three
+ * ordinary paths (pasting the last item, and two clears), with no
+ * confirmation and no destructive-command gate. `sign('clipboard')` is a BARE
+ * WORD, so that address is also the molecule of a tile named `clipboard`: a
+ * routine paste took another participant's markers, author buckets and atoms
+ * with it. Destructive on the desktop client too — NativeSigDirectory's
+ * removeEntry does a real prefix sweep — so a browser-only check proved
+ * nothing.
+ *
+ * WHAT IT IS NOW. Clearing the clipboard is WRITING AN EMPTY LIST, not
+ * deleting a directory. The meta doc IS the clipboard, `writeMeta` goes
+ * through `putPoolDoc` with a subKey (a sub-bucket this code minted, which is
+ * positive proof of ownership), and the two legacy fixed-name files are
+ * literal names nothing else can hold. Nothing enumerates, so nothing that
+ * shares the address can be reached.
+ */
+async function clearClipboard(store: StoreLike): Promise<void> {
+  await writeMeta(store, { items: [] })
+  for (const legacy of [LEGACY_META, LEGACY_META_TMP]) {
+    try { await store.clipboard.removeEntry(legacy) } catch { /* absent */ }
   }
 }
 
