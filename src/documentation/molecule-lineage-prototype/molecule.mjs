@@ -37,23 +37,75 @@
 import { canonName } from './canon.mjs'
 import { sha256, signText, bytesOf, mineSignatures, EMPTY_SIG, SIG_RE } from './sig.mjs'
 import { Root } from './root.mjs'
+import { mintKeys, verifyEd25519 } from './keys.mjs'
+import {
+  acceptHeadClaim,
+  headClaimAuthors,
+  headClaimPreimage,
+  looksLikeAddressPreimage,
+  planHeadClaim,
+  resolveBucketHead,
+} from './head-claim.mjs'
 
 /** The molecule address of a name. sign('') is the ROOT molecule. */
 export const moleculeOf = (name) => signText(canonName(name))
 
 export const ROOT_MOLECULE = EMPTY_SIG
 
-const bucketOf = (authorSig) => authorSig
+const HEX64 = /^[0-9a-f]{64}$/
+
+/**
+ * The hard ceiling on a fork walk. It exists so a chain that cycles or is
+ * absurdly long cannot run forever — NOT as the ordinary bound, which is the
+ * signed seq gap. Exhausting it yields `'unproven'`, never `'fork'`.
+ */
+export const FORK_WALK_CAP = 4096
+
+/** Hops descent can require: the signed seq gap, plus slack, under the cap. */
+const forkBudget = (offeredSeq, heldSeq) => {
+  const gap = Number(offeredSeq ?? 0) - Number(heldSeq ?? 0)
+  return Math.min(FORK_WALK_CAP, Math.max(8, Number.isFinite(gap) ? gap + 4 : 8))
+}
 
 export class MoleculeStore {
   #ticks = 0
 
-  constructor({ root = new Root(), author = 'participant-a', clock } = {}) {
+  /**
+   * `keys` is the IDENTITY, and its public key IS the bucket directory name —
+   * raw lowercase 64-hex, never sign(pubkey). Hashing the bucket name would
+   * sever the address from the thing that authenticates it and force the reader
+   * back to a field in the bytes, which is blocker 1 restated one level down.
+   *
+   * Omit `keys` and a fresh identity is minted, which is what the real signer
+   * does per browser profile (nostr-signer.ts:96-129). Pass the SAME `keys` to
+   * two stores to model one participant on two devices; pass different keys to
+   * model two participants — a distinction the old `signText(author)` address
+   * could not draw, because anyone could type the string.
+   */
+  constructor({ root = new Root(), author = 'participant-a', keys, ledger, clock, verify = verifyEd25519 } = {}) {
     this.root = root
     this.author = author
-    this.authorSig = signText(author)
-    this.cursors = new Map() // `${mol}:${authorSig}` -> succSig | null(empty view)
+    this.keys = keys ?? mintKeys()
+    this.pubkey = this.keys.pubkey
+    this.verify = verify
+    this.cursors = new Map() // `${mol}:${pubkey}` -> succSig | null(empty view)
+    // THE MINT LEDGER: molSig -> the last claim THIS INSTANCE actually signed.
+    //
+    // It is NOT content, it is NOT replicated, and it never leaves the device.
+    // It models the store the SECRET lives in (`localStorage['hc:nostr:secret-
+    // key']`), which is why it is a constructor option: pass the same Map to a
+    // rebuilt store to model "OPFS was evicted, localStorage survived" — the
+    // ordinary shape of that accident, since the two are cleared by different
+    // gestures. Without it, a host that is merely BEHIND hands me a counter of
+    // 0 when I had signed up to 2, and my next signature forks me off my own
+    // chain with nothing anywhere reporting it (`planHeadClaim`).
+    this.minted = ledger ?? new Map()
     this.clock = clock ?? (() => ++this.#ticks)
+  }
+
+  /** DEPRECATED ALIAS. My bucket address — now a public key, not sign(a string). */
+  get authorSig() {
+    return this.pubkey
   }
 
   // ── atoms ────────────────────────────────────────────────────────────────
@@ -85,28 +137,163 @@ export class MoleculeStore {
 
   // ── molecule directory ───────────────────────────────────────────────────
 
-  /** Every author's head in a molecule. THE ENTRY DECIDES: dirs are buckets. */
-  heads(molSig, opts) {
+  // ── head entries: a bucket holds SIGNED CLAIMS, not bare names ───────────
+  //
+  // An entry file is the canonical JSON of `{head, prev, seq, sig}`, named
+  // sha256(its own bytes) so it is content-addressed like everything else. The
+  // signature covers a preimage the READER rebuilds from the two path segments
+  // it walked to — so an entry cannot be moved to another molecule, or into
+  // another key's bucket, without ceasing to verify.
+
+  /**
+   * Read + AUTHENTICATE every entry in one bucket. Unverifiable entries are
+   * ignored, never deleted: DATA NEVER HEALS.
+   *
+   * TWO GATES, and both are about the BUCKET rather than about recency:
+   *
+   *  (1) `verdict.keep` — the signature covers this address's preimage under
+   *      this bucket's key. NOT `verdict.ok`: `ok` answers "may this become my
+   *      head, given what I already hold", which is a question about a
+   *      TRANSITION and has no meaning when re-reading what is already on
+   *      disk. Ranking is `resolveBucketHead`'s job and nothing else's.
+   *
+   *  (2) ADOPTION REFUSAL. A claim binds (molecule, pubkey, head), so two keys
+   *      can each mint a valid claim naming the SAME succession — and `viewOf`
+   *      would then hand the byline for every row to whichever author sorts
+   *      first. So when the atom is local, it must name THIS bucket as its
+   *      signer. When it is absent the claim still counts: complete-or-absent,
+   *      the same rule `viewOf` applies to a cold member.
+   */
+  #bucketClaims(molSig, bucketName, { source = this.root, listOpts } = {}) {
+    if (!HEX64.test(bucketName)) return [] // 'foreign' — not a bucket, not ours
     const out = []
-    for (const entry of this.root.list(molSig, opts)) {
-      if (entry.kind !== 'dir') continue // a file here is a pool record, not ours
-      const files = this.root.list(`${molSig}/${entry.name}`).filter((e) => e.kind === 'file')
-      if (files.length !== 1) continue // one writer per bucket: a fork is not a head
-      out.push({ authorSig: entry.name, sig: files[0].name })
+    for (const f of source.list(`${molSig}/${bucketName}`, listOpts)) {
+      if (f.kind !== 'file') continue
+      const bytes = source.read ? source.read(`${molSig}/${bucketName}/${f.name}`) : source.content(`${molSig}/${bucketName}/${f.name}`)
+      const claim = this.#parseClaim(bytes)
+      if (!claim) continue
+      const address = { molecule: molSig, pubkey: bucketName }
+      const verdict = acceptHeadClaim(address, claim, this.verify)
+      if (!verdict.keep) continue
+      const atom = this.getAtom(claim.head)
+      if (atom && !(atom.succession === 1 && headClaimAuthors(address, atom.signer))) continue
+      out.push({ entry: f.name, head: claim.head, prev: claim.prev, seq: claim.seq, sig: claim.sig })
     }
     return out
   }
 
-  headSig(molSig, authorSig = this.authorSig) {
+  #parseClaim(bytes) {
+    if (!bytes || !bytes.length) return null
+    try {
+      const c = JSON.parse(bytes.toString('utf8'))
+      if (!c || typeof c !== 'object') return null
+      return { head: c.head, prev: c.prev ?? null, seq: c.seq, sig: c.sig }
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Every author's head in a molecule. THE ENTRY DECIDES: dirs are buckets, and
+   * the bucket NAME — never a field in the bytes — is the author.
+   *
+   * The old rule was "a bucket with anything but exactly one file is skipped",
+   * which turned any second entry into a total page blackout. Now that nobody
+   * but the bucket's own key can put an entry there, a second entry means the
+   * owner wrote twice — so RESOLVE it (highest seq, ties by smallest head sig)
+   * instead of blanking the page.
+   */
+  heads(molSig, opts) {
+    const out = []
+    for (const entry of this.root.list(molSig, opts)) {
+      if (entry.kind !== 'dir') continue // a file here is a pool record, not ours
+      const claims = this.#bucketClaims(molSig, entry.name)
+      const win = this.#resolve(molSig, entry.name, claims)
+      if (!win) continue
+      out.push({ authorSig: entry.name, sig: win.head, seq: win.seq, entry: win.entry, rivals: claims.length - 1 })
+    }
+    return out
+  }
+
+  /**
+   * `resolveBucketHead`, plus ONE asymmetry for MY OWN bucket.
+   *
+   * A same-generation sibling (`rival`) is settled for everyone else by the
+   * smallest head signature, which is the only deterministic answer a third
+   * party can compute and is what makes every reader converge. But for my own
+   * bucket I hold evidence nobody else has: the MINT LEDGER says which of those
+   * siblings I actually signed. Preferring it means my own page never flips to
+   * a second device's generation behind my back, while every other reader's
+   * answer is unchanged — the ledger is local and is never replicated, so it
+   * cannot make two readers disagree.
+   */
+  #resolve(molSig, bucketName, claims) {
+    const win = resolveBucketHead(claims)
+    if (!win || bucketName !== this.pubkey) return win
+    const mine = this.minted.get(molSig)
+    if (!mine || mine.seq !== win.seq) return win
+    return claims.find((c) => c.head === mine.head) ?? win
+  }
+
+  headSig(molSig, authorSig = this.pubkey) {
     return this.heads(molSig).find((h) => h.authorSig === authorSig)?.sig ?? null
   }
 
-  /** new-before-old: the entry IS the commit. */
-  #setHead(molSig, succSig) {
-    const bucket = `${molSig}/${bucketOf(this.authorSig)}`
-    this.root.write(`${bucket}/${succSig}`)
+  /** The claim currently resolved for one bucket — what acceptance compares against. */
+  heldClaim(molSig, bucketName = this.pubkey) {
+    return this.#resolve(molSig, bucketName, this.#bucketClaims(molSig, bucketName))
+  }
+
+  /**
+   * Mint a SIGNED head entry for MY bucket at `molSig`. The preimage binds the
+   * molecule and the pubkey, so this entry is inert anywhere else.
+   *
+   * Public so a test can model a crash mid-commit faithfully — the write half
+   * of write-then-prune, with a real claim rather than a bare file name.
+   */
+  mintHeadEntry(molSig, { head, prev = null, seq }) {
+    const preimage = headClaimPreimage(molSig, this.pubkey, head, prev, seq)
+    const claim = { head, prev, seq, sig: this.keys.sign(preimage) }
+    const bytes = bytesOf(claim)
+    return { name: sha256(bytes), bytes, claim }
+  }
+
+  /**
+   * new-before-old: the entry IS the commit. Still two steps and still not
+   * atomic (blocker 6's other half) — but a half-applied write now RESOLVES
+   * rather than erasing the author's whole chain.
+   *
+   * `prev` and `seq` come from `planHeadClaim`, not from the bucket alone: the
+   * bucket is rebuilt from a host, so a host that missed my last two pushes
+   * would otherwise choose the counter my next signature commits to.
+   */
+  #setHead(molSig, succSig, plan) {
+    const held = plan.base ?? null
+    const entry = this.mintHeadEntry(molSig, { head: succSig, prev: plan.prev, seq: plan.seq })
+
+    // SIGN THEN SELF-VERIFY, BEFORE PUBLISHING. My own commit goes through the
+    // same door as a stranger's: there is no "trusted local" branch for anyone
+    // to widen later. The plan may legitimately be AHEAD of what the bucket
+    // holds (the ledger outranking a lagging host), and that reads as a
+    // multi-generation gap, so the walk is supplied — it resolves locally,
+    // because every atom on my own chain is already mine.
+    const verdict = acceptHeadClaim(
+      { molecule: molSig, pubkey: this.pubkey },
+      entry.claim,
+      this.verify,
+      { held, chainContains: (from, target) => this.#chainContains(from, target) },
+    )
+    if (!verdict.ok) throw new Error(`refused my own head claim: ${verdict.reason} (${verdict.detail})`)
+
+    const bucket = `${molSig}/${this.pubkey}`
+    this.root.write(`${bucket}/${entry.name}`, entry.bytes)
+    // THE LEDGER IS WRITTEN AFTER THE BYTES, and is the only record that
+    // survives losing this store. A host can never lower it.
+    this.minted.set(molSig, { head: succSig, prev: plan.prev, seq: plan.seq })
+    // MY OWN bucket, and only ever my own: sweep the entries that lost to the
+    // one I just signed. A foreign bucket is never swept by anybody.
     for (const e of this.root.list(bucket)) {
-      if (e.name !== succSig) this.root.remove(`${bucket}/${e.name}`)
+      if (e.name !== entry.name) this.root.remove(`${bucket}/${e.name}`)
     }
   }
 
@@ -164,17 +351,19 @@ export class MoleculeStore {
    */
   viewOf(molSig, { succession } = {}) {
     const mine = succession === undefined ? this.#viewedSuccession(molSig) : succession
+    // THE AUTHOR COMES FROM THE BUCKET DIRECTORY, never from the atom. The
+    // succession no longer carries an `author` field to disagree with it.
     const others = this.heads(molSig)
-      .filter((h) => h.authorSig !== this.authorSig)
+      .filter((h) => h.authorSig !== this.pubkey)
       .sort((a, b) => (a.authorSig < b.authorSig ? -1 : 1))
-      .map((h) => ({ sig: h.sig, ...this.getAtom(h.sig) }))
+      .map((h) => ({ author: h.authorSig, sig: h.sig, ...this.getAtom(h.sig) }))
 
     const hidden = new Set(mine?.hidden ?? [])
     const rows = []
     const byEnvelope = new Map()
     const byName = new Map()
 
-    const absorb = (succ, isMine) => {
+    const absorb = (succ, isMine, author) => {
       if (!succ || !Array.isArray(succ.members)) return
       succ.members.forEach((envSig, arrayIndex) => {
         if (hidden.has(envSig)) return
@@ -189,7 +378,7 @@ export class MoleculeStore {
           relation: env.relation ?? 'child',
           slot: typeof env.slot === 'number' ? env.slot : null,
           mine: isMine,
-          author: succ.author,
+          author,
           arrayIndex,
           stack: [],
         }
@@ -204,8 +393,8 @@ export class MoleculeStore {
       })
     }
 
-    absorb(mine, true)
-    for (const o of others) absorb(o, false)
+    absorb(mine, true, this.pubkey)
+    for (const o of others) absorb(o, false, o.author)
     return placePinned(rows)
   }
 
@@ -234,30 +423,91 @@ export class MoleculeStore {
 
   // ── commits ──────────────────────────────────────────────────────────────
 
+  /**
+   * What I would sign next, if I committed now — and, crucially, WHICH CLAIM
+   * that plan is built on. `base` is the stronger of the bucket head and my own
+   * mint ledger, and everything downstream compares against IT rather than
+   * against the bucket: the self-verify in `#setHead`, and the out-of-sync
+   * guard in `#commit`.
+   */
+  #plan(molSig) {
+    const held = this.heldClaim(molSig)
+    const minted = this.minted.get(molSig) ?? null
+    const plan = planHeadClaim(held, minted)
+    const base = plan.prev === (minted?.head ?? null) ? minted : held
+    return { ...plan, base: base ?? null, held: held ?? null }
+  }
+
   #base(molSig) {
     const viewed = this.#viewedSuccession(molSig)
     return {
       members: [...(viewed?.members ?? [])],
       hidden: [...(viewed?.hidden ?? [])],
-      // prev is ALWAYS the directory head — committing from a rewound view
-      // APPENDS (promoteToHead); history never branches and never rewrites.
-      prev: this.headSig(molSig),
+      // prev is ALWAYS the strongest link I can prove is mine — the directory
+      // head, or my own mint ledger when a host is behind it. Committing from a
+      // rewound view APPENDS; history never branches and never rewrites.
+      prev: this.#plan(molSig).prev,
     }
   }
 
-  #commit(molSig, name, { members, hidden, prev }) {
+  /**
+   * THE SUCCESSION ATOM STILL DECLARES NO LOCATION — AND NOW NAMES ITS SIGNER.
+   *
+   * `name` and `author` are GONE and are not coming back. They were the two
+   * fields `#absorbMolecule` turned into PATH SEGMENTS, and the fix was not to
+   * check them on arrival: a field which does not exist is a check nobody can
+   * forget. Placement comes from the directory walk.
+   *
+   * `signer` is a different animal and the authority review is what asked for
+   * it. With the atom bound to nothing, any key could mint a valid head claim
+   * naming SOMEONE ELSE'S succession — every field in the preimage true — and
+   * take the byline for the whole page on every reader. `signer` is NEVER a
+   * path segment and chooses nothing; it is compared against a bucket address
+   * that is already authenticated, which is exactly why it is safe now and was
+   * not before. The distinction to hold on to: a DECLARED LOCATION is a
+   * capability, a DECLARED AUTHOR checked against an authenticated address is a
+   * binding.
+   *
+   * `prev` comes from the one plan `#setHead` will sign, so the atom and the
+   * claim can never disagree about the chain link.
+   */
+  #commit(molSig, { members, hidden }) {
+    const plan = this.#plan(molSig)
+
+    // OUT-OF-SYNC REFUSAL — fail closed rather than fork silently.
+    //
+    // My ledger can legitimately be AHEAD of what this store can see: an OPFS
+    // eviction, a partial "clear site data", a restore from a folder backup,
+    // or simply a host that missed my last two pushes. The old code took the
+    // bucket's answer, restarted `seq` from it, and signed — so a legitimate
+    // local write forked me off my own chain, every peer refused it (first
+    // 'stale', then 'fork'), and NOTHING reported it because my own page
+    // rendered perfectly.
+    //
+    // `planHeadClaim` stops the counter going backwards, but a `prev` I cannot
+    // resolve is worse than a wrong counter: `#base` would take its MEMBERS
+    // from the stale head I can see while naming a `prev` I cannot, and publish
+    // a generation that silently drops everything the newer head held. So
+    // refuse, loudly, and say what to do — replicating from a current host
+    // resolves it.
+    if (plan.base && plan.base.head !== (plan.held?.head ?? null)) {
+      throw new Error(
+        `out of sync at ${molSig.slice(0, 8)}: this store holds seq ${plan.held?.seq ?? -1} ` +
+        `but I signed seq ${plan.base.seq}. Replicate from a current host before committing.`,
+      )
+    }
+
     const succ = {
       succession: 1,
-      name,
-      author: this.authorSig,
-      prev: prev ?? null,
+      signer: this.pubkey,
+      prev: plan.prev,
       members,
       at: this.clock(),
     }
     if (hidden.length) succ.hidden = hidden
     const sig = this.putAtom(succ)
-    this.#setHead(molSig, sig)
-    this.cursors.delete(`${molSig}:${this.authorSig}`) // follow the head again
+    this.#setHead(molSig, sig, plan)
+    this.cursors.delete(`${molSig}:${this.pubkey}`) // follow the head again
     return sig
   }
 
@@ -272,7 +522,7 @@ export class MoleculeStore {
     if (!canon) throw new Error('a tile must have a name (the empty name is the ROOT molecule)')
     if (display.includes('/')) throw new Error('a name is not a path')
 
-    const { sig: mol, name: molName } = this.resolveRoute(route)
+    const { sig: mol } = this.resolveRoute(route)
 
     const vertex = { name: display }
     if (body !== null) vertex.properties = [this.putAtom(body)]
@@ -296,14 +546,14 @@ export class MoleculeStore {
       base.members.push(envelope)
     }
 
-    const succession = this.#commit(mol, molName, base)
+    const succession = this.#commit(mol, base)
     return { molecule: mol, vertex: vertexSig, envelope, succession, committed: true }
   }
 
   /** Reorder: a NEW envelope (slot changed) + a NEW succession. Undoable. */
   reorder(route, name, slot) {
     const canon = canonName(name)
-    const { sig: mol, name: molName } = this.resolveRoute(route)
+    const { sig: mol } = this.resolveRoute(route)
     const base = this.#base(mol)
     const at = base.members.findIndex((s) => this.getAtom(s)?.root === canon)
     if (at < 0) throw new Error(`"${canon}" is not a member here`)
@@ -311,19 +561,19 @@ export class MoleculeStore {
     const envelope = this.putAtom({ ...old, slot })
     base.members.splice(at, 1)
     base.members.splice(Math.min(slot, base.members.length), 0, envelope)
-    return this.#commit(mol, molName, base)
+    return this.#commit(mol, base)
   }
 
   /** HIDE FIRST: hide any member (including another author's) in MY succession. */
   hide(route, name) {
     const canon = canonName(name)
-    const { sig: mol, name: molName } = this.resolveRoute(route)
+    const { sig: mol } = this.resolveRoute(route)
     const row = this.viewOf(mol).find((r) => r.name === canon)
     if (!row) throw new Error(`"${canon}" is not visible here`)
     const base = this.#base(mol)
     const targets = [row.envelope, ...row.stack.map((s) => s.envelope)]
     base.hidden = [...new Set([...base.hidden, ...targets])]
-    return this.#commit(mol, molName, base)
+    return this.#commit(mol, base)
   }
 
   /**
@@ -334,16 +584,16 @@ export class MoleculeStore {
    */
   remove(route, name) {
     const canon = canonName(name)
-    const { sig: mol, name: molName } = this.resolveRoute(route)
+    const { sig: mol } = this.resolveRoute(route)
     const base = this.#base(mol)
     const at = base.members.findIndex((s) => this.getAtom(s)?.root === canon)
     if (at < 0) throw new Error(`"${canon}" is not a member here`)
     base.members.splice(at, 1)
-    const succession = this.#commit(mol, molName, base)
+    const succession = this.#commit(mol, base)
     const child = signText(canon)
     if (this.headSig(child)) {
       const childBase = this.#base(child)
-      this.#commit(child, canon, { members: [], hidden: [], prev: childBase.prev })
+      this.#commit(child, { members: [], hidden: [], prev: childBase.prev })
     }
     return succession
   }
@@ -351,13 +601,13 @@ export class MoleculeStore {
   /** Point a new envelope at an existing vertex — share, never copy. */
   revive(route, name, vertexSig) {
     const canon = canonName(name)
-    const { sig: mol, name: molName } = this.resolveRoute(route)
+    const { sig: mol } = this.resolveRoute(route)
     const base = this.#base(mol)
     const envelope = this.putAtom({
       meta: 1, layer: vertexSig, root: canon, relation: 'child', slot: nextFreeSlot(base.members, this),
     })
     base.members.push(envelope)
-    return this.#commit(mol, molName, base)
+    return this.#commit(mol, base)
   }
 
   // ── cursor (undo is a VIEW; the directory head never moves) ───────────────
@@ -398,7 +648,24 @@ export class MoleculeStore {
 
   // ── replication ──────────────────────────────────────────────────────────
 
-  /** Pull one atom and everything it names. Verify on arrival; 404 = absent. */
+  /**
+   * Pull one atom and everything it names. Verify on arrival; 404 = absent.
+   *
+   * THE PREIMAGE GATE. `sha256(bytes) === sig` proves the bytes match the NAME.
+   * It can never prove the name is an ATOM address rather than a DIRECTORY
+   * address, because 64-hex is one alphabet for both by design — and a
+   * molecule address is sha256(a tile name) while a pool address is
+   * sha256(a meaning), both SHORT PUBLIC STRINGS. So a remote does not need a
+   * collision to choose where my bytes land: it lists the address as a member
+   * and serves the four bytes `bees`. In OPFS a file and a directory cannot
+   * share a name, so one served page can permanently deny the drone pool.
+   *
+   * `looksLikeAddressPreimage` (core) refuses any replicated body that could be
+   * a name or a meaning. It is conservative in the safe direction and loses
+   * nothing: such a body is a handful of bytes. See its comment for why the
+   * real cure is domain separation on the ADDRESS and why that is a forward
+   * migration rather than a patch.
+   */
   pullClosure(host, sig, seen = new Set()) {
     if (!SIG_RE.test(sig) || seen.has(sig)) return
     seen.add(sig)
@@ -408,70 +675,230 @@ export class MoleculeStore {
       return
     }
     const bytes = host.content(sig)
-    if (!bytes) return
+    if (!bytes || !bytes.length) return
     if (sha256(bytes) !== sig) throw new Error(`atom ${sig} failed its hash`)
+    if (looksLikeAddressPreimage(bytes)) return // a directory address, not an atom
     this.root.write(sig, bytes)
     const atom = this.getAtom(sig)
     if (atom) for (const next of mineSignatures(atom)) this.pullClosure(host, next, seen)
   }
 
   /**
+   * Fetch ONE atom for a decision, WITHOUT writing anything.
+   *
+   * Fork refusal used to walk `prev` with `pullClosure`, so the closure of a
+   * chain the reader was ABOUT TO REJECT was downloaded and committed to disk
+   * first — 64 hops x a full page each, at addresses the sender chose. A
+   * verdict is not a rollback of the writes it cost, so the walk must be able
+   * to read without keeping.
+   */
+  #peekAtom(host, sig) {
+    if (!host || !SIG_RE.test(String(sig ?? ''))) return null
+    const bytes = host.content(sig)
+    if (!bytes || !bytes.length) return null
+    if (sha256(bytes) !== sig) return null
+    try { return JSON.parse(bytes.toString('utf8')) } catch { return null }
+  }
+
+  /**
    * GET /<molSig>/ then GET /<molSig>/<bucket>/ — replicate every author's head
-   * into my root. A foreign head is accepted only if its prev-chain contains
-   * the head I already hold for that author: anything else is that author
-   * BRANCHING, and history never branches.
+   * into my root.
+   *
+   * READER-DERIVED PLACEMENT. `molSig` is the address I issued the listing
+   * against and `entry.name` is a directory the listing returned. Those two
+   * variables are BOTH the write path AND the two authenticated fields of the
+   * preimage, so a claim can only ever be filed where it was signed to live.
+   * Nothing in this loop reads a location out of the bytes; there is nothing in
+   * the bytes to read.
+   *
+   * Fork refusal is unchanged in rule: a head is accepted over one I hold only
+   * if its prev chain contains what I hold. History never branches.
    */
   replicateMolecule(host, molSig, { includeMine = false } = {}) {
-    const report = { accepted: [], refused: [], skipped: [] }
+    const report = { accepted: [], refused: [], skipped: [], kept: [] }
     for (const entry of host.list(molSig)) {
       if (entry.kind !== 'dir') continue
-      if (!includeMine && entry.name === this.authorSig) {
+      // SHAPE GATE, before the name enters any path. A non-64-hex directory is
+      // 'foreign' under classifyDirectoryEntry — not a bucket, not ours, and
+      // never a write target. (http-auth.js's devOpen returns the literal
+      // pubkey 'dev-open'; a bucket named that would veto deletion forever.)
+      if (!HEX64.test(entry.name)) {
+        report.refused.push({ author: entry.name, reason: 'malformed' })
+        continue
+      }
+      if (!includeMine && entry.name === this.pubkey) {
         report.skipped.push(entry.name)
         continue
       }
-      const files = host.list(`${molSig}/${entry.name}`).filter((e) => e.kind === 'file')
-      if (files.length !== 1) continue
-      const incoming = files[0].name
-      this.pullClosure(host, incoming)
-      const held = this.root
-        .list(`${molSig}/${entry.name}`)
-        .filter((e) => e.kind === 'file')
-        .map((e) => e.name)[0]
-      if (held && held !== incoming && !this.#chainContains(incoming, held)) {
-        report.refused.push({ author: entry.name, incoming, held })
-        continue
+      const address = { molecule: molSig, pubkey: entry.name }
+      const held = this.heldClaim(molSig, entry.name)
+
+      // A host may serve several entries for one bucket (the owner crashed
+      // mid-commit, or two of their devices published). Read them all, then
+      // rank with the SAME total order every reader uses, so the outcome never
+      // depends on listing order.
+      const offers = []
+      for (const file of host.list(`${molSig}/${entry.name}`)) {
+        if (file.kind !== 'file') continue
+        const bytes = host.content(`${molSig}/${entry.name}/${file.name}`)
+        if (!bytes || !bytes.length) continue
+        const offered = this.#parseClaim(bytes)
+        if (!offered) {
+          report.refused.push({ author: entry.name, reason: 'malformed' })
+          continue
+        }
+        offers.push({ offered, bytes })
       }
-      this.root.write(`${molSig}/${entry.name}/${incoming}`)
-      for (const e of this.root.list(`${molSig}/${entry.name}`)) {
-        if (e.name !== incoming) this.root.remove(`${molSig}/${entry.name}/${e.name}`)
+      offers.sort((a, b) =>
+        (b.offered.seq ?? -1) - (a.offered.seq ?? -1) ||
+        (String(a.offered.head) < String(b.offered.head) ? -1 : 1))
+
+      // ── PASS ONE: KEEP EVERY AUTHENTIC ENTRY ─────────────────────────────
+      //
+      // `authentic` is the KEEP bit and `ok` is the HEAD bit, and conflating
+      // them is what made a temporal replay permanent. A host that serves only
+      // generation 0 of a 70-generation chain forges nothing; on first sight
+      // there is nothing to be stale against, so the reader adopts it — and
+      // under the old code the real head then arrived, could not prove descent
+      // across 69 hops, and was REFUSED AND DISCARDED as a fork. The victim
+      // ended up accusing the honest author of branching, forever.
+      //
+      // Keeping every authentic entry makes recency a property of what the
+      // READER HOLDS rather than of the order a host answered in: once
+      // generation 69 is in hand it outranks generation 0 by the author's own
+      // signed counter and can never be talked back down.
+      //
+      // NOTHING IN A FOREIGN BUCKET IS EVER DELETED. The old code accepted one
+      // entry and swept its siblings — bytes it did not write, in a directory
+      // it does not own — which is both the plainest data-never-heals violation
+      // in the file and the reason two readers who met the same author's two
+      // entries in a different order stayed on different heads forever. The
+      // convergence `resolveBucketHead` documents is only true if the resolver
+      // is allowed to SEE both.
+      for (const { offered, bytes } of offers) {
+        const verdict = acceptHeadClaim(address, offered, this.verify, {
+          held,
+          chainContains: (from, target) =>
+            this.#chainContains(from, target, { host, budget: forkBudget(offered.seq, held?.seq) }),
+        })
+        if (!verdict.keep) {
+          // `malformed` / `unsigned` are not the author's bytes at all;
+          // `fork` is a DISPROVEN branch, and refusing it must cost nothing —
+          // no entry stored, and (because the walk peeked rather than pulled)
+          // not one byte of its closure fetched.
+          report.refused.push({ author: entry.name, incoming: offered.head, held: held?.head ?? null, reason: verdict.reason })
+          continue
+        }
+        const name = sha256(bytes)
+        const path = `${molSig}/${entry.name}/${name}`
+        if (!this.root.has(path)) this.root.write(path, bytes)
+        if (!verdict.ok) {
+          // Genuine history that is not my head: kept, reported, never deleted.
+          report.kept.push({ author: entry.name, head: offered.head, seq: offered.seq, reason: verdict.reason })
+          continue
+        }
+        if (verdict.unchanged) report.accepted.push({ author: entry.name, head: offered.head, unchanged: true })
       }
-      report.accepted.push({ author: entry.name, head: incoming })
+
+      // ── PASS TWO: THE WINNER'S CLOSURE, AND ONLY THE WINNER'S ────────────
+      //
+      // The head is now a pure function of the entries I hold. Pull the bytes
+      // for THAT one — a refused claim must never have cost me a write, which
+      // is why the fork walk above reads without keeping (`#peekAtom`).
+      //
+      // The atom must then AGREE with the claim: it is a succession, its prev
+      // matches, and it NAMES THIS BUCKET as its signer. That last one is the
+      // adoption refusal — a valid claim over someone else's succession — and
+      // it is checked again on every read in `#bucketClaims`, so a bucket
+      // cannot keep a stolen byline by racing the fetch.
+      const winner = this.heldClaim(molSig, entry.name)
+      if (!winner && this.root.list(`${molSig}/${entry.name}`).some((f) => f.kind === 'file')) {
+        // Entries are on disk and none of them resolves: every one of them
+        // names a succession that does not name THIS bucket as its signer.
+        // That is the adoption refusal, and it is worth saying out loud —
+        // silently rendering nothing is how a byline theft would hide.
+        report.refused.push({ author: entry.name, reason: 'atom-mismatch' })
+      }
+      if (winner && winner.head !== held?.head) {
+        this.pullClosure(host, winner.head)
+        const succ = this.getAtom(winner.head)
+        if (!succ || succ.succession !== 1 || (succ.prev ?? null) !== winner.prev || !headClaimAuthors(address, succ.signer)) {
+          report.refused.push({ author: entry.name, incoming: winner.head, reason: 'atom-mismatch' })
+        } else {
+          report.accepted.push({ author: entry.name, head: winner.head, seq: winner.seq })
+        }
+      }
     }
     return report
   }
 
-  #chainContains(fromSig, targetSig) {
+  /**
+   * Walk `prev` from `fromSig` looking for `targetSig`. TRI-STATE.
+   *
+   * `prev` is a REFERENT (hypercomb-core/src/core/edge-registry.ts), never a
+   * closure edge — carrying it would make every cold read the entire history of
+   * the thing. So the walk is DELIBERATE and BOUNDED, and the two ways it can
+   * fail mean OPPOSITE things:
+   *
+   *   false        I reached the chain's genesis and your head is not on it.
+   *                A real branch. Permanent, and an accusation.
+   *   'unproven'   I ran out of budget, or an atom did not arrive, or the
+   *                chain cycles. This says NOTHING about the author.
+   *
+   * Reporting the second as the first is what turned 65 ordinary edits made
+   * while a peer was offline into a permanent partition between two honest
+   * participants on one honest host. The budget is now derived from the SIGNED
+   * SEQ GAP, which is exactly the number of hops descent can require and cannot
+   * be inflated beyond what the author actually signed — the doctrine already
+   * said seq "bounds the fork walk"; a constant 64 was neither that quantity
+   * nor large enough for an ordinary absence.
+   *
+   * Every hop READS WITHOUT KEEPING (`#peekAtom`): a verdict must not cost the
+   * reader a write at an address the sender chose.
+   */
+  #chainContains(fromSig, targetSig, { host = null, budget = FORK_WALK_CAP } = {}) {
     let sig = fromSig
     const seen = new Set()
-    while (sig && !seen.has(sig)) {
+    let hops = 0
+    while (sig) {
       if (sig === targetSig) return true
+      if (seen.has(sig)) return 'unproven' // a cycle proves nothing
+      if (hops++ >= budget) return 'unproven'
       seen.add(sig)
-      sig = this.getAtom(sig)?.prev ?? null
+      const atom = this.getAtom(sig) ?? this.#peekAtom(host, sig)
+      if (!atom) return 'unproven' // an absent generation is not a branch
+      sig = atom.prev ?? null
     }
-    return false
+    return false // walked to genesis: the target is provably not an ancestor
   }
 
   /**
-   * COLD: an EMPTY root materializes a route from host listings alone. Every
-   * succession self-places by its own `name` field — the receiver never needs
-   * to know the route the bytes arrived by.
+   * COLD: an EMPTY root materializes a route from host listings alone.
+   *
+   * `#absorbMolecule` USED TO LIVE HERE and is DELETED, not repaired. Its two
+   * lines were
+   *
+   *     const placement = signText(succ.name)
+   *     this.root.write(`${placement}/${succ.author}/${head}`)
+   *
+   * — both path segments taken from fields the atom declared, so bytes from a
+   * host chose which directory they landed in. It has no replacement because
+   * `replicateMolecule` already files at the address it ASKED FOR; the two
+   * functions converge, and the cold path inherits acceptance, fork refusal and
+   * the shape gate for free. The defect is closed by removing the function that
+   * had it.
+   *
+   * `includeMine` is true here on purpose: the cold path no longer needs a
+   * skip-mine guard, because nobody but my key can produce a claim that
+   * verifies in my bucket. The signature is the guard now, not the skip.
    */
   materializeCold(host, route = []) {
     let molSig = ROOT_MOLECULE
     let name = ''
     const walked = []
+    const reports = []
     for (let i = 0; ; i++) {
-      this.#absorbMolecule(host, molSig)
+      reports.push(this.replicateMolecule(host, molSig, { includeMine: true }))
       walked.push({ name, molecule: molSig })
       if (i >= route.length) break
       const target = canonName(route[i])
@@ -480,22 +907,7 @@ export class MoleculeStore {
       name = target
       molSig = signText(target)
     }
-    return { walked, children: this.viewOf(molSig) }
-  }
-
-  #absorbMolecule(host, molSig) {
-    for (const entry of host.list(molSig)) {
-      if (entry.kind !== 'dir') continue
-      const files = host.list(`${molSig}/${entry.name}`).filter((e) => e.kind === 'file')
-      if (files.length !== 1) continue
-      const head = files[0].name
-      this.pullClosure(host, head)
-      const succ = this.getAtom(head)
-      if (!succ || succ.succession !== 1) continue
-      // SELF-PLACING: the atom carries its own molecule name.
-      const placement = signText(succ.name)
-      this.root.write(`${placement}/${succ.author}/${head}`)
-    }
+    return { walked, reports, children: this.viewOf(molSig) }
   }
 
   // ── destructive walkers ──────────────────────────────────────────────────
@@ -523,8 +935,13 @@ export class MoleculeStore {
   flatten(molSig) {
     const removed = []
     for (const e of this.root.list(molSig)) {
-      if (e.kind !== 'dir' || e.name !== this.authorSig) continue
-      const head = this.headSig(molSig)
+      if (e.kind !== 'dir' || e.name !== this.pubkey) continue
+      // Sweep only entries that LOST to a verified winner in MY OWN bucket. A
+      // reader holding no key owns no bucket, so its flatten is a structural
+      // no-op — the cold path that used to be the attack surface can no longer
+      // delete anything at all.
+      const head = this.heldClaim(molSig)?.entry ?? null
+      if (!head) continue
       for (const f of this.root.list(`${molSig}/${e.name}`)) {
         if (f.name !== head) {
           this.root.remove(`${molSig}/${e.name}/${f.name}`)

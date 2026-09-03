@@ -10,6 +10,7 @@ import { hostOf } from './host.mjs'
 import { putPoolDoc, getPoolDoc, poolSignature } from './pool.mjs'
 import { canonName, lineageKey } from './canon.mjs'
 import { signText, EMPTY_SIG } from './sig.mjs'
+import { mintKeys } from './keys.mjs'
 
 const names = (rows) => rows.map((r) => r.name)
 
@@ -39,15 +40,27 @@ test("scenario 1 — save /business/people/Alice: atom at the root, membership i
   // MEMBERSHIP is one zero-byte entry in the molecule, inside my bucket
   const mol = moleculeOf('people')
   assert.equal(r.molecule, mol)
-  const entry = `${mol}/${a.authorSig}/${r.succession}`
-  assert.ok(a.root.has(entry), 'head entry = <sign(name)>/<sign(author)>/<succSig>')
-  assert.equal(a.root.read(entry).length, 0, 'the entry is zero bytes — the name IS the content')
+  // CHANGED BY STEP 3 (signed head claims). The bucket is now named by the
+  // author's PUBLIC KEY, and the entry is no longer a zero-byte file named
+  // after the succession: it is a signed CLAIM — `{head, prev, seq, sig}` —
+  // named sha256 of its own bytes. The signature covers a preimage that binds
+  // the molecule address and the pubkey, so the entry is inert anywhere else.
+  const bucket = `${mol}/${a.pubkey}`
+  const files = a.root.list(bucket).filter((e) => e.kind === 'file')
+  assert.equal(files.length, 1, 'head entry = <sign(name)>/<pubkey>/<sha256(claim)>')
+  const claim = JSON.parse(a.root.read(`${bucket}/${files[0].name}`).toString('utf8'))
+  assert.equal(claim.head, r.succession, 'the claim names the succession it heads')
+  assert.equal(claim.seq, 0, 'seq is monotone per bucket; this is the first commit in sign("people")')
+  assert.match(claim.sig, /^[0-9a-f]{128}$/)
   assert.equal(a.headSig(mol), r.succession)
 
-  // the succession carries its own name, so an atom self-places on arrival
+  // CHANGED BY STEP 3: the succession NO LONGER CARRIES `name` OR `author`.
+  // Those were the two fields `#absorbMolecule` turned into path segments, so
+  // bytes from a host chose where they landed. A field that does not exist is
+  // a check nobody can forget.
   const succ = a.getAtom(r.succession)
-  assert.equal(succ.name, 'people')
-  assert.equal(succ.author, a.authorSig)
+  assert.equal(succ.name, undefined, 'a succession never declares its own molecule')
+  assert.equal(succ.author, undefined, 'a succession never declares its own author')
   assert.equal(succ.prev, peopleCommit === null ? null : succ.prev) // first on this chain
   assert.deepEqual(succ.members, [r.envelope])
 
@@ -146,16 +159,73 @@ test("scenario 3 — two tenants, replicate via GET /<sign('people')>/: union, s
   assert.equal(a.headSig(moleculeOf('people')), danaA.succession)
   assert.equal(a.heads(moleculeOf('people')).length, 2)
 
-  // FORK REFUSAL: a peer head whose chain does not contain the one I hold is refused
-  const forked = new MoleculeStore({ root: new Root(), author: 'bob-hive' })
+  // FORK REFUSAL: a peer head whose chain does not contain the one I hold is
+  // refused. CHANGED BY STEP 3: a bucket is now addressed by a PUBLIC KEY, so
+  // "the same author" means the same KEY — sharing `b.keys` is what puts this
+  // divergent chain in b's bucket at all. Under the old `sign(author-string)`
+  // address, merely typing 'bob-hive' was enough to claim it.
+  // The divergent chain is made LONGER than the one I hold, so the walk can
+  // reach its genesis and DISPROVE descent. (A chain of the same LENGTH is a
+  // `rival`, not a fork — see scenario 3b: neither can contain the other, no
+  // walk can help, and the only convergent answer is the total order.)
+  const forked = new MoleculeStore({ root: new Root(), author: 'bob-hive', keys: b.keys })
   forked.save([], 'club')
   forked.save(['club'], 'people')
   forked.save(['club', 'people'], 'Mallory')
+  forked.save(['club', 'people'], 'Mallory-2')
+  forked.save(['club', 'people'], 'Mallory-3')
   const held = a.root.list(`${moleculeOf('people')}/${b.authorSig}`)[0].name
+  const before = a.root.paths().length
   const refusal = a.replicateMolecule(hostOf(forked.root), moleculeOf('people'))
-  assert.equal(refusal.refused.length, 1, 'history never branches')
+  assert.deepEqual(refusal.refused.map((r) => r.reason), ['fork'], 'history never branches')
   assert.equal(a.root.list(`${moleculeOf('people')}/${b.authorSig}`)[0].name, held)
+  assert.equal(a.root.paths().length, before, 'and refusing it cost me no writes at all')
   assert.deepEqual(names(a.children(['business', 'people'])), ['Dana', 'Eve'])
+})
+
+// ── 3b ──────────────────────────────────────────────────────────────────────
+
+test('scenario 3b — a SAME-GENERATION rival is ranked, not refused, so every reader converges', () => {
+  // One key, two devices — a crash between the write and the sibling sweep has
+  // the same shape. Two chains of the same LENGTH: neither contains the other
+  // and no walk can help, so the only answer that makes two readers agree is
+  // `resolveBucketHead`'s total order (highest seq, ties by the smallest head
+  // sig). Refusing the rival outright left a reader who met the other entry
+  // first on a different head FOREVER, and hard-deleted bytes it did not write
+  // out of a foreign bucket.
+  const keys = mintKeys()
+  const one = new MoleculeStore({ root: new Root(), author: 'owner', keys })
+  one.save([], 'shared-start')
+
+  const clone = new Root()
+  for (const path of one.root.paths()) clone.write(path, one.root.read(path))
+  const two = new MoleculeStore({ root: clone, author: 'owner', keys })
+  one.save([], 'from-device-one')
+  two.save([], 'from-device-two')
+  assert.notEqual(one.headSig(ROOT_MOLECULE), two.headSig(ROOT_MOLECULE))
+
+  const both = new Root()
+  for (const r of [one.root, two.root]) for (const path of r.paths()) both.write(path, r.read(path))
+  const [first, second] = [hostOf(one.root), hostOf(both)]
+
+  const cold = new MoleculeStore({ root: new Root(), author: 'cold' })
+  cold.replicateMolecule(hostOf(both), ROOT_MOLECULE)
+
+  const warm = new MoleculeStore({ root: new Root(), author: 'warm' })
+  warm.replicateMolecule(first, ROOT_MOLECULE)
+  warm.replicateMolecule(second, ROOT_MOLECULE)
+
+  assert.equal(cold.headSig(ROOT_MOLECULE, keys.pubkey), warm.headSig(ROOT_MOLECULE, keys.pubkey),
+    'two readers, one author, ONE head — whatever order they met the entries in')
+  assert.deepEqual(names(cold.children([])), names(warm.children([])))
+
+  // BOTH entries survive on both readers: the loser is never deleted.
+  assert.equal(cold.root.list(`${ROOT_MOLECULE}/${keys.pubkey}`).length, 2)
+  assert.equal(warm.root.list(`${ROOT_MOLECULE}/${keys.pubkey}`).length, 2)
+
+  // And each device keeps ITS OWN head, because the mint ledger is local
+  // evidence no third party has: my page never flips behind my back.
+  assert.notEqual(one.headSig(ROOT_MOLECULE), two.headSig(ROOT_MOLECULE))
 })
 
 // ── 4 ───────────────────────────────────────────────────────────────────────
@@ -302,15 +372,27 @@ test('scenario 6 — a cold client with an EMPTY root materializes /business/peo
   assert.equal(host.stats.misses, 0)
   assert.ok(cold.root.size > 0)
 
-  // the atoms self-placed: the cold client wrote sign(succ.name)/<author>/<head>
-  // without ever being told the route it walked
-  assert.ok(cold.root.has(`${moleculeOf('people')}/${a.authorSig}/${a.headSig(moleculeOf('people'))}`))
+  // CHANGED BY STEP 3: READER-DERIVED PLACEMENT. The atoms no longer
+  // self-place — nothing in them says where they go. The cold client filed
+  // each head at `${molecule it listed}/${bucket name it listed}`, and the
+  // signature it checked was rendered from those same two values. The entry is
+  // named sha256 of the signed claim, so we look it up by the head it names.
+  const peopleMol = moleculeOf('people')
+  const coldBucket = cold.root.list(`${peopleMol}/${a.pubkey}`).filter((e) => e.kind === 'file')
+  assert.equal(coldBucket.length, 1, 'one head filed in the author-key bucket the reader listed')
+  assert.equal(cold.headSig(peopleMol, a.pubkey), a.headSig(peopleMol),
+    'the head the reader resolved for that bucket is the one the author published')
 
   // and the cold client reads the same projection as the author
   assert.deepEqual(cold.childrenSigs(['business', 'people']), a.childrenSigs(['business', 'people']))
 
-  // a corrupted host cannot poison a cold client
-  const evil = { list: host.list, content: () => Buffer.from('lies', 'utf8') }
+  // a corrupted host cannot poison a cold client. It serves honest head CLAIMS
+  // (so acceptance passes and the atom is actually fetched) and lies about the
+  // atom bytes — the hash gate on arrival is what catches it.
+  const evil = {
+    list: host.list,
+    content: (path) => (path.includes('/') ? host.content(path) : Buffer.from('lies', 'utf8')),
+  }
   const victim = new MoleculeStore({ root: new Root(), author: 'cold-visitor' })
   assert.throws(() => victim.materializeCold(evil, ['business']), /failed its hash/)
 })

@@ -18,8 +18,10 @@ import assert from 'node:assert/strict'
 import { MoleculeStore, moleculeOf, ROOT_MOLECULE } from './molecule.mjs'
 import { Root } from './root.mjs'
 import { hostOf } from './host.mjs'
+import { mintKeys } from './keys.mjs'
+import { headClaimPreimage } from './head-claim.mjs'
 import { poolSignature, putPoolDoc } from './pool.mjs'
-import { signText, mineSignatures, canonicalJSON } from './sig.mjs'
+import { signText, mineSignatures, canonicalJSON, bytesOf, sha256 } from './sig.mjs'
 
 // ── the seal the design promises, written faithfully to its own words ───────
 // "seal(M) = a derived succession whose envelopes add succession:<seal(child
@@ -211,25 +213,44 @@ test('D2 — THE ONLY REAL PRUNE FORKS YOU OFF THE MESH: truncating the chain ma
   const peer = new MoleculeStore({ root: new Root(), author: 'peer' })
   peer.replicateMolecule(hostOf(mineRoot), moleculeOf('notes'))
   const mol = moleculeOf('notes')
-  const peerHeld = peer.root.list(`${mol}/${me.authorSig}`)[0].name
+  const peerHeld = peer.root.list(`${mol}/${me.pubkey}`)[0].name
   assert.ok(peerHeld)
 
   // I prune: re-mint my head with prev:null so the dead generations become
   // collectable. This is the ONLY thing that frees bytes.
+  //
+  // CHANGED BY STEP 3: the entry is now a SIGNED head claim, so the truncated
+  // head has to be published as one (an unsigned file would simply be ignored,
+  // which would make this pass for the wrong reason). Truncation also forces
+  // seq back to 0, because seq 0 and genesis must agree — so the peer refuses
+  // it as STALE rather than as a FORK.
+  //
+  // REFINED BY THE AUTHORITY PASS: `stale` is authentic history, so the peer
+  // now KEEPS the bytes instead of dropping them, and reports them in
+  // `kept` rather than `refused`. THE DEFECT IS UNCHANGED and, if anything,
+  // sharper — keeping the truncated entry does not help anyone, because
+  // `resolveBucketHead` ranks by the author's own signed counter and seq 0
+  // loses to seq 5 forever. Pruning still reads as an illegitimate rewrite and
+  // the peer still refuses to follow me, permanently.
   const head = me.getAtom(me.headSig(mol))
   const truncated = me.putAtom({ ...head, prev: null })
-  me.root.write(`${mol}/${me.authorSig}/${truncated}`)
-  me.root.remove(`${mol}/${me.authorSig}/${me.chain(mol).at(-1)?.sig ?? ''}`)
-  for (const f of me.root.list(`${mol}/${me.authorSig}`)) {
-    if (f.name !== truncated) me.root.remove(`${mol}/${me.authorSig}/${f.name}`)
+  const entry = me.mintHeadEntry(mol, { head: truncated, prev: null, seq: 0 })
+  for (const f of me.root.list(`${mol}/${me.pubkey}`)) {
+    me.root.remove(`${mol}/${me.pubkey}/${f.name}`)
   }
+  me.root.write(`${mol}/${me.pubkey}/${entry.name}`, entry.bytes)
   const freed = gc(me)
   assert.ok(freed.length > 0, 'truncation is what actually frees bytes')
 
-  // The peer now sees a head whose chain does not contain the head it holds.
+  // The peer now sees a head it cannot reconcile with the head it holds.
   const report = peer.replicateMolecule(hostOf(mineRoot), mol)
   assert.equal(report.accepted.length, 0)
-  assert.equal(report.refused.length, 1, 'pruning reads as BRANCHING; the peer refuses me forever')
+  assert.deepEqual(
+    report.kept.map((k) => k.reason), ['stale'],
+    'pruning reads as an ILLEGITIMATE REWRITE; the peer never follows me again',
+  )
+  assert.notEqual(peer.headSig(mol, me.pubkey), truncated, 'the peer is pinned to the chain I abandoned')
+  assert.ok(peer.root.has(`${mol}/${me.pubkey}/${peerHeld}`), 'and still holds the entry it had')
 })
 
 test('E — remove() SILENTLY WIPES A LIVE SIBLING ROUTE, and one undo cannot put it back', () => {
@@ -286,30 +307,42 @@ test('F — A DERIVED-CACHE WIPE (doctrine: pools are wipe-safe) DESTROYS A TILE
   assert.deepEqual(me.children(['manifests']), [])
 })
 
-test('G — REPLICATION LETS A REMOTE CHOOSE WHERE MY WRITES LAND: a foreign atom plants a bucket inside a system pool', () => {
+// CHANGED BY STEP 3. This test PASSED before, and a pass was the reproduced
+// defect: a remote chose where my writes landed. The assertion is inverted, and
+// the attack is kept and STRENGTHENED — the impostor now holds a real key and
+// mints a real SIGNED claim for sign('bees'), which is the strongest thing a
+// remote can produce. Placement now comes from the reader's own walk, and the
+// signed preimage binds the molecule address, so the location is as honest as
+// the bytes: content-addressing keeps the BYTES honest, and address-binding
+// keeps the LOCATION honest.
+test('G — REPLICATION NO LONGER LETS A REMOTE CHOOSE WHERE MY WRITES LAND', () => {
   const theirRoot = new Root()
   const them = new MoleculeStore({ root: theirRoot, author: 'stranger' })
   them.save([], 'landing')
 
-  // A hostile (or merely buggy) host puts ONE extra succession in the molecule
-  // I asked for. Its `name` field says 'bees'. #absorbMolecule is SELF-PLACING:
-  // it writes to signText(succ.name), an address the REMOTE picked.
-  const lie = them.putAtom({
-    succession: 1, name: 'bees', author: signText('stranger'), prev: null, members: [], at: 1,
-  })
-  theirRoot.write(`${ROOT_MOLECULE}/${signText('impostor')}/${lie}`)
+  const beesPool = poolSignature('bees')
+  const impostor = mintKeys()
+
+  // A hostile (or merely buggy) host puts ONE extra entry in the molecule I
+  // asked for, carrying a claim genuinely signed for the bees POOL.
+  const lie = them.putAtom({ succession: 1, prev: null, members: [], at: 1 })
+  const claim = {
+    head: lie, prev: null, seq: 0,
+    sig: impostor.sign(headClaimPreimage(beesPool, impostor.pubkey, lie, null, 0)),
+  }
+  const bytes = bytesOf(claim)
+  theirRoot.write(`${ROOT_MOLECULE}/${impostor.pubkey}/${sha256(bytes)}`, bytes)
 
   const me = new MoleculeStore({ root: new Root(), author: 'me' })
-  me.materializeCold(hostOf(theirRoot), [])
+  const { reports } = me.materializeCold(hostOf(theirRoot), [])
 
-  const beesPool = poolSignature('bees')
   const planted = me.root.list(beesPool).filter((e) => e.kind === 'dir')
-  assert.ok(
-    planted.length > 0,
-    'I asked for the root molecule and got a bucket inside the bees POOL: the address came from remote bytes',
+  assert.equal(
+    planted.length, 0,
+    'I asked for the root molecule, so the root molecule is the only place anything could land',
   )
-  // Content-addressing keeps the BYTES honest. It does not keep the LOCATION
-  // honest, because a molecule address is derived from a FIELD, not from a hash.
+  assert.equal(reports[0].refused.find((f) => f.author === impostor.pubkey)?.reason, 'unsigned',
+    'and at the address it was actually served from, the claim does not verify')
 })
 
 test('H — SEALING NEEDS LISTINGS, SO A SEALED ROOT CANNOT BE VERIFIED FROM IMMUTABLE ATOMS ALONE', () => {

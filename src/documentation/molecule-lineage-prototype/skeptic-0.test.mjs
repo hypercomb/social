@@ -10,6 +10,7 @@ import { MoleculeStore, moleculeOf, ROOT_MOLECULE } from './molecule.mjs'
 import { Root } from './root.mjs'
 import { hostOf } from './host.mjs'
 import { signText } from './sig.mjs'
+import { mintKeys } from './keys.mjs'
 
 const seed = (store) => {
   store.save([], 'business')
@@ -21,13 +22,29 @@ const seed = (store) => {
 
 // ───────────────────────────────────────────────────────────────────────────
 // A. THE BUCKET HAS NO TIE-BREAK RULE. The old bag had "max marker wins"; the
-//    molecule bucket has nothing, so a bucket with != 1 file is SILENTLY dead.
+//    molecule bucket had nothing, so a bucket with != 1 file was SILENTLY dead.
 //    #setHead is write-then-prune: two steps, no atomicity. A crash (or a
-//    second tab, or the replicator racing the committer) between them erases
-//    the author's entire chain from every read path, and the NEXT commit forks
+//    second tab, or the replicator racing the committer) between them erased
+//    the author's entire chain from every read path, and the NEXT commit forked
 //    a fresh chain with prev:null — history branched, silently.
+//
+//    CHANGED BY STEP 3 (signed head claims). The attack is UNCHANGED — the same
+//    crash, the same two entries in one bucket — but it no longer blanks the
+//    page. `if (files.length !== 1) continue` was the amplifier that turned any
+//    second entry into a total blackout for every reader, and it is retired:
+//    `resolveBucketHead` picks the highest `seq`, ties broken by the
+//    lexicographically smallest head sig. That order is total, deterministic
+//    and reader-derived, so every reader converges on the same head.
+//
+//    NOTE WHAT IS STILL BROKEN. #setHead is STILL write-then-prune and STILL
+//    not atomic. Step 3 made a half-applied write SURVIVABLE, not atomic; the
+//    atomicity half of blocker 6 is untouched and still owed.
+//
+//    The crash is now modelled with a REAL SIGNED CLAIM for the older
+//    generation, because an entry that is not a verifiable claim is simply
+//    ignored — which would have made this test pass for the wrong reason.
 // ───────────────────────────────────────────────────────────────────────────
-test('A — a bucket with two entries silently erases the author: no order rule exists to break the tie', () => {
+test('A — a bucket with two entries RESOLVES instead of erasing the author (was: silently erased)', () => {
   const store = seed(new MoleculeStore({ author: 'owner' }))
   store.save(['business', 'people'], 'Alice')
   store.save(['business', 'people'], 'Bob')
@@ -38,50 +55,107 @@ test('A — a bucket with two entries silently erases the author: no order rule 
   assert.deepEqual(store.childNames(['business', 'people']), ['Alice', 'Bob'])
 
   // Crash between `write(new)` and `remove(old)` — i.e. #setHead half-applied.
-  store.root.write(`${mol}/${store.authorSig}/${chainBefore[0].sig}`)
+  // Generation 0 is re-planted beside the live generation 1, both signed by the
+  // bucket's own key, exactly as an interrupted commit would leave them.
+  const stale = store.mintHeadEntry(mol, { head: chainBefore[0].sig, prev: null, seq: 0 })
+  store.root.write(`${mol}/${store.pubkey}/${stale.name}`, stale.bytes)
+  assert.equal(store.root.list(`${mol}/${store.pubkey}`).length, 2, 'two entries in one bucket')
 
-  assert.equal(store.heads(mol).length, 0, 'the head is not merely ambiguous — it is GONE')
-  assert.deepEqual(store.childNames(['business', 'people']), [], 'the page reads EMPTY, no error, no warning')
-  assert.equal(store.chain(mol).length, 0, 'the whole chain is unreachable: undo cannot recover it')
+  const head = store.heads(mol)[0]
+  assert.equal(head.sig, chainBefore[1].sig, 'the higher seq wins — the head is not ambiguous')
+  assert.equal(head.rivals, 1, 'and the loser is REPORTED, never deleted: data never heals')
+  assert.deepEqual(store.childNames(['business', 'people']), ['Alice', 'Bob'], 'the page still renders')
+  assert.equal(store.chain(mol).length, 2, 'the chain is still reachable: undo still works')
 
-  // And the next commit forks: prev:null, members [] — history branched.
+  // And the next commit CHAINS ON rather than forking with prev:null.
   store.save(['business', 'people'], 'Carol')
-  const forked = store.chain(mol)
-  assert.equal(forked.length, 1)
-  assert.equal(forked[0].prev, null, 'history BRANCHED — the new chain does not name the old head')
-  assert.deepEqual(store.childNames(['business', 'people']), ['Carol'], 'Alice and Bob are gone from the head forever')
+  const after = store.chain(mol)
+  assert.equal(after.length, 3)
+  assert.equal(after[2].prev, chainBefore[1].sig, 'history did NOT branch')
+  assert.deepEqual(store.childNames(['business', 'people']), ['Alice', 'Bob', 'Carol'])
 })
 
 // ───────────────────────────────────────────────────────────────────────────
-// B. SELF-PLACING TRUSTS THE ATOM'S OWN `author`. materializeCold writes
+// B. SELF-PLACING TRUSTED THE ATOM'S OWN `author`. materializeCold wrote
 //    `${sign(succ.name)}/${succ.author}/${head}` from bytes a host handed over.
-//    Nothing checks that succ.author is the bucket the bytes came from, and
-//    nothing checks that succ.author isn't ME. One foreign atom claiming my
-//    author sig lands a second file in MY bucket -> case A -> my hive blanks.
-//    replicateMolecule guards this (`includeMine`); materializeCold does not.
+//    Nothing checked that succ.author was the bucket the bytes came from, and
+//    nothing checked that succ.author wasn't ME. One foreign atom claiming my
+//    author sig landed a second file in MY bucket -> case A -> my hive blanked.
+//
+//    CHANGED BY STEP 3. The attack is kept in BOTH of its forms, and both are
+//    now refused:
+//
+//      B1 — A PEER REPLAYING MY IDENTITY. Under the old model "my identity" was
+//      `sign('owner')`: anyone who typed the string owned the address. A bucket
+//      is now a PUBLIC KEY, so a peer who is not me simply has a different
+//      bucket and can never reach mine. `succ.author` is gone from the atom
+//      entirely — there is no field left to claim.
+//
+//      B2 — GENUINELY MY OWN KEY, ON A SECOND DEVICE. This is the honest case
+//      the old model could not distinguish from an attack. It never lands in a
+//      way that blanks the page.
+//
+//      REFINED BY THE AUTHORITY PASS. The second device here is at the SAME
+//      generation as me, and two chains of the same LENGTH are a `rival`, not a
+//      `fork`: neither can contain the other, no walk can help, and refusing it
+//      outright is what left two readers of one author on two different heads
+//      forever. So it is KEPT and RANKED — and MY OWN head still does not move,
+//      because the mint ledger (local, never replicated) says which of the two
+//      siblings I actually signed. A device that has genuinely committed PAST
+//      me is a different case and is still a hard refusal: see B3.
 // ───────────────────────────────────────────────────────────────────────────
-test('B — a host-served succession that claims my author sig destroys my head (self-placing is unauthenticated)', () => {
+test('B — a host-served succession claiming to be mine is REFUSED (was: it destroyed my head)', () => {
   const mine = seed(new MoleculeStore({ author: 'owner' }))
   mine.save(['business', 'people'], 'Alice')
+  const molRoot = ROOT_MOLECULE
+  const myHead = mine.headSig(molRoot)
+  assert.equal(mine.heads(molRoot).length, 1)
 
-  // Another device / a peer that replayed my identity — same author string,
-  // different chain. Its bytes are perfectly valid and hash-verify.
+  // B1 — a peer that types the same author string. Its bytes are perfectly
+  // valid and hash-verify; its head claim simply is not signed by my key.
   const theirs = seed(new MoleculeStore({ author: 'owner' }))
   theirs.save([], 'Mallory') // diverges at the ROOT molecule
+  assert.notEqual(theirs.pubkey, mine.pubkey, 'an author STRING is no longer an address')
 
-  const host = hostOf(theirs.root)
-  const molRoot = ROOT_MOLECULE
-
-  assert.equal(mine.heads(molRoot).length, 1)
-  mine.materializeCold(host, [])
-
+  const r1 = mine.materializeCold(hostOf(theirs.root), [])
   assert.equal(
-    mine.root.list(`${molRoot}/${mine.authorSig}`).filter((e) => e.kind === 'file').length,
-    2,
-    'two heads in one bucket, written by a plain replication read',
+    mine.root.list(`${molRoot}/${mine.pubkey}`).filter((e) => e.kind === 'file').length,
+    1,
+    'my bucket still holds exactly one entry — nothing of theirs could reach it',
   )
-  assert.equal(mine.heads(molRoot).length, 0)
-  assert.deepEqual(mine.childNames([]), [], 'my ROOT page is now blank because a host handed me bytes')
+  assert.equal(mine.headSig(molRoot), myHead, 'my head never moved')
+  assert.ok(mine.childNames([]).includes('business'), 'my ROOT page still renders')
+  // Their head landed in THEIR OWN bucket, which is federation working.
+  assert.ok(r1.reports[0].accepted.some((a) => a.author === theirs.pubkey))
+
+  // B2 — the same KEY on a second device, with a genuinely DIVERGENT chain:
+  // it agrees with me at generation 0 ('business') and then commits something
+  // else at generation 1, where I committed 'club'.
+  const secondDevice = new MoleculeStore({ author: 'owner', keys: mine.keys })
+  secondDevice.save([], 'business')
+  secondDevice.save([], 'Mallory')
+  const r2 = mine.materializeCold(hostOf(secondDevice.root), [])
+  const noted = r2.reports[0].kept.find((f) => f.author === mine.pubkey)
+  assert.ok(noted, 'a divergent chain under my own key is REPORTED, not silently applied')
+  assert.equal(noted.reason, 'rival', 'same generation, so it is a sibling and not an accusation')
+  assert.equal(mine.headSig(molRoot), myHead,
+    'and my head still never moved: the mint ledger says which sibling I signed')
+  assert.ok(mine.childNames([]).includes('business'), 'and my ROOT page still renders')
+
+  // B3 — MY OWN KEY, GENUINELY AHEAD OF ME, ON A CHAIN THAT ABANDONS MINE.
+  // The walk can reach its genesis, so descent is DISPROVEN rather than merely
+  // unproven: a hard fork, refused, and refusing it costs me nothing at all.
+  const rogue = new MoleculeStore({ author: 'owner', keys: mine.keys })
+  rogue.save([], 'somewhere-else')
+  rogue.save([], 'and-again')
+  rogue.save([], 'and-once-more')
+  const before = mine.root.paths().length
+  const r3 = mine.materializeCold(hostOf(rogue.root), [])
+  const forked = r3.reports[0].refused.find((f) => f.author === mine.pubkey)
+  assert.ok(forked, 'a chain that abandons mine is refused outright')
+  assert.equal(forked.reason, 'fork', 'history never branches')
+  assert.equal(mine.headSig(molRoot), myHead)
+  assert.equal(mine.root.paths().length, before, 'and not one byte of it was written')
 })
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -171,26 +245,27 @@ test('E — undo on one route + a save on another silently deletes the first rou
 //    and cannot be pinned (the design's answer, sealing, is unimplemented).
 // ───────────────────────────────────────────────────────────────────────────
 test('F — a visitor renders the page in author-hash order; the owner cannot pin the order they published', () => {
-  const ownerName = 'owner'
-  const ownerSig = signText(ownerName)
+  // CHANGED BY STEP 3: the bucket is a PUBLIC KEY, so "author-hash order" is
+  // now pubkey order. The defect is identical — a visitor still renders the
+  // page in an order the owner cannot pin — so the fixture mints identities
+  // either side of the owner's key instead of hashing author strings.
+  const ownerKeys = mintKeys()
 
-  // Two contributor identities: one hashing BELOW the owner, one ABOVE.
   let below = null
   let above = null
   for (let i = 0; i < 500 && (!below || !above); i++) {
-    const n = `guest-${i}`
-    const s = signText(n)
-    if (!below && s < ownerSig) below = n
-    if (!above && s > ownerSig) above = n
+    const k = mintKeys()
+    if (!below && k.pubkey < ownerKeys.pubkey) below = k
+    if (!above && k.pubkey > ownerKeys.pubkey) above = k
   }
   assert.ok(below && above, 'found identities on both sides of the owner')
 
-  const build = (guestName) => {
+  const build = (guestKeys) => {
     const shared = new Root()
-    const owner = new MoleculeStore({ root: shared, author: ownerName })
+    const owner = new MoleculeStore({ root: shared, author: 'owner', keys: ownerKeys })
     owner.save([], 'Owner-First')
     owner.save([], 'Owner-Second')
-    const guest = new MoleculeStore({ root: shared, author: guestName })
+    const guest = new MoleculeStore({ root: shared, author: 'guest', keys: guestKeys })
     guest.save([], 'Guest-Tile')
     const visitor = new MoleculeStore({ root: shared, author: 'a-passing-visitor' })
     return { owner, visitor }
@@ -211,7 +286,7 @@ test('F — a visitor renders the page in author-hash order; the owner cannot pi
   assert.deepEqual(
     lo.visitor.childNames([]),
     ['Guest-Tile', 'Owner-First', 'Owner-Second'],
-    "a guest's tile is rendered FIRST on the owner's published page, because sha256(guest) < sha256(owner)",
+    "a guest's tile is rendered FIRST on the owner's published page, because guestPubkey < ownerPubkey",
   )
 
   // And there is no verb that produces a signature for what was rendered.
@@ -253,7 +328,9 @@ test('H — HOLDS: listing order is irrelevant and the two-tenant union converge
 
   const natural = a.childNames([])
   for (const order of ['reverse', 'sorted']) {
-    const view = new MoleculeStore({ root: shared, author: 'aaa' })
+    // CHANGED BY STEP 3: identity is a KEY, not the string 'aaa'. To read AS
+    // `a` the view must hold a's keys — which is the whole point of the change.
+    const view = new MoleculeStore({ root: shared, author: 'aaa', keys: a.keys })
     view.root.list = ((orig) => (dir, o) => orig.call(view.root, dir, { ...o, order }))(Root.prototype.list)
     assert.deepEqual(view.childNames([]), natural, `stable under listing order=${order}`)
   }

@@ -14,6 +14,8 @@ import { putPoolDoc, getPoolDoc, poolSignature } from './pool.mjs'
 import { canonName } from './canon.mjs'
 import { sha256, signText, EMPTY_SIG } from './sig.mjs'
 import { bytesOf } from './sig.mjs'
+import { mintKeys } from './keys.mjs'
+import { headClaimPreimage } from './head-claim.mjs'
 
 /** Write a raw atom into an arbitrary Root and return its sig. */
 const plant = (root, obj) => {
@@ -24,41 +26,60 @@ const plant = (root, obj) => {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// S2-1. A remote succession decides WHICH DIRECTORY it lands in.
-//       `#absorbMolecule` writes to signText(succ.name) — never checking that
-//       it equals the molecule it was listed under. A host I asked for ONE
-//       molecule can therefore write into ANY address in my root, including a
+// S2-1. A remote succession decided WHICH DIRECTORY it landed in.
+//       `#absorbMolecule` wrote to signText(succ.name) — never checking that it
+//       equalled the molecule it was listed under. A host I asked for ONE
+//       molecule could therefore write into ANY address in my root, including a
 //       reserved system pool.
+//
+//       CHANGED BY STEP 3 (reader-derived placement + signed head claims). The
+//       attack is kept and STRENGTHENED: the attacker now holds a REAL KEY and
+//       mints a REAL SIGNED head claim for sign('bees') — the strongest form
+//       available, not merely an unsigned atom. It still cannot land, for two
+//       independent reasons:
+//
+//         1. Placement is READER-DERIVED. replicateMolecule files at
+//            `${the molecule I listed}/${the bucket the listing returned}`. The
+//            succession no longer carries `name` or `author` at all, so there is
+//            no field left to read a location out of.
+//         2. The signed preimage BINDS the molecule address. A claim minted for
+//            sign('bees') renders a different preimage at the root molecule, so
+//            it is refused 'unsigned' even if step 1 were somehow bypassed.
 // ───────────────────────────────────────────────────────────────────────────
-test('S2-1 self-placing successions let a host write into a RESERVED SYSTEM POOL it was never asked about', () => {
+test('S2-1 a signed succession cannot be filed into a RESERVED SYSTEM POOL it was never routed to', () => {
   const hostileRoot = new Root()
-  const evil = signText('evil')
+  const evilKeys = mintKeys()
+  const beesPool = poolSignature('bees')
 
-  // A perfectly well-formed succession — that claims the name 'bees'.
+  // A perfectly well-formed succession, and a head claim genuinely SIGNED for
+  // the bees pool by a key that really does control its own bucket there.
   const vertex = plant(hostileRoot, { name: 'gotcha' })
   const env = plant(hostileRoot, { meta: 1, layer: vertex, root: 'gotcha', relation: 'child', slot: 0 })
-  const succ = plant(hostileRoot, {
-    succession: 1, name: 'bees', author: evil, prev: null, members: [env], at: 1,
-  })
-  // It is served from the ROOT molecule's listing. I only ever ask for the root.
-  hostileRoot.write(`${ROOT_MOLECULE}/${evil}/${succ}`)
+  const succ = plant(hostileRoot, { succession: 1, prev: null, members: [env], at: 1 })
+  const claim = {
+    head: succ, prev: null, seq: 0,
+    sig: evilKeys.sign(headClaimPreimage(beesPool, evilKeys.pubkey, succ, null, 0)),
+  }
+  const claimBytes = bytesOf(claim)
+  // Served from the ROOT molecule's listing. I only ever ask for the root.
+  hostileRoot.write(`${ROOT_MOLECULE}/${evilKeys.pubkey}/${sha256(claimBytes)}`, claimBytes)
 
   const me = new MoleculeStore({ root: new Root(), author: 'me' })
-  // My own real system pool, at the very address the attacker names.
+  // My own real system pool, at the very address the attacker signed for.
   putPoolDoc(me.root, 'bees', { installed: ['drone-a'] })
 
-  me.materializeCold(hostOf(hostileRoot), [])
-
-  const beesPool = poolSignature('bees')
-  const foreign = me.root.list(beesPool).filter((e) => e.kind === 'dir')
+  const { reports } = me.materializeCold(hostOf(hostileRoot), [])
 
   assert.deepEqual(
-    foreign, [],
-    'a host serving the ROOT molecule planted a contributor bucket inside sign("bees"), ' +
-    'a directory I never routed to. Placement is chosen by the SENDER: ' +
-    '#absorbMolecule does root.write(signText(succ.name)/...) with no check that ' +
-    'signText(succ.name) === the molecule I listed.',
+    me.root.list(beesPool).filter((e) => e.kind === 'dir'), [],
+    'nothing a host serves can plant a bucket in a directory the reader never routed to',
   )
+  assert.equal(
+    reports[0].refused.find((f) => f.author === evilKeys.pubkey)?.reason, 'unsigned',
+    'and at the address it WAS served from, the claim does not verify: the ' +
+    'preimage the reader rebuilt names the ROOT molecule, not sign("bees")',
+  )
+  assert.deepEqual(getPoolDoc(me.root, 'bees'), { installed: ['drone-a'] }, 'my install pool is untouched')
 })
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -67,28 +88,40 @@ test('S2-1 self-placing successions let a host write into a RESERVED SYSTEM POOL
 //       chain(), undo() and "mine:true" placement then read the attacker's
 //       claim as my own history.
 // ───────────────────────────────────────────────────────────────────────────
-test('S2-2 a host can forge MY head: the bucket address is derived from a field the atom declares', () => {
+test('S2-2 a host cannot forge MY head: the bucket address is a KEY, not a field the atom declares', () => {
   const me = new MoleculeStore({ root: new Root(), author: 'me' })
-  const mySig = me.authorSig
+  const mySig = me.pubkey
 
+  // CHANGED BY STEP 3. The attack is kept and STRENGTHENED: Mallory holds a
+  // real key and writes the strongest thing she can — a head claim whose
+  // preimage NAMES MY BUCKET at the root molecule, served from a directory
+  // named with my pubkey. She can write that string; she cannot make it verify
+  // under a key she does not hold. It is the pubkey/preimage comparison, not
+  // the curve maths, that closes this.
+  const mallory = mintKeys()
   const hostileRoot = new Root()
   const vertex = plant(hostileRoot, { name: 'payload' })
   const env = plant(hostileRoot, { meta: 1, layer: vertex, root: 'payload', relation: 'child', slot: 0 })
-  const forged = plant(hostileRoot, {
-    succession: 1, name: '', author: mySig, prev: null, members: [env], at: 1,
-  })
-  hostileRoot.write(`${ROOT_MOLECULE}/${mySig}/${forged}`)
+  const forgedSucc = plant(hostileRoot, { succession: 1, prev: null, members: [env], at: 1 })
+  const forgedClaim = {
+    head: forgedSucc, prev: null, seq: 0,
+    // signed by MALLORY, over a preimage that names MY bucket
+    sig: mallory.sign(headClaimPreimage(ROOT_MOLECULE, mySig, forgedSucc, null, 0)),
+  }
+  const bytes = bytesOf(forgedClaim)
+  hostileRoot.write(`${ROOT_MOLECULE}/${mySig}/${sha256(bytes)}`, bytes)
 
-  me.materializeCold(hostOf(hostileRoot), [])
+  const { reports } = me.materializeCold(hostOf(hostileRoot), [])
 
+  assert.equal(me.headSig(ROOT_MOLECULE), null, 'nothing was installed as my head')
   assert.equal(
-    me.headSig(ROOT_MOLECULE), null,
-    'a cold materialize accepted a succession that merely SAYS author=<me> and installed it ' +
-    `as my own head (${me.headSig(ROOT_MOLECULE)}). chain() now reports it as my history, ` +
-    'viewOf() marks its members mine:true, and my next commit chains prev onto it. ' +
-    'replicateMolecule() has a skip-mine guard and a #chainContains check; ' +
-    '#absorbMolecule — the COLD path, the one the design sells — has neither.',
+    reports[0].refused.find((f) => f.author === mySig)?.reason, 'unsigned',
+    'a bucket is addressed by a PUBLIC KEY and the claim must verify under it. ' +
+    'The succession no longer carries an `author` field at all, so there is ' +
+    'nothing left to declare — and the cold path now runs the SAME acceptance ' +
+    'as replicateMolecule, which is where #absorbMolecule went.',
   )
+  assert.deepEqual(me.childNames([]), [], 'my root page shows nothing of hers')
 })
 
 // ───────────────────────────────────────────────────────────────────────────
