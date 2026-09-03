@@ -85,6 +85,34 @@ judges required:
   non-letter/digit runs → `-`, edge hyphens stripped).
   `controls-bar.component.ts:1158` and `mesh-modal.component.ts:139` hash a
   RAW join today and already disagree — fix both.
+- **TWO PREIMAGE FUNCTIONS, NEVER ONE** (resolved 2026-09-02; the contention
+  register raised this as the one blocking, unhealable decision). A molecule
+  address and a system-pool address must NOT be derived the same way:
+
+  | | preimage | example |
+  |---|---|---|
+  | **molecule** (a tile name) | `fold(canon(name))` | `People` → `people` → `c9022680…` |
+  | **system pool** (a developer's meaning) | the **RAW** meaning, untouched | `websites:menu` → `17deba5b…` |
+
+  The register argued this was a dilemma — canonicalize and the colon is eaten
+  (`websites:menu` → `websites-menu`), so every reserved pool re-addresses;
+  sign raw and `My Cool Tile` re-forks from `My-Cool-Tile`. **Both horns only
+  exist if one function serves both namespaces.** It doesn't, and the code
+  already reflects that: `PoolRegistry::address` signs the raw meaning while
+  the bag preimage is canonicalized. That is not a disagreement, it is the
+  design.
+
+  **The reservation holds BECAUSE the two differ.** `canonicalizeLineageSegment`
+  maps every non-letter/digit run to `-`, so its output can never contain a
+  colon — therefore no tile name, in any script, can ever reach a colon-scoped
+  address. Verified: `canon('websites:menu') === 'websites-menu'`, and
+  `sign('websites:menu')` stays `17deba5b…`.
+
+  Keep `lineageKey` byte-identical (paths, case-preserving) and add
+  `moleculeKey(name) = fold(canon(name)) || String(name).trim()` — the raw
+  fallback matters, or a symbol/emoji-only name canonicalizes to `''` and
+  collides with the ROOT address.
+
 - **CASE IS FOLDED FOR THE ADDRESS** (decided 2026-09-02). The molecule address
   is `sign(canon(name).toLowerCase())`. **Case folding IS the interop** — a
   global vocabulary where `People` and `people` are different molecules is not
