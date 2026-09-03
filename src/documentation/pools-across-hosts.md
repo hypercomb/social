@@ -167,5 +167,15 @@ the root. This is the directory-as-set fork already found on
   The nose ranks by host — the same answer already pinned for hive names.
 - The family list itself: seed with the families a shipped behaviour
   already consumes; add one only when a consumer exists for it.
-- The relay's directory branch, and the static ship's index — neither is
-  built.
+- ~~The relay's directory branch, and the static ship's index — neither is
+  built.~~ **BOTH BUILT 2026-09-03**, on `host:packages` as the first pool to
+  use them. The relay answers `/<sig>/` with its entry names as
+  `text/plain`, `no-store`, filtering `index.html` and dotfiles; the ship
+  writes that same listing as `<pool>/index.html` so a bucket answers the
+  same URL. Client side: `parsePoolListing` / `markerIndices` in
+  `hypercomb-runtime/src/host-pool.ts`, with the index probe kept behind them
+  as the drain window for a relay that has not restarted. Verified against
+  the real content directory: 180 entries in one request; head in 4 requests,
+  a five-row browse page in 8. See `host-packages-pool.md`.
+  Still owed: the family pools (`sign(family + ':names')`) — this built the
+  member half only, for one meaning.

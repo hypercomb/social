@@ -106,22 +106,46 @@ measurement then disproved: a bag entry is `@alias
 in the dependency's own bytes. Nothing survived the check. The document was
 withdrawn from the live host the same day.
 
-### Probing, not an index the host renders
+### The directory branch, and the probe behind it
 
-HTTP cannot list a directory, so reading a pool is a walk. Two ways, and the
-choice is already settled by the host contract: serving `/<pool>/00000007` is
-serving a file, which a bucket, a Pages deployment and a relay all do
-identically, while an index a host RENDERS makes the host a program and
-excludes every static host from being one.
+HTTP cannot list a directory *by default*, which is not the same as cannot.
+`pools-across-hosts.md` settles the shape and this chip now follows it:
 
-So: double until the probe misses, then bisect — `~2·log2(n)` requests.
-**Measured live against `jwize.com`: 18 requests, 926 ms, over a pool of 179
-entries**, agreeing with the manifest's newest.
+| Path | What it is | Cache |
+|---|---|---|
+| `/<sig>` | a file — content, a member record | `immutable` |
+| `/<sig>/` | a directory — a pool, a lineage bag | `no-store` |
 
-Entries are append-only, which is what makes the bisect sound (`has(i)` is
-monotonic, so the boundary IS the head) and what lets them be served
-`immutable` — entry *i* is the same bytes forever. The named documents are the
-only mutable things on the wire, and they are the ones being retired.
+A live host answers the second by `readdir`; a static host's ship writes the
+same bytes as the directory's own `index.html`, at the same address. Both
+shapes answer one URL, and `readdir` is not computing a document — it is
+entry names, nothing that could decide what installs.
+
+**One request serves booting and browsing alike**, which is what finally
+retires the manifest: a browse list needs to enumerate, and enumeration is
+exactly what a probe cannot do.
+
+Behind it, for a host whose relay predates the branch, the probe stays: double
+until it misses, then bisect, `~2·log2(n)`. That is the drain window — 18
+requests where a listing costs one, and it can only ever find the head.
+
+**A CORRECTION, kept because the wrong turn is instructive.** This section
+first argued *against* a directory branch on the grounds that a host which has
+to compute a listing stops being a pile of bytes. That reasoning was sound and
+the conclusion was still wrong, because it was reached without reading
+`pools-across-hosts.md`, which had already ruled: a pool IS a directory, sets
+grow, and the file/directory distinction the OPFS root already makes is the one
+the wire needs. `packages.json` was never a second dialect — it was a relay
+that could not `readdir`. Before that, this chip described a projection, which
+was a manifest with fewer columns. Two wrong turns, both from designing the
+wire rather than reading what the wire already was.
+
+**Measured.** Live directory branch, local relay over the real content dir:
+`GET /<pool>/` → 200, `text/plain`, `no-store`, 180 entries, `index.html`
+excluded. Client end to end: head in 4 requests / 43 ms; five newest rows —
+signature, branch mark and date — in 8 requests / 9 ms; paging by `before`
+works. Against the deployed `jwize.com` the branch 404s until its relay
+restarts, and the probe fallback carries it in the meantime.
 
 ## `beeDeps` is published by nobody
 

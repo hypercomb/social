@@ -312,6 +312,22 @@ const syncTarget = (
     copied++
   })
 
+  // THE STATIC SHIP'S INDEX (documentation/pools-across-hosts.md).
+  //
+  // A live host answers `GET /<pool>/` by `readdir`. A bucket cannot, so the
+  // ship writes the same bytes the live host would compute, at the same
+  // address — a directory describing itself. Both host shapes then answer one
+  // URL, which is the whole point: nothing is named and nothing is agreed.
+  //
+  // `index.html` because that is what a static host serves for a directory
+  // URL. It is not a member and every reader filters it out, on both shapes.
+  const listing = poolOrder.map((_, index) => poolEntryName(index)).sort().join('\n')
+  const indexPath = join(poolDir, 'index.html')
+  if (!existsSync(indexPath) || readFileSync(indexPath, 'utf8') !== listing) {
+    writeFileSync(indexPath, listing, 'utf8')
+    copied++
+  } else skipped++
+
   // remove stale entries (signatures no longer in source) — STRICTLY
   // whitelisted to 64-hex names so app assets sharing the target root
   // (index.html, worker scripts, manifest.json) are untouchable. Recursive

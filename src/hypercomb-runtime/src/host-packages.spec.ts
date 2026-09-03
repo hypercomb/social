@@ -19,17 +19,30 @@ type Served = Record<string, unknown>
 const serving = (routes: Served): ReturnType<typeof vi.fn> =>
   vi.fn(async (url: string) => {
     const body = routes[String(url)]
-    if (body === undefined) return { ok: false, status: 404 } as unknown as Response
+    if (body === undefined) return { ok: false, status: 404, headers: new Headers() } as unknown as Response
     return {
       ok: true,
       status: 200,
+      // A host that does not date its files simply yields rows without a date.
+      headers: new Headers(),
       text: async () => String(body),
       json: async () => body,
     } as unknown as Response
   })
 
-/** The pool as a host lays it out: one signature per gapless index. */
+/** The pool as a host lays it out: the DIRECTORY answering with its entry
+ *  names, and one signature per gapless index underneath it. */
 const poolAt = async (base: string, sigs: string[]): Promise<Served> => {
+  const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
+  const names = sigs.map((_, i) => poolEntryName(i))
+  return {
+    [`${base}/${pool}/`]: names.join('\n'),
+    ...Object.fromEntries(sigs.map((sig, i) => [`${base}/${pool}/${poolEntryName(i)}`, sig])),
+  }
+}
+
+/** A host whose relay predates the directory branch: entries, no listing. */
+const poolWithoutListing = async (base: string, sigs: string[]): Promise<Served> => {
   const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
   return Object.fromEntries(sigs.map((sig, i) => [`${base}/${pool}/${poolEntryName(i)}`, sig]))
 }
@@ -96,6 +109,12 @@ describe('headPackage — discovery', () => {
     expect(await headPackage('host.example')).toBeNull()
   })
 
+  it('falls back to probing for a host whose relay cannot list a directory', async () => {
+    vi.stubGlobal('fetch', serving(await poolWithoutListing('https://host.example', [SIG_B, SIG_A])))
+
+    expect((await headPackage('host.example'))?.packageSig).toBe(SIG_A)
+  })
+
   it('answers null for a domain that publishes nothing at all', async () => {
     vi.stubGlobal('fetch', serving({}))
     expect(await headPackage('host.example')).toBeNull()
@@ -128,7 +147,12 @@ describe('listHostPackages — the browse surface', () => {
 
     await listHostPackages('host.example')
 
-    for (const call of fetchMock.mock.calls) expect(call[1]).toMatchObject({ cache: 'no-store' })
+    // Pool ENTRIES are immutable and read with the default cache; the two
+    // mutable things — a directory listing and a named document — are not.
+    const mutable = fetchMock.mock.calls.filter(call =>
+      String(call[0]).endsWith('manifest.json') || String(call[0]).endsWith('/'))
+    expect(mutable.length).toBeGreaterThan(0)
+    for (const call of mutable) expect(call[1]).toMatchObject({ cache: 'no-store' })
   })
 
   it('answers empty for a domain that publishes nothing', async () => {

@@ -26,7 +26,7 @@
 // It reads nothing but public URLs and writes nothing anywhere.
 
 import { HOST_IOC_KEY, registerPoolMeaning, type HostProvider } from '@hypercomb/core'
-import { HOST_PACKAGES_MEANING, headIndex, parseMember, poolEntryName } from './host-pool.js'
+import { HOST_PACKAGES_MEANING, headIndex, markerIndices, parseMember, parsePoolListing, poolEntryName } from './host-pool.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
@@ -132,13 +132,49 @@ const rowFrom = (zone: string, base: string, fetched: Fetched | null): HostPacka
   }
 }
 
-/** Where a zone's pool answers, and how far it runs. */
-const findPool = async (zone: string): Promise<{ base: string; read: ReturnType<typeof poolReader>; head: number } | null> => {
+type FoundPool = {
+  base: string
+  read: ReturnType<typeof poolReader>
+  head: number
+  /** Every index the host actually holds, when it could tell us in one
+   *  request. Null from the probe path, which can find the head and nothing
+   *  else. */
+  indices: number[] | null
+}
+
+/**
+ * WHERE A ZONE'S POOL ANSWERS.
+ *
+ * Ask the DIRECTORY first — `GET /<pool>/` — which is one request and returns
+ * every entry name, so it serves browsing and booting alike. `no-store`,
+ * because the members are immutable but the membership is not.
+ *
+ * A host whose relay predates the directory branch falls through to probing
+ * indices. That path is the drain window: eighteen requests where the listing
+ * costs one, and it can only find the head — never enumerate. Which is
+ * precisely why a browse list needed a manifest for as long as probing was
+ * the only mechanism.
+ */
+const findPool = async (zone: string): Promise<FoundPool | null> => {
   const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
+
   for (const base of hostBases(zone)) {
     const read = poolReader(base, pool)
+
+    let listing: string[] | null = null
+    try {
+      const res = await fetch(`${base}/${pool}/`, { cache: 'no-store' })
+      listing = res.ok ? parsePoolListing(await res.text()) : null
+    } catch { listing = null }
+
+    if (listing) {
+      const indices = markerIndices(listing)
+      if (indices.length) return { base, read, head: indices[indices.length - 1]!, indices }
+      continue   // the host holds this pool and it is empty — not a miss to retry elsewhere
+    }
+
     const head = await headIndex(async i => (await read(i)) !== null)
-    if (head >= 0) return { base, read, head }
+    if (head >= 0) return { base, read, head, indices: null }
   }
   return null
 }
@@ -182,11 +218,13 @@ export const listHostPackages = async (
   if (!found) return readManifestAnywhere(zone)
 
   const limit = Math.max(1, options.limit ?? BROWSE_PAGE)
-  const top = Math.min(found.head, options.before !== undefined ? options.before - 1 : found.head)
-  if (top < 0) return []
+  const ceiling = options.before !== undefined ? options.before - 1 : found.head
+  if (ceiling < 0) return []
 
-  const indices: number[] = []
-  for (let i = top; i > top - limit && i >= 0; i--) indices.push(i)
+  // The listing knows exactly which indices exist; the probe path can only
+  // assume they run contiguously to the head, which append-only makes true.
+  const available = found.indices ?? Array.from({ length: found.head + 1 }, (_, i) => i)
+  const indices = available.filter(i => i <= ceiling).sort((a, b) => b - a).slice(0, limit)
 
   const rows = await Promise.all(indices.map(async i => rowFrom(zone, found.base, await found.read(i))))
   return rows.filter((row): row is HostPackage => row !== null)

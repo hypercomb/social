@@ -20,13 +20,21 @@
 // each dependency's own first line paired with its file name. One signature
 // expands into everything (documentation/host-packages-pool.md).
 //
-// WHY PROBING, AND NOT AN INDEX THE HOST RENDERS. HTTP has no directory
-// listing, so a walk is unavoidable — but serving `/<pool>/00000007` is
-// serving a file, which a bucket, a Pages deployment and a relay all do
-// identically. The moment a host has to COMPUTE a listing it stops being a
-// pile of bytes, and half the things that can host a hive stop qualifying.
-// Doubling-then-bisecting costs ~2·log2(n) requests: sixteen for a host that
-// has shipped a hundred and seventy-six times.
+// HOW IT IS READ: ASK THE DIRECTORY (documentation/pools-across-hosts.md).
+// `/<sig>` is a FILE — one closure forever, cacheable for a year. `/<sig>/`
+// is a DIRECTORY, and a directory is a set, and sets grow. A host answers the
+// second with its entry names, `no-store`: `readdir` on the wire, not a
+// document. One request, and it serves browsing as well as booting.
+//
+// A static host has no `readdir`, so its ship writes the same bytes as the
+// directory's own index at the same address. Both host shapes answer the same
+// URL, which is the whole point — nothing is named, nothing is agreed.
+//
+// AND A FALLBACK, for a host whose relay predates the directory branch:
+// probe indices, doubling then bisecting, ~2·log2(n) requests. That path is
+// the drain window. It costs eighteen requests where the listing costs one,
+// and it can only find the head — it cannot enumerate, which is why the
+// browse list needed a manifest for as long as it was the only mechanism.
 
 /** The meaning whose signature addresses a host's published packages. It
  *  carries a COLON by the collision rule: `lineageKey` folds every
@@ -74,6 +82,33 @@ export const headIndex = async (has: (index: number) => Promise<boolean>): Promi
   }
   return present
 }
+
+/**
+ * A directory listing as a host answers it: entry names, one per line.
+ *
+ * `index.html` is filtered because that is the STATIC ship's rendering of
+ * this very listing — the directory describing itself for a bucket that
+ * cannot `readdir`. It is not a member on either host shape.
+ *
+ * Returns null for anything that is not a listing at all (an SPA fallback
+ * page, an error body), so a caller can tell "this host has no directory
+ * branch" from "this pool is empty".
+ */
+export const parsePoolListing = (text: string | null): string[] | null => {
+  if (text === null) return null
+  if (text.includes('<')) return null
+  const names = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+  return names.filter(name => name !== 'index.html' && !name.startsWith('.'))
+}
+
+/** The marker indices in a listing, ascending. Anything that is not an
+ *  all-digit marker name is some other kind of pool member and not ours. */
+export const markerIndices = (names: readonly string[]): number[] =>
+  names
+    .filter(name => /^[0-9]+$/.test(name))
+    .map(name => Number(name))
+    .filter(index => Number.isSafeInteger(index) && index >= 0)
+    .sort((a, b) => a - b)
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
