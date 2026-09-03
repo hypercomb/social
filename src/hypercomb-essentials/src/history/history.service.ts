@@ -1,5 +1,5 @@
 // core/history.service.ts
-import { CHILD_SLOTS, EffectBus, SignatureService, SignatureStore, USAGE_IOC_KEY, healLegacyLayer, isMetaEnvelope, isPoolAddress, metaPayloadOf, packedStoreEnabled, poolAddresses, poolMeaningOf, type MetaEnvelope, type UsageRanker } from '@hypercomb/core'
+import { CHILD_SLOTS, EffectBus, SignatureService, SignatureStore, USAGE_IOC_KEY, hardDeleteVetoFor, healLegacyLayer, isMetaEnvelope, isPoolAddress, metaPayloadOf, packedStoreEnabled, poolAddresses, poolMeaningOf, type MetaEnvelope, type UsageRanker } from '@hypercomb/core'
 import { lineageKey, rawLineageKey } from './lineage-key.js'
 import { canonicalizeLayer } from './canonical-layer.js'
 import { isBareLayer } from './child-sig-guard.js'
@@ -83,6 +83,14 @@ export type LayerContent = {
    *  See LayerSlotRegistry. Reads/writes use bracket access so this
    *  signature doesn't have to enumerate every possible slot. */
   [slot: string]: unknown
+}
+
+/** One exact live location head. Bounded readers keep the signatures private
+ * and project only safe structural fields from `layer`. */
+export type CurrentLayerRef = {
+  readonly locationSig: string
+  readonly layerSig: string
+  readonly layer: LayerContent
 }
 
 /**
@@ -2438,6 +2446,41 @@ export class HistoryService {
   // Consolidated-sig cache: locationSig → { key, sealedSig }. `key` folds the
   // location's live head sig + its children's sealed sigs, so any change at or
   // below a node invalidates exactly that node's entry.
+  /**
+   * Resolve the current layer together with the exact head signature that
+   * supplied it, without minting a marker. Hypercomb history is per-page: a
+   * parent's carried child signature may be old after a deep edit, so bounded
+   * readers snapshot each visited LOCATION rather than treating the root as a
+   * global Merkle head.
+   *
+   * The final local re-read couples the object to `layerSig`. Callers still
+   * fence any multi-await traversal with {@link treeEpoch}.
+   */
+  public readonly currentLayerRefAt = async (
+    locationSig: string,
+    stats?: { cold?: boolean },
+  ): Promise<CurrentLayerRef | null> => {
+    const layer = await this.currentLayerAt(locationSig, stats)
+    if (!layer) return null
+    const canonical = HistoryService.canonicalizeLayer(layer)
+    // A husk-only real head can be visually superseded by a parent-carried
+    // virtual seed. Try both sources and choose the one that actually supplied
+    // the object currentLayerAt returned, rather than blindly preferring the
+    // real-head map as #headSigFor normally (and correctly) does for writes.
+    const candidates = [
+      this.#latestSigByLineage.get(locationSig),
+      this.#seededHeadByLineage.get(locationSig),
+    ].filter((sig, index, all): sig is string => !!sig && all.indexOf(sig) === index)
+    for (const layerSig of candidates) {
+      const exact = await this.#resolveLayerLocal(layerSig)
+      if (exact && HistoryService.canonicalizeLayer(exact) === canonical) {
+        return { locationSig, layerSig, layer: exact }
+      }
+    }
+    if (stats) stats.cold = true
+    return null
+  }
+
   readonly #sealCache = new Map<string, { key: string; sealedSig: string }>()
 
   /** Seal results by location, stamped with the {@link treeEpoch} they were
@@ -3710,9 +3753,13 @@ export class HistoryService {
    * shape IS the type" rule.
    *
    * What gets removed:
-   *   - 64-hex sig file whose content is NOT a v2 layer JSON
-   *   - 8-digit numeric file (legacy op or DCP marker — doesn't
-   *     belong in a hypercomb.io bag)
+   *   - marker-shaped file whose content is NOT a canonical marker
+   *     (bare-sig pre-merkle shape, op-JSON, or unreadable)
+   *
+   * What NO LONGER gets removed (2026-09-02): 64-hex sig files. They are
+   * indistinguishable from pool members and molecule succession atoms, and
+   * every reader already ignores non-marker names, so leaving them is inert
+   * where deleting them is irreversible.
    *
    * Files whose names don't match either shape are left alone for
    * manual triage.
@@ -3770,29 +3817,42 @@ export class HistoryService {
     for await (const [name, handle] of (bag as any).entries()) {
       if (handle.kind !== 'file') continue
 
-      // Canonical marker: NNNN name + canonical content.
-      if (HistoryService.#MARKER_RE.test(name)) {
+      // NOT MARKER-SHAPED — a 64-hex file. This function used to drop these
+      // as "pre-merkle pollution", and that is now unsafe: a sig-named file
+      // inside a sig-named directory is INDISTINGUISHABLE from a pool member
+      // or a molecule's succession atom. Both are 64-hex names whose content
+      // is not a v2 layer JSON, so no content sniff can separate the junk
+      // from somebody's data — and the registry check above cannot see a
+      // molecule address, because any participant mints one by typing a word.
+      //
+      // Dropping them bought nothing anyway: every reader already filters by
+      // marker shape (`listLayers`, `#scanLatestMarker`, `refreshLineageCache`
+      // all skip non-marker names), so legacy pollution is inert where it
+      // lies. Leave it — deleting is the only irreversible move available
+      // here. See documentation/hypergraph-molecule-lineage.md.
+      if (!HistoryService.#MARKER_RE.test(name)) continue
+
+      // Marker-shaped: keep it only if its content is a canonical marker.
+      try {
+        const file = await (handle as FileSystemFileHandle).getFile()
+        const text = (await file.text()).trim()
+        // Bare-sig content is the pre-merkle marker shape; drop it.
+        if (HistoryService.#SIG_RE.test(text)) { drop.push(name); continue }
         try {
-          const file = await (handle as FileSystemFileHandle).getFile()
-          const text = (await file.text()).trim()
-          // Bare-sig content is the pre-merkle marker shape; drop it.
-          if (HistoryService.#SIG_RE.test(text)) { drop.push(name); continue }
-          try {
-            const parsed = JSON.parse(text)
-            if (parsed && typeof parsed === 'object') {
-              // Pointer record `{layer:<sig>}` — the modern shape every
-              // marker converges on (commitLayer, #ensureEmptyMarker and
-              // #opportunisticMigrateMarker all write it).
-              if (typeof parsed.layer === 'string' && HistoryService.#SIG_RE.test(parsed.layer)) continue
-              // Legacy inline layer JSON. `name` may be '' — the ROOT
-              // lineage's canonical layer signs as empty, so a non-empty
-              // keep-test here would erase real root history. Op-JSON
-              // from the pre-layer recorder has no `name` and still drops.
-              if (typeof parsed.name === 'string') continue
-            }
-          } catch { /* unparseable — drop */ }
-        } catch { /* unreadable — drop */ }
-      }
+          const parsed = JSON.parse(text)
+          if (parsed && typeof parsed === 'object') {
+            // Pointer record `{layer:<sig>}` — the modern shape every
+            // marker converges on (commitLayer, #ensureEmptyMarker and
+            // #opportunisticMigrateMarker all write it).
+            if (typeof parsed.layer === 'string' && HistoryService.#SIG_RE.test(parsed.layer)) continue
+            // Legacy inline layer JSON. `name` may be '' — the ROOT
+            // lineage's canonical layer signs as empty, so a non-empty
+            // keep-test here would erase real root history. Op-JSON
+            // from the pre-layer recorder has no `name` and still drops.
+            if (typeof parsed.name === 'string') continue
+          }
+        } catch { /* unparseable — drop */ }
+      } catch { /* unreadable — drop */ }
       drop.push(name)
     }
 
@@ -4266,6 +4326,16 @@ export class HistoryService {
    * of that name, and a recursive remove there would take the participant's
    * whole clipboard/registry/computation pool with it. When in doubt, do
    * nothing and say so.
+   *
+   * AND REFUSES ANY SHARED DIRECTORY, registry or no registry. The pool check
+   * below can only recognise meanings some module registered; the address that
+   * actually matters under the molecule model is one no registry can ever
+   * enumerate — `sign('people')` is an ordinary tile's bag AND the shared
+   * molecule holding other participants' head buckets, minted by anyone who
+   * types the word. So the structural guard runs too: THE ENTRY DECIDES. A
+   * directory is removable only when every entry in it is a marker, i.e. only
+   * when its whole content is the history this caller asked to delete.
+   * See `hypercomb-core/src/core/directory-safety.ts`.
    */
   public readonly removeLineageBag = async (lineageSig: string): Promise<boolean> => {
     const sig = String(lineageSig ?? '').trim().toLowerCase()
@@ -4281,9 +4351,18 @@ export class HistoryService {
     let root: FileSystemDirectoryHandle
     try { root = this.hiveRoot } catch { return false }
     if (!root) return false
+    let bag: FileSystemDirectoryHandle
     try {
-      await root.getDirectoryHandle(sig, { create: false })
+      bag = await root.getDirectoryHandle(sig, { create: false })
     } catch { return false }
+    const veto = await hardDeleteVetoFor(bag as unknown as Parameters<typeof hardDeleteVetoFor>[0])
+    if (veto) {
+      console.warn(
+        `[prune] refusing to remove bag ${sig.slice(0, 8)}… — it ${veto}. ` +
+        'A directory is removable only when every entry in it is a marker.',
+      )
+      return false
+    }
     try {
       await root.removeEntry(sig, { recursive: true })
     } catch { return false }

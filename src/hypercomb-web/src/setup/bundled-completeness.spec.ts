@@ -16,12 +16,18 @@ const resolveInventory = vi.fn()
 const isComplete = vi.fn()
 const validateSealedPackage = vi.fn()
 
+const POOL_ADDRESS = 'f'.repeat(64)
+
 vi.mock('@hypercomb/core', () => ({
   EffectBus: { emit: vi.fn() },
   SignatureStore: class SignatureStore {
     trustAll(): void { /* no-op */ }
     toJSON(): unknown { return {} }
   },
+  // Discovery is a pool of meaning: the shell's own `/content/` is a host like
+  // any other, and its package is the head of the pool at the derived address.
+  registerPoolMeaning: async () => POOL_ADDRESS,
+  SignatureService: { sign: async () => 'e'.repeat(64) },
 }))
 
 vi.mock('@hypercomb/shared/core', () => ({
@@ -73,13 +79,15 @@ describe('bundled package completeness gate', () => {
     vi.stubGlobal('get', vi.fn((key: string) =>
       key === '@hypercomb/SignatureStore' ? sigStore : store))
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (String(url).includes('manifest.json')) {
-        return {
-          ok: true,
-          json: async () => ({ packages: { [PACKAGE_SIG]: { bees: [BEE_SIG], dependencies: [], layers: [PACKAGE_SIG] } } }),
-        }
+      const path = String(url)
+      // The bundled pool: a listing, and one entry holding the package sig.
+      if (path === `/content/${POOL_ADDRESS}/`) {
+        return { ok: true, headers: new Headers(), text: async () => '00000000' }
       }
-      return { ok: false }
+      if (path === `/content/${POOL_ADDRESS}/00000000`) {
+        return { ok: true, headers: new Headers(), text: async () => `${PACKAGE_SIG}\ndevelopment` }
+      }
+      return { ok: false, headers: new Headers() }
     }))
   })
 

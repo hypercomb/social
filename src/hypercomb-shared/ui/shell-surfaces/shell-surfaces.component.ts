@@ -26,9 +26,14 @@ import {
   SHELL_SURFACE_REGISTRY_KEY,
   type ShellSurfaceRegistry,
 } from '../../core'
-// Side-effect barrel: importing it runs each surface's module-scope
-// registerShellSurface() so the registry is populated before first render.
-import './shell-surfaces.barrel'
+
+// The barrel contains every shell-owned tool window. Loading it synchronously
+// makes unopened authoring panels part of the first-frame bundle. The registry
+// already reconciles late registrations, so begin loading when the host exists
+// and let each module mount itself as it arrives.
+let shellSurfacesReady: Promise<unknown> | undefined
+const loadShellSurfaces = (): Promise<unknown> =>
+  shellSurfacesReady ??= import('./shell-surfaces.barrel')
 
 type Mounted = { node: HTMLElement; ref?: ComponentRef<unknown> }
 
@@ -76,6 +81,9 @@ export class ShellSurfacesComponent implements OnDestroy {
 
   constructor() {
     this.#registry?.addEventListener('change', this.#sync)
+    void loadShellSurfaces()
+      .then(this.#sync)
+      .catch(error => console.error('[shell-surfaces] failed to load shell surfaces', error))
     // Initial mount OUTSIDE the constructing change-detection pass —
     // createComponent during construction trips NG0100-class errors.
     queueMicrotask(this.#sync)

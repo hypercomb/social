@@ -30,7 +30,7 @@
           (click)="cycleReach()"
         ><span class="mat-sym">{{ scopeIcon() }}</span></button>
       </div>
-      <button class="files-close" type="button" (click)="close()" [attr.aria-label]="'files.close' | t">×</button>
+      <button class="files-close" type="button" (click)="close()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
     </header>
 
     <!-- Selection response: the selected tiles carry documents — one press

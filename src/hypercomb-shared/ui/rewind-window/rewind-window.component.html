@@ -8,7 +8,7 @@
     <header class="rewind-header">
       <span class="title">{{ 'rewind.title' | t }}</span>
       <span class="path">{{ pathLabel() }}</span>
-      <button type="button" class="close" (click)="hide()" [attr.aria-label]="'rewind.close' | t">✕</button>
+      <button type="button" class="close" (click)="hide()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
     </header>
 
     <!-- Stage 1 — by tiles -->

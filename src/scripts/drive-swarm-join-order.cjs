@@ -99,19 +99,25 @@ async function closeAll(...clients) {
   for (const c of clients) { try { await c.ctx.close() } catch { /* already gone */ } }
 }
 
+// One BROWSER PROCESS per scenario. Headless Chromium hands the dev shell a
+// software GL context per page, and from the third context in one process the
+// shell's boot stalled before its post-paint work (the initial mesh broadcast,
+// the network start) ever ran — every later join then read as a dead swarm.
+// That is the headless environment, not the swarm; a fresh process per
+// scenario keeps every client's boot identical to the first one's.
 async function scenario(name, fn) {
   H.log('scenario', '── ' + name)
-  try { await fn() }
+  const la = H.launcherFor(ENGINE)
+  const browser = await la.type.launch({ headless: !H.HEADED, ...la.opts })
+  try { await fn(browser) }
   catch (e) { H.check(`${name}: ran to completion`, false, String(e).slice(0, 200)) }
+  finally { if (!H.KEEP) { try { await browser.close() } catch { /* already gone */ } } }
 }
 
 async function main() {
   H.log('boot', `url=${H.URL_} relay=${H.RELAY ?? '(shell default)'} slow=${SLOW} mode=${MODE} engine=${ENGINE}`)
-  const la = H.launcherFor(ENGINE)
-  const browser = await la.type.launch({ headless: !H.HEADED, ...la.opts })
-
   // ── 1. late joiner ────────────────────────────────────────────────
-  await scenario('late joiner', async () => {
+  await scenario('late joiner', async (browser) => {
     const z = zone('late')
     const A = await boot(browser, 'A1', z)
     H.check('1: A joins', await join(A))
@@ -130,7 +136,7 @@ async function main() {
   })
 
   // ── 2. early joiner ───────────────────────────────────────────────
-  await scenario('early joiner', async () => {
+  await scenario('early joiner', async (browser) => {
     const z = zone('early')
     const B = await boot(browser, 'B2', z)
     H.check('2: B joins an empty zone', await join(B))
@@ -148,7 +154,7 @@ async function main() {
   })
 
   // ── 3. publisher already deep ─────────────────────────────────────
-  await scenario('publisher deep', async () => {
+  await scenario('publisher deep', async (browser) => {
     const z = zone('deep')
     const A = await boot(browser, 'A3', z)
     H.check('3: A joins', await join(A))
@@ -175,7 +181,7 @@ async function main() {
   })
 
   // ── 4. leave and rejoin ───────────────────────────────────────────
-  await scenario('leave and rejoin', async () => {
+  await scenario('leave and rejoin', async (browser) => {
     const z = zone('rejoin')
     const A = await boot(browser, 'A4', z)
     H.check('4: A joins', await join(A))
@@ -194,7 +200,7 @@ async function main() {
     await closeAll(A, B)
   })
 
-  return H.finish([browser])
+  return H.finish([])
 }
 
 main().catch(e => { console.error('[fatal]', e); process.exit(1) })

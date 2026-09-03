@@ -47,7 +47,6 @@ $accent: #7eb6d6;
 
 .observe-header {
   @include tw.header;
-  border-bottom: 1px solid rgba(var(--acc), 0.22);
 }
 
 .observe-title {

@@ -37,7 +37,22 @@ export class NostrSigner {
           this.#cachedPubkey = pk.toLowerCase()
           return this.#cachedPubkey
         }
-      } catch { /* fall through */ }
+      } catch { /* the user said no — see below */ }
+      // AN EXTENSION IS PRESENT AND DID NOT GIVE US A KEY. Do NOT fall through
+      // to minting a local one. `signEvent` below ALWAYS prefers
+      // `window.nostr.signEvent` when the extension exists and never falls
+      // through, so a minted local key could never sign anything here: the two
+      // would disagree forever, and every commit would fail 'signer key
+      // changed' for the rest of the session because both this cache and the
+      // caller's pin the wrong key. Worse, a user who explicitly clicked
+      // "reject" would walk away with a persistent signing identity in
+      // plaintext localStorage that they declined — and since a molecule head
+      // claim makes that key load-bearing for WRITE AUTHORITY, not just for
+      // host PUTs, minting it silently is not a small thing.
+      //
+      // `null` means "I own no bucket", which every caller already handles, and
+      // a later grant simply resolves on the next call.
+      return null
     }
     const secretHex = this.resolveSecretKeyHex()
     if (!secretHex) return null

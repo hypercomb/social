@@ -25,7 +25,18 @@
       (dragover)="allowDrop($event)"
       (drop)="dropOnPane($event)"
     >
-      <div class="ld-pane-head">
+      <!-- THE PANE'S OWN GRIP. Everything else in this window carries a shape
+           FROM the shelf TO here; this carries what you have made back, and
+           letting go on the shelf turns it into one asset. It is on the head
+           rather than floating over the design, because it belongs to the
+           pane as a whole and not to any part of the arrangement. -->
+      <div class="ld-pane-head"
+        [class.is-offering]="offering()"
+        [attr.draggable]="bound() ? 'true' : null"
+        [title]="(bound() ? 'layout.keep.hint' : 'layout.keep.none') | t"
+        (dragstart)="offerDesign($event)"
+        (dragend)="endDrag($event)">
+        @if (bound()) { <span class="ld-pane-grip" aria-hidden="true"></span> }
         <span class="ld-pane-name">{{ cell() || ('layout.hive' | t) }}</span>
         <span class="ld-pane-layout">{{ layout() }}</span>
       </div>
@@ -72,7 +83,14 @@
         <span class="ld-title">{{ 'layout.title' | t }}</span>
         @if (cell()) { <span class="ld-subject">{{ cell() }}</span> }
       </div>
-      <button class="ld-close" type="button" (click)="close()" [attr.aria-label]="'layout.close' | t">×</button>
+      <!-- THE OTHER QUESTION. This window decides the container's SHAPE; the
+           targets window decides what BELONGS in its holes. Two acts, so two
+           windows, and the door between them is here because you go through it
+           in one direction: you shape it first, then you say what it is for. -->
+      <button class="ld-targets" type="button" (click)="openTargets()"
+        [disabled]="!bound()"
+        [attr.aria-label]="'layout.targets' | t" [title]="'layout.targets' | t">◎</button>
+      <button class="ld-close" type="button" (click)="close()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
     </header>
 
     @if (dormant()) {
@@ -83,11 +101,39 @@
          scrolls. They are also the only draggable thing here: an arrangement
          is a shape, and what fills it is a separate question asked later. Drop
          one on the workspace to start a design, or on any hole to nest it. -->
-    <div class="ld-shelf">
+    <div class="ld-shelf"
+      [class.is-offering]="offering()"
+      (dragover)="allowKeep($event)"
+      (drop)="keepDesign($event)">
     <section class="ld-section">
-      <h3 class="ld-section-title">{{ 'layout.layouts' | t }}</h3>
+      <!-- THE TWO TYPES. Left: the pieces you build out of. Right: what you
+           built. One at a time — a single wall of chips where two different
+           kinds of thing look identical is exactly what this splits. -->
+      <div class="ld-types" role="tablist" [attr.aria-label]="'layout.types' | t">
+        <button class="ld-type" type="button" role="tab"
+          [class.is-on]="shelf() === 'piece'"
+          [attr.aria-selected]="shelf() === 'piece'"
+          (click)="showShelf('piece')">
+          {{ 'layout.pieces' | t }}<span class="ld-type-count">{{ pieceCount() }}</span>
+        </button>
+        <button class="ld-type" type="button" role="tab"
+          [class.is-on]="shelf() === 'creation'"
+          [attr.aria-selected]="shelf() === 'creation'"
+          (click)="showShelf('creation')">
+          {{ 'layout.creations' | t }}<span class="ld-type-count">{{ creationCount() }}</span>
+        </button>
+      </div>
+
+      <!-- WHERE A DESIGN LANDS. It says so only while one is on its way, so
+           the shelf is a shelf the rest of the time. -->
+      <p class="ld-keep-hint" aria-hidden="true">{{ 'layout.keep.drop' | t }}</p>
+
+      @if (shelf() === 'creation' && !creationCount()) {
+        <p class="ld-none">{{ 'layout.creations.none' | t }}</p>
+      }
+
       <ul class="ld-assets" [style.grid-template-columns]="columnTemplate()">
-        @for (asset of assets(); track asset.name) {
+        @for (asset of shownAssets(); track asset.name) {
           <li>
             <!-- THE PICTURE IS THE LABEL. A name under every chip is twenty
                  lines of text competing with twenty drawings of the thing the
@@ -110,6 +156,16 @@
               <span class="ld-glyph" [hcRawHtml]="asset.glyph"></span>
               <span class="ld-asset-name">{{ asset.name }}<span class="ld-asset-note">{{ asset.holes }}</span></span>
             </button>
+            <!-- OFF THE SHELF, NOT DELETED. The arrangement is content and
+                 other containers may be reading it; this drops the name and
+                 this shelf's claim on it. Pieces have no such button — a
+                 built-in is not the participant's to put away. -->
+            @if (asset.kind === 'creation') {
+              <button class="ld-asset-forget" type="button"
+                [attr.aria-label]="'layout.forget' | t"
+                [title]="'layout.forget' | t"
+                (click)="forget(asset, $event)">×</button>
+            }
           </li>
         }
       </ul>
@@ -138,6 +194,22 @@
         <p class="ld-level">
           <span class="ld-level-layout">{{ level.layout }}</span>
           <span class="ld-level-path">{{ level.path.length ? level.path.join(' › ') : ('layout.root' | t) }}</span>
+          <!-- TURN IT A QUARTER. Every layout on the shelf is drawn one way and
+               this is the other three: a rail becomes a header, a split becomes
+               two rows, and the flexbox arrives at the new axis already correct
+               because no hole ever stated its cross axis. The arrow points the
+               way the container runs, which is the only thing a turn changes,
+               so the button is its own read-out. -->
+          <button class="ld-turn" type="button"
+            [attr.aria-label]="'layout.turn' | t"
+            [title]="'layout.turn' | t"
+            (click)="rotate()">
+            <svg class="ld-turn-arrow" viewBox="0 0 16 16" aria-hidden="true"
+              [style.transform]="'rotate(' + turnDegrees() + 'deg)'">
+              <path d="M2.5 8h7.5" />
+              <path d="M9 4.5 13.5 8 9 11.5z" class="ld-turn-head" />
+            </svg>
+          </button>
         </p>
 
         <!-- THE ACTIVE CONTAINER, HERE, WITH ITS PANES SELECTABLE.

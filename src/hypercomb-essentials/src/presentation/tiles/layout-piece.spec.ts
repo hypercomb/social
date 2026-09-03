@@ -54,14 +54,14 @@ function makeStore() {
   return { bytes, put, get, templateSigOf, loadTemplate, read }
 }
 
-const sidebar = builtinLayout('sidebar')!
-const stack = builtinLayout('stack')!
+const bookends = builtinLayout('bookends')!
+const thirds = builtinLayout('thirds')!
 const split = builtinLayout('split')!
 
 describe('every reference is a typed hop', () => {
   it('a piece holds the ENVELOPE signature, never the template bytes', async () => {
     const store = makeStore()
-    const minted = (await mintTree(nodeOf(sidebar, sidebar.vars), store.templateSigOf, store.put))!
+    const minted = (await mintTree(nodeOf(bookends, bookends.vars), store.templateSigOf, store.put))!
     const piece = await store.read(minted.sig)
 
     const envelope = await store.read(String(piece!['template']))
@@ -76,11 +76,11 @@ describe('every reference is a typed hop', () => {
 
   it('a hole holds an envelope too, with the relation naming the ROLE', async () => {
     const store = makeStore()
-    const tree = withNodeAt(nodeOf(sidebar, sidebar.vars), ['left'], nodeOf(stack, {}))
+    const tree = withNodeAt(nodeOf(bookends, bookends.vars), ['head'], nodeOf(thirds, {}))
     const minted = (await mintTree(tree, store.templateSigOf, store.put))!
     const piece = await store.read(minted.sig)
 
-    const envelope = await store.read(String((piece!['holes'] as Record<string, string>)['left']))
+    const envelope = await store.read(String((piece!['holes'] as Record<string, string>)['head']))
     expect(envelope).toEqual({ meta: 1, resource: expect.any(String), relation: HOLE_RELATION })
   })
 
@@ -89,33 +89,33 @@ describe('every reference is a typed hop', () => {
     // nested arrangement in a different slot, destroying the dedup that is the
     // whole reason a hole holds a signature.
     const store = makeStore()
-    const root = nodeOf(sidebar, sidebar.vars)
-    const inLeft = (await mintTree(withNodeAt(root, ['left'], nodeOf(stack, {})), store.templateSigOf, store.put))!
-    const inRight = (await mintTree(withNodeAt(root, ['right'], nodeOf(stack, {})), store.templateSigOf, store.put))!
+    const root = nodeOf(bookends, bookends.vars)
+    const inHead = (await mintTree(withNodeAt(root, ['head'], nodeOf(thirds, {})), store.templateSigOf, store.put))!
+    const inTail = (await mintTree(withNodeAt(root, ['tail'], nodeOf(thirds, {})), store.templateSigOf, store.put))!
 
-    const left = (await store.read(inLeft.sig))!['holes'] as Record<string, string>
-    const right = (await store.read(inRight.sig))!['holes'] as Record<string, string>
-    expect(left['left']).toBe(right['right'])
+    const head = (await store.read(inHead.sig))!['holes'] as Record<string, string>
+    const tail = (await store.read(inTail.sig))!['holes'] as Record<string, string>
+    expect(head['head']).toBe(tail['tail'])
   })
 
   it('resolves back through the hop to the arrangement it was minted from', async () => {
     const store = makeStore()
     const tree = withNodeAt(
-      withNodeAt(nodeOf(sidebar, sidebar.vars), ['left'], nodeOf(stack, {})),
-      ['left', 'top'], nodeOf(split, {}))
+      withNodeAt(nodeOf(bookends, bookends.vars), ['head'], nodeOf(thirds, {})),
+      ['head', 'one'], nodeOf(split, {}))
     const minted = (await mintTree(tree, store.templateSigOf, store.put))!
 
     const back = (await resolveTree(minted.sig, store.loadTemplate, store.get))!
-    expect(back.template.name).toBe('sidebar')
-    expect(back.nested['left'].template.name).toBe('stack')
-    expect(back.nested['left'].nested['top'].template.name).toBe('split')
+    expect(back.template.name).toBe('bookends')
+    expect(back.nested['head'].template.name).toBe('thirds')
+    expect(back.nested['head'].nested['one'].template.name).toBe('split')
   })
 })
 
 describe('the arrangement travels', () => {
   it('names every record it reaches, so an adopter gets the whole design', async () => {
     const store = makeStore()
-    const tree = withNodeAt(nodeOf(sidebar, sidebar.vars), ['left'], nodeOf(stack, {}))
+    const tree = withNodeAt(nodeOf(bookends, bookends.vars), ['head'], nodeOf(thirds, {}))
     const minted = (await mintTree(tree, store.templateSigOf, store.put))!
 
     // Everything that was written, minus nothing. A signature the closure
@@ -126,11 +126,11 @@ describe('the arrangement travels', () => {
 
   it('declares its own closure on every level, not only at the root', async () => {
     const store = makeStore()
-    const tree = withNodeAt(nodeOf(sidebar, sidebar.vars), ['left'], nodeOf(stack, {}))
+    const tree = withNodeAt(nodeOf(bookends, bookends.vars), ['head'], nodeOf(thirds, {}))
     const minted = (await mintTree(tree, store.templateSigOf, store.put))!
 
     const root = (await store.read(minted.sig))!
-    const holeRef = (root['holes'] as Record<string, string>)['left']
+    const holeRef = (root['holes'] as Record<string, string>)['head']
     const holeEnvelope = (await store.read(holeRef))!
     const child = (await store.read(String(holeEnvelope['resource'])))!
 
@@ -147,7 +147,7 @@ describe('the arrangement travels', () => {
 describe('a piece is content-addressed', () => {
   it('mints the same signature for the same arrangement', async () => {
     const store = makeStore()
-    const tree = () => withNodeAt(nodeOf(sidebar, sidebar.vars), ['left'], nodeOf(stack, {}))
+    const tree = () => withNodeAt(nodeOf(bookends, bookends.vars), ['head'], nodeOf(thirds, {}))
     const first = (await mintTree(tree(), store.templateSigOf, store.put))!
     const second = (await mintTree(tree(), store.templateSigOf, store.put))!
     expect(second.sig).toBe(first.sig)
@@ -155,8 +155,8 @@ describe('a piece is content-addressed', () => {
 
   it('re-mints only the chain above an edit', async () => {
     const store = makeStore()
-    const before = withNodeAt(nodeOf(sidebar, sidebar.vars), ['left'], nodeOf(stack, {}))
-    const after = withNodeAt(before, ['right'], nodeOf(split, {}))
+    const before = withNodeAt(nodeOf(bookends, bookends.vars), ['head'], nodeOf(thirds, {}))
+    const after = withNodeAt(before, ['tail'], nodeOf(split, {}))
     const a = (await mintTree(before, store.templateSigOf, store.put))!
     const b = (await mintTree(after, store.templateSigOf, store.put))!
 
@@ -164,7 +164,7 @@ describe('a piece is content-addressed', () => {
     // The untouched branch keeps the signature it had.
     const holesA = (await store.read(a.sig))!['holes'] as Record<string, string>
     const holesB = (await store.read(b.sig))!['holes'] as Record<string, string>
-    expect(holesB['left']).toBe(holesA['left'])
+    expect(holesB['head']).toBe(holesA['head'])
   })
 
   it('canonicalises, so key order cannot mint a second signature', () => {
@@ -185,22 +185,22 @@ describe('a piece is content-addressed', () => {
 describe('a damaged arrangement degrades, never fails', () => {
   it('drops a hole whose piece cannot be read rather than losing the page', async () => {
     const store = makeStore()
-    const tree = withNodeAt(nodeOf(sidebar, sidebar.vars), ['left'], nodeOf(stack, {}))
+    const tree = withNodeAt(nodeOf(bookends, bookends.vars), ['head'], nodeOf(thirds, {}))
     const minted = (await mintTree(tree, store.templateSigOf, store.put))!
 
     // Lose exactly the nested piece.
     const root = (await store.read(minted.sig))!
-    const holeEnvelope = (await store.read((root['holes'] as Record<string, string>)['left']))!
+    const holeEnvelope = (await store.read((root['holes'] as Record<string, string>)['head']))!
     store.bytes.delete(String(holeEnvelope['resource']))
 
     const back = (await resolveTree(minted.sig, store.loadTemplate, store.get))!
-    expect(back.template.name).toBe('sidebar')
-    expect(back.nested['left']).toBeUndefined()
+    expect(back.template.name).toBe('bookends')
+    expect(back.nested['head']).toBeUndefined()
   })
 
   it('is null for a record that is not a piece', () => {
     expect(parseLayoutPiece(null)).toBeNull()
-    expect(parseLayoutPiece({ kind: 'layout-template', name: 'sidebar' })).toBeNull()
+    expect(parseLayoutPiece({ kind: 'layout-template', name: 'bookends' })).toBeNull()
     // A piece whose template reference is not a signature is not a piece.
     expect(parseLayoutPiece({ kind: 'layout-piece', version: 1, template: 'nope' })).toBeNull()
   })

@@ -54,11 +54,6 @@ export interface HostPackageInfo {
   /** Display-only sizes. A count cannot widen or narrow what installs. */
   layerCount?: number
   beeCount?: number
-  /** NOT derivable: a bag signature is minted from the bag's own entries, so a
-   *  client cannot know it before fetching the bag it names. Without these the
-   *  import map has no aliases. */
-  beesBag?: string
-  dependenciesBag?: string
 }
 
 /**

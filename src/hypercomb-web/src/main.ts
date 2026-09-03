@@ -39,6 +39,10 @@
 // dev still bundle theirs — Angular lazy-chunks them — so pass them in
 // explicitly and nothing about these shells changes.
 import { bundledCatalogs, bundledLocales } from '@hypercomb/shared/core/bundled-catalogs'
+// ALSO the app's `polyfills` entry in angular.json, which is what actually
+// guarantees it runs before the shared modules that call the bare `register`
+// global at module scope. This line documents the dependency and is a no-op
+// the second time — see the header of shared/core/ioc.web.ts.
 import '@hypercomb/shared/core/ioc.web'
 // The escape cascade's door. This used to ride into every shell inside
 // runtime-initializer; the runtime package cannot reach hypercomb-shared/ui,

@@ -36,7 +36,7 @@ ng build
 
 This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
 
-### Why dev's `initial` budget is ~2.3 MB larger than web's
+### Why dev's `initial` budget is larger than web's
 
 `angular.json` sets `initial` to `maximumWarning: 4.2mb` / `maximumError: 4.5mb`.
 `hypercomb-web` sets `1.8MB` / `2.5MB`. **That gap is by design — do not "fix" it
@@ -48,53 +48,38 @@ The two shells load drones by different mechanisms (see `src/CLAUDE.md`,
 - **hypercomb-web never imports essentials.** `grep -r '@hypercomb/essentials'
   hypercomb-web/src` returns nothing. `LayerInstaller` downloads signed bundles
   into OPFS and `ScriptPreloader` imports them at runtime through an import map.
-  Essentials bytes are therefore *deployed content*, not bundle — which is why
-  web's initial sits at ~1.77 MB.
+  Essentials bytes are therefore *deployed content*, not bundle.
 - **hypercomb-dev imports essentials directly**, so breakpoints, source maps and
   `ng serve` rebuilds work against real `.ts` with no publish step. One line in
-  [`src/app/app.ts`](src/app/app.ts) — `import '@hypercomb/essentials/side-effects'`
-  — pulls the entire auto-generated startup barrel (~280 self-registering
+  [`src/app/app.ts`](src/app/app.ts) imports the generated `side-effects.ts`
+  source barrel and pulls the startup cohort of self-registering
   `*.drone.ts` / `*.queen.ts` / `*.worker.ts` / `*.view.ts` / `*.atomizer.ts`
-  modules) into the initial chunk. That is the whole point of the dev shell.
+  modules into the initial chunk. That is the whole point of the dev shell.
 
 Making that import dynamic would not be a real saving: every module in the
 barrel self-registers into `window.ioc`, and `App`'s constructor enumerates
 `list()` on the next microtask to pulse the registered bees. Deferring the
 barrel either downloads the identical bytes one tick later (a budget-accounting
 trick, not a smaller app) or forces bee startup behind an `await` — a boot-order
-change in the shell every other verification leans on. The budget was raised
-instead, on purpose.
+change in the shell every other verification leans on.
 
-**What is actually in there.** Attributing real emitted bytes across the initial
-chunks (decode `main-*.js.map`'s `mappings`, charge each segment's span to its
-source — *not* `sourcesContent` length, which counts comments and badly
-overstates essentials):
+Shell surfaces have a different lifecycle. The registry can accept components
+after the host is mounted, so `ShellSurfacesComponent` starts its surface barrel
+with `import()` instead of putting every unopened tool window on the first-frame
+path. Shell bootstrap code must import structural components by their leaf paths;
+importing `@hypercomb/shared/ui` evaluates its side-effectful re-export barrel and
+silently pulls the panels back into `initial`.
 
-| Area | Initial bytes | In web's initial? |
-|---|---|---|
-| `hypercomb-essentials` | ~1.58 MB | no — installed to OPFS, imported at runtime |
-| `hypercomb-shared` | ~1.35 MB | yes |
-| `node_modules/pixi.js` | ~0.50 MB | no — built to `public/` as a vendor bundle |
-| `@angular/*` | ~0.24 MB | yes |
-| everything else | ~0.14 MB | mostly |
-| `hypercomb-core` | ~0.03 MB | no — copied to `public/core/` |
+Measured production output after that boundary:
 
-The delta reconciles exactly: 3.88 MB − 1.58 (essentials) − 0.50 (pixi) ≈ 1.80 MB,
-against web's measured 1.77 MB. **Two mechanisms, not one** — essentials is the
-famous half, but pixi is half a megabyte of it and is easy to forget, because
-`hypercomb-web/src` imports pixi nowhere at all (`runtime:pixi` builds it into
-`public/` and the import map resolves it) while dev picks it up transitively
-through the presentation drones.
-
-Note `hypercomb-shared` is nearly as large as essentials and is *not* explained
-by the dev/web split — it is in both. A handful of shared components dominate it
-(`notes-strip` ~148 kB, `controls-bar` ~97 kB, `command-line` ~70 kB,
-`features-viewer` ~71 kB). If dev's budget needs real relief rather than a
-higher ceiling, that is where the reusable wins are, and they help web too.
+| Shell | Initial total | Deferred shell-surface chunk |
+|---|---:|---:|
+| `hypercomb-dev` | 3.62 MB | 1.27 MB |
+| `hypercomb-web` | 0.89 MB | 1.26 MB |
 
 **The budget still guards against regressions.** Measured initial total is
-**4.07 MB** as Angular counts it, so the warning has ~135 kB of headroom and the
-error ~450 kB.
+**3.62 MB** as Angular counts it, so the warning has ~580 kB of headroom and the
+error ~880 kB.
 Adding a drone or two moves it by single-digit kB; accidentally pulling a heavy library
 into the *initial* graph (a second renderer, a parser, a polyfill bundle) trips
 it immediately. If the error starts firing from honest drone growth rather than
@@ -103,13 +88,16 @@ than to raise the ceiling again — see below.
 
 **Levers, in the order to reach for them:**
 
-1. **Preload lane.** `hypercomb-essentials/scripts/prepare.ts` splits the barrel
+1. **Shared UI boundary.** Check that shell bootstrap files use leaf imports,
+   never the side-effectful `@hypercomb/shared/ui` index, and that the surface
+   barrel still enters through `ShellSurfacesComponent`'s dynamic import.
+2. **Preload lane.** `hypercomb-essentials/scripts/prepare.ts` splits the barrel
    into `side-effects.ts` (initial) and `preload-effects.ts` (dynamic, warmed
    after the first settled render). Classification is path-derived — today only
    `games/**`. Widening that predicate moves whole
    feature areas out of the initial chunk with no barrel upkeep. Both files are
    generated; edit the predicate, never the barrels.
-2. **Genuinely eager third-party code.** Check what actually landed before
+3. **Genuinely eager third-party code.** Check what actually landed before
    assuming it is essentials:
    ```bash
    npm --prefix hypercomb-dev run ng -- build --configuration production --verbose
@@ -117,7 +105,7 @@ than to raise the ceiling again — see below.
    `sourceMap` is on in the production configuration, so
    `dist/hypercomb-dev/browser/main-*.js.map` can be bucketed by `sources[]`
    prefix for a per-package attribution.
-3. **Raising the ceiling** — only with the measured number and a note here
+4. **Raising the ceiling** — only with the measured number and a note here
    saying what moved it.
 
 Note that i18n catalogs (`ru`/`hi`/`ar`/`ja`/… ~2.5 MB total) and the games are

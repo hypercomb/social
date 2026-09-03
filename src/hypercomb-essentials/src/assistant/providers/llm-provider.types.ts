@@ -41,8 +41,58 @@ export type LlmTransport =
 /** How heavy a model is within its vendor's line-up. Mirrors ModelTier. */
 export type LlmTier = 'deep' | 'balanced' | 'fast'
 
-/** One turn of a conversation. */
-export type LlmChatMessage = { role: 'user' | 'assistant'; content: string }
+/** One turn of a conversation. Function results are first-class turns so a
+ *  model can observe, receive the bounded result, and then answer or act. */
+export type LlmChatMessage =
+  | { readonly role: 'user' | 'assistant'; readonly content: string; readonly toolCalls?: undefined }
+  | {
+    readonly role: 'assistant'
+    readonly content: string
+    readonly toolCalls: readonly LlmToolCall[]
+  }
+  | {
+    readonly role: 'tool'
+    readonly content: string
+    readonly toolCallId: string
+  }
+
+/** An OpenAI-style function the model may ask the host to call. */
+export type LlmFunctionTool = {
+  readonly type: 'function'
+  readonly function: {
+    readonly name: string
+    readonly description?: string
+    /** JSON Schema for the function arguments. */
+    readonly parameters?: Readonly<Record<string, unknown>>
+    readonly strict?: boolean
+  }
+}
+
+/** One complete, normalized function call returned by any supporting provider. */
+export type LlmToolCall = {
+  /** Some OpenAI-compatible local servers omit ids; callers must tolerate that. */
+  readonly id?: string
+  readonly name: string
+  /** JSON text exactly as emitted by the model. Parsing belongs to the caller. */
+  readonly arguments: string
+}
+
+/** A partial tool call carried by one streaming frame. */
+export type LlmToolCallDelta = {
+  /** OpenAI streams interleaved calls by numeric index. */
+  readonly index: number
+  readonly id?: string
+  readonly name?: string
+  readonly arguments?: string
+}
+
+/** Normalized output of one provider streaming frame. */
+export type LlmStreamEvent = {
+  readonly text?: string
+  readonly toolCallDeltas?: readonly LlmToolCallDelta[]
+  /** Present only on the provider's terminal choice frame. */
+  readonly finishReason?: string
+}
 
 /** A model this provider offers. `id` is the wire name, `name` the human one. */
 export type LlmModelDescriptor = {
@@ -75,6 +125,8 @@ export type LlmRequest = {
   readonly messages: readonly LlmChatMessage[]
   readonly system?: string
   readonly maxTokens?: number
+  /** Optional functions available to providers that speak the OpenAI tool shape. */
+  readonly tools?: readonly LlmFunctionTool[]
   /** Ask the vendor to stream. Only meaningful with `fromStreamEvent`. */
   readonly stream?: boolean
   /**
@@ -89,6 +141,7 @@ export type LlmRequest = {
 /** The one answer shape the rest of the app knows. */
 export type LlmCallResult = {
   readonly text: string
+  readonly toolCalls?: readonly LlmToolCall[]
   readonly stopReason: string
   readonly inputTokens: number
   readonly outputTokens: number
@@ -164,9 +217,10 @@ export type LlmProviderDescriptor = {
   fromResponse(json: unknown, request: LlmRequest): LlmCallResult
 
   /**
-   * Decode one SSE `data:` payload into the text it adds, or `''` for the
-   * frames that carry no text. Absent = this provider does not stream, and
-   * the dispatch falls back to one non-streaming call.
+   * Decode one SSE `data:` payload. Existing text-only adapters may return a
+   * string; tool-capable adapters return text plus indexed call fragments for
+   * the dispatch seam to assemble. Absent = this provider does not stream,
+   * and the dispatch falls back to one non-streaming call.
    */
-  fromStreamEvent?(event: unknown): string
+  fromStreamEvent?(event: unknown): string | LlmStreamEvent
 }

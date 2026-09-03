@@ -54,7 +54,24 @@ export class CreateQueenBee extends QueenBee {
     }
     // The shell owns the create path; this is the same commit the chevron
     // stance runs on Enter, reached by name instead of by stance.
-    EffectBus.emit('command:create-cells', { name })
+    // A sequence must be able to await the actual create commit, not merely
+    // event delivery. This acknowledgement is optional for older emitters and
+    // listeners, while model-driven grammar receives strict ordering.
+    let accepted = false
+    let finish!: (error?: unknown) => void
+    const completed = new Promise<void>((resolve, reject) => {
+      finish = error => error === undefined ? resolve() : reject(error)
+    })
+    EffectBus.emitTransient('command:create-cells', {
+      name,
+      accept: () => { accepted = true },
+      complete: finish,
+    })
+    if (!accepted) {
+      EffectBus.emit('activity:log', { message: 'Create - the command line is unavailable', icon: '+' })
+      throw new Error('Create command line is unavailable')
+    }
+    await completed
   }
 }
 

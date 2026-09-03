@@ -82,7 +82,12 @@ interface BeeSprite {
    *  sharing this layer. Kept in the Pixi world so it travels with the bee. */
   thought: Container | null
   thoughtText: Text | null
-  thoughtMessage: string
+  /** What the bubble was last DRAWN as — the line plus the side plus the box
+   *  height. The box is re-tessellated only when one of those changes. */
+  thoughtDrawn: string
+  /** Which side of the bee the bubble is currently drawn on. The tail has to
+   *  be redrawn when this flips, so it is remembered rather than recomputed. */
+  thoughtBelow: boolean
 }
 
 /** Bee size on screen, in CSS pixels, regardless of zoom. Big enough that the
@@ -106,6 +111,13 @@ const WAGGLE_SCALE = 0.34
 const CHAT_TURN_SECONDS = 6
 const CHAT_MAX_PAIRS = 3
 const CHAT_BUBBLE_WIDTH = 154
+
+/** Keep-out margin between a thought bubble and the viewport edge, in CSS px. */
+const THOUGHT_EDGE_PX = 12
+/** Length of the bead tail between the bubble box and its anchor, in CSS px. */
+const THOUGHT_TAIL_PX = 16
+/** Clearance between the bee and the bubble's anchor, in CSS px. */
+const THOUGHT_GAP_PX = 34
 
 const modelName = (agent: Agent): string => agent.model || agent.behavior || 'my model'
 
@@ -504,7 +516,8 @@ export class AgentBeeDrone extends Drone {
       facing: 1,
       thought: null,
       thoughtText: null,
-      thoughtMessage: '',
+      thoughtDrawn: '',
+      thoughtBelow: false,
     }
     this.#bees.set(agent.id, bee)
 
@@ -813,8 +826,8 @@ export class AgentBeeDrone extends Drone {
         text: message,
         style: {
           fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
-          fontSize: 12,
-          lineHeight: 16,
+          fontSize: 10.5,
+          lineHeight: 14,
           fill: 0xf4f8fb,
           wordWrap: true,
           wordWrapWidth: CHAT_BUBBLE_WIDTH - 20,
@@ -828,27 +841,71 @@ export class AgentBeeDrone extends Drone {
     }
 
     const label = bee.thoughtText!
-    if (bee.thoughtMessage !== message) {
-      bee.thoughtMessage = message
-      label.text = message
-      const bg = bee.thought.children[0] as Graphics
-      const width = CHAT_BUBBLE_WIDTH
-      const height = Math.max(38, label.height + 16)
-      bg.clear()
-      bg.roundRect(0, 0, width, height, 16)
-        .fill({ color: 0x101923, alpha: 0.82 })
-        .stroke({ color: 0x7eb6d6, width: 1, alpha: 0.48 })
-      // Thought-bubble beads point back toward the speaking bee.
-      bg.circle(width * 0.5, height + 6, 4).fill({ color: 0x101923, alpha: 0.82 })
-      bg.circle(width * 0.5 - 6, height + 13, 2.5).fill({ color: 0x101923, alpha: 0.72 })
-      bee.thought.pivot.set(width / 2, height + 16)
+    if (label.text !== message) label.text = message
+    const width = CHAT_BUBBLE_WIDTH
+    const height = Math.max(34, label.height + 16)
+
+    // ABOVE OR BELOW, whichever the bee actually has room for. Clamping alone
+    // could only slide the box down over the bee it belongs to; a bee near the
+    // top of the viewport has to speak DOWNWARD instead, or the words are
+    // half off the screen and there is no point drawing them at all.
+    const direction = towardX >= bee.x ? 1 : -1
+    let below = bee.thoughtBelow
+    if (this.#world && this.#app) {
+      const screen = this.#app.renderer.screen
+      const beeScreen = this.#world.toGlobal({ x: bee.x, y: bee.y }, undefined, true)
+      const reach = THOUGHT_GAP_PX + THOUGHT_TAIL_PX + height
+      const slackAbove = (beeScreen.y - reach) - screen.y
+      const slackBelow = (screen.y + screen.height) - (beeScreen.y + reach)
+      // Hysteresis: only flip when the current side genuinely cannot hold the
+      // box, so a bee drifting along the edge does not flicker side to side.
+      if (!below && slackAbove < THOUGHT_EDGE_PX && slackBelow > THOUGHT_EDGE_PX) below = true
+      else if (below && slackBelow < THOUGHT_EDGE_PX && slackAbove > THOUGHT_EDGE_PX) below = false
     }
 
-    const direction = towardX >= bee.x ? 1 : -1
+    if (bee.thoughtDrawn !== `${message}|${below}|${height}`) {
+      bee.thoughtDrawn = `${message}|${below}|${height}`
+      bee.thoughtBelow = below
+      const bg = bee.thought.children[0] as Graphics
+      bg.clear()
+      bg.roundRect(0, 0, width, height, 8)
+        .fill({ color: 0x101923, alpha: 0.82 })
+        .stroke({ color: 0x7eb6d6, width: 1, alpha: 0.48 })
+      // Thought-bubble beads point back toward the speaking bee — downward
+      // from a bubble that sits above it, upward from one that sits below.
+      const near = below ? -6 : height + 6
+      const far = below ? -13 : height + 13
+      bg.circle(width * 0.5, near, 4).fill({ color: 0x101923, alpha: 0.82 })
+      bg.circle(width * 0.5 - 6, far, 2.5).fill({ color: 0x101923, alpha: 0.72 })
+      bee.thought.pivot.set(width / 2, below ? -THOUGHT_TAIL_PX : height + THOUGHT_TAIL_PX)
+    }
+
     // Both sides reach gently toward the pair's midpoint, making separate
     // bubbles feel like a shared conversation without covering either bee.
-    bee.thought.position.set(bee.x + (44 * direction) / worldScale, bee.y - 34 / worldScale)
+    const gap = (below ? THOUGHT_GAP_PX : -THOUGHT_GAP_PX) / worldScale
+    bee.thought.position.set(bee.x + (44 * direction) / worldScale, bee.y + gap)
     bee.thought.scale.set(1 / worldScale)
+    // A bubble that runs off the edge cannot be read. The bubble is drawn at a
+    // constant screen size, so its box in SCREEN px is known from the pivot.
+    // Clamp that anchor inside the viewport and carry the correction back into
+    // world space.
+    if (this.#world && this.#app) {
+      const screen = this.#app.renderer.screen
+      const anchor = this.#world.toGlobal(bee.thought.position, undefined, true)
+      const halfWidth = width / 2
+      const minX = screen.x + THOUGHT_EDGE_PX + halfWidth
+      const maxX = screen.x + screen.width - THOUGHT_EDGE_PX - halfWidth
+      const minY = below
+        ? screen.y + THOUGHT_EDGE_PX
+        : screen.y + THOUGHT_EDGE_PX + height + THOUGHT_TAIL_PX
+      const maxY = below
+        ? screen.y + screen.height - THOUGHT_EDGE_PX - height - THOUGHT_TAIL_PX
+        : screen.y + screen.height - THOUGHT_EDGE_PX
+      anchor.x = maxX >= minX ? Math.min(Math.max(anchor.x, minX), maxX) : (minX + maxX) / 2
+      anchor.y = maxY >= minY ? Math.min(Math.max(anchor.y, minY), maxY) : (minY + maxY) / 2
+      const local = this.#world.toLocal(anchor)
+      bee.thought.position.set(local.x, local.y)
+    }
     bee.thought.alpha = Math.min(0.92, bee.alpha) * (0.88 + 0.12 * Math.sin(this.#time * 1.4))
     bee.thought.visible = true
   }

@@ -21,14 +21,16 @@
         (click)="toggleNames()"
         [attr.aria-pressed]="showNames()"
         [attr.title]="(showNames() ? 'observe.names.hide' : 'observe.names.show') | t"
+        [attr.aria-label]="(showNames() ? 'observe.names.hide' : 'observe.names.show') | t"
       >{{ (showNames() ? 'observe.names.on' : 'observe.names.off') | t }}</button>
       <button
         class="observe-chip"
         type="button"
         (click)="cycleGroupBy()"
         [attr.title]="'observe.group.hint' | t"
+        [attr.aria-label]="'observe.group.hint' | t"
       >{{ ('observe.group.' + groupBy()) | t }}</button>
-      <button class="observe-close" type="button" (click)="close()" [attr.aria-label]="'observe.close' | t">×</button>
+      <button class="observe-close" type="button" (click)="close()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
     </header>
 
     @if (!hasPoints()) {

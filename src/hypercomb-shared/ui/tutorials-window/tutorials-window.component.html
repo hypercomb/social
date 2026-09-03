@@ -17,7 +17,7 @@
     <header class="tut-header">
       <span class="mat-sym tut-mark" aria-hidden="true">emoji_nature</span>
       <span class="tut-title">{{ 'tutorials.title' | t }}</span>
-      <button class="tut-close" type="button" (click)="close()" [attr.aria-label]="'tutorials.close' | t">&times;</button>
+      <button class="tut-close" type="button" (click)="close()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">&times;</button>
     </header>
 
     @if (totalLessons() === 0) {

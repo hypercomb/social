@@ -12,7 +12,7 @@ $accent: #7eb6d6;
   color: var(--hc-window-ink-loud); font-family: var(--hc-mono, system-ui); font-size: calc(1rem * var(--hc-panel-scale, 1));
   @include tw.panel($accent, right);
 }
-.ref-header { @include tw.header; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(var(--acc), .25); }
+.ref-header { @include tw.header; display: flex; align-items: center; justify-content: space-between; }
 .ref-heading { display: flex; align-items: center; gap: .5em; color: rgb(var(--acc)); font-size: .9em; letter-spacing: .04em; }
 .ref-heading .mat-sym { font-size: 1.05em; }
 .ref-close { border: 0; background: none; color: var(--hc-window-ink-quiet); font: inherit; font-size: 1.2em; cursor: pointer; }

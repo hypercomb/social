@@ -15,8 +15,11 @@ import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
 import { isVisitorSession } from './visitor-session'
 // Cold-boot acquisition. Same implementation the shim uses and the same one
 // behind window.hypercomb.acquire — there is one acquisition, not three.
-import { acquire, deriveInventory, listHostPackages, reportDivergence } from '@hypercomb/runtime/acquire'
+import { acquire, deriveInventory, headPackage, listHostPackages, reportDivergence } from '@hypercomb/runtime/acquire'
 import { deriveBeeDeps } from '@hypercomb/runtime/bee-deps'
+import { aliasOf, bagEntryName, bagSignature, beeEntries, dependencyEntries, orderedEntries } from '@hypercomb/runtime/bags'
+import { HOST_PACKAGES_MEANING, markerIndices, parseMember, parsePoolListing, poolEntryName } from '@hypercomb/runtime/host-pool'
+import { registerPoolMeaning } from '@hypercomb/core'
 import { stampInstalledPackage } from '@hypercomb/runtime/installed-package'
 import { DEFAULT_HOST_ZONES, listHostZones } from '@hypercomb/runtime/host-zones'
 import { cacheImportMap } from './resolve-import-map'
@@ -61,8 +64,6 @@ type InstallManifest = {
   bees: string[]
   dependencies: string[]
   beeDeps?: Record<string, string[]>
-  dependenciesBag?: string
-  beesBag?: string
   // Sidecar branch metadata (does not affect packageSig). Ignored at install.
   label?: string
   at?: string
@@ -302,14 +303,24 @@ const autoloadFromHosts = async (): Promise<boolean> => {
     const zones = carried.length ? carried : [...DEFAULT_HOST_ZONES]
     if (!zones.length) return false
 
-    const offers = (await Promise.all(zones.map(async zone => {
-      try { return await listHostPackages(zone) } catch { return [] }
-    }))).flat()
-    if (!offers.length) return false
+    // ASK EACH DOMAIN FOR ITS HEAD. Discovery is the pool at
+    // `sign('host:packages')` — an address every client derives for itself, so
+    // there is nothing published saying where to look and no catalogue to read
+    // (documentation/host-packages-pool.md).
+    //
+    // THE FIRST CARRIED DOMAIN THAT ANSWERS WINS, and the order is the
+    // participant's own. This used to be "newest wins", ranked by a counter
+    // the manifest stamped — but a counter is per-host bookkeeping, and asking
+    // two hosts to be comparable by it was always a fiction. Ranking ACROSS
+    // hosts is the signed sentinel's job; a host can only answer for itself.
+    // Nothing is risked by the simpler rule: every answer is content-addressed,
+    // so whichever host replies, the bytes verify or they are refused.
+    const heads = (await Promise.all(zones.map(async zone => {
+      try { return await headPackage(zone) } catch { return null }
+    }))).filter((offer): offer is NonNullable<typeof offer> => offer !== null)
+    if (!heads.length) return false
 
-    // Newest wins. Every offer is content-addressed, so "which host" is not a
-    // trust question — whoever answers, the bytes verify or they are refused.
-    const newest = offers.sort((a, b) => (b.generation ?? 0) - (a.generation ?? 0))[0]!
+    const newest = heads[0]!
 
     EffectBus.emit('boot:status', { kind: 'installing' } as BootStatus)
     console.log(`[ensure-install] cold boot — acquiring ${newest.packageSig.slice(0, 12)}… from ${zones.join(', ')}`)
@@ -396,25 +407,17 @@ export const checkForUpdate = async (): Promise<void> => {
 
   // ── Update-authority gate ────────────────────────────────────────────
   // The shell's bundled `/content/` is the update reference ONLY for installs
-  // that came FROM the bundle. A DCP/sentinel-sourced install is a logical
-  // UNION of enabled branches whose source of truth is DCP — DCP surfaces its
-  // own updates. Diffing such an install against the single bundled package
-  // raised phantom "New features" the moment the two drifted (a newer DCP
-  // build, or the union enabling content the shell never bundled), and routing
-  // the participant to DCP for those phantom sigs is a dead end: DCP can't show
-  // bees it doesn't serve, and the resulting installer view has nothing to
-  // commit. Provenance is now stamped on every manifest write; for legacy
-  // manifests (no `source`) we INFER it — an install holding bees the bundle
-  // lacks has diverged from the bundle lineage, so the bundle is not its
-  // authority. When the bundle is not the authority, emit a definitive
-  // available:false so any stale indicator clears. (A legacy BUNDLE install
-  // whose update merely DROPPED bees is misclassified sentinel once; it self-
-  // heals on the next upgradeFromBundled, which stamps source:'bundled'.)
-  const bundledBeeSet = new Set(bundled.bees)
-  const divergedFromBundle = cached.bees.some(sig => !bundledBeeSet.has(sig))
-  const bundleIsAuthority = cached.source === 'bundled'
-    || (cached.source !== 'sentinel' && !divergedFromBundle)
-  if (!bundleIsAuthority) {
+  // that came FROM the bundle. A host-sourced install has its own authority
+  // and surfaces its own updates; diffing it against the bundled package
+  // raised phantom "New features" the moment the two drifted. Provenance is
+  // stamped on every manifest write, and an install without one is treated as
+  // NOT ours — conservative, and it self-heals on the next upgradeFromBundled,
+  // which stamps `source: 'bundled'`.
+  //
+  // This used to INFER provenance by diffing bee sets. It cannot any more, and
+  // should not: the bundle no longer states an inventory, because nothing a
+  // publisher writes down decides what a client installs.
+  if (cached.source !== 'bundled') {
     EffectBus.emit('update:available', {
       available: false,
       newCount: 0,
@@ -426,23 +429,24 @@ export const checkForUpdate = async (): Promise<void> => {
     return
   }
 
-  const available = bundledDiffersFromCached(bundled, cached)
-  const cachedSet = new Set(cached.bees)
-  // The DELTA — bees present in the new bundle but not in the cached install.
-  // The header indicator is a notify-and-route affordance only: it hands this
-  // changed-sig list (not just a count) to the DCP installer, which is where
-  // the participant reviews the changed items and opts in. Nothing installs or
-  // runs in the hive from here — only an enable in DCP syncs a delta bee back.
-  const newBees = bundled.bees.filter(sig => !cachedSet.has(sig))
+  // THE SIGNATURE IS THE ANSWER. Equal signatures returned above, so reaching
+  // here means the bundle is a different tree — which is what an update IS.
+  //
+  // What went with the manifest is the DELTA: "and here are the 4 new bees".
+  // That list existed only because a document enumerated an inventory, and
+  // computing it honestly now would mean resolving the new package's whole
+  // closure to render a number. The pill says a newer build is here; what
+  // changed in it is a release note's job, not the installer's.
   EffectBus.emit('update:available', {
-    available,
-    newCount: newBees.length,
-    newBees,
+    available: true,
+    newCount: 0,
+    newBees: [],
     packageSig: bundled.packageSig,
     previous: bundled.previous ?? null,
     label: bundled.label,
   })
 }
+
 
 // ─────────────────────────────────────────────────────────────────────
 // User-initiated bundled upgrade. Fired explicitly by the "Upgrade
@@ -541,48 +545,74 @@ type BundledPackage = {
   // the bag dir at the content root; legacy bundles nested it inside the
   // retired `__dependencies__/` / `__bees__/` dirs (fetch falls back to
   // that URL shape). Absent for older bundles.
-  dependenciesBag?: string
-  beesBag?: string
   // Sidecar branch metadata (does not affect packageSig). Ignored at install.
   label?: string
   at?: string
   previous?: string | null
 }
 
+/**
+ * THE SHELL'S OWN BUNDLED PACKAGE — read the same way a host's is.
+ *
+ * `/content/` is a host like any other: it carries the `host:packages` pool at
+ * the address every client derives, and the head of that pool is the package
+ * this build ships. There is no manifest to read, and nothing here states an
+ * inventory — the sets are derived from the sealed root at admission, the
+ * beeDeps from the bytes, the bags computed outright.
+ *
+ * A directory listing when the shell is served by something that can list one;
+ * the ship's `index.html` when it cannot. Both answer the same URL, which is
+ * why this needs no branch for "am I on a dev server or a bucket".
+ */
 const fetchBundledPackage = async (): Promise<BundledPackage | null> => {
   try {
-    const res = await fetch('/content/manifest.json', { cache: 'no-store' })
-    if (!res.ok) return null
-    const content = await res.json() as { packages?: Record<string, { bees?: string[]; dependencies?: string[]; layers?: string[]; dependenciesBag?: string; beesBag?: string; label?: string; at?: string; previous?: string | null }> }
-    const sig = Object.keys(content.packages ?? {})[0]
-    if (!sig) return null
-    const pkg = content.packages![sig]
+    const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
+
+    const entryAt = async (index: number): Promise<{ text: string; at: string } | null> => {
+      const res = await fetch(`/content/${pool}/${poolEntryName(index)}`)
+      if (!res.ok) return null
+      const text = await res.text()
+      if (text.includes('<')) return null
+      const modified = res.headers.get('last-modified')
+      const at = modified ? new Date(modified).toISOString() : ''
+      return { text, at: at === 'Invalid Date' ? '' : at }
+    }
+
+    // One request for the listing; the head is the max marker in it.
+    const listing = await fetch(`/content/${pool}/`, { cache: 'no-store' })
+      .then(async res => (res.ok ? parsePoolListing(await res.text()) : null))
+      .catch(() => null)
+
+    let head = -1
+    if (listing) {
+      const indices = markerIndices(listing)
+      head = indices.length ? indices[indices.length - 1]! : -1
+    } else {
+      // A dev server that serves files but cannot list a directory. Walk
+      // forward until the gap — the bundle is one build's worth of entries,
+      // not a host's whole history, so this stays short.
+      while (head < 4096 && await entryAt(head + 1) !== null) head++
+    }
+    if (head < 0) return null
+
+    const fetched = await entryAt(head)
+    const member = parseMember(fetched?.text ?? null)
+    if (!member) return null
+
     return {
-      packageSig: sig,
-      bees: pkg.bees ?? [],
-      dependencies: pkg.dependencies ?? [],
-      layers: pkg.layers ?? [],
-      dependenciesBag: pkg.dependenciesBag,
-      beesBag: pkg.beesBag,
-      // Sidecar branch metadata — carried through so the post-boot update
-      // check can hand the installer the version's walkback link + label.
-      label: pkg.label,
-      at: pkg.at,
-      previous: pkg.previous ?? null,
+      packageSig: member.packageSig,
+      bees: [],
+      dependencies: [],
+      layers: [],
+      label: member.label || undefined,
+      at: fetched?.at,
+      previous: null,
     }
   } catch {
     return null
   }
 }
 
-const bundledDiffersFromCached = (bundled: BundledPackage, cached: InstallManifest): boolean => {
-  if (bundled.bees.length !== cached.bees.length) return true
-  const cachedSet = new Set(cached.bees)
-  for (const sig of bundled.bees) {
-    if (!cachedSet.has(sig)) return true
-  }
-  return false
-}
 
 const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureStore): Promise<boolean> => {
   const store = get('@hypercomb.social/Store') as Store | undefined
@@ -713,46 +743,19 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     readFrom([store.bees, store.legacyBees, store.dependencies, store.legacyDependencies], sig => [`${sig}.js`, sig]),
   )
 
-  // Sigbag fetch (additive): when the bundle declares a bag sig, fetch each
-  // indexed entry and write under <bagSig>/<index>. The bag dir is a
-  // sig-named dir INSIDE the sign(meaning) pool — legitimate structure, not
-  // a typed folder.
-  const writeBag = async (
-    parentDir: FileSystemDirectoryHandle,
-    bagSig: string,
-    entryCount: number,
-    legacyContentPath: string,
-  ): Promise<number> => {
-    const bagDir = await parentDir.getDirectoryHandle(bagSig, { create: true })
-    let written = 0
-    await Promise.all(Array.from({ length: entryCount }, (_, i) => i).map(async (i) => {
-      // 8 digits is the conformance marker width that builds now emit. The
-      // 4-digit name is a READ FALLBACK for dists deployed before the
-      // widening: the bag sig is derived from entry CONTENT, so an old dist
-      // presents the SAME bag sig under the old filenames — without this the
-      // fetch would 404 and install would silently write an empty bag.
-      const indexName = String(i).padStart(8, '0')
-      const legacyIndexName = String(i).padStart(4, '0')
-      const bytes = await fetchBytes(`/content/${bagSig}/${indexName}`)
-        ?? await fetchBytes(`${legacyContentPath}/${bagSig}/${indexName}`)
-        ?? await fetchBytes(`/content/${bagSig}/${legacyIndexName}`)
-        ?? await fetchBytes(`${legacyContentPath}/${bagSig}/${legacyIndexName}`)
-      if (!bytes) return
-      const handle = await bagDir.getFileHandle(indexName, { create: true })
-      const writable = await handle.createWritable()
-      await writable.write(bytes)
-      await writable.close()
-      written++
-    }))
-    return written
-  }
-
-  // Single-bag invariant: before writing the new bag dir, evict any prior bag
-  // dirs so the sign('dependencies') and sign('bees') pools each contain
-  // exactly one bag dir after install. The receiver's importmap build relies
-  // on a `readdir` finding only the active bag — no pointer file needed.
-  // Scoped STRICTLY to install-owned pools: at the OPFS root the same 64-hex
-  // dir shape is a user lineage sigbag.
+  // THE BAGS, BUILT HERE RATHER THAN DOWNLOADED (bags.ts).
+  //
+  // A bag is the index the import map is assembled from, and every input to it
+  // is on disk once the sets above resolve: a dependency's alias is the first
+  // line of its own bytes, a bee has none, and the bag's address is the sha256
+  // of those entries. The bundle's `beesBag` / `dependenciesBag` were the last
+  // two fields anyone could argue a publisher had to assert; they are computed
+  // now, so nothing is fetched and nothing is claimed.
+  //
+  // Single-bag invariant: evict any prior bag first, so the import map's
+  // readdir finds exactly one and needs no pointer file. Scoped STRICTLY to the
+  // install-owned pools — at the OPFS root the same 64-hex dir shape is a user
+  // lineage sigbag.
   const evictOldBagDirs = async (parentDir: FileSystemDirectoryHandle, keepSig: string): Promise<void> => {
     const stale: string[] = []
     for await (const [name, handle] of parentDir.entries()) {
@@ -765,17 +768,29 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
       try { await parentDir.removeEntry(name, { recursive: true }) } catch { /* skip */ }
     }
   }
-  if (bundled.dependenciesBag) await evictOldBagDirs(store.dependencies, bundled.dependenciesBag)
-  if (bundled.beesBag) await evictOldBagDirs(store.bees, bundled.beesBag)
 
-  let depBagCount = 0
-  let beeBagCount = 0
-  if (bundled.dependenciesBag) {
-    depBagCount = await writeBag(store.dependencies, bundled.dependenciesBag, inventory.dependencies.length, '/content/__dependencies__')
+  const putBag = async (
+    parentDir: FileSystemDirectoryHandle | undefined,
+    entries: { sig: string; content: string }[],
+  ): Promise<number> => {
+    if (!parentDir || !entries.length) return 0
+    const bagSig = await bagSignature(entries)
+    await evictOldBagDirs(parentDir, bagSig)
+    const bagDir = await parentDir.getDirectoryHandle(bagSig, { create: true })
+    const ordered = orderedEntries(entries)
+    await Promise.all(ordered.map(async (entry, index) => {
+      const bytes = new TextEncoder().encode(entry.content)
+      await writeBytes(bagDir, bagEntryName(index), bytes.buffer.slice(0, bytes.byteLength) as ArrayBuffer)
+    }))
+    return ordered.length
   }
-  if (bundled.beesBag) {
-    beeBagCount = await writeBag(store.bees, bundled.beesBag, inventory.bees.length, '/content/__bees__')
-  }
+
+  const readDep = readFrom([store.dependencies, store.legacyDependencies], sig => [`${sig}.js`, sig])
+  const aliases = new Map<string, string>()
+  for (const sig of inventory.dependencies) aliases.set(sig, aliasOf(await readDep(sig)))
+
+  const depBagCount = await putBag(store.dependencies, dependencyEntries(inventory.dependencies, sig => aliases.get(sig) ?? ''))
+  const beeBagCount = await putBag(store.bees, beeEntries(inventory.bees))
 
   // COMPLETE OR ABSENT (install-by-replication step 4). The gate reads the
   // CLOSURE RESULT, not the individual files. This used to warn about a
@@ -790,8 +805,6 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     bees: inventory.bees,
     dependencies: inventory.dependencies,
     beeDeps,
-    dependenciesBag: bundled.dependenciesBag,
-    beesBag: bundled.beesBag,
     // Came from the shell's bundled package → the bundle IS this install's
     // update authority (checkForUpdate compares against it).
     source: 'bundled' as const,
@@ -893,8 +906,6 @@ const tryParseManifest = (json: string): InstallManifest | null => {
       bees: Array.isArray(parsed.bees) ? parsed.bees : [],
       dependencies: Array.isArray(parsed.dependencies) ? parsed.dependencies : [],
       beeDeps: parsed.beeDeps && typeof parsed.beeDeps === 'object' ? parsed.beeDeps : undefined,
-      dependenciesBag: typeof parsed.dependenciesBag === 'string' ? parsed.dependenciesBag : undefined,
-      beesBag: typeof parsed.beesBag === 'string' ? parsed.beesBag : undefined,
       source: parsed.source === 'bundled' || parsed.source === 'sentinel' ? parsed.source : undefined,
     }
   } catch {

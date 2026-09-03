@@ -107,10 +107,8 @@
           <span class="mat-sym">menu_book</span>
         </button>
       }
-      <button type="button" class="cv2-mini-btn" (click)="hide()"
-              [attr.aria-label]="'notes.hide' | t" [title]="'notes.hide' | t">
-        <span class="mat-sym">close</span>
-      </button>
+      <button type="button" class="cv2-mini-btn cv2-close" (click)="hide()"
+              [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
     </div>
 
     <!-- The annotations window's two tabs — plain NOTES (prose and the

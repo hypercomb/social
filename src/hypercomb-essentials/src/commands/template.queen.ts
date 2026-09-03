@@ -1,10 +1,11 @@
 // /template — LAYOUT TEMPLATES, and the targets they are plugged into.
 //
 //   /template                     open or close the layout designer window
-//   /template sidebar             plug THIS container into the `sidebar` layout
+//   /template rail                plug THIS container into the `rail` layout
 //   /template off                 unplug it
 //   /template list                the layouts this hive can reach
-//   /template set left 14rem      change one variable, here only
+//   /template rotate              turn this container a quarter
+//   /template set rail 14rem      change one variable, here only
 //   /template save my-shell       save the current shape under a name
 //
 // A layout template is a shared artifact; a target is the mark a container
@@ -12,9 +13,13 @@
 // template-target.ts for why that is the whole point, and
 // documentation/layout-templates.md for the design.
 //
-// The four built-ins — `split`, `sidebar`, `stack`, `shell` — are data, so a
-// fifth one costs no code. Each is named for the arrangement it makes, not for
-// the proportions it happens to start with.
+// The five built-ins — `split`, `rail`, `thirds`, `bookends`, `measure` — are
+// data, so a sixth costs no code. Each DIVIDES the panel a container already
+// has: the outermost panel is implicit, so the set starts at two holes and
+// stops at three, the fourth being a nesting. Each is drawn ONE way and turned
+// to the other three, and each is named for the arrangement it makes: not for
+// the proportions it happens to start with, and not for a SIDE, which stops
+// being true the moment somebody turns it.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import type { VisualBeeRegistry } from './visual-bee-registry.js'
@@ -24,6 +29,7 @@ import {
   nodeOf,
   sanitizeVars,
   templateSlug,
+  turnedDirection,
   variablesOf,
   withVarAt,
   type LayoutTemplate,
@@ -117,15 +123,16 @@ export class TemplateQueenBee extends QueenBee {
   readonly command = 'template'
   override description = 'Layout templates — plug a container into a named, shared layout'
   override descriptionKey = 'slash.template'
-  override options = ['<name>', 'off', 'list', 'set <var> <value>', 'save <name>']
+  override options = ['<name>', 'off', 'list', 'rotate', 'set <var> <value>', 'save <name>']
   override examples = [
-    { input: '/template sidebar', result: 'Plugs this container into the sidebar layout' },
-    { input: '/template set left 14rem', result: 'Widens the left hole, here only' },
+    { input: '/template rail', result: 'Plugs this container into the rail layout' },
+    { input: '/template rotate', result: 'Turns this container a quarter — a rail becomes a header' },
+    { input: '/template set rail 14rem', result: 'Widens the rail hole, here only' },
     { input: '/template off', result: 'Unplugs this container' },
   ]
 
   override slashComplete(args: string): readonly string[] {
-    const verbs = ['off', 'list', 'set', 'save', ...knownTemplates().map(t => t.name)]
+    const verbs = ['off', 'list', 'rotate', 'set', 'save', ...knownTemplates().map(t => t.name)]
     const query = args.toLowerCase().trim()
     if (!query) return verbs
     return verbs.filter(v => v.startsWith(query))
@@ -139,6 +146,7 @@ export class TemplateQueenBee extends QueenBee {
     if (!verb) { this.#toggleView(); return }
     if (lower === 'list') { await this.#list(); return }
     if (lower === 'off' || lower === 'remove' || lower === 'none') { await this.#off(); return }
+    if (lower === 'rotate' || lower === 'turn') { await this.#rotate(); return }
     if (lower === 'set') { await this.#set(rest[0] ?? '', rest.slice(1).join(' ')); return }
     if (lower === 'save') { await this.#save(rest.join(' ')); return }
     await this.#target(trimmed)
@@ -182,6 +190,32 @@ export class TemplateQueenBee extends QueenBee {
     if (removed) {
       EffectBus.emit('activity:log', { message: 'Layout unplugged', icon: 'dashboard' })
     }
+  }
+
+  /**
+   * Turn this container a quarter.
+   *
+   * The ROOT level, like `/template set` — the command line has no selection,
+   * and the level a design starts from is the one it can honestly mean. Inside
+   * the designer a turn is aimed at whichever level is selected.
+   *
+   * It writes `direction` and nothing else: a turn is a quarter of the main
+   * axis, and every hole is already written so that it does not care which
+   * axis that is (layout-template.ts).
+   */
+  async #rotate(): Promise<void> {
+    const segments = this.#segments()
+    const bound = await resolveTemplateAt(segments)
+    if (!bound) {
+      EffectBus.emit('activity:log', { message: 'Nothing is plugged in here yet', icon: 'dashboard' })
+      return
+    }
+    const next = turnedDirection(bound.template, bound.vars)
+    await commitArrangement(segments, withVarAt(bound.node, [], 'direction', next))
+    EffectBus.emit('activity:log', {
+      message: `${bound.template.name} turned a quarter — it runs ${next} now`,
+      icon: 'dashboard',
+    })
   }
 
   /** Change one variable on THIS container's root level. The change re-mints

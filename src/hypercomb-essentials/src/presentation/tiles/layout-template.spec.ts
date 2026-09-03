@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   BUILTIN_LAYOUTS,
+  CONFIGURATION_AXES,
+  QUARTER_TURNS,
   builtinLayout,
   composeLayout,
   configurationOf,
@@ -22,13 +24,15 @@ import {
   sanitizeMeaning,
   templateContainer,
   templateSlug,
+  turnOf,
+  turnedDirection,
   variablesOf,
   type LayoutTemplate,
 } from './layout-template.js'
 import { containerFor, slotsIn } from './division-assembly.js'
 import { divisionPlan } from './visual-division.js'
 
-const sidebar = builtinLayout('sidebar')!
+const bookends = builtinLayout('bookends')!
 
 /** A wrapping row with a full-width band at each end. Not in the library — a
  *  page shell is a `stack` with something nested in its middle — but a band is
@@ -45,26 +49,81 @@ const banded = parseLayoutTemplate({
   vars: { space: '0rem', padding: '0rem', top: '3.5rem', left: '4rem', right: '10rem', bottom: '1rem' },
 })!
 
+/** A column, parsed rather than built in. Every primitive is DRAWN as a row
+ *  and turned to the other three quarters, so `flow: 'column'` is a shape a
+ *  stored template may still declare and nothing in the library asks for. */
+const columnFlow = parseLayoutTemplate({
+  kind: 'layout-template', version: 1, name: 'column-flow', flow: 'column',
+  holes: [{ key: 'top', fill: 'fixed' }, { key: 'body', fill: 'fluid' }],
+  vars: { top: '3.5rem' },
+})!
+
 describe('the built-ins', () => {
-  it('are twenty arrangements, as data', () => {
-    expect(BUILTIN_LAYOUTS).toHaveLength(20)
+  it('are five primitives, as data', () => {
+    // There were twenty. Fifteen were another one turned, mirrored or counted
+    // higher — every one of those is a GESTURE now, a quarter-turn or a
+    // primitive dropped into a primitive's hole — and the sixteenth was a
+    // one-hole `single` that divided nothing.
+    expect(BUILTIN_LAYOUTS).toHaveLength(5)
     expect(BUILTIN_LAYOUTS.map(t => t.name)).toEqual([
-      'single', 'split', 'thirds', 'quarters', 'two-thirds', 'three-quarters',
-      'left-rail', 'right-rail', 'sidebar', 'measure',
-      'rows-two', 'rows-three', 'rows-four', 'header-body', 'body-footer', 'stack',
-      'gallery-two', 'gallery-three', 'gallery-four', 'gallery-six',
+      'split', 'rail', 'thirds', 'bookends', 'measure',
     ])
   })
 
-  it('are every one of them ONE-DIMENSIONAL', () => {
+  it('divide in two at least — the outermost panel is implicit', () => {
+    // The floor, and the reason there is one. The container is already being
+    // drawn into something — the designer's pane, the viewport, its own page —
+    // and a layout DIVIDES that rather than putting one more box around it. So
+    // a one-hole layout divides nothing, and `single` was cut.
+    for (const template of BUILTIN_LAYOUTS) {
+      expect(template.holes.length).toBeGreaterThanOrEqual(2)
+    }
+    expect(builtinLayout('single')).toBeNull()
+
+    // DIVISION is the ruler, not droppability, and the two are not the same
+    // number: `rail` divides in two and seats ONE part, because its other hole
+    // is the container's own page. Pinned here so the distinction is stated in
+    // the file rather than inferred from the floor.
+    expect(memberHoles(builtinLayout('rail')!)).toHaveLength(1)
+  })
+
+  it('but the FORMAT still takes one hole, so an older binding still draws', () => {
+    // The floor is a curation rule for the LIBRARY, never a law of the record.
+    // A hive that bound `single` before it was cut resolves it by SIGNATURE
+    // and never by name, so its stored template must keep parsing and keep
+    // drawing. Data never heals.
+    const stored = parseLayoutTemplate({
+      kind: 'layout-template', version: 1, name: 'single', flow: 'row',
+      holes: [{ key: 'body', fill: 'fluid', self: true }], vars: {},
+    })!
+    expect(stored.holes).toHaveLength(1)
+    expect(templateContainer(stored)).toMatch(/data-hc-self/)
+  })
+
+  it('divide in three at most — the fourth is a nesting', () => {
+    for (const template of BUILTIN_LAYOUTS) {
+      expect(template.holes.length).toBeLessThanOrEqual(3)
+    }
+    // Four even shares is `split` with a `split` in each hole: the same
+    // arrangement `quarters` used to be a chip for, and one the participant
+    // keeps on the shelf under a name of their own.
+    const four = withNodeAt(
+      withNodeAt(nodeOf(builtinLayout('split')!, {}), ['one'], nodeOf(builtinLayout('split')!, {})),
+      ['two'], nodeOf(builtinLayout('split')!, {}))
+    expect(composeLayout(four).leaves).toHaveLength(4)
+  })
+
+  it('are every one of them ONE-DIMENSIONAL, and none of them wraps', () => {
     // A flexbox container has a single axis. Two dimensions is a container
     // with a container nested in one of its holes — which is the gesture the
     // designer exists for, and the only shape that is correct at every size.
+    //
+    // A wrapping row cannot give the remainder to one line, so it looks
+    // finished at exactly one size. `wrap` stays a flow a stored template may
+    // declare; nothing built in asks for it.
     for (const template of BUILTIN_LAYOUTS) {
-      if (template.flow !== 'wrap') continue
-      // The only wrapping ones are galleries, where a content-height line IS
-      // the right answer.
-      expect(template.name.startsWith('gallery-')).toBe(true)
+      expect(template.flow).toBe('row')
+      expect(template.holes.some(h => h.band)).toBe(false)
     }
   })
 
@@ -82,6 +141,17 @@ describe('the built-ins', () => {
     }
   })
 
+  it('name no SIDE, because a side stops being true the moment it is turned', () => {
+    // `left-rail`, `right-rail`, `header-body` and `body-footer` were four
+    // chips for one shape seen from four ends. They are `rail`, turned.
+    for (const template of BUILTIN_LAYOUTS) {
+      expect(template.name).not.toMatch(/left|right|top|bottom|header|footer/)
+      for (const hole of template.holes) {
+        expect(hole.key).not.toMatch(/left|right|top|bottom/)
+      }
+    }
+  })
+
   it('names fold, so "Split" and "split" are one layout', () => {
     expect(templateSlug('Split')).toBe('split')
     expect(builtinLayout('Split')).toBe(builtinLayout('split'))
@@ -90,23 +160,23 @@ describe('the built-ins', () => {
 
 describe('holes are an interface', () => {
   it('numbers only the MEMBER holes — a self hole is not one', () => {
-    expect(memberHoles(sidebar).map(h => h.key)).toEqual(['left', 'right'])
-    expect(holeKeyAt(sidebar, 0)).toBe('left')
-    expect(holeKeyAt(sidebar, 1)).toBe('right')
-    expect(holeIndex(sidebar, 'middle')).toBe(-1)
+    expect(memberHoles(bookends).map(h => h.key)).toEqual(['head', 'tail'])
+    expect(holeKeyAt(bookends, 0)).toBe('head')
+    expect(holeKeyAt(bookends, 1)).toBe('tail')
+    expect(holeIndex(bookends, 'body')).toBe(-1)
   })
 
   it('so member positions do not shift when a template gains a self hole', () => {
     const without = parseLayoutTemplate({
-      ...layoutTemplateRecord(sidebar),
-      holes: sidebar.holes.map(h => ({ ...h, self: undefined })),
+      ...layoutTemplateRecord(bookends),
+      holes: bookends.holes.map(h => ({ ...h, self: undefined })),
     })!
-    expect(holeIndex(sidebar, 'right')).toBe(1)
-    expect(holeIndex(without, 'right')).toBe(2)
+    expect(holeIndex(bookends, 'tail')).toBe(1)
+    expect(holeIndex(without, 'tail')).toBe(2)
   })
 
   it('gives every member hole a slot index and the self hole none', () => {
-    const html = templateContainer(sidebar)
+    const html = templateContainer(bookends)
     expect(slotsIn(html)).toEqual([0, 1])
     expect(html.match(/data-hc-hole=/g)).toHaveLength(3)
     expect(html.match(/data-hc-self/g)).toHaveLength(1)
@@ -116,7 +186,7 @@ describe('holes are an interface', () => {
     // A row layout's holes declare flex only; an EXTENT on the cross axis
     // would refuse any part taller than the designer imagined. `min-height:0`
     // is the flex-track guard, not an extent.
-    const html = templateContainer(sidebar)
+    const html = templateContainer(bookends)
     expect(html).not.toMatch(/[^-]height:/)
   })
 
@@ -145,8 +215,8 @@ describe('the variables', () => {
       const html = templateContainer(template)
       expect(html).toMatch(/--hc-layout-space/)
       // What a per-layout namespace looks like, and why it cannot appear:
-      // --split-space, --shell-space, --sidebar-space each stop inheriting.
-      expect(html).not.toMatch(/--(split|shell|sidebar|stack)-/)
+      // --split-space, --rail-space, --bookends-space each stop inheriting.
+      expect(html).not.toMatch(/--(split|rail|bookends|measure)-/)
     }
   })
 
@@ -157,28 +227,28 @@ describe('the variables', () => {
   })
 
   it('are declared only where they are overridden, so nesting inherits', () => {
-    const root = templateContainer(sidebar, sidebar.vars)
-    const nested = templateContainer(sidebar, { space: '2rem' })
-    expect(root).toMatch(/--hc-layout-left:10rem/)
+    const root = templateContainer(bookends, bookends.vars)
+    const nested = templateContainer(bookends, { space: '2rem' })
+    expect(root).toMatch(/--hc-layout-head:10rem/)
     // The nested container says ONE thing. Everything else still falls through
     // from the container above it — which is exactly what a re-declared alias
     // would have broken.
     expect(nested).toMatch(/--hc-layout-space:2rem/)
     // A hole still READS its variable — that is the inheritance working. What
     // must not appear is a re-DECLARATION.
-    expect(nested).not.toMatch(/--hc-layout-left:/)
+    expect(nested).not.toMatch(/--hc-layout-head:/)
     expect(nested).not.toMatch(/--hc-layout-padding:/)
   })
 
   it('space through gap and inset through padding — no margins, no resets', () => {
-    const html = templateContainer(sidebar)
+    const html = templateContainer(bookends)
     expect(html).toMatch(/gap:var\(--hc-layout-space,0\)/)
     expect(html).toMatch(/padding:var\(--hc-layout-padding,0\)/)
     expect(html).not.toMatch(/margin/)
   })
 
   it('fall back to 0 rather than to a guess', () => {
-    expect(templateContainer(sidebar, {})).toMatch(/gap:var\(--hc-layout-space,0\)/)
+    expect(templateContainer(bookends, {})).toMatch(/gap:var\(--hc-layout-space,0\)/)
   })
 
   it('drop anything that is not a slug pointing at a length', () => {
@@ -190,7 +260,7 @@ describe('the variables', () => {
   })
 
   it('cannot break out of the style attribute', () => {
-    const html = templateContainer(sidebar, { left: '1rem;position:fixed' })
+    const html = templateContainer(bookends, { head: '1rem;position:fixed' })
     expect(html).not.toMatch(/position:fixed/)
   })
 })
@@ -237,7 +307,7 @@ describe('arity is data', () => {
 
 describe('the container keeps its own page', () => {
   it('seats it into the self hole', () => {
-    const out = seatSelf(templateContainer(sidebar), '<p>mine</p>')
+    const out = seatSelf(templateContainer(bookends), '<p>mine</p>')
     expect(out).toMatch(/data-hc-self[^>]*><p>mine<\/p><\/div>/)
   })
 
@@ -248,14 +318,14 @@ describe('the container keeps its own page', () => {
   })
 
   it('is a no-op with nothing to seat', () => {
-    const drawn = templateContainer(sidebar)
+    const drawn = templateContainer(bookends)
     expect(seatSelf(drawn, '')).toBe(drawn)
   })
 })
 
 describe('containerFor — three sources, in order', () => {
   const plan = divisionPlan(3, 'row')
-  const bound = { node: nodeOf(sidebar, sidebar.vars) }
+  const bound = { node: nodeOf(bookends, bookends.vars) }
 
   it('1. an authored page THAT DECLARES HOLES wins over everything', () => {
     const authored = '<main><div data-hc-slot="0"></div></main>'
@@ -264,7 +334,7 @@ describe('containerFor — three sources, in order', () => {
 
   it('2. a bound layout beats the derived container', () => {
     const out = containerFor(plan, '<p>page</p>', bound)!
-    expect(out.html).toMatch(/data-hc-container="sidebar"/)
+    expect(out.html).toMatch(/data-hc-container="bookends"/)
     expect(out.slots).toEqual([0, 1])
   })
 
@@ -299,70 +369,70 @@ describe('a layout holds nobody', () => {
   })
 
   it('is the same bytes for the same shape — N targets are N references', () => {
-    const a: LayoutTemplate = layoutTemplateRecord(sidebar)
-    const b: LayoutTemplate = layoutTemplateRecord(parseLayoutTemplate(layoutTemplateRecord(sidebar))!)
+    const a: LayoutTemplate = layoutTemplateRecord(bookends)
+    const b: LayoutTemplate = layoutTemplateRecord(parseLayoutTemplate(layoutTemplateRecord(bookends))!)
     expect(JSON.stringify(a)).toBe(JSON.stringify(b))
   })
 })
 
 describe('a layout nests in a hole, with or without content there', () => {
-  const root = nodeOf(sidebar, sidebar.vars)
+  const root = nodeOf(bookends, bookends.vars)
 
   it('numbers the LEAVES, so nesting never moves another seat', () => {
-    // sidebar: left | (middle = its own page) | right  →  leaves 0,1
-    expect(composeLayout(root).leaves.map(l => l.key)).toEqual(['left', 'right'])
+    // bookends: head | (body = its own page) | tail  →  leaves 0,1
+    expect(composeLayout(root).leaves.map(l => l.key)).toEqual(['head', 'tail'])
 
-    // Nest a three-way stack in `left`. That hole stops being a seat and its
-    // own three leaves take positions 0,1,2 — read off the finished
+    // Nest a three-way `thirds` in `head`. That hole stops being a seat and
+    // its own three leaves take positions 0,1,2 — read off the finished
     // arrangement, which is the thing content is actually seated into.
-    const nested = withNodeAt(root, ['left'], nodeOf(builtinLayout('stack')!, {}))
+    const nested = withNodeAt(root, ['head'], nodeOf(builtinLayout('thirds')!, {}))
     expect(composeLayout(nested).leaves.map(l => l.path.join('/')))
-      .toEqual(['left/top', 'left/middle', 'left/bottom', 'right'])
+      .toEqual(['head/one', 'head/two', 'head/three', 'tail'])
   })
 
   it('nests to any depth', () => {
     let node = root
-    let path: string[] = ['left']
+    let path: string[] = ['head']
     for (let depth = 0; depth < 5; depth++) {
       node = withNodeAt(node, path, nodeOf(builtinLayout('split')!, {}))
-      path = [...path, 'left']
+      path = [...path, 'one']
     }
-    expect(nodeAt(node, ['left', 'left', 'left', 'left', 'left'])).not.toBeNull()
+    expect(nodeAt(node, ['head', 'one', 'one', 'one', 'one'])).not.toBeNull()
     expect(composeLayout(node).leaves.length).toBeGreaterThan(5)
   })
 
   it('needs nothing in the hole first — a shape is designed before it is filled', () => {
-    const nested = withNodeAt(root, ['right'], nodeOf(builtinLayout('split')!, {}))
-    expect(nodeAt(nested, ['right'])?.template.name).toBe('split')
+    const nested = withNodeAt(root, ['tail'], nodeOf(builtinLayout('split')!, {}))
+    expect(nodeAt(nested, ['tail'])?.template.name).toBe('split')
   })
 
   it('takes one back out without touching anything else', () => {
-    const nested = withNodeAt(root, ['left'], nodeOf(builtinLayout('stack')!, {}))
-    const back = withNodeAt(nested, ['left'], null)
-    expect(composeLayout(back).leaves.map(l => l.key)).toEqual(['left', 'right'])
+    const nested = withNodeAt(root, ['head'], nodeOf(builtinLayout('thirds')!, {}))
+    const back = withNodeAt(nested, ['head'], null)
+    expect(composeLayout(back).leaves.map(l => l.key)).toEqual(['head', 'tail'])
   })
 
   it('refuses a path through a hole nothing is nested in', () => {
     // You cannot drop into a hole that is not on the screen, so a path naming
     // one is a caller bug — inventing the levels would hide it.
-    expect(withNodeAt(root, ['left', 'deeper'], nodeOf(sidebar, {}))).toBe(root)
+    expect(withNodeAt(root, ['head', 'deeper'], nodeOf(bookends, {}))).toBe(root)
   })
 
   it('only the ROOT keeps a self hole — there is one page here', () => {
-    const nested = withNodeAt(root, ['left'], nodeOf(sidebar, {}))
+    const nested = withNodeAt(root, ['head'], nodeOf(bookends, {}))
     expect(composeLayout(nested).html.match(/data-hc-self/g)).toHaveLength(1)
   })
 
   it('writes hole behaviour onto the element, so a border can say what it is', () => {
     const html = composeLayout(root).html
-    expect(html).toMatch(/data-hc-hole="left"[^>]*data-hc-fill="fixed"/)
-    expect(html).toMatch(/data-hc-hole="middle"[^>]*data-hc-fill="fluid"/)
+    expect(html).toMatch(/data-hc-hole="head"[^>]*data-hc-fill="fixed"/)
+    expect(html).toMatch(/data-hc-hole="body"[^>]*data-hc-fill="fluid"/)
     expect(composeLayout(nodeOf(banded, banded.vars)).html).toMatch(/data-hc-band/)
   })
 
   it('addresses every hole by path', () => {
-    const nested = withNodeAt(root, ['left'], nodeOf(builtinLayout('split')!, {}))
-    expect(composeLayout(nested).html).toMatch(/data-hc-path="left\/right"/)
+    const nested = withNodeAt(root, ['head'], nodeOf(builtinLayout('split')!, {}))
+    expect(composeLayout(nested).html).toMatch(/data-hc-path="head\/two"/)
   })
 })
 
@@ -370,24 +440,24 @@ describe('a nested level declares only its own changes', () => {
   it('so everything else keeps falling through from above', () => {
     // The root declares two measurements; the nested level changes ONE.
     const nested = withNodeAt(
-      nodeOf(sidebar, { ...sidebar.vars, space: '1rem' }),
-      ['left'], nodeOf(sidebar, {}))
-    const html = composeLayout(withVarAt(nested, ['left'], 'space', '2rem')).html
+      nodeOf(bookends, { ...bookends.vars, space: '1rem' }),
+      ['head'], nodeOf(bookends, {}))
+    const html = composeLayout(withVarAt(nested, ['head'], 'space', '2rem')).html
 
     // `space` is declared twice — once at each level that set it.
     expect(html.match(/--hc-layout-space:/g)).toHaveLength(2)
-    // `left` is declared ONCE, at the root. The nested sidebar has a `left`
+    // `head` is declared ONCE, at the root. The nested bookends has a `head`
     // hole too and says nothing about it: it reads the one above. That single
     // asymmetry is the entire inheritance model.
-    expect(html.match(/--hc-layout-left:/g)).toHaveLength(1)
+    expect(html.match(/--hc-layout-head:/g)).toHaveLength(1)
   })
 
   it('sets a variable on the level the path names and nowhere else', () => {
     const nested = withNodeAt(
-      nodeOf(sidebar, sidebar.vars), ['left'], nodeOf(sidebar, {}))
-    const out = withVarAt(nested, ['left'], 'left', '3rem')
-    expect(nodeAt(out, ['left'])?.vars['left']).toBe('3rem')
-    expect(out.vars['left']).toBe('10rem')
+      nodeOf(bookends, bookends.vars), ['head'], nodeOf(bookends, {}))
+    const out = withVarAt(nested, ['head'], 'head', '3rem')
+    expect(nodeAt(out, ['head'])?.vars['head']).toBe('3rem')
+    expect(out.vars['head']).toBe('10rem')
   })
 })
 
@@ -409,7 +479,7 @@ describe('a layout is extended with data, never with fields', () => {
     // The fallbacks are the CSS defaults, so a hole that says nothing behaves
     // exactly as it did before the bag existed.
     expect(templateContainer(builtinLayout('split')!))
-      .toMatch(/align-self:var\(--hc-layout-left-align,auto\)/)
+      .toMatch(/align-self:var\(--hc-layout-one-align,auto\)/)
   })
 
   it('declares every OTHER name for whatever is seated there to read', () => {
@@ -482,8 +552,8 @@ describe('a hole always fits the space it is allotted', () => {
     // flex-shrink 1, not 0. Zero is the obvious reading of "fixed" and it is
     // wrong at every scale but one: two 10rem rails in a 34px chip overflow by
     // 286px, silently, because flex overflow does not clip.
-    expect(templateContainer(sidebar)).toMatch(/flex:0 1 var\(--hc-layout-left,0px\)/)
-    expect(templateContainer(sidebar)).toMatch(/flex:0 1 var\(--hc-layout-right,0px\)/)
+    expect(templateContainer(bookends)).toMatch(/flex:0 1 var\(--hc-layout-head,0px\)/)
+    expect(templateContainer(bookends)).toMatch(/flex:0 1 var\(--hc-layout-tail,0px\)/)
   })
 
   it('a wrapping container fills its box rather than packing to the top', () => {
@@ -493,8 +563,8 @@ describe('a hole always fits the space it is allotted', () => {
     expect(templateContainer(banded)).toMatch(/align-content:stretch/)
     // Every container now states its whole configuration, resolved — a
     // single-axis flow simply has no lines for `align-content` to act on.
-    expect(templateContainer(sidebar)).toMatch(/flex-wrap:nowrap/)
-    expect(templateContainer(builtinLayout('stack')!)).toMatch(/flex-direction:column/)
+    expect(templateContainer(bookends)).toMatch(/flex-wrap:nowrap/)
+    expect(templateContainer(columnFlow)).toMatch(/flex-direction:column/)
   })
 
   it('a band is clamped to the line it was given', () => {
@@ -531,15 +601,15 @@ describe('a hole always fits the space it is allotted', () => {
     // Not a special case and not a CSS override: the same layout, given
     // measurements suited to the space. A rail declared at 10rem is three
     // times a 34-pixel chip.
-    expect(miniatureVars(sidebar)).toEqual({
+    expect(miniatureVars(bookends)).toEqual({
       // `overflow: hidden` is the block axis: `max-width:100%` clamps every
       // width case, but an auto-height chain has no percentage to clamp
       // against, so the one box with a definite height says so.
       space: '1px', padding: '0rem', overflow: 'hidden',
-      left: '22%', right: '22%',
+      head: '22%', tail: '22%',
     })
     // A fluid hole takes the remainder and needs no measurement at any scale.
-    expect(miniatureVars(sidebar)).not.toHaveProperty('middle')
+    expect(miniatureVars(bookends)).not.toHaveProperty('body')
   })
 
   it('gives every fixed hole in every built-in a share', () => {
@@ -562,8 +632,8 @@ describe('the flex configuration is data, and it does not inherit', () => {
   it('takes its defaults from the flow, which is shorthand for two axes', () => {
     expect(configurationOf(builtinLayout('split')!))
       .toEqual({ direction: 'row', wrap: 'nowrap', justify: 'flex-start', align: 'stretch', alignContent: 'stretch' })
-    expect(configurationOf(builtinLayout('stack')!).direction).toBe('column')
-    expect(configurationOf(builtinLayout('gallery-four')!).wrap).toBe('wrap')
+    expect(configurationOf(columnFlow).direction).toBe('column')
+    expect(configurationOf(banded).wrap).toBe('wrap')
   })
 
   it('lets a variable win over the flow', () => {
@@ -594,8 +664,8 @@ describe('the flex configuration is data, and it does not inherit', () => {
     // impossible.
     const nested = withNodeAt(
       nodeOf(builtinLayout('split')!, { direction: 'row' }),
-      ['left'],
-      nodeOf(builtinLayout('stack')!, {}),
+      ['one'],
+      nodeOf(builtinLayout('split')!, { direction: 'column' }),
     )
     const html = composeLayout(nested).html
     expect(html.match(/flex-direction:row/g)).toHaveLength(1)
@@ -613,6 +683,87 @@ describe('the flex configuration is data, and it does not inherit', () => {
       ]) {
         expect(html).toMatch(new RegExp(`${property}:`))
       }
+    }
+  })
+})
+
+describe('a layout is drawn one way and turned to the other three', () => {
+  it('spells the four quarters clockwise, from ONE list', () => {
+    expect(QUARTER_TURNS).toEqual(['row', 'column', 'row-reverse', 'column-reverse'])
+    // The rotation IS the direction vocabulary rather than a second copy of
+    // it: two lists of the same four values eventually disagree, and the day
+    // somebody tidies one into alphabetical order a turn stops being a
+    // quarter.
+    expect(CONFIGURATION_AXES.find(axis => axis.name === 'direction')?.values)
+      .toEqual(QUARTER_TURNS)
+  })
+
+  it('draws every primitive at quarter zero', () => {
+    for (const template of BUILTIN_LAYOUTS) {
+      expect(turnOf(template)).toBe(0)
+    }
+  })
+
+  it('turns one quarter at a time, and comes round', () => {
+    expect(turnedDirection(bookends)).toBe('column')
+    expect(turnedDirection(bookends, { direction: 'column' })).toBe('row-reverse')
+    expect(turnedDirection(bookends, { direction: 'row-reverse' })).toBe('column-reverse')
+    expect(turnedDirection(bookends, { direction: 'column-reverse' })).toBe('row')
+    // And backwards, so a turn is undone by turning rather than by counting
+    // to three.
+    expect(turnedDirection(bookends, {}, -1)).toBe('column-reverse')
+  })
+
+  it('starts from where a container STANDS, not from how it was drawn', () => {
+    // A level that has never been turned is at the quarter its flow implies.
+    // Computing from `row` regardless would make the first press on a column
+    // land back where it started.
+    expect(turnOf(columnFlow)).toBe(1)
+    expect(turnedDirection(columnFlow)).toBe('row-reverse')
+  })
+
+  it('REWRITES NOTHING ABOUT A HOLE ON THE WAY ROUND', () => {
+    // This is the whole reason the library draws one way. A hole never states
+    // its cross axis, so a fixed hole's `flex-basis` is a WIDTH in a row and a
+    // HEIGHT in a column from the same bytes — the browser's own flexbox does
+    // the work, and a turned container is laid out exactly as it would have
+    // been if it had been drawn that way to begin with.
+    const row = templateContainer(bookends, bookends.vars)
+    const turned = templateContainer(bookends, { ...bookends.vars, direction: 'column' })
+
+    const holesOf = (html: string): string[] =>
+      [...html.matchAll(/<div [^>]*data-hc-hole[^>]*>/g)].map(match => match[0])
+    expect(holesOf(turned)).toEqual(holesOf(row))
+    // The ONE difference anywhere in the container is the axis it runs on.
+    expect(row).toMatch(/flex-direction:row/)
+    expect(turned).toMatch(/flex-direction:column/)
+    expect(turned.replace('flex-direction:column', 'flex-direction:row')).toBe(row)
+  })
+
+  it('is a fact about ONE container, so it does not fall through', () => {
+    // Turning a level must not turn what is nested in it — nesting a column
+    // inside a row is the entire point of nesting, and it is why the
+    // configuration is resolved on each container instead of inherited.
+    const nested = withNodeAt(
+      nodeOf(bookends, bookends.vars), ['head'], nodeOf(builtinLayout('split')!, {}))
+    const html = composeLayout(withVarAt(nested, [], 'direction', 'column')).html
+    expect(html.match(/flex-direction:column/g)).toHaveLength(1)
+    expect(html.match(/flex-direction:row/g)).toHaveLength(1)
+    // And it is never published as a custom property, which is what would let
+    // it fall through.
+    expect(html).not.toMatch(/--hc-layout-direction/)
+  })
+
+  it('is what makes four old chips one primitive', () => {
+    // `left-rail`, `right-rail`, `header-body` and `body-footer` were four
+    // arrangements of one shape. Each is `rail` at a different quarter, and
+    // the measured hole takes its measure on whichever axis it lands on.
+    const rail = builtinLayout('rail')!
+    const drawn = new Set(
+      QUARTER_TURNS.map(direction => templateContainer(rail, { ...rail.vars, direction })))
+    expect(drawn.size).toBe(4)
+    for (const html of drawn) {
+      expect(html).toMatch(/flex:0 1 var\(--hc-layout-rail,0px\)/)
     }
   })
 })

@@ -2335,7 +2335,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // there — and it must be the SAME commit the chevron stance runs, not a
     // second implementation that drifts. The queen names the act; the line
     // performs it: seed the value the create path reads, commit, restore.
-    this.#createCellsUnsub = EffectBus.on<{ name?: string }>(
+    this.#createCellsUnsub = EffectBus.on<{
+      name?: string
+      accept?: () => void
+      complete?: (error?: unknown) => void
+    }>(
       'command:create-cells',
       (payload) => {
         const name = (payload?.name ?? '').trim()
@@ -2345,8 +2349,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         // behaviour makes a tile, it does not walk you into it.
         const seed = name.replace(/^\/+|\/+$/g, '').trim()
         if (!seed) return
-        this.#setShellValue(seed, false)
-        void this.commitCreateCellInPlace()
+        payload.accept?.()
+        try {
+          this.#setShellValue(seed, false)
+          void this.commitCreateCellInPlace(true)
+            .then(() => payload.complete?.())
+            .catch(error => payload.complete?.(error))
+        } catch (error) {
+          payload.complete?.(error)
+        }
       },
     )
 
@@ -3792,7 +3803,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // create cell in place
   // -------------------------------------------------
 
-  private readonly commitCreateCellInPlace = async (): Promise<void> => {
+  private readonly commitCreateCellInPlace = async (requireCommitter = false): Promise<void> => {
     const rawInput = this.value().trim()
     if (!rawInput) return
 
@@ -3828,6 +3839,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const leafCell = parts[parts.length - 1]
     const armed = this.armedResource()
 
+    const committer = (window as unknown as { ioc: { get(key: string): unknown } }).ioc.get(
+      '@diamondcoreprocessor.com/LayerCommitter',
+    ) as {
+      importTree?: (
+        updates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[],
+      ) => Promise<void>
+    } | undefined
+    // The acknowledged grammar path must fail before even optimistic UI is
+    // emitted when there is no durable commit seam behind it.
+    if (requireCommitter && !committer?.importTree) {
+      throw new Error('Create layer committer is unavailable')
+    }
+
     if (armed) {
       // Lock substrate out of this cell until the resource is fully attached.
       // The lock is released by ResourceAttachDrone once the props blob is
@@ -3848,13 +3872,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // ONE atomic cascade: importTree commits every affected ancestor
     // exactly once. For `a/b/c` from root that's 1 marker each in root,
     // /a, /a/b, /a/b/c — never N markers per level.
-    const committer = (window as unknown as { ioc: { get(key: string): unknown } }).ioc.get(
-      '@diamondcoreprocessor.com/LayerCommitter',
-    ) as {
-      importTree?: (
-        updates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[],
-      ) => Promise<void>
-    } | undefined
     if (committer?.importTree) {
       const updates = events.map(evt => ({
         segments: [...evt.segments, evt.cell],

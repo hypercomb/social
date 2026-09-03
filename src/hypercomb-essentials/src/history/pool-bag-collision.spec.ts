@@ -34,6 +34,7 @@ vi.hoisted(() => {
 type HistoryServiceCtor = new () => {
   purgeNonLayerFiles(sig: string): Promise<void>
   commitLayer(sig: string, layer: { name: string; children?: string[] }): Promise<string>
+  removeLineageBag(sig: string): Promise<boolean>
 }
 let HistoryService: HistoryServiceCtor
 
@@ -197,18 +198,100 @@ describe('pool address / lineage bag address collision', () => {
     }
   })
 
-  it('a genuinely polluted lineage bag is still cleaned', async () => {
+  it('a genuinely polluted lineage bag has its MARKERS cleaned', async () => {
     // Same shape, but NOT a pool address — /flatten must keep working.
     const address = await bagSignature(['some-ordinary-tile'])
     const bag = await root.getDirectoryHandle(address, { create: true })
     await write(bag, '00000000', JSON.stringify({ name: 'some-ordinary-tile' }))
-    await write(bag, 'notes.txt', 'stray junk')
-    await write(bag, '0'.repeat(64), 'pre-merkle sig pointer')
+    await write(bag, '00000001', 'a'.repeat(64))  // pre-merkle bare-sig marker
+    await write(bag, '00000002', 'not json at all')
 
     const history = new HistoryService()
     await history.purgeNonLayerFiles(address)
 
     expect(names(bag)).toEqual(['00000000'])
+  })
+
+  // 2026-09-02 — a deliberate narrowing, not a regression. Purge used to drop
+  // every non-marker file in a bag as "pre-merkle pollution". Under the
+  // molecule model a 64-hex file inside a sig-named directory is
+  // INDISTINGUISHABLE from a pool member or a succession atom: same name
+  // shape, same "not a v2 layer" content. The registry guard above cannot
+  // save them either, because a molecule address is minted by anyone typing
+  // a word and no registry can enumerate it.
+  //
+  // Leaving them is inert — every reader (listLayers, #scanLatestMarker,
+  // refreshLineageCache) already filters by marker shape. Deleting them was
+  // the only irreversible option on the table.
+  // See documentation/hypergraph-molecule-lineage.md.
+  it('leaves non-marker files alone, even in an ordinary tile\'s bag', async () => {
+    const address = await bagSignature(['another-ordinary-tile'])
+    const bag = await root.getDirectoryHandle(address, { create: true })
+    await write(bag, '00000000', JSON.stringify({ name: 'another-ordinary-tile' }))
+    await write(bag, 'notes.txt', 'stray junk')
+    await write(bag, '0'.repeat(64), 'could be pollution — could be a member')
+
+    const history = new HistoryService()
+    await history.purgeNonLayerFiles(address)
+
+    expect(names(bag)).toEqual(['00000000', '0'.repeat(64), 'notes.txt'].sort())
+  })
+
+  // removeLineageBag is the OTHER hard delete, and it is recursive. Its
+  // registry guard (isPoolAddress) only recognises meanings a module
+  // registered — which is exactly the address that CANNOT be registered under
+  // the molecule model, since any participant mints one by typing a word.
+  // The structural guard is what covers it: THE ENTRY DECIDES. A directory is
+  // removable only when every entry in it is a marker.
+  // See hypercomb-core/src/core/directory-safety.ts.
+  describe('removeLineageBag — the entry decides, never the directory', () => {
+    it('removes a pure lineage bag: every entry is the caller\'s own marker', async () => {
+      const address = await bagSignature(['a-tile-with-only-history'])
+      const bag = await root.getDirectoryHandle(address, { create: true })
+      await write(bag, '00000000', JSON.stringify({ name: 'a-tile-with-only-history' }))
+      await write(bag, '00000001', JSON.stringify({ name: 'a-tile-with-only-history' }))
+
+      const history = new HistoryService()
+      expect(await history.removeLineageBag(address)).toBe(true)
+      expect([...root.dirs.keys()]).not.toContain(address)
+    })
+
+    it('REFUSES an unregistered MOLECULE address holding another participant\'s head bucket', async () => {
+      // `people` is an ordinary tile name — no registry knows it. Its bag
+      // address is also the molecule, and the molecule holds per-author head
+      // buckets. A recursive remove here destroys other people's history.
+      const address = await bagSignature(['people'])
+      const bag = await root.getDirectoryHandle(address, { create: true })
+      await write(bag, '00000000', JSON.stringify({ name: 'people' }))
+      const bucket = await bag.getDirectoryHandle('b'.repeat(64), { create: true })
+      await write(bucket, 'c'.repeat(64), 'another author\'s succession head')
+
+      const history = new HistoryService()
+      expect(await history.removeLineageBag(address)).toBe(false)
+      expect([...root.dirs.keys()]).toContain(address)
+      expect([...bag.dirs.keys()]).toContain('b'.repeat(64))
+    })
+
+    it('REFUSES a bag holding sig-named member files', async () => {
+      const address = await bagSignature(['a-tile-that-is-also-a-pool'])
+      const bag = await root.getDirectoryHandle(address, { create: true })
+      await write(bag, '00000000', JSON.stringify({ name: 'a-tile-that-is-also-a-pool' }))
+      await write(bag, 'd'.repeat(64), 'somebody\'s member')
+
+      const history = new HistoryService()
+      expect(await history.removeLineageBag(address)).toBe(false)
+      expect(names(bag)).toContain('d'.repeat(64))
+    })
+
+    it('REFUSES a bag holding an unrecognised entry — unknown provenance is not yours', async () => {
+      const address = await bagSignature(['a-tile-with-a-stray'])
+      const bag = await root.getDirectoryHandle(address, { create: true })
+      await write(bag, '00000000', JSON.stringify({ name: 'a-tile-with-a-stray' }))
+      await write(bag, 'notes.txt', 'who put this here')
+
+      const history = new HistoryService()
+      expect(await history.removeLineageBag(address)).toBe(false)
+    })
   })
 
   it('purge at the ROOT lineage keeps canonical markers (root layer name is empty)', async () => {

@@ -22,6 +22,20 @@ describe('edge registry', () => {
     for (const field of REFERENT_FIELDS) expect(isEdgeField(field), field).toBe(false)
   })
 
+  // A succession's predecessor is a POINTER, not bytes the closure owes.
+  // Carrying it would drag the whole past into every read (measured: 123 atom
+  // fetches to render one member) and make prune unimplementable, because
+  // `prev` chains all history into merkle reachability.
+  // See documentation/hypergraph-molecule-lineage.md.
+  it('treats a succession `prev` as a referent, never an edge', () => {
+    expect(isReferentField('prev')).toBe(true)
+    expect(isEdgeField('prev')).toBe(false)
+  })
+
+  it('never harvests `prev` into a closure', () => {
+    expect(edgeSigsOf({ children: [sigA], prev: sigB })).toEqual([sigA])
+  })
+
   it('edgeSigsOf harvests edge fields only, shallow, deduped, lowercased', () => {
     const sigs = edgeSigsOf({
       children: [sigA, sigB, sigA.toUpperCase(), 'not-a-sig'],

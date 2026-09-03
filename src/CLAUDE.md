@@ -259,17 +259,27 @@ of meaning**, never a `__name__` dir). The model:
     | `manifests` | `c7af7c7a948db8800f71f26f3c90280cf09dfc3141b72318c5ff31ffc9470a59` |
     | `websites:menu` | `17deba5bf2d5bceded9326cba402164b576529d811d73f5f2d2285cd5d038fbb` |
 
-    **Collision rule for NEW meanings**: lineage sigbags share the flat
-    root namespace, and a bag is named `sha256(lineageKey(segments))` —
-    for a single-segment location that is `sha256(<slug>)`, so a bare-word
-    meaning collides with any tile/page whose slug equals it (verified:
-    `sign('websites')` IS the `/websites` launcher bag). `lineageKey`
-    folds every non-letter/number to `-`, so a `:` in the meaning string
-    (e.g. `websites:menu`) can never be produced by a location — every
-    NEW pool meaning MUST carry a colon. A doctrine ratchet enforces
-    this: the bare-word set in `hypercomb-core/src/core/pool-registry.ts`
-    is frozen and may only SHRINK (migrating one away needs a drain plan
-    — `sign()` of a new spelling mints a different address forever).
+    **DOCTRINE 2026-09-02 — HYPERGRAPH MOLECULE LINEAGE (READ FIRST):
+    `src/documentation/hypergraph-molecule-lineage.md`.** The tile NAME
+    is the grammar; a MOLECULE is `sign(name)` (bare word) plus the atoms
+    gathered under it; `/business/people` is a ROUTE, never an address;
+    the path-keyed bag `sha256(lineageKey(segments))` is no longer the
+    identity of anything. `sign('websites')` being the `/websites` bag is
+    THE DESIGN, not a hazard — the hazard was `/flatten` deleting a pool
+    it mistook for a bag, so fix PRUNE SAFETY (never delete a dir holding
+    64-hex entries); do NOT forbid bare words. Order lives in a META
+    atom, the set is unordered and federated (the local dir is one
+    replica; the pool = union across community hosts; every word is a
+    cross-host search address). DATA NEVER HEALS: the transition is a
+    forward commit, dual-pointer (new `sign(name)/000x` AND the old
+    path-keyed bag advance to the SAME atom), and NOTHING is ever deleted
+    — older versions must keep working. Colon meanings stay reserved for
+    SYSTEM pools no tile should name (`websites:menu`, `usage:dwell`); the
+    seven bare-word system pools above must each move to a colon meaning
+    or be declared reserved names. The frozen bare-word ratchet in
+    `hypercomb-core/src/core/pool-registry.ts` is owed a FLIP (step 5 of
+    the doc's execution order) — until it lands it still fails on new
+    bare words; do not extend it, retire it per the register.
 
     **Never keep a local list of pool meanings.** The root is an
     UNTAGGED UNION of `{lineage bag, pool}` and any module may mint a
@@ -420,6 +430,17 @@ Shell-level UI is **registry-fed** (see `src/documentation/shell-surfaces.md`). 
 **Never add an `<hc-*>` tag to either `app.html`** — a doctrine ratchet (`doctrine.spec.ts`) fails the suite if you do. Add a registration + barrel import instead. `order` on the registration is the only DOM/stacking-order lever. Only bound/structural chrome remains template-mounted (header bar, router-outlet, pixi-host, controls-bar, edit-actions, web's install prompt); THAT set must still be kept in sync manually across the two templates, and its ratchet allowlist may only shrink.
 
 ## Agent Coordination (Multi-Worktree)
+
+### Scratch workspaces and generated files (MANDATORY)
+
+Follow the repository-wide policy in `../AGENTS.md`: use the operating system's
+temporary directory by default, or the ignored repo-root `/.tmp/<tool>-<id>/`
+when locality is required. Before writing any other generated directory, add a
+narrow rule to a checked-in `.gitignore` and prove it with `git check-ignore`.
+Never rely on `.git/info/exclude`, never install dependencies into an ad-hoc
+package-local scratch tree, and finish with
+`git status --short --untracked-files=all` so generated residue cannot be
+mistaken for source.
 
 When working in a worktree alongside other agents:
 

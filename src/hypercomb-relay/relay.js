@@ -21,7 +21,7 @@
 
 import { createServer } from 'node:http'
 import { randomBytes, createHash } from 'node:crypto'
-import { existsSync, readFileSync, statSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
@@ -641,6 +641,44 @@ function tryServeContent(req, res) {
   // generic content-directory fallback below.
   if (urlPath === '/.receipts' || urlPath.startsWith('/.receipts/')) return false
 
+  // ── the directory branch (documentation/pools-across-hosts.md) ──────────
+  //
+  // A POOL IS A DIRECTORY, AND A DIRECTORY IS A SET. `/<sig>` names a file —
+  // one closure, forever, cacheable for a year. `/<sig>/` names a set, and
+  // sets grow. Without this branch a host cannot answer "what do you carry
+  // under this meaning" at all, which is why discovery kept reaching for a
+  // named index file next to the content instead: `packages.json` was never a
+  // second dialect, only a relay that could not readdir.
+  //
+  // The listing is entry NAMES and nothing else — never sizes, never
+  // contents, nothing that could decide what a client installs. It is
+  // `readdir` on the wire, not a document: newline-separated, so a static
+  // host's ship can write byte-identical bytes at the same address.
+  const dirMatch = urlPath.match(/^\/([0-9a-f]{64})\/$/)
+  if (dirMatch) {
+    const dir = join(resolve(cfg.contentDir), dirMatch[1])
+    let names
+    try {
+      if (!statSync(dir).isDirectory()) return false
+      // `index.html` is the STATIC ship's rendering of this very listing —
+      // the directory describing itself so a bucket with no readdir can answer
+      // the same URL. It is not a member, on either host shape.
+      names = readdirSync(dir).filter(n => n !== 'index.html' && !n.startsWith('.')).sort()
+    } catch { respondText(res, 404, 'pool not held'); return true }
+    const body = Buffer.from(names.join('\n'), 'utf8')
+    res.writeHead(200, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Content-Length': String(body.length),
+      'Access-Control-Allow-Origin': '*',
+      // A SET GROWS. The members are immutable; the membership is not.
+      'Cache-Control': 'no-store',
+      'Permissions-Policy': PERMISSIONS_POLICY,
+    })
+    if (req.method === 'HEAD') { res.end(); return true }
+    res.end(body)
+    return true
+  }
+
   let resolved
   let contentType
   const sigMatch = urlPath.match(/^\/([0-9a-f]{64})$/)
@@ -686,6 +724,14 @@ function tryServeContent(req, res) {
 
   try {
     const bytes = readFileSync(resolved)
+    // WHEN A HOST RECEIVED IT, from the filesystem rather than from anything
+    // anyone published. A pool entry carries the package signature and nothing
+    // about time; the fact that this file arrived on Tuesday is the transport's
+    // own, not a claim in a document, and every static host (S3, Pages, nginx)
+    // already answers with it. It is the last thing the manifest was carrying
+    // for the browse list.
+    let lastModified = ''
+    try { lastModified = statSync(resolved).mtime.toUTCString() } catch { /* unknowable */ }
     // IMMUTABLE MEANS SIG-ADDRESSED, AND NOTHING ELSE. A signature names one
     // closure forever, so those bytes can be pinned for a year. A NAMED file
     // — manifest.json, packages.json — is the domain's mutable voice: the one
@@ -699,6 +745,8 @@ function tryServeContent(req, res) {
       'Content-Length': String(bytes.length),
       'Access-Control-Allow-Origin': '*',
       'Cache-Control': sigAddressed ? 'public, max-age=31536000, immutable' : 'no-store',
+      ...(lastModified ? { 'Last-Modified': lastModified } : {}),
+      'Access-Control-Expose-Headers': 'Last-Modified',
       'Permissions-Policy': PERMISSIONS_POLICY,
     })
     if (req.method === 'HEAD') { res.end(); return true }

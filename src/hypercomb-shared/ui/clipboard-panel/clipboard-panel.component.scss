@@ -134,7 +134,6 @@ $clipboard: #49d6d0;
 
 .clipboard-header {
   @include tw.header;
-  border-bottom: 1px solid rgba(var(--acc), 0.22);
 }
 
 .clipboard-title {

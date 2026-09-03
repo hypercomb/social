@@ -20,7 +20,7 @@
           <span class="workflow-count">{{ stepCount() }}</span>
         }
       </div>
-      <button class="workflow-close" type="button" (click)="close()" [attr.aria-label]="'workflow.close' | t">×</button>
+      <button class="workflow-close" type="button" (click)="close()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
     </header>
 
     <!-- Not a workflow yet. The tile you are standing in becomes one by being

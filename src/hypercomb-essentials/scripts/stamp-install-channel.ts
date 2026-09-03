@@ -21,6 +21,7 @@
 // always safe to run — and a HAND invocation stays best-effort (exit 0) so
 // re-running it while the hive is closed is a nudge, not a failure.
 
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -38,14 +39,17 @@ const flag = (name: string): string | undefined => {
 const channel = argv.find(a => !a.startsWith('--') && a !== flag('--sig') && a !== flag('--host')) || 'essentials'
 const require_ = argv.includes('--require')
 
+/** The package this build made, read from dist's own `host:packages` member —
+ *  the same thing a host publishes and a client reads, rather than a document
+ *  about it (documentation/host-packages-pool.md). */
 function packageSigFromDist(): string | null {
   const explicit = String(flag('--sig') ?? '').trim().toLowerCase()
   if (explicit) return SIG_RE.test(explicit) ? explicit : null
   try {
-    const manifest = JSON.parse(readFileSync(resolve(__dirname, '..', 'dist', 'manifest.json'), 'utf8')) as { packages?: Record<string, unknown> }
-    const sigs = Object.keys(manifest.packages ?? {}).filter(s => SIG_RE.test(s))
-    if (sigs.length > 1) console.warn(`[stamp-install-channel] manifest holds ${sigs.length} packages — stamping the first`)
-    return sigs[0] ?? null
+    const pool = createHash('sha256').update('host:packages', 'utf8').digest('hex')
+    const entry = readFileSync(resolve(__dirname, '..', 'dist', pool, '00000000'), 'utf8')
+    const sig = (entry.split('\n')[0] ?? '').trim().toLowerCase()
+    return SIG_RE.test(sig) ? sig : null
   } catch { return null }
 }
 
@@ -80,7 +84,7 @@ function stamp(sig: string): Promise<Record<string, unknown>> {
 
 const sig = packageSigFromDist()
 if (!sig) {
-  console.error('[stamp-install-channel] no package sig — dist/manifest.json missing or --sig malformed')
+  console.error('[stamp-install-channel] no package sig — dist carries no host:packages member, or --sig is malformed')
   process.exit(1)
 }
 
