@@ -12,6 +12,14 @@
 // plus one entry-point dependence none of the four names: the seal folds
 // `viewOf`, which reads the LOCAL UNDO CURSOR, so pressing undo re-minted the
 // deploy root with nothing committed and nothing on disk changed.
+//
+// AND, SINCE THE THIRD-PARTY REVIEW OF STEP 4 ITSELF: the SET is signed. Every
+// row was independently signed and the composition was signed by nobody, so a
+// stranger could compose a truncation, an empty deploy or a cherry-picked
+// mixture of generations out of the publisher's own rows and have it verify
+// clean. `verifyDeploy` is the door that refuses those; `verifyHeadMapRows` is
+// the weaker inner half and its verdict has no `ok` field at all, so the two
+// answers can never be confused. The attacks live in headmap-skeptic-*.
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -26,13 +34,16 @@ import {
   canonicalHeadMap,
   claimReaderOf,
   encodeHeadMap,
+  headMapAttestationPreimage,
   headMapClaimFor,
   headMapDiff,
   headMapRegressions,
+  headReaderOf,
   mintHeadMap,
   molecularScope,
   parseHeadMap,
-  verifyHeadMap,
+  verifyDeploy,
+  verifyHeadMapRows,
 } from './head-map.mjs'
 
 /** A host that serves bytes and NOTHING else — the shape every static host has. */
@@ -46,6 +57,17 @@ const contentOnlyHostOf = (root) => ({
     return root.read(sig)
   },
 })
+
+/** The full third-party procedure, from the two things a visitor is given. */
+const verifyMinted = (store, host, minted, { readHead = true } = {}) => verifyDeploy(
+  { sig: minted.sig, bytes: minted.bytes.toString('utf8'), attestation: minted.attestation },
+  store.pubkey,
+  {
+    verify: verifyEd25519,
+    readClaim: claimReaderOf(host, verifyEd25519),
+    readHead: readHead ? headReaderOf(host) : null,
+  },
+)
 
 // ───────────────────────────────────────────────────────────────────────────
 test('A — THE MAP TERMINATES ON THE CYCLIC NAME GRAPH THAT KILLS seal()', () => {
@@ -61,10 +83,12 @@ test('A — THE MAP TERMINATES ON THE CYCLIC NAME GRAPH THAT KILLS seal()', () =
     moleculeOf('business'),
   )
 
-  // The fold has no fixpoint here. The ENUMERATION does not need one: it is set
-  // MEMBERSHIP, and revisiting a molecule can only re-add what is already in
-  // the set — which is precisely why the global visited set that was tried and
-  // REVERTED for sealSubtree is sound for a map and was not for a fold.
+  // The fold has no fixpoint here. The ENUMERATION does not need one: the
+  // whole-hive scope is the mint LEDGER, which is a list and has no graph in it
+  // at all, and a branch scope is set MEMBERSHIP, where revisiting a molecule
+  // can only re-add what is already in the set — which is precisely why the
+  // global visited set that was tried and REVERTED for sealSubtree is sound for
+  // a map and was not for a fold.
   const minted = mintHeadMap(s, { route: [] })
   assert.ok(minted, 'the map mints')
 
@@ -77,8 +101,12 @@ test('A — THE MAP TERMINATES ON THE CYCLIC NAME GRAPH THAT KILLS seal()', () =
   assert.deepEqual(
     molecules.slice().sort(),
     [ROOT_MOLECULE, moleculeOf('business'), moleculeOf('people')].sort(),
-    'the reachable set is the three molecules I head, and no more',
+    'the set is the three molecules I head, and no more',
   )
+  // and a BRANCH scope over the same cycle terminates too
+  const branch = mintHeadMap(s, { route: ['business'] })
+  assert.ok(branch, 'a branch scope on a cyclic graph mints')
+  assert.equal(new Set(branch.record.rows.map((r) => r[0])).size, branch.record.rows.length)
 })
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -109,6 +137,37 @@ test('A2 — ONE MOLECULE, ONE DEPLOY IDENTITY: the map is entry-point independe
   // order IS byte order and there is no locale or tie-break left to specify.
   const molecules = fromBeta.record.rows.map((r) => r[0])
   assert.deepEqual(molecules, [...molecules].sort())
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+test('A3 — THE ROOT SCOPE CONTAINS EVERY BRANCH SCOPE INSIDE IT', () => {
+  // The first cut of `molecularScope` walked MY OWN heads and stopped at any
+  // molecule I did not head, so publishing "everything from the root" published
+  // strictly LESS than publishing a branch inside it, and neither contained the
+  // other. The root scope is the LEDGER now, which is a superset by definition.
+  const shared = new Root()
+  const me = new MoleculeStore({ root: shared, author: 'me' })
+  const them = new MoleculeStore({ root: shared, author: 'stranger' })
+  me.save([], 'shop')
+  them.save(['shop'], 'aisle') // a tile in the middle of MY route, made by somebody else
+  me.save(['shop', 'aisle'], 'jam')
+  me.save(['shop', 'aisle', 'jam'], 'lid')
+
+  const wide = mintHeadMap(me, { route: [] })
+  const deep = mintHeadMap(me, { route: ['shop', 'aisle'] })
+  const wideSet = new Set(wide.record.rows.map((r) => r[0]))
+
+  assert.ok(
+    deep.record.rows.every((r) => wideSet.has(r[0])),
+    'every molecule a branch publishes is in the whole-hive publish',
+  )
+  assert.deepEqual(
+    wide.record.rows.map((r) => r[0]).sort(),
+    [ROOT_MOLECULE, moleculeOf('aisle'), moleculeOf('jam')].sort(),
+    'and the stranger\'s tile does not amputate /shop/aisle/jam from my deploy',
+  )
+  assert.deepEqual(deep.outOfScope.sort(), [ROOT_MOLECULE].sort(),
+    'a branch publish REPORTS what it leaves behind rather than dropping it silently')
 })
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -176,6 +235,11 @@ test('B2 — NOR CAN MY OWN UNDO CURSOR: the map is built from HEADS, never from
 
   assert.equal(after.sig, before.sig, 'undo moves the RENDERED page and never the deploy')
   assert.equal(after.bytes.toString('utf8'), before.bytes.toString('utf8'))
+
+  // and the same for a BRANCH scope, which reads `heads` and not `viewOf`
+  const branchBefore = mintHeadMap(s, { route: ['notes'] }).sig
+  s.undo(['notes'])
+  assert.equal(mintHeadMap(s, { route: ['notes'] }).sig, branchBefore)
 })
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -187,22 +251,23 @@ test('H — A DEPLOY VERIFIES FROM IMMUTABLE ATOMS ALONE, WITH NO DIRECTORY LIST
   src.save(['business', 'people'], 'Alice')
   const deploy = mintHeadMap(src, { route: [] })
 
-  // The visitor holds ONE signature and the publisher's key, and a host with no
-  // readdir branch at all — the shape skeptic-4 H says a sealed pin cannot
-  // survive.
+  // The visitor holds ONE signature, the publisher's key, the attestation, and
+  // a host with no readdir branch at all — the shape skeptic-4 H says a sealed
+  // pin cannot survive.
   const host = contentOnlyHostOf(srcRoot)
   assert.throws(() => host.list(''), /no directory branch/)
 
   // 1. GET /<deploySig>, assert the hash, refuse-or-parse.
   const bytes = host.content(deploy.sig)
   assert.equal(sha256(bytes), deploy.sig, 'the bytes are the ones named')
-  const record = parseHeadMap(bytes.toString('utf8'))
-  assert.ok(record, 'the canonical form parses')
+  assert.ok(parseHeadMap(bytes.toString('utf8')), 'the canonical form parses')
 
-  // 2. Each row: GET /<claimSig>, assert the hash, rebuild the preimage from
-  //    the row KEY and the key I asked for, check the signature.
-  const verdict = verifyHeadMap(record, src.pubkey, claimReaderOf(host, verifyEd25519))
+  // 2. The whole procedure in one door: hash, parse, compare the key, check the
+  //    ATTESTATION over these exact bytes, then each row — GET /<claimSig>,
+  //    hash it, rebuild the preimage from the row KEY and the key I asked for.
+  const verdict = verifyMinted(src, host, deploy)
   assert.equal(verdict.ok, true)
+  assert.equal(verdict.attested, true)
   assert.equal(verdict.holes.length, 0)
   assert.deepEqual(
     verdict.verified.map((v) => v.molecule).sort(),
@@ -218,7 +283,7 @@ test('H — A DEPLOY VERIFIES FROM IMMUTABLE ATOMS ALONE, WITH NO DIRECTORY LIST
 })
 
 // ───────────────────────────────────────────────────────────────────────────
-test('H2 — the two substitution doors are shut: a wrong key, and a row moved between molecules', () => {
+test('H2 — the substitution doors are shut: a wrong key, a moved row, a swapped byte', () => {
   const root = new Root()
   const me = new MoleculeStore({ root, author: 'me' })
   me.save([], 'alpha')
@@ -230,35 +295,147 @@ test('H2 — the two substitution doors are shut: a wrong key, and a row moved b
   // (a) verified against a key that is not the publisher's: FORGED, before any
   //     byte is trusted. `record.pubkey` is self-declared and is COMPARED.
   const stranger = mintKeys()
-  const forged = verifyHeadMap(deploy.record, stranger.pubkey, read)
+  const forged = verifyDeploy(
+    { sig: deploy.sig, bytes: deploy.bytes.toString('utf8'), attestation: deploy.attestation },
+    stranger.pubkey,
+    { verify: verifyEd25519, readClaim: read },
+  )
   assert.equal(forged.ok, false)
   assert.equal(forged.reason, 'forged')
 
-  // (b) two of MY OWN rows swapped. Both claims are genuinely mine and
+  // (b) the bytes a host served are not the ones the signature names: FORGED.
+  //     This is the step the module used to have no function for at all.
+  const other = mintHeadMap(me, { route: ['alpha'] })
+  const swapped = verifyDeploy(
+    { sig: deploy.sig, bytes: other.bytes.toString('utf8'), attestation: deploy.attestation },
+    me.pubkey,
+    { verify: verifyEd25519, readClaim: read },
+  )
+  assert.equal(swapped.reason, 'forged', 'the deploy signature is checked against the bytes')
+
+  // (c) two of MY OWN rows swapped. Both claims are genuinely mine and
   //     genuinely signed — and both refuse, because the molecule the reader
-  //     walked to is line two of the preimage it rebuilds.
+  //     walked to is line two of the preimage it rebuilds. (The rows door is
+  //     used directly here: a swapped set has no attestation, so `verifyDeploy`
+  //     would refuse it one step earlier and never reach the rows.)
   const [a, b] = deploy.record.rows
-  const swapped = canonicalHeadMap(me.pubkey, [
-    { molecule: a[0], claim: b[1] },
-    { molecule: b[0], claim: a[1] },
-    ...deploy.record.rows.slice(2).map(([molecule, claim]) => ({ molecule, claim })),
-  ])
-  const moved = verifyHeadMap(swapped, me.pubkey, read)
-  assert.equal(moved.ok, false)
+  const moved = verifyHeadMapRows(
+    canonicalHeadMap(me.pubkey, [
+      { molecule: a[0], claim: b[1] },
+      { molecule: b[0], claim: a[1] },
+      ...deploy.record.rows.slice(2).map(([molecule, claim]) => ({ molecule, claim })),
+    ]),
+    me.pubkey,
+    read,
+  )
+  assert.equal(moved.rowsAuthentic, false)
   assert.ok(
     moved.holes.some((h) => h.molecule === a[0] && h.reason === 'unsigned'),
     'a claim lifted to another row does not verify at its new address',
   )
 
-  // (c) a claim minted by another key for one of my molecules is a HOLE, never
+  // (d) a claim minted by another key for one of my molecules is a HOLE, never
   //     a verified head — the map cannot speak for a bucket it does not own.
   const lie = { head: sha256(Buffer.from('nothing')), prev: null, seq: 0 }
   lie.sig = stranger.sign(headClaimPreimage(a[0], stranger.pubkey, lie.head, null, 0))
   const lieBytes = bytesOf(lie)
   root.write(sha256(lieBytes), lieBytes)
   const overreach = canonicalHeadMap(me.pubkey, [{ molecule: a[0], claim: sha256(lieBytes) }])
-  const verdict = verifyHeadMap(overreach, me.pubkey, read)
-  assert.deepEqual(verdict.holes.map((h) => h.reason), ['unsigned'])
+  assert.deepEqual(verifyHeadMapRows(overreach, me.pubkey, read).holes.map((h) => h.reason), ['unsigned'])
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+test('H3 — THE SET IS SIGNED: a composition the publisher never made is refused', () => {
+  // The gap three adversarial passes found in the first cut of step 4: every
+  // ROW was signed, the SET was signed by nobody, and `record.pubkey` is a
+  // field whoever composes the bytes chooses. So any stranger holding the
+  // published bytes could compose a smaller, fully-verifying "deploy".
+  const root = new Root()
+  const me = new MoleculeStore({ root, author: 'me' })
+  me.save([], 'business')
+  me.save([], 'finance')
+  me.save(['finance'], 'ledger')
+  const deploy = mintHeadMap(me, { route: [] })
+  const host = contentOnlyHostOf(root)
+  const deps = { verify: verifyEd25519, readClaim: claimReaderOf(host, verifyEd25519) }
+
+  assert.equal(verifyMinted(me, host, deploy).ok, true, 'the genuine deploy verifies')
+
+  const compose = (pairs) => {
+    const record = canonicalHeadMap(me.pubkey, pairs)
+    const bytes = encodeHeadMap(record)
+    return { sig: sha256(Buffer.from(bytes, 'utf8')), bytes, record }
+  }
+  const finance = moleculeOf('finance')
+
+  // (1) TRUNCATION — every surviving row is a genuine, unmodified claim of mine.
+  const cut = compose(
+    deploy.record.rows.filter((r) => r[0] !== finance).map(([molecule, claim]) => ({ molecule, claim })),
+  )
+  const truncated = verifyDeploy({ ...cut, attestation: deploy.attestation }, me.pubkey, deps)
+  assert.equal(truncated.ok, false, 'a subtree cut out of my deploy is refused')
+  assert.equal(truncated.reason, 'unattested')
+  assert.equal(truncated.attested, false)
+
+  // (2) THE EMPTY DEPLOY — "this publisher published nothing".
+  const empty = compose([])
+  assert.equal(verifyDeploy({ ...empty, attestation: null }, me.pubkey, deps).reason, 'unattested')
+  // an EMPTY map is still a legitimate deploy when the publisher signs it
+  const attestedEmpty = { ...empty, attestation: me.keys.sign(headMapAttestationPreimage(me.pubkey, empty.sig)) }
+  assert.equal(verifyDeploy(attestedEmpty, me.pubkey, deps).ok, true,
+    '"I publish nothing" is a statement a publisher is allowed to make — signed')
+
+  // (3) THE ATTESTATION IS WELDED TO THE BYTES AND TO THE KEY. Lifting the
+  //     genuine one onto other bytes fails because `mapSig` is line three;
+  //     minting one under another key fails because `pubkey` is line two.
+  const stranger = mintKeys()
+  const relabelled = compose(deploy.record.rows.map(([molecule, claim]) => ({ molecule, claim })))
+  assert.equal(relabelled.sig, deploy.sig, 'the same set is the same bytes')
+  assert.equal(
+    verifyDeploy(
+      { ...cut, attestation: stranger.sign(headMapAttestationPreimage(me.pubkey, cut.sig)) },
+      me.pubkey, deps,
+    ).reason,
+    'unattested',
+    'a stranger signing MY pubkey line is still not my signature',
+  )
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+test('H4 — A ROW THAT POINTS AT NOTHING IS A HOLE ON THAT ROW', () => {
+  // `refs` is the record's declared closure and it carries CLAIMS; a claim's
+  // `head` is not an edge and `prev` is a REFERENT, so a replica built from the
+  // deploy's own closure holds the map and the claims and NOT ONE BYTE of the
+  // hive — and used to verify ok:true over it, indistinguishable from a whole
+  // site. `readHead` makes that a per-row hole.
+  const root = new Root()
+  const me = new MoleculeStore({ root, author: 'me' })
+  me.save([], 'business')
+  me.save(['business'], 'people')
+  const deploy = mintHeadMap(me, { route: [] })
+
+  const pointersOnly = new Root()
+  pointersOnly.write(deploy.sig, root.read(deploy.sig))
+  for (const claimSig of deploy.record.refs) pointersOnly.write(claimSig, root.read(claimSig))
+  const hollow = contentOnlyHostOf(pointersOnly)
+
+  const rowsOnly = verifyMinted(me, hollow, deploy, { readHead: false })
+  assert.equal(rowsOnly.ok, true, 'every ROW is genuinely mine, which is all the rows door claims')
+
+  const full = verifyMinted(me, hollow, deploy)
+  assert.equal(full.ok, false, 'and a deploy over a site with no pages is not a verified deploy')
+  assert.deepEqual([...new Set(full.holes.map((h) => h.reason))], ['head-absent'])
+  assert.equal(hollow.stats.listings, 0, 'still no listing anywhere')
+
+  // FAILURE IS PER ROW: restore one page and that row verifies again.
+  const partial = new Root()
+  for (const p of pointersOnly.paths()) partial.write(p, pointersOnly.read(p))
+  const first = deploy.record.rows[0]
+  const firstHead = me.heldClaim(first[0]).head
+  partial.write(firstHead, root.read(firstHead))
+  const mixed = verifyMinted(me, contentOnlyHostOf(partial), deploy)
+  assert.equal(mixed.verified.length, 1)
+  assert.equal(mixed.holes.length, deploy.record.rows.length - 1)
 })
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -292,6 +469,7 @@ test('the deploy is IDEMPOTENT (no clock in the bytes) and a REPLAY is caught pe
   const first = mintHeadMap(s, { route: [] })
   const rebuilt = mintHeadMap(s, { route: [] })
   assert.equal(rebuilt.sig, first.sig, 'a rebuild that changed nothing is the SAME signature')
+  assert.equal(rebuilt.attestation, first.attestation, 'and the attestation with it — no clock anywhere')
 
   s.save(['notes'], 'draft', { text: 'v2' })
   const second = mintHeadMap(s, { route: [] })
@@ -302,13 +480,15 @@ test('the deploy is IDEMPOTENT (no clock in the bytes) and a REPLAY is caught pe
   assert.deepEqual(delta.added, [])
   assert.deepEqual(delta.removed, [])
 
-  // BOTH maps verify, and that is correct: every byte of the older one is
-  // genuinely signed by me for this exact address, so a host replaying it
-  // FORGES NOTHING and a verifier must not call it forged. What separates them
-  // is inside the SIGNATURE — `seq`, which cannot be raised without the secret.
-  const read = claimReaderOf(contentOnlyHostOf(root), verifyEd25519)
-  const older = verifyHeadMap(first.record, s.pubkey, read)
-  const newer = verifyHeadMap(second.record, s.pubkey, read)
+  // BOTH deploys verify, and that is correct: every byte of the older one is
+  // genuinely mine, and I really did sign that set, so a host replaying it
+  // FORGES NOTHING and a verifier must not call it forged. THE ATTESTATION
+  // CHANGES NOTHING HERE, deliberately — a signature proves authorship and
+  // never recency. What separates them is inside each CLAIM: `seq`, which
+  // cannot be raised without the secret.
+  const host = contentOnlyHostOf(root)
+  const older = verifyMinted(s, host, first)
+  const newer = verifyMinted(s, host, second)
   assert.equal(older.ok, true)
   assert.equal(newer.ok, true)
   assert.deepEqual(
@@ -356,7 +536,7 @@ test('the scope is MY OWN HEADS: a molecule I only read is named by nobody', () 
   them.save(['business'], 'theirs')
   me.replicateMolecule(hostOf(theirRoot), moleculeOf('theirs'))
 
-  const pairs = molecularScope(me, [])
+  const { pairs } = molecularScope(me, ['business'])
   assert.ok(
     !pairs.some((p) => p.molecule === moleculeOf('theirs')),
     'sign("theirs") is in my root and is NOT in my map — I head nothing there',
@@ -366,9 +546,9 @@ test('the scope is MY OWN HEADS: a molecule I only read is named by nobody', () 
     'and sign("business"), which I DO head, is in it',
   )
   // The rule stated plainly: a molecule is enumerated iff I hold a claim in it.
-  // Reachability decides which molecules are LOOKED AT; my own bucket decides
-  // which are NAMED. `sign("theirs")` is reachable from nothing of mine anyway,
-  // and `sign("mine")` is reachable but headless, so neither is asserted.
+  // Reachability decides which molecules are LOOKED AT — over EVERY author's
+  // members, so a stranger's page cannot amputate mine — and my own bucket
+  // decides which are NAMED. `sign("mine")` is reachable but headless.
   assert.ok(!pairs.some((p) => p.molecule === moleculeOf('mine')))
   void signText
 })

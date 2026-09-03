@@ -61,6 +61,14 @@ const HEX64 = /^[0-9a-f]{64}$/
  */
 export const FORK_WALK_CAP = 4096
 
+/**
+ * The ceiling on ONE closure pull. Not a depth bound — `pullClosure` is
+ * iterative and has no stack to blow — but a bound on how many DISTINCT atoms
+ * one `GET` can cost a reader, because the sender chooses both the shape and
+ * the count. A reader must be able to stop without pretending it finished.
+ */
+export const CLOSURE_ATOM_CAP = 100_000
+
 /** Hops descent can require: the signed seq gap, plus slack, under the cap. */
 const forkBudget = (offeredSeq, heldSeq) => {
   const gap = Number(offeredSeq ?? 0) - Number(heldSeq ?? 0)
@@ -704,21 +712,49 @@ export class MoleculeStore {
    * real cure is domain separation on the ADDRESS and why that is a forward
    * migration rather than a patch.
    */
-  pullClosure(host, sig, seen = new Set()) {
-    if (!SIG_RE.test(sig) || seen.has(sig)) return
-    seen.add(sig)
-    if (this.root.has(sig)) {
-      const held = this.getAtom(sig)
-      if (held) for (const next of mineSignatures(held)) this.pullClosure(host, next, seen)
-      return
+  /**
+   * ITERATIVE, WITH AN EXPLICIT WORKLIST — never recursion.
+   *
+   * This used to recurse once per edge with a visited set and NO DEPTH BOUND,
+   * and hash-checking cannot save it: `sha256(bytes) === sig` proves the bytes
+   * match the NAME and says nothing about their SHAPE, and the bytes are the
+   * publisher's own, so THE PUBLISHER PICKS THE DEPTH. ~20,000 chained atoms of
+   * the form `{kind:'succession', members:[prev]}` — a few dozen bytes each,
+   * well under a megabyte in total — threw `RangeError: Maximum call stack size
+   * exceeded` inside the reader that step 4 offers as the listing-free
+   * replacement for the seal. The threshold sat between 4k and 8k on node 24.
+   * `replicateMolecule` reaches the same walk on a FOREIGN author's head, so a
+   * hostile peer did not even need to be the publisher being verified.
+   *
+   * A worklist has no stack to exhaust: depth costs a queue entry, not a frame.
+   * `budget` is a second, independent belt — a hostile host can still serve an
+   * unbounded number of DISTINCT atoms, and a reader must be able to stop
+   * without lying about having finished, so the report says `capped`.
+   */
+  pullClosure(host, sig, seen = new Set(), { budget = CLOSURE_ATOM_CAP } = {}) {
+    const queue = [sig]
+    let fetched = 0
+    let visited = 0
+    while (queue.length) {
+      const next = queue.pop()
+      if (!SIG_RE.test(String(next ?? '')) || seen.has(next)) continue
+      seen.add(next)
+      if (visited++ >= budget) return { fetched, visited, capped: true }
+      let atom = null
+      if (this.root.has(next)) {
+        atom = this.getAtom(next)
+      } else {
+        const bytes = host.content(next)
+        if (!bytes || !bytes.length) continue
+        if (sha256(bytes) !== next) throw new Error(`atom ${next} failed its hash`)
+        if (looksLikeAddressPreimage(bytes)) continue // a directory address, not an atom
+        this.root.write(next, bytes)
+        fetched++
+        atom = this.getAtom(next)
+      }
+      if (atom) for (const edge of mineSignatures(atom)) if (!seen.has(edge)) queue.push(edge)
     }
-    const bytes = host.content(sig)
-    if (!bytes || !bytes.length) return
-    if (sha256(bytes) !== sig) throw new Error(`atom ${sig} failed its hash`)
-    if (looksLikeAddressPreimage(bytes)) return // a directory address, not an atom
-    this.root.write(sig, bytes)
-    const atom = this.getAtom(sig)
-    if (atom) for (const next of mineSignatures(atom)) this.pullClosure(host, next, seen)
+    return { fetched, visited, capped: false }
   }
 
   /**

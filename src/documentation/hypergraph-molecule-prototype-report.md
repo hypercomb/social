@@ -16,6 +16,60 @@ what five adversarial skeptics broke, and what I think you should do.
 > and 5 (prune, cold-read cost) are UNCHANGED and still open. Full write-up:
 > `hypergraph-molecule-lineage.md` → *The deploy signature is a signed head
 > map*.
+>
+> **REVISED THE SAME DAY — STEP 4 WAS ITSELF PUT THROUGH THREE ADVERSARIAL
+> PASSES, AND SIX FINDINGS LANDED.** All six are fixed; the attacks are kept
+> verbatim in `headmap-skeptic-0/1/2.test.mjs` and
+> `hypercomb-core/src/core/head-map.{skeptic,stranger,third-party}.spec.ts`,
+> with only the assertions inverted, so the forgery is still built before it is
+> refused.
+>
+> 1. **NOTHING SIGNED THE SET.** Every ROW was signed and the COMPOSITION was
+>    signed by nobody, and `record.pubkey` is a field whoever composes the bytes
+>    chooses — so any stranger holding a publisher's public bytes could compose
+>    a TRUNCATION, an EMPTY DEPLOY, or a CHERRY-PICKED mixture of generations
+>    out of that publisher's own rows, each verifying `ok:true, reason:null,
+>    holes:[]`. §4's "a third signature would prove authorship and never
+>    recency, so it would close nothing" conflated two properties: recency is
+>    unprovable by signature, but AUTHORSHIP OF THE SET is not recency and is
+>    exactly what a signature closes. `headMapAttestationPreimage(pubkey,
+>    mapSig)` — three lines, same verifier, same key, no clock.
+> 2. **THE ENUMERATION WAS NOT FLAT AND IT AMPUTATED.** The branch walk stopped
+>    at any molecule the publisher did not head, so ONE tile made by somebody
+>    else in the middle of a route erased every page below it from the deploy,
+>    silently; a contributor who only works inside other people's pages minted a
+>    ZERO-ROW deploy; and the root scope was not a superset of a branch scope
+>    inside it. The root scope is the mint LEDGER now, and a branch walk
+>    descends the UNION of authors as its FILTER while asserting only my own
+>    claims as its CONTENT.
+> 3. **THE PUBLISH PATH FAILED OPEN** where `#commit` fails closed: molecules
+>    the mint could not resolve were dropped with no field naming them.
+>    `unresolved` / `outOfScope` / `opaque` are returned now.
+> 4. **NO FUNCTION TOOK A DEPLOY SIGNATURE**, so steps 0-1 of the documented
+>    verification recipe were owned by nobody and a forged set's verdict was
+>    byte-identical to the truth's. `verifyDeploy` owns the whole procedure;
+>    the weaker `verifyHeadMapRows` has no `ok` field at all.
+> 5. **A DEPLOY COULD NAME NO CONTENT** (`ok:true` over a host holding the map
+>    and the claims and not one byte of the hive) and **A CLAIM READER COULD
+>    STAY SILENT** about what it fetched (a lying host downgraded a row under an
+>    unchanged deploy signature). `readHead` and a REQUIRED `sig` close both;
+>    a lie is `mismatched`, never `absent`.
+> 6. **THE WRITER'S GATE WAS WEAKER THAN THE READER'S** (`encodeHeadMap`
+>    uncapped, `parseHeadMap` capped at 4 MiB), so at 20,660 molecules one more
+>    tile name lost every molecule, silently. Same constant both ways now, the
+>    refusal says which gate said no, and `splitHeadMap` shards past it.
+>
+> **AND ONE OUTSIDE THE MAP: `pullClosure` RECURSED WITH NO DEPTH BOUND.** Step
+> 5 of the verification recipe blew the stack on ~20k chained atoms — well under
+> a megabyte — chosen by whoever serves them. It is iterative now, with an
+> explicit worklist and a distinct-atom budget.
+>
+> **OPEN, AND NO DESIGN CLOSES IT:** a whole, genuinely ATTESTED older deploy,
+> replayed to a COLD reader. A signature proves authorship and never recency;
+> the per-row `seq` defence needs generations the reader has already proven, and
+> a cold reader has none. The pointer's freshness (kind-30564 `created_at`
+> monotonicity) is the mitigation, which is why the pointer must come from a
+> source with a clock. Pinned as `headmap-skeptic-1 S1-B2`.
 
 **Run it yourself** (zero dependencies, Node ≥ 20):
 

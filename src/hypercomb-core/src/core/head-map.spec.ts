@@ -26,13 +26,19 @@ import {
   HEAD_MAP_V1,
   canonicalHeadMap,
   encodeHeadMap,
+  HEAD_MAP_MAX_BYTES,
+  headMapAttestationPreimage,
   headMapClaimFor,
+  headMapRefusal,
   headMapDiff,
   headMapRegressions,
   mergeHeadMap,
   parseHeadMap,
-  verifyHeadMap,
+  splitHeadMap,
+  verifyDeploy,
+  verifyHeadMapRows,
   type HeadMapClaimReader,
+  type HeadMapHeadReader,
   type HeadMapPair,
   type HeadMapRecord,
 } from './head-map.js'
@@ -125,20 +131,39 @@ const publishClaim = (
 const readerFor = (host: ContentOnlyHost): HeadMapClaimReader => async (claimSig) => {
   const bytes = host.get(claimSig)
   if (!bytes) return null
-  if (sha256(bytes) !== claimSig) return null
   try {
     const parsed = JSON.parse(bytes.toString('utf8')) as {
       head: string; prev: string | null; seq: number; sig: string
     }
+    // REPORT WHAT ACTUALLY CAME BACK. Refusing on a mismatch instead would
+    // collapse "this host answered with something else" into "this byte was
+    // cold", and those are opposite facts about a host.
     return {
       offered: { head: parsed.head, prev: parsed.prev ?? null, seq: parsed.seq, sig: parsed.sig },
       verify: verifyEd25519,
-      sig: claimSig,
+      sig: sha256(bytes),
     }
   } catch {
     return null
   }
 }
+
+/** `GET /<headSig>` + hash check: does this row point at bytes that exist? */
+const headReaderFor = (host: ContentOnlyHost): HeadMapHeadReader => async (headSig) => {
+  const bytes = host.get(headSig)
+  return !!bytes && sha256(bytes) === headSig
+}
+
+/** The publisher's detached signature over these exact deploy bytes. */
+const attest = (identity: Identity, record: HeadMapRecord): {
+  sig: string; bytes: string; attestation: string
+} => {
+  const bytes = encodeHeadMap(record)
+  const sig = sha256(bytes)
+  return { sig, bytes, attestation: identity.sign(headMapAttestationPreimage(identity.pubkey, sig)) }
+}
+
+const digest = async (text: string): Promise<string> => sha256(text)
 
 const pairs = (record: HeadMapRecord): HeadMapPair[] =>
   record.rows.map(([molecule, claim]) => ({ molecule, claim }))
@@ -282,6 +307,57 @@ describe('canonical form', () => {
   })
 })
 
+describe('the size gate is the SAME in both directions', () => {
+  const me = mintKeys()
+
+  const pairsOf = (n: number): HeadMapPair[] => {
+    const out: HeadMapPair[] = []
+    for (let i = 0; i < n; i++) out.push({ molecule: sign64(`m${i}`), claim: sign64(`c${i}`) })
+    return out
+  }
+
+  it('a row costs 203 bytes, so the cap lands at exactly 20,660 molecules', () => {
+    const at = encodeHeadMap(canonicalHeadMap(me.pubkey, pairsOf(20660))!)
+    expect(at.length).toBeLessThanOrEqual(HEAD_MAP_MAX_BYTES)
+    expect(parseHeadMap(at)).not.toBeNull()
+
+    // ONE MORE TILE NAME used to lose not one molecule but EVERY molecule: the
+    // encoder had no ceiling, the reader refused at 4 MiB, and the failure was
+    // silent at mint time and total at read time. Same gate now, and it throws
+    // where the publisher can see it rather than where a visitor cannot.
+    expect(() => encodeHeadMap(canonicalHeadMap(me.pubkey, pairsOf(20661))!)).toThrow(RangeError)
+  })
+
+  it('the refusal says WHICH gate failed: "too big" is not "tampered with"', () => {
+    const good = encodeHeadMap(canonicalHeadMap(me.pubkey, [
+      { molecule: sign64('a'), claim: sign64('c') },
+    ])!)
+    expect(headMapRefusal(good)).toBeNull()
+    expect(headMapRefusal('x'.repeat(HEAD_MAP_MAX_BYTES + 1))).toBe('oversize')
+    expect(headMapRefusal('not json')).toBe('unparseable')
+    expect(headMapRefusal(`${good} `)).toBe('non-canonical')
+  })
+
+  it('the cap is not a cliff: a SET splits, and the split is deterministic', () => {
+    const record = canonicalHeadMap(me.pubkey, pairsOf(500))!
+
+    const shards = splitHeadMap(record, 20_000)
+    expect(shards.length).toBeGreaterThan(1)
+    for (const shard of shards) {
+      const bytes = encodeHeadMap(shard)
+      expect(bytes.length).toBeLessThanOrEqual(20_000)
+      expect(parseHeadMap(bytes)).toEqual(shard)
+    }
+    // every molecule survives, exactly once, and a re-split is identical
+    const seen = shards.flatMap((s) => s.rows.map((r) => r[0]))
+    expect(new Set(seen).size).toBe(500)
+    expect(splitHeadMap(record, 20_000).map((s) => s.rows.length))
+      .toEqual(shards.map((s) => s.rows.length))
+    // a record that already fits is one shard
+    expect(splitHeadMap(record)).toHaveLength(1)
+  })
+})
+
 describe('composition (nothing is inferred from absence)', () => {
   const me = mintKeys()
   const other = mintKeys()
@@ -290,16 +366,44 @@ describe('composition (nothing is inferred from absence)', () => {
 
   it('merge is explicit in BOTH directions and refuses a foreign prior', () => {
     const prior = canonicalHeadMap(me.pubkey, [{ molecule: a, claim: sign64('c1') }])!
-    const next = mergeHeadMap(prior, [{ molecule: b, claim: sign64('c2') }])!
-    expect(next.rows).toHaveLength(2)
+    const next = mergeHeadMap(prior, [{ molecule: b, claim: sign64('c2') }])
+    expect(next.record!.rows).toHaveLength(2)
     // absence does NOT remove: a scoped re-mint that names only `b` keeps `a`
-    expect(headMapClaimFor(next, a)).toBe(sign64('c1'))
+    expect(headMapClaimFor(next.record!, a)).toBe(sign64('c1'))
     // removal is NAMED
-    const dropped = mergeHeadMap(next, [], { remove: [a] })!
-    expect(headMapClaimFor(dropped, a)).toBeNull()
-    expect(headMapClaimFor(dropped, b)).toBe(sign64('c2'))
+    const dropped = mergeHeadMap(next.record, [], { remove: [a] })
+    expect(headMapClaimFor(dropped.record!, a)).toBeNull()
+    expect(headMapClaimFor(dropped.record!, b)).toBe(sign64('c2'))
     // a different publisher's prior is not composable
-    expect(mergeHeadMap(prior, [], { pubkey: other.pubkey })).toBeNull()
+    expect(mergeHeadMap(prior, [], { pubkey: other.pubkey }).record).toBeNull()
+  })
+
+  it('a merge REPORTS what it overwrote, so "silently" is not available', () => {
+    const prior = canonicalHeadMap(me.pubkey, [{ molecule: a, claim: sign64('c1') }])!
+    const merged = mergeHeadMap(prior, [{ molecule: a, claim: sign64('c2') }])
+    expect(merged.record).not.toBeNull()
+    expect(merged.replaced).toEqual([{ molecule: a, from: sign64('c1'), to: sign64('c2') }])
+  })
+
+  it('and REFUSES a downgrade the caller can prove, unless it says otherwise', () => {
+    // `HeadMapPair` carried no `seq`, so the composition primitive could not
+    // rank and did not try — while one level down `acceptHeadClaim` makes
+    // staleness its central rule. A stranger's older row merged over a held
+    // newer one used to win, silently. The pair may carry a `seq` now, and the
+    // caller passes the generations it has already PROVEN.
+    const held = canonicalHeadMap(me.pubkey, [{ molecule: a, claim: sign64('gen1') }])!
+    const down = mergeHeadMap(held, [{ molecule: a, claim: sign64('gen0'), seq: 0 }], {
+      held: [{ molecule: a, seq: 1 }],
+    })
+    expect(down.record).toBeNull()
+    expect(down.regressed).toEqual([{ molecule: a, heldSeq: 1, offeredSeq: 0 }])
+
+    const forced = mergeHeadMap(held, [{ molecule: a, claim: sign64('gen0'), seq: 0 }], {
+      held: [{ molecule: a, seq: 1 }],
+      allowRegression: true,
+    })
+    expect(forced.record).not.toBeNull()
+    expect(forced.regressed).toHaveLength(1) // reported even when allowed
   })
 
   it('diff answers WHICH MOLECULE moved, not merely "different"', () => {
@@ -321,7 +425,7 @@ describe('composition (nothing is inferred from absence)', () => {
 })
 
 describe('third-party verification, with no directory listing anywhere', () => {
-  it('verifies every row from immutable atoms fetched BY SIGNATURE (skeptic-4 H)', async () => {
+  it('verifies a whole deploy from immutable atoms fetched BY SIGNATURE (skeptic-4 H)', async () => {
     const host = new ContentOnlyHost()
     const me = mintKeys()
 
@@ -329,27 +433,37 @@ describe('third-party verification, with no directory listing anywhere', () => {
     const people = sign64('people')
     const alice = sign64('alice')
 
+    const heads = [business, people, alice].map((_, i) => host.put(`succession-${i}`))
     const rows = [business, people, alice].map((molecule, i) =>
-      publishClaim(host, me, molecule, sign64(`head-${i}`), null, 0))
+      publishClaim(host, me, molecule, heads[i]!, null, 0))
 
     const record = canonicalHeadMap(me.pubkey, [
       { molecule: business, claim: rows[0]!.claimSig },
       { molecule: people, claim: rows[1]!.claimSig },
       { molecule: alice, claim: rows[2]!.claimSig },
     ])!
-    // the deploy signature: the map atom's own content sig
-    const deploySig = host.put(encodeHeadMap(record))
+    // the deploy: the map atom's own content sig, plus the publisher's
+    // signature over it — the SET is signed, not only each row.
+    const offer = attest(me, record)
+    host.put(offer.bytes)
 
-    // ── the third party holds (pubkey, deploySig) and a content-only host ──
-    const fetched = host.get(deploySig)!
-    expect(sha256(fetched)).toBe(deploySig)
-    const parsed = parseHeadMap(fetched.toString('utf8'))!
-    expect(parsed).toEqual(record)
-
-    const verdict = await verifyHeadMap(parsed, me.pubkey, readerFor(host), acceptHeadClaim)
+    // ── the third party holds (pubkey, deploySig, attestation) and a host ──
+    const verdict = await verifyDeploy(
+      { sig: offer.sig, bytes: host.get(offer.sig)!.toString('utf8'), attestation: offer.attestation },
+      me.pubkey,
+      {
+        digest,
+        verify: verifyEd25519,
+        readClaim: readerFor(host),
+        accept: acceptHeadClaim,
+        readHead: headReaderFor(host),
+      },
+    )
     expect(verdict.ok).toBe(true)
+    expect(verdict.attested).toBe(true)
     expect(verdict.reason).toBeNull()
     expect(verdict.holes).toEqual([])
+    expect(verdict.sig).toBe(offer.sig)
     expect(verdict.verified.map((v) => v.molecule).sort()).toEqual([business, people, alice].sort())
 
     // and NOT ONE listing was needed — the host has no listing verb at all
@@ -357,22 +471,90 @@ describe('third-party verification, with no directory listing anywhere', () => {
     expect(host.gets).toBeGreaterThan(0)
   })
 
-  it('a map verified against the WRONG expected key is forged before a byte is trusted', async () => {
+  it('THE SET IS SIGNED: a truncation of my own genuine rows is refused, before any fetch', async () => {
+    const host = new ContentOnlyHost()
+    const me = mintKeys()
+    const stranger = mintKeys()
+    const business = sign64('business')
+    const finance = sign64('finance')
+
+    const record = canonicalHeadMap(me.pubkey, [
+      { molecule: business, claim: publishClaim(host, me, business, sign64('hb'), null, 0).claimSig },
+      { molecule: finance, claim: publishClaim(host, me, finance, sign64('hf'), null, 0).claimSig },
+    ])!
+    const honest = attest(me, record)
+    const deps = { digest, verify: verifyEd25519, readClaim: readerFor(host), accept: acceptHeadClaim }
+    expect((await verifyDeploy(honest, me.pubkey, deps)).ok).toBe(true)
+
+    // A stranger, holding no key of mine, composes a smaller set out of my own
+    // rows. Every surviving row is genuinely, unmodifiably mine.
+    const cut = canonicalHeadMap(me.pubkey, pairs(record).filter((p) => p.molecule !== finance))!
+    const cutBytes = encodeHeadMap(cut)
+    const cutSig = sha256(cutBytes)
+
+    host.gets = 0
+    for (const attestation of [
+      null,
+      honest.attestation, // my genuine one, lifted — `mapSig` is line three
+      stranger.sign(headMapAttestationPreimage(me.pubkey, cutSig)), // theirs — `pubkey` is line two
+    ]) {
+      const verdict = await verifyDeploy({ sig: cutSig, bytes: cutBytes, attestation }, me.pubkey, deps)
+      expect(verdict.ok).toBe(false)
+      expect(verdict.attested).toBe(false)
+      expect(verdict.reason).toBe('unattested')
+      expect(verdict.verified).toEqual([])
+    }
+    expect(host.gets).toBe(0) // refused before a byte was spent on it
+
+    // THE EMPTY DEPLOY is still legitimate when the publisher signs it: "I
+    // publish nothing" is a statement they are allowed to make.
+    const empty = attest(me, canonicalHeadMap(me.pubkey, [])!)
+    expect((await verifyDeploy(empty, me.pubkey, deps)).ok).toBe(true)
+
+    // AND THE ROWS DOOR STILL ANSWERS THE WEAKER QUESTION — with a verdict that
+    // has no `ok` field, so it cannot be mistaken for the stronger one.
+    const rowsVerdict = await verifyHeadMapRows(cut, me.pubkey, readerFor(host), acceptHeadClaim)
+    expect(rowsVerdict.rowsAuthentic).toBe(true)
+    expect('ok' in rowsVerdict).toBe(false)
+  })
+
+  it('THE BYTES ARE THE ONES NAMED: other bytes at a deploy address are forged', async () => {
+    const host = new ContentOnlyHost()
+    const me = mintKeys()
+    const molecule = sign64('people')
+    const row = publishClaim(host, me, molecule, sign64('h'), null, 0)
+    const mine = attest(me, canonicalHeadMap(me.pubkey, [{ molecule, claim: row.claimSig }])!)
+    const other = attest(me, canonicalHeadMap(me.pubkey, [])!)
+    const deps = { digest, verify: verifyEd25519, readClaim: readerFor(host), accept: acceptHeadClaim }
+
+    const verdict = await verifyDeploy(
+      { sig: mine.sig, bytes: other.bytes, attestation: other.attestation },
+      me.pubkey, deps,
+    )
+    expect(verdict.reason).toBe('forged')
+    // this is the step the module used to have NO function for: nothing
+    // anywhere took a deploy signature, so nothing could check it.
+    expect(verdict.sig).toBe(mine.sig)
+  })
+
+  it('a deploy verified against the WRONG expected key is forged before a byte is trusted', async () => {
     const host = new ContentOnlyHost()
     const me = mintKeys()
     const stranger = mintKeys()
     const molecule = sign64('people')
     const row = publishClaim(host, me, molecule, sign64('h'), null, 0)
-    const record = canonicalHeadMap(me.pubkey, [{ molecule, claim: row.claimSig }])!
+    const offer = attest(me, canonicalHeadMap(me.pubkey, [{ molecule, claim: row.claimSig }])!)
 
     host.gets = 0
-    const verdict = await verifyHeadMap(record, stranger.pubkey, readerFor(host), acceptHeadClaim)
+    const verdict = await verifyDeploy(offer, stranger.pubkey, {
+      digest, verify: verifyEd25519, readClaim: readerFor(host), accept: acceptHeadClaim,
+    })
     expect(verdict.ok).toBe(false)
     expect(verdict.reason).toBe('forged')
     expect(host.gets).toBe(0) // refused before any fetch
   })
 
-  it('A TAMPERED ENTRY is a hole, and only that row', async () => {
+  it('A TAMPERED ENTRY is a hole, and only that row — and it names the host lying', async () => {
     const host = new ContentOnlyHost()
     const me = mintKeys()
     const good = sign64('good')
@@ -380,21 +562,26 @@ describe('third-party verification, with no directory listing anywhere', () => {
     const okRow = publishClaim(host, me, good, sign64('h1'), null, 0)
     const badRow = publishClaim(host, me, bad, sign64('h2'), null, 0)
 
-    // flip one byte of the stored claim: the reader's own hash check catches it
+    // Flip one hex digit inside the stored claim's signature. The body still
+    // parses, so this is precisely the case a reader must NOT collapse into
+    // "cold": the host answered a GET with bytes that are a different atom.
     const bytes = Buffer.from(host.bytes.get(badRow.claimSig)!)
-    bytes[bytes.length - 2] = bytes[bytes.length - 2] === 0x61 ? 0x62 : 0x61
+    bytes[bytes.length - 4] = bytes[bytes.length - 4] === 0x61 ? 0x62 : 0x61
     host.bytes.set(badRow.claimSig, bytes)
+    expect(() => JSON.parse(bytes.toString('utf8'))).not.toThrow()
 
     const record = canonicalHeadMap(me.pubkey, [
       { molecule: good, claim: okRow.claimSig },
       { molecule: bad, claim: badRow.claimSig },
     ])!
-    const verdict = await verifyHeadMap(record, me.pubkey, readerFor(host), acceptHeadClaim)
-    expect(verdict.ok).toBe(false)
+    const verdict = await verifyHeadMapRows(record, me.pubkey, readerFor(host), acceptHeadClaim)
+    expect(verdict.rowsAuthentic).toBe(false)
     expect(verdict.reason).toBe('incomplete')
     // FAILURE IS PER ROW: the honest row still verifies
     expect(verdict.verified.map((v) => v.molecule)).toEqual([good])
-    expect(verdict.holes).toEqual([{ molecule: bad, claim: badRow.claimSig, reason: 'absent' }])
+    // `mismatched`, not `absent`: a lying host and an offline one are different
+    // facts, and collapsing them is how a downgrade went unnoticed.
+    expect(verdict.holes).toEqual([{ molecule: bad, claim: badRow.claimSig, reason: 'mismatched' }])
   })
 
   it('A ROW MOVED TO ANOTHER MOLECULE stops verifying: the address is in the preimage', async () => {
@@ -412,8 +599,8 @@ describe('third-party verification, with no directory listing anywhere', () => {
       { molecule: a, claim: rowB.claimSig },
       { molecule: b, claim: rowA.claimSig },
     ])!
-    const verdict = await verifyHeadMap(record, me.pubkey, readerFor(host), acceptHeadClaim)
-    expect(verdict.ok).toBe(false)
+    const verdict = await verifyHeadMapRows(record, me.pubkey, readerFor(host), acceptHeadClaim)
+    expect(verdict.rowsAuthentic).toBe(false)
     expect(verdict.verified).toEqual([])
     expect(verdict.holes.map((h) => h.reason)).toEqual(['unsigned', 'unsigned'])
   })
@@ -435,32 +622,78 @@ describe('third-party verification, with no directory listing anywhere', () => {
     const before = sha256(encodeHeadMap(honest))
     const after = sha256(encodeHeadMap(canonicalHeadMap(me.pubkey, pairs(honest))!))
     expect(after).toBe(before)
-    expect((await verifyHeadMap(honest, me.pubkey, readerFor(host), acceptHeadClaim)).ok).toBe(true)
+    expect((await verifyHeadMapRows(honest, me.pubkey, readerFor(host), acceptHeadClaim)).rowsAuthentic)
+      .toBe(true)
 
     // a map that reaches for someone else's bucket cannot pass it off as mine
     const overreach = canonicalHeadMap(me.pubkey, [
       { molecule: mine, claim: myRow.claimSig },
       { molecule: theirs, claim: theirRow.claimSig },
     ])!
-    const verdict = await verifyHeadMap(overreach, me.pubkey, readerFor(host), acceptHeadClaim)
-    expect(verdict.ok).toBe(false)
+    const verdict = await verifyHeadMapRows(overreach, me.pubkey, readerFor(host), acceptHeadClaim)
+    expect(verdict.rowsAuthentic).toBe(false)
     expect(verdict.verified.map((v) => v.molecule)).toEqual([mine])
     expect(verdict.holes).toEqual([{ molecule: theirs, claim: theirRow.claimSig, reason: 'unsigned' }])
   })
 
-  it('a reader that answers with a DIFFERENT signature than the row named is refused', async () => {
+  it('a reader that does not SAY what it fetched has proven nothing', async () => {
     const host = new ContentOnlyHost()
     const me = mintKeys()
     const molecule = sign64('people')
     const row = publishClaim(host, me, molecule, sign64('h'), null, 0)
     const record = canonicalHeadMap(me.pubkey, [{ molecule, claim: row.claimSig }])!
+
+    // `sig` used to be OPTIONAL and to say nothing about hashing, so a reader
+    // written strictly to the type omitted it — and a host answering with the
+    // publisher's own older claim downgraded a live row under an unchanged
+    // deploy signature. Silence is not consent.
+    const silent = (async () => ({
+      offered: { head: sign64('h'), prev: null, seq: 0, sig: 'ff'.repeat(64) },
+      verify: verifyEd25519,
+    })) as unknown as HeadMapClaimReader
+    expect((await verifyHeadMapRows(record, me.pubkey, silent, acceptHeadClaim)).holes.map((h) => h.reason))
+      .toEqual(['unchecked'])
+
     const lyingReader: HeadMapClaimReader = async () => ({
       offered: { head: sign64('h'), prev: null, seq: 0, sig: 'ff'.repeat(64) },
       verify: verifyEd25519,
       sig: sign64('some-other-atom'),
     })
-    const verdict = await verifyHeadMap(record, me.pubkey, lyingReader, acceptHeadClaim)
-    expect(verdict.holes.map((h) => h.reason)).toEqual(['mismatched'])
+    expect((await verifyHeadMapRows(record, me.pubkey, lyingReader, acceptHeadClaim)).holes.map((h) => h.reason))
+      .toEqual(['mismatched'])
+  })
+
+  it('A DEPLOY THAT NAMES NO CONTENT is a hole on every row it cannot reach', async () => {
+    // `refs` carries CLAIMS, and a claim's `head` is neither an edge nor a
+    // referent, so a replica built from the deploy's own declared closure holds
+    // the map and the claims and NOT ONE BYTE of the hive — and used to verify
+    // ok:true, byte-identical to the verdict over a complete host.
+    const host = new ContentOnlyHost()
+    const me = mintKeys()
+    const a = sign64('a')
+    const b = sign64('b')
+    const headA = host.put('page-a')
+    const rowA = publishClaim(host, me, a, headA, null, 0)
+    const rowB = publishClaim(host, me, b, sign64('never-stored'), null, 0)
+    const offer = attest(me, canonicalHeadMap(me.pubkey, [
+      { molecule: a, claim: rowA.claimSig }, { molecule: b, claim: rowB.claimSig },
+    ])!)
+
+    const withoutHeads = await verifyDeploy(offer, me.pubkey, {
+      digest, verify: verifyEd25519, readClaim: readerFor(host), accept: acceptHeadClaim,
+    })
+    expect(withoutHeads.ok).toBe(true) // pointers only: what the caller asked
+
+    const withHeads = await verifyDeploy(offer, me.pubkey, {
+      digest,
+      verify: verifyEd25519,
+      readClaim: readerFor(host),
+      accept: acceptHeadClaim,
+      readHead: headReaderFor(host),
+    })
+    expect(withHeads.ok).toBe(false)
+    expect(withHeads.verified.map((v) => v.molecule)).toEqual([a]) // per row, as always
+    expect(withHeads.holes).toEqual([{ molecule: b, claim: rowB.claimSig, reason: 'head-absent' }])
   })
 })
 
@@ -475,14 +708,17 @@ describe('a replayed older map', () => {
     const gen1 = publishClaim(host, me, molecule, sign64('h1'), sign64('h0'), 1)
     const gen2 = publishClaim(host, me, molecule, sign64('h2'), sign64('h1'), 2)
 
-    const old = canonicalHeadMap(me.pubkey, [{ molecule, claim: gen0.claimSig }])!
-    const current = canonicalHeadMap(me.pubkey, [{ molecule, claim: gen2.claimSig }])!
+    const old = attest(me, canonicalHeadMap(me.pubkey, [{ molecule, claim: gen0.claimSig }])!)
+    const current = attest(me, canonicalHeadMap(me.pubkey, [{ molecule, claim: gen2.claimSig }])!)
+    const deps = { digest, verify: verifyEd25519, readClaim: readerFor(host), accept: acceptHeadClaim }
 
-    // BOTH maps verify — and that is correct, and is the whole point. Every
-    // byte in the old one is genuinely signed by me for this exact address; a
-    // host replaying it FORGES NOTHING. So a verifier must not call it forged.
-    const oldVerdict = await verifyHeadMap(old, me.pubkey, readerFor(host), acceptHeadClaim)
-    const nowVerdict = await verifyHeadMap(current, me.pubkey, readerFor(host), acceptHeadClaim)
+    // BOTH deploys verify — and that is correct, and is the whole point. Every
+    // byte of the old one is genuinely signed by me for this exact address, and
+    // I really did sign that set, so a host replaying it FORGES NOTHING and a
+    // verifier must not call it forged. THE ATTESTATION CHANGES NOTHING HERE,
+    // deliberately: a signature proves authorship and never recency.
+    const oldVerdict = await verifyDeploy(old, me.pubkey, deps)
+    const nowVerdict = await verifyDeploy(current, me.pubkey, deps)
     expect(oldVerdict.ok).toBe(true)
     expect(nowVerdict.ok).toBe(true)
 
@@ -498,6 +734,13 @@ describe('a replayed older map', () => {
     // a molecule the reader has never held is not a regression either — absence
     // is not evidence
     expect(headMapRegressions(nowVerdict.verified, [{ molecule: sign64('other'), seq: 0 }])).toEqual([])
+
+    // OPEN, AND PERMANENTLY SO: a COLD reader holds nothing to compare, so a
+    // replayed older attested deploy is invisible to a first-time visitor. No
+    // signature closes that — the freshness of the POINTER is what does, which
+    // is why the pointer must come from a source with a clock (in the shipped
+    // app, the relay's `created_at` monotonicity on the kind-30564 event).
+    expect(headMapRegressions([], oldVerdict.verified)).toEqual([])
     void gen1
   })
 })

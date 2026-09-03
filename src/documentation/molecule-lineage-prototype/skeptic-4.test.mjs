@@ -24,7 +24,7 @@ import { headClaimPreimage } from './head-claim.mjs'
 // longer anyone's deploy signature. What replaces it is the flat, signed head
 // map — proved on its own in head-map.test.mjs and cross-checked here inside
 // each of the four attacks that killed the fold.
-import { claimReaderOf, mintHeadMap, parseHeadMap, verifyHeadMap } from './head-map.mjs'
+import { claimReaderOf, headReaderOf, mintHeadMap, parseHeadMap, verifyDeploy } from './head-map.mjs'
 import { poolSignature, putPoolDoc } from './pool.mjs'
 import { signText, mineSignatures, canonicalJSON, bytesOf, sha256 } from './sig.mjs'
 
@@ -442,9 +442,35 @@ test('H — SEALING NEEDS LISTINGS, SO A SEALED ROOT CANNOT BE VERIFIED FROM IMM
   // signed the enclosing document, so one row could not be checked on its own.)
   const deploy = mintHeadMap(src, { route: [] })
   const listlessHost = { ...contentOnly, content: (sig) => srcRoot.read(sig) }
-  const record = parseHeadMap(listlessHost.content(deploy.sig).toString('utf8'))
-  const verdict = verifyHeadMap(record, src.pubkey, claimReaderOf(listlessHost, verifyEd25519))
+  const served = listlessHost.content(deploy.sig).toString('utf8')
+  assert.ok(parseHeadMap(served), 'refuse-or-parse accepts the bytes the host served')
+  const verdict = verifyDeploy(
+    { sig: deploy.sig, bytes: served, attestation: deploy.attestation },
+    src.pubkey,
+    { verify: verifyEd25519, readClaim: claimReaderOf(listlessHost, verifyEd25519), readHead: headReaderOf(listlessHost) },
+  )
   assert.equal(verdict.ok, true, 'every row verifies from atoms fetched BY SIGNATURE')
+  assert.equal(verdict.attested, true, 'and the SET is the publisher\'s, not merely each row')
   assert.equal(verdict.holes.length, 0)
   assert.throws(() => listlessHost.list(), /no directory branch/, 'and the host still has no readdir')
+
+  // AND `readHead` IS WHY `ok` MEANS SOMETHING. Without it, a host holding
+  // the map and the claims and NOT ONE BYTE of the hive verified ok:true — the
+  // deploy own declared closure is its CLAIMS, and a claim `head` is neither
+  // an edge nor a referent, so the closure stops at the pointers.
+  const pointersOnly = new Root()
+  pointersOnly.write(deploy.sig, srcRoot.read(deploy.sig))
+  for (const claimSig of deploy.record.refs) pointersOnly.write(claimSig, srcRoot.read(claimSig))
+  const emptySite = { ...contentOnly, content: (sig) => pointersOnly.read(sig) }
+  const hollow = verifyDeploy(
+    { sig: deploy.sig, bytes: served, attestation: deploy.attestation },
+    src.pubkey,
+    { verify: verifyEd25519, readClaim: claimReaderOf(emptySite, verifyEd25519), readHead: headReaderOf(emptySite) },
+  )
+  assert.equal(hollow.ok, false, 'a deploy over a site with no pages is NOT a verified deploy')
+  assert.deepEqual(
+    [...new Set(hollow.holes.map((h) => h.reason))],
+    ['head-absent'],
+    'and every row says exactly what is wrong with it',
+  )
 })
