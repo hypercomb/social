@@ -66,6 +66,17 @@ export const EDGE_FIELDS: readonly string[] = Object.freeze([
  *   - `targetSig` — a reference's LINEAGE address (a bag, not content) or a
  *     retire-pointer at a feedback item: in every use, a pointer at a
  *     referent.
+ *   - `prev` — a succession atom's predecessor (`documentation/hypergraph-
+ *     molecule-lineage.md`). THE PREDECESSOR IS NOT A DEPENDENCY. A head names
+ *     the members to render; `prev` names the generation before it, which a
+ *     reader needs only to TIME TRAVEL or to refuse a fork. Carrying it would
+ *     make every closure the entire history of the thing: an adversarial
+ *     review of the molecule prototype measured 123 atom fetches to render one
+ *     member, and — because `prev` chains the whole past into merkle
+ *     reachability — made prune provably unimplementable, since a faithful GC
+ *     over every head frees nothing, ever. Both defects dissolve here, in one
+ *     line, using the distinction this file already draws. Walk `prev`
+ *     deliberately (history, fork refusal); never as part of a closure.
  *
  * May grow as new referent fields are minted — adding here is how a new
  * pointer field opts out of every precise walker at once.
@@ -73,6 +84,7 @@ export const EDGE_FIELDS: readonly string[] = Object.freeze([
 export const REFERENT_FIELDS: readonly string[] = Object.freeze([
   'groupSig',
   'targetSig',
+  'prev',
 ])
 
 const edgeSet: ReadonlySet<string> = new Set(EDGE_FIELDS)
