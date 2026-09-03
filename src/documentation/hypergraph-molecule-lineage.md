@@ -56,8 +56,17 @@ judges required:
   is what reconciles those two facts. Without it the model is unsound; this is
   the skeptic's one real objection and its answer.
 - **A parent's succession lists the child's VERTEX, never the child's head** —
-  so commits stay per-page: no cascade, no stale hint. A vertex may never
-  carry a `children` / `cells` / `layers` slot after migration (ratchet it).
+  so commits stay per-page: no cascade, no stale hint.
+- **`children` on a vertex survives as a DERIVED MIRROR** (decided
+  2026-09-02). Truth is the succession's `members`; the vertex carries a
+  deterministic mirror of it so an older client — which resolves the
+  path-keyed bag under rule 9 and knows nothing about successions — reads a
+  layer with children and renders a populated tile instead of an empty one.
+  Without the mirror, backward compatibility is nominal and broken in
+  practice. Consequences: the mirror is complete-or-absent and never read by
+  a new client, and the ratchet is **"no `children` READ"**, not "no
+  `children` present" — a new read path that consults the mirror is the
+  regression to guard against, not the field itself.
 - **`slot` rides the envelope**, not the member — which finally fixes the
   canonical trap where one `properties.index` per tile has to serve every
   appearance of that tile.
