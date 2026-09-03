@@ -78,18 +78,51 @@ export const headIndex = async (has: (index: number) => Promise<boolean>): Promi
 const SIG_RE = /^[a-f0-9]{64}$/
 
 /**
- * The head package a host publishes, or null when it publishes none.
+ * ONE MEMBER OF THE POOL.
  *
- * `read` answers an entry's text or null; a malformed entry is treated as
- * absent rather than trusted, so a host cannot point a client at something
- * that is not a signature. It could still point at a signature it has no
- * bytes for — which costs a hole at admission, not a wrong install.
+ * Line one is the package signature and is the only line that matters — a
+ * reader that wants nothing else stops there, and always could, whatever a
+ * later ship decides to write underneath.
+ *
+ * Line two, when present, is the MARK the package wears: the branch it was
+ * shipped from. It is not identity and it cannot decide what installs; it is
+ * what lets a picker say `main` and `development` instead of showing a
+ * hundred and seventy-nine indistinguishable signatures. Keeping it HERE,
+ * with the member, is the whole difference from a manifest: nothing lists
+ * everything, so there is no catalogue to keep in agreement and an interrupted
+ * ship still costs exactly one entry.
+ *
+ * The same two-line idiom the dependency bag already uses (`@alias` then the
+ * signature) — an indexed pool entry carrying a pair.
  */
+export type PoolMember = {
+  packageSig: string
+  /** The branch mark, or '' for an entry that wears none. */
+  label: string
+}
+
+/** Parse one entry. Anything that is not a signature on line one is treated as
+ *  absent rather than trusted: a host cannot point a client at a thing that is
+ *  not content-addressed. It CAN name a signature it has no bytes for — which
+ *  costs a hole at admission, never a wrong install. */
+export const parseMember = (text: string | null): PoolMember | null => {
+  if (text === null) return null
+  const [first = '', second = ''] = text.split('\n')
+  const packageSig = first.trim().toLowerCase()
+  if (!SIG_RE.test(packageSig)) return null
+  return { packageSig, label: second.trim().slice(0, 64) }
+}
+
+/** Serialise one entry. Sig alone when it wears no mark, so the common case
+ *  stays exactly the 64 bytes it was. */
+export const formatMember = (packageSig: string, label = ''): string =>
+  label.trim() ? `${packageSig}\n${label.trim()}` : packageSig
+
+/** The head package a host publishes, or null when it publishes none. */
 export const headPackageSig = async (
   read: (index: number) => Promise<string | null>,
 ): Promise<string | null> => {
   const index = await headIndex(async i => (await read(i)) !== null)
   if (index < 0) return null
-  const text = (await read(index))?.trim().toLowerCase() ?? ''
-  return SIG_RE.test(text) ? text : null
+  return parseMember(await read(index))?.packageSig ?? null
 }

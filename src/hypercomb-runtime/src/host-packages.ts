@@ -26,7 +26,7 @@
 // It reads nothing but public URLs and writes nothing anywhere.
 
 import { HOST_IOC_KEY, registerPoolMeaning, type HostProvider } from '@hypercomb/core'
-import { HOST_PACKAGES_MEANING, headPackageSig, poolEntryName } from './host-pool.js'
+import { HOST_PACKAGES_MEANING, headIndex, parseMember, poolEntryName } from './host-pool.js'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
@@ -93,62 +93,108 @@ type ManifestEntry = {
  * case, and the distinctions that matter (is it a host? is CORS set? does the
  * pin resolve?) belong to the host check, not to a picker.
  */
+/** One entry, as it came off the wire. `at` is the transport's own
+ *  `Last-Modified` — when this host received the package — not a date anybody
+ *  published. Every static host answers with it; a host that does not simply
+ *  yields rows without a date. */
+type Fetched = { text: string; at: string }
+
+const poolReader = (base: string, pool: string) =>
+  async (index: number): Promise<Fetched | null> => {
+    try {
+      // DEFAULT CACHE MODE, deliberately: a pool entry is append-only, so
+      // entry N is the same bytes forever and the HTTP cache is free
+      // bandwidth. A 404 for an index nobody has shipped yet is not cached,
+      // which is what keeps the head probe honest.
+      const res = await fetch(`${base}/${pool}/${poolEntryName(index)}`)
+      if (!res.ok) return null
+      const text = await res.text()
+      if (text.includes('<')) return null   // an SPA fallback is not an entry
+      const modified = res.headers.get('last-modified')
+      const at = modified ? new Date(modified).toISOString() : ''
+      return { text, at: at === 'Invalid Date' ? '' : at }
+    } catch { return null }
+  }
+
+const rowFrom = (zone: string, base: string, fetched: Fetched | null): HostPackage | null => {
+  const member = parseMember(fetched?.text ?? null)
+  if (!member) return null
+  return {
+    zone,
+    base,
+    packageSig: member.packageSig,
+    label: member.label || member.packageSig.slice(0, 12),
+    at: fetched?.at ?? '',
+    generation: null,
+    layers: [],
+    bees: [],
+    dependencies: [],
+  }
+}
+
+/** Where a zone's pool answers, and how far it runs. */
+const findPool = async (zone: string): Promise<{ base: string; read: ReturnType<typeof poolReader>; head: number } | null> => {
+  const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
+  for (const base of hostBases(zone)) {
+    const read = poolReader(base, pool)
+    const head = await headIndex(async i => (await read(i)) !== null)
+    if (head >= 0) return { base, read, head }
+  }
+  return null
+}
+
 /**
  * THE HEAD PACKAGE A DOMAIN PUBLISHES — the whole of discovery.
  *
  * The address is DERIVED (`sign('host:packages')`), never named, so nothing
- * had to be published saying where to look. The max index in that pool is the
- * head, and that one signature expands into everything else at admission.
- *
- * Falls back to the manifest's newest entry for a host that has not shipped
- * the pool yet — the drain window, not a second dialect.
+ * had to be published saying where to look. The max index is the head, and
+ * that one signature expands into everything else at admission.
  */
 export const headPackage = async (zone: string): Promise<HostPackage | null> => {
-  const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
-
-  for (const base of hostBases(zone)) {
-    // DEFAULT CACHE MODE, deliberately: a pool entry is append-only, so entry
-    // N is the same bytes forever and the HTTP cache is free bandwidth. A 404
-    // for an index nobody has shipped yet is not cached, which is what keeps
-    // the head probe honest.
-    const read = async (index: number): Promise<string | null> => {
-      try {
-        const res = await fetch(`${base}/${pool}/${poolEntryName(index)}`)
-        if (!res.ok) return null
-        const text = await res.text()
-        return text.includes('<') ? null : text   // an SPA fallback is not an entry
-      } catch { return null }
-    }
-    const packageSig = await headPackageSig(read)
-    if (packageSig) {
-      return {
-        zone,
-        base,
-        packageSig,
-        label: packageSig.slice(0, 12),
-        at: '',
-        generation: null,
-        layers: [],
-        bees: [],
-        dependencies: [],
-      }
-    }
-  }
-
-  return (await listHostPackages(zone))[0] ?? null
+  const found = await findPool(zone)
+  if (!found) return (await readManifestAnywhere(zone))[0] ?? null
+  return rowFrom(zone, found.base, await found.read(found.head))
 }
 
+/** How many rows a picker asks for before someone scrolls. Each is one
+ *  request, so this is the difference between opening a panel and fetching a
+ *  host's entire history — 179 entries and counting on the oldest host. */
+const BROWSE_PAGE = 25
+
 /**
- * Everything a domain publishes, newest first — the BROWSE surface, still read
- * from the manifest.
+ * WHAT A DOMAIN PUBLISHES, newest first — walked from the head, downward.
  *
- * The pool answers "which package", which is what installing needs. It cannot
- * yet answer "and what is each one called", because a name is a mark and the
- * static-host form of marks is not built (documentation/host-packages-pool.md,
- * steps 2-3). Until it is, a picker reads the manifest and a cold boot does
- * not.
+ * There is no list to read: the pool IS the list, and a picker takes the page
+ * it can show rather than the whole history. `before` continues the walk for a
+ * caller that scrolls (the index below which to keep going).
+ *
+ * The three things a row needs now come from three places that cannot
+ * disagree with each other: the signature and its branch mark from the
+ * member's own bytes, the date from the transport, and the counts from
+ * nowhere — a count was only ever decoration, and admission derives the real
+ * inventory anyway.
  */
-export const listHostPackages = async (zone: string): Promise<HostPackage[]> => {
+export const listHostPackages = async (
+  zone: string,
+  options: { limit?: number; before?: number } = {},
+): Promise<HostPackage[]> => {
+  const found = await findPool(zone)
+  if (!found) return readManifestAnywhere(zone)
+
+  const limit = Math.max(1, options.limit ?? BROWSE_PAGE)
+  const top = Math.min(found.head, options.before !== undefined ? options.before - 1 : found.head)
+  if (top < 0) return []
+
+  const indices: number[] = []
+  for (let i = top; i > top - limit && i >= 0; i--) indices.push(i)
+
+  const rows = await Promise.all(indices.map(async i => rowFrom(zone, found.base, await found.read(i))))
+  return rows.filter((row): row is HostPackage => row !== null)
+}
+
+/** The drain window: a host that has not shipped the pool yet is still read
+ *  through its manifest. Not a second dialect — a source that is going away. */
+const readManifestAnywhere = async (zone: string): Promise<HostPackage[]> => {
   for (const base of hostBases(zone)) {
     const declared = await readManifest(zone, base)
     if (declared.length) return declared

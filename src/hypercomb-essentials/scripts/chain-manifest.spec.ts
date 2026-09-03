@@ -2,7 +2,15 @@
 // deploy-azure.ps1 Phase 1 established, now shared by every deploy target.
 
 import { describe, expect, it } from 'vitest'
-import { chainManifest, chainScore, deployStamp, maxGeneration, orderedPackageSigs, type ContentManifest } from './chain-manifest.js'
+import {
+  chainManifest,
+  chainScore,
+  deployStamp,
+  formatPoolEntry,
+  maxGeneration,
+  orderedPackageMembers,
+  type ContentManifest,
+} from './chain-manifest.js'
 
 const SIG_A = 'a'.repeat(64)
 const SIG_B = 'b'.repeat(64)
@@ -133,21 +141,25 @@ describe('chainScore / maxGeneration', () => {
 // The `host:packages` pool is append-only and its head is found by bisecting
 // on "is index i present". Both promises rest on this order being a stable
 // PREFIX: index i must name the same package on every future ship.
-describe('orderedPackageSigs', () => {
+describe('orderedPackageMembers', () => {
 
   it('is oldest first — the order a host appended them', () => {
-    expect(orderedPackageSigs({
+    expect(orderedPackageMembers({
       packages: {
-        [SIG_C]: { generation: 3 },
-        [SIG_A]: { generation: 1 },
-        [SIG_B]: { generation: 2 },
+        [SIG_C]: { generation: 3, label: 'third' },
+        [SIG_A]: { generation: 1, label: 'first' },
+        [SIG_B]: { generation: 2, label: 'second' },
       },
-    })).toEqual([SIG_A, SIG_B, SIG_C])
+    })).toEqual([
+      { sig: SIG_A, label: 'first' },
+      { sig: SIG_B, label: 'second' },
+      { sig: SIG_C, label: 'third' },
+    ])
   })
 
   it('keeps the existing prefix when a ship appends', () => {
-    const before = orderedPackageSigs({ packages: { [SIG_A]: { generation: 1 }, [SIG_B]: { generation: 2 } } })
-    const after = orderedPackageSigs({
+    const before = orderedPackageMembers({ packages: { [SIG_A]: { generation: 1 }, [SIG_B]: { generation: 2 } } })
+    const after = orderedPackageMembers({
       packages: { [SIG_A]: { generation: 1 }, [SIG_B]: { generation: 2 }, [SIG_C]: { generation: 3 } },
     })
 
@@ -155,16 +167,22 @@ describe('orderedPackageSigs', () => {
   })
 
   it('breaks ties on `at` for entries minted before the counter existed', () => {
-    expect(orderedPackageSigs({
+    expect(orderedPackageMembers({
       packages: { [SIG_B]: { at: '2026-05-01T00:00:00' }, [SIG_A]: { at: '2026-01-01T00:00:00' } },
-    })).toEqual([SIG_A, SIG_B])
+    }).map(member => member.sig)).toEqual([SIG_A, SIG_B])
   })
 
   it('ignores keys that are not signatures', () => {
-    expect(orderedPackageSigs({ packages: { 'not-a-sig': {}, [SIG_A]: {} } } as ContentManifest)).toEqual([SIG_A])
+    expect(orderedPackageMembers({ packages: { 'not-a-sig': {}, [SIG_A]: {} } } as ContentManifest))
+      .toEqual([{ sig: SIG_A, label: '' }])
   })
 
   it('renders an empty chain as an empty list', () => {
-    expect(orderedPackageSigs({ packages: {} })).toEqual([])
+    expect(orderedPackageMembers({ packages: {} })).toEqual([])
+  })
+
+  it('formats a pool entry with its optional branch mark on line two', () => {
+    expect(formatPoolEntry({ sig: SIG_A, label: 'development' })).toBe(`${SIG_A}\ndevelopment`)
+    expect(formatPoolEntry({ sig: SIG_A, label: '' })).toBe(SIG_A)
   })
 })

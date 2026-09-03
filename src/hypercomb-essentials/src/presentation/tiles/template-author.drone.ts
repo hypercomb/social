@@ -13,6 +13,7 @@
 //   template:nest       <layout> goes in the hole at <path>
 //   template:unnest     the hole at <path> goes back to being a hole
 //   template:set-var    one variable, on the level at <path>
+//   template:turn       the level at <path> turns one quarter
 //
 // Every one of them is a MERKLE UPDATE, not a mutation: the level named by the
 // path re-mints, so does the chain above it, and the mark ends up pointing at
@@ -34,15 +35,26 @@ import { isBehaviorDormant } from '../../sharing/behavior-enablement.js'
 import {
   CONFIGURATION_AXES, composeLayout, configurationOf, configurationVarsOf,
   miniatureVars, nodeAt,
-  nodeOf, templateContainer, variablesOf, withNodeAt, withVarAt,
+  nodeOf, templateContainer, turnOf, turnedDirection, variablesOf, withNodeAt, withVarAt,
   type LayoutNode,
 } from './layout-template.js'
 import {
   TEMPLATE_TARGET_KIND,
   commitArrangement,
+  readArrangement,
   removeTemplateTarget,
   resolveTemplateAt,
 } from './template-target.js'
+import {
+  CREATIONS_CHANGED,
+  creationGlyph,
+  findCreation,
+  forgetCreation,
+  knownCreations,
+  openHoles,
+  saveCreation,
+  sweepCreationPool,
+} from './layout-creations.js'
 import { findTemplate, knownTemplates, targetTemplate } from '../../commands/template.queen.js'
 import { targetsIn } from './meaning-target.js'
 
@@ -63,6 +75,20 @@ export interface LevelState {
   readonly path: readonly string[]
   readonly layout: string
   readonly flow: string
+  /** WHICH QUARTER THIS LEVEL STANDS AT — 0 for the way its layout is drawn,
+   *  then one per clockwise turn. Resolved, so a level that has never been
+   *  turned still answers, and the designer can draw the arrow without
+   *  holding a second opinion about what a turn means. */
+  readonly turn: number
+  /** THIS LEVEL, DRAWN SMALL — the same pure builder the palette chip uses,
+   *  wearing this level's own configuration.
+   *
+   *  The designer used to find its map by looking the layout's NAME up in the
+   *  palette, which is the arrangement as DRAWN and not as turned: a level
+   *  standing on its side was mapped as the row it came from, and every pane
+   *  in the map was then in the wrong place. A level is the only thing that
+   *  knows how it stands, so it hands over its own picture. */
+  readonly glyph: string
   readonly variables: readonly { name: string; value: string }[]
 }
 
@@ -91,8 +117,15 @@ export interface SelectionState {
   readonly axes: readonly AxisState[]
 }
 
-/** One asset in the palette. Layouts only — see the header. */
+/** One asset in the palette. Layouts only — see the header.
+ *
+ *  TWO TYPES, ONE SHELF. A `piece` is a built-in arrangement — the thing you
+ *  build out of. A `creation` is an arrangement you built and dragged back
+ *  onto the shelf, kept whole: nesting, measurements and all. They are drawn
+ *  the same way and dropped the same way; the type is what the filter reads.
+ *  See layout-creations.ts. */
 export interface AssetState {
+  readonly kind: 'piece' | 'creation'
   readonly name: string
   /** A miniature of the arrangement, drawn by the same pure function that
    *  draws the real container, so a chip can never advertise a shape the
@@ -146,6 +179,16 @@ export class TemplateAuthorDrone extends Drone {
       'template:set-var', payload => {
         void this.#setVar(payload?.segments, payload?.path, payload?.name, payload?.value)
       })
+    this.onEffect<{ segments?: string[]; path?: string[] }>('template:turn', payload => {
+      void this.#turn(payload?.segments, payload?.path)
+    })
+    this.onEffect<{ segments?: string[]; name?: string }>('template:save', payload => {
+      void this.#save(payload?.segments, payload?.name)
+    })
+    this.onEffect<{ name?: string }>('template:forget', payload => {
+      void this.#forget(payload?.name)
+    })
+    this.onEffect(CREATIONS_CHANGED, () => { if (this.#open) void this.#publish() })
     this.onEffect<{ segments?: string[] }>('template:clear', payload => {
       void this.#clear(payload?.segments)
     })
@@ -157,6 +200,10 @@ export class TemplateAuthorDrone extends Drone {
     window.ioc?.get<EventTarget>('@hypercomb.social/Lineage')
       ?.addEventListener?.('change', this.#lineageChange)
     this.#bound = true
+    // The creations live in a pool, so they outlive the session that made
+    // them. One sweep, here: the roster announces itself when it lands and the
+    // panel re-reads through the same door as every other change.
+    void sweepCreationPool()
   }
 
   protected override dispose(): void {
@@ -191,11 +238,15 @@ export class TemplateAuthorDrone extends Drone {
   }
 
   async #read(segments: readonly string[]): Promise<TemplateState> {
-    const assets: AssetState[] = knownTemplates().map(template => ({
-      name: template.name,
-      glyph: templateContainer(template, miniatureVars(template)),
-      holes: template.holes.length,
-    }))
+    const assets: AssetState[] = [
+      ...knownTemplates().map((template): AssetState => ({
+        kind: 'piece',
+        name: template.name,
+        glyph: templateContainer(template, miniatureVars(template)),
+        holes: template.holes.length,
+      })),
+      ...await this.#creationAssets(),
+    ]
 
     const empty: TemplateState = {
       segments: [...segments],
@@ -217,6 +268,58 @@ export class TemplateAuthorDrone extends Drone {
       container: composeLayout(bound.node, targets).html,
       levels: levelsOf(bound.node),
     }
+  }
+
+  /**
+   * The shelf's second half — what this participant has made.
+   *
+   * Each is drawn by resolving its arrangement and shrinking every level, so a
+   * creation's chip is the design rather than its name in a box. One whose
+   * tree cannot be resolved is not offered at all: a chip that plants nothing
+   * is worse than a gap.
+   */
+  async #creationAssets(): Promise<AssetState[]> {
+    const out: AssetState[] = []
+    for (const creation of knownCreations()) {
+      const node = await readArrangement(creation.pieceSig)
+      if (!node) continue
+      out.push({
+        kind: 'creation',
+        name: creation.name,
+        glyph: creationGlyph(node),
+        holes: openHoles(node),
+      })
+    }
+    return out
+  }
+
+  /**
+   * THE DRAG THAT MAKES A THING — what is on the pane becomes one asset on the
+   * shelf, under a name, with every level and every measurement kept whole.
+   *
+   * It saves the SIGNATURE the container already reads through, so the
+   * creation and what is on screen are the same arrangement rather than a copy
+   * that starts drifting the moment either one is touched.
+   */
+  async #save(segments: readonly string[] | undefined, name: string | undefined): Promise<void> {
+    const subject = this.#subject(segments)
+    const bound = await resolveTemplateAt(subject)
+    if (!bound) return
+    const wanted = String(name ?? '').trim() || subject.at(-1) || bound.template.name
+    const creation = await saveCreation(wanted, bound.pieceSig)
+    if (!creation) return
+    EffectBus.emit('activity:log', {
+      message: `Saved the ${creation.name} layout`, icon: 'dashboard',
+    })
+    await this.#publish()
+  }
+
+  /** Take one off the shelf. The arrangement itself is untouched — see
+   *  layout-creations.ts on why forgetting is not deleting. */
+  async #forget(name: string | undefined): Promise<void> {
+    if (!name) return
+    await forgetCreation(name)
+    await this.#publish()
   }
 
   /**
@@ -260,7 +363,17 @@ export class TemplateAuthorDrone extends Drone {
   async #target(segments: readonly string[] | undefined, name: string | undefined): Promise<void> {
     const subject = this.#subject(segments)
     if (!name) return
-    await targetTemplate(subject, name)
+    // A CREATION LANDS WHOLE. `targetTemplate` starts a fresh one-level
+    // arrangement, which is right for a piece and would throw away everything
+    // that makes a creation a creation — so a creation is committed as the
+    // tree it already is.
+    const creation = findCreation(name)
+    if (creation) {
+      const node = await readArrangement(creation.pieceSig)
+      if (node) await commitArrangement(subject, node)
+    } else {
+      await targetTemplate(subject, name)
+    }
     await this.#publish()
   }
 
@@ -280,14 +393,26 @@ export class TemplateAuthorDrone extends Drone {
     const subject = this.#subject(segments)
     const where = this.#path(path)
     if (!where.length || !name) return
-    const template = await findTemplate(name)
-    if (!template) return
+    // A PIECE arrives declaring NOTHING of its own: it inherits every
+    // measurement from the level above until somebody changes one here. A
+    // CREATION arrives declaring everything, because its measurements ARE the
+    // design — that is the whole difference between the two types.
+    const planted = await this.#planted(name)
+    if (!planted) return
     const bound = await resolveTemplateAt(subject)
     if (!bound) return
-    // A nested level declares NOTHING of its own: it inherits every
-    // measurement from the level above until somebody changes one here.
-    await commitArrangement(subject, withNodeAt(bound.node, where, nodeOf(template, {})))
+    await commitArrangement(subject, withNodeAt(bound.node, where, planted))
     await this.#publish()
+  }
+
+  /** What a drop of `name` puts in a hole. A creation can never take a
+   *  piece's name (`freeCreationName`), so the two lookups can never both
+   *  answer and the order is not a preference. */
+  async #planted(name: string): Promise<LayoutNode | null> {
+    const creation = findCreation(name)
+    if (creation) return readArrangement(creation.pieceSig)
+    const template = await findTemplate(name)
+    return template ? nodeOf(template, {}) : null
   }
 
   async #unnest(
@@ -321,6 +446,36 @@ export class TemplateAuthorDrone extends Drone {
     await this.#publishSelection(subject)
   }
 
+  /**
+   * A QUARTER-TURN OF ONE LEVEL.
+   *
+   * It writes `direction`, which is all a turn is — see layout-template.ts on
+   * why nothing about a hole has to be rewritten on the way round. So this is
+   * `#setVar` with the value worked out here instead of handed in, and it is
+   * a separate intent for exactly that reason: the panel presses a button that
+   * says "turn", and what a turn IS stays on this side, with the layouts.
+   */
+  async #turn(
+    segments: readonly string[] | undefined,
+    path: readonly string[] | undefined,
+  ): Promise<void> {
+    const subject = this.#subject(segments)
+    const bound = await resolveTemplateAt(subject)
+    if (!bound) return
+    const where = this.#path(path)
+    // A path names a level only when something is nested there; one that names
+    // a PANE has no container to turn, and turning the level above it instead
+    // would move a container the participant was not pointing at.
+    const level = nodeAt(bound.node, where)
+    if (!level) return
+    await commitArrangement(
+      subject,
+      withVarAt(bound.node, where, 'direction', turnedDirection(level.template, level.vars)),
+    )
+    await this.#publish()
+    await this.#publishSelection(subject)
+  }
+
   async #clear(segments: readonly string[] | undefined): Promise<void> {
     const subject = this.#subject(segments)
     await removeTemplateTarget(subject)
@@ -338,6 +493,14 @@ export function levelsOf(root: LayoutNode): LevelState[] {
       path: [...path],
       layout: node.template.name,
       flow: node.template.flow,
+      turn: turnOf(node.template, node.vars),
+      // Measurements replaced with ones suited to a chip, configuration kept:
+      // the first is a length that means nothing at this scale, the second is
+      // which way the container runs, which IS the shape.
+      glyph: templateContainer(node.template, {
+        ...miniatureVars(node.template),
+        ...configurationVarsOf(node.vars),
+      }),
       variables: variablesOf(node.template).map(name => ({
         name,
         value: node.vars[name] ?? '',

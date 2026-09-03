@@ -686,6 +686,14 @@ function tryServeContent(req, res) {
 
   try {
     const bytes = readFileSync(resolved)
+    // WHEN A HOST RECEIVED IT, from the filesystem rather than from anything
+    // anyone published. A pool entry carries the package signature and nothing
+    // about time; the fact that this file arrived on Tuesday is the transport's
+    // own, not a claim in a document, and every static host (S3, Pages, nginx)
+    // already answers with it. It is the last thing the manifest was carrying
+    // for the browse list.
+    let lastModified = ''
+    try { lastModified = statSync(resolved).mtime.toUTCString() } catch { /* unknowable */ }
     // IMMUTABLE MEANS SIG-ADDRESSED, AND NOTHING ELSE. A signature names one
     // closure forever, so those bytes can be pinned for a year. A NAMED file
     // — manifest.json, packages.json — is the domain's mutable voice: the one
@@ -699,6 +707,8 @@ function tryServeContent(req, res) {
       'Content-Length': String(bytes.length),
       'Access-Control-Allow-Origin': '*',
       'Cache-Control': sigAddressed ? 'public, max-age=31536000, immutable' : 'no-store',
+      ...(lastModified ? { 'Last-Modified': lastModified } : {}),
+      'Access-Control-Expose-Headers': 'Last-Modified',
       'Permissions-Policy': PERMISSIONS_POLICY,
     })
     if (req.method === 'HEAD') { res.end(); return true }

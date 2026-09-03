@@ -5,9 +5,14 @@ import {
   type HexOrientation,
 } from '@hypercomb/essentials/preferences/settings';
 import { RouterOutlet } from '@angular/router';
-import { CommandLineComponent, isTransientMode } from '@hypercomb/shared';
-import { MeshHeaderComponent } from '@hypercomb/shared/ui';
-import { ControlsBarComponent, EditActionsComponent, ShellSurfacesComponent, SyncIndicatorComponent, UpgradeIndicatorComponent } from '@hypercomb/shared/ui';
+import { isTransientMode } from '@hypercomb/shared/core/view-mode.service';
+import { CommandLineComponent } from '@hypercomb/shared/ui/command-line/command-line.component';
+import { ControlsBarComponent } from '@hypercomb/shared/ui/controls-bar/controls-bar.component';
+import { EditActionsComponent } from '@hypercomb/shared/ui/edit-actions/edit-actions.component';
+import { MeshHeaderComponent } from '@hypercomb/shared/ui/mesh-header/mesh-header.component';
+import { ShellSurfacesComponent } from '@hypercomb/shared/ui/shell-surfaces/shell-surfaces.component';
+import { SyncIndicatorComponent } from '@hypercomb/shared/ui/sync-indicator/sync-indicator.component';
+import { UpgradeIndicatorComponent } from '@hypercomb/shared/ui/upgrade-indicator/upgrade-indicator.component';
 
 // One import boots the full essentials module graph — every drone, queen,
 // worker, input, and view self-registers in window.ioc.

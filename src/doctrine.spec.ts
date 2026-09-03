@@ -15,10 +15,12 @@
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync, existsSync } from 'fs'
 import { join, relative } from 'path'
+import { spawnSync } from 'child_process'
 import { createRequire } from 'module'
 import { BARE_WORD_POOL_MEANINGS } from '@hypercomb/core'
 
 const ROOT = __dirname
+const REPO_ROOT = join(ROOT, '..')
 
 // Every package + shell; worktrees/dist/node_modules excluded.
 //
@@ -100,6 +102,50 @@ const assertRatchet = (actual: string[], allowed: string[], rule: string): void 
 }
 
 describe('doctrine ratchets', () => {
+
+  it('reserved scratch workspaces are ignored without hiding ordinary source', () => {
+    // This is a behavior check, not a text check: it proves Git will contain a
+    // future accidental checkout/dependency tree even when it is created deep
+    // inside a package. `--no-index` lets nonexistent probes be checked without
+    // creating the very residue this doctrine guards against.
+    const ignored = [
+      '.tmp/doctrine-probe/node_modules/pkg/index.js',
+      'src/hypercomb-dev/.tmp-doctrine-probe/node_modules/pkg/index.js',
+      'src/hypercomb-dev/.scratch-doctrine-probe/report.json',
+      'src/hypercomb-dev/.audit-doctrine-probe/checkout/package.json',
+      'src/hypercomb-dev/.bundle-trace/node_modules/pkg/index.js',
+      'src/hypercomb-dev/.test-tmp-doctrine-probe/result.json',
+      'src/hypercomb-dev/.audit-head.tar',
+      'src/hypercomb-dev/.bundle-trace.tar.gz',
+      '.worktrees/doctrine-probe/index.ts',
+      '.perf-baseline-doctrine-probe/results.json',
+    ]
+    const visible = [
+      'src/hypercomb-dev/test/fixture.ts',
+      'src/hypercomb-core/audit/rules.ts',
+      'src/hypercomb-web/bundle/source.ts',
+    ]
+    const checkIgnore = (path: string): ReturnType<typeof spawnSync> =>
+      spawnSync('git', ['check-ignore', '--no-index', '-v', '--', path], {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+      })
+
+    for (const path of ignored) {
+      const check = checkIgnore(path)
+      expect(check.error, `git check-ignore could not inspect ${path}`).toBeUndefined()
+      expect(check.status, `${path} must be covered by a checked-in ignore rule`).toBe(0)
+      expect(
+        String(check.stdout).replace(/\\/g, '/'),
+        `${path} must be ignored by the repository .gitignore, not a local exclude`,
+      ).toMatch(/^\.gitignore:\d+:/)
+    }
+    for (const path of visible) {
+      const check = checkIgnore(path)
+      expect(check.error, `git check-ignore could not inspect ${path}`).toBeUndefined()
+      expect(check.status, `${path} is ordinary source and must remain visible`).toBe(1)
+    }
+  })
 
   // ─── bridge scripts: a child sig is a LAYER sig, not a resource ──────
   //
@@ -255,6 +301,15 @@ describe('doctrine ratchets', () => {
       )].sort()
       assertRatchet(tags, allowed, `template surface (${file})`)
     }
+  })
+
+  it('shell bootstrap never imports the side-effectful shared UI index', () => {
+    // Every component re-exported by @hypercomb/shared/ui registers a shell
+    // surface at module scope. Importing one structural component through that
+    // index therefore evaluates the whole panel graph and defeats the lazy
+    // shell-surface boundary. Leaf imports keep first paint structural.
+    const actual = filesMatching(/(?:from\s*|import\s*)['"]@hypercomb\/shared\/ui['"]/)
+    assertRatchet(actual, [], 'shared UI index import')
   })
 
   it('the shell-surface barrel may only shrink — new chrome is an element drone, not a component', () => {

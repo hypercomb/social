@@ -23,8 +23,29 @@ dist/
 # TypeScript cache
 *.tsbuildinfo
 
-# Local generated scratch artifacts
+# Local generated scratch artifacts. `/.tmp/` is the one canonical
+# repository-local scratch root; OS temp is preferred for heavyweight work.
 /.tmp/
+
+# Safety net for accidentally package-local scratch workspaces. These hidden
+# namespaces are reserved as disposable by AGENTS.md and may never hold source.
+**/.tmp/
+**/.tmp-*/
+**/.scratch/
+**/.scratch-*/
+**/.audit/
+**/.audit-*/
+**/.bundle-*/
+**/.test-tmp/
+**/.test-tmp-*/
+**/.audit-*.tar
+**/.audit-*.tar.gz
+**/.bundle-*.tar
+**/.bundle-*.tar.gz
+
+# Agent worktrees and local performance baselines are also disposable.
+/.worktrees/
+/.perf-baseline-*/
 
 # Local heuristic-audit cache/export (generated, not source or hive data)
 src/.hypercomb/
@@ -70,4 +91,3 @@ src/scripts/ai-inside/.*/
 src/diamond-core-processor/public/
 src/NUL
 src/NUL.map
-

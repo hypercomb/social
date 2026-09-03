@@ -23,6 +23,16 @@ drift is structurally impossible, and the doctrine ratchet
 (`doctrine.spec.ts`, "shell templates mount only structural chrome") fails the
 suite if anyone reintroduces a template tag.
 
+## Loading boundary
+
+`ShellSurfacesComponent` loads the one surface barrel with `import()` when the
+host is constructed. Registration is already event-driven, so late arrivals are
+mounted by the same keyed reconciler; unopened authoring panels no longer block
+the first shell frame. Structural shell chrome must be imported by its leaf
+module path. Importing the `@hypercomb/shared/ui` index is not equivalent: every
+re-exported component registers at module scope, so evaluating that index pulls
+the complete surface list back into the initial bundle.
+
 ## The two surface shapes
 
 ```typescript

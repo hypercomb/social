@@ -86,6 +86,14 @@ interface LevelState {
   path: string[]
   layout: string
   flow: string
+  /** Which quarter this level stands at — 0 for the way its layout is drawn,
+   *  then one per clockwise turn. The arrow on the turn button is this times
+   *  ninety degrees, and nothing here decides what a turn means. */
+  turn: number
+  /** This level drawn small, wearing its own configuration. Handed over
+   *  rather than looked up: the palette holds the arrangement as DRAWN, and a
+   *  level standing on its side is not that. */
+  glyph: string
   variables: { name: string; value: string }[]
 }
 
@@ -95,12 +103,22 @@ interface LevelState {
  *  Built by the one reader (template-author.drone.ts) from the same pure
  *  builder that draws the real container, so a preview can never advertise an
  *  arrangement the layout does not make. */
-/** One draggable layout. */
+/** One draggable layout, of either type.
+ *
+ *  A `piece` is a built-in arrangement — what you build out of. A `creation`
+ *  is one you built and dragged back onto the shelf, kept whole. The shelf
+ *  shows one type at a time (see `shelf`), because a wall of chips where two
+ *  different kinds of thing look alike is the thing this filter exists to
+ *  stop. */
 interface AssetState {
+  kind?: 'piece' | 'creation'
   name: string
   glyph: string
   holes: number
 }
+
+/** Which half of the shelf is showing. */
+type ShelfType = 'piece' | 'creation'
 
 interface TemplateStateMsg {
   segments?: string[]
@@ -114,6 +132,8 @@ interface TemplateStateMsg {
 
 const BOX_KEY = 'hc:layout-canvas-box'
 const COLUMNS_KEY = 'hc:layout-columns'
+/** Which half of the shelf you were last looking at. Chrome, not design. */
+const SHELF_KEY = 'hc:layout-shelf'
 /** How tall the properties are, in pixels. Chrome, not design: it says how
  *  much of the window you are giving the shelf, and it never reaches the hive. */
 const INSPECTOR_KEY = 'hc:layout-inspector-h'
@@ -152,6 +172,12 @@ const COLUMN_CHOICES: readonly { value: string; label: string }[] = [
  *  carries the layout name only so a drag starts at all (Firefox needs one
  *  non-empty entry); every handler here reads `dragging()` instead. */
 const LAYOUT_DRAG_TYPE = 'application/x-hypercomb-layout'
+
+/** THE OTHER DIRECTION. A drag that carries the PANE — what you have designed
+ *  — back to the shelf, where letting go makes it one asset. Its own type, so
+ *  a design can never be dropped into one of its own holes and a layout chip
+ *  can never be dropped on the shelf. */
+const CREATION_DRAG_TYPE = 'application/x-hypercomb-creation'
 
 /** Slider bounds per variable, in rem. Gutters are small, rails are not. */
 const RANGE: Readonly<Record<string, readonly [number, number]>> = {
@@ -213,6 +239,27 @@ export class LayoutDesignerComponent implements OnDestroy {
    *  Participant-local: where you are looking is not part of the design. */
   readonly selectedPath = signal<string[]>([])
   readonly dragging = signal<string | null>(null)
+  /** True while the PANE is being dragged towards the shelf. The shelf lights
+   *  up as a target only then — every other drag is going the other way. */
+  readonly offering = signal(false)
+
+  /** WHICH TYPE THE SHELF IS SHOWING. Pieces are what you build out of;
+   *  creations are what you built. One at a time, remembered. */
+  readonly shelf = signal<ShelfType>(
+    safeRead(SHELF_KEY) === 'creation' ? 'creation' : 'piece',
+  )
+
+  /** The shelf's own contents. An asset that predates the two types is a
+   *  piece — that is what everything was. */
+  readonly shownAssets = computed(() =>
+    this.assets().filter(asset => (asset.kind ?? 'piece') === this.shelf()))
+
+  /** How many of each, for the tabs. A tab that says nothing about whether
+   *  there is anything behind it makes you press it to find out. */
+  readonly pieceCount = computed(() =>
+    this.assets().filter(asset => (asset.kind ?? 'piece') === 'piece').length)
+  readonly creationCount = computed(() =>
+    this.assets().filter(asset => asset.kind === 'creation').length)
 
   /** Columns across the shelf: `auto`, or a pinned count. */
   readonly columns = signal(safeRead(COLUMNS_KEY) ?? 'auto')
@@ -315,13 +362,20 @@ export class LayoutDesignerComponent implements OnDestroy {
     return all.find(v => v.name === want) ?? all[0] ?? null
   })
 
-  /** The active container drawn small — the SAME miniature the palette chip
-   *  uses, so the map can never advertise a shape the layout does not make,
-   *  and no second drawing has to be kept in step with the first. */
-  readonly mapGlyph = computed(() => {
-    const layout = this.selectedLevel()?.layout
-    return this.assets().find(asset => asset.name === layout)?.glyph ?? ''
-  })
+  /** The active container drawn small — the same pure builder the palette chip
+   *  uses, so the map can never advertise a shape the layout does not make.
+   *
+   *  IT COMES FROM THE LEVEL, not from the palette. Looking the layout's NAME
+   *  up on the shelf found the arrangement as DRAWN — every primitive is a row
+   *  — so a level that had been turned was mapped lying the wrong way, and
+   *  every pane in the map was then somewhere the pane on the workspace was
+   *  not. A level is the only thing that knows how it stands. */
+  readonly mapGlyph = computed(() => this.selectedLevel()?.glyph ?? '')
+
+  /** How far the turn button's arrow is rotated: one quarter per turn,
+   *  clockwise, which is exactly the order flexbox spells the four
+   *  directions in. */
+  readonly turnDegrees = computed(() => (this.selectedLevel()?.turn ?? 0) * 90)
 
   /** The properties keep their natural height until the split is dragged. */
   readonly inspectorStyle = computed(() => {
@@ -553,13 +607,26 @@ export class LayoutDesignerComponent implements OnDestroy {
    * The arrows ask geometry, not the tree — see select-walk.ts.
    */
   onKey(event: KeyboardEvent): void {
-    const step = stepForKey(event.key, event.shiftKey)
-    if (!step) return
     // A press inside a control belongs to that control. The resize grips are
     // buttons sitting in the pane, and someone on one of those is aiming at
     // the pane's SIZE, not at which container is selected.
     const from = event.target as HTMLElement | null
     if (from?.closest('button, input, textarea, select, [contenteditable]')) return
+
+    // TURN THE SELECTION. Free to take: the pane holds the hive's shortcuts
+    // down while it has focus (see `paneFocus`), and a bare letter here is a
+    // letter nobody else is listening for. With a modifier it belongs to the
+    // browser — reload is Ctrl+R.
+    if ((event.key === 'r' || event.key === 'R')
+      && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault()
+      event.stopPropagation()
+      this.rotate()
+      return
+    }
+
+    const step = stepForKey(event.key, event.shiftKey)
+    if (!step) return
     const items = this.#selectables()
     if (items.length === 0) return
     const next = walkSelection(items, this.selectedPath(), step)
@@ -773,6 +840,64 @@ export class LayoutDesignerComponent implements OnDestroy {
   endDrag(event: DragEvent): void {
     event.stopPropagation()
     this.dragging.set(null)
+    this.offering.set(false)
+  }
+
+  // ── the drag that makes a thing ───────────────────────────────────
+  //
+  // Everything above carries a shape from the shelf to the pane. This carries
+  // the PANE to the shelf: what you have designed — every level, every
+  // measurement — becomes one asset you can drop somewhere else whole.
+
+  /** The pane's grip took a drag. */
+  offerDesign(event: DragEvent): void {
+    event.stopPropagation()
+    if (!this.bound()) { event.preventDefault(); return }
+    this.offering.set(true)
+    event.dataTransfer?.setData(CREATION_DRAG_TYPE, this.cell() || this.layout())
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
+  }
+
+  /** The shelf accepts the pane, and nothing else. */
+  allowKeep(event: DragEvent): void {
+    if (!this.offering()) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+  }
+
+  /**
+   * The shelf took the design. It is named after the container it was designed
+   * on, which is the name you would have typed; the drone makes it unique, and
+   * a name is a thing you can change afterwards — a dialog in the middle of a
+   * drag is not.
+   */
+  keepDesign(event: DragEvent): void {
+    if (!this.offering()) return
+    event.preventDefault()
+    event.stopPropagation()
+    this.offering.set(false)
+    EffectBus.emit('template:save', {
+      segments: this.segments(),
+      name: this.cell() || this.layout(),
+    })
+    this.shelf.set('creation')
+    safeWrite(SHELF_KEY, 'creation')
+  }
+
+  /** Show one half of the shelf. */
+  showShelf(type: ShelfType): void {
+    this.shelf.set(type)
+    safeWrite(SHELF_KEY, type)
+  }
+
+  /** Take a creation off the shelf. The arrangement itself is untouched —
+   *  other containers may still be reading it, and a signature is nobody's to
+   *  delete. */
+  forget(asset: AssetState, event: Event): void {
+    event.preventDefault()
+    event.stopPropagation()
+    EffectBus.emit('template:forget', { name: asset.name })
   }
 
   allowDrop(event: DragEvent): void {
@@ -924,6 +1049,27 @@ export class LayoutDesignerComponent implements OnDestroy {
   }
 
   // ── the properties ────────────────────────────────────────────────
+
+  /**
+   * TURN THE ACTIVE CONTAINER A QUARTER.
+   *
+   * The panel presses a button that says "turn" and says nothing about what a
+   * turn is — the layouts decide that (layout-template.ts), and the drone
+   * works out which direction comes next. Otherwise the four quarters would be
+   * spelled here as well, and two lists of the same four values in two
+   * projects is one list that eventually disagrees with itself.
+   *
+   * It is aimed at the SELECTED LEVEL, so turning is the same gesture at every
+   * depth: the level's own path, never the root, never the hole path that
+   * happens to point at one of its panes.
+   */
+  rotate(): void {
+    if (!this.bound()) return
+    EffectBus.emit('template:turn', {
+      segments: this.segments(),
+      path: this.selectedLevel()?.path ?? [],
+    })
+  }
 
   /** Press a container measure. Only ever one of the two flexbox measures —
    *  a pane is picked on the map, not here. */

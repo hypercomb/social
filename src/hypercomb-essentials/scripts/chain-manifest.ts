@@ -156,15 +156,22 @@ export const chainManifest = (
   }
 }
 
-/** The chain's package signatures in SHIP ORDER, oldest first — the order the
- *  host appended them, and therefore the order the `host:packages` pool holds
- *  them in. `generation` is the counter a ship stamps; `at` breaks ties for
- *  entries old enough to predate it. Oldest-first is not cosmetic: pool entries
- *  are append-only, so index i must mean the same package on every future run,
- *  and only a stable prefix can promise that. */
-export const orderedPackageSigs = (manifest: ContentManifest): string[] =>
+/** The chain's packages in SHIP ORDER, oldest first — the order the host
+ *  appended them, and therefore the order the `host:packages` pool holds them
+ *  in. `generation` is the counter a ship stamps; `at` breaks ties for entries
+ *  old enough to predate it. Oldest-first is not cosmetic: pool entries are
+ *  append-only, so index i must name the same package on every future run, and
+ *  only a stable prefix can promise that. */
+export const orderedPackageMembers = (manifest: ContentManifest): { sig: string; label: string }[] =>
   Object.entries(manifest.packages ?? {})
     .filter(([sig]) => /^[a-f0-9]{64}$/.test(sig))
     .sort((a, b) => (Number(a[1].generation ?? 0) - Number(b[1].generation ?? 0))
       || String(a[1].at ?? '').localeCompare(String(b[1].at ?? '')))
-    .map(([sig]) => sig)
+    .map(([sig, entry]) => ({ sig, label: typeof entry.label === 'string' ? entry.label.trim() : '' }))
+
+/** One pool entry's bytes: the signature, and the branch mark underneath it
+ *  when it wears one. Read back by `parseMember` in
+ *  hypercomb-runtime/src/host-pool.ts — the two must agree, which is why the
+ *  reader takes line one and ignores whatever else a later ship writes. */
+export const formatPoolEntry = (member: { sig: string; label: string }): string =>
+  member.label ? `${member.sig}\n${member.label}` : member.sig

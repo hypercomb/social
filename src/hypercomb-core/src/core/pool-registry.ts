@@ -119,6 +119,18 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // Content, and small by construction: a workflow is a recipe, never a
   // model — no checkpoint, LoRA or output ever enters the hive through it.
   'comfy:workflows',
+  // THE LAYOUTS THIS PARTICIPANT MADE — one sig-named member per saved
+  // arrangement, each `{ kind:'layout-creation@1', name, pieceSig }` naming
+  // the root layout piece it was designed as
+  // (essentials/presentation/tiles/layout-creations.ts). The built-in layouts
+  // are the PIECES you build out of; a creation is the shape you built, kept
+  // whole — nesting, measurements and all — so it can be dropped somewhere
+  // else as one asset. TRUTH POOL, never minted from the optimize phase: a
+  // design is a hand, not a derivation. It is also what makes the arrangement
+  // REACHABLE — a piece tree no mark and no pool member names is litter to
+  // every collector here, and unplugging the one container that used it would
+  // strand the design.
+  'layouts:creations',
   // THE NAMES THIS PARTICIPANT GAVE THE BEHAVIOURS — one content-addressed
   // doc mapping canonical command → the participant's own names for it
   // (essentials/commands/aliases/participant-aliases.ts). Code never declares

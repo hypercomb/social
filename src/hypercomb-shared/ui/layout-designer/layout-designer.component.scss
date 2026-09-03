@@ -112,10 +112,77 @@ $accent: #c9a227;
 // scrolls. It takes the slack, so the inspector below keeps its place however
 // far the library grows.
 .ld-shelf {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+
+  // WHILE A DESIGN IS ON ITS WAY HERE. The shelf says it will take it, and
+  // says nothing at all the rest of the time.
+  &.is-offering {
+    outline: 1px dashed rgba($accent, 0.7);
+    outline-offset: -3px;
+    background: rgba($accent, 0.06);
+  }
+}
+
+// ── the two types ─────────────────────────────────────────────────────
+//
+// PIECES are what you build out of; CREATIONS are what you built. One at a
+// time: the chips are the same drawing of the same kind of thing, so a single
+// wall of them cannot tell you which is which, and the filter is the whole
+// answer to that.
+.ld-types {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0 0 0.55rem;
+}
+.ld-type {
+  flex: 1 1 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.4rem;
+  background: rgba(var(--hc-panel-ink), 0.05);
+  border: 1px solid rgba($steel, 0.22);
+  border-radius: tw.$radius-control;
+  color: rgba($dim, 0.95);
+  font-size: calc(0.62rem * var(--hc-panel-scale, 1));
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+
+  &:hover { border-color: rgba($steel, 0.55); }
+  &.is-on {
+    border-color: rgba($accent, 0.8);
+    background: rgba($accent, 0.12);
+    color: var(--hc-panel-text, inherit);
+  }
+}
+.ld-type-count { opacity: 0.6; font-variant-numeric: tabular-nums; }
+
+// Only while something is being carried here — see `.ld-shelf.is-offering`.
+.ld-keep-hint {
+  display: none;
+  margin: 0 0 0.5rem;
+  text-align: center;
+  color: rgba($accent, 0.95);
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.ld-shelf.is-offering .ld-keep-hint { display: block; }
+
+// An empty half of the shelf says what fills it. In FLOW, unlike the pane's
+// hint, which is absolutely placed over a drawing.
+.ld-none {
+  margin: 0 0 0.5rem;
+  color: rgba($dim, 0.7);
+  font-size: 0.66rem;
+  line-height: 1.5;
 }
 
 // THE LINE BETWEEN THE HALVES, and a grip on it.
@@ -258,6 +325,35 @@ $accent: #c9a227;
 
 .ld-asset-note { color: rgba(23, 21, 14, 0.6); }
 
+// The chip's own cell is the frame the forget button hangs in — a creation is
+// the one asset the participant put here, so it is the one that can be taken
+// away again.
+.ld-assets li { position: relative; }
+.ld-asset-forget {
+  position: absolute;
+  z-index: 3;
+  top: 2px;
+  right: 2px;
+  width: 1.1rem;
+  height: 1.1rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: var(--hc-panel-pane, rgba(0, 0, 0, 0.5));
+  border: 1px solid rgba($steel, 0.3);
+  border-radius: 50%;
+  color: rgba($dim, 0.9);
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+
+  &:hover, &:focus-visible { color: var(--hc-panel-text, inherit); border-color: rgba($steel, 0.7); }
+}
+.ld-assets li:hover .ld-asset-forget,
+.ld-asset-forget:focus-visible { opacity: 1; }
+
 // The layout miniature is built by the same pure function that builds the real
 // container, so it can never drift from the arrangement it advertises. It
 // arrives through [innerHTML], which puts it outside this component's style
@@ -278,6 +374,26 @@ $accent: #c9a227;
   // for measurements suited to a chip (`glyphVars`), and every hole shrinks
   // to fit besides. Do not put a compensating rule back.
   ::ng-deep [data-hc-self] { background: rgba($accent, 0.55); }
+
+  // A NESTED LEVEL FILLS ITS HOLE — the same rule the stage needs, for the
+  // same reason.
+  //
+  // A container in normal flow takes its INTRINSIC height. That is doctrine on
+  // a page and useless in a chip: a nested level's holes are empty, so it drew
+  // 0px tall — and a creation built by nesting, which is the entire point of a
+  // library of six primitives, showed on the shelf as a blank band.
+  //
+  // This forces no MEASUREMENT, which is what the warning above is about. It
+  // says a nested container occupies the hole it is in: a fact about this
+  // surface, not a claim about the layout. Every share below it is still the
+  // arrangement's own.
+  ::ng-deep [data-hc-hole] { display: flex; }
+  ::ng-deep [data-hc-hole] > [data-hc-container] {
+    flex: 1 1 auto;
+    align-self: stretch;
+    min-width: 0;
+    min-height: 0;
+  }
 }
 
 // ── the properties ────────────────────────────────────────────────────
@@ -493,6 +609,24 @@ $accent: #c9a227;
   font-size: 0.72rem;
 }
 .ld-pane-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+// THE GRIP. The head IS the handle — a whole bar is a target you cannot miss,
+// and the ribbing only says so. It appears when there is a design to carry.
+.ld-pane-head[draggable='true'] {
+  cursor: grab;
+  &:active { cursor: grabbing; }
+  &.is-offering { background: rgba($accent, 0.12); }
+}
+.ld-pane-grip {
+  flex: 0 0 auto;
+  width: 0.65rem;
+  height: 0.55rem;
+  margin-right: -0.4rem;
+  align-self: center;
+  background-image: radial-gradient(circle, rgba($dim, 0.85) 1px, transparent 1.2px);
+  background-size: 3px 3px;
+  opacity: 0.75;
+}
 .ld-pane-layout { color: rgba($dim, 0.9); letter-spacing: 0.08em; }
 
 .ld-stage {
@@ -791,11 +925,61 @@ $accent: #c9a227;
 }
 .ld-level-layout { color: rgba($accent, 0.95); letter-spacing: 0.04em; }
 .ld-level-path {
+  flex: 1 1 auto;
   color: rgba($dim, 0.9);
   font-size: 0.9em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: right;
+}
+
+// THE TURN. Its arrow points the way the container runs, so the button states
+// the current quarter and changes it with the same mark — there is no separate
+// read-out to keep in step with the thing it describes.
+//
+// The arrow is DRAWN, not typed. A glyph from the icon set renders as its own
+// name whenever the subset goes stale, and an arrow character depends on
+// whatever the mono stack resolves to; a path in a viewBox depends on nothing.
+.ld-turn {
+  flex: 0 0 auto;
+  // The row is baseline-aligned for its two runs of text; a button has no
+  // text to sit on that line, so it centres on the row instead of hanging
+  // from it.
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  background: none;
+  border: 1px solid rgba($steel, 0.28);
+  border-radius: tw.$radius-control;
+  color: var(--hc-window-ink-quiet);
+  cursor: pointer;
+  transition: border-color 0.14s ease, color 0.14s ease;
+
+  &:hover { border-color: rgba($accent, 0.75); color: rgb(var(--hc-panel-ink)); }
+  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: 1px; }
+}
+.ld-turn-arrow {
+  width: 0.95rem;
+  height: 0.95rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  // About the middle of the box, so four quarters land on four axes rather
+  // than walking the arrow round a corner.
+  transform-origin: 50% 50%;
+  transition: transform 0.16s ease;
+
+  .ld-turn-head { fill: currentColor; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ld-turn-arrow { transition: none; }
 }
 
 .ld-empty-hint {

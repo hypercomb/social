@@ -24,6 +24,12 @@
 // EventTarget so the host rebuilds when surfaces register/unregister
 // mid-session (hot install, feature toggle, two-way installer teardown).
 
+// THE CONTAINER THIS MODULE REGISTERS INTO, named so it loads first wherever
+// a bundler puts this file. A lazy entry that also reaches this module hoists
+// it into a shared chunk that evaluates before the shell's main — where
+// ioc.web used to be imported for it — and the bare `register` global did
+// not exist yet: the whole graph threw and the shell came up blank.
+import './ioc.web'
 import type { Type } from '@angular/core'
 
 export type ShellSurface = {

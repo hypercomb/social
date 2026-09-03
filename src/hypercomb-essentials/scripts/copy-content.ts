@@ -24,7 +24,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmdirSy
 import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { createHash } from 'node:crypto'
-import { chainManifest, chainScore, orderedPackageSigs, type ContentManifest } from './chain-manifest.js'
+import { chainManifest, chainScore, formatPoolEntry, orderedPackageMembers, type ContentManifest } from './chain-manifest.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -200,7 +200,7 @@ const syncTarget = (
   targetDir: string,
   additive: boolean,
   manifestJson: string,
-  poolOrder: string[],
+  poolOrder: { sig: string; label: string }[],
   keep: Set<string>,
   peers: string[],
 ): { copied: number; skipped: number; removed: number; drained: number; healed: number } => {
@@ -286,15 +286,29 @@ const syncTarget = (
   // by rewriting history under a client that may be mid-walk.
   const poolDir = join(targetDir, HOST_PACKAGES_POOL)
   mkdirSync(poolDir, { recursive: true })
-  poolOrder.forEach((sig, index) => {
+  poolOrder.forEach((member, index) => {
     const entry = join(poolDir, poolEntryName(index))
+    const bytes = formatPoolEntry(member)
     if (existsSync(entry)) {
-      const held = readFileSync(entry, 'utf8').trim()
-      if (held !== sig) console.warn(`[copy-content] pool entry ${poolEntryName(index)} holds ${held.slice(0, 12)}, chain says ${sig.slice(0, 12)} — left as written`)
-      skipped++
+      const held = readFileSync(entry, 'utf8')
+      const heldSig = (held.split('\n')[0] ?? '').trim()
+      if (heldSig !== member.sig) {
+        // A different package at an index already shipped. Append-only says
+        // this cannot happen, so it is a fault to report — never to paper over
+        // by rewriting history under a client that may be mid-walk.
+        console.warn(`[copy-content] pool entry ${poolEntryName(index)} holds ${heldSig.slice(0, 12)}, chain says ${member.sig.slice(0, 12)} — left as written`)
+        skipped++
+        return
+      }
+      if (held.trim() === bytes) { skipped++; return }
+      // Same package, fuller bytes: an entry written before members carried
+      // their branch mark. The signature — the only line a reader must have —
+      // is unchanged, so this adds to an entry rather than rewriting one.
+      writeFileSync(entry, bytes, 'utf8')
+      copied++
       return
     }
-    writeFileSync(entry, sig, 'utf8')
+    writeFileSync(entry, bytes, 'utf8')
     copied++
   })
 
@@ -357,7 +371,7 @@ const main = () => {
   }
   const chained = chainManifest(localManifest, authority, new Date())
   const manifestJson = JSON.stringify(chained.manifest, null, 2) + '\n'
-  const poolOrder = orderedPackageSigs(chained.manifest)
+  const poolOrder = orderedPackageMembers(chained.manifest)
   if (chained.generation) {
     console.log(`[copy-content] manifest version: v${chained.generation} '${chained.label}'${chained.minted ? '' : ' (unchanged re-deploy)'}`)
   }

@@ -5,3 +5,6 @@
 // no authoring, installer, publishing, mesh, history, or settings chrome is
 // registered. Creation-owned views still mount through their signed modules.
 
+// A dynamic import requires the replacement to be an ES module even though it
+// intentionally registers nothing.
+export {}

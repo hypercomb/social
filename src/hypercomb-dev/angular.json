@@ -15,7 +15,7 @@
             "outputPath": "dist/hypercomb-dev",
             "index": "src/index.html",
             "browser": "src/main.ts",
-            "polyfills": [],
+            "polyfills": ["@hypercomb/shared/core/ioc.web"],
             "tsConfig": "tsconfig.app.json",
             "inlineStyleLanguage": "scss",
             "assets": [

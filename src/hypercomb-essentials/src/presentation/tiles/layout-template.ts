@@ -37,7 +37,7 @@
 // rule rather than a detail.
 //
 // The instinct is to give each layout its own variable namespace —
-// `--split-space`, `--shell-space`, `--sidebar-space` — and alias it to a local
+// `--split-space`, `--rail-space`, `--bookends-space` — and alias it to a local
 // `--space` inside the component. It reads as tidy and it destroys the one
 // property that makes nesting worth having: a re-declared alias STOPS
 // INHERITING. Set the
@@ -53,8 +53,8 @@
 //     --hc-layout-<hole>     the fixed extent of one hole (any CSS length)
 //
 // A container declares only what it CHANGES. Everything else falls through
-// from the container above it, all the way up. Nest a sidebar inside the
-// middle of a stack and it is already dressed; give the inner one
+// from the container above it, all the way up. Nest a `split` inside the body
+// of a turned `rail` and it is already dressed; give the inner one
 // `--hc-layout-space: 2rem` and only it and its descendants move. That is what
 // "totally flexible" has to mean to be worth anything: one name, inherited,
 // overridable at any depth.
@@ -239,6 +239,62 @@ export function configurationOf(
   }
 }
 
+// ── ROTATION ────────────────────────────────────────────────────────────
+//
+// TURNING A LAYOUT IS A QUARTER-TURN OF ITS MAIN AXIS, AND NOTHING ELSE.
+//
+// This is why the library draws every arrangement ONE way. `flex-direction`
+// already spells the four quarters — `row` is the way it was drawn, and each
+// value after it is one more quarter clockwise — so a turn is a single
+// variable on a single level, minted like any other edit, inheriting nothing
+// and cascading nowhere.
+//
+// NOTHING ABOUT A HOLE IS REWRITTEN ON THE WAY ROUND. A hole never states its
+// cross axis (see `holeStyle`), so a `fixed` hole's `flex-basis` is a WIDTH in
+// a row and a HEIGHT in a column from the same declaration; `gap` and
+// `padding` are axis-agnostic already; `min-width:0` and `min-height:0` are
+// both always present. The turned container is therefore laid out exactly as
+// it would have been if it had been drawn that way in the first place — which
+// is not a coincidence to be grateful for, it is the pay-off of the rule that
+// a hole may not state its cross axis.
+//
+// The two things that DO change meaning are `justify` and `align`, and they
+// change it because that is what they mean: they name the main and cross axes,
+// and the axes have swapped. Flexbox's own semantics, stated, not worked
+// around.
+//
+// The ORDER of this list is load-bearing — it IS the rotation — so it is the
+// same list the vocabulary is checked against rather than a second copy that
+// could be reordered by somebody tidying either one.
+
+/** The four quarter-turns, clockwise from the way a layout is drawn. */
+export const QUARTER_TURNS: readonly string[] = Object.freeze([...DIRECTIONS])
+
+/** Which quarter a container stands at — 0 for the way it was drawn.
+ *
+ *  Resolved rather than read: a level that says nothing about its direction is
+ *  at the quarter its flow implies, and that is the answer a turn has to start
+ *  from or the first press does nothing visible. */
+export function turnOf(
+  template: LayoutTemplate,
+  vars: Readonly<Record<string, string>> = template.vars,
+): number {
+  const at = QUARTER_TURNS.indexOf(configurationOf(template, vars).direction)
+  return at < 0 ? 0 : at
+}
+
+/** The direction `quarters` turns on from where this container stands. Wraps
+ *  in both senses, so turning back from the first quarter lands on the last. */
+export function turnedDirection(
+  template: LayoutTemplate,
+  vars: Readonly<Record<string, string>> = template.vars,
+  quarters = 1,
+): string {
+  const count = QUARTER_TURNS.length
+  const at = (turnOf(template, vars) + Math.trunc(quarters)) % count
+  return QUARTER_TURNS[(at + count) % count]
+}
+
 /** How a set of holes runs. `row` and `column` are single-axis; `wrap` is a
  *  row that lets a `band` hole break the line, which is the only thing the
  *  five-hole application shell needs that a plain row cannot express. */
@@ -351,30 +407,67 @@ const attr = (value: string): string =>
 
 // ── the library ──────────────────────────────────────────────────────────
 //
-// Twenty arrangements, as data. Each is conventionally a component plus a
-// stylesheet plus a variable prefix of its own; none of them needs any of that
-// here, and the twenty-first is `holes: [...]`.
+// SIX PRIMITIVES, AND THEY ARE DRAWN ONE WAY.
 //
-// They are named for what they ARE, because a layout named for its CSS
-// property or for its starting proportions describes something that stops
-// being true the moment somebody moves a variable.
+// There were twenty. Sixteen of them were another one turned, mirrored, or
+// counted higher — `rows-two` was `split` on its side, `right-rail` was
+// `left-rail` seen from the other end, `rows-four` was two `split`s. A palette
+// of twenty is a wall you read; a palette of six is a set of parts you build
+// out of, and building is the thing this window is for.
+//
+// So the library holds the arrangements that cannot be made out of the others:
+//
+//     ONE HOLE     single       the page, in a box of its own
+//     TWO HOLES    split        two even shares
+//                  rail         a measured strip, and the rest
+//     THREE HOLES  thirds       three even shares
+//                  bookends     a measured strip at each end, the rest between
+//                  measure      a measured strip in the MIDDLE, the rest at
+//                               each end — the dual of bookends, and the one
+//                               shape neither turning nor nesting reaches
+//
+// THREE IS THE CEILING, and nesting is why. Four even shares is `split` with a
+// `split` in each hole; a six-cell gallery is `thirds` with a turned `split`
+// in each. Every one of those was in the library and every one of them cost a
+// chip that said less than the gesture that replaces it. What is NOT reachable
+// by nesting is a hole's own kind — fluid or fixed is a fact about the
+// template, not a measurement — which is exactly why `rail`, `bookends` and
+// `measure` are here and `two-thirds` is not: a proportion is a measurement,
+// and the slider already moves it.
+//
+// ── ROTATION IS THE OTHER HALF OF "ONE WAY" ─────────────────────────────
+//
+// Every one of these is a ROW, and none of them needs a column twin, because
+// turning a container is a quarter-turn of its main axis and flexbox already
+// spells all four (see QUARTER_TURNS). Nothing about a hole has to be rewritten
+// on the way round: a hole never states its cross axis, so a `fixed` hole's
+// `flex-basis` is a WIDTH in a row and a HEIGHT in a column, by the same
+// declaration. That is not a trick, it is the reason the cross axis was left
+// unstated in the first place — and it is why `left-rail`, `right-rail`,
+// `header-body` and `body-footer` are one template now.
+//
+// They are named for what they ARE, and for what stays true after the turn: a
+// layout named for a SIDE describes something that stops being true the moment
+// somebody turns it, exactly as a layout named for its starting proportions
+// stops being true the moment somebody moves a variable. `head` and `tail` are
+// ends of the main axis; `left` and `right` were not.
 //
 // EVERY ONE IS ONE-DIMENSIONAL, and that is the whole design. A flexbox
 // container has a single axis; a page that needs two is a container with
-// another container nested in one of its holes. So there is no `shell` in this
-// list — a masthead over two rails over a footer is a `stack` with a `sidebar`
-// dropped into its middle, which is both correct and the gesture the designer
-// exists for. A flat five-hole "shell" can only be faked with `wrap`, and a
-// wrapping row cannot give the remainder to one line: `align-content: stretch`
+// another container nested in one of its holes. So there is no `shell` here —
+// a masthead over two rails over a footer is a turned `bookends` with a
+// `bookends` in its middle. And there is no `wrap` here either: a wrapping row
+// cannot give the remainder to one line, because `align-content: stretch`
 // divides leftover space EQUALLY among lines, so the body would always draw at
 // the height of its own content while the bands sat at their measure. It looks
-// finished at exactly one size.
+// finished at exactly one size. `wrap` remains a flow a stored template may
+// declare; nothing built in asks for it.
 
 const BUILTINS: readonly LayoutTemplate[] = [
-  // ── COLUMNS ────────────────────────────────────────────────────────
+  // ── ONE HOLE ───────────────────────────────────────────────────────
   //
-  // Side by side, in one row. Every one of them is a single axis, which is
-  // the only kind of thing a flexbox container honestly is.
+  // The page and nothing else, in a container of its own — which is what
+  // gives it a padding and a place to be turned and nested.
   {
     kind: LAYOUT_TEMPLATE_KIND,
     version: 1,
@@ -385,97 +478,56 @@ const BUILTINS: readonly LayoutTemplate[] = [
     ],
     vars: {},
   },
+  // ── TWO HOLES ──────────────────────────────────────────────────────
+  //
+  // Turned, `split` is two even rows and `rail` is a header, a footer, or a
+  // side rail — four shapes each, from one drawing.
   {
     kind: LAYOUT_TEMPLATE_KIND,
     version: 1,
     name: 'split',
     flow: 'row',
     holes: [
-      { key: 'left', fill: 'fluid' },
-      { key: 'right', fill: 'fluid' },
+      { key: 'one', fill: 'fluid' },
+      { key: 'two', fill: 'fluid' },
     ],
     vars: {},
   },
+  {
+    kind: LAYOUT_TEMPLATE_KIND,
+    version: 1,
+    name: 'rail',
+    flow: 'row',
+    holes: [
+      { key: 'rail', fill: 'fixed' },
+      { key: 'body', fill: 'fluid', self: true },
+    ],
+    vars: { rail: '14rem' },
+  },
+  // ── THREE HOLES ────────────────────────────────────────────────────
   {
     kind: LAYOUT_TEMPLATE_KIND,
     version: 1,
     name: 'thirds',
     flow: 'row',
     holes: [
-      { key: 'left', fill: 'fluid' },
-      { key: 'middle', fill: 'fluid', self: true },
-      { key: 'right', fill: 'fluid' },
-    ],
-    vars: {},
-  },
-  {
-    kind: LAYOUT_TEMPLATE_KIND,
-    version: 1,
-    name: 'quarters',
-    flow: 'row',
-    holes: [
       { key: 'one', fill: 'fluid' },
-      { key: 'two', fill: 'fluid' },
+      { key: 'two', fill: 'fluid', self: true },
       { key: 'three', fill: 'fluid' },
-      { key: 'four', fill: 'fluid' },
     ],
     vars: {},
   },
   {
     kind: LAYOUT_TEMPLATE_KIND,
     version: 1,
-    name: 'two-thirds',
+    name: 'bookends',
     flow: 'row',
     holes: [
-      { key: 'main', fill: 'fluid', grow: 2, self: true },
-      { key: 'side', fill: 'fluid' },
-    ],
-    vars: {},
-  },
-  {
-    kind: LAYOUT_TEMPLATE_KIND,
-    version: 1,
-    name: 'three-quarters',
-    flow: 'row',
-    holes: [
-      { key: 'main', fill: 'fluid', grow: 3, self: true },
-      { key: 'side', fill: 'fluid' },
-    ],
-    vars: {},
-  },
-  {
-    kind: LAYOUT_TEMPLATE_KIND,
-    version: 1,
-    name: 'left-rail',
-    flow: 'row',
-    holes: [
-      { key: 'rail', fill: 'fixed' },
+      { key: 'head', fill: 'fixed' },
       { key: 'body', fill: 'fluid', self: true },
+      { key: 'tail', fill: 'fixed' },
     ],
-    vars: { rail: '14rem' },
-  },
-  {
-    kind: LAYOUT_TEMPLATE_KIND,
-    version: 1,
-    name: 'right-rail',
-    flow: 'row',
-    holes: [
-      { key: 'body', fill: 'fluid', self: true },
-      { key: 'rail', fill: 'fixed' },
-    ],
-    vars: { rail: '14rem' },
-  },
-  {
-    kind: LAYOUT_TEMPLATE_KIND,
-    version: 1,
-    name: 'sidebar',
-    flow: 'row',
-    holes: [
-      { key: 'left', fill: 'fixed' },
-      { key: 'middle', fill: 'fluid', self: true },
-      { key: 'right', fill: 'fixed' },
-    ],
-    vars: { left: '10rem', right: '10rem' },
+    vars: { head: '10rem', tail: '10rem' },
   },
   {
     kind: LAYOUT_TEMPLATE_KIND,
@@ -488,147 +540,6 @@ const BUILTINS: readonly LayoutTemplate[] = [
       { key: 'after', fill: 'fluid' },
     ],
     vars: { body: '42rem' },
-  },
-  // ── ROWS ───────────────────────────────────────────────────────────
-  //
-  // The same thing turned ninety degrees. A fixed hole's measure is its
-  // HEIGHT here, which is why a header needs no separate concept.
-  {
-    kind: LAYOUT_TEMPLATE_KIND,
-    version: 1,
-    name: 'rows-two',
-    flow: 'column',
-    holes: [
-      { key: 'top', fill: 'fluid', self: true },
-      { key: 'bottom', fill: 'fluid' },
-    ],
-    vars: {},
-  },
-  {
-    kind: LAYOUT_TEMPLATE_KIND,
-    version: 1,
-    name: 'rows-three',
-    flow: 'column',
-    holes: [
-      { key: 'top', fill: 'fluid' },
-      { key: 'middle', fill: 'fluid', self: true },
-      { key: 'bottom', fill: 'fluid' },
-    ],
-    vars: {},
-  },
-  {
-    kind: LAYOUT_TEMPLATE_KIND,
-    version: 1,
-    name: 'rows-four',
-    flow: 'column',
-    holes: [
-      { key: 'one', fill: 'fluid' },
-      { key: 'two', fill: 'fluid' },
-      { key: 'three', fill: 'fluid' },
-      { key: 'four', fill: 'fluid' },
-    ],
-    vars: {},
-  },
-  {
-    kind: LAYOUT_TEMPLATE_KIND,
-    version: 1,
-    name: 'header-body',
-    flow: 'column',
-    holes: [
-      { key: 'header', fill: 'fixed' },
-      { key: 'body', fill: 'fluid', self: true },
-    ],
-    vars: { header: '3.5rem' },
-  },
-  {
-    kind: LAYOUT_TEMPLATE_KIND,
-    version: 1,
-    name: 'body-footer',
-    flow: 'column',
-    holes: [
-      { key: 'body', fill: 'fluid', self: true },
-      { key: 'footer', fill: 'fixed' },
-    ],
-    vars: { footer: '3rem' },
-  },
-  {
-    kind: LAYOUT_TEMPLATE_KIND,
-    version: 1,
-    name: 'stack',
-    flow: 'column',
-    holes: [
-      { key: 'top', fill: 'fixed' },
-      { key: 'middle', fill: 'fluid', self: true },
-      { key: 'bottom', fill: 'fixed' },
-    ],
-    vars: { top: '3.5rem', bottom: '3.5rem' },
-  },
-  // ── GALLERIES ──────────────────────────────────────────────────────
-  //
-  // The one place `wrap` belongs. Cells take an equal SHARE and wrap onto as
-  // many lines as they need, each line as tall as its own content — which is
-  // exactly right for a gallery and exactly wrong for a page shell, because
-  // `align-content` divides leftover space EQUALLY among lines and can never
-  // hand the remainder to one row. A page with a masthead, a body and a
-  // footer is therefore a `stack` with something nested in its middle, never
-  // a wrapping row pretending to be two-dimensional.
-  {
-    kind: LAYOUT_TEMPLATE_KIND,
-    version: 1,
-    name: 'gallery-two',
-    flow: 'wrap',
-    holes: [
-      { key: 'one', fill: 'fluid' },
-      { key: 'two', fill: 'fluid' },
-    ],
-    vars: { one: '48%', two: '48%' },
-  },
-  {
-    kind: LAYOUT_TEMPLATE_KIND,
-    version: 1,
-    name: 'gallery-three',
-    flow: 'wrap',
-    holes: [
-      { key: 'one', fill: 'fluid' },
-      { key: 'two', fill: 'fluid' },
-      { key: 'three', fill: 'fluid' },
-    ],
-    vars: { one: '31%', two: '31%', three: '31%' },
-  },
-  {
-    kind: LAYOUT_TEMPLATE_KIND,
-    version: 1,
-    name: 'gallery-four',
-    flow: 'wrap',
-    holes: [
-      { key: 'one', fill: 'fluid' },
-      { key: 'two', fill: 'fluid' },
-      { key: 'three', fill: 'fluid' },
-      { key: 'four', fill: 'fluid' },
-    ],
-    vars: { one: '48%', two: '48%', three: '48%', four: '48%' },
-  },
-  {
-    kind: LAYOUT_TEMPLATE_KIND,
-    version: 1,
-    name: 'gallery-six',
-    flow: 'wrap',
-    holes: [
-      { key: 'one', fill: 'fluid' },
-      { key: 'two', fill: 'fluid' },
-      { key: 'three', fill: 'fluid' },
-      { key: 'four', fill: 'fluid' },
-      { key: 'five', fill: 'fluid' },
-      { key: 'six', fill: 'fluid' },
-    ],
-    vars: {
-      one: '31%',
-      two: '31%',
-      three: '31%',
-      four: '31%',
-      five: '31%',
-      six: '31%',
-    },
   },
 ]
 

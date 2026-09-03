@@ -32,10 +32,11 @@ Commands live in `commands/template.queen.ts`:
 
 ```
 /template                     open or close the designer window
-/template sidebar             plug THIS container into the sidebar layout
+/template rail                plug THIS container into the rail layout
 /template off                 unplug it
 /template list                the layouts this hive can reach
-/template set left 14rem      change one variable at the root
+/template rotate              turn this container a quarter
+/template set rail 14rem      change one variable at the root
 /template save my-shell       save the current shape under a name
 ```
 
@@ -120,9 +121,9 @@ accepts almost nothing, and a part that fits only one whole is a part that can
 live in only one whole.
 
 ```ts
-{ key: 'left',   fill: 'fixed' }              // sized by --hc-layout-left
-{ key: 'middle', fill: 'fluid', self: true }  // takes the remainder
-{ key: 'top',    fill: 'fixed', band: true }  // breaks the line, full width
+{ key: 'rail', fill: 'fixed' }              // sized by --hc-layout-rail
+{ key: 'body', fill: 'fluid', self: true }  // takes the remainder
+{ key: 'head', fill: 'fixed', band: true }  // breaks the line, full width
 ```
 
 A **self hole** is where the container's own page goes. It carries no seating
@@ -181,35 +182,86 @@ travels with the artifact, because it rides a decoration rather than a table.
 front, so the composer stays synchronous — which is what lets the same function
 draw a container at publish time, in the browser, and in a test.
 
-### The library
+### The library — six primitives, drawn one way
 
-Twenty arrangements, as data. The twenty-first costs no code: it is
-`holes: [...]`.
+| Holes | | |
+|---|---|---|
+| **one** | `single` | the page, in a box of its own |
+| **two** | `split` | two even shares |
+| | `rail` | a measured strip, and the rest |
+| **three** | `thirds` | three even shares |
+| | `bookends` | a measured strip at each end, the rest between |
+| | `measure` | a measured strip in the middle, the rest at each end |
 
-| | |
-|---|---|
-| **Columns** | `single` `split` `thirds` `quarters` `two-thirds` `three-quarters` `left-rail` `right-rail` `sidebar` `measure` |
-| **Rows** | `rows-two` `rows-three` `rows-four` `header-body` `body-footer` `stack` |
-| **Galleries** | `gallery-two` `gallery-three` `gallery-four` `gallery-six` |
+There were twenty. Sixteen of them were another one turned, mirrored, or
+counted higher — `rows-two` was `split` on its side, `right-rail` was
+`left-rail` seen from the other end, `rows-four` was two `split`s. A palette of
+twenty is a wall you read; a palette of six is a set of parts you build out of,
+and building is what this window is for.
 
-Each is named for the arrangement it makes, not for the CSS property it uses or
-the proportions it starts with, because both of those stop being true the
-moment somebody moves a variable.
+**Three holes is the ceiling, and nesting is why.** Four even shares is `split`
+with a `split` in each hole; a six-cell gallery is `thirds` with a turned
+`split` in each. Drag the result back onto the shelf and it is one asset with a
+name — so the arrangements that were chips are now *yours*, and the library is
+only the parts nothing else can be made of.
+
+What nesting cannot reach is a hole's own KIND. Fluid or fixed is a fact about
+the template, not a measurement, which is exactly why `rail`, `bookends` and
+`measure` are primitives and `two-thirds` is not: a proportion is a
+measurement, and the slider already moves it.
+
+Each is named for the arrangement it makes — not for the CSS property it uses,
+not for the proportions it starts with, and **not for a side**. All three stop
+being true the moment somebody moves a variable or turns the container. `head`
+and `tail` are ends of the main axis; `left` and `right` were not.
 
 **Every one is one-dimensional, and that is the whole design.** A flexbox
 container has a single axis; a page that needs two is a container with another
 container nested in one of its holes.
 
 So there is no `shell` in the library. A masthead over two rails over a footer
-is a `stack` with a `sidebar` dropped into its middle — correct at every size,
-and the gesture the designer exists for. A flat five-hole shell can only be
-faked with `wrap`, and **a wrapping row cannot give the remainder to one
-line**: `align-content: stretch` divides leftover space *equally* among lines,
-so the body always draws at the height of its own content while the bands sit
-at their measure. It looks finished at exactly one size.
+is a turned `bookends` with a `bookends` in its middle — correct at every size,
+and the gesture the designer exists for. And there is no `wrap` either: **a
+wrapping row cannot give the remainder to one line**, because `align-content:
+stretch` divides leftover space *equally* among lines, so the body always draws
+at the height of its own content while the bands sit at their measure. It looks
+finished at exactly one size. `wrap` remains a flow a stored template may
+declare; nothing built in asks for it.
 
-Galleries are the one place `wrap` belongs, because there a content-height line
-is the right answer.
+### Rotation is the other half of "drawn one way"
+
+**Turning a layout is a quarter-turn of its main axis, and nothing else.**
+`flex-direction` already spells the four quarters — `row` is the way it was
+drawn and each value after it is one more quarter clockwise — so `QUARTER_TURNS`
+*is* the direction vocabulary rather than a second copy of it. A turn writes one
+variable on one level, minted like any other edit, inheriting nothing and
+cascading nowhere.
+
+**Nothing about a hole is rewritten on the way round.** A hole never states its
+cross axis, so a fixed hole's `flex-basis` is a *width* in a row and a *height*
+in a column from the same bytes; `gap` and `padding` are axis-agnostic already;
+`min-width: 0` and `min-height: 0` are both always present. The turned
+container is laid out exactly as it would have been if it had been drawn that
+way to begin with. That is not luck — it is the pay-off of the rule that a hole
+may not state its cross axis, and it is what lets one drawing serve four
+shapes. Measured in the browser: `rail` at 14rem is 226×519 as a row and
+503×226 as a column, from one template.
+
+The two things that *do* change meaning are `justify` and `align`, and they
+change it because that is what they mean: they name the main and cross axes,
+and the axes have swapped.
+
+So `left-rail`, `right-rail`, `header-body` and `body-footer` are one template
+now, and `stack` is `bookends` turned.
+
+| Where | How |
+|---|---|
+| Designer | the turn button on the selected level, or **R** while the pane has focus |
+| Command line | `/template rotate` — the root level |
+| Flex editor | the `direction` axis, which is the same variable spelled out |
+
+The shelf does **not** turn. A piece is drawn one way; only the design turns —
+otherwise a chip would stop being a stable picture of the part it offers.
 
 ### A hole always fits the space it is allotted
 
@@ -237,7 +289,7 @@ This is the part that is easy to get wrong, so it is a rule rather than a
 detail.
 
 The instinct is to give each layout its own variable namespace —
-`--split-space`, `--shell-space`, `--sidebar-space` — and alias it to a local
+`--split-space`, `--rail-space`, `--bookends-space` — and alias it to a local
 `--space` inside the component. It reads as tidy and it destroys the one
 property that makes nesting worth having: **a re-declared alias stops
 inheriting.** Set the gutter on the outer container and the inner one, having
@@ -255,7 +307,7 @@ overridden and nowhere else:
 
 Only the **root** merges the template's defaults in. A nested level declares
 just its own changes, so everything it does not mention keeps falling through
-from the level above — nest a sidebar inside the middle of a stack and it is
+from the level above — nest a `split` inside the body of a turned `rail` and it is
 already dressed; give the inner one `--hc-layout-space: 2rem` and only it and
 its descendants move.
 
@@ -627,7 +679,13 @@ said nothing, which reads as a broken window rather than as a rule.
 ## Invariants
 
 - A layout names no part, and a part names no layout.
-- A hole never states its cross axis.
+- A hole never states its cross axis. This is what makes a turn free: the same
+  declaration is a width on one axis and a height on the other.
+- A layout is drawn ONE way; the other three quarters are turns, and a turn is
+  one variable on one level. The library therefore holds no mirror of anything
+  it already holds, and no name in it may state a side.
+- No built-in goes past three holes. The fourth is a nesting, and a nesting the
+  participant keeps is a creation.
 - Nesting is a signature, through a typed envelope; nothing is ever inlined.
 - Every level declares its closure, and the mark declares the whole tree's —
   an arrangement that cannot travel is an arrangement that does not exist.
@@ -647,7 +705,8 @@ said nothing, which reads as a broken window rather than as a rule.
 - A pointer gesture walks the stack under it rather than choosing a layer: a
   click comes round at the bottom, the wheel stops at both ends.
 
-Covered by `presentation/tiles/layout-template.spec.ts` (48 tests),
+Covered by `presentation/tiles/layout-template.spec.ts` (77 tests),
+`presentation/tiles/layout-creations.spec.ts` (5 tests),
 `presentation/tiles/layout-piece.spec.ts` (11 tests),
 `hypercomb-shared/ui/layout-designer/canvas-box.spec.ts` (14 tests) and
 `hypercomb-shared/ui/layout-designer/select-walk.spec.ts` (35 tests).
