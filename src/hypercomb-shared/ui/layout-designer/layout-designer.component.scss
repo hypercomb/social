@@ -325,6 +325,21 @@ $accent: #c9a227;
 
 .ld-asset-note { color: rgba(23, 21, 14, 0.6); }
 
+// The door to the targets window. Quiet until there is something to name —
+// an unplugged container has no holes, so it has no interfaces either.
+.ld-targets {
+  flex: 0 0 auto;
+  padding: 0 0.25rem;
+  background: transparent;
+  border: 0;
+  color: rgba($dim, 0.9);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  &:hover:not(:disabled) { color: var(--hc-window-accent, #{$accent}); }
+  &:disabled { opacity: 0.35; cursor: default; }
+}
+
 // The chip's own cell is the frame the forget button hangs in — a creation is
 // the one asset the participant put here, so it is the one that can be taken
 // away again.

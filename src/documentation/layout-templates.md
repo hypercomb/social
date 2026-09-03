@@ -182,28 +182,53 @@ travels with the artifact, because it rides a decoration rather than a table.
 front, so the composer stays synchronous — which is what lets the same function
 draw a container at publish time, in the browser, and in a test.
 
-### The library — six primitives, drawn one way
+### The library — five primitives, drawn one way
 
-| Holes | | |
+**A layout is a division of space that was already being given.** The outermost
+panel is *implicit*, and this module never emits it: it is the **pane** in the
+designer and the viewport in a published page, and a container with nothing
+bound renders as its own page, unwrapped — `containerFor` hands the authored
+HTML straight back. Either way the container is already being drawn into
+somewhere. Binding a layout does not give it that space; it **divides** it.
+
+| Divides | | |
 |---|---|---|
-| **one** | `single` | the page, in a box of its own |
-| **two** | `split` | two even shares |
+| **in two** | `split` | two even shares — the one primitive with no self hole |
 | | `rail` | a measured strip, and the rest |
-| **three** | `thirds` | three even shares |
+| **in three** | `thirds` | three even shares |
 | | `bookends` | a measured strip at each end, the rest between |
 | | `measure` | a measured strip in the middle, the rest at each end |
 
-There were twenty. Sixteen of them were another one turned, mirrored, or
-counted higher — `rows-two` was `split` on its side, `right-rail` was
-`left-rail` seen from the other end, `rows-four` was two `split`s. A palette of
-twenty is a wall you read; a palette of six is a set of parts you build out of,
-and building is what this window is for.
+**Two is the floor of the library.** A one-hole layout divides nothing — it
+puts one more box around the space. There was a `single` here that did exactly
+that, described as "the page, in a box of its own". Its one hole was the *self*
+hole, where the container's own page goes, so no part could ever be seated into
+it; its `space` slider had no second child to space; and turning it moved
+nothing. A chip that divides nothing teaches the wrong thing about what a
+layout is.
 
-**Three holes is the ceiling, and nesting is why.** Four even shares is `split`
-with a `split` in each hole; a six-cell gallery is `thirds` with a turned
-`split` in each. Drag the result back onto the shelf and it is one asset with a
-name — so the arrangements that were chips are now *yours*, and the library is
-only the parts nothing else can be made of.
+What `single` did carry was a padding and an alignment around an undivided
+page, and that goes with it: those belong to the page's own CSS, because a
+layout variable on a layout that divides nothing is not a layout variable.
+
+**The floor is a curation rule, not a law of the format.** `parseLayoutTemplate`
+still accepts a one-hole record and `composeLayout` still draws one, and both
+must: a hive that bound `single` before it was cut resolves it by **signature**
+and never by name, so that container keeps rendering exactly as it did. Data
+never heals; a library is curated.
+
+**Three is the ceiling, and that is a second idea — nesting, not
+implicitness.** Four even shares is `split` with a `split` in each hole; a
+six-cell gallery is `thirds` with a turned `split` in each. Drag the result back
+onto the shelf and it is one asset with a name — so the arrangements that were
+chips are now *yours*, and the library is only the parts nothing else can be
+made of.
+
+There were twenty. Fifteen were another one turned, mirrored, or counted higher
+— `rows-two` was `split` on its side, `right-rail` was `left-rail` seen from
+the other end, `rows-four` was two `split`s — and the sixteenth divided nothing
+at all. A palette of twenty is a wall you read; a palette of five is a set of
+parts you build out of, and building is what this window is for.
 
 What nesting cannot reach is a hole's own KIND. Fluid or fixed is a fact about
 the template, not a measurement, which is exactly why `rail`, `bookends` and
@@ -510,10 +535,13 @@ selection teleporting.
 
 ### The picture is the label
 
-A layout is drawn, not described, so the chips carry no text: twenty names
-under twenty drawings compete with the drawings, and the drawing wins. The name
-waits for the pointer. The walls legend works the same way — four specimens of
-the actual border, each naming itself on hover.
+A layout is drawn, not described, so the chips carry no text: a name under a
+drawing competes with the drawing it is trying to describe, and the drawing
+wins. The name waits for the pointer. That mattered most when there were twenty
+chips and it still holds at five, because the shelf also carries every creation
+the participant has made — and those have no names anybody else would know. The
+walls legend works the same way — four specimens of the actual border, each
+naming itself on hover.
 
 ### The walls say what a hole does
 
@@ -684,6 +712,10 @@ said nothing, which reads as a broken window rather than as a rule.
 - A layout is drawn ONE way; the other three quarters are turns, and a turn is
   one variable on one level. The library therefore holds no mirror of anything
   it already holds, and no name in it may state a side.
+- The outermost panel is implicit, so a layout DIVIDES rather than wraps: no
+  built-in has fewer than two holes. That is a rule about the LIBRARY — the
+  format still accepts one hole, and must, so a binding made before the cut
+  keeps drawing.
 - No built-in goes past three holes. The fourth is a nesting, and a nesting the
   participant keeps is a creation.
 - Nesting is a signature, through a typed envelope; nothing is ever inlined.

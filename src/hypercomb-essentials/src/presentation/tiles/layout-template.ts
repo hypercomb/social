@@ -407,33 +407,61 @@ const attr = (value: string): string =>
 
 // ── the library ──────────────────────────────────────────────────────────
 //
-// SIX PRIMITIVES, AND THEY ARE DRAWN ONE WAY.
+// A LAYOUT IS A DIVISION OF SPACE THAT WAS ALREADY BEING GIVEN.
 //
-// There were twenty. Sixteen of them were another one turned, mirrored, or
-// counted higher — `rows-two` was `split` on its side, `right-rail` was
-// `left-rail` seen from the other end, `rows-four` was two `split`s. A palette
-// of twenty is a wall you read; a palette of six is a set of parts you build
-// out of, and building is the thing this window is for.
+// THE OUTERMOST PANEL IS IMPLICIT, AND THIS MODULE NEVER EMITS IT. It is the
+// PANE in the designer and the viewport in a published page; a container with
+// nothing bound renders as its own page, unwrapped — `containerFor` hands the
+// authored HTML straight back (division-assembly.ts). Either way the container
+// is already being drawn into somewhere. Binding a layout does not GIVE it
+// that space. It DIVIDES it.
 //
-// So the library holds the arrangements that cannot be made out of the others:
+// TWO IS THE FLOOR OF THIS LIBRARY. A one-hole layout divides nothing: it puts
+// one more box around the space and calls that an arrangement. There was a
+// `single` here that did exactly that — "the page, in a box of its own". Its
+// one hole was the SELF hole, where the container's own page goes, so no PART
+// could ever be seated into it; its `space` slider had no second child to
+// space; and turning it moved nothing. A chip that divides nothing teaches the
+// wrong thing about what a layout is.
 //
-//     ONE HOLE     single       the page, in a box of its own
-//     TWO HOLES    split        two even shares
-//                  rail         a measured strip, and the rest
-//     THREE HOLES  thirds       three even shares
-//                  bookends     a measured strip at each end, the rest between
-//                  measure      a measured strip in the MIDDLE, the rest at
-//                               each end — the dual of bookends, and the one
-//                               shape neither turning nor nesting reaches
+// What `single` did carry was a padding and an alignment around an undivided
+// page, and that is deliberately gone with it: those belong to the page's own
+// CSS, because a layout variable on a layout that divides nothing is not a
+// layout variable.
 //
-// THREE IS THE CEILING, and nesting is why. Four even shares is `split` with a
-// `split` in each hole; a six-cell gallery is `thirds` with a turned `split`
-// in each. Every one of those was in the library and every one of them cost a
-// chip that said less than the gesture that replaces it. What is NOT reachable
-// by nesting is a hole's own kind — fluid or fixed is a fact about the
-// template, not a measurement — which is exactly why `rail`, `bookends` and
-// `measure` are here and `two-thirds` is not: a proportion is a measurement,
-// and the slider already moves it.
+// THE FLOOR IS A CURATION RULE, NOT A LAW OF THE FORMAT. `parseLayoutTemplate`
+// still accepts a one-hole record and `composeLayout` still draws one, and
+// both must: a hive that bound `single` before it was cut resolves it by
+// SIGNATURE and never by name (template-target.ts), so that container keeps
+// rendering exactly as it did. Data never heals; a library is curated.
+//
+// THREE IS THE CEILING, and that is a SECOND idea — nesting, not implicitness.
+// Four even shares is `split` with a `split` in each hole; a six-cell gallery
+// is `thirds` with a turned `split` in each. Every one of those was in the
+// library and every one of them cost a chip that said less than the gesture
+// that replaces it.
+//
+// So the library holds the divisions that cannot be made out of the others:
+//
+//     IN TWO     split       two even shares — and the one primitive with no
+//                            self hole, so it divides the space WITHOUT
+//                            keeping a place for the container's own page
+//                rail        a measured strip, and the rest
+//     IN THREE   thirds      three even shares
+//                bookends    a measured strip at each end, the rest between
+//                measure     a measured strip in the MIDDLE, the rest at each
+//                            end — the dual of bookends, and the one shape
+//                            neither turning nor nesting reaches
+//
+// What is NOT reachable by nesting is a hole's own kind — fluid or fixed is a
+// fact about the template, not a measurement — which is exactly why `rail`,
+// `bookends` and `measure` are here and `two-thirds` is not: a proportion is a
+// measurement, and the slider already moves it.
+//
+// There were twenty. Fifteen were another one turned, mirrored, or counted
+// higher — `rows-two` was `split` on its side, `right-rail` was `left-rail`
+// seen from the other end, `rows-four` was two `split`s — and the sixteenth
+// divided nothing at all.
 //
 // ── ROTATION IS THE OTHER HALF OF "ONE WAY" ─────────────────────────────
 //
@@ -464,21 +492,9 @@ const attr = (value: string): string =>
 // declare; nothing built in asks for it.
 
 const BUILTINS: readonly LayoutTemplate[] = [
-  // ── ONE HOLE ───────────────────────────────────────────────────────
+  // ── IN TWO ─────────────────────────────────────────────────────────
   //
-  // The page and nothing else, in a container of its own — which is what
-  // gives it a padding and a place to be turned and nested.
-  {
-    kind: LAYOUT_TEMPLATE_KIND,
-    version: 1,
-    name: 'single',
-    flow: 'row',
-    holes: [
-      { key: 'body', fill: 'fluid', self: true },
-    ],
-    vars: {},
-  },
-  // ── TWO HOLES ──────────────────────────────────────────────────────
+  // The smallest real division, and therefore where the set starts.
   //
   // Turned, `split` is two even rows and `rail` is a header, a footer, or a
   // side rail — four shapes each, from one drawing.
@@ -504,7 +520,7 @@ const BUILTINS: readonly LayoutTemplate[] = [
     ],
     vars: { rail: '14rem' },
   },
-  // ── THREE HOLES ────────────────────────────────────────────────────
+  // ── IN THREE ───────────────────────────────────────────────────────
   {
     kind: LAYOUT_TEMPLATE_KIND,
     version: 1,

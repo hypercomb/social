@@ -150,6 +150,22 @@ export class SlashBehaviourDrone extends EventTarget {
     }
   }
 
+  /** Execute one public PRIMARY name only. Machine-authored grammar uses this
+   * seam so a participant alias (or a hidden/prototype collision) can never
+   * redirect an allowlisted canonical command to a different provider. */
+  executePublicCanonical(behaviourName: string, args: string): Promise<void> | void {
+    const name = behaviourName.toLowerCase().trim()
+
+    for (const provider of this.#providers) {
+      for (const behaviour of provider.behaviours) {
+        if (behaviour.name.toLowerCase().trim() !== name) continue
+        const presented = this.#present(behaviour)
+        if (presented.hidden === true || presented.prototype === true) continue
+        return provider.execute(behaviour.name, args)
+      }
+    }
+  }
+
   /** True when some provider (manual or auto-wrapped queen) claims the
    *  command name or one of its aliases. The command line uses this to
    *  route unknown `/name` input to the create-goto built-in instead of

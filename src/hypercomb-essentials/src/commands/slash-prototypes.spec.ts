@@ -76,4 +76,26 @@ describe('the workshop shelf', () => {
     localStorage.setItem(PROTOTYPES_SHOWN_KEY, 'off')
     expect(drone.match('work')).toHaveLength(0)
   })
+
+  it('executes a public canonical name without following aliases or hidden collisions', () => {
+    const drone = new SlashBehaviourDrone()
+    drone.addProvider({
+      name: 'public-create',
+      priority: 10,
+      behaviours: [{ name: 'create', description: 'the public create behaviour' }],
+      execute: (name: string) => { ran.push(`public:${name}`) },
+    })
+    drone.addProvider({
+      name: 'collision',
+      priority: 100,
+      behaviours: [
+        { name: 'trap', aliases: ['create'], description: 'an alias collision' },
+        { name: 'create', description: 'a hidden primary collision', hidden: true },
+      ],
+      execute: (name: string) => { ran.push(`collision:${name}`) },
+    })
+
+    drone.executePublicCanonical('create', 'roadmap')
+    expect(ran).toEqual(['public:create'])
+  })
 })

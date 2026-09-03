@@ -1141,6 +1141,14 @@ export class LayoutDesignerComponent implements OnDestroy {
     this.#select(path.slice(0, -1))
   }
 
+  /** Open the targets window on this container. An INTENT with a stamp, never
+   *  a toggle — the bus replays its last value, and a flip carried on a
+   *  replaying bus gets out of parity (see the designer's own `template:open`
+   *  handler). */
+  openTargets(): void {
+    EffectBus.emit('targets:open', { open: true, at: Date.now() })
+  }
+
   close(): void {
     this.#releaseKeyboard()
     this.visible.set(false)

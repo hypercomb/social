@@ -577,10 +577,54 @@ export class MoleculeStore {
   }
 
   /**
-   * remove: drop MY envelope AND append an empty succession to the removed
-   * member's OWN molecule on my chain — the replacement for the create-reset
-   * guard, so re-creating the name does not resurrect my old subtree. No atom
-   * is deleted (delete-second is GC, over all heads).
+   * remove: drop MY envelope FROM THIS PAGE. ONE commit, on ONE chain, touching
+   * the INCIDENCE and nothing else. No atom is deleted (delete-second is GC,
+   * over all heads).
+   *
+   * ─── WHAT WAS HERE, AND WHY IT WENT (skeptic-4 E, and three more witnesses) ─
+   *
+   * This used to take a SECOND commit:
+   *
+   *     const child = signText(canon)
+   *     if (this.headSig(child)) {
+   *       const childBase = this.#base(child)
+   *       this.#commit(child, { members: [], hidden: [], prev: childBase.prev })
+   *     }
+   *
+   * justified as "the replacement for the create-reset guard, so re-creating
+   * the name does not resurrect my old subtree". `signText(canon)` is
+   * byte-identical to `moleculeOf(canon)`: it is THE GLOBAL MOLECULE OF THAT
+   * NAME — the very address `/club/people` reads. Appending an empty succession
+   * to it on my chain rendered nothing of mine at EVERY route ending in that
+   * name. Four independent attacks agreed (skeptic-0 D, skeptic-1 A, skeptic-3
+   * S3-E, skeptic-4 E); the third and fourth assert the DEFECT and the first
+   * two assert the EXPECTED behaviour, which is why a tap-bit reading of the
+   * suite made it look two-to-one settled when it was four-to-nil.
+   *
+   * THE SCOPE WAS WRONG, NOT THE INTENT. The thing removed is the ENVELOPE,
+   * which is per-route and per-author; the child molecule is GLOBAL by
+   * construction. And under this model a name IS one page — `/business/people`
+   * and `/club/people` are ONE molecule, pinned as scenario 2 — so re-creating
+   * the name and seeing the same members is not a resurrection, it is the
+   * firehose, and it is exactly what a visitor at the other route saw the whole
+   * time. The guard was trying to give a name LOCAL emptiness, which is the
+   * tree semantics this model retired. Re-adopting a vertex is already the
+   * separate explicit opt-in `revive()`, and the verb for "I want these members
+   * gone from my page" is `hide()` — hide first, delete second.
+   *
+   * There is no defensive version of the old shape: the guard that would have
+   * made it safe ("is this molecule still named by any other envelope?") is
+   * UNCOMPUTABLE by construction, because the design deleted the parent→child
+   * edge from layer bytes AND the reverse map.
+   *
+   * TWO MORE DEFECTS WENT WITH IT. (1) `remove` was two commits on two chains
+   * while `undo` rewinds one, so one undo of one user action restored the tile
+   * and not its contents. (2) The parent commit landed FIRST, so the child
+   * `#commit` could then throw the out-of-sync refusal for a molecule the user
+   * never touched — leaving the removal half-applied while reporting failure.
+   * (3) `remove([], '   ')` routed the child step at `signText('') ===
+   * ROOT_MOLECULE` and committed an empty succession to the ROOT, erasing the
+   * whole top page (skeptic-2 S2-4).
    */
   remove(route, name) {
     const canon = canonName(name)
@@ -589,13 +633,7 @@ export class MoleculeStore {
     const at = base.members.findIndex((s) => this.getAtom(s)?.root === canon)
     if (at < 0) throw new Error(`"${canon}" is not a member here`)
     base.members.splice(at, 1)
-    const succession = this.#commit(mol, base)
-    const child = signText(canon)
-    if (this.headSig(child)) {
-      const childBase = this.#base(child)
-      this.#commit(child, { members: [], hidden: [], prev: childBase.prev })
-    }
-    return succession
+    return this.#commit(mol, base)
   }
 
   /** Point a new envelope at an existing vertex — share, never copy. */

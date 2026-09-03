@@ -111,6 +111,31 @@ import { highlightBlocks } from './chat-highlight'
 import { resolveEntryImageUrl } from '../clipboard-thumbs'
 import { hivePathSegments, renderChatMarkdown } from './chat-markdown'
 import { liveHostConvos, liveHostRun, startHostRun, stopHostRun, type HostAsk } from './host-stream'
+import {
+  callableBehaviours,
+  formatHypercombReceipt,
+  hypercombActionProviderId,
+  hypercombContextKey,
+  hypercombGrammarInstruction,
+  hypercombGrammarTool,
+  HYPERCOMB_GRAMMAR_TOOL_NAME,
+  parseHypercombToolCalls,
+  HypercombActionExecutionError,
+  HypercombPlanQueue,
+  type HypercombBehaviour,
+  type HypercombBehaviourExecutor,
+  type HypercombFunctionTool,
+  type HypercombToolCall,
+} from './hypercomb-grammar'
+import {
+  executeHypercombObservationPlan,
+  formatHypercombObservationReceipt,
+  HYPERCOMB_OBSERVATION_TOOL_NAME,
+  hypercombObservationInstruction,
+  hypercombObservationTool,
+  parseHypercombObservationToolCalls,
+  type HypercombTreeReader,
+} from './hypercomb-observation'
 
 type TurnRole = 'user' | 'assistant'
 
@@ -302,14 +327,34 @@ type DesignationLike = {
 
 type RoutedChunkLike = {
   readonly text: string
+  readonly toolCalls?: readonly HypercombToolCall[]
   readonly providerId: string
   readonly providerLabel: string
   readonly vendor: string
   readonly model: string
 }
 
+/** The native beehavior census/executor, reached through IoC so the shared
+ * shell does not import essentials. Model output is validated against
+ * `entries()` before this direct execution seam is ever called. */
+type SlashBehaviourDroneLike = {
+  entries?(): readonly HypercombBehaviour[]
+  executePublicCanonical?(command: string, args: string): Promise<void> | void
+}
+
+type LlmMessageLike =
+  | {
+    readonly role: 'user' | 'assistant'
+    readonly content: string
+    readonly toolCalls?: readonly HypercombToolCall[]
+  }
+  | { readonly role: 'tool'; readonly content: string; readonly toolCallId: string }
+
 type LlmRouterLike = {
   ready?(call?: { providerId?: string; model?: string; preferModel?: string; need?: { tier?: string; streaming?: boolean } }): boolean
+  providerIdForModel?(model: string): string | undefined
+  providerIsMachineLocal?(providerId: string): boolean
+  providerMachineEndpoint?(providerId: string): string | undefined
   /** Why nothing can answer, as a token this shell turns into words of its
    *  own. The router never sends a sentence: the catalog owns the language. */
   reason?(): string
@@ -318,8 +363,9 @@ type LlmRouterLike = {
     model?: string
     preferModel?: string
     need?: { tier?: string; streaming?: boolean }
-    messages: readonly { role: 'user' | 'assistant'; content: string }[]
+    messages: readonly LlmMessageLike[]
     system?: string
+    tools?: readonly HypercombFunctionTool[]
     maxTokens?: number
     signal?: AbortSignal
   }): AsyncGenerator<RoutedChunkLike>
@@ -367,6 +413,10 @@ const TRANSCRIPT_TURNS = 12
 const DRAFT_HOLD_MS = 500
 const HOST_AI_IOC_KEY = '@diamondcoreprocessor.com/HostAi'
 const LLM_ROUTER_IOC_KEY = '@diamondcoreprocessor.com/LlmRouter'
+const HIVE_TREE_READER_IOC_KEY = '@diamondcoreprocessor.com/HypercombHiveTreeReader'
+const MAX_OBSERVATION_ROUNDS = 3
+const MAX_OBSERVATION_CONTEXT_CHARS = 24_000
+const hypercombPlanQueue = new HypercombPlanQueue()
 
 /** How far back a pending ask record may reach and still be shown as waiting.
  *  Matches the agent registry's give-up window: past it nobody is coming, and
@@ -2996,50 +3046,286 @@ export class ChatWindowComponent implements OnDestroy {
 
   /** Direct provider route (local Ollama or a configured API key). The
    * transcript is the context these providers can honestly see; unlike a
-   * bridge, this path never claims it can walk the hive. */
+   * bridge, this path never claims it can walk the hive. It may nevertheless
+   * EDIT the hive by returning native, validated beehavior grammar: reading
+   * state and applying a named action are deliberately different powers. */
   async #askProvider(convoId: string, message: string): Promise<'answered' | 'declined' | 'aborted'> {
     const router = ioc()?.get(LLM_ROUTER_IOC_KEY) as LlmRouterLike | undefined
     const need = { tier: 'fast', streaming: true }
     const namedModel = this.modelExplicit() ? this.model() || undefined : undefined
     const preferModel = !this.modelExplicit() ? this.model() || undefined : undefined
-    if (!router?.stream || !router.ready?.({ model: namedModel, preferModel, need })) return 'declined'
+    const slash = ioc()?.get('@diamondcoreprocessor.com/SlashBehaviourDrone') as SlashBehaviourDroneLike | undefined
+    const treeReader = ioc()?.get(HIVE_TREE_READER_IOC_KEY) as HypercombTreeReader | undefined
+    const behaviourEntries = slash?.entries?.() ?? []
+    const canAct = !!slash?.executePublicCanonical && callableBehaviours(behaviourEntries).length > 0
+    const canObserve = !!treeReader?.readTree && !!treeReader?.validateSnapshots
+    // Native grammar is LOCAL AUTHORITY. Automatic conversations prefer the
+    // participant's own model; an explicitly named remote model remains a
+    // normal answer-only provider and never receives tree data or action tools.
+    const namedProvider = namedModel ? router?.providerIdForModel?.(namedModel) : undefined
+    const localEndpoint = router?.providerMachineEndpoint?.('local')
+    const localReadyAndTrusted = router?.providerIsMachineLocal?.('local') === true
+      && !!localEndpoint
+      && router.ready?.({ providerId: 'local', need }) === true
+    const nativeProviderId = hypercombActionProviderId(
+      canAct || canObserve, namedModel, namedProvider, localReadyAndTrusted,
+    )
+    const actionProviderId = canAct ? nativeProviderId : undefined
+    const observationProviderId = canObserve ? nativeProviderId : undefined
+    // An unavailable local model loses only its action capability. Automatic
+    // chat may still be answered by the ordinary provider policy, with no
+    // grammar tool attached; an explicitly named local model still declines
+    // honestly instead of changing vendor.
+    const route = nativeProviderId
+      ? { providerId: nativeProviderId, model: namedModel, preferModel, need }
+      : { model: namedModel, preferModel, need }
+    if (!router?.stream || !router.ready?.(route)) return 'declined'
 
-    const messages = this.turns().slice(-TRANSCRIPT_TURNS).map(turn => ({
+    const messages: LlmMessageLike[] = this.turns().slice(-TRANSCRIPT_TURNS).map(turn => ({
       role: turn.role,
       content: turn.text,
     }))
     const about = this.#chosenTargets()
-    const system = about.length
+    const baseSystem = about.length
       ? `You are helping inside Hypercomb. The participant says this conversation is about: ${about.join(', ')}. Do not claim to have read tile contents unless they are present in the messages.`
       : 'You are helping inside Hypercomb. Be accurate and concise. Do not claim to have read hive contents unless they are present in the messages.'
+    const readGrammarContext = (): {
+      readonly key: string
+      readonly page: string
+      readonly segments: readonly string[]
+      readonly selected: readonly string[]
+    } => {
+      const lineage = ioc()?.get('@hypercomb.social/Lineage') as LineageLike | undefined
+      const pageParts = (lineage?.explorerSegments?.() ?? []).map(String).filter(Boolean)
+      const selection = ioc()?.get('@diamondcoreprocessor.com/SelectionService') as SelectionLike | undefined
+      const selected = [...(selection?.selected ?? [])].map(String).filter(Boolean).sort()
+      return {
+        key: hypercombContextKey(pageParts, selected),
+        page: `/${pageParts.join('/')}`,
+        segments: pageParts,
+        selected,
+      }
+    }
+    const grammarContext = readGrammarContext()
+    const system = nativeProviderId
+      ? [
+        baseSystem,
+        observationProviderId ? hypercombObservationInstruction() : '',
+        actionProviderId ? hypercombGrammarInstruction(behaviourEntries) : '',
+        `The native grammar context is page ${grammarContext.page || '/'} with selected tiles: ${grammarContext.selected.join(', ') || '(none)'}. Bare /tree and the word "here" mean that page, which may differ from the conversation subject. You may make at most ${MAX_OBSERVATION_ROUNDS} observation rounds before answering or acting.`,
+      ].filter(Boolean).join('\n\n')
+      : baseSystem
 
     const component = this
     const ask: HostAsk = async function* (_question, opts) {
-      for await (const chunk of router.stream!({
-        model: namedModel,
-        preferModel,
-        need,
-        messages,
-        system,
-        signal: opts?.signal,
-      })) {
-        // The route that emitted text is the truth, including after a
-        // pre-output fallback. Keep the footer, resting bee and transcript's
-        // remembered model aligned with that actual answer.
-        component.designated.set({
-          providerId: chunk.providerId,
-          label: chunk.providerLabel,
-          vendor: chunk.vendor,
-          tier: 'fast',
-          model: chunk.model,
-          name: chunk.model,
-        })
-        component.model.set(chunk.model)
-        component.modelExplicit.set(false)
-        component.#remember(chunk.model)
-        yield chunk.text
+      let wrote = false
+      let observationRounds = 0
+      let observationChars = 0
+      let continuationModel = namedModel
+      const snapshotIds: string[] = []
+
+      const assertNativeAuthority = (providerId: string): void => {
+        if (!nativeProviderId || providerId !== nativeProviderId
+          || router.providerIsMachineLocal?.(providerId) !== true
+          || router.providerMachineEndpoint?.(providerId) !== localEndpoint) {
+          throw new Error('the native grammar exchange is no longer attached to the same local model endpoint')
+        }
       }
-      return ''
+      const callName = (call: HypercombToolCall | undefined): string =>
+        call?.function?.name ?? call?.name ?? ''
+      const normalizeToolCall = (
+        call: HypercombToolCall,
+        round: number,
+      ): Required<Pick<HypercombToolCall, 'id' | 'name'>> & { readonly arguments: string } => {
+        const name = callName(call)
+        const rawArguments = call.function?.arguments ?? call.arguments
+        const args = typeof rawArguments === 'string'
+          ? rawArguments
+          : JSON.stringify(rawArguments)
+        if (!name || typeof args !== 'string') throw new Error('the local model returned a malformed tool call')
+        return {
+          id: call.id || `hypercomb-${round}-${Date.now().toString(36)}`,
+          name,
+          arguments: args,
+        }
+      }
+
+      while (true) {
+        if (opts?.signal?.aborted) throw new DOMException('The model request was aborted', 'AbortError')
+        if (nativeProviderId) {
+          assertNativeAuthority(nativeProviderId)
+          if (readGrammarContext().key !== grammarContext.key) {
+            throw new Error('the page or tile selection changed during the native grammar exchange')
+          }
+        }
+
+        const roundTools = nativeProviderId ? [
+          ...(observationProviderId && observationRounds < MAX_OBSERVATION_ROUNDS
+            && observationChars < MAX_OBSERVATION_CONTEXT_CHARS
+            ? [hypercombObservationTool()]
+            : []),
+          ...(actionProviderId ? [hypercombGrammarTool(behaviourEntries)] : []),
+        ] : []
+        let roundText = ''
+        const roundCalls: HypercombToolCall[] = []
+        let roundProviderId = ''
+        let roundModel = continuationModel ?? ''
+
+        for await (const chunk of router.stream!({
+          providerId: nativeProviderId,
+          model: continuationModel,
+          preferModel: observationRounds === 0 ? preferModel : undefined,
+          need,
+          messages,
+          system,
+          tools: roundTools.length ? roundTools : undefined,
+          signal: opts?.signal,
+        })) {
+          if (roundProviderId && roundProviderId !== chunk.providerId) {
+            throw new Error('a provider changed during one model round')
+          }
+          roundProviderId = chunk.providerId
+          roundModel = chunk.model
+          if (nativeProviderId) assertNativeAuthority(chunk.providerId)
+
+          // The route that emitted output is the truth. Observation rounds
+          // are buffered so internal pre-tool prose never becomes a durable
+          // assistant turn; ordinary answer-only providers still stream live.
+          component.designated.set({
+            providerId: chunk.providerId,
+            label: chunk.providerLabel,
+            vendor: chunk.vendor,
+            tier: 'fast',
+            model: chunk.model,
+            name: chunk.model,
+          })
+          component.model.set(chunk.model)
+          component.modelExplicit.set(false)
+          component.#remember(chunk.model)
+          if (chunk.text) {
+            if (nativeProviderId) roundText += chunk.text
+            else {
+              wrote = true
+              yield chunk.text
+            }
+          }
+          if (chunk.toolCalls?.length) roundCalls.push(...chunk.toolCalls)
+        }
+
+        if (roundCalls.length === 0) {
+          if (snapshotIds.length && treeReader
+            && !await treeReader.validateSnapshots(snapshotIds, opts?.signal)) {
+            const lead = wrote ? '\n\n' : ''
+            wrote = true
+            yield `${lead}Hypercomb's tree changed while the local model was exploring it. Ask again to read the new tree.`
+            return ''
+          }
+          if (roundText) {
+            wrote = true
+            yield roundText
+          }
+          return ''
+        }
+
+        const lead = wrote ? '\n\n' : ''
+        try {
+          if (!nativeProviderId || roundCalls.length !== 1) {
+            throw new Error('one native grammar request is allowed per model round')
+          }
+          assertNativeAuthority(roundProviderId)
+          if (readGrammarContext().key !== grammarContext.key) {
+            throw new Error('the page or tile selection changed while the local model was answering; ask again in the new context')
+          }
+
+          const name = callName(roundCalls[0])
+          const normalized = normalizeToolCall(roundCalls[0], observationRounds + 1)
+          if (name === HYPERCOMB_OBSERVATION_TOOL_NAME) {
+            if (!observationProviderId || !treeReader || observationRounds >= MAX_OBSERVATION_ROUNDS) {
+              throw new Error('no more tree observation rounds are available')
+            }
+            const remaining = MAX_OBSERVATION_CONTEXT_CHARS - observationChars
+            if (remaining < 1_500) throw new Error('the bounded tree observation context is full')
+            const plan = parseHypercombObservationToolCalls(roundCalls, grammarContext.segments)
+            const perReadBytes = Math.max(1_024, Math.min(
+              8_000,
+              Math.floor((remaining - 512) / plan.observations.length),
+            ))
+            const receipt = await executeHypercombObservationPlan(plan, treeReader, {
+              maxDepth: 2,
+              maxNodes: 48,
+              maxBytes: perReadBytes,
+              signal: opts?.signal,
+            })
+            const content = formatHypercombObservationReceipt(receipt)
+            if (content.length > remaining) throw new Error('the bounded tree observation context is full')
+            const allSnapshots = [...snapshotIds, ...receipt.snapshots]
+            if (allSnapshots.length
+              && !await treeReader.validateSnapshots(allSnapshots, opts?.signal)) {
+              throw new Error('the tree changed during exploration; ask again to read the new tree')
+            }
+            observationRounds++
+            observationChars += content.length
+            snapshotIds.push(...receipt.snapshots)
+            messages.push(
+              { role: 'assistant', content: roundText, toolCalls: [normalized] },
+              { role: 'tool', content, toolCallId: normalized.id },
+            )
+            continuationModel = roundModel
+            continue
+          }
+
+          // Parse EVERY action line before the first Queen is invoked, then
+          // await native execution in order. The snapshot check happens in the
+          // serialized lane, immediately before the first action, so waiting
+          // behind another plan cannot stale the observation unnoticed.
+          if (!actionProviderId || name !== HYPERCOMB_GRAMMAR_TOOL_NAME || !slash?.executePublicCanonical) {
+            throw new Error('the local model returned a native grammar it was not offered')
+          }
+          const plan = parseHypercombToolCalls(roundCalls, behaviourEntries)
+          let snapshotAdmitted = snapshotIds.length === 0
+          const guardedExecutor: HypercombBehaviourExecutor = {
+            execute: async (command, args) => {
+              assertNativeAuthority(actionProviderId)
+              if (readGrammarContext().key !== grammarContext.key) {
+                throw new Error('the Hypercomb grammar context changed before execution')
+              }
+              if (!snapshotAdmitted) {
+                if (!treeReader || !await treeReader.validateSnapshots(snapshotIds, opts?.signal)) {
+                  throw new Error('the observed Hypercomb tree changed before execution')
+                }
+                snapshotAdmitted = true
+              }
+              const live = new Set(callableBehaviours(slash.entries?.() ?? []).map(entry => entry.name))
+              if (!live.has(command)) throw new Error(`/${command} is no longer machine-callable`)
+              return slash.executePublicCanonical!(command, args)
+            },
+          }
+          if (roundText) {
+            wrote = true
+            yield `${lead}${roundText}`
+          }
+          const receipt = await hypercombPlanQueue.run(plan, guardedExecutor, opts?.signal)
+          const receiptLead = wrote ? '\n\n' : ''
+          wrote = true
+          yield `${receiptLead}${formatHypercombReceipt(receipt)}`
+          return ''
+        } catch (error) {
+          // Stop belongs to the participant. Do not turn it into a model
+          // receipt or continue the sequence.
+          if (opts?.signal?.aborted) throw error
+          wrote = true
+          if (error instanceof HypercombActionExecutionError) {
+            const prefix = error.completed.length
+              ? `Ran ${error.completed.length} before stopping. `
+              : ''
+            yield `${lead}${prefix}Hypercomb stopped at ${error.grammar}.`
+          } else {
+            const detail = error instanceof Error ? error.message : 'invalid native grammar request'
+            yield `${lead}Hypercomb could not use that local-model request: ${detail}.`
+          }
+          return ''
+        }
+      }
     }
 
     EffectBus.emit('agent:progress', {

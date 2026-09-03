@@ -59,17 +59,48 @@ const columnFlow = parseLayoutTemplate({
 })!
 
 describe('the built-ins', () => {
-  it('are six primitives, as data', () => {
-    // There were twenty. Sixteen of them were another one turned, mirrored or
-    // counted higher, and every one of those is a GESTURE now — a quarter-turn
-    // or a primitive dropped into a primitive's hole.
-    expect(BUILTIN_LAYOUTS).toHaveLength(6)
+  it('are five primitives, as data', () => {
+    // There were twenty. Fifteen were another one turned, mirrored or counted
+    // higher — every one of those is a GESTURE now, a quarter-turn or a
+    // primitive dropped into a primitive's hole — and the sixteenth was a
+    // one-hole `single` that divided nothing.
+    expect(BUILTIN_LAYOUTS).toHaveLength(5)
     expect(BUILTIN_LAYOUTS.map(t => t.name)).toEqual([
-      'single', 'split', 'rail', 'thirds', 'bookends', 'measure',
+      'split', 'rail', 'thirds', 'bookends', 'measure',
     ])
   })
 
-  it('go no further than three holes — the fourth is a nesting', () => {
+  it('divide in two at least — the outermost panel is implicit', () => {
+    // The floor, and the reason there is one. The container is already being
+    // drawn into something — the designer's pane, the viewport, its own page —
+    // and a layout DIVIDES that rather than putting one more box around it. So
+    // a one-hole layout divides nothing, and `single` was cut.
+    for (const template of BUILTIN_LAYOUTS) {
+      expect(template.holes.length).toBeGreaterThanOrEqual(2)
+    }
+    expect(builtinLayout('single')).toBeNull()
+
+    // DIVISION is the ruler, not droppability, and the two are not the same
+    // number: `rail` divides in two and seats ONE part, because its other hole
+    // is the container's own page. Pinned here so the distinction is stated in
+    // the file rather than inferred from the floor.
+    expect(memberHoles(builtinLayout('rail')!)).toHaveLength(1)
+  })
+
+  it('but the FORMAT still takes one hole, so an older binding still draws', () => {
+    // The floor is a curation rule for the LIBRARY, never a law of the record.
+    // A hive that bound `single` before it was cut resolves it by SIGNATURE
+    // and never by name, so its stored template must keep parsing and keep
+    // drawing. Data never heals.
+    const stored = parseLayoutTemplate({
+      kind: 'layout-template', version: 1, name: 'single', flow: 'row',
+      holes: [{ key: 'body', fill: 'fluid', self: true }], vars: {},
+    })!
+    expect(stored.holes).toHaveLength(1)
+    expect(templateContainer(stored)).toMatch(/data-hc-self/)
+  })
+
+  it('divide in three at most — the fourth is a nesting', () => {
     for (const template of BUILTIN_LAYOUTS) {
       expect(template.holes.length).toBeLessThanOrEqual(3)
     }

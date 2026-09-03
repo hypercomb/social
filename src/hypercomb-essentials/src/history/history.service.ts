@@ -85,6 +85,14 @@ export type LayerContent = {
   [slot: string]: unknown
 }
 
+/** One exact live location head. Bounded readers keep the signatures private
+ * and project only safe structural fields from `layer`. */
+export type CurrentLayerRef = {
+  readonly locationSig: string
+  readonly layerSig: string
+  readonly layer: LayerContent
+}
+
 /**
  * SHA-256 of the CANONICAL bytes of the empty layer: `{"name":""}`.
  *
@@ -2438,6 +2446,41 @@ export class HistoryService {
   // Consolidated-sig cache: locationSig → { key, sealedSig }. `key` folds the
   // location's live head sig + its children's sealed sigs, so any change at or
   // below a node invalidates exactly that node's entry.
+  /**
+   * Resolve the current layer together with the exact head signature that
+   * supplied it, without minting a marker. Hypercomb history is per-page: a
+   * parent's carried child signature may be old after a deep edit, so bounded
+   * readers snapshot each visited LOCATION rather than treating the root as a
+   * global Merkle head.
+   *
+   * The final local re-read couples the object to `layerSig`. Callers still
+   * fence any multi-await traversal with {@link treeEpoch}.
+   */
+  public readonly currentLayerRefAt = async (
+    locationSig: string,
+    stats?: { cold?: boolean },
+  ): Promise<CurrentLayerRef | null> => {
+    const layer = await this.currentLayerAt(locationSig, stats)
+    if (!layer) return null
+    const canonical = HistoryService.canonicalizeLayer(layer)
+    // A husk-only real head can be visually superseded by a parent-carried
+    // virtual seed. Try both sources and choose the one that actually supplied
+    // the object currentLayerAt returned, rather than blindly preferring the
+    // real-head map as #headSigFor normally (and correctly) does for writes.
+    const candidates = [
+      this.#latestSigByLineage.get(locationSig),
+      this.#seededHeadByLineage.get(locationSig),
+    ].filter((sig, index, all): sig is string => !!sig && all.indexOf(sig) === index)
+    for (const layerSig of candidates) {
+      const exact = await this.#resolveLayerLocal(layerSig)
+      if (exact && HistoryService.canonicalizeLayer(exact) === canonical) {
+        return { locationSig, layerSig, layer: exact }
+      }
+    }
+    if (stats) stats.cold = true
+    return null
+  }
+
   readonly #sealCache = new Map<string, { key: string; sealedSig: string }>()
 
   /** Seal results by location, stamped with the {@link treeEpoch} they were

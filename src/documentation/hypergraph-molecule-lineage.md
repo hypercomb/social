@@ -282,9 +282,11 @@ half-applied write is now SURVIVABLE, not atomic.
   add), and it makes hide-first structural and undoable.
 - **Replication refuses forks**: accept a newer entry for an author only if
   its `prev` chain contains the entry you hold. History never branches.
-- **The seal is derived** — `{kind:'seal', molecule, head, children:[sealSig]}`
-  minted only in the optimize phase, keyed by the heads it folds,
-  complete-or-absent, never load-bearing.
+- ~~**The seal is derived**~~ — **SUPERSEDED by step 4**, see *The deploy
+  signature is a signed head map* below. A recursive fold over a global name
+  graph has no fixpoint, is entry-point dependent, moves when a stranger
+  commits, and cannot be verified without a directory listing. The deploy is a
+  MANIFEST OF HEADS, not a recursive seal.
 - **The mesh keeps (room, secret)**: `sha256(canon(name) ␀ room ␀ secret)`.
   A channel that is `sign(name)` verbatim would receive every `people` on the
   relay. Unanimous across all three designs.
@@ -511,6 +513,13 @@ every level.
    prune-safety ratchet.
 6. **Docs** — every passage asserting path-keyed identity, bare-word
    prohibition, or a healing pass is reworded. Docs are contention points too.
+7. **The deploy signature** — the recursive seal is retired in favour of a
+   signed head map. Core primitive and prototype landed 2026-09-03; the
+   per-caller migration is written out under *The deploy signature is a signed
+   head map* below and is not applied to shipped code in that pass. Prose that
+   still treats the recursive seal as spec: `hive-snapshots.md:19,37`,
+   `build-revisions.md:80`, `clipboard-sig-native.md:11,60`,
+   `publish-differential.md:58,78,93,268,274`, `insights.md:109`.
 
 **Done means:** the prototype passes its own and the skeptics' tests, and the
 contention register holds no unaddressed `trap` or `must-change` item — code,
@@ -542,6 +551,263 @@ back to the path-keyed bag.
 - GC roots become every head entry in every molecule: with no parent→child
   edge in layer bytes, closure walkers reach child molecules only by route or
   by seal.
+
+## The deploy signature is a signed head map (step 4, landed 2026-09-03)
+
+`hypercomb-core/src/core/head-map.ts` · prototype twin
+`documentation/molecule-lineage-prototype/head-map.mjs`
+
+### What broke, and why it was the fold rather than a bug in it
+
+Four attacks from the adversarial review all land on the recursive seal, and
+none of them is a defect that could be patched:
+
+| | finding |
+|---|---|
+| A | **No merkle root exists.** The recursion step is `sign(childName)`, which does not GROW — it is a step in a general directed graph over the global name set. One ordinary tile named after an ancestor closes a cycle and the fold never terminates. |
+| A2 | **Cycle-breaking does not rescue it.** Cutting on the recursion PATH makes what a node folds depend on which ancestors are on the stack, so one molecule has one merkle identity per entry point. |
+| B | **The cascade comes back, triggered by a stranger.** The fold reads live heads through `viewOf`, which absorbs every author's bucket in a globally-named molecule, so a foreign commit re-mints my deploy signature. |
+| H | **A sealed root cannot be verified from immutable atoms alone.** Sealing needs directory listings, so the merkle proof terminates in a mutable, unsigned, host-chosen readdir — which a static host does not have at all. |
+
+A fifth, unnamed in the review and found while building this: the fold reads
+`viewOf`, and `viewOf` reads the LOCAL UNDO CURSOR. Pressing undo re-minted the
+deploy root with nothing committed anywhere and nothing on disk changed. A
+deploy signature must not be a function of session state.
+
+The shipped `HistoryService.sealSubtree` escapes A only because it is
+PATH-keyed: `sealSubtree([...segments, name])` grows its argument, which is the
+only reason it terminates. Move addressing from path to `sign(name)` and the
+argument becomes constant-size, so A lands on shipped code. Note also that
+`sealSubtree` already enumerates `'cycle'` as a refusal reason, and that its
+guard is a RECURSION-STACK set, deliberately not a global visited set — the
+comment at `history.service.ts:2534-2544` records that a global visited set was
+tried and reverted. That is the shipped acknowledgement of A and A2.
+
+### The shape
+
+The deploy is a flat enumeration of what THIS publisher heads, carried as a
+content atom:
+
+```
+{"kind":"hypercomb.head-map","v":1,"pubkey":"<64hex>",
+ "rows":[["<moleculeSig>","<claimSig>"],…],"refs":["<claimSig>",…]}
+```
+
+- **`rows` sorted strictly ascending by molecule; `refs` the distinct claim
+  sigs, sorted.** Both tokens are fixed-width lowercase hex — one alphabet — so
+  codepoint order IS byte order, the order is total, and there is no locale,
+  collation or tie-break to specify. An ARRAY OF PAIRS, never a JSON object: an
+  object makes the bytes depend on a serializer's key-ordering rule, the
+  "second thing to get wrong" `headClaimPreimage` already refuses one level
+  down.
+- **`rows`, deliberately not `heads`.** `heads` is an EDGE FIELD
+  (`core/edge-registry.ts`), so a closure walker would descend the pairs and
+  try to fetch every MOLECULE address as an atom — a directory with no bytes
+  behind it, i.e. the permanent-404 bug class. `refs` is the record's
+  self-declared flat closure and is the only edge in the record.
+- **No clock, no host, no route, no segment list, no publisher-chosen order.**
+  `hive-link.ts:151` already made this call for its own bundle. It is what
+  gives `mintBuildRecord` its idempotence test back for free: an identical
+  rebuild yields the identical signature.
+- **`pubkey` is a REFERENT** (added to `REFERENT_FIELDS` this step). It is
+  self-declared, so it is COMPARED against the key the reader asked for and
+  never used as an address — the same discipline `acceptHeadClaim`'s
+  argument-one rule enforces and `hive-pointer.ts:87-91` applies when it calls
+  a pubkey mismatch `forged`.
+- **A record carries NO signature of its own.** Every ROW is signed by its
+  claim; the SET's publication is signed by whatever names the map atom — in
+  the shipped app the kind-30564 hive index event, whose `created_at`
+  monotonicity the relay enforces (409 on rollback). A third signature over the
+  map would prove authorship and never recency (`publish-heads.ts:17`), so it
+  would be one more thing to get wrong and would close nothing.
+
+### The value is the head CLAIM, never the succession atom
+
+Only one of the two is checkable by a third party, and the reason is mechanical.
+
+Step 3 deleted `name` and `author` from the succession atom, so the atom is
+bound to no location. A bare head signature in a row is authenticated ONLY by
+whatever signed the enclosing document: a reader who lifts one row out cannot
+check it without swallowing the whole map, which makes the map a TRUST ANCHOR
+and stops the scheme being federated.
+
+A CLAIM signature dereferences to bytes whose signed content is
+`headClaimPreimage(molecule, pubkey, head, prev, seq)` — and the verifier
+REBUILDS lines 2 and 3 from the row's KEY and the pubkey it asked for, never
+from the bytes. A claim moved to another row, or minted under another key,
+renders a string that never verifies (proved on two of the publisher's OWN rows
+in `head-map.spec.ts` and `head-map.test.mjs` H2). `prev`/`seq` ride inside that
+signature, so a reader ranks generations with `resolveBucketHead` WITHOUT the
+map: a stale map degrades to "you may not have heard about a newer head", never
+to "you were talked back down a generation".
+
+An inline claim OBJECT (`{head, prev, seq, sig}` as the value) is refused: it
+duplicates signature bytes that can then disagree with the atom, and
+`blossom-worker/worker.js:802-813` requires every `roots` value to be 64-hex, so
+it breaks the wire and every deployed reader.
+
+### What terminates, and why "just de-duplicate" is right here and was wrong there
+
+Two scopes, both flat:
+
+- **whole hive** (snapshot) — read the local MINT LEDGER, which
+  `head-claim.ts:515-537` already specifies must live beside the KEY rather
+  than in the replicated content tree. It is a `molecule → {head, prev, seq}`
+  table. No graph at all.
+- **one branch** (publish) — a reachability walk over MY OWN heads with a
+  GLOBAL VISITED SET.
+
+The global visited set was tried and REVERTED for `sealSubtree`. It is sound
+here and was not there, and the difference is exact: the seal computes a VALUE
+at each node, and de-duplicating a legitimately repeated sibling changes the
+answer. This computes MEMBERSHIP, which is idempotent and commutative —
+visiting a node twice can only re-add what is already in the set. The reachable
+set is the least fixed point of a relation over a FINITE name space, and a
+visited set computes it exactly. A cycle is therefore a non-event rather than a
+refusal, and a molecule that is a member of itself is one row (and could not be
+two: `canonicalHeadMap` refuses a second pair for a molecule already present
+with a different claim, so the map is a FUNCTION and never a bag).
+
+The walk reads HEADS, never `viewOf` — which is how both the stranger (B) and
+the undo cursor are cut off at the source.
+
+### Why a stranger cannot move it, and how it stays honest anyway
+
+The enumeration opens `<molecule>/<MY pubkey>/` and no other directory. A
+foreign commit lands in a different bucket the enumeration never opens.
+
+The map still NAMES the molecule and asserts exactly one thing about it — *this
+is MY head there* — and says nothing about anyone else's bucket. A reader who
+wants the whole molecule goes to the address: `GET /<sign(name)>/` on any host
+with a directory branch, unioned across community hosts. **The map is a FLOOR,
+never a ceiling**, and that discipline is not new here: `publish-heads.ts:194-197`
+documents `knownRoots` in exactly those words, and `publish-branch.ts:288-291`
+computes `missingFromIndex` and REPORTS it rather than re-asserting it, because
+resurrecting a branch the participant deliberately unpublished would be its own
+kind of lie. The head map inherits that rule verbatim.
+
+### Verification with no directory listing
+
+Every step is `GET /<64hex>` + a hash check + a signature check:
+
+0. obtain `(pubkey, deploySig)` — from the signed index, or from a hive-link
+   bundle whose pubkey is pinned in its canonical bytes.
+1. `GET /<deploySig>`, assert `sha256(bytes) === deploySig`, read the map atom.
+2. `parseHeadMap` — REFUSE-OR-PARSE: it re-canonicalizes and requires the bytes
+   back, so a second spelling of one set cannot exist.
+3. assert `record.pubkey === pubkey`; a mismatch is `forged` and stops before
+   any fetch.
+4. per row: `GET /<claimSig>`, assert the hash, then `acceptHeadClaim` with the
+   molecule from the ROW KEY and the pubkey from step 0. Take **`authentic`**,
+   never `ok` — `ok` answers a question about a TRANSITION and is meaningless
+   when re-reading what is already published.
+5. per verified row: `GET /<head>`, assert the hash, walk its members by
+   signature as today.
+
+Failure is PER ROW (`holes`), so one cold atom never makes a publisher's whole
+deploy unverifiable. This is strictly stronger than the seal, whose internal
+nodes are re-signed by NOBODY: even with listings, a verifier of a sealed root
+could only check hashes, never authorship.
+
+### Per-caller migration — the repo deliverable
+
+**Nothing shipped is deleted in this step.** `sealSubtree` is DEMOTED from a
+gate to a courtesy and stays as the reader for every sealed root already in the
+world (every `rootSig` in every shared hive-link bundle is one). What follows is
+the plan, not a set of edits made now.
+
+| caller | becomes |
+|---|---|
+| `sharing/publish-branch.ts:224,226,227` (+ interface `:69-70`) | Build the map for the branch scope, `putResource(encodeHeadMap(record))` → `mapSig`, then `history.materializeLayer({...liveRootHead, heads:[mapSig]})` → `deploySig`. `sealed` becomes `deploySig` in all FOUR of its load-bearing roles (`:233`/`:247` availability subject, `:283`/`:293` index value, `:315` bundle `rootSig`, `:340` ledger key). The seal+heal pair leaves the required path and `failure:'seal-failed'` (`:229`, surfaced in `host-gesture.ts:101-103`) becomes unreachable. |
+| the AVAILABILITY GATE (`markPublic(sealed,'layer',true)`, `isClosureAvailable`) | The most under-appreciated cost, and it needs no new walker. `heads` is an ARRAY slot and is NOT in `CHILD_SLOTS` (`['cells','layers','children']`), so the map atom stages as a RESOURCE and its `refs` carry every claim. The per-head subtrees come from a FLAT LOOP over the map's rows — `for (row of rows) markPublic(row.head,'layer',true)` — and the gate is the deploy plus every row. **SNAPSHOT THE ROW SET BEFORE STAGING AND SIGN THE MAP OVER THAT SAME SNAPSHOT**, or a commit landing mid-flight yields a map naming a head that was never staged. `confirmPublished`'s `probeServed` subject is `deploySig`; the per-row loop is what proves the creation's bytes. |
+| `sharing/publish-status.drone.ts:116,540-541` | `here` becomes the same `deploySig` publish would write. The comment at `:526-529` names the real cost as the post-commit RE-WALK; that disappears, and the `beforeDeadline(...,15s)` wrapper and the yield-between-rows loop become unnecessary. |
+| `sharing/publish-verdict.ts:28` | `cannot-compare` **SURVIVES and is re-documented**: the cause changes from "a descendant is cold" to "no head claim is held for this branch root". Do not delete the rung — a row can legitimately be absent. Its display copy also changes: `collidingPaths` (`publish-heads.ts:213-225`) stops meaning "two of your paths collide" and starts meaning "this name is shared with the whole network", which is the design and will read as a bug unless the copy moves with it. |
+| `sharing/swarm.drone.ts:2961`, `:3867` | **REPORTED, NOT DECIDED** — both sit in the register's step-4 MESH CHANNEL section (`contention-register.md:60`), marked FLAG, DO NOT DECIDE. No edit is needed: the interface declares `sealSubtree?` OPTIONAL and both sites are wrapped `try { handle = (await …) || cs } catch { handle = cs }`, so they degrade to the pre-seal child sig by construction. They are TWO byte-identical copies and must be extracted into one function before either is touched. |
+| `commands/snapshot.queen.ts:102,111,113,114,117` + `#pushClosure:218-232` | The hard case, and the one that most needs the map: `sealSubtree([])` over a global name graph is exactly the walk A proves has no fixpoint. Mint the whole-hive map from the mint ledger — no walk. `#pushClosure`'s recursion becomes a loop over the rows. The five-reason `lastSealFailure` message collapses into a LIST of molecules whose claim could not be resolved, which is more useful than a single first-failure path. |
+| `history/builds-slot.ts:65,81-82,175,181-194` | Mint the map for the build root's scope. The idempotence test (`head.seal === seal`) moves to `headMap` and works BETTER: no clock in the bytes. The `'the subtree could not be sealed…'` error (`:187`) goes — enumerating heads never needs a descendant's bytes. Callers unchanged. |
+| `history/snapshots-slot.ts:98`, `history/builds-slot.ts:65` | **ADDITIVE FIELD ONLY**: `headMap?: string` beside the existing `seal`. `seal` is already committed into users' layer slots and can never be rewritten (rule 9). Keep minting `seal` while the courtesy walk succeeds; when it fails, write the record anyway with `headMap` and no `seal` — a case that today writes NOTHING. |
+| `history/seal-restore.ts:32 applySealAt` | **UNTOUCHED, and kept forever as the legacy reader.** Add a sibling `applyHeadMapAt(mapSig, carrySlots)`; `restore.queen.ts:113` and `builds.queen.ts:181` choose `record.headMap ? applyHeadMapAt : applySealAt`. The new path is a flat loop — no recursion, no `seen` set, no per-node name resolution. ORDER DEPENDENCY: the flat loop needs a MOLECULE-ADDRESSED `commitLayer` (register orders 135-139, not landed), so `headMap` is WRITTEN now and READ once the committer takes the sig pair. Forward commit, dual pointer, nothing deleted. |
+| `history/layer-placement.ts:33,241-243 captureCollectionSig` (real callers `clipboard.worker.ts:382,449,479,652`, `move.drone.ts:527`) | **NOT MIGRATED, and must not be.** This is composition, not publication: a paste lands a whole subtree through ONE sig appended to a destination parent's `children`, which a flat map cannot supply. Retiring the walk here before register order 151 (a re-homed node keeps identity `sign(name)`; placement is the destination's meta gaining that sig) silently regresses cut/copy/move of a deep-edited, never-navigated subtree to the stale stored sig the doc at `:236-240` already concedes. |
+| `history/history.service.ts:2545 sealSubtree` | KEPT. Demoted to a courtesy, and still the reader for every sealed root already in the world. |
+| `history/history.service.ts:2727 healSubtreeBags` | KEPT, but loses ALL THREE of its callers. A doctrine WIN: it is the only truth-writing member of the family (`commitLayer`, `:2749`) and its own doc warns it can re-commit a parent's frozen hint OVER a legitimately newer descendant edit. It survives only as an explicit user/repair op, never as an unattended auto-repair. |
+| `history/history.service.ts:2496 lastSealFailure` | KEPT; its ONE external reader (`snapshot.queen.ts:117`) stops reading it. |
+| `history/seal-preference.ts:47 chooseSealChildHandle` | KEPT FOR NOW. Zero external callers, but it IS exported through `history/index.ts:37` and listed in `essentials-keys.ts`, so retiring it is a public-surface change to the essentials barrel. Retire it WITH `sealSubtree`, never before: the whole hint-vs-bag arbitration is an artefact of a parent carrying child sigs, and a per-author bucket claim IS the head. `scripts/bridge/_susan-hint-check.cjs` becomes dead with it. |
+| `history/active-genome.service.ts` | NOT a caller, deliberately, and the PRECEDENT to cite: it already publishes `heads: ActiveGenomeHead[]`, a flat per-lineage head enumeration; its source contract forbids sealing; and `active-genome.service.spec.ts:123,164` PIN the boundary with `expect(sealSubtree).not.toHaveBeenCalled()`. A consumer already chose the flat head list over the walk and guarded it with a test. |
+| `doctrine.spec.ts` | NEW RATCHET owed. `grep -n seal` over the doctrine spec returns nothing today, so nothing stops a tenth `sealSubtree(` call site appearing as callers migrate. Add a frozen allowlist of the current nine that may only SHRINK, modelled on the `not.toHaveBeenCalled()` assertion above. |
+
+Shell impact is nil: `hypercomb-shared`, `-web`, `-dev`, `-cli`, `-sdk` and
+`-core` contain ZERO callers; the publish panel only ever sees `here: string |
+null` across a `publish:render` payload.
+
+### Residual risk, stated plainly
+
+- **The deploy layer carries `children` verbatim** from the live branch-root
+  head rather than a freshened seal, so a client on an older shell build sees
+  the pre-seal, leaf-only-commit staleness for descendants edited but never
+  re-committed at the parent. Every head's bytes ARE on the host (the per-row
+  loop stages strictly more than today's spine). The bounded remedy, if needed,
+  is a DEPTH-1, NON-RECURSIVE substitution of the deploy layer's children from
+  the map — deterministic and terminating. Recursion there is exactly the seal
+  and stays forbidden.
+- **The molecule write path does not exist in the repo yet.** Step 3 landed the
+  core primitive and the signer, not storage: nothing writes head claims and
+  `commitLayer` is still path-keyed (register orders 135-139). In the first
+  landing the KEY is `sign(canonName(name))` derived at mint time and a claim's
+  `head` is a LAYER sig, not a succession atom. Say so at the top of the writer
+  or a reader will expect a succession.
+- **Same-generation rivals in my own bucket.** Two devices signing the same
+  `seq` are settled deterministically for every third party by
+  `resolveBucketHead`, but my own mint-ledger asymmetry prefers what I signed,
+  so my two devices can mint two different maps for one molecule set. The
+  index's `created_at` monotonicity makes this last-writer-wins rather than
+  divergent; it is not silently wrong, but it is not converged either.
+- **The visit path still falls back on a forged index.** `fetchHiveManifest`
+  collapses every failure to null and `hive-visit.drone.ts:148` then does
+  `manifest?.roots[key] ?? bundle.rootSig`, so a host serving a FORGED index
+  silently gets the mint-time hint used instead. The publish path refuses; the
+  visit path shrugs. This predates step 4 and is untouched by it — but a head
+  map makes the asymmetry cover more.
+- **Size, deferred not solved.** `HIVE_MAX_BYTES = 65_536` is not hit, because
+  only a 64-hex `deploySig` rides the index and the map is a content atom. That
+  budget becomes real the moment the index itself becomes molecule-keyed
+  (register order 153): at roughly 135 bytes per entry, about 450 molecules per
+  publisher.
+- **Claim bytes become dual-carrier.** For listing-free verification a claim
+  must be fetchable as `GET /<claimSig>` at the root, not only inside its
+  bucket. Both are written and nothing is removed — do NOT "optimise" the
+  bucket copy away, or the cold-listing path regresses.
+
+### `remove()` — settled in the same pass, and unrelated to the deploy
+
+`remove()` took a SECOND commit against `signText(canon)` — the GLOBAL molecule
+of that name, the same address `/club/people` reads — appending an empty
+succession to it on the author's chain, so removing a tile on one page blanked a
+live page elsewhere. Four attacks agreed (`skeptic-0 D`, `skeptic-1 A`,
+`skeptic-3 S3-E`, `skeptic-4 E`); it looked two-to-one settled only because the
+skeptic files do not share a polarity convention — 0 and 4 assert the DEFECT
+(a pass reproduces it) while 1 and 3 assert the REQUIREMENT (a fail reproduces
+it). Read the assertion message, never the tap bit.
+
+The fix is ONE DELETION: `remove()` touches the INCIDENCE and nothing else,
+which is this project's own rule — relations are marks the members wear, never a
+parent that holds them. The comment's justification ("the create-reset guard, so
+re-creating the name does not resurrect my old subtree") had the wrong SCOPE:
+the thing removed is the ENVELOPE, which is per-route; the child molecule is
+global. And under this model a name IS one page, so re-creating it and seeing
+the same members is the firehose, not a resurrection — it is what a visitor at
+the other route saw the whole time. The verb for "gone from my page" is `hide`.
+Re-adopting a vertex is already the separate explicit opt-in `revive()`.
+
+Three more defects went with it: `remove` was two commits on two chains while
+`undo` rewinds one; the parent commit landed first, so the child commit could
+throw the out-of-sync refusal and leave the removal half-applied while reporting
+failure; and `remove([], '   ')` routed the child step at `signText('') ===
+ROOT_MOLECULE` and erased the whole top page (`skeptic-2 S2-4`). Suite before
+the fix: 80 pass / 12 fail. After: 81 / 11, five tests flipping, none
+regressing. The head map neither causes nor fixes this — do not conflate them,
+and do not conflate it with `skeptic-4 F` (a derived-cache wipe of
+`sign('manifests')` destroying the molecule at the same address), which is also
+live and also out of scope.
 
 ## Artifacts of the decision
 

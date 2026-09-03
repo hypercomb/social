@@ -2,10 +2,10 @@
 //
 // THE TWO TYPES OF LAYOUT ASSET.
 //
-// A PIECE is one of the six built-in primitives — `single`, `split`, `rail`,
-// `thirds`, `bookends`, `measure`. It is a shape with holes and nothing in it,
-// it is drawn one way and turned to the other three, and it is what you build
-// OUT OF.
+// A PIECE is one of the five built-in primitives — `split`, `rail`, `thirds`,
+// `bookends`, `measure`. It is a DIVISION of the panel a container already
+// has, with nothing in it; it is drawn one way and turned to the other three,
+// and it is what you build OUT OF.
 //
 // A CREATION is what you built. You plug pieces together in the designer,
 // nest them, move the measurements until it reads the way you want, and then
@@ -237,18 +237,31 @@ export function creationGlyph(node: LayoutNode): string {
   return composeLayout(shrink(node)).html
 }
 
-/** How many holes an arrangement still OFFERS — its own, less the ones a
- *  nested level already fills. What is left is what a part can be dropped
- *  into, which is the only number worth putting on a chip. */
+/**
+ * How many holes an arrangement still OFFERS — its own, less the ones a nested
+ * level already fills. What is left is what a part can be seated into, which is
+ * the only number worth putting on a chip.
+ *
+ * THE SELF HOLE IS ONLY A PAGE AT THE ROOT, and this walk has to say so.
+ * `composeLayout` treats `self` as the container's own page at depth 0 and
+ * IGNORES it at every level below — there is one page here and it belongs to
+ * the container — so a nested level's self hole is an ordinary seat. Skipping
+ * it at every depth undercounted by one for each nested `rail`, `thirds`,
+ * `bookends` or `measure`, which is four of the five primitives.
+ *
+ * The predicate is therefore the exact complement of the one `composeLayout`
+ * uses to NOT push a leaf, and the two numbers agree by construction — which
+ * is the property the spec pins rather than the arithmetic.
+ */
 export function openHoles(node: LayoutNode): number {
   let count = 0
-  const walk = (level: LayoutNode): void => {
+  const walk = (level: LayoutNode, depth: number): void => {
     for (const hole of level.template.holes) {
       const child = level.nested[hole.key]
-      if (child) walk(child)
-      else if (!hole.self) count += 1
+      if (child) walk(child, depth + 1)
+      else if (!hole.self || depth > 0) count += 1
     }
   }
-  walk(node)
+  walk(node, 0)
   return count
 }

@@ -53,6 +53,47 @@ describe('what a creation offers', () => {
       .toBe(3)
   })
 
+  it('counts a NESTED self hole, because below the root it is an ordinary seat', () => {
+    // `composeLayout` treats `self` as the container's own page at depth 0 and
+    // ignores it everywhere below — there is one page here and it belongs to
+    // the container. The walk used to skip it at EVERY depth, so a creation
+    // nesting any of the four primitives that have one advertised a seat fewer
+    // than it had.
+    const nested = withNodeAt(nodeOf(split, {}), ['one'], nodeOf(rail, {}))
+    // split: [ rail | (rail's body — a SEAT here, not a page) ] | two
+    expect(openHoles(nested)).toBe(3)
+  })
+
+  it('agrees with composeLayout everywhere — one rule, counted two ways', () => {
+    // The property, not the arithmetic: whatever a chip claims it offers is
+    // exactly what the composer will seat into. Pinned across every primitive
+    // as a root, and with each of them nested inside a `split`.
+    for (const name of ['split', 'rail', 'thirds', 'bookends', 'measure']) {
+      const template = builtinLayout(name)!
+      const root = nodeOf(template, template.vars)
+      expect(openHoles(root)).toBe(composeLayout(root).leaves.length)
+
+      const inside = withNodeAt(nodeOf(split, {}), ['one'], nodeOf(template, {}))
+      expect(openHoles(inside)).toBe(composeLayout(inside).leaves.length)
+    }
+  })
+
+  it('is what a PIECE chip shows too — the shelf has one rule, not two', () => {
+    // The palette built a piece's count from `template.holes.length` (every
+    // hole, the self hole included) while a creation used `openHoles`, and the
+    // two sat side by side: a `rail` piece said 2 where a creation saved from
+    // a bare `rail` said 1, for the same shape. template-author.drone.ts now
+    // asks this function for both, so these ARE the numbers on the shelf.
+    const offers = (name: string): number => openHoles(nodeOf(builtinLayout(name)!))
+    expect(offers('split')).toBe(2)
+    // Four of the five keep a place for the container's own page, so each
+    // offers one seat fewer than it has holes.
+    expect(offers('rail')).toBe(1)
+    expect(offers('thirds')).toBe(2)
+    expect(offers('bookends')).toBe(2)
+    expect(offers('measure')).toBe(2)
+  })
+
   it('never takes a name a primitive answers to', () => {
     // One shelf shows both types, and which one a drop meant would otherwise
     // depend on lookup order.

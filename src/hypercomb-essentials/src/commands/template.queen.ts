@@ -13,11 +13,13 @@
 // template-target.ts for why that is the whole point, and
 // documentation/layout-templates.md for the design.
 //
-// The six built-ins — `single`, `split`, `rail`, `thirds`, `bookends`,
-// `measure` — are data, so a seventh costs no code. Each is drawn ONE way and
-// turned to the other three, and each is named for the arrangement it makes:
-// not for the proportions it happens to start with, and not for a SIDE, which
-// stops being true the moment somebody turns it.
+// The five built-ins — `split`, `rail`, `thirds`, `bookends`, `measure` — are
+// data, so a sixth costs no code. Each DIVIDES the panel a container already
+// has: the outermost panel is implicit, so the set starts at two holes and
+// stops at three, the fourth being a nesting. Each is drawn ONE way and turned
+// to the other three, and each is named for the arrangement it makes: not for
+// the proportions it happens to start with, and not for a SIDE, which stops
+// being true the moment somebody turns it.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import type { VisualBeeRegistry } from './visual-bee-registry.js'

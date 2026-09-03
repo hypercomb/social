@@ -3,6 +3,20 @@
 Companion to `hypergraph-molecule-lineage.md`. What was built, what it proved,
 what five adversarial skeptics broke, and what I think you should do.
 
+> **STATUS 2026-09-03 — STEP 4 LANDED.** Blockers 2 and 3 below (no merkle
+> root; the stranger-triggered cascade) are ANSWERED by retiring the recursive
+> seal, not by repairing it: the deploy signature is now a flat, signed head
+> map (`hypercomb-core/src/core/head-map.ts`, prototype twin `head-map.mjs`,
+> proofs in `head-map.test.mjs`). §4's proposal is adopted with one refinement
+> — the map is a CONTENT ATOM the index names, never the index's content, so
+> the 64 KiB index ceiling never applies and the index value stays an adoptable
+> layer sig. The `remove()` bug §4 calls "an implementation bug against your
+> own rule" is FIXED in the same pass. Skeptic-4 A, A2, B and H still
+> reproduce AGAINST THE SEAL and always will; that is the point. Blockers 4
+> and 5 (prune, cold-read cost) are UNCHANGED and still open. Full write-up:
+> `hypergraph-molecule-lineage.md` → *The deploy signature is a signed head
+> map*.
+
 **Run it yourself** (zero dependencies, Node ≥ 20):
 
 ```bash

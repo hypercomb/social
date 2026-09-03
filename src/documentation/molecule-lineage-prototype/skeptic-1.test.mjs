@@ -115,6 +115,16 @@ test('C — hide() is defeated by the hidden member\'s next edit (hidden is keye
 // save away. Sealing (the design's ONLY way to name a subtree with one sig —
 // required for publish, adopt, snapshot and any pinned time-travel) then either
 // does not terminate, or is not a pure derivation of content.
+//
+// STEP 4 — THIS TEST STILL FAILS, AND THAT IS THE CORRECT OUTCOME. It asserts a
+// requirement of the FOLD, and the fold is retired rather than repaired: a
+// global name graph cannot have a fixpoint, and adding a global visited set to
+// a fold is the fix that was already tried and REVERTED in the shipped
+// `sealSubtree` (history.service.ts:2534-2544), because de-duplicating a fold
+// changes its answer. The requirement itself — ONE signature that summarizes a
+// deploy, pure in the content and independent of the walk — is met by the flat
+// signed head map instead. See head-map.test.mjs A/A2 and
+// documentation/hypergraph-molecule-lineage.md ("the deploy signature").
 
 const naiveSeal = (store, mol, depth = 0) => {
   if (depth > 64) throw new Error('seal did not terminate')

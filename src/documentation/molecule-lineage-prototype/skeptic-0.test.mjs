@@ -189,14 +189,24 @@ test('C — hiding a foreign member makes MY OWN identical member invisible on c
 })
 
 // ───────────────────────────────────────────────────────────────────────────
-// D. remove() EMPTIES THE CHILD MOLECULE GLOBALLY. Deleting `people` from
-//    /business appends an EMPTY succession to sign('people') — the molecule
-//    that /club/people is also reading. Every tile under the other route
-//    vanishes. The guard that would prevent it ("is this molecule still named
-//    by any other envelope?") is UNCOMPUTABLE by construction: the design
+// D. remove() EMPTIED THE CHILD MOLECULE GLOBALLY. Deleting `people` from
+//    /business appended an EMPTY succession to sign('people') — the molecule
+//    that /club/people is also reading — and every tile under the other route
+//    vanished. The guard that would have prevented it ("is this molecule still
+//    named by any other envelope?") is UNCOMPUTABLE by construction: the design
 //    deleted the parent->child edge from layer bytes AND the reverse map.
+//
+// FIXED (step 4). The attack is kept verbatim and the assertion is INVERTED.
+// `remove()` no longer takes a second commit against `signText(canon)`; it
+// touches THE INCIDENCE and nothing else, which is this project's own rule —
+// relations are marks the members wear, never a parent that holds them. The
+// old second commit was scoped to the child MOLECULE, which is global; the
+// thing actually removed is the ENVELOPE, which is per-route. See the comment
+// on `MoleculeStore.remove` for the four witnesses and for why the
+// "create-reset guard" it claimed to be is not owed under a model where a name
+// IS one page.
 // ───────────────────────────────────────────────────────────────────────────
-test('D — removing a member in one route empties the same-named page in every other route', () => {
+test('D — removing a member in one route leaves the same-named page intact in every other route', () => {
   const store = seed(new MoleculeStore({ author: 'owner' }))
   store.save(['business', 'people'], 'Alice')
   store.save(['club', 'people'], 'Bob')
@@ -208,8 +218,13 @@ test('D — removing a member in one route empties the same-named page in every 
   assert.deepEqual(store.childNames([]), ['business', 'club'], 'club is untouched...')
   assert.deepEqual(
     store.childNames(['club', 'people']),
+    ['Alice', 'Bob'],
+    '...and /club/people STILL HOLDS ITS MEMBERS — a delete on a page that never held Bob cannot destroy him',
+  )
+  assert.deepEqual(
+    store.childNames(['business']),
     [],
-    '...but /club/people is now EMPTY — Bob was destroyed by a delete in a page that never held him',
+    'the page the user actually acted on is the only one that changed',
   )
 })
 

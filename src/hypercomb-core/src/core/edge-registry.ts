@@ -77,6 +77,11 @@ export const EDGE_FIELDS: readonly string[] = Object.freeze([
  *     over every head frees nothing, ever. Both defects dissolve here, in one
  *     line, using the distinction this file already draws. Walk `prev`
  *     deliberately (history, fork refusal); never as part of a closure.
+ *   - `pubkey` — the PUBLISHER of a signed head map (`core/head-map.ts`) and,
+ *     more generally, an IDENTITY: a 64-hex verifying key, not an address any
+ *     host has bytes for. It is compared against the key a reader asked for and
+ *     is never dereferenced, so treating it as an edge is the permanent-404
+ *     bug class exactly as `groupSig` was.
  *
  * May grow as new referent fields are minted — adding here is how a new
  * pointer field opts out of every precise walker at once.
@@ -85,6 +90,7 @@ export const REFERENT_FIELDS: readonly string[] = Object.freeze([
   'groupSig',
   'targetSig',
   'prev',
+  'pubkey',
 ])
 
 const edgeSet: ReadonlySet<string> = new Set(EDGE_FIELDS)

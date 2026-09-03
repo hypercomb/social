@@ -18,8 +18,13 @@ import assert from 'node:assert/strict'
 import { MoleculeStore, moleculeOf, ROOT_MOLECULE } from './molecule.mjs'
 import { Root } from './root.mjs'
 import { hostOf } from './host.mjs'
-import { mintKeys } from './keys.mjs'
+import { mintKeys, verifyEd25519 } from './keys.mjs'
 import { headClaimPreimage } from './head-claim.mjs'
+// STEP 4: the recursive seal below is kept as the ATTACK SURFACE and is no
+// longer anyone's deploy signature. What replaces it is the flat, signed head
+// map — proved on its own in head-map.test.mjs and cross-checked here inside
+// each of the four attacks that killed the fold.
+import { claimReaderOf, mintHeadMap, parseHeadMap, verifyHeadMap } from './head-map.mjs'
 import { poolSignature, putPoolDoc } from './pool.mjs'
 import { signText, mineSignatures, canonicalJSON, bytesOf, sha256 } from './sig.mjs'
 
@@ -106,6 +111,16 @@ test('A — NO MERKLE ROOT EXISTS: one ordinary tile name closes a cycle and sea
 
   // "history is the deploy" needs ONE sig that summarizes everything. There is none.
   assert.throws(() => seal(s, ROOT_MOLECULE), /SEAL DID NOT TERMINATE/)
+
+  // STEP 4 — THE ATTACK IS UNANSWERED AND STAYS UNANSWERED. A global name graph
+  // cannot have a fixpoint, so the fold is not repaired: it is RETIRED. The
+  // deploy signature is now a flat ENUMERATION of what this publisher heads,
+  // which terminates by construction because membership is idempotent. Kept
+  // here as the pointer; the replacement is proved in head-map.test.mjs.
+  const minted = mintHeadMap(s, { route: [] })
+  assert.ok(minted?.sig, 'the ENUMERATION terminates on the exact graph the FOLD cannot')
+  const molecules = minted.record.rows.map((r) => r[0])
+  assert.equal(new Set(molecules).size, molecules.length, 'and a cycle is one row, not a refusal')
 })
 
 test('A2 — cycle-breaking does not rescue it: the SAME molecule seals to two different sigs depending on entry point', () => {
@@ -130,6 +145,16 @@ test('A2 — cycle-breaking does not rescue it: the SAME molecule seals to two d
   )
   // Two publishes of the same page, same bytes underneath, two different pins:
   // a visitor cannot tell "changed" from "entered by a different door".
+
+  // STEP 4 — STILL TRUE OF THE FOLD, AND NOT TRUE OF THE ENUMERATION. `sealCut`
+  // cuts on the RECURSION PATH, so what a node folds depends on which ancestors
+  // are on the stack. A canonical representative of a SET has no path to depend
+  // on: the same molecules entered by two different doors are one signature.
+  assert.equal(
+    mintHeadMap(s, { route: ['alpha', 'beta'] }).sig,
+    mintHeadMap(s, { route: ['alpha', 'beta', 'gamma'] }).sig,
+    'ONE molecule set, ONE deploy identity, whichever door you came in',
+  )
 })
 
 test('B — THE CASCADE COMES BACK, TRIGGERED BY A STRANGER: my deploy sig moves when another tenant commits', () => {
@@ -140,6 +165,7 @@ test('B — THE CASCADE COMES BACK, TRIGGERED BY A STRANGER: my deploy sig moves
   me.save(['business', 'people'], 'Alice')
 
   const before = sealCut(me, ROOT_MOLECULE, '')
+  const mapBefore = mintHeadMap(me, { route: [] }).sig
 
   // A different tenant, on a different host, files a person under THEIR
   // 'people' tile. Same word ⇒ same molecule ⇒ their head lands in mine.
@@ -156,6 +182,18 @@ test('B — THE CASCADE COMES BACK, TRIGGERED BY A STRANGER: my deploy sig moves
   // and it is not cosmetic: the stranger's member is inside my published tree
   const names = me.childNames(['business', 'people'])
   assert.deepEqual(names.sort(), ['Alice', 'Bob'])
+
+  // STEP 4 — THE ONE REMAINING CASCADE IS CUT AT THE SOURCE. The fold reads
+  // `viewOf`, which absorbs EVERY author's bucket in the molecule; the map
+  // enumerates `<molecule>/<MY pubkey>/` and never opens another. The page
+  // above is unchanged — the firehose is the design — but my DEPLOY does not
+  // move, and the map is still honest about the molecule: it names it and
+  // asserts only my head in it.
+  assert.equal(
+    mintHeadMap(me, { route: [] }).sig,
+    mapBefore,
+    'a foreign write cannot re-mint a map that only ever read my own bucket',
+  )
 })
 
 test('C — THE HEAD CLOSURE IS THE WHOLE HISTORY: cold replication of a 30-edit page pulls all 30 dead generations', () => {
@@ -253,7 +291,22 @@ test('D2 — THE ONLY REAL PRUNE FORKS YOU OFF THE MESH: truncating the chain ma
   assert.ok(peer.root.has(`${mol}/${me.pubkey}/${peerHeld}`), 'and still holds the entry it had')
 })
 
-test('E — remove() SILENTLY WIPES A LIVE SIBLING ROUTE, and one undo cannot put it back', () => {
+// CHANGED BY STEP 4 — THE ATTACK IS KEPT AND THE ASSERTIONS ARE INVERTED.
+//
+// This test PASSED, and a pass was the reproduced defect. It was RIGHT, and
+// the two files that looked like they said "fixed" (skeptic-1 A, skeptic-3
+// S3-E) were asserting the EXPECTED CORRECT BEHAVIOUR and FAILING — a polarity
+// difference between the skeptic files, not a disagreement about the facts.
+// Four witnesses, four agreed: skeptic-0 D and this test asserted the defect
+// and passed; skeptic-1 A and skeptic-3 S3-E asserted the requirement and
+// failed. Read the assertion message, never the tap bit.
+//
+// THE FIX IS ONE DELETION in `MoleculeStore.remove`: the second commit against
+// `signText(canon)` — the GLOBAL molecule of that name, the same address
+// /club/people reads. `remove()` now touches THE INCIDENCE and nothing else.
+// That also makes it ONE commit on ONE chain, which is what lets one undo of
+// one user action restore that action completely (the second half below).
+test('E — remove() TOUCHES ONLY THE INCIDENCE, and one undo puts the whole action back', () => {
   const s = new MoleculeStore({ author: 'me' })
   s.save([], 'business')
   s.save([], 'club')
@@ -266,18 +319,23 @@ test('E — remove() SILENTLY WIPES A LIVE SIBLING ROUTE, and one undo cannot pu
   s.remove(['business'], 'people')
 
   assert.deepEqual(
-    s.childNames(['club', 'people']),
+    s.childNames(['business']),
     [],
-    'removing a tile on one page emptied a DIFFERENT, untouched page',
+    'the page I acted on lost the member I removed',
+  )
+  assert.deepEqual(
+    s.childNames(['club', 'people']),
+    ['Alice'],
+    'and a DIFFERENT, untouched page is untouched — removing an incidence is not removing a molecule',
   )
 
-  // Undo where I acted. The tile comes back; its contents do not.
+  // Undo where I acted. One user action, one chain, one undo.
   s.undo(['business'])
   assert.deepEqual(s.childNames(['business']), ['people'], 'the tile is back')
   assert.deepEqual(
     s.childNames(['business', 'people']),
-    [],
-    'its members are NOT back — remove wrote to two chains, undo rewinds one',
+    ['Alice'],
+    'and so are its members — remove wrote ONE commit, so one undo rewinds all of it',
   )
 })
 
@@ -374,4 +432,19 @@ test('H — SEALING NEEDS LISTINGS, SO A SEALED ROOT CANNOT BE VERIFIED FROM IMM
     0,
     'a sealed pin is inert without a mutable, unverifiable listing to place it',
   )
+
+  // STEP 4 — A HEAD MAP IS VERIFIABLE FROM THE SAME HOST, WITH NO LISTING. The
+  // deploy is a content atom; each row's value is a head CLAIM, whose signed
+  // preimage the reader REBUILDS from the row KEY and the key it asked for. So
+  // every step is GET /<64hex> + a hash check + a signature check, and the
+  // merkle proof never terminates in a readdir. (Chosen over a bare succession
+  // sig for exactly this reason: a bare head is authenticated only by whatever
+  // signed the enclosing document, so one row could not be checked on its own.)
+  const deploy = mintHeadMap(src, { route: [] })
+  const listlessHost = { ...contentOnly, content: (sig) => srcRoot.read(sig) }
+  const record = parseHeadMap(listlessHost.content(deploy.sig).toString('utf8'))
+  const verdict = verifyHeadMap(record, src.pubkey, claimReaderOf(listlessHost, verifyEd25519))
+  assert.equal(verdict.ok, true, 'every row verifies from atoms fetched BY SIGNATURE')
+  assert.equal(verdict.holes.length, 0)
+  assert.throws(() => listlessHost.list(), /no directory branch/, 'and the host still has no readdir')
 })

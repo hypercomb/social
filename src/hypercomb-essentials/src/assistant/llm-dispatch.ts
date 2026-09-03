@@ -41,17 +41,23 @@ import './providers/builtin-providers.js'
 import type {
   LlmCallResult,
   LlmChatMessage,
+  LlmFunctionTool,
   LlmProviderDescriptor,
   LlmRequest,
+  LlmToolCall,
 } from './providers/llm-provider.types.js'
 
 export type {
   LlmCallResult,
   LlmChatMessage,
+  LlmFunctionTool,
   LlmModelDescriptor,
   LlmProviderDescriptor,
   LlmRequest,
+  LlmStreamEvent,
   LlmTier,
+  LlmToolCall,
+  LlmToolCallDelta,
   LlmTransport,
 } from './providers/llm-provider.types.js'
 
@@ -74,6 +80,8 @@ export type LlmCall = {
   readonly messages: readonly LlmChatMessage[]
   readonly system?: string
   readonly maxTokens?: number
+  /** OpenAI-style functions available to a supporting provider. */
+  readonly tools?: readonly LlmFunctionTool[]
   /** Hint that `system` is stable and worth prompt-caching where supported. */
   readonly cacheSystem?: boolean
   readonly signal?: AbortSignal
@@ -82,6 +90,7 @@ export type LlmCall = {
 /** One routed stream delta, carrying the truth about who actually answered. */
 export type LlmRoutedChunk = {
   readonly text: string
+  readonly toolCalls?: readonly LlmToolCall[]
   readonly providerId: string
   readonly providerLabel: string
   readonly vendor: string
@@ -228,6 +237,7 @@ export const buildRequest = (
     messages: call.messages,
     system: call.system,
     maxTokens: call.maxTokens,
+    tools: call.tools,
     cacheSystem: call.cacheSystem,
     stream: options.stream === true,
     apiKey,
@@ -354,7 +364,7 @@ const emitLocalUse = (provider: LlmProviderDescriptor): void => {
 async function* streamProvider(
   provider: LlmProviderDescriptor,
   call: LlmCall,
-): AsyncGenerator<{ text: string; model: string }> {
+): AsyncGenerator<{ text: string; toolCalls?: readonly LlmToolCall[]; model: string }> {
   if (provider.transport === 'peer-swarm' || !provider.fromStreamEvent) {
     const request = buildRequest(provider, call)
     let result: LlmCallResult
@@ -371,16 +381,65 @@ async function* streamProvider(
       const response = await send(provider, request, call.signal)
       result = provider.fromResponse(await response.json(), request)
     }
-    if (result.text) yield { text: result.text, model: result.model || request.model }
+    if (result.text || result.toolCalls?.length) {
+      yield {
+        text: result.text,
+        ...(result.toolCalls?.length ? { toolCalls: result.toolCalls } : {}),
+        model: result.model || request.model,
+      }
+    }
     return
   }
 
   const request = buildRequest(provider, call, { stream: true })
   emitLocalUse(provider)
   const response = await send(provider, request, call.signal)
+  const pendingToolCalls = new Map<number, {
+    id?: string
+    name: string
+    arguments: string
+  }>()
+  let toolStreamFinished = false
   for await (const frame of sseFrames(response, call.signal)) {
-    const delta = provider.fromStreamEvent(frame)
-    if (delta) yield { text: delta, model: request.model }
+    const decoded = provider.fromStreamEvent(frame)
+    if (typeof decoded === 'string') {
+      if (decoded) yield { text: decoded, model: request.model }
+      continue
+    }
+    if (decoded.text) yield { text: decoded.text, model: request.model }
+    if (decoded.finishReason === 'tool_calls') toolStreamFinished = true
+    for (const delta of decoded.toolCallDeltas ?? []) {
+      const pending = pendingToolCalls.get(delta.index) ?? { name: '', arguments: '' }
+      if (delta.id !== undefined) pending.id = delta.id
+      if (delta.name !== undefined) pending.name += delta.name
+      if (delta.arguments !== undefined) pending.arguments += delta.arguments
+      pendingToolCalls.set(delta.index, pending)
+    }
+  }
+  // A cancelled or severed stream may already contain JSON that happens to
+  // look complete. It is not a completed model turn and must never cross the
+  // action boundary. OpenAI-shaped providers send a terminal finish_reason;
+  // only then can accumulated function arguments become a normalized call.
+  if (call.signal?.aborted) throw new DOMException('The model request was aborted', 'AbortError')
+  if (pendingToolCalls.size > 0 && !toolStreamFinished) {
+    throw new LlmDispatchError(
+      `${provider.label} ended an incomplete tool call`, provider.id, request.model,
+    )
+  }
+  const orderedToolCalls = [...pendingToolCalls.entries()]
+    .sort(([left], [right]) => left - right)
+  if (orderedToolCalls.some(([, call]) => !call.name.trim())) {
+    throw new LlmDispatchError(
+      `${provider.label} returned a malformed tool call`, provider.id, request.model,
+    )
+  }
+  const toolCalls = orderedToolCalls.map(([, call]): LlmToolCall => ({
+    ...(call.id !== undefined ? { id: call.id } : {}),
+    name: call.name,
+    arguments: call.arguments,
+  }))
+  if (toolCalls.length) {
+    yield { text: '', toolCalls, model: request.model }
   }
 }
 
@@ -431,8 +490,9 @@ export const routeCandidates = (
 /**
  * Route and stream with bounded fallbacks.
  *
- * Fallback is allowed only before a provider emits text. Once bytes are on
- * screen, switching models would splice two answers into one turn. Abort is
+ * Fallback is allowed only before a provider emits text or a tool call. Once
+ * output is on screen or handed to a caller, switching models would splice
+ * two answers into one turn. Abort is
  * always final. An empty successful response counts as a failed attempt —
  * this catches reasoning-only/incompatible responses instead of persisting a
  * blank assistant turn.
@@ -455,6 +515,7 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
         coolingUntil.delete(provider.id)
         yield {
           text: chunk.text,
+          ...(chunk.toolCalls?.length ? { toolCalls: chunk.toolCalls } : {}),
           providerId: provider.id,
           providerLabel: provider.label,
           vendor: provider.vendor,
@@ -492,12 +553,33 @@ export async function* streamRoutedModel(call: LlmCall): AsyncGenerator<LlmRoute
  */
 export async function* streamModel(call: LlmCall): AsyncGenerator<string> {
   const provider = resolveProvider(call)
-  for await (const chunk of streamProvider(provider, call)) yield chunk.text
+  for await (const chunk of streamProvider(provider, call)) {
+    if (chunk.text) yield chunk.text
+  }
 }
 
 /** Structural seam for shells that may not import essentials. */
 export const LLM_ROUTER_IOC_KEY = '@diamondcoreprocessor.com/LlmRouter'
 export const llmRouter = {
+  /** Resolve a model without exposing the provider registry across the shell
+   * boundary. The chat surface uses this to keep an explicitly named remote
+   * model answer-only while granting grammar tools only to `local`. */
+  providerIdForModel: (model: string): string | undefined =>
+    registry().providerForModel(model)?.id,
+  /** Execution authority depends on where the endpoint really is, never on a
+   * provider's friendly id. In particular, changing the built-in `local`
+   * host to a LAN or Internet URL must make it answer-only immediately. */
+  providerIsMachineLocal: (providerId: string): boolean => {
+    const provider = registry().get(providerId)
+    return !!provider && !!machineLocalEndpoint(provider)
+  },
+  /** Stable endpoint identity for a privileged multi-round local exchange.
+   * If the participant changes the configured loopback server mid-turn, the
+   * caller drops the observation instead of disclosing it to another process. */
+  providerMachineEndpoint: (providerId: string): string | undefined => {
+    const provider = registry().get(providerId)
+    return provider ? machineLocalEndpoint(provider) || undefined : undefined
+  },
   /** Is there somebody who can answer RIGHT NOW? A machine-local provider is
    *  only counted while its server is answering — an explicit choice still
    *  reaches `routeCandidates`, so naming a stopped server attempts the call
