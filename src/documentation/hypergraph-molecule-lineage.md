@@ -82,9 +82,26 @@ judges required:
   A channel that is `sign(name)` verbatim would receive every `people` on the
   relay. Unanimous across all three designs.
 - **One canonicalization rule everywhere**: `canonicalizeLineageSegment` (NFC,
-  non-letter/digit runs → `-`, edge hyphens stripped, case preserved).
+  non-letter/digit runs → `-`, edge hyphens stripped).
   `controls-bar.component.ts:1158` and `mesh-modal.component.ts:139` hash a
   RAW join today and already disagree — fix both.
+- **CASE IS FOLDED FOR THE ADDRESS** (decided 2026-09-02). The molecule address
+  is `sign(canon(name).toLowerCase())`. **Case folding IS the interop** — a
+  global vocabulary where `People` and `people` are different molecules is not
+  a shared vocabulary, and the skeptics landed this as a major
+  (`sign('People') !== sign('people')` defeats the headline claim). Notes:
+  - Use `String.prototype.toLowerCase()`, which is locale-INDEPENDENT — never
+    `toLocaleLowerCase`, whose Turkish dotless-i would make one machine's
+    address disagree with another's. NFC first, as today.
+  - **Display case is preserved on the vertex.** The `name` field keeps what
+    the participant typed; only the hashed preimage is folded. "My Tile" still
+    reads as "My Tile".
+  - **Known cost, accepted:** two differently-capitalised tiles MERGE, exactly
+    as two same-named ones do. Naming remains the only partition.
+  - Homoglyphs are NOT solved by folding (Cyrillic `а` still mints a second
+    molecule that renders identically). Open, tracked as a minor.
+  - Folding re-addresses every existing name carrying a capital, so it lands
+    like everything else: additive, dual-pointer, nothing deleted (rule 9).
 
 ## The array is the canonical signed form (decided 2026-09-02)
 

@@ -6,7 +6,7 @@ what five adversarial skeptics broke, and what I think you should do.
 **Run it yourself** (zero dependencies, Node ≥ 20):
 
 ```bash
-cd "C:/Users/Jaime/AppData/Local/Temp/claude/C--Projects-hypercomb-social-src/043117db-9ec6-46e1-b1ca-994406509091/scratchpad/molecule-lineage" && node --test
+cd documentation/molecule-lineage-prototype && node --test
 ```
 
 2,670 lines: `molecule.mjs` (the model), `root.mjs` (an OPFS-shaped root),
@@ -29,7 +29,7 @@ cd "C:/Users/Jaime/AppData/Local/Temp/claude/C--Projects-hypercomb-social-src/04
 | 7 | Time travel: read the molecule as of chain position `0001` |
 | 8 | A tile named `bees` coexists with the reserved system pool `sign('bees')` |
 | 9 | The ROOT molecule is the empty name, and the empty atom is never written |
-| 10 | Canonicalization: punctuation and whitespace converge; **case does not** |
+| 10 | Canonicalization: punctuation and whitespace converge; case does not — **SUPERSEDED, see §6.1: case is now folded** |
 
 **The headline claim is real.** Saving a tile writes 1 vertex + 1 succession +
 1 pointer. No cascade. Two tenants converge on one byte-identical address with
@@ -158,10 +158,13 @@ remote write primitive. The order I'd now recommend:
 
 ## 6. Three decisions only you can make
 
-1. **Case.** Global interop wants `People` and `people` to be one molecule;
-   the current rule preserves case deliberately. I lean: fold case for the
-   *molecule address* only, keep display case on the vertex. It is a real
-   trade — folding makes two differently-capitalised tiles merge.
+1. ~~**Case.**~~ **DECIDED 2026-09-02 — FOLD IT. Case folding IS the interop.**
+   The molecule address becomes `sign(canon(name).toLowerCase())` (locale-
+   independent `toLowerCase`, never `toLocaleLowerCase`); display case is
+   preserved on the vertex. Accepted cost: two differently-capitalised tiles
+   merge, exactly as two same-named ones do. **This supersedes scenario 10 of
+   the prototype**, which asserts case is preserved — that test must be
+   inverted when the fold lands. Homoglyphs remain unsolved and open.
 2. **`hidden` keying.** Envelope-sig keying is broken (it pre-hides your own
    future identical member). Key it by `(molecule, member vertex)` in your own
    succession instead? That changes what "hide" means when two authors add the
