@@ -342,7 +342,11 @@ three doors inherit it, and to grow a principal.
    in a contested file does not survive.
 3. **Correct `/cut`'s `reach`** to `destructive`, and audit the other eleven
    declarations before `reach` is ever read as a tier.
-4. **Fix `/undo N`** — the repair verb, silently broken.
+4. ~~**Fix `/undo N`** — the repair verb, silently broken.~~ **Resolved
+   2026-09-04** by `44f720d3f`: the cursor serializes its own walks, so N steps
+   land regardless of caller. Still owed on top — `undo.queen.ts` reports the
+   number ASKED FOR rather than the number that moved, so it overstates when
+   the walk hits the floor; that file is untracked work from another session.
 5. **Make the fire-and-forget six honest**, using `create.queen`'s
    accept/complete pattern. Six verbs, one known-good template.
 6. **Teach the catalogue the participant's nouns** — say "keyword / tag /
