@@ -76,9 +76,19 @@ describe('machineLocalEndpoint', () => {
   it('claims loopback HTTP providers and nothing else', () => {
     expect(machineLocalEndpoint(localDescriptor())).toBe(HOST)
     expect(machineLocalEndpoint(localDescriptor('http://127.0.0.1:1234'))).toBe('http://127.0.0.1:1234')
+    expect(machineLocalEndpoint(localDescriptor('http://[::1]:11434'))).toBe('http://[::1]:11434')
     expect(machineLocalEndpoint(localDescriptor('https://api.example.test'))).toBe('')
     // A descriptor that names no endpoint is not a local server by omission.
     expect(machineLocalEndpoint({ ...localDescriptor(), endpoint: undefined })).toBe('')
+  })
+
+  it('refuses 0.0.0.0 — a bind address is not a destination', () => {
+    // The one spelling that never named the participant's own process. Local
+    // servers PRINT it because it is what they bound to, so it is a plausible
+    // paste; but nothing dials it, and this test is what hands a model hive
+    // execution authority. The participant's server is at 127.0.0.1.
+    expect(machineLocalEndpoint(localDescriptor('http://0.0.0.0:11434'))).toBe('')
+    expect(machineLocalEndpoint(localDescriptor('http://0.0.0.0:1234/v1'))).toBe('')
   })
 })
 
