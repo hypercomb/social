@@ -868,6 +868,21 @@ export class SwarmAdoptDrone extends Drone {
     opts?: { entry?: Record<string, unknown> | null; silent?: boolean },
   ): Promise<boolean> => {
     const at = this.#currentSegments()
+    // HELD HERE ALREADY? Then this is not intake at all — it is a SYNC of a
+    // tile the participant accepted at some earlier point, and the intake gate
+    // must not sit in front of it. Judging it would refuse an update to their
+    // own content the moment a filter excluded something about it, and would
+    // say "didn't keep it" about a tile sitting in their hive. The gate is for
+    // what is arriving, not for what has already been taken.
+    if (await this.#isHeldHere(at, label)) {
+      const entry = opts?.entry ?? this.#peerEntryFor(label, pubkey)
+      const layerSig = String(entry?.['layerSig'] ?? '').trim().toLowerCase()
+      await this.#additiveAdoptHeld({
+        layerSig: SIG_RE.test(layerSig) ? layerSig : '',
+        at, label,
+      })
+      return true
+    }
     // Intake gate, async half — THE COMMIT, and the authoritative one. Unlike
     // the sync check in `wandEligible` this reads the full union, so a mark
     // carried only by the exact bytes (and therefore invisible to a
@@ -881,15 +896,6 @@ export class SwarmAdoptDrone extends Drone {
     })) {
       this.#rowOutcome(label, undefined, false, `didn't keep "${label}" — it carries a mark you filter out`)
       return false
-    }
-    if (await this.#isHeldHere(at, label)) {
-      const entry = opts?.entry ?? this.#peerEntryFor(label, pubkey)
-      const layerSig = String(entry?.['layerSig'] ?? '').trim().toLowerCase()
-      await this.#additiveAdoptHeld({
-        layerSig: SIG_RE.test(layerSig) ? layerSig : '',
-        at, label,
-      })
-      return true
     }
     const entry = opts?.entry ?? this.#peerEntryFor(label, pubkey)
     if (!entry) {

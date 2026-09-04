@@ -102,7 +102,8 @@ describe('interest registry — polarity', () => {
     expect(reg.allows(['cigars'])).toBe(true)
     expect(reg.allows(['hexagons', 'unrelated'])).toBe(true)
     expect(reg.allows(['knitting'])).toBe(false)
-    expect(reg.allows([])).toBe(false)
+    // Unmarked is NOT a mismatch — see the "unknown is not absent" test below.
+    expect(reg.allows([])).toBe(true)
   })
 
   it('a DROP refuses regardless of a positive match', async () => {
@@ -114,6 +115,32 @@ describe('interest registry — polarity', () => {
     expect(reg.allows(['cigars'])).toBe(true)
     expect(reg.allows(['cigars', 'malicious'])).toBe(false)
     expect(reg.allows(['malicious'])).toBe(false)
+  })
+
+  // THE BLOCKER AN ADVERSARIAL REVIEW RAISED AND ITS OWN SKEPTICS WRONGLY KILLED.
+  // Both mark carriers are participant-LOCAL, so content that just arrived from
+  // somebody else presents ZERO marks. If a KEEP set judged that as a mismatch,
+  // naming one interest would blank the swarm, kill published-pool discovery and
+  // make every offered branch untakeable.
+  it('UNKNOWN IS NOT ABSENT — a KEEP set never refuses unmarked content', async () => {
+    const reg = new InterestRegistry()
+    await reg.save('mine', ['cigars'])
+    await reg.setRole('keep', 'mine')
+    // A peer's tile: nothing local knows any mark for it.
+    expect(reg.allows([])).toBe(true)
+    // Something that DOES carry marks, none of them yours, is still refused —
+    // that is the filter doing its job rather than a blackout.
+    expect(reg.allows(['knitting'])).toBe(false)
+    expect(reg.allows(['cigars'])).toBe(true)
+  })
+
+  it('a DROP cannot fire on absence — there is nothing to match', async () => {
+    const reg = new InterestRegistry()
+    await reg.save('never', ['malicious'])
+    await reg.setRole('drop', 'never')
+    // No marks means nothing to match, so nothing to refuse. A DROP that fired
+    // on absence would be refusing everything it has never heard of.
+    expect(reg.allows([])).toBe(true)
   })
 
   it('a DROP alone still lets unmarked content through', async () => {
@@ -155,6 +182,9 @@ describe('interest registry — identity', () => {
     const a = await reg.signatureOf(['b', 'a', 'a', ' b '])
     const b = await reg.signatureOf(['a', 'b'])
     expect(a).toBe(b)
+    // And the order is code-unit, not collation — the property that lets two
+    // participants on different runtimes land on ONE resource.
+    expect(await reg.signatureOf(['B', 'a'])).toBe(await reg.signatureOf(['a', 'B']))
   })
 
   it('an empty set has no signature', async () => {

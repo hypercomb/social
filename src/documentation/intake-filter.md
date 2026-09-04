@@ -91,6 +91,25 @@ before a record is kept:
 3. keep if it carries one they enrolled in — or if they have named no KEEP set,
    in which case everything that was not dropped is kept
 
+**UNKNOWN IS NOT ABSENT, and this is the difference between a filter and a
+blackout.** Both carriers are participant-LOCAL: `tagsForSegments` reads an
+in-memory index built from this participant's own decoration scans, and
+`sigMarksOf` reads this participant's own `pheromones:content` pool. Content
+that has just arrived from somebody else has an entry in neither, so it presents
+**zero marks** — not "no marks I want", but "no marks I have heard of yet".
+
+So a KEEP set may only ever exclude something that CARRIES marks and carries
+none of yours. Judged the other way, naming a single interest would refuse every
+peer tile in the swarm, every member a domain publishes, and every branch
+anybody offers. An adversarial review raised exactly that as a blocker; its own
+verification stage refuted it three votes to nil, and it was right the first
+time.
+
+The consequence worth stating plainly: **until marks travel WITH content, a KEEP
+set can only narrow things you already hold.** DROP has the same limit — it
+cannot fire on a mark nobody local has recorded. That is the ceiling on this
+gate, and it is a property of where marks live, not of the gate.
+
 **The registry must be loaded for any of that to happen**, and nothing else in
 the tree loads it. The gate therefore kicks `ensureLoaded()` itself, once per
 registry instance: the sync gate starts the load and does not wait (a filter

@@ -147,6 +147,20 @@ export class InterestRegistry extends EventTarget {
     const { keep, drop } = this.#sets
     if (drop.size) for (const m of marks) if (drop.has(m)) return false
     if (!keep.size) return true
+    // UNKNOWN IS NOT ABSENT — and this is the difference between a filter and
+    // a blackout. BOTH mark carriers are participant-LOCAL: `tagsForSegments`
+    // reads an in-memory index filled by this participant's own decoration
+    // scans, and `sigMarksOf` reads this participant's own
+    // `pheromones:content` pool. Content that just arrived from somebody else
+    // has no entry in either, so it presents ZERO marks — not "no marks I
+    // want", but "no marks I have heard of yet".
+    //
+    // Judging that by a KEEP set refuses every peer tile in the swarm, every
+    // member a domain publishes, and every branch anybody offers, the moment a
+    // participant names a single interest. So an unmarked thing is not a
+    // MISMATCH; a KEEP set may only ever exclude something that carries marks
+    // and carries none of yours.
+    if (!marks.length) return true
     for (const m of marks) if (keep.has(m)) return true
     return false
   }
@@ -236,7 +250,16 @@ export class InterestRegistry extends EventTarget {
   /** Sorted, de-duplicated, blank-free — the canonical form that makes the
    *  signature a property of the SET rather than of the picking order. */
   #canonical(marks: readonly string[]): string[] {
-    return [...new Set(marks.map(m => m.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+    // CODE-UNIT ORDER, NOT `localeCompare`. The signature has to be a property
+    // of the SET for two participants to land on one resource — that is the
+    // whole of "a filter is a signature somebody can hand you". `localeCompare`
+    // answers by the runtime's collation, so the same marks sorted under a
+    // different locale or ICU build hash to a different address and the sharing
+    // claim quietly stops being true. Default `sort()` is byte-stable
+    // everywhere. (`bouquet-registry.ts` still uses localeCompare; its
+    // signature is only ever compared against itself, so it does not have this
+    // problem yet — but it is the same latent one.)
+    return [...new Set(marks.map(m => m.trim()).filter(Boolean))].sort()
   }
 
   /** The interest's bytes. ONE definition, used by both the derived signature
