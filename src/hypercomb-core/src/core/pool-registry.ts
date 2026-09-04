@@ -364,6 +364,16 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // Colon-scoped for the usual reason and one extra: publishing into a
   // BARE-WORD pool on a relay would make every sibling entry at that address
   // publicly enumerable by anyone who can derive the word.
+  // A PARTICIPANT REGISTRY'S MASTER RECORD — the name, tag, bouquet and
+  // interest maps, one current JSON document each, written by
+  // hypercomb-shared/core/registry-document.ts. DOCUMENT pools: replaced
+  // whole on every edit, per-participant, never sent. They replace a
+  // pointer member named `names-master` (and three siblings) in the
+  // bare-word `registry` pool, which stays a READ-FALLBACK only.
+  'registry:bouquets',
+  'registry:interests',
+  'registry:names',
+  'registry:tags',
   'vocabulary:hive',
   'vocabulary:published',
   'vocabulary:seen',

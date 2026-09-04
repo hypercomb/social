@@ -68,6 +68,30 @@ const FACTS: Readonly<Record<PoolKind, PoolKindFacts>> = Object.freeze({
 /** The facts behind a kind. */
 export const poolKindFacts = (kind: PoolKind): PoolKindFacts | undefined => FACTS[kind]
 
+/**
+ * MAY THE COLLECTOR CREDIT A MEMBER'S NAME AS A REFERENCE?
+ *
+ * A derived cache is keyed BY ITS SOURCE SIGNATURE — that is the whole of its
+ * invalidation rule — so its members are NAMED by the very signatures the
+ * collector is deciding about. A reference walk that credits member names
+ * therefore keeps a layer alive purely because an accelerator was minted for
+ * it, and wiping the pool changes what the collector keeps. That is exactly
+ * the load-bearing derived cache `documentation/optimize-phase.md` rule 3
+ * forbids: "no read path may require them, cold paths must produce identical
+ * results without them."
+ *
+ * So a WIPE-SAFE pool's member is not a reference — NAME or BYTES. Its bytes
+ * name the very signatures it derives from (a children manifest, a genome
+ * doc), so scanning them pinned every layer an accelerator had been minted
+ * for; the member is skipped whole.
+ *
+ * UNDECLARED IS NOT WIPE-SAFE. `undefined` credits, which is the safe
+ * direction: the collector deletes bytes, and a missed reference deletes live
+ * content while a spurious one merely keeps dead content.
+ */
+export const poolCreditsMemberNames = (facts: PoolKindFacts | undefined): boolean =>
+  facts?.wipeSafe !== true
+
 /** Is this one of the four? */
 export const isPoolKind = (value: unknown): value is PoolKind =>
   typeof value === 'string' && Object.prototype.hasOwnProperty.call(FACTS, value)
@@ -114,6 +138,13 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['comfy:generations', 'set'],
   ['comfy:workflows', 'set'],
   ['community:hosts', 'set'],
+  // What a HOST is offering. The one meaning the directory branch serves
+  // (`GET /<sign('host:packages')>/`), reached by an address every client
+  // derives for itself — so if any pool must be declared replicable, it is
+  // this one. Its sibling `community:hosts` was declared and this was not,
+  // which left the pool that EXISTS to be fetched cross-origin reading as
+  // undeclared to `registerPublishedPool`.
+  ['host:packages', 'set'],
   ['pheromones:content', 'set'],
   ['pheromones:deposits', 'set'],
   ['substrate:references', 'set'],
@@ -122,6 +153,10 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   // DOCUMENTS — one current record, per-participant, replaced in place.
   ['backgrounds:screen', 'document'],
   ['overrides', 'document'],
+  ['registry:bouquets', 'document'],
+  ['registry:interests', 'document'],
+  ['registry:names', 'document'],
+  ['registry:tags', 'document'],
   ['translations', 'document'],
   ['viewport', 'document'],
   // SUCCESSION — per-author buckets of signed claims; they must travel.

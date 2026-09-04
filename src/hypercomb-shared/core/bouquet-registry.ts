@@ -19,9 +19,9 @@
 // ── storage ───────────────────────────────────────────────────────────────
 // Each bouquet's MARKS are a content-addressed resource (sig-named file at the
 // flat OPFS root, via Store.putResource); the master list maps name → that sig
-// and rides the `bouquets-master` record in the sign('registry') pool, beside
-// `tags-master` and `names-master`. No new pool of meaning is minted: this is
-// participant registry state of exactly the same species as the tag list.
+// and is ONE document in the `registry:bouquets` document pool
+// (registry-document.ts), the same species as the tag and name lists. The
+// `bouquets-master` pointer in the bare-word `registry` pool is read-fallback.
 //
 // Marks are SORTED before signing, so the same set picked in a different order
 // is the same bytes and therefore the same signature — two participants who
@@ -29,14 +29,15 @@
 // be shared as a signature the day sharing wants it.
 
 import { EffectBus, SignatureService } from '@hypercomb/core'
+import { readRegistryDocument, writeRegistryDocument } from './registry-document.js'
 
 /** name → the signature of that bouquet's marks resource. */
 type BouquetMap = Record<string, { sig: string }>
 
-const MASTER_KEY = 'bouquets-master'
-/** Pool of meaning holding the registry pointer records. Address =
- *  sign('registry'), derived by Store — never hardcode the hex. */
-const REGISTRY_MEANING = 'registry'
+/** The legacy pointer's member name in the old `registry` pool — read only. */
+const LEGACY_MASTER_KEY = 'bouquets-master'
+/** The document pool holding this participant's bouquet map (registry-document.ts). */
+const BOUQUETS_REGISTRY_MEANING = 'registry:bouquets'
 
 export interface Bouquet {
   name: string
@@ -150,11 +151,9 @@ export class BouquetRegistry extends EventTarget {
     try {
       const store = this.#store()
       if (!store) return
-      const sig = await this.#readPointer(store)
-      if (!sig) { this.#loaded = true; return }
-      const blob = await store.getResource(sig)
-      if (!blob) { this.#loaded = true; return }
-      this.#bouquets = JSON.parse(await blob.text())
+      const bouquets = await readRegistryDocument<BouquetMap>(store, BOUQUETS_REGISTRY_MEANING, LEGACY_MASTER_KEY)
+      if (!bouquets) { this.#loaded = true; return }
+      this.#bouquets = bouquets
       // Expand every pointer once, up front: the panel reads marks
       // synchronously while rendering, so a lazy resolve would show empty
       // bouquets on first paint and fill in a beat later.
@@ -186,9 +185,7 @@ export class BouquetRegistry extends EventTarget {
     try {
       const store = this.#store()
       if (!store) return
-      const blob = new Blob([JSON.stringify(this.#bouquets)], { type: 'application/json' })
-      const sig = await store.putResource(blob)
-      await this.#writePointer(store, sig)
+      await writeRegistryDocument(store, BOUQUETS_REGISTRY_MEANING, this.#bouquets)
     } catch { /* OPFS write failed — in-memory state still valid */ }
     this.#announce()
   }
@@ -196,24 +193,6 @@ export class BouquetRegistry extends EventTarget {
   #announce(): void {
     this.dispatchEvent(new Event('change'))
     EffectBus.emit('bouquets:registry', { bouquets: this.all })
-  }
-
-  async #readPointer(store: any): Promise<string | null> {
-    try {
-      const pool = await store.getPool?.(REGISTRY_MEANING)
-      if (!pool) return null
-      const fh = await pool.getFileHandle(MASTER_KEY)
-      const sig = (await (await fh.getFile()).text()).trim()
-      return sig || null
-    } catch { return null }
-  }
-
-  async #writePointer(store: any, sig: string): Promise<void> {
-    const pool = await store.getPool?.(REGISTRY_MEANING)
-    if (!pool) throw new Error('registry pool unavailable')
-    const fh = await pool.getFileHandle(MASTER_KEY, { create: true })
-    const writable = await fh.createWritable()
-    try { await writable.write(sig) } finally { await writable.close() }
   }
 
   #store(): any {

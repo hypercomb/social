@@ -28,8 +28,9 @@ produced verdicts. So:
 - The number is therefore a **ceiling on deviations**, not a floor. Expect some
   to be refuted on a full read; expect a few misses in the other direction.
 - Fixes are recorded inline as **FIXED (commit)** and left in place so the
-  list stays a census, not a to-do. First stroke, 2026-09-04: the one
-  catastrophic item and the four-hat byte-scan bug — 5 of 57 closed.
+  list stays a census, not a to-do. 2026-09-04: the one catastrophic item,
+  the four-hat byte-scan bug, and three of the four pointer copies — 8 of 57
+  closed.
 
 ## The headline
 
@@ -95,6 +96,15 @@ not wipe-safe whatever it claims. *One-line fix:* gate the byte scan on the same
   both the member's name (a parent sig) and every sig in its bytes
 - `store.ts:1308` `#putOptimizedVisual` — the original image can never be
   collected once its thumbnail exists
+
+**FIXED 2026-09-04 (three of four) — `hypercomb-shared/core/registry-document.ts`
+is the one writer. The pointer is gone: the master record IS the document,
+written by `putPoolDoc` into its own colon-scoped DOCUMENT pool
+(`registry:names` / `registry:tags` / `registry:bouquets` / `registry:interests`,
+reserved in core and seeded as `document`). Reads walk back through the old
+`registry/<key>` pointer and the root `0000` props; writes never do; nothing
+is deleted. `interest-registry.ts` is untracked in another session's tree and
+still carries its copy — a two-line swap once that file lands.**
 
 **Four copies of one wrong pointer — check 1.** `name-registry.ts:150`,
 `tag-registry.ts:181`, `interest-registry.ts:312`, `bouquet-registry.ts:211`
