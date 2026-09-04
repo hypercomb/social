@@ -87,13 +87,35 @@ export class ClipboardWorker extends Worker {
   constructor() {
     super()
 
-    EffectBus.on<{ action: string; targetSegments?: string[] }>('controls:action', (payload) => {
+    // A CALLER MAY ASK TO BE TOLD WHEN THE WORK IS DONE. The buttons that emit
+    // this channel are fire-and-forget by nature — a pointer has already moved
+    // on — but a SENTENCE is not: `/copy drafts` then `/paste` is two lines of
+    // one plan, and the second must not run before the first has staged the
+    // clipboard. It did: capture completes only after a chain of awaits, so
+    // `/paste` found `isEmpty` and returned silently while the receipt printed
+    // "Ran 2 grammars". A model whose next line was `/remove drafts` then
+    // destroyed the source with nothing at the destination.
+    //
+    // The callbacks are OPTIONAL, so all 21 existing emitters are unaffected;
+    // `accept` fires synchronously so a caller can tell a listener existed at
+    // all, and `complete` carries the failure rather than swallowing it. Same
+    // shape as `command:create-cells` (commands/create.queen.ts).
+    EffectBus.on<{
+      action: string
+      targetSegments?: string[]
+      accept?: () => void
+      complete?: (error?: unknown) => void
+    }>('controls:action', (payload) => {
       if (!payload?.action) return
+      const settle = (work: Promise<unknown>): void => {
+        payload.accept?.()
+        void work.then(() => payload.complete?.(), error => payload.complete?.(error))
+      }
       switch (payload.action) {
-        case 'copy': void this.#capture('copy'); break
-        case 'cut': void this.#capture('cut'); break
-        case 'paste': void this.#paste(this.#boundTarget(payload.targetSegments)); break
-        case 'clear-clipboard': void this.#clearClipboard(); break
+        case 'copy': settle(this.#capture('copy')); break
+        case 'cut': settle(this.#capture('cut')); break
+        case 'paste': settle(this.#paste(this.#boundTarget(payload.targetSegments))); break
+        case 'clear-clipboard': settle(this.#clearClipboard()); break
       }
     })
 
