@@ -129,12 +129,24 @@ export function vocabularyRootOf(roots: Record<string, string>): string | null {
  * hold is something the PARTICIPANT does, or the whole scope model is a
  * decoration.
  *
- * Pure data, so the refusal is testable and extends without touching the
- * worker again.
+ * INVERTED TO AN ALLOW-LIST. A deny-list is only ever as complete as the
+ * last person who remembered it: `format:hive` was settable over the bridge
+ * for the same reason `vocabulary:hive` had been, by omission. The rule is
+ * now positive — the bridge may stamp `install:<channel>` and NOTHING else.
+ * Every other reserved key is a participant act. The deny-list is kept as
+ * the named examples, so a test can say why each one is refused.
  */
 export const BRIDGE_FORBIDDEN_ROOT_KEYS: readonly string[] = Object.freeze([
   VOCABULARY_ROOT_KEY,
+  HIVE_FORMAT_ROOT_KEY,
 ])
+
+/** May the bridge's `hive-root-set` write this key? Only an install stamp. */
+export const bridgeMaySetRootKey = (key: string): boolean => {
+  const k = String(key ?? '').trim()
+  if (!k.startsWith(INSTALL_CHANNEL_PREFIX)) return false
+  return /^[a-z][a-z0-9-]*$/.test(k.slice(INSTALL_CHANNEL_PREFIX.length))
+}
 
 /** localStorage key recording which adopted roots follow a static
  *  publisher: `{ "<rootName>": { pubkey, hosts, lineageKey } }`.

@@ -1188,12 +1188,22 @@ export class SwarmDrone extends Drone {
 
       if (payload?.public === true) {
         // Bytes before broadcast. Every join path lands here, so this is the
-        // one place that can promise a participant has somewhere to put the
-        // pictures they are about to advertise. Without a target the
-        // availability gate holds everything back — correct, but useless;
-        // with one, the drain stages the closure and tiles announce as
-        // receipts land. Own host wins; a deliberate CDN opt-out is honored.
-        try { this.#getHostSync()?.ensureSwarmTarget?.() } catch { /* never block the join */ }
+        // one place that can ASK whether a participant has somewhere to put
+        // the pictures they are about to advertise. Without a target the
+        // availability gate holds everything back — correct, and the gate
+        // stays shut until they say where. The service no longer provisions
+        // a third-party host on its own: joining is "share with these
+        // people", not "upload to that company". The yes is one command.
+        try {
+          if (this.#getHostSync()?.ensureSwarmTarget?.() === 'needs-host') {
+            const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
+            EffectBus.emit('toast:show', {
+              type: 'info',
+              title: i18n?.t('swarm.needs-host.title') ?? 'Nowhere to put your pictures yet',
+              message: i18n?.t('swarm.needs-host.message') ?? 'Shared tiles announce once their content has a host. Type /use-live-relay to publish to the public content endpoint, or set your own host in the hosts panel.',
+            })
+          }
+        } catch { /* never block the join */ }
       }
 
       if (payload?.public === false) {
@@ -4521,8 +4531,8 @@ const payload: SwarmLayerPayload = myLabel
       markPublic: (sig: string, kind?: 'layer' | 'bee' | 'dependency' | 'resource', closure?: boolean) => Promise<void>
       isGateActive?: () => boolean
       isClosureAvailable?: (sig: string, kind?: 'layer' | 'bee' | 'dependency' | 'resource', closure?: boolean) => Promise<boolean>
-      /** Provision a durable byte target on join — see host-sync.service. */
-      ensureSwarmTarget?: () => boolean
+      /** Does this participant have a durable byte target? Never provisions one. */
+      ensureSwarmTarget?: () => 'ready' | 'opted-out' | 'needs-host'
     } | undefined
 
   #getRegistry = (): TileSourceRegistryLike | undefined =>

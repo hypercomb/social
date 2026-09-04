@@ -194,8 +194,61 @@ const verifiedMember = async (origin: string, sig: string): Promise<unknown | nu
 /** (origin, meaning) already probed this session — a 404 counts. */
 const probed = new Set<string>()
 
+/** What a host has DECLARED and this participant has not yet PLACED. Keyed
+ *  `origin::meaning`; memory only — an offer is a fact about a host, and the
+ *  host will say it again. */
+export type PublishedOffer = { origin: string; meaning: string; sig: string; record: unknown }
+const offers = new Map<string, PublishedOffer[]>()
+
+/** The standing offers, all of them or one origin's. */
+export const offeredPools = (origin?: string): PublishedOffer[] => {
+  const host = origin ? originHost(origin) : ''
+  const out: PublishedOffer[] = []
+  for (const [key, list] of offers) {
+    if (host && !key.startsWith(`${host}::`)) continue
+    out.push(...list)
+  }
+  return out
+}
+
 /**
- * Read one meaning from one domain. Returns the ids the handler kept.
+ * THE GESTURE. Hand one origin's offers (one meaning's, or all of them) to
+ * their handlers. Returns the ids kept. This is the only path to
+ * `handler.accept`, and nothing calls it on a visit, on `domain:learned`,
+ * or on a schedule — a surface calls it because the participant said yes.
+ */
+export const placeOffers = async (rawOrigin: string, meaning?: string): Promise<string[]> => {
+  const origin = originHost(rawOrigin)
+  if (!origin) return []
+  const kept: string[] = []
+  for (const [key, list] of [...offers]) {
+    if (!key.startsWith(`${origin}::`)) continue
+    if (meaning && key !== `${origin}::${meaning}`) continue
+    const handler = handlers.get(key.slice(origin.length + 2))
+    if (!handler) continue
+    offers.delete(key)
+    for (const offer of list) {
+      try {
+        const id = await handler.accept(offer.record, origin)
+        if (id) kept.push(id)
+      } catch (err) {
+        console.warn(`[published-pools] ${origin} offered a ${offer.meaning} record that was refused:`, err)
+      }
+    }
+  }
+  if (kept.length) console.log(`[published-pools] placed ${kept.length} from ${origin}: ${kept.join(', ')}`)
+  return kept
+}
+
+/** Test seam. */
+export const _resetOffers = (): void => { offers.clear(); probed.clear() }
+
+/**
+ * Read one meaning from one domain. Returns the sigs OFFERED — verified,
+ * admitted by the intake gate, and held for a gesture. Nothing is placed:
+ * a host declaring what it holds is not a host putting it in your world
+ * (`the-algorithm-is-the-application.md` — "nothing enters your world
+ * because someone else decided it should"). `placeOffers` is the act.
  *
  * Silent about the ordinary: a domain with nothing to offer answers 404 and
  * produces no output at all. Only a domain that publishes something, or one
@@ -224,31 +277,29 @@ export const probePublishedPool = async (
   const members = membersOf(index)
   if (!members.length) return []
 
-  const kept: string[] = []
+  const offered: PublishedOffer[] = []
   for (const sig of members) {
     const record = await verifiedMember(origin, sig)
     if (record === null) continue
     // THE INTAKE GATE. Verification answered "are these the bytes the domain
-    // named"; it cannot answer "do I want them". This is a COMMIT path — one
-    // pass per member, at most MAX_MEMBERS of them per domain per session — so
-    // it can afford the full union read (location marks ∪ signature marks).
-    // Allows everything until the participant expresses an interest.
+    // named"; it cannot answer "do I want them". One pass per member, at most
+    // MAX_MEMBERS of them per domain per session, so it can afford the full
+    // union read (location marks ∪ signature marks). Allows everything until
+    // the participant expresses an interest. An offer the gate refuses is
+    // never even shown.
     if (!await intakeAllows({ sig })) continue
-    try {
-      const id = await handler.accept(record, origin)
-      if (id) kept.push(id)
-    } catch (err) {
-      console.warn(`[published-pools] ${origin} offered a ${meaning} record that was refused:`, err)
-    }
+    offered.push({ origin, meaning, sig, record })
   }
-  if (kept.length) {
-    console.log(`[published-pools] ${origin} offers ${kept.length} ${meaning}: ${kept.join(', ')}`)
+  if (offered.length) {
+    offers.set(once, offered)
+    console.log(`[published-pools] ${origin} offers ${offered.length} ${meaning} — held for a gesture`)
+    EffectBus.emit('published-pools:offered', { origin, meaning, count: offered.length })
   }
-  return kept
+  return offered.map(o => o.sig)
 }
 
-/** Read EVERY claimed meaning from one domain. What "adopting" a domain
- *  means for configuration: ask it, once, what it has. */
+/** Read EVERY claimed meaning from one domain. What learning a domain
+ *  means for configuration: ask it, once, what it has — and HOLD the answer. */
 export const probeDomain = async (rawOrigin: string, options: { force?: boolean } = {}): Promise<string[]> => {
   const origin = originHost(rawOrigin)
   if (!origin) return []
@@ -268,7 +319,10 @@ export const probeDomain = async (rawOrigin: string, options: { force?: boolean 
 // to remember to ask.
 //
 // Deliberately NOT gated on a live renderer, a UI, or an install: a probe is
-// one conditional GET, and the handler decides whether anything is kept.
+// one conditional GET, and it PLACES NOTHING. What it learns waits in
+// `offeredPools` until a surface calls `placeOffers` on the participant's
+// yes. This used to call `handler.accept` straight from the visit, which
+// made a host that declares a provider spec into a host that installs one.
 
 EffectBus.on('domain:learned', (payload: unknown) => {
   const host = String((payload as { host?: unknown })?.host ?? '')

@@ -315,17 +315,22 @@ export class HostSyncService extends EventTarget {
    *  and we never re-enable a CDN they deliberately turned off (`'0'` is a
    *  decision; absent is merely unasked).
    *
-   *  CONSENT: joining a swarm IS the gesture — it is an explicit act that
-   *  says "share these tiles with these people", and sharing them is exactly
-   *  what puts their bytes on a host. Callers must not invoke this on boot,
-   *  on navigation, or anywhere a participant has not asked to share. */
-  public readonly ensureSwarmTarget = (): boolean => {
-    if (this.#anyEnabled()) return false
+   *  CONSENT — AND WHY THIS NO LONGER FLIPS THE SWITCH. Joining a swarm is
+   *  the gesture "share these tiles with these people in this zone". The act
+   *  this used to perform on its own was "upload my bytes to a named third
+   *  party", which is a different act with a different counterparty, and the
+   *  participant never said it. So this answers the question and emits it:
+   *  `'ready'` (a target exists), `'opted-out'` (they decided), or
+   *  `'needs-host'` — in which case `host-sync:needs-target` fires and the
+   *  join surface takes the yes (`enablePublicHost` is the yes; the
+   *  `/use-live-relay` command already performs it as a typed gesture). */
+  public readonly ensureSwarmTarget = (): 'ready' | 'opted-out' | 'needs-host' => {
+    if (this.#anyEnabled()) return 'ready'
     let optedOut = false
     try { optedOut = localStorage.getItem(PUBLIC_HOST_KEY) === '0' } catch { /* treat as unasked */ }
-    if (optedOut) return false
-    this.enablePublicHost()
-    return true
+    if (optedOut) return 'opted-out'
+    EffectBus.emit('host-sync:needs-target', { host: this.publicHostDomain() })
+    return 'needs-host'
   }
 
   /** Opt out of the public CDN target. Queued entries and `.public`

@@ -22,7 +22,7 @@ class ManualIdle {
 
 const settle = async () => { for (let i = 0; i < 8; i++) await Promise.resolve() }
 
-function fixture(storage = new MemoryStorage()) {
+function fixture(storage = new MemoryStorage(), allowed?: () => boolean) {
   const idle = new ManualIdle()
   const replication = {
     status: vi.fn(async (): Promise<any> => null),
@@ -31,13 +31,37 @@ function fixture(storage = new MemoryStorage()) {
     verify: vi.fn(async () => false),
   }
   const currentGenome = vi.fn(async () => ({ ...intent, inventory: true }))
-  const queue = new PassiveReplicationQueue({ replication: replication as never, storage, idle, currentGenome })
+  const queue = new PassiveReplicationQueue({ replication: replication as never, storage, idle, currentGenome, allowed })
   return { queue, storage, idle, replication, currentGenome }
 }
 
 beforeEach(() => EffectBus.clear())
 
 describe('passive durable replication', () => {
+  // PUBLISHING IS AN ACT. A commit is not a gesture; without the host-sync
+  // opt-in the queue holds its intent and does nothing — no genome read, no
+  // probe, no byte — and drains the moment the participant says yes.
+  it('does nothing without the opt-in, and everything once it is given', async () => {
+    let optedIn = false
+    const f = fixture(new MemoryStorage(), () => optedIn)
+    f.queue.start()
+    f.queue.enqueueCurrentGenome()
+    f.queue.markReady()
+    f.idle.fire()
+    await settle()
+    expect(f.currentGenome).not.toHaveBeenCalled()
+    expect(f.replication.status).not.toHaveBeenCalled()
+    expect(f.replication.replicate).not.toHaveBeenCalled()
+    expect(f.queue.pending().currentGenomeGeneration).toBe(1)   // intent kept, durable
+
+    optedIn = true
+    f.queue.resume()
+    f.idle.fire()
+    await settle()
+    expect(f.currentGenome).toHaveBeenCalledTimes(1)
+    expect(f.replication.status).toHaveBeenCalled()
+  })
+
   it('does zero startup storage, genome, and network work', () => {
     const f = fixture()
     f.queue.start()

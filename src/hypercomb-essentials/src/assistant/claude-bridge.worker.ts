@@ -14,7 +14,7 @@ import { mintBuildRecord } from '../history/builds-slot.js'
 import { putSummary, listSummaryRuns, type FeedbackSummaryRecord } from './feedback-summaries.js'
 import { readPublicBranches } from '../presentation/tiles/tile-actions.drone.js'
 import { setHiveRoot } from '../sharing/hive-pointer.js'
-import { BRIDGE_FORBIDDEN_ROOT_KEYS, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
+import { bridgeMaySetRootKey, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
 
 // Bridge protocol — matches @hypercomb/sdk/bridge
 const BRIDGE_PORT = 2401
@@ -1146,8 +1146,8 @@ export class ClaudeBridgeWorker extends Worker {
     // words you hold is something the participant does, at their own gesture,
     // or the scope model is decoration. Refused as DATA, in hive-link.ts, so
     // the list extends without touching this worker again.
-    if (BRIDGE_FORBIDDEN_ROOT_KEYS.includes(key)) {
-      return { id: req.id, ok: false, error: `hive-root-set refuses '${key}' — it is a participant act, not a deploy stamp` }
+    if (!bridgeMaySetRootKey(key)) {
+      return { id: req.id, ok: false, error: `hive-root-set refuses '${key}' — only an install:<channel> stamp is settable over the bridge; everything else is a participant act` }
     }
     const host = String(req.host ?? '').trim().toLowerCase() || PUBLIC_CONTENT_HOSTS[0] || ''
     if (!host) return { id: req.id, ok: false, error: 'no index host configured' }

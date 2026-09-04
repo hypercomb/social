@@ -2612,3 +2612,5 @@
   "hosts.hidden.delete-tip": "Forget this build here, permanently. It stays on the host.",
   "hosts.hidden.all": "every build here is hidden"
 }
+  "swarm.needs-host.title": "Nowhere to put your pictures yet",
+  "swarm.needs-host.message": "Shared tiles announce once their content has a host. Type /use-live-relay to publish to the public content endpoint, or set your own host in the hosts panel.",

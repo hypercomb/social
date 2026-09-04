@@ -29,8 +29,8 @@ produced verdicts. So:
   to be refuted on a full read; expect a few misses in the other direction.
 - Fixes are recorded inline as **FIXED (commit)** and left in place so the
   list stays a census, not a to-do. 2026-09-04: the one catastrophic item,
-  the four-hat byte-scan bug, and three of the four pointer copies — 8 of 57
-  closed.
+  the four-hat byte-scan bug, three of the four pointer copies, and the four
+  publish-without-gesture sites — 12 of 57 closed.
 
 ## The headline
 
@@ -115,6 +115,8 @@ mutable-in-place so two readers can disagree. That the identical six lines exist
 four times is itself the evidence. *Fix:* one `writeRegistryPointer(meaning,
 subKey, sig)` emitting a sig-named JSON member under a colon meaning
 (`registry:names` …); delete the four copies.
+
+**FIXED 2026-09-04, all four.** The passive replication queue does no work without the host-sync opt-in (`allowed`, consulted at dispatch; intent stays durable). A learned domain is PROBED and its verified members HELD in `offeredPools`; `placeOffers` is the only path to `handler.accept` and nothing automatic calls it. `ensureSwarmTarget` no longer flips the public CDN on: it answers ready / opted-out / needs-host, emits `host-sync:needs-target`, and the join shows a toast naming the yes (`/use-live-relay`, or the hosts panel). The bridge's `hive-root-set` is an ALLOW-list now — `install:<channel>` and nothing else (`bridgeMaySetRootKey`). Ratcheted in `sharing/publish-gesture.spec.ts`.
 
 **Publishing without a gesture — check 10.**
 - `passive-replication-queue.ts:90` — auto-starts at module load, fires on

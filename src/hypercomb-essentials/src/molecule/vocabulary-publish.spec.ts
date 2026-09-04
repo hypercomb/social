@@ -415,7 +415,9 @@ describe('nothing publishes automatically', () => {
       join(ROOT, 'hypercomb-essentials', 'src', 'assistant', 'claude-bridge.worker.ts'), 'utf8',
     )
     // The colon test alone is NOT the guard — `vocabulary:hive` passes it.
-    expect(worker.includes('BRIDGE_FORBIDDEN_ROOT_KEYS.includes(key)')).toBe(true)
+    // The guard is the ALLOW-list: only an install stamp is settable.
+    expect(worker.includes('bridgeMaySetRootKey(key)')).toBe(true)
+    expect(worker.includes('BRIDGE_FORBIDDEN_ROOT_KEYS')).toBe(false)
     // and the vocabulary act is deliberately not a remote intent
     expect(worker.includes("'vocabulary:publish'")).toBe(false)
   })
