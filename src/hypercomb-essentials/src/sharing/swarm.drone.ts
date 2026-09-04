@@ -1370,12 +1370,13 @@ export class SwarmDrone extends Drone {
     // to whatever's in this list. Omitting them is a silent miss: the
     // broker subscription registers but never receives events, so
     // swarm.requestSubtree() always times out with "no responder."
-    // 30210/30211/30212 = the feedback handshake (request / grant / post),
-    // owned by FeedbackSwarmDrone. 30213 = the durable feedback-loop channel
-    // item (FeedbackChannelDrone). 30214 = the per-recipient feedback REPLY
-    // (FeedbackReplyDrone — host → sender's own channel). Same rule as above:
-    // omit them and the relay filter drops the events as a silent miss.
-    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND, SWARM_LIFECYCLE_KIND, SWARM_BEHAVIOR_KIND, 20400, 30401, 30207, 30210, 30211, 30212, 30213, 30214, 30215, 30216, 30217], true)
+    // 30213 = the durable feedback-loop channel item (FeedbackChannelDrone).
+    // Same rule as above: omit it and the relay filter drops the events as a
+    // silent miss. (30210/30211/30212 were the feedback consent handshake and
+    // 30214 the per-recipient reply; both drones retired with the feedback
+    // window on 2026-09-04 - documentation/annotate-the-screen.md. A kind
+    // nobody publishes and nobody handles has no business in the filter.)
+    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND, SWARM_LIFECYCLE_KIND, SWARM_BEHAVIOR_KIND, 20400, 30401, 30207, 30213, 30215, 30216, 30217], true)
   }
 
   /**
