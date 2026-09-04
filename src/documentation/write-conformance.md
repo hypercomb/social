@@ -30,7 +30,8 @@ produced verdicts. So:
 - Fixes are recorded inline as **FIXED (commit)** and left in place so the
   list stays a census, not a to-do. 2026-09-04: the one catastrophic item,
   the four-hat byte-scan bug, three of the four pointer copies, and the four
-  publish-without-gesture sites — 12 of 57 closed.
+  publish-without-gesture sites, and the life-primitive coherence item —
+  13 of 57 closed.
 
 ## The headline
 
@@ -248,6 +249,15 @@ these are not the shape new writes take. They are listed in `census.json` and
 are excluded from the deviation count on purpose.
 
 ## Life-primitive coherence
+
+**RESOLVED 2026-09-04 — `documentation/life-primitive.md` now exists and is
+the doctrine the code cites.** The four private `CHILD_SLOTS` copies import
+core's roster (ratchet: `history/child-slots.ratchet.spec.ts`). `root` is
+recorded as RESERVED for the molecule's envelope writers, which have not
+landed — not a defect in either live minter. Notes are recorded as the one
+known legacy writer, read-compatible and carried by every closure; their
+forward path is the `notes:<sig>` facet, a deferred forward commit, not an
+in-place fix. The paragraphs below are the census's original finding.
 
 Asked directly: is the molecule model redundant with the Life Primitive? **No —
 they meet at exactly one place and have drifted at three.**

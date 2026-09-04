@@ -72,7 +72,7 @@
 // Toggle live via the public enable()/disable() methods; localStorage
 // changes take effect on the next event, no reload required.
 
-import { EffectBus, SignatureService, registerPoolMeaning, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
+import { CHILD_SLOTS, EffectBus, SignatureService, registerPoolMeaning, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
 import { decorationClosureSigs, nestedResourceSigs } from './decoration-closure.js'
 
 export type HostSyncKind = 'layer' | 'bee' | 'dependency' | 'resource'
@@ -83,10 +83,11 @@ interface SignerLike {
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
-/** Child slots a layer holds its descendant layers in. Also the set of
+/** Child slots a layer holds its descendant layers in — the core roster,
+ *  never restated (documentation/life-primitive.md). Also the set of
  *  `relation` values a meta envelope can carry to mean "I am held as a
  *  child" — the privacy gate reads the relation exactly as it reads a slot. */
-const CHILD_SLOTS = new Set(['cells', 'layers', 'children'])
+const CHILD_SLOT_SET: ReadonlySet<string> = new Set(CHILD_SLOTS)
 
 /** The one incidence a META ENVELOPE (Life Primitive) references.
  *
@@ -110,11 +111,11 @@ const metaIncidence = (record: unknown): { sig: string; kind: HostSyncKind } | n
 }
 
 /** True when an envelope is held as a descendant LAYER — the same condition
- *  the slot walks express as `CHILD_SLOTS.has(slot)`. A tile-only share must
+ *  the slot walks express as `CHILD_SLOT_SET.has(slot)`. A tile-only share must
  *  not descend through one, exactly as it does not descend a `children[]`. */
 const metaIsChildIncidence = (record: unknown, kind: HostSyncKind): boolean =>
   kind === 'layer'
-  && CHILD_SLOTS.has(String((record as Record<string, unknown>)?.['relation'] ?? 'children'))
+  && CHILD_SLOT_SET.has(String((record as Record<string, unknown>)?.['relation'] ?? 'children'))
 const ENTRY_RE = /^([a-f0-9]{64})\.(layer|bee|dependency|resource)$/
 // Pool meanings — sign(meaning) IS the pool address (see #poolSignature).
 // Distinct from PushQueueService's 'push'/'receipts' meanings so the two
@@ -573,7 +574,7 @@ export class HostSyncService extends EventTarget {
     }
     for (const [slot, value] of Object.entries(layer)) {
       if (!Array.isArray(value)) continue
-      const kind: HostSyncKind = CHILD_SLOTS.has(slot) ? 'layer'
+      const kind: HostSyncKind = CHILD_SLOT_SET.has(slot) ? 'layer'
         : slot === 'bees' ? 'bee'
         : slot === 'dependencies' ? 'dependency'
         : 'resource'
@@ -735,7 +736,7 @@ export class HostSyncService extends EventTarget {
       }
       for (const [slot, value] of Object.entries(layer)) {
         if (!Array.isArray(value)) continue
-        const isChildSlot = CHILD_SLOTS.has(slot)
+        const isChildSlot = CHILD_SLOT_SET.has(slot)
         // PRIVACY GATE: without branch closure, descendant layers stay
         // private — skip the child slots entirely.
         if (isChildSlot && !closure) continue
@@ -1286,7 +1287,7 @@ export class HostSyncService extends EventTarget {
       }
       for (const [slot, value] of Object.entries(layer)) {
         if (!Array.isArray(value)) continue
-        const isChildSlot = CHILD_SLOTS.has(slot)
+        const isChildSlot = CHILD_SLOT_SET.has(slot)
         // Tile-only share: descendants are not part of the contract.
         if (isChildSlot && !closure) continue
         const refKind: HostSyncKind = isChildSlot ? 'layer'
@@ -1381,7 +1382,7 @@ export class HostSyncService extends EventTarget {
         }
         for (const [slot, value] of Object.entries(layer)) {
           if (!Array.isArray(value)) continue
-          const isChildSlot = CHILD_SLOTS.has(slot)
+          const isChildSlot = CHILD_SLOT_SET.has(slot)
           if (isChildSlot && !closure) continue
           const refKind: HostSyncKind = isChildSlot ? 'layer'
             : slot === 'bees' ? 'bee'

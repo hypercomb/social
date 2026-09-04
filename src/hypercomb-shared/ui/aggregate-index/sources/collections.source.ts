@@ -33,6 +33,7 @@
 // sanctioned route the command line uses). Never imports essentials.
 
 import {
+  CHILD_SLOTS,
   CANONICAL_REFERENCE_SERVICE_KEY,
   EffectBus,
   USAGE_IOC_KEY,
@@ -52,10 +53,9 @@ const TITLE_KIND = 'title'
 const REFERENCE_KIND = 'reference'
 const SIG = /^[0-9a-f]{64}$/
 
-/** Canonical child-layer slots, in resolution precedence. Mirrors CHILD_SLOTS
- *  in essentials (history/layer-placement.ts) — a string list, not an import,
- *  because shared must never reach into essentials. */
-const CHILD_SLOTS = ['cells', 'layers', 'children'] as const
+// The child roster comes from CORE (`CHILD_SLOTS`, level-roster.ts), which
+// shared may import — the old private copy believed it could not, and was the
+// fourth restatement of one list (documentation/life-primitive.md).
 
 type HistoryLike = {
   sign(l: { explorerSegments?: () => readonly string[] }): Promise<string>
