@@ -62,7 +62,7 @@ types in full trivially. Six of the eleven are genuinely destructive: `flatten`,
 `mesh-block`, `mesh-clear` — are dev/diagnostic; the first pass overstated the
 set.) `/flatten` is the verb that once hard-deleted a pool it mistook for a bag.
 
-### A defect in code committed today
+### A defect in code committed today — *fixed 2026-09-04 (`453bafd98`)*
 
 `fdcfc6152` added a destructive refusal to the bridge's remote-submit listener.
 **It is shaped for the wrong input.** The guard is
@@ -78,7 +78,7 @@ is defeated by writing the line the catalogue teaches.
 Corrected by the verifier: over the bridge a **leaf** removal runs untouched; a
 **nested** one hangs on a `requestConfirm` modal no agent can press.
 
-### And the receipt is dead code for the only production caller
+### And the receipt was dead code for the only production caller — *fixed (`453bafd98`)*
 
 `#submit` passes neither `accept` nor `complete` and returns `{ok:true}`
 unconditionally
@@ -318,10 +318,15 @@ three doors inherit it, and to grow a principal.
 
 ## Owed, in the order that unblocks the most
 
-1. **Fix the bridge's destructive guard** — it checks prose and a machine emits
-   slash. This is a defect in `fdcfc6152` and the smallest real hole.
-2. **Land the `#submit` receipt half** (written, uncommitted) and switch it to
-   `emitTransient`. Until then every refusal reads as success.
+1. ~~**Fix the bridge's destructive guard** — it checks prose and a machine
+   emits slash.~~ **Resolved 2026-09-04** by `453bafd98`: one destructive
+   decision now precedes the prose/slash fork, and the verb-reading rule moved
+   into core as `canonicalVerbOf` with six regression specs.
+2. ~~**Land the `#submit` receipt half** and switch it to `emitTransient`.~~
+   **Resolved 2026-09-04** by `453bafd98`. Note for the record: the first
+   attempt was left uncommitted because that file carried another session's
+   work, and it was **reverted when that session committed** — uncommitted work
+   in a contested file does not survive.
 3. **Correct `/cut`'s `reach`** to `destructive`, and audit the other eleven
    declarations before `reach` is ever read as a tier.
 4. **Fix `/undo N`** — the repair verb, silently broken.
