@@ -10,7 +10,7 @@ vi.hoisted(() => {
 })
 
 import { moleculeAddress } from '@hypercomb/core'
-import { readNotesFacet, unionNoteSigs, writeNotesFacet } from './notes-facet.js'
+import { _resetNotesFacetCache, cachedNotesFacet, readNotesFacet, unionNoteSigs, writeNotesFacet } from './notes-facet.js'
 import type { FacetStore } from '../molecule/facet-succession.js'
 
 describe('writeNotesFacet', () => {
@@ -69,6 +69,17 @@ describe('the one list', () => {
   })
 })
 
+describe('the synchronous path', () => {
+  it('knows nothing until a read, then remembers the WORD it read — case and spacing folded', async () => {
+    _resetNotesFacetCache()
+    expect(cachedNotesFacet('cigars')).toEqual([])
+    const store = { openPool: async () => null, getResource: async () => null }
+    await readNotesFacet('  Cigars ', { store, pubkey: null })
+    expect(cachedNotesFacet('cigars')).toEqual([])           // an absent facet reads as empty, and that is remembered too
+    expect(cachedNotesFacet('')).toEqual([])
+  })
+})
+
 describe('the notes reader', () => {
   it('reads the facet before the slot, and the commit transforms the same union', () => {
     const src = readFileSync(join(process.cwd(), 'hypercomb-essentials', 'src', 'notes', 'notes.drone.ts'), 'utf8')
@@ -79,5 +90,8 @@ describe('the notes reader', () => {
     expect(commit.includes('unionNoteSigs(await readNotesFacet(')).toBe(true)
     // every tree read hands the tile name through
     expect((src.match(/#readAtLocation\(locSig\)/g) ?? []).length).toBe(0)
+    // and the synchronous paint path unions the word's last-read facet
+    const sync = src.slice(src.indexOf('public readonly notesFor ='), src.indexOf('\n  }\n', src.indexOf('public readonly notesFor =')))
+    expect(sync.includes('unionNoteSigs(cachedNotesFacet(cellLabel), slotSigs)')).toBe(true)
   })
 })

@@ -30,7 +30,7 @@
 // propagates to root via the standard merkle cascade.
 
 import { EffectBus } from '@hypercomb/core'
-import { readNotesFacet, unionNoteSigs, writeNotesFacet } from './notes-facet.js'
+import { cachedNotesFacet, readNotesFacet, unionNoteSigs, writeNotesFacet } from './notes-facet.js'
 import {
   addChildInTree,
   insertAsChild,
@@ -353,9 +353,12 @@ export class NotesService {
 
   /**
    * Synchronous notes for a cell at the user's current lineage. Reads
-   * from the peek cache (populated by the preloader walk and by writes).
-   * Returns an empty array if the cell hasn't been touched yet — call
-   * `getNotes()` for the async hydrating read.
+   * from the peek cache (populated by the preloader walk and by writes)
+   * and from the WORD'S facet as of its last async read this session
+   * (`cachedNotesFacet`) — the same union the async read shows, so a
+   * second tile of a word paints the shared list without a round trip
+   * once any tile of that word has been read. Returns an empty array if
+   * nothing is known yet — call `getNotes()` for the async hydrating read.
    */
   public readonly notesFor = (cellLabel: string): Note[] => {
     const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
@@ -363,12 +366,13 @@ export class NotesService {
     const locSig = this.#cellLocationSigSync(cellLabel)
     if (!locSig) return []
     const layer = history.peekCurrentLayer(locSig)
-    if (!layer) return []
-    const sigs = (layer as Record<string, unknown>)[NOTES_SLOT]
-    if (!Array.isArray(sigs)) return []
+    const slot = (layer as Record<string, unknown> | null)?.[NOTES_SLOT]
+    const slotSigs = Array.isArray(slot) ? slot.filter((x): x is string => typeof x === 'string') : []
+    const sigs = unionNoteSigs(cachedNotesFacet(cellLabel), slotSigs)
+    if (sigs.length === 0) return []
     const out: Note[] = []
     for (const sig of sigs) {
-      if (typeof sig !== 'string' || !SIG_REGEX.test(sig)) continue
+      if (!SIG_REGEX.test(sig)) continue
       const cached = this.#cache.get(sig)
       if (cached) out.push(this.#hydrate(sig, cached))
     }

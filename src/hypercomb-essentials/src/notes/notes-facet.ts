@@ -21,7 +21,7 @@
 // NO IDENTITY IS MINTED FOR A NOTE. Without a cached author key the facet is
 // simply not written this time; the layer slot still holds the note.
 
-import { moleculeAddress } from '@hypercomb/core'
+import { moleculeAddress, moleculeKey } from '@hypercomb/core'
 import { readFacetMembers, writeFacetHead, type FacetReadStore, type FacetStore, type FacetWriteResult } from '../molecule/facet-succession.js'
 import { cachedPubkey } from '../sharing/head-claim-signer.js'
 
@@ -32,10 +32,28 @@ export const NOTES_FACET_PLURAL = 'notes'
 const store = (): (FacetStore & FacetReadStore) | undefined =>
   (window as { ioc?: { get?: <T>(k: string) => T | undefined } }).ioc?.get?.<FacetStore & FacetReadStore>('@hypercomb.social/Store')
 
+/** The last facet list each WORD read this session — what the synchronous
+ *  paint path can union without awaiting. Filled by every `readNotesFacet`,
+ *  so a tile's strip catches up the moment any tile of its word has been
+ *  read once. Keyed by the folded word, never the location. */
+const lastRead = new Map<string, string[]>()
+
+/** The facet list for a word as of its last read this session, or `[]`.
+ *  Synchronous by construction; never touches the store. */
+export const cachedNotesFacet = (tileName: string): string[] => {
+  const name = String(tileName ?? '').trim()
+  if (!name) return []
+  return lastRead.get(moleculeKey(name)) ?? []
+}
+
+/** Test seam. */
+export const _resetNotesFacetCache = (): void => { lastRead.clear() }
+
 /**
  * The note sigs on a tile's facet, in order — every author, this reader's own
  * bucket first. Empty when the facet is absent, unreadable, or the tile has
  * no name. Never throws, never mints: it OPENS the pool and creates nothing.
+ * Remembers what it read for the synchronous path (`cachedNotesFacet`).
  */
 export const readNotesFacet = async (
   tileName: string,
@@ -51,7 +69,9 @@ export const readNotesFacet = async (
     plural: NOTES_FACET_PLURAL, subjectSig, store: s,
     ownPubkey: io.pubkey === undefined ? cachedPubkey() : io.pubkey,
   })
-  return read?.members ?? []
+  const members = read?.members ?? []
+  lastRead.set(moleculeKey(name), members)
+  return members
 }
 
 /** The one list a tile's notes are: the facet's members first (every author,
