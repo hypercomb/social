@@ -12,9 +12,9 @@ import { extractPageRefSigs, collectSigsDeep } from '../sharing/decoration-closu
 import { markAuthored, markLayerAuthoredPageSigs } from '../sharing/authored-sigs.js'
 import { mintBuildRecord } from '../history/builds-slot.js'
 import { putSummary, listSummaryRuns, type FeedbackSummaryRecord } from './feedback-summaries.js'
-import { readPublicBranches, setBranchPublic } from '../presentation/tiles/tile-actions.drone.js'
+import { readPublicBranches } from '../presentation/tiles/tile-actions.drone.js'
 import { setHiveRoot } from '../sharing/hive-pointer.js'
-import { PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
+import { BRIDGE_FORBIDDEN_ROOT_KEYS, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
 
 // Bridge protocol — matches @hypercomb/sdk/bridge
 const BRIDGE_PORT = 2401
@@ -75,8 +75,9 @@ type BridgeRequest = {
   dryRun?: boolean
   /** How many entries to return (summary-list). Clamped receiver-side. */
   limit?: number
-  /** `branch-public`: mark (true, the default) or unmark (false) the branch
-   *  at `segments` as public. */
+  /** `branch-public`: REFUSED. Marking a branch public is a participant act —
+   *  it is the scope input of the signed vocabulary claim — so the op reads
+   *  the marks and any attempt to set one is an error. */
   public?: boolean
   /** `hive-root-set`: colon-carrying index key (e.g. `install:essentials`). */
   key?: string
@@ -1138,6 +1139,16 @@ export class ClaudeBridgeWorker extends Worker {
     if (!key.includes(':')) {
       return { id: req.id, ok: false, error: 'hive-root-set requires a colon-carrying key (e.g. install:essentials) — site lineage roots are not settable over the bridge' }
     }
+    // A COLON IS NOT A LICENCE. The colon rule only proves the key is not a
+    // site lineage; it says nothing about whether advancing it is a DEPLOY
+    // STAMP (install:<channel>, which is what this op exists for) or a
+    // PARTICIPANT ACT. `vocabulary:hive` is the second kind — publishing what
+    // words you hold is something the participant does, at their own gesture,
+    // or the scope model is decoration. Refused as DATA, in hive-link.ts, so
+    // the list extends without touching this worker again.
+    if (BRIDGE_FORBIDDEN_ROOT_KEYS.includes(key)) {
+      return { id: req.id, ok: false, error: `hive-root-set refuses '${key}' — it is a participant act, not a deploy stamp` }
+    }
     const host = String(req.host ?? '').trim().toLowerCase() || PUBLIC_CONTENT_HOSTS[0] || ''
     if (!host) return { id: req.id, ok: false, error: 'no index host configured' }
     const result = await setHiveRoot(host, key, sig)
@@ -1571,24 +1582,30 @@ export class ClaudeBridgeWorker extends Worker {
     return { id: req.id, ok: true, data: { name } }
   }
 
-  // Marks (or unmarks) the branch at `segments` public — the same
-  // participant-local flag the tile overlay's make-branch-public toggle
-  // writes. A branch never published before has no publish-panel row until
-  // it carries this mark, so a headless publish (`effect-emit publish:run`)
-  // had no way to reach a FIRST publish; this is that missing step. The mark
-  // is localStorage only — publishing truth still moves solely through
-  // `publishBranch`'s sealed closure and signed index.
+  // READS the public-branch marks. WRITING THEM IS A PARTICIPANT ACT AND IS
+  // REFUSED HERE.
+  //
+  // This op used to WRITE the mark with no gesture at all — the same
+  // class of hole `hive-root-set` had, and one step worse in consequence.
+  // `hc:public-branches` is not merely a panel row: it is the SCOPE INPUT of
+  // the signed vocabulary claim (`molecule/vocabulary-publish.ts` derives the
+  // declared words from exactly these marks), and `swarm.drone.ts` fires
+  // `markPublic` off the same list during a publish walk. An agent driving the
+  // bridge could therefore choose which subtrees a later — properly confirmed
+  // — publish declares, so "the participant chose the scope" would be false
+  // while the confirmation still said it was true.
+  //
+  // A caller that genuinely needs a first publish asks the participant to mark
+  // the branch; the toggle is one click and it is the whole consent gesture.
   async #branchPublic(req: BridgeRequest): Promise<BridgeResponse> {
-    const segments = (req.segments ?? [])
-      .map(s => normalizeCell(String(s ?? '')) || String(s ?? '').trim())
-      .filter(Boolean)
-    if (segments.length === 0) {
-      return { id: req.id, ok: false, error: 'branch-public requires `segments`' }
+    if (req.public !== undefined) {
+      return {
+        id: req.id,
+        ok: false,
+        error: 'branch-public is read-only over the bridge: marking a branch public is a participant act (it is the scope input of the signed vocabulary claim). Ask the participant to use the tile toggle.',
+      }
     }
-    const location = segments.slice(0, -1).join('/')
-    const label = segments[segments.length - 1]
-    const branches = setBranchPublic(location, label, req.public !== false)
-    return { id: req.id, ok: true, data: { branches: readPublicBranches(), applied: branches } }
+    return { id: req.id, ok: true, data: { branches: readPublicBranches() } }
   }
 
   // Runs HostSyncService.reDrain() and returns its summary verbatim. The

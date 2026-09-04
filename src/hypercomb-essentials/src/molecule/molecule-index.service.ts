@@ -271,6 +271,35 @@ export class MoleculeIndexService {
     return map
   }
 
+  /**
+   * THE VOCABULARY OF ONE SUBTREE — record-ACCELERATED, never
+   * record-DEPENDENT.
+   *
+   * `declaredVocabulary()` gives this guarantee for the ROOT; a publish asks
+   * about one PUBLISHED BRANCH, and it used to ask `readRecord`, which "NEVER
+   * DERIVES". This pool is declared `index` kind — recomputable, wipe-safe,
+   * GC-able — so a collector is LICENSED to empty it, and with the raw reader
+   * a wipe turned a publishable claim into a refusal. That is a different
+   * answer, not a slower one, and `optimize-phase.md` rule 3 forbids exactly
+   * that.
+   *
+   * A WHOLE record answers alone. Anything else — absent, empty, truncated —
+   * falls through to the same cold walk `fallbackVocabulary` uses, unioned
+   * with whatever the partial record held. Null means the walk could prove
+   * nothing at all, which a caller must treat as an incomplete picture and
+   * never as an empty vocabulary.
+   */
+  subtreeVocabulary = async (layerSig: string): Promise<MoleculeRecord | null> => {
+    const record = await this.readRecord(layerSig)
+    if (MoleculeIndexService.#whole(record)) return record
+    const words = new MoleculeWordSet()
+    for (const word of record?.words ?? []) words.add(word.a, word.n, 0)
+    const truncated = await this.#walkNames(layerSig, words, { nodes: COLD_WALK_NODES }, 0, new Set())
+      .catch(() => true)
+    if (words.size === 0 && truncated) return null
+    return words.seal(truncated)
+  }
+
   /** The root record, or null. One place, so every reader below asks the same
    *  question and gets the same `truncated`. */
   async #rootRecord(): Promise<MoleculeRecord | null> {
@@ -340,6 +369,9 @@ export interface MoleculeIndexReader {
   declaredVocabulary(): Promise<ReadonlySet<string>>
   declaredVocabularyPartial(): Promise<boolean>
   readRecord(layerSig: string): Promise<MoleculeRecord | null>
+  /** One subtree's vocabulary, with the pool as an accelerator and never as a
+   *  dependency. THE READ A PUBLISH USES. */
+  subtreeVocabulary(layerSig: string): Promise<MoleculeRecord | null>
   rootSig(): Promise<string | null>
 }
 
@@ -352,6 +384,7 @@ export const moleculeIndexReader = (service: MoleculeIndexService): MoleculeInde
     declaredVocabulary: service.declaredVocabulary,
     declaredVocabularyPartial: service.declaredVocabularyPartial,
     readRecord: service.readRecord,
+    subtreeVocabulary: service.subtreeVocabulary,
     rootSig: () => service.rootSig(),
   })
 

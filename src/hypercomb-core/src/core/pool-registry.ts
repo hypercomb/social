@@ -345,6 +345,28 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // picture from layers, so it is state and never minted from the optimize
   // phase. Colon-scoped so it can never collide with a tile slugged 'visual'.
   'visual:tile-art',
+  // THE SIGNED VOCABULARY CLAIM (documentation/vocabulary-claim.md). Three
+  // spellings, reserved together because sign() of a typo mints a different
+  // address forever and a later correction is a data migration:
+  //   vocabulary:hive      the SURFACE — line 3 of the claim preimage, and the
+  //                        reserved hive-index root key. It is a door the
+  //                        reader RENDERS, not a directory anything writes.
+  //   vocabulary:published the participant's own ledger of what they have
+  //                        published and the highest seq they signed — TRUTH,
+  //                        the anti-rollback record planVocabularyClaim
+  //                        takes as `minted`. Never derived from layers, so
+  //                        never minted from the optimize phase.
+  //   vocabulary:seen      a reader's proven high-water per publisher. Holds
+  //                        {at, seq} and NEVER a body sig: a 64-hex string in
+  //                        a pool member's bytes is credited by
+  //                        sigsReferencedOutside, and pinning a STRANGER's
+  //                        atoms in my own store is not a cache, it is litter.
+  // Colon-scoped for the usual reason and one extra: publishing into a
+  // BARE-WORD pool on a relay would make every sibling entry at that address
+  // publicly enumerable by anyone who can derive the word.
+  'vocabulary:hive',
+  'vocabulary:published',
+  'vocabulary:seen',
   'websites:menu',
 ])
 

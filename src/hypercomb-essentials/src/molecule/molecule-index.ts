@@ -111,24 +111,51 @@ export const MAX_RECORD_DEPTH = 24
  *  paths, verified for bytes and not for shape), and a wire one the moment a
  *  host is asked, so the gate is here rather than at each ingress.
  *
- *  AND THE SPELLING IS NEVER A SIGNATURE. `referencesOutside` credits every
- *  64-hex string in a pool member's bytes, so a tile named a 64-hex string
- *  would put that string in a record and PIN it against prune — a derived
+ *  AND THE SPELLING NEVER CARRIES A SIGNATURE. `referencesOutside` credits
+ *  every 64-hex string in a pool member's bytes, so a tile whose name contains
+ *  one would put that string in a record and PIN it against prune — a derived
  *  cache that changes what the collector keeps is not wipe-safe. The address
  *  field is unavoidably 64-hex and is a molecule address, never content; the
- *  display spelling has no such excuse, so it is dropped. */
+ *  display spelling has no such excuse, so every signature-shaped run is
+ *  stripped from it AT THE WRITER (`safeSpelling`). */
 const ADDRESS = /^[0-9a-f]{64}$/i
+
+/** Any 64-hex RUN, anywhere in a string — not the anchored form. */
+const SIGNATURE_RUN = /[0-9a-f]{64}/gi
+
+/**
+ * THE SPELLING, WITH EVERY SIGNATURE-SHAPED RUN REMOVED — AND IT IS DONE AT
+ * THE WRITER.
+ *
+ * The gate used to be the anchored `ADDRESS.test(spelling)` on the READ path,
+ * which was wrong in both directions:
+ *
+ *   * PRUNE NEVER READS THROUGH THIS FILE. `HistoryService.referencesOutside`
+ *     opens the pool member and scans its BYTES with an UNANCHORED regex, so
+ *     the only copy that matters is the one on disk. A read-side filter is too
+ *     late by definition.
+ *   * ANCHORED IS TOO NARROW. A name that merely CONTAINS a signature —
+ *     "backup <sig>", a revision label, a pasted or adopted address — passed
+ *     the test and pinned that signature against the collector. `absorb`
+ *     carries a child's spelling into every ancestor record, so one badly
+ *     named tile pinned its signature all the way up.
+ *
+ * The spelling is a diagnostic; nothing branches on it and the claim body
+ * discards it entirely. Losing a hex run from a display string costs nothing
+ * and is the only way this cache stays wipe-safe.
+ */
+export const safeSpelling = (spelling: unknown): string =>
+  typeof spelling === 'string' ? spelling.replace(SIGNATURE_RUN, '') : ''
 
 const readableWord = (raw: unknown): MoleculeWord | null => {
   if (!raw || typeof raw !== 'object') return null
   const word = raw as Record<string, unknown>
   const address = typeof word['a'] === 'string' ? word['a'].toLowerCase() : ''
   if (!ADDRESS.test(address)) return null
-  const spelling = typeof word['n'] === 'string' ? word['n'] : ''
   const count = Number(word['c'])
   return {
     a: address,
-    n: ADDRESS.test(spelling) ? '' : spelling,
+    n: safeSpelling(word['n']),
     c: Number.isSafeInteger(count) && count > 0 ? count : 1,
   }
 }
@@ -172,10 +199,12 @@ export class MoleculeWordSet {
 
   /** Add one occurrence. `depth` decides only which spelling is displayed. */
   add(address: string, spelling: string, depth = 0): void {
+    // SANITISED AT THE WRITER, because the writer is what prune reads.
+    const safe = safeSpelling(spelling)
     const held = this.#byAddress.get(address)
-    if (!held) { this.#byAddress.set(address, { n: spelling, c: 1, d: depth }); return }
+    if (!held) { this.#byAddress.set(address, { n: safe, c: 1, d: depth }); return }
     held.c += 1
-    if (depth < held.d) { held.n = spelling; held.d = depth }
+    if (depth < held.d) { held.n = safe; held.d = depth }
   }
 
   /** Splice a child's record in WHOLE — the composition step, and the reason
@@ -183,10 +212,11 @@ export class MoleculeWordSet {
    *  exactly true; its depths shift down by one relative to this parent. */
   absorb(record: MoleculeRecord, depth = 1): void {
     for (const word of record.words) {
+      const safe = safeSpelling(word.n)
       const held = this.#byAddress.get(word.a)
-      if (!held) { this.#byAddress.set(word.a, { n: word.n, c: word.c, d: depth }); continue }
+      if (!held) { this.#byAddress.set(word.a, { n: safe, c: word.c, d: depth }); continue }
       held.c += word.c
-      if (depth < held.d) { held.n = word.n; held.d = depth }
+      if (depth < held.d) { held.n = safe; held.d = depth }
     }
   }
 

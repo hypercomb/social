@@ -94,6 +94,48 @@ export function formatRootOf(roots: Record<string, string>): string | null {
   return SIG_RE.test(sig) ? sig : null
 }
 
+// ── The signed VOCABULARY CLAIM (documentation/vocabulary-claim.md) ────────
+//
+// Same two hard constraints as `format:hive`, and for the same reasons: the
+// index cannot carry an extra TOP-LEVEL field (the next publish from ANY
+// client re-serializes `{v, roots}` and erases it), and a roots VALUE must be
+// 64-hex or `fetchHiveIndex` rejects the WHOLE index as malformed — one bad
+// value unpublishes every branch for every reader. So the vocabulary is a
+// reserved KEY pointing at a content-addressed claim atom, never an inline
+// word list.
+//
+// Same spelling as the pool meaning, deliberately, and it carries word
+// characters on both sides of the colon — which is what makes the reservation
+// hold.
+
+export const VOCABULARY_ROOT_KEY = 'vocabulary:hive'
+
+/** The signed vocabulary claim a hive index publishes, or null. Callers pass
+ *  the `roots` of an ALREADY-VERIFIED index — this helper adds no trust. */
+export function vocabularyRootOf(roots: Record<string, string>): string | null {
+  const sig = String(roots[VOCABULARY_ROOT_KEY] ?? '').trim().toLowerCase()
+  return SIG_RE.test(sig) ? sig : null
+}
+
+/**
+ * ROOT KEYS THE BRIDGE MAY NEVER SET.
+ *
+ * `claude-bridge.worker.ts`'s `hive-root-set` op advances the participant's
+ * SIGNED index with no participant gesture at all — an agent or a deploy
+ * script drives it — and it refuses only COLON-LESS keys, precisely so it
+ * cannot clobber a site lineage. Every reserved key is therefore remotely
+ * settable by construction, which is fine for `install:<channel>` (that IS a
+ * deploy stamp) and fatal for a vocabulary claim: publishing what words you
+ * hold is something the PARTICIPANT does, or the whole scope model is a
+ * decoration.
+ *
+ * Pure data, so the refusal is testable and extends without touching the
+ * worker again.
+ */
+export const BRIDGE_FORBIDDEN_ROOT_KEYS: readonly string[] = Object.freeze([
+  VOCABULARY_ROOT_KEY,
+])
+
 /** localStorage key recording which adopted roots follow a static
  *  publisher: `{ "<rootName>": { pubkey, hosts, lineageKey } }`.
  *  Participant-local — like hc:adopted-roots, never folded into lineage. */
