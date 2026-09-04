@@ -5,6 +5,7 @@ import {
   type HexOrientation,
 } from '@hypercomb/essentials/preferences/settings';
 import { RouterOutlet } from '@angular/router';
+import { awaitFirstTilePaint } from '@hypercomb/shared/core/first-tile-paint';
 import { isTransientMode } from '@hypercomb/shared/core/view-mode.service';
 import { CommandLineComponent } from '@hypercomb/shared/ui/command-line/command-line.component';
 import { ControlsBarComponent } from '@hypercomb/shared/ui/controls-bar/controls-bar.component';
@@ -218,7 +219,8 @@ export class App implements AfterViewInit {
     // resolver is ScriptPreloader, whose first find walks every bee/dependency
     // file in OPFS; starting that walk first stretched a trivial explorerDir()
     // read from single-digit milliseconds to ~900ms on a cold profile.
-    const firstTilePaint = this.awaitFirstTilePaint()
+    const lineage = get('@hypercomb.social/Lineage') as { explorerLabel?: () => string } | undefined
+    const firstTilePaint = awaitFirstTilePaint(String(lineage?.explorerLabel?.() ?? '/'))
     const entries = list()
       .map(key => ({ key, bee: get(key) }))
       .filter((entry): entry is { key: string; bee: Bee } =>
@@ -273,27 +275,5 @@ export class App implements AfterViewInit {
 
     // broadcast initial mesh state so drones can react
     EffectBus.emit('mesh:public-changed', { public: this.meshPublic() })
-  }
-
-  private readonly awaitFirstTilePaint = (): Promise<void> => {
-    const lineage = get('@hypercomb.social/Lineage') as { explorerLabel?: () => string } | undefined
-    const targetLocationKey = String(lineage?.explorerLabel?.() ?? '/')
-    return new Promise(resolve => {
-      let off: (() => void) | undefined
-      let done = false
-      const finish = (): void => {
-        if (done) return
-        done = true
-        off?.()
-        resolve()
-      }
-      const maybeOff = EffectBus.on<{ settled?: boolean; locationKey?: string }>('render:cell-count', payload => {
-        if (payload?.settled !== true || payload?.locationKey !== targetLocationKey) return
-        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(finish)
-        else queueMicrotask(finish)
-      })
-      off = typeof maybeOff === 'function' ? maybeOff : undefined
-      if (done) off?.()
-    })
   }
 }
