@@ -121,7 +121,9 @@ describe('the molecule index record must not pin content against prune', () => {
       'utf8',
     )
     expect(src.includes('poolCreditsMemberNames(facts)')).toBe(true)
-    expect(src.includes('if (creditsNames) hit(name.toLowerCase())')).toBe(true)
+    // Name AND bytes: a wipe-safe member is skipped whole, never scanned.
+    expect(src.includes('if (!creditsNames) continue')).toBe(true)
+    expect(src.includes('if (creditsNames) hit(name.toLowerCase())')).toBe(false)
   })
 
   it('the addresses themselves are fine — a molecule address is not content', () => {

@@ -52,7 +52,7 @@ vi.mock('./hive-pointer.js', () => ({
   get: (key: string): unknown => {
     if (key === '@hypercomb.social/Store') return { putResource: async () => BUNDLE }
     if (key === '@diamondcoreprocessor.com/HistoryService') {
-      return { sealSubtree: async () => HEAD, healSubtreeBags: async () => void 0 }
+      return { sealSubtree: async () => HEAD }
     }
     if (key === '@diamondcoreprocessor.com/HostSyncService') {
       return {

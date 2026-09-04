@@ -27,7 +27,9 @@ produced verdicts. So:
   no second reader checked them.
 - The number is therefore a **ceiling on deviations**, not a floor. Expect some
   to be refuted on a full read; expect a few misses in the other direction.
-- Nothing here has been fixed. This document is the list.
+- Fixes are recorded inline as **FIXED (commit)** and left in place so the
+  list stays a census, not a to-do. First stroke, 2026-09-04: the one
+  catastrophic item and the four-hat byte-scan bug — 5 of 57 closed.
 
 ## The headline
 
@@ -61,6 +63,9 @@ commit path and the store are the remaining sites.
 
 ### Catastrophic
 
+**FIXED 2026-09-04 — deleted, with all three callers. Seal failure now surfaces
+as it already did (`lastSealFailure` / `'seal-failed'`).**
+
 **`history.service.ts:2837` `healSubtreeBags → commitLayer`** — neither
 operation. It takes a node that already carries *more* detail (a legitimately
 newer descendant edit) and republishes an ancestor's frozen, less-detailed hint
@@ -70,6 +75,11 @@ automatic call sites (`snapshot.queen.ts:113`, `publish-branch.ts:226`,
 (`lastSealFailure` / `'seal-failed'`).
 
 ### Wide
+
+**FIXED 2026-09-04 — a wipe-safe member is now skipped whole (`if
+(!creditsNames) continue`), name and bytes; ratcheted in
+`molecule-index.prune-pin.spec.ts`. The four sites below are unchanged and
+conform as writes; what was wrong was the reader crediting them.**
 
 **One bug wearing four hats — check 6.** `HistoryService.referencesOutside`
 (`:4425`) correctly refuses to credit a wipe-safe pool's member *names*, but

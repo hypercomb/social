@@ -1,5 +1,5 @@
 // core/history.service.ts
-import { CHILD_SLOTS, EffectBus, MARKER_CEILING, SignatureService, SignatureStore, USAGE_IOC_KEY, classifyDirectoryEntry, hardDeleteVetoFor, healLegacyLayer, isMetaEnvelope, isPoolAddress, markerName as markerNameOf, metaPayloadOf, packedStoreEnabled, poolAddresses, poolMeaningOf, type MetaEnvelope, type UsageRanker } from '@hypercomb/core'
+import { CHILD_SLOTS, EffectBus, MARKER_CEILING, SignatureService, SignatureStore, USAGE_IOC_KEY, classifyDirectoryEntry, hardDeleteVetoFor, healLegacyLayer, isMetaEnvelope, isPoolAddress, markerName as markerNameOf, metaPayloadOf, packedStoreEnabled, poolAddresses, poolCreditsMemberNames, poolKindOfAddress, poolMeaningOf, type MetaEnvelope, type UsageRanker } from '@hypercomb/core'
 import { lineageKey, rawLineageKey } from './lineage-key.js'
 import { canonicalizeLayer } from './canonical-layer.js'
 import { isBareLayer } from './child-sig-guard.js'
@@ -2790,65 +2790,6 @@ export class HistoryService {
   }
 
   /**
-   * DELIBERATE repair op: RE-ASSERT the current head chain into descendant
-   * bags. Walks a subtree from its live head and, wherever a child location's
-   * bag head disagrees with the layer the parent chain names for it, commits
-   * that hinted layer forward as the child's new head marker. Covers BOTH
-   * divergence damages: off-lineage hints (pool re-mints that never touched
-   * the child bag) and bag-level regressions (stale-head sessions re-committing
-   * superseded content on top of good markers — the 2026-07-16 catastrophe;
-   * its fingerprint is runs of duplicate markers). After a heal, bags agree
-   * with their ancestors, so sealSubtree and every location walk yield the
-   * asserted generation natively — append-only, the doctrine's "re-apply
-   * forward" recovery, generalized.
-   *
-   * THE INVOKER ASSERTS THE TREE. If a descendant carries a legitimate edit
-   * newer than the parent's frozen hint (normal leaf-only staleness), this op
-   * re-commits the hint OVER it — only run it on a branch whose head chain
-   * you have verified current (and read the returned report). Mints real
-   * markers (truth): explicit user/repair action ONLY — never from the
-   * optimize phase, never on a schedule. Absent bags are left absent (the
-   * virtual-seed/husk machinery owns those).
-   */
-  public readonly healSubtreeBags = async (
-    segments: readonly string[],
-    report: { healed: { path: string; from: string; to: string }[]; visited: number } = { healed: [], visited: 0 },
-    seen: Set<string> = new Set(),
-  ): Promise<{ healed: { path: string; from: string; to: string }[]; visited: number }> => {
-    const locSig = await this.sign({ explorerSegments: () => [...segments] })
-    if (!locSig || seen.has(locSig)) return report
-    seen.add(locSig)
-    report.visited++
-
-    const head = await this.currentLayerAt(locSig)
-    if (!head) return report
-    const childSigs = Array.isArray(head.children) ? head.children : []
-    for (const cs of childSigs) {
-      const child = await this.getLayerBySig(String(cs))
-      const name = (child?.name ?? '').trim()
-      if (!child || !name) continue // unresolvable child — nothing to compare, nothing to mint
-      const childPath = [...segments, name]
-      const childLoc = await this.sign({ explorerSegments: () => childPath })
-      if (childLoc) {
-        const bag = await this.listLayers(childLoc)
-        const bagHead = bag.length > 0 ? bag[bag.length - 1].layerSig : null
-        if (bagHead && bagHead !== String(cs)) {
-          const offLineage = !bag.some(e => e.layerSig === String(cs))
-          const committed = await this.commitLayer(childLoc, child)
-          report.healed.push({ path: childPath.join('/'), from: bagHead, to: committed })
-          console.info(
-            `[history] healSubtreeBags: /${childPath.join('/')} advanced ` +
-            `${bagHead.slice(0, 8)} → ${committed.slice(0, 8)} ` +
-            `(${offLineage ? 'off-lineage hint' : 'bag head superseded by parent chain'})`,
-          )
-        }
-      }
-      await this.healSubtreeBags(childPath, report, seen)
-    }
-    return report
-  }
-
-  /**
    * The child NAMES directly under a location path — the SAME source of
    * truth the renderer uses (`currentLayerAt` → each child sig's own
    * `.name`), so a membership test here matches what actually paints as a
@@ -4460,7 +4401,11 @@ export class HistoryService {
     /** One sig-named directory, classified ENTRY BY ENTRY. `depth` bounds the
      *  recursion at the level the molecule shape uses; a deeper nest costs
      *  authority rather than being walked forever. */
-    const walk = async (dir: FileSystemDirectoryHandle, depth: number): Promise<void> => {
+    const walk = async (
+      dir: FileSystemDirectoryHandle,
+      depth: number,
+      creditsNames = true,
+    ): Promise<void> => {
       for await (const [name, handle] of (dir as any).entries()) {
         if (remaining.size === 0) return
         await yieldIfDue()
@@ -4471,11 +4416,28 @@ export class HistoryService {
           } else if (entryKind === 'member' && handle.kind === 'file') {
             // The NAME first: under the molecule model a member IS an atom's
             // address, and an EMPTY member file names content by nothing else.
+            //
+            // EXCEPT IN A WIPE-SAFE POOL, where the member is named by the
+            // SOURCE SIGNATURE IT DERIVES FROM — that is the whole of a derived
+            // cache's invalidation rule — so crediting the name would keep a
+            // layer alive purely because an accelerator had been minted for it,
+            // and wiping the pool would change what the collector keeps.
+            // `poolCreditsMemberNames` is the one place that rule lives.
+            //
+            // AND THE BYTES ARE NOT SCANNED EITHER. A derived record's bytes
+            // name the layer signatures it was derived from (a children
+            // manifest, a search record, a genome doc that enumerates every
+            // sig in the hive). Scanning them pinned every layer an
+            // accelerator had ever been minted for, so the pool changed what
+            // the collector kept — the one thing a wipe-safe pool is defined
+            // by never doing. A record nobody may depend on cannot be a
+            // reference; it is skipped whole.
+            if (!creditsNames) continue
             hit(name.toLowerCase())
             await readFile(handle as FileSystemFileHandle, 'member')
           } else if (handle.kind === 'directory') {
             if (depth <= 0) { unreadable++; continue }
-            await walk(handle as FileSystemDirectoryHandle, depth - 1)
+            await walk(handle as FileSystemDirectoryHandle, depth - 1, creditsNames)
           }
           // A `foreign` FILE is credited nothing and costs nothing: it is not
           // a shape this hive writes, and a name that is neither a marker nor
@@ -4493,7 +4455,11 @@ export class HistoryService {
     for (const [lineageSig, dirHandle] of bags) {
       if (remaining.size === 0) break
       if (lineageSig === locationSig) continue
-      try { await walk(dirHandle as FileSystemDirectoryHandle, 2) }
+      // A DERIVED CACHE MAY NEVER CHANGE WHAT THE COLLECTOR KEEPS. Its members
+      // are named by the signatures being decided about, so their NAMES are
+      // not references. Undeclared is not wipe-safe: the default credits.
+      const facts = await poolKindOfAddress(lineageSig).catch(() => undefined)
+      try { await walk(dirHandle as FileSystemDirectoryHandle, 2, poolCreditsMemberNames(facts)) }
       catch { unreadable++ }
     }
     return { found, authoritative: unreadable === 0 }
