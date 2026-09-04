@@ -36,8 +36,8 @@ produced verdicts. So:
   surface, the translation service, the swarm arrival forge, the install
   purge, the three primitive items in the history service, and two of the
   three derived-cache items (the third waits on show-cell, held by another
-  session) — 28 of 57 closed (one not reproduced). Nothing at wide radius
-  remains.
+  session), and the committer's create-reset branch — 29 of 57 closed (one
+  not reproduced). Nothing at wide radius remains.
 
 ## The headline
 
@@ -211,7 +211,7 @@ the siblings already have.
   (one-folder-shape violation) and a second, incompatible marker shape that
   `purgeNonLayerFiles` classifies as pre-merkle and drops. *Fix:* delete;
   nothing reads it.
-- `layer-committer.drone.ts:1199` the create-reset branch — the one place the
+- *FIXED 2026-09-04 — both reset sites (the name-add branch and the import path's "fresh" hydrate) link the head; `cell:fresh` and its listener are gone; ratchet `history/create-links-head.spec.ts`.* `layer-committer.drone.ts:1199` the create-reset branch — the one place the
   commit path deliberately publishes a *less*-detailed head over a live one.
   *Fix:* link the existing head (as `revive: true` already does).
 - `hive-participant.ts:439` — `idOf(item)` (content) becomes a path segment;
