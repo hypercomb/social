@@ -119,9 +119,12 @@ per note (`relation: 'notes'`, `root: 'notes'`, order in `slot`), a
 succession atom `{succession:1, signer, prev, members, at}`, and one signed
 head claim in this author's bucket (`molecule/facet-succession.ts`, the first
 facet writer; `notes/notes-facet.ts`). The note atoms are untouched, so no
-tree re-signs. The layer slot is still written and still read; reads move to
-the facet in a later step. A note never mints an identity: without a cached
-key the facet is skipped that time.
+tree re-signs. The layer slot is still written, and READS UNION the facet with
+it — facet first, every author's verified head, this reader's own bucket
+leading — so two tiles named the same read the same notes, and a commit
+transforms that same union, so a delete at one is a delete for the word. A
+read OPENS the pool and never creates it. A note never mints an identity:
+without a cached key the facet write is skipped that time.
 
 ## One roster, not four
 

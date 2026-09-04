@@ -10,7 +10,7 @@ vi.hoisted(() => {
 })
 
 import { moleculeAddress } from '@hypercomb/core'
-import { writeNotesFacet } from './notes-facet.js'
+import { readNotesFacet, unionNoteSigs, writeNotesFacet } from './notes-facet.js'
 import type { FacetStore } from '../molecule/facet-succession.js'
 
 describe('writeNotesFacet', () => {
@@ -49,5 +49,35 @@ describe('the notes drone', () => {
     expect(update).toBeGreaterThan(-1)
     expect(facet).toBeGreaterThan(update)
     expect(body.includes('await writeNotesFacet(')).toBe(false)
+  })
+})
+
+describe('the one list', () => {
+  it('unions facet first, then the slot, deduped, order kept', () => {
+    const a = 'a'.repeat(64), b = 'b'.repeat(64), c = 'c'.repeat(64)
+    expect(unionNoteSigs([b, a], [a, c])).toEqual([b, a, c])
+    expect(unionNoteSigs([], [c, c, a])).toEqual([c, a])
+    expect(unionNoteSigs([], [])).toEqual([])
+  })
+
+  it('reads an absent facet as empty, opening and never creating', async () => {
+    const opened: string[] = []
+    const store = { openPool: async (m: string) => { opened.push(m); return null }, getResource: async () => null }
+    expect(await readNotesFacet('cigars', { store, pubkey: null })).toEqual([])
+    expect(opened).toHaveLength(1)
+    expect(opened[0]!.startsWith('notes:')).toBe(true)
+  })
+})
+
+describe('the notes reader', () => {
+  it('reads the facet before the slot, and the commit transforms the same union', () => {
+    const src = readFileSync(join(process.cwd(), 'hypercomb-essentials', 'src', 'notes', 'notes.drone.ts'), 'utf8')
+    const read = src.slice(src.indexOf('async #readAtLocation('), src.indexOf('\n  }\n', src.indexOf('async #readAtLocation(')))
+    expect(read.includes('readNotesFacet(tileName)')).toBe(true)
+    expect(read.includes('unionNoteSigs(facetSigs, slotSigs)')).toBe(true)
+    const commit = src.slice(src.indexOf('async #commitCellNotes('), src.indexOf('\n  }\n', src.indexOf('async #commitCellNotes(')))
+    expect(commit.includes('unionNoteSigs(await readNotesFacet(')).toBe(true)
+    // every tree read hands the tile name through
+    expect((src.match(/#readAtLocation\(locSig\)/g) ?? []).length).toBe(0)
   })
 })

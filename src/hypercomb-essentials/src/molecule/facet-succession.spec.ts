@@ -23,7 +23,7 @@ vi.hoisted(() => {
 import {
   SignatureService, facetAddress, headClaimPreimage, mintMetaEnvelope, poolKindOfMeaning, facetPreimage,
 } from '@hypercomb/core'
-import { _resetMintedFacetClaims, writeFacetHead, type FacetStore } from './facet-succession.js'
+import { _resetMintedFacetClaims, readFacetMembers, writeFacetHead, type FacetStore } from './facet-succession.js'
 import type { HeadClaimSignResult } from '../sharing/head-claim-signer.js'
 
 const PUBKEY = 'a'.repeat(64)
@@ -50,10 +50,16 @@ const fake = () => {
       }),
     } as unknown as FileSystemDirectoryHandle
   }
-  const pool = { name: 'facet', kind: 'directory', getDirectoryHandle: async (name: string) => bucketDir(name) } as unknown as FileSystemDirectoryHandle
-  const store: FacetStore & { resources: Map<string, string>; buckets: Map<string, Map<string, string>>; pools: string[] } = {
+  const pool = {
+    name: 'facet', kind: 'directory',
+    getDirectoryHandle: async (name: string) => bucketDir(name),
+    async *entries() { for (const pubkey of buckets.keys()) yield [pubkey, bucketDir(pubkey)] },
+  } as unknown as FileSystemDirectoryHandle
+  const store: FacetStore & { openPool: (m: string) => Promise<FileSystemDirectoryHandle | null>; resources: Map<string, string>; buckets: Map<string, Map<string, string>>; pools: string[] } = {
     resources, buckets, pools: [],
     getPool: async (meaning) => { store.pools.push(meaning); return pool },
+    // the read-only open: null until a WRITE has created the pool
+    openPool: async () => (buckets.size > 0 ? pool : null),
     putResource: async (blob) => { const text = await blob.text(); const sig = await sha(text); resources.set(sig, text); return sig },
     getResource: async (sig) => { const t = resources.get(sig); return t === undefined ? null : ({ text: async () => t } as unknown as Blob) },
     putArtifactMeta: async (kind, sig, incidence) => {
@@ -145,5 +151,44 @@ describe('writeFacetHead', () => {
     expect((await write(store, ['not-a-sig'])).ok).toBe(false)
     expect((await writeFacetHead({ plural: 'notes', subjectSig: 'nope', members: [N1], store, pubkey: PUBKEY, sign: fakeSign })).ok).toBe(false)
     expect(store.resources.size).toBe(0)
+  })
+})
+
+describe('readFacetMembers', () => {
+  const permissive = () => () => true
+
+  it('is null for a facet nobody has written — and OPENS, never creates', async () => {
+    _resetMintedFacetClaims()
+    const store = fake()
+    expect(await readFacetMembers({ plural: 'notes', subjectSig: SUBJECT, store, verify: permissive })).toBeNull()
+    expect(store.pools).toEqual([])
+  })
+
+  it('reads back exactly what was written, in slot order, from the verified head', async () => {
+    _resetMintedFacetClaims()
+    const store = fake()
+    await write(store, [N2, N1])
+    const read = await readFacetMembers({ plural: 'notes', subjectSig: SUBJECT, store, ownPubkey: PUBKEY, verify: permissive })
+    expect(read?.members).toEqual([N2, N1])
+    expect(read?.authors).toBe(1)
+  })
+
+  it('after a change, reads the NEW head — the old claim stays but does not rank', async () => {
+    _resetMintedFacetClaims()
+    const store = fake()
+    await write(store, [N1])
+    await write(store, [N2])
+    const read = await readFacetMembers({ plural: 'notes', subjectSig: SUBJECT, store, verify: permissive })
+    expect(read?.members).toEqual([N2])
+    expect(store.buckets.get(PUBKEY)!.size).toBe(2)
+  })
+
+  it('refuses a claim whose signature does not verify — an unverified bucket contributes nothing', async () => {
+    _resetMintedFacetClaims()
+    const store = fake()
+    await write(store, [N1])
+    const read = await readFacetMembers({ plural: 'notes', subjectSig: SUBJECT, store, verify: () => () => false })
+    expect(read?.members).toEqual([])
+    expect(read?.authors).toBe(0)
   })
 })

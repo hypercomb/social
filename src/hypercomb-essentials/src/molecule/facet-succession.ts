@@ -33,16 +33,19 @@
 // bucket is history; history never heals.
 
 import {
+  acceptHeadClaim,
   declarePoolKind,
   facetAddress,
   facetPreimage,
+  metaPayloadOf,
   moleculeKey,
   planHeadClaim,
   resolveBucketHead,
   SignatureService,
+  type HeadClaimVerifier,
   type HeldHeadClaim,
 } from '@hypercomb/core'
-import { readHeadEntry, signHeadClaim, type HeadClaimSignResult } from '../sharing/head-claim-signer.js'
+import { readHeadEntry, signHeadClaim, verifierFor, type HeadClaimSignResult } from '../sharing/head-claim-signer.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 
@@ -204,4 +207,119 @@ export const writeFacetHead = async (input: FacetWriteInput): Promise<FacetWrite
   } catch (err) { return { ok: false, reason: 'no pool', detail: String(err) } }
   minted.set(`${facet}/${pubkey}`, { head, prev: plan.prev, seq: plan.seq })
   return { ok: true, facet, head, seq: plan.seq, claim, changed: true }
+}
+
+// ---------------------------------------------------------------------------
+// THE READ HALF
+// ---------------------------------------------------------------------------
+//
+// OPENS, NEVER MINTS. A read uses `openPool` — absent pool, null, nothing
+// created — because merely LOOKING at a word's notes must not grow a directory
+// that claims the participant uses the feature. Every claim in every author
+// bucket is verified against the BUCKET'S key by `acceptHeadClaim`, the same
+// gate a peer's bytes face; the reader never trusts a location a claim
+// declares, only the one it walked to. The members are the union across
+// authors, this reader's own bucket first, each author's list in its slot
+// order — and an unreadable bucket ranks nobody.
+
+export interface FacetReadStore {
+  openPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null | undefined>
+  getResource: (sig: string) => Promise<Blob | null | undefined>
+}
+
+export interface FacetReadInput {
+  plural: string
+  subjectSig: string
+  store: FacetReadStore
+  /** This reader's own key, so its list leads. Null is fine: a reader with
+   *  no identity still reads every bucket. */
+  ownPubkey?: string | null
+  /** The verifier factory — injectable so a spec never needs a real curve. */
+  verify?: (event: Record<string, unknown>) => HeadClaimVerifier
+}
+
+export interface FacetReadResult {
+  facet: string
+  /** Member atom sigs, deduped, own author first, each in slot order. */
+  members: string[]
+  /** How many author buckets contributed a verified head. */
+  authors: number
+}
+
+/** A verified head's member sigs, in slot order, or null when the atom or an
+ *  envelope will not read. */
+const membersOfAtom = async (store: FacetReadStore, head: string): Promise<string[] | null> => {
+  let atom: Partial<SuccessionAtom>
+  try {
+    const blob = await store.getResource(head)
+    if (!blob) return null
+    atom = JSON.parse(await blob.text()) as Partial<SuccessionAtom>
+  } catch { return null }
+  if (atom?.succession !== 1 || !Array.isArray(atom.members)) return null
+  const rows: Array<{ sig: string; slot: number }> = []
+  for (const envelopeSig of atom.members) {
+    try {
+      const blob = await store.getResource(String(envelopeSig))
+      if (!blob) return null
+      const envelope = JSON.parse(await blob.text()) as Record<string, unknown>
+      const payload = metaPayloadOf(envelope)
+      if (!payload) return null
+      const slot = typeof envelope['slot'] === 'number' ? envelope['slot'] : rows.length
+      rows.push({ sig: payload.sig, slot })
+    } catch { return null }
+  }
+  return rows.sort((a, b) => a.slot - b.slot).map(r => r.sig)
+}
+
+/**
+ * Read a facet's members across every author bucket. Never throws; an absent
+ * facet is `null` (indistinguishable from "nobody has said anything yet", as
+ * address-syntax.md rule 7 says it should be).
+ */
+export const readFacetMembers = async (input: FacetReadInput): Promise<FacetReadResult | null> => {
+  const subject = String(input.subjectSig ?? '').toLowerCase()
+  if (!SIG_RE.test(subject) || !input.store?.openPool || !input.store.getResource) return null
+  let facet: string
+  let pool: FileSystemDirectoryHandle | null | undefined
+  try {
+    facet = await facetAddress(input.plural, subject)
+    pool = await input.store.openPool(facetPreimage(input.plural, subject))
+  } catch { return null }
+  if (!pool) return null
+  const verify = input.verify ?? verifierFor
+  const own = String(input.ownPubkey ?? '').toLowerCase()
+
+  const byAuthor = new Map<string, string[]>()
+  try {
+    for await (const [bucketName, bucket] of (pool as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+      if (bucket.kind !== 'directory' || !SIG_RE.test(bucketName)) continue
+      const address = { molecule: facet, pubkey: bucketName.toLowerCase() }
+      let held: HeldHeadClaim | null = null
+      try {
+        for await (const [name, handle] of (bucket as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+          if (handle.kind !== 'file' || !SIG_RE.test(name)) continue
+          let read: ReturnType<typeof readHeadEntry>
+          try { read = readHeadEntry(await (await (handle as FileSystemFileHandle).getFile()).text()) } catch { continue }
+          if (!read) continue
+          const verdict = await acceptHeadClaim(address, read.offered, verify(read.event), { held })
+          if (verdict.ok) held = verdict.claim
+        }
+      } catch { continue }   // an unreadable bucket ranks nobody
+      if (!held) continue
+      const members = await membersOfAtom(input.store, held.head)
+      if (members) byAuthor.set(address.pubkey, members)
+    }
+  } catch { return { facet, members: [], authors: 0 } }
+
+  const ordered = [...byAuthor.keys()].sort((a, b) => (a === own ? -1 : b === own ? 1 : a.localeCompare(b)))
+  const seen = new Set<string>()
+  const members: string[] = []
+  for (const author of ordered) {
+    for (const sig of byAuthor.get(author)!) {
+      if (seen.has(sig)) continue
+      seen.add(sig)
+      members.push(sig)
+    }
+  }
+  return { facet, members, authors: byAuthor.size }
 }
