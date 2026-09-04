@@ -47,6 +47,29 @@ export class HistoryCursorService extends EventTarget {
 
   #groupStepEnabled: boolean = HistoryCursorService.#loadGroupStep()
 
+  /** ONE WALK AT A TIME. Every step reads `#position` BEFORE its first await
+   *  (`#undoGroupStep` at its guard and its target, `#stepToPrevGroupLeader`
+   *  likewise), so two overlapping walks compute the SAME target — and `seek`
+   *  early-returns on `clamped === #position`, so the second one silently does
+   *  nothing.
+   *
+   *  That made `/undo 3` step back exactly once: the queen's loop fired three
+   *  walks synchronously, all three read the same position, the first landed
+   *  and the other two were swallowed. It is a latent hazard for the keyboard
+   *  and slider too, where two presses inside one walk's awaits race the same
+   *  way — just harder to hit by hand.
+   *
+   *  Serializing here rather than in the queen fixes every caller at once, and
+   *  keeps the invariant where the position lives. */
+  #stepLane: Promise<void> = Promise.resolve()
+
+  #serializeStep(work: () => Promise<void>): Promise<void> {
+    // A failed walk must not poison the lane for the next one.
+    const next = this.#stepLane.then(work, work)
+    this.#stepLane = next.then(() => undefined, () => undefined)
+    return next
+  }
+
   get state(): CursorState {
     const entry = this.#position > 0 ? this.#layers[this.#position - 1] : null
     return {
@@ -343,12 +366,10 @@ export class HistoryCursorService extends EventTarget {
    * Walks all the way down to position 0 (pre-history) when the user
    * has undone past the first marker.
    */
-  undo(): void {
-    if (this.#groupStepEnabled) {
-      void this.#undoGroupStep()
-      return
-    }
-    void this.#stepToPrevGroupLeader()
+  undo(): Promise<void> {
+    return this.#serializeStep(() => this.#groupStepEnabled
+      ? this.#undoGroupStep()
+      : this.#stepToPrevGroupLeader())
   }
 
   /**
@@ -357,12 +378,10 @@ export class HistoryCursorService extends EventTarget {
    * next group's user-action leader. When the cursor is at the last
    * group, jumps to head (so the rewound flag clears).
    */
-  redo(): void {
-    if (this.#groupStepEnabled) {
-      void this.#redoGroupStep()
-      return
-    }
-    void this.#stepToNextGroupLeader()
+  redo(): Promise<void> {
+    return this.#serializeStep(() => this.#groupStepEnabled
+      ? this.#redoGroupStep()
+      : this.#stepToNextGroupLeader())
   }
 
   /**
