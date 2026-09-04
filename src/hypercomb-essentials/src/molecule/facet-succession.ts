@@ -64,6 +64,9 @@ export interface FacetStore {
   getPool: (meaning: string) => Promise<FileSystemDirectoryHandle | null | undefined>
   putResource: (blob: Blob, options?: { emit?: boolean }) => Promise<string>
   getResource: (sig: string) => Promise<Blob | null | undefined>
+  /** The document-pool contract, for the per-device minted record. */
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
+  getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
   putArtifactMeta?: (
     kind: 'layer' | 'resource' | 'dependency' | 'bee',
     artifactSig: string,
@@ -93,14 +96,51 @@ export interface FacetWriteInput {
   now?: () => number
 }
 
-/** The claims this instance signed this session, per facet — the local half
- *  of `planHeadClaim`, so a host that is merely behind can never roll my own
- *  counter back. Session memory: durable minted records live beside the key
- *  (vocabulary-ledger does this for the vocabulary claim) and are a later step. */
+/**
+ * THE MINTED RECORD — the local half of `planHeadClaim`'s anti-rollback rule.
+ *
+ * A host that is merely BEHIND hands back a bucket with my genesis and none of
+ * my later claims; planning from that alone would sign seq 1 over genesis
+ * again, and every peer holding my real chain would refuse it as a fork. So
+ * the last claim THIS DEVICE signed for each facet is kept where the KEY is
+ * kept: per-device, never replicated, one current document per (facet,
+ * pubkey) in the `facet:minted` pool (head-claim.ts, "WHAT MY NEXT CLAIM MUST
+ * CARRY"). Memory is only a cache in front of it.
+ */
+export const FACET_MINTED_MEANING = 'facet:minted'
 const minted = new Map<string, HeldHeadClaim>()
 
-/** Test seam. */
+/** Test seam — clears the CACHE only; the document stays, as it would across a reload. */
 export const _resetMintedFacetClaims = (): void => { minted.clear() }
+
+const mintedKey = (facet: string, pubkey: string): string => `${facet}:${pubkey}`
+
+const readMinted = async (store: FacetStore, facet: string, pubkey: string): Promise<HeldHeadClaim | null> => {
+  const cached = minted.get(mintedKey(facet, pubkey))
+  if (cached) return cached
+  if (!store.getPoolDoc) return null
+  try {
+    const pool = await store.getPool(FACET_MINTED_MEANING)
+    const bytes = await store.getPoolDoc(pool ?? undefined, mintedKey(facet, pubkey))
+    if (!bytes || bytes.byteLength === 0) return null
+    const doc = JSON.parse(new TextDecoder().decode(bytes)) as Partial<HeldHeadClaim> & { facet?: string; pubkey?: string }
+    if (doc.facet !== facet || doc.pubkey !== pubkey || !SIG_RE.test(String(doc.head ?? ''))) return null
+    const record: HeldHeadClaim = { head: String(doc.head), prev: doc.prev ?? null, seq: Number(doc.seq) }
+    minted.set(mintedKey(facet, pubkey), record)
+    return record
+  } catch { return null }
+}
+
+const writeMinted = async (store: FacetStore, facet: string, pubkey: string, record: HeldHeadClaim): Promise<void> => {
+  minted.set(mintedKey(facet, pubkey), record)
+  if (!store.putPoolDoc) return
+  try {
+    const pool = await store.getPool(FACET_MINTED_MEANING)
+    if (!pool) return
+    const bytes = new TextEncoder().encode(JSON.stringify({ facet, pubkey, ...record, at: Date.now() })).buffer as ArrayBuffer
+    await store.putPoolDoc(pool, bytes, mintedKey(facet, pubkey))
+  } catch { /* the cache still holds it for this session */ }
+}
 
 const canonicalAtom = (atom: SuccessionAtom): string =>
   JSON.stringify({ succession: 1, signer: atom.signer, prev: atom.prev, members: atom.members, at: atom.at })
@@ -181,7 +221,7 @@ export const writeFacetHead = async (input: FacetWriteInput): Promise<FacetWrite
 
   // 2. Where this author's chain stands, from the bucket and from memory.
   const held = await heldHead(bucket, facet, pubkey)
-  const own = minted.get(`${facet}/${pubkey}`) ?? null
+  const own = await readMinted(store, facet, pubkey)
   const plan = planHeadClaim(held, own)
   const current = plan.prev
   const currentMembers = await membersOfHead(store, current)
@@ -205,7 +245,7 @@ export const writeFacetHead = async (input: FacetWriteInput): Promise<FacetWrite
     const writable = await handle.createWritable()
     try { await writable.write(bytes) } finally { await writable.close() }
   } catch (err) { return { ok: false, reason: 'no pool', detail: String(err) } }
-  minted.set(`${facet}/${pubkey}`, { head, prev: plan.prev, seq: plan.seq })
+  await writeMinted(store, facet, pubkey, { head, prev: plan.prev, seq: plan.seq })
   return { ok: true, facet, head, seq: plan.seq, claim, changed: true }
 }
 

@@ -55,11 +55,15 @@ const fake = () => {
     getDirectoryHandle: async (name: string) => bucketDir(name),
     async *entries() { for (const pubkey of buckets.keys()) yield [pubkey, bucketDir(pubkey)] },
   } as unknown as FileSystemDirectoryHandle
-  const store: FacetStore & { openPool: (m: string) => Promise<FileSystemDirectoryHandle | null>; resources: Map<string, string>; buckets: Map<string, Map<string, string>>; pools: string[] } = {
+  const store: FacetStore & { openPool: (m: string) => Promise<FileSystemDirectoryHandle | null>; resources: Map<string, string>; buckets: Map<string, Map<string, string>>; pools: string[]; docs: Map<string, ArrayBuffer> } = {
     resources, buckets, pools: [],
     getPool: async (meaning) => { store.pools.push(meaning); return pool },
     // the read-only open: null until a WRITE has created the pool
     openPool: async () => (buckets.size > 0 ? pool : null),
+    // the document-pool contract, for the per-device minted record
+    docs: new Map<string, ArrayBuffer>(),
+    putPoolDoc: async (_p, bytes, subKey) => { store.docs.set(String(subKey), bytes); return 'f'.repeat(64) },
+    getPoolDoc: async (_p, subKey) => store.docs.get(String(subKey)) ?? null,
     putResource: async (blob) => { const text = await blob.text(); const sig = await sha(text); resources.set(sig, text); return sig },
     getResource: async (sig) => { const t = resources.get(sig); return t === undefined ? null : ({ text: async () => t } as unknown as Blob) },
     putArtifactMeta: async (kind, sig, incidence) => {
@@ -100,7 +104,8 @@ describe('writeFacetHead', () => {
     expect(r.changed).toBe(true)
     expect(r.facet).toBe(await facetAddress('notes', SUBJECT))
     // the pool was addressed by its derived meaning, declared a succession
-    expect(store.pools).toEqual([facetPreimage('notes', SUBJECT)])
+    // (the minted record's own pool is addressed beside it)
+    expect([...new Set(store.pools)]).toEqual([facetPreimage('notes', SUBJECT), 'facet:minted'])
     expect(poolKindOfMeaning(facetPreimage('notes', SUBJECT))?.kind).toBe('succession')
     // the atom
     const atom = JSON.parse(store.resources.get(r.head)!)
@@ -190,5 +195,30 @@ describe('readFacetMembers', () => {
     const read = await readFacetMembers({ plural: 'notes', subjectSig: SUBJECT, store, verify: () => () => false })
     expect(read?.members).toEqual([])
     expect(read?.authors).toBe(0)
+  })
+})
+
+describe('the minted record', () => {
+  it('survives a reload AND a host that is behind — the next claim chains from what THIS device signed', async () => {
+    _resetMintedFacetClaims()
+    const store = fake()
+    const first = await write(store, [N1])
+    const second = await write(store, [N2])
+    expect(first.ok && second.ok).toBe(true)
+    if (!first.ok || !second.ok) return
+    expect(second.seq).toBe(1)
+    // a reload: the cache is gone. A host that is behind: the bucket has lost
+    // every claim. Only the document beside the key remembers seq 1.
+    _resetMintedFacetClaims()
+    store.buckets.get(PUBKEY)!.clear()
+    const third = await write(store, [N1, N2])
+    expect(third.ok).toBe(true)
+    if (!third.ok) return
+    expect(third.seq).toBe(2)
+    const atom = JSON.parse(store.resources.get(third.head)!)
+    expect(atom.prev).toBe(second.head)
+    // the record itself is a document keyed by facet and key, never replicated
+    const doc = JSON.parse(new TextDecoder().decode(store.docs.get(`${third.facet}:${PUBKEY}`)!))
+    expect(doc).toMatchObject({ facet: third.facet, pubkey: PUBKEY, head: third.head, seq: 2 })
   })
 })
