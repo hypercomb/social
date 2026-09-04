@@ -37,7 +37,8 @@ produced verdicts. So:
   purge, the three primitive items in the history service, and two of the
   three derived-cache items (the third waits on show-cell, held by another
   session), the committer's create-reset branch, the tile-art and tutorial
-  addresses, and the orphaned participant base — 32 of 57 closed (one not
+  addresses, the orphaned participant base, and the fourth registry pointer —
+  33 of 57 closed (one not
   reproduced; the five localStorage stores are an owner decision; the eager
   pool opens are deferred to the colon migration). Nothing at wide radius
   remains.
@@ -107,14 +108,13 @@ not wipe-safe whatever it claims. *One-line fix:* gate the byte scan on the same
 - `store.ts:1308` `#putOptimizedVisual` — the original image can never be
   collected once its thumbnail exists
 
-**FIXED 2026-09-04 (three of four) — `hypercomb-shared/core/registry-document.ts`
+**FIXED 2026-09-04 (all four — `interest-registry.ts` adopted the same writer when it landed) — `hypercomb-shared/core/registry-document.ts`
 is the one writer. The pointer is gone: the master record IS the document,
 written by `putPoolDoc` into its own colon-scoped DOCUMENT pool
 (`registry:names` / `registry:tags` / `registry:bouquets` / `registry:interests`,
 reserved in core and seeded as `document`). Reads walk back through the old
 `registry/<key>` pointer and the root `0000` props; writes never do; nothing
-is deleted. `interest-registry.ts` is untracked in another session's tree and
-still carries its copy — a two-line swap once that file lands.**
+is deleted. No `#writePointer` remains anywhere in the tree.**
 
 **Four copies of one wrong pointer — check 1.** `name-registry.ts:150`,
 `tag-registry.ts:181`, `interest-registry.ts:312`, `bouquet-registry.ts:211`
