@@ -30,6 +30,7 @@
 
 import { EffectBus, SignatureService } from '@hypercomb/core'
 import { readRegistryDocument, writeRegistryDocument } from './registry-document.js'
+import { canonicalMarks, markSetBytes } from './mark-set.js'
 
 /** name → the signature of that bouquet's marks resource. */
 type BouquetMap = Record<string, { sig: string }>
@@ -132,18 +133,22 @@ export class BouquetRegistry extends EventTarget {
     await this.#save()
   }
 
-  /** Sorted, de-duplicated, blank-free — the canonical form that makes the
-   *  signature a property of the SET rather than of the picking order. */
-  #canonical(marks: readonly string[]): string[] {
-    return [...new Set(marks.map(m => m.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))
-  }
+  /** The canonical form, shared with the interest registry (`mark-set.ts`).
+   *
+   *  It sorted with `localeCompare` until the two files were unified. That is a
+   *  RUNTIME-dependent order, so the same marks could hash to two addresses on
+   *  two machines — and it differed from the interest registry's, so one set
+   *  assembled as a bouquet and as an interest landed on two resources despite
+   *  a comment here claiming otherwise. Bouquets already stored keep resolving:
+   *  the master maps name to the sig it was saved under, and content is
+   *  immutable. Only a future re-save of a MIXED-CASE set mints a different
+   *  address than it would have before, and it is the correct one. */
+  #canonical(marks: readonly string[]): string[] { return canonicalMarks(marks) }
 
   /** The bouquet's bytes. ONE definition, used by both the derived signature
    *  and the stored resource — if these two ever disagree, a named bouquet
-   *  would resolve to nothing. */
-  #bytes(marks: string[]): string {
-    return JSON.stringify({ marks })
-  }
+   *  would resolve to nothing. Now literally one definition, shared. */
+  #bytes(marks: string[]): string { return markSetBytes(marks) }
 
   // ── persistence ────────────────────────────────────────────────────
 

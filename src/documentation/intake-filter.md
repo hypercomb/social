@@ -305,8 +305,8 @@ default set that opens the cycle and that the participant can replace entirely.
   are participant-local, so a KEEP set can only narrow what you already hold and
   a DROP cannot fire on a mark nobody local recorded. Community deposits
   arriving alongside the bytes are what would lift it.
-- **A surface for editing an interest.** The registry, the gate and the four
-  call sites are built; nothing yet lets a participant SAY which marks they
+- **A surface for editing an interest.** The registry, the gate and its three
+  sites are built; nothing yet lets a participant SAY which marks they
   want. Until something does, every verdict is the empty-set default (allow),
   which is why shipping it changes nothing on its own.
 - **A decision on polarity.** An interest is a set you are watching FOR, which

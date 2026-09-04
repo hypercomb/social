@@ -53,6 +53,7 @@
 
 import { EffectBus, SignatureService } from '@hypercomb/core'
 import { readRegistryDocument, writeRegistryDocument } from './registry-document.js'
+import { canonicalMarks, markSetBytes } from './mark-set.js'
 
 /** name → the signature of that interest's marks resource. */
 type InterestMap = Record<string, { sig: string }>
@@ -267,28 +268,14 @@ export class InterestRegistry extends EventTarget {
     return true
   }
 
-  /** Sorted, de-duplicated, blank-free — the canonical form that makes the
-   *  signature a property of the SET rather than of the picking order. */
-  #canonical(marks: readonly string[]): string[] {
-    // CODE-UNIT ORDER, NOT `localeCompare`. The signature has to be a property
-    // of the SET for two participants to land on one resource — that is the
-    // whole of "a filter is a signature somebody can hand you". `localeCompare`
-    // answers by the runtime's collation, so the same marks sorted under a
-    // different locale or ICU build hash to a different address and the sharing
-    // claim quietly stops being true. Default `sort()` is byte-stable
-    // everywhere. (`bouquet-registry.ts` still uses localeCompare; its
-    // signature is only ever compared against itself, so it does not have this
-    // problem yet — but it is the same latent one.)
-    return [...new Set(marks.map(m => m.trim()).filter(Boolean))].sort()
-  }
+  /** The canonical form, shared with the bouquet registry so the two can never
+   *  disagree about what a set of marks IS. See `mark-set.ts`. */
+  #canonical(marks: readonly string[]): string[] { return canonicalMarks(marks) }
 
-  /** The interest's bytes. ONE definition, used by both the derived signature
-   *  and the stored resource. Deliberately the SAME shape a bouquet writes
-   *  (`{ marks }`) — the two are the same kind of thing pointed opposite ways,
-   *  so a set assembled as one can be adopted as the other without conversion. */
-  #bytes(marks: string[]): string {
-    return JSON.stringify({ marks })
-  }
+  /** The bytes, from the shared definition — which is what makes the claim
+   *  above true rather than aspirational: a set assembled as a bouquet and the
+   *  same set assembled as an interest hash to ONE address. */
+  #bytes(marks: string[]): string { return markSetBytes(marks) }
 
   /** Rebuild the resolved sets from the roles. Called on every change, so
    *  `sets()` and `allows()` are always current without awaiting. */
