@@ -2231,11 +2231,35 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       if (this.#stance() !== 'find') this.#setShellValue('', false)
     })
 
-    // remote bridge submit (Claude CLI, future /transcript) — same path as a
-    // human keystroke or a voice release. Single state machine, three input
-    // sources. See claude-bridge.worker.ts.
+    // remote bridge submit (Claude CLI, future /transcript) — the Common
+    // Tongue first, then the same tag/slash pipeline a keystroke falls back
+    // to. See claude-bridge.worker.ts.
+    //
+    // THIS USED TO SKIP THE READER, and the comment here claimed it was "the
+    // same path as a human keystroke". It was not: both keyboard paths try
+    // `#commitUtterance` FIRST and only fall through, so a remote caller got
+    // the legacy pipeline alone. Measured 2026-09-04 over the live bridge —
+    // `/create x` created a tile, bare `create x` did nothing at all while
+    // the bridge still answered ok. An agent that speaks the way the
+    // behaviour reference reads was talking to a door that could not hear it.
+    //
+    // THE READER IS ENTERED DIRECTLY, NOT VIA `#commitUtterance`. That method
+    // answers "handled" for two states that mean WAITING — an ambiguity
+    // dropdown and a destructive confirm — and a remote caller has nobody to
+    // answer either; parking a choice on a screen no agent can see would be
+    // worse than refusing. So a remote line takes the Tongue only when the
+    // reading is unambiguous, non-destructive, and actually matched a
+    // behaviour. Everything else falls through, where canonical slash grammar
+    // still works and prose is simply refused.
     this.#remoteSubmitUnsub = EffectBus.on<{ text: string }>('command-line:remote-submit', ({ text }) => {
       this.#setShellValue(text, false)
+      const reading = this.#utteranceReader()?.read(lowered(text))
+      if (reading?.actions.length
+        && !reading.spans.some(span => span.role === 'ambiguity')
+        && !reading.actions.some(action => DESTRUCTIVE_COMMANDS.has(action.command))) {
+        void this.#executeReading(reading)
+        return
+      }
       void this.#preprocessTagsThenExecute(text)
     })
 
