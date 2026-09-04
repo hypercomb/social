@@ -90,11 +90,29 @@ system as it ships — and, since 2026-09-03, wrong about the narrow door too.
 `ClaudeBridgeWorker.#submit`
 ([claude-bridge.worker.ts:1543](../hypercomb-essentials/src/assistant/claude-bridge.worker.ts:1543))
 forwards a remote session's text **verbatim** into
-`EffectBus.emit('command-line:remote-submit')`. Its own comment states the
-intent plainly: *"Text is forwarded verbatim so anything the keyboard accepts
-(slash behaviours, bracket selects, multi-token grammar, plain cell names) just
-works."* That is the entire live census — hidden behaviours included — with no
-`CALLABLE_FORMS`, no additive sub-language, no per-line census re-derivation.
+`EffectBus.emit('command-line:remote-submit')`, with no `CALLABLE_FORMS`, no
+per-line census re-derivation, and hidden behaviours reachable.
+
+> **CORRECTION, MEASURED 2026-09-04.** An earlier revision of this document
+> quoted `#submit`'s own comment — *"anything the keyboard accepts … just
+> works"* — as a statement of fact. **It was false, and this document repeated
+> it.** Driven over the live bridge: `/create x` created a tile; bare `create x`
+> did **nothing at all**; both answered `ok`. The handler called
+> `#preprocessTagsThenExecute` directly, while both keyboard paths try
+> `#commitUtterance` **first** and only fall through — so a remote caller got
+> the legacy slash/tag pipeline and never the Common Tongue. The door could not
+> hear the words the behaviour reference teaches an agent to speak.
+>
+> Fixed in `f2bcc0c44`: the reader is now entered directly on the remote path,
+> but only for a reading that is unambiguous, non-destructive and actually
+> matched — because `#commitUtterance` answers "handled" for two states that
+> mean *waiting*, and a remote caller has nobody to answer a dropdown.
+>
+> **The lesson is about this document, not that handler.** Every other claim
+> here was verified by reading source, and reading source is what produced the
+> error: three call sites were read for *authority* and none for *which
+> pipeline*. Source says what code is permitted to do; only running it says
+> what happens.
 
 The same file shows the author knew exactly what an allowlist is: `#effectEmit`
 carries `#REMOTE_INTENTS`, eight entries, commented *"The allowlist is the
@@ -434,6 +452,23 @@ through `slash.execute(command, args)` — **the same seam** the grammar plan
 drives. It is ~90% of that design, already shipped, in the workflow subsystem.
 
 ### What clear text does not have
+
+**No return half.** Measured 2026-09-04: the bridge's `submit` answers `{ok:true}`
+**immediately**, before anything executes — `ok` means *the effect was emitted*,
+never *the command ran*. It was wrong twice in six calls during one session (bare
+prose did nothing; `/remove` did nothing). There is no receipt on this path at
+all: `formatHypercombReceipt` belongs to the model channel, not the bridge. **So
+the "communicating back" half of the protocol does not exist on the door an agent
+would use** — it must independently read back to learn anything, which is exactly
+what verifying that session required (`layer-at` diff → new sig →
+`layer-by-sig`). Anything built on this loop needs either a real receipt or an
+explicit convention that the caller always verifies.
+
+**No census over the wire.** The bridge's `behaviors-list` returns **views** — 17
+entries shaped `{view, slashCommand, decorationKind, adoptable}`, zero `machine`
+blocks. An agent on the bridge therefore cannot ask *what may I say?*; it must be
+handed a reference out of band. That is the same gap `layer.docs.bees` would
+close, seen from the other end.
 
 **No replay resistance, and nothing to reuse.** There is no nonce, no expiry and
 no per-operation counter anywhere in the tree. `treeEpoch` is a process-local
