@@ -36,8 +36,11 @@ produced verdicts. So:
   surface, the translation service, the swarm arrival forge, the install
   purge, the three primitive items in the history service, and two of the
   three derived-cache items (the third waits on show-cell, held by another
-  session), and the committer's create-reset branch — 29 of 57 closed (one
-  not reproduced). Nothing at wide radius remains.
+  session), the committer's create-reset branch, the tile-art and tutorial
+  addresses, and the orphaned participant base — 32 of 57 closed (one not
+  reproduced; the five localStorage stores are an owner decision; the eager
+  pool opens are deferred to the colon migration). Nothing at wide radius
+  remains.
 
 ## The headline
 
@@ -214,9 +217,9 @@ the siblings already have.
 - *FIXED 2026-09-04 — both reset sites (the name-add branch and the import path's "fresh" hydrate) link the head; `cell:fresh` and its listener are gone; ratchet `history/create-links-head.spec.ts`.* `layer-committer.drone.ts:1199` the create-reset branch — the one place the
   commit path deliberately publishes a *less*-detailed head over a live one.
   *Fix:* link the existing head (as `revive: true` already does).
-- `hive-participant.ts:439` — `idOf(item)` (content) becomes a path segment;
+- *2026-09-04 — deleted: `HiveParticipant` had no subclass and no importer but the generated barrel; the notes drone never adopted it.* `hive-participant.ts:439` — `idOf(item)` (content) becomes a path segment;
   checks 3 and 4. *Fix:* derive the location from `sign(bodySig)`.
-- `tile-art.ts:107` — the pool key is `name.trim().toLowerCase()`, not an
+- *FIXED 2026-09-04 — the member is `moleculeAddress(name)`; the lowercased name is a read-fallback.* `tile-art.ts:107` — the pool key is `name.trim().toLowerCase()`, not an
   address. *Fix:* `moleculeAddress(name)`.
 - `notes.drone.ts:1008` `#writeNoteLayer` — **the Life Primitive and the
   molecule model have drifted apart here.** Every *layer's* artifact references
@@ -225,20 +228,20 @@ the siblings already have.
   'note'})`, the one-line call `tile-properties.ts:820` already makes.
 - *FIXED 2026-09-04 — hashed before any write, written only on a match, and with emit:false so a peer's bytes never become this participant's publish; ratchet `swarm-resource-arrival.spec.ts`.* `swarm.drone.ts:3225` — a resource event's bytes are stored before the sig is
   checked. *Fix:* hash first, write on match.
-- `tutorial-provenance.ts:82` — a NEW sub-bucket address minted from a path;
+- *FIXED 2026-09-04 — the sub-bucket is the location's own signature from `history.sign`; the path key is a read-fallback; no signer means no write.* `tutorial-provenance.ts:82` — a NEW sub-bucket address minted from a path;
   check 4. *Fix:* key by the parent layer sig the record already resolves.
 - *FIXED 2026-09-04 — `purgeInstallCacheDir` removes a file only if named like an install artifact and a directory only past `bagEvictionVeto`; tests in `install-purge.spec.ts`.* `ensure-install.ts:983` `purgeStaleOpfsArtifacts` — the one `purgeDir` in that
   file not routed through `hardDeleteVetoFor`. *Fix:* one line, same guard as
   its neighbours.
 - *FIXED 2026-09-04 — deleted with `memoize.ts` and `expand.ts`; nothing imported any of the three.* `projection.ts:42` — a memo keyed by a *name* in localStorage; checks 6 and 7.
-- **Participant state outside the graph — check 1.** `tile-properties.ts:284`
+- *OWNER DECISION, 2026-09-04: each of these is a feature's state store moving into a pool — five designs, not five fixes. Left open on purpose.* **Participant state outside the graph — check 1.** `tile-properties.ts:284`
   (`hc:tile-props-index`), `saved-locations-store.ts:49`,
   `pinned-entrances.store.ts:178` (keyed by a *path*, check 4 too),
   `recent-portals.store.ts:191`, `icon-override.store.ts:75`. Each is a
   "fourth thing": recomputable or authored state that could be a colon-scoped
   pool with sha256-named members. A saved location *is* a molecule per the
   higher-order doc.
-- `store.ts:456` `#doInit` — opens nine bare-word pools eagerly, minting nine
+- *DEFERRED 2026-09-04 with reason: 54 readers hold these as non-optional handles; opening lazily is a wide seam change, and the colon migration that retires the bare words is the real fix.* `store.ts:456` `#doInit` — opens nine bare-word pools eagerly, minting nine
   empty molecules on every boot. *Fix:* open lazily; the colon migration is the
   real fix and is already scheduled.
 

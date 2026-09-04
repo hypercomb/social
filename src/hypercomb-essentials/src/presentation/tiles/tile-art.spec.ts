@@ -50,6 +50,8 @@ const install = (): void => {
   }
 }
 
+import { moleculeAddress } from '@hypercomb/core'
+
 let tileArtSig: typeof import('./tile-art.js').tileArtSig
 let setTileArt: typeof import('./tile-art.js').setTileArt
 let forgetTileArt: typeof import('./tile-art.js').forgetTileArt
@@ -62,13 +64,19 @@ beforeEach(async () => {
 })
 
 describe('default tile art', () => {
-  it('resolves a name to the signature the pool points at', async () => {
-    pool!.files.set('folder-sync', new MemoryFile(ART))
+  it('resolves a name to the signature the pool points at — the member is the molecule address', async () => {
+    pool!.files.set(await moleculeAddress('folder-sync'), new MemoryFile(ART))
     expect(await tileArtSig('folder-sync')).toBe(ART)
   })
 
-  it('matches names case- and space-insensitively', async () => {
+  it('still reads a member written under the legacy lowercased name — nothing is rewritten', async () => {
     pool!.files.set('folder-sync', new MemoryFile(ART))
+    expect(await tileArtSig('folder-sync')).toBe(ART)
+    expect(pool!.files.size).toBe(1)
+  })
+
+  it('matches names case- and space-insensitively', async () => {
+    pool!.files.set(await moleculeAddress('folder-sync'), new MemoryFile(ART))
     expect(await tileArtSig('  Folder-Sync  ')).toBe(ART)
   })
 
@@ -87,7 +95,7 @@ describe('default tile art', () => {
   it('treats a member that is not a signature as no art', async () => {
     // A pointer written by hand incorrectly must read as absent, not as a
     // signature that 404s on every single render.
-    pool!.files.set('bad', new MemoryFile('/images/backup.png'))
+    pool!.files.set(await moleculeAddress('bad'), new MemoryFile('/images/backup.png'))
     expect(await tileArtSig('bad')).toBe('')
   })
 
@@ -99,8 +107,8 @@ describe('default tile art', () => {
   it('writes a pointer and reads it straight back', async () => {
     expect(await setTileArt('folder-sync', ART)).toBe(true)
     expect(await tileArtSig('folder-sync')).toBe(ART)
-    // Stored as the POINTER, not the image.
-    const stored = await (await pool!.getFileHandle('folder-sync')).getFile()
+    // Stored as the POINTER, not the image, under the word's ADDRESS.
+    const stored = await (await pool!.getFileHandle(await moleculeAddress('folder-sync'))).getFile()
     expect(await stored.text()).toBe(ART)
   })
 
@@ -112,7 +120,7 @@ describe('default tile art', () => {
 
   it('forgets a cached answer when told to', async () => {
     expect(await tileArtSig('folder-sync')).toBe('')
-    pool!.files.set('folder-sync', new MemoryFile(ART))
+    pool!.files.set(await moleculeAddress('folder-sync'), new MemoryFile(ART))
     // Still cached as a miss — a restore or a peer's pool arriving is exactly
     // the case that needs the invalidation.
     expect(await tileArtSig('folder-sync')).toBe('')

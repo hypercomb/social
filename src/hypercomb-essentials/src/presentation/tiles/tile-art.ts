@@ -22,13 +22,18 @@
 // by a peer exactly like every other resource. A pool full of image bytes
 // would have none of that.
 //
-// ── Keyed by NAME, deliberately ────────────────────────────────────────
+// ── Keyed by the NAME'S ADDRESS, deliberately ──────────────────────────
 //
-// The member name is the tile's own name — `folder-sync`, `tutor`, `website`.
-// Not a location signature, because then the art would belong to one cell and
-// every other instance of that behaviour would be bare. Not a registry entry,
-// because that would put the mapping back in code and mean a new picture needs
-// a release. A name is what an author already knows.
+// The member is named by the tile's own word — `folder-sync`, `tutor`,
+// `website` — as the MOLECULE ADDRESS of that word, `moleculeAddress(name)`
+// (hypergraph-molecule-lineage.md: the name is the grammar, sign(name) is its
+// address). Not a location signature, because then the art would belong to
+// one cell and every other instance of that behaviour would be bare. Not a
+// registry entry, because that would put the mapping back in code. And not
+// the raw lowercased string it used to be (write-conformance, tile-art.ts:107):
+// a member is an address or it is foreign, and the molecule address is the one
+// spelling every word already has. Members written under the old lowercased
+// name stay readable — the read falls back to them; nothing is rewritten.
 //
 // The consequence is that two tiles sharing a name share a default. For
 // behaviour tiles that is the point. For anything else, the tile's own
@@ -39,6 +44,8 @@
 // This is TRUTH: an author's choice of picture cannot be re-derived from
 // layers by a cold client, so by the optimize-phase litmus it is state, gets
 // its own pool of meaning, and is never minted from the optimize phase.
+
+import { moleculeAddress } from '@hypercomb/core'
 
 const TILE_ART_MEANING = 'visual:tile-art'
 const SIG_RE = /^[0-9a-f]{64}$/
@@ -77,14 +84,19 @@ export async function tileArtSig(name: string): Promise<string> {
   try {
     const pool = await store()?.getPool(TILE_ART_MEANING)
     if (pool) {
-      const handle = await pool.getFileHandle(key, { create: false })
-      const text = (await (await handle.getFile()).text()).trim().toLowerCase()
-      // The member is a pointer. Anything else is a member someone wrote by
-      // hand incorrectly, and a bad pointer must read as "no art" rather than
-      // as a signature that will 404 on every render.
-      if (SIG_RE.test(text)) sig = text
+      // The address first; the legacy lowercased name second, read-only.
+      for (const member of [await moleculeAddress(key), key]) {
+        try {
+          const handle = await pool.getFileHandle(member, { create: false })
+          const text = (await (await handle.getFile()).text()).trim().toLowerCase()
+          // The member is a pointer. Anything else is a member someone wrote
+          // by hand incorrectly, and a bad pointer must read as "no art" rather
+          // than as a signature that will 404 on every render.
+          if (SIG_RE.test(text)) { sig = text; break }
+        } catch { /* this spelling is absent — try the next */ }
+      }
     }
-  } catch { /* absent member, no pool, no OPFS — all of them mean no art */ }
+  } catch { /* no pool, no OPFS, an unaddressable name — all of them mean no art */ }
 
   resolved.set(key, sig)
   return sig
@@ -103,7 +115,7 @@ export async function setTileArt(name: string, sig: string): Promise<boolean> {
   try {
     const pool = await store()?.getPool(TILE_ART_MEANING)
     if (!pool) return false
-    const handle = await pool.getFileHandle(key, { create: true })
+    const handle = await pool.getFileHandle(await moleculeAddress(key), { create: true })
     const writable = await handle.createWritable()
     try { await writable.write(pointer) } finally { await writable.close() }
     resolved.set(key, pointer)

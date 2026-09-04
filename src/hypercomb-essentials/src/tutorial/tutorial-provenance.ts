@@ -48,13 +48,32 @@ type StoreApi = {
   getPoolDoc(pool: FileSystemDirectoryHandle | undefined, subKey?: string): Promise<ArrayBuffer | null>
 }
 type LineageApi = { domain?: () => string }
-type HistoryApi = { getLayerBySig(sig: string): Promise<{ name?: string } | null> }
+type HistoryApi = {
+  getLayerBySig(sig: string): Promise<{ name?: string } | null>
+  sign?(lineage: { explorerSegments: () => readonly string[] }): Promise<string>
+}
 
 const store = (): StoreApi | undefined =>
   window.ioc.get<StoreApi>('@hypercomb.social/Store') ?? undefined
 
-const locationKey = (segments: readonly string[]): string =>
+/** The old sub-bucket: a PATH string, lowercased and joined — a spelling
+ *  minted here and nowhere else (write-conformance, tutorial-provenance.ts:82).
+ *  READ-FALLBACK ONLY: records written under it stay readable; nothing is
+ *  rewritten and nothing new lands here. */
+const legacyLocationKey = (segments: readonly string[]): string =>
   'tutorial:planner:' + segments.map(s => String(s).toLowerCase()).join('/')
+
+/** The sub-bucket is the location's own ADDRESS — the same signature the
+ *  history bag for that location has, from the one canonical signer. Null
+ *  when history is not up, in which case nothing is written. */
+const locationAddress = async (segments: readonly string[]): Promise<string | null> => {
+  const history = window.ioc.get<HistoryApi>('@diamondcoreprocessor.com/HistoryService')
+  if (!history?.sign) return null
+  try {
+    const sig = await history.sign({ explorerSegments: () => segments.map(s => String(s)) })
+    return /^[0-9a-f]{64}$/i.test(sig) ? sig.toLowerCase() : null
+  } catch { return null }
+}
 
 export const readTutorialRecord = async (
   segments: readonly string[],
@@ -63,7 +82,9 @@ export const readTutorialRecord = async (
   if (!s) return null
   const pool = await s.getPool(MEANING)
   if (!pool) return null
-  const bytes = await s.getPoolDoc(pool, locationKey(segments))
+  const address = await locationAddress(segments)
+  const bytes = (address ? await s.getPoolDoc(pool, address) : null)
+    ?? await s.getPoolDoc(pool, legacyLocationKey(segments))
   if (!bytes) return null
   try {
     const record = JSON.parse(new TextDecoder().decode(bytes)) as TutorialArtifactRecord
@@ -78,8 +99,10 @@ export const writeTutorialRecord = async (record: TutorialArtifactRecord): Promi
   if (!s) return
   const pool = await s.getPool(MEANING)
   if (!pool) return
+  const address = await locationAddress(record.segments)
+  if (!address) return   // no signer, no address, no write — never a path
   const bytes = new TextEncoder().encode(JSON.stringify(record, null, 2))
-  await s.putPoolDoc(pool, bytes.buffer as ArrayBuffer, locationKey(record.segments))
+  await s.putPoolDoc(pool, bytes.buffer as ArrayBuffer, address)
 }
 
 /** Document pools always hold one current member — clearing writes a tombstone. */
