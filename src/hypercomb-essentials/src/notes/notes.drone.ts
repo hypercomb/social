@@ -30,6 +30,7 @@
 // propagates to root via the standard merkle cascade.
 
 import { EffectBus } from '@hypercomb/core'
+import { writeNotesFacet } from './notes-facet.js'
 import {
   addChildInTree,
   insertAsChild,
@@ -983,6 +984,14 @@ export class NotesService {
       segments: [...segments],
       op: 'set' as const,
       sigs: nextNotes.slice(),
+    })
+    // THE FACET, ALONGSIDE (decided 2026-09-04). The same list lands on the
+    // tile's word — sign('notes:' + moleculeAddress(name)) — as envelopes, a
+    // succession atom and a signed head in this author's bucket. A forward
+    // commit beside the slot above, never a gate on it, and never an identity
+    // minted for a note: without a cached key it simply does not happen.
+    void writeNotesFacet(segments[segments.length - 1] ?? '', nextNotes).then(r => {
+      if (!r.ok && r.reason !== 'no identity') console.warn('[notes] facet not written:', r.reason, r.detail ?? '')
     })
   }
 

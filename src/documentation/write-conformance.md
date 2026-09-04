@@ -276,7 +276,7 @@ the siblings already have.
   checks 3 and 4. *Fix:* derive the location from `sign(bodySig)`.
 - *FIXED 2026-09-04 — the member is `moleculeAddress(name)`; the lowercased name is a read-fallback.* `tile-art.ts:107` — the pool key is `name.trim().toLowerCase()`, not an
   address. *Fix:* `moleculeAddress(name)`.
-- `notes.drone.ts:1008` `#writeNoteLayer` — **the Life Primitive and the
+- *2026-09-04 — the facet write landed alongside (`notes/notes-facet.ts` → `molecule/facet-succession.ts`, the first facet writer): envelopes with relation/root/slot, a succession atom, a signed head per author bucket at `sign('notes:' + moleculeAddress(name))`. Note atoms unchanged; the slot still written and read. The adjudication had already reclassified this site legacy-conforming.* `notes.drone.ts:1008` `#writeNoteLayer` — **the Life Primitive and the
   molecule model have drifted apart here.** Every *layer's* artifact references
   are healed into meta envelopes; a note's children are put raw. *Fix:* map
   each child through `store.ensureArtifactMeta('resource', childSig, {relation:

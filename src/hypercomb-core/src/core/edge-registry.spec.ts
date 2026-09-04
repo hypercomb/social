@@ -13,7 +13,7 @@ describe('edge registry', () => {
     // If this fails you are CHANGING THE PROTOCOL — every precise walker and
     // the native client must agree before the list moves.
     expect([...EDGE_FIELDS].sort()).toEqual([
-      'bee', 'children', 'content', 'dependency', 'layer', 'refs', 'resource',
+      'bee', 'children', 'content', 'dependency', 'layer', 'members', 'refs', 'resource',
     ])
   })
 

@@ -112,14 +112,16 @@ read-compatible by the rule above and travels in every closure by the walker
 rule above, so it is not a data-loss risk. It is the one place a new write
 still mints the pre-primitive shape.
 
-The forward path is decided and deferred: notes become a facet of the tile's
-molecule — `notes:<sig>` (the plural facet, `hypergraph-molecule-lineage.md`
-"facets"), each note an atom, its incidence an envelope with
-`relation: 'notes'` and `slot` for order. That is a forward commit, not a
-rewrite: an untagged note must keep signing to the bytes it always did, or
-every re-materialisation re-signs the whole tree. Until that step, the notes
-drone is a **known legacy writer** and is listed as such in
-`write-conformance.md`, not a site to "fix" in place.
+The forward path landed 2026-09-04, as a write ALONGSIDE the slot: every notes
+change also puts the list on the tile's facet — `sign('notes:' +
+moleculeAddress(name))`, the subject being the tile's WORD — as one envelope
+per note (`relation: 'notes'`, `root: 'notes'`, order in `slot`), a
+succession atom `{succession:1, signer, prev, members, at}`, and one signed
+head claim in this author's bucket (`molecule/facet-succession.ts`, the first
+facet writer; `notes/notes-facet.ts`). The note atoms are untouched, so no
+tree re-signs. The layer slot is still written and still read; reads move to
+the facet in a later step. A note never mints an identity: without a cached
+key the facet is skipped that time.
 
 ## One roster, not four
 
