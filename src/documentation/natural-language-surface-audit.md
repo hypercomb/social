@@ -4,26 +4,30 @@
 adversarially refuted before it was kept. Several claims in the first pass were
 overstated and are recorded here in their corrected form.
 
-> **⚠ THIS AUDIT DESCRIBES THE WORKING TREE, NOT `development`.** The
-> census-derived machine vocabulary it audits — `MachineGrammar`, `reach`, the
-> twelve verbs — **is not committed.** HEAD's model channel is still the old
-> hand-written `CALLABLE_FORMS` table of five.
+> **⚠ RESOLVED 2026-09-04 (`6f99f2da4`) — this audit now describes
+> `development`.** It did not when written.
 >
-> Four of the eight files that constitute the vocabulary are **untracked**:
-> `machine-grammar.ts` (the contract itself), `clipboard.queen.ts`,
-> `undo.queen.ts`, `hide.queen.ts` — carrying six of the twelve verbs (`copy`,
-> `cut`, `paste`, `undo`, `redo`, `hide`). Nothing is broken by this: committed
-> code references none of them, so a clean clone still builds.
+> The census-derived vocabulary audited here — `MachineGrammar`, `reach`, the
+> twelve verbs — was **entirely uncommitted working-tree work**, and four of the
+> eight files that constitute it were untracked, including `machine-grammar.ts`,
+> the contract itself. HEAD's model channel was still the hand-written
+> `CALLABLE_FORMS` table of five. Nothing was broken by that — committed code
+> referenced none of it — but two things followed, and both bit.
 >
-> But two things follow, and both bite. **The fix for the incident that
-> prompted this audit is written and uncommitted** — a model told a participant
-> Hypercomb has no delete because HEAD's five-verb table omits `/remove`, and
-> the census that includes it has never landed. And **any improvement made to
-> those four files evaporates on the next checkout**: that happened twice in
-> one day to work in this document's own Owed list, silently, noticed only
-> because a diff showed zero hunks where changes were expected.
+> **The fix for the incident that prompted this audit was written and
+> unlanded.** A model told a participant Hypercomb has no delete because the
+> five-verb table omitted `/remove`; the census that includes it had sat in the
+> tree for a day. And **improvements to those files evaporated on checkout** —
+> twice in one day, to items in this document's own Owed list, silently, caught
+> only because a diff showed zero hunks where edits were expected.
 >
-> Landing them is not on the Owed list below. It is upstream of it.
+> Landed at the participant's direction, with authorship attributed to the
+> every-act-has-a-word session. Two things were reduced to their share rather
+> than swept: `side-effects.ts` carries only this feature's three registrations,
+> and `doctrine.spec.ts` was **excluded** — its allowlist change is coupled to
+> another session's staged deletion of the feedback-viewer. So this feature's
+> own ratchet, *"the model grammar module names no behaviour"*, is still owed,
+> and it is the thing that stops the hand-kept table growing back.
 
 **The one sentence:** four surfaces turn language into execution, exactly one of
 them is default-deny, and the field that looks like the capability tier
