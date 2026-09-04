@@ -32,8 +32,9 @@ produced verdicts. So:
   the four-hat byte-scan bug, three of the four pointer copies, and the four
   publish-without-gesture sites, the life-primitive coherence item, the
   legacy-history shadow test, the layer writer's hash refusal, both host-side
-  write guards, the insight catalog's kind, and check 5 on the canonical
-  write surface — 20 of 57 closed (one not reproduced).
+  write guards, the insight catalog's kind, check 5 on the canonical write
+  surface, and the translation service — 21 of 57 closed (one not
+  reproduced). Nothing at wide radius remains.
 
 ## The headline
 
@@ -182,7 +183,7 @@ the siblings already have.
 - `host-sync.service.ts:89` (also `active-genome.ts:95`,
   `website-archive.queen.ts:55`) — a local copy of `CHILD_SLOTS`, which core
   owns and `healLegacyLayer` imports. *Fix:* import it.
-- `translation.service.ts:415` — writes translated props into a device-local
+- *FIXED 2026-09-04 — one call through `writeTilePropertiesAt`; reads through `readTilePropertiesAt`; ratchet `translation.write-surface.spec.ts`.* `translation.service.ts:415` — writes translated props into a device-local
   index and never touches the layer; checks 1 and 3. *Fix:* one call through
   `writeTilePropertiesAt`.
 - *FIXED 2026-09-04 — seeded `document`.* `tree-insight.ts:96` with `pool-kinds.ts:129` — `insights:catalog` is

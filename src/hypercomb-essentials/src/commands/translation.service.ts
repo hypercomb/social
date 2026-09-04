@@ -7,7 +7,7 @@
 
 import { EffectBus, SignatureService, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { callAnthropic, callAnthropicBatch, getApiKey, MODELS } from '../assistant/llm-api.js'
-import { cellLocationSig, lookupTilePropsSig } from '../editor/tile-properties.js'
+import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 
 // Translation cache: per-locale maps, each a CONTENT-ADDRESSED document in
 // the sign('translations') document pool (Store.putPoolDoc/getPoolDoc,
@@ -16,6 +16,15 @@ import { cellLocationSig, lookupTilePropsSig } from '../editor/tile-properties.j
 //   { "<sourceSig>": "<translatedSig>", ... }
 // The legacy non-signed `translations/<locale>.json` dir is a read-fallback/
 // drain source: Store's boot absorb content-addresses it into the pool.
+//
+// WHERE A TILE'S TRANSLATIONS LIVE. In the tile's own properties, on the
+// tile's own LAYER, through the one canonical writer (`writeTilePropertiesAt`
+// → the committer → a new marker at every affected depth: undoable, shared,
+// carried by every closure). This used to `putResource` a modified props
+// blob and record its sig only in the device-local `hc:tile-props-index`,
+// so a translated hive had translations on ONE browser and nowhere else —
+// write-conformance checks 1 and 3. The index is a read cache the canonical
+// writer keeps warm; nothing here touches it.
 const PROPS_INDEX_KEY = 'hc:tile-props-index'
 const LEGACY_TRANSLATIONS_DIR = 'translations'
 const BATCH_SIZE = 40
@@ -343,38 +352,30 @@ export class TranslationService extends EventTarget {
       }
       await this.#persistLocale(targetLocale)
 
-      // 3. Walk tiles: attach translations[locale].labelSig / contentSig, update props index
-      const propsIndex: Record<string, string> = JSON.parse(
-        localStorage.getItem(PROPS_INDEX_KEY) ?? '{}',
-      )
-      // The sweep enumerates the CURRENT explorer location's tiles; index
-      // entries are keyed by each tile's full-lineage sig (legacy
-      // bare-label entries remain a read fallback).
+      // 3. Walk tiles: attach translations[locale].labelSig / contentSig ON THE
+      //    TILE'S LAYER, through the canonical writer. The sweep enumerates the
+      //    CURRENT explorer location's tiles.
       const sweepLineage = get('@hypercomb.social/Lineage') as
         { explorerSegments?: () => readonly string[] } | undefined
       const sweepSegments = sweepLineage?.explorerSegments?.() ?? []
 
       for (const tileName of plan.tileNames) {
-        const tileKey = await cellLocationSig(sweepSegments, tileName)
-        const propsSig = lookupTilePropsSig(propsIndex, tileKey, tileName)
-        if (!propsSig) {
-          EffectBus.emit('translation:tile-done', { label: tileName })
-          continue
-        }
-
-        const propsBlob = await store.getResource(propsSig)
-        if (!propsBlob) {
-          EffectBus.emit('translation:tile-done', { label: tileName })
-          continue
-        }
-
         let props: Record<string, any>
         try {
-          props = JSON.parse(await propsBlob.text())
+          props = await readTilePropertiesAt(sweepSegments, tileName)
         } catch {
           EffectBus.emit('translation:tile-done', { label: tileName })
           continue
         }
+        // A tile with no properties at all has nothing to translate INTO —
+        // the label still translates for the live catalog below, but a
+        // properties record is not minted for a tile that never had one.
+        const hadProps = Object.keys(props).length > 0
+        // Work on a copy of the translations key only: the canonical writer
+        // merges over the tile's OWN sparse overrides, so handing it the whole
+        // effective (inherited) object would freeze every root default into
+        // this appearance.
+        props = { ...props, translations: structuredClone(props['translations'] ?? {}) }
 
         let changed = false
 
@@ -407,18 +408,15 @@ export class TranslationService extends EventTarget {
           }
         }
 
-        if (changed) {
-          const updatedBlob = new Blob(
-            [JSON.stringify(props, null, 2)],
-            { type: 'application/json' },
-          )
-          propsIndex[tileKey || tileName] = await store.putResource(updatedBlob)
+        if (changed && hadProps) {
+          // ONE call through the canonical writer: a new props resource, the
+          // tile layer's `properties` slot advanced, the cascade to root, a
+          // marker at every depth. The index is warmed by that path.
+          await writeTilePropertiesAt(sweepSegments, tileName, { translations: props['translations'] })
         }
 
         EffectBus.emit('translation:tile-done', { label: tileName })
       }
-
-      localStorage.setItem(PROPS_INDEX_KEY, JSON.stringify(propsIndex))
 
       if (i18n && Object.keys(catalog).length) {
         i18n.registerTranslations('app', targetLocale, catalog)
@@ -460,12 +458,9 @@ export class TranslationService extends EventTarget {
 
     if (store) {
       for (const tileName of tileNames) {
-        const propsSig = lookupTilePropsSig(propsIndex, await cellLocationSig(planSegments, tileName), tileName)
-        if (!propsSig) continue
-        const blob = await store.getResource(propsSig)
-        if (!blob) continue
+        // The tile's EFFECTIVE properties, from its layer — never the index.
+        const props = await readTilePropertiesAt(planSegments, tileName).catch(() => ({} as Record<string, unknown>))
         try {
-          const props = JSON.parse(await blob.text()) as Record<string, any>
           const contentSig = props['contentSig']
           if (typeof contentSig === 'string') {
             const contentBlob = await store.getResource(contentSig)
