@@ -4,6 +4,27 @@
 adversarially refuted before it was kept. Several claims in the first pass were
 overstated and are recorded here in their corrected form.
 
+> **⚠ THIS AUDIT DESCRIBES THE WORKING TREE, NOT `development`.** The
+> census-derived machine vocabulary it audits — `MachineGrammar`, `reach`, the
+> twelve verbs — **is not committed.** HEAD's model channel is still the old
+> hand-written `CALLABLE_FORMS` table of five.
+>
+> Four of the eight files that constitute the vocabulary are **untracked**:
+> `machine-grammar.ts` (the contract itself), `clipboard.queen.ts`,
+> `undo.queen.ts`, `hide.queen.ts` — carrying six of the twelve verbs (`copy`,
+> `cut`, `paste`, `undo`, `redo`, `hide`). Nothing is broken by this: committed
+> code references none of them, so a clean clone still builds.
+>
+> But two things follow, and both bite. **The fix for the incident that
+> prompted this audit is written and uncommitted** — a model told a participant
+> Hypercomb has no delete because HEAD's five-verb table omits `/remove`, and
+> the census that includes it has never landed. And **any improvement made to
+> those four files evaporates on the next checkout**: that happened twice in
+> one day to work in this document's own Owed list, silently, noticed only
+> because a diff showed zero hunks where changes were expected.
+>
+> Landing them is not on the Owed list below. It is upstream of it.
+
 **The one sentence:** four surfaces turn language into execution, exactly one of
 them is default-deny, and the field that looks like the capability tier
 (`MachineGrammar.reach`) is decorative **by design** — so a sandbox is not a
