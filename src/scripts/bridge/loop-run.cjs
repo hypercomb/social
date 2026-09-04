@@ -67,6 +67,71 @@ const runIdForAsk = askSig =>
   'ask:' + crypto.createHash('sha256').update(String(askSig || '')).digest('hex').slice(0, 32)
 
 /**
+ * The tile path a set of segments names.
+ *
+ * Mirrors tilePath() in assistant/chat-thread.ts, which is the source of
+ * truth — a script cannot import the TypeScript, so the rule is spelled
+ * twice and must be changed in both places. It is deliberately trivial for
+ * that reason: trim, drop empties, join with a slash.
+ */
+const tilePathOfSegments = segments =>
+  '/' + (Array.isArray(segments) ? segments : [])
+    .map(s => String(s ?? '').trim()).filter(Boolean).join('/')
+
+/**
+ * THE WHOLE RUN REFERENCE, from the one handle a responder always has.
+ *
+ * A responder answering an ask knows its sig, and nothing else it holds
+ * survives its own death. So both halves are derived from it:
+ *
+ *   • the RUN ID, hashed from the ask — stable across restarts by
+ *     construction rather than by the next process remembering a string.
+ *   • the CONVERSATION, which is the TARGET TILE own chat when the ask
+ *     names a tile. That is where a person would look for what an agent
+ *     did about that tile; it is a conversation the system already
+ *     addresses (chat:tile:/path — derived, never minted); and — the
+ *     practical part — it is already listed and already deletable, so
+ *     agent runs inherit a collector instead of piling up orphan buckets
+ *     that nothing in the app can reach.
+ *
+ * An ask that names no tile falls back to agent:<sig>, which
+ * isHumanConversation excludes from every chat list.
+ *
+ * A MULTI-TARGET run belongs to the FIRST target conversation as a whole;
+ * each step still records the cell it acted on, so which targets are done
+ * is read from the steps, never from the bucket they sit in.
+ */
+const runRefForAsk = (askSig, segments) => {
+  const path = tilePathOfSegments(segments)
+  return {
+    convoId: path === '/' ? 'agent:' + String(askSig || '') : 'chat:tile:' + path,
+    id: runIdForAsk(askSig),
+  }
+}
+
+/**
+ * The run a responder was woken for, from the environment — or null.
+ *
+ * A parked session exports this ONCE per ask; every script it then runs
+ * attaches the run without the model having to remember a field on each
+ * hand-typed request. That is the difference between a ledger that fills
+ * itself and one that fills only when somebody remembers it.
+ */
+const runFromEnv = (env = process.env) => {
+  const ask = String(env.HYPERCOMB_RUN_ASK || '').trim()
+  if (!ask) return null
+  let segments = []
+  const raw = String(env.HYPERCOMB_RUN_SEGMENTS || '').trim()
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) segments = parsed
+    } catch { segments = raw.split('/') }
+  }
+  return runRefForAsk(ask, segments)
+}
+
+/**
  * Open a run against one conversation.
  *
  * Pass `ask` (the ask sig) and the run id is derived for you — the safe path,
@@ -166,4 +231,4 @@ function openRun({ convoId, runId, ask, bridge = DEFAULT_BRIDGE, timeoutMs = 15_
   return { convoId: convo, runId: id, act, peek, resume, alreadyDid, requestOf }
 }
 
-module.exports = { openRun, runIdForAsk }
+module.exports = { openRun, runIdForAsk, runRefForAsk, runFromEnv, tilePathOfSegments }

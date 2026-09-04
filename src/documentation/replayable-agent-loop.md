@@ -1,8 +1,10 @@
 # The replayable agent loop
 
-> **status: built.** `assistant/chat-steps.ts` (the record), `claude-bridge.worker.ts`
-> (the writer and the read path), `scripts/bridge/loop-run.cjs` (the responder's
-> side). Specs: `assistant/chat-steps.spec.ts`.
+> **status: built.** `assistant/chat-steps.ts` (the record),
+> `claude-bridge.worker.ts` (the writer and the read path),
+> `scripts/bridge/loop-run.cjs` (the responder's side), wired into
+> `_ask-drain.cjs` and `_bop.cjs`. Specs: `assistant/chat-steps.spec.ts`,
+> `scripts/bridge/loop-run.spec.ts`.
 
 An agent working in the hive is a loop: it is asked something, it takes steps,
 it answers. Two thirds of that was already durable. The turns are stored — one
@@ -163,6 +165,51 @@ run: { convoId: 'chat:tile:/dolphin/site', id: 'run-7f3a' }
 Put that on the requests you already send. That is the entire cost. The steps
 you forgot you took and the ones that failed are recorded exactly like the
 rest. A request with no `run` records nothing and behaves precisely as before.
+
+### Declaring it once, not per call
+
+Attaching `run` by hand is fine for a client that builds its requests, and
+useless for the paths that do not: `_bop.cjs` takes a hand-written JSON blob
+on the command line, and that is how multi-target answers, `break-apart`,
+`expand` and `organize` are sent. A field the model has to remember on every
+one of those is a field that will be forgotten, and a forgotten field is an
+empty ledger that looks exactly like a run that did nothing.
+
+So the run is **derived from the ask** and read from the environment. A parked
+session exports it once:
+
+```bash
+export HYPERCOMB_RUN_ASK=<ask sig>
+export HYPERCOMB_RUN_SEGMENTS='["dolphin","site"]'   # optional: the target tile
+```
+
+Every `_bop.cjs` request then carries the run without being told to. An
+explicit `run` in the JSON still wins; no env var and no run records nothing,
+exactly as before.
+
+Both halves come from the one handle a responder always has:
+
+| | derived as | why |
+|---|---|---|
+| `run.id` | `sha256(askSig)` | stable across a restart by construction, not by the next process remembering a string |
+| `run.convoId` | the target tile's own chat (`chat:tile:/path`) | where a person looks for what an agent did about that tile — and it is already listed and already deletable, so runs inherit a collector instead of piling up orphan buckets |
+
+An ask naming no tile falls back to `agent:<sig>`, which
+`isHumanConversation` keeps out of every chat list. A multi-target run belongs
+to the first target's conversation as a whole; each step records the cell it
+acted on, so which targets are done is read from the steps, never from the
+bucket they sit in.
+
+### What it closed
+
+`_ask-drain.cjs` writes the note and then retires the ask. A crash between
+the two left the ask pending, so the next drain answered a question that was
+already answered and the tile got the same note twice — unavoidable while
+nothing recorded the write. It now asks the ledger whether this run already
+landed a `note-add` for that cell and, if so, retires without a second note.
+
+On a ledger it cannot **read**, it writes the note anyway. A duplicate note is
+a nuisance; a lost answer is the failure that file already refuses twice.
 
 Two ops are deliberately **not** steps: `thread-read` (reading the log is how
 you rejoin the loop, not a move within it) and `agent-progress` (the
