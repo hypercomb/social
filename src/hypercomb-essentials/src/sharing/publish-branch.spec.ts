@@ -82,19 +82,68 @@ beforeEach(() => {
   localStorage.clear()
 })
 
+describe('where the bytes go', () => {
+  it('stops with no-host when the branch names no node and nothing is standing — and flips no switch', async () => {
+    const ioc = (window as unknown as { ioc: { get: (k: string) => unknown } }).ioc
+    const original = ioc.get
+    let enableCalls = 0
+    ioc.get = (key: string): unknown => {
+      if (key !== '@diamondcoreprocessor.com/HostSyncService') return original(key)
+      return {
+        ...(original(key) as object),
+        isEnabled: () => false,
+        isPublicHostEnabled: () => false,
+        enablePublicHost: () => { enableCalls++ },
+      }
+    }
+    try {
+      const result = await publishBranch(['site'])
+      expect(result).toMatchObject({ ok: false, failure: 'no-host' })
+      expect(putCalls).toEqual([])
+      expect(enableCalls).toBe(0)
+    } finally { ioc.get = original }
+  })
+
+  it('names the nodes it publishes to, and never the standing enable', async () => {
+    const ioc = (window as unknown as { ioc: { get: (k: string) => unknown } }).ioc
+    const original = ioc.get
+    const named: string[][] = []
+    let enableCalls = 0
+    ioc.get = (key: string): unknown => {
+      if (key !== '@diamondcoreprocessor.com/HostSyncService') return original(key)
+      return {
+        ...(original(key) as object),
+        enablePublicHost: () => { enableCalls++ },
+        addPublishNodes: (domains: readonly string[]) => { named.push([...domains]) },
+      }
+    }
+    try {
+      indexRead = { ok: false, reason: 'http', status: 404 }
+      const result = await publishBranch(['site'])
+      expect(result.ok).toBe(true)
+      expect(enableCalls).toBe(0)
+      expect(named).toHaveLength(1)
+      expect(named[0]!.length).toBeGreaterThan(0)
+      if (result.ok) expect(result.host).toBe(named[0]![0])
+    } finally { ioc.get = original }
+  })
+})
+
 describe('publish index wipe guard', () => {
 
-  it('REFUSES to write when the existing index could not be read', async () => {
+  it('REFUSES to write when no node answers — it stops before sealing, and nothing is PUT', async () => {
+    // Every node unreachable is not an index we could not read; it is a
+    // publish with nowhere to go. It stops BEFORE sealing or staging (no
+    // bytes leave), and says which nodes did not answer.
     indexRead = { ok: false, reason: 'unreachable' }
 
     const result = await publishBranch(['notes'])
 
     expect(result.ok).toBe(false)
     if (!result.ok) {
-      expect(result.failure).toBe('index-unsafe')
-      expect(result.reason).toBe('unreachable')
-      // The bytes are hosted — only the pointer was withheld.
-      expect(result.sealed).toBe(HEAD)
+      expect(result.failure).toBe('no-host')
+      expect(result.reason).toContain('no node answered')
+      expect(result.sealed).toBeUndefined()
     }
     // THE ASSERTION THAT MATTERS: nothing was PUT, so no other branch was
     // dropped from the world.

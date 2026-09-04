@@ -54,8 +54,12 @@ the census had not:**
   mismatch (`contentRefused`); the spec's content fixture carries its real
   signature.*
 - `publish-branch.ts` step 1 — `enablePublicHost()` unconditionally, even over
-  a prior explicit opt-out (check 10). **Owner question:** is a publish the
-  gesture that grants the standing public host?
+  a prior explicit opt-out (check 10). *Decided and fixed 2026-09-04: a
+  publish is one act — bytes to the branch's AVAILABLE PUBLISHED NODES (its
+  host marks, else the participant's standing targets as they already are),
+  then the index. It names those nodes to host-sync for this act
+  (`addPublishNodes`) and never flips a standing switch. No node named, or
+  none answering, is a `no-host` stop with its reason.*
 - `packed-collect.ts` — the collector the census actually cited for the
   four-hat bug still credits every pool member's name and bytes with no
   pool-kind gate; under the packed store the reader fix does not reach it.

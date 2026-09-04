@@ -1509,6 +1509,7 @@
   "publish.other-device": "This entry was published from another device — this hive has no branch at that path to publish.",
   "publish.failure.services": "Core services are not ready yet.",
   "publish.failure.no-branch": "That row has no branch here to publish.",
+  "publish.failure.no-host": "Nowhere to put the bytes — this branch names no host and none is set as your default. Add a host to the branch, or set one in the hosts panel, then publish again.",
   "publish.failure.seal-failed": "The branch could not be sealed — a child is cold. Visit its tiles once, then publish again.",
   "publish.failure.no-signer": "No signing key available — the hive index must be signed.",
   "publish.failure.not-available": "Still uploading — the index was NOT advanced, so no dead links. It keeps retrying.",

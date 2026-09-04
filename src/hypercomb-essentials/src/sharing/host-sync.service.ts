@@ -396,7 +396,7 @@ export class HostSyncService extends EventTarget {
   /** Any drain destination enabled at all? Gates the content:wrote
    *  handler, the retry timer, and the boot drains. */
   readonly #anyEnabled = (): boolean =>
-    !this.#readonlyVisitor() && (this.#isEnabled() || this.#publicHostEnabled())
+    !this.#readonlyVisitor() && (this.#isEnabled() || this.#publicHostEnabled() || this.#publishNodes.size > 0)
 
   readonly #isEnabled = (): boolean => {
     if (this.#readonlyVisitor()) return false
@@ -442,10 +442,41 @@ export class HostSyncService extends EventTarget {
     void this.drain()
   }
 
+  /**
+   * THE NODES A PUBLISH NAMED, THIS SESSION. A publish is one act with two
+   * halves — put the bytes where the branch is served from, then advance the
+   * index — and the branch's published nodes are where the bytes go. They are
+   * added here for the act (`publishBranch` → `addPublishNodes`) and become
+   * public-only targets exactly like the standing public host: only
+   * `.public`-marked sigs travel to them. Nothing about a publish flips a
+   * STANDING switch any more — the decision "use the public host from now on"
+   * belongs to the hosts panel, never to a press that was about one branch.
+   * Session memory: the branch's host MARKS are the durable record, and the
+   * next publish names its nodes again.
+   */
+  readonly #publishNodes = new Set<string>()
+
+  /** Name the nodes THIS publish puts its bytes on — content doors, bare
+   *  hostnames. Idempotent. Kicks a drain so anything already staged and
+   *  marked public starts moving. */
+  public readonly addPublishNodes = (domains: readonly string[]): void => {
+    let added = false
+    for (const raw of domains) {
+      const domain = String(raw ?? '').trim().toLowerCase()
+      if (!HOST_DOMAIN_RE.test(domain) || this.#publishNodes.has(domain)) continue
+      this.#publishNodes.add(domain)
+      added = true
+    }
+    if (added) void this.drain()
+  }
+
+  /** The nodes publishes have named this session — for a status line. */
+  public readonly publishNodes = (): string[] => [...this.#publishNodes]
+
   /** The currently-enabled drain destinations: the operator's self-domain
-   *  (when configured AND opted in) plus the public CDN target (behind its
-   *  own gate). Empty when everything is off. Future consent-granted hosts
-   *  (30411 records) append here with their own scoping. */
+   *  (when configured AND opted in), the public CDN target (behind its own
+   *  gate), and every node a publish named this session (`#publishNodes`).
+   *  Empty when everything is off. */
   readonly #targets = async (): Promise<SyncTarget[]> => {
     const targets: SyncTarget[] = []
     if (this.#isEnabled()) {
@@ -459,6 +490,10 @@ export class HostSyncService extends EventTarget {
         hostHash: await HostSyncService.#hostHash(domain),
         publicOnly: true,
       })
+    }
+    for (const domain of this.#publishNodes) {
+      if (targets.some(t => t.domain === domain)) continue
+      targets.push({ domain, hostHash: await HostSyncService.#hostHash(domain), publicOnly: true })
     }
     return targets
   }
@@ -704,7 +739,9 @@ export class HostSyncService extends EventTarget {
    *  recurses into `cells`/`layers`/`children` — a tile-only public tile
    *  must never mark its private descendants' layers. */
   public readonly markPublic = async (sig: string, kind: HostSyncKind = 'layer', closure = true): Promise<void> => {
-    if (!this.#publicHostEnabled()) return
+    // A public-only target must exist for the marker to mean anything: the
+    // standing public host, or a node a publish named for this act.
+    if (!this.#publicHostEnabled() && this.#publishNodes.size === 0) return
     const s = String(sig ?? '').trim().toLowerCase()
     if (!SIG_RE.test(s)) return
     // Walk dedup: a completed full-closure walk (bare `s`) covers both
