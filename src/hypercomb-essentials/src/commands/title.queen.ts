@@ -72,6 +72,7 @@ export class TitleQueenBee extends QueenBee {
     forms: '<text> | <cell> = <text> | <cell> =',
     example: '/title roadmap = Road map',
     reach: 'editing' as const,
+    scope: 'tile' as const,
     refuse: (args: string): string | undefined => {
       const equals = args.indexOf('=')
       if (equals === -1) return args.trim() ? undefined : '/title needs the text to draw'

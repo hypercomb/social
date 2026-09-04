@@ -47,6 +47,44 @@ export type MachineReach =
   | 'destructive'
 
 /**
+ * WHERE the change lands. `reach` says how MUCH a verb changes; `scope` says how
+ * FAR the change travels. Neither can be inferred from the other, and a gate
+ * that reads only one is gated on the wrong thing.
+ *
+ * The audit that added this axis (documentation/natural-language-surface-audit.md)
+ * found the two axes crossing in both directions:
+ *
+ *   `/keyword <cell> = <tag>` is EDITING at the tile — one slot on its own
+ *   layer, undoable through history — and ADDITIVE at the hive in the same
+ *   call, minting a row in a registry document that no undo unwrites.
+ *
+ *   `/hide` was declared 'editing' on its author's stated premise that
+ *   "nothing is published, and no peer sees a change". It emits a SIGNED MESH
+ *   EVENT under the participant's own pubkey. The value was honest about the
+ *   intent and wrong about the code.
+ *
+ * ORDERED OUTWARD, and DECLARED AS A CEILING. A verb that touches two rings
+ * declares the wider one, because a gate must bound the worst case rather than
+ * describe the common one. `/keyword` is therefore 'hive', not 'tile'.
+ *
+ * REVERSIBILITY IS NOT ON EITHER AXIS, and does not track them. `/remove` is
+ * 'destructive' and fully undoable; `/keyword`'s registry write is 'editing' at
+ * the tile and lands in no layer and no bag, so no undo unwrites it. If a grant
+ * ever wants "only what I can take back", that is a third thing to declare.
+ */
+export type MachineScope =
+  /** This browser only — a lens or a preference. Nothing enters the hive. */
+  | 'local'
+  /** The named tile's own slots: its decorations, properties, title. */
+  | 'tile'
+  /** Which tiles a parent holds — the page's membership changes. */
+  | 'page'
+  /** A hive-wide document no single tile owns: a registry, a pool, an index. */
+  | 'hive'
+  /** Leaves the machine: a signed publish, a peer, a host. */
+  | 'network'
+
+/**
  * A behaviour's machine-facing declaration — what a model may say to it, and
  * what it refuses. Held beside `description` / `options` / `examples` so the
  * one authoring surface answers every reader: participant, reference sheet,
@@ -70,8 +108,20 @@ export interface MachineGrammar {
    */
   readonly bare?: boolean
 
-  /** How far a call reaches. Defaults to `'editing'` when unstated. */
+  /** How MUCH a call changes. Defaults to `'editing'` when unstated. */
   readonly reach?: MachineReach
+
+  /**
+   * How FAR the change travels — see {@link MachineScope}. Declared as a
+   * CEILING: a verb touching two rings states the wider one, because a gate
+   * must bound the worst case, not describe the common one.
+   *
+   * Unstated defaults to `'hive'` in meaning, but a gate should treat a MISSING
+   * scope as unknown rather than as `'hive'`: the twelve values that exist were
+   * each traced to their commit, and a thirteenth that declares none has not
+   * been. Refusing what has not been judged is the safe direction.
+   */
+  readonly scope?: MachineScope
 
   /**
    * ONE CLAUSE THE CATALOGUE APPENDS, in the behaviour's own words: what

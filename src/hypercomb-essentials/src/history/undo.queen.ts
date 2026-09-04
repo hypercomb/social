@@ -113,6 +113,7 @@ export class UndoQueenBee extends CursorStepQueen {
     example: '/undo',
     bare: true,
     reach: 'editing' as const,
+    scope: 'hive' as const,
     refuse: refuseSteps,
   }
 
@@ -133,6 +134,7 @@ export class RedoQueenBee extends CursorStepQueen {
     example: '/redo',
     bare: true,
     reach: 'editing' as const,
+    scope: 'hive' as const,
     refuse: refuseSteps,
   }
 

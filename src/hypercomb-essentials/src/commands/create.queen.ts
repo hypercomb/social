@@ -52,6 +52,7 @@ export class CreateQueenBee extends QueenBee {
     forms: '<name> | <parent>/<child>',
     example: '/create roadmap',
     reach: 'additive' as const,
+    scope: 'page' as const,
     refuse: (args: string): string | undefined => {
       const parts = args.split('/').map(part => part.trim())
       if (args.includes(BACKSLASH) || parts.some(part => !part || part === '.' || part === '..')) {

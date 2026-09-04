@@ -310,6 +310,7 @@ class KeywordProvider implements SlashBehaviourProvider {
         forms: '<cell> = <tag> | <cell> = <tag>(#hexcolor)',
         example: '/keyword roadmap = urgent',
         reach: 'editing',
+        scope: 'hive',
         consequence: 'Tags the named tile; ~ before a tag removes it.',
         refuse: refuseNamedKeyword,
       } }
@@ -367,6 +368,7 @@ class RemoveProvider implements SlashBehaviourProvider {
         forms: '<tile> | [<tile>, <tile>, ...]',
         example: '/remove drafts',
         reach: 'destructive',
+        scope: 'page',
         consequence: 'Takes tiles off this page; their content, subtree and history survive and /undo restores them, though a tile regains its auto-assigned art only by re-picking it. Asks first only when other tiles are nested beneath.',
         refuse: refuseTileList('/remove'),
       } }
@@ -419,6 +421,7 @@ class AccentProvider implements SlashBehaviourProvider {
         forms: '<cell> = <preset>',
         example: '/accent roadmap = ember',
         reach: 'editing',
+        scope: 'tile',
         consequence: "Sets that one tile's accent; presets are glacier, bloom, aurora, ember, nebula.",
         refuse: refuseNamedAccent,
       },

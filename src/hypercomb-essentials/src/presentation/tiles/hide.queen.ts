@@ -10,11 +10,19 @@
 // harsher half, was in it. A speaker who wanted the safe option had to ask for
 // the dangerous one.
 //
-// Hiding is a PARTICIPANT-LOCAL lens, not a commit: it writes the hidden list
-// this browser keeps and repaints. Nothing leaves the layer, nothing is
-// published, and no peer sees a change. That is exactly why it is the right
-// first reach for a model — the worst case is a view you can restore with the
-// same word.
+// Hiding is a lens, not a commit: it writes the hidden list this browser keeps
+// and repaints. Nothing leaves the layer — no tile leaves a parent's children,
+// no bytes move — which is why it is the right first reach for a model, and why
+// the worst case is a view you can restore with the same word.
+//
+// CORRECTION (2026-09-04). This header used to add "nothing is published, and
+// no peer sees a change". THAT IS FALSE, and it was the premise the machine
+// `reach` was chosen on. `#hideOrBlock` hands the hidden list to
+// `SwarmDrone.publishHide` (tile-actions.drone.ts), which emits a SIGNED MESH
+// EVENT under the participant's own pubkey (swarm.drone.ts, SWARM_HIDE_KIND) so
+// peers filter the same tile at render time. Hiding is local in what it changes
+// and NOT local in how far it travels — which is precisely the pair the machine
+// block now declares: `reach: 'editing'`, `scope: 'network'`.
 //
 // Syntax:
 //   /hide <tile>                 — hide one tile
@@ -73,7 +81,22 @@ export class HideQueenBee extends QueenBee {
   override machine = {
     forms: '<tile> | [<tile>, <tile>, ...] | ~<tile>',
     example: '/hide drafts',
+    // EDITING, NOT DESTRUCTIVE — deliberately, and the scope carries the rest.
+    // The rubric's destructive line names hiding ("Moves, hides, or takes
+    // something away"), but it was written when hiding was believed local. What
+    // /hide actually does to the hive is set a visibility flag: no tile leaves
+    // a parent's children, no bytes move, and the same word reverses it. Label
+    // it destructive and an "additive + editing" grant blocks the GENTLE verb
+    // while leaving nothing safer than /remove — inverting HIDE FIRST, DELETE
+    // SECOND at exactly the surface where a model chooses.
+    //
+    // The concerning half is not magnitude, it is travel: this publishes a
+    // signed mesh event under the participant's pubkey (tile-actions.drone.ts
+    // -> swarm.publishHide). `scope: 'network'` is what a grant should gate on,
+    // and it is why this file's header — "nothing is published, and no peer
+    // sees a change" — is wrong and has been corrected below.
     reach: 'editing' as const,
+    scope: 'network' as const,
     refuse: (args: string): string | undefined => {
       const reading = read(args)
       return 'refuse' in reading ? reading.refuse : undefined

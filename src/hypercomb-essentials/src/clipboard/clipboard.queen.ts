@@ -143,6 +143,7 @@ export class CopyQueenBee extends ClipboardVerbQueen {
     forms: '<tile> | [<tile>, <tile>, ...]',
     example: '/copy drafts',
     reach: 'additive' as const,
+    scope: 'hive' as const,
     refuse: refuseTargets('/copy', false),
   }
 
@@ -162,7 +163,8 @@ export class CutQueenBee extends ClipboardVerbQueen {
   override machine = {
     forms: '<tile> | [<tile>, <tile>, ...]',
     example: '/cut drafts',
-    reach: 'editing' as const,
+    reach: 'destructive' as const,
+    scope: 'hive' as const,
     refuse: refuseTargets('/cut', false),
   }
 
@@ -183,6 +185,7 @@ export class PasteQueenBee extends ClipboardVerbQueen {
     example: '/paste',
     bare: true,
     reach: 'additive' as const,
+    scope: 'hive' as const,
     refuse: (args: string): string | undefined =>
       args.trim() ? '/paste places what is held here; it takes no argument' : undefined,
   }

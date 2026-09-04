@@ -75,6 +75,7 @@ export class PostitQueenBee extends QueenBee {
     forms: 'here <text>',
     example: '/postit here First draft',
     reach: 'additive' as const,
+    scope: 'tile' as const,
     refuse: (args: string): string | undefined =>
       /^here[ ]+[^ ]/i.test(args) ? undefined : '/postit needs the form: /postit here <text>',
   }
