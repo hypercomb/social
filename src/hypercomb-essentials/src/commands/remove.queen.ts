@@ -69,8 +69,8 @@ export class RemoveQueenBee extends QueenBee {
       .map(s => String(s ?? '').trim())
       .filter(Boolean)
 
-    await removeTilesAt(segments, targets, {
-      // Deleting a tile takes its whole branch with it. Count what's nested and
+    const landed = await removeTilesAt(segments, targets, {
+      // Removing a tile takes its whole branch with it. Count what's nested and
       // confirm (the dialog is skipped when nothing is nested — see helper).
       confirm: async (history, parent) => {
         if (!(await confirmRemoval(history, parent, targets))) return false
@@ -78,6 +78,19 @@ export class RemoveQueenBee extends QueenBee {
         return true
       },
     })
+
+    // A DECLINED OR IMPOSSIBLE REMOVAL MUST NOT RESOLVE CLEAN. `removeTilesAt`
+    // answers false when the participant cancels the dialog, when the services
+    // are not up, or when the parent layer will not resolve — and this used to
+    // return normally, so a model's receipt read "Ran 1 grammar" over work that
+    // never happened. That is the exact failure `refuse` exists to prevent, one
+    // step further down the path where only the outcome can see it. Throwing
+    // makes the plan stop and report the honest partial receipt; for a typed
+    // participant it surfaces as the same warned-and-skipped line as any other
+    // behaviour that could not act.
+    if (!landed) {
+      throw new Error(`/remove did not run — ${targets.length === 1 ? `"${targets[0]}"` : 'the tiles'} were not taken off this page`)
+    }
   }
 }
 

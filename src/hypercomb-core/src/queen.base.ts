@@ -1,4 +1,5 @@
 import { Bee, BeeState } from './bee.base.js'
+import type { MachineGrammar } from './core/machine-grammar.js'
 
 // -------------------------------------------------
 // queen bee — real-time slash behaviour dispatch, no lifecycle
@@ -47,6 +48,17 @@ export abstract class QueenBee extends Bee {
    * happens. One or two well-chosen examples beat an exhaustive list.
    */
   public examples?: readonly QueenUsageExample[]
+
+  /**
+   * THE MACHINE-FACING DECLARATION. Set this and the behaviour joins the
+   * vocabulary a model speaking only the communication layer can use; leave it
+   * unset — the default — and no model can call it. The argument language is
+   * stated here by the author who wrote the parser, not by a table elsewhere
+   * that knows only the command name.
+   *
+   * See `MachineGrammar` for why the old shell-side allowlist was retired.
+   */
+  public machine?: MachineGrammar
 
   /**
    * Optional autocomplete hook. Returns the list of completions for the current

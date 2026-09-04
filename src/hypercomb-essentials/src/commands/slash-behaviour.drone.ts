@@ -6,6 +6,8 @@ import {
 import { ReceiptBuilder, describeReceipt } from '../assistant/receipt.js'
 import { BREAK_APART_SKIP_LABELS } from '../assistant/break-apart.drone.js'
 import type { SlashBehaviour, SlashBehaviourMatch, SlashBehaviourProvider } from './slash-behaviour.provider.js'
+import { readNamedTarget } from './keyword.queen.js'
+import { readAccentTarget } from './accent.queen.js'
 
 /** Participant-local lens: whether the prototypes filter is open. Read live
  *  on every presentation so `/prototypes` takes effect on the next keystroke
@@ -210,6 +212,84 @@ class ClearProvider implements SlashBehaviourProvider {
   }
 }
 
+// ── MACHINE ARGUMENT RULES ────────────────────────────────────────────
+//
+// A behaviour that offers itself to a machine states what it CANNOT act on.
+// These rules live beside the behaviours rather than in the grammar module,
+// because the person who wrote the parser is the only one who knows them —
+// that separation is the whole reason the old shell-side allowlist drifted
+// until a participant was told Hypercomb has no way to delete a tile.
+//
+// Native parsers are forgiving: they normalize bad input into a no-op. A clean
+// no-op earns the model a receipt claiming work that never happened, and a
+// receipt must never lie. So each rule refuses what would silently do nothing.
+
+const HEX_COLOUR = /^#[0-9a-f]{3}(?:[0-9a-f]|[0-9a-f]{3}|[0-9a-f]{5})?$/i
+const ACCENT_PRESETS = new Set(['glacier', 'bloom', 'aurora', 'ember', 'nebula'])
+
+/** `[a, b, c]` or a single bare item — the list shape the tag and tile verbs share. */
+const bracketItems = (raw: string): string[] => {
+  const trimmed = raw.trim()
+  const bracket = trimmed.match(/^\[(.*)\]$/s)
+  return (bracket ? bracket[1].split(',') : [trimmed]).map(part => part.trim()).filter(Boolean)
+}
+
+const refuseKeyword = (args: string): string | undefined => {
+  const items = bracketItems(args)
+  if (!items.length) return '/keyword needs at least one tag'
+  for (const item of items) {
+    const body = item.startsWith('~') ? item.slice(1).trim() : item
+    const match = body.match(/^([^()\[\],~]+?)(?:\(([^)]+)\))?$/)
+    if (!match?.[1].trim()) return '/keyword needs tag names'
+    if (match[2] !== undefined && !HEX_COLOUR.test(match[2].trim())) {
+      return '/keyword colours are hexadecimal, like urgent(#c0392b)'
+    }
+  }
+  return undefined
+}
+
+const refuseAccent = (args: string): string | undefined => {
+  const normalized = args.trim().toLowerCase()
+  if (normalized.startsWith('~')) {
+    return normalized.slice(1).trim() ? undefined : '/accent needs a tag name after ~'
+  }
+  const bracket = normalized.match(/^\[([^\]]+)\]\s+(\S+)$/)
+  if (bracket) {
+    const tags = bracket[1].split(',').map(tag => tag.trim()).filter(Boolean)
+    if (tags.length && ACCENT_PRESETS.has(bracket[2])) return undefined
+  } else {
+    const parts = normalized.split(/\s+/)
+    if ((parts.length === 1 && ACCENT_PRESETS.has(parts[0]))
+      || (parts.length === 2 && !!parts[0] && ACCENT_PRESETS.has(parts[1]))) return undefined
+  }
+  return '/accent needs a known preset: glacier, bloom, aurora, ember, or nebula'
+}
+
+/** The machine seam admits ONLY the named forms of /keyword and /accent, so
+ *  the gate reuses each queen's own reader — a gate that re-derives a parser's
+ *  rule is a second copy of it, and second copies drift. */
+const refuseNamedKeyword = (args: string): string | undefined => {
+  const named = readNamedTarget(args)
+  if (!named) return '/keyword needs a named tile on this seam: /keyword <cell> = <tag>'
+  if ('refuse' in named) return named.refuse
+  return refuseKeyword(named.tags)
+}
+
+const refuseNamedAccent = (args: string): string | undefined => {
+  const named = readAccentTarget(args.toLowerCase())
+  if (!named) return '/accent needs a named tile on this seam: /accent <cell> = <preset>'
+  return 'refuse' in named ? named.refuse : undefined
+}
+
+const refuseTileList = (verb: string) => (args: string): string | undefined => {
+  const items = bracketItems(args)
+  if (!items.length) return `${verb} needs at least one tile name`
+  if (items.some(name => name.includes('/') || name.includes(String.fromCharCode(92)))) {
+    return `${verb} names tiles on this page; it does not reach through /`
+  }
+  return undefined
+}
+
 class KeywordProvider implements SlashBehaviourProvider {
   readonly name = 'keyword-provider'
   readonly priority = 100
@@ -219,7 +299,20 @@ class KeywordProvider implements SlashBehaviourProvider {
       examples: [
         { input: '/keyword urgent', result: 'Tags the selected tiles with "urgent"' },
         { input: '/keyword ~urgent', result: 'Removes the "urgent" tag from the selected tiles' },
-      ] }
+      ],
+      // A MACHINE MUST NAME THE TILE. Every other form of /keyword acts on the
+      // current selection, which a speaker cannot see: `/keyword urgent` with
+      // nothing picked writes only the global tag registry and still earns a
+      // clean receipt for tiles it never touched. `/remove`'s own declaration
+      // states the rule; these two broke it while inheriting it from the old
+      // five-name table. The participant keeps every form.
+      machine: {
+        forms: '<cell> = <tag> | <cell> = <tag>(#hexcolor)',
+        example: '/keyword roadmap = urgent',
+        reach: 'editing',
+        consequence: 'Tags the named tile; ~ before a tag removes it.',
+        refuse: refuseNamedKeyword,
+      } }
   ]
 
   async execute(_behaviourName: string, args: string): Promise<void> {
@@ -253,7 +346,30 @@ class RemoveProvider implements SlashBehaviourProvider {
       examples: [
         { input: '/remove drafts', result: 'Removes the tile named "drafts" from the current directory' },
         { input: '/remove', result: 'Removes the currently selected tiles' },
-      ] }
+      ],
+      // DELETION IS SAYABLE — and it is not deletion. `/remove` is ONE
+      // `LayerCommitter.update` setting the parent's children slot to the
+      // survivors (remove.queen.ts); the tile's bytes, its whole subtree and
+      // its history bag all stay exactly where they were, and undoing the
+      // commit brings the tile back. The committer's own docstring is the
+      // clearest statement of it: "add and remove are special cases of 'the
+      // new children list is X'."
+      //
+      // So the consequence is stated plainly rather than dressed as danger.
+      // It also does NOT promise a dialog: `confirmRemoval` skips it whenever
+      // nothing is nested beneath the target (remove-confirm.ts), which is the
+      // common case, and the catalogue claiming otherwise had a model relaying
+      // a confirmation that never happened.
+      //
+      // A bare `/remove` acts on the current SELECTION, which a machine cannot
+      // see and must not guess at, so names are required on this seam.
+      machine: {
+        forms: '<tile> | [<tile>, <tile>, ...]',
+        example: '/remove drafts',
+        reach: 'destructive',
+        consequence: 'Takes tiles off this page; their content, subtree and history survive and /undo restores them, though a tile regains its auto-assigned art only by re-picking it. Asks first only when other tiles are nested beneath.',
+        refuse: refuseTileList('/remove'),
+      } }
   ]
 
   async execute(_behaviourName: string, args: string): Promise<void> {
@@ -295,6 +411,17 @@ class AccentProvider implements SlashBehaviourProvider {
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
     { name: 'accent', description: 'Set the hover accent color by name', descriptionKey: 'slash.accent',
+      // Same rule, and /accent needed it more: one line could write
+      // localStorage, the global TagRegistry, OR per-tile properties depending
+      // on what happened to be selected. The named form writes exactly one
+      // store, so what a model says is what a model does.
+      machine: {
+        forms: '<cell> = <preset>',
+        example: '/accent roadmap = ember',
+        reach: 'editing',
+        consequence: "Sets that one tile's accent; presets are glacier, bloom, aurora, ember, nebula.",
+        refuse: refuseNamedAccent,
+      },
       options: ['glacier', 'bloom', 'aurora', 'ember', 'nebula', '<tag> <preset>', '[<tag>, <tag>] <preset>', '~<tag>'],
       examples: [
         { input: '/accent ember', result: 'Sets the default hover accent to ember' },
@@ -705,6 +832,7 @@ const isQueen = (value: unknown): value is {
   descriptionKey?: string
   slashHidden?: boolean
   slashPrototype?: boolean
+  machine?: SlashBehaviour['machine']
   invoke: (args: string) => Promise<void> | void
   slashComplete?: (args: string) => readonly string[]
 } => {
@@ -731,6 +859,10 @@ const wrapQueen = (queen: ReturnType<typeof isQueen> extends true ? never : any)
     // every reference surface gets them without parsing descriptions.
     options: queen.options,
     examples: queen.examples,
+    // The machine declaration rides the same wire as the usage docs: one
+    // authoring surface on the queen, every reader downstream — the model
+    // census included — reading what the author actually wrote.
+    machine: queen.machine,
   }],
   execute(_behaviourName: string, args: string): Promise<void> | void {
     // The walk hands back a dotted path; the behaviour parses spaces. This is

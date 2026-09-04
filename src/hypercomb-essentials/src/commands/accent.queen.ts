@@ -28,16 +28,37 @@ const get = (key: string) => (window as any).ioc?.get?.(key)
  *   /accent [education, work] bloom  — assign bloom accent to multiple tags
  *   /accent ~education               — remove accent from tag "education"
  *   [a,b]/accent bloom               — set per-tile accent on selected tiles
+ *   /accent cell = bloom             — set THIS tile's accent, nothing else
+ *
+ * THE NAMED FORM EXISTS FOR SPEAKERS, and it is narrower than the others on
+ * purpose. `/accent` otherwise spans three stores and which one it writes
+ * depends on state a speaker cannot see: the bare preset writes localStorage,
+ * the `<tag> <preset>` form writes the global TagRegistry — and ALSO writes
+ * per-tile properties if tiles happen to be selected. One line, three possible
+ * effects, chosen by invisible context. The `cell = preset` form writes the
+ * named tile's `properties` slot and nothing else, which is why it is the only
+ * form offered to a machine.
  */
 export class AccentQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'accent'
   override description = 'Set the hover accent color by name'
-  override options = ['<color name>']
-  override examples = [{ input: '/accent teal', result: 'Hover accent turns teal' }]
+  override options = ['<color name>', '<cell> = <preset>']
+  override examples = [
+    { input: '/accent teal', result: 'Hover accent turns teal' },
+    { input: '/accent roadmap = bloom', result: 'The tile "roadmap" takes the bloom accent' },
+  ]
 
   protected async execute(args: string): Promise<void> {
     const trimmed = args.trim().toLowerCase()
+
+    // Named tile: /accent cell = preset — one tile, one store, no selection.
+    const named = readAccentTarget(trimmed)
+    if (named) {
+      if ('refuse' in named) { EffectBus.emit('activity:log', { message: `Accent — ${named.refuse}`, icon: '~' }); return }
+      await this.#setTileAccent([named.cell], named.preset)
+      return
+    }
 
     // No args: cycle to next preset
     if (!trimmed) {
@@ -156,3 +177,22 @@ function loadIndex(): number {
 
 const _accent = new AccentQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/AccentQueenBee', _accent)
+
+/** `<cell> = <preset>` — the named form, or undefined when the line uses none.
+ *  One reader for the parser and for the machine gate, so the two can never
+ *  disagree about what a line means. */
+export const readAccentTarget = (
+  args: string,
+): { cell: string; preset: string } | { refuse: string } | undefined => {
+  const equals = args.indexOf('=')
+  if (equals === -1) return undefined
+  const cell = args.slice(0, equals).trim()
+  const preset = args.slice(equals + 1).trim()
+  if (!cell || cell.includes('/') || cell.includes(String.fromCharCode(92))) {
+    return { refuse: 'the named form is /accent <cell> = <preset>, one tile on this page' }
+  }
+  if (!(preset in ACCENT_NAMES)) {
+    return { refuse: `"${preset || '(nothing)'}" is not a known accent preset` }
+  }
+  return { cell, preset }
+}

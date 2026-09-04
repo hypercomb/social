@@ -68,6 +68,17 @@ export class PostitQueenBee extends QueenBee {
   readonly command = 'postit'
   override description = 'Post-it — a small sticky on the tile that opens into a full page'
   override options = ['here <text>', 'tile', 'sticky', 'remove', 'on', 'off']
+
+  /** The bare forms toggle a VIEW, which a speaker cannot see the result of.
+   *  Only the form that writes something is offered. */
+  override machine = {
+    forms: 'here <text>',
+    example: '/postit here First draft',
+    reach: 'additive' as const,
+    refuse: (args: string): string | undefined =>
+      /^here[ ]+[^ ]/i.test(args) ? undefined : '/postit needs the form: /postit here <text>',
+  }
+
   override examples = [
     { input: 'meetup@postit Call the venue before Saturday', result: 'Sticks that note on the "meetup" tile — from anywhere, no need to go there' },
     { input: '/postit here Call the venue before Saturday', result: 'Sticks that text on the current cell' },

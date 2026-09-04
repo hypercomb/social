@@ -64,6 +64,25 @@ export class TitleQueenBee extends QueenBee {
     { input: '/title jazz =', result: 'Clears the title — "jazz" draws under its own name again' },
   ]
 
+  /** Clearing is offered too. A title is an ordinary decoration: it commits as
+   *  one layer and `/undo` puts it back, so withholding the clearing form
+   *  bought nothing except a speaker who could set a wrong title and not
+   *  correct it. */
+  override machine = {
+    forms: '<text> | <cell> = <text> | <cell> =',
+    example: '/title roadmap = Road map',
+    reach: 'editing' as const,
+    refuse: (args: string): string | undefined => {
+      const equals = args.indexOf('=')
+      if (equals === -1) return args.trim() ? undefined : '/title needs the text to draw'
+      const target = args.slice(0, equals).trim()
+      if (!target || target.includes('/') || target.includes(BACKSLASH)) {
+        return '/title needs one child tile name before ='
+      }
+      return undefined
+    },
+  }
+
   protected async execute(args: string): Promise<void> {
     const raw = args.trim()
     if (!raw) { this.#log('Title — usage: /title <text>  or  /title <cell> = <text>'); return }
