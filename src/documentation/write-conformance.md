@@ -34,8 +34,10 @@ produced verdicts. So:
   legacy-history shadow test, the layer writer's hash refusal, both host-side
   write guards, the insight catalog's kind, check 5 on the canonical write
   surface, the translation service, the swarm arrival forge, the install
-  purge, and the three primitive items in the history service — 26 of 57
-  closed (one not reproduced). Nothing at wide radius remains.
+  purge, the three primitive items in the history service, and two of the
+  three derived-cache items (the third waits on show-cell, held by another
+  session) — 28 of 57 closed (one not reproduced). Nothing at wide radius
+  remains.
 
 ## The headline
 
@@ -193,12 +195,12 @@ the siblings already have.
 
 ### Local
 
-- **Derived caches minted off the render path — check 7.** `show-cell.drone.ts:666`
+- *2026-09-04 — `ManifestOptimizerDrone.enqueue(parentSig, childSigs)` is the door; the two show-cell writes are left for the session that holds that file dirty: replace each `store.writeChildrenManifest(...)` with `optimizer.enqueue(parentLayerSig, childSigs)` and delete the render-path build.* `show-cell.drone.ts:666`
   `resolveChildNames` and `:708` `upgradeThinPack` write children manifests
   from a paint, making a second and third writer of a record
   `manifest-optimizer.drone.ts` owns. *Fix:* push the parent sig into the
   optimizer's `#pending` set; delete the writes.
-- `hive-search.service.ts:213` — a record keyed by a content sig that is not a
+- *FIXED 2026-09-04 — `writeRecord` refuses a truncated record: not to disk, not to the memo.* `hive-search.service.ts:213` — a record keyed by a content sig that is not a
   pure function of it (it depends on where the walk arrived). *Fix:* return
   `null` for a truncated record; guard the write.
 - *FIXED 2026-09-04 — `history/marker-meta.ts`: one current record per marker layer sig in the `history:marker-meta` document pool; the marker file is never rewritten; readers union legacy in-marker fields (record wins).* `history.service.ts:4338` `setMarkerMeta`, `:4653` `stampMarkerSig` — in-place
@@ -228,7 +230,7 @@ the siblings already have.
 - *FIXED 2026-09-04 — `purgeInstallCacheDir` removes a file only if named like an install artifact and a directory only past `bagEvictionVeto`; tests in `install-purge.spec.ts`.* `ensure-install.ts:983` `purgeStaleOpfsArtifacts` — the one `purgeDir` in that
   file not routed through `hardDeleteVetoFor`. *Fix:* one line, same guard as
   its neighbours.
-- `projection.ts:42` — a memo keyed by a *name* in localStorage; checks 6 and 7.
+- *FIXED 2026-09-04 — deleted with `memoize.ts` and `expand.ts`; nothing imported any of the three.* `projection.ts:42` — a memo keyed by a *name* in localStorage; checks 6 and 7.
 - **Participant state outside the graph — check 1.** `tile-properties.ts:284`
   (`hc:tile-props-index`), `saved-locations-store.ts:49`,
   `pinned-entrances.store.ts:178` (keyed by a *path*, check 4 too),
