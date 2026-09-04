@@ -64,35 +64,48 @@ set.) `/flatten` is the verb that once hard-deleted a pool it mistook for a bag.
 
 ### A defect in code committed today — *fixed 2026-09-04 (`453bafd98`)*
 
-`fdcfc6152` added a destructive refusal to the bridge's remote-submit listener.
-**It is shaped for the wrong input.** The guard is
-`const prose = !text.trimStart().startsWith('/')`, and only a prose reading is
-checked against `DESTRUCTIVE_COMMANDS` — so `/remove drafts` skips the reader
-entirely and falls to the legacy pipeline
-([command-line.component.ts:2274](../hypercomb-shared/ui/command-line/command-line.component.ts:2274)).
+`fdcfc6152` added a destructive refusal to the bridge's remote-submit listener,
+and **it was shaped for the wrong input.** The guard sat behind
+`const prose = !text.trimStart().startsWith('/')`, so only a prose reading was
+checked against `DESTRUCTIVE_COMMANDS` — and `/remove drafts` skipped the reader
+entirely and fell to the legacy pipeline.
 
 **Canonical slash is precisely what a machine emits** — the model channel's
 parser accepts nothing else. The only caller-aware destructive gate in the tree
-is defeated by writing the line the catalogue teaches.
+was defeated by writing the line the catalogue teaches.
 
-Corrected by the verifier: over the bridge a **leaf** removal runs untouched; a
-**nested** one hangs on a `requestConfirm` modal no agent can press.
+Corrected by the verifier: over the bridge a **leaf** removal ran untouched; a
+**nested** one hung on a `requestConfirm` modal no agent can press.
+
+**Fixed in `453bafd98`**: one destructive decision now precedes the prose/slash
+fork and reads whichever form the verb arrived in. The verb-reading rule moved
+into core as `canonicalVerbOf`, with six regression specs covering the
+leading-whitespace smuggle and the head-verb-only rule (`/create /remove` names
+`create`). Still keyed on the four-name set — see `/cut` below; that is owed.
 
 ### And the receipt was dead code for the only production caller — *fixed (`453bafd98`)*
 
-`#submit` passes neither `accept` nor `complete` and returns `{ok:true}`
-unconditionally
-([claude-bridge.worker.ts:1659](../hypercomb-essentials/src/assistant/claude-bridge.worker.ts:1659)),
-so the `RemoteSubmitOutcome` the listener computes is **discarded**. `fdcfc6152`
-landed the command-line half; the essentials half is written but uncommitted
-because that file carries another session's in-flight work. Until it lands,
-refusals, ambiguities and per-action failures are all reported to an agent as
-success.
+`#submit` passed neither `accept` nor `complete` and returned `{ok:true}`
+unconditionally, so the `RemoteSubmitOutcome` the listener computed was
+**discarded** — refusals, ambiguities and per-action failures all reached an
+agent as success. It also used `EffectBus.emit` rather than `emitTransient`, the
+replay hazard the contract explicitly forbids: on a component remount the last
+bridge-submitted line would **re-execute with no caller and no receipt**.
 
-`#submit` also uses `EffectBus.emit` rather than `emitTransient` — the replay
-hazard the contract explicitly forbids. On a component remount the last
-bridge-submitted line **re-executes with no caller and no receipt**. The same
-defect exists at `bee-tutorial.drone.ts:582`.
+**Fixed in `453bafd98`** — both halves, plus an 8s deadline that is a wedge
+backstop rather than the normal exit (the listener settles on every path), and
+which also keeps the quiet window from wedging, since `submit` is in
+`#MUTATING_OPS` and `#quietDone` runs in a `finally`.
+
+**The operational lesson is worth more than the fix.** The essentials half was
+written hours earlier and left uncommitted because that file carried another
+session's in-flight work — and it was **silently reverted when that session
+committed**. Uncommitted work in a contested file does not survive. The correct
+move was to commit the two halves separately from the start, not to hold one
+back.
+
+The same `emit`-instead-of-`emitTransient` defect still exists at
+`bee-tutorial.drone.ts:582`.
 
 ## Can a model delete a tile unattended? Yes.
 
