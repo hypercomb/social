@@ -2,6 +2,8 @@
 import {
   Worker, EffectBus, normalizeCell, hypercomb, isSignature, SignatureService,
   isLocalClaudeBridgeConfigured,
+  REMOTE_SUBMIT, formatRemoteSubmitOutcome,
+  type RemoteSubmitRequest, type RemoteSubmitOutcome,
 } from '@hypercomb/core'
 import { deliverTurn, readTurns, setConversationGoalReached } from './chat-thread.js'
 import { appendStep, nextSeq as ledgerNextSeq, readSteps } from './chat-steps.js'
@@ -98,6 +100,28 @@ type BridgeRequest = {
 type BridgeResponse = { id: string; ok: boolean; data?: unknown; error?: string }
 
 const RECONNECT_MS = 3_000
+
+/** How long `submit` waits for the command line's receipt before answering
+ *  `unknown`. The listener settles on every path, so this is a backstop
+ *  against a wedge, never the normal exit.
+ *
+ *  IT ALSO KEEPS THE QUIET WINDOW FROM WEDGING. `submit` is in
+ *  `#MUTATING_OPS` and `#quietDone` runs in a `finally`, so a promise that
+ *  never settled would hold the participant's tile surface behind a quiet
+ *  badge for the rest of the session — a far worse failure than the wrong
+ *  answer this replaces. Every await here must have a ceiling.
+ *
+ *  ONLY A COMMON TONGUE SENTENCE ACTUALLY WAITS. Canonical slash, a refusal
+ *  and any unmatched line all settle synchronously, so existing callers —
+ *  which send slash grammar — keep their instant answer.
+ *
+ *  Set below the 10s deadline that carries `submit` in all three clients
+ *  (scripts/bridge/bridge-cli.cjs, scripts/bridge-cli.cjs,
+ *  hypercomb-cli/src/bridge/client.ts). It cannot satisfy every caller — the
+ *  shortest socket timeout under scripts/bridge is 5s — so a genuinely slow
+ *  sentence can still surface there as a client-side timeout. That belongs to
+ *  the caller to raise; it is not a reason to go back to lying. */
+const SUBMIT_DEADLINE_MS = 8_000
 
 export class ClaudeBridgeWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -1656,11 +1680,54 @@ export class ClaudeBridgeWorker extends Worker {
   // component subscribes and runs the existing submit pipeline. Text is
   // forwarded verbatim so anything the keyboard accepts (slash behaviours,
   // bracket selects, multi-token grammar, plain cell names) just works.
+  //
+  // AND IT WAITS FOR AN ANSWER. This used to emit and return `{ok:true}` on the
+  // next line, which meant "the effect was delivered" and was read by every
+  // caller as "the command ran". Measured over the live bridge 2026-09-04, it
+  // was wrong twice in six calls — bare prose did nothing, `/remove` did
+  // nothing, both answered ok. An agent that cannot tell success from silence
+  // cannot correct itself, and will report a success to a participant for a
+  // sentence that did nothing.
+  //
+  // The receipt says only what the command line can honestly know
+  // (`RemoteSubmitOutcome` in core): `ran` with a per-action list where ok is
+  // DID-NOT-THROW, `ambiguous` with the claimants so a caller can choose and
+  // say it again, `refused` for a destructive verb that needs a person, or
+  // `unknown` when the line went to the legacy pipeline, whose completion is
+  // not observable. `ok` on the wire stays true for all of them: the call
+  // itself succeeded, and `outcome.kind` is what the caller must read.
+  //
+  // TRANSIENT, NOT `emit`. A stored last value replays to late subscribers, so
+  // a re-created command line would RE-EXECUTE the previous bridge line with
+  // no caller and no receipt. EffectBus dispatches synchronously, so
+  // `accepted` is already true here if a command line was listening at all.
   async #submit(req: BridgeRequest): Promise<BridgeResponse> {
     const text = req.text
     if (typeof text !== 'string') return { id: req.id, ok: false, error: 'no text provided' }
-    EffectBus.emit('command-line:remote-submit', { text })
-    return { id: req.id, ok: true }
+
+    let accepted = false
+    let settle!: (outcome: RemoteSubmitOutcome) => void
+    const answered = new Promise<RemoteSubmitOutcome>(resolve => { settle = resolve })
+
+    const request: RemoteSubmitRequest = {
+      text,
+      accept: () => { accepted = true },
+      complete: outcome => settle(outcome),
+    }
+    EffectBus.emitTransient(REMOTE_SUBMIT, request)
+
+    if (!accepted) return { id: req.id, ok: false, error: 'the command line is unavailable' }
+
+    const timer = setTimeout(
+      () => settle({ kind: 'unknown', reason: 'the command line did not answer in time' }),
+      SUBMIT_DEADLINE_MS,
+    )
+    try {
+      const outcome = await answered
+      return { id: req.id, ok: true, data: { outcome, summary: formatRemoteSubmitOutcome(outcome) } }
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   // Emits one allowlisted UI intent — the same effects the matching panel

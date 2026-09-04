@@ -86,6 +86,20 @@ export type RemoteSubmitRequest = {
   readonly complete?: (outcome: RemoteSubmitOutcome) => void
 }
 
+/** The behaviour a CANONICAL SLASH line names, or `''` when the line is not
+ *  canonical slash grammar.
+ *
+ *  This exists because a guard that read only prose let `/remove drafts` walk
+ *  past it. A machine emits canonical slash — the model channel's parser
+ *  accepts nothing else — so any rule about WHICH VERB a remote line says has
+ *  to read both forms or it reads the wrong half of its traffic. Kept here,
+ *  beside the outcome it feeds, so the parser and the listener cannot drift.
+ *
+ *  Deliberately narrow: it identifies the head verb only, never arguments, and
+ *  matches the same shape the model channel's `parseLine` admits. */
+export const canonicalVerbOf = (text: string): string =>
+  text.trimStart().match(/^\/([a-z][a-z0-9-]*)/)?.[1] ?? ''
+
 /** One line for a person or a log. Never claims more than the outcome does. */
 export const formatRemoteSubmitOutcome = (outcome: RemoteSubmitOutcome): string => {
   switch (outcome.kind) {

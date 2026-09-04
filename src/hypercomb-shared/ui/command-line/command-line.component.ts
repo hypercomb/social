@@ -18,7 +18,8 @@ import {
   commandRoot, completeCommandPath, commandMembersFor, commandPath, type CommandObject,
   parseBehaviourCall, behaviourCallCursor, BehaviourCallError,
   type BehaviourCall, type CallValue,
-  REMOTE_SUBMIT, type RemoteSubmitRequest, type RemoteSubmitOutcome, type RemoteSubmitAction,
+  REMOTE_SUBMIT, canonicalVerbOf,
+  type RemoteSubmitRequest, type RemoteSubmitOutcome, type RemoteSubmitAction,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { VoiceInputService } from '../../core/voice-input.service'
@@ -1289,6 +1290,20 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     EffectBus.emit('chat:toggle', {})
   }
 
+  /** ANNOTATE THE SCREEN — one press, from wherever the command line is. The
+   *  sheet reads the location itself, so nothing has to be pointed at first.
+   *  `/annotate` and the `d` key are the same act through other doors. */
+  onMarkupPress(): void {
+    EffectBus.emit('markup:open', {})
+  }
+
+  /** Can this browser photograph its own screen? `getDisplayMedia` is absent
+   *  on every phone, so the door is not offered there — the sheet would take
+   *  ink and then have nothing to do with it. Read once: a browser does not
+   *  grow the capability mid-session. */
+  readonly canAnnotate = signal(
+    typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia)
+
 
   /** Toggle the pheromone panel — open it when closed, close it when open.
    *  The panel owns reach selection and filtering, and mirrors its open-state
@@ -2251,7 +2266,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // worse than refusing. So a remote line takes the Tongue only when the
     // reading is unambiguous, non-destructive, and actually matched a
     // behaviour. Everything else falls through, where canonical slash grammar
-    // still works and prose is simply refused.
+    // still works and unmatched prose is simply refused — EXCEPT a destructive
+    // verb, which is refused in either form, before the fork.
     this.#remoteSubmitUnsub = EffectBus.on<RemoteSubmitRequest>(REMOTE_SUBMIT, ({ text, accept, complete }) => {
       accept?.()
       // ALWAYS SETTLE, EXACTLY ONCE. A caller that is never answered hangs,
@@ -2271,8 +2287,40 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // is, for prose. A line that already carries its slash is exact by
       // construction and must not be re-routed through the Tongue; `/create x`
       // over the bridge is measured working on the legacy path and stays there.
-      const prose = !text.trimStart().startsWith('/')
+      const trimmed = text.trimStart()
+      const prose = !trimmed.startsWith('/')
       const reading = prose ? this.#utteranceReader()?.read(lowered(text)) : null
+
+      // ONE DESTRUCTIVE DECISION, WHICHEVER WAY THE VERB ARRIVED.
+      //
+      // The first version of this guard sat inside the prose branch only — and
+      // a machine emits CANONICAL SLASH (the model channel's parser accepts
+      // nothing else), so `/remove drafts` walked straight past the one
+      // caller-aware destructive gate in the tree by writing exactly the line
+      // the catalogue teaches it to write. Audited 2026-09-04, see
+      // documentation/natural-language-surface-audit.md.
+      //
+      // KNOWN GAP, deliberately not widened here: `DESTRUCTIVE_COMMANDS` is a
+      // hand-kept name set, and `/cut` drops a child from its parent just as
+      // `/remove` does while declaring `reach: 'editing'` and staying off the
+      // list. Keying this on a declared property instead is owed work — adding
+      // a name here would also change what a PERSON typing `cut` sees, which
+      // is not this fix's business.
+      const spokenVerbs = reading?.actions.length
+        ? reading.actions.map(action => action.command)
+        : [canonicalVerbOf(trimmed)]
+      const barred = spokenVerbs.filter(verb => verb && DESTRUCTIVE_COMMANDS.has(verb))
+      if (barred.length) {
+        // The typed path answers a destructive word with a rendered
+        // confirmation. A remote caller cannot press it, so it is refused and
+        // told why, rather than parking a choice on a screen no agent can see
+        // — or, for a leaf tile, removing it with no dialog at all.
+        settle({
+          kind: 'refused',
+          reason: `${[...new Set(barred)].map(verb => `/${verb}`).join(', ')} needs a person to confirm it`,
+        })
+        return
+      }
 
       if (reading?.actions.length) {
         const ambiguous = reading.spans.find(span => span.role === 'ambiguity')
@@ -2287,18 +2335,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
           })
           return
         }
-        const destructive = reading.actions.filter(a => DESTRUCTIVE_COMMANDS.has(a.command))
-        if (destructive.length) {
-          // The typed path answers a destructive word with a rendered
-          // confirmation. A remote caller cannot press it, so it is refused
-          // and told why, rather than parking a choice on a screen no agent
-          // can see — which is what silently happened before.
-          settle({
-            kind: 'refused',
-            reason: `${destructive.map(a => `/${a.command}`).join(', ')} needs a person to confirm it`,
-          })
-          return
-        }
+        // (Destructive verbs were already refused above, for both forms.)
         void this.#executeReading(reading)
           .then(actions => settle({ kind: 'ran', actions }))
           .catch(error => settle({

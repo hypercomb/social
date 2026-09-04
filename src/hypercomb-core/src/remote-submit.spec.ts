@@ -3,9 +3,44 @@ import { EffectBus } from './effect-bus.js'
 import {
   REMOTE_SUBMIT,
   formatRemoteSubmitOutcome,
+  canonicalVerbOf,
   type RemoteSubmitRequest,
   type RemoteSubmitOutcome,
 } from './remote-submit.types.js'
+
+describe('reading the verb out of BOTH forms a remote line can take', () => {
+  // THE REGRESSION THIS GUARDS. The first destructive guard on the bridge read
+  // only prose, so `/remove drafts` — canonical slash, which is exactly what a
+  // machine emits — walked past the one caller-aware destructive gate in the
+  // tree by writing the line the catalogue teaches. Audited 2026-09-04.
+  it('names the verb in a canonical slash line', () => {
+    expect(canonicalVerbOf('/remove drafts')).toBe('remove')
+    expect(canonicalVerbOf('/create roadmap')).toBe('create')
+    expect(canonicalVerbOf('/collapse-history')).toBe('collapse-history')
+  })
+
+  it('sees through leading whitespace, which is how a bypass would be smuggled', () => {
+    expect(canonicalVerbOf('   /remove drafts')).toBe('remove')
+    expect(canonicalVerbOf('\t/remove drafts')).toBe('remove')
+  })
+
+  it('answers empty for prose, so the reader stays the authority there', () => {
+    expect(canonicalVerbOf('remove drafts')).toBe('')
+    expect(canonicalVerbOf('please create a thing')).toBe('')
+    expect(canonicalVerbOf('')).toBe('')
+  })
+
+  it('takes the head verb only — never an argument that looks like one', () => {
+    expect(canonicalVerbOf('/create /remove')).toBe('create')
+    expect(canonicalVerbOf('/postit here /remove everything')).toBe('postit')
+  })
+
+  it('refuses shapes the model channel would also refuse', () => {
+    expect(canonicalVerbOf('//remove')).toBe('')
+    expect(canonicalVerbOf('/Remove')).toBe('')   // parseLine is lowercase-only
+    expect(canonicalVerbOf('/1remove')).toBe('')  // must start with a letter
+  })
+})
 
 describe('remote-submit outcome wording', () => {
   it('names what ran, and never more', () => {
