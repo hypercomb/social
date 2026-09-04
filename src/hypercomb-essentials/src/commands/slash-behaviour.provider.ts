@@ -1,5 +1,7 @@
 // ui/slash-behaviour/slash-behaviour.provider.ts
 
+import type { MachineGrammar } from '@hypercomb/core'
+
 export interface SlashBehaviour {
   readonly name: string
   readonly description: string
@@ -29,6 +31,14 @@ export interface SlashBehaviour {
   readonly options?: readonly string[]
   /** Worked examples: what to type and what happens. */
   readonly examples?: readonly { readonly input: string; readonly result: string }[]
+  /**
+   * MACHINE REACH — present when a model speaking only the communication
+   * layer may say this behaviour. Absent is the default and means no model
+   * can call it. Queens declare it on themselves (`QueenBee.machine`) and the
+   * auto-wrap carries it here, so the census a model reads and the census a
+   * participant reads are the same census.
+   */
+  readonly machine?: MachineGrammar
 }
 
 export interface SlashBehaviourMatch {

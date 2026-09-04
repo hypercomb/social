@@ -15,8 +15,7 @@
 // Resolution cascade:
 //   per-hive substrate (walk lineage, respect inherit=false)
 //     → registry.activeId
-//     → first builtin in registry
-//     → none
+//     → none  (a null activeId is an ANSWER, not a gap — see resolve())
 //
 // Storage (pools-of-meaning model):
 //   sign('substrate:sources') pool, `registry` file → SubstrateRegistry JSON
@@ -97,6 +96,13 @@ const REFERENCES_MEANING = 'substrate:references'
 // identifier shape for newly MINTED bare-word meanings, and these are being
 // drained away rather than minted.
 const RETIRED_SOURCE_POOLS = ['places:sources', 'substrate'] as const
+/** The registry's OWN document pool: one current record, replaced whole,
+ *  addressed by the signature of its bytes. It used to be a member literally
+ *  named `registry` inside `substrate:sources` — a caller-chosen human name
+ *  beside sig-named override members, the same shape as the four registry
+ *  pointer copies (write-conformance, adjudication). That member is now a
+ *  READ-FALLBACK; nothing is rewritten. */
+const REGISTRY_MEANING = 'substrate:registry'
 const RETIRED_REFERENCE_POOLS = ['places:references'] as const
 const REGISTRY_RECORD = 'registry'
 const SIG_NAME_RE = /^[0-9a-f]{64}$/
@@ -219,6 +225,9 @@ type StoreHandle = {
   legacyHypercombIo?: FileSystemDirectoryHandle
   /** Open (creating if needed) the sign(meaning) pool for a meaning. */
   getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
+  /** The document-pool contract (Store.putPoolDoc / getPoolDoc). */
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
+  getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
   getResource: (sig: string) => Promise<Blob | null>
   putResource: (blob: Blob) => Promise<string>
 }
@@ -342,14 +351,26 @@ export class SubstrateService extends EventTarget {
     if (!store) return
     let registry: SubstrateRegistry | null = null
     let fromLegacy = false
-    // Canonical: the sign('substrate:sources') pool `registry` record. Legacy
-    // read-fallback: the root `0000` props under `substrate-registry`.
+    // Canonical: the current document in sign('substrate:registry'). Read
+    // fallbacks, oldest last: the `registry` member in substrate:sources (and
+    // the retired pools behind it), then the root `0000` props.
     try {
-      const rec = await this.#readPoolRecord(store, REGISTRY_RECORD)
-      if (rec && Array.isArray((rec as any).sources)) {
-        registry = rec as unknown as SubstrateRegistry
+      const doc = store.getPoolDoc
+        ? await store.getPoolDoc((await this.#poolFor(store, REGISTRY_MEANING)) ?? undefined)
+        : null
+      if (doc && doc.byteLength > 0) {
+        const parsed = JSON.parse(new TextDecoder().decode(doc))
+        if (parsed && Array.isArray(parsed.sources)) registry = parsed as SubstrateRegistry
       }
-    } catch { /* pool miss */ }
+    } catch { /* no document yet */ }
+    if (!registry) {
+      try {
+        const rec = await this.#readPoolRecord(store, REGISTRY_RECORD)
+        if (rec && Array.isArray((rec as any).sources)) {
+          registry = rec as unknown as SubstrateRegistry
+        }
+      } catch { /* pool miss */ }
+    }
     if (!registry) {
       try {
         const props = await this.#readRootProps(store)
@@ -368,10 +389,18 @@ export class SubstrateService extends EventTarget {
     }
 
     if (!registry) {
-      // First-ever load — seed with all built-in sets, Nature active. Nothing
-      // exists to re-dress, so the marker is settled here rather than leaving
-      // a pass armed to re-roll a hive that was never on an older default.
-      registry = { sources: [...BUILTIN_SETS], activeId: NATURE_SET_ID }
+      // FIRST-EVER LOAD — every built-in set registered and NONE of them
+      // active. A new hive arrives BARE. The sets are there to be chosen,
+      // not handed out: dressing someone's first tiles in a wall of stock
+      // scenes is an opinion they then have to undo, and the pictures we
+      // ship are not good enough to be worth that. Choosing a group is one
+      // press in the Backgrounds window, or `/background tiles.nature`, and
+      // choosing is what makes the look theirs.
+      //
+      // Nothing exists to re-dress, so the marker is settled here rather
+      // than leaving a pass armed to re-roll a hive that was never on an
+      // older default.
+      registry = { sources: [...BUILTIN_SETS], activeId: null }
       try { localStorage.setItem(REDRESS_LS, SETS_VERSION) } catch { /* ignore */ }
 
       // Migrate legacy substrate-global if present.
@@ -435,7 +464,10 @@ export class SubstrateService extends EventTarget {
     let migrated = false
     try {
       if (localStorage.getItem(SETS_VERSION_LS) !== SETS_VERSION) {
-        if (activeId === DEFAULT_SET_ID || activeId === PHOTOS_SET_ID || activeId === null) {
+        // `null` is NOT unconfigured any more — it is the ship default, and
+        // advancing it would hand pictures to a hive that is deliberately
+        // bare. Only the two EARLIER ship defaults still count as unchosen.
+        if (activeId === DEFAULT_SET_ID || activeId === PHOTOS_SET_ID) {
           activeId = NATURE_SET_ID
           // Only the hive that was actually MOVED gets re-dressed. A deliberate
           // choice keeps both its source and its pictures — including someone
@@ -453,10 +485,12 @@ export class SubstrateService extends EventTarget {
     } catch { /* localStorage unavailable — skip the one-time reset */ }
 
     // Heal a dangling active source — e.g. a retired gradient set that's no
-    // longer a built-in and was never a user source. Substrate must always
-    // resolve, so fall back to the ship default.
+    // longer a built-in and was never a user source. It heals to the SHIP
+    // DEFAULT, which is bare now: a source that no longer exists is not a
+    // reason to start handing out a different set's pictures, and the groups
+    // are one press away in the window.
     let healed = false
-    if (activeId && !sources.some(s => s.id === activeId)) { activeId = NATURE_SET_ID; healed = true }
+    if (activeId && !sources.some(s => s.id === activeId)) { activeId = null; healed = true }
 
     const builtinsChanged = registry.sources.length !== sources.length
       || BUILTIN_SETS.some(b => {
@@ -476,10 +510,15 @@ export class SubstrateService extends EventTarget {
     const store = this.#store()
     if (!store) return
     try {
-      // Registry lives in the sign('substrate:sources') pool `registry` record —
-      // never the legacy root `0000` (which collides with the root sigbag
-      // marker convention). The legacy keys are scrubbed on first migrate.
-      await this.#writePoolRecord(store, REGISTRY_RECORD, next as unknown as Record<string, unknown>)
+      // The registry IS the current document of its own pool — the record's
+      // signature is its address, exactly one member by design. A store with
+      // no document contract writes nothing (in-memory state stays valid);
+      // the old `registry` member is never written again.
+      if (!store.putPoolDoc) return
+      const pool = await this.#poolFor(store, REGISTRY_MEANING)
+      if (!pool) return
+      const bytes = new TextEncoder().encode(JSON.stringify(next)).buffer as ArrayBuffer
+      await store.putPoolDoc(pool, bytes)
     } catch { /* store not ready */ }
   }
 
@@ -601,8 +640,13 @@ export class SubstrateService extends EventTarget {
     const active = this.activeSource
     if (active) return active
 
-    // 3. First builtin fallback (if any)
-    return this.#registry.sources.find(s => s.builtin) ?? null
+    // 3. NOTHING, and that is a real answer. A null activeId MEANS no
+    //    pictures — it is what a new install carries, so handing back
+    //    the first builtin would overrule a choice rather than fill a gap.
+    //    The fallback was written when the registry always named a set and
+    //    null could only mean "the set you picked is gone"; that case is
+    //    healed where it can be told apart, in #mergeBuiltinSets.
+    return null
   }
 
   async #resolveHiveOverride(): Promise<SubstrateSource | null> {

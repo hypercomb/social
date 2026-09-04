@@ -227,7 +227,7 @@ tutorialLessons.register({
   id: 'window-notes',
   level: L,
   order: 50,
-  title: 'The annotations window',
+  title: 'The writing window',
   summary: 'Two tabs over one tree — NOTES for reasoning, LISTS for order — edited in place.',
   pheromones: ['tutorial', 'lesson', 'expert', 'editing', 'meaning'],
   requires: () => hasWindow('hc-notes-strip'),
@@ -263,7 +263,7 @@ tutorialLessons.register({
 })
 
 // ── 55 · the notes reader ──────────────────────────────────────────────
-// A window of its own, and a different job: the annotations window is where
+// A window of its own, and a different job: the writing window is where
 // you WRITE (a dense tree, edited in place); the reader is where you READ (one
 // note at a time, big, with its hierarchy around it). Taught back to back.
 
@@ -289,13 +289,13 @@ tutorialLessons.register({
     await stage.wait(900)
     stage.highlight(null)
 
-    // The book button on the annotations window is the ONLY emitter of
+    // The book button on the writing window is the ONLY emitter of
     // `notes:open` — this is that button's own effect, not a private hook.
     stage.emit('notes:open', { cellLabel: label })
     await stage.wait(1600)
 
     await stage.say('reader-window', 'Written to be written, opened to be read',
-      'The annotations window is where you WRITE: a dense tree you edit in place. This is where you READ — one note at a time, drawn big, with its place in the tree around it.')
+      'The writing window is where you WRITE: a dense tree you edit in place. This is where you READ — one note at a time, drawn big, with its place in the tree around it.')
 
     await stage.say('reader-window-tabs', 'One tile, several documents',
       'The tabs down the side are this tile’s root notes: each one is a little document made of everything nested under it, so a tile with four roots reads as four. Previous and Next walk depth-first inside the one you are in, and wrap round at either end.')
@@ -712,42 +712,6 @@ tutorialLessons.register({
       'Everything listed here is what a configured AI request on this tile gets to draw on — in the chat window, that is the paper-clip count beside the path. Attach the branches that explain a tile once, and every future answer starts already knowing them.')
     stage.emit('context:window-close', {})
     await stage.wait(500)
-  },
-})
-
-// ── 168 · the feedback window ──────────────────────────────────────────
-// The inbox for everything that arrives from someone else — and, since the
-// dashboard was deleted, the only place open QUESTIONS addressed to you are
-// shown and answered. It sits beside the assistant material it completes.
-
-tutorialLessons.register({
-  id: 'window-feedback',
-  level: L,
-  order: 168,
-  title: 'The feedback window',
-  summary: 'One list for everything that came to you: feedback to resolve, questions to answer.',
-  pheromones: ['tutorial', 'lesson', 'expert', 'swarm', 'assistant'],
-  requires: () => hasWindow('hc-feedback-viewer'),
-  async run(stage) {
-    await subject(stage, names(stage)[0], 34)
-
-    const c = stage.center()
-    await stage.flyTo(c.x, c.y - 100)
-    await stage.say('feedback-window', 'One place for what arrives',
-      'Everything that comes to you from someone else lands here, in one list, newest first — so there is one place to look rather than several.')
-
-    // The exact effect the command-line header's feedback button raises.
-    stage.emit('feedback:toggle', {})
-    await stage.wait(1700)
-
-    await stage.say('feedback-window-kinds', 'Two kinds of row',
-      'FEEDBACK is what a participant said — yours or somebody else’s, never anonymous, each carrying who sent it; you resolve one when you are done with it, and that stays local to you. A QUESTION is the other kind: something asked OF you, which you answer right in the row.')
-
-    await stage.say('feedback-window-reach', 'How far you are listening',
-      'The reach decides how much of the hive the list covers — just here, this branch, or everything — and it re-reads as you walk, so the answer always belongs to where you are standing. The line at the bottom is how you say something back.')
-
-    stage.emit('feedback:toggle', {})
-    await stage.wait(600)
   },
 })
 

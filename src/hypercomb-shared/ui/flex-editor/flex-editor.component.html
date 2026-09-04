@@ -25,6 +25,13 @@
          on the canvas; this says it in words. -->
     <p class="fx-where">{{ where() || ('flex.root' | t) }}</p>
 
+    <!-- WHY THERE ARE TWO PLACES. Along and across are in the properties, next
+         to the measurements, because they are the two you already know you
+         want. This is the GALLERY: every axis, every value, drawn on your own
+         container — what you open when you cannot choose between two of them.
+         Both write the same variable through the same intent. -->
+    <p class="fx-relation">{{ 'flex.gallery' | t }}</p>
+
     <!-- THE ONLY SCROLLER. Five axes as an accordion: shut, a row says what the
          axis does and what it is set to; open, it shows you. -->
     <div class="fx-shelf">

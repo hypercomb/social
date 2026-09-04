@@ -19,6 +19,24 @@
 // it does not, and the child seated in it when something is — so the window
 // is readable without pressing anything.
 //
+// ── NAMING IT IS DRAWING THE HIVE ───────────────────────────────────────
+//
+// A layout is a TREE, and the names on it are a hive waiting to be grown. A
+// named SECTION — a hole with an arrangement in it — is the tile everything
+// under it hangs from; a named LEAF is a tile at whatever level it finds
+// itself; an unnamed section is transparent, an arrangement decision and not a
+// place, so what is under it hangs from the nearest named ancestor.
+//
+// That is why sections are named here at all. They take no member and they
+// never will, and for a long time that was read as "so they cannot be named" —
+// which is true of a SEAT and false of a NAME. While it stood, every hive a
+// design could grow was exactly one row deep.
+//
+// GROW is at the foot of the window: it says how many tiles the design is
+// asking for, and it makes them through the one create door. Nothing here
+// implements creation, and nothing here is undone by pressing it twice — a
+// tile that is already there is already there.
+//
 // ── TWO KINDS OF "WHAT IS IN IT", NEVER MERGED ──────────────────────────
 //
 // SEATED is a fact: the child of this container whose enrolment position is
@@ -67,6 +85,14 @@ const t = (key: string, fallback: string, params?: Record<string, string | numbe
     const text = ioc<I18nProvider>(I18N_IOC_KEY)?.t?.(key, params)
     return text && text !== key ? text : interpolate(fallback, params)
   } catch { return interpolate(fallback, params) }
+}
+
+/** A hole path, safe inside an attribute selector. `CSS.escape` where the
+ *  browser has it; the hole keys this ever sees are slugs, so the fallback
+ *  only has to survive the ones that are not. */
+const cssEscape = (value: string): string => {
+  const escape = (globalThis as { CSS?: { escape?: (v: string) => string } }).CSS?.escape
+  return escape ? escape(value) : String(value).replace(/["\\]/g, '\\$&')
 }
 
 const interpolate = (text: string, params?: Record<string, string | number>): string =>
@@ -199,6 +225,13 @@ export class LayoutTargetsElement extends HTMLElement {
     panel.appendChild(props)
     this.#props = props
     this.#renderProps()
+
+    // THE HIVE THIS DESIGN IS ASKING FOR, at the foot of the WINDOW and not
+    // inside the properties. It is a fact about the whole arrangement — every
+    // name on it — so putting it under the selected hole would have made it
+    // look like a property of that hole, and hidden it entirely while nothing
+    // was selected, which is exactly when you want to see what you have built.
+    this.#renderGrow(panel)
   }
 
   #head(): HTMLElement {
@@ -225,28 +258,39 @@ export class LayoutTargetsElement extends HTMLElement {
   }
 
   /**
-   * Make every fillable hole a button.
+   * Make EVERY hole a button — seats and sections alike.
    *
-   * `data-hc-slot` is the composer's own mark for "a member seats here", so
-   * this never has to know a layout and never has to be taught a new one. A
-   * hole without it holds a nested arrangement or the container's own page —
-   * neither takes a part, so neither can be named.
+   * It was `[data-hc-slot]` only, which is the composer's own mark for "a
+   * member seats here". That is the right question to ask about a SEAT and the
+   * wrong one to ask about a name: a section takes no member and is still the
+   * tile its children hang from. The state's own hole list is the index now,
+   * and it carries which is which, so this never has to know a layout.
+   *
+   * A section CONTAINS the holes inside it, so both are under the pointer at
+   * once. The inner one wins — every handler stops the event — which is the
+   * only reading that lets a section be pressed at all: its own name sits in
+   * its margin, where none of its children are.
    */
   #bindHoles(stage: HTMLElement, holes: readonly HoleState[]): void {
-    const byPath = new Map(holes.map(hole => [hole.path.join('/'), hole]))
-    for (const node of Array.from(stage.querySelectorAll<HTMLElement>('[data-hc-slot]'))) {
-      const path = node.getAttribute('data-hc-path') ?? ''
-      const hole = byPath.get(path)
+    for (const hole of holes) {
+      const path = hole.path.join('/')
+      const node = stage.querySelector<HTMLElement>(
+        `[data-hc-path="${cssEscape(path)}"]`,
+      )
+      if (!node) continue
       node.classList.add('hc-targets-hole')
-      if (hole?.meaning) node.classList.add('is-named')
+      if (hole.section) node.classList.add('is-section')
+      if (hole.meaning) node.classList.add('is-named')
       if (path === this.#picked) node.classList.add('is-picked')
       node.setAttribute('role', 'button')
       node.tabIndex = 0
 
       // THE HOLE SAYS WHAT IT IS: its name if it has one, its slot if it does
-      // not, and underneath, whatever is sitting in it.
-      node.appendChild(face('hc-targets-hole-name', hole?.meaning || `#${hole?.slot ?? '?'}`))
-      if (hole?.filledBy) node.appendChild(face('hc-targets-hole-fill', hole.filledBy))
+      // not — and a section has no slot to fall back on, so it says what it is
+      // instead. Underneath, whatever is sitting in it.
+      node.appendChild(face('hc-targets-hole-name',
+        hole.meaning || (hole.section ? t('targets.section', 'section') : `#${hole.slot}`)))
+      if (hole.filledBy) node.appendChild(face('hc-targets-hole-fill', hole.filledBy))
 
       node.addEventListener('click', event => {
         event.preventDefault()
@@ -269,7 +313,9 @@ export class LayoutTargetsElement extends HTMLElement {
     const hole = this.#hole()
     this.#family = hole?.family || this.#state?.families?.[0] || 'site'
     this.#draft = hole?.name ?? ''
-    for (const node of Array.from(this.#stage?.querySelectorAll<HTMLElement>('[data-hc-slot]') ?? [])) {
+    for (const node of Array.from(
+      this.#stage?.querySelectorAll<HTMLElement>('.hc-targets-hole') ?? [],
+    )) {
       node.classList.toggle('is-picked', (node.getAttribute('data-hc-path') ?? '') === path)
     }
     this.#renderProps()
@@ -295,7 +341,9 @@ export class LayoutTargetsElement extends HTMLElement {
     const head = document.createElement('h3')
     head.className = 'hc-targets-hole-head'
     head.appendChild(face('hc-targets-where', hole.path.join(' › ')))
-    head.appendChild(face('hc-targets-slot', t('targets.slot', 'member {n}', { n: hole.slot })))
+    head.appendChild(face('hc-targets-slot', hole.section
+      ? t('targets.section.is', 'section — a branch')
+      : t('targets.slot', 'member {n}', { n: hole.slot })))
     props.appendChild(head)
 
     // WHAT IT IS CALLED. A family and a name, because a meaning is always
@@ -372,7 +420,16 @@ export class LayoutTargetsElement extends HTMLElement {
       props.appendChild(row)
     }
 
-    // WHAT IS IN IT — a fact.
+    // WHAT IS IN IT — a fact. A SECTION is filled by the arrangement nested in
+    // it, which is a different fact and never a member, so it is said
+    // separately rather than reported as an empty seat.
+    if (hole.section) {
+      const holds = rowOf(t('targets.holds', 'It holds'))
+      holds.appendChild(face('hc-targets-answer', t('targets.holds.what',
+        'an arrangement — name it and the tiles below it hang from this one')))
+      props.appendChild(holds)
+      return
+    }
     const seated = rowOf(t('targets.seated', 'In it now'))
     if (hole.filledBy) {
       const visit = document.createElement('button')
@@ -413,6 +470,64 @@ export class LayoutTargetsElement extends HTMLElement {
     }
 
     this.#preview()
+  }
+
+  /**
+   * THE HIVE THIS DESIGN IS ASKING FOR, and the one press that makes it.
+   *
+   * It reads the outline the one reader derived — every named hole as a tile
+   * path, sections included — and says it back as the tree it is before
+   * anything is made. A button that only said "grow" would be asking for a
+   * yes to a question it had not put.
+   *
+   * Absent while nothing is named. There is no honest version of this control
+   * for a design that has said nothing yet, and an empty one would be a
+   * control in the way.
+   */
+  #renderGrow(host: HTMLElement): void {
+    const outline = this.#state?.outline ?? []
+    if (!outline.length) return
+
+    const section = document.createElement('section')
+    section.className = 'hc-targets-grow'
+
+    const head = document.createElement('h4')
+    head.className = 'hc-targets-grow-head'
+    head.textContent = t('targets.grow.head', 'The hive this asks for')
+    section.appendChild(head)
+
+    const list = document.createElement('ul')
+    list.className = 'hc-targets-outline'
+    for (const path of outline) {
+      const row = document.createElement('li')
+      // INDENTED BY DEPTH, because the indent IS the answer: it says which
+      // tile each one hangs from, which is the whole thing a name on a section
+      // decides.
+      row.style.paddingLeft = `${(path.length - 1) * 0.7}rem`
+      row.textContent = path[path.length - 1] ?? ''
+      list.appendChild(row)
+    }
+    section.appendChild(list)
+
+    const grow = document.createElement('button')
+    grow.type = 'button'
+    grow.className = 'hc-targets-do is-grow'
+    grow.textContent = t('targets.grow', 'Grow {n} tiles', { n: outline.length })
+    grow.addEventListener('click', () => {
+      EffectBus.emit('targets:grow', { segments: this.#state?.segments ?? [] })
+    })
+    section.appendChild(grow)
+
+    // Pressing it twice makes nothing twice — a tile that is already there is
+    // already there — and saying so is cheaper than the participant finding
+    // out by trying it.
+    const note = document.createElement('p')
+    note.className = 'hc-targets-guide'
+    note.textContent = t('targets.grow.again',
+      'Tiles this design already named are left alone.')
+    section.appendChild(note)
+
+    host.appendChild(section)
   }
 
   /** The line under the two fields, kept in step with them without redrawing
@@ -598,12 +713,52 @@ function ensureStyles(): void {
       pointer-events: none;
     }
 
+    /* A SECTION is not a seat. It is drawn as the branch it is — a quiet frame
+       around the holes inside it, its name in its own margin where none of its
+       children are, so pressing the section and pressing what is in it are two
+       different targets rather than a guess. */
+    .hc-targets-hole.is-section {
+      border-style: solid; border-color: rgba(${STEEL}, 0.22);
+      padding-top: 0.9rem;
+    }
+    .hc-targets-hole.is-section.is-named { border-color: rgba(${ACCENT}, 0.45); }
+    .hc-targets-hole.is-section:hover { background: rgba(255, 255, 255, 0.03); }
+    .hc-targets-hole.is-section > .hc-targets-hole-name {
+      color: rgba(${ACCENT}, 0.8);
+      font-size: 0.68em; letter-spacing: 0.1em; text-transform: uppercase;
+    }
+
     .hc-targets-count {
       flex: 0 0 auto; margin: 0; padding: 0 0.75rem 0.5rem;
       color: rgba(238, 244, 248, 0.45);
       font-size: 0.72em; letter-spacing: 0.1em; text-transform: uppercase;
       border-bottom: 1px solid rgba(${STEEL}, 0.18);
     }
+
+    /* WHAT THE DESIGN WOULD GROW. The indent is the answer — it says which
+       tile each name hangs from — so the list is drawn as a tree and never as
+       a set of paths with slashes in them. */
+    .hc-targets-grow {
+      flex: 0 0 auto;
+      margin: 0; padding: 0.6rem 0.75rem 0.8rem;
+      border-top: 1px solid rgba(${STEEL}, 0.18);
+    }
+    .hc-targets-grow-head {
+      margin: 0 0 0.4rem; font-size: 0.72em; font-weight: 600;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      color: rgba(238, 244, 248, 0.55);
+    }
+    .hc-targets-outline {
+      list-style: none; margin: 0 0 0.6rem; padding: 0;
+      max-height: 9rem; overflow-y: auto;
+    }
+    .hc-targets-outline li {
+      position: relative;
+      padding-top: 1px; padding-bottom: 1px;
+      font-size: 0.8em; color: rgba(${ACCENT}, 0.85);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .hc-targets-do.is-grow { width: 100%; }
 
     .hc-targets-props {
       flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;

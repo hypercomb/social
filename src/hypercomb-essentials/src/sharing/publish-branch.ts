@@ -67,7 +67,6 @@ const BUNDLE_RECEIPT_MS = 12_000
 interface StoreLike { putResource: (b: Blob) => Promise<string> }
 interface HistoryLike {
   sealSubtree: (segments: readonly string[]) => Promise<string | null>
-  healSubtreeBags: (segments: readonly string[]) => Promise<unknown>
 }
 interface HostSyncLike {
   isEnabled?: () => boolean
@@ -218,14 +217,10 @@ export async function publishBranch(
     catch { /* the stamp is a courtesy to the reader, never a gate */ }
   }
 
-  // 3. A merkle-coherent root from LIVE heads; heal once, retry, else fail
-  //    loud — never publish a lossy seal.
+  // 3. A merkle-coherent root from LIVE heads, else fail loud — never
+  //    publish a lossy seal, and never auto-heal on the way (see step 6).
   report({ phase: 'sealing' })
-  let sealed = await history.sealSubtree(segs)
-  if (!sealed) {
-    try { await history.healSubtreeBags(segs) } catch { /* heal is best-effort */ }
-    sealed = await history.sealSubtree(segs)
-  }
+  const sealed = await history.sealSubtree(segs)
   if (!sealed || !SIG_RE.test(sealed)) return { ok: false, failure: 'seal-failed' }
 
   // 4. Stage the sealed closure and start pushing.

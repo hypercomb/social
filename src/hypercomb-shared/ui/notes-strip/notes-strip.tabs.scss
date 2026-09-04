@@ -1,6 +1,6 @@
 // hypercomb-shared/ui/notes-strip/notes-strip.tabs.scss
 //
-// The tabs header — the drag bar and the annotations tabs.
+// The tabs header — the drag bar and the writing tabs.
 // The toolwindow band the panel is dragged by, the notes | lists tabs
 // that split the notes tree, and the small buttons that live in the band.
 //
@@ -87,7 +87,7 @@
 .cv2-dragbar-faint { color: var(--md-on-surface-faint); }
 .cv2-dragbar-spacer { flex: 1; }
 
-// ── annotations tabs ─────────────────────────────────────
+// ── writing tabs ─────────────────────────────────────
 // The window's two tabs (notes | lists), directly under the dragbar. Cold
 // steel like every hairline; the active tab earns an underline, not a glow.
 .cv2-tabs {

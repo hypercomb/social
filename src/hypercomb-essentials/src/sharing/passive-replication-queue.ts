@@ -17,6 +17,14 @@ export type PassiveReplicationOptions = {
   idle?: IdleScheduler
   /** Runs only behind the ready+idle gate and must observe cancellation. */
   currentGenome: (signal: AbortSignal) => Promise<StoredIntent | null>
+  /**
+   * THE GESTURE. A push is publishing, and publishing is an act: nothing
+   * leaves this machine because a commit happened. Consulted at dispatch,
+   * never at enqueue — intent stays durable and drains the moment the
+   * participant opts in. The default wiring asks HostSyncService for the
+   * SAME opt-in that gates every other push to the self-domain.
+   */
+  allowed?: () => boolean
 }
 
 const defaultIdle = (): IdleScheduler => {
@@ -36,6 +44,7 @@ export class PassiveReplicationQueue {
   readonly #storage: StorageLike
   readonly #idle: IdleScheduler
   readonly #currentGenome: PassiveReplicationOptions['currentGenome']
+  readonly #allowed: () => boolean
   #ready = false
   #foreground = false
   #scheduled: number | null = null
@@ -46,6 +55,7 @@ export class PassiveReplicationQueue {
     this.#storage = options.storage ?? localStorage
     this.#idle = options.idle ?? defaultIdle()
     this.#currentGenome = options.currentGenome
+    this.#allowed = options.allowed ?? (() => true)
   }
 
   start(): void {
@@ -100,6 +110,11 @@ export class PassiveReplicationQueue {
 
   async #dispatchOne(): Promise<void> {
     if (this.#running) return
+    // No opt-in, no work: not the genome read, not a probe, not a byte. The
+    // queue keeps its intent and is re-scheduled by the next ready/idle edge.
+    let allowed = false
+    try { allowed = this.#allowed() === true } catch { allowed = false }
+    if (!allowed) return
     const controller = new AbortController()
     this.#running = controller
     let progressed = false
@@ -162,6 +177,11 @@ export function createDefaultPassiveReplicationQueue(): PassiveReplicationQueue 
   const replication = new ReplicationClient()
   return new PassiveReplicationQueue({
     replication,
+    allowed: () => {
+      const ioc = window.ioc as { get?: (key: string) => unknown } | undefined
+      const hostSync = ioc?.get?.('@diamondcoreprocessor.com/HostSyncService') as { isEnabled?: () => boolean } | undefined
+      return hostSync?.isEnabled?.() === true
+    },
     currentGenome: async signal => {
       if (signal.aborted) return null
       let domain = ''

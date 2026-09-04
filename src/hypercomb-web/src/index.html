@@ -63,6 +63,22 @@
       })();
     </script>
 
+    <!-- Renderer recovery: deployed participants can keep an older
+         show-cell bee in OPFS after the shell updates. That version treated an
+         unset readiness-shade preference as ON and could leave every tile
+         dark indefinitely. Stamp the new safe default before any module (or
+         cached bee) evaluates the flag; an explicit participant choice is
+         preserved. New renderers also understand '0' as off. -->
+    <script>
+      (function () {
+        try {
+          if (localStorage.getItem('hc:tile-shade') === null) {
+            localStorage.setItem('hc:tile-shade', '0');
+          }
+        } catch (e) {}
+      })();
+    </script>
+
     <!-- interactive-widget=resizes-content: when the on-screen keyboard opens
          (Android Chrome/Edge), the layout viewport shrinks instead of the
          keyboard overlaying it — so bottom-anchored chrome (mobile bar, sheets)
@@ -93,7 +109,7 @@
          and Referer on every page load. See
          documentation/no-third-party-requests.md. Regenerate the woff2 with
          `node scripts/fetch-fonts.cjs hypercomb-web/public/fonts inter`. -->
-    <link rel="stylesheet" href="fonts/fonts.css?v=00e24efc50" />
+    <link rel="stylesheet" href="fonts/fonts.css?v=42a7992810" />
 
     <!-- Loading-page (genesis splash) styles — in <head> so they survive the
          re-parent out of <app-root> that keeps the splash up until tiles paint. -->

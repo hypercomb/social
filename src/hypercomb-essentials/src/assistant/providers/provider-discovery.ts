@@ -37,7 +37,7 @@
 // from a hostile spec, so it arrives HELD (off, with everything visible) and
 // one click in the console turns it on.
 
-import { SignatureService, isSignature } from '@hypercomb/core'
+import { declarePoolKind, SignatureService, isSignature } from '@hypercomb/core'
 import { llmActivation } from '../llm-activation.js'
 import { registerLlmProvider } from '../llm-provider-registry.js'
 import { registerPublishedPool } from '../../sharing/published-pools.js'
@@ -47,6 +47,13 @@ import { compileProviderSpec, parseProviderSpec, type LlmProviderSpec } from './
  *  The SAME string names the local OPFS pool and the index a domain
  *  publishes at `sign(meaning)`; one address, two sides of the loop. */
 export const LLM_PROVIDERS_POOL = 'llm:providers'
+
+// THE SHAPE, DECLARED BESIDE THE MEANING. A `set`: sig-named members, each
+// removable only by whoever put it there, and it TRAVELS — a domain offering
+// its providers at `sign(meaning)` is the whole point of the published-pool
+// loop. `registerPublishedPool` now reads this: a meaning declared `document`
+// (per-participant) or `index` (derived, never sent) is refused as an offer.
+declarePoolKind(LLM_PROVIDERS_POOL, 'set')
 
 /** Device-local provenance: which domain offered this provider. Never part
  *  of the spec — see the module comment. */

@@ -253,8 +253,10 @@ export class LlmQueenBee extends QueenBee {
     // error: "go through the hive and …" is a legitimate ask with no single
     // tile to own the answer. It is marked `scope:'hive'` so the responder
     // knows not to force a note onto an arbitrary tile — hive-wide findings
-    // belong in the feedback window (the ask-gate), or on the one tile the work
-    // actually concerns, named explicitly.
+    // belong on the one tile the work actually concerns, named explicitly by
+    // the responder. (They used to have the feedback window as a fallback
+    // landing; that window retired 2026-09-04, so naming the tile is now the
+    // only honest ending.)
     const hiveScope = targets.length === 0 && segments.length === 0
 
     const store = get<StoreLike>('@hypercomb.social/Store')
@@ -292,7 +294,7 @@ export class LlmQueenBee extends QueenBee {
     EffectBus.emit('toast:show', {
       type: 'tip',
       message: hiveScope
-        ? 'Asked about the whole hive — the answer arrives in the feedback window.'
+        ? 'Asked about the whole hive — the answer will arrive as a note on whichever tile it concerns.'
         : `Asked — the answer will arrive as a note on ${targets.length ? targets.join(', ') : 'this page'}.`,
     })
     console.log(

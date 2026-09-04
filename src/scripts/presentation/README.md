@@ -123,6 +123,38 @@ The canvas is the upstream author of `ecosystem/*.jsx`. Re-exporting it
 overwrites the working copies here, so carry `<Narration>` back into the canvas
 (or re-apply it) before taking a fresh export as the shell.
 
+## The comparison, narrated
+
+`deepseek.cjs` does the same for the DeepSeek Harness / Hypercomb comparison —
+a Claude Design piece on the Broadsheet system, ten scenes, 1920x1080, exported
+as its own self-extracting bundle. Same narrator, same cache, same key, same
+retiming; only the shell and the story asset differ.
+
+```bash
+node deepseek.cjs           # narrate + assemble
+node deepseek.cjs --check   # stale audio, no network
+node deepseek.cjs --times   # the retiming, scene by scene
+```
+
+| Piece | Where |
+|---|---|
+| The composition | `deepseek/comparison-scenes.jsx` |
+| The bundle shell (React, Babel, fonts) | `deepseek/comparison-shell.html` |
+| The narration | one line per scene, in `deepseek.cjs` |
+| The audio | `audio-cache/<h16>.mp3` — the SAME cache, the SAME key |
+| Deliverable | `dist/hypercomb-deepseek-comparison.html` |
+
+The composition arrived with a caption per scene, written to land on a beat
+partway through it. Narrating it moves the words to the front of the scene and
+makes them one thing: `caps` is the narration when there is narration, and the
+authored list only when there is none, so the silent canvas is unchanged.
+
+Its scenes are dense — every line here runs close to the length of the picture
+it carries, so the retiming lands between x0.91 and x1.10 and the film goes 88s
+to 91s, 84s of it spoken. That is the shape to hold when a line is rewritten: a
+line much longer than its scene does not stretch the voice, it slows the
+drawing, and there is no floor on how slow it may get.
+
 ## The directory of hives
 
 hypercomb.com is a wildcard host: publishing a creation named `susan` makes

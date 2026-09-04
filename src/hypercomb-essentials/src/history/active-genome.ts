@@ -5,6 +5,8 @@
 // self-referential. The runtime service stores the canonical result in the
 // sign('computed') meaning pool.
 
+import { CHILD_SLOTS } from '@hypercomb/core'
+
 export const ACTIVE_GENOME_VERSION = 1 as const
 
 export type ActiveGenomeObjectKind = 'layer' | 'resource' | 'bee' | 'dependency'
@@ -92,7 +94,8 @@ export const formatGenomeBytes = (bytes: number): string => {
 }
 
 const SIG_RE = /^[0-9a-f]{64}$/
-const CHILD_SLOTS = new Set(['cells', 'layers', 'children'])
+/** The child roster, from core — never restated (documentation/life-primitive.md). */
+const CHILD_SLOT_SET: ReadonlySet<string> = new Set(CHILD_SLOTS)
 
 const sig = (value: unknown): string | null => {
   const text = typeof value === 'string' ? value.trim().toLowerCase() : ''
@@ -216,7 +219,7 @@ export async function collectActiveGenome(
 
     for (const [key, value] of Object.entries(layer.value)) {
       if (key === 'name') continue
-      if (CHILD_SLOTS.has(key) && Array.isArray(value)) {
+      if (CHILD_SLOT_SET.has(key) && Array.isArray(value)) {
         for (const childRaw of value) {
           const childSig = sig(childRaw)
           if (!childSig) continue

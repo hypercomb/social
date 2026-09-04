@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { holeMeaning, interfaceName, withMeaningAt } from './hole-target.js'
-import { builtinLayout, nodeOf, withNodeAt } from './layout-template.js'
+import { hiveOutline, holeMeaning, interfaceName, withMeaningAt } from './hole-target.js'
+import { builtinLayout, nodeOf, withNodeAt, type LayoutNode } from './layout-template.js'
 
 const rail = builtinLayout('rail')!
 const split = builtinLayout('split')!
@@ -19,16 +19,27 @@ describe('naming a hole mints a variant, never an edit in place', () => {
     expect(before.template.holes.find(h => h.key === key)?.meaning).toBeUndefined()
   })
 
-  it('refuses a hole that is not there, and one holding a nested layout', () => {
+  it('refuses a hole that is not there', () => {
     const root = nodeOf(split, {})
-    const [first] = holeKeys(split)
     expect(withMeaningAt(root, ['nonesuch'], 'site:masthead')).toBe(root)
     expect(withMeaningAt(root, [], 'site:masthead')).toBe(root)
+  })
 
-    // A hole with a layout in it is filled BY THAT LAYOUT — it takes no member,
-    // so it can ask for nothing.
-    const nested = withNodeAt(root, [first], nodeOf(rail, {}))
-    expect(withMeaningAt(nested, [first], 'site:masthead')).toBe(nested)
+  it('NAMES A SECTION — a hole holding a layout is the branch, not a seat', () => {
+    // This overturns the rule that stood here before: a hole with a layout in
+    // it takes no MEMBER, and that was read as "so it can ask for nothing".
+    // A name is not a seat. In a hive the section is the tile everything under
+    // it hangs from, and withholding the name made every hive a design could
+    // grow exactly one row deep.
+    const [first] = holeKeys(split)
+    const nested = withNodeAt(nodeOf(split, {}), [first], nodeOf(rail, {}))
+    const named = withMeaningAt(nested, [first], 'site:masthead')
+
+    expect(named).not.toBe(nested)
+    expect(named.template.holes.find(h => h.key === first)?.meaning).toBe('site:masthead')
+    // And the layout that was in it is still in it — naming the section says
+    // what the section IS, and moves nothing.
+    expect(named.nested[first]?.template.name).toBe(rail.name)
   })
 
   it('refuses an unscoped name rather than guessing a family', () => {
@@ -106,5 +117,43 @@ describe('a meaning is folded before it is minted', () => {
   it('is empty for an empty name — never a bare `site:`', () => {
     expect(holeMeaning('site', '')).toBe('')
     expect(holeMeaning('site', '   ')).toBe('')
+  })
+})
+
+// ── THE HIVE A DESIGN IS ASKING FOR ────────────────────────────────────────
+
+describe('hiveOutline', () => {
+
+  const named = (node: LayoutNode, path: string[], name: string): LayoutNode =>
+    withMeaningAt(node, path, holeMeaning('site', name))
+
+  it('says nothing at all until something is named', () => {
+    expect(hiveOutline(nodeOf(split, {}))).toEqual([])
+  })
+
+  it('reads named leaves as children, in the order the design reads', () => {
+    const [one, two] = holeKeys(split)
+    let root = named(nodeOf(split, {}), [one], 'masthead')
+    root = named(root, [two], 'body')
+    expect(hiveOutline(root)).toEqual([['masthead'], ['body']])
+  })
+
+  it('reads a named SECTION as the branch its leaves hang from', () => {
+    const [one] = holeKeys(split)
+    const [inner] = holeKeys(rail)
+    let root = withNodeAt(nodeOf(split, {}), [one], nodeOf(rail, {}))
+    root = named(root, [one], 'chrome')
+    root = named(root, [one, inner], 'nav')
+    expect(hiveOutline(root)).toEqual([['chrome'], ['chrome', 'nav']])
+  })
+
+  it('lets an UNNAMED section through — it is an arrangement, not a place', () => {
+    const [one] = holeKeys(split)
+    const [inner] = holeKeys(rail)
+    let root = withNodeAt(nodeOf(split, {}), [one], nodeOf(rail, {}))
+    root = named(root, [one, inner], 'nav')
+    // `nav` hangs from the nearest NAMED ancestor, which here is the container
+    // itself. A section nobody named is not a tile nobody asked for.
+    expect(hiveOutline(root)).toEqual([['nav']])
   })
 })

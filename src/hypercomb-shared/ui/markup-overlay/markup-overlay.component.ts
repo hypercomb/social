@@ -1,7 +1,14 @@
 // hypercomb-shared/ui/markup-overlay/markup-overlay.component.ts
 //
-// MARK UP THE SCREEN — draw on what you are looking at, photograph it, and
+// ANNOTATE THE SCREEN — draw on what you are looking at, photograph it, and
 // hand the picture to the agents as context.
+//
+// It is reachable from ANYWHERE: the command line's rail, the word
+// `/annotate`, and the `d` key all open the same sheet. It used to hang off
+// the notes desk's header, which made annotating a thing you did while
+// writing notes; it is the opposite — you annotate the screen you are
+// standing in front of, and the notes desk is just one of the things that
+// might be on it.
 //
 // A question about a screen is nearly always a question about ONE PART of it,
 // and describing which part in prose is the slowest, least reliable half of
@@ -32,13 +39,20 @@
 //    screen. Only the toolbar is hidden for the frame: it is the one thing on
 //    screen that is about taking the picture rather than in it.
 //
+// 4. IT KNOWS WHERE IT WAS DRAWN. A screen is always a screen OF somewhere,
+//    and the hive already says where you are standing — so the sheet reads the
+//    location on open and the picture carries it. That is what makes the
+//    second door possible: START A CONVERSATION, which mints a new thread on
+//    that very tile with the annotation as its only reference. No picker, no
+//    second gesture naming a subject that was never in doubt.
+//
 // Numbers rather than typed labels: the words belong in the question, and a
 // pin dropped on the screen is what ties "the button at 1 is misaligned" to a
 // place. Typing on a canvas would be a second, worse composer.
 //
 // Registry-fed surface (registerShellSurface), never an <hc-*> tag in app.html.
 
-import { Component, ElementRef, signal, viewChild, type OnInit, type OnDestroy } from '@angular/core'
+import { Component, ElementRef, computed, signal, viewChild, type OnInit, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '../../core/shell-surface-registry'
@@ -83,6 +97,11 @@ type Shape =
  *  and is addressed by the signature of its bytes. */
 type StoreLike = { putResource?(blob: Blob): Promise<string> }
 
+/** WHERE YOU ARE STANDING. The one fact the sheet needs from the hive: the
+ *  segments of the layer on screen, which is the location the annotation is
+ *  OF and the tile a conversation started from it belongs to. */
+type LineageLike = { explorerSegments?(): readonly string[] }
+
 const SIG_RE = /^[0-9a-f]{64}$/
 
 const ioc = (): { get<T>(key: string): T | undefined } | undefined =>
@@ -120,9 +139,15 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
 
   readonly inks = INKS
 
-  /** Which tile the annotations window was showing when the sheet opened. It
-   *  names the picture, so a shelf of shots is readable without opening them. */
-  readonly subject = signal('')
+  /** WHERE THE SHEET WAS OPENED — the layer's segments, read once on open and
+   *  never re-read: a picture is of the screen at a moment, and the moment
+   *  that matters is the one the participant started drawing on. Empty is the
+   *  hive's own root, which is a location like any other. */
+  readonly location = signal<readonly string[]>([])
+
+  /** That location as a participant reads it — `/dolphin/site`, or the hive. */
+  readonly where = computed(() =>
+    this.location().length ? '/' + this.location().join('/') : this.#say('markup.hive'))
 
   #shapes: Shape[] = []
   #drawing: Shape | null = null
@@ -133,10 +158,18 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
   #cleanups: Array<() => void> = []
 
   ngOnInit(): void {
-    this.#cleanups.push(EffectBus.on<{ cellLabel?: string }>('markup:open', payload => {
-      this.open(String(payload?.cellLabel ?? ''))
+    this.#cleanups.push(EffectBus.on<{ path?: readonly string[] }>('markup:open', payload => {
+      this.open(Array.isArray(payload?.path) ? payload!.path! : undefined)
     }))
     this.#cleanups.push(EffectBus.on('markup:close', () => this.close()))
+    // THE KEY IS THE SAME ACT — `d` (keyboard/default-keymap.ts) comes through
+    // the keymap's one lane, exactly as `c` reaches the chat window, so the
+    // press, the rail button and the word all land in `open`.
+    this.#cleanups.push(EffectBus.on<{ cmd?: string }>('keymap:invoke', payload => {
+      if (payload?.cmd !== 'markup.open') return
+      if (this.active()) this.close()
+      else this.open()
+    }))
     window.addEventListener('keydown', this.#onKeyDown, true)
     window.addEventListener('resize', this.#onResize)
   }
@@ -152,10 +185,14 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
   // ── opening and closing ────────────────────────────────────────────
 
   /** A fresh sheet every time. Ink kept from a previous question would be
-   *  drawn over a screen that has since moved on. */
-  open(subject = ''): void {
+   *  drawn over a screen that has since moved on.
+   *
+   *  `path` is for a caller that knows better than the hive does; everyone
+   *  else gets the layer on screen, which is the answer in every case anyone
+   *  has needed so far. */
+  open(path?: readonly string[]): void {
     if (this.active()) return
-    this.subject.set(subject)
+    this.location.set(path ? [...path] : this.#here())
     this.#shapes = []
     this.#drawing = null
     this.#pins = 0
@@ -170,6 +207,15 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
     this.active.set(false)
     this.shooting.set(false)
     this.#release()
+  }
+
+  /** The layer on screen, as segments. A hive that has not registered its
+   *  lineage yet answers with the root, which is where it is. */
+  #here(): readonly string[] {
+    const lineage = ioc()?.get('@hypercomb.social/Lineage') as LineageLike | undefined
+    return (lineage?.explorerSegments?.() ?? [])
+      .map(segment => String(segment ?? '').trim())
+      .filter(Boolean)
   }
 
   /** Stop sharing. A capture stream left running is a browser telling the
@@ -344,8 +390,14 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
 
   /** Take the picture and put it on the chat's shelf. The sheet closes on
    *  success: the mark has become the picture, and leaving it up would invite
-   *  a second shot of a screen that is now covered by a toast. */
-  async send(): Promise<void> {
+   *  a second shot of a screen that is now covered by a toast.
+   *
+   *  TWO DOORS, one act. `fresh` is the difference between "this belongs in
+   *  what we are already talking about" and "this is a new thing to talk
+   *  about" — and the second is the whole reason the sheet reads a location:
+   *  a new conversation has to be a conversation ABOUT somewhere, and the
+   *  somewhere is where you were standing when you drew. */
+  async send(fresh = false): Promise<void> {
     if (this.busy()) return
     this.busy.set(true)
     let blob: Blob | null = null
@@ -382,14 +434,23 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
       return
     }
 
-    const subject = this.subject().trim()
+    const where = this.where()
     EffectBus.emit('chat:attach-picture', {
       sig,
-      name: subject ? `marked-up screen — ${subject}` : 'marked-up screen',
+      name: this.#say('markup.name', { where }),
       kind: blob.type || 'image/png',
       size: blob.size,
+      // THE LOCATION RIDES WITH THE PICTURE. The chat window reads it two
+      // ways: as the crumb under the reference's name, and — with `fresh` —
+      // as the tile the new conversation belongs to.
+      path: this.location(),
+      fresh,
     })
-    EffectBus.emit('toast:show', { type: 'success', title: 'markup', message: this.#say('markup.attached') })
+    EffectBus.emit('toast:show', {
+      type: 'success',
+      title: 'markup',
+      message: this.#say(fresh ? 'markup.started' : 'markup.attached', { where }),
+    })
     this.close()
   }
 
@@ -494,9 +555,10 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
     })
   }
 
-  #say(key: string): string {
-    const i18n = ioc()?.get('@hypercomb.social/I18n') as { t?(key: string): string } | undefined
-    return i18n?.t?.(key) ?? key
+  #say(key: string, params?: Record<string, string>): string {
+    const i18n = ioc()?.get('@hypercomb.social/I18n') as
+      { t?(key: string, params?: Record<string, string>): string } | undefined
+    return i18n?.t?.(key, params) ?? key
   }
 
   // ── keys ───────────────────────────────────────────────────────────
@@ -519,7 +581,8 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
       event.preventDefault()
       event.stopPropagation()
-      void this.send()
+      // Shift is the second door: a new conversation rather than the open one.
+      void this.send(event.shiftKey)
     }
   }
 }

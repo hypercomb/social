@@ -75,6 +75,61 @@ describe('the cursor follows its own location head', () => {
     expect(cursor.state.rewound).toBe(true)
   })
 
+  // ONE WALK AT A TIME. Every step reads `#position` before its first await,
+  // so overlapping walks used to compute the SAME target — and `seek`
+  // early-returns on `clamped === #position`, so all but the first were
+  // silently swallowed. `/undo 3` stepped back exactly ONCE and reported three.
+  // These fix the shape of that bug, not one caller's use of it.
+
+  it('overlapping undos each land — three fired at once step three, not one', async () => {
+    const cursor = new HistoryCursorService()
+    layersBySig.set(LOC_A, entries(6))
+    await cursor.load(LOC_A)
+    expect(cursor.state.position).toBe(6)
+
+    // Fired WITHOUT awaiting between them — exactly what a loop does.
+    await Promise.all([cursor.undo(), cursor.undo(), cursor.undo()])
+
+    expect(cursor.state.position).toBe(3)
+  })
+
+  it('firing concurrently is indistinguishable from stepping one at a time', async () => {
+    const concurrent = new HistoryCursorService()
+    const sequential = new HistoryCursorService()
+    layersBySig.set(LOC_A, entries(6))
+    await concurrent.load(LOC_A)
+    await sequential.load(LOC_A)
+
+    await Promise.all([concurrent.undo(), concurrent.undo(), concurrent.undo()])
+    await sequential.undo(); await sequential.undo(); await sequential.undo()
+
+    expect(concurrent.state.position).toBe(sequential.state.position)
+  })
+
+  it('redo serializes the same way', async () => {
+    const cursor = new HistoryCursorService()
+    layersBySig.set(LOC_A, entries(6))
+    await cursor.load(LOC_A)
+    cursor.seek(1)
+
+    await Promise.all([cursor.redo(), cursor.redo()])
+
+    expect(cursor.state.position).toBeGreaterThan(2)
+  })
+
+  it('a walk that throws does not poison the lane for the next one', async () => {
+    const cursor = new HistoryCursorService()
+    layersBySig.set(LOC_A, entries(4))
+    await cursor.load(LOC_A)
+
+    // Whatever the first walk does, a later one must still be able to run.
+    await Promise.allSettled([cursor.undo(), cursor.undo()])
+    const reached = cursor.state.position
+    await cursor.undo()
+
+    expect(cursor.state.position).toBeLessThanOrEqual(reached)
+  })
+
   it('a new location always starts at head', async () => {
     const cursor = new HistoryCursorService()
     layersBySig.set(LOC_A, entries(5))

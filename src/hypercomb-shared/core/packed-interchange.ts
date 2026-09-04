@@ -57,6 +57,8 @@ export interface FileLike {
  *  two implementations report the same shape. */
 export interface Transfer {
   content: number
+  /** Content whose bytes did not hash to their name — refused, never written. */
+  contentRefused: number
   contentSkipped: number
   markers: number
   markersSkipped: number
@@ -65,7 +67,7 @@ export interface Transfer {
 }
 
 export const emptyTransfer = (): Transfer => ({
-  content: 0, contentSkipped: 0, markers: 0, markersSkipped: 0,
+  content: 0, contentRefused: 0, contentSkipped: 0, markers: 0, markersSkipped: 0,
   poolMembers: 0, poolMembersSkipped: 0,
 })
 
@@ -73,6 +75,8 @@ export const emptyTransfer = (): Transfer => ({
  *  answer false. */
 export const changed = (transfer: Transfer): boolean =>
   transfer.content > 0 || transfer.markers > 0 || transfer.poolMembers > 0
+
+import { SignatureService } from '@hypercomb/core'
 
 const SIG = /^[0-9a-f]{64}$/i
 const MARKER = /^\d{8}$/
@@ -172,6 +176,18 @@ const transfer = async (
       if (existing) { moved.contentSkipped++; continue }
       const bytes = await readBytes(source, name)
       if (!bytes) continue
+      // THE NAME IS THE HASH, OR NOTHING IS WRITTEN. The name was lifted from
+      // the SOURCE listing — a folder on a disk, a peer's export — and until
+      // this line nothing had checked that the bytes under it are the bytes it
+      // claims. A restore that trusted the listing put a stranger's bytes
+      // into the live hive under a signature this client never verified: the
+      // same gap writeLayerBytes was closed for (write-conformance check 1,
+      // found by the census adjudication). Refused, counted, never written.
+      const exact = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+      if ((await SignatureService.sign(exact)).toLowerCase() !== name.toLowerCase()) {
+        moved.contentRefused++
+        continue
+      }
       await writeBytes(target, name, bytes)
       moved.content++
       continue

@@ -39,7 +39,7 @@
 // `@hypercomb/core` is EXTERNAL — the import map resolves it to the runtime
 // the shim already loaded, so this bundle shares its instances rather than
 // minting a second set.
-import { registerPoolMeaning, SignatureStore } from '@hypercomb/core'
+import { MARKER_NAME, hardDeleteVetoFor, registerPoolMeaning, SignatureStore } from '@hypercomb/core'
 // These two are PURE — stateless functions over bytes, no IoC registration, no
 // module state — which is the entire reason they may be bundled in here. The
 // walker IS the protocol; only the io wiring below is ours.
@@ -532,13 +532,34 @@ const activate = (
  * shape is a user lineage sigbag.
  */
 const writeBags = async (store: StoreLike, inventory: PackageInventory): Promise<void> => {
+  // "Scoped strictly to the install-owned pools" scopes the HANDLE, not the
+  // ADDRESS: `store.bees` IS sign('bees'), and sign('bees') IS the molecule of
+  // a tile named `bees`. A 64-hex SUBDIRECTORY there is an author bucket as
+  // readily as it is a stale bag. So a candidate is evicted only when its own
+  // contents prove it is a bag: all markers, or empty.
   const evict = async (parent: FileSystemDirectoryHandle, keep: string): Promise<void> => {
     const stale: string[] = []
     for await (const [name, handle] of parent.entries()) {
       if (handle.kind === 'directory' && SIG_RE.test(name) && name !== keep) stale.push(name)
     }
     for (const name of stale) {
-      try { await parent.removeEntry(name, { recursive: true }) } catch { /* skip */ }
+      try {
+        const dir = await parent.getDirectoryHandle(name, { create: false })
+        // `hardDeleteVetoFor` passes an EMPTY directory ("nothing to lose"),
+        // which at a molecule address is a namespace a replication or another
+        // tab may be mid-write into. Nothing this code wrote is ever empty, so
+        // proof of a bag is at least one MARKER; absence of proof refuses.
+        let veto = await hardDeleteVetoFor(dir)
+        if (!veto) {
+          let markers = 0
+          for await (const [entry, handle] of dir.entries()) {
+            if (handle.kind === 'file' && MARKER_NAME.test(entry)) { markers++; break }
+          }
+          if (markers === 0) veto = 'is empty — an install pass never leaves a bag empty'
+        }
+        if (veto) { console.warn(`[acquire] not evicting ${name.slice(0, 8)}… — it ${veto}`); continue }
+        await parent.removeEntry(name, { recursive: true })
+      } catch { /* skip */ }
     }
   }
 

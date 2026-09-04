@@ -90,6 +90,15 @@
       <button class="ld-targets" type="button" (click)="openTargets()"
         [disabled]="!bound()"
         [attr.aria-label]="'layout.targets' | t" [title]="'layout.targets' | t">◎</button>
+      <!-- SEND THE PROPERTIES ACROSS. They dock on the other edge and share
+           that lane with the flex gallery; the shelf gets the whole of this
+           side. The arrow points where they are going, which is the only thing
+           the button decides. -->
+      @if (!across()) {
+        <button class="ld-across" type="button" (click)="sendAcross()"
+          [attr.aria-label]="'layout.properties.across' | t"
+          [title]="'layout.properties.across' | t">⇥</button>
+      }
       <button class="ld-close" type="button" (click)="close()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
     </header>
 
@@ -128,64 +137,227 @@
            the shelf is a shelf the rest of the time. -->
       <p class="ld-keep-hint" aria-hidden="true">{{ 'layout.keep.drop' | t }}</p>
 
-      @if (shelf() === 'creation' && !creationCount()) {
-        <p class="ld-none">{{ 'layout.creations.none' | t }}</p>
-      }
+      @if (shelf() === 'piece') {
+        <!-- THE BUILT-INS. Six shapes, no headings, nothing to put away: they
+             are the vocabulary, not the participant's own things. -->
+        <ul class="ld-assets" [style.grid-template-columns]="columnTemplate()">
+          @for (asset of shownAssets(); track asset.name) {
+            <li>
+              <button
+                type="button"
+                class="ld-asset"
+                [class.is-on]="asset.name === layout()"
+                draggable="true"
+                [attr.aria-label]="asset.name"
+                (dragstart)="startDrag(asset, $event)"
+                (dragend)="endDrag($event)"
+                (click)="plug(asset.name)"
+              >
+                <!-- THE PICTURE IS THE LABEL. A name under every chip is twenty
+                     lines of text competing with twenty drawings of the thing
+                     the text is trying to describe; the drawing wins, so the
+                     name waits for the pointer.
 
-      <ul class="ld-assets" [style.grid-template-columns]="columnTemplate()">
-        @for (asset of shownAssets(); track asset.name) {
-          <li>
-            <!-- THE PICTURE IS THE LABEL. A name under every chip is twenty
-                 lines of text competing with twenty drawings of the thing the
-                 text is trying to describe; the drawing wins, so the name
-                 waits for the pointer. -->
-            <button
-              type="button"
-              class="ld-asset"
-              [class.is-on]="asset.name === layout()"
-              draggable="true"
-              [attr.aria-label]="asset.name"
-              (dragstart)="startDrag(asset, $event)"
-              (dragend)="endDrag($event)"
-              (click)="plug(asset.name)"
-            >
-              <!-- The miniature is drawn by the same pure builder as the real
-                   container, so it can never advertise a shape the layout does
-                   not make. It is mounted RAW: an [innerHTML] binding strips
-                   the style and data-hc-* attributes that ARE the picture. -->
-              <span class="ld-glyph" [hcRawHtml]="asset.glyph"></span>
-              <span class="ld-asset-name">{{ asset.name }}<span class="ld-asset-note">{{ asset.holes }}</span></span>
-            </button>
-            <!-- OFF THE SHELF, NOT DELETED. The arrangement is content and
-                 other containers may be reading it; this drops the name and
-                 this shelf's claim on it. Pieces have no such button — a
-                 built-in is not the participant's to put away. -->
-            @if (asset.kind === 'creation') {
-              <button class="ld-asset-forget" type="button"
-                [attr.aria-label]="'layout.forget' | t"
-                [title]="'layout.forget' | t"
-                (click)="forget(asset, $event)">×</button>
-            }
-          </li>
+                     The miniature is drawn by the same pure builder as the real
+                     container, so it can never advertise a shape the layout
+                     does not make. It is mounted RAW: an [innerHTML] binding
+                     strips the style and data-hc-* attributes that ARE the
+                     picture. -->
+                <span class="ld-glyph" [hcRawHtml]="asset.glyph"></span>
+                <span class="ld-asset-name">{{ asset.name }}<span class="ld-asset-note">{{ asset.holes }}</span></span>
+              </button>
+            </li>
+          }
+        </ul>
+      } @else {
+        <!-- WHAT HAS BEEN PUT AWAY. The count is on the button, so pressing it
+             is never a guess about whether anything is behind it, and the
+             button is not there at all when nothing is. -->
+        @if (hiddenCount()) {
+          <button class="ld-hidden-toggle" type="button"
+            [class.is-on]="showHidden()"
+            [attr.aria-pressed]="showHidden()"
+            (click)="toggleHidden()">
+            {{ 'layout.hidden.show' | t }}<span class="ld-type-count">{{ hiddenCount() }}</span>
+          </button>
         }
-      </ul>
+
+        @if (!creationCount()) {
+          <p class="ld-none">{{ 'layout.creations.none' | t }}</p>
+        }
+
+        <!-- ONE ROW PER WORD.
+             A group is a MOLECULE: nothing holds these chips, they each wear
+             the word, and the heading exists because something wears it. So a
+             group cannot be empty, cannot be created before it has a member,
+             and ends by its last member leaving — which is why there is no
+             "new group" button anywhere here. Carry a chip to a heading and it
+             wears that word; open its editor and type one, and the word is
+             made by being worn. -->
+        @for (row of creationRows(); track row.word) {
+          <section class="ld-group">
+            @if (row.word) {
+              <h4 class="ld-group-head"
+                [class.is-target]="dragging()"
+                (dragover)="allowGather(row, $event)"
+                (drop)="dropOnGroup(row, $event)"
+                [title]="row.address || row.word">
+                <span class="ld-group-word">{{ row.word }}</span>
+                <span class="ld-type-count">{{ row.assets.length }}</span>
+              </h4>
+            } @else if (creationRows().length > 1) {
+              <h4 class="ld-group-head is-loose"
+                [class.is-target]="dragging()"
+                (dragover)="allowGather(row, $event)"
+                (drop)="dropOnGroup(row, $event)">
+                <span class="ld-group-word">{{ 'layout.loose' | t }}</span>
+                <span class="ld-type-count">{{ row.assets.length }}</span>
+              </h4>
+            }
+
+            <ul class="ld-assets" [style.grid-template-columns]="columnTemplate()">
+              @for (asset of row.assets; track asset.name) {
+                <li [class.is-put-away]="asset.hidden">
+                  <button
+                    type="button"
+                    class="ld-asset"
+                    [class.is-on]="asset.name === layout()"
+                    draggable="true"
+                    [attr.aria-label]="asset.name"
+                    (dragstart)="startDrag(asset, $event)"
+                    (dragend)="endDrag($event)"
+                    (click)="plug(asset.name)"
+                  >
+                    <span class="ld-glyph" [hcRawHtml]="asset.glyph"></span>
+                    <span class="ld-asset-name">{{ asset.name }}<span class="ld-asset-note">{{ asset.holes }}</span></span>
+                  </button>
+
+                  <!-- THE TWO ACTS A LIST OFFERS, and neither of them is
+                       delete. Naming says what it is; hiding takes it out of
+                       what is offered and puts it where it can be brought
+                       back. Destroying it lives in the delete area, on a row
+                       you went looking for. -->
+                  @if (asset.hidden) {
+                    <button class="ld-chip-act is-restore" type="button"
+                      [attr.aria-label]="'layout.restore' | t"
+                      [title]="'layout.restore' | t"
+                      (click)="restore(asset, $event)">↺</button>
+                  } @else {
+                    <button class="ld-chip-act is-name" type="button"
+                      [attr.aria-label]="'layout.rename' | t"
+                      [title]="'layout.rename' | t"
+                      (click)="rename(asset, $event)">✎</button>
+                    <button class="ld-chip-act is-hide" type="button"
+                      [attr.aria-label]="'layout.hide' | t"
+                      [title]="'layout.hide' | t"
+                      (click)="hide(asset, $event)">⊘</button>
+                  }
+
+                  <!-- ORDER RIDES THE MEMBER, so moving one is two members
+                       swapping ranks and never the shelf renumbering. Only
+                       where there is something to move past. -->
+                  @if (row.assets.length > 1) {
+                    <button class="ld-chip-shift is-back" type="button"
+                      [attr.aria-label]="'layout.earlier' | t"
+                      [title]="'layout.earlier' | t"
+                      (click)="shift(asset, -1, $event)">‹</button>
+                    <button class="ld-chip-shift is-on-ahead" type="button"
+                      [attr.aria-label]="'layout.later' | t"
+                      [title]="'layout.later' | t"
+                      (click)="shift(asset, 1, $event)">›</button>
+                  }
+
+                  <!-- WHAT IT IS CALLED, AND WHAT IT IS ONE OF — one editor,
+                       because they are one act. Enter commits both, Escape
+                       leaves both alone, and an empty word sets it loose. -->
+                  @if (renaming() === asset.name) {
+                    <div class="ld-chip-edit" (click)="$event.stopPropagation()">
+                      <input class="ld-chip-field" #chipName
+                        type="text"
+                        autofocus
+                        [value]="asset.name"
+                        [attr.aria-label]="'layout.rename' | t"
+                        [attr.placeholder]="'layout.rename' | t"
+                        (keydown)="editKey(asset, $event, chipName.value, chipWord.value)" />
+                      <input class="ld-chip-field is-word" #chipWord
+                        type="text"
+                        [value]="asset.group || ''"
+                        [attr.aria-label]="'layout.under' | t"
+                        [attr.placeholder]="'layout.under' | t"
+                        (keydown)="editKey(asset, $event, chipName.value, chipWord.value)" />
+                      <button class="ld-chip-done" type="button"
+                        [attr.aria-label]="'layout.name.done' | t"
+                        (click)="commitEdit(asset, chipName.value, chipWord.value)">✓</button>
+                    </div>
+                  }
+                </li>
+              }
+            </ul>
+          </section>
+        }
+      }
     </section>
     </div>
 
-    <!-- THE GRIP BETWEEN THE HALVES. The window still does not scroll as a
-         whole; this moves where the shelf stops and the properties start, so
-         a deep arrangement can be given the room it needs without the library
-         above it losing its place. Double-click puts it back. -->
-    <div class="ld-split" role="separator" aria-orientation="horizontal"
-      tabindex="0"
-      [attr.aria-label]="'layout.split' | t"
-      [title]="'layout.split' | t"
-      (pointerdown)="grabSplit($event)"
-      (dblclick)="resetSplit()"
-      (keydown)="onSplitKey($event)"></div>
+    <!-- THE GRIP BETWEEN THE HALVES, while there are two halves. The window
+         still does not scroll as a whole; this moves where the shelf stops and
+         the properties start, so a deep arrangement can be given the room it
+         needs without the library above it losing its place. Double-click puts
+         it back. Gone when the properties are across — there is nothing on
+         this side for it to divide. -->
+    @if (!across()) {
+      <div class="ld-split" role="separator" aria-orientation="horizontal"
+        tabindex="0"
+        [attr.aria-label]="'layout.split' | t"
+        [title]="'layout.split' | t"
+        (pointerdown)="grabSplit($event)"
+        (dblclick)="resetSplit()"
+        (keydown)="onSplitKey($event)"></div>
 
-    <!-- THE BOTTOM HALF. The properties of the active container. -->
-    <div class="ld-inspector" #inspector [style.height]="inspectorStyle()">
+      <!-- THE BOTTOM HALF. The properties of the active container. -->
+      <div class="ld-inspector" #inspector [style.height]="inspectorStyle()">
+        <ng-container [ngTemplateOutlet]="properties"></ng-container>
+      </div>
+    }
+  </aside>
+
+  <!-- ACROSS. The same properties, on the other edge, sharing that lane with
+       the flex gallery — the two of them are the same question at two depths,
+       and the shelf gets the whole of the side it was crowding.
+
+       It is the SAME MARKUP, rendered in one place or the other; a second copy
+       would be two panels that drift, and the participant would find out which
+       one had the newer control by pressing the wrong one. -->
+  @if (across()) {
+    <aside
+      class="ld-away"
+      [hcDockInset]="awaySide()"
+      hcDockedPanel="layout-properties"
+      [dockSide]="awaySide()"
+      [minWidth]="240"
+      [maxWidth]="460"
+      [defaultWidth]="300"
+      data-consumes-wheel
+      tabindex="-1"
+      [attr.aria-label]="'layout.options' | t"
+    >
+      <header class="ld-header">
+        <div class="ld-heading">
+          <span class="ld-title">{{ 'layout.options' | t }}</span>
+          @if (layout()) { <span class="ld-subject">{{ layout() }}</span> }
+        </div>
+        <button class="ld-across" type="button" (click)="sendAcross()"
+          [attr.aria-label]="'layout.properties.back' | t"
+          [title]="'layout.properties.back' | t">⇤</button>
+      </header>
+      <div class="ld-inspector is-away">
+        <ng-container [ngTemplateOutlet]="properties"></ng-container>
+      </div>
+    </aside>
+  }
+
+  <!-- THE PROPERTIES THEMSELVES, written once. -->
+  <ng-template #properties>
     @if (bound() && selectedLevel(); as level) {
       <!-- THE PROPERTIES of whichever level is selected. Dragging writes the
            custom property straight onto that level; letting go commits it. -->
@@ -272,6 +444,38 @@
         }
 
 
+        <!-- WHERE THE PARTS SIT.
+             Along the axis, and across it. This is the question a participant
+             asks constantly — put it at the far end, spread them out, centre
+             that — and the only place it could be asked was the companion
+             window, which is a GALLERY: it draws your container wearing every
+             value, and that is what you open to compare two you cannot choose
+             between. Comparing is the rarer act. Both write the same variable
+             through the same intent, so the two windows cannot disagree.
+
+             Each value is drawn as WHAT IT DOES — marks in a box — because
+             `flex-end` is CSS's word for it and nobody thinks in it. -->
+        <div class="ld-distribute" role="group" [attr.aria-label]="'layout.distribute' | t">
+          @for (axis of distribution(); track axis.axis) {
+            <div class="ld-axis" [attr.data-axis]="axis.axis">
+              <span class="ld-axis-name">{{ 'layout.axis.' + axis.axis | t }}</span>
+              <div class="ld-axis-values">
+                @for (option of axis.values; track option.value) {
+                  <button class="ld-place" type="button"
+                    [class.is-on]="option.on"
+                    [attr.data-place]="option.key"
+                    [attr.aria-pressed]="option.on"
+                    [attr.aria-label]="axis.axis + ': ' + option.value"
+                    [title]="option.value"
+                    (click)="distribute(axis.axis, option.value)">
+                    <span class="ld-place-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+                  </button>
+                }
+              </div>
+            </div>
+          }
+        </div>
+
         <!-- The inheritance rule used to be three lines of prose here. It is
              the largest single thing in a half of a window that may not
              scroll, and it explains something the sliders already show: a
@@ -296,6 +500,5 @@
     } @else {
       <p class="ld-still">{{ 'layout.intro' | t }}</p>
     }
-    </div>
-  </aside>
+  </ng-template>
 }

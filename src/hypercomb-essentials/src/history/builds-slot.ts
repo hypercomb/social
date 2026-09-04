@@ -79,7 +79,6 @@ interface HistoryLike {
   sign?: (l: unknown) => Promise<string>
   currentLayerAt?: (sig: string) => Promise<Record<string, unknown> | null>
   sealSubtree?: (segments: readonly string[]) => Promise<string | null>
-  healSubtreeBags?: (segments: readonly string[]) => Promise<unknown>
   getLayerBySig?: (sig: string) => Promise<Record<string, unknown> | null>
 }
 interface StoreLike {
@@ -176,13 +175,9 @@ export async function mintBuildRecord(
     return { error: 'core services are not ready' }
   }
 
-  // Seal from live heads; heal once, retry, else fail LOUD — never name
-  // a tree that cannot dereference (same contract as /snapshot).
-  let seal = await history.sealSubtree(segments)
-  if (!seal) {
-    try { await history.healSubtreeBags?.(segments) } catch { /* heal is best-effort */ }
-    seal = await history.sealSubtree(segments)
-  }
+  // Seal from live heads, else fail LOUD — never name a tree that cannot
+  // dereference (same contract as /snapshot). No automatic heal.
+  const seal = await history.sealSubtree(segments)
   if (!seal || !SIG_RE.test(seal)) {
     return { error: 'the subtree could not be sealed (a cell is cold or unresolvable) — visit it once and retry' }
   }

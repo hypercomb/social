@@ -41,7 +41,8 @@
 // which fires for the self domain, community domains, and any host the mesh
 // or an adopt handoff taught us.
 
-import { EffectBus, SignatureService } from '@hypercomb/core'
+import { EffectBus, poolKindOfMeaning, registerPoolMeaning, SignatureService } from '@hypercomb/core'
+import { allows as intakeAllows } from '../pheromones/intake-filter.js'
 
 /** How many members one domain may offer per meaning. A published index is
  *  a curated list, not a database dump; past this something is wrong and we
@@ -78,6 +79,30 @@ export const registerPublishedPool = (handler: PublishedPoolHandler): void => {
       `[published-pools] meaning "${meaning}" must carry a colon — a bare word collides with a lineage bag`,
     )
   }
+  // THE DECLARED KIND, READ. `replicates` is the one fact that answers "may
+  // this pool be OFFERED to a stranger at all", and until now nothing asked.
+  //
+  // It REFUSES and never widens: the offered set can only get smaller, no byte
+  // moves, no reference is removed, and nothing here reaches a delete. It also
+  // changes nothing today — both live handlers are `set` — which is the point:
+  // what it buys is that `molecule:index` (SEED-declared `index`) can never be
+  // registered as a published pool. Serving a wipe-safe, GC-able derived cache
+  // as if it were an answer is exactly the mistake the vocabulary claim exists
+  // to prevent, and this turns that argument into a mechanism.
+  //
+  // UNDECLARED IS PERMITTED, deliberately — that is the conservative direction
+  // here and it preserves today's behaviour byte for byte. A kind is a
+  // declaration by whoever mints the pool, and its absence is not a licence to
+  // guess.
+  const facts = poolKindOfMeaning(meaning)
+  if (facts && !facts.replicates) {
+    throw new Error(
+      `[published-pools] meaning "${meaning}" is declared ${facts.kind} — ` +
+      `${facts.kind === 'index'
+        ? 'a derived cache is never sent'
+        : 'a per-participant document is never sent'}`,
+    )
+  }
   handlers.set(meaning, handler)
 }
 
@@ -86,16 +111,24 @@ export const publishedPoolMeanings = (): string[] => [...handlers.keys()]
 
 // ── addressing ──────────────────────────────────────────────────────────
 
-/** `sign(meaning)`, memoised — the probe asks for the same few every time. */
-const poolAddresses = new Map<string, Promise<string>>()
-
-const poolAddress = (meaning: string): Promise<string> => {
-  const hit = poolAddresses.get(meaning)
-  if (hit) return hit
-  const derived = SignatureService.sign(new TextEncoder().encode(meaning).buffer as ArrayBuffer)
-  poolAddresses.set(meaning, derived)
-  return derived
-}
+/**
+ * `sign(meaning)` — through the REGISTRY, which memoises and REGISTERS in one
+ * call.
+ *
+ * It used to derive through a private memo and a raw `SignatureService.sign`,
+ * bypassing `registerPoolMeaning` — every other addressing site in the tree was
+ * corrected to register (`runtime/store.ts`, `host-sync.service.ts`,
+ * `acquire.ts`). A meaning known ONLY through a published-pool handler
+ * therefore never entered the core registry, so `isPoolAddress` could not see
+ * it: the swarm walk's pool-exclusion set, history's bag-removal refusal and
+ * folder-sync's pool labelling would all have been blind to that address. Both
+ * current meanings happen to be seeded, so nothing is broken today; a
+ * module-minted one would have been.
+ *
+ * Registering also lets `poolKindOfAddress` resolve the address back to its
+ * declared kind.
+ */
+const poolAddress = (meaning: string): Promise<string> => registerPoolMeaning(meaning)
 
 /** A bare host from anything host-shaped. Empty when it is not usable. */
 export const originHost = (raw: string): string => {
@@ -161,8 +194,74 @@ const verifiedMember = async (origin: string, sig: string): Promise<unknown | nu
 /** (origin, meaning) already probed this session — a 404 counts. */
 const probed = new Set<string>()
 
+/** What a host has DECLARED and this participant has not yet PLACED. Keyed
+ *  `origin::meaning`; memory only — an offer is a fact about a host, and the
+ *  host will say it again. */
+export type PublishedOffer = { origin: string; meaning: string; sig: string; record: unknown }
+const offers = new Map<string, PublishedOffer[]>()
+
+/** The standing offers, all of them or one origin's. */
+export const offeredPools = (origin?: string): PublishedOffer[] => {
+  const host = origin ? originHost(origin) : ''
+  const out: PublishedOffer[] = []
+  for (const [key, list] of offers) {
+    if (host && !key.startsWith(`${host}::`)) continue
+    out.push(...list)
+  }
+  return out
+}
+
 /**
- * Read one meaning from one domain. Returns the ids the handler kept.
+ * THE GESTURE. Hand one origin's offers (one meaning's, or all of them) to
+ * their handlers. Returns the ids kept. This is the only path to
+ * `handler.accept`, and nothing calls it on a visit, on `domain:learned`,
+ * or on a schedule — a surface calls it because the participant said yes.
+ */
+export const placeOffers = async (rawOrigin: string, meaning?: string): Promise<string[]> => {
+  const origin = originHost(rawOrigin)
+  if (!origin) return []
+  const kept: string[] = []
+  for (const [key, list] of [...offers]) {
+    if (!key.startsWith(`${origin}::`)) continue
+    if (meaning && key !== `${origin}::${meaning}`) continue
+    const handler = handlers.get(key.slice(origin.length + 2))
+    if (!handler) continue
+    offers.delete(key)
+    for (const offer of list) {
+      try {
+        const id = await handler.accept(offer.record, origin)
+        if (id) kept.push(id)
+      } catch (err) {
+        console.warn(`[published-pools] ${origin} offered a ${offer.meaning} record that was refused:`, err)
+      }
+    }
+  }
+  if (kept.length) console.log(`[published-pools] placed ${kept.length} from ${origin}: ${kept.join(', ')}`)
+  return kept
+}
+
+/** NOT NOW. Drop one origin's offers (one meaning's, or all) without placing
+ *  them. Memory only, so the host offers again the next time it is learned;
+ *  the window says so. Nothing is written, so nothing is deleted. */
+export const dismissOffers = (rawOrigin: string, meaning?: string): void => {
+  const origin = originHost(rawOrigin)
+  if (!origin) return
+  for (const key of [...offers.keys()]) {
+    if (!key.startsWith(`${origin}::`)) continue
+    if (meaning && key !== `${origin}::${meaning}`) continue
+    offers.delete(key)
+  }
+}
+
+/** Test seam. */
+export const _resetOffers = (): void => { offers.clear(); probed.clear() }
+
+/**
+ * Read one meaning from one domain. Returns the sigs OFFERED — verified,
+ * admitted by the intake gate, and held for a gesture. Nothing is placed:
+ * a host declaring what it holds is not a host putting it in your world
+ * (`the-algorithm-is-the-application.md` — "nothing enters your world
+ * because someone else decided it should"). `placeOffers` is the act.
  *
  * Silent about the ordinary: a domain with nothing to offer answers 404 and
  * produces no output at all. Only a domain that publishes something, or one
@@ -191,25 +290,31 @@ export const probePublishedPool = async (
   const members = membersOf(index)
   if (!members.length) return []
 
-  const kept: string[] = []
+  const offered: PublishedOffer[] = []
   for (const sig of members) {
     const record = await verifiedMember(origin, sig)
     if (record === null) continue
-    try {
-      const id = await handler.accept(record, origin)
-      if (id) kept.push(id)
-    } catch (err) {
-      console.warn(`[published-pools] ${origin} offered a ${meaning} record that was refused:`, err)
-    }
+    // THE INTAKE GATE. Verification answered "are these the bytes the domain
+    // named"; it cannot answer "do I want them". One pass per member, at most
+    // MAX_MEMBERS of them per domain per session, so it can afford the awaited
+    // record read. A published member has only ever had a signature to be
+    // judged by, which is why this call site needed no change when the gate
+    // dropped the location carrier — it was already asking the right question.
+    // Allows everything until the participant expresses an interest. An offer
+    // the gate refuses is never even shown.
+    if (!await intakeAllows({ sig })) continue
+    offered.push({ origin, meaning, sig, record })
   }
-  if (kept.length) {
-    console.log(`[published-pools] ${origin} offers ${kept.length} ${meaning}: ${kept.join(', ')}`)
+  if (offered.length) {
+    offers.set(once, offered)
+    console.log(`[published-pools] ${origin} offers ${offered.length} ${meaning} — held for a gesture`)
+    EffectBus.emit('published-pools:offered', { origin, meaning, count: offered.length })
   }
-  return kept
+  return offered.map(o => o.sig)
 }
 
-/** Read EVERY claimed meaning from one domain. What "adopting" a domain
- *  means for configuration: ask it, once, what it has. */
+/** Read EVERY claimed meaning from one domain. What learning a domain
+ *  means for configuration: ask it, once, what it has — and HOLD the answer. */
 export const probeDomain = async (rawOrigin: string, options: { force?: boolean } = {}): Promise<string[]> => {
   const origin = originHost(rawOrigin)
   if (!origin) return []
@@ -229,7 +334,10 @@ export const probeDomain = async (rawOrigin: string, options: { force?: boolean 
 // to remember to ask.
 //
 // Deliberately NOT gated on a live renderer, a UI, or an install: a probe is
-// one conditional GET, and the handler decides whether anything is kept.
+// one conditional GET, and it PLACES NOTHING. What it learns waits in
+// `offeredPools` until a surface calls `placeOffers` on the participant's
+// yes. This used to call `handler.accept` straight from the visit, which
+// made a host that declares a provider spec into a host that installs one.
 
 EffectBus.on('domain:learned', (payload: unknown) => {
   const host = String((payload as { host?: unknown })?.host ?? '')

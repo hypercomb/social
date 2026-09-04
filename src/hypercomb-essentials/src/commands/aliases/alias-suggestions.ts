@@ -32,7 +32,6 @@ export const ALIAS_SUGGESTIONS: Readonly<Record<string, readonly string[]>> = Ob
   'bubble': ['bobble'],
   'builds': ['build'],
   'clear-mesh': ['clearmesh', 'clear-relay', 'wipe-mesh'],
-  'collapse-history': ['collapse-histories', 'squash-history'],
   'collections': ['sets'],
   'comfy': ['comfyui'],
   'consolidate-content': ['retire-content-pools', 'migrate-content'],

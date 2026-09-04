@@ -92,11 +92,15 @@ type CommitDelta =
   | { kind: 'sig'; slot: string; op: 'append' | 'removeSig'; sig: string }
   | { kind: 'sig-swap'; slot: string; from: string; to: string }
   | { kind: 'set'; slot: string; sigs: readonly string[] }
-  // `revive` (add only): link the location bag's CURRENT head instead of
-  // resetting it — the undo-a-remove gesture (activity log revert). A plain
-  // add of a name the parent does not list is a CREATE and must yield a
-  // fresh, childless tile even when the location bag holds a deleted
-  // tile's history (delete never touches the child's bag).
+  // An add ALWAYS links the location bag's current head. It used to reset
+  // the head to a bare {name} when the parent did not list the name — a
+  // "fresh create" — which was the one place the commit path deliberately
+  // published a LESS-detailed head over a live one (write-conformance,
+  // layer-committer.drone.ts:1199): the same defect class as healSubtreeBags,
+  // and the opposite of hide-first (a remove UNLINKS; re-adding the name is
+  // the reveal). Forgetting a tile for good is the delete area's act, never
+  // a side effect of typing its name again. `revive` is accepted for the
+  // callers that pass it and changes nothing.
   | { kind: 'name'; slot: 'children'; op: 'add' | 'remove'; cell: string; revive?: boolean }
   // deltas: N surgical sig-space edits against ONE slot in ONE commit —
   // the sig-native cut/copy/paste/move primitive. Unlike 'set'/'layer'
@@ -123,6 +127,10 @@ type CommitDelta =
   | {
       kind: 'layer'
       layer: { [slot: string]: readonly string[] }
+      /** Non-list slots, carried VERBATIM into the machine (write-conformance
+       *  check 5: a scalar child pointer or inline metadata must survive an
+       *  update that did not mean to touch it). `null` drops the slot. */
+      scalars?: { [slot: string]: unknown }
       /** Keys in this set are interpreted as cell-NAME arrays and resolved
        *  to sigs at commit time. All other keys are treated as sig arrays. */
       nameSlots?: ReadonlySet<string>
@@ -140,6 +148,16 @@ type CommitRequest = {
  *  whatever location happens to be current — grafting one layer's
  *  values into another (observed live: a child created at /hello was
  *  appended to root's children minutes later by exactly this race). */
+/** A write refused because the participant is viewing the past. Named so a
+ *  caller can tell "the hive would not take this" apart from "the write broke",
+ *  and so a receipt can say which. Not a failure of the work — an answer. */
+export class RewoundCommitError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'RewoundCommitError'
+  }
+}
+
 const segmentsAtIntent = (): string[] | null => {
   const lineage = get<Lineage>('@hypercomb.social/Lineage')
   const segs = lineage?.explorerSegments?.()
@@ -611,10 +629,13 @@ export class LayerCommitter {
   /**
    * Layer-as-primitive update. Pass the full new layer state at this position
    * — `{ name, ...slots }` — and the committer applies every slot in one
-   * cascade. Empty arrays wipe the slot (absent ≡ empty). Slot names are the
-   * caller's convention; the committer adds no special handling beyond
-   * optional name→sig resolution for slots listed in `nameSlots` (typically
-   * just `'children'`).
+   * cascade. Empty arrays wipe the slot (absent ≡ empty). A NON-ARRAY value
+   * is a scalar slot and is carried through verbatim (`null` drops it) —
+   * it used to be silently discarded, so a scalar child pointer on an
+   * installed layer vanished on the first edit. Slot names are the caller's
+   * convention; the committer adds no special handling beyond optional
+   * name→sig resolution for slots listed in `nameSlots` (typically just
+   * `'children'`).
    *
    * This is the canonical write surface — single API, single cascade per
    * parent, no fire-and-forget paths, no item-level synthesis. Add and
@@ -625,15 +646,15 @@ export class LayerCommitter {
     layer: { name?: string; [slot: string]: unknown },
     nameSlots: ReadonlySet<string> = new Set(['children']),
   ): Promise<string> {
-    // Strip the `name` key — it identifies the cell, not a slot.
-    // Coerce every other entry to a string array (drop non-array values
-    // since the convention is "lists in, lists out").
+    // Strip the `name` key — it identifies the cell, not a slot. Arrays
+    // become list slots; anything else is a scalar slot carried verbatim
+    // (`undefined` is "not mentioned", `null` is "drop it").
     const slots: { [slot: string]: readonly string[] } = {}
+    const scalars: { [slot: string]: unknown } = {}
     for (const [key, value] of Object.entries(layer)) {
       if (key === 'name') continue
-      if (Array.isArray(value)) {
-        slots[key] = value.map(v => String(v))
-      }
+      if (Array.isArray(value)) slots[key] = value.map(v => String(v))
+      else if (value !== undefined) scalars[key] = value
     }
     // Bind malformed/absent segments to the CURRENT location (intent
     // time), never to root — `?? []` here silently re-addressed a
@@ -645,7 +666,7 @@ export class LayerCommitter {
     }
     await this.#machine.requestAndWait({
       segments: cleaned,
-      delta: { kind: 'layer', layer: slots, nameSlots },
+      delta: { kind: 'layer', layer: slots, scalars, nameSlots },
     })
 
     // Return the new layer sig so callers can use it to compose the merkle
@@ -705,12 +726,28 @@ export class LayerCommitter {
 
     const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
     if (cursor?.state?.rewound) {
-      // Never commit while the cursor is rewound (the assembled state reflects
-      // the past view) — but never SILENTLY: a caller that resolves this void
-      // as success (paste/adopt fold) would report committed while nothing was
-      // written, and the work vanishes on the next refresh.
-      console.warn('[LayerCommitter] importTree skipped — history cursor is rewound; nothing was committed', { updates: updates.length })
-      return
+      // Never commit while the cursor is rewound — the assembled state reflects
+      // the past view, not a new intent. AND NEVER SILENTLY: this used to say
+      // exactly that and then `console.warn` and return, which is silent to
+      // everyone except a console. A caller that resolved this void as success
+      // reported the write as committed while nothing was written, and the work
+      // vanished on the next refresh.
+      //
+      // `/undo` is what puts a hive here, and it is machine-callable — so a
+      // plan of `/undo` then `/create x` had the create resolve clean and the
+      // receipt say it ran. THROWING is what closes that: `enqueue` returns the
+      // task's own promise and guards the chain separately, so the rejection
+      // reaches the caller without stalling the queue, and the create path's
+      // `.catch(error => payload.complete?.(error))` turns it into an honest
+      // refusal. Callers that do not catch stop before their success effects
+      // fire, which is more correct than emitting `cell:added` for a cell that
+      // was never added.
+      EffectBus.emit('activity:log', {
+        message: 'Nothing was written — you are viewing the past. Step forward to write again.',
+        icon: 'history',
+      })
+      throw new RewoundCommitError(
+        `history cursor is rewound; ${updates.length} update(s) were not committed`)
     }
 
     const lineage = get<Lineage>('@hypercomb.social/Lineage')
@@ -773,36 +810,6 @@ export class LayerCommitter {
     // transitions: pathKey → { prevSig, newSig, name } produced by this commit.
     const transitions = new Map<string, { prevSig: string; newSig: string; name: string }>()
 
-    // PRE-batch child names under a parent path — memoised per run. Read
-    // during leaf processing (deepest-first, so every parent is read before
-    // it commits) to decide whether a bare `{name}` update is a CREATE (the
-    // parent does not list the name) or a pass-through of a live tile
-    // (nested create `a/b/c` walking through an existing `a`).
-    const parentChildNames = new Map<string, Promise<Set<string>>>()
-    const namesUnder = (parentSegs: string[]): Promise<Set<string>> => {
-      const key = encode(parentSegs)
-      let pending = parentChildNames.get(key)
-      if (!pending) {
-        pending = (async () => {
-          const parentName = parentSegs.length === 0 ? ROOT_NAME : parentSegs[parentSegs.length - 1]
-          const parentLoc = await history.sign({
-            domain: lineage.domain,
-            explorerSegments: () => parentSegs,
-          } as Lineage)
-          const head = await history.getLayerBySig(await history.latestMarkerSigFor(parentLoc, parentName))
-          const names = new Set<string>()
-          const children = Array.isArray(head?.children) ? head.children as readonly unknown[] : []
-          await Promise.all(children.map(async raw => {
-            const child = await history.getLayerBySig(String(raw))
-            if (child?.name) names.add(child.name)
-          }))
-          return names
-        })()
-        parentChildNames.set(key, pending)
-      }
-      return pending
-    }
-
     for (const pathKey of ordered) {
       const segments = decode(pathKey)
       const ancestorName = segments.length === 0 ? ROOT_NAME : segments[segments.length - 1]
@@ -816,27 +823,24 @@ export class LayerCommitter {
 
       const update = updateByPath.get(pathKey)
 
-      // Fresh-create guard: a bare `{name}` update (no slot arrays — the
-      // typed-create shape) for a name the parent does NOT currently list
-      // is a CREATE, and a create yields a fresh tile. The location bag
-      // may still hold a previously-deleted tile's full history (delete
-      // only unlinks from the parent; the bag survives for undo) — so
-      // hydrating from its head would resurrect the old subtree, notes,
-      // and tags into the "new" tile. Hydrate empty instead; the commit
-      // below appends a bare marker (old markers stay — undo inside the
-      // tile still walks back). Updates that carry slot arrays are
-      // explicit layer state (move / adopt / paste) and hydrate from the
-      // head as before, as do bare updates for live names (nested create
-      // passing through an existing tile must not touch it).
-      const fresh = update !== undefined
-        && segments.length > 0
-        && Object.entries(update.layer).every(([k, v]) => k === 'name' || !Array.isArray(v))
-        && !(await namesUnder(segments.slice(0, -1))).has(ancestorName)
-      const machine = LayerMachine.fromLayer(fresh ? null : prevLayer, ancestorName, segments)
+      // ALWAYS HYDRATE FROM THE HEAD. A bare `{name}` update for a name the
+      // parent does not list used to hydrate EMPTY — a "fresh create" that
+      // committed a bare layer over whatever the location bag held, so a
+      // deleted tile's subtree, notes and tags were replaced by nothing the
+      // moment its name was typed again. That published less detail over a
+      // live head, which the commit path may never do. A remove only unlinks;
+      // re-adding the name links the head back — the reveal. What a
+      // participant wants gone for good goes through the delete area.
+      const machine = LayerMachine.fromLayer(prevLayer, ancestorName, segments)
       if (update) {
         for (const [slot, raw] of Object.entries(update.layer)) {
           if (slot === 'name') continue
-          if (!Array.isArray(raw)) continue
+          // A non-array value is a SCALAR slot — the installed `cells: <sig>`
+          // pointer, inline metadata — and rides through verbatim (`null`
+          // drops it). This loop used to skip it, so a pasted or adopted layer
+          // at a fresh location committed without its child pointer: the
+          // third coercion site the check-5 fix left behind (adjudication).
+          if (!Array.isArray(raw)) { if (raw !== undefined) machine.setScalar(slot, raw); continue }
           let sigs: string[]
           if (nameSlots.has(slot)) {
             // Snapshot prior (name→live sig) before the set so a paste / adopt
@@ -906,15 +910,6 @@ export class LayerCommitter {
 
       const newSig = await history.commitLayer(ancestorLocSig, machine.output())
       transitions.set(pathKey, { prevSig, newSig, name: ancestorName })
-
-      // A fresh create that actually RESET a rich head: participant-local
-      // caches keyed by this location (props index, nurses) must drop, or
-      // the deleted tile's image resurrects onto the fresh tile.
-      // Transient: a point-in-time event; replaying it to a late
-      // subscriber could clear an entry written AFTER the reset.
-      if (fresh && !isBareLayer(prevLayer)) {
-        EffectBus.emitTransient('cell:fresh', { cell: ancestorName, segments: segments.slice(0, -1) })
-      }
 
       // Post-commit reconcile — mirror what #commit emits so subscribers
       // (show-cell's slot machine, activity log, substrate, tile-overlay)
@@ -1178,35 +1173,11 @@ export class LayerCommitter {
               domain: lineage.domain,
               explorerSegments: () => [...sub, d.cell],
             } as Lineage)
-            const headSig = await history.latestMarkerSigFor(cellLocSig, d.cell)
-            let cellSig = headSig
-            // Adding a name the parent does NOT list is a CREATE, and a
-            // create yields a fresh tile. The location bag may still hold
-            // a previously-deleted tile's full history (delete only
-            // unlinks from the parent; the bag survives for undo) — so
-            // linking the bag head would resurrect the old subtree.
-            // Reset the head to the bare {name} layer instead; the old
-            // markers stay (undo inside the tile still walks back).
-            // `revive` opts back into head-linking — the undo-a-remove
-            // gesture, where resurrection is exactly the point.
-            if (!d.revive) {
-              let listed = false
-              for (const sig of machine.getSlot('children') as readonly string[]) {
-                const child = await history.getLayerBySig(String(sig))
-                if (child?.name === d.cell) { listed = true; break }
-              }
-              if (!listed) {
-                cellSig = await history.commitLayer(cellLocSig, { name: d.cell })
-                if (cellSig !== headSig) {
-                  // A real reset happened (head was rich) — participant-
-                  // local caches keyed by this location must drop.
-                  // Transient: a point-in-time event; replaying it to a
-                  // late subscriber could clear an entry written AFTER
-                  // the reset.
-                  EffectBus.emitTransient('cell:fresh', { cell: d.cell, segments: sub })
-                }
-              }
-            }
+            // THE HEAD IS LINKED, ALWAYS. This branch used to commit a bare
+            // {name} over the location's head when the parent did not list
+            // the name (see the delta type above) — the one deliberate
+            // less-detail-over-live publish on the commit path. Gone.
+            const cellSig = await history.latestMarkerSigFor(cellLocSig, d.cell)
             machine.apply({ slot: 'children', op: 'append', sig: cellSig })
           } else if (d.op === 'remove') {
             const prevChildren = machine.getSlot('children') as readonly string[]
@@ -1251,6 +1222,11 @@ export class LayerCommitter {
               sigs = values.map(v => String(v)).filter(Boolean)
             }
             machine.apply({ slot, op: 'set', sigs })
+          }
+          // Scalar slots ride through untouched — the machine holds them
+          // beside the lists and writes them back as they came.
+          for (const [slot, value] of Object.entries(d.scalars ?? {})) {
+            machine.setScalar(slot, value)
           }
         }
       }

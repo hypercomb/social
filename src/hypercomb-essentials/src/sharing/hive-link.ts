@@ -43,6 +43,13 @@ export const HIVE_INDEX_EVENT_KIND = 30564
 // non-letter/number to `-`, so no site lineage can ever produce a key
 // containing `:`. `install:`-prefixed keys are therefore reserved by
 // construction — no allowlist needed, no census to drift.
+//
+// NARROWER THAN IT READS, stated exactly: canonicalizeLineageSegment falls
+// back to the RAW segment when canonicalization empties it, so a tile named
+// exactly `:` does produce a bare colon. The reservation is absolute only for
+// a key carrying letters or digits on BOTH sides of the colon — which
+// `install:<channel>` and `format:hive` both do, and a bare `:` prefix would
+// not. Reserve accordingly.
 
 export const INSTALL_CHANNEL_PREFIX = 'install:'
 
@@ -58,6 +65,87 @@ export function installChannelKey(channel: string): string {
 export function installRootOf(roots: Record<string, string>, channel: string): string | null {
   const sig = String(roots[installChannelKey(channel)] ?? '').trim().toLowerCase()
   return SIG_RE.test(sig) ? sig : null
+}
+
+// ── The hive FORMAT marker (documentation-free half: see hive-format.ts) ──
+//
+// A reserved roots key, for two reasons that are both hard constraints:
+//
+//   * The index cannot carry an extra TOP-LEVEL field. `putHiveManifest`
+//     re-serializes `{ v, roots }` and its signature accepts only `roots`, so
+//     anything else is erased by the very next publish from ANY client —
+//     including an older one, which is precisely the silent divergence this
+//     marker exists to prevent.
+//   * A roots VALUE must be 64-hex or `fetchHiveIndex` rejects the WHOLE
+//     index as malformed (and the host repeats the rule). So the version can
+//     never be inlined; the key points at a content-addressed declaration.
+//
+// Same spelling as the pool meaning, deliberately: one word to remember, two
+// places it means the same thing. The colon carries word characters on both
+// sides, which is what makes the reservation hold — see the narrower
+// statement of that rule below.
+
+export const HIVE_FORMAT_ROOT_KEY = 'format:hive'
+
+/** The format declaration a hive index publishes, or null. Callers pass the
+ *  `roots` of an ALREADY-VERIFIED index — this helper adds no trust. */
+export function formatRootOf(roots: Record<string, string>): string | null {
+  const sig = String(roots[HIVE_FORMAT_ROOT_KEY] ?? '').trim().toLowerCase()
+  return SIG_RE.test(sig) ? sig : null
+}
+
+// ── The signed VOCABULARY CLAIM (documentation/vocabulary-claim.md) ────────
+//
+// Same two hard constraints as `format:hive`, and for the same reasons: the
+// index cannot carry an extra TOP-LEVEL field (the next publish from ANY
+// client re-serializes `{v, roots}` and erases it), and a roots VALUE must be
+// 64-hex or `fetchHiveIndex` rejects the WHOLE index as malformed — one bad
+// value unpublishes every branch for every reader. So the vocabulary is a
+// reserved KEY pointing at a content-addressed claim atom, never an inline
+// word list.
+//
+// Same spelling as the pool meaning, deliberately, and it carries word
+// characters on both sides of the colon — which is what makes the reservation
+// hold.
+
+export const VOCABULARY_ROOT_KEY = 'vocabulary:hive'
+
+/** The signed vocabulary claim a hive index publishes, or null. Callers pass
+ *  the `roots` of an ALREADY-VERIFIED index — this helper adds no trust. */
+export function vocabularyRootOf(roots: Record<string, string>): string | null {
+  const sig = String(roots[VOCABULARY_ROOT_KEY] ?? '').trim().toLowerCase()
+  return SIG_RE.test(sig) ? sig : null
+}
+
+/**
+ * ROOT KEYS THE BRIDGE MAY NEVER SET.
+ *
+ * `claude-bridge.worker.ts`'s `hive-root-set` op advances the participant's
+ * SIGNED index with no participant gesture at all — an agent or a deploy
+ * script drives it — and it refuses only COLON-LESS keys, precisely so it
+ * cannot clobber a site lineage. Every reserved key is therefore remotely
+ * settable by construction, which is fine for `install:<channel>` (that IS a
+ * deploy stamp) and fatal for a vocabulary claim: publishing what words you
+ * hold is something the PARTICIPANT does, or the whole scope model is a
+ * decoration.
+ *
+ * INVERTED TO AN ALLOW-LIST. A deny-list is only ever as complete as the
+ * last person who remembered it: `format:hive` was settable over the bridge
+ * for the same reason `vocabulary:hive` had been, by omission. The rule is
+ * now positive — the bridge may stamp `install:<channel>` and NOTHING else.
+ * Every other reserved key is a participant act. The deny-list is kept as
+ * the named examples, so a test can say why each one is refused.
+ */
+export const BRIDGE_FORBIDDEN_ROOT_KEYS: readonly string[] = Object.freeze([
+  VOCABULARY_ROOT_KEY,
+  HIVE_FORMAT_ROOT_KEY,
+])
+
+/** May the bridge's `hive-root-set` write this key? Only an install stamp. */
+export const bridgeMaySetRootKey = (key: string): boolean => {
+  const k = String(key ?? '').trim()
+  if (!k.startsWith(INSTALL_CHANNEL_PREFIX)) return false
+  return /^[a-z][a-z0-9-]*$/.test(k.slice(INSTALL_CHANNEL_PREFIX.length))
 }
 
 /** localStorage key recording which adopted roots follow a static

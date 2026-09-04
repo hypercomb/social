@@ -1,0 +1,1583 @@
+{
+ "adjudicated": "2026-09-04",
+ "readers": 6,
+ "verdicts": [
+  {
+   "file": "hypercomb-essentials/src/search/hive-search.service.ts",
+   "symbol": "HiveSearchService.writeRecord",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": 6,
+   "reason": "The pin the check exists to prevent is closed on the reader side: `referencesOutside` now derives `creditsNames` from `poolCreditsMemberNames(await poolKindOfAddress(lineageSig))` (history.service.ts:4447-4448) and the walk does `if (!creditsNames) continue` BEFORE both `hit(name)` and `readFile(..., 'member')` (4421-4423), so a `search:index` member (seeded `index`, pool-kinds.ts:132, wipeSafe true) is skipped name and bytes; molecule-index.prune-pin.spec.ts:125 ratchets the exact line. The record still literally holds layer sigs (`rowsOfManifest` puts `entry.sig` in every row, hive-search.ts:176), so under the check's wording it is only conforming because the reader no longer credits wipe-safe members — the write itself is unchanged, as write-conformance.md says.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/active-genome.service.ts",
+   "symbol": "ActiveGenomeService.#writeDoc (via #persist, line 285)",
+   "censusClassification": "deviation",
+   "verdict": "fix-incomplete",
+   "check": 7,
+   "reason": "The check-6 half is closed by the same reader fix (`computed:genome` seeded `index`, pool-kinds.ts:129, so the member is skipped whole), but the check-7 half write-conformance.md recorded is untouched: `#schedule` (153-168) arms its own `requestIdleCallback`/`setTimeout` off `content:wrote`, `history:marker-wrote` and `history:head-changed` (102-107) and runs `void this.refresh()` -> `#persist` -> `#writeDoc` -> `putPoolDoc`; there is no `optimize()` on this class, so the derived doc is minted from a private idle scheduler, not the processor's phase. Secondary: `invalidate()` runs synchronously inside the commit effect and `#enqueueSignature` writes `localStorage` there (336).",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/manifest-optimizer.drone.ts",
+   "symbol": "ManifestOptimizerDrone.optimize → store.writeChildrenManifest",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`optimize` (129-153) drains `#pending`, resolves every child by sig and writes only when `manifest.length === childSigs.length` (149); keyed by the parent layer sig, minted in the phase, and commitLayer's comment at history.service.ts:1115-1119 confirms the write left the commit path. The census's one reservation (check 6, entries pin child sigs against prune) is closed since by the `creditsNames` reader fix — `manifests` is seeded `index` (pool-kinds.ts:130) so the member is skipped name and bytes.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts",
+   "symbol": "resolveChildNames backfill → store.writeChildrenManifest",
+   "censusClassification": "deviation",
+   "verdict": "confirmed",
+   "check": 7,
+   "reason": "Still present at the current head: inside `resolveChildNames` the `allResolved` branch (642-669) schedules `await store.writeChildrenManifest!(parentLayerSig, (rich ?? thin))` (666) via requestIdleCallback off the paint, and `ManifestOptimizerDrone.enqueue` (manifest-optimizer.drone.ts:118, 'THE ONE DOOR') exists but show-cell never calls it (no `enqueue(` in the file). write-conformance.md records this as deliberately left for the session holding the file, and doctrine.spec.ts:407-417 still allowlists show-cell as a manifest writer — the deviation is real and open, not fixed.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts",
+   "symbol": "upgradeThinPack → store.writeChildrenManifest",
+   "censusClassification": "deviation",
+   "verdict": "confirmed",
+   "check": 7,
+   "reason": "`upgradeThinPack` (684-716) is invoked from the manifest-hit branch of `resolveChildNames` under `options?.mayUpgradePack` (591), calls `optimizerCtor.buildEntries` (706) — which mints renditions via `#visualFor` — and then `store.writeChildrenManifest!` (708) from an idle callback off the render path; `_packUpgradeTried` (678) and `rich.length !== childSigs.length` (707) keep it bounded and complete-or-absent, as the census said, but it is still a derived-cache write outside `optimize()`. The `enqueue` door that would replace it is unused here.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/search/hive-search.service.ts",
+   "symbol": "HiveSearchService.derive → writeRecord for a child",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": 1,
+   "reason": "`writeRecord` now opens with `if (record.truncated === true) return` (268) — no disk write and no `#memo` set — and the comment cites this census entry; `derive` still returns `{ v: 1, rows: [], truncated: true }` at the depth cap (192) rather than null, but line 212 propagates `truncated` to the parent so neither the empty child nor the parent that spliced it is persisted, and search-index.drone.ts:77-79 / 100-102 route every write through the guarded `writeRecord`. Sound; the one consequence is that a root whose full walk never fits `MAX_RECORD_ROWS` or the per-pass budget has no record, so `vocabulary()` (239-254) is empty and `search` answers `partial` — honest, not a conformance failure.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/presentation/tiles/tree-insight.ts",
+   "symbol": "writeCatalog → store.putPoolDoc (with pool-kinds.ts:129)",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": null,
+   "reason": "pool-kinds.ts:155-158 now seeds `['insights:catalog', 'document']` with a comment naming the hazard, so `wipeSafe` is false and `deletion` is `replaces-siblings` — which is exactly what `putPoolDoc`'s proven-colon sibling sweep (store.ts:270-280) already did, so declaration and behaviour agree. The write itself (`writeCatalog` 89-100, one content-addressed member via `putPoolDoc`) is unchanged and correct.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/manifest-optimizer.drone.ts",
+   "symbol": "ManifestOptimizerDrone.#visualFor → store.optimizeVisual",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`#visualFor` (214-253) mints the rendition under the source image's own sig via `store.optimizeVisual` only when `getOptimizedVisual` misses and `budget.mints > 0`, through the process-wide `#mintSerially` chain (194-199), and inlines only under `#MAX_INLINE_BYTES` (245). The inherited caveat is still live: `buildEntries` (164-184) is called from show-cell.drone.ts:665 and :706, so a rendition can be minted off the render path until those two sites move to `enqueue`; that is the same open check-7 debt, not a second one.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/molecule/molecule-index.service.ts",
+   "symbol": "MoleculeIndexService.writeRecord",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`writeRecord` (128-137) writes under the layer sig it derives from; `MoleculeWordSet.seal()` strips every `SIGNATURE_RUN` from spellings (molecule-index.ts:124, 148) so the bytes carry molecule addresses only; `moleculeIndexReader` (396-407) registers the read half without `derive`/`writeRecord`; and `fallbackVocabulary` (280-290) walks manifests through `#layerLocal` rather than another cache. Every claim the census made checks out against the current file.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/molecule/molecule-index.drone.ts",
+   "symbol": "MoleculeIndexDrone.optimize",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`optimize` (91-119) skips a held non-truncated record (112-113), writes only `record.truncated !== true` (115), and `#repairRoot` (124-134) re-derives only a record that exists AND admits truncation, bounded by `#repaired`; an absent root is left absent (`if (!held ...) return`, 129). Nothing is written at a molecule address, so check 10 holds as the census said.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/presentation/tiles/thumbnails.ts",
+   "symbol": "writeThumbnail",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`writeThumbnail` (57-72) writes raw webp bytes from `deriveThumbnail` under the source image sig in `sign('thumbnails:hex')` (colon meaning, seeded `index` at pool-kinds.ts:133); the payload is binary so it carries no 64-hex text, and the header's argument for keeping it out of `properties` (10-14) is correct — a props write would mint a layer and a marker.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/presentation/tiles/thumbnail-optimizer.drone.ts",
+   "symbol": "ThumbnailOptimizerDrone.optimize",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`optimize` (53-74) drains `PER_PASS` demanded sigs from `thumbnail:wanted`, re-checks `readThumbnail` before deriving (64), marks `#attempted` so an undecodable image is tried once, and writes only when `deriveThumbnail` returned bytes (68-69) — derive-on-miss, keyed by the input sig, in the phase.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/presentation/tiles/visual-optimizer.drone.ts",
+   "symbol": "VisualOptimizerDrone.optimize",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`optimize` (66-87) is demand-driven off `visual:wanted`, re-checks `getOptimizedVisual` (77), and reads the source through `getResourceResolvedLocal ?? getResourceLocal` (80) so no host fetch lands on the optimization path; `Store.optimizeVisual` writes a whole webp or nothing.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-runtime/src/store.ts",
+   "symbol": "Store.#putOptimizedVisual / optimizeVisual",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`optimizeVisual` (1323-1345) returns early on a cached hit and when the raw is already within `#VISUAL_OPTIM_TARGET`, and `#putOptimizedVisual` (1308-1321) writes binary under the source sig in the `sign('visual-optimization')` pool (`#visualOptimDir`, 1290-1296). One correction to the census's supporting detail: `removeOptimization` (1347) and `listOptimizations` (1365) act on `this.optimization` — the bare-word `sign('optimization')` decoration pool — not on the visual pool, which has no delete path at all; the `classifyDirectoryEntry(...) !== 'member'` guards (1353, 1376) therefore protect a different pool than the one this site writes.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "HistoryService.commitLayer",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`commitLayer` (1007-1144): `#signLayer` names the bytes (1019), `writeLayerBytes` lands them at the flat root (1073), the marker is a new `markerNameOf(max+1)` file with a ceiling refusal (1090-1098), no manifest is minted (1115-1119), and `content:wrote` is emitted last (1141). The `Number(e.filename)` at 1041/1091 reads the in-memory `#layerListCache`, whose entries come from enumerations already filtered by `#MARKER_RE` (1436, 1529, 1583), so no directory entry name is parsed as a number — check 9 holds.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/molecule/vocabulary-ledger.ts",
+   "symbol": "writeVocabularyRecord / seen-record write",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`declarePoolKind(..., 'set')` for both meanings (53-54) keeps `wipeSafe` false so the published ledger's claim-sig member names keep crediting; `writeVocabularyRecord` (148-155) is keyed by the claim sig; and `rememberProvenSeq` (215-223) writes exactly `{ at, seq }` keyed by the publisher's pubkey and refuses to lower a held seq — no stranger's atom sig enters the seen pool.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/molecule/vocabulary-publish.ts",
+   "symbol": "VocabularyPublishDeps.confirm gate",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": 10,
+   "reason": "The API guard `options?.confirmed !== true` (318) and the human gate `deps.confirm(summary)` (352) both precede the first write, `deps.putResource(text)` at 374; the deps interface (209-225) orders every writing member below the fence comment, and the routine additionally moved `deps.publicKey` (which can mint a secret key) and `deps.readHeld` (two HTTPS requests) below the gate (355, 370) with `seq: null` in the summary. Check 10 is satisfied structurally.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/computation/computation.service.ts",
+   "symbol": "ComputationService.record",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`record` (55-85) appends `markerName(nextIndex)` and throws at the ceiling (67-70) into a bag keyed by `computeLookupKey` = sign(input + '/' + function) (38-49), a stated derivation; `#nextIndex` (266-267), `lookup` (118) and `replay` (176-177) each call `classifyDirectoryEntry(name) !== 'marker'` before `Number(name)`, so check 9 is closed at all three enumerations exactly as the census described.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/editor/viewport-store.ts",
+   "symbol": "writeViewportAt",
+   "censusClassification": "break-apart",
+   "verdict": "refuted",
+   "correctedClassification": "legacy-conforming",
+   "check": 4,
+   "reason": "The census applied check 4 to the substrate override (a NEW record keyed by `history.sign({explorerSegments})`, the sha256(lineageKey) path hash) and filed it legacy-conforming, then filed this site break-apart although it keys the very same way: `locationSig` (97-106) -> `history.sign(...)` -> `dir.getFileHandle(sig, {create: true})` (293). Same shape, same verdict: correct for what it is, not the shape a new address takes. Everything else the census credited holds — `document` kind (pool-kinds.ts:165), the `classifyDirectoryEntry(sig) !== 'member'` clear guard (278), and the read-only first-visit seed (215-228).",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/commands/decoration-kind-index.ts",
+   "symbol": "kindsByKey / segmentsByKey module state",
+   "censusClassification": "wrap-up",
+   "verdict": "refuted",
+   "correctedClassification": "unclear",
+   "check": null,
+   "reason": "The census's own reasoning ('no persisted write in the file at all') is correct — the file contains no `getPool`, `createWritable`, `putResource`, `putPoolDoc`, `removeEntry` or `localStorage` call, only in-memory maps keyed by `segments.join(SEP)` (58) hydrated from effects — but the census's class for 'no write at all; refuted on read' is `unclear`, not `wrap-up`. A site with nothing written cannot be a composition; it should not count toward the conforming total.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/substrate/substrate.service.ts",
+   "symbol": "SubstrateService.#writeOverride → #writePoolRecord",
+   "censusClassification": "legacy-conforming",
+   "verdict": "confirmed",
+   "check": 4,
+   "reason": "`#writeOverride` (585-596) keys the merged record by `#locationSig(segments)` = `history.sign({explorerSegments})` (2362-2368), a path hash on a new write in a `set` pool (pool-kinds.ts:150) — legacy shape, correctly not a defect, and `removeReference` (707-716) removes the marker only. Adjacent miss the census did not list: `#saveRegistry` (486-496) calls `#writePoolRecord(store, REGISTRY_RECORD, ...)` with `REGISTRY_RECORD = 'registry'`, writing a member literally named `registry` into the same `sign('substrate:sources')` pool (2351-2358) — a caller-chosen human name, neither sha256 nor a derivation, the same check-1 shape as the four `#writePointer` copies write-conformance.md records as fixed.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/assistant/agent-registry.service.ts",
+   "symbol": "AgentRegistryService.#retireAsk",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`#retireAsk` (468-508) reaches `removeOptimization` only after `classifyDirectoryEntry(sig) === 'member'` (482), a readable blob, parseable JSON, `kind === 'ask'`, `mode === 'context'` and `askSig === id` (484-490) — every branch is a reason to keep, and `listOptimizations` (store.ts:1365-1380) already offers member names only. The stop marker it then writes goes through `putOptimization`, which names the member `SignatureService.sign(bytes)` (store.ts:1228), so nothing here is named by a caller.",
+   "area": "derived"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "healSubtreeBags → commitLayer",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": null,
+   "reason": "The function no longer exists in history.service.ts (the only remaining mention is a comment in layer-committer.drone.ts:99), and all three former callers now call only sealSubtree: snapshot.queen.ts:112 `history.sealSubtree([])`, publish-branch.ts:223, builds-slot.ts:180 — no heal, no try/catch retry. Failure surfaces through `lastSealFailure` / `#refuseSeal`, which is what the doc promised.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/layer-machine.ts",
+   "symbol": "LayerMachine.fromLayer",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": null,
+   "reason": "fromLayer now does `if (Array.isArray(v)) { if (v.length > 0) m.#slots.set(...) } else if (v !== undefined && v !== null) m.#scalars.set(key, v)` and output() writes `#scalars` back before the lists; layer-machine.spec.ts pins the round-trip. Residual nit, not a defect in the fix: apply() runs `this.#scalars.delete(delta.slot)` BEFORE evaluating the op, so a no-op list delta on a scalar slot (removeSig of an absent sig, swap with an absent `from`) drops the scalar while reporting `changed: false` — reachable only by a caller that names a scalar slot with a list op, which the header defines as an explicit assertion.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/layer-committer.drone.ts",
+   "symbol": "LayerCommitter.update",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": null,
+   "reason": "update() now splits `if (Array.isArray(value)) slots[key] = … else if (value !== undefined) scalars[key] = value` and enqueues `{ kind: 'layer', layer: slots, scalars, nameSlots }`; #commit applies `machine.setScalar(slot, value)` for each. The same coercion survives unfixed on the bulk surface, #importTree — reported on that site below.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "gcLegacyHistory",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": null,
+   "reason": "#dirShadowed now reads both files and compares `byteLength` then every byte (`if (a[i] !== b[i]) return false`), returns false on any non-file entry or unreadable side, and gcLegacyHistory removes `__history__` only when `allShadowed` — so a same-name divergence keeps the folder permanently (the safe direction; it will never pass a later pass either, which is acceptable on never-wipe history). The final `removeEntry(__history__, {recursive:true})` still bypasses directory-safety, but hardDeleteVetoFor would always veto a dir of sig-named subdirs, so the per-file byte proof is the stronger, case-specific gate for check 8.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/collapse-history.queen.ts",
+   "symbol": "CollapseHistoryQueenBee.#collapse → archiveEntries",
+   "censusClassification": "deviation",
+   "verdict": "fix-incomplete",
+   "check": 2,
+   "reason": "write-conformance.md records this as 'could not be located — no such file exists', but hypercomb-essentials/src/history/collapse-history.queen.ts exists and is unchanged: `for (const { signature: lineageSig } of await history.list())` iterates enumerateBags (which by its own comment has 'NO REGISTRY SKIP … label only, never a gate') and calls `archiveEntries(lineageSig, toDelete)` on every sig-named dir at the root, including pools and molecule addresses it holds no head for. Radius is smaller than the census said — other authors' markers live in sub-buckets that listLayers (`handle.kind !== 'file' → continue`) never reads, and archiveEntries refuses non-marker names — but the closure claim in the doc is wrong and nothing landed.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "setMarkerMeta",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": null,
+   "reason": "setMarkerMeta now reads the marker (`readMarker`) and calls `writeMarkerMetaRecord(store, { layer: m.layerSig, location, marker }, patch)` in history/marker-meta.ts, which merges over the current record and writes it through `store.putPoolDoc(pool, bytes, layer)` into the colon-scoped `history:marker-meta` document pool (declared `document` in pool-kinds.ts:154); the marker file is never opened for writing. putPoolDoc's sweep of the previous record runs only on a `subKey` sub-bucket plus `documentSweepVetoFor`, which is the doctrine's own proof-of-ownership for a document pool. Design consequence worth knowing, not a check failure: the key is the LAYER sig, so byte-identical revisions at two locations (every same-named empty genesis) share one record and `location`/`marker` name only the last writer.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "stampMarkerSig",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": null,
+   "reason": "stampMarkerSig refuses `layer`/`location`/`marker`/`at` as field names, reads the marker, and writes `{ [key]: sig }` through writeMarkerMetaRecord — same pool, same sub-bucket-keyed putPoolDoc, marker file untouched. A second stamp under the same field still replaces the first in the record (`next[key] = value` in the merge), but the earlier receipt survives as a resource and as a `receipts:prune` member, so nothing is lost.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/layer-committer.drone.ts",
+   "symbol": "LayerCommitter.#commit — the create-reset branch",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": null,
+   "reason": "The `d.kind === 'name' / op 'add'` branch now does only `const cellSig = await history.latestMarkerSigFor(cellLocSig, d.cell); machine.apply({ slot: 'children', op: 'append', sig: cellSig })` — no `commitLayer(cellLocSig, { name })`, no `fresh` hydrate in #importTree either (`LayerMachine.fromLayer(prevLayer, ancestorName, segments)` always). create-links-head.spec.ts mechanically pins both sites and the absence of `cell:fresh`. latestMarkerSigFor mints the empty marker only for a genuinely new name on a warm parent chain, which is the create case, not a reset.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "writeRecord — the record file",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": null,
+   "reason": "No `writeRecord`, `listRecordSigs`, `resolveDeltaRecord` or `hydratedStateAt` remains in history.service.ts, and history/delta-record.ts and delta-reducer.ts do not exist (`ls` fails). Only stale string IoC-key constants survive in essentials-keys.ts (`DeltaRecord`, `HydratedState` in the `_root` census object) — cosmetic, not an import.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "writeRecord — the numeric marker",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": null,
+   "reason": "Deleted with the same function. The comment above `replay` now states it: '`record()` — the legacy op-log WRITER — is deleted … the committer is the sole bag writer'. purgeNonLayerFiles still classifies bare-sig marker content as droppable, which is now only a legacy drain, never a collision with a live writer.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/hive-participant.ts",
+   "symbol": "HiveParticipant.#commitParticipant",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": null,
+   "reason": "The file is gone (`ls hypercomb-essentials/src/history/hive-participant.ts` fails; git log shows it removed in 55c39ff6c 'the orphaned participant base goes'), and no importer remains — notes.drone.ts:99 states 'No HiveParticipant base class'. Deliberate deletion per write-conformance.md. Only the string constant `HiveParticipant = '@history/hive-participant'` in essentials-keys.ts:566 lingers.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "commitLayer — the layer pool write",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`#signLayer` canonicalizes and hashes (`SignatureService.sign(bytes.buffer)`), then `await store.writeLayerBytes(layerSig, bytes.buffer)` runs before the marker is named or written — the pointer can never resolve to absent bytes. Additive and content-addressed; the dedup `if (lastSig === layerSig) return layerSig` precedes it.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "commitLayer — the marker append",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "Name is `markerNameOf(max(knownList)+1)` on the warm path or `#nextMarkerName`, which takes `Math.max(liveMax, await this.#archivedHighWater(locationSig))` and throws on the `null` ceiling; the write is `getFileHandle(markerName, { create: true })` of `{ layer: layerSig }` and never rewrites. `locationSig` is an argument, so the payload never chooses the address.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "commitLayer — virtual-seed materialization",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "Guarded by `seeded && seeded !== layerSig`, names the marker through the same markerNameOf/#nextMarkerName pair and `throw`s on a null name, writes `{ layer: seeded }` whose bytes are already pooled (the parent-carried layer), and the try/catch leaves the real commit correct on failure.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "#ensureEmptyMarker",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`getFileHandle('00000000', { create: false })` probe → return if present; otherwise pool-writes `sha256(canonicalizeLayer(emptyLayer(name)))` first, then writes the pointer record, and drops `#layerListCache` because the marker set changed outside the append path. Idempotent, never overwrites.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "#canonicalArtifactReferences → putResource",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "materialize writes the exact envelope bytes and verifies the address the store returned: `if (written !== record.sig) throw new Error('metadata write mismatch …')`; `healed.incompatible.length > 0` throws rather than guessing. Runs inside #signLayer, i.e. at every write boundary and never on a read.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "sealSubtree — internal node pool write",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`#signLayer({ ...head, children: sealedChildren })` then `#poolWriteLayer(sig, bytes)` — no marker, no `#setHead`, no history entry; memoised by `${headSig}|${sealedChildren}` and by treeEpoch. `activeLayers` is a recursion-stack guard keyed by resolved layer sig (added before the try, deleted in `finally`), so a repeated sibling is not a cycle. Note the writes are triggered from navigation via publish-status.drone.ts:541, which is fine because they are additive and content-addressed.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "sealSubtree — leaf materialization",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`if (sealedChildren.length === 0) { if (headSig) return remember(headSig); const leaf = await #signLayer(head); await #poolWriteLayer(leaf.sig, leaf.bytes) }` — a known head is reused, an unknown one is re-signed through the same canonicalization the commit used, so it cannot fork.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "materializeLayer",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "Three lines: `#signLayer(layer)`, `#poolWriteLayer(sig, bytes)`, cache seeds. No marker, no head. The off-lineage-hint cost is arbitrated downstream by chooseSealChildHandle, as the census said.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "#opportunisticMigrateMarker",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "Idle-scheduled; `await store.writeLayerBytes(layerSig, bytes)` completes before the marker is rewritten as `{ layer: layerSig }`, and it fires only when `extractLayerSigFromMarker` reports `isPointer === false` (pure inline layer JSON, which hashes to layerSig), so no annotation field can be dropped. Doctrinal tension to record rather than a check failure: history/marker-meta.ts now states 'No marker is rewritten to migrate — data never heals', while this read-path rewrite (from listLayers and latestMarkerSigFor) still rewrites marker files in place.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "getBag — empty-content collision repair",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "Fires only when `signature === sha256(new ArrayBuffer(0))`, only on `DOMException` named `TypeMismatchError`, and only after `(await collision.getFile()).size !== 0` is false — a zero-byte file at sha256('') is by definition re-mintable from nothing. Logs the repair.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "purgeNonLayerFiles / #quarantineNonLayerFiles",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`const shared = await hardDeleteVetoFor(bag); if (shared) { warn; return }` precedes any removal; the loop `if (!MARKER_RE.test(name)) continue` leaves every 64-hex file alone; a marker is kept when its content is a `{layer:<sig>}` pointer or inline JSON with `typeof parsed.name === 'string'` (empty allowed for the root). Only reachable from /flatten.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "removeEntries",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "Per name: `if (classifyDirectoryEntry(filename) !== 'marker') { warn; continue }` before `bag.removeEntry(filename)`; on any removal it drops head, seed, husk memo, list cache and schedules the head persist.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "archiveEntries — copy into sign('temporary'), then remove",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`if (!archive) return 0`; per name the same marker guard as removeEntries; pool key is the layer sig from `extractLayerSigFromMarker` (which always yields a sig — it hashes legacy bytes — so the positional fallback is unreachable), presence-checked before copy, then `bag.removeEntry(filename)`. Nit: a legacy pointer marker carrying in-marker `label`/`marked` fields is deduped away by name if a plain `{layer}` marker for the same sig was archived first, losing only that legacy annotation from the archive.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "archiveEntries — high-water bucket write",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "Before any removal: `peak` over marker-classified names, then `bucket = #highWaterBucket(locationSig, true)` under `sign('history:high-water')/<locationSig>/` (colon meaning, registered in pool-registry.ts:231) and `bucket.getFileHandle(markerNameOf(peak), { create: true })`. `#nextMarkerName` reads it via `#archivedHighWater`, so the sequence cannot rewind. `Number(name)` is applied only after the marker-shape classification — the sanctioned derivation, not a check-9 parse.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "removeContentSigs",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`await root.getFileHandle(sig, { create: false })` in its own try/catch → `continue` on failure, so a sig-named directory (TypeMismatchError) is never reached by the `root.removeEntry(sig)` that follows; both caches are dropped per removal.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "removeLineageBag",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "Two gates before `root.removeEntry(sig, { recursive: true })`: `isPoolAddress(sig)` to name the refusal, then `hardDeleteVetoFor(bag)` which (directory-safety.ts) returns a reason for any member, bucket or foreign entry and fails closed when the directory cannot be enumerated. Check 8 satisfied literally.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "#copyBagInto",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`try { await dst.getFileHandle(name, { create: false }); continue } catch { /* copy */ }` — never overwrites; a `__temporary__` subdir is absorbed, any other subdir skipped; per-entry try/catch. The name-only skip is now harmless for GC because #dirShadowed compares bytes.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "#absorbTemporaryDir",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "Per file: presence probe in the pool by name, copy if absent, then `dir.removeEntry(name)`; non-file entries are skipped so they block the final NON-recursive `parent.removeEntry('__temporary__')`, which fails (caught) until the dir is empty. Pool names are layer sigs, so name presence implies content identity for pointer and inline markers alike.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "#temporaryPool",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "Opens `store.getPool('temporary')` (registered derivation) or derives sha256('temporary') by convention; creates only. Open doctrine item stands: 'temporary' is a bare word seeded in pool-registry.ts:69 but absent from the seven-pool register at hypergraph-molecule-lineage.md:484, and it shares its address with a root tile named `temporary` — safe today only because removeLineageBag/purge consult the veto.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "getBag",
+   "censusClassification": "legacy-conforming",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`await this.#promoteBag(signature)` then `hiveRoot.getDirectoryHandle(signature, { create: true })`; the address is `sign(lineageKey(segments))` from `sign()`, one hash from the root. Path-keyed by design and explicitly preserved by the doctrine until the sign(name) forward commit lands.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "#promoteBag",
+   "censusClassification": "legacy-conforming",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "Collects every legacy source and the raw-key alias bag with `create: false`, creates the root bag only `if (sources.length > 0)`, and unions through #copyBagInto — adds only, leaves the raw bag in place, memoises per session and does not memoise when the store is not ready.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "gcLegacyHistory — root bag creation",
+   "censusClassification": "legacy-conforming",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`hiveRoot.getDirectoryHandle(name, { create: true })` for a 64-hex legacy bag name followed by the union copy — additive; the removal that follows is now byte-gated (see the gcLegacyHistory verdict).",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "#flushHeadIndex",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`buildFlushIndex(existing, #latestSigByLineage, #headStamp, #headOwned, #headDropped)` merges only session-derived lineages into the stored map; `#restoreHeadIndex` puts every restored entry into `#headUnvalidated`, and latestMarkerSigFor calls `#validateRestoredHead` before trusting one, so nothing load-bearing is minted. It is a localStorage write and therefore sits in the doc's frozen 'participant state outside the graph' list — an owner decision, not a pool record, so checks 6/7 do not apply literally.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/history.service.ts",
+   "symbol": "commitLayer — EffectBus.emit('content:wrote')",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "host-sync.service.ts's constructor handler is `EffectBus.on('content:wrote', ({sig,kind,bytes}) => { if (!this.#anyEnabled()) return; void this.enqueue(...) })`, gated on the explicit opt-in keys `hc:host-sync:enabled` / `hc:public-host`; write-conformance.md records the passive-replication queue as now gated on the same predicate. Nothing leaves the machine on a commit without a participant gesture.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/layer-committer.drone.ts",
+   "symbol": "LayerCommitter.#commit — the leaf commit",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "Address is bound in `CommitMachine.#addressed` at enqueue and `#commit` refuses `req.segments === null` with a console.error; hydrates `LayerMachine.fromLayer(prevLayer, ancestorName, sub)` from `latestMarkerSigFor`, applies exactly one delta, and calls `history.commitLayer(ancestorLocSig, machine.output())` once. Rewound cursor and active preview both return before any write.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/layer-committer.drone.ts",
+   "symbol": "LayerCommitter.#importTree",
+   "censusClassification": "break-apart",
+   "verdict": "refuted",
+   "correctedClassification": "deviation",
+   "check": 5,
+   "reason": "The ordering, rewound/preview refusals and NUL-escaped path key are as the census describes, but the per-update slot loop is `for (const [slot, raw] of Object.entries(update.layer)) { if (slot === 'name') continue; if (!Array.isArray(raw)) continue; … }` — the same coercion the 2026-09-04 fix removed from update(); scalars in an import payload are silently discarded and there is no `scalars` channel on this surface. The machine keeps the scalars of the location's OWN prior head, so an edit at an existing location survives, but a pasted/adopted layer carrying a scalar child pointer (`cells: <sig>`) lands at a fresh location whose head has none and commits without it — check 5 on the bulk write surface.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/layer-committer.drone.ts",
+   "symbol": "#resolveChildName / chooseChildSig",
+   "censusClassification": "break-apart",
+   "verdict": "refuted",
+   "correctedClassification": "unclear",
+   "check": null,
+   "reason": "Correct and load-bearing as a guard — `chooseChildSig({ resolvedSig, resolvedBare, priorSig, priorBare })` keeps the prior only when a bare husk would replace a live child — but it performs no write (latestMarkerSigFor's own minting is that function's site, not this one). The census's own fifth class is 'unclear (no write at all)', so it should not be counted among conforming writes.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/layer-machine.ts",
+   "symbol": "LayerMachine.commit",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`if (!this.#segments) throw …; const locationSig = await history.sign(...); return history.commitLayer(locationSig, this.output())` — and output() now emits `#scalars` first, so the defect the census deferred to fromLayer is closed here too.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/layer-machine.ts",
+   "symbol": "LayerMachine.apply — the 'set' op",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`[...new Set(delta.sigs)]` collapses duplicates in order, `same` short-circuits, an empty incoming list deletes the slot (sparse invariant). The preceding `this.#scalars.delete(delta.slot)` is the documented explicit replacement of a scalar by a list.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/hive-participant.ts",
+   "symbol": "HiveParticipant.#commitParticipant — body resource",
+   "censusClassification": "break-apart",
+   "verdict": "cannot-locate",
+   "check": null,
+   "reason": "hive-participant.ts no longer exists; write-conformance.md records the class as deleted deliberately on 2026-09-04 ('no subclass and no importer but the generated barrel'), and notes.drone.ts:99 confirms no base class remains. Nothing to adjudicate.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/hive-participant.ts",
+   "symbol": "HiveParticipant.upsert / remove → committer.update",
+   "censusClassification": "wrap-up",
+   "verdict": "cannot-locate",
+   "check": null,
+   "reason": "Same deleted file (git: removed in 55c39ff6c). The committer's docblocks at layer-committer.drone.ts:194/495/531 still name HiveParticipant as a caller — stale comments only.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/prune.service.ts",
+   "symbol": "PruneService.#purge — bag removal",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "Step 2 runs `history.removeLineageBag(bagSig)` per branch node (skipping `node.segments.length === 0`, the root) BEFORE step 3's `referencesOutside`, for the reason the comment states; every removal still passes removeLineageBag's registry + hardDeleteVetoFor gates, so the ordering cannot widen what is destroyed.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/prune.service.ts",
+   "symbol": "PruneService.#purge — content removal",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`const shared = references.authoritative ? references.found : new Set(allCandidates)` with a console.warn on the non-authoritative branch, then `removeContentSigs(purgeable)` (files only). referencesOutside now skips wipe-safe members whole (`if (!creditsNames) continue`) per the 2026-09-04 fix, and counts oversized or unreadable entries against authority.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/prune.service.ts",
+   "symbol": "PruneService.#writeReceipt — pool member",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`sig = await store.putResource(blob, { emit: false })` (so no content:wrote publish enqueue), then `pool.getFileHandle(sig, { create: true })` under `PRUNE_RECEIPTS_MEANING` = 'receipts:prune' (colon meaning, pool-registry.ts:308) with the same bytes — name is the content; the pool write is try/catch because the resource is the durable copy; the head stamp goes through stampMarkerSig into the marker-meta record.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/pruned-tiles.ts",
+   "symbol": "collectPrunedTiles / collectBranchNodes",
+   "censusClassification": "wrap-up",
+   "verdict": "refuted",
+   "correctedClassification": "unclear",
+   "check": null,
+   "reason": "Pure readers — `src.readLayer`, `childSigsOf`, in-memory maps; the only side effect is `src.yieldNow()`. The `liveNames` handling (`if (!layer) continue` leaves liveNames at the last READABLE revision) is correct as the census credits it, but a site with no write belongs in the census's 'unclear (no write at all)' bucket, not in the conforming-write tally.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/commands/flatten.queen.ts",
+   "symbol": "FlattenQueenBee.execute → commitLayer",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "Scoped to `cursor.state.locationSig`; `purgeNonLayerFiles` (veto-gated) → `archiveEntries(locationSig, entries.map(e => e.filename))` (marker-only, high-water written first) → `history.commitLayer(locationSig, headContent)`; archiveEntries drops the head so the dedup cannot short-circuit, and #ensureEmptyMarker re-plants 00000000. The step-3/step-4 comments remain stale as the census noted.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/collapse-history.queen.ts",
+   "symbol": "CollapseHistoryQueenBee.#collapse — cursor keys",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`if (key?.startsWith('hc:history-cursor:')) localStorage.removeItem(key)` — prefix-scoped to this subsystem's own keys, re-derivable (absent cursor = head), nothing signed.",
+   "area": "commit"
+  },
+  {
+   "file": "hypercomb-essentials/src/history/undo.queen.ts",
+   "symbol": "UndoQueenBee.step / RedoQueenBee.step",
+   "censusClassification": "wrap-up",
+   "verdict": "refuted",
+   "correctedClassification": "unclear",
+   "check": null,
+   "reason": "`step()` is `cursor.undo()` / `cursor.redo()` and the loop now awaits each walk and stops when `cursor.state.position` does not move — still zero writes, only an `activity:log` emit. Correct behaviour, but by the census's own definition a no-write site is 'unclear', not a conforming wrap-up.",
+   "area": "commit"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/passive-replication-queue.ts",
+   "symbol": "PassiveReplicationQueue.#complete → replication.replicate",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": 10,
+   "reason": "`#dispatchOne` now evaluates `this.#allowed()` before `this.#currentGenome(...)` and returns on false ('No opt-in, no work'); `createDefaultPassiveReplicationQueue` binds `allowed` to `hostSync?.isEnabled?.() === true`, the same ENABLED_KEY + self-domain predicate host-sync's own self-domain target uses, and `publish-gesture.spec.ts` ratchets the ordering. The doc's second half ('restrict to .public inventory') was not added, but is not owed: host-sync's self-domain target is declared `publicOnly: false` in `#targets()`, so the whole tree is that channel's contract; `enqueueCurrentGenome` still bumps a localStorage counter on every commit, which is durable local intent, not a departure of bytes.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/published-pools.ts",
+   "symbol": "probePublishedPool → handler.accept(record, origin)",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": 10,
+   "reason": "`probePublishedPool` no longer calls `handler.accept`; verified, intake-admitted members are pushed into the in-memory `offers` map and `published-pools:offered` is emitted. `placeOffers` is the only call site of `handler.accept(` in the module, `EffectBus.on('domain:learned')` only calls `probeDomain`, and `publish-gesture.spec.ts` proves `placeOffers(` has exactly one caller: `sharing/offers.view.ts` (`place: (origin, meaning) => placeOffers(origin, meaning)`). The probe itself is still automatic on `domain:learned`, but it is a conditional GET that writes nothing.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/host-sync.service.ts",
+   "symbol": "HostSyncService.ensureSwarmTarget",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": 10,
+   "reason": "The body is now `if (this.#anyEnabled()) return 'ready'; if (optedOut) return 'opted-out'; EffectBus.emit('host-sync:needs-target', ...); return 'needs-host'` — no call to `enablePublicHost` and no localStorage write. The one caller (`swarm.drone.ts` `mesh:public-changed` handler) reacts to `'needs-host'` with a `toast:show` naming `/use-live-relay` and the hosts panel as the yes. Ratcheted by `publish-gesture.spec.ts` ('joining a swarm never provisions a third-party host').",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/hive-link.ts",
+   "symbol": "BRIDGE_FORBIDDEN_ROOT_KEYS",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": 10,
+   "reason": "The gate is inverted to an allow-list: `bridgeMaySetRootKey(key)` returns true only for `install:` + `/^[a-z][a-z0-9-]*$/`, and `claude-bridge.worker.ts#hiveRootSet` refuses on `!bridgeMaySetRootKey(key)` before calling `setHiveRoot`. `BRIDGE_FORBIDDEN_ROOT_KEYS` is kept as named examples and now lists both `VOCABULARY_ROOT_KEY` and `HIVE_FORMAT_ROOT_KEY`; `hive-link.spec.ts` asserts `bridgeMaySetRootKey(HIVE_FORMAT_ROOT_KEY) === false` and `vocabulary-publish.spec.ts` asserts the worker uses the allow-list and no longer references the deny-list.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/host-sync.service.ts",
+   "symbol": "const CHILD_SLOTS (local copy)",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": null,
+   "reason": "The local literal is gone: host-sync imports `CHILD_SLOTS` from `@hypercomb/core` and derives `const CHILD_SLOT_SET: ReadonlySet<string> = new Set(CHILD_SLOTS)`, which `markPublic`, `#enqueueLayerRefs`, `#closureReceiptedUncached` and `metaIsChildIncidence` all consult. `history/active-genome.ts` and `commands/website-archive.queen.ts` take the same shape from the core import, and `history/child-slots.ratchet.spec.ts` exists to hold it.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/swarm.drone.ts",
+   "symbol": "SwarmDrone.#onResourceEvent → store.putResource(blob)",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": 1,
+   "reason": "`#onResourceEvent` now computes `actual = await SignatureService.sign(bytes)` and returns on `actual !== sig` ('discarded unwritten') before any write; the write that follows is `store.putResource(new Blob([bytes]), { emit: false })`, so a peer's atom never triggers this participant's `content:wrote` publish path. `swarm-resource-arrival.spec.ts` ratchets both the hash-before-put order and the `emit: false` literal.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/nostr-mesh.drone.ts",
+   "symbol": "NostrMeshDrone.publishEvent",
+   "censusClassification": "unclear",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "The method still exists with the pass-through `const signed = (evt.id && evt.pubkey && evt.sig) ? evt : await this.trySign(evt)` feeding `sendEventToAll`, and a grep of essentials for `publishEvent\\b` finds only its definition — no caller, so no live write. The doc lists it under 'None' with 'Fix: delete'; that deletion has not happened, so the classification stands as dead-but-armed.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/publish-branch.ts",
+   "symbol": "publishBranch — const key = lineageKey(segs)",
+   "censusClassification": "legacy-conforming",
+   "verdict": "confirmed",
+   "check": 4,
+   "reason": "`const key = lineageKey(segs)` is still the literal folded path used as the map key in `{ ...existing, [key]: sealed }` and in `PublishRecord.lineageKey`; the reader side (`fetchHiveIndex`, the host worker) parses exactly that shape and `collidingPaths` in publish-heads.ts owns the fold collision. Correct wire format, not the shape a new address would take.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/swarm.drone.ts",
+   "symbol": "#syncForCurrentLineage — sigStore.signText(`${pathKey}\\0${room}\\0${secret}`)",
+   "censusClassification": "legacy-conforming",
+   "verdict": "confirmed",
+   "check": 4,
+   "reason": "`#syncForCurrentLineage`, `composeSigForSegments`, `#publishSubtree` and `#wipeSubtree` all derive the rendezvous as `signText(`${lineageKey(segments)}\\0${room}\\0${secret}`)` — the NUL-separated private half of the doctrine formula with a route key rather than a molecule as its first term. A capability gap (no reach-by-word), not a corruption; it is also gated behind room+secret and `hc:mesh-public`.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/publish-branch.ts",
+   "symbol": "publishBranch — putHiveManifest(indexHost, roots)",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": 10,
+   "reason": "Both callers are gestures (`host-gesture.ts` share sheet, `publish-status.drone.ts` panel button); the PUT is refused unless `isClosureAvailable` returned true inside the deadline (`not-available`) and unless `fetchHiveIndex` returned `ok` or an honest 404 (`index-unsafe`), so the whole-map rewrite is always based on a schnorr-verified read. One caveat outside this site: step 1 calls `hostSync.enablePublicHost?.()` unconditionally, which sets the STANDING `hc:public-host` opt-in to '1' even over a prior explicit '0' — a broader switch than the one-branch gesture, and the consent `enablePublicHost` documents is not shown by this caller.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/publish-branch.ts",
+   "symbol": "unpublishBranch — delete roots[key] then putHiveManifest",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": 2,
+   "reason": "`unpublishBranch` returns `index-unsafe` on any read that is not `ok` (a 404 short-circuits to `removed: false`), copies the verified roots, deletes exactly `roots[key]`, and only then PUTs; the map it rewrites was verified against the participant's own pubkey by `fetchHiveIndex`. The doc comment states the honest limit (advertising stops, the closure stays hosted).",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/publish-branch.ts",
+   "symbol": "publishBranch — store.putResource(encodeHiveLinkBundle(bundle))",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": 1,
+   "reason": "`encodeHiveLinkBundle` serialises a fixed-order object `{kind, v, segments, pubkey, hosts, rootSig?}` and omits `createdAt`; the address is whatever `putResource` hashes those bytes to, so nothing in the payload names its own location. (Because `rootSig` rides the mint, the link sig changes per head — the module says so.)",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/publish-heads.ts",
+   "symbol": "writePublishRecord",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": 1,
+   "reason": "The member is named by the sealed head sig it records (`getFileHandle(s, { create: true })`, `s` SIG_RE-checked), written in one `write` of the whole JSON, and the pool is `publish:heads`, a per-participant state pool, not a derived cache — so naming a layer sig is truth, not a prune pin. Caveat, not a failure: the write overwrites in place ('re-publishing the same head overwrites with a fresher stamp'), so publishing head X to host A and then to host B leaves only the B record and `knownRoots(A, pubkey)` forgets X.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/hive-pointer.ts",
+   "symbol": "setHiveRoot",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": 2,
+   "reason": "`setHiveRoot` refuses on `!read.ok` unless `read.reason === 'http' && read.status === 404` (the only `{}` baseline), no-ops with `reason: 'unchanged'` when `existing[cleanKey] === cleanSig`, and PUTs `{ ...existing, [cleanKey]: cleanSig }` — one key merged into a verified map. Its two callers are the bridge (now behind `bridgeMaySetRootKey`) and `molecule/vocabulary-publish.deps.ts`.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/host-sync.service.ts",
+   "symbol": "HostSyncService.markPublic",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`markPublic` returns immediately unless `#publicHostEnabled()`, writes an empty `{sig}.public` sidecar, and walks the layer: `if (metaIsChildIncidence(layer, incidence.kind) && !closure) return` for envelopes and `if (isChildSlot && !closure) continue` for array slots, so a tile-only share never marks descendant layers. The CHILD_SLOTS caveat the census filed separately is resolved by the core import.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/host-sync.service.ts",
+   "symbol": "HostSyncService.#pushAndReceipt — fetch(url, {method:'PUT'})",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": 3,
+   "reason": "`const actual = await SignatureService.sign(bytes); if (actual !== entry.sig) return 'corrupt'` precedes the network call; the URL is `${scheme}://${host}${this.#pathFor(entry.sig)}` with `#pathFor` = `/${sig}`, so `kind` never shapes the address; the receipt is written only after a `cache: 'no-store'` GET read-back returns ok. Targets come from `#targets()`, each behind its own opt-in flag.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/host-sync.service.ts",
+   "symbol": "HostSyncService.#absorbLegacy — root.removeEntry(LEGACY_PUSH_DIR)",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": 8,
+   "reason": "All three removals (`legacyPush.removeEntry(LEGACY_QUEUE_SUBDIR)`, `root.removeEntry(LEGACY_PUSH_DIR)`, `root.removeEntry(LEGACY_RECEIPTS_DIR)`) are non-recursive and are attempted only when `#absorbDir` returned true; `#absorbDir` removes each source file only after confirming the pool copy exists (`pool.getFileHandle(name, { create: false })` or a completed write) and sets `drained = false` on any non-file entry or failure. No recursive removal exists, so `directory-safety` is not owed here.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/host-sync.service.ts",
+   "symbol": "HostSyncService.#receiptStillHonored — dir.removeEntry(sig)",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": 2,
+   "reason": "The `removeEntry(sig)` loop over the receipts pool and legacy receipts dir runs only inside `if (res.status === 404)` after a HEAD to `${host}/${sig}`; `res.ok` marks verified, any other status or a thrown fetch calls `#noteProbeFailure` and returns true, keeping the receipt. The entry removed is the participant's own receipt for the sig just probed.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/swarm.drone.ts",
+   "symbol": "SwarmDrone.#publishSubtree — mesh.publish(SWARM_LAYER_KIND, …)",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": 10,
+   "reason": "`#syncForCurrentLineage` returns before any publish unless both `room` and `secret` are set and `localStorage['hc:mesh-public'] === 'true'` (`privateNow` gate); inside the walk `isCellPublic(publicLocation, c.name)` prunes private children into `prunedNames` (never recursed as publishes), and the availability gate holds back any child whose closure `isClosureAvailable` has not confirmed. `if (delivered === false)` un-stamps `#lastPublishedBySig` so a failed signing is not remembered as live.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/swarm.drone.ts",
+   "symbol": "SwarmDrone.#wipeSubtree — mesh.publish with an empty payload",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": 2,
+   "reason": "`if (!this.#lastPublishedBySig.has(sig)) return` precedes the publish, and the event is our own parameterized-replaceable slot (`['d', sig]` under our pubkey) carrying `{ visuals: [] }` — the only event it can replace is one we published. Recursion into children self-gates on the same membership check.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/swarm.drone.ts",
+   "symbol": "SwarmDrone.#publishDrillRequest — mesh.publish(SWARM_INTEREST_KIND, …, {pathSegments: share})",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`share = segments.length === 0 ? [] : this.#broadcastablePrefix(segments)` and the call returns on `segments.length > 0 && share.length === 0`; `#broadcastablePrefix` breaks at the first segment that is neither in `#foreignPathKeys` (taught by a peer) nor `isCellPublic`. It also reaches the wire only from `#syncForCurrentLineage`, which is behind the room+secret and `hc:mesh-public` gates.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/community-hosts.ts",
+   "symbol": "addCommunityHost",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": 1,
+   "reason": "`hostArtifactRecord(zone)` is `{kind, meaning, payload: {zone: hostZone(zone)}}` with no clock, `hostArtifactSig` is `SignatureService.sign(encodeRecord(zone))`, and `addCommunityHost` writes `encodeRecord(zone)` under exactly that name — the member name is the hash of the bytes written. `hostZone` folds scheme, `content.` prefix, path and case before minting.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/community-hosts.ts",
+   "symbol": "removeCommunityHost — pool.removeEntry(await hostArtifactSig(zone))",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": 2,
+   "reason": "A single non-recursive `pool.removeEntry(await hostArtifactSig(zone))` where the name is recomputed from the normalised zone, never taken from a listing; `hostZone` returning '' short-circuits before any removal. Branch marks are untouched, as the module states.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/community-hosts.ts",
+   "symbol": "setBranchHosts (drop-then-wear)",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`setBranchHosts` drops `groupSignature(host:<zone>)` marks only for zones in `current` but not `wanted`, then for each wanted zone does `dropEnrollment` + `wearEnrollment(segments, { sig, meaning, order: index })` so `order` rides the mark. Every drop is of the branch's own mark by group sig; nothing outside the branch's enrollment slot is written.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/folder-sync.service.ts",
+   "symbol": "writeFile (the one folder-write helper)",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": 10,
+   "reason": "`writeFile` is `getFileHandle(name, { create: true })` → `createWritable` → `write` → `close`; a grep of the file for `removeEntry` returns nothing, and the destination handles come only from `showDirectoryPicker` (three call sites) — an OS gesture. `deviceId` is `#loadDeviceId()`, locally minted, so the `devices/<id>/` subtree is not chosen by payload.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/published-pools.ts",
+   "symbol": "registerPublishedPool",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": 6,
+   "reason": "`registerPublishedPool` throws on a colon-less meaning and on `poolKindOfMeaning(meaning)` returning a kind with `replicates === false` (index or document), so a derived cache can never be claimed as an offer; `poolAddress` is `registerPoolMeaning(meaning)`, so a module-minted meaning enters the core registry. It writes nothing itself beyond the in-memory `handlers` map.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/head-claim-signer.ts",
+   "symbol": "signHeadClaim",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`signHeadClaim` composes the event inline from `{kind: HEAD_CLAIM_KIND, created_at, tags: [[D_TAG, molecule], ['h', head]], content}`, runs `parseHeadClaimPreimage` (the reader's gate) before asking the signer, compares the returned pubkey, and self-verifies `verifierFor(JSON.parse(JSON.stringify(signed)))` on the round-tripped bytes. Still zero non-spec callers: a grep across essentials, shared and runtime finds only its definition, the two spec files and the keys barrel — the molecule naming side remains unwired.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/hive-link.ts",
+   "symbol": "validateHiveLinkBundle",
+   "censusClassification": "wrap-up",
+   "verdict": "refuted",
+   "correctedClassification": "unclear",
+   "check": null,
+   "reason": "`validateHiveLinkBundle` performs no write at all — it returns a normalised object or null (`SLASH_RE` on segments, `HOST_RE` on hosts, `SIG_RE` on pubkey) and the module 'imports nothing'. Its guarding is correct and it is what makes check 3 hold for the publish side, but by the census's own definition a site with no write is 'unclear', not 'wrap-up'.",
+   "area": "publishing"
+  },
+  {
+   "file": "C:/Projects/hypercomb/social/src/hypercomb-essentials/src/sharing/active-genome-replication.ts",
+   "symbol": "replicateActiveGenome",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": 10,
+   "reason": "`replicateActiveGenome(replication, activeGenome, domain, sources, signal)` takes its destination from the caller and bounds the pull to the enumerated `exact` set (`limit: exact.size + 1`). It still has no callers (grep finds only the definition and the keys barrel); the live path is `createDefaultPassiveReplicationQueue.currentGenome`, which now reconstructs the same request behind the `allowed` gate — so the census's 'the one that ships has no gesture' contrast no longer holds, but the duplication of one act in two implementations does.",
+   "area": "publishing"
+  },
+  {
+   "file": "hypercomb-essentials/src/commands/translation.service.ts",
+   "symbol": "TranslationService.translateCurrentLevel — propsIndex[tileKey || tileName] = await store.putResource(updatedBlob)",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": null,
+   "reason": "The site is now `#runSweep` step 3: props are read with `readTilePropertiesAt(sweepSegments, tileName)` and written with ONE call `writeTilePropertiesAt(sweepSegments, tileName, { translations: props['translations'] })` — no props blob is minted here (the two remaining `store.putResource` calls store translated TEXT), and `PROPS_INDEX_KEY` is only ever read (legacy bare-label name enumeration in `hydrateCatalog` / `#enumerateTileNames`), never written. The fix is sound: the canonical writer canonicalizes (sorted keys), commits the `properties` slot through the committer and seeds only the lineage-keyed index entry; `translation.write-surface.spec.ts` ratchets all three properties. Minor design note, not a defect: `hadProps` gates on the EFFECTIVE (inherited) props, so a tile with no properties anywhere gets its label into the live catalog but no layer write.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-essentials/src/presentation/tiles/tile-art.ts",
+   "symbol": "setTileArt — pool.getFileHandle(key, { create: true }) where key = name.trim().toLowerCase()",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": null,
+   "reason": "`setTileArt` now writes `pool.getFileHandle(await moleculeAddress(key), { create: true })` — the member is `sign(fold(canon(name)))` from `hypercomb-core/src/core/molecule-address.ts`, a stated derivation, so checks 1 and 3 hold and the member classifies as a 64-hex member rather than `foreign`. `tileArtSig` reads `[await moleculeAddress(key), key]` in that order, so members written under the old lowercased spelling stay readable and nothing is rewritten (data never heals, address moves forward). The pool meaning `visual:tile-art` is colon-scoped and registered (pool-registry.ts:353). Sound.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts",
+   "symbol": "resolveChildNames — schedule(() => store.writeChildrenManifest(parentLayerSig, rich ?? thin))",
+   "censusClassification": "deviation",
+   "verdict": "confirmed",
+   "check": 7,
+   "reason": "Still present: after the per-child resolution, `if (parentLayerSig && store?.writeChildrenManifest && allResolved)` idle-schedules `await store.writeChildrenManifest!(parentLayerSig, (rich ?? thin))`, optionally enriching via `ManifestOptimizerDrone.buildEntries` — a derived-cache mint from the render path, not from `optimize()`. `ManifestOptimizerDrone.enqueue(parentSig, childSigs)` now exists as 'THE ONE DOOR' but show-cell never calls it; write-conformance.md records this pair as deliberately left for the session holding the file, and the doctrine.spec.ts ratchet ('derived-cache manifests are written only by ...') still lists show-cell as a writer. Everything else about the write conforms (keyed by parent layer sig, complete-or-absent, never load-bearing).",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts",
+   "symbol": "upgradeThinPack — schedule(() => store.writeChildrenManifest(parentLayerSig, rich))",
+   "censusClassification": "deviation",
+   "verdict": "confirmed",
+   "check": 7,
+   "reason": "Still present: `upgradeThinPack` (called from the manifest-hit branch when `options?.mayUpgradePack`) idle-schedules `optimizerCtor.buildEntries(childSigs, layers)` and then `store.writeChildrenManifest!(parentLayerSig, rich)` guarded by `rich.length !== childSigs.length` → return. Same failure as the site above: a second render-path writer of a record the optimize phase owns; the fix named in write-conformance.md (`optimizer.enqueue(parentLayerSig, childSigs)` and delete the build) has not landed. The one-attempt-per-session `_packUpgradeTried` set and the complete-or-absent guard are correct as far as they go.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-essentials/src/editor/tile-properties.ts",
+   "symbol": "writeTilePropsIndex — localStorage.setItem(TILE_PROPS_INDEX_KEY, JSON.stringify(index))",
+   "censusClassification": "deviation",
+   "verdict": "confirmed",
+   "check": 1,
+   "reason": "`writeTilePropsIndex` is unchanged: `localStorage.setItem(TILE_PROPS_INDEX_KEY, JSON.stringify(index))`, a per-device store outside the graph; write-conformance.md lists `hc:tile-props-index` among the five stores left open as an OWNER DECISION (not fixed), so the deviation stands by the doc's own account. Two details the census got right and are still true: the write path keys by lineage sig only (`seedLayerKeyedTileProps(lockKey, ...)` guarded by `isSignature(lockKey)`), and `lookupTilePropsSig` still falls back to `index[label]`, so a bare-label legacy entry can still be READ across same-named locations. Blast radius local: the `properties` slot is authoritative and `writeTilePropertiesAt` reads its own overrides from the layer, never from this index.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-essentials/src/notes/notes.drone.ts",
+   "symbol": "#writeNoteLayer — store.putResource(new Blob([canonicalJSON({ children, mark, note, shape, tags })]))",
+   "censusClassification": "deviation",
+   "verdict": "refuted",
+   "correctedClassification": "legacy-conforming",
+   "check": null,
+   "reason": "Against the ten checks the write conforms: `canonicalJSON(layer)` → `store.putResource` names the note by its content (1), it appends (2), the bytes do not choose the address (3), `children` is an array of sigs (5), and it is truth, not derived (6/7 do not apply). The census's finding is not one of the ten checks — it is the Life-Primitive envelope shape — and `documentation/life-primitive.md` §'Notes: the one live writer that bypasses the envelope' now records exactly this as read-compatible legacy with a DEFERRED forward path (the `notes:<sig>` facet), explicitly not an in-place fix because 'an untagged note must keep signing to the bytes it always did'. That is the definition of legacy-conforming: correct for what it is, not the shape new writes take. The absence of `ensureArtifactMeta` here is real (only tile-properties.ts:820 and artifact-content.ts mint envelopes), but it is a recorded deferral, not a defect.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-core/src/core/life-primitive.ts",
+   "symbol": "MetaEnvelope.root — 'Stable canonical grammar name, when this is a root/reference incidence'",
+   "censusClassification": "deviation",
+   "verdict": "refuted",
+   "correctedClassification": "unclear",
+   "check": null,
+   "reason": "There is no write at this site: it is a type field. `mintMetaEnvelope` does carry it when supplied (`const root = cleanRoot(fields.root); if (root) record.root = root`), and it is true that no live minter passes it (`Store.putArtifactMeta` spreads `{ ...payload, ...incidence }` and every caller's incidence is `{ relation }`; `artifact-content.ts:47` passes `{ resource, relation }`). write-conformance.md §'Life-primitive coherence' marks this RESOLVED 2026-09-04 and `documentation/life-primitive.md` §'`root` is reserved, not drifted' states the field is reserved for the molecule-transition envelope writers that have not landed — 'not a defect in either live minter'. An unset reserved field is not a deviating write; it is the census's 'no write at all' bucket.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts",
+   "symbol": "#persistLayoutMode — localStorage.setItem(`hc:layout-mode:${explorerLabel}`, mode)",
+   "censusClassification": "deviation",
+   "verdict": "confirmed",
+   "check": 3,
+   "reason": "Still present and still dead: `#persistLayoutMode` (show-cell.drone.ts ~8048) does `localStorage.setItem(this.#layoutModeKey(String(lineage?.explorerLabel?.() ?? '/')), mode)` — a raw human path as a storage-key segment — and `#readLayoutMode(_locationKey)` ignores its argument and returns 'pinned'. A grep of the file finds the definition at 8048 and no caller anywhere, so the blast radius is none; write-conformance.md lists it under 'None' with *Fix: delete*, not done. Classification stands, ranking (none) stands.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-essentials/src/editor/viewport-store.ts",
+   "symbol": "writeViewportAt — dir.getFileHandle(await locationSig(segments), { create: true })",
+   "censusClassification": "legacy-conforming",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`writeViewportAt` writes `dir.getFileHandle(sig, { create: true })` where `sig = await locationSig(segments)` = `history.sign` of the path (root spelled '/'), into the `sign('viewport')` pool — path-hashed addressing that check 4 says to note as legacy, not a defect; 'viewport' is registered as a bare-word `document` pool (pool-kinds.ts:165, pool-registry.ts:72). The clear branch refuses unless `classifyDirectoryEntry(sig) === 'member'` before a single non-recursive `dir.removeEntry(sig)`, with the correct comment that the bare word is also a tile's molecule. The module states why viewport stays out of the layer. Correct for what it is.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-essentials/src/assistant/llm.queen.ts",
+   "symbol": "submitAsk / submitChat — store.putOptimization(new Blob([JSON.stringify(record)]))",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`Store.putOptimization` (store.ts ~1226) signs the bytes and writes `this.optimization.getFileHandle(signature, { create: true })` — content-named (1), append-only with an exists-short-circuit (2). The pool is documented in store.ts:105-127 as the 'persistent decoration substrate' holding Q&A and comms, and optimize-phase.md names only `sign('manifests')` / `sign('visual-optimization')` as derived-cache pools, so this is truth in a truth pool and check 7 does not apply. `composeContext` caps the context list at `CONTEXT_SIG_CAP = 64` and rides `contextTruncated` when it bites. Wrap-up, as classified.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-essentials/src/assistant/chat-thread.ts",
+   "symbol": "deleteConversation — for (const entryName of own) await bucket.removeEntry(entryName); await pool.removeEntry(name)",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "The current `deleteConversation` enumerates the `sha256(convoId)` bucket, requires every file to parse as `chat-turn` / `chat-archived` / `chat-goal-reached` naming this convoId (unreadable = unproven = return false), admits exactly one subdirectory (`STEP_LEDGER_NAME()`) and only after `provedLedgerEntries` proves every record inside, then removes the proven names one by one and finally `pool.removeEntry(name)` with no `recursive` anywhere — a removal of a named set the caller proved is its own (check 2), and nothing recursive to consult directory-safety for (8). `appendTurn` names each turn by `sha256` of its own JSON and pushes the text to a root resource. Conforming as classified; the one soft spot is `parsed?.convoId === undefined` counting as ours, which only a record with no convoId and one of the three kinds could exploit.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-essentials/src/commands/sweep.queen.ts",
+   "symbol": "SweepQueenBee.execute — await root.removeEntry(v.name, { recursive: v.kind === 'directory' })",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "Classification confirmed but the census's reasoning was wrong on check 8: this recursive removal DOES consult directory-safety — `isLegitName` calls `classifyDirectoryEntry(name, kind === 'directory')` from `hypercomb-core/src/core/directory-safety.ts`, which is exactly what the doctrine.spec.ts ratchet ('a recursive directory removal consults directory-safety') accepts, and its comment records that sweep.queen.ts was REMOVED from the allowlist for that reason. Beyond the classifier, nothing is removed until `copyFileVerified` / `copyDirVerified` confirm the quarantine copy (byte-length only, as the census caveat says). The 4-hex `LEGACY_MARKER_RE` allowance and the `__x__` / `hypercomb.io` / `overrides` / `translations` / `.crswap` keep-list are all stated. Conforming.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-essentials/src/presentation/tiles/thumbnail-optimizer.drone.ts",
+   "symbol": "ThumbnailOptimizerDrone.optimize — await writeThumbnail(store, sig, bytes)",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "The only write is inside `public override optimize = async ()` (check 7); `writeThumbnail` (thumbnails.ts:57-65) writes `pool.getFileHandle(imageSig, { create: true })` in `sign('thumbnails:hex')`, keyed by the SOURCE image signature and seeded `index` (wipe-safe) in pool-kinds.ts:133; the bytes are a webp so the record holds no layer signatures (6); `if (!bytes) continue` and `readThumbnail` short-circuit make it complete-or-absent and idempotent; `#attempted` stops retry storms. Reference implementation, as the census says.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-essentials/src/commands/decoration-manifest.ts",
+   "symbol": "writeDecoration — const sig = await store.putResource(blob); commitDecorationDelta({ op: 'append' })",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`writeDecoration` builds `{ kind, appliesTo, payload, mark?, refs? }`, content-addresses it with `store.putResource` (1), and appends the sig to the cell's `decorations` slot through `commitDecorationDelta` (2), with the emit-then-revert pattern restoring the read model on failure. `refs` is `collectSigsDeep(payload)` ∪ declared, omitted for `kind === 'group'` with the reason stated. `replaceDecoration` removes only priors returned by `listDecorations({ kind, segments })` — matched on kind at that location — and leaves superseded JSON at the content root. Conforming door for every caller the census names.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-essentials/src/commands/canonical-reference.service.ts",
+   "symbol": "#retainVariant — pool.getDirectoryHandle(sign(name)) then bucket.getFileHandle(recordSig)",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`#retainVariant` mints the variant record with `store.putResource(..., { emit: false })` (no publish without a gesture, 10), opens `store.getPool('canonical:variants')` — colon-scoped and reserved in pool-registry.ts:224 — then a sub-bucket `SignatureService.sign(name)` derived via the signer directly so it is NOT registered as a pool meaning, and writes the record under its own `recordSig` (1). Nothing is removed at the old bare-name address. Wrap-up as classified; this is the corrected pattern the tile-art fix now also follows.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-essentials/src/commands/website-archive.queen.ts",
+   "symbol": "import pass 2 — if ((await sha256Hex(e.bytes)) !== m.sig) refuse; else store.writeLayerBytes(sig, ab)",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "Pass 1 classifies every entry (legacy `__x__` dirs, derived `beesPool`/`depsPool` addresses compared against locally computed `poolSig(...)`, flat sigs typed by the manifest's `layers` array; unknown pool → `null`, skipped) and on any `sha256Hex(e.bytes) !== m.sig` returns before a single write; pass 2 lands `writeLayerBytes` (which now hashes and refuses per write-conformance.md) / `putResource(..., { emit: false })` / `writeBeeDep` only from the verified `toLand` list. The branch name is re-read from the landed root layer and rejected on `/[\\\\/\\x00-\\x1f]/`. The one unverified path is `writeBeeDep`, which trusts the already-verified sig and writes `<sig>.js` best-effort — acceptable since verification precedes it. Conforming.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-essentials/src/assistant/visual-distribution.ts",
+   "symbol": "distributeVisual — replaceDecoration(frame) -> ensureSiteArtifact -> per part: seat, cropRegion, putResource, writeTilePropertiesAt",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "Order in the current code is frame (`replaceDecoration({ kind: DIVISION_KIND, ... })`) → relation (`ensureSiteArtifact`, a mark the whole wears) → per part `seat(partSegments, group.sig, group.meaning, k)` then `isParticipantImage(own)` skip, `cropRegion`/`drawDerived` → `store.putResource(bytes)` → `writeTilePropertiesAt(wholeSegments, part, { large, small, substrate: undefined, index? })`. Each part ends as its own artifact carrying its own picture through the canonical writer; no parent container is written; `dressParts` deliberately writes no frame when nothing was divided. Break-apart as classified.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-essentials/src/clipboard/clipboard.worker.ts",
+   "symbol": "writeMeta / clearClipboard — store.putPoolDoc(store.clipboard, bytes, META_SUBKEY)",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`clearClipboard` is `await writeMeta(store, { items: [] })` plus two literal-name legacy removals (`__meta__`, `__meta__.tmp`) — a write, not an enumeration. `writeMeta` calls `store.putPoolDoc(store.clipboard, bytes, 'clipboard-meta')`; in store.ts:243-290 the subKey opens `sign(subKey)` as the target, the new member is written under `sign(bytes)` BEFORE any sibling drops, and the sibling sweep runs only on `proven = !!subKey || colon-meaning` AND a clean `documentSweepVetoFor(target)`, otherwise it warns and returns the sig. Check 2 honoured by positive proof of ownership; conforming as classified.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-essentials/src/pheromones/enrollment-acts.ts",
+   "symbol": "wearEnrollment / toggleSiteArtifact / ensureSiteArtifact",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`wearEnrollment` is one `writeDecoration({ kind: ENROLLMENT_KIND, payload: { sig, meaning, order? } })` on the member; `toggleSiteArtifact` / `ensureSiteArtifact` put the identity record via `replaceDecoration` AND wear the same membership mark ('naming a set means belonging to it'); `dropEnrollment` removes only decorations whose `payload.sig` equals the group asked about; `nextOrderIn` derives order from `enrolledCells` — no counter anywhere. `groupSignature(relationMeaning(family, name))` keeps `site:x` and `gallery:x` distinct. Nothing touches any other tile. Wrap-up as classified.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-essentials/src/presentation/tiles/tree-insight.ts",
+   "symbol": "writeCatalog — store.putPoolDoc(pool, JSON.stringify(catalog))",
+   "censusClassification": "wrap-up",
+   "verdict": "fixed-since",
+   "check": null,
+   "reason": "The write is unchanged and conforming for a document pool: `store.putPoolDoc(pool, buffer)` with no subKey on the colon-scoped meaning `insights:catalog` (registered pool-registry.ts:331), so the current member is `sign(bytes)` and the sibling sweep is gated by the colon proof + `documentSweepVetoFor`. The separately listed FIXED item — the pool being seeded `index` (wipe-safe) while holding hand-authored layer sigs in `calls`, which would have made it a derived record holding layer signatures (check 6) — is present: pool-kinds.ts:158 now reads `['insights:catalog', 'document']`. The owed break-apart (one document rewrites every insight) remains an observation, not a check failure.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-essentials/src/assistant/claude-bridge.worker.ts",
+   "symbol": "#decorationAdd — markAuthored(htmlSig)",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`#decorationAdd` still mints `{ kind, appliesTo, payload, mark?, refs? }` via `store.putResource`, derives `refs` from `collectSigsDeep(payload)` (excluding `group` and `creation` kinds) plus the HTML body's `extractPageRefSigs`, and commits through `commitSlotSet` — conforming. The flagged clause is unchanged: `markAuthored(htmlSig)` (authored-sigs.ts:98) takes the request's `payload.htmlSig` verbatim, adds it to a localStorage allow-set and `syncToPool`, so any sig the bridge names becomes 'locally authored' for `feature-availability.isLocallyAuthored`. As the census says, the bridge is the participant's own trusted process, so this widens no boundary; it stays a note, not a deviation.",
+   "area": "features"
+  },
+  {
+   "file": "hypercomb-shared/core/name-registry.ts",
+   "symbol": "NameRegistry.#writePointer",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": 1,
+   "reason": "`#writePointer` no longer exists anywhere in the tree; `NameRegistry.#save` calls `writeRegistryDocument(store, 'registry:names', this.#names)` (registry-document.ts:104-114), which signs the bytes and writes them via `putPoolDoc` into the colon-scoped `registry:names` pool (reserved in pool-registry.ts:381, seeded `document` in pool-kinds.ts:162). The member name is sha256(bytes), the sweep runs only under putPoolDoc's proof+veto pair, and the old `names-master` pointer is read-fallback only (`legacyPointer`, never written). Sound.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-shared/core/tag-registry.ts",
+   "symbol": "TagRegistry.#writePointer",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": 1,
+   "reason": "Same writer as names: tag-registry.ts:121 `writeRegistryDocument(store, TAGS_REGISTRY_MEANING /* 'registry:tags' */, this.#tags)`; `LEGACY_MASTER_KEY = 'tags-master'` (line 18) is passed only to `readRegistryDocument` as a fallback. No pointer write remains.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-shared/core/interest-registry.ts",
+   "symbol": "InterestRegistry.#writePointer",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": 1,
+   "reason": "interest-registry.ts:331 `#save` calls `writeRegistryDocument(store, 'registry:interests', this.#file)`; the per-interest mark lists are separate content atoms written with `store.putResource` (#putMarks, line 320-327) and referenced from the document by sig, which is the correct composition shape. `interests-master` (line 79) is read-fallback only.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-shared/core/bouquet-registry.ts",
+   "symbol": "BouquetRegistry.#writePointer",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": 1,
+   "reason": "bouquet-registry.ts:193 `writeRegistryDocument(store, 'registry:bouquets', this.#bouquets)`; `bouquets-master` (line 39) survives only as the `legacyKey` argument to `readRegistryDocument` at line 159. The four-copy duplication the census cited is gone: one writer in registry-document.ts, covered by registry-document.spec.ts.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-runtime/src/store.ts",
+   "symbol": "Store.writeChildrenManifest",
+   "censusClassification": "deviation",
+   "verdict": "fix-incomplete",
+   "check": 6,
+   "reason": "The write is unchanged (store.ts:2256-2266: member named by the parent layer sig in the `manifests` pool, body inlining child layers) and the doc's reader-side fix IS present in `HistoryService.referencesOutside` (history.service.ts:4421 `if (!creditsNames) continue` skips a wipe-safe member's name AND bytes, gated by `poolKindOfAddress` → `poolCreditsMemberNames`, with `manifests` seeded `index`). But the collector the census actually cited, `packed-collect.ts:132-146`, still credits every pool member's leaf name (`if (isSigName(leaf)) reachable.add(...)`) and every sig in its bytes (`collectSignaturesIn`) with no pool-kind consultation at all (its only import is `isSigName`), so under the packed store (`PackedStoreHost.collect`, worker:639, behind the `hc:store:packed` flag) a manifest still pins the parent and every child layer permanently.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-runtime/src/store.ts",
+   "symbol": "Store.#putOptimizedVisual",
+   "censusClassification": "deviation",
+   "verdict": "fix-incomplete",
+   "check": 6,
+   "reason": "store.ts:1308-1316 still writes the webp under the SOURCE image's resource sig in the `visual-optimization` pool (seeded `index`, wipe-safe). `referencesOutside` now skips it (history.service.ts:4421), but `packed-collect.ts:138` credits the member NAME unconditionally (`if (isSigName(leaf)) reachable.add(leaf)`), so in the packed collector the original image is still uncollectable once its thumbnail exists — exactly the harm the census described. Same one-file gap as the manifests site.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-runtime/src/store.ts",
+   "symbol": "Store.writeLayerBytes",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": 1,
+   "reason": "store.ts:1917-1921 now computes `await SignatureService.sign(bytes) !== expected` (expected = `signature.toLowerCase()`; `sign` emits lowercase hex, signature.service.ts:30) and warns + returns on mismatch before any `getFileHandle`. Callers hand exact buffers: `cacheLocal` uses `exactBuffer(bytes)` (1854, 1869) and the host write-through at 1198 passes `copy.buffer` of a fresh `new Uint8Array(bytes)` copy, so a legitimate write cannot false-mismatch on a subarray. `writeOptimizedBytes` (2226) inherits the check by delegation. Sound.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts",
+   "symbol": "resolveChildNames — idle-scheduled manifest backfill",
+   "censusClassification": "deviation",
+   "verdict": "confirmed",
+   "check": 7,
+   "reason": "Still live at show-cell.drone.ts:643-668: when `allResolved`, a `requestIdleCallback` closure calls `store.writeChildrenManifest!(parentLayerSig, rich ?? thin)` from the render path. The sanctioned door `ManifestOptimizerDrone.enqueue(parentSig, childSigs)` exists (manifest-optimizer.drone.ts:118, 'THE ONE DOOR … Nothing else writes a children manifest') and show-cell does not call it; it only borrows `optimizer.buildEntries`. doctrine.spec.ts:407-416 still allowlists show-cell as a writer, matching write-conformance.md's note that this waits on the session holding the file.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts",
+   "symbol": "upgradeThinPack",
+   "censusClassification": "deviation",
+   "verdict": "confirmed",
+   "check": 7,
+   "reason": "show-cell.drone.ts:684-716: on the read path (`mayUpgradePack` render pass), guarded by `_packUpgradeTried`, schedules an idle callback that calls `store.writeChildrenManifest!(parentLayerSig, rich)` at line 708 — a third minter of the optimizer-owned record. Unchanged since the census.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-runtime/src/store.ts",
+   "symbol": "Store.#doInit — the `pool()` helper",
+   "censusClassification": "deviation",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "store.ts:455-478 still defines `pool = meaning => opfsRoot.getDirectoryHandle(await Store.poolSignature(meaning), { create: true })` and opens bees/dependencies/clipboard/threads/computation/manifests/optimization/overrides/translations eagerly on every boot — nine bare-word molecule addresses minted as directories whether or not anything is stored. write-conformance.md records this as DEFERRED (54 non-optional handle readers; colon migration is the real fix), which matches the code: no numbered check fails at this site by itself, the census's framing is accurate.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-essentials/src/tutorial/tutorial-provenance.ts",
+   "symbol": "writeTutorialRecord / locationKey",
+   "censusClassification": "deviation",
+   "verdict": "fix-incomplete",
+   "check": 4,
+   "reason": "The bespoke `'tutorial:planner:' + segments.join('/')` spelling is now read-fallback only (`legacyLocationKey`, line 64-65) and `writeTutorialRecord` refuses to write without a signer (line 104) — both real improvements, ratcheted in tutorial-provenance.spec.ts. But the new subKey `locationAddress` (line 70-78) is `history.sign({ explorerSegments })`, and `HistoryService.sign` (history.service.ts:695-720) is by its own comment 'purely path-derived' — `lineageKey(explorerSegments)` hashed — i.e. the path-keyed bag address that hypergraph-molecule-lineage.md:21-23 retires ('Depth is a route, never an address … no longer the identity of anything'). A NEW write is therefore still minting `sign(sha256(lineageKey(path)))` sub-buckets; a rename or move of the parent still strands the record. The census's proposed key (the parent layer sig, which `tutorialPlannerSig` already resolves via `resolveCurrentLayer`) was not taken.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-shared/core/layer-graph-resolver.service.ts",
+   "symbol": "LayerGraphResolver.writeCachedLayerJson",
+   "censusClassification": "deviation",
+   "verdict": "confirmed",
+   "check": 1,
+   "reason": "File still present: `resolve` fetches `${location}/${signature}` (fetchLayerJson, line 98-104), never hashes the text, and `writeCachedLayerJson` (line 78-90) writes it to `hypercombRoot/<signature>` with `create: true`. Still dead: nothing outside `.claude/worktrees` imports it, `hypercomb-shared/index.ts` does not export it, it calls a bare `get(...)` it never imports, and `import { Store } from './store'` resolves to the migration stub. write-conformance.md lists it under 'None' with fix 'delete the file' and no FIXED mark; radius none, deviation stands.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-runtime/src/store.ts",
+   "symbol": "Store.putPoolDoc",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "store.ts:243-297 verified: member = `SignatureService.sign(bytes)`; the sweep needs `proven = !!subKey || /[\\p{L}\\p{N}]:[\\p{L}\\p{N}]/u.test(meaning)` where `meaning = poolMeaningOf(pool.name)` (registry grants only) AND `documentSweepVetoFor(target) === null`; a refusal is logged and returns the sig. Re-checked every non-spec caller: chat:drafts, chat:streams, context:basket, context:groups, commands:aliases, habits:spoken, format:hive, backgrounds:screen, insights:catalog, registry:*, and computed:genome / history:marker-meta / tutorial:artifacts / marks / usage / overrides / translations all with a subKey — the only bare-word no-subKey call is the store's own `#absorbLegacyDocDir` at 1539, which runs only while the pool is empty (1533), so a refused sweep there costs nothing.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-runtime/src/acquire.ts",
+   "symbol": "writeBags — evict",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": 8,
+   "reason": "acquire.ts:540-563: each stale 64-hex subdirectory is passed to `hardDeleteVetoFor(dir)`, and when that returns null the code additionally counts `MARKER_NAME` files and sets `veto = 'is empty — an install pass never leaves a bag empty'` on zero markers, refusing with the reason logged before `parent.removeEntry(name, { recursive: true })`. Matches the census reading exactly.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-runtime/src/packed-store-engine.ts",
+   "symbol": "markerIndexOf (the classifier every packed write routes through)",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": 9,
+   "reason": "packed-store-engine.ts:135-136 `markerIndexOf = name => /^\\d{8}$/.test(name) ? Number(name) : null` — full-string anchor, `Number` not `parseInt`; `#drainDirEntry` (worker:589) routes a null result to `putPool`, never `setMarker`. `markerName`/`MARKER_CEILING` in directory-safety.ts:159-167 close the minting end. Conforming on check 9 as stated.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-runtime/src/store.ts",
+   "symbol": "Store.#stageToHost",
+   "censusClassification": "wrap-up",
+   "verdict": "refuted",
+   "correctedClassification": "unclear",
+   "check": null,
+   "reason": "The census's gate is never reached: store.ts:973-975 resolves `ioc.get('@HostSyncService')`, but the service registers as `'@diamondcoreprocessor.com/HostSyncService'` (host-sync.service.ts:1825) and nothing in the tree registers the short key; both IoC maps do an exact `instances.get(k)` (hypercomb-runtime/src/ioc.web.ts:59, core ioc.ts:37). So `hostSync` is always undefined and line 976 returns before any enqueue — no bytes are staged from reads at all. The check-10 gate the census credits (`#isEnabled` at host-sync.service.ts:401-404, `#readonlyVisitor` at 393) is real but is reached only through the service's own `content:wrote` listener (235-243), never from this read path. Nothing leaves the machine, so no check fails, but the site performs no write and the conforming verdict was reached for the wrong reason.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-shared/core/packed-store-scale-probe.ts",
+   "symbol": "cleanup",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": 2,
+   "reason": "packed-store-scale-probe.ts:212-239: every address is `probeBagAddress(bag)` = `sign('packed-store-scale-probe:bag:' + index)` (line 32, 49-50) — colon-carrying, unreachable by any tile name; markers are removed by name first and the recursive `root.removeEntry(address)` follows. No `directory-safety` call (check 8 literally unmet), but doctrine.spec.ts:1210 allowlists this file for that ratchet with the same reason, and ownership is proven by derivation, which is what check 2 requires. The census reading holds.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-runtime/src/store.ts",
+   "symbol": "Store.#absorbLegacyPool / #absorbLegacyBucketDir (1456) / #absorbLegacyDocDir (1518)",
+   "censusClassification": "legacy-conforming",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "store.ts:1454-1590 verified: per-record copy → present-check → `legacy.removeEntry(name)`; the bucket variant compares bytes with `Store.#bytesEqual` and sets `bucketClean = false` on a same-name divergence (1481-1488) so neither copy is lost; the doc variant only content-addresses when `getPoolDoc` is empty (1533); all three end with a non-recursive `opfsRoot.removeEntry(legacyName)` that throws (and returns false) on a non-empty dir. Writes land in bare-word pools, which is the deferred #doInit debt, not a defect here.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-runtime/src/store.ts",
+   "symbol": "Store.#mergeLineageBag / #relocateScopeDir (2027) / #relocatePool (2116)",
+   "censusClassification": "legacy-conforming",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "store.ts:2038-2195 verified: `#mergeLineageBag` copies only markers whose root entry is absent or 0-byte (2112-2115) and never overwrites a non-empty root marker; 'already at root' is size equality (2052-2055, 2160-2165), and GC is gated on `done === total && unrelocatable === 0` (2077) / `shadowed === sigTotal && unrelocatable === 0` (2181). The two recursive `removeEntry` calls rely on that full-relocation gate rather than `hardDeleteVetoFor` (store.ts passes the doctrine ratchet by mentioning the module elsewhere), which is acceptable for a drain that has just verified every entry it holds.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-runtime/src/packed-store.worker.ts",
+   "symbol": "PackedStoreHost.#drainDirEntry",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "packed-store.worker.ts:583-617: marker path `setMarker` only when absent and verifies `bytesEqual` before `dir.removeEntry`; pool path `putPool` only when absent; the pack-wins branches (595-600, 607-610) remove the flat copy only after confirming the pack already holds a DIFFERENT record at that key. `#removeIfEmpty` (620-626) iterates and returns on the first entry before `removeEntry`. Sub-bucket members drain as `${entryName}/${leafName}` (502) and packed-collect.ts:143 credits the last segment — the two files agree, as the census said.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-runtime/src/native-filesystem.ts",
+   "symbol": "NativeSigDirectory class docstring",
+   "censusClassification": "deviation",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "native-filesystem.ts:315-317 still reads '`putPoolDoc` prunes prior members with a `kind === \\'file\\'` guard specifically so it cannot delete a sub-bucket', and 465-467 repeats it; store.ts:253-257 says the opposite in as many words ('`kind === \\'file\\'` is NOT a shape guard … the old sweep erased another participant's set'). write-conformance.md lists this under 'None' with no FIXED mark. Drift, not a write; the deviation classification (radius none) stands.",
+   "area": "store"
+  },
+  {
+   "file": "hypercomb-relay/relay.js",
+   "symbol": "tryWriteContent — writeFileSync(resolved, body)",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": 3,
+   "reason": "tryWriteContent now computes `segments = urlPath.split('/').filter(Boolean)` on the DECODED path and returns 400 when `segments.length !== 1`, before verifyWriteAuth and before the sha256 check, so an authorised writer can no longer choose a directory; the surviving `mkdirSync(dirname(resolved))` can only name contentDir itself, and a sig-named DIRECTORY already at `/<sig>` makes writeFileSync throw EISDIR into the 500 branch rather than displacing anything. Residual, not a defect: the caller still picks among `<sig>`, `<sig>.js`, `<sig>.json` — three legacy typed names for one atom, read back through resolveFlatSig.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-relay/replicate.js",
+   "symbol": "contentDirectoryIO().write — renameSync(finalPath, oldPath)",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": 8,
+   "reason": "contentDirectoryIO().write now throws `refusing to write atom … over a directory` when `existsSync(finalPath) && statSync(finalPath).isDirectory()`, before any part file is staged, so a pool or bag at an atom's address is never renamed aside; replicate.test.js:119 asserts the rejection and that the directory and its member are untouched. Note the throw escapes resolveOne's Promise.all and lands in tryReplicate's `.catch` as a `failed` job (relay.js), i.e. the whole replication aborts instead of the atom being recorded in `refused` — safe, but a coarser outcome than the sibling hash refusal.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-web/src/setup/ensure-install.ts",
+   "symbol": "purgeStaleOpfsArtifacts — purgeDir on every subdirectory of store.layers",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": 2,
+   "reason": "`purgeDir` is now `purgeInstallCacheDir`, which removes a FILE only when `isInstallArtifactName` (`/^[0-9a-f]{64}(?:\\.js)?$/i`) matches and a DIRECTORY only when `bagEvictionVeto` is null (hardDeleteVetoFor passes AND at least one marker present), refusing and naming everything else; install-purge.spec.ts covers the three cases. Residual worth recording: `Store.#relocatePool` skips every subdirectory of `__layers__` (`if (handle.kind !== 'file' …) { unrelocatable++; continue }`), so a sig-named file inside `__layers__/<sub>/` is never drained to the root before this purge removes it — bounded to legacy per-domain install subdirs, and strictly narrower than the pre-fix remove-all.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-shared/core/layer-graph-resolver.service.ts",
+   "symbol": "LayerGraphResolver.writeCachedLayerJson",
+   "censusClassification": "deviation",
+   "verdict": "confirmed",
+   "check": 1,
+   "reason": "`resolve()` fetches `${location}/${signature}` via fetchLayerJson, gets back `res.text()` with no hash and no content-type check, and on a cache miss hands it to writeCachedLayerJson which does `layersDir.getFileHandle(signature, { create: true })` on `store.hypercombRoot` — the name is the sig it asked for, not sha256 of the bytes. The class is still dead: a tree-wide grep finds no importer outside worktrees (only a comment in hypercomb-core/src/core/signature-predicate.ts:11 names it) and write-conformance.md leaves it under 'None' with 'Fix: delete the file' — not yet done.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-shared/core/name-registry.ts",
+   "symbol": "NameRegistry.#writePointer",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": 1,
+   "reason": "`#writePointer` no longer exists; `#save()` calls `writeRegistryDocument(store, 'registry:names', this.#names)` (registry-document.ts), which is `store.putPoolDoc(pool, bytes)` — a member named `SignatureService.sign(bytes)` in a colon-scoped pool that pool-registry.ts:381 seeds and pool-kinds.ts:162 declares `document`, so putPoolDoc's `proven` gate (`/[\\p{L}\\p{N}]:[\\p{L}\\p{N}]/u` on `poolMeaningOf(pool.name)`) grants the sibling sweep and documentSweepVetoFor still guards it structurally. `LEGACY_MASTER_KEY = 'names-master'` survives only as the read-fallback argument; a tree-wide grep for `#writePointer` / `*-master` writers finds source hits in built `dist/` bundles only.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-shared/core/tag-registry.ts",
+   "symbol": "TagRegistry.#writePointer",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": 1,
+   "reason": "Same fix as name-registry: `#save()` at tag-registry.ts:121 calls `writeRegistryDocument(store, 'registry:tags', this.#tags)`; `tags-master` remains only as `LEGACY_MASTER_KEY`, read by `readRegistryDocument`'s legacyPointer fallback and never written. `registry:tags` is seeded in pool-registry.ts:382 and kinded `document` in pool-kinds.ts:163.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-shared/core/bouquet-registry.ts",
+   "symbol": "BouquetRegistry.#writePointer",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": 1,
+   "reason": "`#save()` at bouquet-registry.ts:193 now calls `writeRegistryDocument(store, 'registry:bouquets', this.#bouquets)`; the mark-set payload still goes through `store.putResource(blob)` in `#putMarks` (the part the census already called correct), and `bouquets-master` is read-fallback only. `registry:bouquets` seeded at pool-registry.ts:379 / pool-kinds.ts:160 as `document`.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-shared/core/interest-registry.ts",
+   "symbol": "InterestRegistry.#writePointer",
+   "censusClassification": "deviation",
+   "verdict": "fixed-since",
+   "check": 1,
+   "reason": "`#save()` at interest-registry.ts:331 calls `writeRegistryDocument(store, 'registry:interests', this.#file)`; `#load` reads through `readRegistryDocument(..., LEGACY_MASTER_KEY = 'interests-master')` and tolerates the older bare-map shape. `registry:interests` is seeded (pool-registry.ts:380) and kinded `document` (pool-kinds.ts:161); the write path is identical to the other three, as write-conformance.md states.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-shared/core/projection.ts",
+   "symbol": "persist(table) — localStorage memo of (producerId,inputs) → resultSig",
+   "censusClassification": "deviation",
+   "verdict": "cannot-locate",
+   "check": 6,
+   "reason": "hypercomb-shared/core/projection.ts, memoize.ts and expand.ts do not exist at HEAD, and no source file imports `./projection`, `./memoize` or `./expand` (the only `expand` hit is essentials' unrelated `expand.drone`). write-conformance.md records this as FIXED 2026-09-04 by deletion — deliberate, and the fix is complete.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-shared/core/saved-locations-store.ts",
+   "symbol": "SavedLocationsStore.#write",
+   "censusClassification": "deviation",
+   "verdict": "confirmed",
+   "check": 1,
+   "reason": "`#write` still does `localStorage.setItem('hc:saved-locations', JSON.stringify(v))` — a fixed human key holding a participant-authored list, outside the graph. write-conformance.md records the five localStorage stores as an explicit OWNER DECISION left open, so this remains a live, acknowledged deviation.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-shared/core/pinned-entrances.store.ts",
+   "symbol": "PinnedEntrancesStore — localStorage.setItem(storageKey(segments), …)",
+   "censusClassification": "deviation",
+   "verdict": "confirmed",
+   "check": 4,
+   "reason": "`storageKey(segments)` at :74-75 is still `${KEY_PREFIX}${normalizePath(segments).join('/')}` and `#write` at :178 sets it — a PATH-keyed address minted new, plus participant state outside the graph (check 1 as well). Owner decision per write-conformance.md; the file's own :21-25 argument about not skewing layer sigs is correct about the layer and does not reach localStorage.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-shared/core/recent-portals.store.ts",
+   "symbol": "RecentPortalsStore.#write",
+   "censusClassification": "deviation",
+   "verdict": "confirmed",
+   "check": 1,
+   "reason": "`#write` at :191 and `#writePin` at :217 still write fixed keys (`KEY`, `PIN_KEY`) via localStorage.setItem from `#commit`. Same family and same owner decision as saved-locations.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-shared/core/icon-override.store.ts",
+   "symbol": "IconOverrideStore — localStorage.setItem(STORAGE_KEY, …)",
+   "censusClassification": "deviation",
+   "verdict": "confirmed",
+   "check": 1,
+   "reason": "`#persist()` at :75 still writes the whole override map to `localStorage['hc:icon-overrides']`; a per-tile icon is a decoration the artifact should wear, and here it cannot travel or be undone. Owner decision per write-conformance.md.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-web/src/setup/ensure-install.ts",
+   "symbol": "dropLegacy — purgeDir(dir) on legacy __bees__ / __dependencies__",
+   "censusClassification": "legacy-conforming",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "Still legacy-conforming, and now stronger than the census described: `purgeDir` is `purgeInstallCacheDir`, so even inside the literal `__bees__`/`__dependencies__` dirs only `<sig>`/`<sig>.js` files and veto-passing bags go, and `store.opfsRoot.removeEntry(name)` at the end is non-recursive so the dir only disappears once genuinely empty. `Store.LEGACY_BEES_DIRECTORY` names are `__x__` literals no canonicalized tile name can produce.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-relay/blossom-worker/worker.js",
+   "symbol": "putHive — env.HIVES.put(pubkey, JSON.stringify(evt))",
+   "censusClassification": "legacy-conforming",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "putHive requires `auth.pubkey === pubkey` (NIP-98), `evt.pubkey === pubkey`, `verifyEventSig(evt)`, and refuses `evt.created_at <= stored.created_at` with 409 before `env.HIVES.put(pubkey, …)` — a replace of the author's own document only. `validHiveEventContent` still requires `{v, roots:{lineageKey: sig}}`, the path-keyed payload the molecule doctrine retired, which is exactly what makes it legacy rather than the shape a new write takes.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-web/src/setup/ensure-install.ts",
+   "symbol": "writeTo(store.bees, sig => `${sig}.js`, …)",
+   "censusClassification": "legacy-conforming",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "The write at :754 runs inside `resolveInventory`, whose `resolveOne` (replication-walker.ts) verifies `SignatureService.sign(bytes) === signature` before calling `io.write`, so the bytes are pinned; `writeTo` then names the file `${sig}.js` in the sign('bees') pool and seeds the SW cache. The `.js` suffix is the stated derivation the module loader needs and classifies the entry as foreign, which is why purgeOwned must be a named-set removal — the census's reading holds.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-shim/host/serve.mjs",
+   "symbol": "createServer handler — the whole file",
+   "censusClassification": "unclear",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "The file imports only `createReadStream`, `stat` and path helpers; every method other than GET/HEAD/OPTIONS gets `send(res, 405, …)` and there is no fs mutation anywhere. The missing-signature rule is present: `if (SIG_RE.test(name) || inSignature) return send(res, 404, cors, null)` before the index.html fallback. No write to classify — 'unclear' is the taxonomy's gap, not the verdict's.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-runtime/src/host-zones.ts",
+   "symbol": "addHostZone — writable.write(encodeRecord(zone))",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`memberName = SignatureService.sign(encodeRecord(zone))` over a clock-free record `{kind, meaning:'host:<zone>', payload:{zone}}`, written with `getFileHandle(await memberName(zone), {create:true})` into `store.getPool('community:hosts')` — name is the content, meaning is colon-scoped, repeat adds land on the same member.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-runtime/src/host-zones.ts",
+   "symbol": "removeHostZone — dir.removeEntry(await memberName(zone))",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`dir.removeEntry(await memberName(zone))` is non-recursive and can only name an entry this module's own `encodeRecord` hashes to, so check 2's 'named set the caller proved is its own' is discharged by construction; nothing else is enumerated or touched.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-runtime/src/store.ts",
+   "symbol": "Store.putPoolDoc",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "Writes `<pool>[/<sign(subKey)>]/<sign(bytes)>` first, then sweeps only when `proven` (`!!subKey` or a colon-carrying `poolMeaningOf(pool.name)`) AND `documentSweepVetoFor(target)` is null; a bare word or unregistered meaning yields a warn-and-return with the new member already on disk. Sweep removes only `isSignature(name) && name !== sig` files. Reads as the census describes.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-runtime/src/store.ts",
+   "symbol": "Store.putArtifactMeta — mintMetaEnvelope",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "putArtifactMeta builds the typed payload, calls core's `mintMetaEnvelope({...payload, ...incidence})` and stores it via `putResource` (sha256-named); `ensureArtifactMeta` reuses an existing envelope when `payload.kind === kind` and relation matches, throws on a kind mismatch, and otherwise wraps `payload.sig` (the terminal artifact) rather than the envelope. One minter, as claimed.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-runtime/src/replication-walker.ts",
+   "symbol": "resolveOne — await io.write(signature, bytes)",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "resolveOne re-verifies a local copy (`if (bytes && !(await verify(bytes, signature))) bytes = null`), and on fetch pushes to `holes` or `refused` before the only `io.write`, which runs after `verify` passes; `isComplete` requires both lists empty and `!limited`. `mineSignatures` is the default `children` selector and a caller may pass a structured one, so the regex walk is a superset, not a drift.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-web/src/setup/ensure-install.ts",
+   "symbol": "putBag — writeBytes(bagDir, bagEntryName(index), …)",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`bagSig = await bagSignature(entries)` names the directory by its own entries and each marker is `bagEntryName(index)` — the bag is computed from admitted bytes, nothing fetched. The preceding `evictOldBagDirs` removes a 64-hex sibling only after `bagEvictionVeto` (hardDeleteVetoFor + at-least-one-marker) returns null, refusing empties as the header explains.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-web/src/setup/ensure-install.ts",
+   "symbol": "purgeOwned — planNamedRemovalFor(dir, own) then removeEntry(name)",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`own` is built from the cached manifest's bees/dependencies/beeDeps as `<sig>` and `<sig>.js`; `planNamedRemovalFor(dir, own)` runs FIRST and a `plan.refused` returns before the directory loop; sub-dirs then each pass `bagEvictionVeto` individually and only `plan.remove` names are removed. The ordering the census praised is the ordering in the file.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-relay/receipt-index.js",
+   "symbol": "ReceiptIndex.#persist — renameSync(part, target)",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`#path(owner)` is `.receipts/<owner>.json` where `owner` is always `auth.pubkey` at both relay call sites (`receiptIndex.add(auth.pubkey, …)` in tryWriteContent and tryReplicate); `add` only inserts, `load` drops only sigs whose bytes fail `hash(readFileSync(hit.path)) !== signature`, and `#persist` stages with `flag:'wx'` then renames. The `/.receipts` prefix is refused by the generic content branch.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-relay/blossom-worker/worker.js",
+   "symbol": "storeBlob — env.CONTENT.put(sig, body, …)",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "storeBlob returns `{outcome:'exists'}` on `env.CONTENT.head(sig)` before any put, so it never overwrites; putSig checks `sha256Hex(body) === sig` and the auth `payload` tag against the same hash before calling it, and putUpload derives `sig` from the body itself. Published site hosts get `405 published Core hosts are read-only` for every non-GET/HEAD above the mutation routes.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-relay/relay.js",
+   "symbol": "persistEvent — stmtInsert.run(…), with the replaceable-event DELETE at line 240",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "The DELETE is `WHERE pubkey = ? AND kind = ? AND <dMatch>` bound to `evt.pubkey`, `kind`, `d` — the same author's own replaceable slot — and is skipped when a newer `created_at` is already held; `deleteExpired` removes only rows whose own `expiration` tag has passed. Nothing reaches another author's rows.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-shared/core/note-marks.store.ts",
+   "symbol": "NoteMarksStore — store.putPoolDoc(pool, bytes, MARKS_SUBKEY)",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`MARKS_MEANING = 'notes:marks'` (colon) and `MARKS_SUBKEY = 'v1'` at :48-49; the write at :172 is `putPoolDoc(pool, bytes, MARKS_SUBKEY)`, so the member lands in a `sign('v1')` sub-bucket named by its own hash and both of putPoolDoc's proofs hold.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-shared/core/websites-pool.ts",
+   "symbol": "markSeeded — writable.write over dir.getFileHandle(sig)",
+   "censusClassification": "wrap-up",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "`MEANING = 'websites:menu'`; markSeeded hashes `{kind:'websites-seeded'}` with `SignatureService.sign(bytes)` and opens `dir.getFileHandle(sig, {create:true})` — a content-addressed member, idempotent by construction; `isSeeded` parses members named by `isSignature(name)` rather than trusting a filename.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-shared/core/packed-interchange.ts",
+   "symbol": "transfer — writeBytes into the target",
+   "censusClassification": "wrap-up",
+   "verdict": "refuted",
+   "correctedClassification": "deviation",
+   "check": 1,
+   "reason": "The union semantics are as described (no removal anywhere; occupied markers preserved on restore), but the content branch does `const bytes = await readBytes(source, name); … await writeBytes(target, name, bytes)` — it writes bytes under a 64-hex name taken from the SOURCE LISTING without ever hashing them, on the comment's assumption that 'content never differs by definition'. That is the same gap `writeLayerBytes` was fixed for on 2026-09-04 (its siblings hash and refuse), and on RESTORE the source is an external folder the participant can have edited. Radius is currently nil: no non-spec file imports packed-interchange.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-shared/core/packed-store-scale-probe.ts",
+   "symbol": "cleanup — root.removeEntry(address, { recursive: true })",
+   "censusClassification": "break-apart",
+   "verdict": "confirmed",
+   "check": 8,
+   "reason": "`probeBagAddress(i) = sign('packed-store-scale-probe:bag:' + i)` — a colon preimage no canonicalized tile name can reach — and cleanup iterates `bag < PROBE_BAGS` over those derived addresses only, never enumerating the root; markers are removed by name first because a packed-store recursive remove is a silent no-op. It does not literally call directory-safety, so it sits on the `a recursive directory removal consults directory-safety` ratchet allowlist in doctrine.spec.ts:1211 with that by-construction reason — an accepted, ratcheted exception to check 8's letter rather than a deviation from its purpose.",
+   "area": "shell"
+  },
+  {
+   "file": "hypercomb-runtime/src/host-pool.ts",
+   "symbol": "markerIndices — /^[0-9]+$/ then Number(name)",
+   "censusClassification": "unclear",
+   "verdict": "confirmed",
+   "check": null,
+   "reason": "markerIndices filters with the anchored `/^[0-9]+$/` BEFORE `Number(name)` and then `Number.isSafeInteger(index) && index >= 0`, so a 64-hex member can never be read as an index; the function writes nothing. 'unclear' is the taxonomy having no slot for a read helper — the check-9 refutation stands.",
+   "area": "shell"
+  }
+ ]
+}

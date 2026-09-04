@@ -64,6 +64,46 @@ export class TitleQueenBee extends QueenBee {
     { input: '/title jazz =', result: 'Clears the title — "jazz" draws under its own name again' },
   ]
 
+  /** CLEARING IS A PARTICIPANT'S FORM, NOT A MACHINE'S — withdrawn 2026-09-04.
+   *
+   *  It used to be offered here, on the argument that "a title is an ordinary
+   *  decoration: it commits as one layer and `/undo` puts it back, so
+   *  withholding the clearing form bought nothing except a speaker who could
+   *  set a wrong title and not correct it." That reasoning was sound about
+   *  reversibility and wrong about the axis it was defending.
+   *
+   *  Setting swaps one title record for another; clearing runs the SAME removal
+   *  loop and then writes nothing (decoration.service.ts returns 'cleared'
+   *  before any replacement). "Takes something away" is the rubric's own
+   *  wording for destructive, so this one declaration had to cover both a
+   *  reversible edit and a removal — and a gate reading `reach` would have been
+   *  gated on the weaker half. Reversibility is not what separates the tiers:
+   *  `/remove` is destructive and fully undoable too.
+   *
+   *  The cost is real and small. A model can still correct a wrong title by
+   *  setting another one; what it can no longer do is return a tile to drawing
+   *  under its own name. That form stays available to a participant, in
+   *  `options` and `examples` below, and `/undo` reverses either. */
+  override machine = {
+    forms: '<text> | <cell> = <text>',
+    example: '/title roadmap = Road map',
+    reach: 'editing' as const,
+    scope: 'tile' as const,
+    refuse: (args: string): string | undefined => {
+      const equals = args.indexOf('=')
+      if (equals === -1) return args.trim() ? undefined : '/title needs the text to draw'
+      const target = args.slice(0, equals).trim()
+      if (!target || target.includes('/') || target.includes(BACKSLASH)) {
+        return '/title needs one child tile name before ='
+      }
+      // The gate, not the documentation. `forms` describes; this refuses.
+      if (!args.slice(equals + 1).trim()) {
+        return '/title sets a title; clearing one is a participant\'s to do'
+      }
+      return undefined
+    },
+  }
+
   protected async execute(args: string): Promise<void> {
     const raw = args.trim()
     if (!raw) { this.#log('Title — usage: /title <text>  or  /title <cell> = <text>'); return }

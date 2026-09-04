@@ -18,7 +18,13 @@ const iocMap = new Map<string, unknown>()
 
 const {
   originHost, probeDomain, probePublishedPool, publishedPoolMeanings, registerPublishedPool,
+  offeredPools, placeOffers, _resetOffers,
 } = await import('./published-pools.js')
+const { EffectBus } = await import('@hypercomb/core')
+
+/** The ids a host has offered — read off the held records, never off a handler. */
+const idsOffered = (host: string): string[] =>
+  offeredPools(host).map(o => String((o.record as { id?: unknown }).id)).sort()
 const { SignatureService } = await import('@hypercomb/core')
 
 const MEANING = 'test:things'
@@ -51,6 +57,7 @@ let accepted: { record: unknown; origin: string }[] = []
 
 beforeEach(() => {
   accepted = []
+  _resetOffers()
   vi.unstubAllGlobals()
   registerPublishedPool({
     meaning: MEANING,
@@ -85,13 +92,36 @@ describe('originHost', () => {
 })
 
 describe('probePublishedPool', () => {
-  it('takes every member whose bytes match the sig the index named', async () => {
+  // A HOST DECLARES; THE PARTICIPANT PLACES. The probe verifies and HOLDS;
+  // nothing reaches a handler until `placeOffers` — the gesture — is called.
+  it('OFFERS every member whose bytes match the sig the index named, and places NONE of them', async () => {
     const { members, poolSig, index } = await domain([{ id: 'one' }, { id: 'two' }])
     serve('example.com', poolSig, index, members)
 
-    const kept = await probePublishedPool('example.com', MEANING)
-    expect(kept).toEqual(['one', 'two'])
+    const offered = await probePublishedPool('example.com', MEANING)
+    expect(offered.sort()).toEqual([...members.keys()].sort())
+    expect(accepted).toEqual([])
+    expect(idsOffered('example.com')).toEqual(['one', 'two'])
+  })
+
+  it('places an offer only on the gesture, and only once', async () => {
+    const { members, poolSig, index } = await domain([{ id: 'one' }, { id: 'two' }])
+    serve('example.com', poolSig, index, members)
+    await probePublishedPool('example.com', MEANING)
+
+    expect(await placeOffers('example.com', MEANING)).toEqual(['one', 'two'])
     expect(accepted.map(a => a.origin)).toEqual(['example.com', 'example.com'])
+    expect(offeredPools('example.com')).toEqual([])
+    expect(await placeOffers('example.com', MEANING)).toEqual([])
+    expect(accepted).toHaveLength(2)
+  })
+
+  it('learning a domain never places — the domain:learned trigger only probes', async () => {
+    const { members, poolSig, index } = await domain([{ id: 'one' }])
+    serve('learned.example', poolSig, index, members)
+    EffectBus.emit('domain:learned', { host: 'learned.example' })
+    await vi.waitFor(() => expect(idsOffered('learned.example')).toEqual(['one']))
+    expect(accepted).toEqual([])
   })
 
   it('DROPS a member whose bytes do not hash to its sig', async () => {
@@ -129,9 +159,10 @@ describe('probePublishedPool', () => {
     const { members, poolSig, index } = await domain([{ id: 'once' }])
     serve('cached.example', poolSig, index, members)
 
-    expect(await probePublishedPool('cached.example', MEANING)).toEqual(['once'])
+    expect((await probePublishedPool('cached.example', MEANING)).length).toBe(1)
     expect(await probePublishedPool('cached.example', MEANING)).toEqual([])
-    expect(await probePublishedPool('cached.example', MEANING, { force: true })).toEqual(['once'])
+    expect((await probePublishedPool('cached.example', MEANING, { force: true })).length).toBe(1)
+    expect(idsOffered('cached.example')).toEqual(['once'])
   })
 
   it('does nothing for a meaning nobody claimed, or a host that is not one', async () => {
@@ -147,6 +178,7 @@ describe('probePublishedPool', () => {
     index.members.push('f'.repeat(64))          // named, never served
     serve('mixed.example', poolSig, index, members)
 
-    expect(await probePublishedPool('mixed.example', MEANING)).toEqual(['good'])
+    expect((await probePublishedPool('mixed.example', MEANING)).length).toBe(1)
+    expect(idsOffered('mixed.example')).toEqual(['good'])
   })
 })

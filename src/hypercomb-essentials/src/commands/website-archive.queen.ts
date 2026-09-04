@@ -32,7 +32,7 @@
 // swarm-adopt uses (including the tile-props-index seed, without which the
 // substrate clobbers each imported image).
 
-import { EffectBus, hypercomb, I18N_IOC_KEY, SignatureService, type I18nProvider } from '@hypercomb/core'
+import { CHILD_SLOTS, EffectBus, hypercomb, I18N_IOC_KEY, SignatureService, type I18nProvider } from '@hypercomb/core'
 import { buildStoreZip, readStoreZip } from './store-zip.js'
 import { decorationClosureSigs } from '../sharing/decoration-closure.js'
 import {
@@ -52,7 +52,8 @@ const COMMITTER_KEY = '@diamondcoreprocessor.com/LayerCommitter'
 const CURSOR_KEY = '@diamondcoreprocessor.com/HistoryCursorService'
 
 const SIG_RE = /^[0-9a-f]{64}$/
-const CHILD_SLOTS = new Set(['cells', 'layers', 'children'])
+/** The child roster, from core — never restated (documentation/life-primitive.md). */
+const CHILD_SLOT_SET: ReadonlySet<string> = new Set(CHILD_SLOTS)
 
 // ── zip entry shapes ──────────────────────────────────────────
 // v2 archives mirror the OPFS pools model: layer + resource bytes are FLAT
@@ -258,7 +259,7 @@ export async function exportBranch(): Promise<void> {
       for (const raw of value) {
         const ref = String(raw ?? '').trim().toLowerCase()
         if (!SIG_RE.test(ref)) continue
-        if (CHILD_SLOTS.has(slot)) { await walkLayer(ref); continue }
+        if (CHILD_SLOT_SET.has(slot)) { await walkLayer(ref); continue }
         if (slot === 'bees') {
           if (visitedAssets.has(ref)) continue
           visitedAssets.add(ref)

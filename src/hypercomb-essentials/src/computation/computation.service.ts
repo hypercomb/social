@@ -4,9 +4,12 @@ import {
   type Signature,
   type ComputationReceipt,
   ComputationReceiptCanonical,
+  MARKER_CEILING,
   SignatureService,
   SignatureStore,
+  classifyDirectoryEntry,
   get,
+  markerName,
 } from '@hypercomb/core'
 
 export const CHAIN_REFERENCE_FUNCTION_SIGNATURE = 'chain-reference'
@@ -59,7 +62,12 @@ export class ComputationService {
 
     const bag = await this.#getBag(lookupKey)
     const nextIndex = await this.#nextIndex(bag)
-    const fileName = String(nextIndex).padStart(8, '0')
+    // padStart(8) is a no-op above 99999999 and every reader rejects nine
+    // digits, so refuse rather than mint a name nothing can read again.
+    const fileName = markerName(nextIndex)
+    if (fileName === null) {
+      throw new Error(`[computation] receipt chain is at the marker ceiling (${MARKER_CEILING})`)
+    }
 
     const { receiptSignature, canonicalJson } =
       await ComputationReceiptCanonical.compute(receipt)
@@ -104,6 +112,10 @@ export class ComputationService {
 
     for await (const [name, handle] of bag.entries()) {
       if (handle.kind !== 'file') continue
+      // A raw string max PREFERS a 64-hex member over a receipt name
+      // ('00abc' > '00000012'), so an unguarded scan returned a foreign
+      // member as "the latest receipt" — and cached it.
+      if (classifyDirectoryEntry(name) !== 'marker') continue
       if (name > maxName) {
         maxName = name
         maxHandle = handle as FileSystemFileHandle
@@ -158,7 +170,11 @@ export class ComputationService {
 
     const receipts: ComputationReceipt[] = []
     for (const entry of entries) {
-      const index = parseInt(entry.name, 10)
+      // `parseInt` returns the PREFIX of a digit-leading 64-hex name, so a
+      // foreign member was folded into the chain — and this chain is SIGNED
+      // (signChainSegment), so it silently changed a signature.
+      if (classifyDirectoryEntry(entry.name) !== 'marker') continue
+      const index = Number(entry.name)
       if (isNaN(index)) continue
 
       try {
@@ -245,7 +261,10 @@ export class ComputationService {
     let max = 0
     for await (const [name, handle] of bag.entries()) {
       if (handle.kind !== 'file') continue
-      const n = parseInt(name, 10)
+      // Classify by NAME, then `Number`. `parseInt('99999999ab…', 10)` is
+      // 99999999 — the exact input the isNaN check cannot catch.
+      if (classifyDirectoryEntry(name) !== 'marker') continue
+      const n = Number(name)
       if (!isNaN(n) && n > max) max = n
     }
     return max + 1

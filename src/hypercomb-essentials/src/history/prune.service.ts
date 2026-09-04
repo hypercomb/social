@@ -371,8 +371,19 @@ export class PruneService extends EventTarget {
 
     // 3. Who else needs these bytes. One walk for the whole batch, now that
     //    the purged tiles' own histories are gone.
-    const shared = await history.sigsReferencedOutside(this.#locationSig, [...allCandidates])
-      .catch(() => new Set<string>())
+    // A LOCAL-ONLY ANSWER IS NOT A LICENCE TO DELETE. `authoritative` is false
+    // when this client could not read every bag and marker it needed, and the
+    // bytes below are irreversible — so on a partial answer nothing is
+    // removed, and the receipt says the sigs were withheld rather than
+    // reporting a number the participant cannot explain.
+    const references = await history.referencesOutside(this.#locationSig, [...allCandidates])
+      .catch(() => ({ found: new Set<string>(), authoritative: false }))
+    const shared = references.authoritative
+      ? references.found
+      : new Set<string>(allCandidates)
+    if (!references.authoritative) {
+      console.warn('[prune] refusing to remove content bytes — the reachability walk was incomplete')
+    }
 
     // 4. Remove the layer bytes nobody else claims.
     for (const tile of targets) {

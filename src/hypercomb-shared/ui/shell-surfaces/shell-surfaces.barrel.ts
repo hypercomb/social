@@ -58,13 +58,13 @@ import '../clipboard-panel/clipboard-panel.component'
 import '../contact-card/contact-form.component'
 import '../contact-card/contact-hover.component'
 import '../action-card/action-card.component'
-import '../feedback-viewer/feedback-viewer.component'
 import '../website-nav/website-nav.component'
 import '../tile-editor/tile-editor.component'
 import '../camera-capture/camera-capture.component'
 import '../portal/portal-overlay.component'
 // Draw on the screen, photograph it, and hand the picture to the agents —
-// opened from the annotations window (markup-overlay.component.ts).
+// standing surface, opened from anywhere: the command line's rail, the word
+// `/annotate`, or the `d` key (markup-overlay.component.ts).
 import '../markup-overlay/markup-overlay.component'
 import '../confirm-dialog/confirm-dialog.component'
 import '../icon-picker/icon-picker.component'

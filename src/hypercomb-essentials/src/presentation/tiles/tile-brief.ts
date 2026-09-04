@@ -84,7 +84,7 @@ export type TileBrief = {
   label: string
   title: string
   /** The structure — roots carrying a heading/list mark, or roots with
-   *  children. The annotations window calls this tab "lists". */
+   *  children. The writing window calls this tab "lists". */
   lists: readonly Note[]
   /** The prose and the conversation. */
   notes: readonly Note[]

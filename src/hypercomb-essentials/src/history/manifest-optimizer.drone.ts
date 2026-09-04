@@ -107,6 +107,25 @@ export class ManifestOptimizerDrone extends Drone {
     })
   }
 
+  /**
+   * THE ONE DOOR. Anything that learns a parent needs a manifest — a paint
+   * that found none, a thin pack that could be enriched — says so HERE, and
+   * the optimize phase mints it on the next idle pass. Nothing else writes a
+   * children manifest (optimize-phase.md: a derived cache is minted in the
+   * phase, never on the render path). Idempotent: the latest child list for
+   * a parent wins, and a parent with no children is not queued.
+   */
+  public readonly enqueue = (parentSig: string, childSigs: readonly string[]): void => {
+    const parent = String(parentSig ?? '').toLowerCase()
+    if (!SIG_RE.test(parent)) return
+    const children = childSigs.map(c => String(c ?? '').toLowerCase()).filter(c => SIG_RE.test(c))
+    if (children.length === 0) return
+    this.#pending.set(parent, children)
+  }
+
+  /** How many parents are waiting for the next pass — for a test, or a status line. */
+  public get pendingCount(): number { return this.#pending.size }
+
   public override optimize = async (): Promise<void> => {
     if (this.#pending.size === 0) return
     const store = get('@hypercomb.social/Store') as ManifestStore | undefined

@@ -6,7 +6,7 @@
 |---|---|
 | The reader (plain language → spans) | BUILT, committed |
 | The Claude Bridge (`#submit`) | BUILT, committed, **full authority** |
-| `hypercomb_act` / `hypercomb_observe` | BUILT, **uncommitted**, 63 passing tests |
+| `hypercomb_act` / `hypercomb_observe` | BUILT, committed `d3bf7acda`, 63 passing tests |
 | Per-atom verification on admission | BUILT, committed |
 | Directory branch (`GET /<sig>/`) | BUILT 2026-09-03, one meaning (`host:packages`) |
 | Concurrent fan-out across hosts | BUILT in 3 places; the main byte path is **serial** |
@@ -30,6 +30,23 @@ Companions: `pools-across-hosts.md` (one word, one address, every host),
 `known-location-pools.md`, `claude-bridge-setup.md`,
 `hosting-from-a-machine.md`, `protocol/conformance.md`.
 
+**Neighbouring documents that own territory this one only cites** — read them
+rather than treating this doc as authority on their subject:
+
+- `every-act-has-a-word.md` — **owns the vocabulary backlog**: the
+  `CALLABLE_FORMS` failure in full, and the checklist for giving every act a
+  word. This document states the *law* behind it and defers the work list.
+- `intake-filter.md` — owns the **inbound content** direction (who you take
+  from, what you keep of what arrives). Distinct from this document's concern,
+  which is what an arriving *operation* may do. Its three-gate table —
+  selection / intake / activation — is the right frame, and conflating those
+  gates with this one is the mistake it warns about.
+- `trust-boundary-and-the-extension-question.md` — the separate gate on
+  running code.
+- `collapsed-compute.md`, `instant-computing.md`, `signature-algebra.md` — own
+  shared computation; this document only marks where their consensus dodge
+  stops.
+
 ## The census: five surfaces, not three
 
 A communication-layer document that lists only the elegant channels is not a
@@ -41,8 +58,8 @@ hive:
 | **The reader** | participant → hive | full live census | committed |
 | **Claude Bridge** `#submit` | remote session → hive | **full census, verbatim** | committed |
 | Claude Bridge `#effect-emit` | remote session → hive | 8-intent allowlist | committed |
-| **`hypercomb_act`** | model → hive | 5 verbs, additive only | uncommitted |
-| **`hypercomb_observe`** | hive → model | structure only | uncommitted |
+| **`hypercomb_act`** | model → hive | census-derived; each behaviour declares its own reach | committed |
+| **`hypercomb_observe`** | hive → model | structure only | committed |
 | Replication / acquisition | host → hive | bytes only, hash-gated | committed |
 | Mesh (kinds 30200–30205) | peer → peer | layer state, consent-gated | committed |
 
@@ -67,17 +84,35 @@ broker's invariant, not the network's.
 ## The wide door and the narrow door
 
 **This is the most important thing in this document.** A reader who takes away
-only "a model can call five additive verbs" will be wrong about the system as
-it ships.
+only "a model can call a handful of additive verbs" will be wrong about the
+system as it ships — and, since 2026-09-03, wrong about the narrow door too.
 
 `ClaudeBridgeWorker.#submit`
 ([claude-bridge.worker.ts:1543](../hypercomb-essentials/src/assistant/claude-bridge.worker.ts:1543))
 forwards a remote session's text **verbatim** into
-`EffectBus.emit('command-line:remote-submit')`. Its own comment states the
-intent plainly: *"Text is forwarded verbatim so anything the keyboard accepts
-(slash behaviours, bracket selects, multi-token grammar, plain cell names) just
-works."* That is the entire live census — hidden behaviours included — with no
-`CALLABLE_FORMS`, no additive sub-language, no per-line census re-derivation.
+`EffectBus.emit('command-line:remote-submit')`, with no `CALLABLE_FORMS`, no
+per-line census re-derivation, and hidden behaviours reachable.
+
+> **CORRECTION, MEASURED 2026-09-04.** An earlier revision of this document
+> quoted `#submit`'s own comment — *"anything the keyboard accepts … just
+> works"* — as a statement of fact. **It was false, and this document repeated
+> it.** Driven over the live bridge: `/create x` created a tile; bare `create x`
+> did **nothing at all**; both answered `ok`. The handler called
+> `#preprocessTagsThenExecute` directly, while both keyboard paths try
+> `#commitUtterance` **first** and only fall through — so a remote caller got
+> the legacy slash/tag pipeline and never the Common Tongue. The door could not
+> hear the words the behaviour reference teaches an agent to speak.
+>
+> Fixed in `f2bcc0c44`: the reader is now entered directly on the remote path,
+> but only for a reading that is unambiguous, non-destructive and actually
+> matched — because `#commitUtterance` answers "handled" for two states that
+> mean *waiting*, and a remote caller has nobody to answer a dropdown.
+>
+> **The lesson is about this document, not that handler.** Every other claim
+> here was verified by reading source, and reading source is what produced the
+> error: three call sites were read for *authority* and none for *which
+> pipeline*. Source says what code is permitted to do; only running it says
+> what happens.
 
 The same file shows the author knew exactly what an allowlist is: `#effectEmit`
 carries `#REMOTE_INTENTS`, eight entries, commented *"The allowlist is the
@@ -90,10 +125,33 @@ explicit `?claudeBridge=1` opt-in.
 State it as a position, and it is defensible. Leave it unstated, and this
 document becomes a citation for a guarantee the running system does not make.
 
-**And the guarded door is not yet in the tree.**
-`git show HEAD:…/slash-behaviour.drone.ts | grep -c executePublicCanonical`
-returns **0**. The executor seam every gate in the next two sections rests on
-does not exist in the last commit.
+### The position (Jaime, 2026-09-03): keep both doors
+
+**Decided. Both doors stay, and the reasoning is two-part:**
+
+1. **The wide door is switchable.** The bridge is not ambient — it needs a
+   broker running, loopback registration, and an explicit `?claudeBridge=1`.
+   The participant can close it at any moment. Risk bounded by an affirmative
+   act is a different kind of risk from risk you cannot turn off.
+2. **Removing an old path is how this system breaks.** Data never heals. The
+   repeated lesson — the transition is a forward commit, nothing is deleted,
+   older readers must keep working — applies to *channels* as much as to
+   bytes. Narrowing `#submit` to match `hypercomb_act` would be healing, and
+   healing is the failure mode, not the fix.
+
+So the asymmetry is intentional and now stated: **`#submit`'s boundary is the
+broker, not the vocabulary.** A reader who wants the narrow guarantee should
+read the model channel; a reader who wants to know what the bridge can do
+should assume *everything the keyboard can do*, because that is the design.
+
+**The load-bearing condition is loopback.** Both halves of the reasoning above
+depend on the caller being the participant's own machine. If any grammar
+surface is ever exposed to a remote caller, the wide door stops being local
+and this position must be re-argued from scratch — see **Owed**.
+
+*(Resolved 2026-09-03: the guarded door is now in the tree. `d3bf7acda`
+committed the act and observation channels, and `executePublicCanonical`
+exists in HEAD. The gate and the wide door now ship together.)*
 
 ## One language, two grammars
 
@@ -103,7 +161,7 @@ grammar, and that is deliberate.
 | | Human input | Machine input (`hypercomb_act`) |
 |---|---|---|
 | Grammar | plain language, read into spans | canonical slash only, `/^\/([a-z][a-z0-9-]*)(?:\s+(.+))?$/` |
-| Vocabulary | full live census + participant aliases | five verbs, additive forms only |
+| Vocabulary | full live census + participant aliases | census-derived: the behaviours that declared a machine grammar |
 | Ambiguity | marked; the line waits for a choice | rejected before anything runs |
 | Argument | optional; the reader attaches what follows | **required**; a bare verb is refused |
 | A failing step | warned and **skipped**; the sentence continues | **stops**, with an honest partial receipt |
@@ -169,23 +227,78 @@ there. The pure function is deterministic; the running app is deterministic
 states its own scope: the model speaks Hypercomb; function calling is only the
 envelope.
 
-**Authority is default-deny, and narrower than "five verbs" suggests.**
-`CALLABLE_FORMS` admits `create`, `keyword`, `accent`, `postit`, `title`;
-`callableBehaviours()` intersects that with the *live* census, dropping
-`hidden` and `prototype`. The second gate matters more — each verb is validated
-down to an **additive sub-language**
-([`validateCommandArgs`](../hypercomb-shared/ui/chat-window/hypercomb-grammar.ts:242)):
+**Authority is default-deny, and the deny lives on the behaviour.** Until
+2026-09-03 it lived here instead: `CALLABLE_FORMS`, five behaviour names and
+their argument shapes, written by hand in the shell beside the parser. It was
+wrong the way a second copy of a list is always wrong — it drifted toward less
+than exists. A participant asked a local model to delete a tile and was told,
+accurately from what the model had been given, that Hypercomb has no delete
+behaviour. `/remove` had shipped for months; any participant could type it; it
+was simply not one of the five.
 
-| Verb | May | May not |
-|---|---|---|
-| `create` | name tiles, `<parent>/<child>` | backslashes, empty, `.`, `..` |
-| `keyword` | add tags, optional `#hex` | `~` — **cannot remove a tag** |
-| `accent` | five known presets | `~` — cannot remove an accent |
-| `postit` | `here <text>` | any other form |
-| `title` | set a title | clear one; reach through `/` |
+**A capability with no word does not exist to a participant who is speaking.**
+That is the whole reason the layer is called a communication layer, and a
+hand-kept table in the shell was quietly deciding which capabilities were real.
 
-Nothing a model can call removes or clears anything. The destructive half was
-never offered, so it never has to be refused.
+So authority moved ONTO each behaviour. `QueenBee.machine` (contract:
+[`MachineGrammar`](../hypercomb-core/src/core/machine-grammar.ts)) is declared
+beside `description`, `options` and `examples`, and
+[`callableBehaviours()`](../hypercomb-shared/ui/chat-window/hypercomb-grammar.ts)
+derives the model's vocabulary from the live census. The shell module now knows
+how to read a declaration and knows no behaviour names — a doctrine ratchet in
+`doctrine.spec.ts` fails the suite if one reappears there.
+
+A declaration states four things:
+
+| Field | Meaning |
+|---|---|
+| `forms` | the argument shape, in the notation `options` already uses |
+| `example` | one complete canonical line |
+| `bare` | whether a bare verb is a real call (`/undo`, `/paste`) |
+| `reach` | `additive`, `editing`, or `destructive` — printed in the catalogue |
+| `refuse` | the behaviour's own argument rule, run before anything executes |
+
+`refuse` is where the old `validateCommandArgs` went, split up and returned to
+the authors who wrote each parser. Its motive is unchanged: native parsers
+normalize bad input into a no-op, and a clean no-op would earn a receipt for
+work that never happened.
+
+**Destruction is offered, and stated.** `/remove` declares
+`reach: 'destructive'` and its catalogue line says so; the guard is not silence
+but the confirmation `/remove` already performs at its own door, where the
+participant can see the branch it is about to take. What a machine may NOT do
+is guess a target: a bare `/remove` acts on the current selection, which a
+speaker cannot see, so names are required on this seam.
+
+**The consequence is quoted, never composed.** The catalogue briefly printed a
+fixed sentence for every `destructive` verb — "removes; asks the participant to
+confirm" — and both halves were false for `/remove`: nothing leaves the disk,
+and `confirmRemoval` skips its dialog whenever nothing is nested beneath the
+target. A distant module cannot know whether a behaviour confirms, so it must
+not claim one; `MachineGrammar.consequence` is where the behaviour says it, and
+a behaviour that says nothing gets silence rather than a default.
+
+**A machine names its target.** `/remove`, `/copy`, `/cut`, `/keyword` and
+`/accent` all have participant forms that act on the current selection. A model
+cannot see a selection and must not guess at one, so the machine seam requires
+explicit names — `/keyword roadmap = urgent`, not `/keyword urgent`. The
+participant keeps every form.
+
+**Not a single `/update` verb.** The question was asked and settled on
+2026-09-03: a layer update genuinely is the write primitive beneath the
+committed half — `/remove` is one `LayerCommitter.update` and nothing else — but
+the seam admits one verb plus one flat unescaped argument, so a desired layer
+state is unsayable here, and collapsing would cost the per-behaviour `refuse`
+voices, per-line receipts and an honest per-act `reach`. Full account:
+[`every-act-has-a-word.md`](every-act-has-a-word.md).
+
+**What declares one today** — nine of about 130 behaviours, default-deny very
+much intact: `create`, `keyword`, `accent`, `postit`, `title` (the original
+five), `remove`, `hide`, `undo`, `redo`, `copy`, `cut`, `paste`. The last seven
+are the answer to the same question the participant's complaint asked — which
+ordinary acts had no word at all — and `hide`, `undo`, `redo`, `copy`, `cut`
+and `paste` had to be MINTED, not merely declared: they existed only as icons
+and keystrokes.
 
 **Nothing runs until everything parses** — one invalid tail cannot leave a
 half-run prefix. Bounds: 1–12 grammars, 1000 characters, no control characters,
@@ -207,10 +320,13 @@ so the lane is app-wide: two conversations cannot interleave grammars.
 State these wherever the receipt is presented as a guarantee:
 
 - **A receipt is not proof the hive changed.** The executor contract is
-  literally *did not throw*. The source concedes native parsers can normalize
-  bad input into a no-op, and `/title` without `=` is exactly such an escape
-  hatch — so a model can earn `Ran 1 Hypercomb grammar` for a line that did
-  nothing. Validation narrows this; it does not close it.
+  literally *did not throw*, and native parsers normalize bad input into a
+  no-op — so a clean return can mean nothing happened. `refuse` is the answer
+  to exactly this, and it is the right one: the behaviour that owns the parser
+  states what it genuinely cannot act on. But it is **opt-in and per-behaviour**
+  — a behaviour that declares `machine` and omits `refuse` still earns
+  `Ran 1 Hypercomb grammar` for a line that did nothing. The gap moved from
+  the shell to the author; it did not close.
 - **Abort is not clean.** `executeHypercombPlan` throws `stopped()` *after* a
   successful action, discarding `completed`, and the chat host rethrows on an
   aborted signal instead of rendering. Stopping a three-line plan mid-way
@@ -218,6 +334,154 @@ State these wherever the receipt is presented as a guarantee:
 - **No aggregate budget.** The 1–12 bound is enforced twice, but a legal plan
   is up to 12 × 1000 characters and nothing caps total execution time or how
   many plans one model may queue behind others on the shared lane.
+
+## The law: derive the admissible set, never enumerate it
+
+This system has now learned the same lesson three times, in three unrelated
+subsystems, and it should be stated once as a rule rather than re-learned a
+fourth time.
+
+| Where | The second copy | How it failed |
+|---|---|---|
+| Machine vocabulary | `CALLABLE_FORMS`, five names hand-written in the shell | drifted **toward less than exists** — a participant asked a model to delete a tile and was told Hypercomb has no delete behaviour, while `/remove` had shipped for months |
+| Pool meanings | four separate local lists of pool names | drifted apart; `/flatten` on a colliding address **hard-deleted an entire pool** |
+| Root vocabulary | the frozen bare-word ratchet | had to be flipped once the molecule doctrine reversed the rule |
+
+> **THE RULE. Any set of "what is allowed" must be DERIVED from the live
+> census at the moment of use. A hand-kept list of admissible operations is
+> always wrong in the same direction — it decays toward less than exists,
+> silently, and the failure looks like a capability that was never built.**
+
+This is why `MachineGrammar` moved authority onto each behaviour, and it is the
+test any future proposal must pass. Two that fail it, recorded so they are not
+proposed again:
+
+- **A curated pool of pre-vetted operation signatures** — `CALLABLE_FORMS` with
+  hashes instead of names. Same list, same drift, worse ergonomics.
+- **A hand-maintained behaviour reference** used as the protocol spec. See the
+  next section: `slash-behaviour-reference.md` has already drifted.
+
+The rule also explains why **matching words against the live census is not a
+compromise but the strongest available design**: it keeps no second list at all.
+There is nothing to drift.
+
+## The clear-text protocol
+
+**Direction (Jaime, 2026-09-03).** The intended primary channel is neither the
+bridge nor a function-call envelope: an agent reads the **behaviour reference**,
+replies in plain text using words that match, and the hive reads those words
+with the deterministic reader and executes them. The reply *is* the call; the
+document *is* the API. Nothing is transported that a human could not paste.
+
+This works because the receiving end is a pure function, not a model — four
+span roles, ambiguity that halts rather than guesses. Most agent protocols put
+a model on both ends and hope.
+
+Signature payloads were considered and rejected, on evidence:
+
+- A **behaviour has no signature.** Its identity is the lowercased `name`;
+  `SlashBehaviour` carries no sig field and the machine gate is a
+  `Map<name, MachineGrammar>`.
+- A **bee** signature is the hash of *bundler output*, so it is unstable across
+  rebuilds; one bee carries 16 behaviours in `slash-behaviour.drone.ts`, so it
+  cannot name `/keyword` distinctly from `/help`; and **the dev shell mints no
+  bee signatures at all**, so a sig payload names nothing there.
+- A doctrine ratchet forbids 64-hex literals in source, so no caller could hold
+  one.
+- And a vetted-signature set fails **the law** above.
+
+Words require only the published reference. Signatures would require the caller
+to already *possess* the artifacts — a prerequisite that destroys the protocol's
+one virtue.
+
+### The reference must be generated, and the build already generates it
+
+If a document is the API surface, hand-maintaining it is the same bug as
+`CALLABLE_FORMS`. `slash-behaviour-reference.md` is hand-maintained **and has
+already drifted** — its Aliases column documents code-declared aliases that are
+now ratchet-forbidden with an empty allowlist.
+
+**The generated form already exists and nothing reads it.**
+[`build-module.ts:1016`](../hypercomb-essentials/scripts/build-module.ts:1016)
+writes `layer.docs.bees`, keyed by bee signature, where each `BeeDocEntry`
+([:304](../hypercomb-essentials/scripts/build-module.ts:304)) carries:
+
+```
+className, kind, description, effects, listens, emits, deps,
+grammar: { example, meaning? }[],
+command: string | null, aliases: string[]
+```
+
+That is a machine-readable behaviour reference — grammar examples *with their
+meanings* — emitted into the signed layer tree on every build, travelling with
+replication, content-addressed like everything else. A repo-wide grep finds **no
+reader of a layer's `docs` field**. It needs a reader, not an author.
+
+`consequence` becomes protocol-critical in this design: it is the sentence an
+agent relays to a participant about what is about to happen. The catalogue has
+already been wrong here — it printed a fixed line for every destructive verb,
+both halves false for `/remove`, and *"a model read that line and relayed a
+confirmation that never happened."*
+
+### The bottleneck is the vocabulary, not the wire
+
+**Roughly eight shipped behaviours declare a `machine` block** — clipboard ×3,
+`create`, `postit`, `title`, `undo` ×2, `hide`, plus three inline. Everything
+else in the census is invisible to an agent no matter how good the protocol is.
+
+So "if we don't have that control, we turn them into behaviours" has two
+backlogs, and the smaller one is the famous one:
+
+1. **Declare `machine` on behaviours that already exist.** Cheap, and it is what
+   actually widens the protocol.
+2. **Turn shell-only actions into behaviours.** That list is already written
+   down as the bridge's `#REMOTE_INTENTS` — `publish:run`, `publish:unpublish`,
+   `publish:refresh`, `publish:inspect` and the rest are precisely the actions
+   with only a pointer path. Convert them and the allowlist dissolves into the
+   census, which is the law applied to the bridge.
+
+### Do not rebuild the frozen operation
+
+If parameterized, content-addressed, replayable operations are ever wanted,
+`WorkflowStep`
+([workflow-step.ts:71](../hypercomb-essentials/src/workflow/workflow-step.ts:71))
+already is one: `{v:1, kind:'command', command?, args?}` with `{cell}`/`{scope}`
+holes, minted by `putResource` into a `stepSig`, resolved from a bare signature
+by `readStepResource` (total, returns null on malformation), and executed
+through `slash.execute(command, args)` — **the same seam** the grammar plan
+drives. It is ~90% of that design, already shipped, in the workflow subsystem.
+
+### What clear text does not have
+
+**No return half.** Measured 2026-09-04: the bridge's `submit` answers `{ok:true}`
+**immediately**, before anything executes — `ok` means *the effect was emitted*,
+never *the command ran*. It was wrong twice in six calls during one session (bare
+prose did nothing; `/remove` did nothing). There is no receipt on this path at
+all: `formatHypercombReceipt` belongs to the model channel, not the bridge. **So
+the "communicating back" half of the protocol does not exist on the door an agent
+would use** — it must independently read back to learn anything, which is exactly
+what verifying that session required (`layer-at` diff → new sig →
+`layer-by-sig`). Anything built on this loop needs either a real receipt or an
+explicit convention that the caller always verifies.
+
+**No census over the wire.** The bridge's `behaviors-list` returns **views** — 17
+entries shaped `{view, slashCommand, decorationKind, adoptable}`, zero `machine`
+blocks. An agent on the bridge therefore cannot ask *what may I say?*; it must be
+handed a reference out of band. That is the same gap `layer.docs.bees` would
+close, seen from the other end.
+
+**No replay resistance, and nothing to reuse.** There is no nonce, no expiry and
+no per-operation counter anywhere in the tree. `treeEpoch` is a process-local
+in-memory counter starting at 0, never persisted — so "this moment" does not
+survive a reload, let alone a hop between machines. The one short-lived
+capability handle that exists, the observation snapshot, is deliberately
+non-transportable (*"never accepted back from the model"*). `hypercombContextKey`
+binds page and selection, but only by live re-comparison inside one exchange; it
+is not a value a caller could carry.
+
+For a participant and their own agent this does not bite. It bites the instant
+the same words arrive from anywhere else — and minting an operation nonce would
+be the repo's first.
 
 ## The observation channel: `hypercomb_observe`
 
@@ -249,11 +513,19 @@ expose `executePublicCanonical` *and* the live census to hold at least one
 callable behaviour. Only the participant's own local provider is handed
 execution.
 
-**Machine-locality is a hostname test, and its pattern admits `0.0.0.0`**
-([local-liveness.ts:90](../hypercomb-essentials/src/assistant/providers/local-liveness.ts:90)).
-That is a *bind* address, not a loopback destination — the one host in the set
-that is not self-evidently the participant's own process. Worth a second look
-before this seam is committed.
+**Machine-locality is a hostname test**
+([local-liveness.ts](../hypercomb-essentials/src/assistant/providers/local-liveness.ts)),
+so every spelling it admits has to be one the participant's own process
+answers at. It admitted `0.0.0.0` — a *bind* address, not a destination, and
+the one host in the set that was not self-evidently theirs. That entry has
+been removed: nothing in the system ever produced it (`LOCAL_HOST_CANDIDATES`
+is `127.0.0.1`, `localhost`, `[::1]`), the provider-spec compiler's endpoint
+gate never accepted it, and a participant who pastes it off their server's
+startup line reaches nothing either way — Chromium refuses `0.0.0.0` as a
+destination outright. Admitting it granted the classification without the
+connection: *your own machine, merely not running*, asserted from a string
+that cannot say so. It is now answer-only, like any host that left the
+machine, and covered by both specs.
 
 **A tool call is authorized only by a terminal `finish_reason: 'tool_calls'`.**
 A `length` or content-filter stop yields no `toolCalls` even when the arguments
@@ -376,6 +648,23 @@ than fails**: a host answering 200 to everything yields a `present` index up to
 reported as *publishing nothing* — indistinguishable from an honest empty host,
 with no error anywhere in the chain.
 
+**That second trap is the unknown-collapsing-into-absent disease, and it now
+has a shipped cure one subsystem over.** The signed vocabulary claim
+(`abe24da2a`) makes the same conflation *structurally impossible* for the words
+a hive publishes: "no" is minted in exactly one place, a pure fold, and only
+when a claim whose **signed** completeness flag is true omits the word at a seq
+strictly higher than any claim naming it. Everything else — an unreachable
+host, a host with no vocabulary, a claim that merely omits — stays **unknown**,
+because *"unknown collapsing into absent would make the whole discovery model a
+lie."*
+
+The pool reader makes exactly that collapse today. It answers "publishes
+nothing" for four distinguishable conditions: an honest empty pool, a 404, an
+SPA fallback, and a host answering 200 to everything. Only the first is a fact;
+the rest are ignorance. The remedy does not need inventing — the discipline is
+now shipped, domain-separated and line-oriented, with a clock-free `seq` on the
+principle that *a signature proves authorship and never recency*. See **Owed**.
+
 `manifest.json` is **not** a `findPool` tier — the spec pins the opposite
 ("asks no named document when the pool answers"). It remains load-bearing
 elsewhere: the browse list still reads it, because a name is a mark and the
@@ -477,6 +766,137 @@ actually travels is not a fan-out.** `content-broker.drone.ts` walks an ordered
 host list one at a time with a 3000 ms probe each, so ten dead hosts cost
 thirty seconds, not three.
 
+## Shared execution: the consensus dodge, and the regime it stops in
+
+The next thing this layer is asked to carry is **shared computation** — speak
+grammar, fan it out, take results back. `collapsed-compute.md`,
+`instant-computing.md` and `signature-algebra.md` already own that doctrine, and
+its central claim is a good one that this document should reinforce, not
+restate. But it holds in one regime and not the next, and the boundary is not
+currently written anywhere.
+
+### The dodge is real, and Bitcoin is the wrong analogy
+
+`instant-computing.md:41` names it: *"the thing that kills world-scale systems
+is consensus: global agreement on ordering and state. this architecture needs
+none."* `collapsed-compute.md:272` puts the mechanism plainly: *"Content
+addressing IS the consensus. Two peers who independently produce the same
+content arrive at the same signature."*
+
+**That is right, for a reason worth stating so nobody imports a blockchain to
+solve it.** Bitcoin needs global consensus because *which transaction came
+first* has no intrinsic answer — ordering must be socially agreed, so it needs
+a chain, mining, and a canonical history. `f(x)` has exactly one right answer,
+identical for every peer, permanently. **There is nothing to agree about.** No
+chain is needed, and none should be built. At most a *quorum* is needed, and a
+quorum is small, local and ad hoc — O(k), never O(network).
+
+### Where it stops: convergence is not delegation
+
+The dodge is a statement about peers who **each computed**. That is a **cache**,
+and in a cache it is airtight: nobody publishes a marker they did not earn,
+because computing it was the only way to know it.
+
+**A labor market inverts the incentive.** If I ask and you compute and I do not
+recompute, then publishing `authenticity → garbage` is strictly cheaper than
+computing honestly, and the marker is perfectly well-formed — same shape, same
+hash discipline, no way to tell from the bytes. Content addressing proves *what
+was asked* and *what you sent*; it cannot prove you did the work.
+
+So: **collapsed compute is sound as a memo table and unsound as an oracle.**
+`instant-computing.md:7`'s *"no result ever needs to be trusted"* is true in the
+first regime and false in the second. Any farm-out design must say which regime
+it is in.
+
+### The doctrine's answer exists, and it is not wired up
+
+`collapsed-compute.md:241-255` anticipates this precisely — trusted authorities
+vouch for compositions, and **`SignatureStore.isTrusted(sig)` is named "the
+trust boundary" three times.**
+
+**`isTrusted` has zero call sites.** It is defined at
+[`signature-store.ts:35`](../hypercomb-core/src/core/signature-store.ts:35) and
+called nowhere in the source tree — the only other occurrences in the repo are a
+worktree copy of the same file and unrelated DOM/Pixi typings. Its sibling
+`verify` short-circuits to `true` on set membership without hashing, and also
+has no callers, while `trustAll` persists a set to localStorage that is restored
+unvalidated.
+
+This is the same decoy flagged in **Where the guarantee stops** — but it is
+load-bearing for far more than the admission path. **The trust boundary the
+entire shared-compute story rests on is a stub.** Nothing is broken today,
+because nothing delegates computation yet. The moment something does, the
+doctrine will read as though a boundary exists.
+
+### What is actually needed is small
+
+Not consensus. **Attribution.**
+
+`ComputationReceipt`
+([`computation-receipt.ts`](../hypercomb-core/src/core/computation-receipt.ts))
+is already most of the way there: `{inputSignature, functionSignature,
+outputSignature, timestamp}`. Note its shape — because `timestamp` sits inside
+the canonical JSON that gets signed, **two nodes computing the same `f(x)`
+produce different receipt signatures.** That is wrong for a cache key and right
+for an attestation, which tells you what the primitive already is. It is missing
+only a signer.
+
+| Add | Gets you |
+|---|---|
+| `by: <pubkey>` + a signature over the triple | a claim someone is **accountable** for |
+| ask k nodes, compare `(input, function, output)` | disagreement that is **detectable and attributable**, O(k) |
+| a `pure` declaration on `MachineGrammar` | eligibility to be farmed out at all (the optimize-phase litmus, enforced) |
+
+Reputation, not mining. And the comparison key is the **triple**, never the
+receipt signature — the timestamp makes receipts deliberately non-identical.
+
+*Open: is `ComputationReceipt` an attestation or a cache key? It is currently
+shaped as the former and described as the latter. Deciding that settles whether
+`timestamp` stays inside the signed canonical form.*
+
+### The admission policy: reach bounds damage, scope bounds disclosure
+
+**Direction (Jaime, 2026-09-03): a per-hive policy filtering what a remote
+caller may do — strip `destructive`, perhaps strip `additive` too, leave reads,
+and attach a scope.**
+
+The classifier already exists: `MachineGrammar.reach` is
+`additive | editing | destructive`, and the insertion point exists too —
+`callableBehaviours()` is *already* "live census ∩ policy". A remote policy is a
+second intersection at that same seam, default-deny like the first. This is
+buildable now.
+
+Three things that must be true before it is a security control rather than a
+convenience:
+
+1. **`reach` becomes security-critical the moment it is a remote filter.**
+   Today it is catalogue metadata, self-declared by the behaviour author, and a
+   wrong value costs a misleading sentence. As an admission filter, a behaviour
+   declaring `additive` while actually removing something **is** the bypass.
+   That is tolerable inside a vetted package network — it is exactly what the
+   vetting is for — and intolerable outside one. Either way the field's status
+   changes, and `machine-grammar.ts` should say so where the field is declared.
+2. **Reject the plan; never filter it.** "Anything that evaluates to a delete
+   gets discarded" is the one shape to avoid: strip line 3 of a five-line plan
+   and you execute 1, 2, 4, 5 — a plan nobody authored, with a receipt that
+   cannot honestly describe it. The existing parser already settled this
+   principle for a different reason (*"no mutation occurs here, so one invalid
+   tail cannot leave a half-run prefix"*). Admission must inherit it: **one
+   refused line refuses the whole plan.**
+3. **Read-only is not the safe floor it sounds like.** Reach bounds what a
+   caller can *break*; it does nothing about what they can *see*, and reads are
+   precisely the disclosure channel — success/failure over any verb is an
+   oracle that enumerates a hive without writing anything. A read-only remote
+   policy over a whole hive is a full disclosure surface with a reassuring
+   name.
+
+**So the two axes are not interchangeable, and the less obvious one matters
+more.** Reach without scope gives a caller who cannot damage you and can read
+everything. Scope without reach gives a caller confined to a branch, where even
+a destructive verb costs only that branch. **Scope is the stronger primitive**,
+it is the one still missing, and its unit already exists: the branch, which is
+already how publishing, marks and stated encryption granularity are cut.
+
 ## Not this
 
 - **No remote execution of grammar.** No host runs a behaviour, holds a
@@ -485,7 +905,9 @@ thirty seconds, not three.
   grammar only: broader command-line forms are stateful UI input, not a
   stance-independent seam.
 - **No named file as a discovery surface** — the pool is the address.
-- **No removal verbs for machines** — additive by construction.
+- **No verb a model can reach that the participant cannot see land.** Removal
+  is offered; silence about removal is not. Reach is stated in the catalogue
+  and destructive behaviours confirm at their own door.
 - **No trust in a model-supplied snapshot.** Freshness is host-kept.
 - **No receipt for work that did not happen.**
 - **No citing `SignatureStore.verify`** as the integrity gate.
@@ -501,12 +923,18 @@ thirty seconds, not three.
 - The `community:hosts` record shape is implemented **twice, byte-identically**
   (essentials and runtime) because the two shells share the pool by address and
   cannot import each other. Correct today; a drift hazard forever.
-- **Neither `host:packages` nor `community:hosts` is in `SEED_MEANINGS`**
-  ([pool-registry.ts:242](../hypercomb-core/src/core/pool-registry.ts:242)), so
-  `isPoolAddress` does not recognise these directories until some path derives
-  their address at runtime. Anything walking or pruning the OPFS root before
-  host code has run can still mistake `sign('community:hosts')` for a lineage
-  sigbag — **exactly the incident class the registry was built to stop.**
+- ~~**Neither `host:packages` nor `community:hosts` is in `SEED_MEANINGS`**~~
+  **CLOSED 2026-09-03.** Both are seeded, and the sweep that went looking for
+  them found *thirteen* meanings missing rather than two — `chat:blurbs`,
+  `chat:streams`, `community:hosts`, `computed:genome`, `hidden:items`,
+  `host:packages`, `insights:catalog`, `llm:providers`, `mobile:roots`,
+  `notes:marks`, `receipts:prune`, `search:index`, `thumbnails:hex` — so the
+  registry recognised 44 of the 53 pools the tree actually derives. The seed
+  is now a superset (58, the extra being reserved spellings), and two ratchets
+  in `doctrine.spec.ts` hold it there: one requires every constant handed to a
+  pool call to be named `*MEANING*`/`*POOL*`, the other asserts the seed covers
+  every meaning those constants spell. The prune guards were not touched — the
+  seed was the fix, not the guard.
 - **The relay's immutability test is an unanchored substring match**
   (`/[a-f0-9]{64}/i` over the path), giving a one-year `immutable` header to any
   path merely *containing* 64 hex. The mutable pool listing escapes only
@@ -543,8 +971,122 @@ reader will otherwise hit alone.
 
 ## Owed
 
-- **Commit.** `executePublicCanonical` does not exist in HEAD. Every gate in
-  *The round* rests on uncommitted code, while the bridge's wide door ships.
+**The clear-text protocol's backlog, in the order that unblocks the most:**
+
+- **A reader for `layer.docs.bees`.** The build emits a full machine-readable
+  behaviour reference — commands, aliases, and grammar examples with meanings —
+  into every signed layer, and nothing reads it. This is the protocol spec,
+  already generated and already replicating. Writing the reader also retires
+  hand-maintained `slash-behaviour-reference.md` as a source of truth, which has
+  already drifted.
+- **`machine` declarations on behaviours that already exist.** About eight
+  declare one today. This, not the wire, is what bounds what an agent can say.
+  *(Owned by `every-act-has-a-word.md` — that is the checklist; this entry only
+  records why the protocol depends on it.)*
+- **`#REMOTE_INTENTS` → behaviours.** The bridge's 8-intent allowlist is the
+  written-down census of actions with only a pointer path. Each is a behaviour
+  that does not exist yet; converting them dissolves the allowlist into the
+  census.
+- **Teach the pool reader the difference between unknown and absent.** It
+  answers "publishes nothing" for an honest empty pool, a 404, an SPA fallback
+  and a 200-to-everything host alike — one fact and three kinds of ignorance.
+  `abe24da2a` shipped the discipline that makes this collapse impossible for
+  vocabulary claims; the pool reader is the same disease without the cure. Note
+  the fix is *not* signing the listing — it is refusing to mint "no" from
+  anything but a positive, complete answer.
+- **If the behaviour reference ever needs to survive a hostile host**, reuse the
+  signed vocabulary claim's discipline rather than minting a second scheme —
+  and note `PayloadCanonical`/`BeePayloadV1` (`hypercomb-core/src/payload-
+  canonical.ts`) is dormant prior art for hashing a behaviour's *declaration*
+  (name + grammar) rather than its bundler output, which is the stable identity
+  a bee signature is not.
+- **An operation nonce, if and only if words ever arrive from off-machine.**
+  Nothing in the tree resists replay and there is nothing to reuse — `treeEpoch`
+  is in-memory and starts at 0, snapshots are deliberately non-transportable.
+  Do not build this before it is needed; do not ship a remote surface without
+  it.
+
+- ~~**Commit.** `executePublicCanonical` does not exist in HEAD.~~ **Resolved
+  2026-09-03** by `d3bf7acda`; the gate ships alongside the wide door.
+- **Publishing a grammar surface.** Everything in this document assumes the
+  caller is the participant's own machine — loopback is what makes both the
+  bridge position and the act channel's gates hold. Exposing `QueenBee.machine`
+  declarations to *remote* callers is a different system, and the declaration
+  alone does not carry it. Three axes that "public" currently conflates need
+  separating first: **what** may be called (declared — exists), **who** may
+  call (missing), and **against which scope** (missing). Two hazards are
+  specific to this architecture rather than generic:
+  - **Additive is not non-disclosing.** A purely additive verb is still an
+    oracle: success/failure over `/title x = y` answers "does tile `x` exist".
+    A remote caller who can probe can enumerate a hive without ever writing
+    anything meaningful. The observation channel already reasons this way —
+    structure only, never contents — but an *action result* is a stronger
+    oracle than a tree read, and nothing currently treats it as one.
+  - **Discovery unions; authority must not.** A pool is a union across hosts,
+    which is exactly right for finding a style and exactly wrong for "safe to
+    run in public." If a community-maintained safe-set is a plain union,
+    anyone in the community can widen everyone's attack surface. Such a set
+    needs weighting by author and host trust (the sybil rule already stated in
+    `pools-across-hosts.md`), or a signature from a specific someone — not
+    membership alone.
+  - Prior art for the resource half is already in the tree: `host-ai.md`'s
+    route with `AI_WRITERS` empty accepts any valid signer and **the operator
+    pays**. Compute exposure without admission control has failed here once.
+
+### The trusted package network, and the litmus it already has
+
+**Direction (Jaime, 2026-09-03): a trusted package network, where joining is
+taking part in the shared computing machine.** The model is sound and this
+architecture carries it better than a distro does — content addressing
+collapses "trust the maintainer, the transport, and that the binary matches
+the source" into one check that runs locally on admission.
+
+Two things that network **cannot** carry, and one it can:
+
+- **It answers "is this code safe", not "safe against what".** A vetted package
+  is a code-integrity claim. Debian's `grep` is safe; `grep` pointed at your
+  keys still leaks. A distro supplies the missing half through process
+  boundaries and file permissions. Hypercomb has no such boundary — a
+  behaviour reaches the whole hive through one Store and one root, by design.
+  **The missing primitive is not more trust, it is SCOPE**, and the unit
+  already exists: the branch. Publishing is per-branch, marks are per-branch,
+  encryption granularity is stated per-branch. "Remote calls run against *this
+  branch*, never your hive" is expressible in primitives that ship today.
+- **Membership must not be transitive, and must be revocable.** Trust the
+  *packages*, weighted by who signed them — not the network as a blob, which
+  makes joining a blank cheque and one compromise everyone's compromise.
+
+And the one it carries genuinely — stated carefully, because the tempting
+version of this claim is false:
+
+**Content addressing gives detectable, attributable disagreement. It does not
+give verifiable computation.** A signature over a result proves *these are the
+bytes that node sent* and *these are exactly the inputs it was given*. It does
+not prove the bytes are the right answer for those inputs. Verifying `f(x)`
+without trusting the executor requires one of: verification cheaper than
+execution (search-shaped work, or a proof), redundant execution plus agreement,
+or a trusted node. Content addressing supplies none of those.
+
+What it *does* supply is worth having and is rarer than it sounds: because
+inputs are named by hash, every node provably computed over **the same
+inputs** — so if two nodes return different result signatures, you know
+someone is wrong, and you know precisely what they were asked. Most
+volunteer-compute systems spend real effort establishing just that much before
+they can even compare answers. Here it is free.
+
+So the trust surface shrinks but does not vanish. A node still needs a
+reputation for **correctness** unless the workload is verify-cheap or run
+redundantly. What content addressing removes is ambiguity about *what was
+asked* — never the need to check the answer.
+
+**But only for pure derivations — and the test for that is already written.**
+The optimize-phase litmus (`optimize-phase.md`) asks: *"Could a cold client
+rebuild this from layers alone?"* That same question is the distributed-compute
+litmus. **Yes** → the work is a pure derivation over signed inputs: a stranger
+can compute it and you can check their answer. **No** → it is state, it depends
+on a clock or live hive or the network, its result is unverifiable, and it must
+stay home. The classifier for what may be farmed out already exists; it was
+written for a different purpose.
 - **The bridge's authority model.** `#submit` has no allowlist. Either it gets
   one, or this document's position — loopback plus explicit opt-in is the whole
   boundary — must be stated where a reader of the bridge will find it.

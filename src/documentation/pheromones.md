@@ -2,7 +2,9 @@
 
 **Status: DESIGN — pinned 2026-07-09 (Jaime). Not built.**
 Companions: `public-content-endpoint.md` (the shelf this curates),
-`optimize-phase.md` (where fields are minted).
+`optimize-phase.md` (where fields are minted),
+`intake-filter.md` (the other half — marks filtering what you TAKE IN, where
+this doc covers marks making what you deposit FOUND).
 
 ## Pheromones ARE the sharing layer (Jaime, 2026-07-09)
 

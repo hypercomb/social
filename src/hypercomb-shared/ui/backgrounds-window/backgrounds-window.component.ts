@@ -60,6 +60,13 @@ type ThemesLike = EventTarget & {
    *  A build from before this existed falls back to the flat list. */
   half?(which: 'screen' | 'tiles', all?: boolean): readonly ThemeLike[]
   mood?(id: string): 'light' | 'dark' | null
+  /** Bare a half — or both. Optional: a build from before `off` meant the
+   *  tiles half too simply has a window without the None card. */
+  clear?(half?: 'screen' | 'tiles'): Promise<string>
+  /** Is that half wearing nothing? Asked of the services that paint. */
+  bare?(which: 'screen' | 'tiles'): boolean
+  /** Is this look the one worn on that half? */
+  worn?(id: string, which: 'screen' | 'tiles'): boolean
 }
 type CanvasLike = EventTarget & {
   picture: string | null
@@ -305,6 +312,28 @@ export class BackgroundsWindowComponent implements OnDestroy {
   /** The groups that dress TILES. */
   readonly tileGroups = computed<LookRow[]>(() => this.#looks('tiles'))
 
+  /** Is the screen wearing nothing — no drawn look and no picture? This is
+   *  what a new install opens as, so the card that says so has to be on the
+   *  list: a state you can only reach by never having chosen is a state you
+   *  cannot get back to. */
+  readonly screenBare = computed<boolean>(() => {
+    this.revision()
+    return this.#themes()?.bare?.('screen') === true
+  })
+
+  /** Is any group handing pictures to blank tiles? */
+  readonly tilesBare = computed<boolean>(() => {
+    this.revision()
+    return this.#themes()?.bare?.('tiles') === true
+  })
+
+  /** Can this essentials build bare a half at all? An older one has no
+   *  `clear`, and a card that does nothing is worse than no card. */
+  readonly canBare = computed<boolean>(() => {
+    this.revision()
+    return typeof this.#themes()?.clear === 'function'
+  })
+
   /** Is the chrome a bright look? What the filter turns on, and what the
    *  toggle's own label has to say out loud. */
   readonly lightWorld = computed<boolean>(() => {
@@ -344,7 +373,11 @@ export class BackgroundsWindowComponent implements OnDestroy {
       // and the card is the only place that can warn you.
       dresses: [theme.screen ? 'screen' : null, theme.tiles ? 'tiles' : null, theme.chrome ? 'chrome' : null]
         .filter(Boolean).join(' + '),
-      active: theme.id === active,
+      // WHICH HALF WEARS WHAT is the service's to say. One `active` word
+      // described both halves, so baring one of them on its own left the
+      // other section's card still lit under a screen you could see was
+      // empty. Older builds have no `worn` and keep the single word.
+      active: service.worn ? service.worn(theme.id, which) : theme.id === active,
     }))
   }
 
@@ -370,6 +403,14 @@ export class BackgroundsWindowComponent implements OnDestroy {
   section(key: string): void {
     this.sections.toggle(key)
     if (this.sections.isOpen('tiles')) void this.#loadPictures()
+  }
+
+  /** Wear nothing on this half. Nothing is removed: a picture already on a
+   *  tile stays on it, and the groups stay on the list — the pool simply
+   *  stops dressing what is still blank. */
+  async bareHalf(which: 'screen' | 'tiles'): Promise<void> {
+    await this.#themes()?.clear?.(which)
+    this.revision.update(n => n + 1)
   }
 
   /** Wear a look. The theme decides which halves move — the card says which,

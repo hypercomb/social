@@ -3,6 +3,7 @@
 
 import { EffectBus } from '@hypercomb/core'
 import { CompletionUtility } from './completion-utility'
+import { awaitFirstTilePaint } from './first-tile-paint'
 
 type BootstrapStep = {
   index: number
@@ -106,9 +107,12 @@ export class BootstrapHistory {
     // metadata can make a path expose many bees, and pulsing them while the
     // current layer is still resolving steals the same main thread and OPFS
     // queue the renderer needs. Subscribe before dispatch so a very fast paint
-    // cannot race past the barrier.
+    // cannot race past the barrier. The waiting rule and its give-up valve
+    // live in `first-tile-paint.ts`, one copy for both shells: a barrier that
+    // can hang disables every background behaviour for the life of the page,
+    // so it is worth exactly one implementation.
     const targetLocationKey = segments.length ? `/${segments.join('/')}` : '/'
-    const firstTilePaint = this.awaitFirstTilePaint(targetLocationKey)
+    const firstTilePaint = awaitFirstTilePaint(targetLocationKey)
     this.dispatchPopState()
 
     // Fire the landing intent on the first `synchronize` — emitted once all
@@ -196,30 +200,6 @@ export class BootstrapHistory {
       }
     }
   }
-
-  private awaitFirstTilePaint = (targetLocationKey: string): Promise<void> => new Promise<void>((resolve) => {
-    let off: (() => void) | undefined
-    let done = false
-    const finish = (): void => {
-      if (done) return
-      done = true
-      try { off?.() } catch { /* already released */ }
-      resolve()
-    }
-    const maybeOff = EffectBus.on<{ settled?: boolean; locationKey?: string }>('render:cell-count', payload => {
-      if (payload?.locationKey !== targetLocationKey) return
-      // Only the renderer's final geometry/empty verdict releases background
-      // work. Earlier cell-count notifications intentionally omit `settled`;
-      // accepting undefined here released the OPFS-wide script-preloader walk
-      // while the current layer was still resolving and starved first paint.
-      if (payload?.settled !== true) return
-      // Let the renderer's buffer push complete before bee pulses begin.
-      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => finish())
-      else queueMicrotask(finish)
-    })
-    off = typeof maybeOff === 'function' ? maybeOff : undefined
-    if (done) off?.()
-  })
 
   private dispatchPopState = (): void => {
     try {

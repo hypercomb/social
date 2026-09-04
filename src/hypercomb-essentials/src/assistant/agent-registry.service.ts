@@ -48,7 +48,7 @@
 // Stop markers are swept by the next `seed()` once they are older than an
 // hour — by then either a responder saw it or none was listening.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, classifyDirectoryEntry } from '@hypercomb/core'
 import { kindFor, type AgentKind } from '../presentation/avatars/agent-waggle.js'
 import { identifyModel } from '../presentation/avatars/agent-model.js'
 
@@ -473,6 +473,13 @@ export class AgentRegistry extends EventTarget {
       try {
         const sigs = await store.listOptimizations()
         for (const sig of sigs.slice(0, SEED_SCAN_LIMIT)) {
+          // DELETE ONLY ON A POSITIVE MATCH. This loop is the shipped shape of
+          // a derived-cache wipe: it enumerates sign('optimization') — a BARE
+          // WORD, so also the address of a tile named `optimization` — and
+          // removes what it does not recognise. Every step below must be a
+          // reason to KEEP, so an unreadable member, an unparseable member or
+          // a member of some other shape survives untouched.
+          if (classifyDirectoryEntry(sig) !== 'member') continue
           try {
             const blob = await store.getOptimization(sig)
             if (!blob) continue

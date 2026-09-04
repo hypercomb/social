@@ -4,6 +4,20 @@
 // its one payload is an ordered sequence of native slash-beehavior grammars.
 // The envelope is deliberately tiny so it can be shed later without changing
 // the language or the executor underneath it.
+//
+// THE VOCABULARY IS THE CENSUS, NOT A TABLE HERE. This file used to hold
+// `CALLABLE_FORMS` — five behaviour names and their argument shapes, written
+// by hand, in the shell, beside the parser. It was wrong the way a second copy
+// of a list is always wrong: it drifted toward less than exists. A participant
+// asked a local model to delete a tile and was told, correctly and uselessly,
+// that Hypercomb has no delete behaviour — because `/remove` was not one of the
+// five, though it has shipped for months and any participant can type it.
+//
+// So authority moved TO each behaviour (`QueenBee.machine`, contract in core's
+// `MachineGrammar`) and this file derives from the live census. It knows how to
+// read a declaration; it knows no behaviour names. Default-deny is unchanged —
+// no declaration, no call — but the decision now belongs to the author who
+// wrote the argument parser, not to a distant list that knew only a name.
 
 export const HYPERCOMB_GRAMMAR_TOOL_NAME = 'hypercomb_act'
 
@@ -28,21 +42,24 @@ export const hypercombContextKey = (
 const MAX_GRAMMARS = 12
 const MAX_GRAMMAR_LENGTH = 1_000
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/
-const ACCENT_PRESETS = new Set(['glacier', 'bloom', 'aurora', 'ember', 'nebula'])
-const HEX_COLOUR = /^#[0-9a-f]{3}(?:[0-9a-f]{1}|[0-9a-f]{3}|[0-9a-f]{5})?$/i
-
 /**
- * Machine authority is default-deny. These are bounded hive edits whose
- * arguments are validated below; discovery flags such as `hidden` are not an
- * authorization boundary and are checked independently.
+ * What a behaviour tells a machine about itself — structurally core's
+ * `MachineGrammar`, restated here so this module stays pure, dependency-free
+ * and independently testable.
  */
-/** Forms are an authorization surface, not a second command reference. */
-const CALLABLE_FORMS: Readonly<Record<string, { forms: string; example: string }>> = {
-  create: { forms: '<name> | <parent>/<child>', example: '/create roadmap' },
-  keyword: { forms: '<tag> | <tag>(#hexcolor) | [<tag>, <tag>, ...]', example: '/keyword urgent' },
-  accent: { forms: '<preset> | <tag> <preset> | [<tag>, <tag>] <preset>', example: '/accent ember' },
-  postit: { forms: 'here <text>', example: '/postit here First draft' },
-  title: { forms: '<text> | <cell> = <text>', example: '/title roadmap = Road map' },
+export type HypercombMachineGrammar = {
+  /** Argument shape, in the notation `options` uses. Empty when there is none. */
+  readonly forms: string
+  /** One complete canonical line. */
+  readonly example: string
+  /** True when a bare verb, with no argument, is a real call. */
+  readonly bare?: boolean
+  /** How far a call reaches. Labelling for the catalogue, not a tier. */
+  readonly reach?: 'additive' | 'editing' | 'destructive'
+  /** One clause the catalogue appends verbatim: what really happens. */
+  readonly consequence?: string
+  /** The behaviour's own argument rule: a reason to refuse, or undefined. */
+  readonly refuse?: (args: string) => string | undefined
 }
 
 export type HypercombBehaviour = {
@@ -53,6 +70,8 @@ export type HypercombBehaviour = {
   readonly prototype?: boolean
   readonly options?: readonly string[]
   readonly examples?: readonly { readonly input: string; readonly result: string }[]
+  /** Present exactly when this behaviour's author offered it to machines. */
+  readonly machine?: HypercombMachineGrammar
 }
 
 export type HypercombToolCall = {
@@ -164,7 +183,12 @@ export class HypercombActionExecutionError extends Error {
   }
 }
 
-/** The live public census intersected with the explicit machine policy. */
+/**
+ * The live public census, narrowed to behaviours that declared themselves
+ * machine-callable. Discovery flags are checked independently of the
+ * declaration: a behaviour concealed from the palette (`hidden`) or still in
+ * the workshop (`prototype`) is never offered, however it declared itself.
+ */
 export const callableBehaviours = (
   entries: readonly HypercombBehaviour[],
 ): readonly HypercombBehaviour[] => {
@@ -172,7 +196,9 @@ export const callableBehaviours = (
   const result: HypercombBehaviour[] = []
   for (const entry of entries) {
     const name = String(entry?.name ?? '').trim().toLowerCase()
-    if (!name || seen.has(name) || !Object.hasOwn(CALLABLE_FORMS, name)) continue
+    if (!name || seen.has(name)) continue
+    const machine = entry.machine
+    if (!machine || typeof machine.forms !== 'string' || typeof machine.example !== 'string') continue
     if (entry.hidden === true || entry.prototype === true) continue
     seen.add(name)
     result.push({ ...entry, name })
@@ -182,8 +208,15 @@ export const callableBehaviours = (
 
 const catalogue = (entries: readonly HypercombBehaviour[]): string =>
   callableBehaviours(entries).map(entry => {
-    const policy = CALLABLE_FORMS[entry.name]
-    return `/${entry.name} ${policy.forms} - ${entry.description ?? entry.name}. Example: ${policy.example}`
+    const machine = entry.machine!
+    const forms = machine.forms.trim()
+    // The consequence is QUOTED, never composed. This module knows how far a
+    // verb reaches but not what reaching there does, and a fixed sentence per
+    // reach value was how the catalogue came to promise a confirmation
+    // `/remove` does not perform for a leaf tile. If a behaviour says nothing
+    // here, the catalogue says nothing.
+    const note = machine.consequence?.trim() ? ` ${machine.consequence.trim()}` : ''
+    return `/${entry.name}${forms ? ` ${forms}` : ''} - ${entry.description ?? entry.name}.${note} Example: ${machine.example}`
   }).join('\n')
 
 /** One transport tool; Hypercomb grammar remains the actual action language. */
@@ -234,71 +267,9 @@ const parseArguments = (raw: unknown): Record<string, unknown> => {
   return value as Record<string, unknown>
 }
 
-const validKeywordItem = (raw: string): boolean => {
-  const match = raw.trim().match(/^([^()[\],~]+?)(?:\(([^)]+)\))?$/)
-  return !!match?.[1].trim() && (match[2] === undefined || HEX_COLOUR.test(match[2].trim()))
-}
-
-const validateCommandArgs = (command: string, args: string): void => {
-  if (command === 'create') {
-    const parts = args.split('/').map(part => part.trim())
-    if (args.includes('\\') || parts.some(part => !part || part === '.' || part === '..')) {
-      throw new HypercombGrammarError('/create needs one or more explicit tile names separated by /')
-    }
-    return
-  }
-
-  if (command === 'keyword') {
-    if (args.includes('~')) {
-      throw new HypercombGrammarError('/keyword model actions cannot remove tags')
-    }
-    const bracket = args.match(/^\[(.*)\]$/)
-    const items = bracket ? bracket[1].split(',') : [args]
-    if (!items.length || items.some(item => !validKeywordItem(item))) {
-      throw new HypercombGrammarError('/keyword needs additive tags, optionally with a hexadecimal colour')
-    }
-    return
-  }
-
-  if (command === 'accent') {
-    if (args.includes('~')) {
-      throw new HypercombGrammarError('/accent model actions cannot remove tag accents')
-    }
-    const normalized = args.toLowerCase()
-    const bracket = normalized.match(/^\[([^\]]+)\]\s+(\S+)$/)
-    if (bracket) {
-      const tags = bracket[1].split(',').map(tag => tag.trim()).filter(Boolean)
-      if (tags.length && ACCENT_PRESETS.has(bracket[2])) return
-    } else {
-      const parts = normalized.split(/\s+/)
-      if ((parts.length === 1 && ACCENT_PRESETS.has(parts[0]))
-        || (parts.length === 2 && !!parts[0] && ACCENT_PRESETS.has(parts[1]))) return
-    }
-    throw new HypercombGrammarError('/accent needs a known preset: glacier, bloom, aurora, ember, or nebula')
-  }
-
-  if (command === 'postit') {
-    if (!/^here\s+\S/i.test(args)) {
-      throw new HypercombGrammarError('/postit model actions must use: /postit here <text>')
-    }
-    return
-  }
-
-  if (command === 'title') {
-    const equals = args.indexOf('=')
-    if (equals === -1) return
-    const target = args.slice(0, equals).trim()
-    const title = args.slice(equals + 1).trim()
-    if (!target || target.includes('/') || target.includes('\\')) {
-      throw new HypercombGrammarError('/title needs one child tile name before =')
-    }
-    if (!title) throw new HypercombGrammarError('/title model actions cannot clear titles')
-  }
-}
-
 const parseLine = (
   raw: unknown,
-  allowed: ReadonlySet<string>,
+  allowed: ReadonlyMap<string, HypercombMachineGrammar>,
   index: number,
 ): HypercombAction => {
   if (typeof raw !== 'string') {
@@ -321,14 +292,22 @@ const parseLine = (
   }
   const command = match[1]
   const args = (match[2] ?? '').trim()
-  if (!allowed.has(command)) {
+  const machine = allowed.get(command)
+  if (!machine) {
     throw new HypercombGrammarError(`/${command} is not available for model actions`)
   }
-  if (!args) throw new HypercombGrammarError(`/${command} needs an explicit argument`)
-  // Validate the exact additive/editing sub-language each Queen can perform;
-  // native parsers that normalize bad input into a no-op must not earn a
-  // misleading model receipt.
-  validateCommandArgs(command, args)
+  // An argument is required unless the behaviour said a bare verb means
+  // something entire on its own. A model that guesses a target is worse than
+  // a model that is refused.
+  if (!args && machine.bare !== true) {
+    throw new HypercombGrammarError(`/${command} needs an explicit argument`)
+  }
+  // The behaviour's OWN rule, stated by the author who wrote its parser.
+  // Native parsers normalize bad input into a no-op, and a clean no-op earns
+  // the model a receipt claiming work that never happened; a receipt must
+  // never lie, so a behaviour states here what it cannot act on.
+  const refusal = machine.refuse?.(args)
+  if (refusal) throw new HypercombGrammarError(refusal)
   return { grammar, command, args }
 }
 
@@ -373,7 +352,7 @@ export const parseHypercombGrammars = (
   if (grammars.length < 1 || grammars.length > MAX_GRAMMARS) {
     throw new HypercombGrammarError(`grammars must contain between 1 and ${MAX_GRAMMARS} lines`)
   }
-  const allowed = new Set(callableBehaviours(entries).map(entry => entry.name))
+  const allowed = new Map(callableBehaviours(entries).map(entry => [entry.name, entry.machine!] as const))
   const actions = grammars.map((line, index) => parseLine(line, allowed, index))
   return { actions }
 }

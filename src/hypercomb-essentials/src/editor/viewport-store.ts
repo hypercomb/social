@@ -28,7 +28,7 @@
 // No OPFS folder handle (`<dir>/0000`) is required, which is what made
 // the old path silently no-op for sub-layers and racily for root.
 
-import { EffectBus, SignatureService } from '@hypercomb/core'
+import { EffectBus, SignatureService, classifyDirectoryEntry } from '@hypercomb/core'
 import type { ViewportSnapshot } from '../navigation/zoom/zoom.drone.js'
 import { ROOT_NAME } from '../history/history.service.js'
 import { readTilePropertiesAt } from './tile-properties.js'
@@ -272,6 +272,13 @@ export const writeViewportAt = async (
   const merged = await serialize(async (): Promise<ViewportSnapshot | null> => {
     if (snapshot === null) {
       _warmCache.delete(sig)
+      // sign('viewport') is a BARE WORD, so this pool's address is also the
+      // molecule of a tile named `viewport`. A single named removal stays
+      // legal, but only for a MEMBER — never a marker, never an author bucket.
+      if (classifyDirectoryEntry(sig) !== 'member') {
+        console.warn(`[viewport] refusing to clear "${sig}" — it is not a member name`)
+        return null
+      }
       try { await dir.removeEntry(sig) } catch { /* already absent */ }
       // Drop the legacy copy too (drain source) — cleared means cleared.
       try { await (await legacyViewportDir())?.removeEntry(sig) } catch { /* absent / drained */ }

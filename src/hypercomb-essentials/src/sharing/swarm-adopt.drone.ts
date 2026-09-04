@@ -55,6 +55,7 @@ import {
   isAdoptTombstoned,
 } from './adopted-roots.js'
 import { setDivergedLabels, clearPeerDivergence } from './peer-divergence.js'
+import { allows as intakeAllows } from '../pheromones/intake-filter.js'
 
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
@@ -572,6 +573,33 @@ export class SwarmAdoptDrone extends Drone {
       return true
     }
 
+    // THE INTAKE GATE, and it belongs HERE — on the single acquisition
+    // primitive — rather than on one of its callers.
+    //
+    // It sat on `#adoptPageTile`, which is one of FOUR paths into this
+    // function. The others are the wand (`#onWand`, the only take a finger can
+    // perform), the retry, and the child fold of an adopted branch — all of
+    // them arriving content, none of them gated. Worse, the wand's own
+    // `wandEligible` check is SYNCHRONOUS and so can only answer from marks
+    // already in memory, which for a peer's freshly-arrived signature is
+    // nothing: the half that can actually refuse foreign bytes was exactly the
+    // half that path skipped. Two takes of the same bytes disagreed — refused
+    // through the adopt panel, admitted by a click.
+    //
+    // Below the held-here return on purpose: a tile already in the hive is not
+    // arriving, and re-judging it would refuse a SYNC of the participant's own
+    // content. The gate is for what is coming in.
+    //
+    // BY THE LAYER SIG ALONE. `segments` was passed too, and the location
+    // carrier behind it describes whatever the participant holds at that path
+    // — not the bytes arriving. The gate reads content addresses now; a fold
+    // whose entry carries no layerSig is judged unmarked, which is what an
+    // offering nobody can name honestly is.
+    if (!await intakeAllows({ sig: SIG_RE.test(layerSig) ? layerSig : '' })) {
+      this.#visitStage('filtered', { name })
+      return false
+    }
+
     // Viewing history — the committer refuses rewound writes; don't try.
     // state.rewound is the canonical test (same as #doCommitBranch) —
     // currentLayerSig is a POSITION and can be set in perfectly normal
@@ -711,6 +739,20 @@ export class SwarmAdoptDrone extends Drone {
     let inZone = false
     try { inZone = localStorage.getItem('hc:mesh-public') === 'true' } catch { /* private default */ }
     if (!inZone) return false
+    // NO INTAKE GATE HERE, deliberately — it was added and is now removed.
+    //
+    // `wandEligible` is not an adoption predicate. It has three consumers:
+    // SelectionInputDrone asks it on POINTERDOWN (is this press a take, and
+    // must select stand down?), and TileOverlayDrone asks it both at the entry
+    // choke point and to paint the TAKEABLE SHADE. Filtering here therefore
+    // changed navigation and how tiles LOOK, which is far beyond deciding what
+    // enters the hive — a tile would have quietly stopped reading as takeable
+    // and the press would have fallen through to selection with no explanation.
+    //
+    // It could not have done the job anyway: this predicate is synchronous by
+    // contract, so it can only read the location carrier, which holds nothing
+    // for a peer's tile. The gate that can actually refuse foreign bytes is the
+    // union read in `#foldPageTile`, at the commit.
     return this.#peerEntryFor(name) !== null
   }
 
@@ -861,6 +903,12 @@ export class SwarmAdoptDrone extends Drone {
     opts?: { entry?: Record<string, unknown> | null; silent?: boolean },
   ): Promise<boolean> => {
     const at = this.#currentSegments()
+    // HELD HERE ALREADY? Then this is not intake at all — it is a SYNC of a
+    // tile the participant accepted at some earlier point, and the intake gate
+    // must not sit in front of it. Judging it would refuse an update to their
+    // own content the moment a filter excluded something about it, and would
+    // say "didn't keep it" about a tile sitting in their hive. The gate is for
+    // what is arriving, not for what has already been taken.
     if (await this.#isHeldHere(at, label)) {
       const entry = opts?.entry ?? this.#peerEntryFor(label, pubkey)
       const layerSig = String(entry?.['layerSig'] ?? '').trim().toLowerCase()
@@ -870,6 +918,11 @@ export class SwarmAdoptDrone extends Drone {
       })
       return true
     }
+    // The intake gate lives in `#foldPageTile` — the acquisition primitive all
+    // four take paths share. It ran here as well, on an entry resolved BEFORE
+    // its own await and then thrown away: the offer was re-resolved afterwards,
+    // so the gate could judge one entry while a different one was committed.
+    // One gate, on the primitive, judging the entry it is actually given.
     const entry = opts?.entry ?? this.#peerEntryFor(label, pubkey)
     if (!entry) {
       this.#rowOutcome(label, undefined, false, `couldn't keep "${label}" — it's no longer offered here`)

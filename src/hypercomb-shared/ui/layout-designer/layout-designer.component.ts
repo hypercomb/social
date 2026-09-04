@@ -58,6 +58,7 @@
 // and emits intents back. Every write is an effect, never a layer touch.
 
 import { registerShellSurface } from '../../core/shell-surface-registry'
+import { NgTemplateOutlet } from '@angular/common'
 import {
   Component, ElementRef, computed, effect, signal, untracked, viewChild,
   type OnDestroy,
@@ -81,6 +82,10 @@ import {
 /** Keyed so overlapping suppressions do not release one another. */
 const KEYBOARD_REASON = 'layout-pane'
 
+/** The edge the shelf docks against. One constant, so "the other side" is a
+ *  derivation and never a second opinion. */
+const SHELF_SIDE: 'left' | 'right' = 'left'
+
 /** One level of the arrangement, addressed by the hole path that reaches it. */
 interface LevelState {
   path: string[]
@@ -95,6 +100,11 @@ interface LevelState {
    *  level standing on its side is not that. */
   glyph: string
   variables: { name: string; value: string }[]
+  /** Where the parts sit along the axis, and how they sit across it. Resolved
+   *  by the one reader, so a level that has never said anything still answers
+   *  with where its parts actually are. */
+  justify?: string
+  align?: string
 }
 
 /** ONE AXIS OF THE FLEXBOX CONFIGURATION, with a live preview of THIS
@@ -115,6 +125,33 @@ interface AssetState {
   name: string
   glyph: string
   holes: number
+  /** What it is across every rename. Empty on a piece — a built-in is not the
+   *  participant's to rename or to put away. */
+  id?: string
+  /** The WORD it is gathered under. A group is a molecule the members wear,
+   *  never a folder holding them: this is the mark, and the group is whatever
+   *  wears it. */
+  group?: string
+  /** Put away. Still here, still in the delete area, comes back. */
+  hidden?: boolean
+}
+
+/** One word the shelf is wearing, and how many wear it. */
+interface GroupState {
+  name: string
+  address: string
+  count: number
+}
+
+/** One heading and the chips under it. Derived from the marks every read —
+ *  there is no group object anywhere for this to fall out of step with. */
+interface ShelfRow {
+  /** The word, or empty for the loose ones. */
+  word: string
+  /** `sign(word)` — the molecule this heading names. Empty while it is still
+   *  being derived, and on the loose row, which names no molecule at all. */
+  address: string
+  assets: AssetState[]
 }
 
 /** Which half of the shelf is showing. */
@@ -127,6 +164,7 @@ interface TemplateStateMsg {
   container?: string
   levels?: LevelState[]
   assets?: AssetState[]
+  groups?: GroupState[]
   dormant?: boolean
 }
 
@@ -137,6 +175,12 @@ const SHELF_KEY = 'hc:layout-shelf'
 /** How tall the properties are, in pixels. Chrome, not design: it says how
  *  much of the window you are giving the shelf, and it never reaches the hive. */
 const INSPECTOR_KEY = 'hc:layout-inspector-h'
+/** Whether the shelf is showing what has been put away. Chrome: hiding is a
+ *  fact about the creation, looking at what you hid is a fact about you. */
+const HIDDEN_KEY = 'hc:layout-show-hidden'
+/** Whether the properties are on the other edge. Chrome: where you keep a
+ *  control says nothing about the design it edits. */
+const ACROSS_KEY = 'hc:layout-props-across'
 
 /** The properties may not eat the whole window, and they may not be crushed
  *  out of usefulness either — the map plus one slider has a floor. */
@@ -179,6 +223,43 @@ const LAYOUT_DRAG_TYPE = 'application/x-hypercomb-layout'
  *  can never be dropped on the shelf. */
 const CREATION_DRAG_TYPE = 'application/x-hypercomb-creation'
 
+/**
+ * WHERE THE PARTS SIT — the two axes a participant reaches for constantly.
+ *
+ * The full vocabulary of every axis lives in the companion window, which is a
+ * GALLERY: it draws your container wearing each value, and that is what you
+ * open when you cannot decide between `space-around` and `space-evenly`. These
+ * are the ones you already know you want, and each is drawn as what it does —
+ * three marks in a box — rather than named, because "flex-end" is CSS's word
+ * for it and nobody thinks in it.
+ *
+ * The same variable, through the same intent, whichever window moved it.
+ */
+const DISTRIBUTE: readonly {
+  readonly axis: 'justify' | 'align'
+  readonly values: readonly { readonly value: string; readonly key: string }[]
+}[] = Object.freeze([
+  {
+    axis: 'justify',
+    values: Object.freeze([
+      { value: 'flex-start', key: 'start' },
+      { value: 'center', key: 'middle' },
+      { value: 'flex-end', key: 'end' },
+      { value: 'space-between', key: 'apart' },
+      { value: 'space-evenly', key: 'even' },
+    ]),
+  },
+  {
+    axis: 'align',
+    values: Object.freeze([
+      { value: 'flex-start', key: 'start' },
+      { value: 'center', key: 'middle' },
+      { value: 'flex-end', key: 'end' },
+      { value: 'stretch', key: 'fill' },
+    ]),
+  },
+])
+
 /** Slider bounds per variable, in rem. Gutters are small, rails are not. */
 const RANGE: Readonly<Record<string, readonly [number, number]>> = {
   space: [0, 4],
@@ -204,7 +285,7 @@ const HANDLES: readonly Handle[] = ['se']
 @Component({
   selector: 'hc-layout-designer',
   standalone: true,
-  imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective, RawHtmlDirective],
+  imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective, RawHtmlDirective, NgTemplateOutlet],
   templateUrl: './layout-designer.component.html',
   styleUrls: ['./layout-designer.component.scss'],
 })
@@ -226,6 +307,8 @@ export class LayoutDesignerComponent implements OnDestroy {
   readonly layout = signal('')
   readonly levels = signal<LevelState[]>([])
   readonly assets = signal<AssetState[]>([])
+  /** The words the shelf is wearing, in shelf order. */
+  readonly groups = signal<GroupState[]>([])
   /** How the active container BEHAVES — direction, wrap, justify, align.
    *  These used to be a second window docked on the far side of the screen;
    *  they are properties of the selected container, so they are in the
@@ -249,10 +332,86 @@ export class LayoutDesignerComponent implements OnDestroy {
     safeRead(SHELF_KEY) === 'creation' ? 'creation' : 'piece',
   )
 
+  /**
+   * THE PROPERTIES ARE ON THE OTHER EDGE.
+   *
+   * The shelf and the properties are two different acts on two different
+   * things — one is the library, the other is the container in front of you —
+   * and stacking them makes each one short. Sent across, the properties dock
+   * on the opposite edge and share that lane with the flex gallery, which is
+   * the same question at a greater depth; the shelf then gets the whole of the
+   * side it was crowding.
+   *
+   * It is the same markup either way (one `ng-template`, rendered in one place
+   * or the other). Two copies would drift, and the participant would find out
+   * which one had the newer control by pressing the wrong one.
+   */
+  readonly across = signal(safeRead(ACROSS_KEY) === 'on')
+
+  /** WHICH edge "across" is: the one the shelf is not on. The shelf docks left,
+   *  so this is the right — stated as a derivation rather than a constant, so
+   *  a shelf that ever moves takes this with it. */
+  readonly awaySide = computed<'left' | 'right'>(() => SHELF_SIDE === 'left' ? 'right' : 'left')
+
+  /** WHETHER WHAT HAS BEEN PUT AWAY IS SHOWING. Off by default: the whole
+   *  point of hiding a thing is that it stops being offered. */
+  readonly showHidden = signal(safeRead(HIDDEN_KEY) === 'on')
+
+  /** THE CREATION BEING NAMED, or null. One at a time.
+   *
+   *  Naming it and saying what it is one of are ONE act, so they are one
+   *  editor: what to call this, and which word it is gathered under. Two
+   *  buttons for two fields would have made the second one look like a
+   *  different kind of decision, and it is not — both are what the thing is
+   *  called by, one of them by everything that shares the word. */
+  readonly renaming = signal<string | null>(null)
+
   /** The shelf's own contents. An asset that predates the two types is a
    *  piece — that is what everything was. */
   readonly shownAssets = computed(() =>
     this.assets().filter(asset => (asset.kind ?? 'piece') === this.shelf()))
+
+  /** Every creation, less what is put away — unless you asked to see it. */
+  readonly creations = computed(() => this.assets()
+    .filter(asset => asset.kind === 'creation')
+    .filter(asset => this.showHidden() || !asset.hidden))
+
+  /** How many are put away. The toggle says the number, so pressing it is
+   *  never a guess about whether anything is behind it. */
+  readonly hiddenCount = computed(() =>
+    this.assets().filter(asset => asset.kind === 'creation' && asset.hidden).length)
+
+  /**
+   * THE SHELF AS THE MARKS DRAW IT.
+   *
+   * One row per word, in the order the words were first worn, and the loose
+   * ones last under no heading at all. Nothing holds a row: a word is a row
+   * because something wears it, so a group empties itself out of existence and
+   * there is never a heading with nothing under it.
+   *
+   * The loose row has no heading when there are no words — a single "loose"
+   * label over the whole shelf classifies nothing.
+   */
+  readonly creationRows = computed<ShelfRow[]>(() => {
+    const shown = this.creations()
+    const address = new Map(this.groups().map(group => [group.name, group.address]))
+    const rows: ShelfRow[] = []
+    const at = new Map<string, ShelfRow>()
+    const loose: ShelfRow = { word: '', address: '', assets: [] }
+    for (const asset of shown) {
+      const word = asset.group ?? ''
+      if (!word) { loose.assets.push(asset); continue }
+      let row = at.get(word)
+      if (!row) {
+        row = { word, address: address.get(word) ?? '', assets: [] }
+        at.set(word, row)
+        rows.push(row)
+      }
+      row.assets.push(asset)
+    }
+    if (loose.assets.length) rows.push(loose)
+    return rows
+  })
 
   /** How many of each, for the tabs. A tab that says nothing about whether
    *  there is anything behind it makes you press it to find out. */
@@ -273,6 +432,20 @@ export class LayoutDesignerComponent implements OnDestroy {
    *  measure — the slider follows the thing you are pointing at, and a
    *  remembered chip that quietly outranks the pane would make it stop. */
   readonly picked = signal<string | null>(null)
+
+  /** The two axes, each value marked with whether the selected level is
+   *  standing on it. Resolved values, so exactly one is always on. */
+  readonly distribution = computed(() => {
+    const level = this.selectedLevel()
+    if (!level) return []
+    return DISTRIBUTE.map(axis => ({
+      axis: axis.axis,
+      values: axis.values.map(option => ({
+        ...option,
+        on: (axis.axis === 'justify' ? level.justify : level.align) === option.value,
+      })),
+    }))
+  })
 
   readonly handles = HANDLES
   readonly bound = computed(() => this.layout() !== '')
@@ -439,6 +612,7 @@ export class LayoutDesignerComponent implements OnDestroy {
       this.layout.set(String(state?.layout ?? ''))
       this.levels.set(state?.levels ?? [])
       this.assets.set(state?.assets ?? [])
+      this.groups.set(state?.groups ?? [])
       this.dormant.set(state?.dormant === true)
       this.#container.set(String(state?.container ?? ''))
       // Re-announce on every state change: the level is the same, but what it
@@ -891,13 +1065,148 @@ export class LayoutDesignerComponent implements OnDestroy {
     safeWrite(SHELF_KEY, type)
   }
 
-  /** Take a creation off the shelf. The arrangement itself is untouched —
-   *  other containers may still be reading it, and a signature is nobody's to
-   *  delete. */
-  forget(asset: AssetState, event: Event): void {
+  // ── what a creation is, and where it sits ─────────────────────────
+  //
+  // Four acts, and one of them is not delete. A list offers HIDE: the chip
+  // stops being offered, nothing is gone, and the delete area is the one place
+  // where destroying it is on the table at all. Everything else here is
+  // naming — what to call it, and which word it is gathered under.
+
+  /** PUT IT AWAY. It goes to the delete area, where it can be brought back and
+   *  where — and only where — it can be deleted for good. */
+  hide(asset: AssetState, event: Event): void {
     event.preventDefault()
     event.stopPropagation()
-    EffectBus.emit('template:forget', { name: asset.name })
+    EffectBus.emit('template:conceal', { name: asset.name, hidden: true })
+  }
+
+  /** Take it back out. */
+  restore(asset: AssetState, event: Event): void {
+    event.preventDefault()
+    event.stopPropagation()
+    EffectBus.emit('template:conceal', { name: asset.name, hidden: false })
+  }
+
+  /**
+   * Send the properties to the other edge, or bring them back.
+   *
+   * Nothing about the design moves and nothing is re-read: the same template
+   * is rendered in the other place. What the shelf gets back is the height the
+   * properties were taking, which is the whole point of moving them.
+   */
+  sendAcross(): void {
+    const next = !this.across()
+    this.across.set(next)
+    safeWrite(ACROSS_KEY, next ? 'on' : 'off')
+    // The lane places a window by measuring the ones already in it, and one
+    // has just appeared or gone. Nothing else knows that but this.
+    EffectBus.emit('viewport:inset-poll', {})
+  }
+
+  /** Show what has been put away, or stop. */
+  toggleHidden(): void {
+    const next = !this.showHidden()
+    this.showHidden.set(next)
+    safeWrite(HIDDEN_KEY, next ? 'on' : 'off')
+  }
+
+  /** Open the editor over the chip, or shut it again. */
+  rename(asset: AssetState, event: Event): void {
+    event.preventDefault()
+    event.stopPropagation()
+    this.renaming.set(this.renaming() === asset.name ? null : asset.name)
+  }
+
+  /** ENTER COMMITS, ESCAPE LEAVES IT ALONE. Both fields answer to both keys —
+   *  it is one act, so it has one pair of keys and one commit. */
+  editKey(asset: AssetState, event: KeyboardEvent, name: string, word: string): void {
+    event.stopPropagation()
+    if (event.key === 'Escape') { this.stopEditing(); return }
+    if (event.key !== 'Enter') return
+    event.preventDefault()
+    this.commitEdit(asset, name, word)
+  }
+
+  /**
+   * What it is called, and what it is one of.
+   *
+   * Two intents rather than one, because they are two different facts about
+   * the creation and the pool keeps them apart — but one gesture, so a chip
+   * never sits half-edited. An EMPTY word sets it loose: a group is whatever
+   * wears the word, so the last member leaving IS the group ending, and
+   * nothing has to be deleted for that to happen.
+   */
+  commitEdit(asset: AssetState, name: string, word: string): void {
+    const wanted = String(name ?? '').trim()
+    const under = String(word ?? '').trim()
+    this.renaming.set(null)
+    if (under !== (asset.group ?? '')) {
+      EffectBus.emit('template:group', { name: asset.name, group: under })
+    }
+    if (wanted && wanted !== asset.name) {
+      EffectBus.emit('template:rename', { name: asset.name, to: wanted })
+    }
+  }
+
+  stopEditing(): void {
+    this.renaming.set(null)
+  }
+
+  /** One place earlier or later among the ones wearing the same word. */
+  shift(asset: AssetState, by: number, event: Event): void {
+    event.preventDefault()
+    event.stopPropagation()
+    EffectBus.emit('template:move', { name: asset.name, by })
+  }
+
+  // ── gathering by drag ─────────────────────────────────────────────
+  //
+  // The shelf already speaks drag: a chip is carried to a hole and lands
+  // there. Carrying one to a HEADING is the same gesture asking the other
+  // question — not "where does this shape go" but "what is this one of" — so
+  // grouping needs no button at all.
+
+  /** A heading will take a creation that is not already under it. */
+  allowGather(row: ShelfRow, event: DragEvent): void {
+    const carried = this.#carried()
+    if (!carried || carried.group === row.word) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+  }
+
+  /** It landed on the heading: it wears that word now. */
+  dropOnGroup(row: ShelfRow, event: DragEvent): void {
+    const carried = this.#carried()
+    if (!carried) return
+    event.preventDefault()
+    event.stopPropagation()
+    this.dragging.set(null)
+    if (carried.group === row.word) return
+    EffectBus.emit('template:group', { name: carried.name, group: row.word })
+  }
+
+  /** The creation being dragged, when it is one. A piece has nothing to say
+   *  about groups — it is a built-in, and it is nobody's to gather. */
+  #carried(): AssetState | null {
+    const name = this.dragging()
+    if (!name) return null
+    const asset = this.assets().find(held => held.name === name)
+    return asset?.kind === 'creation' ? asset : null
+  }
+
+  // ── where the parts sit ───────────────────────────────────────────
+
+  /** One press, one variable, the same intent the companion window emits. A
+   *  value already on is set again rather than cleared: "not centred" is not
+   *  an answer, and the axis always says something. */
+  distribute(axis: string, value: string): void {
+    EffectBus.emit('template:set-var', {
+      segments: this.segments(),
+      path: this.selectedPath(),
+      name: axis,
+      value,
+    })
   }
 
   allowDrop(event: DragEvent): void {

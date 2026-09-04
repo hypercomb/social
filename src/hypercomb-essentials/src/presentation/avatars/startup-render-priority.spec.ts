@@ -20,6 +20,10 @@ const PRELOADER = readFileSync(
   join(__dirname, '../../../../hypercomb-runtime/src/script-preloader.ts'),
   'utf8',
 )
+const BARRIER = readFileSync(
+  join(__dirname, '../../../../hypercomb-shared/core/first-tile-paint.ts'),
+  'utf8',
+)
 const PREPARE = readFileSync(
   join(__dirname, '../../../scripts/prepare.ts'),
   'utf8',
@@ -35,7 +39,7 @@ const PACKED_WORKER = readFileSync(
 
 describe('startup render priority', () => {
   it('subscribes to first paint before navigation and awaits it before pulsing bees', () => {
-    const barrier = BOOT.indexOf('const firstTilePaint = this.awaitFirstTilePaint(targetLocationKey)')
+    const barrier = BOOT.indexOf('const firstTilePaint = awaitFirstTilePaint(targetLocationKey)')
     const navigation = BOOT.indexOf('this.dispatchPopState()')
     const wait = BOOT.indexOf('await firstTilePaint')
     const pulse = BOOT.indexOf("await this.encounter(preloader, '')")
@@ -44,9 +48,29 @@ describe('startup render priority', () => {
     expect(barrier).toBeLessThan(navigation)
     expect(wait).toBeGreaterThan(navigation)
     expect(wait).toBeLessThan(pulse)
-    expect(BOOT).toContain('payload?.locationKey !== targetLocationKey')
-    expect(BOOT).toContain('payload?.settled !== true')
+    expect(BOOT).toContain("import { awaitFirstTilePaint } from './first-tile-paint'")
+    expect(BARRIER).toContain("payload?.settled !== true || payload?.locationKey !== targetLocationKey")
     expect(TILES).toContain("{ ...this.#buildCellCountPayload(cells), settled: final }")
+  })
+
+  it('keeps ONE barrier, and that barrier always opens', () => {
+    // Two shells, one waiting rule. A second copy is how the give-up valve
+    // gets fixed in one shell and stays broken in the other.
+    expect(BOOT).not.toContain("EffectBus.on<{ settled?: boolean; locationKey?: string }>('render:cell-count'")
+    expect(DEV_APP).not.toContain("EffectBus.on<{ settled?: boolean; locationKey?: string }>('render:cell-count'")
+
+    // The frame that never comes: give up on renderer SILENCE, not on a wall
+    // clock, and never wait past the ceiling however noisy the page is.
+    expect(BARRIER).toContain('FIRST_TILE_PAINT_SILENCE_MS')
+    expect(BARRIER).toContain('FIRST_TILE_PAINT_CEILING_MS')
+    expect(BARRIER).toContain('ceilingMs - (Date.now() - startedAt)')
+    // Proof of life re-arms the valve BEFORE the payload is judged.
+    expect(BARRIER.indexOf('arm()')).toBeLessThan(BARRIER.indexOf('payload?.settled !== true ||'))
+
+    // The handoff that never runs: a hidden tab is never served an animation
+    // frame, so the frame is raced by a timer and cannot strand the barrier.
+    expect(BARRIER).toContain('requestAnimationFrame(() => release())')
+    expect(BARRIER).toContain('setTimeout(release, frameMs)')
   })
 
   it('does not mount, seed, or animate agent bees before the matching tile pass paints', () => {
@@ -70,7 +94,7 @@ describe('startup render priority', () => {
   })
 
   it('does not let the dev processor resolver walk OPFS before first paint', () => {
-    const barrier = DEV_APP.indexOf('const firstTilePaint = this.awaitFirstTilePaint()')
+    const barrier = DEV_APP.indexOf('const firstTilePaint = awaitFirstTilePaint(')
     const direct = DEV_APP.indexOf('preloader?.useRegisteredBees?.(values)')
     const pulse = DEV_APP.indexOf('renderFirst.map(')
     const wait = DEV_APP.indexOf('await firstTilePaint')
@@ -86,7 +110,7 @@ describe('startup render priority', () => {
     expect(DEV_APP).toContain('RENDER_FIRST_KEYS')
     expect(DEV_APP).toContain("'@diamondcoreprocessor.com/PixiHostWorker'")
     expect(DEV_APP).toContain("'@diamondcoreprocessor.com/ShowCellDrone'")
-    expect(DEV_APP).toContain("payload?.settled !== true || payload?.locationKey !== targetLocationKey")
+    expect(DEV_APP).toContain("import { awaitFirstTilePaint } from '@hypercomb/shared/core/first-tile-paint'")
     expect(PRELOADER).toContain('if (this.#registeredBees)')
     expect(PRELOADER).toMatch(/if \(this\.#registeredBees\) \{[\s\S]*return \[\]/)
     expect(PRELOADER).toContain('OPFS module walk skipped')

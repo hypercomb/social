@@ -882,6 +882,14 @@ function tryWriteContent(req, res) {
   const root = resolve(cfg.contentDir)
   if (!resolved.startsWith(root + sep) && resolved !== root) { respondText(res, 403, 'target outside content root'); return true }
 
+  // writes land FLAT. The sig check below pins the BYTES; it says nothing about
+  // the PLACE, and `mkdirSync(dirname(resolved), { recursive: true })` let an
+  // authorised writer choose any directory under the content root — including
+  // a pool's, whose members it could then shadow. An atom has one address:
+  // `/<sig>`. A second segment is refused before auth is even consulted.
+  const segments = urlPath.split('/').filter(Boolean)
+  if (segments.length !== 1) { respondText(res, 400, 'an atom is written at /<sig> — no directory may be chosen'); return true }
+
   // writes must be sig-addressed: basename (minus .js/.json) must be a 64-hex sig
   const base = urlPath.split('/').pop() || ''
   const sig = base.replace(/\.(js|json)$/i, '').toLowerCase()

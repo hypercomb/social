@@ -22,6 +22,7 @@ and interruptible.
 | Bees — the sprites, the dance, the click | `essentials/…/presentation/avatars/agent-bee.drone.ts` |
 | Panel — what opens when you click one | `essentials/…/assistant/agent-panel.view.ts` |
 | `agent-progress` — how a responder reports | `essentials/…/assistant/claude-bridge.worker.ts` |
+| Step ledger — what a responder DID, durably | `essentials/…/assistant/chat-steps.ts` |
 | Orchestrator — the bee that watches the bees | `essentials/…/assistant/orchestrator.drone.ts` |
 | Orchestrator sweep — the repo half | `scripts/bridge/orchestrator-sweep.cjs` |
 

@@ -114,3 +114,71 @@ describe('collection', () => {
     expect(engine.hasContent(address(1))).toBe(true)
   })
 })
+
+describe('a pool member NAME is itself a reference', () => {
+  it('keeps the atom a pool member names, even when its bytes hold no signature', async () => {
+    // Under the molecule model a member IS an atom's address. Reading only
+    // the member's BYTES left the atom unreferenced, so the sweep deleted
+    // `<root>/<sig>` while the pool still named it — data loss with no
+    // destructive call anywhere near the pool.
+    const engine = PackedStoreEngine.open(new MemorySyncFile())
+    engine.putContent(address(1), json({ name: 'an atom a pool names' }))
+    engine.putPool(address(7), address(1), new TextEncoder().encode('not json, no sigs inside'))
+
+    const result = await collect(engine)
+
+    expect(result.swept).toBe(0)
+    expect(engine.getContent(address(1))).toBeTruthy()
+  })
+
+  it('still follows the member BYTES as well as the name', async () => {
+    const engine = PackedStoreEngine.open(new MemorySyncFile())
+    engine.putContent(address(1), json({ name: 'named by the member' }))
+    engine.putContent(address(2), json({ name: 'referenced inside it' }))
+    engine.putPool(address(7), address(1), json({ points: address(2) }))
+
+    const result = await collect(engine)
+
+    expect(result.swept).toBe(0)
+    expect(engine.getContent(address(2))).toBeTruthy()
+  })
+
+  it('does not keep content just because SOME pool exists', async () => {
+    const engine = PackedStoreEngine.open(new MemorySyncFile())
+    engine.putContent(address(3), json({ name: 'an abandoned paste' }))
+    engine.putPool(address(7), address(1), json({}))
+
+    const result = await collect(engine)
+
+    expect(result.swept).toBe(1)
+    expect(engine.getContent(address(3))).toBeFalsy()
+  })
+})
+
+
+describe('wipe-safe pools — a derived cache is not a reference', () => {
+  it('skips the members of a wipe-safe pool WHOLE, name and bytes, so the cache cannot pin what it derived from', async () => {
+    const engine = PackedStoreEngine.open(new MemorySyncFile())
+    engine.putContent(address(1), json({ name: 'the original image the thumbnail was derived from' }))
+    engine.putContent(address(2), json({ name: 'a layer the manifest names' }))
+    // a derived-cache pool: member NAMED by the source sig, bytes NAMING a layer
+    engine.putPool(address(9), address(1), json({ derivedFrom: address(2) }))
+
+    const result = await collect(engine, { wipeSafePools: new Set([address(9)]) })
+
+    expect(result.swept).toBe(2)
+    expect(engine.getContent(address(1))).toBeFalsy()
+    expect(engine.getContent(address(2))).toBeFalsy()
+  })
+
+  it('an UNDECLARED pool still credits — the bias only yields to a registry that says wipe-safe', async () => {
+    const engine = PackedStoreEngine.open(new MemorySyncFile())
+    engine.putContent(address(1), json({ name: 'named by a member' }))
+    engine.putPool(address(9), address(1), json({}))
+
+    const result = await collect(engine, { wipeSafePools: new Set([address(8)]) })
+
+    expect(result.swept).toBe(0)
+    expect(engine.getContent(address(1))).toBeTruthy()
+  })
+})

@@ -209,3 +209,15 @@ $accent: #c9a227;
 .fx-option:hover .fx-option-name,
 .fx-option:focus-visible .fx-option-name,
 .fx-option.is-on .fx-option-name { opacity: 1; }
+
+// WHY THERE ARE TWO PLACES — said once, quietly, at the head. The properties
+// hold the two axes you reach for; this is every axis drawn on your own
+// container, which is what you open to compare rather than to decide.
+.fx-relation {
+  flex: 0 0 auto;
+  margin: 0 0 0.5rem;
+  padding: 0 0.75rem;
+  color: rgba($dim, 0.6);
+  font-size: calc(0.62rem * var(--hc-panel-scale, 1));
+  line-height: 1.5;
+}

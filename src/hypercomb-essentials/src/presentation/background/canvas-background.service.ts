@@ -376,7 +376,25 @@ export class CanvasBackgroundService extends EventTarget {
   #archetype: Archetype = DEFAULT_ARCHETYPE
   /** Pinned palette, or null to follow the colour theme. */
   #palette: Palette | null = null
-  #enabled = true
+  /** THE SHIP DEFAULT IS A BARE SURFACE.
+   *
+   *  A drawn backdrop used to arrive with the app, in whatever palette the
+   *  chrome theme implied — so choosing a colour theme also chose a field
+   *  of lattice or contour rings nobody had asked for, and every new
+   *  install opened onto one. These looks are worth having when you pick
+   *  one; none of them is good enough to be the thing you have to turn off
+   *  first. So the screen starts as the surface colour and stays there
+   *  until a look is chosen.
+   *
+   *  A STORED PREFERENCE STILL WINS, in both directions: someone already
+   *  wearing a backdrop keeps it, and someone who typed `screen.off` keeps
+   *  that. See #restore and #hasPref. */
+  #enabled = false
+  /** Did this origin have a preference of its own? Only the ABSENCE of one
+   *  falls through to the bare default — and only an absence may be
+   *  overruled by a backdrop the hive itself carries (see
+   *  #resolveScreenForCurrentPath). */
+  #hasPref = false
   /** The picture behind the hive, as a SIGNATURE — the bytes live at the
    *  content root and are resolved on demand, never held in the preference. */
   #pictureSig: string | null = null
@@ -735,7 +753,7 @@ export class CanvasBackgroundService extends EventTarget {
   }
 
   status(): string {
-    if (!this.#enabled) return 'canvas background off'
+    if (!this.#enabled) return 'screen → none (bare surface)'
     if (this.#pictureSig) {
       const held = this.#pictureUrl ? '' : ' (resolving)'
       // Said as OPACITY — the way round people ask for it. 100% is the picture
@@ -1483,6 +1501,12 @@ export class CanvasBackgroundService extends EventTarget {
       return
     }
     const { key, record } = found
+    // A BACKDROP THE HIVE CARRIES IS NOT THE SHIP DEFAULT'S TO REFUSE. The
+    // screen starts bare, but bare is the absence of a choice — and a
+    // creation that travels with its own picture has made one. Only an
+    // origin with no preference of its own is opened this way; someone who
+    // typed `screen.off` wrote a preference and keeps it.
+    if (!this.#hasPref) this.#enabled = true
     this.#screenSourceKey = key
     this.#cascade = record.cascade !== false
     this.#dim = record.dim
@@ -1540,6 +1564,7 @@ export class CanvasBackgroundService extends EventTarget {
     try {
       const raw = localStorage.getItem(STORAGE_KEY)
       if (!raw) return
+      this.#hasPref = true
       const parsed = JSON.parse(raw) as {
         archetype?: string; palette?: string | null; enabled?: boolean
         picture?: string | null; dim?: number; zoom?: number; panX?: number; panY?: number; v?: number
@@ -1581,6 +1606,10 @@ export class CanvasBackgroundService extends EventTarget {
   }
 
   #persist(): void {
+    // WRITING A PREFERENCE IS HAVING ONE. Without this the flag only turned
+    // true on the NEXT boot, so `screen.off` typed on a fresh install was
+    // undone by the first page that carried a picture of its own.
+    this.#hasPref = true
     try {
       // Participant-local ONLY: what is showing and how washed. The shelves
       // are network-queryable content and live in their pool of meaning —

@@ -12,7 +12,7 @@
 //
 // It is NOT an AI agent. An `ask` step deposits a request and the run STOPS
 // on it (status `asked`) — generation begins only from the participant's own
-// answer in the feedback window. See workflow-ask.ts for why that is not
+// answer as a Q&A row on the tile. See workflow-ask.ts for why that is not
 // negotiable.
 //
 // ── The run does not move you ─────────────────────────────────────────

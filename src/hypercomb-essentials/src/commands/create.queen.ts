@@ -46,6 +46,22 @@ export class CreateQueenBee extends QueenBee {
     { input: 'make meals/breakfast', result: 'Creates "meals", then "breakfast" inside it' },
   ]
 
+  /** A name is the tile's ADDRESS, so an empty or relative segment is not a
+   *  weak name — it is a different tile, or none. Refuse rather than normalize. */
+  override machine = {
+    forms: '<name> | <parent>/<child>',
+    example: '/create roadmap',
+    reach: 'additive' as const,
+    scope: 'page' as const,
+    refuse: (args: string): string | undefined => {
+      const parts = args.split('/').map(part => part.trim())
+      if (args.includes(BACKSLASH) || parts.some(part => !part || part === '.' || part === '..')) {
+        return '/create needs one or more explicit tile names separated by /'
+      }
+      return undefined
+    },
+  }
+
   protected async execute(args: string): Promise<void> {
     const name = safeName(args)
     if (!name) {

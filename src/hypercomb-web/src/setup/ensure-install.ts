@@ -8,7 +8,7 @@
 // package shipped with the shell is an ORIGIN the walker may pull atoms
 // from — never a competing install machine.
 
-import { EffectBus, SignatureStore } from '@hypercomb/core'
+import { EffectBus, MARKER_NAME, SignatureStore, hardDeleteVetoFor, planNamedRemovalFor } from '@hypercomb/core'
 import { isComplete, resolveInventory, Store, validateSealedPackage, type ReplicationIo } from '@hypercomb/shared/core'
 import { seedDarkOnFreshInstall } from '@hypercomb/shared/ui/features-viewer/behavior-enablement'
 import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
@@ -49,6 +49,27 @@ export const opfsWritable = (): boolean =>
   nativeAvailable() ||
   (typeof FileSystemFileHandle !== 'undefined' &&
    typeof FileSystemFileHandle.prototype.createWritable === 'function')
+
+// AN INSTALL-OWNED EVICTOR MAY ONLY REMOVE A BAG IT WROTE.
+//
+// `hardDeleteVetoFor` returns null for an EMPTY directory — "there is
+// nothing to lose" — which is true at a lineage address and false at a
+// molecule address: there it is a NAMESPACE another tab or a replication may
+// be mid-write into, and the window between `getDirectoryHandle(create:
+// true)` and the first claim write is exactly when an install pass runs.
+// Nothing this code wrote is ever empty, so an empty directory is positive
+// evidence the install did NOT write it. Proof of a bag is at least one
+// marker; absence of proof refuses.
+const bagEvictionVeto = async (dir: FileSystemDirectoryHandle): Promise<string | null> => {
+  const veto = await hardDeleteVetoFor(dir)
+  if (veto) return veto
+  try {
+    for await (const [name, handle] of dir.entries()) {
+      if (handle.kind === 'file' && MARKER_NAME.test(name)) return null
+    }
+  } catch (err) { return `could not be read (${String((err as Error)?.message ?? err)})` }
+  return 'is empty — an install pass never leaves a bag empty'
+}
 
 const MANIFEST_KEY = 'core-adapter.installed-manifest'
 const SIG_STORE_KEY = 'hypercomb.signature-store'
@@ -765,7 +786,16 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
       stale.push(name)
     }
     for (const name of stale) {
-      try { await parentDir.removeEntry(name, { recursive: true }) } catch { /* skip */ }
+      // A 64-hex SUBDIRECTORY of a pool is an author bucket as readily as a
+      // stale bag. Let it prove which: a bag holds only `bagEntryName(i)`
+      // markers, so `hardDeleteVetoFor` passes; a bucket or a nested pool
+      // holds members and refuses.
+      try {
+        const child = await parentDir.getDirectoryHandle(name, { create: false })
+        const veto = await bagEvictionVeto(child)
+        if (veto) { console.warn(`[ensure-install] not evicting ${name.slice(0, 8)}… — it ${veto}`); continue }
+        await parentDir.removeEntry(name, { recursive: true })
+      } catch { /* skip */ }
     }
   }
 
@@ -853,17 +883,102 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
  * Never the pool dirs themselves, never the flat root (layer bytes
  * share it with user commits), never lineage bags.
  */
-const purgeStaleOpfsArtifacts = async (store: Store): Promise<void> => {
-  const purgeDir = async (dir: FileSystemDirectoryHandle) => {
-    const names: string[] = []
+/** An entry an install pass writes: `<sig>` or `<sig>.js`. Nothing else in
+ *  an install cache is this code's to remove. */
+export const isInstallArtifactName = (name: string): boolean => /^[0-9a-f]{64}(?:\.js)?$/i.test(name)
+
+/**
+ * Empty a LEGACY install-cache directory of what an install wrote — and of
+ * nothing else. This was the one `purgeDir` in the file that removed every
+ * entry by enumeration (write-conformance, ensure-install.ts:983) while its
+ * neighbours proved each removal. The same rule as theirs, per entry: a FILE
+ * goes only if it is named like an install artifact; a DIRECTORY goes only if
+ * `bagEvictionVeto` is null (a bag this install wrote — at least one marker,
+ * nothing foreign). Anything else stays, and the caller's non-recursive
+ * `removeEntry` on the directory then fails, which is the design: a legacy
+ * dir disappears only once it is genuinely empty. Returns what was refused.
+ */
+export const purgeInstallCacheDir = async (dir: FileSystemDirectoryHandle): Promise<string[]> => {
+  const entries: Array<[string, FileSystemHandle]> = []
+  try {
+    for await (const entry of dir.entries()) entries.push(entry)
+  } catch { return [] }
+  const refused: string[] = []
+  for (const [name, handle] of entries) {
     try {
-      for await (const [name] of dir.entries()) names.push(name)
+      if (handle.kind === 'file') {
+        if (!isInstallArtifactName(name)) { refused.push(name); continue }
+        await dir.removeEntry(name)
+      } else {
+        const veto = await bagEvictionVeto(handle as FileSystemDirectoryHandle)
+        if (veto) { refused.push(name); continue }
+        await dir.removeEntry(name, { recursive: true })
+      }
+    } catch { refused.push(name) }
+  }
+  if (refused.length) console.warn(`[ensure-install] left ${refused.length} entr${refused.length === 1 ? 'y' : 'ies'} in ${dir.name} — not an install's to remove`)
+  return refused
+}
+
+const purgeStaleOpfsArtifacts = async (store: Store): Promise<void> => {
+  const purgeDir = purgeInstallCacheDir
+
+  // THE POOLS ARE NOT WIPED — they are purged by NAME.
+  //
+  // "Install-cache pool contents only" scopes the HANDLE, not the ADDRESS.
+  // `store.bees` IS sign('bees'), and sign('bees') IS the molecule of a tile
+  // named `bees`; the same for `dependencies`. An enumerate-and-remove-all
+  // there destroys another participant's markers, buckets and atoms.
+  //
+  // So the removal set is what THIS installer wrote, read back from the
+  // cached manifest — and note the shape: an install-cache file is named
+  // `<sig>.js`, which classifies as FOREIGN, not as a member. That is
+  // precisely why this must be a NAMED-SET removal and can never be
+  // simplified back into a kind-based sweep.
+  //
+  // A manifest may only NARROW the set: every name is still classified, and
+  // the whole plan is refused if a marker is present.
+  const own = new Set<string>()
+  const cached = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
+  for (const sig of [...(cached?.bees ?? []), ...(cached?.dependencies ?? []),
+    ...Object.values(cached?.beeDeps ?? {}).flatMap(list => list ?? [])]) {
+    own.add(sig); own.add(`${sig}.js`)
+  }
+  const purgeOwned = async (dir: FileSystemDirectoryHandle | undefined): Promise<void> => {
+    if (!dir) return
+    // Bag DIRS are not in any manifest — their names are computed. Each one
+    // proves itself instead: `hardDeleteVetoFor` passes only for a directory
+    // that is all markers (which a bag is) or empty, and refuses an author
+    // bucket or a nested pool.
+    // THE WHOLE-DIRECTORY REFUSAL COMES FIRST. `planNamedRemovalFor` refuses
+    // the entire plan when this directory holds markers — which is how it
+    // recognises a participant's lineage living at `sign('bees')` — and the
+    // directory loop used to run BEFORE it, so that protection never gated the
+    // sub-directory removals at all. One refusal, then nothing is touched.
+    const plan = await planNamedRemovalFor(dir, own)
+    if (plan.refused) {
+      console.warn(`[ensure-install] not purging ${dir.name.slice(0, 8)}… — it ${plan.refused}`)
+      return
+    }
+    const dirs: string[] = []
+    try {
+      for await (const [name, handle] of dir.entries()) {
+        if (handle.kind === 'directory') dirs.push(name)
+      }
     } catch { return }
-    for (const name of names) {
+    for (const name of dirs) {
+      try {
+        const child = await dir.getDirectoryHandle(name, { create: false })
+        const veto = await bagEvictionVeto(child)
+        if (veto) { console.warn(`[ensure-install] not purging ${name.slice(0, 8)}… — it ${veto}`); continue }
+        await dir.removeEntry(name, { recursive: true })
+      } catch { /* skip */ }
+    }
+    for (const name of plan.remove) {
       try { await dir.removeEntry(name, { recursive: true }) } catch { /* skip */ }
     }
   }
-  await Promise.all([purgeDir(store.bees), purgeDir(store.dependencies)])
+  await Promise.all([purgeOwned(store.bees), purgeOwned(store.dependencies)])
   // The legacy `__bees__`/`__dependencies__` drain dirs are the same
   // install cache — empty them in the same wipe so the Store's detached
   // absorb can't re-seed the pools with the stale sigs we just purged,

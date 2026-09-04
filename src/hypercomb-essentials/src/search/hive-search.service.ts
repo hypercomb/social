@@ -257,6 +257,15 @@ export class HiveSearchService {
    *  was derived from. Best-effort — a failed write costs a slower search
    *  and nothing else. */
   writeRecord = async (layerSig: string, record: SearchRecord): Promise<void> => {
+    // COMPLETE OR ABSENT (optimize-phase.md rule 3). A truncated record is
+    // not a function of the layer sig — it is a function of where the walk
+    // happened to stop, which is the budget, the depth cap and the order of
+    // the pass. Keyed by the sig, it would be read back as THE record for
+    // that content forever, and `readRecord` would then never re-derive it
+    // (write-conformance, hive-search.service.ts:213). Not to disk, not to
+    // the memo: the next pass derives again, and a search meanwhile answers
+    // from the free ring and says it is partial.
+    if (record.truncated === true) return
     if (this.#pool === undefined) this.#pool = (await this.store?.getPool(SEARCH_INDEX_MEANING)) ?? null
     if (!this.#pool) return
     try {

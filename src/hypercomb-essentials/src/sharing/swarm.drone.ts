@@ -26,7 +26,7 @@
 // subscription on the same sig auto-triggers that paint when an event
 // arrives, so we don't need to dispatch a render signal ourselves.
 
-import { Drone, EffectBus, poolAddresses, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { Drone, EffectBus, poolAddresses, SignatureService, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { readTilePropertiesAt, withoutSubstrateImage } from '../editor/tile-properties.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
@@ -38,6 +38,7 @@ import { SWARM_INVITE_KIND } from './meeting-invite.js'
 import { lineageKey } from '../history/lineage-key.js'
 import { isWithinAdoptedRoot } from './adopted-roots.js'
 import { swarmFilterSelection } from './swarm-filter.service.js'
+import { allowsHere } from '../pheromones/intake-filter.js'
 import { withheldForShare, ENABLEMENT_CHANGED } from './behavior-enablement.js'
 
 const SWARM_LAYER_KIND = 30200
@@ -344,13 +345,13 @@ interface HistoryServiceLike {
 
 interface StoreLike {
   hypercombRoot?: FileSystemDirectoryHandle | null
-  // Resource API — content-addressed read/write. putResource computes
-  // the sig from bytes itself (sha256), so we get verification for
-  // free when receiving over the wire: a mismatched payload from a
-  // malicious peer yields a sig that differs from the d-tag and we
-  // discard.
+  // Resource API — content-addressed read/write. Bytes that arrive over
+  // the wire are hashed HERE, before any write: a payload that does not
+  // hash to the d-tag it claims is discarded without touching the store
+  // (`#onResourceEvent`). `emit: false` keeps a peer's bytes out of the
+  // content:wrote publish trigger — they are not this participant's act.
   getResource?: (sig: string) => Promise<Blob | null>
-  putResource?: (blob: Blob) => Promise<string>
+  putResource?: (blob: Blob, options?: { emit?: boolean }) => Promise<string>
 }
 
 // Singleton credential stores (RoomStore + SecretStore) live in
@@ -1187,12 +1188,22 @@ export class SwarmDrone extends Drone {
 
       if (payload?.public === true) {
         // Bytes before broadcast. Every join path lands here, so this is the
-        // one place that can promise a participant has somewhere to put the
-        // pictures they are about to advertise. Without a target the
-        // availability gate holds everything back — correct, but useless;
-        // with one, the drain stages the closure and tiles announce as
-        // receipts land. Own host wins; a deliberate CDN opt-out is honored.
-        try { this.#getHostSync()?.ensureSwarmTarget?.() } catch { /* never block the join */ }
+        // one place that can ASK whether a participant has somewhere to put
+        // the pictures they are about to advertise. Without a target the
+        // availability gate holds everything back — correct, and the gate
+        // stays shut until they say where. The service no longer provisions
+        // a third-party host on its own: joining is "share with these
+        // people", not "upload to that company". The yes is one command.
+        try {
+          if (this.#getHostSync()?.ensureSwarmTarget?.() === 'needs-host') {
+            const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
+            EffectBus.emit('toast:show', {
+              type: 'info',
+              title: i18n?.t('swarm.needs-host.title') ?? 'Nowhere to put your pictures yet',
+              message: i18n?.t('swarm.needs-host.message') ?? 'Shared tiles announce once their content has a host. Type /use-live-relay to publish to the public content endpoint, or set your own host in the hosts panel.',
+            })
+          }
+        } catch { /* never block the join */ }
       }
 
       if (payload?.public === false) {
@@ -1359,12 +1370,13 @@ export class SwarmDrone extends Drone {
     // to whatever's in this list. Omitting them is a silent miss: the
     // broker subscription registers but never receives events, so
     // swarm.requestSubtree() always times out with "no responder."
-    // 30210/30211/30212 = the feedback handshake (request / grant / post),
-    // owned by FeedbackSwarmDrone. 30213 = the durable feedback-loop channel
-    // item (FeedbackChannelDrone). 30214 = the per-recipient feedback REPLY
-    // (FeedbackReplyDrone — host → sender's own channel). Same rule as above:
-    // omit them and the relay filter drops the events as a silent miss.
-    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND, SWARM_LIFECYCLE_KIND, SWARM_BEHAVIOR_KIND, 20400, 30401, 30207, 30210, 30211, 30212, 30213, 30214, 30215, 30216, 30217], true)
+    // 30213 = the durable feedback-loop channel item (FeedbackChannelDrone).
+    // Same rule as above: omit it and the relay filter drops the events as a
+    // silent miss. (30210/30211/30212 were the feedback consent handshake and
+    // 30214 the per-recipient reply; both drones retired with the feedback
+    // window on 2026-09-04 - documentation/annotate-the-screen.md. A kind
+    // nobody publishes and nobody handles has no business in the filter.)
+    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND, SWARM_LIFECYCLE_KIND, SWARM_BEHAVIOR_KIND, 20400, 30401, 30207, 30213, 30215, 30216, 30217], true)
   }
 
   /**
@@ -1545,6 +1557,21 @@ export class SwarmDrone extends Drone {
         return tiles
           .filter(({ peerPubkey }) => selectedParticipants.size === 0 || selectedParticipants.has(peerPubkey))
           .filter(({ name }) => !hiddenLineages.has(locKey ? `${locKey}/${name}` : name))
+          // Intake gate — the marks the participant is watching for, and the
+          // ones they never want. SYNCHRONOUS on purpose, exactly like the two
+          // filters above: this runs per peer tile per render, so an awaited
+          // OPFS hit each would be a storm. `allowsHere` reads only marks
+          // already in memory and kicks the read for the rest, so an unseen
+          // signature costs one round trip ever and is refused from the next
+          // render on. The authoritative refusal runs at ADOPT, at the commit.
+          //
+          // BY THE PEER'S LAYER SIG, NEVER BY THE PATH. `[...loc.segments,
+          // name]` is where the offering would LAND, and the marks there are
+          // the participant's own tile's — a peer publishing a name you
+          // already use at this location was judged by YOUR marks, in both
+          // directions. Co-located same-name is the ordinary case: it is what
+          // the tile source's `kind:name` dedup below exists to resolve.
+          .filter(tile => allowsHere({ sig: String(tile['layerSig'] ?? '') }))
           .map(({ name, peerPubkey, imageSig, index }) => ({
             name,
             kind: 'peer' as const,
@@ -3188,9 +3215,15 @@ const payload: SwarmLayerPayload = myLabel
     }
   }
 
-  // Resource arrival path. Verifies the bytes against the d-tag sig
-  // (Store.putResource computes its own sha256 — a mismatch tells us
-  // the peer published bad bytes and we discard rather than persist).
+  // Resource arrival path. HASH FIRST, WRITE ON MATCH. The bytes used to be
+  // handed to Store.putResource and the verdict read off the sig it
+  // returned — so a peer's mismatching payload was already ON DISK under its
+  // real hash before we "discarded" it, and, worse, putResource's
+  // content:wrote had already enqueued a stranger's bytes for THIS
+  // participant's public host (write-conformance, swarm.drone.ts:3225). Now
+  // nothing is written until the bytes prove they are the sig the d-tag
+  // names, and a verified write is marked emit:false: it is a peer's atom
+  // arriving, never this participant authoring.
   // On success, emits `swarm:resource-arrived` so substrate / show-
   // cell can re-resolve any tile that was waiting on this sig.
   #onResourceEvent = async (evt: MeshEvtLike): Promise<void> => {
@@ -3211,18 +3244,16 @@ const payload: SwarmLayerPayload = myLabel
     try { bytes = base64ToArrayBuffer(content) } catch { return }
     if (bytes.byteLength === 0 || bytes.byteLength > MAX_RESOURCE_BYTES) return
 
-    const blob = new Blob([bytes])
-    let writtenSig = ''
-    try { writtenSig = await store.putResource(blob) } catch { return }
-    if (writtenSig !== sig) {
-      // Defence: malicious peer published bytes whose sig doesn't
-      // match the d-tag they claimed. OPFS now holds the bytes under
-      // their REAL sig (which is fine — content-addressed), but we
-      // keep the subscription open since the actual sig we wanted
-      // hasn't arrived. A correct publisher will re-send.
-      console.warn('[swarm] resource sig mismatch', { claimed: sig.slice(0, 12), actual: writtenSig.slice(0, 12) })
+    let actual = ''
+    try { actual = (await SignatureService.sign(bytes)).toLowerCase() } catch { return }
+    if (actual !== sig) {
+      // A peer published bytes that are not the sig they claimed. Nothing
+      // was written; the one-shot subscription stays open because the sig
+      // we asked for has not arrived. A correct publisher will re-send.
+      console.warn('[swarm] resource sig mismatch — discarded unwritten', { claimed: sig.slice(0, 12), actual: actual.slice(0, 12) })
       return
     }
+    try { await store.putResource(new Blob([bytes]), { emit: false }) } catch { return }
 
     // Close our one-shot sub for this sig — bytes are now in OPFS.
     const sub = this.#resourceSubs.get(sig)
@@ -4512,8 +4543,8 @@ const payload: SwarmLayerPayload = myLabel
       markPublic: (sig: string, kind?: 'layer' | 'bee' | 'dependency' | 'resource', closure?: boolean) => Promise<void>
       isGateActive?: () => boolean
       isClosureAvailable?: (sig: string, kind?: 'layer' | 'bee' | 'dependency' | 'resource', closure?: boolean) => Promise<boolean>
-      /** Provision a durable byte target on join — see host-sync.service. */
-      ensureSwarmTarget?: () => boolean
+      /** Does this participant have a durable byte target? Never provisions one. */
+      ensureSwarmTarget?: () => 'ready' | 'opted-out' | 'needs-host'
     } | undefined
 
   #getRegistry = (): TileSourceRegistryLike | undefined =>

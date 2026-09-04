@@ -24,6 +24,7 @@ import { QueenBee, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 // sign(its bytes), never a human filename. The legacy non-signed
 // `overrides/i18n.json` is a read-fallback/drain source — Store's boot absorb
 // content-addresses it into the pool and removes it.
+const OVERRIDES_SUBKEY = 'i18n'
 const LEGACY_OVERRIDES_DIR = 'overrides'
 const OVERRIDES_FILE = 'i18n.json'
 
@@ -135,7 +136,11 @@ export class I18nOverrideQueenBee extends QueenBee {
     const store = get('@hypercomb.social/Store') as StoreDocApi | undefined
     const readPool = async (): Promise<OverrideLayer | null> => {
       if (!store?.overrides) return null
-      const buf = await store.getPoolDoc(store.overrides)
+      // Sub-bucket FIRST, then the pool root as a READ-ONLY legacy fallback.
+      // Nothing at the old address is ever deleted: data never heals, the
+      // address moves forward and the old bytes stay readable where they lie.
+      const buf = (await store.getPoolDoc(store.overrides, OVERRIDES_SUBKEY))
+        ?? (await store.getPoolDoc(store.overrides))
       if (!buf) return null
       try { return JSON.parse(new TextDecoder().decode(buf)) as OverrideLayer } catch { return null }
     }
@@ -155,7 +160,13 @@ export class I18nOverrideQueenBee extends QueenBee {
     const store = get('@hypercomb.social/Store') as StoreDocApi | undefined
     if (!store?.overrides) return
     const bytes = new TextEncoder().encode(JSON.stringify(layer, null, 2)).buffer as ArrayBuffer
-    await store.putPoolDoc(store.overrides, bytes)
+    // WRITE INTO A SUB-BUCKET, NOT THE POOL ROOT. sign('overrides') is a BARE
+    // WORD, so the pool root is also the molecule of a tile named `overrides`
+    // — and a root-level document write asks putPoolDoc to sweep every other
+    // 64-hex FILE there, which is exactly a molecule's succession atoms. A
+    // subKey targets sign(subKey) ONE LEVEL DOWN, space this code minted, and
+    // is the positive proof that lets the sweep run at all.
+    await store.putPoolDoc(store.overrides, bytes, OVERRIDES_SUBKEY)
   }
 
   #applyLive(locale: string, catalog: Record<string, string>): void {

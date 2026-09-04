@@ -120,8 +120,10 @@ export const BACKGROUND_THEMES: readonly BackgroundTheme[] = [
   { id: 'bloom',   label: 'Bloom',   screen: { archetype: 'mesh',      palette: 'bloom' },   chrome: 'bloom' },
   { id: 'sherbet', label: 'Sherbet', screen: { archetype: 'dots',      palette: 'sherbet' }, chrome: 'sherbet' },
 
-  // Nature is the SHIP DEFAULT — twenty scenes, first in the list, and what an
-  // unchosen `active` reads as. Its tiles set is the substrate's default too.
+  // Nature is the largest group — twenty scenes, and first in the list. It
+  // used to be the SHIP DEFAULT, handed to every new install before anyone
+  // had asked for pictures; nothing is handed out now (see
+  // DEFAULT_BACKGROUND_THEME), so this is a group you choose like any other.
   { id: 'nature',    label: 'Nature',    tiles: 'builtin:theme-nature',    preview: '/substrate/theme-nature/1.jpg', mood: 'dark' },
   // THE NEUTRAL PAIR. steel and daylight are the backdrops for the plain dark
   // and light chrome — same azure/clay chord, same grounds — so they name that
@@ -144,8 +146,22 @@ export const BACKGROUND_THEMES: readonly BackgroundTheme[] = [
   { id: 'botanical', label: 'Botanical', tiles: 'builtin:theme-botanical', preview: '/substrate/theme-botanical/1.jpg', mood: 'dark' },
 ]
 
-/** What `active` reads as before anyone has chosen — the ship default. */
-export const DEFAULT_BACKGROUND_THEME = 'nature'
+/**
+ * What `active` reads as before anyone has chosen — and it is `off`.
+ *
+ * AN INSTALL ARRIVES BARE. The app used to open onto a drawn backdrop in
+ * whatever palette the chrome implied, over twenty stock scenes spread across
+ * the tiles — two looks nobody had picked, on a hive with nothing in it yet.
+ * Each of these looks is worth having when you choose it. None of them is
+ * worth being the first thing you have to undo, and the pictures we ship are
+ * not good enough to make that trade. So the default is the surface: the hive
+ * you are given is the hexagons, and every look here is one press away in the
+ * Backgrounds window.
+ *
+ * This governs a NEW install only. A stored value is a choice and wins —
+ * including the word `off`, and including a look chosen years ago.
+ */
+export const DEFAULT_BACKGROUND_THEME = 'off'
 
 export class BackgroundThemeService extends EventTarget {
   #themes: BackgroundTheme[] = [...BACKGROUND_THEMES]
@@ -162,6 +178,11 @@ export class BackgroundThemeService extends EventTarget {
     // matchMedia arm covers the `system` theme, which sets no attribute at all
     // and would otherwise flip at dusk with nothing announcing it.
     EffectBus.on('theme:changed', () => { this.dispatchEvent(new CustomEvent('change')) })
+    // A half can be bared on its own, and `bare()`/`worn()` answer by asking
+    // the substrate — so a source change made anywhere else (the organizer,
+    // `/substrate`, the one-time advance) has to reach the surfaces drawing
+    // those answers.
+    EffectBus.on('substrate:changed', () => { this.dispatchEvent(new CustomEvent('change')) })
     try {
       window.matchMedia?.('(prefers-color-scheme: light)')
         ?.addEventListener?.('change', () => { this.dispatchEvent(new CustomEvent('change')) })
@@ -294,14 +315,7 @@ export class BackgroundThemeService extends EventTarget {
     const [name, item] = rest
 
     const canvas = get('@diamondcoreprocessor.com/CanvasBackground') as CanvasBackgroundService | undefined
-    if (name === 'off') {
-      canvas?.set('off')
-      this.#active = 'off'
-      this.#activeItem = null
-      this.#persist()
-      this.dispatchEvent(new CustomEvent('change'))
-      return 'background off — bare surface'
-    }
+    if (name === 'off') return await this.clear()
 
     const theme = name ? this.theme(name) : undefined
     if (!theme) return null
@@ -378,6 +392,75 @@ export class BackgroundThemeService extends EventTarget {
       : `background → ${theme.label}${tail}`
   }
 
+  /**
+   * Bare a half — or both.
+   *
+   * OFF IS THE SHIP DEFAULT, not a corner of the grammar, so getting back to
+   * it has to be one word rather than a state you can only have by never
+   * having chosen. It is also the only way to stop the tiles half: `off` used
+   * to clear the screen and leave the pictures, which meant a group you tried
+   * once went on dressing every blank tile you ever made afterwards.
+   *
+   * NOTHING IS REMOVED. A picture already on a tile stays on it, the groups
+   * stay registered, and the hidden list is untouched — the pool simply stops
+   * dressing what is still blank. Put a group back on and it resumes.
+   */
+  async clear(half?: 'screen' | 'tiles'): Promise<string> {
+    const both = half === undefined
+    if (both || half === 'screen') {
+      const canvas = get('@diamondcoreprocessor.com/CanvasBackground') as CanvasBackgroundService | undefined
+      canvas?.set('off')
+    }
+    if (both || half === 'tiles') {
+      const substrate = get('@diamondcoreprocessor.com/SubstrateService') as SubstrateLike | undefined
+      if (substrate) {
+        await substrate.ensureLoaded()
+        substrate.unpinImages()
+        await substrate.setActive(null)
+      }
+      this.#activeItem = null
+    }
+    // Only baring BOTH halves is a look in its own right. Baring one leaves
+    // the other wearing what it wears, and `worn()` reads that off the
+    // services rather than off this word.
+    if (both) { this.#active = 'off'; this.#persist() }
+    this.dispatchEvent(new CustomEvent('change'))
+    // Only a whole look is announced as one. Baring a single half does not
+    // make the app `off`, and saying so would be a lie to anyone listening.
+    if (both) EffectBus.emit('background:theme', { id: 'off' })
+    if (both) return 'background off — bare surface, no tile pictures'
+    return half === 'screen' ? 'screen → none (bare surface)' : 'tiles → none (no pictures)'
+  }
+
+  /**
+   * Is that half wearing nothing?
+   *
+   * ASKED OF THE THING THAT PAINTS, never of a flag kept here. A half can be
+   * bared on its own, so one "active theme" word cannot answer for both —
+   * and a second copy of the answer is exactly the drift that leaves a card
+   * lit under a screen you can see is empty.
+   */
+  bare(which: 'screen' | 'tiles'): boolean {
+    if (which === 'screen') {
+      const canvas = get('@diamondcoreprocessor.com/CanvasBackground') as CanvasBackgroundService | undefined
+      return canvas ? !canvas.enabled && !canvas.picture : false
+    }
+    const substrate = get('@diamondcoreprocessor.com/SubstrateService') as SubstrateLike | undefined
+    return substrate ? substrate.activeSource === null : false
+  }
+
+  /** Is this look the one worn on that half? Same rule as `bare()`: the
+   *  tiles answer comes from the source actually handing out pictures. */
+  worn(id: string, which: 'screen' | 'tiles'): boolean {
+    const theme = this.theme(id)
+    if (!theme) return false
+    if (which === 'tiles') {
+      const substrate = get('@diamondcoreprocessor.com/SubstrateService') as SubstrateLike | undefined
+      return Boolean(theme.tiles) && substrate?.activeSource?.id === theme.tiles
+    }
+    return Boolean(theme.screen) && this.#active === theme.id && !this.bare('screen')
+  }
+
   /** Read a theme's pictures for visual choosers without activating it. */
   async choices(id: string): Promise<{ name: string; imageSig: string }[]> {
     const theme = this.theme(id)
@@ -408,11 +491,18 @@ export class BackgroundThemeService extends EventTarget {
   }
 
   status(): string {
-    if (this.#active === 'off') return 'background off'
+    // Said from the halves themselves. A theme name describes what was last
+    // WORN; after one half is bared it no longer describes what is SHOWING,
+    // and the status line is the one place that must never be out of date.
+    const halves = [
+      this.bare('screen') ? null : 'screen',
+      this.bare('tiles') ? null : 'tiles',
+    ].filter(Boolean)
+    if (halves.length === 0) return 'background off — bare surface, no tile pictures'
     const theme = this.#active ? this.theme(this.#active) : undefined
-    if (!theme) return 'background — no theme chosen yet'
-    const halves = [theme.screen ? 'screen' : null, theme.tiles ? 'tiles' : null].filter(Boolean)
-    return `background → ${theme.label} (${halves.join(' + ')})`
+    return theme
+      ? `background → ${theme.label} (${halves.join(' + ')})`
+      : `background → ${halves.join(' + ')}`
   }
 
   /**

@@ -14,7 +14,7 @@
 // null when off or unsupported, and Store's #doInit treats null exactly like
 // a missing native host — the flat OPFS path runs as before.
 
-import { packedStoreEnabled, setBulkSigner } from '@hypercomb/core'
+import { SignatureService, packedStoreEnabled, poolKindFacts, poolKinds, setBulkSigner } from '@hypercomb/core'
 import { NativeRootDirectory, installSwBytesBridge, type NativeBridge } from './native-filesystem'
 import { PACK_MAGIC, PACK_POINTER_FILENAME, packFilename } from './packed-store-engine'
 
@@ -170,6 +170,18 @@ export interface PackedBoot {
  * flat layout by DRAIN, and until a record is drained the flat layout still
  * holds it.
  */
+/** The addresses of every pool the registry declares WIPE-SAFE (the `index`
+ *  kind), derived here on the main thread where the registry lives, so the
+ *  worker's collector can skip their members whole (packed-collect.ts). */
+export const wipeSafePoolAddresses = async (): Promise<string[]> => {
+  const out: string[] = []
+  for (const [meaning, kind] of poolKinds()) {
+    if (poolKindFacts(kind)?.wipeSafe !== true) continue
+    out.push(await SignatureService.sign(new TextEncoder().encode(meaning).buffer as ArrayBuffer))
+  }
+  return out
+}
+
 export const packedRoot = async (config: PackedStoreConfig): Promise<PackedBoot | null> => {
   if (!packedStoreEnabled() || !packedSupported()) {
     lastUnavailable = 'disabled'
@@ -201,7 +213,7 @@ export const packedRoot = async (config: PackedStoreConfig): Promise<PackedBoot 
       stats: () => openedBridge.invoke('pack_stats'),
       drain: (limit = 200) => openedBridge.invoke('pack_drain', { limit }),
       compact: () => openedBridge.invoke('pack_compact'),
-      collect: () => openedBridge.invoke('pack_collect'),
+      collect: async () => openedBridge.invoke('pack_collect', { wipeSafePools: await wipeSafePoolAddresses() }),
     }
     lastUnavailable = null
     return { root: new NativeRootDirectory(openedBridge), bridge: openedBridge, info }

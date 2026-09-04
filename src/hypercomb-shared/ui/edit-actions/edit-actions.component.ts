@@ -85,12 +85,12 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
    */
   readonly viewActive = signal(false)
 
-  // Share-feedback panel open/closed — lights the feedback button. The toggle
-  // moved here from the command line's tools rail (Jaime, 2026-08-12): the
-  // forum glyph belongs to feedback, and its home is the bottom-right corner
-  // the old FAB owned — now a proper member of the document cluster, left of
-  // the rotate icon.
-  readonly feedbackOpen = signal(false)
+  /** Can this browser photograph its own screen? `getDisplayMedia` is absent
+   *  on every phone, so the door is not offered there — the sheet would take
+   *  ink and then have nothing to do with it. Read once: a browser does not
+   *  grow the capability mid-session. */
+  readonly canAnnotate = signal(
+    typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia)
 
   readonly #host = inject(ElementRef) as ElementRef<HTMLElement>
 
@@ -101,7 +101,6 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
   #selectionUnsub: (() => void) | null = null
   #orientationUnsub: (() => void) | null = null
   #viewActiveUnsub: (() => void) | null = null
-  #feedbackUnsub: (() => void) | null = null
 
   ngOnInit(): void {
     // Start the shared inset→CSS-var bridge. edit-actions is template-mounted in
@@ -135,10 +134,6 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
     this.#viewActiveUnsub = EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {
       this.viewActive.set(!!active)
     })
-
-    this.#feedbackUnsub = EffectBus.on<{ open?: boolean }>('feedback:panel-state', ({ open }) => {
-      this.feedbackOpen.set(!!open)
-    })
   }
 
   /**
@@ -148,7 +143,7 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
    * The pheromone strip runs along the same bottom band from the other side
    * and has to stop before this cluster. It used to stop 12rem short — a
    * static guess made when the cluster held two buttons, and wrong in both
-   * directions since: the cluster GROWS (selection verbs, save, feedback,
+   * directions since: the cluster GROWS (selection verbs, save, annotate,
    * rotate) and it DISAPPEARS entirely under a full-viewport view. A guess
    * that is too generous leaves a visible gap between the tags and the
    * toolwindow beside them; one that is too tight puts tags under the icons.
@@ -179,7 +174,6 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
     this.#selectionUnsub?.()
     this.#orientationUnsub?.()
     this.#viewActiveUnsub?.()
-    this.#feedbackUnsub?.()
   }
 
   // Reuse the keyboard command path so persistence, rendering and layout
@@ -188,10 +182,11 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
     EffectBus.emit('keymap:invoke', { cmd: 'render.toggleOrientation' })
   }
 
-  /** Flip the feedback panel — FeedbackViewerComponent listens and
-   *  broadcasts state back via `feedback:panel-state`. */
-  readonly toggleFeedback = (): void => {
-    EffectBus.emit('feedback:toggle', {})
+  /** ANNOTATE THE SCREEN — the drawing sheet over the whole app. It reads the
+   *  location it was opened at by itself, so this corner has nothing to name:
+   *  one press, from wherever you are standing. */
+  readonly annotate = (): void => {
+    EffectBus.emit('markup:open', {})
   }
 
   // ── undo / redo ──────────────────────────────────────────

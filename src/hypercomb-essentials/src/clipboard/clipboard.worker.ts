@@ -87,13 +87,35 @@ export class ClipboardWorker extends Worker {
   constructor() {
     super()
 
-    EffectBus.on<{ action: string; targetSegments?: string[] }>('controls:action', (payload) => {
+    // A CALLER MAY ASK TO BE TOLD WHEN THE WORK IS DONE. The buttons that emit
+    // this channel are fire-and-forget by nature — a pointer has already moved
+    // on — but a SENTENCE is not: `/copy drafts` then `/paste` is two lines of
+    // one plan, and the second must not run before the first has staged the
+    // clipboard. It did: capture completes only after a chain of awaits, so
+    // `/paste` found `isEmpty` and returned silently while the receipt printed
+    // "Ran 2 grammars". A model whose next line was `/remove drafts` then
+    // destroyed the source with nothing at the destination.
+    //
+    // The callbacks are OPTIONAL, so all 21 existing emitters are unaffected;
+    // `accept` fires synchronously so a caller can tell a listener existed at
+    // all, and `complete` carries the failure rather than swallowing it. Same
+    // shape as `command:create-cells` (commands/create.queen.ts).
+    EffectBus.on<{
+      action: string
+      targetSegments?: string[]
+      accept?: () => void
+      complete?: (error?: unknown) => void
+    }>('controls:action', (payload) => {
       if (!payload?.action) return
+      const settle = (work: Promise<unknown>): void => {
+        payload.accept?.()
+        void work.then(() => payload.complete?.(), error => payload.complete?.(error))
+      }
       switch (payload.action) {
-        case 'copy': void this.#capture('copy'); break
-        case 'cut': void this.#capture('cut'); break
-        case 'paste': void this.#paste(this.#boundTarget(payload.targetSegments)); break
-        case 'clear-clipboard': void this.#clearClipboard(); break
+        case 'copy': settle(this.#capture('copy')); break
+        case 'cut': settle(this.#capture('cut')); break
+        case 'paste': settle(this.#paste(this.#boundTarget(payload.targetSegments))); break
+        case 'clear-clipboard': settle(this.#clearClipboard()); break
       }
     })
 
@@ -495,7 +517,7 @@ export class ClipboardWorker extends Worker {
     const svc = this.#clipboardSvc
     const store = this.#store
     if (!svc || !store) return
-    if (svc.isEmpty) { await clearDirectory(store.clipboard); return }
+    if (svc.isEmpty) { await clearClipboard(store); return }
     await writeMeta(store, {
       items: svc.items.map(i => ({
         label: i.label,
@@ -844,7 +866,7 @@ export class ClipboardWorker extends Worker {
     this.#clipboardSvc?.clear()
     clearExclusions()
     const store = this.#store
-    if (store) await clearDirectory(store.clipboard)
+    if (store) await clearClipboard(store)
   }
 
   // ── validate ──────────────────────────────────────────
@@ -907,7 +929,7 @@ export class ClipboardWorker extends Worker {
     svc.removeItems(invalid)
 
     if (svc.isEmpty) {
-      await clearDirectory(store.clipboard)
+      await clearClipboard(store)
     } else {
       await writeMeta(store, {
         items: svc.items.map(i => ({
@@ -1077,15 +1099,30 @@ async function readMeta(
   return (await tryParse(LEGACY_META)) ?? (await tryParse(LEGACY_META_TMP))
 }
 
-async function clearDirectory(dir: FileSystemDirectoryHandle): Promise<void> {
-  const entries: string[] = []
-  for await (const [name] of (dir as any).entries()) {
-    entries.push(name)
-  }
-  for (const name of entries) {
-    try {
-      await dir.removeEntry(name, { recursive: true })
-    } catch { /* ignore */ }
+/**
+ * Empty the clipboard.
+ *
+ * WHAT THIS USED TO BE. `clearDirectory(store.clipboard)` enumerated the pool
+ * and `removeEntry(name, { recursive: true })` on EVERY entry — from three
+ * ordinary paths (pasting the last item, and two clears), with no
+ * confirmation and no destructive-command gate. `sign('clipboard')` is a BARE
+ * WORD, so that address is also the molecule of a tile named `clipboard`: a
+ * routine paste took another participant's markers, author buckets and atoms
+ * with it. Destructive on the desktop client too — NativeSigDirectory's
+ * removeEntry does a real prefix sweep — so a browser-only check proved
+ * nothing.
+ *
+ * WHAT IT IS NOW. Clearing the clipboard is WRITING AN EMPTY LIST, not
+ * deleting a directory. The meta doc IS the clipboard, `writeMeta` goes
+ * through `putPoolDoc` with a subKey (a sub-bucket this code minted, which is
+ * positive proof of ownership), and the two legacy fixed-name files are
+ * literal names nothing else can hold. Nothing enumerates, so nothing that
+ * shares the address can be reached.
+ */
+async function clearClipboard(store: StoreLike): Promise<void> {
+  await writeMeta(store, { items: [] })
+  for (const legacy of [LEGACY_META, LEGACY_META_TMP]) {
+    try { await store.clipboard.removeEntry(legacy) } catch { /* absent */ }
   }
 }
 

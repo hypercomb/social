@@ -72,7 +72,7 @@
 // Toggle live via the public enable()/disable() methods; localStorage
 // changes take effect on the next event, no reload required.
 
-import { EffectBus, SignatureService, registerPoolMeaning, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
+import { CHILD_SLOTS, EffectBus, SignatureService, registerPoolMeaning, isMetaEnvelope, metaPayloadOf } from '@hypercomb/core'
 import { decorationClosureSigs, nestedResourceSigs } from './decoration-closure.js'
 
 export type HostSyncKind = 'layer' | 'bee' | 'dependency' | 'resource'
@@ -83,10 +83,11 @@ interface SignerLike {
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
-/** Child slots a layer holds its descendant layers in. Also the set of
+/** Child slots a layer holds its descendant layers in — the core roster,
+ *  never restated (documentation/life-primitive.md). Also the set of
  *  `relation` values a meta envelope can carry to mean "I am held as a
  *  child" — the privacy gate reads the relation exactly as it reads a slot. */
-const CHILD_SLOTS = new Set(['cells', 'layers', 'children'])
+const CHILD_SLOT_SET: ReadonlySet<string> = new Set(CHILD_SLOTS)
 
 /** The one incidence a META ENVELOPE (Life Primitive) references.
  *
@@ -110,11 +111,11 @@ const metaIncidence = (record: unknown): { sig: string; kind: HostSyncKind } | n
 }
 
 /** True when an envelope is held as a descendant LAYER — the same condition
- *  the slot walks express as `CHILD_SLOTS.has(slot)`. A tile-only share must
+ *  the slot walks express as `CHILD_SLOT_SET.has(slot)`. A tile-only share must
  *  not descend through one, exactly as it does not descend a `children[]`. */
 const metaIsChildIncidence = (record: unknown, kind: HostSyncKind): boolean =>
   kind === 'layer'
-  && CHILD_SLOTS.has(String((record as Record<string, unknown>)?.['relation'] ?? 'children'))
+  && CHILD_SLOT_SET.has(String((record as Record<string, unknown>)?.['relation'] ?? 'children'))
 const ENTRY_RE = /^([a-f0-9]{64})\.(layer|bee|dependency|resource)$/
 // Pool meanings — sign(meaning) IS the pool address (see #poolSignature).
 // Distinct from PushQueueService's 'push'/'receipts' meanings so the two
@@ -315,17 +316,22 @@ export class HostSyncService extends EventTarget {
    *  and we never re-enable a CDN they deliberately turned off (`'0'` is a
    *  decision; absent is merely unasked).
    *
-   *  CONSENT: joining a swarm IS the gesture — it is an explicit act that
-   *  says "share these tiles with these people", and sharing them is exactly
-   *  what puts their bytes on a host. Callers must not invoke this on boot,
-   *  on navigation, or anywhere a participant has not asked to share. */
-  public readonly ensureSwarmTarget = (): boolean => {
-    if (this.#anyEnabled()) return false
+   *  CONSENT — AND WHY THIS NO LONGER FLIPS THE SWITCH. Joining a swarm is
+   *  the gesture "share these tiles with these people in this zone". The act
+   *  this used to perform on its own was "upload my bytes to a named third
+   *  party", which is a different act with a different counterparty, and the
+   *  participant never said it. So this answers the question and emits it:
+   *  `'ready'` (a target exists), `'opted-out'` (they decided), or
+   *  `'needs-host'` — in which case `host-sync:needs-target` fires and the
+   *  join surface takes the yes (`enablePublicHost` is the yes; the
+   *  `/use-live-relay` command already performs it as a typed gesture). */
+  public readonly ensureSwarmTarget = (): 'ready' | 'opted-out' | 'needs-host' => {
+    if (this.#anyEnabled()) return 'ready'
     let optedOut = false
     try { optedOut = localStorage.getItem(PUBLIC_HOST_KEY) === '0' } catch { /* treat as unasked */ }
-    if (optedOut) return false
-    this.enablePublicHost()
-    return true
+    if (optedOut) return 'opted-out'
+    EffectBus.emit('host-sync:needs-target', { host: this.publicHostDomain() })
+    return 'needs-host'
   }
 
   /** Opt out of the public CDN target. Queued entries and `.public`
@@ -568,7 +574,7 @@ export class HostSyncService extends EventTarget {
     }
     for (const [slot, value] of Object.entries(layer)) {
       if (!Array.isArray(value)) continue
-      const kind: HostSyncKind = CHILD_SLOTS.has(slot) ? 'layer'
+      const kind: HostSyncKind = CHILD_SLOT_SET.has(slot) ? 'layer'
         : slot === 'bees' ? 'bee'
         : slot === 'dependencies' ? 'dependency'
         : 'resource'
@@ -730,7 +736,7 @@ export class HostSyncService extends EventTarget {
       }
       for (const [slot, value] of Object.entries(layer)) {
         if (!Array.isArray(value)) continue
-        const isChildSlot = CHILD_SLOTS.has(slot)
+        const isChildSlot = CHILD_SLOT_SET.has(slot)
         // PRIVACY GATE: without branch closure, descendant layers stay
         // private — skip the child slots entirely.
         if (isChildSlot && !closure) continue
@@ -1281,7 +1287,7 @@ export class HostSyncService extends EventTarget {
       }
       for (const [slot, value] of Object.entries(layer)) {
         if (!Array.isArray(value)) continue
-        const isChildSlot = CHILD_SLOTS.has(slot)
+        const isChildSlot = CHILD_SLOT_SET.has(slot)
         // Tile-only share: descendants are not part of the contract.
         if (isChildSlot && !closure) continue
         const refKind: HostSyncKind = isChildSlot ? 'layer'
@@ -1376,7 +1382,7 @@ export class HostSyncService extends EventTarget {
         }
         for (const [slot, value] of Object.entries(layer)) {
           if (!Array.isArray(value)) continue
-          const isChildSlot = CHILD_SLOTS.has(slot)
+          const isChildSlot = CHILD_SLOT_SET.has(slot)
           if (isChildSlot && !closure) continue
           const refKind: HostSyncKind = isChildSlot ? 'layer'
             : slot === 'bees' ? 'bee'

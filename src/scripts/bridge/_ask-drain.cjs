@@ -17,6 +17,7 @@
 // note appears in the tile's notes live; never trust visual confirmation.
 
 const WebSocket = require('ws')
+const { openRun, runRefForAsk } = require('./loop-run.cjs')
 const BRIDGE = process.env.BRIDGE_URL || 'ws://localhost:2401'
 // Only needed when driving a REMOTE broker (loopback senders are trusted).
 const TOKEN = String(process.env.HYPERCOMB_BRIDGE_TOKEN || '').trim()
@@ -125,6 +126,27 @@ async function answer(askSig, cellPath, text) {
   const cell = segs[segs.length - 1]
   const parent = segs.slice(0, -1)
 
+  // THIS RUN, DERIVED — not invented, so it is the same run after a restart.
+  // Every request below carries it, which is what puts this answer in the
+  // hive's ledger without anyone having to remember a field.
+  const run = runRefForAsk(askSig)
+
+  // THE DUPLICATE-NOTE WINDOW, CLOSED. The note lands and then the ask is
+  // retired; a crash between the two leaves the ask pending, so the next
+  // drain answers a question that is already answered and the tile gets the
+  // same note twice. That was unavoidable while nothing recorded the write.
+  // Now it is: if this run already landed a note-add for this cell, skip
+  // straight to retiring the ask.
+  //
+  // On a ledger we cannot READ, write the note. A duplicate note is a
+  // nuisance; a lost answer is the failure this file already refuses twice
+  // ('never lose an answer over a failed lookup').
+  let alreadyNoted = false
+  try {
+    const { landed } = await openRun({ convoId: run.convoId, runId: run.id }).resume()
+    alreadyNoted = landed.some(s => s.verb === 'note-add' && s.request && s.request.cell === cell)
+  } catch { /* cannot tell — answering twice beats not answering */ }
+
   // CARRY THE QUESTION INTO THE NOTE. An answer alone reads as a floating
   // statement months later — and the routine that reads notes as instructions
   // has no idea what prompted it. Look the ask up by sig and prefix its
@@ -162,18 +184,22 @@ async function answer(askSig, cellPath, text) {
     : ''
   const body = asked ? `${asked}\n\n${text}` : text
 
-  const noteRes = await withRenderer({ op: 'note-add', segments: parent, cell, text: body })
-  if (!noteRes.ok) { console.error('note-add failed:', noteRes.error); process.exit(1) }
+  if (alreadyNoted) {
+    console.log(`[ask-drain] ${askSig.slice(0, 12)}… already answered on ${cell} — retiring without a second note`)
+  } else {
+    const noteRes = await withRenderer({ op: 'note-add', segments: parent, cell, text: body, run })
+    if (!noteRes.ok) { console.error('note-add failed:', noteRes.error); process.exit(1) }
+  }
 
   // Retire the context records BEFORE the ask: `optimization-remove` of the
   // ask is what emits `ask:answered` (the bee lands, the pill drops), so it
   // goes last and any leftover follow-up is already gone.
   for (const record of contextRecords) {
-    const gone = await withRenderer({ op: 'optimization-remove', sig: record.sig }, 2)
+    const gone = await withRenderer({ op: 'optimization-remove', sig: record.sig, run }, 2)
     if (!gone.ok) console.error('context record not retired:', record.sig, gone.error)
   }
 
-  const rm = await withRenderer({ op: 'optimization-remove', sig: askSig })
+  const rm = await withRenderer({ op: 'optimization-remove', sig: askSig, run })
   if (!rm.ok) { console.error('optimization-remove failed (note was written):', rm.error); process.exit(1) }
 
   console.log(`[ask-drain] answered /${segs.join('/')} and retired ask ${askSig.slice(0, 12)}…`)

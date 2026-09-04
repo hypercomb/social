@@ -2,8 +2,11 @@
 import {
   Worker, EffectBus, normalizeCell, hypercomb, isSignature, SignatureService,
   isLocalClaudeBridgeConfigured,
+  REMOTE_SUBMIT, formatRemoteSubmitOutcome,
+  type RemoteSubmitRequest, type RemoteSubmitOutcome,
 } from '@hypercomb/core'
 import { deliverTurn, readTurns, setConversationGoalReached } from './chat-thread.js'
+import { appendStep, nextSeq as ledgerNextSeq, readSteps } from './chat-steps.js'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import type { HistoryService } from '../history/history.service.js'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
@@ -12,9 +15,9 @@ import { extractPageRefSigs, collectSigsDeep } from '../sharing/decoration-closu
 import { markAuthored, markLayerAuthoredPageSigs } from '../sharing/authored-sigs.js'
 import { mintBuildRecord } from '../history/builds-slot.js'
 import { putSummary, listSummaryRuns, type FeedbackSummaryRecord } from './feedback-summaries.js'
-import { readPublicBranches, setBranchPublic } from '../presentation/tiles/tile-actions.drone.js'
+import { readPublicBranches } from '../presentation/tiles/tile-actions.drone.js'
 import { setHiveRoot } from '../sharing/hive-pointer.js'
-import { PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
+import { bridgeMaySetRootKey, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
 
 // Bridge protocol — matches @hypercomb/sdk/bridge
 const BRIDGE_PORT = 2401
@@ -75,18 +78,50 @@ type BridgeRequest = {
   dryRun?: boolean
   /** How many entries to return (summary-list). Clamped receiver-side. */
   limit?: number
-  /** `branch-public`: mark (true, the default) or unmark (false) the branch
-   *  at `segments` as public. */
+  /** `branch-public`: REFUSED. Marking a branch public is a participant act —
+   *  it is the scope input of the signed vocabulary claim — so the op reads
+   *  the marks and any attempt to set one is an error. */
   public?: boolean
   /** `hive-root-set`: colon-carrying index key (e.g. `install:essentials`). */
   key?: string
   /** `hive-root-set`: index host override (defaults to the standing public
    *  content endpoint). */
   host?: string
+  /** THE AGENT LOOP THIS REQUEST IS A STEP OF. Present only when a responder
+   *  has declared a run; absent means nothing is recorded and the op behaves
+   *  exactly as it always did. Two fields on requests a responder already
+   *  sends is the whole cost of a replayable loop — see chat-steps.ts. */
+  run?: { convoId?: string; id?: string }
+  /** `thread-read`: also return the conversation's step ledger. */
+  steps?: boolean
+  /** `thread-read`: narrow the returned steps to one run. */
+  runId?: string
 }
 type BridgeResponse = { id: string; ok: boolean; data?: unknown; error?: string }
 
 const RECONNECT_MS = 3_000
+
+/** How long `submit` waits for the command line's receipt before answering
+ *  `unknown`. The listener settles on every path, so this is a backstop
+ *  against a wedge, never the normal exit.
+ *
+ *  IT ALSO KEEPS THE QUIET WINDOW FROM WEDGING. `submit` is in
+ *  `#MUTATING_OPS` and `#quietDone` runs in a `finally`, so a promise that
+ *  never settled would hold the participant's tile surface behind a quiet
+ *  badge for the rest of the session — a far worse failure than the wrong
+ *  answer this replaces. Every await here must have a ceiling.
+ *
+ *  ONLY A COMMON TONGUE SENTENCE ACTUALLY WAITS. Canonical slash, a refusal
+ *  and any unmatched line all settle synchronously, so existing callers —
+ *  which send slash grammar — keep their instant answer.
+ *
+ *  Set below the 10s deadline that carries `submit` in all three clients
+ *  (scripts/bridge/bridge-cli.cjs, scripts/bridge-cli.cjs,
+ *  hypercomb-cli/src/bridge/client.ts). It cannot satisfy every caller — the
+ *  shortest socket timeout under scripts/bridge is 5s — so a genuinely slow
+ *  sentence can still surface there as a client-side timeout. That belongs to
+ *  the caller to raise; it is not a reason to go back to lying. */
+const SUBMIT_DEADLINE_MS = 8_000
 
 export class ClaudeBridgeWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -259,6 +294,19 @@ export class ClaudeBridgeWorker extends Worker {
     'add', 'remove', 'summary-add', 'chat-reply', 'chat-goal-reached', 'submit',
   ])
 
+  /** NOT steps of the loop. Reading the log is how a responder REJOINS the
+   *  loop rather than a move within it, and `agent-progress` is the
+   *  announcement half of the pair — recording it would fill the ledger with
+   *  the chatter the record exists to replace. */
+  static readonly #STEP_SILENT_OPS = new Set(['thread-read', 'agent-progress'])
+
+  /** The next `seq` each live run should claim, seeded from the LEDGER on a
+   *  run's first op so a page reload continues the count instead of
+   *  restarting it and overwriting the run's own history. Held as a promise
+   *  chain: two ops racing on one run each claim a distinct seq, because the
+   *  map is updated synchronously with the successor of the claim. */
+  readonly #runSeq = new Map<string, Promise<number>>()
+
   #quietDepth = 0
   #quietClose: ReturnType<typeof setTimeout> | null = null
 
@@ -291,6 +339,16 @@ export class ClaudeBridgeWorker extends Worker {
   }
 
   async #dispatch(req: BridgeRequest): Promise<BridgeResponse> {
+    const res = await this.#routeQuietly(req)
+    // EVERY op a responder sends passes through here, which is the whole
+    // reason the loop becomes replayable for free: a responder does not have
+    // to remember to record anything, and the steps it FORGOT it took — and
+    // the ones that failed — are recorded exactly like the rest.
+    await this.#recordStep(req, res)
+    return res
+  }
+
+  async #routeQuietly(req: BridgeRequest): Promise<BridgeResponse> {
     if (!ClaudeBridgeWorker.#MUTATING_OPS.has(String(req.op))) return this.#route(req)
     this.#quietOpen()
     try {
@@ -298,6 +356,69 @@ export class ClaudeBridgeWorker extends Worker {
     } finally {
       this.#quietDone()
     }
+  }
+
+  /** How many runs the counter will hold before it forgets the oldest. A
+   *  long-lived tab answers many conversations, and every one of them would
+   *  otherwise keep an entry forever. Forgetting is SAFE here and nowhere
+   *  else in this file: the count's authority is the ledger on disk, so a
+   *  forgotten run re-seeds from it exactly as a reloaded one does. */
+  static readonly #RUN_SEQ_CEILING = 256
+
+  /** The seq this call claims, leaving its successor for the next. */
+  #claimSeq(convoId: string, runId: string): Promise<number> {
+    const key = `${convoId}\u0000${runId}`
+    const claimed = this.#runSeq.get(key) ?? ledgerNextSeq(convoId, runId)
+
+    // Evict the OLDEST run, never the whole map, and never the run being
+    // claimed. Clearing looked cheap because re-seeding reads the ledger —
+    // but a re-seed mid-run reads a ledger that does not yet hold the steps
+    // still in flight, hands out a seq already taken, and `settle()` then
+    // drops one of the two colliding records entirely. Map iteration is
+    // insertion-ordered, so the first key that is not this one is the oldest.
+    if (this.#runSeq.size >= ClaudeBridgeWorker.#RUN_SEQ_CEILING) {
+      for (const old of this.#runSeq.keys()) {
+        if (old !== key) { this.#runSeq.delete(old); break }
+      }
+    }
+
+    // A REJECTED claim must not become the run's permanent state. Storing
+    // `claimed.then(...)` unguarded meant one transient store fault poisoned
+    // every later step of that run for the life of the tab — silently, since
+    // #recordStep swallows what it catches. Forget the key instead: the next
+    // step re-seeds from disk, which is the authority anyway.
+    this.#runSeq.set(key, claimed.then(n => n + 1).catch(() => {
+      this.#runSeq.delete(key)
+      throw new Error('run seq unavailable')
+    }))
+    // Nothing awaits the stored promise unless another step arrives, so its
+    // rejection must not surface as an unhandled one.
+    void this.#runSeq.get(key)?.catch(() => { /* handled by the next claim */ })
+    return claimed
+  }
+
+  /** Write the attempt, then let the op's own answer go back unchanged.
+   *  The ledger must NEVER fail the work it records — a hive that cannot
+   *  write a step is a hive with a gap in its trail, not a broken op. */
+  async #recordStep(req: BridgeRequest, res: BridgeResponse): Promise<void> {
+    const convoId = String(req.run?.convoId ?? '').trim()
+    const runId = String(req.run?.id ?? '').trim()
+    const verb = String(req.op ?? '').trim()
+    if (!convoId || !runId || !verb) return
+    if (ClaudeBridgeWorker.#STEP_SILENT_OPS.has(verb)) return
+    try {
+      await appendStep({
+        convoId, runId, verb,
+        seq: await this.#claimSeq(convoId, runId),
+        // Stamped from the BROWSER, never the responder's machine: one clock
+        // per hive means a run cannot be skewed by whoever is answering it.
+        at: Date.now(),
+        outcome: res.ok ? 'ok' : 'failed',
+        request: stepPayload(req),
+        sigs: harvestSigs(res.data),
+        error: res.ok ? undefined : String(res.error ?? ''),
+      })
+    } catch { /* never surface the ledger's trouble as the op's */ }
   }
 
   async #route(req: BridgeRequest): Promise<BridgeResponse> {
@@ -414,7 +535,7 @@ export class ClaudeBridgeWorker extends Worker {
   // pool API (putOptimization/listOptimizations/removeOptimization).
   // Each entry is a content-addressed JSON file (Q&A, comm, future kinds).
   // Layer-untouched: this directory is structurally separate from any
-  // cell's layer slots. The feedback window and state-machine wrappers
+  // cell's layer slots. The loop's Q&A rows and state-machine wrappers
   // around base objects pull from here at access/render time.
 
   /**
@@ -621,10 +742,19 @@ export class ClaudeBridgeWorker extends Worker {
     const convoId = typeof req.cell === 'string' ? req.cell.trim() : ''
     if (!convoId) return { id: req.id, ok: false, error: 'thread-read requires `cell` (the convoId)' }
     const turns = await readTurns(convoId)
-    return {
-      id: req.id, ok: true,
-      data: { convoId, turns: turns.map(t => ({ role: t.role, text: t.text, at: t.at })) },
+    const data: Record<string, unknown> = {
+      convoId, turns: turns.map(t => ({ role: t.role, text: t.text, at: t.at })),
     }
+    // THE LOG IS THE ONLY TRUTH THE RESPONDER CAN SEE. Turns say what was
+    // said; steps say what was done and what failed. One call returns both
+    // so a restarted responder reconstructs its whole loop from the record
+    // instead of from memory it no longer has. Opt-in, so every existing
+    // caller gets byte-identical output.
+    if (req.steps) {
+      const runId = typeof req.runId === 'string' ? req.runId.trim() : ''
+      data['steps'] = await readSteps(convoId, runId || undefined)
+    }
+    return { id: req.id, ok: true, data }
   }
 
   // ─── agent-progress ────────────────────────────────────────────────
@@ -1138,6 +1268,16 @@ export class ClaudeBridgeWorker extends Worker {
     if (!key.includes(':')) {
       return { id: req.id, ok: false, error: 'hive-root-set requires a colon-carrying key (e.g. install:essentials) — site lineage roots are not settable over the bridge' }
     }
+    // A COLON IS NOT A LICENCE. The colon rule only proves the key is not a
+    // site lineage; it says nothing about whether advancing it is a DEPLOY
+    // STAMP (install:<channel>, which is what this op exists for) or a
+    // PARTICIPANT ACT. `vocabulary:hive` is the second kind — publishing what
+    // words you hold is something the participant does, at their own gesture,
+    // or the scope model is decoration. Refused as DATA, in hive-link.ts, so
+    // the list extends without touching this worker again.
+    if (!bridgeMaySetRootKey(key)) {
+      return { id: req.id, ok: false, error: `hive-root-set refuses '${key}' — only an install:<channel> stamp is settable over the bridge; everything else is a participant act` }
+    }
     const host = String(req.host ?? '').trim().toLowerCase() || PUBLIC_CONTENT_HOSTS[0] || ''
     if (!host) return { id: req.id, ok: false, error: 'no index host configured' }
     const result = await setHiveRoot(host, key, sig)
@@ -1540,11 +1680,54 @@ export class ClaudeBridgeWorker extends Worker {
   // component subscribes and runs the existing submit pipeline. Text is
   // forwarded verbatim so anything the keyboard accepts (slash behaviours,
   // bracket selects, multi-token grammar, plain cell names) just works.
+  //
+  // AND IT WAITS FOR AN ANSWER. This used to emit and return `{ok:true}` on the
+  // next line, which meant "the effect was delivered" and was read by every
+  // caller as "the command ran". Measured over the live bridge 2026-09-04, it
+  // was wrong twice in six calls — bare prose did nothing, `/remove` did
+  // nothing, both answered ok. An agent that cannot tell success from silence
+  // cannot correct itself, and will report a success to a participant for a
+  // sentence that did nothing.
+  //
+  // The receipt says only what the command line can honestly know
+  // (`RemoteSubmitOutcome` in core): `ran` with a per-action list where ok is
+  // DID-NOT-THROW, `ambiguous` with the claimants so a caller can choose and
+  // say it again, `refused` for a destructive verb that needs a person, or
+  // `unknown` when the line went to the legacy pipeline, whose completion is
+  // not observable. `ok` on the wire stays true for all of them: the call
+  // itself succeeded, and `outcome.kind` is what the caller must read.
+  //
+  // TRANSIENT, NOT `emit`. A stored last value replays to late subscribers, so
+  // a re-created command line would RE-EXECUTE the previous bridge line with
+  // no caller and no receipt. EffectBus dispatches synchronously, so
+  // `accepted` is already true here if a command line was listening at all.
   async #submit(req: BridgeRequest): Promise<BridgeResponse> {
     const text = req.text
     if (typeof text !== 'string') return { id: req.id, ok: false, error: 'no text provided' }
-    EffectBus.emit('command-line:remote-submit', { text })
-    return { id: req.id, ok: true }
+
+    let accepted = false
+    let settle!: (outcome: RemoteSubmitOutcome) => void
+    const answered = new Promise<RemoteSubmitOutcome>(resolve => { settle = resolve })
+
+    const request: RemoteSubmitRequest = {
+      text,
+      accept: () => { accepted = true },
+      complete: outcome => settle(outcome),
+    }
+    EffectBus.emitTransient(REMOTE_SUBMIT, request)
+
+    if (!accepted) return { id: req.id, ok: false, error: 'the command line is unavailable' }
+
+    const timer = setTimeout(
+      () => settle({ kind: 'unknown', reason: 'the command line did not answer in time' }),
+      SUBMIT_DEADLINE_MS,
+    )
+    try {
+      const outcome = await answered
+      return { id: req.id, ok: true, data: { outcome, summary: formatRemoteSubmitOutcome(outcome) } }
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   // Emits one allowlisted UI intent — the same effects the matching panel
@@ -1571,24 +1754,30 @@ export class ClaudeBridgeWorker extends Worker {
     return { id: req.id, ok: true, data: { name } }
   }
 
-  // Marks (or unmarks) the branch at `segments` public — the same
-  // participant-local flag the tile overlay's make-branch-public toggle
-  // writes. A branch never published before has no publish-panel row until
-  // it carries this mark, so a headless publish (`effect-emit publish:run`)
-  // had no way to reach a FIRST publish; this is that missing step. The mark
-  // is localStorage only — publishing truth still moves solely through
-  // `publishBranch`'s sealed closure and signed index.
+  // READS the public-branch marks. WRITING THEM IS A PARTICIPANT ACT AND IS
+  // REFUSED HERE.
+  //
+  // This op used to WRITE the mark with no gesture at all — the same
+  // class of hole `hive-root-set` had, and one step worse in consequence.
+  // `hc:public-branches` is not merely a panel row: it is the SCOPE INPUT of
+  // the signed vocabulary claim (`molecule/vocabulary-publish.ts` derives the
+  // declared words from exactly these marks), and `swarm.drone.ts` fires
+  // `markPublic` off the same list during a publish walk. An agent driving the
+  // bridge could therefore choose which subtrees a later — properly confirmed
+  // — publish declares, so "the participant chose the scope" would be false
+  // while the confirmation still said it was true.
+  //
+  // A caller that genuinely needs a first publish asks the participant to mark
+  // the branch; the toggle is one click and it is the whole consent gesture.
   async #branchPublic(req: BridgeRequest): Promise<BridgeResponse> {
-    const segments = (req.segments ?? [])
-      .map(s => normalizeCell(String(s ?? '')) || String(s ?? '').trim())
-      .filter(Boolean)
-    if (segments.length === 0) {
-      return { id: req.id, ok: false, error: 'branch-public requires `segments`' }
+    if (req.public !== undefined) {
+      return {
+        id: req.id,
+        ok: false,
+        error: 'branch-public is read-only over the bridge: marking a branch public is a participant act (it is the scope input of the signed vocabulary claim). Ask the participant to use the tile toggle.',
+      }
     }
-    const location = segments.slice(0, -1).join('/')
-    const label = segments[segments.length - 1]
-    const branches = setBranchPublic(location, label, req.public !== false)
-    return { id: req.id, ok: true, data: { branches: readPublicBranches(), applied: branches } }
+    return { id: req.id, ok: true, data: { branches: readPublicBranches() } }
   }
 
   // Runs HostSyncService.reDrain() and returns its summary verbatim. The
@@ -1773,6 +1962,76 @@ export class ClaudeBridgeWorker extends Worker {
       return lastOp !== 'remove' || allSet.has(cell)
     })
   }
+}
+
+// ─── step-ledger helpers ───────────────────────────────────────────
+//
+// Routing, not content: `id` is a per-message nonce and `run` is the
+// addressing that put the step in this ledger in the first place, so neither
+// belongs in the recorded payload — and both would stop two identical
+// requests deduping to one resource. `base64` is dropped because the
+// response's own signature already points at those bytes; copying a resource
+// into the record of the step that made it is the one thing this file is
+// careful never to do.
+const STEP_UNRECORDED_FIELDS = new Set(['id', 'run', 'base64', 'layer'])
+
+/** A layer body is CONTENT, and the ledger's one promise is that it points at
+ *  history rather than copying it. Recording `req.layer` verbatim broke that
+ *  for the commonest structural verb: a full snapshot of a proposed layer sat
+ *  at the content root, referenced by nothing, free to disagree with what
+ *  `commitLayer` actually stored once it deduped or healed a reference. What
+ *  a resume needs is the SHAPE of the attempt — which tile, which slots, how
+ *  many children — so that is what is kept. */
+const layerShape = (layer: unknown): Record<string, unknown> | undefined => {
+  if (!layer || typeof layer !== 'object') return undefined
+  const src = layer as Record<string, unknown>
+  const slots: string[] = []
+  let children: number | undefined
+  for (const [slot, value] of Object.entries(src)) {
+    if (slot === 'name') continue
+    slots.push(slot)
+    if (slot === 'children' && Array.isArray(value)) children = value.length
+  }
+  return {
+    ...(typeof src['name'] === 'string' ? { name: src['name'] } : {}),
+    ...(slots.length ? { slots: slots.sort() } : {}),
+    ...(children === undefined ? {} : { children }),
+  }
+}
+
+/** The request as the ledger stores it — keys SORTED, so the same request
+ *  sent twice mints one resource rather than two. */
+const stepPayload = (req: BridgeRequest): Record<string, unknown> => {
+  const out: Record<string, unknown> = {}
+  for (const key of Object.keys(req).sort()) {
+    if (STEP_UNRECORDED_FIELDS.has(key)) continue
+    out[key] = (req as unknown as Record<string, unknown>)[key]
+  }
+  const shape = layerShape(req.layer)
+  if (shape) out['layerShape'] = shape
+  return out
+}
+
+/** Signatures the op RETURNED — the edge from an attempt to the history it
+ *  produced. Pointers only: this never copies what they point at, which is
+ *  what keeps the ledger a view over history rather than a rival to it.
+ *  Bounded in depth and count so a large answer cannot turn one step into a
+ *  large record. */
+const harvestSigs = (data: unknown, limit = 32, maxDepth = 4): string[] => {
+  const out: string[] = []
+  const walk = (value: unknown, depth: number): void => {
+    if (out.length >= limit || depth > maxDepth) return
+    if (typeof value === 'string') {
+      if (isSignature(value) && !out.includes(value)) out.push(value)
+      return
+    }
+    if (Array.isArray(value)) { for (const item of value) walk(item, depth + 1); return }
+    if (value && typeof value === 'object') {
+      for (const item of Object.values(value as Record<string, unknown>)) walk(item, depth + 1)
+    }
+  }
+  walk(data, 0)
+  return out
 }
 
 // ─── base64 helpers ────────────────────────────────────────────────

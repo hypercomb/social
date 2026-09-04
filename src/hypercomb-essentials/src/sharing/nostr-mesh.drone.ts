@@ -551,27 +551,6 @@ export class NostrMeshDrone extends Drone {
     return delivered
   }
 
-  // note: publish a fully-formed event (signed elsewhere)
-  public publishEvent = async (evt: NostrEvent): Promise<boolean> => {
-    this.ensureStartedNow()
-
-    if (!evt || !evt.kind || !Array.isArray(evt.tags)) return false
-
-    // note: always local fanout
-    const sig = this.readX(evt.tags)
-    if (sig) this.fanoutToSig('local', sig, evt)
-
-    // note: if not signed, try to sign for network. Same honesty contract
-    // as publish(): false = no relay will ever see this event.
-    const signed = (evt.id && evt.pubkey && evt.sig) ? evt : await this.trySign(evt)
-    if (!signed) {
-      this.stats.sendSkippedNoSigner++
-      return false
-    }
-
-    return this.sendEventToAll(signed)
-  }
-
   // -----------------------------
   // startup
   // -----------------------------

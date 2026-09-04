@@ -34,6 +34,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 - [group-signatures.md](group-signatures.md) — Group identity as a first-class citizen: sign('group:<meaning>') carried by every member, so a set adds and deletes as one unit
 - [website-artifact-paradigm.md](website-artifact-paradigm.md) — Atomic artifacts related by decoration: never mint a parent to hold a view's members; one website artifact names the relation and every member wears its mark
 - [layout-templates.md](layout-templates.md) — Named, shared layouts a container opts into by wearing a mark: holes are an interface, arity is data, and one inherited variable vocabulary replaces a namespace per layout
+- [ontology-is-the-name.md](ontology-is-the-name.md) — The ontology is the name: layouts declare belonging, marks record it, pools index it, renderers project it; historical vocabularies import as SKOS marks, never as a service
 
 ## Architecture
 

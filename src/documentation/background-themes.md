@@ -6,8 +6,37 @@ One command, one list, one word.
 /background ember
 ```
 
-`/background` with nothing after it prints the current theme and the whole list.
-`/background off` is bare surface.
+`/background` with nothing after it opens the Backgrounds window.
+`/background off` is bare surface — and it is what an install starts as.
+
+## The default is nothing
+
+**A new install has no backdrop behind the hive and no pictures on its
+tiles.** The app used to open onto a drawn look in whatever palette the
+chrome theme implied, over twenty stock scenes spread across the tiles —
+two looks nobody had picked, on a hive with nothing in it yet. Every look
+here is worth having when you choose it; none is worth being the first
+thing you have to undo. So the hive you are given is the hexagons, and a
+look is one press away in the Backgrounds window.
+
+This governs a **new install only**. A stored choice wins — a look picked
+years ago is still on, and so is `off` if that is what you typed.
+
+Each half stops on its own, and **stopping removes nothing**: a picture
+already on a tile stays on it, the groups stay on the list, and the hidden
+list is untouched. The pool simply stops dressing what is still blank.
+
+```bash
+/background screen.off   # bare surface
+/background tiles.off    # stop filling blank tiles
+/background off          # both
+```
+
+In the window each half's grid opens with a **None** card, marked when that
+half is wearing nothing. Which card is lit is read from the services that
+actually paint — the canvas for the screen, the substrate's active source
+for the tiles — so baring one half on its own can never leave the other
+section's card lit under a screen you can see is empty.
 
 ## The grammar
 
@@ -126,9 +155,10 @@ the Ember screen.
 
 | Theme | Dresses |
 |---|---|
-| `nature` (**default**) `photos` `minimal` `geometric` `abstract` `cosmos` `ink` `botanical` | tiles |
+| `nature` `photos` `minimal` `geometric` `abstract` `cosmos` `ink` `botanical` | tiles |
 | `steel` `daylight` `indigo` `teal` `ember` | screen + tiles |
-| `off` | clears the screen |
+| `honey` `bloom` `sherbet` | screen + chrome |
+| `off` (**default**) | bares both halves |
 
 The generated sets share one art direction (2026-08-20 quality pass): film
 grain over every plate, gaussian-blur atmospherics and glow, layered
@@ -138,7 +168,7 @@ the white tile label lives there. `cosmos` (ten deep-space plates), `ink`
 (eight sumi-e washes on paper), and `botanical` (eight foliage plates, leaves
 at the edges only) joined in the same pass.
 
-**Nature is the ship default** — twenty scenes (dawn ridges, alpine lake,
+**Nature is the largest group** — twenty scenes (dawn ridges, alpine lake,
 ocean, sunset cloudbank, desert night, forest light shafts, terraces, storm
 light, aurora, misty pines, lavender, moon over water, autumn fog, cherry
 bokeh, canyon beam, alpenglow, firefly meadow, waterfall mist, prairie
@@ -146,11 +176,13 @@ thunderhead, winter birches), the largest group by a distance, so a wall of tile
 way before a picture repeats. A scene has to sit *behind* a tile's own content,
 so every plate keeps its centre band low-frequency and its values controlled —
 detail lives toward the edges, and the label pill always has a calm field to
-sit on. It leads the list, an unchosen `active` reads as
-`nature`, and its picture set is the substrate's default tile fill. Anyone who
-had never chosen a set — the earlier Steel and Photos ship defaults — is moved
-onto it once, by the `hc:substrate-sets-v` marker; a deliberate choice is left
-alone.
+sit on. It leads the list. It was the ship default until the default became
+nothing; it is now a group you choose like any other. Anyone who had never
+chosen a set — the earlier Steel and Photos ship defaults — is still moved
+onto it once, by the `hc:substrate-sets-v` marker, because those installs are
+already wearing pictures and taking them away is not this change's business.
+A deliberate choice is left alone, and so is a source of `null`: that no
+longer means *unconfigured*, it means **none**, and nothing advances it.
 
 **The tiles move with the default.** Advancing the source only decides what a
 *blank* tile will be given, so the one-time advance also **re-dresses every tile

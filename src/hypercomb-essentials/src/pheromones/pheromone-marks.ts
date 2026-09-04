@@ -38,6 +38,8 @@ const SIG_RE = /^[0-9a-f]{64}$/
 
 type StoreLike = {
   getPool(meaning: string): Promise<FileSystemDirectoryHandle | null>
+  /** The read-only open. A READ must not mint the pool — see `readRecord`. */
+  openPool?(meaning: string): Promise<FileSystemDirectoryHandle | null>
 }
 
 const store = (): StoreLike | undefined =>
@@ -60,12 +62,32 @@ export type MarkTarget = {
  *  writes, which are the only sanctioned writers. */
 const cache = new Map<string, readonly string[]>()
 
+/**
+ * THE MARKS ALREADY IN HAND — synchronous, and `undefined` when this sig has
+ * never been read.
+ *
+ * The distinction is the whole point: `[]` means "read it, no marks", while
+ * `undefined` means "no idea yet". A synchronous gate that cannot tell those
+ * apart has to treat an unread signature as unmarked, which is a verdict it
+ * has no evidence for. Callers that get `undefined` should allow and, if they
+ * care, kick `sigMarksOf` so the next pass has an answer.
+ */
+export function sigMarksKnown(sig: string): readonly string[] | undefined {
+  if (!SIG_RE.test(sig)) return undefined
+  return cache.get(sig.toLowerCase())
+}
+
 async function readRecord(sig: string): Promise<readonly string[]> {
   const known = cache.get(sig)
   if (known) return known
   let marks: string[] = []
   try {
-    const pool = await store()?.getPool(MARKS_MEANING)
+    // READ-ONLY OPEN. `getPool` creates, so consulting the marks of one
+    // stranger's signature used to mint `sign('pheromones:content')` on a
+    // hive that has never marked anything — a directory claiming a feature
+    // the participant does not use, in a root every walker enumerates.
+    const st = store()
+    const pool = st ? await (st.openPool?.(MARKS_MEANING) ?? st.getPool(MARKS_MEANING)) : null
     if (pool) {
       const handle = await pool.getFileHandle(sig, { create: false })
       const parsed = JSON.parse(await (await handle.getFile()).text()) as { marks?: unknown }
@@ -142,6 +164,7 @@ export async function marksOf(target: MarkTarget): Promise<readonly string[]> {
 window.ioc.register('@diamondcoreprocessor.com/PheromoneMarks', {
   marksOf,
   sigMarksOf,
+  sigMarksKnown,
   addSigMark,
   removeSigMark,
 })

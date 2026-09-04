@@ -105,14 +105,11 @@ export class SnapshotQueenBee extends QueenBee {
       return false
     }
 
-    // 1. A merkle-coherent root from live heads; heal once, retry, else
-    //    fail LOUD — never name a tree that cannot dereference.
+    // 1. A merkle-coherent root from live heads, else fail LOUD — never
+    //    name a tree that cannot dereference. No automatic heal: the old
+    //    retry re-committed an ancestor's frozen hint OVER a newer child edit.
     this.#activity(this.#t(i18n, 'snapshot.sealing', 'sealing your hive…'), '●')
-    let seal = await history.sealSubtree([])
-    if (!seal) {
-      try { await history.healSubtreeBags([]) } catch { /* heal is best-effort */ }
-      seal = await history.sealSubtree([])
-    }
+    const seal = await history.sealSubtree([])
     if (!seal || !SIG_RE.test(seal)) {
       const failure = history.lastSealFailure
       const path = failure ? `/${failure.path.join('/')}` : ''

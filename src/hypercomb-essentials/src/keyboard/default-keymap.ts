@@ -166,6 +166,17 @@ export const defaultKeyMap: KeyMapLayer = {
       category: 'Navigation',
     },
 
+    // Annotate — a bare d puts the drawing sheet over whatever is on screen.
+    // Same lane as chat's `c`: the key, the rail button and `/annotate` all
+    // end in one `open`, and pressing it again takes the sheet away.
+    {
+      cmd: 'markup.open',
+      sequence: [[{ key: 'd', primary: false }]],
+      description: 'Annotate the screen',
+      descriptionKey: 'keymap.annotate',
+      category: 'Navigation',
+    },
+
     // Arrange — apply / cycle tile target sequences over existing tiles
     {
       cmd: 'sequence.cycle',

@@ -7,7 +7,7 @@
 // repeated request is an idempotent delta repair.
 
 import { createHash, randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 export const SIGNATURE_RE = /^[a-f0-9]{64}$/
@@ -44,7 +44,11 @@ export async function resolveSignatureClosure(root, io, options = {}) {
       bytes = await io.fetch(signature)
       if (!bytes) { result.holes.push(signature); return }
       if (sha256(bytes) !== signature) { result.refused.push(signature); return }
-      await io.write(signature, bytes)
+      // A destination that refuses the write (a directory at the atom's
+      // address) is ONE refused atom, not a failed job: the sibling atoms
+      // still land, and the caller reads `refused` exactly as it does for a
+      // hash mismatch.
+      try { await io.write(signature, bytes) } catch { result.refused.push(signature); return }
       result.fetched++
     }
     result.held.push(signature)
@@ -101,7 +105,7 @@ export async function resolveSignatureInventory(root, io, options = {}) {
         atom = await io.fetch(signature)
         if (!atom) { result.holes.push(signature); return }
         if (sha256(atom) !== signature) { result.refused.push(signature); return }
-        await io.write(signature, atom)
+        try { await io.write(signature, atom) } catch { result.refused.push(signature); return }
         result.fetched++
       }
       result.held.push(signature)
@@ -177,6 +181,15 @@ export function contentDirectoryIO(contentDir, sources, resolveExisting = null) 
       const finalPath = join(contentDir, signature)
       const partPath = join(contentDir, `.part-${signature}-${randomBytes(6).toString('hex')}`)
       const oldPath = join(contentDir, `.old-${signature}-${randomBytes(6).toString('hex')}`)
+      // THE ENTRY DECIDES. `existsSync` is true for a DIRECTORY, and the content
+      // root demonstrably holds sig-named directories — pools and lineage bags,
+      // the very ones the listing branch serves. Renaming one aside and dropping
+      // an atom in its place, then `rmSync` on the "old" path, was the host-side
+      // twin of the /flatten hazard: a whole pool gone for one replicated atom.
+      // A directory at an atom's address is refused, never replaced.
+      if (existsSync(finalPath) && statSync(finalPath).isDirectory()) {
+        throw new Error(`refusing to write atom ${signature.slice(0, 8)}… over a directory`)
+      }
       try {
         writeFileSync(partPath, bytes)
         if (existsSync(finalPath)) renameSync(finalPath, oldPath)

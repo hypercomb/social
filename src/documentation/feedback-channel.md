@@ -318,39 +318,26 @@ an aggregating host sees a name on every incoming item instead of an anonymous
 pile. The pubkey stays authoritative (it is the signed event's author); the
 name is what the list reads.
 
-## The return channel — replying to a sender (2026-07-27)
+## The return channel — RETIRED (2026-09-04)
 
-When the host resolves an issue, the answer travels BACK to whoever sent the
-feedback. The addressing problem ("each instance needs a code") is already
-solved by the identity above: every instance mints a nostr keypair, and every
-feedback item carries the sender's pubkey in `payload.from`. **The pubkey is
-the code**; the name is display-only on top, so two participants with the same
-name can never receive each other's replies.
+The per-recipient reply channel is gone, together with `FeedbackReplyDrone`
+(kind **30214**) and the visitor-consent handshake in `FeedbackSwarmDrone`
+(kinds **30210 / 30211 / 30212**). Both were doors of the feedback window, and
+that window has been retired — see `documentation/annotate-the-screen.md`.
 
-- **Channel derivation** (`FeedbackReplyDrone`, kind **30214** — in
-  `SwarmDrone.configureKinds`, same silent-miss rule as the rest of the
-  family): `sha256("hc:feedback-reply\0" + recipientPubkey)`. Both sides
-  compute it — no exchange, no registry. Unscoped (no room/secret), same
-  relay transport as the community channel.
-- **Every instance listens on its OWN channel** automatically (7-day replay
-  window on subscribe), the mirror of contribute-by-default.
-- **Sending**: a feedback row that carries a `from` pubkey shows **Reply** in
-  the host's feedback window. The reply record
-  (`kind:'feedback-reply'`, payload `reId` + a short `re` quote + `text` +
-  the host's `by`/`from`) is published on the sender's channel with a unique
-  d-tag + NIP-40 expiration; delivery is content-addressed (sha256 of the
-  exact JSON) so relay replay is idempotent. Rows without a pubkey (legacy /
-  anonymous) have no address — no Reply button.
-- **Receiving**: the drone verifies the hash, ingests into the local
-  `sign('optimization')` pool with `emit:false` (a reply must never ride back
-  out over the community channel), toasts, and emits
-  `feedback:reply-ingested`. The feedback window lists it as a `reply` row —
-  quoting the original item — in its own band between questions and feedback,
-  exempt from reach-scoping because the return-channel record has no page
-  route. **Resolve** retires it.
-- **Durability v1**: the 7-day relay window (unique d-tag + expiration,
-  idempotent replay) — the same story as visitor posts. If replies need to
-  outlive that, graft the channel drone's pending-map + read-back confirm.
+What replaced it: you draw on the screen and start a conversation from the
+annotation, in the place the thing happened. Filing an issue for somebody to
+resolve, and resolving it back down a return channel, is the shape that was
+dropped, not a shape that is missing an implementation.
+
+**What still lives on this channel** is the LOOP's own traffic — `feedback`,
+`qa` and `qa-answer` records — carried by `FeedbackChannelDrone` (kind
+**30213**), which is untouched. The loop turns those into Q&A rows on tiles,
+which is where they are read now.
+
+Two dead kind numbers (30210, 30211, 30212, 30214) are still listed in
+`SwarmDrone.configureKinds`. Subscribing to a kind nobody publishes costs
+nothing, so they are harmless; drop them the next time that file is open.
 
 ## Operator + test checklist
 

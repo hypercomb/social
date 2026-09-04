@@ -6,10 +6,13 @@ import {
   EffectBus,
   PACKED_STORE_FLAG_KEY,
   SignatureService,
+  classifyDirectoryEntry,
+  documentSweepVetoFor,
   isMetaEnvelope,
   isSignature,
   metaPayloadOf,
   mintMetaEnvelope,
+  poolMeaningOf,
   registerPoolMeaning,
   resolveMetaArtifact,
   type ArtifactResolutionKind,
@@ -217,6 +220,28 @@ export class Store extends EventTarget {
     } catch { return null }
   }
 
+  /** THE READ-ONLY OPEN. Null when the pool does not exist — it is NOT
+   *  created.
+   *
+   *  `getPool` creates, which is right for a writer and wrong for a reader:
+   *  a feature that merely CONSULTS a pool minted its directory on every
+   *  hive that had never used the feature, so a participant who expressed no
+   *  interest still grew `sign('registry:interests')` and
+   *  `sign('pheromones:content')` the first time a peer tile arrived. Empty
+   *  directories are not harmless here — the root is an untagged union that
+   *  walkers, the collector and `/flatten` all enumerate, and a pool nobody
+   *  ever wrote is noise in every one of those passes.
+   *
+   *  Registering the meaning still happens (`poolSignature` derives and
+   *  registers), because knowing an address is a pool is exactly what makes
+   *  a walker safe — that half was never the cost. */
+  public openPool = async (meaning: string): Promise<FileSystemDirectoryHandle | null> => {
+    if (!this.#opfsAvailable) return null
+    try {
+      return await this.opfsRoot.getDirectoryHandle(await Store.poolSignature(meaning), { create: false })
+    } catch { return null }
+  }
+
   // -------------------------------------------------
   // content-addressed document pools
   // -------------------------------------------------
@@ -250,9 +275,34 @@ export class Store extends EventTarget {
       const handle = await target.getFileHandle(sig, { create: true })
       const writable = await handle.createWritable()
       try { await writable.write(bytes) } finally { await writable.close() }
-      // Drop prior document members only — FILES named by a sig. The
-      // `kind === 'file'` guard keeps a mixed pool safe: sign(subKey)
-      // sub-bucket dirs are also 64-hex, and must never be removed here.
+      // THE SWEEP RUNS ONLY ON POSITIVE PROOF THAT THIS IS THE CALLER'S OWN
+      // DOCUMENT SPACE. `kind === 'file'` is NOT a shape guard: a molecule's
+      // succession atoms and gathered members are exactly 64-hex FILES, so
+      // the old sweep erased another participant's set on every write to a
+      // bare-word address.
+      //
+      // Two forms are proof, because a tile name can produce neither:
+      //   1. a `subKey` — the target is a sign(subKey) sub-bucket THIS code
+      //      minted; a molecule address only ever exists at the ROOT.
+      //   2. a colon-carrying meaning — `lineageKey` folds every
+      //      non-letter/digit to `-`, so no tile name reaches a colon.
+      // A bare word, or a meaning the registry has never derived, is NOT
+      // proof and the sweep does not run. The registry is consulted only to
+      // GRANT permission, never to deny it: it fails closed on the unknown.
+      const meaning = subKey ? undefined : await poolMeaningOf(pool.name)
+      const proven = !!subKey || /[\p{L}\p{N}]:[\p{L}\p{N}]/u.test(meaning ?? '')
+      // And the STRUCTURE must independently agree: any marker, any author
+      // bucket, any foreign name and the whole sweep is refused.
+      const veto = proven
+        ? await documentSweepVetoFor(target)
+        : `the pool address ${pool.name.slice(0, 8)}… is a bare word or unregistered meaning`
+      if (veto) {
+        // Not fatal: the new document is already on disk, and `getPoolDoc`
+        // returns the first non-empty member. A refused sweep costs a stale
+        // read; proceeding would cost another participant's molecule.
+        console.warn(`[pool] not sweeping ${target.name.slice(0, 8)}… — ${veto}`)
+        return sig
+      }
       for await (const [name, h] of (target as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
         if (h.kind === 'file' && name !== sig && isSignature(name)) {
           try { await target.removeEntry(name) } catch { /* raced; harmless */ }
@@ -1318,6 +1368,14 @@ export class Store extends EventTarget {
 
   public removeOptimization = async (signature: string): Promise<boolean> => {
     if (!this.optimization) return false
+    // sign('optimization') is a BARE WORD, so this pool's address is also the
+    // address of a tile named `optimization`. A single named removal stays
+    // legal (directory-safety.ts), but only for a MEMBER: never a marker of
+    // somebody's lineage, never an author bucket, never a foreign name.
+    if (classifyDirectoryEntry(signature) !== 'member') {
+      console.warn(`[store] refusing to remove "${signature}" from the optimization pool — it is not a member name`)
+      return false
+    }
     let removed = false
     try { await this.optimization.removeEntry(signature); removed = true } catch { /* not in pool */ }
     if (this.#legacyOptimization) {
@@ -1329,9 +1387,15 @@ export class Store extends EventTarget {
   public listOptimizations = async (): Promise<string[]> => {
     if (!this.optimization) return []
     const sigs = new Set<string>()
+    // Offer MEMBER names only. Callers of this list go on to DELETE what they
+    // do not recognise, so a marker or a sig-named author bucket must never
+    // reach them — fixing it at the source means the next caller cannot
+    // forget. (Consumers see strictly fewer names than before: only member
+    // FILES, which is all the optimize phase and the agent registry ever
+    // wrote here.)
     const collect = async (pool: FileSystemDirectoryHandle): Promise<void> => {
-      for await (const [name] of (pool as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
-        if (/^[0-9a-f]{64}$/.test(name)) sigs.add(name)
+      for await (const [name, handle] of (pool as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+        if (classifyDirectoryEntry(name, handle?.kind === 'directory') === 'member') sigs.add(name)
       }
     }
     await collect(this.optimization)
@@ -1867,8 +1931,19 @@ export class Store extends EventTarget {
    *  root; no code writes a legacy typed pool. */
   public writeLayerBytes = async (signature: string, bytes: ArrayBuffer): Promise<void> => {
     if (!this.hypercombRoot) return
+    // THE NAME IS THE HASH, OR NOTHING IS WRITTEN. writeBeeBytes and
+    // writeDependencyBytes twelve lines down have always refused a mismatch;
+    // the layer writer did not, and one of its callers is the host-fetch
+    // write-through — a stranger's bytes landing at the root under a name
+    // this client never checked. A sig that names other bytes is not a cache
+    // miss to fill, it is a lie to refuse.
+    const expected = signature.toLowerCase()
+    if (await SignatureService.sign(bytes) !== expected) {
+      console.warn(`[store] refusing to write layer ${expected.slice(0, 8)}… — bytes do not hash to their name`)
+      return
+    }
     try {
-      const handle = await this.hypercombRoot.getFileHandle(signature, { create: true })
+      const handle = await this.hypercombRoot.getFileHandle(expected, { create: true })
       const writable = await handle.createWritable()
       try { await writable.write(bytes) } finally { await writable.close() }
     } catch { /* best-effort */ }
@@ -2088,11 +2163,44 @@ export class Store extends EventTarget {
     let copied = 0
     let unrelocatable = 0
     try {
+      /** Copy one sig-named file up to the root unless a COMPLETE copy is
+       *  already there. Content-addressed, so equal size is the proof. */
+      const copyUp = async (name: string, handle: FileSystemFileHandle, where: string): Promise<'shadowed' | 'copied' | 'failed'> => {
+        try {
+          const sourceFile = await handle.getFile()
+          try {
+            const existing = await this.hypercombRoot!.getFileHandle(name, { create: false })
+            if ((await existing.getFile()).size === sourceFile.size) return 'shadowed'
+          } catch { /* not at root yet — copy it up */ }
+          const bytes = await sourceFile.arrayBuffer()
+          const dest = await this.hypercombRoot!.getFileHandle(name, { create: true })
+          const writable = await dest.createWritable()
+          try { await writable.write(bytes) } finally { await writable.close() }
+          return 'copied'
+        } catch (err) {
+          console.warn(`[store] relocate ${where}/${name.slice(0, 12)} → root failed`, err)
+          return 'failed'
+        }
+      }
       for await (const [name, handle] of (source as any).entries()) {
-        // Skip subdirectories (bag dirs, per-domain manifests) and any
-        // non-sig file (.crswap temp, stray artifacts): not ours to move,
-        // and their presence defers the pool's GC.
-        if (handle.kind !== 'file' || !isSignature(name)) { unrelocatable++; continue }
+        // A SUBDIRECTORY (a legacy per-domain manifest dir under __layers__)
+        // is not ours to move — its presence defers the pool's GC — but the
+        // sig-named FILES inside it are content, and the install purge that
+        // later removes such a dir must never be the first thing to touch
+        // them. Drain them up one level first (adjudication nit).
+        if (handle.kind === 'directory') {
+          unrelocatable++
+          try {
+            for await (const [inner, innerHandle] of (handle as any).entries()) {
+              if (innerHandle.kind !== 'file' || !isSignature(inner) || inner === EMPTY_CONTENT_SIG) continue
+              await copyUp(inner, innerHandle as FileSystemFileHandle, `${poolName}/${name.slice(0, 12)}`)
+            }
+          } catch { /* unreadable subdir — deferred by the count above */ }
+          continue
+        }
+        // Any non-sig file (.crswap temp, stray artifact): not ours to move,
+        // and its presence defers the pool's GC.
+        if (!isSignature(name)) { unrelocatable++; continue }
         // THE EMPTY-HASH COLLISION. sha256('') names both "empty content" and
         // the ROOT lineage's sigbag, and at the root that name is a DIRECTORY.
         // Relocating a legacy file under it can never succeed — getFileHandle
@@ -2102,29 +2210,13 @@ export class Store extends EventTarget {
         // move on, silently.
         if (name === EMPTY_CONTENT_SIG) { unrelocatable++; continue }
         sigTotal++
-        try {
-          const sourceFile = await (handle as FileSystemFileHandle).getFile()
-          // Shadowed must mean COMPLETE at the root — size equality, not
-          // mere existence. A 0-byte/short target from an interrupted
-          // earlier copy would otherwise pass the gate and the GC would
-          // delete the only complete copy. Content-addressed, so equal
-          // size ⇒ identical bytes.
-          try {
-            const existing = await this.hypercombRoot.getFileHandle(name, { create: false })
-            if ((await existing.getFile()).size === sourceFile.size) {
-              shadowed++
-              continue
-            }
-          } catch { /* not at root yet — copy it up */ }
-          const bytes = await sourceFile.arrayBuffer()
-          const dest = await this.hypercombRoot.getFileHandle(name, { create: true })
-          const writable = await dest.createWritable()
-          try { await writable.write(bytes) } finally { await writable.close() }
-          shadowed++
-          copied++
-        } catch (err) {
-          console.warn(`[store] relocate ${poolName}/${name.slice(0, 12)} → root failed`, err)
-        }
+        // Shadowed must mean COMPLETE at the root — size equality, not mere
+        // existence: a 0-byte/short target from an interrupted earlier copy
+        // would otherwise pass the gate and the GC would delete the only
+        // complete copy.
+        const outcome = await copyUp(name, handle as FileSystemFileHandle, poolName)
+        if (outcome !== 'failed') shadowed++
+        if (outcome === 'copied') copied++
       }
     } catch (err) {
       console.warn(`[store] relocate scan of ${poolName} failed — pool left in place`, err)
