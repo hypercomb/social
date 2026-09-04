@@ -200,3 +200,28 @@ export const defaultVocabularyPublishDeps = (): VocabularyPublishDeps => ({
   },
   writeRecord: writeVocabularyRecord,
 })
+
+// ---------------------------------------------------------------------------
+// THE DOOR, RE-EXPORTED — the only route a surface may take to it
+// ---------------------------------------------------------------------------
+//
+// `vocabulary-publish.accidental.spec.ts` walks every non-spec `.ts` in
+// essentials and shared and fails if the source names the routine's own
+// module, exempting only that module and this one. A surface therefore cannot
+// import the door directly, and the allowlist stays EMPTY.
+//
+// Re-exporting here is a TIGHTENING, not a loosening. After it, the door is
+// unreachable without also holding `defaultVocabularyPublishDeps` in the same
+// import — so a caller cannot hand-roll a deps object with its own `confirm`
+// and quietly replace the load-bearing copy above. That substitution is the
+// actual thing the ratchet defends.
+//
+// `vocabulary.queen.spec.ts` names the single permitted caller.
+
+export { publishVocabulary, withdrawVocabulary } from './vocabulary-publish.js'
+export type {
+  VocabularyPublishDeps,
+  VocabularyPublishFailure,
+  VocabularyPublishResult,
+  VocabularyPublishSummary,
+} from './vocabulary-publish.js'

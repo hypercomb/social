@@ -26,7 +26,7 @@
 // one write per member, complete-or-absent, and a malformed member is skipped
 // rather than thrown on — one bad file must never blind the reader to the rest.
 
-import { get, registerPoolMeaning } from '@hypercomb/core'
+import { declarePoolKind, get, registerPoolMeaning } from '@hypercomb/core'
 
 const STORE_KEY = '@hypercomb.social/Store'
 const SIG_RE = /^[a-f0-9]{64}$/
@@ -35,6 +35,23 @@ const SIG_RE = /^[a-f0-9]{64}$/
 export const VOCABULARY_LEDGER_MEANING = 'vocabulary:published'
 /** WHAT I have proven about others. */
 export const VOCABULARY_SEEN_MEANING = 'vocabulary:seen'
+
+// THE SHAPE, DECLARED BESIDE THE MEANING — never in a central table one file
+// over, which is the drift `pool-kinds.ts` exists to avoid. Both are `set`:
+// sig-named members, a member only ever leaves by its own author's hand, and
+// NEITHER IS WIPE-SAFE. That last fact is the load-bearing one. The published
+// ledger's member NAMES are the claim signatures, and crediting them in the
+// reference walk is exactly the pinning that keeps a published claim from
+// being collected out from under my own index pointer. Declaring `index` here
+// would flip `wipeSafe` to true, un-pin those names, and let the collector
+// reclaim live content — so the declaration is checked mechanically by
+// `vocabulary-kinds.spec.ts` and must never move.
+//
+// The argument is a compile-time constant in both calls. A kind parsed off the
+// wire must never reach this map: `poolKindOfAddress` feeds the collector's
+// reachability answer, and a stranger gets no vote on what it reclaims.
+declarePoolKind(VOCABULARY_LEDGER_MEANING, 'set')
+declarePoolKind(VOCABULARY_SEEN_MEANING, 'set')
 
 /** One vocabulary publish, recorded BEFORE the act is reported as done. */
 export interface VocabularyPublishRecord {

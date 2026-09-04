@@ -41,7 +41,7 @@
 // which fires for the self domain, community domains, and any host the mesh
 // or an adopt handoff taught us.
 
-import { EffectBus, SignatureService } from '@hypercomb/core'
+import { EffectBus, poolKindOfMeaning, registerPoolMeaning, SignatureService } from '@hypercomb/core'
 
 /** How many members one domain may offer per meaning. A published index is
  *  a curated list, not a database dump; past this something is wrong and we
@@ -78,6 +78,30 @@ export const registerPublishedPool = (handler: PublishedPoolHandler): void => {
       `[published-pools] meaning "${meaning}" must carry a colon — a bare word collides with a lineage bag`,
     )
   }
+  // THE DECLARED KIND, READ. `replicates` is the one fact that answers "may
+  // this pool be OFFERED to a stranger at all", and until now nothing asked.
+  //
+  // It REFUSES and never widens: the offered set can only get smaller, no byte
+  // moves, no reference is removed, and nothing here reaches a delete. It also
+  // changes nothing today — both live handlers are `set` — which is the point:
+  // what it buys is that `molecule:index` (SEED-declared `index`) can never be
+  // registered as a published pool. Serving a wipe-safe, GC-able derived cache
+  // as if it were an answer is exactly the mistake the vocabulary claim exists
+  // to prevent, and this turns that argument into a mechanism.
+  //
+  // UNDECLARED IS PERMITTED, deliberately — that is the conservative direction
+  // here and it preserves today's behaviour byte for byte. A kind is a
+  // declaration by whoever mints the pool, and its absence is not a licence to
+  // guess.
+  const facts = poolKindOfMeaning(meaning)
+  if (facts && !facts.replicates) {
+    throw new Error(
+      `[published-pools] meaning "${meaning}" is declared ${facts.kind} — ` +
+      `${facts.kind === 'index'
+        ? 'a derived cache is never sent'
+        : 'a per-participant document is never sent'}`,
+    )
+  }
   handlers.set(meaning, handler)
 }
 
@@ -86,16 +110,24 @@ export const publishedPoolMeanings = (): string[] => [...handlers.keys()]
 
 // ── addressing ──────────────────────────────────────────────────────────
 
-/** `sign(meaning)`, memoised — the probe asks for the same few every time. */
-const poolAddresses = new Map<string, Promise<string>>()
-
-const poolAddress = (meaning: string): Promise<string> => {
-  const hit = poolAddresses.get(meaning)
-  if (hit) return hit
-  const derived = SignatureService.sign(new TextEncoder().encode(meaning).buffer as ArrayBuffer)
-  poolAddresses.set(meaning, derived)
-  return derived
-}
+/**
+ * `sign(meaning)` — through the REGISTRY, which memoises and REGISTERS in one
+ * call.
+ *
+ * It used to derive through a private memo and a raw `SignatureService.sign`,
+ * bypassing `registerPoolMeaning` — every other addressing site in the tree was
+ * corrected to register (`runtime/store.ts`, `host-sync.service.ts`,
+ * `acquire.ts`). A meaning known ONLY through a published-pool handler
+ * therefore never entered the core registry, so `isPoolAddress` could not see
+ * it: the swarm walk's pool-exclusion set, history's bag-removal refusal and
+ * folder-sync's pool labelling would all have been blind to that address. Both
+ * current meanings happen to be seeded, so nothing is broken today; a
+ * module-minted one would have been.
+ *
+ * Registering also lets `poolKindOfAddress` resolve the address back to its
+ * declared kind.
+ */
+const poolAddress = (meaning: string): Promise<string> => registerPoolMeaning(meaning)
 
 /** A bare host from anything host-shaped. Empty when it is not usable. */
 export const originHost = (raw: string): string => {

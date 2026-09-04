@@ -33,6 +33,19 @@
     })();
   </script>
 
+  <!-- Keep parity with the production shell: an older cached show-cell bee
+       interprets an unset readiness shade as ON and can make every tile look
+       absent. Establish the safe default before any module evaluates it. -->
+  <script>
+    (function () {
+      try {
+        if (localStorage.getItem('hc:tile-shade') === null) {
+          localStorage.setItem('hc:tile-shade', '0');
+        }
+      } catch (e) {}
+    })();
+  </script>
+
   <!-- interactive-widget=resizes-content: keyboard shrinks the layout viewport
        (Android) so bottom-anchored chrome rides above it. Kept in sync with
        hypercomb-web/src/index.html (shell parity). -->

@@ -58,6 +58,8 @@ type HistoryLike = {
 type StoreLike = {
   getPool(meaning: string): Promise<FileSystemDirectoryHandle | null>
   readChildrenManifest?(parentLayerSig: string): Promise<ManifestEntry[] | null>
+  /** The LOCAL read of a layer's bytes — OPFS only, never a host. */
+  getLayerLocalBytes?(signature: string): Promise<Uint8Array | null>
 }
 
 export interface MoleculeBudget {
@@ -140,9 +142,25 @@ export class MoleculeIndexService {
   async #manifestOf(layerSig: string): Promise<ManifestEntry[] | null> {
     const direct = await this.store?.readChildrenManifest?.(layerSig).catch(() => null)
     if (direct?.length) return direct
-    const layer = await this.history?.getLayerBySig(layerSig).catch(() => null)
+    // THE COLD WALK STAYS ON THIS DEVICE. `history.getLayerBySig` fires an
+    // UNAWAITED host fetch on a local miss (`void store.fetchLayerFromHost`),
+    // so a "local" vocabulary read would put a signature on the wire for every
+    // manifest it could not find — one press of a read-only window, a burst of
+    // network reads. The index is a derivation of what is HERE; a layer that is
+    // not here is simply not walked.
+    const layer = await this.#layerLocal(layerSig)
     if (!layer) return null
     return (await this.history?.childrenManifestFor?.(layer).catch(() => null)) ?? null
+  }
+
+  /** A layer's bytes from OPFS alone. Null on a miss — never a fetch. */
+  async #layerLocal(layerSig: string): Promise<LayerLike | null> {
+    const bytes = await this.store?.getLayerLocalBytes?.(layerSig).catch(() => null)
+    if (!bytes?.byteLength) return null
+    try {
+      const parsed = JSON.parse(new TextDecoder().decode(bytes)) as unknown
+      return parsed && typeof parsed === 'object' ? parsed as LayerLike : null
+    } catch { return null }
   }
 
   /**

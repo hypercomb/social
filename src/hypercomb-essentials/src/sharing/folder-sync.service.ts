@@ -20,7 +20,7 @@
 // files are skipped, and conflicting files are reported but NEVER overwritten.
 // Root-level sig-named content is sha256-verified before import.
 
-import { EffectBus, SignatureService, classifyDirectoryEntry, poolMeanings } from '@hypercomb/core'
+import { EffectBus, SignatureService, classifyDirectoryEntry, poolKindOfMeaning, poolMeanings } from '@hypercomb/core'
 import { extractLayerSigFromMarker } from '../history/history.service.js'
 // TYPE ONLY — erased at compile time, so this stays an IoC relationship at
 // runtime and no bundle edge is created between the two drones.
@@ -325,7 +325,18 @@ const categoryFor = (
       : 'other root files'
   }
   const meaning = pools.get(first)
-  if (meaning) return `pool: ${meaning}`
+  // A LABEL, AND ONLY A LABEL. The declared kind tells a participant reading a
+  // backup report which of their backed-up megabytes are re-derivable. It is
+  // NOT permission to stop backing a pool up: `walkHive`/`walkFiles` still
+  // ENUMERATE rather than list, per the rule stated above them, and the
+  // failure mode of a stale include-set is a directory quietly dropping out of
+  // the backup with no signal at all.
+  if (meaning) {
+    const kind = poolKindOfMeaning(meaning)?.kind
+    return kind
+      ? `pool: ${meaning} (${kind}${kind === 'index' ? ' — re-derivable' : ''})`
+      : `pool: ${meaning}`
+  }
   if (SIG_RE.test(first)) return 'history folders'
   return `folder: ${first}`
 }

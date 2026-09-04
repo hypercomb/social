@@ -63,6 +63,10 @@ const store = {
     if (blind.has(parentLayerSig)) return null
     return (TREE[parentLayerSig] ?? []).map(c => ({ sig: c.sig, layer: { name: c.name } }))
   },
+  // The LOCAL layer read — OPFS alone, never a host. `blind` models a layer
+  // that is not here, exactly as it does for `getLayerBySig`.
+  getLayerLocalBytes: async (s: string): Promise<Uint8Array | null> =>
+    TREE[s] && !blind.has(s) ? new TextEncoder().encode(JSON.stringify({ name: s })) : null,
 }
 
 const history = {

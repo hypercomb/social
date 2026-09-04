@@ -286,6 +286,32 @@ export const VOCABULARY_DEADLINES: VocabularyDeadlines = Object.freeze({
   search: 10_000,
 })
 
+/**
+ * HOW MUCH LEAVES AT ONCE. The deadlines bound how long the SURFACE waits;
+ * they never bounded how much one keystroke sends. Twenty visited branches
+ * times four doors was eighty simultaneous outbound requests. Every door is
+ * still asked — concurrently within the cap, so no single door decides — but
+ * never more than this many at a time.
+ */
+export const VOCABULARY_FANOUT = 8
+
+type Gate = <T>(work: () => Promise<T>) => Promise<T>
+
+/** A counting semaphore. Order of admission is FIFO. */
+const semaphore = (limit: number): Gate => {
+  let active = 0
+  const waiting: (() => void)[] = []
+  const release = (): void => {
+    active -= 1
+    waiting.shift()?.()
+  }
+  return async <T>(work: () => Promise<T>): Promise<T> => {
+    if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve))
+    active += 1
+    try { return await work() } finally { release() }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // DEPENDENCIES — every one of them injectable, so a spec never touches a socket
 // ---------------------------------------------------------------------------
@@ -503,6 +529,7 @@ const askPublisher = async (
   publisher: VocabularyPublisher,
   deps: VocabularySearchDeps,
   deadlines: VocabularyDeadlines,
+  gate: Gate,
 ): Promise<VocabularyFinding> => {
   const pubkey = publisher.pubkey
   const hosts = publisher.hosts
@@ -512,11 +539,12 @@ const askPublisher = async (
   if (!HEX64.test(pubkey)) return unknown(pubkey, 'no-key', [])
   if (hosts.length === 0) return unknown(pubkey, 'unreachable', [])
 
-  // EVERY DOOR, CONCURRENTLY. Sequential probing multiplies a stall, and
-  // first-wins would let one replaying door decide.
+  // EVERY DOOR, CONCURRENTLY — within the fan-out cap. Sequential probing
+  // multiplies a stall, and first-wins would let one replaying door decide;
+  // the gate bounds how much is in flight, not which doors are asked.
   const answers = await Promise.all(
     hosts.map((host) =>
-      askDoor(address, pubkey, host, deps, deadlines)
+      gate(() => askDoor(address, pubkey, host, deps, deadlines))
         .catch((): DoorAnswer => ({ door: { host, outcome: 'unreachable', seq: null }, claim: null, observation: null })),
     ),
   )
@@ -635,10 +663,12 @@ export const searchVocabulary = async (
 
   let timer: ReturnType<typeof setTimeout> | undefined
   const expiry = new Promise<void>((resolve) => { timer = setTimeout(resolve, deadlines.search) })
+  // One gate per search: the cap is on what THIS keystroke sends.
+  const gate = semaphore(VOCABULARY_FANOUT)
   try {
     const legs = folded.publishers.map((p, i) =>
       byDeadline(
-        () => askPublisher(asked, p, deps, deadlines),
+        () => askPublisher(asked, p, deps, deadlines, gate),
         deadlines.publisher,
         rows[i] as VocabularyFinding,
       )

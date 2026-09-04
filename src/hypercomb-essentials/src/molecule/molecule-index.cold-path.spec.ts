@@ -97,6 +97,11 @@ const store = {
   },
   readChildrenManifest: async (parentLayerSig: string) =>
     (TREE[parentLayerSig] ?? []).map(child => ({ sig: child.sig, layer: { name: child.name } })),
+  // The LOCAL layer read. The cold walk resolves a layer from OPFS alone —
+  // never `history.getLayerBySig`, which fires an unawaited host fetch on a
+  // miss — so the fake models the bytes as being here.
+  getLayerLocalBytes: async (s: string): Promise<Uint8Array | null> =>
+    TREE[s] ? new TextEncoder().encode(JSON.stringify({ name: s })) : null,
 }
 
 const history = {
