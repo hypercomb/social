@@ -613,6 +613,23 @@ than fails**: a host answering 200 to everything yields a `present` index up to
 reported as *publishing nothing* — indistinguishable from an honest empty host,
 with no error anywhere in the chain.
 
+**That second trap is the unknown-collapsing-into-absent disease, and it now
+has a shipped cure one subsystem over.** The signed vocabulary claim
+(`abe24da2a`) makes the same conflation *structurally impossible* for the words
+a hive publishes: "no" is minted in exactly one place, a pure fold, and only
+when a claim whose **signed** completeness flag is true omits the word at a seq
+strictly higher than any claim naming it. Everything else — an unreachable
+host, a host with no vocabulary, a claim that merely omits — stays **unknown**,
+because *"unknown collapsing into absent would make the whole discovery model a
+lie."*
+
+The pool reader makes exactly that collapse today. It answers "publishes
+nothing" for four distinguishable conditions: an honest empty pool, a 404, an
+SPA fallback, and a host answering 200 to everything. Only the first is a fact;
+the rest are ignorance. The remedy does not need inventing — the discipline is
+now shipped, domain-separated and line-oriented, with a clock-free `seq` on the
+principle that *a signature proves authorship and never recency*. See **Owed**.
+
 `manifest.json` is **not** a `findPool` tier — the spec pins the opposite
 ("asks no named document when the pool answers"). It remains load-bearing
 elsewhere: the browse list still reads it, because a name is a mark and the
@@ -935,6 +952,19 @@ reader will otherwise hit alone.
   written-down census of actions with only a pointer path. Each is a behaviour
   that does not exist yet; converting them dissolves the allowlist into the
   census.
+- **Teach the pool reader the difference between unknown and absent.** It
+  answers "publishes nothing" for an honest empty pool, a 404, an SPA fallback
+  and a 200-to-everything host alike — one fact and three kinds of ignorance.
+  `abe24da2a` shipped the discipline that makes this collapse impossible for
+  vocabulary claims; the pool reader is the same disease without the cure. Note
+  the fix is *not* signing the listing — it is refusing to mint "no" from
+  anything but a positive, complete answer.
+- **If the behaviour reference ever needs to survive a hostile host**, reuse the
+  signed vocabulary claim's discipline rather than minting a second scheme —
+  and note `PayloadCanonical`/`BeePayloadV1` (`hypercomb-core/src/payload-
+  canonical.ts`) is dormant prior art for hashing a behaviour's *declaration*
+  (name + grammar) rather than its bundler output, which is the stable identity
+  a bee signature is not.
 - **An operation nonce, if and only if words ever arrive from off-machine.**
   Nothing in the tree resists replay and there is nothing to reuse — `treeEpoch`
   is in-memory and starts at 0, snapshots are deliberately non-transportable.
