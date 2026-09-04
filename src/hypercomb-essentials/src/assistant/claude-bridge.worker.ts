@@ -535,7 +535,7 @@ export class ClaudeBridgeWorker extends Worker {
   // pool API (putOptimization/listOptimizations/removeOptimization).
   // Each entry is a content-addressed JSON file (Q&A, comm, future kinds).
   // Layer-untouched: this directory is structurally separate from any
-  // cell's layer slots. The feedback window and state-machine wrappers
+  // cell's layer slots. The loop's Q&A rows and state-machine wrappers
   // around base objects pull from here at access/render time.
 
   /**

@@ -43,7 +43,7 @@ export interface AiRequestRecord {
   /** Filled by the hand-off session. */
   readonly resultSigs: readonly string[]
   /** Which workflow deposited it — provenance, so a question on the
-   *  feedback window can say where it came from instead of appearing from
+   *  reader can say where it came from instead of it appearing from
    *  nowhere. */
   readonly viaWorkflow?: string
 }

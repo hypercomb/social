@@ -2,7 +2,8 @@
 //
 // Slash command `/feedback-host on|off` — toggle HOST mode on THIS browser:
 // subscribe to the FIXED community feedback channel, ingest every participant's
-// feedback, and surface all of it in the feedback window.
+// feedback, and aggregate all of it. (The loop turns it into Q&A rows on
+// tiles — the feedback window itself retired 2026-09-04.)
 //
 // Participants do NOT need this — they publish their feedback by default. This
 // is the single switch the HOST flips on their own browser to RECEIVE it (the
@@ -25,7 +26,7 @@ const chan = (): ChannelLike | undefined =>
 export class FeedbackHostQueenBee {
   readonly command = 'feedback-host'
   readonly description =
-    'Toggle HOST mode: receive and aggregate every participant’s feedback into your feedback window. on (default) | off. Participants publish by default and never need this.'
+    'Toggle HOST mode: receive and aggregate every participant’s records so the loop can work them into Q&A on your tiles. on (default) | off. Participants publish by default and never need this.'
 
   async invoke(args: string): Promise<void> {
     const arg = (args ?? '').trim().toLowerCase()
