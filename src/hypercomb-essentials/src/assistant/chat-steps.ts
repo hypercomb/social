@@ -286,6 +286,43 @@ export const settle = (steps: readonly ChatStep[]): ChatStep[] => {
     a.runId === b.runId ? a.seq - b.seq : (a.runId < b.runId ? -1 : 1))
 }
 
+/**
+ * THE RUN AN ASK IS ANSWERED BY — derived from the ask sig, and nothing else.
+ *
+ * Both halves come from ONE input on purpose. An earlier spelling took the
+ * conversation from the target tile's path, which reads better and is wrong:
+ * the responder learns that path from the command line (whichever target it
+ * is answering right now) while a reader — the agent panel — can only infer
+ * it from the ask record. Two inputs, free to disagree, and for a
+ * multi-target ask they DO: the responder writes into target 3's bucket
+ * while the panel reads target 1's and shows an empty ledger. Silently,
+ * which is the failure mode this whole feature exists to remove.
+ *
+ * So the address is the ask. Every party that knows which ask this is —
+ * the responder, the panel, a later audit — computes the same bucket
+ * without consulting anything else. `agent:` sits outside
+ * `isHumanConversation`, so these never appear in a chat list.
+ *
+ * The cost, stated: one directory per answered ask, which nothing sweeps
+ * yet. It holds only the run's own steps, the conversation list skips it
+ * without opening a file, and no read path enumerates it — but it does
+ * accumulate, and a sweep is owed.
+ */
+export const runIdForAsk = async (askSig: string): Promise<string> =>
+  'ask:' + (await sha256(new TextEncoder().encode(String(askSig ?? '')).buffer as ArrayBuffer)).slice(0, 32)
+
+/** The conversation an ask's run records into. See {@link runIdForAsk}. */
+export const runConvoForAsk = (askSig: string): string => 'agent:' + String(askSig ?? '')
+
+/** Every recorded attempt for one ASK, oldest first. What the agent panel
+ *  reads to show what a responder actually did, as opposed to what it last
+ *  claimed it was doing. */
+export const readAskSteps = async (askSig: string): Promise<ChatStep[]> => {
+  const sig = String(askSig ?? '').trim()
+  if (!sig) return []
+  return readSteps(runConvoForAsk(sig), await runIdForAsk(sig))
+}
+
 /** Where a run got to: the seq a resuming writer should claim next. Reads
  *  the ledger, so it is correct across a reload — an in-memory counter is
  *  not, and a run that restarts its numbering overwrites its own history. */

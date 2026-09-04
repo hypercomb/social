@@ -67,47 +67,25 @@ const runIdForAsk = askSig =>
   'ask:' + crypto.createHash('sha256').update(String(askSig || '')).digest('hex').slice(0, 32)
 
 /**
- * The tile path a set of segments names.
+ * THE WHOLE RUN REFERENCE, from the ask sig and nothing else.
  *
- * Mirrors tilePath() in assistant/chat-thread.ts, which is the source of
- * truth — a script cannot import the TypeScript, so the rule is spelled
- * twice and must be changed in both places. It is deliberately trivial for
- * that reason: trim, drop empties, join with a slash.
+ * Mirrors runIdForAsk / runConvoForAsk in assistant/chat-steps.ts, which is
+ * the source of truth — a .cjs script cannot import the TypeScript, so the
+ * rule is spelled twice and loop-run.spec.ts compares the two rather than
+ * trusting them.
+ *
+ * ONE input, deliberately. Deriving the conversation from the target tile
+ * instead reads better and is wrong: the responder knows that path from the
+ * command line (whichever target it is answering) and a reader can only
+ * infer it from the ask record — two inputs, free to disagree, and for a
+ * multi-target ask they do. The reader then shows an empty ledger, silently.
  */
-const tilePathOfSegments = segments =>
-  '/' + (Array.isArray(segments) ? segments : [])
-    .map(s => String(s ?? '').trim()).filter(Boolean).join('/')
+const runConvoForAsk = askSig => 'agent:' + String(askSig || '')
 
-/**
- * THE WHOLE RUN REFERENCE, from the one handle a responder always has.
- *
- * A responder answering an ask knows its sig, and nothing else it holds
- * survives its own death. So both halves are derived from it:
- *
- *   • the RUN ID, hashed from the ask — stable across restarts by
- *     construction rather than by the next process remembering a string.
- *   • the CONVERSATION, which is the TARGET TILE own chat when the ask
- *     names a tile. That is where a person would look for what an agent
- *     did about that tile; it is a conversation the system already
- *     addresses (chat:tile:/path — derived, never minted); and — the
- *     practical part — it is already listed and already deletable, so
- *     agent runs inherit a collector instead of piling up orphan buckets
- *     that nothing in the app can reach.
- *
- * An ask that names no tile falls back to agent:<sig>, which
- * isHumanConversation excludes from every chat list.
- *
- * A MULTI-TARGET run belongs to the FIRST target conversation as a whole;
- * each step still records the cell it acted on, so which targets are done
- * is read from the steps, never from the bucket they sit in.
- */
-const runRefForAsk = (askSig, segments) => {
-  const path = tilePathOfSegments(segments)
-  return {
-    convoId: path === '/' ? 'agent:' + String(askSig || '') : 'chat:tile:' + path,
-    id: runIdForAsk(askSig),
-  }
-}
+const runRefForAsk = askSig => ({
+  convoId: runConvoForAsk(askSig),
+  id: runIdForAsk(askSig),
+})
 
 /**
  * The run a responder was woken for, from the environment — or null.
@@ -119,16 +97,7 @@ const runRefForAsk = (askSig, segments) => {
  */
 const runFromEnv = (env = process.env) => {
   const ask = String(env.HYPERCOMB_RUN_ASK || '').trim()
-  if (!ask) return null
-  let segments = []
-  const raw = String(env.HYPERCOMB_RUN_SEGMENTS || '').trim()
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw)
-      if (Array.isArray(parsed)) segments = parsed
-    } catch { segments = raw.split('/') }
-  }
-  return runRefForAsk(ask, segments)
+  return ask ? runRefForAsk(ask) : null
 }
 
 /**
@@ -231,4 +200,4 @@ function openRun({ convoId, runId, ask, bridge = DEFAULT_BRIDGE, timeoutMs = 15_
   return { convoId: convo, runId: id, act, peek, resume, alreadyDid, requestOf }
 }
 
-module.exports = { openRun, runIdForAsk, runRefForAsk, runFromEnv, tilePathOfSegments }
+module.exports = { openRun, runIdForAsk, runRefForAsk, runConvoForAsk, runFromEnv }

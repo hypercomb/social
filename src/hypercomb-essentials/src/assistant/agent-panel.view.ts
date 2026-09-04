@@ -22,12 +22,16 @@ import type { Agent, AgentRegistry } from './agent-registry.service.js'
 import type { OrchestratorFinding, OrchestratorSummary } from './orchestrator.drone.js'
 import { avatarKeyOf, type AgentAvatarRegistry } from '../presentation/avatars/agent-avatar.js'
 import { AgentTilesRail } from './agent-tiles-rail.js'
+import { readAskSteps, settle, stepRequest, type ChatStep } from './chat-steps.js'
 
 const STYLE_ID = 'hc-agent-panel-styles'
 const STEEL = '126, 182, 214'
 const WIDTH_KEY = 'hc:agent-panel-width'
 const FULLSCREEN_KEY = 'hc:agent-panel-fullscreen'
 const MIN_WIDTH = 320
+/** How many recorded steps the panel lists. A panel is a summary; a run
+ *  longer than this says so on its last line rather than scrolling. */
+const MAX_DID_LINES = 40
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as unknown as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
@@ -63,6 +67,9 @@ export class AgentPanelView extends EventTarget {
   #stopButton: HTMLButtonElement | null = null
   #registry: AgentRegistry | undefined
   #expandedActivity = new Set<string>()
+  /** Bumped on every render. A ledger read that returns after the panel
+   *  has moved on belongs to an agent nobody is looking at any more. */
+  #didToken = 0
   #fullscreen = false
   #resizeCleanup: (() => void) | null = null
   /** The Copilot-style left column, alive only in full screen: the hive as a
@@ -454,6 +461,7 @@ export class AgentPanelView extends EventTarget {
       )
     }
     body.appendChild(this.#activity(agent))
+    body.appendChild(this.#did(agent))
     if (agent.context.length) {
       body.appendChild(this.#section(
         this.#t('agent.context-added', 'Context you added'),
@@ -855,6 +863,108 @@ export class AgentPanelView extends EventTarget {
     })
     wrap.appendChild(log)
     return wrap
+  }
+
+  /**
+   * WHAT IT DID — the durable half of the panel.
+   *
+   * The activity log above is what the responder SAID while it worked: a
+   * live needle, held in memory, gone on reload and empty for any agent
+   * this tab did not personally watch. This is the hive's own record —
+   * every bridge op the run actually ran, in order, including the ones that
+   * failed (assistant/chat-steps.ts).
+   *
+   * The two disagreeing is INFORMATION, not a fault. A claim with no step
+   * behind it is work that was announced and did not land, which is exactly
+   * what you want to see when an agent says it is finished and the tile
+   * disagrees.
+   *
+   * Filled from disk, so it arrives a beat late and stays HIDDEN until it
+   * has something to say: an agent that recorded nothing costs no space and
+   * owes no explanation.
+   */
+  #did(agent: Agent): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'hc-agent-section'
+    wrap.hidden = true
+    const head = document.createElement('div')
+    head.className = 'hc-agent-label'
+    head.textContent = this.#t('agent.did', 'What it did')
+    const log = document.createElement('div')
+    log.className = 'hc-agent-log'
+    wrap.append(head, log)
+    void this.#fillDid(wrap, log, agent.id, ++this.#didToken)
+    return wrap
+  }
+
+  /** Read the run, then paint it — never the other way round. A failure to
+   *  read leaves the section hidden rather than claiming the run did
+   *  nothing: "no record" and "could not read the record" are different
+   *  facts, and only one of them is safe to show as an empty list. */
+  async #fillDid(
+    wrap: HTMLElement,
+    log: HTMLElement,
+    askSig: string,
+    token: number,
+  ): Promise<void> {
+    let steps: ChatStep[] = []
+    try {
+      steps = settle(await readAskSteps(askSig))
+    } catch { return }
+    if (!steps.length) return
+
+    // The panel re-rendered while the disk was answering — this section is
+    // detached and belongs to an agent that is no longer on screen.
+    if (token !== this.#didToken || !wrap.isConnected) return
+
+    // What each step ACTED ON lives behind its content signature. Fetched
+    // together rather than one line at a time, and capped: a panel is a
+    // summary, and a run long enough to hit the cap is telling you that on
+    // its own.
+    const shown = steps.slice(-MAX_DID_LINES)
+    const requests = await Promise.all(
+      shown.map(step => stepRequest(step).catch(() => undefined)),
+    )
+    if (token !== this.#didToken || !wrap.isConnected) return
+
+    shown.forEach((step, index) => {
+      const line = document.createElement('div')
+      line.className = 'hc-agent-logline'
+
+      const time = document.createElement('span')
+      time.className = 'hc-agent-dim'
+      time.textContent = new Date(step.at).toLocaleTimeString()
+
+      const text = document.createElement('span')
+      text.className = 'hc-agent-logtext'
+      const request = requests[index] as { cell?: unknown; segments?: unknown } | undefined
+      const cell = typeof request?.cell === 'string' ? request.cell : ''
+      text.textContent = cell ? `${step.verb} — ${cell}` : step.verb
+
+      line.append(time, text)
+
+      // Failure is named in words, never by colour alone: the ledger records
+      // attempts, and an attempt that did not land is the single most
+      // useful thing on this list.
+      if (step.outcome === 'failed') {
+        const failed = document.createElement('span')
+        failed.className = 'hc-agent-dim'
+        failed.textContent = this.#t('agent.did-failed', 'failed')
+        line.appendChild(failed)
+      }
+
+      line.title = `#${step.seq} ${step.verb} · ${step.outcome}`
+      log.appendChild(line)
+    })
+
+    if (steps.length > shown.length) {
+      const more = document.createElement('div')
+      more.className = 'hc-agent-dim'
+      more.textContent = this.#t('agent.did-more', `…and ${steps.length - shown.length} earlier`)
+      log.appendChild(more)
+    }
+
+    wrap.hidden = false
   }
 
   async #addContext(button: HTMLButtonElement): Promise<void> {

@@ -180,25 +180,41 @@ session exports it once:
 
 ```bash
 export HYPERCOMB_RUN_ASK=<ask sig>
-export HYPERCOMB_RUN_SEGMENTS='["dolphin","site"]'   # optional: the target tile
 ```
 
 Every `_bop.cjs` request then carries the run without being told to. An
 explicit `run` in the JSON still wins; no env var and no run records nothing,
 exactly as before.
 
-Both halves come from the one handle a responder always has:
+Both halves come from **one input**, and that is the whole point:
 
-| | derived as | why |
-|---|---|---|
-| `run.id` | `sha256(askSig)` | stable across a restart by construction, not by the next process remembering a string |
-| `run.convoId` | the target tile's own chat (`chat:tile:/path`) | where a person looks for what an agent did about that tile — and it is already listed and already deletable, so runs inherit a collector instead of piling up orphan buckets |
+| | derived as |
+|---|---|
+| `run.id` | `'ask:' + sha256(askSig).slice(0, 32)` |
+| `run.convoId` | `'agent:' + askSig` |
 
-An ask naming no tile falls back to `agent:<sig>`, which
-`isHumanConversation` keeps out of every chat list. A multi-target run belongs
-to the first target's conversation as a whole; each step records the cell it
-acted on, so which targets are done is read from the steps, never from the
-bucket they sit in.
+An earlier spelling took the conversation from the **target tile's path**,
+which reads better and is wrong. The responder learns that path from the
+command line — whichever target it is answering right now — while a reader
+like the agent panel can only infer it from the ask record. Two inputs, free
+to disagree, and for a multi-target ask they do: the responder writes into
+target 3's bucket while the panel reads target 1's and shows an empty ledger.
+Silently, which is the failure this feature exists to remove.
+
+Addressing the **ask** means every party that knows which ask this is computes
+the same bucket without consulting anything else. `agent:` sits outside
+`isHumanConversation`, so these never appear in a chat list.
+
+The cost, stated plainly: one directory per answered ask, which nothing sweeps
+yet. It holds only that run's steps, the conversation list skips it without
+opening a file, and no read path enumerates it — but it does accumulate, and a
+sweep is owed.
+
+The rule is necessarily written twice — `chat-steps.ts` is the source of
+truth and `loop-run.cjs` mirrors it, because a `.cjs` script cannot import
+the TypeScript. Drift there fails silently in the worst way, so
+`loop-run.spec.ts` compares the two implementations directly rather than
+trusting them.
 
 ### What it closed
 
@@ -264,6 +280,26 @@ Two rules the helper enforces, both learned from breaking it:
   predicates receive that request. Without it, "did I already answer target 3
   of 5" is undecidable, and a responder that guessed would answer target 1,
   report success, and drop the other four.
+
+## Seeing it
+
+The agent panel (click a bee) grew a second section under **What it is doing**:
+
+- **What it is doing** — what the responder SAID while it worked. A live
+  needle, held in memory, gone on reload and empty for any agent this tab did
+  not personally watch.
+- **What it did** — the hive's own record: every op the run actually ran, in
+  order, with the target it acted on and the ones that failed named as failed.
+
+The two disagreeing is **information, not a fault**. A claim with no step
+behind it is work that was announced and did not land — exactly what you want
+to see when an agent reports success and the tile disagrees.
+
+It is filled from disk, so it arrives a beat after the panel and stays hidden
+until it has something to say: an agent that recorded nothing costs no space
+and owes no explanation. A read that FAILS also leaves it hidden rather than
+showing an empty list — "no record" and "could not read the record" are
+different facts, and only one of them is safe to draw as nothing.
 
 ## What this does not do
 

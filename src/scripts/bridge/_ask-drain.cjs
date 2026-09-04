@@ -129,7 +129,7 @@ async function answer(askSig, cellPath, text) {
   // THIS RUN, DERIVED — not invented, so it is the same run after a restart.
   // Every request below carries it, which is what puts this answer in the
   // hive's ledger without anyone having to remember a field.
-  const run = runRefForAsk(askSig, segs)
+  const run = runRefForAsk(askSig)
 
   // THE DUPLICATE-NOTE WINDOW, CLOSED. The note lands and then the ask is
   // retired; a crash between the two leaves the ask pending, so the next

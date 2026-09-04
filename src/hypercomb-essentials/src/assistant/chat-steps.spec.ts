@@ -467,3 +467,54 @@ describe('failing to read is not an empty run', () => {
     await expect(steps.readSteps(CONVO, RUN)).rejects.toThrow('OPFS unavailable')
   })
 })
+
+describe('the reader finds what the writer wrote', () => {
+  // THE BUG CLASS THIS CLOSES. The responder writes a run's steps and the
+  // agent panel reads them back. If the two compute the bucket from different
+  // inputs they disagree silently: the ledger fills, every read is empty, and
+  // nothing reports a fault. Both now address the ASK, and this proves the
+  // round trip rather than trusting it.
+
+  const ASK = 'f'.repeat(64)
+
+  it('reads back by ask sig alone what a run recorded under it', async () => {
+    const { steps } = await load(store)
+
+    const convoId = steps.runConvoForAsk(ASK)
+    const runId = await steps.runIdForAsk(ASK)
+    await steps.appendStep({
+      convoId, runId, seq: 0, verb: 'note-add', at: 10, outcome: 'ok',
+      request: { cell: 'site', segments: ['dolphin'] },
+    })
+    await steps.appendStep({
+      convoId, runId, seq: 1, verb: 'optimization-remove', at: 20, outcome: 'failed',
+      error: 'gone',
+    })
+
+    // The panel knows the ask sig and nothing else — exactly what it has.
+    const read = await steps.readAskSteps(ASK)
+    expect(read.map(s => [s.verb, s.outcome])).toEqual([
+      ['note-add', 'ok'],
+      ['optimization-remove', 'failed'],
+    ])
+    expect(await steps.stepRequest(read[0]!)).toEqual({ cell: 'site', segments: ['dolphin'] })
+  })
+
+  it('keeps a headless run out of the chat list', async () => {
+    const { steps, thread } = await load(store)
+    expect(thread.isHumanConversation(steps.runConvoForAsk(ASK))).toBe(false)
+
+    await steps.appendStep({
+      convoId: steps.runConvoForAsk(ASK), runId: await steps.runIdForAsk(ASK),
+      seq: 0, verb: 'update', at: 1, outcome: 'ok',
+    })
+    // A run's bucket holds no turns, so the chat window never lists it.
+    expect((await thread.listConversations()).map(c => c.convoId)).not.toContain(steps.runConvoForAsk(ASK))
+  })
+
+  it('says nothing about an ask that never ran', async () => {
+    const { steps } = await load(store)
+    expect(await steps.readAskSteps('c'.repeat(64))).toEqual([])
+    expect(await steps.readAskSteps('')).toEqual([])
+  })
+})

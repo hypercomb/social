@@ -6,19 +6,20 @@
 //   • A run id that is not stable across a restart makes the whole mechanism
 //     a no-op that still appears to work — the resume reads an empty ledger
 //     and honestly reports that this run has done nothing.
-//   • A tile path spelled differently here than in `chat-thread.ts` sends a
-//     run's steps to a DIFFERENT bucket than the one the app reads, so the
-//     ledger fills and the resume stays empty forever. The rule is
-//     necessarily written twice (a .cjs script cannot import the TypeScript),
-//     so the two spellings are compared here rather than trusted.
+//   • The derivation is necessarily written TWICE (a .cjs script cannot
+//     import the TypeScript). If the two spellings drift, the responder
+//     writes into one bucket and the agent panel reads another: the ledger
+//     fills, every read stays empty, and nothing anywhere reports a fault.
+//     So the two implementations are compared directly, not trusted.
 //   • A responder that forgets to attach the run records nothing, which is
 //     indistinguishable from a run that did nothing.
 
 import { describe, expect, it, vi } from 'vitest'
 import { createRequire } from 'node:module'
 
-// chat-thread registers an IoC surface at module scope; it only needs the
-// shell globals to exist, not to work — nothing here calls the store.
+// chat-steps imports chat-thread, which registers an IoC surface at module
+// scope; it only needs the shell globals to exist, not to work — nothing here
+// reaches the store.
 vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>
   g['get'] = () => undefined
@@ -34,13 +35,14 @@ vi.hoisted(() => {
 const require_ = createRequire(import.meta.url)
 const loop = require_('./loop-run.cjs') as {
   runIdForAsk: (askSig: string) => string
-  runRefForAsk: (askSig: string, segments?: unknown) => { convoId: string; id: string }
+  runConvoForAsk: (askSig: string) => string
+  runRefForAsk: (askSig: string) => { convoId: string; id: string }
   runFromEnv: (env?: Record<string, string | undefined>) => { convoId: string; id: string } | null
-  tilePathOfSegments: (segments: unknown) => string
   openRun: (opts: Record<string, unknown>) => unknown
 }
 
 const ASK = 'a'.repeat(64)
+const OTHER = 'b'.repeat(64)
 
 describe('the run id is derived, never invented', () => {
   it('is the same string every time, so a restarted responder finds its run', () => {
@@ -48,55 +50,44 @@ describe('the run id is derived, never invented', () => {
   })
 
   it('separates two asks', () => {
-    expect(loop.runIdForAsk(ASK)).not.toBe(loop.runIdForAsk('b'.repeat(64)))
+    expect(loop.runIdForAsk(ASK)).not.toBe(loop.runIdForAsk(OTHER))
   })
 })
 
-describe('the run reference names where a person would look', () => {
-  it('puts an ask about a tile in that tile own conversation', () => {
-    const ref = loop.runRefForAsk(ASK, ['dolphin', 'site'])
-    expect(ref.convoId).toBe('chat:tile:/dolphin/site')
-    expect(ref.id).toBe(loop.runIdForAsk(ASK))
+describe('the run reference has exactly one input', () => {
+  it('addresses the ask, so every party computes the same bucket', () => {
+    // Deriving the conversation from the target tile instead reads better and
+    // is wrong: the responder knows that path from the command line and a
+    // reader can only infer it from the ask record. For a multi-target ask
+    // the two disagree, and the reader shows an empty ledger.
+    expect(loop.runRefForAsk(ASK)).toEqual({
+      convoId: `agent:${ASK}`,
+      id: loop.runIdForAsk(ASK),
+    })
   })
 
-  it('falls back to a headless conversation when no tile is named', () => {
-    // `agent:` is outside isHumanConversation's allowlist, so a headless run
-    // never turns up in the chat window.
-    expect(loop.runRefForAsk(ASK, []).convoId).toBe(`agent:${ASK}`)
-    expect(loop.runRefForAsk(ASK, undefined).convoId).toBe(`agent:${ASK}`)
+  it('stays outside the chat list', async () => {
+    const { isHumanConversation } = await import('../../hypercomb-essentials/src/assistant/chat-thread.js')
+    expect(isHumanConversation(loop.runConvoForAsk(ASK))).toBe(false)
   })
 })
 
-describe('the tile path is spelled the same as the app spells it', () => {
-  it('agrees with chat-thread.tilePath on every shape that reaches it', async () => {
-    const { tilePath } = await import('../../hypercomb-essentials/src/assistant/chat-thread.js')
-    const cases: string[][] = [
-      ['dolphin', 'site'],
-      ['dolphin'],
-      [],
-      ['  spaced  ', 'name'],
-      ['', 'skip', ''],
-      ['a', 'b', 'c', 'd'],
-    ]
-    for (const segments of cases) {
-      expect(loop.tilePathOfSegments(segments), JSON.stringify(segments))
-        .toBe(tilePath(segments))
+describe('the script and the app derive the same address', () => {
+  it('agrees with chat-steps on both halves', async () => {
+    const steps = await import('../../hypercomb-essentials/src/assistant/chat-steps.js')
+    for (const sig of [ASK, OTHER, '', 'not-a-sig']) {
+      expect(loop.runIdForAsk(sig), `id for ${JSON.stringify(sig)}`)
+        .toBe(await steps.runIdForAsk(sig))
+      expect(loop.runConvoForAsk(sig), `convo for ${JSON.stringify(sig)}`)
+        .toBe(steps.runConvoForAsk(sig))
     }
   })
 })
 
 describe('a parked session declares the run once', () => {
-  it('reads the ask (and its target) out of the environment', () => {
-    const ref = loop.runFromEnv({
-      HYPERCOMB_RUN_ASK: ASK,
-      HYPERCOMB_RUN_SEGMENTS: JSON.stringify(['dolphin', 'site']),
-    })
-    expect(ref).toEqual({ convoId: 'chat:tile:/dolphin/site', id: loop.runIdForAsk(ASK) })
-  })
-
-  it('accepts a plain path as well as JSON, because a shell will hand it one', () => {
-    expect(loop.runFromEnv({ HYPERCOMB_RUN_ASK: ASK, HYPERCOMB_RUN_SEGMENTS: 'dolphin/site' })?.convoId)
-      .toBe('chat:tile:/dolphin/site')
+  it('reads the ask out of the environment', () => {
+    expect(loop.runFromEnv({ HYPERCOMB_RUN_ASK: ASK }))
+      .toEqual({ convoId: `agent:${ASK}`, id: loop.runIdForAsk(ASK) })
   })
 
   it('is null when nothing was declared — nothing is recorded, as before', () => {
