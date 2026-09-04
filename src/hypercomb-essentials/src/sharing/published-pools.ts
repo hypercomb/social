@@ -240,6 +240,19 @@ export const placeOffers = async (rawOrigin: string, meaning?: string): Promise<
   return kept
 }
 
+/** NOT NOW. Drop one origin's offers (one meaning's, or all) without placing
+ *  them. Memory only, so the host offers again the next time it is learned;
+ *  the window says so. Nothing is written, so nothing is deleted. */
+export const dismissOffers = (rawOrigin: string, meaning?: string): void => {
+  const origin = originHost(rawOrigin)
+  if (!origin) return
+  for (const key of [...offers.keys()]) {
+    if (!key.startsWith(`${origin}::`)) continue
+    if (meaning && key !== `${origin}::${meaning}`) continue
+    offers.delete(key)
+  }
+}
+
 /** Test seam. */
 export const _resetOffers = (): void => { offers.clear(); probed.clear() }
 

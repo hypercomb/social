@@ -7,7 +7,7 @@
 // the way doctrine.spec.ts keeps its allowlists: by reading the source and
 // refusing the shape that was wrong.
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -37,6 +37,22 @@ describe('publishing is an act', () => {
     expect(place.includes('handler.accept(')).toBe(true)
     // exactly one call site for accept in the whole module
     expect(src.split('handler.accept(').length - 1).toBe(1)
+  })
+
+  it('placeOffers has ONE caller outside its module — the offers window, on a press', () => {
+    const root = join(process.cwd(), 'hypercomb-essentials', 'src')
+    const walk = (dir: string): string[] => readdirSync(dir).flatMap(name => {
+      const full = join(dir, name)
+      if (statSync(full).isDirectory()) return walk(full)
+      if (!name.endsWith('.ts') || name.endsWith('.spec.ts') || name.endsWith('-keys.ts')) return []
+      return [full]
+    })
+    const callers = walk(root)
+      .filter(f => /\bplaceOffers\s*\(/.test(readFileSync(f, 'utf8')))
+      .map(f => f.slice(root.length + 1).replace(/\\/g, '/'))
+      .sort()
+    // the definition site does not match `placeOffers(` — it is `placeOffers = async (`
+    expect(callers).toEqual(['sharing/offers.view.ts'])
   })
 
   it('joining a swarm never provisions a third-party host — ensureSwarmTarget signals, it does not switch', () => {
