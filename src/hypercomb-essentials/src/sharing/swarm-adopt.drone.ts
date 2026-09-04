@@ -55,6 +55,7 @@ import {
   isAdoptTombstoned,
 } from './adopted-roots.js'
 import { setDivergedLabels, clearPeerDivergence } from './peer-divergence.js'
+import { allows as intakeAllows, allowsHere } from '../pheromones/intake-filter.js'
 
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
@@ -711,6 +712,12 @@ export class SwarmAdoptDrone extends Drone {
     let inZone = false
     try { inZone = localStorage.getItem('hc:mesh-public') === 'true' } catch { /* private default */ }
     if (!inZone) return false
+    // Intake gate, sync half. This runs on POINTERDOWN, which is why it asks
+    // the location carrier only — the same reason the rest of this predicate
+    // is synchronous. A tile the participant's interest excludes is not
+    // eligible for a take, so the press falls through to selection instead of
+    // adopting something they filtered out.
+    if (!allowsHere({ segments: [...this.#currentSegments(), name] })) return false
     return this.#peerEntryFor(name) !== null
   }
 
@@ -861,6 +868,20 @@ export class SwarmAdoptDrone extends Drone {
     opts?: { entry?: Record<string, unknown> | null; silent?: boolean },
   ): Promise<boolean> => {
     const at = this.#currentSegments()
+    // Intake gate, async half — THE COMMIT, and the authoritative one. Unlike
+    // the sync check in `wandEligible` this reads the full union, so a mark
+    // carried only by the exact bytes (and therefore invisible to a
+    // location-keyed read) still refuses the take. One pass per adopt, so the
+    // signature read is affordable here in a way it never is at render.
+    const gateEntry = opts?.entry ?? this.#peerEntryFor(label, pubkey)
+    const gateSig = String(gateEntry?.['layerSig'] ?? '').trim().toLowerCase()
+    if (!await intakeAllows({
+      segments: [...at, label],
+      ...(SIG_RE.test(gateSig) ? { sig: gateSig } : {}),
+    })) {
+      this.#rowOutcome(label, undefined, false, `didn't keep "${label}" — it carries a mark you filter out`)
+      return false
+    }
     if (await this.#isHeldHere(at, label)) {
       const entry = opts?.entry ?? this.#peerEntryFor(label, pubkey)
       const layerSig = String(entry?.['layerSig'] ?? '').trim().toLowerCase()

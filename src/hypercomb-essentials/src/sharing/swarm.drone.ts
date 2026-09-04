@@ -38,6 +38,7 @@ import { SWARM_INVITE_KIND } from './meeting-invite.js'
 import { lineageKey } from '../history/lineage-key.js'
 import { isWithinAdoptedRoot } from './adopted-roots.js'
 import { swarmFilterSelection } from './swarm-filter.service.js'
+import { allowsHere } from '../pheromones/intake-filter.js'
 import { withheldForShare, ENABLEMENT_CHANGED } from './behavior-enablement.js'
 
 const SWARM_LAYER_KIND = 30200
@@ -1545,6 +1546,14 @@ export class SwarmDrone extends Drone {
         return tiles
           .filter(({ peerPubkey }) => selectedParticipants.size === 0 || selectedParticipants.has(peerPubkey))
           .filter(({ name }) => !hiddenLineages.has(locKey ? `${locKey}/${name}` : name))
+          // Intake gate — the marks the participant is watching for, and the
+          // ones they never want. SYNCHRONOUS on purpose, exactly like the two
+          // filters above: this runs per peer tile per render, so the union
+          // read's signature half (one OPFS hit each) would be a storm here.
+          // The location carrier is an in-memory index, so it costs what
+          // readHiddenLineages costs. The signature half runs at ADOPT, which
+          // is the commit — draw cheaply, refuse authoritatively.
+          .filter(({ name }) => allowsHere({ segments: [...loc.segments, name] }))
           .map(({ name, peerPubkey, imageSig, index }) => ({
             name,
             kind: 'peer' as const,

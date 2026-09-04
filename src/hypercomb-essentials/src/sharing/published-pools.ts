@@ -42,6 +42,7 @@
 // or an adopt handoff taught us.
 
 import { EffectBus, poolKindOfMeaning, registerPoolMeaning, SignatureService } from '@hypercomb/core'
+import { allows as intakeAllows } from '../pheromones/intake-filter.js'
 
 /** How many members one domain may offer per meaning. A published index is
  *  a curated list, not a database dump; past this something is wrong and we
@@ -227,6 +228,12 @@ export const probePublishedPool = async (
   for (const sig of members) {
     const record = await verifiedMember(origin, sig)
     if (record === null) continue
+    // THE INTAKE GATE. Verification answered "are these the bytes the domain
+    // named"; it cannot answer "do I want them". This is a COMMIT path — one
+    // pass per member, at most MAX_MEMBERS of them per domain per session — so
+    // it can afford the full union read (location marks ∪ signature marks).
+    // Allows everything until the participant expresses an interest.
+    if (!await intakeAllows({ sig })) continue
     try {
       const id = await handler.accept(record, origin)
       if (id) kept.push(id)
