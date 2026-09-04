@@ -96,6 +96,13 @@ const REFERENCES_MEANING = 'substrate:references'
 // identifier shape for newly MINTED bare-word meanings, and these are being
 // drained away rather than minted.
 const RETIRED_SOURCE_POOLS = ['places:sources', 'substrate'] as const
+/** The registry's OWN document pool: one current record, replaced whole,
+ *  addressed by the signature of its bytes. It used to be a member literally
+ *  named `registry` inside `substrate:sources` — a caller-chosen human name
+ *  beside sig-named override members, the same shape as the four registry
+ *  pointer copies (write-conformance, adjudication). That member is now a
+ *  READ-FALLBACK; nothing is rewritten. */
+const REGISTRY_MEANING = 'substrate:registry'
 const RETIRED_REFERENCE_POOLS = ['places:references'] as const
 const REGISTRY_RECORD = 'registry'
 const SIG_NAME_RE = /^[0-9a-f]{64}$/
@@ -218,6 +225,9 @@ type StoreHandle = {
   legacyHypercombIo?: FileSystemDirectoryHandle
   /** Open (creating if needed) the sign(meaning) pool for a meaning. */
   getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
+  /** The document-pool contract (Store.putPoolDoc / getPoolDoc). */
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
+  getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
   getResource: (sig: string) => Promise<Blob | null>
   putResource: (blob: Blob) => Promise<string>
 }
@@ -341,14 +351,26 @@ export class SubstrateService extends EventTarget {
     if (!store) return
     let registry: SubstrateRegistry | null = null
     let fromLegacy = false
-    // Canonical: the sign('substrate:sources') pool `registry` record. Legacy
-    // read-fallback: the root `0000` props under `substrate-registry`.
+    // Canonical: the current document in sign('substrate:registry'). Read
+    // fallbacks, oldest last: the `registry` member in substrate:sources (and
+    // the retired pools behind it), then the root `0000` props.
     try {
-      const rec = await this.#readPoolRecord(store, REGISTRY_RECORD)
-      if (rec && Array.isArray((rec as any).sources)) {
-        registry = rec as unknown as SubstrateRegistry
+      const doc = store.getPoolDoc
+        ? await store.getPoolDoc((await this.#poolFor(store, REGISTRY_MEANING)) ?? undefined)
+        : null
+      if (doc && doc.byteLength > 0) {
+        const parsed = JSON.parse(new TextDecoder().decode(doc))
+        if (parsed && Array.isArray(parsed.sources)) registry = parsed as SubstrateRegistry
       }
-    } catch { /* pool miss */ }
+    } catch { /* no document yet */ }
+    if (!registry) {
+      try {
+        const rec = await this.#readPoolRecord(store, REGISTRY_RECORD)
+        if (rec && Array.isArray((rec as any).sources)) {
+          registry = rec as unknown as SubstrateRegistry
+        }
+      } catch { /* pool miss */ }
+    }
     if (!registry) {
       try {
         const props = await this.#readRootProps(store)
@@ -488,10 +510,15 @@ export class SubstrateService extends EventTarget {
     const store = this.#store()
     if (!store) return
     try {
-      // Registry lives in the sign('substrate:sources') pool `registry` record —
-      // never the legacy root `0000` (which collides with the root sigbag
-      // marker convention). The legacy keys are scrubbed on first migrate.
-      await this.#writePoolRecord(store, REGISTRY_RECORD, next as unknown as Record<string, unknown>)
+      // The registry IS the current document of its own pool — the record's
+      // signature is its address, exactly one member by design. A store with
+      // no document contract writes nothing (in-memory state stays valid);
+      // the old `registry` member is never written again.
+      if (!store.putPoolDoc) return
+      const pool = await this.#poolFor(store, REGISTRY_MEANING)
+      if (!pool) return
+      const bytes = new TextEncoder().encode(JSON.stringify(next)).buffer as ArrayBuffer
+      await store.putPoolDoc(pool, bytes)
     } catch { /* store not ready */ }
   }
 

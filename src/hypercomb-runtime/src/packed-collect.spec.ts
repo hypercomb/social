@@ -154,3 +154,31 @@ describe('a pool member NAME is itself a reference', () => {
     expect(engine.getContent(address(3))).toBeFalsy()
   })
 })
+
+
+describe('wipe-safe pools — a derived cache is not a reference', () => {
+  it('skips the members of a wipe-safe pool WHOLE, name and bytes, so the cache cannot pin what it derived from', async () => {
+    const engine = PackedStoreEngine.open(new MemorySyncFile())
+    engine.putContent(address(1), json({ name: 'the original image the thumbnail was derived from' }))
+    engine.putContent(address(2), json({ name: 'a layer the manifest names' }))
+    // a derived-cache pool: member NAMED by the source sig, bytes NAMING a layer
+    engine.putPool(address(9), address(1), json({ derivedFrom: address(2) }))
+
+    const result = await collect(engine, { wipeSafePools: new Set([address(9)]) })
+
+    expect(result.swept).toBe(2)
+    expect(engine.getContent(address(1))).toBeFalsy()
+    expect(engine.getContent(address(2))).toBeFalsy()
+  })
+
+  it('an UNDECLARED pool still credits — the bias only yields to a registry that says wipe-safe', async () => {
+    const engine = PackedStoreEngine.open(new MemorySyncFile())
+    engine.putContent(address(1), json({ name: 'named by a member' }))
+    engine.putPool(address(9), address(1), json({}))
+
+    const result = await collect(engine, { wipeSafePools: new Set([address(8)]) })
+
+    expect(result.swept).toBe(0)
+    expect(engine.getContent(address(1))).toBeTruthy()
+  })
+})

@@ -46,7 +46,8 @@ the census had not:**
   optimize phase. *Fixed 2026-09-04: it arms intent and exposes `optimize()`.*
 - `substrate.service.ts` `#saveRegistry` — writes a member literally named
   `registry` into `substrate:sources`: the same shape as the four pointer
-  copies. **Open.**
+  copies. *Fixed 2026-09-04: the registry is the current document of its own
+  `substrate:registry` pool; the old member is a read-fallback.*
 - `packed-interchange.ts` `transfer` — copies bytes under a 64-hex name lifted
   from the source listing without hashing them (check 1). No importer today.
   **Open.**
@@ -56,7 +57,9 @@ the census had not:**
 - `packed-collect.ts` — the collector the census actually cited for the
   four-hat bug still credits every pool member's name and bytes with no
   pool-kind gate; under the packed store the reader fix does not reach it.
-  **Open** (the OPFS reader is fixed).
+  *Fixed 2026-09-04: `collect` takes the wipe-safe pool addresses and skips
+  their members whole; the bridge derives the set on the main thread from the
+  registry and sends it with `pack_collect`. An undeclared pool still credits.*
 - `collapse-history.queen.ts` exists — an earlier note here said it did not.
   *Retired 2026-09-04 together with `/flatten` (born `/compact`): archiving the
   middle of a history is the one act that publishes less than the participant

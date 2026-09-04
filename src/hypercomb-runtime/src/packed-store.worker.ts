@@ -74,6 +74,10 @@ interface CommandPayload {
    *  service worker knows `bees`, not sign('bees'). */
   meaning?: string
   key?: string
+  /** `pack_collect`: the addresses of every pool the registry declares
+   *  wipe-safe, derived on the main thread (packed-bridge.ts) — the worker
+   *  has no registry of its own. Their members are skipped whole. */
+  wipeSafePools?: string[]
 }
 
 /** OPFS synchronous access — worker-only, and not in the DOM lib TypeScript
@@ -635,8 +639,9 @@ class PackedHost {
    * files (exactly the ones worth reclaiming) could never be freed. The
    * reachability answer is the same for both.
    */
-  async collect(): Promise<Collected> {
+  async collect(wipeSafePools: ReadonlySet<string> = new Set()): Promise<Collected> {
     return await collect(this.#engine, {
+      wipeSafePools,
       looseSigs: async () => {
         const out: string[] = []
         for (const [name, handle] of await snapshot(this.#root)) {
@@ -758,7 +763,7 @@ const handle = async (request: BridgeRequest): Promise<{ result: unknown; transf
       // MANUAL / IDLE ONLY. Walks every marker and every pool member — the
       // one thing the packed store exists to avoid doing on boot. Nothing
       // schedules this; it is invoked deliberately.
-      return { result: await host.collect(), transfer: [] }
+      return { result: await host.collect(new Set((p.wipeSafePools ?? []).map(a => String(a).toLowerCase()))), transfer: [] }
     case 'pack_stats':
       return { result: host.stats(), transfer: [] }
     case 'pack_close':

@@ -113,6 +113,23 @@ export const collect = async (
     looseSigs?: () => Promise<string[]>
     sizeOfBlob?: (sig: string) => Promise<number>
     sweepBlob?: (sig: string) => Promise<boolean>
+    /**
+     * Pool ADDRESSES (sign(meaning)) whose members are DERIVED CACHES — the
+     * `index` kind, wipe-safe by declaration. Their members are named by the
+     * very signatures this walk decides about and their bytes enumerate what
+     * they were derived from, so crediting them keeps a layer alive purely
+     * because an accelerator had been minted for it — and the original image
+     * can never be reclaimed once its thumbnail exists. A cache may never
+     * change what the collector keeps (optimize-phase.md rule 3), so these
+     * pools are skipped WHOLE, name and bytes — the same rule
+     * HistoryService.referencesOutside applies on the OPFS side.
+     *
+     * The bias in the header still holds for everything else: an UNDECLARED
+     * pool credits. Only a pool the registry knows to be wipe-safe is skipped,
+     * and the caller (the bridge, on the main thread, where the registry
+     * lives) says which those are.
+     */
+    wipeSafePools?: ReadonlySet<string>
   },
 ): Promise<Collected> => {
   const reachable = new Set<string>()
@@ -127,7 +144,9 @@ export const collect = async (
   }
   // Pool members are not layers, but they may REFERENCE content — a clipboard
   // entry naming a copied image, for one. Their referents must survive.
+  const wipeSafe = options?.wipeSafePools
   for (const pool of engine.pools()) {
+    if (wipeSafe?.has(pool.toLowerCase())) continue   // a derived cache is not a reference
     for (const member of engine.poolMembers(pool)) {
       // The member's NAME is itself a content signature — under the molecule
       // model a member IS an atom's address. Reading only its BYTES left the

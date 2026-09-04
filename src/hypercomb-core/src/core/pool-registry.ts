@@ -340,6 +340,11 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // to prevent — so the colon-scoped spelling is claimed now, not later.
   'hives:names',
   'substrate:references',
+  // THE SUBSTRATE REGISTRY — which background sources this participant has and
+  // which is active: one current document (essentials/substrate). It replaces a
+  // member literally named `registry` inside substrate:sources, kept as a
+  // read-fallback. Per-participant, replaced whole: DOCUMENT.
+  'substrate:registry',
   'substrate:sources',
   'tutorial:artifacts',
   'usage:dwell',
