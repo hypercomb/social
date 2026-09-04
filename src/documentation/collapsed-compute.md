@@ -240,6 +240,29 @@ Query-as-identity (algebra concept #1 in signature-algebra.md) is collapsed comp
 
 ## Trusted Authorities and Safe Sharing
 
+> **⚠ STATUS 2026-09-03 — THIS SECTION DESCRIBES AN UNWIRED BOUNDARY.**
+> `SignatureStore.isTrusted(sig)`, named below as "the trust boundary", has
+> **zero call sites** in the source tree (defined at
+> `hypercomb-core/src/core/signature-store.ts:35`; the only other occurrences
+> in the repo are a worktree copy of that same file and unrelated DOM/Pixi
+> typings). Its sibling `verify` short-circuits to `true` on set membership
+> **without hashing** and also has no callers, and `trustAll` persists a set to
+> localStorage that is restored unvalidated on the next boot.
+>
+> Nothing is broken today, because nothing yet consumes a computation it did
+> not perform — the property that actually holds is the one in *The Principle*
+> above: peers who **each compute** converge on the same signature, which is
+> airtight for a cache. The authority layer described here is what would be
+> needed the moment a result is **accepted from someone else**, and it is not
+> built. Until it is, read step 4's "is the signature in the trusted
+> allowlist?" as a design intent, not a check that runs.
+>
+> See `hypercomb-communication-layer.md` § *Shared execution: the consensus
+> dodge, and the regime it stops in* for the convergence-vs-delegation
+> boundary and for what attribution would take (a signer on
+> `ComputationReceipt`, and comparison by the `(input, function, output)`
+> triple rather than the receipt signature).
+
 Collapsed compute only works if you can trust the signatures you receive. Hypercomb solves this through **trusted authorities** — entities who have verified and signed compositions, making them safe to consume without re-verification.
 
 ### How trust works
