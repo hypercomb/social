@@ -50,7 +50,9 @@ the census had not:**
   `substrate:registry` pool; the old member is a read-fallback.*
 - `packed-interchange.ts` `transfer` — copies bytes under a 64-hex name lifted
   from the source listing without hashing them (check 1). No importer today.
-  **Open.**
+  *Fixed 2026-09-04: content is hashed before it is written and refused on a
+  mismatch (`contentRefused`); the spec's content fixture carries its real
+  signature.*
 - `publish-branch.ts` step 1 — `enablePublicHost()` unconditionally, even over
   a prior explicit opt-out (check 10). **Owner question:** is a publish the
   gesture that grants the standing public host?
@@ -71,7 +73,8 @@ the census had not:**
   before learning the list op was a no-op; `#opportunisticMigrateMarker`
   still rewrites marker files from a read path; `replicate.js`'s directory
   refusal fails the whole job rather than one atom; `layer-graph-resolver`
-  and `publishEvent` are dead code the doc said to delete and nobody has.
+  and `publishEvent` were dead code the doc said to delete — *deleted
+  2026-09-04.*
 
 - Fixes are recorded inline as **FIXED (commit)** and left in place so the
   list stays a census, not a to-do. 2026-09-04: the one catastrophic item,

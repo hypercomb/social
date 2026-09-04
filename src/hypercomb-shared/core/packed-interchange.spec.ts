@@ -7,6 +7,7 @@
 // a plain in-memory directory.
 
 import { describe, expect, it } from 'vitest'
+import { SignatureService } from '@hypercomb/core'
 import { NativeRootDirectory, type NativeBridge } from './native-filesystem'
 import {
   MemorySyncFile,
@@ -27,6 +28,11 @@ const text = (raw: Uint8Array | null | undefined): string | null =>
 
 const address = (seed: number): string =>
   seed.toString(16).padStart(8, '0').repeat(8)
+
+// Content is addressed by its REAL hash: the interchange refuses bytes that
+// do not hash to their name, so the one content fixture carries its true
+// signature. Bags and pools keep synthetic addresses — those are directories.
+const LAYER_SIG = await SignatureService.sign(bytes('layer bytes').buffer as ArrayBuffer)
 
 /**
  * The packed engine behind the SAME bridge interface the worker implements,
@@ -133,8 +139,8 @@ class MemoryDirectory implements DirectoryLike {
 /** A packed hive with content, a bag, a pool, and a colliding address. */
 const buildHive = () => {
   const engine = PackedStoreEngine.open(new MemorySyncFile())
-  const contentSigs = new Map<string, string>([['layer bytes', address(1)]])
-  engine.putContent(address(1), bytes('layer bytes'))
+  const contentSigs = new Map<string, string>([['layer bytes', LAYER_SIG]])
+  engine.putContent(LAYER_SIG, bytes('layer bytes'))
   engine.putMarkerAt(address(2), 0, bytes('marker zero'))
   engine.putMarkerAt(address(2), 7, bytes('marker seven'))
   engine.putPool(address(3), 'clip', bytes('a clipboard record'))
@@ -150,7 +156,7 @@ describe('packed store: interchange (conformance §7)', () => {
     const folder = new MemoryDirectory()
     const moved = await exportInterchange(root, folder)
 
-    expect(text(folder.files.get(address(1)))).toBe('layer bytes')
+    expect(text(folder.files.get(LAYER_SIG))).toBe('layer bytes')
     expect(text(folder.dirs.get(address(2))?.files.get(markerFilename(0)))).toBe('marker zero')
     expect(text(folder.dirs.get(address(2))?.files.get(markerFilename(7)))).toBe('marker seven')
     expect(text(folder.dirs.get(address(3))?.files.get('clip'))).toBe('a clipboard record')
@@ -177,11 +183,11 @@ describe('packed store: interchange (conformance §7)', () => {
     // A brand new, empty store — nothing carried over but the folder.
     const fresh = PackedStoreEngine.open(new MemorySyncFile())
     const freshRoot = new NativeRootDirectory(
-      bridgeOver(fresh, new Map([['layer bytes', address(1)]])),
+      bridgeOver(fresh, new Map([['layer bytes', LAYER_SIG]])),
     ) as unknown as DirectoryLike
     const restored = await restoreInterchange(folder, freshRoot)
 
-    expect(text(fresh.getContent(address(1)))).toBe('layer bytes')
+    expect(text(fresh.getContent(LAYER_SIG))).toBe('layer bytes')
     expect(text(fresh.getMarker(address(2), 0))).toBe('marker zero')
     expect(text(fresh.getMarker(address(2), 7))).toBe('marker seven')
     expect(fresh.head(address(2))?.index).toBe(7)      // head survives as the max index
@@ -198,7 +204,7 @@ describe('packed store: interchange (conformance §7)', () => {
 
     const fresh = PackedStoreEngine.open(new MemorySyncFile())
     const freshRoot = new NativeRootDirectory(
-      bridgeOver(fresh, new Map([['layer bytes', address(1)]])),
+      bridgeOver(fresh, new Map([['layer bytes', LAYER_SIG]])),
     ) as unknown as DirectoryLike
 
     await restoreInterchange(folder, freshRoot)
@@ -236,6 +242,23 @@ describe('packed store: interchange (conformance §7)', () => {
     await exportInterchange(root, folder)
     const second = await exportInterchange(root, folder)
     expect(changed(second)).toBe(false)
+  })
+
+  it('refuses content whose bytes do not hash to its name — a listing is not a proof', async () => {
+    const folder = new MemoryDirectory()
+    folder.files.set(address(5), bytes('bytes that are not what the name claims'))
+    folder.files.set(LAYER_SIG, bytes('layer bytes'))
+    const fresh = PackedStoreEngine.open(new MemorySyncFile())
+    const freshRoot = new NativeRootDirectory(
+      bridgeOver(fresh, new Map([['layer bytes', LAYER_SIG]])),
+    ) as unknown as DirectoryLike
+
+    const restored = await restoreInterchange(folder, freshRoot)
+
+    expect(restored.contentRefused).toBe(1)
+    expect(restored.content).toBe(1)
+    expect(fresh.hasContent(address(5))).toBe(false)
+    expect(text(fresh.getContent(LAYER_SIG))).toBe('layer bytes')
   })
 
   it('ignores files that are not part of a hive', async () => {
