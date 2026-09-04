@@ -22,12 +22,13 @@ overstated and are recorded here in their corrected form.
 > only because a diff showed zero hunks where edits were expected.
 >
 > Landed at the participant's direction, with authorship attributed to the
-> every-act-has-a-word session. Two things were reduced to their share rather
+> every-act-has-a-word session. Two files were reduced to their share rather
 > than swept: `side-effects.ts` carries only this feature's three registrations,
-> and `doctrine.spec.ts` was **excluded** — its allowlist change is coupled to
-> another session's staged deletion of the feedback-viewer. So this feature's
-> own ratchet, *"the model grammar module names no behaviour"*, is still owed,
-> and it is the thing that stops the hand-kept table growing back.
+> and `doctrine.spec.ts` was split — its **ratchet landed** (`ba45150b3`,
+> *"the model grammar module names no behaviour"*, which is what stops the
+> hand-kept table growing back), while the allowlist removal riding alongside it
+> did not, being correct only once another session's staged deletion of the
+> feedback-viewer lands.
 
 **The one sentence:** four surfaces turn language into execution, exactly one of
 them is default-deny, and the field that looks like the capability tier
