@@ -18,6 +18,7 @@ import {
   commandRoot, completeCommandPath, commandMembersFor, commandPath, type CommandObject,
   parseBehaviourCall, behaviourCallCursor, BehaviourCallError,
   type BehaviourCall, type CallValue,
+  REMOTE_SUBMIT, type RemoteSubmitRequest, type RemoteSubmitOutcome, type RemoteSubmitAction,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { VoiceInputService } from '../../core/voice-input.service'
@@ -2251,16 +2252,74 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // reading is unambiguous, non-destructive, and actually matched a
     // behaviour. Everything else falls through, where canonical slash grammar
     // still works and prose is simply refused.
-    this.#remoteSubmitUnsub = EffectBus.on<{ text: string }>('command-line:remote-submit', ({ text }) => {
+    this.#remoteSubmitUnsub = EffectBus.on<RemoteSubmitRequest>(REMOTE_SUBMIT, ({ text, accept, complete }) => {
+      accept?.()
+      // ALWAYS SETTLE, EXACTLY ONCE. A caller that is never answered hangs,
+      // and a hang is worse than a wrong answer because it is invisible.
+      let settled = false
+      const settle = (outcome: RemoteSubmitOutcome): void => {
+        if (settled) return
+        settled = true
+        try { complete?.(outcome) }
+        catch (e) { console.warn('[remote-submit] receipt handler threw:', e) }
+      }
+
       this.#setShellValue(text, false)
-      const reading = this.#utteranceReader()?.read(lowered(text))
-      if (reading?.actions.length
-        && !reading.spans.some(span => span.role === 'ambiguity')
-        && !reading.actions.some(action => DESTRUCTIVE_COMMANDS.has(action.command))) {
+
+      // CANONICAL SLASH STAYS ON THE PIPELINE IT ALREADY USES. The keyboard
+      // consults the reader only when `#toRegister` CHANGED the line — that
+      // is, for prose. A line that already carries its slash is exact by
+      // construction and must not be re-routed through the Tongue; `/create x`
+      // over the bridge is measured working on the legacy path and stays there.
+      const prose = !text.trimStart().startsWith('/')
+      const reading = prose ? this.#utteranceReader()?.read(lowered(text)) : null
+
+      if (reading?.actions.length) {
+        const ambiguous = reading.spans.find(span => span.role === 'ambiguity')
+        if (ambiguous) {
+          // NOTHING RUNS on an ambiguity, and the claimants go back so the
+          // caller can choose and say it again. A dropdown is the person's
+          // affordance; a remote caller has no hands.
+          settle({
+            kind: 'ambiguous',
+            word: ambiguous.text,
+            candidates: (ambiguous.candidates ?? []).map(c => c.name),
+          })
+          return
+        }
+        const destructive = reading.actions.filter(a => DESTRUCTIVE_COMMANDS.has(a.command))
+        if (destructive.length) {
+          // The typed path answers a destructive word with a rendered
+          // confirmation. A remote caller cannot press it, so it is refused
+          // and told why, rather than parking a choice on a screen no agent
+          // can see — which is what silently happened before.
+          settle({
+            kind: 'refused',
+            reason: `${destructive.map(a => `/${a.command}`).join(', ')} needs a person to confirm it`,
+          })
+          return
+        }
         void this.#executeReading(reading)
+          .then(actions => settle({ kind: 'ran', actions }))
+          .catch(error => settle({
+            kind: 'unknown',
+            reason: error instanceof Error ? error.message : String(error),
+          }))
         return
       }
+
+      // The legacy tag/slash pipeline resolves through fire-and-forget
+      // branches, so awaiting it would prove delivery and not completion.
+      // Rather than mint a fake receipt it answers UNKNOWN — the same law the
+      // pool reader is owed: never answer from anything but a positive,
+      // complete result.
       void this.#preprocessTagsThenExecute(text)
+      settle({
+        kind: 'unknown',
+        reason: prose
+          ? 'no behaviour matched; ran on the legacy pipeline, whose outcome is not observable'
+          : 'canonical slash grammar runs on the legacy pipeline, whose outcome is not observable',
+      })
     })
 
     // voice active state sync (for mic button visual) — and the stance guard.
@@ -3014,18 +3073,55 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   /** The sentence is the transaction: actions run in word order through the
-   *  same executor typed slash commands use, then ONE synchronize pass. */
-  async #executeReading(reading: UtteranceReadingLike): Promise<void> {
+   *  same executor typed slash commands use, then ONE synchronize pass.
+   *
+   *  RETURNS WHAT IT DID. A failing action is still warned and skipped — the
+   *  sentence carries on, because a person is watching and the rest of their
+   *  line is still worth running. But the outcomes are now RETURNED as well as
+   *  logged, because a remote caller is not watching a console: it is handed
+   *  this list as its receipt (`RemoteSubmitOutcome`). `ok` means the action
+   *  was dispatched and did not throw — never that the hive changed, since
+   *  every executor in the tree is `Promise<void> | void`. */
+  async #executeReading(reading: UtteranceReadingLike): Promise<RemoteSubmitAction[]> {
     this.#recordHistory(reading.text)
     this.#pendingChoice.set(null)
     this.#utteranceResolutions.set(new Map())
     this.clear()
+    const outcomes: RemoteSubmitAction[] = []
     const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as
-      { execute?(name: string, args: string): Promise<unknown> } | undefined
-    if (!drone?.execute) return
+      { execute?(name: string, args: string): Promise<unknown>; has?(name: string): boolean } | undefined
+    if (!drone?.execute) {
+      return reading.actions.map(action => ({
+        command: action.command, args: action.args, ok: false,
+        error: 'no behaviour executor is registered',
+      }))
+    }
     for (const action of reading.actions) {
-      try { await drone.execute(action.command, action.args) }
-      catch (e) { console.warn('[utterance] action failed:', action.command, e) }
+      // RE-DERIVE THE CENSUS PER ACTION, the same discipline the model channel
+      // keeps. The reading was taken against the census as it was; a behaviour
+      // can stop being claimable between reading and running. `execute` falls
+      // off its loop and returns `undefined` for an unclaimed name — silent,
+      // and indistinguishable from a void success — so ask first rather than
+      // report a success that never happened.
+      if (drone.has && !drone.has(action.command)) {
+        console.warn('[utterance] no behaviour claims:', action.command)
+        outcomes.push({
+          command: action.command, args: action.args, ok: false,
+          error: 'no behaviour claims that name',
+        })
+        continue
+      }
+      try {
+        await drone.execute(action.command, action.args)
+        outcomes.push({ command: action.command, args: action.args, ok: true })
+      }
+      catch (e) {
+        console.warn('[utterance] action failed:', action.command, e)
+        outcomes.push({
+          command: action.command, args: action.args, ok: false,
+          error: e instanceof Error ? e.message : String(e),
+        })
+      }
     }
     // ONLY EXECUTION TEACHES. The phrasing is learned here, after the actions
     // have actually run — never from typing, never from a pathway the
@@ -3033,6 +3129,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // only place in the component allowed to mint one.
     this.#spokenHabits()?.learn(reading)
     this.requestSynchronize()
+    return outcomes
   }
 
   /** Resolve the pending choice with the option at `index` (highlighted row
