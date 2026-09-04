@@ -148,6 +148,16 @@ type CommitRequest = {
  *  whatever location happens to be current — grafting one layer's
  *  values into another (observed live: a child created at /hello was
  *  appended to root's children minutes later by exactly this race). */
+/** A write refused because the participant is viewing the past. Named so a
+ *  caller can tell "the hive would not take this" apart from "the write broke",
+ *  and so a receipt can say which. Not a failure of the work — an answer. */
+export class RewoundCommitError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'RewoundCommitError'
+  }
+}
+
 const segmentsAtIntent = (): string[] | null => {
   const lineage = get<Lineage>('@hypercomb.social/Lineage')
   const segs = lineage?.explorerSegments?.()
@@ -716,12 +726,28 @@ export class LayerCommitter {
 
     const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
     if (cursor?.state?.rewound) {
-      // Never commit while the cursor is rewound (the assembled state reflects
-      // the past view) — but never SILENTLY: a caller that resolves this void
-      // as success (paste/adopt fold) would report committed while nothing was
-      // written, and the work vanishes on the next refresh.
-      console.warn('[LayerCommitter] importTree skipped — history cursor is rewound; nothing was committed', { updates: updates.length })
-      return
+      // Never commit while the cursor is rewound — the assembled state reflects
+      // the past view, not a new intent. AND NEVER SILENTLY: this used to say
+      // exactly that and then `console.warn` and return, which is silent to
+      // everyone except a console. A caller that resolved this void as success
+      // reported the write as committed while nothing was written, and the work
+      // vanished on the next refresh.
+      //
+      // `/undo` is what puts a hive here, and it is machine-callable — so a
+      // plan of `/undo` then `/create x` had the create resolve clean and the
+      // receipt say it ran. THROWING is what closes that: `enqueue` returns the
+      // task's own promise and guards the chain separately, so the rejection
+      // reaches the caller without stalling the queue, and the create path's
+      // `.catch(error => payload.complete?.(error))` turns it into an honest
+      // refusal. Callers that do not catch stop before their success effects
+      // fire, which is more correct than emitting `cell:added` for a cell that
+      // was never added.
+      EffectBus.emit('activity:log', {
+        message: 'Nothing was written — you are viewing the past. Step forward to write again.',
+        icon: 'history',
+      })
+      throw new RewoundCommitError(
+        `history cursor is rewound; ${updates.length} update(s) were not committed`)
     }
 
     const lineage = get<Lineage>('@hypercomb.social/Lineage')

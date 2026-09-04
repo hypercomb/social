@@ -32,7 +32,7 @@ const get = <T,>(key: string): T | undefined => (window as { ioc?: { get?: (k: s
 type CursorShape = {
   undo(): void | Promise<void>
   redo(): void | Promise<void>
-  readonly state?: { readonly position: number }
+  readonly state?: { readonly position: number; readonly rewound?: boolean }
 }
 
 const MAX_STEPS = 50
@@ -92,6 +92,16 @@ abstract class CursorStepQueen extends QueenBee {
       stepped === 0 ? `${this.command} — nothing left to step`
       : stepped === 1 ? `${this.command} — stepped one action`
       : `${this.command} — stepped ${stepped} actions`)
+
+    // STEPPING BACK CHANGES WHAT THE HIVE WILL ACCEPT, not just what it shows.
+    // While the cursor is rewound `LayerCommitter` refuses every commit, so the
+    // next verb in a sentence writes nothing. That is a CAPABILITY change and
+    // neither `reach` nor `scope` can express it — the least a speaker is owed
+    // is to be told, in the same breath, that the hive has stopped taking
+    // writes and how to give it back.
+    if (cursor.state?.rewound) {
+      this.#log(`${this.command} — the hive will not take writes until you return to now (/redo)`)
+    }
   }
 
   #log(message: string): void {
