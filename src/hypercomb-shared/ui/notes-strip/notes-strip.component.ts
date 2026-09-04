@@ -1848,7 +1848,7 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     return role === 'heading' || role === 'list'
   }
 
-  /** The active tile's note tree — split by the details tabs (prose and
+  /** The active tile's note tree — split by the writing tabs (prose and
    *  conversation on `notes`, structured lists on `lists`), then pruned to
    *  the search query. Each surviving node is a shallow copy with its
    *  children likewise pruned, so the recursive row template renders the

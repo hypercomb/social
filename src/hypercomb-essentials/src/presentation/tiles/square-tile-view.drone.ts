@@ -595,7 +595,7 @@ export class SquareTileViewDrone extends Drone {
       onClose: page ? undefined : () => this.#closeBrief(),
       onEnter: brief.childCount > 0 ? () => this.#enter(brief.segments) : undefined,
       onSibling: name => this.#enter([...parent, name]),
-      // The details window addresses a tile by label at the current
+      // The writing window addresses a tile by label at the current
       // location — true of a plate, never of the page itself.
       onWrite: page ? undefined : () => EffectBus.emit('notes:open', { cellLabel: label }),
       onWriteInline: text => {

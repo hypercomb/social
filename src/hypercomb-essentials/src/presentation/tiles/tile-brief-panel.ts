@@ -48,7 +48,7 @@ export type BriefPanelOptions = {
   onEnter?: () => void
   /** Walk to a neighbour on the row. */
   onSibling?: (label: string) => void
-  /** Open the details window on this tile. Offered only where the tile
+  /** Open the writing window on this tile. Offered only where the tile
    *  can be addressed by label from where the participant stands. */
   onWrite?: () => void
   /** Write a note ON THIS TILE, at its own address — the desk principle, so a
@@ -173,7 +173,7 @@ function briefHead(brief: TileBrief, options: BriefPanelOptions, page: boolean):
 /** The structure: an outline, marks kept, nesting drawn with a hairline. */
 function listsSection(lists: readonly Note[]): HTMLElement {
   const section = element('section', 'tb-lists')
-  section.appendChild(heading('details.tab.lists', 'lists'))
+  section.appendChild(heading('writing.tab.lists', 'lists'))
   section.appendChild(outline(lists, 0))
   return section
 }
@@ -195,7 +195,7 @@ function outline(notes: readonly Note[], depth: number): HTMLElement {
  *  them — a page of unbroken text is not a brief. */
 function notesSection(notes: readonly Note[]): HTMLElement {
   const section = element('section', 'tb-notes')
-  section.appendChild(heading('details.tab.notes', 'notes'))
+  section.appendChild(heading('writing.tab.notes', 'notes'))
   for (const note of notes) {
     const kind = noteKindOf(note)
     const block = element('div', 'tb-note')
@@ -328,9 +328,9 @@ function affordanceRail(brief: TileBrief, options: BriefPanelOptions): HTMLEleme
   const doors: BriefAffordance[] = []
   if (options.onWrite && (brief.lists.length || brief.notes.length)) {
     doors.push({
-      name: 'details',
+      name: 'writing',
       svgMarkup: '',
-      label: briefText('details.title', 'details'),
+      label: briefText('writing.title', 'writing'),
       destructive: false,
       inert: false,
       run: () => options.onWrite?.(),

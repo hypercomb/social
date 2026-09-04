@@ -227,7 +227,7 @@ tutorialLessons.register({
   id: 'window-notes',
   level: L,
   order: 50,
-  title: 'The details window',
+  title: 'The writing window',
   summary: 'Two tabs over one tree — NOTES for reasoning, LISTS for order — edited in place.',
   pheromones: ['tutorial', 'lesson', 'expert', 'editing', 'meaning'],
   requires: () => hasWindow('hc-notes-strip'),
@@ -263,7 +263,7 @@ tutorialLessons.register({
 })
 
 // ── 55 · the notes reader ──────────────────────────────────────────────
-// A window of its own, and a different job: the details window is where
+// A window of its own, and a different job: the writing window is where
 // you WRITE (a dense tree, edited in place); the reader is where you READ (one
 // note at a time, big, with its hierarchy around it). Taught back to back.
 
@@ -289,13 +289,13 @@ tutorialLessons.register({
     await stage.wait(900)
     stage.highlight(null)
 
-    // The book button on the details window is the ONLY emitter of
+    // The book button on the writing window is the ONLY emitter of
     // `notes:open` — this is that button's own effect, not a private hook.
     stage.emit('notes:open', { cellLabel: label })
     await stage.wait(1600)
 
     await stage.say('reader-window', 'Written to be written, opened to be read',
-      'The details window is where you WRITE: a dense tree you edit in place. This is where you READ — one note at a time, drawn big, with its place in the tree around it.')
+      'The writing window is where you WRITE: a dense tree you edit in place. This is where you READ — one note at a time, drawn big, with its place in the tree around it.')
 
     await stage.say('reader-window-tabs', 'One tile, several documents',
       'The tabs down the side are this tile’s root notes: each one is a little document made of everything nested under it, so a tile with four roots reads as four. Previous and Next walk depth-first inside the one you are in, and wrap round at either end.')

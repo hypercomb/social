@@ -63,7 +63,7 @@
            gesture the lines use. -->
       <span class="cv2-dragbar-title">
         <span class="hex-mark" aria-hidden="true"></span>
-        <span>{{ cell() || ('details.title' | t) }}</span>
+        <span>{{ cell() || ('writing.title' | t) }}</span>
         @if (tab() === 'lists' && cell()) {
           @if (listRoot(); as root) {
             <span class="cv2-dragbar-sep" aria-hidden="true">/</span>
@@ -103,20 +103,20 @@
               [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
     </div>
 
-    <!-- The details window's two tabs — plain NOTES (prose and the
+    <!-- The writing window's two tabs — plain NOTES (prose and the
          question/answer conversation) and LISTS (the hierarchical list-notes:
          roots carrying a heading/list mark, or any note tree). Same editor,
          same navigator, same form on both — only which roots show differs
          (see visibleNotes). One window, one rail icon. -->
-    <div class="cv2-tabs" role="tablist" [attr.aria-label]="'details.title' | t">
+    <div class="cv2-tabs" role="tablist" [attr.aria-label]="'writing.title' | t">
       <button type="button" class="cv2-tab" role="tab"
               [class.is-active]="tab() === 'notes'"
               [attr.aria-selected]="tab() === 'notes'"
-              (click)="setTab('notes')">{{ 'details.tab.notes' | t }}</button>
+              (click)="setTab('notes')">{{ 'writing.tab.notes' | t }}</button>
       <button type="button" class="cv2-tab" role="tab"
               [class.is-active]="tab() === 'lists'"
               [attr.aria-selected]="tab() === 'lists'"
-              (click)="setTab('lists')">{{ 'details.tab.lists' | t }}</button>
+              (click)="setTab('lists')">{{ 'writing.tab.lists' | t }}</button>
     </div>
 
     <!-- ── Mark rail — part of the HEADER, not of either pane ──────
@@ -518,7 +518,7 @@
             <div class="cv2-cloud-empty">{{ 'notes.noteNoMatch' | t }}</div>
           } @else {
             <div class="cv2-col-blank">
-              <span>{{ (tab() === 'lists' ? 'details.lists.empty' : 'notes.empty.none') | t }}</span>
+              <span>{{ (tab() === 'lists' ? 'writing.lists.empty' : 'notes.empty.none') | t }}</span>
               @if (tab() === 'lists') {
                 <button type="button" class="cv2-reading-edit" (click)="newList()">
                   <span class="mat-sym" aria-hidden="true">playlist_add</span>
@@ -655,7 +655,7 @@
               </div>
             } @else {
               <div class="cv2-list-blank">
-                <span>{{ 'details.lists.empty' | t }}</span>
+                <span>{{ 'writing.lists.empty' | t }}</span>
               </div>
             }
 

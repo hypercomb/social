@@ -88,9 +88,12 @@ bar; adding a control made the two overlap.
   The swarm's `feedback-reply` / `feedback-swarm` drones and the bridge's
   feedback channel are untouched — they are the peer-to-peer machinery, not the
   window.
-- **The notes window is now Details.** Annotating is no longer a button in the
-  corner of that desk; it is a standing act of its own. The `details.*` catalog
-  keys replace `annotations.*`.
+- **The notes window is now Writing.** Annotating is no longer a button in the
+  corner of that desk; it is a standing act of its own, so the word
+  "annotation" was freed for the sheet. The window holds what is *written* on a
+  tile — prose, lists and the question-and-answer conversation — and "details"
+  is the vocabulary of forms and records, which none of that is. The
+  `writing.*` catalog keys replace `annotations.*`.
 
 ## Files
 
