@@ -182,6 +182,17 @@
                  to wonder why pressing one changed nothing you can see. -->
             <p class="bg-note">{{ (hasPicture() ? 'backgrounds.looks.under' : 'backgrounds.looks.about') | t }}</p>
             <div class="bg-grid">
+              <!-- NOTHING IS A LOOK, and it is the one an install opens with.
+                   First on the list because it is the default, and because a
+                   state you can only have by never having chosen is one you
+                   can never get back to. -->
+              @if (canBare()) {
+                <button class="bg-card" type="button" [class.on]="screenBare()" (click)="bareHalf('screen')">
+                  <span class="bg-card-chip bg-card-chip-none" aria-hidden="true"></span>
+                  <span class="bg-card-name">{{ 'backgrounds.none' | t }}</span>
+                  <span class="bg-card-note">{{ 'backgrounds.none.screen' | t }}</span>
+                </button>
+              }
               @for (look of screenLooks(); track look.id) {
                 <button class="bg-card" type="button" [class.on]="look.active" (click)="wear(look.id)">
                   <span class="bg-card-chip" [style.background]="look.swatch" aria-hidden="true"></span>
@@ -205,6 +216,15 @@
         @if (isOpen('tiles')) {
           <div class="bg-body">
             <div class="bg-grid">
+              <!-- Blank tiles stay blank. The pictures already on tiles are
+                   untouched — this stops the pool handing out more. -->
+              @if (canBare()) {
+                <button class="bg-card" type="button" [class.on]="tilesBare()" (click)="bareHalf('tiles')">
+                  <span class="bg-card-chip bg-card-chip-none" aria-hidden="true"></span>
+                  <span class="bg-card-name">{{ 'backgrounds.none' | t }}</span>
+                  <span class="bg-card-note">{{ 'backgrounds.none.tiles' | t }}</span>
+                </button>
+              }
               @for (group of tileGroups(); track group.id) {
                 <button class="bg-card" type="button" [class.on]="group.active" (click)="wear(group.id)">
                   <span class="bg-card-chip" [style.background]="group.swatch" aria-hidden="true"></span>

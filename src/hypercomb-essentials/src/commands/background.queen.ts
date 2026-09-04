@@ -15,8 +15,10 @@
 //   /background tiles.ember.dots       — pin ONE picture onto every tile
 //   /background tiles.ember.force      — also re-dress this layer's tiles
 //   /background tiles.ember.force.global — … every tile in the hive
+//   /background tiles.off              — stop filling blank tiles
 //   /background tiles.hidden           — the pictures you have taken out
 //   /background tiles.hidden.clear     — put them all back
+//   /background off                    — both halves bare (the ship default)
 //
 // TWO HALVES, SAID OUT LOUD. A theme dresses the screen behind the hive, the
 // pictures that fill blank tiles, or both — and until now the only place that
@@ -149,6 +151,11 @@ function tilesMembers(svc: BackgroundThemeService, path: readonly string[]): rea
         .filter(Boolean).join(' + '),
       swatch: svc.swatch(theme.id) || undefined,
     }))
+    // THE HALF HAS TO BE ABLE TO STOP. `off` was a member of the screen and
+    // not of the tiles, so a group you tried once went on dressing every
+    // blank tile you made afterwards with no word to end it — and it is the
+    // state a new install is in, which you must be able to get back to.
+    out.push({ name: 'off', description: 'stop filling blank tiles', leaf: true })
     const hidden = (get(SUBSTRATE) as SubstrateService | undefined)?.hiddenImages?.() ?? []
     out.push({
       name: 'hidden',
@@ -194,7 +201,7 @@ export class BackgroundQueenBee extends QueenBee {
   override options = [
     'screen', 'screen.<look>', 'screen.picture', 'screen.opacity.<0-100>', 'screen.off',
     'tiles', 'tiles.<group>', 'tiles.<group>.<picture>', 'tiles.<group>.force', 'tiles.<group>.items',
-    'tiles.hidden',
+    'tiles.off', 'tiles.hidden',
   ]
   override examples = [
     { input: '/background', result: 'Opens the Backgrounds window' },
@@ -269,11 +276,9 @@ export class BackgroundQueenBee extends QueenBee {
       return
     }
 
-    if (words[0] === 'off') {
-      const result = await svc.set('off')
-      this.#log(result ?? 'screen cleared')
-      return
-    }
+    // The half's own word bares the half. The bare `/background off` still
+    // bares BOTH — that is the ship default, said in one word.
+    if (words[0] === 'off') { this.#log(await svc.clear('screen')); return }
 
     const theme = svc.theme(words[0])
     if (!theme?.screen) { this.#log(`no screen look named "${words[0]}"`); return }
@@ -284,6 +289,10 @@ export class BackgroundQueenBee extends QueenBee {
 
   async #tiles(svc: BackgroundThemeService, words: readonly string[]): Promise<void> {
     if (words.length === 0) { EffectBus.emit('backgrounds:reveal', { section: 'tiles' }); return }
+
+    // Blank tiles stay blank. The pictures already on tiles are untouched —
+    // this stops the pool handing out more, it does not take any back.
+    if (words[0] === 'off') { this.#log(await svc.clear('tiles')); return }
 
     if (words[0] === 'hidden') {
       const substrate = get(SUBSTRATE) as SubstrateService | undefined

@@ -322,6 +322,10 @@ $accent: #7eb6d6;
   background-size: cover;
   background-position: center;
 }
+// NOTHING, drawn as nothing: the surface the app would show, inside the
+// same frame every other chip wears, so the empty one reads as a choice
+// rather than as a chip that failed to load.
+.bg-card-chip-none { background: var(--md-surface); }
 .bg-card-name { font-size: 0.74em; color: var(--hc-window-ink-loud); }
 .bg-card-note { font-size: 0.64em; color: var(--hc-window-ink-quiet); }
 
