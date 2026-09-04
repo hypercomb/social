@@ -143,6 +143,16 @@ interface GroupState {
   count: number
 }
 
+/** A hole and what it is called. Mirrors HoleName in template-author.drone.ts. */
+interface HoleName {
+  path: string[]
+  key: string
+  meaning: string
+  family: string
+  name: string
+  section: boolean
+}
+
 /** One heading and the chips under it. Derived from the marks every read —
  *  there is no group object anywhere for this to fall out of step with. */
 interface ShelfRow {
@@ -165,6 +175,8 @@ interface TemplateStateMsg {
   levels?: LevelState[]
   assets?: AssetState[]
   groups?: GroupState[]
+  holes?: HoleName[]
+  families?: string[]
   dormant?: boolean
 }
 
@@ -309,6 +321,10 @@ export class LayoutDesignerComponent implements OnDestroy {
   readonly assets = signal<AssetState[]>([])
   /** The words the shelf is wearing, in shelf order. */
   readonly groups = signal<GroupState[]>([])
+  /** Every hole and what it is called. */
+  readonly holes = signal<HoleName[]>([])
+  /** The families this hive can make. */
+  readonly families = signal<string[]>([])
   /** How the active container BEHAVES — direction, wrap, justify, align.
    *  These used to be a second window docked on the far side of the screen;
    *  they are properties of the selected container, so they are in the
@@ -510,6 +526,46 @@ export class LayoutDesignerComponent implements OnDestroy {
     return path[level.path.length] ?? null
   })
 
+  /**
+   * THE HOLE THE POINTER IS ON, if any.
+   *
+   * The map already selects a pane; this is that pane as the hole it is. It is
+   * what makes naming reachable from the surface where the shape is being
+   * made — the other window is the deep view of the same hole, not the only
+   * door to it.
+   */
+  readonly focusedHole = computed<HoleName | null>(() => {
+    const level = this.selectedLevel()
+    const pane = this.focusedPane()
+    if (!level || !pane) return null
+    const want = [...level.path, pane].join('/')
+    return this.holes().find(hole => hole.path.join('/') === want) ?? null
+  })
+
+  /**
+   * THE FOCUSED HOLE AS A LIST OF NONE OR ONE.
+   *
+   * Solely so the naming row can be written with `@for ... track path`: `@if`
+   * REUSES the input across two different holes, and two unnamed holes both
+   * bind `value=""`, so the binding does not change and half-typed text follows
+   * the pointer onto the next pane. Tracking by path destroys the field with
+   * the hole it belonged to.
+   */
+  readonly focusedHoles = computed<HoleName[]>(() => {
+    const hole = this.focusedHole()
+    return hole ? [hole] : []
+  })
+
+  /** Which family a new name is minted in. Follows the hole when it has one,
+   *  and otherwise stays where the participant last put it — naming three
+   *  holes in a row is naming them in one family nearly every time. */
+  readonly namingFamily = signal('')
+
+  /** The family the control should show: the hole's own, else the remembered
+   *  one, else whatever the hive offers first. */
+  readonly holeFamily = computed(() =>
+    this.focusedHole()?.family || this.namingFamily() || this.families()[0] || 'site')
+
   /** TYPE ONE — the container's own flexbox measurements. */
   readonly containerMeasures = computed(() =>
     (this.selectedLevel()?.variables ?? []).filter(v => CONTAINER_MEASURES.includes(v.name)))
@@ -613,6 +669,8 @@ export class LayoutDesignerComponent implements OnDestroy {
       this.levels.set(state?.levels ?? [])
       this.assets.set(state?.assets ?? [])
       this.groups.set(state?.groups ?? [])
+      this.holes.set(state?.holes ?? [])
+      this.families.set(state?.families ?? [])
       this.dormant.set(state?.dormant === true)
       this.#container.set(String(state?.container ?? ''))
       // Re-announce on every state change: the level is the same, but what it
@@ -680,6 +738,14 @@ export class LayoutDesignerComponent implements OnDestroy {
 
   // ── the pane ──────────────────────────────────────────────────────
 
+  /** What the hole at this path is FOR, or empty. One lookup, so the two
+   *  pictures the designer draws of the same container cannot disagree about
+   *  the same hole. */
+  #meaningAt(path: readonly string[]): string {
+    const want = path.join('/')
+    return this.holes().find(hole => hole.path.join('/') === want)?.meaning ?? ''
+  }
+
   /** Wire every hole the arrangement declares. The only contract is the
    *  attributes the composer writes, so this never has to know a layout. */
   #bindHoles(host: HTMLElement, cell: string, picked: string): void {
@@ -695,7 +761,16 @@ export class LayoutDesignerComponent implements OnDestroy {
         node.classList.add('is-self')
         node.appendChild(face('ld-hole-fill', cell || 'this page'))
       } else if (!node.querySelector('[data-hc-container]')) {
-        node.appendChild(face('ld-hole-name', path.at(-1) ?? ''))
+        // WHAT IT IS FOR, where it has been said; the hole's key otherwise.
+        // It drew the key unconditionally, so naming a hole `site:masthead`
+        // changed nothing on either picture the designer draws of the same
+        // container — the answer lived only in the other window, and the
+        // surface you were working on stayed silent about the thing you had
+        // just told it.
+        const named = this.#meaningAt(path)
+        const label = face(named ? 'ld-hole-name is-named' : 'ld-hole-name',
+          named || (path.at(-1) ?? ''))
+        node.appendChild(label)
       }
 
       const enter = (event: DragEvent): void => {
@@ -953,7 +1028,10 @@ export class LayoutDesignerComponent implements OnDestroy {
       const key = node.getAttribute('data-hc-hole') ?? ''
       node.classList.add('ld-map-pane')
       if (key === pane) node.classList.add('is-picked')
-      node.setAttribute('title', key)
+      // The same answer as the workspace hole: what it is for, else its key.
+      const named = this.#meaningAt([...(this.selectedLevel()?.path ?? []), key])
+      if (named) node.classList.add('is-named')
+      node.setAttribute('title', named || key)
 
       const pick = (event: MouseEvent): void => {
         event.stopPropagation()
@@ -1101,6 +1179,35 @@ export class LayoutDesignerComponent implements OnDestroy {
     // The lane places a window by measuring the ones already in it, and one
     // has just appeared or gone. Nothing else knows that but this.
     EffectBus.emit('viewport:inset-poll', {})
+  }
+
+  /**
+   * NAME THE HOLE THE POINTER IS ON.
+   *
+   * The same intent the targets window emits, so a hole has ONE write path
+   * however it was named. An empty name unnames it, which is the same control
+   * doing the same thing rather than a second button for the opposite act.
+   */
+  nameHole(family: string, name: string): void {
+    const hole = this.focusedHole()
+    if (!hole) return
+    const wanted = String(name ?? '').trim()
+    this.namingFamily.set(family)
+    EffectBus.emit(wanted ? 'targets:name' : 'targets:clear', {
+      segments: this.segments(),
+      path: hole.path,
+      family,
+      name: wanted,
+    })
+  }
+
+  /** Enter commits, Escape gives the pane back the keyboard. */
+  nameKey(event: KeyboardEvent, family: string, name: string): void {
+    event.stopPropagation()
+    if (event.key === 'Escape') { (event.target as HTMLElement)?.blur(); return }
+    if (event.key !== 'Enter') return
+    event.preventDefault()
+    this.nameHole(family, name)
   }
 
   /** Show what has been put away, or stop. */

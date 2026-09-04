@@ -312,6 +312,12 @@ async function divisionRelationName(wholeSegments: readonly string[]): Promise<s
 /**
  * Put this part at position `order` in the division.
  *
+ * EXPORTED because seating is not only something a distribution does to parts
+ * it just made. A hole in a layout says what belongs in it, and answering that
+ * with an artifact the hive already has is the same act at the same address:
+ * the part wears the division's mark at the slot's index. There is one seating
+ * write, and this is it.
+ *
  * Deliberately NOT `ensureEnrollment`: that derives the next free position by
  * walking the hive, which is the right answer when a participant joins a set
  * and the wrong one here — the position is already known, it is the slot the
@@ -319,7 +325,7 @@ async function divisionRelationName(wholeSegments: readonly string[]): Promise<s
  * already enrolled at another position is re-seated, because the division just
  * decided where it goes.
  */
-async function seat(
+export async function seat(
   partSegments: readonly string[],
   groupSig: string,
   meaning: string,
