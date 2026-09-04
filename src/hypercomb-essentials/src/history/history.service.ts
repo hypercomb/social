@@ -1585,7 +1585,7 @@ export class HistoryService {
       if (!isNaN(n) && n > max) max = n
     }
     // ARCHIVING MUST NOT REWIND THE COUNTER. `archiveEntries` (/flatten,
-    // /collapse-history) moves markers out of the bag, so a LIVE-ONLY scan
+    // the retired /collapse-history) moves markers out of the bag, so a LIVE-ONLY scan
     // restarts the sequence at 00000001 — and union resolution ("the highest
     // marker across sources wins") then resurrects the archived chain from
     // any replica. The high-water bucket is forward-only: it holds the
@@ -4021,7 +4021,11 @@ export class HistoryService {
    * subdirs are drain sources — absorbed into this pool by the self-clean,
    * never written again.)
    *
-   * USED ONLY BY /collapse-history AND /flatten. These are the rare
+   * Its two callers — /collapse-history and /flatten (born /compact) — were
+   * RETIRED 2026-09-04: archiving the middle of a history is the one act
+   * that publishes less than the participant had. Kept, callerless, while
+   * its hardening spec (archive-entries-guard.spec.ts) is in flight; it is
+   * not a door any behaviour opens. These were the rare
    * paths that wipe non-head markers in bulk; everywhere else
    * (single-entry UI delete, mergeEntries) stays on the hard-delete
    * primitive `removeEntries`.

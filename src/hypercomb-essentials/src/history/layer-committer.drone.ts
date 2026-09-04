@@ -809,7 +809,12 @@ export class LayerCommitter {
       if (update) {
         for (const [slot, raw] of Object.entries(update.layer)) {
           if (slot === 'name') continue
-          if (!Array.isArray(raw)) continue
+          // A non-array value is a SCALAR slot — the installed `cells: <sig>`
+          // pointer, inline metadata — and rides through verbatim (`null`
+          // drops it). This loop used to skip it, so a pasted or adopted layer
+          // at a fresh location committed without its child pointer: the
+          // third coercion site the check-5 fix left behind (adjudication).
+          if (!Array.isArray(raw)) { if (raw !== undefined) machine.setScalar(slot, raw); continue }
           let sigs: string[]
           if (nameSlots.has(slot)) {
             // Snapshot prior (name→live sig) before the set so a paste / adopt

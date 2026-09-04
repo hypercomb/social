@@ -31,8 +31,6 @@ const COMPUTED_MEANING = 'computed:genome'
 const COMPUTED_SUBKEY = 'active-genome'
 const QUEUE_SUBKEY = 'active-genome-queue'
 const PASSIVE_QUEUE_KEY = 'hc:active-genome:pending'
-const DEBOUNCE_MS = 15_000
-const RETRY_MS = 30_000
 const SIG_RE = /^[0-9a-f]{64}$/
 const INDICATOR_KEY = 'genome-weight'
 
@@ -87,8 +85,6 @@ export class ActiveGenomeService {
   #recordSig: string | null = null
   #dirty = true
   #generation = 0
-  #timer: ReturnType<typeof setTimeout> | null = null
-  #idleHandle: number | null = null
   #foregroundActive = false
   #passiveIntent = false
   #refreshing: Promise<ActiveGenomeRecord | null> | null = null
@@ -150,30 +146,33 @@ export class ActiveGenomeService {
     return this.#refreshing
   }
 
-  #schedule(delay = DEBOUNCE_MS): void {
-    if (!this.#passiveIntent || this.#foregroundActive || this.#idleHandle !== null || this.#timer !== null) return
-    const scope = globalThis as typeof globalThis & {
-      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
-      cancelIdleCallback?: (handle: number) => void
-    }
-    const run = () => {
-      this.#timer = null
-      this.#idleHandle = null
-      if (this.#foregroundActive || !this.#passiveIntent) return
-      this.#passiveIntent = false
-      void this.refresh()
-    }
-    if (scope.requestIdleCallback) this.#idleHandle = scope.requestIdleCallback(run, { timeout: delay })
-    else this.#timer = setTimeout(run, delay)
+  /**
+   * ARM, NEVER SCHEDULE. The census is a derived cache (`computed:genome`,
+   * seeded `index`), and optimize-phase.md says where a derived cache is
+   * minted: the processor's coalesced idle pass, and nowhere else. This used
+   * to run its own requestIdleCallback off content:wrote and history:* — a
+   * second scheduler beside the phase (write-conformance check 7, and the
+   * adjudication's one incomplete fix in this area). Now an invalidation only
+   * records INTENT; `optimize()` below is where the work happens.
+   */
+  #schedule(): void {
+    this.#passiveIntent = true
+  }
+
+  /**
+   * THE OPTIMIZE HOOK. The processor enumerates every IoC registration with
+   * an `optimize` and awaits it after `synchronize` (core/hypercomb.ts). A
+   * pass with nothing armed, or with the foreground busy, costs nothing; a
+   * refresh that cannot settle re-arms itself and the next pass tries again.
+   */
+  public readonly optimize = async (): Promise<void> => {
+    if (!this.#passiveIntent || this.#foregroundActive) return
+    this.#passiveIntent = false
+    await this.refresh()
   }
 
   #foregroundStarted(): void {
     this.#foregroundActive = true
-    const scope = globalThis as typeof globalThis & { cancelIdleCallback?: (handle: number) => void }
-    if (this.#idleHandle !== null) scope.cancelIdleCallback?.(this.#idleHandle)
-    if (this.#timer !== null) clearTimeout(this.#timer)
-    this.#idleHandle = null
-    this.#timer = null
   }
 
   #foregroundSettled(): void {
@@ -209,7 +208,7 @@ export class ActiveGenomeService {
       if (!result.record) {
         this.#dirty = true
         this.#publishState()
-        this.#schedule(RETRY_MS)
+        this.#schedule()
         return this.#record
       }
       this.#record = result.record

@@ -17,16 +17,59 @@ correct or already wrong.
 
 ## How this was produced, honestly
 
-Six parallel sweeps read the tree by area and classified 174 write sites. A
-second phase — whole-file adjudication of every suspect site, to refute the
-census's inflations — **died on a usage limit after 6 of 51 files** and never
-produced verdicts. So:
+Six parallel sweeps read the tree by area and classified 174 write sites. The
+second phase — whole-file adjudication of every site against the current
+source — died on a usage limit the first time and **ran to completion on
+2026-09-04 (six readers, one per area; verdicts in
+`write-conformance.adjudication.json`, every site once)**:
 
-- The classifications below are **the census's, unadjudicated**. Each sweep was
-  told to refute freely and did (the "none" bucket is largely refutations), but
-  no second reader checked them.
-- The number is therefore a **ceiling on deviations**, not a floor. Expect some
-  to be refuted on a full read; expect a few misses in the other direction.
+| verdict | sites |
+|---|---|
+| confirmed | 121 |
+| fixed since the census, fix present and sound | 34 |
+| refuted (reclassified) | 11 |
+| fix incomplete | 5 |
+| cannot locate (deleted deliberately) | 3 |
+
+Corrected classes: deviation 57 · wrap-up 64 · break-apart 29 ·
+legacy-conforming 14 · unclear 10. The deviation count did not move: eleven
+refutations were bookkeeping (sites with no write at all had been counted as
+conforming; notes and the substrate override are legacy-conforming, not
+deviations), offset by the readers' own finds. **What the readers found that
+the census had not:**
+
+- `layer-committer.drone.ts` `#importTree` — a third scalar-dropping site the
+  check-5 fix missed (paste / adopt at a fresh location lost a scalar child
+  pointer). *Fixed 2026-09-04 with this adjudication.*
+- `active-genome.service.ts` — the check-6 half was closed by the reader fix,
+  the check-7 half was not: the service ran its own idle scheduler beside the
+  optimize phase. *Fixed 2026-09-04: it arms intent and exposes `optimize()`.*
+- `substrate.service.ts` `#saveRegistry` — writes a member literally named
+  `registry` into `substrate:sources`: the same shape as the four pointer
+  copies. **Open.**
+- `packed-interchange.ts` `transfer` — copies bytes under a 64-hex name lifted
+  from the source listing without hashing them (check 1). No importer today.
+  **Open.**
+- `publish-branch.ts` step 1 — `enablePublicHost()` unconditionally, even over
+  a prior explicit opt-out (check 10). **Owner question:** is a publish the
+  gesture that grants the standing public host?
+- `packed-collect.ts` — the collector the census actually cited for the
+  four-hat bug still credits every pool member's name and bytes with no
+  pool-kind gate; under the packed store the reader fix does not reach it.
+  **Open** (the OPFS reader is fixed).
+- `collapse-history.queen.ts` exists — an earlier note here said it did not.
+  *Retired 2026-09-04 together with `/flatten` (born `/compact`): archiving the
+  middle of a history is the one act that publishes less than the participant
+  had.* `archiveEntries` stays, callerless, while its hardening spec lands.
+- `tutorial-provenance.ts` — the fix keys by the location's signature, which
+  is the path-hashed address the molecule model retires; an improvement, not
+  the parent-layer-sig key proposed. Recorded, not reopened.
+- Residual nits, recorded not counted: `LayerMachine.apply` drops a scalar
+  before learning the list op was a no-op; `#opportunisticMigrateMarker`
+  still rewrites marker files from a read path; `replicate.js`'s directory
+  refusal fails the whole job rather than one atom; `layer-graph-resolver`
+  and `publishEvent` are dead code the doc said to delete and nobody has.
+
 - Fixes are recorded inline as **FIXED (commit)** and left in place so the
   list stays a census, not a to-do. 2026-09-04: the one catastrophic item,
   the four-hat byte-scan bug, three of the four pointer copies, and the four
@@ -154,9 +197,9 @@ states scalar slots exist. *Fix:* carry non-array slots through verbatim.
 
 **Deletion — check 2.** *gcLegacyHistory FIXED 2026-09-04: the shadow test
 compares bytes, so a diverged legacy marker keeps the folder. The
-`collapse-history.queen.ts:76` site could not be located — no such file
-exists; the nearest bag-removing loop, `sweep.queen.ts`, copies each entry
-verified before it removes it. Recorded as not reproduced.*
+`collapse-history.queen.ts:76` site: an earlier note here wrongly said the
+file did not exist. It did, unchanged; the adjudication caught it. The
+behaviour is RETIRED 2026-09-04 with /flatten.*
 - `history.service.ts:559` `gcLegacyHistory` — the shadow test is by *name*
   only and `#copyBagInto` never overwrites, so on a same-name divergence the
   legacy copy is never copied and then destroyed. *Fix:* compare content, or

@@ -96,5 +96,8 @@ describe('LayerMachine scalar slots — check 5 on the canonical write surface',
     expect(src.includes("delta: { kind: 'layer', layer: slots, scalars, nameSlots }")).toBe(true)
     expect(src.includes('machine.setScalar(slot, value)')).toBe(true)
     expect(src.includes('drop non-array values')).toBe(false)
+    // and the IMPORT path — paste / adopt — carries them too
+    expect(src.includes('if (!Array.isArray(raw)) { if (raw !== undefined) machine.setScalar(slot, raw); continue }')).toBe(true)
+    expect(src.includes('if (!Array.isArray(raw)) continue')).toBe(false)
   })
 })
