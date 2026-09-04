@@ -50,6 +50,14 @@ export default defineConfig({
     // `.claude/**` keeps agent worktrees (full repo copies under
     // .claude/worktrees/) out of collection — their stale spec copies
     // re-run against old code and fail the suite from the main tree.
-    exclude: ['node_modules', 'dist', '**/node_modules/**', '**/.claude/**'],
+    //
+    // `.tmp/**` is the same failure one directory over. `AGENTS.md` names
+    // repo-root `.tmp/<tool>-<id>/` as the sanctioned scratch space and
+    // `.gitignore` ignores it, so git never sees what lands there — but
+    // `include: ['**/*.spec.ts']` did, and a throwaway `probe.spec.ts` written
+    // by an agent verifying a claim then failed the suite from a path no
+    // `git status` would ever show. Ignored by git and collected by the runner
+    // is the worst of both: invisible AND load-bearing.
+    exclude: ['node_modules', 'dist', '**/node_modules/**', '**/.claude/**', '**/.tmp/**'],
   },
 })
