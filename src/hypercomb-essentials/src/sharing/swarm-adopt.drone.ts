@@ -55,7 +55,7 @@ import {
   isAdoptTombstoned,
 } from './adopted-roots.js'
 import { setDivergedLabels, clearPeerDivergence } from './peer-divergence.js'
-import { allows as intakeAllows, allowsHere } from '../pheromones/intake-filter.js'
+import { allows as intakeAllows } from '../pheromones/intake-filter.js'
 
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
@@ -573,6 +573,30 @@ export class SwarmAdoptDrone extends Drone {
       return true
     }
 
+    // THE INTAKE GATE, and it belongs HERE — on the single acquisition
+    // primitive — rather than on one of its callers.
+    //
+    // It sat on `#adoptPageTile`, which is one of FOUR paths into this
+    // function. The others are the wand (`#onWand`, the only take a finger can
+    // perform), the retry, and the child fold of an adopted branch — all of
+    // them arriving content, none of them gated. Worse, the wand's own
+    // `wandEligible` check is SYNCHRONOUS and so can only ask the location
+    // carrier, which holds nothing for a peer's tile: the half that can
+    // actually refuse foreign bytes was exactly the half that path skipped. Two
+    // takes of the same bytes disagreed — refused through the adopt panel,
+    // admitted by a click.
+    //
+    // Below the held-here return on purpose: a tile already in the hive is not
+    // arriving, and re-judging it would refuse a SYNC of the participant's own
+    // content. The gate is for what is coming in.
+    if (!await intakeAllows({
+      segments,
+      ...(SIG_RE.test(layerSig) ? { sig: layerSig } : {}),
+    })) {
+      this.#visitStage('filtered', { name })
+      return false
+    }
+
     // Viewing history — the committer refuses rewound writes; don't try.
     // state.rewound is the canonical test (same as #doCommitBranch) —
     // currentLayerSig is a POSITION and can be set in perfectly normal
@@ -712,12 +736,20 @@ export class SwarmAdoptDrone extends Drone {
     let inZone = false
     try { inZone = localStorage.getItem('hc:mesh-public') === 'true' } catch { /* private default */ }
     if (!inZone) return false
-    // Intake gate, sync half. This runs on POINTERDOWN, which is why it asks
-    // the location carrier only — the same reason the rest of this predicate
-    // is synchronous. A tile the participant's interest excludes is not
-    // eligible for a take, so the press falls through to selection instead of
-    // adopting something they filtered out.
-    if (!allowsHere({ segments: [...this.#currentSegments(), name] })) return false
+    // NO INTAKE GATE HERE, deliberately — it was added and is now removed.
+    //
+    // `wandEligible` is not an adoption predicate. It has three consumers:
+    // SelectionInputDrone asks it on POINTERDOWN (is this press a take, and
+    // must select stand down?), and TileOverlayDrone asks it both at the entry
+    // choke point and to paint the TAKEABLE SHADE. Filtering here therefore
+    // changed navigation and how tiles LOOK, which is far beyond deciding what
+    // enters the hive — a tile would have quietly stopped reading as takeable
+    // and the press would have fallen through to selection with no explanation.
+    //
+    // It could not have done the job anyway: this predicate is synchronous by
+    // contract, so it can only read the location carrier, which holds nothing
+    // for a peer's tile. The gate that can actually refuse foreign bytes is the
+    // union read in `#foldPageTile`, at the commit.
     return this.#peerEntryFor(name) !== null
   }
 
@@ -883,20 +915,11 @@ export class SwarmAdoptDrone extends Drone {
       })
       return true
     }
-    // Intake gate, async half — THE COMMIT, and the authoritative one. Unlike
-    // the sync check in `wandEligible` this reads the full union, so a mark
-    // carried only by the exact bytes (and therefore invisible to a
-    // location-keyed read) still refuses the take. One pass per adopt, so the
-    // signature read is affordable here in a way it never is at render.
-    const gateEntry = opts?.entry ?? this.#peerEntryFor(label, pubkey)
-    const gateSig = String(gateEntry?.['layerSig'] ?? '').trim().toLowerCase()
-    if (!await intakeAllows({
-      segments: [...at, label],
-      ...(SIG_RE.test(gateSig) ? { sig: gateSig } : {}),
-    })) {
-      this.#rowOutcome(label, undefined, false, `didn't keep "${label}" — it carries a mark you filter out`)
-      return false
-    }
+    // The intake gate lives in `#foldPageTile` — the acquisition primitive all
+    // four take paths share. It ran here as well, on an entry resolved BEFORE
+    // its own await and then thrown away: the offer was re-resolved afterwards,
+    // so the gate could judge one entry while a different one was committed.
+    // One gate, on the primitive, judging the entry it is actually given.
     const entry = opts?.entry ?? this.#peerEntryFor(label, pubkey)
     if (!entry) {
       this.#rowOutcome(label, undefined, false, `couldn't keep "${label}" — it's no longer offered here`)

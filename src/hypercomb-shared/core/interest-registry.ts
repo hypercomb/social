@@ -165,6 +165,12 @@ export class InterestRegistry extends EventTarget {
     return false
   }
 
+  /** Did a load actually land? False after an attempt that found no Store —
+   *  the registry keeps its retry open in that case, and the intake gate uses
+   *  this to know it must ask again rather than latching a load that never
+   *  happened. */
+  isLoaded(): boolean { return this.#loaded }
+
   async ensureLoaded(): Promise<void> {
     if (this.#loaded) return
     if (this.#loading) return this.#loading
@@ -217,9 +223,23 @@ export class InterestRegistry extends EventTarget {
     await this.ensureLoaded()
     const store = this.#store()
     if (!store) return false
-    await this.#readMarks(store, sig.toLowerCase())
-    if (!this.#marks.has(sig.toLowerCase())) return false
-    this.#file.interests[name.trim()] = { sig: sig.toLowerCase() }
+    const key = sig.toLowerCase()
+    // THE STORE IS THE ONLY WITNESS THAT THE BYTES EXIST.
+    //
+    // `#marks` is a resolution cache, not evidence of storage: `signatureOf()`
+    // fills it for a set it deliberately did NOT write (deriving an identity is
+    // not storing one — that is the whole reason the two methods are separate).
+    // `#readMarks` then returns early on a cache hit, so this guard used to
+    // accept a signature nothing had ever stored. The interest persisted, the
+    // next load resolved it to an EMPTY set, and a DROP role pointing at it
+    // silently became no filter — fail-open on exactly the half that refuses.
+    //
+    // Dropping the cached entry first forces the read to reach the store, which
+    // is the only thing that can answer the question actually being asked.
+    this.#marks.delete(key)
+    await this.#readMarks(store, key)
+    if (!this.#marks.has(key)) return false
+    this.#file.interests[name.trim()] = { sig: key }
     await this.#save()
     return true
   }

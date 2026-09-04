@@ -49,6 +49,9 @@ const get = <T,>(key: string): T | undefined => (window as any).ioc?.get?.(key) 
 type RegistryLike = {
   allows(marks: readonly string[]): boolean
   ensureLoaded?(): Promise<void>
+  /** Did the load actually land? Distinguishes "read an empty registry" from
+   *  "never got to read", which is what tells `warm` whether to retry. */
+  isLoaded?(): boolean
 }
 
 const registry = (): RegistryLike | undefined =>
@@ -74,14 +77,26 @@ const registry = (): RegistryLike | undefined =>
  */
 const warmed = new WeakMap<RegistryLike, Promise<void>>()
 const warm = (reg: RegistryLike): Promise<void> => {
-  let started = warmed.get(reg)
-  if (!started) {
-    // Swallows: a filter that cannot load must not break intake, and the
-    // empty sets it falls back to already allow everything.
-    started = Promise.resolve(reg.ensureLoaded?.()).then(() => { /* loaded */ }, () => { /* cold */ })
-    warmed.set(reg, started)
-  }
-  return started
+  const started = warmed.get(reg)
+  if (started) return started
+  // Swallows: a filter that cannot load must not break intake, and the empty
+  // sets it falls back to already allow everything.
+  const attempt = Promise.resolve(reg.ensureLoaded?.()).then(() => { /* loaded */ }, () => { /* cold */ })
+  warmed.set(reg, attempt)
+  // A FAILED ATTEMPT IS NOT A LOAD, so it must not be remembered as one.
+  //
+  // The registry deliberately keeps its own retry open: `#load` returns early
+  // without setting `#loaded` when the Store is not in IoC yet, so a later
+  // `ensureLoaded()` tries again. Caching the ATTEMPT here closed that door —
+  // the first intake that happened to beat Store registration latched a
+  // resolved promise into this map and the registry was never asked again,
+  // leaving the filter inert for the rest of the session. Dropping the entry
+  // on failure hands the retry back to the registry, which is the only thing
+  // that knows whether it actually loaded.
+  void attempt.then(() => {
+    if (reg.isLoaded?.() === false) warmed.delete(reg)
+  })
+  return attempt
 }
 
 /** What the gate is deciding about. Exactly `marksOf`'s target, so a caller

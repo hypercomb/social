@@ -155,6 +155,44 @@ describe('intake filter', () => {
       expect(reg.calls).toBe(1)
     })
 
+    // The registry keeps its own retry open when the Store is not in IoC yet.
+    // Caching the ATTEMPT here closed that door: one intake beating Store
+    // registration left the filter inert for the whole session.
+    it('a load that did not land is retried, not latched', async () => {
+      let loaded = false
+      const reg = {
+        calls: 0,
+        allows: (marks: readonly string[]) => !loaded || !marks.includes('malicious'),
+        isLoaded: () => loaded,
+        ensureLoaded: async () => {
+          reg.calls++
+          await Promise.resolve()
+          if (reg.calls >= 2) loaded = true      // the Store showed up late
+        },
+      }
+      ;(window as any).__reg = { '@hypercomb.social/InterestRegistry': reg }
+      locationMarks.set('a/b', ['malicious'])
+
+      expect(await allows({ segments: ['a', 'b'] })).toBe(true)   // cold, allowed
+      expect(reg.calls).toBe(1)
+      expect(await allows({ segments: ['a', 'b'] })).toBe(false)  // asked again, now warm
+      expect(reg.calls).toBe(2)
+    })
+
+    it('stops asking once the load has landed', async () => {
+      const reg = {
+        calls: 0,
+        allows: () => true,
+        isLoaded: () => true,
+        ensureLoaded: async () => { reg.calls++; await Promise.resolve() },
+      }
+      ;(window as any).__reg = { '@hypercomb.social/InterestRegistry': reg }
+      await allows({ segments: ['a'] })
+      await allows({ segments: ['b'] })
+      await allows({ segments: ['c'] })
+      expect(reg.calls).toBe(1)
+    })
+
     it('a registry that cannot load still allows — intake never breaks on it', async () => {
       ;(window as any).__reg = {
         '@hypercomb.social/InterestRegistry': {

@@ -226,6 +226,18 @@ describe('interest registry — identity', () => {
     expect(author.marks('theirs')).toEqual(['malicious'])
   })
 
+  // signatureOf() DERIVES an identity without storing it, and it caches the
+  // marks so the sig can be resolved for display. adopt() must not read that
+  // cache as proof the bytes exist, or it persists an interest that resolves to
+  // an empty set on the next load — silently disarming a DROP role.
+  it('refuses a signature that was only DERIVED, never minted', async () => {
+    const reg = new InterestRegistry()
+    const derived = await reg.signatureOf(['malicious'])   // no bytes written
+    expect(derived).toBeTruthy()
+    expect(await reg.adopt('borrowed', derived!)).toBe(false)
+    expect(reg.names).not.toContain('borrowed')
+  })
+
   it('refuses a signature that resolves to nothing', async () => {
     const reg = new InterestRegistry()
     expect(await reg.adopt('nope', 'a'.repeat(64))).toBe(false)

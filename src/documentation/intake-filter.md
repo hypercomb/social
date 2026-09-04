@@ -2,7 +2,7 @@
 
 **Status: BUILT 2026-09-04 — and INERT BY DESIGN until a participant expresses
 an interest.** Selection was already built; the mark gate, the `InterestRegistry`
-behind it and all four call sites now ship. What does not exist yet is a
+behind it and all three gate sites now ship. What does not exist yet is a
 surface for SAYING which marks you want, so every verdict today is the
 empty-set default: allow. That is deliberate — a filter that started dropping
 content on upgrade would be the worst version of this feature.
@@ -82,9 +82,9 @@ that addresses what hashing cannot.
 
 `marksOf(target)`
 ([pheromone-marks.ts:132](../hypercomb-essentials/src/pheromones/pheromone-marks.ts:132))
-had exactly one caller — the file that defines it. It now has a consumer:
-`pheromones/intake-filter.ts`, applied at four call sites. At each intake point,
-before a record is kept:
+is the union read. It now has a second consumer in
+`pheromones/intake-filter.ts`, applied at three gate sites. At each intake
+point, before a record is kept:
 
 1. read the marks the content wears
 2. drop if it carries a mark the participant excluded (DROP wins, always)
@@ -131,15 +131,28 @@ The intake points do not determine the gate's shape. **The carrier does.**
 Only the sig half is async. That single fact decides everything below, and it
 means most of the gate needs no new machinery at all.
 
-Each intake point turns out to have **two** decision moments, and the codebase
-has already taken a position on both:
+Where each gate sits, and which carrier it can afford to ask:
 
 | Site | Moment | Rate | Identity in hand | Gate |
 |---|---|---|---|---|
-| [published-pools.ts:195](../hypercomb-essentials/src/sharing/published-pools.ts:195) | commit | ≤64 per domain/meaning/session | `sig` | `await marksOf({ sig })` |
-| [swarm.drone.ts:1545](../hypercomb-essentials/src/sharing/swarm.drone.ts:1545) tile source | render | every render of the location | `locKey/name`, `peerPubkey` | **sync** `tagsForSegments` |
-| [swarm-adopt.drone.ts:708](../hypercomb-essentials/src/sharing/swarm-adopt.drone.ts:708) `wandEligible` | mid-gesture (POINTERDOWN) | per press | `label` | **sync** `tagsForLabel` |
-| [swarm-adopt.drone.ts:858](../hypercomb-essentials/src/sharing/swarm-adopt.drone.ts:858) `#adoptPageTile` | commit | per adopt | `segments` + `layerSig` | `await marksOf({ segments, sig })` |
+| [published-pools.ts:303](../hypercomb-essentials/src/sharing/published-pools.ts:303) | commit | ≤64 per domain/meaning/session | `sig` | `await marksOf({ sig })` |
+| [swarm.drone.ts:1566](../hypercomb-essentials/src/sharing/swarm.drone.ts:1566) tile source | render | every render of the location | `locKey/name` | **sync** `tagsForSegments` |
+| [swarm-adopt.drone.ts:592](../hypercomb-essentials/src/sharing/swarm-adopt.drone.ts:592) `#foldPageTile` | commit | per take, every path | `segments` + `layerSig` | `await marksOf({ segments, sig })` |
+
+**The commit gate is on the PRIMITIVE, not on a caller.** `#foldPageTile` is the
+single acquisition function, and four paths reach it: the wand (the only take a
+finger can perform), the adopt panel, the retry, and the child fold of an
+adopted branch. The gate first sat on `#adoptPageTile` — one of those four — so
+a signature-carried mark refused a take through the panel and admitted the same
+bytes through a click. It also sits BELOW that function's own held-here return,
+because a tile already in the hive is not arriving and re-judging it would
+refuse a sync of the participant's own content.
+
+`wandEligible` deliberately carries NO gate. It briefly did, and that was a
+mistake: it has three consumers — pointerdown selection, the entry choke point,
+and the *takeable shade* — so filtering there changed navigation and how tiles
+look, well beyond deciding what enters the hive. Being synchronous it could
+only read the location carrier anyway, which holds nothing for a peer's tile.
 
 ### The rule that falls out
 
@@ -156,9 +169,11 @@ follow rather than invent:
   `swarmFilterSelection()` — both sync set lookups, and the comment says why:
   *"Path-keyed is sync (no `sign()` needed) and matches the user-visible
   identity of the tile."*
-- `wandEligible` is documented as synchronous on purpose, so both callers can
+- `wandEligible` is documented as synchronous on purpose so its callers can
   decide mid-gesture — *"which keeps the whole check off the async layer
-  reads."*
+  reads."* It is the precedent for the render gate's shape, and the reason no
+  intake gate belongs in it: a predicate that cheap cannot ask the only carrier
+  that knows anything about a peer's bytes.
 
 Adding `await marksOf({ sig })` inside the tile source would put one OPFS read
 per peer tile on every render of the location. That is the one way to get this
@@ -171,8 +186,8 @@ wrong.
   no restructuring.
 - **swarm tile source** — one more sync `.filter()` beside the two that are
   already there. No new machinery.
-- **adopt** — the sync half is one more condition in `wandEligible`; the async
-  half sits where `layerSig` is already resolved.
+- **adopt** — one gate inside `#foldPageTile`, where `segments` and `layerSig`
+  are already resolved and every take path passes through.
 - **sig marks at render time** — the only piece needing anything new: a
   pre-resolved warm set, modelled on `SwarmFilterService` (in-memory,
   session-only, EffectBus change events). Worth deferring until something
@@ -286,8 +301,10 @@ default set that opens the cycle and that the participant can replace entirely.
 
 ## Owed
 
-- **The gate itself** — four call sites, traced above. Needs nothing new except
-  at one of them (sig marks at render time).
+- **Marks that travel with content.** The ceiling stated above: both carriers
+  are participant-local, so a KEEP set can only narrow what you already hold and
+  a DROP cannot fire on a mark nobody local recorded. Community deposits
+  arriving alongside the bytes are what would lift it.
 - **A surface for editing an interest.** The registry, the gate and the four
   call sites are built; nothing yet lets a participant SAY which marks they
   want. Until something does, every verdict is the empty-set default (allow),
