@@ -80,10 +80,10 @@ that addresses what hashing cannot.
 
 ## Intake: the mark gate
 
-`marksOf(target)`
-([pheromone-marks.ts:132](../hypercomb-essentials/src/pheromones/pheromone-marks.ts:132))
-is the union read. It now has a second consumer in
-`pheromones/intake-filter.ts`, applied at three gate sites. At each intake
+`sigMarksOf(sig)`
+([pheromone-marks.ts](../hypercomb-essentials/src/pheromones/pheromone-marks.ts))
+reads the marks a participant has put on exact BYTES. It has a second consumer
+in `pheromones/intake-filter.ts`, applied at three gate sites. At each intake
 point, before a record is kept:
 
 1. read the marks the content wears
@@ -92,11 +92,10 @@ point, before a record is kept:
    in which case everything that was not dropped is kept
 
 **UNKNOWN IS NOT ABSENT, and this is the difference between a filter and a
-blackout.** Both carriers are participant-LOCAL: `tagsForSegments` reads an
-in-memory index built from this participant's own decoration scans, and
-`sigMarksOf` reads this participant's own `pheromones:content` pool. Content
-that has just arrived from somebody else has an entry in neither, so it presents
-**zero marks** — not "no marks I want", but "no marks I have heard of yet".
+blackout.** The carrier is participant-LOCAL: `sigMarksOf` reads this
+participant's own `pheromones:content` pool. Content that has just arrived from
+somebody else has no record there, so it presents **zero marks** — not "no marks
+I want", but "no marks I have heard of yet".
 
 So a KEEP set may only ever exclude something that CARRIES marks and carries
 none of yours. Judged the other way, naming a single interest would refuse every
@@ -118,80 +117,113 @@ first arrival of every session would slip past a filter that was actually set).
 Without that kick the sets stay empty for the life of the session and the
 filter ships present, tested, and never once refusing anything.
 
-## Where the gate sits — two carriers, two shapes
+## Where the gate sits — one carrier, two shapes
 
-The intake points do not determine the gate's shape. **The carrier does.**
-`marksOf` is a union of two reads with completely different costs:
+**The address of an offering is its SIGNATURE, never its path.**
 
-| Carrier | Read | Cost |
+The gate read the location carrier as well, for one release, and that was a
+false-evidence bug rather than a missing feature. A location is where a
+stranger's offering would LAND; it is not a description of it. Two things
+followed, and both were live:
+
+> A peer publishing a tile named `notes` into a page where you already hold a
+> `notes` tile was judged **by your own tile's marks**. Mark yours `private`
+> with `private` in your DROP set and their unrelated tile vanished from the
+> swarm; mark yours `cigars` with a KEEP set and theirs was admitted having
+> satisfied nothing.
+
+Co-located same-name is not exotic. It is the ordinary case the tile source's
+own `kind:name` dedup exists to resolve, and a REFERENCE tile is named after its
+target by construction — *"a reference and its target ALWAYS share a name"*
+([decoration-kind-index.ts](../hypercomb-essentials/src/commands/decoration-kind-index.ts)).
+The index itself was made location-aware for that exact reason; the gate then
+used the location as if it were an identity, which is the same mistake one level
+up.
+
+A signature cannot collide that way. It names the bytes themselves, so a mark
+keyed by one is about the thing being offered no matter whose hive it came from
+or where it would sit. It is the only carrier that survives crossing a hive
+boundary, and therefore the only one admissible at intake. `IntakeTarget` is a
+signature and nothing else, and a ratchet in `intake-filter.spec.ts` holds the
+gate's import list against the location carrier returning — nothing about
+`tagsForSegments([...loc.segments, name])` *looks* wrong at a call site, so the
+import is the thing to hold.
+
+### Two gates over the one carrier
+
+| Gate | Read | Cost |
 |---|---|---|
-| location / label | `tagsForSegments` · `tagsForLabel` ([decoration-kind-index.ts:185](../hypercomb-essentials/src/commands/decoration-kind-index.ts:185)) | **synchronous, O(1)**, in-memory index — *"the badge renderer and show-cell's tag aggregation read this per visible cell"* |
-| signature | `sigMarksOf` | **async**, one OPFS read per sig |
+| `allowsHere` | `sigMarksKnown` — the in-memory record cache | **synchronous, O(1)**; `undefined` for a signature never read |
+| `allows` | `await sigMarksOf` | **async**, one OPFS read per sig, cached thereafter |
 
-Only the sig half is async. That single fact decides everything below, and it
-means most of the gate needs no new machinery at all.
-
-Where each gate sits, and which carrier it can afford to ask:
+Where each sits:
 
 | Site | Moment | Rate | Identity in hand | Gate |
 |---|---|---|---|---|
-| [published-pools.ts:303](../hypercomb-essentials/src/sharing/published-pools.ts:303) | commit | ≤64 per domain/meaning/session | `sig` | `await marksOf({ sig })` |
-| [swarm.drone.ts:1566](../hypercomb-essentials/src/sharing/swarm.drone.ts:1566) tile source | render | every render of the location | `locKey/name` | **sync** `tagsForSegments` |
-| [swarm-adopt.drone.ts:592](../hypercomb-essentials/src/sharing/swarm-adopt.drone.ts:592) `#foldPageTile` | commit | per take, every path | `segments` + `layerSig` | `await marksOf({ segments, sig })` |
+| [published-pools.ts](../hypercomb-essentials/src/sharing/published-pools.ts) | commit | at most 64 per domain/meaning/session | `sig` | `await allows({ sig })` |
+| [swarm.drone.ts](../hypercomb-essentials/src/sharing/swarm.drone.ts) tile source | render | every render of the location | peer entry's `layerSig` | **sync** `allowsHere({ sig })` |
+| [swarm-adopt.drone.ts](../hypercomb-essentials/src/sharing/swarm-adopt.drone.ts) `#foldPageTile` | commit | per take, every path | `layerSig` | `await allows({ sig })` |
 
 **The commit gate is on the PRIMITIVE, not on a caller.** `#foldPageTile` is the
 single acquisition function, and four paths reach it: the wand (the only take a
 finger can perform), the adopt panel, the retry, and the child fold of an
 adopted branch. The gate first sat on `#adoptPageTile` — one of those four — so
-a signature-carried mark refused a take through the panel and admitted the same
-bytes through a click. It also sits BELOW that function's own held-here return,
-because a tile already in the hive is not arriving and re-judging it would
-refuse a sync of the participant's own content.
+a mark refused a take through the panel and admitted the same bytes through a
+click. It also sits BELOW that function's own held-here return, because a tile
+already in the hive is not arriving and re-judging it would refuse a sync of the
+participant's own content.
 
 `wandEligible` deliberately carries NO gate. It briefly did, and that was a
 mistake: it has three consumers — pointerdown selection, the entry choke point,
 and the *takeable shade* — so filtering there changed navigation and how tiles
-look, well beyond deciding what enters the hive. Being synchronous it could
-only read the location carrier anyway, which holds nothing for a peer's tile.
+look, well beyond deciding what enters the hive.
 
 ### The rule that falls out
 
-**A sync moment may only ask the location carrier; the async commit asks the
-union.** This is not a limitation to work around — it is the same shape as
-*hide first, delete second*: the cheap gate suppresses, the authoritative gate
-refuses at admission. A mark that only the sig carries will not stop a tile
-being drawn, but it will stop it being taken.
+**A sync moment may only ask what is already in memory; the async commit awaits
+the read.** This is not a limitation to work around — it is the same shape as
+*hide first, delete second*: the cheap gate suppresses what it already knows
+about, the authoritative gate refuses at admission.
 
-Both existing filters at these sites already obey it, which is the precedent to
-follow rather than invent:
+The sync gate is not therefore blind. On a miss it KICKS the read (once per
+signature, ever) and answers `true` for that pass; peer content re-renders on
+every relay arrival and every `synchronize`, so a marked signature is suppressed
+within a frame or two of first sight. That is what *hide first* can honestly
+promise while the evidence lives on disk. Adding an `await` inside the tile
+source instead would put one OPFS read per peer tile on every render of the
+location — the one way to get this wrong.
 
-- the swarm tile source filters with `readHiddenLineages()` and
-  `swarmFilterSelection()` — both sync set lookups, and the comment says why:
-  *"Path-keyed is sync (no `sign()` needed) and matches the user-visible
-  identity of the tile."*
-- `wandEligible` is documented as synchronous on purpose so its callers can
-  decide mid-gesture — *"which keeps the whole check off the async layer
-  reads."* It is the precedent for the render gate's shape, and the reason no
-  intake gate belongs in it: a predicate that cheap cannot ask the only carrier
-  that knows anything about a peer's bytes.
+Both existing filters at that site already obey the shape, which is the
+precedent followed rather than invented: `readHiddenLineages()` and
+`swarmFilterSelection()` are both sync set lookups.
 
-Adding `await marksOf({ sig })` inside the tile source would put one OPFS read
-per peer tile on every render of the location. That is the one way to get this
-wrong.
+### Inert, and inert ON DISK
 
-### What it actually costs
+*"Changes nothing until a participant expresses an interest"* is two claims. The
+verdict half was always true. The storage half was not.
 
-- **published-pools** — a drop-in. The loop is already `async` and already
-  per-sig; the check goes between `verifiedMember` and `handler.accept`, with
-  no restructuring.
-- **swarm tile source** — one more sync `.filter()` beside the two that are
-  already there. No new machinery.
-- **adopt** — one gate inside `#foldPageTile`, where `segments` and `layerSig`
-  are already resolved and every take path passes through.
-- **sig marks at render time** — the only piece needing anything new: a
-  pre-resolved warm set, modelled on `SwarmFilterService` (in-memory,
-  session-only, EffectBus change events). Worth deferring until something
-  actually needs it, because the location carrier covers the common case.
+Reaching the registry opened `sign('registry:interests')` — and
+`sign('registry')` behind it, for the legacy fallback that was always going to
+miss — with a **creating** handle, and the mark read opened
+`sign('pheromones:content')`. So a participant who had never named an interest
+grew three pool directories the first time a peer tile arrived. Empty
+directories are not harmless in this root: it is an untagged union that walkers,
+the collector and `/flatten` all enumerate, and a pool nobody wrote is noise in
+every one of those passes. A pool directory is a claim that the participant uses
+a feature, and a read must not make that claim on their behalf.
+
+Two changes, and the seam spec fails without either:
+
+- **`Store.openPool(meaning)`** — the read-only open, `create: false`, null when
+  the pool does not exist. `registry-document.ts` prefers it on every read path,
+  which fixes all four registries at once (bouquets, names, tags, interests);
+  `pheromone-marks.ts` prefers it in `readRecord`. Writes still use `getPool`,
+  which is what a writer wants.
+- **`InterestRegistry.filters()`** — false until a KEEP or DROP role names a
+  non-empty interest. The gate short-circuits on it, so a participant with no
+  interest performs no mark read at all: there is no verdict a read could
+  change. A registry too old to report is asked anyway — paying for a read beats
+  skipping a refusal.
 
 ## Granularity is data, not code
 
@@ -301,13 +333,17 @@ default set that opens the cycle and that the participant can replace entirely.
 
 ## Owed
 
-- **Marks that travel with content.** The ceiling stated above: both carriers
-  are participant-local, so a KEEP set can only narrow what you already hold and
-  a DROP cannot fire on a mark nobody local recorded. Community deposits
-  arriving alongside the bytes are what would lift it.
+- **Marks that travel with content.** The ceiling stated above: the carrier is
+  participant-local, so a KEEP set can only narrow what you already hold and a
+  DROP cannot fire on a mark nobody local recorded. Community deposits arriving
+  alongside the bytes are what would lift it — and it is now the ONLY thing
+  standing between the gate and being useful against a stranger, the location
+  carrier having been correctly taken out of it.
 - **A surface for editing an interest.** The registry, the gate and its three
-  sites are built; nothing yet lets a participant SAY which marks they
-  want. Until something does, every verdict is the empty-set default (allow),
+  sites are built and proven end to end
+  ([`intake-filter-seam.spec.ts`](../intake-filter-seam.spec.ts) drives the real
+  registry through the real gate over the real carrier); nothing yet lets a
+  participant SAY which marks they want. Until something does, every verdict is the empty-set default (allow),
   which is why shipping it changes nothing on its own.
 - **A decision on polarity.** An interest is a set you are watching FOR, which
   reads positive: keep what carries an enrolled mark. The one filter shipping

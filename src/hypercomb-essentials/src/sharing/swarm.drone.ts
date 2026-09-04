@@ -1559,12 +1559,19 @@ export class SwarmDrone extends Drone {
           .filter(({ name }) => !hiddenLineages.has(locKey ? `${locKey}/${name}` : name))
           // Intake gate — the marks the participant is watching for, and the
           // ones they never want. SYNCHRONOUS on purpose, exactly like the two
-          // filters above: this runs per peer tile per render, so the union
-          // read's signature half (one OPFS hit each) would be a storm here.
-          // The location carrier is an in-memory index, so it costs what
-          // readHiddenLineages costs. The signature half runs at ADOPT, which
-          // is the commit — draw cheaply, refuse authoritatively.
-          .filter(({ name }) => allowsHere({ segments: [...loc.segments, name] }))
+          // filters above: this runs per peer tile per render, so an awaited
+          // OPFS hit each would be a storm. `allowsHere` reads only marks
+          // already in memory and kicks the read for the rest, so an unseen
+          // signature costs one round trip ever and is refused from the next
+          // render on. The authoritative refusal runs at ADOPT, at the commit.
+          //
+          // BY THE PEER'S LAYER SIG, NEVER BY THE PATH. `[...loc.segments,
+          // name]` is where the offering would LAND, and the marks there are
+          // the participant's own tile's — a peer publishing a name you
+          // already use at this location was judged by YOUR marks, in both
+          // directions. Co-located same-name is the ordinary case: it is what
+          // the tile source's `kind:name` dedup below exists to resolve.
+          .filter(tile => allowsHere({ sig: String(tile['layerSig'] ?? '') }))
           .map(({ name, peerPubkey, imageSig, index }) => ({
             name,
             kind: 'peer' as const,

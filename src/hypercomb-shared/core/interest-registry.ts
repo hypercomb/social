@@ -87,7 +87,7 @@ export interface Interest {
 
 /** What an intake needs, already resolved. Sets, not promises: the render and
  *  gesture call sites decide synchronously (see documentation/intake-filter.md
- *  — "a sync moment may only ask the location carrier"). */
+ *  — "the sync gate reads the marks already in hand and never awaits"). */
 export type IntakeSets = { keep: ReadonlySet<string>; drop: ReadonlySet<string> }
 
 const EMPTY: IntakeSets = { keep: new Set(), drop: new Set() }
@@ -149,12 +149,10 @@ export class InterestRegistry extends EventTarget {
     if (drop.size) for (const m of marks) if (drop.has(m)) return false
     if (!keep.size) return true
     // UNKNOWN IS NOT ABSENT — and this is the difference between a filter and
-    // a blackout. BOTH mark carriers are participant-LOCAL: `tagsForSegments`
-    // reads an in-memory index filled by this participant's own decoration
-    // scans, and `sigMarksOf` reads this participant's own
-    // `pheromones:content` pool. Content that just arrived from somebody else
-    // has no entry in either, so it presents ZERO marks — not "no marks I
-    // want", but "no marks I have heard of yet".
+    // a blackout. The mark carrier is participant-LOCAL: `sigMarksOf` reads
+    // this participant's own `pheromones:content` pool. Content that just
+    // arrived from somebody else has no record there, so it presents ZERO
+    // marks — not "no marks I want", but "no marks I have heard of yet".
     //
     // Judging that by a KEEP set refuses every peer tile in the swarm, every
     // member a domain publishes, and every branch anybody offers, the moment a
@@ -165,6 +163,18 @@ export class InterestRegistry extends EventTarget {
     for (const m of marks) if (keep.has(m)) return true
     return false
   }
+
+  /**
+   * DOES THIS PARTICIPANT FILTER ANYTHING AT ALL?
+   *
+   * False until a KEEP or a DROP role names a non-empty interest, and the
+   * intake gate short-circuits on it: with nothing to refuse, every mark read
+   * taken on this registry's behalf is a read whose answer cannot change the
+   * verdict. That is what makes the gate inert ON DISK and not merely in its
+   * verdicts — the reads it skips are the ones that were opening pools on
+   * hives that never used the feature.
+   */
+  filters(): boolean { return this.#sets.keep.size > 0 || this.#sets.drop.size > 0 }
 
   /** Did a load actually land? False after an attempt that found no Store —
    *  the registry keeps its retry open in that case, and the intake gate uses

@@ -296,10 +296,12 @@ export const probePublishedPool = async (
     if (record === null) continue
     // THE INTAKE GATE. Verification answered "are these the bytes the domain
     // named"; it cannot answer "do I want them". One pass per member, at most
-    // MAX_MEMBERS of them per domain per session, so it can afford the full
-    // union read (location marks ∪ signature marks). Allows everything until
-    // the participant expresses an interest. An offer the gate refuses is
-    // never even shown.
+    // MAX_MEMBERS of them per domain per session, so it can afford the awaited
+    // record read. A published member has only ever had a signature to be
+    // judged by, which is why this call site needed no change when the gate
+    // dropped the location carrier — it was already asking the right question.
+    // Allows everything until the participant expresses an interest. An offer
+    // the gate refuses is never even shown.
     if (!await intakeAllows({ sig })) continue
     offered.push({ origin, meaning, sig, record })
   }

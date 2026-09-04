@@ -580,19 +580,22 @@ export class SwarmAdoptDrone extends Drone {
     // function. The others are the wand (`#onWand`, the only take a finger can
     // perform), the retry, and the child fold of an adopted branch — all of
     // them arriving content, none of them gated. Worse, the wand's own
-    // `wandEligible` check is SYNCHRONOUS and so can only ask the location
-    // carrier, which holds nothing for a peer's tile: the half that can
-    // actually refuse foreign bytes was exactly the half that path skipped. Two
-    // takes of the same bytes disagreed — refused through the adopt panel,
-    // admitted by a click.
+    // `wandEligible` check is SYNCHRONOUS and so can only answer from marks
+    // already in memory, which for a peer's freshly-arrived signature is
+    // nothing: the half that can actually refuse foreign bytes was exactly the
+    // half that path skipped. Two takes of the same bytes disagreed — refused
+    // through the adopt panel, admitted by a click.
     //
     // Below the held-here return on purpose: a tile already in the hive is not
     // arriving, and re-judging it would refuse a SYNC of the participant's own
     // content. The gate is for what is coming in.
-    if (!await intakeAllows({
-      segments,
-      ...(SIG_RE.test(layerSig) ? { sig: layerSig } : {}),
-    })) {
+    //
+    // BY THE LAYER SIG ALONE. `segments` was passed too, and the location
+    // carrier behind it describes whatever the participant holds at that path
+    // — not the bytes arriving. The gate reads content addresses now; a fold
+    // whose entry carries no layerSig is judged unmarked, which is what an
+    // offering nobody can name honestly is.
+    if (!await intakeAllows({ sig: SIG_RE.test(layerSig) ? layerSig : '' })) {
       this.#visitStage('filtered', { name })
       return false
     }

@@ -220,6 +220,28 @@ export class Store extends EventTarget {
     } catch { return null }
   }
 
+  /** THE READ-ONLY OPEN. Null when the pool does not exist — it is NOT
+   *  created.
+   *
+   *  `getPool` creates, which is right for a writer and wrong for a reader:
+   *  a feature that merely CONSULTS a pool minted its directory on every
+   *  hive that had never used the feature, so a participant who expressed no
+   *  interest still grew `sign('registry:interests')` and
+   *  `sign('pheromones:content')` the first time a peer tile arrived. Empty
+   *  directories are not harmless here — the root is an untagged union that
+   *  walkers, the collector and `/flatten` all enumerate, and a pool nobody
+   *  ever wrote is noise in every one of those passes.
+   *
+   *  Registering the meaning still happens (`poolSignature` derives and
+   *  registers), because knowing an address is a pool is exactly what makes
+   *  a walker safe — that half was never the cost. */
+  public openPool = async (meaning: string): Promise<FileSystemDirectoryHandle | null> => {
+    if (!this.#opfsAvailable) return null
+    try {
+      return await this.opfsRoot.getDirectoryHandle(await Store.poolSignature(meaning), { create: false })
+    } catch { return null }
+  }
+
   // -------------------------------------------------
   // content-addressed document pools
   // -------------------------------------------------

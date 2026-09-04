@@ -29,6 +29,10 @@
 
 export interface RegistryStoreLike {
   getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | undefined>
+  /** The read-only open — absent pool, null handle, nothing created. Every
+   *  read below prefers it; `getPool` is the write path's opener and creates.
+   *  Optional so a store that predates it still reads (it merely mints). */
+  openPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null | undefined>
   getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined) => Promise<ArrayBuffer | null>
   putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer) => Promise<string | null>
   getResource: (sig: string) => Promise<Blob | null | undefined>
@@ -42,6 +46,24 @@ const LEGACY_PROPS_FILE = '0000'
 
 const decode = (bytes: ArrayBuffer): string => new TextDecoder().decode(bytes)
 
+/**
+ * OPEN FOR READING, AND DO NOT MINT.
+ *
+ * A read used `getPool`, which creates. So merely CONSULTING a registry —
+ * which the intake gate does on the first arrival of every session — grew
+ * `sign('registry:interests')` on hives that had never named an interest, and
+ * `sign('registry')` beside it for the legacy fallback that was always going
+ * to miss. A pool directory is a claim that the participant uses a feature;
+ * reading must not make that claim on their behalf.
+ */
+const openForRead = async (
+  store: RegistryStoreLike,
+  meaning: string,
+): Promise<FileSystemDirectoryHandle | undefined> => {
+  if (store.openPool) return (await store.openPool(meaning)) ?? undefined
+  return await store.getPool?.(meaning)
+}
+
 const parse = <T>(text: string): T | null => {
   try {
     const value = JSON.parse(text)
@@ -52,7 +74,7 @@ const parse = <T>(text: string): T | null => {
 /** The legacy pointer's target, from the old pool member or the root props. */
 const legacyPointer = async (store: RegistryStoreLike, legacyKey: string): Promise<string | null> => {
   try {
-    const pool = await store.getPool?.(LEGACY_REGISTRY_MEANING)
+    const pool = await openForRead(store, LEGACY_REGISTRY_MEANING)
     if (pool) {
       const fh = await pool.getFileHandle(legacyKey)
       const sig = (await (await fh.getFile()).text()).trim()
@@ -80,7 +102,8 @@ export const readRegistryDocument = async <T extends object>(
   legacyKey: string,
 ): Promise<T | null> => {
   try {
-    const pool = await store.getPool?.(meaning)
+    const pool = await openForRead(store, meaning)
+    if (!pool) throw new Error('no document pool')
     const bytes = await store.getPoolDoc?.(pool)
     if (bytes && bytes.byteLength > 0) {
       const current = parse<T>(decode(bytes))
