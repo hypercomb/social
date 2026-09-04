@@ -883,16 +883,45 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
  * Never the pool dirs themselves, never the flat root (layer bytes
  * share it with user commits), never lineage bags.
  */
-const purgeStaleOpfsArtifacts = async (store: Store): Promise<void> => {
-  const purgeDir = async (dir: FileSystemDirectoryHandle) => {
-    const names: string[] = []
+/** An entry an install pass writes: `<sig>` or `<sig>.js`. Nothing else in
+ *  an install cache is this code's to remove. */
+export const isInstallArtifactName = (name: string): boolean => /^[0-9a-f]{64}(?:\.js)?$/i.test(name)
+
+/**
+ * Empty a LEGACY install-cache directory of what an install wrote — and of
+ * nothing else. This was the one `purgeDir` in the file that removed every
+ * entry by enumeration (write-conformance, ensure-install.ts:983) while its
+ * neighbours proved each removal. The same rule as theirs, per entry: a FILE
+ * goes only if it is named like an install artifact; a DIRECTORY goes only if
+ * `bagEvictionVeto` is null (a bag this install wrote — at least one marker,
+ * nothing foreign). Anything else stays, and the caller's non-recursive
+ * `removeEntry` on the directory then fails, which is the design: a legacy
+ * dir disappears only once it is genuinely empty. Returns what was refused.
+ */
+export const purgeInstallCacheDir = async (dir: FileSystemDirectoryHandle): Promise<string[]> => {
+  const entries: Array<[string, FileSystemHandle]> = []
+  try {
+    for await (const entry of dir.entries()) entries.push(entry)
+  } catch { return [] }
+  const refused: string[] = []
+  for (const [name, handle] of entries) {
     try {
-      for await (const [name] of dir.entries()) names.push(name)
-    } catch { return }
-    for (const name of names) {
-      try { await dir.removeEntry(name, { recursive: true }) } catch { /* skip */ }
-    }
+      if (handle.kind === 'file') {
+        if (!isInstallArtifactName(name)) { refused.push(name); continue }
+        await dir.removeEntry(name)
+      } else {
+        const veto = await bagEvictionVeto(handle as FileSystemDirectoryHandle)
+        if (veto) { refused.push(name); continue }
+        await dir.removeEntry(name, { recursive: true })
+      }
+    } catch { refused.push(name) }
   }
+  if (refused.length) console.warn(`[ensure-install] left ${refused.length} entr${refused.length === 1 ? 'y' : 'ies'} in ${dir.name} — not an install's to remove`)
+  return refused
+}
+
+const purgeStaleOpfsArtifacts = async (store: Store): Promise<void> => {
+  const purgeDir = purgeInstallCacheDir
 
   // THE POOLS ARE NOT WIPED — they are purged by NAME.
   //

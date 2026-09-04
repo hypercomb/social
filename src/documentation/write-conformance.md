@@ -33,8 +33,9 @@ produced verdicts. So:
   publish-without-gesture sites, the life-primitive coherence item, the
   legacy-history shadow test, the layer writer's hash refusal, both host-side
   write guards, the insight catalog's kind, check 5 on the canonical write
-  surface, and the translation service — 21 of 57 closed (one not
-  reproduced). Nothing at wide radius remains.
+  surface, the translation service, the swarm arrival forge and the install
+  purge — 23 of 57 closed (one not reproduced). Nothing at wide radius
+  remains.
 
 ## The headline
 
@@ -220,11 +221,11 @@ the siblings already have.
   are healed into meta envelopes; a note's children are put raw. *Fix:* map
   each child through `store.ensureArtifactMeta('resource', childSig, {relation:
   'note'})`, the one-line call `tile-properties.ts:820` already makes.
-- `swarm.drone.ts:3225` — a resource event's bytes are stored before the sig is
+- *FIXED 2026-09-04 — hashed before any write, written only on a match, and with emit:false so a peer's bytes never become this participant's publish; ratchet `swarm-resource-arrival.spec.ts`.* `swarm.drone.ts:3225` — a resource event's bytes are stored before the sig is
   checked. *Fix:* hash first, write on match.
 - `tutorial-provenance.ts:82` — a NEW sub-bucket address minted from a path;
   check 4. *Fix:* key by the parent layer sig the record already resolves.
-- `ensure-install.ts:983` `purgeStaleOpfsArtifacts` — the one `purgeDir` in that
+- *FIXED 2026-09-04 — `purgeInstallCacheDir` removes a file only if named like an install artifact and a directory only past `bagEvictionVeto`; tests in `install-purge.spec.ts`.* `ensure-install.ts:983` `purgeStaleOpfsArtifacts` — the one `purgeDir` in that
   file not routed through `hardDeleteVetoFor`. *Fix:* one line, same guard as
   its neighbours.
 - `projection.ts:42` — a memo keyed by a *name* in localStorage; checks 6 and 7.

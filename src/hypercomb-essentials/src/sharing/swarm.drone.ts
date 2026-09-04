@@ -26,7 +26,7 @@
 // subscription on the same sig auto-triggers that paint when an event
 // arrives, so we don't need to dispatch a render signal ourselves.
 
-import { Drone, EffectBus, poolAddresses, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { Drone, EffectBus, poolAddresses, SignatureService, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { readTilePropertiesAt, withoutSubstrateImage } from '../editor/tile-properties.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
@@ -345,13 +345,13 @@ interface HistoryServiceLike {
 
 interface StoreLike {
   hypercombRoot?: FileSystemDirectoryHandle | null
-  // Resource API — content-addressed read/write. putResource computes
-  // the sig from bytes itself (sha256), so we get verification for
-  // free when receiving over the wire: a mismatched payload from a
-  // malicious peer yields a sig that differs from the d-tag and we
-  // discard.
+  // Resource API — content-addressed read/write. Bytes that arrive over
+  // the wire are hashed HERE, before any write: a payload that does not
+  // hash to the d-tag it claims is discarded without touching the store
+  // (`#onResourceEvent`). `emit: false` keeps a peer's bytes out of the
+  // content:wrote publish trigger — they are not this participant's act.
   getResource?: (sig: string) => Promise<Blob | null>
-  putResource?: (blob: Blob) => Promise<string>
+  putResource?: (blob: Blob, options?: { emit?: boolean }) => Promise<string>
 }
 
 // Singleton credential stores (RoomStore + SecretStore) live in
@@ -3207,9 +3207,15 @@ const payload: SwarmLayerPayload = myLabel
     }
   }
 
-  // Resource arrival path. Verifies the bytes against the d-tag sig
-  // (Store.putResource computes its own sha256 — a mismatch tells us
-  // the peer published bad bytes and we discard rather than persist).
+  // Resource arrival path. HASH FIRST, WRITE ON MATCH. The bytes used to be
+  // handed to Store.putResource and the verdict read off the sig it
+  // returned — so a peer's mismatching payload was already ON DISK under its
+  // real hash before we "discarded" it, and, worse, putResource's
+  // content:wrote had already enqueued a stranger's bytes for THIS
+  // participant's public host (write-conformance, swarm.drone.ts:3225). Now
+  // nothing is written until the bytes prove they are the sig the d-tag
+  // names, and a verified write is marked emit:false: it is a peer's atom
+  // arriving, never this participant authoring.
   // On success, emits `swarm:resource-arrived` so substrate / show-
   // cell can re-resolve any tile that was waiting on this sig.
   #onResourceEvent = async (evt: MeshEvtLike): Promise<void> => {
@@ -3230,18 +3236,16 @@ const payload: SwarmLayerPayload = myLabel
     try { bytes = base64ToArrayBuffer(content) } catch { return }
     if (bytes.byteLength === 0 || bytes.byteLength > MAX_RESOURCE_BYTES) return
 
-    const blob = new Blob([bytes])
-    let writtenSig = ''
-    try { writtenSig = await store.putResource(blob) } catch { return }
-    if (writtenSig !== sig) {
-      // Defence: malicious peer published bytes whose sig doesn't
-      // match the d-tag they claimed. OPFS now holds the bytes under
-      // their REAL sig (which is fine — content-addressed), but we
-      // keep the subscription open since the actual sig we wanted
-      // hasn't arrived. A correct publisher will re-send.
-      console.warn('[swarm] resource sig mismatch', { claimed: sig.slice(0, 12), actual: writtenSig.slice(0, 12) })
+    let actual = ''
+    try { actual = (await SignatureService.sign(bytes)).toLowerCase() } catch { return }
+    if (actual !== sig) {
+      // A peer published bytes that are not the sig they claimed. Nothing
+      // was written; the one-shot subscription stays open because the sig
+      // we asked for has not arrived. A correct publisher will re-send.
+      console.warn('[swarm] resource sig mismatch — discarded unwritten', { claimed: sig.slice(0, 12), actual: actual.slice(0, 12) })
       return
     }
+    try { await store.putResource(new Blob([bytes]), { emit: false }) } catch { return }
 
     // Close our one-shot sub for this sig — bytes are now in OPFS.
     const sub = this.#resourceSubs.get(sig)
