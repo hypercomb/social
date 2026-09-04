@@ -122,7 +122,10 @@ facet writer; `notes/notes-facet.ts`). The note atoms are untouched, so no
 tree re-signs. The layer slot is still written, and READS UNION the facet with
 it — facet first, every author's verified head, this reader's own bucket
 leading — so two tiles named the same read the same notes, and a commit
-transforms that same union, so a delete at one is a delete for the word. A
+transforms that same union, so a removal at one is a removal for the word.
+A removal is an UNLINK, never a forget: the note atom stays at the root, the
+prior list is one marker back in history and one `prev` back on the facet,
+and undo restores it. Forgetting bytes is the delete area's act alone. A
 read OPENS the pool and never creates it. A note never mints an identity:
 without a cached key the facet write is skipped that time.
 

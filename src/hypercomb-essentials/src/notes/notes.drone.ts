@@ -430,6 +430,15 @@ export class NotesService {
    * for top-level AND nested notes — walks the tree, drops the node
    * (and its entire subtree), then re-materializes from leaves. Used
    * by the `note:delete` EffectBus handler and headless callers.
+   *
+   * "DELETE" IS AN UNLINK. Nothing here destroys bytes: the note stays a content
+   * atom at the root, the previous list is one marker back in the layer's
+   * history and one `prev` back on the word's facet, and undo restores it. This
+   * is hide-first by construction — the reversible removing act a list may
+   * offer. Forgetting bytes lives only in the delete area, behind prune, and a
+   * note never reaches it. The verb keeps its name because renaming re-signs
+   * nothing but breaks every caller; the participant-facing word says what it
+   * does.
    */
   public async deleteAtSegments(
     parentSegments: readonly string[],
@@ -966,8 +975,9 @@ export class NotesService {
       : []
     // The prior list is the SAME union the reader shows — facet first, then
     // the slot — so a transform edits what the participant saw, and the result
-    // lands on both the slot and the word's facet. That is what makes a delete
-    // at one tile of the word a delete for the word, rather than a flicker
+    // lands on both the slot and the word's facet. That is what makes a removal
+    // at one tile of the word a removal for the word (an UNLINK — the atom and
+    // every prior list survive; undo walks back), rather than a flicker
     // between two tiles' lists.
     const priorNotes = unionNoteSigs(await readNotesFacet(segments[segments.length - 1] ?? ''), slotNotes)
     const nextNotes = transform(priorNotes)

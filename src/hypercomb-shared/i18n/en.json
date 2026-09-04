@@ -357,7 +357,7 @@
   "notes.strip.toggle": "toggle layout (rows / chips)",
   "notes.strip.exit": "exit notes mode",
   "notes.hide": "hide notes",
-  "notes.delete": "delete note",
+  "notes.delete": "remove note (undo restores it)",
   "notes.viewer.aria": "notes reader",
   "notes.read": "read these notes",
   "notes.face.label": "Note face",
