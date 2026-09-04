@@ -43,7 +43,7 @@ sends.
   "at": 1757000000000,          // stamped by the BROWSER, never the responder
   "outcome": "ok",              // or "failed"
   "contentSig": "9f2c…",        // the request, as a root content resource
-  "sigs": ["a41b…"],            // signatures the op RETURNED — pointers into history
+  "sigs": ["a41b…"],            // signatures the op NAMED — pointers into history
   "errorSig": "3d70…"           // the reason, when it failed
 }
 ```
@@ -125,6 +125,32 @@ Order inside a run is `seq`, assigned by the writer. Never the clock — `at` is
 a label, and the bridge stamps it from the browser, so a responder's machine
 clock cannot skew a run at all.
 
+## The run stays private
+
+A run's requests are the participant's working material: note bodies, command
+lines, the shape of a layer a step proposed. `content:wrote` is the
+**publication trigger** — `PushQueue` subscribes to it with no kind filter,
+and `HostSync` PUTs on the same signal once a public host is configured. A
+ledger that minted its resources loudly would therefore enqueue every recorded
+request for a host the participant never chose to show it to.
+
+So the ledger writes **silently**, passing `{ emit: false }` exactly as the
+store's own cache-fill writes do. This is not an optimisation. Removing it is
+a privacy regression, and a spec asserts every payload the ledger mints
+carries the flag.
+
+Two further limits on what a step is allowed to hold:
+
+- **A layer body is never copied.** `update` carries the proposed layer, and
+  recording it verbatim would put a full snapshot at the content root,
+  referenced by nothing, free to disagree with what `commitLayer` actually
+  stored once it deduped or healed a reference — breaking this file's one
+  promise for the commonest structural verb. What a resume needs is the
+  *shape* of the attempt, so `layerShape` records the tile name, the slot
+  names and the child count, and nothing else.
+- **`base64` is dropped**, because the response's own signature already
+  points at those bytes.
+
 ## The bridge contract
 
 Every op a responder sends already passes through one chokepoint, so the
@@ -165,20 +191,51 @@ From a script, [`loop-run.cjs`](../scripts/bridge/loop-run.cjs):
 
 ```js
 const { openRun } = require('./loop-run.cjs')
-const run = openRun({ convoId, runId: 'run-7f3a' })   // a STABLE id, or resume is impossible
 
-const { landed, nextSeq } = await run.resume()        // where the last process got to
-if (!await run.alreadyDid('note-add')) {
+// DERIVE the run id from the ask — never invent one. A run id has to be the
+// same string after the process that chose it has died, and every other
+// stable handle in this loop (the ask sig, the convoId, the bucket name) is
+// derived. Leaving this one to be retyped from memory is what would make the
+// whole mechanism a no-op that still appears to work.
+const run = openRun({ convoId, ask: askSig })
+
+const { landed, steps, nextSeq } = await run.resume()   // THROWS if it cannot read
+if (!await run.alreadyDid('note-add', req => req?.cell === '/dolphin')) {
   await run.act('note-add', { cell: '/dolphin', text: answer })
 }
 ```
 
+Two rules the helper enforces, both learned from breaking it:
+
+- **Failing to read is not an empty run.** `resume()` throws rather than
+  returning an empty ledger, because a transient store fault that reads as
+  "this run did nothing" is taken by the caller as permission to do the work
+  again — the exact outcome the ledger exists to prevent, produced by the
+  ledger's own client.
+- **A manifest is not an answer.** Steps come back as pointers, so
+  `resume()` materializes each step's request before returning and
+  predicates receive that request. Without it, "did I already answer target 3
+  of 5" is undecidable, and a responder that guessed would answer target 1,
+  report success, and drop the other four.
+
 ## What this does not do
 
-- **It does not make an agent's work transactional.** A step records that an
-  op was attempted and how it ended. If a responder dies between two ops, the
-  hive is in the state the first one left it — the ledger tells you that
-  truthfully, it does not roll anything back.
+- **It does not make an agent's work transactional**, and there is a window
+  it cannot close. The step is written *after* the op returns, so a crash in
+  that gap leaves the effect landed and no record of it — the ledger narrows
+  the window from a network round-trip to a local write, it does not remove
+  it. A resume must therefore treat a missing step as "unknown", never as
+  "did not happen", and verify against the hive before assuming work is
+  outstanding.
+- **It never fails the work it records.** A ledger write that cannot complete
+  is caught and dropped: a hive that cannot write a step has a gap in its
+  trail, not a broken op. The alternative — surfacing the ledger's trouble as
+  the op's — would turn a successful `note-add` into an error whose safe
+  retry duplicates it, so the record would manufacture the very duplicate it
+  exists to prevent.
+- **A `sigs` entry is a citation, not a promise of presence.** A removing op
+  names what it removed, so its step carries a pointer that no longer
+  resolves. Treat every entry as something to check.
 - **It does not decide what a resume should skip.** `alreadyDid` is a blunt
   guard over verbs; whether repeating a step is safe is the responder's
   judgement, because only it knows whether the op is idempotent.

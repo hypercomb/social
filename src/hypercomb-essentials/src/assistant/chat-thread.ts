@@ -260,11 +260,19 @@ export const conversationBucket = async (
 ): Promise<FileSystemDirectoryHandle | null> => {
   const id = String(convoId ?? '').trim()
   if (!id) return null
+  // ONLY the directory miss is caught. A store that FAILS must propagate:
+  // "the bucket is not there yet" and "I could not find out" are different
+  // answers, and collapsing them is how a transient fault comes to read as a
+  // run that never did anything — which a resuming responder takes as
+  // permission to do the work again. The rejection travels out through
+  // readSteps to thread-read, which answers `ok:false`, which is what
+  // `loop-run.cjs`'s resume() turns into a thrown error rather than an empty
+  // ledger. Null from here means the conversation has no bucket, nothing more.
   const store = get<StoreLike>('@hypercomb.social/Store')
   const pool = await store?.getPool?.(THREADS_POOL)
   if (!pool) return null
+  const name = await sha256(new TextEncoder().encode(id).buffer as ArrayBuffer)
   try {
-    const name = await sha256(new TextEncoder().encode(id).buffer as ArrayBuffer)
     return await pool.getDirectoryHandle(name, { create })
   } catch { return null }
 }
@@ -282,7 +290,16 @@ const provedLedgerEntries = async (
   for await (const [entryName, handle] of entries) {
     if (handle.kind !== 'file') return null
     try {
-      const parsed = JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as { kind?: string; convoId?: string }
+      const file = await (handle as FileSystemFileHandle).getFile()
+      // A ZERO-BYTE entry is this ledger's own interrupted write, never
+      // somebody else's bytes: `getFileHandle({create:true})` lands the file
+      // before its contents, so a crash mid-write leaves exactly this. Left
+      // unaccounted it is unparseable, and an unparseable entry refuses the
+      // delete FOREVER — the chat window's Delete button silently stops
+      // working, with a hashed directory name in a console warning as the
+      // only symptom. It is ours; it goes with the rest.
+      if (file.size === 0) { names.push(entryName); continue }
+      const parsed = JSON.parse(await file.text()) as { kind?: string; convoId?: string }
       if (parsed?.kind !== 'chat-step' || parsed.convoId !== convoId) return null
     } catch { return null }
     names.push(entryName)

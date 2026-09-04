@@ -88,8 +88,12 @@ export interface ChatStep {
   /** The request, as a root content resource — never inline. Absent when
    *  the store could not mint resources. */
   readonly contentSig?: string
-  /** Signatures the op RETURNED: pointers INTO history, never copies of it.
-   *  This is the edge that makes the trail a view rather than a log. */
+  /** Signatures the op NAMED in its answer: pointers INTO history, never
+   *  copies of it — the edge that makes the trail a view rather than a log.
+   *  A REMOVING op names what it removed, so a step for one carries a
+   *  signature that no longer resolves. That is honest rather than broken:
+   *  the pointer records what the attempt was about, and a reader must treat
+   *  every entry as a citation to check, never as a promise of presence. */
   readonly sigs?: readonly string[]
   /** Failure text, as a resource. Absent when the step worked. */
   readonly errorSig?: string
@@ -112,9 +116,19 @@ export interface StepInput {
 }
 
 type StoreLike = {
-  putResource?: (blob: Blob) => Promise<string>
+  putResource?: (blob: Blob, options?: { emit?: boolean }) => Promise<string>
   getResource?: (sig: string) => Promise<Blob | null>
 }
+
+/** A run's requests are the participant's PRIVATE working material — note
+ *  bodies, command lines, the layer a step proposed. `content:wrote` is the
+ *  publication trigger: PushQueue subscribes to it with no kind filter, and
+ *  HostSync PUTs on the same signal once a public host is configured. Minting
+ *  these resources loudly would enqueue every recorded request for a host the
+ *  participant never chose to show them to. So the ledger writes SILENTLY,
+ *  the same way the store's own cache-fill writes do. This is not an
+ *  optimisation; removing it is a privacy regression. */
+const SILENT = { emit: false } as const
 
 const hex = (buf: ArrayBuffer): string =>
   [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('')
@@ -161,12 +175,12 @@ export const appendStep = async (step: StepInput): Promise<boolean> => {
     let contentSig: string | undefined
     if (store?.putResource && step.request !== undefined) {
       contentSig = await store.putResource(
-        new Blob([JSON.stringify(step.request)], { type: 'application/json' }))
+        new Blob([JSON.stringify(step.request)], { type: 'application/json' }), SILENT)
     }
     let errorSig: string | undefined
     const error = String(step.error ?? '')
     if (store?.putResource && error) {
-      errorSig = await store.putResource(new Blob([error], { type: 'text/plain' }))
+      errorSig = await store.putResource(new Blob([error], { type: 'text/plain' }), SILENT)
     }
 
     // Explicit key order: the file is named by the hash of these bytes, so
@@ -179,13 +193,30 @@ export const appendStep = async (step: StepInput): Promise<boolean> => {
       seq,
       verb,
       at: Number(step.at) || 0,
-      outcome: step.outcome === 'failed' ? 'failed' : 'ok',
+      // A ledger whose whole purpose is to be BELIEVED about what landed must
+      // never let an unrecognised outcome read as success. 'ok' is the value
+      // that has to be asked for; everything else settles to 'failed'.
+      outcome: step.outcome === 'ok' ? 'ok' : 'failed',
       ...(contentSig ? { contentSig } : {}),
       ...(step.sigs && step.sigs.length ? { sigs: [...step.sigs] } : {}),
       ...(errorSig ? { errorSig } : {}),
     }
     const bytes = new TextEncoder().encode(JSON.stringify(record)).buffer as ArrayBuffer
-    const handle = await ledger.getFileHandle(await sha256(bytes), { create: true })
+    const name = await sha256(bytes)
+
+    // REPLAYING A STEP MUST NOT DESTROY IT. `createWritable()` truncates an
+    // existing file to zero and only refills it on close, so re-recording an
+    // identical step opens a window in which a crash leaves an EMPTY record
+    // where a complete one was — and an empty record is unparseable, which
+    // (before this check) made the conversation permanently undeletable. The
+    // record is content-addressed, so a same-named file of the same length is
+    // already byte-for-byte this step: there is nothing to write.
+    try {
+      const existing = await ledger.getFileHandle(name, { create: false })
+      if ((await existing.getFile()).size === bytes.byteLength) return true
+    } catch { /* not recorded yet — fall through and write it */ }
+
+    const handle = await ledger.getFileHandle(name, { create: true })
     const writable = await handle.createWritable()
     try { await writable.write(new Blob([bytes as BlobPart])) } finally { await writable.close() }
 

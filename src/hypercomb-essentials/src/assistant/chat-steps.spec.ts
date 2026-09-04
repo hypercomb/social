@@ -68,7 +68,9 @@ class MockFile {
       text: () => Promise.resolve(new TextDecoder().decode(slice)),
     } as unknown as File
   }
+  opens = 0
   async createWritable() {
+    this.opens++
     return {
       write: async (chunk: Blob | ArrayBuffer | Uint8Array | string) => {
         if (typeof chunk === 'string') { this.bytes = new TextEncoder().encode(chunk); return }
@@ -125,10 +127,12 @@ const sha256Hex = async (bytes: Uint8Array): Promise<string> => {
 
 const makeStore = (pool: MockDir) => {
   const resources = new Map<string, Uint8Array>()
-  return {
+  const store = {
     resources,
     getPool: async () => pool as unknown as FileSystemDirectoryHandle,
-    putResource: async (blob: Blob) => {
+    putOptions: [] as Array<{ emit?: boolean } | undefined>,
+    putResource: async function (this: { putOptions: Array<unknown> }, blob: Blob, options?: { emit?: boolean }) {
+      store.putOptions.push(options)
       const bytes = new Uint8Array(await blob.arrayBuffer())
       const sig = await sha256Hex(bytes)
       resources.set(sig, bytes)
@@ -140,6 +144,7 @@ const makeStore = (pool: MockDir) => {
       return { text: () => Promise.resolve(new TextDecoder().decode(bytes)) } as unknown as Blob
     },
   }
+  return store
 }
 
 type StepsModule = typeof import('./chat-steps.js')
@@ -378,5 +383,87 @@ describe('deleting a conversation that ran an agent', () => {
 
     expect(await thread.deleteConversation(CONVO)).toBe(false)
     expect(await bucketOf(pool)).toBeDefined()
+  })
+})
+
+describe('the ledger keeps the run private', () => {
+  it('mints every payload SILENTLY — a recorded request is not published', async () => {
+    const { steps } = await load(store)
+    await steps.appendStep({
+      convoId: CONVO, runId: RUN, seq: 0, verb: 'note-add', at: 1,
+      outcome: 'failed', request: { cell: '/private', text: 'working notes' },
+      error: 'nope',
+    })
+
+    // `content:wrote` is the publication trigger — PushQueue subscribes with
+    // no kind filter and HostSync PUTs on the same signal. Every resource the
+    // ledger mints must suppress it, or a run's private working material is
+    // enqueued for a host the participant never chose to show it to.
+    expect(store.putOptions.length, 'request AND error were both stored').toBe(2)
+    for (const options of store.putOptions) expect(options).toEqual({ emit: false })
+  })
+})
+
+describe('a replayed step never destroys the record it repeats', () => {
+  it('does not reopen the file when the identical step is written again', async () => {
+    const { steps } = await load(store)
+    const step = {
+      convoId: CONVO, runId: RUN, seq: 0, verb: 'update', at: 4242,
+      outcome: 'ok' as const, request: { cell: '/x' },
+    }
+    await steps.appendStep(step)
+    const ledger = (await ledgerOf(pool))!
+    const file = [...ledger.files.values()][0]!
+    expect(file.opens).toBe(1)
+
+    // createWritable() truncates to zero and only refills on close, so
+    // rewriting a complete record opens a window where a crash leaves it
+    // empty. The record is content-addressed: there is nothing to write.
+    expect(await steps.appendStep(step)).toBe(true)
+    expect(file.opens, 'the complete record was left untouched').toBe(1)
+    expect(await steps.readSteps(CONVO, RUN)).toHaveLength(1)
+  })
+
+  it('does not let an interrupted write brick the conversation forever', async () => {
+    const { steps, thread } = await load(store)
+    await thread.appendTurn(CONVO, 'user', 'hello')
+    await steps.appendStep({ convoId: CONVO, runId: RUN, seq: 0, verb: 'update', at: 1, outcome: 'ok' })
+
+    // Exactly what a crash between getFileHandle and close leaves behind.
+    const ledger = (await ledgerOf(pool))!
+    await ledger.getFileHandle('0'.repeat(64), { create: true })
+
+    // An empty entry is this ledger's own half-write, not foreign bytes — if
+    // it counted as unaccounted-for, Delete would refuse for good.
+    expect(await thread.deleteConversation(CONVO)).toBe(true)
+    expect(await bucketOf(pool)).toBeUndefined()
+  })
+})
+
+describe('an unrecognised outcome never reads as landed', () => {
+  it('settles anything that is not "ok" to failed', async () => {
+    const { steps } = await load(store)
+    await steps.appendStep({
+      convoId: CONVO, runId: RUN, seq: 0, verb: 'update', at: 1,
+      outcome: 'pending' as unknown as 'ok',
+    })
+    expect((await steps.readSteps(CONVO, RUN))[0]!.outcome).toBe('failed')
+  })
+})
+
+describe('failing to read is not an empty run', () => {
+  it('propagates a store failure instead of reporting that nothing landed', async () => {
+    const failing = {
+      ...store,
+      getPool: async () => { throw new Error('OPFS unavailable') },
+    }
+    vi.resetModules()
+    const g = globalThis as Record<string, unknown>
+    g['get'] = (key: string) => key === '@hypercomb.social/Store' ? failing : undefined
+    const steps = await import('./chat-steps.js')
+
+    // An empty array here would be indistinguishable from "this run has done
+    // nothing", and a resuming responder would redo work that already landed.
+    await expect(steps.readSteps(CONVO, RUN)).rejects.toThrow('OPFS unavailable')
   })
 })

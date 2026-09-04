@@ -345,12 +345,31 @@ export class ClaudeBridgeWorker extends Worker {
   #claimSeq(convoId: string, runId: string): Promise<number> {
     const key = `${convoId}\u0000${runId}`
     const claimed = this.#runSeq.get(key) ?? ledgerNextSeq(convoId, runId)
-    // Drop the whole map rather than track age: re-seeding is one directory
-    // read and always correct, so cheapest-possible eviction costs nothing
-    // that matters. Evict BEFORE the set, never after — the entry this call
-    // just claimed has to survive its own arrival.
-    if (this.#runSeq.size >= ClaudeBridgeWorker.#RUN_SEQ_CEILING) this.#runSeq.clear()
-    this.#runSeq.set(key, claimed.then(n => n + 1))
+
+    // Evict the OLDEST run, never the whole map, and never the run being
+    // claimed. Clearing looked cheap because re-seeding reads the ledger —
+    // but a re-seed mid-run reads a ledger that does not yet hold the steps
+    // still in flight, hands out a seq already taken, and `settle()` then
+    // drops one of the two colliding records entirely. Map iteration is
+    // insertion-ordered, so the first key that is not this one is the oldest.
+    if (this.#runSeq.size >= ClaudeBridgeWorker.#RUN_SEQ_CEILING) {
+      for (const old of this.#runSeq.keys()) {
+        if (old !== key) { this.#runSeq.delete(old); break }
+      }
+    }
+
+    // A REJECTED claim must not become the run's permanent state. Storing
+    // `claimed.then(...)` unguarded meant one transient store fault poisoned
+    // every later step of that run for the life of the tab — silently, since
+    // #recordStep swallows what it catches. Forget the key instead: the next
+    // step re-seeds from disk, which is the authority anyway.
+    this.#runSeq.set(key, claimed.then(n => n + 1).catch(() => {
+      this.#runSeq.delete(key)
+      throw new Error('run seq unavailable')
+    }))
+    // Nothing awaits the stored promise unless another step arrives, so its
+    // rejection must not surface as an unhandled one.
+    void this.#runSeq.get(key)?.catch(() => { /* handled by the next claim */ })
     return claimed
   }
 
@@ -1887,7 +1906,31 @@ export class ClaudeBridgeWorker extends Worker {
 // response's own signature already points at those bytes; copying a resource
 // into the record of the step that made it is the one thing this file is
 // careful never to do.
-const STEP_UNRECORDED_FIELDS = new Set(['id', 'run', 'base64'])
+const STEP_UNRECORDED_FIELDS = new Set(['id', 'run', 'base64', 'layer'])
+
+/** A layer body is CONTENT, and the ledger's one promise is that it points at
+ *  history rather than copying it. Recording `req.layer` verbatim broke that
+ *  for the commonest structural verb: a full snapshot of a proposed layer sat
+ *  at the content root, referenced by nothing, free to disagree with what
+ *  `commitLayer` actually stored once it deduped or healed a reference. What
+ *  a resume needs is the SHAPE of the attempt — which tile, which slots, how
+ *  many children — so that is what is kept. */
+const layerShape = (layer: unknown): Record<string, unknown> | undefined => {
+  if (!layer || typeof layer !== 'object') return undefined
+  const src = layer as Record<string, unknown>
+  const slots: string[] = []
+  let children: number | undefined
+  for (const [slot, value] of Object.entries(src)) {
+    if (slot === 'name') continue
+    slots.push(slot)
+    if (slot === 'children' && Array.isArray(value)) children = value.length
+  }
+  return {
+    ...(typeof src['name'] === 'string' ? { name: src['name'] } : {}),
+    ...(slots.length ? { slots: slots.sort() } : {}),
+    ...(children === undefined ? {} : { children }),
+  }
+}
 
 /** The request as the ledger stores it — keys SORTED, so the same request
  *  sent twice mints one resource rather than two. */
@@ -1897,6 +1940,8 @@ const stepPayload = (req: BridgeRequest): Record<string, unknown> => {
     if (STEP_UNRECORDED_FIELDS.has(key)) continue
     out[key] = (req as unknown as Record<string, unknown>)[key]
   }
+  const shape = layerShape(req.layer)
+  if (shape) out['layerShape'] = shape
   return out
 }
 
