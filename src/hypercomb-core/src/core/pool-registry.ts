@@ -229,6 +229,12 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // union resolution across replicas would then resurrect the archived chain.
   // Holds markers, never members; nothing is ever deleted from it.
   'history:high-water',
+  // WHAT A PARTICIPANT SAYS ABOUT A REVISION — a ★ mark, a restore-point
+  // label, a prune receipt — one current document per marker LAYER SIG
+  // (essentials/history/marker-meta.ts). The marker file itself is never
+  // rewritten; before this pool the fields were written into the marker, and
+  // those markers stay readable. Per-participant, replaced in place: DOCUMENT.
+  'history:marker-meta',
   // What a HOST is offering — the package pointers a shim publishes for
   // clients to replicate from (runtime/host-pool.ts, consumed by
   // web/setup/ensure-install.ts). The address is DERIVED by every client for

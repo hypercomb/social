@@ -33,9 +33,9 @@ produced verdicts. So:
   publish-without-gesture sites, the life-primitive coherence item, the
   legacy-history shadow test, the layer writer's hash refusal, both host-side
   write guards, the insight catalog's kind, check 5 on the canonical write
-  surface, the translation service, the swarm arrival forge and the install
-  purge — 23 of 57 closed (one not reproduced). Nothing at wide radius
-  remains.
+  surface, the translation service, the swarm arrival forge, the install
+  purge, and the three primitive items in the history service — 26 of 57
+  closed (one not reproduced). Nothing at wide radius remains.
 
 ## The headline
 
@@ -201,11 +201,11 @@ the siblings already have.
 - `hive-search.service.ts:213` — a record keyed by a content sig that is not a
   pure function of it (it depends on where the walk arrived). *Fix:* return
   `null` for a truncated record; guard the write.
-- `history.service.ts:4338` `setMarkerMeta`, `:4653` `stampMarkerSig` — in-place
+- *FIXED 2026-09-04 — `history/marker-meta.ts`: one current record per marker layer sig in the `history:marker-meta` document pool; the marker file is never rewritten; readers union legacy in-marker fields (record wins).* `history.service.ts:4338` `setMarkerMeta`, `:4653` `stampMarkerSig` — in-place
   mutation of a marker under a non-content name; break-apart in *intent*,
   implemented as an overwrite. *Fix:* a sig-addressed record in a colon pool
   keyed by the marker's layer sig.
-- `history.service.ts:4746`/`:4757` `writeRecord` — a content atom inside a bag
+- *FIXED 2026-09-04 — deleted with the whole delta-record path (`writeRecord`, `listRecordSigs`, `resolveDeltaRecord`, `hydratedStateAt`, `delta-record.ts`, `delta-reducer.ts`); nothing called it.* `history.service.ts:4746`/`:4757` `writeRecord` — a content atom inside a bag
   (one-folder-shape violation) and a second, incompatible marker shape that
   `purgeNonLayerFiles` classifies as pre-merkle and drops. *Fix:* delete;
   nothing reads it.

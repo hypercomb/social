@@ -151,6 +151,7 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['websites:menu', 'set'],
   // DOCUMENTS — one current record, per-participant, replaced in place.
   ['backgrounds:screen', 'document'],
+  ['history:marker-meta', 'document'],
   // Hand-authored insights, one current catalog via putPoolDoc — a PARTICIPANT'S
   // record, not a derivation. It was seeded 'index' (wipe-safe), which told the
   // collector a hand-written catalog could be thrown away.
