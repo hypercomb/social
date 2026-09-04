@@ -97,6 +97,19 @@ let goalNamePromise: Promise<string> | null = null
 const goalName = (): Promise<string> =>
   (goalNamePromise ??= sha256(new TextEncoder().encode(GOAL_MARKER).buffer as ArrayBuffer))
 
+/** The STEP LEDGER's directory name inside a bucket — the agent's recorded
+ *  attempts, written beside the turns by `chat-steps.ts`. Named HERE, with
+ *  the archive and goal markers, because this file owns the bucket's shape:
+ *  the writer and `deleteConversation`'s proof of ownership must never be
+ *  able to drift apart. A directory rather than more files beside the turns
+ *  so that every existing reader skips it — `readBucketRaw` walks under
+ *  `handle.kind !== 'file'` — and the conversation list never pays for a
+ *  busy run. */
+export const STEP_LEDGER = 'chat-steps'
+let stepLedgerPromise: Promise<string> | null = null
+export const STEP_LEDGER_NAME = (): Promise<string> =>
+  (stepLedgerPromise ??= sha256(new TextEncoder().encode(STEP_LEDGER).buffer as ArrayBuffer))
+
 export interface ChatGoalReached {
   /** Human-readable attained goals, one per line when there is more than one. */
   readonly details: string
@@ -232,6 +245,49 @@ const bucketFor = async (
 ): Promise<FileSystemDirectoryHandle> => {
   const name = await sha256(new TextEncoder().encode(convoId).buffer as ArrayBuffer)
   return pool.getDirectoryHandle(name, { create: true })
+}
+
+/** A conversation's bucket, for the modules that keep their OWN records
+ *  beside the turns (`chat-steps.ts`). Exported so the addressing rule —
+ *  `sha256(convoId)` — is spelled in exactly ONE place: a second spelling
+ *  is a second copy of a fact, free to drift the first time either is
+ *  touched, and a drifted bucket name is a thread that silently forks in
+ *  two. `create: false` mints nothing, so reading a conversation that has
+ *  never been spoken to stays free. */
+export const conversationBucket = async (
+  convoId: string,
+  create = false,
+): Promise<FileSystemDirectoryHandle | null> => {
+  const id = String(convoId ?? '').trim()
+  if (!id) return null
+  const store = get<StoreLike>('@hypercomb.social/Store')
+  const pool = await store?.getPool?.(THREADS_POOL)
+  if (!pool) return null
+  try {
+    const name = await sha256(new TextEncoder().encode(id).buffer as ArrayBuffer)
+    return await pool.getDirectoryHandle(name, { create })
+  } catch { return null }
+}
+
+/** The step ledger's files, but ONLY when every one of them is this
+ *  conversation's own. Null means unproven, and unproven is not ours to
+ *  delete — the same standard `deleteConversation` holds a turn to. A
+ *  ledger that holds anything else, or that nests further, does not pass. */
+const provedLedgerEntries = async (
+  ledger: FileSystemDirectoryHandle,
+  convoId: string,
+): Promise<string[] | null> => {
+  const names: string[] = []
+  const entries = (ledger as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()
+  for await (const [entryName, handle] of entries) {
+    if (handle.kind !== 'file') return null
+    try {
+      const parsed = JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as { kind?: string; convoId?: string }
+      if (parsed?.kind !== 'chat-step' || parsed.convoId !== convoId) return null
+    } catch { return null }
+    names.push(entryName)
+  }
+  return names
 }
 
 /**
@@ -776,8 +832,21 @@ export const deleteConversation = async (convoId: string): Promise<boolean> => {
     // holding anything unaccounted for.
     const bucket = await pool.getDirectoryHandle(name, { create: false })
     const own: string[] = []
+    let ledger: { dir: FileSystemDirectoryHandle; entries: string[] } | null = null
     for await (const [entryName, handle] of (bucket as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
       if (handle.kind !== 'file') {
+        // The STEP LEDGER is the one subdirectory a bucket may legitimately
+        // hold: the agent's recorded attempts, written beside the turns by
+        // chat-steps.ts. Refusing on it outright would make every
+        // conversation an agent has ever worked in undeletable, so it is
+        // proved rather than assumed — by the same standard as everything
+        // else here, every record inside must name THIS conversation. A
+        // ledger with one foreign record in it still refuses, and so does
+        // any other directory.
+        if (entryName === await STEP_LEDGER_NAME()) {
+          const proved = await provedLedgerEntries(handle as FileSystemDirectoryHandle, id)
+          if (proved) { ledger = { dir: handle as FileSystemDirectoryHandle, entries: proved }; continue }
+        }
         console.warn(`[chat] not deleting conversation ${name.slice(0, 8)}… — it holds a subdirectory (${entryName})`)
         return false
       }
@@ -799,6 +868,12 @@ export const deleteConversation = async (convoId: string): Promise<boolean> => {
     // Remove only the entries we just proved, then the emptied bucket — never
     // a recursive sweep over bytes we did not account for.
     for (const entryName of own) await bucket.removeEntry(entryName)
+    // The ledger's files one at a time, then the emptied directory — never a
+    // recursive sweep, for the same reason the turns get none.
+    if (ledger) {
+      for (const stepName of ledger.entries) await ledger.dir.removeEntry(stepName)
+      await bucket.removeEntry(await STEP_LEDGER_NAME())
+    }
     await pool.removeEntry(name)
     return true
   } catch { return false }

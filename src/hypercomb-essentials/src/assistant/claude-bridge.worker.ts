@@ -4,6 +4,7 @@ import {
   isLocalClaudeBridgeConfigured,
 } from '@hypercomb/core'
 import { deliverTurn, readTurns, setConversationGoalReached } from './chat-thread.js'
+import { appendStep, nextSeq as ledgerNextSeq, readSteps } from './chat-steps.js'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import type { HistoryService } from '../history/history.service.js'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
@@ -84,6 +85,15 @@ type BridgeRequest = {
   /** `hive-root-set`: index host override (defaults to the standing public
    *  content endpoint). */
   host?: string
+  /** THE AGENT LOOP THIS REQUEST IS A STEP OF. Present only when a responder
+   *  has declared a run; absent means nothing is recorded and the op behaves
+   *  exactly as it always did. Two fields on requests a responder already
+   *  sends is the whole cost of a replayable loop — see chat-steps.ts. */
+  run?: { convoId?: string; id?: string }
+  /** `thread-read`: also return the conversation's step ledger. */
+  steps?: boolean
+  /** `thread-read`: narrow the returned steps to one run. */
+  runId?: string
 }
 type BridgeResponse = { id: string; ok: boolean; data?: unknown; error?: string }
 
@@ -260,6 +270,19 @@ export class ClaudeBridgeWorker extends Worker {
     'add', 'remove', 'summary-add', 'chat-reply', 'chat-goal-reached', 'submit',
   ])
 
+  /** NOT steps of the loop. Reading the log is how a responder REJOINS the
+   *  loop rather than a move within it, and `agent-progress` is the
+   *  announcement half of the pair — recording it would fill the ledger with
+   *  the chatter the record exists to replace. */
+  static readonly #STEP_SILENT_OPS = new Set(['thread-read', 'agent-progress'])
+
+  /** The next `seq` each live run should claim, seeded from the LEDGER on a
+   *  run's first op so a page reload continues the count instead of
+   *  restarting it and overwriting the run's own history. Held as a promise
+   *  chain: two ops racing on one run each claim a distinct seq, because the
+   *  map is updated synchronously with the successor of the claim. */
+  readonly #runSeq = new Map<string, Promise<number>>()
+
   #quietDepth = 0
   #quietClose: ReturnType<typeof setTimeout> | null = null
 
@@ -292,6 +315,16 @@ export class ClaudeBridgeWorker extends Worker {
   }
 
   async #dispatch(req: BridgeRequest): Promise<BridgeResponse> {
+    const res = await this.#routeQuietly(req)
+    // EVERY op a responder sends passes through here, which is the whole
+    // reason the loop becomes replayable for free: a responder does not have
+    // to remember to record anything, and the steps it FORGOT it took — and
+    // the ones that failed — are recorded exactly like the rest.
+    await this.#recordStep(req, res)
+    return res
+  }
+
+  async #routeQuietly(req: BridgeRequest): Promise<BridgeResponse> {
     if (!ClaudeBridgeWorker.#MUTATING_OPS.has(String(req.op))) return this.#route(req)
     this.#quietOpen()
     try {
@@ -299,6 +332,50 @@ export class ClaudeBridgeWorker extends Worker {
     } finally {
       this.#quietDone()
     }
+  }
+
+  /** How many runs the counter will hold before it forgets the oldest. A
+   *  long-lived tab answers many conversations, and every one of them would
+   *  otherwise keep an entry forever. Forgetting is SAFE here and nowhere
+   *  else in this file: the count's authority is the ledger on disk, so a
+   *  forgotten run re-seeds from it exactly as a reloaded one does. */
+  static readonly #RUN_SEQ_CEILING = 256
+
+  /** The seq this call claims, leaving its successor for the next. */
+  #claimSeq(convoId: string, runId: string): Promise<number> {
+    const key = `${convoId}\u0000${runId}`
+    const claimed = this.#runSeq.get(key) ?? ledgerNextSeq(convoId, runId)
+    // Drop the whole map rather than track age: re-seeding is one directory
+    // read and always correct, so cheapest-possible eviction costs nothing
+    // that matters. Evict BEFORE the set, never after — the entry this call
+    // just claimed has to survive its own arrival.
+    if (this.#runSeq.size >= ClaudeBridgeWorker.#RUN_SEQ_CEILING) this.#runSeq.clear()
+    this.#runSeq.set(key, claimed.then(n => n + 1))
+    return claimed
+  }
+
+  /** Write the attempt, then let the op's own answer go back unchanged.
+   *  The ledger must NEVER fail the work it records — a hive that cannot
+   *  write a step is a hive with a gap in its trail, not a broken op. */
+  async #recordStep(req: BridgeRequest, res: BridgeResponse): Promise<void> {
+    const convoId = String(req.run?.convoId ?? '').trim()
+    const runId = String(req.run?.id ?? '').trim()
+    const verb = String(req.op ?? '').trim()
+    if (!convoId || !runId || !verb) return
+    if (ClaudeBridgeWorker.#STEP_SILENT_OPS.has(verb)) return
+    try {
+      await appendStep({
+        convoId, runId, verb,
+        seq: await this.#claimSeq(convoId, runId),
+        // Stamped from the BROWSER, never the responder's machine: one clock
+        // per hive means a run cannot be skewed by whoever is answering it.
+        at: Date.now(),
+        outcome: res.ok ? 'ok' : 'failed',
+        request: stepPayload(req),
+        sigs: harvestSigs(res.data),
+        error: res.ok ? undefined : String(res.error ?? ''),
+      })
+    } catch { /* never surface the ledger's trouble as the op's */ }
   }
 
   async #route(req: BridgeRequest): Promise<BridgeResponse> {
@@ -622,10 +699,19 @@ export class ClaudeBridgeWorker extends Worker {
     const convoId = typeof req.cell === 'string' ? req.cell.trim() : ''
     if (!convoId) return { id: req.id, ok: false, error: 'thread-read requires `cell` (the convoId)' }
     const turns = await readTurns(convoId)
-    return {
-      id: req.id, ok: true,
-      data: { convoId, turns: turns.map(t => ({ role: t.role, text: t.text, at: t.at })) },
+    const data: Record<string, unknown> = {
+      convoId, turns: turns.map(t => ({ role: t.role, text: t.text, at: t.at })),
     }
+    // THE LOG IS THE ONLY TRUTH THE RESPONDER CAN SEE. Turns say what was
+    // said; steps say what was done and what failed. One call returns both
+    // so a restarted responder reconstructs its whole loop from the record
+    // instead of from memory it no longer has. Opt-in, so every existing
+    // caller gets byte-identical output.
+    if (req.steps) {
+      const runId = typeof req.runId === 'string' ? req.runId.trim() : ''
+      data['steps'] = await readSteps(convoId, runId || undefined)
+    }
+    return { id: req.id, ok: true, data }
   }
 
   // ─── agent-progress ────────────────────────────────────────────────
@@ -1790,6 +1876,50 @@ export class ClaudeBridgeWorker extends Worker {
       return lastOp !== 'remove' || allSet.has(cell)
     })
   }
+}
+
+// ─── step-ledger helpers ───────────────────────────────────────────
+//
+// Routing, not content: `id` is a per-message nonce and `run` is the
+// addressing that put the step in this ledger in the first place, so neither
+// belongs in the recorded payload — and both would stop two identical
+// requests deduping to one resource. `base64` is dropped because the
+// response's own signature already points at those bytes; copying a resource
+// into the record of the step that made it is the one thing this file is
+// careful never to do.
+const STEP_UNRECORDED_FIELDS = new Set(['id', 'run', 'base64'])
+
+/** The request as the ledger stores it — keys SORTED, so the same request
+ *  sent twice mints one resource rather than two. */
+const stepPayload = (req: BridgeRequest): Record<string, unknown> => {
+  const out: Record<string, unknown> = {}
+  for (const key of Object.keys(req).sort()) {
+    if (STEP_UNRECORDED_FIELDS.has(key)) continue
+    out[key] = (req as unknown as Record<string, unknown>)[key]
+  }
+  return out
+}
+
+/** Signatures the op RETURNED — the edge from an attempt to the history it
+ *  produced. Pointers only: this never copies what they point at, which is
+ *  what keeps the ledger a view over history rather than a rival to it.
+ *  Bounded in depth and count so a large answer cannot turn one step into a
+ *  large record. */
+const harvestSigs = (data: unknown, limit = 32, maxDepth = 4): string[] => {
+  const out: string[] = []
+  const walk = (value: unknown, depth: number): void => {
+    if (out.length >= limit || depth > maxDepth) return
+    if (typeof value === 'string') {
+      if (isSignature(value) && !out.includes(value)) out.push(value)
+      return
+    }
+    if (Array.isArray(value)) { for (const item of value) walk(item, depth + 1); return }
+    if (value && typeof value === 'object') {
+      for (const item of Object.values(value as Record<string, unknown>)) walk(item, depth + 1)
+    }
+  }
+  walk(data, 0)
+  return out
 }
 
 // ─── base64 helpers ────────────────────────────────────────────────
