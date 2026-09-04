@@ -929,7 +929,7 @@ export class AgentPanelView extends EventTarget {
 
     shown.forEach((step, index) => {
       const line = document.createElement('div')
-      line.className = 'hc-agent-logline'
+      line.className = 'hc-agent-logline reading'
 
       const time = document.createElement('span')
       time.className = 'hc-agent-dim'
@@ -1191,6 +1191,11 @@ export class AgentPanelView extends EventTarget {
   color:rgba(238,244,250,0.82);cursor:pointer;border-radius:4px;}
 .hc-agent-logline:hover,.hc-agent-logline:focus-visible{background:rgba(255,255,255,0.055);outline:none;}
 .hc-agent-logline .hc-agent-dim{flex:0 0 auto;}
+/* A RECORDED step is read, never pressed — the activity lines above expand on
+   click, these do not. Without this they would still offer a pointer and a
+   hover lift, which is a control promising something it cannot do. */
+.hc-agent-logline.reading{cursor:default;}
+.hc-agent-logline.reading:hover{background:none;}
 .hc-agent-logtext{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .hc-agent-logline.expanded .hc-agent-logtext{overflow:visible;text-overflow:clip;white-space:pre-wrap;
   overflow-wrap:anywhere;}
