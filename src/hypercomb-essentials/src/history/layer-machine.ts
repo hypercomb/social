@@ -187,15 +187,18 @@ export class LayerMachine {
     }
 
     // A list op asserts the slot is a list. If it was held as a scalar,
-    // the scalar yields — explicitly, never by accident (header).
-    this.#scalars.delete(delta.slot)
+    // the scalar yields — explicitly, never by accident (header) — but only
+    // to an op that CHANGED something: a no-op (a removeSig that misses, a
+    // swap with no `from`) leaves the scalar exactly as it was, so
+    // `{ changed: false }` stays true in both senses (adjudication nit).
     const arr = this.#slots.get(delta.slot) ?? []
+    const yieldScalar = (): void => { this.#scalars.delete(delta.slot) }
 
     if (delta.op === 'append') {
       if (typeof delta.sig !== 'string' || delta.sig.length === 0) return { changed: false }
       if (arr.includes(delta.sig)) return { changed: false }
       this.#slots.set(delta.slot, [...arr, delta.sig])
-      return { changed: true }
+      { yieldScalar(); return { changed: true } }
     }
 
     if (delta.op === 'removeSig') {
@@ -206,7 +209,7 @@ export class LayerMachine {
       next.splice(idx, 1)
       if (next.length === 0) this.#slots.delete(delta.slot)
       else this.#slots.set(delta.slot, next)
-      return { changed: true }
+      { yieldScalar(); return { changed: true } }
     }
 
     if (delta.op === 'swap') {
@@ -218,7 +221,7 @@ export class LayerMachine {
       const next = arr.slice()
       next[idx] = delta.to
       this.#slots.set(delta.slot, next)
-      return { changed: true }
+      { yieldScalar(); return { changed: true } }
     }
 
     if (delta.op === 'set') {
@@ -233,7 +236,7 @@ export class LayerMachine {
       if (same) return { changed: false }
       if (incoming.length === 0) this.#slots.delete(delta.slot)
       else this.#slots.set(delta.slot, incoming)
-      return { changed: true }
+      { yieldScalar(); return { changed: true } }
     }
 
     return { changed: false }

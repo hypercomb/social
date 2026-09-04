@@ -69,12 +69,14 @@ the census had not:**
 - `tutorial-provenance.ts` — the fix keys by the location's signature, which
   is the path-hashed address the molecule model retires; an improvement, not
   the parent-layer-sig key proposed. Recorded, not reopened.
-- Residual nits, recorded not counted: `LayerMachine.apply` drops a scalar
-  before learning the list op was a no-op; `#opportunisticMigrateMarker`
-  still rewrites marker files from a read path; `replicate.js`'s directory
-  refusal fails the whole job rather than one atom; `layer-graph-resolver`
-  and `publishEvent` were dead code the doc said to delete — *deleted
-  2026-09-04.*
+- Residual nits, recorded not counted — *all four resolved 2026-09-04*:
+  `LayerMachine.apply` yields a scalar only to a list op that changed
+  something; `#opportunisticMigrateMarker` no longer rewrites the marker
+  (the harmless content put remains); `replicate.js` records a refused
+  destination write as one refused atom and the closure continues; the pool
+  relocation drains sig files one level below `__layers__` before the
+  install purge can reach them. `layer-graph-resolver` and `publishEvent`
+  were dead code the doc said to delete — *deleted 2026-09-04.*
 
 - Fixes are recorded inline as **FIXED (commit)** and left in place so the
   list stays a census, not a to-do. 2026-09-04: the one catastrophic item,

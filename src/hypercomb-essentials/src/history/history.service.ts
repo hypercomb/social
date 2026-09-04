@@ -1307,9 +1307,9 @@ export class HistoryService {
     // legacy markers (where bytes ARE the layer JSON).
     const { layerSig, isPointer } = await extractLayerSigFromMarker(bytes)
     if (!isPointer) {
-      // Legacy: marker bytes == layer bytes. Cache them, and migrate
-      // the marker to a pointer record (and the bytes into the pool)
-      // so subsequent reads find the canonical shape.
+      // Legacy: marker bytes == layer bytes. Cache them, and put the
+      // layer bytes at the root so sig reads find them. The marker itself
+      // is never rewritten (see #opportunisticMigrateMarker).
       this.#preloaderCache.set(layerSig, bytes)
       this.#opportunisticMigrateMarker(layerSig, bytes, handle)
     }
@@ -1329,26 +1329,21 @@ export class HistoryService {
   }
 
   /**
-   * Opportunistic legacy-marker migration: when a marker is read in its
-   * legacy bytes-in-marker shape, (1) write its bytes as a sig-named file
-   * at the OPFS root (store.writeLayerBytes), then (2) rewrite the marker file itself
-   * as a pointer record `{"layer":"<sig>"}`. After this the marker is
-   * indistinguishable from a fresh commit. Best-effort, idle-deferred —
-   * no caller waits.
-   *
-   * Sequencing matters: the pool write must complete before the marker
-   * rewrite, otherwise a concurrent reader could see the new
-   * pointer-shape marker pointing at bytes that aren't in the pool yet.
-   *
-   * Marker filename (NNNNNNNN) stays sequential — only its content
-   * shape changes. Layer-sig identity (what `latestMarkerSigFor` and
-   * `getLayerBySig` use) is unchanged because the layer bytes are
-   * unchanged; the marker rewrite is purely a shape migration.
+   * A LEGACY MARKER IS READ, NEVER REWRITTEN. Markers written before the
+   * pointer shape carry the layer JSON itself; `extractLayerSigFromMarker`
+   * reads them forever. This used to schedule a marker REWRITE into the
+   * pointer shape from the read path — a write nobody asked for, on a file
+   * whose bytes other readers and replicas hold, from the one path that is
+   * supposed to be pure (adjudication nit; data never heals). What remains
+   * is the harmless half: the layer bytes the marker inlines are put at the
+   * flat root so `getLayerBySig` finds them — a content write, addressed by
+   * its own hash, idempotent, and refused by `writeLayerBytes` if the bytes
+   * ever failed to match.
    */
   #opportunisticMigrateMarker = (
     layerSig: string,
     bytes: ArrayBuffer,
-    markerHandle: FileSystemFileHandle | null,
+    _markerHandle: FileSystemFileHandle | null,
   ): void => {
     const store = get<{
       writeLayerBytes?: (sig: string, b: ArrayBuffer) => Promise<void>
@@ -1359,18 +1354,10 @@ export class HistoryService {
         ? (cb) => (window as any).requestIdleCallback(cb, { timeout: 5_000 })
         : (cb) => setTimeout(cb, 0)
     schedule(async () => {
-      try {
-        // 1. Pool write FIRST — marker rewrite must point at present bytes.
-        await store.writeLayerBytes!(layerSig, bytes)
-        // 2. Rewrite the marker file as a pointer record.
-        if (!markerHandle) return
-        const record = JSON.stringify({ layer: layerSig })
-        const recordBytes = new TextEncoder().encode(record)
-        const writable = await markerHandle.createWritable()
-        try { await writable.write(recordBytes.buffer as ArrayBuffer) } finally { await writable.close() }
-      } catch { /* best-effort */ }
+      try { await store.writeLayerBytes!(layerSig, bytes) } catch { /* best-effort cache fill */ }
     })
   }
+
 
   /**
    * Head = the chronologically latest marker. Returns null when the

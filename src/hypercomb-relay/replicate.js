@@ -44,7 +44,11 @@ export async function resolveSignatureClosure(root, io, options = {}) {
       bytes = await io.fetch(signature)
       if (!bytes) { result.holes.push(signature); return }
       if (sha256(bytes) !== signature) { result.refused.push(signature); return }
-      await io.write(signature, bytes)
+      // A destination that refuses the write (a directory at the atom's
+      // address) is ONE refused atom, not a failed job: the sibling atoms
+      // still land, and the caller reads `refused` exactly as it does for a
+      // hash mismatch.
+      try { await io.write(signature, bytes) } catch { result.refused.push(signature); return }
       result.fetched++
     }
     result.held.push(signature)
@@ -101,7 +105,7 @@ export async function resolveSignatureInventory(root, io, options = {}) {
         atom = await io.fetch(signature)
         if (!atom) { result.holes.push(signature); return }
         if (sha256(atom) !== signature) { result.refused.push(signature); return }
-        await io.write(signature, atom)
+        try { await io.write(signature, atom) } catch { result.refused.push(signature); return }
         result.fetched++
       }
       result.held.push(signature)

@@ -71,6 +71,14 @@ describe('LayerMachine scalar slots — check 5 on the canonical write surface',
     expect(out['notes']).toEqual(['a'.repeat(64), 'b'.repeat(64)])
   })
 
+  it('a list op that changes NOTHING leaves a scalar slot exactly as it was', () => {
+    const m = LayerMachine.fromLayer({ name: 'x', cells: SIG } as never, 'x')
+    expect(m.apply({ slot: 'cells', op: 'removeSig', sig: 'd'.repeat(64) })).toEqual({ changed: false })
+    expect(m.apply({ slot: 'cells', op: 'swap', from: 'd'.repeat(64), to: 'e'.repeat(64) })).toEqual({ changed: false })
+    expect(m.getScalar('cells')).toBe(SIG)
+    expect((m.output() as Record<string, unknown>)['cells']).toBe(SIG)
+  })
+
   it('a list op on a scalar slot REPLACES it — explicit, never accidental', () => {
     const m = LayerMachine.fromLayer({ name: 'x', cells: SIG } as never, 'x')
     m.apply({ slot: 'cells', op: 'set', sigs: ['d'.repeat(64)] })

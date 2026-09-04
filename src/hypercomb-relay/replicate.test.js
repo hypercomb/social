@@ -121,3 +121,30 @@ test('flat destination refuses to write an atom over a DIRECTORY at that address
     assert.deepEqual(readFileSync(join(dir, signature, 'b'.repeat(64)), 'utf8'), 'a member')
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
+
+test('a destination that refuses one atom records it as refused and the rest of the closure still lands', async () => {
+  const leaf = Buffer.from('a leaf that lands')
+  const leafSig = sig(leaf)
+  const blocked = Buffer.from('a leaf whose address is a directory')
+  const blockedSig = sig(blocked)
+  const root = Buffer.from(JSON.stringify({ a: leafSig, b: blockedSig }))
+  const rootSig = sig(root)
+  const source = new Map([[rootSig, root], [leafSig, leaf], [blockedSig, blocked]])
+  const destination = new Map()
+  const io = {
+    fetch: async signature => source.get(signature) ?? null,
+    read: async signature => destination.get(signature) ?? null,
+    write: async (signature, bytes) => {
+      if (signature === blockedSig) throw new Error('refusing to write atom over a directory')
+      destination.set(signature, bytes)
+    },
+  }
+
+  const result = await resolveSignatureClosure(rootSig, io)
+
+  assert.deepEqual(result.refused, [blockedSig])
+  assert.deepEqual(result.holes, [])
+  assert.ok(result.held.includes(leafSig))
+  assert.ok(destination.has(leafSig))
+  assert.ok(!destination.has(blockedSig))
+})

@@ -2141,11 +2141,44 @@ export class Store extends EventTarget {
     let copied = 0
     let unrelocatable = 0
     try {
+      /** Copy one sig-named file up to the root unless a COMPLETE copy is
+       *  already there. Content-addressed, so equal size is the proof. */
+      const copyUp = async (name: string, handle: FileSystemFileHandle, where: string): Promise<'shadowed' | 'copied' | 'failed'> => {
+        try {
+          const sourceFile = await handle.getFile()
+          try {
+            const existing = await this.hypercombRoot!.getFileHandle(name, { create: false })
+            if ((await existing.getFile()).size === sourceFile.size) return 'shadowed'
+          } catch { /* not at root yet — copy it up */ }
+          const bytes = await sourceFile.arrayBuffer()
+          const dest = await this.hypercombRoot!.getFileHandle(name, { create: true })
+          const writable = await dest.createWritable()
+          try { await writable.write(bytes) } finally { await writable.close() }
+          return 'copied'
+        } catch (err) {
+          console.warn(`[store] relocate ${where}/${name.slice(0, 12)} → root failed`, err)
+          return 'failed'
+        }
+      }
       for await (const [name, handle] of (source as any).entries()) {
-        // Skip subdirectories (bag dirs, per-domain manifests) and any
-        // non-sig file (.crswap temp, stray artifacts): not ours to move,
-        // and their presence defers the pool's GC.
-        if (handle.kind !== 'file' || !isSignature(name)) { unrelocatable++; continue }
+        // A SUBDIRECTORY (a legacy per-domain manifest dir under __layers__)
+        // is not ours to move — its presence defers the pool's GC — but the
+        // sig-named FILES inside it are content, and the install purge that
+        // later removes such a dir must never be the first thing to touch
+        // them. Drain them up one level first (adjudication nit).
+        if (handle.kind === 'directory') {
+          unrelocatable++
+          try {
+            for await (const [inner, innerHandle] of (handle as any).entries()) {
+              if (innerHandle.kind !== 'file' || !isSignature(inner) || inner === EMPTY_CONTENT_SIG) continue
+              await copyUp(inner, innerHandle as FileSystemFileHandle, `${poolName}/${name.slice(0, 12)}`)
+            }
+          } catch { /* unreadable subdir — deferred by the count above */ }
+          continue
+        }
+        // Any non-sig file (.crswap temp, stray artifact): not ours to move,
+        // and its presence defers the pool's GC.
+        if (!isSignature(name)) { unrelocatable++; continue }
         // THE EMPTY-HASH COLLISION. sha256('') names both "empty content" and
         // the ROOT lineage's sigbag, and at the root that name is a DIRECTORY.
         // Relocating a legacy file under it can never succeed — getFileHandle
@@ -2155,29 +2188,13 @@ export class Store extends EventTarget {
         // move on, silently.
         if (name === EMPTY_CONTENT_SIG) { unrelocatable++; continue }
         sigTotal++
-        try {
-          const sourceFile = await (handle as FileSystemFileHandle).getFile()
-          // Shadowed must mean COMPLETE at the root — size equality, not
-          // mere existence. A 0-byte/short target from an interrupted
-          // earlier copy would otherwise pass the gate and the GC would
-          // delete the only complete copy. Content-addressed, so equal
-          // size ⇒ identical bytes.
-          try {
-            const existing = await this.hypercombRoot.getFileHandle(name, { create: false })
-            if ((await existing.getFile()).size === sourceFile.size) {
-              shadowed++
-              continue
-            }
-          } catch { /* not at root yet — copy it up */ }
-          const bytes = await sourceFile.arrayBuffer()
-          const dest = await this.hypercombRoot.getFileHandle(name, { create: true })
-          const writable = await dest.createWritable()
-          try { await writable.write(bytes) } finally { await writable.close() }
-          shadowed++
-          copied++
-        } catch (err) {
-          console.warn(`[store] relocate ${poolName}/${name.slice(0, 12)} → root failed`, err)
-        }
+        // Shadowed must mean COMPLETE at the root — size equality, not mere
+        // existence: a 0-byte/short target from an interrupted earlier copy
+        // would otherwise pass the gate and the GC would delete the only
+        // complete copy.
+        const outcome = await copyUp(name, handle as FileSystemFileHandle, poolName)
+        if (outcome !== 'failed') shadowed++
+        if (outcome === 'copied') copied++
       }
     } catch (err) {
       console.warn(`[store] relocate scan of ${poolName} failed — pool left in place`, err)
