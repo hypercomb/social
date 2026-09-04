@@ -182,6 +182,96 @@ travels with the artifact, because it rides a decoration rather than a table.
 front, so the composer stays synchronous — which is what lets the same function
 draw a container at publish time, in the browser, and in a test.
 
+### Naming a section, and growing a hive from the design
+
+For a long time only a **leaf** could be named. A hole holding a nested layout
+takes no member, and that was read as "so it can ask for nothing" — which is
+true of a **seat** and false of a **name**.
+
+A layout is a **tree**, and the names on it are a hive waiting to be grown:
+
+| what it is | in the design | in the hive |
+|---|---|---|
+| named **section** | a hole with an arrangement in it | the tile everything under it hangs from |
+| named **leaf** | a hole a member seats into | a tile at whatever level it finds itself |
+| **unnamed** section | an arrangement decision | nothing — transparent; its named children hang from the nearest named ancestor |
+
+`holeTargetsOf` therefore reports both, a section carrying `slot: -1` so the
+distinction survives and nothing can mistake one for a seating position. The
+slot indices still come from `composeLayout`'s own numbering — the walk is the
+tree's, the numbers are the composer's, and an index that disagreed would name
+the wrong hole silently.
+
+`hiveOutline(node)` is the pure read of that: every named hole as a tile path,
+in the order the design reads. The targets window draws it as a tree before
+anything is made, and **Grow** queues each path at the one create door
+(`command:create-cells` — the same door `/create` uses). Nothing about tile
+creation is reimplemented, and pressing it twice makes nothing twice.
+
+While the rule stood, every hive a design could grow was exactly one row deep.
+
+### The properties can sit on either side
+
+The shelf and the properties are two acts on two different things — the library,
+and the container in front of you — and stacking them in one panel makes each
+one short. The arrow in the designer's header sends the properties to the other
+edge, where they share that lane with the flex gallery (a dock lane holds two;
+see `core/panels/dock-lanes.ts`). The shelf then has the whole of the side it
+was crowding, and the split grip goes away because there is nothing left on that
+side for it to divide.
+
+It is the SAME MARKUP either way — one `ng-template`, rendered in one place or
+the other. Two copies would drift, and the participant would find out which one
+had the newer control by pressing the wrong one.
+
+Which edge "across" is, is derived from where the shelf docks rather than
+written down twice, so a shelf that ever moves takes this with it.
+
+### Where the parts sit — two places, one variable
+
+`justify` and `align` are the two axes a participant reaches for constantly —
+put this at the far end, spread these out, centre that. They are in the
+**properties**, drawn as what they do: nine small flexboxes, each setting itself
+from the value it stands for, so a control cannot advertise an arrangement the
+value does not make.
+
+The **flex editor** keeps all five axes and stays what it always was: a
+**gallery**, drawing your own container wearing every value. That is what you
+open to *compare* two you cannot choose between; the properties answer the
+commoner question. Both emit `template:set-var`, so the two windows cannot
+disagree about what a variable is.
+
+### A group is a molecule, not a folder
+
+A saved arrangement can be gathered under a **word**, and `sign(word)` is its
+address — the molecule that word already names, on this hive and on every other
+one. Nothing holds the group: each creation **wears** the word, and the group is
+whatever wears it.
+
+Three things follow, and each is pinned in `layout-groups.spec.ts`:
+
+- **A group cannot be empty.** There is no way to make one before it has a
+  member, which is why the shelf has no "new group" button anywhere.
+- **The last member leaving IS the group ending.** Nothing is deleted for that
+  to happen, and no member is ever orphaned by it.
+- **Order rides the member.** Each creation carries `order`; a move is two
+  members swapping ranks, never the shelf renumbering. A group holds no list,
+  so two members can never disagree about which comes first — and a member that
+  arrived from somebody else's hive simply sorts by what it says.
+
+The creation's **identity** is derived once from the name it was born with and
+the moment it was made, and carried through every rewrite. Renaming, grouping
+and reordering each mint a new pool member — a member is named by its own bytes
+— so none of those can be the identity. Concealment keys on it: hide a creation,
+rename it, and it is still hidden.
+
+**Hiding is what the shelf offers; deleting is not on it.** A creation goes to
+the delete area through the one owner of what is put away
+(`concealment.ts`), where it can be brought back and where — and only there —
+it can be destroyed. `forgetCreation` still exists and is that second act; the
+arrangement itself survives either way, because it is content and nobody owns a
+signature.
+
 ### The library — five primitives, drawn one way
 
 **A layout is a division of space that was already being given.** The outermost
@@ -732,6 +822,13 @@ said nothing, which reads as a broken window rather than as a rule.
 - The same arrangement mints the same signature, so N targets are N references.
 - A hole meaning is always `scope:name`, and its address is a **group**
   signature — never a pool signature, which would register a place.
+- A SECTION can be named and takes no member. `slot: -1` says so, and the two
+  facts never merge: a name is what a hole IS, a slot is where a member sits.
+- An unnamed section is transparent to `hiveOutline`. A design half-named grows
+  the half that was named, and never a tile nobody asked for.
+- A group is whatever wears the word. It cannot be empty, it is never created
+  before its first member, and it ends when its last one leaves.
+- Order rides the member, never a list. A move swaps two ranks.
 - The selection is ringed on the outside, and the keyboard never climbs into
   the container it is already in.
 - A pointer gesture walks the stack under it rather than choosing a layer: a
@@ -739,6 +836,8 @@ said nothing, which reads as a broken window rather than as a rule.
 
 Covered by `presentation/tiles/layout-template.spec.ts` (77 tests),
 `presentation/tiles/layout-creations.spec.ts` (5 tests),
+`presentation/tiles/layout-groups.spec.ts` (11 tests),
+`presentation/tiles/hole-target.spec.ts` (17 tests),
 `presentation/tiles/layout-piece.spec.ts` (11 tests),
 `hypercomb-shared/ui/layout-designer/canvas-box.spec.ts` (14 tests) and
 `hypercomb-shared/ui/layout-designer/select-walk.spec.ts` (35 tests).

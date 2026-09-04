@@ -64,6 +64,7 @@ import {
   type LayoutHole,
   type LayoutNode,
   type LayoutTemplate,
+  type LeafHole,
 } from './layout-template.js'
 
 /** The family a hole is named in when nothing else is said. A website is the
@@ -78,8 +79,22 @@ export interface HoleTarget {
   readonly level: readonly string[]
   /** The hole's own key within that level. */
   readonly key: string
-  /** Which member seats here — the slot index the composer gave it. */
+  /** Which member seats here — the slot index the composer gave it. A SECTION
+   *  has none and says -1: it is filled by the layout nested in it, not by a
+   *  member, so it is not a seating position at all. */
   readonly slot: number
+  /** A layout is nested in this hole.
+   *
+   *  It takes no member and it never will, and for a long time that was read as
+   *  "so it cannot be named". That is true of a SEAT and false of a NAME: in a
+   *  hive the section is the tile the things under it hang from, so a design
+   *  whose sections are unnamed can only ever grow one flat row of children.
+   *  A named section is a parent; a named leaf is a child; an unnamed section
+   *  is transparent and its children hang from whatever is above it. */
+  readonly section: boolean
+  /** How deep this hole sits — 0 on the root's own template. The window indents
+   *  by it, so the list reads as the tree it is. */
+  readonly depth: number
   readonly fill: 'fixed' | 'fluid'
   readonly band: boolean
   /** `site:masthead`, or empty when this hole has not been named. */
@@ -95,27 +110,72 @@ export interface HoleTarget {
   readonly artifactKind: string
 }
 
-/** Every hole a part can be seated into, in slot order.
+/** EVERY hole in the arrangement, in document order — sections and seats alike.
  *
- *  LEAVES ONLY, and that is not a shortcut. A hole holding a nested level is
- *  filled BY THAT LAYOUT — it is a container, not a slot, it takes no member
- *  and it gets no index. Offering it for naming would advertise an interface
- *  nothing can ever answer.
+ *  It was leaves only, and the reasoning was sound as far as it went: a hole
+ *  holding a nested level takes no member, so offering it a slot would be
+ *  offering a seat nothing can sit in. But a name is not a seat. A design is a
+ *  TREE, and the tree is what a hive is grown from: the sections are its
+ *  branches and the leaves are what hangs off them. Withholding the name from
+ *  the branches meant every hive a layout could grow was one row deep.
  *
- *  The walk is `composeLayout`'s own, not a second one written to match it: a
- *  slot index that disagreed with the composer's would name the wrong hole,
- *  and it would do it silently. */
+ *  So both are here, a section carrying `slot: -1` so the distinction survives
+ *  and nothing can mistake one for a seating position.
+ *
+ *  THE SLOTS STILL COME FROM `composeLayout`. The walk below is the tree's, but
+ *  a leaf's index is looked up from the composer's own numbering rather than
+ *  counted again here: an index that disagreed with the composer's would name
+ *  the wrong hole, and it would do it silently. */
 export async function holeTargetsOf(root: LayoutNode): Promise<readonly HoleTarget[]> {
   const out: HoleTarget[] = []
-  for (const leaf of composeLayout(root).leaves) {
-    const meaning = sanitizeMeaning(leaf.meaning ?? '')
+  const slots = new Map<string, LeafHole>()
+  for (const leaf of composeLayout(root).leaves) slots.set(leaf.path.join('/'), leaf)
+
+  interface Raw {
+    path: string[]
+    key: string
+    slot: number
+    section: boolean
+    depth: number
+    fill: 'fixed' | 'fluid'
+    band: boolean
+    meaning: string
+  }
+  const raw: Raw[] = []
+  const walk = (node: LayoutNode, path: readonly string[], depth: number): void => {
+    for (const hole of node.template.holes) {
+      const here = [...path, hole.key]
+      const child = node.nested[hole.key]
+      const leaf = slots.get(here.join('/'))
+      // The root's own page is not a hole anybody names: it is where the
+      // container's own content goes, and `composeLayout` gives it no slot.
+      if (!child && !leaf) continue
+      raw.push({
+        path: here,
+        key: hole.key,
+        slot: leaf?.index ?? -1,
+        section: !!child,
+        depth,
+        fill: hole.fill,
+        band: hole.band === true,
+        meaning: sanitizeMeaning(hole.meaning ?? ''),
+      })
+      if (child) walk(child, here, depth + 1)
+    }
+  }
+  walk(root, [], 0)
+
+  for (const hole of raw) {
+    const meaning = hole.meaning
     out.push({
-      path: [...leaf.path],
-      level: leaf.path.slice(0, -1),
-      key: leaf.key,
-      slot: leaf.index,
-      fill: leaf.fill,
-      band: leaf.band === true,
+      path: [...hole.path],
+      level: hole.path.slice(0, -1),
+      key: hole.key,
+      slot: hole.slot,
+      section: hole.section,
+      depth: hole.depth,
+      fill: hole.fill,
+      band: hole.band,
       meaning,
       family: meaning ? familyOfMeaning(meaning) : '',
       name: meaning ? nameOfMeaning(meaning) : '',
@@ -123,6 +183,41 @@ export async function holeTargetsOf(root: LayoutNode): Promise<readonly HoleTarg
       artifactKind: artifactKindFor(meaning ? familyOfMeaning(meaning) : DEFAULT_HOLE_FAMILY),
     })
   }
+  return out
+}
+
+/**
+ * THE HIVE THIS DESIGN IS ASKING FOR — every named hole as a tile path, in the
+ * order the design reads.
+ *
+ * This is the whole point of naming a section. A named section is a TILE and
+ * the things below it hang from it; a named leaf is a tile at whatever level it
+ * finds itself; an UNNAMED section is transparent — it is an arrangement
+ * decision, not a place, so its named children attach to the nearest named
+ * ancestor rather than to a tile nobody asked for.
+ *
+ * Pure. It says what the hive would be, and nothing here creates anything: what
+ * that costs, and whether any of it is already there, is decided by the caller.
+ */
+export function hiveOutline(root: LayoutNode): readonly (readonly string[])[] {
+  const out: string[][] = []
+  const walk = (node: LayoutNode, trail: readonly string[], depth: number): void => {
+    if (depth > 16) return
+    for (const hole of node.template.holes) {
+      const meaning = sanitizeMeaning(hole.meaning ?? '')
+      const name = meaning ? nameOfMeaning(meaning) : ''
+      const child = node.nested[hole.key]
+      // A hole that is neither named nor holding anything named contributes
+      // nothing — a design half-named grows the half that was named.
+      // The root's own page is not a child of itself. Below the root a self
+      // hole is an ordinary seat, which is composeLayout's own rule.
+      const own = depth === 0 && hole.self === true && !child
+      const here = name && !own ? [...trail, name] : [...trail]
+      if (name && !own) out.push(here)
+      if (child) walk(child, here, depth + 1)
+    }
+  }
+  walk(root, [], 0)
   return out
 }
 
@@ -158,8 +253,9 @@ export function withMeaningAt(
   const key = path[path.length - 1]
   const node = nodeAt(root, level)
   if (!node || !node.template.holes.some(hole => hole.key === key)) return root
-  // A hole holding a nested level takes no member, so it can ask for nothing.
-  if (node.nested[key]) return root
+  // A hole holding a nested level takes no MEMBER. It is still named: it is the
+  // section, and in a hive the section is the tile everything under it hangs
+  // from. See holeTargetsOf.
 
   const clean = sanitizeMeaning(meaning)
   const holes: LayoutHole[] = node.template.holes.map((hole): LayoutHole => {

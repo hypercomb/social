@@ -50,15 +50,21 @@ import {
   creationGlyph,
   findCreation,
   forgetCreation,
+  groupCreation,
   knownCreations,
+  knownGroups,
+  moveCreation,
   openHoles,
+  renameCreation,
   saveCreation,
   sweepCreationPool,
 } from './layout-creations.js'
+import type { ConcealedItem } from '../../concealment/concealment.js'
 import { findTemplate, knownTemplates, targetTemplate } from '../../commands/template.queen.js'
 import { targetsIn } from './meaning-target.js'
 import {
   DEFAULT_HOLE_FAMILY,
+  hiveOutline,
   holeMeaning,
   holeTargetsOf,
   withMeaningAt,
@@ -126,6 +132,20 @@ export interface LevelState {
    *  knows how it stands, so it hands over its own picture. */
   readonly glyph: string
   readonly variables: readonly { name: string; value: string }[]
+  /** HOW THIS LEVEL DISTRIBUTES WHAT IS IN IT, resolved.
+   *
+   *  Where the parts sit along the axis, and how they sit across it. They are
+   *  the two questions a participant asks constantly — put this at the far end,
+   *  spread these out, centre that — and they were only answerable in the
+   *  companion window, which is a gallery you open to COMPARE values. Comparing
+   *  is the rarer act; the properties answer the common one, and both write the
+   *  same variable.
+   *
+   *  RESOLVED, not declared: a level that has never said anything still stands
+   *  somewhere, and a control that showed nothing for it would be lying about
+   *  where the parts are. */
+  readonly justify: string
+  readonly align: string
 }
 
 /** One value an axis can take, drawn as YOUR container wearing it.
@@ -171,6 +191,24 @@ export interface AssetState {
    *  the raw hole count. Both types answer through `openHoles`, so a piece and
    *  a creation of the same shape put the same number on the shelf. */
   readonly holes: number
+  /** WHAT IT IS, across every rename. Empty for a piece — a built-in is not
+   *  the participant's to hide or to rename, so it needs no identity to key
+   *  either act on. */
+  readonly id: string
+  /** The word it is gathered under, or empty for a loose one. A group is a
+   *  molecule the members wear, never a folder holding them. */
+  readonly group: string
+  /** Put away. It is still here, it is listed in the delete area, and it comes
+   *  back — that is the whole difference between hiding and deleting. */
+  readonly hidden: boolean
+}
+
+/** One word the shelf is wearing. The address is `sign(word)` — the molecule
+ *  that word names everywhere, not a label this shelf minted. */
+export interface GroupState {
+  readonly name: string
+  readonly address: string
+  readonly count: number
 }
 
 /** One hole, everything the targets window shows about it.
@@ -201,6 +239,11 @@ export interface TargetsState {
    *  Derived from the behaviours actually registered — a family nothing can
    *  produce is guidance towards a dead end. */
   readonly families: readonly string[]
+  /** THE HIVE THIS DESIGN IS ASKING FOR — every named hole as a tile path, in
+   *  the order the design reads. Named sections are the branches; named leaves
+   *  hang off them. Empty until something is named, which is the honest answer
+   *  to "what would this grow" before anything has been said. */
+  readonly outline: readonly (readonly string[])[]
   readonly dormant: boolean
 }
 
@@ -212,11 +255,20 @@ export interface TemplateState {
   readonly container: string
   readonly levels: readonly LevelState[]
   readonly assets: readonly AssetState[]
+  /** The words the creations are wearing, in shelf order. Derived from the
+   *  members every read — there is no group record to fall out of step. */
+  readonly groups: readonly GroupState[]
   readonly dormant: boolean
 }
 
 const get = <T,>(key: string): T | undefined =>
   (window as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
+
+/** Whether two sets say the same thing — the concealment drone re-announces on
+ *  every read, and republishing the whole shelf for an unchanged answer would
+ *  redraw the panel under the participant's pointer. */
+const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
+  a.size === b.size && [...a].every(value => b.has(value))
 
 export class TemplateAuthorDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -233,6 +285,11 @@ export class TemplateAuthorDrone extends Drone {
   #targetsGen = 0
   /** Which level the designer is pointing at. Viewing state, not design. */
   #selected: string[] = []
+  /** Creation identities the participant has put away — hidden AND deleted,
+   *  because both mean "not on the shelf" and only the delete area tells them
+   *  apart. Owned by the concealment drone; mirrored here so a read does not
+   *  await it. */
+  #hidden = new Set<string>()
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#bound) return
@@ -272,6 +329,38 @@ export class TemplateAuthorDrone extends Drone {
     })
     this.onEffect<{ name?: string }>('template:forget', payload => {
       void this.#forget(payload?.name)
+    })
+    this.onEffect<{ name?: string; to?: string }>('template:rename', payload => {
+      void this.#rename(payload?.name, payload?.to)
+    })
+    this.onEffect<{ name?: string; group?: string }>('template:group', payload => {
+      void this.#group(payload?.name, payload?.group)
+    })
+    this.onEffect<{ name?: string; by?: number }>('template:move', payload => {
+      void this.#move(payload?.name, payload?.by)
+    })
+    this.onEffect<{ name?: string; hidden?: boolean }>('template:conceal', payload => {
+      void this.#conceal(payload?.name, payload?.hidden !== false)
+    })
+    // WHAT IS PUT AWAY is owned by one drone for the whole app, so this reads
+    // the same set the delete area does rather than keeping a second one.
+    this.onEffect<{ items?: ConcealedItem[]; gone?: string[] }>('hidden:render', payload => {
+      const hidden = new Set<string>([
+        ...(payload?.items ?? []).map(item => String(item?.sig ?? '').toLowerCase()),
+        ...(payload?.gone ?? []).map(sig => String(sig ?? '').toLowerCase()),
+      ])
+      const was = this.#hidden
+      this.#hidden = hidden
+      // DELETED IN THE DELETE AREA MEANS THE SHELF LETS GO. The concealment
+      // record keeps it from ever listing again; this is what stops the pool
+      // member outliving the decision by forever. The ARRANGEMENT is untouched
+      // and untouchable — it is content, other containers may be reading it,
+      // and a signature is nobody's to delete.
+      void this.#reap(payload?.gone ?? [])
+      if (this.#open && !sameSet(was, hidden)) void this.#publish()
+    })
+    this.onEffect<{ segments?: string[] }>('targets:grow', payload => {
+      void this.#grow(payload?.segments)
     })
     this.onEffect(CREATIONS_CHANGED, () => { if (this.#open) void this.#publish() })
     this.onEffect<{ segments?: string[] }>('template:clear', payload => {
@@ -336,6 +425,9 @@ export class TemplateAuthorDrone extends Drone {
       ...knownTemplates().map((template): AssetState => ({
         kind: 'piece',
         name: template.name,
+        id: '',
+        group: '',
+        hidden: false,
         glyph: templateContainer(template, miniatureVars(template)),
         // THE SAME FUNCTION THE CREATIONS USE. This was `template.holes.length`
         // — every hole, the self hole included — while a creation counted only
@@ -352,6 +444,7 @@ export class TemplateAuthorDrone extends Drone {
       segments: [...segments],
       cell: segments.at(-1) ?? '',
       layout: '', container: '', levels: [], assets,
+      groups: knownGroups().map(group => ({ ...group })),
       dormant: isBehaviorDormant(TEMPLATE_TARGET_KIND, segments),
     }
     // The ROOT reads like anywhere else. It has a location signature, it can
@@ -388,6 +481,13 @@ export class TemplateAuthorDrone extends Drone {
         name: creation.name,
         glyph: creationGlyph(node),
         holes: openHoles(node),
+        id: creation.id,
+        group: creation.group,
+        // A creation whose identity could not be derived is never reported
+        // hidden: an empty key would match every other undated record, and a
+        // shelf that hides the wrong thing is worse than one that hides
+        // nothing.
+        hidden: !!creation.id && this.#hidden.has(creation.id),
       })
     }
     return out
@@ -416,10 +516,126 @@ export class TemplateAuthorDrone extends Drone {
 
   /** Take one off the shelf. The arrangement itself is untouched — see
    *  layout-creations.ts on why forgetting is not deleting. */
+  /** Drop the pool members for creations the delete area destroyed. Once each:
+   *  forgetting announces, which brings the set round again. */
+  async #reap(gone: readonly string[]): Promise<void> {
+    const ids = new Set(gone.map(sig => String(sig ?? '').toLowerCase()).filter(Boolean))
+    if (!ids.size) return
+    for (const creation of knownCreations()) {
+      if (!creation.id || !ids.has(creation.id)) continue
+      await forgetCreation(creation.name)
+    }
+  }
+
   async #forget(name: string | undefined): Promise<void> {
     if (!name) return
     await forgetCreation(name)
     await this.#publish()
+  }
+
+  async #rename(name: string | undefined, to: string | undefined): Promise<void> {
+    if (!name || !String(to ?? '').trim()) return
+    const renamed = await renameCreation(name, String(to))
+    if (!renamed) return
+    // The shelf shows the free neighbour when the name was taken, so the log
+    // says what it actually ended up called rather than what was asked for.
+    EffectBus.emit('activity:log', { message: `Layout renamed to ${renamed.name}`, icon: 'dashboard' })
+    await this.#publish()
+  }
+
+  async #group(name: string | undefined, group: string | undefined): Promise<void> {
+    if (!name) return
+    const held = await groupCreation(name, String(group ?? ''))
+    if (!held) return
+    EffectBus.emit('activity:log', {
+      message: held.group ? `${held.name} joined ${held.group}` : `${held.name} is loose again`,
+      icon: 'dashboard',
+    })
+    await this.#publish()
+  }
+
+  async #move(name: string | undefined, by: number | undefined): Promise<void> {
+    if (!name || !Number(by)) return
+    if (await moveCreation(name, Number(by) < 0 ? -1 : 1)) await this.#publish()
+  }
+
+  /**
+   * PUT IT AWAY, or take it back out.
+   *
+   * Hiding is the act a list offers; deleting lives in the delete area and is
+   * not on this shelf at all. Both go through the one owner of what is put
+   * away, keyed on the creation's IDENTITY — so renaming a hidden creation
+   * leaves it hidden, which is what renaming means and hiding does not.
+   */
+  async #conceal(name: string | undefined, hidden: boolean): Promise<void> {
+    const creation = name ? findCreation(name) : null
+    if (!creation?.id) return
+    // THE INTENT, never the pool. Concealment has ONE owner and it holds the
+    // read as well as the write: writing to the pool from here would put the
+    // record down and leave every surface — this one included — still showing
+    // the row, because nothing would have re-read the set.
+    if (hidden) {
+      EffectBus.emit('hidden:conceal', {
+        sig: creation.id,
+        scope: 'layout-creation',
+        label: creation.name,
+        from: creation.group || 'layouts',
+        // The arrangement itself survives a delete — it is content, addressed
+        // by its bytes. What can be destroyed is this shelf's claim on it.
+        deletable: true,
+      })
+    } else {
+      EffectBus.emit('hidden:reveal', { sig: creation.id })
+    }
+  }
+
+  /**
+   * GROW THE HIVE THIS DESIGN IS ASKING FOR.
+   *
+   * A design names its holes, and a named hole is a tile: sections are the
+   * branches, leaves are what hangs off them. This walks the outline in the
+   * order the design reads and says each path once.
+   *
+   * IT DOES NOT IMPLEMENT CREATION. Tile creation has one door — the command
+   * line's create path, which owns nesting, name normalisation and the commit —
+   * and this queues paths at it, exactly as `/create` does. A second
+   * implementation would be a second set of rules about what a name may be.
+   */
+  async #grow(segments: readonly string[] | undefined): Promise<void> {
+    const subject = this.#subject(segments)
+    const bound = await resolveTemplateAt(subject)
+    if (!bound) return
+    const outline = hiveOutline(bound.node)
+    if (!outline.length) {
+      EffectBus.emit('activity:log', {
+        message: 'Nothing is named yet — name a hole and it becomes a tile', icon: '⬡',
+      })
+      return
+    }
+    let made = 0
+    for (const path of outline) {
+      if (await this.#create(path.join('/'))) made += 1
+    }
+    EffectBus.emit('activity:log', {
+      message: made ? `Grew ${made} ${made === 1 ? 'tile' : 'tiles'} from ${bound.template.name}`
+        : 'The hive already has everything this design names',
+      icon: 'dashboard',
+    })
+  }
+
+  /** One path through the one create door. Resolves false when the shell is not
+   *  listening, so a grow reports what it actually managed. */
+  #create(path: string): Promise<boolean> {
+    if (!path) return Promise.resolve(false)
+    return new Promise<boolean>(resolve => {
+      let accepted = false
+      EffectBus.emitTransient('command:create-cells', {
+        name: path,
+        accept: () => { accepted = true },
+        complete: (error?: unknown) => resolve(accepted && error === undefined),
+      })
+      if (!accepted) resolve(false)
+    })
   }
 
   // ── the targets read ───────────────────────────────────────────────
@@ -436,6 +652,7 @@ export class TemplateAuthorDrone extends Drone {
       segments: [...segments],
       cell: segments.at(-1) ?? '',
       layout: '', container: '', holes: [], families: this.#families([]),
+      outline: [],
       dormant: isBehaviorDormant(TEMPLATE_TARGET_KIND, segments),
     }
     const bound = await resolveTemplateAt(segments)
@@ -452,6 +669,7 @@ export class TemplateAuthorDrone extends Drone {
       layout: bound.template.name,
       container: composeLayout(bound.node, await targetsIn(bound.node)).html,
       families: this.#families(holes.map(hole => hole.family)),
+      outline: hiveOutline(bound.node).map(path => [...path]),
       holes: holes.map((hole): HoleState => {
         const member = seated.get(hole.slot)
         return {
@@ -756,6 +974,8 @@ export function levelsOf(root: LayoutNode): LevelState[] {
         name,
         value: node.vars[name] ?? '',
       })),
+      justify: configurationOf(node.template, node.vars).justify,
+      align: configurationOf(node.template, node.vars).align,
     })
     for (const [key, child] of Object.entries(node.nested)) walk(child, [...path, key])
   }
