@@ -1055,6 +1055,48 @@ describe('doctrine ratchets', () => {
   // prove is rendered must be in every shell's list, or the fix is
   // `node scripts/fetch-fonts.cjs <shell>/public/fonts inter … material-symbols`
   // — never a smaller list.
+  // ── THE MODEL'S VOCABULARY IS THE CENSUS, NOT A LIST IN THE SHELL ────
+  //
+  // `hypercomb-grammar.ts` once carried `CALLABLE_FORMS`: five behaviour names
+  // and their argument shapes, written by hand, in the shell, beside the
+  // parser. Being a second copy of a list, it drifted the way second copies
+  // always drift — toward less than exists. A participant asked a local model
+  // to delete a tile and was told there is no delete behaviour, because
+  // `/remove` was not among the five, though it had shipped for months and any
+  // participant could type it.
+  //
+  // Authority now lives on each behaviour (`QueenBee.machine`) and the shell
+  // module derives from the live census. This ratchet is what stops the table
+  // growing back: the grammar module may not NAME a behaviour. If a new verb
+  // needs offering to a model, the fix is a `machine` block on that verb — in
+  // the file that implements it, beside the parser that reads its arguments.
+  it('the model grammar module names no behaviour', () => {
+    const grammar = readFileSync(
+      join(ROOT, 'hypercomb-shared', 'ui', 'chat-window', 'hypercomb-grammar.ts'), 'utf8')
+
+    // The live census: every command word a queen or a manual provider claims.
+    const census = new Set<string>()
+    for (const file of walk(join(ROOT, 'hypercomb-essentials', 'src'))) {
+      if (file.endsWith('.spec.ts')) continue
+      const code = stripComments(readFileSync(file, 'utf8'))
+      for (const m of code.matchAll(/(?:readonly )?command = '([a-z][a-z0-9-]*)'/g)) census.add(m[1])
+      for (const m of code.matchAll(/\{ name: '([a-z][a-z0-9-]*)', description:/g)) census.add(m[1])
+    }
+    expect(census.size, 'the behaviour census could not be read').toBeGreaterThan(80)
+
+    // Every word the shell module states, outside its own prose.
+    const named = new Set<string>()
+    const code = stripComments(grammar)
+    for (const m of code.matchAll(/['"`]\/?([a-z][a-z0-9-]*)['"`]/g)) {
+      if (census.has(m[1])) named.add(m[1])
+    }
+
+    expect(
+      [...named].sort(),
+      'the shell must not name behaviours for machine use — declare `machine` on the behaviour instead',
+    ).toEqual([])
+  })
+
   it('every icon the UI renders ships in every shell\'s icon subset', () => {
     const require = createRequire(import.meta.url)
     const wanted = require('./scripts/icon-names.cjs') as string[]
