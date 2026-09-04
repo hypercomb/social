@@ -1069,9 +1069,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   readonly #chatPanelOpen = signal(false)
   readonly chatPanelOpen = this.#chatPanelOpen.asReadonly()
 
-  // (The feedback toggle moved to the bottom-right document cluster —
-  //  edit-actions.component — taking the forum glyph and the
-  //  `feedback:toggle` / `feedback:panel-state` wiring with it.)
+  // (The feedback toggle left this rail for the bottom-right document cluster,
+  //  and then the feedback window itself was retired — 2026-09-04. That corner
+  //  opens the annotation sheet now: documentation/annotate-the-screen.md.)
 
   // ── pheromones button ─────────────────────────────────
   //
@@ -1289,20 +1289,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   onChatToggle(): void {
     EffectBus.emit('chat:toggle', {})
   }
-
-  /** ANNOTATE THE SCREEN — one press, from wherever the command line is. The
-   *  sheet reads the location itself, so nothing has to be pointed at first.
-   *  `/annotate` and the `d` key are the same act through other doors. */
-  onMarkupPress(): void {
-    EffectBus.emit('markup:open', {})
-  }
-
-  /** Can this browser photograph its own screen? `getDisplayMedia` is absent
-   *  on every phone, so the door is not offered there — the sheet would take
-   *  ink and then have nothing to do with it. Read once: a browser does not
-   *  grow the capability mid-session. */
-  readonly canAnnotate = signal(
-    typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia)
 
 
   /** Toggle the pheromone panel — open it when closed, close it when open.

@@ -13,8 +13,10 @@
 
 @use '../toolwindow' as tw;
 
-// The annotations window's identity: this sheet opens from that window and is
-// part of the same gesture, so it wears the same cold steel.
+// The sheet's own identity. It was the details window's steel back when it
+// opened from that window's header; it is a standing surface of its own now,
+// and keeps the cold steel because that is what a sheet of drawing ink over a
+// live screen should read as — an overlay, not a panel of the app.
 $steel: #7eb6d6;
 
 :host { display: contents; }
@@ -40,9 +42,10 @@ $steel: #7eb6d6;
 
 // ── the toolbar ──────────────────────────────────────────────────────
 
-.mk-bar {
-  @include tw.floating-panel($steel);
-
+// THE DOCK owns the position; the hint and the bar just stack inside it. The
+// bar wraps to as many rows as its controls need, and the hint stays the line
+// above it whatever that number is.
+.mk-dock {
   position: fixed;
   z-index: 100005;
   left: 50%;
@@ -50,12 +53,22 @@ $steel: #7eb6d6;
   bottom: calc(1.25rem + var(--hc-safe-bottom, 0px));
 
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: min(96vw, 46rem);
+}
+
+.mk-bar {
+  @include tw.floating-panel($steel);
+
+  display: flex;
   align-items: center;
   flex-wrap: wrap;
   justify-content: center;
   gap: 0.3rem;
   padding: 0.4rem 0.55rem;
-  max-width: min(96vw, 46rem);
+  max-width: 100%;
 }
 
 .mk-group {
@@ -126,6 +139,34 @@ $steel: #7eb6d6;
   }
 }
 
+// ── where this is of ─────────────────────────────────────────────────
+// Not a control: a fact, in the quiet ink, sitting where a caption would.
+// It has to be readable at a glance and never wide enough to push the two
+// acts off the bar, so a deep address ellipsizes rather than wrapping.
+
+.mk-where {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: 14rem;
+  padding: 0 0.15rem;
+  color: var(--hc-window-ink-quiet);
+  font-family: var(--hc-mono, system-ui);
+  font-size: 0.64rem;
+  letter-spacing: 0.03em;
+  cursor: default;
+
+  .mat-sym { font-size: 0.9rem; line-height: 1; }
+}
+
+.mk-where-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;          // a long address is told by its TAIL
+  text-align: left;
+}
+
 // ── the act ──────────────────────────────────────────────────────────
 
 .mk-send {
@@ -150,27 +191,34 @@ $steel: #7eb6d6;
   &:hover { filter: brightness(1.08); }
 }
 
+// The second door wears the tint rather than the accent: both are real acts,
+// but only one of them is what most presses mean, and two accent buttons side
+// by side make the participant choose before reading either.
+.mk-converse {
+  background: var(--hc-window-tint);
+  color: var(--hc-window-ink-loud);
+  box-shadow: inset 0 0 0 1px var(--hc-window-line);
+}
+
 .mk-close { margin-left: 0.1rem; }
 
 // ── the hint ─────────────────────────────────────────────────────────
 // One line, above the bar, saying what the press will do. It sits on the
-// screenshot rather than on a panel, so it carries its own dark plate.
+// screenshot rather than inside the bar, so it carries its own themed plate —
+// and it is a SIBLING IN THE DOCK, never independently positioned: measuring
+// it from the bottom of the screen assumed a one-row bar and broke the moment
+// the bar grew a control.
 
 .mk-hint {
-  position: fixed;
-  z-index: 100005;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: calc(4.1rem + var(--hc-safe-bottom, 0px));
+  @include tw.floating-panel($steel);
 
-  max-width: min(92vw, 40rem);
+  max-width: min(100%, 40rem);
   padding: 0.25rem 0.6rem;
-  // The hint sits OUTSIDE the bar, so the radius vars the floating-panel
-  // mixin publishes on .mk-bar do not reach it — the ladder value is spelled
-  // as the fallback rather than inherited from nothing.
-  border-radius: var(--hc-window-radius-control, 2px);
-  background: rgba(0, 0, 0, 0.62);
-  color: var(--hc-window-ink-plain);
+  // The hint is the bar's sibling, so it takes the same material mixin itself;
+  // pane, ink and accent must switch together for every named/system theme.
+  border-radius: var(--hc-window-radius-control);
+  color: var(--hc-window-ink-loud);
+  box-shadow: 0 4px 16px rgba(var(--hc-panel-shadow), 0.4);
   font-family: var(--hc-mono, system-ui);
   font-size: 0.62rem;
   letter-spacing: 0.03em;
@@ -178,16 +226,9 @@ $steel: #7eb6d6;
   pointer-events: none;
 }
 
-// A dark plate under bright ink is correct in both themes; under a bright
-// theme the panel ink is dark, so the plate goes with it and the line stays
-// legible instead of disappearing into the shot.
-:host-context(:is([data-theme='light'], [data-theme='honey'], [data-theme='sherbet'])) .mk-hint,
-:is([data-theme='light'], [data-theme='honey'], [data-theme='sherbet']) .mk-hint {
-  background: rgba(255, 255, 255, 0.82);
-}
-
 @media (max-width: 560px) {
   .mk-send-text { display: none; }
   .mk-send { padding: 0 0.55rem; }
+  .mk-where { max-width: 8rem; }
   .mk-hint { display: none; }
 }

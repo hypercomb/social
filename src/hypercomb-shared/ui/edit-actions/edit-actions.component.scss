@@ -40,6 +40,12 @@ $steel: rgb(126, 182, 214);
   flex-direction: row-reverse;
   align-items: center;
   gap: 0.3rem;
+
+  // OVER A PAGE. A view paints in its own stacking band, well above this
+  // cluster's resting z-index, so the one control that survives a view has to
+  // come up with it — the same lift the control bar takes when a surface asks
+  // to keep the controls. Same corner, same size: only the altitude changes.
+  &.over-view { z-index: 100004; }
 }
 
 .ea-btn {

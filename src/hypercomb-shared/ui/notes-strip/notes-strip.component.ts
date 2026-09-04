@@ -1540,16 +1540,6 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     EffectBus.emit('notes:open', { cellLabel })
   }
 
-  /** MARK UP THE SCREEN — open the drawing sheet over the whole app
-   *  (markup-overlay.component.ts). An annotation drawn on the interface is
-   *  still an annotation; its reader is the agent, which is why the shot it
-   *  produces lands on the chat's reference shelf rather than in this tree.
-   *  The active tile rides along only to NAME the picture — the sheet covers
-   *  the screen, not the tile, so there is nothing to gate on here. */
-  markUp(): void {
-    EffectBus.emit('markup:open', { cellLabel: this.cell() })
-  }
-
   // ── Note-row drag-reorder ─────────────────────────────────
   // Pointer-based (not HTML5 DnD) so we keep tight control over the
   // visual ghost + drop indicator and don't have to fight the
@@ -1858,7 +1848,7 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
     return role === 'heading' || role === 'list'
   }
 
-  /** The active tile's note tree — split by the annotations tab (prose and
+  /** The active tile's note tree — split by the details tabs (prose and
    *  conversation on `notes`, structured lists on `lists`), then pruned to
    *  the search query. Each surviving node is a shallow copy with its
    *  children likewise pruned, so the recursive row template renders the

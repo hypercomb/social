@@ -176,6 +176,11 @@ type ChatThreadsLike = {
    *  dormant until something lands in it. Absent on an older essentials
    *  build, and then the sidebar simply opens free-floating chats. */
   tileConvoId?(segments: readonly string[]): string
+  /** ANOTHER conversation about the same location — a tile is a subject, not
+   *  one thread. Absent on an older essentials build; then a conversation
+   *  started from an annotation is a free chat, which still carries the
+   *  picture, it just is not filed under the tile. */
+  newTileConvoId?(segments: readonly string[], seed?: string): string
   tilePath?(segments: readonly string[]): string
   tilePathOf?(convoId: string): string
   /** Unsent thinking, stored the moment it is typed and activating nothing. */
@@ -237,6 +242,19 @@ type RailPickLike = {
 /** A tile dragged out of the sidebar. The CONTRACT with essentials is this
  *  mime type and this shape — the shell may never import the module that
  *  sends it, so the wire is a string, not a type. */
+/** WHAT AN ANNOTATION SENDS. The sheet stores the bytes and hands over a
+ *  reference plus WHERE it was drawn; `fresh` asks for a new conversation on
+ *  that location rather than a line on the open one's shelf. */
+type AttachedPicture = {
+  sig?: string
+  name?: string
+  kind?: string
+  size?: number
+  open?: boolean
+  path?: readonly string[]
+  fresh?: boolean
+}
+
 export const TILE_DRAG_TYPE = 'application/x-hypercomb-tile'
 export type DroppedTile = { readonly name: string; readonly path: string; readonly sig: string }
 type TilesRailLike = {
@@ -984,6 +1002,49 @@ export class ChatWindowComponent implements OnDestroy {
     }])
     this.#announceSet()
     void this.#refreshContextThumbs()
+  }
+
+  /** AN ANNOTATION LANDING. Two shapes, one path in:
+   *
+   *    plain    the picture joins the open conversation's shelf, the way a
+   *             pasted screenshot does.
+   *    fresh    a NEW conversation about the location the picture was taken
+   *             at, carrying the annotation and nothing else.
+   *
+   *  The order matters. The window is opened FIRST, because opening resumes
+   *  the most recent conversation and would otherwise land on top of the one
+   *  just started. The shelf is then emptied — a conversation started from an
+   *  annotation is about that annotation, and references gathered for some
+   *  earlier question would ride along unread. Nothing is lost by it: the
+   *  shelf is filled FROM the clipboard, which this does not touch. */
+  async #attachPicture(payload?: AttachedPicture): Promise<void> {
+    const sig = String(payload?.sig ?? '')
+    if (!/^[0-9a-f]{64}$/.test(sig)) return
+    const path = (Array.isArray(payload?.path) ? payload!.path! : [])
+      .map(segment => String(segment ?? '').trim())
+      .filter(Boolean)
+    const show = payload?.open !== false
+
+    if (payload?.fresh) {
+      if (show && !this.visible()) await this.open()
+      this.#startAt(path)
+      this.references.set([])
+    }
+
+    const key = `image:${sig}`
+    if (!this.references().some(held => held.key === key)) {
+      this.references.set([...this.references(), {
+        key,
+        path,
+        name: String(payload?.name || 'annotation'),
+        sig,
+        size: Number(payload?.size) || undefined,
+        kind: String(payload?.kind || 'image/png'),
+      }])
+      this.#announceSet()
+      void this.#refreshContextThumbs()
+    }
+    if (show && !this.visible()) await this.open()
   }
 
   /** WHAT THE REQUEST CARRIES, structured. A reference is a pointer plus what
@@ -1816,31 +1877,18 @@ export class ChatWindowComponent implements OnDestroy {
 
     this.#cleanups.push(EffectBus.on('chat:close', () => { if (this.visible()) this.close() }))
 
-    // A PICTURE ARRIVING FROM ELSEWHERE. The markup sheet (markup-overlay)
+    // A PICTURE ARRIVING FROM ELSEWHERE. The annotation sheet (markup-overlay)
     // photographs the screen and stores the bytes itself, so what reaches the
     // shelf is the same {sig, kind} reference a pasted screenshot becomes —
     // the surface that took the picture never has to know how this window
     // holds one. The window opens on arrival: a context nobody can see is a
     // context nobody will use.
-    this.#cleanups.push(EffectBus.on<{ sig?: string; name?: string; kind?: string; size?: number; open?: boolean }>(
-      'chat:attach-picture', payload => {
-        const sig = String(payload?.sig ?? '')
-        if (!/^[0-9a-f]{64}$/.test(sig)) return
-        const key = `image:${sig}`
-        if (!this.references().some(held => held.key === key)) {
-          this.references.set([...this.references(), {
-            key,
-            path: [],
-            name: String(payload?.name || 'marked-up screen'),
-            sig,
-            size: Number(payload?.size) || undefined,
-            kind: String(payload?.kind || 'image/png'),
-          }])
-          this.#announceSet()
-          void this.#refreshContextThumbs()
-        }
-        if (payload?.open !== false && !this.visible()) void this.open()
-      }))
+    //
+    // `fresh` is the annotation's second door: not "add this to what we are
+    // talking about" but "here is a new thing to talk about", at the location
+    // the picture was taken.
+    this.#cleanups.push(EffectBus.on<AttachedPicture>(
+      'chat:attach-picture', payload => { void this.#attachPicture(payload) }))
 
     // A draft landing anywhere — this composer, another window, a sweep — is
     // a change to the roster, because a conversation that holds only unsent
@@ -2724,7 +2772,34 @@ export class ChatWindowComponent implements OnDestroy {
     // unlistable: no row can hold it. It answers false when there is no tile,
     // and then a free chat is the honest thing to make.
     if (this.#rail?.newChatOnSubject?.()) { if (focus) this.#focus(); return }
-    this.activeId.set(threads?.newConvoId() ?? '')
+    this.#mint(threads?.newConvoId() ?? '', focus)
+  }
+
+  /** Start a conversation ABOUT A LOCATION — the door an annotation comes
+   *  through. The rail's "new chat" needs a tile in hand and the sidebar is
+   *  where that hand lives; here the location arrives with the picture, so
+   *  nothing has to be pointed at first. ANOTHER conversation, not the tile's
+   *  first one: an annotation is a new subject, and grafting it onto whatever
+   *  was last said about that tile is how threads become unreadable.
+   *
+   *  The rail's subject is dropped: it named a tile you clicked, and the
+   *  conversation is no longer about that tile. */
+  #startAt(segments: readonly string[]): void {
+    const threads = this.#threads()
+    void this.#flushDraft()
+    this.railSubject.set(null)
+    this.#rail?.clearSubject()
+    this.#mint(
+      threads?.newTileConvoId?.(segments) ?? threads?.newConvoId() ?? '',
+      true,
+    )
+  }
+
+  /** Become a named conversation that holds nothing yet. Shared by the free
+   *  chat and the located one, so the two can never drift about what a fresh
+   *  thread starts out as. */
+  #mint(convoId: string, focus: boolean): void {
+    this.activeId.set(convoId)
     this.#heldDraft = ''
     const box = this.input()?.nativeElement
     if (box) { box.value = ''; this.autosize(box) }

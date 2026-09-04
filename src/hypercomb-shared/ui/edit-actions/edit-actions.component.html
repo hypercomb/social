@@ -4,33 +4,51 @@
      grows the selection verbs — visually cut · copy · remove, left of
      undo. Container is row-reverse: later DOM children extend LEFT, so
      undo never moves under the cursor. -->
+<!-- THE CLUSTER SURVIVES A VIEW; ITS CONTENTS MOSTLY DO NOT. A page — a
+     website, a game, a document — takes the screen, and the app's editing
+     chrome has no business on it: undo, redo, save and the selection verbs
+     all belong to the hive you are standing in, not to the thing you are
+     reading. ANNOTATE is the exception, and the reason this is a per-control
+     gate instead of the old `display:none` on the whole box: the moment you
+     most want to draw on the screen and ask about it is when a page is what
+     is on the screen. Over a view it lifts to the view's own stacking band —
+     at the cluster's resting z-index it would be painted over. -->
 <div class="edit-actions" role="group" [attr.aria-label]="'controls.edit-actions' | t"
-  [style.display]="viewActive() ? 'none' : null">
-  <button
-    class="ea-btn"
-    type="button"
-    (click)="toggleOrientation()"
-    [attr.aria-label]="(flatTop() ? 'editor.switch-to-point' : 'editor.switch-to-flat') | t"
-    [title]="(flatTop() ? 'editor.switch-to-point' : 'editor.switch-to-flat') | t"
-  >
-    <span class="mat-sym">crop_rotate</span>
-  </button>
+  [class.over-view]="viewActive()"
+  [style.display]="viewActive() && !canAnnotate() ? 'none' : null">
+  @if (!viewActive()) {
+    <button
+      class="ea-btn"
+      type="button"
+      (click)="toggleOrientation()"
+      [attr.aria-label]="(flatTop() ? 'editor.switch-to-point' : 'editor.switch-to-flat') | t"
+      [title]="(flatTop() ? 'editor.switch-to-point' : 'editor.switch-to-flat') | t"
+    >
+      <span class="mat-sym">crop_rotate</span>
+    </button>
+  }
 
-  <!-- feedback — moved down from the command line's tools rail; row-reverse
-       places it immediately LEFT of the rotate icon. Lights while the
-       combined feedback panel is open. -->
-  <button
-    class="ea-btn"
-    [class.on]="feedbackOpen()"
-    type="button"
-    (click)="toggleFeedback()"
-    [attr.aria-label]="'feedback.button' | t"
-    [attr.aria-pressed]="feedbackOpen()"
-    [title]="'feedback.button' | t"
-  >
-    <span class="mat-sym">forum</span>
-  </button>
+  <!-- ANNOTATE — this corner used to open the feedback window, and the swap is
+       the point. Filing an issue hands somebody a complaint; drawing on the
+       screen and starting a conversation from it hands the assistant the
+       thing itself, in the place it happened. Same corner, same reflex,
+       different ending. Row-reverse puts it immediately LEFT of the rotate
+       icon, where the forum glyph was.
+       Hidden where the browser cannot photograph its own screen (every
+       phone): a control that can only fail is worse than no control. -->
+  @if (canAnnotate()) {
+    <button
+      class="ea-btn"
+      type="button"
+      (click)="annotate()"
+      [attr.aria-label]="'annotate.open' | t"
+      [title]="'annotate.open' | t"
+    >
+      <span class="mat-sym">draw</span>
+    </button>
+  }
 
+  @if (!viewActive()) {
   <button
     class="ea-btn"
     type="button"
@@ -95,5 +113,6 @@
     >
       <span class="mat-sym">content_cut</span>
     </button>
+  }
   }
 </div>

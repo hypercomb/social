@@ -14,6 +14,15 @@
        the one thing on screen that is about taking the picture rather than in
        it, and `visibility` still reserves its box in the compositor. -->
   @if (!shooting()) {
+    <!-- ONE DOCK, two stacked children. The hint used to be its own fixed
+         element measured from the bottom of the screen, which silently assumed
+         the bar was exactly one row tall — add a control and the two overlap.
+         Stacking them in a column means the bar may grow to any number of rows
+         and the hint is always the line above it. -->
+    <div class="mk-dock">
+
+    <div class="mk-hint">{{ 'markup.hint' | t }}</div>
+
     <div class="mk-bar" role="toolbar" [attr.aria-label]="'markup.title' | t">
 
       <div class="mk-group">
@@ -67,18 +76,37 @@
 
       <span class="mk-sep" aria-hidden="true"></span>
 
-      <!-- The act. Everything left of here is preparation for this one press:
-           photograph the screen and put the picture on the chat's shelf. -->
+      <!-- WHERE THIS IS OF. Read once when the sheet opened and shown because
+           it is what the second door acts on: a conversation started here
+           belongs to this location, and a participant should see which before
+           pressing, not after. -->
+      <span class="mk-where" [title]="'markup.where' | t" [attr.aria-label]="'markup.where' | t">
+        <span class="mat-sym" aria-hidden="true">my_location</span>
+        <span class="mk-where-text">{{ where() }}</span>
+      </span>
+
+      <span class="mk-sep" aria-hidden="true"></span>
+
+      <!-- THE TWO DOORS. Left: this belongs in what we are already talking
+           about. Right: this IS the thing to talk about — a new conversation
+           on the location above, carrying the annotation and nothing else. -->
       <button type="button" class="mk-send" (click)="send()" [disabled]="busy()"
               [title]="'markup.send.hint' | t" [attr.aria-label]="'markup.send.hint' | t">
         <span class="mat-sym">photo_camera</span>
         <span class="mk-send-text">{{ 'markup.send' | t }}</span>
       </button>
 
+      <button type="button" class="mk-send mk-converse" (click)="send(true)" [disabled]="busy()"
+              [title]="'markup.converse.hint' | t: { where: where() }"
+              [attr.aria-label]="'markup.converse.hint' | t: { where: where() }">
+        <span class="mat-sym">forum</span>
+        <span class="mk-send-text">{{ 'markup.converse' | t }}</span>
+      </button>
+
       <button type="button" class="mk-btn mk-close" (click)="close()"
               [title]="'panel.close' | t" [attr.aria-label]="'panel.close' | t">×</button>
     </div>
 
-    <div class="mk-hint">{{ 'markup.hint' | t }}</div>
+    </div>
   }
 }

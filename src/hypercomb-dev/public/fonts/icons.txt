@@ -13,7 +13,6 @@ album
 analytics
 anchor
 api
-approval
 apps
 archive
 arrow_back
@@ -272,7 +271,6 @@ refresh
 remove
 repeat
 replay
-reply
 report
 request_quote
 restore

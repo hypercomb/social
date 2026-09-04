@@ -369,7 +369,6 @@ describe('doctrine ratchets', () => {
       "docs-overlay/docs-overlay.component",
       "example-hives/example-hives-offer.component",
       "features-viewer/features-viewer.component",
-      "feedback-viewer/feedback-viewer.component",
       "files-viewer/files-viewer.component",
       "flex-editor/flex-editor.component",
       "format-painter/format-painter.component",

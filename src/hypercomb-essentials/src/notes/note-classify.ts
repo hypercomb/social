@@ -6,7 +6,7 @@
 //
 // The vocabulary is the mark palette's (hypercomb-shared/core/note-marks.store.ts):
 // a mark's ROLE is `heading` | `list` | `prose`, and the two constrained roles
-// are POINTS while `prose` is the NOTE. The annotations window calls the two
+// are POINTS while `prose` is the NOTE. The details window calls the two
 // tabs "lists" and "notes"; this module keeps those user words on the outside
 // (`lists` / `notes` on the split's result) and the role words on the inside.
 //
@@ -71,7 +71,7 @@ export function isPointRoot(note: Note, roleOf?: RoleResolver): boolean {
   return role === 'heading' || role === 'list'
 }
 
-/** The tile's writing, split the way the annotations window splits it:
+/** The tile's writing, split the way the details window splits it:
  *  `lists` is the structure, `notes` is the prose and the conversation. */
 export function splitNoteRoots(
   notes: readonly Note[],
