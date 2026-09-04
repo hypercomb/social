@@ -1909,8 +1909,19 @@ export class Store extends EventTarget {
    *  root; no code writes a legacy typed pool. */
   public writeLayerBytes = async (signature: string, bytes: ArrayBuffer): Promise<void> => {
     if (!this.hypercombRoot) return
+    // THE NAME IS THE HASH, OR NOTHING IS WRITTEN. writeBeeBytes and
+    // writeDependencyBytes twelve lines down have always refused a mismatch;
+    // the layer writer did not, and one of its callers is the host-fetch
+    // write-through — a stranger's bytes landing at the root under a name
+    // this client never checked. A sig that names other bytes is not a cache
+    // miss to fill, it is a lie to refuse.
+    const expected = signature.toLowerCase()
+    if (await SignatureService.sign(bytes) !== expected) {
+      console.warn(`[store] refusing to write layer ${expected.slice(0, 8)}… — bytes do not hash to their name`)
+      return
+    }
     try {
-      const handle = await this.hypercombRoot.getFileHandle(signature, { create: true })
+      const handle = await this.hypercombRoot.getFileHandle(expected, { create: true })
       const writable = await handle.createWritable()
       try { await writable.write(bytes) } finally { await writable.close() }
     } catch { /* best-effort */ }

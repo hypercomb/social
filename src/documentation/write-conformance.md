@@ -30,8 +30,10 @@ produced verdicts. So:
 - Fixes are recorded inline as **FIXED (commit)** and left in place so the
   list stays a census, not a to-do. 2026-09-04: the one catastrophic item,
   the four-hat byte-scan bug, three of the four pointer copies, and the four
-  publish-without-gesture sites, and the life-primitive coherence item —
-  13 of 57 closed.
+  publish-without-gesture sites, the life-primitive coherence item, the
+  legacy-history shadow test, the layer writer's hash refusal, both host-side
+  write guards, and the insight catalog's kind — 19 of 57 closed (one not
+  reproduced).
 
 ## The headline
 
@@ -142,7 +144,11 @@ drops any scalar slot (`if (Array.isArray(v) && v.length > 0)`), and
 slot silently vanishes and `output()` can never write it back. `level-roster.ts`
 states scalar slots exist. *Fix:* carry non-array slots through verbatim.
 
-**Deletion — check 2.**
+**Deletion — check 2.** *gcLegacyHistory FIXED 2026-09-04: the shadow test
+compares bytes, so a diverged legacy marker keeps the folder. The
+`collapse-history.queen.ts:76` site could not be located — no such file
+exists; the nearest bag-removing loop, `sweep.queen.ts`, copies each entry
+verified before it removes it. Recorded as not reproduced.*
 - `history.service.ts:559` `gcLegacyHistory` — the shadow test is by *name*
   only and `#copyBagInto` never overwrites, so on a same-name divergence the
   legacy copy is never copied and then destroyed. *Fix:* compare content, or
@@ -151,12 +157,13 @@ states scalar slots exist. *Fix:* carry non-array slots through verbatim.
   pool addresses, so this loop removes markers from directories it has proved
   nothing about. *Fix:* restrict to bags this participant has a head for.
 
-**The primitive itself — check 1.** `store.ts:1910` `writeLayerBytes` — its two
+**The primitive itself — check 1.** *FIXED 2026-09-04 — the layer writer refuses a hash mismatch like its siblings; the host-fetch write-through was its most exposed caller.*
+`store.ts:1910` `writeLayerBytes` — its two
 siblings twelve lines away (`writeBeeBytes`, `writeDependencyBytes`) hash the
 bytes and refuse on mismatch; the layer writer does not. *Fix:* the three lines
 the siblings already have.
 
-**Hosts — checks 2, 3, 8.**
+**Hosts — checks 2, 3, 8.** *Both FIXED 2026-09-04: the relay's PUT refuses any path with more than one segment; the replicator refuses to write an atom over a directory (test added).*
 - `relay.js:909` `tryWriteContent` — the sig check pins the bytes and nothing
   about the *place*; `mkdirSync(dirname(resolved), {recursive:true})` lets an
   authorised writer choose a directory. *Fix:* reject any PUT path with more
@@ -177,7 +184,7 @@ the siblings already have.
 - `translation.service.ts:415` — writes translated props into a device-local
   index and never touches the layer; checks 1 and 3. *Fix:* one call through
   `writeTilePropertiesAt`.
-- `tree-insight.ts:96` with `pool-kinds.ts:129` — `insights:catalog` is
+- *FIXED 2026-09-04 — seeded `document`.* `tree-insight.ts:96` with `pool-kinds.ts:129` — `insights:catalog` is
   declared `index` (wipe-safe) but is a per-participant current document; a
   collector may wipe a hand-authored record. *Fix:* one seed line → `document`.
 

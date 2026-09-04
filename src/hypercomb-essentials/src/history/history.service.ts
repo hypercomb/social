@@ -565,11 +565,16 @@ export class HistoryService {
     }
   }
 
-  /** True when every FILE in `src` exists (by name) in `dst` and `src`
-   *  holds no leftover subdirs. The union copy never overwrites, so name
-   *  presence is the correct shadow test: a same-named file IS the
-   *  surviving era's marker, and the content bytes both point at live at
-   *  the root regardless. */
+  /** True when every FILE in `src` exists in `dst` WITH THE SAME BYTES and
+   *  `src` holds no leftover subdirs.
+   *
+   *  BYTES, NOT NAMES. The union copy never overwrites, so on a same-name
+   *  divergence — a legacy `0003` pointing at one layer and the root's
+   *  `0003` pointing at another — the legacy marker was never copied, the
+   *  name test then called it shadowed, and `__history__` was removed with
+   *  the only copy of that generation inside it. A marker that differs is
+   *  NOT shadowed; its presence keeps the legacy folder for a later pass,
+   *  which is the only safe answer on never-wipe history. */
   static readonly #dirShadowed = async (
     src: FileSystemDirectoryHandle,
     dst: FileSystemDirectoryHandle,
@@ -577,7 +582,15 @@ export class HistoryService {
     try {
       for await (const [name, handle] of (src as any).entries()) {
         if (handle.kind !== 'file') return false  // `__temporary__` straggler or unknown subdir
-        try { await dst.getFileHandle(name, { create: false }) } catch { return false }
+        let mine: ArrayBuffer
+        let theirs: ArrayBuffer
+        try {
+          mine = await (await (handle as FileSystemFileHandle).getFile()).arrayBuffer()
+          theirs = await (await (await dst.getFileHandle(name, { create: false })).getFile()).arrayBuffer()
+        } catch { return false }
+        if (mine.byteLength !== theirs.byteLength) return false
+        const a = new Uint8Array(mine), b = new Uint8Array(theirs)
+        for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
       }
       return true
     } catch { return false }

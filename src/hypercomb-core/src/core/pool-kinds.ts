@@ -127,7 +127,6 @@ export const declarePoolKind = (meaning: string, kind: PoolKind): PoolKindFacts 
 const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   // DERIVED CACHES — recomputable, wipe-safe, never sent.
   ['computed:genome', 'index'],
-  ['insights:catalog', 'index'],
   ['manifests', 'index'],
   ['molecule:index', 'index'],
   ['search:index', 'index'],
@@ -152,6 +151,10 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['websites:menu', 'set'],
   // DOCUMENTS — one current record, per-participant, replaced in place.
   ['backgrounds:screen', 'document'],
+  // Hand-authored insights, one current catalog via putPoolDoc — a PARTICIPANT'S
+  // record, not a derivation. It was seeded 'index' (wipe-safe), which told the
+  // collector a hand-written catalog could be thrown away.
+  ['insights:catalog', 'document'],
   ['overrides', 'document'],
   ['registry:bouquets', 'document'],
   ['registry:interests', 'document'],
