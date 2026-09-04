@@ -32,8 +32,8 @@ produced verdicts. So:
   the four-hat byte-scan bug, three of the four pointer copies, and the four
   publish-without-gesture sites, the life-primitive coherence item, the
   legacy-history shadow test, the layer writer's hash refusal, both host-side
-  write guards, and the insight catalog's kind — 19 of 57 closed (one not
-  reproduced).
+  write guards, the insight catalog's kind, and check 5 on the canonical
+  write surface — 20 of 57 closed (one not reproduced).
 
 ## The headline
 
@@ -138,7 +138,8 @@ subKey, sig)` emitting a sig-named JSON member under a colon meaning
   same reason `vocabulary:hive` was. *Fix:* add it — better, invert to an
   allow-list of `install:*`.
 
-**Check 5 on the canonical write surface.** `layer-machine.ts:121` `fromLayer`
+**Check 5 on the canonical write surface.** *FIXED 2026-09-04 — the machine carries scalar slots verbatim (a list op on one replaces it, explicitly); the committer's `update` passes non-array values through as `scalars` instead of discarding them. Tests in `layer-machine.spec.ts`.*
+`layer-machine.ts:121` `fromLayer`
 drops any scalar slot (`if (Array.isArray(v) && v.length > 0)`), and
 `layer-committer.drone.ts:634` `update` does the same one layer up — a scalar
 slot silently vanishes and `output()` can never write it back. `level-roster.ts`

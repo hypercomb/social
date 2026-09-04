@@ -31,6 +31,21 @@
 // only `name` plus non-empty slots, in the canonical order produced by
 // HistoryService.canonicalizeLayer.
 //
+// ── Scalar slots ─────────────────────────────────────────────────────
+//
+// Not every slot is a list. `level-roster.ts` and `life-primitive.ts`
+// both state the installed form: a child slot may hold ONE signature
+// naming a JSON array resource (`cells: <sig>`), and a layer may carry
+// inline scalar metadata. The machine used to drop every non-array value
+// on hydrate, so `output()` could never write it back — one ordinary
+// edit at an installed location silently erased the pointer to its
+// children (write-conformance check 5). A scalar is now carried
+// VERBATIM: hydrated as-is, emitted as-is, never interpreted. The list
+// ops below address list slots only; an array op on a slot currently
+// held as a scalar REPLACES the scalar (the caller asserted the slot is
+// now a list), which is the one interpretation that cannot lose data
+// by accident — it is explicit.
+//
 // ── Operations ───────────────────────────────────────────────────────
 //
 //   { slot, op: 'append',    sig }       — append if not already present
@@ -90,6 +105,9 @@ export class LayerMachine {
   // Values are kept as `unknown[]` so inline payloads coexist with sig
   // pointers on the same slot if a subsystem wants to mix.
   readonly #slots = new Map<string, unknown[]>()
+  // Non-list slots, carried verbatim (see "Scalar slots" above). A slot
+  // name lives in exactly one of the two maps at a time.
+  readonly #scalars = new Map<string, unknown>()
 
   /**
    * Hydrate a machine from a committed layer (or `null` when no prior
@@ -99,7 +117,8 @@ export class LayerMachine {
    * Slot-agnostic: every field except `name` is treated as a slot,
    * including `children`. The machine does NOT know which slots exist
    * or what they mean — drones (Children, Notes, Tags, ...) own that
-   * knowledge. Empty arrays are dropped (sparse-layer invariant).
+   * knowledge. Empty arrays are dropped (sparse-layer invariant); a
+   * non-array value is a SCALAR slot and is carried through untouched.
    *
    * Optional `segments` records the lineage path so the machine can
    * later self-commit via `commit(history)`. Pass when known; omit
@@ -118,7 +137,8 @@ export class LayerMachine {
       for (const key of Object.keys(prev)) {
         if (key === 'name') continue
         const v = (prev as Record<string, unknown>)[key]
-        if (Array.isArray(v) && v.length > 0) m.#slots.set(key, v.slice())
+        if (Array.isArray(v)) { if (v.length > 0) m.#slots.set(key, v.slice()) }
+        else if (v !== undefined && v !== null) m.#scalars.set(key, v)
       }
     }
     return m
@@ -166,6 +186,9 @@ export class LayerMachine {
       throw new Error('[LayerMachine] cannot mutate reserved slot "name"')
     }
 
+    // A list op asserts the slot is a list. If it was held as a scalar,
+    // the scalar yields — explicitly, never by accident (header).
+    this.#scalars.delete(delta.slot)
     const arr = this.#slots.get(delta.slot) ?? []
 
     if (delta.op === 'append') {
@@ -274,8 +297,37 @@ export class LayerMachine {
    * the machine does not need to (and must not) carry any per-slot
    * positioning logic. Empty slots are dropped (sparse-layer invariant).
    */
+  /** A scalar slot's value, or `undefined` when the slot is absent or a list. */
+  getScalar(slot: string): unknown {
+    return this.#scalars.get(slot)
+  }
+
+  /** Set (or, with `undefined`/`null`, drop) a scalar slot. Setting one
+   *  removes any list held under the same name — a name lives in exactly
+   *  one of the two maps. Returns whether anything changed. */
+  setScalar(slot: string, value: unknown): { changed: boolean } {
+    if (slot === 'name') return { changed: false }
+    if (value === undefined || value === null) {
+      const had = this.#scalars.delete(slot)
+      return { changed: had }
+    }
+    if (Array.isArray(value)) throw new Error('[LayerMachine] setScalar given a list — use apply()')
+    const before = this.#scalars.get(slot)
+    const hadList = this.#slots.delete(slot)
+    this.#scalars.set(slot, value)
+    return { changed: hadList || before !== value }
+  }
+
+  /** Every scalar slot, for callers that enumerate the whole layer. */
+  scalars(): IterableIterator<[string, unknown]> {
+    return this.#scalars.entries()
+  }
+
   output(): LayerContent {
     const layer: LayerContent = { name: this.#name }
+    for (const [slot, value] of this.#scalars) {
+      ;(layer as Record<string, unknown>)[slot] = value
+    }
     for (const [slot, vals] of this.#slots) {
       if (!vals || vals.length === 0) continue
       ;(layer as Record<string, unknown>)[slot] = vals.slice()

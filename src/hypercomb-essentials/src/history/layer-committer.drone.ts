@@ -123,6 +123,10 @@ type CommitDelta =
   | {
       kind: 'layer'
       layer: { [slot: string]: readonly string[] }
+      /** Non-list slots, carried VERBATIM into the machine (write-conformance
+       *  check 5: a scalar child pointer or inline metadata must survive an
+       *  update that did not mean to touch it). `null` drops the slot. */
+      scalars?: { [slot: string]: unknown }
       /** Keys in this set are interpreted as cell-NAME arrays and resolved
        *  to sigs at commit time. All other keys are treated as sig arrays. */
       nameSlots?: ReadonlySet<string>
@@ -611,10 +615,13 @@ export class LayerCommitter {
   /**
    * Layer-as-primitive update. Pass the full new layer state at this position
    * — `{ name, ...slots }` — and the committer applies every slot in one
-   * cascade. Empty arrays wipe the slot (absent ≡ empty). Slot names are the
-   * caller's convention; the committer adds no special handling beyond
-   * optional name→sig resolution for slots listed in `nameSlots` (typically
-   * just `'children'`).
+   * cascade. Empty arrays wipe the slot (absent ≡ empty). A NON-ARRAY value
+   * is a scalar slot and is carried through verbatim (`null` drops it) —
+   * it used to be silently discarded, so a scalar child pointer on an
+   * installed layer vanished on the first edit. Slot names are the caller's
+   * convention; the committer adds no special handling beyond optional
+   * name→sig resolution for slots listed in `nameSlots` (typically just
+   * `'children'`).
    *
    * This is the canonical write surface — single API, single cascade per
    * parent, no fire-and-forget paths, no item-level synthesis. Add and
@@ -625,15 +632,15 @@ export class LayerCommitter {
     layer: { name?: string; [slot: string]: unknown },
     nameSlots: ReadonlySet<string> = new Set(['children']),
   ): Promise<string> {
-    // Strip the `name` key — it identifies the cell, not a slot.
-    // Coerce every other entry to a string array (drop non-array values
-    // since the convention is "lists in, lists out").
+    // Strip the `name` key — it identifies the cell, not a slot. Arrays
+    // become list slots; anything else is a scalar slot carried verbatim
+    // (`undefined` is "not mentioned", `null` is "drop it").
     const slots: { [slot: string]: readonly string[] } = {}
+    const scalars: { [slot: string]: unknown } = {}
     for (const [key, value] of Object.entries(layer)) {
       if (key === 'name') continue
-      if (Array.isArray(value)) {
-        slots[key] = value.map(v => String(v))
-      }
+      if (Array.isArray(value)) slots[key] = value.map(v => String(v))
+      else if (value !== undefined) scalars[key] = value
     }
     // Bind malformed/absent segments to the CURRENT location (intent
     // time), never to root — `?? []` here silently re-addressed a
@@ -645,7 +652,7 @@ export class LayerCommitter {
     }
     await this.#machine.requestAndWait({
       segments: cleaned,
-      delta: { kind: 'layer', layer: slots, nameSlots },
+      delta: { kind: 'layer', layer: slots, scalars, nameSlots },
     })
 
     // Return the new layer sig so callers can use it to compose the merkle
@@ -1251,6 +1258,11 @@ export class LayerCommitter {
               sigs = values.map(v => String(v)).filter(Boolean)
             }
             machine.apply({ slot, op: 'set', sigs })
+          }
+          // Scalar slots ride through untouched — the machine holds them
+          // beside the lists and writes them back as they came.
+          for (const [slot, value] of Object.entries(d.scalars ?? {})) {
+            machine.setScalar(slot, value)
           }
         }
       }
