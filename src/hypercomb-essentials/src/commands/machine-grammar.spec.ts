@@ -148,13 +148,26 @@ describe('the machine grammar the shipped behaviours declare', () => {
     expect(accent?.refuse?.('roadmap = ultraviolet')).toContain('not a known accent preset')
   })
 
-  it('lets a machine clear a title it set, because a title is an ordinary decoration', () => {
+  it('lets a machine SET a title but not clear one — clearing is a removal', () => {
     const title = new TitleQueenBee()
     wellFormed(title.machine, 'title')
     expect(title.machine?.refuse?.('roadmap = Road map')).toBeUndefined()
-    // Withholding the clearing form bought nothing but a speaker who could set
-    // a wrong title and not correct it. `/undo` puts either back.
-    expect(title.machine?.refuse?.('roadmap =')).toBeUndefined()
+
+    // WITHDRAWN 2026-09-04. This used to assert the opposite, on the argument
+    // that a title is an ordinary decoration and `/undo` puts either back. That
+    // is true and was the wrong axis: setting swaps one record for another,
+    // while clearing runs the same removal loop and writes nothing after it —
+    // "takes something away", which is the rubric's own destructive wording. One
+    // `reach: 'editing'` cannot cover both, and a gate reading it would be gated
+    // on the weaker half. Reversibility does not separate the tiers: /remove is
+    // destructive and undoable too.
+    //
+    // A model can still correct a wrong title by setting another. Clearing back
+    // to no-title stays a participant's form.
+    expect(title.machine?.refuse?.('roadmap =')).toContain('clearing')
+    expect(title.machine?.forms).not.toContain('<cell> = |')
+    expect(title.machine?.forms.endsWith('<cell> = <text>')).toBe(true)
+
     expect(title.machine?.refuse?.('= Something')).toContain('one child tile name')
     expect(title.machine?.refuse?.('child/path = Something')).toContain('one child tile name')
   })
