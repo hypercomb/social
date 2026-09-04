@@ -20,6 +20,33 @@ import {
 export const POSTIT_VIEW = 'postit'
 export const POSTIT_KIND = 'visual:postit:note'
 
+/**
+ * The next record for a note, given what it already held and what this call
+ * sets. CARRIES THE WHOLE PRIOR RECORD and overrides only what changed.
+ *
+ * It used to name the fields it kept — text, title, pin, size — and so silently
+ * DROPPED every field it did not name. `htmlSig` was one: a post-it whose
+ * record is an authored one-page site (mounted by postit-view.drone.ts,
+ * `if (payload?.htmlSig)`) lost its page the moment anyone said
+ * `/postit here <text>`, because the rebuild simply never mentioned it. That is
+ * the ONLY machine-callable form of this verb, so a model could destroy an
+ * authored page while its receipt read as an ordinary note edit.
+ *
+ * Spreading the prior record fixes the CLASS rather than the field: a property
+ * added to `PostitPayload` later cannot be lost by forgetting to list it here.
+ * It is a pure function so the rule can be asserted directly — a silent drop
+ * leaves no failure to notice, which is why it survived this long.
+ */
+export const mergePostitPayload = (
+  prior: PostitPayload | undefined,
+  next: { readonly text?: string; readonly title?: string },
+): PostitPayload => ({
+  ...prior,
+  version: 1,
+  ...(next.text ? { text: next.text } : {}),
+  ...(next.title ? { title: next.title } : {}),
+})
+
 /** Payload of a `visual:postit:note` record. Exactly one of `htmlSig` /
  *  `text` is expected; `htmlSig` wins when both are present. */
 export interface PostitPayload {
@@ -164,12 +191,19 @@ export class PostitQueenBee extends QueenBee {
     const segs = [...segments]
     const prior = (await listDecorations<PostitPayload>({ kind: POSTIT_KIND, segments: segs }))
       .at(-1)?.record.payload
-    const payload: PostitPayload = {
-      version: 1,
-      ...(text ? { text } : {}),
-      ...(title ? { title } : prior?.title ? { title: prior.title } : {}),
-      ...(prior?.pin ? { pin: prior.pin } : {}),
-      ...(prior?.size ? { size: prior.size } : {}),
+    const payload = mergePostitPayload(prior, { text, title })
+
+    // A PAGE OUTRANKS TEXT AT RENDER TIME, so setting text on a note that
+    // holds a page changes nothing a participant can see. Preserving the page
+    // is right — it is the irreplaceable half — but a silent no-op is its own
+    // lie, so the outcome is said out loud. Replacing a page deliberately is
+    // `/postit remove` and then `/postit here <text>`; that path is a
+    // participant's, not a machine's, which is the correct asymmetry.
+    if (text && prior?.htmlSig) {
+      EffectBus.emit('activity:log', {
+        message: 'Post-it holds a page — the page is kept, so the new text is not shown',
+        icon: 'sticky_note_2',
+      })
     }
     await replaceDecoration({
       kind: POSTIT_KIND,
