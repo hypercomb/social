@@ -2968,8 +2968,10 @@ export class ShowCellDrone extends Drone {
     this.#forceNextRender = false
 
     // Rendering owns the main thread until this pass publishes its matching
-    // cell snapshot. Post-paint layers (agent bees today) use the pass id to
-    // reject a replayed cell-count from the layer the participant just left.
+    // cell snapshot. The pass id is how a listener rejects a replayed
+    // cell-count from the layer the participant just left — SequenceCycleDrone
+    // today. (The agent bees held that gate until e5be06adc; they wait behind
+    // the boot paint barrier now, not this id.)
     const renderPassId = ++this.#tileRenderPassId
     this.emitEffect('render:tiles-target', { locationKey, renderPassId })
 
