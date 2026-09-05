@@ -1,4 +1,4 @@
-// hypercomb-shared/core/packed-store-engine.spec.ts
+// hypercomb-runtime/src/packed-store-engine.spec.ts
 //
 // The packed store's contract, and the measurement that justifies it.
 //

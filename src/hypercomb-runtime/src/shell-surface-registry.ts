@@ -1,4 +1,4 @@
-// hypercomb-shared/core/shell-surface-registry.ts
+// hypercomb-runtime/src/shell-surface-registry.ts
 //
 // Shell-side registry for top-level UI SURFACES — the panels, strips, and
 // overlays that today are hand-mounted, one <hc-*> tag at a time, in each

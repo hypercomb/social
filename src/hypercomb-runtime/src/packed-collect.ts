@@ -1,4 +1,4 @@
-// hypercomb-shared/core/packed-collect.ts
+// hypercomb-runtime/src/packed-collect.ts
 //
 // COLLECTION — reclaim content no committed layer ever referenced.
 //

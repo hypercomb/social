@@ -1,4 +1,4 @@
-// hypercomb-shared/core/packed-bridge.ts
+// hypercomb-runtime/src/packed-bridge.ts
 //
 // THE SECOND BRIDGE — the packed-store worker behind the NativeBridge seam.
 //

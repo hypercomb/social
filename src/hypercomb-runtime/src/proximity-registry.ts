@@ -1,4 +1,4 @@
-// hypercomb-shared/core/proximity-registry.ts
+// hypercomb-runtime/src/proximity-registry.ts
 //
 // Proximity declaration — the shared half of "everything in proximity gets
 // pre-looked." The navigation pattern already warms the CURRENT location's

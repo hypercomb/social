@@ -1,4 +1,4 @@
-// hypercomb-shared/core/ioc.web.ts
+// hypercomb-runtime/src/ioc.web.ts
 
 const instances = new Map<string, unknown>()
 const listeners: Array<(key: string, value: unknown) => void> = []
