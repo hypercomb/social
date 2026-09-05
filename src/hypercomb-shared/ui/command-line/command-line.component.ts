@@ -21,6 +21,7 @@ import {
   REMOTE_SUBMIT, canonicalVerbOf,
   type RemoteSubmitRequest, type RemoteSubmitOutcome, type RemoteSubmitAction,
   admitMachineCall, spokenEntry, currentMachineGrant, type AdmissionEntry,
+  isReservedPoolWord,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { VoiceInputService } from '../../core/voice-input.service'
@@ -3984,6 +3985,21 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const parts = raw.split('/').map(s => this.completions.normalize(s.trim())).filter(Boolean)
     if (parts.length === 0) {
       this.clear()
+      return
+    }
+
+    // THE RESERVED-NAME GATE (documentation/hypergraph-molecule-lineage.md,
+    // execution order step 5). A molecule named `bees` IS sign('bees') — the
+    // install's own bee pool — so the tile's atoms would gather inside the
+    // pool. Refused here, at the naming gesture, before anything is minted or
+    // painted; the typed name stays in the line so it can be changed. Every
+    // segment is a word, so every segment is checked.
+    const reserved = parts.find(part => isReservedPoolWord(part))
+    if (reserved) {
+      EffectBus.emit('activity:log', {
+        message: `"${reserved}" is a reserved word — it is the address of a system pool. Choose another name.`,
+        icon: 'error',
+      })
       return
     }
 

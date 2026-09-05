@@ -495,9 +495,11 @@ entries, regardless of registry. Do not forbid bare words.
   addresses are already derived in code on every host. The frozen list in
   `pool-registry.ts` IS the reserved-name list; `isReservedPoolWord(name)`
   folds a tile name the way a bag address folds and answers the one question
-  the collision poses. The naming gesture refuses a reserved word (wiring
-  through the create/title queens is the remaining half; they are held by
-  another session today). `websites` is deliberately NOT on the list.
+  the collision poses. The naming gesture refuses a reserved word: the
+  shell's create path (`command-line.component.ts`, the one commit every new
+  tile name passes) logs the refusal and keeps the typed name in the line;
+  the create queen's `refuse` says the same to the model grammar. `websites`
+  is deliberately NOT on the list.
 - The frozen bare-word set in `pool-registry.ts` stops being a prohibition on
   tiles and becomes the reserved-name list. The ratchet flips from "no bare
   words" to "no `__x__`, no hardcoded hex, no deletion of a member-bearing

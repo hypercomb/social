@@ -26,7 +26,7 @@
 // attach, the retained parent prefix), so this queen NAMES the act and the
 // shell performs it — one implementation, two ways to say it.
 
-import { QueenBee, EffectBus } from '@hypercomb/core'
+import { QueenBee, EffectBus, isReservedPoolWord } from '@hypercomb/core'
 
 const BACKSLASH = String.fromCharCode(92)
 
@@ -58,6 +58,11 @@ export class CreateQueenBee extends QueenBee {
       if (args.includes(BACKSLASH) || parts.some(part => !part || part === '.' || part === '..')) {
         return '/create needs one or more explicit tile names separated by /'
       }
+      // A reserved word is the address of a system pool (hypergraph-molecule-
+      // lineage.md, step 5): the shell refuses it too, but the grammar should
+      // hear a refusal, not a create that never happened.
+      const reserved = parts.find(part => isReservedPoolWord(part))
+      if (reserved) return `"${reserved}" is a reserved word — it is the address of a system pool; choose another name`
       return undefined
     },
   }
