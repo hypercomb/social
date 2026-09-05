@@ -6,7 +6,7 @@
 // a content-addressed JSON record — a sig file at the flat OPFS root
 // (legacy `__resources__/` is a read-fallback drain source); see
 // `Store.putResource` / `Store.getResource` in
-// hypercomb-shared/core/store.ts — of the shape:
+// hypercomb-runtime/src/store.ts — of the shape:
 //
 //   {
 //     kind: string,            // e.g. 'visual:website:page'

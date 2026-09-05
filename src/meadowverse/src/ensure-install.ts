@@ -2,7 +2,7 @@
 // runs BEFORE the import map is set, so that OPFS dependencies are written
 // before the browser freezes the import-map entries.
 //
-// Storage model (see hypercomb-shared/core/store.ts): bees and dependencies
+// Storage model (see hypercomb-runtime/src/store.ts): bees and dependencies
 // live in their sign(meaning) POOLS (store.bees / store.dependencies —
 // the handles already point at the pools); layers live as bare sig-named
 // files at the FLAT OPFS ROOT. The legacy `__bees__`/`__dependencies__`/
