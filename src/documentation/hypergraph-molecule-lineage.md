@@ -486,6 +486,18 @@ entries, regardless of registry. Do not forbid bare words.
   stay ambiguous. Each either moves to a colon meaning (with a drain — a new
   spelling mints a new address forever) or is declared a reserved name the
   command line refuses. Decide per pool; record it in the register.
+
+  **DECIDED 2026-09-04 — all seven stay bare and are RESERVED NAMES.** No
+  drain: `bees` and `dependencies` are the install's own pools, and a new
+  spelling would strand every deployed package behind an address no client
+  derives; `clipboard`, `threads`, `computation`, `manifests` and
+  `optimization` hold participant records and derived caches whose
+  addresses are already derived in code on every host. The frozen list in
+  `pool-registry.ts` IS the reserved-name list; `isReservedPoolWord(name)`
+  folds a tile name the way a bag address folds and answers the one question
+  the collision poses. The naming gesture refuses a reserved word (wiring
+  through the create/title queens is the remaining half; they are held by
+  another session today). `websites` is deliberately NOT on the list.
 - The frozen bare-word set in `pool-registry.ts` stops being a prohibition on
   tiles and becomes the reserved-name list. The ratchet flips from "no bare
   words" to "no `__x__`, no hardcoded hex, no deletion of a member-bearing
