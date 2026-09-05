@@ -416,6 +416,27 @@ describe('doctrine ratchets', () => {
     ], 'children-manifest writer')
   })
 
+  it('sealSubtree callers may only shrink — the recursive seal is a courtesy, never a new dependency', () => {
+    // documentation/hypergraph-molecule-lineage.md, the seal register: the
+    // recursive seal is DEMOTED, kept as the reader for every sealed root
+    // already in the world, and retired in favour of the flat head map. A
+    // publication that takes a sealed walk instead of the flat map is
+    // ordering a new client to walk. The definition file is on the list
+    // because it seals its own descendants; everything else is the frozen
+    // set of callers that still ride the walk. Empty the list, retire the
+    // walk.
+    const actual = filesMatching(/\bsealSubtree\s*\(/)
+    assertRatchet(actual, [
+      'hypercomb-essentials/src/commands/snapshot.queen.ts',
+      'hypercomb-essentials/src/history/builds-slot.ts',
+      'hypercomb-essentials/src/history/history.service.ts',
+      'hypercomb-essentials/src/history/layer-placement.ts',
+      'hypercomb-essentials/src/sharing/publish-branch.ts',
+      'hypercomb-essentials/src/sharing/publish-status.drone.ts',
+      'hypercomb-essentials/src/sharing/swarm.drone.ts',
+    ], 'sealSubtree caller')
+  })
+
   it('children-bearing layer commits ride the LayerCommitter FIFO — no inline-children commitLayer', () => {
     // A direct history.commitLayer(...) whose assembled layer carries a
     // `children` key is a read-modify-write OUTSIDE the committer's
