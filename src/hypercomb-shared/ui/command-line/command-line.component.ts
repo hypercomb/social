@@ -2286,21 +2286,70 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // the catalogue teaches it to write. Audited 2026-09-04, see
       // documentation/natural-language-surface-audit.md.
       //
-      // KNOWN GAP, deliberately not widened here: `DESTRUCTIVE_COMMANDS` is a
-      // hand-kept name set, and `/cut` drops a child from its parent just as
-      // `/remove` does while declaring `reach: 'editing'` and staying off the
-      // list. Keying this on a declared property instead is owed work — adding
-      // a name here would also change what a PERSON typing `cut` sees, which
-      // is not this fix's business.
+      // THAT GAP IS CLOSED. This used to read the hand-kept
+      // `DESTRUCTIVE_COMMANDS` set, which had already drifted — `/cut` drops a
+      // child from its parent just as `/remove` does and was never on it. The
+      // refusals below are keyed on DECLARED properties instead, so a verb
+      // cannot slip past by not being on a list. `DESTRUCTIVE_COMMANDS` stays
+      // for the KEYBOARD path, where it gates a rendered confirmation rather
+      // than a refusal, and where widening it would change what a person
+      // typing `cut` sees.
       const spokenVerbs = reading?.actions.length
         ? reading.actions.map(action => action.command)
         : [canonicalVerbOf(trimmed)]
-      const barred = spokenVerbs.filter(verb => verb && DESTRUCTIVE_COMMANDS.has(verb))
+      // WHAT A REMOTE CALLER MAY NOT SAY, read off the census rather than a
+      // list kept here. The four-name set this replaced (`remove, rm, delete,
+      // del`) was the same mistake as the retired CALLABLE_FORMS table: a
+      // second copy of a truth that lives elsewhere, and it had already
+      // drifted — `/cut` drops a child from its parent exactly as `/remove`
+      // does and was never on it.
+      //
+      // TWO REFUSALS, both resolved through `entries()` so an alias cannot
+      // walk around them (`rm` resolves to `remove`, and inherits its reach):
+      //
+      //   DESTRUCTIVE — the declared `machine.reach`. The typed path answers a
+      //   destructive word with a rendered confirmation; a remote caller has
+      //   nobody to press it, so it is refused and told why rather than
+      //   parking a choice on a screen no agent can see — or, for a leaf tile,
+      //   removing it with no dialog at all.
+      //
+      //   HIDDEN or PROTOTYPE — `slashHidden` is documented as "must be typed
+      //   in full on purpose", which is a HUMAN-typing assumption a machine
+      //   defeats for free. It is a discoverability flag being read as an
+      //   authorization one, and behind it sit `/flatten`, `/prune`, `/sweep`,
+      //   `/collapse-history` and `/consolidate-*` — `/flatten` being the verb
+      //   that once hard-deleted a pool it mistook for a lineage bag.
+      //
+      // This narrows the REMOTE door only. The keyboard is untouched, and the
+      // bridge stays wide for everything else, which is the standing position.
+      const census = (get('@diamondcoreprocessor.com/SlashBehaviourDrone') as {
+        entries?(): readonly {
+          name: string; aliases?: readonly string[]
+          hidden?: boolean; prototype?: boolean
+          machine?: { reach?: string }
+        }[]
+      } | undefined)?.entries?.() ?? []
+      const entryFor = (verb: string) => census.find(e =>
+        e.name.toLowerCase() === verb
+        || (e.aliases ?? []).some(alias => alias.toLowerCase() === verb))
+
+      const barred: string[] = []
+      const concealed: string[] = []
+      for (const verb of spokenVerbs) {
+        if (!verb) continue
+        const entry = entryFor(verb)
+        if (!entry) continue
+        if (entry.hidden || entry.prototype) concealed.push(verb)
+        else if (entry.machine?.reach === 'destructive') barred.push(verb)
+      }
+      if (concealed.length) {
+        settle({
+          kind: 'refused',
+          reason: `${[...new Set(concealed)].map(verb => `/${verb}`).join(', ')} is not offered to a caller that is not typing it`,
+        })
+        return
+      }
       if (barred.length) {
-        // The typed path answers a destructive word with a rendered
-        // confirmation. A remote caller cannot press it, so it is refused and
-        // told why, rather than parking a choice on a screen no agent can see
-        // — or, for a leaf tile, removing it with no dialog at all.
         settle({
           kind: 'refused',
           reason: `${[...new Set(barred)].map(verb => `/${verb}`).join(', ')} needs a person to confirm it`,
