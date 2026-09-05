@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest'
 // registers into a global at load. Mock the shell the way ensure-install.spec
 // does; core stays REAL, because `hardDeleteVetoFor` is the guard under test.
 vi.mock('@hypercomb/shared/core', () => ({ Store: class Store {} }))
-vi.mock('@hypercomb/shared/core/store', () => ({ Store: class Store {} }))
+vi.mock('@hypercomb/runtime/store', () => ({ Store: class Store {} }))
 vi.stubGlobal('register', vi.fn())
 vi.stubGlobal('get', vi.fn(() => undefined))
 
