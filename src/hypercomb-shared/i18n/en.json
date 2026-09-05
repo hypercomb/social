@@ -1087,6 +1087,7 @@
   "upgrade.discard": "Discard",
   "upgrade.revision": "Name for this update",
   "upgrade.installer": "Installer",
+  "upgrade.needs-shell": "This update needs a newer Hypercomb — refresh the page first, then adopt again",
   "upgrade.installer-hint": "Review the changes in the installer first — Adopt installs silently right here",
   "apply-update.title": "New features ready",
   "apply-update.count.zero": "Update ready to install",

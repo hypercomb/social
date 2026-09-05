@@ -17,6 +17,7 @@ import { isVisitorSession } from './visitor-session'
 // behind window.hypercomb.acquire — there is one acquisition, not three.
 import { acquire, deriveInventory, headPackage, listHostPackages, reportDivergence } from '@hypercomb/runtime/acquire'
 import { deriveBeeDeps } from '@hypercomb/runtime/bee-deps'
+import { checkCoreCompatibility, CoreMismatchError, describeCoreMismatch } from '@hypercomb/runtime/core-surface'
 import { aliasOf, bagEntryName, bagSignature, beeEntries, dependencyEntries, orderedEntries } from '@hypercomb/runtime/bags'
 import { HOST_PACKAGES_MEANING, markerIndices, parseMember, parsePoolListing, poolEntryName } from '@hypercomb/runtime/host-pool'
 import { registerPoolMeaning } from '@hypercomb/core'
@@ -256,7 +257,7 @@ export const ensureInstall = async (): Promise<void> => {
     localStorage.removeItem(MANIFEST_KEY)
     localStorage.removeItem(SYNC_SIG_KEY)
     localStorage.removeItem(INSTALLED_FLAG_KEY)
-    await purgeStaleOpfsArtifacts(store)
+    await purgeStaleOpfsArtifacts(store, installArtifactSigs(cachedManifest))
   }
 
   // Cold boot / cache miss. Nothing is installed, so there is nothing to
@@ -505,18 +506,25 @@ export const upgradeFromBundled = async (): Promise<boolean> => {
       console.warn('[upgrade-from-bundled] no bundled /content/manifest.json available')
       return false
     }
-    // Wipe stale artifacts before reinstall so signatures dropped from
-    // the new bundle don't linger and load on next boot.
-    const cached = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
-    if (cached) {
-      localStorage.removeItem(MANIFEST_KEY)
-      localStorage.removeItem(SYNC_SIG_KEY)
-      await purgeStaleOpfsArtifacts(store)
-    }
+    // INSTALL FIRST, PURGE AFTER. This used to wipe the current install before
+    // fetching the next one, so any refusal on the way in (an incomplete
+    // closure, a core the shell cannot serve) left the participant with NO
+    // install at all. Now the current package stays live until the new one has
+    // fully resolved and passed every gate; only then are the atoms it dropped
+    // purged — by name, old minus new — so nothing stale loads on the next
+    // boot. Present atoms are reused by the walker, so this is also less to
+    // fetch, not more.
+    const previous = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
     // Report what actually happened. This used to return `true`
     // unconditionally, so a partial install told the caller it had succeeded
     // and main.ts reloaded into a hive with bees missing.
-    return await installFromBundled(bundled, sigStore)
+    const ok = await installFromBundled(bundled, sigStore)
+    if (ok && previous) {
+      const current = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
+      const keep = new Set(installArtifactSigs(current))
+      await purgeStaleOpfsArtifacts(store, installArtifactSigs(previous).filter(sig => !keep.has(sig)))
+    }
+    return ok
   } finally {
     EffectBus.emit('install:sync', { active: false, source: 'bundled' })
   }
@@ -755,6 +763,22 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     } satisfies ReplicationIo),
   ])
 
+  // CAN THIS SHELL RUN IT? (core-surface.ts). The admitted modules name what
+  // they import from `@hypercomb/core`; the shell's own runtime core is asked
+  // what it exports. A package built against a newer core than this shell
+  // ships is refused HERE, by name — never activated to die at evaluation
+  // ("does not provide an export named …", nine dependencies down, live
+  // 2026-09-04). Thrown rather than returned so the caller unwinds before it
+  // touches the install it is replacing; the bytes stay for the delta repair.
+  const compat = await checkCoreCompatibility(
+    [...inventory.bees, ...inventory.dependencies],
+    readFrom([store.bees, store.legacyBees, store.dependencies, store.legacyDependencies], sig => [`${sig}.js`, sig]),
+  )
+  if (!compat.ok) {
+    console.warn(`[ensure-install] bundled package ${bundled.packageSig.slice(0, 12)} ${describeCoreMismatch(compat.missing)}`)
+    throw new CoreMismatchError(compat.missing)
+  }
+
   // beeDeps, worked out from the bytes just admitted rather than taken from
   // the bundled manifest (bee-deps.ts). A HINT: an empty map means every
   // dependency loads eagerly, which is correct and merely heavier at boot.
@@ -849,6 +873,7 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     // attempt is a delta repair rather than a refetch — but never claim the
     // hive is installed.
     localStorage.setItem(MANIFEST_KEY, JSON.stringify(manifest))
+    localStorage.removeItem(SYNC_SIG_KEY)
     return false
   }
 
@@ -920,7 +945,16 @@ export const purgeInstallCacheDir = async (dir: FileSystemDirectoryHandle): Prom
   return refused
 }
 
-const purgeStaleOpfsArtifacts = async (store: Store): Promise<void> => {
+/** Every install-cache atom a manifest accounts for: its bees, its
+ *  dependencies, and the dependencies its bees claim. */
+const installArtifactSigs = (manifest: ReturnType<typeof tryParseManifest>): string[] =>
+  [...new Set([
+    ...(manifest?.bees ?? []),
+    ...(manifest?.dependencies ?? []),
+    ...Object.values(manifest?.beeDeps ?? {}).flatMap(list => list ?? []),
+  ])]
+
+const purgeStaleOpfsArtifacts = async (store: Store, sigs: readonly string[]): Promise<void> => {
   const purgeDir = purgeInstallCacheDir
 
   // THE POOLS ARE NOT WIPED — they are purged by NAME.
@@ -937,11 +971,11 @@ const purgeStaleOpfsArtifacts = async (store: Store): Promise<void> => {
   // simplified back into a kind-based sweep.
   //
   // A manifest may only NARROW the set: every name is still classified, and
-  // the whole plan is refused if a marker is present.
+  // the whole plan is refused if a marker is present. The caller says WHICH
+  // manifest's atoms — the one being replaced, minus what the replacement
+  // still uses — so a purge after a successful install never eats the install.
   const own = new Set<string>()
-  const cached = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
-  for (const sig of [...(cached?.bees ?? []), ...(cached?.dependencies ?? []),
-    ...Object.values(cached?.beeDeps ?? {}).flatMap(list => list ?? [])]) {
+  for (const sig of sigs) {
     own.add(sig); own.add(`${sig}.js`)
   }
   const purgeOwned = async (dir: FileSystemDirectoryHandle | undefined): Promise<void> => {

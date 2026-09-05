@@ -996,6 +996,7 @@
   "upgrade.discard": "破棄",
   "upgrade.revision": "この更新の名前",
   "upgrade.installer": "インストーラー",
+  "upgrade.needs-shell": "この更新には新しい Hypercomb が必要です — まずページを再読み込みしてから、もう一度採用してください",
   "upgrade.installer-hint": "先にインストーラーで変更内容を確認 — 採用はこの場で静かにインストールします",
   "apply-update.title": "新機能の準備完了",
   "apply-update.count.zero": "更新をインストールできます",

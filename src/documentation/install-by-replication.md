@@ -263,3 +263,12 @@ DCP the *transport* dies. DCP the *ledger* is promoted:
 - **Never push updates.** The consumer requests; the icon informs; the human
   decides.
 - **Never re-grow a second transport.** One verb: `replicate(root)`.
+- **Never activate a package the shell's core cannot serve.** Modules import
+  `@hypercomb/core` from the shell's runtime, so a package built against a
+  newer core dies at evaluation on an older shell. At admission, after the
+  closure resolves and before activation, the required exports are DERIVED
+  from the admitted bytes and compared with the live core's export surface
+  (`hypercomb-runtime/src/core-surface.ts`); a short shell refuses by name
+  and the bytes stay for the delta repair. Directional by design: a shell
+  that exports more than a package needs passes, so a restore point to an
+  older package still installs. Nothing a publisher writes down is consulted.

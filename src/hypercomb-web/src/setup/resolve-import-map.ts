@@ -2,6 +2,7 @@
 
 import { environment } from '@hypercomb/shared/environments/environment'
 import { Store } from '@hypercomb/shared/core/store'
+import { CORE_RUNTIME_URL } from '@hypercomb/runtime/core-surface'
 
 export type ResolvedImports = Record<string, string>
 
@@ -75,7 +76,7 @@ export const cacheImportMap = async (): Promise<void> => {
 export const resolveImportMap = async (): Promise<ResolvedImports> => {
   const imports: ResolvedImports = {}
   const aliasSource = new Map<string, string>()
-  imports['@hypercomb/core'] = '/hypercomb-core.runtime.js'
+  imports['@hypercomb/core'] = CORE_RUNTIME_URL
   imports['pixi.js'] = '/vendor/pixi.runtime.js'
 
   const store = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(
