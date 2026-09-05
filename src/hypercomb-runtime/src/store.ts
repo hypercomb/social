@@ -219,8 +219,8 @@ export class Store extends EventTarget {
     } catch { return null }
   }
 
-  /** THE READ-ONLY OPEN. Null when the pool does not exist — it is NOT
-   *  created.
+  /** THE READ-ONLY OPEN — it never CREATES. That is the whole guarantee, and
+   *  it holds on every backend.
    *
    *  `getPool` creates, which is right for a writer and wrong for a reader:
    *  a feature that merely CONSULTS a pool minted its directory on every
@@ -230,6 +230,21 @@ export class Store extends EventTarget {
    *  directories are not harmless here — the root is an untagged union that
    *  walkers, the collector and `/flatten` all enumerate, and a pool nobody
    *  ever wrote is noise in every one of those passes.
+   *
+   *  A NULL IS NOT PROOF OF ABSENCE, AND A HANDLE IS NOT PROOF OF EXISTENCE.
+   *  Do not build on either:
+   *
+   *    - Null folds three cases together — the pool is not there, OPFS is
+   *      unavailable, or `getDirectoryHandle` refused for some other reason.
+   *      A caller that needs to tell "never written" from "could not read"
+   *      must get that from what it finds INSIDE the pool, not from here.
+   *    - On a PACKED hive a handle always comes back. `NativeRootDirectory`
+   *      discards `create` for sig-named names by design — "a bag with no
+   *      markers and a pool with no members are indistinguishable from an
+   *      empty one, and both are valid" — so a pool that was never written
+   *      answers with a handle over an empty virtual directory. Nothing is
+   *      minted, so the guarantee above is intact; existence is simply not a
+   *      question this can answer there.
    *
    *  Registering the meaning still happens (`poolSignature` derives and
    *  registers), because knowing an address is a pool is exactly what makes
