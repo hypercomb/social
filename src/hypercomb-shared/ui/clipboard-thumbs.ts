@@ -20,22 +20,28 @@
 // the surface. A miss returns null and the caller shows its glyph.
 
 const SIG_RE = /^[0-9a-f]{64}$/i
-const TILE_PROPS_INDEX_KEY = 'hc:tile-props-index'
 
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const STORE_KEY = '@hypercomb.social/Store'
 const CLIPBOARD_WORKER_KEY = '@diamondcoreprocessor.com/ClipboardWorker'
 
-type HistoryLike = { sign?: (ctx: { explorerSegments: () => string[] }) => Promise<string> }
+type HistoryLike = {
+  sign?: (ctx: { explorerSegments: () => string[] }) => Promise<string>
+  /** The parsed head layer, from the warm cache only — never a scan. */
+  peekCurrentLayer?: (locationSig: string) => { properties?: unknown } | null
+}
 type StoreLike = { getResource?: (sig: string) => Promise<Blob | null> }
 
 const ioc = (): { get?: (k: string) => unknown } | undefined =>
   (window as { ioc?: { get?: (k: string) => unknown } }).ioc
 
-const lookupPropsSig = (locSig: string, label: string): string | undefined => {
+/** The head layer's `properties[0]`, synchronously from the warm cache. The
+ *  layer IS the index; a miss falls through to the canonical read below. */
+const lookupPropsSig = (history: HistoryLike | undefined, locSig: string): string | undefined => {
   try {
-    const idx = JSON.parse(localStorage.getItem(TILE_PROPS_INDEX_KEY) ?? '{}') as Record<string, string>
-    const v = (locSig && idx[locSig]) ?? idx[label]
+    const layer = locSig ? history?.peekCurrentLayer?.(locSig) : null
+    const slot = Array.isArray(layer?.properties) ? layer!.properties as unknown[] : []
+    const v = slot[0]
     return (typeof v === 'string' && SIG_RE.test(v)) ? v : undefined
   } catch { return undefined }
 }
@@ -77,9 +83,9 @@ export const resolveEntryImageUrl = async (
   if (history?.sign) {
     try { locSig = await history.sign({ explorerSegments: () => [...sourceSegments, label] }) } catch { /* cold */ }
   }
-  let propsSig = lookupPropsSig(locSig, label)
+  let propsSig = lookupPropsSig(history, locSig)
   if (!propsSig) {
-    // Render-index miss — the tile was never rendered with this image (a cut
+    // Warm-cache miss — the tile's head was never parsed this session (a cut
     // tile, or a freshly generated image). The canonical read keeps a
     // generated picture from being lost.
     propsSig = await canonicalPropsSig([...sourceSegments, label])

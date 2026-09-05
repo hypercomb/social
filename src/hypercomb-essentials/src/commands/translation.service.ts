@@ -7,7 +7,7 @@
 
 import { EffectBus, SignatureService, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { callAnthropic, callAnthropicBatch, getApiKey, MODELS } from '../assistant/llm-api.js'
-import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
+import { readTilePropertiesAt, readTilePropsIndex, writeTilePropertiesAt } from '../editor/tile-properties.js'
 
 // Translation cache: per-locale maps, each a CONTENT-ADDRESSED document in
 // the sign('translations') document pool (Store.putPoolDoc/getPoolDoc,
@@ -23,9 +23,8 @@ import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-prop
 // carried by every closure). This used to `putResource` a modified props
 // blob and record its sig only in the device-local `hc:tile-props-index`,
 // so a translated hive had translations on ONE browser and nowhere else —
-// write-conformance checks 1 and 3. The index is a read cache the canonical
-// writer keeps warm; nothing here touches it.
-const PROPS_INDEX_KEY = 'hc:tile-props-index'
+// write-conformance checks 1 and 3. The index is a SESSION read cache the
+// canonical writer keeps warm (`readTilePropsIndex`); nothing here writes it.
 const LEGACY_TRANSLATIONS_DIR = 'translations'
 const BATCH_SIZE = 40
 
@@ -232,9 +231,7 @@ export class TranslationService extends EventTarget {
     const store = get('@hypercomb.social/Store') as StoreLike | undefined
     if (!i18n || !store) return
 
-    const propsIndex: Record<string, string> = JSON.parse(
-      localStorage.getItem(PROPS_INDEX_KEY) ?? '{}',
-    )
+    const propsIndex: Record<string, string> = readTilePropsIndex()
     const catalog: Record<string, string> = {}
 
     // Index keys are full-lineage sigs for new entries; only legacy
@@ -443,9 +440,7 @@ export class TranslationService extends EventTarget {
     toTranslate: string[]
   }> {
     const store = get('@hypercomb.social/Store') as StoreLike | undefined
-    const propsIndex: Record<string, string> = JSON.parse(
-      localStorage.getItem(PROPS_INDEX_KEY) ?? '{}',
-    )
+    const propsIndex: Record<string, string> = readTilePropsIndex()
     // Walk lineage's explorer directory — every actual tile, not just ones with saved props.
     const tileNames = await this.#enumerateTileNames(propsIndex)
     const planLineage = get('@hypercomb.social/Lineage') as

@@ -1605,9 +1605,8 @@ export class ShowCellDrone extends Drone {
    */
   public override async warmup(): Promise<void> {
     try {
-      const raw = localStorage.getItem('hc:tile-props-index')
-      if (!raw) return
-      const propsIndex = JSON.parse(raw) as Record<string, unknown>
+      const propsIndex = readTilePropsIndex() as Record<string, unknown>
+      if (Object.keys(propsIndex).length === 0) return
       // Full-lineage (sig) keys aren't labels — only legacy bare-label
       // entries can seed the atlas's label slots.
       this.#warmLabels = Object.keys(propsIndex).filter(k => !/^[0-9a-f]{64}$/.test(k))
@@ -5422,13 +5421,22 @@ export class ShowCellDrone extends Drone {
    *  list lights up per-tile on hover (tile:hover-tags). */
   #emitRenderTags(cells: Cell[]): void {
     const counts = new Map<string, number>()
+    // Per-tile tags ride alongside the counts. The tag strip only ever
+    // needed the totals, but a tag is the hive's own way of saying what a
+    // tile IS, so anything grouping tiles by kind (the organism's texture
+    // projection) needs to know WHICH tile wears WHICH — and re-deriving
+    // that outside this loop would mean a second reader of the lens,
+    // filters and requirements that already resolved here.
+    const byLabel: Record<string, string[]> = {}
     for (const cell of cells) {
-      for (const tag of this.#tagsFor(cell.label)) {
+      const tags = this.#tagsFor(cell.label)
+      if (tags.length) byLabel[cell.label] = [...tags]
+      for (const tag of tags) {
         counts.set(tag, (counts.get(tag) ?? 0) + 1)
       }
     }
     const tags = [...counts.entries()].map(([name, count]) => ({ name, count }))
-    this.emitEffect('render:tags', { tags })
+    this.emitEffect('render:tags', { tags, byLabel })
   }
 
   /** Is anything narrowing the page — the participant's lens, a reference's
@@ -9002,7 +9010,7 @@ export class ShowCellDrone extends Drone {
       })()
     }
 
-    const livePropsIndex: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
+    const livePropsIndex: Record<string, string> = readTilePropsIndex()
 
     // Index entries are keyed by the tile's FULL-LINEAGE sig (the sigbag
     // key — tile-properties.ts) so same-named tiles at different hive
@@ -9764,9 +9772,7 @@ export class ShowCellDrone extends Drone {
           }
         }
       } catch { /* unknown structure → fail-open below */ }
-      const livePropsIndex: Record<string, string> = (() => {
-        try { return JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}') } catch { return {} }
-      })()
+      const livePropsIndex: Record<string, string> = readTilePropsIndex()
       // Per-label sig cache under this parent (content-addressed → stable).
       let cachedSigs = this.#childImageSigsByParent.get(parentLayerSig)
       if (!cachedSigs) {
@@ -10171,9 +10177,7 @@ export class ShowCellDrone extends Drone {
       })))
       weighted.sort((a, b) => b.w - a.w)
 
-      const livePropsIndex: Record<string, string> = (() => {
-        try { return JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}') } catch { return {} }
-      })()
+      const livePropsIndex: Record<string, string> = readTilePropsIndex()
 
       for (const { label } of weighted) {
         if (gen !== this.#prebakeGen) return

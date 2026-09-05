@@ -1099,7 +1099,7 @@ export class SubstrateService extends EventTarget {
   #seedUsageCounts(): void {
     this.#usageCounts = new Map(this.#propsPool.map(entry => [entry.propsSig, 0]))
     try {
-      const index: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
+      const index = readTilePropsIndex()
       for (const propsSig of Object.values(index)) {
         if (typeof propsSig !== 'string') continue
         if (!this.#usageCounts.has(propsSig)) continue
@@ -2019,7 +2019,7 @@ export class SubstrateService extends EventTarget {
       }
       const fingerprintOf = (): string => {
         const hist = get('@diamondcoreprocessor.com/HistoryService') as { headIndexCount?: () => number } | undefined
-        const idxRaw = localStorage.getItem('hc:tile-props-index') ?? '{}'
+        const idxRaw = JSON.stringify(readTilePropsIndex())
         // `v2` — the pass gained the default-entry heal (an index entry may now
         // be CORRECTED, not just filled). Hives that completed a v1 pass carry a
         // matching fingerprint and would skip forever, never healing the entries
@@ -2032,7 +2032,7 @@ export class SubstrateService extends EventTarget {
       }
       const store = this.#store()
       if (!store) { console.info('[substrate] stamp pass: store not ready'); return 0 }
-      const index: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
+      const index = readTilePropsIndex()
       const indexSize = Object.keys(index).length
 
       // Legacy dir-file 0000 source: the OLDEST props generation lives as a

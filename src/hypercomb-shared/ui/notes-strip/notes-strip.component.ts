@@ -41,7 +41,6 @@ const MARK_PICK_ID = 'notes:mark-palette'
 // Participant-local render index: locationSig (or bare label) -> props-resource
 // sig, written by the renderer for every tile it paints. Read-only here, and
 // O(1) — the identity plate never triggers a cold tree walk to find a picture.
-const TILE_PROPS_INDEX_KEY = 'hc:tile-props-index'
 const SIG_RE = /^[0-9a-f]{64}$/i
 
 // Panel width (px) at which the identity plate earns its large form: the
@@ -196,6 +195,8 @@ type QaItem = {
 type HistoryServiceLike = {
   sign(lineageLike: { explorerSegments?: () => readonly string[] }): Promise<string>
   currentLayerAt(locationSig: string): Promise<{ qa?: unknown; children?: unknown; properties?: unknown } | null>
+  /** The parsed head layer from the warm cache only — never a scan. */
+  peekCurrentLayer?(locationSig: string): { properties?: unknown } | null
 }
 
 type StoreLike = {
@@ -2246,9 +2247,12 @@ export class NotesStripComponent implements OnDestroy, PanelSizeOwner {
       const segments = [...(lineage?.explorerSegments?.() ?? []), cell]
       try { locSig = await history.sign({ explorerSegments: () => segments }) } catch { /* cold */ }
     }
+    // The layer IS the index: its `properties[0]` from the warm cache, never
+    // a tree walk. A cold head reads as no picture, exactly as a miss did.
     try {
-      const idx = JSON.parse(localStorage.getItem(TILE_PROPS_INDEX_KEY) ?? '{}') as Record<string, string>
-      const v = (locSig && idx[locSig]) || idx[cell]
+      const layer = locSig ? history?.peekCurrentLayer?.(locSig) : null
+      const slot = Array.isArray(layer?.properties) ? layer!.properties as unknown[] : []
+      const v = slot[0]
       return (typeof v === 'string' && SIG_RE.test(v)) ? v : null
     } catch { return null }
   }
