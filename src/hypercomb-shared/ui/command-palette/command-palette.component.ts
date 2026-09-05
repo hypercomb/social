@@ -4,7 +4,7 @@
 // Forwards input changes and keyboard navigation back to the drone
 // via EffectBus effects. No business logic lives here.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import {
   Component,
   computed,

@@ -4,7 +4,7 @@
 // renders to HTML with a lightweight parser, and displays in a clean overlay.
 // Activated via `/docs` slash behaviour (listens to EffectBus 'docs:open').
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, signal, computed, effect, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe.js'

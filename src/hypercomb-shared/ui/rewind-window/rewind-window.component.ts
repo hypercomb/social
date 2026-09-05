@@ -21,7 +21,7 @@
 // property); a miss falls back to the full image bytes, and a further
 // miss renders an initial-letter hex. Nothing is load-bearing.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, ElementRef, computed, effect, inject, signal, type AfterViewInit, type OnDestroy, type OnInit } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'

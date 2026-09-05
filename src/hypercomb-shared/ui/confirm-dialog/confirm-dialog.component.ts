@@ -4,7 +4,7 @@
 // modal dialog. Responds with 'confirm:response' on user decision.
 // Escape key and backdrop click dismiss as cancel.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, signal, computed, type OnInit, type OnDestroy } from '@angular/core'
 import { EffectBus, type ConfirmRequest, type ConfirmResponse } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'

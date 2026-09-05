@@ -42,7 +42,7 @@
 // the same intent the designer's own sliders use, so a variable has one write
 // path however it was moved.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, computed, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'

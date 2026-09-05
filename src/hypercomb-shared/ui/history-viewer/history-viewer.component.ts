@@ -8,7 +8,7 @@
 //
 // Clicking a row seeks the HistoryCursor to that entry.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, ElementRef, computed, effect, inject, signal, type OnDestroy, type OnInit } from '@angular/core'
 import { EffectBus, IconRef, type IconRef as IconRefType } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'

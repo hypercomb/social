@@ -103,7 +103,7 @@ import {
   isParticipantAiHostConfigured,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { signalSession } from '../window-session'

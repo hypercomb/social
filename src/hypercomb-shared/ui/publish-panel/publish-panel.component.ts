@@ -36,7 +36,7 @@
 // Unpublish lives in the properties pane, under its honest limit stated in
 // full — it stops the branch being advertised, it does not un-share it.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, computed, inject, signal, type OnDestroy } from '@angular/core'
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser'
 import { EffectBus } from '@hypercomb/core'

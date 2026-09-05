@@ -7,7 +7,7 @@
 // decoration. Shell UI — must NOT import essentials. The optional "import
 // .vcf" button parses a vCard locally to prefill the fields.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, signal, type OnDestroy } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { EffectBus } from '@hypercomb/core'

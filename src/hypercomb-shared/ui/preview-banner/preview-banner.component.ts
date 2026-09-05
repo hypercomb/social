@@ -12,7 +12,7 @@
 // mount order irrelevant). The buttons emit `hive:adopt-accept` /
 // `hive:adopt-dismiss`; the drone owns everything that happens next.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, signal, computed, type OnDestroy, type OnInit } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'

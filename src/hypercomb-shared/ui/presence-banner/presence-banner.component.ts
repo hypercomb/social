@@ -25,7 +25,7 @@
 // processor's 'mesh:public-changed' broadcast (last-value replay →
 // correct on mount, even if we subscribe after the initial emit).
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, ElementRef, inject, signal, computed, effect, viewChild, type OnDestroy, type OnInit } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
