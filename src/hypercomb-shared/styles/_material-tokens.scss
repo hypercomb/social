@@ -227,6 +227,12 @@
   // These were the single biggest source of unreadable bright-theme chrome:
   // thirty panels had each picked their own near-white for "faint label",
   // which is invisible the moment the pane goes cream. A rung cannot be.
+  --hc-window-ink-ghost: rgba(var(--hc-panel-ink), var(--hc-ink-a-ghost));
+  --hc-window-ink-faint: rgba(var(--hc-panel-ink), var(--hc-ink-a-faint));
+  --hc-window-ink-quiet: rgba(var(--hc-panel-ink), var(--hc-ink-a-quiet));
+  --hc-window-ink-plain: rgba(var(--hc-panel-ink), var(--hc-ink-a-plain));
+  --hc-window-ink-loud:  rgba(var(--hc-panel-ink), var(--hc-ink-a-loud));
+
   // Ink ON A SCRIM. A viewfinder, a crop mask, a label composited over
   // arbitrary imagery: these sit on a fixed black substrate that no theme
   // repaints, so the panel ink — near-black under a bright look — would
@@ -235,12 +241,6 @@
   // every theme. Two rungs, never a literal in a component sheet.
   --hc-window-on-scrim:       rgba(255, 255, 255, 0.96);
   --hc-window-on-scrim-quiet: rgba(255, 255, 255, 0.82);
-
-  --hc-window-ink-ghost: rgba(var(--hc-panel-ink), var(--hc-ink-a-ghost));
-  --hc-window-ink-faint: rgba(var(--hc-panel-ink), var(--hc-ink-a-faint));
-  --hc-window-ink-quiet: rgba(var(--hc-panel-ink), var(--hc-ink-a-quiet));
-  --hc-window-ink-plain: rgba(var(--hc-panel-ink), var(--hc-ink-a-plain));
-  --hc-window-ink-loud:  rgba(var(--hc-panel-ink), var(--hc-ink-a-loud));
 
   // ── THE PANEL'S OWN GROUNDS ───────────────────────────────────────
   // A row, a field, a chip and a divider inside a tool window are not the
