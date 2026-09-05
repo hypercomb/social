@@ -1,4 +1,4 @@
-// hypercomb-shared/core/script-preloader.ts
+// hypercomb-runtime/src/script-preloader.ts
 // Marker-driven bee resolver: reads signature markers from the cell tree
 // and loads bee modules on demand. The processor (hypercomb.act()) is the
 // sole caller of find() → pulse → synchronize.
