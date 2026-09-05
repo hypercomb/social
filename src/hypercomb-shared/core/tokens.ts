@@ -13,7 +13,7 @@ import { Lineage } from './lineage'
 import { MovementService } from './movement.service'
 import { Navigation } from './navigation'
 import { ResourceCompletionService } from './resource-completion.service'
-import { ScriptPreloader } from './script-preloader'
+import { ScriptPreloader } from '@hypercomb/runtime/script-preloader'
 import { CellSuggestionProvider } from './cell-suggestion.provider'
 import { ThemeService } from './theme.service'
 

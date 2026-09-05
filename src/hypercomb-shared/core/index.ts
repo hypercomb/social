@@ -1,5 +1,5 @@
-export * from './script-preloader'
-export * from './store'
+export * from '@hypercomb/runtime/script-preloader'
+export * from '@hypercomb/runtime/store'
 export * from './model'
 export * from './movement.service'
 export * from '@hypercomb/runtime/dependency-loader'
