@@ -94,7 +94,7 @@ the census had not:**
   session), the committer's create-reset branch, the tile-art and tutorial
   addresses, the orphaned participant base, and the fourth registry pointer —
   33 of 57 closed (one not
-  reproduced; the five localStorage stores are an owner decision; the eager
+  reproduced; four of the five localStorage stores are document pools and the fifth is a recorded decision; the eager
   pool opens are deferred to the colon migration). Nothing at wide radius
   remains.
 
@@ -289,7 +289,7 @@ the siblings already have.
   file not routed through `hardDeleteVetoFor`. *Fix:* one line, same guard as
   its neighbours.
 - *FIXED 2026-09-04 — deleted with `memoize.ts` and `expand.ts`; nothing imported any of the three.* `projection.ts:42` — a memo keyed by a *name* in localStorage; checks 6 and 7.
-- *OWNER DECISION, 2026-09-04: each of these is a feature's state store moving into a pool — five designs, not five fixes. Left open on purpose.* **Participant state outside the graph — check 1.** `tile-properties.ts:284`
+- *FIXED 2026-09-04, four of five — the saved locations, pinned entrances, recent portals + home mark, and icon overrides are DOCUMENT pools (`locations:saved`, `entrances:pinned`, `portals:recent`, `icons:overrides`) behind `hypercomb-shared/core/participant-document.ts`: a synchronous value, hydrated from the pool once the Store is ready, written through, the localStorage keys read once as a fallback and never written again. The pin store's path-named keys (check 4) are gone with it — the route is data inside one record now. THE TILE-PROPS INDEX STAYS A DEVICE CACHE, BY DECISION: it is a derived cache of the layer's `properties` slot, written on the commit path and keyed by LOCATION, so a pool would make it exactly the load-bearing commit-path derived cache optimize-phase.md forbids. Its retirement is the peek cache (`peekCurrentLayer(locSig)` already holds the slot), which runs through show-cell — held by another session.* **Participant state outside the graph — check 1.** `tile-properties.ts:284`
   (`hc:tile-props-index`), `saved-locations-store.ts:49`,
   `pinned-entrances.store.ts:178` (keyed by a *path*, check 4 too),
   `recent-portals.store.ts:191`, `icon-override.store.ts:75`. Each is a

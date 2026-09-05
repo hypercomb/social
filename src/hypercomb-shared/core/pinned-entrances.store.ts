@@ -18,17 +18,26 @@
 // cascading capability is the typed file dropbox; visual bees (website,
 // …) are node-local, so their pins are strictly per-page.
 //
-// A pin is a
-// personal navigation arrangement, not content: like the hide list and the
-// public flags it lives in localStorage keyed by the location, never in the
-// layer (it must not skew layer signatures across peers), and it references
-// the entrance by identity (groupId + memberKey) — the entrance itself stays
-// first-class in its launch group / aggregation layer.
+// ── Storage: one document, keyed inside by the level ──────────────────
+//
+// A pin is a personal navigation arrangement, not content: it never enters
+// the layer (it must not skew layer signatures across peers), and it
+// references the entrance by identity (groupId + memberKey) — the entrance
+// itself stays first-class in its launch group / aggregation layer.
+//
+// Every level's pins live in ONE DOCUMENT — a map from the level's normalized
+// route to its pin list — in the participant's `entrances:pinned` pool
+// (participant-document.ts). Before this, each level was its own localStorage
+// key NAMED BY THE PATH, which is the shape write-conformance check 4
+// forbids; those keys are read once as a fallback and never written again.
+// The route is still what a pin is ABOUT — it is data inside the record now,
+// not the record's address.
 //
 // The stored icon/label are a render fallback for the moment before the
 // group's discovery scan lands; consumers prefer the LIVE member's glyph.
 
 import { normalizeCell } from '@hypercomb/core'
+import { ParticipantDocument, type ParticipantDocumentOptions } from './participant-document'
 
 export type PinnedEntrance = {
   /** Launch group that owns the entrance (websites, games, …). */
@@ -61,18 +70,56 @@ export type PinnedEntranceAt = {
   pin: PinnedEntrance
 }
 
-const KEY_PREFIX = 'hc:pinned-entrances:/'
+/** LEGACY localStorage key prefix — one key per level, named by the path.
+ *  Read at construction, never written. */
+const LEGACY_KEY_PREFIX = 'hc:pinned-entrances:/'
+/** The document pool. Colon-scoped: no tile can name it. */
+export const PINNED_ENTRANCES_MEANING = 'entrances:pinned'
 
-/** Canonical per-level storage key. Every segment is normalized so raw nav
- *  paths and normalized descent paths agree (same rule as tilePath). */
+/** level route (normalized, `/`-joined; the hive root is ``) → its pins. */
+type PinMap = Record<string, PinnedEntrance[]>
+
+/** Canonical per-level route. Every segment is normalized so raw nav paths
+ *  and normalized descent paths agree (same rule as tilePath). */
 function normalizePath(segments: readonly string[]): string[] {
   return segments
     .map(s => String(s ?? '').trim()).filter(Boolean)
     .map(s => normalizeCell(s) || s)
 }
 
-function storageKey(segments: readonly string[]): string {
-  return `${KEY_PREFIX}${normalizePath(segments).join('/')}`
+const levelKey = (segments: readonly string[]): string => normalizePath(segments).join('/')
+
+const isPin = (p: unknown): p is PinnedEntrance =>
+  !!p && typeof p === 'object'
+  && typeof (p as PinnedEntrance).groupId === 'string'
+  && typeof (p as PinnedEntrance).memberKey === 'string'
+
+const parse = (raw: unknown): PinMap | null => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const out: PinMap = {}
+  for (const [level, pins] of Object.entries(raw as Record<string, unknown>)) {
+    if (!Array.isArray(pins)) continue
+    const clean = pins.filter(isPin)
+    if (clean.length > 0) out[level] = clean
+  }
+  return out
+}
+
+/** The walk-back: every per-level legacy key, folded into one map. */
+const legacy = (): PinMap => {
+  const out: PinMap = {}
+  let keys: string[]
+  try { keys = Object.keys(localStorage) } catch { return out }
+  for (const key of keys) {
+    if (!key.startsWith(LEGACY_KEY_PREFIX)) continue
+    try {
+      const arr = JSON.parse(localStorage.getItem(key) ?? '[]')
+      if (!Array.isArray(arr)) continue
+      const clean = arr.filter(isPin)
+      if (clean.length > 0) out[key.slice(LEGACY_KEY_PREFIX.length).split('/').filter(Boolean).join('/')] = clean
+    } catch { /* one unreadable key — skip it */ }
+  }
+  return out
 }
 
 /** True when `here` is `root` or sits beneath it. Both are normalized first,
@@ -85,33 +132,29 @@ export function withinSubtree(here: readonly string[], root: readonly string[]):
   return r.every((seg, i) => seg === h[i])
 }
 
-class PinnedEntrancesStore extends EventTarget {
+export class PinnedEntrancesStore extends EventTarget {
+  readonly #doc: ParticipantDocument<PinMap>
+
+  constructor(io: Pick<ParticipantDocumentOptions<PinMap>, 'whenStore'> = {}) {
+    super()
+    this.#doc = new ParticipantDocument<PinMap>({
+      meaning: PINNED_ENTRANCES_MEANING, parse, empty: {}, legacy, whenStore: io.whenStore,
+    })
+    this.#doc.addEventListener('change', () => this.dispatchEvent(new CustomEvent('change')))
+  }
+
   pinsAt(segments: readonly string[]): PinnedEntrance[] {
-    try {
-      const raw = localStorage.getItem(storageKey(segments))
-      const arr = raw ? JSON.parse(raw) : []
-      if (!Array.isArray(arr)) return []
-      return arr.filter((p): p is PinnedEntrance =>
-        !!p && typeof p === 'object'
-        && typeof (p as PinnedEntrance).groupId === 'string'
-        && typeof (p as PinnedEntrance).memberKey === 'string')
-    } catch {
-      return []
-    }
+    return [...(this.#doc.value[levelKey(segments)] ?? [])]
   }
 
   /** Every pin on every level, each tagged with the level holding it. The
    *  cascade rule needs this: a pin dropped on one page can still reach the
-   *  current location, so the bar cannot look at one key alone. Cheap — a
-   *  handful of short localStorage keys, walked on refresh. */
+   *  current location, so the bar cannot look at one level alone. */
   allPins(): PinnedEntranceAt[] {
     const out: PinnedEntranceAt[] = []
-    let keys: string[]
-    try { keys = Object.keys(localStorage) } catch { return out }
-    for (const key of keys) {
-      if (!key.startsWith(KEY_PREFIX)) continue
-      const level = key.slice(KEY_PREFIX.length).split('/').filter(Boolean)
-      for (const pin of this.pinsAt(level)) out.push({ level, pin })
+    for (const [key, pins] of Object.entries(this.#doc.value)) {
+      const level = key.split('/').filter(Boolean)
+      for (const pin of pins) out.push({ level, pin })
     }
     return out
   }
@@ -173,10 +216,11 @@ class PinnedEntrancesStore extends EventTarget {
   }
 
   #write(segments: readonly string[], pins: PinnedEntrance[]): void {
-    try {
-      if (pins.length === 0) localStorage.removeItem(storageKey(segments))
-      else localStorage.setItem(storageKey(segments), JSON.stringify(pins))
-    } catch { /* private-browsing edge case — pin won't persist */ }
+    const next: PinMap = { ...this.#doc.value }
+    const key = levelKey(segments)
+    if (pins.length === 0) delete next[key]
+    else next[key] = pins
+    this.#doc.write(next)
     this.dispatchEvent(new CustomEvent('change'))
   }
 }
