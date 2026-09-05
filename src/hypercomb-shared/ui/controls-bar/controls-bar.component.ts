@@ -28,7 +28,7 @@ import { isWindowShowing } from '../window-session'
 import { showHiveRoot } from '../../core/home-root'
 import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
-import type { InstallMonitor } from '../../core/install-monitor'
+import type { InstallMonitor } from '@hypercomb/runtime/install-monitor'
 import { VoiceInputService } from '../../core/voice-input.service'
 import { secretTag } from '@hypercomb/core'
 

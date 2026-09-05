@@ -46,7 +46,7 @@ import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { groupRegistry, type GroupMember, type LaunchGroup } from '../../core/group-registry'
 import { pinnedEntrances, type PinnedEntrance } from '../../core/pinned-entrances.store'
-import { registerProximityProvider } from '../../core/proximity-registry'
+import { registerProximityProvider } from '@hypercomb/runtime/proximity-registry'
 import '../../core/launch-groups'   // side-effect: registers the built-in groups
 
 type PinView = {

@@ -8,12 +8,12 @@
 
 import { describe, expect, it } from 'vitest'
 import { SignatureService } from '@hypercomb/core'
-import { NativeRootDirectory, type NativeBridge } from './native-filesystem'
+import { NativeRootDirectory, type NativeBridge } from '@hypercomb/runtime/native-filesystem'
 import {
   MemorySyncFile,
   PackedStoreEngine,
   markerFilename,
-} from './packed-store-engine'
+} from '@hypercomb/runtime/packed-store-engine'
 import {
   changed,
   exportInterchange,

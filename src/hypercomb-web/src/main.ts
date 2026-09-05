@@ -52,7 +52,7 @@ import '@hypercomb/shared/ui/tool-windows'
 // anything can capture the original — nine files call
 // navigator.storage.getDirectory() directly, and WebView2 has a real OPFS
 // bucket they would otherwise silently write into. No-op in a browser.
-import { installNativeStorageOverride, installNativeSwBridge } from '@hypercomb/shared/core/native-filesystem'
+import { installNativeStorageOverride, installNativeSwBridge } from '@hypercomb/runtime/native-filesystem'
 installNativeStorageOverride()
 // Answer the service worker's byte requests from the native store — the SW
 // global can see neither the Tauri bridge nor the storage override.
@@ -67,8 +67,8 @@ import '@hypercomb/shared/core/header-size'
 import { bootstrapApplication } from '@angular/platform-browser'
 import { EffectBus } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared'
-import { PACKED_STORE_MEANING } from '@hypercomb/shared/core/packed-store-engine'
-import { packedStoreBlocksBoot } from '@hypercomb/shared/core/packed-store-gate'
+import { PACKED_STORE_MEANING } from '@hypercomb/runtime/packed-store-engine'
+import { packedStoreBlocksBoot } from '@hypercomb/runtime/packed-store-gate'
 import { ensureInstall, opfsWritable, upgradeFromBundled, type BootStatus } from './setup/ensure-install'
 import { cacheImportMap, IMPORT_MAP_STORAGE_KEY, resolveImportMap } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
@@ -78,8 +78,8 @@ import {
   initializeRuntime,
   protectOriginStorage,
 } from '@hypercomb/shared/core'
-import { postCommunityDomainsToServiceWorker } from '@hypercomb/shared/core/sw-domains'
-import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
+import { postCommunityDomainsToServiceWorker } from '@hypercomb/runtime/sw-domains'
+import { nativeAvailable } from '@hypercomb/runtime/native-filesystem'
 
 // Ensure side-effect registration
 const _deps = [DependencyLoader]

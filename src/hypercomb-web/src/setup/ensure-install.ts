@@ -11,7 +11,7 @@
 import { EffectBus, MARKER_NAME, SignatureStore, hardDeleteVetoFor, planNamedRemovalFor } from '@hypercomb/core'
 import { isComplete, resolveInventory, Store, validateSealedPackage, type ReplicationIo } from '@hypercomb/shared/core'
 import { seedDarkOnFreshInstall } from '@hypercomb/shared/ui/features-viewer/behavior-enablement'
-import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
+import { nativeAvailable } from '@hypercomb/runtime/native-filesystem'
 import { isVisitorSession } from './visitor-session'
 // Cold-boot acquisition. Same implementation the shim uses and the same one
 // behind window.hypercomb.acquire — there is one acquisition, not three.
@@ -541,7 +541,7 @@ export const upgradeFromBundled = async (): Promise<boolean> => {
  */
 const adoptNativeBundle = async (): Promise<boolean> => {
   try {
-    const { nativeAvailable } = await import('@hypercomb/shared/core/native-filesystem')
+    const { nativeAvailable } = await import('@hypercomb/runtime/native-filesystem')
     if (!nativeAvailable()) return false
     const bundled = await fetchBundledPackage()
     if (!bundled) return false
@@ -665,7 +665,7 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
       // error (verified live: correct bytes, wrong header). There is no SPA
       // fallback inside the native shell, and the walker's sha256 check is
       // the real gate — index.html bytes could never hash to a declared sig.
-      const { nativeAvailable } = await import('@hypercomb/shared/core/native-filesystem')
+      const { nativeAvailable } = await import('@hypercomb/runtime/native-filesystem')
       if (!nativeAvailable() &&
           (res.headers.get('content-type') || '').toLowerCase().includes('text/html')) return null
       return new Uint8Array(await res.arrayBuffer()) as Uint8Array<ArrayBuffer>

@@ -8,7 +8,7 @@
 
 import type { Provider } from '@angular/core'
 import { CompletionUtility } from './completion-utility'
-import { LocalizationService } from './i18n.service'
+import { LocalizationService } from '@hypercomb/runtime/i18n.service'
 import { Lineage } from './lineage'
 import { MovementService } from './movement.service'
 import { Navigation } from './navigation'

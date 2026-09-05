@@ -10,7 +10,7 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import type { ScriptPreloader } from '../../core/script-preloader'
 import { LocationParser } from '../../core/initializers/location-parser'
 import { RuntimeMediator } from '../runtime-mediator'
-import { isComplete, resolveInventory, type ReplicationIo } from '../../core/replication-walker'
+import { isComplete, resolveInventory, type ReplicationIo } from '@hypercomb/runtime/replication-walker'
 
 
 interface ExplorerEntry {
