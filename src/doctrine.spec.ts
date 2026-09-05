@@ -406,13 +406,13 @@ describe('doctrine ratchets', () => {
 
   it('derived-cache manifests are written only by the store, the optimize phase, and the render backfill', () => {
     // The commit path mints truth only. writeChildrenManifest is called
-    // from the ManifestOptimizerDrone (processor optimize phase) and the
-    // show-cell resolveChildNames backfill; store.ts defines it.
+    // from the ManifestOptimizerDrone (processor optimize phase) — the ONE
+    // door — and store.ts defines it. The show-cell render backfill used to
+    // write it too; it now enqueues the parent and the phase mints the pack.
     const actual = filesMatching(/writeChildrenManifest/)
     assertRatchet(actual, [
       'hypercomb-runtime/src/store.ts',
       'hypercomb-essentials/src/history/manifest-optimizer.drone.ts',
-      'hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts',
     ], 'children-manifest writer')
   })
 

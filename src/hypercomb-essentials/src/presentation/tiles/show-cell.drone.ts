@@ -533,12 +533,12 @@ async function resolveChildNames(
   // — a single file read returns the resolved
   // child layer objects with names already inlined. Skips the per-child
   // getLayerBySig walk entirely on cold load. Falls through to the
-  // signature-resolution path on miss; commitLayer writes a fresh
-  // manifest after every commit so subsequent reads stay hot.
+  // signature-resolution path on miss; the optimize phase mints a fresh
+  // manifest after every commit so subsequent reads stay hot. This is a
+  // READER: the paint never writes the cache (see the enqueue below).
   const store = parentLayerSig
     ? (window as any).ioc?.get?.('@hypercomb.social/Store') as {
         readChildrenManifest?: (sig: string) => Promise<Array<{ sig: string; layer: { name?: string; children?: string[] } }> | null>
-        writeChildrenManifest?: (sig: string, m: Array<{ sig: string; layer: { name?: string; children?: string[] } }>) => Promise<void>
       } | undefined
     : undefined
 
@@ -588,7 +588,7 @@ async function resolveChildNames(
       // visit paints from the pack. Once per parent sig per session; keyed by
       // an immutable content sig, so a successful upgrade is permanent.
       // Render pass only — see `options.mayUpgradePack`.
-      if (options?.mayUpgradePack) upgradeThinPack(parentLayerSig, manifest, content.children, store)
+      if (options?.mayUpgradePack) upgradeThinPack(parentLayerSig, manifest, content.children)
       freshenBranchesAfterPaint(out)
       return out
     }
@@ -639,34 +639,12 @@ async function resolveChildNames(
   // manifests lets the first fully-warm pass heal the layer so every
   // subsequent load is a single manifest read with all children present.
   // Idle-scheduled so the current render path doesn't pay the write.
+  // THE PAINT DOES NOT WRITE THE CACHE. It says which parent needs one, and
+  // the optimize phase mints it — enriched, budgeted, on the next idle pass
+  // (optimize-phase.md rule 1; manifest-optimizer.drone.ts is the one door).
+  // Until it lands, the render resolves per child exactly as it just did.
   const allResolved = children.length === content.children.length && children.every(c => !!c?.name)
-  if (parentLayerSig && store?.writeChildrenManifest && allResolved) {
-    const thin: Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }> = []
-    for (let i = 0; i < children.length; i++) {
-      thin.push({ sig: content.children[i], layer: children[i]! })
-    }
-    const schedule = typeof (window as any).requestIdleCallback === 'function'
-      ? (cb: () => void) => (window as any).requestIdleCallback(cb, { timeout: 5_000 })
-      : (cb: () => void) => setTimeout(cb, 0)
-    schedule(() => {
-      void (async () => {
-        // ENRICHED when we can: the pack carries each tile's props and its
-        // optimized visual, so the NEXT visit to this layer paints from two
-        // reads. Falling back to the thin array is still correct (the render
-        // resolves per child, as it always did) — it just doesn't pay off.
-        // Enriching MINTS renditions, so only the painting pass may do it; a
-        // prepareView sweeping the neighbourhood writes the thin array and
-        // leaves the visuals to the optimize phase.
-        const optimizer = options?.mayUpgradePack
-          ? (window as any).ioc?.get?.('@diamondcoreprocessor.com/ManifestOptimizerDrone') as {
-              buildEntries?: (sigs: readonly string[], layers: ReadonlyArray<{ name?: string }>) => Promise<Array<Record<string, unknown>> | null>
-            } | undefined
-          : undefined
-        const rich = await optimizer?.buildEntries?.(content.children ?? [], children as Array<{ name?: string }>).catch(() => null)
-        await store.writeChildrenManifest!(parentLayerSig, (rich ?? thin) as typeof thin)
-      })()
-    })
-  }
+  if (parentLayerSig && allResolved) manifestOptimizer()?.enqueue?.(parentLayerSig, content.children)
 
   freshenBranchesAfterPaint(out)
   return out
@@ -681,36 +659,27 @@ const _packUpgradeTried = new Set<string>()
  *  child), off the render path. Silent no-op when the pack is already rich,
  *  when the optimizer isn't registered, or when the re-mint can't complete —
  *  the thin pack stays valid, it just keeps costing per-tile reads. */
+/** The optimizer's one door, when it is registered. */
+const manifestOptimizer = (): {
+  enqueue?: (parentSig: string, childSigs: readonly string[]) => void
+  constructor?: { packNeedsVisuals?: (p: ReadonlyArray<unknown>) => boolean }
+} | undefined =>
+  (window as any).ioc?.get?.('@diamondcoreprocessor.com/ManifestOptimizerDrone')
+
 function upgradeThinPack(
   parentLayerSig: string,
   manifest: Array<{ sig: string; layer: { name?: string; [k: string]: unknown }; visual?: unknown }>,
   childSigs: readonly string[],
-  store: { writeChildrenManifest?: (sig: string, m: Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }>) => Promise<void> } | undefined,
 ): void {
-  if (!parentLayerSig || !store?.writeChildrenManifest || _packUpgradeTried.has(parentLayerSig)) return
-  const optimizerCtor = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ManifestOptimizerDrone') as {
-    buildEntries?: (sigs: readonly string[], layers: ReadonlyArray<{ name?: string }>) => Promise<Array<Record<string, unknown>> | null>
-    constructor?: { packNeedsVisuals?: (p: ReadonlyArray<unknown>) => boolean }
-  } | undefined
-  if (!optimizerCtor?.buildEntries) return
-  const needs = (optimizerCtor.constructor as { packNeedsVisuals?: (p: ReadonlyArray<unknown>) => boolean } | undefined)?.packNeedsVisuals
+  if (!parentLayerSig || _packUpgradeTried.has(parentLayerSig)) return
+  const optimizer = manifestOptimizer()
+  if (!optimizer?.enqueue) return
+  const needs = optimizer.constructor?.packNeedsVisuals
   if (needs && !needs(manifest)) return
   _packUpgradeTried.add(parentLayerSig)
-  const schedule = typeof (window as any).requestIdleCallback === 'function'
-    ? (cb: () => void) => (window as any).requestIdleCallback(cb, { timeout: 8_000 })
-    : (cb: () => void) => setTimeout(cb, 250)
-  schedule(() => {
-    void (async () => {
-      try {
-        const layers = manifest.map(e => e.layer)
-        const rich = await optimizerCtor.buildEntries!(childSigs, layers as ReadonlyArray<{ name?: string }>)
-        if (!rich || rich.length !== childSigs.length) return
-        await store.writeChildrenManifest!(parentLayerSig, rich as Array<{ sig: string; layer: { name?: string } }>)
-        for (const entry of rich) ShowCellDrone.adoptPackedVisual(entry as { visual?: { sig?: string; webp?: string; type?: string } })
-        console.log(`[preload] layer pack enriched: ${parentLayerSig.slice(0, 12)} (${rich.length} tiles bind from one file)`)
-      } catch { /* thin pack stays valid */ }
-    })()
-  })
+  // The next idle pass re-mints the pack with visuals; the thin pack stays
+  // valid until then, and the visit after that binds from one file.
+  optimizer.enqueue(parentLayerSig, childSigs)
 }
 
 export class ShowCellDrone extends Drone {

@@ -274,12 +274,16 @@ of meaning**, never a `__name__` dir). The model:
     forward commit, dual-pointer (new `sign(name)/000x` AND the old
     path-keyed bag advance to the SAME atom), and NOTHING is ever deleted
     — older versions must keep working. Colon meanings stay reserved for
-    SYSTEM pools no tile should name (`websites:menu`, `usage:dwell`); the
-    seven bare-word system pools above must each move to a colon meaning
-    or be declared reserved names. The frozen bare-word ratchet in
-    `hypercomb-core/src/core/pool-registry.ts` is owed a FLIP (step 5 of
-    the doc's execution order) — until it lands it still fails on new
-    bare words; do not extend it, retire it per the register.
+    SYSTEM pools no tile should name (`websites:menu`, `usage:dwell`). The
+    seven bare-word system pools above are RESERVED NAMES (decided
+    2026-09-04, step 5 of the doc's execution order, LANDED): no drain, no
+    new spelling — `BARE_WORD_POOL_MEANINGS` in
+    `hypercomb-core/src/core/pool-registry.ts` IS the reserved-name list
+    (frozen, may only shrink), `isReservedPoolWord(name)` asks the one
+    question the collision poses (folded as a molecule address folds, so
+    `Bees` is refused like `bees`; `websites` is NOT reserved), and the
+    shell's create path plus the create queen refuse the word at the
+    naming gesture. Never keep a second list of reserved words.
 
     **Never keep a local list of pool meanings.** The root is an
     UNTAGGED UNION of `{lineage bag, pool}` and any module may mint a
