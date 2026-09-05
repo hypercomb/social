@@ -7,7 +7,7 @@ import { PinnedEntrancesComponent } from '../pinned-entrances/pinned-entrances.c
 import type { Lineage } from '../../core/lineage'
 import type { MovementService } from '../../core/movement.service'
 import type { Navigation } from '../../core/navigation'
-import type { ScriptPreloader } from '../../core/script-preloader'
+import type { ScriptPreloader } from '@hypercomb/runtime/script-preloader'
 import type { CellSuggestionProvider } from '../../core/cell-suggestion.provider'
 import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/core/completion-utility'
 import { fromRuntime } from '../../core/from-runtime'
