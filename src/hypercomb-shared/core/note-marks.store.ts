@@ -41,7 +41,7 @@
 // it into a shared chunk that evaluates before the shell's main — where
 // ioc.web used to be imported for it — and the bare `register` global did
 // not exist yet: the whole graph threw and the shell came up blank.
-import './ioc.web'
+import '@hypercomb/runtime/ioc.web'
 import type { Store } from '@hypercomb/runtime/store'
 
 // Colon-carrying meaning: unproducible by any tile slug, so collision-proof.

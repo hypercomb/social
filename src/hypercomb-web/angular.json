@@ -18,11 +18,11 @@
           "builder": "@angular/build:application",
           "options": {
             "browser": "src/main.ts",
-            "polyfills": ["@hypercomb/shared/core/ioc.web"],
+            "polyfills": ["@hypercomb/runtime/ioc.web"],
             "tsConfig": "tsconfig.app.json",
             "inlineStyleLanguage": "scss",
             "allowedCommonJsDependencies": [
-              "@hypercomb/shared/core/ioc.web"
+              "@hypercomb/runtime/ioc.web"
             ],
             "assets": [
               {

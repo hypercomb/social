@@ -1,7 +1,7 @@
 // meadowverse/src/main.ts
 // thin runtime harness — boots the processor, lets bees run
 /// <reference path="../../hypercomb-shared/global.d.ts" />
-import '../../hypercomb-shared/core/ioc.web'
+import '@hypercomb/runtime/ioc.web'
 
 import { BEE_RESOLVER_KEY, hypercomb } from '@hypercomb/core'
 import { DependencyLoader } from '../../hypercomb-shared/core'
