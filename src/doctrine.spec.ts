@@ -1304,4 +1304,30 @@ describe('doctrine ratchets', () => {
       'parseInt over a directory entry name — classify with classifyDirectoryEntry, then use Number',
     )
   })
+
+  it('no door judges a machine call for itself — admission is asked, never re-derived', () => {
+    // DEFAULT-ELSEWHERE. Four surfaces turn language into execution here, and
+    // for a while each judged machine callers on its own: one was default-deny,
+    // one filtered concealed verbs, one weighed destruction against a hand-kept
+    // set of four names that had already drifted (`/cut` was never on it), and
+    // one weighed nothing at all. The differences were not a design — they were
+    // the order the doors were written in.
+    //
+    // An admission rule in four copies does not fail safe. It fails OPEN at
+    // whichever copy was not updated, which is the same shape as the pool
+    // lists that drifted until `/flatten` deleted a pool, and as
+    // `CALLABLE_FORMS`, which told a participant this hive has no delete
+    // behaviour. So the judgement lives once, in core's `machine-admission`,
+    // and a door supplies only WHO is calling and which census row the spoken
+    // word resolves to.
+    //
+    // What this forbids is narrow and exact: weighing a DECLARED reach or scope
+    // against a literal anywhere but the gate. Declaring one (`reach: 'editing'`
+    // on a behaviour) is untouched — that is a behaviour describing itself,
+    // which is the whole point. Empty allowlist: the gate compares by ladder
+    // position, so there is nothing here to grandfather.
+    const actual = filesMatching(
+      /\bmachine\s*[?!]?\.\s*(?:reach|scope)\s*[!=]==\s*['"`]/)
+    assertRatchet(actual, [], 'a door re-deriving machine admission instead of asking the gate')
+  })
 })

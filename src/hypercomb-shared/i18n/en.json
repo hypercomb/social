@@ -454,6 +454,7 @@
   "slash.remove-builtin": "remove selected tiles",
   "slash.heal": "Restore participant pictures a default overwrote",
   "slash.images": "Open the room's pictures for a tile and choose one",
+  "slash.grant": "Set how far a machine may go in this hive",
   "slash.help": "Show reference",
   "slash.providers": "Manage AI providers and API keys",
   "slash.history": "Toggle the history panel",

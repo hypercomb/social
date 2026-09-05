@@ -444,6 +444,7 @@
   "slash.remove-builtin": "選択したタイルを削除",
   "slash.heal": "既定画像に上書きされた参加者の画像を復元",
   "slash.images": "この場の参加者が持つ画像を開いて選ぶ",
+  "slash.grant": "この巣で機械がどこまで踏み込めるかを設定",
   "slash.help": "リファレンスを表示",
   "slash.providers": "AIプロバイダーとAPIキーを管理します",
   "slash.history": "履歴パネルの表示切替",
