@@ -36,9 +36,12 @@ vi.hoisted(() => {
   }
 })
 
+// The facade is typed against the spec's own MockDir: the real Store takes a
+// FileSystemDirectoryHandle, and the fake implements exactly the surface the
+// document-pool helpers touch.
 type StoreLike = {
-  putPoolDoc(pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string): Promise<string | null>
-  getPoolDoc(pool: FileSystemDirectoryHandle | undefined, subKey?: string): Promise<ArrayBuffer | null>
+  putPoolDoc(pool: MockDir, bytes: ArrayBuffer, subKey?: string): Promise<string | null>
+  getPoolDoc(pool: MockDir | undefined, subKey?: string): Promise<ArrayBuffer | null>
 }
 type StoreStatics = { poolSignature(meaning: string): Promise<string> }
 let store: StoreLike

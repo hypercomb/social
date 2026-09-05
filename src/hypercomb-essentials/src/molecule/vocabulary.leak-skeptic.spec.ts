@@ -155,9 +155,9 @@ describe('one press of Look', () => {
         const seen = askedAt.get(host) ?? []
         seen.push(pubkey)
         askedAt.set(host, seen)
-        return { ok: false, reason: 'missing' } as HiveIndexResult
+        return { ok: false, reason: 'unreachable' }
       },
-      readAtom: async () => ({ ok: false, why: 'unreachable' as const }),
+      readAtom: async () => ({ ok: false, reason: 'absent' as const }),
     }
 
     await searchVocabulary(HEX('a'), horizon, deps)
@@ -195,9 +195,9 @@ describe('one press of Look', () => {
         peak = Math.max(peak, inFlight)
         await Promise.resolve()
         inFlight -= 1
-        return { ok: false, reason: 'missing' } as HiveIndexResult
+        return { ok: false, reason: 'unreachable' }
       },
-      readAtom: async () => ({ ok: false, why: 'unreachable' as const }),
+      readAtom: async () => ({ ok: false, reason: 'absent' as const }),
     }
 
     await searchVocabulary(HEX('a'), horizon, deps)

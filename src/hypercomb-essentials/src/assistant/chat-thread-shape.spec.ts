@@ -84,7 +84,7 @@ class MockFile {
         if (typeof chunk === 'string') { this.bytes = new TextEncoder().encode(chunk); return }
         if (ArrayBuffer.isView(chunk)) {
           const view = chunk as Uint8Array
-          this.bytes = new Uint8Array(view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength))
+          this.bytes = new Uint8Array(view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer)
           return
         }
         if (chunk && typeof (chunk as Blob).arrayBuffer === 'function') {

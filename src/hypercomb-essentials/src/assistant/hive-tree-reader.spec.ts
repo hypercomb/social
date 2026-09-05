@@ -121,7 +121,7 @@ describe('the bounded live hive tree reader', () => {
 
   it('discards a read when the tree epoch moves during traversal', async () => {
     const fx = fixture()
-    const original = fx.getLayerBySig.getMockImplementation()!
+    const original = fx.getLayerBySig.getMockImplementation()! as (signature: string) => Promise<unknown>
     fx.getLayerBySig.mockImplementation(async (signature: string) => {
       const value = await original(signature)
       fx.epoch.value++
