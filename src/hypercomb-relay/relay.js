@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // hypercomb-relay — minimal Nostr relay AND HTTP content host for private swarm meetings
-// usage: node relay.js [--port 7777] [--pubkeys hex1,hex2] [--memory] [--db ./relay.db] [--max-event-size 65536] [--content-dir ./content] [--writers hex1,hex2] [--max-body-bytes 52428800]
+// usage: node relay.js [--port 7777] [--pubkeys hex1,hex2] [--memory] [--db ./relay.db] [--max-event-size 65536] [--content-dir ./content] [--writers hex1,hex2] [--max-body-bytes 52428800] [--replication-origins https://a.example,https://b.example] [--allow-private-sources]
 //
 // env fallbacks (used when the matching --flag is absent):
 //   PORT             → port to listen on (Azure App Service injects this)
@@ -29,6 +29,7 @@ import { WebSocketServer } from 'ws'
 import { verifyEvent } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
 import { verifyNip98 } from './http-auth.js'
+import { blockedSourcesReason } from './address-guard.js'
 import { contentDirectoryIO, parseReplicationRequest, resolveSignatureClosure, resolveSignatureInventory } from './replicate.js'
 import { ReceiptIndex } from './receipt-index.js'
 
@@ -67,6 +68,26 @@ function parseArgs(argv) {
     // its own authored content on a dev relay without NIP-98 key setup. Never
     // use on a public host.
     devOpenWrites: false,
+    // Replication destinations. `POST /replicate` asks THIS host to GET origins
+    // the caller names, so the caller chooses where the host's socket goes.
+    // Authorization answers who is asking, never where they pointed it.
+    //
+    // replicationOrigins: when non-empty, a source must match one of these
+    // origins exactly (scheme + host + port). Empty means "any origin that
+    // survives the address screen" — the same shape --writers uses, except an
+    // empty set here widens rather than closes, because replication from the
+    // open web is the ordinary case and an origin list is the operator's
+    // tightening, not their opt-in.
+    replicationOrigins: (() => {
+      const value = String(process.env.REPLICATION_ORIGINS ?? '').trim()
+      return value ? value.split(',').map(normalizeOrigin).filter(Boolean) : null
+    })(),
+    // DEV ONLY: let replication sources point into loopback / private / link-local
+    // space. Off by default: otherwise an authorized writer can read the
+    // operator's cloud metadata endpoint, admin ports and internal services
+    // through a replication result. A dev relay pulling from 127.0.0.1 needs it;
+    // a public host must never set it.
+    allowPrivateSources: String(process.env.ALLOW_PRIVATE_SOURCES ?? '').trim() === '1',
     // SPA serving REMOVED — the relay is a slim STORAGE/MESH host only.
     //
     // Under the full-split model, the installer's code-serving role is fixed
@@ -92,6 +113,7 @@ function parseArgs(argv) {
     const a = argv[i]
     if (a === '--memory') { args.memory = true; continue }
     if (a === '--dev-open-writes') { args.devOpenWrites = true; continue }
+    if (a === '--allow-private-sources') { args.allowPrivateSources = true; continue }
     const next = argv[i + 1]
     if (a === '--port' && next) { args.port = Number(next); i++ }
     else if (a === '--pubkeys' && next) { args.pubkeys = next.split(',').map(normalizePubkey).filter(Boolean); i++ }
@@ -100,6 +122,7 @@ function parseArgs(argv) {
     else if (a === '--content-dir' && next) { args.contentDir = resolve(next); i++ }
     else if (a === '--writers' && next) { args.writers = next.split(',').map(normalizePubkey).filter(Boolean); i++ }
     else if (a === '--max-body-bytes' && next) { args.maxBodyBytes = Number(next); i++ }
+    else if (a === '--replication-origins' && next) { args.replicationOrigins = next.split(',').map(normalizeOrigin).filter(Boolean); i++ }
     else if (a === '--spa-dir' && next) {
       // Removed flag — surface a clear error so legacy startup scripts get
       // updated rather than silently changing behavior. The relay no longer
@@ -115,6 +138,17 @@ function parseArgs(argv) {
     }
   }
   return args
+}
+
+/** An allowed replication origin is scheme + host + port and nothing else —
+ * a path would invite a caller to think a prefix was enforced when only the
+ * ORIGIN can be. */
+function normalizeOrigin(raw) {
+  try {
+    const url = new URL(String(raw).trim())
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    return url.origin
+  } catch { return null }
 }
 
 function normalizePubkey(raw) {
@@ -133,6 +167,10 @@ const cfg = parseArgs(process.argv)
 const writers = new Set(
   ((cfg.writers && cfg.writers.length ? cfg.writers : cfg.pubkeys) || []).map((p) => p.toLowerCase())
 )
+
+// Origins a replication source may name. Empty = unrestricted (the address
+// screen still applies); non-empty = an exact-origin allowlist.
+const replicationOrigins = new Set(cfg.replicationOrigins || [])
 
 function sha256Hex(buf) {
   return createHash('sha256').update(buf).digest('hex')
@@ -812,29 +850,48 @@ function tryReplicate(req, res) {
     const auth = verifyNip98(req, writers, { devOpen: cfg.devOpenWrites, payload: body })
     if (!auth.ok) { respondText(res, 401, auth.reason); return }
     let request
-    try { request = parseReplicationRequest(JSON.parse(body.toString('utf8'))) } catch (error) {
+    try {
+      request = parseReplicationRequest(JSON.parse(body.toString('utf8')), {
+        allowedOrigins: replicationOrigins,
+        allowPrivate: cfg.allowPrivateSources,
+      })
+    } catch (error) {
       respondText(res, 400, error?.message || 'invalid replication request'); return
     }
-    const key = `${auth.pubkey}:${request.signature}`
-    const existing = replicationJobs.get(key)
-    if (!existing) {
-      const resolver = request.inventory ? resolveSignatureInventory : resolveSignatureClosure
-      setReplicationResult(key, { state: 'running', signature: request.signature, startedAt: new Date().toISOString() })
-      const job = resolver(request.signature, contentDirectoryIO(cfg.contentDir, request.sources, resolveFlatSig), { limit: request.limit })
-        .then(result => {
-          receiptIndex.add(auth.pubkey, result.held)
-          setReplicationResult(key, { state: 'complete', completedAt: new Date().toISOString(), ...result })
-          console.log(`[replicate] ${auth.pubkey.slice(0, 8)}… ${request.signature.slice(0, 12)}… fetched=${result.fetched} present=${result.present} holes=${result.holes.length} refused=${result.refused.length}${result.limited ? ' limited' : ''}`)
+    // The caller names the destinations, so the host screens them before it
+    // opens a socket: a source resolving into loopback, link-local, private or
+    // CGNAT space is refused HERE, where the caller learns why, rather than
+    // becoming an empty job whose holes read like an unreachable peer. A source
+    // that does not resolve at all is NOT refused here — the answer is unknown
+    // and `guardedLookup` screens it again at connect time, so a DNS blip stays
+    // a retry instead of a rejection.
+    blockedSourcesReason(request.sources, cfg.allowPrivateSources, replicationOrigins).then(blocked => {
+      if (blocked) { respondText(res, 400, blocked); return }
+      const key = `${auth.pubkey}:${request.signature}`
+      const existing = replicationJobs.get(key)
+      if (!existing) {
+        const resolver = request.inventory ? resolveSignatureInventory : resolveSignatureClosure
+        setReplicationResult(key, { state: 'running', signature: request.signature, startedAt: new Date().toISOString() })
+        const io = contentDirectoryIO(cfg.contentDir, request.sources, resolveFlatSig, {
+          allowPrivate: cfg.allowPrivateSources,
+          allowedOrigins: replicationOrigins,
         })
-        .catch(error => {
-          setReplicationResult(key, { state: 'failed', signature: request.signature, completedAt: new Date().toISOString(), error: String(error?.message || error) })
-          console.error('[replicate] job failed:', error?.message || error)
-        })
-        .finally(() => replicationJobs.delete(key))
-      replicationJobs.set(key, job)
-    }
-    res.writeHead(202, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' })
-    res.end(JSON.stringify({ accepted: true, signature: request.signature, running: !!existing }))
+        const job = resolver(request.signature, io, { limit: request.limit })
+          .then(result => {
+            receiptIndex.add(auth.pubkey, result.held)
+            setReplicationResult(key, { state: 'complete', completedAt: new Date().toISOString(), ...result })
+            console.log(`[replicate] ${auth.pubkey.slice(0, 8)}… ${request.signature.slice(0, 12)}… fetched=${result.fetched} present=${result.present} holes=${result.holes.length} refused=${result.refused.length}${result.limited ? ' limited' : ''}`)
+          })
+          .catch(error => {
+            setReplicationResult(key, { state: 'failed', signature: request.signature, completedAt: new Date().toISOString(), error: String(error?.message || error) })
+            console.error('[replicate] job failed:', error?.message || error)
+          })
+          .finally(() => replicationJobs.delete(key))
+        replicationJobs.set(key, job)
+      }
+      res.writeHead(202, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' })
+      res.end(JSON.stringify({ accepted: true, signature: request.signature, running: !!existing }))
+    }).catch(error => respondText(res, 500, `source screening failed: ${error?.message || error}`))
   })
   return true
 }
@@ -1106,6 +1163,8 @@ server.listen(cfg.port, () => {
   if (cfg.devOpenWrites) console.log('writes: OPEN (--dev-open-writes — sha256 verify only, NEVER use on a public host)')
   else if (writers.size > 0) console.log(`writes: enabled — ${writers.size} authorized writer pubkey(s) (NIP-98 + sha256 verify)`)
   else console.log('writes: disabled (no --writers / --pubkeys configured)')
+  console.log(`replication sources: ${replicationOrigins.size ? `${replicationOrigins.size} allowed origin(s)` : 'any public origin'}`)
+  if (cfg.allowPrivateSources) console.log('replication sources: PRIVATE ADDRESSES ALLOWED (--allow-private-sources — dev only, NEVER use on a public host)')
   // Banner: slim storage-host announcement (no SPA — full-split model).
   // Visitors hitting `/` see the landing page → linked to canonical installer.
   console.log(`role: storage + mesh (slim host — installer code is canonical at ${CANONICAL_INSTALLER_URL})`)

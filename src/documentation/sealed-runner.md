@@ -326,6 +326,28 @@ elsewhere and nobody is watching them.
    private/ProxyAgent finds nothing. So it reaches the operator's internal
    network on behalf of anyone with write access. It is still the closest
    existing thing to a public runner, and still the opposite of sealed.
+
+   **FIXED 2026-09-04 — `hypercomb-relay/address-guard.js`.** The destination,
+   not the hostname string, is now screened: loopback, link-local (incl.
+   `169.254.169.254`), RFC1918, CGNAT, unique-local IPv6, multicast and the
+   unspecified/reserved ranges, plus the IPv4-mapped, IPv4-compatible and NAT64
+   spellings of each. The screen runs in two places for two different reasons —
+   at request time (`blockedSourcesReason`, so the caller gets a `400` naming the
+   address rather than a job that silently returns nothing) and inside the
+   socket's own name resolution (`guardedLookup` as the `lookup` passed to
+   `http.request`), which is what closes the DNS-rebinding window a
+   resolve-then-fetch check leaves open: the address the guard clears IS the
+   address the socket connects to. Redirects are no longer followed at all —
+   the fetcher moved off `fetch`, which followed a `302` into loopback and
+   returned the internal server's body. `--replication-origins` is an optional
+   exact-origin allowlist (empty = any origin surviving the screen) and an
+   allowlisted origin is exempt from the address screen, because an origin the
+   OPERATOR named is not the caller-chose-the-destination threat. Jobs are now
+   bounded in three directions, not one: atoms, fetched bytes (2 GiB) and wall
+   clock (10 min). `--allow-private-sources` (default off, dev only) is the sole
+   way back to the old behaviour. Covered by `address-guard.test.js` and the SSRF
+   case in `relay.integration.test.js`, which asserts the internal server is
+   never called. **The unverified-`#verifyAndImport` finding (2) is untouched.**
 2. **Bee loading executes network-delivered code with zero isolation** — OPFS
    bytes imported into the main realm via blob URL, with `window.ioc`, OPFS,
    `localStorage` (including `hc:nostr:secret-key`), fetch and the EffectBus.
