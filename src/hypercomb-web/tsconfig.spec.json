@@ -4,6 +4,17 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./out-tsc/spec",
+    /* `Array.fromAsync` is declared only in lib.esnext.array — no ES20xx lib
+       carries it — and memory-filesystem.spec drains an async iterable with
+       it. Pulling in that ONE lib rather than all of "ESNext" keeps the app's
+       ES2022 surface exactly where it is: a spec may use this, the shell may
+       not. */
+    "lib": [
+      "ES2022",
+      "ESNext.Array",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "types": [
       "jasmine"
     ]
