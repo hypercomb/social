@@ -3,7 +3,7 @@
 // Listens for 'mesh:open-modal' to open, broadcasts 'mesh:modal-open'
 // while open so the controls-bar can highlight the trigger.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, signal, computed, type OnInit, type OnDestroy } from '@angular/core'
 import { EffectBus, secretTag } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'

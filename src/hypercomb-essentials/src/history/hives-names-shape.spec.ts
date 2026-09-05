@@ -9,7 +9,7 @@
 //           holding ONE current record { name, head } (sealed head sig)
 //   walk:   from the head, children only — not exercised here
 //
-// Drives the REAL Store.putPoolDoc / getPoolDoc (hypercomb-shared) and
+// Drives the REAL Store.putPoolDoc / getPoolDoc (hypercomb-runtime) and
 // the REAL address derivations. What these tests freeze:
 //   1. the pool address can never be minted by a location (colon rule)
 //   2. the entry is name → head; NO lineageKey derivation anywhere
@@ -124,7 +124,7 @@ describe('hives:names — the entry shape uses no lineage sigbags', () => {
   let pool: MockDir
 
   beforeAll(async () => {
-    const mod = await import('../../../hypercomb-shared/core/store.js')
+    const mod = await import('@hypercomb/runtime/store')
     StoreClass = mod.Store as unknown as StoreStatics
     store = new (mod.Store as unknown as new () => StoreLike)()
   })

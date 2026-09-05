@@ -31,11 +31,11 @@
 }
 
 :host(.note-intent) ::ng-deep .command-input::placeholder {
-  color: color-mix(in srgb, var(--md-secondary) 55%, transparent);
+  color: var(--hc-chrome-ink-quiet);
 }
 
 :host(.note-intent) ::ng-deep .ghost {
-  color: color-mix(in srgb, var(--md-secondary) 35%, transparent);
+  color: var(--hc-chrome-ink-quiet);
 }
 
 .command-line-wrapper {
@@ -122,8 +122,8 @@
     width: var(--mobile-go-width);
     height: 2.75rem;
     box-sizing: border-box;
-    background: rgba(8, 16, 26, 0.72);
-    border: 1px solid rgba(126, 182, 214, 0.5);
+    background: rgba(var(--hc-chrome-glass), var(--hc-chrome-glass-a));
+    border: 1px solid rgba(var(--hc-chrome-rule), 0.72);
     border-left-color: color-mix(in srgb, var(--md-primary) 45%, transparent);
     border-radius: 0;
   }

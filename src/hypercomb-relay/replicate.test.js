@@ -148,3 +148,74 @@ test('a destination that refuses one atom records it as refused and the rest of 
   assert.ok(destination.has(leafSig))
   assert.ok(!destination.has(blockedSig))
 })
+
+test('a literal private, loopback or link-local source is refused at parse time', () => {
+  const parse = source => () => parseReplicationRequest({ signature: 'a'.repeat(64), sources: [source] })
+  assert.throws(parse('http://127.0.0.1:8080'), /loopback/)
+  assert.throws(parse('http://169.254.169.254/'), /link-local/)
+  assert.throws(parse('http://10.1.2.3/content'), /private/)
+  assert.throws(parse('http://[::1]:8080'), /loopback/)
+  assert.throws(parse('http://[::ffff:10.0.0.1]/'), /private/)
+  // a public literal and an ordinary name still pass
+  assert.deepEqual(parse('https://93.184.216.34/')().sources, ['https://93.184.216.34'])
+  assert.deepEqual(parse('https://content.example/')().sources, ['https://content.example'])
+})
+
+test('the dev escape hatch is the only way a private source parses', () => {
+  const request = parseReplicationRequest(
+    { signature: 'a'.repeat(64), sources: ['http://127.0.0.1:8080'] },
+    { allowPrivate: true },
+  )
+  assert.deepEqual(request.sources, ['http://127.0.0.1:8080'])
+})
+
+test('an operator origin allowlist admits only the origins it names', () => {
+  const allowedOrigins = new Set(['https://content.example'])
+  const request = parseReplicationRequest(
+    { signature: 'a'.repeat(64), sources: ['https://content.example/atoms'] },
+    { allowedOrigins },
+  )
+  assert.deepEqual(request.sources, ['https://content.example/atoms'])
+  assert.throws(() => parseReplicationRequest(
+    { signature: 'a'.repeat(64), sources: ['https://other.example'] },
+    { allowedOrigins },
+  ), /not an allowed replication origin/)
+})
+
+test('a job is bounded by wall clock and fetched bytes, not by atom count alone', async () => {
+  const leaf = Buffer.from('a leaf')
+  const leafSig = sig(leaf)
+  const root = Buffer.from(JSON.stringify({ leafSig }))
+  const rootSig = sig(root)
+  const source = new Map([[rootSig, root], [leafSig, leaf]])
+  const io = {
+    fetch: async signature => source.get(signature) ?? null,
+    read: async () => null,
+    write: async () => {},
+  }
+  const byByte = await resolveSignatureClosure(rootSig, io, { byteLimit: 1 })
+  assert.equal(byByte.fetched, 1)
+  assert.equal(byByte.limited, true)
+  assert.equal(byByte.fetchedBytes, root.byteLength)
+
+  const byClock = await resolveSignatureClosure(rootSig, io, { deadlineMs: -1 })
+  assert.equal(byClock.fetched, 0)
+  assert.equal(byClock.limited, true)
+})
+
+test('an origin the OPERATOR named is exempt from the address screen', () => {
+  // The screen exists because the CALLER chooses the destination. When the
+  // operator names an internal mirror, that reason is gone — so an allowlisted
+  // origin reaches private space without opening the screen for anything else.
+  const allowedOrigins = new Set(['http://10.0.0.7:8080'])
+  const request = parseReplicationRequest(
+    { signature: 'a'.repeat(64), sources: ['http://10.0.0.7:8080/atoms'] },
+    { allowedOrigins },
+  )
+  assert.deepEqual(request.sources, ['http://10.0.0.7:8080/atoms'])
+  // and an unlisted private origin is still refused, by the allowlist itself
+  assert.throws(() => parseReplicationRequest(
+    { signature: 'a'.repeat(64), sources: ['http://10.0.0.8:8080'] },
+    { allowedOrigins },
+  ), /not an allowed replication origin/)
+})

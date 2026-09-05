@@ -17,7 +17,7 @@
 // `landing:apply` and the renderer owns everything after that. EffectBus
 // last-value replay makes mount order irrelevant.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, computed, signal, type OnDestroy, type OnInit } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'

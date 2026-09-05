@@ -241,6 +241,18 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // it exists precisely so a host that is merely behind cannot hand this
   // device a counter lower than the one it signed. DOCUMENT.
   'facet:minted',
+  // FOUR NAVIGATION-AND-CHROME RECORDS THAT LIVED IN localStorage — the saved
+  // locations, the pinned entrances, the recent portals with the marked home,
+  // and the icon overrides (hypercomb-shared/core/participant-document.ts).
+  // Each is the participant's own, small, and read synchronously by a paint
+  // path; each is now ONE current JSON document per participant, never
+  // replicated. DOCUMENT. `portals:recent` holds two sub-bucket documents,
+  // the list and the home mark, so the list falling over cannot take the
+  // mark with it. The localStorage keys stay READ-FALLBACK only.
+  'entrances:pinned',
+  'icons:overrides',
+  'locations:saved',
+  'portals:recent',
   // What a HOST is offering — the package pointers a shim publishes for
   // clients to replicate from (runtime/host-pool.ts, consumed by
   // web/setup/ensure-install.ts). The address is DERIVED by every client for

@@ -72,7 +72,7 @@
   gap: 0.4rem;
   padding: 0.4rem 0.6rem;
 
-  .mat-sym { color: color-mix(in srgb, var(--md-on-surface) 55%, transparent); }
+  .mat-sym { color: var(--hc-window-ink-quiet); }
 }
 .cv2-tilelist-input {
   flex: 1 1 auto;
@@ -84,7 +84,7 @@
   font-family: inherit;
   font-size: scaled(0.8rem);
 
-  &::placeholder { color: color-mix(in srgb, var(--md-on-surface) 45%, transparent); }
+  &::placeholder { color: var(--hc-window-ink-quiet); }
 }
 .cv2-tilelist-clear {
   display: inline-flex;
@@ -92,7 +92,7 @@
   background: none;
   border: none;
   cursor: pointer;
-  color: color-mix(in srgb, var(--md-on-surface) 55%, transparent);
+  color: var(--hc-window-ink-quiet);
   padding: 0;
   &:hover { color: var(--md-on-surface); }
 }
@@ -210,7 +210,7 @@
 .cv2-tilelist-empty {
   list-style: none;
   padding: 0.6rem 0.7rem;
-  color: color-mix(in srgb, var(--md-on-surface) 50%, transparent);
+  color: var(--hc-window-ink-quiet);
   font-size: scaled(0.78rem);
   font-style: italic;
 }
@@ -223,6 +223,6 @@
   align-items: center;
   gap: 0.3rem;
   padding: 0.3rem 0.7rem 0.45rem;
-  color: color-mix(in srgb, var(--md-on-surface) 55%, transparent);
+  color: var(--hc-window-ink-quiet);
   font-size: scaled(0.72rem);
 }

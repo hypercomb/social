@@ -13,7 +13,7 @@
 // Headless by design — no template, no chrome. Shell UI never imports
 // essentials; ViewMode is resolved at call time through window.ioc.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, OnDestroy } from '@angular/core'
 
 /** Runtime service locator — shared must never statically import essentials, so

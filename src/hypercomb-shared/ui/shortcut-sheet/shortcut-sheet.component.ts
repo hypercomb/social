@@ -4,7 +4,7 @@
 // sections (slash commands, command-line operations, keyboard shortcuts) with
 // a shared filter input. No business logic — the drone owns the data.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import {
   Component,
   computed,

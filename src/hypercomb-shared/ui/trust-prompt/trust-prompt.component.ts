@@ -9,7 +9,7 @@
 // Multiple back-to-back checks are queued — only one prompt visible at a
 // time. The caller's promise stays pending until the user responds.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, signal, computed, type OnInit, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'

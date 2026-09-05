@@ -152,10 +152,28 @@ export type IntakeTarget = {
 const SIG_RE = /^[0-9a-f]{64}$/i
 
 /** Signatures whose record read has been kicked by the sync gate, so a miss
- *  costs one OPFS read ever rather than one per frame. Entries are never
- *  removed: the record cache behind `sigMarksKnown` is itself permanent and
- *  invalidated only by this participant's own writes. */
+ *  costs one OPFS read rather than one per frame.
+ *
+ *  AN ENTRY IS RELEASED WHEN ITS READ DID NOT LAND — same discipline as `warm`
+ *  above, and for the same reason. This set once said "never removed", on the
+ *  premise that the record cache it fronts mirrors the pool exactly. That
+ *  premise was false: `readRecord` cached a failure as an answer, so a read
+ *  that raced the Store into IoC latched "no marks" onto a signature forever
+ *  and this set forbade the second chance. Two guards, one bug — the cache no
+ *  longer stores a failure, and this no longer refuses to retry one. */
 const kicked = new Set<string>()
+
+/** Kick the record read for a signature once, and hand the retry back if it
+ *  did not land. `sigMarksOf` caches only an answer, so an uncached signature
+ *  after the read resolves means the pool was unreachable. */
+const kick = (sig: string): void => {
+  if (kicked.has(sig)) return
+  kicked.add(sig)
+  void sigMarksOf(sig).then(
+    () => { if (!sigMarksKnown(sig)) kicked.delete(sig) },
+    () => { kicked.delete(sig) },
+  )
+}
 
 /**
  * SYNCHRONOUS verdict from the marks already in hand.
@@ -183,7 +201,7 @@ export const allowsHere = (target: IntakeTarget): boolean => {
   // marked signature is suppressed within a frame or two of first sight —
   // which is what `hide first` can honestly promise when the evidence lives
   // on disk. The authoritative refusal is `allows`, at the commit.
-  if (!kicked.has(sig)) { kicked.add(sig); void sigMarksOf(sig) }
+  kick(sig)
   return true
 }
 

@@ -27,7 +27,7 @@
 // Destructive-ish — hidden from autocomplete; the user types the full
 // `/sweep` to invoke. Output toast lists what was moved and where.
 
-import { QueenBee, SignatureService } from '@hypercomb/core'
+import { QueenBee, SignatureService, classifyDirectoryEntry } from '@hypercomb/core'
 
 // Quarantine destination: the sign('temporary') pool of meaning. Derived,
 // never hardcoded — sha256 of the UTF-8 bytes of the meaning string, so
@@ -35,18 +35,21 @@ import { QueenBee, SignatureService } from '@hypercomb/core'
 // folder, which is itself a retired drain source now).
 const TEMPORARY_MEANING = 'temporary'
 
-const SIG_RE = /^[0-9a-f]{64}$/
-// Sigbag marker files: `0000` … `000x` (hex). The max marker IS the
-// current root, so a root-level marker is live data, never a stray.
-// (Until its own drain runs, the substrate registry also lives in root
-// `0000` — one more reason marker-shaped names are untouchable.)
-const MARKER_RE = /^[0-9a-f]{4}$/
+// LEGACY 4-hex sigbag markers: `0000` … `000x`. Today's markers are EIGHT
+// digits and are classified by `directory-safety.ts` — which is the single
+// classifier every reader shares, and which this file must not fork. A marker
+// minted by `markerName()` matched neither test here, so /sweep read live
+// lineage data at the root as a stray to quarantine. This clause is now the
+// legacy allowance only, stated as such.
+const LEGACY_MARKER_RE = /^[0-9a-f]{4}$/
 
-/** Root entries that are legit besides sig/marker names: legacy drain
- *  sources (self-cleaning owns their removal) and known exceptions. */
+/** Root entries that are legit besides the shapes `classifyDirectoryEntry`
+ *  knows: legacy drain sources (self-cleaning owns their removal) and known
+ *  exceptions. */
 const isLegitName = (name: string, kind: FileSystemHandle['kind']): boolean => {
-  if (SIG_RE.test(name)) return true                                   // content / sigbag / pool
-  if (kind === 'file' && MARKER_RE.test(name)) return true             // root sigbag marker
+  // content atom / lineage sigbag / pool of meaning / author bucket / marker
+  if (classifyDirectoryEntry(name, kind === 'directory') !== 'foreign') return true
+  if (kind === 'file' && LEGACY_MARKER_RE.test(name)) return true      // legacy 4-hex marker
   if (name.startsWith('__') && name.endsWith('__')) return true        // legacy drain source
   if (name === 'hypercomb.io') return true                             // legacy content root (drain)
   if (name === 'overrides' || name === 'translations') return true     // legacy i18n dirs (self-cleaning drain)

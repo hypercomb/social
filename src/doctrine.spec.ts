@@ -277,7 +277,7 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/sharing/content-broker.drone.ts',
       'hypercomb-essentials/src/sharing/feedback-channel.drone.ts',
       'hypercomb-essentials/src/sharing/host-sync.service.ts',
-      'hypercomb-essentials/src/sharing/push-queue.service.ts',
+      'hypercomb-essentials/src/sharing/retired-push-pool.ts',
       'hypercomb-essentials/src/sharing/swarm.drone.ts',
     ], 'typed-folder literal')
   })
@@ -414,6 +414,27 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/history/manifest-optimizer.drone.ts',
       'hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts',
     ], 'children-manifest writer')
+  })
+
+  it('sealSubtree callers may only shrink — the recursive seal is a courtesy, never a new dependency', () => {
+    // documentation/hypergraph-molecule-lineage.md, the seal register: the
+    // recursive seal is DEMOTED, kept as the reader for every sealed root
+    // already in the world, and retired in favour of the flat head map. A
+    // publication that takes a sealed walk instead of the flat map is
+    // ordering a new client to walk. The definition file is on the list
+    // because it seals its own descendants; everything else is the frozen
+    // set of callers that still ride the walk. Empty the list, retire the
+    // walk.
+    const actual = filesMatching(/\bsealSubtree\s*\(/)
+    assertRatchet(actual, [
+      'hypercomb-essentials/src/commands/snapshot.queen.ts',
+      'hypercomb-essentials/src/history/builds-slot.ts',
+      'hypercomb-essentials/src/history/history.service.ts',
+      'hypercomb-essentials/src/history/layer-placement.ts',
+      'hypercomb-essentials/src/sharing/publish-branch.ts',
+      'hypercomb-essentials/src/sharing/publish-status.drone.ts',
+      'hypercomb-essentials/src/sharing/swarm.drone.ts',
+    ], 'sealSubtree caller')
   })
 
   it('children-bearing layer commits ride the LayerCommitter FIFO — no inline-children commitLayer', () => {
@@ -1303,5 +1324,31 @@ describe('doctrine ratchets', () => {
       [],
       'parseInt over a directory entry name — classify with classifyDirectoryEntry, then use Number',
     )
+  })
+
+  it('no door judges a machine call for itself — admission is asked, never re-derived', () => {
+    // DEFAULT-ELSEWHERE. Four surfaces turn language into execution here, and
+    // for a while each judged machine callers on its own: one was default-deny,
+    // one filtered concealed verbs, one weighed destruction against a hand-kept
+    // set of four names that had already drifted (`/cut` was never on it), and
+    // one weighed nothing at all. The differences were not a design — they were
+    // the order the doors were written in.
+    //
+    // An admission rule in four copies does not fail safe. It fails OPEN at
+    // whichever copy was not updated, which is the same shape as the pool
+    // lists that drifted until `/flatten` deleted a pool, and as
+    // `CALLABLE_FORMS`, which told a participant this hive has no delete
+    // behaviour. So the judgement lives once, in core's `machine-admission`,
+    // and a door supplies only WHO is calling and which census row the spoken
+    // word resolves to.
+    //
+    // What this forbids is narrow and exact: weighing a DECLARED reach or scope
+    // against a literal anywhere but the gate. Declaring one (`reach: 'editing'`
+    // on a behaviour) is untouched — that is a behaviour describing itself,
+    // which is the whole point. Empty allowlist: the gate compares by ladder
+    // position, so there is nothing here to grandfather.
+    const actual = filesMatching(
+      /\bmachine\s*[?!]?\.\s*(?:reach|scope)\s*[!=]==\s*['"`]/)
+    assertRatchet(actual, [], 'a door re-deriving machine admission instead of asking the gate')
   })
 })

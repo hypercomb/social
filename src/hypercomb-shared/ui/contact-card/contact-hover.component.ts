@@ -12,7 +12,7 @@
 // Shell UI — must NOT import essentials. "Save (.vcf)" exports the card so a
 // viewer can import the shared contact into their own address book.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'

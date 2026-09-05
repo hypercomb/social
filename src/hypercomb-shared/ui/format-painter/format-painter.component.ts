@@ -3,7 +3,7 @@
 // Subscribes to FormatPainterDrone state and renders a right-side panel
 // with property entries (color swatches + checkboxes) and an Apply button.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { ChangeDetectorRef, Component, computed, inject, signal, type OnInit, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'

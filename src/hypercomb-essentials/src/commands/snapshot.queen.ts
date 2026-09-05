@@ -14,15 +14,18 @@
 //      is what makes one signature name the current tree. Heal + retry
 //      once, then fail LOUD — a snapshot that cannot dereference is
 //      worse than no snapshot.
-//   2. Push the sealed closure. Every COMMITTED layer already reached
-//      DCP (commitLayer emits `content:wrote`, PushQueueService mirrors
-//      it), but the seal's re-signed INTERNAL nodes are pool-writes with
-//      no such echo — so they are enqueued explicitly here. Without this
-//      the seal dereferences locally and dangles in the backup.
-//   3. Wait for receipts. `hasReceipt` is DCP's confirmation; a snapshot
-//      is only honest once every layer under its seal is acknowledged.
-//   4. Write the record + append its sig to the root layer's `snapshots`
+//   2. Write the record + append its sig to the root layer's `snapshots`
 //      slot — one commit, one marker, undoable like anything else.
+//
+// A SNAPSHOT IS LOCAL. It used to push its sealed closure to DCP and wait
+// for receipts before claiming to be a backup; that transport was deleted
+// with the installer on 2026-08-30 and the push channel behind it followed
+// (`sharing/retired-push-pool.ts` says why). The seal is a merkle root over
+// content this hive already holds, so it dereferences here and now — what it
+// is NOT is an off-machine copy. Getting the bytes to another node is a
+// separate act with its own gesture: replication from a host, or the
+// host-sync opt-in. Do not re-add a push here; a snapshot that silently
+// uploaded would be publishing without a gesture (write-conformance check 10).
 //
 // ── What it does NOT do ───────────────────────────────────────────────
 //
@@ -38,28 +41,14 @@ import type { HistoryService } from '../history/history.service.js'
 const STORE_KEY = '@hypercomb.social/Store'
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const COMMITTER_KEY = '@diamondcoreprocessor.com/LayerCommitter'
-const PUSH_QUEUE_KEY = '@diamondcoreprocessor.com/PushQueueService'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
-/** Receipts normally land in seconds. Past the deadline the push queue
- *  keeps retrying detached — the snapshot just declines to claim the
- *  backup is complete yet. */
-const RECEIPT_DEADLINE_MS = 30_000
-const RECEIPT_POLL_MS = 250
-
 interface StoreLike {
   putResource?: (b: Blob) => Promise<string>
-  getLayerPoolBytes?: (sig: string) => Promise<Uint8Array | null>
 }
 interface CommitterLike {
   commitSlotAppend?: (segments: readonly string[], slot: string, sig: string) => Promise<void>
-}
-interface PushQueueLike {
-  enqueue?: (sig: string, kind: 'layer' | 'resource', bytes: ArrayBuffer) => Promise<void>
-  drain?: () => Promise<void>
-  pending?: () => Promise<string[]>
-  hasReceipt?: (sig: string) => Promise<boolean>
 }
 
 export class SnapshotQueenBee extends QueenBee {
@@ -131,10 +120,7 @@ export class SnapshotQueenBee extends QueenBee {
       return false
     }
 
-    // 2 + 3. Mirror the sealed closure to DCP and wait for receipts.
-    const backup = await this.#pushClosure(seal, i18n)
-
-    // 4. The record, then one commit on the root lineage.
+    // 2. The record, then one commit on the root lineage.
     const label = name || await this.#autoName()
     const record: SnapshotRecord = { seal, label, at: Date.now() }
     const sig = await store.putResource(
@@ -160,89 +146,18 @@ export class SnapshotQueenBee extends QueenBee {
       console.warn('[snapshot] restore point committed but its revision label could not be written', err)
     }
 
-    // Name the seal in the installer too, so the backup is more than an
-    // undifferentiated pile of received layers: a durable, named pointer
-    // survives even if this origin's OPFS is lost. Pointer only — the
-    // bytes went up through the push queue above. Best-effort by design:
-    // the hive's own record is already committed, so a missing or
-    // unreachable installer must never fail the snapshot.
+    // Offer the seal a NAME on the sentinel bridge, if one is ever there to
+    // take it. Nothing assigns `__sentinelBridge` since the installer was
+    // deleted, so today this returns without doing anything — it is a pointer
+    // hand-off, never a byte transfer, and it cannot fail the snapshot. It is
+    // left in place rather than removed with the push channel because it
+    // writes nothing anywhere: it is dead, not accumulating.
     await this.#recordWithInstaller(label, seal)
 
     const short = seal.slice(0, 8)
-    if (backup === 'complete') {
-      this.#toast('success', this.#t(i18n, 'snapshot.title', 'Snapshot'),
-        this.#t(i18n, 'snapshot.saved', 'Saved "{label}" — {seal}', { label, seal: short }))
-    } else if (backup === 'pending') {
-      this.#toast('info', this.#t(i18n, 'snapshot.title', 'Snapshot'),
-        this.#t(i18n, 'snapshot.saved-pending',
-          'Saved "{label}" — {seal}. Some layers are still uploading to the installer; they retry automatically.',
-          { label, seal: short }))
-    } else {
-      this.#toast('info', this.#t(i18n, 'snapshot.title', 'Snapshot'),
-        this.#t(i18n, 'snapshot.saved-local',
-          'Saved "{label}" — {seal}. No installer is connected, so this snapshot is local only; it uploads on its own once one is.',
-          { label, seal: short }))
-    }
+    this.#toast('success', this.#t(i18n, 'snapshot.title', 'Snapshot'),
+      this.#t(i18n, 'snapshot.saved', 'Saved "{label}" — {seal}', { label, seal: short }))
     return true
-  }
-
-  /**
-   * Walk the sealed closure and enqueue every layer DCP has not already
-   * receipted, then wait (bounded) for the queue to clear.
-   *
-   * Only LAYERS are walked. Resource slots (properties, notes, website,
-   * the snapshot records themselves) went through `putResource`, which
-   * emits `content:wrote` and is therefore already queued; the gap this
-   * closes is exactly the seal's re-signed internal nodes.
-   *
-   * The enqueue happens whether or not an installer is reachable — the
-   * queue is on OPFS and crash-safe, so a snapshot taken offline uploads
-   * itself on the next drain. Only the WAIT is skipped when no sentinel
-   * bridge exists (the dev shell), because nothing would ever receipt it
-   * and the participant would sit through the deadline for a false
-   * "still uploading".
-   */
-  async #pushClosure(
-    seal: string,
-    i18n: I18nProvider | undefined,
-  ): Promise<'complete' | 'pending' | 'no-installer'> {
-    const pushQueue = get<PushQueueLike>(PUSH_QUEUE_KEY)
-    const history = get<HistoryService>(HISTORY_KEY)
-    const store = get<StoreLike>(STORE_KEY)
-    if (!pushQueue?.enqueue || !history?.getLayerBySig || !store?.getLayerPoolBytes) return 'no-installer'
-    const hasBridge = !!(globalThis as { __sentinelBridge?: { intake?: unknown } }).__sentinelBridge?.intake
-
-    const seen = new Set<string>()
-    const walk = async (sig: string): Promise<void> => {
-      const s = String(sig ?? '').trim().toLowerCase()
-      if (!SIG_RE.test(s) || seen.has(s)) return
-      seen.add(s)
-      if (!(await pushQueue.hasReceipt?.(s))) {
-        const bytes = await store.getLayerPoolBytes?.(s)
-        if (bytes) {
-          await pushQueue.enqueue?.(s, 'layer',
-            bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
-        }
-      }
-      const layer = await history.getLayerBySig(s)
-      // Mirror sealSubtree exactly: it walks `children` and nothing else.
-      for (const child of (Array.isArray(layer?.children) ? layer.children : [])) {
-        await walk(String(child))
-      }
-    }
-    await walk(seal)
-    if (!hasBridge) return 'no-installer'
-
-    this.#activity(this.#t(i18n, 'snapshot.pushing', 'backing up to the installer…'), '○')
-    await pushQueue.drain?.()
-
-    const deadline = Date.now() + RECEIPT_DEADLINE_MS
-    for (;;) {
-      const pending = (await pushQueue.pending?.()) ?? []
-      if (pending.length === 0) return 'complete'
-      if (Date.now() >= deadline) return 'pending'
-      await new Promise(r => setTimeout(r, RECEIPT_POLL_MS))
-    }
   }
 
   // ── list ────────────────────────────────────────────────

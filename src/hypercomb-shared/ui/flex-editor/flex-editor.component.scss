@@ -217,7 +217,7 @@ $accent: #c9a227;
   flex: 0 0 auto;
   margin: 0 0 0.5rem;
   padding: 0 0.75rem;
-  color: rgba($dim, 0.6);
+  color: var(--hc-window-ink-faint);
   font-size: calc(0.62rem * var(--hc-panel-scale, 1));
   line-height: 1.5;
 }

@@ -162,7 +162,7 @@
   line-height: 1.45;
   outline: none;
 
-  &::placeholder { color: color-mix(in srgb, var(--md-on-surface) 35%, transparent); }
+  &::placeholder { color: var(--hc-window-ink-quiet); }
   &:focus { border-bottom-color: rgba($steel, 0.9); }
 }
 
@@ -175,7 +175,7 @@
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: color-mix(in srgb, var(--md-on-surface) 50%, transparent);
+  color: var(--hc-window-ink-quiet);
   font-family: inherit;
   font-size: scaled(0.7rem);
   cursor: pointer;
@@ -190,7 +190,7 @@
 .cv2-line-sub {
   flex: 0 0 auto;
   padding-right: 2px;
-  color: color-mix(in srgb, var(--md-on-surface) 40%, transparent);
+  color: var(--hc-window-ink-quiet);
   font-size: scaled(0.68rem);
   font-variant-numeric: tabular-nums;
 }
@@ -229,7 +229,7 @@
   border: 1px solid transparent;
   border-radius: var(--hc-radius-control);
   background: transparent;
-  color: color-mix(in srgb, var(--md-on-surface) 52%, transparent);
+  color: var(--hc-window-ink-quiet);
   font-family: inherit;
   font-size: scaled(0.72rem);
   cursor: pointer;
@@ -259,7 +259,7 @@
   padding: 1.4rem;
   text-align: center;
   font-size: scaled(0.78rem);
-  color: color-mix(in srgb, var(--md-on-surface) 45%, transparent);
+  color: var(--hc-window-ink-quiet);
 }
 
 // The row of the open list, in the selector below. The bottom tree is
@@ -268,5 +268,4 @@
   background: color-mix(in srgb, #{$steel} 12%, transparent);
   box-shadow: inset 2px 0 0 0 rgba($steel, 0.85);
 }
-
 

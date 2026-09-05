@@ -3,7 +3,7 @@
 // Renders stacked toast notifications. Subscribes to ToastDrone state via
 // fromRuntime(). No business logic — just rendering + forwarding actions.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, computed, type OnDestroy } from '@angular/core'
 import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'

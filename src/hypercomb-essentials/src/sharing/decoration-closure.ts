@@ -118,9 +118,17 @@ export function collectSigsDeep(value: unknown): string[] {
  *  so without this the host is missing exactly the bytes render will ask for →
  *  a fresh adopter 404s on every tile image.
  *
- *  Returns [] for non-JSON and for DECORATION records (any record with a string
- *  `kind`): those declare their own closure via `refs` / `payload.htmlSig` and
- *  are handled by `decorationClosureSigs`, so this never double-harvests them.
+ *  Returns [] for non-JSON and for KIND-BEARING records. A STRING `kind` is a
+ *  decoration: it declares its own closure via `refs` / `payload.htmlSig` and
+ *  is handled by `decorationClosureSigs`, so this never double-harvests it. A
+ *  NUMBER `kind` is a signed nostr event (a hive index, a head claim, a
+ *  vocabulary claim), and it slipped the string guard: the deep walk then
+ *  harvested every 64-hex RUN in it — the event id, BOTH halves of a schnorr
+ *  signature, the author's pubkey, and any POOL ADDRESS in a `d` tag — and each
+ *  got a standing `<sig>.public` "publish this on sight" marker. No bytes stand
+ *  behind any of them, so nothing leaked; writing a public marker against a
+ *  pool address is nevertheless the exact category error `directory-safety.ts`
+ *  exists to prevent. An event's nested sigs are never resources.
  *  Scoped to data resources keeps it targeted — NOT a blind harvest of every
  *  resource — and on the push side a stray non-resource hex is inert anyway
  *  (the walk only enqueues sigs it holds locally as a resource). */
@@ -129,7 +137,8 @@ export function nestedResourceSigs(recordBytes: Bytes): string[] {
   let record: unknown
   try { record = JSON.parse(decode(recordBytes)) } catch { return [] }
   if (!record || typeof record !== 'object') return []
-  if (typeof (record as Record<string, unknown>)['kind'] === 'string') return []
+  const kind = (record as Record<string, unknown>)['kind']
+  if (typeof kind === 'string' || typeof kind === 'number') return []
   return collectSigsDeep(record)
 }
 

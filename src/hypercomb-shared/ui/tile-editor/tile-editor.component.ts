@@ -1,7 +1,7 @@
 // hypercomb-shared/ui/tile-editor/tile-editor.component.ts
 // Tile editor with image manager, link, and border color fields.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import {
   Component,
   computed,

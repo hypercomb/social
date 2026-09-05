@@ -60,6 +60,13 @@ describe('streamRoutedModel', () => {
     localStorage.setItem(LOCAL_HOST_STORAGE_KEY, 'http://127.0.0.1:11999')
     expect(llmRouter.providerIsMachineLocal('local')).toBe(true)
     expect(llmRouter.providerMachineEndpoint('local')).toBe('http://127.0.0.1:11999')
+    // A host the participant typed after reading it off their own server's
+    // startup line. `0.0.0.0` is where that server BOUND, not somewhere a
+    // client goes: it never proves this machine, so it never earns the
+    // execution tier — answer-only, exactly like a URL that left the machine.
+    localStorage.setItem(LOCAL_HOST_STORAGE_KEY, 'http://0.0.0.0:11434')
+    expect(llmRouter.providerIsMachineLocal('local')).toBe(false)
+    expect(llmRouter.providerMachineEndpoint('local')).toBeUndefined()
     expect(llmRouter.providerIsMachineLocal('missing')).toBe(false)
   })
 

@@ -63,6 +63,19 @@ const NAMESPACE_SEGMENTS_MAX = 3
 const PACKAGE_SPECIFIER = '@hypercomb/essentials'
 const PLATFORM_EXTERNALS = ['@hypercomb/core', 'pixi.js']
 
+// Bee artifacts that must evaluate before the first visible hive frame can
+// settle. Constructor-registered services such as Settings, AxialService and
+// LayoutService are namespace dependencies of these artifacts, not bee
+// artifacts themselves. The signed root layer publishes the resolved sigs as
+// an optimization hint; the runtime still verifies readiness and can fall back
+// to the full bee wave.
+const RENDER_CRITICAL_BEE_CLASSES = Object.freeze([
+  'PixiHostWorker',
+  'ShowCellDrone',
+  'BackgroundDrone',
+] as const)
+const RENDER_CRITICAL_BEE_CLASS_SET = new Set<string>(RENDER_CRITICAL_BEE_CLASSES)
+
 // Separately owned capability packs may still use domain-shaped roots. The
 // package's own capabilities live directly under src/ and publish beneath the
 // package specifier instead of pretending to be domains.
@@ -142,8 +155,13 @@ interface BeeDepCacheEntry {
 // this change edited the EXTRACTOR, not any source — so every one of the 333
 // files previously cached as `doc: null` would hit the cache and stay
 // nameless. Bumping is what makes an extractor change take effect at all.
+//
+// version 7 = the signed root layer carries the render-critical bee sigs. The
+// source mtimes do not change when this builder changes, so a version-6 cache
+// would otherwise take the whole-build early exit and leave the old root in
+// place without the new field.
 interface BuildCache {
-  version: 6
+  version: 7
   rootHash: string                            // Merkle root of all unit hashes
   rootLayerSig: string                        // last output root signature
   namespaces: Record<string, UnitCache>
@@ -159,7 +177,7 @@ const OUTPUT_CACHE_DIR = join(DIST_ROOT, '.cache')
 const loadCache = (): BuildCache | null => {
   try {
     const raw = JSON.parse(readFileSync(CACHE_FILE, 'utf8'))
-    if (raw?.version === 6) return raw
+    if (raw?.version === 7) return raw
   } catch {}
   return null
 }
@@ -562,12 +580,13 @@ const buildLayersFromTree = async (
   resourcesByDir: Map<string, { bees: string[]; deps: string[] }>,
   out: Map<string, string>,
   rootDependencies: string[],
+  rootCriticalBees: readonly string[],
   docsByDir: Map<string, Record<string, BeeDocEntry>>,
   prevLayerCache?: Record<string, LayerCacheEntry>
 ): Promise<string | null> => {
   const layers: string[] = []
   for (const c of node.children) {
-    const childSig = await buildLayersFromTree(c, resourcesByDir, out, rootDependencies, docsByDir, prevLayerCache)
+    const childSig = await buildLayersFromTree(c, resourcesByDir, out, rootDependencies, rootCriticalBees, docsByDir, prevLayerCache)
     if (childSig) layers.push(childSig)
   }
 
@@ -578,6 +597,7 @@ const buildLayersFromTree = async (
   // beeline: compute layer input signature from all components
   const beeSigs = uniqSorted(entry.bees)
   const depSigs = node.rel ? [] : rootDependencies
+  const criticalBeeSigs = node.rel ? [] : uniqSorted([...rootCriticalBees])
   const docsKey = docsByDir.has(node.rel) ? JSON.stringify(docsByDir.get(node.rel)) : ''
   let folderDocSig = ''
   if (node.rel) {
@@ -593,7 +613,9 @@ const buildLayersFromTree = async (
   // prior runs and the cache misses. Without this, a field rename
   // (e.g. `layers` → `cells`) is invisible to the input hash and the
   // cache happily returns the OLD JSON under the OLD sig.
-  const shapeDescriptor = 'cells:name:bees:dependencies'
+  const shapeDescriptor = node.rel
+    ? 'cells:name:bees:dependencies'
+    : 'cells:name:bees:dependencies:criticalBees'
 
   const layerInputParts = [
     shapeDescriptor,
@@ -601,6 +623,7 @@ const buildLayersFromTree = async (
     beeSigs.join(':'),
     depSigs.join(':'),
     layers.join(':'),
+    criticalBeeSigs.join(':'),
     docsKey,
     folderDocSig,
   ]
@@ -638,6 +661,7 @@ const buildLayersFromTree = async (
     dependencies: depSigs,
   }
 
+  if (!node.rel) layer.criticalBees = criticalBeeSigs
   if (docs) layer.docs = docs
 
   const { sig, json } = await signJson(layer)
@@ -949,6 +973,9 @@ const main = async (): Promise<void> => {
   // bees — extract deps from compiled output and map to dep sigs
   const beeDepsMap = new Map<string, string[]>()
   const docsByDir = new Map<string, Record<string, BeeDocEntry>>()
+  const criticalBeeMatches = new Map<string, string[]>(
+    RENDER_CRITICAL_BEE_CLASSES.map(className => [className, []]),
+  )
   const beeExternals = [...PLATFORM_EXTERNALS, ...allSpecifiers]
   let beeCacheHits = 0
   let beeCacheMisses = 0
@@ -1017,6 +1044,10 @@ const main = async (): Promise<void> => {
       const dirDocs = docsByDir.get(src.relDir) ?? {}
       dirDocs[sig] = beeDoc
       docsByDir.set(src.relDir, dirDocs)
+
+      if (RENDER_CRITICAL_BEE_CLASS_SET.has(beeDoc.className)) {
+        criticalBeeMatches.get(beeDoc.className)!.push(sig)
+      }
     }
 
     // beeline: cache bee dependency mapping by outputSig.
@@ -1059,6 +1090,33 @@ const main = async (): Promise<void> => {
 
   console.log(`[build-module] bees: ${beeCacheHits} cached, ${beeCacheMisses} built`)
 
+  // Resolve class intent to content identity. This is deliberately strict:
+  // silently emitting a partial or ambiguous startup hint would move a
+  // compiler mistake onto the participant's first-paint path. Older roots may
+  // omit the field; every root produced by this compiler must name each
+  // expected bee exactly once.
+  const criticalErrors: string[] = []
+  for (const className of RENDER_CRITICAL_BEE_CLASSES) {
+    const matches = criticalBeeMatches.get(className) ?? []
+    if (matches.length === 0) criticalErrors.push(`${className} was not found`)
+    if (matches.length > 1) criticalErrors.push(`${className} matched ${matches.length} bee artifacts`)
+  }
+  if (criticalErrors.length) {
+    throw new Error(`build-module: invalid render-critical bee set: ${criticalErrors.join('; ')}`)
+  }
+
+  const criticalBees = uniqSorted(
+    RENDER_CRITICAL_BEE_CLASSES.map(className => criticalBeeMatches.get(className)![0]!),
+  )
+  if (criticalBees.length !== RENDER_CRITICAL_BEE_CLASSES.length) {
+    throw new Error('build-module: render-critical classes resolved to duplicate bee signatures')
+  }
+  for (const sig of criticalBees) {
+    if (!isSig(sig)) throw new Error(`build-module: render-critical bee has invalid signature: ${sig}`)
+    if (!resourceBytes.has(sig)) throw new Error(`build-module: render-critical bee is outside the bee inventory: ${sig}`)
+  }
+  console.log(`[build-module] render-critical bees: ${criticalBees.map(sig => sig.slice(0, 12)).join(', ')}`)
+
   // --- Phase 4: layers + manifest (always regenerated, cheap) ---
 
   // merge queen docs into docsByDir (queens are keyed by className, not sig)
@@ -1069,7 +1127,7 @@ const main = async (): Promise<void> => {
   }
 
   const tree = readDirTree(SRC_ROOT, '')
-  const rootLayerSig = await buildLayersFromTree(tree, resourcesByDir, layers, rootDependencies, docsByDir, cache?.layerCache)
+  const rootLayerSig = await buildLayersFromTree(tree, resourcesByDir, layers, rootDependencies, criticalBees, docsByDir, cache?.layerCache)
   // The root node (`node.rel === ''`) always builds a layer — the null
   // early-return in buildLayersFromTree is gated on `node.rel`, so only a
   // non-root empty dir returns null. Assert it here so the rest of the
@@ -1206,7 +1264,7 @@ const main = async (): Promise<void> => {
     if (!inManifestLayers.has(rootLayerSig)) errors.push(`root layer ${rootLayerSig.slice(0, 12)} missing from manifest.layers`)
 
     for (const [sig, json] of layers) {
-      let parsed: { name?: string; cells?: unknown[]; bees?: unknown[]; dependencies?: unknown[] }
+      let parsed: { name?: string; cells?: unknown[]; bees?: unknown[]; dependencies?: unknown[]; criticalBees?: unknown[] }
       try { parsed = JSON.parse(json) } catch { errors.push(`layer ${sig.slice(0, 12)} is not valid JSON`); continue }
       const tag = `layer "${parsed.name ?? '?'}" (${sig.slice(0, 12)})`
       for (const child of (Array.isArray(parsed.cells) ? parsed.cells : [])) {
@@ -1223,6 +1281,19 @@ const main = async (): Promise<void> => {
         const d = bare(depRef)
         if (!onDiskDeps.has(d)) errors.push(`${tag} → dependency ${d.slice(0, 12)} not on disk`)
         else if (!inManifestDeps.has(d)) errors.push(`${tag} → dependency ${d.slice(0, 12)} missing from manifest.dependencies`)
+      }
+      if (sig === rootLayerSig) {
+        const emittedCritical = Array.isArray(parsed.criticalBees) ? parsed.criticalBees.map(bare) : []
+        if (JSON.stringify(emittedCritical) !== JSON.stringify(criticalBees)) {
+          errors.push(`${tag} has an incomplete, duplicated, or unordered criticalBees hint`)
+        }
+        for (const criticalRef of emittedCritical) {
+          if (!isSig(criticalRef)) errors.push(`${tag} has a critical bee with an invalid signature: ${criticalRef}`)
+          else if (!onDiskBees.has(criticalRef)) errors.push(`${tag} has critical bee ${criticalRef.slice(0, 12)} missing on disk`)
+          else if (!inManifestBees.has(criticalRef)) errors.push(`${tag} has critical bee ${criticalRef.slice(0, 12)} missing from manifest.bees`)
+        }
+      } else if (parsed.criticalBees !== undefined) {
+        errors.push(`${tag} declares criticalBees outside the package root`)
       }
     }
 
@@ -1287,7 +1358,7 @@ const main = async (): Promise<void> => {
 
   const rootHash = await computeRootHash(allUnitSigs)
   saveCache({
-    version: 6,
+    version: 7,
     rootHash,
     rootLayerSig,
     namespaces: newNamespaces,

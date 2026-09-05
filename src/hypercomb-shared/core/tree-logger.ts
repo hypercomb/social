@@ -11,7 +11,7 @@
 // overrides) deep-walks as before.
 
 import { poolMeanings } from '@hypercomb/core'
-import { Store } from './store'
+import { Store } from '@hypercomb/runtime/store'
 
 const SIG_RE = /^[a-f0-9]{64}$/i
 /** Legacy `__x__` dirs — drain sources awaiting self-clean removal. */

@@ -46,11 +46,11 @@ describe('ThemeService.reassert', () => {
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
   })
 
-  it('defaults to dark when the participant has never chosen', async () => {
+  it('defaults to honey when the participant has never chosen', async () => {
     const svc = await load(null)
     document.documentElement.setAttribute('data-theme', 'light')
     expect(svc.reassert()).toBe(true)
-    expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
+    expect(document.documentElement.getAttribute('data-theme')).toBe('honey')
   })
 
   it("restores 'system' by REMOVING the attribute, not by writing a name", async () => {

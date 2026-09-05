@@ -61,7 +61,7 @@
   font-family: var(--hc-mono, system-ui);
   font-size: scaled(1rem);
   font-weight: 600;
-  color: color-mix(in srgb, var(--md-secondary) 85%, white);
+  color: var(--hc-window-ink-loud);
   line-height: 1;
 }
 
@@ -88,7 +88,7 @@
   align-items: center;
   gap: 0.15rem 0.3rem;
   font-size: scaled(0.66rem);
-  color: color-mix(in srgb, var(--md-on-surface) 48%, transparent);
+  color: var(--hc-window-ink-quiet);
   overflow: hidden;
 }
 .cv2-plate-seg {
@@ -109,7 +109,7 @@
   align-items: center;
   gap: 0.3rem 0.5rem;
   font-size: scaled(0.68rem);
-  color: color-mix(in srgb, var(--md-on-surface) 62%, transparent);
+  color: var(--hc-window-ink-quiet);
   font-variant-numeric: tabular-nums;
 }
 .cv2-plate-stat {
@@ -150,6 +150,8 @@
 // of the docked strip; pointer-transparent, because it is a look, not a
 // target — the pointer must stay free to reach the next chip.
 .cv2-peek {
+  @include tw.floating-panel($steel);
+
   position: fixed;
   z-index: 60050;
   pointer-events: none;
@@ -159,11 +161,11 @@
   display: flex;
   flex-direction: column;
   padding: 0.45rem 0.55rem 0.5rem;
-  background: rgba(14, 14, 22, 0.97);
+  background: rgba(var(--hc-panel-pane), 0.97);
   backdrop-filter: blur(14px);
-  border: 1px solid color-mix(in srgb, #{$steel} 45%, transparent);
-  border-radius: 4px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  border-color: var(--hc-window-edge-firm);
+  border-radius: tw.$radius-card;
+  box-shadow: 0 10px 30px rgba(var(--hc-panel-shadow), 0.55);
   font-family: var(--hc-mono, system-ui);
   animation: cv2-peek-in var(--md-dur-short, 140ms) var(--md-easing-standard, ease-out);
 }
@@ -174,8 +176,8 @@
 // tooltip that will vanish.
 .cv2-peek.is-pinned {
   pointer-events: auto;
-  border-color: color-mix(in srgb, #{$steel} 70%, transparent);
-  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba($steel, 0.12) inset;
+  border-color: var(--hc-window-edge-firm);
+  box-shadow: 0 10px 34px rgba(var(--hc-panel-shadow), 0.6), 0 0 0 1px var(--hc-window-wash) inset;
   animation: none;   // it is not appearing and disappearing; it is just there
 
   .cv2-peek-list {
@@ -186,16 +188,16 @@
     cursor: pointer;
     border-radius: 4px;
     padding: 0.2rem 0.35rem;
-    &:hover { background: color-mix(in srgb, var(--md-on-surface) 9%, transparent); }
+    &:hover { background: var(--hc-window-wash); }
     &.is-active {
-      background: color-mix(in srgb, #{$steel} 20%, transparent);
-      box-shadow: inset 2px 0 0 0 rgba($steel, 0.9);
-      color: var(--md-on-surface-strong, var(--md-on-surface));
+      background: var(--hc-window-wash-strong);
+      box-shadow: inset 2px 0 0 0 var(--hc-window-edge-firm);
+      color: var(--hc-window-ink-loud);
     }
     // A mark dragged from the rail, hovering a row of the pinned card.
     &.is-mark-target {
-      background: color-mix(in srgb, #{$steel} 26%, transparent);
-      box-shadow: inset 0 0 0 1px rgba($steel, 0.7);
+      background: var(--hc-window-wash-strong);
+      box-shadow: inset 0 0 0 1px var(--hc-window-edge-firm);
     }
   }
 }
@@ -207,14 +209,14 @@
   width: 20px;
   height: 20px;
   padding: 0;
-  border: 1px solid color-mix(in srgb, var(--md-on-surface) 18%, transparent);
+  border: 1px solid var(--hc-window-edge);
   border-radius: 4px;
   background: transparent;
-  color: color-mix(in srgb, var(--md-on-surface) 65%, transparent);
+  color: var(--hc-window-ink-quiet);
   cursor: pointer;
   &:hover {
-    border-color: rgba($steel, 0.6);
-    color: color-mix(in srgb, #{$steel} 85%, white);
+    border-color: var(--hc-window-edge-firm);
+    color: var(--hc-window-accent);
   }
 }
 @keyframes cv2-peek-in {
@@ -227,14 +229,14 @@
   gap: 0.4rem;
   padding-bottom: 0.35rem;
   margin-bottom: 0.3rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--md-on-surface) 10%, transparent);
+  border-bottom: 1px solid var(--hc-window-edge);
 
   .hex-mark { font-size: scaled(0.75rem); }
 }
 .cv2-peek-name {
   font-size: scaled(0.78rem);
   font-weight: 600;
-  color: var(--md-on-surface);
+  color: var(--hc-window-ink-loud);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -253,7 +255,7 @@
   padding: 0.13rem 0;
   font-size: scaled(0.72rem);
   line-height: 1.35;
-  color: color-mix(in srgb, var(--md-on-surface) 80%, transparent);
+  color: var(--hc-window-ink-plain);
 
   &.is-q { color: color-mix(in srgb, var(--md-secondary) 80%, var(--md-on-surface)); }
   &.is-a { color: tw.ink(rgb(140, 195, 255)); }
@@ -281,13 +283,12 @@
   padding-top: 0.3rem;
   font-size: scaled(0.68rem);
   font-style: italic;
-  color: color-mix(in srgb, var(--md-on-surface) 45%, transparent);
+  color: var(--hc-window-ink-quiet);
 }
 
 // Prompt shown in place of the editor when no tile is active yet.
 .cv2-empty-hint {
   padding: 0.7rem 0.8rem;
-  color: color-mix(in srgb, var(--md-on-surface) 60%, transparent);
+  color: var(--hc-window-ink-quiet);
   font-size: scaled(0.8rem);
 }
-

@@ -11,7 +11,7 @@
 //
 // Drives in lockstep with alt+wheel via the shared SpotlightService.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import {
   Component,
   computed,

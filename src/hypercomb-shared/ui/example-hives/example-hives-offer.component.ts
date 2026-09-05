@@ -13,7 +13,7 @@
 // (per-example status), and the broker's `adopt:progress` (climbing piece
 // counts while a fold pulls its closure — loaders always show counts).
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, signal, computed, type OnDestroy, type OnInit } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'

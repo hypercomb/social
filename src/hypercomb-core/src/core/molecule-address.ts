@@ -27,7 +27,7 @@
 
 import { SignatureService } from './signature.service.js'
 import { canonicalizeLineageSegment } from './lineage-key.js'
-import { reservedColonScopes } from './pool-registry.js'
+import { BARE_WORD_POOL_MEANINGS, reservedColonScopes } from './pool-registry.js'
 
 /** A 64-hex signature — the only thing that may follow a colon besides a
  *  reserved system word. */
@@ -67,6 +67,35 @@ export const fold = (value: string): string => String(value ?? '').toLowerCase()
  */
 export const moleculeKey = (name: unknown): string =>
   fold(canonicalizeLineageSegment(name) || String(name ?? '').trim())
+
+/** The bare-word pool meanings as a MOLECULE would fold them — derived once
+ *  from the frozen list in pool-registry.ts; never a second list. */
+const RESERVED_POOL_KEYS: ReadonlySet<string> = new Set(
+  BARE_WORD_POOL_MEANINGS.map(meaning => moleculeKey(meaning)).filter(Boolean),
+)
+
+/**
+ * IS THIS TILE NAME A RESERVED POOL WORD?
+ *
+ * The ratchet flip (documentation/hypergraph-molecule-lineage.md, execution
+ * order step 5): the frozen bare-word set stops being a prohibition on new
+ * POOLS and becomes the reserved-name list a TILE may not take. A molecule
+ * named `bees` — or `Bees`, or `BEES`, since the molecule preimage is
+ * case-folded — is `sign('bees')`, the install's own bee pool: the same
+ * address, so the tile's atoms would gather inside the pool. The name is
+ * refused at the naming gesture, the way a filesystem refuses a name that is
+ * already a device.
+ *
+ * Asked the way the collision is computed: `moleculeKey(name)` against
+ * `moleculeKey(meaning)`, nothing looser. `websites` is NOT reserved —
+ * `sign('websites')` being the `/websites` bag is the design. A
+ * colon-carrying name is never reserved here; the address gate refuses it on
+ * its own grounds.
+ */
+export const isReservedPoolWord = (name: unknown): boolean => {
+  const key = moleculeKey(name)
+  return key.length > 0 && RESERVED_POOL_KEYS.has(key)
+}
 
 /** meaning → sig, and the inverse. A session mints each word once.
  *

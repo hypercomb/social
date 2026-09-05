@@ -242,7 +242,7 @@ $mint: #6fbf94;
   padding-bottom: 0.7em;
 }
 
-.removal-title { color: rgba($amber, 0.95); }
+.removal-title { color: tw.ink($amber); }
 
 .removal-hint,
 .removal-empty {
@@ -253,7 +253,7 @@ $mint: #6fbf94;
   color: var(--hc-window-ink-quiet);
 }
 
-.removal-empty { color: rgba($amber, 0.8); }
+.removal-empty { color: tw.ink($amber); }
 
 .removal-list {
   list-style: none;
@@ -275,7 +275,7 @@ $mint: #6fbf94;
 .removal-cell-icon {
   flex: 0 0 auto;
   font-size: 0.9em;
-  color: rgba($amber, 0.9);
+  color: tw.ink($amber);
 }
 
 .removal-cell-name {
@@ -392,7 +392,7 @@ $mint: #6fbf94;
   background: none;
   border: none;
   padding: 0 0.2em;
-  color: rgba($mint, 0.8);
+  color: tw.ink($mint);
   font: inherit;
   line-height: 1;
   cursor: pointer;
@@ -418,7 +418,7 @@ $mint: #6fbf94;
   text-align: left;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
 
-  .mat-sym { font-size: 1.1em; color: $mint; }
+  .mat-sym { font-size: 1.1em; color: tw.ink($mint); }
   &:hover { background: rgba($mint, 0.13); border-color: rgba($mint, 0.7); color: var(--hc-window-ink-loud); }
   &:focus-visible { outline: 1px solid rgba($mint, 0.7); outline-offset: 1px; }
 }
@@ -462,7 +462,7 @@ $mint: #6fbf94;
   margin: 0 0 0.45em;
   padding: 0 1em;
   font-size: 0.72em;
-  color: rgba($mint, 0.85);
+  color: tw.ink($mint);
 
   .mat-sym { font-size: 1em; }
 }
@@ -496,7 +496,7 @@ $mint: #6fbf94;
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 
-  .mat-sym { font-size: 1.05em; color: $mint; }
+  .mat-sym { font-size: 1.05em; color: tw.ink($mint); }
   &:hover { background: rgba($mint, 0.13); border-color: rgba($mint, 0.7); color: var(--hc-window-ink-loud); }
 }
 
@@ -549,7 +549,7 @@ $mint: #6fbf94;
   border-top: 1px solid rgba(var(--acc), 0.18);
 }
 
-.bouquet-title { color: rgba($mint, 0.95); }
+.bouquet-title { color: tw.ink($mint); }
 
 .bouquet-list {
   list-style: none;
@@ -1010,7 +1010,7 @@ $mint: #6fbf94;
   // for whatever is staged, so it must never be hidden.
   &.armed {
     opacity: 1;
-    color: $amber;
+    color: tw.ink($amber);
 
     &:hover { color: tw.ink(#f0d9b6); }
   }
@@ -1032,13 +1032,13 @@ $mint: #6fbf94;
   transition: opacity 0.12s ease, color 0.12s ease;
 
   .tags-row:hover & { opacity: 1; }
-  &:hover { color: $mint; }
+  &:hover { color: tw.ink($mint); }
 
   // picked: the tick stays visible without a hover — it is the readout of
   // what the brush is carrying, so it must never be hidden.
   &.picked {
     opacity: 1;
-    color: rgba($mint, 0.8);
+    color: tw.ink($mint);
 
     &:hover { color: var(--hc-window-ink-loud); }
   }
@@ -1046,9 +1046,8 @@ $mint: #6fbf94;
   // armed: picked AND painting — full mint, the loudest the row gets.
   &.armed {
     opacity: 1;
-    color: $mint;
+    color: tw.ink($mint);
 
     &:hover { color: var(--hc-window-ink-loud); }
   }
 }
-

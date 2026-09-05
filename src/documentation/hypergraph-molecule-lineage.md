@@ -486,6 +486,20 @@ entries, regardless of registry. Do not forbid bare words.
   stay ambiguous. Each either moves to a colon meaning (with a drain — a new
   spelling mints a new address forever) or is declared a reserved name the
   command line refuses. Decide per pool; record it in the register.
+
+  **DECIDED 2026-09-04 — all seven stay bare and are RESERVED NAMES.** No
+  drain: `bees` and `dependencies` are the install's own pools, and a new
+  spelling would strand every deployed package behind an address no client
+  derives; `clipboard`, `threads`, `computation`, `manifests` and
+  `optimization` hold participant records and derived caches whose
+  addresses are already derived in code on every host. The frozen list in
+  `pool-registry.ts` IS the reserved-name list; `isReservedPoolWord(name)`
+  folds a tile name the way a bag address folds and answers the one question
+  the collision poses. The naming gesture refuses a reserved word: the
+  shell's create path (`command-line.component.ts`, the one commit every new
+  tile name passes) logs the refusal and keeps the typed name in the line;
+  the create queen's `refuse` says the same to the model grammar. `websites`
+  is deliberately NOT on the list.
 - The frozen bare-word set in `pool-registry.ts` stops being a prohibition on
   tiles and becomes the reserved-name list. The ratchet flips from "no bare
   words" to "no `__x__`, no hardcoded hex, no deletion of a member-bearing
@@ -877,8 +891,7 @@ the pointer. `sealed` becomes `deploySig` in all FOUR of its load-bearing roles 
 | `history/history.service.ts:2496 lastSealFailure` | KEPT; its ONE external reader (`snapshot.queen.ts:117`) stops reading it. |
 | `history/seal-preference.ts:47 chooseSealChildHandle` | KEPT FOR NOW. Zero external callers, but it IS exported through `history/index.ts:37` and listed in `essentials-keys.ts`, so retiring it is a public-surface change to the essentials barrel. Retire it WITH `sealSubtree`, never before: the whole hint-vs-bag arbitration is an artefact of a parent carrying child sigs, and a per-author bucket claim IS the head. `scripts/bridge/_susan-hint-check.cjs` becomes dead with it. |
 | `history/active-genome.service.ts` | NOT a caller, deliberately, and the PRECEDENT to cite: it already publishes `heads: ActiveGenomeHead[]`, a flat per-lineage head enumeration; its source contract forbids sealing; and `active-genome.service.spec.ts:123,164` PIN the boundary with `expect(sealSubtree).not.toHaveBeenCalled()`. A consumer already chose the flat head list over the walk and guarded it with a test. |
-| the RECURSIVE CLOSURE WALKERS — `commands/snapshot.queen.ts#pushClosure:208-232`, `sharing/decoration-closure.ts:80-82 collectSigsDeep`, `sharing/host-sync.service.ts:1348`, `sharing/swarm-adopt.drone.ts:1290`, `sharing/authored-bootstrap.worker.ts:77` | **OWED, and it is the one finding that is not about the map at all.** Every one recurses per edge with a visited set and NO DEPTH BOUND, and hash-checking cannot save them: `sha256(bytes) === sig` proves the bytes match the NAME and says nothing about their SHAPE, while the bytes are chosen by whoever serves them — so THE SENDER PICKS THE DEPTH. In the prototype, ~20,000 chained atoms of a few dozen bytes each (the whole weapon under a megabyte) threw `RangeError: Maximum call stack size exceeded` inside the reader this scheme offers as the listing-free replacement for the seal, and fork refusal reaches the same walk on a FOREIGN author's head, so a hostile peer need not be the publisher under verification. The fix is mechanical and was made in the prototype (`molecule.mjs#pullClosure`): an explicit worklist instead of a call stack, plus a distinct-atom budget (`CLOSURE_ATOM_CAP`) so a reader that stops SAYS it stopped rather than reporting success. `#pushClosure` is already committed above to becoming a flat loop over the map's rows; the other four need the same treatment independently of step 4. |
-| `doctrine.spec.ts` | NEW RATCHET owed. `grep -n seal` over the doctrine spec returns nothing today, so nothing stops a tenth `sealSubtree(` call site appearing as callers migrate. Add a frozen allowlist of the current nine that may only SHRINK, modelled on the `not.toHaveBeenCalled()` assertion above. |
+| `doctrine.spec.ts` | LANDED 2026-09-04: `sealSubtree callers may only shrink` — a frozen allowlist of the seven files that still ride the walk (the definition file among them, since it seals its own descendants). Drift fails the suite; paying a caller down without removing its row fails it too. Empty the list, retire the walk. |
 
 Shell impact is nil: `hypercomb-shared`, `-web`, `-dev`, `-cli`, `-sdk` and
 `-core` contain ZERO callers; the publish panel only ever sees `here: string |

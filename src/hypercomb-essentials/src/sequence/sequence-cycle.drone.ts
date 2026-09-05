@@ -49,7 +49,15 @@ import {
   removeSequenceTarget,
 } from './sequence-target.js'
 
-type CellCountPayload = { count: number; labels: string[]; coords?: Axial[] }
+type CellCountPayload = {
+  count: number
+  labels: string[]
+  coords?: Axial[]
+  /** True only on a pass's FINAL batch — every tile is on screen. */
+  settled?: boolean
+  locationKey?: string
+  renderPassId?: number
+}
 
 type AxialServiceLike = { items?: Map<number, AxialLike> }
 type LineageLike = { explorerSegments?: () => readonly string[] }
@@ -62,6 +70,9 @@ type StoreLike = { putResource(blob: Blob): Promise<string> }
 type I18nLike = { t: (k: string, p?: Record<string, string | number>) => string }
 
 const ACTIVE_KEY = 'hc:arrange-active'
+
+/** How long the arrange gate will wait for a targeted pass to settle. */
+const PAINT_SETTLE_TIMEOUT = 3000
 
 /** One slot in the cycle: a built-in generator or a saved palette set. */
 type CycleEntry =
@@ -80,7 +91,7 @@ export class SequenceCycleDrone extends Drone {
     sequences: '@diamondcoreprocessor.com/SequenceService',
   }
   protected override listens = [
-    'render:cell-count', 'keymap:invoke', 'sequence:select', 'sequence:edit',
+    'render:tiles-target', 'render:cell-count', 'keymap:invoke', 'sequence:select', 'sequence:edit',
   ]
   protected override emits = [
     'arrange:preview', 'cell:reorder', 'toast:show',
@@ -92,6 +103,16 @@ export class SequenceCycleDrone extends Drone {
   #cellCoords: Axial[] = []
 
   #busy = false
+  // The tile pass the renderer has TARGETED, and the newest one known to have
+  // finished painting. Tiles arrive in batches, so while the first is ahead of
+  // the second the snapshot below holds only the tiles that have come into
+  // view so far — see #cycle's gate. Two counters rather than one flag because
+  // every effect here replays its last value on subscribe, in whatever order
+  // the handlers are registered; comparing two monotonic numbers converges to
+  // the same answer either way round, where a flag would strand itself armed.
+  #targetedPass = 0
+  #paintedPass = 0
+  #paintWatchdog: ReturnType<typeof setTimeout> | null = null
   #effectsRegistered = false
   #fitTimer: ReturnType<typeof setTimeout> | null = null
   #commitTail: Promise<void> = Promise.resolve()
@@ -101,9 +122,17 @@ export class SequenceCycleDrone extends Drone {
     if (this.#effectsRegistered) return
     this.#effectsRegistered = true
 
+    // A pass has been targeted: from here until its final snapshot lands, the
+    // tiles are still coming into view.
+    this.onEffect<{ renderPassId?: number }>('render:tiles-target', (payload) => {
+      this.#targetedPass = Math.max(this.#targetedPass, Number(payload?.renderPassId ?? 0))
+      if (this.#tilesComingIntoView()) this.#armPaintWatchdog()
+    })
+
     this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
       this.#cellLabels = payload.labels ?? []
       this.#cellCoords = payload.coords ?? []
+      this.#notePaintSettled(payload)
     })
 
     this.onEffect<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
@@ -125,8 +154,57 @@ export class SequenceCycleDrone extends Drone {
 
   // ── cycle ───────────────────────────────────────────────────────────
 
+  /** True while the newest targeted pass is still painting. */
+  #tilesComingIntoView = (): boolean => this.#targetedPass > this.#paintedPass
+
+  /** Mark a pass painted. Three shapes arrive on this effect and they mean
+   *  different things:
+   *    `settled: true`  — the pass's FINAL batch; every tile is on screen.
+   *    `settled: false` — an intermediate batch; more tiles are still coming.
+   *    no `settled` key — an in-place touch-up published long after the pass
+   *                       painted (an image landing, a shade flip), which is
+   *                       itself proof that its pass finished.
+   *  Only the middle one leaves the gate closed. */
+  #notePaintSettled = (payload: CellCountPayload): void => {
+    if (payload?.settled === false) return
+    const pass = Number(payload?.renderPassId ?? 0)
+    if (pass <= this.#paintedPass) return
+    this.#paintedPass = pass
+    if (!this.#tilesComingIntoView()) this.#clearPaintWatchdog()
+  }
+
+  /** A pass that never publishes a final snapshot must not disable arranging
+   *  for the rest of the session — a silently dead command is a worse fault
+   *  than the glitch this gate exists to prevent. A healthy pass settles in
+   *  well under this window, so the timer firing is itself a bug worth seeing
+   *  in the log. */
+  #armPaintWatchdog = (): void => {
+    this.#clearPaintWatchdog()
+    this.#paintWatchdog = setTimeout(() => {
+      this.#paintWatchdog = null
+      if (!this.#tilesComingIntoView()) return
+      console.warn('[sequence-cycle] tile pass never settled — releasing the arrange gate')
+      this.#paintedPass = this.#targetedPass
+    }, PAINT_SETTLE_TIMEOUT)
+  }
+
+  #clearPaintWatchdog = (): void => {
+    if (this.#paintWatchdog === null) return
+    clearTimeout(this.#paintWatchdog)
+    this.#paintWatchdog = null
+  }
+
   #cycle = async (dir: number, requestedId?: string): Promise<void> => {
     if (this.#busy) return
+
+    // TILES FIRST, THEN THE ARRANGEMENT. A page paints in batches, and the
+    // snapshot this drone arranges from is whatever the last batch published —
+    // so arranging mid-reveal repacks the tiles that happen to be on screen
+    // and leaves the rest to land on top of the new layout. The participant
+    // sees the page tear itself apart, and the index writes that follow are
+    // computed against that partial set. Refuse until the pass has settled;
+    // the reveal is short and the key can simply be pressed again.
+    if (this.#tilesComingIntoView()) return
 
     const axialSvc = this.resolve<AxialServiceLike>('axial')
     if (!axialSvc?.items?.size) return

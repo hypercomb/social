@@ -3,7 +3,7 @@
 // Minimal vertical bar at left screen edge showing current touch sensitivity.
 // Appears during two-finger sensitivity swipe, fades 1s after gesture ends.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, signal, type OnInit, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 

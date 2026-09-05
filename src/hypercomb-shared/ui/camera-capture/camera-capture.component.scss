@@ -89,7 +89,10 @@
   border-radius: 50%;
   border: none;
   background: rgba(255, 255, 255, 0.15);
-  color: var(--hc-window-ink-loud);
+  // This control always sits on the black/video substrate, independent of
+  // the app theme. Theme ink can become near-black in the bright looks, so
+  // the camera takes the scrim's own ink.
+  color: var(--hc-window-on-scrim);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -109,6 +112,9 @@
   text-align: center;
   font-size: 0.8rem;
   letter-spacing: 0.04em;
-  color: var(--hc-window-ink-quiet);
+  // The viewfinder is intentionally theme-independent. Keep its instruction
+  // readable when the surrounding app uses a bright ink ladder.
+  color: var(--hc-window-on-scrim-quiet);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
   pointer-events: none;
 }

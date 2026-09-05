@@ -1028,6 +1028,19 @@ export class ShowCellDrone extends Drone {
   // parent sig (content changed) gates fresh.
   readonly #resolveGateExhausted = new Set<string>()
   static readonly #RESOLVE_GATE_MAX_ATTEMPTS = 12
+  // Wall-clock deadline for a completeness hold, keyed by LOCATION.
+  //
+  // The attempt budget above cannot bound anything by itself. It is keyed by
+  // parent content sig, so a parent whose head advances between passes gets a
+  // fresh key and restarts at attempt 1 — and `#rearmResolveGates`
+  // (content:arrived / miss-window) CLEARS the counter outright. Either path
+  // lets a layer defer the paint forever, which is the blank canvas the
+  // budget exists to prevent. The location key does not churn and this map
+  // survives the re-arm, so however the counter is reset the paint is still
+  // only held for #RESOLVE_GATE_HOLD_MS before falling through to
+  // best-effort.
+  readonly #gateFirstHoldAt = new Map<string, number>()
+  static readonly #RESOLVE_GATE_HOLD_MS = 8000
   // Per-parent-sig count of consecutive renders whose branch-STATUS (does a
   // child have its own children?) came back on a cold pool miss. Unlike the
   // name gate this NEVER holds the paint — tiles show immediately — it only
@@ -2968,8 +2981,10 @@ export class ShowCellDrone extends Drone {
     this.#forceNextRender = false
 
     // Rendering owns the main thread until this pass publishes its matching
-    // cell snapshot. Post-paint layers (agent bees today) use the pass id to
-    // reject a replayed cell-count from the layer the participant just left.
+    // cell snapshot. The pass id is how a listener rejects a replayed
+    // cell-count from the layer the participant just left — SequenceCycleDrone
+    // today. (The agent bees held that gate until e5be06adc; they wait behind
+    // the boot paint barrier now, not this id.)
     const renderPassId = ++this.#tileRenderPassId
     this.emitEffect('render:tiles-target', { locationKey, renderPassId })
 
@@ -3905,10 +3920,11 @@ export class ShowCellDrone extends Drone {
     // a genuinely-absent child can never blank the canvas forever.
     if (!childResolveComplete && childResolveExpected > 0) {
       const gateKey = gateParentSig || locationKey
+      const heldFor = this.#gateHoldAge(locationKey)
       if (!this.#resolveGateExhausted.has(gateKey)) {
         const attempts = (this.#incompleteResolveAttempts.get(gateKey) ?? 0) + 1
         this.#incompleteResolveAttempts.set(gateKey, attempts)
-        if (attempts <= ShowCellDrone.#RESOLVE_GATE_MAX_ATTEMPTS) {
+        if (attempts <= ShowCellDrone.#RESOLVE_GATE_MAX_ATTEMPTS && heldFor <= ShowCellDrone.#RESOLVE_GATE_HOLD_MS) {
           this.#recordRenderAudit('gate', union.size, locationKey)
           if (DIAG) console.info(`[diag:childres] GATE hold loc=${locationKey} attempt=${attempts}/${ShowCellDrone.#RESOLVE_GATE_MAX_ATTEMPTS} expected=${childResolveExpected} got=${union.size} — deferring partial`)
           // Force the next render past the fast-path skip and re-render with a
@@ -3924,7 +3940,7 @@ export class ShowCellDrone extends Drone {
         // Budget exhausted — stop gating this layer so it can't thrash the
         // render loop, then fall through to paint what resolved.
         this.#resolveGateExhausted.add(gateKey)
-        console.warn(`[diag:childres] GATE exhausted loc=${locationKey} after ${attempts} attempts expected=${childResolveExpected} got=${union.size} — painting placeholders for the missing`)
+        console.warn(`[diag:childres] GATE exhausted loc=${locationKey} after ${attempts} attempts / ${heldFor}ms expected=${childResolveExpected} got=${union.size} — painting placeholders for the missing`)
       }
       // Gate exhausted (this pass or a prior one). The unresolved children
       // are NOT dropped: paint each as an explicit unavailable-placeholder —
@@ -3960,6 +3976,7 @@ export class ShowCellDrone extends Drone {
       // Clean resolution — reset this layer's retry budget and drop the
       // placeholder bookkeeping so a later regression re-emits fresh.
       this.#incompleteResolveAttempts.delete(gateParentSig)
+      this.#gateFirstHoldAt.delete(locationKey)
       this.#placeholderLocations.delete(locationKey)
       this.#missingEmitKeyByLocation.delete(locationKey)
     }
@@ -4498,10 +4515,11 @@ export class ShowCellDrone extends Drone {
     // The nurse never caches cold reads, so each retry re-reads the head.
     if (orderStats.coldIndexNames.length > 0) {
       const idxGateKey = 'idx:' + (gateParentSig || locationKey)
+      const idxHeldFor = this.#gateHoldAge('idx:' + locationKey)
       if (!this.#resolveGateExhausted.has(idxGateKey)) {
         const attempts = (this.#incompleteResolveAttempts.get(idxGateKey) ?? 0) + 1
         this.#incompleteResolveAttempts.set(idxGateKey, attempts)
-        if (attempts <= ShowCellDrone.#RESOLVE_GATE_MAX_ATTEMPTS) {
+        if (attempts <= ShowCellDrone.#RESOLVE_GATE_MAX_ATTEMPTS && idxHeldFor <= ShowCellDrone.#RESOLVE_GATE_HOLD_MS) {
           this.#recordRenderAudit('gate', union.size, locationKey)
           console.info(`[diag:idxres] GATE hold loc=${locationKey} attempt=${attempts}/${ShowCellDrone.#RESOLVE_GATE_MAX_ATTEMPTS} cold-index: ${orderStats.coldIndexNames.join(', ')} — deferring paint`)
           this.#forceNextRender = true
@@ -4513,6 +4531,7 @@ export class ShowCellDrone extends Drone {
       }
     } else {
       this.#incompleteResolveAttempts.delete('idx:' + (gateParentSig || locationKey))
+      this.#gateFirstHoldAt.delete('idx:' + locationKey)
     }
 
     const previousLocationKey = this.renderedLocationKey
@@ -5265,6 +5284,10 @@ export class ShowCellDrone extends Drone {
     this.#bakedLabelAtlasGen = nextLabelAtlasGen
     this.renderedCount = cells.length
     this.#recordRenderAudit('paint', cells.length, this.renderedLocationKey)
+    // A real paint ends every hold on this location — drop both deadlines so a
+    // later genuine incompleteness gets its own full window.
+    this.#gateFirstHoldAt.delete(this.renderedLocationKey)
+    this.#gateFirstHoldAt.delete('idx:' + this.renderedLocationKey)
 
     // A paint with every image AND every label resolvable is the convergence
     // point of the eviction-repaint cycle — reset its bound here (eviction
@@ -5335,6 +5358,17 @@ export class ShowCellDrone extends Drone {
    * count — exactly the "10 then 13" signature). A correct single-pass
    * load shows each location with `paints: 1` and `twoStage: false`.
    */
+  /** Age in ms of the current completeness hold on `key`, starting the clock
+   *  on the first call. Keyed by LOCATION so a churning parent sig cannot
+   *  reset it, and deliberately NOT cleared by `#rearmResolveGates` — only a
+   *  clean resolution or an actual paint drops it. */
+  #gateHoldAge(key: string): number {
+    const now = Date.now()
+    const first = this.#gateFirstHoldAt.get(key)
+    if (first === undefined) { this.#gateFirstHoldAt.set(key, now); return 0 }
+    return now - first
+  }
+
   #recordRenderAudit(kind: 'paint' | 'gate', count: number, loc: string): void {
     try {
       const w = window as unknown as {

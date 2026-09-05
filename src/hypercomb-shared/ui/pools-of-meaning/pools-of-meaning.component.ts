@@ -17,7 +17,7 @@
 import { Component } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import { postCommunityDomainsToServiceWorker } from '../../core/sw-domains'
+import { postCommunityDomainsToServiceWorker } from '@hypercomb/runtime/sw-domains'
 import { PinnableHoverBase, type PinnablePanel } from '../pinnable/pinnable-hover.base'
 import { forgetPoolRoot, type PoolRoot, type PoolsPayload } from './pools-data'
 

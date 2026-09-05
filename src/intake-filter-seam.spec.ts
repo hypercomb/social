@@ -92,7 +92,16 @@ const makeStore = () => {
       meaning,
       files,
       getFileHandle: async (name: string, opts?: { create?: boolean }) => {
-        if (!files.has(name) && !opts?.create) throw new Error('NotFoundError')
+        // ABSENCE IS REPORTED BY `name`, exactly as OPFS and the native shim
+        // report it (`new DOMException(..., 'NotFoundError')`). `readRecord`
+        // now reads that name to tell "no record here" — an answer — from "the
+        // pool would not read" — not an answer. A fake that threw a plain
+        // Error made every absent member look like a failed read.
+        if (!files.has(name) && !opts?.create) {
+          throw typeof DOMException !== 'undefined'
+            ? new DOMException(`${name} not found`, 'NotFoundError')
+            : Object.assign(new Error(`${name} not found`), { name: 'NotFoundError' })
+        }
         return {
           getFile: async () => ({ text: async () => files.get(name) ?? '' }),
           createWritable: async () => ({
@@ -158,6 +167,24 @@ const { allows, allowsHere } = await import('./hypercomb-essentials/src/pheromon
  *  also what real content addressing gives you. */
 let counter = 0
 const freshSig = async (): Promise<string> => await sign(`content-${++counter}`)
+
+/** Put a mark record straight into the pool, WITHOUT going through
+ *  `addSigMark` — which would populate the module's record cache and hide the
+ *  very thing these tests are about. This is what "the participant marked
+ *  these bytes in an earlier session" looks like to a cold cache. */
+const markOnDisk = async (sig: string, marks: string[]): Promise<void> => {
+  const pool = await store.getPool('pheromones:content')
+  pool.files.set(sig, JSON.stringify({ marks }))
+}
+
+/** Let a kicked read and its follow-up settle. */
+const flush = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
+
+/** IoC with the registry but NO Store — the boot race the gate walks into when
+ *  it kicks a read at first sight of a peer signature. */
+const withoutStore = (reg: unknown): void => {
+  ;(window as any).__ioc = { '@hypercomb.social/InterestRegistry': reg }
+}
 
 const put = (reg: unknown): void => {
   ;(window as any).__ioc = {
@@ -330,6 +357,84 @@ describe('the real registry, through the real gate', () => {
 
     expect(await allows({ sig: alsoBad })).toBe(false)
     expect(allowsHere({ sig: alsoBad })).toBe(false)
+  })
+
+  // ── a failed read is not an answer ──────────────────────────────────────
+  //
+  // THE FAIL-OPEN. `readRecord` used to wrap the whole read in one `try` and
+  // cache the result unconditionally, so "the Store was not in IoC yet" and
+  // "the read threw" both resolved to a permanent `[]`. Since `readRecord`
+  // returns early on a cache hit, nothing ever re-read it: a signature the
+  // participant had put a DROP mark on was admitted for the life of the tab.
+  //
+  // It fails one way only, and that way is the wrong one. KEEP is safe — an
+  // empty mark list is admitted by `unknown is not absent`. DROP is the half
+  // whose entire job is to refuse, and it was the half that stopped.
+  describe('a read that did not land', () => {
+    /** A hive that filters, and bytes marked in an earlier session. */
+    const readyToRefuse = async (): Promise<{ reg: any; bad: string }> => {
+      const reg = new InterestRegistry()
+      put(reg)
+      await reg.save('junk', ['malicious'])
+      await reg.setRole('drop', 'junk')
+      const bad = await freshSig()
+      await markOnDisk(bad, ['malicious'])
+      return { reg, bad }
+    }
+
+    it('is not remembered as one — the commit gate refuses once the store arrives', async () => {
+      const { reg, bad } = await readyToRefuse()
+
+      // The Store is not reachable. Intake must not break, so: allowed.
+      withoutStore(reg)
+      expect(await allows({ sig: bad })).toBe(true)
+
+      // The Store arrives. Nothing was cached, so the read happens for real
+      // and the DROP mark is finally seen. Before the fix this stayed `true`
+      // forever, because the failure had been cached as the answer.
+      put(reg)
+      expect(await allows({ sig: bad })).toBe(false)
+    })
+
+    it('releases the sync gate\'s kick, so a later frame tries again', async () => {
+      const { reg, bad } = await readyToRefuse()
+
+      // First sight of the signature, mid-boot: kicks a read that cannot land.
+      withoutStore(reg)
+      expect(allowsHere({ sig: bad })).toBe(true)
+      await flush()
+
+      // The Store arrives. Still nothing known, so the gate must kick AGAIN —
+      // the `kicked` set used to say "entries are never removed", which turned
+      // one unlucky moment into a permanent hole.
+      put(reg)
+      expect(allowsHere({ sig: bad })).toBe(true)
+      await flush()
+
+      // Now it knows, and now it refuses.
+      expect(allowsHere({ sig: bad })).toBe(false)
+    })
+
+    // THE OVER-CORRECTION THIS MUST NOT BECOME. If no read were ever cached,
+    // the gate would re-open the pool for every unmarked signature on every
+    // commit — and unmarked is the overwhelmingly common case. An ABSENT
+    // record is a real answer and must still be remembered.
+    it('an absent record is still an answer, and is still remembered', async () => {
+      const reg = new InterestRegistry()
+      put(reg)
+      await reg.save('junk', ['malicious'])
+      await reg.setRole('drop', 'junk')
+      await addSigMark(await freshSig(), 'malicious')   // the pool now exists
+
+      const clean = await freshSig()
+      store.opened.length = 0
+      expect(await allows({ sig: clean })).toBe(true)
+      const opens = store.opened.filter(m => m === 'pheromones:content').length
+      expect(opens).toBeGreaterThan(0)
+
+      expect(await allows({ sig: clean })).toBe(true)
+      expect(store.opened.filter(m => m === 'pheromones:content').length).toBe(opens)
+    })
   })
 
   // An interest is a signature somebody can hand you — that is the cold-start

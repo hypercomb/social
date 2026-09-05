@@ -116,7 +116,7 @@ $quiet: #8ea2b0;
 
 .publish-index {
   font-size: 0.72em;
-  color: rgba($amber, 0.9);
+  color: tw.ink($amber);
 
   // Nothing is wrong — the line is just the age of what we read.
   &.quiet { color: var(--hc-window-ink-quiet); }
@@ -237,7 +237,7 @@ $quiet: #8ea2b0;
   color: var(--hc-window-ink-quiet);
 }
 
-.pcur.is-busy .pcur-state { color: rgba($amber, 0.85); }
+.pcur.is-busy .pcur-state { color: tw.ink($amber); }
 
 .pcur-action {
   flex: 0 0 auto;
@@ -696,14 +696,14 @@ $quiet: #8ea2b0;
   flex: 0 0 auto;
   font-size: 0.85em;
   letter-spacing: 0.05em;
-  color: $mint;
+  color: tw.ink($mint);
   background: rgba($mint, 0.12);
   border: 1px solid rgba($mint, 0.35);
   border-radius: tw.$radius-pill;
   padding: 0 0.5em;
 }
 
-.pdet-gaps { color: rgba($amber, 0.9); }
+.pdet-gaps { color: tw.ink($amber); }
 
 .pdet-gaplist {
   list-style: none;
@@ -959,7 +959,7 @@ $quiet: #8ea2b0;
   .prow-state { color: var(--hc-window-ink-quiet); }
 }
 
-.publish-row.is-busy .prow-state { color: rgba($amber, 0.85); }
+.publish-row.is-busy .prow-state { color: tw.ink($amber); }
 
 .prow-action {
   flex: 0 0 auto;

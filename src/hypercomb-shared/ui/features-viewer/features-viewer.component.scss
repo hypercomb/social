@@ -438,8 +438,8 @@ $path-fail: #e08a8a;     // failed terminal
   color: var(--hc-window-ink-quiet);
 }
 
-.dl-path.ok .dl-text { color: rgba($path-ok, 0.9); }
-.dl-path.fail .dl-text { color: rgba($path-fail, 0.9); }
+.dl-path.ok .dl-text { color: tw.ink($path-ok); }
+.dl-path.fail .dl-text { color: tw.ink($path-fail); }
 
 .dl-track {
   display: flex;
@@ -507,8 +507,8 @@ $path-fail: #e08a8a;     // failed terminal
   span:last-child { text-align: right; }
 }
 
-.dl-path.ok .dl-labels span:last-child { color: rgba($path-ok, 0.85); }
-.dl-path.fail .dl-labels span:last-child { color: rgba($path-fail, 0.85); }
+.dl-path.ok .dl-labels span:last-child { color: tw.ink($path-ok); }
+.dl-path.fail .dl-labels span:last-child { color: tw.ink($path-fail); }
 
 @keyframes dl-pulse {
   0%, 100% { opacity: 1;    transform: scale(1);    }
@@ -558,8 +558,8 @@ $path-fail: #e08a8a;     // failed terminal
   max-height: 40vh;
   overflow: auto;
   padding: 0.7em 0.8em;
-  background: rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(var(--acc), 0.18);
+  background: var(--hc-window-wash);
+  border: 1px solid var(--hc-window-edge);
   border-radius: tw.$radius-card;
   font-family: var(--hc-mono, ui-monospace, monospace);
   font-size: 0.7em;

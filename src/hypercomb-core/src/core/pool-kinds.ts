@@ -154,6 +154,13 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['history:marker-meta', 'document'],
   ['facet:minted', 'document'],
   ['substrate:registry', 'document'],
+  // Navigation and chrome records moved out of localStorage
+  // (hypercomb-shared/core/participant-document.ts): per participant, one
+  // current record each, replaced whole on every edit.
+  ['entrances:pinned', 'document'],
+  ['icons:overrides', 'document'],
+  ['locations:saved', 'document'],
+  ['portals:recent', 'document'],
   // Hand-authored insights, one current catalog via putPoolDoc — a PARTICIPANT'S
   // record, not a derivation. It was seeded 'index' (wipe-safe), which told the
   // collector a hand-written catalog could be thrown away.

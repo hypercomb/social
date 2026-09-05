@@ -35,6 +35,21 @@ them is default-deny, and the field that looks like the capability tier
 (`MachineGrammar.reach`) is decorative **by design** — so a sandbox is not a
 tightening of an existing gate, it is the first consent artifact in this path.
 
+> **RESOLVED 2026-09-04 — DEFAULT-ELSEWHERE.** The decision moved OFF the doors.
+> `hypercomb-core/src/core/machine-admission.ts` answers *may this caller say
+> this word* once, and both machine doors ask it: the bridge as `'operator'`,
+> the model channel as `'model'`. They differ in exactly one bit — whether a
+> `machine` declaration is required — and share everything else, so the
+> divergence this document is mostly about can no longer be reintroduced
+> quietly. `reach` and `scope` stopped being decorative in the same commit: they
+> are now weighed against a participant-held ceiling, default `editing/network`,
+> written by `/grant` and by nothing else. A doctrine ratchet fails the suite if
+> any door compares a declared `reach` or `scope` against a literal again.
+>
+> What did NOT change: the keyboard. A person typing into their own command line
+> is not a caller to be admitted, and `MachineCaller` has no `'participant'`
+> member — the day it gains one is the day somebody starts gating the owner.
+
 Companions — read these rather than treating this document as authority on their
 subject: `hypercomb-communication-layer.md` (the channels and their contracts),
 `every-act-has-a-word.md` (the vocabulary backlog), `intake-filter.md` (inbound
@@ -47,8 +62,14 @@ content; its selection/intake/activation table is the right frame and this is a
 | reach | n | verbs |
 |---|---|---|
 | `additive` | 4 | create, postit, copy, paste |
-| `editing` | 7 | keyword, accent, title, cut, hide, undo, redo |
-| `destructive` | 1 | **remove** |
+| `editing` | 6 | keyword, accent, title, hide, undo, redo |
+| `destructive` | 2 | **remove**, **cut** |
+
+*(`cut` was listed as `editing` in the first pass and is `destructive` in the
+code: it calls `commitChildrenDeltas` with `removes`, so the parent stops
+holding the tile exactly as `/remove` makes it stop. That correction is why the
+retired four-name destructive set — `remove, rm, delete, del` — was the wrong
+shape rather than merely an incomplete list.)*
 
 All twelve declare `refuse`. `keyword`, `accent` and `remove` are declared
 inline in `slash-behaviour.drone.ts` rather than in their queen files.
@@ -69,6 +90,25 @@ This is the headline finding. **Exactly one surface implements default-deny.**
 | Canonical slash (keyboard) | not required | **no** | yes | **none** | no |
 | Bridge `submit` | not required | **no** | yes | prose only — see below | no |
 
+**As of the default-elsewhere pass, the two MACHINE rows read one rule.** The
+table above is kept because it is what the code looked like when the finding was
+made, and because the shape of the disagreement is the argument. What it looks
+like now:
+
+| | declares `machine`? | concealed | reach / scope | resolves |
+|---|---|---|---|---|
+| **Model channel** (`hypercomb_act`) | **required** | refused | against the grant | primary names only |
+| **Bridge `submit`** | not required | refused | against the grant | primary names + participant aliases |
+| Keyboard (prose and canonical slash) | — | — | — | the participant is not a caller |
+
+The two machine rows differ where they must and nowhere else. A declaration is
+not required of the bridge because ~97 of ~109 behaviours declare none, and
+requiring one there would break the authoring tool this hive is built with while
+protecting nobody who is not present. Resolution differs because the model
+channel must never let a participant alias redirect a canonical word, and the
+bridge must accept the line a person would type — which is also what makes `rm`
+inherit `remove`'s reach rather than being absent from a list.
+
 `SlashBehaviourDrone.execute` resolves **any name or alias, hidden or not,
 machine-declared or not, and runs it** — no `#present` call, no hidden check
 ([slash-behaviour.drone.ts:143](../hypercomb-essentials/src/commands/slash-behaviour.drone.ts:143)).
@@ -87,6 +127,14 @@ types in full trivially. Six of the eleven are genuinely destructive: `flatten`,
 `sweep`. (The other five — `debug`, `view-current`, `verify-history`,
 `mesh-block`, `mesh-clear` — are dev/diagnostic; the first pass overstated the
 set.) `/flatten` is the verb that once hard-deleted a pool it mistook for a bag.
+
+**Verified live 2026-09-04 against a running hive, and two of those names are
+gone.** The census carries twelve `slashHidden` verbs — `prune`, `sweep`,
+`consolidate-history`, `consolidate-content`, `debug`, `verify-history`,
+`view-current`, `atlas`, `studio`, `lounge`, `block-peer`, `clear-mesh` —
+and neither `flatten` nor `collapse-history` is among them; both were retired
+in the behaviour prune. The gate reads the FLAG, never a list of the verbs
+carrying it, which is why this correction changes prose and no code.
 
 ### A defect in code committed today — *fixed 2026-09-04 (`453bafd98`)*
 
@@ -133,7 +181,14 @@ back.
 The same `emit`-instead-of-`emitTransient` defect still exists at
 `bee-tutorial.drone.ts:582`.
 
-## Can a model delete a tile unattended? Yes.
+## Can a model delete a tile unattended? Yes — *no longer, as of 2026-09-04.*
+
+> Under the standing default grant (`editing/network`) `/remove` and `/cut` are
+> neither offered nor admitted to the model channel. The finding below is what
+> the code did before that ceiling existed, and the reasoning is still why the
+> ceiling stops where it does. Raising it is one line — `/grant destructive` —
+> and that is the point: it is now a thing a participant chose.
+
 
 Blunt answer: **a trusted local model can remove a leaf tile with no dialog and
 no human confirmation.** One `hypercomb_act` call carrying `/remove <tile>` runs

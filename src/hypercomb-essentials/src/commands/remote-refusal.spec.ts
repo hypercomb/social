@@ -7,10 +7,13 @@
 // already drifted, because `/cut` drops a child from its parent exactly as
 // `/remove` does and was never on it.
 //
-// These assert the PROPERTIES the guard now keys on, at their source. The guard
-// itself lives in an Angular component (hypercomb-shared/ui/command-line), which
-// this project may not import — so this pins the declarations the guard reads,
-// and a source guard pins the guard.
+// SINCE THEN the decision itself moved OFF this door: `admitMachineCall` in
+// core answers for every machine surface, and the rule is asserted there
+// (hypercomb-core/src/core/machine-admission.spec.ts). What is left here is the
+// half only this project can see — that the shipped behaviours declare what the
+// gate reads — plus a source guard proving this door ASKS rather than judges.
+// The guard itself lives in an Angular component (hypercomb-shared/ui/
+// command-line), which this project may not import.
 
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -55,25 +58,33 @@ const remoteBlock = (): string => {
   return guard.slice(at, at + 6000)
 }
 
-describe('the remote guard reads declarations, not a list', () => {
-  it('refuses on the declared reach rather than a hand-kept name set', () => {
+describe('the remote door asks the gate, and does not judge for itself', () => {
+  it('resolves the caller as an OPERATOR and hands the verdict to core', () => {
+    // DEFAULT-ELSEWHERE. Judging here is how four surfaces came to disagree —
+    // each door deciding in the order the doors were written. The rule is
+    // core's `machine-admission`; this door supplies only who is calling and
+    // which census row the word resolves to.
     const block = remoteBlock()
-    expect(block).toContain("machine?.reach === 'destructive'")
-    // The old set must not be what the REMOTE path consults any more.
+    expect(block).toContain("'operator'")
+    expect(block).toContain('admitMachineCall(')
+    // Neither refusal may be re-derived here. A second copy of an admission
+    // rule does not fail safe — it fails OPEN at whichever door was not
+    // updated, which is exactly what the audit found.
+    expect(block).not.toContain("machine?.reach === 'destructive'")
     expect(block).not.toContain('DESTRUCTIVE_COMMANDS.has')
   })
 
-  it('refuses concealed verbs — hidden is a discoverability flag, not an authorization one', () => {
-    // /flatten, /prune, /sweep, /collapse-history, /consolidate-* sit behind
-    // `slashHidden`, documented as "must be typed in full on purpose" — a
-    // human-typing assumption a machine defeats for free.
-    const block = remoteBlock()
-    expect(block).toMatch(/entry\.hidden \|\| entry\.prototype/)
+  it('resolves participant aliases, so a second name cannot walk around a refusal', () => {
+    // `rm` must inherit `remove`'s reach rather than be absent from a list.
+    // Resolution stays at the door because it differs by door ON PURPOSE: the
+    // model channel resolves primary names only.
+    expect(remoteBlock()).toContain('spokenEntry(')
   })
 
-  it('resolves aliases, so a second name cannot walk around either refusal', () => {
-    // `rm` must inherit `remove`'s reach rather than be absent from a list.
-    expect(remoteBlock()).toContain('aliases')
+  it('judges EVERY verb in the line, and the first refusal answers', () => {
+    // A prose reading can carry several actions. Admitting a prefix and
+    // refusing a tail would leave the hive half-changed under a refusal.
+    expect(remoteBlock()).toMatch(/for \(const verb of spokenVerbs\)/)
   })
 
   it('leaves the keyboard path alone — typing still gets a confirmation', () => {

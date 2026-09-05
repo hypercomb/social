@@ -13,7 +13,8 @@
 //
 //   node scripts/drive-toolwindow-contrast.cjs [--url http://localhost:4250]
 //                                              [--out <dir>] [--engine chrome]
-//                                              [--themes honey,light,sherbet,dark]
+//                                              [--themes light,dark,honey,bloom,sherbet,system-light,system-dark]
+//                                              [--allow-missing]
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -61,6 +62,14 @@ const WINDOWS = [
   { id: 'context',    effect: 'context:tile-changed', payload: {},                   sel: '.ctx-panel' },
   { id: 'publish',    effect: 'publish:render',      payload: {},                    sel: '.publish-panel' },
   { id: 'references', effect: 'references:compose',  payload: {},                    sel: '.ref-panel' },
+  { id: 'action',     effect: 'action:hover-show',   payload: {
+    label: 'Contrast audit', cmd: 'contrast-audit', kind: 'slash',
+    steps: [['Ctrl', 'K']], category: 'audit',
+    description: 'Verifies that every readable run clears its contrast target.',
+    detail: 'This synthetic reference card exercises its labels, pills, dividers, and examples.',
+    usage: '/contrast-audit <theme>', params: ['theme'],
+    examples: [{ input: '/contrast-audit honey', result: 'All runs measured.' }],
+  }, sel: '.action-card-panel' },
 ]
 
 // Walk one open panel and measure every visible text run in it. Runs entirely
@@ -70,9 +79,13 @@ const MEASURE = (sel) => {
   if (!panel) return { present: false }
 
   const parse = (c) => {
-    const m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+))?/i.exec(c || '')
+    let m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+))?/i.exec(c || '')
+    if (m) return [+m[1], +m[2], +m[3], m[4] === undefined ? 1 : +m[4]]
+    // Chromium serializes color-mix() as color(srgb …). Skipping those runs
+    // made themed accent labels disappear from the audit entirely.
+    m = /color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\)/i.exec(c || '')
     if (!m) return null
-    return [+m[1], +m[2], +m[3], m[4] === undefined ? 1 : +m[4]]
+    return [+m[1] * 255, +m[2] * 255, +m[3] * 255, m[4] === undefined ? 1 : +m[4]]
   }
   const over = (fg, bg) => {
     const a = fg[3]
@@ -136,7 +149,8 @@ const MEASURE = (sel) => {
 async function main() {
   const url = String(arg('url', 'http://localhost:4250'))
   const outDir = path.resolve(String(arg('out', 'test-results/toolwindow-contrast')))
-  const themes = String(arg('themes', 'honey,light,sherbet,dark')).split(',').map(s => s.trim()).filter(Boolean)
+  const themes = String(arg('themes', 'light,dark,honey,bloom,sherbet,system-light,system-dark')).split(',').map(s => s.trim()).filter(Boolean)
+  const allowMissing = arg('allow-missing', false) === true
   fs.mkdirSync(outDir, { recursive: true })
 
   const { type, opts } = launcherFor(arg('engine', 'chrome'))
@@ -149,7 +163,9 @@ async function main() {
     await page.waitForTimeout(2500)
 
     for (const theme of themes) {
-      await page.evaluate((t) => window.ioc && window.ioc.get && window.ioc.get('@hypercomb.social/Theme') && window.ioc.get('@hypercomb.social/Theme').setTheme(t), theme)
+      const systemScheme = /^system-(light|dark)$/.exec(theme)?.[1]
+      if (systemScheme) await page.emulateMedia({ colorScheme: systemScheme })
+      await page.evaluate((t) => window.ioc && window.ioc.get && window.ioc.get('@hypercomb.social/Theme') && window.ioc.get('@hypercomb.social/Theme').setTheme(t), systemScheme ? 'system' : theme)
       await page.waitForTimeout(400)
 
       for (const w of WINDOWS) {
@@ -167,7 +183,7 @@ async function main() {
         }
         let res
         try { res = await attempt() }
-        catch { await settle(); await page.evaluate((t) => window.ioc.get('@hypercomb.social/Theme').setTheme(t), theme); await page.waitForTimeout(300); res = await attempt() }
+        catch { await settle(); await page.evaluate((t) => window.ioc.get('@hypercomb.social/Theme').setTheme(t), systemScheme ? 'system' : theme); await page.waitForTimeout(300); res = await attempt() }
         if (!res.present) { report.push({ theme, window: w.id, present: false }); continue }
         const fails = res.rows.filter(r => !r.pass)
         report.push({
@@ -190,15 +206,20 @@ async function main() {
 
   fs.writeFileSync(path.join(outDir, 'contrast.json'), JSON.stringify(report, null, 2))
   let bad = 0
+  let missing = 0
   for (const r of report) {
-    if (!r.present) { console.log('  .  ' + r.theme.padEnd(8) + ' ' + r.window.padEnd(11) + ' (not present)'); continue }
+    if (!r.present) {
+      missing += 1
+      console.log(' MISS ' + r.theme.padEnd(8) + ' ' + r.window.padEnd(11) + ' (not present)')
+      continue
+    }
     const mark = r.fails ? 'FAIL' : ' ok '
     if (r.fails) bad += r.fails
     console.log('  ' + mark + '  ' + r.theme.padEnd(8) + ' ' + r.window.padEnd(11) + ' ' + String(r.runs).padStart(3) + ' runs, ' + String(r.fails).padStart(3) + ' under target, worst ' + r.worst + ':1')
     for (const f of (r.failing || [])) console.log('           .' + f.cls + ' "' + f.text + '" ' + f.ratio + ':1 (needs ' + f.need + ') ' + f.color + ' on ' + f.ground)
   }
-  console.log('\n' + bad + ' text runs under target. Report: ' + path.join(outDir, 'contrast.json'))
-  process.exit(bad ? 1 : 0)
+  console.log('\n' + bad + ' text runs under target; ' + missing + ' surfaces not exercised. Report: ' + path.join(outDir, 'contrast.json'))
+  process.exit(bad || (missing && !allowMissing) ? 1 : 0)
 }
 
 main().catch(err => { console.error(err); process.exit(1) })

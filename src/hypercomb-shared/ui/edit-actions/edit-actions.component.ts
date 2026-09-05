@@ -25,10 +25,14 @@
 // undo at least once), because that is the only moment there's a choice to
 // commit: you've gone back, and "save" is how you choose what to move
 // forward with. It promotes the rewound state to head (HistoryService
-// .promoteToHead — append-only, never truncates) and, where the DCP
-// sentinel bridge exists, freezes that promoted head as a named branch so
-// the chosen state is also saved into DCP. At head there is nothing to
-// merge, so no Save.
+// .promoteToHead — append-only, never truncates). At head there is nothing
+// to merge, so no Save.
+//
+// SAVE IS LOCAL AND SENDS NOTHING. It also offers the promoted head to a
+// sentinel bridge as a named branch, but nothing has assigned
+// `__sentinelBridge` since the installer was deleted, so that half never
+// runs. It used to drain a push queue on the way past; that channel is gone
+// (`essentials/sharing/retired-push-pool.ts`).
 //
 // Shell UI: NEVER imports essentials — it reaches the runtime only through
 // window.ioc (the local `get` helper) and EffectBus.
@@ -50,7 +54,6 @@ type CursorLike = {
   jumpToLatest?: () => void
 }
 type HistoryLike = { promoteToHead?: (locationSig: string, layerSig: string) => Promise<string | null> }
-type PushQueueLike = { drain?: () => Promise<void>; pending?: () => Promise<string[]> }
 type SentinelBridgeLike = { saveBranch?: (name: string) => Promise<string | null> }
 
 @Component({
@@ -240,33 +243,23 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
       await cursor.load?.(locationSig)
       cursor.jumpToLatest?.()
 
-      // Where DCP is reachable (web shell), also freeze the promoted head as
-      // a named branch — "save those pushed changes". Drain the push queue
-      // first so every leaf is received before the branch is stamped.
-      // Bridge-absent (e.g. dev shell) → the local merge above still stands.
+      // If a sentinel bridge is ever there, also freeze the promoted head as
+      // a named branch. Nothing has assigned `__sentinelBridge` since the
+      // installer was deleted, so today this is a no-op; the local merge
+      // above is the whole act either way.
+      //
+      // This used to drain PushQueueService first, "so every leaf is received
+      // before the branch is stamped". That queue was the installer's push
+      // channel and is gone (`essentials/sharing/retired-push-pool.ts`); it
+      // never received anything, because the same missing bridge that skips
+      // the stamp also failed every push. Do not reach for another queue
+      // here — getting bytes to a node is its own gesture, not a rider on
+      // Save (write-conformance check 10).
       const bridge = (globalThis as { __sentinelBridge?: SentinelBridgeLike }).__sentinelBridge
-      if (bridge?.saveBranch) {
-        const pq = get('@diamondcoreprocessor.com/PushQueueService') as PushQueueLike | undefined
-        if (pq) {
-          await pq.drain?.()
-          await this.#waitForPushDrain(pq)
-        }
-        await bridge.saveBranch('')   // '' → DCP auto-names save-N
-      }
+      if (bridge?.saveBranch) await bridge.saveBranch('')   // '' → auto-named save-N
     } finally {
       this.saving.set(false)
     }
   }
 
-  /** Poll the push queue until nothing is pending (or the timeout fires).
-   *  Bounded so a stalled/absent host can't hang Save. */
-  readonly #waitForPushDrain = async (pq: PushQueueLike, timeoutMs = 8000): Promise<void> => {
-    const start = Date.now()
-    for (;;) {
-      const pending = (await pq.pending?.()) ?? []
-      if (pending.length === 0) return
-      if (Date.now() - start > timeoutMs) return
-      await new Promise(resolve => setTimeout(resolve, 200))
-    }
-  }
 }

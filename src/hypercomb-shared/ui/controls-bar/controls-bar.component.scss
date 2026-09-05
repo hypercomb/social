@@ -54,7 +54,7 @@ $actions-corner: 12rem;
   border: 1px solid color-mix(in srgb, var(--md-outline-variant) 55%, transparent);
   border-radius: var(--hc-radius-floating, 4px);
   background: color-mix(in srgb, var(--md-surface-c-low) 82%, transparent);
-  color: color-mix(in srgb, var(--md-on-surface) 62%, transparent);
+  color: var(--md-on-surface-faint);
   font-family: var(--hc-mono);
   font-size: 0.64rem;
   line-height: 1;
@@ -1800,7 +1800,7 @@ $actions-corner: 12rem;
   font-size: 0.62rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--md-on-surface) 55%, transparent);
+  color: var(--md-on-surface-faint);
 }
 
 .tour-row {
@@ -1847,7 +1847,7 @@ $actions-corner: 12rem;
   background: transparent;
   border: 0;
   border-radius: 4px;
-  color: color-mix(in srgb, var(--md-on-surface) 55%, transparent);
+  color: var(--md-on-surface-faint);
   cursor: pointer;
 
   .mat-sym { font-size: 1.05rem; }
@@ -1884,7 +1884,7 @@ $actions-corner: 12rem;
   display: block;
   font-family: var(--hc-mono);
   font-size: 0.62rem;
-  color: color-mix(in srgb, var(--md-on-surface) 50%, transparent);
+  color: var(--md-on-surface-faint);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1918,7 +1918,7 @@ $actions-corner: 12rem;
   border-top: 1px solid var(--md-outline-variant);
   border-radius: 0 0 4px 4px;
   color: color-mix(in srgb, var(--md-on-surface) 75%, transparent);
-  .mat-sym { color: color-mix(in srgb, var(--md-on-surface) 55%, transparent); }
+  .mat-sym { color: var(--md-on-surface-faint); }
   &:hover { color: var(--md-on-surface); }
 }
 

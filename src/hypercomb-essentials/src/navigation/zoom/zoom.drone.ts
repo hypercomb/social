@@ -382,7 +382,7 @@ export class ZoomDrone extends Drone {
     coordinator: '@diamondcoreprocessor.com/TouchGestureCoordinator',
     touchPan: '@diamondcoreprocessor.com/TouchPanInput',
   }
-  protected override listens = ['render:host-ready', 'editor:mode', 'keymap:invoke', 'render:geometry-changed', 'render:cell-count', 'frame:changed']
+  protected override listens = ['render:host-ready', 'editor:mode', 'keymap:invoke', 'render:geometry-changed', 'render:cell-count', 'frame:changed', 'move:drag']
 
   #effectsRegistered = false
   #hexGeo: HexGeometry = DEFAULT_HEX_GEOMETRY
@@ -390,6 +390,11 @@ export class ZoomDrone extends Drone {
   // zoomToFit reads it to give a LONE tile extra breathing room — a
   // single tile otherwise fits edge-to-edge and looks far too big.
   #cellCount = 0
+
+  // A tile is in hand (MoveDrone's `move:drag`). While it is, the viewport is
+  // the drag's frame of reference and must hold still — see the guard at the
+  // top of zoomToFit for why a fit mid-drag goes wrong.
+  #tileDragActive = false
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
@@ -405,6 +410,12 @@ export class ZoomDrone extends Drone {
 
     this.onEffect<HexGeometry>('render:geometry-changed', (geo) => {
       this.#hexGeo = geo
+    })
+
+    // Last-value replay means a fit asked for immediately after a drag ends
+    // still reads the settled value.
+    this.onEffect<{ active: boolean }>('move:drag', ({ active }) => {
+      this.#tileDragActive = active
     })
 
     // Track the current layer's tile count so zoomToFit can tell a lone
@@ -658,8 +669,11 @@ export class ZoomDrone extends Drone {
       Math.round(screen?.width ?? 0), Math.round(screen?.height ?? 0),
     ].join(':')
     if (key === this.#framedFitKey) return
-    this.#framedFitKey = key
-    this.zoomToFit(false, 'auto')
+    // Stamp the key only if the fit actually RAN. zoomToFit can refuse (a
+    // drag in hand, a degenerate safe area), and recording the key anyway
+    // would mark this frame as fitted forever — the retry on the next render
+    // would see an unchanged key and skip.
+    if (this.zoomToFit(false, 'auto')) this.#framedFitKey = key
   }
 
   /**
@@ -681,6 +695,18 @@ export class ZoomDrone extends Drone {
     hold?: 'none' | 'scale' | 'position' | 'both',
   ): boolean => {
     if (!this.renderContainer || !this.renderer || !this.app) return false
+
+    // A TILE IN HAND OWNS THE VIEWPORT. While a drag is in flight the pointer
+    // is the only thing moving; a fit would slide and rescale the world under
+    // a stationary cursor over 200ms, and no pointermove fires to re-derive
+    // the hovered hex — so the held tile detaches from the cursor and drops
+    // somewhere the participant never pointed at. Worse, the fit measures the
+    // content layer as the PREVIEW arranges it, so it frames an order that
+    // stops existing the moment the drag commits. Refuse outright rather than
+    // deferring: a fit that lands after the release is a jump nobody asked
+    // for. Every explicit path (the fit button, `0`/`r`, /fit, the quick menu)
+    // already handles a false return, so pressing again after the drop works.
+    if (this.#tileDragActive) return false
 
     const resolvedHold = hold ?? this.fitHold?.() ?? 'none'
     // Both axes pinned — the viewport is fully the user's; nothing to fit.

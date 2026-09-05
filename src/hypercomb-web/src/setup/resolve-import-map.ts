@@ -1,7 +1,7 @@
 // hypercomb-web/src/setup/resolve-import-map.ts
 
 import { environment } from '@hypercomb/shared/environments/environment'
-import { Store } from '@hypercomb/shared/core/store'
+import { Store } from '@hypercomb/runtime/store'
 import { CORE_RUNTIME_URL } from '@hypercomb/runtime/core-surface'
 
 export type ResolvedImports = Record<string, string>

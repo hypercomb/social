@@ -42,8 +42,8 @@ import { bundledCatalogs, bundledLocales } from '@hypercomb/shared/core/bundled-
 // ALSO the app's `polyfills` entry in angular.json, which is what actually
 // guarantees it runs before the shared modules that call the bare `register`
 // global at module scope. This line documents the dependency and is a no-op
-// the second time — see the header of shared/core/ioc.web.ts.
-import '@hypercomb/shared/core/ioc.web'
+// the second time — see the header of hypercomb-runtime/src/ioc.web.ts.
+import '@hypercomb/runtime/ioc.web'
 // The escape cascade's door. This used to ride into every shell inside
 // runtime-initializer; the runtime package cannot reach hypercomb-shared/ui,
 // so the shell that wants tool windows imports them itself.
@@ -63,8 +63,8 @@ import '@hypercomb/shared/core/invite-capture'
 // `/header` slash command (auto-wires via ioc.onRegister).
 import '@hypercomb/shared/core/header-size'
 import { bootstrapApplication } from '@angular/platform-browser'
-import { PACKED_STORE_MEANING } from '@hypercomb/shared/core/packed-store-engine'
-import { packedStoreBlocksBoot } from '@hypercomb/shared/core/packed-store-gate'
+import { PACKED_STORE_MEANING } from '@hypercomb/runtime/packed-store-engine'
+import { packedStoreBlocksBoot } from '@hypercomb/runtime/packed-store-gate'
 import { installScaleProbe } from '@hypercomb/shared/core/packed-store-scale-probe'
 import { EffectBus, SignatureStore } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared'
@@ -74,7 +74,7 @@ import {
   IconProviderRegistry,
   protectOriginStorage,
 } from '@hypercomb/shared/core'
-import { postCommunityDomainsToServiceWorker } from '@hypercomb/shared/core/sw-domains'
+import { postCommunityDomainsToServiceWorker } from '@hypercomb/runtime/sw-domains'
 import { appConfig } from './app/app.config'
 import { App } from './app/app'
 

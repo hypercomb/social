@@ -94,7 +94,7 @@ the census had not:**
   session), the committer's create-reset branch, the tile-art and tutorial
   addresses, the orphaned participant base, and the fourth registry pointer —
   33 of 57 closed (one not
-  reproduced; the five localStorage stores are an owner decision; the eager
+  reproduced; four of the five localStorage stores are document pools and the fifth is a recorded decision; the eager
   pool opens are deferred to the colon migration). Nothing at wide radius
   remains.
 
@@ -199,6 +199,42 @@ subKey, sig)` emitting a sig-named JSON member under a colon meaning
   `HIVE_FORMAT_ROOT_KEY` is settable over the bridge with no gesture, for the
   same reason `vocabulary:hive` was. *Fix:* add it — better, invert to an
   allow-list of `install:*`.
+- `push-queue.service.ts:129` `PushQueueService` — **the fifth hole, found
+  2026-09-04, and the only `content:wrote` subscriber with no gate of any
+  kind**: no opt-in, no filter on kind, provenance or authorship. It wrote a
+  full byte copy of every committed sig into `sign('push')/{sig}.{kind}` for
+  the DCP installer to drain. Two faults, not one. (a) LOCAL, happening on
+  every commit: nothing in the tree read, pruned or collected that pool, so
+  content duplicated on disk without bound — `RepushQueenBee` drives
+  HostSyncService's separate `host-push`/`host-receipts` meanings, not this
+  one. (b) LATENT, network: `#pushAndReceipt` returned false immediately
+  because `globalThis.__sentinelBridge` is read at nine sites and assigned at
+  none — the sole assigner went with the installer in `fc3696c3b`
+  (2026-08-30). `drain()` was kicked on every enqueue, at module load and on
+  a 20 s timer, so the whole accumulated backlog would have gone out the
+  moment any bridge appeared.
+
+**FIXED 2026-09-04 — the fifth is DELETED, not gated.** Gating it would have
+been porting an install path: the service is the installer's push channel and
+the installer is gone, while `HostSyncService` already does the same job on
+the same trigger behind `#anyEnabled()`. `push-queue.service.ts` is removed,
+with its two dead bridge-gated callers (`snapshot.queen.ts` `#pushClosure`,
+`edit-actions.component.ts`'s save-branch drain) — a snapshot and a Save are
+both plainly local now, and neither claims otherwise in its toast.
+`sharing/retired-push-pool.ts` collects what already accumulated: per entry,
+confirm the canonical copy at its content-addressed home holds the same
+bytes, then remove the duplicate — an entry that cannot be vouched for is
+KEPT and counted, because it may hold the last surviving copy of its sig. It
+probes OPFS directly rather than through Store, whose content reads all call
+`#stageToHost`; a collector built on those would publish every sig it swept.
+`'push'` and `'receipts'` STAY in `BARE_WORD_POOL_MEANINGS` until no
+participant can still be carrying one of those dirs — the registry is what
+stops a root walker taking a pool for a lineage sigbag and pruning it.
+Ratcheted in `sharing/publish-gesture.spec.ts`, which also freezes the census
+of every file whose code names `content:wrote` at all — by the literal, not
+by a subscribe shape, so a handler registered through a `listens` array or a
+loop over effect names cannot slip past. Behaviour in
+`sharing/retired-push-pool.spec.ts`.
 
 **Check 5 on the canonical write surface.** *FIXED 2026-09-04 — the machine carries scalar slots verbatim (a list op on one replaces it, explicitly); the committer's `update` passes non-array values through as `scalars` instead of discarding them. Tests in `layer-machine.spec.ts`.*
 `layer-machine.ts:121` `fromLayer`
@@ -289,7 +325,7 @@ the siblings already have.
   file not routed through `hardDeleteVetoFor`. *Fix:* one line, same guard as
   its neighbours.
 - *FIXED 2026-09-04 — deleted with `memoize.ts` and `expand.ts`; nothing imported any of the three.* `projection.ts:42` — a memo keyed by a *name* in localStorage; checks 6 and 7.
-- *OWNER DECISION, 2026-09-04: each of these is a feature's state store moving into a pool — five designs, not five fixes. Left open on purpose.* **Participant state outside the graph — check 1.** `tile-properties.ts:284`
+- *FIXED 2026-09-04, four of five — the saved locations, pinned entrances, recent portals + home mark, and icon overrides are DOCUMENT pools (`locations:saved`, `entrances:pinned`, `portals:recent`, `icons:overrides`) behind `hypercomb-shared/core/participant-document.ts`: a synchronous value, hydrated from the pool once the Store is ready, written through, the localStorage keys read once as a fallback and never written again. The pin store's path-named keys (check 4) are gone with it — the route is data inside one record now. THE TILE-PROPS INDEX STAYS A DEVICE CACHE, BY DECISION: it is a derived cache of the layer's `properties` slot, written on the commit path and keyed by LOCATION, so a pool would make it exactly the load-bearing commit-path derived cache optimize-phase.md forbids. Its retirement is the peek cache (`peekCurrentLayer(locSig)` already holds the slot), which runs through show-cell — held by another session.* **Participant state outside the graph — check 1.** `tile-properties.ts:284`
   (`hc:tile-props-index`), `saved-locations-store.ts:49`,
   `pinned-entrances.store.ts:178` (keyed by a *path*, check 4 too),
   `recent-portals.store.ts:191`, `icon-override.store.ts:75`. Each is a

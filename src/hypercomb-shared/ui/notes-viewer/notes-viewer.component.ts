@@ -23,7 +23,7 @@
 // Editing still delegates to the command line in capture mode. This surface
 // reads and marks; it never grows its own text input.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, computed, effect, signal, type OnDestroy } from '@angular/core'
 import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'

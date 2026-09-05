@@ -16,7 +16,7 @@
 // names are off; the panel falls back to a truncated pubkey — a neutral id that
 // still distinguishes peers without revealing who.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'

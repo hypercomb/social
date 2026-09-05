@@ -41,7 +41,7 @@
 // (all sticky, so opening mid-run hydrates correctly) and emits intents back.
 // Every write is an effect, never a layer touch from here.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import {
   ChangeDetectorRef, Component, computed, inject, signal, type OnDestroy,
 } from '@angular/core'

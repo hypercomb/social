@@ -23,7 +23,7 @@
 
 import type { UsageRanker } from '@hypercomb/core'
 import type { Lineage } from './lineage'
-import type { Store } from './store'
+import type { Store } from '@hypercomb/runtime/store'
 
 // Pool meaning carries a colon so it can never collide with a location's
 // lineage bag (lineageKey folds every non-alphanumeric to '-', so a ':' is

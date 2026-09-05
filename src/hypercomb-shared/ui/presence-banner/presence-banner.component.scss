@@ -47,9 +47,9 @@
   align-items: center;
   gap: 0.3rem;
   padding: 0.22rem 0.4rem;
-  background: color-mix(in srgb, var(--md-surface-c-low, #1a1a1a) 72%, transparent);
+  background: rgba(var(--hc-panel-pane), 0.86);
   backdrop-filter: blur(8px);
-  border: 1px solid rgba(245, 245, 245, 0.08);
+  border: 1px solid var(--hc-window-line);
   border-radius: 999px;
   pointer-events: auto;
   max-width: 68vw;
@@ -61,6 +61,21 @@
 }
 
 .badge {
+  // HSL's equal lightness is not equal perceived luminance: saturated blue
+  // at 64% misses AA on a dark pane while yellow misses it on a light one.
+  // First pull every hue 30% toward the pane's opposite ink, then apply the
+  // bright-theme deepening knob. Sampling the full 0-359 hue wheel keeps the
+  // worst pairing above 4.5:1 on all five theme panes.
+  --presence-readable: color-mix(
+    in srgb,
+    var(--presence-identity, var(--md-primary)) 70%,
+    rgb(var(--hc-panel-ink))
+  );
+  --presence-ink: color-mix(
+    in srgb,
+    var(--presence-readable),
+    rgb(var(--hc-panel-ink)) var(--hc-deepen)
+  );
   appearance: none;
   flex: 0 0 auto;
   display: inline-flex;
@@ -69,8 +84,8 @@
   width: 1.85rem;
   height: 1.85rem;
   padding: 0;
-  background: color-mix(in srgb, var(--md-surface-c-low, #101010) 85%, transparent);
-  border: 1px solid rgba(245, 245, 245, 0.14);
+  background: rgba(var(--hc-panel-pane), 0.94);
+  border: 1px solid var(--hc-window-line-firm);
   border-radius: 50%;
   // Colour + glow are injected inline per identity — the fluorescent
   // hue lives on the text, not the chip, so the strip stays cold.
@@ -80,25 +95,29 @@
   letter-spacing: 0.03em;
   line-height: 1;
   cursor: pointer;
-  transition: transform 140ms ease, border-color 140ms ease, filter 140ms ease;
+  color: var(--presence-ink);
+  text-shadow:
+    0 0 6px color-mix(in srgb, var(--presence-ink) 70%, transparent),
+    0 0 2px color-mix(in srgb, var(--presence-ink) 85%, transparent);
+  transition: transform 140ms ease, border-color 140ms ease;
 
   &:hover {
-    filter: brightness(1.15);
     transform: translateY(-1px);
   }
 
   // Your own badge wears a faint ring in its own hue (border-color is
   // bound inline) so you can pick yourself out at a glance.
   &.self {
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+    border-color: var(--presence-ink);
+    box-shadow: 0 0 0 1px var(--hc-window-tint) inset;
   }
 
   // Unnamed self badge — the "set your name" affordance.
   &.add-name {
-    color: rgba(245, 245, 245, 0.5) !important;
+    color: var(--hc-window-ink-quiet) !important;
     text-shadow: none !important;
     border-style: dashed;
-    border-color: rgba(245, 245, 245, 0.28) !important;
+    border-color: var(--hc-window-line-firm) !important;
     font-weight: 400;
     font-size: 0.95rem;
   }
@@ -107,7 +126,8 @@
   // solid ring (border-color is bound inline) plus a faint fill, so the
   // selected set reads at a glance without any new glow.
   &.selected {
-    background: color-mix(in srgb, currentColor 16%, rgba(0, 0, 0, 0.6));
+    background: rgb(var(--hc-panel-pane));
+    border-color: var(--presence-ink);
     box-shadow: 0 0 0 1px currentColor inset;
   }
 }
@@ -117,11 +137,11 @@
   width: 8.5rem;
   height: 1.85rem;
   padding: 0 0.6rem;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--md-primary, #7eb6d6);
+  background: rgba(var(--hc-panel-pane), 0.96);
+  border: 1px solid var(--md-primary);
   border-radius: 999px;
   color: var(--hc-window-ink-loud);
-  caret-color: var(--md-primary, #7eb6d6);
+  caret-color: var(--md-primary);
   font-family: var(--hc-font);
   font-size: 0.72rem;
   letter-spacing: 0.02em;
@@ -141,11 +161,15 @@
   font-size: 0.7rem;
   cursor: pointer;
 
-  &:hover { color: var(--hc-window-ink-quiet); }
+  &:hover { color: var(--hc-window-ink-loud); }
 }
 
 .presence-caption {
   margin-top: 0.3rem;
+  padding: 0.18rem 0.45rem;
+  background: rgba(var(--hc-panel-pane), 0.92);
+  border: 1px solid var(--hc-window-line);
+  border-radius: 999px;
   color: var(--hc-window-ink-quiet);
   font-family: var(--hc-font);
   font-size: 0.68rem;
@@ -159,13 +183,13 @@
   margin-top: 0.4rem;
   min-width: 220px;
   max-width: 60vw;
-  background: color-mix(in srgb, var(--md-surface-c-low, #1a1a1a) 92%, transparent);
+  background: rgba(var(--hc-panel-pane), 0.96);
   backdrop-filter: blur(10px);
-  border: 1px solid rgba(245, 245, 245, 0.1);
+  border: 1px solid var(--hc-window-line);
   border-radius: var(--hc-radius-floating);
   padding: 0.35rem 0.25rem;
   pointer-events: auto;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 6px 20px rgba(var(--hc-panel-shadow), 0.4);
   animation: panel-fade-in 220ms ease-out;
 }
 
@@ -187,12 +211,12 @@
   transition: background 120ms ease;
 
   &:hover {
-    background: rgba(245, 245, 245, 0.04);
+    background: var(--hc-window-tint);
   }
 
   // Row of a filter-selected participant — quiet tint, no motion.
   &.selected {
-    background: rgba(245, 245, 245, 0.07);
+    background: var(--hc-window-tint-strong);
   }
 }
 
@@ -243,18 +267,19 @@
 
   &:hover {
     color: var(--hc-window-ink-plain);
-    background: rgba(245, 245, 245, 0.06);
+    background: var(--hc-window-tint-strong);
   }
 
   &.active {
-    color: var(--md-on-primary, #0a0a0a);
-    background: var(--md-primary, #7eb6d6);
-    border-color: var(--md-primary, #7eb6d6);
-    box-shadow: 0 0 5px rgba(126, 182, 214, 0.45);
+    color: var(--md-on-primary);
+    background: var(--md-primary);
+    border-color: var(--md-primary);
+    box-shadow: 0 0 5px color-mix(in srgb, var(--md-primary) 45%, transparent);
   }
 
   &.active:hover {
-    filter: brightness(1.08);
+    outline: 2px solid color-mix(in srgb, currentColor 28%, transparent);
+    outline-offset: 1px;
   }
 
   svg { display: block; }
@@ -263,9 +288,10 @@
 // Distinct hue for follow vs subscribe so the two toggles read as
 // different concepts at a glance even before the user learns them.
 .follow-toggle.active {
-  background: #6ec96e;
-  border-color: #6ec96e;
-  box-shadow: 0 0 5px rgba(110, 201, 110, 0.45);
+  color: var(--hc-status-ok);
+  background: var(--hc-window-tint);
+  border-color: color-mix(in srgb, var(--hc-status-ok) 72%, transparent);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--hc-status-ok) 42%, transparent);
 }
 
 // ── phone: the expanded panel is a sheet ──────────────

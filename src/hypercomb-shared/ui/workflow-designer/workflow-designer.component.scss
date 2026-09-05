@@ -302,7 +302,7 @@ $dim: #7f95a3;
   border-radius: 2px;
 
   &.needs {
-    color: $amber;
+    color: tw.ink($amber);
     border-color: rgba($amber, 0.45);
   }
 }

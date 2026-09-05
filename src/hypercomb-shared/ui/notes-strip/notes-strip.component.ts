@@ -16,7 +16,7 @@ import { CommandShellComponent } from '../command-shell/command-shell.component'
 import { HcDockedPanelDirective, type PanelSizeOwner } from '../docked-panel/hc-docked-panel.directive'
 import type { SettingRow } from '../docked-panel/panel-settings'
 import { type WindowSession, windowsParked } from '../window-session'
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { fromRuntime } from '../../core/from-runtime'
 import {
   NOTE_MARKS_IOC_KEY,

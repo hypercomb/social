@@ -10,7 +10,7 @@
 import type { Signal } from '@angular/core'
 import type { I18nProvider } from '@hypercomb/core'
 import { fromRuntime } from './from-runtime'
-import { LocalizationService } from './i18n.service'
+import { LocalizationService } from '@hypercomb/runtime/i18n.service'
 
 export function ti18n(
   key: string,

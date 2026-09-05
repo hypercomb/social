@@ -15,7 +15,7 @@
             "outputPath": "dist/hypercomb-dev",
             "index": "src/index.html",
             "browser": "src/main.ts",
-            "polyfills": ["@hypercomb/shared/core/ioc.web"],
+            "polyfills": ["@hypercomb/runtime/ioc.web"],
             "tsConfig": "tsconfig.app.json",
             "inlineStyleLanguage": "scss",
             "assets": [
@@ -44,7 +44,7 @@
             "allowedCommonJsDependencies": [
               "@xmldom/xmldom",
               "parse-svg-path",
-              "@hypercomb/shared/core/ioc.web"
+              "@hypercomb/runtime/ioc.web"
             ]
           },
           "configurations": {

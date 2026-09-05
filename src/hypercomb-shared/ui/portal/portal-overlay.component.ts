@@ -1,4 +1,4 @@
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { ChangeDetectorRef, Component, inject, type OnInit, type OnDestroy } from "@angular/core"
 import { DomSanitizer, type SafeResourceUrl } from "@angular/platform-browser"
 import { EffectBus } from '@hypercomb/core'

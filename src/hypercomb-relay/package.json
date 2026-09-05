@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node relay.js",
     "setup": "node setup.js",
-    "serve": "node relay.js --port 7777 --memory --content-dir ./content",
+    "serve": "node relay.js --port 7777 --memory --content-dir ./content --allow-private-sources",
     "test": "node --test *.test.js"
   },
   "dependencies": {

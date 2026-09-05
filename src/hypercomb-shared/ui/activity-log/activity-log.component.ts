@@ -1,7 +1,7 @@
 // hypercomb-shared/ui/activity-log/activity-log.component.ts
 // Minimal activity log — shows recent hive operations as auto-dismissing line items.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import {
   ApplicationRef,
   Component,

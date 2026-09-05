@@ -1,4 +1,4 @@
-import '@hypercomb/shared/core/ioc.web'
+import '@hypercomb/runtime/ioc.web'
 import { bootstrapApplication } from '@angular/platform-browser'
 import { SignatureStore } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared'

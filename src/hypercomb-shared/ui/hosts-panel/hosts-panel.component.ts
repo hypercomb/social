@@ -33,7 +33,7 @@
 // never a zero, because "no branches name this host" and "nobody has counted"
 // are different facts and only one of them is knowable here.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 // The SAME reader the shim uses on a cold boot. It lives in runtime precisely

@@ -24,7 +24,7 @@
 // only through window.ioc at runtime; row data arrives pre-computed on
 // `features:open` / `features:roster`.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, computed, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { onSelection } from '../../core/selection-context'

@@ -395,8 +395,8 @@ describe('the ledger keeps the run private', () => {
       error: 'nope',
     })
 
-    // `content:wrote` is the publication trigger — PushQueue subscribes with
-    // no kind filter and HostSync PUTs on the same signal. Every resource the
+    // `content:wrote` is the publication trigger — HostSync PUTs on that
+    // signal, with no filter on kind. Every resource the
     // ledger mints must suppress it, or a run's private working material is
     // enqueued for a host the participant never chose to show it to.
     expect(store.putOptions.length, 'request AND error were both stored').toBe(2)

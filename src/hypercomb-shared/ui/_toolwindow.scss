@@ -70,9 +70,9 @@
   --hc-window-accent: rgb(var(--acc));
   // Quiet, not faint. This is the identity used for a secondary label or a
   // resting glyph — it still has to be READ, so it steps down in presence and
-  // not off the contrast cliff. At 0.72 it measured under target on every
-  // bright pane; the visible difference between 0.88 and full is enough.
-  --hc-window-accent-quiet: rgba(var(--acc), 0.88);
+  // not off the contrast cliff. At 0.88 it still measured 4.35-4.40:1 on
+  // tinted bright-theme rows, so hierarchy comes from type size and weight.
+  --hc-window-accent-quiet: rgb(var(--acc));
   --hc-window-wash: rgba(var(--acc), 0.10);
   --hc-window-wash-strong: rgba(var(--acc), 0.20);
   --hc-window-edge: rgba(var(--acc), 0.28);
@@ -307,7 +307,7 @@ $header-action-gap: 0.25rem;
     min-width: $header-action-size;
     padding: 0;
     font-size: 1.125rem;
-    color: rgba(var(--hc-panel-ink), 0.62);
+    color: var(--hc-window-ink-faint);
 
     &:hover { color: var(--hc-panel-text); background-color: rgba(var(--hc-panel-ink), 0.075); }
   }

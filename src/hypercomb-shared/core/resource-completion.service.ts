@@ -1,6 +1,6 @@
 // hypercomb-shared/core/resource-completion.service.ts
 
-import type { ScriptPreloader } from './script-preloader'
+import type { ScriptPreloader } from '@hypercomb/runtime/script-preloader'
 
 export class ResourceCompletionService {
 

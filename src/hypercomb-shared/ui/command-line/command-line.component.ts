@@ -7,7 +7,7 @@ import { PinnedEntrancesComponent } from '../pinned-entrances/pinned-entrances.c
 import type { Lineage } from '../../core/lineage'
 import type { MovementService } from '../../core/movement.service'
 import type { Navigation } from '../../core/navigation'
-import type { ScriptPreloader } from '../../core/script-preloader'
+import type { ScriptPreloader } from '@hypercomb/runtime/script-preloader'
 import type { CellSuggestionProvider } from '../../core/cell-suggestion.provider'
 import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/core/completion-utility'
 import { fromRuntime } from '../../core/from-runtime'
@@ -20,6 +20,8 @@ import {
   type BehaviourCall, type CallValue,
   REMOTE_SUBMIT, canonicalVerbOf,
   type RemoteSubmitRequest, type RemoteSubmitOutcome, type RemoteSubmitAction,
+  admitMachineCall, spokenEntry, currentMachineGrant, type AdmissionEntry,
+  isReservedPoolWord,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { VoiceInputService } from '../../core/voice-input.service'
@@ -2297,63 +2299,39 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const spokenVerbs = reading?.actions.length
         ? reading.actions.map(action => action.command)
         : [canonicalVerbOf(trimmed)]
-      // WHAT A REMOTE CALLER MAY NOT SAY, read off the census rather than a
-      // list kept here. The four-name set this replaced (`remove, rm, delete,
-      // del`) was the same mistake as the retired CALLABLE_FORMS table: a
-      // second copy of a truth that lives elsewhere, and it had already
-      // drifted — `/cut` drops a child from its parent exactly as `/remove`
-      // does and was never on it.
+      // WHICH IS NOT DECIDED HERE ANY MORE. Deciding it here is how the four
+      // surfaces came to disagree in the first place — each door judging for
+      // itself, in the order the doors were written. The judgement lives in
+      // core's `machine-admission`, this door supplies only the two things a
+      // distant module cannot know: WHO is calling, and which census row the
+      // spoken word resolves to.
       //
-      // TWO REFUSALS, both resolved through `entries()` so an alias cannot
-      // walk around them (`rm` resolves to `remove`, and inherits its reach):
+      // `'operator'`, not `'model'`. The one production caller is the Claude
+      // bridge — a tool the participant started, on their own machine, with
+      // the receipts in front of them. Requiring a `machine` declaration here
+      // would refuse ~97 of ~109 behaviours and break the authoring tool this
+      // hive is built with. What an operator is protected from is a word it
+      // cannot answer for, not a word nobody anticipated.
+      // Resolution DOES stay here, because it differs by door on purpose: this
+      // one accepts the line a person would type, so it resolves participant
+      // aliases too (`rm` inherits `remove`'s reach rather than being absent
+      // from a list, which is how the retired four-name set was walked
+      // around). The model channel resolves primary names only, so no alias
+      // can redirect a canonical word.
       //
-      //   DESTRUCTIVE — the declared `machine.reach`. The typed path answers a
-      //   destructive word with a rendered confirmation; a remote caller has
-      //   nobody to press it, so it is refused and told why rather than
-      //   parking a choice on a screen no agent can see — or, for a leaf tile,
-      //   removing it with no dialog at all.
-      //
-      //   HIDDEN or PROTOTYPE — `slashHidden` is documented as "must be typed
-      //   in full on purpose", which is a HUMAN-typing assumption a machine
-      //   defeats for free. It is a discoverability flag being read as an
-      //   authorization one, and behind it sit `/flatten`, `/prune`, `/sweep`,
-      //   `/collapse-history` and `/consolidate-*` — `/flatten` being the verb
-      //   that once hard-deleted a pool it mistook for a lineage bag.
-      //
-      // This narrows the REMOTE door only. The keyboard is untouched, and the
-      // bridge stays wide for everything else, which is the standing position.
+      // EVERY VERB IN THE LINE IS JUDGED, and the FIRST refusal answers. A
+      // prose reading can carry several actions; admitting a prefix and
+      // refusing a tail would leave the hive half-changed with a refusal on
+      // the receipt.
       const census = (get('@diamondcoreprocessor.com/SlashBehaviourDrone') as {
-        entries?(): readonly {
-          name: string; aliases?: readonly string[]
-          hidden?: boolean; prototype?: boolean
-          machine?: { reach?: string }
-        }[]
+        entries?(): readonly AdmissionEntry[]
       } | undefined)?.entries?.() ?? []
-      const entryFor = (verb: string) => census.find(e =>
-        e.name.toLowerCase() === verb
-        || (e.aliases ?? []).some(alias => alias.toLowerCase() === verb))
-
-      const barred: string[] = []
-      const concealed: string[] = []
+      const grant = currentMachineGrant()
       for (const verb of spokenVerbs) {
         if (!verb) continue
-        const entry = entryFor(verb)
-        if (!entry) continue
-        if (entry.hidden || entry.prototype) concealed.push(verb)
-        else if (entry.machine?.reach === 'destructive') barred.push(verb)
-      }
-      if (concealed.length) {
-        settle({
-          kind: 'refused',
-          reason: `${[...new Set(concealed)].map(verb => `/${verb}`).join(', ')} is not offered to a caller that is not typing it`,
-        })
-        return
-      }
-      if (barred.length) {
-        settle({
-          kind: 'refused',
-          reason: `${[...new Set(barred)].map(verb => `/${verb}`).join(', ')} needs a person to confirm it`,
-        })
+        const verdict = admitMachineCall(verb, spokenEntry(verb, census), 'operator', grant)
+        if (verdict.admit) continue
+        settle({ kind: 'refused', reason: verdict.reason })
         return
       }
 
@@ -4007,6 +3985,21 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const parts = raw.split('/').map(s => this.completions.normalize(s.trim())).filter(Boolean)
     if (parts.length === 0) {
       this.clear()
+      return
+    }
+
+    // THE RESERVED-NAME GATE (documentation/hypergraph-molecule-lineage.md,
+    // execution order step 5). A molecule named `bees` IS sign('bees') — the
+    // install's own bee pool — so the tile's atoms would gather inside the
+    // pool. Refused here, at the naming gesture, before anything is minted or
+    // painted; the typed name stays in the line so it can be changed. Every
+    // segment is a word, so every segment is checked.
+    const reserved = parts.find(part => isReservedPoolWord(part))
+    if (reserved) {
+      EffectBus.emit('activity:log', {
+        message: `"${reserved}" is a reserved word — it is the address of a system pool. Choose another name.`,
+        icon: 'error',
+      })
       return
     }
 

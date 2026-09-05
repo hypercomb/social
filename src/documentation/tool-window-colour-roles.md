@@ -113,6 +113,13 @@ genuinely dark field, and then even correct ink fails on it.
 **A modal scrim is not a ground.** `rgba(0, 0, 0, 0.6)` behind a dialog is
 correct in both themes; dimming the app is what black is for.
 
+**Ink on a scrim has its own rungs.** Text that sits on a fixed black
+substrate — a camera viewfinder, a crop mask, a label composited over
+imagery — cannot take the panel ink, which goes near-black under a bright
+look. It takes `--hc-window-on-scrim` (loud) or `--hc-window-on-scrim-quiet`
+(secondary), defined once beside the ink ladder. The light literal a
+component would otherwise write there is exactly what the ratchet refuses.
+
 ### Colour on purpose — the deepen knob
 
 A green "ready", an amber caution, a panel's decorative second hue. These

@@ -49,7 +49,7 @@
 // `render:tags` (show-cell's per-page aggregation); both are sticky on the bus
 // so a freshly-opened panel hydrates immediately.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { NgTemplateOutlet } from '@angular/common'
 import { ChangeDetectorRef, Component, computed, ElementRef, inject, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'

@@ -122,8 +122,8 @@ type StoreLike = {
 
 /** A run's requests are the participant's PRIVATE working material — note
  *  bodies, command lines, the layer a step proposed. `content:wrote` is the
- *  publication trigger: PushQueue subscribes to it with no kind filter, and
- *  HostSync PUTs on the same signal once a public host is configured. Minting
+ *  publication trigger: HostSync PUTs on that signal once a public host is
+ *  configured, with no filter on kind. Minting
  *  these resources loudly would enqueue every recorded request for a host the
  *  participant never chose to show them to. So the ledger writes SILENTLY,
  *  the same way the store's own cache-fill writes do. This is not an

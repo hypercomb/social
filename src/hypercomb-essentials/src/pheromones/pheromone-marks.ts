@@ -59,8 +59,23 @@ export type MarkTarget = {
 
 /** In-memory record cache, target sig → sorted marks. An entry mirrors the
  *  pool exactly (absence = no record); invalidated only by this module's own
- *  writes, which are the only sanctioned writers. */
+ *  writes, which are the only sanctioned writers.
+ *
+ *  AN ENTRY IS ONLY EVER AN ANSWER. Nothing here is written for a read that
+ *  could not reach the pool — see `readFromPool`. That rule is what makes the
+ *  cache permanent-by-design safe: a permanent cache of a failure is a wrong
+ *  answer nothing can ever correct. */
 const cache = new Map<string, readonly string[]>()
+
+/** The shared "no marks" value handed back for a read that did NOT land. It is
+ *  deliberately not put in the cache. */
+const NONE: readonly string[] = Object.freeze([])
+
+/** Did this rejection mean "the member is not there"? That is an ANSWER — the
+ *  participant has not marked these bytes. Every other rejection means the read
+ *  failed, which is not. */
+const isAbsent = (err: unknown): boolean =>
+  !!err && typeof err === 'object' && (err as { name?: unknown }).name === 'NotFoundError'
 
 /**
  * THE MARKS ALREADY IN HAND — synchronous, and `undefined` when this sig has
@@ -77,24 +92,85 @@ export function sigMarksKnown(sig: string): readonly string[] | undefined {
   return cache.get(sig.toLowerCase())
 }
 
-async function readRecord(sig: string): Promise<readonly string[]> {
-  const known = cache.get(sig)
-  if (known) return known
-  let marks: string[] = []
+/**
+ * ONE READ, AND WHETHER IT LANDED.
+ *
+ * This separation is the whole fix. The old body wrapped everything in one
+ * `try` and cached the result unconditionally, so THREE outcomes collapsed
+ * into one permanent `[]`:
+ *
+ *   the member is absent          — an answer, and the common one
+ *   the read threw                — NOT an answer
+ *   `store()` was undefined       — NOT an answer
+ *
+ * Only the first is evidence. Caching the other two latched "no marks" onto a
+ * signature for the life of the tab, and since `readRecord` returns early on a
+ * cache hit, nothing ever re-read it. That fails OPEN on the DROP half: a
+ * signature the participant excluded was admitted forever because one read
+ * raced the Store into IoC. (KEEP fails safe — an empty mark list is admitted
+ * by `unknown is not absent` — so the damage was one-sided, on exactly the
+ * half whose only job is to refuse.)
+ *
+ * It became reachable when the intake gate started kicking this read at first
+ * sight of a peer signature: the earliest, least settled moment in a session,
+ * which is precisely when the Store is most likely to be missing.
+ */
+async function readFromPool(sig: string): Promise<{ landed: boolean; marks: string[] }> {
+  const st = store()
+  // THE RACE THE GATE OPENED. No Store in IoC yet is not "no marks".
+  if (!st) return { landed: false, marks: [] }
+
+  let pool: FileSystemDirectoryHandle | null
   try {
     // READ-ONLY OPEN. `getPool` creates, so consulting the marks of one
     // stranger's signature used to mint `sign('pheromones:content')` on a
     // hive that has never marked anything — a directory claiming a feature
     // the participant does not use, in a root every walker enumerates.
-    const st = store()
-    const pool = st ? await (st.openPool?.(MARKS_MEANING) ?? st.getPool(MARKS_MEANING)) : null
-    if (pool) {
-      const handle = await pool.getFileHandle(sig, { create: false })
-      const parsed = JSON.parse(await (await handle.getFile()).text()) as { marks?: unknown }
-      marks = normalizeTags(parsed?.marks)
-    }
-  } catch { /* absent record = no marks — the normal case */ }
-  const frozen = Object.freeze(marks)
+    pool = await (st.openPool?.(MARKS_MEANING) ?? st.getPool(MARKS_MEANING))
+  } catch { return { landed: false, marks: [] } }
+
+  // NO POOL IS AN ANSWER. `openPool` does not create, so its absence means this
+  // participant has never marked anything and no record can exist. Treating it
+  // as a failure would make every gate call on a never-marked hive — the common
+  // case — re-open a directory that will never be there.
+  //
+  // (`Store.openPool` does fold a genuinely unreadable root into the same null;
+  // that conflation is one level down and noted on `openPool` itself. A hive
+  // whose root cannot be opened at all has failed harder than a mark cache.)
+  if (!pool) return { landed: true, marks: [] }
+
+  let handle: FileSystemFileHandle
+  try {
+    handle = await pool.getFileHandle(sig, { create: false })
+  } catch (err) {
+    // Absent member = unmarked bytes, and that IS the answer. Anything else —
+    // a torn handle, a quota error — is the pool refusing to be read.
+    return isAbsent(err) ? { landed: true, marks: [] } : { landed: false, marks: [] }
+  }
+
+  try {
+    const parsed = JSON.parse(await (await handle.getFile()).text()) as { marks?: unknown }
+    return { landed: true, marks: normalizeTags(parsed?.marks) }
+  } catch {
+    // The member exists but would not read or parse. Deliberately NOT an
+    // answer: "there is a record here and I could not see it" must not resolve
+    // to "there are no marks here", which is the fail-open direction. The cost
+    // of getting this wrong is a refusal that silently stops refusing; the cost
+    // of retrying is one read per commit on a corrupt record that should not
+    // exist, since `writeRecord` is the only writer and always writes JSON.
+    return { landed: false, marks: [] }
+  }
+}
+
+async function readRecord(sig: string): Promise<readonly string[]> {
+  const known = cache.get(sig)
+  if (known) return known
+  const read = await readFromPool(sig)
+  // A READ THAT DID NOT LAND IS NOT AN ANSWER, so it is not remembered as one.
+  // The caller gets "no marks" for now — intake must never break on a failed
+  // read — and the next caller asks again.
+  if (!read.landed) return NONE
+  const frozen = Object.freeze(read.marks)
   cache.set(sig, frozen)
   return frozen
 }

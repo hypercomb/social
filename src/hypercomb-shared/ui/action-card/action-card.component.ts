@@ -13,7 +13,7 @@
 // Nothing else. Pins are page-scoped: they belong to the launcher page and
 // re-show when you come back to it.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component } from '@angular/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { PinnableHoverBase } from '../pinnable/pinnable-hover.base'

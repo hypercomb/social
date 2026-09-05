@@ -17,11 +17,14 @@ vi.mock('@hypercomb/shared/core', () => ({
 }))
 
 // The DEEP specifier is a different module to vitest, and the mock above does
-// not cover it: resolve-import-map imports `@hypercomb/shared/core/store`,
-// whose module scope calls the `register` global that only ioc.web installs in
-// a browser. Without this the whole spec file fails to load — a suite that
+// not cover it: resolve-import-map imports `@hypercomb/runtime/store`, whose
+// module scope calls the `register` global that only ioc.web installs in a
+// browser. Without this the whole spec file fails to load — a suite that
 // reports "0 tests" rather than a failure, which is how it went unnoticed.
-vi.mock('@hypercomb/shared/core/store', () => ({
+// The specifier must track the real import: when it moved off
+// `@hypercomb/shared/core/store` this mock stopped matching and the suite
+// went silent again, exactly as described above.
+vi.mock('@hypercomb/runtime/store', () => ({
   Store: class Store {},
 }))
 

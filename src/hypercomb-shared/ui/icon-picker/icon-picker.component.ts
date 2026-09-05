@@ -10,7 +10,7 @@
 // click-to-choose UX, self-contained as a chooser. A canvas-integrated Pixi
 // version could replace this later behind the same `icon:pick-request` effect.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, OnDestroy, computed, signal } from '@angular/core'
 import {
   EffectBus,

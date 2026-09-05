@@ -57,7 +57,7 @@
 // window renders `template:state` (sticky, so opening mid-session hydrates)
 // and emits intents back. Every write is an effect, never a layer touch.
 
-import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { NgTemplateOutlet } from '@angular/common'
 import {
   Component, ElementRef, computed, effect, signal, untracked, viewChild,

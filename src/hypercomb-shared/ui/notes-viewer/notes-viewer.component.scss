@@ -239,7 +239,7 @@ $hex: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
 .viewer-rail-count {
   flex: 0 0 auto;
   font-size: 0.66rem;
-  color: color-mix(in srgb, var(--md-on-surface) 45%, transparent);
+  color: var(--hc-window-ink-quiet);
 }
 
 .viewer-main {
@@ -266,7 +266,7 @@ $hex: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
   font-size: 0.66rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--md-on-surface) 42%, transparent);
+  color: var(--hc-window-ink-quiet);
   margin-bottom: 4px;
 }
 
@@ -312,7 +312,7 @@ $hex: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
   background: transparent;
   border: 0;
   border-radius: 50%;
-  color: color-mix(in srgb, var(--md-on-surface) 55%, transparent);
+  color: var(--hc-window-ink-quiet);
   font: inherit;
   line-height: 1;
   cursor: pointer;
@@ -325,7 +325,7 @@ $hex: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
 
 .viewer-tags-hint {
   font-size: 0.66rem;
-  color: color-mix(in srgb, var(--md-on-surface) 34%, transparent);
+  color: var(--hc-window-ink-quiet);
 }
 
 // ── The cycle ───────────────────────────────────────────────
@@ -367,7 +367,7 @@ $hex: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
   text-align: center;
   font-size: 0.7rem;
   letter-spacing: 0.05em;
-  color: color-mix(in srgb, var(--md-on-surface) 52%, transparent);
+  color: var(--hc-window-ink-quiet);
 }
 
 // ── The outline ─────────────────────────────────────────────
