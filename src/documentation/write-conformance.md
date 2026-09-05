@@ -54,8 +54,12 @@ the census had not:**
   mismatch (`contentRefused`); the spec's content fixture carries its real
   signature.*
 - `publish-branch.ts` step 1 — `enablePublicHost()` unconditionally, even over
-  a prior explicit opt-out (check 10). **Owner question:** is a publish the
-  gesture that grants the standing public host?
+  a prior explicit opt-out (check 10). *Decided and fixed 2026-09-04: a
+  publish is one act — bytes to the branch's AVAILABLE PUBLISHED NODES (its
+  host marks, else the participant's standing targets as they already are),
+  then the index. It names those nodes to host-sync for this act
+  (`addPublishNodes`) and never flips a standing switch. No node named, or
+  none answering, is a `no-host` stop with its reason.*
 - `packed-collect.ts` — the collector the census actually cited for the
   four-hat bug still credits every pool member's name and bytes with no
   pool-kind gate; under the packed store the reader fix does not reach it.
@@ -272,7 +276,7 @@ the siblings already have.
   checks 3 and 4. *Fix:* derive the location from `sign(bodySig)`.
 - *FIXED 2026-09-04 — the member is `moleculeAddress(name)`; the lowercased name is a read-fallback.* `tile-art.ts:107` — the pool key is `name.trim().toLowerCase()`, not an
   address. *Fix:* `moleculeAddress(name)`.
-- `notes.drone.ts:1008` `#writeNoteLayer` — **the Life Primitive and the
+- *2026-09-04 — the facet write landed alongside (`notes/notes-facet.ts` → `molecule/facet-succession.ts`, the first facet writer): envelopes with relation/root/slot, a succession atom, a signed head per author bucket at `sign('notes:' + moleculeAddress(name))`. Note atoms unchanged; the slot still written and read. The adjudication had already reclassified this site legacy-conforming.* `notes.drone.ts:1008` `#writeNoteLayer` — **the Life Primitive and the
   molecule model have drifted apart here.** Every *layer's* artifact references
   are healed into meta envelopes; a note's children are put raw. *Fix:* map
   each child through `store.ensureArtifactMeta('resource', childSig, {relation:

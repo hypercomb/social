@@ -1,4 +1,4 @@
-// hypercomb-shared/core/install-monitor.ts
+// hypercomb-runtime/src/install-monitor.ts
 //
 // Tiny pub-sub for the background install/sync state.
 // Listens on EffectBus 'install:state' events and exposes a reactive state

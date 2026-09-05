@@ -155,6 +155,51 @@ to 91s, 84s of it spoken. That is the shape to hold when a line is rewritten: a
 line much longer than its scene does not stretch the voice, it slows the
 drawing, and there is no floor on how slow it may get.
 
+## Any narrated film as an MP4
+
+`film.cjs` turns a built deliverable into a video, for anywhere that will not
+run a page — a feed, a chat, a slide.
+
+```bash
+node film.cjs deepseek-comparison        # → posts/deepseek-comparison.mp4 + .srt
+node film.cjs ecosystem-bloom            # any narrated deliverable, same way
+node film.cjs deepseek-comparison --keep # reuse the frames already drawn
+node film.cjs deepseek-comparison --max 45   # size ceiling in MB (default 9.4)
+```
+
+It re-voices nothing and re-times nothing. The deliverable already IS the film:
+the picture, the clips as inlined data uris, and the second each line lands at.
+`film.cjs` reads all three back out of the page, so if the MP4 and the page ever
+disagree, the bug is in `film.cjs` and nowhere else.
+
+**Frame-exact, not a screen recording.** The stage owns an export transport —
+dispatch `data-om-seek-to-time-frame` with `{time, sync: true}` on the
+exportable root and it commits that instant synchronously, so the screenshot
+that follows is the composition AT that second. A frame is never "whatever the
+browser managed to paint in 33ms": a slow machine makes the render take longer
+instead of making the film stutter. 90s at 30fps is ~2,700 frames, about six
+minutes.
+
+The default 9.4 MB ceiling is not a quality opinion — the browser-extension
+upload path these get posted through caps a file at 10 MB. The encode starts at
+CRF 19 and only walks up if it overshoots; flat vector and type compress far
+better than footage, so the first try usually ships. Raise it with `--max` when
+the destination is not that path.
+
+Frames and clips land in `full/frames/<name>/` and `full/clips/<name>/` (already
+gitignored), wiped on each run so a shorter re-cut cannot inherit the old tail.
+
+**It counts the frames back out of the file it wrote**, and fails the build if
+that number is not the number it drew. This is not paranoia — it is the bug it
+was written for. `amix` ends at the last clip and ffmpeg's `-t` is a ceiling and
+never a floor, so the voice track came out as long as the *narration*; `-shortest`
+then ended the film at the last syllable and threw away everything the
+composition held after it. Silently: exit 0, no warning, a perfectly valid MP4,
+and the summary printing the truncated length as if it were right. It cost this
+film 14 frames and would have taken 2.75s — the entire closing beat — off
+`ecosystem-bloom`. The track is now padded to the film's length, so `-shortest`
+has nothing left to cut; the count is what keeps it honest.
+
 ## The directory of hives
 
 hypercomb.com is a wildcard host: publishing a creation named `susan` makes

@@ -1,4 +1,4 @@
-// hypercomb-web/src/app/core/dependency-loader.ts
+// hypercomb-runtime/src/dependency-loader.ts
 
 import { EffectBus } from '@hypercomb/core'
 import { Store } from './store'

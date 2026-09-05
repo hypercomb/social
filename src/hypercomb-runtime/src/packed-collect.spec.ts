@@ -1,4 +1,4 @@
-// hypercomb-shared/core/packed-collect.spec.ts
+// hypercomb-runtime/src/packed-collect.spec.ts
 //
 // The collector's contract. Most of these tests exist to prove what it does
 // NOT collect — a garbage collector that sweeps one live layer is worse than

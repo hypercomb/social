@@ -4,6 +4,7 @@ import { upgradeFromBundled, checkForUpdate, type BootStatus } from '../setup/en
 import { cacheImportMap } from '../setup/resolve-import-map'
 import { acquire, installedPackageSig, listHostPackages } from '@hypercomb/runtime/acquire'
 import { addHostZone, listHostZones } from '@hypercomb/runtime/host-zones'
+import { CoreMismatchError } from '@hypercomb/runtime/core-surface'
 import { nativeAvailable } from '@hypercomb/shared/core/native-filesystem'
 import { isTransientMode } from '@hypercomb/shared/core/view-mode.service'
 import { buildRevisionName } from '@hypercomb/core'
@@ -130,7 +131,16 @@ export class App implements AfterViewInit {
       }
     } catch (err) {
       console.error('[app] upgradeFromBundled failed', err)
-      EffectBus.emit('update:status', { phase: 'error', message: 'Update failed — nothing was adopted' })
+      // The package needs a core this shell does not serve (core-surface.ts).
+      // Nothing was touched; the fix is a newer shell, not another attempt.
+      const needsShell = err instanceof CoreMismatchError
+      const i18n = window.ioc?.get<{ t?: (key: string) => string }>('@hypercomb.social/I18n')
+      EffectBus.emit('update:status', {
+        phase: 'error',
+        message: needsShell
+          ? (i18n?.t?.('upgrade.needs-shell') ?? 'This update needs a newer Hypercomb — refresh the page first, then adopt again')
+          : 'Update failed — nothing was adopted',
+      })
       this.upgrading.set(false)
     }
   }

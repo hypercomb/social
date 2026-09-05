@@ -73,16 +73,62 @@ describe('startup render priority', () => {
     expect(BARRIER).toContain('setTimeout(release, frameMs)')
   })
 
-  it('does not mount, seed, or animate agent bees before the matching tile pass paints', () => {
+  it('keeps agent bees behind the paint barrier: deaf until pulsed, mounted once, seeded late', () => {
+    // WHAT THIS USED TO ASSERT, AND WHY IT DOESN'T ANY MORE. The bee drone
+    // once carried the gate itself: it watched `render:tiles-target`, tore its
+    // own ticker down (`#pauseForTileRender`), and mounted only when a
+    // `render:cell-count` arrived carrying that pass id or better. e5be06adc
+    // deleted all of it. The PER-NAVIGATION half is gone deliberately — bees
+    // now keep flying across a layer change, and there is nothing left in the
+    // drone that re-paints them against a pass verdict.
+    //
+    // The STARTUP half survived by moving UP: the drone never subscribes to
+    // anything until the processor pulses it, and the processor cannot reach
+    // it until the first-tile-paint barrier opens (asserted above). What
+    // follows is that mechanism — every step of it, so a change that puts the
+    // bees back on the boot path fails here rather than in a profile.
+
+    // The pass identity is still published. Its consumer today is
+    // SequenceCycleDrone (sequence/arrange-after-paint.spec.ts, which drives
+    // the effect synthetically) — so this is the only guard left that the
+    // renderer still emits it at all.
     expect(TILES).toContain("this.emitEffect('render:tiles-target', { locationKey, renderPassId })")
     expect(TILES).toContain('renderPassId: this.#tileRenderPassId')
-    expect(BEE).toContain("onEffect<{ locationKey?: string; renderPassId?: number }>('render:tiles-target'")
-    expect(BEE).toContain('this.#pauseForTileRender()')
-    expect(BEE).toContain('Number(payload?.renderPassId ?? -1) < target.renderPassId')
-    expect(BEE).toMatch(/if \(this\.#tilesPainted\) this\.#mount\(\)/)
-    expect(BEE).toMatch(/onEffect<\{ settled\?: boolean; locationKey\?: string; renderPassId\?: number \}>\('render:cell-count',[\s\S]*this\.#tilesPainted = true[\s\S]*this\.#mount\(\)/)
-    expect(BEE).toMatch(/if \(!this\.#app \|\| !this\.#world \|\| !this\.#tilesPainted\) return/)
+
+    // DEAF UNTIL PULSED. Every subscription is taken in `heartbeat`, never at
+    // module load — so EffectBus's last-value replay of `render:host-ready`
+    // cannot reach a drone the processor has not started yet.
+    expect(BEE).toMatch(/override heartbeat = async \(\): Promise<void> => \{\s*this\.#ensureEffects\(\)/)
+    expect(BEE).toMatch(/#ensureEffects = \(\): void => \{\s*if \(this\.#effectsRegistered\) return/)
+
+    // ONE WAY IN. The layer, the registry listeners, the ticker and the
+    // pointer listeners are all raised by `#mount`, and `#mount` is reachable
+    // from exactly one place: the host-ready handler, inside those effects.
+    expect(BEE.match(/this\.#mount\(\)/g) ?? []).toHaveLength(1)
+    expect(BEE).toMatch(/onEffect<HostReadyPayload>\('render:host-ready'[\s\S]{0,400}?this\.#mount\(\)/)
+    expect(BEE).toContain('if (!this.#app || !this.#world) return')
+
+    // NOT IN THE RENDER-FIRST COHORT. This is what actually holds the drone
+    // behind the barrier: the shell pulses the three render keys before the
+    // barrier and everything else after it, so naming the bees here would put
+    // them back in front of first paint.
+    const renderFirstStart = DEV_APP.indexOf('const RENDER_FIRST_KEYS')
+    expect(renderFirstStart).toBeGreaterThan(-1)
+    expect(DEV_APP.slice(renderFirstStart, DEV_APP.indexOf('])', renderFirstStart)))
+      .not.toContain('AgentBee')
+
+    // ANIMATION IS BOUND ONCE, AND RELEASED. One `ticker.add` in the file, and
+    // it is the mount's.
+    expect(BEE.match(/ticker\.add\(/g) ?? []).toHaveLength(1)
+    expect(BEE).toMatch(/if \(!this\.#tickerBound\) \{[\s\S]{0,120}?this\.#app\.ticker\.add\(this\.#onTick\)/)
     expect(BEE).toContain('this.#app.ticker.remove(this.#onTick)')
+
+    // NEITHER POOL WALK IS ON THE MOUNT PATH. The queued-ask seed and the
+    // talked-to-tiles read both walk storage; mounting must not await either,
+    // or the barrier opening would simply move the stall one step later.
+    expect(BEE).toContain('requestIdleCallback(seed, { timeout: 4000 })')
+    expect(BEE).toContain('else setTimeout(seed, 1200)')
+    expect(BEE).toMatch(/setTimeout\(\(\) => \{[\s\S]{0,200}?this\.#refreshResting\(\)[\s\S]{0,40}?\}, REST_SETTLE_MS\)/)
   })
 
   it('keeps per-child head repair behind the current-layer paint', () => {

@@ -1,4 +1,4 @@
-// hypercomb-shared/core/packed-store-gate.ts
+// hypercomb-runtime/src/packed-store-gate.ts
 //
 // THE BOOT GATE for the packed store's one-way door.
 //

@@ -71,6 +71,7 @@ import {
 const PUBLISH_FAILURE_TEXT: Record<PublishFailure, string> = {
   'services': 'Core services are not ready yet.',
   'no-branch': 'That row has no branch here to publish.',
+  'no-host': 'Nowhere to put the bytes — this branch names no host and none is set as your default. Add a host to the branch, or set one in the hosts panel, then publish again.',
   'seal-failed': 'The branch could not be sealed — a child is cold. Visit its tiles once, then publish again.',
   'no-signer': 'No signing key available — the hive index must be signed.',
   'not-available': 'Still uploading — the index was NOT advanced, so no dead links. It keeps retrying.',

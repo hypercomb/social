@@ -120,15 +120,44 @@ export class HideQueenBee extends QueenBee {
     // The tile-actions bee owns the hidden list and the repaint. Speaking to
     // it by its action name is the same door the icon uses, so there is one
     // implementation of hiding and this queen is only a way to say it.
+    // EACH TILE IS ACKNOWLEDGED, and the count reports what was CLAIMED rather
+    // than what was asked. An emit nobody handles looks exactly like one that
+    // worked, so this used to log "3 tiles out of view" whether the tile-actions
+    // bee was listening or not. `#hideOrBlock` is synchronous today, so these
+    // settle at once; the acknowledgement is what makes an unhandled emit
+    // visible, and what keeps this honest if hides move into a pool and the
+    // write becomes asynchronous.
+    const claimedLabels: string[] = []
     for (const label of reading.targets) {
-      EffectBus.emit('tile:action', {
+      let accepted = false
+      let finish!: (error?: unknown) => void
+      const done = new Promise<void>((resolve, reject) => {
+        let settled = false
+        finish = error => {
+          if (settled) return
+          settled = true
+          error === undefined ? resolve() : reject(error)
+        }
+      })
+      EffectBus.emitTransient('tile:action', {
         action: reading.show ? 'unhide' : 'hide',
         label, q: 0, r: 0, index: 0,
+        accept: () => { accepted = true },
+        complete: finish,
       })
+      if (!accepted) continue
+      try { await done; claimedLabels.push(label) }
+      catch (error) { console.warn('[hide] tile action failed:', label, error) }
     }
 
-    const count = reading.targets.length
-    const noun = count === 1 ? `"${reading.targets[0]}"` : `${count} tiles`
+    if (claimedLabels.length === 0) {
+      this.#log('Hide — nothing was hidden; the tile surface is not listening')
+      return
+    }
+    // Name the tile that actually landed, not the first one asked for.
+    const noun = claimedLabels.length === 1
+      ? `"${claimedLabels[0]}"`
+      : `${claimedLabels.length} tiles`
     this.#log(reading.show ? `Hide — ${noun} drawing again` : `Hide — ${noun} out of view here`)
   }
 

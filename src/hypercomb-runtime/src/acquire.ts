@@ -57,6 +57,7 @@ export { installedPackageSig }
 export { headPackage, hostBases, listHostPackages, type HostPackage }
 import { validateSealedPackage } from './sealed-package.js'
 import { deriveBeeDeps } from './bee-deps.js'
+import { checkCoreCompatibility, describeCoreMismatch } from './core-surface.js'
 import { aliasOf, bagEntryName, bagSignature, beeEntries, dependencyEntries, orderedEntries } from './bags.js'
 
 // Store is reached STRUCTURALLY, never imported. Importing the module would
@@ -435,6 +436,18 @@ export const installPackage = async (
         ? `${held.refused.length} atom(s) refused — served bytes did not hash to their name`
         : `${held.holes.length} atom(s) unreachable`,
     }
+  }
+
+  // CAN THIS SHELL RUN IT? (core-surface.ts). The modules just admitted name
+  // what they import from `@hypercomb/core`; the shell's runtime core is asked
+  // what it exports. A shell that is short refuses HERE, by name, instead of
+  // activating a package whose every module dies at evaluation. The bytes stay
+  // — once the shell ships, the same call is a delta repair.
+  const readAtom = readFrom([store.bees, store.dependencies], sig => [`${sig}.js`, sig])
+  const compat = await checkCoreCompatibility([...inventory.bees, ...inventory.dependencies], readAtom)
+  if (!compat.ok) {
+    console.warn(`[acquire] ${pkg.packageSig.slice(0, 12)} ${describeCoreMismatch(compat.missing)}`)
+    return fail(`package ${describeCoreMismatch(compat.missing)}`)
   }
 
   // beeDeps, worked out from the bytes just admitted rather than taken from

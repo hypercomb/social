@@ -70,11 +70,13 @@ import {
   withMeaningAt,
   type HoleTarget,
 } from './hole-target.js'
-import { divisionGroupOf } from '../../assistant/visual-distribution.js'
+import { divisionGroupOf, seat } from '../../assistant/visual-distribution.js'
 import {
   artifactFamilyOf,
   enrolledCells,
+  forgetEnrollments,
   orderIn,
+  visualFamilyOf,
   type CellEnrollment,
 } from '../../pheromones/enrollment.js'
 import type { VisualBeeRegistry } from '../../commands/visual-bee-registry.js'
@@ -218,14 +220,25 @@ export interface GroupState {
  *  `answers` is an INVITATION — every artifact in the hive declaring this
  *  hole's meaning, most of which are not here and never will be. Folding them
  *  into one list would say a hole is filled when nothing is in it. */
+/** One thing that declares a hole's meaning, and where it is. */
+export interface Answerer {
+  readonly name: string
+  readonly segments: readonly string[]
+}
+
 export interface HoleState extends HoleTarget {
   /** The child seated at this slot, by name. Empty when the slot is empty. */
   readonly filledBy: string
   /** That child's location, so the window can offer to walk to it. */
   readonly filledAt: readonly string[]
-  /** Everything wearing this hole's meaning, by name. Empty for an unnamed
-   *  hole — an unnamed hole asks for nothing, so nothing can answer it. */
-  readonly answers: readonly string[]
+  /** Everything wearing this hole's meaning.
+   *
+   *  It was a list of NAMES, which reads fine and cannot be acted on: putting
+   *  one of them in the hole needs its location, and a name is not one. Each
+   *  answerer now carries where it is, so the window can offer to seat it and
+   *  the seating has something to address. Empty for an unnamed hole — an
+   *  unnamed hole asks for nothing, so nothing can answer it. */
+  readonly answers: readonly Answerer[]
 }
 
 export interface TargetsState {
@@ -247,6 +260,20 @@ export interface TargetsState {
   readonly dormant: boolean
 }
 
+/** A hole, as the DESIGNER needs it: what it is called, and nothing about who
+ *  might fill it. The deep read — who answers, who is seated — costs a walk of
+ *  the hive and belongs to the targets window, which is the surface that asks
+ *  that question. Naming is the cheap half and belongs where the shape is
+ *  being made. */
+export interface HoleName {
+  readonly path: readonly string[]
+  readonly key: string
+  readonly meaning: string
+  readonly family: string
+  readonly name: string
+  readonly section: boolean
+}
+
 export interface TemplateState {
   readonly segments: readonly string[]
   readonly cell: string
@@ -258,6 +285,11 @@ export interface TemplateState {
   /** The words the creations are wearing, in shelf order. Derived from the
    *  members every read — there is no group record to fall out of step. */
   readonly groups: readonly GroupState[]
+  /** Every hole and what it is called, so a hole can be named from the surface
+   *  where its shape is being made rather than only from the other window. */
+  readonly holes: readonly HoleName[]
+  /** The families this hive can make, for the naming control. */
+  readonly families: readonly string[]
   readonly dormant: boolean
 }
 
@@ -362,6 +394,10 @@ export class TemplateAuthorDrone extends Drone {
     this.onEffect<{ segments?: string[] }>('targets:grow', payload => {
       void this.#grow(payload?.segments)
     })
+    this.onEffect<{ segments?: string[]; path?: string[]; part?: string[] }>(
+      'targets:seat', payload => {
+        void this.#seat(payload?.segments, payload?.path, payload?.part)
+      })
     this.onEffect(CREATIONS_CHANGED, () => { if (this.#open) void this.#publish() })
     this.onEffect<{ segments?: string[] }>('template:clear', payload => {
       void this.#clear(payload?.segments)
@@ -445,6 +481,7 @@ export class TemplateAuthorDrone extends Drone {
       cell: segments.at(-1) ?? '',
       layout: '', container: '', levels: [], assets,
       groups: knownGroups().map(group => ({ ...group })),
+      holes: [], families: this.#families([]),
       dormant: isBehaviorDormant(TEMPLATE_TARGET_KIND, segments),
     }
     // The ROOT reads like anywhere else. It has a location signature, it can
@@ -455,11 +492,22 @@ export class TemplateAuthorDrone extends Drone {
     // Every conventional name resolved in one pass, so the pure composer can
     // write each hole's target without ever awaiting.
     const targets = await targetsIn(bound.node)
+    // The NAMES only. No hive walk here — see HoleName.
+    const holes = await holeTargetsOf(bound.node)
     return {
       ...empty,
       layout: bound.template.name,
       container: composeLayout(bound.node, targets).html,
       levels: levelsOf(bound.node),
+      holes: holes.map((hole): HoleName => ({
+        path: [...hole.path],
+        key: hole.key,
+        meaning: hole.meaning,
+        family: hole.family,
+        name: hole.name,
+        section: hole.section,
+      })),
+      families: this.#families(holes.map(hole => hole.family)),
     }
   }
 
@@ -587,6 +635,69 @@ export class TemplateAuthorDrone extends Drone {
     } else {
       EffectBus.emit('hidden:reveal', { sig: creation.id })
     }
+  }
+
+  /**
+   * PUT AN ARTIFACT THIS HIVE ALREADY HAS INTO THIS HOLE.
+   *
+   * THE TWO VOCABULARIES MEET HERE, and until now they never did. A hole
+   * ADVERTISES a conventional name — anything wearing `site:masthead` answers
+   * it — and that group is an invitation with no bytes and no seating power.
+   * What the renderer actually seats is enrolment ORDER in the container's own
+   * DIVISION group: member k lands in hole k. So a hole could list what
+   * answered it and had no mechanism to ever put one there, which is exactly
+   * why naming read as bookkeeping.
+   *
+   * Seating is therefore: wear the DIVISION's mark at THIS hole's slot. The
+   * interface says what belongs; the division says where it sits; this is the
+   * one act that turns the first into the second.
+   *
+   * A SECTION is refused rather than coerced. It carries slot -1 because it is
+   * filled by the arrangement nested in it and takes no member at all —
+   * seating one at slot 0 would silently claim another hole's seat.
+   */
+  async #seat(
+    segments: readonly string[] | undefined,
+    path: readonly string[] | undefined,
+    part: readonly string[] | undefined,
+  ): Promise<void> {
+    const subject = this.#subject(segments)
+    const where = this.#path(path)
+    const who = (part ?? []).map(s => String(s ?? '')).filter(Boolean)
+    if (!where.length || !who.length) return
+
+    const bound = await resolveTemplateAt(subject)
+    if (!bound) return
+    const hole = (await holeTargetsOf(bound.node))
+      .find(candidate => candidate.path.join('/') === where.join('/'))
+    if (!hole) return
+    if (hole.section || hole.slot < 0) {
+      EffectBus.emit('activity:log', {
+        message: 'A section holds an arrangement, not a part — name a hole inside it',
+        icon: '⬡',
+      })
+      return
+    }
+
+    const group = await divisionGroupOf(subject)
+    if (!group) {
+      EffectBus.emit('activity:log', {
+        message: 'This container has no division to seat into yet', icon: '⬡',
+      })
+      return
+    }
+    await seat(who, group.sig, group.meaning, hole.slot)
+    // THE READ IS MEMOIZED AND THE WRITE JUST INVALIDATED IT. `enrolledCells`
+    // keeps ONE completed walk, keyed on the sig set, and drops it only here —
+    // so a republish that skipped this would re-read the enrolments as they
+    // were a moment ago and report the hole still empty, which is the one
+    // thing the participant is looking at to see whether the press worked.
+    forgetEnrollments()
+    EffectBus.emit('activity:log', {
+      message: `${who.at(-1)} sits in ${hole.meaning || hole.key}`, icon: 'dashboard',
+    })
+    await this.#publishTargets()
+    if (this.#open) await this.#publish()
   }
 
   /**
@@ -724,8 +835,8 @@ export class TemplateAuthorDrone extends Drone {
    */
   async #answering(
     holes: readonly HoleTarget[],
-  ): Promise<Map<string, readonly string[]>> {
-    const out = new Map<string, string[]>()
+  ): Promise<Map<string, readonly Answerer[]>> {
+    const out = new Map<string, Answerer[]>()
     const sigs = [...new Set(holes.map(hole => hole.target).filter(Boolean))]
     if (sigs.length === 0) return out
     try {
@@ -737,7 +848,7 @@ export class TemplateAuthorDrone extends Drone {
         for (const enrolled of cell.enrollments) {
           if (!wanted.has(enrolled.sig)) continue
           const held = out.get(enrolled.sig) ?? []
-          held.push(cell.name)
+          held.push({ name: cell.name, segments: [...cell.segments] })
           out.set(enrolled.sig, held)
         }
       }
@@ -745,16 +856,29 @@ export class TemplateAuthorDrone extends Drone {
     return out
   }
 
-  /** The families this hive can actually produce, plus any already in use.
-   *  A behaviour declares `visual:<family>:artifact` and is thereby a maker of
-   *  that family — there is no registry to keep in step, which is the point of
-   *  matching on the kind. */
+  /**
+   * The families this hive can actually produce, plus any already in use.
+   *
+   * IT USED TO MATCH ONLY `visual:<family>:artifact` AND THEREFORE MATCHED
+   * NOTHING. Every behaviour in the registry declares a MEMBER kind —
+   * `visual:website:page`, `visual:diagram:slide`, `visual:workflow:step` —
+   * and `artifactFamilyOf` answers null for all of them by design, because it
+   * asks the narrower question "is this the kind a thing wears to BE one". So
+   * the chooser offered exactly one family, forever, and a participant asking
+   * for a web artifact had nothing to ask with.
+   *
+   * A behaviour that makes `visual:website:page` is a maker of WEBSITE things.
+   * That is what a hole wants to name, so the middle segment is what is read.
+   * Still no registry to keep in step: declaring the kind IS the declaration.
+   */
   #families(inUse: readonly string[]): readonly string[] {
     const found = new Set<string>([DEFAULT_HOLE_FAMILY])
     try {
       const registry = get<VisualBeeRegistry>('@diamondcoreprocessor.com/VisualBeeRegistry')
       for (const bee of registry?.all?.() ?? []) {
-        const family = artifactFamilyOf(bee.decorationKind)
+        // The artifact kind first, where a behaviour declares one; the member
+        // kind's family otherwise. Both name the same family when both exist.
+        const family = artifactFamilyOf(bee.decorationKind) ?? visualFamilyOf(bee.decorationKind)
         if (family) found.add(family)
       }
     } catch { /* the built-in family alone is a working editor */ }

@@ -1,4 +1,4 @@
-// hypercomb-shared/core/i18n.service.ts
+// hypercomb-runtime/src/i18n.service.ts
 //
 // Runtime localization service. Extends EventTarget so Angular components can
 // bridge to signals via fromRuntime(). Bees resolve via window.ioc.get(I18N_IOC_KEY).

@@ -70,7 +70,10 @@ interface HistoryLike {
 }
 interface HostSyncLike {
   isEnabled?: () => boolean
-  enablePublicHost?: () => void
+  isPublicHostEnabled?: () => boolean
+  publicHostDomain?: () => string
+  /** Name the nodes THIS publish puts its bytes on (host-sync.service). */
+  addPublishNodes?: (domains: readonly string[]) => void
   markPublic?: (sig: string, kind?: string, closure?: boolean) => Promise<void>
   drain?: () => Promise<void>
   reDrain?: () => Promise<unknown>
@@ -93,6 +96,7 @@ export interface PublishProgress {
 export type PublishFailure =
   | 'services'        // core services not ready
   | 'no-branch'       // called at the hive root
+  | 'no-host'         // nowhere to put the bytes: no node named, none standing, or none answering
   | 'seal-failed'     // a child is cold or unresolvable
   | 'no-signer'       // no key to sign the index with
   | 'not-available'   // closure still uploading at the deadline — pointer NOT advanced
@@ -142,10 +146,19 @@ const selfDomain = (): string => {
  *  public zone, it has no `content.` DNS label in front of it. */
 const contentDoor = (zone: string): string => LOOPBACK_RE.test(zone) ? zone : `content.${zone}`
 
-/** The branch's doors in preference order: its marks (primary first), then the
- *  standing defaults. Every door fronts ONE shared heap and ONE per-key index. */
-const doorsFor = (branchZones: readonly string[]): string[] =>
-  [...new Set([...branchZones.map(contentDoor), ...PUBLIC_CONTENT_HOSTS])].filter(Boolean)
+/** The nodes a branch is served from: its host marks (primary first) as
+ *  content doors, else the participant's STANDING targets as they already
+ *  are — never anything flipped on for the occasion. */
+const nodesFor = async (segs: readonly string[], hostSync: HostSyncLike | undefined): Promise<string[]> => {
+  let branchZones: string[] = []
+  try { branchZones = await hostsOfBranch(segs) } catch { /* no marks — the standing targets remain */ }
+  const self = selfDomain()
+  const standing = [
+    ...(hostSync?.isEnabled?.() && self ? [self] : []),
+    ...(hostSync?.isPublicHostEnabled?.() ? [hostSync.publicHostDomain?.() || PUBLIC_CONTENT_HOSTS[0] || ''] : []),
+  ]
+  return [...new Set([...branchZones.map(contentDoor), ...standing])].filter(Boolean)
+}
 
 /** Walk the doors until one ANSWERS — a verified index or an honest 404. A
  *  branch pointed at a zone whose DNS has not landed yet must still publish:
@@ -188,7 +201,36 @@ export async function publishBranch(
   //    walk (if ever on) agrees with the same mark.
   const parentLocation = '/' + segs.slice(0, -1).join('/')
   if (!isBranchPublic(parentLocation, name)) setBranchPublic(parentLocation, name, true)
-  hostSync.enablePublicHost?.()
+
+  // 1b. WHERE THE BYTES GO: the branch's published nodes, THIS act. A publish
+  //     is one act with two halves — put the bytes where the branch is served
+  //     from, then advance the index — and both belong to this press. The
+  //     nodes are the branch's own host marks (primary first) from the
+  //     community pool, and when it wears none, the participant's STANDING
+  //     targets (own host, public host) as they already are. Nothing is
+  //     flipped on: this used to call `enablePublicHost()` unconditionally,
+  //     even over an explicit opt-out — a standing rule set by a press that
+  //     was about one branch (write-conformance check 10, adjudication).
+  //     Available = the node's index door answers (a verified index or an
+  //     honest 404). A node that is down is skipped for this publish and
+  //     named in the result; with no node at all, the publish stops and says
+  //     so — it never picks a host the participant did not.
+  const pubkey = String((await signer.getPublicKeyHex()) ?? '').toLowerCase()
+  if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
+  const nodes = await nodesFor(segs, hostSync)
+  if (nodes.length === 0) return { ok: false, failure: 'no-host', reason: 'no node named' }
+  const answering: string[] = []
+  const unreachable: string[] = []
+  for (const door of nodes) {
+    const read = await fetchHiveIndex(door, pubkey)
+    // Answered = anything but a transport failure. A forged, malformed or
+    // 5xx index is a node that IS there, and the wipe guard below must see
+    // it as such (index-unsafe), never as an absent node.
+    if (read.ok || read.reason !== 'unreachable') answering.push(door)
+    else unreachable.push(door)
+  }
+  if (answering.length === 0) return { ok: false, failure: 'no-host', reason: `no node answered (${unreachable.join(', ')})` }
+  hostSync.addPublishNodes?.(answering)
 
   // 2. THE LIGHTS TRAVEL WITH THE TREE. Stamp the branch root with the
   //    behaviours it is DRESSED IN, BEFORE sealing, so the mark is inside
@@ -249,17 +291,10 @@ export async function publishBranch(
 
   // 6. Merge + sign + PUT the index — behind the wipe guard.
   report({ phase: 'indexing' })
-  const pubkey = String((await signer.getPublicKeyHex()) ?? '').toLowerCase()
-  if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer', sealed }
-
   const key = lineageKey(segs)
-  // The marks the branch wears are the one per-branch routing record. A branch
-  // with no marks rides the standing defaults.
-  let branchZones: string[] = []
-  try { branchZones = await hostsOfBranch(segs) } catch { /* defaults remain available */ }
-  const branchHosts = branchZones.map(contentDoor)
-  // The branch's own doors first; the first that ANSWERS carries the write.
-  const { host: indexHost, read } = await resolveIndexDoor(doorsFor(branchZones), pubkey)
+  // The nodes that answered, primary first; the first that still answers
+  // carries the write.
+  const { host: indexHost, read } = await resolveIndexDoor(answering, pubkey)
 
   let existing: Record<string, string>
   if (read.ok) {
@@ -290,17 +325,10 @@ export async function publishBranch(
   if (!put.ok) return { ok: false, failure: 'index-failed', reason: put.reason, sealed }
 
   // 7. The stable bearer link: segments + pubkey + hosts (+ the sealed head
-  //    as a cold-index fallback hint).
+  //    as a cold-index fallback hint). The hosts are the nodes this publish
+  //    put its bytes on — nothing is advertised that did not take them.
   report({ phase: 'linking' })
-  const self = selfDomain()
-  // The branch's own doors first (primary leading), then the standing
-  // defaults. All of them front the one shared heap, so every advertised
-  // host serves the same bytes — the order is preference, not truth.
-  const hosts = [...new Set([
-    ...(hostSync.isEnabled?.() && self ? [self] : []),
-    ...branchHosts,
-    ...PUBLIC_CONTENT_HOSTS,
-  ])]
+  const hosts = [...answering]
   const bundle: HiveLinkBundle = {
     kind: HIVE_LINK_KIND,
     v: HIVE_LINK_VERSION,
@@ -404,11 +432,11 @@ export async function unpublishBranch(
   if (!SIG_RE.test(pubkey)) return { ok: false, failure: 'no-signer' }
 
   const key = lineageKey(segs)
-  let branchZones: string[] = []
-  try { branchZones = await hostsOfBranch(segs) } catch { /* defaults remain available */ }
-  // Withdraw through the first of the branch's doors that answers — the same
-  // walk publishing takes, against the same shared index.
-  const { host: indexHost, read } = await resolveIndexDoor(doorsFor(branchZones), pubkey)
+  // Withdraw through the first of the branch's nodes that answers — the same
+  // set publishing uses, against the same shared index.
+  const nodes = await nodesFor(segs, get<HostSyncLike>(HOST_SYNC_KEY))
+  if (nodes.length === 0) return { ok: false, failure: 'no-host', reason: 'no node named' }
+  const { host: indexHost, read } = await resolveIndexDoor(nodes, pubkey)
   // The same guard as publishing, for the same reason: a rewrite we cannot
   // base on a verified read is a rewrite that drops everything we cannot see.
   if (!read.ok) {

@@ -445,11 +445,39 @@ export class LayoutTargetsElement extends HTMLElement {
     }
     props.appendChild(seated)
 
-    // WHAT COULD FILL IT — an invitation, kept apart from the fact above.
+    // WHAT COULD FILL IT — an invitation, kept apart from the fact above, and
+    // now an invitation you can ACCEPT.
+    //
+    // These were dot-joined text. Reading "three things answer this" and having
+    // no way to put one of them in is what made naming a hole feel like
+    // bookkeeping: the hole advertised an interface into a void. Each answerer
+    // is a button now, and pressing it seats that artifact at this hole's slot.
     if (hole.meaning) {
       const answers = rowOf(t('targets.answering', 'Could fill it'))
       if (hole.answers.length) {
-        answers.appendChild(face('hc-targets-answer', hole.answers.join(' · ')))
+        const list = document.createElement('div')
+        list.className = 'hc-targets-answers'
+        for (const answer of hole.answers) {
+          const put = document.createElement('button')
+          put.type = 'button'
+          put.className = 'hc-targets-put'
+          put.textContent = answer.name
+          // A SECTION takes no member, so it is never offered one. The drone
+          // refuses it too — this only keeps the offer honest on the way in.
+          put.disabled = hole.section
+          put.title = hole.section
+            ? t('targets.put.section', 'A section holds an arrangement, not a part')
+            : t('targets.put', 'Put {name} in this hole', { name: answer.name })
+          put.addEventListener('click', () => {
+            EffectBus.emit('targets:seat', {
+              segments: this.#state?.segments ?? [],
+              path: hole.path,
+              part: answer.segments,
+            })
+          })
+          list.appendChild(put)
+        }
+        answers.appendChild(list)
       } else {
         answers.appendChild(face('hc-targets-empty',
           t('targets.answering.none', 'nothing in this hive wears this name yet')))
@@ -615,7 +643,14 @@ function ensureStyles(): void {
     .hc-targets {
       position: fixed;
       top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor, 0px));
-      right: var(--hc-controls-right, 0px); bottom: 0;
+      /* CLEAR OF THE RAIL *AND* OF ANYTHING DOCKED ON THIS EDGE.
+         It pinned to the rail alone, which is only the far edge — a docked
+         panel on the right (the flex gallery, and now the designer's own
+         properties when they are sent across) reserves --hc-inset-right
+         and this window painted straight over it at z-index 100002. The
+         larger of the two is the first free column either way. */
+      right: max(var(--hc-controls-right, 0px), var(--hc-inset-right, 0px));
+      bottom: 0;
       width: 340px; min-width: 260px; max-width: calc(100vw - 1.5rem);
       box-sizing: border-box; display: flex; flex-direction: column;
       z-index: 100002;
@@ -727,6 +762,26 @@ function ensureStyles(): void {
       color: rgba(${ACCENT}, 0.8);
       font-size: 0.68em; letter-spacing: 0.1em; text-transform: uppercase;
     }
+
+    /* EVERY ANSWER IS A DOOR. They read as a row of small chips rather than a
+       list, because what matters is which one you want and not how many there
+       are — and a disabled one (a section, which takes no member) still shows,
+       because "this cannot be filled that way" is an answer. */
+    .hc-targets-answers {
+      display: flex; flex-wrap: wrap; gap: 0.25rem; min-width: 0;
+    }
+    .hc-targets-put {
+      padding: 0.15rem 0.4rem;
+      background: rgba(${ACCENT}, 0.12);
+      border: 1px solid rgba(${ACCENT}, 0.45); border-radius: 2px;
+      color: rgba(238, 244, 248, 0.92);
+      font: inherit; font-size: 0.78em; line-height: 1.4;
+      cursor: pointer; transition: background 120ms ease, border-color 120ms ease;
+    }
+    .hc-targets-put:hover:not(:disabled) {
+      background: rgba(${ACCENT}, 0.26); border-color: rgba(${ACCENT}, 0.9);
+    }
+    .hc-targets-put:disabled { opacity: 0.4; cursor: default; }
 
     .hc-targets-count {
       flex: 0 0 auto; margin: 0; padding: 0 0.75rem 0.5rem;

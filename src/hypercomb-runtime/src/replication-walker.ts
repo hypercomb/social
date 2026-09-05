@@ -1,4 +1,4 @@
-// hypercomb-shared/core/replication-walker.ts
+// hypercomb-runtime/src/replication-walker.ts
 //
 // The shell-embedded replication client (documentation/install-by-replication.md,
 // migration step 1). Browser-side twin of the relay's replicate.js: given

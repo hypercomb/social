@@ -88,7 +88,27 @@ const inFlight = new Map<string, Promise<LocalServerReport>>()
 
 // ── which providers this file speaks for ──────────────────────────────────
 
-const LOOPBACK = /^(localhost|127(?:\.\d+){3}|\[::1\]|::1|0\.0\.0\.0)$/i
+// EVERY SPELLING HERE HAS TO NAME THE PARTICIPANT'S OWN PROCESS, because
+// this test is one of the three conditions that hand a model hive EXECUTION
+// authority (chat-window.component.ts:3066-3068). `0.0.0.0` used to be in
+// this set and does not belong: it is the wildcard a server BINDS to — "accept
+// on every interface" — never an address a client DIALS. Servers print it
+// (llama.cpp, vLLM and LM Studio all announce `0.0.0.0:<port>`), so it is a
+// plausible thing to paste into the host field, which is exactly why it must
+// not pass silently: as a DESTINATION it is undefined, resolved differently by
+// every OS, and refused outright by Chromium since the 0.0.0.0-day fix. So
+// admitting it bought a participant nothing — the probe fails either way and
+// the gate closes anyway — while asserting the one thing the string cannot
+// support: that this is their own machine. The provider-spec compiler's
+// endpoint gate never admitted it either (`isAcceptableEndpoint`).
+//
+// A participant whose server printed `0.0.0.0` reaches it at `127.0.0.1`; the
+// whole 127/8 block, both `::1` spellings and `localhost` stay, since each of
+// those IS self-evidently this machine. One consequence at the second call
+// site below: a page SERVED from hostname `0.0.0.0` now counts as a public
+// origin, which stands the automatic probe down until a real press. That is
+// the conservative direction, and the only direction a bind address earns.
+const LOOPBACK = /^(localhost|127(?:\.\d+){3}|\[::1\]|::1)$/i
 
 /**
  * The base URL a MACHINE-LOCAL provider is reached at, or `''` when the

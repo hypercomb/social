@@ -235,6 +235,12 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // rewritten; before this pool the fields were written into the marker, and
   // those markers stay readable. Per-participant, replaced in place: DOCUMENT.
   'history:marker-meta',
+  // THE LAST HEAD CLAIM THIS DEVICE SIGNED, per facet — the `minted` half of
+  // `planHeadClaim`'s anti-rollback rule (core/head-claim.ts). One current
+  // document per (facet, pubkey) sub-bucket; per-device, never replicated —
+  // it exists precisely so a host that is merely behind cannot hand this
+  // device a counter lower than the one it signed. DOCUMENT.
+  'facet:minted',
   // What a HOST is offering — the package pointers a shim publishes for
   // clients to replicate from (runtime/host-pool.ts, consumed by
   // web/setup/ensure-install.ts). The address is DERIVED by every client for

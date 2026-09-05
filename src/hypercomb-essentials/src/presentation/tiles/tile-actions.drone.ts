@@ -513,9 +513,18 @@ type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 // (now buttonless, programmatic/spec-only) adopt verb directly via its
 // own tile:action listener. The legacy paired-channel 'adopt' / 'import'
 // handlers were retired with the paired-channel subsystem.
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'hide', 'break-apart', 'block', 'remove', 'make-public', 'make-branch-public'])
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'hide', 'unhide', 'break-apart', 'block', 'remove', 'make-public', 'make-branch-public'])
 
-type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
+type TileActionPayload = {
+  action: string; label: string; q: number; r: number; index: number
+  /** Called synchronously when this drone claims the action, so a caller can
+   *  tell "nobody was listening" apart from "it ran". A pointer never needs
+   *  this — it has already moved on — but a SENTENCE does: `/hide` logged
+   *  tiles as hidden whether or not any handler existed. */
+  accept?: () => void
+  /** Settled once the action has been carried out. */
+  complete?: (error?: unknown) => void
+}
 
 export class TileActionsDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -596,7 +605,21 @@ export class TileActionsDrone extends Drone {
       // Handle clicks on our own actions
       this.onEffect<TileActionPayload>('tile:action', (payload) => {
         if (!HANDLED_ACTIONS.has(payload.action)) return
-        this.#handleAction(payload)
+        // ACKNOWLEDGE BEFORE ACTING, SETTLE AFTER. `accept` says this drone
+        // claimed the action — an unclaimed emit is indistinguishable from a
+        // completed one otherwise, and `/hide` reported tiles hidden that no
+        // handler ever saw. `#handleAction` is synchronous for hide/unhide
+        // today, so `complete` fires immediately; threading it now means the
+        // move of hides from session storage into a pool cannot turn this into
+        // a silent race later.
+        payload.accept?.()
+        try {
+          this.#handleAction(payload)
+          payload.complete?.()
+        } catch (error) {
+          payload.complete?.(error)
+          throw error
+        }
       })
 
       // Handle hide / reroll / bulk public-private from selection context menu
@@ -851,6 +874,12 @@ export class TileActionsDrone extends Drone {
         break
 
       case 'break-apart':
+      // `break-apart` reaches unhide because the overlay REUSES that icon slot
+      // on an already-hidden tile. That is a drawing decision, and it made the
+      // verb unsayable: a caller with no pointer cannot ask for "the action
+      // behind the icon that is showing". `unhide` is the same act under its
+      // own name, for `/hide ~<tile>` and anything else that speaks.
+      case 'unhide':
         this.#unhide(label)
         break
 

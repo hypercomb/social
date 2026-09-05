@@ -98,6 +98,12 @@ export const hostCurrentBranch = async (): Promise<void> => {
           toast('tip', t(i18n, 'host.title', 'Publish branch'),
             t(i18n, 'host.not-branch', 'Navigate into the branch you want to publish, then try again.'))
           return
+        case 'no-host':
+          toast('tip', t(i18n, 'host.title', 'Publish branch'),
+            t(i18n, 'host.no-host',
+              'Nowhere to put the bytes ({reason}) — add a host to this branch, or set one in the hosts panel, then publish again. Nothing was published.',
+              { reason: result.reason ?? 'no node' }))
+          return
         case 'seal-failed':
           toast('error', t(i18n, 'host.title', 'Publish branch'),
             t(i18n, 'host.seal-failed', 'The branch could not be sealed (a child is cold or unresolvable) — visit its tiles once, then try again.'))

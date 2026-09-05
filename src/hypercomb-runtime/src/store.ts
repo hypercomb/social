@@ -1,5 +1,4 @@
-// hypercomb-shared/core/store.ts
-// hypercomb-web/src/app/core/store.ts
+// hypercomb-runtime/src/store.ts
 
 import {
   Bee,

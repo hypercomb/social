@@ -30,6 +30,7 @@
 // propagates to root via the standard merkle cascade.
 
 import { EffectBus } from '@hypercomb/core'
+import { cachedNotesFacet, readNotesFacet, unionNoteSigs, writeNotesFacet } from './notes-facet.js'
 import {
   addChildInTree,
   insertAsChild,
@@ -352,9 +353,12 @@ export class NotesService {
 
   /**
    * Synchronous notes for a cell at the user's current lineage. Reads
-   * from the peek cache (populated by the preloader walk and by writes).
-   * Returns an empty array if the cell hasn't been touched yet — call
-   * `getNotes()` for the async hydrating read.
+   * from the peek cache (populated by the preloader walk and by writes)
+   * and from the WORD'S facet as of its last async read this session
+   * (`cachedNotesFacet`) — the same union the async read shows, so a
+   * second tile of a word paints the shared list without a round trip
+   * once any tile of that word has been read. Returns an empty array if
+   * nothing is known yet — call `getNotes()` for the async hydrating read.
    */
   public readonly notesFor = (cellLabel: string): Note[] => {
     const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
@@ -362,12 +366,13 @@ export class NotesService {
     const locSig = this.#cellLocationSigSync(cellLabel)
     if (!locSig) return []
     const layer = history.peekCurrentLayer(locSig)
-    if (!layer) return []
-    const sigs = (layer as Record<string, unknown>)[NOTES_SLOT]
-    if (!Array.isArray(sigs)) return []
+    const slot = (layer as Record<string, unknown> | null)?.[NOTES_SLOT]
+    const slotSigs = Array.isArray(slot) ? slot.filter((x): x is string => typeof x === 'string') : []
+    const sigs = unionNoteSigs(cachedNotesFacet(cellLabel), slotSigs)
+    if (sigs.length === 0) return []
     const out: Note[] = []
     for (const sig of sigs) {
-      if (typeof sig !== 'string' || !SIG_REGEX.test(sig)) continue
+      if (!SIG_REGEX.test(sig)) continue
       const cached = this.#cache.get(sig)
       if (cached) out.push(this.#hydrate(sig, cached))
     }
@@ -382,7 +387,7 @@ export class NotesService {
   public readonly getNotes = async (cellLabel: string): Promise<Note[]> => {
     const resolved = await this.#resolveCellLocation(cellLabel)
     if (!resolved) return []
-    return this.#readAtLocation(resolved.locationSig)
+    return this.#readAtLocation(resolved.locationSig, resolved.segments[resolved.segments.length - 1] ?? cellLabel)
   }
 
   /**
@@ -396,7 +401,7 @@ export class NotesService {
     const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
     if (!history) return []
     const locSig = await history.sign({ explorerSegments: () => cleaned })
-    return this.#readAtLocation(locSig)
+    return this.#readAtLocation(locSig, cleaned[cleaned.length - 1] ?? '')
   }
 
   // ── Public write API ──────────────────────────────────────────────
@@ -429,6 +434,15 @@ export class NotesService {
    * for top-level AND nested notes — walks the tree, drops the node
    * (and its entire subtree), then re-materializes from leaves. Used
    * by the `note:delete` EffectBus handler and headless callers.
+   *
+   * "DELETE" IS AN UNLINK. Nothing here destroys bytes: the note stays a content
+   * atom at the root, the previous list is one marker back in the layer's
+   * history and one `prev` back on the word's facet, and undo restores it. This
+   * is hide-first by construction — the reversible removing act a list may
+   * offer. Forgetting bytes lives only in the delete area, behind prune, and a
+   * note never reaches it. The verb keeps its name because renaming re-signs
+   * nothing but breaks every caller; the participant-facing word says what it
+   * does.
    */
   public async deleteAtSegments(
     parentSegments: readonly string[],
@@ -680,7 +694,7 @@ export class NotesService {
    */
   async #deleteFromTree(segments: readonly string[], noteId: string): Promise<void> {
     const locSig = await this.#locSig(segments)
-    const tree = await this.#readAtLocation(locSig)
+    const tree = await this.#readAtLocation(locSig, segments[segments.length - 1] ?? '')
     const { tree: nextTree, removed } = removeFromTree(tree, noteId)
     if (!removed) return  // node wasn't in this cell — leave layer alone
     const rootSigs: string[] = []
@@ -719,7 +733,7 @@ export class NotesService {
     index?: number,
   ): Promise<void> {
     const locSig = await this.#locSig(segments)
-    const tree = await this.#readAtLocation(locSig)
+    const tree = await this.#readAtLocation(locSig, segments[segments.length - 1] ?? '')
 
     // 1. Locate the source node and pluck it (with its subtree) out
     //    of wherever it currently lives.
@@ -784,7 +798,7 @@ export class NotesService {
     mark: string | null,
   ): Promise<void> {
     const locSig = await this.#locSig(segments)
-    const tree = await this.#readAtLocation(locSig)
+    const tree = await this.#readAtLocation(locSig, segments[segments.length - 1] ?? '')
     const { tree: nextTree, changed } = addChildInTree(tree, parentId, text, mark)
     if (!changed) return  // parent isn't in this cell
     const rootSigs: string[] = []
@@ -818,7 +832,7 @@ export class NotesService {
     mark: string | null | undefined,
   ): Promise<void> {
     const locSig = await this.#locSig(segments)
-    const tree = await this.#readAtLocation(locSig)
+    const tree = await this.#readAtLocation(locSig, segments[segments.length - 1] ?? '')
     const { tree: nextTree, changed } = setTextInTree(tree, noteId, text, mark)
     if (!changed) return  // node not in this cell, or already reads exactly that
     const rootSigs: string[] = []
@@ -846,7 +860,7 @@ export class NotesService {
     mark: string | null,
   ): Promise<void> {
     const locSig = await this.#locSig(segments)
-    const tree = await this.#readAtLocation(locSig)
+    const tree = await this.#readAtLocation(locSig, segments[segments.length - 1] ?? '')
     const { tree: nextTree, changed } = setMarkInTree(tree, noteId, mark)
     if (!changed) return  // node not in this cell, or already carries that mark
     const rootSigs: string[] = []
@@ -875,7 +889,7 @@ export class NotesService {
     add: boolean,
   ): Promise<void> {
     const locSig = await this.#locSig(segments)
-    const tree = await this.#readAtLocation(locSig)
+    const tree = await this.#readAtLocation(locSig, segments[segments.length - 1] ?? '')
     const { tree: nextTree, changed } = setTagInTree(tree, noteId, tag, add)
     if (!changed) return  // node not in this cell, or already in that state
     const rootSigs: string[] = []
@@ -909,7 +923,7 @@ export class NotesService {
     parts: readonly (string | NotePart)[],
   ): Promise<void> {
     const locSig = await this.#locSig(segments)
-    const tree = await this.#readAtLocation(locSig)
+    const tree = await this.#readAtLocation(locSig, segments[segments.length - 1] ?? '')
     const { tree: nextTree, changed } = splitInTree(tree, noteId, head, parts)
     if (!changed) return  // node not in this cell, blank head, or no usable parts
     const rootSigs: string[] = []
@@ -960,9 +974,16 @@ export class NotesService {
     }
     const locSig = await history.sign({ explorerSegments: () => segments })
     const priorLayer = await history.currentLayerAt(locSig)
-    const priorNotes = Array.isArray(priorLayer?.[NOTES_SLOT])
+    const slotNotes = Array.isArray(priorLayer?.[NOTES_SLOT])
       ? (priorLayer[NOTES_SLOT] as readonly unknown[]).filter((s): s is string => typeof s === 'string')
       : []
+    // The prior list is the SAME union the reader shows — facet first, then
+    // the slot — so a transform edits what the participant saw, and the result
+    // lands on both the slot and the word's facet. That is what makes a removal
+    // at one tile of the word a removal for the word (an UNLINK — the atom and
+    // every prior list survive; undo walks back), rather than a flicker
+    // between two tiles' lists.
+    const priorNotes = unionNoteSigs(await readNotesFacet(segments[segments.length - 1] ?? ''), slotNotes)
     const nextNotes = transform(priorNotes)
     const base: { name?: string; [k: string]: unknown } = priorLayer
       ? { ...priorLayer }
@@ -983,6 +1004,14 @@ export class NotesService {
       segments: [...segments],
       op: 'set' as const,
       sigs: nextNotes.slice(),
+    })
+    // THE FACET, ALONGSIDE (decided 2026-09-04). The same list lands on the
+    // tile's word — sign('notes:' + moleculeAddress(name)) — as envelopes, a
+    // succession atom and a signed head in this author's bucket. A forward
+    // commit beside the slot above, never a gate on it, and never an identity
+    // minted for a note: without a cached key it simply does not happen.
+    void writeNotesFacet(segments[segments.length - 1] ?? '', nextNotes).then(r => {
+      if (!r.ok && r.reason !== 'no identity') console.warn('[notes] facet not written:', r.reason, r.detail ?? '')
     })
   }
 
@@ -1026,13 +1055,19 @@ export class NotesService {
    * flows (move, cascade-delete) also use this method so the source's
    * full subtree travels with the operation.
    */
-  async #readAtLocation(locationSig: string): Promise<Note[]> {
+  async #readAtLocation(locationSig: string, tileName = ''): Promise<Note[]> {
     const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
     if (!history) return []
     const layer = await history.currentLayerAt(locationSig)
-    if (!layer) return []
-    const sigs = (layer as Record<string, unknown>)[NOTES_SLOT]
-    if (!Array.isArray(sigs)) return []
+    const slot = (layer as Record<string, unknown> | null)?.[NOTES_SLOT]
+    const slotSigs = Array.isArray(slot) ? slot.filter((x): x is string => typeof x === 'string') : []
+    // THE FACET FIRST (decided 2026-09-04). A tile's notes are the notes of
+    // its WORD: every author's list on sign('notes:' + moleculeAddress(name)),
+    // this reader's own first, then whatever the layer slot still holds that
+    // the facet does not. Two tiles named the same read the same notes.
+    const facetSigs = tileName ? await readNotesFacet(tileName) : []
+    const sigs = unionNoteSigs(facetSigs, slotSigs)
+    if (sigs.length === 0) return []
     const out: Note[] = []
     for (const sig of sigs) {
       if (typeof sig !== 'string' || !SIG_REGEX.test(sig)) continue

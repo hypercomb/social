@@ -1,11 +1,11 @@
-// hypercomb-shared/core/native-filesystem.ts
+// hypercomb-runtime/src/native-filesystem.ts
 //
 // A FileSystemDirectoryHandle implementation backed by the native store.
 //
-// LIVES IN `shared`, NOT IN THE CLIENT. This is shell-level plumbing — the same
-// category as bootstrapping and file installation — and `Store` imports it
-// directly. Putting it in `hypercomb-client` would make `shared` depend on a
-// shell, inverting the dependency direction.
+// LIVES IN THE RUNTIME PACKAGE, NOT IN THE CLIENT. This is shell-level plumbing
+// — the same category as bootstrapping and file installation — and `Store`
+// imports it directly. Putting it in `hypercomb-client` would make the runtime
+// depend on a shell, inverting the dependency direction.
 //
 // It is inert in a browser: `nativeAvailable()` is false, `nativeRoot()`
 // returns null, and `Store` keeps using OPFS with nothing changed.

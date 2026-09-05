@@ -1,4 +1,4 @@
-// hypercomb-shared/core/sw-domains.ts
+// hypercomb-runtime/src/sw-domains.ts
 //
 // Page → service-worker host-domain hand-off (resource streaming, Phase 2).
 //

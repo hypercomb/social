@@ -45,6 +45,11 @@
  *   - `content`  — a node's content hop (the meta-resource envelope, the
  *     generic node's "what this node says" slot).
  *   - `refs`     — a decoration record's self-declared flat closure.
+ *   - `members`  — a succession atom's ordered envelope sigs
+ *     (`{succession:1, signer, prev, members, at}`, the molecule model's
+ *     head atom — essentials/molecule/facet-succession.ts). The members ARE
+ *     the collection; their bytes must travel with any closure that carries
+ *     the head. `prev`, beside it, is the referent it always was.
  */
 export const EDGE_FIELDS: readonly string[] = Object.freeze([
   'layer',
@@ -54,6 +59,7 @@ export const EDGE_FIELDS: readonly string[] = Object.freeze([
   'children',
   'content',
   'refs',
+  'members',
 ])
 
 /**

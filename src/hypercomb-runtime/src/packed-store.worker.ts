@@ -1,4 +1,4 @@
-// hypercomb-shared/core/packed-store.worker.ts
+// hypercomb-runtime/src/packed-store.worker.ts
 //
 // THE PACKED-STORE WORKER — the one owner of the hive's packed file.
 //

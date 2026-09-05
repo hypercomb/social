@@ -102,6 +102,22 @@ export const artifactFamilyOf = (kind: string): string | null =>
 /** `gallery` → `visual:gallery:artifact`. */
 export const artifactKindFor = (family: string): string => `visual:${family}:artifact`
 
+/** EVERY visual kind names its family, not only the `:artifact` one.
+ *
+ *  `artifactFamilyOf` answers a narrower question — "is this the kind a thing
+ *  wears to BE an artifact of that family" — and returns null for the member
+ *  kinds, which is correct for enrolment and wrong for a chooser: a behaviour
+ *  that makes `visual:website:page` is a maker of WEBSITE things, and a hole
+ *  asking for one should be able to say so. Matching the middle segment is the
+ *  whole declaration; there is still no registry to keep in step.
+ *
+ *  `visual:website:page` → `website`; `visual:gallery:artifact` → `gallery`;
+ *  anything else → null. */
+const VISUAL_KIND_RE = /^visual:([a-z0-9][a-z0-9-]*):[a-z0-9][a-z0-9-]*$/
+
+export const visualFamilyOf = (kind: string): string | null =>
+  VISUAL_KIND_RE.exec(String(kind ?? ''))?.[1] ?? null
+
 /** The family every behaviour that has not declared one of its own falls into —
  *  a WEBSITE, the general "this names a set" artifact. */
 export const SITE_FAMILY = 'site'

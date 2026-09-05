@@ -394,6 +394,44 @@
              and a hole out there are the same hole. -->
         <div class="ld-map" #map [attr.aria-label]="'layout.map' | t"></div>
 
+        <!-- WHAT THIS HOLE IS FOR — on the surface where the shape is made.
+             The map above already selects a pane; this says what that pane is,
+             and until now the only way to say it was an unlabelled glyph in the
+             header leading to a second window. A hole nobody can name is a hole
+             nobody can fill, and the whole point of naming one is that anything
+             wearing the name can answer it.
+
+             Naming is HERE because it is cheap and belongs with the shape.
+             WHO answers, and putting one of them in, is the other window — the
+             deep view of this same hole, reached from the same row. -->
+        @for (hole of focusedHoles(); track hole.path.join('/')) {
+          <div class="ld-naming" role="group" [attr.aria-label]="'layout.hole.name' | t">
+            <span class="ld-naming-where">{{ hole.key }}</span>
+            @if (hole.section) {
+              <span class="ld-naming-kind">{{ 'layout.hole.section' | t }}</span>
+            }
+            <select class="ld-naming-family" #holeFam
+              [attr.aria-label]="'layout.hole.family' | t"
+              [title]="'layout.hole.family' | t"
+              (change)="nameHole(holeFam.value, holeName.value)">
+              @for (family of families(); track family) {
+                <option [value]="family" [selected]="family === holeFamily()">{{ family }}</option>
+              }
+            </select>
+            <input class="ld-naming-name" #holeName
+              type="text"
+              [value]="hole.name"
+              [attr.placeholder]="'layout.hole.placeholder' | t"
+              [attr.aria-label]="'layout.hole.name' | t"
+              (keydown)="nameKey($event, holeFam.value, holeName.value)"
+              (blur)="nameHole(holeFam.value, holeName.value)" />
+            <button class="ld-naming-more" type="button"
+              (click)="openTargets()"
+              [attr.aria-label]="'layout.targets' | t"
+              [title]="'layout.hole.more' | t">◎</button>
+          </div>
+        }
+
         <!-- THE TWO TYPES, IN ONE ROW. Left of the rule are the container's
              own flexbox measurements; right of it is the pane being pointed
              at. One row, because they are the same question asked of two

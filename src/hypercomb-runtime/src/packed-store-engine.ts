@@ -1,4 +1,4 @@
-// hypercomb-shared/core/packed-store-engine.ts
+// hypercomb-runtime/src/packed-store-engine.ts
 //
 // THE PACKED STORE — every small record of a hive in ONE file.
 //
