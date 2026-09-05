@@ -277,7 +277,7 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/sharing/content-broker.drone.ts',
       'hypercomb-essentials/src/sharing/feedback-channel.drone.ts',
       'hypercomb-essentials/src/sharing/host-sync.service.ts',
-      'hypercomb-essentials/src/sharing/push-queue.service.ts',
+      'hypercomb-essentials/src/sharing/retired-push-pool.ts',
       'hypercomb-essentials/src/sharing/swarm.drone.ts',
     ], 'typed-folder literal')
   })

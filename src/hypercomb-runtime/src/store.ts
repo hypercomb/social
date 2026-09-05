@@ -890,14 +890,15 @@ export class Store extends EventTarget {
     // a later writable against the same sig (see the cached-Blob caveat
     // above in this method).
     this.#resourceCache.set(signature, new Blob([bytes], { type: blob.type }))
-    // Mirror up to DCP. PushQueueService (in essentials) subscribes to
-    // `content:wrote` and queues the bytes for sentinel intake. Going
-    // through EffectBus avoids a shared→essentials import.
+    // Announce the write. Subscribers in essentials pick it up through
+    // EffectBus, which avoids a shared→essentials import. Every one of
+    // them that SENDS the bytes anywhere is behind a participant opt-in —
+    // this emit is a notification, never itself an act of publishing
+    // (documentation/write-conformance.md check 10).
     //
     // Suppressed (emit: false) for cache-fill writes — bytes pulled FROM a
     // host via getResource's cold-miss fallback must NOT echo back into
-    // HostSync/PushQueue as if we authored them. Only genuine local
-    // authoring emits.
+    // HostSync as if we authored them. Only genuine local authoring emits.
     if (options?.emit !== false) {
       EffectBus.emit('content:wrote', { sig: signature, kind: 'resource' as const, bytes })
     }

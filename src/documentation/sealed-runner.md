@@ -212,7 +212,7 @@ On the current tree:
 
 | subscriber | gate |
 |---|---|
-| `PushQueueService` | **no policy gate** — no opt-in, no filter on kind, provenance or authorship. Every `content:wrote` sig gets a full byte copy written to `sign('push')/{sig}.{kind}`; the only short-circuits are a 64-hex shape test, an existing-receipt skip, and a silent no-op before Store has an OPFS root. **[corrected] It is not inert on disk** — that write lands on every commit *today*, and nothing in the tree reads, prunes or GCs the pool, so local content duplicates without bound. Inert only as to the network: `globalThis.__sentinelBridge` is read at nine sites and **assigned at none**. `drain()` is kicked on every enqueue, at load, and again 20 s later, so the backlog goes out the moment a bridge appears. |
+| `PushQueueService` | **no policy gate** — no opt-in, no filter on kind, provenance or authorship. Every `content:wrote` sig gets a full byte copy written to `sign('push')/{sig}.{kind}`; the only short-circuits are a 64-hex shape test, an existing-receipt skip, and a silent no-op before Store has an OPFS root. **[corrected] It is not inert on disk** — that write lands on every commit *today*, and nothing in the tree reads, prunes or GCs the pool, so local content duplicates without bound. Inert only as to the network: `globalThis.__sentinelBridge` is read at nine sites and **assigned at none**. `drain()` is kicked on every enqueue, at load, and again 20 s later, so the backlog goes out the moment a bridge appears.  **RESOLVED 2026-09-04 — DELETED.** Gating it would have ported an install path; the service is the deleted installer's push channel and HostSyncService already covers the job behind an opt-in. `sharing/retired-push-pool.ts` collects the stranded pools (verify the canonical copy, then remove the duplicate; an unverifiable entry is kept). See `write-conformance.md` check 10. |
 | `HostSyncService` | gated overall (`#anyEnabled()` fronts the handler) — but the self-domain target is built `{ publicOnly: false }`, and the drain's only per-sig gate is the public-only one. So with `hc:host-sync:enabled` on and a self-domain set, entries of **every** kind are signed-PUT to the self-domain with no `.public` marker required, and a layer write drags its whole transitive ref closure into the queue. |
 | `PassiveReplicationQueue` | enqueues durable intent on every head change regardless of gate, and drains the moment the participant opts in. |
 | `FeedbackChannelDrone` | publishes `feedback`/`qa`/`qa-answer` records to a fixed community-wide channel — a **channel id, not a relay URL** — **by default, with no opt-in and no UI showing the role is active**. Gated only on record kind and on not visiting another hive; the sole off switch is an undocumented `hc:feedback-channel:enabled='false'`. |
@@ -244,7 +244,11 @@ exist yet:**
 1. Adoption writes without emitting, and re-marks provenance as foreign. **This
    is an API change, not a call-site one** — `commitLayer` has no suppression
    parameter, so one must be added before an adopted layer can land quietly.
-2. `PushQueueService` acquires a gate. It is the only ungated subscriber.
+2. ~~`PushQueueService` acquires a gate. It is the only ungated subscriber.~~
+   **DONE 2026-09-04 by deletion** — see §2.4. It was the only ungated
+   subscriber; the census in `sharing/publish-gesture.spec.ts` now freezes
+   every file whose code names `content:wrote`, so the next one cannot
+   arrive unnoticed.
 3. Swarm auto-publish ignores `cell:added` originating from an adopt.
 4. The runnability gate keys on **provenance, not tree position** —
    `isForeignContent` currently returns false for anything outside a marked
@@ -375,12 +379,12 @@ elsewhere and nobody is watching them.
 Nothing in §3 is safe to build before §2.4 is paid down, because the adoption
 door is the one place a runner's output touches the participant. In order:
 
-1. Gate `PushQueueService` — and separately, decide whether its unbounded,
-   never-collected on-disk duplicate of all content is wanted at all. Give
-   `commitLayer` a suppression parameter, then make adoption use it.
-   Provenance-key the runnability gate. **All of this is worth doing whether or
-   not a runner is ever built** — it is the standing "publishing is an act"
-   doctrine, unenforced.
+1. ~~Gate `PushQueueService`~~ **DONE 2026-09-04 — deleted, and the pool it
+   had been accumulating since 2026-08-30 is collected** (§2.4). Still owed
+   from this item: give `commitLayer` a suppression parameter, then make
+   adoption use it; provenance-key the runnability gate. **Both are worth
+   doing whether or not a runner is ever built** — they are the standing
+   "publishing is an act" doctrine, unenforced.
 2. Settle the closure question: one walker, one definition of a record's
    children, or an explicit statement that closure is defined only over an
    inventory.

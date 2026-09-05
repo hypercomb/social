@@ -3,10 +3,14 @@
 // Remote backup: signed HTTP push of committed content to the operator's
 // OWN host (e.g. jwize.com), with confirmed-read-back receipts.
 //
-// This is the REMOTE counterpart to PushQueueService's DCP-iframe path.
-// Same trigger (`content:wrote`) and the same crash-safe
-// queue-with-receipts shape, but a different, fully isolated destination
-// and transport:
+// THE ONLY `content:wrote` SUBSCRIBER THAT SENDS BYTES ANYWHERE, and it
+// asks first: #anyEnabled() fronts the handler, the retry timer and the boot
+// kick, so an un-opted-in participant queues nothing. It once had a sibling —
+// PushQueueService, the DCP installer's push channel — which subscribed with
+// no gate at all; that channel was retired with the installer and its pools
+// are collected by `retired-push-pool.ts`. Do not grow a second one.
+//
+// Crash-safe queue-with-receipts, over its own destination and transport:
 //
 //   transport = HTTP PUT to https://<host>/<typed-path> carrying a NIP-98
 //   Authorization header — a kind-27235 Nostr event signed by the
@@ -23,9 +27,9 @@
 //
 // On-disk shape: two POOLS OF MEANING at the OPFS root — dirs named by
 // sign(meaning), sha256 of the UTF-8 meaning bytes, the same derivation
-// Store uses (no typed __folders__, ever). Isolated from
-// PushQueueService's pools (distinct meanings) so the two backup channels
-// never interfere:
+// Store uses (no typed __folders__, ever). The meanings are its own — the
+// retired push channel's 'push'/'receipts' pools are a different address and
+// are only ever collected, never written:
 //
 //   sign('host-push')/{sig}.{kind}         ← queued bytes (FIFO by mtime)
 //   sign('host-push')/{sig}.public         ← sidecar marker: this sig is in a
@@ -118,8 +122,8 @@ const metaIsChildIncidence = (record: unknown, kind: HostSyncKind): boolean =>
   && CHILD_SLOT_SET.has(String((record as Record<string, unknown>)?.['relation'] ?? 'children'))
 const ENTRY_RE = /^([a-f0-9]{64})\.(layer|bee|dependency|resource)$/
 // Pool meanings — sign(meaning) IS the pool address (see #poolSignature).
-// Distinct from PushQueueService's 'push'/'receipts' meanings so the two
-// backup channels' pools never collide.
+// Distinct from the retired push channel's 'push'/'receipts' meanings, so
+// its collector can never reach these.
 const PUSH_MEANING = 'host-push'
 const RECEIPTS_MEANING = 'host-receipts'
 // Legacy drain sources — pre-pool dirs. Opened WITHOUT create (a drained
@@ -1692,7 +1696,7 @@ export class HostSyncService extends EventTarget {
 
   // -------------------------------------------------
   // internal — directory resolution + queue ops
-  // (mirrors PushQueueService; distinct pool meanings)
+  // (its own pool meanings — nothing else writes them)
   // -------------------------------------------------
 
   readonly #getPool = async (meaning: string, create: boolean): Promise<FileSystemDirectoryHandle | null> => {
@@ -1873,6 +1877,6 @@ if (_hostSync.isEnabled()) void _hostSync.drain()
 // the shell has settled so the legacy dir absorb happens even in an
 // opted-in session that never writes new content. Detached + delayed clear
 // of first paint and the warmup walk, mirroring Store's content self-clean
-// and PushQueueService's boot kick. Gated on isEnabled() so an un-opted-in
+// and the retired-push collector. Gated on isEnabled() so an un-opted-in
 // visitor never triggers the signer.
 setTimeout(() => { if (_hostSync.isEnabled()) void _hostSync.drain() }, 20_000)

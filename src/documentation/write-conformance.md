@@ -199,6 +199,42 @@ subKey, sig)` emitting a sig-named JSON member under a colon meaning
   `HIVE_FORMAT_ROOT_KEY` is settable over the bridge with no gesture, for the
   same reason `vocabulary:hive` was. *Fix:* add it — better, invert to an
   allow-list of `install:*`.
+- `push-queue.service.ts:129` `PushQueueService` — **the fifth hole, found
+  2026-09-04, and the only `content:wrote` subscriber with no gate of any
+  kind**: no opt-in, no filter on kind, provenance or authorship. It wrote a
+  full byte copy of every committed sig into `sign('push')/{sig}.{kind}` for
+  the DCP installer to drain. Two faults, not one. (a) LOCAL, happening on
+  every commit: nothing in the tree read, pruned or collected that pool, so
+  content duplicated on disk without bound — `RepushQueenBee` drives
+  HostSyncService's separate `host-push`/`host-receipts` meanings, not this
+  one. (b) LATENT, network: `#pushAndReceipt` returned false immediately
+  because `globalThis.__sentinelBridge` is read at nine sites and assigned at
+  none — the sole assigner went with the installer in `fc3696c3b`
+  (2026-08-30). `drain()` was kicked on every enqueue, at module load and on
+  a 20 s timer, so the whole accumulated backlog would have gone out the
+  moment any bridge appeared.
+
+**FIXED 2026-09-04 — the fifth is DELETED, not gated.** Gating it would have
+been porting an install path: the service is the installer's push channel and
+the installer is gone, while `HostSyncService` already does the same job on
+the same trigger behind `#anyEnabled()`. `push-queue.service.ts` is removed,
+with its two dead bridge-gated callers (`snapshot.queen.ts` `#pushClosure`,
+`edit-actions.component.ts`'s save-branch drain) — a snapshot and a Save are
+both plainly local now, and neither claims otherwise in its toast.
+`sharing/retired-push-pool.ts` collects what already accumulated: per entry,
+confirm the canonical copy at its content-addressed home holds the same
+bytes, then remove the duplicate — an entry that cannot be vouched for is
+KEPT and counted, because it may hold the last surviving copy of its sig. It
+probes OPFS directly rather than through Store, whose content reads all call
+`#stageToHost`; a collector built on those would publish every sig it swept.
+`'push'` and `'receipts'` STAY in `BARE_WORD_POOL_MEANINGS` until no
+participant can still be carrying one of those dirs — the registry is what
+stops a root walker taking a pool for a lineage sigbag and pruning it.
+Ratcheted in `sharing/publish-gesture.spec.ts`, which also freezes the census
+of every file whose code names `content:wrote` at all — by the literal, not
+by a subscribe shape, so a handler registered through a `listens` array or a
+loop over effect names cannot slip past. Behaviour in
+`sharing/retired-push-pool.spec.ts`.
 
 **Check 5 on the canonical write surface.** *FIXED 2026-09-04 — the machine carries scalar slots verbatim (a list op on one replaces it, explicitly); the committer's `update` passes non-array values through as `scalars` instead of discarding them. Tests in `layer-machine.spec.ts`.*
 `layer-machine.ts:121` `fromLayer`

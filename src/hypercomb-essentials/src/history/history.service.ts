@@ -1135,9 +1135,10 @@ export class HistoryService {
     this.#noteHeadDerived(locationSig, markerName)
     this.#scheduleHeadPersist()
 
-    // Mirror up to DCP. PushQueueService listens on EffectBus and
-    // enqueues the bytes for sentinel intake; the queue survives
-    // page reloads and retries until DCP acks.
+    // Announce the commit. Subscribers pick it up through EffectBus; the
+    // ones that SEND the bytes anywhere are behind a participant opt-in.
+    // This emit is a notification, never itself an act of publishing
+    // (documentation/write-conformance.md check 10).
     EffectBus.emit('content:wrote', { sig: layerSig, kind: 'layer' as const, bytes: bytes.buffer as ArrayBuffer })
 
     return layerSig
