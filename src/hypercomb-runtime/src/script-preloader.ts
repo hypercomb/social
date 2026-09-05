@@ -5,37 +5,29 @@
 
 import { Bee, type BeeResolver, EffectBus } from '@hypercomb/core'
 import { Store } from './store'
+import { installedPackageSig } from './installed-package.js'
+import {
+  learnedCriticalBeeSigs,
+  parseLearnedCriticalBeeSigs,
+  renderCriticalStatus,
+  serializeLearnedCriticalBeeSigs,
+  validateCriticalBeeHints,
+} from './critical-bees.js'
 
 export interface ActionDescriptor {
   signature: string
   name: string // kebab-case, ux-facing
 }
 
+type DeferredBeeLoads = {
+  pending: readonly string[]
+  loads: readonly Promise<Bee | null>[]
+}
+
 export class ScriptPreloader extends EventTarget implements BeeResolver {
 
   // SHA-256 of canonical JSON: [] → 4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
   static readonly #EMPTY_SIGS: readonly string[] = Object.freeze([])
-
-  // Render-critical IoC keys. find() resolves as soon as every key here
-  // is registered; remaining bees keep loading in background. This is the
-  // minimum set required to paint the first hive frame: Pixi host, hex
-  // math, layout solver, the cell renderer, and its prerequisites.
-  //
-  // Keep this list small — every entry blocks first paint. If a drone
-  // belongs here, it should be because the visible grid genuinely cannot
-  // render without it. Anything tile-action / overlay / network / history
-  // related does NOT belong here.
-  static readonly #RENDER_CRITICAL_KEYS: readonly string[] = Object.freeze([
-    '@PixiHostWorker',
-    '@Settings',
-    '@AxialService',
-    '@LayoutService',
-    '@ShowCellDrone',
-    // Hot-reloaded class name in dev shell (esbuild collision-rename adds
-    // a `_` prefix). Production sees the un-prefixed form.
-    '@_ShowCellDrone',
-    '@BackgroundDrone',
-  ])
 
   private get store(): Store { return <Store>get("@hypercomb.social/Store") }
 
@@ -116,7 +108,12 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       const tWalk = performance.now()
       const walked = layerRoots.length
         ? await this.#walkLayers(layerRoots)
-        : { bees: ScriptPreloader.readManifestBees(), dependencies: ScriptPreloader.#EMPTY_SIGS, resources: ScriptPreloader.#EMPTY_SIGS }
+        : {
+            bees: ScriptPreloader.readManifestBees(),
+            dependencies: ScriptPreloader.#EMPTY_SIGS,
+            resources: ScriptPreloader.#EMPTY_SIGS,
+            criticalBees: ScriptPreloader.#EMPTY_SIGS,
+          }
       const walkMs = performance.now() - tWalk
 
       // Cache warming, AT IDLE AND IN SMALL BATCHES.
@@ -137,8 +134,9 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       if (walked.resources.length) this.#preheatAtIdle(walked.resources)
 
       const tBees = performance.now()
+      let deferredBeeLoads: DeferredBeeLoads | null = null
       if (walked.bees.length) {
-        await this.#loadBeesPrioritized(walked.bees)
+        deferredBeeLoads = await this.#loadBeesPrioritized(walked.bees, walked.criticalBees)
       }
       const beesMs = performance.now() - tBees
 
@@ -179,11 +177,21 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         ;(window as any).__hcBoot?.(`first preloader.find done (total=${findMs.toFixed(0)}ms walk=${walkMs.toFixed(0)}ms bees=${beesMs.toFixed(0)}ms)`)
       }
 
-      // The resolver contract is Promise<Bee[]> and the processor pulses
-      // every entry — pulse-less module products (EventTarget UI drones,
-      // constructor-wired services) are legitimate cache residents but
-      // must never reach the pulse loop.
-      return [...this.#beeCache.values()].filter(b => typeof (b as any)?.pulse === 'function')
+      // Atomically assign pulse ownership. A background import can finish at
+      // any microtask boundary, so taking a live cache snapshot in find() and
+      // letting a separate continuation infer ownership caused timing-specific
+      // double pulses. Everything in this exact snapshot belongs to the
+      // processor encounter; the finisher owns only later arrivals.
+      const encounterEntries = [...this.#beeCache.entries()]
+        .filter(([, bee]) => typeof (bee as any)?.pulse === 'function')
+      for (const [sig] of encounterEntries) this.#firstPulsed.add(sig)
+      if (deferredBeeLoads) {
+        this.#finishBeeLoadsInBackground(deferredBeeLoads.pending, deferredBeeLoads.loads)
+      }
+
+      // Pulse-less module products (EventTarget UI drones, constructor-wired
+      // services) are legitimate cache residents but never reach the loop.
+      return encounterEntries.map(([, bee]) => bee)
     }
 
     this.#finding = run()
@@ -235,15 +243,18 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     dependencies: string[]
     resources: string[]
     children: string[]
+    criticalBees?: unknown
   }>()
 
   #walkLayers = async (
     roots: string[]
-  ): Promise<{ bees: string[]; dependencies: string[]; resources: string[] }> => {
+  ): Promise<{ bees: string[]; dependencies: string[]; resources: string[]; criticalBees: string[] }> => {
     const visited = new Set<string>()
     const bees = new Set<string>()
     const dependencies = new Set<string>()
     const resources = new Set<string>()
+    const activeRoot = installedPackageSig()
+    let rootCriticalBees: unknown
 
     let opfsReads = 0
     let cacheHits = 0
@@ -271,11 +282,15 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         const tParse = performance.now()
         try {
           const layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
+          // `cells` is the current signed-layer shape. `layers` remains a
+          // read-only fallback for packages emitted before the rename.
+          const childRefs = Array.isArray(layer['cells']) ? layer['cells'] : layer['layers']
           parsed = {
             bees: ((layer['bees'] as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
             dependencies: ((layer['dependencies'] as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
             resources: ((layer['resources'] as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
-            children: ((layer['layers'] as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
+            children: ((childRefs as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
+            criticalBees: layer['criticalBees'],
           }
           this.#layerCache.set(clean, parsed)
         } catch (err) {
@@ -288,6 +303,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       for (const b of parsed.bees) bees.add(b)
       for (const d of parsed.dependencies) dependencies.add(d)
       for (const r of parsed.resources) resources.add(r)
+      // Startup intent is accepted only from the package root. Child-layer
+      // fields are ordinary unknown metadata, so they can never influence
+      // scheduling even if an older/custom publisher happens to use the name.
+      if (activeRoot && clean === activeRoot) rootCriticalBees = parsed.criticalBees
 
       await Promise.all(parsed.children.map(visit))
     }
@@ -296,10 +315,17 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
 
     console.log(`[script-preloader] walkLayers: ${visited.size} layers (${opfsReads} OPFS reads = ${opfsMs.toFixed(0)}ms, ${cacheHits} cache hits, parse ${parseMs.toFixed(0)}ms)`)
 
+    const enabledBees = [...bees].filter(Boolean)
+    const criticalBees = validateCriticalBeeHints(rootCriticalBees, enabledBees)
+    if (rootCriticalBees !== undefined && !criticalBees) {
+      console.warn('[script-preloader] ignoring invalid root criticalBees hint; using validated fallback scheduling')
+    }
+
     return {
-      bees: [...bees].filter(Boolean),
+      bees: enabledBees,
       dependencies: [...dependencies].filter(Boolean),
       resources: [...resources].filter(Boolean),
+      criticalBees: criticalBees ?? [],
     }
   }
 
@@ -354,18 +380,18 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   /**
    * Priority-aware bee loading.
    *
-   * Two strategies, picked based on whether we have a learned sig→iocKey
-   * cache from prior boots:
+   * Two strategies, picked from package-bound metadata:
    *
-   *   FAST PATH (warm cache): we already know which sigs are render-
-   *     critical. Load JUST those in wave 1, awaited. The remaining
+   *   FAST PATH: the signed package root names the render-critical sigs
+   *     (or an older package has a package-bound learned cache). Load JUST
+   *     those in wave 1, awaited. The remaining
    *     ~48 bees start AFTER critical finishes, in background. Critical
    *     gets exclusive use of the browser's eval thread for ~6 modules
    *     instead of competing with 48 — empirically the difference between
    *     ~400ms (everything jammed in parallel) and ~50ms (just critical).
    *
-   *   COLD PATH (no cache): we don't know which sigs map to critical IoC
-   *     keys yet, so we fall back to the onRegister race — start all
+   *   COLD PATH (no usable hint): we don't know which sigs map to critical
+   *     IoC keys yet, so we fall back to the onRegister race — start all
    *     loads, resolve as soon as the six critical keys appear. Slower
    *     than the warm path, but populates the cache so the next boot is
    *     fast.
@@ -375,14 +401,23 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
    * heartbeat wires EffectBus listeners (NostrMeshDrone, PairedChannelDrone)
    * require this or their listeners never register.
    */
-  #loadBeesPrioritized = async (sigs: string[]): Promise<void> => {
+  #loadBeesPrioritized = async (
+    sigs: readonly string[],
+    signedCriticalBees: readonly string[],
+  ): Promise<DeferredBeeLoads | null> => {
     const pending = sigs.filter(sig => sig && this.#isSignature(sig) && !this.#beeCache.has(sig))
-    if (!pending.length) return
+    if (!pending.length) return null
 
     EffectBus.emit('loader:bees-progress', { loading: pending.length, total: this.#beeCache.size + pending.length })
 
-    const learnedCritical = ScriptPreloader.#readLearnedCriticalSigs()
-    const criticalSet = new Set(learnedCritical.filter(sig => pending.includes(sig)))
+    const learnedCritical = signedCriticalBees.length
+      ? ScriptPreloader.#EMPTY_SIGS
+      : ScriptPreloader.#readLearnedCriticalSigs(sigs)
+    const criticalSource = signedCriticalBees.length ? 'signed root' : 'learned cache'
+    const criticalSet = new Set(
+      (signedCriticalBees.length ? signedCriticalBees : learnedCritical)
+        .filter(sig => sigs.includes(sig)),
+    )
 
     // ── FAST PATH ────────────────────────────────────────────────
     if (criticalSet.size > 0) {
@@ -390,80 +425,94 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       const restPending = pending.filter(sig => !criticalSet.has(sig))
 
       const tWave1 = performance.now()
-      await Promise.allSettled(criticalPending.map(sig => this.#loadBeeBySignature(sig)))
+      const criticalLoads = criticalPending.map(sig => this.#loadBeeBySignature(sig))
+      await Promise.allSettled(criticalLoads)
       const wave1Ms = performance.now() - tWave1
+      const status = renderCriticalStatus(window.ioc)
 
-      // Encounter loop will pulse these. Mark them.
-      for (const sig of this.#beeCache.keys()) this.#firstPulsed.add(sig)
+      if (status.ready) {
+        const fastMsg = `[script-preloader] FAST ${criticalSource} wave (${criticalPending.length}) loaded in ${wave1Ms.toFixed(0)}ms; ${restPending.length} backgrounded`
+        console.log(fastMsg)
+        try { localStorage.setItem('hc:perf-last-boot', `${Date.now()}:${fastMsg}`) } catch {}
 
-      const fastMsg = `[script-preloader] FAST critical wave (${criticalPending.length}) loaded in ${wave1Ms.toFixed(0)}ms; ${restPending.length} backgrounded`
-      console.log(fastMsg)
-      try { localStorage.setItem('hc:perf-last-boot', `${Date.now()}:${fastMsg}`) } catch {}
-
-      // Background: load the rest and pulse them individually.
-      void (async () => {
         const restLoads = restPending.map(sig => this.#loadBeeBySignature(sig))
-        await Promise.allSettled(restLoads)
-        for (const [sig, bee] of this.#beeCache) {
-          if (this.#firstPulsed.has(sig)) continue
-          this.#firstPulsed.add(sig)
-          // Pulse-less entries are legitimate: EventTarget UI drones
-          // (palette, toast, notes…) are constructor-wired and don't
-          // participate in the pulse cycle.
-          if (typeof (bee as any)?.pulse !== 'function') continue
-          try { await bee.pulse('') } catch (err) {
-            console.warn(`[script-preloader] late pulse failed for ${bee.iocKey}:`, err)
-          }
-        }
-        this.#refreshProjection()
-        ScriptPreloader.#updateLearnedCriticalSigs(this.#beeCache)
-        EffectBus.emit('loader:bees-done', {
-          loaded: this.#beeCache.size,
-          failed: pending.length - this.#beeCache.size,
-          total: this.#beeCache.size,
-        })
-      })()
-      return
+        return { pending, loads: [...criticalLoads, ...restLoads] }
+      }
+
+      // A hint is scheduling advice, never a readiness assertion. If a
+      // critical module failed or the hint was incomplete, start everything
+      // else and use the same readiness/all-settled gate as a cold boot.
+      if (!signedCriticalBees.length) ScriptPreloader.#clearLearnedCriticalSigs()
+      console.warn(
+        `[script-preloader] ${criticalSource} wave incomplete after ${wave1Ms.toFixed(0)}ms; ` +
+        `falling back (${ScriptPreloader.#formatMissingCritical(status.missing)})`,
+      )
+
+      const tFallback = performance.now()
+      const fallback = await this.#loadUntilRenderCritical(restPending)
+      const fallbackMs = performance.now() - tFallback
+
+      const fallbackMsg = fallback.ready
+        ? `[script-preloader] FALLBACK critical services ready in ${fallbackMs.toFixed(0)}ms`
+        : `[script-preloader] FALLBACK all bees settled in ${fallbackMs.toFixed(0)}ms with critical services missing: ${ScriptPreloader.#formatMissingCritical(fallback.missing)}`
+      console.log(fallbackMsg)
+      try { localStorage.setItem('hc:perf-last-boot', `${Date.now()}:${fallbackMsg}`) } catch {}
+      return { pending, loads: [...criticalLoads, ...fallback.loads] }
     }
 
     // ── COLD PATH (no cache yet) ─────────────────────────────────
-    const allLoads = pending.map(sig => this.#loadBeeBySignature(sig))
-
-    const critical = ScriptPreloader.#RENDER_CRITICAL_KEYS
     const tCriticalStart = performance.now()
-    const criticalReady = new Promise<void>(resolve => {
-      const stillNeeded = new Set<string>(critical)
-      for (const k of [...stillNeeded]) {
-        if (window.ioc.has?.(k)) stillNeeded.delete(k)
-      }
-      if (stillNeeded.size === 0) { resolve(); return }
-
-      let unsub: (() => void) | undefined
-      unsub = window.ioc.onRegister?.((key) => {
-        if (!stillNeeded.has(key)) return
-        stillNeeded.delete(key)
-        if (stillNeeded.size === 0) {
-          unsub?.()
-          resolve()
-        }
-      })
-      if (!unsub) {
-        void Promise.allSettled(allLoads).then(() => resolve())
-      }
-    })
-
-    await Promise.race([
-      criticalReady,
-      Promise.allSettled(allLoads).then(() => {}),
-    ])
+    const cold = await this.#loadUntilRenderCritical(pending)
     const criticalMs = performance.now() - tCriticalStart
 
-    for (const sig of this.#beeCache.keys()) this.#firstPulsed.add(sig)
+    const coldMsg = cold.ready
+      ? `[script-preloader] COLD critical services ready in ${criticalMs.toFixed(0)}ms; populating package-bound cache`
+      : `[script-preloader] COLD all bees settled in ${criticalMs.toFixed(0)}ms with critical services missing: ${ScriptPreloader.#formatMissingCritical(cold.missing)}`
+    console.log(coldMsg)
+    try { localStorage.setItem('hc:perf-last-boot', `${Date.now()}:${coldMsg}`) } catch {}
+    return { pending, loads: cold.loads }
+  }
 
-    console.log(`[script-preloader] COLD critical bees ready in ${criticalMs.toFixed(0)}ms; populating sig→iocKey cache for next boot`)
+  /** Install the readiness listener before module evaluation starts, then
+   *  return as soon as the visual prerequisites register or every requested
+   *  module settles. The latter keeps a broken package diagnosable without
+   *  turning startup into an infinite wait. */
+  #loadUntilRenderCritical = async (
+    sigs: readonly string[],
+  ): Promise<{ loads: Promise<Bee | null>[]; ready: boolean; missing: ReadonlyArray<ReadonlyArray<string>> }> => {
+    let signalled = false
+    let signalReady: () => void = () => { /* assigned by the promise */ }
+    const criticalReady = new Promise<void>(resolve => { signalReady = resolve })
+    const check = (): void => {
+      if (signalled || !renderCriticalStatus(window.ioc).ready) return
+      signalled = true
+      signalReady()
+    }
 
+    let unsubscribe: (() => void) | undefined
+    try { unsubscribe = window.ioc.onRegister?.(() => { check() }) } catch { /* all-settled remains the fallback */ }
+    check()
+
+    const loads = sigs.map(sig => this.#loadBeeBySignature(sig))
+    try {
+      await Promise.race([
+        criticalReady,
+        Promise.allSettled(loads).then(() => undefined),
+      ])
+    } finally {
+      unsubscribe?.()
+    }
+
+    const status = renderCriticalStatus(window.ioc)
+    return { loads, ...status }
+  }
+
+  #finishBeeLoadsInBackground = (
+    pending: readonly string[],
+    loads: readonly Promise<Bee | null>[],
+  ): void => {
     void (async () => {
-      await Promise.allSettled(allLoads)
+      await Promise.allSettled(loads)
       for (const [sig, bee] of this.#beeCache) {
         if (this.#firstPulsed.has(sig)) continue
         this.#firstPulsed.add(sig)
@@ -477,54 +526,50 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       }
       this.#refreshProjection()
       ScriptPreloader.#updateLearnedCriticalSigs(this.#beeCache)
+      const loaded = pending.filter(sig => this.#beeCache.has(sig)).length
       EffectBus.emit('loader:bees-done', {
-        loaded: this.#beeCache.size,
-        failed: pending.length - this.#beeCache.size,
+        loaded,
+        failed: pending.length - loaded,
         total: this.#beeCache.size,
       })
     })()
   }
 
-  /** Read learned critical-bee sigs from prior boots. Empty on first run. */
-  static #readLearnedCriticalSigs(): readonly string[] {
+  static #formatMissingCritical(missing: ReadonlyArray<ReadonlyArray<string>>): string {
+    return missing
+      .map(group => group.map(key => key.split('/').pop() ?? key).join('|'))
+      .join(', ')
+  }
+
+  /** Read learned critical-bee sigs only when they belong to this exact live
+   *  package and remain members of its signed bee inventory. */
+  static #readLearnedCriticalSigs(enabled: Iterable<string>): readonly string[] {
     try {
+      const packageSig = installedPackageSig()
       const raw = localStorage.getItem('hc:critical-bee-sigs')
-      if (!raw) return []
-      const parsed = JSON.parse(raw)
-      return Array.isArray(parsed)
-        ? parsed.filter(s => typeof s === 'string' && /^[a-f0-9]{64}$/i.test(s))
-        : []
+      if (!packageSig || !raw) return []
+      return parseLearnedCriticalBeeSigs(raw, packageSig, enabled) ?? []
     } catch { return [] }
   }
 
-  /** Persist learned sig→iocKey mapping for render-critical bees so the
-   *  next boot can hit the fast path. Best-effort; failures are silent.
-   *
-   *  Matches by constructor.name string, not by instance identity. Dev-
-   *  shell hot-reload creates parallel class objects: the instance in
-   *  `window.ioc` (registered first by a stale module) can be a different
-   *  object than the one in `beeCache` (created fresh by `store.getBee`).
-   *  Instance comparison fails. Constructor.name is stable across the
-   *  module-boundary because esbuild keeps the class name. */
+  static #clearLearnedCriticalSigs(): void {
+    try { localStorage.removeItem('hc:critical-bee-sigs') } catch { /* best-effort cache */ }
+  }
+
+  /** Persist a complete sig→class mapping for render-critical bees so an
+   *  older package with no signed hint can hit the fast path next boot.
+   *  Names come from iocKey (or constructor.name), never instance identity,
+   *  and the cache is bound to the exact installed package signature. */
   static #updateLearnedCriticalSigs(beeCache: Map<string, Bee>): void {
     try {
-      const criticalClassNames = new Set<string>()
-      for (const key of ScriptPreloader.#RENDER_CRITICAL_KEYS) {
-        const className = key.split('/').pop()
-        if (className) criticalClassNames.add(className)
-      }
-      const sigs: string[] = []
-      const seenKeys: string[] = []
-      const distinctInstances = new Set<unknown>()
-      for (const [sig, bee] of beeCache) {
-        distinctInstances.add(bee)
-        const iocKey = (bee as any)?.iocKey ?? '(null)'
-        seenKeys.push(iocKey)
-        const className = iocKey.split('/').pop()
-        if (className && criticalClassNames.has(className)) sigs.push(sig)
-      }
-      localStorage.setItem('hc:critical-bee-sigs', JSON.stringify(sigs))
-      console.log(`[script-preloader] cached ${sigs.length} critical sigs (saw ${seenKeys.length} bees, ${distinctInstances.size} distinct instances); want=${[...criticalClassNames].join(',')}; got_first5=${seenKeys.slice(0, 5).join('|')}`)
+      const packageSig = installedPackageSig()
+      const sigs = learnedCriticalBeeSigs(beeCache)
+      if (!packageSig || !sigs) return
+      localStorage.setItem(
+        'hc:critical-bee-sigs',
+        serializeLearnedCriticalBeeSigs(packageSig, sigs),
+      )
+      console.log(`[script-preloader] cached ${sigs.length} package-bound critical bee signatures`)
     } catch (err) {
       console.warn('[script-preloader] failed to persist critical bee sigs:', err)
     }

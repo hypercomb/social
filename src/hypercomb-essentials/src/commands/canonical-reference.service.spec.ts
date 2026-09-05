@@ -112,14 +112,22 @@ describe('CanonicalReferenceService', () => {
         written.push(record)
         return hex('decoration:' + written.length)
       },
-      getPool: async () => ({
-        getFileHandle: async () => ({
-          createWritable: async () => ({
-            write: async (bytes: Uint8Array) => { pooled.push(JSON.parse(new TextDecoder().decode(bytes))) },
-            close: async () => undefined,
+      // The variant record no longer lands at the pool's TOP LEVEL — deriving
+      // a pool address from a raw tile name wrote foreign 64-hex records into
+      // what the molecule model says is that tile's own molecule. It is now
+      // `canonical:variants` (colon-scoped, unreachable by any tile name) with
+      // sign(name) as a SUB-BUCKET, so the pool has to nest here too.
+      getPool: async () => {
+        const bucket = {
+          getFileHandle: async () => ({
+            createWritable: async () => ({
+              write: async (bytes: Uint8Array) => { pooled.push(JSON.parse(new TextDecoder().decode(bytes))) },
+              close: async () => undefined,
+            }),
           }),
-        }),
-      }) as unknown as FileSystemDirectoryHandle,
+        }
+        return { ...bucket, getDirectoryHandle: async () => bucket } as unknown as FileSystemDirectoryHandle
+      },
     })
   })
 

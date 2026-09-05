@@ -158,4 +158,17 @@ $deepen-max-steps: 24;
   @at-root :host-context(:is(#{$sel})) & {
     --acc: #{$deep};
   }
+
+  // `system` removes data-theme. On a light OS its panel ground is bright, so
+  // it needs the same deep identity accent as explicit Light. Both selector
+  // forms are required for the Angular/global stylesheet split above; the
+  // media query keeps the authored pastel in system-dark sessions.
+  @media (prefers-color-scheme: light) {
+    @at-root :root:not([data-theme]) & {
+      --acc: #{$deep};
+    }
+    @at-root :host-context(:root:not([data-theme])) & {
+      --acc: #{$deep};
+    }
+  }
 }

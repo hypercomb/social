@@ -108,8 +108,8 @@
   // Refused: a sibling already reads this way. Same token as .link-denied.
   &.rename-denied,
   &.rename-denied:focus {
-    border-bottom-color: #e05050;
-    color: #e05050;
+    border-bottom-color: var(--hc-status-alert);
+    color: var(--hc-status-alert);
   }
 }
 
@@ -131,8 +131,8 @@
   transition: color 0.15s, background 0.15s;
 
   &:hover {
-    color: tw.ink(#ff6666);
-    background: rgba(255, 100, 100, 0.1);
+    color: var(--hc-status-alert);
+    background: color-mix(in srgb, var(--hc-status-alert) 10%, transparent);
   }
 }
 
@@ -186,14 +186,16 @@
   pointer-events: none;
 
   span {
-    color: var(--hc-window-ink-quiet);
+    // This copy lives on the fixed neutral image stage, not on the themed
+    // dialog material. Keep its ink paired with that stage in every theme.
+    color: rgba(0, 0, 0, 0.72);
     font-size: 0.8em;
   }
 }
 
 .placeholder-icon {
   font-size: 2.5em !important;
-  color: #999 !important;
+  color: rgba(0, 0, 0, 0.58) !important;
 }
 
 // ── hex frame mask ──────────────────────────────────────
@@ -205,7 +207,9 @@
   transform: translate(-50%, -50%);
   pointer-events: none;
   z-index: 2;
-  color: var(--hc-window-ink-loud);
+  // The label is composited over arbitrary imagery on a fixed black scrim;
+  // theme ink would turn dark in the bright themes and disappear here.
+  color: var(--hc-window-on-scrim);
   font-family: var(--hc-font);
   font-size: 0.95em;
   letter-spacing: 0.04em;
@@ -247,8 +251,8 @@
   display: flex;
   align-items: center;
   gap: 0.4em;
-  background: #252528;
-  border: 1px solid #3a3a3e;
+  background: var(--hc-window-tint);
+  border: 1px solid var(--hc-window-line-firm);
   border-radius: var(--hc-radius-floating);
   color: var(--hc-window-ink-loud);
   cursor: pointer;
@@ -262,8 +266,8 @@
   }
 
   &:hover {
-    background: #333336;
-    border-color: #555;
+    background: var(--hc-window-tint-strong);
+    border-color: var(--md-secondary);
   }
 }
 
@@ -320,11 +324,11 @@
   }
 
   &.broken::before {
-    border-color: #666;
+    border-color: currentColor;
   }
 
   &.broken::after {
-    border-color: #666;
+    border-color: currentColor;
   }
 }
 
@@ -422,7 +426,8 @@
   border-radius: 50%;
   border: none;
   background: rgba(255, 255, 255, 0.15);
-  color: var(--hc-window-ink-loud);
+  // Camera chrome always sits on live video / the black crop mask.
+  color: var(--hc-window-on-scrim);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -469,19 +474,19 @@
   grid-column: 2 / -1;
 
   &.link-denied {
-    border-color: #e05050;
-    color: #e05050;
+    border-color: var(--hc-status-alert);
+    color: var(--hc-status-alert);
   }
 
   &.link-warned {
-    border-color: #d4a843;
-    color: tw.ink(#d4a843);
+    border-color: var(--hc-status-warn);
+    color: var(--hc-status-warn);
   }
 }
 
 .field-input {
-  background: #1e1e22;
-  border: 1px solid #333;
+  background: var(--hc-window-tint);
+  border: 1px solid var(--hc-window-line-firm);
   border-radius: var(--hc-radius-floating);
   color: var(--hc-window-ink-loud);
   padding: 0.35em 0.5em;
@@ -489,9 +494,14 @@
   transition: border-color 0.15s;
   min-width: 0;
 
+  &::placeholder {
+    color: var(--hc-window-ink-quiet);
+    opacity: 1;
+  }
+
   &:focus {
     outline: none;
-    border-color: #c8975a;
+    border-color: var(--md-secondary);
   }
 }
 
@@ -535,7 +545,7 @@
   width: 2em;
   height: 2em;
   padding: 0;
-  border: 1px solid #333;
+  border: 1px solid var(--hc-window-line-firm);
   border-radius: var(--hc-radius-floating);
   background: none;
   cursor: pointer;
@@ -557,31 +567,32 @@
   justify-content: space-between;
   align-items: center;
   padding: 0.6em 0.8em;
-  border-top: 1px solid #2a2a2e;
+  border-top: 1px solid var(--hc-window-line);
 
   button {
     padding: 0.4em 1.2em;
     border-radius: var(--hc-radius-floating);
-    border: 1px solid #3a3a3e;
-    background: #252528;
+    border: 1px solid var(--hc-window-line-firm);
+    background: var(--hc-window-tint);
     color: var(--hc-window-ink-loud);
     cursor: pointer;
     font-size: 0.8em;
     transition: background 0.15s, border-color 0.15s;
 
     &:hover {
-      background: #333336;
-      border-color: #555;
+      background: var(--hc-window-tint-strong);
+      border-color: var(--md-secondary);
     }
 
     &.primary {
-      background: #c8975a;
-      border-color: #c8975a;
-      color: #1a1a1e;
+      background: var(--md-secondary);
+      border-color: var(--md-secondary);
+      color: var(--md-on-secondary);
       font-weight: 600;
 
       &:hover {
-        background: #d4a76a;
+        background: var(--md-secondary);
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--md-secondary) 28%, transparent);
       }
     }
   }
@@ -600,16 +611,16 @@
   height: 2em;
   padding: 0 !important;
   border-radius: var(--hc-radius-floating);
-  border: 1px solid #3a3a3e;
-  background: #252528;
+  border: 1px solid var(--hc-window-line-firm);
+  background: var(--hc-window-tint);
   color: var(--hc-window-ink-quiet);
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 
   &:hover {
-    background: #333336;
-    border-color: #555;
-    color: tw.ink(#c8975a);
+    background: var(--hc-window-tint-strong);
+    border-color: var(--md-secondary);
+    color: var(--md-secondary);
   }
 }
 
@@ -765,8 +776,8 @@
 .qa-section {
   margin-top: 1rem;
   padding: 0.75rem 0.9rem 0.9rem;
-  background: rgba(255, 225, 74, 0.04);
-  border: 1px solid rgba(255, 225, 74, 0.18);
+  background: color-mix(in srgb, var(--hc-status-warn) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--hc-status-warn) 24%, transparent);
   border-radius: var(--hc-radius-card);
   display: flex;
   flex-direction: column;
@@ -777,7 +788,7 @@
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  color: tw.ink(#ffe14a);
+  color: var(--hc-status-warn);
 
   h4 {
     margin: 0;
@@ -785,12 +796,12 @@
     font-weight: 600;
     letter-spacing: 0.14em;
     text-transform: uppercase;
-    color: tw.ink(rgba(255, 225, 74, 0.78));
+    color: var(--hc-status-warn);
   }
 
   .qa-icon {
     font-size: 0.85rem;
-    color: tw.ink(rgba(255, 225, 74, 0.78));
+    color: var(--hc-status-warn);
   }
 }
 
@@ -799,7 +810,7 @@
   flex-direction: column;
   gap: 0.5rem;
   padding: 0.65rem 0 0.2rem;
-  border-top: 1px solid rgba(255, 225, 74, 0.10);
+  border-top: 1px solid color-mix(in srgb, var(--hc-status-warn) 18%, transparent);
 
   &:first-of-type {
     border-top: 0;
@@ -807,7 +818,7 @@
   }
 
   &.qa-answered {
-    opacity: 0.78;
+    .qa-question { color: var(--hc-window-ink-plain); }
   }
 }
 
@@ -820,8 +831,8 @@
   font-size: 0.92rem;
   line-height: 1.45;
   color: var(--hc-window-ink-loud);
-  background: rgba(255, 225, 74, 0.13);
-  border: 1px solid rgba(255, 225, 74, 0.32);
+  background: color-mix(in srgb, var(--hc-status-warn) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--hc-status-warn) 38%, transparent);
   border-left-width: 3px;
   border-radius: 4px var(--hc-radius-card) var(--hc-radius-card) 4px;
 }
@@ -835,8 +846,8 @@
   font-size: 0.88rem;
   line-height: 1.45;
   color: var(--hc-window-ink-plain);
-  background: rgba(110, 180, 255, 0.08);
-  border: 1px solid rgba(110, 180, 255, 0.22);
+  background: color-mix(in srgb, var(--hc-status-info) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--hc-status-info) 28%, transparent);
   border-left-width: 3px;
   border-radius: 4px var(--hc-radius-card) var(--hc-radius-card) 4px;
 }
@@ -849,8 +860,8 @@
   align-items: stretch;
   gap: 0.4rem;
   padding: 0.45rem 0.55rem;
-  background: rgba(110, 180, 255, 0.05);
-  border: 1px solid rgba(110, 180, 255, 0.20);
+  background: color-mix(in srgb, var(--hc-status-info) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--hc-status-info) 26%, transparent);
   border-left-width: 3px;
   border-radius: 4px var(--hc-radius-card) var(--hc-radius-card) 4px;
 }
@@ -870,10 +881,10 @@
   flex-shrink: 0;
   align-self: flex-end;
   padding: 0.35rem 0.95rem;
-  background: rgba(110, 180, 255, 0.18);
-  border: 1px solid rgba(110, 180, 255, 0.45);
+  background: color-mix(in srgb, var(--hc-status-info) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--hc-status-info) 55%, transparent);
   border-radius: var(--hc-radius-control);
-  color: tw.ink(#b6d4ff);
+  color: var(--hc-status-info);
   font-size: 0.84rem;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -881,8 +892,8 @@
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 
   &:hover {
-    background: rgba(110, 180, 255, 0.28);
-    border-color: rgba(110, 180, 255, 0.65);
+    background: color-mix(in srgb, var(--hc-status-info) 28%, transparent);
+    border-color: color-mix(in srgb, var(--hc-status-info) 75%, transparent);
     color: var(--hc-window-ink-loud);
   }
 }

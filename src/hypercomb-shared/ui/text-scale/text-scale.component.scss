@@ -27,13 +27,13 @@
   margin-right: 0.35rem;
   background: none;
   border: none;
-  color: rgba(var(--hc-chrome-ink), 0.38);
+  color: var(--hc-chrome-ink-quiet);
   font-size: 1rem;
   line-height: 1;
   cursor: pointer;
   transition: color 120ms ease, transform 200ms var(--md-easing-standard, ease);
 
-  &:hover { color: rgba(var(--hc-chrome-ink), 0.8); }
+  &:hover { color: var(--hc-chrome-ink-plain); }
 
   &.on {
     color: var(--cmd-accent-command, var(--hc-chrome-text));
@@ -43,7 +43,7 @@
 
 .text-scale-label {
   margin-right: 0.35rem;
-  color: rgba(var(--hc-chrome-ink), 0.42);
+  color: var(--hc-chrome-ink-quiet);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   white-space: nowrap;
@@ -54,14 +54,14 @@
   background: none;
   border: 1px solid transparent;
   border-radius: 3px;
-  color: rgba(var(--hc-chrome-ink), 0.5);
+  color: var(--hc-chrome-ink-quiet);
   font: inherit;
   cursor: pointer;
   white-space: nowrap;
   transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
 
   &:hover {
-    color: rgba(var(--hc-chrome-ink), 0.85);
+    color: var(--hc-chrome-ink-plain);
     background: rgba(var(--glow-color-rgb, var(--hc-chrome-accent)), 0.08);
   }
 

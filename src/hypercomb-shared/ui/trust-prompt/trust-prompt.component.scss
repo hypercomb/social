@@ -23,9 +23,11 @@
   left: 50%;
   transform: translate(-50%, -50%);
   width: min(420px, calc(100vw - 32px));
-  background: #fff;
-  border-radius: 4px;
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  background: rgba(var(--hc-panel-pane), 0.99);
+  color: var(--hc-window-ink-loud);
+  border: 1px solid var(--hc-window-line);
+  border-radius: var(--hc-radius-floating);
+  box-shadow: var(--md-elev-4);
   z-index: 100001;
   animation: panel-in 0.18s ease;
 }
@@ -48,13 +50,13 @@
   margin: 0;
   font-size: 14px;
   font-weight: 700;
-  color: #1a1a1a;
+  color: var(--hc-window-ink-loud);
   letter-spacing: 0.01em;
 }
 
 .trust-prompt-body {
   padding: 4px 20px 16px;
-  color: #2a2a2a;
+  color: var(--hc-window-ink-plain);
 }
 
 .trust-prompt-summary,
@@ -72,11 +74,11 @@
 .trust-prompt-warning {
   margin-top: 14px;
   padding: 10px 12px;
-  background: rgba(220, 60, 0, 0.06);
-  border-left: 3px solid rgba(220, 60, 0, 0.5);
+  background: color-mix(in srgb, var(--hc-status-warn) 5%, transparent);
+  border-left: 3px solid color-mix(in srgb, var(--hc-status-warn) 68%, transparent);
   font-size: 12px;
-  color: #6a2a00;
-  border-radius: 2px;
+  color: var(--hc-status-warn);
+  border-radius: var(--hc-radius-control);
 }
 
 .trust-prompt-actions {
@@ -84,7 +86,7 @@
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 16px 16px;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  border-top: 1px solid var(--hc-window-line);
 }
 
 .trust-prompt-btn {
@@ -92,31 +94,34 @@
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: var(--hc-radius-control);
   border: 1px solid transparent;
   transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
 
 .trust-prompt-btn.deny {
-  background: #f3f3f3;
-  color: #555;
-  border-color: rgba(0, 0, 0, 0.08);
+  background: var(--hc-window-tint);
+  color: var(--hc-window-ink-plain);
+  border-color: var(--hc-window-line);
 }
-.trust-prompt-btn.deny:hover { background: #eaeaea; color: #222; }
+.trust-prompt-btn.deny:hover { background: var(--hc-window-tint-strong); color: var(--hc-window-ink-loud); }
 
 .trust-prompt-btn.allow-once {
-  background: #fff;
-  color: #1a1a1a;
-  border-color: rgba(0, 0, 0, 0.18);
+  background: transparent;
+  color: var(--hc-window-ink-loud);
+  border-color: var(--hc-window-line-firm);
 }
-.trust-prompt-btn.allow-once:hover { background: #fafafa; }
+.trust-prompt-btn.allow-once:hover { background: var(--hc-window-tint); }
 
 .trust-prompt-btn.allow-always {
-  background: #1a1a1a;
-  color: var(--hc-window-ink-loud);
-  border-color: #1a1a1a;
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+  border-color: var(--md-primary);
 }
-.trust-prompt-btn.allow-always:hover { background: #333; }
+.trust-prompt-btn.allow-always:hover {
+  background: var(--md-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--md-primary) 28%, transparent);
+}
 
 @media (max-width: 600px) {
   .trust-prompt-actions { flex-direction: column-reverse; }

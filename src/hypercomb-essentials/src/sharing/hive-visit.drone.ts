@@ -35,6 +35,7 @@ import { ensureDecorationsIndexed } from '../commands/decoration-kind-index.js'
 import { publishLightsWithinAt } from '../commands/publish-lights.js'
 import { adoptPublishedLights } from './behavior-enablement.js'
 import { validateHiveLinkBundle, STATIC_FOLLOWS_KEY, type HiveLinkBundle } from './hive-link.js'
+import { checkRemoteHiveFormat } from './hive-format.js'
 import { fetchHiveManifestFromAny } from './hive-pointer.js'
 import { lineageKey } from '../history/lineage-key.js'
 import { isAdoptTombstoned } from './adopted-roots.js'
@@ -145,6 +146,10 @@ export class HiveVisitDrone extends Drone {
     // covers a cold/unreachable index (the old closure stays hosted).
     const key = lineageKey(bundle.segments)
     const manifest = await fetchHiveManifestFromAny(bundle.hosts, bundle.pubkey)
+    // BEFORE ADOPTING: does this visitor's client read the format this hive is
+    // written in? The index is already signature-verified here, and the check
+    // is silent unless the hive declares a format this build cannot read.
+    if (manifest) void checkRemoteHiveFormat(manifest.roots, bundle.hosts).catch(() => null)
     const head = manifest?.roots[key] ?? bundle.rootSig ?? ''
     if (!SIG_RE.test(head)) {
       this.#toast('error', i18n?.t('preview.banner.title') ?? 'Hive preview',
@@ -360,6 +365,10 @@ export class HiveVisitDrone extends Drone {
     for (const [pubkey, group] of byPublisher) {
       const manifest = await fetchHiveManifestFromAny(group.hosts, pubkey)
       if (!manifest) continue
+      // Same check on the follow path: a publisher this client tracks may move
+      // its hive past what this build can read, and folding a branch it only
+      // partly understands is exactly the silent divergence to name out loud.
+      void checkRemoteHiveFormat(manifest.roots, group.hosts).catch(() => null)
       for (const [name, follow] of group.entries) {
         // Delete-is-unsubscribe: a tombstoned root never re-folds.
         if (isAdoptTombstoned([name])) continue

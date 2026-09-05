@@ -38,22 +38,26 @@
   // enough that a tile is brighter on the side facing a shared vertex and
   // sinks away between them, never enough to turn the comb into a slab or
   // to wash the pheromone hues out from under it.
-  .light-core { stop-color: #cfe6f5; stop-opacity: 0.085; }
-  .light-mid  { stop-color: #9fc4dd; stop-opacity: 0.03; }
-  .light-edge { stop-color: #9fc4dd; stop-opacity: 0; }
+  .light-core { stop-color: rgb(var(--hc-chrome-accent)); stop-opacity: 0.11; }
+  .light-mid  { stop-color: rgb(var(--hc-chrome-accent)); stop-opacity: 0.04; }
+  .light-edge { stop-color: rgb(var(--hc-chrome-accent)); stop-opacity: 0; }
 }
 
 .offer-backdrop {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(circle at 50% 42%, rgba(126, 182, 214, 0.07), transparent 35rem),
-    rgba(7, 10, 14, 0.48);
+    radial-gradient(circle at 50% 42%, rgba(var(--hc-chrome-accent), 0.09), transparent 35rem),
+    rgba(var(--hc-chrome-shadow), 0.48);
   backdrop-filter: blur(3px) saturate(0.75);
   pointer-events: auto;
 }
 
 .offer-card {
+  // This welcome is panel material, so its ground and its ink must move as a
+  // pair. A fixed near-black card under the global ink ladder made every
+  // bright theme render dark text on dark glass.
+  @include tw.floating-panel(#7eb6d6);
   position: absolute;
   top: 50%;
   left: 50%;
@@ -70,11 +74,14 @@
   display: grid;
   grid-template-columns: minmax(17rem, 0.72fr) minmax(28rem, 1.28fr);
   border-radius: var(--hc-radius-floating);
-  background: rgba(12, 17, 24, 0.94);
-  border: 1px solid rgba(216, 230, 238, 0.12);
-  box-shadow: 0 2rem 6rem rgba(0, 0, 0, 0.42), 0 0 0 1px rgba(0, 0, 0, 0.18);
+  background: rgba(var(--hc-panel-pane), 0.965);
+  border-color: var(--hc-window-edge);
+  box-shadow:
+    0 2rem 6rem rgba(var(--hc-panel-shadow), 0.42),
+    0 0 0 1px var(--hc-window-line);
   backdrop-filter: blur(18px) saturate(1.1);
   color: var(--hc-window-ink-loud);
+  font-family: inherit;
   pointer-events: auto;
 
   h2 {
@@ -92,16 +99,16 @@
   flex-direction: column;
   padding: clamp(1.75rem, 3vw, 2.75rem);
   background:
-    linear-gradient(145deg, rgba(126, 182, 214, 0.13), transparent 48%),
-    rgba(8, 13, 19, 0.52);
-  border-right: 1px solid rgba(216, 230, 238, 0.09);
+    linear-gradient(145deg, var(--hc-window-wash-strong), transparent 48%),
+    var(--hc-window-tint);
+  border-right: 1px solid var(--hc-window-line);
 }
 
 .eyebrow,
 .section-kicker {
   display: block;
   margin-bottom: 0.9rem;
-  color: tw.ink(#7eb6d6);
+  color: var(--hc-window-accent-quiet);
   font-size: 0.68rem;
   font-weight: 750;
   letter-spacing: 0.16em;
@@ -129,15 +136,15 @@
     align-items: center;
     gap: 0.75rem;
     padding: 0.75rem 0.9rem;
-    border: 1px solid rgba(126, 182, 214, 0.28);
+    border: 1px solid var(--hc-window-edge);
     border-radius: var(--hc-radius-control);
-    background: rgba(126, 182, 214, 0.08);
+    background: var(--hc-window-wash);
     color: var(--hc-window-ink-loud);
     text-align: left;
 
     &:hover {
-      background: rgba(126, 182, 214, 0.15);
-      border-color: rgba(126, 182, 214, 0.48);
+      background: var(--hc-window-wash-strong);
+      border-color: var(--hc-window-edge-firm);
       transform: translateY(-1px);
     }
   }
@@ -149,8 +156,8 @@
   width: 2.2rem;
   height: 2.2rem;
   border-radius: 50%;
-  background: #7eb6d6;
-  color: #0c1118;
+  background: var(--hc-window-accent);
+  color: var(--hc-window-on-accent);
   font-size: 1.2rem;
   font-weight: 800;
 }
@@ -159,7 +166,7 @@
 .action-copy { display: grid; gap: 0.16rem; }
 .action-copy strong { font-size: 0.88rem; }
 .action-copy small { color: var(--hc-window-ink-quiet); font-size: 0.71rem; }
-.action-arrow { color: tw.ink(#7eb6d6); font-size: 1.1rem; }
+.action-arrow { color: var(--hc-window-accent-quiet); font-size: 1.1rem; }
 
 .examples {
   min-width: 0;
@@ -196,11 +203,13 @@
   overflow: hidden;
   display: grid;
   grid-template-rows: auto 1fr auto;
-  border: 1px solid rgba(216, 230, 238, 0.1);
+  border: 1px solid var(--hc-window-line);
   border-radius: var(--hc-radius-card);
-  background: rgba(216, 230, 238, 0.035);
+  background: var(--hc-window-tint);
 
-  &.is-added { border-color: rgba(111, 211, 154, 0.35); }
+  &.is-added {
+    border-color: color-mix(in srgb, #{tw.ink(#6fd39a)} 52%, transparent);
+  }
 }
 
 .cover-wrap { position: relative; }
@@ -211,9 +220,9 @@
   aspect-ratio: 2.15 / 1;
   object-fit: cover;
   background:
-    radial-gradient(circle at 38% 45%, rgba(126, 182, 214, 0.23), transparent 2.5rem),
-    linear-gradient(135deg, rgba(126, 182, 214, 0.1), rgba(216, 230, 238, 0.02));
-  border-bottom: 1px solid rgba(216, 230, 238, 0.08);
+    radial-gradient(circle at 38% 45%, var(--hc-window-wash-strong), transparent 2.5rem),
+    linear-gradient(135deg, var(--hc-window-wash), var(--hc-window-tint));
+  border-bottom: 1px solid var(--hc-window-line);
 }
 
 .cover-blank { display: block; }
@@ -244,13 +253,13 @@
   bottom: 0.55rem;
   padding: 0.25rem 0.45rem;
   border-radius: 999px;
-  background: rgba(8, 13, 19, 0.78);
+  background: rgb(var(--hc-panel-ink));
   font-size: 0.7rem;
-  color: var(--hc-window-ink-quiet);
+  color: rgb(var(--hc-panel-pane));
 }
 
 button {
-  border: 1px solid rgba(216, 230, 238, 0.14);
+  border: 1px solid var(--hc-window-line);
   border-radius: var(--hc-radius-control);
   padding: 0.48rem 0.8rem;
   font: inherit;
@@ -260,17 +269,17 @@ button {
   color: var(--hc-window-ink-plain);
   transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
 
-  &:hover { background: rgba(216, 230, 238, 0.08); }
-  &:focus-visible { outline: 2px solid #7eb6d6; outline-offset: 2px; }
+  &:hover { background: var(--hc-window-tint-strong); }
+  &:focus-visible { outline: 2px solid var(--hc-window-accent); outline-offset: 2px; }
 }
 
 .add {
   justify-self: start;
   margin: 0 0.9rem 0.9rem;
-  border-color: rgba(126, 182, 214, 0.38);
-  color: tw.ink(#a8d0e7);
+  border-color: var(--hc-window-edge-firm);
+  color: var(--hc-window-accent-quiet);
 
-  &:hover { background: rgba(126, 182, 214, 0.12); }
+  &:hover { background: var(--hc-window-wash-strong); }
 }
 
 .adding,
@@ -290,7 +299,7 @@ button {
   display: flex;
   justify-content: center;
   padding: 0.85rem;
-  border-top: 1px solid rgba(216, 230, 238, 0.08);
+  border-top: 1px solid var(--hc-window-line);
 }
 
 .dismiss {
@@ -318,7 +327,7 @@ button {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
-  .welcome { border-right: 0; border-bottom: 1px solid rgba(216, 230, 238, 0.09); }
+  .welcome { border-right: 0; border-bottom: 1px solid var(--hc-window-line); }
   .offer-card h2 { max-width: none; font-size: 2.35rem; }
   .subtitle { margin: 0.85rem 0 1.25rem; }
   .rows { grid-template-columns: 1fr; }

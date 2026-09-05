@@ -33,7 +33,7 @@ const world = (): World => {
 
 /** A layer record in the shape the build emits: child layers in `cells`,
  *  bees and dependencies carrying the writer's `.js` suffix. */
-const layer = (record: { cells?: string[]; bees?: string[]; dependencies?: string[] }): Uint8Array<ArrayBuffer> =>
+const layer = (record: { cells?: string[]; bees?: string[]; dependencies?: string[]; criticalBees?: string[] }): Uint8Array<ArrayBuffer> =>
   encode(JSON.stringify({ name: 'layer', cells: [], bees: [], dependencies: [], ...record }))
 
 /** Publish an atom at the origin under its real signature. */
@@ -75,6 +75,22 @@ describe('inventory derivation', () => {
     expect(inventory.bees).toEqual([declared])
     expect(inventory.bees).not.toContain(injected)
     expect(inventory.layers).toEqual([root])
+  })
+
+  it('treats root criticalBees as a non-authoritative scheduling hint', async () => {
+    const w = world()
+    const declared = await publish(w, encode('declared bee'))
+    const hintedOnly = await publish(w, encode('hinted but not declared bee'))
+    const root = await publish(w, layer({
+      bees: [declared],
+      criticalBees: [declared, hintedOnly],
+    }))
+
+    const { inventory, result } = await deriveInventory(root, w.io)
+
+    expect(isComplete(result)).toBe(true)
+    expect(inventory.bees).toEqual([declared])
+    expect(inventory.bees).not.toContain(hintedOnly)
   })
 
   it('follows only `cells` — a bee signature is inventory, never frontier', async () => {

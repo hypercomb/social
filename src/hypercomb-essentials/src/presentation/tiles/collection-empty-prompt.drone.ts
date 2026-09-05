@@ -280,7 +280,7 @@ class CollectionEmptyPromptDrone {
     title.textContent = this.#t('hive.empty.title', 'Your hive is empty')
 
     const hint = document.createElement('span')
-    hint.style.cssText = 'font-size:12px;color:rgba(var(--hc-chrome-ink),0.5);'
+    hint.style.cssText = 'font-size:12px;color:var(--hc-chrome-ink-quiet);'
     hint.textContent = this.#t('hive.empty.notice', 'Add the first thing you want to keep.')
 
     const button = document.createElement('button')
@@ -353,7 +353,7 @@ class CollectionEmptyPromptDrone {
 
     const body = document.createElement('div')
     body.dataset['role'] = 'body'
-    body.style.cssText = 'font-size:13px;line-height:1.5;color:rgba(var(--hc-chrome-ink),0.58);margin-bottom:14px;'
+    body.style.cssText = 'font-size:13px;line-height:1.5;color:var(--hc-chrome-ink-quiet);margin-bottom:14px;'
     body.textContent = bodyText
 
     const button = document.createElement('button')

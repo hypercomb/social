@@ -6,11 +6,14 @@
 // the header-bar idiom: borderless flex children separated by the same
 // 1px steel hairline the mode-toggle uses.
 
+@use '../toolwindow' as tw;
+
 :host {
   display: contents;
 }
 
 .sync-cell {
+  @include tw.floating-panel(#7eb6d6);
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -22,10 +25,10 @@
   min-height: 2.15rem;
   box-sizing: border-box;
   padding: 0.38rem 0.7rem;
-  border: 1px solid rgba(126, 182, 214, 0.25);
+  border-color: var(--hc-window-edge);
   border-radius: var(--hc-radius-floating);
-  background: rgba(9, 14, 20, 0.94);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.42);
+  background: rgba(var(--hc-panel-pane), 0.96);
+  box-shadow: 0 8px 28px rgba(var(--hc-panel-shadow), 0.42);
   backdrop-filter: blur(12px);
   pointer-events: auto;
   font-family: var(--hc-font);
@@ -50,7 +53,7 @@
 }
 
 .sync-cell.done {
-  border-color: rgba(110, 201, 110, 0.28);
+  border-color: color-mix(in srgb, #{tw.ink(#6ec96e)} 42%, transparent);
 
   .sync-label {
     color: var(--hc-window-ink-plain);
@@ -67,14 +70,14 @@
   position: relative;
   height: 3px;
   border-radius: 999px;
-  background: rgba(245, 245, 245, 0.12);
+  background: var(--hc-window-tint-strong);
   overflow: hidden;
 }
 
 .sync-fill {
   height: 100%;
   border-radius: 999px;
-  background: #e0a93e;
+  background: tw.ink(#e0a93e);
   transition: width 200ms ease-out;
 }
 

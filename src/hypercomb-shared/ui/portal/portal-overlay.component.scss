@@ -12,7 +12,7 @@
 .panel {
   position: fixed;
   inset: 0;
-  background: rgba(18, 18, 18, 0.82);
+  background: rgb(var(--hc-panel-pane));
   overflow: hidden;
   z-index: 90001;
 }
@@ -45,6 +45,7 @@
 // the underlying shell so the participant always knows "which host's UI
 // am I looking at right now." Title attr shows the full URL on hover.
 .portal-address {
+  @include tw.floating-panel(#c8975a);
   position: absolute;
   top: 1rem;
   right: 1rem;
@@ -53,11 +54,11 @@
   gap: 0.5rem;
   padding: 0.4rem 0.85rem;
 
-  background: rgba(14, 18, 24, 0.78);
+  background: rgba(var(--hc-panel-pane), 0.96);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-color: var(--hc-window-edge);
   border-radius: 4px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 16px rgba(var(--hc-panel-shadow), 0.4);
 
   color: var(--hc-window-ink-plain);
   font-family: var(--hc-mono);
@@ -75,7 +76,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: rgba(200, 151, 90, 0.9);
+  background: var(--hc-window-accent);
   flex-shrink: 0;
 }
 
@@ -104,24 +105,25 @@
 // DONE — the only button in the bar, and the way out. Accent-gold fill: it is
 // the one deliberate exit next to the passive ones (backdrop, Escape).
 .portal-apply {
+  @include tw.floating-panel(#c8975a);
   display: flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.55rem 1.6rem;
 
-  background: rgba(200, 151, 90, 0.92);
-  border: 1px solid rgba(200, 151, 90, 0.95);
+  background: var(--hc-window-accent);
+  border-color: var(--hc-window-accent);
   border-radius: 4px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 32px rgba(var(--hc-panel-shadow), 0.5);
+  color: var(--hc-window-on-accent);
 
   font-family: var(--hc-mono);
   cursor: pointer;
   pointer-events: auto;
-  transition: transform 200ms ease, background 200ms ease, border-color 200ms ease;
+  transition: transform 200ms ease, filter 200ms ease;
 
   &:hover {
-    background: rgba(212, 164, 102, 1);
-    border-color: rgba(212, 164, 102, 1);
+    filter: brightness(1.08);
   }
 
   &:active {
@@ -134,7 +136,7 @@
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #161616;
+  color: inherit;
 }
 
 // Pending +adds / −removes, sitting at the LEFT of the action bar.

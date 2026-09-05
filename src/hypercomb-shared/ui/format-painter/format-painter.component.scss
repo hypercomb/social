@@ -6,6 +6,8 @@
 // ── panel (right-side drawer) ────────────────────────────
 
 .fp-panel {
+  @include tw.floating-panel(#c8975a);
+
   position: fixed;
   // clears the header at any size: 3.5rem × the active header zoom
   top: max(calc(3rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 0.67rem));
@@ -20,14 +22,7 @@
   display: flex;
   flex-direction: column;
 
-  background: rgba(14, 18, 24, 0.92);
   backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: var(--hc-radius-floating);
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.7);
-
-  color: var(--hc-window-ink-plain);
-  font-family: var(--hc-mono);
 
   animation: fp-enter 200ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
@@ -39,7 +34,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 0.6rem 0.75rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--hc-window-line);
 
   h3 {
     font-size: 0.62rem;
@@ -66,8 +61,8 @@
   transition: color 150ms ease, background 150ms ease;
 
   &:hover {
-    color: whitesmoke;
-    background: rgba(255, 255, 255, 0.08);
+    color: var(--hc-window-ink-loud);
+    background: var(--hc-window-tint-strong);
   }
 }
 
@@ -99,7 +94,7 @@
   transition: background 100ms ease;
 
   &:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--hc-window-tint);
   }
 
   &.disabled {
@@ -107,7 +102,7 @@
   }
 
   input[type="checkbox"] {
-    accent-color: #c8975a;
+    accent-color: var(--hc-window-accent);
     width: 0.85rem;
     height: 0.85rem;
     cursor: pointer;
@@ -120,7 +115,7 @@
   width: 1rem;
   height: 1rem;
   border-radius: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--hc-window-line);
   flex-shrink: 0;
 }
 
@@ -142,16 +137,16 @@
 
 .fp-footer {
   padding: 0.5rem 0.75rem 0.6rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--hc-window-line);
 }
 
 .fp-apply {
   width: 100%;
   padding: 0.4rem 0;
-  background: rgba(200, 151, 90, 0.18);
-  border: 1px solid rgba(200, 151, 90, 0.3);
+  background: var(--hc-window-wash);
+  border: 1px solid var(--hc-window-edge);
   border-radius: var(--hc-radius-floating);
-  color: tw.ink(#c8975a);
+  color: var(--hc-window-accent);
   font-size: 0.65rem;
   font-weight: 600;
   font-family: inherit;
@@ -160,8 +155,8 @@
   transition: background 150ms ease, border-color 150ms ease;
 
   &:hover:not(:disabled) {
-    background: rgba(200, 151, 90, 0.28);
-    border-color: rgba(200, 151, 90, 0.5);
+    background: var(--hc-window-wash-strong);
+    border-color: var(--hc-window-edge-firm);
   }
 
   &:disabled {

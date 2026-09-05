@@ -84,7 +84,7 @@ $accent: #ffcf6b;
   transition: color 150ms ease;
 }
 
-.pheromone-card-close:hover { color: tw.ink(#ffc8c8); }
+.pheromone-card-close:hover { color: var(--hc-status-alert); }
 
 // The peek's only control — it keeps the card up, which is what makes the
 // chips' ×'s reachable now that the tile's hover band stands down here.
@@ -111,8 +111,8 @@ $accent: #ffcf6b;
   gap: 0.4rem;
   padding: 0.22rem 0.3rem 0.22rem 0.35rem;
   border-radius: var(--hc-radius-floating);
-  background: rgba(var(--hc-panel-ink), 0.06);
-  border: 1px solid rgba(var(--hc-panel-ink), 0.14);
+  background: var(--hc-window-tint);
+  border: 1px solid var(--hc-window-line);
   font-size: 0.76rem;
   line-height: 1.2;
   color: var(--hc-window-ink-loud);
@@ -154,7 +154,11 @@ $accent: #ffcf6b;
   opacity: 0.75;
   transition: opacity 130ms ease, background 130ms ease, color 130ms ease;
 
-  &:hover { opacity: 1; background: rgba(0, 0, 0, 0.34); color: tw.ink(#ffc8c8); }
+  &:hover {
+    opacity: 1;
+    background: var(--hc-window-tint);
+    color: var(--hc-status-alert);
+  }
 }
 
 .pheromone-card-hint {

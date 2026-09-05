@@ -106,6 +106,10 @@ export class MoveDrone extends Drone {
   #copyMode = false
 
   get moveActive(): boolean { return this.#moveActive }
+  /** A tile is in hand right now — a drag has begun and has not been
+   *  committed or cancelled. The viewport reads this to refuse a fit
+   *  mid-drag (see ZoomDrone.zoomToFit). */
+  get dragActive(): boolean { return this.#activeSource !== null }
   get dropIntoActive(): boolean { return this.#dropIntoActive }
   get copyModeActive(): boolean { return this.#copyMode }
 
@@ -133,7 +137,7 @@ export class MoveDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'controls:action', 'tile:action']
-  protected override emits = ['move:preview', 'move:committed', 'move:mode', 'cell:reorder', 'move:drop-into', 'move:drop-into-commit', 'move:copy-drag', 'cell:added']
+  protected override emits = ['move:preview', 'move:committed', 'move:mode', 'move:drag', 'cell:reorder', 'move:drop-into', 'move:drop-into-commit', 'move:copy-drag', 'cell:added']
 
   #effectsRegistered = false
 
@@ -236,7 +240,9 @@ export class MoveDrone extends Drone {
   }
 
   #end = (source: string): void => {
-    if (this.#activeSource === source) this.#activeSource = null
+    if (this.#activeSource !== source) return
+    this.#activeSource = null
+    this.emitEffect('move:drag', { active: false })
   }
 
   // ── public API (called by input handlers) ────────────────
@@ -249,6 +255,10 @@ export class MoveDrone extends Drone {
     // never sits in that state.
     if (this.#activeSource && (!this.#anchorAxial || this.#movedGroup.size === 0)) {
       this.#activeSource = null
+      // Whoever is holding still for the drag (the viewport refuses to fit
+      // while a tile is in hand) must be released too, or a swallowed
+      // pointerup would freeze them for the rest of the session.
+      this.emitEffect('move:drag', { active: false })
       this.#anchorAxial = null
       this.#movedGroup.clear()
       this.#occupancy.clear()
@@ -346,6 +356,10 @@ export class MoveDrone extends Drone {
     console.log('[move] beginMove', { anchorLabel, selectedLabels: selected ? [...selected] : [], movedGroupSize: this.#movedGroup.size, movedLabels: [...this.#movedGroup.keys()], cellCount: this.#cellCount, cellLabelsLen: this.#dragLabels.length, cellLabels: [...this.#dragLabels] })
 
     this.#anchorAxial = anchorAxial
+    // A tile is now genuinely in hand. Announced HERE and not in #begin so the
+    // half-dozen refusal paths above (no axial service, anchor on empty ground,
+    // a peer's tile, an unselected anchor) never flash a drag that isn't.
+    this.emitEffect('move:drag', { active: true })
     return true
   }
 

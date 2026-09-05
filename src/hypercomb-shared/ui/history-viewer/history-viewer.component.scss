@@ -413,7 +413,7 @@
 .row[data-category="cells"]       .indicator { background: #6dc077; }
 .row[data-category="cells"]       .row-icon  { color: tw.ink(#6dc077); }
 .row[data-category="content"]     .indicator { background: #5f8bd9; }
-.row[data-category="content"]     .row-icon  { color:      #5f8bd9; }
+.row[data-category="content"]     .row-icon  { color: tw.ink(#5f8bd9); }
 .row[data-category="tags"]        .indicator { background: #d9c25f; }
 .row[data-category="tags"]        .row-icon  { color: tw.ink(#d9c25f); }
 .row[data-category="notes"]       .indicator { background: #b37dd4; }
@@ -466,7 +466,7 @@
 }
 
 .filter-toggle[data-category="cells"]       { color: tw.ink(#6dc077); }
-.filter-toggle[data-category="content"]     { color: #5f8bd9; }
+.filter-toggle[data-category="content"]     { color: tw.ink(#5f8bd9); }
 .filter-toggle[data-category="tags"]        { color: tw.ink(#d9c25f); }
 .filter-toggle[data-category="notes"]       { color: tw.ink(#b37dd4); }
 .filter-toggle[data-category="visibility"]  { color: var(--hc-window-ink-loud); }

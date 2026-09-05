@@ -60,7 +60,9 @@
   --md-on-surface:        #1a2130;
   --md-on-surface-strong: #0a1020;
   --md-on-surface-var:    #4b5468;
-  --md-on-surface-faint:  #7c8697;
+  // "Faint" is still readable copy (placeholders, drag labels, empty-state
+  // hints), not decoration. Keep its quietest pairing above 4.5:1.
+  --md-on-surface-faint:  #556071;
 
   // ── primary / secondary / tertiary ────────────────────────────────
   // A CHORD — and the same chord dark wears at the other end of the dimmer:
@@ -70,16 +72,14 @@
   //
   // What was here was a navy plus two apologies (#794c1e brown, #5a3d68
   // mauve) — a panel showing three states looked decorated rather than
-  // composed. And the primary was institutional rather than actionable:
-  // #1f4376 sits at 9:1 against white, so far down the scale that it reads
-  // as a border. The three tuned looks put their primary at 4.6–5.9:1
-  // against white — vivid, still legal — and this now sits with them at 5.5.
-  --md-primary:           #1668c4;
+  // composed. The chord stays vivid, but every accent now clears 4.5:1 even
+  // on the darkest bright-theme surface rung, not only against white.
+  --md-primary:           #1460b4;
   --md-on-primary:        #ffffff;
   --md-primary-container: #d4e6fb;
   --md-on-primary-c:      #06294f;
 
-  --md-secondary:         #b45a22;
+  --md-secondary:         #974b1c;
   --md-on-secondary:      #ffffff;
   --md-secondary-c:       #fbdfcc;
   --md-on-secondary-c:    #3d1806;
@@ -181,7 +181,7 @@
   --hc-chrome-glass-a:   0.82;
   --hc-chrome-rule:      62, 74, 94;
   --hc-chrome-rule-firm: 26, 33, 48;
-  --hc-chrome-accent:    22, 104, 196;
+  --hc-chrome-accent:    20, 96, 180;
   --hc-chrome-ink:       26, 33, 48;
   --hc-chrome-text:      #1a2130;
   --hc-chrome-shadow:    18, 34, 58;
@@ -205,7 +205,7 @@
   //   plain  icons and labels doing actual work              (>= 7:1)
   //   loud   the one thing in the group that is selected
   --hc-ink-a-ghost: 0.46;
-  --hc-ink-a-faint: 0.62;
+  --hc-ink-a-faint: 0.64;
   --hc-ink-a-quiet: 0.70;
   --hc-ink-a-plain: 0.82;
   --hc-ink-a-loud:  0.96;
@@ -241,6 +241,15 @@
   // every theme. Two rungs, never a literal in a component sheet.
   --hc-window-on-scrim:       rgba(255, 255, 255, 0.96);
   --hc-window-on-scrim-quiet: rgba(255, 255, 255, 0.82);
+
+  // The same readable weights on header/rail chrome. Components should name
+  // the intended weight instead of inventing an opacity: 40–55% ink is not
+  // quiet on a bright ground, it is simply illegible.
+  --hc-chrome-ink-ghost: rgba(var(--hc-chrome-ink), var(--hc-ink-a-ghost));
+  --hc-chrome-ink-faint: rgba(var(--hc-chrome-ink), var(--hc-ink-a-faint));
+  --hc-chrome-ink-quiet: rgba(var(--hc-chrome-ink), var(--hc-ink-a-quiet));
+  --hc-chrome-ink-plain: rgba(var(--hc-chrome-ink), var(--hc-ink-a-plain));
+  --hc-chrome-ink-loud:  rgba(var(--hc-chrome-ink), var(--hc-ink-a-loud));
 
   // ── THE PANEL'S OWN GROUNDS ───────────────────────────────────────
   // A row, a field, a chip and a divider inside a tool window are not the
@@ -291,12 +300,12 @@
   // is a fact about the hive, not part of the look's chord. Honey's amber
   // and sherbet's magenta dress the chrome; they must not be able to make
   // "recording" mean something other than red.
-  --hc-status-ok:     #08745a;
-  --hc-status-warn:   #9a5c06;
-  --hc-status-alert:  #b3261e;
+  --hc-status-ok:     #00634a;
+  --hc-status-warn:   #7f4b04;
+  --hc-status-alert:  #aa2119;
   --hc-status-info:   #1f4376;
   --hc-status-branch: #6b3a86;
-  --hc-status-secret: #855312;
+  --hc-status-secret: #7e4a0d;
   --hc-status-solo:   #a3116b;
   --hc-status-swarm:  #175f8a;
 
@@ -347,7 +356,7 @@
   // A translucent white subtracts more from near-black than ink does from
   // cream, so every weight costs less here. These are today's values.
   --hc-ink-a-ghost: 0.32;
-  --hc-ink-a-faint: 0.48;
+  --hc-ink-a-faint: 0.49;
   --hc-ink-a-quiet: 0.60;
   --hc-ink-a-plain: 0.80;
   --hc-ink-a-loud:  1;
@@ -355,15 +364,15 @@
   // A coloured mark was authored FOR this ground. Nothing to pull down.
   --hc-deepen: 0%;
 
-  // The luminous end of each status hue — these are the literals the bar
-  // has always used, moved behind the role rather than restyled.
+  // The luminous end of each status hue, kept light enough to remain readable
+  // even on dark's highest surface rung.
   --hc-status-ok:     #00e5a0;
   --hc-status-warn:   #f0b05c;
-  --hc-status-alert:  #ff4444;
+  --hc-status-alert:  #ff8585;
   --hc-status-info:   #8caad2;
-  --hc-status-branch: #be8cc8;
+  --hc-status-branch: #ca98d4;
   --hc-status-secret: #daa564;
-  --hc-status-solo:   #ff2d8a;
+  --hc-status-solo:   #ff83b5;
   --hc-status-swarm:  #78c8ff;
   --hc-shield-l: 50%;
 
@@ -378,7 +387,7 @@
   --md-on-surface:        #e3ecf3;
   --md-on-surface-strong: #f5fafd;
   --md-on-surface-var:    #a3b4c4;
-  --md-on-surface-faint:  #6c7e8f;
+  --md-on-surface-faint:  #94a6b7;
 
   // The other end of light's chord — azure, clay, periwinkle — pale rather
   // than deep. The hues are the ones dark already had; what they lacked was
@@ -466,7 +475,7 @@
   --hc-chrome-glass:     255, 250, 236;
   --hc-chrome-rule:      150, 112, 40;
   --hc-chrome-rule-firm: 120, 86, 20;
-  --hc-chrome-accent:    181, 115, 10;
+  --hc-chrome-accent:    130, 83, 6;
   --hc-chrome-ink:       43, 30, 6;
   --hc-chrome-text:      #2b1e06;
   --hc-chrome-shadow:    120, 80, 10;
@@ -482,19 +491,19 @@
   --md-on-surface:        #2b1e06;
   --md-on-surface-strong: #160f02;
   --md-on-surface-var:    #6b5426;
-  --md-on-surface-faint:  #a08a5c;
+  --md-on-surface-faint:  #6d592f;
 
-  --md-primary:           #b5730a;
+  --md-primary:           #825306;
   --md-on-primary:        #ffffff;
   --md-primary-container: #ffdf9e;
   --md-on-primary-c:      #3a2500;
 
-  --md-secondary:         #d4562f;
+  --md-secondary:         #a23c20;
   --md-on-secondary:      #ffffff;
   --md-secondary-c:       #ffdac9;
   --md-on-secondary-c:    #40120a;
 
-  --md-tertiary:          #0f766e;
+  --md-tertiary:          #0d6861;
   --md-tertiary-c:        #b8f0e6;
 
   --md-outline:           rgba(43, 30, 6, 0.22);
@@ -523,7 +532,7 @@
   --hc-chrome-glass:     246, 253, 250;
   --hc-chrome-rule:      46, 100, 84;
   --hc-chrome-rule-firm: 15, 70, 55;
-  --hc-chrome-accent:    13, 122, 95;
+  --hc-chrome-accent:    12, 108, 84;
   --hc-chrome-ink:       15, 42, 34;
   --hc-chrome-text:      #0f2a22;
   --hc-chrome-shadow:    10, 70, 55;
@@ -539,19 +548,19 @@
   --md-on-surface:        #0f2a22;
   --md-on-surface-strong: #04160f;
   --md-on-surface-var:    #3f6357;
-  --md-on-surface-faint:  #7e9c90;
+  --md-on-surface-faint:  #446357;
 
-  --md-primary:           #0d7a5f;
+  --md-primary:           #0c6c54;
   --md-on-primary:        #ffffff;
   --md-primary-container: #b6ecd9;
   --md-on-primary-c:      #00281c;
 
-  --md-secondary:         #e0563f;
+  --md-secondary:         #a73b2a;
   --md-on-secondary:      #ffffff;
   --md-secondary-c:       #ffd9d0;
   --md-on-secondary-c:    #3d0f06;
 
-  --md-tertiary:          #6b4fd1;
+  --md-tertiary:          #6345ce;
   --md-tertiary-c:        #ded4ff;
 
   --md-outline:           rgba(15, 42, 34, 0.20);
@@ -578,7 +587,7 @@
   --hc-chrome-glass:     254, 250, 255;
   --hc-chrome-rule:      110, 78, 132;
   --hc-chrome-rule-firm: 70, 36, 96;
-  --hc-chrome-accent:    194, 17, 143;
+  --hc-chrome-accent:    167, 15, 123;
   --hc-chrome-ink:       36, 16, 51;
   --hc-chrome-text:      #241033;
   --hc-chrome-shadow:    90, 20, 90;
@@ -594,19 +603,19 @@
   --md-on-surface:        #241033;
   --md-on-surface-strong: #12061c;
   --md-on-surface-var:    #5b4470;
-  --md-on-surface-faint:  #9385a3;
+  --md-on-surface-faint:  #604e70;
 
-  --md-primary:           #c2118f;
+  --md-primary:           #a70f7b;
   --md-on-primary:        #ffffff;
   --md-primary-container: #ffd4f0;
   --md-on-primary-c:      #3d0030;
 
-  --md-secondary:         #0aa5c9;
+  --md-secondary:         #006176;
   --md-on-secondary:      #ffffff;
   --md-secondary-c:       #c4f0fb;
   --md-on-secondary-c:    #00303c;
 
-  --md-tertiary:          #6f9f14;
+  --md-tertiary:          #44610c;
   --md-tertiary-c:        #e2f8bd;
 
   --md-outline:           rgba(36, 16, 51, 0.20);

@@ -90,6 +90,70 @@ function luminance(color) {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
 }
 
+// The welcome offer is a composed surface rather than a tool window, but it
+// has the same non-negotiable contract: every readable run clears WCAG AA in
+// every built-in theme. Composite translucent ink and ancestor grounds just
+// as the tool-window contrast driver does; checking token names or taking a
+// screenshot cannot catch a correct ink token placed on the wrong material.
+const MEASURE_TEXT = (sel) => {
+  const panel = document.querySelector(sel)
+  if (!panel) return { present: false, rows: [] }
+
+  const parse = (value) => {
+    let m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+))?/i.exec(value || '')
+    if (m) return [+m[1], +m[2], +m[3], m[4] === undefined ? 1 : +m[4]]
+    // color-mix() computes to color(srgb ...) in current Chromium.
+    m = /color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\)/i.exec(value || '')
+    return m ? [+m[1] * 255, +m[2] * 255, +m[3] * 255, m[4] === undefined ? 1 : +m[4]] : null
+  }
+  const over = (fg, bg) => {
+    const a = fg[3]
+    return [fg[0] * a + bg[0] * (1 - a), fg[1] * a + bg[1] * (1 - a), fg[2] * a + bg[2] * (1 - a), 1]
+  }
+  const lum = (c) => {
+    const channel = (v) => { v /= 255; return v > 0.03928 ? Math.pow((v + 0.055) / 1.055, 2.4) : v / 12.92 }
+    return 0.2126 * channel(c[0]) + 0.7152 * channel(c[1]) + 0.0722 * channel(c[2])
+  }
+  const ratio = (a, b) => {
+    const pair = [lum(a), lum(b)].sort((x, y) => y - x)
+    return (pair[0] + 0.05) / (pair[1] + 0.05)
+  }
+  const groundOf = (el) => {
+    const stack = []
+    for (let node = el; node; node = node.parentElement) {
+      const bg = parse(getComputedStyle(node).backgroundColor)
+      if (bg && bg[3] > 0) { stack.unshift(bg); if (bg[3] >= 0.999) break }
+      if (node === document.documentElement) break
+    }
+    let ground = [255, 255, 255, 1]
+    for (const layer of stack) ground = over(layer, ground)
+    return ground
+  }
+
+  const rows = []
+  const walker = document.createTreeWalker(panel, NodeFilter.SHOW_TEXT)
+  const seen = new Set()
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = (node.nodeValue || '').trim()
+    const el = node.parentElement
+    if (!text || !el || seen.has(el)) continue
+    seen.add(el)
+    const cs = getComputedStyle(el)
+    const box = el.getBoundingClientRect()
+    if (cs.visibility === 'hidden' || cs.display === 'none' || box.width < 1 || box.height < 1) continue
+    const fg = parse(cs.color)
+    if (!fg) continue
+    const ground = groundOf(el)
+    const ink = over(fg, ground)
+    const px = Number.parseFloat(cs.fontSize) || 12
+    const bold = (Number.parseInt(cs.fontWeight, 10) || 400) >= 700
+    const need = px >= 24 || (px >= 18.66 && bold) ? 3 : 4.5
+    const measured = ratio(ink, ground)
+    rows.push({ text: text.slice(0, 36), ratio: +measured.toFixed(2), need, pass: measured >= need })
+  }
+  return { present: true, rows }
+}
+
 const emit = (page, effect, payload) =>
   page.evaluate(([e, p]) => window.__hypercombEffectBus.emit(e, p), [effect, payload])
 
@@ -115,6 +179,34 @@ async function main() {
   try {
     await page.goto(url, { waitUntil: 'load' })
     await page.waitForTimeout(9000)
+
+    // The first-run offer arrives after the empty renderer settles and the
+    // example roster loads. Test it BEFORE clicking Start empty: the old
+    // driver dismissed the only surface whose contrast had actually broken.
+    let offerPresent = true
+    try { await page.waitForSelector('.offer-card', { state: 'visible', timeout: 30000 }) }
+    catch { offerPresent = false }
+    check('the first-run example offer appears', offerPresent, offerPresent ? '' : '.offer-card missing')
+    if (offerPresent) {
+      for (const theme of ['light', 'dark', 'honey', 'bloom', 'sherbet', 'system-light', 'system-dark']) {
+        const systemScheme = /^system-(light|dark)$/.exec(theme)?.[1]
+        if (systemScheme) await page.emulateMedia({ colorScheme: systemScheme })
+        await page.evaluate((name) => window.ioc?.get?.('@hypercomb.social/Theme')?.setTheme?.(name), systemScheme ? 'system' : theme)
+        await page.waitForTimeout(500)
+        const measured = await page.evaluate(MEASURE_TEXT, '.offer-card')
+        const failures = measured.rows.filter(row => !row.pass)
+        const worst = measured.rows.length
+          ? Math.min(...measured.rows.map(row => row.ratio))
+          : 0
+        check(`the welcome offer is readable in ${theme}`,
+          measured.present && measured.rows.length > 0 && failures.length === 0,
+          `${measured.rows.length} runs, ${failures.length} under target, worst ${worst}:1`)
+        await shot(`offer-${theme}`)
+      }
+      // The rest of this driver proves the fresh-shell Honey contract.
+      await page.evaluate(() => window.ioc?.get?.('@hypercomb.social/Theme')?.setTheme?.('honey'))
+      await page.waitForTimeout(400)
+    }
     const startEmpty = page.getByText('Start empty', { exact: true })
     if (await startEmpty.count()) { await startEmpty.first().click(); await page.waitForTimeout(2500) }
     await page.keyboard.press('Escape')
@@ -147,8 +239,8 @@ async function main() {
     check('so the backdrop is bright too — on a DARK-OS machine',
       s.palette === 'honey', `resolvedPalette=${s.palette}`)
 
-    check('/theme offers the three looks beside light and dark',
-      ['light', 'dark', 'honey', 'bloom', 'sherbet'].every(t => s.offered.includes(t)),
+    check('/theme offers system and the three looks beside light and dark',
+      ['system', 'light', 'dark', 'honey', 'bloom', 'sherbet'].every(t => s.offered.includes(t)),
       s.offered.join(', '))
 
     // ── 3. ONE LOOK DRESSES THE WHOLE APP ─────────────────────────────

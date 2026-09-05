@@ -11,7 +11,12 @@ $accent: #a8ffd8;
 
 // The identity as a triple — a bright theme takes the same hue deep.
 // These panels do not come through `tw.panel()`, so they say it here.
-:host { @include identity.accent($accent); }
+:host {
+  @include identity.accent($accent);
+  // This hand-built floating surface does not take tw.floating-panel(), so it
+  // must publish the accent roles its title and organisation label consume.
+  @include tw.window-roles;
+}
 
 :host {
   position: fixed;
