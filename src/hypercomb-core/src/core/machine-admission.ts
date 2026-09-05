@@ -181,11 +181,18 @@ export const admitMachineCall = (
 
   // HIDDEN IS A DISCOVERABILITY FLAG BEING READ AS AN AUTHORIZATION ONE.
   // `slashHidden` is documented as "must be typed in full on purpose" — a
-  // HUMAN-typing assumption a machine defeats for free. Behind it sit
-  // `/flatten`, `/prune`, `/sweep`, `/collapse-history` and `/consolidate-*`;
-  // `/flatten` is the verb that once hard-deleted a pool it mistook for a
-  // lineage bag. A prototype is workshop-stage code, concealed the same way
-  // for the same reason: nobody chose to offer it.
+  // HUMAN-typing assumption a machine defeats for free. Read off a live census
+  // 2026-09-04, twelve verbs sit behind it and four of them cut deep:
+  // `/prune`, `/sweep`, `/consolidate-history`, `/consolidate-content`. The
+  // kind of thing that lives back there is why: `/flatten`, retired since, is
+  // the verb that once hard-deleted a pool it mistook for a lineage bag.
+  // A prototype is workshop-stage code, concealed the same way for the same
+  // reason: nobody chose to offer it.
+  //
+  // NAMES GO STALE AND THE RULE MUST NOT. This gate reads the flag, never a
+  // list of the verbs carrying it — the earlier draft of this comment named
+  // `/flatten` and `/collapse-history` as live, and neither is in the census
+  // any more.
   if (entry.hidden === true || entry.prototype === true) {
     return refuse(`/${name} is not offered to a caller that is not typing it`)
   }

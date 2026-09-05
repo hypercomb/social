@@ -128,6 +128,14 @@ types in full trivially. Six of the eleven are genuinely destructive: `flatten`,
 `mesh-block`, `mesh-clear` — are dev/diagnostic; the first pass overstated the
 set.) `/flatten` is the verb that once hard-deleted a pool it mistook for a bag.
 
+**Verified live 2026-09-04 against a running hive, and two of those names are
+gone.** The census carries twelve `slashHidden` verbs — `prune`, `sweep`,
+`consolidate-history`, `consolidate-content`, `debug`, `verify-history`,
+`view-current`, `atlas`, `studio`, `lounge`, `block-peer`, `clear-mesh` —
+and neither `flatten` nor `collapse-history` is among them; both were retired
+in the behaviour prune. The gate reads the FLAG, never a list of the verbs
+carrying it, which is why this correction changes prose and no code.
+
 ### A defect in code committed today — *fixed 2026-09-04 (`453bafd98`)*
 
 `fdcfc6152` added a destructive refusal to the bridge's remote-submit listener,
