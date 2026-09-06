@@ -26,6 +26,9 @@ export interface DiscoverPayload {
   readonly origin: string
   readonly host: string
   readonly at: number
+  /** Every origin to read when the page is the COMMUNITY — the hosts you
+   *  carry, one page. Absent for a single named domain. */
+  readonly origins?: readonly string[]
 }
 
 /** A pasted domain in any casual shape → its origin, or null when it cannot
@@ -52,17 +55,19 @@ const PROBE_TIMEOUT_MS = 12_000
 export class DiscoverQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'discover'
-  override description = 'Discover a domain — every creation its hypercomb host publishes, as plates'
-  override options = ['<domain>']
+  override description = 'Discover a domain — every creation its hypercomb host publishes, as plates; with no domain, every host you carry'
+  override options = ['<domain>', '']
   override examples = [
     { input: '/discover pluginthematrix.com', result: 'Opens the publication directory that domain serves' },
+    { input: '/discover', result: 'One page of everything the hosts in your host directory share' },
   ]
 
   protected async execute(args: string): Promise<void> {
+    if (!args.trim()) { await this.#community(); return }
     const directory = normalizeDirectory(args)
     if (!directory) {
       this.#toast('tip', this.#t('discover.title', 'Discover'),
-        this.#t('discover.usage', 'Name a domain — try /discover pluginthematrix.com'))
+        this.#t('discover.usage', 'Name a domain — try /discover pluginthematrix.com — or say it alone for every host you carry'))
       return
     }
 
@@ -84,6 +89,32 @@ export class DiscoverQueenBee extends QueenBee {
     } satisfies DiscoverPayload)
     EffectBus.emit('activity:log', {
       message: `Discovering ${directory.host} — ${cards.length} published creation${cards.length === 1 ? '' : 's'}`,
+      icon: 'public',
+    })
+  }
+
+  /** THE COMMUNITY PAGE. The hosts you carry (community:hosts, the same set
+   *  the host directory shows) are the horizon; each one's ledger is read
+   *  and the plates are laid on one page. Nothing is placed, nothing is
+   *  written — it is the swarm's "what is out there" for static, public
+   *  content, and every plate can be stepped through or brought home. */
+  async #community(): Promise<void> {
+    const { listCommunityHosts } = await import('./community-hosts.js')
+    const zones = await listCommunityHosts().catch(() => [] as string[])
+    const origins = zones
+      .map(zone => normalizeDirectory(zone)?.origin ?? '')
+      .filter(Boolean)
+    if (origins.length === 0) {
+      this.#toast('tip', this.#t('discover.title', 'Discover'),
+        this.#t('discover.no-hosts', 'You carry no hosts yet — add one in the host directory (/hosts), then discover.'))
+      return
+    }
+    EffectBus.emit(DISCOVER_EFFECT, {
+      origin: origins[0]!, host: this.#t('discover.community', 'your community'), origins, at: Date.now(),
+    } satisfies DiscoverPayload)
+    EffectBus.emit('activity:log', {
+      message: this.#t('discover.community-log', 'Discovering everything {count} host(s) share')
+        .replace('{count}', String(origins.length)),
       icon: 'public',
     })
   }

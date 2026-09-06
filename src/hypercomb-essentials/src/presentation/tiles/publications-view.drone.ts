@@ -8,7 +8,15 @@
 // profile), the site's title, its address, and who shared it when.
 // Stepping through a plate LEAVES for that site — an external door, opened
 // through `openExternalLink` (never a hand-rolled anchor; the native shell
-// would lose its whole window to one).
+// would lose its whole window to one). Under each plate a second door,
+// BRING INTO MY HIVE, hands the creation to the hive-link preview flow
+// (hive-visit.drone) as the same bundle a /<sig> invite carries: a
+// session-only preview at /<branch>, then Adopt or Dismiss, and follow
+// updates after. Joining a public host from its directory IS the invite
+// flow, reached by a click.
+//
+// With no domain named, /discover lays EVERY host you carry on one page —
+// the community: the static, public counterpart of walking into a swarm.
 //
 // The ledger is the only source of plates. Publish adds one, unpublish
 // removes one, an empty ledger is an honest welcome — nothing on the page
@@ -19,7 +27,7 @@ import { titleForLabel } from '../../commands/decoration-kind-index.js'
 import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
 import { isBehaviorDormant } from '../../sharing/behavior-enablement.js'
 import { listDecorations } from '../../commands/decoration-manifest.js'
-import { fetchPublicationCards, type PublicationCard } from '../../sharing/publications-ledger.js'
+import { fetchPublicationCards, hiveLinkFromCard, type PublicationCard } from '../../sharing/publications-ledger.js'
 import { lineageKey } from '../../history/lineage-key.js'
 import { trackScrollGutter } from './scroll-gutter.js'
 import { openExternalLink } from './document-view-links.js'
@@ -43,7 +51,7 @@ export class PublicationsViewDrone extends Drone {
   #targetSegments: string[] | null = null
   /** Set by /discover — the page renders a FOREIGN domain's ledger instead
    *  of this host's. Cleared whenever the view is left. */
-  #directory: { origin: string; host: string } | null = null
+  #directory: { origin: string; host: string; origins?: readonly string[] } | null = null
   #bound = false
   #active = false
   #gen = 0
@@ -74,7 +82,10 @@ export class PublicationsViewDrone extends Drone {
         // freshness gate a reload would reopen a stale discovery unbidden.
         if (!payload?.origin || !payload?.host) return
         if (Math.abs(Date.now() - (payload.at ?? 0)) > 10_000) return
-        this.#directory = { origin: String(payload.origin), host: String(payload.host) }
+        this.#directory = {
+          origin: String(payload.origin), host: String(payload.host),
+          ...(payload.origins?.length ? { origins: payload.origins.map(String) } : {}),
+        }
         this.#targetSegments = null
         this.#vm()?.setMode(PUBLICATIONS_VIEW)
         void this.#reconcile()
@@ -144,7 +155,26 @@ export class PublicationsViewDrone extends Drone {
     let title: string
     let tagline: string
     let cards: PublicationCard[] | null
-    if (directory) {
+    if (directory?.origins?.length) {
+      // The community: every host you carry, one page. A host that does not
+      // answer contributes nothing; only when NONE answers is the page
+      // unreachable rather than empty.
+      const answers = await Promise.all(directory.origins.map(o => fetchPublicationCards({}, o).catch(() => null)))
+      if (gen !== this.#gen || this.#vm()?.mode !== PUBLICATIONS_VIEW) return
+      const seen = new Set<string>()
+      const merged: PublicationCard[] = []
+      for (const list of answers) {
+        for (const card of list ?? []) {
+          if (seen.has(card.url)) continue
+          seen.add(card.url)
+          merged.push(card)
+        }
+      }
+      merged.sort((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0))
+      cards = answers.every(a => a === null) ? null : merged
+      title = directory.host
+      tagline = this.#t('publications.communityTagline', 'everything the hosts you carry share')
+    } else if (directory) {
       // Discovery: the FOREIGN domain's ledger, verbatim — nothing excluded,
       // the page titles itself with the door it was pointed at.
       cards = await fetchPublicationCards({}, directory.origin)
@@ -213,7 +243,7 @@ export class PublicationsViewDrone extends Drone {
       sheet.appendChild(grid)
       const hint = document.createElement('p')
       hint.className = 'pv-hint'
-      hint.textContent = this.#t('publications.hint', 'step through a plate to visit a creation')
+      hint.textContent = this.#t('publications.hint', 'step through a plate to visit a creation — or bring it into your hive to keep a copy that follows its publisher')
       sheet.appendChild(hint)
     } else {
       const still = document.createElement('main')
@@ -246,8 +276,28 @@ export class PublicationsViewDrone extends Drone {
   }
 
   /** One published site, one plate: honeycomb monogram, title, address,
-   *  who shared it when. The click is an EXTERNAL door. */
+   *  who shared it when. The plate's click is an EXTERNAL door; the door
+   *  beneath it brings the creation home through the hive-link preview. */
   #plate(card: PublicationCard, index: number): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'pv-plate-wrap'
+    wrap.style.setProperty('--i', String(index))
+    wrap.appendChild(this.#door(card, index))
+
+    const bring = document.createElement('button')
+    bring.type = 'button'
+    bring.className = 'pv-bring'
+    bring.textContent = this.#t('publications.bring', 'bring into my hive')
+    bring.title = this.#t('publications.bringTitle', 'Preview this creation in your hive, then adopt it or walk away — nothing is written until you adopt')
+    bring.onclick = () => {
+      EffectBus.emit('hive:link', hiveLinkFromCard(card))
+      this.#vm()?.setMode('hexagons')
+    }
+    wrap.appendChild(bring)
+    return wrap
+  }
+
+  #door(card: PublicationCard, index: number): HTMLElement {
     const plate = document.createElement('button')
     plate.type = 'button'
     plate.className = 'pv-plate'
@@ -319,6 +369,14 @@ export class PublicationsViewDrone extends Drone {
 // espresso ink, gold hairlines. The monogram sits on a honeycomb wash —
 // the one place the hexagon shows through the plate.
 const SCENE_CSS = `
+  .hc-publications-view .pv-plate-wrap { display: flex; flex-direction: column; align-items: stretch; gap: 0.45rem; }
+  .hc-publications-view .pv-bring {
+    align-self: center; font: inherit; font-size: 0.82rem; letter-spacing: 0.04em;
+    color: inherit; background: transparent; border: 1px solid currentColor; border-radius: 999px;
+    padding: 0.28rem 0.9rem; opacity: 0.72; cursor: pointer;
+  }
+  .hc-publications-view .pv-bring:hover, .hc-publications-view .pv-bring:focus-visible { opacity: 1; }
+
 .hc-publications-view{position:fixed;top:0;bottom:0;left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);z-index:150;overflow:auto;background:
  radial-gradient(120% 70% at 50% 0%,rgba(255,255,255,.75),transparent 60%),
  linear-gradient(180deg,#f8f3e8 0%,#f3ecdd 60%,#ede4d1 100%);
