@@ -60,6 +60,13 @@ import { allows as intakeAllows } from '../pheromones/intake-filter.js'
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
+/** The static peer source (static-peers.drone.ts): public hosts' creations
+ *  offered as shaded tiles. Consulted by the same questions the swarm is —
+ *  a take is a take whichever wire the offer arrived on. */
+const STATIC_PEERS_KEY = '@diamondcoreprocessor.com/StaticPeersDrone'
+type StaticPeersLike = {
+  peerEntriesAt: (segments: readonly string[]) => readonly ({ name: string; peerPubkey: string } & Record<string, unknown>)[]
+}
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const COMMITTER_KEY = '@diamondcoreprocessor.com/LayerCommitter'
 const SNAPSHOT_QUEEN_KEY = '@diamondcoreprocessor.com/SnapshotQueenBee'
@@ -738,7 +745,9 @@ export class SwarmAdoptDrone extends Drone {
     if (!name) return false
     let inZone = false
     try { inZone = localStorage.getItem('hc:mesh-public') === 'true' } catch { /* private default */ }
-    if (!inZone) return false
+    // A STATIC offer is takeable in private mode — nothing of yours leaves
+    // when you take a public host's tile; the zone flag governs the mesh.
+    if (!inZone && !this.#staticEntryFor(name)) return false
     // NO INTAKE GATE HERE, deliberately — it was added and is now removed.
     //
     // `wandEligible` is not an adoption predicate. It has three consumers:
@@ -809,12 +818,25 @@ export class SwarmAdoptDrone extends Drone {
    *  pubkey narrows when the caller knows whose). */
   #peerEntryFor = (label: string, pubkey?: string): Record<string, unknown> | null => {
     const swarm = this.#ioc()?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
-    if (!swarm?.peerTilesAtCurrentSig) return null
     const matches = (p: { name: string; peerPubkey: string }): boolean =>
       p.name === label && (!pubkey || p.peerPubkey === pubkey)
-    return (swarm.peerTilesAtCurrentSig().find(matches)
-      ?? swarm.subscribedTiles?.().find(matches)
-      ?? swarm.peerTilesAtCurrentSig().find(p => p.name === label)
+    const live = swarm?.peerTilesAtCurrentSig
+      ? (swarm.peerTilesAtCurrentSig().find(matches)
+        ?? swarm.subscribedTiles?.().find(matches)
+        ?? swarm.peerTilesAtCurrentSig().find(p => p.name === label)
+        ?? null)
+      : null
+    return (live ?? this.#staticEntryFor(label, pubkey)) as Record<string, unknown> | null
+  }
+
+  /** A public host's offered tile at the current location — the static peer
+   *  source's answer, in the same shape a live peer tile carries. */
+  #staticEntryFor = (label: string, pubkey?: string): Record<string, unknown> | null => {
+    const statics = this.#ioc()?.get?.(STATIC_PEERS_KEY) as StaticPeersLike | undefined
+    if (!statics?.peerEntriesAt) return null
+    const here = statics.peerEntriesAt(this.#currentSegments())
+    return (here.find(p => p.name === label && (!pubkey || p.peerPubkey === pubkey))
+      ?? here.find(p => p.name === label)
       ?? null) as Record<string, unknown> | null
   }
 

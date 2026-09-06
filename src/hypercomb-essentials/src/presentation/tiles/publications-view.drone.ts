@@ -9,11 +9,12 @@
 // Stepping through a plate LEAVES for that site — an external door, opened
 // through `openExternalLink` (never a hand-rolled anchor; the native shell
 // would lose its whole window to one). Under each plate a second door,
-// BRING INTO MY HIVE, hands the creation to the hive-link preview flow
-// (hive-visit.drone) as the same bundle a /<sig> invite carries: a
-// session-only preview at /<branch>, then Adopt or Dismiss, and follow
-// updates after. Joining a public host from its directory IS the invite
-// flow, reached by a click.
+// SHOW IN MY HIVE, OFFERS the creation (static-peers.drone.ts): it appears
+// as a shaded tile at your top level exactly as a swarm peer's would, and
+// each step you take through it is the adopt — the first click takes that
+// tile, the second walks in, its children arrive shaded. Nothing folds on
+// its own: "every action is a step towards your permanence, your desires,
+// your hive." The same door withdraws the offer.
 //
 // With no domain named, /discover lays EVERY host you carry on one page —
 // the community: the static, public counterpart of walking into a swarm.
@@ -27,7 +28,8 @@ import { titleForLabel } from '../../commands/decoration-kind-index.js'
 import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
 import { isBehaviorDormant } from '../../sharing/behavior-enablement.js'
 import { listDecorations } from '../../commands/decoration-manifest.js'
-import { fetchPublicationCards, hiveLinkFromCard, type PublicationCard } from '../../sharing/publications-ledger.js'
+import { fetchPublicationCards, type PublicationCard } from '../../sharing/publications-ledger.js'
+import { offerFromCard } from '../../sharing/static-peers.js'
 import { lineageKey } from '../../history/lineage-key.js'
 import { trackScrollGutter } from './scroll-gutter.js'
 import { openExternalLink } from './document-view-links.js'
@@ -243,7 +245,7 @@ export class PublicationsViewDrone extends Drone {
       sheet.appendChild(grid)
       const hint = document.createElement('p')
       hint.className = 'pv-hint'
-      hint.textContent = this.#t('publications.hint', 'step through a plate to visit a creation — or bring it into your hive to keep a copy that follows its publisher')
+      hint.textContent = this.#t('publications.hint', 'step through a plate to visit a creation — or show it in your hive, shaded, and take it one tile at a time')
       sheet.appendChild(hint)
     } else {
       const still = document.createElement('main')
@@ -277,23 +279,37 @@ export class PublicationsViewDrone extends Drone {
 
   /** One published site, one plate: honeycomb monogram, title, address,
    *  who shared it when. The plate's click is an EXTERNAL door; the door
-   *  beneath it brings the creation home through the hive-link preview. */
+   *  beneath it OFFERS the creation in your hive (shaded), or withdraws it. */
   #plate(card: PublicationCard, index: number): HTMLElement {
     const wrap = document.createElement('div')
     wrap.className = 'pv-plate-wrap'
     wrap.style.setProperty('--i', String(index))
     wrap.appendChild(this.#door(card, index))
 
-    const bring = document.createElement('button')
-    bring.type = 'button'
-    bring.className = 'pv-bring'
-    bring.textContent = this.#t('publications.bring', 'bring into my hive')
-    bring.title = this.#t('publications.bringTitle', 'Preview this creation in your hive, then adopt it or walk away — nothing is written until you adopt')
-    bring.onclick = () => {
-      EffectBus.emit('hive:link', hiveLinkFromCard(card))
-      this.#vm()?.setMode('hexagons')
+    const offer = offerFromCard(card)
+    if (offer) {
+      const statics = window.ioc?.get<{ isOffered?: (name: string) => boolean }>('@diamondcoreprocessor.com/StaticPeersDrone')
+      const bring = document.createElement('button')
+      bring.type = 'button'
+      bring.className = 'pv-bring'
+      const paint = (offered: boolean): void => {
+        bring.textContent = offered
+          ? this.#t('publications.offered', 'shown in your hive — remove')
+          : this.#t('publications.offer', 'show in my hive')
+        bring.title = offered
+          ? this.#t('publications.offeredTitle', 'Stop offering this creation — tiles you already took stay yours')
+          : this.#t('publications.offerTitle', 'It appears shaded at your top level; the first click on a tile takes it, the second walks in — each step is the adopt')
+        bring.dataset['offered'] = offered ? 'true' : 'false'
+      }
+      paint(statics?.isOffered?.(offer.name) === true)
+      bring.onclick = () => {
+        const offered = bring.dataset['offered'] === 'true'
+        if (offered) EffectBus.emit('community:withdraw', { name: offer.name })
+        else EffectBus.emit('community:offer', offer)
+        paint(!offered)
+      }
+      wrap.appendChild(bring)
     }
-    wrap.appendChild(bring)
     return wrap
   }
 

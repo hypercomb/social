@@ -16,8 +16,7 @@
 //      through its second name still refuses to list itself
 
 import { describe, expect, it } from 'vitest'
-import { doorsOf, hiveLinkFromCard, shapePublications } from './publications-ledger.js'
-import { validateHiveLinkBundle } from './hive-link.js'
+import { doorsOf, shapePublications } from './publications-ledger.js'
 
 const SIG_A = 'a'.repeat(64)
 const SIG_B = 'b'.repeat(64)
@@ -146,23 +145,14 @@ describe('shapePublications', () => {
   })
 })
 
-describe('bring into my hive', () => {
-  it('a plate carries the key and head it was verified against, and folds into a bundle the preview flow accepts', () => {
+describe('a plate carries what an offer needs', () => {
+  it('the publisher key and the verified head it was shaped from', () => {
     const [card] = shapePublications([site({
       lineage: 'revolucion/meetup',
       hosts: [door('meetup.pluginthematrix.com', true), door('meetup.hypercomb.com')],
     })])
     expect(card!.pubkey).toBe('e'.repeat(64))
     expect(card!.head).toBe(SIG_A)
-    const bundle = hiveLinkFromCard(card!, 1234)
-    expect(bundle).toMatchObject({
-      segments: ['revolucion', 'meetup'],
-      pubkey: 'e'.repeat(64),
-      hosts: ['meetup.pluginthematrix.com', 'meetup.hypercomb.com'],
-      rootSig: SIG_A,
-      createdAt: 1234,
-    })
-    // the same validator the /<sig> invite passes through
-    expect(validateHiveLinkBundle(bundle)).toMatchObject({ segments: ['revolucion', 'meetup'], hosts: ['meetup.pluginthematrix.com', 'meetup.hypercomb.com'] })
+    expect(card!.hosts.map(d => d.host)).toEqual(['meetup.pluginthematrix.com', 'meetup.hypercomb.com'])
   })
 })

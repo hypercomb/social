@@ -18,29 +18,6 @@
 // deployment's own origin always answers first.
 
 /** One approved publisher on a site binding, as the worker reports it. */
-import { HIVE_LINK_KIND, HIVE_LINK_VERSION, type HiveLinkBundle } from './hive-link.js'
-
-/**
- * BRING INTO MY HIVE — a plate folded into the hive-link bundle a /<sig>
- * invite carries (hive-link.ts). Same shape, same consumer
- * (hive-visit.drone: preview at /<branch>, Adopt or Dismiss, follow updates),
- * so joining a public host from its directory IS the invite flow, reached
- * by a click instead of a link. The lineage is the publisher's route; its
- * segments are what the index is keyed by. Every door the creation answers
- * on rides along as a byte host, primary first.
- */
-export function hiveLinkFromCard(card: PublicationCard, now: number = Date.now()): HiveLinkBundle {
-  return {
-    kind: HIVE_LINK_KIND,
-    v: HIVE_LINK_VERSION,
-    segments: card.lineage.split('/').map(s => s.trim()).filter(Boolean),
-    pubkey: card.pubkey,
-    hosts: card.hosts.map(d => d.host),
-    rootSig: card.head,
-    createdAt: now,
-  }
-}
-
 export interface LedgerPublisher {
   readonly pubkey: string
   readonly label: string
