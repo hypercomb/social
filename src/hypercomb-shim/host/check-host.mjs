@@ -231,6 +231,54 @@ if (!manifest) {
   }
 }
 
+// ── 10. the pool at its address ──────────────────────────────────────────────
+// documentation/host-packages-pool.md, "The directory branch": a pool is a
+// DIRECTORY, and it is reached at the one address every client derives for
+// itself — GET /<sign(meaning)>/ answers text/plain, one entry name per line,
+// no-store. A live host readdirs; a static host ships the same bytes as that
+// directory's own index.html. The hive's host directory, the offers window
+// and every cross-host word search ask THIS door and nothing else, so a host
+// that does not answer it "publishes nothing" no matter what else it serves.
+//
+// The interesting failure is the SPA fallback again (checks 4 and 9): a
+// redirect to / or a 200 of text/html means the rewrite ate the address.
+// An honest 404 is a host that has no packages yet — a warning, not a fail.
+{
+  const meaning = 'host:packages'
+  const poolSig = await sha256(new TextEncoder().encode(meaning))
+  const res = await get(`/${poolSig}/`, { cache: 'no-store', redirect: 'manual' })
+  if (res.error) {
+    record(false, 'serves the packages pool at its address', String(res.error), 'unexpected network failure')
+  } else {
+    const type = (res.headers.get('content-type') ?? '').toLowerCase()
+    const cache = (res.headers.get('cache-control') ?? '').toLowerCase()
+    if (res.status >= 300 && res.status < 400) {
+      record(false, 'serves the packages pool at its address',
+        `HTTP ${res.status} → ${res.headers.get('location') ?? '?'}`,
+        `/${poolSig.slice(0, 12)}…/ was redirected — a rewrite is answering the pool's address. ` +
+        'A static host must ship the listing as that directory\'s own index.html (public/_redirects: the file wins before any rewrite); a live host answers by readdir')
+    } else if (res.status === 404) {
+      record(null, 'serves the packages pool at its address', 'HTTP 404',
+        'this host offers no packages yet — fine for a shell host; a node cannot install from it')
+    } else if (!res.ok) {
+      record(false, 'serves the packages pool at its address', `HTTP ${res.status}`, 'the pool address must answer 200 (a listing) or 404 (no pool)')
+    } else if (type.includes('text/html')) {
+      record(false, 'serves the packages pool at its address', 'answered text/html',
+        'the SPA fallback swallowed the pool address — the listing (text/plain, one entry per line) must win before any rewrite')
+    } else {
+      const body = await res.text()
+      const entries = body.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+      const wellFormed = entries.length > 0 && entries.every(e => /^\d{8}$/.test(e) || SIG_RE.test(e))
+      record(wellFormed, 'serves the packages pool at its address',
+        `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}, ${type || '(no content-type)'}`,
+        'the listing is one entry name per line — 8-digit marker names or 64-hex members — and nothing else')
+      const fresh = cache.includes('no-store') || cache.includes('max-age=0') || cache.includes('no-cache')
+      record(fresh ? true : null, 'the pool listing is not hard-cached', cache || '(no cache-control)',
+        'a pool GROWS — cache the listing and every client stops at the head it first saw; set no-store on /<sig>/')
+    }
+  }
+}
+
 // ── verdict ──────────────────────────────────────────────────────────────────
 const failed = results.filter(r => r.ok === false)
 const warned = results.filter(r => r.ok === null)
