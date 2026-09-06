@@ -93,6 +93,9 @@ export class StaticPeersDrone extends Drone {
   #localized = new Set<string>()
   /** Last resolution per location key — what the sync lookups answer from. */
   #entriesByLocation = new Map<string, StaticPeerEntry[]>()
+  /** The location last resolved — arriving somewhere new is news for the
+   *  divergence scan even when what stands there is unchanged. */
+  #lastKey: string | null = null
 
   constructor() {
     super()
@@ -211,6 +214,21 @@ export class StaticPeersDrone extends Drone {
   public readonly branchNamesAt = (segments: readonly string[]): readonly string[] =>
     this.peerEntriesAt(segments).filter(e => e.hasChildren).map(e => e.name)
 
+  /** The publisher's child NAMES at a route under an offer — what the
+   *  divergence scan compares against the children you hold there. Empty
+   *  when the route is not under an offer or the layer is unresolvable. */
+  public readonly childNamesAt = async (segments: readonly string[]): Promise<readonly string[]> => {
+    const clean = segments.map(s => String(s ?? '').trim()).filter(Boolean)
+    let offer = clean.length ? this.#offers.get(clean[0]!) : undefined
+    if (!offer) return []
+    await this.#ready(offer)
+    offer = this.#offers.get(offer.name) ?? offer
+    if (!SIG_RE.test(offer.head)) return []
+    const here = await layerAtRoute(offer.head, clean.slice(1), this.#io())
+    if (!here) return []
+    return (await childEntriesOf(here.layer, offer.pubkey, this.#io())).map(e => e.name)
+  }
+
   #io = (): StaticPeersIo => {
     const store = this.#store()
     return {
@@ -249,7 +267,20 @@ export class StaticPeersDrone extends Drone {
         }
       }
     }
+    const before = this.#entriesByLocation.get(key)
     this.#entriesByLocation.set(key, out)
+    // Only REAL news: the divergence scan (swarm-adopt.drone.ts) listens for
+    // this, and the render calls this source on every pass — an unconditional
+    // emit would be a repaint loop. News is: a new location, or a changed
+    // answer at the same one. The swarm gets a heartbeat burst on arrival;
+    // a static offer has to say so itself, or a held tile whose publisher
+    // has more than you hold would never dim when you came back to it.
+    const fingerprint = (list: readonly StaticPeerEntry[]) => list.map(e => e.name + ':' + e.layerSig).join('|')
+    const arrived = this.#lastKey !== key
+    this.#lastKey = key
+    if (out.length && (arrived || !before || fingerprint(before) !== fingerprint(out))) {
+      this.emitEffect('swarm:peers-changed', { sig: '', pubkey: '', reason: arrived ? 'static-arrived' : 'static-resolved' })
+    }
     return out
   }
 
