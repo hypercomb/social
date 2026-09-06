@@ -172,7 +172,10 @@ jobs:
           set -euo pipefail
           test -f index.html || { echo "MISSING index.html"; exit 1; }
           grep -q '"importmap"' index.html || { echo "import map was not baked in"; exit 1; }
-          test -f content/manifest.json || { echo "MISSING content/manifest.json"; exit 1; }
+          # The bundle publishes its package through the host:packages pool
+          # (address DERIVED, never named) — there is no manifest.json any more.
+          POOL=$(node -e "process.stdout.write(require('node:crypto').createHash('sha256').update('host:packages').digest('hex'))")
+          test -f "content/$POOL/00000000" || { echo "MISSING content/<sign(host:packages)>/00000000 — the bundle publishes no package"; exit 1; }
           SIGS=$(find content -maxdepth 1 -type f -name '????????????????????????????????????????????????????????????????' | wc -l)
           echo "OK: import map baked; $SIGS flat content files."
           test "$SIGS" -gt 0 || { echo "no content shipped"; exit 1; }
