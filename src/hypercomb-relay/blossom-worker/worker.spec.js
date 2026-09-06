@@ -364,3 +364,10 @@ test('a pool address on a site door answers the directory branch, never the SPA 
   assert.equal(await listing.text(), '00000000\n00000001\n')
   assert.deepEqual(assetRequests, [])
 })
+
+test('a site door is readable cross-origin — its manifest carries the open CORS header', async () => {
+  const { env } = await fixture()
+  const res = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/content/manifest.json'), env)
+  assert.equal(res.status, 200)
+  assert.equal(res.headers.get('access-control-allow-origin'), '*')
+})

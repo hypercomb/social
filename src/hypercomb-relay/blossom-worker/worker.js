@@ -422,6 +422,12 @@ async function serveVisitorAsset(request, env) {
   headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()')
   headers.set('Referrer-Policy', 'no-referrer')
   headers.set('X-Content-Type-Options', 'nosniff')
+  // A door exists to be pulled FROM. The visitor engine's own assets — the
+  // package manifest and the atoms under /content/ above all — are public,
+  // immutable and reader-verified, so no request's origin changes the answer;
+  // without this header a hive replicating from another origin died as an
+  // opaque "Failed to fetch" and the door read as publishing nothing.
+  headers.set('Access-Control-Allow-Origin', '*')
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
