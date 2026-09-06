@@ -40,7 +40,7 @@ import { EffectBus } from '@hypercomb/core'
 // so there is one answer to "what does this domain publish" — essentials
 // cannot reach runtime (it imports core and nothing else), which is why this
 // call sits in the panel rather than in HostsDrone.
-import { listHostPackages, type HostPackage } from '@hypercomb/runtime/host-packages'
+import { askHostPackages, type HostPackage } from '@hypercomb/runtime/host-packages'
 import { hostZone } from '@hypercomb/runtime/host-zones'
 // The build this shell is RUNNING — the one stamp every activation path
 // leaves, read here so "you are on build N" is a fact and not a guess.
@@ -52,7 +52,9 @@ import { signalSession } from '../window-session'
 
 /** What one host publishes, once asked. `null` while in flight. Packages
  *  arrive newest first — the manifest reader sorts by generation. */
-type Offer = { packages: HostPackage[] } | null
+/** What a host offers, and whether it answered at all — "publishes nothing
+ *  here" and "does not answer" are different facts. */
+type Offer = { packages: HostPackage[]; answered: boolean } | null
 
 type IntakeState = {
   phase: 'applying' | 'applied' | 'failed'
@@ -252,6 +254,12 @@ export class HostsPanelComponent implements OnDestroy {
     const packages = this.offers()[zone]?.packages ?? []
     const concealed = this.concealed()
     return concealed.size === 0 ? packages : packages.filter(p => !concealed.has(p.packageSig))
+  }
+
+  /** Did the door answer at all when asked? False is a network fact, not a
+   *  publishing one. */
+  offerAnswered(zone: string): boolean {
+    return this.offers()[zone]?.answered === true
   }
 
   /** The newest build this host offers, or null when it offers nothing. */
@@ -542,11 +550,12 @@ export class HostsPanelComponent implements OnDestroy {
 
     this.offers.set({ ...this.offers(), [zone]: null })
     let packages: HostPackage[] = []
-    try { packages = await listHostPackages(zone) } catch { /* empty answer */ }
+    let answered = false
+    try { ({ packages, answered } = await askHostPackages(zone)) } catch { /* no answer */ }
     this.asked.set(new Set([...this.asked(), zone]))
     this.offers.set({
       ...this.offers(),
-      [zone]: { packages },
+      [zone]: { packages, answered },
     })
   }
 
