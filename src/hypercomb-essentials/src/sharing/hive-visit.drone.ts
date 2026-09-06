@@ -1,57 +1,57 @@
 // sharing/hive-visit.drone.ts
 //
-// The VISITOR side of static hive hosting — "adopt for review".
+// A hive-link arrives — what happens depends on WHO you are.
 //
 // A hive-link bundle (hive-link.ts) arrives via the /<sig> boot capture:
-// MeetingInviteWorker decodes it and emits `hive:link`. This drone then:
+// MeetingInviteWorker decodes it and emits `hive:link`. This drone resolves
+// the publisher's CURRENT head for the linked branch from their signed hive
+// index (hive-pointer.ts) — verified against the pubkey pinned in the
+// bundle, so no host can substitute content — and then:
 //
-//   1. Resolves the publisher's CURRENT head for the linked branch from
-//      their signed hive index (hive-pointer.ts) — verified against the
-//      pubkey pinned in the bundle, so no host can substitute content.
-//   2. Localizes the branch's layer closure into the content pool
-//      (broker.adopt, layersOnly + silent — content-addressed bytes are
-//      inert cache, NOT adoption).
-//   3. Seeds a PREVIEW head (history.seedPreviewHead) at /<branchName> and
-//      navigates there: the branch renders through the one real render
-//      path, browsable, with ZERO lineage writes. Foreign pages/scripts
-//      stay behind the render-time verification gate as always.
-//   4. The preview banner (shell surface) offers Adopt / Dismiss:
-//      `hive:adopt-accept` drops the preview and folds the branch through
-//      SwarmAdoptDrone.adoptResolvedBranch — ADOPT IS ADOPT, the same
-//      gesture as a mesh adopt, code consent and all. `hive:adopt-dismiss`
-//      drops the preview and walks away — nothing was ever written.
+//   A PARTICIPANT (a hive of their own) is handed an OFFER, never a fold.
+//   Jaime, 2026-09-06: "Adopt is identical to a swarm — shaded by default,
+//   and as you navigate through them you adopt them. Every action is a step
+//   towards your permanence, your desires, your hive." The creation appears
+//   at their top level as a shaded peer tile (static-peers.drone.ts); the
+//   first click takes that tile, the second walks in, the children arrive
+//   shaded, each one taken the same way. The link is the same door as the
+//   community page's "show in my hive" — reached by a URL instead of a
+//   click. Nothing is written until the participant takes something.
+//
+//   A VISITOR (the published visitor shell — a reader with no hive) gets the
+//   PREVIEW MOUNT: the branch's layer closure is localized (content-addressed
+//   cache, not adoption), a session-only preview head is seeded at the
+//   publisher's segments, and the creation renders through the one real
+//   render path with ZERO lineage writes. That mount IS the visitor
+//   deployment's render path (hypercomb-web/src/main.visitor.ts listens for
+//   `preview:mode` to set the URL base). A visitor has nothing to adopt
+//   into, so the banner is a strip that says what is showing, with no exits.
 //
 // The whole flow rides the HTTPS byte tier only: it works with
 // hc:mesh-public OFF (private mode) and never touches the relay.
 //
-// FOLLOW UPDATES (phase 1 = boot poll): an adopted static root records a
-// follow in hc:static-follows. Shortly after boot this drone fetches each
-// followed publisher's index ONCE, O(1)-compares the published head to the
-// sync receipt, and re-folds through syncResolvedBranch when the publisher
-// moved — same receipts, same tombstone respect as mesh auto-sync.
+// FOLLOWS. The old "adopt for review" left a follow record per adopted root
+// (`hc:static-follows`, localStorage) and re-folded whole branches at boot
+// when a publisher moved — a fold with no gesture. Those records are read
+// ONCE by the static peer source and become offers; nothing folds at boot
+// any more, and nothing writes that key again.
 
-import { Drone, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { Drone, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { ensureDecorationsIndexed } from '../commands/decoration-kind-index.js'
 import { publishLightsWithinAt } from '../commands/publish-lights.js'
 import { adoptPublishedLights } from './behavior-enablement.js'
-import { validateHiveLinkBundle, STATIC_FOLLOWS_KEY, type HiveLinkBundle } from './hive-link.js'
+import { validateHiveLinkBundle, type HiveLinkBundle } from './hive-link.js'
 import { checkRemoteHiveFormat } from './hive-format.js'
 import { fetchHiveManifestFromAny } from './hive-pointer.js'
 import { lineageKey } from '../history/lineage-key.js'
-import { isAdoptTombstoned } from './adopted-roots.js'
 import { isPublishedVisitorShell } from './behavior-enablement.js'
+import type { StaticOffer } from './static-peers.js'
 
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
 const NAV_KEY = '@hypercomb.social/Navigation'
-const SWARM_ADOPT_KEY = '@diamondcoreprocessor.com/SwarmAdoptDrone'
-// Mirrors swarm-adopt.drone.ts SYNC_RECEIPTS_KEY — the ONE receipts map
-// both sync sources (mesh broadcasts, static indexes) compare against.
-const SYNC_RECEIPTS_KEY = 'hc:synced-publisher-roots'
 
 const SIG_RE = /^[a-f0-9]{64}$/
-const BOOT_SYNC_DELAY_MS = 30_000
-const BOOT_SYNC_MAX_TRIES = 3
 
 interface HistoryLike {
   sign: (lineage: { explorerSegments: () => string[] }) => Promise<string>
@@ -67,18 +67,6 @@ interface BrokerLike {
 }
 
 interface NavLike { go: (segments: readonly string[]) => void }
-
-interface AdoptLike {
-  adoptResolvedBranch: (branch: { layerSig: string; at: string[]; domain?: string; label: string }) =>
-    Promise<'committed' | 'exists' | 'rewound' | 'unavailable' | 'declined' | 'uninspectable'>
-  syncResolvedBranch: (branch: { layerSig: string; at: string[]; domain?: string; label: string }) =>
-    Promise<'committed' | 'exists' | 'unavailable' | 'rewound'>
-}
-
-interface StaticFollow { pubkey: string; hosts: string[]; lineageKey: string }
-
-/** The active preview, if any — what accept/dismiss act on. */
-interface ActivePreview { bundle: HiveLinkBundle; head: string; name: string; key: string }
 
 /** Is this shell a READER of a published site, rather than a participant with
  *  a hive of their own? The visitor bootstrap stamps both marks before it
@@ -98,22 +86,14 @@ export class HiveVisitDrone extends Drone {
   override genotype = 'sharing'
 
   public override description =
-    'Receives a hive-link bundle, resolves the publisher\'s current head from their signed hive index, and renders the branch as a session-only PREVIEW (adopt for review) — zero lineage writes until the explicit Adopt, which folds through the one adopt gesture. Dismiss forgets everything. Boot-polls followed static publishers for updates.'
+    'Receives a hive-link bundle and resolves the publisher\'s current head from their signed hive index. A participant is handed an OFFER — the creation appears shaded at their top level and each step through it is the adopt; a visitor shell gets the session-only preview mount that renders the published creation with zero lineage writes.'
   public override effects = ['network'] as const
-  protected override listens = ['hive:link', 'hive:adopt-accept', 'hive:adopt-dismiss']
-  protected override emits = ['preview:mode', 'toast:show', 'activity:log']
-
-  #active: ActivePreview | null = null
-  #bootSyncTries = 0
+  protected override listens = ['hive:link']
+  protected override emits = ['community:offer', 'preview:mode', 'toast:show', 'activity:log']
 
   constructor() {
     super()
-    this.onEffect<unknown>('hive:link', (raw) => { void this.#preview(raw) })
-    this.onEffect('hive:adopt-accept', () => { void this.#accept() })
-    this.onEffect('hive:adopt-dismiss', () => { this.#dismiss() })
-    // Follow updates ride a single detached post-boot pass — off the boot
-    // path, one index fetch per followed publisher, never a timer loop.
-    setTimeout(() => { void this.#bootSync() }, BOOT_SYNC_DELAY_MS)
+    this.onEffect<unknown>('hive:link', (raw) => { void this.#arrive(raw) })
   }
 
   #ioc = () => (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
@@ -123,11 +103,58 @@ export class HiveVisitDrone extends Drone {
     this.emitEffect('toast:show', { type, title, message })
   }
 
-  // ── 1-2-3: resolve head → localize closure → seed preview ────────────
+  // ── the head, from the publisher's signed index ──────────────────────
 
-  #preview = async (raw: unknown): Promise<void> => {
+  #resolveHead = async (bundle: HiveLinkBundle): Promise<{ key: string; head: string } | null> => {
+    const key = lineageKey(bundle.segments)
+    const manifest = await fetchHiveManifestFromAny(bundle.hosts, bundle.pubkey)
+    // BEFORE anything: does this client read the format this hive is written
+    // in? The index is already signature-verified here, and the check is
+    // silent unless the hive declares a format this build cannot read.
+    if (manifest) void checkRemoteHiveFormat(manifest.roots, bundle.hosts).catch(() => null)
+    // The signed index names "now"; the bundle's rootSig hint covers a
+    // cold/unreachable index (the old closure stays hosted).
+    const head = manifest?.roots[key] ?? bundle.rootSig ?? ''
+    if (!SIG_RE.test(head)) {
+      const i18n = this.#i18n()
+      this.#toast('error', i18n?.t('preview.banner.title') ?? 'Hive link',
+        i18n?.t('preview.unreachable') ?? 'This hive\'s index is unreachable and the link carries no fallback.')
+      return null
+    }
+    return { key, head }
+  }
+
+  #arrive = async (raw: unknown): Promise<void> => {
     const bundle = validateHiveLinkBundle(raw)
     if (!bundle) { console.warn('[hive-visit] link rejected — malformed bundle', raw); return }
+    if (isReadOnlySession()) await this.#previewForVisitor(bundle)
+    else await this.#offerToParticipant(bundle)
+  }
+
+  // ── a participant: the offer ──────────────────────────────────────────
+
+  #offerToParticipant = async (bundle: HiveLinkBundle): Promise<void> => {
+    const resolved = await this.#resolveHead(bundle)
+    if (!resolved) return
+    const name = bundle.segments[bundle.segments.length - 1] ?? ''
+    const offer: StaticOffer = {
+      name, pubkey: bundle.pubkey, hosts: [...bundle.hosts],
+      lineageKey: resolved.key, segments: [...bundle.segments], head: resolved.head,
+    }
+    EffectBus.emit('community:offer', offer)
+    // The shaded tile stands at your top level — go where it is.
+    this.#ioc()?.get<NavLike>(NAV_KEY)?.go([])
+    const i18n = this.#i18n()
+    this.emitEffect('activity:log', {
+      message: i18n?.t('offer.arrived', { name })
+        ?? `"${name}" is offered in your hive — shaded until you take it; the first click takes a tile, the second walks in`,
+      icon: '●',
+    })
+  }
+
+  // ── a visitor: the preview mount (the visitor deployment's render path) ──
+
+  #previewForVisitor = async (bundle: HiveLinkBundle): Promise<void> => {
     const i18n = this.#i18n()
     const history = this.#ioc()?.get<HistoryLike>(HISTORY_KEY)
     const broker = this.#ioc()?.get<BrokerLike>(BROKER_KEY)
@@ -138,24 +165,9 @@ export class HiveVisitDrone extends Drone {
       })
       return
     }
-
-    // One preview at a time — a fresh link replaces the current one.
-    if (this.#active) this.#dismiss({ silent: true })
-
-    // The publisher's signed index names "now"; the bundle's rootSig hint
-    // covers a cold/unreachable index (the old closure stays hosted).
-    const key = lineageKey(bundle.segments)
-    const manifest = await fetchHiveManifestFromAny(bundle.hosts, bundle.pubkey)
-    // BEFORE ADOPTING: does this visitor's client read the format this hive is
-    // written in? The index is already signature-verified here, and the check
-    // is silent unless the hive declares a format this build cannot read.
-    if (manifest) void checkRemoteHiveFormat(manifest.roots, bundle.hosts).catch(() => null)
-    const head = manifest?.roots[key] ?? bundle.rootSig ?? ''
-    if (!SIG_RE.test(head)) {
-      this.#toast('error', i18n?.t('preview.banner.title') ?? 'Hive preview',
-        i18n?.t('preview.unreachable') ?? 'This hive\'s index is unreachable and the link carries no fallback.')
-      return
-    }
+    const resolved = await this.#resolveHead(bundle)
+    if (!resolved) return
+    const { head } = resolved
 
     // Teach the broker where the bytes live (session-noted tier — works in
     // private mode, no relay flag needed), then localize the layer closure.
@@ -172,31 +184,26 @@ export class HiveVisitDrone extends Drone {
     }
     const name = String(root['name'] ?? '').trim() || bundle.segments[bundle.segments.length - 1]
 
-    // WHERE the preview mounts. A participant hive-link lands at the top
-    // level (/<name>): the visitor doesn't hold the publisher's ancestors,
-    // and a nested mount could shadow their own content. A published SITE
-    // mounts at the publisher's own segments instead — location-pinned marks
-    // (view:default, the pheromone walk) only match where the publisher
-    // minted them, so a nested lineage (games/arkanoid) flattened to
-    // /arkanoid arrives as bare hexagons with its face unmatched. A visitor
-    // origin holds no content of its own, so nothing can be shadowed there.
+    // WHERE the preview mounts. A published SITE mounts at the publisher's
+    // own segments — location-pinned marks (view:default, the pheromone
+    // walk) only match where the publisher minted them, so a nested lineage
+    // (games/arkanoid) flattened to /arkanoid would arrive as bare hexagons
+    // with its face unmatched. A visitor origin holds no content of its own,
+    // so nothing can be shadowed there.
     const mount = isPublishedVisitorShell() && bundle.segments.length > 0
       ? [...bundle.segments]
       : [name]
 
-    // Collision: never preview OVER the visitor's own content. currentLayerAt
-    // resolves real bags AND parent-carried children, so an occupied name is
-    // caught however it is held.
+    // Collision: never preview OVER content already standing there.
     const locSig = await history.sign({ explorerSegments: () => [...mount] })
     const occupied = await history.currentLayerAt(locSig).catch(() => null)
     if (occupied) console.warn('[hive-visit] name already occupied:', name)
     if (occupied || !(await history.seedPreviewHead(mount, head))) {
       this.#toast('tip', i18n?.t('preview.banner.title') ?? 'Hive preview',
-        i18n?.t('preview.collision', { name }) ?? `You already have "${name}" — move or rename yours first, then open the link again.`)
+        i18n?.t('preview.collision', { name }) ?? `"${name}" is already standing here — the link could not be opened.`)
       return
     }
 
-    this.#active = { bundle, head, name, key }
     // Hydrate the preview root's decorations BEFORE arriving. The arrival
     // arbitration (view.bee #openDefaultView) runs pre-paint and reads the
     // synchronous decoration index — deciding before this hydration meant a
@@ -213,10 +220,6 @@ export class HiveVisitDrone extends Drone {
     // just landed (commands/publish-lights.ts), so this reads verified bytes,
     // not a side channel.
     //
-    // READ-ONLY SESSIONS ONLY. A participant opening someone's link is
-    // previewing, not visiting: replacing THEIR roster with a stranger's
-    // arrangement would be a hive-wide change nobody asked for. An older
-    // publication carries no mark (`null`) and is left alone.
     // AN EMPTY MARK IS NOT AN INSTRUCTION TO GO DARK. `[]` is truthy, so the
     // old `if (lights)` adopted it — and an empty on-list means every kind is
     // OFF, where an ABSENT one means all-on (isKindGloballyOff). A publication
@@ -225,10 +228,8 @@ export class HiveVisitDrone extends Drone {
     // than never having adopted at all. Adopt only when there is something to
     // light; "the publisher lit nothing" and "this predates the mark" both
     // leave the visitor's defaults alone, which is the same screen either way.
-    if (isReadOnlySession()) {
-      const lights = await publishLightsWithinAt(mount).catch(() => null)
-      if (lights?.length) adoptPublishedLights(lights)
-    }
+    const lights = await publishLightsWithinAt(mount).catch(() => null)
+    if (lights?.length) adoptPublishedLights(lights)
     nav.go(mount)
     this.emitEffect('preview:mode', {
       active: true,
@@ -238,152 +239,6 @@ export class HiveVisitDrone extends Drone {
       hosts: bundle.hosts,
       tiles: stats.layers,
     })
-    this.emitEffect('activity:log', {
-      message: i18n?.t('preview.started', { name }) ?? `previewing "${name}" — adopt it to keep it, dismiss to walk away`,
-      icon: '●',
-    })
-  }
-
-  // ── 4a: adopt — drop the preview, then the ONE adopt gesture ─────────
-
-  #accept = async (): Promise<void> => {
-    const p = this.#active
-    if (!p) return
-    const history = this.#ioc()?.get<HistoryLike>(HISTORY_KEY)
-    const adopt = this.#ioc()?.get<AdoptLike>(SWARM_ADOPT_KEY)
-    if (!history || !adopt?.adoptResolvedBranch) return
-
-    // Drop FIRST: the committer refuses every commit while a preview is
-    // active, the fold included. The closure is already pool-resident, so
-    // the fold needs no network and lands fast.
-    history.dropPreviewHead()
-    this.emitEffect('preview:mode', { active: false })
-
-    const res = await adopt.adoptResolvedBranch({
-      layerSig: p.head,
-      at: [],
-      domain: p.bundle.hosts[0],
-      label: p.name,
-    })
-
-    if (res === 'committed' || res === 'exists') {
-      this.#recordFollow(p.name, { pubkey: p.bundle.pubkey, hosts: p.bundle.hosts, lineageKey: p.key })
-      this.#active = null
-      return
-    }
-    // 'declined' / 'rewound' / 'unavailable' / 'uninspectable' — nothing
-    // folded. Restore the preview so the visitor keeps what they were
-    // looking at; the adopt gesture already explained itself.
-    await history.seedPreviewHead([p.name], p.head)
-    this.emitEffect('preview:mode', {
-      active: true,
-      label: p.name,
-      pubkey: p.bundle.pubkey,
-      hosts: p.bundle.hosts,
-    })
-  }
-
-  // ── 4b: dismiss — forget everything, walk away ───────────────────────
-
-  #dismiss = (opts?: { silent?: boolean }): void => {
-    const p = this.#active
-    this.#active = null
-    const history = this.#ioc()?.get<HistoryLike>(HISTORY_KEY)
-    history?.dropPreviewHead()
-    this.emitEffect('preview:mode', { active: false })
-    if (opts?.silent) return
-    const nav = this.#ioc()?.get<NavLike>(NAV_KEY)
-    nav?.go([])
-    if (p) {
-      const i18n = this.#i18n()
-      this.emitEffect('activity:log', {
-        message: i18n?.t('preview.dismissed', { name: p.name }) ?? `preview of "${p.name}" dismissed — nothing was kept`,
-        icon: '○',
-      })
-    }
-  }
-
-  // ── follow updates: one index fetch per publisher, O(1) head compare ─
-
-  #loadFollows = (): Record<string, StaticFollow> => {
-    try {
-      const raw = localStorage.getItem(STATIC_FOLLOWS_KEY)
-      const obj = raw ? JSON.parse(raw) : {}
-      return obj && typeof obj === 'object' ? obj as Record<string, StaticFollow> : {}
-    } catch { return {} }
-  }
-
-  #recordFollow = (name: string, follow: StaticFollow): void => {
-    try {
-      const follows = this.#loadFollows()
-      follows[name] = follow
-      localStorage.setItem(STATIC_FOLLOWS_KEY, JSON.stringify(follows))
-    } catch { /* no localStorage — follows degrade to this session */ }
-  }
-
-  #loadReceipts = (): Record<string, string> => {
-    try {
-      const raw = localStorage.getItem(SYNC_RECEIPTS_KEY)
-      const obj = raw ? JSON.parse(raw) : {}
-      return obj && typeof obj === 'object' ? obj as Record<string, string> : {}
-    } catch { return {} }
-  }
-
-  #recordReceipt = (name: string, sig: string): void => {
-    try {
-      const receipts = this.#loadReceipts()
-      receipts[name] = sig
-      localStorage.setItem(SYNC_RECEIPTS_KEY, JSON.stringify(receipts))
-    } catch { /* no localStorage — compare degrades to once-per-session */ }
-  }
-
-  #bootSync = async (): Promise<void> => {
-    const follows = Object.entries(this.#loadFollows())
-    if (follows.length === 0) return
-    const broker = this.#ioc()?.get<BrokerLike>(BROKER_KEY)
-    const adopt = this.#ioc()?.get<AdoptLike>(SWARM_ADOPT_KEY)
-    if (!broker?.adopt || !adopt?.syncResolvedBranch) {
-      // Services not registered yet (slow cold boot) — retry a few times,
-      // then give up until next boot; follows are never urgent.
-      if (++this.#bootSyncTries < BOOT_SYNC_MAX_TRIES) {
-        setTimeout(() => { void this.#bootSync() }, BOOT_SYNC_DELAY_MS)
-      }
-      return
-    }
-
-    // One index fetch answers every followed root from that publisher.
-    const byPublisher = new Map<string, { hosts: string[]; entries: [string, StaticFollow][] }>()
-    for (const [name, follow] of follows) {
-      if (!SIG_RE.test(String(follow?.pubkey ?? '')) || !Array.isArray(follow?.hosts)) continue
-      const group = byPublisher.get(follow.pubkey) ?? { hosts: [], entries: [] }
-      for (const h of follow.hosts) if (!group.hosts.includes(h)) group.hosts.push(h)
-      group.entries.push([name, follow])
-      byPublisher.set(follow.pubkey, group)
-    }
-
-    const receipts = this.#loadReceipts()
-    for (const [pubkey, group] of byPublisher) {
-      const manifest = await fetchHiveManifestFromAny(group.hosts, pubkey)
-      if (!manifest) continue
-      // Same check on the follow path: a publisher this client tracks may move
-      // its hive past what this build can read, and folding a branch it only
-      // partly understands is exactly the silent divergence to name out loud.
-      void checkRemoteHiveFormat(manifest.roots, group.hosts).catch(() => null)
-      for (const [name, follow] of group.entries) {
-        // Delete-is-unsubscribe: a tombstoned root never re-folds.
-        if (isAdoptTombstoned([name])) continue
-        const head = manifest.roots[follow.lineageKey]
-        if (!head || receipts[name] === head) continue
-        if (!receipts[name]) {
-          // Absent receipt BASELINES instead of folding — same rule as mesh
-          // auto-sync: a pre-receipt state must never mass-refold on first sight.
-          this.#recordReceipt(name, head)
-          continue
-        }
-        broker.noteDomainsForSig?.(head, follow.hosts)
-        await adopt.syncResolvedBranch({ layerSig: head, at: [], domain: follow.hosts[0], label: name })
-      }
-    }
   }
 }
 

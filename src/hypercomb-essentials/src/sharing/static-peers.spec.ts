@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest'
 import { mintMetaEnvelope } from '@hypercomb/core'
 import {
-  childEntriesOf, entryFor, layerAtRoute, offerFromCard, readThrough,
+  childEntriesOf, entryFor, layerAtRoute, offerFromCard, offersFromLegacyFollows, readThrough,
   type StaticPeersIo,
 } from './static-peers.js'
 import type { PublicationCard } from './publications-ledger.js'
@@ -92,5 +92,20 @@ describe('the walk through envelopes', () => {
     const holed = heap({ [HEAD]: { name: 'r', children: [ENV1] }, [ENV1]: envelope(KID1, 0) })
     expect(await childEntriesOf((await readThrough(HEAD, holed))!.record, sig('e'), holed)).toEqual([])
     expect(await entryFor(KID1, { name: '' }, sig('e'), holed)).toBeNull()
+  })
+})
+
+describe('legacy follows become offers', () => {
+  it('one offer per followed root, head unknown until the index is read; malformed records dropped', () => {
+    const offers = offersFromLegacyFollows({
+      revolucion: { pubkey: sig('e'), hosts: ['Revolucion.pluginthematrix.com'], lineageKey: 'revolucion' },
+      meetup: { pubkey: sig('e'), hosts: ['meetup.pluginthematrix.com'], lineageKey: 'revolucion/meetup' },
+      broken: { pubkey: 'nope', hosts: [], lineageKey: '' },
+    })
+    expect(offers).toEqual([
+      { name: 'revolucion', pubkey: sig('e'), hosts: ['revolucion.pluginthematrix.com'], lineageKey: 'revolucion', segments: ['revolucion'], head: '' },
+      { name: 'meetup', pubkey: sig('e'), hosts: ['meetup.pluginthematrix.com'], lineageKey: 'revolucion/meetup', segments: ['revolucion', 'meetup'], head: '' },
+    ])
+    expect(offersFromLegacyFollows(null)).toEqual([])
   })
 })

@@ -41,8 +41,30 @@ export interface StaticOffer {
   readonly lineageKey: string
   /** The publisher's own route to the creation. */
   readonly segments: readonly string[]
-  /** The verified head the last time the index was read. */
+  /** The verified head the last time the index was read — or `` for an
+   *  offer minted from a legacy follow record, filled in from the index the
+   *  first time it is resolved. */
   readonly head: string
+}
+
+/** The old "adopt for review" flow left one record per adopted root in
+ *  localStorage (`hc:static-follows`: name → {pubkey, hosts, lineageKey}).
+ *  Read ONCE and turned into offers — the publisher's creation stays in the
+ *  hive as a shaded tile beside what was already taken, and nothing re-folds
+ *  at boot. The head is unknown until the index is read. */
+export const offersFromLegacyFollows = (raw: unknown): StaticOffer[] => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return []
+  const out: StaticOffer[] = []
+  for (const [name, follow] of Object.entries(raw as Record<string, unknown>)) {
+    const f = follow as Record<string, unknown> | null
+    const pubkey = String(f?.['pubkey'] ?? '').toLowerCase()
+    const hosts = Array.isArray(f?.['hosts']) ? (f!['hosts'] as unknown[]).map(h => String(h ?? '').toLowerCase()).filter(Boolean) : []
+    const lineageKey = String(f?.['lineageKey'] ?? '').trim()
+    const clean = String(name ?? '').trim()
+    if (!clean || !SIG_RE.test(pubkey) || hosts.length === 0 || !lineageKey) continue
+    out.push({ name: clean, pubkey, hosts, lineageKey, segments: lineageKey.split('/').filter(Boolean), head: '' })
+  }
+  return out
 }
 
 /** A plate on the community page, as an offer. */

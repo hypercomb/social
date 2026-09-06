@@ -26,9 +26,10 @@
 import { Drone, EffectBus } from '@hypercomb/core'
 import { fetchHiveManifestFromAny } from './hive-pointer.js'
 import {
-  childEntriesOf, entryFor, layerAtRoute, readThrough,
+  childEntriesOf, entryFor, layerAtRoute, offersFromLegacyFollows, readThrough,
   type StaticOffer, type StaticPeerEntry, type StaticPeersIo,
 } from './static-peers.js'
+import { STATIC_FOLLOWS_KEY } from './hive-link.js'
 import type { TileEntry, TileSource, LocationContext } from '../presentation/tiles/tile-source.types.js'
 
 export const STATIC_PEERS_KEY = '@diamondcoreprocessor.com/StaticPeersDrone'
@@ -67,8 +68,8 @@ const parseOffers = (raw: unknown): StaticOffer[] => {
     const hosts = Array.isArray(o?.['hosts']) ? (o['hosts'] as unknown[]).map(String).filter(Boolean) : []
     const segments = Array.isArray(o?.['segments']) ? (o['segments'] as unknown[]).map(String).filter(Boolean) : []
     const lineageKey = String(o?.['lineageKey'] ?? '')
-    if (!name || !SIG_RE.test(pubkey) || !SIG_RE.test(head) || !hosts.length) continue
-    out.push({ name, pubkey, head, hosts, segments, lineageKey })
+    if (!name || !SIG_RE.test(pubkey) || !hosts.length) continue
+    out.push({ name, pubkey, head: SIG_RE.test(head) ? head : '', hosts, segments, lineageKey })
   }
   return out
 }
@@ -83,6 +84,9 @@ export class StaticPeersDrone extends Drone {
 
   #offers = new Map<string, StaticOffer>()
   #loaded = false
+  /** The one-time read of `hc:static-follows` has happened (recorded in the
+   *  document, so a withdrawn legacy offer does not come back next boot). */
+  #legacyRead = false
   #unregister: (() => void) | null = null
   /** Heads re-read from the index this session, and closures localized. */
   #refreshed = new Set<string>()
@@ -97,7 +101,7 @@ export class StaticPeersDrone extends Drone {
   }
 
   protected override heartbeat = async (): Promise<void> => {
-    if (!this.#loaded) { this.#loaded = true; await this.#load() }
+    if (!this.#loaded) { this.#loaded = true; await this.#load(); await this.#migrateLegacyFollows() }
     if (!this.#unregister) this.#register(0)
   }
 
@@ -118,8 +122,23 @@ export class StaticPeersDrone extends Drone {
       if (!pool) return
       const bytes = await store.getPoolDoc(pool)
       if (!bytes) return
-      for (const o of parseOffers(JSON.parse(new TextDecoder().decode(bytes)))) this.#offers.set(o.name, o)
+      const doc = JSON.parse(new TextDecoder().decode(bytes)) as { legacyRead?: unknown }
+      for (const o of parseOffers(doc)) this.#offers.set(o.name, o)
+      this.#legacyRead = doc?.legacyRead === true
     } catch { /* no document yet */ }
+  }
+
+  /** READS WALK BACK, WRITES NEVER DO: the old flow's follow records become
+   *  offers exactly once; the key is never written or removed. */
+  #migrateLegacyFollows = async (): Promise<void> => {
+    if (this.#legacyRead) return
+    this.#legacyRead = true
+    let raw: unknown = null
+    try { raw = JSON.parse(globalThis.localStorage?.getItem(STATIC_FOLLOWS_KEY) ?? 'null') } catch { raw = null }
+    const offers = offersFromLegacyFollows(raw)
+    for (const o of offers) if (!this.#offers.has(o.name)) this.#offers.set(o.name, o)
+    await this.#save()
+    if (offers.length) this.emitEffect('swarm:peers-changed', { sig: '', pubkey: '', reason: 'static-legacy-follows' })
   }
 
   #save = async (): Promise<void> => {
@@ -128,7 +147,7 @@ export class StaticPeersDrone extends Drone {
     try {
       const pool = await store.getPool(COMMUNITY_OFFERS_MEANING)
       if (!pool) return
-      const bytes = new TextEncoder().encode(JSON.stringify({ offers: [...this.#offers.values()] })).buffer as ArrayBuffer
+      const bytes = new TextEncoder().encode(JSON.stringify({ offers: [...this.#offers.values()], legacyRead: this.#legacyRead })).buffer as ArrayBuffer
       await store.putPoolDoc(pool, bytes)
     } catch { /* the in-memory set stands */ }
   }
@@ -214,10 +233,11 @@ export class StaticPeersDrone extends Drone {
         if (entry) out.push(entry)
       }
     } else {
-      const offer = this.#offers.get(segments[0]!)
+      let offer = this.#offers.get(segments[0]!)
       if (offer) {
         await this.#ready(offer)
-        const here = await layerAtRoute(offer.head, segments.slice(1), this.#io())
+        offer = this.#offers.get(offer.name) ?? offer
+        const here = SIG_RE.test(offer.head) ? await layerAtRoute(offer.head, segments.slice(1), this.#io()) : null
         if (here) {
           const children = await childEntriesOf(here.layer, offer.pubkey, this.#io())
           const broker = ioc()?.get<BrokerLike>(BROKER_KEY)
@@ -235,6 +255,8 @@ export class StaticPeersDrone extends Drone {
 
   #rootEntry = async (offer: StaticOffer): Promise<StaticPeerEntry | null> => {
     await this.#ready(offer)
+    offer = this.#offers.get(offer.name) ?? offer
+    if (!SIG_RE.test(offer.head)) return null
     const io = this.#io()
     const hit = await readThrough(offer.head, io)
     if (!hit) return null
@@ -259,6 +281,7 @@ export class StaticPeersDrone extends Drone {
         offer = this.#offers.get(offer.name)!
       }
     }
+    if (!SIG_RE.test(offer.head)) return   // the index did not answer yet — no head, nothing to show
     if (!this.#localized.has(offer.head)) {
       this.#localized.add(offer.head)
       const broker = ioc()?.get<BrokerLike>(BROKER_KEY)
