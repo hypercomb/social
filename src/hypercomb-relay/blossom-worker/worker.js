@@ -375,6 +375,40 @@ async function servePublications(request, env) {
   return json(200, { sites }, { 'Cache-Control': 'no-store' })
 }
 
+// GET /<sig>/ — THE DIRECTORY BRANCH (documentation/host-packages-pool.md).
+// A pool is a directory, reached at the one address every client derives for
+// itself: sign(meaning), trailing slash. The hive's host directory, the offers
+// window and every cross-host word search open THIS door and nothing else. A
+// live relay answers by readdir; here the heap is R2, so the pool's members
+// are the objects under the prefix `<sig>/`, and the listing is their names —
+// one per line, text/plain, no-store, because a pool GROWS. An address with
+// nothing under it is an honest 404 (a host with no packages yet), never the
+// SPA fallback: a 307 to / or a page of HTML at a pool's address is the one
+// answer that makes a live host read as "does not answer".
+async function servePoolListing(request, env, sig) {
+  const headers = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...CORS }
+  const prefix = `${sig}/`
+  const names = []
+  if (env.CONTENT?.list) {
+    let cursor
+    do {
+      const page = await env.CONTENT.list({ prefix, cursor, limit: 1000 })
+      for (const obj of page.objects ?? []) {
+        const name = String(obj.key ?? '').slice(prefix.length)
+        if (name && !name.includes('/')) names.push(name)
+      }
+      cursor = page.truncated ? page.cursor : undefined
+    } while (cursor)
+  }
+  if (names.length === 0) {
+    return new Response(request.method === 'HEAD' ? null : 'no pool at this address\n', {
+      status: 404, headers: { ...headers, 'X-Reason': 'no pool at this address' },
+    })
+  }
+  names.sort()
+  return new Response(request.method === 'HEAD' ? null : names.join('\n') + '\n', { status: 200, headers })
+}
+
 async function serveVisitorAsset(request, env) {
   if (!env.ASSETS?.fetch) return text(503, 'visitor engine is not deployed')
   let response = await env.ASSETS.fetch(request)
@@ -388,6 +422,12 @@ async function serveVisitorAsset(request, env) {
   headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()')
   headers.set('Referrer-Policy', 'no-referrer')
   headers.set('X-Content-Type-Options', 'nosniff')
+  // A door exists to be pulled FROM. The visitor engine's own assets — the
+  // package manifest and the atoms under /content/ above all — are public,
+  // immutable and reader-verified, so no request's origin changes the answer;
+  // without this header a hive replicating from another origin died as an
+  // opaque "Failed to fetch" and the door read as publishing nothing.
+  headers.set('Access-Control-Allow-Origin', '*')
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -1064,6 +1104,15 @@ export default {
         return serveBlob(request, env, sigMatch[2], named ? suffixType(pathname) : null)
       }
       if (method === 'PUT' && !isAlias && !named) return putSig(request, env, sigMatch[2])
+      return text(405, 'method not allowed')
+    }
+
+    // The directory branch: a pool at its address, on every door. It sits
+    // ABOVE the mark, the site and the relay banner because the address is
+    // derived, not chosen — no rewrite may answer it with a page.
+    const poolMatch = pathname.match(/^\/([0-9a-f]{64})\/$/)
+    if (poolMatch) {
+      if (method === 'GET' || method === 'HEAD') return servePoolListing(request, env, poolMatch[1])
       return text(405, 'method not allowed')
     }
 

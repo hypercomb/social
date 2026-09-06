@@ -2949,7 +2949,7 @@ export class TileOverlayDrone extends Drone {
     // its empty layer (see #beginEnterHold). Nothing is consumed while the
     // hold is merely armed: a short press still falls through to #onClick, so
     // click-to-open and the overlay actions behave exactly as before.
-    if (!this.#branchLabels.has(entry.label)) {
+    if (!this.#branchLabels.has(entry.label) && !this.#staticBranch(entry.label)) {
       this.#beginEnterHold(e, entry.label)
       return
     }
@@ -3257,6 +3257,7 @@ export class TileOverlayDrone extends Drone {
       this.#branchLabels.has(entry.label)
       || referenceTargetForLabel(entry.label) !== null
       || this.#externalLabels.has(entry.label)
+      || this.#staticBranch(entry.label)
     ) {
       // A branch (enter its children) OR a reference tile (portal to its
       // target). #navigateInto routes references to their pointer.
@@ -3609,6 +3610,18 @@ export class TileOverlayDrone extends Drone {
    *  scoped — names mean nothing across pages. Readiness shade (yours,
    *  still loading) matches neither branch and never refuses: entering a
    *  loading tile stays allowed, exactly as before. */
+  /** A TAKEN static tile whose publisher's layer has children is a BRANCH
+   *  even while its local layer is childless — the take is one level, and
+   *  walking in is how the inside arrives, shaded (static-peers.drone.ts).
+   *  The swarm needs no such clause only because its public mode makes every
+   *  tile enterable; a public host's offer is taken in private mode. */
+  #staticBranch(label: string): boolean {
+    const statics = window.ioc?.get<{ branchNamesAt?: (s: readonly string[]) => readonly string[] }>('@diamondcoreprocessor.com/StaticPeersDrone')
+    if (!statics?.branchNamesAt) return false
+    const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
+    return statics.branchNamesAt(segs).includes(label)
+  }
+
   #firstClickTakes(label: string): boolean {
     const here = this.#currentLocationKey()
     if (this.#wandTakenLocation !== here) {

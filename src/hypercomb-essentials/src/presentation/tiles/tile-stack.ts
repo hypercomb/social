@@ -65,12 +65,44 @@ const NO_VARIANTS: readonly StackVariant[] = []
 let stacks: ReadonlyMap<string, readonly StackVariant[]> = new Map()
 let hovered: string | null = null
 
+/** Sticky effect carrying this pass's participant depth per label — how
+ *  many people hold each tile. Sticky (last-value replay) so an ornament
+ *  drone that boots after the first render pass still paints without
+ *  waiting for the next one. Only labels held by MORE THAN ONE
+ *  participant ride: an unstacked tile has no depth to mark, and sending
+ *  the whole page's ones would make every pass look like a change. */
+export const TILE_STACK_DEPTHS = 'render:tile-stack-depths'
+
+/** Payload of {@link TILE_STACK_DEPTHS}. A plain record, not the stack
+ *  map itself — a consumer reading depth must not be handed the variants
+ *  (properties, layerSigs) it has no business holding across a pass. */
+export interface TileStackDepths {
+  readonly depths: Readonly<Record<string, number>>
+}
+
 /** Publish the stacks resolved by this render pass. Replaces the whole
  *  map — a label that stopped stacking (peer left) must stop reading as
- *  stacked immediately, and a per-key merge would strand it. */
+ *  stacked immediately, and a per-key merge would strand it.
+ *
+ *  `quiet` swaps the state WITHOUT announcing it, and exists for exactly one
+ *  caller: the pre-resolution reset show-cell runs at the top of every pass
+ *  so a location cannot inherit the last one's multiplicity marks. That reset
+ *  is bookkeeping, not a finding. Announced, it told every depth ornament
+ *  that all the peers had gone — and the real stacks only arrive after an
+ *  awaited registry resolve, so each pass tore the badges down and re-minted
+ *  them a fifth of a second later. Callers publishing a RESULT leave it off. */
 export const setTileStacks = (
   next: ReadonlyMap<string, readonly StackVariant[]>,
-): void => { stacks = next }
+  options: { readonly quiet?: boolean } = {},
+): void => {
+  stacks = next
+  if (options.quiet) return
+  const depths: Record<string, number> = {}
+  for (const [label, variants] of next) {
+    if (variants.length > 1) depths[label] = variants.length
+  }
+  EffectBus.emit<TileStackDepths>(TILE_STACK_DEPTHS, { depths })
+}
 
 /** Every variant of `label`, in participant order. */
 export const stackFor = (label: string): readonly StackVariant[] =>

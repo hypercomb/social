@@ -222,7 +222,7 @@
                 @if (allHidden(zone)) {
                   <p class="hosts-probing">{{ 'hosts.hidden.all' | t }}</p>
                 } @else {
-                  <p class="hosts-probing">{{ 'hosts.offer.none' | t }}</p>
+                  <p class="hosts-probing">{{ (offerAnswered(zone) ? 'hosts.offer.none' : 'hosts.offer.silent') | t }}</p>
                 }
               }
 

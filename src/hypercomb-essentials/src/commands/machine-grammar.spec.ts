@@ -178,7 +178,7 @@ describe('the machine grammar the shipped behaviours declare', () => {
       expect(queen.machine?.refuse?.('[drafts, notes]')).toBeUndefined()
       // The button acts on whatever is picked. That is right for a hand and
       // useless to a speaker, so the machine seam requires names.
-      expect(queen.machine?.bare).not.toBe(true)
+      expect((queen.machine as { bare?: boolean } | undefined)?.bare).not.toBe(true)
       expect(queen.machine?.refuse?.('')).toContain('cannot see what is picked')
       expect(queen.machine?.refuse?.('projects/drafts')).toContain('does not reach through')
     }

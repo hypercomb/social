@@ -226,6 +226,18 @@ describe('doctrine ratchets', () => {
     ], 'synchronize dispatch')
   })
 
+  it('the root hive\'s membership is a participant act — nothing appends to it by address', () => {
+    // The OPFS root is a STORE; the root hive is one hive among hives. Being
+    // referenced, adopted or discovered never makes something a member of it.
+    // The reference write door used to "promote" every target into the root
+    // hive's children (documentation/reference-designer.md, section 4); that
+    // code is gone and nothing may write `commitChildrenDeltas([] …)` again.
+    // A root append happens only through the committer, from an act the
+    // participant made ON the root hive, where the address is the location.
+    const actual = filesMatching(/commitChildrenDeltas\s*\(\s*\[\s*\]/)
+    assertRatchet(actual, [], 'root-hive membership append by literal address')
+  })
+
   it('no behaviour declares an alias in code — aliases are the participant\'s to give', () => {
     // A behaviour's name is its ONE name. The 54 code-declared alias lists
     // (removed 2026-09-01) put every spelling into autocomplete, the common
@@ -406,13 +418,13 @@ describe('doctrine ratchets', () => {
 
   it('derived-cache manifests are written only by the store, the optimize phase, and the render backfill', () => {
     // The commit path mints truth only. writeChildrenManifest is called
-    // from the ManifestOptimizerDrone (processor optimize phase) and the
-    // show-cell resolveChildNames backfill; store.ts defines it.
+    // from the ManifestOptimizerDrone (processor optimize phase) — the ONE
+    // door — and store.ts defines it. The show-cell render backfill used to
+    // write it too; it now enqueues the parent and the phase mints the pack.
     const actual = filesMatching(/writeChildrenManifest/)
     assertRatchet(actual, [
       'hypercomb-runtime/src/store.ts',
       'hypercomb-essentials/src/history/manifest-optimizer.drone.ts',
-      'hypercomb-essentials/src/presentation/tiles/show-cell.drone.ts',
     ], 'children-manifest writer')
   })
 

@@ -4,7 +4,7 @@
 // contacts no host.
 
 import { describe, expect, it } from 'vitest'
-import { buildHorizon, contentDoorOf } from './vocabulary-horizon.js'
+import { buildHorizon, publishersFromCards, contentDoorOf } from './vocabulary-horizon.js'
 
 const K1 = '1'.repeat(64)
 const K2 = '2'.repeat(64)
@@ -83,5 +83,22 @@ describe('the horizon', () => {
 
   it('an empty world produces an EMPTY horizon — a state, never an invented publisher', () => {
     expect(buildHorizon({}).publishers).toEqual([])
+  })
+})
+
+describe('publishersFromCards — the community as a horizon', () => {
+  it('every publisher a host lists becomes a row holding every door its creations answer on', () => {
+    const P = 'e'.repeat(64), Q = 'f'.repeat(64)
+    const rows = publishersFromCards([
+      { pubkey: P, hosts: [{ host: 'revolucion.pluginthematrix.com' }, { host: 'revolucion.hypercomb.com' }] },
+      { pubkey: P, hosts: [{ host: 'meetup.pluginthematrix.com' }] },
+      { pubkey: Q, hosts: [{ host: 'susan.hypercomb.com' }] },
+      { pubkey: 'not-a-key', hosts: [{ host: 'x.example' }] },
+    ])
+    expect(Object.keys(rows).sort()).toEqual([`ledger:${P}`, `ledger:${Q}`])
+    expect(rows[`ledger:${P}`]!.hosts).toEqual(['revolucion.pluginthematrix.com', 'revolucion.hypercomb.com', 'meetup.pluginthematrix.com'])
+    // and the horizon keeps those doors verbatim — the site door serves the index
+    const horizon = buildHorizon({ follows: rows })
+    expect(horizon.publishers.find(p => p.pubkey === P)?.hosts).toContain('revolucion.pluginthematrix.com')
   })
 })

@@ -7,7 +7,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerPoolMeaning } from '@hypercomb/core'
-import { headPackage, hostBases, listHostPackages } from './host-packages'
+import { askHostPackages, headPackage, hostBases, listHostPackages } from './host-packages'
 import { HOST_PACKAGES_MEANING, poolEntryName } from './host-pool'
 
 const SIG_A = 'a'.repeat(64)
@@ -150,5 +150,30 @@ describe('hostBases', () => {
       'https://content.host.example',
     ])
     expect(hostBases('localhost:4270')[0]).toBe('http://localhost:4270/content')
+  })
+})
+
+describe('askHostPackages — an empty answer says which kind of empty', () => {
+  beforeEach(() => vi.unstubAllGlobals())
+
+  it('an honest 404 at the derived address is a host that ANSWERED and publishes nothing', async () => {
+    vi.stubGlobal('fetch', serving({}))
+    const { packages, answered } = await askHostPackages('host.example')
+    expect(packages).toEqual([])
+    expect(answered).toBe(true)
+  })
+
+  it('a door that throws on every base did NOT answer', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
+    const { packages, answered } = await askHostPackages('host.example')
+    expect(packages).toEqual([])
+    expect(answered).toBe(false)
+  })
+
+  it('a host with a pool answers with its rows', async () => {
+    vi.stubGlobal('fetch', serving(await poolAt('https://host.example', [SIG_A])))
+    const { packages, answered } = await askHostPackages('host.example')
+    expect(answered).toBe(true)
+    expect(packages.map(p => p.packageSig)).toEqual([SIG_A])
   })
 })

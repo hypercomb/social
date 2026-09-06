@@ -28,7 +28,8 @@
 // Run after `npm run build` in hypercomb-web:
 //   node hypercomb-client/scripts/bake-frontend.mjs
 
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, copyFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, copyFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -41,8 +42,32 @@ const out = join(here, '../app/frontend')
 // "this build was not a full one", not "the bake is broken" — `--if-available`
 // makes that a skip. Invoked by hand (or by CI ahead of a bundle) the script
 // keeps hard-failing: there, an unbaked frontend is a broken bundle.
+//
+// WHAT A BUNDLE IS, NOW. The build stopped writing a manifest into the content
+// (commit e56b74553 — "the ship stops writing a manifest"). What a host
+// publishes is the `host:packages` pool: a directory at the DERIVED address
+// sha256('host:packages') holding indexed members (`00000000`, …), each
+// naming a package's root layer on its first line. The bake reads the bundle
+// the same way a client reads a host — head member → root layer → its
+// `dependencies` — so it can never disagree with what the shell installs.
+const POOL_ADDRESS = createHash('sha256').update('host:packages', 'utf8').digest('hex')
+const MARKER_RE = /^\d{8}$/
+const SIG_RE = /^[0-9a-f]{64}$/
+
+/** The head member of the bundled `host:packages` pool, or null when the
+ *  content carries no pool (a dev shell with no /content/, or a partial build). */
+const bundledHead = (contentDir) => {
+  const poolDir = join(contentDir, POOL_ADDRESS)
+  if (!existsSync(poolDir)) return null
+  const markers = readdirSync(poolDir).filter(name => MARKER_RE.test(name)).sort()
+  const head = markers.at(-1)
+  if (!head) return null
+  return readFileSync(join(poolDir, head), 'utf8').split('\n', 1)[0]?.trim().toLowerCase() ?? null
+}
+
 const optional = process.argv.includes('--if-available')
-if (optional && !existsSync(join(dist, 'content/manifest.json'))) {
+const rootSig = bundledHead(join(dist, 'content'))
+if (optional && !rootSig) {
   console.log('bake-frontend: no bundled content in the web dist — skipped')
   process.exit(0)
 }
@@ -54,10 +79,12 @@ cpSync(dist, out, { recursive: true })
 
 // 2. Derive the import map — the same rules as resolve-import-map.ts:
 //    static runtimes, then one alias per dependency from its first-line
-//    `// @scope/name` comment.
-const manifest = JSON.parse(readFileSync(join(out, 'content/manifest.json'), 'utf8'))
-const pkg = Object.values(manifest.packages ?? {})[0]
-if (!pkg) throw new Error('bundled manifest has no package')
+//    `// @scope/name` comment. The dependency list is the root layer's own:
+//    layer JSON spells each dependency WITH a `.js` suffix, the content
+//    namespace names it by bare signature.
+if (!rootSig || !SIG_RE.test(rootSig)) throw new Error('bundled content publishes no package (no host:packages head)')
+const rootLayer = JSON.parse(readFileSync(join(out, 'content', rootSig), 'utf8'))
+const dependencies = (rootLayer.dependencies ?? []).map(name => String(name).replace(/\.js$/i, ''))
 
 const imports = {
   '@hypercomb/core': '/hypercomb-core.runtime.js',
@@ -68,7 +95,7 @@ const imports = {
 const modulesDir = join(out, 'modules')
 
 let aliased = 0
-for (const sig of pkg.dependencies ?? []) {
+for (const sig of dependencies) {
   const source = join(out, 'content', sig)
   let firstLine = ''
   try {
@@ -103,7 +130,6 @@ const mapJson = JSON.stringify({ imports })
 
 // Stamp the service worker's content hash so registration re-installs on
 // every worker change (see ensureSwControl in main.ts).
-const { createHash } = await import('node:crypto')
 const swHash = createHash('sha256').update(readFileSync(join(out, 'hypercomb.worker.js'))).digest('hex').slice(0, 12)
 const indexPath = join(out, 'index.html')
 const html = readFileSync(indexPath, 'utf8').replace(

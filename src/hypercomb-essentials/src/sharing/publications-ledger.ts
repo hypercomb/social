@@ -58,6 +58,13 @@ export interface PublicationCard {
   readonly title: string
   readonly lineage: string
   readonly publisherLabel: string
+  /** The publisher whose verified head names this plate — what a hive-link
+   *  bundle pins, so "bring into my hive" verifies against the same key the
+   *  door was verified against. */
+  readonly pubkey: string
+  /** That publisher's verified head at read time — the bundle's rootSig
+   *  hint, so the preview can seed even when the index is unreachable. */
+  readonly head: string
   /** Unix seconds. */
   readonly publishedAt: number | null
   /** Every address this creation answers on, primary first — never empty, and
@@ -120,6 +127,8 @@ export function shapePublications(
       title: site.title,
       lineage: site.lineage,
       publisherLabel: publisher.label || publisher.pubkey.slice(0, 12) + '…',
+      pubkey: publisher.pubkey,
+      head: publisher.head as string,
       publishedAt: publisher.publishedAt,
     })
   }

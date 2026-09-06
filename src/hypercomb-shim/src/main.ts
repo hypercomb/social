@@ -251,14 +251,22 @@ const boot = async (): Promise<void> => {
   document.getElementById('hc-splash')?.remove()
   window.dispatchEvent(new Event('hypercomb:runtime-ready'))
 
-  // NOTHING CAME UP ⇒ ASK FOR A DOMAIN. The card is the shim's only surface
-  // and this is the only place it appears. The test is what actually MOUNTED
+  // /hosts is the same management door the full shell exposes. /@hypercomb is
+  // its reserved alias for hosts whose content vocabulary already uses the
+  // word "hosts". Both remain reachable on a warm host whose installed package
+  // owns normal routes. A cold host opens the same console automatically. The
+  // test is what actually MOUNTED
   // after a pulse, not what localStorage claims: a hive whose package was
   // half-written, or whose OPFS was cleared under a stale installed-marker, is
   // empty in the way that matters however confident the marker is. Anything
-  // that reached a surface boots straight past this and never sees it.
-  if (live.mounted === 0 && live.angular === 0) {
-    console.log('[shim] 0 surfaces — no package is live')
+  // that reached a surface boots straight past the automatic cold-host prompt,
+  // but remains manageable through the explicit route.
+  const managerPath = location.pathname.replace(/\/+$/, '')
+  const managerRequested = managerPath === '/hosts' || managerPath === '/@hypercomb'
+  if (managerRequested || (live.mounted === 0 && live.angular === 0)) {
+    console.log(managerRequested
+      ? `[shim] ${managerPath} — opening the host console`
+      : '[shim] 0 surfaces — no package is live')
     if (acquisition) acquisition.prompt()
     else renderBootFailure(new Error(
       'Nothing is installed, and the bootstrap could not be loaded — so there is no way to install anything. ' +

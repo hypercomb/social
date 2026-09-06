@@ -202,6 +202,11 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // all: replication has no fixed origin, so the set of machines willing to
   // serve is itself content. TRUTH POOL — "I know this host" is an act.
   'community:hosts',
+  // WHAT YOU ASKED TO SEE from the hosts you carry — the creations offered as
+  // shaded peer tiles in your hive (essentials/sharing/static-peers.drone.ts).
+  // One current JSON document per participant, replaced whole; never sent.
+  // The swarm model for static content: an offer is not an adoption.
+  'community:offers',
   // WHAT FORMAT THIS HIVE IS WRITTEN IN — one declaration naming the format
   // its newest writes use, the lowest reader version that sees all of it, and
   // when that last moved (see essentials/sharing/hive-format.ts and the pure

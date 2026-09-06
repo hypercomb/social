@@ -144,3 +144,15 @@ describe('shapePublications', () => {
     expect(cards[0].publisherLabel).toBe('c'.repeat(12) + '…')
   })
 })
+
+describe('a plate carries what an offer needs', () => {
+  it('the publisher key and the verified head it was shaped from', () => {
+    const [card] = shapePublications([site({
+      lineage: 'revolucion/meetup',
+      hosts: [door('meetup.pluginthematrix.com', true), door('meetup.hypercomb.com')],
+    })])
+    expect(card!.pubkey).toBe('e'.repeat(64))
+    expect(card!.head).toBe(SIG_A)
+    expect(card!.hosts.map(d => d.host)).toEqual(['meetup.pluginthematrix.com', 'meetup.hypercomb.com'])
+  })
+})

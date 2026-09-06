@@ -41,7 +41,7 @@ import {
   readTilePropsIndex,
   writeTilePropertiesAt,
 } from '../editor/tile-properties.js'
-import { referenceEditsRootDefaultForLabel } from '../commands/decoration-kind-index.js'
+import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../commands/decoration-kind-index.js'
 import { galleryImageSigsAt } from '../commands/lightbox.queen.js'
 import { fetchThroughContentHop } from '../presentation/tiles/artifact-content.js'
 import { canonicalPeerImageCandidates, previewSigOf, type PeerImageCandidate, type PeerImageProps } from './peer-images.js'
@@ -508,17 +508,26 @@ export class ImageChoiceDrone extends Drone {
     }
 
     try {
-      const editsRoot = this.#segments.length === 0 || referenceEditsRootDefaultForLabel(label)
-      const parentSegments = editsRoot ? [] : this.#segments
-      const selected = pointers(await readTilePropertiesAt(parentSegments, label))
+      // A Portal row READS what it dresses: the target where the item lives.
+      const [target] = imageChoiceWriteTargets(this.#segments, label, this.#portalTarget(label))
+      if (!target) return undefined
+      const editsRoot = target.role === 'root-default'
+      const parentSegments = target.parentSegments
+      const selected = pointers(await readTilePropertiesAt(parentSegments, target.cell))
       if (selected) return selected
-      const key = await cellLocationSig(parentSegments, label)
+      const key = await cellLocationSig(parentSegments, target.cell)
       const index = readTilePropsIndex()
       const sig = index[key] ?? (editsRoot ? undefined : index[label])
       if (!sig) return undefined
       const blob = await this.#store()?.getResource?.(sig)
       return blob ? pointers(JSON.parse(await blob.text())) : undefined
     } catch { return undefined }
+  }
+
+  /** The route a Portal default-authoring row points at; null for any other
+   *  tile, so it dresses its own appearance. Never the hive root. */
+  #portalTarget(label: string): readonly string[] | null {
+    return referenceEditsRootDefaultForLabel(label) ? referenceTargetForLabel(label) : null
   }
 
   /** Restore the hive and drop everything the pick owned. Safe to call twice. */
@@ -581,11 +590,7 @@ export class ImageChoiceDrone extends Drone {
       // which is why every fetch here goes through `fetchThroughContentHop`.
       // Raw legacy image sigs pass through the same path unchanged and are
       // upgraded the next time somebody chooses them.
-      const targets = imageChoiceWriteTargets(
-        this.#segments,
-        label,
-        referenceEditsRootDefaultForLabel(label),
-      )
+      const targets = imageChoiceWriteTargets(this.#segments, label, this.#portalTarget(label))
       for (const target of targets) {
         const existing = await readTilePropertiesAt(target.parentSegments, target.cell)
         const updates: Record<string, unknown> = {

@@ -1,4 +1,6 @@
-<!-- The adopt-for-review strip: state + the only two exits. -->
+<!-- The visitor's preview strip: what is showing and whose it is. No exits —
+     a visitor shell has no hive to adopt into, and a participant is never
+     shown this at all: their link becomes an OFFER (hive-visit.drone.ts). -->
 @if (visible()) {
   <div class="preview-banner" role="status">
     <span class="pulse" aria-hidden="true"></span>
@@ -8,7 +10,5 @@
     @if (tiles() > 0) {
       <span class="meta">{{ 'preview.banner.tiles' | t: { count: tiles() } }}</span>
     }
-    <button type="button" class="adopt" (click)="onAdopt()">{{ 'preview.adopt' | t }}</button>
-    <button type="button" class="dismiss" (click)="onDismiss()">{{ 'preview.dismiss' | t }}</button>
   </div>
 }

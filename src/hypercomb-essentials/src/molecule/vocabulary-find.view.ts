@@ -47,7 +47,7 @@
 
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { MOLECULE_INDEX_SERVICE_KEY, type MoleculeIndexReader } from './molecule-index.service.js'
-import { buildHorizon, type HorizonSources } from './vocabulary-horizon.js'
+import { buildHorizon, publishersFromCards, type HorizonSources } from './vocabulary-horizon.js'
 import { loadProvenSeqs, rememberProvenSeq } from './vocabulary-ledger.js'
 import {
   searchVocabulary,
@@ -197,6 +197,29 @@ export class VocabularyFindElement extends HTMLElement {
     try {
       if (link) follows = JSON.parse(globalThis.localStorage?.getItem(link.STATIC_FOLLOWS_KEY) ?? '{}')
     } catch { follows = {} }
+    // WHAT YOU HAVE BEEN OFFERED (static-peers.drone.ts) — a publisher whose
+    // creation stands shaded in your hive is one you can ask.
+    const statics = ioc<{ offers?: () => readonly { name: string; pubkey: string; hosts: readonly string[] }[] }>(
+      '@diamondcoreprocessor.com/StaticPeersDrone')
+    for (const o of statics?.offers?.() ?? []) follows[`offer:${o.name}`] = { pubkey: o.pubkey, hosts: [...o.hosts] }
+    // THE COMMUNITY'S LEDGERS — every publisher every host you carry lists.
+    // This is what makes a word findable ACROSS DOMAINS with nothing visited
+    // and nothing offered: the hosts you added are the horizon. One small
+    // JSON per host, read at lookup time; a host that does not answer
+    // contributes nobody.
+    try {
+      const { fetchPublicationCards } = await import('../sharing/publications-ledger.js')
+      const originOf = (zone: string): string => {
+        const bare = zone.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '')
+        const local = /^(localhost|127\.)/.test(bare)
+        return bare ? `${local ? 'http' : 'https'}://${bare}` : ''
+      }
+      const ledgers = await Promise.all(zones.map(z => {
+        const origin = originOf(z)
+        return origin ? fetchPublicationCards({}, origin).catch(() => null) : Promise.resolve(null)
+      }))
+      Object.assign(follows, publishersFromCards(ledgers.flatMap(cards => cards ?? [])))
+    } catch { /* a ledger that cannot be read is nobody to ask, not a failure to ask */ }
     return buildHorizon({
       visits,
       follows,

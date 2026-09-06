@@ -1,59 +1,45 @@
-// Deploy the assembled presentation to Azure Static Web Apps (hypercomb.com).
+// Compatibility entrypoint for deploying hypercomb.com.
 //
-// Follows the same pattern as the other sites in this subscription:
-// resource group swa-hypercomb-prod-west-001, West US 2, Free SKU.
+// The framework-free host shell owns the apex. The assembled presentation is
+// retained at /tour/ instead of replacing /pin, the heap, and the host console.
 // Requires `az login` and network access.
 //
-//   node scripts/presentation/build.cjs        # assemble first
-//   node scripts/presentation/deploy-azure.cjs # then ship
+//   node scripts/presentation/build.cjs
+//   node scripts/presentation/deploy-azure.cjs
+
 const fs = require('fs')
 const path = require('path')
 const { execFileSync } = require('child_process')
 
-const ROOT = __dirname
-const APP = 'pbs-hypercomb-com'
-const GROUP = 'swa-hypercomb-prod-west-001'
+const root = __dirname
+const sourceRoot = path.join(root, '..', '..')
+const core = path.join(sourceRoot, 'hypercomb-core')
+const runtime = path.join(sourceRoot, 'hypercomb-runtime')
+const essentials = path.join(sourceRoot, 'hypercomb-essentials')
+const shim = path.join(sourceRoot, 'hypercomb-shim')
+const tour = path.join(root, 'dist', 'hypercomb-presentation.html')
+const tourOg = path.join(root, 'og.png')
 
-const dist = path.join(ROOT, 'dist', 'hypercomb-presentation.html')
-if (!fs.existsSync(dist)) throw new Error('run build.cjs first — dist/hypercomb-presentation.html is missing')
+if (!fs.existsSync(tour)) throw new Error('run build.cjs first — dist/hypercomb-presentation.html is missing')
+if (!fs.existsSync(tourOg)) throw new Error('the presentation social image is missing — expected og.png')
 
-// Built from empty every time: the SWA CLI uploads whatever is in this folder,
-// so a file that stopped being part of the site would otherwise keep shipping
-// from a previous run's leftovers. What is staged here IS the site.
-const stage = path.join(ROOT, 'deploy')
-fs.rmSync(stage, { recursive: true, force: true })
-fs.mkdirSync(stage, { recursive: true })
-fs.copyFileSync(dist, path.join(stage, 'index.html'))
-// the link card social platforms fetch when the URL is posted
-fs.copyFileSync(path.join(ROOT, 'og.png'), path.join(stage, 'og.png'))
+const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+const build = (cwd, script) => execFileSync(npm, ['run', script], { cwd, stdio: 'inherit' })
 
-// The mark. index.html carries it inline, but browsers probe /favicon.ico
-// unprompted (and so do link unfurlers, feed readers and the OS when a page
-// is pinned) — a 404 there is the blank globe on the apex of a platform whose
-// every other door wears the hexagon. One master, built by
-// `node scripts/build-favicons.cjs`; copied, never re-drawn.
-const shell = path.join(ROOT, '..', '..', 'hypercomb-web', 'public')
-for (const mark of ['favicon.ico', 'favicon.svg', 'apple-touch-icon.png', 'icon.svg']) {
-  const from = path.join(shell, mark)
-  if (!fs.existsSync(from)) throw new Error(`the mark is missing (${mark}) — run \`node scripts/build-favicons.cjs\``)
-  fs.copyFileSync(from, path.join(stage, mark))
-}
-// The Claude Code + bridge checklist is no longer part of this site: hypercomb.com
-// is the pitch, and wiring an AI into a hive is a step you take after you have
-// one. It stays written down — documentation/claude-bridge-setup.md is the full
-// tutorial, and setup.html is the page it was published as. Its walkthrough
-// capture lives with the other clips in media/bridge-setup.mp4, so the page
-// still plays when opened straight from the folder.
-fs.writeFileSync(path.join(stage, 'staticwebapp.config.json'), JSON.stringify({
-  navigationFallback: { rewrite: '/index.html' },
-  globalHeaders: { 'cache-control': 'public, max-age=300, must-revalidate' },
-  mimeTypes: { '.html': 'text/html; charset=utf-8' },
-}, null, 2))
+// None of these generated directories are committed. Build the entire input
+// chain so a clean checkout cannot deploy stale content from somebody's last
+// local run (or fail only after production deployment has started).
+build(core, 'build')
+build(runtime, 'build')
+build(essentials, 'build:module')
+build(shim, 'build:vendor')
+build(shim, 'build')
 
-const az = (...args) => execFileSync('az', args, { encoding: 'utf8', shell: true }).trim()
-const token = az('staticwebapp', 'secrets', 'list', '-n', APP, '-g', GROUP, '--query', 'properties.apiKey', '-o', 'tsv')
-if (!token) throw new Error('could not read the deployment token — is `az login` current?')
-
-console.log(`deploying ${(fs.statSync(dist).size / 1e6).toFixed(2)} MB to ${APP}…`)
-execFileSync('npx', ['--yes', '@azure/static-web-apps-cli', 'deploy', stage,
-  '--deployment-token', token, '--env', 'production'], { stdio: 'inherit', shell: true })
+execFileSync(process.execPath, [
+  path.join(shim, 'host', 'deploy-azure.mjs'),
+  '--app', 'pbs-hypercomb-com',
+  '--group', 'swa-hypercomb-prod-west-001',
+  '--domain', 'hypercomb.com',
+  '--tour', tour,
+  '--tour-og', tourOg,
+], { cwd: sourceRoot, stdio: 'inherit' })

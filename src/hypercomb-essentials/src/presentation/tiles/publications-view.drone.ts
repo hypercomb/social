@@ -8,7 +8,16 @@
 // profile), the site's title, its address, and who shared it when.
 // Stepping through a plate LEAVES for that site — an external door, opened
 // through `openExternalLink` (never a hand-rolled anchor; the native shell
-// would lose its whole window to one).
+// would lose its whole window to one). Under each plate a second door,
+// SHOW IN MY HIVE, OFFERS the creation (static-peers.drone.ts): it appears
+// as a shaded tile at your top level exactly as a swarm peer's would, and
+// each step you take through it is the adopt — the first click takes that
+// tile, the second walks in, its children arrive shaded. Nothing folds on
+// its own: "every action is a step towards your permanence, your desires,
+// your hive." The same door withdraws the offer.
+//
+// With no domain named, /discover lays EVERY host you carry on one page —
+// the community: the static, public counterpart of walking into a swarm.
 //
 // The ledger is the only source of plates. Publish adds one, unpublish
 // removes one, an empty ledger is an honest welcome — nothing on the page
@@ -20,6 +29,7 @@ import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
 import { isBehaviorDormant } from '../../sharing/behavior-enablement.js'
 import { listDecorations } from '../../commands/decoration-manifest.js'
 import { fetchPublicationCards, type PublicationCard } from '../../sharing/publications-ledger.js'
+import { offerFromCard } from '../../sharing/static-peers.js'
 import { lineageKey } from '../../history/lineage-key.js'
 import { trackScrollGutter } from './scroll-gutter.js'
 import { openExternalLink } from './document-view-links.js'
@@ -43,7 +53,7 @@ export class PublicationsViewDrone extends Drone {
   #targetSegments: string[] | null = null
   /** Set by /discover — the page renders a FOREIGN domain's ledger instead
    *  of this host's. Cleared whenever the view is left. */
-  #directory: { origin: string; host: string } | null = null
+  #directory: { origin: string; host: string; origins?: readonly string[] } | null = null
   #bound = false
   #active = false
   #gen = 0
@@ -74,7 +84,10 @@ export class PublicationsViewDrone extends Drone {
         // freshness gate a reload would reopen a stale discovery unbidden.
         if (!payload?.origin || !payload?.host) return
         if (Math.abs(Date.now() - (payload.at ?? 0)) > 10_000) return
-        this.#directory = { origin: String(payload.origin), host: String(payload.host) }
+        this.#directory = {
+          origin: String(payload.origin), host: String(payload.host),
+          ...(payload.origins?.length ? { origins: payload.origins.map(String) } : {}),
+        }
         this.#targetSegments = null
         this.#vm()?.setMode(PUBLICATIONS_VIEW)
         void this.#reconcile()
@@ -144,7 +157,26 @@ export class PublicationsViewDrone extends Drone {
     let title: string
     let tagline: string
     let cards: PublicationCard[] | null
-    if (directory) {
+    if (directory?.origins?.length) {
+      // The community: every host you carry, one page. A host that does not
+      // answer contributes nothing; only when NONE answers is the page
+      // unreachable rather than empty.
+      const answers = await Promise.all(directory.origins.map(o => fetchPublicationCards({}, o).catch(() => null)))
+      if (gen !== this.#gen || this.#vm()?.mode !== PUBLICATIONS_VIEW) return
+      const seen = new Set<string>()
+      const merged: PublicationCard[] = []
+      for (const list of answers) {
+        for (const card of list ?? []) {
+          if (seen.has(card.url)) continue
+          seen.add(card.url)
+          merged.push(card)
+        }
+      }
+      merged.sort((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0))
+      cards = answers.every(a => a === null) ? null : merged
+      title = directory.host
+      tagline = this.#t('publications.communityTagline', 'everything the hosts you carry share')
+    } else if (directory) {
       // Discovery: the FOREIGN domain's ledger, verbatim — nothing excluded,
       // the page titles itself with the door it was pointed at.
       cards = await fetchPublicationCards({}, directory.origin)
@@ -213,7 +245,7 @@ export class PublicationsViewDrone extends Drone {
       sheet.appendChild(grid)
       const hint = document.createElement('p')
       hint.className = 'pv-hint'
-      hint.textContent = this.#t('publications.hint', 'step through a plate to visit a creation')
+      hint.textContent = this.#t('publications.hint', 'step through a plate to visit a creation — or show it in your hive, shaded, and take it one tile at a time')
       sheet.appendChild(hint)
     } else {
       const still = document.createElement('main')
@@ -246,8 +278,42 @@ export class PublicationsViewDrone extends Drone {
   }
 
   /** One published site, one plate: honeycomb monogram, title, address,
-   *  who shared it when. The click is an EXTERNAL door. */
+   *  who shared it when. The plate's click is an EXTERNAL door; the door
+   *  beneath it OFFERS the creation in your hive (shaded), or withdraws it. */
   #plate(card: PublicationCard, index: number): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'pv-plate-wrap'
+    wrap.style.setProperty('--i', String(index))
+    wrap.appendChild(this.#door(card, index))
+
+    const offer = offerFromCard(card)
+    if (offer) {
+      const statics = window.ioc?.get<{ isOffered?: (name: string) => boolean }>('@diamondcoreprocessor.com/StaticPeersDrone')
+      const bring = document.createElement('button')
+      bring.type = 'button'
+      bring.className = 'pv-bring'
+      const paint = (offered: boolean): void => {
+        bring.textContent = offered
+          ? this.#t('publications.offered', 'shown in your hive — remove')
+          : this.#t('publications.offer', 'show in my hive')
+        bring.title = offered
+          ? this.#t('publications.offeredTitle', 'Stop offering this creation — tiles you already took stay yours')
+          : this.#t('publications.offerTitle', 'It appears shaded at your top level; the first click on a tile takes it, the second walks in — each step is the adopt')
+        bring.dataset['offered'] = offered ? 'true' : 'false'
+      }
+      paint(statics?.isOffered?.(offer.name) === true)
+      bring.onclick = () => {
+        const offered = bring.dataset['offered'] === 'true'
+        if (offered) EffectBus.emit('community:withdraw', { name: offer.name })
+        else EffectBus.emit('community:offer', offer)
+        paint(!offered)
+      }
+      wrap.appendChild(bring)
+    }
+    return wrap
+  }
+
+  #door(card: PublicationCard, index: number): HTMLElement {
     const plate = document.createElement('button')
     plate.type = 'button'
     plate.className = 'pv-plate'
@@ -319,6 +385,14 @@ export class PublicationsViewDrone extends Drone {
 // espresso ink, gold hairlines. The monogram sits on a honeycomb wash —
 // the one place the hexagon shows through the plate.
 const SCENE_CSS = `
+  .hc-publications-view .pv-plate-wrap { display: flex; flex-direction: column; align-items: stretch; gap: 0.45rem; }
+  .hc-publications-view .pv-bring {
+    align-self: center; font: inherit; font-size: 0.82rem; letter-spacing: 0.04em;
+    color: inherit; background: transparent; border: 1px solid currentColor; border-radius: 999px;
+    padding: 0.28rem 0.9rem; opacity: 0.72; cursor: pointer;
+  }
+  .hc-publications-view .pv-bring:hover, .hc-publications-view .pv-bring:focus-visible { opacity: 1; }
+
 .hc-publications-view{position:fixed;top:0;bottom:0;left:var(--hc-inset-left,0px);right:var(--hc-inset-right,0px);z-index:150;overflow:auto;background:
  radial-gradient(120% 70% at 50% 0%,rgba(255,255,255,.75),transparent 60%),
  linear-gradient(180deg,#f8f3e8 0%,#f3ecdd 60%,#ede4d1 100%);

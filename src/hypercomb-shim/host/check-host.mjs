@@ -141,6 +141,31 @@ if (!manifest) {
     '`*` is correct: the bytes are public, immutable and verified by the reader.')
 }
 
+// A guaranteed miss distinguishes an honest heap from an SPA fallback that
+// turns every unknown signature into index.html. /content is the canonical
+// machine namespace on static hosts; the root alias is retained for older
+// hosts, but is optional when the manifest itself was found under /content.
+{
+  const missing = '0'.repeat(64)
+  const canonicalBase = manifest ? manifestBase : '/content'
+  const canonicalPath = `${canonicalBase}/${missing}`
+  const res = await get(canonicalPath, { cache: 'no-store', redirect: 'manual' })
+  const type = (res.headers?.get?.('content-type') ?? '').toLowerCase()
+  record(!res.error && res.status === 404, 'missing content signatures return 404',
+    res.error ? String(res.error) : `${canonicalPath} returned HTTP ${res.status} ${type || ''}`.trim(),
+    'exclude the content namespace from the SPA fallback; missing machine bytes must be absent, not HTML')
+
+  if (canonicalBase) {
+    const rootPath = `/${missing}`
+    const root = await get(rootPath, { cache: 'no-store', redirect: 'manual' })
+    const rootType = (root.headers?.get?.('content-type') ?? '').toLowerCase()
+    const honest = !root.error && root.status === 404
+    record(honest ? true : null, 'root signature aliases do not impersonate content',
+      root.error ? String(root.error) : `${rootPath} returned HTTP ${root.status} ${rootType || ''}`.trim(),
+      'optional root aliases should return 404 on a miss; Azure static hosts use /content for machine reads')
+  }
+}
+
 // ── 6. locales, as content ───────────────────────────────────────────────────
 // A locale is not bundled and not an installer resource — it is bytes the host
 // holds, named by their own hash. A host with no index simply publishes no
@@ -228,6 +253,101 @@ if (!manifest) {
     record(null, 'wears a mark', 'no icon answered',
       'ship the shim public/ icons (node scripts/build-favicons.cjs) or your own — ' +
       'without one every tab on this host shows the browser default')
+  }
+}
+
+// ── 10. the pool at its address ──────────────────────────────────────────────
+// documentation/host-packages-pool.md, "The directory branch": a pool is a
+// DIRECTORY, and it is reached at the one address every client derives for
+// itself. Hosts may expose their heap at /content or at the origin root, so the
+// checker follows the same ordered bases as runtime host discovery. A listing
+// answers text/plain, one entry name per line, no-store. A live host readdirs;
+// a static host ships the same bytes as that directory's own index.html.
+//
+// The interesting failure is the SPA fallback again (checks 4 and 9): a
+// redirect to / or a 200 of text/html means the rewrite ate the address.
+// An honest 404 is a host that has no packages yet — a warning, not a fail.
+{
+  const meaning = 'host:packages'
+  const poolSig = await sha256(new TextEncoder().encode(meaning))
+  const probes = []
+  for (const base of ['/content', '']) {
+    const path = `${base}/${poolSig}/`
+    const res = await get(path, { cache: 'no-store', redirect: 'manual' })
+    probes.push({ path, res, type: (res.headers?.get?.('content-type') ?? '').toLowerCase() })
+  }
+  const served = probes.find(p => !p.res.error && p.res.ok && !p.type.includes('text/html'))
+  if (served) {
+    const { path, res, type } = served
+    const cache = (res.headers.get('cache-control') ?? '').toLowerCase()
+    const body = await res.text()
+    const entries = body.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+    const wellFormed = entries.length > 0 && entries.every(e => /^\d{8}$/.test(e) || SIG_RE.test(e))
+    record(wellFormed, 'serves the packages pool at its address',
+      `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} at ${path}, ${type || '(no content-type)'}`,
+      'the listing is one entry name per line — 8-digit marker names or 64-hex members — and nothing else')
+    const fresh = cache.includes('no-store') || cache.includes('max-age=0') || cache.includes('no-cache')
+    record(fresh ? true : null, 'the pool listing is not hard-cached', cache || '(no cache-control)',
+      'a pool GROWS — cache the listing and every client stops at the head it first saw; set no-store on the pool directory')
+
+    // Prove the package picker can walk beyond the directory. A listing alone
+    // can pass while the static host rewrites `<pool>/<entry>` to HTML — which
+    // looks like an offer until the participant clicks it.
+    if (wellFormed) {
+      const entry = entries[entries.length - 1]
+      const memberPath = `${path}${entry}`
+      const memberRes = await get(memberPath, { cache: 'no-store' })
+      const memberType = (memberRes.headers?.get?.('content-type') ?? '').toLowerCase()
+      if (memberRes.error || !memberRes.ok || memberType.includes('text/html')) {
+        record(false, 'serves a package-pool member',
+          memberRes.error ? String(memberRes.error) : `${memberPath} returned HTTP ${memberRes.status} ${memberType || ''}`.trim(),
+          'the pool member must be served as its own text bytes, before the SPA fallback')
+      } else {
+        const member = await memberRes.text()
+        const packageSig = (member.split(/\r?\n/)[0] ?? '').trim().toLowerCase()
+        record(SIG_RE.test(packageSig), 'serves a package-pool member',
+          SIG_RE.test(packageSig) ? `${entry} names ${packageSig.slice(0, 12)}…` : `${entry} does not begin with a package signature`,
+          'a host:packages member begins with the 64-hex package root it offers')
+
+        if (SIG_RE.test(packageSig)) {
+          const base = path.slice(0, -`${poolSig}/`.length)
+          const packagePath = `${base}${packageSig}`
+          const packageRes = await get(packagePath)
+          if (packageRes.error || !packageRes.ok) {
+            record(false, 'serves the package root its pool names',
+              packageRes.error ? String(packageRes.error) : `${packagePath} returned HTTP ${packageRes.status}`,
+              'publish every package root before appending its pool member')
+          } else {
+            const bytes = await packageRes.arrayBuffer()
+            const hash = await sha256(bytes)
+            record(hash === packageSig, 'serves the package root its pool names',
+              hash === packageSig ? `${packageSig.slice(0, 12)}… verified` : `served ${hash.slice(0, 12)}…, named ${packageSig.slice(0, 12)}…`,
+              'the package root bytes must hash to the signature advertised by the pool member')
+          }
+        }
+      }
+    }
+  } else {
+    const network = probes.find(p => p.res.error)
+    const redirected = probes.find(p => p.res.status >= 300 && p.res.status < 400)
+    const swallowed = probes.find(p => p.res.ok && p.type.includes('text/html'))
+    const unexpected = probes.find(p => !p.res.error && p.res.status !== 404)
+    if (network) {
+      record(false, 'serves the packages pool at its address', String(network.res.error), 'unexpected network failure')
+    } else if (redirected) {
+      record(false, 'serves the packages pool at its address',
+        `${redirected.path} returned HTTP ${redirected.res.status} → ${redirected.res.headers.get('location') ?? '?'}`,
+        'a rewrite is answering the pool address; the real directory listing must win')
+    } else if (swallowed) {
+      record(false, 'serves the packages pool at its address', `${swallowed.path} answered text/html`,
+        'the SPA fallback swallowed the pool address — the listing (text/plain, one entry per line) must win before any rewrite')
+    } else if (unexpected) {
+      record(false, 'serves the packages pool at its address', `${unexpected.path} returned HTTP ${unexpected.res.status}`,
+        'the pool address must answer 200 (a listing) or 404 (no pool)')
+    } else {
+      record(null, 'serves the packages pool at its address', 'HTTP 404 at /content and /',
+        'this host offers no packages yet — fine for a shell host; a node cannot install from it')
+    }
   }
 }
 

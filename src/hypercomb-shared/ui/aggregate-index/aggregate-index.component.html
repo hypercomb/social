@@ -62,37 +62,6 @@
       </button>
     }
 
-    @if (referencePick(); as pick) {
-      <div class="ai-staged" role="group">
-        <p class="ai-versions-note">
-          {{ pick.portal.label }} · {{ 'select.picked' | t: { count: selection().length } }}
-        </p>
-        <button class="ai-staged-add" type="button"
-                [disabled]="selection().length === 0"
-                (click)="finishReferencePick()">
-          {{ 'collections-landing.add-to' | t: {
-            count: selection().length,
-            name: pick.parentSegments[pick.parentSegments.length - 1]
-          } }}
-        </button>
-        <form class="ai-filter-row"
-              (submit)="$event.preventDefault(); finishReferencePick(referenceContainerName())">
-          <div class="ai-filter-field">
-            <input class="ai-filter-input" type="text" autocomplete="off"
-                   [value]="referenceContainerName()"
-                   (input)="referenceContainerName.set($any($event.target).value)"
-                   [placeholder]="'collections-landing.new' | t" />
-          </div>
-          <button class="ai-filter-add mat-sym" type="submit"
-                  [disabled]="selection().length === 0 || !referenceContainerName().trim()"
-                  [attr.aria-label]="'aggregate.create-named' | t: { name: referenceContainerName() }">add</button>
-        </form>
-        <button class="ai-carry-clear" type="button" (click)="cancelReferencePick()">
-          {{ 'aggregate.carry.clear' | t }}
-        </button>
-      </div>
-    }
-
     <!-- Carrying: picked here, applied wherever you walk to. The bar names the
          page it would land on, so pressing it can never be a guess — and it
          says what the bouquet in hand will do, because a mark landing on twelve

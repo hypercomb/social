@@ -132,13 +132,13 @@ describe('the rule normalises to one spelling', () => {
 describe('appending the rule is byte-stable', () => {
 
   it('a record with NO rule produces exactly today\'s payload bytes', () => {
-    const opts = { name: 'Cigar', targetSig: SIG_A, requiredMarks: ['review'], requiredBouquet: SIG_B }
+    const opts = { targetSegments: ['cigar'], targetSig: SIG_A, requiredMarks: ['review'], requiredBouquet: SIG_B }
     expect(JSON.stringify(buildReferenceRulePayload(opts)))
       .toBe(JSON.stringify(buildCanonicalReferencePayload(opts)))
   })
 
   it('appends the rule AFTER every existing field, so nothing before it moves', () => {
-    const opts = { name: 'Cigar', targetSig: SIG_A, editsRootDefault: true }
+    const opts = { targetSegments: ['cigar'], targetSig: SIG_A, editsRootDefault: true }
     const without = JSON.stringify(buildCanonicalReferencePayload(opts))
     const rule = validateReferenceRule(base)
     if (!rule.ok) throw new Error('unreachable')
@@ -151,7 +151,7 @@ describe('appending the rule is byte-stable', () => {
     // It used to drop the rule and return the base payload. That is an
     // UNSCOPED reference — the shape the existing reader happily accepts — so
     // a refused rule became a committed reference with no audience at all.
-    const opts = { name: 'Cigar' }
+    const opts = { targetSegments: ['cigar'] }
     const bad = { ...base, scope: undefined } as unknown as Parameters<typeof buildReferenceRulePayload>[0]['rule']
     expect(() => buildReferenceRulePayload({ ...opts, rule: bad })).toThrow(/scope/)
     // …and a payload with no rule at all is still byte-identical to today's.

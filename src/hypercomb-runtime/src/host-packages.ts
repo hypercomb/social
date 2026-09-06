@@ -138,8 +138,15 @@ type FoundPool = {
  * precisely why a browse list needed a document for as long as probing was the
  * only mechanism.
  */
-const findPool = async (zone: string): Promise<FoundPool | null> => {
+/** What the probe learned: the pool, and — separately — whether any door
+ *  ANSWERED at all. "Publishes nothing here" (an honest 404 at the derived
+ *  address) and "does not answer" (no HTTP response from any base) are
+ *  different facts, and only the second is about reachability. */
+type PoolProbe = { pool: FoundPool | null; answered: boolean }
+
+const probePool = async (zone: string): Promise<PoolProbe> => {
   const pool = await registerPoolMeaning(HOST_PACKAGES_MEANING)
+  let answered = false
 
   for (const base of hostBases(zone)) {
     const read = poolReader(base, pool)
@@ -147,20 +154,23 @@ const findPool = async (zone: string): Promise<FoundPool | null> => {
     let listing: string[] | null = null
     try {
       const res = await fetch(`${base}/${pool}/`, { cache: 'no-store' })
+      answered = true   // any status is an answer; a thrown fetch is not
       listing = res.ok ? parsePoolListing(await res.text()) : null
     } catch { listing = null }
 
     if (listing) {
       const indices = markerIndices(listing)
-      if (indices.length) return { base, read, head: indices[indices.length - 1]!, indices }
+      if (indices.length) return { pool: { base, read, head: indices[indices.length - 1]!, indices }, answered }
       continue   // the host holds this pool and it is empty — not a miss to retry elsewhere
     }
 
     const head = await headIndex(async i => (await read(i)) !== null)
-    if (head >= 0) return { base, read, head, indices: null }
+    if (head >= 0) return { pool: { base, read, head, indices: null }, answered: true }
   }
-  return null
+  return { pool: null, answered }
 }
+
+const findPool = async (zone: string): Promise<FoundPool | null> => (await probePool(zone)).pool
 
 /**
  * THE HEAD PACKAGE A DOMAIN PUBLISHES — the whole of discovery.
@@ -196,9 +206,28 @@ const BROWSE_PAGE = 25
 export const listHostPackages = async (
   zone: string,
   options: { limit?: number; before?: number } = {},
+): Promise<HostPackage[]> => (await askHostPackages(zone, options)).packages
+
+/**
+ * The same rows, plus the one fact a surface needs to say the right thing
+ * about an empty answer: did the door answer at all? A host directory that
+ * shows "publishes nothing here" for a domain that is DOWN sends the
+ * participant to look for a publish problem that is a network problem.
+ */
+export const askHostPackages = async (
+  zone: string,
+  options: { limit?: number; before?: number } = {},
+): Promise<{ packages: HostPackage[]; answered: boolean }> => {
+  const { pool: found, answered } = await probePool(zone)
+  if (!found) return { packages: [], answered }
+  return { packages: await rowsFrom(zone, found, options), answered: true }
+}
+
+const rowsFrom = async (
+  zone: string,
+  found: FoundPool,
+  options: { limit?: number; before?: number },
 ): Promise<HostPackage[]> => {
-  const found = await findPool(zone)
-  if (!found) return []
 
   const limit = Math.max(1, options.limit ?? BROWSE_PAGE)
   const ceiling = options.before !== undefined ? options.before - 1 : found.head

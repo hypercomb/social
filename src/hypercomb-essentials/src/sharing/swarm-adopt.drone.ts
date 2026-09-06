@@ -60,6 +60,14 @@ import { allows as intakeAllows } from '../pheromones/intake-filter.js'
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
+/** The static peer source (static-peers.drone.ts): public hosts' creations
+ *  offered as shaded tiles. Consulted by the same questions the swarm is —
+ *  a take is a take whichever wire the offer arrived on. */
+const STATIC_PEERS_KEY = '@diamondcoreprocessor.com/StaticPeersDrone'
+type StaticPeersLike = {
+  peerEntriesAt: (segments: readonly string[]) => readonly ({ name: string; peerPubkey: string } & Record<string, unknown>)[]
+  childNamesAt?: (segments: readonly string[]) => Promise<readonly string[]>
+}
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const COMMITTER_KEY = '@diamondcoreprocessor.com/LayerCommitter'
 const SNAPSHOT_QUEEN_KEY = '@diamondcoreprocessor.com/SnapshotQueenBee'
@@ -689,6 +697,7 @@ export class SwarmAdoptDrone extends Drone {
     // slot, while this one-level lightweight fold needs the explicit bridge.
     await this.#applyWireTitles(segments, entry)
     this.#visitStage('landed', { name, at: [...segments] })
+    this.#scheduleDivergenceScan()
 
     if (SIG_RE.test(layerSig)) {
       recordVisit({ segments, layerSig, pubkey, domain })
@@ -738,7 +747,9 @@ export class SwarmAdoptDrone extends Drone {
     if (!name) return false
     let inZone = false
     try { inZone = localStorage.getItem('hc:mesh-public') === 'true' } catch { /* private default */ }
-    if (!inZone) return false
+    // A STATIC offer is takeable in private mode — nothing of yours leaves
+    // when you take a public host's tile; the zone flag governs the mesh.
+    if (!inZone && !this.#staticEntryFor(name)) return false
     // NO INTAKE GATE HERE, deliberately — it was added and is now removed.
     //
     // `wandEligible` is not an adoption predicate. It has three consumers:
@@ -809,12 +820,25 @@ export class SwarmAdoptDrone extends Drone {
    *  pubkey narrows when the caller knows whose). */
   #peerEntryFor = (label: string, pubkey?: string): Record<string, unknown> | null => {
     const swarm = this.#ioc()?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
-    if (!swarm?.peerTilesAtCurrentSig) return null
     const matches = (p: { name: string; peerPubkey: string }): boolean =>
       p.name === label && (!pubkey || p.peerPubkey === pubkey)
-    return (swarm.peerTilesAtCurrentSig().find(matches)
-      ?? swarm.subscribedTiles?.().find(matches)
-      ?? swarm.peerTilesAtCurrentSig().find(p => p.name === label)
+    const live = swarm?.peerTilesAtCurrentSig
+      ? (swarm.peerTilesAtCurrentSig().find(matches)
+        ?? swarm.subscribedTiles?.().find(matches)
+        ?? swarm.peerTilesAtCurrentSig().find(p => p.name === label)
+        ?? null)
+      : null
+    return (live ?? this.#staticEntryFor(label, pubkey)) as Record<string, unknown> | null
+  }
+
+  /** A public host's offered tile at the current location — the static peer
+   *  source's answer, in the same shape a live peer tile carries. */
+  #staticEntryFor = (label: string, pubkey?: string): Record<string, unknown> | null => {
+    const statics = this.#ioc()?.get?.(STATIC_PEERS_KEY) as StaticPeersLike | undefined
+    if (!statics?.peerEntriesAt) return null
+    const here = statics.peerEntriesAt(this.#currentSegments())
+    return (here.find(p => p.name === label && (!pubkey || p.peerPubkey === pubkey))
+      ?? here.find(p => p.name === label)
       ?? null) as Record<string, unknown> | null
   }
 
@@ -1373,11 +1397,47 @@ export class SwarmAdoptDrone extends Drone {
   // authoritative "give me their current version" gesture.
   #syncPeerTile = async (label: string, pubkey?: string, opts?: { explicit?: boolean }): Promise<void> => {
     const branch = this.#resolvePeerBranch(label, pubkey)
-    if (!branch) return
+    if (!branch) {
+      const entry = this.#staticEntryFor(label, pubkey)
+      if (entry) await this.#syncStaticTile(this.#currentSegments(), label, entry, opts)
+      return
+    }
     // An EXPLICIT sync gesture re-subscribes a revoked path; the auto-sync
     // caller never clears stones — it SKIPS tombstoned targets instead.
     if (opts?.explicit) clearAdoptTombstone([...branch.at, branch.label])
     await this.syncResolvedBranch(branch)
+  }
+
+  /** A held tile a PUBLIC HOST's publisher has moved past: refresh THIS tile
+   *  from their current layer — its props, and the receipt that baselines
+   *  divergence — one level, never its children. "Every action is a step":
+   *  what is new inside arrives shaded when you walk in, and is taken there.
+   *  The overlay's second click walks in; the swarm's whole-branch sync is
+   *  deliberately not reached for a static offer. */
+  #syncStaticTile = async (
+    at: readonly string[],
+    label: string,
+    entry: Record<string, unknown>,
+    opts?: { explicit?: boolean },
+  ): Promise<void> => {
+    const layerSig = String(entry['layerSig'] ?? '').trim().toLowerCase()
+    if (opts?.explicit) clearAdoptTombstone([...at, label])
+    if (!await this.#isHeldHere([...at], label)) return   // not held → the wand takes it, not this
+    const props: Record<string, unknown> = {}
+    for (const key of VISIT_PROP_KEYS) if (entry[key] !== undefined) props[key] = entry[key]
+    if (Object.keys(props).length > 0) {
+      try { await writeTilePropertiesAt([...at], label, props) } catch { /* the receipt still moves; props catch up on the next refresh */ }
+    }
+    if (SIG_RE.test(layerSig)) this.#recordSyncReceipt([...at, label], layerSig)
+    forgetDecorationLabel(label)
+    EffectBus.emit('tile:saved', { cell: label })
+    const i18n = this.#ioc()?.get?.(I18N_IOC_KEY) as I18nProvider | undefined
+    const said = i18n?.t('swarm.refreshed', { cell: label })
+    EffectBus.emit('activity:log', {
+      message: said && said !== 'swarm.refreshed' ? said : `"${label}" refreshed from its publisher — walk in to take what is new`,
+      icon: '●',
+    })
+    this.#scheduleDivergenceScan()
   }
 
   /** Sync an ALREADY-RESOLVED branch — the shared tail of #syncPeerTile,
@@ -1555,7 +1615,16 @@ export class SwarmAdoptDrone extends Drone {
       return
     }
     const diverged = new Set<string>()
-    for (const tile of swarm.peerTilesAtCurrentSig()) {
+    // A public host's offer is a peer too (static-peers.drone.ts): the same
+    // three rules judge a held tile whichever wire the offer arrived on.
+    // Tagged so rule 3 asks the static source for the publisher's children
+    // instead of the mesh cache.
+    const statics = ioc?.get?.(STATIC_PEERS_KEY) as StaticPeersLike | undefined
+    const offered: Array<{ name: string; peerPubkey: string; static?: boolean } & Record<string, unknown>> = [
+      ...swarm.peerTilesAtCurrentSig(),
+      ...(statics?.peerEntriesAt?.(at) ?? []).map(e => ({ ...e, static: true })),
+    ]
+    for (const tile of offered) {
       const name = String(tile.name ?? '').trim()
       if (!name) continue
       const sig = String((tile as Record<string, unknown>)['layerSig'] ?? '').trim().toLowerCase()
@@ -1614,9 +1683,10 @@ export class SwarmAdoptDrone extends Drone {
       // it structurally and tsc stays silent; the wrapper has no `children`,
       // which reads as "I hold nothing here" and would mark EVERY held tile
       // with any peer child as diverged.
-      if (await this.#peerOffersUnheldChildren(swarm, history, target, held.layer)) {
-        diverged.add(name)
-      }
+      const unheld = tile.static
+        ? await this.#staticOffersUnheldChildren(statics, history, target, held.layer)
+        : await this.#peerOffersUnheldChildren(swarm, history, target, held.layer)
+      if (unheld) diverged.add(name)
     }
     if (setDivergedLabels(diverged)) {
       EffectBus.emit('swarm:divergence-changed', { labels: [...diverged] })
@@ -1638,6 +1708,25 @@ export class SwarmAdoptDrone extends Drone {
    * not evidence of divergence: a cold page must not light adopt on
    * everything it hasn't finished reading.
    */
+  /** Rule 3 for a static offer: does the PUBLISHER hold a child under this
+   *  tile whose NAME we don't? Their layer is read through the static source
+   *  (signed index → localized closure), never the mesh cache. */
+  #staticOffersUnheldChildren = async (
+    statics: StaticPeersLike | undefined,
+    history: PlacementHistory,
+    target: readonly string[],
+    heldChild: PlacementLayer,
+  ): Promise<boolean> => {
+    if (!statics?.childNamesAt) return false
+    const theirs = await statics.childNamesAt(target).catch(() => [] as readonly string[])
+    if (theirs.length === 0) return false
+    const { names, coldMiss } = await childNamesOfStrict(history, heldChild)
+      .catch(() => ({ names: [] as string[], coldMiss: true }))
+    if (coldMiss) return false
+    const mine = new Set(names.map(n => n.trim().toLowerCase()))
+    return theirs.some(n => { const k = String(n ?? '').trim().toLowerCase(); return k && !mine.has(k) })
+  }
+
   #peerOffersUnheldChildren = async (
     swarm: SwarmDroneLike,
     history: PlacementHistory,

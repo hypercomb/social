@@ -339,3 +339,35 @@ test('a site may declare its own icon, and only a same-origin one', async () => 
   // than fetching an icon from a third party on every page load.
   assert.equal('icon' in offOrigin, false)
 })
+
+test('a pool address on a site door answers the directory branch, never the SPA fallback', async () => {
+  const pool = 'd'.repeat(64)
+  const { env, assetRequests } = await fixture()
+  // nothing under the prefix: an honest 404, text, no-store, cross-origin readable
+  const empty = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/${pool}/`), env)
+  assert.equal(empty.status, 404)
+  assert.match(empty.headers.get('content-type'), /text\/plain/)
+  assert.equal(empty.headers.get('cache-control'), 'no-store')
+  assert.equal(empty.headers.get('access-control-allow-origin'), '*')
+  assert.deepEqual(assetRequests, [])
+
+  // members under the prefix: their names, one per line, sorted, no-store
+  env.CONTENT = {
+    list: async ({ prefix }) => ({
+      objects: [`${prefix}00000001`, `${prefix}00000000`, `${prefix}nested/deeper`].map(key => ({ key })),
+      truncated: false,
+    }),
+  }
+  const listing = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/${pool}/`), env)
+  assert.equal(listing.status, 200)
+  assert.equal(listing.headers.get('cache-control'), 'no-store')
+  assert.equal(await listing.text(), '00000000\n00000001\n')
+  assert.deepEqual(assetRequests, [])
+})
+
+test('a site door is readable cross-origin — its manifest carries the open CORS header', async () => {
+  const { env } = await fixture()
+  const res = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/content/manifest.json'), env)
+  assert.equal(res.status, 200)
+  assert.equal(res.headers.get('access-control-allow-origin'), '*')
+})

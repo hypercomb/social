@@ -258,30 +258,52 @@ export const isParticipantImage = (props: unknown): boolean => {
   return hasTileImage(p) && p?.[SUBSTRATE_MARK] !== true
 }
 
-// ── Participant-local props index (`hc:tile-props-index`) ────────────
+// ── The props index — a SESSION CACHE of tile → props-resource sig ──────
 //
-// A localStorage cache of tile → props-resource sig used by the render
-// and editor fast paths (the canonical home is the layer's `properties`
-// slot). Entries are keyed by the tile's FULL-LINEAGE signature — the
-// same sigbag key the history bags use (`cellLocationSig`) — so two
-// tiles sharing a leaf name at different hive locations can never read
-// or clobber each other's assignment. Legacy entries keyed by bare
-// label still exist from before this keying; readers fall back to them
-// (shared across same-named locations, as they always were) but writers
-// and removers touch ONLY the lineage-keyed entry, so the legacy
-// cross-location blast radius is gone.
+// The canonical home of a tile's props sig is its head layer's
+// `properties` slot. This index is a memory of what that slot said, kept
+// so the render and editor fast paths can answer synchronously: keyed by
+// the head LAYER sig (derive-on-miss, the optimize-phase key law), by the
+// tile's FULL-LINEAGE signature (`cellLocationSig`), and — legacy only —
+// by bare label. Every entry is re-derivable from the layer, and every
+// reader treats a miss as "read canonical", never as "no picture".
+//
+// RETIRED AS A DEVICE STORE (write-conformance, 2026-09-05). It lived in
+// localStorage: participant state outside the graph, keyed by location,
+// written on the commit path — the one shape a derived cache may not
+// take. It is now MEMORY ONLY. The old localStorage key is read ONCE, at
+// first use, as the walk-back for a hive whose tiles were assigned under
+// the old model (index-only assignments the reconciler has not stamped
+// into canonical yet), and it is never written or removed again. Reads
+// walk back, writes never do. A reload starts from the legacy read plus
+// whatever the paint re-derives — which is what a cache is.
 
+/** LEGACY localStorage key — read once at first use, never written. */
 export const TILE_PROPS_INDEX_KEY = 'hc:tile-props-index'
 
-export const readTilePropsIndex = (): Record<string, string> => {
+let liveIndex: Record<string, string> | null = null
+
+const legacyIndex = (): Record<string, string> => {
   try {
     const parsed = JSON.parse(localStorage.getItem(TILE_PROPS_INDEX_KEY) ?? '{}')
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, string> : {}
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? { ...(parsed as Record<string, string>) } : {}
   } catch { return {} }
 }
 
-export const writeTilePropsIndex = (index: Record<string, string>): void =>
-  localStorage.setItem(TILE_PROPS_INDEX_KEY, JSON.stringify(index))
+/** A SNAPSHOT of the session index (callers mutate and hand it back to
+ *  `writeTilePropsIndex`, as they always did). */
+export const readTilePropsIndex = (): Record<string, string> => {
+  if (!liveIndex) liveIndex = legacyIndex()
+  return { ...liveIndex }
+}
+
+/** Replace the session index. Memory only — never localStorage. */
+export const writeTilePropsIndex = (index: Record<string, string>): void => {
+  liveIndex = { ...index }
+}
+
+/** Test seam: forget the session index so the next read walks back again. */
+export const _resetTilePropsIndex = (): void => { liveIndex = null }
 
 /**
  * Resolve a tile's props sig from the index: lineage-keyed entry first
@@ -544,9 +566,9 @@ export const readTilePropertiesAt = async (
  * Read just the tile's CANONICAL props sig — the `properties[0]` value in the
  * tile's head layer — without fetching/parsing the resource blob.
  *
- * This is the sig the participant-local index (`hc:tile-props-index`) stores.
- * Canonical is the source of truth and travels with the layer (history/OPFS);
- * the index is a per-device localStorage cache that show-cell + substrate read.
+ * This is the sig the session props index stores. Canonical is the source of
+ * truth and travels with the layer (history/OPFS); the index is a memory-only
+ * cache that show-cell + substrate read.
  * When a tile's image arrives via the layer (adopted / synced / authored on
  * another device, or after an index entry was cleared) the canonical slot has
  * the sig but the local index does not. Callers use this to SEED the index

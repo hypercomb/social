@@ -329,9 +329,13 @@ type HostAiLike = {
  *  hint the bridge roster resolves, and the one string a model bee's vendor
  *  family and tier shade are read off. `tier` is the level of thinking the
  *  designation was made for, DECLARED by the provider. */
+type ChatNeed = { tier?: string; readsHive?: boolean; streaming?: boolean; viaAsk?: boolean }
+
 type PolicyLike = {
-  designate?(need: { tier?: string; readsHive?: boolean; streaming?: boolean }):
-    DesignationLike | undefined
+  designate?(need: ChatNeed): DesignationLike | undefined
+  /** What a chat turn needs, owned by the policy. Absent on an older
+   *  essentials build, which is why the caller keeps a fallback. */
+  readonly chatNeed?: ChatNeed
 }
 
 type DesignationLike = {
@@ -2936,7 +2940,11 @@ export class ChatWindowComponent implements OnDestroy {
 
   #refreshDesignation(): void {
     const policy = ioc()?.get('@diamondcoreprocessor.com/LlmPolicyStore') as PolicyLike | undefined
-    const need = { tier: 'fast', streaming: true }
+    // THE POLICY OWNS THE NEED. Stating it here as a literal is what let this
+    // window ask for something its own docstring contradicts — a `fast` call
+    // that named no ask path, which no bridge could ever be chosen for. The
+    // fallback is for an older essentials build that has no `chatNeed`.
+    const need: ChatNeed = policy?.chatNeed ?? { streaming: true, viaAsk: true }
     this.designated.set(policy?.designate?.(need) ?? null)
     const router = ioc()?.get(LLM_ROUTER_IOC_KEY) as LlmRouterLike | undefined
     this.providerReady.set(!!router?.ready?.({

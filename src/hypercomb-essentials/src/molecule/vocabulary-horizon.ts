@@ -65,6 +65,35 @@ export interface HorizonSources {
 
 const clean = (raw: unknown): string => String(raw ?? '').trim().toLowerCase()
 
+/** One plate of a host's publication ledger, as far as the horizon cares. */
+export interface HorizonCard {
+  readonly pubkey?: unknown
+  readonly hosts?: readonly { readonly host?: unknown }[]
+}
+
+/**
+ * EVERY PUBLISHER THE HOSTS YOU CARRY PUBLISH FOR, as follow rows — the
+ * community's whole horizon, so a word can be looked for ACROSS DOMAINS
+ * without having visited or been offered anything first. A ledger card
+ * names its publisher and every door the creation answers on; those doors
+ * serve the publisher's signed index too (`/hive/<pubkey>` answers on a
+ * site door and on the relay face alike), so they are the doors to ask.
+ * Keyed so the same publisher listed by two hosts folds to one row with
+ * both hosts' doors. Cards without a usable key contribute nothing.
+ */
+export const publishersFromCards = (cards: readonly HorizonCard[]): Record<string, HorizonFollow> => {
+  const out: Record<string, HorizonFollow> = {}
+  for (const card of cards ?? []) {
+    const pubkey = clean(card?.pubkey)
+    if (!/^[a-f0-9]{64}$/.test(pubkey)) continue
+    const hosts = (card?.hosts ?? []).map(d => clean(d?.host)).filter(Boolean)
+    const key = `ledger:${pubkey}`
+    const prior = out[key]
+    out[key] = { pubkey, hosts: prior ? [...new Set([...(prior.hosts ?? []), ...hosts])] : hosts }
+  }
+  return out
+}
+
 /** `content.<zone>` — the door, never the zone itself. */
 export const contentDoorOf = (zone: unknown): string => {
   const bare = clean(zone).replace(/^wss?:\/\//, '').replace(/^https?:\/\//, '').replace(/\/+$/, '')

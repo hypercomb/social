@@ -15,7 +15,7 @@ const iocMap = new Map<string, unknown>()
   },
 }
 
-const { candidatesFor, chooseProvider, costOf, designate, llmPolicy, modelForTier, rankProviders } =
+const { CHAT_NEED, candidatesFor, chooseProvider, costOf, designate, llmPolicy, modelForTier, rankProviders } =
   await import('./model-policy.js')
 const { llmProviderRegistry } = await import('./llm-provider-registry.js')
 const { llmActivation } = await import('./llm-activation.js')
@@ -199,6 +199,33 @@ describe('hive-reading work', () => {
   it('nothing bridged means the work cannot be placed', () => {
     roster(KEYED, LOCAL)
     expect(chooseProvider({ readsHive: true })).toBeUndefined()
+  })
+})
+
+// A participant with two CLIs parked on the bridge saw the console report
+// neither as active and the chat answer from the local model instead. Both
+// surfaces were asking `{ tier: 'fast' }` with no ask path declared, and a
+// bridge was excluded from anything that did not demand a hive reader — so
+// the tier built to reach Claude Code could never be designated for the
+// window built to talk to it.
+describe('a chat turn', () => {
+  it('can be answered by a parked bridge', () => {
+    roster(LOCAL, BRIDGE)
+    expect(chooseProvider(CHAT_NEED)?.id).toBe('claude-bridge')
+  })
+
+  it('still reaches an ordinary provider when nothing is bridged', () => {
+    roster(KEYED, LOCAL)
+    expect(chooseProvider(CHAT_NEED)?.id).toBe('keyed-vendor')
+  })
+
+  it('does not hard-require a hive reader, so a local model still qualifies', () => {
+    roster(LOCAL)
+    expect(chooseProvider(CHAT_NEED)?.id).toBe('my-machine')
+  })
+
+  it('is what the policy hands a shell that may not import this module', () => {
+    expect(llmPolicy.chatNeed).toEqual(CHAT_NEED)
   })
 })
 

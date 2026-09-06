@@ -72,6 +72,7 @@
 
 import { Drone, EffectBus, registerPoolMeaning } from '@hypercomb/core'
 import { decorationClosureSigs } from './decoration-closure.js'
+import { adoptDescendantsOf } from './adopt-descendants.js'
 
 const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
@@ -1327,9 +1328,10 @@ export class ContentBrokerDrone extends Drone {
       try { parsed = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown> }
       catch { return } // not a parseable layer — nothing to recurse
 
-      const children = asSigs(parsed['cells']).length ? asSigs(parsed['cells'])
-        : asSigs(parsed['layers']).length ? asSigs(parsed['layers'])
-        : asSigs(parsed['children'])
+      // A child slot holds META ENVELOPES since the Life write boundary; the
+      // walk steps through each to the layer it names (adopt-descendants.ts) —
+      // stopping at the envelope localized a hive with none of its children.
+      const children = [...adoptDescendantsOf(parsed).layers]
       const childSet = new Set(children)
 
       // Resource leaves — eagerly mirrored UNLESS `layersOnly`. Per the slim-

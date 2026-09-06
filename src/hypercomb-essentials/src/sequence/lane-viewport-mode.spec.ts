@@ -105,6 +105,7 @@ describe('lane viewport across separately bundled copies', () => {
   it('engaging in one copy locks the axis in another', async () => {
     setLaneViewport(true)
     // A fresh module instance = the pan bee's private copy of this file.
+    // @ts-expect-error — the query suffix is vitest's fresh-module-copy idiom; the type resolver cannot see it
     const other = await import('./lane-viewport-mode.js?copy=pan')
     expect(other.getLaneScrollAxis()).toBe('y')
     landscape()
@@ -113,6 +114,7 @@ describe('lane viewport across separately bundled copies', () => {
 
   it('releasing in one copy releases it in the other', async () => {
     setLaneViewport(true)
+    // @ts-expect-error — same idiom, second copy
     const other = await import('./lane-viewport-mode.js?copy=zoom')
     expect(other.getLaneScrollAxis()).not.toBeNull()
     setLaneViewport(false)

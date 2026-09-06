@@ -1,4 +1,61 @@
 {
+  "routes": [
+    {
+      "route": "/content/44150aa24d2f2a1c1b544530e2f7e177cde71130f882f37984d0cdba16bf2363/",
+      "rewrite": "/content/44150aa24d2f2a1c1b544530e2f7e177cde71130f882f37984d0cdba16bf2363/listing.txt",
+      "headers": {
+        "cache-control": "no-cache, no-store, must-revalidate"
+      }
+    },
+    {
+      "route": "/pin",
+      "headers": {
+        "cache-control": "no-cache, no-store, must-revalidate"
+      }
+    },
+    {
+      "route": "/hypercomb.worker.js",
+      "headers": {
+        "cache-control": "no-cache, no-store, must-revalidate"
+      }
+    },
+    {
+      "route": "/env.js",
+      "headers": {
+        "cache-control": "no-cache, no-store, must-revalidate"
+      }
+    },
+    {
+      "route": "/main.js",
+      "headers": {
+        "cache-control": "no-cache, no-store, must-revalidate"
+      }
+    },
+    {
+      "route": "/content/manifest.json",
+      "headers": {
+        "cache-control": "no-cache, no-store, must-revalidate"
+      }
+    },
+    {
+      "route": "/content/*",
+      "headers": {
+        "cache-control": "public, max-age=31536000, immutable"
+      }
+    },
+    {
+      "route": "/vendor/*",
+      "headers": {
+        "cache-control": "public, max-age=0, must-revalidate"
+      }
+    },
+    {
+      "route": "/core/*",
+      "headers": {
+        "cache-control": "public, max-age=0, must-revalidate"
+      }
+    }
+  ],
   "navigationFallback": {
     "rewrite": "/index.html",
     "exclude": [
@@ -10,9 +67,20 @@
       "*.ico",
       "*.json",
       "*.svg",
+      "*.png",
+      "*.jpg",
+      "*.jpeg",
+      "*.webp",
+      "*.gif",
+      "*.woff2",
       "*.webmanifest",
       "*.map"
     ]
+  },
+  "globalHeaders": {
+    "access-control-allow-origin": "*",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff"
   },
   "mimeTypes": {
     ".webmanifest": "application/manifest+json"

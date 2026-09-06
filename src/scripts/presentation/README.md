@@ -44,7 +44,7 @@ node build.cjs             # compile instructions → dist/hypercomb-presentatio
 node build.cjs --check     # list scenes whose audio is stale (no network)
 node instructions.cjs      # re-derive scene instructions + production.md
 node instructions.cjs --push   # (bridge live) write instructions onto the hive tiles
-node deploy-azure.cjs      # ship to Azure Static Web Apps
+node deploy-azure.cjs      # ship the host to Azure; keep this deck at /tour/
 node verbs.cjs             # the three structural verbs in one short cut
 ```
 
@@ -295,28 +295,29 @@ Azure Static Web App `pbs-hypercomb-com` — resource group
 `swa-hypercomb-prod-west-001`, West US 2, Free SKU, matching the other sites in
 the subscription. Default host: `calm-hill-0e74a6a1e.7.azurestaticapps.net`.
 
-**DNS for hypercomb.com** is at DreamHost, so the binding needs these records
-added there once:
-
-| Type | Host | Value |
-|---|---|---|
-| TXT | `hypercomb.com` (apex) | `_cebnglku2tdwzjk561x16ak3tcu78ji` |
-| ALIAS / ANAME (or A) | `hypercomb.com` | `calm-hill-0e74a6a1e.7.azurestaticapps.net` |
-| CNAME | `www.hypercomb.com` | `calm-hill-0e74a6a1e.7.azurestaticapps.net` |
-
-Then finish the binding:
+The apex deploy is the complete framework-free Hypercomb host (`/pin`, content
+heap, service worker, and host console), not a presentation-only SPA. This deck
+is overlaid at `/tour/` during deployment so it remains available without
+swallowing host protocol paths. The reusable Azure deployer lives in
+`hypercomb-shim/host/deploy-azure.mjs`.
 
 ```bash
-az staticwebapp hostname set -n pbs-hypercomb-com -g swa-hypercomb-prod-west-001 --hostname hypercomb.com --validation-method dns-txt-token
+npm run deploy:hypercomb.com
 ```
 
-```bash
-az staticwebapp hostname set -n pbs-hypercomb-com -g swa-hypercomb-prod-west-001 --hostname www.hypercomb.com
-```
+That command rebuilds core, runtime, package content, and the framework-free
+host from source; stages the deck and its existing `og.png`; runs the host
+contract locally; deploys with the pinned Azure Static Web Apps CLI; and runs
+the same contract against the public origin. A failed local check never reaches
+the production upload.
 
-The page links out to **hypercomb.io** from the splash ("skip the tour") and the
-closing scene ("start your hive") — hypercomb.com is the pitch, hypercomb.io is
-the app.
+**DNS for hypercomb.com is managed by Cloudflare** and currently fronts the
+existing Azure custom-domain binding. Any future DNS or proxy change belongs
+in that Cloudflare zone, not DreamHost. Azure remains the origin of the apex.
+
+The tour links out to **hypercomb.io** from the splash ("skip the tour") and the
+closing scene ("start your hive"). The hypercomb.com apex is now itself a host;
+the presentation remains its guided introduction at `/tour/`.
 
 ## Voice
 

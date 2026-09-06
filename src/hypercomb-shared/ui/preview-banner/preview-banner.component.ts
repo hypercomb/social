@@ -9,8 +9,9 @@
 // and Dismiss (walk away, nothing kept).
 //
 // Driven entirely by the `preview:mode` effect (last-value replay makes
-// mount order irrelevant). The buttons emit `hive:adopt-accept` /
-// `hive:adopt-dismiss`; the drone owns everything that happens next.
+// mount order irrelevant). It has no buttons: a visitor shell has no hive to
+// adopt into, and a participant's link is an OFFER (hive-visit.drone.ts) —
+// the swarm model, never a whole-branch adopt.
 
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, signal, computed, type OnDestroy, type OnInit } from '@angular/core'
@@ -51,14 +52,6 @@ export class PreviewBannerComponent implements OnInit, OnDestroy {
         this.#state.set(p ?? null)
       }),
     )
-  }
-
-  onAdopt(): void {
-    EffectBus.emit('hive:adopt-accept', {})
-  }
-
-  onDismiss(): void {
-    EffectBus.emit('hive:adopt-dismiss', {})
   }
 
   ngOnDestroy(): void {

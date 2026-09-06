@@ -533,12 +533,12 @@ async function resolveChildNames(
   // — a single file read returns the resolved
   // child layer objects with names already inlined. Skips the per-child
   // getLayerBySig walk entirely on cold load. Falls through to the
-  // signature-resolution path on miss; commitLayer writes a fresh
-  // manifest after every commit so subsequent reads stay hot.
+  // signature-resolution path on miss; the optimize phase mints a fresh
+  // manifest after every commit so subsequent reads stay hot. This is a
+  // READER: the paint never writes the cache (see the enqueue below).
   const store = parentLayerSig
     ? (window as any).ioc?.get?.('@hypercomb.social/Store') as {
         readChildrenManifest?: (sig: string) => Promise<Array<{ sig: string; layer: { name?: string; children?: string[] } }> | null>
-        writeChildrenManifest?: (sig: string, m: Array<{ sig: string; layer: { name?: string; children?: string[] } }>) => Promise<void>
       } | undefined
     : undefined
 
@@ -588,7 +588,7 @@ async function resolveChildNames(
       // visit paints from the pack. Once per parent sig per session; keyed by
       // an immutable content sig, so a successful upgrade is permanent.
       // Render pass only — see `options.mayUpgradePack`.
-      if (options?.mayUpgradePack) upgradeThinPack(parentLayerSig, manifest, content.children, store)
+      if (options?.mayUpgradePack) upgradeThinPack(parentLayerSig, manifest, content.children)
       freshenBranchesAfterPaint(out)
       return out
     }
@@ -639,34 +639,12 @@ async function resolveChildNames(
   // manifests lets the first fully-warm pass heal the layer so every
   // subsequent load is a single manifest read with all children present.
   // Idle-scheduled so the current render path doesn't pay the write.
+  // THE PAINT DOES NOT WRITE THE CACHE. It says which parent needs one, and
+  // the optimize phase mints it — enriched, budgeted, on the next idle pass
+  // (optimize-phase.md rule 1; manifest-optimizer.drone.ts is the one door).
+  // Until it lands, the render resolves per child exactly as it just did.
   const allResolved = children.length === content.children.length && children.every(c => !!c?.name)
-  if (parentLayerSig && store?.writeChildrenManifest && allResolved) {
-    const thin: Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }> = []
-    for (let i = 0; i < children.length; i++) {
-      thin.push({ sig: content.children[i], layer: children[i]! })
-    }
-    const schedule = typeof (window as any).requestIdleCallback === 'function'
-      ? (cb: () => void) => (window as any).requestIdleCallback(cb, { timeout: 5_000 })
-      : (cb: () => void) => setTimeout(cb, 0)
-    schedule(() => {
-      void (async () => {
-        // ENRICHED when we can: the pack carries each tile's props and its
-        // optimized visual, so the NEXT visit to this layer paints from two
-        // reads. Falling back to the thin array is still correct (the render
-        // resolves per child, as it always did) — it just doesn't pay off.
-        // Enriching MINTS renditions, so only the painting pass may do it; a
-        // prepareView sweeping the neighbourhood writes the thin array and
-        // leaves the visuals to the optimize phase.
-        const optimizer = options?.mayUpgradePack
-          ? (window as any).ioc?.get?.('@diamondcoreprocessor.com/ManifestOptimizerDrone') as {
-              buildEntries?: (sigs: readonly string[], layers: ReadonlyArray<{ name?: string }>) => Promise<Array<Record<string, unknown>> | null>
-            } | undefined
-          : undefined
-        const rich = await optimizer?.buildEntries?.(content.children ?? [], children as Array<{ name?: string }>).catch(() => null)
-        await store.writeChildrenManifest!(parentLayerSig, (rich ?? thin) as typeof thin)
-      })()
-    })
-  }
+  if (parentLayerSig && allResolved) manifestOptimizer()?.enqueue?.(parentLayerSig, content.children)
 
   freshenBranchesAfterPaint(out)
   return out
@@ -681,36 +659,27 @@ const _packUpgradeTried = new Set<string>()
  *  child), off the render path. Silent no-op when the pack is already rich,
  *  when the optimizer isn't registered, or when the re-mint can't complete —
  *  the thin pack stays valid, it just keeps costing per-tile reads. */
+/** The optimizer's one door, when it is registered. */
+const manifestOptimizer = (): {
+  enqueue?: (parentSig: string, childSigs: readonly string[]) => void
+  constructor?: { packNeedsVisuals?: (p: ReadonlyArray<unknown>) => boolean }
+} | undefined =>
+  (window as any).ioc?.get?.('@diamondcoreprocessor.com/ManifestOptimizerDrone')
+
 function upgradeThinPack(
   parentLayerSig: string,
   manifest: Array<{ sig: string; layer: { name?: string; [k: string]: unknown }; visual?: unknown }>,
   childSigs: readonly string[],
-  store: { writeChildrenManifest?: (sig: string, m: Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }>) => Promise<void> } | undefined,
 ): void {
-  if (!parentLayerSig || !store?.writeChildrenManifest || _packUpgradeTried.has(parentLayerSig)) return
-  const optimizerCtor = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ManifestOptimizerDrone') as {
-    buildEntries?: (sigs: readonly string[], layers: ReadonlyArray<{ name?: string }>) => Promise<Array<Record<string, unknown>> | null>
-    constructor?: { packNeedsVisuals?: (p: ReadonlyArray<unknown>) => boolean }
-  } | undefined
-  if (!optimizerCtor?.buildEntries) return
-  const needs = (optimizerCtor.constructor as { packNeedsVisuals?: (p: ReadonlyArray<unknown>) => boolean } | undefined)?.packNeedsVisuals
+  if (!parentLayerSig || _packUpgradeTried.has(parentLayerSig)) return
+  const optimizer = manifestOptimizer()
+  if (!optimizer?.enqueue) return
+  const needs = optimizer.constructor?.packNeedsVisuals
   if (needs && !needs(manifest)) return
   _packUpgradeTried.add(parentLayerSig)
-  const schedule = typeof (window as any).requestIdleCallback === 'function'
-    ? (cb: () => void) => (window as any).requestIdleCallback(cb, { timeout: 8_000 })
-    : (cb: () => void) => setTimeout(cb, 250)
-  schedule(() => {
-    void (async () => {
-      try {
-        const layers = manifest.map(e => e.layer)
-        const rich = await optimizerCtor.buildEntries!(childSigs, layers as ReadonlyArray<{ name?: string }>)
-        if (!rich || rich.length !== childSigs.length) return
-        await store.writeChildrenManifest!(parentLayerSig, rich as Array<{ sig: string; layer: { name?: string } }>)
-        for (const entry of rich) ShowCellDrone.adoptPackedVisual(entry as { visual?: { sig?: string; webp?: string; type?: string } })
-        console.log(`[preload] layer pack enriched: ${parentLayerSig.slice(0, 12)} (${rich.length} tiles bind from one file)`)
-      } catch { /* thin pack stays valid */ }
-    })()
-  })
+  // The next idle pass re-mints the pack with visuals; the thin pack stays
+  // valid until then, and the visit after that binds from one file.
+  optimizer.enqueue(parentLayerSig, childSigs)
 }
 
 export class ShowCellDrone extends Drone {
@@ -883,12 +852,24 @@ export class ShowCellDrone extends Drone {
    *  what "click a tile, come back, and it's slow again" was made of). */
   readonly #preparedViewPath = new Map<string, string>()
 
+  /** MEMBERSHIP GENERATION — the fence on every memo write.
+   *
+   *  Bumped by every add/remove that invalidates prepared views. A resolution
+   *  pass captures it before its first await and refuses to write its memo if
+   *  it moved: a pass that started BEFORE a child was appended (a neighbourhood
+   *  warm, a render mid-flight) otherwise landed its pre-add answer AFTER the
+   *  invalidation and served "leaf" for a tile that had just become a branch —
+   *  the holder a References composition wrote could not be clicked into until
+   *  a reload. The fence is what makes the invalidation final. */
+  #membershipGeneration = 0
+
   /** Drop prepared views whose location is an ancestor of (or equal to) the
    *  segments where a child was just added or removed — those are the only
    *  entries whose branch-status can have flipped. Everything else keeps its
    *  preparation. Unknown segments fall back to the old blanket clear, which
    *  is correct, just wasteful (legacy emitters that don't carry an address). */
   #invalidatePreparedViewsFor(segments: readonly string[] | undefined): void {
+    this.#membershipGeneration++
     if (!segments || segments.length === 0) {
       this.#completeChildNamesByParentSig.clear()
       this.#preparedViewPath.clear()
@@ -1636,9 +1617,8 @@ export class ShowCellDrone extends Drone {
    */
   public override async warmup(): Promise<void> {
     try {
-      const raw = localStorage.getItem('hc:tile-props-index')
-      if (!raw) return
-      const propsIndex = JSON.parse(raw) as Record<string, unknown>
+      const propsIndex = readTilePropsIndex() as Record<string, unknown>
+      if (Object.keys(propsIndex).length === 0) return
       // Full-lineage (sig) keys aren't labels — only legacy bare-label
       // entries can seed the atlas's label slots.
       this.#warmLabels = Object.keys(propsIndex).filter(k => !/^[0-9a-f]{64}$/.test(k))
@@ -3783,6 +3763,7 @@ export class ShowCellDrone extends Drone {
               unresolvedSigs: string[]
             } = { expected: 0, resolved: 0, unresolvedSigs: [] }
             const branchStats = { cold: false }
+            const membershipGenerationAtStart = this.#membershipGeneration
             // branchSetFromResolve is filled in the SAME pass that resolves
             // names — one read, no separate per-child branch walk. branchStats
             // reports separately whether any child's branch-STATUS came back on
@@ -3835,7 +3816,10 @@ export class ShowCellDrone extends Drone {
             // the layer still paints now — a missing dot is not a missing tile,
             // so we never hold the paint the way the name gate does.
             const branchComplete = !branchStats.cold
-            if (childResolveComplete && branchComplete && parentLayerSig && stats.expected > 0) {
+            // Membership moved under this pass: its answer predates an add or
+            // remove, so it must not become the memo (see #membershipGeneration).
+            const membershipStill = membershipGenerationAtStart === this.#membershipGeneration
+            if (childResolveComplete && branchComplete && membershipStill && parentLayerSig && stats.expected > 0) {
               const names: string[] = []
               for (const n of layerAllowed) if (typeof n === 'string' && n.length > 0) names.push(n)
               // Bound: evict oldest (Map keeps insertion order) past a cap so
@@ -4001,7 +3985,10 @@ export class ShowCellDrone extends Drone {
     const previousVariantLabels = new Set(this.#stackVariantLabels)
     this.#stackDepthByLabel = new Map()
     this.#stackVariantLabels = new Set()
-    setTileStacks(new Map())
+    // Quiet: this is the pre-resolution reset, not a finding. Announcing it
+    // would tell the depth ornaments every peer had left, a fifth of a second
+    // before the real stacks land. See setTileStacks.
+    setTileStacks(new Map(), { quiet: true })
     const previousVariantTitles = new Map(this.registryTitlesByLabel)
     this.registryPropertiesByLabel.clear()
     this.registryTitlesByLabel.clear()
@@ -5453,13 +5440,22 @@ export class ShowCellDrone extends Drone {
    *  list lights up per-tile on hover (tile:hover-tags). */
   #emitRenderTags(cells: Cell[]): void {
     const counts = new Map<string, number>()
+    // Per-tile tags ride alongside the counts. The tag strip only ever
+    // needed the totals, but a tag is the hive's own way of saying what a
+    // tile IS, so anything grouping tiles by kind (the organism's texture
+    // projection) needs to know WHICH tile wears WHICH — and re-deriving
+    // that outside this loop would mean a second reader of the lens,
+    // filters and requirements that already resolved here.
+    const byLabel: Record<string, string[]> = {}
     for (const cell of cells) {
-      for (const tag of this.#tagsFor(cell.label)) {
+      const tags = this.#tagsFor(cell.label)
+      if (tags.length) byLabel[cell.label] = [...tags]
+      for (const tag of tags) {
         counts.set(tag, (counts.get(tag) ?? 0) + 1)
       }
     }
     const tags = [...counts.entries()].map(([name, count]) => ({ name, count }))
-    this.emitEffect('render:tags', { tags })
+    this.emitEffect('render:tags', { tags, byLabel })
   }
 
   /** Is anything narrowing the page — the participant's lens, a reference's
@@ -9033,7 +9029,7 @@ export class ShowCellDrone extends Drone {
       })()
     }
 
-    const livePropsIndex: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
+    const livePropsIndex: Record<string, string> = readTilePropsIndex()
 
     // Index entries are keyed by the tile's FULL-LINEAGE sig (the sigbag
     // key — tile-properties.ts) so same-named tiles at different hive
@@ -9795,9 +9791,7 @@ export class ShowCellDrone extends Drone {
           }
         }
       } catch { /* unknown structure → fail-open below */ }
-      const livePropsIndex: Record<string, string> = (() => {
-        try { return JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}') } catch { return {} }
-      })()
+      const livePropsIndex: Record<string, string> = readTilePropsIndex()
       // Per-label sig cache under this parent (content-addressed → stable).
       let cachedSigs = this.#childImageSigsByParent.get(parentLayerSig)
       if (!cachedSigs) {
@@ -10202,9 +10196,7 @@ export class ShowCellDrone extends Drone {
       })))
       weighted.sort((a, b) => b.w - a.w)
 
-      const livePropsIndex: Record<string, string> = (() => {
-        try { return JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}') } catch { return {} }
-      })()
+      const livePropsIndex: Record<string, string> = readTilePropsIndex()
 
       for (const { label } of weighted) {
         if (gen !== this.#prebakeGen) return
@@ -10704,9 +10696,13 @@ export class ShowCellDrone extends Drone {
         const stats = { expected: 0, resolved: 0, unresolvedSigs: [] as string[] }
         const branches = new Set<string>()
         const branchStats = { cold: false }
+        const membershipGenerationAtStart = this.#membershipGeneration
         const resolved = await resolveChildNames(history, segments, null, content, layerSig, stats, branches, branchStats)
         const complete = stats.expected > 0 && stats.resolved >= stats.expected
         if (!complete || branchStats.cold) return false
+        // A child was added or removed while this resolved: the answer is
+        // pre-add and may not become the memo or the fast-path cells.
+        if (membershipGenerationAtStart !== this.#membershipGeneration) return false
         const names: string[] = []
         for (const n of resolved) if (typeof n === 'string' && n.length > 0) names.push(n)
         if (this.#completeChildNamesByParentSig.size > ShowCellDrone.#PREPARED_VIEW_CAP) {

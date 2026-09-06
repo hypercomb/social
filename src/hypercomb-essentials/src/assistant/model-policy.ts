@@ -73,7 +73,39 @@ export type ModelNeed = {
   readonly readsHive?: boolean
   /** The caller will consume deltas; a provider that cannot stream is worse. */
   readonly streaming?: boolean
+  /**
+   * THE CALLER CAN WAIT FOR AN ASK. A bridge does not answer a fetch: it
+   * answers through the broker, as an ask record a parked CLI drains. Callers
+   * differ in whether they can live with that, and it is the caller — not the
+   * weight of the work — that knows.
+   *
+   * This used to be inferred from `readsHive`, on the reasonable-sounding
+   * theory that hive-reading work is the only work worth a bridge. The theory
+   * was wrong in the one place it mattered most: the chat window can wait
+   * (`LlmQueen.submitChat` is its durable path, and it is how a participant
+   * talks to Claude Code at all), but it must not HARD-REQUIRE a hive reader
+   * or it would exclude every keyed and local provider along with it. Asking
+   * for `readsHive` was the only way to be considered, so the chat asked for
+   * neither and no bridge could ever be designated for the surface built to
+   * reach one.
+   */
+  readonly viaAsk?: boolean
 }
+
+/**
+ * WHAT AN ORDINARY CHAT TURN NEEDS — stated once, read by the window that
+ * sends it and by the console that reports who would take it.
+ *
+ * Two surfaces answering "who is about to answer?" from two copies of a
+ * literal is how the console came to show no provider as active while the
+ * chat routed elsewhere. They now read the same value, so they cannot
+ * disagree about the answer.
+ *
+ * The tier is deliberately UNSTATED: omitted means balanced, and what weight
+ * a given question deserves is a judgement about the question, not a constant
+ * about the surface.
+ */
+export const CHAT_NEED: ModelNeed = { viaAsk: true, streaming: true }
 
 /**
  * What a provider costs the participant to use, in the only currency that
@@ -170,6 +202,12 @@ export class LlmPolicyStore extends EventTarget {
    *  be able to say who is about to answer without asking the participant to
    *  choose; this method is that seam. See `designate` below. */
   designate(need: ModelNeed = {}): Designation | undefined { return designate(need) }
+
+  /** WHAT AN ORDINARY CHAT TURN NEEDS, over the same seam `designate` crosses.
+   *  The shell may never import a module, so a window that wants to state the
+   *  need correctly has to be handed it rather than keep its own copy — which
+   *  is exactly how the chat and the console came to disagree. */
+  get chatNeed(): ModelNeed { return CHAT_NEED }
 }
 
 export const llmPolicy = new LlmPolicyStore()
@@ -201,9 +239,11 @@ const hasTier = (provider: LlmProviderDescriptor, tier: LlmTier): boolean =>
 /** Hard requirements. Failing one of these means "cannot do this work". */
 const canDo = (provider: LlmProviderDescriptor, need: ModelNeed): boolean => {
   if (need.readsHive && !provider.readsHive) return false
-  // A bridge answers asks, not calls: it is only a candidate for work that
-  // actually wants the hive-reading tier.
-  if (!need.readsHive && provider.transport === 'agent-bridge') return false
+  // A bridge answers asks, not calls, so it is only a candidate for a caller
+  // that can wait for one — work that wants the hive-reading tier, or any
+  // caller that said so itself (`viaAsk`). A one-shot mechanical call that
+  // states neither still never lands on a bridge.
+  if (!need.readsHive && !need.viaAsk && provider.transport === 'agent-bridge') return false
   if (need.streaming && provider.transport === 'peer-swarm') return false
   return true
 }

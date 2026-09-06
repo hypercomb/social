@@ -74,6 +74,9 @@ type StoreLike = { getResource(sig: string): Promise<Blob | null> }
 type NavigationLike = { goRaw?: (segments: readonly string[]) => void }
 type RecentPortalsLike = { isPinned(segments: readonly string[]): boolean }
 type CommitterLike = {
+  importTree?: (
+    updates: Array<{ segments: readonly string[]; layer: { name?: string; [slot: string]: unknown } }>,
+  ) => Promise<void>
   update?: (
     segments: readonly string[],
     layer: { name?: string; [slot: string]: unknown },
@@ -132,6 +135,11 @@ const ioc = (): { get(k: string): unknown } | undefined =>
 const history = () => ioc()?.get('@diamondcoreprocessor.com/HistoryService') as HistoryLike | undefined
 const committer = () => ioc()?.get('@diamondcoreprocessor.com/LayerCommitter') as CommitterLike | undefined
 const store = () => ioc()?.get('@hypercomb.social/Store') as StoreLike | undefined
+/** The page the participant is standing on — where a typed name mints its tile. */
+const currentSegments = (): readonly string[] => {
+  const lineage = ioc()?.get('@hypercomb.social/Lineage') as { explorerSegments?: () => readonly string[] } | undefined
+  return (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+}
 
 class CollectionsSource implements AggregateSource {
   readonly id = 'collections'
@@ -378,19 +386,31 @@ class CollectionsSource implements AggregateSource {
     }
   }
 
-  /** Make a collection from a typed fixed name.
+  /** Make a collection from a typed name.
    *
-   *  One name names one canonical root. The canonical service creates or
-   *  reuses `/<name>`, guarantees it appears in the hive-root complement, and
-   *  writes a marked default-authoring reference under `sets/`. A name already
-   *  in the index is a no-op. */
+   *  A collection is a TILE. The row under `sets/` is a marked default-
+   *  authoring reference that points at where that tile LIVES: the one already
+   *  answering to the name, wherever it is, or — when nothing does — a tile
+   *  minted on the page you are standing on. Never a copy at the hive root: the
+   *  root is a store, not a collection (documentation/reference-designer.md).
+   *  A name already in the index is a no-op. */
   async create(name: string): Promise<AddedRows> {
     const cell = name.trim()
     if (!cell || this.#entries.some(e => e.name === cell)) return
+    let source = await this.#findByName(cell)
+    if (!source) {
+      const here = currentSegments()
+      // Standing in the index itself: its parent is the only tile-bearing page.
+      const target = [...(here[0] === SETS ? [] : here), cell]
+      const c = committer()
+      if (!c?.importTree) return
+      await c.importTree([{ segments: target, layer: { name: cell } }])
+      source = target
+    }
     const references = ioc()?.get(CANONICAL_REFERENCE_SERVICE_KEY) as CanonicalReferenceService | undefined
     const added = await references?.place({
       name: cell,
-      sourceSegments: null,
+      sourceSegments: source,
       parentSegments: [SETS],
       // The Portals index is the one place where editing a reference means
       // "make this my default for future uses". References activated inside

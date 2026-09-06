@@ -154,6 +154,7 @@ const SEED: ReadonlyArray<readonly [string, PoolKind]> = Object.freeze([
   ['history:marker-meta', 'document'],
   ['facet:minted', 'document'],
   ['substrate:registry', 'document'],
+  ['community:offers', 'document'],
   // Navigation and chrome records moved out of localStorage
   // (hypercomb-shared/core/participant-document.ts): per participant, one
   // current record each, replaced whole on every edit.

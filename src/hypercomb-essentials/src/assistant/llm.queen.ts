@@ -29,12 +29,18 @@
 // tile names as context). The ask record IS the request; the Claude bridge loop
 // IS the response — a live service the user triggers from the hive.
 
-import { QueenBee, EffectBus, isLocalClaudeBridgeConfigured, isSignature } from '@hypercomb/core'
+import {
+  QueenBee, EffectBus, isLocalClaudeBridgeConfigured, isSignature, machineCatalogue,
+  type CensusEntry,
+} from '@hypercomb/core'
 import { llmProviderRegistry } from './llm-provider-registry.js'
 import type { SlashBehaviour, SlashBehaviourProvider } from '../commands/slash-behaviour.provider.js'
 import { resolveTileContext } from './tile-context.js'
 
-type StoreLike = { putOptimization?: (blob: Blob) => Promise<string> }
+type StoreLike = {
+  putOptimization?: (blob: Blob) => Promise<string>
+  putResource?: (blob: Blob) => Promise<string>
+}
 type SelectionLike = { selected: ReadonlySet<string> }
 type LineageLike = { explorerSegments?: () => readonly string[] }
 
@@ -112,6 +118,85 @@ const composeContext = async (
   } catch {
     return {}
   }
+}
+
+/**
+ * WHAT THIS HIVE CAN DO, IN WORDS — the instruction a bridged responder needs
+ * and, until now, never received.
+ *
+ * The chat window has always handed its local model a census-derived
+ * vocabulary (`hypercombGrammarInstruction`). The bridge tier got the
+ * MATERIAL of a question — prompt, transcript, context signatures — and none
+ * of the vocabulary, because the renderer lived in the shell where no module
+ * can reach it. Claude Code coped only because a skill file happens to sit in
+ * this repo; a freshly announced Codex or Gemini received a hive question with
+ * no idea that signatures expand, that `behaviors-list` exists, or what a
+ * grammar line looks like. The catalogue now lives in core, so both tiers
+ * teach the same words.
+ *
+ * THE FRAMING IS DELIBERATELY NOT THE SHELL'S. The local model is handed a
+ * function tool and told to call it; a bridged session has the broker and its
+ * ops instead, so this says what IT can actually do. It claims no mechanism
+ * that does not exist — in particular it does NOT promise that a grammar line
+ * will be offered to the participant for a keypress, because that surface is
+ * not built yet (documentation/model-mediation-and-the-training-prompt.md
+ * §3.4). Telling a model about a door that is not there earns a confident
+ * answer about work that never happened, which is the one failure this whole
+ * census exists to prevent.
+ */
+const bridgeInstruction = (): string => {
+  const drone = get<{ entries?: () => readonly CensusEntry[] }>(
+    '@diamondcoreprocessor.com/SlashBehaviourDrone',
+  )
+  const entries = drone?.entries?.() ?? []
+  const catalogue = machineCatalogue(entries)
+  return [
+    'You are answering inside Hypercomb, a hive of tiles addressed by signature.',
+    '',
+    'READING. Every signature in this request is a 64-hex pointer, never inline'
+    + ' content: expand one with the bridge op `get-resource` to read its bytes.'
+    + ' `layer-at` and `layer-by-sig` walk the tree, `note-list` reads a tile\'s'
+    + ' notes, and `behaviors-list` reports which behaviour packages this hive'
+    + ' has installed. Read before you answer — never guess hive state.',
+    '',
+    'ACTING. This hive\'s native action language is its behaviour grammar, and'
+    + ' the vocabulary below is the LIVE census of what a machine may say here'
+    + ' — derived from the behaviours actually installed and filtered by the'
+    + ' participant\'s current grant. A verb absent from this list is either not'
+    + ' installed or not permitted; there are no synonyms to try.',
+    '',
+    catalogue || '(no behaviour is currently machine-callable in this hive)',
+  ].join('\n')
+}
+
+/**
+ * The instruction as a SIGNATURE, the way every other expandable field on an
+ * ask travels.
+ *
+ * Inlining it would put a multi-kilobyte catalogue into every ask record, and
+ * an ask record is a content-addressed resource in the optimization pool — so
+ * a hundred turns would store a hundred near-identical copies of a census that
+ * changes only when a behaviour is installed. As a signature it is the
+ * opposite: identical census, identical bytes, identical sig, stored once and
+ * pointed at by every ask that shares it.
+ *
+ * It also puts the responder's first move where it belongs. The instruction
+ * tells a model to expand signatures with `get-resource`; reaching the
+ * instruction ITSELF that way makes the first thing it does the thing it was
+ * just taught, on a resource whose content it can check against its own
+ * behaviour.
+ *
+ * Returns undefined rather than throwing: an ask that loses its vocabulary is
+ * degraded, but an ask that never leaves is lost. Same rule `composeContext`
+ * follows — context is a grade of service, the question is the service.
+ */
+const instructionSigFor = async (store: StoreLike): Promise<string | undefined> => {
+  if (!store.putResource) return undefined
+  try {
+    const text = bridgeInstruction()
+    if (!text.trim()) return undefined
+    return await store.putResource(new Blob([text], { type: 'text/plain' }))
+  } catch { return undefined }
 }
 
 export class LlmQueenBee extends QueenBee {
@@ -205,6 +290,11 @@ export class LlmQueenBee extends QueenBee {
         }
       : attached
 
+    // WHAT THIS HIVE CAN DO, carried with the question. Minted alongside the
+    // context rather than before it: both are grades of service, and neither
+    // may fail the send.
+    const instructionSig = await instructionSigFor(store)
+
     const record = {
       kind: ASK_KIND,
       appliesTo: targets.length ? targets : segments,
@@ -214,6 +304,7 @@ export class LlmQueenBee extends QueenBee {
         prompt,
         transcript: transcript.slice(-12),
         model: this.activeModel,
+        ...(instructionSig ? { instructionSig } : {}),
         targets,
         segments,
         // The TARGET is `appliesTo` above — the tile this conversation is
@@ -269,6 +360,11 @@ export class LlmQueenBee extends QueenBee {
     // ask reads from the same curated branches a chat turn does.
     const context = await composeContext(segments)
 
+    // Same vocabulary a chat turn carries. A note-bound ask needs it MORE, not
+    // less: nobody is watching a conversation to correct a responder that
+    // guessed at what this hive can do — the answer just lands on the tile.
+    const instructionSig = await instructionSigFor(store)
+
     // The ask record — content-addressed, participant-local (never shared).
     // `appliesTo` is where the answer should land (the selection, else here).
     const record = {
@@ -277,6 +373,7 @@ export class LlmQueenBee extends QueenBee {
       payload: {
         prompt,
         model: this.activeModel,   // responder hint (opus / sonnet / haiku / fable)
+        ...(instructionSig ? { instructionSig } : {}),
         targets,                   // selected tile labels
         segments,                  // lineage of the current level
         ...context,                // attached-context sigs (context / contextTruncated)

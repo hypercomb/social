@@ -25,7 +25,7 @@ class MemoryFile {
         if (typeof value === 'string') this.#bytes = new TextEncoder().encode(value)
         else if (value instanceof Blob) this.#bytes = new Uint8Array(await value.arrayBuffer())
         else if (ArrayBuffer.isView(value)) {
-          this.#bytes = new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength))
+          this.#bytes = new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer)
         } else if (value instanceof ArrayBuffer) this.#bytes = new Uint8Array(value.slice(0))
         else throw new Error(`unsupported memory write: ${typeof value}`)
         this.#modified = Date.now()
