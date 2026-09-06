@@ -30,7 +30,7 @@
 import { EffectBus, I18N_IOC_KEY, llmKeyStore, type I18nProvider } from '@hypercomb/core'
 import { isLendingModels } from '../sharing/peer-models.drone.js'
 import { llmActivation } from './llm-activation.js'
-import { TIERS, USAGE_PLANS, availabilityOf, candidatesFor, chooseProvider, costOf, explainChoice, llmPolicy } from './model-policy.js'
+import { CHAT_NEED, TIERS, USAGE_PLANS, availabilityOf, candidatesFor, chooseProvider, costOf, explainChoice, llmPolicy } from './model-policy.js'
 import { callModel } from './llm-dispatch.js'
 import { llmProviderRegistry } from './llm-provider-registry.js'
 import './providers/builtin-providers.js'
@@ -74,16 +74,13 @@ export type ProviderTab = 'subscription' | 'api' | 'swarm'
 const TABS: readonly { id: ProviderTab; label: string; hint: string }[] = [
   {
     id: 'subscription',
-    label: 'Subscriptions',
+    label: 'Subscription',
     hint: 'A plan you already pay for. A CLI session running on this machine answers '
       + 'through its own account — and these are the only responders that can read your hive.',
   },
   {
     id: 'api',
-    // CHAT API, not "API requests" — the tab is named for what the key BUYS
-    // (an answer in the conversation), not for the shape of the transaction,
-    // and the shorter word is also the one that fits the strip on one line.
-    label: 'Chat API',
+    label: 'API',
     hint: 'Billed per request against a key you paste here. The key stays in this browser, '
       + 'and the endpoint it would travel to is shown before you paste it.',
   },
@@ -662,7 +659,7 @@ export class ProvidersWindowView extends EventTarget {
     const usable = enabled && (!needsKey || hasKey) && !localDown && availability !== 'exhausted'
     // ACTIVE means this provider would answer the chat's ordinary automatic
     // request now. Merely being enabled is permission, not current selection.
-    const active = usable && llmPolicy.designate({ tier: 'fast', streaming: true })?.providerId === provider.id
+    const active = usable && llmPolicy.designate(CHAT_NEED)?.providerId === provider.id
 
     const row = document.createElement('div')
     row.className = 'hc-provider'

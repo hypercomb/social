@@ -100,6 +100,20 @@ createServer(async (req, res) => {
     return send(res, 200, headers, req.method === 'HEAD' ? null : createReadStream(target))
   }
 
+  // A pool on a static host is a directory whose index.html contains the same
+  // newline listing a live host would produce with readdir. Serve that file as
+  // text, not as a document: clients parse entry names from the response.
+  const directoryIndex = urlPath.endsWith('/') ? await fileAt(join(target, 'index.html')) : null
+  if (directoryIndex) {
+    const isPool = SIG_RE.test(name)
+    return send(res, 200, {
+      ...cors,
+      'content-type': isPool ? TYPES['.txt'] : TYPES['.html'],
+      'content-length': String(directoryIndex.size),
+      'cache-control': isPool ? 'no-cache, no-store, must-revalidate' : 'public, max-age=0, must-revalidate',
+    }, req.method === 'HEAD' ? null : createReadStream(join(target, 'index.html')))
+  }
+
   // (2) Genuinely missing → the shell, so a hive location resolves. A missing
   // SIGNATURE is a real 404 though: answering it with HTML would make the
   // origin's own heap look present-but-corrupt to every node replicating
@@ -110,7 +124,7 @@ createServer(async (req, res) => {
   // nothing downstream verifies. A replicator fetches /<bagSig>/00000007 and
   // writes back whatever it gets; markers are not content-addressed, so an
   // index.html answer lands in the reader's own lineage bag unchallenged.
-  const inSignature = SIG_RE.test(urlPath.split('/').filter(Boolean)[0] ?? '')
+  const inSignature = urlPath.split('/').filter(Boolean).some(segment => SIG_RE.test(segment))
   if (SIG_RE.test(name) || inSignature) return send(res, 404, cors, null)
 
   const shell = join(root, 'index.html')

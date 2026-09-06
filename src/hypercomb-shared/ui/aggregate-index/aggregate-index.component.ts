@@ -59,9 +59,6 @@ type OverlayLike = {
 }
 type NavigationLike = { goRaw?(segments: readonly string[]): void; segmentsRaw?(): readonly string[] }
 type SelectModeLike = { arm?(): void; disarm?(): void }
-type LayerCommitterLike = {
-  importTree?(updates: Array<{ segments: readonly string[]; layer: { name?: string; [slot: string]: unknown } }>): Promise<void>
-}
 
 const ioc = (): { get(k: string): unknown } | undefined =>
   (globalThis as { ioc?: { get(k: string): unknown } }).ioc
@@ -197,16 +194,6 @@ export class AggregateIndexComponent implements OnDestroy {
    *  navigation, and resolving `here + label` later would name whatever tile
    *  happens to share the name on the page you have since walked to. */
   readonly selection = signal<readonly StagedEntry[]>([])
-
-  /** A Portal dropped onto a tile turns the canvas into a reference picker.
-   *  The target's real page is opened, while this remembers where the chosen
-   *  children will be applied and where Done must return. */
-  readonly referencePick = signal<{
-    portal: AggregateItem
-    parentSegments: readonly string[]
-    originSegments: readonly string[]
-  } | null>(null)
-  readonly referenceContainerName = signal('')
 
   /** The collection we are STANDING IN, if the current location is one of our
    *  rows. This is what makes "drill into a collection and add tiles" work: the
@@ -466,49 +453,6 @@ export class AggregateIndexComponent implements OnDestroy {
   #dropStaged(): void {
     withSelectionService(s => s.clear())
     this.selection.set([])
-  }
-
-  /** Finish a reference-picking trip. Without a name, the dropped-on tile is
-   *  the referencer. With a name, a new child container is created first and
-   *  the chosen references live beneath it. */
-  async finishReferencePick(containerName = ''): Promise<void> {
-    const pick = this.referencePick()
-    const chosen = this.selection()
-    if (!pick || chosen.length === 0) return
-
-    let parent = [...pick.parentSegments]
-    const name = safeCellName(containerName)
-    if (name) {
-      const committer = ioc()?.get('@diamondcoreprocessor.com/LayerCommitter') as LayerCommitterLike | undefined
-      if (!committer?.importTree) return
-      parent = [...parent, name]
-      await committer.importTree([{ segments: parent, layer: { name } }])
-    }
-
-    for (const entry of chosen) {
-      await dropReferenceTile(
-        { key: entry.label, label: entry.label, segments: entry.segments },
-        parent,
-      )
-    }
-    await new hypercomb().act()
-    const back = [...pick.originSegments]
-    this.referencePick.set(null)
-    this.referenceContainerName.set('')
-    this.#dropStaged()
-    ;(ioc()?.get('@diamondcoreprocessor.com/SelectModeDrone') as SelectModeLike | undefined)?.disarm?.()
-    ;(ioc()?.get('@hypercomb.social/Navigation') as NavigationLike | undefined)?.goRaw?.(back)
-  }
-
-  cancelReferencePick(): void {
-    const pick = this.referencePick()
-    if (!pick) return
-    const back = [...pick.originSegments]
-    this.referencePick.set(null)
-    this.referenceContainerName.set('')
-    this.#dropStaged()
-    ;(ioc()?.get('@diamondcoreprocessor.com/SelectModeDrone') as SelectModeLike | undefined)?.disarm?.()
-    ;(ioc()?.get('@hypercomb.social/Navigation') as NavigationLike | undefined)?.goRaw?.(back)
   }
 
   /** Whether this row is the collection currently being managed (the hive is
@@ -1030,7 +974,6 @@ export class AggregateIndexComponent implements OnDestroy {
       this.dragOverHive.set(false)
       EffectBus.emit('drop:dragging', {
         active: true,
-        emptyOnly: true,
         targetTile: {
           label: safeCellName(p.item.label) || p.item.label,
           imageSig: p.item.imageSig,
@@ -1080,14 +1023,23 @@ export class AggregateIndexComponent implements OnDestroy {
     // page the participant dropped from rather than to the effective source.
     const origin = ((ioc()?.get('@hypercomb.social/Navigation') as NavigationLike | undefined)
       ?.segmentsRaw?.() ?? here).map(String)
-    if (label || target?.occupied) {
-      EffectBus.emit('toast:show', {
-        type: 'info', title: 'Reference needs an empty hex',
-        message: 'Nothing changed — drop the Portal on an empty place in the hive.',
+    // ON A TILE — GATHER. The tile under the pointer is the holder: the same
+    // window, the same picking, the chosen items appended as reference
+    // children of THAT tile. Its name is its address and is not offered for
+    // change; a different name is a different tile, i.e. the empty-hex drop.
+    // (documentation/reference-designer.md, sections 1–3)
+    const holder = safeCellName(label ?? target?.label ?? '')
+    if (holder) {
+      EffectBus.emit('references:compose', {
+        portal: item,
+        parentSegments: [...here, holder],
+        originSegments: origin,
+        createTile: false,
+        existingLabels: [...this.#renderedLabels],
       })
       return
     }
-    if (!target) return
+    if (!target || target.occupied) return
     let targetIndex = target.index
     if (targetIndex < 0) {
       const items = (ioc()?.get('@diamondcoreprocessor.com/AxialService') as
@@ -1170,13 +1122,6 @@ export class AggregateIndexComponent implements OnDestroy {
   #onLineage = (): void => {
     this.#dropStaged()
     this.#refresh()
-    const pick = this.referencePick()
-    if (pick && sameSegments(this.#segments(), pick.portal.segments)) {
-      // Navigation's guard disarms selection modes, so arm only after arrival.
-      setTimeout(() => {
-        ;(ioc()?.get('@diamondcoreprocessor.com/SelectModeDrone') as SelectModeLike | undefined)?.arm?.()
-      }, 0)
-    }
   }
 
   /** Arriving at a source's own location opens its index; leaving does NOT close

@@ -59,7 +59,11 @@ export class ReferencesWindowComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<Composition>('references:compose', c => {
       if (!c?.portal) return
       this.composition.set(c)
-      this.name.set(c.createTile ? this.#availableName(c.portal.label, c.existingLabels ?? []) : '')
+      // Over a tile the holder already has a name — its address — so it is
+      // shown, never offered for change (reference-designer.md, section 2).
+      this.name.set(c.createTile
+        ? this.#availableName(c.portal.label, c.existingLabels ?? [])
+        : String(c.parentSegments[c.parentSegments.length - 1] ?? ''))
       this.selected.set([])
       this.choosing.set(false)
       this.visible.set(true)

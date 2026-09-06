@@ -52,13 +52,12 @@
 // OPEN, which is the one failure mode a requirement must never have.
 
 import {
-  CANONICAL_REFERENCE_SERVICE_KEY,
   QueenBee,
   EffectBus,
   buildCanonicalReferencePayload,
   buildCanonicalReferenceRecord,
+  moleculeAddress,
   normalizeReferenceMarks,
-  type CanonicalReferenceService,
 } from '@hypercomb/core'
 import { REFERENCE_DECORATION_KIND } from './decoration-kind-index.js'
 import { listDecorations, removeDecoration } from './decoration-manifest.js'
@@ -102,10 +101,7 @@ export const buildReferencePayload = (opts: {
   requiredMarks?: readonly string[]
   requiredBouquet?: string
   editsRootDefault?: boolean
-}): Record<string, unknown> => {
-  const name = String(opts.targetSegments[opts.targetSegments.length - 1] ?? '')
-  return buildCanonicalReferencePayload({ name, ...opts })
-}
+}): Record<string, unknown> => buildCanonicalReferencePayload(opts)
 
 /** Assemble the whole reference DECORATION RECORD — payload plus the resource
  *  closure the push/adopt walk reads (`refs`).
@@ -126,10 +122,7 @@ export const buildReferenceRecord = (opts: {
   requiredMarks?: readonly string[]
   requiredBouquet?: string
   editsRootDefault?: boolean
-}): Record<string, unknown> => {
-  const name = String(opts.targetSegments[opts.targetSegments.length - 1] ?? '')
-  return buildCanonicalReferenceRecord({ name, ...opts })
-}
+}): Record<string, unknown> => buildCanonicalReferenceRecord(opts)
 
 type LineageShape = { explorerSegments?: () => readonly string[] }
 type StoreShape = { putResource(blob: Blob, options?: { emit?: boolean }): Promise<string> }
@@ -317,14 +310,15 @@ export class RequiresQueenBee extends QueenBee {
     const store = get<StoreShape>('@hypercomb.social/Store')
     if (!store?.putResource) { this.#log('Requires — unavailable'); return }
 
-    const legacyTargetSegments = Array.isArray(current.targetSegments)
+    const targetSegments = Array.isArray(current.targetSegments)
       ? current.targetSegments.map(s => String(s)).filter(Boolean)
       : []
+    if (targetSegments.length === 0) { this.#log('Requires — this reference names no target'); return }
 
-    // Editing a legacy reference is its lazy migration to the fixed-name root.
-    const roots = get<CanonicalReferenceService>(CANONICAL_REFERENCE_SERVICE_KEY)
-    const root = await roots?.ensureRoot(name, legacyTargetSegments)
-    if (!root) { this.#log('Requires — target could not be promoted to its root'); return }
+    // The route stays where it points. Identity is the target's MOLECULE —
+    // a requirements edit is also the lazy migration of a reference that
+    // still carries a path-keyed bag as its `targetSig`.
+    const targetSig = await moleculeAddress(targetSegments[targetSegments.length - 1])
 
     // Rebuilt in the same field order `/reference` and the Organizer's drop use,
     // with `requiredMarks` OMITTED when empty — same content must produce the
@@ -332,8 +326,8 @@ export class RequiresQueenBee extends QueenBee {
     // declared as the record's resource closure so the demand can still be
     // expanded after a share or an adopt.
     const record = buildCanonicalReferenceRecord({
-      name,
-      targetSig: root.targetSig,
+      targetSegments,
+      targetSig,
       requiredMarks: marks,
       requiredBouquet: bouquet,
       // A requirements edit is also the lazy grammar migration. Preserve an

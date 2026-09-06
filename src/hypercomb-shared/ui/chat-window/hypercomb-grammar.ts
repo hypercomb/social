@@ -34,9 +34,15 @@
 // a trap.
 
 import {
-  admitMachineCall, currentMachineGrant, primaryEntry,
+  admitMachineCall, callableBehaviours, currentMachineGrant, machineCatalogue, primaryEntry,
   type MachineGrant, type MachineReach, type MachineScope,
 } from '@hypercomb/core'
+
+// THE CATALOGUE MOVED DOWN TO CORE. It is not shell knowledge: the bridge tier
+// has to teach the same vocabulary to a CLI that cannot see this file, and a
+// second renderer is how `CALLABLE_FORMS` went wrong. Re-exported here because
+// this module is still the door the chat window knocks on.
+export { callableBehaviours }
 
 export const HYPERCOMB_GRAMMAR_TOOL_NAME = 'hypercomb_act'
 
@@ -219,24 +225,6 @@ export class HypercombActionExecutionError extends Error {
  * The grant is read live rather than captured, so tightening it takes effect on
  * the next turn without a reload. Tests pass one explicitly.
  */
-export const callableBehaviours = (
-  entries: readonly HypercombBehaviour[],
-  grant: MachineGrant = currentMachineGrant(),
-): readonly HypercombBehaviour[] => {
-  const seen = new Set<string>()
-  const result: HypercombBehaviour[] = []
-  for (const entry of entries) {
-    const name = String(entry?.name ?? '').trim().toLowerCase()
-    if (!name || seen.has(name)) continue
-    const machine = entry.machine
-    if (!machine || typeof machine.forms !== 'string' || typeof machine.example !== 'string') continue
-    if (!admitMachineCall(name, entry, 'model', grant).admit) continue
-    seen.add(name)
-    result.push({ ...entry, name })
-  }
-  return result
-}
-
 /**
  * WHY A LINE WAS NOT ACCEPTED, in the gate's own words rather than a flat
  * "not available". A model that is told `/remove is destructive, and this hive
@@ -255,21 +243,7 @@ const refusalFor = (
   return verdict.admit ? `/${verb} is not available for model actions` : verdict.reason
 }
 
-const catalogue = (
-  entries: readonly HypercombBehaviour[],
-  grant: MachineGrant,
-): string =>
-  callableBehaviours(entries, grant).map(entry => {
-    const machine = entry.machine!
-    const forms = machine.forms.trim()
-    // The consequence is QUOTED, never composed. This module knows how far a
-    // verb reaches but not what reaching there does, and a fixed sentence per
-    // reach value was how the catalogue came to promise a confirmation
-    // `/remove` does not perform for a leaf tile. If a behaviour says nothing
-    // here, the catalogue says nothing.
-    const note = machine.consequence?.trim() ? ` ${machine.consequence.trim()}` : ''
-    return `/${entry.name}${forms ? ` ${forms}` : ''} - ${entry.description ?? entry.name}.${note} Example: ${machine.example}`
-  }).join('\n')
+const catalogue = machineCatalogue
 
 /** One transport tool; Hypercomb grammar remains the actual action language. */
 export const hypercombGrammarTool = (

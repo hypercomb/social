@@ -25,10 +25,10 @@ import { Drone } from '@hypercomb/core'
 import { Container, Sprite, Text, Graphics, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import { bakeBeeAtlas } from '../avatars/bee-ab-atlas.js'
+import { TileBadgeLayer, BADGE_CORNER, type Axial } from './badge-layer.js'
 
 const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 
-type Axial = { q: number; r: number }
 type CellCountPayload = {
   count: number
   labels: string[]
@@ -64,16 +64,8 @@ export class PresenceBadgeDrone extends Drone {
   ]
   protected override emits: string[] = []
 
-  #container: Container | null = null
-  #layer: Container | null = null
+  #badgeLayer = new TileBadgeLayer(BADGE_Z)
   #beeTexture: Texture | null = null
-
-  // Geometry mirrors the overlay: spacing drives axialToPixel, circumRadius
-  // sizes the corner offset, flat selects the axial formula.
-  #spacing = 38
-  #circum = 32
-  #flat = false
-  #meshOffset = { x: 0, y: 0 }
 
   // Current visible tiles (label → axial) and which of them render no image
   // (the "no content" cue), both from render:cell-count.
@@ -95,8 +87,7 @@ export class PresenceBadgeDrone extends Drone {
     // render:host-ready is sticky (last-value replay), so we get the
     // container even if the host booted before this drone's first pulse.
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
-      this.#container = payload.container
-      this.#ensureLayer()
+      if (payload?.container) this.#badgeLayer.attach(payload.container)
       void this.#bakeBee()
     })
 
@@ -114,18 +105,17 @@ export class PresenceBadgeDrone extends Drone {
     })
 
     this.onEffect<{ x: number; y: number }>('render:mesh-offset', (offset) => {
-      this.#meshOffset = { x: offset?.x ?? 0, y: offset?.y ?? 0 }
+      this.#badgeLayer.setMeshOffset(offset)
       this.#reposition()
     })
 
     this.onEffect<{ spacing?: number; circumRadiusPx?: number }>('render:geometry-changed', (geo) => {
-      if (typeof geo?.spacing === 'number' && geo.spacing > 0) this.#spacing = geo.spacing
-      if (typeof geo?.circumRadiusPx === 'number' && geo.circumRadiusPx > 0) this.#circum = geo.circumRadiusPx
+      this.#badgeLayer.setGeometry(geo)
       this.#reposition()
     })
 
     this.onEffect<{ flat?: boolean }>('render:set-orientation', (p) => {
-      this.#flat = !!p?.flat
+      this.#badgeLayer.setOrientation(!!p?.flat)
       this.#reposition()
     })
 
@@ -140,16 +130,7 @@ export class PresenceBadgeDrone extends Drone {
     if (this.#pollTimer) { clearInterval(this.#pollTimer); this.#pollTimer = null }
     for (const b of this.#badges.values()) b.box.destroy({ children: true })
     this.#badges.clear()
-    if (this.#layer) { this.#layer.destroy({ children: true }); this.#layer = null }
-  }
-
-  #ensureLayer(): void {
-    if (!this.#container || this.#layer) return
-    this.#layer = new Container()
-    this.#layer.zIndex = BADGE_Z
-    this.#layer.eventMode = 'none'           // notification only — never intercepts clicks
-    this.#container.addChild(this.#layer)
-    this.#container.sortableChildren = true
+    this.#badgeLayer.destroy()
   }
 
   // Bake one static bee frame (mid-flap) to a texture, reusing the swarm's
@@ -173,7 +154,7 @@ export class PresenceBadgeDrone extends Drone {
   }
 
   #refresh(force = false): void {
-    if (!this.#layer) return
+    if (!this.#badgeLayer.layer) return
     const snap = this.#snapshot()
 
     // Cheap no-op guard: skip a full rebuild when nothing visible changed.
@@ -220,7 +201,7 @@ export class PresenceBadgeDrone extends Drone {
       })
       text.anchor.set(0, 0.5)
       box.addChild(bg, bee, text)
-      this.#layer!.addChild(box)
+      this.#badgeLayer.layer!.addChild(box)
       b = { box, bg, bee, text }
       this.#badges.set(label, b)
     }
@@ -250,29 +231,16 @@ export class PresenceBadgeDrone extends Drone {
       b.bee.alpha = 1
     }
 
-    this.#place(b.box, coord)
-  }
-
-  #place(box: Container, coord: Axial): void {
-    const px = this.#axialToPixel(coord.q, coord.r)
-    const cx = px.x + this.#meshOffset.x
-    const cy = px.y + this.#meshOffset.y
-    // Top-right of the hex. Tuned against the ~32px circumradius; the pill
-    // extends rightward from the bee so it reads as a corner ornament.
-    box.position.set(cx + this.#circum * 0.42, cy - this.#circum * 0.78)
+    // Top-right shoulder. The pill extends rightward from the bee so it
+    // reads as a corner ornament; the holder badge takes the other side.
+    this.#badgeLayer.place(b.box, coord, BADGE_CORNER.topRight)
   }
 
   #reposition(): void {
     for (const [label, b] of this.#badges) {
       const coord = this.#coordByLabel.get(label)
-      if (coord) this.#place(b.box, coord)
+      if (coord) this.#badgeLayer.place(b.box, coord, BADGE_CORNER.topRight)
     }
-  }
-
-  #axialToPixel(q: number, r: number): { x: number; y: number } {
-    return this.#flat
-      ? { x: 1.5 * this.#spacing * q, y: Math.sqrt(3) * this.#spacing * (r + q / 2) }
-      : { x: Math.sqrt(3) * this.#spacing * (q + r / 2), y: this.#spacing * 1.5 * r }
   }
 }
 

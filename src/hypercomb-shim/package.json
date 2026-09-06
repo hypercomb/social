@@ -21,7 +21,8 @@
     "start": "node host/serve.mjs dist 4270",
     "typecheck": "npx tsc -p tsconfig.json --noEmit",
     "host:check": "node host/check-host.mjs",
-    "host:deploy": "node host/deploy-cloudflare.mjs"
+    "host:deploy": "node host/deploy-cloudflare.mjs",
+    "host:deploy:azure": "node host/deploy-azure.mjs"
   },
   "dependencies": {
     "@hypercomb/core": "file:../hypercomb-core",

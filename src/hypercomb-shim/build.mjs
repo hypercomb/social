@@ -85,6 +85,16 @@ if (withContent) {
     await cp(from, resolve(outContent, entry.name), { recursive: entry.isDirectory() })
     contentFiles++
   }
+
+  // Azure Static Web Apps serves a directory's index.html with an HTML MIME
+  // type. Keep the ordinary index for Pages and local hosts, and emit the same
+  // pool listing as .txt for the Azure route in staticwebapp.config.json.
+  const packagesPool = createHash('sha256').update('host:packages', 'utf8').digest('hex')
+  const poolIndex = resolve(outContent, packagesPool, 'index.html')
+  if (await exists(poolIndex)) {
+    await cp(poolIndex, resolve(outContent, packagesPool, 'listing.txt'))
+    contentFiles++
+  }
   contentBytes = await dirBytes(outContent)
 }
 

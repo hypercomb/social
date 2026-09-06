@@ -852,12 +852,24 @@ export class ShowCellDrone extends Drone {
    *  what "click a tile, come back, and it's slow again" was made of). */
   readonly #preparedViewPath = new Map<string, string>()
 
+  /** MEMBERSHIP GENERATION — the fence on every memo write.
+   *
+   *  Bumped by every add/remove that invalidates prepared views. A resolution
+   *  pass captures it before its first await and refuses to write its memo if
+   *  it moved: a pass that started BEFORE a child was appended (a neighbourhood
+   *  warm, a render mid-flight) otherwise landed its pre-add answer AFTER the
+   *  invalidation and served "leaf" for a tile that had just become a branch —
+   *  the holder a References composition wrote could not be clicked into until
+   *  a reload. The fence is what makes the invalidation final. */
+  #membershipGeneration = 0
+
   /** Drop prepared views whose location is an ancestor of (or equal to) the
    *  segments where a child was just added or removed — those are the only
    *  entries whose branch-status can have flipped. Everything else keeps its
    *  preparation. Unknown segments fall back to the old blanket clear, which
    *  is correct, just wasteful (legacy emitters that don't carry an address). */
   #invalidatePreparedViewsFor(segments: readonly string[] | undefined): void {
+    this.#membershipGeneration++
     if (!segments || segments.length === 0) {
       this.#completeChildNamesByParentSig.clear()
       this.#preparedViewPath.clear()
@@ -3751,6 +3763,7 @@ export class ShowCellDrone extends Drone {
               unresolvedSigs: string[]
             } = { expected: 0, resolved: 0, unresolvedSigs: [] }
             const branchStats = { cold: false }
+            const membershipGenerationAtStart = this.#membershipGeneration
             // branchSetFromResolve is filled in the SAME pass that resolves
             // names — one read, no separate per-child branch walk. branchStats
             // reports separately whether any child's branch-STATUS came back on
@@ -3803,7 +3816,10 @@ export class ShowCellDrone extends Drone {
             // the layer still paints now — a missing dot is not a missing tile,
             // so we never hold the paint the way the name gate does.
             const branchComplete = !branchStats.cold
-            if (childResolveComplete && branchComplete && parentLayerSig && stats.expected > 0) {
+            // Membership moved under this pass: its answer predates an add or
+            // remove, so it must not become the memo (see #membershipGeneration).
+            const membershipStill = membershipGenerationAtStart === this.#membershipGeneration
+            if (childResolveComplete && branchComplete && membershipStill && parentLayerSig && stats.expected > 0) {
               const names: string[] = []
               for (const n of layerAllowed) if (typeof n === 'string' && n.length > 0) names.push(n)
               // Bound: evict oldest (Map keeps insertion order) past a cap so
@@ -3969,7 +3985,10 @@ export class ShowCellDrone extends Drone {
     const previousVariantLabels = new Set(this.#stackVariantLabels)
     this.#stackDepthByLabel = new Map()
     this.#stackVariantLabels = new Set()
-    setTileStacks(new Map())
+    // Quiet: this is the pre-resolution reset, not a finding. Announcing it
+    // would tell the depth ornaments every peer had left, a fifth of a second
+    // before the real stacks land. See setTileStacks.
+    setTileStacks(new Map(), { quiet: true })
     const previousVariantTitles = new Map(this.registryTitlesByLabel)
     this.registryPropertiesByLabel.clear()
     this.registryTitlesByLabel.clear()
@@ -10677,9 +10696,13 @@ export class ShowCellDrone extends Drone {
         const stats = { expected: 0, resolved: 0, unresolvedSigs: [] as string[] }
         const branches = new Set<string>()
         const branchStats = { cold: false }
+        const membershipGenerationAtStart = this.#membershipGeneration
         const resolved = await resolveChildNames(history, segments, null, content, layerSig, stats, branches, branchStats)
         const complete = stats.expected > 0 && stats.resolved >= stats.expected
         if (!complete || branchStats.cold) return false
+        // A child was added or removed while this resolved: the answer is
+        // pre-add and may not become the memo or the fast-path cells.
+        if (membershipGenerationAtStart !== this.#membershipGeneration) return false
         const names: string[] = []
         for (const n of resolved) if (typeof n === 'string' && n.length > 0) names.push(n)
         if (this.#completeChildNamesByParentSig.size > ShowCellDrone.#PREPARED_VIEW_CAP) {

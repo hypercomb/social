@@ -53,9 +53,6 @@ export interface DropTarget {
  *  (commands/decoration-kind-index.ts). A string constant, not an import —
  *  shared must not reach into essentials. */
 const TAG_KIND = 'tag'
-/** Mirrors CONTEXT_DECORATION_KIND — a place whose material belongs in any
- *  language-model request made about the tile carrying it. */
-const CONTEXT_KIND = 'context'
 
 /** Names become path segments — drop separators and control characters
  *  (mirrors the UNSAFE_CELL_NAME guard in essentials). */
@@ -149,100 +146,11 @@ export const dropReferenceTile = async (
 }
 
 /**
- * Attach a place to an EXISTING tile as CONTEXT — the "drop onto a tile"
- * gesture.
- *
- * Dropping onto empty hive says "put this here". Dropping onto something that
- * is already there cannot mean the same thing, because there is no room; what
- * it means is a statement about the TILE — that answering questions about it
- * requires knowing about the dropped place too. So the drop writes a `context`
- * decoration: a live pointer, resolved at read time, never a copy.
- *
- * When the drop lands, a summary of the branch is generated asynchronously
- * (Haiku explores the tree, caches the summary by branch sig) so the responder
- * receives not just raw content sigs but a human-readable guide to what they
- * mean. Summaries ride in the context array BEFORE the sigs, framing the
- * responder's understanding before it tries to parse layer bytes.
- *
- * ── This REPLACED attaching the item's keywords ─────────────────────────────
- *
- * That gesture used to mean "make this tile a member of this collection" by
- * copying the collection's pheromones onto it. It is gone, and one gesture now
- * has one meaning. Membership is still sayable, and still says itself better,
- * from the pheromone panel — where marks live and where painting one is a
- * deliberate act rather than a side effect of a drag that missed the gap.
- *
- * `targetSig` is the target's LINEAGE address, not a content hash, for exactly
- * the reason a reference carries one: a content hash would freeze this into a
- * snapshot that stops tracking the moment the source changes, and stale context
- * is worse than none — it answers confidently out of date.
- *
- * Returns true when the attachment landed.
- */
-export const dropContextOnTile = async (
-  item: AggregateItem,
-  tileSegments: readonly string[],
-): Promise<boolean> => {
-  const store = ioc()?.get('@hypercomb.social/Store') as StoreLike | undefined
-  if (!store?.putResource || !item.segments.length) return false
-
-  const references = ioc()?.get(CANONICAL_REFERENCE_SERVICE_KEY) as CanonicalReferenceService | undefined
-  const name = safeCellName(item.segments[item.segments.length - 1] ?? item.label)
-  if (!references?.ensureRoot || !name) return false
-  try {
-    const root = await references.ensureRoot(name, item.segments)
-    if (!root) return false
-    const payload: ReferencePayload = {
-      targetSegments: [...root.segments],
-      targetSig: root.targetSig,
-    }
-    // appliesTo:[] so the same place attached to two tiles dedups to ONE sig —
-    // the same economy every other decoration here gets.
-    const record = { kind: CONTEXT_KIND, appliesTo: [] as string[], payload }
-    const sig = await store.putResource(
-      new Blob([JSON.stringify(record)], { type: 'application/json' }))
-    EffectBus.emit('decorations:changed', { segments: [...tileSegments], op: 'append', sig })
-
-    // Fire-and-forget: generate a branch summary so the responder has a guide
-    // to the supporting data. The summary is cached by branch sig, so
-    // subsequent drops of the same branch read the cache instantly. If the
-    // branch is edited, its content sigs change and the cache misses.
-    try {
-      const tileContext = (window as { ioc?: { get?(k: string): unknown } }).ioc?.get?.(
-        '@diamondcoreprocessor.com/TileContext',
-      ) as {
-        resolve: (segments: readonly string[]) => Promise<unknown>
-        /** Absent on an older essentials build — then the drop lands and the
-         *  responder simply reads raw sigs. */
-        withSummaries?: (branches: readonly unknown[]) => Promise<string[]>
-      } | undefined
-      if (tileContext?.resolve) {
-        const branches = await tileContext.resolve([...root.segments])
-        // Through the IoC seam, never by path: this file is SHELL, and shell
-        // may never import a module. It is also the only way the call can
-        // survive the web shell, where essentials is loaded from OPFS at
-        // runtime and no relative path to it exists at all.
-        if (Array.isArray(branches) && branches.length > 0) {
-          await tileContext.withSummaries?.(branches)
-        }
-      }
-    } catch {
-      // Summary generation is purely informational; a failure must not break
-      // the drop gesture. The decoration lands, context rides with the next
-      // request, and the responder sees raw sigs if the summary was not minted.
-    }
-
-    return true
-  } catch {
-    return false
-  }
-}
-
-/**
  * Attach the item's keywords to an EXISTING tile. A pheromone on a tile is what
  * makes that tile a member of every collection parameterised by it.
  *
- * NO LONGER REACHED BY THE DROP GESTURE — see `dropContextOnTile`. Kept because
+ * NO LONGER REACHED BY THE DROP GESTURE — a drop onto a tile GATHERS references
+ * under it (documentation/reference-designer.md). Kept because
  * `applyCarried` still uses it to scent a batch of new references with the
  * bouquet in hand, which is a different act with the same mechanics.
  *

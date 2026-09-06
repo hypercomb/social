@@ -21,7 +21,10 @@
 //
 // Output contract (line-buffered, one JSON object per line):
 //   { "ask": "<sig>", "prompt": "...", "model": "opus|sonnet|haiku",
-//     "targets": [...], "segments": [...], "appliesTo": [...] }
+//     "targets": [...], "segments": [...], "appliesTo": [...],
+//     "instructionSig": "<sig>" }      ← expand with `get-resource`: how to
+//                                        read this hive, plus the live census
+//                                        of behaviours a machine may say here
 //   { "stopped": "<sig>" }              ← the participant stopped an ask this
 //                                          watcher announced: abort the work,
 //                                          write no note, retire nothing else
@@ -175,6 +178,14 @@ async function tick() {
       // writing a note. Absent = a normal question.
       task: it.payload?.task ?? '',
       existing: it.payload?.existing ?? [],
+      // WHAT THIS HIVE CAN DO — a signature naming a plain-text instruction:
+      // how to read the hive (get-resource / layer-at / behaviors-list) and
+      // the LIVE census of behaviours a machine may say here, filtered by the
+      // participant's grant. Expand it with `get-resource` BEFORE answering.
+      // Claude Code has a skill file to fall back on; every other CLI has only
+      // this, so a responder that skips it is guessing about the hive it is
+      // standing in. Absent on asks minted before this field existed.
+      instructionSig: it.payload?.instructionSig ?? '',
       prompt: it.payload?.prompt ?? '',
       transcript: it.payload?.transcript ?? [],
       model: it.payload?.model ?? '',
