@@ -32,6 +32,19 @@ impl HiveSource for Stub {
     fn entry(&self, sig: &str, name: &str) -> Option<Vec<u8>> {
         self.entries.get(&(sig.to_string(), name.to_string())).cloned()
     }
+    fn entries(&self, sig: &str) -> Option<Vec<String>> {
+        let mut names: Vec<String> = self
+            .entries
+            .keys()
+            .filter(|(held, _)| held == sig)
+            .map(|(_, name)| name.clone())
+            .collect();
+        if names.is_empty() {
+            return None;
+        }
+        names.sort();
+        Some(names)
+    }
 }
 
 /// A shell directory shaped like a shim build.
@@ -119,6 +132,65 @@ fn markers_and_pool_members_come_out_of_the_directory() {
     let member = resolve(&root, &hive, "GET", &format!("/{SIG_B}/my%20note"));
     assert_eq!(member.status, 200);
     assert_eq!(body_of(&member), b"pool bytes");
+
+    // `/content` is the canonical namespace used by static hosts. A machine
+    // host accepts it too, so a discovered base works without host-specific
+    // branching in the reader.
+    let canonical = resolve(&root, &hive, "GET", &format!("/content/{SIG_B}/my%20note"));
+    assert_eq!(canonical.status, 200);
+    assert_eq!(body_of(&canonical), b"pool bytes");
+}
+
+#[test]
+fn a_signature_directory_lists_its_members_at_both_bases() {
+    let (_dir, root) = shell();
+    let mut hive = Stub::default();
+    hive.entries.insert(
+        (SIG_B.to_string(), "00000001".to_string()),
+        SIG_A.as_bytes().to_vec(),
+    );
+    hive.entries.insert(
+        (SIG_B.to_string(), "00000000".to_string()),
+        SIG_A.as_bytes().to_vec(),
+    );
+
+    for path in [format!("/{SIG_B}/"), format!("/content/{SIG_B}/")] {
+        let reply = resolve(&root, &hive, "GET", &path);
+        assert_eq!(reply.status, 200, "{path}");
+        assert_eq!(
+            reply.header("content-type"),
+            Some("text/plain; charset=utf-8")
+        );
+        assert_eq!(reply.header("cache-control"), Some("no-store"));
+        assert_eq!(reply.header("access-control-allow-origin"), Some("*"));
+        assert_eq!(body_of(&reply), b"00000000\n00000001");
+    }
+}
+
+#[test]
+fn staged_and_live_pool_entries_are_one_listing_and_live_bytes_win() {
+    let (_dir, root) = shell();
+    let pool = root.join("content").join(SIG_B);
+    std::fs::create_dir_all(&pool).unwrap();
+    std::fs::write(pool.join("index.html"), b"00000000\n00000002").unwrap();
+    std::fs::write(pool.join("listing.txt"), b"00000000\n00000002").unwrap();
+    std::fs::write(pool.join("00000000"), b"staged old bytes").unwrap();
+    std::fs::write(pool.join("00000002"), b"staged package").unwrap();
+
+    let mut hive = Stub::default();
+    hive.entries.insert(
+        (SIG_B.to_string(), "00000000".to_string()),
+        b"live current bytes".to_vec(),
+    );
+
+    let listing = resolve(&root, &hive, "GET", &format!("/content/{SIG_B}/"));
+    assert_eq!(body_of(&listing), b"00000000\n00000002");
+
+    let live = resolve(&root, &hive, "GET", &format!("/content/{SIG_B}/00000000"));
+    assert_eq!(body_of(&live), b"live current bytes");
+
+    let staged = resolve(&root, &hive, "GET", &format!("/content/{SIG_B}/00000002"));
+    assert_eq!(body_of(&staged), b"staged package");
 }
 
 #[test]
@@ -143,6 +215,20 @@ fn a_miss_inside_a_signature_never_answers_with_the_shell() {
 
     let member = resolve(&root, &hive, "GET", &format!("/{SIG_B}/clipboard-entry"));
     assert_eq!(member.status, 404);
+
+    let canonical = resolve(
+        &root,
+        &hive,
+        "GET",
+        &format!("/content/{SIG_B}/clipboard-entry"),
+    );
+    assert_eq!(canonical.status, 404);
+    assert!(body_of(&canonical).is_empty());
+
+    assert_eq!(
+        resolve(&root, &hive, "GET", &format!("/content/{SIG_B}/")).status,
+        404,
+    );
 }
 
 #[test]

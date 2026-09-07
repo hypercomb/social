@@ -577,6 +577,23 @@ impl hypercomb_serve::HiveSource for AppHive {
     fn entry(&self, sig: &str, name: &str) -> Option<Vec<u8>> {
         self.0.state::<Host>().raw_dir_get(sig, name).ok().flatten()
     }
+
+    fn entries(&self, sig: &str) -> Option<Vec<String>> {
+        let mut names: Vec<String> = self
+            .0
+            .state::<Host>()
+            .raw_dir_entries(sig)
+            .ok()?
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
+        if names.is_empty() {
+            return None;
+        }
+        names.sort();
+        names.dedup();
+        Some(names)
+    }
 }
 
 /// The running host, or nothing. Managed state so the menu can stop what the

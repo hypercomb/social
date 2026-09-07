@@ -23,8 +23,15 @@ const tourOg = path.join(root, 'og.png')
 if (!fs.existsSync(tour)) throw new Error('run build.cjs first — dist/hypercomb-presentation.html is missing')
 if (!fs.existsSync(tourOg)) throw new Error('the presentation social image is missing — expected og.png')
 
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-const build = (cwd, script) => execFileSync(npm, ['run', script], { cwd, stdio: 'inherit' })
+let npm = { program: 'npm', prefix: [] }
+if (process.platform === 'win32') {
+  const inherited = process.env.npm_execpath
+  const bundled = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+  const cli = inherited && fs.existsSync(inherited) ? inherited : bundled
+  if (!fs.existsSync(cli)) throw new Error('npm-cli.js was not found beside Node or in npm_execpath')
+  npm = { program: process.execPath, prefix: [cli] }
+}
+const build = (cwd, script) => execFileSync(npm.program, [...npm.prefix, 'run', script], { cwd, stdio: 'inherit' })
 
 // None of these generated directories are committed. Build the entire input
 // chain so a clean checkout cannot deploy stale content from somebody's last
@@ -35,11 +42,13 @@ build(essentials, 'build:module')
 build(shim, 'build:vendor')
 build(shim, 'build')
 
-execFileSync(process.execPath, [
+const deploy = [
   path.join(shim, 'host', 'deploy-azure.mjs'),
   '--app', 'pbs-hypercomb-com',
   '--group', 'swa-hypercomb-prod-west-001',
   '--domain', 'hypercomb.com',
   '--tour', tour,
   '--tour-og', tourOg,
-], { cwd: sourceRoot, stdio: 'inherit' })
+]
+if (process.argv.includes('--check-only')) deploy.push('--check-only')
+execFileSync(process.execPath, deploy, { cwd: sourceRoot, stdio: 'inherit' })

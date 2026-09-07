@@ -79,6 +79,12 @@ pub trait HiveSource: Send + Sync + 'static {
     /// a bag and a pool — for a bare-word meaning the two are byte-identical —
     /// so the ENTRY decides, never the directory.
     fn entry(&self, sig: &str, name: &str) -> Option<Vec<u8>>;
+
+    /// Names held inside a signature-addressed directory. A trailing-slash
+    /// request uses this to expose a pool as the newline listing static hosts
+    /// put in `index.html`. `None` means the directory is not held and must be
+    /// an honest 404, never an empty success or the SPA shell.
+    fn entries(&self, sig: &str) -> Option<Vec<String>>;
 }
 
 impl HiveSource for hypercomb_host::Host {
@@ -91,6 +97,21 @@ impl HiveSource for hypercomb_host::Host {
 
     fn entry(&self, sig: &str, name: &str) -> Option<Vec<u8>> {
         self.raw_dir_get(sig, name).ok().flatten()
+    }
+
+    fn entries(&self, sig: &str) -> Option<Vec<String>> {
+        let mut names: Vec<String> = self
+            .raw_dir_entries(sig)
+            .ok()?
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
+        if names.is_empty() {
+            return None;
+        }
+        names.sort();
+        names.dedup();
+        Some(names)
     }
 }
 
@@ -209,6 +230,32 @@ fn shell_file(shell: &Path, segments: &[String]) -> Option<PathBuf> {
     }
 }
 
+/// Entry names held by a signature directory in the staged shell. A machine
+/// host can `read_dir`, so it does not need to trust or parse the static
+/// `index.html` rendering of the same set.
+fn shell_directory_entries(shell: &Path, segments: &[String]) -> Vec<String> {
+    let mut path = shell.to_path_buf();
+    for segment in segments {
+        if !safe_segment(segment) {
+            return Vec::new();
+        }
+        path.push(segment);
+    }
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| {
+            safe_segment(name)
+                && name != "index.html"
+                && name != "listing.txt"
+                && !name.starts_with('.')
+        })
+        .collect()
+}
+
 fn cors(reply: Reply) -> Reply {
     reply
         .with("access-control-allow-origin", "*")
@@ -247,9 +294,56 @@ pub fn resolve(shell: &Path, hive: &dyn HiveSource, method: &str, target: &str) 
     }
 
     let name = segments.last().cloned().unwrap_or_default();
-    let first = segments.first().cloned().unwrap_or_default();
 
-    // (1) A real file wins, always — before any rewrite is considered.
+    // (1) A pool/bag directory. The trailing slash is the wire-level
+    // distinction between immutable bytes at a signature and the mutable set
+    // held at that same address. Both canonical `/content` and root aliases
+    // are accepted, just like content below.
+    let directory_sig = if path.ends_with('/') {
+        match segments.as_slice() {
+            [only] if is_sig(only) => Some(only.clone()),
+            [base, sig] if base == "content" && is_sig(sig) => Some(sig.clone()),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    if let Some(sig) = directory_sig {
+        let mut names = shell_directory_entries(shell, &segments);
+        if let Some(mut held) = hive.entries(&sig) {
+            names.append(&mut held);
+        }
+        names.sort();
+        names.dedup();
+        return if names.is_empty() {
+            cors(Reply::new(404))
+        } else {
+            cors(Reply::new(200))
+                .with("content-type", "text/plain; charset=utf-8")
+                .with("cache-control", "no-store")
+                .body(Body::Bytes(names.join("\n").into_bytes()))
+        };
+    }
+
+    // (2) Mutable directory entries in the live hive take precedence over the
+    // staged bootstrap copy at the same path. If absent, the static file branch
+    // below still offers packages bundled with the shell.
+    let directory_entry = match segments.as_slice() {
+        [dir, entry] if is_sig(dir) => Some((dir, entry)),
+        [base, dir, entry] if base == "content" && is_sig(dir) => Some((dir, entry)),
+        _ => None,
+    };
+    if let Some((dir, entry)) = directory_entry {
+        if let Some(bytes) = hive.entry(dir, entry) {
+            return cors(Reply::new(200))
+                .with("content-type", "application/octet-stream")
+                .with("cache-control", "no-cache, must-revalidate")
+                .body(Body::Bytes(bytes));
+        }
+    }
+
+    // (3) A real file wins before any SPA rewrite. This also supplies staged
+    // package bytes and pool members that the live hive does not hold yet.
     if let Some(file) = shell_file(shell, &segments) {
         let mut reply = cors(Reply::new(200))
             .with("content-type", type_for(&name))
@@ -260,8 +354,11 @@ pub fn resolve(shell: &Path, hive: &dyn HiveSource, method: &str, target: &str) 
         }
         return reply;
     }
+    if directory_entry.is_some() {
+        return cors(Reply::new(404));
+    }
 
-    // (2) The hive itself. `/content/<sig>` as well as `/<sig>`, because the
+    // (4) The hive itself. `/content/<sig>` as well as `/<sig>`, because the
     // shim's fetcher tries both bases and a host that answers only one of them
     // is a host half its readers cannot install from.
     let content_sig = match segments.as_slice() {
@@ -280,29 +377,11 @@ pub fn resolve(shell: &Path, hive: &dyn HiveSource, method: &str, target: &str) 
         };
     }
 
-    // (3) Inside a signature-named directory: a marker or a pool member.
-    //
-    // Never immutable. A marker index is stable in ordinary use, but history
-    // compaction genuinely removes revisions, and a pool member is mutable by
-    // definition — a client that cached either forever would hold a hive that
-    // can never move.
-    if let [dir, entry] = segments.as_slice() {
-        if is_sig(dir) {
-            return match hive.entry(dir, entry) {
-                Some(bytes) => cors(Reply::new(200))
-                    .with("content-type", "application/octet-stream")
-                    .with("cache-control", "no-cache, must-revalidate")
-                    .body(Body::Bytes(bytes)),
-                None => cors(Reply::new(404)),
-            };
-        }
-    }
-
-    // (4) A miss. A hive LOCATION is not a file, so an ordinary deep link gets
+    // (5) A miss. A hive LOCATION is not a file, so an ordinary deep link gets
     // the shell — but a miss at or under a signature is a real 404. See the
     // module docs: answering those with HTML is how an origin poisons the nodes
     // replicating from it.
-    if is_sig(&name) || is_sig(&first) {
+    if segments.iter().any(|segment| is_sig(segment)) {
         return cors(Reply::new(404));
     }
 

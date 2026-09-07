@@ -150,18 +150,25 @@ export class PassiveReplicationQueue {
   async #complete(intent: StoredIntent, signal: AbortSignal): Promise<boolean> {
     if (signal.aborted) return false
     let status = await this.#replication.status(intent.domain, intent.signature, signal)
-    if (!status && !signal.aborted) {
+    // A 202 from an older relay proves only byte replication: old servers
+    // ignore unknown JSON fields. For package intents, require the explicit
+    // publication receipt in status before the durable intent can drain.
+    if (!this.#isComplete(status, intent) && !signal.aborted) {
       if (!await this.#replication.replicate(intent.domain, intent, signal) || signal.aborted) return false
       status = await this.#replication.status(intent.domain, intent.signature, signal)
     }
-    if (!this.#isComplete(status) || signal.aborted) return false
+    if (!this.#isComplete(status, intent) || signal.aborted) return false
     const receipts = await this.#replication.refreshReceipts(intent.domain, signal)
     if (!receipts?.signatures.includes(intent.signature) || signal.aborted) return false
     return this.#replication.verify(intent.domain, intent.signature, signal)
   }
 
-  #isComplete(status: ReplicationStatus | null): boolean {
-    return status?.state === 'complete' && !status.limited && !status.holes?.length && !status.refused?.length
+  #isComplete(status: ReplicationStatus | null, intent: StoredIntent): boolean {
+    return status?.state === 'complete'
+      && !status.limited
+      && !status.holes?.length
+      && !status.refused?.length
+      && (!intent.package || status.package?.published === true)
   }
   #read(): StoredState {
     try {

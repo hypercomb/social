@@ -39,6 +39,18 @@
 /media/*
   Cache-Control: public, max-age=604800
 
+# A host is public read-only content. Other Hypercomb origins must be able to
+# pull and verify these bytes; credentials are neither sent nor accepted.
+/content/*
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=31536000, immutable
+
+# Mutable discovery surfaces must not strand a node on an old package head.
+/content/manifest.json
+  Cache-Control: no-cache, no-store, must-revalidate
+/content/44150aa24d2f2a1c1b544530e2f7e177cde71130f882f37984d0cdba16bf2363/*
+  Cache-Control: no-cache, no-store, must-revalidate
+
 # The service worker must never be cached hard — a stale one strands clients on
 # an old runtime with no way to update.
 /hypercomb.worker.js

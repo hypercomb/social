@@ -33,7 +33,7 @@
 # narrower rules after /content/* so Pages-style hosts do not freeze them.
 /content/manifest.json
   Cache-Control: no-cache, no-store, must-revalidate
-/content/44150aa24d2f2a1c1b544530e2f7e177cde71130f882f37984d0cdba16bf2363/
+/content/44150aa24d2f2a1c1b544530e2f7e177cde71130f882f37984d0cdba16bf2363/*
   Cache-Control: no-cache, no-store, must-revalidate
 
 /vendor/*

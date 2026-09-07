@@ -295,14 +295,24 @@ const syncTarget = (
   // address — a directory describing itself. Both host shapes then answer one
   // URL, which is the whole point: nothing is named and nothing is agreed.
   //
-  // `index.html` because that is what a static host serves for a directory
-  // URL. It is not a member and every reader filters it out, on both shapes.
+  // `index.html` because Pages-style hosts serve it for a directory URL. Azure
+  // Static Web Apps needs an explicit rewrite to preserve the listing's text
+  // MIME type, so mirrored browser ships also carry the same bytes as
+  // `listing.txt`. Neither file is a member and every live reader filters the
+  // static renderings out.
   const listing = poolOrder.map((_, index) => poolEntryName(index)).sort().join('\n')
   const indexPath = join(poolDir, 'index.html')
   if (!existsSync(indexPath) || readFileSync(indexPath, 'utf8') !== listing) {
     writeFileSync(indexPath, listing, 'utf8')
     copied++
   } else skipped++
+  if (!additive) {
+    const listingPath = join(poolDir, 'listing.txt')
+    if (!existsSync(listingPath) || readFileSync(listingPath, 'utf8') !== listing) {
+      writeFileSync(listingPath, listing, 'utf8')
+      copied++
+    } else skipped++
+  }
 
   // remove stale entries (signatures no longer in source) — STRICTLY
   // whitelisted to 64-hex names so app assets sharing the target root

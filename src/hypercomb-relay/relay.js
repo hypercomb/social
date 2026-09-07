@@ -30,7 +30,7 @@ import { verifyEvent } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
 import { verifyNip98 } from './http-auth.js'
 import { blockedSourcesReason } from './address-guard.js'
-import { contentDirectoryIO, parseReplicationRequest, resolveSignatureClosure, resolveSignatureInventory } from './replicate.js'
+import { contentDirectoryIO, HOST_PACKAGES_POOL, parseReplicationRequest, publishReplicatedPackage, resolvePackageClosure, resolveSignatureClosure, resolveSignatureInventory } from './replicate.js'
 import { ReceiptIndex } from './receipt-index.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -869,25 +869,59 @@ function tryReplicate(req, res) {
       if (blocked) { respondText(res, 400, blocked); return }
       const key = `${auth.pubkey}:${request.signature}`
       const existing = replicationJobs.get(key)
+      // Preserve one job per status identity. If a package request arrives
+      // behind a generic/inventory walk, queue its FULL request (sources and
+      // limit included) as a second delta pass. That avoids both status races
+      // and a false 202 whose package intent inherited insufficient inputs.
+      if (existing && request.package && !existing.packageRequest) existing.packageRequest = request
       if (!existing) {
-        const resolver = request.inventory ? resolveSignatureInventory : resolveSignatureClosure
+        const entry = { packageRequest: request.package ? request : null, promise: null }
         setReplicationResult(key, { state: 'running', signature: request.signature, startedAt: new Date().toISOString() })
-        const io = contentDirectoryIO(cfg.contentDir, request.sources, resolveFlatSig, {
-          allowPrivate: cfg.allowPrivateSources,
-          allowedOrigins: replicationOrigins,
-        })
-        const job = resolver(request.signature, io, { limit: request.limit })
-          .then(result => {
-            receiptIndex.add(auth.pubkey, result.held)
-            setReplicationResult(key, { state: 'complete', completedAt: new Date().toISOString(), ...result })
-            console.log(`[replicate] ${auth.pubkey.slice(0, 8)}… ${request.signature.slice(0, 12)}… fetched=${result.fetched} present=${result.present} holes=${result.holes.length} refused=${result.refused.length}${result.limited ? ' limited' : ''}`)
+        const resolveRequest = async jobRequest => {
+          const resolver = jobRequest.package
+            ? resolvePackageClosure
+            : jobRequest.inventory ? resolveSignatureInventory : resolveSignatureClosure
+          const io = contentDirectoryIO(cfg.contentDir, jobRequest.sources, resolveFlatSig, {
+            allowPrivate: cfg.allowPrivateSources,
+            allowedOrigins: replicationOrigins,
           })
+          return await resolver(jobRequest.signature, io, { limit: jobRequest.limit })
+        }
+        const job = (async () => {
+          const receipted = new Set()
+          let result = await resolveRequest(request)
+          for (const signature of result.held) receipted.add(signature)
+
+          // A package request attached to an earlier non-package job gets its
+          // own structural walk with its own inputs. Atoms already landed make
+          // this an inexpensive delta pass in the successful common case.
+          const packageRequest = entry.packageRequest
+          if (packageRequest && packageRequest !== request) {
+            result = await resolveRequest(packageRequest)
+            for (const signature of result.held) receipted.add(signature)
+          }
+
+          receiptIndex.add(auth.pubkey, receipted)
+          const publication = publishReplicatedPackage(cfg.contentDir, packageRequest, result)
+          setReplicationResult(key, {
+            state: 'complete', completedAt: new Date().toISOString(), ...result,
+            ...(packageRequest ? {
+              package: {
+                label: packageRequest.package.label,
+                published: publication !== null,
+                ...(publication ?? {}),
+              },
+            } : {}),
+          })
+          console.log(`[replicate] ${auth.pubkey.slice(0, 8)}… ${request.signature.slice(0, 12)}… fetched=${result.fetched} present=${result.present} holes=${result.holes.length} refused=${result.refused.length}${result.limited ? ' limited' : ''}${publication ? ` package=${publication.appended ? 'appended' : 'held'}:${publication.name}` : ''}`)
+        })()
           .catch(error => {
             setReplicationResult(key, { state: 'failed', signature: request.signature, completedAt: new Date().toISOString(), error: String(error?.message || error) })
             console.error('[replicate] job failed:', error?.message || error)
           })
           .finally(() => replicationJobs.delete(key))
-        replicationJobs.set(key, job)
+        entry.promise = job
+        replicationJobs.set(key, entry)
       }
       res.writeHead(202, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' })
       res.end(JSON.stringify({ accepted: true, signature: request.signature, running: !!existing }))
@@ -951,6 +985,10 @@ function tryWriteContent(req, res) {
   const base = urlPath.split('/').pop() || ''
   const sig = base.replace(/\.(js|json)$/i, '').toLowerCase()
   if (!/^[0-9a-f]{64}$/.test(sig)) { respondText(res, 400, 'target is not sig-addressed'); return true }
+  // The pool's address has a known atom preimage (`host:packages`). Reserve it
+  // on BOTH write paths even before the directory exists, or a valid direct
+  // PUT could occupy the path and permanently prevent package publication.
+  if (sig === HOST_PACKAGES_POOL) { respondText(res, 409, 'target is reserved for the host:packages pool'); return true }
 
   const auth = verifyWriteAuth(req)
   if (!auth.ok) { respondText(res, 401, auth.reason); return true }
