@@ -47,9 +47,9 @@
   </script>
 
   <!-- interactive-widget=resizes-content: keyboard shrinks the layout viewport
-       (Android) so bottom-anchored chrome rides above it. Kept in sync with
-       hypercomb-web/src/index.html (shell parity). -->
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+       (Android) so bottom-anchored chrome rides above it. viewport-fit=cover
+       exposes safe areas while browser zoom remains user-controlled. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <!-- Built by `node scripts/build-favicons.cjs` — same mark as the app. -->
   <link rel="icon" href="favicon.ico" sizes="48x48">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">

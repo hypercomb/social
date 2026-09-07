@@ -225,3 +225,22 @@ describe('validatePoolSpelling', () => {
     }
   })
 })
+
+describe('the home molecule — what the home page draws from', () => {
+  it('is an ordinary bare-word molecule, so a top-level tile of that name IS the home', async () => {
+    const { HOME_MOLECULE_NAME, homeMoleculeAddress, homeMoleculeKey, rootMoleculeAddress } =
+      await import('./molecule-address.js')
+    const { lineageKey } = await import('./lineage-key.js')
+    expect(HOME_MOLECULE_NAME).toBe('root-entries')
+    expect(await homeMoleculeAddress()).toBe(await moleculeAddress(HOME_MOLECULE_NAME))
+    // The lineage key of a top-level tile named root-entries is the same
+    // preimage — history.service signs the empty path with exactly this key.
+    expect(homeMoleculeKey()).toBe(lineageKey([HOME_MOLECULE_NAME]))
+    expect(homeMoleculeKey()).not.toBe('')
+  })
+
+  it('is never the empty-content root — that bag stays as the legacy alias', async () => {
+    const { homeMoleculeAddress, rootMoleculeAddress } = await import('./molecule-address.js')
+    expect(await homeMoleculeAddress()).not.toBe(await rootMoleculeAddress())
+  })
+})

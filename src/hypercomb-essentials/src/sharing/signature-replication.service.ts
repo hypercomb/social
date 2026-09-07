@@ -22,6 +22,9 @@ export type ReplicationRequest = {
   sources: string[]
   limit?: number
   inventory?: boolean
+  /** Opt in to publishing a verified, complete closure in the destination
+   * host's `host:packages` pool. Generic signature replication omits this. */
+  package?: { label: string }
 }
 
 export type ReplicationStatus = {
@@ -34,6 +37,13 @@ export type ReplicationStatus = {
   holes?: string[]
   refused?: string[]
   limited?: boolean
+  package?: {
+    label: string
+    published: boolean
+    appended?: boolean
+    index?: number
+    name?: string
+  }
   error?: string
 }
 

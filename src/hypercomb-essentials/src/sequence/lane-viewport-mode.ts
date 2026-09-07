@@ -20,6 +20,8 @@ import { MOBILE_MODE_IOC_KEY } from '../preferences/mobile-pheromones.js'
 import { LANE_DEFAULT, LANE_MAX, LANE_MIN, clampLanes } from './arrangements.js'
 
 const LANE_COUNT_KEY = 'hc:lane-count'
+const LANE_COUNT_REVISION_KEY = 'hc:lane-count-revision'
+const LANE_COUNT_REVISION = 'browse-default-v1'
 
 /** The switch itself travels on the BUS, because module scope is not shared.
  *
@@ -56,6 +58,35 @@ try {
 // the ordinary placement commit.
 let laneCount = LANE_DEFAULT
 
+/** Upgrade the old implicit three-lane scan default without trampling a
+ *  choice made after the readable two-lane default shipped. Before the
+ *  revision marker existed, a stored `3` was indistinguishable from the old
+ *  default. Migrating it once is the useful bias: anyone who really wants the
+ *  scan rung can select it again, and that explicit choice is then marked. */
+export const laneCountFromStoredPreference = (
+  storedValue: string | null,
+  currentRevision: boolean,
+): number => {
+  const stored = Number(storedValue)
+  if (!Number.isFinite(stored) || stored <= 0) return LANE_DEFAULT
+  const normalized = clampLanes(stored)
+  return !currentRevision && normalized === LANE_MAX ? LANE_DEFAULT : normalized
+}
+
+const restoreLaneCount = (): void => {
+  try {
+    const stored = window.localStorage?.getItem(LANE_COUNT_KEY) ?? null
+    const currentRevision = window.localStorage?.getItem(LANE_COUNT_REVISION_KEY) === LANE_COUNT_REVISION
+    laneCount = laneCountFromStoredPreference(stored, currentRevision)
+    // Repair invalid values and stamp the one-time default migration. Every
+    // separately bundled bee reads the same two storage values.
+    if (stored !== String(laneCount)) window.localStorage?.setItem(LANE_COUNT_KEY, String(laneCount))
+    if (!currentRevision) window.localStorage?.setItem(LANE_COUNT_REVISION_KEY, LANE_COUNT_REVISION)
+  } catch {
+    laneCount = LANE_DEFAULT
+  }
+}
+
 const mobileModeActive = (): boolean => {
   const ioc = (globalThis as {
     ioc?: { get?: (key: string) => unknown }
@@ -85,8 +116,9 @@ export const getLaneScrollAxis = (): LaneScrollAxis | null =>
  *  copy every bee can see. */
 export const getLaneCount = (): number => {
   try {
-    const stored = Number(window.localStorage?.getItem(LANE_COUNT_KEY))
-    if (Number.isFinite(stored) && stored > 0) laneCount = clampLanes(stored)
+    const stored = window.localStorage?.getItem(LANE_COUNT_KEY) ?? null
+    const currentRevision = window.localStorage?.getItem(LANE_COUNT_REVISION_KEY) === LANE_COUNT_REVISION
+    laneCount = laneCountFromStoredPreference(stored, currentRevision)
   } catch {
     /* storage disabled — the local rung is the best we have */
   }
@@ -97,6 +129,7 @@ export const setLaneCount = (lanes: number): number => {
   laneCount = clampLanes(lanes)
   try {
     window.localStorage?.setItem(LANE_COUNT_KEY, String(laneCount))
+    window.localStorage?.setItem(LANE_COUNT_REVISION_KEY, LANE_COUNT_REVISION)
   } catch {
     /* private mode / storage disabled — the rung just won't persist */
   }
@@ -112,12 +145,7 @@ export const stepLaneCount = (dir: number): number =>
 export const laneCountAtEdge = (dir: number): boolean =>
   dir < 0 ? getLaneCount() <= LANE_MIN : getLaneCount() >= LANE_MAX
 
-try {
-  const stored = Number(window.localStorage?.getItem(LANE_COUNT_KEY))
-  laneCount = Number.isFinite(stored) && stored > 0 ? clampLanes(stored) : LANE_DEFAULT
-} catch {
-  laneCount = LANE_DEFAULT
-}
+restoreLaneCount()
 
 /** Engage or release the lane viewport. There is no axis to pass: the caller
  *  owns WHETHER the phone is reading in lanes, the device owns WHICH WAY. */

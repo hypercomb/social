@@ -1,9 +1,9 @@
 // presentation/grid/rail-grid.ts
 //
 // THE PHONE'S SLOT GRID. On a phone the hive is read as a strip of rails —
-// three lanes across the SHORT side of the screen, the strip running along
-// the LONG one — and this module is the pure geometry of that strip: slot
-// number in, hex coordinate out. It is the rail counterpart of the spiral
+// one to three lanes across the SHORT side of the screen (two by default),
+// the strip running along the LONG one — and this module is the pure geometry
+// of that strip: slot number in, hex coordinate out. It is the rail counterpart of the spiral
 // matrix `AxialService.createMatrix` builds for the desktop, and the two are
 // interchangeable behind `AxialService.items`: the renderer places slot i at
 // `items.get(i)` and never asks which matrix answered.

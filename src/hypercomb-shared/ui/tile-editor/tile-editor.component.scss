@@ -897,3 +897,16 @@
     color: var(--hc-window-ink-loud);
   }
 }
+
+// The Q&A rules are authored after the main phone block, so their one-class
+// selectors otherwise win the cascade and shrink the textarea back below the
+// iOS 16px focus floor. Use the shared either-axis phone definition here: a
+// landscape handset can be wider than 599px while still being phone-short.
+@include phone {
+  .qa-answer-input { font-size: 16px; }
+
+  .qa-submit {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

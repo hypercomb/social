@@ -365,6 +365,10 @@
     // The prompt and GO draw their own frame. Keeping the header frame here
     // would make the icon rail look like it was still inside the command line.
     padding: 0;
+    // viewport-fit=cover exposes the notch/status inset. Reserve it once on
+    // the outer bar; children keep their existing geometry and the measured
+    // --hc-header-bottom automatically moves every anchored surface below it.
+    padding-top: var(--hc-safe-top, env(safe-area-inset-top, 0px));
     background: transparent;
     border: 0;
     box-shadow: none;
@@ -394,7 +398,10 @@
 
   .header-bar.input-open {
     display: flex;
+    box-sizing: border-box;
     height: clamp(3rem, 24vh, 4.5rem);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
     // The revealed rail is tapped with a thumb too: the desktop metrics
     // (1.6rem boxes, 25.6px) are far under the 44px floor.
     --hc-rail-btn: 2.75rem;

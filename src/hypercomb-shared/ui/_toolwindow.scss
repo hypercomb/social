@@ -205,6 +205,7 @@ $header-action-gap: 0.25rem;
     min-width: 0 !important;
     max-width: none !important;
     max-height: min(62vh, 30rem);
+    max-height: min(62dvh, 30rem);
     box-sizing: border-box;
     border-right: 0 !important;
     border-left: var(--hc-controls-left, 0px) solid transparent !important;
@@ -215,11 +216,29 @@ $header-action-gap: 0.25rem;
     box-shadow: 0 -10px 40px rgba(var(--hc-panel-shadow), 0.55), 0 0 0 1px rgba(var(--acc), 0.06) inset;
     font-size: calc(1rem * max(1, var(--hc-panel-scale, 1))) !important;
 
-    // Thumb-sized controls. Scoped to the sheet's own buttons; an icon button
-    // that sets an explicit height (the header's close, a chip) is unaffected
-    // because min-height only raises what is shorter.
+    // Thumb-sized controls. The block-size floor keeps compact row controls
+    // usable without forcing every text button to become 44px wide. Only
+    // controls that identify themselves as actions/icons/closes get the square
+    // target; this also wins over the header primitive's desktop dimensions.
     button,
-    [role='button'] { min-height: 2.5em; }
+    [role='button'] { min-block-size: 44px; }
+
+    button[class*='action'],
+    button[class*='icon'],
+    button[class*='close'],
+    [role='button'][class*='action'],
+    [role='button'][class*='icon'],
+    [role='button'][class*='close'],
+    [class*='actions'] > button {
+      min-inline-size: 44px !important;
+      min-block-size: 44px !important;
+    }
+
+    // iOS zooms focused form fields below 16px, which turns a simple edit into
+    // an accidental viewport zoom. Preserve larger inherited panel scales.
+    input,
+    select,
+    textarea { font-size: max(1em, 16px) !important; }
 
     // The resize grip the primitive injects on the panel's inner edge: a sheet
     // is not resized from its side. `::ng-deep` because the grip is created
@@ -229,7 +248,7 @@ $header-action-gap: 0.25rem;
     & ::ng-deep [data-hc-grip] { display: none !important; }
 
     &[data-hc-sheet='full'] {
-      top: 0 !important;
+      top: var(--hc-safe-top, env(safe-area-inset-top, 0px)) !important;
       max-height: none;
       border-top: 0;
       border-radius: 0;

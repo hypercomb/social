@@ -613,3 +613,18 @@ $clipboard: #49d6d0;
   letter-spacing: 0.06em;
   text-indent: 0;
 }
+
+@media (hover: none), (pointer: coarse) {
+  .item-verb {
+    opacity: 1;
+    transform: none;
+  }
+
+  .item-discard {
+    width: auto;
+    height: auto;
+    min-inline-size: 44px;
+    min-block-size: 44px;
+    opacity: 1;
+  }
+}

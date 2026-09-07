@@ -3,7 +3,8 @@
 // Full-viewport DOCUMENT takeover — the long-form analogue of SiteViewDrone
 // and TutorViewDrone. When ViewMode is 'document', the current cell's body
 // (its first-class `document` slot) is opened in an editor over the
-// viewport. Escape or right-click returns to hexagons.
+// viewport. The visible back control, Escape, or the shared BackGesture
+// returns to the hive.
 //
 // ── Why a plain markdown surface ──────────────────────────────────────
 //
@@ -24,10 +25,12 @@
 // with the network down and never blocks a keystroke on a request.
 
 import { Drone } from '@hypercomb/core'
+import type { BackGesture } from '../navigation/back-gesture.service.js'
 import { DOCUMENT_SLOT } from './document-slot.js'
 import { SAVE_DEBOUNCE_MS, newestBodySig, shouldCommitBody } from './document-edit.js'
 
 const DOCUMENT_VIEW = 'document'
+const DOCUMENT_VIEW_OWNER = 'document-view'
 
 /**
  * This behaviour's feature identity — what the Beehaviors panel switches off
@@ -67,8 +70,9 @@ export class DocumentViewDrone extends Drone {
   #registered = false
   #lineageBound = false
   #viewModeBound = false
-  #contextMenuBound = false
   #escapeBound = false
+  /** Unregisters this view's shared right-click / hardware-BACK peel. */
+  #backOff: (() => void) | null = null
   #reconciling = false
 
   protected override deps = {
@@ -97,13 +101,6 @@ export class DocumentViewDrone extends Drone {
         this.#viewModeBound = true
       }
     }
-    if (!this.#contextMenuBound) {
-      // Right-click anywhere in document mode = back to hexagons. Capture
-      // phase so the browser menu never appears; gated on the mode so it is
-      // inert in hexagon view.
-      window.addEventListener('contextmenu', this.#onContextMenu, true)
-      this.#contextMenuBound = true
-    }
     if (!this.#escapeBound) {
       // ESCAPE IS A PEEL, AND IT IS EVERYWHERE. This used to hang off the
       // EDITOR, so it only answered while the caret was in the text — press
@@ -122,6 +119,16 @@ export class DocumentViewDrone extends Drone {
       window.addEventListener('keydown', this.#onKeyDown, true)
       this.#escapeBound = true
     }
+    if (!this.#backOff) {
+      // One registration feeds both shared ways back: BackGesture owns the
+      // right button, and navigation/view-back routes browser / hardware BACK
+      // through the same registry. It also preserves the arrival-face rule
+      // (navigate back rather than merely peeling the renderer). Do not push
+      // a document-specific history entry here: view-back owns the single
+      // trap for the whole view stack.
+      this.#backOff = window.ioc?.get<BackGesture>('@diamondcoreprocessor.com/BackGesture')
+        ?.register({ owner: DOCUMENT_VIEW_OWNER, back: () => { void this.#exit() } }) ?? null
+    }
     void this.#reconcile()
   }
 
@@ -130,8 +137,9 @@ export class DocumentViewDrone extends Drone {
     if (this.#lineageBound && lineage?.removeEventListener) lineage.removeEventListener('change', this.#onLineageChange)
     const vm = this.#vm()
     if (this.#viewModeBound && vm?.removeEventListener) vm.removeEventListener('change', this.#onViewModeChange)
-    if (this.#contextMenuBound) window.removeEventListener('contextmenu', this.#onContextMenu, true)
     if (this.#escapeBound) { window.removeEventListener('keydown', this.#onKeyDown, true); this.#escapeBound = false }
+    this.#backOff?.()
+    this.#backOff = null
     this.#teardown()
   }
 
@@ -139,13 +147,6 @@ export class DocumentViewDrone extends Drone {
 
   readonly #onLineageChange = (): void => { void this.#reconcile() }
   readonly #onViewModeChange = (): void => { void this.#reconcile() }
-
-  readonly #onContextMenu = (e: MouseEvent): void => {
-    const vm = this.#vm()
-    if (!vm || vm.mode !== DOCUMENT_VIEW) return
-    e.preventDefault()
-    void this.#exit()
-  }
 
   #vm(): ViewModeShape | undefined {
     return (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<ViewModeShape>('@hypercomb.social/ViewMode')
@@ -214,21 +215,48 @@ export class DocumentViewDrone extends Drone {
     // handler preventDefaults wheel events and the document cannot scroll.
     host.setAttribute('data-consumes-wheel', '')
 
+    const toolbar = document.createElement('div')
+    toolbar.setAttribute('data-hc-document-toolbar', '')
+    toolbar.style.cssText =
+      'flex:0 0 auto;box-sizing:border-box;min-height:3.75rem;' +
+      'padding:calc(8px + var(--hc-safe-top,env(safe-area-inset-top,0px))) ' +
+      'calc(12px + env(safe-area-inset-right,0px)) 8px ' +
+      'calc(12px + env(safe-area-inset-left,0px));' +
+      'border-bottom:1px solid #211f2b;display:flex;align-items:center;gap:12px;'
+
+    const back = document.createElement('button')
+    back.type = 'button'
+    back.setAttribute('data-hc-document-back', '')
+    back.setAttribute('aria-label', 'Back to the hive')
+    back.title = 'Back to the hive'
+    back.textContent = '\u2190'
+    back.style.cssText =
+      'flex:0 0 2.75rem;width:2.75rem;height:2.75rem;padding:0;' +
+      'display:flex;align-items:center;justify-content:center;border-radius:50%;' +
+      'border:1px solid #343140;background-color:#1b1922;color:#e8e6f0;' +
+      'font:600 1.4rem/1 system-ui,sans-serif;cursor:pointer;touch-action:manipulation;'
+    back.addEventListener('click', this.#onBackClick)
+
     const hint = document.createElement('div')
     hint.style.cssText =
-      'flex:0 0 auto;padding:10px 18px;font:12px/1.5 system-ui,sans-serif;' +
-      'color:#8a8798;border-bottom:1px solid #211f2b;display:flex;gap:16px;'
-    hint.append(this.#hintText('Saves as you type'), this.#hintText('Esc or right-click to close'))
+      'flex:1 1 auto;min-width:0;font:13px/1.5 system-ui,sans-serif;' +
+      'color:#8a8798;display:flex;flex-wrap:wrap;gap:2px 16px;'
+    hint.append(this.#hintText('Saves as you type'), this.#hintText('Back or Esc to close'))
+    toolbar.append(back, hint)
 
     const editor = document.createElement('textarea')
+    editor.className = 'hc-document-editor'
+    editor.setAttribute('aria-label', 'Document body')
     editor.value = text
     editor.spellcheck = false
     editor.style.cssText =
-      'flex:1 1 auto;width:100%;box-sizing:border-box;padding:28px 18px;border:0;outline:0;resize:none;' +
-      'background:transparent;color:#e8e6f0;font:14px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace;'
+      'flex:1 1 auto;width:100%;box-sizing:border-box;' +
+      'padding:28px 18px calc(28px + var(--hc-safe-bottom,env(safe-area-inset-bottom,0px)));' +
+      'border:0;outline:0;resize:none;background-color:transparent;color:#e8e6f0;' +
+      'font:16px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace;'
     editor.addEventListener('input', this.#onInput)
 
-    host.append(hint, editor)
+    host.append(toolbar, editor)
     document.body.appendChild(host)
     editor.focus()
 
@@ -250,6 +278,8 @@ export class DocumentViewDrone extends Drone {
     e.stopImmediatePropagation()
     void this.#exit()
   }
+
+  readonly #onBackClick = (): void => { void this.#backOut() }
 
   readonly #onInput = (): void => {
     const mount = this.#mount
@@ -291,18 +321,41 @@ export class DocumentViewDrone extends Drone {
     }
   }
 
+  /** The visible back plate obeys the same arrival-face rule as BACK and the
+   *  right button. Save first because an arrival-face back navigates rather
+   *  than calling the peel callback. */
+  async #backOut(): Promise<void> {
+    await this.#flushPendingSave()
+    const vm = this.#vm()
+    if (!vm || vm.mode !== DOCUMENT_VIEW) return
+    const peel = (): void => {
+      this.#teardown()
+      vm.setMode('hexagons')
+    }
+    const gesture = window.ioc?.get<BackGesture>('@diamondcoreprocessor.com/BackGesture')
+    if (gesture?.backOutOfView) gesture.backOutOfView(peel)
+    else peel()
+  }
+
   /** Flush a pending save before leaving, so closing never loses a keystroke. */
   async #exit(): Promise<void> {
-    await this.#teardownSaving()
+    await this.#flushPendingSave()
+    this.#teardown()
     this.#vm()?.setMode('hexagons')
   }
 
   async #teardownSaving(): Promise<void> {
-    if (this.#mount) {
-      if (this.#mount.timer !== null) window.clearTimeout(this.#mount.timer)
-      await this.#save()
-    }
+    await this.#flushPendingSave()
     this.#teardown()
+  }
+
+  async #flushPendingSave(): Promise<void> {
+    if (!this.#mount) return
+    if (this.#mount.timer !== null) {
+      window.clearTimeout(this.#mount.timer)
+      this.#mount.timer = null
+    }
+    await this.#save()
   }
 
   #teardown(): void {
@@ -322,8 +375,8 @@ export class DocumentViewDrone extends Drone {
     // must not unhide the chrome while the document is still open.
     const modes = window.ioc.get('@diamondcoreprocessor.com/ModeRegistry') as
       { enter(mode: string, owner: string): void; exit(mode: string, owner: string): void } | undefined
-    if (active) modes?.enter('view:active', 'document-view')
-    else modes?.exit('view:active', 'document-view')
+    if (active) modes?.enter('view:active', DOCUMENT_VIEW_OWNER)
+    else modes?.exit('view:active', DOCUMENT_VIEW_OWNER)
   }
 }
 

@@ -38,6 +38,12 @@
       }
     },
     {
+      "route": "/content/44150aa24d2f2a1c1b544530e2f7e177cde71130f882f37984d0cdba16bf2363/*",
+      "headers": {
+        "cache-control": "no-cache, no-store, must-revalidate"
+      }
+    },
+    {
       "route": "/content/*",
       "headers": {
         "cache-control": "public, max-age=31536000, immutable"

@@ -21,8 +21,9 @@
 const SIG_RE = /^[a-f0-9]{64}$/
 
 const origin = (process.argv[2] ?? '').replace(/\/+$/, '')
+const contentOnly = process.argv.includes('--content-only')
 if (!origin) {
-  console.error('usage: node host/check-host.mjs <origin>   e.g. https://example.com')
+  console.error('usage: node host/check-host.mjs <origin> [--content-only]   e.g. https://example.com')
   process.exit(2)
 }
 
@@ -52,47 +53,49 @@ if (index.error || !index.ok) {
     'the origin must serve the shim build (index.html + main.js) at /')
 } else {
   const html = await index.text()
-  const hasModule = html.includes('main.js')
+  const hasModule = /<script\b(?=[^>]*\btype=["']module["'])(?=[^>]*\bsrc=["'][^"']+\.js(?:[?#][^"']*)?["'])[^>]*>/i.test(html)
   record(hasModule, 'serves the shell', `${html.length} bytes of HTML at /`,
-    'index.html must load ./main.js as a module — deploy the shim dist/, not a placeholder')
+    'index.html must load a JavaScript module entry point — deploy the complete built shell, not a placeholder')
 }
 
 // ── 2. the pin ───────────────────────────────────────────────────────────────
 // The one mutable pointer in the chain. Everything it names is verified.
 let pin = ''
-const pinRes = await get('/pin', { cache: 'no-store' })
-if (pinRes.error || !pinRes.ok) {
-  record(false, 'publishes /pin', pinRes.error ? String(pinRes.error) : `HTTP ${pinRes.status}`,
-    'the shim build writes dist/pin — deploy the whole dist/, not just index.html + assets')
-} else {
-  pin = (await pinRes.text()).trim().toLowerCase()
-  record(SIG_RE.test(pin), 'publishes /pin', pin ? `${pin.slice(0, 12)}…` : '(empty)',
-    '/pin must hold one 64-hex signature')
-  const cache = (pinRes.headers.get('cache-control') ?? '').toLowerCase()
-  const fresh = cache.includes('no-store') || cache.includes('no-cache') || cache.includes('max-age=0')
-  record(fresh ? true : null, 'pin is not hard-cached', cache || '(no cache-control)',
-    'a hard-cached pin cannot be repointed — set max-age=0, must-revalidate (see public/_headers)')
-}
-
-// ── 3. the bootstrap bundle, verified ────────────────────────────────────────
-if (SIG_RE.test(pin)) {
-  let served = null
-  for (const path of [`/${pin}`, `/content/${pin}`]) {
-    const res = await get(path)
-    if (!res.error && res.ok) { served = { res, path }; break }
-  }
-  if (!served) {
-    record(false, 'serves the bootstrap it pins', 'no bytes at /<pin> or /content/<pin>',
-      'the pinned bundle must be reachable — deploy dist/<sig> alongside dist/pin')
+if (!contentOnly) {
+  const pinRes = await get('/pin', { cache: 'no-store' })
+  if (pinRes.error || !pinRes.ok) {
+    record(false, 'publishes /pin', pinRes.error ? String(pinRes.error) : `HTTP ${pinRes.status}`,
+      'the shim build writes dist/pin — deploy the whole dist/, not just index.html + assets')
   } else {
-    const bytes = await served.res.arrayBuffer()
-    const hash = await sha256(bytes)
-    record(hash === pin, 'bootstrap bytes hash to the pin',
-      hash === pin ? `${(bytes.byteLength / 1024).toFixed(0)} kB at ${served.path}` : `served ${hash.slice(0, 12)}…, pinned ${pin.slice(0, 12)}…`,
-      'the origin is serving something other than what it pins — redeploy; a mismatch is REFUSED by every client')
-    const type = (served.res.headers.get('content-type') ?? '').toLowerCase()
-    record(!type.includes('text/html'), 'signature paths are not swallowed by the SPA fallback', type || '(none)',
-      'an unconditional /* → /index.html 200 rewrite hides the heap. Existing files must win (Pages does this by default)')
+    pin = (await pinRes.text()).trim().toLowerCase()
+    record(SIG_RE.test(pin), 'publishes /pin', pin ? `${pin.slice(0, 12)}…` : '(empty)',
+      '/pin must hold one 64-hex signature')
+    const cache = (pinRes.headers.get('cache-control') ?? '').toLowerCase()
+    const fresh = cache.includes('no-store') || cache.includes('no-cache') || cache.includes('max-age=0')
+    record(fresh ? true : null, 'pin is not hard-cached', cache || '(no cache-control)',
+      'a hard-cached pin cannot be repointed — set max-age=0, must-revalidate (see public/_headers)')
+  }
+
+  // ── 3. the bootstrap bundle, verified ──────────────────────────────────────
+  if (SIG_RE.test(pin)) {
+    let served = null
+    for (const path of [`/${pin}`, `/content/${pin}`]) {
+      const res = await get(path)
+      if (!res.error && res.ok) { served = { res, path }; break }
+    }
+    if (!served) {
+      record(false, 'serves the bootstrap it pins', 'no bytes at /<pin> or /content/<pin>',
+        'the pinned bundle must be reachable — deploy dist/<sig> alongside dist/pin')
+    } else {
+      const bytes = await served.res.arrayBuffer()
+      const hash = await sha256(bytes)
+      record(hash === pin, 'bootstrap bytes hash to the pin',
+        hash === pin ? `${(bytes.byteLength / 1024).toFixed(0)} kB at ${served.path}` : `served ${hash.slice(0, 12)}…, pinned ${pin.slice(0, 12)}…`,
+        'the origin is serving something other than what it pins — redeploy; a mismatch is REFUSED by every client')
+      const type = (served.res.headers.get('content-type') ?? '').toLowerCase()
+      record(!type.includes('text/html'), 'signature paths are not swallowed by the SPA fallback', type || '(none)',
+        'an unconditional /* → /index.html 200 rewrite hides the heap. Existing files must win (Pages does this by default)')
+    }
   }
 }
 
@@ -105,8 +108,8 @@ for (const base of ['/content', '']) {
   try { manifest = await res.json(); manifestBase = base; break } catch { /* not JSON */ }
 }
 if (!manifest) {
-  record(null, 'publishes a package manifest', 'none at /content/manifest.json or /manifest.json',
-    'optional — a host with no packages is a valid shell host, but no node can install from it')
+  record(true, 'does not require a legacy package manifest',
+    'none at /content/manifest.json or /manifest.json; checking the host:packages pool below')
 } else {
   const sigs = Object.keys(manifest.packages ?? {}).filter(s => SIG_RE.test(s))
   record(sigs.length > 0, 'publishes a package manifest',
@@ -132,10 +135,13 @@ if (!manifest) {
 }
 
 // ── 5. CORS — the one that looks like "publishes nothing" ────────────────────
-{
-  const res = await get(`${manifestBase || '/content'}/manifest.json`, { cache: 'no-store' })
+// A missing legacy manifest is not a useful CORS probe: Azure does not attach
+// route headers to its generated 404 page. Current pool-based hosts are
+// checked against resources they actually publish below.
+if (manifest) {
+  const res = await get(`${manifestBase}/manifest.json`, { cache: 'no-store' })
   const acao = res.error ? null : res.headers.get('access-control-allow-origin')
-  record(acao === '*' || (acao != null && acao !== ''), 'content is readable cross-origin', acao ?? '(no header)',
+  record(acao === '*' || (acao != null && acao !== ''), 'package manifest is readable cross-origin', acao ?? '(no header)',
     'a host exists to be pulled FROM. Without Access-Control-Allow-Origin every replication from another ' +
     'origin dies as an opaque "Failed to fetch" and this host looks like it publishes nothing. ' +
     '`*` is correct: the bytes are public, immutable and verified by the reader.')
@@ -155,6 +161,13 @@ if (!manifest) {
     res.error ? String(res.error) : `${canonicalPath} returned HTTP ${res.status} ${type || ''}`.trim(),
     'exclude the content namespace from the SPA fallback; missing machine bytes must be absent, not HTML')
 
+  const nestedPath = `${canonicalPath}/00000000`
+  const nested = await get(nestedPath, { cache: 'no-store', redirect: 'manual' })
+  const nestedType = (nested.headers?.get?.('content-type') ?? '').toLowerCase()
+  record(!nested.error && nested.status === 404, 'missing pool members return 404',
+    nested.error ? String(nested.error) : `${nestedPath} returned HTTP ${nested.status} ${nestedType || ''}`.trim(),
+    'exclude nested machine paths from the SPA fallback; a pool member miss must never return the shell')
+
   if (canonicalBase) {
     const rootPath = `/${missing}`
     const root = await get(rootPath, { cache: 'no-store', redirect: 'manual' })
@@ -171,7 +184,7 @@ if (!manifest) {
 // holds, named by their own hash. A host with no index simply publishes no
 // languages, which is a warning rather than a failure: the shell still runs in
 // its fallback locale.
-{
+if (!contentOnly) {
   const res = await get('/locales.json', { cache: 'no-store' })
   if (res.error || !res.ok) {
     record(null, 'publishes locales as content', 'no /locales.json',
@@ -280,6 +293,7 @@ if (!manifest) {
   if (served) {
     const { path, res, type } = served
     const cache = (res.headers.get('cache-control') ?? '').toLowerCase()
+    const acao = res.headers.get('access-control-allow-origin')
     const body = await res.text()
     const entries = body.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
     const wellFormed = entries.length > 0 && entries.every(e => /^\d{8}$/.test(e) || SIG_RE.test(e))
@@ -289,6 +303,9 @@ if (!manifest) {
     const fresh = cache.includes('no-store') || cache.includes('max-age=0') || cache.includes('no-cache')
     record(fresh ? true : null, 'the pool listing is not hard-cached', cache || '(no cache-control)',
       'a pool GROWS — cache the listing and every client stops at the head it first saw; set no-store on the pool directory')
+    record(acao === '*' || (acao != null && acao !== ''), 'package pool is readable cross-origin',
+      acao ?? '(no header)',
+      'set Access-Control-Allow-Origin on the pool directory and its members so another host can discover them')
 
     // Prove the package picker can walk beyond the directory. A listing alone
     // can pass while the static host rewrites `<pool>/<entry>` to HTML — which
@@ -320,9 +337,13 @@ if (!manifest) {
           } else {
             const bytes = await packageRes.arrayBuffer()
             const hash = await sha256(bytes)
+            const packageAcao = packageRes.headers.get('access-control-allow-origin')
             record(hash === packageSig, 'serves the package root its pool names',
               hash === packageSig ? `${packageSig.slice(0, 12)}… verified` : `served ${hash.slice(0, 12)}…, named ${packageSig.slice(0, 12)}…`,
               'the package root bytes must hash to the signature advertised by the pool member')
+            record(packageAcao === '*' || (packageAcao != null && packageAcao !== ''),
+              'package bytes are readable cross-origin', packageAcao ?? '(no header)',
+              'set Access-Control-Allow-Origin on immutable content so another host can pull and verify the package')
           }
         }
       }

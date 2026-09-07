@@ -110,4 +110,26 @@ describe('passive durable replication', () => {
     f.queue.resume(); f.idle.fire(); await settle()
     expect(f.queue.pending().signatures).toHaveLength(0)
   })
+
+  it('keeps a package intent until status explicitly confirms publication', async () => {
+    const f = fixture()
+    const packageIntent = { ...intent, package: { label: 'development' } }
+    f.queue.enqueueSignature(packageIntent)
+    // An older relay ignores `package`, returns 202, and reports an otherwise
+    // complete byte replication. That must not drain the publication intent.
+    f.replication.status.mockResolvedValue({ state: 'complete', signature, holes: [], refused: [], limited: false })
+    f.queue.markReady(); f.idle.fire(); await settle()
+    expect(f.replication.replicate).toHaveBeenCalledWith(packageIntent.domain, packageIntent, expect.any(AbortSignal))
+    expect(f.queue.pending().signatures).toHaveLength(1)
+    expect(f.replication.refreshReceipts).not.toHaveBeenCalled()
+
+    f.replication.status.mockResolvedValue({
+      state: 'complete', signature, holes: [], refused: [], limited: false,
+      package: { label: 'development', published: true },
+    })
+    f.replication.refreshReceipts.mockResolvedValue({ version: 1, revision: 1, updatedAt: '', signatures: [signature] })
+    f.replication.verify.mockResolvedValue(true)
+    f.queue.resume(); f.idle.fire(); await settle()
+    expect(f.queue.pending().signatures).toHaveLength(0)
+  })
 })

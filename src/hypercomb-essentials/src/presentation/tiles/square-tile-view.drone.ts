@@ -712,8 +712,9 @@ const SCENE_CSS = `
 .wv-caption{color:#5c4630;font:600 .78rem/1.3 Georgia,'Times New Roman',serif;letter-spacing:.14em;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wv-plate:hover .wv-caption{color:#3a2a1c}
 .wv-hint{margin:auto auto 0;padding-top:2.6rem;text-align:center;color:rgba(138,118,87,.75);font:400 .74rem/1 Georgia,serif;letter-spacing:.26em;text-transform:uppercase;animation:wv-fade 1s ease .6s backwards}
-.wv-close{position:fixed;z-index:2147483600;right:calc(.75rem + env(safe-area-inset-right,0px) + var(--hc-scroll-gutter,0px));top:calc(.75rem + env(safe-area-inset-top,0px));width:2.25rem;height:2.25rem;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(255,253,247,.85);border:1px solid rgba(184,147,63,.5);backdrop-filter:blur(6px);color:#5c4630;cursor:pointer;font:1.3rem/1 serif;padding:0;opacity:.6;transition:opacity .16s ease}
+.wv-close{position:fixed;z-index:2147483600;right:calc(.75rem + env(safe-area-inset-right,0px) + var(--hc-scroll-gutter,0px));top:calc(.75rem + env(safe-area-inset-top,0px));width:2.75rem;height:2.75rem;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(255,253,247,.85);border:1px solid rgba(184,147,63,.5);backdrop-filter:blur(6px);color:#5c4630;cursor:pointer;font:1.3rem/1 serif;padding:0;opacity:.6;transition:opacity .16s ease}
 .wv-close:hover{opacity:1}
+@media(hover:none),(pointer:coarse){.wv-close{opacity:1}}
 /* THE DOG-EAR. A plate is a card and a card has a back; the corner is how you
    turn it. Standing on tiles that carry something, offered on hover
    elsewhere — never competing with the plate's own click. */
@@ -736,10 +737,10 @@ const SCENE_CSS = `
 @keyframes wv-rise{from{opacity:0;translate:0 14px}to{opacity:1;translate:0 0}}
 @keyframes wv-fade{from{opacity:0}to{opacity:1}}
 @media(prefers-reduced-motion:reduce){.wv-plate,.wv-crest{animation:none}.wv-hint{animation:none}}
-@media(max-width:560px){.wv-grid{grid-template-columns:repeat(auto-fill,minmax(128px,1fr))}.wv-mat{padding:6px}.wv-caption{font-size:.68rem;letter-spacing:.1em}
+@media(max-width:560px){.wv-grid{grid-template-columns:repeat(auto-fill,minmax(128px,1fr))}.wv-mat{padding:6px}.wv-caption{font-size:.85rem;letter-spacing:.08em}
  /* No hover to reveal it and a finger to hit it: the corner stands on every
     plate and takes a bigger target. The hold gesture opens it too. */
- .wv-fold{width:2.6rem;height:2.6rem;opacity:.8}.wv-fold::before{right:11px;top:11px}}
+ .wv-fold{width:2.75rem;height:2.75rem;opacity:.8}.wv-fold::before{right:11px;top:11px}}
 `
 
 const _squareTileView = new SquareTileViewDrone()

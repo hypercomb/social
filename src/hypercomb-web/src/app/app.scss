@@ -264,6 +264,9 @@ app-header {
 
 :host {
   display: block;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
 
   &.move-mode::after {
     content:

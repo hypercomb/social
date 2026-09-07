@@ -12,8 +12,8 @@ import { cellLocationSig } from '../../editor/tile-properties.js'
 import { peerDivergesAt } from '../../sharing/peer-divergence.js'
 import type { IconRegistryEntry } from './tile-actions.drone.js'
 import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-actions.drone.js'
-import { openTileMenu, openView, viewsFor } from './viewer-walk.js'
-import { viewDoorFor } from './app-deck.js'
+import { clickNeedsCoordinateHitTest, resolveTilePress, usesTileCloseUp } from './tile-tap-policy.js'
+import { openTileMenu } from './viewer-walk.js'
 
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; swarmTakeLabels?: string[]; noImageLabels?: string[]; substrateLabels?: string[]; linkLabels?: string[]; hiddenLabels?: string[]; shadedLabels?: string[]; flatPaths?: Record<string, string[]>; filterBlocked?: string[] }
 
@@ -42,9 +42,9 @@ const TILE_ENTER_HOLD_JITTER_PX = 8
 
 // ── The touch grammar ─────────────────────────────────────────────────
 //
-//   tap        GO TO THE TILE — enter its layer, ON THE RELEASE, never the
-//              press. A childless tile enters its empty layer; there is no
-//              such thing as a tile a tap cannot walk into.
+//   tap        OPEN THE TILE — its readable close-up, with labelled, thumb-
+//              sized actions and an explicit "go inside" choice. No primary
+//              action is hidden behind a gesture a phone never explains.
 //   hold still the quick-menu ring (quickmenu/quick-menu.input.ts, 380ms).
 //              Let go without moving and the ring's zero-travel slot opens
 //              THAT tile's own screen — picture, name, notes, actions. Flick
@@ -57,7 +57,7 @@ const TILE_ENTER_HOLD_JITTER_PX = 8
 // a tile. One long press, one owner: the ring, which carries the tile screen
 // as its centre.
 //
-// Entry MUST stay on the release. A press that navigates on pointerdown
+// The tap MUST stay on the release. A press that navigates on pointerdown
 // consumes the pointer, and every hold watching it — drag-to-move, the
 // quick-menu ring — dies with the consume before it can mature. That is why a
 // long-press on a phone once did nothing at all: the view had already changed
@@ -2954,11 +2954,13 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
-    // A FINGER on a branch tile: do nothing on the press. Entry happens on the
-    // release (#onClick), the long press belongs to the quick-menu ring, and
-    // the drag belongs to touch-move — none of which survive this drone
-    // consuming the pointer here. See the touch grammar at the top.
-    if (e.pointerType === 'touch') {
+    // A PHONE TAP on a branch tile: do nothing on the press. The release
+    // (#onClick) opens the close-up, the long press belongs to the quick-menu
+    // ring, and a finger drag belongs to touch-move — none of which survive
+    // this drone consuming the pointer here. Check the shared mobile service
+    // as well as pointerType so a stylus, accessibility mouse, and `/mobile on`
+    // obey the same phone contract. See the touch grammar at the top.
+    if (usesTileCloseUp(e.pointerType === 'touch', this.#mobileMode())) {
       this.#cancelEnterHold()
       return
     }
@@ -3106,26 +3108,19 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
-    // ── Generation re-bind: commit against the tile the user SAW ─────────
+    // ── Press re-bind: commit against the tile the user SAW ──────────────
     // #onPointerDown captured {generation, axial, label} when the press
-    // resolved. If the axial map was rebuilt since (render:cell-count landed
-    // between press and click — e.g. a trailing click arriving after the
-    // guard cleared for a NEW layer), the same position now describes a
-    // different layer's tile. Re-resolve by LABEL in the current map: commit
-    // only if the pressed tile still resolves here; otherwise swallow the
-    // click entirely (no navigation, no selection change).
+    // resolved. Bind it on EVERY click: phones need not emit pointermove, so
+    // #currentAxial may still describe the previous tap. If the map rebuilt
+    // between press and click, re-resolve by label in the current map. Commit
+    // only if the pressed tile still resolves; otherwise swallow the click
+    // entirely (no navigation, no selection change).
     const press = this.#pressCapture
     this.#pressCapture = null
-    if (press && press.generation !== this.#mapGeneration) {
-      let rebound: { q: number; r: number; index: number } | null = null
-      for (const [key, occ] of this.#occupiedByAxial) {
-        if (occ.label !== press.label) continue
-        const [q, r] = key.split(',').map(Number)
-        rebound = { q, r, index: occ.index }
-        break
-      }
+    if (press) {
+      const rebound = resolveTilePress(press, this.#mapGeneration, this.#occupiedByAxial)
       if (!rebound) {
-        console.warn('[tile-overlay] click swallowed — tile map changed since press and', press.label, 'no longer resolves here')
+        console.warn('[tile-overlay] click swallowed — pressed tile', press.label, 'no longer resolves here')
         diag('press-rebind-failed')
         return
       }
@@ -3133,10 +3128,11 @@ export class TileOverlayDrone extends Drone {
       this.#currentIndex = rebound.index
     }
 
-    // If pointermove hasn't fired since navigation (e.g. click without moving
-    // the mouse after changing levels), resolve axial from click coordinates
-    // so the click isn't swallowed.
-    if (this.#currentIndex === undefined || this.#currentAxial === null) {
+    // If this press did not capture a tile, ALWAYS resolve from the click's
+    // coordinates. In particular, a phone tap on empty canvas has no capture
+    // and may have no pointermove, so the hover fields can still name the
+    // previous tile. Reusing them would reopen that tile from empty ground.
+    if (clickNeedsCoordinateHitTest(press, this.#currentAxial, this.#currentIndex)) {
       const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
       if (!detector) return
 
@@ -3253,6 +3249,17 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
+    // On a phone the hover band does not exist, so navigating immediately
+    // would hide every per-tile action behind a long press. A plain tap opens
+    // the tile's readable action hub instead. That screen carries the same
+    // affordances as the desktop band and an explicit "go inside" control;
+    // launch-group tiles remain direct launchers because pointerdown consumes
+    // them above, and clipboard/selection modes have already claimed the tap.
+    if (usesTileCloseUp(this.#pressWasTouch, this.#mobileMode())) {
+      openTileMenu(entry.label)
+      return
+    }
+
     if (
       this.#branchLabels.has(entry.label)
       || referenceTargetForLabel(entry.label) !== null
@@ -3272,33 +3279,6 @@ export class TileOverlayDrone extends Drone {
       this.#navigateInto(entry.label)
     } else {
       // ── LEAF TILE ───────────────────────────────────────────
-      // ON TOUCH, A TAP GOES TO THE TILE. Childless or not: #navigateInto
-      // opens its (empty) layer, the same choke point hold-to-enter uses on
-      // desktop — so one gesture means one thing everywhere on the hive and no
-      // tile is a dead end. The tile's own SCREEN is a long press away (the
-      // ring's centre); it is no longer what a tap produces.
-      //
-      // A LINK tile is the exception, and it is the tile's own doing: its
-      // content is somewhere else, so `open` — which LinkOpenWorker consumes to
-      // route to the viewer or the browser — is what "go to the tile" means
-      // there. Walking into an empty layer instead would be walking past it.
-      //
-      // Mouse/pen keep the old behaviour: on desktop the hover band carries
-      // every action and a fullscreen takeover would be in the way.
-      if ((this.#pressWasTouch || this.#mobileMode()) && !this.#linkLabels.has(entry.label)) {
-        // A TILE THAT CARRIES A VIEW IS AN ICON THAT OPENS IT. Registry-pure:
-        // every render view the tile wears (`viewsFor`). One → open it,
-        // through the same `view-enter:` door the on-tile icon uses; several
-        // → the close-up on its "open as" page, the screen for choosing;
-        // none → the tap goes inside, as it always did.
-        const views = viewsFor(entry.label)
-        const door = viewDoorFor(views)
-        if (door === 'view') { openView(views[0]!, entry.label); return }
-        if (door === 'menu') { openTileMenu(entry.label); return }
-        this.#navigateInto(entry.label)
-        return
-      }
-
       // Non-branch tile with no action button hit → default "open" action
       this.emitEffect('tile:action', {
         action: 'open',

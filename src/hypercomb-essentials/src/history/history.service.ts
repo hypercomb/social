@@ -1,5 +1,5 @@
 // core/history.service.ts
-import { CHILD_SLOTS, EffectBus, MARKER_CEILING, SignatureService, SignatureStore, USAGE_IOC_KEY, classifyDirectoryEntry, hardDeleteVetoFor, healLegacyLayer, isMetaEnvelope, isPoolAddress, markerName as markerNameOf, metaPayloadOf, packedStoreEnabled, poolAddresses, poolCreditsMemberNames, poolKindOfAddress, poolMeaningOf, type MetaEnvelope, type UsageRanker } from '@hypercomb/core'
+import { CHILD_SLOTS, EffectBus, MARKER_CEILING, SignatureService, SignatureStore, USAGE_IOC_KEY, classifyDirectoryEntry, hardDeleteVetoFor, healLegacyLayer, homeMoleculeKey, isMetaEnvelope, isPoolAddress, markerName as markerNameOf, metaPayloadOf, packedStoreEnabled, poolAddresses, poolCreditsMemberNames, poolKindOfAddress, poolMeaningOf, rootMoleculeAddress, type MetaEnvelope, type UsageRanker } from '@hypercomb/core'
 import { lineageKey, rawLineageKey } from './lineage-key.js'
 import { canonicalizeLayer } from './canonical-layer.js'
 import { isBareLayer } from './child-sig-guard.js'
@@ -384,6 +384,37 @@ export class HistoryService {
     return promise
   }
 
+  /** The home molecule's bag address, memoized — the sig the empty path signs. */
+  #homeSig: string | null = null
+  readonly #homeLineageSig = async (): Promise<string> => {
+    if (!this.#homeSig) this.#homeSig = await this.sign({ explorerSegments: () => [] })
+    return this.#homeSig
+  }
+
+  /** DUAL POINTER for the root. The home page's bag is `sign('root-entries')`;
+   *  the empty-content `sign('')` bag is what every earlier build reads as the
+   *  root. Each marker committed to the home bag is copied, same name and same
+   *  bytes, into the legacy bag, so both pointers advance to the SAME atom and
+   *  an older build keeps a live root. Forward only, nothing removed; the
+   *  legacy bag is still union-read into the home bag on every touch, so a
+   *  marker an old build writes there is seen here too (highest wins). */
+  readonly #mirrorHomeMarker = async (
+    locationSig: string,
+    markerName: string,
+    bytes: ArrayBuffer,
+  ): Promise<void> => {
+    try {
+      if (locationSig !== await this.#homeLineageSig()) return
+      const legacySig = await rootMoleculeAddress()
+      if (legacySig === locationSig) return
+      const legacy = await this.getBag(legacySig)
+      try { await legacy.getFileHandle(markerName, { create: false }); return } catch { /* absent — mirror it */ }
+      const out = await legacy.getFileHandle(markerName, { create: true })
+      const w = await out.createWritable()
+      try { await w.write(bytes) } finally { await w.close() }
+    } catch { /* best-effort — the home bag is the truth; the mirror is a courtesy to older builds */ }
+  }
+
   /** Resolve a lineage bag for WRITING. The root bag is the ONLY write
    *  destination; the union-promotion runs first so the NNNNNNNN sequence
    *  continues from the highest marker across every source (a fresh root
@@ -709,7 +740,15 @@ export class HistoryService {
     // Discard `domain` parameter (still extracted for backward-compat
     // of the call surface) — sig is purely path-derived.
     void domain
-    const key = lineageKey(explorerSegmentsRaw)
+    // THE ROOT LOCATION IS THE HOME MOLECULE. The empty path signs the bag
+    // of `root-entries` (core/molecule-address.ts), not `sign('')`: the home
+    // page draws its tiles from one chosen pool, and everything else at the
+    // OPFS root is simply in its own group. The legacy `sign('')` bag arrives
+    // through the raw-alias bridge below — `rawLineageKey([])` is '' and the
+    // key is not, so the old root bag unions into the home bag on first
+    // touch (highest marker wins) — and `commitLayer` mirrors every root
+    // marker back into it, so an older build keeps reading a live root.
+    const key = lineageKey(explorerSegmentsRaw) || homeMoleculeKey()
 
     // use SignatureStore.signText() for memoization — same lineage = same sig
     const sigStore = get<SignatureStore>('@hypercomb/SignatureStore')
@@ -1101,6 +1140,7 @@ export class HistoryService {
       markerName,
       bytes: markerBytes.buffer as ArrayBuffer,
     })
+    await this.#mirrorHomeMarker(locationSig, markerName, markerBytes.buffer as ArrayBuffer)
 
     // Keep the in-memory marker list coherent: the entry we just wrote
     // IS the bag's new tail. cursor.onNewLayer reads it via listLayers'

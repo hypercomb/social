@@ -822,8 +822,9 @@ const POST_CSS = `
 .postit-image{min-height:100%;display:flex;align-items:center;justify-content:center;padding:2rem;box-sizing:border-box}
 .postit-image img{max-width:min(94vw,1100px);max-height:88vh;box-shadow:0 22px 60px rgba(0,0,0,.55)}
 .postit-empty{color:#8fa3b3;font-family:system-ui;font-size:1rem}
-.postit-close{position:fixed;z-index:2147483600;right:calc(0.75rem + env(safe-area-inset-right,0px) + var(--hc-scroll-gutter,0px));top:calc(0.75rem + env(safe-area-inset-top,0px));width:2.25rem;height:2.25rem;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(12,17,24,.82);border:1px solid rgba(126,182,214,.42);backdrop-filter:blur(6px);color:#cfe2ee;cursor:pointer;font:1.3rem/1 serif;padding:0;opacity:.55;transition:opacity .16s ease}
+.postit-close{position:fixed;z-index:2147483600;right:calc(0.75rem + env(safe-area-inset-right,0px) + var(--hc-scroll-gutter,0px));top:calc(0.75rem + env(safe-area-inset-top,0px));width:2.75rem;height:2.75rem;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(12,17,24,.82);border:1px solid rgba(126,182,214,.42);backdrop-filter:blur(6px);color:#cfe2ee;cursor:pointer;font:1.3rem/1 serif;padding:0;opacity:.55;transition:opacity .16s ease}
 .postit-close:hover{opacity:1}
+@media(hover:none),(pointer:coarse){.postit-close{opacity:1}}
 `
 
 const _postitView = new PostitViewDrone()

@@ -34,18 +34,15 @@
 //
 // The mobile control bar is deliberately capped, and the root ring's
 // seven slots are spoken for. A pill costs no permanent chrome: it is
-// only on mobile and only on the hexagons surface.
+// present only while selection is armed and only on the hexagons surface.
 //
-// ── ONE picker, always there ──────────────────────────────────────────
+// ── ONE picker, only while active ─────────────────────────────────────
 //
-// It used to stand down whenever peer tiles were on screen, handing the
-// job to the swarm's own pill — so in a swarm, the place you most want
-// to pick things, the general picker vanished. And it used to hide
-// itself on a page that had not reported any tiles yet. Between the two,
-// "select" was a control that came and went. It does not any more: on
-// mobile the pill is ALWAYS up, and KEEPING peer tiles is just another
-// verb it offers once the picked set contains somebody else's tile
-// (SampleSwarmDrone still owns the keeping — this only asks it).
+// A tile's close-up carries the explicit Select action, so an idle pill would
+// duplicate that door and permanently cover part of the hive. Once selection
+// is armed, this is the one picker: KEEPING peer tiles is just another verb it
+// offers when the picked set contains somebody else's tile (SampleSwarmDrone
+// still owns the keeping — this only asks it).
 //
 // ── It is BUILT ONCE ──────────────────────────────────────────────────
 //
@@ -56,12 +53,12 @@
 // The host and its buttons are now built once and UPDATED in place.
 
 import { Drone, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
-import { MOBILE_MODE_EFFECT, MOBILE_MODE_IOC_KEY } from '../preferences/mobile-pheromones.js'
 import { isPublishedVisitorShell } from '../sharing/behavior-enablement.js'
 
 const SELECTION_KEY = '@diamondcoreprocessor.com/SelectionService'
 const QUICK_MENU_INPUT_KEY = '@diamondcoreprocessor.com/QuickMenuInput'
 const SAMPLE_SWARM_KEY = '@diamondcoreprocessor.com/SampleSwarmDrone'
+const VIEW_MODE_KEY = '@hypercomb.social/ViewMode'
 
 /** The ring that opens over a picked set. Registered in QuickMenuRegistry. */
 export const SELECTION_MENU = 'selection'
@@ -92,7 +89,7 @@ type SelectionShape = {
   clear(): void
 }
 type QuickMenuLike = { open(name?: string): boolean }
-type MobileModeLike = { active?: boolean }
+type ViewModeLike = EventTarget & { mode?: string }
 /** The swarm picker, asked to keep the peer tiles in the current selection. */
 type SampleSwarmLike = { keepSelected(labels: readonly string[]): void }
 
@@ -110,7 +107,7 @@ export class SelectModeDrone extends Drone {
   override description = 'Pick tiles with a finger, then act on the set from the selection ring.'
 
   protected override deps = {}
-  protected override listens = ['render:cell-count', 'selection:changed', 'sample:mode', 'view:active', 'adopt:done', MOBILE_MODE_EFFECT]
+  protected override listens = ['render:cell-count', 'selection:changed', 'sample:mode', 'view:active', 'adopt:done']
   protected override emits = ['select:mode']
 
   #registered = false
@@ -121,7 +118,6 @@ export class SelectModeDrone extends Drone {
   #frame: HTMLDivElement | null = null
 
   #armed = false
-  #mobile = false
   /** Every label on screen right now — what `select all` means here. */
   #labels: string[] = []
   /** Peer-published labels on screen — the ones that can be KEPT. */
@@ -132,6 +128,11 @@ export class SelectModeDrone extends Drone {
   #sampling = false
   /** A full-surface view owns the viewport — the pill has no business over it. */
   #viewActive = false
+  /** ViewMode is the synchronous source of truth for canvas ownership. The
+   *  owner-counted `view:active` signal remains a second safeguard for
+   *  full-screen surfaces that do not claim a ViewMode of their own. */
+  #viewMode: ViewModeLike | null = null
+  readonly #onViewModeChange = (): void => { this.#reconcile() }
 
   get armed(): boolean { return this.#armed }
 
@@ -143,7 +144,15 @@ export class SelectModeDrone extends Drone {
     if (this.#bound) return
     this.#bound = true
 
-    this.#mobile = !!(window.ioc?.get?.(MOBILE_MODE_IOC_KEY) as MobileModeLike | undefined)?.active
+    if (!this.#ensureViewMode()) {
+      // ViewMode is shell-owned and can register after the essentials graph.
+      // Bind at that moment so a takeover cannot leave the body-appended pill
+      // behind merely because no other effect happened to reconcile it.
+      window.ioc?.whenReady?.<ViewModeLike>(VIEW_MODE_KEY, viewMode => {
+        this.#bindViewMode(viewMode)
+        this.#reconcile()
+      })
+    }
 
     this.onEffect<{ labels?: unknown; externalLabels?: unknown }>('render:cell-count', payload => {
       this.#labels = toLabels(payload?.labels)
@@ -161,11 +170,6 @@ export class SelectModeDrone extends Drone {
       // Both modes suppress navigation identically; one of them is enough.
       if (this.#sampling && this.#armed) this.disarm()
       else this.#reconcile()
-    })
-
-    this.onEffect<{ active?: boolean }>(MOBILE_MODE_EFFECT, payload => {
-      this.#mobile = !!payload?.active
-      this.#reconcile()
     })
 
     // A full-surface view (a tile's own screen, a website, a deck) has taken
@@ -203,6 +207,21 @@ export class SelectModeDrone extends Drone {
     this.#reconcile()
   }
 
+  protected override dispose(): void {
+    // A replacement/disposal can happen while the picker owns tile taps (for
+    // example during hot reload or a feature swap). Relinquish that mode
+    // before removing its only visible Done control, and do not leave a stale
+    // set for the next owner to inherit.
+    if (this.#armed) {
+      this.#selection()?.clear()
+      this.#armed = false
+      this.emitEffect('select:mode', { active: false })
+    }
+    this.#viewMode?.removeEventListener('change', this.#onViewModeChange)
+    this.#viewMode = null
+    this.#teardown()
+  }
+
   // ── mode ──────────────────────────────────────────────────────────
 
   arm(): void {
@@ -235,22 +254,35 @@ export class SelectModeDrone extends Drone {
 
   // ── pill ──────────────────────────────────────────────────────────
 
-  /** Whether the pill belongs on screen at all. On mobile: ALWAYS — a picker
-   *  that comes and goes is a picker you cannot rely on, and "is there
-   *  anything here to pick" is a question the pill itself answers better than
-   *  its own absence does. Off mobile it shows only while armed, because a
-   *  pointer picks with ctrl and needs no invitation — but an armed mode with
-   *  no visible way out would be a trap. */
+  /** Whether the pill belongs on screen at all. The close-up is the idle door
+   *  into selection; the pill appears only after that action arms the mode and
+   *  then provides its state, options and way out. */
   #wanted(): boolean {
     // A published site never grows the picker: selection feeds authoring
     // verbs, and the pill is shell chrome — not part of anyone's website.
     if (isPublishedVisitorShell()) return false
+    // `view:active` is owner-counted and can arrive after ViewMode changes (or
+    // be missed by a faulty surface). ViewMode itself is synchronous: only the
+    // hexagon ground may carry this persistent piece of canvas chrome.
+    if ((this.#ensureViewMode()?.mode ?? 'hexagons') !== 'hexagons') return false
     if (this.#viewActive) return false
-    if (this.#armed) return true
     // The swarm's own picker is armed and owns the gesture; two pills would
     // claim there are two selections.
     if (this.#sampling) return false
-    return this.#mobile
+    return this.#armed
+  }
+
+  #ensureViewMode(): ViewModeLike | undefined {
+    const viewMode = window.ioc?.get?.<ViewModeLike>(VIEW_MODE_KEY)
+    if (viewMode) this.#bindViewMode(viewMode)
+    return viewMode ?? this.#viewMode ?? undefined
+  }
+
+  #bindViewMode(viewMode: ViewModeLike): void {
+    if (this.#viewMode === viewMode || typeof viewMode.addEventListener !== 'function') return
+    this.#viewMode?.removeEventListener('change', this.#onViewModeChange)
+    this.#viewMode = viewMode
+    viewMode.addEventListener('change', this.#onViewModeChange)
   }
 
   /** Peer-published tiles in the picked set — what "keep" would act on. Only

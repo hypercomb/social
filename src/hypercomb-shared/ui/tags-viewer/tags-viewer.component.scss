@@ -1051,3 +1051,16 @@ $mint: #6fbf94;
     &:hover { color: var(--hc-window-ink-loud); }
   }
 }
+
+@media (hover: none), (pointer: coarse) {
+  .tag-remove,
+  .tag-apply {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-inline-size: 44px;
+    min-block-size: 44px;
+    padding: 0;
+    opacity: 1;
+  }
+}

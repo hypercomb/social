@@ -422,8 +422,9 @@ const SCENE_CSS = `
 .pv-still-line{margin:0;color:#5c4630;font:italic 400 1.35rem/1.5 Georgia,serif}
 .pv-still-sub{margin:.9rem 0 0;color:rgba(138,118,87,.9);font:400 .9rem/1.6 Georgia,serif}
 .pv-hint{margin:auto auto 0;padding-top:2.6rem;text-align:center;color:rgba(138,118,87,.75);font:400 .74rem/1 Georgia,serif;letter-spacing:.26em;text-transform:uppercase;animation:pv-fade 1s ease .6s backwards}
-.pv-close{position:fixed;z-index:2147483600;right:calc(.75rem + env(safe-area-inset-right,0px) + var(--hc-scroll-gutter,0px));top:calc(.75rem + env(safe-area-inset-top,0px));width:2.25rem;height:2.25rem;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(255,253,247,.85);border:1px solid rgba(184,147,63,.5);backdrop-filter:blur(6px);color:#5c4630;cursor:pointer;font:1.3rem/1 serif;padding:0;opacity:.6;transition:opacity .16s ease}
+.pv-close{position:fixed;z-index:2147483600;right:calc(.75rem + env(safe-area-inset-right,0px) + var(--hc-scroll-gutter,0px));top:calc(.75rem + env(safe-area-inset-top,0px));width:2.75rem;height:2.75rem;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(255,253,247,.85);border:1px solid rgba(184,147,63,.5);backdrop-filter:blur(6px);color:#5c4630;cursor:pointer;font:1.3rem/1 serif;padding:0;opacity:.6;transition:opacity .16s ease}
 .pv-close:hover{opacity:1}
+@media(hover:none),(pointer:coarse){.pv-close{opacity:1}}
 @keyframes pv-rise{from{opacity:0;translate:0 14px}to{opacity:1;translate:0 0}}
 @keyframes pv-fade{from{opacity:0}to{opacity:1}}
 @media(prefers-reduced-motion:reduce){.pv-plate,.pv-crest{animation:none}.pv-hint,.pv-still{animation:none}}

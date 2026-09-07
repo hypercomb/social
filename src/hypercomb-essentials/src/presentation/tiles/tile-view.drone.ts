@@ -2,13 +2,13 @@
 //
 // THE DEFAULT FULLSCREEN TILE VIEW — the tile's own screen, on a phone.
 //
-// HOW IT OPENS: hold a tile and let go without moving.
+// HOW IT OPENS: tap a tile. A long-press ring can also open it.
 //
-// One hold, three outcomes, decided by what the hand does next — tap and you
-// go INTO the tile; hold and PULL and you move it; hold and LET GO and this
-// opens. On a phone the ring never enters the picture over a tile at all (see
-// quick-menu.input's `#pendingView`), which is what leaves the pull free to be
-// a move. On desktop the same view is the ring's zero-travel centre.
+// One tap opens a readable, explicit action hub instead of guessing whether a
+// tiny tile should navigate, launch a viewer, or expose editing controls. A
+// hold and pull still moves the tile; the quick-menu ring still owns a held
+// finger and can open this screen from its centre. On desktop the same view is
+// the ring's zero-travel centre.
 //
 // AND IT IS THE ONLY PER-TILE SURFACE ON A PHONE. The desktop hover band is
 // retired in mobile mode — it needs a pointer to rest on a tile before it
@@ -30,12 +30,12 @@
 // which the layer's Views sheet shares, so a hand that learned one screen
 // already knows the other. See `#buildDeck`.
 //
-// LAST IN THE TAKEOVER ORDER. On a phone, tile-overlay consults
-// `viewsFor(label)` on the TAP first: a tile carrying exactly one view opens
-// it; several open THIS screen on its "open as" page; none walks in. This one
-// needs no decoration at all — it is the fallback for the undecorated
-// majority, which is exactly why it cannot be expressed as a ranked registry
-// bee (the picker requires `hasDecorationKind`).
+// LAST IN THE TAKEOVER ORDER. On a phone, tile-overlay opens this screen for a
+// plain tile tap. The close-up then shows every available viewer and action,
+// plus an explicit way inside. It needs no decoration at all — it is the
+// fallback for the undecorated majority, which is exactly why it cannot be
+// expressed as a ranked registry bee (the picker requires
+// `hasDecorationKind`).
 //
 // IN PLACE, NEVER NAVIGATES. Like slides/lightbox it pins the segments it was
 // opened for and mounts over the current layer, so closing drops you exactly
@@ -313,11 +313,6 @@ export class TileViewDrone extends Drone {
   #urls: string[] = []
   /** Labels the current render says are external (peer-published, adoptable). */
   #external = new Set<string>()
-  /** Labels the current render says are BRANCHES — the ones "go inside" means
-   *  something for. A long-hold opens this view over a branch too, and without
-   *  the verb the close-up would be a dead end for exactly the tiles that have
-   *  somewhere to go. */
-  #branches = new Set<string>()
   /** An in-flight horizontal swipe over the view. */
   #swipe: { pointerId: number; x: number; y: number } | null = null
   /** Set by a swipe that committed, so the trailing click never also fires the
@@ -364,11 +359,9 @@ export class TileViewDrone extends Drone {
     // Adoptability rides the render pass: `external` means "on screen but not a
     // child of my layer" — the same signal that flips the desktop band to its
     // peer profile. tile:hover carries no such flag, so this is the only source.
-    this.onEffect<{ externalLabels?: unknown; branchLabels?: unknown; labels?: unknown }>('render:cell-count', payload => {
+    this.onEffect<{ externalLabels?: unknown; labels?: unknown }>('render:cell-count', payload => {
       const list = Array.isArray(payload?.externalLabels) ? payload.externalLabels : []
       this.#external = new Set(list.map(s => String(s)))
-      const branches = Array.isArray(payload?.branchLabels) ? payload.branchLabels : []
-      this.#branches = new Set(branches.map(s => String(s)))
       // The ROW itself is tracked by viewer-walk.ts, from this same effect —
       // one definition, shared with every viewer that walks it.
     })
@@ -1142,8 +1135,8 @@ export class TileViewDrone extends Drone {
    * WHAT CAN BE DONE TO THIS TILE, as chips — already filtered by `when`, so
    * the rail and the deck can only ever render the same set.
    *
-   * GO INSIDE leads: a branch's whole point is what is under it, and the
-   * close-up is reached by holding one. Then EVERYTHING THE BAND CARRIES —
+   * GO INSIDE leads: every tile may become a branch, and a phone reaches the
+   * close-up before navigating. Then EVERYTHING THE BAND CARRIES —
    * edit, note, share, features, adopt, hide, block, files, invite, remove,
    * the lot — resolved for THIS tile by the surface that owns them (these
    * used to be a hand-written subset, which meant a phone saw five of the
@@ -1189,7 +1182,6 @@ export class TileViewDrone extends Drone {
       glyph: 'login',
       labelKey: 'tile-view.enter',
       fallback: 'go inside',
-      when: () => this.#branches.has(label),
       accent: true,
       run: () => {
         this.emitEffect('tile:enter-request', { label })
@@ -1231,11 +1223,11 @@ export class TileViewDrone extends Drone {
   //     photos, slides, a website …), the live question on arrival;
   //   right — EDIT · left — nothing (beehaviors are managed where you
   //     STAND, not from a tile you point at — see tile-actions.drone.ts);
-  //   lower-right — GO INSIDE (branches; the thumb's easiest flick)
+  //   lower-right — GO INSIDE (every tile; the thumb's easiest flick)
   //   lower-left — SELECT.
   //
-  // A face with no occupant (no second viewer, not a branch) renders nothing
-  // and swallows nothing: the swipe simply does not commit.
+  // An optional face with no occupant (for example, no second viewer) renders
+  // nothing and swallows nothing: the swipe simply does not commit.
 
   /** Which chip each face carries, for this tile. */
   #hexFaces(label: string): Partial<Record<FaceDir, Chip>> {
@@ -1259,7 +1251,10 @@ export class TileViewDrone extends Drone {
     // "settings"; the beehaviors panel is not a per-tile door any more, and
     // a face with no occupant renders nothing and swallows nothing — better
     // than a chip that asks the behaviour question about the wrong tile.
-    if (this.#branches.has(label)) faces.se = this.#enterChip(label)
+    // Every tile may become a branch. A plain phone tap now opens this close-up
+    // before navigating, so the primary way forward must live on the immediately
+    // visible hexagon as well as in the paged action deck.
+    faces.se = this.#enterChip(label)
     faces.sw = this.#selectChip(label)
     return faces
   }

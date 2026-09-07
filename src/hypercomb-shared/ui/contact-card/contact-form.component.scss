@@ -184,3 +184,63 @@ textarea { resize: vertical; }
     &:disabled { opacity: 0.4; cursor: not-allowed; }
   }
 }
+
+// A floating dialog does not pass through `tw.panel()`, so it needs its own
+// phone contract: one field per row, native-focus-safe type, and controls a
+// thumb can actually hit. Either axis may identify a phone so landscape is
+// included too.
+@media (max-width: 599px), (max-height: 449px) {
+  .contact-form-panel {
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: 0;
+    transform: none;
+    box-sizing: border-box;
+    width: 100%;
+    max-height: calc(100dvh - var(--hc-safe-top, 0px));
+    border-radius: tw.$radius-floating tw.$radius-floating 0 0;
+  }
+
+  .contact-row { flex-direction: column; }
+
+  .contact-form-header {
+    padding-left: calc(0.75rem + env(safe-area-inset-left, 0px));
+    padding-right: calc(0.75rem + env(safe-area-inset-right, 0px));
+  }
+
+  .contact-form-body {
+    padding-left: calc(1rem + env(safe-area-inset-left, 0px));
+    padding-right: calc(1rem + env(safe-area-inset-right, 0px));
+  }
+
+  input,
+  textarea {
+    box-sizing: border-box;
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  textarea { min-height: 5rem; }
+
+  .contact-form-header > .contact-form-close,
+  .contact-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .contact-form-footer {
+    flex-wrap: wrap;
+    padding-left: calc(1rem + env(safe-area-inset-left, 0px));
+    padding-right: calc(1rem + env(safe-area-inset-right, 0px));
+    padding-bottom: calc(0.75rem + var(--hc-safe-bottom, 0px));
+  }
+
+  .contact-import {
+    box-sizing: border-box;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+}

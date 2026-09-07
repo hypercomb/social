@@ -7,7 +7,7 @@
 // repeated request is an idempotent delta repair.
 
 import { createHash, randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { Agent as HttpAgent, request as httpRequest } from 'node:http'
 import { Agent as HttpsAgent, request as httpsRequest } from 'node:https'
 import { join } from 'node:path'
@@ -27,6 +27,80 @@ const DEFAULT_JOB_DEADLINE_MS = 600_000
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
 
+// Discovery is the pool itself (documentation/host-packages-pool.md). The
+// address is derived here rather than copied from a build so every host and
+// every client asks the same meaning for the same directory.
+export const HOST_PACKAGES_POOL = sha256(Buffer.from('host:packages', 'utf8'))
+const PACKAGE_ENTRY_RE = /^[0-9]{8}$/
+const packageEntryName = index => String(index).padStart(8, '0')
+
+/** Append one package to this host's published pool.
+ *
+ * The staged file is complete before `linkSync` makes it visible. A hard link
+ * is also an exclusive create: if another relay process claimed the same next
+ * index, EEXIST sends this writer around the loop to re-read the pool. That
+ * keeps indices gapless without a process-local mutex or a crash-stale lock.
+ * Re-reading also makes publication idempotent across jobs and processes: the
+ * first entry naming a signature wins, including its original label. */
+export function appendHostPackage(contentDir, packageSig, label) {
+  if (!SIGNATURE_RE.test(packageSig)) throw new TypeError('package signature must be a lowercase 64-hex signature')
+  const mark = typeof label === 'string' ? label.trim() : ''
+  if (!mark || mark.length > 64 || /[\r\n]/.test(mark)) {
+    throw new TypeError('package label must contain between 1 and 64 characters on one line')
+  }
+
+  const poolDir = join(contentDir, HOST_PACKAGES_POOL)
+  mkdirSync(poolDir, { recursive: true })
+  const bytes = `${packageSig}\n${mark}`
+  const partPath = join(poolDir, `.part-package-${process.pid}-${randomBytes(6).toString('hex')}`)
+  writeFileSync(partPath, bytes, { flag: 'wx' })
+  try {
+    for (;;) {
+      let maxIndex = -1
+      for (const name of readdirSync(poolDir)) {
+        if (!PACKAGE_ENTRY_RE.test(name)) continue
+        const index = Number(name)
+        if (index > maxIndex) maxIndex = index
+        try {
+          const heldSig = (readFileSync(join(poolDir, name), 'utf8').split('\n')[0] ?? '').trim().toLowerCase()
+          if (heldSig === packageSig) return { appended: false, index, name }
+        } catch { /* an unreadable entry still occupies its index */ }
+      }
+
+      const index = maxIndex + 1
+      if (index > 99_999_999) throw new Error('host package pool exhausted its 8-digit index space')
+      const name = packageEntryName(index)
+      try {
+        // Same-directory hard link: atomic visibility of already-written bytes
+        // plus O_EXCL semantics for the destination name on NTFS and POSIX.
+        linkSync(partPath, join(poolDir, name))
+        return { appended: true, index, name }
+      } catch (error) {
+        if (error?.code === 'EEXIST') continue
+        throw error
+      }
+    }
+  } finally {
+    try { rmSync(partPath, { force: true }) } catch {}
+  }
+}
+
+/** A package becomes discoverable only after the requested root and every
+ * atom the closure reached are held and verified. A bounded, holed or refused
+ * walk is a useful replication result, but it is not a publishable package. */
+export function publishReplicatedPackage(contentDir, request, result) {
+  if (!request?.package) return null
+  const held = Array.isArray(result?.held) ? result.held : []
+  const complete = result?.root === request.signature
+    && held.includes(request.signature)
+    && result?.limited === false
+    && Array.isArray(result?.holes) && result.holes.length === 0
+    && Array.isArray(result?.refused) && result.refused.length === 0
+    && Number.isSafeInteger(result?.total) && result.total === held.length
+  if (!complete) return null
+  return appendHostPackage(contentDir, request.signature, request.package.label)
+}
+
 /** Text atoms may refer to more atoms by their 64-hex identities. Opaque
  * binary atoms are leaves. The typed browser walker remains more precise;
  * this host-side fallback deliberately follows only literal signatures. */
@@ -34,6 +108,35 @@ export function mineSignatures(bytes) {
   const text = new TextDecoder().decode(bytes)
   if (text.includes('\uFFFD')) return []
   return [...text.matchAll(/[a-f0-9]{64}/g)].map(match => match[0])
+}
+
+const barePackageSignature = value =>
+  String(value ?? '').trim().toLowerCase().replace(/\.(?:js|json)$/, '')
+
+/** Read only the references that define a package layer. Arbitrary 64-hex
+ * text elsewhere in the JSON is not package inventory and must not turn into
+ * a hole that prevents publication. */
+function packageLayerReferences(bytes) {
+  let record
+  try { record = JSON.parse(new TextDecoder().decode(bytes)) } catch { return null }
+  if (!record || typeof record !== 'object' || Array.isArray(record) || typeof record.name !== 'string' || !record.name.trim()) return null
+  if (!Array.isArray(record.cells) || !Array.isArray(record.bees) || !Array.isArray(record.dependencies)) return null
+
+  const signatures = (values, cells = false) => {
+    const out = []
+    for (const value of values) {
+      const signature = barePackageSignature(
+        typeof value === 'string' ? value : (cells || (value && typeof value === 'object')) ? value?.sig : '',
+      )
+      if (!SIGNATURE_RE.test(signature)) return null
+      out.push(signature)
+    }
+    return out
+  }
+  const layers = signatures(record.cells, true)
+  const bees = signatures(record.bees)
+  const dependencies = signatures(record.dependencies)
+  return layers && bees && dependencies ? { layers, bees, dependencies } : null
 }
 
 /** Resolve one signature closure through an injected atom store. */
@@ -46,6 +149,7 @@ export async function resolveSignatureClosure(root, io, options = {}) {
   const seen = new Set([root])
   const queue = [root]
   const result = { root, total: 0, present: 0, fetched: 0, fetchedBytes: 0, held: [], holes: [], refused: [], limited: false }
+  const selectChildren = options.children ?? mineSignatures
 
   const resolveOne = async (signature) => {
     let bytes = await io.read(signature)
@@ -64,7 +168,7 @@ export async function resolveSignatureClosure(root, io, options = {}) {
       result.fetchedBytes += bytes.byteLength
     }
     result.held.push(signature)
-    for (const child of mineSignatures(bytes)) {
+    for (const child of selectChildren(bytes, signature)) {
       if (seen.has(child)) continue
       seen.add(child)
       queue.push(child)
@@ -80,6 +184,39 @@ export async function resolveSignatureClosure(root, io, options = {}) {
     await Promise.all(frontier.map(resolveOne))
   }
   result.limited = spent || queue.length > 0
+  return result
+}
+
+/** Resolve a package by its signed structure: child layers through `cells`,
+ * then the bees and dependencies those layers declare as exact leaf atoms.
+ * This is the Node twin of runtime's `deriveInventory`; unlike generic
+ * replication it never mines unrelated signature-looking text. */
+export async function resolvePackageClosure(root, io, options = {}) {
+  const layerSignatures = new Set([root])
+  const leafSignatures = new Set()
+  const invalidLayers = new Set()
+  const children = (bytes, signature) => {
+    // Bees and dependencies are exact leaves even when their bytes happen to
+    // parse as JSON and contain a `cells` field.
+    if (!layerSignatures.has(signature)) return []
+    const references = packageLayerReferences(bytes)
+    if (!references) { invalidLayers.add(signature); return [] }
+
+    for (const child of references.layers) {
+      if (leafSignatures.has(child)) invalidLayers.add(signature)
+      layerSignatures.add(child)
+    }
+    for (const leaf of [...references.bees, ...references.dependencies]) {
+      if (layerSignatures.has(leaf)) invalidLayers.add(signature)
+      leafSignatures.add(leaf)
+    }
+    return [...new Set([...references.layers, ...references.bees, ...references.dependencies])]
+  }
+
+  const result = await resolveSignatureClosure(root, io, { ...options, children })
+  for (const signature of invalidLayers) {
+    if (!result.refused.includes(signature)) result.refused.push(signature)
+  }
   return result
 }
 
@@ -175,7 +312,21 @@ export function parseReplicationRequest(value, options = {}) {
   const limit = Number.isInteger(requestedLimit) && requestedLimit > 0
     ? Math.min(requestedLimit, DEFAULT_REPLICATION_LIMIT)
     : DEFAULT_REPLICATION_LIMIT
-  return { signature: root, sources, limit, inventory: value?.inventory === true }
+  const inventory = value?.inventory === true
+  let packageMetadata = null
+  if (value?.package !== undefined) {
+    if (!value.package || typeof value.package !== 'object' || Array.isArray(value.package)) {
+      throw new TypeError('package metadata must be an object containing label')
+    }
+    if (typeof value.package.label !== 'string') throw new TypeError('package label must be a string')
+    const label = value.package.label.trim()
+    if (!label || label.length > 64 || /[\r\n]/.test(label)) {
+      throw new TypeError('package label must contain between 1 and 64 characters on one line')
+    }
+    if (inventory) throw new TypeError('package publication cannot use inventory mode')
+    packageMetadata = { label }
+  }
+  return { signature: root, sources, limit, inventory, package: packageMetadata }
 }
 
 // Replication keeps its OWN connection pools, and a screened pool is never the
@@ -289,6 +440,13 @@ export function contentDirectoryIO(contentDir, sources, resolveExisting = null, 
       // an atom in its place, then `rmSync` on the "old" path, was the host-side
       // twin of the /flatten hazard: a whole pool gone for one replicated atom.
       // A directory at an atom's address is refused, never replaced.
+      // `sign('host:packages')` is also explicitly reserved before the first
+      // package creates its directory. Its known hash preimage is the meaning
+      // itself, so allowing that one flat atom would let an earlier generic
+      // replication permanently occupy the pool's path.
+      if (signature === HOST_PACKAGES_POOL) {
+        throw new Error(`refusing to write atom ${signature.slice(0, 8)}… over the reserved host:packages pool`)
+      }
       if (existsSync(finalPath) && statSync(finalPath).isDirectory()) {
         throw new Error(`refusing to write atom ${signature.slice(0, 8)}… over a directory`)
       }

@@ -157,8 +157,9 @@
 
 :host {
   display: block;
-  width: 100vw;
+  width: 100%;
   height: 100vh;
+  height: 100dvh;
   position: relative;
   overflow: hidden;
 
@@ -275,4 +276,3 @@ hc-command-line {
   outline-color: rgba(0, 229, 255, 0.8) !important;
   box-shadow: 0 0 12px rgba(0, 229, 255, 0.25), inset 0 0 6px rgba(0, 229, 255, 0.08) !important;
 }
-
