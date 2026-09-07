@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   getLaneScrollAxis,
+  laneCountFromStoredPreference,
   laneStripHorizontal,
   setLaneViewport,
 } from './lane-viewport-mode.js'
@@ -21,6 +22,24 @@ const setViewport = (width: number, height: number): void => {
 
 const portrait = (): void => setViewport(390, 844)
 const landscape = (): void => setViewport(844, 390)
+
+describe('lane-count default migration', () => {
+  it('moves the legacy implicit scan rung to the readable browse rung once', () => {
+    expect(laneCountFromStoredPreference('3', false)).toBe(2)
+  })
+
+  it('preserves every explicit choice after the migration marker exists', () => {
+    expect(laneCountFromStoredPreference('1', true)).toBe(1)
+    expect(laneCountFromStoredPreference('2', true)).toBe(2)
+    expect(laneCountFromStoredPreference('3', true)).toBe(3)
+  })
+
+  it('preserves legacy read and browse choices and repairs missing values', () => {
+    expect(laneCountFromStoredPreference('1', false)).toBe(1)
+    expect(laneCountFromStoredPreference('2', false)).toBe(2)
+    expect(laneCountFromStoredPreference(null, false)).toBe(2)
+  })
+})
 
 describe('lane viewport axis', () => {
   beforeEach(() => {

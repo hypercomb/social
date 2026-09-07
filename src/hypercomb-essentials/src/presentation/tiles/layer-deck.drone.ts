@@ -61,6 +61,8 @@ const SHEET_EDGE = 'rgba(126,182,214,0.34)'
 const BACKDROP = 'rgba(0,0,0,0.42)'
 /** The lane rung's ceiling — `lanes:step -1` from 1 wraps back up here. */
 const LANES_FULL = 3
+/** Synchronous UI fallback before the replayed lane state arrives. */
+const LANES_DEFAULT = 2
 
 type ViewToggle = { view: string; icon?: string; label?: string; active?: boolean; isDefault?: boolean }
 type Lanes = { active?: boolean; lanes?: number }
@@ -92,7 +94,7 @@ export class LayerDeckDrone extends Drone {
   ]
   protected override emits = [
     'view:toggle', 'feature:apply', 'camera:capture-open', 'tags:view-open',
-    'keymap:invoke', 'lanes:step', 'lanes:set',
+    'keymap:invoke', 'lanes:step', 'lanes:set', 'viewport:pin-toggle',
   ]
 
   #registered = false
@@ -255,7 +257,7 @@ export class LayerDeckDrone extends Drone {
       // occupies (`--hc-controls-*`, 0px where it does not), so the bar's
       // discs stay where the hand left them and the sheet takes the rest.
       'position:absolute;left:var(--hc-controls-left,0px);right:var(--hc-controls-right,0px);' +
-      'bottom:calc(var(--hc-controls-bottom,0px) + env(safe-area-inset-bottom,0px));' +
+      'bottom:max(var(--hc-controls-bottom,0px), env(safe-area-inset-bottom,0px));' +
       // The sheet's ceiling: the phone-sheet rule in portrait; taller on a
       // landscape phone, whose 62vh is ~240px — less than one row of plates
       // with its dots and dock, which would put the close plate behind a
@@ -378,7 +380,7 @@ export class LayerDeckDrone extends Drone {
   /** SEE — how you see the layer. Lenses, never commits. */
   #seeChips(): AppChip[] {
     const chips: AppChip[] = []
-    const lanes = Number(this.#lanes.lanes) || LANES_FULL
+    const lanes = Number(this.#lanes.lanes) || LANES_DEFAULT
     chips.push({
       action: 'lanes',
       glyph: 'view_column',
@@ -415,6 +417,19 @@ export class LayerDeckDrone extends Drone {
       run: () => {
         this.close()
         EffectBus.emit('tags:view-open', {})
+      },
+    })
+    chips.push({
+      action: 'pin',
+      glyph: 'push_pin',
+      labelKey: 'controls.pin',
+      fallback: 'pin / unpin',
+      run: () => {
+        // A command, never replayable state: ControlsBar owns the persisted
+        // per-layer set and the InputGate lock derived from it. Close so the
+        // toggle cannot be repeated against a stale-looking plate.
+        EffectBus.emitTransient('viewport:pin-toggle', {})
+        this.close()
       },
     })
     // The sheet stays up for undo/redo: the hive above it shows the step,

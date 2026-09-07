@@ -138,6 +138,29 @@ export const moleculeAddress = async (name: unknown): Promise<string> => {
 /** The ROOT address, `sign('')`, reachable only on purpose. */
 export const rootMoleculeAddress = async (): Promise<string> => await signText('')
 
+/**
+ * THE HOME MOLECULE — what the home page draws its tiles from.
+ *
+ * Everything is on the root: every molecule and bag lives at the OPFS root,
+ * that is the nature of the hive. The home page shows ONE chosen pool of
+ * them, and that pool is a molecule like any other — a bare word anyone may
+ * type, whose bag `sign('root-entries')` holds the home page's head layer and
+ * history. A tile literally named `root-entries` at the top level IS the home
+ * (the same address), exactly as `sign('websites')` is the `/websites` bag.
+ *
+ * The empty path used to hash to `sign('')`, the empty-content root. That bag
+ * stays as the legacy alias: reads union it in (highest marker wins) and every
+ * root commit mirrors its marker there, so an older build keeps working.
+ * Nothing is deleted. (documentation/root-entries.md)
+ */
+export const HOME_MOLECULE_NAME = 'root-entries'
+
+/** The home molecule's preimage — the lineage key the root location signs. */
+export const homeMoleculeKey = (): string => moleculeKey(HOME_MOLECULE_NAME)
+
+/** The home molecule's address: the bag the home page draws from. */
+export const homeMoleculeAddress = async (): Promise<string> => await signText(homeMoleculeKey())
+
 /** The word behind a molecule address THIS session derived, if any. A molecule
  *  minted elsewhere is still a molecule — absence here is not "not a molecule". */
 export const moleculeWordOf = (address: string): string | undefined =>

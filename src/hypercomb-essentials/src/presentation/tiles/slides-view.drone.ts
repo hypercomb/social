@@ -1181,8 +1181,11 @@ export class SlidesViewDrone extends Drone {
     // Dot strip (bottom center).
     const dots = document.createElement('div')
     dots.style.cssText =
-      `position:absolute;bottom:${bottom(22)};left:0;right:0;display:flex;gap:8px;` +
-      `justify-content:center;align-items:center;flex-wrap:wrap;padding:${scrolling ? '0 3.5rem' : '0 120px'};`
+      `position:absolute;bottom:${bottom(4)};left:0;right:0;display:flex;gap:0;` +
+      `justify-content:safe center;align-items:center;flex-wrap:nowrap;overflow-x:auto;` +
+      `overscroll-behavior-x:contain;touch-action:pan-x;scrollbar-width:none;box-sizing:border-box;` +
+      `pointer-events:none;padding:${scrolling ? '0 3.5rem' : '0 120px'};`
+    dots.setAttribute('data-consumes-wheel', '')
     host.appendChild(dots)
 
     // Empty-state guide (shown when the deck has no diagram tiles yet).
@@ -1604,16 +1607,28 @@ export class SlidesViewDrone extends Drone {
       for (let i = 0; i < n; i++) {
         const dot = document.createElement('button')
         dot.type = 'button'
+        dot.setAttribute('aria-label', `Go to slide ${i + 1} of ${n}`)
         dot.style.cssText =
-          'width:9px;height:9px;padding:0;border:none;border-radius:50%;cursor:pointer;' +
+          'flex:0 0 44px;width:44px;height:44px;padding:0;border:none;cursor:pointer;' +
+          'display:grid;place-items:center;background:transparent;pointer-events:auto;'
+        const mark = document.createElement('span')
+        mark.setAttribute('aria-hidden', 'true')
+        mark.style.cssText =
+          'display:block;width:9px;height:9px;border-radius:50%;pointer-events:none;' +
           'background:rgba(255,255,255,0.22);transition:background .16s ease;'
+        dot.appendChild(mark)
         dot.addEventListener('click', () => this.#show(i))
         m.dots.appendChild(dot)
       }
     }
     const children = m.dots.children
     for (let i = 0; i < children.length; i++) {
-      (children[i] as HTMLElement).style.background = i === index ? STEEL : 'rgba(255,255,255,0.22)'
+      const dot = children[i] as HTMLButtonElement
+      const active = i === index
+      const mark = dot.firstElementChild as HTMLElement | null
+      if (mark) mark.style.background = active ? STEEL : 'rgba(255,255,255,0.22)'
+      if (active) dot.setAttribute('aria-current', 'step')
+      else dot.removeAttribute('aria-current')
     }
   }
 

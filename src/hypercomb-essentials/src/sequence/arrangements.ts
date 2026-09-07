@@ -134,13 +134,14 @@ export const flowerIndexes = (
 // and only point-top hexes pack into straight vertical ones.
 //
 // The lane COUNT is the phone's zoom control: fewer lanes ⇒ wider hexes ⇒
-// bigger label, bigger picture, readable notes. Three is the scan step, one
-// is the read step. The count is bounded here so no caller can mint a lane
-// arrangement the ladder cannot walk back.
+// bigger label, bigger picture, readable notes. Three is the scan step, two
+// is the usable browsing default, and one is the read step. The count is
+// bounded here so no caller can mint a lane arrangement the ladder cannot
+// walk back.
 
 export const LANE_MIN = 1
 export const LANE_MAX = 3
-export const LANE_DEFAULT = 3
+export const LANE_DEFAULT = 2
 
 export const clampLanes = (lanes: number): number =>
   Math.min(LANE_MAX, Math.max(LANE_MIN, Math.round(Number.isFinite(lanes) ? lanes : LANE_DEFAULT)))
@@ -227,7 +228,7 @@ export const laneIndexes = (
 export const threeLaneIndexes = (
   count: number,
   coordToIndex: Map<string, number>,
-): number[] => laneIndexes(count, coordToIndex, LANE_DEFAULT)
+): number[] => laneIndexes(count, coordToIndex, 3)
 
 // ── Apply to existing tiles ──────────────────────────────────────────
 //

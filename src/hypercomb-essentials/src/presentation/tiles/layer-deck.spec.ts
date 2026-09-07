@@ -54,12 +54,13 @@ services['@diamondcoreprocessor.com/ImagePasteWorker'] = { createTileFromImage: 
 
 // OUT contracts, spied before anything is emitted so a replay cannot confuse.
 const out = {
-  toggle: vi.fn(), apply: vi.fn(), camera: vi.fn(), tags: vi.fn(), keymap: vi.fn(), step: vi.fn(), set: vi.fn(),
+  toggle: vi.fn(), apply: vi.fn(), camera: vi.fn(), tags: vi.fn(), pin: vi.fn(), keymap: vi.fn(), step: vi.fn(), set: vi.fn(),
 }
 EffectBus.on('view:toggle', out.toggle)
 EffectBus.on('feature:apply', out.apply)
 EffectBus.on('camera:capture-open', out.camera)
 EffectBus.on('tags:view-open', out.tags)
+EffectBus.on('viewport:pin-toggle', out.pin)
 EffectBus.on('keymap:invoke', out.keymap)
 EffectBus.on('lanes:step', out.step)
 EffectBus.on('lanes:set', out.set)
@@ -221,6 +222,14 @@ describe('the three groups', () => {
     expect(out.keymap).toHaveBeenCalledWith({ cmd: 'history.redo' })
     plate('pheromones')!.click()
     expect(out.tags).toHaveBeenCalledTimes(1)
+    expect(isOpen()).toBe(false)
+  })
+
+  it('see: pin asks the controls owner to toggle persisted pin state, then closes', () => {
+    open()
+    expect(plate('pin')).toBeDefined()
+    plate('pin')!.click()
+    expect(out.pin).toHaveBeenCalledTimes(1)
     expect(isOpen()).toBe(false)
   })
 

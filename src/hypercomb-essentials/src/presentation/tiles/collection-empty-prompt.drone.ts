@@ -392,8 +392,13 @@ class CollectionEmptyPromptDrone {
 
     const mobile = window.matchMedia('(max-width: 599px), (max-height: 599px)').matches
     EffectBus.emit('mobile:input-visible', { visible: true, mobile })
-    EffectBus.emit('command:focus', { cell: '' })
-    EffectBus.emit('keymap:invoke', { cmd: 'ui.commandLineToggle' })
+    // This action promises to ADD A TILE, so leave the command line at the
+    // one canonical creation door instead of merely focusing an empty line in
+    // whichever stance happened to be active. In beehaviour stance an empty
+    // focus made the participant type a name, receive "nothing reads as a
+    // behaviour", and remain stuck on the empty screen. `search:prefill` also
+    // owns the collapsed-mobile reveal and focus timing in the shell.
+    EffectBus.emit('search:prefill', { value: '/create ', focus: true })
 
     const focusInput = (): void => {
       const input = document.querySelector<HTMLInputElement>('hc-command-shell input.command-input')

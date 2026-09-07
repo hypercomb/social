@@ -318,7 +318,7 @@
     position: fixed;
     left: 0.6rem;
     right: 0.6rem;
-    bottom: calc(var(--hc-controls-bottom, 0px) + var(--hc-safe-bottom, 0px) + 0.6rem);
+    bottom: calc(max(var(--hc-controls-bottom, 0px), var(--hc-safe-bottom, 0px)) + 0.6rem);
     margin-top: 0;
     min-width: 0;
     max-width: none;

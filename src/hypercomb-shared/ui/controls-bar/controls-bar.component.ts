@@ -364,7 +364,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   /** The legibility ladder: how many lanes of hexagons the phone is reading
    *  at (3 scan · 2 browse · 1 read), and whether lane mode owns the
    *  viewport at all. Published by SequenceCycleDrone on `lanes:changed`. */
-  readonly laneCount = signal(3)
+  readonly laneCount = signal(2)
   readonly lanesActive = signal(false)
   /** The icon rows above the bar (right of the rail in landscape). Five to a
    *  row, and it WRAPS — a sixth control starts a second row above the first,
@@ -1477,6 +1477,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #lockBumpUnsub: (() => void) | null = null
   #iconEditUnsub: (() => void) | null = null
   #configureControlUnsub: (() => void) | null = null
+  #pinToggleUnsub: (() => void) | null = null
   #onIconOverride = (): void => this.iconRev.update(v => v + 1)
 
   ngOnInit(): void {
@@ -1500,6 +1501,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // Pulse the pin button when a pan/zoom is rejected because input is
     // locked. Transient (no replay) so a fresh mount never bumps.
     this.#lockBumpUnsub = EffectBus.on('input:locked-attempt', this.#flashLockBump)
+    // The mobile layer deck is framework-free chrome, so it asks through the
+    // bus; this component remains the one owner of the persisted per-layer pin
+    // set and the InputGate lock derived from it.
+    this.#pinToggleUnsub = EffectBus.on('viewport:pin-toggle', () => this.togglePin())
 
     // The Escape cascade force-clears the gate as last-resort recovery. On a
     // pinned layer that IS the release gesture, so fold it back into the
@@ -2070,6 +2075,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#lockBumpUnsub?.()
     this.#iconEditUnsub?.()
     this.#configureControlUnsub?.()
+    this.#pinToggleUnsub?.()
     this.#titleTickUnsub?.()
     this.#localeTickUnsub?.()
     iconOverrides.removeEventListener('change', this.#onIconOverride)

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { clampLanes, laneCoords, threeLaneCoords, threeLaneIndexes } from './arrangements.js'
+import { LANE_DEFAULT, clampLanes, laneCoords, threeLaneCoords, threeLaneIndexes } from './arrangements.js'
 
 describe('threeLaneCoords', () => {
   afterEach(() => localStorage.removeItem('hc:hex-orientation'))
@@ -84,7 +84,11 @@ describe('threeLaneCoords', () => {
   it('clamps the ladder to its rungs', () => {
     expect(clampLanes(0)).toBe(1)
     expect(clampLanes(9)).toBe(3)
-    expect(clampLanes(Number.NaN)).toBe(3)
+    expect(clampLanes(Number.NaN)).toBe(2)
+  })
+
+  it('starts new phones on the readable browse rung', () => {
+    expect(LANE_DEFAULT).toBe(2)
   })
 
   it('uses flat-top packing only for an explicit flat-top preference', () => {

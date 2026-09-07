@@ -109,16 +109,13 @@ take up everything, it is simply where everything is kept. Visibility is
 membership, and membership is a mark the participant made — never a side effect
 of being referenced somewhere.
 
-**Direction (2026-09-06): the root hive's membership is itself a pool.**
+**BUILT (2026-09-06): the home page draws from the `root-entries` molecule.**
 Everything is on the root — every molecule and bag lives there, that is the
-nature of the hive — and the home page shows ONE chosen pool of them. Today
-that pool is the `[]` layer's children slot. The direction is a pool of
-meaning the home page draws its tiles from (working names: `root-entries`,
-`hypercomb`, anything you like; the address-syntax rules decide the spelling),
-so that "on the root" and "shown on the home page" are visibly two different
-facts. A molecule not in that pool is not hidden; it is in its own group, and
-reachable at its address. Not built; the write door above already respects
-the distinction.
+nature of the hive — and the home page shows ONE chosen pool of them: the
+molecule `root-entries`, whose bag the empty path now signs. "On the root"
+and "shown on the home page" are two different facts. A molecule not in that
+pool is not hidden; it is in its own group, reachable at its address. Full
+mechanism, dual pointer and costs: `documentation/root-entries.md`.
 
 The service is the pre-molecule answer to a real problem ("two appearances of
 one named item drifted apart, so give the name ONE canonical home"). The

@@ -79,12 +79,10 @@
       })();
     </script>
 
-    <!-- interactive-widget=resizes-content: when the on-screen keyboard opens
-         (Android Chrome/Edge), the layout viewport shrinks instead of the
-         keyboard overlaying it — so bottom-anchored chrome (mobile bar, sheets)
-         rides above the keyboard rather than hiding underneath. iOS ignores it
-         harmlessly. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+    <!-- interactive-widget=resizes-content: keyboard shrinks the layout viewport
+         (Android) so bottom-anchored chrome rides above it. viewport-fit=cover
+         exposes safe areas while browser zoom remains user-controlled. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <!-- Built by `node scripts/build-favicons.cjs` from one master mark; the
          .ico carries 16/32/48 for the tab, the .svg is what modern browsers
          actually pick and scales to any density. -->
