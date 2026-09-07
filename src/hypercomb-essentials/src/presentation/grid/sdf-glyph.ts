@@ -27,20 +27,28 @@
 // below): identical GPU memory, atlas, UVs and shader — only the field gets
 // more accurate.
 //
-// HELD AT 2 until the bake has somewhere to live. Nothing persists these cells:
-// buildSdfCell runs synchronously on the geometry path and the result goes
-// straight into a GPU slot, so every reload re-bakes every visible label and
-// every atlas eviction re-bakes on re-entry. The EDT is O(W·H) two-pass over
-// two grids, so SS 4 costs ~4× — per label, forever, on every cold path. Raise
-// this to 4 once the cells are cached in a derived pool keyed by the bake
-// inputs; then the cost is paid once and the field quality is free.
-const SS = 2
+// SS 4 IS LOAD-BEARING, NOT A LUXURY (2026-09-06). It was held at 2 for a week
+// to save EDT time and the labels came back BROKEN on Windows: a Light stem at
+// 36px is ~1.5px wide, DirectWrite's greyscale AA leaves it with almost no
+// pixel above 50% coverage (81 of 1347 ink pixels for "the-waggle-dance"), so
+// the "inside" seeds are a sparse chain of dots and the field along every stem
+// oscillates about the 0.5 edge. Decoded at rest size that reads as glyphs
+// made of fragments — Jaime: "a glitch in the font". At 72px the same stem is
+// ~3px and always carries an interior (1257 seeds) — continuous strokes.
+//
+// The cost objection is answered below, not by lowering SS: the EDT runs only
+// over the INK's bounding box (plus the SDF spread), never the full raster. A
+// one-line label inks ~80 rows of a 512-row raster, so the transform touches
+// roughly a fifth of the cells a full-frame SS 2 pass did. Nothing persists
+// these cells yet (every reload re-bakes); when a derived pool arrives the
+// cost is paid once and none of this matters.
+const SS = 4
 const INF = 1e20
 
 // The atlas only ever constructs 128px cells (see HexLabelAtlas). MAXW bounds
 // the working raster and all reusable scratch buffers accordingly.
 const CELL_LOGICAL = 128
-const MAXW = CELL_LOGICAL * SS // 256 working raster edge
+const MAXW = CELL_LOGICAL * SS // 512 working raster edge
 
 // Module-level scratch — reused across every call so buildSdfCell allocates
 // nothing on the (warmup/cache-miss) bake path.
@@ -77,10 +85,9 @@ export function buildSdfCell(text: string, opts: SdfCellOpts = {}): ImageData {
     getComputedStyle(document.documentElement).getPropertyValue('--hc-font').trim() ||
     "'Source Sans Pro Light', system-ui, sans-serif"
 
-  const W = CELL_LOGICAL * SS // 256
+  const W = CELL_LOGICAL * SS // 512
   const H = W
   const radius = radiusLogical * SS
-  const size = W * H
 
   // ── 1. Rasterize glyph coverage (plain white on transparent) ─────────
   if (!_cv || _cv.width !== W || _cv.height !== H) {
@@ -124,29 +131,67 @@ export function buildSdfCell(text: string, opts: SdfCellOpts = {}): ImageData {
 
   const img = ctx.getImageData(0, 0, W, H).data
 
-  // ── 2. Seed inside/outside squared-distance grids (sub-pixel aware) ──
+  // ── 2. Find the ink's bounding box, padded by the SDF spread ─────────
+  // Everything farther than `radius` from any ink saturates to 0 in the field
+  // anyway, so the distance transform only has to run over the ink box grown
+  // by `radius`. That is what makes SS 4 affordable: a one-line label inks a
+  // narrow band of the raster, and the EDT is O(area) of the band, not of the
+  // frame. The stride of the compact grids is the box width, not W.
+  let minX = W, minY = H, maxX = -1, maxY = -1
+  for (let y = 0; y < H; y++) {
+    const row = y * W
+    for (let x = 0; x < W; x++) {
+      if (img[(row + x) * 4 + 3] !== 0) {
+        if (x < minX) minX = x
+        if (x > maxX) maxX = x
+        if (y < minY) minY = y
+        if (y > maxY) maxY = y
+      }
+    }
+  }
+  const out = new Uint8ClampedArray(cellDevice * cellDevice * 4)
+  if (maxX < 0) {
+    // No ink at all (empty or unprintable text): a far-outside field, opaque.
+    for (let px = 3; px < out.length; px += 4) out[px] = 255
+    return new ImageData(out, cellDevice, cellDevice)
+  }
+  const pad = Math.ceil(radius) + 1
+  const bx0 = Math.max(0, minX - pad)
+  const by0 = Math.max(0, minY - pad)
+  const bx1 = Math.min(W, maxX + pad + 1) // exclusive
+  const by1 = Math.min(H, maxY + pad + 1) // exclusive
+  const bw = bx1 - bx0
+  const bh = by1 - by0
+
+  // ── 3. Seed inside/outside squared-distance grids (sub-pixel aware) ──
   const gridOuter = _gridOuter
   const gridInner = _gridInner
-  for (let i = 0; i < size; i++) {
-    const av = img[i * 4 + 3] / 255 // coverage 0..1 (glyph is white)
-    if (av >= 1.0) {
-      gridOuter[i] = 0
-      gridInner[i] = INF
-    } else if (av <= 0.0) {
-      gridOuter[i] = INF
-      gridInner[i] = 0
-    } else {
-      const dd = 0.5 - av // >0 mostly outside, <0 mostly inside
-      gridOuter[i] = dd > 0 ? dd * dd : 0
-      gridInner[i] = dd < 0 ? dd * dd : 0
+  for (let y = 0; y < bh; y++) {
+    const srcRow = (by0 + y) * W + bx0
+    const dstRow = y * bw
+    for (let x = 0; x < bw; x++) {
+      const av = img[(srcRow + x) * 4 + 3] / 255 // coverage 0..1 (glyph is white)
+      const i = dstRow + x
+      if (av >= 1.0) {
+        gridOuter[i] = 0
+        gridInner[i] = INF
+      } else if (av <= 0.0) {
+        gridOuter[i] = INF
+        gridInner[i] = 0
+      } else {
+        const dd = 0.5 - av // >0 mostly outside, <0 mostly inside
+        gridOuter[i] = dd > 0 ? dd * dd : 0
+        gridInner[i] = dd < 0 ? dd * dd : 0
+      }
     }
   }
 
-  edt(gridOuter, W, H)
-  edt(gridInner, W, H)
+  edt(gridOuter, bw, bh)
+  edt(gridInner, bw, bh)
 
-  // ── 3. Signed distance → 0..1, box-downsample to the device cell ─────
-  const out = new Uint8ClampedArray(cellDevice * cellDevice * 4)
+  // ── 4. Signed distance → 0..1, box-downsample to the device cell ─────
+  // Raster cells outside the box are farther than `radius` from all ink by
+  // construction, so they take the saturated far-outside value directly.
   const step = W / cellDevice
   for (let oy = 0; oy < cellDevice; oy++) {
     const sy0 = Math.floor(oy * step)
@@ -157,10 +202,15 @@ export function buildSdfCell(text: string, opts: SdfCellOpts = {}): ImageData {
       let acc = 0
       let n = 0
       for (let sy = sy0; sy < sy1; sy++) {
-        const row = sy * W
+        const inRow = sy >= by0 && sy < by1
+        const row = (sy - by0) * bw - bx0
         for (let sx = sx0; sx < sx1; sx++) {
-          const i = row + sx
-          acc += Math.sqrt(gridOuter[i]) - Math.sqrt(gridInner[i]) // +outside, −inside
+          if (inRow && sx >= bx0 && sx < bx1) {
+            const i = row + sx
+            acc += Math.sqrt(gridOuter[i]) - Math.sqrt(gridInner[i]) // +outside, −inside
+          } else {
+            acc += radius
+          }
           n++
         }
       }
