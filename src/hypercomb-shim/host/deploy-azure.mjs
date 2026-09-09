@@ -4,14 +4,15 @@
 //   npm run host:deploy:azure -- --app my-host --group my-group
 //   npm run host:deploy:azure -- --app my-host --group my-group --domain hive.example.com
 //
-// `--tour` optionally keeps an existing standalone page at /tour/, and
+// `--tour` optionally keeps an existing standalone page at /tour/, `--page
+// <route>=<path>` stages any other page or page directory beside it, and
 // `--welcome` stages the front door the cold-host card reads (welcome.json —
-// this origin's name, what it is, where else it leads). Both are overlays in a
-// temporary deployment directory; the host dist itself remains generic.
+// this origin's name, what it is, where else it leads). All three are overlays
+// in a temporary deployment directory; the host dist itself remains generic.
 
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { access, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer as createTcpServer } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
@@ -29,6 +30,19 @@ const arg = (name, fallback = '') => {
   return index >= 0 ? (process.argv[index + 1] ?? '') : fallback
 }
 
+// `--page <route>=<path>`, repeatable. A file becomes <route>/index.html; a
+// directory is copied whole, so a page that carries its own stylesheet, images
+// and downloads arrives intact. One path segment only — a route is a name on
+// this origin, never a way to write somewhere else in the stage.
+const ROUTE_RE = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/
+const pages = process.argv.reduce((found, value, index) => {
+  if (value !== '--page') return found
+  const [route, ...rest] = (process.argv[index + 1] ?? '').split('=')
+  const source = rest.join('=')
+  if (!ROUTE_RE.test(route) || !source) throw new Error(`--page wants <route>=<path>, got "${process.argv[index + 1]}"`)
+  return [...found, { route, source }]
+}, [])
+
 const app = arg('app')
 const group = arg('group')
 const domain = arg('domain')
@@ -41,7 +55,7 @@ if (!app || !group) {
   console.error(`
 Deploy the shim to an existing Azure Static Web App.
 
-  npm run host:deploy:azure -- --app <name> --group <resource-group> [--domain <hostname>] [--tour <html> --tour-og <image>] [--welcome <json>] [--check-only]
+  npm run host:deploy:azure -- --app <name> --group <resource-group> [--domain <hostname>] [--tour <html> --tour-og <image>] [--welcome <json>] [--page <route>=<path>] [--check-only]
 
 Authentication comes from the active Azure CLI session. The deployment token
 is read only for this process and is never printed or written to disk.
@@ -233,6 +247,13 @@ const verifyStage = async (root) => {
       await imageResponse.arrayBuffer()
     }
 
+    for (const { route } of pages) {
+      const response = await fetch(`${origin}/${route}/`)
+      const type = (response.headers.get('content-type') ?? '').toLowerCase()
+      if (!response.ok || !type.includes('text/html')) throw new Error(`the staged /${route}/ page is not HTML`)
+      await response.arrayBuffer()
+    }
+
     if (welcome) {
       // The card reads this over HTTP and believes it only when the origin
       // says JSON — an SPA fallback answers 200 with HTML for a file that is
@@ -289,10 +310,20 @@ let stage = dist
 let temporary = ''
 
 try {
-  if (tour || welcome) {
+  if (tour || welcome || pages.length > 0) {
     temporary = await mkdtemp(resolve(tmpdir(), 'hypercomb-azure-'))
     stage = resolve(temporary, 'site')
     await cp(dist, stage, { recursive: true })
+  }
+
+  for (const { route, source } of pages) {
+    const from = resolve(process.cwd(), source)
+    const into = resolve(stage, route)
+    const whole = (await stat(from)).isDirectory()
+    await mkdir(into, { recursive: true })
+    await cp(from, whole ? into : resolve(into, 'index.html'), { recursive: whole })
+    await access(resolve(into, 'index.html'))
+    console.log(`[deploy] staged /${route}/ from ${whole ? 'the directory ' : ''}${source}`)
   }
 
   if (tour) {

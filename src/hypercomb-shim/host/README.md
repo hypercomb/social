@@ -147,6 +147,14 @@ Azure deployer takes `--welcome <file>`, which stages it without changing the
 generic build. hypercomb.com composes its own from the same directory of live
 doors the presentation bakes in ([welcome.cjs](../../scripts/presentation/welcome.cjs)).
 
+A link needs somewhere to land, so the Azure deployer also takes
+`--page <route>=<path>`, repeatable. A file becomes `<route>/index.html`; a
+directory is copied whole, which is how a page that carries its own stylesheet,
+images and downloadable files arrives intact. hypercomb.com stages the tour at
+`/tour/` and the downloads page — desktop release status, the browser utilities,
+their checksums — at `/downloads/`. Routes are one path segment, matched against
+`[a-z0-9-]`, so a route can only ever name a place on this origin.
+
 ## A machine that already holds the hive
 
 Everything above serves a *folder*. The Windows, macOS and Linux client serves

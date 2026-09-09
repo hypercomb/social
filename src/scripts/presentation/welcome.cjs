@@ -27,6 +27,12 @@ const OUT = path.join(__dirname, 'dist', 'welcome.json')
 // The tour is the presentation, kept whole and moved to /tour/ when the shim
 // took the apex. It is the first link because it is the one thing this domain
 // most wants read: nineteen minutes that explain the rest.
+//
+// /downloads/ is documentation/hypercomb.com — the welcome page that carries
+// the desktop release status and the two browser utilities, with their sizes,
+// checksums and install steps. It was written, kept current, and served
+// NOWHERE; the deploy stages that whole directory, so these two links are the
+// first time either file has been downloadable from this domain.
 const compose = (doors) => ({
   title: 'hypercomb',
   tagline: 'An open software platform. Your work is named by its own content, '
@@ -34,6 +40,8 @@ const compose = (doors) => ({
   links: [
     { label: 'Watch the tour', href: '/tour/', note: '≈ 19 minutes · narrated, with captions' },
     { label: 'Open hypercomb.io', href: 'https://hypercomb.io', note: 'the app — start a hive of your own' },
+    { label: 'Downloads', href: '/downloads/', note: 'desktop app · Windows, macOS, Linux' },
+    { label: 'Browser extensions', href: '/downloads/#extensions', note: 'Smart Autolinker · No YouTube Shorts' },
   ],
   doorsLabel: `live on ${hosts.ZONE} · ${doors.length} ${doors.length === 1 ? 'hive' : 'hives'}`,
   doors: doors.map(d => ({ title: d.title, host: d.host })),
