@@ -67,13 +67,6 @@ const NAME_EM = 5.6
 const BIG_HEAD_EM = 7.5
 const BIG_HEAD_TRACKING = 0.16
 const NAME_TRACKING = 0.04
-/** Widest a name may run before it wraps, as a multiple of the circumradius.
- *  A point-top hexagon is √3·R wide across its middle — where the band sits —
- *  so 1.6 uses nearly the whole tile and leaves the border its margin. */
-const MAX_WIDTH_R = 1.6
-/** A name wraps to at most this many lines; past that it is allowed to run
- *  wider rather than shrink, because consistent size is the point. */
-const MAX_LINES = 2
 /** Half-height of one band row — the shader's `u_radiusPx * 0.15`. */
 const ROW_H_R = 0.15
 /** Runs after Pixi's own render (UPDATE_PRIORITY.LOW = −25) so the transform
@@ -136,7 +129,6 @@ export class TileNameDrone extends Drone {
   #bigHead = false
   #band: BandRowsPayload = { rows: 1, label: null }
   #last = [NaN, NaN, NaN, NaN, NaN, NaN]
-  #measure: CanvasRenderingContext2D | null = null
   #tick = (): void => this.#follow()
   #onResize = (): void => this.#fitRoot()
 
@@ -292,29 +284,13 @@ export class TileNameDrone extends Drone {
     const rows = this.#band.label === label ? Math.max(1, this.#band.rows) : 1
     const y = px.y + this.#meshOffset.y - (rows - 1) * ROW_H_R * R
 
-    // ONE SIZE, ALWAYS. A name too wide for the tile wraps at this size rather
-    // than shrinking to fit, so no tile ever wears a smaller alphabet than its
-    // neighbour. The wrap width is set in LAYOUT px (the span's own units) and
-    // the whole span is then scaled down, which keeps the browser's line
-    // breaking working on real metrics.
+    // ONE SIZE, ONE LINE, ALWAYS. A name is never shrunk to fit and never
+    // wrapped (Jaime, 2026-09-09: "no wrapping") — both are ways of letting the
+    // tile decide how its name is set, and the whole point is that every name
+    // on the hive wears the same alphabet. A name longer than its tile simply
+    // runs wider; nothing about its letters changes.
     const em = this.#bigHead ? BIG_HEAD_EM : NAME_EM
     const scale = em / LAYOUT_PX
-    const maxWorld = MAX_WIDTH_R * R
-    const wraps = this.#measureWorld(text, em) > maxWorld
-    if (wraps) {
-      span.style.whiteSpace = 'normal'
-      // Break at spaces and hyphens ONLY. `anywhere` chopped MOUNTAINS into
-      // "MOUNTAIN" + an orphan "S"; a name with no break opportunity is
-      // allowed to run wider than its tile instead, because the one thing
-      // that must not vary is the size of the letters.
-      span.style.overflowWrap = 'normal'
-      span.style.width = `${maxWorld / scale}px`
-      span.style.maxHeight = `${MAX_LINES * LAYOUT_PX * 1.05}px`
-    } else {
-      span.style.whiteSpace = 'nowrap'
-      span.style.width = ''
-      span.style.maxHeight = ''
-    }
     const rotate = this.#pivot ? ' rotate(90deg)' : ''
     span.style.transform = `translate(${x}px,${y}px)${rotate} scale(${scale}) translate(-50%,-50%)`
   }
@@ -324,22 +300,6 @@ export class TileNameDrone extends Drone {
     return this.#flat
       ? { x: 1.5 * s * q, y: Math.sqrt(3) * s * (r + q / 2) }
       : { x: Math.sqrt(3) * s * (q + r / 2), y: s * 1.5 * r }
-  }
-
-  /** Advance of `text` at NAME_EM, in world px, measured once per placement
-   *  off a scratch 2D context in the same face the span renders in. */
-  #measureWorld(text: string, em: number): number {
-    if (!this.#measure) {
-      const cv = document.createElement('canvas')
-      this.#measure = cv.getContext('2d')
-      if (!this.#measure) return 0
-    }
-    const ctx = this.#measure
-    const track = this.#bigHead ? BIG_HEAD_TRACKING : NAME_TRACKING
-    const body = this.#bigHead ? text.toUpperCase() : text
-    ctx.font = `${NAME_WEIGHT} ${LAYOUT_PX}px ${FONT_STACK}`
-    try { (ctx as unknown as { letterSpacing: string }).letterSpacing = `${LAYOUT_PX * track}px` } catch { /* older engine */ }
-    return ctx.measureText(body).width * (em / LAYOUT_PX)
   }
 }
 
