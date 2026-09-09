@@ -4,12 +4,14 @@
 //   npm run host:deploy:azure -- --app my-host --group my-group
 //   npm run host:deploy:azure -- --app my-host --group my-group --domain hive.example.com
 //
-// `--tour` optionally keeps an existing standalone page at /tour/. It is an
-// overlay in a temporary deployment directory; the host dist remains generic.
+// `--tour` optionally keeps an existing standalone page at /tour/, and
+// `--welcome` stages the front door the cold-host card reads (welcome.json —
+// this origin's name, what it is, where else it leads). Both are overlays in a
+// temporary deployment directory; the host dist itself remains generic.
 
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { access, cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { access, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer as createTcpServer } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
@@ -32,13 +34,14 @@ const group = arg('group')
 const domain = arg('domain')
 const tour = arg('tour')
 const tourOg = arg('tour-og')
+const welcome = arg('welcome')
 const checkOnly = process.argv.includes('--check-only')
 
 if (!app || !group) {
   console.error(`
 Deploy the shim to an existing Azure Static Web App.
 
-  npm run host:deploy:azure -- --app <name> --group <resource-group> [--domain <hostname>] [--tour <html> --tour-og <image>] [--check-only]
+  npm run host:deploy:azure -- --app <name> --group <resource-group> [--domain <hostname>] [--tour <html> --tour-og <image>] [--welcome <json>] [--check-only]
 
 Authentication comes from the active Azure CLI session. The deployment token
 is read only for this process and is never printed or written to disk.
@@ -96,7 +99,7 @@ const stop = async (child) => {
 // on Windows after it already downloaded and verified that client. The cache
 // metadata is owned by the SWA CLI itself; the containment check prevents a
 // corrupt metadata file from turning this deployer into an arbitrary runner.
-const deployWithCachedAzureClient = async (root, token) => {
+const cachedAzureClient = async () => {
   const cacheRoot = resolve(homedir(), '.swa', 'deploy')
   const metadata = JSON.parse(await readFile(resolve(cacheRoot, 'StaticSitesClient.json'), 'utf8'))
   const binary = resolve(String(metadata?.binary ?? ''))
@@ -105,8 +108,17 @@ const deployWithCachedAzureClient = async (root, token) => {
     throw new Error('the cached Azure deployment client path is outside ~/.swa/deploy')
   }
   await access(binary)
+  return binary
+}
+
+const deployWithCachedAzureClient = async (root, token) => {
+  const binary = await cachedAzureClient()
+  // Microsoft's client refuses to run from inside the folder it is uploading
+  // ("Current directory cannot be identical to or contained within artifact
+  // folders"), so it is started from the stage's parent and told the app
+  // location outright.
   await run(binary, [], {
-    cwd: root,
+    cwd: dirname(root),
     env: {
       ...process.env,
       DEPLOYMENT_ACTION: 'upload',
@@ -221,11 +233,54 @@ const verifyStage = async (root) => {
       await imageResponse.arrayBuffer()
     }
 
+    if (welcome) {
+      // The card reads this over HTTP and believes it only when the origin
+      // says JSON — an SPA fallback answers 200 with HTML for a file that is
+      // not there, so the type is the test, not the status.
+      const response = await fetch(`${origin}/welcome.json`)
+      const type = (response.headers.get('content-type') ?? '').toLowerCase()
+      if (!response.ok || !type.includes('json')) throw new Error('the staged /welcome.json is not served as JSON')
+      const door = JSON.parse(await response.text())
+      const links = Array.isArray(door.links) ? door.links.length : 0
+      const doors = Array.isArray(door.doors) ? door.doors.length : 0
+      console.log(`[deploy] front door staged — ${links} link(s), ${doors} door(s)`)
+    }
+
     console.log(`[deploy] preflighting the complete staged host at ${origin}`)
     await run(process.execPath, [resolve(here, 'check-host.mjs'), origin])
   } finally {
     await stop(server)
   }
+}
+
+// DID THE UPLOAD LAND? An exit code cannot answer that — the Azure launcher
+// has exited zero having asked a question nobody was there to answer — so the
+// origin is asked instead, and the pin is the thing to ask about: it is the one
+// mutable pointer, it is served no-store, and any deploy that changed anything
+// moves it. A staged front door is checked with it, so a partial upload cannot
+// pass as a whole one. Azure's edge needs a moment to turn over, hence the wait.
+const servesTheStage = async (target, root, seconds = 120) => {
+  const pin = (await readFile(resolve(root, 'pin'), 'utf8')).trim().toLowerCase()
+  const staged = welcome ? (await readFile(resolve(root, 'welcome.json'), 'utf8')).trim() : ''
+  const deadline = Date.now() + seconds * 1_000
+  let reason = 'the origin never answered'
+  while (Date.now() < deadline) {
+    try {
+      const live = (await (await fetch(`${target}/pin`, { cache: 'no-store' })).text()).trim().toLowerCase()
+      if (live !== pin) reason = `/pin is ${live.slice(0, 12)}…, staged ${pin.slice(0, 12)}…`
+      else if (!welcome) return true
+      else {
+        const response = await fetch(`${target}/welcome.json`, { cache: 'no-store' })
+        const type = (response.headers.get('content-type') ?? '').toLowerCase()
+        if (!response.ok || !type.includes('json')) reason = `/welcome.json answered ${response.status} ${type}`
+        else if ((await response.text()).trim() !== staged) reason = '/welcome.json differs from the staged front door'
+        else return true
+      }
+    } catch (error) { reason = String(error) }
+    await delay(5_000)
+  }
+  console.warn(`[deploy] ${target} is not serving the staged bytes — ${reason}`)
+  return false
 }
 
 await access(resolve(dist, 'pin'))
@@ -234,12 +289,15 @@ let stage = dist
 let temporary = ''
 
 try {
-  if (tour) {
-    const tourPath = resolve(process.cwd(), tour)
-    await access(tourPath)
+  if (tour || welcome) {
     temporary = await mkdtemp(resolve(tmpdir(), 'hypercomb-azure-'))
     stage = resolve(temporary, 'site')
     await cp(dist, stage, { recursive: true })
+  }
+
+  if (tour) {
+    const tourPath = resolve(process.cwd(), tour)
+    await access(tourPath)
     await mkdir(resolve(stage, 'tour'), { recursive: true })
     await cp(tourPath, resolve(stage, 'tour', 'index.html'))
     if (tourOg) {
@@ -249,6 +307,18 @@ try {
     }
     await access(resolve(stage, 'tour', 'index.html'))
     if (tourOg) await access(resolve(stage, 'og.png'))
+  }
+
+  if (welcome) {
+    // Parsed rather than copied. A front door that is not a JSON object is
+    // ignored in silence by every visitor's browser, and this is the last
+    // moment where that can be said out loud instead of shipped.
+    const source = resolve(process.cwd(), welcome)
+    const staged = JSON.parse(await readFile(source, 'utf8'))
+    if (!staged || typeof staged !== 'object' || Array.isArray(staged)) {
+      throw new Error('--welcome must name a JSON object')
+    }
+    await writeFile(resolve(stage, 'welcome.json'), JSON.stringify(staged, null, 2) + '\n')
   }
 
   // Upload is the irreversible boundary. Verify the exact staged bytes first,
@@ -299,33 +369,38 @@ try {
       '--yes', '@azure/static-web-apps-cli@2.0.10', '--', '--verbose', 'info', 'deploy', '.',
       '--swa-config-location', '.', '--env', 'production',
     ]
+    const deployEnv = { ...process.env, SWA_CLI_DEPLOYMENT_TOKEN: token, CI: '1' }
+    const target = `https://${domain || defaultHostname}`
+
+    // TWO WAYS UP, CLIENT FIRST. The launcher (npx @azure/static-web-apps-cli)
+    // is a wrapper that, finding no swa-cli.config.json, runs `swa init` and
+    // asks "Do you want to deploy your app now?". With nobody at the keyboard
+    // it answers itself by EXITING ZERO having uploaded nothing — success over
+    // an unchanged site, which is the worst answer a deploy can give. So the
+    // deployment client it downloaded is preferred whenever it is on this
+    // machine, and the launcher is the fallback that first puts it there.
+    // Either way the exit code decides nothing: the origin does.
+    const uploads = []
+    try {
+      await cachedAzureClient()
+      uploads.push(['cached Azure deployment client', () => deployWithCachedAzureClient(stage, token)])
+    } catch { /* not downloaded yet — the launcher below will fetch it */ }
+    uploads.push(['Azure Static Web Apps CLI', () => run(npx.program, deployArgs, { cwd: stage, env: deployEnv })])
+
     let deployed = false
-    let launcherError = null
-    for (let attempt = 1; attempt <= 2 && !deployed; attempt += 1) {
-      try {
-        await run(npx.program, deployArgs,
-          { cwd: stage, env: { ...process.env, SWA_CLI_DEPLOYMENT_TOKEN: token } })
-        deployed = true
-      } catch (error) {
-        launcherError = error
-        if (attempt < 2) {
-          console.warn('[deploy] Azure launcher exited before confirming the atomic upload; retrying once')
-          await delay(3_000)
-        }
-      }
+    const failures = []
+    for (const [name, upload] of uploads) {
+      console.log(`[deploy] uploading with the ${name}`)
+      try { await upload() } catch (error) { failures.push(error) }
+      deployed = await servesTheStage(target, stage, 90)
+      if (deployed) break
+      console.warn(`[deploy] the ${name} finished without the origin changing`)
     }
     if (!deployed) {
-      console.warn('[deploy] Azure launcher failed twice; using its verified cached deployment client directly')
-      try {
-        await deployWithCachedAzureClient(stage, token)
-        deployed = true
-      } catch (directError) {
-        throw new AggregateError([launcherError, directError].filter(Boolean),
-          'both Azure deployment paths failed')
-      }
+      throw new AggregateError(failures,
+        `every Azure upload path finished without ${target} serving the staged bytes`)
     }
 
-    const target = `https://${domain || defaultHostname}`
     console.log(`\n[deploy] deployed. Verifying the host contract at ${target}\n`)
     await run(process.execPath, [resolve(here, 'check-host.mjs'), target])
   }

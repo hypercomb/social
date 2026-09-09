@@ -118,6 +118,35 @@ The deploy verifies itself when it finishes. A brand-new custom domain often
 needs a minute for DNS and its certificate — re-run `host:check` if it does not
 pass immediately.
 
+## The front door — what a cold visitor sees
+
+A host that publishes for others opens the add-a-domain card to every browser
+arriving with nothing held. On a domain that is also a *website*, that card is
+the website, so it can carry the site's own name, a sentence about it, and the
+links that belong on a front page.
+
+Stage a `welcome.json` next to the shell and the card reads it:
+
+```json
+{
+  "title": "hypercomb",
+  "tagline": "An open software platform.",
+  "links": [{ "label": "Watch the tour", "href": "/tour/", "note": "≈ 19 minutes" }],
+  "doorsLabel": "live on hypercomb.com · 6 hives",
+  "doors": [{ "title": "Revolución", "host": "revolucion.hypercomb.com" }]
+}
+```
+
+Every field is optional and every field is untrusted: text is clamped, and an
+`href` may only be a path on this origin or a plain `http(s)` address. A host
+with no `welcome.json` renders the plain card, which is the normal case — the
+shim itself knows nothing about any particular domain.
+
+On Cloudflare Pages, put the file in `public/` and it ships in `dist/`. The
+Azure deployer takes `--welcome <file>`, which stages it without changing the
+generic build. hypercomb.com composes its own from the same directory of live
+doors the presentation bakes in ([welcome.cjs](../../scripts/presentation/welcome.cjs)).
+
 ## A machine that already holds the hive
 
 Everything above serves a *folder*. The Windows, macOS and Linux client serves
