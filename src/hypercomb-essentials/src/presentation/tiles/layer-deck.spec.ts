@@ -55,7 +55,12 @@ services['@diamondcoreprocessor.com/ImagePasteWorker'] = { createTileFromImage: 
 // OUT contracts, spied before anything is emitted so a replay cannot confuse.
 const out = {
   toggle: vi.fn(), apply: vi.fn(), camera: vi.fn(), tags: vi.fn(), pin: vi.fn(), keymap: vi.fn(), step: vi.fn(), set: vi.fn(),
+  publish: vi.fn(), meshModal: vi.fn(), meshLeave: vi.fn(), face: vi.fn(),
 }
+EffectBus.on('phone:face-set', out.face)
+EffectBus.on('publish:view-toggle', out.publish)
+EffectBus.on('mesh:open-modal', out.meshModal)
+EffectBus.on('mesh:leave', out.meshLeave)
 EffectBus.on('view:toggle', out.toggle)
 EffectBus.on('feature:apply', out.apply)
 EffectBus.on('camera:capture-open', out.camera)
@@ -154,52 +159,60 @@ describe('the three groups', () => {
     expect(out.toggle).toHaveBeenCalledWith({ view: 'slides', mode: 'on' })
   })
 
-  it('add here: attachable bees the layer lacks, never navigation or unattachable ones, plus camera and library', () => {
+  it('add here: attachable bees the layer lacks, never navigation or unattachable ones — the camera and library moved to the Add sheet', () => {
     open()
     expect(plate('feature:apply:scroller')).toBeDefined()
     expect(plate('feature:apply:slides')).toBeUndefined()   // carried already
     expect(plate('feature:apply:tree')).toBeUndefined()     // navigation
     expect(plate('feature:apply:website')).toBeUndefined()  // not attachable
-    expect(plate('camera')).toBeDefined()
-    expect(plate('library')).toBeDefined()
+    expect(plate('camera')).toBeUndefined()
+    expect(plate('library')).toBeUndefined()
     plate('feature:apply:scroller')!.click()
     expect(out.apply).toHaveBeenCalledWith({ view: 'scroller', segments: ['honey-garden'], remove: false })
     expect(isOpen()).toBe(false)
   })
 
-  it('add here at the root offers no behaviour (nothing to mark) but still the camera and the library', () => {
+  it('add here at the root offers no behaviour (nothing to mark)', () => {
     segments = []
     open()
     expect(plate('feature:apply:scroller')).toBeUndefined()
-    expect(plate('camera')).toBeDefined()
-    expect(plate('library')).toBeDefined()
   })
 
-  it('camera closes the sheet and opens the shutter', () => {
+  it('see: share hands the screen to the publish sheet; swarm joins through the location dialog and leaves through mesh:leave', () => {
     open()
-    plate('camera')!.click()
+    plate('share')!.click()
     expect(isOpen()).toBe(false)
-    expect(out.camera).toHaveBeenCalledTimes(1)
-  })
-
-  it('library opens a hidden multi-file picker and feeds each image through the paste seam', async () => {
+    expect(out.publish).toHaveBeenCalledTimes(1)
     open()
-    plate('library')!.click()
-    const input = document.querySelector('input[data-hc-layer-deck-library]') as HTMLInputElement
-    expect(input).not.toBeNull()
-    expect(input.accept).toBe('image/*,video/*')
-    expect(input.multiple).toBe(true)
-    const picked = [new File(['a'], 'a.png', { type: 'image/png' }), new File(['b'], 'b.mp4', { type: 'video/mp4' })]
-    Object.defineProperty(input, 'files', { value: picked, configurable: true })
-    input.dispatchEvent(new Event('change'))
-    expect(isOpen()).toBe(false)
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(createTile).toHaveBeenCalledTimes(1)
-    expect(createTile.mock.calls[0][0]).toBe(picked[0])
+    plate('swarm')!.click()
+    expect(out.meshModal).toHaveBeenCalledWith({ join: true })
+    expect(out.meshLeave).not.toHaveBeenCalled()
+    EffectBus.emit('mesh:public-changed', { public: true })
+    open()
+    expect(plate('swarm')!.firstElementChild?.getAttribute('data-tone')).toBe('accent')
+    plate('swarm')!.click()
+    expect(out.meshLeave).toHaveBeenCalledTimes(1)
+    EffectBus.emit('mesh:public-changed', { public: false })
   })
 
-  it('see: the rung carries its digit and steps down, wrapping to three at one; no fullscreen plate here', () => {
+  it('see: from the list face the lanes plate selects the hexagons and closes; on the hexagons a list plate is the way back', () => {
+    EffectBus.emit('phone:face', { face: 'list' })
+    open()
+    expect(plate('list')).toBeUndefined()
+    plate('lanes')!.click()
+    expect(out.face).toHaveBeenCalledWith({ face: 'hexagons' })
+    expect(out.step).not.toHaveBeenCalled()
+    expect(isOpen()).toBe(false)
+    EffectBus.emit('phone:face', { face: 'hexagons' })
+    open()
+    expect(plate('lanes')!.firstElementChild?.getAttribute('data-tone')).toBe('accent')
+    plate('list')!.click()
+    expect(out.face).toHaveBeenCalledWith({ face: 'list' })
+    expect(isOpen()).toBe(false)
+  })
+
+  it('see: on the hexagons the rung carries its digit and steps down, wrapping to three at one; no fullscreen plate here', () => {
+    EffectBus.emit('phone:face', { face: 'hexagons' })
     open()
     const lanes = plate('lanes')!
     expect(lanes.querySelector('[data-role="app-badge"]')?.textContent).toBe('3')

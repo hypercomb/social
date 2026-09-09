@@ -276,3 +276,83 @@ describe('hosts panel — the set, apart from the publishing', () => {
     expect(DRONE).toMatch(/hosts: this\.#knownZones\(\)/)
   })
 })
+
+// ── the other half of the directory: what a domain SERVES ───────────────────
+//
+// A domain is a list of domains until it can show you what is on them. Jaime,
+// 2026-09-09: "just a sidebar with a list of domains, and each time you select
+// one you get to see the list of features — and then when you're done you just
+// see the list of features that your domain has."
+//
+// The switch on each creation is an OFFER and nothing else. Per the static
+// peers ruling: shaded by default, and the walk in is the adopt. There is no
+// door here that brings a branch in, and the publisher never sets the flag for
+// you — the offers document is yours, written in your own pool.
+const STATIC_PEERS = readFileSync(join(here, 'static-peers.drone.ts'), 'utf8')
+
+describe('the host directory shows what a domain serves', () => {
+  it('asks the domain for its creations when you look into it, and only then', () => {
+    expect(HOSTS_TS).toMatch(/EffectBus\.emit\('hosts:creations', \{ zone \}\)/)
+    expect(STATIC_PEERS).toMatch(/this\.onEffect<\{ zone\?: string \}>\('hosts:creations'/)
+    // Asked from look(), never from the render loop or the panel opening.
+    expect(HOSTS_TS).toMatch(/async look\(zone: string\)[\s\S]{0,800}?EffectBus\.emit\('hosts:creations'/)
+  })
+
+  it('is answered by the drone that owns the offers, so the switch cannot disagree with the hive', () => {
+    expect(STATIC_PEERS).toMatch(/'community:offers-render'/)
+    expect(STATIC_PEERS).toMatch(/'hosts:creations:render'/)
+    // The offered flag is read at emit time, never stored on the card.
+    expect(STATIC_PEERS).toMatch(/#renderCreations = \(zone: string\): void => \{[\s\S]{0,600}?offered: this\.#offers\.has\(row\.name\)/)
+    // Offering or withdrawing anywhere in the hive redraws every list.
+    expect(STATIC_PEERS).toMatch(/#renderOfferState = \(\): void => \{[\s\S]{0,200}?this\.#renderMine\(\)[\s\S]{0,200}?this\.#renderCreations\(zone\)/)
+  })
+
+  it('mints the offer where the offers live — shared never builds one', () => {
+    expect(STATIC_PEERS).toMatch(/const offer = offerFromCard\(card\)/)
+    // Shared holds the shape by hand and never the mapping: no mint here, and
+    // no reach into essentials to borrow one.
+    expect(HOSTS_TS).not.toMatch(/offerFromCard/)
+    expect(HOSTS_TS).not.toMatch(/lineageKey: [^;\n]*\.lineage/)
+    expect(HOSTS_TS).not.toMatch(/from '@hypercomb\/essentials/)
+    expect(HOSTS_TS).toMatch(/offer: unknown \| null/)
+    // The panel sends back exactly what it was handed.
+    expect(HOSTS_TS).toMatch(/EffectBus\.emit\('community:offer', row\.offer\)/)
+  })
+
+  it('offers a creation and withdraws it — and never adopts a branch', () => {
+    expect(HOSTS_TS).toMatch(/EffectBus\.emit\('community:withdraw', \{ name: row\.name \}\)/)
+    expect(HOSTS_HTML).not.toMatch(/adopt/i)
+    expect(EN['hosts.creations.show-title']).toMatch(/shaded until you walk into it/i)
+    expect(EN['hosts.mine.note']).toMatch(/taking one tile never takes its branch/i)
+  })
+
+  it('draws no switch on a plate it could not hold', () => {
+    expect(HOSTS_HTML).toMatch(/@if \(row\.offer \|\| row\.offered\)/)
+    expect(HOSTS_TS).toMatch(/if \(!row\.offer\) return/)
+    expect(EN['hosts.creations.unheld']).toBeTruthy()
+  })
+
+  it('tells "publishes nothing" from "did not answer" for creations too', () => {
+    expect(STATIC_PEERS).toMatch(/answered: cards !== null/)
+    expect(HOSTS_HTML).toMatch(/creationsAnswered\(zone\) \? 'hosts\.creations\.none' : 'hosts\.creations\.silent'/)
+    expect(EN['hosts.creations.silent']).toMatch(/down/i)
+  })
+
+  it('asks the domain’s OWN ledger, never a canonical directory standing in for it', () => {
+    expect(STATIC_PEERS).toMatch(/fetchPublicationCards\(\{\}, `https:\/\/\$\{zone\}`\)/)
+  })
+
+  it('shows what your hive carries without being asked, from every domain at once', () => {
+    // Emitted once the document is read, so a panel opened later replays it.
+    expect(STATIC_PEERS).toMatch(/await this\.#migrateLegacyFollows\(\)[\s\S]{0,300}?this\.#renderMine\(\)/)
+    expect(HOSTS_TS).toMatch(/'community:offers-render'/)
+    expect(HOSTS_HTML).toMatch(/hosts\.mine\.open/)
+    expect(EN['hosts.mine.open']).toMatch(/\{count\}/)
+  })
+
+  it('puts the creations above the builds — a build is the app, a creation is what somebody made', () => {
+    expect(HOSTS_HTML.indexOf('hosts-creations')).toBeGreaterThan(0)
+    expect(HOSTS_HTML.indexOf('hosts-creations')).toBeLessThan(HOSTS_HTML.indexOf('hosts-inspector'))
+    expect(EN['hosts.builds']).toBe('Builds')
+  })
+})

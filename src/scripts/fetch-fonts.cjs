@@ -19,6 +19,9 @@ const URL_LIMIT = 4000
 
 const FAMILIES = {
   inter:            'Inter:wght@300..700',
+  // Tile names (tile-name.drone.ts): the variable face carries 300..700 in one
+  // file, so the weight is a CSS number, not a second download. SIL OFL 1.1.
+  'source-sans':    'Source+Sans+3:wght@300..700',
   'source-serif':   'Source+Serif+4:ital,opsz,wght@0,8..60,400..600;1,8..60,400..600',
   'jetbrains-mono': 'JetBrains+Mono:wght@400..600',
   fraunces:         'Fraunces:opsz,wght@9..144,400..600',

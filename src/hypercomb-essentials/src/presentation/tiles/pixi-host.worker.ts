@@ -2,6 +2,7 @@
 import { Worker, EffectBus } from '@hypercomb/core'
 import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
 import { Application, Container } from 'pixi.js'
+import { refreshSceneText } from '../grid/screen-text-resolution.js'
 import {
   computeStageCenter,
   computeViewportOrigin,
@@ -17,6 +18,34 @@ export type HostReadyPayload = {
   container: Container
   canvas: HTMLCanvasElement
   renderer: Application['renderer']
+}
+
+/** Browser zoom (Ctrl+wheel, Ctrl+plus) and a move to another monitor change
+ *  devicePixelRatio AFTER boot. Pixi resizes the canvas for the new CSS box
+ *  (resizeTo) but keeps the resolution it was created with, so the backing
+ *  store is upscaled by the browser and EVERYTHING — hex edges, pictures, the
+ *  SDF names — goes soft (2026-09-09: "no matter what we do the text is poorly
+ *  rendering"). Follow the ratio: a one-shot media query armed at the current
+ *  ratio fires the moment it stops matching. The renderer's resolutionChange
+ *  runner re-bakes auto-resolution texts; ticker-driven texts follow on their
+ *  next frame; the ResizePlugin's own deferred resize keeps the CSS box. */
+function followDevicePixelRatio(app: Application, phone: boolean): void {
+  if (typeof window.matchMedia !== 'function') return
+  const arm = (): void => {
+    const dpr = window.devicePixelRatio || 1
+    const query = window.matchMedia(`(resolution: ${dpr}dppx)`)
+    const onChange = (): void => {
+      query.removeEventListener('change', onChange)
+      const next = window.devicePixelRatio || 1
+      const resolution = phone ? Math.min(1.5, next) : next
+      if (app.renderer.resolution !== resolution) {
+        app.renderer.resize(app.renderer.screen.width, app.renderer.screen.height, resolution)
+      }
+      arm()
+    }
+    query.addEventListener('change', onChange)
+  }
+  arm()
 }
 
 export class PixiHostWorker extends Worker {
@@ -217,6 +246,11 @@ export class PixiHostWorker extends Worker {
       antialias: !phone,
     })
     if (phone) app.ticker.maxFPS = 30
+    followDevicePixelRatio(app, phone)
+    // Keep every registered scene text baked at the density it is DISPLAYED
+    // at (see grid/screen-text-resolution.ts). Priority −27 puts it after
+    // Pixi's own render, so the transforms it reads are the ones just drawn.
+    app.ticker.add(() => refreshSceneText(app.renderer.resolution), undefined, -27)
     const pixiInitMs = performance.now() - tPixiInit
     console.log(`[pixi-host] Application.init() ${pixiInitMs.toFixed(0)}ms`)
     ;(window as any).__hcBoot?.(`Application.init() done (${pixiInitMs.toFixed(0)}ms)`)

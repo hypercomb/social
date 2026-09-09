@@ -53,6 +53,16 @@ const NAV_KEY = '@hypercomb.social/Navigation'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
+/** The route a door carried, read off the SAME payload the bundle came in —
+ *  `at` is never part of the bundle (it would change its signature and mean
+ *  the same link landed everyone in the same place), so it is validated here
+ *  and simply absent when the link was an ordinary invite. */
+const routeBeside = (raw: unknown): string[] => {
+  const at = (raw as { at?: unknown })?.at
+  if (!Array.isArray(at)) return []
+  return at.map(s => String(s ?? '').trim()).filter(Boolean).slice(0, 24)
+}
+
 interface HistoryLike {
   sign: (lineage: { explorerSegments: () => string[] }) => Promise<string>
   currentLayerAt: (locationSig: string, stats?: { cold?: boolean }) => Promise<Record<string, unknown> | null>
@@ -128,12 +138,15 @@ export class HiveVisitDrone extends Drone {
     const bundle = validateHiveLinkBundle(raw)
     if (!bundle) { console.warn('[hive-visit] link rejected — malformed bundle', raw); return }
     if (isReadOnlySession()) await this.#previewForVisitor(bundle)
-    else await this.#offerToParticipant(bundle)
+    // WHERE THEY WERE STANDING rides beside the bundle, not inside it: the
+    // bundle is one creation's coordinates and is the same for everyone,
+    // while the route is this reader's alone (meeting-invite.worker.ts).
+    else await this.#offerToParticipant(bundle, routeBeside(raw))
   }
 
   // ── a participant: the offer ──────────────────────────────────────────
 
-  #offerToParticipant = async (bundle: HiveLinkBundle): Promise<void> => {
+  #offerToParticipant = async (bundle: HiveLinkBundle, at: readonly string[] = []): Promise<void> => {
     const resolved = await this.#resolveHead(bundle)
     if (!resolved) return
     const name = bundle.segments[bundle.segments.length - 1] ?? ''
@@ -142,8 +155,11 @@ export class HiveVisitDrone extends Drone {
       lineageKey: resolved.key, segments: [...bundle.segments], head: resolved.head,
     }
     EffectBus.emit('community:offer', offer)
-    // The shaded tile stands at your top level — go where it is.
-    this.#ioc()?.get<NavLike>(NAV_KEY)?.go([])
+    // The shaded tile stands at your top level — go where it is, or, when the
+    // door said where its reader was standing, go THERE: inside the offer, at
+    // the route they came from. Still shaded, still taken one tile at a time
+    // — landing somewhere is not holding it.
+    this.#ioc()?.get<NavLike>(NAV_KEY)?.go(name && at.length ? [name, ...at] : [])
     const i18n = this.#i18n()
     this.emitEffect('activity:log', {
       message: i18n?.t('offer.arrived', { name })

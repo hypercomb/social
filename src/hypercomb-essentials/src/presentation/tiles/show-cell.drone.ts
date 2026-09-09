@@ -1184,6 +1184,12 @@ export class ShowCellDrone extends Drone {
   #pivot = false
   #textOnly = false
   #labelsVisible = true
+  /** tile-names:dom — the DOM name layer (tile-name.drone.ts) is mounted and
+   *  draws the glyphs as real text; the shader keeps only the band (u_glyphs 0). */
+  #domNames = false
+  /** Launcher silhouette per rendered label — the same value shapeAttr gets —
+   *  so the DOM name layer can stand aside where the shader draws its own strip. */
+  #shapeModeByLabel = new Map<string, number>()
 
   /** Does a tile's `hideText` mark actually hide its name right now?
    *  Only ever when the image it hides BEHIND is on screen: an image that
@@ -5137,6 +5143,7 @@ export class ShowCellDrone extends Drone {
     this.shader.setPivot(this.#pivot)
     this.#applyBandRows()
     this.shader.setLabelMix(this.#labelsVisible ? 1.0 : 0.0)
+    this.shader.setGlyphs(this.#domNames ? 0 : 1)
     this.shader.setImageMix(this.#textOnly ? 0.0 : this.#substrateFadeMix())
 
     // Per-group launcher visuals — NOT universal, and chosen PER TILE so a mixed
@@ -6856,6 +6863,13 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    // The DOM name layer draws the glyphs while it is mounted; the shader keeps
+    // the band behind them. Last-value replay covers either boot order.
+    this.onEffect<{ on: boolean }>('tile-names:dom', (p) => {
+      this.#domNames = !!p?.on
+      this.shader?.setGlyphs(this.#domNames ? 0 : 1)
+    })
+
     // listen for pivot mode toggle (loads pre-rotated snapshots + rotated labels)
     this.onEffect<{ pivot: boolean }>('render:set-pivot', (payload) => {
       if (this.#pivot !== payload.pivot) {
@@ -7768,13 +7782,17 @@ export class ShowCellDrone extends Drone {
    *  atlas and every label re-resolves through here, so a language switch
    *  swaps titles with no extra wiring. */
   private readonly attachLabelResolver = (atlas: HexLabelAtlas): void => {
+    atlas.setLabelResolver(this.displayNameFor)
+  }
+
+  /** The one address→display resolution, shared by the SDF bake and the DOM
+   *  name layer (tile-name.drone.ts) so a tile can never read two ways. */
+  public readonly displayNameFor = (directoryName: string): string => {
     const i18n = get<I18nProvider>(I18N_IOC_KEY)
-    atlas.setLabelResolver((directoryName: string) => {
-      const locale = i18n?.locale ?? 'en'
-      return this.registryTitlesByLabel.get(directoryName)?.[locale]?.trim()
-        || titleForLabel(directoryName, locale)
-        || (i18n ? i18n.resolveCell(directoryName) : directoryName)
-    })
+    const locale = i18n?.locale ?? 'en'
+    return this.registryTitlesByLabel.get(directoryName)?.[locale]?.trim()
+      || titleForLabel(directoryName, locale)
+      || (i18n ? i18n.resolveCell(directoryName) : directoryName)
   }
 
   /**
@@ -11039,6 +11057,7 @@ export class ShowCellDrone extends Drone {
       // Per-tile launcher silhouette. Only launcher tiles carry a launch:target
       // `shape`; everything else resolves to 0 (hexagon).
       const sm = !onLauncherPage ? 0 : launchShapeToMode(launchShapeForLabel(c.label))
+      this.#shapeModeByLabel.set(c.label, sm)
       shapeAttr.set([sm, sm, sm, sm], sap)
       sap += 4
 
@@ -11274,6 +11293,12 @@ export class ShowCellDrone extends Drone {
    *  tile whose image is actually in the atlas (an image that has not
    *  landed yet never hid anything) — and never for the hovered tile,
    *  which is the whole point of the reveal. */
+  /** The DOM name layer (tile-name.drone.ts) asks these two; the answers are
+   *  the SDF path's own, so the two paths can never disagree. */
+  public readonly nameHidden = (label: string): boolean => this.#labelIsHidden(label)
+  public readonly shaderDrawsName = (label: string): boolean =>
+    (this.#shapeModeByLabel.get(label) ?? 0) > 0
+
   #labelIsHidden(label: string): boolean {
     if (label === this.#hoverRevealLabel) return false
     const cell = this.renderedCells.get(label)

@@ -1,9 +1,58 @@
 # Mobile, one column — the phone reads a layer as a list, and does three things
 
-Status: DESIGN, 2026-09-09. Supersedes the phone's *reading surface* in
-`mobile-rails-projection.md` (the rails). Everything else that doc built —
-the sheets, the app-deck plate language, `link:intake`, `deliver-link`,
-one definition of mobile, hardware BACK — stays and is reused here.
+Status: **PASSES 1 + 2 + 3 BUILT, 2026-09-09.** Pass 3 (live on dev-4254):
+**hold → hexagon → swipe to a face** on the tile page — on a phone the
+picture rests as a RECTANGLE (`RECT_CLIP`, the same six vertices) and
+morphs to the hexagon under the finger in 250 ms (`#holdShape`,
+`clip-path` transition, reduced-motion snaps) with the six face captions
+fading in; letting go returns it; the swipe-to-face mechanics are the
+existing `#bindHexGesture`. **Add inside** plate on the tile page (enters,
+then the Add sheet rises). **Row ⋯** → the tile page. **Hold a row** (420
+ms) lifts it: drag to reorder — the whole order goes to `MoveDrone
+.reorderList` via `move:reorder-list`, the same dense-rank write a rail
+drag makes — or let go still and it is the tile page. A sheet popping its
+synthetic history entry fires `navigate` with the lineage unmoved: the
+list compares segments before going stale. OWED from pass 3: the ROW's
+hold-rise variant (thumbnail rising to a ~120 px hexagon with faces under
+the finger) — a row hold is reorder-or-page for now.
+
+Earlier: **PASSES 1 + 2 BUILT, 2026-09-09** (see §6 — live on dev-4254 at
+375×812: the list, Back · Add · More, leaf tap → tile page, the toast,
+share + swarm on the deck, first-boot lands inside the seeded hive; the
+ADD SHEET with its five doors; More re-worded "this page"; and — pulled
+forward from pass 3 at Jaime's ask — **list · hexagons as ONE selector**:
+choosing the hexagons (the lanes) puts the list away, and the deck's
+`list` plate is the way back; `hc:phone-face`, published as `phone:face`,
+set through `phone:face-set`). Pass 3 (hold → hexagon → swipe, reorder,
+Add inside, row ⋯) designed, not built.
+
+**Pass 2 lives in** `presentation/tiles/add-sheet.drone.ts`
+(`hc-add-sheet`, order 710, z 100003, spec `add-sheet.spec.ts`): name it →
+`command:create-cells` (the create queen's door — NOT the command line's
+stance-dependent submit, where a bare word became `/word`), reserved
+words refused in place; URL → `link:intake`; `/x` → `command:submit` (a
+new command-line door that runs `#submitAsEnter`); camera →
+`camera:capture-open`; library → `ImagePasteWorker.createTileFromImage`;
+paste a link → the clipboard inside the tap; say it → `VoiceInputService`
+with the interim words in the field. It reports `add:sheet-state` so the
+bar's disc is lit while it is up, and closes the deck as it opens. Supersedes the phone's *reading surface*
+in `mobile-rails-projection.md` (the rails). Everything else that doc
+built — the sheets, the app-deck plate language, `link:intake`,
+`deliver-link`, one definition of mobile, hardware BACK — stays and is
+reused here.
+
+**Where pass 1 lives:** `presentation/tiles/layer-list.drone.ts`
+(`hc-layer-list`, shell surface order 300, z 59990 — level with the
+close-up, over the Pixi host; spec `layer-list.spec.ts`);
+`controls-bar` mobile block (three discs; the composer collapses in both
+orientations, Add reveals it with focus, GO collapses it);
+`_header-bar.scss` phone block (`.header-bar{display:none}` +
+`.input-open`); `activity-log` (`isMobile` → newest-only, 4 s,
+`:host-context([data-hc-mobile='on'])`); `layer-deck` (share + swarm
+plates; `mesh:leave` is the shell's new effect-door toward private, in
+`controls-bar`); `example-hives.worker` (phone → `goRaw([name])` after a
+committed adopt). Pass 1's Add is the composer: naming only — the camera,
+library and link doors stay on the deck until the Add sheet (pass 2).
 
 ## 0. The verdict on the hexagons
 

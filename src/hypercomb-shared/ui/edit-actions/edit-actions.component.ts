@@ -82,8 +82,8 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
   /**
    * A full-viewport view (website, slides, tree, tutor, photo …) owns the
    * screen. The document actions edit the HIVE, not the view, so the whole
-   * cluster steps aside while one is up — same `view:active` contract the
-   * controls-bar uses. Without this the bottom-right cluster paints over the
+   * cluster steps aside unless the view reserves the shell's space through
+   * `view:keeps-shell`. Without this the bottom-right cluster paints over the
    * website's own exit control and reads as the site's chrome.
    */
   readonly viewActive = signal(false)
@@ -134,7 +134,7 @@ export class EditActionsComponent implements AfterViewInit, OnInit, OnDestroy {
       this.flatTop.set(!!flat)
     })
 
-    this.#viewActiveUnsub = EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {
+    this.#viewActiveUnsub = EffectBus.on<{ active: boolean }>('view:shell-hidden', ({ active }) => {
       this.viewActive.set(!!active)
     })
   }

@@ -203,6 +203,11 @@ export class TagsViewerComponent implements OnDestroy {
   readonly #bouquets = signal<BouquetLike[]>([])
   /** The naming field is open (the bouquet in hand is being given a name). */
   readonly #naming = signal(false)
+  /** The create field is open (a keyword is being minted by hand). */
+  readonly #creating = signal(false)
+  /** Why the last create was refused, as an i18n key. Cleared on the next
+   *  keystroke, so the message belongs to the word you just tried. */
+  readonly #createError = signal<string | null>(null)
   /** The signature of the bouquet in hand. Derived the moment anything is
    *  picked — the gathered set IS a bouquet, named or not — so the identity is
    *  never something a later Save has to invent. */
@@ -225,6 +230,8 @@ export class TagsViewerComponent implements OnDestroy {
   readonly removalCells = this.#removalCells.asReadonly()
   readonly removalCount = computed(() => this.#removalCells().length)
   readonly naming = this.#naming.asReadonly()
+  readonly creating = this.#creating.asReadonly()
+  readonly createError = this.#createError.asReadonly()
   /** The identity of the bouquet in hand, shortened. Shown because it is the
    *  proof that a bouquet exists before it has a name — and because two people
    *  who gather the same marks will see the same one. */
@@ -869,6 +876,72 @@ export class TagsViewerComponent implements OnDestroy {
     this.#naming.set(false)
   }
 
+  /** Open the create field, caret in it — same focus ladder, same reason, as
+   *  `beginNaming` above. */
+  beginCreate(): void {
+    this.#createError.set(null)
+    this.#creating.set(true)
+    const focus = (): void => {
+      const input = this.#host.nativeElement.querySelector('.tag-create-input') as HTMLInputElement | null
+      input?.focus()
+      input?.select()
+    }
+    queueMicrotask(focus)
+    requestAnimationFrame(focus)
+    setTimeout(focus, 60)
+  }
+
+  cancelCreate(): void {
+    this.#creating.set(false)
+    this.#createError.set(null)
+  }
+
+  clearCreateError(): void {
+    if (this.#createError()) this.#createError.set(null)
+  }
+
+  /** Mint a keyword by hand.
+   *
+   *  Creating is `registry.add` and nothing else. A hand-made mark is the
+   *  author's own tag — the fixed tier — so it needs no pool and no deposit:
+   *  it enters the layer's closure the moment it lands on a tile, and until
+   *  then it is only a word this hive knows. `add` is an upsert, so this is
+   *  also why the duplicate check happens HERE rather than being left to the
+   *  registry: silently re-adding an existing mark would look like success
+   *  and produce nothing.
+   *
+   *  Colon names are refused. `visual:website:page` is a namespace behaviours
+   *  mint to say what a tile IS; hand-filing into one would be curating a
+   *  vocabulary the system already names — the same reason those groups are
+   *  folded away and kept out of the loose list.
+   *
+   *  The field stays open on success (returning true clears it) so a burst of
+   *  words is one gesture, not one per press.
+   */
+  async submitCreate(input: HTMLInputElement): Promise<void> {
+    // The template cannot hold this: Angular expressions have no arrow
+    // functions, so "clear the field only if the word was taken" has to be a
+    // method. Clearing unconditionally would eat a rejected word and leave
+    // the participant retyping it to read their own mistake.
+    if (await this.createTag(input.value)) {
+      input.value = ''
+      input.focus()
+    }
+  }
+
+  async createTag(raw: string): Promise<boolean> {
+    const name = raw.trim()
+    if (!name) return false
+    if (name.includes(':')) { this.#createError.set('tags.create.error.namespaced'); return false }
+    const registry = this.#registry()
+    await registry?.ensureLoaded()
+    if (registry && name in registry.all) { this.#createError.set('tags.create.error.exists'); return false }
+    this.#createError.set(null)
+    await registry?.add(name)
+    this.#registryVersion.update(v => v + 1)
+    return true
+  }
+
   /** Name the picked set. Re-using an existing name replaces it — the name IS
    *  the address, so this is an update, never a second bouquet. */
   async saveBouquet(name: string): Promise<void> {
@@ -962,12 +1035,14 @@ export class TagsViewerComponent implements OnDestroy {
     EffectBus.emit('tags:view-state', { open: false })
   }
 
-  /** One level back per press: shut the naming field, then put the bouquet
+  /** One level back per press: shut the create field, then the naming field,
+   *  then put the bouquet
    *  down, then drop an armed removal. False means nothing of ours was open,
    *  and the shell cascade carries on past us — clearing a selection before it
    *  ever closes this window. Reached from the session; there is no listener
    *  here. */
   dismiss(): boolean {
+    if (this.#creating()) { this.cancelCreate(); return true }
     if (this.#naming()) { this.cancelNaming(); return true }
     if (this.selectedCount() > 0 || this.painting()) { this.putDown(); return true }
     if (this.#removalTag()) { this.cancelRemoval(); return true }

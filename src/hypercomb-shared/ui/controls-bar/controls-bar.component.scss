@@ -1440,19 +1440,19 @@ $actions-corner: 12rem;
     }
   }
 
-  // THE WORD UNDER THE DISC. Five glyphs in a row read as five abstract
-  // marks; a word under each is what makes them the big native icons a phone
-  // expects. Out of the disc's flow (the disc is a circle) and out of the
-  // bar's layout box, so the sheets' clearance still measures the discs and
-  // the labels sit in the gap the bar leaves beneath itself. 0.62rem is what
-  // keeps five of them clear of each other at 375px.
+  // THE WORD UNDER THE DISC. Glyphs in a row read as abstract marks; a word
+  // under each is what makes them the big native icons a phone expects. Out
+  // of the disc's flow (the disc is a circle) and out of the bar's layout
+  // box, so the sheets' clearance still measures the discs and the labels
+  // sit in the gap the bar leaves beneath itself. Three discs at 375px have
+  // room for a readable word (0.62rem was what five needed).
   .ctl-label {
     position: absolute;
     top: 100%;
     left: 50%;
     transform: translateX(-50%);
     margin-top: 0.22rem;
-    font-size: 0.62rem;
+    font-size: 0.74rem;
     font-weight: 600;
     line-height: 1;
     letter-spacing: 0.02em;
@@ -1487,41 +1487,6 @@ $actions-corner: 12rem;
   // `data-consumes-wheel` and the landscape ordering) — they lay out nothing.
   .mobile-side { display: contents; }
 
-  // The view row sits OUT OF FLOW above the bar, so the bottom row keeps its
-  // five-slot rhythm and the camera stays dead centre whether it is open or
-  // not. Same disc language as the bar — it is the same bar, one row up.
-  .mobile-nav { position: relative; }
-
-  .mobile-view-row {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: calc(100% + 0.7rem);
-    // FIVE TO A ROW, AND IT GROWS UPWARD. A grid rather than a flex row: the
-    // sixth control starts a second row, and because the block is anchored by
-    // its BOTTOM edge, that row appears above the first instead of pushing the
-    // bar down. Adding a control is one button in the template — nothing here
-    // changes, and the select pill's lift follows #viewRowCount.
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    justify-items: center;
-    align-items: center;
-    gap: 0.4rem;
-    // Resting style IS the final state — the row is visible the moment it is
-    // in the DOM. The animation only adds the rise, so reduced-motion (and a
-    // frozen animation clock) can never leave it invisible.
-    animation: hc-view-row-rise 140ms ease-out;
-  }
-
-  @keyframes hc-view-row-rise {
-    from { opacity: 0; transform: translateY(0.5rem); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .mobile-view-row { animation: none; }
-  }
-
   // The centre is the anchor by POSITION, not size — the same footprint as its
   // flanks so the whole row reads evenly balanced. A hair more contrast is the
   // only cue that it is the fixed one.
@@ -1538,8 +1503,10 @@ $actions-corner: 12rem;
     pointer-events: none;
   }
 
-  // The shutter reads warm against the cold chrome — it is the one control on
-  // the bar that MAKES something rather than moving the view.
+  // ADD reads warm against the cold chrome — it is the one control on the
+  // bar that MAKES something rather than moving the view. (The shutter wore
+  // this colour when it was the centre disc; it lives on the deck now.)
+  .ctl-btn.add-btn .mat-sym,
   .ctl-btn.camera-btn .mat-sym { color: var(--hc-status-secret); }
 
   .badge { top: -4px; right: -4px; }
@@ -1553,9 +1520,9 @@ $actions-corner: 12rem;
   border-color: color-mix(in srgb, var(--hc-status-ok) 45%, transparent);
 }
 
-// The view toggle — lit while its row is up, so the chevron is not the only
-// thing saying which way it will go.
-.pill-stage.mobile .view-row-btn.active {
+// ADD — lit while the composer it revealed is up, so the disc says which
+// way its next press goes (a second press puts the composer away).
+.pill-stage.mobile .add-btn.active {
   color: rgba(var(--hc-chrome-accent), var(--hc-ink-a-loud));
   background: rgba(var(--hc-chrome-accent), 0.14);
   border-color: rgba(var(--hc-chrome-accent), 0.45);
@@ -1666,24 +1633,10 @@ $actions-corner: 12rem;
   .ctl-btn .hci,
   .ctl-btn .mat-sym { transform: none; }
 
-  // No words in the column: six discs already fill a 390px-tall viewport
-  // between the header anchor and the safe inset, and a label under each
-  // would land on the next disc.
-  .ctl-label { display: none; }
-
-  // The rail is on the left edge, so the view row pops out to its RIGHT as a
-  // column — the same relationship, rotated with everything else.
-  .mobile-view-row {
-    // One column beside the rail — the portrait grid's five-across turned on
-    // its side. However many controls there are, they stack.
-    grid-template-columns: 1fr;
-    left: calc(100% + 0.7rem);
-    right: auto;
-    bottom: auto;
-    top: 50%;
-    transform: translateY(-50%);
-    animation: none;
-  }
+  // Three discs in the column leave room for their words (six did not);
+  // the word sits under its disc as in portrait, and the column's gap
+  // carries it.
+  .mobile-nav { gap: 1.4rem; }
 }
 
 // A landscape phone with the Android editor open can leave only ~300px

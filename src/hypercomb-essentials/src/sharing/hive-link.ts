@@ -160,6 +160,121 @@ export const STATIC_FOLLOWS_KEY = 'hc:static-follows'
  *  standing host HostSyncService drains public closures to. */
 export const PUBLIC_CONTENT_HOSTS = ['content.pluginthematrix.com']
 
+// ── THE OUTSIDE-IN DOOR ─────────────────────────────────────────────────────
+//
+// Jaime: "I go to somebody's domain, I like that package, I click that link,
+// and it brings me back to MY domain and redirects me to adopting that package
+// from where I was originally."
+//
+// A published site is a read-only shell on somebody else's origin: it cannot
+// write to your hive, cannot fetch across origins, and must not pretend to.
+// So the door is a LINK and it carries COORDINATES, not bytes — the publisher's
+// key, the hosts that answer for them, their route to the creation, and the
+// route the reader was standing on. All four are already on the visitor's
+// screen; none of them needs a fetch the read-only shell is not allowed to
+// make, and none of them is trusted on arrival: the reader's own hive reads
+// the publisher's SIGNED INDEX for the head, exactly as the invite link does.
+//
+// What arrives is therefore an OFFER — one creation, shaded, taken a tile at a
+// time. A link can put a creation in front of you; only you can hold it.
+
+/** Where a reader's hive lives when they have not said otherwise. ONE
+ *  spelling in this package — hypercomb.io IS the app (the shim's welcome
+ *  card carries the only other one, for a cold host with no code loaded). */
+export const HIVE_APP_ORIGIN = 'https://hypercomb.io'
+
+/** localStorage key naming the reader's OWN hive, when it is not the app's
+ *  standing origin. Read on a published site, where nothing else about the
+ *  reader is knowable; never written by anything here. */
+export const MY_HIVE_KEY = 'hc:my-hive'
+
+/** sessionStorage key the shell's boot capture stashes a door under. The
+ *  capture lives in the shell (hypercomb-shared/core/invite-capture.ts) and
+ *  MUST NOT import essentials, so this literal is mirrored there with a
+ *  comment pointing back here. Keep the two in sync — as PENDING_INVITE_KEY is. */
+export const PENDING_DOOR_KEY = 'hc:pending-door'
+
+/** The query parameter that makes a URL a door. */
+export const HIVE_DOOR_PARAM = 'hive'
+
+/** What a door says: a creation, and where its reader was standing. */
+export interface HiveDoor {
+  readonly bundle: HiveLinkBundle
+  readonly at: readonly string[]
+}
+
+// The bundle validator's own host rule, one definition below — a door and a
+// bundle must agree on what a host is or a link can mint one the other
+// refuses.
+const DOOR_HOST_RE = /^[a-z0-9.-]+(:\d{1,5})?$/
+
+const cleanHost = (raw: unknown): string => {
+  const bare = String(raw ?? '').trim().toLowerCase()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//, '').split(/[/?#]/)[0] ?? ''
+  return DOOR_HOST_RE.test(bare) ? bare : ''
+}
+
+const cleanRoute = (raw: unknown): string[] => {
+  const parts = Array.isArray(raw) ? raw : String(raw ?? '').split('/')
+  return parts.map(p => String(p ?? '').trim()).filter(Boolean).slice(0, 24)
+}
+
+/**
+ * THE DOOR'S ADDRESS, on the reader's own hive.
+ *
+ * Every part is encoded whole, so a tile named with a slash or an ampersand
+ * cannot smuggle a second parameter. An origin that is not a plain web
+ * address falls back to the app's — a door must land somewhere real.
+ */
+export const hiveDoorUrl = (
+  appOrigin: string,
+  bundle: Pick<HiveLinkBundle, 'pubkey' | 'hosts' | 'segments'>,
+  at: readonly string[] = [],
+): string => {
+  const pubkey = String(bundle?.pubkey ?? '').toLowerCase()
+  const hosts = (bundle?.hosts ?? []).map(cleanHost).filter(Boolean)
+  const of = cleanRoute(bundle?.segments)
+  if (!/^[0-9a-f]{64}$/.test(pubkey) || hosts.length === 0 || of.length === 0) return ''
+  let origin: URL
+  try { origin = new URL(String(appOrigin ?? '') || HIVE_APP_ORIGIN) } catch { origin = new URL(HIVE_APP_ORIGIN) }
+  if (origin.protocol !== 'https:' && origin.protocol !== 'http:') origin = new URL(HIVE_APP_ORIGIN)
+  const url = new URL('/', origin.origin)
+  url.searchParams.set(HIVE_DOOR_PARAM, pubkey)
+  url.searchParams.set('on', hosts.join(','))
+  url.searchParams.set('of', of.join('/'))
+  const route = cleanRoute(at)
+  if (route.length) url.searchParams.set('at', route.join('/'))
+  return url.toString()
+}
+
+/**
+ * A door back out of a URL's query, or null when the query is not one.
+ *
+ * The bundle it builds goes through `validateHiveLinkBundle` like any other,
+ * so a door can never be a shape the rest of the path has not already agreed
+ * to. `rootSig` is deliberately absent: a door names WHO and WHERE, and the
+ * head comes from the publisher's signed index at arrival — the one place it
+ * is true at the moment it is read.
+ */
+export const hiveDoorFrom = (search: unknown): HiveDoor | null => {
+  let params: URLSearchParams
+  try { params = new URLSearchParams(String(search ?? '')) } catch { return null }
+  const pubkey = String(params.get(HIVE_DOOR_PARAM) ?? '').trim().toLowerCase()
+  if (!/^[0-9a-f]{64}$/.test(pubkey)) return null
+  const hosts = String(params.get('on') ?? '').split(',').map(cleanHost).filter(Boolean)
+  const segments = cleanRoute(params.get('of'))
+  const bundle = validateHiveLinkBundle({
+    kind: HIVE_LINK_KIND, v: HIVE_LINK_VERSION, pubkey, hosts, segments,
+  })
+  return bundle ? { bundle, at: cleanRoute(params.get('at')) } : null
+}
+
+/** The same door out of what the boot capture stashed. Validated HERE and not
+ *  there: the capture runs before anything else and holds the query verbatim,
+ *  so this is the only place that decides what it means. */
+export const hiveDoorOf = (raw: unknown): HiveDoor | null =>
+  hiveDoorFrom(String(raw ?? ''))
+
 export interface HiveLinkBundle {
   kind: typeof HIVE_LINK_KIND
   /** Schema version — informational; older readers tolerate unknown extras. */

@@ -34,6 +34,8 @@ export type ModePayload = { active: boolean; owner: string }
 
 export class ModeRegistry {
   #owners = new Map<string, Set<string>>()
+  #shellHidden: boolean | undefined
+  #controlsHidden: boolean | undefined
 
   /** Is `mode` held by any owner right now? */
   isActive = (mode: string): boolean => (this.#owners.get(mode)?.size ?? 0) > 0
@@ -51,6 +53,7 @@ export class ModeRegistry {
     if (set.has(owner)) return
     set.add(owner)
     if (!wasActive) EffectBus.emit<ModePayload>(mode, { active: true, owner })
+    this.#publishChrome(mode, owner)
   }
 
   /** `owner` exits `mode`. Broadcasts `<mode> {active:false, owner}` ONLY on
@@ -60,6 +63,7 @@ export class ModeRegistry {
     const set = this.#owners.get(mode)
     if (!set || !set.delete(owner)) return
     if (set.size === 0) EffectBus.emit<ModePayload>(mode, { active: false, owner })
+    this.#publishChrome(mode, owner)
   }
 
   /** Force-drop `owner` from EVERY mode it holds — teardown when a surface is
@@ -71,6 +75,32 @@ export class ModeRegistry {
       if (set.delete(owner) && set.size === 0) {
         EffectBus.emit<ModePayload>(mode, { active: false, owner })
       }
+    }
+    this.#publishChrome('view:active', owner)
+  }
+
+  /** A view can cover the canvas while reserving space for shell controls.
+   *  `view:keeps-shell` keeps the command line and editing chrome as well as
+   *  the control bar; `view:keeps-controls` keeps only the bar. Both claims
+   *  belong to the SAME owner as `view:active`.
+   *
+   *  Every covering owner must leave that space available. In particular, a
+   *  photo opened over a square page must hide the page's retained chrome,
+   *  even though the aggregate `view:active` never changes. */
+  #publishChrome(mode: string, owner: string): void {
+    if (mode !== 'view:active' && mode !== 'view:keeps-shell' && mode !== 'view:keeps-controls') return
+    const views = this.#owners.get('view:active') ?? new Set<string>()
+    const shell = this.#owners.get('view:keeps-shell')
+    const controls = this.#owners.get('view:keeps-controls')
+    const shellHidden = [...views].some(view => !shell?.has(view))
+    const controlsHidden = [...views].some(view => !shell?.has(view) && !controls?.has(view))
+    if (shellHidden !== this.#shellHidden) {
+      this.#shellHidden = shellHidden
+      EffectBus.emit<ModePayload>('view:shell-hidden', { active: shellHidden, owner })
+    }
+    if (controlsHidden !== this.#controlsHidden) {
+      this.#controlsHidden = controlsHidden
+      EffectBus.emit<ModePayload>('view:controls-hidden', { active: controlsHidden, owner })
     }
   }
 }

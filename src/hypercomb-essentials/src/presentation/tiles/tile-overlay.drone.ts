@@ -1,6 +1,7 @@
 // pixi/tile-overlay.drone.ts
 import { Drone, EffectBus, consumePointerGesture, POINTER_GESTURE_END, type I18nProvider, I18N_IOC_KEY, type KeyMapLayer, ICON_PICK_REQUEST, type IconPickRequest, USAGE_IOC_KEY, type UsageRanker } from '@hypercomb/core'
 import { Application, Container, Graphics, Point, Sprite, Text, TextStyle } from 'pixi.js'
+import { containerScreenScale, followTextResolution, screenTextResolution } from '../grid/screen-text-resolution.js'
 import { HexIconButton } from './hex-icon-button.js'
 import { HexOverlayMesh } from './hex-overlay.shader.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
@@ -263,23 +264,21 @@ const REREGISTER_REPAIR_MS = 1500
 
 const HINT_DELAY_MS = 110     // near-instant hover-to-hint — just long enough to filter a mouse glance crossing the icon
 const HINT_Y_OFFSET = 17        // below the label band — moved up 7 with ICON_Y (absolute, does not follow on its own)
-const HINT_FONT_SIZE = 4
+const HINT_FONT_SIZE = 6
 const HINT_COLOR = 0xeaf0ff     // near-white — reads crisp against the dark hint pill
-const HINT_EXPANDED_FONT_SIZE = 3.25
-const HINT_MAX_WIDTH = 44
+const HINT_EXPANDED_FONT_SIZE = 5
+const HINT_MAX_WIDTH = 66
 // Tooltip pill behind the hint text — turns the bare floating glyph into a
 // clean, legible label that reads against any tile content.
 const HINT_PILL_FILL = 0x0c0c1a
 const HINT_PILL_ALPHA = 0.82
-const HINT_PILL_PAD_X = 2.5
-const HINT_PILL_PAD_Y = 2
-const HINT_PILL_RADIUS = 2
-// Hint Text rasterisation resolution. The stage is scaled 1.8× and the
-// camera can zoom further, so the renderer's default DPR alone leaves
-// the 6pt font visibly soft. Oversample at 4× DPR (min 6) so the texture
-// stays sharp through typical zoom-in. Matches the SVG icon strategy
-// (rasterise at 4× viewBox — see hex-icon-button.ts).
-const HINT_TEXT_RESOLUTION = Math.max(6, (typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1) * 4)
+const HINT_PILL_PAD_X = 3.5
+const HINT_PILL_PAD_Y = 2.5
+const HINT_PILL_RADIUS = 2.5
+// Hint / cue Text rasterisation follows the SCREEN, not a fixed oversample —
+// the shared policy in grid/screen-text-resolution.ts; the animation ticker
+// re-bakes the live texts the moment the camera moves them off that grid
+// (see #followTextResolution).
 
 // ── The verb cue ──────────────────────────────────────────────────────
 // While a mode owns the tile click — the clipboard window, a bouquet in
@@ -1283,6 +1282,7 @@ export class TileOverlayDrone extends Drone {
         if (this.#arrangeMode || this.#iconEditOn) {
           this.#animateArrangeWiggle()
         }
+        this.#followTextResolution()
       }
       this.#app.ticker.add(this.#animTickBound)
     }
@@ -2661,7 +2661,8 @@ export class TileOverlayDrone extends Drone {
         fill: HINT_COLOR,
         align: 'center',
       }),
-      resolution: HINT_TEXT_RESOLUTION,
+      resolution: this.#screenTextResolution(),
+      roundPixels: true,
     })
     this.#hintText.anchor.set(0.5, 0)
     this.#hintText.position.set(action.button.position.x, HINT_Y_OFFSET)
@@ -2695,20 +2696,21 @@ export class TileOverlayDrone extends Drone {
         fontSize: HINT_EXPANDED_FONT_SIZE,
         fill: HINT_COLOR,
         align: 'left',
-        lineHeight: 4.25,
+        lineHeight: 6.5,
         wordWrap: true,
         wordWrapWidth: HINT_MAX_WIDTH,
       }),
-      resolution: HINT_TEXT_RESOLUTION,
+      resolution: this.#screenTextResolution(),
+      roundPixels: true,
     })
     this.#hintDescriptionText.anchor.set(0, 0)
 
     // The expanded hint is one panel: the operation leads at the start and
     // its explanation flows directly underneath. Previously each line owned
     // a separate pill, which read as two overlapping popups.
-    const headerGap = 1.5
-    const rowGap = 1.25
-    const iconSize = 4.5
+    const headerGap = 2
+    const rowGap = 1.75
+    const iconSize = 6.5
     const titleHeight = this.#hintText?.height ?? HINT_FONT_SIZE
     const textWidth = Math.max(
       this.#hintText?.width ?? 0,
@@ -2765,6 +2767,23 @@ export class TileOverlayDrone extends Drone {
     this.#hintActionName = null
     this.#hintExpanded = false
     this.#clearHintText()
+  }
+
+  /** Raster density that puts one texel of a world-space Text on one device
+   *  pixel: the render container's screen scale × the renderer's resolution,
+   *  rounded UP to the next eighth so the raster never runs short. */
+  #screenTextResolution(): number {
+    return screenTextResolution(containerScreenScale(this.#renderContainer), this.#renderer?.resolution)
+  }
+
+  /** Every frame: if the camera has moved a live hint or cue off its raster
+   *  grid, re-bake it at the new density. Pixi regenerates the texture on a
+   *  resolution change and leaves the logical size alone, so pills and
+   *  positions stay valid. A few compares per frame when nothing is showing. */
+  #followTextResolution(): void {
+    const cueText = this.#swapCue?.children.find((child): child is Text => child instanceof Text) ?? null
+    if (!this.#hintText && !this.#hintDescriptionText && !cueText) return
+    followTextResolution([this.#hintText, this.#hintDescriptionText, cueText], this.#screenTextResolution())
   }
 
   /** Rounded translucent pill sized to a hint Text (anchored 0.5,0 at
@@ -4022,7 +4041,8 @@ export class TileOverlayDrone extends Drone {
         fill: verb.color,
         align: 'center',
       }),
-      resolution: HINT_TEXT_RESOLUTION,
+      resolution: this.#screenTextResolution(),
+      roundPixels: true,
     })
     // Pill bottom edge sits SWAP_CUE_MARGIN above the hex's circumradius.
     const topY = -(this.#geo.circumRadiusPx + SWAP_CUE_MARGIN) - text.height - HINT_PILL_PAD_Y

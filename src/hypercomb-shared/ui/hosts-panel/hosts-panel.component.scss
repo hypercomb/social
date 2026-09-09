@@ -559,3 +559,109 @@ $accent: #7eb6d6;
   &:hover { color: var(--hc-window-ink-loud); background: rgba(var(--acc), 0.07); }
   &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
 }
+
+// ── the creations half ──────────────────────────────────────────────────────
+//
+// A domain serves two lists and they are not the same kind of thing: builds
+// are the app, taken by replication; creations are what people made. The
+// creations block borrows the inspector's left edge so the two read as one
+// domain's answer, and keeps its own accent so the eye can tell which list it
+// is looking at without reading the heading.
+
+.hosts-creations {
+  margin: 0 0 0.35em;
+  padding: 0.5em 0.6em 0.45em 0.75em;
+  border-left: 2px solid rgba(var(--acc), 0.45);
+  background: rgba(var(--acc), 0.04);
+}
+
+.hosts-creation {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.35em 0;
+  border-bottom: 1px solid rgba(var(--acc), 0.07);
+
+  &:last-child { border-bottom: none; }
+  > :not(.hosts-creation-name) { flex: 0 0 auto; }
+}
+
+.hosts-creation-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82em;
+  color: var(--hc-window-ink-loud);
+  text-decoration: none;
+
+  &:hover { color: var(--hc-window-accent); text-decoration: underline; }
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+}
+
+.hosts-creation-by,
+.hosts-creation-unheld {
+  max-width: 9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.7em;
+  color: var(--hc-window-ink-quiet);
+}
+
+// THE SWITCH. Off it is an offer to make; on it is the offer standing, and
+// pressing it again withdraws — so the ON state must read as a state and not
+// as a button waiting to be pressed.
+.hosts-creation-take {
+  padding: 0.28em 0.55em;
+  font: inherit;
+  font-size: 0.72em;
+  color: var(--hc-window-ink-plain);
+  background: rgba(var(--acc), 0.1);
+  border: 1px solid rgba(var(--acc), 0.25);
+  border-radius: tw.$radius-control;
+  cursor: pointer;
+
+  &:hover { background: rgba(var(--acc), 0.18); }
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+
+  &.on {
+    color: var(--hc-window-accent);
+    background: rgba(var(--acc), 0.16);
+    border-color: rgba(var(--acc), 0.5);
+  }
+}
+
+// ── what your hive carries ──────────────────────────────────────────────────
+
+.hosts-mine-head {
+  display: flex;
+  align-items: center;
+  margin: 0 0 0.15em;
+}
+
+.hosts-mine-toggle {
+  display: block;
+  margin-inline-start: -0.4em;
+  padding: 0.25em 0.4em;
+  text-align: left;
+  font: inherit;
+  font-size: 0.72em;
+  color: var(--hc-window-accent-quiet);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: tw.$radius-control;
+  cursor: pointer;
+
+  &:hover { color: var(--hc-window-ink-loud); background: rgba(var(--acc), 0.07); }
+  &.open { color: var(--hc-window-accent); }
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+}
+
+.hosts-mine {
+  margin: 0 0 0.6em;
+  padding: 0.15em 0.6em 0.4em 0.75em;
+  border-left: 2px solid rgba(var(--acc), 0.45);
+  background: rgba(var(--acc), 0.04);
+}

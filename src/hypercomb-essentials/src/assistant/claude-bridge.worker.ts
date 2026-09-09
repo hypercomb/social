@@ -100,6 +100,11 @@ type BridgeRequest = {
 type BridgeResponse = { id: string; ok: boolean; data?: unknown; error?: string }
 
 const RECONNECT_MS = 3_000
+// A tab that opted into the bridge but came up BEFORE the broker must keep
+// dialling — that is the whole reason a renderer goes missing. Backing off to
+// a ceiling is what keeps "keep dialling" from becoming a red console line
+// every three seconds for the rest of the session.
+const RECONNECT_CEILING_MS = 30_000
 
 /** How long `submit` waits for the command line's receipt before answering
  *  `unknown`. The listener settles on every path, so this is a backstop
@@ -138,6 +143,9 @@ export class ClaudeBridgeWorker extends Worker {
 
   #ws: WebSocket | null = null
   #timer: ReturnType<typeof setTimeout> | null = null
+  /** Consecutive attempts that did not reach an open socket. Reset by a
+   *  successful handshake; the only input to the backoff. */
+  #attempts = 0
 
   /** Warmup: subscribe to the explicit `claude-bridge:connect` event AND
    *  attempt an auto-connect. The auto-connect is gated by the shared local
@@ -193,11 +201,16 @@ export class ClaudeBridgeWorker extends Worker {
   }
 
   #connect(): void {
+    // A pending retry timer and an explicit `claude-bridge:connect` can now
+    // both land on this method, so it has to be idempotent: never open a
+    // second socket over a live one.
+    if (this.#ws) return
     try {
       const ws = new WebSocket(`ws://localhost:${this.#port()}`)
 
       ws.onopen = () => {
         this.#connected = true
+        this.#attempts = 0
         ws.send(JSON.stringify({ type: 'renderer' }))
         console.log('[claude-bridge] connected')
         this.#announce()
@@ -216,12 +229,14 @@ export class ClaudeBridgeWorker extends Worker {
         // attempt is precisely when nobody is. Staying silent here is what
         // leaves a window with no way to tell "thinking" from "nothing there".
         this.#announce()
-        // Only reconnect if we previously had a successful connection.
-        // Avoids spamming the console when the bridge server isn't running.
-        if (wasConnected) {
-          console.log('[claude-bridge] disconnected, will reconnect')
-          this.#scheduleReconnect()
-        }
+        // ALWAYS reconnect. Only reconnecting after a prior success is what
+        // left a tab dead for the rest of its life when it happened to load
+        // before the broker: the participant has already opted in
+        // (`isLocalClaudeBridgeConfigured`), so a broker that starts later is
+        // exactly what this socket is waiting for. The console cost is paid
+        // by the backoff, not by giving up.
+        if (wasConnected) console.log('[claude-bridge] disconnected, will reconnect')
+        this.#scheduleReconnect()
       }
 
       ws.onerror = () => {
@@ -233,15 +248,25 @@ export class ClaudeBridgeWorker extends Worker {
       // Initial connection failed — bridge server not running. Silent on the
       // console, but still announced: a surface must not be left guessing.
       this.#announce()
+      this.#scheduleReconnect()
     }
+  }
+
+  /** Exponential backoff, capped. The first few retries are quick so a broker
+   *  started a moment after the tab is caught almost immediately; a broker
+   *  that never arrives settles to one attempt every `RECONNECT_CEILING_MS`. */
+  #backoffMs(): number {
+    return Math.min(RECONNECT_MS * 2 ** this.#attempts, RECONNECT_CEILING_MS)
   }
 
   #scheduleReconnect(): void {
     if (this.#timer) return
+    const wait = this.#backoffMs()
+    this.#attempts++
     this.#timer = setTimeout(() => {
       this.#timer = null
       this.#connect()
-    }, RECONNECT_MS)
+    }, wait)
   }
 
   // ------- message handling -------

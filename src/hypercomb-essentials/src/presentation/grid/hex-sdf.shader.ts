@@ -25,6 +25,11 @@ export class HexSdfTextureShader {
       // pushed through `overlay:band-rows`.
       u_bandRows: { value: 1, type: 'f32' },
       u_labelMix: { value: 1.0, type: 'f32' },
+      // 1 = this shader draws the name glyphs from the SDF atlas; 0 = the DOM
+      // name layer (tile-name.drone.ts) draws them as real vector text and the
+      // shader keeps only the band behind them. Launcher shapes (games) keep
+      // their own strip either way — the DOM layer stands aside for those.
+      u_glyphs: { value: 1.0, type: 'f32' },
       u_imageMix: { value: 1.0, type: 'f32' },
       u_accentColor: { value: [0.4, 0.85, 1.0], type: 'vec3<f32>' },
       // Launcher motion (vertex stage). u_driftAmp = 0 disables it entirely
@@ -104,6 +109,11 @@ export class HexSdfTextureShader {
   public setLabelMix = (mix: number): void => {
     this.#ug.uniforms.u_labelMix = mix
     this.#ug.update()
+  }
+
+  /** 0 hands the name glyphs to the DOM name layer; 1 draws them here. */
+  setGlyphs(on: number): void {
+    this.#ug.uniforms.u_glyphs = on
   }
 
   public setImageMix = (mix: number): void => {
@@ -271,6 +281,7 @@ export class HexSdfTextureShader {
     uniform float u_hoveredIndex;
     uniform float u_bandRows;
     uniform float u_labelMix;
+    uniform float u_glyphs;
     uniform float u_imageMix;
     uniform vec3 u_accentColor;
     uniform float u_time;
@@ -328,10 +339,22 @@ export class HexSdfTextureShader {
     // FILL ONLY — hard user rule: no halo, no outline, no shadow, no second
     // threshold. Nothing may darken or decorate the outside of a glyph;
     // legibility over images comes from the pill/banner drawn BEHIND text.
+    // ONE-FRAGMENT RAMP, FATTER FILL (2026-09-09). The ramp used to span
+    // ±fwidth — two fragments — so a Light stem a pixel or so wide never
+    // reached full white at its centre and every letter read grey and weak
+    // (Jaime: "the opacity is affecting the text"). ±half a fwidth is the
+    // standard one-fragment antialias: stems hit 100% ink, edges stay smooth.
+    // LABEL_EDGE below 0.5 moves the ink boundary OUTWARD by a constant
+    // fraction of the SDF spread (0.015 × 16 cell px ≈ a quarter cell px per
+    // side — 0.47 read a touch heavy), the approved way to strengthen the
+    // glyph: it is the FILL that
+    // grows, in cell space, at every zoom alike. Still no stroke, halo, rim
+    // or shadow — nothing is drawn outside the fill.
+    const float LABEL_EDGE = 0.485;
     float labelFill(vec2 uv) {
       float sd = texture(u_label, uv).r;
-      float aa = clamp(fwidth(sd), 1e-4, 0.3);
-      return smoothstep(0.5 - aa, 0.5 + aa, sd);
+      float aa = clamp(fwidth(sd) * 0.5, 1e-4, 0.3);
+      return smoothstep(LABEL_EDGE - aa, LABEL_EDGE + aa, sd);
     }
 
     float sdHex(vec2 p, float r) {
@@ -550,7 +573,7 @@ export class HexSdfTextureShader {
       float nameShift = (u_bandRows - 1.0) * rowH * hovered;
       vec2 nameUV = vec2(vUV.x, vUV.y + nameShift / max(u_quadSize.y, 1.0));
       vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, clamp((nameUV - 0.5) * LABEL_BAND + 0.5, 0.0, 1.0));
-      float la = labelFill(luv);   // plain white fill, nothing else
+      float la = labelFill(luv) * u_glyphs;   // plain white fill, nothing else
 
       // Is there a label at all? Hidden text collapses aLabelUV to the
       // degenerate rect [0,0,0,0] (show-cell's hideText path / hover
@@ -580,9 +603,12 @@ export class HexSdfTextureShader {
       float bandAA = max(u_radiusPx * 0.02, 0.6);
       float bandD = abs(local.y) - bandH;
       float bandMask = (1.0 - smoothstep(0.0, bandAA, bandD)) * max(labelPresent, hovered);
-      // Hover sits DARKER than the resting pill — the icons ride this, so it
-      // has to hold them against any picture. At rest the pill is untouched.
-      color.rgb = mix(color.rgb, vec3(0.0), bandMask * mix(imgBlend * 0.55, 0.72, hovered) * u_labelMix);
+      // NEAR-OPAQUE (2026-09-09). The resting band darkened the picture by
+      // only 55%, so whatever sat behind the name bled through the band and
+      // around every letter, and the white ink had nothing solid to stand on.
+      // 0.85 at rest / 0.90 on hover keeps a trace of the picture for
+      // continuity while giving the text and the icons a solid ground.
+      color.rgb = mix(color.rgb, vec3(0.0), bandMask * mix(imgBlend * 0.85, 0.90, hovered) * u_labelMix);
 
       // Hairline ruler on the seam UNDER THE NAME — it divides what the tile is
       // called from what you can do to it, so it sits at the bottom of the top

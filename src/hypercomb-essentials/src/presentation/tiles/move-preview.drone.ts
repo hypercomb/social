@@ -2,6 +2,7 @@
 import { Drone } from '@hypercomb/core'
 import { Container, Graphics, Sprite, Text, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
+import { trackSceneText } from '../grid/screen-text-resolution.js'
 
 type MovePreviewPayload = {
   names: string[]
@@ -402,6 +403,7 @@ export class MovePreviewDrone extends Drone {
         },
       })
       text.anchor.set(0.5)
+      trackSceneText(text, this.#renderContainer!)
       node.addChild(text)
     }
 

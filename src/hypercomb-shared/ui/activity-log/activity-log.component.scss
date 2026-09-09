@@ -50,6 +50,38 @@
   &::-webkit-scrollbar { display: none; }   // Chromium / Safari
 }
 
+// ── the phone's toast ─────────────────────────────────────
+// ONE line, over the list, above the bar by MEASUREMENT (the bar publishes
+// `--hc-controls-bottom`; the 4rem is the floor while it has not). Keyed on
+// the one definition of a phone — the stamp MobileModeService leaves on
+// <html> — so `/mobile on` and a narrow desktop window agree with the
+// component's newest-only rule, never on a width query of our own. Reads in
+// the reading face at a size a thumb-length away can read; a quiet glass
+// ground so it stands off the rows it lies over.
+:host-context([data-hc-mobile='on']) .activity-panel {
+  bottom: calc(max(var(--hc-controls-bottom, 0px), 4rem) + 0.5rem);
+  left: 0.75rem;
+  right: 0.75rem;
+  max-width: none;
+  padding: 0.35rem 0.6rem;
+  font-family: var(--hc-read, var(--hc-font));
+  font-size: 0.92rem;
+  color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-plain));
+  background: rgba(var(--hc-chrome-glass), var(--hc-chrome-glass-a));
+  border: 1px solid rgba(var(--hc-chrome-rule), 0.3);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+
+  .entry-revert,
+  .entry-dismiss {
+    width: 2.2rem;
+    min-height: 2.2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+  }
+}
+
 // ── entry rows ───────────────────────────────────────────
 
 .activity-entry {

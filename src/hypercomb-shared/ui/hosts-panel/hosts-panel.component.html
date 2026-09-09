@@ -40,6 +40,41 @@
            act with a real consequence, and removing one is a DELETE — the
            artifact goes, and every branch that named it keeps saying so,
            which is the honest state and reads as one. -->
+      <!-- WHAT YOUR HIVE CARRIES, from every domain at once. The list you are
+           left with when you are done choosing — so it sits above the domains
+           rather than inside any one of them. Folded, because it answers a
+           question you ask on purpose; a count is always stated, so the fold
+           can never read as "nothing". -->
+      @if (mineCount(); as held) {
+        <div class="hosts-mine-head">
+          <button
+            class="hosts-mine-toggle"
+            type="button"
+            [class.open]="mineOpen()"
+            [attr.aria-expanded]="mineOpen()"
+            (click)="toggleMine()"
+          >{{ 'hosts.mine.open' | t: { count: held } }}</button>
+        </div>
+        @if (mineOpen()) {
+          <div class="hosts-mine">
+            @for (row of mine(); track row.name) {
+              <div class="hosts-creation held">
+                <span class="hosts-creation-name">{{ row.name }}</span>
+                <span class="hosts-creation-by">{{ row.host }}</span>
+                <button
+                  class="hosts-creation-take on"
+                  type="button"
+                  [attr.data-tip]="'hosts.creations.shown-title' | t: { name: row.name }"
+                  [attr.aria-label]="'hosts.creations.shown-title' | t: { name: row.name }"
+                  (click)="withdraw(row)"
+                >{{ 'hosts.creations.shown' | t }}</button>
+              </div>
+            }
+            <p class="hosts-note">{{ 'hosts.mine.note' | t }}</p>
+          </div>
+        }
+      }
+
       <div class="hosts-section-head">
         <span>{{ 'hosts.directory' | t }}</span>
         <span class="hosts-total">{{ zones().length }}</span>
@@ -76,7 +111,50 @@
              that is newest here, and Update. The whole ledger is a fold away
              for pinning and rollback — every root stays valid forever. -->
         @if (selectedZone() === zone) {
+          <!-- WHAT THIS DOMAIN SERVES. The creations come before the builds
+               because they are why anybody carries somebody else's domain:
+               a build is the app, a creation is what a person made. The one
+               act on each is the switch — an OFFER, which puts it in your
+               hive shaded and takes nothing until you walk into it. There is
+               deliberately no "bring the whole branch in" door. -->
+          <section class="hosts-creations" [attr.aria-label]="'hosts.creations.title' | t: { host: zone }">
+            <div class="hosts-section-head">
+              <span>{{ 'hosts.creations.title' | t: { host: zone } }}</span>
+              @if (creationsOf(zone); as rows) {
+                @if (rows.length) { <span class="hosts-total">{{ rows.length }}</span> }
+              }
+            </div>
+            @if (!creationsKnown(zone)) {
+              <p class="hosts-probing" aria-live="polite">{{ 'hosts.probing' | t }}</p>
+            } @else if (creationsOf(zone); as rows) {
+              @for (row of rows; track row.lineage) {
+                <div class="hosts-creation" [class.held]="row.offered">
+                  <a class="hosts-creation-name" [href]="row.url" target="_blank" rel="noopener"
+                     [attr.title]="'hosts.creations.visit' | t: { host: row.host }">{{ row.title }}</a>
+                  <span class="hosts-creation-by">{{ row.publisherLabel }}</span>
+                  @if (row.offer || row.offered) {
+                    <button
+                      class="hosts-creation-take"
+                      type="button"
+                      [class.on]="row.offered"
+                      [attr.data-tip]="(row.offered ? 'hosts.creations.shown-title' : 'hosts.creations.show-title') | t: { name: row.title }"
+                      [attr.aria-label]="(row.offered ? 'hosts.creations.shown-title' : 'hosts.creations.show-title') | t: { name: row.title }"
+                      (click)="toggleCreation(row)"
+                    >{{ (row.offered ? 'hosts.creations.shown' : 'hosts.creations.show') | t }}</button>
+                  } @else {
+                    <span class="hosts-creation-unheld">{{ 'hosts.creations.unheld' | t }}</span>
+                  }
+                </div>
+              } @empty {
+                <p class="hosts-empty">{{ (creationsAnswered(zone) ? 'hosts.creations.none' : 'hosts.creations.silent') | t }}</p>
+              }
+            }
+          </section>
+
           <section class="hosts-inspector" [attr.aria-label]="'hosts.offer.title' | t: { host: zone }">
+            <div class="hosts-section-head">
+              <span>{{ 'hosts.builds' | t }}</span>
+            </div>
             @if (isProbing(zone)) {
               <p class="hosts-probing" aria-live="polite">{{ 'hosts.probing' | t }}</p>
             } @else if (offerOf(zone); as offer) {

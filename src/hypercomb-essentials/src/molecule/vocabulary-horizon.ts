@@ -94,11 +94,57 @@ export const publishersFromCards = (cards: readonly HorizonCard[]): Record<strin
   return out
 }
 
-/** `content.<zone>` — the door, never the zone itself. */
+const bareHost = (zone: unknown): string =>
+  clean(zone).replace(/^wss?:\/\//, '').replace(/^https?:\/\//, '').replace(/\/+$/, '').split(/[/?#]/)[0] ?? ''
+
+/**
+ * THE APEX A WILDCARD ZONE HANGS OFF.
+ *
+ * `susan.hypercomb.com` is a site on the `hypercomb.com` zone: the DNS
+ * wildcard covers ONE label, so the relay's write face is `content.hypercomb.com`
+ * and `content.susan.hypercomb.com` is a name that resolves to nothing at all.
+ * A loopback or port-bearing address is a machine, not a zone, and is left
+ * exactly as it is.
+ */
+export const apexOf = (zone: unknown): string => {
+  const bare = bareHost(zone)
+  if (!bare || bare.includes(':') || /^(localhost|127(?:\.\d+){3})$/.test(bare)) return bare
+  const labels = bare.split('.').filter(Boolean)
+  return labels.length > 2 ? labels.slice(-2).join('.') : labels.join('.')
+}
+
+/**
+ * `content.<apex>` — the relay's write/read face for a zone.
+ *
+ * It was `content.<zone>` on whatever it was handed, which minted a DEAD door
+ * for every site on a wildcard zone: a visit to `susan.hypercomb.com` asked
+ * `content.susan.hypercomb.com`, a name no DNS record covers, and the search
+ * spent its timeout there and reported "no door answered in time". The face
+ * belongs to the APEX (`resolveSite` in the blossom worker: a hostname that is
+ * not `content.<zone>` and not a site is answered `nothingHere`).
+ */
 export const contentDoorOf = (zone: unknown): string => {
-  const bare = clean(zone).replace(/^wss?:\/\//, '').replace(/^https?:\/\//, '').replace(/\/+$/, '')
+  const bare = bareHost(zone)
   if (!bare) return ''
-  return bare.startsWith('content.') ? bare : `content.${bare}`
+  if (bare.startsWith('content.')) return bare
+  const apex = apexOf(bare)
+  return apex ? `content.${apex}` : ''
+}
+
+/**
+ * EVERY DOOR WORTH ASKING FOR A ZONE, in reading order.
+ *
+ * The zone ITSELF is a door: `/hive/<pubkey>` is matched above the site branch
+ * in the worker's router, so a published site serves its publisher's signed
+ * index on its own hostname. Asking only the relay face threw that away — and
+ * on a wildcard zone the relay face it minted did not exist. Both are asked
+ * concurrently and ranked, so a door that is down costs nothing but itself.
+ */
+export const doorsOfZone = (zone: unknown): string[] => {
+  const bare = bareHost(zone)
+  if (!bare) return []
+  const face = contentDoorOf(bare)
+  return face && face !== bare ? [bare, face] : [bare]
 }
 
 /**
@@ -113,8 +159,7 @@ export const buildHorizon = (sources: HorizonSources): VocabularyHorizon => {
   // deliberately unused here — see the header.
   const zones: string[] = []
   for (const zone of sources.communityZones ?? []) {
-    const door = contentDoorOf(zone)
-    if (door && !zones.includes(door)) zones.push(door)
+    for (const door of doorsOfZone(zone)) if (!zones.includes(door)) zones.push(door)
   }
   const orZones = (own: string[]): string[] => (own.length ? own : zones)
 
@@ -122,7 +167,7 @@ export const buildHorizon = (sources: HorizonSources): VocabularyHorizon => {
   for (const visit of sources.visits ?? []) {
     const pubkey = clean(visit?.pubkey)
     if (!pubkey) continue
-    rows.push({ pubkey, hosts: orZones([contentDoorOf(visit?.domain)].filter(Boolean)) })
+    rows.push({ pubkey, hosts: orZones(doorsOfZone(visit?.domain)) })
   }
   for (const follow of Object.values(sources.follows ?? {})) {
     const pubkey = clean(follow?.pubkey)

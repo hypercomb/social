@@ -500,7 +500,10 @@ const writeFlag = (key: string): void => {
   try { globalThis.localStorage?.setItem(key, '1') } catch { /* session-local */ }
 }
 
-/** The participant's explicit open/closed choice wins on later page loads.
+/** WHAT WAS SHOWING when the page was last left wins on later page loads.
+ *  Not what was intended: the shell parks this window on Escape and whenever
+ *  another tool window opens, and a reload must agree with the screen the
+ *  participant walked away from (see `session` below).
  *  With no choice yet, preserve the configured local bridge's companion-view
  *  default. Storage can be unavailable in private/locked-down browsers. */
 const rememberedChatVisibility = (fallback: boolean): boolean => {
@@ -577,9 +580,10 @@ export class ChatWindowComponent implements OnDestroy {
   readonly hostConfigured = signal(isParticipantAiHostConfigured())
   readonly enabled = computed(() => this.providerReady() || this.bridgeConfigured() || this.hostConfigured())
 
-  /** The participant's last explicit open/closed choice survives a refresh.
-   *  On the first visit only, a configured local bridge keeps the established
-   *  companion-view default; everyone else begins with the launcher. */
+  /** Whether the window was on screen when the page was last left survives a
+   *  refresh. On the first visit only, a configured local bridge keeps the
+   *  established companion-view default; everyone else begins with the
+   *  launcher. */
   readonly visible = signal(rememberedChatVisibility(this.bridgeConfigured()))
 
   /** Parked while the hive is covered and brought back intact — the thread is
@@ -596,9 +600,18 @@ export class ChatWindowComponent implements OnDestroy {
    *      which is exactly the thing chat-context-action.drone.ts exists to
    *      prevent.
    *    • the `view:active` claim follows the SCREEN, not the intent: a parked
-   *      window covers nothing, so it must not go on claiming the surface. */
+   *      window covers nothing, so it must not go on claiming the surface.
+   *    • WHAT A RELOAD COMES BACK TO follows the screen as well. Escape puts
+   *      every showing window away (tool-windows.ts) and the one-window rule
+   *      parks this one the moment another opens (window-rule.ts) — neither
+   *      is a close, so remembering only open()/close() left the stored
+   *      choice saying "open" for a window that was not on screen, and the
+   *      next refresh laid the chat back over a hive the participant had
+   *      cleared. Parked still forgets nothing else; it simply is not
+   *      SHOWING, and showing is what a reload brings back. */
   readonly session = signalSession(this.visible, open => {
     EffectBus.emit('chat:window-state', { open })
+    rememberChatVisibility(open)
     this.#claimSurface(open && !this.peeking())
     this.#applyFold()
   })

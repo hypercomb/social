@@ -66,6 +66,9 @@ import {
   LOCAL_NOT_HELD,
   NO_ADDRESS,
   NO_READER,
+  OFFER_HEAD,
+  OFFER_SHOW,
+  OFFER_SHOWN,
   OPEN_STAMP_MS,
   VERDICT_LABEL,
   VERDICT_MARK,
@@ -73,8 +76,13 @@ import {
   allUnknownWords,
   counterWords,
   doorWords,
+  offerWords,
   unknownFooter,
 } from './vocabulary-words.js'
+// TYPE ONLY. This window keeps its whole reach behind dynamic imports so an
+// unopened surface costs nothing at boot; a type is erased and costs nothing
+// either way.
+import type { StaticOffer } from '../sharing/static-peers.js'
 
 const SURFACE = 'hc-vocabulary-find'
 const STYLE_ID = 'hc-vocabulary-find-style'
@@ -85,6 +93,15 @@ const ACCENT = '201, 162, 39'
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
+
+/** The offers authority. Named by its key rather than imported, so this
+ *  window still pulls nothing into the boot bundle. */
+type StaticPeersLike = {
+  offers?: () => readonly StaticOffer[]
+  isOffered?: (name: string) => boolean
+}
+const staticPeers = (): StaticPeersLike | undefined =>
+  ioc<StaticPeersLike>('@diamondcoreprocessor.com/StaticPeersDrone')
 
 const t = (key: string, fallback: string, params?: Record<string, string | number>): string => {
   try {
@@ -178,6 +195,13 @@ export class VocabularyFindElement extends HTMLElement {
   #state: FindState = { word: '', address: null, local: null, horizon: null, horizonFailed: false, search: null, asked: false, asking: false }
   #cleanup: (() => void)[] = []
 
+  /** WHAT EACH PUBLISHER PUBLISHES, keyed by their key — gathered on the way
+   *  to the horizon and kept BESIDE it, because a finding names a publisher
+   *  and what you can hold is a creation. A seam like the other four, so a
+   *  test can hand the window creations without a ledger. Cleared at the top
+   *  of every look, so a stale search's creations can never be clicked. */
+  takeable = new Map<string, StaticOffer[]>()
+
   /** SEAMS. Every one of them replaced in the spec, so no test opens a socket
    *  or a pool, and no test contacts a real host. */
   reader: () => MoleculeIndexReader | undefined =
@@ -199,9 +223,17 @@ export class VocabularyFindElement extends HTMLElement {
     } catch { follows = {} }
     // WHAT YOU HAVE BEEN OFFERED (static-peers.drone.ts) — a publisher whose
     // creation stands shaded in your hive is one you can ask.
-    const statics = ioc<{ offers?: () => readonly { name: string; pubkey: string; hosts: readonly string[] }[] }>(
-      '@diamondcoreprocessor.com/StaticPeersDrone')
-    for (const o of statics?.offers?.() ?? []) follows[`offer:${o.name}`] = { pubkey: o.pubkey, hosts: [...o.hosts] }
+    const statics = staticPeers()
+    const takeable = new Map<string, StaticOffer[]>()
+    const remember = (offer: StaticOffer | null): void => {
+      if (!offer) return
+      const held = takeable.get(offer.pubkey) ?? []
+      if (!held.some(o => o.name === offer.name)) takeable.set(offer.pubkey, [...held, offer])
+    }
+    for (const o of statics?.offers?.() ?? []) {
+      follows[`offer:${o.name}`] = { pubkey: o.pubkey, hosts: [...o.hosts] }
+      remember(o)
+    }
     // THE COMMUNITY'S LEDGERS — every publisher every host you carry lists.
     // This is what makes a word findable ACROSS DOMAINS with nothing visited
     // and nothing offered: the hosts you added are the horizon. One small
@@ -209,6 +241,11 @@ export class VocabularyFindElement extends HTMLElement {
     // contributes nobody.
     try {
       const { fetchPublicationCards } = await import('../sharing/publications-ledger.js')
+      // The mapping from a plate to an offer lives with the offers, and the
+      // plate is only whole HERE — `publishersFromCards` keeps a key and its
+      // doors, and `foldHorizon` rebuilds every row from those two fields, so
+      // a creation attached to a horizon row would never survive to a result.
+      const { offerFromCard } = await import('../sharing/static-peers.js')
       const originOf = (zone: string): string => {
         const bare = zone.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '')
         const local = /^(localhost|127\.)/.test(bare)
@@ -218,8 +255,12 @@ export class VocabularyFindElement extends HTMLElement {
         const origin = originOf(z)
         return origin ? fetchPublicationCards({}, origin).catch(() => null) : Promise.resolve(null)
       }))
-      Object.assign(follows, publishersFromCards(ledgers.flatMap(cards => cards ?? [])))
+      const cards = ledgers.flatMap(list => list ?? [])
+      Object.assign(follows, publishersFromCards(cards))
+      for (const card of cards) remember(offerFromCard(card))
     } catch { /* a ledger that cannot be read is nobody to ask, not a failure to ask */ }
+    // The side table, not the horizon: the search re-folds what it is handed.
+    this.takeable = takeable
     return buildHorizon({
       visits,
       follows,
@@ -248,6 +289,12 @@ export class VocabularyFindElement extends HTMLElement {
       this.open()
       const word = String(payload?.word ?? '').trim()
       if (word) void this.look(word)
+    }))
+    // The offers authority says when a creation arrives or leaves — the same
+    // signal the host directory reads. Redrawing here is what keeps a switch
+    // from having to guess whether its own click landed.
+    this.#cleanup.push(EffectBus.on('community:offers-render', () => {
+      if (this.#panel) this.#render()
     }))
   }
 
@@ -282,6 +329,30 @@ export class VocabularyFindElement extends HTMLElement {
 
   get open$(): boolean { return !!this.#panel }
 
+  /**
+   * The chips for one publisher: every creation of theirs this reader has seen
+   * listed, with the switch's state read LIVE from the offers authority — so a
+   * creation offered from the community page or the host directory already
+   * reads as shown the moment this window draws it.
+   */
+  #takesFor(pubkey: string): TakeChip[] {
+    const peers = staticPeers()
+    return (this.takeable.get(pubkey) ?? []).map(offer => {
+      const offered = peers?.isOffered?.(offer.name) === true
+      return {
+        offer,
+        offered,
+        toggle: (): void => {
+          // The offer is the whole act. Nothing here folds, adopts a branch,
+          // or navigates — the creation stands shaded and the walk in is the
+          // adopt (static-peers.ts).
+          if (offered) EffectBus.emit('community:withdraw', { name: offer.name })
+          else EffectBus.emit('community:offer', offer)
+        },
+      }
+    })
+  }
+
   readonly #onKey = (event: KeyboardEvent): void => {
     if (event.key !== 'Escape') return
     event.stopPropagation()
@@ -295,6 +366,7 @@ export class VocabularyFindElement extends HTMLElement {
   async look(word: string): Promise<void> {
     const mine = ++this.#generation
     this.open()
+    this.takeable = new Map()
     const asked = String(word ?? '').trim()
     this.#state = { word: asked, address: null, local: null, horizon: null, horizonFailed: false, search: null, asked: false, asking: true }
     this.#render()
@@ -415,7 +487,7 @@ export class VocabularyFindElement extends HTMLElement {
 
     const tally = tallyOf(search.findings)
     body.appendChild(note('hc-find-tally', counterWords(tally.declared, tally.absent, tally.unknown)))
-    for (const finding of search.findings) body.appendChild(findingRow(finding))
+    for (const finding of search.findings) body.appendChild(findingRow(finding, this.#takesFor(finding.publisher)))
 
     const unknowns = unknownCount(search)
     if (unknowns > 0 && unknowns === search.findings.length) {
@@ -483,7 +555,7 @@ const askingRow = (pubkey: string, hosts: readonly string[]): HTMLElement => {
   return row
 }
 
-const findingRow = (finding: VocabularyFinding): HTMLElement => {
+const findingRow = (finding: VocabularyFinding, takes: readonly TakeChip[] = []): HTMLElement => {
   const row = document.createElement('div')
   row.className = `hc-find-row is-${finding.verdict}`
   row.appendChild(label(
@@ -497,7 +569,46 @@ const findingRow = (finding: VocabularyFinding): HTMLElement => {
     list.appendChild(door(d.host, `${doorWords(d.outcome)}${d.seq === null ? '' : ` (seq ${d.seq})`}`))
   }
   if (finding.doors.length) row.appendChild(list)
+  if (takes.length) row.appendChild(takeStrip(takes))
   return row
+}
+
+/** One creation of one publisher, and whether it stands in your hive. */
+interface TakeChip {
+  readonly offer: StaticOffer
+  readonly offered: boolean
+  readonly toggle: () => void
+}
+
+/**
+ * THE ACT ON A RESULT. A row says a publisher declares the word; these say
+ * what that publisher publishes, and each one is the same offer the community
+ * page and the host directory make — one creation, shaded, taken by walking
+ * into it. A publisher whose creations this reader has never seen listed gets
+ * no strip at all rather than a switch that cannot work.
+ *
+ * The strip is drawn AFTER the doors so it reads as an act on the row and
+ * never as part of the evidence. It never removes, reorders or fades a row:
+ * what a search found stands exactly as it was found.
+ */
+const takeStrip = (takes: readonly TakeChip[]): HTMLElement => {
+  const strip = document.createElement('div')
+  strip.className = 'hc-find-takes'
+  const head = document.createElement('span')
+  head.className = 'hc-find-takes-head'
+  head.textContent = OFFER_HEAD
+  strip.appendChild(head)
+  for (const take of takes) {
+    const chip = document.createElement('button')
+    chip.type = 'button'
+    chip.className = take.offered ? 'hc-find-take is-on' : 'hc-find-take'
+    chip.textContent = `${take.offer.name} · ${take.offered ? OFFER_SHOWN : OFFER_SHOW}`
+    chip.title = offerWords(take.offer.name, take.offered)
+    chip.setAttribute('aria-pressed', String(take.offered))
+    chip.addEventListener('click', take.toggle)
+    strip.appendChild(chip)
+  }
+  return strip
 }
 
 const label = (verdict: string, who: string, why: string): HTMLElement => {
@@ -586,6 +697,29 @@ function ensureStyles(): void {
       color: inherit; font: inherit; font-size: 0.85em; cursor: pointer;
     }
     .hc-find-do:hover { border-color: rgba(${ACCENT}, 0.8); }
+    .hc-find-takes {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.4rem;
+      margin-top: 0.4rem;
+    }
+    .hc-find-takes-head {
+      font-size: 0.72em; letter-spacing: 0.06em; text-transform: uppercase;
+      color: rgba(${STEEL}, 0.75);
+    }
+    .hc-find-take {
+      padding: 0.2rem 0.5rem;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(${STEEL}, 0.3); border-radius: var(--hc-radius-control, 2px);
+      color: inherit; font: inherit; font-size: 0.78em; cursor: pointer;
+    }
+    .hc-find-take:hover { border-color: rgba(${ACCENT}, 0.8); }
+    .hc-find-take:focus-visible { outline: 1px solid rgba(${ACCENT}, 0.8); outline-offset: 1px; }
+    /* ON IS A STATE, NOT A PRESSED BUTTON — and never a fade: this window may
+       not use opacity to say anything, because a dimmed row is how an unknown
+       gets read as an absence. */
+    .hc-find-take.is-on {
+      border-color: rgba(${ACCENT}, 0.85);
+      background: rgba(${ACCENT}, 0.16);
+    }
     .hc-find-close {
       flex: 0 0 auto; display: inline-grid; place-items: center;
       width: 1.75rem; height: 1.75rem; padding: 0;
