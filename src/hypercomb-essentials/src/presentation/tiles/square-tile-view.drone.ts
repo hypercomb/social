@@ -3,8 +3,8 @@
 // The marked cell's CHILDREN are the elements of the page: each child tile
 // is a square plate — warm ivory paper, espresso ink, gold hairlines — laid
 // out as a clean centred gallery grid. Every element visible at once,
-// obviously clickable, nothing floating and nothing to learn: hovering
-// lifts a plate, stepping through one is a plain NAVIGATION — the arrival
+// obviously clickable: hovering opens a two-column action rectangle over
+// a neighbour, stepping through one is a plain NAVIGATION — the arrival
 // system opens whatever face the destination resolves to (its own
 // `view:default` mark, else the branch's). This drone renders exactly ONE
 // layer; children are doorways. Depth is garnish here — soft shadows, a
@@ -27,7 +27,9 @@ import { readTilePropertiesAt, tilePictureCandidates } from '../../editor/tile-p
 import { resolveLocalResourceReference } from './local-resource-reference.js'
 import { childNamesOf, type PlacementHistory, type PlacementLayer } from '../../history/layer-placement.js'
 import { trackScrollGutter } from './scroll-gutter.js'
-import { readTileBrief, type TileBrief } from './tile-brief.js'
+import { affordancesFor, readTileBrief, type TileBrief } from './tile-brief.js'
+import { SquareTileMenu, SQUARE_TILE_MENU_LAYOUT_CSS } from './square-tile-menu.js'
+import { SQUARE_TILE_MENU_CSS } from './square-tile-menu-panel.js'
 import {
   buildTileBriefPanel, TILE_BRIEF_CSS,
   type BriefPanelOptions, type BriefSibling,
@@ -106,11 +108,12 @@ export class SquareTileViewDrone extends Drone {
   /** Generation of the in-flight brief read — a second fold turned while the
    *  first is still reading must not paint over the second. */
   #briefGen = 0
+  #menu: SquareTileMenu | null = null
+  #controlsVisible = true
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#bound) {
       this.#vm()?.addEventListener('change', this.#change)
-      window.addEventListener('keydown', this.#key, true)
       // A REAL RENDERER FOLLOWS THE LINEAGE. The plate click is the same
       // click a hexagon gets — navigate, nothing more — so when the
       // destination's own face is this same view, no mode change and no
@@ -125,6 +128,9 @@ export class SquareTileViewDrone extends Drone {
       // A note written on this page is one of the things the page SHOWS, so
       // the sheet is one of the surfaces that has to hear about it.
       this.onEffect('notes:changed', this.#change)
+      // The standard Escape cascade first clears typing, editors and tool
+      // windows. Only its final fallback leaves this underlying view.
+      this.onEffect('global:escape', this.#escape)
       this.onEffect<{ view?: string; segments?: string[] }>('view:open-for-tile', payload => {
         if (payload?.view !== SQUARE_TILE_VIEW) return
         this.#targetSegments = (payload.segments ?? []).map(String).filter(Boolean)
@@ -140,6 +146,7 @@ export class SquareTileViewDrone extends Drone {
           // Same ladder as Escape: the way out of an open card is the card,
           // and only then the way out of the sheet.
           back: () => {
+            if (this.#menu?.dismiss(true)) return
             if (this.#briefPanel && this.#briefLabel) this.#closeBrief()
             else this.#vm()?.setMode('hexagons')
           },
@@ -153,7 +160,6 @@ export class SquareTileViewDrone extends Drone {
     this.#vm()?.removeEventListener('change', this.#change)
     window.ioc?.get<EventTarget>('@hypercomb.social/Lineage')
       ?.removeEventListener?.('change', this.#lineageChange)
-    window.removeEventListener('keydown', this.#key, true)
     this.#backOff?.()
     this.#backOff = null
     this.#teardown()
@@ -161,20 +167,23 @@ export class SquareTileViewDrone extends Drone {
 
   readonly #change = (): void => { void this.#reconcile() }
   readonly #lineageChange = (): void => {
+    this.#menu?.dismiss()
     this.#targetSegments = null
     // A new place is a new card. Whatever was turned down belonged to the
     // layer we just left.
     this.#briefLabel = null
     void this.#reconcile()
   }
-  readonly #key = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape' || this.#vm()?.mode !== SQUARE_TILE_VIEW) return
-    event.preventDefault()
-    event.stopImmediatePropagation()
+  readonly #escape = (): void => {
+    if (this.#vm()?.mode !== SQUARE_TILE_VIEW) return
+    const modes = window.ioc?.get<{ ownersOf(mode: string): readonly string[] }>('@diamondcoreprocessor.com/ModeRegistry')
+    const top = modes?.ownersOf('view:active').at(-1)
+    if (top && top !== 'square-tile-view') return
     // ESCAPE UNDOES THE LAST THING DONE. An open card is a step in, so it is
     // the step Escape takes back — the sheet only closes once nothing is
     // turned down. (The page's own brief IS the sheet; there is nothing to
     // fold back there, so Escape leaves.)
+    if (this.#menu?.dismiss(true)) return
     if (this.#briefPanel && this.#briefLabel) { this.#closeBrief(); return }
     this.#vm()?.setMode('hexagons')
   }
@@ -188,6 +197,7 @@ export class SquareTileViewDrone extends Drone {
     if (this.#vm()?.mode === SQUARE_TILE_VIEW) { await this.#mount(gen); return }
     this.#targetSegments = null
     this.#teardown()
+    this.#controlsVisible = true
   }
 
   async #mount(gen: number): Promise<void> {
@@ -236,6 +246,7 @@ export class SquareTileViewDrone extends Drone {
     this.#objectUrls = fresh
     this.#host = this.#build(title, payload?.tagline ?? '', segments, panels, pageData)
     document.body.appendChild(this.#host)
+    this.#syncControls()
     // The sheet scrolls, so on Windows it wears a real scrollbar — measure it
     // and let the × step aside by that much (see scroll-gutter.ts).
     this.#gutterOff = trackScrollGutter(this.#host)
@@ -304,7 +315,7 @@ export class SquareTileViewDrone extends Drone {
   ): HTMLElement {
     const host = document.createElement('section')
     host.className = 'hc-square-tile-view'
-    host.innerHTML = `<style>${SCENE_CSS}${TILE_BRIEF_CSS}</style>`
+    host.innerHTML = `<style>${SCENE_CSS}${TILE_BRIEF_CSS}${SQUARE_TILE_MENU_LAYOUT_CSS}${SQUARE_TILE_MENU_CSS}</style>`
     // The page scrolls like a page; the hex wheel-zoom handler must not
     // preventDefault our wheel events (same hatch the site view uses).
     host.setAttribute('data-consumes-wheel', '')
@@ -337,12 +348,32 @@ export class SquareTileViewDrone extends Drone {
 
     const grid = document.createElement('main')
     grid.className = 'wv-grid'
+    this.#menu = new SquareTileMenu(grid, {
+      actionsFor: label => {
+        // The hex action registry addresses children of the current layer.
+        // An explicit preview path must never act on a same-named tile here.
+        const current = window.ioc?.get<LineageShape>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? []
+        if (JSON.stringify(current) !== JSON.stringify(segments)) return []
+        return affordancesFor(label).map(action => ({
+          ...action,
+          run: () => {
+            const now = window.ioc?.get<LineageShape>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? []
+            if (JSON.stringify(now) !== JSON.stringify(segments)) return
+            const live = affordancesFor(label).find(candidate => candidate.name === action.name)
+            if (live && !live.inert) live.run()
+          },
+        }))
+      },
+      onDetails: label => { void this.#openBrief(label) },
+    })
     panels.forEach((panel, index) => {
-      const plate = document.createElement('button')
-      plate.type = 'button'
+      const plate = document.createElement('div')
       plate.className = 'wv-plate'
       plate.style.setProperty('--i', String(index))
-      plate.title = panel.title
+      const door = document.createElement('button')
+      door.type = 'button'
+      door.className = 'wv-door'
+      door.title = panel.title
       const mat = document.createElement('span')
       mat.className = 'wv-mat'
       if (panel.imageUrl) {
@@ -357,12 +388,13 @@ export class SquareTileViewDrone extends Drone {
         blank.className = 'wv-art wv-art-blank'
         mat.appendChild(blank)
       }
-      plate.appendChild(mat)
+      door.appendChild(mat)
       const caption = document.createElement('span')
       caption.className = 'wv-caption'
       caption.textContent = panel.title
-      plate.appendChild(caption)
-      plate.onclick = () => this.#enter([...segments, panel.label])
+      door.appendChild(caption)
+      door.onclick = () => this.#enter([...segments, panel.label])
+      plate.appendChild(door)
       // The plate is a doorway; the CORNER is the card. A hexagon has no
       // back, so the band crowds its icons around the rim — a plate has one,
       // and turning it costs no navigation, which is the whole point: the
@@ -370,7 +402,8 @@ export class SquareTileViewDrone extends Drone {
       const fold = this.#fold(panel.label, this.#t('square-tile.fold.tile', 'turn the corner'))
       if (this.#carries(panel.label)) fold.setAttribute('data-carries', '')
       plate.appendChild(fold)
-      this.#bindHold(plate, panel.label)
+      this.#bindHold(door, panel.label)
+      this.#menu?.bind(plate, panel.label, panel.title)
       grid.appendChild(plate)
     })
     sheet.appendChild(grid)
@@ -393,18 +426,30 @@ export class SquareTileViewDrone extends Drone {
       const hint = document.createElement('p')
       hint.className = 'wv-hint'
       hint.textContent = panels.length
-        ? this.#t('square-tile.hint.step', 'step through a plate · turn a corner to read one')
+        ? this.#t('square-tile.menu.hint', 'click a tile to enter · hover or use ⋯ for options')
         : this.#t('square-tile.hint.leaf', 'the end of this branch')
       sheet.appendChild(hint)
     }
 
+    const tools = document.createElement('div')
+    tools.className = 'wv-tools'
+    const controls = document.createElement('button')
+    controls.type = 'button'
+    controls.className = 'wv-shell-toggle'
+    controls.onclick = () => {
+      this.#menu?.dismiss()
+      this.#controlsVisible = !this.#controlsVisible
+      this.#syncControls()
+    }
+    tools.appendChild(controls)
     const close = document.createElement('button')
     close.type = 'button'
     close.className = 'wv-close'
     close.setAttribute('aria-label', 'Return to hexagons')
     close.textContent = '×'
     close.onclick = () => this.#vm()?.setMode('hexagons')
-    host.appendChild(close)
+    tools.appendChild(close)
+    host.appendChild(tools)
 
     return host
   }
@@ -439,16 +484,13 @@ export class SquareTileViewDrone extends Drone {
   // corner is the second gesture: a pointer turns it down, a finger holds the
   // plate, a keyboard presses `i` on the focused plate.
 
-  /** NOT a `<button>`: a plate IS a button, and a button inside a button is
-   *  invalid — Chrome tolerates the nesting, other engines reparent it and
-   *  the corner stops being clickable. A span carrying the button role is
-   *  valid anywhere and reads the same to a screen reader. */
+  /** Sibling of the doorway and management button, so every control has
+   *  native keyboard behavior without nesting interactive elements. */
   #fold(label: string, title: string): HTMLElement {
-    const fold = document.createElement('span')
+    const fold = document.createElement('button')
+    fold.type = 'button'
     fold.className = 'wv-fold'
     fold.title = title
-    fold.setAttribute('role', 'button')
-    fold.setAttribute('tabindex', '0')
     fold.setAttribute('aria-label', title)
     fold.setAttribute('data-fold', label)
     const turn = (event: Event): void => {
@@ -458,10 +500,6 @@ export class SquareTileViewDrone extends Drone {
       void this.#toggleBrief(label)
     }
     fold.addEventListener('click', turn)
-    fold.addEventListener('keydown', event => {
-      if (event.key !== 'Enter' && event.key !== ' ') return
-      turn(event)
-    })
     return fold
   }
 
@@ -530,6 +568,7 @@ export class SquareTileViewDrone extends Drone {
 
   /** Turn a corner down. `label` is a plate's; `''` is the page's own. */
   async #openBrief(label: string): Promise<void> {
+    this.#menu?.dismiss()
     const host = this.#host
     const grid = host?.querySelector('.wv-grid')
     if (!host || !grid) return
@@ -662,7 +701,27 @@ export class SquareTileViewDrone extends Drone {
     return text && text !== key ? text : fallback
   }
 
+  #syncControls(): void {
+    this.#host?.setAttribute('data-controls', this.#controlsVisible ? 'shown' : 'hidden')
+    const toggle = this.#host?.querySelector<HTMLButtonElement>('.wv-shell-toggle')
+    if (toggle) {
+      const text = this.#controlsVisible
+        ? this.#t('square-tile.controls.hide', 'Hide controls')
+        : this.#t('square-tile.controls.show', 'Show controls')
+      toggle.textContent = text
+      toggle.title = text
+      toggle.setAttribute('aria-label', text)
+      toggle.setAttribute('aria-pressed', String(this.#controlsVisible))
+    }
+    if (!this.#active) return
+    const modes = window.ioc?.get<{ enter(m: string, o: string): void; exit(m: string, o: string): void }>('@diamondcoreprocessor.com/ModeRegistry')
+    if (this.#controlsVisible) modes?.enter('view:keeps-shell', 'square-tile-view')
+    else modes?.exit('view:keeps-shell', 'square-tile-view')
+  }
+
   #teardown(): void {
+    this.#menu?.destroy()
+    this.#menu = null
     this.#gutterOff?.()
     this.#gutterOff = null
     // The PANEL goes with the host; WHICH corner was turned down does not —
@@ -680,8 +739,13 @@ export class SquareTileViewDrone extends Drone {
     if (this.#active === active) return
     this.#active = active
     const modes = window.ioc?.get<{ enter(m: string, o: string): void; exit(m: string, o: string): void }>('@diamondcoreprocessor.com/ModeRegistry')
-    if (active) modes?.enter('view:active', 'square-tile-view')
-    else modes?.exit('view:active', 'square-tile-view')
+    if (active) {
+      if (this.#controlsVisible) modes?.enter('view:keeps-shell', 'square-tile-view')
+      modes?.enter('view:active', 'square-tile-view')
+    } else {
+      modes?.exit('view:active', 'square-tile-view')
+      modes?.exit('view:keeps-shell', 'square-tile-view')
+    }
   }
 }
 
@@ -694,32 +758,40 @@ const SCENE_CSS = `
  radial-gradient(120% 70% at 50% 0%,rgba(255,255,255,.75),transparent 60%),
  linear-gradient(180deg,#f8f3e8 0%,#f3ecdd 60%,#ede4d1 100%);
  color:#31241a}
-.wv-sheet{box-sizing:border-box;max-width:1180px;margin:0 auto;padding:clamp(2.2rem,6vh,4.5rem) clamp(1.2rem,4vw,3rem) 4rem;min-height:100%;display:flex;flex-direction:column}
+.hc-square-tile-view[data-controls="shown"]{--wv-top:max(var(--hc-inset-top,0px),var(--hc-header-anchor,2.75rem));--wv-right:calc(var(--hc-inset-right,0px) + var(--hc-controls-right,0px));top:var(--wv-top);bottom:max(var(--hc-inset-bottom,0px),var(--hc-controls-bottom,0px),var(--hc-safe-bottom,0px));left:calc(var(--hc-inset-left,0px) + var(--hc-controls-left,0px));right:var(--wv-right)}
+.wv-sheet{box-sizing:border-box;max-width:1180px;margin:0 auto;padding:clamp(4.5rem,9vh,6rem) clamp(1.2rem,4vw,3rem) 4rem;min-height:100%;display:flex;flex-direction:column}
 .wv-crest{text-align:center;margin-bottom:clamp(1.8rem,4.5vh,3.2rem);animation:wv-rise .7s cubic-bezier(.2,.7,.2,1) backwards}
 .wv-title{margin:0;font:italic 700 clamp(2.6rem,6vw,4.2rem)/1.08 Georgia,'Times New Roman',serif;letter-spacing:.04em;color:#3a2a1c}
 .wv-rule{width:7.5rem;height:2px;margin:1.05rem auto 0;background:linear-gradient(90deg,transparent,#b8933f 18%,#d9b96a 50%,#b8933f 82%,transparent)}
 .wv-tagline{margin:.95rem 0 0;color:#8a7657;font:400 .95rem/1.5 Georgia,serif;letter-spacing:.24em;text-transform:uppercase}
 .wv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:clamp(1rem,2.4vw,1.8rem);justify-items:stretch;align-content:start;max-width:980px;margin:0 auto;width:100%}
-.wv-plate{position:relative;display:flex;flex-direction:column;gap:.7rem;padding:0;border:0;background:none;cursor:pointer;text-align:center;animation:wv-rise .6s cubic-bezier(.2,.7,.2,1) backwards;animation-delay:calc(.05s * var(--i,0));transition:transform .18s ease}
-.wv-plate:hover,.wv-plate:focus-visible{transform:translateY(-5px);outline:none}
-.wv-mat{display:block;background:#fffdf7;border:1px solid rgba(184,147,63,.55);padding:9px;box-shadow:0 1px 2px rgba(58,42,28,.08),0 10px 24px -12px rgba(58,42,28,.28);transition:box-shadow .18s ease,border-color .18s ease}
-.wv-plate:hover .wv-mat,.wv-plate:focus-visible .wv-mat{border-color:#b8933f;box-shadow:0 2px 3px rgba(58,42,28,.1),0 18px 34px -14px rgba(58,42,28,.4),0 0 0 1px rgba(184,147,63,.35)}
+.wv-plate{position:relative;min-width:0;text-align:center;animation:wv-rise .6s cubic-bezier(.2,.7,.2,1) backwards;animation-delay:calc(.05s * var(--i,0));transition:transform .18s ease}
+.wv-door{display:flex;flex-direction:column;gap:.7rem;width:100%;min-width:0;padding:0;border:0;background:none;cursor:pointer;text-align:center}
+.wv-plate:hover,.wv-plate:focus-within{transform:translateY(-5px)}
+.wv-door:focus-visible{outline:2px solid #8b651b;outline-offset:4px}
+.wv-mat{display:block;box-sizing:border-box;width:100%;background:#fffdf7;border:1px solid rgba(184,147,63,.55);padding:9px;box-shadow:0 1px 2px rgba(58,42,28,.08),0 10px 24px -12px rgba(58,42,28,.28);transition:box-shadow .18s ease,border-color .18s ease}
+.wv-plate:hover .wv-mat,.wv-plate:focus-within .wv-mat{border-color:#b8933f;box-shadow:0 2px 3px rgba(58,42,28,.1),0 18px 34px -14px rgba(58,42,28,.4),0 0 0 1px rgba(184,147,63,.35)}
 .wv-art{display:block;width:100%;aspect-ratio:1/1;object-fit:cover;background:#efe7d6}
 .wv-plate:hover .wv-art{filter:saturate(1.05) brightness(1.03)}
 .wv-art-blank{background:
  radial-gradient(42% 42% at 50% 46%,rgba(184,147,63,.22),transparent 72%),
  conic-gradient(from 30deg,rgba(184,147,63,.14) 0 60deg,transparent 0 120deg,rgba(184,147,63,.14) 0 180deg,transparent 0 240deg,rgba(184,147,63,.14) 0 300deg,transparent 0),#f4edde}
-.wv-caption{color:#5c4630;font:600 .78rem/1.3 Georgia,'Times New Roman',serif;letter-spacing:.14em;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wv-caption{display:block;width:100%;color:#5c4630;font:600 .78rem/1.3 Georgia,'Times New Roman',serif;letter-spacing:.14em;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wv-plate:hover .wv-caption{color:#3a2a1c}
 .wv-hint{margin:auto auto 0;padding-top:2.6rem;text-align:center;color:rgba(138,118,87,.75);font:400 .74rem/1 Georgia,serif;letter-spacing:.26em;text-transform:uppercase;animation:wv-fade 1s ease .6s backwards}
-.wv-close{position:fixed;z-index:2147483600;right:calc(.75rem + env(safe-area-inset-right,0px) + var(--hc-scroll-gutter,0px));top:calc(.75rem + env(safe-area-inset-top,0px));width:2.75rem;height:2.75rem;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(255,253,247,.85);border:1px solid rgba(184,147,63,.5);backdrop-filter:blur(6px);color:#5c4630;cursor:pointer;font:1.3rem/1 serif;padding:0;opacity:.6;transition:opacity .16s ease}
+.wv-tools{position:fixed;z-index:2147483600;right:calc(var(--wv-right,var(--hc-inset-right,0px)) + .75rem + env(safe-area-inset-right,0px) + var(--hc-scroll-gutter,0px));top:calc(var(--wv-top,0px) + .75rem + env(safe-area-inset-top,0px));display:flex;align-items:center;gap:.5rem}
+.hc-square-tile-view[data-controls="shown"] .wv-tools{margin-top:1rem}
+.wv-shell-toggle{min-height:2.75rem;padding:.5rem 1rem;border:1px solid rgba(184,147,63,.5);border-radius:1.5rem;background:#fffdf7;color:#5c4630;font:600 .8rem/1.2 Georgia,serif;cursor:pointer}
+.wv-shell-toggle:hover{background:#efe7d6}
+.wv-tools button:focus-visible{outline:2px solid #8b651b;outline-offset:3px}
+.wv-close{width:2.75rem;height:2.75rem;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(255,253,247,.85);border:1px solid rgba(184,147,63,.5);backdrop-filter:blur(6px);color:#5c4630;cursor:pointer;font:1.3rem/1 serif;padding:0;opacity:.6;transition:opacity .16s ease}
 .wv-close:hover{opacity:1}
 @media(hover:none),(pointer:coarse){.wv-close{opacity:1}}
 /* THE DOG-EAR. A plate is a card and a card has a back; the corner is how you
    turn it. Standing on tiles that carry something, offered on hover
    elsewhere — never competing with the plate's own click. */
 .wv-fold{position:absolute;right:0;top:0;width:2.1rem;height:2.1rem;padding:0;border:0;background:none;cursor:pointer;
- opacity:0;transition:opacity .18s ease;z-index:1;display:block}
+ opacity:0;transition:opacity .18s ease;z-index:3;display:block}
 .wv-fold::before{content:'';position:absolute;right:9px;top:9px;width:1.05rem;height:1.05rem;
  background:linear-gradient(225deg,#d9b96a 46%,rgba(184,147,63,.25) 48%,transparent 50%);
  box-shadow:-1px 1px 2px rgba(58,42,28,.18);transition:width .16s ease,height .16s ease}

@@ -93,7 +93,7 @@ export class App implements AfterViewInit {
       this.meshPublic.set(pub)
     })
 
-    EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {
+    EffectBus.on<{ active: boolean }>('view:shell-hidden', ({ active }) => {
       this.viewActive.set(active)
     })
 
