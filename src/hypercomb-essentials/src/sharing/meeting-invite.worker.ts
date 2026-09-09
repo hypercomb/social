@@ -5,7 +5,11 @@
 //
 //   • Link path — the shell capture (hypercomb-shared/core/invite-capture.ts)
 //     stashes a `/<sig>` boot URL under PENDING_INVITE_KEY; this worker drains
-//     it once, resolves the bundle, and joins.
+//     it once, resolves the bundle, and joins. The same capture stashes an
+//     outside-in DOOR (a `?hive=` query pressed on somebody's published site)
+//     under PENDING_DOOR_KEY, which carries coordinates rather than a
+//     signature — a read-only visitor shell may not fetch across origins to
+//     mint one — and lands as the same `hive:link`.
 //
 //   • Tile path — clicking a `swarm:invite` overlay icon emits
 //     `tile:action { action:'invite', label }`. The handler resolves the
@@ -25,7 +29,7 @@ import {
   type InviteDecorationPayload,
 } from './meeting-invite.js'
 import { loadBundleJson, loadInviteBundle, joinMeetingPlace } from './meeting-invite.join.js'
-import { validateHiveLinkBundle } from './hive-link.js'
+import { PENDING_DOOR_KEY, hiveDoorOf, validateHiveLinkBundle } from './hive-link.js'
 import { listDecorations } from '../commands/decoration-manifest.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
@@ -79,6 +83,25 @@ export class MeetingInviteWorker extends Worker {
       this.#clearPending()
       void this.#joinFromLink(sig)
     }
+
+    // One-shot: an outside-in DOOR captured at boot — a link pressed on
+    // somebody's published site, carrying coordinates rather than a
+    // signature. It reaches the same place a `/<sig>` hive-link does, and
+    // the head is read from the publisher's signed index there.
+    this.#drainDoor()
+  }
+
+  #drainDoor = (): void => {
+    let held = ''
+    try { held = sessionStorage.getItem(PENDING_DOOR_KEY) ?? '' } catch { held = '' }
+    if (!held) return
+    try { sessionStorage.removeItem(PENDING_DOOR_KEY) } catch { /* ignore */ }
+    const door = hiveDoorOf(held)
+    if (!door) return
+    // The route rides BESIDE the bundle, never inside it: a bundle is one
+    // creation's coordinates and reads the same for everyone handed it, while
+    // where the reader was standing is theirs alone.
+    this.emitEffect('hive:link', door.at.length ? { ...door.bundle, at: [...door.at] } : door.bundle)
   }
 
   #pendingLink = (): string => {
