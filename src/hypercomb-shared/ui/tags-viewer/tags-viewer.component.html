@@ -197,7 +197,7 @@
          and there is nothing to hang the control off. -->
     @if (!creating()) {
       <button class="tag-create-open" type="button" (click)="beginCreate()" [attr.title]="'tags.create.hint' | t">
-        <span class="mat-sym" aria-hidden="true">new_label</span>{{ 'tags.create' | t }}
+        <span class="mat-sym" aria-hidden="true">add</span>{{ 'tags.create' | t }}
       </button>
     } @else {
       <form class="tag-create-form" (submit)="$event.preventDefault(); submitCreate(newTag)">
