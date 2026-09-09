@@ -298,11 +298,11 @@
             </button>
           </div>
 
-          <!-- ADD — the centre act: name a tile. Reveals the composer with
-               focus (`mobile:input-visible` without `focus:false`, from
-               inside the tap, which is what iOS needs to raise the keyboard).
-               Lit while the composer is up; a second press puts it away. -->
-          <button class="ctl-btn add-btn mobile-center" [class.active]="inputVisible()"
+          <!-- ADD — the centre act: the Add sheet (hc-add-sheet). Name it,
+               take a photo, the library, paste a link, say it — one sheet,
+               five doors. Lit while the sheet is up; a second press puts it
+               away. -->
+          <button class="ctl-btn add-btn mobile-center" [class.active]="addOpen()"
                   (click)="toggleAdd()"
                   [attr.aria-label]="'controls.add' | t">
             <span class="mat-sym">add</span>

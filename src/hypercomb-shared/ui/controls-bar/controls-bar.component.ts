@@ -434,10 +434,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.inputVisible.set(next)
     EffectBus.emit('mobile:input-visible', { visible: next, mobile: this.isMobile() })
   }
-  /** ADD — the phone bar's centre disc. Until the Add sheet folds the
-   * camera, the library and the link pipeline in (pass 2), adding is
-   * naming: the composer rises with the keyboard; Enter adds. */
-  readonly toggleAdd = (): void => { this.toggleInput() }
+  /** ADD — the phone bar's centre disc: the Add sheet (`hc-add-sheet`, an
+   * essentials surface) — name it, take a photo, the library, paste a link,
+   * say it. The sheet toggles on the effect and reports its state back, so
+   * the disc is lit exactly while the sheet is up. */
+  readonly addOpen = signal(false)
+  readonly toggleAdd = (): void => { EffectBus.emit('add:sheet-open', {}) }
+  #addSheetUnsub: (() => void) | null = null
   // The bar is not the only emitter — GO, the mic reveal, the tutorial and
   // the empty-hex long-press all move visibility on the same effect. Mirror
   // every emission into the signal so the keyboard button's lit state stays
@@ -1551,6 +1554,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       'mobile:input-visible',
       ({ visible, mobile }) => this.inputVisible.set(mobile ? visible : true),
     )
+    this.#addSheetUnsub = EffectBus.on<{ open?: boolean }>('add:sheet-state', ({ open }) => {
+      this.addOpen.set(open === true)
+    })
 
     // ── ONE definition of mobile ──
     // MobileModeService (essentials) decides: a coarse pointer AND a
@@ -1989,6 +1995,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.gate?.removeEventListener?.('change', this.#onGateChange)
     if (this.gate?.lockedBy?.(PIN_OWNER)) this.gate.unlock(PIN_OWNER)
     this.#inputVisibleMirrorUnsub?.()
+    this.#addSheetUnsub?.()
     this.#mobileModeUnsub?.()
     this.#landscapeQuery?.removeEventListener('change', this.#landscapeHandler)
     this.#headerObserver?.disconnect()

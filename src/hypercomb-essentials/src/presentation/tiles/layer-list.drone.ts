@@ -77,6 +77,12 @@ type NavigationShape = { goRaw?: (segments: readonly string[]) => void; back?: (
 type ModesShape = { isActive?: (mode: string) => boolean }
 type NotesShape = { getNotes?: (label: string) => Promise<{ text?: string }[]> }
 type SnapshotShape = { snapshotCells?: () => { label: string; imageSig?: string }[] }
+export type PhoneFace = 'list' | 'hexagons'
+const FACE_KEY = 'hc:phone-face'
+
+function readFace(): PhoneFace {
+  try { return localStorage.getItem(FACE_KEY) === 'hexagons' ? 'hexagons' : 'list' } catch { return 'list' }
+}
 
 /** The element the registry mounts — it exists at the registry's order and
  *  tells the drone where it is. */
@@ -96,8 +102,16 @@ export class LayerListDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
 
   protected override deps = { lineage: '@hypercomb.social/Lineage' }
-  protected override listens = ['render:cell-count', MOBILE_MODE_EFFECT, 'view:active']
-  protected override emits = ['tile:enter-request', 'tile:view-open', 'layer:deck-open']
+  protected override listens = ['render:cell-count', MOBILE_MODE_EFFECT, 'view:active', 'phone:face-set']
+  protected override emits = ['tile:enter-request', 'tile:view-open', 'layer:deck-open', 'phone:face']
+
+  /** THE FACE — list or hexagons (the rails), one at a time, never both
+   *  (Jaime, 2026-09-09: "the lanes view should replace the list view when
+   *  you select it — a mutually exclusive selector"). A participant posture
+   *  like `hc:rails`, never tile truth. Published as `phone:face {face}`
+   *  (last-value replayed) so the deck's plates read the same fact; set
+   *  through `phone:face-set {face}` from anywhere. */
+  #face: PhoneFace = readFace()
 
   #registered = false
   #bound = false
@@ -138,7 +152,22 @@ export class LayerListDrone extends Drone {
       this.#pathOpen = false
       this.#render()
     })
+    this.onEffect<{ face?: string }>('phone:face-set', payload => {
+      this.setFace(payload?.face === 'hexagons' ? 'hexagons' : 'list')
+    })
+    EffectBus.emit('phone:face', { face: this.#face })
     window.addEventListener('navigate', this.#onNavigate)
+  }
+
+  /** Which face the phone reads the layer as. */
+  get face(): PhoneFace { return this.#face }
+
+  setFace(face: PhoneFace): void {
+    if (face === this.#face) return
+    this.#face = face
+    try { localStorage.setItem(FACE_KEY, face) } catch { /* posture only */ }
+    EffectBus.emit('phone:face', { face })
+    this.#sync()
   }
 
   /** Called by the element when the registry mounts it. */
@@ -153,7 +182,8 @@ export class LayerListDrone extends Drone {
 
   /** Is the list on screen? */
   get showing(): boolean {
-    return this.#mobile && !this.#viewActive && !!this.#element && this.#element.style.display !== 'none'
+    return this.#mobile && !this.#viewActive && this.#face === 'list'
+      && !!this.#element && this.#element.style.display !== 'none'
   }
 
   /** The rows as last read — the harness's and the spec's window. */
@@ -170,7 +200,7 @@ export class LayerListDrone extends Drone {
     if (!el) return
     const modes = window.ioc?.get?.<ModesShape>('@diamondcoreprocessor.com/ModeRegistry')
     const underView = this.#viewActive || modes?.isActive?.('view:active') === true
-    const show = this.#mobile && !underView
+    const show = this.#mobile && !underView && this.#face === 'list'
     if (!show) {
       el.style.display = 'none'
       el.replaceChildren()
@@ -200,16 +230,19 @@ export class LayerListDrone extends Drone {
 
   #render(): void {
     const el = this.#element
-    if (!el || !this.#mobile || this.#viewActive) return
+    if (!el || !this.#mobile || this.#viewActive || this.#face !== 'list') return
     installLayerListCss()
     const gen = ++this.#generation
     el.replaceChildren()
     el.style.display = 'flex'
     el.style.cssText +=
       // Under the revealed composer (the bar measures the header's bottom
-      // edge and removes the var while it is collapsed), above the bar.
-      'top:var(--hc-header-bottom,0px);left:0;right:0;' +
-      'bottom:max(var(--hc-controls-bottom,0px),env(safe-area-inset-bottom,0px));' +
+      // edge and removes the var while it is collapsed). To the very BOTTOM
+      // of the screen: the bar is glass over whatever is under it, and what
+      // is under it must be this list, not the hexagon canvas peeking
+      // through the band the discs sit in. The rows pad themselves clear of
+      // the bar instead (see the stylesheet).
+      'top:var(--hc-header-bottom,0px);left:0;right:0;bottom:0;' +
       'flex-direction:column;'
 
     const segments = this.#segments()
@@ -242,6 +275,28 @@ export class LayerListDrone extends Drone {
     more.addEventListener('click', () => EffectBus.emit('layer:deck-open', {}))
     bar.append(back, title, more)
     el.appendChild(bar)
+
+    // ── the face selector: list · hexagons, one at a time ──
+    const faces = document.createElement('div')
+    faces.dataset['role'] = 'list-faces'
+    faces.setAttribute('role', 'group')
+    for (const face of ['list', 'hexagons'] as const) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.dataset['action'] = `face:${face}`
+      b.className = 'hc-ll-face'
+      b.setAttribute('aria-pressed', String(face === this.#face))
+      const glyph = document.createElement('span')
+      glyph.className = 'mat-sym'
+      glyph.setAttribute('aria-hidden', 'true')
+      glyph.textContent = face === 'list' ? 'view_list' : 'hexagon'
+      const word = document.createElement('span')
+      word.textContent = this.#t(`layer-list.face-${face}`, face)
+      b.append(glyph, word)
+      b.addEventListener('click', () => this.setFace(face))
+      faces.appendChild(b)
+    }
+    el.appendChild(faces)
 
     // ── the path, root → here, dropped under the title ──
     if (this.#pathOpen) {
@@ -282,8 +337,23 @@ export class LayerListDrone extends Drone {
     } else {
       const pictures = this.#pictureSigs()
       for (const row of this.#rows) list.appendChild(this.#rowEl(row, pictures.get(row.label), gen))
+      // The renderer resolves pictures AFTER it announces the cells (props
+      // arrive, the atlas paints, no second announcement follows). Look
+      // again once it has had a moment, and fill any thumbnail still bare.
+      setTimeout(() => this.#refreshPictures(gen), 1500)
     }
     el.appendChild(list)
+  }
+
+  #refreshPictures(gen: number): void {
+    if (gen !== this.#generation || !this.#element) return
+    const pictures = this.#pictureSigs()
+    for (const row of this.#element.querySelectorAll<HTMLElement>('[data-role="list-row"]')) {
+      const thumb = row.querySelector<HTMLElement>('.hc-ll-hex')
+      if (!thumb || thumb.querySelector('img')) continue
+      const sig = pictures.get(row.dataset['label'] ?? '')
+      if (sig) this.#paint(thumb, sig)
+    }
   }
 
   #rowEl(row: Row, imageSig: string | undefined, gen: number): HTMLElement {
@@ -433,10 +503,16 @@ ${S} [data-role="list-title"]{flex:0 0 auto;display:grid;grid-template-columns:2
 ${S} .hc-ll-glyph{appearance:none;border:0;background:none;color:rgba(var(--hc-chrome-accent,20,96,180),0.95);font:inherit;font-size:1.6rem;line-height:1;min-height:2.75rem;cursor:pointer;}
 ${S} .hc-ll-glyph:disabled{opacity:0.28;}
 ${S} .hc-ll-title{appearance:none;border:0;background:none;color:inherit;font:inherit;font-weight:600;font-size:1.05rem;min-height:2.75rem;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;}
+${S} [data-role="list-faces"]{flex:0 0 auto;display:flex;justify-content:center;gap:0;padding:0.35rem 0;border-bottom:1px solid rgba(var(--hc-chrome-rule,62,74,94),0.16);}
+${S} .hc-ll-face{appearance:none;border:1px solid rgba(var(--hc-chrome-rule,62,74,94),0.34);background:none;color:rgba(var(--hc-chrome-ink,26,33,48),var(--hc-ink-a-quiet,0.62));font:inherit;font-size:0.8rem;display:inline-flex;align-items:center;gap:0.3rem;min-height:2rem;padding:0 0.8rem;cursor:pointer;}
+${S} .hc-ll-face .mat-sym{font-size:1.1rem;line-height:1;}
+${S} .hc-ll-face:first-child{border-radius:var(--hc-radius-floating,4px) 0 0 var(--hc-radius-floating,4px);border-right:0;}
+${S} .hc-ll-face:last-child{border-radius:0 var(--hc-radius-floating,4px) var(--hc-radius-floating,4px) 0;}
+${S} .hc-ll-face[aria-pressed="true"]{background:rgba(var(--hc-chrome-accent,20,96,180),0.95);color:rgb(var(--hc-chrome-glass,250,251,253));border-color:transparent;}
 ${S} [data-role="list-path"]{flex:0 0 auto;display:flex;flex-direction:column;border-bottom:1px solid rgba(var(--hc-chrome-rule,62,74,94),0.22);background:rgba(var(--hc-chrome-rule,62,74,94),0.06);}
 ${S} .hc-ll-crumb{appearance:none;border:0;background:none;color:inherit;font:inherit;text-align:left;min-height:2.6rem;padding-right:0.9rem;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 ${S} .hc-ll-crumb[aria-current]{font-weight:600;color:rgba(var(--hc-chrome-accent,20,96,180),0.95);}
-${S} [data-role="list-rows"]{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;padding-bottom:0.5rem;}
+${S} [data-role="list-rows"]{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;padding-bottom:calc(max(var(--hc-controls-bottom,0px),env(safe-area-inset-bottom,0px)) + 1.6rem);}
 ${S} .hc-ll-row{appearance:none;border:0;border-bottom:1px solid rgba(var(--hc-chrome-rule,62,74,94),0.16);background:none;color:inherit;font:inherit;width:100%;display:grid;grid-template-columns:2.9rem 1fr auto;align-items:center;gap:0.65rem;min-height:${ROW_HEIGHT};padding:0.35rem 0.9rem 0.35rem 0.75rem;text-align:left;cursor:pointer;}
 ${S} .hc-ll-row:active{background:rgba(var(--hc-chrome-accent,20,96,180),0.08);}
 ${S} .hc-ll-row.is-dim{opacity:0.42;}
@@ -446,7 +522,7 @@ ${S} .hc-ll-text{min-width:0;display:flex;flex-direction:column;justify-content:
 ${S} .hc-ll-name{display:block;font-weight:600;font-size:1rem;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 ${S} .hc-ll-sub{display:block;font-size:0.8rem;line-height:1.25;color:rgba(var(--hc-chrome-ink,26,33,48),var(--hc-ink-a-quiet,0.62));overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-height:1em;}
 ${S} .hc-ll-tail{font-size:1.5rem;line-height:1;color:rgba(var(--hc-chrome-accent,20,96,180),0.9);}
-${S} [data-role="list-empty"]{padding:2.5rem 1.4rem;text-align:center;}
+${S} [data-role="list-empty"]{padding:2.5rem 1.4rem calc(2.5rem + max(var(--hc-controls-bottom,0px),env(safe-area-inset-bottom,0px)));text-align:center;}
 ${S} [data-role="list-empty"] p{margin:0 0 0.5rem;}
 ${S} .hc-ll-hint{color:rgba(var(--hc-chrome-ink,26,33,48),var(--hc-ink-a-quiet,0.62));font-size:0.9rem;}
 `

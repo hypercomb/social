@@ -1,9 +1,25 @@
 # Mobile, one column — the phone reads a layer as a list, and does three things
 
-Status: **PASS 1 BUILT, 2026-09-09** (see §6 — live on dev-4254 at
+Status: **PASSES 1 + 2 BUILT, 2026-09-09** (see §6 — live on dev-4254 at
 375×812: the list, Back · Add · More, leaf tap → tile page, the toast,
-share + swarm on the deck, first-boot lands inside the seeded hive).
-Passes 2–3 designed, not built. Supersedes the phone's *reading surface*
+share + swarm on the deck, first-boot lands inside the seeded hive; the
+ADD SHEET with its five doors; More re-worded "this page"; and — pulled
+forward from pass 3 at Jaime's ask — **list · hexagons as ONE selector**:
+choosing the hexagons (the lanes) puts the list away, and the deck's
+`list` plate is the way back; `hc:phone-face`, published as `phone:face`,
+set through `phone:face-set`). Pass 3 (hold → hexagon → swipe, reorder,
+Add inside, row ⋯) designed, not built.
+
+**Pass 2 lives in** `presentation/tiles/add-sheet.drone.ts`
+(`hc-add-sheet`, order 710, z 100003, spec `add-sheet.spec.ts`): name it →
+`command:create-cells` (the create queen's door — NOT the command line's
+stance-dependent submit, where a bare word became `/word`), reserved
+words refused in place; URL → `link:intake`; `/x` → `command:submit` (a
+new command-line door that runs `#submitAsEnter`); camera →
+`camera:capture-open`; library → `ImagePasteWorker.createTileFromImage`;
+paste a link → the clipboard inside the tap; say it → `VoiceInputService`
+with the interim words in the field. It reports `add:sheet-state` so the
+bar's disc is lit while it is up, and closes the deck as it opens. Supersedes the phone's *reading surface*
 in `mobile-rails-projection.md` (the rails). Everything else that doc
 built — the sheets, the app-deck plate language, `link:intake`,
 `deliver-link`, one definition of mobile, hardware BACK — stays and is

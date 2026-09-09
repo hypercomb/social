@@ -2237,6 +2237,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       if (this.#stance() !== 'find') this.#setShellValue('', false)
     })
 
+    // A LINE HANDED IN FROM ANOTHER SURFACE — the phone's Add sheet — is
+    // submitted exactly as Enter submits a typed one: URL → link intake,
+    // `/` → the slash pipeline, a bare word → create (with the reserved-word
+    // refusal). One executor, so the sheet never grows a second parser.
+    this.#commandSubmitUnsub = EffectBus.on<{ text?: string }>('command:submit', ({ text }) => {
+      const line = String(text ?? '').trim()
+      if (line) this.#submitAsEnter(line)
+    })
+
     // remote bridge submit (Claude CLI, future /transcript) — the Common
     // Tongue first, then the same tag/slash pipeline a keystroke falls back
     // to. See claude-bridge.worker.ts.
@@ -2622,6 +2631,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #selectionSyncUnsub?: () => void
   #voiceInterimUnsub?: () => void
   #voiceSubmitUnsub?: () => void
+  #commandSubmitUnsub?: () => void
   #remoteSubmitUnsub?: () => void
   // Location segments (bracket stripped) at the last navigate event.
   #lastNavKey = ''
@@ -2731,6 +2741,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#selectionSyncUnsub?.()
     this.#voiceInterimUnsub?.()
     this.#voiceSubmitUnsub?.()
+    this.#commandSubmitUnsub?.()
     this.#remoteSubmitUnsub?.()
     this.#voiceActiveUnsub?.()
     this.#pushToTalkUnsub?.()

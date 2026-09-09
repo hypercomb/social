@@ -163,3 +163,20 @@ describe('the title bar', () => {
     expect(out.deck).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('the face', () => {
+  it('list and hexagons are one selector: choosing the hexagons puts the list away, and it publishes the face', () => {
+    const faces = vi.fn()
+    const off = EffectBus.on('phone:face', faces)
+    expect(action('face:list').getAttribute('aria-pressed')).toBe('true')
+    action('face:hexagons').click()
+    expect(faces).toHaveBeenLastCalledWith({ face: 'hexagons' })
+    expect(drone.showing).toBe(false)
+    expect(el.querySelector('[data-role="list-row"]')).toBeNull()
+    EffectBus.emit('phone:face-set', { face: 'list' })
+    expect(faces).toHaveBeenLastCalledWith({ face: 'list' })
+    expect(drone.showing).toBe(true)
+    expect(action('face:list').getAttribute('aria-pressed')).toBe('true')
+    off()
+  })
+})

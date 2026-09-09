@@ -21,10 +21,9 @@
 //   add here  — what `VisualBeeRegistry.forPlatform('mobile')` offers as an
 //               ATTACHABLE behaviour this layer does not yet carry; a tap is
 //               `feature:apply` at the current lineage — the same write the
-//               Beehaviors panel and `name@view` make. Plus the CAMERA and the
-//               LIBRARY: a feed can be FILLED from the phone's photo library,
-//               not only from the live camera, through the same
-//               `createTileFromImage` seam the shutter uses.
+//               Beehaviors panel and `name@view` make. (The camera and the
+//               library lived here until the ADD SHEET — add-sheet.drone.ts,
+//               the bar's Add disc — took every make-a-tile door.)
 //   see       — the lane rung (3 / 2 / 1, a lens, never a commit), fullscreen
 //               where the platform has it (iPhone has no element fullscreen;
 //               an inert button is worse than none), pheromones, and UNDO ·
@@ -67,7 +66,6 @@ const LANES_DEFAULT = 2
 type ViewToggle = { view: string; icon?: string; label?: string; active?: boolean; isDefault?: boolean }
 type Lanes = { active?: boolean; lanes?: number }
 type LineageShape = { explorerSegments?: () => readonly string[] }
-type ImagePasteShape = { createTileFromImage?: (blob: Blob) => Promise<void> }
 type ModesShape = { isActive?: (mode: string) => boolean }
 
 /** The element the registry mounts. Its whole job is to exist in the DOM at
@@ -90,12 +88,14 @@ export class LayerDeckDrone extends Drone {
   protected override deps = { lineage: '@hypercomb.social/Lineage' }
   protected override listens = [
     'layer:deck-open', 'layer:deck-close', 'view-toggles:changed', 'lanes:changed',
-    MOBILE_MODE_EFFECT, 'view:active', 'mesh:public-changed',
+    MOBILE_MODE_EFFECT, 'view:active', 'mesh:public-changed', 'phone:face',
   ]
+  /** The phone's face — list or hexagons — as the list surface publishes it. */
+  #face: 'list' | 'hexagons' = 'list'
   protected override emits = [
-    'view:toggle', 'feature:apply', 'camera:capture-open', 'tags:view-open',
+    'view:toggle', 'feature:apply', 'tags:view-open',
     'keymap:invoke', 'lanes:step', 'lanes:set', 'viewport:pin-toggle',
-    'publish:view-toggle', 'mesh:open-modal', 'mesh:leave',
+    'publish:view-toggle', 'mesh:open-modal', 'mesh:leave', 'phone:face-set',
   ]
   /** The swarm switch's reading — the shell's `mesh:public-changed` replay. */
   #meshPublic = false
@@ -108,7 +108,6 @@ export class LayerDeckDrone extends Drone {
   #historyTrap = false
   #toggles: ViewToggle[] = []
   #lanes: Lanes = {}
-  #fileInput: HTMLInputElement | null = null
   #resizeQueued = false
 
   protected override heartbeat = async (): Promise<void> => {
@@ -139,6 +138,10 @@ export class LayerDeckDrone extends Drone {
     })
     this.onEffect<{ public?: boolean }>('mesh:public-changed', payload => {
       this.#meshPublic = payload?.public === true
+      if (this.#open) this.#render()
+    })
+    this.onEffect<{ face?: string }>('phone:face', payload => {
+      this.#face = payload?.face === 'hexagons' ? 'hexagons' : 'list'
       if (this.#open) this.#render()
     })
     // The phone stopped being a phone (`/mobile off`, a resize past the
@@ -364,23 +367,9 @@ export class LayerDeckDrone extends Drone {
         })
       }
     }
-    chips.push({
-      action: 'camera',
-      glyph: 'photo_camera',
-      labelKey: 'layer-deck.camera',
-      fallback: 'camera',
-      run: () => {
-        this.close()
-        EffectBus.emit('camera:capture-open', {})
-      },
-    })
-    chips.push({
-      action: 'library',
-      glyph: 'add_photo_alternate',
-      labelKey: 'layer-deck.library',
-      fallback: 'library',
-      run: () => this.#pickFromLibrary(),
-    })
+    // The camera and the library left this group for the ADD SHEET
+    // (add-sheet.drone.ts, the bar's Add disc) — making a tile is Add's
+    // act; this sheet is about how the page is seen and what it carries.
     return chips
   }
 
@@ -388,13 +377,35 @@ export class LayerDeckDrone extends Drone {
   #seeChips(): AppChip[] {
     const chips: AppChip[] = []
     const lanes = Number(this.#lanes.lanes) || LANES_DEFAULT
+    // LIST · LANES — one face at a time. From the list, the lanes plate IS
+    // the selector: it takes the phone to the hexagons and puts the list
+    // away. On the hexagons it walks the rung, and a LIST plate stands
+    // beside it as the way back. Never both faces on screen.
+    if (this.#face === 'hexagons') {
+      chips.push({
+        action: 'list',
+        glyph: 'view_list',
+        labelKey: 'layer-deck.list',
+        fallback: 'list',
+        run: () => {
+          this.close()
+          EffectBus.emit('phone:face-set', { face: 'list' })
+        },
+      })
+    }
     chips.push({
       action: 'lanes',
       glyph: 'view_column',
       badge: String(lanes),
       labelKey: 'layer-deck.lanes',
       fallback: 'lanes',
+      accent: this.#face === 'hexagons',
       run: () => {
+        if (this.#face !== 'hexagons') {
+          this.close()
+          EffectBus.emit('phone:face-set', { face: 'hexagons' })
+          return
+        }
         // 3 → 2 → 1 → 3. The projection publishes `lanes:changed` and the
         // sheet re-renders with the new digit; it stays up so the rung can
         // be walked without reopening.
@@ -491,49 +502,6 @@ export class LayerDeckDrone extends Drone {
       labelKey: 'layer-deck.close',
       fallback: 'close',
       run: () => this.close(),
-    }
-  }
-
-  // ── the library ────────────────────────────────────────────
-
-  /** A hidden file input, made once, clicked from the plate's own tap (the
-   *  gesture a browser requires). Every picked image goes through the same
-   *  seam the camera shutter uses, one after another. */
-  #pickFromLibrary(): void {
-    let input = this.#fileInput
-    if (!input || !input.isConnected) {
-      input = document.createElement('input')
-      input.type = 'file'
-      input.accept = 'image/*,video/*'
-      input.multiple = true
-      input.setAttribute('data-hc-layer-deck-library', '')
-      input.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;'
-      input.addEventListener('change', () => {
-        const files = Array.from(input!.files ?? [])
-        input!.value = ''
-        this.close()
-        void this.#intake(files)
-      })
-      document.body.appendChild(input)
-      this.#fileInput = input
-    }
-    input.click()
-  }
-
-  async #intake(files: File[]): Promise<void> {
-    const paste = window.ioc?.get?.<ImagePasteShape>('@diamondcoreprocessor.com/ImagePasteWorker')
-    if (!paste?.createTileFromImage) return
-    for (const file of files) {
-      // The seam is the image editor's: it decodes what it is handed. A video
-      // is accepted by the picker so a mixed selection is not refused at the
-      // door, but it has no tile-making path here yet — skipped, said once.
-      if (!file.type.startsWith('image/')) {
-        console.warn('[layer-deck] library: no tile path for', file.type, file.name)
-        continue
-      }
-      try { await paste.createTileFromImage(file) } catch (err) {
-        console.warn('[layer-deck] library: could not make a tile from', file.name, err)
-      }
     }
   }
 
