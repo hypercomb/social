@@ -2108,7 +2108,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }
     })
 
-    this.#viewActiveUnsub = EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {
+    this.#viewActiveUnsub = EffectBus.on<{ active: boolean }>('view:shell-hidden', ({ active }) => {
+      if (active === this.viewActive()) return
       this.viewActive.set(active)
       // A SURFACE HANDOVER QUIETS THE LINE (Jaime: "it should wait for me to
       // type"). A staged, uncommitted command — a tile action's composed
@@ -2128,10 +2129,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }
     })
 
-    // Mobile input visibility — on desktop and PORTRAIT phones the command
-    // line is always visible (portrait pins it as the top prompt surface);
-    // only LANDSCAPE phones collapse it, revealed by the sidebar keyboard
-    // toggle / mic / long-press. `focus: false` marks sync-driven
+    // Mobile input visibility — on a phone (either orientation) the command
+    // line is COLLAPSED until asked for: the bar's Add disc, the mic and the
+    // long-press reveal it, GO collapses it again (mobile-one-column.md —
+    // the composer is the Add sheet's field, not a pinned strip over the
+    // list). Desktop always shows it. `focus: false` marks sync-driven
     // emissions (media-query changes, boot) that must not steal focus or
     // pop the soft keyboard; user-gesture emitters omit it and get focus.
     this.#mobileVisibilityUnsub = EffectBus.on<{ visible: boolean; mobile: boolean; focus?: boolean }>(
@@ -2642,20 +2644,20 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return get('@hypercomb.social/VoiceInputService') as VoiceInputService | undefined
   }
 
-  /** Mobile "GO" button: submit the text. Portrait pins the command line
-   * so GO never collapses it there (the bar stays ready for the next
-   * command); landscape collapses back to the sidebar's keyboard toggle. */
+  /** Mobile "GO" button: submit the text and collapse the composer back
+   * under the bar's Add disc — on a phone the command line is a sheet you
+   * ask for, not a strip that stays. The one definition of a phone is the
+   * `data-hc-mobile` stamp MobileModeService leaves on <html> (so
+   * `/mobile on|off` is honoured); the media query is only the seed before
+   * the stamp lands. */
   readonly closeMobileInput = (): void => {
     const v = this.value().trim()
     if (v) {
       void this.#preprocessTagsThenExecute(this.value())
     }
-    // Landscape phones are WIDE but SHORT. Width-based detection on
-    // purpose: the soft keyboard shrinks only the HEIGHT, so a portrait
-    // phone mid-typing can pseudo-flip orientation queries but never
-    // exceeds 599px width — this predicate cannot misread it.
-    const landscapePhone = window.innerWidth > 599 && window.innerHeight <= 449
-    if (landscapePhone) {
+    const stamped = document.documentElement.getAttribute('data-hc-mobile')
+    const phone = stamped ? stamped === 'on' : this.isMobile()
+    if (phone) {
       EffectBus.emit('mobile:input-visible', { visible: false, mobile: true })
     }
   }
@@ -2668,9 +2670,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // The mic is a VOICE control only — it NEVER hides the command line.
   // (Hiding on release was the "tap the mic and the command line flashes
   // away" bug: a relaxed tap crossed the hold threshold and the release
-  // handler collapsed the bar it had just opened. Portrait now pins the
-  // bar permanently; landscape collapses only via GO / the keyboard
-  // toggle.)
+  // handler collapsed the bar it had just opened. Only GO and the bar's
+  // Add disc move the bar's visibility on a phone.)
   //   Tap while idle:      start listening (toggle on).
   //   Tap while listening: stop — VoiceInputService emits voice:submit,
   //                        which executes the dictated text.

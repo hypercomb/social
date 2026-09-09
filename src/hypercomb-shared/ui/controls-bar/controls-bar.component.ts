@@ -237,6 +237,10 @@ function overridesOf(map: Record<string, boolean>): Record<string, boolean> {
   imports: [TranslatePipe],
   templateUrl: './controls-bar.component.html',
   styleUrls: ['./controls-bar.component.scss'],
+  host: {
+    '[style.visibility]': 'viewHidden() ? "hidden" : null',
+    '[attr.inert]': 'viewHidden() ? "" : null',
+  },
 })
 export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
@@ -366,42 +370,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  viewport at all. Published by SequenceCycleDrone on `lanes:changed`. */
   readonly laneCount = signal(2)
   readonly lanesActive = signal(false)
-  /** The icon rows above the bar (right of the rail in landscape). Five to a
-   *  row, and it WRAPS — a sixth control starts a second row above the first,
-   *  so the stack grows up from the bar and the bottom row never squeezes. */
-  readonly viewRowOpen = signal(false)
-  /** Controls currently in the row. Five per row; the lift below follows it, so
-   *  adding a control here is the whole change — nothing else measures. */
-  readonly #viewRowCount = 4
-  /** How far anything floating above the bar must lift to clear the view row.
-   *  Published as a CSS variable so body-appended chrome (the select pill)
-   *  moves with it without a second event contract. One row is 4.6rem; each
-   *  further row adds its own height plus the gap. */
-  #setViewRowLift = (open: boolean): void => {
-    const rows = Math.max(1, Math.ceil(this.#viewRowCount / 5))
-    const lift = open ? `${(4.6 + (rows - 1) * 3.4).toFixed(2)}rem` : '0px'
-    document.documentElement.style.setProperty('--hc-mobile-row-lift', lift)
-  }
-  #viewRowAway = (event: Event): void => {
-    if (!this.viewRowOpen()) return
-    const target = event.target as HTMLElement | null
-    // The row itself and the button that opened it own their own taps.
-    if (target?.closest?.('.mobile-view-row, .view-row-btn')) return
-    this.closeViewRow()
-  }
-  readonly toggleViewRow = (event?: Event): void => {
-    event?.stopPropagation?.()
-    const next = !this.viewRowOpen()
-    this.viewRowOpen.set(next)
-    this.#setViewRowLift(next)
-    EffectBus.emit('mobile:view-row', { open: next })
-  }
-  readonly closeViewRow = (): void => {
-    if (!this.viewRowOpen()) return
-    this.viewRowOpen.set(false)
-    this.#setViewRowLift(false)
-    EffectBus.emit('mobile:view-row', { open: false })
-  }
   /** Rotate the grid: point-top ⇄ flat-top. In lane mode the lanes own the
    *  orientation (they turn with the device), so this is the manual override
    *  for the free viewport. */
@@ -436,11 +404,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#syncInputVisibility()
   }
   #syncInputVisibility = (): void => {
-    // Desktop AND portrait phones always show the command line — portrait
-    // pins it as the top prompt surface. Only landscape phones collapse
-    // it; the sidebar's keyboard button reveals it on demand.
+    // Desktop always shows the command line. A PHONE collapses it in either
+    // orientation — the bar's Add disc reveals it on demand (the composer is
+    // a sheet you ask for, not a strip over the list: mobile-one-column.md,
+    // superseding the 2026-07-28 portrait pin).
     // `focus: false` — a sync must never steal focus or pop the keyboard.
-    if (this.isMobile() && this.isLandscape()) {
+    if (this.isMobile()) {
       // Never collapse an input the user is actively typing in. The soft
       // keyboard's viewport resize can flip the (orientation)/(max-height)
       // queries mid-type — collapsing on that flip yanked the command line
@@ -457,14 +426,18 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       EffectBus.emit('mobile:input-visible', { visible: true, mobile: this.isMobile(), focus: false })
     }
   }
-  /** Landscape sidebar keyboard button: reveal ⇄ collapse the command
-   * line. Revealing omits `focus` so the shell focuses and the native
-   * keyboard rises inside the user gesture. */
+  /** Reveal ⇄ collapse the command line on a phone. Revealing omits
+   * `focus` so the shell focuses and the native keyboard rises inside the
+   * user gesture. */
   readonly toggleInput = (): void => {
     const next = !this.inputVisible()
     this.inputVisible.set(next)
     EffectBus.emit('mobile:input-visible', { visible: next, mobile: this.isMobile() })
   }
+  /** ADD — the phone bar's centre disc. Until the Add sheet folds the
+   * camera, the library and the link pipeline in (pass 2), adding is
+   * naming: the composer rises with the keyboard; Enter adds. */
+  readonly toggleAdd = (): void => { this.toggleInput() }
   // The bar is not the only emitter — GO, the mic reveal, the tutorial and
   // the empty-hex long-press all move visibility on the same effect. Mirror
   // every emission into the signal so the keyboard button's lit state stays
@@ -1051,8 +1024,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #touchDragging = signal(false)
   #viewActiveUnsub: (() => void) | null = null
   #viewActive = signal(false)
-  #keepsControlsUnsub: (() => void) | null = null
-  #keepsControls = signal(false)
+  #controlsHiddenUnsub: (() => void) | null = null
+  #controlsHidden = signal(false)
   readonly #IDLE_DELAY = 3000
 
   // ── swipe-to-go-back gesture ────────────────────────────
@@ -1418,22 +1391,16 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // long as a conversation was open, and left only the bar's own edge line
   // showing — a stray rule down the side of the window with nothing beside it.
   //
-  // So the view says which kind it is, by holding `view:keeps-controls`
-  // (owner-counted, same as `view:active`). Nothing here knows any window's
-  // name; a view that leaves room keeps the bar, and any that does not still
-  // takes the screen whole.
+  // The registry combines each view's `view:keeps-controls` or
+  // `view:keeps-shell` claim. A covering view that reserves neither edge
+  // hides the bar even when another view underneath keeps its controls.
   readonly visible = computed(() =>
-    !this.#touchDragging() && (!this.#viewActive() || this.#keepsControls()))
+    !this.#touchDragging() && !this.#controlsHidden())
 
-  /** THE BAR HIDES UNDER A VIEW ON A PHONE. `.faded` only DIMS (and is put
-   *  back to full opacity on touch, where it stood for the idle fade that has
-   *  no hover to recover from), so on a phone the bar stayed painted and
-   *  tappable at z 60000 over every takeover — the close-up, the slides — at
-   *  59988–59990, with its discs live on top of somebody's page. A view that
-   *  holds `view:keeps-controls` has laid itself out beside the bar and keeps
-   *  it. */
-  readonly viewHidden = computed(() =>
-    this.isMobile() && this.#viewActive() && !this.#keepsControls())
+  /** A clean view hides all bar-owned chrome, including breadcrumbs and the
+   *  agent toggle. Visibility preserves measured edge reservations; inert
+   *  also removes the hidden controls and flyouts from keyboard interaction. */
+  readonly viewHidden = this.#controlsHidden.asReadonly()
 
   /** Kept on screen WHILE a view covers the canvas — the bar is standing beside
    *  a window that reserved its edge, not on the bare hive. Its own band
@@ -1442,7 +1409,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  and pressable, but anything it opens anchored to itself would render
    *  behind the very window it is standing beside. Lifted only for as long as
    *  that is true. */
-  readonly overView = computed(() => this.#viewActive() && this.#keepsControls())
+  readonly overView = computed(() => this.#viewActive() && !this.#controlsHidden())
   readonly roomOpen = this.#roomOpen.asReadonly()
   readonly beesVisible = this.#beesVisible.asReadonly()
   readonly agentsVisible = this.#agentsVisible.asReadonly()
@@ -1473,6 +1440,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #meshModalUnsub: (() => void) | null = null
   #lanesUnsub: (() => void) | null = null
   #meshJoinUnsub: (() => void) | null = null
+  #meshLeaveUnsub: (() => void) | null = null
   #swarmZoneUnsub: (() => void) | null = null
   #lockBumpUnsub: (() => void) | null = null
   #iconEditUnsub: (() => void) | null = null
@@ -1548,6 +1516,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
     // The location dialog's "start" confirmed (join mode) — flip to public
     // now that the where/secret are set. Idempotent: already public → no-op.
+    // The way OUT of the swarm from anywhere that is not this bar (the phone's
+    // layer deck carries the swarm plate now that the solo/swarm disc is
+    // gone): the flip itself lives in the shell behind `meshToggled`, and
+    // this is its one effect-shaped door toward private.
+    this.#meshLeaveUnsub = EffectBus.on('mesh:leave', () => {
+      if (this.meshPublic()) this.meshToggled.emit()
+    })
     this.#meshJoinUnsub = EffectBus.on('mesh:join', () => {
       if (!this.meshPublic()) this.meshToggled.emit()
     })
@@ -1604,10 +1579,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     window.addEventListener('resize', this.#onResize)
     window.addEventListener('pointermove', this.#onActivity)
     window.addEventListener('pointerdown', this.#onActivity)
-    // Capture phase: a tap on the canvas is consumed by the renderer's own
-    // handlers, so a bubbling listener would never see it and the row would
-    // only ever close from its own button.
-    window.addEventListener('pointerdown', this.#viewRowAway, true)
     window.addEventListener('keydown', this.#onActivity)
     window.addEventListener('navigate', this.#onActivity)
     this.#resetIdleTimer()
@@ -1702,8 +1673,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       this.#viewActive.set(active)
     })
 
-    this.#keepsControlsUnsub = EffectBus.on<{ active: boolean }>('view:keeps-controls', ({ active }) => {
-      this.#keepsControls.set(active)
+    this.#controlsHiddenUnsub = EffectBus.on<{ active: boolean }>('view:controls-hidden', ({ active }) => {
+      this.#controlsHidden.set(active)
     })
 
     this.#tagsUnsub = EffectBus.on<{ tags: { name: string; count: number }[] }>('render:tags', ({ tags }) => {
@@ -2045,7 +2016,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     window.removeEventListener('pointermove', this.#onPillDragMove)
     window.removeEventListener('pointerup', this.#onPillDragEnd)
     if (this.#idleTimer) clearTimeout(this.#idleTimer)
-    window.removeEventListener('pointerdown', this.#viewRowAway, true)
     this.#fitLockedUnsub?.()
     this.#lanesUnsub?.()
     this.#zoomManualUnsub?.()
@@ -2057,7 +2027,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#layoutModeUnsub?.()
     this.#touchDraggingUnsub?.()
     this.#viewActiveUnsub?.()
-    this.#keepsControlsUnsub?.()
+    this.#controlsHiddenUnsub?.()
     this.#beesUnsub?.()
     this.#voiceActiveUnsub?.()
     this.#showHiddenUnsub?.()
@@ -2071,6 +2041,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#hoverTagsUnsub?.()
     this.#meshModalUnsub?.()
     this.#meshJoinUnsub?.()
+    this.#meshLeaveUnsub?.()
     this.#swarmZoneUnsub?.()
     this.#lockBumpUnsub?.()
     this.#iconEditUnsub?.()

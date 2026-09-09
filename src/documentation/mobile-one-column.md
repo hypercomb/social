@@ -1,9 +1,26 @@
 # Mobile, one column — the phone reads a layer as a list, and does three things
 
-Status: DESIGN, 2026-09-09. Supersedes the phone's *reading surface* in
-`mobile-rails-projection.md` (the rails). Everything else that doc built —
-the sheets, the app-deck plate language, `link:intake`, `deliver-link`,
-one definition of mobile, hardware BACK — stays and is reused here.
+Status: **PASS 1 BUILT, 2026-09-09** (see §6 — live on dev-4254 at
+375×812: the list, Back · Add · More, leaf tap → tile page, the toast,
+share + swarm on the deck, first-boot lands inside the seeded hive).
+Passes 2–3 designed, not built. Supersedes the phone's *reading surface*
+in `mobile-rails-projection.md` (the rails). Everything else that doc
+built — the sheets, the app-deck plate language, `link:intake`,
+`deliver-link`, one definition of mobile, hardware BACK — stays and is
+reused here.
+
+**Where pass 1 lives:** `presentation/tiles/layer-list.drone.ts`
+(`hc-layer-list`, shell surface order 300, z 59990 — level with the
+close-up, over the Pixi host; spec `layer-list.spec.ts`);
+`controls-bar` mobile block (three discs; the composer collapses in both
+orientations, Add reveals it with focus, GO collapses it);
+`_header-bar.scss` phone block (`.header-bar{display:none}` +
+`.input-open`); `activity-log` (`isMobile` → newest-only, 4 s,
+`:host-context([data-hc-mobile='on'])`); `layer-deck` (share + swarm
+plates; `mesh:leave` is the shell's new effect-door toward private, in
+`controls-bar`); `example-hives.worker` (phone → `goRaw([name])` after a
+committed adopt). Pass 1's Add is the composer: naming only — the camera,
+library and link doors stay on the deck until the Add sheet (pass 2).
 
 ## 0. The verdict on the hexagons
 

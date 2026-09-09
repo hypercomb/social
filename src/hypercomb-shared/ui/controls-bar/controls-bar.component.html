@@ -272,73 +272,21 @@
     @case ('browsing') {
 
       @if (isMobile()) {
-        <!-- ═══ MOBILE: five labelled discs, fixed centre ═══
-             back · views │ CAMERA │ share · solo/swarm.
-             The centre button is the anchor, and on a phone the act that
-             belongs under the thumb is CAPTURE: point at something, press,
-             and a tile is created from the photo. VIEWS opens the layer deck
-             — big plates for this layer's views, what can be added here, and
-             the how-you-see controls (rung, fullscreen, pheromones, pin,
-             undo/redo, library) that used to hide one tap away behind an
-             unlabeled chevron. SHARE opens the publish sheet for this page.
-             FIT left the bar: the rails own the fit on a phone, and a fit
-             disc that double-tapped into "always fit" with no cue was a trap.
-             Every disc carries a word under it (`.ctl-label`) — five glyphs
-             alone read as five abstract marks — and every button is evenly
-             spaced across the bar, so the extra landscape control never
-             bunches one side. -->
+        <!-- ═══ MOBILE: three labelled discs ═══
+             BACK · ADD · MORE (documentation/mobile-one-column.md). The phone
+             reads a layer as a LIST (hc-layer-list, an essentials surface);
+             the bar under it does three things and every disc carries its
+             word. ADD reveals the composer — the command line, collapsed on a
+             phone until asked for — with focus so the keyboard rises inside
+             the tap; the camera, the library and the link pipeline are the
+             deck's plates until the Add sheet folds them in (pass 2). MORE
+             opens the layer deck: open as, add here, and the how-you-see
+             controls, plus share and swarm. Five discs (back · views ·
+             camera · share · solo) became these three: nothing was deleted,
+             it moved off the primary screen. The side groups survive as DOM
+             grouping only (they carry the landscape order remap). -->
 
         <div class="controls-section mobile-nav">
-          <!-- VIEW ROW — a second five-icon row that pops ABOVE the bar (to
-               its right in landscape) instead of squeezing the bottom row.
-               Everything here changes HOW you see: fullscreen, the lane
-               ladder, the hex rotation, the other arrangements, pheromones.
-               Out of flow, so the bottom row keeps its five-slot rhythm and
-               the camera stays dead centre. Closes on its own button or a
-               tap anywhere else; while it is up, the select pill lifts by
-               --hc-mobile-row-lift so nothing is covered. -->
-          @if (viewRowOpen()) {
-            <div class="mobile-view-row" data-consumes-wheel>
-              <button class="ctl-btn fullscreen-btn" [class.active]="isFullscreen()"
-                      (click)="toggleFullscreen()"
-                      [attr.aria-label]="'controls.fullscreen' | t">
-                <span class="mat-sym">{{ isFullscreen() ? 'fullscreen_exit' : 'fullscreen' }}</span>
-              </button>
-              <!-- LANES — the phone's zoom. Tap walks 3 → 2 → 1 and wraps:
-                   fewer lanes means wider hexagons, a bigger name, a bigger
-                   picture, notes you can actually read. The digit IS the
-                   readout. Long-press releases the lane viewport. -->
-              <button class="ctl-btn lanes-btn" [class.active]="lanesActive()"
-                      (click)="stepLanes()"
-                      (contextmenu)="releaseLanes(); $event.preventDefault()"
-                      [attr.aria-label]="'controls.lanes' | t">
-                <span class="mat-sym">view_column</span>
-                <span class="lane-digit" aria-hidden="true">{{ laneCount() }}</span>
-              </button>
-              <!-- ROTATE and ARRANGE left this row with the rails: the rail
-                   owns the hex orientation (point-top strip in portrait,
-                   flat-top in landscape, turning with the device), and a
-                   pattern order is meaningless in a feed. Both remain
-                   keyboard commands and desktop rail controls. -->
-              <button class="ctl-btn pheromone-btn" (click)="openPheromones()"
-                      [attr.aria-label]="'tags.panel.open' | t">
-                <span class="mat-sym">label</span>
-              </button>
-              <!-- PIN — the sixth control, and therefore the first on a second
-                   row. It had no mobile affordance at all: a pinned layer holds
-                   the InputGate, so the page stops answering a drag, and the
-                   only ways out were Escape, a slash command or a desktop. The
-                   state was reachable and the release was not. It is here
-                   rather than on the bottom row because that row is five slots
-                   with the camera dead centre, and because pinning is a
-                   how-you-see control like everything else up here. -->
-              <button class="ctl-btn pin-btn" [class.active]="pinnedHere()"
-                      (click)="togglePin()"
-                      [attr.aria-label]="'controls.pin' | t">
-                <span class="mat-sym" [class.filled]="pinnedHere()">push_pin</span>
-              </button>
-            </div>
-          }
           <div class="mobile-side left" data-consumes-wheel>
             <!-- BACK — fires on pointerdown; on a phone it first puts away any
                  sheet that is up (goBack), and only then walks the lineage. -->
@@ -348,56 +296,28 @@
               <span class="mat-sym">arrow_back</span>
               <span class="ctl-label" aria-hidden="true">{{ 'controls.back' | t }}</span>
             </button>
-            <!-- VIEWS — opens the layer deck (`layer:deck-open`), a sheet of
-                 big plates: open this layer as one of its views, add a
-                 creation here, and the how-you-see controls. It replaces the
-                 chevron that used to pop a second row of six small discs. -->
-            <button class="ctl-btn views-btn"
-                    (click)="openViews()"
-                    [attr.aria-label]="'controls.views' | t">
-              <span class="mat-sym">apps</span>
-              <span class="ctl-label" aria-hidden="true">{{ 'controls.views' | t }}</span>
-            </button>
-            <!-- LANDSCAPE ONLY: portrait pins the command line permanently,
-                 so a reveal toggle would be dead weight there. In landscape
-                 the bar is collapsed to preserve the short viewport; this
-                 button opens it with focus so the native keyboard rises —
-                 and it is also how the mic is reached there, since the mic
-                 now lives inside the command line. -->
-            @if (isLandscape()) {
-              <button class="ctl-btn keyboard-btn" [class.active]="inputVisible()"
-                      (click)="toggleInput()"
-                      [attr.aria-label]="'controls.keyboard' | t">
-                <span class="mat-sym" [class.filled]="inputVisible()">keyboard</span>
-              </button>
-            }
           </div>
 
-          <!-- CAMERA — the centre act: take a picture, get a tile. Opens the
-               full-screen viewfinder (hc-camera-capture); the frame it captures
-               creates a new cell here and opens the editor on it. Always
-               available — a pinned layer stops the viewport moving, it does not
-               stop you making something. -->
-          <button class="ctl-btn camera-btn mobile-center"
-                  (click)="openCamera()"
-                  [attr.aria-label]="'controls.camera' | t">
-            <span class="mat-sym">photo_camera</span>
-            <span class="ctl-label" aria-hidden="true">{{ 'camera.title' | t }}</span>
+          <!-- ADD — the centre act: name a tile. Reveals the composer with
+               focus (`mobile:input-visible` without `focus:false`, from
+               inside the tap, which is what iOS needs to raise the keyboard).
+               Lit while the composer is up; a second press puts it away. -->
+          <button class="ctl-btn add-btn mobile-center" [class.active]="inputVisible()"
+                  (click)="toggleAdd()"
+                  [attr.aria-label]="'controls.add' | t">
+            <span class="mat-sym">add</span>
+            <span class="ctl-label" aria-hidden="true">{{ 'controls.add' | t }}</span>
           </button>
 
           <div class="mobile-side right" data-consumes-wheel>
-            <!-- SHARE — the publish sheet for this page (`publish:view-toggle`):
-                 publish it, its links, the community hosts. Community sharing
-                 has to fit on the phone, and this is its one press. -->
-            <button class="ctl-btn share-btn"
-                    (click)="openShare()"
-                    [attr.aria-label]="'controls.share' | t">
-              <span class="mat-sym">ios_share</span>
-              <span class="ctl-label" aria-hidden="true">{{ 'controls.share' | t }}</span>
-            </button>
-            <button class="ctl-btn mesh-mobile-btn" [class.shield-mode]="meshPublic()" (click)="toggleMeshPublic()" [attr.aria-label]="(meshPublic() ? 'mesh.swarm' : 'mesh.solo') | t">
-              <span class="mat-sym" [class.filled]="meshPublic()">{{ meshPublic() ? 'groups' : 'person' }}</span>
-              <span class="ctl-label" aria-hidden="true">{{ (meshPublic() ? 'controls.swarm' : 'controls.solo') | t }}</span>
+            <!-- MORE — the layer deck (`layer:deck-open`): open this layer as
+                 one of its views, add a creation here, share it, the swarm,
+                 and the how-you-see controls. -->
+            <button class="ctl-btn more-btn"
+                    (click)="openViews()"
+                    [attr.aria-label]="'controls.more' | t">
+              <span class="mat-sym">more_horiz</span>
+              <span class="ctl-label" aria-hidden="true">{{ 'controls.more' | t }}</span>
             </button>
           </div>
         </div>

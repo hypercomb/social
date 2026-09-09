@@ -24,6 +24,10 @@ interface ActivityEntry {
 }
 
 const TIMEOUT_S = 10
+/** On a phone the log is ONE toast — the newest entry, gone in four
+ *  seconds, its ↩ kept. A column of `+ added "…" ×` rows lying across the
+ *  list was desktop scaffolding on a screen with room for one line. */
+const PHONE_TIMEOUT_MS = 4_000
 
 // Effects hidden from the activity log. Add effect names here to suppress them.
 const HIDDEN: Set<string> = new Set([
@@ -52,8 +56,20 @@ export class ActivityLogComponent implements OnDestroy {
 
   readonly entries = this.#entries.asReadonly()
   readonly hasEntries = computed(() => this.#entries().length > 0)
+  /** The one definition of a phone — MobileModeService's verdict, seeded
+   *  from the stamp it leaves on <html> (in the web shell essentials arrive
+   *  from OPFS after this component mounts) and then read from its
+   *  last-value-replayed effect. Never a media query of our own. */
+  readonly isMobile = signal(document.documentElement.getAttribute('data-hc-mobile') === 'on')
 
   constructor() {
+    // Outside the #ready gate on purpose: that gate drops replays, and the
+    // replay is exactly what tells us which shell we are in.
+    this.#unsubs.push(
+      EffectBus.on<{ active?: boolean }>('mobile:mode', p => {
+        this.isMobile.set(p?.active === true)
+      }),
+    )
     this.#unsubs.push(
       EffectBus.on<{ cell: string }>('cell:added', p => {
         if (!this.#ready || !p?.cell || HIDDEN.has('cell:added')) return
@@ -102,9 +118,16 @@ export class ActivityLogComponent implements OnDestroy {
 
   #addEntry(icon: string, message: string, revert?: () => Promise<void>): void {
     const id = this.#nextId++
-    const timer = setTimeout(() => this.dismiss(id), TIMEOUT_S * 1000)
+    const phone = this.isMobile()
+    const timer = setTimeout(() => this.dismiss(id), phone ? PHONE_TIMEOUT_MS : TIMEOUT_S * 1000)
     const entry: ActivityEntry = { id, icon, message, timer, fading: false, revert: revert ?? null }
-    this.#entries.update(list => [entry, ...list].slice(0, 10))
+    if (phone) {
+      // Newest only: the toast replaces what was there, timers and all.
+      for (const old of this.#entries()) old.timer != null && clearTimeout(old.timer)
+      this.#entries.set([entry])
+    } else {
+      this.#entries.update(list => [entry, ...list].slice(0, 10))
+    }
     this.#appRef.tick()
   }
 

@@ -305,17 +305,19 @@
 }
 
 // ── phone (≤599px) ────────────────────────────────────────
-// PORTRAIT PHONES PIN THE COMMAND LINE (Jaime, 2026-07-28: "In portrait
-// view the command line should be visible always"). The header is
-// permanently the slim prompt surface — ~11% of the viewport, clamped —
-// with everything except the text box + GO suppressed. No reveal dance:
-// the old hidden-until-long-press model made typing undiscoverable and
-// let visibility syncs yank the input away mid-use (the mic-tap flash).
-// Landscape phones (wide but short) still collapse it — see the
-// max-height block below, which wins the cascade in the overlap.
+// THE COMMAND LINE IS A SHEET YOU ASK FOR ON A PHONE (mobile-one-column.md,
+// 2026-09-09, superseding the 2026-07-28 portrait pin). The phone reads a
+// layer as a list, and a pinned prompt strip with its icon rail was a third
+// of the chrome on a screen with one tile. The bar's Add disc (and the mic,
+// and a long-press) reveals it with focus — `.input-open` — and GO
+// collapses it again; while collapsed the header takes no room, so the
+// list starts at the top (the bar drops `--hc-header-bottom` while the
+// header is display:none). The mic-tap-flash guard lives in the bar's
+// #syncInputVisibility (never collapse an input being typed in).
 @include phone-only {
 
-  .header-bar,
+  .header-bar { display: none; }
+
   .header-bar.input-open {
     display: flex;
     // min-height, NOT height: in portrait the icon rail is a second row under

@@ -20,6 +20,7 @@
 
 import { Worker, get } from '@hypercomb/core'
 import { resolveLayerAt, childNamesOfStrict } from '../history/layer-placement.js'
+import { MOBILE_MODE_IOC_KEY } from '../preferences/mobile-pheromones.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
@@ -217,6 +218,14 @@ export class ExampleHivesWorker extends Worker {
         { silent: true },
       )
       this.emitEffect('examples:adopted', { name, status })
+      // ON A PHONE, WALK IN. The root with its one container tile is the
+      // worst first screen a phone can show (a lone row, or a lone hexagon
+      // in a void); the hive the participant just asked for is the page
+      // they want. Desktop keeps the card's 'Added' row and its Done.
+      if ((status === 'committed' || status === 'exists')
+        && get<{ active?: boolean }>(MOBILE_MODE_IOC_KEY)?.active === true) {
+        get<{ goRaw?: (segments: readonly string[]) => void }>('@hypercomb.social/Navigation')?.goRaw?.([entry.name])
+      }
     } catch {
       this.emitEffect('examples:adopted', { name, status: 'unavailable' })
     } finally {

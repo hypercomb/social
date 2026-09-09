@@ -90,12 +90,15 @@ export class LayerDeckDrone extends Drone {
   protected override deps = { lineage: '@hypercomb.social/Lineage' }
   protected override listens = [
     'layer:deck-open', 'layer:deck-close', 'view-toggles:changed', 'lanes:changed',
-    MOBILE_MODE_EFFECT, 'view:active',
+    MOBILE_MODE_EFFECT, 'view:active', 'mesh:public-changed',
   ]
   protected override emits = [
     'view:toggle', 'feature:apply', 'camera:capture-open', 'tags:view-open',
     'keymap:invoke', 'lanes:step', 'lanes:set', 'viewport:pin-toggle',
+    'publish:view-toggle', 'mesh:open-modal', 'mesh:leave',
   ]
+  /** The swarm switch's reading — the shell's `mesh:public-changed` replay. */
+  #meshPublic = false
 
   #registered = false
   #bound = false
@@ -132,6 +135,10 @@ export class LayerDeckDrone extends Drone {
     })
     this.onEffect<Lanes>('lanes:changed', payload => {
       this.#lanes = { active: payload?.active === true, lanes: Number(payload?.lanes) || undefined }
+      if (this.#open) this.#render()
+    })
+    this.onEffect<{ public?: boolean }>('mesh:public-changed', payload => {
+      this.#meshPublic = payload?.public === true
       if (this.#open) this.#render()
     })
     // The phone stopped being a phone (`/mobile off`, a resize past the
@@ -430,6 +437,32 @@ export class LayerDeckDrone extends Drone {
         // toggle cannot be repeated against a stale-looking plate.
         EffectBus.emitTransient('viewport:pin-toggle', {})
         this.close()
+      },
+    })
+    // SHARE and SWARM moved here from the bar when it went to three discs
+    // (mobile-one-column.md). Share hands the screen to the publish sheet;
+    // swarm is a switch — join goes through the location dialog the bar's
+    // disc used, leave is the shell's one effect-shaped door (`mesh:leave`).
+    chips.push({
+      action: 'share',
+      glyph: 'ios_share',
+      labelKey: 'layer-deck.share',
+      fallback: 'share',
+      run: () => {
+        this.close()
+        EffectBus.emit('publish:view-toggle', {})
+      },
+    })
+    chips.push({
+      action: 'swarm',
+      glyph: this.#meshPublic ? 'groups' : 'person',
+      labelKey: this.#meshPublic ? 'layer-deck.swarm-leave' : 'layer-deck.swarm',
+      fallback: this.#meshPublic ? 'leave swarm' : 'join swarm',
+      accent: this.#meshPublic,
+      run: () => {
+        this.close()
+        if (this.#meshPublic) EffectBus.emit('mesh:leave', {})
+        else EffectBus.emit('mesh:open-modal', { join: true })
       },
     })
     // The sheet stays up for undo/redo: the hive above it shows the step,
