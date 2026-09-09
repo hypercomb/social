@@ -118,6 +118,53 @@ The deploy verifies itself when it finishes. A brand-new custom domain often
 needs a minute for DNS and its certificate — re-run `host:check` if it does not
 pass immediately.
 
+## The front door — what a cold visitor sees
+
+A host that publishes for others opens one card to every browser arriving
+with nothing held, and that card is the host's front door. With nothing
+staged, every host presents itself the same way:
+
+- the mark, the **hostname** as the title, and one sentence about what a host is;
+- **Published here** — what this origin publishes, each package with its
+  *Replicate* button, before anyone types anything;
+- **Add a domain** — the other hosts this browser carries and what they publish;
+- a footer where the platform explains itself: the tour, hypercomb.io,
+  documentation, source, licensing.
+
+On a domain that is also a *website*, the card is the website, so it can carry
+the site's own name, a sentence about it, the links that belong on its front
+page, and the hives live on its zone. Stage a `welcome.json` next to the shell
+and the card reads it:
+
+```json
+{
+  "title": "hypercomb",
+  "tagline": "An open software platform.",
+  "links": [{ "label": "Watch the tour", "href": "/tour/", "note": "≈ 19 minutes" }],
+  "doorsLabel": "live on hypercomb.com · 6 hives",
+  "doors": [{ "title": "Revolución", "host": "revolucion.hypercomb.com" }]
+}
+```
+
+Every field is optional and every field is untrusted: text is clamped, and an
+`href` may only be a path on this origin or a plain `http(s)` address. The
+first link leads; the footer never repeats a door the staged links already
+open. A host with no `welcome.json` renders the default front door, which is
+the normal case — the shim itself knows nothing about any particular domain.
+
+On Cloudflare Pages, put the file in `public/` and it ships in `dist/`. The
+Azure deployer takes `--welcome <file>`, which stages it without changing the
+generic build. hypercomb.com composes its own from the same directory of live
+doors the presentation bakes in ([welcome.cjs](../../scripts/presentation/welcome.cjs)).
+
+A link needs somewhere to land, so the Azure deployer also takes
+`--page <route>=<path>`, repeatable. A file becomes `<route>/index.html`; a
+directory is copied whole, which is how a page that carries its own stylesheet,
+images and downloadable files arrives intact. hypercomb.com stages the tour at
+`/tour/` and the downloads page — desktop release status, the browser utilities,
+their checksums — at `/downloads/`. Routes are one path segment, matched against
+`[a-z0-9-]`, so a route can only ever name a place on this origin.
+
 ## A machine that already holds the hive
 
 Everything above serves a *folder*. The Windows, macOS and Linux client serves

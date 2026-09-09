@@ -40,6 +40,18 @@ export const canonicalReferenceName = (raw: string): string =>
 export const canonicalReferenceRoute = (segments: readonly unknown[]): string[] =>
   segments.map(segment => canonicalReferenceName(String(segment ?? ''))).filter(Boolean)
 
+/**
+ * The one route a named item may be referenced through.
+ *
+ * Superseded by `canonicalReferenceRoute`, and kept because core's export
+ * surface is a PROTOCOL: packages published while this name existed import it,
+ * and a participant already carrying one of those packages loses the whole
+ * namespace — "does not provide an export named 'canonicalRootSegments'" —
+ * the moment a shell ships a core without it. Older versions keep working.
+ */
+export const canonicalRootSegments = (rawName: string): readonly string[] =>
+  canonicalReferenceRoute([rawName])
+
 /** Sorted, deduped, blank-free; empty means absent in the payload. */
 export const normalizeReferenceMarks = (marks: readonly string[]): string[] =>
   [...new Set(marks.map(m => String(m ?? '').trim()).filter(Boolean))].sort()

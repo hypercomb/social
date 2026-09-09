@@ -32,6 +32,8 @@ $accent: #7eb6d6;
 .ref-error { margin: 0; color: tw.ink(#ff9ca8); font-size: .66em; line-height: 1.35; }
 .ref-landing, .ref-hint { margin: .1em 0; font-size: .67em; line-height: 1.45; }
 .ref-landing { color: var(--hc-window-accent-quiet); } .ref-hint { color: var(--hc-window-ink-quiet); }
+.ref-group { display: flex; flex-wrap: wrap; gap: .35em .6em; align-items: baseline; }
+.ref-group-door { padding: .2em .55em; border: 1px solid rgba(var(--acc), .24); border-radius: tw.$radius-control; background: transparent; color: var(--hc-window-accent); font: inherit; cursor: pointer; }
 .ref-actions { justify-content: flex-end; gap: .45em; margin-top: .35em; }
 .ref-actions button { padding: .43em .72em; border-radius: tw.$radius-control; font: inherit; font-size: .72em; cursor: pointer; }
 .ref-cancel { border: 1px solid rgba(var(--acc), .24); background: transparent; color: var(--hc-window-ink-quiet); }

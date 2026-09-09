@@ -8,6 +8,7 @@ import type { AggregateItem, StagedEntry } from '../aggregate-index/aggregate-so
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { signalSession } from '../window-session'
+import { gatheredFrom } from './gathered-from'
 
 type Composition = {
   portal: AggregateItem
@@ -40,6 +41,10 @@ export class ReferencesWindowComponent implements OnDestroy {
   readonly selected = signal<readonly StagedEntry[]>([])
   readonly choosing = signal(false)
   readonly saving = signal(false)
+  /** Where the holder's existing references came from — derived (see
+   *  `gatheredFrom`), shown as the way back to choose more. Null while there is
+   *  nothing gathered yet or the holder is being minted. */
+  readonly group = signal<{ label: string; segments: readonly string[] } | null>(null)
   readonly targetName = computed(() => safeCellName(this.name()))
   readonly nameTaken = computed(() => {
     const target = this.targetName()
@@ -66,8 +71,22 @@ export class ReferencesWindowComponent implements OnDestroy {
         : String(c.parentSegments[c.parentSegments.length - 1] ?? ''))
       this.selected.set([])
       this.choosing.set(false)
+      this.group.set(null)
       this.visible.set(true)
       this.#emitDraft()
+      if (!c.createTile) {
+        const holder = [...c.parentSegments]
+        void gatheredFrom(holder).then(segments => {
+          // Still the same composition, and the group is not the portal in hand
+          // — that one is already the picker's source.
+          const current = this.composition()
+          if (!segments || current !== c) return
+          const samePortal = segments.length === c.portal.segments.length
+            && segments.every((s, i) => String(s) === String(c.portal.segments[i]))
+          if (samePortal) return
+          this.group.set({ label: String(segments[segments.length - 1] ?? ''), segments })
+        })
+      }
     }))
     this.#cleanups.push(EffectBus.on('references:view-close', () => this.cancel()))
   }
@@ -85,6 +104,23 @@ export class ReferencesWindowComponent implements OnDestroy {
   updateName(value: string): void {
     this.name.set(value)
     this.#emitDraft()
+  }
+
+  /** The way back: pick more from the group the holder already gathers from.
+   *  The group becomes the picker's source; the chosen items land under the
+   *  same holder. */
+  chooseFromGroup(): void {
+    const c = this.composition()
+    const group = this.group()
+    if (!c || !group) return
+    this.composition.set({
+      ...c,
+      portal: { key: group.label, label: group.label, segments: [...group.segments] },
+    })
+    this.group.set(null)
+    this.selected.set([])
+    withSelectionService(s => s.clear())
+    this.beginSelection()
   }
 
   beginSelection(): void {

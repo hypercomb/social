@@ -14,6 +14,10 @@
         @if (nameTaken()) { <p class="ref-error">{{ 'references.name-taken' | t }}</p> }
       } @else {
         <p class="ref-landing">{{ 'references.parent-target' | t: { name: draft.parentSegments[draft.parentSegments.length - 1] } }}</p>
+        @if (group(); as g) {
+          <p class="ref-landing ref-group">{{ 'references.gathered-from' | t: { name: g.label } }}
+            <button type="button" class="ref-group-door" (click)="chooseFromGroup()">{{ 'references.choose-from-group' | t: { name: g.label } }}</button></p>
+        }
       }
       <label>{{ 'references.items' | t }}</label>
       <div class="ref-types">

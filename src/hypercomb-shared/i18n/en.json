@@ -1655,6 +1655,8 @@
   "references.name-taken": "A tile with this name is already on the parent.",
   "references.temporary-target": "temporary target",
   "references.parent-target": "Adding selected items directly to {name}",
+  "references.gathered-from": "Already gathered from {name}.",
+  "references.choose-from-group": "Choose more from {name}",
   "references.items": "Items in this reference",
   "references.items-empty": "Nothing selected yet",
   "references.picker-hint": "Choose items to open the source layer. Items begin dimmed; select one to make it opaque and include it.",
