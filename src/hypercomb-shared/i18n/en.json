@@ -2606,5 +2606,17 @@
   "hosts.hidden.restore": "Unhide",
   "hosts.hidden.delete": "Delete",
   "hosts.hidden.delete-tip": "Forget this build here, permanently. It stays on the host.",
-  "hosts.hidden.all": "every build here is hidden"
+  "hosts.hidden.all": "every build here is hidden",
+  "hosts.builds": "Builds",
+  "hosts.creations.title": "Creations on {host}",
+  "hosts.creations.show": "show",
+  "hosts.creations.shown": "shown",
+  "hosts.creations.show-title": "Show {name} in your hive — it stands shaded until you walk into it",
+  "hosts.creations.shown-title": "Shown in your hive — press to stop showing it",
+  "hosts.creations.visit": "Open on {host}",
+  "hosts.creations.none": "publishes no creations here — the domain answered, and lists none",
+  "hosts.creations.silent": "no ledger at this domain, or it is down",
+  "hosts.creations.unheld": "no verified head",
+  "hosts.mine.open": "In your hive ({count})",
+  "hosts.mine.note": "Shown creations stand in your hive, shaded. Walking into one is what takes it — nothing arrives on its own, and taking one tile never takes its branch."
 }

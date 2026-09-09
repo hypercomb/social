@@ -98,6 +98,41 @@ interface PublishRenderish {
   rows?: { zones?: string[] }[]
 }
 
+/** Mirrors HostCreationRow in essentials/sharing/static-peers.drone.ts —
+ *  shared cannot import essentials, so the shape is kept field-for-field by
+ *  hand. `offer` is opaque here on purpose: the panel sends it back exactly
+ *  as it arrived, and only the drone knows how a plate becomes one. */
+interface CreationRow {
+  name: string
+  title: string
+  lineage: string
+  host: string
+  url: string
+  publisherLabel: string
+  offered: boolean
+  offer: unknown | null
+}
+
+/** Mirrors HostCreationsRender. */
+interface CreationsRenderish {
+  zone?: string
+  rows?: CreationRow[]
+  answered?: boolean
+}
+
+/** One creation you carry, as `community:offers-render` reports it. */
+interface MineRow {
+  name: string
+  pubkey: string
+  lineageKey: string
+  host: string
+  hosts: string[]
+}
+
+interface OffersRenderish {
+  offers?: MineRow[]
+}
+
 @Component({
   selector: 'hc-hosts-panel',
   standalone: true,
@@ -134,6 +169,23 @@ export class HostsPanelComponent implements OnDestroy {
    *  seen; a missing entry renders as nothing at all. */
   readonly naming = signal<Record<string, number>>({})
 
+  // ── the creations half ───────────────────────────────────────────────────
+  //
+  // A DOMAIN SERVES TWO LISTS AND THEY ARE NOT THE SAME KIND OF THING.
+  // Builds are the app itself, taken by replication; creations are what
+  // people made and published, taken one tile at a time by the swarm's own
+  // grammar. The creations come first here because they are the reason a
+  // person adds somebody's domain at all.
+
+  /** zone → what it serves. Absent = never asked. */
+  readonly creations = signal<Record<string, { rows: CreationRow[]; answered: boolean }>>({})
+  /** What you carry, and whether that has been reported yet. */
+  readonly mine = signal<MineRow[]>([])
+  readonly mineKnown = signal(false)
+  /** Is your own list unfolded? It is the answer to "what did I take", which
+   *  is a question you ask on purpose. */
+  readonly mineOpen = signal(false)
+
   #cleanups: (() => void)[] = []
 
   constructor() {
@@ -158,6 +210,23 @@ export class HostsPanelComponent implements OnDestroy {
         ...items.map(i => i.sig),
         ...(p?.gone ?? []),
       ]))
+    }))
+
+    // WHAT A DOMAIN SERVES. Asked when you look into one, answered by the
+    // drone that owns the offers document — so the switch's state and the
+    // list it sits in can never disagree.
+    this.#cleanups.push(EffectBus.on<CreationsRenderish>('hosts:creations:render', (p) => {
+      const zone = String(p?.zone ?? '')
+      if (!zone) return
+      this.creations.set({ ...this.creations(), [zone]: { rows: p?.rows ?? [], answered: !!p?.answered } })
+    }))
+
+    // WHAT YOU CARRY — the creations you have asked to see, wherever you
+    // asked from. Replayed, so opening the panel never shows an empty list
+    // it has not actually read.
+    this.#cleanups.push(EffectBus.on<OffersRenderish>('community:offers-render', (p) => {
+      this.mine.set(Array.isArray(p?.offers) ? p!.offers! : [])
+      this.mineKnown.set(true)
     }))
 
     // Decoration only — see the note at the top. EffectBus replays the last
@@ -546,6 +615,10 @@ export class HostsPanelComponent implements OnDestroy {
     this.selectedZone.set(zone)
     this.expandedZone.set('')
     this.ledgerOpen.set(false)
+    // What this domain SERVES is asked at the same moment and answered
+    // separately: the ledger is one small file and the manifest is megabytes,
+    // so the creations are on screen long before the builds are.
+    EffectBus.emit('hosts:creations', { zone })
     if (zone in this.offers()) return
 
     this.offers.set({ ...this.offers(), [zone]: null })
@@ -557,6 +630,53 @@ export class HostsPanelComponent implements OnDestroy {
       ...this.offers(),
       [zone]: { packages, answered },
     })
+  }
+
+  // ── the creations a domain serves, and the one switch on each ────────────
+
+  /** The rows this domain serves, or [] while the answer is still coming. */
+  creationsOf(zone: string): CreationRow[] {
+    return this.creations()[zone]?.rows ?? []
+  }
+
+  /** Has this domain's ledger been heard from at all? */
+  creationsKnown(zone: string): boolean {
+    return zone in this.creations()
+  }
+
+  /** The ledger answered and listed nothing — distinct from not answering. */
+  creationsAnswered(zone: string): boolean {
+    return this.creations()[zone]?.answered === true
+  }
+
+  /**
+   * THE ONE ACT ON A CREATION: show it in your hive, or stop showing it.
+   *
+   * Never "adopt this branch". An offer puts the creation in your hive as a
+   * shaded tile and nothing else happens until you walk into it — every step
+   * from there is yours (see static-peers.ts). A row whose plate carries no
+   * verified head has no offer to send, and its switch is not drawn.
+   */
+  toggleCreation(row: CreationRow): void {
+    if (row.offered) { EffectBus.emit('community:withdraw', { name: row.name }); return }
+    if (!row.offer) return
+    EffectBus.emit('community:offer', row.offer)
+  }
+
+  /** What your hive carries, from every domain at once — the list you are
+   *  left with "when you're done". */
+  mineCount(): number {
+    return this.mine().length
+  }
+
+  toggleMine(): void {
+    this.mineOpen.set(!this.mineOpen())
+  }
+
+  /** Stop showing one. The publisher keeps publishing it; your hive stops
+   *  carrying it, and anything you already TOOK from it stays yours. */
+  withdraw(row: MineRow): void {
+    EffectBus.emit('community:withdraw', { name: row.name })
   }
 
   // Acquisition is loaded only when somebody asks for a package. The host

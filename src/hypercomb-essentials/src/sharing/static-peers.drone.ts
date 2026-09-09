@@ -25,8 +25,9 @@
 
 import { Drone, EffectBus } from '@hypercomb/core'
 import { fetchHiveManifestFromAny } from './hive-pointer.js'
+import { fetchPublicationCards, type PublicationCard } from './publications-ledger.js'
 import {
-  childEntriesOf, entryFor, layerAtRoute, offersFromLegacyFollows, readThrough,
+  childEntriesOf, entryFor, layerAtRoute, offerFromCard, offersFromLegacyFollows, readThrough,
   type StaticOffer, type StaticPeerEntry, type StaticPeersIo,
 } from './static-peers.js'
 import { STATIC_FOLLOWS_KEY } from './hive-link.js'
@@ -57,6 +58,38 @@ type RegistryLike = { register?: (source: TileSource) => () => void }
 
 const ioc = () => (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
 
+/**
+ * ONE CREATION A DOMAIN SERVES, as a surface wants it.
+ *
+ * The host directory is a list of domains; a domain serves a list of
+ * creations; a creation you want is one you OFFER. A shell surface cannot
+ * import essentials, so the row carries the finished offer rather than the
+ * mapping that mints it — the panel sends `offer` straight back on
+ * `community:offer` and never has to know how a plate becomes one.
+ *
+ * `offer` is null for a plate with no verified head or key: it is a creation
+ * you can visit and not one you can hold, and a switch that cannot work must
+ * not be drawn.
+ */
+export interface HostCreationRow {
+  readonly name: string
+  readonly title: string
+  readonly lineage: string
+  readonly host: string
+  readonly url: string
+  readonly publisherLabel: string
+  readonly offered: boolean
+  readonly offer: StaticOffer | null
+}
+
+export interface HostCreationsRender {
+  readonly zone: string
+  readonly rows: readonly HostCreationRow[]
+  /** Did the domain's ledger answer at all? "Publishes nothing" and "did not
+   *  answer" are different facts, and only the second is about reachability. */
+  readonly answered: boolean
+}
+
 const parseOffers = (raw: unknown): StaticOffer[] => {
   const list = (raw as { offers?: unknown })?.offers
   if (!Array.isArray(list)) return []
@@ -79,8 +112,10 @@ export class StaticPeersDrone extends Drone {
   override description =
     'Offers the creations public hosts publish as shaded peer tiles in your hive — the swarm model for static content. Each step you take through them is the adopt; nothing folds on its own.'
   public override effects = ['network'] as const
-  protected override listens = ['community:offer', 'community:withdraw']
-  protected override emits = ['swarm:peers-changed', 'activity:log']
+  protected override listens = ['community:offer', 'community:withdraw', 'hosts:creations']
+  protected override emits = [
+    'swarm:peers-changed', 'activity:log', 'community:offers-render', 'hosts:creations:render',
+  ]
 
   #offers = new Map<string, StaticOffer>()
   #loaded = false
@@ -97,14 +132,32 @@ export class StaticPeersDrone extends Drone {
    *  divergence scan even when what stands there is unchanged. */
   #lastKey: string | null = null
 
+  /** zone → what its ledger last answered. Absent = never asked. Kept for
+   *  the session: a domain's list of creations is not what changes while you
+   *  are reading it, and re-asking on every look would spend a request to
+   *  redraw the same rows. */
+  #creations = new Map<string, HostCreationsRender>()
+
   constructor() {
     super()
     this.onEffect<Partial<StaticOffer>>('community:offer', (p) => { void this.#offer(p) })
     this.onEffect<{ name?: string }>('community:withdraw', (p) => { void this.#withdraw(String(p?.name ?? '')) })
+    // WHAT A DOMAIN SERVES — asked by the host directory when you look into
+    // one. The offers document lives here, so the row that carries the switch
+    // is minted here too and no surface has to hold both halves.
+    this.onEffect<{ zone?: string }>('hosts:creations', (p) => { void this.#lookCreations(String(p?.zone ?? '')) })
   }
 
   protected override heartbeat = async (): Promise<void> => {
-    if (!this.#loaded) { this.#loaded = true; await this.#load(); await this.#migrateLegacyFollows() }
+    if (!this.#loaded) {
+      this.#loaded = true
+      await this.#load()
+      await this.#migrateLegacyFollows()
+      // Your list, once it is known — a surface mounted before this pulse
+      // gets it on replay rather than showing an empty hive it cannot tell
+      // apart from a hive that carries nothing.
+      this.#renderMine()
+    }
     if (!this.#unregister) this.#register(0)
   }
 
@@ -161,6 +214,7 @@ export class StaticPeersDrone extends Drone {
     this.#offers.set(offer.name, offer)
     this.#entriesByLocation.clear()
     await this.#save()
+    this.#renderOfferState()
     this.emitEffect('activity:log', { message: `"${offer.name}" is offered in your hive — shaded until you take it`, icon: 'public' })
     this.emitEffect('swarm:peers-changed', { sig: '', pubkey: offer.pubkey, reason: 'static-offer' })
   }
@@ -171,12 +225,89 @@ export class StaticPeersDrone extends Drone {
     this.#offers.delete(name)
     this.#entriesByLocation.clear()
     await this.#save()
+    this.#renderOfferState()
     this.emitEffect('swarm:peers-changed', { sig: '', pubkey: offer.pubkey, reason: 'static-withdraw' })
   }
 
   /** Every offer, for the community page's toggles. */
   public readonly offers = (): readonly StaticOffer[] => [...this.#offers.values()]
   public readonly isOffered = (name: string): boolean => this.#offers.has(String(name ?? '').trim())
+
+  // ── what a domain serves, and what you have taken from it ────────────
+  //
+  // THE HOST DIRECTORY IS A LIST OF DOMAINS; A DOMAIN SERVES A LIST OF
+  // CREATIONS. Jaime, on why the switch belongs on the domain's list rather
+  // than on the creation's own page: "just a sidebar with a list of domains,
+  // and each time you select one you get to see the list of features — and
+  // then when you're done you just see the list of features that your domain
+  // has." The publisher never gets to set that flag for you: an offer is
+  // written here, by you, in your own pool.
+
+  /** YOUR LIST — every creation you have asked to see, for the surface that
+   *  shows what your hive carries. Emitted on every change, and EffectBus
+   *  replays the last value, so a panel that opens later is never blank. */
+  #renderMine = (): void => {
+    this.emitEffect('community:offers-render', {
+      offers: [...this.#offers.values()].map(o => ({
+        name: o.name,
+        pubkey: o.pubkey,
+        lineageKey: o.lineageKey,
+        host: o.hosts[0] ?? '',
+        hosts: [...o.hosts],
+      })),
+    })
+  }
+
+  /** A plate becomes a row: the switch's state, and the offer it sends. */
+  #rowsFrom = (cards: readonly PublicationCard[]): HostCreationRow[] =>
+    cards.map(card => {
+      const offer = offerFromCard(card)
+      const name = offer?.name ?? (card.lineage.split('/').filter(Boolean).pop() ?? card.title)
+      return {
+        name,
+        title: card.title || name,
+        lineage: card.lineage,
+        host: card.host,
+        url: card.url,
+        publisherLabel: card.publisherLabel,
+        offered: this.#offers.has(name),
+        offer,
+      }
+    })
+
+  #renderCreations = (zone: string): void => {
+    const held = this.#creations.get(zone)
+    if (!held) return
+    // The switch's state is read at emit time, never stored on the card: an
+    // offer made from anywhere else in the hive must show here too.
+    const rows = held.rows.map(row => ({ ...row, offered: this.#offers.has(row.name) }))
+    this.#creations.set(zone, { ...held, rows })
+    this.emitEffect('hosts:creations:render', { zone, rows, answered: held.answered })
+  }
+
+  #lookCreations = async (raw: string): Promise<void> => {
+    const zone = raw.trim().toLowerCase()
+    if (!zone) return
+    if (this.#creations.has(zone)) { this.#renderCreations(zone); return }
+
+    // The domain's OWN ledger, verbatim: no same-origin preference and no
+    // canonical fallback, so a domain that does not answer reads as itself
+    // and never as somebody else's list wearing its name.
+    let cards: Awaited<ReturnType<typeof fetchPublicationCards>> = null
+    try { cards = await fetchPublicationCards({}, `https://${zone}`) } catch { cards = null }
+    this.#creations.set(zone, {
+      zone,
+      rows: cards ? this.#rowsFrom(cards) : [],
+      answered: cards !== null,
+    })
+    this.#renderCreations(zone)
+  }
+
+  /** Every list that shows an offer's state, after that state changed. */
+  #renderOfferState = (): void => {
+    this.#renderMine()
+    for (const zone of this.#creations.keys()) this.#renderCreations(zone)
+  }
 
   // ── the tile source ──────────────────────────────────────────────────
 
