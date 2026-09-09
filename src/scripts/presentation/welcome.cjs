@@ -12,7 +12,7 @@
 // to the shell at deploy time and read by the card (hypercomb-shim/src/
 // bootstrap/welcome.ts); the shim itself stays generic and knows nothing about
 // hypercomb.com. Any host may stage its own, and a host with none renders the
-// plain card it always did.
+// default front door: its own name, what it publishes, the platform's doors.
 //
 // The directory of doors is the SAME derivation the presentation splash bakes
 // in — hosts.cjs, from the worker's ledger of signed heads — so the two pages

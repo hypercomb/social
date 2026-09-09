@@ -120,12 +120,21 @@ pass immediately.
 
 ## The front door — what a cold visitor sees
 
-A host that publishes for others opens the add-a-domain card to every browser
-arriving with nothing held. On a domain that is also a *website*, that card is
-the website, so it can carry the site's own name, a sentence about it, and the
-links that belong on a front page.
+A host that publishes for others opens one card to every browser arriving
+with nothing held, and that card is the host's front door. With nothing
+staged, every host presents itself the same way:
 
-Stage a `welcome.json` next to the shell and the card reads it:
+- the mark, the **hostname** as the title, and one sentence about what a host is;
+- **Published here** — what this origin publishes, each package with its
+  *Replicate* button, before anyone types anything;
+- **Add a domain** — the other hosts this browser carries and what they publish;
+- a footer where the platform explains itself: the tour, hypercomb.io,
+  documentation, source, licensing.
+
+On a domain that is also a *website*, the card is the website, so it can carry
+the site's own name, a sentence about it, the links that belong on its front
+page, and the hives live on its zone. Stage a `welcome.json` next to the shell
+and the card reads it:
 
 ```json
 {
@@ -138,9 +147,10 @@ Stage a `welcome.json` next to the shell and the card reads it:
 ```
 
 Every field is optional and every field is untrusted: text is clamped, and an
-`href` may only be a path on this origin or a plain `http(s)` address. A host
-with no `welcome.json` renders the plain card, which is the normal case — the
-shim itself knows nothing about any particular domain.
+`href` may only be a path on this origin or a plain `http(s)` address. The
+first link leads; the footer never repeats a door the staged links already
+open. A host with no `welcome.json` renders the default front door, which is
+the normal case — the shim itself knows nothing about any particular domain.
 
 On Cloudflare Pages, put the file in `public/` and it ships in `dist/`. The
 Azure deployer takes `--welcome <file>`, which stages it without changing the

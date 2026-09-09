@@ -1,45 +1,48 @@
 // hypercomb-shim/src/host-panel.ts
 //
-// THE ONLY SURFACE THE SHIM OWNS. One card: what this origin is, where else it
-// leads, add a domain, see what it publishes, click one. The middle two are
-// the front door — staged content, absent on most hosts (see welcome.ts) — and
-// the rest is the whole interaction, deliberately: every other panel in the
-// system arrives as a behaviour, through the very package this card installs.
+// THE ONLY SURFACE THE SHIM OWNS. One card, and it is every host's front door:
+// the mark and the host's name, a sentence about what this is, what THIS
+// origin publishes, the domains you carry and what they publish, and where
+// the platform explains itself. An operator stages more on top (welcome.ts):
+// their own title and sentence, the links that belong on their front page,
+// the hives live on their zone. That is the whole interaction, deliberately:
+// every other panel in the system arrives as a behaviour, through the very
+// package this card replicates.
 //
-// It appears only when nothing is installed. A hive that already holds a
-// package boots straight past it and never sees it — but on an origin that
-// publishes for others to take, "nothing installed" is every first visit, so
-// this card is also that origin's website and has to read like one.
+// It appears only when nothing is held. A hive that already holds a package
+// boots straight past it and never sees it — but on an origin that publishes
+// for others to take, "nothing held" is every first visit, so this card is
+// also that origin's website and has to read like one.
 //
 // Framework-free by necessity, not taste. This runs BEFORE any bee exists, so
 // there is nothing to render with but the DOM.
 
 import { addHostZone, hostZone, listHostZones, removeHostZone } from './hosts'
-import { installPackage, listHostPackages, type HostPackage } from './replicate'
-import { readWelcome, type Welcome, type WelcomeDoor, type WelcomeLink } from './welcome'
+import { installPackage, type HostPackage } from './replicate'
+import { askHostPackages } from '@hypercomb/runtime/host-packages'
+import { frontDoorOf, readWelcome, type FrontDoor, type Welcome, type WelcomeDoor, type WelcomeLink } from './welcome'
 
 const STYLE = `
 :host { all: initial }
 .card {
   box-sizing: border-box; position: fixed; inset: 0; z-index: 2147483100;
-  display: grid; place-items: center; overflow: auto;
+  display: grid; place-items: start center; overflow: auto;
   background: radial-gradient(120% 90% at 50% 42%, #0c1018 0%, #05060a 60%, #030409 100%);
   font: 14px/1.55 Inter, system-ui, sans-serif; color: #dce7ef;
 }
 /* A front door is taller than the viewport, and a grid that centres taller
-   content clips its top where it cannot be scrolled back. Start-align it. */
-.card.door { place-items: start center; }
-.panel { box-sizing: border-box; width: min(38rem, calc(100vw - 2rem)); margin: 6vh 0; }
-.card.door .panel { width: min(44rem, calc(100vw - 2rem)); margin: 8vh 0 6vh; }
+   content clips its top where it cannot be scrolled back — so it starts at
+   the top, with the brand's own margin as the breathing room. */
+.panel { box-sizing: border-box; width: min(44rem, calc(100vw - 2rem)); margin: 8vh 0 6vh; }
 h1 { margin: 0 0 .35rem; font-size: 1.2rem; font-weight: 600; color: #f1f6fa; }
-p.lede { margin: 0 0 1.5rem; color: #8fa3b4; }
+p.lede { margin: 0 0 1.25rem; color: #8fa3b4; }
 
 /* the front door — the mark, the name, and what this is */
 .brand { display: grid; justify-items: center; text-align: center; gap: .6rem; margin-bottom: 2.4rem; }
 .brand svg { width: 4.25rem; height: 4.25rem; filter: drop-shadow(0 0 1.75rem rgba(242,182,50,.3)); }
 .brand h1 {
   margin: 0; font-size: clamp(1.5rem, 5vw, 2rem); font-weight: 600;
-  letter-spacing: .3em; text-indent: .3em; color: #f1f6fa;
+  letter-spacing: .3em; text-indent: .3em; color: #f1f6fa; overflow-wrap: anywhere;
 }
 .brand p { max-width: 34rem; margin: 0; color: #8fa3b4; }
 
@@ -49,7 +52,7 @@ p.lede { margin: 0 0 1.5rem; color: #8fa3b4; }
   font-size: 10px; font-weight: 500; letter-spacing: .28em; text-transform: uppercase; color: #6f8394;
 }
 section { margin-bottom: 2rem; }
-section:last-of-type { margin-bottom: 0; }
+.panel > section:last-of-type { margin-bottom: 0; }
 
 /* chips: the places this origin sends you. A grid rather than a wrapping row —
    the directory is a list of equals and reads as one when the columns line up. */
@@ -62,6 +65,7 @@ a.chip {
   transition: border-color .2s, background .2s;
 }
 a.chip b { font-weight: 500; color: #eaf2f8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+a.chip b i { font-style: normal; margin-left: .35em; color: #7d8f9e; }
 a.chip span {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .78em;
   color: #7d8f9e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -92,7 +96,14 @@ button:disabled { opacity: .5; cursor: default; }
   display: flex; align-items: center; gap: .5rem;
   padding: .6rem .75rem; background: rgba(126,182,214,.06);
 }
-.zone { flex: 1; font-weight: 600; color: #f1f6fa; }
+/* the host you are standing on: the same box, gold-edged, nothing to drop */
+.host.self { border-color: rgba(242,182,50,.30); }
+.host.self > header { background: rgba(242,182,50,.06); }
+.host.self .tag {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: #a98a4a;
+}
+.zone { flex: 1; font-weight: 600; color: #f1f6fa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drop { background: none; border: none; padding: .2rem .4rem; color: #7d8f9e; }
 .drop:hover { color: #d98b8b; }
 ul { list-style: none; margin: 0; padding: 0; }
@@ -100,10 +111,23 @@ li { display: flex; align-items: center; gap: .75rem; padding: .55rem .75rem; bo
 .label { flex: 1; min-width: 0; }
 .label b { display: block; font-weight: 500; color: #eaf2f8; }
 .label span { color: #7d8f9e; font-size: .85em; font-variant-numeric: tabular-nums; }
-.muted { padding: .55rem .75rem; color: #7d8f9e; border-top: 1px solid rgba(126,182,214,.12); }
-.status { min-height: 1.4em; margin-top: 1rem; color: #8fa3b4; }
+.muted { padding: .55rem .75rem; margin: 0; color: #7d8f9e; border-top: 1px solid rgba(126,182,214,.12); }
+.status { min-height: 1.4em; margin: 1rem 0 0; color: #8fa3b4; }
 .status[data-tone="bad"] { color: #d98b8b; }
 .status[data-tone="good"] { color: #8fbf9f; }
+
+/* the footer — where the platform explains itself, on every host */
+footer {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1.1rem;
+  margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid rgba(126,182,214,.12);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px;
+  letter-spacing: .12em; color: #6f8394;
+}
+footer .made { display: inline-flex; align-items: center; gap: .45rem; margin-right: auto; }
+footer .made svg { width: 1rem; height: 1rem; }
+footer a { color: #8fa3b4; text-decoration: none; border-bottom: 1px solid transparent; }
+footer a:hover { color: #f7d489; border-bottom-color: rgba(242,182,50,.5); }
+footer a:focus-visible { outline: 2px solid rgba(126,182,214,.75); outline-offset: 2px; }
 `
 
 // The mark, drawn rather than fetched: this card renders before this origin
@@ -114,11 +138,25 @@ const MARK = '<svg viewBox="-52 -52 104 104" aria-hidden="true" focusable="false
   '<polygon points="30,0 15,26 -15,26 -30,0 -15,-26 15,-26" fill="none" stroke="#f2b632" stroke-width="1.2" opacity=".5"/>' +
   '<circle r="4" fill="#f2b632"/></svg>'
 
+const mark = (): Element => {
+  const holder = document.createElement('div')
+  holder.innerHTML = MARK
+  return holder.firstElementChild ?? holder
+}
+
+/** What a door answered, kept for the life of the card: the origin's own
+ *  packages cannot change between two renders of the same page. */
+type Answer = { packages: HostPackage[]; answered: boolean }
+
 class HostPanelElement extends HTMLElement {
   readonly #root = this.attachShadow({ mode: 'open' })
   #busy = false
   /** Undefined until read once; null when this host stages no front door. */
   #welcome: Welcome | null | undefined = undefined
+  /** The origin you are standing on, as a zone — `` when it is not one
+   *  (a file:// preview, an address with no dots that is not loopback). */
+  readonly #self = hostZone(location.host)
+  #selfAnswer: Promise<Answer> | undefined = undefined
 
   connectedCallback(): void {
     void this.#render()
@@ -135,104 +173,64 @@ class HostPanelElement extends HTMLElement {
     // The front door is read once per card, not once per render: adding a
     // domain must not re-ask the origin for a file that cannot have changed.
     if (this.#welcome === undefined) this.#welcome = await readWelcome()
-    const welcome = this.#welcome
-    const zones = await listHostZones()
+    // Named as the zone it is — `localhost:4270` on a machine, the hostname
+    // everywhere else — so the title and the box below it agree.
+    const door = frontDoorOf(this.#welcome, this.#self || location.hostname, location.origin)
+    // The tab is named for the place, not for the shell that drew it.
+    document.title = door.title
+    const zones = (await listHostZones()).filter(zone => zone !== this.#self)
     this.#root.replaceChildren()
 
     const style = document.createElement('style')
     style.textContent = STYLE
 
     const card = document.createElement('div')
-    card.className = welcome ? 'card door' : 'card'
+    card.className = 'card'
     const panel = document.createElement('div')
     panel.className = 'panel'
 
-    if (welcome) panel.append(...this.#frontDoor(welcome))
+    panel.append(...this.#frontDoor(door))
+    if (this.#self) panel.append(this.#published())
+    panel.append(this.#carried(zones))
+    if (door.footer.length > 0) panel.append(this.#footer(door.footer))
 
-    const form = document.createElement('form')
-    const input = document.createElement('input')
-    input.placeholder = 'hypercomb.com'
-    input.spellcheck = false
-    input.autocapitalize = 'off'
-    input.setAttribute('aria-label', 'Domain to add')
-    const add = document.createElement('button')
-    add.type = 'submit'
-    add.textContent = 'Add'
-    form.append(input, add)
-    form.addEventListener('submit', (event) => {
-      event.preventDefault()
-      void this.#add(input.value)
-    })
-
-    const list = document.createElement('div')
-    for (const zone of zones) list.append(this.#hostRow(zone))
-    if (zones.length === 0) {
-      const empty = document.createElement('p')
-      empty.className = 'muted'
-      empty.style.border = 'none'
-      empty.textContent = 'No domains yet.'
-      list.append(empty)
-    }
-
-    const status = document.createElement('p')
-    status.className = 'status'
-
-    // With a front door above it, adding a domain is one section of a page and
-    // takes a section label; on a bare host it IS the page and keeps the h1.
-    const adding = document.createElement('section')
-    const heading = document.createElement(welcome ? 'h2' : 'h1')
-    heading.textContent = 'Add a domain'
-    if (welcome) heading.className = 'lbl'
-    const lede = document.createElement('p')
-    lede.className = 'lede'
-    lede.textContent = 'A host publishes packages. Add one, then choose what to take: replication fetches the whole closure of that signature, and every byte is verified against its own name before it is admitted.'
-    adding.append(heading, lede, form, list, status)
-
-    panel.append(adding)
     card.append(panel)
     this.#root.append(style, card)
-    // Focus belongs in the field only when the field is the point. On a front
-    // door it would scroll the page past everything the visitor came to read.
-    if (!welcome) input.focus()
   }
 
-  #frontDoor(welcome: Welcome): HTMLElement[] {
+  #frontDoor(door: FrontDoor): HTMLElement[] {
     const parts: HTMLElement[] = []
 
     const brand = document.createElement('div')
     brand.className = 'brand'
-    const mark = document.createElement('div')
-    mark.innerHTML = MARK
-    brand.append(mark.firstElementChild ?? mark)
+    brand.append(mark())
     const title = document.createElement('h1')
-    title.textContent = welcome.title || location.hostname
+    title.textContent = door.title
     brand.append(title)
-    if (welcome.tagline) {
-      const tagline = document.createElement('p')
-      tagline.textContent = welcome.tagline
-      brand.append(tagline)
-    }
+    const tagline = document.createElement('p')
+    tagline.textContent = door.tagline
+    brand.append(tagline)
     parts.push(brand)
 
-    if (welcome.links.length > 0) {
+    if (door.links.length > 0) {
       const links = document.createElement('section')
       const row = document.createElement('div')
       row.className = 'chips wide'
       // The first link leads: it is the one thing this origin most wants read.
-      welcome.links.forEach((link, index) => row.append(this.#linkChip(link, index === 0)))
+      door.links.forEach((link, index) => row.append(this.#linkChip(link, index === 0)))
       links.append(row)
       parts.push(links)
     }
 
-    if (welcome.doors.length > 0) {
+    if (door.doors.length > 0) {
       const directory = document.createElement('section')
       const label = document.createElement('p')
       label.className = 'lbl'
-      label.textContent = welcome.doorsLabel ||
-        `${welcome.doors.length} ${welcome.doors.length === 1 ? 'hive' : 'hives'} live here`
+      label.textContent = door.doorsLabel ||
+        `${door.doors.length} ${door.doors.length === 1 ? 'hive' : 'hives'} live here`
       const row = document.createElement('div')
       row.className = 'chips'
-      for (const door of welcome.doors) row.append(this.#doorChip(door))
+      for (const place of door.doors) row.append(this.#doorChip(place))
       directory.append(label, row)
       parts.push(directory)
     }
@@ -244,14 +242,18 @@ class HostPanelElement extends HTMLElement {
     const anchor = document.createElement('a')
     anchor.className = lead ? 'chip lead' : 'chip'
     anchor.href = link.href
-    // Somewhere else on the web opens in its own tab; somewhere on this origin
-    // is this site still, and replaces the page it was clicked from.
+    const label = document.createElement('b')
+    label.textContent = link.label
+    // Somewhere else on the web opens in its own tab and says so; somewhere on
+    // this origin is this site still, and replaces the page it was clicked from.
     if (anchor.origin !== location.origin) {
       anchor.target = '_blank'
       anchor.rel = 'noopener'
+      const out = document.createElement('i')
+      out.setAttribute('aria-hidden', 'true')
+      out.textContent = '↗'
+      label.append(out)
     }
-    const label = document.createElement('b')
-    label.textContent = link.label
     anchor.append(label)
     if (link.note) {
       const note = document.createElement('span')
@@ -277,41 +279,129 @@ class HostPanelElement extends HTMLElement {
     return anchor
   }
 
-  #hostRow(zone: string): HTMLElement {
+  /** What THIS origin publishes — the presentation of a host is what it
+   *  holds, so it is on the page before anyone types anything. */
+  #published(): HTMLElement {
+    const section = document.createElement('section')
+    const label = document.createElement('p')
+    label.className = 'lbl'
+    label.textContent = 'Published here'
+    const box = this.#hostBox(this.#self, true)
+    section.append(label, box)
+    this.#selfAnswer ??= this.#ask(this.#self)
+    void this.#fill(box, this.#selfAnswer, 'Nothing published here yet.')
+    return section
+  }
+
+  /** The domains you carry, and the field that adds one. */
+  #carried(zones: string[]): HTMLElement {
+    const section = document.createElement('section')
+    const heading = document.createElement('h2')
+    heading.className = 'lbl'
+    heading.textContent = 'Add a domain'
+    const lede = document.createElement('p')
+    lede.className = 'lede'
+    lede.textContent = 'Carry another host and what it publishes appears here. Replication fetches the whole closure of a signature, and every byte is verified against its own name before it is admitted.'
+
+    const form = document.createElement('form')
+    const input = document.createElement('input')
+    input.placeholder = 'hypercomb.com'
+    input.spellcheck = false
+    input.autocapitalize = 'off'
+    input.setAttribute('aria-label', 'Domain to add')
+    const add = document.createElement('button')
+    add.type = 'submit'
+    add.textContent = 'Add'
+    form.append(input, add)
+    form.addEventListener('submit', (event) => {
+      event.preventDefault()
+      void this.#add(input.value)
+    })
+
+    const list = document.createElement('div')
+    for (const zone of zones) {
+      const box = this.#hostBox(zone, false)
+      void this.#fill(box, this.#ask(zone), 'Nothing published here.')
+      list.append(box)
+    }
+
+    const status = document.createElement('p')
+    status.className = 'status'
+
+    section.append(heading, lede, form, list, status)
+    return section
+  }
+
+  #footer(links: readonly WelcomeLink[]): HTMLElement {
+    const footer = document.createElement('footer')
+    const made = document.createElement('span')
+    made.className = 'made'
+    made.append(mark(), document.createTextNode('hypercomb'))
+    footer.append(made)
+    for (const link of links) {
+      const anchor = document.createElement('a')
+      anchor.href = link.href
+      anchor.textContent = link.label
+      if (link.note) anchor.title = link.note
+      if (anchor.origin !== location.origin) {
+        anchor.target = '_blank'
+        anchor.rel = 'noopener'
+      }
+      footer.append(anchor)
+    }
+    return footer
+  }
+
+  #hostBox(zone: string, self: boolean): HTMLElement {
     const host = document.createElement('section')
-    host.className = 'host'
+    host.className = self ? 'host self' : 'host'
 
     const header = document.createElement('header')
     const name = document.createElement('span')
     name.className = 'zone'
     name.textContent = zone
-    const drop = document.createElement('button')
-    drop.className = 'drop'
-    drop.type = 'button'
-    drop.title = `Remove ${zone}`
-    drop.textContent = '✕'
-    drop.addEventListener('click', () => { void this.#remove(zone) })
-    header.append(name, drop)
+    header.append(name)
+    if (self) {
+      const tag = document.createElement('span')
+      tag.className = 'tag'
+      tag.textContent = 'this host'
+      header.append(tag)
+    } else {
+      const drop = document.createElement('button')
+      drop.className = 'drop'
+      drop.type = 'button'
+      drop.title = `Remove ${zone}`
+      drop.textContent = '✕'
+      drop.addEventListener('click', () => { void this.#remove(zone) })
+      header.append(drop)
+    }
 
     const body = document.createElement('div')
+    body.className = 'body'
     const loading = document.createElement('p')
     loading.className = 'muted'
     loading.textContent = 'Asking…'
     body.append(loading)
 
     host.append(header, body)
-    void this.#fillPackages(zone, body)
     return host
   }
 
-  async #fillPackages(zone: string, body: HTMLElement): Promise<void> {
-    let packages: HostPackage[] = []
-    try { packages = await listHostPackages(zone) } catch { packages = [] }
+  async #ask(zone: string): Promise<Answer> {
+    try { return await askHostPackages(zone) } catch { return { packages: [], answered: false } }
+  }
+
+  /** "Publishes nothing" and "did not answer" are different facts, and only
+   *  the second is about reachability — the box says which. */
+  async #fill(box: HTMLElement, pending: Promise<Answer>, nothing: string): Promise<void> {
+    const { packages, answered } = await pending
+    const body = box.querySelector('.body')
+    if (!body) return
     body.replaceChildren()
     if (packages.length === 0) {
       const none = document.createElement('p')
       none.className = 'muted'
-      none.textContent = 'Nothing published here, or the host did not answer.'
+      none.textContent = answered ? nothing : 'The host did not answer.'
       body.append(none)
       return
     }
@@ -329,9 +419,10 @@ class HostPanelElement extends HTMLElement {
     title.textContent = pkg.label
     const detail = document.createElement('span')
     const atoms = pkg.bees.length + pkg.dependencies.length + pkg.layers.length
-    detail.textContent =
-      `${pkg.packageSig.slice(0, 12)}… · ${atoms} atoms · ` +
-      `${pkg.bees.length} bees, ${pkg.dependencies.length} deps, ${pkg.layers.length} layers`
+    detail.textContent = atoms > 0
+      ? `${pkg.packageSig.slice(0, 12)}… · ${atoms} atoms · ` +
+        `${pkg.bees.length} bees, ${pkg.dependencies.length} deps, ${pkg.layers.length} layers`
+      : `${pkg.packageSig.slice(0, 12)}…${pkg.at ? ` · ${pkg.at.slice(0, 10)}` : ''}`
     label.append(title, detail)
 
     const take = document.createElement('button')
@@ -347,6 +438,7 @@ class HostPanelElement extends HTMLElement {
     if (this.#busy) return
     const zone = hostZone(raw)
     if (!zone) { this.#say(`"${raw.trim()}" is not a hostname.`, 'bad'); return }
+    if (zone === this.#self) { this.#say(`${zone} is this host — what it publishes is already on the page.`); return }
     const added = await addHostZone(zone)
     if (!added) { this.#say(`Could not add ${zone}.`, 'bad'); return }
     await this.#render()
