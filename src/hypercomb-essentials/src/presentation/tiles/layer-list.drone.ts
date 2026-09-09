@@ -49,6 +49,8 @@ const LIST_Z = 59990
  *  the rows at the same z. */
 const LIST_ORDER = 300
 const ROW_HEIGHT = '3.75rem'
+/** A press this long lifts the row (drag to reorder; let go to open its page). */
+const HOLD_MS = 420
 const HEX = 'polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)'
 const STYLE_ID = 'hc-layer-list-css'
 
@@ -148,6 +150,7 @@ export class LayerListDrone extends Drone {
     this.onEffect<CellCountPayload>('render:cell-count', payload => {
       if (!payload || payload.settled === false) return
       this.#rows = this.#rowsFrom(payload)
+      this.#rowsAt = this.#segments().join('/')
       this.#stale = false
       this.#pathOpen = false
       this.#render()
@@ -189,9 +192,15 @@ export class LayerListDrone extends Drone {
   /** The rows as last read — the harness's and the spec's window. */
   get rows(): readonly Row[] { return this.#rows }
 
+  /** The location the rows were read for. A sheet or the close-up closing
+   *  pops its synthetic history entry, and that too says `navigate` — with
+   *  the lineage unmoved and no render to follow. Only a real move makes
+   *  the rows stale. */
+  #rowsAt = ''
+
   #onNavigate = (): void => {
-    this.#stale = true
     this.#pathOpen = false
+    if (this.#segments().join('/') !== this.#rowsAt) this.#stale = true
     this.#render()
   }
 
@@ -380,15 +389,126 @@ export class LayerListDrone extends Drone {
     sub.textContent = this.#holds(row)
     text.append(name, sub)
 
+    // THE ROW'S OWN DOORS: ⋯ is the explicit way to the tile page (a hold
+    // is its shortcut, never the only door); › says a tap goes inside.
     const tail = document.createElement('span')
     tail.className = 'hc-ll-tail'
-    tail.textContent = row.branch ? '›' : ''
-    tail.setAttribute('aria-hidden', 'true')
+    const more = document.createElement('button')
+    more.type = 'button'
+    more.className = 'hc-ll-row-more'
+    more.dataset['action'] = 'row-more'
+    more.textContent = '⋯'
+    more.setAttribute('aria-label', this.#t('layer-list.more', 'more about this tile'))
+    more.addEventListener('click', e => { e.stopPropagation(); openTileMenu(row.label) })
+    tail.appendChild(more)
+    if (row.branch) {
+      const chev = document.createElement('span')
+      chev.className = 'hc-ll-chev'
+      chev.textContent = '›'
+      chev.setAttribute('aria-hidden', 'true')
+      tail.appendChild(chev)
+    }
 
     el.append(thumb, text, tail)
-    el.addEventListener('click', () => this.#open(row))
+    el.addEventListener('click', () => { if (!this.#consumeClick) this.#open(row) })
+    this.#bindHold(el, row)
     void this.#fillNote(row.label, sub, gen)
     return el
+  }
+
+  // ── hold: lift the row; drag to reorder; release still → the tile page ──
+
+  /** Swallows the click a hold or a drag leaves behind. */
+  #consumeClick = false
+  #drag: { pointerId: number; row: HTMLElement; startY: number; lastY: number; moved: boolean; timer: ReturnType<typeof setTimeout> | null; lifted: boolean } | null = null
+
+  #bindHold(el: HTMLElement, row: Row): void {
+    el.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || this.#drag) return
+      const timer = setTimeout(() => this.#lift(e.pointerId), HOLD_MS)
+      this.#drag = { pointerId: e.pointerId, row: el, startY: e.clientY, lastY: e.clientY, moved: false, timer, lifted: false }
+    })
+    el.addEventListener('pointermove', e => {
+      const d = this.#drag
+      if (!d || d.pointerId !== e.pointerId) return
+      if (!d.lifted) {
+        // A finger that travels before the hold lands is a scroll, not a
+        // hold — let the list scroll and forget the press.
+        if (Math.abs(e.clientY - d.startY) > 8) this.#dropHold()
+        return
+      }
+      e.preventDefault()
+      d.lastY = e.clientY
+      d.moved = true
+      this.#shuffle(d.row, e.clientY)
+    })
+    const end = (e: PointerEvent) => {
+      const d = this.#drag
+      if (!d || d.pointerId !== e.pointerId) return
+      this.#drag = null
+      if (d.timer) clearTimeout(d.timer)
+      if (!d.lifted) return
+      d.row.classList.remove('is-lifted')
+      this.#consumeClick = true
+      setTimeout(() => { this.#consumeClick = false }, 0)
+      if (d.moved) void this.#commitOrder()
+      else openTileMenu(row.label)
+    }
+    el.addEventListener('pointerup', end)
+    el.addEventListener('pointercancel', e => {
+      const d = this.#drag
+      if (!d || d.pointerId !== e.pointerId) return
+      this.#dropHold()
+      d.row.classList.remove('is-lifted')
+    })
+    // The browser's own long-press menu would take the hold.
+    el.addEventListener('contextmenu', e => { if (this.#mobile) e.preventDefault() })
+  }
+
+  #dropHold(): void {
+    const d = this.#drag
+    if (!d) return
+    if (d.timer) clearTimeout(d.timer)
+    this.#drag = null
+  }
+
+  #lift(pointerId: number): void {
+    const d = this.#drag
+    if (!d || d.pointerId !== pointerId) return
+    d.timer = null
+    d.lifted = true
+    d.row.classList.add('is-lifted')
+    try { d.row.setPointerCapture(pointerId) } catch { /* best effort */ }
+    try { navigator.vibrate?.(8) } catch { /* no haptics */ }
+  }
+
+  /** Move the lifted row to where the finger is: over the upper half of a
+   *  neighbour it goes before it, over the lower half, after. */
+  #shuffle(row: HTMLElement, y: number): void {
+    const list = row.parentElement
+    if (!list) return
+    for (const other of list.querySelectorAll<HTMLElement>('[data-role="list-row"]')) {
+      if (other === row) continue
+      const r = other.getBoundingClientRect()
+      if (y < r.top || y > r.bottom) continue
+      const before = y < r.top + r.height / 2
+      if (before && other.previousElementSibling !== row) list.insertBefore(row, other)
+      else if (!before && other.nextElementSibling !== row) list.insertBefore(row, other.nextElementSibling)
+      return
+    }
+  }
+
+  /** The order on screen becomes the layer's order — one act, every tile
+   *  written once, through the move drone (the same commit a rail drag makes). */
+  async #commitOrder(): Promise<void> {
+    const list = this.#element?.querySelector('[data-role="list-rows"]')
+    if (!list) return
+    const labels = [...list.querySelectorAll<HTMLElement>('[data-role="list-row"]')].map(r => r.dataset['label'] ?? '').filter(Boolean)
+    const before = this.#rows.map(r => r.label)
+    if (labels.join('\n') === before.join('\n')) return
+    const byLabel = new Map(this.#rows.map(r => [r.label, r]))
+    this.#rows = labels.map(l => byLabel.get(l)).filter((r): r is Row => !!r)
+    EffectBus.emitTransient('move:reorder-list', { labels })
   }
 
   /** The second line at rest — what the leaf holds, before its note lands. */
@@ -521,7 +641,12 @@ ${S} .hc-ll-hex img{display:block;width:100%;height:100%;object-fit:cover;}
 ${S} .hc-ll-text{min-width:0;display:flex;flex-direction:column;justify-content:center;gap:0.15rem;}
 ${S} .hc-ll-name{display:block;font-weight:600;font-size:1rem;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 ${S} .hc-ll-sub{display:block;font-size:0.8rem;line-height:1.25;color:rgba(var(--hc-chrome-ink,26,33,48),var(--hc-ink-a-quiet,0.62));overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-height:1em;}
-${S} .hc-ll-tail{font-size:1.5rem;line-height:1;color:rgba(var(--hc-chrome-accent,20,96,180),0.9);}
+${S} .hc-ll-tail{display:inline-flex;align-items:center;gap:0.1rem;line-height:1;color:rgba(var(--hc-chrome-accent,20,96,180),0.9);}
+${S} .hc-ll-chev{font-size:1.5rem;}
+${S} .hc-ll-row-more{appearance:none;border:0;background:none;color:rgba(var(--hc-chrome-ink,26,33,48),var(--hc-ink-a-quiet,0.62));font:inherit;font-size:1.4rem;line-height:1;min-width:2.4rem;min-height:2.4rem;cursor:pointer;}
+${S} .hc-ll-row{touch-action:pan-y;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;transition:transform .12s ease,box-shadow .12s ease,background .12s ease;}
+${S} .hc-ll-row.is-lifted{position:relative;z-index:1;background:rgb(var(--hc-chrome-glass,250,251,253));box-shadow:0 6px 18px rgba(0,0,0,0.22);transform:scale(1.02);touch-action:none;}
+@media (prefers-reduced-motion:reduce){${S} .hc-ll-row{transition:none;}}
 ${S} [data-role="list-empty"]{padding:2.5rem 1.4rem calc(2.5rem + max(var(--hc-controls-bottom,0px),env(safe-area-inset-bottom,0px)));text-align:center;}
 ${S} [data-role="list-empty"] p{margin:0 0 0.5rem;}
 ${S} .hc-ll-hint{color:rgba(var(--hc-chrome-ink,26,33,48),var(--hc-ink-a-quiet,0.62));font-size:0.9rem;}

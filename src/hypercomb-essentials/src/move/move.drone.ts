@@ -1370,6 +1370,19 @@ export class MoveDrone extends Drone {
     this.emitEffect('move:committed', { order: denseOrder })
   }
 
+  /** A whole new order, dense, from a surface that reads the layer as a
+   *  strip (the phone's list). Same write as a rail drag's commit. */
+  async reorderList(labels: readonly string[]): Promise<void> {
+    const orderProjection = window.ioc.get<OrderProjection>('@diamondcoreprocessor.com/OrderProjection')
+    if (orderProjection) {
+      await orderProjection.reorder([...labels])
+    }
+    await this.#persistDenseRanks(labels)
+    this.emitEffect('cell:reorder', { labels: [...labels] })
+    this.emitEffect('move:committed', { order: [...labels] })
+    void new hypercomb().act()
+  }
+
   /** The rail commit: walk the strip's slot array in order and give every
    *  occupied slot the next rank as its `index`, so the committed order IS
    *  the order on screen and the desktop's spiral reads it back dense. */
@@ -1427,3 +1440,13 @@ export class MoveDrone extends Drone {
 
 const _move = new MoveDrone()
 window.ioc.register('@diamondcoreprocessor.com/MoveDrone', _move)
+
+// THE LIST'S REORDER. The phone's list (layer-list.drone.ts) drags a row
+// to a new place and hands the WHOLE order here — the same commit a rail
+// drag makes: every tile's `index` = its rank in the strip, one deliberate
+// act, so the desktop's spiral reads it back dense. A command, never
+// replayed to late subscribers.
+EffectBus.on<{ labels?: unknown }>('move:reorder-list', payload => {
+  const labels = Array.isArray(payload?.labels) ? payload.labels.filter((l): l is string => typeof l === 'string' && !!l) : []
+  if (labels.length) void _move.reorderList(labels)
+})

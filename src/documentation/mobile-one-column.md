@@ -1,6 +1,22 @@
 # Mobile, one column — the phone reads a layer as a list, and does three things
 
-Status: **PASSES 1 + 2 BUILT, 2026-09-09** (see §6 — live on dev-4254 at
+Status: **PASSES 1 + 2 + 3 BUILT, 2026-09-09.** Pass 3 (live on dev-4254):
+**hold → hexagon → swipe to a face** on the tile page — on a phone the
+picture rests as a RECTANGLE (`RECT_CLIP`, the same six vertices) and
+morphs to the hexagon under the finger in 250 ms (`#holdShape`,
+`clip-path` transition, reduced-motion snaps) with the six face captions
+fading in; letting go returns it; the swipe-to-face mechanics are the
+existing `#bindHexGesture`. **Add inside** plate on the tile page (enters,
+then the Add sheet rises). **Row ⋯** → the tile page. **Hold a row** (420
+ms) lifts it: drag to reorder — the whole order goes to `MoveDrone
+.reorderList` via `move:reorder-list`, the same dense-rank write a rail
+drag makes — or let go still and it is the tile page. A sheet popping its
+synthetic history entry fires `navigate` with the lineage unmoved: the
+list compares segments before going stale. OWED from pass 3: the ROW's
+hold-rise variant (thumbnail rising to a ~120 px hexagon with faces under
+the finger) — a row hold is reorder-or-page for now.
+
+Earlier: **PASSES 1 + 2 BUILT, 2026-09-09** (see §6 — live on dev-4254 at
 375×812: the list, Back · Add · More, leaf tap → tile page, the toast,
 share + swarm on the deck, first-boot lands inside the seeded hive; the
 ADD SHEET with its five doors; More re-worded "this page"; and — pulled

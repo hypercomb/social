@@ -97,8 +97,8 @@ describe('rows', () => {
   it('paint in the payload order, › on branches only, the second line saying what a leaf holds', () => {
     expect(rows().map(r => r.dataset['label'])).toEqual(['sunrise', 'meadow', 'comb'])
     expect(row('meadow')?.dataset['kind']).toBe('branch')
-    expect(row('meadow')?.querySelector('.hc-ll-tail')?.textContent).toBe('›')
-    expect(row('sunrise')?.querySelector('.hc-ll-tail')?.textContent).toBe('')
+    expect(row('meadow')?.querySelector('.hc-ll-chev')).not.toBeNull()
+    expect(row('sunrise')?.querySelector('.hc-ll-chev')).toBeNull()
     expect(row('comb')?.querySelector('.hc-ll-sub')?.textContent).toBe('link')
     expect(row('meadow')?.querySelector('.hc-ll-sub')?.textContent).toBe('inside')
   })
@@ -128,7 +128,10 @@ describe('rows', () => {
     expect(el.querySelector('[data-role="list-empty"]')?.textContent).toContain('Nothing here yet.')
   })
 
-  it('a navigate clears the old page until the next pass', () => {
+  it('a navigate that did not move (a sheet popping its history entry) keeps the rows; a real move clears them until the next pass', () => {
+    window.dispatchEvent(new Event('navigate'))
+    expect(rows()).toHaveLength(3)
+    segments = ['honey-garden', 'meadow']
     window.dispatchEvent(new Event('navigate'))
     expect(rows()).toHaveLength(0)
     expect(el.querySelector('[data-role="list-empty"]')).toBeNull()
@@ -161,6 +164,49 @@ describe('the title bar', () => {
   it('⋯ opens the layer deck', () => {
     action('more').click()
     expect(out.deck).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("the row's own doors", () => {
+  it('⋯ opens the tile page without opening the row', () => {
+    const more = row('meadow')?.querySelector('[data-action="row-more"]') as HTMLButtonElement
+    more.click()
+    expect(out.view).toHaveBeenCalledWith({ label: 'meadow', segments: ['honey-garden'] })
+    expect(out.enter).not.toHaveBeenCalled()
+  })
+
+  it('a hold lifts the row; let go still and it is the tile page, not an enter', () => {
+    vi.useFakeTimers()
+    const r = row('meadow')!
+    r.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 3, button: 0, clientY: 100 }))
+    vi.advanceTimersByTime(500)
+    expect(r.classList.contains('is-lifted')).toBe(true)
+    r.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 3, clientY: 100 }))
+    expect(r.classList.contains('is-lifted')).toBe(false)
+    expect(out.view).toHaveBeenCalledWith({ label: 'meadow', segments: ['honey-garden'] })
+    r.click()
+    expect(out.enter).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('a hold that moves reorders the rows and hands the whole order to the move drone', () => {
+    vi.useFakeTimers()
+    const reorder = vi.fn()
+    const off = EffectBus.on('move:reorder-list', reorder)
+    const first = row('sunrise')!
+    const last = row('comb')!
+    const lastRect = { top: 200, bottom: 260, height: 60 }
+    vi.spyOn(last, 'getBoundingClientRect').mockReturnValue(lastRect as DOMRect)
+    vi.spyOn(row('meadow')!, 'getBoundingClientRect').mockReturnValue({ top: 130, bottom: 190, height: 60 } as DOMRect)
+    first.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 4, button: 0, clientY: 70 }))
+    vi.advanceTimersByTime(500)
+    first.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 4, clientY: 250 }))
+    expect(rows().map(r => r.dataset['label'])).toEqual(['meadow', 'comb', 'sunrise'])
+    first.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 4, clientY: 250 }))
+    expect(reorder).toHaveBeenCalledWith({ labels: ['meadow', 'comb', 'sunrise'] })
+    expect(out.view).not.toHaveBeenCalled()
+    off()
+    vi.useRealTimers()
   })
 })
 

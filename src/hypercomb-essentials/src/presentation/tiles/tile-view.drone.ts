@@ -134,6 +134,15 @@ const TAP = '4.6rem'
  *  numbers the aggregate-index and collections-landing hexes use — a tile in
  *  close-up must be the same shape as the tile you tapped. */
 const HEX_CLIP = 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)'
+/** THE SHAPE AT REST ON A PHONE: a rectangle with the same six vertices, so
+ *  `clip-path` can MORPH it into the hexagon under a finger (Jaime,
+ *  2026-09-09: "put a hexagon when you put your finger on the picture … a
+ *  quick fade to hexagon, like .25 seconds … I don't want to lose that space
+ *  for the text underneath"). Every pixel goes to the picture until the hand
+ *  is on it; then the six faces light up and a swipe toward one is that
+ *  face's act. Desktop keeps the hexagon at rest. */
+const RECT_CLIP = 'polygon(50% 0%, 100% 0%, 100% 100%, 50% 100%, 0% 100%, 0% 0%)'
+const MORPH_MS = 250
 const HEX_RATIO = '0.866'
 /** Travel that makes a horizontal drag a step to the next tile. Roughly a
  *  thumb's width — under it, a finger resting and lifting is still a tap. */
@@ -726,16 +735,21 @@ export class TileViewDrone extends Drone {
       `flex:0 0 auto;position:relative;box-sizing:content-box;padding:${FACE_PAD};`
     const hexFrame = document.createElement('div')
     hexFrame.dataset['role'] = 'hex-frame'
+    // ON A PHONE THE PICTURE RESTS AS A RECTANGLE and becomes the hexagon
+    // under the finger (`#holdShape`); a pointer device keeps the hexagon.
+    const restClip = this.#mobile() ? RECT_CLIP : HEX_CLIP
+    const morph = this.#mobile() && !matchMedia?.('(prefers-reduced-motion: reduce)')?.matches
+      ? `transition:clip-path ${MORPH_MS}ms ease;` : ''
     hexFrame.style.cssText =
       // border-box, or the 2px edge is ADDED to the sized box and the ratio
       // — and with it the hexagon — comes out slightly squashed.
       `box-sizing:border-box;aspect-ratio:${HEX_RATIO};padding:2px;background:${STEEL};` +
-      `clip-path:${HEX_CLIP};`
+      `clip-path:${restClip};${morph}`
     const hex = document.createElement('div')
     hex.dataset['role'] = 'picture'
     hex.style.cssText =
       'width:100%;height:100%;display:flex;align-items:center;justify-content:center;' +
-      `clip-path:${HEX_CLIP};background:#0b1018 center/cover no-repeat;`
+      `clip-path:${restClip};background:#0b1018 center/cover no-repeat;${morph}`
     // Until (or unless) a picture lands, the hexagon carries the tile's first
     // letter rather than sitting there as a black shape.
     const initial = document.createElement('span')
@@ -1190,6 +1204,26 @@ export class TileViewDrone extends Drone {
     }
   }
 
+  /** ADD INSIDE — enter the tile and open the Add sheet on what is (still)
+   *  an empty page. The sheet waits for the move to land: it refuses to
+   *  open under a view and names the page it adds to, so it must see the
+   *  new lineage first. */
+  #addInsideChip(label: string): Chip {
+    return {
+      action: 'add-inside',
+      glyph: 'add_box',
+      labelKey: 'tile-view.add-inside',
+      fallback: 'add inside',
+      run: () => {
+        this.close()
+        window.addEventListener('navigate', () => {
+          setTimeout(() => this.emitEffect('add:sheet-open', {}), 350)
+        }, { once: true })
+        this.emitEffect('tile:enter-request', { label })
+      },
+    }
+  }
+
   /** PICK IT, as a chip — arms the picker with this tile already in. Shared by
    *  the menu grid and the hexagon's bottom-left face. */
   #selectChip(label: string): Chip {
@@ -1268,7 +1302,12 @@ export class TileViewDrone extends Drone {
   ): Partial<Record<FaceDir, HTMLElement>> {
     const layer = document.createElement('div')
     layer.dataset['role'] = 'face-layer'
-    layer.style.cssText = `position:absolute;inset:${FACE_PAD};pointer-events:none;`
+    // On a phone the captions arrive WITH the hexagon — under the finger —
+    // and go with it; at rest the picture is the whole of it.
+    const hidden = this.#mobile()
+    layer.style.cssText =
+      `position:absolute;inset:${FACE_PAD};pointer-events:none;` +
+      (hidden ? `opacity:0;transition:opacity ${MORPH_MS}ms ease;` : '')
     const spans: Partial<Record<FaceDir, HTMLElement>> = {}
     for (const dir of FACE_DIRS) {
       const chip = faces[dir]
@@ -1329,6 +1368,7 @@ export class TileViewDrone extends Drone {
       committed = false
       e.stopPropagation()
       try { zone.setPointerCapture(e.pointerId) } catch { /* best effort */ }
+      this.#holdShape(zone, true)
     })
     zone.addEventListener('pointermove', e => {
       if (!start || start.id !== e.pointerId) return
@@ -1341,6 +1381,7 @@ export class TileViewDrone extends Drone {
       const dy = e.clientY - start.y
       start = null
       paint(null)
+      this.#holdShape(zone, false)
       if (this.#suspended) return
       if (Math.hypot(dx, dy) < FACE_PX) return
       const dir = aim(dx, dy)
@@ -1362,7 +1403,7 @@ export class TileViewDrone extends Drone {
       committed = true
       chip.run ? chip.run() : this.emitEffect('tile:action', { action: chip.action, label: this.#label ?? '' })
     })
-    zone.addEventListener('pointercancel', () => { start = null; paint(null) })
+    zone.addEventListener('pointercancel', () => { start = null; paint(null); this.#holdShape(zone, false) })
     // The click a committed drag leaves behind would land on whatever caption
     // the finger came up over. Capture phase, same reason the host swallows
     // its row-walk's trailing click.
@@ -1372,6 +1413,21 @@ export class TileViewDrone extends Drone {
       e.preventDefault()
       e.stopPropagation()
     }, true)
+  }
+
+  /** The finger is on the picture (or has left it): on a phone the rectangle
+   *  becomes the hexagon and the six faces light, ~a quarter second; letting
+   *  go returns it. A pointer device's hexagon is a hexagon already. */
+  #holdShape(zone: HTMLElement, held: boolean): void {
+    if (!this.#mobile()) return
+    zone.toggleAttribute('data-held', held)
+    const clip = held ? HEX_CLIP : RECT_CLIP
+    for (const role of ['hex-frame', 'picture'] as const) {
+      const el = zone.querySelector<HTMLElement>(`[data-role="${role}"]`)
+      if (el) el.style.clipPath = clip
+    }
+    const faces = zone.querySelector<HTMLElement>('[data-role="face-layer"]')
+    if (faces) faces.style.opacity = held ? '1' : '0'
   }
 
   /**
@@ -1584,6 +1640,9 @@ export class TileViewDrone extends Drone {
       groups.push({ title: this.#t('tile-view.creations', 'available creations'), chips: creations })
     }
     const actions = this.#actionChips(label)
+    // ADD INSIDE — how a leaf becomes a branch on a phone (mobile-one-column
+    // §2.2): walk in, and the Add sheet rises on the empty page.
+    actions.unshift(this.#addInsideChip(label))
     if (actions.length) {
       groups.push({ title: this.#t('tile-view.actions', 'actions'), chips: actions })
     }
