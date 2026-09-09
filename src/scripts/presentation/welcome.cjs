@@ -39,7 +39,7 @@ const compose = (doors) => ({
     + 'kept in your hands, and carried by the people who use it.',
   links: [
     { label: 'Watch the tour', href: '/tour/', note: '≈ 19 minutes · narrated, with captions' },
-    { label: 'Open hypercomb.io', href: 'https://hypercomb.io', note: 'the app — start a hive of your own' },
+    { label: 'Open hypercomb.io', href: 'https://hypercomb.io', note: 'the main app — start a hive of your own' },
     { label: 'Downloads', href: '/downloads/', note: 'desktop app · Windows, macOS, Linux' },
     { label: 'Browser extensions', href: '/downloads/#extensions', note: 'Smart Autolinker · No YouTube Shorts' },
   ],

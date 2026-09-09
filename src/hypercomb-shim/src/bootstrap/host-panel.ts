@@ -185,7 +185,7 @@ class HostPanelElement extends HTMLElement {
     if (welcome) heading.className = 'lbl'
     const lede = document.createElement('p')
     lede.className = 'lede'
-    lede.textContent = 'A host publishes packages. Add one, then choose what to take from it — every byte is verified against its own signature before it is admitted.'
+    lede.textContent = 'A host publishes packages. Add one, then choose what to take: replication fetches the whole closure of that signature, and every byte is verified against its own name before it is admitted.'
     adding.append(heading, lede, form, list, status)
 
     panel.append(adding)
@@ -336,7 +336,7 @@ class HostPanelElement extends HTMLElement {
 
     const take = document.createElement('button')
     take.type = 'button'
-    take.textContent = 'Install'
+    take.textContent = 'Replicate'
     take.addEventListener('click', () => { void this.#install(pkg, take) })
 
     row.append(label, take)
@@ -364,21 +364,21 @@ class HostPanelElement extends HTMLElement {
     if (this.#busy) return
     this.#busy = true
     for (const other of this.#root.querySelectorAll('button')) other.disabled = true
-    button.textContent = 'Installing…'
+    button.textContent = 'Replicating…'
     this.#say(`Replicating ${pkg.packageSig.slice(0, 12)}… from ${pkg.zone}.`)
 
     const outcome = await installPackage(pkg)
     if (!outcome.ok) {
       this.#busy = false
       for (const other of this.#root.querySelectorAll('button')) other.disabled = false
-      button.textContent = 'Install'
-      this.#say(outcome.error ?? 'Install failed.', 'bad')
-      console.warn('[shim] install incomplete', outcome)
+      button.textContent = 'Replicate'
+      this.#say(outcome.error ?? 'Replication failed.', 'bad')
+      console.warn('[shim] replication incomplete', outcome)
       return
     }
 
     this.#say(`Held ${outcome.fetched + outcome.present} atoms (${outcome.fetched} fetched). Starting…`, 'good')
-    console.log('[shim] install complete', outcome)
+    console.log('[shim] replication complete', outcome)
     // A reload, and only here. The import map has to be live BEFORE the first
     // module script evaluates, and the bees that just landed are exactly those
     // module scripts — so the honest move after a cold install is to start the

@@ -269,7 +269,7 @@ const boot = async (): Promise<void> => {
       : '[shim] 0 surfaces — no package is live')
     if (acquisition) acquisition.prompt()
     else renderBootFailure(new Error(
-      'Nothing is installed, and the bootstrap could not be loaded — so there is no way to install anything. ' +
+      'Nothing is held here, and the bootstrap could not be loaded — so there is no way to replicate anything. ' +
       'The origin must publish /pin and serve the bundle it names.',
     ))
   }
