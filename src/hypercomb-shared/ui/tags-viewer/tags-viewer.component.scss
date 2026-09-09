@@ -479,7 +479,11 @@ $mint: #6fbf94;
 
 // The offer to name what is picked. Dashed, like the other "there is more you
 // could do here" affordance in this panel (stage-selection).
-.bouquet-save-open {
+// Minting a keyword reads exactly like saving a bouquet: same dashed
+// affordance, same field, same pair of buttons. They are the two ways this
+// window gains a word, so they must not look like different mechanisms.
+.bouquet-save-open,
+.tag-create-open {
   display: flex;
   align-items: center;
   gap: 0.45em;
@@ -500,14 +504,16 @@ $mint: #6fbf94;
   &:hover { background: rgba($mint, 0.13); border-color: rgba($mint, 0.7); color: var(--hc-window-ink-loud); }
 }
 
-.bouquet-name-form {
+.bouquet-name-form,
+.tag-create-form {
   display: flex;
   align-items: center;
   gap: 0.35em;
   margin: 0 1em 0.6em;
 }
 
-.bouquet-name-input {
+.bouquet-name-input,
+.tag-create-input {
   flex: 1 1 auto;
   min-width: 0;
   padding: 0.3em 0.5em;
@@ -523,7 +529,9 @@ $mint: #6fbf94;
 }
 
 .bouquet-name-commit,
-.bouquet-name-cancel {
+.bouquet-name-cancel,
+.tag-create-commit,
+.tag-create-cancel {
   flex: 0 0 auto;
   background: none;
   border: 1px solid rgba(var(--acc), 0.35);
@@ -537,11 +545,18 @@ $mint: #6fbf94;
   &:hover { background: rgba(var(--acc), 0.16); color: var(--hc-panel-text); }
 }
 
-.bouquet-name-commit {
+.bouquet-name-commit,
+.tag-create-commit {
   border-color: rgba($mint, 0.6);
   color: var(--hc-window-ink-loud);
 
   &:hover { background: rgba($mint, 0.22); color: var(--hc-panel-text); }
+}
+
+.tag-create-error {
+  margin: -0.3em 1em 0.6em;
+  color: var(--hc-window-ink-quiet);
+  font-size: 0.7em;
 }
 
 .tags-bouquets-section {

@@ -185,6 +185,39 @@
       </div>
     </div>
 
+    <!-- ── Mint a keyword ──────────────────────────────────────────────────
+         Every other gesture here works on a mark that already exists:
+         behaviours mint the namespaced ones, and a plain keyword only ever
+         appeared by being applied somewhere first. Someone who wanted a NEW
+         word had nowhere to say it — which is exactly what "I did it but now
+         can't see how to add one" was reporting.
+
+         It sits ABOVE the vocabulary and outside every `@if` on it, because
+         the moment you most need to create a mark is when the list is empty
+         and there is nothing to hang the control off. -->
+    @if (!creating()) {
+      <button class="tag-create-open" type="button" (click)="beginCreate()" [attr.title]="'tags.create.hint' | t">
+        <span class="mat-sym" aria-hidden="true">new_label</span>{{ 'tags.create' | t }}
+      </button>
+    } @else {
+      <form class="tag-create-form" (submit)="$event.preventDefault(); submitCreate(newTag)">
+        <input
+          #newTag
+          class="tag-create-input"
+          type="text"
+          autocomplete="off"
+          (input)="clearCreateError()"
+          [attr.placeholder]="'tags.create.placeholder' | t"
+          [attr.aria-label]="'tags.create.placeholder' | t"
+        />
+        <button class="tag-create-commit" type="submit">{{ 'tags.create.commit' | t }}</button>
+        <button class="tag-create-cancel" type="button" (click)="cancelCreate()">{{ 'tags.create.cancel' | t }}</button>
+      </form>
+      @if (createError(); as err) {
+        <p class="tag-create-error" role="alert">{{ err | t }}</p>
+      }
+    }
+
     <!-- What is filtered right now, and the way out of it. -->
     <section class="tags-active-section">
       @if (hasFilter()) {
