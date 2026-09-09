@@ -28,6 +28,7 @@ import { Container, Text, Graphics } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import { TILE_STACK_DEPTHS, type TileStackDepths } from './tile-stack.js'
 import { TileBadgeLayer, BADGE_CORNER, type Axial } from './badge-layer.js'
+import { trackSceneText } from '../grid/screen-text-resolution.js'
 
 type CellCountPayload = {
   count: number
@@ -179,6 +180,7 @@ export class HolderBadgeDrone extends Drone {
       })
       text.anchor.set(1, 0.5)          // grows leftward from the anchor
       this.#drawGlyph(glyph)
+      trackSceneText(text, this.#badgeLayer.layer!)
       box.addChild(bg, glyph, text)
       this.#badgeLayer.layer!.addChild(box)
       b = { box, bg, glyph, text }

@@ -27,6 +27,7 @@
 import { Drone } from '@hypercomb/core'
 import { Container, Graphics, Sprite, Text, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
+import { trackSceneText } from '../grid/screen-text-resolution.js'
 
 /** The `drop:target` broadcast. `over` is absent on payloads written before the
  *  pointer path started reporting, and absent reads as "yes, over the hive" —
@@ -310,6 +311,7 @@ export class DropLandingDrone extends Drone {
     })
     text.anchor.set(0.5)
     if (text.width > width * 0.82) text.scale.set((width * 0.82) / text.width)
+    trackSceneText(text, this.#renderContainer!)
     node.addChild(text)
 
     const border = new Graphics()

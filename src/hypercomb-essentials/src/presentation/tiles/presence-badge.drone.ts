@@ -26,6 +26,7 @@ import { Container, Sprite, Text, Graphics, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import { bakeBeeAtlas } from '../avatars/bee-ab-atlas.js'
 import { TileBadgeLayer, BADGE_CORNER, type Axial } from './badge-layer.js'
+import { trackSceneText } from '../grid/screen-text-resolution.js'
 
 const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 
@@ -200,6 +201,7 @@ export class PresenceBadgeDrone extends Drone {
         },
       })
       text.anchor.set(0, 0.5)
+      trackSceneText(text, this.#badgeLayer.layer!)
       box.addChild(bg, bee, text)
       this.#badgeLayer.layer!.addChild(box)
       b = { box, bg, bee, text }

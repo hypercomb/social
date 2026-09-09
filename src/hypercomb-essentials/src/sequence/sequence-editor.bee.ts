@@ -41,6 +41,7 @@
 import { Worker } from '@hypercomb/core'
 import { Container, Graphics, Text, Point } from 'pixi.js'
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
+import { trackSceneText } from '../presentation/grid/screen-text-resolution.js'
 
 const RETURN_KEY = 'hc:@diamondcoreprocessor.com/SequenceEditorBee:return'
 
@@ -544,6 +545,7 @@ export class SequenceEditorBee extends Worker {
       })
       label.anchor.set(0.5)
       label.position.set(cx, cy)
+      trackSceneText(label, this.#renderContainer!)
       this.#targets!.addChild(label)
     })
   }

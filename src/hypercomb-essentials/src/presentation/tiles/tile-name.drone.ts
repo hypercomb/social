@@ -67,6 +67,13 @@ const NAME_EM = 5.6
 const BIG_HEAD_EM = 7.5
 const BIG_HEAD_TRACKING = 0.16
 const NAME_TRACKING = 0.04
+/** A name is kept INSIDE its tile: it may run this many circumradii wide and
+ *  is then cut with an ellipsis. A point-top hexagon is √3·R across its middle,
+ *  where the band sits, so 1.55 uses nearly the whole tile and still leaves the
+ *  border its margin. Cutting is the only lever left once size is fixed and
+ *  wrapping is out — and a name must never spill onto its neighbour
+ *  (Jaime, 2026-09-09: "the text can't go over the outside"). */
+const MAX_WIDTH_R = 1.55
 /** Half-height of one band row — the shader's `u_radiusPx * 0.15`. */
 const ROW_H_R = 0.15
 /** Runs after Pixi's own render (UPDATE_PRIORITY.LOW = −25) so the transform
@@ -91,6 +98,7 @@ const STYLE = `
 .hc-tile-names{position:absolute;left:0;top:0;overflow:hidden;pointer-events:none;user-select:none;z-index:1}
 .hc-tile-names-world{position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0}
 .hc-tile-names span{position:absolute;left:0;top:0;white-space:nowrap;line-height:1;transform-origin:0 0;
+  overflow:hidden;text-overflow:ellipsis;
   font-family:var(--hc-tile-name-font,${FONT_STACK});font-weight:var(--hc-tile-name-weight,${NAME_WEIGHT});
   font-size:${LAYOUT_PX}px;letter-spacing:${NAME_TRACKING}em;color:var(--hc-tile-name-color,#fff);
   text-align:center}
@@ -291,6 +299,9 @@ export class TileNameDrone extends Drone {
     // runs wider; nothing about its letters changes.
     const em = this.#bigHead ? BIG_HEAD_EM : NAME_EM
     const scale = em / LAYOUT_PX
+    // Cut, never spill. maxWidth is in the span's own layout units, so it is
+    // the world bound divided back through the scale the span is drawn at.
+    span.style.maxWidth = `${(MAX_WIDTH_R * R) / scale}px`
     const rotate = this.#pivot ? ' rotate(90deg)' : ''
     span.style.transform = `translate(${x}px,${y}px)${rotate} scale(${scale}) translate(-50%,-50%)`
   }

@@ -44,3 +44,34 @@ export function followTextResolution(
     if (text && text.resolution !== resolution) text.resolution = resolution
   }
 }
+
+// ── the scene-text registry ─────────────────────────────────────────
+//
+// Any Text parented under the render container is magnified by the camera, so
+// a bake at the renderer's own resolution is right at exactly one zoom. Rather
+// than teach every drone its own ticker, a drone hands its text here once and
+// the Pixi host runs ONE pass per frame (refreshSceneText) that keeps them all
+// on the pixel grid. Cheap: a scale read, then one compare per text.
+//
+// Membership is by the text itself, so a destroyed text drops out on the next
+// pass and a drone needs no unregister call in its dispose.
+
+type Tracked = { text: Text; host: Container }
+const tracked = new Set<Tracked>()
+
+/** Follow the screen with this text, which is (or will be) parented under
+ *  host. Safe to call before the first render — the initial bake uses the
+ *  host's current transform and the per-frame pass corrects it. */
+export function trackSceneText(text: Text, host: Container): void {
+  text.resolution = screenTextResolution(containerScreenScale(host))
+  tracked.add({ text, host })
+}
+
+/** One pass over every tracked text. Called by the Pixi host each frame. */
+export function refreshSceneText(rendererResolution?: number): void {
+  for (const entry of tracked) {
+    if (entry.text.destroyed) { tracked.delete(entry); continue }
+    const resolution = screenTextResolution(containerScreenScale(entry.host), rendererResolution)
+    if (entry.text.resolution !== resolution) entry.text.resolution = resolution
+  }
+}

@@ -2,6 +2,7 @@
 import { Worker, EffectBus } from '@hypercomb/core'
 import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
 import { Application, Container } from 'pixi.js'
+import { refreshSceneText } from '../grid/screen-text-resolution.js'
 import {
   computeStageCenter,
   computeViewportOrigin,
@@ -246,6 +247,10 @@ export class PixiHostWorker extends Worker {
     })
     if (phone) app.ticker.maxFPS = 30
     followDevicePixelRatio(app, phone)
+    // Keep every registered scene text baked at the density it is DISPLAYED
+    // at (see grid/screen-text-resolution.ts). Priority −27 puts it after
+    // Pixi's own render, so the transforms it reads are the ones just drawn.
+    app.ticker.add(() => refreshSceneText(app.renderer.resolution), undefined, -27)
     const pixiInitMs = performance.now() - tPixiInit
     console.log(`[pixi-host] Application.init() ${pixiInitMs.toFixed(0)}ms`)
     ;(window as any).__hcBoot?.(`Application.init() done (${pixiInitMs.toFixed(0)}ms)`)
