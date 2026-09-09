@@ -10,6 +10,7 @@
 //     host: every dep of `searchVocabulary` is injected.
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { EffectBus } from '@hypercomb/core'
 
 vi.hoisted(() => {
   ;(window as unknown as { ioc: unknown }).ioc = {
@@ -274,5 +275,119 @@ describe('a slow host', () => {
     }, { surface: 'd'.repeat(64) })
     expect(result.findings).toHaveLength(2)
     expect(result.findings.every(f => f.verdict === 'unknown' && f.why === 'malformed')).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE ONE ACT ON A RESULT — an offer, never an adoption
+// ---------------------------------------------------------------------------
+//
+// A finding says a PUBLISHER declares the word; what a reader can hold is a
+// CREATION. The switch is therefore the same offer the community page and the
+// host directory make: one creation, shaded in your hive, taken by walking
+// into it. It must never remove, reorder, fade or collapse a row — the whole
+// file exists to stop an unknown reading as an absence.
+
+/** The table is filled ON THE WAY to the horizon, so a spec fills it where
+ *  production does — inside the seam, after look() has cleared it. */
+const fills = (el: VocabularyFindElement, offers: ReturnType<typeof offerOf>[]): void => {
+  const horizon = { publishers: [{ pubkey: K1, hosts: ['one.example.com'] }] }
+  el.gatherHorizon = async () => {
+    el.takeable = new Map([[K1, offers]])
+    return horizon
+  }
+}
+
+const offerOf = (pubkey: string, name: string) => ({
+  name, pubkey, hosts: ['one.example.com'], lineageKey: name, segments: [name], head: 'a'.repeat(64),
+})
+
+describe('a result carries the switch that offers what the publisher publishes', () => {
+  it('draws one chip per creation, after the doors, and never touches the rows', async () => {
+    const el = mount()
+    drive(el, fakeReader(), { publishers: [{ pubkey: K1, hosts: ['one.example.com'] }] },
+      { address: ADDRESS, findings: [declared(K1, 'one.example.com')] })
+    fills(el, [offerOf(K1, 'revolucion'), offerOf(K1, 'meetup')])
+    await el.look('cigar')
+
+    const rows = [...document.querySelectorAll('.hc-find-row')]
+    expect(rows).toHaveLength(1)
+    const chips = [...rows[0]!.querySelectorAll('.hc-find-take')]
+    expect(chips.map(c => c.textContent)).toEqual([
+      'revolucion · show in my hive', 'meetup · show in my hive',
+    ])
+    // After the evidence, never inside it.
+    const strip = rows[0]!.querySelector('.hc-find-takes')!
+    const doors = rows[0]!.querySelector('.hc-find-doors')!
+    expect(doors.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('a publisher with no creations this reader has seen gets no strip at all', async () => {
+    const el = mount()
+    drive(el, fakeReader(), { publishers: [{ pubkey: K1, hosts: ['one.example.com'] }] },
+      { address: ADDRESS, findings: [unknown(K1, 'unreachable', 'one.example.com')] })
+    await el.look('cigar')
+    expect(document.querySelector('.hc-find-takes')).toBeNull()
+    // and the row itself is untouched — full weight, its own words
+    expect(document.querySelector('.hc-find-row.is-unknown')).toBeTruthy()
+  })
+
+  it('offers a creation and withdraws it — one creation, never a branch', async () => {
+    const emitted: { name: string; payload: unknown }[] = []
+    const spy = vi.spyOn(EffectBus, 'emit').mockImplementation(((name: string, payload: unknown) => {
+      emitted.push({ name, payload })
+    }) as never)
+    try {
+      const el = mount()
+      drive(el, fakeReader(), { publishers: [{ pubkey: K1, hosts: ['one.example.com'] }] },
+        { address: ADDRESS, findings: [declared(K1, 'one.example.com')] })
+      fills(el, [offerOf(K1, 'revolucion')])
+      await el.look('cigar')
+
+      ;(document.querySelector('.hc-find-take') as HTMLButtonElement).click()
+      expect(emitted.filter(e => e.name === 'community:offer')).toHaveLength(1)
+      expect(emitted.find(e => e.name === 'community:offer')?.payload).toMatchObject({
+        name: 'revolucion', pubkey: K1, lineageKey: 'revolucion',
+      })
+      expect(emitted.some(e => e.name.includes('adopt'))).toBe(false)
+    } finally { spy.mockRestore() }
+  })
+
+  it('reads the switch state from the offers authority, so an offer made elsewhere already shows', async () => {
+    const held = new Set(['revolucion'])
+    const previous = (window as unknown as { ioc: { get: (k: string) => unknown } }).ioc
+    ;(window as unknown as { ioc: unknown }).ioc = {
+      ...previous,
+      get: (key: string) => key === '@diamondcoreprocessor.com/StaticPeersDrone'
+        ? { isOffered: (name: string) => held.has(name), offers: () => [] }
+        : undefined,
+    }
+    try {
+      const el = mount()
+      drive(el, fakeReader(), { publishers: [{ pubkey: K1, hosts: ['one.example.com'] }] },
+        { address: ADDRESS, findings: [declared(K1, 'one.example.com')] })
+      fills(el, [offerOf(K1, 'revolucion'), offerOf(K1, 'meetup')])
+      await el.look('cigar')
+
+      const chips = [...document.querySelectorAll('.hc-find-take')]
+      expect(chips[0]!.textContent).toBe('revolucion · shown in your hive')
+      expect(chips[0]!.getAttribute('aria-pressed')).toBe('true')
+      expect(chips[1]!.textContent).toBe('meetup · show in my hive')
+      expect(chips[1]!.getAttribute('aria-pressed')).toBe('false')
+    } finally { (window as unknown as { ioc: unknown }).ioc = previous }
+  })
+
+  it('forgets a stale search’s creations before the next one draws', async () => {
+    const el = mount()
+    drive(el, fakeReader(), { publishers: [{ pubkey: K1, hosts: ['one.example.com'] }] },
+      { address: ADDRESS, findings: [declared(K1, 'one.example.com')] })
+    fills(el, [offerOf(K1, 'revolucion')])
+    await el.look('cigar')
+    expect(document.querySelectorAll('.hc-find-take')).toHaveLength(1)
+    // look() clears the table first; a horizon gathered with no ledger behind
+    // it puts nothing back, which is what a search with no ledger looks like.
+    el.gatherHorizon = async () => ({ publishers: [{ pubkey: K1, hosts: ['one.example.com'] }] })
+    await el.look('maduro')
+    expect(document.querySelectorAll('.hc-find-take')).toHaveLength(0)
   })
 })

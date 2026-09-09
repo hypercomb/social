@@ -188,3 +188,26 @@ export const NAME_UNKNOWN_LOCALLY = '(name not known locally)'
 export const namelessFooter = (n: number): string =>
   `${n} address${n === 1 ? '' : 'es'} ${n === 1 ? 'has' : 'have'} no local spelling. ` +
   `${n === 1 ? 'It is' : 'They are'} still declared.`
+
+// ---------------------------------------------------------------------------
+// THE ONE ACT A RESULT OFFERS
+// ---------------------------------------------------------------------------
+//
+// A finding is about a WORD; what you can hold is a CREATION. So the act on a
+// row is never "take this word" — it is the same offer the community page and
+// the host directory make: the publisher's creation stands in your hive,
+// shaded, and walking into it is what takes it. Nothing here adopts a branch.
+
+/** Above the chips, when a publisher in the results has creations to offer. */
+export const OFFER_HEAD = 'what they publish'
+
+/** The switch, off and on. Short, because a row already carries a verdict, a
+ *  key and its doors. */
+export const OFFER_SHOW = 'show in my hive'
+export const OFFER_SHOWN = 'shown in your hive'
+
+/** The sentence the switch carries for a reader who stops on it. */
+export const offerWords = (name: string, offered: boolean): string =>
+  offered
+    ? `“${name}” stands in your hive — press to stop showing it`
+    : `Show “${name}” in your hive — it stands shaded until you walk into it`
