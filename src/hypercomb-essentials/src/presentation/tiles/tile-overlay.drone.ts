@@ -274,12 +274,18 @@ const HINT_PILL_ALPHA = 0.82
 const HINT_PILL_PAD_X = 2.5
 const HINT_PILL_PAD_Y = 2
 const HINT_PILL_RADIUS = 2
-// Hint Text rasterisation resolution. The stage is scaled 1.8× and the
-// camera can zoom further, so the renderer's default DPR alone leaves
-// the 6pt font visibly soft. Oversample at 4× DPR (min 6) so the texture
-// stays sharp through typical zoom-in. Matches the SVG icon strategy
-// (rasterise at 4× viewBox — see hex-icon-button.ts).
-const HINT_TEXT_RESOLUTION = Math.max(6, (typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1) * 4)
+// Hint / cue Text rasterisation follows the SCREEN, not a fixed oversample.
+// The overlay lives in world space (stage ×1.8, then the camera), so a bake
+// at one fixed density is minified when zoomed out and magnified when zoomed
+// in — bilinear either way — and the glyphs read soft at every zoom except
+// the one the constant happened to match. Baking at exactly
+// (world scale × renderer resolution) lands one raster texel on one device
+// pixel; the animation ticker re-bakes the moment the camera moves the text
+// off that grid (see #followTextResolution). Eighth steps bound the churn
+// during a continuous zoom while keeping the oversample under 12.5%.
+const TEXT_RESOLUTION_STEP = 8
+const TEXT_RESOLUTION_MIN = 0.5
+const TEXT_RESOLUTION_MAX = 24
 
 // ── The verb cue ──────────────────────────────────────────────────────
 // While a mode owns the tile click — the clipboard window, a bouquet in
@@ -1283,6 +1289,7 @@ export class TileOverlayDrone extends Drone {
         if (this.#arrangeMode || this.#iconEditOn) {
           this.#animateArrangeWiggle()
         }
+        this.#followTextResolution()
       }
       this.#app.ticker.add(this.#animTickBound)
     }
@@ -2661,7 +2668,8 @@ export class TileOverlayDrone extends Drone {
         fill: HINT_COLOR,
         align: 'center',
       }),
-      resolution: HINT_TEXT_RESOLUTION,
+      resolution: this.#screenTextResolution(),
+      roundPixels: true,
     })
     this.#hintText.anchor.set(0.5, 0)
     this.#hintText.position.set(action.button.position.x, HINT_Y_OFFSET)
@@ -2699,7 +2707,8 @@ export class TileOverlayDrone extends Drone {
         wordWrap: true,
         wordWrapWidth: HINT_MAX_WIDTH,
       }),
-      resolution: HINT_TEXT_RESOLUTION,
+      resolution: this.#screenTextResolution(),
+      roundPixels: true,
     })
     this.#hintDescriptionText.anchor.set(0, 0)
 
@@ -2765,6 +2774,30 @@ export class TileOverlayDrone extends Drone {
     this.#hintActionName = null
     this.#hintExpanded = false
     this.#clearHintText()
+  }
+
+  /** Raster density that puts one texel of a world-space Text on one device
+   *  pixel: the render container's screen scale × the renderer's resolution,
+   *  rounded UP to the next eighth so the raster never runs short. */
+  #screenTextResolution(): number {
+    const wt = this.#renderContainer?.worldTransform
+    const scale = wt ? Math.hypot(wt.a, wt.b) : 1
+    const dpr = this.#renderer?.resolution ?? (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1)
+    const raw = Math.ceil(scale * dpr * TEXT_RESOLUTION_STEP) / TEXT_RESOLUTION_STEP
+    return Math.min(TEXT_RESOLUTION_MAX, Math.max(TEXT_RESOLUTION_MIN, raw))
+  }
+
+  /** Every frame: if the camera has moved a live hint or cue off its raster
+   *  grid, re-bake it at the new density. Pixi regenerates the texture on a
+   *  resolution change and leaves the logical size alone, so pills and
+   *  positions stay valid. A few compares per frame when nothing is showing. */
+  #followTextResolution(): void {
+    const cueText = this.#swapCue?.children.find((child): child is Text => child instanceof Text) ?? null
+    if (!this.#hintText && !this.#hintDescriptionText && !cueText) return
+    const res = this.#screenTextResolution()
+    for (const text of [this.#hintText, this.#hintDescriptionText, cueText]) {
+      if (text && text.resolution !== res) text.resolution = res
+    }
   }
 
   /** Rounded translucent pill sized to a hint Text (anchored 0.5,0 at
@@ -4022,7 +4055,8 @@ export class TileOverlayDrone extends Drone {
         fill: verb.color,
         align: 'center',
       }),
-      resolution: HINT_TEXT_RESOLUTION,
+      resolution: this.#screenTextResolution(),
+      roundPixels: true,
     })
     // Pill bottom edge sits SWAP_CUE_MARGIN above the hex's circumradius.
     const topY = -(this.#geo.circumRadiusPx + SWAP_CUE_MARGIN) - text.height - HINT_PILL_PAD_Y
