@@ -99,6 +99,25 @@ type InstallManifest = {
   source?: 'bundled' | 'sentinel'
 }
 
+/** Is this origin's hive EMPTY — no bytes at the root at all?
+ *
+ *  The only question the dark-start gate may ask, because it is the only one
+ *  about the hive rather than about a cache of it. A sig file, a lineage
+ *  sigbag, a pool, a packed-store generation — any entry means content, and
+ *  content means this is not a first run.
+ *
+ *  Every uncertain answer is `false`: no OPFS, an enumeration that throws, a
+ *  root that has not resolved. Refusing to darken a hive we cannot read is
+ *  the whole point — the cost of a wrong `true` is a participant's entire
+ *  roster, silently. */
+export const hiveLooksEmpty = async (store: Store): Promise<boolean> => {
+  if (!store.opfsAvailable || !store.hypercombRoot) return false
+  try {
+    for await (const [_name] of store.hypercombRoot.entries()) return false
+    return true
+  } catch { return false }
+}
+
 export const ensureInstall = async (): Promise<void> => {
   // register the central signature allowlist — scripts in the store skip re-verification
   const sigStore = new SignatureStore()
@@ -137,6 +156,25 @@ export const ensureInstall = async (): Promise<void> => {
   // darken it — and a hive whose install cache was wiped is unaffected for
   // the same reason.
   //
+  // AND EXCEPT FOR A HIVE THAT ALREADY HOLDS CONTENT. The claim above — "an
+  // existing hive already HAS the list, so this cannot darken it" — is false
+  // for the one population it matters for: a hive that PREDATES the roster
+  // has no on-list at all (it answers all-on from the legacy off-list), and
+  // the census seed that would materialize one runs 8s after boot, long after
+  // this line. So an established hive whose install cache went cold — an
+  // interrupted install, an origin change, localStorage evicted — took the
+  // dark path, and `[]` plus the `'*'` cohort stamp meant EVERY function on
+  // EVERY tile vanished permanently, with no seed left that could light them
+  // again. Reported from the hive as "none of the tiles have functions on
+  // them"; a reload could not fix it because the emptied list outlives the
+  // page.
+  //
+  // `usableCache` describes localStorage's manifest, never the hive. So ask
+  // the hive: bytes at the root mean somebody has been here, whatever the
+  // cache says. Unsure counts as content — starting a fresh hive lit is a
+  // preference the participant can change in one click, while darkening a
+  // real one destroys work they cannot see to recover.
+  //
   // EXCEPT FOR A VISITOR. A published site is not a fresh hive someone is
   // about to make their own — it is somebody else's finished creation, being
   // read. The visitor has no Beehaviors roster to opt in from, and the
@@ -147,7 +185,7 @@ export const ensureInstall = async (): Promise<void> => {
   // participant and a trap for a reader. The publisher already decided what
   // this creation looks like — `publish:lights` on the branch root carries
   // that decision, and the visit adopts it (sharing/publish-lights.ts).
-  if (!usableCache && !isVisitorSession()) seedDarkOnFreshInstall()
+  if (!usableCache && !isVisitorSession() && await hiveLooksEmpty(store)) seedDarkOnFreshInstall()
 
   if (!store.opfsAvailable) {
     // 'no-storage', not 'no-sentinel' — the welcome card renders an
