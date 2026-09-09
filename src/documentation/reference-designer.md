@@ -1,9 +1,8 @@
 # The reference designer — on empty hexes AND on tiles
 
-> **Status: BUILT 2026-09-06** (steps 1–6 of section 5 and the memo fence of
-> section 8; live on the dev build, not yet committed). Owed: the derived
-> "group" line in the window (section 7) and the one-time re-point of the four
-> references already written (section 6).
+> **Status: BUILT** (steps 1–6 of section 5 and the memo fence of section 8,
+> 2026-09-06; the four re-points of section 6, 2026-09-06; the derived "group"
+> line of section 7, 2026-09-09). Nothing owed.
 
 The Portals panel lets you drag a portal onto an empty hex, name the tile, and
 pick which of the portal's items it gathers. That is the designer. This doc
@@ -217,8 +216,13 @@ drag a tile onto the `people` row (ENROLL) or create inside `people`. Nothing
 records "gathered from people" on the holder's layer — a back-pointer there
 would move the holder's signature every time its members changed and ruin the
 merkle tree. The group is DERIVED: the common parent of the routes the
-reference children already carry. A "group" line in the window showing that
-derivation, with a door to it, is owed; the data for it exists today.
+reference children already carry. BUILT 2026-09-09: over a holder the window
+derives it (`references-window/gathered-from.ts`, most common parent of the
+children's routes, ties to the first seen) and shows "Already gathered from
+{group}" with one door, "Choose more from {group}", which makes the group the
+picker's source and lands the choices under the same holder. Nothing is
+written; the line is absent while the holder gathers nothing, and while the
+group is the very portal in hand.
 
 **Showing who a holder references — the facet, not a pair-word.** A pool named
 `associates:people` was considered and set aside: two user words around a
