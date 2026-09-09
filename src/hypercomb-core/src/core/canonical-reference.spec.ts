@@ -5,6 +5,7 @@ import {
   buildCanonicalVariantRecord,
   canonicalReferenceName,
   canonicalReferenceRoute,
+  canonicalRootSegments,
   normalizeReferenceMarks,
 } from './canonical-reference.js'
 
@@ -15,6 +16,14 @@ describe('canonical portal reference grammar', () => {
   it('keeps a name one safe segment, and a route a list of them', () => {
     expect(canonicalReferenceName('  peo/ple\\  ')).toBe('people')
     expect(canonicalReferenceRoute(['nest', ' peo/ple ', '', null])).toEqual(['nest', 'people'])
+  })
+
+  it('keeps canonicalRootSegments exported — published packages import it', () => {
+    // Core's export surface is a protocol. A package built while this name
+    // existed loads its whole namespace through it; dropping the export takes
+    // the namespace down on every participant already carrying that package.
+    expect(canonicalRootSegments('  peo/ple  ')).toEqual(['people'])
+    expect(canonicalRootSegments('   ')).toEqual([])
   })
 
   it('points at WHERE THE TARGET LIVES — the route is kept, never a root copy', () => {
