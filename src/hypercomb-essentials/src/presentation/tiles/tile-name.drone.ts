@@ -54,28 +54,55 @@ const SHOW_CELL_KEY = '@diamondcoreprocessor.com/ShowCellDrone'
 
 /** CSS layout size of a name. Scaled down to NAME_EM; never painted at this size. */
 const LAYOUT_PX = 40
-/** Em of a name at rest, in world px. The SDF drew 18 cell px of a 128-px cell
- *  spanning one circumradius (≈ 5.3 world px); this is a step up for
- *  legibility — the band is 0.3 R tall and had the room. */
-const NAME_EM = 6.5
-/** Widest a name may run, as a multiple of the circumradius (≈ 0.8 of a
- *  point-top hex's width). Longer names shrink uniformly, as the bake did. */
-const MAX_WIDTH_R = 1.4
+/** Em of a name, in world px. ONE SIZE FOR EVERY NAME — a long name is never
+ *  shrunk to fit. The SDF bake shrank any label wider than its cell, so
+ *  "pheromone-workflow" rendered visibly smaller than "sea" and the hive read
+ *  as several type sizes at once (Jaime, 2026-09-09: "we need a little bit
+ *  more consistency with the height and the width of the font ... it just
+ *  tries to fit to text"). A name too wide now WRAPS at this same size, so
+ *  every glyph on the hive is the same glyph. */
+const NAME_EM = 5.6
+/** BIG HEAD MODE — the genesis screen's treatment on the tiles: the same face,
+ *  uppercase, wide-tracked, and large enough to read across the room. */
+const BIG_HEAD_EM = 7.5
+const BIG_HEAD_TRACKING = 0.16
+const NAME_TRACKING = 0.04
+/** Widest a name may run before it wraps, as a multiple of the circumradius.
+ *  A point-top hexagon is √3·R wide across its middle — where the band sits —
+ *  so 1.6 uses nearly the whole tile and leaves the border its margin. */
+const MAX_WIDTH_R = 1.6
+/** A name wraps to at most this many lines; past that it is allowed to run
+ *  wider rather than shrink, because consistent size is the point. */
+const MAX_LINES = 2
 /** Half-height of one band row — the shader's `u_radiusPx * 0.15`. */
 const ROW_H_R = 0.15
 /** Runs after Pixi's own render (UPDATE_PRIORITY.LOW = −25) so the transform
  *  read is the one that was just drawn, never a frame behind. */
 const TICK_PRIORITY = -26
 
-const FONT_STACK = "'Source Sans 3', 'Source Sans Pro Light', system-ui, sans-serif"
+// THE SPLASH'S FACE. The hive's first words — "CLICK TO ENTER" on the genesis
+// screen — are set in the platform's monospace, and Jaime asked for the names
+// to speak in the same voice (2026-09-09). Same stack as splash.js, so the
+// tile names and that first screen resolve to the identical family on every
+// platform. The splash's .42em tracking is a wordmark treatment, not a reading
+// one — at tile size it would shred a name into loose letters, so the names
+// take a modest track instead ("maybe not the extra wide spacing but the same
+// text"). BIG HEAD MODE (see /big-head-mode) is the treatment worn whole:
+// uppercase, wider track, and a much larger em.
+const FONT_STACK = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace'
+/** A monospace's regular IS its reading weight; 300 would synthesise on faces
+ *  that have no light cut. --hc-tile-name-weight overrides. */
+const NAME_WEIGHT = 400
 
 const STYLE = `
 .hc-tile-names{position:absolute;left:0;top:0;overflow:hidden;pointer-events:none;user-select:none;z-index:1}
 .hc-tile-names-world{position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0}
 .hc-tile-names span{position:absolute;left:0;top:0;white-space:nowrap;line-height:1;transform-origin:0 0;
-  font-family:var(--hc-tile-name-font,${FONT_STACK});font-weight:var(--hc-tile-name-weight,400);
-  font-size:${LAYOUT_PX}px;letter-spacing:0.02em;color:var(--hc-tile-name-color,#fff)}
+  font-family:var(--hc-tile-name-font,${FONT_STACK});font-weight:var(--hc-tile-name-weight,${NAME_WEIGHT});
+  font-size:${LAYOUT_PX}px;letter-spacing:${NAME_TRACKING}em;color:var(--hc-tile-name-color,#fff);
+  text-align:center}
 .hc-tile-names span[hidden]{display:none}
+.hc-tile-names.hc-big-head span{letter-spacing:${BIG_HEAD_TRACKING}em;text-transform:uppercase}
 `
 
 export class TileNameDrone extends Drone {
@@ -88,7 +115,7 @@ export class TileNameDrone extends Drone {
   protected override listens: string[] = [
     'render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:geometry-changed',
     'render:set-orientation', 'render:set-pivot', 'render:set-text-only', 'tile:toggle-text',
-    'tile:hover', 'overlay:band-rows',
+    'tile:hover', 'overlay:band-rows', 'render:big-head-mode',
   ]
   protected override emits: string[] = ['tile-names:dom']
 
@@ -106,6 +133,7 @@ export class TileNameDrone extends Drone {
   #pivot = false
   #visible = true
   #hovered: string | null = null
+  #bigHead = false
   #band: BandRowsPayload = { rows: 1, label: null }
   #last = [NaN, NaN, NaN, NaN, NaN, NaN]
   #measure: CanvasRenderingContext2D | null = null
@@ -128,9 +156,14 @@ export class TileNameDrone extends Drone {
     this.onEffect('tile:toggle-text', () => { this.#visible = !this.#visible; if (this.#root) this.#root.hidden = !this.#visible })
     this.onEffect<HoverPayload>('tile:hover', (p) => { this.#hovered = p?.label ?? null; this.#refreshAll() })
     this.onEffect<BandRowsPayload>('overlay:band-rows', (p) => { this.#band = { rows: p?.rows ?? 1, label: p?.label ?? null }; this.#placeAll() })
+    this.onEffect<{ on: boolean }>('render:big-head-mode', (p) => {
+      this.#bigHead = !!p?.on
+      this.#root?.classList.toggle('hc-big-head', this.#bigHead)
+      this.#placeAll()
+    })
 
     // Fallback metrics measure wrong until the face arrives; re-fit then.
-    document.fonts?.load(`400 ${LAYOUT_PX}px 'Source Sans 3'`).then(() => this.#placeAll()).catch(() => { /* face optional */ })
+    document.fonts?.load(`${NAME_WEIGHT} ${LAYOUT_PX}px 'Source Sans 3'`).then(() => this.#placeAll()).catch(() => { /* face optional */ })
   }
 
   protected override dispose(): void {
@@ -160,7 +193,7 @@ export class TileNameDrone extends Drone {
     }
 
     const root = document.createElement('div')
-    root.className = 'hc-tile-names'
+    root.className = this.#bigHead ? 'hc-tile-names hc-big-head' : 'hc-tile-names'
     root.hidden = !this.#visible
     const world = document.createElement('div')
     world.className = 'hc-tile-names-world'
@@ -259,10 +292,29 @@ export class TileNameDrone extends Drone {
     const rows = this.#band.label === label ? Math.max(1, this.#band.rows) : 1
     const y = px.y + this.#meshOffset.y - (rows - 1) * ROW_H_R * R
 
-    // Uniform shrink for names wider than the band allows — the bake's rule.
-    const widthWorld = this.#measureWorld(text)
+    // ONE SIZE, ALWAYS. A name too wide for the tile wraps at this size rather
+    // than shrinking to fit, so no tile ever wears a smaller alphabet than its
+    // neighbour. The wrap width is set in LAYOUT px (the span's own units) and
+    // the whole span is then scaled down, which keeps the browser's line
+    // breaking working on real metrics.
+    const em = this.#bigHead ? BIG_HEAD_EM : NAME_EM
+    const scale = em / LAYOUT_PX
     const maxWorld = MAX_WIDTH_R * R
-    const scale = (NAME_EM / LAYOUT_PX) * (widthWorld > maxWorld ? maxWorld / widthWorld : 1)
+    const wraps = this.#measureWorld(text, em) > maxWorld
+    if (wraps) {
+      span.style.whiteSpace = 'normal'
+      // Break at spaces and hyphens ONLY. `anywhere` chopped MOUNTAINS into
+      // "MOUNTAIN" + an orphan "S"; a name with no break opportunity is
+      // allowed to run wider than its tile instead, because the one thing
+      // that must not vary is the size of the letters.
+      span.style.overflowWrap = 'normal'
+      span.style.width = `${maxWorld / scale}px`
+      span.style.maxHeight = `${MAX_LINES * LAYOUT_PX * 1.05}px`
+    } else {
+      span.style.whiteSpace = 'nowrap'
+      span.style.width = ''
+      span.style.maxHeight = ''
+    }
     const rotate = this.#pivot ? ' rotate(90deg)' : ''
     span.style.transform = `translate(${x}px,${y}px)${rotate} scale(${scale}) translate(-50%,-50%)`
   }
@@ -276,16 +328,18 @@ export class TileNameDrone extends Drone {
 
   /** Advance of `text` at NAME_EM, in world px, measured once per placement
    *  off a scratch 2D context in the same face the span renders in. */
-  #measureWorld(text: string): number {
+  #measureWorld(text: string, em: number): number {
     if (!this.#measure) {
       const cv = document.createElement('canvas')
       this.#measure = cv.getContext('2d')
       if (!this.#measure) return 0
     }
     const ctx = this.#measure
-    ctx.font = `400 ${LAYOUT_PX}px ${FONT_STACK}`
-    try { (ctx as unknown as { letterSpacing: string }).letterSpacing = `${LAYOUT_PX * 0.02}px` } catch { /* older engine */ }
-    return ctx.measureText(text).width * (NAME_EM / LAYOUT_PX)
+    const track = this.#bigHead ? BIG_HEAD_TRACKING : NAME_TRACKING
+    const body = this.#bigHead ? text.toUpperCase() : text
+    ctx.font = `${NAME_WEIGHT} ${LAYOUT_PX}px ${FONT_STACK}`
+    try { (ctx as unknown as { letterSpacing: string }).letterSpacing = `${LAYOUT_PX * track}px` } catch { /* older engine */ }
+    return ctx.measureText(body).width * (em / LAYOUT_PX)
   }
 }
 

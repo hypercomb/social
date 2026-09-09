@@ -649,6 +649,26 @@ class PushToTalkProvider implements SlashBehaviourProvider {
   }
 }
 
+/** BIG HEAD MODE — the tile names wear the genesis screen's treatment: the
+ *  same monospace face they always wear, but uppercase, wide-tracked and much
+ *  larger, so a hive reads across a room. Names still never shrink to fit;
+ *  a long one wraps. */
+class BigHeadModeProvider implements SlashBehaviourProvider {
+  readonly name = 'big-head-mode-provider'
+  readonly priority = 100
+  readonly behaviours: SlashBehaviour[] = [
+    { name: 'big-head-mode', description: 'Tile names in the genesis screen\'s big uppercase type', descriptionKey: 'slash.big-head-mode',
+      examples: [{ input: '/big-head-mode', result: 'Names go large and uppercase; repeat to restore' }] }
+  ]
+
+  #active = false
+
+  execute(): void {
+    this.#active = !this.#active
+    EffectBus.emit('render:big-head-mode', { on: this.#active })
+  }
+}
+
 class TextOnlyProvider implements SlashBehaviourProvider {
   readonly name = 'text-only-provider'
   readonly priority = 100
@@ -810,6 +830,7 @@ _slashBehaviours.addProvider(new ExpandProvider())
 _slashBehaviours.addProvider(new OrganizeProvider())
 _slashBehaviours.addProvider(new VoiceProvider())
 _slashBehaviours.addProvider(new PushToTalkProvider())
+_slashBehaviours.addProvider(new BigHeadModeProvider())
 _slashBehaviours.addProvider(new TextOnlyProvider())
 _slashBehaviours.addProvider(new DocsProvider())
 _slashBehaviours.addProvider(new DomainProvider())

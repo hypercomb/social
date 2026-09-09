@@ -105,12 +105,55 @@ const ANCHOR_INTERVAL_MS = 400
 const FLAP_FPS = 13
 /** How far above its tile a bee dances, in CSS px. */
 const HOVER_PX = 38
+/** How far from a hovered tile's centre a bee must stand, as a multiple of the
+ *  hex circumradius. The overlay fills the tile with its icon rows and the name
+ *  band while the pointer is on it, and a bee dancing there sits on top of both
+ *  (Jaime, 2026-09-09: "when you mouse over a tile make sure that the agents
+ *  get out of the way"). 2.1 puts the bee clear of the hexagon with a margin,
+ *  near enough that it still reads as belonging to that tile. */
+const TILE_CLEARANCE_R = 2.1
 /** Fixed compact waggle size. Agent status must not pulse the path width. */
 const WAGGLE_SCALE = 0.34
 /** Ambient chatter changes slowly enough to read, but never becomes chrome. */
 const CHAT_TURN_SECONDS = 6
 const CHAT_MAX_PAIRS = 3
 const CHAT_BUBBLE_WIDTH = 154
+/** HOW BIG THE CHATTER READS — 60% of the size it was drawn at (Jaime,
+ *  2026-09-09: "the text is too big"). A bubble is drawn at a CONSTANT SCREEN
+ *  SIZE — `thought.scale.set(1 / worldScale)` cancels the camera — so there is
+ *  no zoom level at which this gets out of the way on its own, and no viewport
+ *  it adapts to. The number here is the only thing that decides it.
+ *
+ *  The BOX keeps its width. Narrowing it with the text would wrap the same
+ *  105-character line into twice as many lines and give back the height the
+ *  smaller type just saved; at the same width, smaller type simply means fewer
+ *  lines — the bubble gets shorter, which is the whole point. Padding follows
+ *  the text so the box still hugs it. */
+const CHAT_BUBBLE_SCALE = 0.6
+const CHAT_BUBBLE_FONT = 10.5 * CHAT_BUBBLE_SCALE
+const CHAT_BUBBLE_LINE = 14 * CHAT_BUBBLE_SCALE
+const CHAT_BUBBLE_PAD_X = 10 * CHAT_BUBBLE_SCALE
+const CHAT_BUBBLE_PAD_Y = 8 * CHAT_BUBBLE_SCALE
+/** Floor for a one-line bubble, so a short line still reads as a box. */
+const CHAT_BUBBLE_MIN_HEIGHT = 34 * CHAT_BUBBLE_SCALE
+/** THE VOICE THE BEES SPEAK IN. `system-ui` is the shell's chrome face —
+ *  Segoe UI on Windows — which is what a menu sounds like, not a conversation.
+ *  Source Sans 3 is the hive's OWN face (the same one the tile names are set
+ *  in, `tile-name.drone.ts`): a humanist sans with open counters and real
+ *  optical spacing, which is what still reads at this size where a display
+ *  serif would silt up. Self-hosted `@font-face` — latin + latin-ext, one
+ *  variable file per subset (`hypercomb-shared/fonts/_fonts.scss`), NOTHING
+ *  fetched from a third party. The stack behind it is the old chrome one, so
+ *  a subset that does not carry the glyph still says something.
+ *
+ *  Weight 400, not the 300 the face opens at: light-on-dark at six pixels
+ *  needs the stem, and the tracking below buys back the openness. */
+const CHAT_BUBBLE_FAMILY = "'Source Sans 3', system-ui, -apple-system, 'Segoe UI', sans-serif"
+const CHAT_BUBBLE_WEIGHT = '400'
+/** A whisker of tracking. At this size, on a dark ground, letters set solid
+ *  close their own gaps — this is the difference between a line you can read
+ *  at a glance and one you have to stop for. */
+const CHAT_BUBBLE_TRACKING = 0.15
 
 /** Keep-out margin between a thought bubble and the viewport edge, in CSS px. */
 const THOUGHT_EDGE_PX = 12
@@ -179,20 +222,22 @@ const beeBanter = (speaker: Agent, listener: Agent, turn: number): string => {
 //
 // THE SAME BEE, CALMER. It is not a second kind of bee and does not get a
 // second look to learn — same body, same colour, same name on the belly,
-// just slower and dimmer. It is also literally the same sprite: the id is
-// `chat:<convoId>`, which is exactly what the chat window raises when a
-// question goes out on that conversation, so sending one WAKES this bee into
-// the full dance instead of fading it out and flying a new one in.
+// just SLOWER. Never DIMMER: a bee that is on screen is solid, whatever it
+// is doing, so pace is the only thing rest changes. It is also literally the
+// same sprite: the id is `chat:<convoId>`, which is exactly what the chat
+// window raises when a question goes out on that conversation, so sending one
+// WAKES this bee into the full dance instead of fading it out and flying a
+// new one in.
 //
 // Never in the work registry. The orchestrator sweeps that for stalls, and a
 // resting bee sitting there as `working` would be reported silent after four
 // minutes and rogue after forty-five — a watchdog barking at furniture.
 
-/** How fast a resting bee's dance clock runs against a working one's. */
+/** How fast a resting bee's dance clock runs against a working one's. This is
+ *  the ONLY thing rest changes. A resting bee used to also be held at half
+ *  alpha, which read as a rendering fault rather than as calm — a bee that is
+ *  on screen at all is fully opaque. */
 const REST_PACE = 0.3
-/** How present a resting bee is. Enough to be seen and pressed, not enough to
- *  compete with a tile that is actually thinking. */
-const REST_ALPHA = 0.5
 /** Soonest the thread pool is re-read after a change. Threads move in bursts
  *  (a reply lands, a list refreshes); one read per burst is enough. */
 const REST_SETTLE_MS = 400
@@ -260,6 +305,8 @@ export class AgentBeeDrone extends Drone {
   #tipWhat: HTMLDivElement | null = null
   #tipWhere: HTMLDivElement | null = null
   #hovering = ''
+  /** The tile the pointer is on — bees standing on it step aside. */
+  #tileUnderPointer: string | null = null
   /** A press landed on a bee: swallow the pointerup/click that follows it. */
   #swallowPointer: number | null = null
   #swallowClickUntil = 0
@@ -289,6 +336,12 @@ export class AgentBeeDrone extends Drone {
     })
 
     this.onEffect<HexGeometry>('render:geometry-changed', geo => { this.#hexGeo = geo })
+
+    // The pointer entering a tile is what makes a bee step aside; the dance
+    // centre eases, so it glides out and glides back on its own.
+    this.onEffect<{ label?: string | null }>('tile:hover', p => {
+      this.#tileUnderPointer = p?.label ?? null
+    })
 
     this.onEffect(BEE_PERSONALITY_CHANGED, () => {
       // A participant edit changes the acting instructions immediately. Any
@@ -570,6 +623,34 @@ export class AgentBeeDrone extends Drone {
     return this.#atRoot() || this.#perched ? this.#viewAnchor(agent.id) : null
   }
 
+  /** World-space centre of the tile under the pointer, or null when the
+   *  pointer is off the hive. Resolved per frame from the same snapshot the
+   *  anchors use, so it follows a pan or a zoom for free. */
+  #pointerTileCentre = (): { x: number; y: number } | null => {
+    const label = this.#tileUnderPointer
+    if (!label) return null
+    const cells = ioc<ShowCellLike>('@diamondcoreprocessor.com/ShowCellDrone')?.snapshotCells?.() ?? []
+    const cell = cells.find(c => c.label === label)
+    return cell ? this.#axialToPixel(cell.q, cell.r) : null
+  }
+
+  /** How far to push a bee anchored at (x, y) so it clears the hovered tile.
+   *  Zero for every bee already outside the clearance ring, so a hover moves
+   *  only the bees that are actually in the way. Straight up when a bee sits
+   *  exactly on the centre — there is no direction to push it otherwise. */
+  #clearance = (x: number, y: number): { x: number; y: number } => {
+    const centre = this.#pointerTileCentre()
+    if (!centre) return { x: 0, y: 0 }
+    const clear = this.#hexGeo.circumRadiusPx * TILE_CLEARANCE_R
+    const dx = x - centre.x
+    const dy = y - centre.y
+    const distance = Math.hypot(dx, dy)
+    if (distance >= clear) return { x: 0, y: 0 }
+    if (distance < 0.001) return { x: 0, y: -clear }
+    const push = clear - distance
+    return { x: (dx / distance) * push, y: (dy / distance) * push }
+  }
+
   /** Is the participant on the root layer? Global work lives there. */
   #atRoot = (): boolean => {
     const lineage = ioc<LineageLike>('@hypercomb.social/Lineage')
@@ -655,8 +736,9 @@ export class AgentBeeDrone extends Drone {
         bee.kind = agent.kind
       }
       const resting = this.#isResting(id)
+      // Two states only: on this layer (solid) or not (gone). Rest never
+      // dims — it slows the dance below.
       if (!agent || grounded) bee.fadeTarget = 0
-      else if (resting && bee.fadeTarget > REST_ALPHA) bee.fadeTarget = REST_ALPHA
 
       // The dance CENTRE eases onto the anchor; the bee then dances around the
       // centre. Two layers, so a pan or a repaint moves the whole dance
@@ -664,8 +746,11 @@ export class AgentBeeDrone extends Drone {
       const hover = HOVER_PX / worldScale
       const hovered = this.#hovering === id
       if (!hovered) {
-        bee.centreX += (bee.anchorX - bee.centreX) * 0.06
-        bee.centreY += (bee.anchorY - hover - bee.centreY) * 0.06
+        // Step aside for the tile under the pointer — the overlay owns that
+        // hexagon while the participant is reading it.
+        const aside = this.#clearance(bee.anchorX, bee.anchorY - hover)
+        bee.centreX += (bee.anchorX + aside.x - bee.centreX) * 0.06
+        bee.centreY += (bee.anchorY - hover + aside.y - bee.centreY) * 0.06
       }
 
       // Freeze a hovered bee in place so the following press has a stable
@@ -819,21 +904,32 @@ export class AgentBeeDrone extends Drone {
   #showThought = (bee: BeeSprite, message: string, towardX: number, worldScale: number): void => {
     if (!this.#layer) return
     if (!bee.thought) {
+      // Canvas text does NOT pull a @font-face down the way a DOM node does:
+      // ask for it explicitly, or the first bubble is measured and rasterised
+      // in the fallback and keeps that texture until its line next changes.
+      // Fire-and-forget — the tile names ask for the same face at boot, so by
+      // the time a bee has anything to say it is resident; this is only the
+      // insurance that says so out loud, and a miss self-heals on the next
+      // turn of the conversation.
+      void document.fonts?.load(`${CHAT_BUBBLE_WEIGHT} ${CHAT_BUBBLE_FONT}px 'Source Sans 3'`)
+        ?.catch(() => { /* face optional — the stack behind it still speaks */ })
       const thought = new Container()
       thought.eventMode = 'none'
       const bg = new Graphics()
       const label = new Text({
         text: message,
         style: {
-          fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
-          fontSize: 10.5,
-          lineHeight: 14,
+          fontFamily: CHAT_BUBBLE_FAMILY,
+          fontWeight: CHAT_BUBBLE_WEIGHT,
+          fontSize: CHAT_BUBBLE_FONT,
+          lineHeight: CHAT_BUBBLE_LINE,
+          letterSpacing: CHAT_BUBBLE_TRACKING,
           fill: 0xf4f8fb,
           wordWrap: true,
-          wordWrapWidth: CHAT_BUBBLE_WIDTH - 20,
+          wordWrapWidth: CHAT_BUBBLE_WIDTH - CHAT_BUBBLE_PAD_X * 2,
         },
       })
-      label.position.set(10, 8)
+      label.position.set(CHAT_BUBBLE_PAD_X, CHAT_BUBBLE_PAD_Y)
       thought.addChild(bg, label)
       this.#layer.addChild(thought)
       bee.thought = thought
@@ -843,7 +939,7 @@ export class AgentBeeDrone extends Drone {
     const label = bee.thoughtText!
     if (label.text !== message) label.text = message
     const width = CHAT_BUBBLE_WIDTH
-    const height = Math.max(34, label.height + 16)
+    const height = Math.max(CHAT_BUBBLE_MIN_HEIGHT, label.height + CHAT_BUBBLE_PAD_Y * 2)
 
     // ABOVE OR BELOW, whichever the bee actually has room for. Clamping alone
     // could only slide the box down over the bee it belongs to; a bee near the
