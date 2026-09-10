@@ -21,6 +21,11 @@ import type { Agent, AgentRegistry } from './agent-registry.service.js'
 // panel reaches it structurally through IoC instead.
 import type { OrchestratorFinding, OrchestratorSummary } from './orchestrator.drone.js'
 import { avatarKeyOf, type AgentAvatarRegistry } from '../presentation/avatars/agent-avatar.js'
+// PURE, and the only speller of the `chat:<convoId>` key a conversation bee
+// wears (presentation/avatars/resting-bees.ts). Read here rather than
+// re-spelled, so the press that opens a talk can never drift from the key that
+// names it.
+import { restingConvoId } from '../presentation/avatars/resting-bees.js'
 import { AgentTilesRail } from './agent-tiles-rail.js'
 import { readAskSteps, settle, stepRequest, type ChatStep } from './chat-steps.js'
 
@@ -51,6 +56,21 @@ const orchestratorDrone = (): OrchestratorLike | undefined =>
 const navigation = (): { goRaw?: (segments: readonly string[]) => void } | undefined =>
   ioc<{ goRaw?: (segments: readonly string[]) => void }>('@hypercomb.social/Navigation')
 
+/** What the panel needs of the thread store to show a conversation: the turns.
+ *  Reached structurally through IoC — chat-thread.ts registers its singleton at
+ *  module scope, and importing a value from it would mint a second one in this
+ *  bundle. */
+type ThreadsLike = {
+  readTurns?: (convoId: string) => Promise<ReadonlyArray<{ role: string; text: string; at: number }>>
+}
+
+const chatThreads = (): ThreadsLike | undefined =>
+  ioc<ThreadsLike>('@diamondcoreprocessor.com/ChatThreads')
+
+/** How many turns of a conversation the little panel shows. It is a glance at
+ *  what was said, not the conversation — the window is one press further on. */
+const MAX_TURN_LINES = 8
+
 const elapsed = (since: number): string => {
   const seconds = Math.max(0, Math.round((Date.now() - since) / 1000))
   if (seconds < 60) return `${seconds}s`
@@ -77,6 +97,9 @@ export class AgentPanelView extends EventTarget {
   #rail: AgentTilesRail | null = null
   #railHost: HTMLDivElement | null = null
   #chips: HTMLDivElement | null = null
+  /** The composer row. Hidden for a conversation: "add context while it works"
+   *  is an offer only a run can keep. */
+  #composeRow: HTMLDivElement | null = null
   #send: HTMLButtonElement | null = null
   /** Model hint the Apply flow rides out on; the chip in the chips row cycles it. */
   #askModel = 'opus'
@@ -109,7 +132,7 @@ export class AgentPanelView extends EventTarget {
       // simply raises the agent's window over it. Routed inside `open()` it
       // would close the report first — the audit you were reading, dismantled
       // by the thing it pointed you at.
-      const agent = ioc<AgentRegistry>('@diamondcoreprocessor.com/AgentRegistry')?.get(id)
+      const agent = ioc<AgentRegistry>('@diamondcoreprocessor.com/AgentRegistry')?.find(id)
       if (agent?.behavior === 'folder-sync') {
         EffectBus.emit('folder-sync:open', { agentId: id })
         return
@@ -142,7 +165,7 @@ export class AgentPanelView extends EventTarget {
     // bee keeps flying, so its panel stays up.
     EffectBus.on<{ public?: boolean }>('mesh:public-changed', payload => {
       if (payload?.public !== true || !this.#panel) return
-      const agent = this.#registry?.get(this.#id)
+      const agent = this.#subject()
       if ((agent?.origin ?? 'local') === 'local') this.close()
     })
     // The report is live. Findings clear on their own when work recovers, and
@@ -150,8 +173,19 @@ export class AgentPanelView extends EventTarget {
     // touches the agent registry, so without this the open panel would sit
     // there showing a state that has already passed.
     EffectBus.on('orchestrator:findings', () => {
-      if (this.#panel && this.#registry?.get(this.#id)?.kind === 'orchestrator') this.#render()
+      if (this.#panel && this.#subject()?.kind === 'orchestrator') this.#render()
     })
+  }
+
+  /** The agent this panel is about, from EITHER lane — the work lane first,
+   *  because a resting bee and the working one that wakes from it share an id. */
+  #subject(): Agent | undefined {
+    return this.#registry?.find(this.#id)
+  }
+
+  /** Is the subject a conversation rather than a run? */
+  #restingNow(): boolean {
+    return this.#registry?.isResting(this.#id) ?? false
   }
 
   #t(key: string, fallback: string): string {
@@ -165,7 +199,13 @@ export class AgentPanelView extends EventTarget {
     if (this.#panel) this.close()
 
     this.#registry = ioc<AgentRegistry>('@diamondcoreprocessor.com/AgentRegistry')
-    const agent = this.#registry?.get(id)
+    // BOTH LANES. A tile that has been talked to keeps a bee whether or not a
+    // question is out, and that bee is in the RESTING lane — `get` sees only
+    // work, so pressing one opened nothing at all (Jaime, 2026-09-09: "the
+    // logs are still not showing … used to have a little window show up in the
+    // bottom of the screen when I click the Bees"). The registry has had
+    // `find` for exactly this; nothing was using it.
+    const agent = this.#registry?.find(id)
     if (!agent) return
     // Own-window agents (folder-sync) are routed by the `agent:open` handler
     // and by #swap before this runs — this is the last resort for a direct
@@ -299,6 +339,7 @@ export class AgentPanelView extends EventTarget {
     })
     row.append(input, send, stop)
     this.#input = input
+    this.#composeRow = row
 
     // Two columns: the tiles rail (full screen only) and everything the
     // panel already was. The rail host exists from the start so toggling
@@ -433,9 +474,16 @@ export class AgentPanelView extends EventTarget {
   #render = (): void => {
     const body = this.#body
     if (!body) return
-    const agent = this.#registry?.get(this.#id)
-    const running = agent?.status === 'pending' || agent?.status === 'working' || agent?.status === 'blocked'
+    const agent = this.#subject()
+    // A RESTING bee is not work: it is a conversation this tile has had. It is
+    // minted `working` so its sprite dances, so the panel must ask the lane,
+    // not the status — otherwise it offers to Stop a talk that ended days ago.
+    const resting = this.#restingNow()
+    const running = !resting
+      && (agent?.status === 'pending' || agent?.status === 'working' || agent?.status === 'blocked')
     if (this.#stopButton) this.#stopButton.hidden = !running
+    if (this.#composeRow) this.#composeRow.hidden = resting
+    if (resting && this.#chips) this.#chips.hidden = true
     if (!agent) {
       // The agent finished and its record has been retired — say so rather
       // than leaving a panel describing something that no longer exists.
@@ -448,6 +496,20 @@ export class AgentPanelView extends EventTarget {
     }
 
     body.textContent = ''
+
+    // A CONVERSATION, NOT A RUN. There is no progress to report, nothing to
+    // stop and no context to add mid-flight — what you pressed the bee for is
+    // WHAT WAS SAID. The panel shows the tail of it and offers the window.
+    if (resting) {
+      body.append(
+        this.#restedRow(agent),
+        this.#whereRow(agent),
+        this.#conversation(agent),
+        this.#openTalkRow(agent),
+      )
+      return
+    }
+
     body.append(this.#statusRow(agent))
     // The orchestrator's panel is a REPORT, not a request. Its own "where" is
     // the whole hive and its own "request" is a sentence nobody needs twice —
@@ -816,6 +878,113 @@ export class AgentPanelView extends EventTarget {
     EffectBus.emit('spotlight:show', { targets: [target] })
   }
 
+  /** The top line of a conversation's panel. No status pill: "working" is what
+   *  makes the bee dance, not a claim about a talk that is over — what belongs
+   *  here is that it was a talk, and how long ago. */
+  #restedRow(agent: Agent): HTMLElement {
+    const row = document.createElement('div')
+    row.className = 'hc-agent-status'
+    const pill = document.createElement('span')
+    // The plain pill, not `done`: green reads as "it succeeded", and a
+    // conversation you had is neither a success nor a failure.
+    pill.className = 'hc-agent-pill'
+    pill.textContent = this.#t('agent.talked', 'talked to')
+    const age = document.createElement('span')
+    age.className = 'hc-agent-dim'
+    age.textContent = elapsed(agent.updatedAt || agent.startedAt)
+    row.append(pill, age)
+    return row
+  }
+
+  /** WHAT WAS SAID, the last few turns of it. Read from the thread store, so
+   *  it arrives a beat late and says so — an empty conversation and one that
+   *  could not be read are different facts, and only the first is safe to show
+   *  as nothing. */
+  #conversation(agent: Agent): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'hc-agent-section'
+    const head = document.createElement('div')
+    head.className = 'hc-agent-label'
+    head.textContent = this.#t('agent.said-here', 'What was said here')
+    const log = document.createElement('div')
+    log.className = 'hc-agent-log'
+    const waiting = document.createElement('div')
+    waiting.className = 'hc-agent-dim'
+    waiting.textContent = this.#t('agent.reading', 'reading…')
+    log.appendChild(waiting)
+    wrap.append(head, log)
+    void this.#fillConversation(wrap, log, agent.id, ++this.#didToken)
+    return wrap
+  }
+
+  async #fillConversation(
+    wrap: HTMLElement,
+    log: HTMLElement,
+    id: string,
+    token: number,
+  ): Promise<void> {
+    const convoId = restingConvoId(id)
+    let turns: ReadonlyArray<{ role: string; text: string; at: number }> = []
+    try {
+      turns = (await chatThreads()?.readTurns?.(convoId)) ?? []
+    } catch {
+      // Could not read — leave the panel saying so rather than claiming the
+      // conversation was empty.
+      if (token === this.#didToken && wrap.isConnected) {
+        log.textContent = this.#t('agent.said-unreadable', 'Could not read this conversation.')
+      }
+      return
+    }
+    if (token !== this.#didToken || !wrap.isConnected) return
+
+    log.textContent = ''
+    if (!turns.length) {
+      const none = document.createElement('div')
+      none.className = 'hc-agent-dim'
+      none.textContent = this.#t('agent.said-none', 'Nothing said yet.')
+      log.appendChild(none)
+      return
+    }
+
+    // The TAIL: the last thing said is the thing you pressed the bee to see.
+    for (const turn of turns.slice(-MAX_TURN_LINES)) {
+      const line = document.createElement('div')
+      line.className = 'hc-agent-logline reading'
+      const who = document.createElement('span')
+      who.className = 'hc-agent-dim'
+      who.textContent = turn.role === 'user'
+        ? this.#t('agent.said-you', 'you')
+        : this.#t('agent.said-them', 'reply')
+      const text = document.createElement('span')
+      text.className = 'hc-agent-logtext'
+      text.textContent = turn.text.replace(/\s+/g, ' ').trim()
+      line.title = `${who.textContent} · ${new Date(turn.at).toLocaleString()}`
+      line.append(who, text)
+      log.appendChild(line)
+    }
+  }
+
+  /** The way in. The panel is a glance; the conversation lives in the chat
+   *  window, and this is the one press between them. */
+  #openTalkRow(agent: Agent): HTMLElement {
+    const row = document.createElement('div')
+    row.className = 'hc-agent-section'
+    const open = document.createElement('button')
+    open.type = 'button'
+    open.className = 'hc-agent-btn hc-agent-ok'
+    open.textContent = this.#t('agent.open-talk', 'Open the conversation')
+    open.addEventListener('click', () => {
+      const convoId = restingConvoId(agent.id)
+      if (!convoId) return
+      // Closed first: the chat window takes the screen, and a panel left
+      // standing under it is a panel you cannot see to close.
+      this.close()
+      EffectBus.emit('chat:open', { convoId })
+    })
+    row.appendChild(open)
+    return row
+  }
+
   #section(label: string, text: string): HTMLElement {
     const wrap = document.createElement('div')
     wrap.className = 'hc-agent-section'
@@ -1018,7 +1187,7 @@ export class AgentPanelView extends EventTarget {
     if (!id || id === this.#id) return
     // An own-window agent is not a subject this panel can show — raise its
     // window and leave the panel (the report, usually) exactly as it stands.
-    if (this.#registry?.get(id)?.behavior === 'folder-sync') {
+    if (this.#registry?.find(id)?.behavior === 'folder-sync') {
       EffectBus.emit('folder-sync:open', { agentId: id })
       return
     }
@@ -1051,6 +1220,7 @@ export class AgentPanelView extends EventTarget {
     this.#railHost = null
     this.#chips = null
     this.#send = null
+    this.#composeRow = null
     this.#panel?.remove()
     this.#panel = null
     this.#body = null

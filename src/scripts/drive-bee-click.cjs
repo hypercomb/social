@@ -14,6 +14,8 @@
 //   1. A STILL PRESS OPENS THE LOG. Click the bee, the agent panel is up.
 //   2. A PRESS THAT WOBBLES IS STILL A CLICK. The bee is dancing, so the hand
 //      is moving when the button goes down.
+//   2b. A CONVERSATION BEE OPENS ITS TALK — the resting lane, which the panel
+//      could not see at all.
 //   3. THE BEE HOLDS ITS GROUND. Hovering the tile under a bee must not move
 //      it — a target that runs is a target you cannot press.
 //   4. OUT OF THE LIGHT, NOT OUT OF THE WAY. A bee over the tile you are
@@ -251,6 +253,75 @@ async function main() {
     panel = await panelState(page)
     claim(panel.open, 'a press that wobbles 6px is still a click')
     await closePanel(page)
+  }
+
+  // 2b. A CONVERSATION BEE OPENS ITS TALK. A tile that has been talked to keeps
+  //     a bee whether or not a question is out, and that bee lives in the
+  //     registry's RESTING lane — the lane the panel could not see, so pressing
+  //     one opened nothing at all.
+  const restTile = labels[1] ?? labels[0] ?? ''
+  const rested = await page.evaluate(async ([tile]) => {
+    const threads = window.ioc?.get?.('@diamondcoreprocessor.com/ChatThreads')
+    const registry = window.ioc?.get?.('@diamondcoreprocessor.com/AgentRegistry')
+    if (!threads || !registry) return { ok: false, why: 'no threads/registry' }
+    // Segments, the way the hive spells a tile's address — `tilePath` maps
+    // over them, so a string here is a TypeError, not a path.
+    const segments = tile ? [tile] : []
+    const convoId = threads.newTileConvoId(segments, 'proof')
+    await threads.appendTurn?.(convoId, 'user', 'what is this tile for?')
+    await threads.appendTurn?.(convoId, 'assistant', 'It is the workbench, where the day is kept.')
+    // The same derivation the drone runs, through the registry's own lane.
+    registry.rest?.(new Map([[`chat:${convoId}`, {
+      id: `chat:${convoId}`, behavior: 'opus', kind: 'model', model: 'opus', vendor: 'anthropic',
+      request: 'what is this tile for?', targets: tile ? [tile] : [], segments: [],
+      status: 'working', activity: [], context: [], origin: 'local',
+      startedAt: Date.now() - 90000, updatedAt: Date.now() - 60000,
+    }]]))
+    return { ok: true, id: `chat:${convoId}` }
+  }, [restTile])
+  log(`   (resting bee: ${JSON.stringify(rested)})`)
+  await sleep(1600)
+  await pump(page, 60)
+  const withRest = await readBees(page)
+  // The conversation is about a DIFFERENT tile from the running agent, so the
+  // two bees dance in different places and there is no doubt which was pressed.
+  const working = bees[0]
+  const restingBee = withRest
+    .filter(b => Math.hypot(b.x - working.x, b.y - working.y) > 60)
+    .sort((a, b) => Math.hypot(b.x - working.x, b.y - working.y) - Math.hypot(a.x - working.x, a.y - working.y))[0]
+  if (rested.ok && restingBee) {
+    await clickAt(page, restingBee.x, restingBee.y)
+    const talk = await panelState(page)
+    const said = /what is this tile for/i.test(talk.text || '')
+    const wrongPanel = /proof: a press/i.test(talk.text || '')
+    claim(talk.open && !wrongPanel, 'pressing a conversation bee opens the little window',
+      talk.open ? talk.text.replace(/\s+/g, ' ').slice(0, 90) : 'no .hc-agent panel')
+    claim(said, 'and the window shows what was said')
+    claim(!/Stop/.test(talk.text || ''), 'and never offers to stop a talk that already ended')
+
+    // THE WAY IN. The panel is a glance; the button is the one press between
+    // it and the conversation itself.
+    const opened = await page.evaluate(() => {
+      const button = [...document.querySelectorAll('.hc-agent button')]
+        .find(b => /open the conversation/i.test(b.textContent || ''))
+      if (!button) return false
+      button.click()
+      return true
+    })
+    await sleep(900)
+    const chatUp = await page.evaluate(() => {
+      const window = document.querySelector('hc-chat-window')
+      if (!window) return false
+      const box = window.getBoundingClientRect()
+      return box.width > 0 && box.height > 0 && getComputedStyle(window).visibility !== 'hidden'
+    })
+    claim(opened && chatUp, 'and one press from there opens the conversation itself')
+    await page.evaluate(() => window.__hypercombEffectBus.emit('chat:close', {}))
+    await sleep(400)
+    await closePanel(page)
+  } else {
+    claim(false, 'pressing a conversation bee opens the little window',
+      `${withRest.length} bee(s) on the layer, none apart from the working one`)
   }
 
   // 3. THE BEE HOLDS ITS GROUND while the pointer walks the hive under it.
