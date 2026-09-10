@@ -37,7 +37,7 @@ $accent: #d9a441;
 .tut-panel {
   pointer-events: auto;
   position: absolute;
-  top: max(calc(2.3rem * var(--hc-header-zoom, 1)), var(--hc-header-anchor));
+  top: var(--hc-header-anchor);
   right: 0;
   bottom: 0;
   width: 380px;
@@ -426,9 +426,8 @@ $accent: #d9a441;
 }
 
 // ── responsive: stay flush below the header at every header height ──
-@include touch {
-  .tut-panel { top: max(calc(3.65rem * var(--hc-header-zoom, 1)), calc(var(--hc-header-anchor) + 1.02rem)); }
-}
+// The header anchor already carries the touch bar's extra height (it is the
+// bar's MEASURED bottom), so there is no touch override to keep in step.
 
 @include phone-only {
   .tut-panel { top: 0; }

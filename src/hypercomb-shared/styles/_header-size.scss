@@ -32,18 +32,31 @@
 // carrying several branch-scoped behaviours pushes the rail to two or three
 // rows, and the bar grows with it.
 //
-// `max()` of the nominal height and the LIVE measured bottom
-// (`--hc-header-bottom`, published by controls-bar's ResizeObserver) means
-// this can only ever push offsets DOWN, never up. With the var unset it is
-// exactly the old nominal value, so a one-row rail renders pixel-identically.
+// THE MEASURED BOTTOM WINS OUTRIGHT; the nominal is only what to use BEFORE
+// the first measurement lands (and while the header is not rendered at all —
+// the observer REMOVES the var then, so the fallback is what answers).
+//
+// It used to be `max(nominal, measured)`, on the reasoning that an anchor may
+// only ever push DOWN. That was the wrong instinct: the nominal is a GUESS at
+// the bar's height, and it guesses ~1.1px HIGH on desktop (2.33rem = 37.28px
+// against a real 36.19px bottom) and ~1.4px high in the 13" zoom band. `max()`
+// let that guess beat the measurement, so the left rail and every panel that
+// docks flush under the bar sat one to two pixels low and showed a hairline of
+// canvas between the command line and the panel below it — visible as a seam
+// under the Portals window (Jaime, 2026-09-09). A measurement is not something
+// to take the max WITH; it is the answer.
+//
+// A taller-than-nominal header still pushes everything down, because that is
+// what the measurement SAYS — a wrapped icon rail reports its real bottom.
 //
 // Panels add their own air on top: `calc(var(--hc-header-anchor) + <air>)`.
-// Never go back to a bare `<base>rem * zoom` — that is the bug this replaces.
+// Never go back to a bare `<base>rem * zoom`, and never re-wrap this in a
+// `max()` against one — both are the bug this replaces.
 :root {
   --hc-header-nominal: 2.33rem;   // 2.2rem bar + hairline borders, desktop
-  --hc-header-anchor: max(
-    calc(var(--hc-header-nominal) * var(--hc-header-zoom, 1.0)),
-    var(--hc-header-bottom, 0px)
+  --hc-header-anchor: var(
+    --hc-header-bottom,
+    calc(var(--hc-header-nominal) * var(--hc-header-zoom, 1.0))
   );
 }
 

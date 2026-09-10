@@ -25,7 +25,7 @@ $accent: #c9a227;
   pointer-events: auto;
   position: absolute;
   z-index: 2;
-  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor, 0px));
+  top: var(--hc-header-anchor);
   right: 0;
   bottom: 0;
   width: 300px;

@@ -72,7 +72,7 @@ $clipboard: #49d6d0;
   position: absolute;
   // Dock flush below the header bar and run to the viewport floor — the
   // same anchoring the features panel uses so the two share the right dock.
-  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  top: var(--hc-header-anchor);
   right: 0;
   bottom: 0;
   // The inline [style.width] (drag-resized, persisted) drives the actual
@@ -526,7 +526,7 @@ $clipboard: #49d6d0;
   @include tw.window-roles;
 
   position: absolute;
-  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  top: var(--hc-header-anchor);
   bottom: 0;
   left: var(--hc-controls-left, 0px);
   pointer-events: none;

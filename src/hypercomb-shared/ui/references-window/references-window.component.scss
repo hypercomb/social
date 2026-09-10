@@ -5,7 +5,7 @@ $accent: #7eb6d6;
 
 :host { position: fixed; inset: 0; z-index: 100002; pointer-events: none; }
 .ref-panel {
-  pointer-events: auto; position: absolute; top: max(calc(2.3rem * var(--hc-header-zoom, 1)), var(--hc-header-anchor));
+  pointer-events: auto; position: absolute; top: var(--hc-header-anchor);
   right: 0; bottom: 0; width: 340px; min-width: 260px; max-width: calc(100vw - 1.5rem);
   display: flex; flex-direction: column; background: rgba(var(--hc-panel-pane), 0.96);
   border-left: 1px solid rgba(var(--acc), .5); box-shadow: -10px 0 40px rgba(var(--hc-panel-shadow), .5);

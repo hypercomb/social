@@ -26,7 +26,7 @@ $accent: #7eb6d6;
 .hosts-panel {
   pointer-events: auto;
   position: absolute;
-  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  top: var(--hc-header-anchor);
   right: 0;
   bottom: 0;
   width: 340px;

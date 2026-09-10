@@ -35,7 +35,7 @@ $mint: #6fbf94;
   // publishes `--hc-desk-top` for exactly as long as it holds the surface;
   // unset — which is every other time this panel is open — this is the
   // anchor it always was.
-  top: var(--hc-desk-top, max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor)));
+  top: var(--hc-desk-top, var(--hc-header-anchor));
   right: 0;
   bottom: 0;
   width: 320px;

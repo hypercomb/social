@@ -26,6 +26,16 @@
 // Bees hold a CONSTANT SCREEN SIZE (counter-scaled against the world
 // container) so a zoomed-out hive still shows a bee you can see and hit.
 //
+// ── Dragging ───────────────────────────────────────────────────────────
+//
+// The same press that opens a bee can PUT IT SOMEWHERE ELSE. A bee dances
+// over the tile it is working on, which is exactly the tile a participant
+// sometimes wants to read, so it can be taken hold of and pulled aside; drop
+// it back where its work put it and it goes home. The press decides what it is
+// by travelling, which is why the open happens on the RELEASE and not on the
+// press. What is remembered is a displacement from the bee's own anchor, so
+// the bee holds its new place through a pan and a zoom (bee-drag.ts).
+//
 // ── Branding ───────────────────────────────────────────────────────────
 //
 // A bee's NAME is painted ON THE BEE — livery across its abdomen, baked into
@@ -47,6 +57,7 @@ import { BEE_PERSONALITY_CHANGED, personaFor, personalityKey, type BeePersona } 
 import { cacheBanter, cachedBanter } from './bee-banter-cache.js'
 import { loreBeats, topicAt } from './bee-hive-lore.js'
 import { inWaggleArea, waggleOffset, wagglePath, type AgentKind } from './agent-waggle.js'
+import { isDrag, nudgeFrom, snapsHome, type Nudge } from './bee-drag.js'
 import { trackSceneText } from '../grid/screen-text-resolution.js'
 import type { HostReadyPayload } from '../tiles/pixi-host.worker.js'
 import type { HexGeometry } from '../grid/hex-geometry.js'
@@ -90,6 +101,22 @@ interface BeeSprite {
   /** Which side of the bee the bubble is currently drawn on. The tail has to
    *  be redrawn when this flips, so it is remembered rather than recomputed. */
   thoughtBelow: boolean
+}
+
+/** A press in flight on a bee. What it becomes is decided by whether it
+ *  travels: still, it opens the request on release; moving, it carries the bee
+ *  out of the way (bee-drag.ts). */
+interface BeePress {
+  id: string
+  pointerId: number
+  /** Where the press went down, in client px — the travel is measured here. */
+  startX: number
+  startY: number
+  /** Where inside its dance the bee was taken hold of, in world units. Kept
+   *  so a dragged bee does not snap its centre under the cursor. */
+  grabX: number
+  grabY: number
+  dragging: boolean
 }
 
 /** Bee size on screen, in CSS pixels, regardless of zoom. Big enough that the
@@ -370,6 +397,12 @@ export class AgentBeeDrone extends Drone {
   #tileUnderPointer: string | null = null
   /** A press landed on a bee: swallow the pointerup/click that follows it. */
   #swallowPointer: number | null = null
+  /** The press in flight, if any — an open or a drag, not yet decided. */
+  #press: BeePress | null = null
+  /** How far each bee has been PULLED from where its work puts it, in world
+   *  units, per agent. Session-only, like the perch: the work is the truth,
+   *  the seating is not. */
+  readonly #nudges = new Map<string, Nudge>()
   #swallowClickUntil = 0
   /** The agent that has been PERCHED — pulled out of the hive to the top-left
    *  corner where it stays put while its panel is open. Only the orchestrator
@@ -579,6 +612,7 @@ export class AgentBeeDrone extends Drone {
       this.#listenersBound = true
       window.addEventListener('pointerdown', this.#onPointerDown, true)
       window.addEventListener('pointerup', this.#onPointerSettle, true)
+      window.addEventListener('pointercancel', this.#onPointerCancel, true)
       window.addEventListener('click', this.#onPointerSettle, true)
       window.addEventListener('pointermove', this.#onPointerMove, { passive: true })
     }
@@ -808,10 +842,21 @@ export class AgentBeeDrone extends Drone {
       // smoothly instead of teleporting the bee mid-figure.
       const hover = HOVER_PX / worldScale
       const hovered = this.#hovering === id
-      if (!hovered) {
+      const dragged = this.#press?.dragging === true && this.#press.id === id
+      // PUT THERE BY HAND. A nudge is held against the bee's OWN anchor, so
+      // the place the participant chose survives a pan, a zoom and a repaint.
+      const nudge = this.#nudges.get(id)
+      if (dragged) {
+        // 1:1 under the pointer while it is being carried — easing here would
+        // just make the bee lag the hand that is placing it.
+        bee.centreX = bee.anchorX + (nudge?.x ?? 0)
+        bee.centreY = bee.anchorY - hover + (nudge?.y ?? 0)
+      } else if (!hovered) {
         // Step aside for the tile under the pointer — the overlay owns that
-        // hexagon while the participant is reading it.
-        const aside = this.#clearance(bee.anchorX, bee.anchorY - hover)
+        // hexagon while the participant is reading it. A bee that has been PUT
+        // somewhere does not step: the participant already said where it goes,
+        // and a second opinion would only drag it back over the tiles.
+        const aside = nudge ?? this.#clearance(bee.anchorX, bee.anchorY - hover)
         bee.centreX += (bee.anchorX + aside.x - bee.centreX) * 0.06
         bee.centreY += (bee.anchorY - hover + aside.y - bee.centreY) * 0.06
       }
@@ -848,6 +893,8 @@ export class AgentBeeDrone extends Drone {
         bee.thought = null
         bee.thoughtText = null
         this.#bees.delete(id)
+        this.#nudges.delete(id)
+        if (this.#press?.id === id) this.#press = null
         if (this.#perched === id) this.#perched = ''
         if (this.#hovering === id) this.#setHover('')
         continue
@@ -1249,6 +1296,27 @@ export class AgentBeeDrone extends Drone {
     this.#swallowPointer = event.pointerId
     this.#setHover('')
 
+    // THE PRESS IS NOT YET AN OPEN. A bee dances over the tile it is working
+    // on, and that tile is sometimes the one you are trying to read — so the
+    // same press can instead PULL THE BEE OUT OF THE WAY. Which it is, is
+    // decided by travel (bee-drag.ts): a still press opens the request when it
+    // is released, a moving one carries the bee.
+    const bee = this.#bees.get(id)
+    const local = this.#toWorld(event.clientX, event.clientY)
+    this.#press = {
+      id,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      grabX: bee && local ? local.x - bee.centreX : 0,
+      grabY: bee && local ? local.y - bee.centreY : 0,
+      dragging: false,
+    }
+  }
+
+  /** Open the request the press landed on. Reached from the RELEASE, because
+   *  the press itself may still turn into a drag. */
+  #openBee = (id: string): void => {
     // THE ORCHESTRATOR IS A DIFFERENT PRESS. Opening the watcher is a request
     // to audit the hive, which is three things at once: it takes itself out of
     // the way (perches top-left), it gathers every tile that has an agent on
@@ -1260,6 +1328,10 @@ export class AgentBeeDrone extends Drone {
     // the real work. Pressing the watcher again puts all of it down.
     if (this.#bees.get(id)?.kind === 'orchestrator') {
       const orchestrator = ioc<OrchestratorLike>('@diamondcoreprocessor.com/OrchestratorDrone')
+      // Perching is itself a "get out of the way", and it names the place: the
+      // corner. Any earlier nudge is spent — it would only push the watcher
+      // back off the corner it was just sent to.
+      this.#nudges.delete(id)
       if (this.#perched === id) {
         this.#perched = ''
         orchestrator?.clearAudit?.()
@@ -1310,14 +1382,71 @@ export class AgentBeeDrone extends Drone {
     if (pointerId !== undefined && pointerId !== this.#swallowPointer) return
     this.#swallowPointer = null
     this.#swallowClickUntil = Date.now() + 500
+    // THE RELEASE IS WHERE THE PRESS IS SPENT: put the bee down, or open it.
+    const press = this.#press
+    this.#press = null
+    if (press?.dragging) this.#endDrag(press)
+    else if (press) this.#openBee(press.id)
     event.stopPropagation()
     event.preventDefault()
   }
 
+  /** A cancelled pointer (a touch taken over by the browser, a lost capture)
+   *  ends the press where it stands. Without this the bee would keep following
+   *  a pointer that is no longer pressing anything. */
+  #onPointerCancel = (event: PointerEvent): void => {
+    const press = this.#press
+    if (!press || press.pointerId !== event.pointerId) return
+    this.#press = null
+    this.#swallowPointer = null
+    if (press.dragging) this.#endDrag(press)
+  }
+
   #onPointerMove = (event: PointerEvent): void => {
+    if (this.#press && this.#press.pointerId === event.pointerId) { this.#drag(event); return }
     if (this.#hiveHidden) { this.#setHover(''); return }
     const id = this.#hitTest(event.clientX, event.clientY)
     this.#setHover(id, event.clientX, event.clientY)
+  }
+
+  /** Carry the pressed bee with the pointer, once the press has travelled far
+   *  enough to be a drag. Below the threshold nothing moves at all, so a click
+   *  that wobbles by a pixel still opens the request. */
+  #drag = (event: PointerEvent): void => {
+    const press = this.#press
+    if (!press) return
+    if (!press.dragging) {
+      if (!isDrag(event.clientX - press.startX, event.clientY - press.startY)) return
+      press.dragging = true
+      if (this.#canvas) this.#canvas.style.cursor = 'grabbing'
+    }
+    const bee = this.#bees.get(press.id)
+    const local = this.#toWorld(event.clientX, event.clientY)
+    if (!bee || !local) return
+    const hover = HOVER_PX / (this.#world?.scale.x || 1)
+    this.#nudges.set(press.id, nudgeFrom(
+      local,
+      { x: press.grabX, y: press.grabY },
+      { x: bee.anchorX, y: bee.anchorY - hover },
+    ))
+  }
+
+  /** Let go. A bee dropped back where its work put it takes its old place
+   *  again: putting it back is how a nudge is undone, and no command is
+   *  needed for it. */
+  #endDrag = (press: BeePress): void => {
+    if (this.#canvas?.style.cursor === 'grabbing') this.#canvas.style.cursor = ''
+    const nudge = this.#nudges.get(press.id)
+    if (nudge && snapsHome(nudge, this.#world?.scale.x || 1)) this.#nudges.delete(press.id)
+  }
+
+  /** A client-space point in world coordinates, or null before the host is up.
+   *  The same mapping `#hitTest` uses, so a grab lands where the hit did. */
+  #toWorld = (clientX: number, clientY: number): { x: number; y: number } | null => {
+    if (!this.#app || !this.#world) return null
+    this.#app.renderer.events.mapPositionToPoint(this.#probe, clientX, clientY)
+    const local = this.#world.toLocal(this.#probe)
+    return { x: local.x, y: local.y }
   }
 
   #setHover = (id: string, clientX = 0, clientY = 0): void => {
@@ -1420,6 +1549,7 @@ export class AgentBeeDrone extends Drone {
     if (this.#listenersBound) {
       window.removeEventListener('pointerdown', this.#onPointerDown, true)
       window.removeEventListener('pointerup', this.#onPointerSettle, true)
+      window.removeEventListener('pointercancel', this.#onPointerCancel, true)
       window.removeEventListener('click', this.#onPointerSettle, true)
       window.removeEventListener('pointermove', this.#onPointerMove)
       this.#listenersBound = false

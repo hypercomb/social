@@ -19,6 +19,8 @@
 //   6. ARCHIVING is additive and reversible: a marker file in the thread's
 //      OWN bucket, every turn untouched, and the list still reports the
 //      thread — it is the surfaces that hide it, not the pool that forgets it
+//   7. a thread says whether it has been ANSWERED, and carries the NAME it was
+//      given — both out of the same walk, both metadata, neither a turn
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
@@ -337,6 +339,67 @@ describe('chat-thread — turns are contentSig manifests; legacy stays readable'
     // A receipt is metadata, never another visible transcript turn.
     expect(byId.get('chat:finished')?.turnCount).toBe(1)
     expect((await mod.readTurns('chat:finished')).map(t => t.text)).toEqual(['finish this outcome'])
+  })
+
+  it('reports whether a thread has been answered, so a question in flight can say so', async () => {
+    await mod.appendTurn('chat:waiting', 'user', 'the seams flicker at high zoom')
+    await mod.appendTurn('chat:answered', 'user', 'the seams flicker at high zoom')
+    await mod.appendTurn('chat:answered', 'assistant', 'the shader samples across the atlas edge')
+
+    const { conversations } = await mod.listConversationsWithLatest()
+    const byId = new Map(conversations.map(c => [c.convoId, c]))
+    expect(byId.get('chat:waiting')?.replied).toBe(false)
+    expect(byId.get('chat:answered')?.replied).toBe(true)
+    // A sent question is a LISTED conversation — it is the one you most want
+    // on the surface, not the one to hide until its answer arrives.
+    expect(byId.get('chat:waiting')?.turnCount).toBe(1)
+  })
+
+  it('a written NAME replaces the opening line, and reads back from the same walk', async () => {
+    await mod.appendTurn('chat:named', 'user', 'hmm this is weird')
+    await mod.appendTurn('chat:named', 'assistant', 'the atlas edge is being sampled')
+
+    const before = (await mod.listConversationsWithLatest()).conversations
+      .find((c: { convoId: string }) => c.convoId === 'chat:named')
+    expect(before?.title).toBe('hmm this is weird')
+    expect(before?.named).toBe(false)
+
+    expect(await mod.setConversationName('chat:named', 'Hexagon shader seams')).toBe(true)
+
+    const after = (await mod.listConversationsWithLatest()).conversations
+      .find((c: { convoId: string }) => c.convoId === 'chat:named')
+    expect(after?.title).toBe('Hexagon shader seams')
+    expect(after?.named).toBe(true)
+    // A name is metadata, never another turn in the transcript.
+    expect(after?.turnCount).toBe(2)
+    expect((await mod.readTurns('chat:named')).map((t: { text: string }) => t.text))
+      .toEqual(['hmm this is weird', 'the atlas edge is being sampled'])
+  })
+
+  it('naming is overwrite, never append — and clearing it gives the opening line back', async () => {
+    await mod.appendTurn('chat:renamed', 'user', 'the opening line')
+    const bucketName = await sha256Hex(new TextEncoder().encode('chat:renamed'))
+    const before = pool.dirs.get(bucketName)!.files.size
+
+    await mod.setConversationName('chat:renamed', 'First guess')
+    await mod.setConversationName('chat:renamed', 'Second guess')
+    expect(pool.dirs.get(bucketName)!.files.size).toBe(before + 1)
+
+    const named = (await mod.listConversationsWithLatest()).conversations
+      .find((c: { convoId: string }) => c.convoId === 'chat:renamed')
+    expect(named?.title).toBe('Second guess')
+
+    await mod.setConversationName('chat:renamed', '')
+    const bare = (await mod.listConversationsWithLatest()).conversations
+      .find((c: { convoId: string }) => c.convoId === 'chat:renamed')
+    expect(bare?.title).toBe('the opening line')
+    expect(pool.dirs.get(bucketName)!.files.size).toBe(before)
+  })
+
+  it('naming a thread nobody has spoken in mints no bucket', async () => {
+    expect(await mod.setConversationName('chat:never-spoken', 'A name for nothing')).toBe(false)
+    const bucketName = await sha256Hex(new TextEncoder().encode('chat:never-spoken'))
+    expect(pool.dirs.has(bucketName)).toBe(false)
   })
 
   it('deleteConversation drops the bucket and leaves the text resource', async () => {

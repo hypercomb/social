@@ -49,7 +49,7 @@ $accent: #c9a227;
   // Above the workspace unconditionally. The inset already keeps them apart;
   // this is the guarantee that survives a frame where the inset is still 0.
   z-index: 2;
-  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  top: var(--hc-header-anchor);
   left: 0;
   bottom: 0;
   width: 320px;
@@ -723,7 +723,7 @@ $accent: #c9a227;
   // this is a place you work rather than a place you are trapped — so it stays
   // above and the workspace nests in what is left, on the same anchor the
   // panel uses so the two line up exactly.
-  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor, 0px));
+  top: var(--hc-header-anchor);
   bottom: var(--hc-inset-bottom, 0px);
   left: var(--hc-inset-left, 0px);
   right: var(--hc-inset-right, 0px);
@@ -1282,7 +1282,7 @@ $accent: #c9a227;
   // than shared with `.ld-panel`: the two differ in the edge they take and in
   // nothing else, and a mixin for one shared property would hide which of the
   // two is which.
-  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  top: var(--hc-header-anchor);
   right: 0;
   bottom: 0;
   width: 300px;

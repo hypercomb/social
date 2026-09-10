@@ -156,6 +156,12 @@ type ConversationSummary = {
    *  essentials build has no archive at all, and there every thread is live. */
   readonly archived?: boolean
   readonly goal?: { readonly details: string; readonly at: number }
+  /** HAS ANYTHING COME BACK? A sent question with no answer yet is a real
+   *  conversation with no subject, so it is named by what it is doing rather
+   *  than by the line you opened with. Optional because an older essentials
+   *  build does not report it — and there, every thread reads as answered,
+   *  which is exactly how this behaved before the flag existed. */
+  readonly replied?: boolean
 }
 
 /** The threads module, reached through IoC — shell may never import essentials. */
@@ -1354,6 +1360,8 @@ export class ChatWindowComponent implements OnDestroy {
       lastAt: convo.lastAt,
       draft: '',
       archived: !!convo.archived,
+      // Only ever false for a question still out — see ConversationSummary.
+      replied: convo.replied !== false,
     }))
 
     const known = new Set(rows.map(row => row.convoId))
@@ -1374,6 +1382,9 @@ export class ChatWindowComponent implements OnDestroy {
         lastAt: 0,
         draft: held.text,
         archived: false,
+        // A draft is unsent thinking, not a question waiting on anybody —
+        // it is named by what it says, which is all there is of it.
+        replied: true,
       })
     }
     return rows.sort((a, b) => b.lastAt - a.lastAt)
@@ -1566,6 +1577,15 @@ export class ChatWindowComponent implements OnDestroy {
     const listed = this.conversations().find(c => c.convoId === id)?.title
     return listed || this.#titleFrom(this.turns())
   })
+
+  /** IS THE THREAD IN HAND STILL WAITING FOR ITS FIRST ANSWER? Then it has no
+   *  subject to be named after, and the bar says so instead of naming the
+   *  conversation after the thing you did not know when you opened it. A
+   *  streaming answer already counts as arrived — the words are on screen. */
+  readonly activeAwaiting = computed(() =>
+    this.turns().length > 0
+    && !this.streaming()
+    && !this.turns().some(turn => turn.role === 'assistant'))
 
   /** First line of the first user turn — the same naming rule the threads
    *  module applies, so the in-memory list bump and a cold re-list agree. */
@@ -2671,6 +2691,12 @@ export class ChatWindowComponent implements OnDestroy {
       title: prev?.title || this.#titleFrom(turnsHere ?? []),
       turnCount: turnsHere ? turnsHere.length : (prev?.turnCount ?? 0) + added,
       lastAt: turnsHere?.[turnsHere.length - 1]?.at ?? Date.now(),
+      // The turns in hand are the truth for the thread being read; for any
+      // other, a bump only ever ADDS turns, and the only turn that can arrive
+      // for a thread you are not in is an answer.
+      replied: turnsHere
+        ? turnsHere.some(turn => turn.role === 'assistant')
+        : (prev?.replied ?? true),
     }
     const rest = index >= 0 ? [...list.slice(0, index), ...list.slice(index + 1)] : [...list]
     this.conversations.set([summary, ...rest].sort((a, b) => b.lastAt - a.lastAt))
@@ -3066,6 +3092,12 @@ export class ChatWindowComponent implements OnDestroy {
 
     const stored = await threads.appendTurn(convoId, 'user', message)
     if (!stored) console.warn('[chat] the question was not stored — it will be missing after a reload')
+    // ANNOUNCE THE QUESTION, not just the answer. A thread is a row from its
+    // first turn — waiting for its reply, which is the state you most want to
+    // see — and the rail cannot know that until somebody says so. Without
+    // this the row appeared only when the answer came back, which is the one
+    // moment you no longer needed telling.
+    else EffectBus.emit('chat:threads-changed', { convoId })
 
     // THREE TIERS, one window. The provider router is first: it covers local
     // Ollama and participant-keyed APIs, applies policy, and owns bounded

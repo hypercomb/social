@@ -521,7 +521,7 @@ $actions-corner: 12rem;
   min-width: 0;
   width: $rail-width;
   // clears the header bottom at any size: 2.8rem × the active header zoom
-  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  top: var(--hc-header-anchor);
   bottom: 0;
 
   // …EXCEPT when the rail is standing beside a view that kept it. The gap at
@@ -753,14 +753,12 @@ $actions-corner: 12rem;
   }
 }
 
-// The rail's top tracks the header height. On touch the bar's intrinsic
-// height is 3.5rem (vs 2.5rem desktop), so the touch base offset differs;
-// both scale by the active header zoom. The 13" band bump now rides
-// folded into `--hc-header-zoom` (see `styles/_header-size.scss`), so no
-// per-band override is needed here.
-@include touch {
-  .pill-stage.dock-left { top: max(calc(3.65rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 1.02rem)); }
-}
+// The rail's top tracks the header height through `--hc-header-anchor` alone
+// (the dock-left rule above). It used to carry a `@include touch` override
+// too, because the touch bar is intrinsically 3.5rem against the desktop
+// 2.5rem — but the anchor IS the bar's measured bottom, so it already knows
+// that, and the override's extra 1.02rem of air only opened a gap. Neither
+// the touch height nor the 13" band bump needs a rule here.
 
 // On the LEFT dock the function icons run top-down in registry order
 // (dcp → … → fullscreen) beneath the grip + edit-toggle, with the back button

@@ -389,14 +389,14 @@
     <div class="chat-bar">
       @if (railVisible()) {
         <span class="chat-current chat-current-still">
-          <span class="chat-current-name">{{ activeTitle() || ('chat.untitled' | t) }}</span>
+          <span class="chat-current-name">{{ activeAwaiting() ? ('agent.rail-chat-waiting' | t) : (activeTitle() || ('chat.untitled' | t)) }}</span>
         </span>
       } @else {
         <button class="chat-current" type="button" (click)="toggleList()"
           [attr.aria-expanded]="listOpen()"
           [title]="'chat.list.toggle' | t">
           <span class="mat-sym" aria-hidden="true">{{ listOpen() ? 'expand_more' : 'chevron_right' }}</span>
-          <span class="chat-current-name">{{ activeTitle() || ('chat.untitled' | t) }}</span>
+          <span class="chat-current-name">{{ activeAwaiting() ? ('agent.rail-chat-waiting' | t) : (activeTitle() || ('chat.untitled' | t)) }}</span>
         </button>
       }
       <!-- ARCHIVE THE CHAT YOU ARE IN. The per-row control in the fold acts on
@@ -492,7 +492,10 @@
             @if (conversation.tile) {
               <span class="chat-list-tile" [title]="conversation.tile">{{ conversation.tile }}</span>
             }
-            <span class="chat-list-name">{{ conversation.title || ('chat.untitled' | t) }}</span>
+            <!-- A QUESTION STILL OUT has no subject to be named after; a thread PUT
+                 AWAY without one was stopped rather than left waiting, so it
+                 keeps its opening line. -->
+            <span class="chat-list-name" [class.awaiting]="!conversation.replied && !conversation.archived">{{ conversation.replied || conversation.archived ? (conversation.title || ('chat.untitled' | t)) : ('agent.rail-chat-waiting' | t) }}</span>
             <span class="chat-list-meta">
               @if (conversation.draft) {
                 <span class="chat-list-draft">{{ 'chat.list.draft' | t }}</span>
