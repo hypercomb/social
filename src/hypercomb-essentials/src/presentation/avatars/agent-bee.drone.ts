@@ -47,6 +47,7 @@ import { BEE_PERSONALITY_CHANGED, personaFor, personalityKey, type BeePersona } 
 import { cacheBanter, cachedBanter } from './bee-banter-cache.js'
 import { loreBeats, topicAt } from './bee-hive-lore.js'
 import { inWaggleArea, waggleOffset, wagglePath, type AgentKind } from './agent-waggle.js'
+import { trackSceneText } from '../grid/screen-text-resolution.js'
 import type { HostReadyPayload } from '../tiles/pixi-host.worker.js'
 import type { HexGeometry } from '../grid/hex-geometry.js'
 
@@ -1040,10 +1041,25 @@ export class AgentBeeDrone extends Drone {
           wordWrap: true,
           wordWrapWidth: CHAT_BUBBLE_WIDTH - CHAT_BUBBLE_PAD_X * 2,
         },
+        // Texels on device pixels. The bubble sits at a fractional world
+        // position that the counter-scale does not make whole, so without
+        // this the glyph raster lands between pixels and is resampled even
+        // when its density is right.
+        roundPixels: true,
       })
       label.position.set(CHAT_BUBBLE_PAD_X, CHAT_BUBBLE_PAD_Y)
       thought.addChild(bg, label)
       this.#layer.addChild(thought)
+      // BAKE AT THE DENSITY IT IS SHOWN AT — the same remedy the overlay's
+      // hint and cue text got. The counter-scale below cancels the CAMERA,
+      // not the stage: the Pixi host scales the stage ×1.8, so a bubble is
+      // always DISPLAYED 1.8× the size its texture was rasterised at, and
+      // every glyph came through a bilinear magnify. (That residual is also
+      // why 6.3px type reads as ~11px on screen.) Handing the label to the
+      // scene-text registry makes the host's one per-frame pass keep it at
+      // (screen scale × renderer resolution) — through the ×1.8, through a
+      // DPR change, through a move to another monitor.
+      trackSceneText(label, thought)
       bee.thought = thought
       bee.thoughtText = label
     }
