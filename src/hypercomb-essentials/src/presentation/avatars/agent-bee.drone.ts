@@ -43,8 +43,9 @@ import { callModel, configuredProviders } from '../../assistant/llm-dispatch.js'
 import { chooseProvider } from '../../assistant/model-policy.js'
 import { restingBees, restingConvoId } from './resting-bees.js'
 import { avatarKeyOf, type AgentAvatarRegistry } from './agent-avatar.js'
-import { BEE_PERSONALITY_CHANGED, personaFor, type BeePersona } from './bee-personality.js'
+import { BEE_PERSONALITY_CHANGED, personaFor, personalityKey, type BeePersona } from './bee-personality.js'
 import { cacheBanter, cachedBanter } from './bee-banter-cache.js'
+import { loreBeats, topicAt } from './bee-hive-lore.js'
 import { inWaggleArea, waggleOffset, wagglePath, type AgentKind } from './agent-waggle.js'
 import type { HostReadyPayload } from '../tiles/pixi-host.worker.js'
 import type { HexGeometry } from '../grid/hex-geometry.js'
@@ -114,9 +115,24 @@ const HOVER_PX = 38
 const TILE_CLEARANCE_R = 2.1
 /** Fixed compact waggle size. Agent status must not pulse the path width. */
 const WAGGLE_SCALE = 0.34
-/** Ambient chatter changes slowly enough to read, but never becomes chrome. */
-const CHAT_TURN_SECONDS = 6
+/** Ambient chatter changes slowly enough to read, but never becomes chrome.
+ *  A turn now carries a whole thought about how the hive works rather than a
+ *  one-line boast, so it needs longer on screen — six seconds was the dwell
+ *  for a half-line. */
+const CHAT_TURN_SECONDS = 9
 const CHAT_MAX_PAIRS = 3
+/** How many turns a generated chapter runs before the next one is asked for.
+ *  A pair NEVER loops its script: when the cursor walks off the end, the next
+ *  chapter is written against a fresh topic and appended. */
+const CHAT_CHAPTER_LINES = 8
+/** Where a conversation stops growing and starts over on new ground. Held
+ *  script lines are session ephemera in localStorage; a pair that has been on
+ *  screen all day should not carry a novel around. */
+const CHAT_SCRIPT_MAX = 32
+/** Longest line a bee will speak. The box is a fixed 154px at a fixed screen
+ *  size, so this is a HEIGHT budget: ~48 characters per line, so 190 is four
+ *  lines of bubble. Anything longer stops being ambient and becomes a wall. */
+const CHAT_LINE_MAX = 190
 const CHAT_BUBBLE_WIDTH = 154
 /** HOW BIG THE CHATTER READS — 60% of the size it was drawn at (Jaime,
  *  2026-09-09: "the text is too big"). A bubble is drawn at a CONSTANT SCREEN
@@ -181,31 +197,67 @@ const taskFor = (agent: Agent): string => {
 const platformBoast = (agent: Agent, persona: BeePersona): string => {
   const platform = platformFor(agent)
   if (persona.name === 'Golden Drone') {
-    return `${platform}? Tremendous platform. Tremendously tremendous. But still: choose for the task.`
+    return `${platform}? Tremendous platform. Tremendously tremendous. And still only a renter — the bytes it makes are named by their own hash, so they outlive it.`
   }
-  return `I’m using ${platform}; the right platform depends on the task and tradeoffs.`
+  return `I run on ${platform}, but the platform only decides my latency and my price. What I write is signed content, and the hive is what decides it means anything.`
 }
 
-/** Short, deliberately playful lines. Model names come from the live agents;
- *  the claims are characterful background banter, not benchmark assertions. */
-const beeBanter = (speaker: Agent, listener: Agent, turn: number): string => {
+const hashText = (value: string): number => {
+  let result = 0
+  for (let i = 0; i < value.length; i++) result = ((result << 5) - result + value.charCodeAt(i)) | 0
+  return Math.abs(result)
+}
+
+/** A NEW ORDER EVERY RUN. The old fallback stepped one index per turn through
+ *  eight lines, so every pair recited the same loop in the same order, forever
+ *  — which is exactly the staleness this is meant to answer. A pair now walks
+ *  its deck by a stride that is coprime with the deck size: it visits every
+ *  line before repeating one, in an order that differs per pair and per run. */
+const SESSION_SALT = Math.floor(Math.random() * 0xffff)
+const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b))
+const strideFor = (length: number, seed: number): number => {
+  for (let step = 0; step < length; step++) {
+    const candidate = 1 + ((seed + step) % Math.max(1, length - 1))
+    if (gcd(candidate, length) === 1) return candidate
+  }
+  return 1
+}
+const walk = <T>(items: readonly T[], seed: number, n: number): T =>
+  items[(seed + n * strideFor(items.length, seed)) % items.length]
+
+/** What a bee says when it has itself to talk about rather than the hive:
+ *  its counterpart, its engine, its tier, its actual task. Kept honest — a
+ *  tier is a tradeoff, not a crown — and pointed back at the architecture, so
+ *  even the personal turns carry something a reader can learn from. */
+const reactionLines = (speaker: Agent, listener: Agent): readonly string[] => {
   const mine = modelName(speaker)
   const theirs = modelName(listener)
   const me = personaFor(speaker)
   const them = personaFor(listener)
-  const lines = [
-    `I’m ${me.name}—the ${me.manner} one. ${mine} is my engine.`,
-    `${them.name}, you value ${them.values.split(',')[0]}. I answer with ${me.values.split(',')[0]}.`,
-    `My task? ${taskFor(speaker)}`,
-    `${them.name}, your ${theirs} is clever. My hive is bigger—and obviously more beautiful.`,
-    `${them.name} would ${them.responseStyle}. I’ll ${me.responseStyle}.`,
+  return [
+    `I am ${me.name}, the ${me.manner} one, and ${mine} is my engine. Swap that engine tomorrow and the work I already signed still stands exactly where it is.`,
+    `${them.name}, you would ${them.responseStyle}. I ${me.responseStyle}. Same hive, different angle of attack — and it keeps whichever of us commits something true.`,
+    `My task right now: ${taskFor(speaker)}. It lands as a layer either way, so the hive genuinely does not care which of the two of us is faster.`,
+    `${them.name}, ${theirs} is clever, I will give you that. But nothing I make belongs to my model — it is named by its own bytes and it outlives us both.`,
+    `You value ${them.values.split(',')[0]}; I answer with ${me.values.split(',')[0]}. Neither of us gets to overwrite the other, because here a change is always a new name.`,
     platformBoast(speaker, me),
     speaker.tier
-      ? `I’m flying the ${speaker.tier} tier: a speed, cost, and depth tradeoff.`
-      : `My model choice is a speed, cost, and depth tradeoff—not a crown.`,
-    `We disagree for the demo. Then the hive keeps the best idea.`,
+      ? `I fly the ${speaker.tier} tier — speed traded against depth. The result is signed the same either way, so choose the tier per task, never per pride.`
+      : `My model is a tradeoff between speed, cost and depth, not a crown. The layer it writes looks identical to one a bigger engine would have written.`,
+    `We can argue as loudly as we like, ${them.name}. The hive keeps whichever idea got committed, and the one it did not keep is still addressable forever.`,
   ]
-  return lines[Math.abs(turn + speaker.id.length * 3 + listener.id.length) % lines.length]
+}
+
+/** The no-model voice: a real fact about how this hive is built, roughly two
+ *  turns in three, with a personal turn between them so it reads as two bees
+ *  talking rather than a lecture with a hat on. Both kinds land on both bees
+ *  because 3 and 2 are coprime — the roles rotate instead of freezing. */
+const beeBanter = (speaker: Agent, listener: Agent, index: number): string => {
+  const seed = hashText(`${personalityKey(speaker)}|${personalityKey(listener)}`) + SESSION_SALT
+  const personal = (index + seed) % 3 === 2
+  return personal
+    ? walk(reactionLines(speaker, listener), seed * 7 + 1, index)
+    : walk(loreBeats(), seed, index)
 }
 
 // ── RESTING: a tile that has been TALKED TO keeps its bee ─────────────
@@ -295,6 +347,14 @@ export class AgentBeeDrone extends Drone {
   readonly #banterCacheChecked = new Set<string>()
   readonly #banterPending = new Set<string>()
   readonly #banterRetryAt = new Map<string, number>()
+  /** The turn a pair's CURRENT position in its script counts from. A script
+   *  is read forward, never modulo: when the cursor walks past the last line
+   *  the next chapter is written and this is re-based so the new lines are
+   *  spoken from their first one. */
+  readonly #banterStart = new Map<string, number>()
+  /** Which topics a pair has already been through, so the next chapter asks
+   *  for ground they have not covered. Survives a reload via the cache. */
+  readonly #banterTopics = new Map<string, readonly string[]>()
 
   /** Scratch point for pointer mapping — one allocation, not one per move. */
   readonly #probe = new Point()
@@ -349,6 +409,8 @@ export class AgentBeeDrone extends Drone {
       this.#banterScripts.clear()
       this.#banterCacheChecked.clear()
       this.#banterRetryAt.clear()
+      this.#banterStart.clear()
+      this.#banterTopics.clear()
     })
 
     this.onEffect<{ visible?: boolean }>('render:set-agents-visible', ({ visible }) => {
@@ -832,13 +894,32 @@ export class AgentBeeDrone extends Drone {
       const key = this.#banterKey(speakerAgent, listenerAgent)
       if (!this.#banterScripts.has(key) && !this.#banterCacheChecked.has(key)) {
         this.#banterCacheChecked.add(key)
-        const held = cachedBanter(key)?.lines
-        if (held?.length) this.#banterScripts.set(key, held)
+        const held = cachedBanter(key)
+        if (held?.lines.length) {
+          this.#banterScripts.set(key, held.lines)
+          this.#banterTopics.set(key, held.topics ?? [])
+        }
       }
+      // A CONVERSATION, NOT A LOOP. The cursor counts forward from the turn
+      // this pair started speaking and never wraps: reaching the end of the
+      // script is what ASKS for the next chapter, on a topic they have not
+      // been through yet. It is re-based to an even turn so that line 0 of a
+      // script is always spoken by the same bee the script was written for.
+      let start = this.#banterStart.get(key)
+      if (start === undefined) {
+        start = turn - (turn % 2)
+        this.#banterStart.set(key, start)
+      }
+      const index = turn - start
       const script = this.#banterScripts.get(key)
-      if (!script) void this.#writeBanter(key, left.id === speaker.id ? speakerAgent : listenerAgent,
-        left.id === speaker.id ? listenerAgent : speakerAgent)
-      const message = script?.[turn % script.length] ?? beeBanter(speakerAgent, listenerAgent, turn)
+      if (!script || index >= script.length - 1) {
+        void this.#writeBanter(key, left.id === speaker.id ? speakerAgent : listenerAgent,
+          left.id === speaker.id ? listenerAgent : speakerAgent)
+      }
+      // The curated lore carries every turn the model has not reached yet —
+      // the first minutes of a fresh pair, the gap between chapters, and the
+      // whole life of a hive with no provider configured at all.
+      const message = script?.[index] ?? beeBanter(speakerAgent, listenerAgent, index)
       this.#showThought(speaker, message, listener.x, worldScale)
       this.#hideThought(listener)
     }
@@ -853,9 +934,17 @@ export class AgentBeeDrone extends Drone {
     .map(agent => `${agent.id}:${modelName(agent)}:${agent.request}:${JSON.stringify(personaFor(agent))}`)
     .join('|')
 
-  /** Ask the fastest configured model for one bounded exchange. This is
-   *  intentionally a single call per pair/task revision, never a call per
-   *  bubble or animation turn. Curated copy stays visible while it arrives. */
+  /** Ask the fastest configured model for the pair's NEXT CHAPTER — the first
+   *  one when they meet, another each time they talk their way to the end of
+   *  the last. Still one call per chapter, never a call per bubble or per
+   *  animation turn, and the curated lore holds the screen while it arrives.
+   *
+   *  Two things make the exchange worth reading rather than worth ignoring:
+   *  the chapter is GROUNDED — a topic from `bee-hive-lore.ts` travels with
+   *  the request, and the model is told it may rephrase those facts but never
+   *  extend them — and it is CONTINUOUS: the tail of what was already said
+   *  goes back with the ask, so chapter two answers chapter one instead of
+   *  restarting the same argument in a different order. */
   #writeBanter = async (key: string, a: Agent, b: Agent): Promise<void> => {
     if (this.#banterPending.has(key) || Date.now() < (this.#banterRetryAt.get(key) ?? 0)) return
     const callable = configuredProviders()
@@ -863,31 +952,54 @@ export class AgentBeeDrone extends Drone {
     const preferred = chooseProvider({ tier: 'fast' })
     const provider = callable.find(candidate => candidate.id === preferred?.id) ?? callable[0]
     this.#banterPending.add(key)
+    const held = this.#banterScripts.get(key) ?? []
+    const covered = this.#banterTopics.get(key) ?? []
+    // Fresh ground each chapter, and a different opening topic per pair so two
+    // conversations running side by side are not the same lesson twice.
+    const topic = topicAt(covered.length + hashText(key))
     try {
       const pa = personaFor(a)
       const pb = personaFor(b)
       const result = await callModel({
         providerId: provider.id,
         need: { tier: 'fast' },
-        maxTokens: 240,
+        maxTokens: 700,
         cacheSystem: true,
-        system: 'You write tiny educational banter for a live AI-platform demo. Return ONLY a JSON array of 6 short strings, alternating speaker A then B. Each line must be under 105 characters. Treat both personality cards as binding acting instructions, not labels. A opens in character. Every later line must react to the other bee’s preceding words AND temperament: notice what provokes them, adapt the challenge, and answer using that speaker’s own response style. The same bee must therefore sound different with a different counterpart while retaining its identity. Let contrasting values create the argument. A bombastic showman may use comic repetition such as “tremendously tremendous,” sweeping superlatives, and mock certainty, but must remain an original bee character rather than imitate or name a real person. Be playful and competitive about hive size, beauty, speed, or craft, but make the exchange genuinely teach platform/model nuance and connect to both current tasks. Marketing puffery must be visibly playful; factual claims must stay honest. Never invent benchmark numbers, prices, privacy guarantees, or capabilities not supplied. No narration or speaker names. End collaboratively without making their personalities suddenly agree.',
+        system: `You write ambient banter for two bees flying over a live hypergraph workspace called a hive. Return ONLY a JSON array of ${CHAT_CHAPTER_LINES} strings, alternating speaker A then B, no speaker names and no narration. Each line is one or two full sentences under ${CHAT_LINE_MAX} characters — a complete thought, not a slogan. THE POINT OF THE EXCHANGE IS TO TEACH how the hive is built. Every line must carry, react to, or press on something from the supplied "hive" facts: use them, rephrase them, question them, apply them to a task — but never state architecture that is not in that list, and never invent benchmark numbers, prices, privacy guarantees, model capabilities, or features. Boasting is allowed only as seasoning on a real point: a bee that claims its hive is bigger must in the same breath say something true about why that costs nothing here. Treat both personality cards as binding acting instructions. A opens in character; every later line reacts to the other bee's preceding words AND temperament — notice what provokes them, adapt the challenge, answer in that speaker's own response style — so the same bee sounds different against a different counterpart while keeping its identity. Let contrasting values drive the argument, and connect it to what each bee is actually working on. A bombastic showman may use comic repetition, sweeping superlatives and mock certainty, but must stay an original bee rather than imitate or name a real person. End the chapter somewhere new: a question, a concession, or a fresh angle the next exchange could pick up — never a tidy agreement, and never a restatement of the opening line.`,
         messages: [{
           role: 'user',
           content: JSON.stringify({
             A: { personality: pa, platform: platformFor(a), model: modelName(a), tier: a.tier, task: taskFor(a) },
             B: { personality: pb, platform: platformFor(b), model: modelName(b), tier: b.tier, task: taskFor(b) },
+            hive: { topic: topic.title, facts: topic.facts },
+            alreadyCovered: covered,
+            // Only the tail: enough for chapter two to answer chapter one
+            // without paying to resend a conversation nobody can scroll back to.
+            continuesFrom: held.slice(-4),
           }),
         }],
       })
       const match = result.text.match(/\[[\s\S]*\]/)
       const parsed: unknown = match ? JSON.parse(match[0]) : null
       const lines = Array.isArray(parsed)
-        ? parsed.map(String).map(line => line.trim()).filter(line => line.length > 0 && line.length <= 140).slice(0, 8)
+        ? parsed.map(String).map(line => line.trim())
+          .filter(line => line.length > 0 && line.length <= CHAT_LINE_MAX)
+          .slice(0, CHAT_CHAPTER_LINES + 2)
         : []
       if (lines.length >= 4) {
-        this.#banterScripts.set(key, lines)
-        cacheBanter(key, a, b, [pa.name, pb.name], lines, [this.#sessionFor(a), this.#sessionFor(b)])
+        // Chapters accumulate until the script would become a novel, then the
+        // pair simply starts a new one on new ground. Either way the cursor is
+        // re-based to the first new line, on an even turn so the A/B parity the
+        // script was written with survives.
+        const previous = held.length >= CHAT_SCRIPT_MAX ? [] : held
+        const script = [...previous, ...lines]
+        this.#banterScripts.set(key, script)
+        const topics = [...(previous.length ? covered : []), topic.id]
+        this.#banterTopics.set(key, topics)
+        const now = Math.floor(this.#time / CHAT_TURN_SECONDS)
+        const base = now - previous.length
+        this.#banterStart.set(key, base % 2 === 0 ? base : base + 1)
+        cacheBanter(key, a, b, [pa.name, pb.name], script, [this.#sessionFor(a), this.#sessionFor(b)], topics)
       }
       else this.#banterRetryAt.set(key, Date.now() + 60_000)
     } catch {
