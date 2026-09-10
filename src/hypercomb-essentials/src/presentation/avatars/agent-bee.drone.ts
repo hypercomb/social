@@ -146,9 +146,17 @@ const WAGGLE_SCALE = 0.34
 /** Ambient chatter changes slowly enough to read, but never becomes chrome.
  *  A turn now carries a whole thought about how the hive works rather than a
  *  one-line boast, so it needs longer on screen — six seconds was the dwell
- *  for a half-line. */
-const CHAT_TURN_SECONDS = 9
+ *  for a half-line, nine was still a line you had to catch rather than read
+ *  (Jaime, 2026-09-09: "make it stay around a little longer so people can read
+ *  it"). Fifteen is a four-line bubble read at a glance, twice, by someone who
+ *  is doing something else. */
+const CHAT_TURN_SECONDS = 15
 const CHAT_MAX_PAIRS = 3
+/** How far along its deck a pair will step to avoid saying what another pair
+ *  is ALREADY saying. Three pairs can be on screen at once and they draw from
+ *  the same curated deck, so two of them landing on one beat is a coincidence
+ *  that will happen — and two identical boxes read as a bug, not as chatter. */
+const CHAT_DEDUPE_STEPS = 6
 /** How many turns a generated chapter runs before the next one is asked for.
  *  A pair NEVER loops its script: when the cursor walks off the end, the next
  *  chapter is written against a fresh topic and appended. */
@@ -176,8 +184,13 @@ const CHAT_BUBBLE_WIDTH = 154
 const CHAT_BUBBLE_SCALE = 0.6
 const CHAT_BUBBLE_FONT = 10.5 * CHAT_BUBBLE_SCALE
 const CHAT_BUBBLE_LINE = 14 * CHAT_BUBBLE_SCALE
-const CHAT_BUBBLE_PAD_X = 10 * CHAT_BUBBLE_SCALE
-const CHAT_BUBBLE_PAD_Y = 8 * CHAT_BUBBLE_SCALE
+/** ROOM AROUND THE WORDS, inside the box (Jaime, 2026-09-09: "a little bit of
+ *  padding … inside the container"). At this size the text was sitting almost
+ *  on the stroke, which is what made a readable line look cramped; the box
+ *  keeps its width, so the extra horizontal padding comes out of the wrap
+ *  width and the bubble grows down instead of out. */
+const CHAT_BUBBLE_PAD_X = 15 * CHAT_BUBBLE_SCALE
+const CHAT_BUBBLE_PAD_Y = 13 * CHAT_BUBBLE_SCALE
 /** Floor for a one-line bubble, so a short line still reads as a box. */
 const CHAT_BUBBLE_MIN_HEIGHT = 34 * CHAT_BUBBLE_SCALE
 /** THE VOICE THE BEES SPEAK IN. `system-ui` is the shell's chrome face —
@@ -927,6 +940,11 @@ export class AgentBeeDrone extends Drone {
       .filter(bee => bee.alpha > 0.22 && bee.id !== this.#perched && !!this.#agentFor(bee.id))
       .sort((a, b) => a.id.localeCompare(b.id))
     const chatting = new Set<string>()
+    // NEVER THE SAME WORDS TWICE ON ONE SCREEN. Pairs are independent and draw
+    // from one deck, so a collision is only a matter of time — and two boxes
+    // carrying an identical sentence read as a rendering fault, not as two
+    // conversations. The second pair steps along its own deck instead.
+    const spoken = new Set<string>()
     const turn = Math.floor(this.#time / CHAT_TURN_SECONDS)
 
     for (let i = 0; i + 1 < visible.length && i / 2 < CHAT_MAX_PAIRS; i += 2) {
@@ -938,7 +956,6 @@ export class AgentBeeDrone extends Drone {
       const listenerAgent = this.#agentFor(listener.id)
       if (!speakerAgent || !listenerAgent) continue
 
-      chatting.add(speaker.id)
       const key = this.#banterKey(speakerAgent, listenerAgent)
       if (!this.#banterScripts.has(key) && !this.#banterCacheChecked.has(key)) {
         this.#banterCacheChecked.add(key)
@@ -967,7 +984,17 @@ export class AgentBeeDrone extends Drone {
       // The curated lore carries every turn the model has not reached yet —
       // the first minutes of a fresh pair, the gap between chapters, and the
       // whole life of a hive with no provider configured at all.
-      const message = script?.[index] ?? beeBanter(speakerAgent, listenerAgent, index)
+      const lineAt = (n: number): string =>
+        script?.[n] ?? beeBanter(speakerAgent, listenerAgent, n)
+      let message = lineAt(index)
+      for (let step = 1; spoken.has(message) && step <= CHAT_DEDUPE_STEPS; step++) {
+        message = lineAt(index + step)
+      }
+      // Still an echo after stepping the whole way: say nothing rather than say
+      // it twice. This pair's next turn comes around on its own.
+      if (spoken.has(message)) { this.#hideThought(speaker); this.#hideThought(listener); continue }
+      spoken.add(message)
+      chatting.add(speaker.id)
       this.#showThought(speaker, message, listener.x, worldScale)
       this.#hideThought(listener)
     }
