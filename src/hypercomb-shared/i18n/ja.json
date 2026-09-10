@@ -2133,6 +2133,8 @@
   "workflow.view.exit": "ヘキサゴン",
   "workflow.view.steps": "{count} ステップ",
   "workflow.view.empty": "まだステップがありません。パレットから種類をこのキャンバスへドラッグしてください。",
+  "bees.swept": "脇へ払いました — もう一度なぞると戻ります。",
+  "bees.swept-back": "仕事に戻りました。",
   "agent.close": "閉じる",
   "agent.request": "依頼内容",
   "agent.where": "作業対象",

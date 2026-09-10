@@ -2282,6 +2282,8 @@
   "workflow.view.exit": "hexagons",
   "workflow.view.steps": "{count} steps",
   "workflow.view.empty": "No steps yet. Drag a kind from the palette onto this canvas.",
+  "bees.swept": "Swept aside — scribble over them again to bring them back.",
+  "bees.swept-back": "Back on the work.",
   "agent.close": "Close",
   "agent.request": "The request",
   "agent.where": "Working on",

@@ -45,7 +45,7 @@
 // dance near each other a reader has to guess which name goes with which. What
 // is painted on the bee cannot be read against the wrong one.
 
-import { Drone, EffectBus } from '@hypercomb/core'
+import { Drone, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { Application, Container, Graphics, Point, Sprite, Text, Texture } from 'pixi.js'
 import type { AgentRegistry, Agent } from '../../assistant/agent-registry.service.js'
 import { conversationModel, listRailConversations, tileConvoId } from '../../assistant/chat-thread.js'
@@ -57,7 +57,10 @@ import { BEE_PERSONALITY_CHANGED, personaFor, personalityKey, type BeePersona } 
 import { cacheBanter, cachedBanter } from './bee-banter-cache.js'
 import { loreBeats, topicAt } from './bee-hive-lore.js'
 import { inWaggleArea, waggleOffset, wagglePath, type AgentKind } from './agent-waggle.js'
-import { isDrag, nudgeFrom, snapsHome, type Nudge } from './bee-drag.js'
+import {
+  isDrag, nudgeFrom, snapsHome, ScrubDetector, sweptAsideTo, SWEEP_REACH_PX,
+  type Nudge, type Room,
+} from './bee-drag.js'
 import { trackSceneText } from '../grid/screen-text-resolution.js'
 import type { HostReadyPayload } from '../tiles/pixi-host.worker.js'
 import type { HexGeometry } from '../grid/hex-geometry.js'
@@ -90,6 +93,12 @@ interface BeeSprite {
   danceTime: number
   alpha: number
   fadeTarget: number
+  /** INK, not presence. Eased 0..1, multiplied into everything the bee draws
+   *  so it can stand back out of the light over a tile the participant is
+   *  reading WITHOUT moving — `alpha` stays the presence value the hit test
+   *  judges by, so a bee that has gone quiet is still exactly as pressable as
+   *  it looks. */
+  dim: number
   facing: number
   /** Ambient, non-interactive conversation shown only while another bee is
    *  sharing this layer. Kept in the Pixi world so it travels with the bee. */
@@ -134,15 +143,33 @@ const ANCHOR_INTERVAL_MS = 400
 const FLAP_FPS = 13
 /** How far above its tile a bee dances, in CSS px. */
 const HOVER_PX = 38
-/** How far from a hovered tile's centre a bee must stand, as a multiple of the
- *  hex circumradius. The overlay fills the tile with its icon rows and the name
- *  band while the pointer is on it, and a bee dancing there sits on top of both
- *  (Jaime, 2026-09-09: "when you mouse over a tile make sure that the agents
- *  get out of the way"). 2.1 puts the bee clear of the hexagon with a margin,
- *  near enough that it still reads as belonging to that tile. */
+/** How near a hovered tile's centre a bee has to be to be standing in its
+ *  light, as a multiple of the hex circumradius. The overlay fills the tile
+ *  with its icon rows and the name band while the pointer is on it, and a bee
+ *  dancing there sits on top of both (Jaime, 2026-09-09: "when you mouse over
+ *  a tile make sure that the agents get out of the way"). 2.1 covers the
+ *  hexagon with a margin.
+ *
+ *  It used to be a PUSH — the bee was moved out of the ring. That is what took
+ *  the bees away from the participant: a bee that runs when you reach for it
+ *  is a bee whose log you cannot open. Now the same ring only costs the bee
+ *  its INK (`GHOST_INK`); moving one is something you do, never something it
+ *  decides. */
 const TILE_CLEARANCE_R = 2.1
+/** How much ink a bee keeps while it is standing back over a tile you are
+ *  reading. Enough to still be seen and aimed at — it has not gone anywhere —
+ *  little enough that the tile's own overlay reads straight through it. */
+const GHOST_INK = 0.3
 /** Fixed compact waggle size. Agent status must not pulse the path width. */
 const WAGGLE_SCALE = 0.34
+/** THE VIEWPORT IS THE ROOM. A bee is chrome, not content: it is anchored to a
+ *  tile, and a pan or a zoom can carry that tile off the edge or up under the
+ *  header bar, where the bee is simply gone (Jaime, 2026-09-09: they "should
+ *  never be able to fly off screen — currently they're going underneath the
+ *  header and you can't see them"). The dance is kept inside the visible band,
+ *  which starts at the header's MEASURED bottom, not at the canvas top.
+ *  Keep-in margin around a bee, in CSS px: half its body plus a little air. */
+const BEE_EDGE_PX = BEE_PX * 0.5 + 8
 /** Ambient chatter changes slowly enough to read, but never becomes chrome.
  *  A turn now carries a whole thought about how the hive works rather than a
  *  one-line boast, so it needs longer on screen — six seconds was the dwell
@@ -375,6 +402,14 @@ export class AgentBeeDrone extends Drone {
   #hexGeo: HexGeometry = { circumRadiusPx: 32, gapPx: 6, padPx: 10, spacing: 38 }
   #time = 0
   #lastAnchorAt = 0
+  /** The broom (bee-drag.ts): scribbling over a patch of hive sweeps the bees
+   *  in it aside, and scribbling over swept bees sends them back. */
+  #scrub = new ScrubDetector()
+  /** How much of the canvas's top the header bar covers, in CSS px. Measured
+   *  on the anchor cadence, not per frame — `getComputedStyle` is a layout
+   *  read and this is chrome that moves when the shell moves, not when the
+   *  camera does. */
+  #topInset = 0
   #hiveHidden = false
   /** In a swarm — LOCAL agents go out of sight for as long as it lasts
    *  (see the `mesh:public-changed` handler). */
@@ -675,6 +710,7 @@ export class AgentBeeDrone extends Drone {
       seed: Math.random() * 6.28,
       danceTime: 0,
       alpha: 0,
+      dim: 1,
       fadeTarget: resolved && !this.#grounded(agent) ? 1 : 0,
       facing: 1,
       thought: null,
@@ -744,21 +780,14 @@ export class AgentBeeDrone extends Drone {
     return cell ? this.#axialToPixel(cell.q, cell.r) : null
   }
 
-  /** How far to push a bee anchored at (x, y) so it clears the hovered tile.
-   *  Zero for every bee already outside the clearance ring, so a hover moves
-   *  only the bees that are actually in the way. Straight up when a bee sits
-   *  exactly on the centre — there is no direction to push it otherwise. */
-  #clearance = (x: number, y: number): { x: number; y: number } => {
+  /** Is this bee standing in the light the participant is reading by — that
+   *  is, over the tile under the pointer? False for every bee outside the
+   *  ring, so reading one tile only quiets the bees actually on top of it. */
+  #inTheLight = (bee: BeeSprite): boolean => {
     const centre = this.#pointerTileCentre()
-    if (!centre) return { x: 0, y: 0 }
+    if (!centre) return false
     const clear = this.#hexGeo.circumRadiusPx * TILE_CLEARANCE_R
-    const dx = x - centre.x
-    const dy = y - centre.y
-    const distance = Math.hypot(dx, dy)
-    if (distance >= clear) return { x: 0, y: 0 }
-    if (distance < 0.001) return { x: 0, y: -clear }
-    const push = clear - distance
-    return { x: (dx / distance) * push, y: (dy / distance) * push }
+    return Math.hypot(bee.centreX - centre.x, bee.centreY - centre.y) < clear
   }
 
   /** Is the participant on the root layer? Global work lives there. */
@@ -775,6 +804,48 @@ export class AgentBeeDrone extends Drone {
     if (!this.#app || !this.#world) return { x: 0, y: 0 }
     const screen = this.#app.renderer.screen
     return this.#world.toLocal(new Point(screen.width * PERCH_X, screen.height * PERCH_Y))
+  }
+
+  /** What the header bar hides of the canvas, in CSS px. The shell publishes
+   *  its MEASURED bottom edge as `--hc-header-bottom` (controls-bar's
+   *  ResizeObserver) and REMOVES the variable while the bar is hidden, so a
+   *  hidden header gives the bees the whole screen back on its own. The canvas
+   *  is not assumed to start at the top of the viewport — whatever of the bar
+   *  overlaps this canvas is the inset, and nothing else. */
+  #measureTopInset = (): void => {
+    const canvas = this.#canvas ?? this.#app?.canvas
+    if (!canvas) { this.#topInset = 0; return }
+    const raw = getComputedStyle(document.documentElement).getPropertyValue('--hc-header-bottom')
+    const headerBottom = Number.parseFloat(raw) || 0
+    const top = canvas.getBoundingClientRect?.().top ?? 0
+    this.#topInset = Math.max(0, headerBottom - top)
+  }
+
+  /** KEEP THE BEE IN THE ROOM. Clamps the drawn position into the visible band
+   *  and carries the same correction into the dance CENTRE, so a bee whose
+   *  tile has been panned away settles against the edge and keeps dancing
+   *  there instead of pressing into the wall every frame and springing back.
+   *  Screen space is the only frame that knows about the header, so the clamp
+   *  is done there and brought back through the world transform — the same
+   *  round trip the thought bubbles make. */
+  #keepInView = (bee: BeeSprite): void => {
+    if (!this.#app || !this.#world) return
+    const screen = this.#app.renderer.screen
+    const minX = screen.x + BEE_EDGE_PX
+    const maxX = screen.x + screen.width - BEE_EDGE_PX
+    const minY = screen.y + this.#topInset + BEE_EDGE_PX
+    const maxY = screen.y + screen.height - BEE_EDGE_PX
+    // A viewport too small to hold the bee: park it in the middle of whatever
+    // band there is rather than letting the clamp fight itself.
+    const point = this.#world.toGlobal(new Point(bee.x, bee.y), undefined, true)
+    const x = maxX >= minX ? Math.min(Math.max(point.x, minX), maxX) : (minX + maxX) / 2
+    const y = maxY >= minY ? Math.min(Math.max(point.y, minY), maxY) : (minY + maxY) / 2
+    if (x === point.x && y === point.y) return
+    const local = this.#world.toLocal(new Point(x, y))
+    bee.centreX += local.x - bee.x
+    bee.centreY += local.y - bee.y
+    bee.x = local.x
+    bee.y = local.y
   }
 
   /** A stable spot in the current view, spread so hive-wide bees never stack.
@@ -813,7 +884,7 @@ export class AgentBeeDrone extends Drone {
     // Anchors are re-resolved on a slow cadence: the tiles under the bees only
     // move when the participant pans, zooms, or the layer repaints.
     const reanchor = now - this.#lastAnchorAt > ANCHOR_INTERVAL_MS
-    if (reanchor) this.#lastAnchorAt = now
+    if (reanchor) { this.#lastAnchorAt = now; this.#measureTopInset() }
 
     // Counter-scale: constant size on screen whatever the world scale is.
     // The avatar's texture cell is ATLAS_CELL_PX square.
@@ -864,15 +935,34 @@ export class AgentBeeDrone extends Drone {
         // just make the bee lag the hand that is placing it.
         bee.centreX = bee.anchorX + (nudge?.x ?? 0)
         bee.centreY = bee.anchorY - hover + (nudge?.y ?? 0)
-      } else if (!hovered) {
-        // Step aside for the tile under the pointer — the overlay owns that
-        // hexagon while the participant is reading it. A bee that has been PUT
-        // somewhere does not step: the participant already said where it goes,
-        // and a second opinion would only drag it back over the tiles.
-        const aside = nudge ?? this.#clearance(bee.anchorX, bee.anchorY - hover)
-        bee.centreX += (bee.anchorX + aside.x - bee.centreX) * 0.06
-        bee.centreY += (bee.anchorY - hover + aside.y - bee.centreY) * 0.06
+      } else {
+        // Its work says where it dances; a nudge — a drag, or a sweep — says
+        // where the participant put it instead. Nothing else moves a bee. It
+        // does NOT step aside from the pointer: a target that flinches as you
+        // reach for it cannot be pressed, and pressing is how a log is opened.
+        // Standing back out of the light is `#inTheLight` below, and that
+        // costs ink, never ground.
+        //
+        // TRAVEL IS NOT THE DANCE, so hovering does not stop it. Hovering
+        // freezes the waggle (below) — that is what makes a dancing bee a
+        // stable target — but a bee that has just been swept aside, or swept
+        // back to its work, has somewhere to be, and the cursor happens to be
+        // exactly where it was standing. Frozen here, it would simply never go
+        // (measured 2026-09-09: swept to the wall, the sweep back left it on
+        // the wall). The glide is slow enough to follow and the target goes
+        // with it.
+        bee.centreX += (bee.anchorX + (nudge?.x ?? 0) - bee.centreX) * 0.06
+        bee.centreY += (bee.anchorY - hover + (nudge?.y ?? 0) - bee.centreY) * 0.06
       }
+
+      // OUT OF THE LIGHT, NOT OUT OF THE WAY. While the participant is reading
+      // the tile this bee is dancing over, the overlay owns that hexagon — its
+      // icon rows and its name band are under the bee. So the bee goes quiet:
+      // it keeps its place, its size and its whole hit target, and simply
+      // stops competing for the eye. A hovered or carried bee never dims —
+      // that one is being looked at.
+      const lit = hovered || dragged || !this.#inTheLight(bee)
+      bee.dim += ((lit ? 1 : GHOST_INK) - bee.dim) * 0.12
 
       // Freeze a hovered bee in place so the following press has a stable
       // target. Its wings can keep beating; only the waggle motion pauses.
@@ -884,6 +974,10 @@ export class AgentBeeDrone extends Drone {
       const ahead = waggleOffset(bee.kind, bee.danceTime + 0.05, bee.seed, WAGGLE_SCALE)
       bee.x = bee.centreX + offset.x / worldScale
       bee.y = bee.centreY + offset.y / worldScale
+      // The room comes last: whatever the anchor, the nudge, the clearance or
+      // the departure drift decided, the bee is still on screen and still
+      // below the header.
+      this.#keepInView(bee)
       // Lean the way the dance is going — the turn at each end of the run is
       // what makes a figure-8 read as a figure-8.
       if (Math.abs(ahead.x - offset.x) > 0.2) bee.facing = ahead.x >= offset.x ? 1 : -1
@@ -923,7 +1017,7 @@ export class AgentBeeDrone extends Drone {
       // cannot be flipped to show which way it is going — the name would come
       // out backwards — so the turn at each end of the run is a lean instead.
       bee.sprite.rotation += (bee.facing * BANK - bee.sprite.rotation) * 0.12
-      bee.sprite.alpha = bee.alpha
+      bee.sprite.alpha = bee.alpha * bee.dim
       this.#badge(bee, agent?.status === 'blocked')
     }
 
@@ -1204,7 +1298,7 @@ export class AgentBeeDrone extends Drone {
       const local = this.#world.toLocal(anchor)
       bee.thought.position.set(local.x, local.y)
     }
-    bee.thought.alpha = Math.min(0.92, bee.alpha) * (0.88 + 0.12 * Math.sin(this.#time * 1.4))
+    bee.thought.alpha = Math.min(0.92, bee.alpha) * bee.dim * (0.88 + 0.12 * Math.sin(this.#time * 1.4))
     bee.thought.visible = true
   }
 
@@ -1235,7 +1329,7 @@ export class AgentBeeDrone extends Drone {
     bee.badge.visible = true
     // One slow breath, in step with nothing else — a bee that has been
     // waiting a while is still asking just as calmly as when it started.
-    bee.badge.alpha = bee.alpha * (0.55 + 0.45 * (0.5 + 0.5 * Math.sin(this.#time * 2.2)))
+    bee.badge.alpha = bee.alpha * bee.dim * (0.55 + 0.45 * (0.5 + 0.5 * Math.sin(this.#time * 2.2)))
   }
 
   /** The WAGGLE AREA — a faint trace of the patch of air each bee is dancing
@@ -1260,7 +1354,7 @@ export class AgentBeeDrone extends Drone {
       trace.stroke({
         width: (hovered ? 1.6 : 1) / worldScale,
         color: 0x7eb6d6,
-        alpha: bee.alpha * (hovered ? 0.5 : 0.17),
+        alpha: bee.alpha * bee.dim * (hovered ? 0.5 : 0.17),
       })
     }
   }
@@ -1273,7 +1367,14 @@ export class AgentBeeDrone extends Drone {
    *  in. The bee wins when the cursor is on it (nearest bee first), but the
    *  area is what makes this usable — you should not have to chase a dancing
    *  insect with a mouse. Distances are compared in SCREEN pixels so the
-   *  target is the same size at any zoom. */
+   *  target is the same size at any zoom.
+   *
+   *  THE TILE OWNS ITS OWN AIR. Over a tile, only the bee's BODY answers: the
+   *  waggle area is a courtesy for aiming at a bee dancing in the open, and a
+   *  courtesy that swallows presses meant for the hexagon underneath is how a
+   *  bee gets in the way of the work (Jaime, 2026-09-09: "the agents are in
+   *  the way of the tile operations"). The body is generous and the bee holds
+   *  still under the cursor, so nothing is lost by aiming at the bee itself. */
   #hitTest = (clientX: number, clientY: number): string => {
     if (!this.#app || !this.#world || !this.#layer?.visible || this.#bees.size === 0) return ''
     const rect = this.#canvas?.getBoundingClientRect()
@@ -1309,11 +1410,14 @@ export class AgentBeeDrone extends Drone {
         areaDistance = centreDistance
       }
     }
-    return onBee || inArea
+    return onBee || (this.#tileUnderPointer ? '' : inArea)
   }
 
   #onPointerDown = (event: PointerEvent): void => {
     if (this.#hiveHidden) return
+    // A press ends any scribble in progress, wherever it lands: what follows
+    // is a pan, a selection or a carry, and none of them is a sweep.
+    this.#scrub.clear()
 
     const id = this.#hitTest(event.clientX, event.clientY)
     if (!id) return
@@ -1410,10 +1514,14 @@ export class AgentBeeDrone extends Drone {
     this.#swallowPointer = null
     this.#swallowClickUntil = Date.now() + 500
     // THE RELEASE IS WHERE THE PRESS IS SPENT: put the bee down, or open it.
+    // A PRESS THAT MOVED NOTHING IS A CLICK. The threshold alone cannot carry
+    // that promise — a hand still travelling when the button goes down would
+    // spend the press on a drag that ends where it started, and the request
+    // would never open. So the release asks what actually happened: the bee is
+    // somewhere else now (a drag), or it is exactly where it was (a click).
     const press = this.#press
     this.#press = null
-    if (press?.dragging) this.#endDrag(press)
-    else if (press) this.#openBee(press.id)
+    if (press && (!press.dragging || this.#endDrag(press))) this.#openBee(press.id)
     event.stopPropagation()
     event.preventDefault()
   }
@@ -1432,8 +1540,87 @@ export class AgentBeeDrone extends Drone {
   #onPointerMove = (event: PointerEvent): void => {
     if (this.#press && this.#press.pointerId === event.pointerId) { this.#drag(event); return }
     if (this.#hiveHidden) { this.#setHover(''); return }
+    // THE BROOM. Scribbling over a patch of hive with nothing pressed sweeps
+    // the bees in it out to the wall — and scribbling over swept bees sends
+    // them back to their work. Only with no button down: a press already
+    // means pan, select or carry, and a gesture must never mean two things.
+    if (event.buttons === 0) {
+      const at = this.#scrub.feed(event.clientX, event.clientY, event.timeStamp || Date.now())
+      if (at) this.#sweep(at)
+    } else {
+      this.#scrub.clear()
+    }
     const id = this.#hitTest(event.clientX, event.clientY)
     this.#setHover(id, event.clientX, event.clientY)
+  }
+
+  /** SWEEP THE PATCH. Every bee dancing near the scribble goes out to the wall
+   *  along the line from the broom, as a NUDGE — the same displacement a drag
+   *  writes, so a swept bee holds its place through a pan and a zoom, comes
+   *  home when it is dropped back, and mints nothing.
+   *
+   *  The same gesture is the way back: when everything the broom can reach has
+   *  already been swept, scrubbing sends it home instead. One gesture, both
+   *  directions, and no memory of which is which — the bees' own state says. */
+  #sweep = (at: { x: number; y: number }): void => {
+    if (!this.#app || !this.#world) return
+    const rect = this.#canvas?.getBoundingClientRect()
+    if (rect && (at.x < rect.left || at.x > rect.right || at.y < rect.top || at.y > rect.bottom)) return
+
+    const worldScale = this.#world.scale.x || 1
+    const hover = HOVER_PX / worldScale
+    const reach = SWEEP_REACH_PX * SWEEP_REACH_PX
+    // The scribble, in the same screen space the bees are measured in.
+    this.#app.renderer.events.mapPositionToPoint(this.#probe, at.x, at.y)
+    const broom = { x: this.#probe.x, y: this.#probe.y }
+
+    const reached: BeeSprite[] = []
+    for (const bee of this.#bees.values()) {
+      if (bee.alpha < 0.25 || bee.id === this.#perched) continue
+      const screen = this.#world.toGlobal(new Point(bee.centreX, bee.centreY), undefined, true)
+      const dx = screen.x - broom.x
+      const dy = screen.y - broom.y
+      if (dx * dx + dy * dy > reach) continue
+      reached.push(bee)
+    }
+    if (!reached.length) return
+
+    // Already all out of the way? Then this scribble means "come back".
+    if (reached.every(bee => this.#nudges.has(bee.id))) {
+      for (const bee of reached) this.#nudges.delete(bee.id)
+      this.emitEffect('toast:show', { type: 'tip', message: this.#word('bees.swept-back', 'Back on the work.') })
+      return
+    }
+
+    const screen = this.#app.renderer.screen
+    const room: Room = {
+      left: screen.x,
+      top: screen.y + this.#topInset,
+      right: screen.x + screen.width,
+      bottom: screen.y + screen.height,
+    }
+    for (const bee of reached) {
+      if (this.#nudges.has(bee.id)) continue
+      const from = this.#world.toGlobal(new Point(bee.centreX, bee.centreY), undefined, true)
+      const to = sweptAsideTo({ x: from.x, y: from.y }, { x: broom.x, y: broom.y }, room, BEE_EDGE_PX)
+      const local = this.#world.toLocal(new Point(to.x, to.y))
+      this.#nudges.set(bee.id, {
+        x: local.x - bee.anchorX,
+        y: local.y - (bee.anchorY - hover),
+      })
+    }
+    this.emitEffect('toast:show', {
+      type: 'tip',
+      message: this.#word('bees.swept', 'Swept aside — scribble over them again to bring them back.'),
+    })
+  }
+
+  /** A line in the participant's language, or the English it was written in.
+   *  Neither line counts the bees: there is no plural machinery behind `t`,
+   *  and a sentence that is true for one bee and for five needs none. */
+  #word = (key: string, fallback: string): string => {
+    const said = ioc<I18nProvider>(I18N_IOC_KEY)?.t?.(key)
+    return said && said !== key ? said : fallback
   }
 
   /** Carry the pressed bee with the pointer, once the press has travelled far
@@ -1458,13 +1645,18 @@ export class AgentBeeDrone extends Drone {
     ))
   }
 
-  /** Let go. A bee dropped back where its work put it takes its old place
-   *  again: putting it back is how a nudge is undone, and no command is
-   *  needed for it. */
-  #endDrag = (press: BeePress): void => {
+  /** Let go, and say whether the bee ended up HOME. A bee dropped back where
+   *  its work put it takes its old place again — putting it back is how a
+   *  nudge is undone, and no command is needed for it — and, because nothing
+   *  was moved, that release is still a click. */
+  #endDrag = (press: BeePress): boolean => {
     if (this.#canvas?.style.cursor === 'grabbing') this.#canvas.style.cursor = ''
     const nudge = this.#nudges.get(press.id)
-    if (nudge && snapsHome(nudge, this.#world?.scale.x || 1)) this.#nudges.delete(press.id)
+    const home = !nudge || snapsHome(nudge, this.#world?.scale.x || 1)
+    if (home) this.#nudges.delete(press.id)
+    // TRUE = the bee is back where its work put it, so nothing was moved and
+    // the press is still a press: the release opens the request.
+    return home
   }
 
   /** A client-space point in world coordinates, or null before the host is up.
