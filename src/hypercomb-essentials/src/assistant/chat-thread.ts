@@ -88,6 +88,13 @@ type TurnManifest = {
 // with a turn file, whose name is the hash of a JSON record.
 const ARCHIVE_MARKER = 'chat-archived'
 const GOAL_MARKER = 'chat-goal-reached'
+/** WHAT THIS CONVERSATION IS CALLED. A thread names itself by its first
+ *  message, which is what you did not know yet; once an exchange exists the
+ *  name can be INFERRED from it (chat-name.ts) and written here. Same mutable
+ *  marker shape as the archive flag: a stable name inside the bucket, so
+ *  every surface that already walks the turns learns the name for free — no
+ *  second pool, no second read, and nothing to keep in step. */
+const NAME_MARKER = 'chat-name'
 
 /** The marker file's name inside a bucket. Derived once, then held. */
 let archiveNamePromise: Promise<string> | null = null
@@ -96,6 +103,9 @@ const archiveName = (): Promise<string> =>
 let goalNamePromise: Promise<string> | null = null
 const goalName = (): Promise<string> =>
   (goalNamePromise ??= sha256(new TextEncoder().encode(GOAL_MARKER).buffer as ArrayBuffer))
+let nameNamePromise: Promise<string> | null = null
+const nameName = (): Promise<string> =>
+  (nameNamePromise ??= sha256(new TextEncoder().encode(NAME_MARKER).buffer as ArrayBuffer))
 
 /** The STEP LEDGER's directory name inside a bucket — the agent's recorded
  *  attempts, written beside the turns by `chat-steps.ts`. Named HERE, with
@@ -132,6 +142,8 @@ type BucketRead = {
   readonly turns: RawTurn[]
   readonly archived: boolean
   readonly goal?: ChatGoalReached
+  /** The inferred name, when one has been written. Absent is normal. */
+  readonly name?: string
 }
 
 /** One conversation, as the chat window lists it. Recovered from the pool —
@@ -149,6 +161,16 @@ export interface ConversationSummary {
   readonly archived: boolean
   /** Set by a bridge responder when the conversation's requested outcome is complete. */
   readonly goal?: ChatGoalReached
+  /** HAS ANYTHING COME BACK? A question that has been sent and not yet
+   *  answered is a real conversation — it lists, it is enterable, it is the
+   *  thread you are watching — but it has no subject yet, only an opening
+   *  line. Surfaces say so ("waiting for reply…") rather than naming a thread
+   *  after the thing you did not know when you started it. */
+  readonly replied: boolean
+  /** Is `title` a NAME that was written down (chat-name.ts), or is the thread
+   *  still wearing its opening line? What lets the naming drain find the
+   *  threads that have never been named without re-reading every bucket. */
+  readonly named: boolean
 }
 
 /** Conversations that belong to a PERSON, and so appear in the chat window.
@@ -378,6 +400,7 @@ const readBucketRaw = async (
   const out: RawTurn[] = []
   let archived = false
   let goal: ChatGoalReached | undefined
+  let named = ''
   let decided = !humanOnly
   const entries = (bucket as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()
   for await (const [, handle] of entries) {
@@ -394,6 +417,12 @@ const readBucketRaw = async (
         goal = { details, at: Number(turn.at) || 0 }
         continue
       }
+      // The name rides beside the turns for the same reason the archive flag
+      // does: the walk is already reading every file here.
+      if (turn?.kind === NAME_MARKER) {
+        if (typeof turn.text === 'string') named = turn.text.trim()
+        continue
+      }
       if (turn?.kind !== 'chat-turn' || !turn.convoId) continue
       // Either shape: legacy inline text, or a manifest pointing at it.
       if (typeof turn.text !== 'string' && typeof turn.contentSig !== 'string') continue
@@ -405,8 +434,13 @@ const readBucketRaw = async (
       out.push(turn)
     } catch { /* one unreadable turn must not hide the thread */ }
   }
-  return { turns: out.sort((a, b) => a.at - b.at), archived, goal }
+  return { turns: out.sort((a, b) => a.at - b.at), archived, goal, ...(named ? { name: named } : {}) }
 }
+
+/** Has anything come back yet? One assistant turn is all it takes — a thread
+ *  can hold several questions before its first answer, so this asks about the
+ *  ROLES rather than counting turns. */
+const repliedIn = (raw: readonly RawTurn[]): boolean => raw.some(turn => turn.role === 'assistant')
 
 /** The text behind one raw turn: inline (legacy) or resolved from the content
  *  root by sig. An unresolvable resource yields '' — the turn's existence
@@ -509,12 +543,15 @@ export const listConversationsWithLatest = async (): Promise<ConversationList> =
         const lastAt = raw[raw.length - 1]?.at ?? 0
         out.push({
           convoId,
-          // One resource read per thread — the lead turn's text names it;
-          // counts and recency come from the manifests alone.
-          title: await titleOfRaw(raw, store),
+          // THE WRITTEN NAME WINS. When one has been inferred it is already
+          // in hand from this same walk and costs nothing; without one the
+          // lead turn's text names it, at one resource read per thread.
+          title: read.name || await titleOfRaw(raw, store),
           turnCount: raw.length,
           lastAt,
           archived: read.archived,
+          replied: repliedIn(raw),
+          named: !!read.name,
           ...(read.goal ? { goal: read.goal } : {}),
         })
         // AN ARCHIVED THREAD IS NEVER "where you were". `latestTurns` is what
@@ -582,9 +619,12 @@ export interface TileConversation {
   /** The tile it is about — several conversations can share one path. */
   readonly path: string
   readonly convoId: string
-  /** Its first message, which is what names it in the list. */
+  /** What names it in the list: the name inferred from its first exchange
+   *  when there is one, else its first message. */
   readonly title: string
   readonly turns: number
+  /** Whether anything has come back — see ConversationSummary.replied. */
+  readonly replied: boolean
   readonly lastAt: number
   /** The newest turn landed after the last time this thread was opened. */
   readonly unread: boolean
@@ -624,6 +664,7 @@ export const listTileConversations = async (): Promise<TileConversation[]> => {
       convoId: convo.convoId,
       title: convo.title,
       turns: convo.turnCount,
+      replied: convo.replied,
       lastAt: convo.lastAt,
       unread: convo.lastAt > (seen[convo.convoId] ?? 0),
       archived: convo.archived,
@@ -654,6 +695,7 @@ export const listRailConversations = async (): Promise<TileConversation[]> => {
       convoId: convo.convoId,
       title: convo.title,
       turns: convo.turnCount,
+      replied: convo.replied,
       lastAt: convo.lastAt,
       unread: convo.lastAt > (seen[convo.convoId] ?? 0),
       archived: convo.archived,
@@ -682,8 +724,9 @@ export const readConversationSummary = async (convoId: string): Promise<TileConv
     return {
       path: tilePathOf(id) || HIVE_PATH,
       convoId: id,
-      title: await titleOfRaw(raw, store),
+      title: read?.name || await titleOfRaw(raw, store),
       turns: raw.length,
+      replied: repliedIn(raw),
       lastAt,
       unread: lastAt > (seenMap()[id] ?? 0),
       archived: !!read?.archived,
@@ -710,6 +753,7 @@ export const listGlobalConversations = async (): Promise<TileConversation[]> => 
       convoId: convo.convoId,
       title: convo.title,
       turns: convo.turnCount,
+      replied: convo.replied,
       lastAt: convo.lastAt,
       unread: convo.lastAt > (seen[convo.convoId] ?? 0),
       archived: convo.archived,
@@ -793,6 +837,68 @@ export const setConversationArchived = async (
   } catch { return false }
 }
 
+/** THE NAME THIS THREAD ALREADY HAS, or '' when it has none. ONE file read —
+ *  the marker, straight from the bucket, without walking the turns.
+ *
+ *  It exists so that "name it once" survives a reload. The naming pass is
+ *  driven by turns landing, and a page that has just opened remembers nothing
+ *  about which threads it named in a previous life; without this it would
+ *  re-derive — and overwrite — the name of every thread the participant so
+ *  much as opens. The pool is the memory, as it is for everything else here. */
+export const readConversationName = async (convoId: string): Promise<string> => {
+  const id = String(convoId ?? '').trim()
+  if (!id) return ''
+  const store = get<StoreLike>('@hypercomb.social/Store')
+  const pool = await store?.getPool?.(THREADS_POOL)
+  if (!pool) return ''
+  try {
+    const bucketName = await sha256(new TextEncoder().encode(id).buffer as ArrayBuffer)
+    const bucket = await pool.getDirectoryHandle(bucketName, { create: false })
+    const handle = await bucket.getFileHandle(await nameName(), { create: false })
+    const parsed = JSON.parse(await (await handle.getFile()).text()) as { kind?: string; text?: string }
+    return parsed?.kind === NAME_MARKER && typeof parsed.text === 'string' ? parsed.text.trim() : ''
+  } catch { return '' }   // no bucket, no marker — an unnamed thread, not an error
+}
+
+/** WHAT THIS CONVERSATION IS CALLED. Written once, when the first reply makes
+ *  a subject exist (chat-name.ts infers it); empty clears it and the thread
+ *  goes back to being named by its opening line.
+ *
+ *  Overwrite, never append — the marker is a MUTABLE fact about the thread,
+ *  so it has a stable name a second write replaces. The bucket is never
+ *  created here: naming a conversation nobody has spoken in would mint an
+ *  empty directory for a label about nothing. */
+export const setConversationName = async (
+  convoId: string,
+  name: string,
+): Promise<boolean> => {
+  const id = String(convoId ?? '').trim()
+  const label = String(name ?? '').trim().slice(0, 120)
+  if (!id) return false
+  const store = get<StoreLike>('@hypercomb.social/Store')
+  const pool = await store?.getPool?.(THREADS_POOL)
+  if (!pool) return false
+  try {
+    const bucketName = await sha256(new TextEncoder().encode(id).buffer as ArrayBuffer)
+    const bucket = await pool.getDirectoryHandle(bucketName, { create: false })
+    const marker = await nameName()
+    if (!label) {
+      try { await bucket.removeEntry(marker) } catch { /* was never named */ }
+    } else {
+      const at = Date.now()
+      const handle = await bucket.getFileHandle(marker, { create: true })
+      const writable = await handle.createWritable()
+      try {
+        await writable.write(new Blob([JSON.stringify({ kind: NAME_MARKER, convoId: id, text: label, at })]))
+      } finally { await writable.close() }
+    }
+    // Announced from HERE, like every other bucket write — the surfaces that
+    // list this thread repaint from the pool, not from whoever asked.
+    EffectBus.emit('chat:threads-changed', { convoId: id })
+    return true
+  } catch { return false }
+}
+
 /** Persist the responder's "goals attained" receipt beside this conversation. */
 export const setConversationGoalReached = async (
   convoId: string,
@@ -869,7 +975,7 @@ export const deleteConversation = async (convoId: string): Promise<boolean> => {
       }
       try {
         const parsed = JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as { kind?: string; convoId?: string }
-        const isOurs = (parsed?.kind === ARCHIVE_MARKER || parsed?.kind === GOAL_MARKER || parsed?.kind === 'chat-turn')
+        const isOurs = (parsed?.kind === ARCHIVE_MARKER || parsed?.kind === GOAL_MARKER || parsed?.kind === NAME_MARKER || parsed?.kind === 'chat-turn')
           && (parsed?.convoId === undefined || parsed.convoId === id)
         if (!isOurs) {
           console.warn(`[chat] not deleting conversation ${name.slice(0, 8)}… — ${entryName.slice(0, 8)}… is not this conversation's`)
@@ -1126,6 +1232,7 @@ export class ChatThreads {
   readonly deleteConversation = deleteConversation
   readonly setConversationArchived = setConversationArchived
   readonly setConversationGoalReached = setConversationGoalReached
+  readonly setConversationName = setConversationName
   readonly newConvoId = newConvoId
   readonly isHumanConversation = isHumanConversation
 }

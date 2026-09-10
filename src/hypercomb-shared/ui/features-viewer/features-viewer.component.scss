@@ -59,7 +59,7 @@ $row-pad: 0.72rem;
   // 2.3rem clears the ~2.33rem header bottom, × `--hc-header-zoom` so it
   // stays flush across the presets. `bottom: 0` carries the panel to the
   // viewport floor without recomputing a height per size.
-  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  top: var(--hc-header-anchor);
   right: 0;
   bottom: 0;
   width: 404px;
@@ -1107,9 +1107,8 @@ $path-fail: #e08a8a;     // failed terminal
 // ── responsive: stay flush below the header at every header height ──
 // On touch the bar's intrinsic height is 3.5rem (vs 2.5rem desktop), so the
 // touch base offset differs; it still scales by the active header zoom.
-@include touch {
-  .features-panel { top: max(calc(3.65rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 1.02rem)); }
-}
+// The header anchor already carries the touch bar's extra height (it is the
+// bar's MEASURED bottom), so there is no touch override to keep in step.
 
 // ── phone: THE WHOLE PAGE, not a docked slab or a peeking sheet ────
 // Turning features on and off, and deciding whether to allow a foreign

@@ -42,7 +42,7 @@ $quiet: #8ea2b0;
 .publish-panel {
   pointer-events: auto;
   position: absolute;
-  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  top: var(--hc-header-anchor);
   right: 0;
   bottom: 0;
   width: 380px;
@@ -1074,9 +1074,8 @@ $quiet: #8ea2b0;
 }
 
 // ── responsive: stay flush below the header at every header height ──
-@include touch {
-  .publish-panel { top: max(calc(3.65rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 1.02rem)); }
-}
+// The header anchor already carries the touch bar's extra height (it is the
+// bar's MEASURED bottom), so there is no touch override to keep in step.
 
 // ── phone: bottom sheet ───────────────────────────────────
 // The window takes the same treatment the tags panel does: full width along

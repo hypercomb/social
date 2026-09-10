@@ -985,6 +985,13 @@ $accent: #7eb6d6;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+
+  // THE QUESTION IS STILL OUT — said in the ink, so the row keeps its shape
+  // and the words read as a state rather than as a name somebody chose.
+  &.awaiting {
+    color: var(--hc-window-ink-quiet);
+    font-style: italic;
+  }
 }
 
 .chat-list-meta {

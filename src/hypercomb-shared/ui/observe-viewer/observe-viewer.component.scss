@@ -27,7 +27,7 @@ $accent: #7eb6d6;
 .observe-panel {
   pointer-events: auto;
   position: absolute;
-  top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor));
+  top: var(--hc-header-anchor);
   right: 0;
   bottom: 0;
   width: 340px;
@@ -208,9 +208,8 @@ $accent: #7eb6d6;
 }
 
 // ── responsive: stay flush below the header at every header height ──
-@include touch {
-  .observe-panel { top: max(calc(3.65rem * var(--hc-header-zoom, 1.0)), calc(var(--hc-header-anchor) + 1.02rem)); }
-}
+// The header anchor already carries the touch bar's extra height (it is the
+// bar's MEASURED bottom), so there is no touch override to keep in step.
 
 // Phone: a bottom sheet, from `tw.panel` (_toolwindow.scss). The width-only
 // `top: 0` that used to sit here made the panel a full-height slab on

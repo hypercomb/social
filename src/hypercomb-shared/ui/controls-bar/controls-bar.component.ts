@@ -1813,7 +1813,18 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
           // the header zoom and on touch). Publish it so a left-docked panel
           // aligns flush with the rail's top edge instead of hardcoding the
           // same offsets a second time and drifting out of step with it.
-          leftTop = `${Math.round(Math.max(0, stage.offsetTop))}px`
+          //
+          // FRACTIONAL, from the rect — not `Math.round(offsetTop)`. The
+          // header's bottom edge lands on a fraction at any header zoom
+          // (41.47px in the 13" band), so the rail's top does too; rounding it
+          // to 43 put the panel a pixel and a half BELOW the rail it is
+          // supposed to be flush with, and the canvas showed through between
+          // the command line and the panel. Only the VERTICAL axis is read
+          // from the rect: `.pill-stage.dock-left` sets `transform: none`
+          // (including while faded), so nothing translates it in Y — the
+          // horizontal reservation above still uses the layout box, for the
+          // in-flight centring translate the comment there describes.
+          leftTop = `${Math.max(0, stage.getBoundingClientRect().top)}px`
         } else {
           right = Math.max(0, window.innerWidth - stage.offsetLeft)
         }

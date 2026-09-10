@@ -277,14 +277,21 @@ describe('tiles rail gestures — every row is a conversation', () => {
     expect(host.querySelectorAll(`${TILE_ROWS} .hc-rail-row.current`).length).toBe(1)
   })
 
-  it('does not render a conversation or creation button before somebody speaks', async () => {
+  it('an EMPTY fold still offers the way in — exactly one + New conversation', async () => {
+    // /pheromone-workflow has never been spoken to, so its fold lists no
+    // conversations. It must still carry the invitation: a fold that showed
+    // an empty list and no way to start left the root chat with nothing to
+    // press at all. And exactly ONE — no row is called "New conversation"
+    // any more, so the link is the only thing wearing those words.
     rows()[0].click()
     await settle()
 
     expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
     expect(rail.subject?.name).toBe('pheromone-workflow')
-    expect(host.querySelector('.hc-rail-chat-new')).toBeNull()
-    expect(host.querySelector('.hc-rail-chat')).toBeNull()
+    expect(host.querySelectorAll('.hc-rail-chat-new').length).toBe(1)
+    // The link is a `.hc-rail-chat` wearing the row styling; what must be
+    // absent is a conversation ROW, which is what a body means.
+    expect(host.querySelector('.hc-rail-chat-body')).toBeNull()
   })
 
   it('pressing the tile PUTS YOU IN the conversation you were last in', async () => {

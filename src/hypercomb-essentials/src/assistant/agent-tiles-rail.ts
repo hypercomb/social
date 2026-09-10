@@ -527,6 +527,13 @@ const RAIL_CSS = `
 /* PUT AWAY, and it reads that way: dimmer than a live thread, so the section
    under the disclosure is visibly a different shelf. */
 .hc-rail-chat.filed{color:var(--hc-window-ink-quiet);}
+/* THE QUESTION IS STILL OUT. The row is a real row — enterable, current-able,
+   the same box as every other — it simply has nothing to be called yet. Said
+   in the ink rather than in a second shape: quiet and italic, so it reads as
+   a state rather than as a thread somebody named "waiting for reply". It
+   stops being either the moment the answer lands. */
+.hc-rail-chat.awaiting .hc-rail-chat-name{color:var(--hc-window-ink-quiet);
+  font-style:italic;}
 .hc-rail-archived{color:var(--hc-window-ink-quiet);font-size:0.72rem;
   font-family:var(--hc-mono,monospace);letter-spacing:0.04em;}
 .hc-rail-archived.on{color:var(--hc-window-accent, rgb(${STEEL}));}
@@ -1402,20 +1409,32 @@ export class AgentTilesRail {
       body.type = 'button'
       body.className = 'hc-rail-chat-body'
 
+      // A QUESTION IN FLIGHT HAS NO NAME YET. Until the first reply lands
+      // there is no subject — only the thing you did not know when you typed
+      // it — so the row says what is actually true about it and waits. When
+      // the answer arrives the thread is named from the exchange
+      // (chat-name.ts) and this row picks the name up on the repaint.
+      //
+      // NOT ON THE ARCHIVE SHELF. A thread you put away without an answer is
+      // not waiting for one — you stopped it. There it wears its opening
+      // line, which is the only thing it was ever going to be called.
+      const waiting = !chat.replied && !chat.archived
+      if (waiting) item.classList.add('awaiting')
+
       const title = document.createElement('span')
       title.className = 'hc-rail-chat-name'
-      title.textContent = chat.title
-        || (chat.turns
-          ? this.#t('agent.rail-chat-untitled', 'Untitled')
-          : this.#t('agent.rail-chat-fresh', 'New conversation'))
+      title.textContent = waiting
+        ? this.#t('agent.rail-chat-waiting', 'waiting for reply…')
+        : (chat.title || this.#t('agent.rail-chat-untitled', 'Untitled'))
 
       const meta = document.createElement('span')
       meta.className = 'hc-rail-chat-meta'
-      // "0 turns" is a fact nobody needs. A conversation with nothing in it
-      // is named by being EMPTY, not by counting what is not there.
-      meta.textContent = chat.turns
-        ? this.#t('agent.rail-turns', '{count} turns').replace('{count}', String(chat.turns))
-        : this.#t('agent.rail-chat-empty', 'empty')
+      // Nothing to count while the question is still out — the name is
+      // already saying what this row's state is, and "1 turns" beside it is
+      // the same fact said worse.
+      meta.textContent = waiting
+        ? ''
+        : this.#t('agent.rail-turns', '{count} turns').replace('{count}', String(chat.turns))
 
       // THE HEAD IS THE OLD ROW — name left, turn count right. Everything
       // below it is new, and absent when there is no blurb.
@@ -1468,7 +1487,16 @@ export class AgentTilesRail {
     // belongs where you already are. A link, not a row — it enters a freshly
     // minted thread id without writing a thing, so pressing it and walking
     // away leaves no husk behind.
-    if (chats.length && this.#subject?.key === key) {
+    //
+    // ALWAYS EXACTLY ONE, an EMPTY fold included. It used to be absent when
+    // there was nothing listed, on the theory that the empty composer in the
+    // window is the invitation — which is true of the tile you have already
+    // walked into, and false of the hive's own fold, where a participant with
+    // no conversations yet opened the root chat and found a list with nothing
+    // in it and no way to start. The other half of "exactly one" is that no
+    // ROW is ever called "New conversation" any more: a thread appears here
+    // when its question is sent, wearing what it is waiting for.
+    if (this.#subject?.key === key) {
       const fresh = document.createElement('button')
       fresh.type = 'button'
       fresh.className = 'hc-rail-chat hc-rail-chat-new'
@@ -1640,9 +1668,11 @@ export class AgentTilesRail {
   /** Fold what those conversations say now into the list already in hand. */
   async #mergeChats(ids: readonly string[]): Promise<void> {
     const fresh = (await Promise.all(ids.map(id => readConversationSummary(id).catch(() => null))))
-      // A conversation becomes a list item when an exchange exists. The
-      // first user turn alone is still the composer waiting for its return.
-      .filter((chat): chat is TileConversation => !!chat && (chat.archived || chat.turns >= 2))
+      // A conversation becomes a list item the moment it holds a turn. It
+      // used to wait for the whole exchange — which meant a question you had
+      // just sent was nowhere on the surface until its answer came back, and
+      // the one thing you wanted to watch was the one thing not listed.
+      .filter((chat): chat is TileConversation => !!chat && (chat.archived || chat.turns >= 1))
     if (this.#disposed || !fresh.length) return
     const byId = new Map(this.#chatList.map(chat => [chat.convoId, chat]))
     for (const chat of fresh) byId.set(chat.convoId, chat)
@@ -1679,7 +1709,7 @@ export class AgentTilesRail {
    *  the tiles' threads and the hive's arrive together. */
   async #refreshChats(): Promise<void> {
     let chats: TileConversation[] = []
-    try { chats = (await listRailConversations()).filter(chat => chat.archived || chat.turns >= 2) } catch { return }
+    try { chats = (await listRailConversations()).filter(chat => chat.archived || chat.turns >= 1) } catch { return }
     if (this.#disposed) return
     this.#chatList = chats
     this.#chats = foldTileConversations(chats)
