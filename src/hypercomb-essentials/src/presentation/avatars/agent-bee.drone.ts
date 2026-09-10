@@ -405,11 +405,12 @@ export class AgentBeeDrone extends Drone {
   /** The broom (bee-drag.ts): scribbling over a patch of hive sweeps the bees
    *  in it aside, and scribbling over swept bees sends them back. */
   #scrub = new ScrubDetector()
-  /** How much of the canvas's top the header bar covers, in CSS px. Measured
-   *  on the anchor cadence, not per frame — `getComputedStyle` is a layout
-   *  read and this is chrome that moves when the shell moves, not when the
-   *  camera does. */
-  #topInset = 0
+  /** How much of the canvas each side of the shell's chrome covers, in CSS px
+   *  — the header above, the command line or a docked rail on the other three
+   *  sides. What is left is THE ROOM. Measured on the anchor cadence, not per
+   *  frame: `getComputedStyle` is a layout read, and this is chrome that moves
+   *  when the shell moves, not when the camera does. */
+  #room = { top: 0, left: 0, right: 0, bottom: 0 }
   #hiveHidden = false
   /** In a swarm — LOCAL agents go out of sight for as long as it lasts
    *  (see the `mesh:public-changed` handler). */
@@ -806,19 +807,42 @@ export class AgentBeeDrone extends Drone {
     return this.#world.toLocal(new Point(screen.width * PERCH_X, screen.height * PERCH_Y))
   }
 
-  /** What the header bar hides of the canvas, in CSS px. The shell publishes
-   *  its MEASURED bottom edge as `--hc-header-bottom` (controls-bar's
-   *  ResizeObserver) and REMOVES the variable while the bar is hidden, so a
-   *  hidden header gives the bees the whole screen back on its own. The canvas
-   *  is not assumed to start at the top of the viewport — whatever of the bar
-   *  overlaps this canvas is the inset, and nothing else. */
-  #measureTopInset = (): void => {
+  /** What the shell's chrome hides of the canvas, in CSS px, on each side.
+   *
+   *  The shell publishes its own measured edges and nothing here guesses at
+   *  them: `--hc-header-bottom` is the header's bottom in client space, and
+   *  `--hc-controls-left/right/bottom` are what the command line — docked to a
+   *  side, or a strip along the bottom — reserves from those edges. All are
+   *  REMOVED, not zeroed, while the chrome is away, so a hidden header or a
+   *  put-down bar gives the bees that ground back on its own.
+   *
+   *  The canvas is not assumed to fill the window: only the part of each
+   *  reservation that actually overlaps THIS canvas is an inset. */
+  #measureRoom = (): void => {
     const canvas = this.#canvas ?? this.#app?.canvas
-    if (!canvas) { this.#topInset = 0; return }
-    const raw = getComputedStyle(document.documentElement).getPropertyValue('--hc-header-bottom')
-    const headerBottom = Number.parseFloat(raw) || 0
-    const top = canvas.getBoundingClientRect?.().top ?? 0
-    this.#topInset = Math.max(0, headerBottom - top)
+    const rect = canvas?.getBoundingClientRect?.()
+    if (!rect) { this.#room = { top: 0, left: 0, right: 0, bottom: 0 }; return }
+    const style = getComputedStyle(document.documentElement)
+    const px = (name: string): number => Number.parseFloat(style.getPropertyValue(name)) || 0
+    this.#room = {
+      top: Math.max(0, px('--hc-header-bottom') - rect.top),
+      left: Math.max(0, px('--hc-controls-left') - rect.left),
+      right: Math.max(0, px('--hc-controls-right') - (window.innerWidth - rect.right)),
+      bottom: Math.max(0, px('--hc-controls-bottom') - (window.innerHeight - rect.bottom)),
+    }
+  }
+
+  /** The free canvas, in screen px: everything the shell's chrome is not
+   *  standing on. Where a bee may be, and the wall a sweep parks it against. */
+  #theRoom = (): Room => {
+    const screen = this.#app?.renderer.screen
+    if (!screen) return { left: 0, top: 0, right: 0, bottom: 0 }
+    return {
+      left: screen.x + this.#room.left,
+      top: screen.y + this.#room.top,
+      right: screen.x + screen.width - this.#room.right,
+      bottom: screen.y + screen.height - this.#room.bottom,
+    }
   }
 
   /** KEEP THE BEE IN THE ROOM. Clamps the drawn position into the visible band
@@ -830,11 +854,11 @@ export class AgentBeeDrone extends Drone {
    *  round trip the thought bubbles make. */
   #keepInView = (bee: BeeSprite): void => {
     if (!this.#app || !this.#world) return
-    const screen = this.#app.renderer.screen
-    const minX = screen.x + BEE_EDGE_PX
-    const maxX = screen.x + screen.width - BEE_EDGE_PX
-    const minY = screen.y + this.#topInset + BEE_EDGE_PX
-    const maxY = screen.y + screen.height - BEE_EDGE_PX
+    const room = this.#theRoom()
+    const minX = room.left + BEE_EDGE_PX
+    const maxX = room.right - BEE_EDGE_PX
+    const minY = room.top + BEE_EDGE_PX
+    const maxY = room.bottom - BEE_EDGE_PX
     // A viewport too small to hold the bee: park it in the middle of whatever
     // band there is rather than letting the clamp fight itself.
     const point = this.#world.toGlobal(new Point(bee.x, bee.y), undefined, true)
@@ -884,7 +908,7 @@ export class AgentBeeDrone extends Drone {
     // Anchors are re-resolved on a slow cadence: the tiles under the bees only
     // move when the participant pans, zooms, or the layer repaints.
     const reanchor = now - this.#lastAnchorAt > ANCHOR_INTERVAL_MS
-    if (reanchor) { this.#lastAnchorAt = now; this.#measureTopInset() }
+    if (reanchor) { this.#lastAnchorAt = now; this.#measureRoom() }
 
     // Counter-scale: constant size on screen whatever the world scale is.
     // The avatar's texture cell is ATLAS_CELL_PX square.
@@ -1592,13 +1616,7 @@ export class AgentBeeDrone extends Drone {
       return
     }
 
-    const screen = this.#app.renderer.screen
-    const room: Room = {
-      left: screen.x,
-      top: screen.y + this.#topInset,
-      right: screen.x + screen.width,
-      bottom: screen.y + screen.height,
-    }
+    const room = this.#theRoom()
     for (const bee of reached) {
       if (this.#nudges.has(bee.id)) continue
       const from = this.#world.toGlobal(new Point(bee.centreX, bee.centreY), undefined, true)

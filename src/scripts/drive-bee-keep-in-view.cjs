@@ -6,10 +6,10 @@
 // the header and you can't see them").
 //
 // It drives the real drone — no stubs. Agents are raised through the same
-// `agent:start` lane any behaviour uses, the header band is declared the way
-// the shell declares it (`--hc-header-bottom`, the controls bar's measured
-// ResizeObserver value), and what is asserted is the PIXI SCENE: the GLOBAL
-// position of every bee sprite bright enough to be seen.
+// `agent:start` lane any behaviour uses, the room's walls are declared the way
+// the shell declares them (`--hc-header-bottom` and `--hc-controls-*`, the
+// controls bar's measured ResizeObserver values), and what is asserted is the
+// PIXI SCENE: the GLOBAL position of every bee sprite bright enough to be seen.
 //
 // Two states are proven, because they fail differently:
 //   1. AT REST — a bee's dance centre must stay inside the band.
@@ -42,6 +42,13 @@ const HEADED = process.argv.includes('--headed')
 /** A deliberately TALL header, so "under the bar" is unambiguous in the
  *  numbers rather than a matter of a few pixels. */
 const HEADER_PX = 420
+/** ...and a deliberately WIDE command line. The room has four walls: the
+ *  header above, and whatever the command line reserves when it is a strip
+ *  along the bottom or a rail down a side. A bee parked behind the prompt is
+ *  a bee you cannot see or press, which is the same fault as one under the
+ *  header bar. */
+const CONTROLS_BOTTOM_PX = 200
+const CONTROLS_LEFT_PX = 160
 
 const ts = () => new Date().toISOString().slice(11, 23)
 const log = (...a) => console.log(`[${ts()}]`, ...a)
@@ -111,9 +118,11 @@ const pump = (page, frames = 120) => page.evaluate((n) => {
 /** THE HEADER, DECLARED THE WAY THE SHELL DECLARES IT. The controls bar
  *  publishes its measured bottom edge here; re-asserted before every read in
  *  case that ResizeObserver has fired in between. */
-const setHeader = (page, px) => page.evaluate((h) => {
+const setHeader = (page, px) => page.evaluate(([h, bottom, left]) => {
   document.documentElement.style.setProperty('--hc-header-bottom', `${h}px`)
-}, px)
+  document.documentElement.style.setProperty('--hc-controls-bottom', `${bottom}px`)
+  document.documentElement.style.setProperty('--hc-controls-left', `${left}px`)
+}, [px, CONTROLS_BOTTOM_PX, CONTROLS_LEFT_PX])
 
 /** Every bee sprite on the agent layer, in SCREEN coordinates. */
 function readBees(page) {
@@ -134,11 +143,14 @@ function readBees(page) {
       }
     }
     const screen = app.renderer.screen
-    const raw = getComputedStyle(document.documentElement).getPropertyValue('--hc-header-bottom')
+    const style = getComputedStyle(document.documentElement)
+    const px = (name) => Number.parseFloat(style.getPropertyValue(name)) || 0
     const canvasTop = (window.__proof.canvas?.getBoundingClientRect?.().top) ?? 0
     return {
       bees: sprites,
-      headerBottom: Number.parseFloat(raw) || 0,
+      headerBottom: px('--hc-header-bottom'),
+      controlsBottom: px('--hc-controls-bottom'),
+      controlsLeft: px('--hc-controls-left'),
       canvasTop,
       screen: { x: screen.x, y: screen.y, width: screen.width, height: screen.height },
     }
@@ -156,19 +168,21 @@ async function check(page, label) {
   await pump(page, 120)
   const state = await readBees(page)
   if (state.error) throw new Error(state.error)
-  const { bees, headerBottom, canvasTop, screen } = state
+  const { bees, headerBottom, controlsBottom, controlsLeft, canvasTop, screen } = state
   const top = Math.max(0, headerBottom - canvasTop)
+  const floor = screen.y + screen.height - controlsBottom
+  const wall = screen.x + controlsLeft
   if (!bees.length) {
     failures.push(`${label}: no bees on the layer to judge`)
     log(`FAIL ${label} — no bees visible`)
     return
   }
   const outside = bees.filter(b =>
-    b.y < top || b.y > screen.y + screen.height || b.x < screen.x || b.x > screen.x + screen.width)
+    b.y < top || b.y > floor || b.x < wall || b.x > screen.x + screen.width)
   const lowest = Math.min(...bees.map(b => b.y))
   const ok = outside.length === 0
   if (!ok) failures.push(`${label}: ${outside.length} bee(s) out of the room — ${JSON.stringify(outside)}`)
-  log(`${ok ? 'OK  ' : 'FAIL'} ${label} — ${bees.length} bees, highest y=${lowest}, band starts ${top}, screen ${screen.width}×${screen.height}`)
+  log(`${ok ? 'OK  ' : 'FAIL'} ${label} — ${bees.length} bees, highest y=${lowest}, room y ${top}..${Math.round(floor)}, x from ${Math.round(wall)}, screen ${screen.width}×${screen.height}`)
 }
 
 async function main() {
