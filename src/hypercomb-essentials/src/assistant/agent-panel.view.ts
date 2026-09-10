@@ -21,11 +21,19 @@ import type { Agent, AgentRegistry } from './agent-registry.service.js'
 // panel reaches it structurally through IoC instead.
 import type { OrchestratorFinding, OrchestratorSummary } from './orchestrator.drone.js'
 import { avatarKeyOf, type AgentAvatarRegistry } from '../presentation/avatars/agent-avatar.js'
+// PURE, and the only speller of the `chat:<convoId>` key a conversation bee
+// wears (presentation/avatars/resting-bees.ts). Read here rather than
+// re-spelled, so the press that opens a talk can never drift from the key that
+// names it.
+import { restingConvoId } from '../presentation/avatars/resting-bees.js'
 import { AgentTilesRail } from './agent-tiles-rail.js'
 import { readAskSteps, settle, stepRequest, type ChatStep } from './chat-steps.js'
 
 const STYLE_ID = 'hc-agent-panel-styles'
 const STEEL = '126, 182, 214'
+/** The same hue taken deep for bright looks — `identity.deepen()` on #7eb6d6,
+ *  precomputed because this sheet is not Sass. */
+const STEEL_DEEP = '39, 93, 124'
 const WIDTH_KEY = 'hc:agent-panel-width'
 const FULLSCREEN_KEY = 'hc:agent-panel-fullscreen'
 const MIN_WIDTH = 320
@@ -50,6 +58,21 @@ const orchestratorDrone = (): OrchestratorLike | undefined =>
 
 const navigation = (): { goRaw?: (segments: readonly string[]) => void } | undefined =>
   ioc<{ goRaw?: (segments: readonly string[]) => void }>('@hypercomb.social/Navigation')
+
+/** What the panel needs of the thread store to show a conversation: the turns.
+ *  Reached structurally through IoC — chat-thread.ts registers its singleton at
+ *  module scope, and importing a value from it would mint a second one in this
+ *  bundle. */
+type ThreadsLike = {
+  readTurns?: (convoId: string) => Promise<ReadonlyArray<{ role: string; text: string; at: number }>>
+}
+
+const chatThreads = (): ThreadsLike | undefined =>
+  ioc<ThreadsLike>('@diamondcoreprocessor.com/ChatThreads')
+
+/** How many turns of a conversation the little panel shows. It is a glance at
+ *  what was said, not the conversation — the window is one press further on. */
+const MAX_TURN_LINES = 8
 
 const elapsed = (since: number): string => {
   const seconds = Math.max(0, Math.round((Date.now() - since) / 1000))
@@ -77,6 +100,9 @@ export class AgentPanelView extends EventTarget {
   #rail: AgentTilesRail | null = null
   #railHost: HTMLDivElement | null = null
   #chips: HTMLDivElement | null = null
+  /** The composer row. Hidden for a conversation: "add context while it works"
+   *  is an offer only a run can keep. */
+  #composeRow: HTMLDivElement | null = null
   #send: HTMLButtonElement | null = null
   /** Model hint the Apply flow rides out on; the chip in the chips row cycles it. */
   #askModel = 'opus'
@@ -109,7 +135,7 @@ export class AgentPanelView extends EventTarget {
       // simply raises the agent's window over it. Routed inside `open()` it
       // would close the report first — the audit you were reading, dismantled
       // by the thing it pointed you at.
-      const agent = ioc<AgentRegistry>('@diamondcoreprocessor.com/AgentRegistry')?.get(id)
+      const agent = ioc<AgentRegistry>('@diamondcoreprocessor.com/AgentRegistry')?.find(id)
       if (agent?.behavior === 'folder-sync') {
         EffectBus.emit('folder-sync:open', { agentId: id })
         return
@@ -142,7 +168,7 @@ export class AgentPanelView extends EventTarget {
     // bee keeps flying, so its panel stays up.
     EffectBus.on<{ public?: boolean }>('mesh:public-changed', payload => {
       if (payload?.public !== true || !this.#panel) return
-      const agent = this.#registry?.get(this.#id)
+      const agent = this.#subject()
       if ((agent?.origin ?? 'local') === 'local') this.close()
     })
     // The report is live. Findings clear on their own when work recovers, and
@@ -150,8 +176,19 @@ export class AgentPanelView extends EventTarget {
     // touches the agent registry, so without this the open panel would sit
     // there showing a state that has already passed.
     EffectBus.on('orchestrator:findings', () => {
-      if (this.#panel && this.#registry?.get(this.#id)?.kind === 'orchestrator') this.#render()
+      if (this.#panel && this.#subject()?.kind === 'orchestrator') this.#render()
     })
+  }
+
+  /** The agent this panel is about, from EITHER lane — the work lane first,
+   *  because a resting bee and the working one that wakes from it share an id. */
+  #subject(): Agent | undefined {
+    return this.#registry?.find(this.#id)
+  }
+
+  /** Is the subject a conversation rather than a run? */
+  #restingNow(): boolean {
+    return this.#registry?.isResting(this.#id) ?? false
   }
 
   #t(key: string, fallback: string): string {
@@ -165,7 +202,13 @@ export class AgentPanelView extends EventTarget {
     if (this.#panel) this.close()
 
     this.#registry = ioc<AgentRegistry>('@diamondcoreprocessor.com/AgentRegistry')
-    const agent = this.#registry?.get(id)
+    // BOTH LANES. A tile that has been talked to keeps a bee whether or not a
+    // question is out, and that bee is in the RESTING lane — `get` sees only
+    // work, so pressing one opened nothing at all (Jaime, 2026-09-09: "the
+    // logs are still not showing … used to have a little window show up in the
+    // bottom of the screen when I click the Bees"). The registry has had
+    // `find` for exactly this; nothing was using it.
+    const agent = this.#registry?.find(id)
     if (!agent) return
     // Own-window agents (folder-sync) are routed by the `agent:open` handler
     // and by #swap before this runs — this is the last resort for a direct
@@ -299,6 +342,7 @@ export class AgentPanelView extends EventTarget {
     })
     row.append(input, send, stop)
     this.#input = input
+    this.#composeRow = row
 
     // Two columns: the tiles rail (full screen only) and everything the
     // panel already was. The rail host exists from the start so toggling
@@ -433,9 +477,16 @@ export class AgentPanelView extends EventTarget {
   #render = (): void => {
     const body = this.#body
     if (!body) return
-    const agent = this.#registry?.get(this.#id)
-    const running = agent?.status === 'pending' || agent?.status === 'working' || agent?.status === 'blocked'
+    const agent = this.#subject()
+    // A RESTING bee is not work: it is a conversation this tile has had. It is
+    // minted `working` so its sprite dances, so the panel must ask the lane,
+    // not the status — otherwise it offers to Stop a talk that ended days ago.
+    const resting = this.#restingNow()
+    const running = !resting
+      && (agent?.status === 'pending' || agent?.status === 'working' || agent?.status === 'blocked')
     if (this.#stopButton) this.#stopButton.hidden = !running
+    if (this.#composeRow) this.#composeRow.hidden = resting
+    if (resting && this.#chips) this.#chips.hidden = true
     if (!agent) {
       // The agent finished and its record has been retired — say so rather
       // than leaving a panel describing something that no longer exists.
@@ -448,6 +499,20 @@ export class AgentPanelView extends EventTarget {
     }
 
     body.textContent = ''
+
+    // A CONVERSATION, NOT A RUN. There is no progress to report, nothing to
+    // stop and no context to add mid-flight — what you pressed the bee for is
+    // WHAT WAS SAID. The panel shows the tail of it and offers the window.
+    if (resting) {
+      body.append(
+        this.#restedRow(agent),
+        this.#whereRow(agent),
+        this.#conversation(agent),
+        this.#openTalkRow(agent),
+      )
+      return
+    }
+
     body.append(this.#statusRow(agent))
     // The orchestrator's panel is a REPORT, not a request. Its own "where" is
     // the whole hive and its own "request" is a sentence nobody needs twice —
@@ -816,6 +881,113 @@ export class AgentPanelView extends EventTarget {
     EffectBus.emit('spotlight:show', { targets: [target] })
   }
 
+  /** The top line of a conversation's panel. No status pill: "working" is what
+   *  makes the bee dance, not a claim about a talk that is over — what belongs
+   *  here is that it was a talk, and how long ago. */
+  #restedRow(agent: Agent): HTMLElement {
+    const row = document.createElement('div')
+    row.className = 'hc-agent-status'
+    const pill = document.createElement('span')
+    // The plain pill, not `done`: green reads as "it succeeded", and a
+    // conversation you had is neither a success nor a failure.
+    pill.className = 'hc-agent-pill'
+    pill.textContent = this.#t('agent.talked', 'talked to')
+    const age = document.createElement('span')
+    age.className = 'hc-agent-dim'
+    age.textContent = elapsed(agent.updatedAt || agent.startedAt)
+    row.append(pill, age)
+    return row
+  }
+
+  /** WHAT WAS SAID, the last few turns of it. Read from the thread store, so
+   *  it arrives a beat late and says so — an empty conversation and one that
+   *  could not be read are different facts, and only the first is safe to show
+   *  as nothing. */
+  #conversation(agent: Agent): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'hc-agent-section'
+    const head = document.createElement('div')
+    head.className = 'hc-agent-label'
+    head.textContent = this.#t('agent.said-here', 'What was said here')
+    const log = document.createElement('div')
+    log.className = 'hc-agent-log'
+    const waiting = document.createElement('div')
+    waiting.className = 'hc-agent-dim'
+    waiting.textContent = this.#t('agent.reading', 'reading…')
+    log.appendChild(waiting)
+    wrap.append(head, log)
+    void this.#fillConversation(wrap, log, agent.id, ++this.#didToken)
+    return wrap
+  }
+
+  async #fillConversation(
+    wrap: HTMLElement,
+    log: HTMLElement,
+    id: string,
+    token: number,
+  ): Promise<void> {
+    const convoId = restingConvoId(id)
+    let turns: ReadonlyArray<{ role: string; text: string; at: number }> = []
+    try {
+      turns = (await chatThreads()?.readTurns?.(convoId)) ?? []
+    } catch {
+      // Could not read — leave the panel saying so rather than claiming the
+      // conversation was empty.
+      if (token === this.#didToken && wrap.isConnected) {
+        log.textContent = this.#t('agent.said-unreadable', 'Could not read this conversation.')
+      }
+      return
+    }
+    if (token !== this.#didToken || !wrap.isConnected) return
+
+    log.textContent = ''
+    if (!turns.length) {
+      const none = document.createElement('div')
+      none.className = 'hc-agent-dim'
+      none.textContent = this.#t('agent.said-none', 'Nothing said yet.')
+      log.appendChild(none)
+      return
+    }
+
+    // The TAIL: the last thing said is the thing you pressed the bee to see.
+    for (const turn of turns.slice(-MAX_TURN_LINES)) {
+      const line = document.createElement('div')
+      line.className = 'hc-agent-logline reading'
+      const who = document.createElement('span')
+      who.className = 'hc-agent-dim'
+      who.textContent = turn.role === 'user'
+        ? this.#t('agent.said-you', 'you')
+        : this.#t('agent.said-them', 'reply')
+      const text = document.createElement('span')
+      text.className = 'hc-agent-logtext'
+      text.textContent = turn.text.replace(/\s+/g, ' ').trim()
+      line.title = `${who.textContent} · ${new Date(turn.at).toLocaleString()}`
+      line.append(who, text)
+      log.appendChild(line)
+    }
+  }
+
+  /** The way in. The panel is a glance; the conversation lives in the chat
+   *  window, and this is the one press between them. */
+  #openTalkRow(agent: Agent): HTMLElement {
+    const row = document.createElement('div')
+    row.className = 'hc-agent-section'
+    const open = document.createElement('button')
+    open.type = 'button'
+    open.className = 'hc-agent-btn hc-agent-ok'
+    open.textContent = this.#t('agent.open-talk', 'Open the conversation')
+    open.addEventListener('click', () => {
+      const convoId = restingConvoId(agent.id)
+      if (!convoId) return
+      // Closed first: the chat window takes the screen, and a panel left
+      // standing under it is a panel you cannot see to close.
+      this.close()
+      EffectBus.emit('chat:open', { convoId })
+    })
+    row.appendChild(open)
+    return row
+  }
+
   #section(label: string, text: string): HTMLElement {
     const wrap = document.createElement('div')
     wrap.className = 'hc-agent-section'
@@ -1018,7 +1190,7 @@ export class AgentPanelView extends EventTarget {
     if (!id || id === this.#id) return
     // An own-window agent is not a subject this panel can show — raise its
     // window and leave the panel (the report, usually) exactly as it stands.
-    if (this.#registry?.get(id)?.behavior === 'folder-sync') {
+    if (this.#registry?.find(id)?.behavior === 'folder-sync') {
       EffectBus.emit('folder-sync:open', { agentId: id })
       return
     }
@@ -1051,6 +1223,7 @@ export class AgentPanelView extends EventTarget {
     this.#railHost = null
     this.#chips = null
     this.#send = null
+    this.#composeRow = null
     this.#panel?.remove()
     this.#panel = null
     this.#body = null
@@ -1091,125 +1264,183 @@ export class AgentPanelView extends EventTarget {
     const style = document.createElement('style')
     style.id = STYLE_ID
     style.textContent = `
-.hc-agent{position:fixed;z-index:99999;display:flex;flex-direction:row;align-items:stretch;
+/* ── THE PANE ────────────────────────────────────────────────────────────
+   The floating tool-window material (ui/_toolwindow.scss floating-panel),
+   said again here because this is a DOM singleton with no SCSS. A tool
+   window never names a colour (documentation/tool-window-colour-roles.md):
+   the pane, the ink, the shadow and the grounds are the theme's, and the
+   identity is the steel family the chat window flies. The roles are declared
+   ON the panel so the tiles rail mounted inside it reads the real identity
+   instead of its literal fallbacks. */
+.hc-agent{
+  --acc:${STEEL};
+  --hc-window-accent:rgb(var(--acc));
+  --hc-window-accent-quiet:rgb(var(--acc));
+  --hc-window-wash:rgba(var(--acc),0.10);
+  --hc-window-wash-strong:rgba(var(--acc),0.20);
+  --hc-window-edge:rgba(var(--acc),0.28);
+  --hc-window-edge-firm:rgba(var(--acc),0.62);
+  --hc-window-on-accent:rgb(var(--hc-panel-pane));
+  /* Colour on purpose — amber caution, green ok, red failed — pulled toward
+     the panel's ink under a bright look, untouched on a dark one (tw.ink()). */
+  --hc-agent-amber:color-mix(in srgb, #d6b26e, rgb(var(--hc-panel-ink)) var(--hc-deepen, 0%));
+  --hc-agent-green:color-mix(in srgb, #96d6a4, rgb(var(--hc-panel-ink)) var(--hc-deepen, 0%));
+  --hc-agent-red:color-mix(in srgb, #e87c7b, rgb(var(--hc-panel-ink)) var(--hc-deepen, 0%));
+  /* Chrome is mono; anything READ takes the reading face. */
+  --hc-agent-prose:var(--hc-read, var(--hc-font, system-ui));
+  position:fixed;z-index:99999;display:flex;flex-direction:row;align-items:stretch;
   right:calc(var(--hc-controls-right, 0px) + 1rem);bottom:1rem;width:min(24rem,calc(100vw - 2rem));
   max-height:min(30rem,70vh);box-sizing:border-box;
-  background:rgba(6,9,14,0.96);border:1px solid rgba(${STEEL},0.35);border-radius:var(--hc-radius-floating, 4px);}
+  background:rgba(var(--hc-panel-pane),0.98);
+  border:1px solid rgba(var(--acc),0.38);border-radius:var(--hc-radius-floating, 4px);
+  box-shadow:0 18px 54px rgba(var(--hc-panel-shadow),0.55), inset 0 1px rgba(var(--hc-panel-sheen),0.03);
+  font-family:var(--hc-mono, system-ui);color:var(--hc-panel-text);}
+/* Bright looks take the identity DEEP (ui/_panel-identity.scss, deepen()):
+   the same hue, down under 0.12 luminance so it reads on cream. A global
+   sheet, so the plain selector is enough — no :host-context needed. */
+:is([data-theme="light"],[data-theme="honey"],[data-theme="bloom"],[data-theme="sherbet"]) .hc-agent{--acc:${STEEL_DEEP};}
+@media (prefers-color-scheme: light){:root:not([data-theme]) .hc-agent{--acc:${STEEL_DEEP};}}
 .hc-agent.fullscreen{inset:0;width:auto!important;max-width:none;height:auto;max-height:none;
-  border-radius:0;border:none;}
-.hc-agent-main{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column;gap:0.55rem;
-  padding:0.75rem 0.85rem;box-sizing:border-box;}
+  border-radius:0;border:none;box-shadow:none;}
+.hc-agent-main{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column;}
 .hc-agent-rail{display:none;}
 .hc-agent.fullscreen .hc-agent-rail{display:flex;flex-direction:column;min-height:0;
-  flex:0 0 clamp(15rem,24vw,19rem);border-right:1px solid rgba(${STEEL},0.16);
-  background:rgba(3,5,9,0.55);}
-.hc-agent-chips{display:flex;flex-wrap:wrap;gap:0.3rem;flex:0 0 auto;}
-.hc-agent-chips[hidden]{display:none;}
-.hc-agent-chip{display:inline-flex;align-items:center;gap:0.25rem;max-width:12rem;
-  padding:0.1rem 0.3rem 0.1rem 0.55rem;border:1px solid rgba(${STEEL},0.4);border-radius:999px;
-  color:rgba(238,244,250,0.92);font-size:0.76rem;background:rgba(${STEEL},0.08);}
-.hc-agent-chip-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.hc-agent-chip-off{border:0;background:none;color:rgba(238,244,250,0.55);font:inherit;
-  font-size:0.9rem;line-height:1;cursor:pointer;padding:0 0.15rem;border-radius:999px;}
-.hc-agent-chip-off:hover{color:whitesmoke;}
-.hc-agent-chip-model{cursor:pointer;font-family:var(--hc-mono,monospace);letter-spacing:0.06em;
-  text-transform:uppercase;font-size:0.68rem;color:rgba(${STEEL},0.9);background:none;
-  padding:0.14rem 0.6rem;margin-left:auto;}
-.hc-agent-chip-model:hover{background:rgba(${STEEL},0.12);}
+  flex:0 0 clamp(15rem,24vw,19rem);border-right:1px solid var(--hc-window-line);
+  background:var(--hc-window-tint);}
 .hc-agent-resize{position:absolute;z-index:1;inset:0 auto 0 -0.35rem;width:0.7rem;cursor:ew-resize;}
 .hc-agent-resize::after{content:"";position:absolute;top:42%;bottom:42%;left:0.25rem;
-  border-left:1px solid rgba(${STEEL},0.42);}
+  border-left:1px solid var(--hc-window-edge-firm);}
 .hc-agent.fullscreen .hc-agent-resize{display:none;}
-.hc-agent-head{display:flex;align-items:center;gap:0.5rem;flex:0 0 auto;}
-.hc-agent-avatar{width:1.9rem;height:1.9rem;flex:0 0 auto;}
-.hc-agent-title{flex:1 1 auto;font-family:var(--hc-mono,monospace);font-size:0.76rem;font-weight:600;
-  letter-spacing:0.1em;text-transform:uppercase;color:rgba(${STEEL},0.95);}
-.hc-agent-kind{margin-left:0.5rem;font-weight:400;letter-spacing:0.06em;
-  color:rgba(216,230,238,0.45);}
-.hc-agent-back{width:1.7rem;height:2rem;flex:0 0 auto;border:none;background:none;
-  color:rgba(${STEEL},0.75);font-size:1.5rem;line-height:1;cursor:pointer;border-radius:var(--hc-radius-control, 2px);}
-.hc-agent-back:hover{color:whitesmoke;background:rgba(255,255,255,0.07);}
-.hc-agent-carry{display:flex;flex-direction:column;gap:0.35rem;margin-bottom:0.6rem;
-  padding:0.55rem 0.6rem;border:1px solid rgba(214,178,110,0.45);border-radius:var(--hc-radius-card, 3px);
-  background:rgba(214,178,110,0.08);}
-.hc-agent-carry .hc-agent-label{color:rgba(226,196,140,0.85);margin:0;}
+
+/* ── THE HEADER BAND (tw.header) ─────────────────────────────────────────
+   One height, one divider — the identity hairline — and one hit area for
+   every action, so this title bar lines up with every other tool window's. */
+.hc-agent-head{flex:0 0 auto;box-sizing:border-box;display:flex;align-items:center;gap:0.5rem;
+  height:2.875rem;min-height:2.875rem;padding:0 0.75rem;line-height:1;
+  border-bottom:1px solid var(--hc-window-edge);
+  background:linear-gradient(180deg, rgba(var(--hc-panel-sheen),0.018), rgba(var(--hc-panel-sheen),0.006));}
+.hc-agent-avatar{width:1.75rem;height:1.75rem;flex:0 0 auto;}
+.hc-agent-title{flex:1 1 auto;min-width:0;font-size:0.72rem;font-weight:600;
+  letter-spacing:0.12em;text-transform:uppercase;color:var(--hc-window-accent);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hc-agent-kind{margin-left:0.5rem;font-weight:400;letter-spacing:0.06em;color:var(--hc-window-ink-quiet);}
+.hc-agent-head>button{box-sizing:border-box;display:inline-grid;place-items:center;flex:0 0 auto;
+  min-width:1.75rem;height:1.75rem;padding:0 0.25rem;border:0;background:none;font:inherit;
+  border-radius:var(--hc-radius-control, 2px);line-height:1;cursor:pointer;color:var(--hc-window-ink-faint);
+  transition:color 120ms ease, background-color 120ms ease;}
+.hc-agent-head>button:hover{color:var(--hc-panel-text);background-color:rgba(var(--hc-panel-ink),0.075);}
+.hc-agent-head>button:focus-visible{outline:1px solid color-mix(in srgb, var(--hc-window-accent) 72%, white);outline-offset:1px;}
+.hc-agent-back{font-size:1.4rem;color:var(--hc-window-accent-quiet);}
+.hc-agent-window{font-size:1rem;}
+.hc-agent-close{width:1.75rem;padding:0;font-size:1.125rem;}
+
+/* ── THE BODY ────────────────────────────────────────────────────────────── */
+.hc-agent-body{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:0.8rem;
+  padding:0.75rem 0.85rem;scrollbar-width:thin;scrollbar-color:var(--hc-window-line-firm) transparent;}
+.hc-agent-section>.hc-agent-section{margin-top:0.75rem;}
+.hc-agent-label{font-size:0.66rem;letter-spacing:0.1em;text-transform:uppercase;
+  color:var(--hc-window-accent-quiet);margin-bottom:0.3rem;}
+.hc-agent-text{font-family:var(--hc-agent-prose);font-size:0.86rem;line-height:1.5;
+  color:var(--hc-window-ink-plain);white-space:pre-wrap;word-break:break-word;}
+.hc-agent-dim{font-size:0.72rem;color:var(--hc-window-ink-quiet);font-variant-numeric:tabular-nums;}
+.hc-agent-status{display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;}
+.hc-agent-pill{padding:0.14rem 0.55rem;border-radius:var(--hc-radius-pill, 999px);font-size:0.66rem;line-height:1.3;
+  letter-spacing:0.08em;text-transform:uppercase;border:1px solid var(--hc-window-edge-firm);color:var(--hc-window-accent);}
+.hc-agent-pill.working{background:var(--hc-window-wash-strong);}
+.hc-agent-pill.stalled{border-color:var(--hc-agent-amber);color:var(--hc-agent-amber);background:none;}
+.hc-agent-pill.blocked{border-color:var(--hc-window-accent);background:var(--hc-window-wash);}
+.hc-agent-pill.done{border-color:var(--hc-agent-green);color:var(--hc-agent-green);}
+.hc-agent-pill.failed{border-color:var(--hc-agent-red);color:var(--hc-agent-red);}
+.hc-agent-needs{font-family:var(--hc-agent-prose);font-size:0.8rem;line-height:1.4;color:var(--hc-window-ink-plain);}
+.hc-agent-headline{font-family:var(--hc-agent-prose);font-size:0.94rem;line-height:1.4;
+  color:var(--hc-window-ink-loud);margin-bottom:0.5rem;}
+.hc-agent-headline.ok{color:var(--hc-agent-green);}
+.hc-agent-headline.attention{color:var(--hc-agent-amber);}
+.hc-agent-counts{display:flex;flex-wrap:wrap;gap:0.35rem;margin-bottom:0.35rem;}
+.hc-agent-finding{display:flex;align-items:flex-start;gap:0.5rem;padding:0.3rem 0;}
+.hc-agent-finding .hc-agent-pill{flex:0 0 auto;}
+.hc-agent-finding .hc-agent-text{flex:1 1 auto;min-width:0;font-size:0.8rem;}
+.hc-agent-carry{display:flex;flex-direction:column;gap:0.35rem;margin-bottom:0.6rem;padding:0.6rem 0.65rem;
+  border:1px solid color-mix(in srgb, var(--hc-agent-amber) 45%, transparent);border-left:3px solid var(--hc-agent-amber);
+  border-radius:var(--hc-radius-card, 3px);background:var(--hc-window-tint);}
+.hc-agent-carry .hc-agent-label{color:var(--hc-agent-amber);margin:0;}
 .hc-agent-carry-actions{display:flex;gap:0.4rem;margin-top:0.15rem;}
 .hc-agent-carry-actions .hc-agent-btn{min-height:2rem;padding:0 0.7rem;font-size:0.78rem;}
 .hc-agent-run{display:flex;align-items:stretch;gap:0.25rem;}
-.hc-agent-runmain{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:0.1rem;
-  padding:0.28rem 0.35rem;border:0;background:none;text-align:left;font:inherit;cursor:pointer;
-  border-radius:var(--hc-radius-floating, 4px);}
-.hc-agent-runmain:hover,.hc-agent-runmain:focus-visible{background:rgba(255,255,255,0.055);outline:none;}
+.hc-agent-runmain{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:0.12rem;
+  padding:0.3rem 0.4rem;border:0;background:none;text-align:left;font:inherit;color:inherit;cursor:pointer;
+  border-radius:var(--hc-radius-control, 2px);}
+.hc-agent-runmain:hover,.hc-agent-runmain:focus-visible{background:var(--hc-window-tint);outline:none;}
 .hc-agent-runtop{display:flex;align-items:baseline;justify-content:space-between;gap:0.5rem;}
-.hc-agent-runwho{font-size:0.8rem;color:rgba(238,244,250,0.92);font-weight:600;
+.hc-agent-runwho{font-size:0.8rem;font-weight:600;color:var(--hc-window-ink-loud);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.hc-agent-runlatest{font-size:0.73rem;color:rgba(216,230,238,0.55);
+.hc-agent-runlatest{font-family:var(--hc-agent-prose);font-size:0.76rem;color:var(--hc-window-ink-quiet);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.hc-agent-runbee{flex:0 0 auto;width:2rem;border:1px solid rgba(${STEEL},0.22);border-radius:var(--hc-radius-floating, 4px);
-  background:none;color:rgba(${STEEL},0.8);font-size:0.9rem;line-height:1;cursor:pointer;}
-.hc-agent-runbee:hover{border-color:rgba(${STEEL},0.7);background:rgba(${STEEL},0.12);color:whitesmoke;}
-.hc-agent-go{flex:0 0 auto;align-self:flex-start;margin-left:auto;padding:0.1rem 0.55rem;
-  border:1px solid rgba(${STEEL},0.4);border-radius:999px;background:none;
-  color:rgba(${STEEL},0.9);font:inherit;font-size:0.7rem;letter-spacing:0.06em;
-  text-transform:uppercase;cursor:pointer;}
-.hc-agent-go:hover{border-color:rgba(${STEEL},0.9);background:rgba(${STEEL},0.14);color:whitesmoke;}
-.hc-agent-close,.hc-agent-window{width:2rem;height:2rem;border:none;background:none;color:rgba(245,245,245,0.4);
-  font-size:1.3rem;line-height:1;cursor:pointer;border-radius:var(--hc-radius-control, 2px);}
-.hc-agent-window{font-size:1rem;}
-.hc-agent-close:hover,.hc-agent-window:hover{color:whitesmoke;background:rgba(255,255,255,0.07);}
-.hc-agent-body{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:0.6rem;}
-.hc-agent-status{display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;}
-.hc-agent-pill{padding:0.12rem 0.5rem;border-radius:999px;font-size:0.68rem;letter-spacing:0.08em;
-  text-transform:uppercase;border:1px solid rgba(${STEEL},0.4);color:rgba(${STEEL},0.9);}
-.hc-agent-pill.working{border-color:rgba(${STEEL},0.9);background:rgba(${STEEL},0.16);}
-.hc-agent-pill.stalled{border-color:rgba(214,178,110,0.7);color:rgba(226,196,140,0.95);background:none;}
-.hc-agent-pill.blocked{border-color:rgba(126,182,214,0.85);color:rgba(196,226,246,0.98);background:rgba(126,182,214,0.12);}
-.hc-agent-needs{font-size:0.76rem;line-height:1.35;color:rgba(196,226,246,0.9);}
-.hc-agent-pill.done{border-color:rgba(126,196,142,0.7);color:rgba(150,214,164,0.95);}
-.hc-agent-pill.failed{border-color:rgba(226,75,74,0.7);color:rgba(232,124,123,0.95);}
-.hc-agent-dim{font-size:0.72rem;color:rgba(216,230,238,0.5);}
-.hc-agent-headline{font-size:0.92rem;line-height:1.4;color:rgba(238,244,250,0.95);margin-bottom:0.5rem;}
-.hc-agent-headline.ok{color:rgba(150,214,164,0.95);}
-.hc-agent-headline.attention{color:rgba(226,196,140,0.98);}
-.hc-agent-counts{display:flex;flex-wrap:wrap;gap:0.35rem;margin-bottom:0.35rem;}
-.hc-agent-finding{display:flex;align-items:flex-start;gap:0.5rem;padding:0.25rem 0;}
-.hc-agent-finding .hc-agent-pill{flex:0 0 auto;}
-.hc-agent-finding .hc-agent-text{flex:1 1 auto;min-width:0;font-size:0.8rem;}
-.hc-agent-label{font-size:0.68rem;letter-spacing:0.06em;text-transform:uppercase;
-  color:rgba(${STEEL},0.6);margin-bottom:0.2rem;}
+.hc-agent-runbee{flex:0 0 auto;width:1.85rem;border:1px solid var(--hc-window-line-firm);
+  border-radius:var(--hc-radius-control, 2px);background:none;color:var(--hc-window-accent-quiet);
+  font-size:0.9rem;line-height:1;cursor:pointer;}
+.hc-agent-runbee:hover{border-color:var(--hc-window-edge-firm);background:var(--hc-window-wash);color:var(--hc-window-accent);}
+.hc-agent-go{flex:0 0 auto;align-self:flex-start;margin-left:auto;padding:0.12rem 0.55rem;
+  border:1px solid var(--hc-window-edge-firm);border-radius:var(--hc-radius-pill, 999px);background:none;
+  color:var(--hc-window-accent);font:inherit;font-size:0.68rem;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;}
+.hc-agent-go:hover{background:var(--hc-window-wash-strong);}
 .hc-agent-where{display:flex;flex-wrap:wrap;gap:0.3rem;}
-.hc-agent-tile{padding:0.14rem 0.55rem;border:1px solid rgba(${STEEL},0.35);border-radius:999px;
-  background:none;color:rgba(238,244,250,0.9);font:inherit;font-size:0.8rem;cursor:pointer;
+.hc-agent-tile{padding:0.16rem 0.6rem;border:1px solid var(--hc-window-line-firm);border-radius:var(--hc-radius-pill, 999px);
+  background:none;color:var(--hc-window-ink-plain);font:inherit;font-family:var(--hc-agent-prose);font-size:0.8rem;cursor:pointer;
   max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.hc-agent-tile:hover,.hc-agent-tile:focus-visible{border-color:rgba(${STEEL},0.85);
-  background:rgba(${STEEL},0.14);color:whitesmoke;outline:none;}
-.hc-agent-text{font-size:0.85rem;line-height:1.45;color:rgba(238,244,250,0.9);white-space:pre-wrap;
-  word-break:break-word;}
-.hc-agent-log{display:flex;flex-direction:column;gap:0.25rem;}
-.hc-agent-logline{display:flex;width:100%;min-width:0;gap:0.5rem;padding:0.1rem 0;border:0;
-  background:none;text-align:left;font:inherit;font-size:0.78rem;line-height:1.4;
-  color:rgba(238,244,250,0.82);cursor:pointer;border-radius:4px;}
-.hc-agent-logline:hover,.hc-agent-logline:focus-visible{background:rgba(255,255,255,0.055);outline:none;}
+.hc-agent-tile:hover,.hc-agent-tile:focus-visible{border-color:var(--hc-window-edge-firm);
+  background:var(--hc-window-wash);color:var(--hc-window-ink-loud);outline:none;}
+.hc-agent-log{display:flex;flex-direction:column;gap:0.15rem;}
+.hc-agent-logline{display:flex;box-sizing:border-box;width:calc(100% + 0.7rem);margin:0 -0.35rem;min-width:0;gap:0.5rem;
+  padding:0.15rem 0.35rem;border:0;background:none;text-align:left;font:inherit;font-size:0.78rem;line-height:1.45;
+  color:var(--hc-window-ink-plain);cursor:pointer;border-radius:var(--hc-radius-control, 2px);}
+.hc-agent-logline:hover,.hc-agent-logline:focus-visible{background:var(--hc-window-tint);outline:none;}
 .hc-agent-logline .hc-agent-dim{flex:0 0 auto;}
 /* A RECORDED step is read, never pressed — the activity lines above expand on
    click, these do not. Without this they would still offer a pointer and a
    hover lift, which is a control promising something it cannot do. */
 .hc-agent-logline.reading{cursor:default;}
 .hc-agent-logline.reading:hover{background:none;}
-.hc-agent-logtext{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hc-agent-logtext{min-width:0;font-family:var(--hc-agent-prose);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .hc-agent-logline.expanded .hc-agent-logtext{overflow:visible;text-overflow:clip;white-space:pre-wrap;
   overflow-wrap:anywhere;}
-.hc-agent-row{display:flex;gap:0.5rem;align-items:flex-end;flex:0 0 auto;}
+
+/* ── THE COMPOSER ────────────────────────────────────────────────────────── */
+.hc-agent-chips{display:flex;flex-wrap:wrap;gap:0.3rem;flex:0 0 auto;padding:0.55rem 0.85rem 0;
+  border-top:1px solid var(--hc-window-line);}
+.hc-agent-chips[hidden]{display:none;}
+.hc-agent-chip{display:inline-flex;align-items:center;gap:0.25rem;max-width:12rem;
+  padding:0.1rem 0.3rem 0.1rem 0.55rem;border:1px solid var(--hc-window-edge-firm);border-radius:var(--hc-radius-pill, 999px);
+  color:var(--hc-window-ink-plain);font-size:0.76rem;background:var(--hc-window-wash);}
+.hc-agent-chip-name{min-width:0;font-family:var(--hc-agent-prose);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hc-agent-chip-off{border:0;background:none;color:var(--hc-window-ink-quiet);font:inherit;
+  font-size:0.9rem;line-height:1;cursor:pointer;padding:0 0.15rem;border-radius:var(--hc-radius-pill, 999px);}
+.hc-agent-chip-off:hover{color:var(--hc-window-ink-loud);}
+.hc-agent-chip-model{cursor:pointer;font-family:var(--hc-mono,monospace);letter-spacing:0.06em;
+  text-transform:uppercase;font-size:0.68rem;color:var(--hc-window-accent);background:none;
+  padding:0.14rem 0.6rem;margin-left:auto;}
+.hc-agent-chip-model:hover{background:var(--hc-window-wash);}
+.hc-agent-row{display:flex;gap:0.5rem;align-items:flex-end;flex:0 0 auto;padding:0.6rem 0.85rem 0.8rem;
+  border-top:1px solid var(--hc-window-line);}
+.hc-agent-chips:not([hidden])+.hc-agent-row{border-top:0;padding-top:0.5rem;}
+/* \`hidden\` must win over the flex display, or a conversation still shows a
+   composer that "add context while it works" cannot honour. */
+.hc-agent-row[hidden]{display:none;}
 .hc-agent-input{flex:1 1 auto;box-sizing:border-box;resize:none;padding:0.5rem 0.6rem;font:inherit;
-  font-size:16px;line-height:1.4;color:whitesmoke;background:rgba(255,255,255,0.05);
-  border:1px solid rgba(255,255,255,0.12);border-radius:var(--hc-radius-control, 2px);outline:none;}
-.hc-agent-input:focus{border-color:rgba(${STEEL},0.55);}
-.hc-agent-btn{min-height:2.4rem;padding:0 0.9rem;border-radius:var(--hc-radius-control, 2px);border:1px solid rgba(255,255,255,0.14);
-  background:none;color:rgba(235,242,248,0.85);font:inherit;font-size:0.86rem;cursor:pointer;}
-.hc-agent-ok{background:rgba(${STEEL},0.9);border-color:rgba(${STEEL},0.9);color:#0c1118;font-weight:700;}
+  font-family:var(--hc-agent-prose);font-size:16px;line-height:1.4;color:var(--hc-window-ink-loud);
+  background:var(--hc-window-tint);border:1px solid var(--hc-window-line-firm);
+  border-radius:var(--hc-radius-control, 2px);outline:none;}
+.hc-agent-input::placeholder{color:var(--hc-window-ink-quiet);}
+.hc-agent-input:focus{border-color:var(--hc-window-edge-firm);}
+.hc-agent-btn{min-height:2.4rem;padding:0 0.9rem;border-radius:var(--hc-radius-control, 2px);
+  border:1px solid var(--hc-window-line-firm);background:none;color:var(--hc-window-ink-plain);
+  font:inherit;font-size:0.84rem;cursor:pointer;}
+.hc-agent-btn:hover{background:var(--hc-window-tint);color:var(--hc-window-ink-loud);}
+.hc-agent-ok{background:var(--hc-window-accent);border-color:var(--hc-window-accent);color:var(--hc-window-on-accent);font-weight:700;}
+.hc-agent-ok:hover{background:var(--hc-window-accent);color:var(--hc-window-on-accent);}
 .hc-agent-ok:disabled{opacity:0.55;cursor:default;}
-.hc-agent-stop{flex:0 0 auto;border-color:rgba(226,75,74,0.5);color:rgba(232,140,139,0.95);}
-.hc-agent-stop:hover{border-color:rgba(226,75,74,0.9);background:rgba(226,75,74,0.14);}
+.hc-agent-stop{flex:0 0 auto;border-color:color-mix(in srgb, var(--hc-agent-red) 55%, transparent);color:var(--hc-agent-red);}
+.hc-agent-stop:hover{border-color:var(--hc-agent-red);background:color-mix(in srgb, var(--hc-agent-red) 14%, transparent);color:var(--hc-agent-red);}
 .hc-agent-stop:disabled{opacity:0.55;cursor:default;}
 .hc-agent-stop[hidden]{display:none;}
 `

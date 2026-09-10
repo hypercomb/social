@@ -804,7 +804,7 @@
   "slash.reroll": "Rigenerare le immagini di sfondo del substrato sulle tessere",
   "slash.screensaver": "Salvaschermo inattivo on/off + stile; on | off | now | hexagon | circle | thought",
   "slash.solomon": "Solomon's Key — gioco puzzle con evocazione blocchi + editor di livelli; on | off | design",
-  "slash.bubble": "Bubble Bobble — soffia bolle per intrappolare nemici, scoppia per frutta + editor di livelli; on | off | design",
+  "slash.bubble": "Bubble Bobble ? tre livelli arcade; intrappola i nemici nelle bolle e raccogli la frutta; on | off",
   "slash.arkanoid": "Arkanoid — rimbalza la palla sulla racchetta per rompere ogni mattone, cattura pillole bonus + editor di livelli; on | off | design",
   "slash.roper": "Roper — artiglieria a turni stile Worms con corda ninja; on | off",
   "substrate.on": "substrato attivo → {path}",

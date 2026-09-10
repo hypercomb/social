@@ -66,6 +66,11 @@ const NAME_EM = 5.6
  *  uppercase, wide-tracked, and large enough to read across the room. */
 const BIG_HEAD_EM = 7.5
 const BIG_HEAD_TRACKING = 0.16
+/** BIG HEAD IS A STICKY MODE — how the hive is being read, not a one-off act,
+ *  so it outlives a reload. The slash behaviour writes this key; the names seed
+ *  themselves from it before the first paint, so a reloaded hive comes up big
+ *  without waiting for anyone to re-emit `render:big-head-mode`. */
+const BIG_HEAD_KEY = 'hc:big-head'
 const NAME_TRACKING = 0.04
 /** A name is kept INSIDE its tile: it may run this many circumradii wide and
  *  is then cut with an ellipsis. A point-top hexagon is √3·R across its middle,
@@ -134,7 +139,7 @@ export class TileNameDrone extends Drone {
   #pivot = false
   #visible = true
   #hovered: string | null = null
-  #bigHead = false
+  #bigHead = (() => { try { return localStorage.getItem(BIG_HEAD_KEY) === '1' } catch { return false } })()
   #band: BandRowsPayload = { rows: 1, label: null }
   #last = [NaN, NaN, NaN, NaN, NaN, NaN]
   #tick = (): void => this.#follow()

@@ -804,7 +804,7 @@
   "slash.reroll": "Regerar imagens de fundo do substrato nos ladrilhos",
   "slash.screensaver": "Protetor de tela inativo on/off + estilo; on | off | now | hexagon | circle | thought",
   "slash.solomon": "Solomon's Key — jogo de puzzle com conjuração de blocos + editor de fases; on | off | design",
-  "slash.bubble": "Bubble Bobble — sopre bolhas para prender inimigos, estoure para frutas + editor de fases; on | off | design",
+  "slash.bubble": "Bubble Bobble ? tr?s fases arcade; prenda inimigos em bolhas e recolha frutas; on | off",
   "slash.arkanoid": "Arkanoid — rebata a bola na raquete para quebrar todos os tijolos, pegue pílulas de poder + editor de fases; on | off | design",
   "slash.roper": "Roper — artilharia por turnos estilo Worms com corda ninja; on | off",
   "substrate.on": "substrato ativado → {path}",

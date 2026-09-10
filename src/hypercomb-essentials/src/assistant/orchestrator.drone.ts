@@ -36,7 +36,6 @@
 import { Drone, EffectBus } from '@hypercomb/core'
 import type { Agent, AgentRegistry } from './agent-registry.service.js'
 import { drainBlurbs } from './chat-blurb.js'
-import { drainNames, nameConversation } from './chat-name.js'
 
 export type FindingKind = 'waiting' | 'silent' | 'overlap' | 'failed' | 'rogue' | 'sweep' | 'blocked'
 
@@ -117,20 +116,6 @@ const BLURB_MS = 5 * 60_000
  *  for one main thread, so it takes a few and comes back in five minutes. */
 const BLURB_LIMIT = 2
 
-// ── NAMING A THREAD THE MOMENT IT HAS A SUBJECT ───────────────────────
-//
-// The blurb waits for a conversation to settle; the NAME cannot. Until the
-// first reply lands a thread has no subject and every surface says so
-// ("waiting for reply…"), so the answer arriving is exactly when the row is
-// standing there asking to be named — a five-minute clock would leave it
-// saying nothing about a conversation you are looking straight at.
-//
-// So naming is EVENT-DRIVEN, off `chat:threads-changed`, and the drain on the
-// blurb clock is only the catch-up for replies that landed while nobody was
-// listening. Naming is once-per-thread (chat-name.ts), which is what stops
-// the write's own announcement from coming back round as another call.
-const NAME_LIMIT = 2
-
 const ioc = <T,>(key: string): T | undefined =>
   (window as unknown as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
 
@@ -154,10 +139,6 @@ export class OrchestratorDrone extends Drone {
   /** A pass in flight. Model calls outlast the interval, and two drains would
    *  pick the same threads and pay for them twice. */
   #blurbBusy = false
-  /** Threads with a naming call in flight, and threads this page has already
-   *  named — see #nameThread. */
-  readonly #naming = new Set<string>()
-  readonly #named = new Set<string>()
   #started = false
   /** Findings currently standing, keyed so the same one is not re-announced
    *  every 15 seconds — an alert that repeats is an alert nobody reads. */
@@ -196,27 +177,6 @@ export class OrchestratorDrone extends Drone {
     this.#sweep()
     this.#blurbTimer = setInterval(this.#blurbPass, BLURB_MS)
     void this.#blurbPass()
-    this.onEffect('chat:threads-changed', (payload: { convoId?: string }) => {
-      void this.#nameThread(String(payload?.convoId ?? ''))
-    })
-  }
-
-  /** A TURN LANDED IN THIS THREAD. If it was the first answer, the thread now
-   *  has a subject and no name — so name it. Every other case falls straight
-   *  back out: `nameConversation` refuses a thread with no reply, and a thread
-   *  already named is not attempted again (which is what keeps the write's own
-   *  `chat:threads-changed` from starting this over).
-   *
-   *  One at a time, per thread. A burst of replies drained off the bridge
-   *  arrives as a burst of announcements for the SAME conversation, and two
-   *  calls in flight for one thread would pay twice for one name. */
-  async #nameThread(convoId: string): Promise<void> {
-    if (!convoId || this.#naming.has(convoId) || this.#named.has(convoId)) return
-    this.#naming.add(convoId)
-    try {
-      if (await nameConversation(convoId)) this.#named.add(convoId)
-    } catch { /* a convenience nobody asked for out loud must never raise */ }
-    finally { this.#naming.delete(convoId) }
   }
 
   /** ONE LABELLING PASS. Never raises the bee: a hive with nothing to watch
@@ -226,9 +186,6 @@ export class OrchestratorDrone extends Drone {
     if (this.#blurbBusy) return
     this.#blurbBusy = true
     try {
-      // The catch-up, first: a thread with no NAME is unreadable in the list
-      // in a way a thread with no blurb is not.
-      await drainNames(NAME_LIMIT)
       const { behind, minted } = await drainBlurbs(BLURB_LIMIT)
       if (!minted || !this.#raised) return
       const left = behind - minted

@@ -11,9 +11,16 @@
 //   5. dropped back where the work put it, the bee goes home — that is the
 //      whole of "undo a nudge"
 //   6. the snap-home test is measured on SCREEN, not in the world
+//   7. THE BROOM: a scribble — back and forth, or in circles — is told apart
+//      from ordinary mousing by how much it TURNS, and a swept bee lands
+//      inside the wall it was pushed toward
 
 import { describe, it, expect } from 'vitest'
-import { DRAG_PX, SNAP_HOME_PX, isDrag, nudgeFrom, snapsHome } from './bee-drag.js'
+import {
+  DRAG_PX, SCRUB_PAUSE_MS, SCRUB_WINDOW_MS, SNAP_HOME_PX, ScrubDetector,
+  TOSS_MAX_PX_PER_S, TOSS_WINDOW_MS,
+  isDrag, nudgeFrom, releaseVelocity, slowed, snapsHome, sweptAsideTo,
+} from './bee-drag.js'
 
 describe('bee drag — a press that travels carries the bee', () => {
 
@@ -21,6 +28,13 @@ describe('bee drag — a press that travels carries the bee', () => {
     expect(isDrag(0, 0)).toBe(false)
     expect(isDrag(1, 1)).toBe(false)
     expect(isDrag(DRAG_PX - 1, 0)).toBe(false)
+  })
+
+  it("leaves a click's worth of slop, because the bee is dancing", () => {
+    // You press a bee in motion, so the hand is usually still moving when the
+    // button goes down. Ten pixels of that is a click, not a drag.
+    expect(isDrag(10, 0)).toBe(false)
+    expect(isDrag(7, 7)).toBe(false)
   })
 
   it('takes up the drag the moment the press has travelled', () => {
@@ -61,5 +75,223 @@ describe('bee drag — a press that travels carries the bee', () => {
 
   it('survives a world with no scale rather than dividing the hive by zero', () => {
     expect(snapsHome({ x: 4, y: 0 }, 0)).toBe(true)
+  })
+})
+
+describe('the broom — scribbling sweeps the bees aside', () => {
+  /** Feed a path of points, one every 30ms, and report every sweep it fired. */
+  const scrub = (points: Array<{ x: number; y: number }>, step = 30) => {
+    const detector = new ScrubDetector()
+    const fired: Array<{ x: number; y: number }> = []
+    let t = 1000
+    for (const point of points) {
+      const hit = detector.feed(point.x, point.y, t)
+      if (hit) fired.push(hit)
+      t += step
+    }
+    return fired
+  }
+
+  const backAndForth = (legs: number, span = 60, y = 400) => {
+    const points: Array<{ x: number; y: number }> = []
+    for (let leg = 0; leg < legs; leg++) {
+      const from = leg % 2 ? span : -span
+      const to = leg % 2 ? -span : span
+      for (let i = 1; i <= 4; i++) points.push({ x: 700 + from + ((to - from) * i) / 4, y })
+    }
+    return points
+  }
+
+  const circle = (turns: number, radius = 40, samples = 16) => {
+    const points: Array<{ x: number; y: number }> = []
+    for (let i = 0; i <= samples * turns; i++) {
+      const a = (i / samples) * Math.PI * 2
+      points.push({ x: 700 + Math.cos(a) * radius, y: 400 + Math.sin(a) * radius })
+    }
+    return points
+  }
+
+  it('reads a back-and-forth scribble as a sweep', () => {
+    expect(scrub(backAndForth(4)).length).toBe(1)
+  })
+
+  it('reads a circular scribble as the same sweep', () => {
+    expect(scrub(circle(1.5)).length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('never reads a straight travel as a sweep', () => {
+    const straight = Array.from({ length: 30 }, (_, i) => ({ x: 200 + i * 20, y: 400 }))
+    expect(scrub(straight)).toEqual([])
+  })
+
+  it('never reads an ordinary curved approach as a sweep', () => {
+    // A quarter turn on the way to a tile — the commonest mouse path there is.
+    const curve = Array.from({ length: 14 }, (_, i) => {
+      const a = (i / 13) * (Math.PI / 2)
+      return { x: 600 + Math.sin(a) * 180, y: 500 - (1 - Math.cos(a)) * 180 }
+    })
+    expect(scrub(curve)).toEqual([])
+  })
+
+  it('never lets a slow hour of mousing add up to one', () => {
+    // The same scribble, but each stroke a second and a half apart.
+    expect(scrub(backAndForth(6), SCRUB_WINDOW_MS + 400)).toEqual([])
+  })
+
+  it('never lets ORDINARY MOUSING add up to one', () => {
+    // Go somewhere, stop, come back, stop, go on: two reversals, which is as
+    // much turning as a scribble has — and it swept the hive by accident until
+    // the turning had to be continuous (measured 2026-09-09).
+    const detector = new ScrubDetector()
+    let t = 1000
+    const trip = (from: { x: number; y: number }, to: { x: number; y: number }) => {
+      for (let i = 1; i <= 8; i++) {
+        const point = { x: from.x + ((to.x - from.x) * i) / 8, y: from.y + ((to.y - from.y) * i) / 8 }
+        expect(detector.feed(point.x, point.y, t)).toBeNull()
+        t += 16
+      }
+      t += SCRUB_PAUSE_MS + 300   // the hand stops to read something
+    }
+    trip({ x: 700, y: 400 }, { x: 480, y: 540 })
+    trip({ x: 480, y: 540 }, { x: 700, y: 438 })
+    trip({ x: 700, y: 438 }, { x: 520, y: 500 })
+  })
+
+  it('sweeps once per scribble, not once per stroke', () => {
+    // Ten legs is one long continuous scribble, and it is one act — otherwise
+    // the bees would go out, come back and go out again under one gesture.
+    expect(scrub(backAndForth(10)).length).toBe(1)
+  })
+
+  it('comes down again after a SHORT pause too', () => {
+    const detector = new ScrubDetector()
+    let fired = 0
+    let t = 1000
+    const run = () => {
+      for (const point of backAndForth(6)) {
+        if (detector.feed(point.x, point.y, t)) fired++
+        t += 30
+      }
+    }
+    run()
+    t += SCRUB_PAUSE_MS + 40
+    run()
+    expect(fired).toBe(2)
+  })
+
+  it('comes down again once the hand holds still', () => {
+    const detector = new ScrubDetector()
+    const fired: unknown[] = []
+    let t = 1000
+    for (const point of backAndForth(6)) {
+      const hit = detector.feed(point.x, point.y, t)
+      if (hit) fired.push(hit)
+      t += 30
+    }
+    expect(fired.length).toBe(1)
+    // A pause — then a fresh scribble is a fresh act, and sweeps again. The
+    // pause here is longer than the whole window on purpose: that is the
+    // ordinary case (sweep, do something else, scribble again) and it is the
+    // one that used to leave the broom up for the rest of the session.
+    t += SCRUB_WINDOW_MS * 3
+    for (const point of backAndForth(6)) {
+      const hit = detector.feed(point.x, point.y, t)
+      if (hit) fired.push(hit)
+      t += 30
+    }
+    expect(fired.length).toBe(2)
+  })
+
+  it('answers with the middle of the scribble, so the sweep starts where you scrubbed', () => {
+    const [at] = scrub(backAndForth(4, 60, 400))
+    expect(at).toBeDefined()
+    expect(Math.abs(at.x - 700)).toBeLessThan(60)
+    expect(Math.abs(at.y - 400)).toBeLessThan(20)
+  })
+
+  it('forgets the stroke in progress when the gesture is taken over', () => {
+    const detector = new ScrubDetector()
+    let t = 1000
+    for (const point of backAndForth(3)) { detector.feed(point.x, point.y, t); t += 30 }
+    detector.clear()
+    // One more leg would have finished it; after a clear it is starting over.
+    for (const point of backAndForth(1)) {
+      expect(detector.feed(point.x, point.y, t)).toBeNull()
+      t += 30
+    }
+  })
+})
+
+describe('swept aside — where the broom puts a bee', () => {
+  const room = { left: 0, top: 100, right: 1000, bottom: 700 }
+
+  it('sends the bee out along the line from the broom', () => {
+    // Broom to the left of the bee: the bee goes right, to the right wall.
+    const to = sweptAsideTo({ x: 500, y: 400 }, { x: 300, y: 400 }, room, 36)
+    expect(to.x).toBeCloseTo(964, 0)
+    expect(to.y).toBeCloseTo(400, 0)
+  })
+
+  it('parks it inside the wall, never on it', () => {
+    const to = sweptAsideTo({ x: 500, y: 400 }, { x: 500, y: 690 }, room, 36)
+    // Swept upward — and the room's top is the header's bottom, not zero.
+    expect(to.y).toBeGreaterThanOrEqual(room.top + 36 - 0.5)
+  })
+
+  it('sends a bee under the broom straight up', () => {
+    const to = sweptAsideTo({ x: 500, y: 400 }, { x: 500, y: 400 }, room, 36)
+    expect(to.x).toBeCloseTo(500, 0)
+    expect(to.y).toBeCloseTo(136, 0)
+  })
+
+  it('parks it in the middle when the room is too small to hold it', () => {
+    const to = sweptAsideTo({ x: 40, y: 40 }, { x: 10, y: 10 }, { left: 0, top: 0, right: 50, bottom: 50 }, 40)
+    expect(to).toEqual({ x: 25, y: 25 })
+  })
+})
+
+describe('bee toss — let go while moving and the bee keeps going', () => {
+
+  const trail = (points: Array<[number, number, number]>) =>
+    points.map(([x, y, t]) => ({ x, y, t }))
+
+  it("reads the hand's speed at the release, and caps a hard flick", () => {
+    // 200 px in the last 67 ms, straight right: ~3000 px/s — over the cap.
+    const v = releaseVelocity(trail([[0, 0, 0], [100, 0, 33], [200, 0, 66], [300, 0, 100]]), 100)
+    expect(v).not.toBeNull()
+    expect(Math.hypot(v!.x, v!.y)).toBeCloseTo(TOSS_MAX_PX_PER_S, 6)
+    expect(v!.y).toBe(0)
+  })
+
+  it('is a drop, not a throw, when the hand was slow', () => {
+    // 10 px in 100 ms = 100 px/s: placed.
+    expect(releaseVelocity(trail([[0, 0, 0], [10, 0, 100]]), 100)).toBeNull()
+  })
+
+  it('is a drop when the hand had stopped before letting go', () => {
+    // A fast stroke, then held still for longer than the window: no throw.
+    expect(releaseVelocity(trail([[0, 0, 0], [200, 0, 50]]), 50 + TOSS_WINDOW_MS + 1)).toBeNull()
+  })
+
+  it('reads only the last stretch, so a slow walk that ends in a flick is a flick', () => {
+    // Crawl for a second, then 120 px in the last 60 ms: 2000 px/s.
+    const v = releaseVelocity(trail([[0, 0, 0], [5, 0, 500], [10, 0, 1000], [130, 0, 1060]]), 1060)
+    expect(v).not.toBeNull()
+    expect(v!.x).toBeCloseTo(2000, 3)
+  })
+
+  it('needs two samples to read a speed at all', () => {
+    expect(releaseVelocity([], 0)).toBeNull()
+    expect(releaseVelocity(trail([[0, 0, 0]]), 0)).toBeNull()
+  })
+
+  it('slows along its own line and stops dead, never reversing', () => {
+    const v = { x: 300, y: 400 } // 500 px/s
+    const after = slowed(v, 0.1, 1000) // sheds 100 px/s → 400 px/s
+    expect(Math.hypot(after.x, after.y)).toBeCloseTo(400, 6)
+    expect(after.x / after.y).toBeCloseTo(0.75, 6)
+    // A frame long enough to spend it all leaves exactly zero, not a bounce.
+    expect(slowed(v, 1, 1000)).toEqual({ x: 0, y: 0 })
+    expect(slowed({ x: 0, y: 0 }, 0.016)).toEqual({ x: 0, y: 0 })
   })
 })

@@ -538,6 +538,13 @@ export class ViewBee extends Worker {
     const key = segments.join(SEGMENT_SEPARATOR)
     if (this.#autoOpenedKey === key) return
     const prevArrival = this.#autoOpenedView
+    // A RETREAT — landing on an ANCESTOR of the place just decided. Walking
+    // in, a surface rides along; walking back out, nothing does: the place
+    // you return to opens as ITS face (its own mark, the cascade, or
+    // hexagons), whoever put the current surface up.
+    const prevKey = this.#autoOpenedKey
+    const retreat = prevKey !== null && prevKey !== key
+      && (key === '' || prevKey.startsWith(key + SEGMENT_SEPARATOR))
     // A NEW decision supersedes any release still waiting on a paint — the
     // participant moved again before the old destination's tiles landed.
     this.#pendingRelease?.()
@@ -557,9 +564,13 @@ export class ViewBee extends Worker {
     // the new default forever: the reported "loads back as hexagons".)
     let opened = ''
     if (available && vm.mode === want) opened = want
-    else if (available && (vm.mode === DEFAULT_SURFACE || vm.mode === prevArrival)) {
+    else if (available && (vm.mode === DEFAULT_SURFACE || vm.mode === prevArrival || retreat)) {
       vm.setMode(want)
       opened = want
+    } else if (!available && retreat && vm.mode !== DEFAULT_SURFACE) {
+      // Backing out of ANY view to a place that has no face of its own — the
+      // parent is hexagons, even when the view's toggle still reaches it.
+      this.#releaseWhenPainted(vm, vm.mode)
     } else if (!available && prevArrival && vm.mode === prevArrival
                && (optedOut || !toggles.some(t => t.view === prevArrival))) {
       // Walking OUT of the layer — and out of its whole scope: a
@@ -573,7 +584,7 @@ export class ViewBee extends Worker {
       this.#releaseWhenPainted(vm, prevArrival)
     }
     if (opened) this.#autoOpenedView = opened
-    else if (vm.mode !== prevArrival || !toggles.some(t => t.view === prevArrival)) {
+    else if (retreat || vm.mode !== prevArrival || !toggles.some(t => t.view === prevArrival)) {
       // The old arrival's surface is gone (released above, escaped, or the
       // participant switched views themselves) — drop the claim. Kept only
       // while still riding the previous arrival inside its own scope.

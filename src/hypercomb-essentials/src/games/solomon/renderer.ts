@@ -354,6 +354,20 @@ export class Renderer {
     for (const m of e.mirrors) prop_mirror(ctx, m.col, m.row, time, pulse, m.telegraph ?? 0)
     prop_door(ctx, e.level.door.col, e.level.door.row, this.#doorAnim, time, pulse)
 
+    this.#actors(e, time, pulse)
+  }
+
+  /** Transparent actor pass for the native Hypercomb square surface. Terrain,
+   *  passages and sigils are rendered from their actual child tile layers. */
+  drawActors(e: Engine, time: number): void {
+    this.#syncFrame(e, time)
+    const ctx = this.#ctx
+    for (const m of e.mirrors) prop_mirror(ctx, m.col, m.row, time, this.#pulse, m.telegraph ?? 0)
+    this.#actors(e, time, this.#pulse)
+  }
+
+  #actors(e: Engine, time: number, pulse: number): void {
+    const ctx = this.#ctx
     for (const it of e.items) {
       if (it.taken) continue
       if (it.hidden) { if (it.secret) fx_secretAura(ctx, it.col, it.row, time); continue }

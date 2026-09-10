@@ -652,20 +652,31 @@ class PushToTalkProvider implements SlashBehaviourProvider {
 /** BIG HEAD MODE — the tile names wear the genesis screen's treatment: the
  *  same monospace face they always wear, but uppercase, wide-tracked and much
  *  larger, so a hive reads across a room. Names still never shrink to fit;
- *  a long one wraps. */
+ *  a long one wraps.
+ *
+ *  A STICKY MODE (Jaime, 2026-09-09): the mode is how the hive is being read,
+ *  not a thing done once, so it survives a reload. `hc:big-head` is the truth
+ *  — the provider holds no `#active` of its own, so the switch and the names
+ *  can never drift apart (tile-name.drone.ts seeds itself from the same key). */
+const BIG_HEAD_KEY = 'hc:big-head'
+const readBigHead = (fallback = false): boolean => {
+  try { return localStorage.getItem(BIG_HEAD_KEY) === '1' } catch { return fallback }
+}
 class BigHeadModeProvider implements SlashBehaviourProvider {
   readonly name = 'big-head-mode-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
     { name: 'big-head-mode', description: 'Tile names in the genesis screen\'s big uppercase type', descriptionKey: 'slash.big-head-mode',
-      examples: [{ input: '/big-head-mode', result: 'Names go large and uppercase; repeat to restore' }] }
+      examples: [{ input: '/big-head-mode', result: 'Names go large and uppercase and stay that way; repeat to restore' }] }
   ]
 
-  #active = false
+  /** Mirrors the key so the toggle still flips where storage is blocked. */
+  #on = readBigHead()
 
   execute(): void {
-    this.#active = !this.#active
-    EffectBus.emit('render:big-head-mode', { on: this.#active })
+    this.#on = !readBigHead(this.#on)
+    try { localStorage.setItem(BIG_HEAD_KEY, this.#on ? '1' : '0') } catch { /* storage blocked — mode is session-only */ }
+    EffectBus.emit('render:big-head-mode', { on: this.#on })
   }
 }
 

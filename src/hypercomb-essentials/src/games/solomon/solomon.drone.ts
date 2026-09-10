@@ -2,9 +2,9 @@
 //
 // SolomonDrone — owns the Solomon's Key game overlay's on/off lifecycle.
 //
-// The game is a self-contained mini-app (see overlay.ts): a full-screen canvas
-// that mounts above the hive and tears itself fully down on close. It never
-// touches the hex grid or Pixi. This drone is the bridge to the shell: it
+// The adventure mounts above the hive (labyrinth-overlay.ts). Its room squares
+// are native Hypercomb child layers, with session-local simulation and durable
+// discoveries. This drone is the bridge to the shell: it
 // surfaces the header toggle, opens/closes the overlay, and broadcasts its
 // availability + active state so the command-line's header icon can reflect on
 // / off.
@@ -25,7 +25,7 @@
 
 import { Drone, EffectBus } from '@hypercomb/core'
 import { isGameDormant, onEnablementChanged } from '../game-enablement.js'
-import { SolomonOverlay } from './overlay.js'
+import { SolomonLabyrinthOverlay } from './labyrinth-overlay.js'
 
 export class SolomonDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -39,12 +39,12 @@ export class SolomonDrone extends Drone {
   readonly gameIcon = 'castle'
 
   public override description =
-    "Solomon's Key — a block-conjuring puzzle-platformer with a built-in level designer. Toggle from the header icon or /solomon."
+    "Solomon's Key — explore an overworld, learn clues, assemble shrines, and enter interconnected Hypercomb tile labyrinths."
 
   protected override listens = ['solomon:toggle', 'keymap:invoke']
   protected override emits = ['solomon:state']
 
-  #overlay: SolomonOverlay | null = null
+  #overlay: SolomonLabyrinthOverlay | null = null
   #wired = false
   #unsubs: (() => void)[] = []
 
@@ -106,7 +106,7 @@ export class SolomonDrone extends Drone {
     // The roster's light is the outer gate: dormant means this game is not
     // here at all — no header icon, no launcher tile, nothing to open.
     if (this.gameDormant || this.isActive()) return
-    this.#overlay = new SolomonOverlay(() => this.close())
+    this.#overlay = new SolomonLabyrinthOverlay(() => this.close())
     this.#overlay.mount()
     // Tell overlays/screensaver the hive is covered (suspends the idle saver).
     window.dispatchEvent(new CustomEvent('portal:open', { detail: { target: 'solomon' } }))
