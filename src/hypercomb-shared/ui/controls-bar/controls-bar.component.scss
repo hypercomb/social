@@ -1650,9 +1650,12 @@ $actions-corner: 12rem;
 // landscape keeps the larger 3.4rem thumb targets above.
 @media (orientation: landscape) and (max-height: 449px) {
   .pill-stage.mobile.landscape {
+    // Tight, never so tight that a disc sits on the word under the one above
+    // it: 0.15rem was sized for six controls, and with three it tucked "more"
+    // and "add" under their neighbours.
     .mobile-nav {
-      gap: 0.15rem;
-      padding-block: 0.3rem;
+      gap: 1.15rem;
+      padding-block: 0.4rem;
     }
 
     .ctl-btn {

@@ -6,8 +6,11 @@
 // pool through the RUNNING broker every few seconds and prints ONE JSON LINE
 // per ask it hasn't seen before — nothing else. It is built to sit under a
 // persistent Claude Code Monitor: each printed line wakes the session, the
-// session answers over the bridge (`_ask-drain.cjs answer …`), and the
-// watcher stays parked. Silence means "parked and healthy".
+// session answers over the bridge (`_ask-drain.cjs answer …` for a note-bound
+// ask, `_chat-reply.cjs` for a chat turn), and the watcher stays parked.
+// Silence means "parked and healthy". EVERY ask wakes the session, whatever
+// model it was designated for — `model` on the line says what was asked for,
+// and the session answers it; there is no handoff to another CLI here.
 //
 //   node scripts/bridge/watch-asks.cjs           → watch forever (Monitor mode)
 //   node scripts/bridge/watch-asks.cjs --once    → one tick, then exit (smoke)
@@ -22,9 +25,18 @@
 // Output contract (line-buffered, one JSON object per line):
 //   { "ask": "<sig>", "prompt": "...", "model": "opus|sonnet|haiku",
 //     "targets": [...], "segments": [...], "appliesTo": [...],
-//     "instructionSig": "<sig>" }      ← expand with `get-resource`: how to
+//     "instructionSig": "<sig>",        ← expand with `get-resource`: how to
 //                                        read this hive, plus the live census
 //                                        of behaviours a machine may say here
+//     "references": [{kind,sig,label}], ← what the participant attached by hand
+//     "contextSigs": [...],             ← content sigs attached to the tile
+//     "contextTruncated": false,        ← the sig list was capped; widen with
+//                                        `layer-at` from `segments`
+//     "creationId": "<id>",             ← structural asks: stamp every tile
+//     "reply": "node scripts/bridge/_chat-reply.cjs <convoId> \"<reply text>\" --ask <sig>" }
+//                                      ← mode:'chat' only — the exact command
+//                                        that delivers the reply into THIS
+//                                        conversation with the run attached
 //   { "stopped": "<sig>" }              ← the participant stopped an ask this
 //                                          watcher announced: abort the work,
 //                                          write no note, retire nothing else
@@ -159,14 +171,30 @@ async function tick() {
     }
     if (seen.has(sig)) continue
     seen.add(sig)
+    const mode = String(it.payload?.mode ?? '')
+    const convoId = String(it.payload?.convoId ?? '')
     console.log(JSON.stringify({
       ask: sig,
+      // `context` is FOLLOW-UP TEXT (the context records folded in above).
+      // The payload's own `context` — content sigs — prints as `contextSigs`
+      // below; the two have nothing in common but the word.
       context: contextByAsk.get(sig) ?? [],
-      // mode 'chat' = a refinement-conversation turn: reply via the
-      // `chat-reply` bridge op (cell=convoId, text=reply) then retire —
-      // NEVER note-add. Absent mode = classic note-bound ask.
-      mode: it.payload?.mode ?? '',
-      convoId: it.payload?.convoId ?? '',
+      // mode 'chat' = a conversation turn from the chat window: reply via
+      // `_chat-reply.cjs` (the `chat-reply` bridge op, cell=convoId,
+      // text=reply) then retire — NEVER note-add. Absent mode = classic
+      // note-bound ask.
+      mode,
+      convoId,
+      // THE PROCEDURE TRAVELS WITH THE SCRIPT. For a chat turn, this is the
+      // exact command that delivers the reply into this conversation with
+      // `run:{ask}` attached, so the work is filed in the conversation's own
+      // ledger and the route can draw it (documentation/chat-route.md §2.5,
+      // §3.1). Add `--question "<prompt>" --option "<a>" --option "<b>"` to
+      // ask a direction; retire the ask afterwards with `_ask-drain.cjs
+      // retire <sig>`. A responder with no skill file has only this line.
+      ...(mode === 'chat' && convoId
+        ? { reply: `node scripts/bridge/_chat-reply.cjs ${convoId} "<reply text>" --ask ${sig}` }
+        : {}),
       // 'hive' = asked from the root with no tile chosen: a hive-wide ask with
       // no single tile to own the answer. The responder reports on the
       // DASHBOARD instead of forcing a note somewhere arbitrary (see the
@@ -178,6 +206,23 @@ async function tick() {
       // writing a note. Absent = a normal question.
       task: it.payload?.task ?? '',
       existing: it.payload?.existing ?? [],
+      // ONE ACT, ONE ID. Structural asks (break-apart, expand, organize)
+      // carry it so every tile the responder mints is stamped as part of the
+      // same batch; the organize plan echoes it verbatim. Absent on asks
+      // minted before the field existed — stamp nothing rather than invent.
+      creationId: it.payload?.creationId ?? '',
+      // WHAT THE PARTICIPANT ATTACHED BY HAND: `{kind, sig, label}` each. A
+      // media `kind` (image/png, …) is a picture pasted into the composer —
+      // fetch it and LOOK before answering; `layer` / `context` kinds are
+      // hive content read as usual.
+      references: it.payload?.references ?? [],
+      // THE TILE'S ATTACHED CONTEXT, as content sigs (the payload's own
+      // `context` field — renamed here because `context` above is already
+      // the follow-up text). Read these first; `contextTruncated` says the
+      // list was capped, so widen with `layer-at` from `segments` when the
+      // question needs more than it shows.
+      contextSigs: it.payload?.context ?? [],
+      contextTruncated: it.payload?.contextTruncated === true,
       // WHAT THIS HIVE CAN DO — a signature naming a plain-text instruction:
       // how to read the hive (get-resource / layer-at / behaviors-list) and
       // the LIVE census of behaviours a machine may say here, filtered by the

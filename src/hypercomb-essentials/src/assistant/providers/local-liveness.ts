@@ -40,6 +40,7 @@
 // registry's `change` event does the rest.
 
 import { EffectBus } from '@hypercomb/core'
+import { llmActivation } from '../llm-activation.js'
 import { llmProviderRegistry, replaceDiscoveredLlmProvider } from '../llm-provider-registry.js'
 import {
   LOCAL_HOST_CANDIDATES,
@@ -183,13 +184,44 @@ export const refreshNetworkPermission = async (): Promise<PermissionState> => {
 const permissionPending = (): boolean =>
   onAPublicOrigin() && (networkPermission === 'prompt' || networkPermission === 'denied')
 
+// ── who asked ─────────────────────────────────────────────────────────────
+//
+// A PORT NOBODY OPENED IS NOT KNOCKED ON. A browser logs every refused
+// request in red whether or not the page catches the rejection — there is no
+// quiet way for a fetch to fail — so an unattended probe of a server the
+// participant never ran fills their console with errors about software they
+// do not have, every heartbeat, forever.
+//
+// The unattended paths (the heartbeat, a roster read gone stale) therefore
+// knock only when there is a reason to: a server has answered on this device
+// before, the participant typed its address, or they asked this session —
+// pressed Check again, opened the console, made a call. Asking is never
+// gated. Switching the provider off in the console stops the knocking.
+
+const answeredKey = (provider: LlmProviderDescriptor): string => `hc:llm:${provider.id}:answered`
+
+const askedThisSession = new Set<string>()
+
+const answeredHere = (provider: LlmProviderDescriptor): boolean => {
+  try { return globalThis.localStorage?.getItem(answeredKey(provider)) === '1' } catch { return false }
+}
+
+const worthKnocking = (provider: LlmProviderDescriptor): boolean =>
+  llmActivation.isEnabled(provider.id)
+  && (askedThisSession.has(provider.id)
+    || answeredHere(provider)
+    || (provider.id === LOCAL_PROVIDER.id && hasExplicitLocalHost()))
+
 // ── the probe ─────────────────────────────────────────────────────────────
 
-const getJson = async (url: string): Promise<unknown | null> => {
+/** The parsed body; `null` when the server answered with something that is
+ *  not usable; `undefined` when nothing answered at all. */
+const getJson = async (url: string): Promise<unknown> => {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
   try {
-    const response = await fetch(url, { method: 'GET', signal: controller.signal })
+    const response = await fetch(url, { method: 'GET', signal: controller.signal }).catch(() => undefined)
+    if (!response) return undefined
     if (!response.ok) return null
     return await response.json()
   } catch { return null } finally { clearTimeout(timer) }
@@ -228,12 +260,16 @@ const modelIdsFrom = (json: unknown): string[] => {
  * `/v1/models` first: Ollama, LM Studio, llama.cpp's server, vLLM and LocalAI
  * all serve it, which is the same reason the request adapter is the OpenAI
  * one. `/api/tags` is the fallback for an Ollama build too old for the
- * compatibility layer.
+ * compatibility layer — asked only when `/v1/models` ANSWERED without a list.
+ * When nothing answered at all the same socket refuses the fallback too, and
+ * that is one more red line in the console for no more knowledge.
  */
 export const probeLocalServer = async (host: string): Promise<LocalServerReport> => {
   const at = Date.now()
   const openAi = await getJson(`${host}/v1/models`)
-  const models = openAi ? modelIdsFrom(openAi) : modelIdsFrom(await getJson(`${host}/api/tags`))
+  const models = openAi
+    ? modelIdsFrom(openAi)
+    : openAi === null ? modelIdsFrom(await getJson(`${host}/api/tags`)) : []
   if (openAi || models.length) {
     return { state: models.length ? 'awake' : 'empty', host, models, checkedAt: at }
   }
@@ -272,6 +308,10 @@ const remember = (provider: LlmProviderDescriptor, report: LocalServerReport): L
     || before.models.length !== report.models.length
     || before.models.some((model, index) => model !== report.models[index])
   if (!moved) return report
+  if (report.state === 'awake' || report.state === 'empty' || report.state === 'blocked') {
+    // Something really listens here: worth watching on every later visit.
+    try { globalThis.localStorage?.setItem(answeredKey(provider), '1') } catch { /* session-only */ }
+  }
   syncRoster(provider, report)
   // WHO ANSWERS MAY HAVE CHANGED. The registry's own `change` covers a roster
   // swap; a server merely waking or dying moves no descriptor, so the same
@@ -328,6 +368,7 @@ const findTheServer = async (
 export const checkLocalServer = async (provider: LlmProviderDescriptor): Promise<LocalServerReport> => {
   const host = machineLocalEndpoint(provider)
   if (!host) return UNKNOWN('')
+  askedThisSession.add(provider.id)
   const running = inFlight.get(provider.id)
   if (running) return running
   const probe = findTheServer(provider, host)
@@ -346,6 +387,8 @@ export const refreshLocalServer = (provider: LlmProviderDescriptor): void => {
   // While the BROWSER is the blocker, an automatic probe only hangs. The
   // sweep has already written the honest state; the next press does the rest.
   if (permissionPending()) return
+  // Unattended, so only where someone has reason to look (see "who asked").
+  if (!worthKnocking(provider)) return
   const cached = localServerReport(provider)
   if (cached.state !== 'unknown' && Date.now() - cached.checkedAt < STALE_MS) return
   void checkLocalServer(provider)
@@ -451,8 +494,9 @@ const syncRoster = (provider: LlmProviderDescriptor, report: LocalServerReport):
 //
 // Probing only when asked would leave a window that has been open for an hour
 // showing an hour-old answer, and starting the server is exactly the moment a
-// participant looks at the line. So: every machine-local provider is checked
-// on a slow timer while the page is visible, on the page becoming visible,
+// participant looks at the line. So: every machine-local provider worth
+// watching is checked on a slow timer while the page is visible, on the page
+// becoming visible,
 // and whenever the participant edits the local host.
 
 const sweep = (): void => {
@@ -488,9 +532,14 @@ export const startLocalLivenessWatch = (): void => {
 }
 
 /** The participant moved the server (or believes they fixed it). Forget what
- *  we knew and ask again — a stale "asleep" must never outlive its cause. */
+ *  we knew and ask again — a stale "asleep" must never outlive its cause.
+ *  An ask, not a heartbeat: every machine-local server is probed now. */
 export const recheckLocalServers = (): void => {
   reports.clear()
+  askedThisSession.clear()
   lastWalk = 0
-  sweep()
+  if (permissionPending()) { sweep(); return }
+  for (const provider of llmProviderRegistry().all()) {
+    if (machineLocalEndpoint(provider)) void checkLocalServer(provider)
+  }
 }

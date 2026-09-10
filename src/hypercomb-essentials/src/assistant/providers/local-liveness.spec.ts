@@ -33,6 +33,7 @@ const {
   recheckLocalServers,
 } = await import('./local-liveness.js')
 const { llmRouter, streamRoutedModel } = await import('../llm-dispatch.js')
+const { llmActivation } = await import('../llm-activation.js')
 
 type Descriptor = import('./llm-provider.types.js').LlmProviderDescriptor
 
@@ -280,5 +281,51 @@ describe('the browser barrier', () => {
     expect((await checkLocalServer(provider)).state).toBe('asleep')
     expect(llmRouter.reason()).toBe('local-down')
     offPublicOrigin()
+  })
+})
+
+describe('a server nobody has run here', () => {
+  // A browser logs every refused request in red, caught or not, so the
+  // unattended paths knock only once there is a reason to.
+  const refused = () => vi.fn(async (_url: string) => { throw new TypeError('connection refused') })
+
+  it('is not knocked on by a roster read until someone asks', async () => {
+    const provider = localDescriptor()
+    registry.register(provider)
+    const fetchMock = refused()
+    vi.stubGlobal('fetch', fetchMock)
+
+    expect(localModelServerUp(provider)).toBe(false)
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    // Asking is never gated — and a dead host costs two requests, not three.
+    expect((await checkLocalServer(provider)).state).toBe('asleep')
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([`${HOST}/v1/models`, HOST])
+  })
+
+  it('remembers a server that answered on this device', async () => {
+    const provider = localDescriptor()
+    registry.register(provider)
+    vi.stubGlobal('fetch', serverWith('qwen3:8b'))
+
+    await checkLocalServer(provider)
+    expect(store.get('hc:llm:my-machine:answered')).toBe('1')
+  })
+
+  it('knocks unattended where a server answered before — unless switched off', async () => {
+    store.set('hc:llm:my-machine:answered', '1')
+    const provider = localDescriptor()
+    registry.register(provider)
+    const fetchMock = refused()
+    vi.stubGlobal('fetch', fetchMock)
+
+    llmActivation.setEnabled('my-machine', false)
+    localModelServerUp(provider)
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    llmActivation.setEnabled('my-machine', true)
+    localModelServerUp(provider)
+    expect(fetchMock).toHaveBeenCalled()
+    await checkLocalServer(provider)
   })
 })

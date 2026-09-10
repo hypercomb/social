@@ -1,7 +1,7 @@
 // ui/slash-behaviour/slash-behaviour.drone.ts
 import {
   EffectBus, get, hypercomb, I18N_IOC_KEY, type I18nProvider,
-  registerCommandRoot, commandRoot, type CommandObject, type CommandMember,
+  registerCommandRoot, commandRoot, type CommandObject, type CommandMember, type KeyMapLayer,
 } from '@hypercomb/core'
 import { ReceiptBuilder, describeReceipt } from '../assistant/receipt.js'
 import { BREAK_APART_SKIP_LABELS } from '../assistant/break-apart.drone.js'
@@ -680,6 +680,60 @@ class BigHeadModeProvider implements SlashBehaviourProvider {
   }
 }
 
+/** COMMAND LINE ON DEMAND — the command line leaves the bar until it is asked
+ *  for. Typing a stance sigil from anywhere summons it wearing that stance (`/`
+ *  commands, `?` finds, `>` names tiles), clicking away sends it off again,
+ *  and the icon rail on the bar never moves. The tile's command icon stays the
+ *  one pointer door (command-line.component.ts owns the showing).
+ *
+ *  OFF BY DEFAULT, STICKY ONCE ON (Jaime, 2026-09-10): a participant who never
+ *  asks for it keeps the line they can see and click, so nobody is left
+ *  hunting for a box that is not there. `hc:command-line-on-demand` is the
+ *  truth — the line seeds itself from the same key. While on, bare `/` belongs
+ *  to the line, so the shortcut sheet steps to Ctrl+/ — the one binding this
+ *  layer overrides, because the keymap resolves layers per command, not per key. */
+const COMMAND_LINE_ON_DEMAND_KEY = 'hc:command-line-on-demand'
+const readCommandLineOnDemand = (fallback = false): boolean => {
+  try { return localStorage.getItem(COMMAND_LINE_ON_DEMAND_KEY) === '1' } catch { return fallback }
+}
+const COMMAND_LINE_ON_DEMAND_LAYER: KeyMapLayer = {
+  id: 'command-line-on-demand',
+  priority: 10,
+  bindings: [
+    { cmd: 'ui.commandLineCommandStance', sequence: [[{ key: '/', ctrl: false, meta: false, alt: false }]], description: 'Open the command line for a command', descriptionKey: 'keymap.command-line-command-stance', category: 'Navigation' },
+    { cmd: 'ui.commandLineFindStance', sequence: [[{ key: '?', ctrl: false, meta: false, alt: false }]], description: 'Open the command line to find', descriptionKey: 'keymap.command-line-find-stance', category: 'Navigation' },
+    { cmd: 'ui.commandLineTilesStance', sequence: [[{ key: '>', ctrl: false, meta: false, alt: false }]], description: 'Open the command line to name tiles', descriptionKey: 'keymap.command-line-tiles-stance', category: 'Navigation' },
+    { cmd: 'ui.shortcutSheet', sequence: [[{ key: '/', primary: true }]], description: 'Show keyboard shortcuts', descriptionKey: 'keymap.shortcuts', category: 'Navigation' },
+  ],
+}
+class CommandLineOnDemandProvider implements SlashBehaviourProvider {
+  readonly name = 'command-line-on-demand-provider'
+  readonly priority = 100
+  readonly behaviours: SlashBehaviour[] = [
+    { name: 'command-line-on-demand', description: 'Hide the command line until you type / ? or >', descriptionKey: 'slash.command-line-on-demand',
+      examples: [{ input: '/command-line-on-demand', result: 'The line hides until a sigil calls it and stays that way; repeat to keep it showing' }] }
+  ]
+
+  /** Mirrors the key so the toggle still flips where storage is blocked. */
+  #on = readCommandLineOnDemand()
+
+  constructor() { this.#applyLayer() }
+
+  execute(): void {
+    this.#on = !readCommandLineOnDemand(this.#on)
+    try { localStorage.setItem(COMMAND_LINE_ON_DEMAND_KEY, this.#on ? '1' : '0') } catch { /* storage blocked — mode is session-only */ }
+    this.#applyLayer()
+    EffectBus.emit('command-line:on-demand', { on: this.#on })
+  }
+
+  #applyLayer(): void {
+    window.ioc.whenReady<{ addLayer(layer: KeyMapLayer): void; removeLayer(id: string): void }>(
+      '@diamondcoreprocessor.com/KeyMapService',
+      keymap => this.#on ? keymap.addLayer(COMMAND_LINE_ON_DEMAND_LAYER) : keymap.removeLayer(COMMAND_LINE_ON_DEMAND_LAYER.id),
+    )
+  }
+}
+
 class TextOnlyProvider implements SlashBehaviourProvider {
   readonly name = 'text-only-provider'
   readonly priority = 100
@@ -842,6 +896,7 @@ _slashBehaviours.addProvider(new OrganizeProvider())
 _slashBehaviours.addProvider(new VoiceProvider())
 _slashBehaviours.addProvider(new PushToTalkProvider())
 _slashBehaviours.addProvider(new BigHeadModeProvider())
+_slashBehaviours.addProvider(new CommandLineOnDemandProvider())
 _slashBehaviours.addProvider(new TextOnlyProvider())
 _slashBehaviours.addProvider(new DocsProvider())
 _slashBehaviours.addProvider(new DomainProvider())

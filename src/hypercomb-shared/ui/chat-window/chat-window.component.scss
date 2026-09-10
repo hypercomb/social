@@ -945,15 +945,21 @@ $accent: #7eb6d6;
 // bolted onto a title. The rule between them does the separating instead,
 // because it says they are different KINDS of act (this one is about the
 // thread you are reading; that one leaves it) without drawing two boxes.
+// ONE ICON SIZE PER ROW, and it is the header gear's: a 1.75rem box with a
+// 1.0625rem glyph (28px / 17px at the root), in rem so neither the panel's
+// text ladder nor a px literal decides it. The peek and providers controls in
+// chat-peek.scss take the same two numbers.
 .chat-new,
 .chat-put {
   flex: 0 0 auto;
   @include tw.icon-button;
+  width: tw.$header-action-size;
+  height: tw.$header-action-size;
   background: none;
   border: none;
   cursor: pointer;
 
-  .mat-sym { font-size: 1.05em; }
+  .mat-sym { font-size: 1.0625rem; }
 }
 
 // Same box as every other icon in the row — the row now carries the window's
@@ -962,12 +968,14 @@ $accent: #7eb6d6;
 .chat-goal {
   flex: 0 0 auto;
   @include tw.icon-button;
+  width: tw.$header-action-size;
+  height: tw.$header-action-size;
   border: 0;
   background: transparent;
   color: tw.ink(#70d59a);
   cursor: pointer;
 
-  .mat-sym { font-size: 1.05em; }
+  .mat-sym { font-size: 1.0625rem; }
 }
 .chat-goal.on, .chat-goal:hover { background: rgba(112, 213, 154, 0.14); }
 .chat-goal-details {

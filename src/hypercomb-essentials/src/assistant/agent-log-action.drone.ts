@@ -29,6 +29,7 @@
 
 import { Drone } from '@hypercomb/core'
 import type { Agent, AgentRegistry } from './agent-registry.service.js'
+import { MOBILE_MODE_EFFECT } from '../preferences/mobile-pheromones.js'
 import type {
   OverlayActionDescriptor, OverlayProfileKey, OverlayTileContext,
 } from '../presentation/tiles/tile-overlay.drone.js'
@@ -116,7 +117,7 @@ export class AgentLogActionDrone extends Drone {
     'agent-window icon on tiles that have an agent, while the agents are hidden'
 
   protected override listens = [
-    'render:set-agents-visible', 'overlay:request-register', 'tile:action',
+    'render:set-agents-visible', 'overlay:request-register', 'tile:action', MOBILE_MODE_EFFECT,
   ]
   protected override emits = [
     'overlay:register-action', 'overlay:unregister-action', 'agent:open',
@@ -127,13 +128,15 @@ export class AgentLogActionDrone extends Drone {
    *  choice before the renderer mounts and EffectBus replays the last value,
    *  so a late drone learns the truth without asking. */
   #hidden = false
+  /** On a phone there are no agents — no bees and no door either. */
+  #mobile = false
 
   /** Is the icon offered right now? Public because "is this affordance on the
    *  tiles" is a question other surfaces ask — the close-up screen and the
    *  tile brief build their lists from the same registry — and because it is
    *  the only honest way to read this state on a headless renderer, where no
    *  cell is painted and the overlay knows no labels to be asked about. */
-  get armed(): boolean { return this.#hidden }
+  get armed(): boolean { return this.#hidden && !this.#mobile }
 
   /** The agent a press on this tile would open. Public for the same reason. */
   agentFor(label: string): Agent | undefined { return agentOn(label) }
@@ -146,6 +149,13 @@ export class AgentLogActionDrone extends Drone {
       const hidden = payload?.visible === false
       if (hidden === this.#hidden) return
       this.#hidden = hidden
+      this.#apply()
+    })
+
+    this.onEffect<{ active?: boolean }>(MOBILE_MODE_EFFECT, payload => {
+      const mobile = payload?.active === true
+      if (mobile === this.#mobile) return
+      this.#mobile = mobile
       this.#apply()
     })
 
@@ -163,13 +173,13 @@ export class AgentLogActionDrone extends Drone {
    *  overlay offers (`invokeActionForTile`), and for the same reason: the icon
    *  band is not the only thing that can press an affordance. */
   press(label: string): void {
-    const agent = agentOn(label)
+    const agent = this.#mobile ? undefined : agentOn(label)
     if (!agent) return
     this.emitEffect('agent:open', { id: agent.id })
   }
 
   #apply(): void {
-    if (this.#hidden) { this.emitEffect('overlay:register-action', DESCRIPTORS); return }
+    if (this.armed) { this.emitEffect('overlay:register-action', DESCRIPTORS); return }
     // Profile-aware removal: the name lives in four orders and each has to be
     // spliced by its own profile, or the wrong one keeps an icon.
     for (const profile of PROFILES) {

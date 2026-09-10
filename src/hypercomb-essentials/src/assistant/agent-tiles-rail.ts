@@ -466,7 +466,13 @@ const RAIL_CSS = `
    down the side: the fold already says what they belong to, and a line plus a
    picture's worth of indent turned a list of two chats into a diagram. */
 .hc-rail-chats{display:flex;flex-direction:column;gap:1px;
-  margin:1px 0 4px 0.9rem;padding-left:0;}
+  margin:1px 0 4px 0.9rem;padding-left:0;
+  /* CAPPED. The fold is one-open-at-a-time, but a tile with many threads
+     (and its archive opened) could still push every row under it off the
+     screen. The window is full-screen, so 40vh is 40% of the tool window:
+     the fold grows to that and then scrolls within it, and the tile rows
+     below stay reachable (documentation/chat-route.md §5). */
+  max-height:40vh;overflow-y:auto;}
 /* ONE LINE, AND NO WRAP TO GIVE. The row used to carry flex-wrap because the
    points list under an open conversation asked for a whole line
    (\`flex:1 0 100%\`) and would otherwise take that basis on the SAME line,

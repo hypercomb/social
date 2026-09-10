@@ -7,6 +7,9 @@
 //   · ‹ goes back through Navigation (disabled at the root); the title drops
 //     the path and a crumb jumps by goRaw; ⋯ opens the layer deck
 //   · an empty layer is a sentence, never a void
+//   · the face (list · hexagons) is set from outside — the controls bar's
+//     FACE disc sends phone:face-set; the header carries no switch, stays on
+//     both faces, and only the list face paints rows
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectBus } from '@hypercomb/core'
@@ -211,18 +214,36 @@ describe("the row's own doors", () => {
 })
 
 describe('the face', () => {
-  it('list and hexagons are one selector: choosing the hexagons puts the list away, and it publishes the face', () => {
-    const faces = vi.fn()
-    const off = EffectBus.on('phone:face', faces)
-    expect(action('face:list').getAttribute('aria-pressed')).toBe('true')
-    action('face:hexagons').click()
-    expect(faces).toHaveBeenLastCalledWith({ face: 'hexagons' })
+  it('the header carries no list · hexagons switch — the face arrives from the controls bar', () => {
+    expect(el.querySelector('[data-role="list-faces"]')).toBeNull()
+    expect(el.querySelector('[data-action^="face:"]')).toBeNull()
+    const bar = el.querySelector('[data-role="list-title"]') as HTMLElement
+    expect(Array.from(bar.children).map(c => (c as HTMLElement).dataset['action'])).toEqual(['back', 'path', 'more'])
+  })
+
+  it('phone:face-set is one selector: the hexagons face is the header without rows, the list face paints rows, and the face replays', () => {
+    EffectBus.emit('phone:face-set', { face: 'hexagons' })
+    // A late subscriber (the controls bar's FACE disc) reads the replayed face.
+    const late = vi.fn()
+    const offLate = EffectBus.on('phone:face', late)
+    expect(late).toHaveBeenCalledWith({ face: 'hexagons' })
+    offLate()
     expect(drone.showing).toBe(false)
-    expect(el.querySelector('[data-role="list-row"]')).toBeNull()
+    expect(el.style.display).toBe('flex')
+    expect(el.style.bottom).toBe('auto')
+    expect(el.querySelector('[data-role="list-title"]')).not.toBeNull()
+    expect(action('back')).not.toBeNull()
+    expect(action('more')).not.toBeNull()
+    expect(el.querySelector('[data-role="list-rows"]')).toBeNull()
+    expect(rows()).toHaveLength(0)
+
     EffectBus.emit('phone:face-set', { face: 'list' })
-    expect(faces).toHaveBeenLastCalledWith({ face: 'list' })
+    const again = vi.fn()
+    const offAgain = EffectBus.on('phone:face', again)
+    expect(again).toHaveBeenCalledWith({ face: 'list' })
+    offAgain()
     expect(drone.showing).toBe(true)
-    expect(action('face:list').getAttribute('aria-pressed')).toBe('true')
-    off()
+    expect(el.querySelector('[data-role="list-title"]')).not.toBeNull()
+    expect(rows().map(r => r.dataset['label'])).toEqual(['sunrise', 'meadow', 'comb'])
   })
 })

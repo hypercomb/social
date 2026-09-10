@@ -24,6 +24,7 @@
 // replies are two turns, never an overwrite.
 
 import { EffectBus } from '@hypercomb/core'
+import { readRoute, type Route } from './chat-route.js'
 
 /** Pool of meaning holding conversations. Bare word, already in the frozen
  *  registry — do NOT re-spell it; `sign()` of a new spelling is a different
@@ -41,6 +42,13 @@ export interface ChatTurn {
   /** The text's root-resource signature — present on doctrine-shape turns
    *  (see below), absent on legacy inline turns. */
   readonly contentSig?: string
+  /** THE TURN'S OWN signature — the manifest file's name in the bucket, the
+   *  hash of its bytes. Present on every turn read from disk; absent on a
+   *  turn a surface holds in memory before (or without) storing it. This is
+   *  the identity a run's `chat-reply` step points at, and so the join the
+   *  route is drawn on: `contentSig` dedups across identical replies, this
+   *  never does. */
+  readonly sig?: string
 }
 
 /** A turn as it sits ON DISK since the doctrine pass: the TEXT is a root
@@ -124,6 +132,8 @@ type RawTurn = {
   readonly at: number
   readonly text?: string
   readonly contentSig?: string
+  /** The entry's file name — set by the walk, never read from the bytes. */
+  readonly sig?: string
 }
 
 /** One bucket, read once: its turns and whether it has been put away. Both
@@ -313,28 +323,37 @@ const provedLedgerEntries = async (
   return names
 }
 
+/** What a stored turn is called: its manifest's file name, and the text's
+ *  resource when the store could mint one. */
+export interface StoredTurn {
+  readonly turnSig: string
+  readonly contentSig?: string
+}
+
 /**
- * Append a turn and return true only once the bytes are on disk.
+ * Append a turn and return its signatures only once the bytes are on disk —
+ * null when they are not.
  *
- * The return value is the whole point: `chat-reply` reports success to the
- * responder from this, so a turn that could not be stored is a FAILED reply,
- * not a silent one. A responder that sees false can retry or say so instead of
- * retiring an ask whose answer evaporated.
+ * The turn sig was always computed here (the file is named by it) and then
+ * thrown away; it is handed back so `chat-reply` can answer with the identity
+ * of the turn it wrote, which is what lets a run's recorded step point at the
+ * reply it ended on. `appendTurn` below keeps the boolean contract every
+ * existing caller reads.
  */
-export const appendTurn = async (
+export const appendTurnSig = async (
   convoId: string,
   role: TurnRole,
   text: string,
-): Promise<boolean> => {
+): Promise<StoredTurn | null> => {
   const id = String(convoId ?? '').trim()
   const body = String(text ?? '')
-  if (!id || !body) return false
+  if (!id || !body) return null
 
   const store = get<StoreLike>('@hypercomb.social/Store')
   const pool = await store?.getPool?.(THREADS_POOL)
   if (!pool) {
     console.warn('[chat-thread] threads pool unavailable — turn NOT stored')
-    return false
+    return null
   }
 
   try {
@@ -347,8 +366,9 @@ export const appendTurn = async (
     // worse than storing it in the old shape.
     const bucket = await bucketFor(pool, id)
     let record: ChatTurn | TurnManifest
+    let contentSig: string | undefined
     if (store?.putResource) {
-      const contentSig = await store.putResource(new Blob([body], { type: 'text/plain' }))
+      contentSig = await store.putResource(new Blob([body], { type: 'text/plain' }))
       record = { kind: 'chat-turn', convoId: id, role, at: Date.now(), contentSig }
     } else {
       record = { kind: 'chat-turn', convoId: id, role, at: Date.now(), text: body }
@@ -357,15 +377,30 @@ export const appendTurn = async (
     // Named by its own content hash: append-only. (Two deliberate repeats of
     // the same words are two manifests — `at` differs — while the TEXT bytes
     // behind them are one deduped resource.)
-    const handle = await bucket.getFileHandle(await sha256(bytes), { create: true })
+    const turnSig = await sha256(bytes)
+    const handle = await bucket.getFileHandle(turnSig, { create: true })
     const writable = await handle.createWritable()
     try { await writable.write(new Blob([bytes as BlobPart])) } finally { await writable.close() }
-    return true
+    return { turnSig, ...(contentSig ? { contentSig } : {}) }
   } catch (err) {
     console.warn('[chat-thread] could not store the turn:', err)
-    return false
+    return null
   }
 }
+
+/**
+ * Append a turn and return true only once the bytes are on disk.
+ *
+ * The return value is the whole point: `chat-reply` reports success to the
+ * responder from this, so a turn that could not be stored is a FAILED reply,
+ * not a silent one. A responder that sees false can retry or say so instead of
+ * retiring an ask whose answer evaporated.
+ */
+export const appendTurn = async (
+  convoId: string,
+  role: TurnRole,
+  text: string,
+): Promise<boolean> => !!(await appendTurnSig(convoId, role, text))
 
 /** Every turn record in one bucket, oldest first, texts NOT yet materialized —
  *  shared by the single-thread read and the conversation list, so both agree
@@ -386,7 +421,7 @@ const readBucketRaw = async (
   let goal: ChatGoalReached | undefined
   let decided = !humanOnly
   const entries = (bucket as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()
-  for await (const [, handle] of entries) {
+  for await (const [entryName, handle] of entries) {
     if (handle.kind !== 'file') continue
     try {
       const file = await (handle as FileSystemFileHandle).getFile()
@@ -408,10 +443,67 @@ const readBucketRaw = async (
         if (!isHumanConversation(turn.convoId)) return null
         decided = true
       }
-      out.push(turn)
+      // The entry name IS the turn's signature (the file is named by the
+      // hash of its bytes) — set last, so a record that happened to carry a
+      // `sig` field of its own could never pass as another turn.
+      out.push({ ...turn, sig: entryName })
     } catch { /* one unreadable turn must not hide the thread */ }
   }
   return { turns: out.sort((a, b) => a.at - b.at), archived, goal }
+}
+
+/**
+ * Every turn in ONE bucket, STRICTLY: a read that fails, throws.
+ *
+ * `readTurns` swallows every fault into `[]`, which is right for the window
+ * — "no bucket yet" and "could not read" both draw as an empty thread the
+ * participant is about to speak into. It is wrong for the ROUTE, whose whole
+ * claim is that it shows what the records say: an unreadable bucket drawn as
+ * an empty pipe says "nothing happened" about a run that may have done
+ * everything. So this walk lets a file-system or store rejection travel out
+ * to the caller, which turns it into a notice rather than an empty route.
+ *
+ * What still does NOT throw: an entry that is not a turn record (a marker,
+ * a half-written zero-byte file, foreign bytes) is skipped — that is a state
+ * of the bucket, not a fault in reading it — and a text resource that has
+ * GONE reads as '' exactly as it does everywhere else, because the turn's
+ * existence (role, time, sig) is still true.
+ */
+export const readTurnsStrict = async (
+  bucket: FileSystemDirectoryHandle,
+  convoId: string,
+): Promise<ChatTurn[]> => {
+  const store = get<StoreLike>('@hypercomb.social/Store')
+  if (!store) throw new Error('store unavailable')
+  const out: RawTurn[] = []
+  const entries = (bucket as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()
+  for await (const [entryName, handle] of entries) {
+    if (handle.kind !== 'file') continue
+    const text = await (await (handle as FileSystemFileHandle).getFile()).text()
+    let turn: (RawTurn & { kind?: string }) | null
+    try { turn = JSON.parse(text) as RawTurn & { kind?: string } } catch { continue }
+    if (turn?.kind !== 'chat-turn' || turn.convoId !== convoId) continue
+    if (typeof turn.text !== 'string' && typeof turn.contentSig !== 'string') continue
+    out.push({ ...turn, sig: entryName })
+  }
+  out.sort((a, b) => a.at - b.at)
+  return Promise.all(out.map(async raw => {
+    let body = ''
+    if (typeof raw.text === 'string') body = raw.text
+    else if (raw.contentSig && store.getResource) {
+      const blob = await store.getResource(raw.contentSig)   // a rejection propagates
+      body = blob ? await blob.text() : ''
+    }
+    return {
+      kind: 'chat-turn' as const,
+      convoId: raw.convoId,
+      role: raw.role,
+      at: raw.at,
+      text: body,
+      ...(raw.contentSig ? { contentSig: raw.contentSig } : {}),
+      ...(raw.sig ? { sig: raw.sig } : {}),
+    }
+  }))
 }
 
 /** Has anything come back yet? One assistant turn is all it takes — a thread
@@ -444,6 +536,7 @@ const materializeTurns = async (
     at: r.at,
     text: await resolveText(r, store),
     ...(r.contentSig ? { contentSig: r.contentSig } : {}),
+    ...(r.sig ? { sig: r.sig } : {}),
   })))
 
 /** Every stored turn for a conversation, oldest first. What a window reads
@@ -924,18 +1017,25 @@ export const deleteConversation = async (convoId: string): Promise<boolean> => {
 /** Store the turn, THEN announce it. The effect carries the convoId only —
  *  it says "fresh turns exist", it is not the turn. A listener re-reads;
  *  nothing downstream depends on this arriving. */
+export const deliverTurnSig = async (
+  convoId: string,
+  role: TurnRole,
+  text: string,
+): Promise<StoredTurn | null> => {
+  const stored = await appendTurnSig(convoId, role, text)
+  if (!stored) return null
+  // `text` rides along purely so an OPEN window can paint without a re-read.
+  // The stored turn is the truth; this is a courtesy for the live case.
+  EffectBus.emit('ask:chat-reply', { convoId, text })
+  return stored
+}
+
+/** {@link deliverTurnSig} with the boolean contract existing callers read. */
 export const deliverTurn = async (
   convoId: string,
   role: TurnRole,
   text: string,
-): Promise<boolean> => {
-  const stored = await appendTurn(convoId, role, text)
-  if (!stored) return false
-  // `text` rides along purely so an OPEN window can paint without a re-read.
-  // The stored turn is the truth; this is a courtesy for the live case.
-  EffectBus.emit('ask:chat-reply', { convoId, text })
-  return true
-}
+): Promise<boolean> => !!(await deliverTurnSig(convoId, role, text))
 
 // ── sticky drafts ────────────────────────────────────────
 //
@@ -1153,6 +1253,20 @@ export class ChatThreads {
   readonly setConversationGoalReached = setConversationGoalReached
   readonly newConvoId = newConvoId
   readonly isHumanConversation = isHumanConversation
+
+  /** The conversation's ROUTE — its runs laid along its turns, read from the
+   *  records (chat-route.ts). A METHOD, not a field like its siblings: this
+   *  class is instantiated at module scope, inside the import cycle
+   *  chat-thread → chat-route → chat-steps → chat-thread, and a field
+   *  initialiser dereferences the import binding while the cycle is still
+   *  evaluating — whichever file loaded first decides whether that is a
+   *  function or a temporal-dead-zone error. A method reads the binding at
+   *  call time, when every module has long since finished. The shell
+   *  feature-detects it (`readRoute?.`): a web build whose essentials lag
+   *  the shell simply has no route. */
+  readRoute(convoId: string, liveRunId?: string): Promise<Route> {
+    return readRoute(convoId, liveRunId)
+  }
 }
 
 export const CHAT_THREADS_IOC_KEY = '@diamondcoreprocessor.com/ChatThreads'

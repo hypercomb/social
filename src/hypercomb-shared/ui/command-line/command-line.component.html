@@ -3,6 +3,7 @@
 <div class="command-line-wrapper" [style.visibility]="touchDragging() || viewActive() ? 'hidden' : null">
   <hc-command-shell
     #shell
+    [collapsed]="lineHidden()"
     [suggestions]="suggestions()"
     [placeholder]="placeholder()"
     [ghostValue]="ghostValue()"

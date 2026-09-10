@@ -66,8 +66,10 @@
          an off-origin font/script/style hands that host the visitor's IP, UA
          and Referer on every page load. See
          documentation/no-third-party-requests.md. Regenerate the woff2 with
-         `node scripts/fetch-fonts.cjs hypercomb-shim/public/fonts inter`. -->
-    <link rel="stylesheet" href="fonts/fonts.css?v=42a7992810" />
+         `node scripts/fetch-fonts.cjs hypercomb-shim/public/fonts inter source-serif material-symbols`
+         — name EVERY family the shell ships: the script deletes the ones
+         you leave out. -->
+    <link rel="stylesheet" href="fonts/fonts.css?v=9f66025de5" />
 
     <style>
       html, body {

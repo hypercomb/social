@@ -1,13 +1,18 @@
 // scripts/bridge/loop-run.cjs
 //
-// A RESPONDER'S RUN — two fields, and the loop records itself.
+// A RESPONDER'S RUN — one field, and the loop records itself.
 //
 // The hive records what an agent DID (essentials/assistant/chat-steps.ts),
 // but only for requests that say which loop they belong to. That is the
-// whole contract: put `run: { convoId, id }` on the requests you already
-// send, and every step — including the ones that failed, and the ones you
-// forgot you took — lands in the conversation's ledger. A responder that
-// declares no run behaves exactly as it always did.
+// whole contract: put `run: { ask }` on the requests you already send —
+// the sig of the ask you are answering — and every step, including the ones
+// that failed and the ones you forgot you took, lands in the conversation's
+// ledger. The RENDERER resolves which conversation from the ask record it
+// already reads (a chat ask's run lives in the chat's own bucket, any other
+// in `agent:<askSig>`), so nothing here needs a second input. The older
+// explicit `run: { convoId, id }` is still honoured for runs that are not
+// answering an ask. A responder that declares no run behaves exactly as it
+// always did.
 //
 // What it buys is the thing a killed process cannot otherwise have: on
 // restart, `resume()` reads the ledger back and says where you got to.
@@ -90,31 +95,44 @@ const runRefForAsk = askSig => ({
 /**
  * The run a responder was woken for, from the environment — or null.
  *
- * A parked session exports this ONCE per ask; every script it then runs
- * attaches the run without the model having to remember a field on each
- * hand-typed request. That is the difference between a ledger that fills
- * itself and one that fills only when somebody remembers it.
+ * A FALLBACK, for `_bop.cjs` and any hand-typed request: the scripts that
+ * answer an ask take `--ask <sig>` on the command line and never need this.
+ * A Claude Code session runs each command in a fresh shell, so an exported
+ * variable does not survive to the next call anyway — and in a shell where
+ * it does, a stale one files a run under the wrong ask. When it is set, it
+ * yields the `{ ask }` form: the renderer resolves the bucket from the ask
+ * record (a chat ask's run lands in the chat's own bucket), never this
+ * script from a second variable.
  */
 const runFromEnv = (env = process.env) => {
   const ask = String(env.HYPERCOMB_RUN_ASK || '').trim()
-  return ask ? runRefForAsk(ask) : null
+  return ask ? { ask } : null
 }
 
 /**
  * Open a run against one conversation.
  *
- * Pass `ask` (the ask sig) and the run id is derived for you — the safe path,
- * and the one to use whenever the run is answering an ask. Pass `runId`
- * explicitly only when you have your own stable handle and can guarantee the
- * next process spells it identically.
+ * Pass `ask` (the ask sig) and every op is sent as `run: { ask }`: the
+ * RENDERER resolves where the run lives from the ask record it already
+ * reads — a chat-mode ask into the chat's own bucket, anything else into
+ * `agent:<askSig>` — so one input addresses the run on both sides and no
+ * environment is involved. `convoId` is then only where `resume()` reads
+ * from (the chat convoId, for a chat ask; it defaults to the note-mode
+ * address). Pass `convoId` + `runId` explicitly, with no `ask`, only when
+ * you have your own stable handle and can guarantee the next process spells
+ * it identically — that form is sent as it always was.
  */
 function openRun({ convoId, runId, ask, bridge = DEFAULT_BRIDGE, timeoutMs = 15_000 }) {
-  const convo = String(convoId || '').trim()
-  const id = String(runId || (ask ? runIdForAsk(ask) : '')).trim()
+  const askSig = String(ask || '').trim()
+  const convo = String(convoId || (askSig ? runConvoForAsk(askSig) : '')).trim()
+  const id = String(runId || (askSig ? runIdForAsk(askSig) : '')).trim()
   if (!convo) throw new Error('openRun needs a convoId')
   if (!id) throw new Error('openRun needs `ask` (preferred — the id is derived) or an explicit stable `runId`')
 
-  const run = { convoId: convo, id }
+  // THE ASK FORM WINS. With an ask in hand the renderer's resolution is the
+  // one that cannot misfile (it reads the record); an explicit address is
+  // the legacy form for runs that are not answering an ask.
+  const run = askSig ? { ask: askSig } : { convoId: convo, id }
 
   /** Send one op AS A STEP of this run. The hive records it; you get the
    *  op's own answer back, unchanged. */

@@ -109,10 +109,18 @@ $accent: #7eb6d6;
 // control now, so they take that control's box (`tw.icon-button`, rem — the
 // row's font-size must not decide how big a window control is) instead of the
 // em box they wore while they were header chrome.
+// THE GEAR'S SIZE, IN REM. The header gear is a 28px box with a 17px glyph,
+// pinned by core; these sit one row under it and read as the same kind of
+// control, so they take the same box (`tw.$header-action-size`, 1.75rem) and
+// the same glyph (1.0625rem at the 16px root). Rem, never px — chrome in a
+// tool-window sheet is never px — and rem, never em: the glyph used to be
+// `1.05em` and drifted with the panel's text size while the gear did not.
 .chat-peek,
 .chat-providers {
   flex: 0 0 auto;
   @include tw.icon-button;
+  width: tw.$header-action-size;
+  height: tw.$header-action-size;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -123,7 +131,7 @@ $accent: #7eb6d6;
   transition: color 0.14s ease, background 0.14s ease, border-color 0.14s ease;
 
   .mat-sym {
-    font-size: 1.05em;
+    font-size: 1.0625rem;
   }
 
   &:hover,

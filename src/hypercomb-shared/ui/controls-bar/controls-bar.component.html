@@ -115,17 +115,20 @@
 }
 
 <!-- breadcrumb: below header, right-aligned -->
-<button class="agent-visibility-toggle"
-        [class.rail-left]="dockSide() === 'left'"
-        [class.agents-hidden]="!agentsVisible()"
-        type="button"
-        (click)="toggleAgents()"
-        [attr.aria-pressed]="!agentsVisible()"
-        [attr.aria-label]="(agentsVisible() ? 'controls.hide-agents' : 'controls.show-agents') | t"
-        [title]="(agentsVisible() ? 'controls.hide-agents' : 'controls.show-agents') | t">
-  <span class="mat-sym" aria-hidden="true">{{ agentsVisible() ? 'visibility' : 'visibility_off' }}</span>
-  <span>{{ (agentsVisible() ? 'controls.hide-agents' : 'controls.show-agents') | t }}</span>
-</button>
+<!-- No agents on a phone — nothing to show or hide, so no toggle. -->
+@if (!isMobile()) {
+  <button class="agent-visibility-toggle"
+          [class.rail-left]="dockSide() === 'left'"
+          [class.agents-hidden]="!agentsVisible()"
+          type="button"
+          (click)="toggleAgents()"
+          [attr.aria-pressed]="!agentsVisible()"
+          [attr.aria-label]="(agentsVisible() ? 'controls.hide-agents' : 'controls.show-agents') | t"
+          [title]="(agentsVisible() ? 'controls.hide-agents' : 'controls.show-agents') | t">
+    <span class="mat-sym" aria-hidden="true">{{ agentsVisible() ? 'visibility' : 'visibility_off' }}</span>
+    <span>{{ (agentsVisible() ? 'controls.hide-agents' : 'controls.show-agents') | t }}</span>
+  </button>
+}
 
 <div class="breadcrumb-top" [class.faded]="isMobile()">
   @if (meshPublic()) {
