@@ -16,6 +16,8 @@ const arg = (name, fallback) => {
   return i >= 0 ? process.argv[i + 1] : fallback
 }
 const HIVE = arg('--url', 'http://localhost:4250')
+// Generated output goes to the OS temp dir, never into the repo — see AGENTS.md.
+const SHOT = arg('--shot', require('path').join(require('os').tmpdir(), 'chat-waiting.png'))
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 ;(async () => {
@@ -58,7 +60,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms))
   } else say('NO COMPOSER FOUND — the send half could not be driven')
 
   say(`AFTER SEND  ${JSON.stringify(await read())}`)
-  await page.locator('.chat-rail').screenshot({ path: 'shot-chat-waiting.png' })
+  await page.locator('.chat-rail').screenshot({ path: SHOT })
+  say(`shot: ${SHOT}`)
   if (errors.length) say(`page errors: ${errors.slice(0, 3).join(' | ')}`)
 
   await browser.close()
