@@ -17,12 +17,12 @@ export class BubbleQueenBee extends QueenBee {
   readonly command = 'bubble'
   override description = 'Bubble Bobble — blow bubbles, trap foes, clear the screen'
   override descriptionKey = 'slash.bubble'
-  override options = ['on', 'off', 'design']
+  override options = ['on', 'off']
   override examples = [{ input: '/bubble on', result: 'Starts Bubble Bobble' }]
 
   override slashComplete(args: string): readonly string[] {
     const q = args.trim().toLowerCase()
-    return ['on', 'off', 'design'].filter(o => o.startsWith(q))
+    return ['on', 'off'].filter(o => o.startsWith(q))
   }
 
   protected async execute(args: string): Promise<void> {
@@ -41,7 +41,7 @@ export class BubbleQueenBee extends QueenBee {
     if (a === 'on' || a === 'open') { drone.open(); this.#log('Bubble Bobble — opened', '🫧'); return }
     if (a === 'off' || a === 'close') { drone.close(); this.#log('Bubble Bobble — closed', '○'); return }
     if (a === 'design' || a === 'designer' || a === 'edit') {
-      drone.openDesigner(); this.#log('Bubble Bobble — designer', '🫧'); return
+      this.#log('This Bubble Bobble version has three arcade rounds and no level designer.', '🫧'); return
     }
     const on = drone.toggle()
     this.#log(on ? 'Bubble Bobble — opened' : 'Bubble Bobble — closed', on ? '🫧' : '○')

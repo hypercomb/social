@@ -524,14 +524,21 @@ $actions-corner: 12rem;
   top: var(--hc-header-anchor);
   bottom: 0;
 
-  // …EXCEPT when the rail is standing beside a view that kept it. The gap at
-  // the top is there to clear the header bar, and the shell hides the header
-  // for exactly the same `view:active` that put us here — so the gap clears
-  // nothing and shows a thumbnail-sized square of hive above the rail, which
-  // reads as a hole rather than as the hive. Run to the top instead; the
-  // reservation follows, because `--hc-controls-left-top` is measured from
-  // this box (and the height change is what re-measures it).
-  &.over-view { top: 0; }
+  // …EXCEPT when the header is not on screen at all. The gap at the top is
+  // there to clear the header bar; with the bar gone the gap clears nothing
+  // and shows a thumbnail-sized square of hive above the rail, which reads as
+  // a hole rather than as the hive. Run to the top instead; the reservation
+  // follows, because `--hc-controls-left-top` is measured from this box (and
+  // the height change is what re-measures it).
+  //
+  // `shell-hidden`, NOT `over-view`. They are different claims and this rule
+  // used to conflate them: `over-view` is `view:active` (a view covers the
+  // canvas — the rail must be LIFTED above it, line 460), while the shell
+  // hides its header on `view:shell-hidden`. A view that keeps the controls —
+  // the behaviours page, chat — raises the first and not the second, so the
+  // rail ran to the top while the command line was still there and covered the
+  // left end of the prompt.
+  &.shell-hidden { top: 0; }
   transform: none;
   align-items: stretch; // let the rail fill the full height
 

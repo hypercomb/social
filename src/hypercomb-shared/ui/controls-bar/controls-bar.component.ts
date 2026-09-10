@@ -1029,6 +1029,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #viewActive = signal(false)
   #controlsHiddenUnsub: (() => void) | null = null
   #controlsHidden = signal(false)
+  #shellHiddenUnsub: (() => void) | null = null
+  #shellHidden = signal(false)
   readonly #IDLE_DELAY = 3000
 
   // ── swipe-to-go-back gesture ────────────────────────────
@@ -1413,6 +1415,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  behind the very window it is standing beside. Lifted only for as long as
    *  that is true. */
   readonly overView = computed(() => this.#viewActive() && !this.#controlsHidden())
+
+  /** Is the SHELL HEADER actually gone? `view:shell-hidden` is the shell's own
+   *  signal — the one `app.html` binds the header's `visibility` to — and it is
+   *  NOT the same claim as `view:active`. A view that keeps the controls (the
+   *  behaviours page, chat) announces `view:active` while the command line
+   *  stays on screen, so a rail that ran to `top: 0` on `view:active` covered
+   *  the left end of the prompt (Jaime, 2026-09-09). Only this says the space
+   *  above the anchor is free. */
+  readonly shellHidden = this.#shellHidden.asReadonly()
   readonly roomOpen = this.#roomOpen.asReadonly()
   readonly beesVisible = this.#beesVisible.asReadonly()
   readonly agentsVisible = this.#agentsVisible.asReadonly()
@@ -1681,6 +1692,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
     this.#controlsHiddenUnsub = EffectBus.on<{ active: boolean }>('view:controls-hidden', ({ active }) => {
       this.#controlsHidden.set(active)
+    })
+
+    this.#shellHiddenUnsub = EffectBus.on<{ active: boolean }>('view:shell-hidden', ({ active }) => {
+      this.#shellHidden.set(active)
     })
 
     this.#tagsUnsub = EffectBus.on<{ tags: { name: string; count: number }[] }>('render:tags', ({ tags }) => {
@@ -2045,6 +2060,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#layoutModeUnsub?.()
     this.#touchDraggingUnsub?.()
     this.#viewActiveUnsub?.()
+    this.#shellHiddenUnsub?.()
     this.#controlsHiddenUnsub?.()
     this.#beesUnsub?.()
     this.#voiceActiveUnsub?.()

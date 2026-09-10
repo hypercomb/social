@@ -1021,7 +1021,7 @@
   "slash.reroll": "Reroll substrate background images on tiles",
   "slash.screensaver": "Idle screensaver on/off + style; on | off | now | hexagon | circle | thought",
   "slash.solomon": "Solomon's Key — block-conjuring puzzle game + level designer; on | off | design",
-  "slash.bubble": "Bubble Bobble — blow bubbles to trap foes, pop them for fruit + level designer; on | off | design",
+  "slash.bubble": "Bubble Bobble ? three arcade rounds; blow bubbles, trap foes and collect fruit; on | off",
   "slash.arkanoid": "Arkanoid — bounce the ball off the paddle to break every brick, catch power pills + level designer; on | off | design",
   "slash.roper": "Roper — turn-based Worms-style artillery with a ninja rope; on | off",
   "substrate.on": "substrate on → {path}",

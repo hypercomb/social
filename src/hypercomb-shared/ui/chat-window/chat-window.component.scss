@@ -149,6 +149,35 @@ $accent: #7eb6d6;
   color: var(--hc-window-accent-quiet);
 }
 
+// ── HOVER OPENS WHAT THE ROW CLIPPED ─────────────────────────────────
+//
+// An ellipsis answers "there is more" and never "more of WHAT". The clip is
+// still right for the RESTING row — every label one line, every chip the same
+// height, the row scans — so the answer is not to stop clipping but to OPEN
+// on hover: the label drops the single-line rule and reads its whole self
+// across TWO lines at a smaller size, in the box it already had.
+//
+// NOTHING MOVES. The box keeps its width, so no neighbour shifts and the
+// strip never re-scrolls under the pointer; and two lines at 0.85x of an
+// already-small label is ~1.7em against a 2.875rem header, so the row it
+// opened in still holds it. Two lines at 0.85x is ~2.35x the characters —
+// past even that the clamp puts the ellipsis back on the second line and the
+// title tooltip is still the whole string.
+@mixin unfurl {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  // A tile name is one long word as often as not, and a branch has no spaces
+  // at all — without this the second line stays empty and the clip is exactly
+  // where it was.
+  overflow-wrap: anywhere;
+  white-space: normal;
+  font-size: 0.85em;
+  line-height: 1.2;
+}
+
 // THE HEADER IS THE REQUEST. The tile it is about, then the branch that needs
 // changing, then everything the responder should read — left to right, in the
 // order a sentence would say it.
@@ -172,6 +201,10 @@ $accent: #7eb6d6;
   max-width: 40%;
   font-size: 0.9em;
   letter-spacing: 0.05em;
+
+  // Read the whole name without leaving the row — see @mixin unfurl.
+  &:hover .chat-subject-tile,
+  &:hover .chat-subject-hive { @include unfurl; }
 }
 
 // THE DROP AREA — one long rectangle, always there. It takes the width the
@@ -214,6 +247,8 @@ $accent: #7eb6d6;
   white-space: nowrap;
   color: var(--hc-window-accent-quiet);
   font-size: 0.78em;
+
+  &:hover { @include unfurl; }
 }
 
 // A BOX. Empty it is an outline waiting for something; filled it names what
@@ -252,6 +287,41 @@ $accent: #7eb6d6;
   &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
 
   .mat-sym { font-size: 1.05em; opacity: 0.85; }
+
+  // THE WHOLE SENTENCE, ON HOVER. A chip says "name, then where it hangs
+  // from"; clipped, it can say neither. Pointing at it opens BOTH — the chip
+  // is the target, not the one word under the pointer, because the two facts
+  // are read together. See @mixin unfurl.
+  //
+  // AND IT TAKES THE ROOM IT NEEDS. Two lines inside the resting 11rem cap
+  // buys ~2.3x the characters, which is enough for a short name and NOT
+  // enough for the long ones — which are the only names anybody hovers. So
+  // the caps come off for as long as the pointer is on the chip: the chip may
+  // grow to the whole strip, and the labels shrink-to-fit inside it instead
+  // of clipping. The strip is a scroller, so this is the widest a label can
+  // open without a single thing outside the strip moving, and the row's own
+  // height is untouched either way.
+  &:hover {
+    max-width: 100%;
+
+    .chat-box-name {
+      // 0 0 auto held the name at its full width and let it overflow instead
+      // of wrapping; it has to be allowed to give way before it can wrap.
+      flex: 0 1 auto;
+      min-width: 0;
+      max-width: none;
+      @include unfurl;
+    }
+
+    // Still gives way SIX TIMES faster than the name (flex-shrink: 6, from
+    // the resting rule) — the name is what you are reading, the branch is
+    // what tells two same-named tiles apart.
+    .chat-box-branch {
+      min-width: 0;
+      max-width: none;
+      @include unfurl;
+    }
+  }
 }
 
 .chat-box-name {

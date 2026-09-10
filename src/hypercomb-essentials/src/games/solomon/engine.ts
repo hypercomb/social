@@ -82,6 +82,8 @@ export interface LevelDef {
   /** Visual theme the renderer bakes the room with (per-shrine identity):
    *  'sandstone' | 'verdant' | 'crystal' | 'abyss'. Defaults to sandstone. */
   theme?: string
+  /** Room doors are traversed explicitly by the interconnected labyrinth. */
+  interconnected?: boolean
 }
 
 export type GameState = 'playing' | 'won' | 'dead' | 'gameover' | 'complete'
@@ -134,6 +136,43 @@ export interface Fireball { x: number; y: number; vx: number; life: number; supe
 /** An enemy projectile (gargoil / dragon / saramandor / panel). Breaks bricks,
  *  kills Dana. */
 export interface Shot { x: number; y: number; vx: number; life: number }
+
+/** Runtime data only: definitions and entity placements remain native authored data. */
+export interface EngineSnapshot {
+  version: 1
+  definitionKey: string
+  terrain: [index: number, baseline: number, current: number][]
+  runtime: Pick<Engine, 'player' | 'facing' | 'onGround' | 'ducking' | 'doorOpen' | 'ammo' | 'ammoCap'
+    | 'fairyCount' | 'sealCount' | 'zodiacHeld' | 'wingsHeld' | 'pageTime' | 'pageSpace'
+    | 'life' | 'lives' | 'score' | 'state' | 'coyote' | 'enemies' | 'fairies' | 'fireballs' | 'shots'> & {
+    items: { taken: boolean; hidden: boolean; reveal: number }[]
+    mirrors: { cd: number; count: number; telegraph: number }[]
+  }
+  collectedSeals: string[]
+  groundRow: number
+  fireCooldown: number
+}
+
+const snapshotObject = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value)
+const snapshotNumber = (value: unknown, min: number, max: number): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
+const snapshotInteger = (value: unknown, min: number, max: number): value is number =>
+  snapshotNumber(value, min, max) && Number.isInteger(value)
+
+/** Copy only known fields; a save never supplies prototypes or extra properties. */
+function snapshotShape<T extends object>(raw: unknown, template: T): T | null {
+  if (!snapshotObject(raw)) return null
+  const result = { ...template } as Record<string, unknown>
+  for (const [key, sample] of Object.entries(template)) {
+    const value = raw[key]
+    if (typeof sample === 'number' ? !snapshotNumber(value, -1e9, 1e9)
+      : sample === null ? value !== null && !snapshotNumber(value, -1e9, 1e9)
+        : typeof value !== typeof sample) return null
+    result[key] = value
+  }
+  return result as T
+}
 
 // Tuning — pixels, pixels/second, pixels/second².
 const GRAVITY = 900          // enemies + projectiles fall at this
@@ -369,6 +408,143 @@ export class Engine {
 
   get width(): number { return this.cols * TILE }
   get height(): number { return this.rows * TILE }
+
+  #definitionKey(): string {
+    const level = this.level
+    const value = JSON.stringify([
+      level.cols, level.rows, level.tiles, [level.player.col, level.player.row], [level.door.col, level.door.row],
+      level.enemies.map(e => [e.col, e.row, e.kind ?? 'goblin', e.dir ?? 1]),
+      level.items.map(i => [i.col, i.row, i.kind, !!i.hidden, !!i.secret, !!i.deep, i.value ?? null]),
+      level.mirrors.map(m => [m.col, m.row, m.kind ?? 'demonhead']), !!level.interconnected,
+    ])
+    let hash = 2166136261
+    for (let i = 0; i < value.length; i++) hash = Math.imul(hash ^ value.charCodeAt(i), 16777619)
+    return `${value.length}:${(hash >>> 0).toString(16)}`
+  }
+
+  exportState(): EngineSnapshot {
+    const terrain: EngineSnapshot['terrain'] = []
+    for (let i = 0; i < this.grid.length; i++) if (this.grid[i] !== this.level.tiles[i]) terrain.push([i, this.level.tiles[i], this.grid[i]])
+    return {
+      version: 1, definitionKey: this.#definitionKey(), terrain,
+      runtime: {
+        player: { ...this.player }, facing: this.facing, onGround: this.onGround, ducking: this.ducking,
+        doorOpen: this.doorOpen, ammo: [...this.ammo], ammoCap: this.ammoCap,
+        fairyCount: this.fairyCount, sealCount: this.sealCount, zodiacHeld: this.zodiacHeld, wingsHeld: this.wingsHeld,
+        pageTime: this.pageTime, pageSpace: this.pageSpace, life: this.life, lives: this.lives, score: this.score, state: this.state, coyote: this.coyote,
+        enemies: this.enemies.map(e => ({ ...e })), fairies: this.fairies.map(f => ({ ...f })),
+        fireballs: this.fireballs.map(f => ({ ...f })), shots: this.shots.map(s => ({ ...s })),
+        items: this.items.map(i => ({ taken: i.taken, hidden: !!i.hidden, reveal: i.reveal })),
+        mirrors: this.mirrors.map(m => ({ cd: m.cd, count: m.count, telegraph: m.telegraph })),
+      },
+      collectedSeals: [...this.#collectedSeals], groundRow: this.#groundRow, fireCooldown: this.#fireCooldown,
+    }
+  }
+
+  /** Validate completely before mutating, retaining the current authored room. */
+  restoreState(raw: unknown): boolean {
+    if (!snapshotObject(raw) || raw['version'] !== 1 || raw['definitionKey'] !== this.#definitionKey() || !snapshotObject(raw['runtime'])) return false
+    const runtime = raw['runtime']
+    if (!Array.isArray(raw['terrain']) || raw['terrain'].length > this.grid.length) return false
+    const grid = Uint8Array.from(this.level.tiles), changed = new Set<number>()
+    for (const entry of raw['terrain']) {
+      if (!Array.isArray(entry) || entry.length !== 3) return false
+      const [index, baseline, current] = entry
+      if (!snapshotInteger(index, 0, grid.length - 1) || changed.has(index) || baseline !== this.level.tiles[index] || !snapshotInteger(current, EMPTY, CRACKED)) return false
+      changed.add(index); grid[index] = current
+    }
+    const player = snapshotShape(runtime['player'], this.player)
+    if (!player || player.w !== PLAYER_W || ![PLAYER_H, DUCK_H].includes(player.h)
+      || !snapshotNumber(player.x, 0, this.width - PLAYER_W) || !snapshotNumber(player.y, -TILE, this.height + TILE * 2)
+      || !snapshotNumber(player.vx, -MAX_FALL * 2, MAX_FALL * 2) || !snapshotNumber(player.vy, -MAX_FALL * 2, MAX_FALL * 2)) return false
+    const booleans = ['onGround', 'ducking', 'doorOpen', 'zodiacHeld', 'wingsHeld', 'pageTime', 'pageSpace'] as const
+    if (booleans.some(key => typeof runtime[key] !== 'boolean') || player.h !== (runtime['ducking'] ? DUCK_H : PLAYER_H)) return false
+    if (runtime['facing'] !== -1 && runtime['facing'] !== 1) return false
+    if (!snapshotInteger(runtime['ammoCap'], MAX_AMMO, SCROLL_CAP) || !Array.isArray(runtime['ammo'])
+      || runtime['ammo'].length > runtime['ammoCap'] || runtime['ammo'].some(item => typeof item !== 'boolean')) return false
+    if (!snapshotInteger(runtime['score'], 0, 1e9) || !snapshotInteger(runtime['lives'], 0, 9999)
+      || !snapshotInteger(runtime['fairyCount'], 0, 1e6) || !snapshotInteger(runtime['sealCount'], 0, 1e6)
+      || !snapshotNumber(runtime['life'], 0, 1e9) || !snapshotNumber(runtime['coyote'], 0, COYOTE_TIME)) return false
+    if (!['playing', 'won', 'dead', 'gameover', 'complete'].includes(runtime['state'] as string)
+      || (runtime['state'] === 'playing' && (runtime['lives'] === 0 || runtime['life'] <= 0))) return false
+    if (!snapshotInteger(raw['groundRow'], -1, this.rows + 2) || !snapshotNumber(raw['fireCooldown'], 0, FIRE_COOLDOWN)) return false
+    const sealKeys = new Set(this.level.items.filter(item => item.kind === 'seal').map(item => this.#sealKey(item)))
+    if (!Array.isArray(raw['collectedSeals']) || raw['collectedSeals'].length > sealKeys.size || raw['collectedSeals'].some(key => typeof key !== 'string' || !sealKeys.has(key))) return false
+
+    if (!Array.isArray(runtime['items']) || runtime['items'].length !== this.level.items.length) return false
+    const items: Item[] = []
+    for (const [index, value] of runtime['items'].entries()) {
+      const state = snapshotShape(value, { taken: false, hidden: false, reveal: 0 })
+      if (!state || !snapshotNumber(state.reveal, 0, 10)) return false
+      items.push({ ...this.level.items[index], ...state })
+    }
+    if (!Array.isArray(runtime['mirrors']) || runtime['mirrors'].length !== this.level.mirrors.length) return false
+    const mirrors: Mirror[] = []
+    for (const [index, value] of runtime['mirrors'].entries()) {
+      const state = snapshotShape(value, { cd: 0, count: 0, telegraph: 0 })
+      if (!state || !snapshotNumber(state.cd, -1, MIRROR_INTERVAL) || !snapshotInteger(state.count, 0, 1e9) || !snapshotNumber(state.telegraph, 0, 1)) return false
+      mirrors.push({ ...this.level.mirrors[index], kind: this.level.mirrors[index].kind ?? 'demonhead', ...state })
+    }
+    const allowedKinds = new Set([...this.level.enemies.map(e => e.kind ?? 'goblin'), ...this.level.mirrors.map(m => m.kind ?? 'demonhead')])
+    if (!Array.isArray(runtime['enemies']) || runtime['enemies'].length > this.level.enemies.length + this.level.mirrors.length * (MIRROR_CAP + 2)) return false
+    const enemyStates = ['patrol', 'chase', 'scan', 'windup', 'punch', 'attack', 'recover', 'flee', 'hover', 'align', 'swoop', 'rise', 'drift', 'dart', 'hunt', 'stun']
+    const enemies: Enemy[] = []
+    for (const value of runtime['enemies']) {
+      if (!snapshotObject(value) || !allowedKinds.has(value['kind'] as EnemyKind)) return false
+      const kind = value['kind'] as EnemyKind, template = this.#makeEnemy(kind, 0, 0, 1)
+      const enemy = snapshotShape(value, template)
+      if (!enemy || (enemy.dir !== -1 && enemy.dir !== 1) || !enemyStates.includes(enemy.state)
+        || enemy.w !== template.w || enemy.h !== template.h
+        || !snapshotNumber(enemy.x, -TILE * 2, this.width + TILE * 2) || !snapshotNumber(enemy.y, -TILE * 2, this.height + TILE * 3)
+        || !snapshotNumber(enemy.vx, -4096, 4096) || !snapshotNumber(enemy.vy, -4096, 4096)) return false
+      enemies.push(enemy)
+    }
+    const readArray = <T extends object>(value: unknown, template: T, maximum: number): T[] | null => {
+      if (!Array.isArray(value) || value.length > maximum) return null
+      const entries: T[] = []
+      for (const item of value) { const entry = snapshotShape(item, template); if (!entry) return null; entries.push(entry) }
+      return entries
+    }
+    const fairies = readArray(runtime['fairies'], { x: 0, y: 0, phase: 0, taken: false }, this.level.items.length)
+    const fireballs = readArray(runtime['fireballs'], { x: 0, y: 0, vx: 0, life: 0, super: false }, 256)
+    const shots = readArray(runtime['shots'], { x: 0, y: 0, vx: 0, life: 0 }, 512)
+    if (!fairies || !fireballs || !shots) return false
+    if ([...fairies, ...fireballs, ...shots].some(body => !snapshotNumber(body.x, -TILE * 4, this.width + TILE * 4) || !snapshotNumber(body.y, -TILE * 4, this.height + TILE * 4))) return false
+    if ([...fireballs, ...shots].some(projectile => !snapshotNumber(projectile.vx, -4096, 4096) || !snapshotNumber(projectile.life, 0, 60))) return false
+
+    this.spawn() // Clear effects and input only after every saved field validated.
+    this.grid = grid
+    this.player = player
+    this.facing = runtime['facing']
+    for (const key of booleans) this[key] = runtime[key] as boolean
+    this.ammo = [...runtime['ammo']] as boolean[]; this.ammoCap = runtime['ammoCap']
+    this.score = runtime['score']; this.lives = runtime['lives']; this.life = runtime['life']
+    this.fairyCount = runtime['fairyCount']; this.sealCount = runtime['sealCount']; this.coyote = runtime['coyote']
+    this.state = runtime['state'] as GameState
+    this.items = items; this.mirrors = mirrors; this.enemies = enemies
+    this.fairies = fairies; this.fireballs = fireballs; this.shots = shots
+    this.#collectedSeals = new Set(raw['collectedSeals'] as string[])
+    this.#groundRow = raw['groundRow']; this.#fireCooldown = raw['fireCooldown']
+    this.walking = false; this.jumpBuffer = 0; this.#jumpHeldPrev = this.#jumpActive = false
+    this.playerAnim = this.#animState(false)
+    return true
+  }
+
+  /** Arrive from another room without resetting its blocks, foes or pickups. */
+  arrive(cell: Cell, facing: 1 | -1 = 1): void {
+    this.player.w = PLAYER_W
+    this.player.h = PLAYER_H
+    this.player.x = cell.col * TILE + (TILE - PLAYER_W) / 2
+    this.player.y = cell.row * TILE
+    this.player.vx = this.player.vy = 0
+    this.facing = facing
+    this.onGround = this.walking = this.ducking = false
+    this.input.left = this.input.right = this.input.down = this.input.jump = false
+    this.#groundRow = cell.row
+    this.coyote = this.jumpBuffer = 0
+    this.#jumpHeldPrev = this.#jumpActive = false
+    this.playerAnim = 'idle'
+  }
 
   /** (Re)load a level from its definition, resetting ALL dynamic state including
    *  the persistent seal tally (a brand-new game). */
@@ -1397,7 +1573,7 @@ export class Engine {
     if (!this.items.some(i => i.kind === 'key')) this.doorOpen = true
 
     const d = this.level.door
-    if (this.doorOpen && this.rectOverlapsCell(p, d.col, d.row)) {
+    if (!this.level.interconnected && this.doorOpen && this.rectOverlapsCell(p, d.col, d.row)) {
       this.score += 1000
       this.state = 'won'
     }

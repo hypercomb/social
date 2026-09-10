@@ -804,7 +804,7 @@
   "slash.reroll": "Acak ulang gambar latar substrat pada ubin",
   "slash.screensaver": "Screen saver idle hidup/mati + gaya; on | off | now | hexagon | circle | thought",
   "slash.solomon": "Solomon's Key — permainan teka-teki konjurasi blok + desainer level; on | off | design",
-  "slash.bubble": "Bubble Bobble — tiup gelembung untuk menjebak musuh, pecahkan untuk buah + desainer level; on | off | design",
+  "slash.bubble": "Bubble Bobble ? tiga ronde arcade; tangkap musuh dalam gelembung dan kumpulkan buah; on | off",
   "slash.arkanoid": "Arkanoid — pantulkan bola dari dayung untuk menghancurkan semua batu bata, tangkap pil kekuatan + desainer level; on | off | design",
   "slash.roper": "Roper — artileri berbasis giliran gaya Worms dengan tali ninja; on | off",
   "substrate.on": "substrat aktif → {path}",

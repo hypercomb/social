@@ -113,12 +113,6 @@ export class BubbleDrone extends Drone {
     this.#emitState()
   }
 
-  /** Open the overlay straight into the level designer. */
-  public openDesigner(): void {
-    this.open()
-    this.#overlay?.showDesigner()
-  }
-
   public close(): void {
     if (!this.#overlay) { this.#emitState(); return }
     this.#overlay.unmount()
