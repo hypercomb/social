@@ -382,6 +382,8 @@
   "action.reroll.description": "Randomize the background image on this tile",
   "action.remove": "remove",
   "action.remove.description": "Delete this tile — you can find it again in history",
+  "action.agent-log": "agent",
+  "action.agent-log.description": "Open this tile's agent window — what it is doing, or what was said here",
   "action.files": "files",
   "action.files.description": "View and download files attached to this tile",
   "action.share-link": "copy link",

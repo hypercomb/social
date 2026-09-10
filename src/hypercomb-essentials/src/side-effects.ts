@@ -4,6 +4,7 @@
 // so one `import '@hypercomb/essentials/side-effects'` boots the full graph.
 // do not edit manually
 
+import './assistant/agent-log-action.drone'
 import './assistant/agent-panel.view'
 import './assistant/agent-registry.service'
 import './assistant/agent-tiles-rail'

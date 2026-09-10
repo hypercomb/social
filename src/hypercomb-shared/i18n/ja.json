@@ -370,6 +370,8 @@
   "action.reroll.description": "このタイルの背景画像をランダムに変更する",
   "action.remove": "削除",
   "action.remove.description": "このタイルを削除 — 履歴からいつでも再び見つけられます",
+  "action.agent-log": "エージェント",
+  "action.agent-log.description": "このタイルのエージェント画面を開く — 実行中の内容、またはここで話したこと",
   "action.files": "ファイル",
   "action.files.description": "このタイルに添付されたファイルを表示・ダウンロードする",
   "action.share-link": "リンクをコピー",
