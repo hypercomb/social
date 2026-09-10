@@ -893,6 +893,22 @@ $bp-phone-max: 599px;
 // geometry. Every metric belongs to the rail above.
 .action-group { display: contents; }
 
+// THE LINE ON DEMAND, AT REST (command-line.component.ts `lineHidden`). The
+// words, their glyph and the stance tint step out; the box does not. Opacity,
+// never display or visibility — the box keeps its width so the rail beside it
+// holds still, and the input stays focusable for every door that summons it.
+// Nothing in the empty box takes a click (pointing is not a way in), but the
+// indicators stay lit and pressable: they report standing state, not the line.
+.command-shell.collapsed {
+  background: transparent;
+  pointer-events: none;
+
+  .prompt-glyph,
+  .input-wrap { opacity: 0; }
+
+  .indicators { pointer-events: auto; }
+}
+
 // Hairline group separator — the same steel the header frame and the
 // mesh toggle's border use, shortened to a centred tick so it divides
 // without drawing attention. It rides the row like any other rail item, so

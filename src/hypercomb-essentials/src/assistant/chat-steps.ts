@@ -314,6 +314,39 @@ export const runIdForAsk = async (askSig: string): Promise<string> =>
 /** The conversation an ask's run records into. See {@link runIdForAsk}. */
 export const runConvoForAsk = (askSig: string): string => 'agent:' + String(askSig ?? '')
 
+/**
+ * THE RUN AN ASK IS ANSWERED BY, given the ask RECORD — still one input.
+ *
+ * A chat turn's ask carries the conversation it was raised in
+ * (`payload.mode === 'chat'`, `payload.convoId`), and the steps a responder
+ * takes for that turn belong in THAT conversation's bucket: it is the bucket
+ * the chat window reads, the one `deleteConversation` proves and removes,
+ * and the one the route (chat-route.ts) lays the run along. Filing them
+ * under `agent:<askSig>` instead — the note-mode address — put chat work in
+ * a bucket the window cannot find.
+ *
+ * The record is a parameter rather than a lookup so that the renderer, which
+ * reads the ask record before retiring it anyway, resolves the run in ONE
+ * place (`#dispatch`, before the op routes) and a request need carry nothing
+ * but the ask sig. Environment variables were the alternative and cannot
+ * work: a Claude Code session runs every command in a fresh shell, and in a
+ * shell where they DO persist a stale conversation variable files one
+ * thread's private run into another's bucket. Anything that is not a chat
+ * ask — a note-mode ask, or a record already gone — resolves exactly as
+ * {@link runConvoForAsk} always did.
+ */
+export const runForAsk = async (
+  askSig: string,
+  record?: unknown,
+): Promise<{ convoId: string; id: string }> => {
+  const sig = String(askSig ?? '')
+  const payload = (record as { payload?: { mode?: unknown; convoId?: unknown } } | null | undefined)?.payload
+  const chatConvo = payload?.mode === 'chat' && typeof payload.convoId === 'string'
+    ? payload.convoId.trim()
+    : ''
+  return { convoId: chatConvo || runConvoForAsk(sig), id: await runIdForAsk(sig) }
+}
+
 /** Every recorded attempt for one ASK, oldest first. What the agent panel
  *  reads to show what a responder actually did, as opposed to what it last
  *  claimed it was doing. */

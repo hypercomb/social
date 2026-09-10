@@ -62,6 +62,7 @@ export * from './core/llm-keys.js'
 export * from './core/secret-words/index.js'
 export * from './core/revision-name.js'
 export * from './core/behaviour-call.js'
+export * from './question-fence.js'
 
 // The PANEL KIT — the docked tool-window model, moved out of the Angular shell
 // (2026-09-01) so a behaviour can build its own chrome. Framework-free by

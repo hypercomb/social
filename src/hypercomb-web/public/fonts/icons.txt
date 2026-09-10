@@ -10,6 +10,7 @@ add_link
 add_photo_alternate
 alarm
 album
+alt_route
 analytics
 anchor
 api
@@ -355,7 +356,6 @@ verified_user
 video_file
 videocam
 view_carousel
-view_column
 view_in_ar
 view_list
 view_module

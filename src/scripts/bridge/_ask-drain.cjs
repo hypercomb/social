@@ -2,15 +2,20 @@
 //
 // The hive command line `[tiles]/opus|sonnet|haiku <question>` writes a
 // `{ kind:'ask', appliesTo, payload:{ prompt, model, targets, segments } }`
-// optimization into the renderer's OPFS `__optimization__/`. This script is the
-// Claude Code side of the loop: it LISTS pending asks over the bridge, and (per
-// ask) writes the answer as a NOTE on the target tile and retires the ask.
+// optimization into the renderer's optimization pool (`sign('optimization')`
+// at the OPFS root). This script is the Claude Code side of the loop: it LISTS
+// pending asks over the bridge, and (per ask) writes the answer as a NOTE on
+// the target tile and retires the ask.
 //
 //   node scripts/bridge/_ask-drain.cjs list
 //       → JSON array: [{ sig, prompt, model, targets, segments, appliesTo }]
 //
 //   node scripts/bridge/_ask-drain.cjs answer <ask-sig> <cell-path> "<answer text>"
 //       → note-add the answer onto <cell-path>, then optimization-remove <ask-sig>
+//
+//   node scripts/bridge/_ask-drain.cjs retire <ask-sig>
+//       → optimization-remove <ask-sig> with no note (the chat-turn path, after
+//         _chat-reply.cjs delivered the reply)
 //
 // Requires the broker (node scripts/bridge/run-bridge.cjs) and a renderer
 // (a hive tab on localhost with ?claudeBridge=1). Reads are headless — the
@@ -207,9 +212,16 @@ async function answer(askSig, cellPath, text) {
 
 // Retire an ask WITHOUT writing a note — the chat-turn path (the reply went
 // through _chat-reply.cjs instead) or an undeliverable ask.
+//
+// The retire carries `run: { ask }` — the ONE input, the sig this command
+// already has — and the renderer resolves the bucket: a chat ask's ledger is
+// its conversation's, anything else is `agent:<sig>` (chat-route.md §3.1).
+// The retire's own step is bookkeeping the route never draws, but it closes
+// the run in the same ledger the reply was filed in, so a reader that asks
+// "did this run finish" gets an answer instead of a silence.
 async function retire(askSig) {
   if (!askSig) { console.error('Usage: _ask-drain.cjs retire <ask-sig>'); process.exit(1) }
-  const rm = await withRenderer({ op: 'optimization-remove', sig: askSig })
+  const rm = await withRenderer({ op: 'optimization-remove', sig: askSig, run: { ask: askSig } })
   if (!rm.ok) { console.error('optimization-remove failed:', rm.error); process.exit(1) }
   console.log(`[ask-drain] retired ${askSig.slice(0, 12)}…`)
 }

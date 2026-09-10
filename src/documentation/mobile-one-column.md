@@ -135,6 +135,24 @@ here) — tap any ancestor to jump. The ▤/▦ toggle swaps the same rows for
 a 3-across grid of picture hexagons (the existing rails projection, kept
 exactly as built) — for looking, not for finding.
 
+**The header is the same on both faces** (Jaime, 2026-09-10: "in portrait
+mode in hexagon view there's no way back unless you go into landscape…
+always have the top and bottom in portrait"). The title bar — back · where
+I am · more — and the list · hexagons switch stay on screen whichever face
+is showing. On the hexagons face the list element IS that header and
+nothing more, and it hands its strip to the canvas owner
+(`viewport:inset`, owner `layer-list`, side `top`), so the hexagons are
+laid out below it, never under it. In landscape the switch sits inline in
+a one-row title bar (back · name · list/hexagons · more), and header and
+rows start to the right of the rail (`--hc-controls-left`).
+
+**One tap, one meaning, on both faces.** A tap on a branch HEXAGON goes
+inside — the same door its row opens — and a leaf hexagon opens its tile
+page; a branch's page is still one hold or its row's `⋯` away. "Add a
+tile", wherever a phone offers it (the welcome card, an empty page), opens
+the Add sheet — never the command line. **No agents on a phone:** no bees,
+no agent icon on tiles, no agent window, no show/hide agents button.
+
 ### 2.2 The tile page (a leaf, or a branch's `⋯`)
 
 The existing close-up (`tile:view-open`, `app-deck.ts`), unchanged in
@@ -292,3 +310,15 @@ honey-garden: (1) six rows, names ≥ 16 px, `›` on branches only;
 sheet open; (5) `+ Add` → type `pollen-2` → Enter → seventh row, toast,
 `cell:reorder` 0×; (6) ▦ → rails [3,3], ▤ → rows again; (7) root shows
 `honey-garden ›`, never a void.
+
+**The whole phone, recorded** — `scripts/drive-mobile-walkthrough.cjs
+--port <own dev port> --out <scratch dir>` walks 23 steps in portrait
+(375×812) and again in landscape (812×375), each in a fresh touch context
+with mobile mode on, and writes a numbered PNG, a `steps.json` row of
+measured facts (list header, face switch, bar, sheets, tile page, command
+line, canvas top, agents) and a `.webm` per orientation. Run it BEFORE a
+phone change and AFTER; the step log is the pass/fail, the frames and
+videos are the review. It must show: a top and a bottom on every list and
+hexagons step; `face:list` reachable from the hexagons face; a branch
+hexagon tap landing inside; "Add a tile" opening the Add sheet; no agent
+icon and no agents toggle on any step.

@@ -49,7 +49,7 @@
 // disposable — every byte of it can be deleted at any moment and no truth is
 // lost — which is the only honest answer to "won't this pile up?".
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, plainQuestionText } from '@hypercomb/core'
 import { listConversations, readTurns, type ChatTurn, type ConversationSummary } from './chat-thread.js'
 import { activeProviders, callModel } from './llm-dispatch.js'
 
@@ -179,7 +179,10 @@ const SYSTEM = [
  *  the middle was cut, so it never mistakes a truncation for a short chat. */
 const transcriptOf = (turns: readonly ChatTurn[]): string => {
   const clip = (turn: ChatTurn): string => {
-    const body = turn.text.trim().replace(/\s+/g, ' ')
+    // A question the responder asked is a fenced block in the turn (core
+    // question-fence.ts); the model labelling the thread should read it as
+    // the question it was, not as a JSON blob it may quote back.
+    const body = plainQuestionText(turn.text).trim().replace(/\s+/g, ' ')
     const text = body.length > CHARS_PER_TURN ? body.slice(0, CHARS_PER_TURN - 1) + '…' : body
     return `${turn.role}: ${text}`
   }

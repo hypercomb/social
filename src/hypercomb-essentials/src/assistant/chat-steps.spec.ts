@@ -518,3 +518,43 @@ describe('the reader finds what the writer wrote', () => {
     expect(await steps.readAskSteps('')).toEqual([])
   })
 })
+
+describe('a chat ask records into the conversation it was raised in', () => {
+  // THE MISFILING THIS CLOSES. A chat turn's ask used to address its run at
+  // `agent:<askSig>` like every other ask — a bucket the chat window never
+  // reads, deleteConversation never removes, and the route cannot lay along
+  // the thread. The record names the conversation; the run follows it.
+
+  const ASK = 'e'.repeat(64)
+  const CHAT = 'chat:tile:/dolphin/site'
+
+  it('follows the record into the chat bucket, with the id derived as ever', async () => {
+    const { steps } = await load(store)
+    const run = await steps.runForAsk(ASK, { kind: 'ask', payload: { mode: 'chat', convoId: CHAT } })
+    expect(run).toEqual({ convoId: CHAT, id: await steps.runIdForAsk(ASK) })
+  })
+
+  it('falls back to the agent bucket for a note-mode ask, or a record already gone', async () => {
+    const { steps } = await load(store)
+    const expected = { convoId: steps.runConvoForAsk(ASK), id: await steps.runIdForAsk(ASK) }
+    expect(await steps.runForAsk(ASK, { kind: 'ask', payload: { mode: 'note', convoId: CHAT } })).toEqual(expected)
+    expect(await steps.runForAsk(ASK, { kind: 'ask', payload: { mode: 'chat' } })).toEqual(expected)
+    expect(await steps.runForAsk(ASK, { kind: 'ask', payload: { mode: 'chat', convoId: '   ' } })).toEqual(expected)
+    expect(await steps.runForAsk(ASK, undefined)).toEqual(expected)
+    expect(await steps.runForAsk(ASK, null)).toEqual(expected)
+    expect(await steps.runForAsk(ASK, 'not a record')).toEqual(expected)
+  })
+
+  it('lands the steps where the chat window reads them', async () => {
+    const { steps, thread } = await load(store)
+    await thread.appendTurn(CHAT, 'user', 'lay this out for me')
+    const run = await steps.runForAsk(ASK, { kind: 'ask', payload: { mode: 'chat', convoId: CHAT } })
+    await steps.appendStep({ ...run, runId: run.id, seq: 0, verb: 'note-add', at: 10, outcome: 'ok' })
+
+    // The chat's OWN bucket holds the run — not a sibling nobody lists.
+    expect((await steps.readSteps(CHAT, run.id)).map(s => s.verb)).toEqual(['note-add'])
+    expect(await steps.readAskSteps(ASK)).toEqual([])
+    // And the thread still reads as exactly its turns.
+    expect((await thread.readTurns(CHAT)).map(t => t.text)).toEqual(['lay this out for me'])
+  })
+})

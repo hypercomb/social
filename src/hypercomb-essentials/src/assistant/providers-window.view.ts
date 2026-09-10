@@ -892,6 +892,9 @@ export class ProvidersWindowView extends EventTarget {
     const block = document.createElement('div')
     block.className = 'hc-provider-usage'
     const report = localServerReport(provider)
+    // Opening the console IS asking. The heartbeat leaves a server nobody has
+    // run here alone, so without this the line would say "Checking…" forever.
+    if (report.state === 'unknown') void checkLocalServer(provider)
 
     const line = document.createElement('div')
     line.className = 'hc-provider-usage-line'

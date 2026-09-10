@@ -5,8 +5,9 @@ import {
   REMOTE_SUBMIT, formatRemoteSubmitOutcome,
   type RemoteSubmitRequest, type RemoteSubmitOutcome,
 } from '@hypercomb/core'
-import { deliverTurn, readTurns, setConversationGoalReached } from './chat-thread.js'
-import { appendStep, nextSeq as ledgerNextSeq, readSteps } from './chat-steps.js'
+import { deliverTurnSig, readTurns, setConversationGoalReached } from './chat-thread.js'
+import { appendStep, nextSeq as ledgerNextSeq, readSteps, runForAsk } from './chat-steps.js'
+import { MUTATING_OPS, STEP_SILENT_OPS } from './bridge-ops.js'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import type { HistoryService } from '../history/history.service.js'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
@@ -90,8 +91,14 @@ type BridgeRequest = {
   /** THE AGENT LOOP THIS REQUEST IS A STEP OF. Present only when a responder
    *  has declared a run; absent means nothing is recorded and the op behaves
    *  exactly as it always did. Two fields on requests a responder already
-   *  sends is the whole cost of a replayable loop — see chat-steps.ts. */
-  run?: { convoId?: string; id?: string }
+   *  sends is the whole cost of a replayable loop — see chat-steps.ts.
+   *
+   *  Or ONE field: `{ ask }` names the ask being answered and this renderer
+   *  resolves the run from the ask record (`runForAsk`) before the op routes
+   *  — a chat ask's run lands in the chat's own bucket, anything else in
+   *  `agent:<askSig>` as before. An explicit `{ convoId, id }` is honoured
+   *  as it always was. */
+  run?: { convoId?: string; id?: string; ask?: string }
   /** `thread-read`: also return the conversation's step ledger. */
   steps?: boolean
   /** `thread-read`: narrow the returned steps to one run. */
@@ -312,18 +319,17 @@ export class ClaudeBridgeWorker extends Worker {
   // flicker this exists to prevent. A burst is therefore ONE window.
   static readonly #QUIET_SETTLE_MS = 400
 
-  static readonly #MUTATING_OPS = new Set([
-    'update', 'note-add', 'note-delete', 'note-split', 'put-resource',
-    'optimization-add', 'optimization-remove', 'decoration-add',
-    'bag-add', 'bag-remove', 'bag-set', 'build-record', 'stamp',
-    'add', 'remove', 'summary-add', 'chat-reply', 'chat-goal-reached', 'submit',
-  ])
+  // Both sets live in bridge-ops.ts — a leaf with no imports — because the
+  // route (chat-route.ts) reads the same sets to decide which recorded steps
+  // are drawn as work, and it cannot import a bee that dials a socket on
+  // load. One spelling, pinned by bridge-ops.spec.ts.
+  static readonly #MUTATING_OPS = MUTATING_OPS
 
   /** NOT steps of the loop. Reading the log is how a responder REJOINS the
    *  loop rather than a move within it, and `agent-progress` is the
    *  announcement half of the pair — recording it would fill the ledger with
    *  the chatter the record exists to replace. */
-  static readonly #STEP_SILENT_OPS = new Set(['thread-read', 'agent-progress'])
+  static readonly #STEP_SILENT_OPS = STEP_SILENT_OPS
 
   /** The next `seq` each live run should claim, seeded from the LEDGER on a
    *  run's first op so a page reload continues the count instead of
@@ -364,6 +370,10 @@ export class ClaudeBridgeWorker extends Worker {
   }
 
   async #dispatch(req: BridgeRequest): Promise<BridgeResponse> {
+    // The run is resolved BEFORE the op routes, so that the retire's own
+    // step — `optimization-remove` of the ask — is addressed while the ask
+    // record still exists to be read.
+    await this.#resolveRun(req)
     const res = await this.#routeQuietly(req)
     // EVERY op a responder sends passes through here, which is the whole
     // reason the loop becomes replayable for free: a responder does not have
@@ -371,6 +381,28 @@ export class ClaudeBridgeWorker extends Worker {
     // the ones that failed — are recorded exactly like the rest.
     await this.#recordStep(req, res)
     return res
+  }
+
+  /** `run: { ask }` → `run: { convoId, id }`, from the ask record.
+   *
+   *  ONE input, the ask; the address follows from the record this renderer
+   *  already reads before retiring it. A chat ask names its conversation, so
+   *  the run lands in the chat's own bucket — the one the window reads and
+   *  the route draws; anything else, or a record already gone, resolves to
+   *  `agent:<askSig>` exactly as before. An explicit `{ convoId, id }` is
+   *  honoured untouched. Best-effort on the read: an unreadable record must
+   *  not fail the op, it only decides which bucket the step lands in. */
+  async #resolveRun(req: BridgeRequest): Promise<void> {
+    const ask = typeof req.run?.ask === 'string' ? req.run.ask.trim() : ''
+    if (!ask) return
+    if (String(req.run?.convoId ?? '').trim() && String(req.run?.id ?? '').trim()) return
+    let record: unknown
+    try {
+      const store = get<{ getOptimization?: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
+      const blob = isSignature(ask) ? await store?.getOptimization?.(ask) : null
+      if (blob) record = JSON.parse(await blob.text())
+    } catch { /* unreadable — the note-mode address, as before */ }
+    req.run = await runForAsk(ask, record)
   }
 
   async #routeQuietly(req: BridgeRequest): Promise<BridgeResponse> {
@@ -738,9 +770,14 @@ export class ClaudeBridgeWorker extends Worker {
     // went nowhere and the responder was told it had landed, so it retired the
     // ask believing the answer was delivered. `ok` now reflects the WRITE, so
     // an unstorable reply is a failed reply the responder can act on.
-    const stored = await deliverTurn(convoId, 'assistant', text)
+    const stored = await deliverTurnSig(convoId, 'assistant', text)
     if (!stored) return { id: req.id, ok: false, error: 'chat-reply could not be stored — reply NOT delivered' }
-    return { id: req.id, ok: true }
+    // The turn's own sig comes back so the step recorded for this reply
+    // POINTS at the turn it wrote (harvestSigs picks it up): that pointer is
+    // how the route lays a run along the row of the reply that ended it.
+    // The content sig rides along too, but it dedups across identical replies,
+    // so a reader that wants THIS turn matches on `turnSig` alone.
+    return { id: req.id, ok: true, data: { turnSig: stored.turnSig, ...(stored.contentSig ? { contentSig: stored.contentSig } : {}) } }
   }
 
   /** Durable "goals attained" receipt for one chat. `text` names the goals

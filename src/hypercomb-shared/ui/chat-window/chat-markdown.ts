@@ -34,6 +34,13 @@
 // unless it was written with a leading slash.
 //
 // No framework imports: this is a pure string function, testable on its own.
+// The one import is core's fence grammar: the question parser
+// (`splitQuestion`, hypercomb-core/src/question-fence.ts) removes a fenced
+// block from a turn BEFORE this renderer sees it, and the block it removes
+// must be exactly the block this renderer would have drawn. One regex, owned
+// by core, read by both.
+
+import { FENCE_RE } from '@hypercomb/core'
 
 /** Placeholder sentinels. Stripped from the input first, so model text can
  *  never forge one and reach the restore pass with markup of its own. */
@@ -229,7 +236,7 @@ export const renderChatMarkdown = (source: string): string => {
     const line = lines[i]
 
     // ── fenced code ───────────────────────────────────────────────────────
-    const fenceMatch = line.match(/^\s{0,3}(```+|~~~+)(.*)$/)
+    const fenceMatch = line.match(FENCE_RE)
     if (fence) {
       if (fenceMatch && fenceMatch[1][0] === fence[0] && fenceMatch[1].length >= fence.length) {
         out.push(codeBlock(fenceLang, codeLines))

@@ -25,6 +25,7 @@ import { EffectBus, I18N_IOC_KEY } from '@hypercomb/core'
 import { childNamesOf } from '../../history/layer-placement.js'
 import { isClaimedByTakeoverAt } from '../../commands/decoration-kind-index.js'
 import { isPublishedVisitorShell } from '../../sharing/behavior-enablement.js'
+import { MOBILE_MODE_IOC_KEY } from '../../preferences/mobile-pheromones.js'
 
 const SETS = 'sets'
 
@@ -390,15 +391,26 @@ class CollectionEmptyPromptDrone {
     if (event?.target instanceof HTMLElement) event.target.blur()
     this.#hide()
 
+    // ON A PHONE THE ADD SHEET IS THE NAMING DOOR (mobile-one-column.md): a
+    // name field that makes a tile, and nothing else to learn. The command
+    // line is a tool for people who know its words — never where "Add a tile"
+    // lands.
+    if (ioc()?.get<{ active?: boolean }>(MOBILE_MODE_IOC_KEY)?.active === true) {
+      EffectBus.emit('add:sheet-open', {})
+      return
+    }
+
     const mobile = window.matchMedia('(max-width: 599px), (max-height: 599px)').matches
     EffectBus.emit('mobile:input-visible', { visible: true, mobile })
-    // This action promises to ADD A TILE, so leave the command line at the
-    // one canonical creation door instead of merely focusing an empty line in
-    // whichever stance happened to be active. In beehaviour stance an empty
-    // focus made the participant type a name, receive "nothing reads as a
-    // behaviour", and remain stuck on the empty screen. `search:prefill` also
-    // owns the collapsed-mobile reveal and focus timing in the shell.
-    EffectBus.emit('search:prefill', { value: '/create ', focus: true })
+    // This action promises to ADD A TILE, so it puts the line in the stance
+    // that makes one — the chevron, empty — whatever stance was standing: a
+    // name typed here IS a tile. It used to prefill `/create `, which dropped
+    // the participant into the command register to be taught a word, and an
+    // empty focus in command stance read the name as "nothing reads as a
+    // behaviour". `search:prefill` also owns the collapsed-mobile reveal and
+    // focus timing in the shell.
+    EffectBus.emit('command-line:stance', { stance: 'tiles' })
+    EffectBus.emit('search:prefill', { value: '', focus: true })
 
     const focusInput = (): void => {
       const input = document.querySelector<HTMLInputElement>('hc-command-shell input.command-input')

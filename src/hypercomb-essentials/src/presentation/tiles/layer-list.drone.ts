@@ -27,6 +27,11 @@
 //   title       → the path, root → here; a tap is `Navigation.goRaw(...)`
 //   ⋯           → `layer:deck-open`               (More — the layer deck)
 //
+// THE FACE IS NOT THIS HEADER'S. List · hexagons is toggled from the phone
+// controls bar (its FACE disc), which reaches this drone as
+// `phone:face-set {face}`; the header is one row — ‹ · where I am · ⋯ — on
+// both faces.
+//
 // CONTROLS PAINT BEFORE THEY WRITE: rows paint from the replayed payload at
 // once; pictures and note peeks fill in per row afterwards.
 //
@@ -105,14 +110,16 @@ export class LayerListDrone extends Drone {
 
   protected override deps = { lineage: '@hypercomb.social/Lineage' }
   protected override listens = ['render:cell-count', MOBILE_MODE_EFFECT, 'view:active', 'phone:face-set']
-  protected override emits = ['tile:enter-request', 'tile:view-open', 'layer:deck-open', 'phone:face']
+  protected override emits = ['tile:enter-request', 'tile:view-open', 'layer:deck-open', 'phone:face', 'viewport:inset']
 
   /** THE FACE — list or hexagons (the rails), one at a time, never both
    *  (Jaime, 2026-09-09: "the lanes view should replace the list view when
    *  you select it — a mutually exclusive selector"). A participant posture
    *  like `hc:rails`, never tile truth. Published as `phone:face {face}`
-   *  (last-value replayed) so the deck's plates read the same fact; set
-   *  through `phone:face-set {face}` from anywhere. */
+   *  (last-value replayed) so the deck's plates and the controls bar's FACE
+   *  disc read the same fact. The toggle itself lives on the controls bar
+   *  and reaches this drone through `phone:face-set {face}` (any other
+   *  caller may send the same). */
   #face: PhoneFace = readFace()
 
   #registered = false
@@ -209,13 +216,31 @@ export class LayerListDrone extends Drone {
     if (!el) return
     const modes = window.ioc?.get?.<ModesShape>('@diamondcoreprocessor.com/ModeRegistry')
     const underView = this.#viewActive || modes?.isActive?.('view:active') === true
-    const show = this.#mobile && !underView && this.#face === 'list'
+    // THE HEADER STAYS WHATEVER THE FACE. The list face paints rows under it;
+    // the hexagons face is the header alone, over the canvas — so ‹, where I
+    // am and ⋯ are on screen in both. The way back to the list is the
+    // controls bar's FACE disc (→ `phone:face-set`), never "turn the phone
+    // on its side".
+    const show = this.#mobile && !underView
     if (!show) {
       el.style.display = 'none'
       el.replaceChildren()
+      this.#reserveTop(0)
       return
     }
     this.#render()
+  }
+
+  /** How much of the top of the screen the header holds, handed to the canvas
+   *  owner (`viewport:inset` → pixi-host shrinks its box and refits), so the
+   *  hexagons are framed BELOW the header, never under it. 0 hands it back. */
+  #reserved = 0
+
+  #reserveTop(px: number): void {
+    const size = Math.max(0, Math.round(px))
+    if (size === this.#reserved) return
+    this.#reserved = size
+    EffectBus.emit('viewport:inset', { owner: 'layer-list', side: 'top', size })
   }
 
   #rowsFrom(p: CellCountPayload): Row[] {
@@ -239,20 +264,24 @@ export class LayerListDrone extends Drone {
 
   #render(): void {
     const el = this.#element
-    if (!el || !this.#mobile || this.#viewActive || this.#face !== 'list') return
+    if (!el || !this.#mobile || this.#viewActive) return
     installLayerListCss()
     const gen = ++this.#generation
+    const rows = this.#face === 'list'
     el.replaceChildren()
     el.style.display = 'flex'
     el.style.cssText +=
       // Under the revealed composer (the bar measures the header's bottom
-      // edge and removes the var while it is collapsed). To the very BOTTOM
-      // of the screen: the bar is glass over whatever is under it, and what
-      // is under it must be this list, not the hexagon canvas peeking
-      // through the band the discs sit in. The rows pad themselves clear of
-      // the bar instead (see the stylesheet).
-      'top:var(--hc-header-bottom,0px);left:0;right:0;bottom:0;' +
-      'flex-direction:column;'
+      // edge and removes the var while it is collapsed), and clear of a
+      // docked rail on the left (a landscape phone's discs publish their
+      // width; portrait publishes 0). On the list face, to the very BOTTOM of
+      // the screen: the bar is glass over whatever is under it, and what is
+      // under it must be this list, not the hexagon canvas peeking through
+      // the band the discs sit in — the rows pad themselves clear of the bar
+      // instead (see the stylesheet). On the hexagons face the element is the
+      // header and nothing more.
+      'top:var(--hc-header-bottom,0px);left:var(--hc-controls-left,0px);right:0;' +
+      `bottom:${rows ? '0' : 'auto'};flex-direction:column;`
 
     const segments = this.#segments()
     const here = segments[segments.length - 1] ?? ''
@@ -264,7 +293,7 @@ export class LayerListDrone extends Drone {
     back.type = 'button'
     back.dataset['action'] = 'back'
     back.className = 'hc-ll-glyph'
-    back.textContent = '‹'
+    back.appendChild(this.#glyph('arrow_back'))
     back.setAttribute('aria-label', this.#t('controls.back', 'back'))
     back.disabled = segments.length === 0
     back.addEventListener('click', () => this.#back())
@@ -279,33 +308,14 @@ export class LayerListDrone extends Drone {
     more.type = 'button'
     more.dataset['action'] = 'more'
     more.className = 'hc-ll-glyph'
-    more.textContent = '⋯'
+    more.appendChild(this.#glyph('more_horiz'))
     more.setAttribute('aria-label', this.#t('controls.more', 'more'))
     more.addEventListener('click', () => EffectBus.emit('layer:deck-open', {}))
+
+    // ONE row in both orientations. The list · hexagons toggle is not here —
+    // it is the controls bar's FACE disc, arriving as `phone:face-set`.
     bar.append(back, title, more)
     el.appendChild(bar)
-
-    // ── the face selector: list · hexagons, one at a time ──
-    const faces = document.createElement('div')
-    faces.dataset['role'] = 'list-faces'
-    faces.setAttribute('role', 'group')
-    for (const face of ['list', 'hexagons'] as const) {
-      const b = document.createElement('button')
-      b.type = 'button'
-      b.dataset['action'] = `face:${face}`
-      b.className = 'hc-ll-face'
-      b.setAttribute('aria-pressed', String(face === this.#face))
-      const glyph = document.createElement('span')
-      glyph.className = 'mat-sym'
-      glyph.setAttribute('aria-hidden', 'true')
-      glyph.textContent = face === 'list' ? 'view_list' : 'hexagon'
-      const word = document.createElement('span')
-      word.textContent = this.#t(`layer-list.face-${face}`, face)
-      b.append(glyph, word)
-      b.addEventListener('click', () => this.setFace(face))
-      faces.appendChild(b)
-    }
-    el.appendChild(faces)
 
     // ── the path, root → here, dropped under the title ──
     if (this.#pathOpen) {
@@ -326,6 +336,11 @@ export class LayerListDrone extends Drone {
       })
       el.appendChild(path)
     }
+
+    // The canvas keeps clear of the header on BOTH faces, so switching faces
+    // never moves the hexagons.
+    this.#reserveTop(bar.getBoundingClientRect().bottom)
+    if (!rows) return
 
     // ── the rows ──
     const list = document.createElement('div')
@@ -598,6 +613,16 @@ export class LayerListDrone extends Drone {
     } catch { return [] }
   }
 
+  /** A Material Symbols glyph — the same family, and the same names, the bar's
+   *  discs already draw, so the subset is known to carry them. */
+  #glyph(name: string): HTMLElement {
+    const glyph = document.createElement('span')
+    glyph.className = 'mat-sym'
+    glyph.setAttribute('aria-hidden', 'true')
+    glyph.textContent = name
+    return glyph
+  }
+
   /** A caption, or the plain-English stand-in. `t()` ECHOES THE KEY BACK when
    *  it cannot resolve one — guard, so no key ever reaches the screen. */
   #t(key: string, fallback: string): string {
@@ -619,16 +644,15 @@ export function installLayerListCss(): void {
   const S = LAYER_LIST_SURFACE
   style.textContent = `
 ${S}{background:rgb(var(--hc-chrome-glass,250,251,253));color:rgba(var(--hc-chrome-ink,26,33,48),var(--hc-ink-a-plain,0.92));font-family:var(--hc-read,var(--hc-font,system-ui,sans-serif));font-size:1rem;overscroll-behavior:contain;}
-${S} [data-role="list-title"]{flex:0 0 auto;display:grid;grid-template-columns:2.75rem 1fr 2.75rem;align-items:center;min-height:2.75rem;padding:max(0.2rem,env(safe-area-inset-top,0px)) 0.3rem 0.2rem;border-bottom:1px solid rgba(var(--hc-chrome-rule,62,74,94),0.22);}
-${S} .hc-ll-glyph{appearance:none;border:0;background:none;color:rgba(var(--hc-chrome-accent,20,96,180),0.95);font:inherit;font-size:1.6rem;line-height:1;min-height:2.75rem;cursor:pointer;}
+${S} [data-role="list-title"]{flex:0 0 auto;display:grid;grid-template-columns:2.75rem minmax(0,1fr) 2.75rem;grid-template-areas:"back title more";align-items:center;column-gap:0.25rem;padding:max(0.2rem,env(safe-area-inset-top,0px)) 0.3rem 0.2rem;background:rgb(var(--hc-chrome-glass,250,251,253));border-bottom:1px solid rgba(var(--hc-chrome-rule,62,74,94),0.22);box-shadow:0 2px 10px rgba(var(--hc-chrome-rule,62,74,94),0.08);}
+${S} [data-role="list-title"] > [data-action="back"]{grid-area:back;}
+${S} [data-role="list-title"] > [data-action="path"]{grid-area:title;}
+${S} [data-role="list-title"] > [data-action="more"]{grid-area:more;}
+:root[data-hc-orientation="landscape"] ${S} .hc-ll-title{text-align:left;padding-left:0.35rem;}
+${S} .hc-ll-glyph{appearance:none;border:0;background:none;color:rgba(var(--hc-chrome-accent,20,96,180),0.95);font:inherit;line-height:1;min-height:2.75rem;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;}
+${S} .hc-ll-glyph .mat-sym{font-size:1.5rem;line-height:1;}
 ${S} .hc-ll-glyph:disabled{opacity:0.28;}
 ${S} .hc-ll-title{appearance:none;border:0;background:none;color:inherit;font:inherit;font-weight:600;font-size:1.05rem;min-height:2.75rem;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;}
-${S} [data-role="list-faces"]{flex:0 0 auto;display:flex;justify-content:center;gap:0;padding:0.35rem 0;border-bottom:1px solid rgba(var(--hc-chrome-rule,62,74,94),0.16);}
-${S} .hc-ll-face{appearance:none;border:1px solid rgba(var(--hc-chrome-rule,62,74,94),0.34);background:none;color:rgba(var(--hc-chrome-ink,26,33,48),var(--hc-ink-a-quiet,0.62));font:inherit;font-size:0.8rem;display:inline-flex;align-items:center;gap:0.3rem;min-height:2rem;padding:0 0.8rem;cursor:pointer;}
-${S} .hc-ll-face .mat-sym{font-size:1.1rem;line-height:1;}
-${S} .hc-ll-face:first-child{border-radius:var(--hc-radius-floating,4px) 0 0 var(--hc-radius-floating,4px);border-right:0;}
-${S} .hc-ll-face:last-child{border-radius:0 var(--hc-radius-floating,4px) var(--hc-radius-floating,4px) 0;}
-${S} .hc-ll-face[aria-pressed="true"]{background:rgba(var(--hc-chrome-accent,20,96,180),0.95);color:rgb(var(--hc-chrome-glass,250,251,253));border-color:transparent;}
 ${S} [data-role="list-path"]{flex:0 0 auto;display:flex;flex-direction:column;border-bottom:1px solid rgba(var(--hc-chrome-rule,62,74,94),0.22);background:rgba(var(--hc-chrome-rule,62,74,94),0.06);}
 ${S} .hc-ll-crumb{appearance:none;border:0;background:none;color:inherit;font:inherit;text-align:left;min-height:2.6rem;padding-right:0.9rem;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 ${S} .hc-ll-crumb[aria-current]{font-weight:600;color:rgba(var(--hc-chrome-accent,20,96,180),0.95);}

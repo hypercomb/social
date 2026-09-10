@@ -192,6 +192,10 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   /** Whether to show the suggestion dropdown. Parent controls this. */
   readonly showSuggestions = input(false)
 
+  /** The line on demand, at rest: the words step out of the box while the box
+   *  keeps its place, so the rail beside it never moves. Parent controls this. */
+  readonly collapsed = input(false)
+
   /** Prefix of each suggestion that the user has typed (for highlight split). */
   readonly typedPrefix = input('')
 
@@ -658,7 +662,8 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   // ── lifecycle ───────────────────────────────────────────
 
   ngAfterViewInit(): void {
-    this.inputElement?.focus()
+    // A line on demand starts away — focusing it here would summon it on boot.
+    if (!this.collapsed()) this.inputElement?.focus()
     // Keep the fixed dropdown anchored if the viewport changes while it's open.
     const reflow = (): void => { if (this.effectiveShowCompletions()) this.#positionIntel() }
     window.addEventListener('resize', reflow)

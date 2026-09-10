@@ -14,8 +14,9 @@
 //
 // Cold chrome, DOM singleton, no Angular — the same shape as ask-screen.view.
 
-import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, plainQuestionText, type I18nProvider } from '@hypercomb/core'
 import type { Agent, AgentRegistry } from './agent-registry.service.js'
+import { MOBILE_MODE_EFFECT, MOBILE_MODE_IOC_KEY } from '../preferences/mobile-pheromones.js'
 // TYPE-ONLY, deliberately. Importing a value from the orchestrator drone would
 // inline it into this bundle and mint a second IoC registration for it; the
 // panel reaches it structurally through IoC instead.
@@ -129,6 +130,8 @@ export class AgentPanelView extends EventTarget {
     EffectBus.on<{ id?: string; from?: string }>('agent:open', payload => {
       const id = String(payload?.id ?? '')
       if (!id) return
+      // No agents on a phone — no window opens, whoever asks.
+      if (ioc<{ active?: boolean }>(MOBILE_MODE_IOC_KEY)?.active === true) return
       // Some agents have their OWN window, and opening them must not touch
       // this panel at all: routed here, before the step/open split, a click
       // from inside the orchestrator's report leaves the report standing and
@@ -148,6 +151,10 @@ export class AgentPanelView extends EventTarget {
       const from = String(payload?.from ?? '')
       if (from && from !== id) { this.#stepTo(id, from); return }
       this.open(id)
+    })
+    // Turning into a phone (`/mobile on`, a rotate) puts an open panel down.
+    EffectBus.on<{ active?: boolean }>(MOBILE_MODE_EFFECT, payload => {
+      if (payload?.active === true && this.#panel) this.close()
     })
     // Closed from outside — pressing a perched bee a second time puts its
     // panel down the same way its × would.
@@ -960,7 +967,10 @@ export class AgentPanelView extends EventTarget {
         : this.#t('agent.said-them', 'reply')
       const text = document.createElement('span')
       text.className = 'hc-agent-logtext'
-      text.textContent = turn.text.replace(/\s+/g, ' ').trim()
+      // A reply that asked a direction carries its question as a fenced
+      // block (core question-fence.ts); shown as one line it would read as
+      // raw JSON, so the fence becomes `Q: <prompt> — <a> · <b>` first.
+      text.textContent = plainQuestionText(turn.text).replace(/\s+/g, ' ').trim()
       line.title = `${who.textContent} · ${new Date(turn.at).toLocaleString()}`
       line.append(who, text)
       log.appendChild(line)

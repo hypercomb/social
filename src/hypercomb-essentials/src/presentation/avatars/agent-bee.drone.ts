@@ -65,6 +65,7 @@ import {
 import { trackSceneText } from '../grid/screen-text-resolution.js'
 import type { HostReadyPayload } from '../tiles/pixi-host.worker.js'
 import type { HexGeometry } from '../grid/hex-geometry.js'
+import { MOBILE_MODE_EFFECT } from '../../preferences/mobile-pheromones.js'
 
 type ShowCellLike = { snapshotCells?: () => Array<{ q: number; r: number; label: string }> }
 type LineageLike = { explorerSegments?: () => readonly string[] }
@@ -388,7 +389,7 @@ export class AgentBeeDrone extends Drone {
 
   protected override listens = [
     'render:host-ready', 'render:geometry-changed', 'render:set-hive-visible', 'agent:closed',
-    'mesh:public-changed', 'render:set-agents-visible', BEE_PERSONALITY_CHANGED,
+    'mesh:public-changed', 'render:set-agents-visible', BEE_PERSONALITY_CHANGED, MOBILE_MODE_EFFECT,
   ]
   protected override emits = ['agent:open', 'agent:close', 'toast:show']
 
@@ -422,6 +423,8 @@ export class AgentBeeDrone extends Drone {
   /** Participant-only visibility. Hiding the layer never stops or removes an
    *  agent; it only fades its bee and takes that bee out of hit testing. */
   #agentsHidden = false
+  /** On a phone — no agents at all (see the `mobile:mode` handler). */
+  #mobile = false
   /** Model-written scripts are session ephemera: no immutable hive content is
    *  minted for background theatre. The task/model facts remain in Agent. */
   readonly #banterScripts = new Map<string, readonly string[]>()
@@ -531,6 +534,27 @@ export class AgentBeeDrone extends Drone {
       if (this.#layer) this.#layer.visible = !this.#hiveHidden
     })
 
+    // ── no agents on a phone ────────────────────────────────────────
+    //
+    // The phone reads a layer as a list (mobile-one-column.md) and a bee is
+    // nothing a thumb can aim at. Same treatment as a swarm, for EVERY agent:
+    // grounded, never stopped — the work keeps running and answers still land
+    // as notes. Last-value replayed, so a phone grounds the bees before any
+    // are drawn.
+    this.onEffect<{ active?: boolean }>(MOBILE_MODE_EFFECT, payload => {
+      const next = payload?.active === true
+      if (next === this.#mobile) return
+      this.#mobile = next
+      this.#lastAnchorAt = 0
+      if (!next) return
+      this.#setHover('')
+      const perched = this.#perched
+      if (!perched) return
+      this.#perched = ''
+      ioc<OrchestratorLike>('@diamondcoreprocessor.com/OrchestratorDrone')?.clearAudit?.()
+      this.emitEffect('agent:close', { id: perched })
+    })
+
     // ── in a swarm, the sky belongs to the participants ─────────────
     //
     // A bee over a tile means SOMEBODY IS HERE. In a swarm that sentence is
@@ -577,7 +601,7 @@ export class AgentBeeDrone extends Drone {
   /** Out of sight: work running for you locally, while you are in a swarm.
    *  Grounded is not stopped — the agent is untouched, only its bee is. */
   #grounded = (agent: Agent): boolean =>
-    this.#agentsHidden || (this.#inSwarm && (agent.origin ?? 'local') === 'local')
+    this.#agentsHidden || this.#mobile || (this.#inSwarm && (agent.origin ?? 'local') === 'local')
 
   #restingTimer: ReturnType<typeof setTimeout> | null = null
   #dropThreadWatch: (() => void) | null = null

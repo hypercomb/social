@@ -1,7 +1,7 @@
 <!-- hypercomb-shared/ui/command-shell/command-shell.component.html -->
 
 <div class="command-bar">
-  <div class="command-shell" [class.stance-command]="promptSigil() === 'slash'"
+  <div class="command-shell" [class.collapsed]="collapsed()" [class.stance-command]="promptSigil() === 'slash'"
        [class.stance-find]="promptSigil() === 'question'" (mousedown)="onShellMouseDown($event)">
     <div class="command-row">
 
@@ -325,7 +325,7 @@
 
   </div>
 
-  @if (effectiveShowCompletions()) {
+  @if (effectiveShowCompletions() && !collapsed()) {
     <div class="command-intel" [class.has-detail]="!!activeDetail()"
       [style.--hc-panel-scale]="textScale()">
       <ul class="command-results" role="listbox" [class.wide-swatches]="wideSwatches()">

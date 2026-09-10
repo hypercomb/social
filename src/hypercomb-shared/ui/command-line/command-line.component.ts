@@ -1,6 +1,6 @@
 // hypercomb-shared/ui/command-line/command-line.component.ts
 
-import { AfterViewInit, Component, computed, effect, signal, ViewChild, type OnDestroy } from '@angular/core'
+import { AfterViewInit, Component, computed, effect, ElementRef, inject, signal, ViewChild, type OnDestroy } from '@angular/core'
 import { CommandShellComponent } from '../command-shell/command-shell.component'
 import { HintBarComponent } from '../hint-bar/hint-bar.component'
 import { PinnedEntrancesComponent } from '../pinned-entrances/pinned-entrances.component'
@@ -191,6 +191,21 @@ const COMMAND_HISTORY_MAX = 100
 const lowered = (text: string): string => text.toLowerCase()
 
 const STANCE_STORAGE_KEY = 'hc:command-line-stance'
+
+/** The line on demand — an opt-in, sticky participant preference written by
+ *  the `command-line-on-demand` slash behaviour (essentials). Unset means off. */
+const ON_DEMAND_STORAGE_KEY = 'hc:command-line-on-demand'
+const readCommandLineOnDemand = (): boolean => {
+  try { return localStorage.getItem(ON_DEMAND_STORAGE_KEY) === '1' } catch { return false }
+}
+
+/** The keymap commands that summon the on-demand line, and the stance each one
+ *  arrives wearing — the same three sigils typing into the line already knows. */
+const SUMMON_STANCES = new Map<string, Stance>([
+  ['ui.commandLineCommandStance', 'command'],
+  ['ui.commandLineFindStance', 'find'],
+  ['ui.commandLineTilesStance', 'tiles'],
+])
 
 /**
  * The three standing meanings of a plain line.
@@ -983,7 +998,63 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    *  tile, and the labels came back. */
   readonly #composing = computed(() => this.#caretInLine() || this.value().trim().length > 0)
 
-  onCaretPresence(present: boolean): void { this.#caretInLine.set(present) }
+  onCaretPresence(present: boolean): void {
+    this.#caretInLine.set(present)
+    if (present) { this.#lineOpen.set(true); return }
+    // A blur is not yet "away". Focus may be hopping to a control on the line
+    // itself (the rail, a suggestion), or the whole window may have gone
+    // (alt-tab) and will hand the caret straight back. Decide once it settles.
+    setTimeout(() => {
+      if (this.#caretInLine() || !document.hasFocus()) return
+      if (this.#host.contains(document.activeElement)) return
+      this.#closeLine()
+    }, 0)
+  }
+
+  // ── the line on demand ──────────────────────────────────
+  // AN OPT-IN, STICKY MODE (`/command-line-on-demand`, Jaime 2026-09-10). Off —
+  // the default, so nobody is left hunting for a box that is not there — the
+  // line is the pinned, clickable strip it has always been. On, the text box
+  // leaves the bar until it is asked for: a stance sigil typed from anywhere
+  // (`/` commands, `?` finds, `>` names tiles — the keymap layer the slash
+  // behaviour adds), the tile's command icon, or anything else that focuses
+  // the input brings it back; clicking away sends it off again. It hides by
+  // opacity, never display or visibility: the box keeps its width so the icon
+  // rail beside it never moves, and the input stays focusable so every door
+  // that already focuses it still lands. Desktop only — a phone already
+  // summons its line as a sheet.
+  readonly #host = inject(ElementRef).nativeElement as HTMLElement
+  readonly #onDemand = signal(readCommandLineOnDemand())
+  readonly #lineOpen = signal(false)
+  readonly lineHidden = computed(() =>
+    this.#onDemand() && !this.isMobile() && !this.#lineOpen() && !this.armedResource())
+
+  /** The bar stops painting a strip for a line that is not there; its box —
+   *  and everything anchored under it — stays put (`_header-bar.scss`). */
+  readonly #headerGround = effect(() => {
+    this.#host.closest('.header-bar')?.classList.toggle('line-hidden', this.lineHidden())
+  })
+
+  /** Send the line away. A line nobody can see must hold nothing: a staged
+   *  command, a live find filter or a note capture left in it would go on
+   *  acting on the hive with no face to answer for it. */
+  #closeLine(): void {
+    if (!this.#lineOpen()) return
+    this.#lineOpen.set(false)
+    if (!this.#onDemand() || this.isMobile()) return
+    if (this.value() || this.#captureMode()) this.clear()
+    this.#seededArmName = ''
+    this.commandSubject.set(null)
+    if (this.#caretInLine()) this.shell?.blur()
+  }
+
+  /** A click anywhere off the line is "away" even when it leaves focus where it
+   *  was (a control that prevents its mousedown default never blurs the input). */
+  readonly #closeLineOnPointerAway = (e: PointerEvent): void => {
+    if (!this.#onDemand() || !this.#lineOpen()) return
+    if (e.target instanceof Node && this.#host.contains(e.target)) return
+    this.#closeLine()
+  }
 
   /** Tell the hive when the line is being written in. The overlay cannot see
    *  Angular state, so the state travels as an effect (sticky, so a drone that
@@ -2009,7 +2080,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   public ngAfterViewInit(): void {
-    this.shell?.focus()
+    // The line on demand starts away — it arrives when it is asked for.
+    if (!this.#onDemand()) this.shell?.focus()
 
     // Warm the master tag list so `:` shows every tag immediately — even on a
     // tile that has none (the registry is otherwise loaded lazily, only on the
@@ -2022,6 +2094,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     window.addEventListener('popstate', this.#onNavigate)
     window.addEventListener('pointerdown', this.#forgetClearedLine, true)
     window.addEventListener('keydown', this.#forgetClearedLineOnKey, true)
+    window.addEventListener('pointerdown', this.#closeLineOnPointerAway, true)
 
     this.#mobileQuery = window.matchMedia('(max-width: 599px), (max-height: 449px)')
     this.isMobile.set(this.#mobileQuery.matches)
@@ -2029,6 +2102,21 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#commandLineToggleUnsub = EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
       if (payload?.cmd !== 'ui.commandLineToggle') return
       this.shell?.focus()
+    })
+
+    // A stance sigil typed off the line summons it (the on-demand keymap layer —
+    // those bindings exist only while the mode is on). The keymap already
+    // consumed the key, so the sigil never lands as text: the line simply
+    // arrives wearing the stance, exactly as if it had been typed into it.
+    this.#summonUnsub = EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
+      const stance = SUMMON_STANCES.get(payload?.cmd ?? '')
+      if (!stance) return
+      this.#setStance(stance)
+      if (this.mobileHidden()) EffectBus.emit('mobile:input-visible', { visible: true, mobile: true })
+      this.#focusShellSoon()
+    })
+    this.#onDemandUnsub = EffectBus.on<{ on: boolean }>('command-line:on-demand', ({ on }) => {
+      this.#onDemand.set(!!on)
     })
 
     // Prefill. `focus`, `select` and `subject` are optional and additive: a
@@ -2048,11 +2136,20 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // A prefill with no subject CLEARS the chip rather than leaving the
       // previous gesture's face over an unrelated command.
       this.commandSubject.set(subject ?? null)
+      // Words put on the line are meant to be seen — the on-demand line comes
+      // out for them even when the gesture leaves focus where it is.
+      if (value) this.#lineOpen.set(true)
       if (!focus) return
       // A collapsed mobile bar has to open first — focusing an input inside a
       // display:none header is the known dead end (see `command:focus`).
       if (this.mobileHidden()) EffectBus.emit('mobile:input-visible', { visible: true, mobile: true })
       this.#focusShellSoon(select)
+    })
+
+    // A door that promises a TILE ("Add a tile") asks for the stance that
+    // makes one, so a name typed there can never be read as a command.
+    this.#stanceUnsub = EffectBus.on<{ stance?: string }>('command-line:stance', ({ stance }) => {
+      if (stance === 'tiles' || stance === 'command' || stance === 'find') this.#setStance(stance)
     })
 
     this.#commandFocusUnsub = EffectBus.on<{ cell: string }>('command:focus', ({ cell }) => {
@@ -2622,10 +2719,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #voiceActiveUnsub?: () => void
   #pushToTalkUnsub?: () => void
   #prefillUnsub?: () => void
+  #stanceUnsub?: () => void
   #commandFocusUnsub?: () => void
   #enterModeUnsub?: () => void
   #notesCancelUnsub?: () => void
   #commandLineToggleUnsub?: () => void
+  #summonUnsub?: () => void
+  #onDemandUnsub?: () => void
   #touchDraggingUnsub?: () => void
   #viewActiveUnsub?: () => void
   #selectionSyncUnsub?: () => void
@@ -2702,6 +2802,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       EffectBus.emit('mobile:input-visible', { visible: true, mobile: true })
       queueMicrotask(() => this.shell?.focus())
     }
+    // Dictation lands in the line, so the on-demand line comes out to take it.
+    if (this.lineHidden()) this.#focusShellSoon()
     if (!this.#micWasListening) this.voiceService?.start()
 
     this.#micHoldTimer = setTimeout(() => {
@@ -2728,7 +2830,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   public ngOnDestroy(): void {
+    this.#summonUnsub?.()
+    this.#onDemandUnsub?.()
     this.#prefillUnsub?.()
+    this.#stanceUnsub?.()
     this.#commandFocusUnsub?.()
     this.#enterModeUnsub?.()
     this.#notesCancelUnsub?.()
@@ -2765,6 +2870,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     window.removeEventListener('popstate', this.#onNavigate)
     window.removeEventListener('pointerdown', this.#forgetClearedLine, true)
     window.removeEventListener('keydown', this.#forgetClearedLineOnKey, true)
+    window.removeEventListener('pointerdown', this.#closeLineOnPointerAway, true)
     this.#mobileQuery?.removeEventListener('change', this.#mobileQueryHandler)
   }
 

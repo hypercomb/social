@@ -99,8 +99,12 @@ import {
   CLAUDE_BRIDGE_ENABLED_STORAGE_KEY,
   EffectBus,
   PARTICIPANT_AI_HOST_STORAGE_KEY,
+  hostWireText,
   isLocalClaudeBridgeConfigured,
   isParticipantAiHostConfigured,
+  settleQuestions,
+  splitQuestion,
+  type SettledQuestion,
 } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
@@ -145,6 +149,96 @@ type ChatTurn = {
   readonly role: TurnRole
   readonly text: string
   readonly at: number
+  /** The turn's manifest signature — its file name in the bucket. Present
+   *  on a turn read back from disk, absent on one this window appended in
+   *  memory and has not re-read yet. It is the ONLY join between a drawn
+   *  row and the route's work rows (documentation/chat-route.md §3.2): a
+   *  turn without one gets no pieces. */
+  readonly sig?: string
+}
+
+// ── THE ROUTE, as essentials reports it ─────────────────────────────────
+//
+// Work pieces are read from the run ledger by `ChatThreads.readRoute`
+// (documentation/chat-route.md §3), feature-detected like everything else on
+// that object. Junctions are NOT in it: the shell derives them itself from
+// `settleQuestions` over the turns it already holds, and zips both onto its
+// rows. These shapes are the contract, spelled here because the shell may
+// never import the module that produces them.
+
+/** One attempt inside a run — a step from the ledger, settled. */
+type RouteAttempt = {
+  readonly seq: number
+  readonly verb: string
+  readonly outcome: 'ok' | 'failed'
+  readonly cell?: string
+  readonly error?: string
+  readonly at: number
+}
+
+/** One run the responder made: one piece on the pipe, however many attempts
+ *  it holds. A run with a failed attempt anywhere is a LEAK. */
+type RoutePiece = {
+  readonly runId: string
+  readonly attempts: readonly RouteAttempt[]
+  readonly leak: boolean
+  /** No chat-reply step named this row; the run was placed by time. */
+  readonly placedByTime?: boolean
+  /** Its newest step is young enough that the reply's step may still be on
+   *  its way — drawn as in progress, never as unfinished. */
+  readonly inProgress?: boolean
+}
+
+type Route = {
+  readonly rows: readonly { readonly turnSig: string; readonly index: number; readonly pieces: readonly RoutePiece[] }[]
+  /** The run the outstanding ask is making right now — the wait row's piece. */
+  readonly live?: RoutePiece
+  /** Runs no reply followed, drawn after the row they came after. */
+  readonly unfinished: readonly { readonly afterIndex: number; readonly piece: RoutePiece }[]
+}
+
+/** How a piece names its verb. Written as an array of `{ verb, icon }` so the
+ *  icon subset extractor (scripts/icon-names.cjs, rule 3: `icon: '…'`) sees
+ *  every glyph — a map keyed by verb would ship the WORDS. Every name here
+ *  must already be, or now be, in the shipped subset. */
+const VERB_ICONS: readonly { verb: string; icon: string }[] = [
+  { verb: 'update', icon: 'edit' },
+  { verb: 'note-add', icon: 'edit_note' },
+  { verb: 'note-delete', icon: 'delete' },
+  { verb: 'note-split', icon: 'edit_note' },
+  { verb: 'put-resource', icon: 'upload_file' },
+  { verb: 'optimization-add', icon: 'bolt' },
+  { verb: 'decoration-add', icon: 'label' },
+  { verb: 'bag-add', icon: 'add_box' },
+  { verb: 'bag-remove', icon: 'delete' },
+  { verb: 'bag-set', icon: 'sync' },
+  { verb: 'build-record', icon: 'build' },
+  { verb: 'stamp', icon: 'flag' },
+  { verb: 'add', icon: 'add_box' },
+  { verb: 'remove', icon: 'delete' },
+  { verb: 'summary-add', icon: 'description' },
+  { verb: 'submit', icon: 'play_arrow' },
+]
+
+/** A verb the map does not know still gets a glyph, never its name. */
+const VERB_ICON_FALLBACK: { readonly icon: string } = { icon: 'build' }
+
+/** What the participant is pointing at on the pipe, and where its card goes.
+ *  One card for the whole window: the pieces are spans, the card is the one
+ *  floating rung, and it follows whichever piece has the pointer or focus. */
+type RouteCard = {
+  /** Which drawn row the piece belongs to — the message that lifts its
+   *  border while the card is up. -1 for the wait row and the end. */
+  readonly row: number
+  readonly kind: 'junction' | 'work' | 'live' | 'unfinished' | 'end'
+  readonly question?: SettledQuestion
+  readonly piece?: RoutePiece
+  /** Relative to the panel, which is the card's containing block. */
+  readonly x: number
+  readonly y: number
+  /** Whether the pointer is over the piece or the piece is focused: the
+   *  card stays for either and leaves when neither holds. */
+  readonly focus: boolean
 }
 
 type ConversationSummary = {
@@ -205,6 +299,21 @@ type ChatThreadsLike = {
   saveStreamCheckpoint?(convoId: string, text: string): Promise<boolean>
   listStreamCheckpoints?(): Promise<ReadonlyArray<{ convoId: string; text: string; at: number }>>
   recoverStreamCheckpoints?(live?: ReadonlySet<string>): Promise<number>
+  /** THE ROUTE'S WORK, read from the run ledger (chat-route.md §3.5). A
+   *  method, not a field. The second argument is the LIVE RUN's id — the
+   *  run the outstanding ask is making, `runIdForAsk(pendingSig)` — so its
+   *  piece lands in the wait row rather than being placed by time. Resolves
+   *  to an empty route for a conversation with no bucket and THROWS on a
+   *  read fault, which is the one case that earns the notice line. Absent
+   *  on an older essentials build: then the column shows junctions only,
+   *  no notice. */
+  readRoute?(convoId: string, liveRunId?: string): Promise<Route>
+  /** The run an ask records under — `'ask:' + sha256(askSig)…` — which is
+   *  the module's rule, not the shell's: the shell holds the outstanding
+   *  ask's SIGNATURE and needs the module to say which run that is. Absent
+   *  on a build that has not exposed it; then the route is read without a
+   *  live run and the outstanding run is placed by the ledger's own rules. */
+  runIdForAsk?(askSig: string): Promise<string>
 }
 
 type QueenLike = {
@@ -470,6 +579,18 @@ const ELAPSED_TICK_MS = 1_000
  *  session's cache is otherwise a slow leak of everything ever said. */
 const RENDER_CACHE_MAX = 240
 
+/** How long a refresh hint waits for its neighbours before the bucket is
+ *  re-read. A run lands its steps in bursts, and `agent:step` fires per
+ *  step; one read per burst is the honest cost, one per step is not. */
+const ROUTE_REFRESH_MS = 150
+
+/** The keymap suppression reasons this window holds while its own keys are
+ *  in use. Two, not one: the wizard and the column each hold and release on
+ *  their own focus, and a shared reason would let one release the other's.
+ *  Reason-keyed exactly as the command palette and the layout designer do it. */
+const QUESTION_KEYS_REASON = 'chat-question'
+const ROUTE_KEYS_REASON = 'chat-route'
+
 // ── guided setup ─────────────────────────────────────────────────────────
 //
 // The setup state is a CHECKLIST, not a notice. Each step verifies itself
@@ -568,9 +689,11 @@ type ModeRegistryLike = {
   // Four sheets, not one: Angular's component style budget is per-sheet, and
   // the peek geometry and the picture viewer are self-contained states that
   // read better apart.
+  // A fifth for the route and the question wizard (chat-route.scss): the
+  // main sheet is at the budget, and the pipe is its own vocabulary.
   styleUrls: [
     './chat-window.component.scss', './chat-markdown.scss',
-    './chat-peek.scss', './chat-look.scss',
+    './chat-peek.scss', './chat-look.scss', './chat-route.scss',
   ],
 })
 export class ChatWindowComponent implements OnDestroy {
@@ -620,6 +743,11 @@ export class ChatWindowComponent implements OnDestroy {
     rememberChatVisibility(open)
     this.#claimSurface(open && !this.peeking())
     this.#applyFold()
+    // PARKED IS OFF SCREEN: a keymap the wizard or the route was holding is
+    // let go, or the whole hive stays deaf behind a window nobody can see.
+    // The open question itself survives as a record and is drawn again on
+    // unpark — without re-firing the arrival focus (`#questionArrived`).
+    if (!open) { this.#releaseQuestionKeys(); this.#releaseRouteKeys(); this.routeCard.set(null) }
   })
 
   readonly conversations = signal<readonly ConversationSummary[]>([])
@@ -1632,13 +1760,471 @@ export class ChatWindowComponent implements OnDestroy {
   }
 
   /** The thread, rendered. Recomputed when a turn lands; the cache above makes
-   *  that a lookup per existing turn rather than a re-parse. */
-  readonly rendered = computed(() =>
-    this.turns().map((turn, index) => ({
-      turn,
-      key: `${turn.at}:${index}`,
-      html: this.#markdown(turn.text),
-    })))
+   *  that a lookup per existing turn rather than a re-parse.
+   *
+   *  EACH TURN IS SPLIT FIRST (chat-route.md §2.2): the question a reply asked
+   *  is machinery, so `html` is the markdown of the PROSE alone and the
+   *  question is drawn by the template, where every string goes through
+   *  interpolation and never `innerHTML`. `question` is the settled state
+   *  from `settleQuestions` — open, settled or superseded — dense over the
+   *  turns, so row i reads `settled[i]`.
+   *
+   *  KEYED BY POSITION, not by `at`: the route's join (§3.2) replaces the
+   *  in-memory turns with the sig-bearing list read back from disk, whose
+   *  `at` is the manifest's and not the receipt's. A key that moved on that
+   *  swap rebuilt every row — and took the focus off an option the
+   *  participant was walking with the arrow keys. A thread is append-only,
+   *  so an index names its turn for good. */
+  readonly rendered = computed(() => {
+    const turns = this.turns()
+    const settled = settleQuestions(turns)
+    return turns.map((turn, index) => {
+      const split = splitQuestion(turn.text)
+      return {
+        turn,
+        index,
+        key: `${index}:${turn.role}`,
+        prose: split.prose,
+        html: this.#markdown(split.prose),
+        question: settled[index],
+      }
+    })
+  })
+
+  // ── THE RESPONSE WIZARD — a question asked inside a reply ───────────────
+  //
+  // A responder that needs a direction decided ends its reply with one
+  // `hypercomb-question` fence (documentation/chat-route.md §2). The parser
+  // is core's; what lives here is the DRAWING and the PICK. An open question
+  // is a radiogroup with roving focus; a settled one collapses to a single
+  // line; the composer is always the other answer. Picking sends the label
+  // through `send()` — same turn, same wait, same queue — so the record is
+  // the same as if it had been typed.
+
+  /** The one open question, or null. Only the last assistant turn can hold
+   *  one (§2.3), and never while a reply is streaming: a question read from
+   *  a partial is a question that may not be finished being asked. */
+  readonly openQuestion = computed(() => {
+    if (this.streaming()) return null
+    const rows = this.rendered()
+    const last = rows[rows.length - 1]
+    return last?.question?.state === 'open' ? last : null
+  })
+
+  /** Which option is the group's tab stop — the roving focus index. */
+  readonly questionCursor = signal(0)
+
+  /** The keymap is held while the group contains focus; released on blur,
+   *  settle, close and park. A held suppression the window forgot would
+   *  deafen the whole hive, so every path out goes through `#releaseKeys`. */
+  #questionKeysHeld = false
+
+  /** The question last given the arrival focus, so unpark, a re-read that
+   *  swaps the turns, or any later recompute cannot fire it twice. Keyed by
+   *  position and prompt, which survive the sig-bearing re-read. */
+  #questionArrived = ''
+
+  /** FOCUS ON ARRIVAL, under a real precondition (§2.2). "Composer empty" is
+   *  always true after a send, so it cannot be the test on its own; focus
+   *  moves only when it is somewhere the participant is not USING — the
+   *  composer, the body, or the panel root — never the rail's find field, a
+   *  rail row, the command line, or a button elsewhere. And only while the
+   *  transcript is at the bottom, with `preventScroll` so the move itself
+   *  cannot overrule the at-bottom rule. Otherwise focus stays put and the
+   *  `aria-live` group announces the prompt. */
+  readonly #questionArrival = effect(() => {
+    const open = this.openQuestion()
+    if (!open) return
+    const key = `${open.index}:${open.question?.prompt ?? ''}`
+    if (key === this.#questionArrived) return
+    this.#questionArrived = key
+    this.questionCursor.set(0)
+    // After the group is in the DOM, not before.
+    setTimeout(() => this.#focusQuestionOnArrival(open.index), 0)
+  })
+
+  #focusQuestionOnArrival(index: number): void {
+    if (this.openQuestion()?.index !== index) return
+    const composer = this.input()?.nativeElement ?? null
+    const active = document.activeElement
+    const panel = this.panel()?.nativeElement ?? null
+    const resting = active === null || active === document.body || active === composer || active === panel
+    if (!resting) return
+    if (composer && composer.value.trim()) return
+    if (!this.atBottom()) return
+    const first = this.#questionOptions()[0]
+    if (!first) return
+    first.focus({ preventScroll: true })
+    this.#scrollDown()
+  }
+
+  /** The open group's option buttons, in order. */
+  #questionOptions(): HTMLButtonElement[] {
+    const scroller = this.scroller()?.nativeElement
+    return scroller ? [...scroller.querySelectorAll<HTMLButtonElement>('.chat-question-option')] : []
+  }
+
+  /** Release every held suppression the moment no question is open — the
+   *  group leaving the DOM does not reliably blur, so the settle itself is a
+   *  release path (§2.2: "on blur, settle, close and park"). */
+  readonly #questionSettled = effect(() => {
+    if (!this.openQuestion()) this.#releaseQuestionKeys()
+  })
+
+  /** The group took focus: the hive's keymap runs on `window` in the capture
+   *  phase and treats a focused button as non-interactive, so ↑/↓ would move
+   *  the hex selection and Enter would paste before the group ever saw the
+   *  key. Suppression is the defence; `stopPropagation` protects nothing. */
+  onQuestionFocusIn(): void {
+    if (this.#questionKeysHeld) return
+    this.#questionKeysHeld = true
+    EffectBus.emit('keymap:suppress', { reason: QUESTION_KEYS_REASON })
+  }
+
+  /** Moving between the group's own options is not leaving it. */
+  onQuestionFocusOut(event: FocusEvent): void {
+    const to = event.relatedTarget as Node | null
+    if (to && (event.currentTarget as HTMLElement).contains(to)) return
+    this.#releaseQuestionKeys()
+  }
+
+  #releaseQuestionKeys(): void {
+    if (!this.#questionKeysHeld) return
+    this.#questionKeysHeld = false
+    EffectBus.emit('keymap:unsuppress', { reason: QUESTION_KEYS_REASON })
+  }
+
+  /** The group's keys: ↑/↓ move the roving focus, Enter or Space pick, the
+   *  digits 1–4 pick by number. Each is `preventDefault`ed so a Space cannot
+   *  also scroll the transcript and an Enter cannot reach anything else. No
+   *  Escape rung here — the cascade owns Escape, and a press with focus on
+   *  an option parks the window, as it would anywhere in it. */
+  onQuestionKey(event: KeyboardEvent, row: number, options: readonly string[]): void {
+    const buttons = this.#questionOptions()
+    const at = Math.max(0, buttons.indexOf(document.activeElement as HTMLButtonElement))
+    const move = (to: number): void => {
+      const next = (to + buttons.length) % buttons.length
+      this.questionCursor.set(next)
+      buttons[next]?.focus({ preventScroll: true })
+    }
+    switch (event.key) {
+      case 'ArrowDown': case 'ArrowRight':
+        event.preventDefault(); move(at + 1); return
+      case 'ArrowUp': case 'ArrowLeft':
+        event.preventDefault(); move(at - 1); return
+      case 'Home':
+        event.preventDefault(); move(0); return
+      case 'End':
+        event.preventDefault(); move(buttons.length - 1); return
+      case 'Enter': case ' ':
+        event.preventDefault(); this.pickOption(row, at, options); return
+      default: {
+        const digit = Number(event.key)
+        if (Number.isInteger(digit) && digit >= 1 && digit <= options.length) {
+          event.preventDefault()
+          this.pickOption(row, digit - 1, options)
+        }
+      }
+    }
+  }
+
+  /** PICK — send the option's label as the next user turn through the
+   *  ordinary path. Refused while a question is out (the options are also
+   *  `disabled` then, the idiom retry already uses); `send()` itself is
+   *  unchanged. The keys are released first: the group is about to leave. */
+  pickOption(row: number, index: number, options: readonly string[]): void {
+    if (this.waiting()) return
+    if (this.openQuestion()?.index !== row) return
+    const label = options[index]
+    if (!label) return
+    this.#releaseQuestionKeys()
+    void this.send(label)
+  }
+
+  /** The settled line's answer — the option's label, or that the participant
+   *  answered in their own words. */
+  answerOf(question: SettledQuestion): string {
+    if (typeof question.outlet === 'number') return question.options[question.outlet] ?? ''
+    const i18n = ioc()?.get('@hypercomb.social/I18n') as { t?: (key: string) => string } | undefined
+    return i18n?.t?.('chat.question.own') || 'answered in your own words'
+  }
+
+  /** The outlets NOT taken, for the settled line's title and the card. */
+  otherOutlets(question: SettledQuestion): string {
+    return question.options
+      .filter((_, at) => at !== question.outlet)
+      .join(' · ')
+  }
+
+  // ── THE ROUTE — the conversation's workflow, fixed in place beside it ───
+  //
+  // A vertical pipe in a narrow column beside the thread, one row per turn
+  // (documentation/chat-route.md). Junctions are the questions above, derived
+  // here; work pieces are runs read from the ledger by essentials; the end
+  // is a reversible state. The route is a VIEW over records that already
+  // exist. It writes nothing.
+
+  /** What `readRoute` returned for the open conversation, or null when it is
+   *  absent, has not been read, or could not be. */
+  readonly route = signal<Route | null>(null)
+
+  /** The read THREW — a store fault, not an empty ledger. Draws one quiet
+   *  line at the thread's foot, never an empty pipe. */
+  readonly routeError = signal(false)
+
+  /** Work rows by turn signature — the join with the drawn rows. */
+  readonly #routeBySig = computed(() => {
+    const map = new Map<string, readonly RoutePiece[]>()
+    for (const row of this.route()?.rows ?? []) map.set(row.turnSig, row.pieces)
+    return map
+  })
+
+  /** The pieces on row `index`'s cell: the reply's own runs (matched on the
+   *  turn's sig — a turn without one gets none), then any run no reply
+   *  followed that came after this row. */
+  workOf(entry: { turn: ChatTurn; index: number }): readonly RoutePiece[] {
+    const sig = entry.turn.sig
+    return sig ? this.#routeBySig().get(sig) ?? [] : []
+  }
+
+  unfinishedAfter(index: number): readonly RoutePiece[] {
+    return (this.route()?.unfinished ?? [])
+      .filter(item => item.afterIndex === index)
+      .map(item => item.piece)
+  }
+
+  /** PRESENCE: the column exists only when there is something on it — at
+   *  least one junction the shell knows of, or at least one work row, a
+   *  live run or an unfinished one. A plain chat draws the thread exactly
+   *  as it did before the route existed. */
+  readonly routeShown = computed(() => {
+    if (this.rendered().some(entry => entry.question)) return true
+    const route = this.route()
+    if (!route) return false
+    return route.rows.some(row => row.pieces.length > 0) || !!route.live || route.unfinished.length > 0
+  })
+
+  /** The pipe's last row: open while the conversation goes on, a cap that
+   *  says goal reached or put away. Both are states the participant can
+   *  reverse, and the cap says so. */
+  readonly routeEnd = computed<'open' | 'goal' | 'archived'>(() =>
+    this.activeArchived() ? 'archived' : this.activeGoal() ? 'goal' : 'open')
+
+  /** The end cap's glyph. A resolver rather than a template ternary: the
+   *  icon extractor reads every literal in a `.mat-sym` interpolation, and
+   *  `routeEnd() === 'goal' ? …` shipped the WORD "goal" into the subset
+   *  request (it is not a Material Symbol). Written as two returns so rule 4
+   *  of scripts/icon-names.cjs sees both glyphs. */
+  endIcon(): string {
+    if (this.routeEnd() === 'goal') return 'task_alt'
+    return 'archive'
+  }
+
+  /** The glyph for a run: its first attempt's verb, through the map. */
+  pieceIcon(piece: RoutePiece): string {
+    const verb = piece.attempts[0]?.verb ?? ''
+    return (VERB_ICONS.find(entry => entry.verb === verb) ?? VERB_ICON_FALLBACK).icon
+  }
+
+  /** The failed attempt a leak is named for — the first one. */
+  leakOf(piece: RoutePiece): RouteAttempt | undefined {
+    return piece.attempts.find(attempt => attempt.outcome === 'failed')
+  }
+
+  /** The junction's outlets as the small SVG draws them: x positions fanned
+   *  across the card, each open, taken or capped. */
+  outletsOf(question: SettledQuestion): readonly { x: number; state: 'open' | 'taken' | 'capped' }[] {
+    const n = question.options.length
+    return question.options.map((_, at) => ({
+      x: 12 + (at - (n - 1) / 2) * 5,
+      state: question.state === 'open' ? 'open'
+        : question.state === 'settled' && question.outlet === at ? 'taken'
+        : 'capped',
+    }))
+  }
+
+  /** The hover card, one for the window. */
+  readonly routeCard = signal<RouteCard | null>(null)
+
+  /** The column's one roving tab stop, by piece key (`w:<runId>`, `j:<row>`,
+   *  `u:<runId>`, `live`, `end`). '' means the first piece in the column.
+   *  Every other piece is `tabindex=-1`; ↑/↓ move between them under the
+   *  same kind of suppression the wizard holds. */
+  readonly routeCursor = signal('')
+
+  /** Every piece key in the column, in drawn order — so "the first piece"
+   *  is a fact about the column and not about which row rendered first. */
+  readonly routeKeys = computed(() => {
+    const keys: string[] = []
+    for (const entry of this.rendered()) {
+      for (const piece of this.workOf(entry)) keys.push(`w:${piece.runId}`)
+      if (entry.question) keys.push(`j:${entry.index}`)
+      for (const piece of this.unfinishedAfter(entry.index)) keys.push(`u:${piece.runId}`)
+    }
+    if (this.route()?.live) keys.push('live')
+    if (this.routeEnd() !== 'open') keys.push('end')
+    return keys
+  })
+
+  isRouteTab(key: string): boolean {
+    const cursor = this.routeCursor()
+    const keys = this.routeKeys()
+    return (cursor && keys.includes(cursor) ? cursor : keys[0]) === key
+  }
+
+  #routeKeysHeld = false
+
+  #routePieces(): HTMLElement[] {
+    const scroller = this.scroller()?.nativeElement
+    return scroller ? [...scroller.querySelectorAll<HTMLElement>('.chat-route-piece')] : []
+  }
+
+  /** What a work piece says to a screen reader — and its title. A leak
+   *  names the failure in words: failed, the verb, the target. Colour never
+   *  carries the meaning alone. */
+  pieceLabel(piece: RoutePiece, kind: 'work' | 'live' | 'unfinished'): string {
+    const i18n = ioc()?.get('@hypercomb.social/I18n') as
+      { t?: (key: string, params?: Record<string, unknown>) => string } | undefined
+    const t = (key: string, params?: Record<string, unknown>): string => i18n?.t?.(key, params) ?? key
+    const parts: string[] = []
+    const leak = this.leakOf(piece)
+    if (leak) parts.push(t('chat.route.leak', { verb: leak.verb, target: leak.cell || '—' }))
+    parts.push(t('chat.route.work', { count: piece.attempts.length }))
+    if (kind === 'live') parts.push(t('chat.route.live'))
+    else if (piece.inProgress) parts.push(t('chat.route.inProgress'))
+    else if (kind === 'unfinished') parts.push(t('chat.route.unfinished'))
+    if (piece.placedByTime) parts.push(t('chat.route.placedByTime'))
+    return parts.join(' — ')
+  }
+
+  /** Show the card for a piece. `focus` says which of hover and focus
+   *  brought it, so leaving with the pointer does not take a card that focus
+   *  is still holding. Positioned from the piece's rect, relative to the
+   *  panel: the scroller clips absolute children and the panel wears a
+   *  backdrop-filter, which makes it the containing block for `fixed` too —
+   *  so the card is an absolute child of the panel and the rect is read in
+   *  the panel's own coordinates. */
+  showRouteCard(event: Event, card: Omit<RouteCard, 'x' | 'y' | 'focus'>, focus = false): void {
+    const piece = event.currentTarget as HTMLElement | null
+    const panel = this.panel()?.nativeElement
+    if (!piece || !panel) return
+    const rect = piece.getBoundingClientRect()
+    const home = panel.getBoundingClientRect()
+    this.routeCard.set({
+      ...card,
+      x: rect.left - home.left,
+      y: rect.top - home.top + rect.height / 2,
+      focus: focus || (this.routeCard()?.focus ?? false),
+    })
+  }
+
+  hideRouteCard(fromFocus = false): void {
+    const held = this.routeCard()
+    if (!held) return
+    // The pointer leaving does not take a card that focus is holding.
+    if (!fromFocus && held.focus) { this.routeCard.set({ ...held, focus: true }); return }
+    this.routeCard.set(null)
+  }
+
+  onRouteFocusIn(event: FocusEvent, card: Omit<RouteCard, 'x' | 'y' | 'focus'>): void {
+    this.showRouteCard(event, card, true)
+    if (this.#routeKeysHeld) return
+    this.#routeKeysHeld = true
+    EffectBus.emit('keymap:suppress', { reason: ROUTE_KEYS_REASON })
+  }
+
+  onRouteFocusOut(event: FocusEvent): void {
+    this.hideRouteCard(true)
+    const to = event.relatedTarget as Element | null
+    if (to?.classList.contains('chat-route-piece')) return
+    this.#releaseRouteKeys()
+  }
+
+  #releaseRouteKeys(): void {
+    if (!this.#routeKeysHeld) return
+    this.#routeKeysHeld = false
+    EffectBus.emit('keymap:unsuppress', { reason: ROUTE_KEYS_REASON })
+  }
+
+  /** ↑/↓ walk the column's pieces; Home and End jump. The cursor follows the
+   *  piece that took focus, read off its `data-route-key`. */
+  onRouteKey(event: KeyboardEvent): void {
+    const pieces = this.#routePieces()
+    const at = Math.max(0, pieces.indexOf(event.currentTarget as HTMLElement))
+    const move = (to: number): void => {
+      const next = Math.max(0, Math.min(pieces.length - 1, to))
+      const target = pieces[next]
+      if (!target) return
+      this.routeCursor.set(target.dataset['routeKey'] ?? '')
+      target.focus({ preventScroll: true })
+    }
+    switch (event.key) {
+      case 'ArrowDown': event.preventDefault(); move(at + 1); return
+      case 'ArrowUp': event.preventDefault(); move(at - 1); return
+      case 'Home': event.preventDefault(); move(0); return
+      case 'End': event.preventDefault(); move(pieces.length - 1); return
+    }
+  }
+
+  // ── reading the route ───────────────────────────────────────────────────
+  //
+  // On every refresh hint the bucket is re-read, never appended to from a
+  // payload (§3.5): `agent:step` filtered on the conversation (EffectBus
+  // replays the last value, so the filter is not optional), the thread
+  // changing, the goal landing. `ask:chat-reply` ends the wait and is NOT a
+  // hint — the reply's own step is written after that effect fires, and a
+  // read triggered by it would see a run with no reply for one refresh.
+
+  #routeTimer: ReturnType<typeof setTimeout> | null = null
+
+  #scheduleRouteRefresh(convoId: string): void {
+    if (!convoId || convoId !== this.activeId()) return
+    if (this.#routeTimer !== null) clearTimeout(this.#routeTimer)
+    this.#routeTimer = setTimeout(() => {
+      this.#routeTimer = null
+      void this.#refreshRoute(convoId)
+    }, ROUTE_REFRESH_MS)
+  }
+
+  /** THE JOIN (§3.2): re-read the turns and adopt the sig-bearing list when
+   *  it is at least as long as what is in memory — a shorter read is a write
+   *  still landing, and the in-memory turn it lacks must not vanish. Then
+   *  the route, if the module can read one. */
+  async #refreshRoute(convoId: string): Promise<void> {
+    const threads = this.#threads()
+    if (!threads || convoId !== this.activeId()) return
+    try {
+      const turns = await threads.readTurns(convoId)
+      if (convoId !== this.activeId()) return
+      if (turns.length >= this.turns().length) this.turns.set(turns)
+    } catch { /* the in-memory turns stand; the route below may still read */ }
+
+    if (!threads.readRoute) { this.route.set(null); this.routeError.set(false); return }
+    try {
+      // The live run is named by the module's rule from the outstanding
+      // ask's signature; a build that does not expose the rule reads the
+      // route with no live run named.
+      const askSig = this.#outstanding.get(convoId)?.sig || ''
+      const liveRunId = askSig && threads.runIdForAsk ? await threads.runIdForAsk(askSig) : undefined
+      const route = await threads.readRoute(convoId, liveRunId)
+      if (convoId !== this.activeId()) return
+      this.route.set(route)
+      this.routeError.set(false)
+    } catch {
+      if (convoId !== this.activeId()) return
+      this.route.set(null)
+      this.routeError.set(true)
+    }
+  }
+
+  /** Leaving a conversation leaves its route behind. */
+  #clearRoute(): void {
+    if (this.#routeTimer !== null) { clearTimeout(this.#routeTimer); this.#routeTimer = null }
+    this.route.set(null)
+    this.routeError.set(false)
+    this.routeCard.set(null)
+    this.routeCursor.set('')
+  }
 
   /** The half-arrived answer. Its own computed and deliberately NOT cached —
    *  every chunk is a new string, and caching them would be a leak with a
@@ -1932,9 +2518,23 @@ export class ChatWindowComponent implements OnDestroy {
     // words is still a conversation you must be able to get back to.
     this.#cleanups.push(EffectBus.on('chat:drafts-changed', () => { void this.#refreshDrafts() }))
     this.#cleanups.push(EffectBus.on<{ convoId?: string }>('chat:goal-reached', payload => {
+      this.#scheduleRouteRefresh(String(payload?.convoId ?? ''))
       void this.#refreshList().then(() => {
         if (payload?.convoId === this.activeId()) this.goalOpen.set(true)
       })
+    }))
+
+    // THE ROUTE'S REFRESH HINTS (chat-route.md §3.5). A step landing in the
+    // ledger, or the thread changing, means the route may have moved; both
+    // are hints to RE-READ, never payloads to append. Filtered on the
+    // conversation because EffectBus replays the last `agent:step` to every
+    // new subscriber, and a step from some other thread's run must not
+    // re-read this one. `ask:chat-reply` is deliberately not here.
+    this.#cleanups.push(EffectBus.on<{ convoId?: string }>('agent:step', payload => {
+      this.#scheduleRouteRefresh(String(payload?.convoId ?? ''))
+    }))
+    this.#cleanups.push(EffectBus.on<{ convoId?: string }>('chat:threads-changed', payload => {
+      this.#scheduleRouteRefresh(String(payload?.convoId ?? ''))
     }))
 
     // ── WHAT THERE IS TO PASTE ───────────────────────────────────────
@@ -2083,6 +2683,11 @@ export class ChatWindowComponent implements OnDestroy {
     this.#railQuery = null
     if (this.#retryTimer) clearInterval(this.#retryTimer)
     this.#stopClock()
+    // A suppression left behind deafens the whole hive, and `focusout` never
+    // arrives when the window is destroyed out from under the focus.
+    this.#releaseQuestionKeys()
+    this.#releaseRouteKeys()
+    if (this.#routeTimer !== null) { clearTimeout(this.#routeTimer); this.#routeTimer = null }
     // A DESTROY IS NOT A STOP. This used to abort the host's stream, so
     // folding the panel away — or any surface swap that rebuilds this
     // component — threw away an answer mid-arrival, unstored. The run lives in
@@ -2540,6 +3145,10 @@ export class ChatWindowComponent implements OnDestroy {
         this.streaming.set('')
         this.turns.set(latestTurns)
         this.#syncWait(recent.convoId)
+        // The one-pass read carried no route; ask for it now that the thread
+        // is the open one (the two-read path below gets it from `#load`).
+        this.#clearRoute()
+        this.#scheduleRouteRefresh(recent.convoId)
         this.#scrollDown(true)
       } else if (!this.activeId()) {
         this.newChat(false)
@@ -2564,6 +3173,10 @@ export class ChatWindowComponent implements OnDestroy {
     this.#applyFold()
     this.listOpen.set(false)
     this.armed.set('')
+    // A keymap held by the wizard or the route goes with the window.
+    this.#releaseQuestionKeys()
+    this.#releaseRouteKeys()
+    this.routeCard.set(null)
     // Closing the window is a real close: the sidebar's trail and subject go
     // down with it.
     // The half-written thought does NOT: it is flushed first, so closing the
@@ -2717,6 +3330,9 @@ export class ChatWindowComponent implements OnDestroy {
     if (this.activeId() !== convoId) return
     this.turns.set(turns)
     this.#syncWait(convoId)
+    // The last thread's route must not stand beside this one's turns for the
+    // 150 ms until the re-read lands; the announce below schedules that read.
+    this.#clearRoute()
     // Arriving IS reading: the newest turn here is no longer unread, which is
     // what takes the bold off this tile's row in the list.
     threads.markConversationSeen?.(convoId, turns[turns.length - 1]?.at ?? Date.now())
@@ -2848,6 +3464,7 @@ export class ChatWindowComponent implements OnDestroy {
     if (box) { box.value = ''; this.autosize(box) }
     this.turns.set([])
     this.streaming.set('')
+    this.#clearRoute()
     // A NEW CONVERSATION HAS NAMED NOBODY. Carrying the last thread's named
     // model into it was survivable while a picker showed what it was; with
     // the policy designating, an inherited name is a silent override of the
@@ -3504,8 +4121,15 @@ export class ChatWindowComponent implements OnDestroy {
     // The shallow tier cannot read the hive, so chosen tiles reach it the
     // only way they can: named in the question itself. Wire-only — the
     // stored turn stays the participant's own words.
+    //
+    // AND IT IS STATELESS, so an answer to a question the responder asked
+    // (chat-route.md §2.4) goes over the wire as the question restated with
+    // the answer — `hostWireText` finds the open question ignoring the user
+    // turn `send()` has already appended — while the stored turn stays the
+    // bare answer. Null when the message answers nothing.
     const about = this.#chosenTargets()
-    const question = about.length ? `${message}\n\n(About: ${about.join(', ')})` : message
+    const body = hostWireText(this.turns(), message) ?? message
+    const question = about.length ? `${body}\n\n(About: ${about.join(', ')})` : body
 
     EffectBus.emit('agent:progress', {
       id: this.#beeId(convoId),
@@ -3674,6 +4298,9 @@ export class ChatWindowComponent implements OnDestroy {
     if (!element) return
     const distance = element.scrollHeight - element.scrollTop - element.clientHeight
     this.atBottom.set(distance <= NEAR_BOTTOM_PX)
+    // The route's card is positioned from a rect read once; a scroll moves
+    // the piece out from under it, so the card goes rather than drifting.
+    if (this.routeCard()) this.routeCard.set(null)
   }
 
   /** After the turn is in the DOM, not before. `force` is for arrivals the
@@ -3714,8 +4341,10 @@ export class ChatWindowComponent implements OnDestroy {
     return ''
   }
 
-  copyTurn(turn: ChatTurn, key: string): void {
-    void navigator.clipboard?.writeText(turn.text).then(() => {
+  /** Copy, note and edit act on the PROSE — the question fence is machinery,
+   *  not what was said, so it never rides along (chat-route.md §2.2). */
+  copyTurn(text: string, key: string): void {
+    void navigator.clipboard?.writeText(text).then(() => {
       this.copiedTurn.set(key)
       setTimeout(() => { if (this.copiedTurn() === key) this.copiedTurn.set('') }, 1_400)
     }).catch(() => {
@@ -3731,10 +4360,10 @@ export class ChatWindowComponent implements OnDestroy {
 
   /** Put it back in the composer to be rewritten. Explicitly NOT a truncation
    *  of the thread — send it and it appends, like anything else you type. */
-  editTurn(turn: ChatTurn): void {
+  editTurn(text: string): void {
     const element = this.input()?.nativeElement
     if (!element) return
-    element.value = turn.text
+    element.value = text
     this.autosize(element)
     element.focus()
     element.setSelectionRange(element.value.length, element.value.length)
@@ -3749,7 +4378,7 @@ export class ChatWindowComponent implements OnDestroy {
    * a child of the current location, which is a different tile than the one the
    * status line above the composer has been naming all along.
    */
-  async noteTurn(turn: ChatTurn): Promise<void> {
+  async noteTurn(text: string): Promise<void> {
     const here = [...this.here()]
     const selected = this.targets()
     const [parents, label] = selected.length === 1
@@ -3771,7 +4400,7 @@ export class ChatWindowComponent implements OnDestroy {
     }
 
     try {
-      await notes.addAtSegments(parents, label, turn.text, null, null)
+      await notes.addAtSegments(parents, label, text, null, null)
       EffectBus.emit('toast:show', { type: 'tip', message: `Noted on ${label}.` })
     } catch {
       EffectBus.emit('toast:show', { type: 'warning', message: `Could not write the note on ${label}.` })

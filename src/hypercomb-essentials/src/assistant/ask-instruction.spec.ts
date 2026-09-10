@@ -130,6 +130,29 @@ describe('an ask carries what this hive can do', () => {
     expect(text).toContain('behaviors-list')
   })
 
+  it('teaches the responder how to ask the participant a direction', async () => {
+    const { QUESTION_FENCE_LANG, QUESTION_LIMITS } = await import('@hypercomb/core')
+    const queen = new LlmQueenBee()
+    await queen.submitChat('c1', 'how should this be laid out?', [], [])
+
+    const text = resources.get(String(lastPayload()['instructionSig'])) ?? ''
+    const asking = text.slice(text.indexOf('ASKING.'))
+    expect(asking.startsWith('ASKING.')).toBe(true)
+    // The convention, as the parser reads it: ONE fence, that language, at
+    // the END, two to four options, and the turn ends there.
+    expect(asking).toContain('`' + QUESTION_FENCE_LANG + '`')
+    expect(asking).toContain('ONE fenced code block')
+    expect(asking).toContain('two to four')
+    expect(asking).toContain('LAST in the reply')
+    expect(asking).toContain('END THE TURN')
+    expect(asking).toContain(`under ${QUESTION_LIMITS.promptMax} characters`)
+    expect(asking).toContain(`under ${QUESTION_LIMITS.optionMax}`)
+    // And the other half: the answer is the next turn, and the composer is
+    // always the other answer.
+    expect(asking).toContain('arrives as the next turn')
+    expect(asking).toContain('their own words')
+  })
+
   it('rides on a note-bound ask too, not just a chat turn', async () => {
     const queen = new LlmQueenBee()
     await queen.submitAsk('summarise this', ['dylan'])

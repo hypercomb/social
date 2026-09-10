@@ -129,6 +129,16 @@
   border-top-color: rgba(var(--hc-chrome-rule-firm), 0.55);
 }
 
+// The line on demand, at rest (command-line.component.ts `lineHidden`): the
+// bar keeps its box — the icon rail and everything anchored under the header
+// hold still — but stops painting a strip for a line that is not there.
+.header-bar.line-hidden {
+  background: transparent;
+  border-top-color: transparent;
+
+  &::before { display: none; }
+}
+
 // ── hci icon font ────────────────────────────────────────
 
 .hci {
@@ -386,6 +396,16 @@
   .header-bar.input-open {
     border-color: transparent;
   }
+
+  // A REVEALED LINE IS A SURFACE. With the desktop frame stood down, the
+  // prompt and its icon rail were drawn straight over the hive: the canvas
+  // showed through the rail row and the strip read as broken. On a phone it
+  // is a full-width band at the top — the chrome's own ground and one rule
+  // under it, the same material as the list's title bar it sits above.
+  .header-bar.input-open {
+    background: rgb(var(--hc-chrome-glass));
+    border-bottom: 1px solid rgba(var(--hc-chrome-rule), 0.22);
+  }
 }
 
 // Landscape phones are WIDE but SHORT, so the width-based `phone-only` misses
@@ -409,6 +429,14 @@
     --hc-rail-btn: 2.75rem;
     --hc-rail-glyph: 1.6rem;
     --hc-rail-gap: 0.35rem;
+    // A surface, not frosted glass over the hive (see the portrait rule).
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    border-bottom: 1px solid rgba(var(--hc-chrome-rule), 0.22);
+    background: rgb(var(--hc-chrome-glass));
+
+    &::before { display: none; }
   }
 
   .header-bar.input-open .mesh-header,

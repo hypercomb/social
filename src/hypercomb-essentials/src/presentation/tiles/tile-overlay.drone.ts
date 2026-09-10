@@ -3268,15 +3268,24 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
-    // On a phone the hover band does not exist, so navigating immediately
-    // would hide every per-tile action behind a long press. A plain tap opens
-    // the tile's readable action hub instead. That screen carries the same
-    // affordances as the desktop band and an explicit "go inside" control;
-    // launch-group tiles remain direct launchers because pointerdown consumes
-    // them above, and clipboard/selection modes have already claimed the tap.
+    // On a phone the hover band does not exist, so a LEAF tap opens the
+    // tile's readable action hub — the same affordances as the desktop band.
+    // A BRANCH tap goes inside, exactly as its row does on the list face
+    // (layer-list.drone.ts): two faces of one layer must not answer the same
+    // tap two ways, and a tile page that has to be backed out of before you
+    // can go in is a detour. A branch's page is still one hold (the quick
+    // menu) or the row's ⋯ away. Launch-group tiles remain direct launchers
+    // because pointerdown consumes them above, and clipboard/selection modes
+    // have already claimed the tap.
     if (usesTileCloseUp(this.#pressWasTouch, this.#mobileMode())) {
-      openTileMenu(entry.label)
-      return
+      const enterable = this.#branchLabels.has(entry.label)
+        || referenceTargetForLabel(entry.label) !== null
+        || this.#externalLabels.has(entry.label)
+        || this.#staticBranch(entry.label)
+      if (!enterable) {
+        openTileMenu(entry.label)
+        return
+      }
     }
 
     if (
