@@ -240,3 +240,64 @@ export const sweptAsideTo = (
   if (!Number.isFinite(travel) || travel < 0) travel = 0
   return { x: x + dx * travel, y: y + dy * travel }
 }
+
+// ── the toss ──────────────────────────────────────────────────────────────
+//
+// A bee let go of while the hand is still moving is not dropped but THROWN:
+// it keeps going the way it was thrown and slows to a stop, like a stone on
+// ice (Jaime, 2026-09-10: "as if you were tossing it … a game of curling
+// towards the spot … the idea of sliding something over to something"). So
+// "over there" can be said with a flick instead of a walk.
+//
+// Speed and friction are measured on SCREEN, in CSS px: a throw is a thing
+// the hand does, and the hand knows nothing of zoom. The slide itself lands
+// in the nudge, so a thrown bee holds its place through a pan exactly as a
+// dragged one does.
+
+/** The stretch of travel the release speed is read from. Short, so it is the
+ *  hand's speed AT the release and not the average of the whole drag — a slow
+ *  walk that ends in a flick is a flick. */
+export const TOSS_WINDOW_MS = 90
+/** Slower than this at release and the bee was PLACED, not thrown. */
+export const TOSS_MIN_PX_PER_S = 240
+/** Faster than this and the throw is capped: a flick must not put a bee
+ *  through the far wall before anyone sees it go. */
+export const TOSS_MAX_PX_PER_S = 2400
+/** How fast a thrown bee sheds speed, in px/s per second. CONSTANT, not
+ *  proportional: a stone slides and then stops, it does not creep for ever.
+ *  A firm flick (~1500 px/s) goes about a second and eight hundred px. */
+export const TOSS_DECEL_PX_PER_S2 = 1400
+
+/** The hand's speed at the moment of release, in px/s, read from the last
+ *  stretch of the drag. Null when it was a drop: the hand had stopped (the
+ *  newest sample is older than the window), it was moving too slowly, or
+ *  there is not enough travel to read a speed from. Capped, never reversed. */
+export const releaseVelocity = (trail: readonly ScrubSample[], now: number): Nudge | null => {
+  if (trail.length < 2) return null
+  const last = trail[trail.length - 1]
+  if (now - last.t > TOSS_WINDOW_MS) return null
+  let first = last
+  for (let i = trail.length - 2; i >= 0; i--) {
+    if (last.t - trail[i].t > TOSS_WINDOW_MS) break
+    first = trail[i]
+  }
+  const seconds = (last.t - first.t) / 1000
+  if (seconds <= 0) return null
+  const velocity = { x: (last.x - first.x) / seconds, y: (last.y - first.y) / seconds }
+  const speed = Math.hypot(velocity.x, velocity.y)
+  if (speed < TOSS_MIN_PX_PER_S) return null
+  if (speed <= TOSS_MAX_PX_PER_S) return velocity
+  const cap = TOSS_MAX_PX_PER_S / speed
+  return { x: velocity.x * cap, y: velocity.y * cap }
+}
+
+/** One frame of sliding: the velocity after `dt` seconds of friction, along
+ *  the same line — and exactly zero once the stone has stopped, never a
+ *  reversal. Zero is the signal the slide is over. */
+export const slowed = (velocity: Nudge, dt: number, decel = TOSS_DECEL_PX_PER_S2): Nudge => {
+  const speed = Math.hypot(velocity.x, velocity.y)
+  const next = speed - decel * dt
+  if (speed === 0 || next <= 0) return { x: 0, y: 0 }
+  const keep = next / speed
+  return { x: velocity.x * keep, y: velocity.y * keep }
+}

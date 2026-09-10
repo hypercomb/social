@@ -18,7 +18,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   DRAG_PX, SCRUB_PAUSE_MS, SCRUB_WINDOW_MS, SNAP_HOME_PX, ScrubDetector,
-  isDrag, nudgeFrom, snapsHome, sweptAsideTo,
+  TOSS_MAX_PX_PER_S, TOSS_WINDOW_MS,
+  isDrag, nudgeFrom, releaseVelocity, slowed, snapsHome, sweptAsideTo,
 } from './bee-drag.js'
 
 describe('bee drag — a press that travels carries the bee', () => {
@@ -246,5 +247,51 @@ describe('swept aside — where the broom puts a bee', () => {
   it('parks it in the middle when the room is too small to hold it', () => {
     const to = sweptAsideTo({ x: 40, y: 40 }, { x: 10, y: 10 }, { left: 0, top: 0, right: 50, bottom: 50 }, 40)
     expect(to).toEqual({ x: 25, y: 25 })
+  })
+})
+
+describe('bee toss — let go while moving and the bee keeps going', () => {
+
+  const trail = (points: Array<[number, number, number]>) =>
+    points.map(([x, y, t]) => ({ x, y, t }))
+
+  it("reads the hand's speed at the release, and caps a hard flick", () => {
+    // 200 px in the last 67 ms, straight right: ~3000 px/s — over the cap.
+    const v = releaseVelocity(trail([[0, 0, 0], [100, 0, 33], [200, 0, 66], [300, 0, 100]]), 100)
+    expect(v).not.toBeNull()
+    expect(Math.hypot(v!.x, v!.y)).toBeCloseTo(TOSS_MAX_PX_PER_S, 6)
+    expect(v!.y).toBe(0)
+  })
+
+  it('is a drop, not a throw, when the hand was slow', () => {
+    // 10 px in 100 ms = 100 px/s: placed.
+    expect(releaseVelocity(trail([[0, 0, 0], [10, 0, 100]]), 100)).toBeNull()
+  })
+
+  it('is a drop when the hand had stopped before letting go', () => {
+    // A fast stroke, then held still for longer than the window: no throw.
+    expect(releaseVelocity(trail([[0, 0, 0], [200, 0, 50]]), 50 + TOSS_WINDOW_MS + 1)).toBeNull()
+  })
+
+  it('reads only the last stretch, so a slow walk that ends in a flick is a flick', () => {
+    // Crawl for a second, then 120 px in the last 60 ms: 2000 px/s.
+    const v = releaseVelocity(trail([[0, 0, 0], [5, 0, 500], [10, 0, 1000], [130, 0, 1060]]), 1060)
+    expect(v).not.toBeNull()
+    expect(v!.x).toBeCloseTo(2000, 3)
+  })
+
+  it('needs two samples to read a speed at all', () => {
+    expect(releaseVelocity([], 0)).toBeNull()
+    expect(releaseVelocity(trail([[0, 0, 0]]), 0)).toBeNull()
+  })
+
+  it('slows along its own line and stops dead, never reversing', () => {
+    const v = { x: 300, y: 400 } // 500 px/s
+    const after = slowed(v, 0.1, 1000) // sheds 100 px/s → 400 px/s
+    expect(Math.hypot(after.x, after.y)).toBeCloseTo(400, 6)
+    expect(after.x / after.y).toBeCloseTo(0.75, 6)
+    // A frame long enough to spend it all leaves exactly zero, not a bounce.
+    expect(slowed(v, 1, 1000)).toEqual({ x: 0, y: 0 })
+    expect(slowed({ x: 0, y: 0 }, 0.016)).toEqual({ x: 0, y: 0 })
   })
 })

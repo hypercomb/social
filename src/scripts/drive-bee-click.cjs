@@ -23,6 +23,8 @@
 //   5. THE BROOM. Scribbling over a bee sweeps it out to the wall, it stays
 //      there, it is still pressable there, and a second scribble sends it back.
 //   6. A PRESS THAT TRAVELS CARRIES THE BEE, and opens nothing.
+//   7. A THROW SLIDES. Let go while the hand is still moving and the bee
+//      keeps going the way it was thrown, slows, and stops — curling.
 //
 //   node scripts/drive-bee-click.cjs [--headed] [--port 4250]
 //
@@ -176,6 +178,29 @@ async function main() {
     args: ['--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader'],
   })
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  // NOT RELOADED OUT FROM UNDER ITSELF. Another session's edit rebuilds the
+  // dev server, which then reloads every page it serves — and a proof
+  // mid-gesture dies with "execution context was destroyed" (three runs in a
+  // row, 2026-09-10, while the bubble game was being edited next door). This
+  // page's live-reload socket is the one thing neutered: it is the only socket
+  // that asks for the `vite-hmr` protocol, so the app's own sockets — the
+  // bridge broker, the relays — go through untouched.
+  await context.addInitScript(() => {
+    const Native = window.WebSocket
+    const Quiet = function (url, protocols) {
+      const asked = Array.isArray(protocols) ? protocols : protocols ? [protocols] : []
+      if (!asked.includes('vite-hmr')) return new Native(url, protocols)
+      const never = new EventTarget()
+      Object.assign(never, {
+        url: String(url), readyState: 0, protocol: '', extensions: '', binaryType: 'blob',
+        bufferedAmount: 0, send() {}, close() {},
+      })
+      return never
+    }
+    Quiet.prototype = Native.prototype
+    Object.assign(Quiet, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 })
+    window.WebSocket = Quiet
+  })
   const page = await context.newPage()
   page.on('pageerror', e => log('page error:', e.message))
 
@@ -428,6 +453,8 @@ async function main() {
     // Toward the middle of the room: a bee parked at the wall cannot be
     // dragged further into it, and that would prove nothing about the drag.
     await page.mouse.move(b.x < 720 ? b.x + 150 : b.x - 150, b.y < 450 ? b.y + 90 : b.y - 90, { steps: 12 })
+    // The hand STOPS before it lets go — this is a drop, not a throw (7).
+    await sleep(150)
     await page.mouse.up()
     await sleep(300)
     await pump(page, 90)
@@ -436,6 +463,77 @@ async function main() {
     claim(!panelAfterDrag.open, 'a press that travels opens nothing')
     claim(!!after && Math.hypot(after.x - b.x, after.y - b.y) > 60,
       'a press that travels carries the bee', after ? `moved ${Math.round(Math.hypot(after.x - b.x, after.y - b.y))}px` : 'bee gone')
+  }
+
+  // 7. A THROW SLIDES. Let go while the hand is still moving and the bee keeps
+  //    going the way it was thrown, slows, and stops — a stone on ice. The
+  //    hand is paced by hand (a move every ~16ms, released mid-stroke) so the
+  //    throw is a firm one and not the capped flick a burst of steps makes;
+  //    the slide is then sampled with the clock turned by hand, so what is
+  //    measured is the slide itself: distance per tenth-second falling to the
+  //    waggle's own wander, well beyond where the hand let go.
+  bees = await readBees(page)
+  if (bees.length) {
+    const b = bees[0]
+    await page.mouse.move(b.x, b.y, { steps: 6 })
+    await sleep(120)
+    await page.mouse.down()
+    // Toward the middle again — a stone thrown into the boards stops at once.
+    const dx = b.x < 720 ? 14 : -14
+    const dy = b.y < 450 ? 10 : -10
+    let hx = b.x, hy = b.y
+    for (let i = 0; i < 10; i++) {
+      hx += dx; hy += dy
+      await page.mouse.move(hx, hy)
+      await sleep(16)
+    }
+    // Every frame from here is written down IN the page — a headless clock
+    // runs frames of its own between CDP calls, and a sample taken from
+    // outside arrives after most of a half-second slide has already played.
+    await page.evaluate(() => {
+      const app = window.__proof.app
+      window.__trace = []
+      window.__traceFn = () => {
+        const world = window.__proof.world
+        for (const layer of world.children.filter(c => c.zIndex === 11 && Array.isArray(c.children))) {
+          for (const child of layer.children) {
+            if (child.texture === undefined || child.anchor === undefined || child.alpha <= 0.25) continue
+            const p = child.getGlobalPosition()
+            window.__trace.push({ d: app.ticker.deltaMS, x: p.x, y: p.y })
+            return
+          }
+        }
+      }
+      app.ticker.add(window.__traceFn)
+    })
+    await page.mouse.up()
+    // Frames before this one are the hand's; the slide starts here.
+    const mark = await page.evaluate(() => window.__trace.length)
+    await pump(page, 60)
+    const trace = await page.evaluate(() => {
+      window.__proof.app.ticker.remove(window.__traceFn)
+      return window.__trace
+    })
+    const panelAfterThrow = await panelState(page)
+    // A PUMPED FRAME ON A GPU-LESS PAGE IS A TENTH OF A SECOND. The renderer
+    // throws out of the ticker's update before it can move the clock on, so
+    // every frame measures the full clamped elapsed (100ms) — `pump(60)` is
+    // six seconds of drone time. Which makes each frame here one tenth-second
+    // sample of the slide: the throw early, the waggle's own wander late.
+    const slide = trace.slice(mark)
+    const steps = slide.slice(1).map((p, i) => Math.hypot(p.x - slide[i].x, p.y - slide[i].y))
+    const early = Math.max(steps[0] ?? 0, steps[1] ?? 0)
+    const late = steps.slice(-3).reduce((s, v) => s + v, 0) / Math.max(1, Math.min(3, steps.length))
+    const end = slide[slide.length - 1]
+    log(`throw trace: ${slide.length} frames after release at ${slide[0] ? Math.round(slide[0].d) : '-'}ms each`)
+    // How far past the hand's last position the bee came to rest, along the
+    // line it was thrown — the slide, with the hand's own travel taken out.
+    const unit = Math.hypot(dx, dy)
+    const beyond = end ? ((end.x - hx) * dx + (end.y - hy) * dy) / unit : 0
+    claim(!panelAfterThrow.open, 'a throw opens nothing')
+    claim(beyond > 40, 'a thrown bee keeps going after the hand lets go', `${Math.round(beyond)}px beyond the release`)
+    claim(early > 40 && late < 25 && late < early / 2, 'a thrown bee slows and stops',
+      `per tenth-second: ${steps.map(s => Math.round(s)).join(' ')} (${slide.length} frames)`)
   }
 
   await browser.close()

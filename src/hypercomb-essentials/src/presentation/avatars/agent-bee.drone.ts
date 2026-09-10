@@ -58,8 +58,9 @@ import { cacheBanter, cachedBanter } from './bee-banter-cache.js'
 import { loreBeats, topicAt } from './bee-hive-lore.js'
 import { inWaggleArea, waggleOffset, wagglePath, type AgentKind } from './agent-waggle.js'
 import {
-  isDrag, nudgeFrom, snapsHome, ScrubDetector, sweptAsideTo, SWEEP_REACH_PX,
-  type Nudge, type Room,
+  isDrag, nudgeFrom, releaseVelocity, slowed, snapsHome, ScrubDetector, sweptAsideTo,
+  SWEEP_REACH_PX, TOSS_WINDOW_MS,
+  type Nudge, type Room, type ScrubSample,
 } from './bee-drag.js'
 import { trackSceneText } from '../grid/screen-text-resolution.js'
 import type { HostReadyPayload } from '../tiles/pixi-host.worker.js'
@@ -126,6 +127,9 @@ interface BeePress {
   grabX: number
   grabY: number
   dragging: boolean
+  /** The last few places the pointer was, in client px. The hand's speed at
+   *  the release is read from these — that is what makes a drop a THROW. */
+  trail: ScrubSample[]
 }
 
 /** Bee size on screen, in CSS pixels, regardless of zoom. Big enough that the
@@ -452,6 +456,10 @@ export class AgentBeeDrone extends Drone {
    *  units, per agent. Session-only, like the perch: the work is the truth,
    *  the seating is not. */
   readonly #nudges = new Map<string, Nudge>()
+  /** Bees IN FLIGHT — thrown, still sliding. The velocity is in SCREEN px/s
+   *  (a throw is the hand's, and the hand knows nothing of zoom) and lands in
+   *  the nudge frame by frame (#slide). Gone the moment the bee stops. */
+  readonly #glides = new Map<string, Nudge>()
   #swallowClickUntil = 0
   /** The agent that has been PERCHED — pulled out of the hive to the top-left
    *  corner where it stays put while its panel is open. Only the orchestrator
@@ -904,6 +912,7 @@ export class AgentBeeDrone extends Drone {
     const dt = this.#app.ticker.deltaMS / 1000
     this.#time += dt
     const now = Date.now()
+    this.#slide(dt)
 
     // Anchors are re-resolved on a slow cadence: the tiles under the bees only
     // move when the participant pans, zooms, or the layer repaints.
@@ -951,12 +960,15 @@ export class AgentBeeDrone extends Drone {
       const hover = HOVER_PX / worldScale
       const hovered = this.#hovering === id
       const dragged = this.#press?.dragging === true && this.#press.id === id
+      // Thrown and still sliding: the nudge is moving under it (#slide).
+      const thrown = this.#glides.has(id)
       // PUT THERE BY HAND. A nudge is held against the bee's OWN anchor, so
       // the place the participant chose survives a pan, a zoom and a repaint.
       const nudge = this.#nudges.get(id)
-      if (dragged) {
+      if (dragged || thrown) {
         // 1:1 under the pointer while it is being carried — easing here would
-        // just make the bee lag the hand that is placing it.
+        // just make the bee lag the hand that is placing it — and 1:1 with
+        // the slide, or the throw would read as a drift and the stop a creep.
         bee.centreX = bee.anchorX + (nudge?.x ?? 0)
         bee.centreY = bee.anchorY - hover + (nudge?.y ?? 0)
       } else {
@@ -985,7 +997,7 @@ export class AgentBeeDrone extends Drone {
       // it keeps its place, its size and its whole hit target, and simply
       // stops competing for the eye. A hovered or carried bee never dims —
       // that one is being looked at.
-      const lit = hovered || dragged || !this.#inTheLight(bee)
+      const lit = hovered || dragged || thrown || !this.#inTheLight(bee)
       bee.dim += ((lit ? 1 : GHOST_INK) - bee.dim) * 0.12
 
       // Freeze a hovered bee in place so the following press has a stable
@@ -1025,6 +1037,7 @@ export class AgentBeeDrone extends Drone {
         bee.thoughtText = null
         this.#bees.delete(id)
         this.#nudges.delete(id)
+        this.#glides.delete(id)
         if (this.#press?.id === id) this.#press = null
         if (this.#perched === id) this.#perched = ''
         if (this.#hovering === id) this.#setHover('')
@@ -1466,7 +1479,10 @@ export class AgentBeeDrone extends Drone {
       grabX: bee && local ? local.x - bee.centreX : 0,
       grabY: bee && local ? local.y - bee.centreY : 0,
       dragging: false,
+      trail: [],
     }
+    // CAUGHT. A bee taken hold of mid-slide stops sliding — the hand has it.
+    this.#glides.delete(id)
   }
 
   /** Open the request the press landed on. Reached from the RELEASE, because
@@ -1487,6 +1503,7 @@ export class AgentBeeDrone extends Drone {
       // corner. Any earlier nudge is spent — it would only push the watcher
       // back off the corner it was just sent to.
       this.#nudges.delete(id)
+      this.#glides.delete(id)
       if (this.#perched === id) {
         this.#perched = ''
         orchestrator?.clearAudit?.()
@@ -1545,7 +1562,7 @@ export class AgentBeeDrone extends Drone {
     // somewhere else now (a drag), or it is exactly where it was (a click).
     const press = this.#press
     this.#press = null
-    if (press && (!press.dragging || this.#endDrag(press))) this.#openBee(press.id)
+    if (press && (!press.dragging || this.#endDrag(press, event.timeStamp || Date.now()))) this.#openBee(press.id)
     event.stopPropagation()
     event.preventDefault()
   }
@@ -1558,7 +1575,7 @@ export class AgentBeeDrone extends Drone {
     if (!press || press.pointerId !== event.pointerId) return
     this.#press = null
     this.#swallowPointer = null
-    if (press.dragging) this.#endDrag(press)
+    if (press.dragging) this.#endDrag(press, event.timeStamp || Date.now())
   }
 
   #onPointerMove = (event: PointerEvent): void => {
@@ -1611,7 +1628,7 @@ export class AgentBeeDrone extends Drone {
 
     // Already all out of the way? Then this scribble means "come back".
     if (reached.every(bee => this.#nudges.has(bee.id))) {
-      for (const bee of reached) this.#nudges.delete(bee.id)
+      for (const bee of reached) { this.#nudges.delete(bee.id); this.#glides.delete(bee.id) }
       this.emitEffect('toast:show', { type: 'tip', message: this.#word('bees.swept-back', 'Back on the work.') })
       return
     }
@@ -1622,6 +1639,7 @@ export class AgentBeeDrone extends Drone {
       const from = this.#world.toGlobal(new Point(bee.centreX, bee.centreY), undefined, true)
       const to = sweptAsideTo({ x: from.x, y: from.y }, { x: broom.x, y: broom.y }, room, BEE_EDGE_PX)
       const local = this.#world.toLocal(new Point(to.x, to.y))
+      this.#glides.delete(bee.id)
       this.#nudges.set(bee.id, {
         x: local.x - bee.anchorX,
         y: local.y - (bee.anchorY - hover),
@@ -1652,6 +1670,11 @@ export class AgentBeeDrone extends Drone {
       press.dragging = true
       if (this.#canvas) this.#canvas.style.cursor = 'grabbing'
     }
+    // The hand's recent path, for the throw. Kept short: the speed wanted is
+    // the speed AT the release, not the average of the whole drag.
+    const at = event.timeStamp || Date.now()
+    press.trail.push({ x: event.clientX, y: event.clientY, t: at })
+    while (press.trail.length && at - press.trail[0].t > TOSS_WINDOW_MS * 2) press.trail.shift()
     const bee = this.#bees.get(press.id)
     const local = this.#toWorld(event.clientX, event.clientY)
     if (!bee || !local) return
@@ -1666,15 +1689,69 @@ export class AgentBeeDrone extends Drone {
   /** Let go, and say whether the bee ended up HOME. A bee dropped back where
    *  its work put it takes its old place again — putting it back is how a
    *  nudge is undone, and no command is needed for it — and, because nothing
-   *  was moved, that release is still a click. */
-  #endDrag = (press: BeePress): boolean => {
+   *  was moved, that release is still a click.
+   *
+   *  THE TOSS. Let go while the hand is still moving, the bee is not dropped
+   *  but THROWN: it keeps going the way it was thrown and slows to a stop,
+   *  like a stone on ice (bee-drag.ts). A thrown bee is nowhere yet, so the
+   *  release is not a click, and home is judged where it stops (#slide). */
+  #endDrag = (press: BeePress, at: number): boolean => {
     if (this.#canvas?.style.cursor === 'grabbing') this.#canvas.style.cursor = ''
     const nudge = this.#nudges.get(press.id)
+    const thrown = nudge ? releaseVelocity(press.trail, at) : null
+    if (thrown) {
+      this.#glides.set(press.id, thrown)
+      return false
+    }
     const home = !nudge || snapsHome(nudge, this.#world?.scale.x || 1)
     if (home) this.#nudges.delete(press.id)
     // TRUE = the bee is back where its work put it, so nothing was moved and
     // the press is still a press: the release opens the request.
     return home
+  }
+
+  /** THE SLIDE — every thrown bee, one frame on. The nudge advances by the
+   *  velocity (screen px/s, brought into world units here so the throw reads
+   *  the same at any zoom), friction takes its share, and the wall is where
+   *  it stops: a stone that reaches the boards stays at the boards. Only once
+   *  it has stopped is the release judged — a bee that slid back onto its
+   *  work goes home, exactly as a dropped one would. */
+  #slide = (dt: number): void => {
+    if (!this.#glides.size || !this.#world) return
+    const worldScale = this.#world.scale.x || 1
+    const hover = HOVER_PX / worldScale
+    const room = this.#theRoom()
+    const minX = room.left + BEE_EDGE_PX
+    const maxX = room.right - BEE_EDGE_PX
+    const minY = room.top + BEE_EDGE_PX
+    const maxY = room.bottom - BEE_EDGE_PX
+    for (const [id, velocity] of this.#glides) {
+      const bee = this.#bees.get(id)
+      const nudge = this.#nudges.get(id)
+      if (!bee || !nudge) { this.#glides.delete(id); continue }
+      let next: Nudge = {
+        x: nudge.x + velocity.x * dt / worldScale,
+        y: nudge.y + velocity.y * dt / worldScale,
+      }
+      let remaining = slowed(velocity, dt)
+      // The wall, measured on screen like the room itself.
+      const point = this.#world.toGlobal(
+        new Point(bee.anchorX + next.x, bee.anchorY - hover + next.y), undefined, true)
+      const x = Math.min(Math.max(point.x, minX), maxX)
+      const y = Math.min(Math.max(point.y, minY), maxY)
+      if (x !== point.x || y !== point.y) {
+        const local = this.#world.toLocal(new Point(x, y))
+        next = { x: local.x - bee.anchorX, y: local.y - (bee.anchorY - hover) }
+        remaining = { x: 0, y: 0 }
+      }
+      this.#nudges.set(id, next)
+      if (remaining.x === 0 && remaining.y === 0) {
+        this.#glides.delete(id)
+        if (snapsHome(next, worldScale)) this.#nudges.delete(id)
+      } else {
+        this.#glides.set(id, remaining)
+      }
+    }
   }
 
   /** A client-space point in world coordinates, or null before the host is up.
