@@ -887,7 +887,14 @@ export const deleteConversation = async (convoId: string): Promise<boolean> => {
       }
       try {
         const parsed = JSON.parse(await (await (handle as FileSystemFileHandle).getFile()).text()) as { kind?: string; convoId?: string }
-        const isOurs = (parsed?.kind === ARCHIVE_MARKER || parsed?.kind === GOAL_MARKER || parsed?.kind === 'chat-turn')
+        // `chat-name` is a RETIRED shape, still proved. Threads were briefly
+        // given an inferred name, written as a marker beside the turns; the
+        // reader is gone (readBucketRaw skips anything that is not a turn or a
+        // known marker, so such a file is inert), but a bucket that still
+        // holds one would fail this proof and the conversation would refuse to
+        // delete. A retired feature must not strand a thread.
+        const isOurs = (parsed?.kind === ARCHIVE_MARKER || parsed?.kind === GOAL_MARKER
+          || parsed?.kind === 'chat-name' || parsed?.kind === 'chat-turn')
           && (parsed?.convoId === undefined || parsed.convoId === id)
         if (!isOurs) {
           console.warn(`[chat] not deleting conversation ${name.slice(0, 8)}… — ${entryName.slice(0, 8)}… is not this conversation's`)
