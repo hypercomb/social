@@ -31,6 +31,9 @@ import { readAskSteps, settle, stepRequest, type ChatStep } from './chat-steps.j
 
 const STYLE_ID = 'hc-agent-panel-styles'
 const STEEL = '126, 182, 214'
+/** The same hue taken deep for bright looks — `identity.deepen()` on #7eb6d6,
+ *  precomputed because this sheet is not Sass. */
+const STEEL_DEEP = '39, 93, 124'
 const WIDTH_KEY = 'hc:agent-panel-width'
 const FULLSCREEN_KEY = 'hc:agent-panel-fullscreen'
 const MIN_WIDTH = 320
@@ -1261,125 +1264,183 @@ export class AgentPanelView extends EventTarget {
     const style = document.createElement('style')
     style.id = STYLE_ID
     style.textContent = `
-.hc-agent{position:fixed;z-index:99999;display:flex;flex-direction:row;align-items:stretch;
+/* ── THE PANE ────────────────────────────────────────────────────────────
+   The floating tool-window material (ui/_toolwindow.scss floating-panel),
+   said again here because this is a DOM singleton with no SCSS. A tool
+   window never names a colour (documentation/tool-window-colour-roles.md):
+   the pane, the ink, the shadow and the grounds are the theme's, and the
+   identity is the steel family the chat window flies. The roles are declared
+   ON the panel so the tiles rail mounted inside it reads the real identity
+   instead of its literal fallbacks. */
+.hc-agent{
+  --acc:${STEEL};
+  --hc-window-accent:rgb(var(--acc));
+  --hc-window-accent-quiet:rgb(var(--acc));
+  --hc-window-wash:rgba(var(--acc),0.10);
+  --hc-window-wash-strong:rgba(var(--acc),0.20);
+  --hc-window-edge:rgba(var(--acc),0.28);
+  --hc-window-edge-firm:rgba(var(--acc),0.62);
+  --hc-window-on-accent:rgb(var(--hc-panel-pane));
+  /* Colour on purpose — amber caution, green ok, red failed — pulled toward
+     the panel's ink under a bright look, untouched on a dark one (tw.ink()). */
+  --hc-agent-amber:color-mix(in srgb, #d6b26e, rgb(var(--hc-panel-ink)) var(--hc-deepen, 0%));
+  --hc-agent-green:color-mix(in srgb, #96d6a4, rgb(var(--hc-panel-ink)) var(--hc-deepen, 0%));
+  --hc-agent-red:color-mix(in srgb, #e87c7b, rgb(var(--hc-panel-ink)) var(--hc-deepen, 0%));
+  /* Chrome is mono; anything READ takes the reading face. */
+  --hc-agent-prose:var(--hc-read, var(--hc-font, system-ui));
+  position:fixed;z-index:99999;display:flex;flex-direction:row;align-items:stretch;
   right:calc(var(--hc-controls-right, 0px) + 1rem);bottom:1rem;width:min(24rem,calc(100vw - 2rem));
   max-height:min(30rem,70vh);box-sizing:border-box;
-  background:rgba(6,9,14,0.96);border:1px solid rgba(${STEEL},0.35);border-radius:var(--hc-radius-floating, 4px);}
+  background:rgba(var(--hc-panel-pane),0.98);
+  border:1px solid rgba(var(--acc),0.38);border-radius:var(--hc-radius-floating, 4px);
+  box-shadow:0 18px 54px rgba(var(--hc-panel-shadow),0.55), inset 0 1px rgba(var(--hc-panel-sheen),0.03);
+  font-family:var(--hc-mono, system-ui);color:var(--hc-panel-text);}
+/* Bright looks take the identity DEEP (ui/_panel-identity.scss, deepen()):
+   the same hue, down under 0.12 luminance so it reads on cream. A global
+   sheet, so the plain selector is enough — no :host-context needed. */
+:is([data-theme="light"],[data-theme="honey"],[data-theme="bloom"],[data-theme="sherbet"]) .hc-agent{--acc:${STEEL_DEEP};}
+@media (prefers-color-scheme: light){:root:not([data-theme]) .hc-agent{--acc:${STEEL_DEEP};}}
 .hc-agent.fullscreen{inset:0;width:auto!important;max-width:none;height:auto;max-height:none;
-  border-radius:0;border:none;}
-.hc-agent-main{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column;gap:0.55rem;
-  padding:0.75rem 0.85rem;box-sizing:border-box;}
+  border-radius:0;border:none;box-shadow:none;}
+.hc-agent-main{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column;}
 .hc-agent-rail{display:none;}
 .hc-agent.fullscreen .hc-agent-rail{display:flex;flex-direction:column;min-height:0;
-  flex:0 0 clamp(15rem,24vw,19rem);border-right:1px solid rgba(${STEEL},0.16);
-  background:rgba(3,5,9,0.55);}
-.hc-agent-chips{display:flex;flex-wrap:wrap;gap:0.3rem;flex:0 0 auto;}
-.hc-agent-chips[hidden]{display:none;}
-.hc-agent-chip{display:inline-flex;align-items:center;gap:0.25rem;max-width:12rem;
-  padding:0.1rem 0.3rem 0.1rem 0.55rem;border:1px solid rgba(${STEEL},0.4);border-radius:999px;
-  color:rgba(238,244,250,0.92);font-size:0.76rem;background:rgba(${STEEL},0.08);}
-.hc-agent-chip-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.hc-agent-chip-off{border:0;background:none;color:rgba(238,244,250,0.55);font:inherit;
-  font-size:0.9rem;line-height:1;cursor:pointer;padding:0 0.15rem;border-radius:999px;}
-.hc-agent-chip-off:hover{color:whitesmoke;}
-.hc-agent-chip-model{cursor:pointer;font-family:var(--hc-mono,monospace);letter-spacing:0.06em;
-  text-transform:uppercase;font-size:0.68rem;color:rgba(${STEEL},0.9);background:none;
-  padding:0.14rem 0.6rem;margin-left:auto;}
-.hc-agent-chip-model:hover{background:rgba(${STEEL},0.12);}
+  flex:0 0 clamp(15rem,24vw,19rem);border-right:1px solid var(--hc-window-line);
+  background:var(--hc-window-tint);}
 .hc-agent-resize{position:absolute;z-index:1;inset:0 auto 0 -0.35rem;width:0.7rem;cursor:ew-resize;}
 .hc-agent-resize::after{content:"";position:absolute;top:42%;bottom:42%;left:0.25rem;
-  border-left:1px solid rgba(${STEEL},0.42);}
+  border-left:1px solid var(--hc-window-edge-firm);}
 .hc-agent.fullscreen .hc-agent-resize{display:none;}
-.hc-agent-head{display:flex;align-items:center;gap:0.5rem;flex:0 0 auto;}
-.hc-agent-avatar{width:1.9rem;height:1.9rem;flex:0 0 auto;}
-.hc-agent-title{flex:1 1 auto;font-family:var(--hc-mono,monospace);font-size:0.76rem;font-weight:600;
-  letter-spacing:0.1em;text-transform:uppercase;color:rgba(${STEEL},0.95);}
-.hc-agent-kind{margin-left:0.5rem;font-weight:400;letter-spacing:0.06em;
-  color:rgba(216,230,238,0.45);}
-.hc-agent-back{width:1.7rem;height:2rem;flex:0 0 auto;border:none;background:none;
-  color:rgba(${STEEL},0.75);font-size:1.5rem;line-height:1;cursor:pointer;border-radius:var(--hc-radius-control, 2px);}
-.hc-agent-back:hover{color:whitesmoke;background:rgba(255,255,255,0.07);}
-.hc-agent-carry{display:flex;flex-direction:column;gap:0.35rem;margin-bottom:0.6rem;
-  padding:0.55rem 0.6rem;border:1px solid rgba(214,178,110,0.45);border-radius:var(--hc-radius-card, 3px);
-  background:rgba(214,178,110,0.08);}
-.hc-agent-carry .hc-agent-label{color:rgba(226,196,140,0.85);margin:0;}
+
+/* ── THE HEADER BAND (tw.header) ─────────────────────────────────────────
+   One height, one divider — the identity hairline — and one hit area for
+   every action, so this title bar lines up with every other tool window's. */
+.hc-agent-head{flex:0 0 auto;box-sizing:border-box;display:flex;align-items:center;gap:0.5rem;
+  height:2.875rem;min-height:2.875rem;padding:0 0.75rem;line-height:1;
+  border-bottom:1px solid var(--hc-window-edge);
+  background:linear-gradient(180deg, rgba(var(--hc-panel-sheen),0.018), rgba(var(--hc-panel-sheen),0.006));}
+.hc-agent-avatar{width:1.75rem;height:1.75rem;flex:0 0 auto;}
+.hc-agent-title{flex:1 1 auto;min-width:0;font-size:0.72rem;font-weight:600;
+  letter-spacing:0.12em;text-transform:uppercase;color:var(--hc-window-accent);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hc-agent-kind{margin-left:0.5rem;font-weight:400;letter-spacing:0.06em;color:var(--hc-window-ink-quiet);}
+.hc-agent-head>button{box-sizing:border-box;display:inline-grid;place-items:center;flex:0 0 auto;
+  min-width:1.75rem;height:1.75rem;padding:0 0.25rem;border:0;background:none;font:inherit;
+  border-radius:var(--hc-radius-control, 2px);line-height:1;cursor:pointer;color:var(--hc-window-ink-faint);
+  transition:color 120ms ease, background-color 120ms ease;}
+.hc-agent-head>button:hover{color:var(--hc-panel-text);background-color:rgba(var(--hc-panel-ink),0.075);}
+.hc-agent-head>button:focus-visible{outline:1px solid color-mix(in srgb, var(--hc-window-accent) 72%, white);outline-offset:1px;}
+.hc-agent-back{font-size:1.4rem;color:var(--hc-window-accent-quiet);}
+.hc-agent-window{font-size:1rem;}
+.hc-agent-close{width:1.75rem;padding:0;font-size:1.125rem;}
+
+/* ── THE BODY ────────────────────────────────────────────────────────────── */
+.hc-agent-body{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:0.8rem;
+  padding:0.75rem 0.85rem;scrollbar-width:thin;scrollbar-color:var(--hc-window-line-firm) transparent;}
+.hc-agent-section>.hc-agent-section{margin-top:0.75rem;}
+.hc-agent-label{font-size:0.66rem;letter-spacing:0.1em;text-transform:uppercase;
+  color:var(--hc-window-accent-quiet);margin-bottom:0.3rem;}
+.hc-agent-text{font-family:var(--hc-agent-prose);font-size:0.86rem;line-height:1.5;
+  color:var(--hc-window-ink-plain);white-space:pre-wrap;word-break:break-word;}
+.hc-agent-dim{font-size:0.72rem;color:var(--hc-window-ink-quiet);font-variant-numeric:tabular-nums;}
+.hc-agent-status{display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;}
+.hc-agent-pill{padding:0.14rem 0.55rem;border-radius:var(--hc-radius-pill, 999px);font-size:0.66rem;line-height:1.3;
+  letter-spacing:0.08em;text-transform:uppercase;border:1px solid var(--hc-window-edge-firm);color:var(--hc-window-accent);}
+.hc-agent-pill.working{background:var(--hc-window-wash-strong);}
+.hc-agent-pill.stalled{border-color:var(--hc-agent-amber);color:var(--hc-agent-amber);background:none;}
+.hc-agent-pill.blocked{border-color:var(--hc-window-accent);background:var(--hc-window-wash);}
+.hc-agent-pill.done{border-color:var(--hc-agent-green);color:var(--hc-agent-green);}
+.hc-agent-pill.failed{border-color:var(--hc-agent-red);color:var(--hc-agent-red);}
+.hc-agent-needs{font-family:var(--hc-agent-prose);font-size:0.8rem;line-height:1.4;color:var(--hc-window-ink-plain);}
+.hc-agent-headline{font-family:var(--hc-agent-prose);font-size:0.94rem;line-height:1.4;
+  color:var(--hc-window-ink-loud);margin-bottom:0.5rem;}
+.hc-agent-headline.ok{color:var(--hc-agent-green);}
+.hc-agent-headline.attention{color:var(--hc-agent-amber);}
+.hc-agent-counts{display:flex;flex-wrap:wrap;gap:0.35rem;margin-bottom:0.35rem;}
+.hc-agent-finding{display:flex;align-items:flex-start;gap:0.5rem;padding:0.3rem 0;}
+.hc-agent-finding .hc-agent-pill{flex:0 0 auto;}
+.hc-agent-finding .hc-agent-text{flex:1 1 auto;min-width:0;font-size:0.8rem;}
+.hc-agent-carry{display:flex;flex-direction:column;gap:0.35rem;margin-bottom:0.6rem;padding:0.6rem 0.65rem;
+  border:1px solid color-mix(in srgb, var(--hc-agent-amber) 45%, transparent);border-left:3px solid var(--hc-agent-amber);
+  border-radius:var(--hc-radius-card, 3px);background:var(--hc-window-tint);}
+.hc-agent-carry .hc-agent-label{color:var(--hc-agent-amber);margin:0;}
 .hc-agent-carry-actions{display:flex;gap:0.4rem;margin-top:0.15rem;}
 .hc-agent-carry-actions .hc-agent-btn{min-height:2rem;padding:0 0.7rem;font-size:0.78rem;}
 .hc-agent-run{display:flex;align-items:stretch;gap:0.25rem;}
-.hc-agent-runmain{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:0.1rem;
-  padding:0.28rem 0.35rem;border:0;background:none;text-align:left;font:inherit;cursor:pointer;
-  border-radius:var(--hc-radius-floating, 4px);}
-.hc-agent-runmain:hover,.hc-agent-runmain:focus-visible{background:rgba(255,255,255,0.055);outline:none;}
+.hc-agent-runmain{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:0.12rem;
+  padding:0.3rem 0.4rem;border:0;background:none;text-align:left;font:inherit;color:inherit;cursor:pointer;
+  border-radius:var(--hc-radius-control, 2px);}
+.hc-agent-runmain:hover,.hc-agent-runmain:focus-visible{background:var(--hc-window-tint);outline:none;}
 .hc-agent-runtop{display:flex;align-items:baseline;justify-content:space-between;gap:0.5rem;}
-.hc-agent-runwho{font-size:0.8rem;color:rgba(238,244,250,0.92);font-weight:600;
+.hc-agent-runwho{font-size:0.8rem;font-weight:600;color:var(--hc-window-ink-loud);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.hc-agent-runlatest{font-size:0.73rem;color:rgba(216,230,238,0.55);
+.hc-agent-runlatest{font-family:var(--hc-agent-prose);font-size:0.76rem;color:var(--hc-window-ink-quiet);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.hc-agent-runbee{flex:0 0 auto;width:2rem;border:1px solid rgba(${STEEL},0.22);border-radius:var(--hc-radius-floating, 4px);
-  background:none;color:rgba(${STEEL},0.8);font-size:0.9rem;line-height:1;cursor:pointer;}
-.hc-agent-runbee:hover{border-color:rgba(${STEEL},0.7);background:rgba(${STEEL},0.12);color:whitesmoke;}
-.hc-agent-go{flex:0 0 auto;align-self:flex-start;margin-left:auto;padding:0.1rem 0.55rem;
-  border:1px solid rgba(${STEEL},0.4);border-radius:999px;background:none;
-  color:rgba(${STEEL},0.9);font:inherit;font-size:0.7rem;letter-spacing:0.06em;
-  text-transform:uppercase;cursor:pointer;}
-.hc-agent-go:hover{border-color:rgba(${STEEL},0.9);background:rgba(${STEEL},0.14);color:whitesmoke;}
-.hc-agent-close,.hc-agent-window{width:2rem;height:2rem;border:none;background:none;color:rgba(245,245,245,0.4);
-  font-size:1.3rem;line-height:1;cursor:pointer;border-radius:var(--hc-radius-control, 2px);}
-.hc-agent-window{font-size:1rem;}
-.hc-agent-close:hover,.hc-agent-window:hover{color:whitesmoke;background:rgba(255,255,255,0.07);}
-.hc-agent-body{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:0.6rem;}
-.hc-agent-status{display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;}
-.hc-agent-pill{padding:0.12rem 0.5rem;border-radius:999px;font-size:0.68rem;letter-spacing:0.08em;
-  text-transform:uppercase;border:1px solid rgba(${STEEL},0.4);color:rgba(${STEEL},0.9);}
-.hc-agent-pill.working{border-color:rgba(${STEEL},0.9);background:rgba(${STEEL},0.16);}
-.hc-agent-pill.stalled{border-color:rgba(214,178,110,0.7);color:rgba(226,196,140,0.95);background:none;}
-.hc-agent-pill.blocked{border-color:rgba(126,182,214,0.85);color:rgba(196,226,246,0.98);background:rgba(126,182,214,0.12);}
-.hc-agent-needs{font-size:0.76rem;line-height:1.35;color:rgba(196,226,246,0.9);}
-.hc-agent-pill.done{border-color:rgba(126,196,142,0.7);color:rgba(150,214,164,0.95);}
-.hc-agent-pill.failed{border-color:rgba(226,75,74,0.7);color:rgba(232,124,123,0.95);}
-.hc-agent-dim{font-size:0.72rem;color:rgba(216,230,238,0.5);}
-.hc-agent-headline{font-size:0.92rem;line-height:1.4;color:rgba(238,244,250,0.95);margin-bottom:0.5rem;}
-.hc-agent-headline.ok{color:rgba(150,214,164,0.95);}
-.hc-agent-headline.attention{color:rgba(226,196,140,0.98);}
-.hc-agent-counts{display:flex;flex-wrap:wrap;gap:0.35rem;margin-bottom:0.35rem;}
-.hc-agent-finding{display:flex;align-items:flex-start;gap:0.5rem;padding:0.25rem 0;}
-.hc-agent-finding .hc-agent-pill{flex:0 0 auto;}
-.hc-agent-finding .hc-agent-text{flex:1 1 auto;min-width:0;font-size:0.8rem;}
-.hc-agent-label{font-size:0.68rem;letter-spacing:0.06em;text-transform:uppercase;
-  color:rgba(${STEEL},0.6);margin-bottom:0.2rem;}
+.hc-agent-runbee{flex:0 0 auto;width:1.85rem;border:1px solid var(--hc-window-line-firm);
+  border-radius:var(--hc-radius-control, 2px);background:none;color:var(--hc-window-accent-quiet);
+  font-size:0.9rem;line-height:1;cursor:pointer;}
+.hc-agent-runbee:hover{border-color:var(--hc-window-edge-firm);background:var(--hc-window-wash);color:var(--hc-window-accent);}
+.hc-agent-go{flex:0 0 auto;align-self:flex-start;margin-left:auto;padding:0.12rem 0.55rem;
+  border:1px solid var(--hc-window-edge-firm);border-radius:var(--hc-radius-pill, 999px);background:none;
+  color:var(--hc-window-accent);font:inherit;font-size:0.68rem;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;}
+.hc-agent-go:hover{background:var(--hc-window-wash-strong);}
 .hc-agent-where{display:flex;flex-wrap:wrap;gap:0.3rem;}
-.hc-agent-tile{padding:0.14rem 0.55rem;border:1px solid rgba(${STEEL},0.35);border-radius:999px;
-  background:none;color:rgba(238,244,250,0.9);font:inherit;font-size:0.8rem;cursor:pointer;
+.hc-agent-tile{padding:0.16rem 0.6rem;border:1px solid var(--hc-window-line-firm);border-radius:var(--hc-radius-pill, 999px);
+  background:none;color:var(--hc-window-ink-plain);font:inherit;font-family:var(--hc-agent-prose);font-size:0.8rem;cursor:pointer;
   max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.hc-agent-tile:hover,.hc-agent-tile:focus-visible{border-color:rgba(${STEEL},0.85);
-  background:rgba(${STEEL},0.14);color:whitesmoke;outline:none;}
-.hc-agent-text{font-size:0.85rem;line-height:1.45;color:rgba(238,244,250,0.9);white-space:pre-wrap;
-  word-break:break-word;}
-.hc-agent-log{display:flex;flex-direction:column;gap:0.25rem;}
-.hc-agent-logline{display:flex;width:100%;min-width:0;gap:0.5rem;padding:0.1rem 0;border:0;
-  background:none;text-align:left;font:inherit;font-size:0.78rem;line-height:1.4;
-  color:rgba(238,244,250,0.82);cursor:pointer;border-radius:4px;}
-.hc-agent-logline:hover,.hc-agent-logline:focus-visible{background:rgba(255,255,255,0.055);outline:none;}
+.hc-agent-tile:hover,.hc-agent-tile:focus-visible{border-color:var(--hc-window-edge-firm);
+  background:var(--hc-window-wash);color:var(--hc-window-ink-loud);outline:none;}
+.hc-agent-log{display:flex;flex-direction:column;gap:0.15rem;}
+.hc-agent-logline{display:flex;box-sizing:border-box;width:calc(100% + 0.7rem);margin:0 -0.35rem;min-width:0;gap:0.5rem;
+  padding:0.15rem 0.35rem;border:0;background:none;text-align:left;font:inherit;font-size:0.78rem;line-height:1.45;
+  color:var(--hc-window-ink-plain);cursor:pointer;border-radius:var(--hc-radius-control, 2px);}
+.hc-agent-logline:hover,.hc-agent-logline:focus-visible{background:var(--hc-window-tint);outline:none;}
 .hc-agent-logline .hc-agent-dim{flex:0 0 auto;}
 /* A RECORDED step is read, never pressed — the activity lines above expand on
    click, these do not. Without this they would still offer a pointer and a
    hover lift, which is a control promising something it cannot do. */
 .hc-agent-logline.reading{cursor:default;}
 .hc-agent-logline.reading:hover{background:none;}
-.hc-agent-logtext{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hc-agent-logtext{min-width:0;font-family:var(--hc-agent-prose);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .hc-agent-logline.expanded .hc-agent-logtext{overflow:visible;text-overflow:clip;white-space:pre-wrap;
   overflow-wrap:anywhere;}
-.hc-agent-row{display:flex;gap:0.5rem;align-items:flex-end;flex:0 0 auto;}
+
+/* ── THE COMPOSER ────────────────────────────────────────────────────────── */
+.hc-agent-chips{display:flex;flex-wrap:wrap;gap:0.3rem;flex:0 0 auto;padding:0.55rem 0.85rem 0;
+  border-top:1px solid var(--hc-window-line);}
+.hc-agent-chips[hidden]{display:none;}
+.hc-agent-chip{display:inline-flex;align-items:center;gap:0.25rem;max-width:12rem;
+  padding:0.1rem 0.3rem 0.1rem 0.55rem;border:1px solid var(--hc-window-edge-firm);border-radius:var(--hc-radius-pill, 999px);
+  color:var(--hc-window-ink-plain);font-size:0.76rem;background:var(--hc-window-wash);}
+.hc-agent-chip-name{min-width:0;font-family:var(--hc-agent-prose);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hc-agent-chip-off{border:0;background:none;color:var(--hc-window-ink-quiet);font:inherit;
+  font-size:0.9rem;line-height:1;cursor:pointer;padding:0 0.15rem;border-radius:var(--hc-radius-pill, 999px);}
+.hc-agent-chip-off:hover{color:var(--hc-window-ink-loud);}
+.hc-agent-chip-model{cursor:pointer;font-family:var(--hc-mono,monospace);letter-spacing:0.06em;
+  text-transform:uppercase;font-size:0.68rem;color:var(--hc-window-accent);background:none;
+  padding:0.14rem 0.6rem;margin-left:auto;}
+.hc-agent-chip-model:hover{background:var(--hc-window-wash);}
+.hc-agent-row{display:flex;gap:0.5rem;align-items:flex-end;flex:0 0 auto;padding:0.6rem 0.85rem 0.8rem;
+  border-top:1px solid var(--hc-window-line);}
+.hc-agent-chips:not([hidden])+.hc-agent-row{border-top:0;padding-top:0.5rem;}
+/* \`hidden\` must win over the flex display, or a conversation still shows a
+   composer that "add context while it works" cannot honour. */
+.hc-agent-row[hidden]{display:none;}
 .hc-agent-input{flex:1 1 auto;box-sizing:border-box;resize:none;padding:0.5rem 0.6rem;font:inherit;
-  font-size:16px;line-height:1.4;color:whitesmoke;background:rgba(255,255,255,0.05);
-  border:1px solid rgba(255,255,255,0.12);border-radius:var(--hc-radius-control, 2px);outline:none;}
-.hc-agent-input:focus{border-color:rgba(${STEEL},0.55);}
-.hc-agent-btn{min-height:2.4rem;padding:0 0.9rem;border-radius:var(--hc-radius-control, 2px);border:1px solid rgba(255,255,255,0.14);
-  background:none;color:rgba(235,242,248,0.85);font:inherit;font-size:0.86rem;cursor:pointer;}
-.hc-agent-ok{background:rgba(${STEEL},0.9);border-color:rgba(${STEEL},0.9);color:#0c1118;font-weight:700;}
+  font-family:var(--hc-agent-prose);font-size:16px;line-height:1.4;color:var(--hc-window-ink-loud);
+  background:var(--hc-window-tint);border:1px solid var(--hc-window-line-firm);
+  border-radius:var(--hc-radius-control, 2px);outline:none;}
+.hc-agent-input::placeholder{color:var(--hc-window-ink-quiet);}
+.hc-agent-input:focus{border-color:var(--hc-window-edge-firm);}
+.hc-agent-btn{min-height:2.4rem;padding:0 0.9rem;border-radius:var(--hc-radius-control, 2px);
+  border:1px solid var(--hc-window-line-firm);background:none;color:var(--hc-window-ink-plain);
+  font:inherit;font-size:0.84rem;cursor:pointer;}
+.hc-agent-btn:hover{background:var(--hc-window-tint);color:var(--hc-window-ink-loud);}
+.hc-agent-ok{background:var(--hc-window-accent);border-color:var(--hc-window-accent);color:var(--hc-window-on-accent);font-weight:700;}
+.hc-agent-ok:hover{background:var(--hc-window-accent);color:var(--hc-window-on-accent);}
 .hc-agent-ok:disabled{opacity:0.55;cursor:default;}
-.hc-agent-stop{flex:0 0 auto;border-color:rgba(226,75,74,0.5);color:rgba(232,140,139,0.95);}
-.hc-agent-stop:hover{border-color:rgba(226,75,74,0.9);background:rgba(226,75,74,0.14);}
+.hc-agent-stop{flex:0 0 auto;border-color:color-mix(in srgb, var(--hc-agent-red) 55%, transparent);color:var(--hc-agent-red);}
+.hc-agent-stop:hover{border-color:var(--hc-agent-red);background:color-mix(in srgb, var(--hc-agent-red) 14%, transparent);color:var(--hc-agent-red);}
 .hc-agent-stop:disabled{opacity:0.55;cursor:default;}
 .hc-agent-stop[hidden]{display:none;}
 `
