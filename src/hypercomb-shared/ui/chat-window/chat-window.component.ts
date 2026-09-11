@@ -780,6 +780,10 @@ type AttachedPicture = {
   open?: boolean
   path?: readonly string[]
   fresh?: boolean
+  /** An annotation cut into parts: every picture in ONE landing. Separate
+   *  landings would race a fresh conversation emptying the shelf, and the bus
+   *  replays only the last of them to a late subscriber. */
+  pictures?: readonly AttachedPicture[]
 }
 
 export const TILE_DRAG_TYPE = 'application/x-hypercomb-tile'
@@ -1641,8 +1645,9 @@ export class ChatWindowComponent implements OnDestroy {
    *  earlier question would ride along unread. Nothing is lost by it: the
    *  shelf is filled FROM the clipboard, which this does not touch. */
   async #attachPicture(payload?: AttachedPicture): Promise<void> {
-    const sig = String(payload?.sig ?? '')
-    if (!/^[0-9a-f]{64}$/.test(sig)) return
+    const listed: readonly AttachedPicture[] = Array.isArray(payload?.pictures) ? payload!.pictures! : payload ? [payload] : []
+    const pictures = listed.filter(picture => /^[0-9a-f]{64}$/.test(String(picture?.sig ?? '')))
+    if (!pictures.length) return
     const path = (Array.isArray(payload?.path) ? payload!.path! : [])
       .map(segment => String(segment ?? '').trim())
       .filter(Boolean)
@@ -1654,16 +1659,22 @@ export class ChatWindowComponent implements OnDestroy {
       this.references.set([])
     }
 
-    const key = `image:${sig}`
-    if (!this.references().some(held => held.key === key)) {
-      this.references.set([...this.references(), {
+    let shelf = this.references()
+    for (const picture of pictures) {
+      const sig = String(picture.sig)
+      const key = `image:${sig}`
+      if (shelf.some(held => held.key === key)) continue
+      shelf = [...shelf, {
         key,
         path,
-        name: String(payload?.name || 'annotation'),
+        name: String(picture.name || 'annotation'),
         sig,
-        size: Number(payload?.size) || undefined,
-        kind: String(payload?.kind || 'image/png'),
-      }])
+        size: Number(picture.size) || undefined,
+        kind: String(picture.kind || 'image/png'),
+      }]
+    }
+    if (shelf !== this.references()) {
+      this.references.set(shelf)
       this.#announceSet()
       void this.#refreshContextThumbs()
     }
