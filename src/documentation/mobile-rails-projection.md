@@ -169,6 +169,21 @@ for EVERY rendered tile (the dense order), not just the dragged ones.
 - Momentum: the coordinator zeroes the cross-axis velocity under a lane
   axis, so a sideways flick in portrait does not hold the input gate while
   nothing moves.
+- **The strip stops at its ends, each end the moment it comes on screen**
+  (`laneStopDelta` in `sequence/lane-viewport-mode.ts`, applied along the
+  lane axis by `PanningDrone.#clampStageDelta`). Travel toward the start is
+  free only while the first tile is still before the window's near edge and
+  stops as it arrives; travel toward the end is free only while the last tile
+  is still past the far edge and stops the instant it is fully on screen. The
+  window is the canvas below the header and above the portrait bar
+  (`--hc-controls-bottom`), or right of the landscape rail
+  (`--hc-controls-left`), inset by the fit's 5 px — so a strip pulled back
+  rests exactly where the fit put it. A strip that already fits stands still;
+  one left out of place only moves back toward the window, never jumps under
+  the finger. `panBy` returns the travel it applied: a refused pan announces
+  no `viewport:manual` (it would hand the page away from the global fit), and
+  a coast ends on the frame it meets a stop. The desktop keeps "one tile
+  stays on screen".
 - Right-edge swipe-back in the controls bar is off while the lane axis is
   `'x'` (a leftward drag IS the strip scroll in landscape); the Back disc
   and the hardware button remain.
@@ -192,6 +207,13 @@ Two doors, both registry-fed, no hand-listed views anywhere:
    layer, including the scroller; *see* — the rung (3/2/1), fullscreen,
    pheromones, pin. It is a drone-contributed shell surface (custom element
    via `@hypercomb.social/ShellSurfaceRegistry`), never a tag in `app.html`.
+
+   *2026-09-10:* the phone bar has a second row again — Tools toggles a
+   tools row (Share · Swarm · Tags · Pin · Fullscreen) over the bottom row
+   Back · Face · Camera · Add · Tools (pass 5, `mobile-one-column.md`). No
+   bar cell opens this sheet any more: the Views disc became the bar's More
+   on 2026-09-09 and left the bar on 2026-09-10, so the views sheet is the
+   list header's `⋯`.
 
 The *see* group also carries **undo · redo** (keymap `edit.undo` /
 `edit.redo`) — every phone gesture writes truth (camera, editor, hold-drag,

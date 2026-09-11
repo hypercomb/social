@@ -19,7 +19,12 @@
         [attr.title]="!armedResource() && subject() ? subject()!.label : null"
         (mousedown)="onArmedGlyphMouseDown($event)"
       >
-        @if (armedResource(); as armed) {
+        @if (collapsed()) {
+          <!-- THE LINE ON DEMAND, AT REST: the Hypercomb mark holds the prompt's
+               slot, so the corner keeps its spacing while the line is away.
+               The tab's own file — one master, never a copy. -->
+          <img class="prompt-mark" src="favicon.svg" alt="" draggable="false" />
+        } @else if (armedResource(); as armed) {
           @if (armed.previewUrl) {
             <img class="prompt-thumb" [src]="armed.previewUrl" alt="" draggable="false" />
           } @else {

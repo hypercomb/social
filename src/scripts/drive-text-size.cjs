@@ -156,30 +156,33 @@ async function main() {
     // `e` edits the tile under the cursor — but the Pixi surface does not
     // reliably paint headless (no GPU), so there may be nothing under it. Open
     // the editor through its own service instead: same component, same state.
+    // The editor docks into the view as a tool window now, so its text size is
+    // the docked-panel primitive's own gear — the same record every window uses.
     await page.evaluate(() => {
       const svc = window.ioc?.get('@diamondcoreprocessor.com/TileEditorService')
-      svc?.open('sizing-probe', {}, null, [])
+      svc?.open('sizing-probe', {}, null, [], 'dock')
     })
     await page.waitForTimeout(1500)
 
-    const editorOpen = await page.locator('.editor-panel').count()
+    const EDITOR = '[data-hc-tile-editor]'
+    const editorOpen = await page.locator(EDITOR).count()
     if (!editorOpen) {
       console.log('note: could not open the tile editor in this run — skipping its checks')
     } else {
       await dropOverlay()
-      const eBase = await page.evaluate(fontPx, '.editor-panel')
-      await page.locator('.editor-panel .text-scale-gear').first().click()
+      const eBase = await page.evaluate(fontPx, EDITOR)
+      await page.locator(`${EDITOR} [data-hc-panel-settings]`).first().click()
       await page.waitForTimeout(350)
-      const eLarger = page.locator('.editor-panel .text-scale-step', { hasText: 'Larger' }).first()
+      const eLarger = page.locator('[data-hc-panel-settings-pop]').getByText('Larger', { exact: true }).first()
       check('the editor offers the same gear and ladder', await eLarger.count() > 0)
       await eLarger.click()
       await page.waitForTimeout(500)
-      const eGrown = await page.evaluate(fontPx, '.editor-panel')
+      const eGrown = await page.evaluate(fontPx, EDITOR)
       check('picking Larger grows the editor', eGrown > eBase + 0.5, `${eBase}px → ${eGrown}px`)
       check('the editor writes its own record',
         await page.evaluate(() => localStorage.getItem('hc:panel-text:tile-editor')) === '1.32')
       await dropOverlay()
-      await page.locator('.editor-panel').screenshot({ path: path.join(out, 'editor-larger.png') })
+      await page.locator(EDITOR).screenshot({ path: path.join(out, 'editor-larger.png') })
     }
 
     const fail = checks.filter(c => !c.ok)

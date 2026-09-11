@@ -16,6 +16,7 @@ import { extractPageRefSigs, collectSigsDeep } from '../sharing/decoration-closu
 import { markAuthored, markLayerAuthoredPageSigs } from '../sharing/authored-sigs.js'
 import { mintBuildRecord } from '../history/builds-slot.js'
 import { putSummary, listSummaryRuns, type FeedbackSummaryRecord } from './feedback-summaries.js'
+import { compactBreaks, listBreaks, updateIssue } from './breaks.js'
 import { readPublicBranches } from '../presentation/tiles/tile-actions.drone.js'
 import { setHiveRoot } from '../sharing/hive-pointer.js'
 import { bridgeMaySetRootKey, PUBLIC_CONTENT_HOSTS } from '../sharing/hive-link.js'
@@ -503,6 +504,9 @@ export class ClaudeBridgeWorker extends Worker {
       case 'feedback-channel-status': return this.#feedbackChannelStatus(req)
       case 'summary-add':  return this.#summaryAdd(req)
       case 'summary-list': return this.#summaryList(req)
+      case 'breaks-compact':     return this.#breaksCompact(req)
+      case 'breaks-list':        return this.#breaksList(req)
+      case 'break-issue-update': return this.#breakIssueUpdate(req)
       case 'behaviors-list': return this.#behaviorsList(req)
       case 'ui-state': return this.#uiState(req)
       case 'diag-open': return this.#diagOpen(req)
@@ -749,6 +753,54 @@ export class ClaudeBridgeWorker extends Worker {
         })),
         runCount: runs.length,
       },
+    }
+  }
+
+  // ─── breaks-compact / breaks-list / break-issue-update ─────────────
+  //
+  // The break repair loop's verbs (documentation/break-repair-loop.md). The
+  // fold runs HERE, inside the hive, rather than as list-then-remove over the
+  // socket: a break that lands mid-fold is a queue member the fold never
+  // listed, so it simply waits for the next one. Interpreting and choosing
+  // belong to the agent and the participant; update carries them back.
+  // Deliberately NOT in MUTATING_OPS: none of them touches the surface, so
+  // none should hold it behind a quiet badge while a tick runs.
+
+  async #breaksCompact(req: BridgeRequest): Promise<BridgeResponse> {
+    try {
+      const result = await compactBreaks()
+      return result
+        ? { id: req.id, ok: true, data: result }
+        : { id: req.id, ok: false, error: 'breaks-compact: store not ready' }
+    } catch (err) {
+      return { id: req.id, ok: false, error: `breaks-compact: ${(err as Error)?.message ?? String(err)}` }
+    }
+  }
+
+  async #breaksList(req: BridgeRequest): Promise<BridgeResponse> {
+    const listed = await listBreaks()
+    return listed
+      ? { id: req.id, ok: true, data: listed }
+      : { id: req.id, ok: false, error: 'breaks-list: store not ready' }
+  }
+
+  async #breakIssueUpdate(req: BridgeRequest): Promise<BridgeResponse> {
+    if (typeof req.sig !== 'string' || !/^[0-9a-f]{64}$/.test(req.sig)) {
+      return { id: req.id, ok: false, error: 'break-issue-update needs `sig` (the issue fingerprint)' }
+    }
+    const patch = req.payload && typeof req.payload === 'object' && !Array.isArray(req.payload)
+      ? req.payload as Record<string, unknown>
+      : {}
+    try {
+      const issue = await updateIssue(req.sig, patch)
+      if (issue === 'no-pool') return { id: req.id, ok: false, error: 'break-issue-update: store not ready' }
+      if (issue === 'no-issue') return { id: req.id, ok: false, error: `break-issue-update: no issue ${req.sig.slice(0, 8)}` }
+      if (issue === 'refused') {
+        return { id: req.id, ok: false, error: `break-issue-update: ${req.sig.slice(0, 8)} is no longer ${String(patch['onlyIfStatus'])}; nothing was changed` }
+      }
+      return { id: req.id, ok: true, data: { issue } }
+    } catch (err) {
+      return { id: req.id, ok: false, error: `break-issue-update: ${(err as Error)?.message ?? String(err)}` }
     }
   }
 

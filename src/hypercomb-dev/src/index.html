@@ -5,6 +5,50 @@
   <title>Hypercomb Development</title>
   <base href="/">
 
+  <!-- Break capture: every client-side break is queued for the break repair
+       loop (documentation/break-repair-loop.md). The listeners go on HERE,
+       before any stylesheet, script or module can fail, and only hold what
+       they see: essentials' assistant/break-capture.drone.ts takes the buffer
+       over when it loads. Only candidates are held — a console call carrying an
+       Error, a script or stylesheet that failed, a runtime error — so noise
+       cannot fill the slots, and a warning is held only while half the buffer
+       is free for breaks. The array is the flag: whichever side runs first
+       installs the listeners, never both. Mirrored in
+       hypercomb-web/src/index.html. -->
+  <script>
+    (function () {
+      if (Array.isArray(window.__hcBreaks)) return;
+      var held = (window.__hcBreaks = []);
+      var errorLike = function (v) {
+        return v instanceof Error || (!!v && typeof v === 'object' && typeof v.stack === 'string' && typeof v.message === 'string');
+      };
+      var candidate = function (kind, detail) {
+        if (kind === 'reported' || kind === 'warned') return Array.isArray(detail) && detail.some(errorLike);
+        if (kind === 'error') {
+          var tag = detail && detail.target && detail.target.tagName;
+          return typeof tag !== 'string' || /^(SCRIPT|LINK)$/i.test(tag);
+        }
+        return true;
+      };
+      // Everything inside take() is guarded: an argument that throws when
+      // inspected (a revoked Proxy, a cross-origin window, a throwing getter)
+      // must never turn a console call into an exception in its caller.
+      var take = function (kind, detail) {
+        try {
+          var at = Date.now();
+          if (typeof window.__hcBreak === 'function') { window.__hcBreak(kind, detail, at); return; }
+          if (candidate(kind, detail) && held.length < (kind === 'warned' ? 50 : 100)) held.push([kind, detail, at]);
+        } catch (e) {}
+      };
+      window.addEventListener('error', function (e) { take('error', e); }, true);
+      window.addEventListener('unhandledrejection', function (e) { take('rejection', e.reason); });
+      var report = console.error.bind(console);
+      console.error = function () { var args = Array.prototype.slice.call(arguments); report.apply(null, args); take('reported', args); };
+      var warn = console.warn.bind(console);
+      console.warn = function () { var args = Array.prototype.slice.call(arguments); warn.apply(null, args); take('warned', args); };
+    })();
+  </script>
+
   <!-- Theme pre-paint: reflect the stored theme onto <html> before first paint
        so there's no flash. ThemeService (@hypercomb.social/Theme) owns it
        thereafter. Boots dark when no preference is stored; 'system' clears the
@@ -62,7 +106,7 @@
        self-hosts it, so the old Google link for it was a duplicate download.
        Regenerate:
        `node scripts/fetch-fonts.cjs hypercomb-dev/public/fonts inter source-serif material-symbols` -->
-  <link rel="stylesheet" href="fonts/fonts.css?v=9f66025de5">
+  <link rel="stylesheet" href="fonts/fonts.css?v=25dc9561e8">
 
   <!-- Loading-page (genesis splash) styles — in <head> so they survive the
        re-parent out of <app-root> that keeps the splash up until tiles paint. -->

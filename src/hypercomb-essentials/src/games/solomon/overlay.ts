@@ -6,12 +6,13 @@
 // Pixi — it mounts above everything as a fixed overlay and tears itself fully
 // down on close. The SolomonDrone owns its lifecycle (open/close).
 
+import { EffectBus } from '@hypercomb/core'
 import { Engine, TILE, SIM_DT, type LevelDef } from './engine.js'
 import { Renderer } from './renderer.js'
 import { Designer, TOOLS, type Tool } from './designer.js'
 import {
   BUILTIN_LEVELS, PRINCESS_ROOM, SEAL_TOTAL,
-  loadCustomLevels, upsertCustomLevel, deleteCustomLevel, cloneLevel,
+  loadCustomLevels, loadCreations, forgetCreations, uniqueCreationName, cloneLevel, type Creation,
 } from './levels.js'
 import { Overworld, OverworldView, type NodeDef } from './overworld.js'
 import { Shaker, ParticleField, easeOutBack, ARCADE } from '../juice.js'
@@ -77,12 +78,19 @@ export class SolomonOverlay {
   #playBar: HTMLDivElement | null = null
   #designBar: HTMLDivElement | null = null
   #nameInput: HTMLInputElement | null = null
-  #loadSelect: HTMLSelectElement | null = null
+  #creationsPanel: HTMLDivElement | null = null
   #toolButtons = new Map<Tool, HTMLButtonElement>()
+
+  // Saved creations put away (hidden) or destroyed (gone), as the one
+  // concealment owner reports them — this surface never keeps its own set.
+  #hiddenIds = new Set<string>()
+  #goneIds = new Set<string>()
+  #foldOpen = { hidden: false, builtin: false }
+  #offHidden: (() => void) | null = null
 
   #mode: Mode = 'play'
   #engine: Engine | null = null
-  #designer = new Designer()
+  #designer = Designer.restore()
 
   #levels: LevelDef[] = []
   #levelIndex = 0
@@ -196,6 +204,17 @@ export class SolomonOverlay {
     // stays on the canvas — a stroke can only START on the grid.
     window.addEventListener('pointermove', this.#onPointerMove)
     window.addEventListener('pointerup', this.#onPointerUp)
+    this.#offHidden = EffectBus.on<{ items?: { sig?: string }[]; gone?: string[] }>('hidden:render', payload => {
+      this.#hiddenIds = new Set((payload?.items ?? []).map(i => String(i?.sig ?? '').toLowerCase()))
+      this.#goneIds = new Set((payload?.gone ?? []).map(sig => String(sig ?? '').toLowerCase()))
+      // Destroyed in the delete area → forget the saved level on this device.
+      if (this.#goneIds.size && forgetCreations(this.#goneIds)) this.#refreshLevels()
+      if (this.#designer.editingId && this.#goneIds.has(this.#designer.editingId)) {
+        this.#designer.editingId = null   // the canvas stays; it is simply not filed any more
+        this.#designer.persist()
+      }
+      this.#renderCreations()
+    })
     this.#lastTs = 0
     this.#raf = requestAnimationFrame(this.#loop)
   }
@@ -208,6 +227,9 @@ export class SolomonOverlay {
     window.removeEventListener('resize', this.#fit)
     window.removeEventListener('pointermove', this.#onPointerMove)
     window.removeEventListener('pointerup', this.#onPointerUp)
+    this.#offHidden?.()
+    this.#offHidden = null
+    this.#designer.persist()
     this.#audio.stopAmbience()
     this.#audio.dispose()
     this.#root?.remove()
@@ -265,19 +287,15 @@ export class SolomonOverlay {
     designBar.appendChild(palette)
     const nameInput = el('input', { class: 'sol-name', placeholder: 'level name' }) as HTMLInputElement
     nameInput.value = this.#designer.level.name
+    nameInput.addEventListener('input', () => { this.#designer.level.name = nameInput.value; this.#designer.persist() })
     designBar.appendChild(nameInput)
     this.#nameInput = nameInput
-    const mkBtn = (txt: string, fn: () => void) => { const b = el('button', { class: 'sol-btn', text: txt }) as HTMLButtonElement; b.onclick = fn; return b }
-    designBar.appendChild(mkBtn('New', () => this.#designerNew()))
-    designBar.appendChild(mkBtn('Save', () => this.#designerSave()))
-    designBar.appendChild(mkBtn('▶ Test', () => this.#designerTest()))
-    const loadSel = el('select', { class: 'sol-select' }) as HTMLSelectElement
-    loadSel.onchange = () => this.#designerLoad(loadSel.value)
-    designBar.appendChild(loadSel)
-    this.#loadSelect = loadSel
-    designBar.appendChild(mkBtn('Delete', () => this.#designerDelete()))
-    designBar.appendChild(mkBtn('Export', () => this.#designerExport()))
-    designBar.appendChild(mkBtn('Import', () => this.#designerImport()))
+    designBar.appendChild(btn('New', () => this.#designerNew()))
+    designBar.appendChild(btn('Save', () => this.#designerSave(), 'Save this level, then start a fresh canvas'))
+    designBar.appendChild(btn('▶ Test', () => this.#designerTest()))
+    designBar.appendChild(btn('📂 Creations', () => this.#toggleCreations(), 'Continue editing or duplicate a saved level'))
+    designBar.appendChild(btn('Export', () => this.#designerExport()))
+    designBar.appendChild(btn('Import', () => this.#designerImport()))
     bar.appendChild(designBar)
     this.#designBar = designBar
 
@@ -306,6 +324,9 @@ export class SolomonOverlay {
     stage.appendChild(canvas)
     const banner = el('div', { class: 'sol-banner sol-hidden' }) as HTMLDivElement
     stage.appendChild(banner)
+    const creations = el('div', { class: 'sol-creations sol-hidden' }) as HTMLDivElement
+    stage.appendChild(creations)
+    this.#creationsPanel = creations
     root.appendChild(stage)
     this.#stage = stage
     this.#banner = banner
@@ -320,7 +341,6 @@ export class SolomonOverlay {
     this.#canvas = canvas
     this.#ctx = canvas.getContext('2d')
     if (this.#ctx) { this.#ctx.imageSmoothingEnabled = true; this.#renderer = new Renderer(this.#ctx); this.#owView = new OverworldView(this.#ctx) }
-    this.#refreshLoadSelect()
   }
 
   // ── mode + level control ─────────────────────────────────
@@ -346,6 +366,7 @@ export class SolomonOverlay {
     this.#root?.querySelectorAll('.sol-tab').forEach((t, i) => t.classList.toggle('on', (i === 0) === onPlay))
     this.#playBar?.classList.toggle('sol-hidden', !onPlay)
     this.#designBar?.classList.toggle('sol-hidden', this.#mode !== 'design')
+    if (this.#mode !== 'design') this.#closeCreations()
     this.#mapBtn?.classList.toggle('sol-hidden', this.#mode !== 'play') // "to map" only inside a cavern
     if (this.#levelLabel) {
       this.#levelLabel.textContent = this.#mode === 'overworld'
@@ -992,7 +1013,10 @@ export class SolomonOverlay {
     if (this.#painting && cell) this.#paintAt(cell)
   }
 
-  #onPointerUp = (): void => { this.#painting = false }
+  #onPointerUp = (): void => {
+    if (this.#painting) this.#designer.persist()   // one write per stroke, not per cell
+    this.#painting = false
+  }
 
   #paintAt(cell: { col: number; row: number }): void {
     if (cell.col === this.#lastCell.col && cell.row === this.#lastCell.row) return
@@ -1002,29 +1026,50 @@ export class SolomonOverlay {
 
   // ── designer actions ─────────────────────────────────────
 
-  #setTool(tool: Tool): void { this.#designer.setTool(tool); this.#updateToolButtons() }
+  #setTool(tool: Tool): void { this.#designer.setTool(tool); this.#designer.persist(); this.#updateToolButtons() }
 
   #updateToolButtons(): void {
     for (const [tool, b] of this.#toolButtons) b.classList.toggle('on', tool === this.#designer.tool)
   }
 
-  #designerNew(): void {
-    this.#designer.newLevel('My Level')
+  /** The designer's canvas was replaced — sync the chrome to it and remember it. */
+  #canvasReplaced(): void {
     if (this.#nameInput) this.#nameInput.value = this.#designer.level.name
     this.#sizeCanvasTo(this.#designer.level)
+    this.#designer.persist()
+    this.#renderCreations()
+  }
+
+  /** Replacing a canvas with unsaved work asks first; the draft is sticky, so
+   *  nothing else ever throws work away. */
+  #mayReplaceCanvas(): boolean {
+    return !this.#designer.unsaved(loadCreations())
+      || window.confirm(`“${this.#designer.level.name}” has unsaved changes. Replace it?`)
+  }
+
+  #startBlank(): void {
+    this.#designer.newLevel(uniqueCreationName('My Level', loadCreations().map(c => c.level.name)))
+    this.#canvasReplaced()
+  }
+
+  #designerNew(): void {
+    if (!this.#mayReplaceCanvas()) return
+    this.#startBlank()
     this.#flash('new blank level')
   }
 
   #designerSave(): void {
     const name = (this.#nameInput?.value ?? '').trim() || 'My Level'
-    const level = this.#designer.named(name)
-    upsertCustomLevel(level)
+    const saved = this.#designer.save(name)
     this.#refreshLevels()
-    this.#refreshLoadSelect(name)
-    this.#flash(`saved “${name}”`)
+    // Filed — the canvas refreshes so the next creation starts clean. The saved
+    // one waits under Creations to be continued or duplicated.
+    this.#startBlank()
+    this.#flash(`saved “${saved.level.name}” — fresh canvas ready`)
   }
 
   #designerTest(): void {
+    this.#closeCreations()
     // Playtest the in-progress level without requiring a save (a one-off cavern,
     // not part of the overworld journey).
     this.#mode = 'play'
@@ -1057,23 +1102,106 @@ export class SolomonOverlay {
     else this.#enterCavern(this.#currentCavern)
   }
 
-  #designerLoad(name: string): void {
-    if (!name) return
-    const lvl = loadCustomLevels().find(l => l.name === name)
-      ?? BUILTIN_LEVELS.find(l => l.name === name)
-    if (!lvl) return
-    this.#designer.setLevel(lvl)
-    if (this.#nameInput) this.#nameInput.value = lvl.name
-    this.#sizeCanvasTo(lvl)
-    this.#flash(`editing “${name}”`)
+  #designerEdit(creation: Creation): void {
+    if (creation.id !== this.#designer.editingId && !this.#mayReplaceCanvas()) return
+    this.#designer.edit(creation)
+    this.#closeCreations()
+    this.#canvasReplaced()
+    this.#flash(`editing “${creation.level.name}” — Save files over it`)
   }
 
-  #designerDelete(): void {
-    const name = (this.#nameInput?.value ?? '').trim()
-    deleteCustomLevel(name)
-    this.#refreshLevels()
-    this.#refreshLoadSelect()
-    this.#flash(`deleted “${name}”`)
+  #designerDuplicate(level: LevelDef): void {
+    if (!this.#mayReplaceCanvas()) return
+    const name = uniqueCreationName(`${level.name} copy`, loadCreations().map(c => c.level.name))
+    this.#designer.duplicate(level, name)
+    this.#closeCreations()
+    this.#canvasReplaced()
+    this.#flash(`duplicated as “${name}” — Save to keep it`)
+  }
+
+  /** Hide / show a saved level. Hide first, delete second: the list only puts a
+   *  level away; destroying one happens in the delete area, on a hidden one. */
+  #designerConceal(creation: Creation, hidden: boolean): void {
+    if (hidden) {
+      EffectBus.emit('hidden:conceal', {
+        sig: creation.id,
+        scope: 'solomon-level',
+        label: creation.level.name,
+        from: "Solomon's Key designer",
+        deletable: true,
+      })
+    } else {
+      EffectBus.emit('hidden:reveal', { sig: creation.id })
+    }
+  }
+
+  #toggleCreations(): void {
+    const panel = this.#creationsPanel
+    if (!panel) return
+    const opening = panel.classList.contains('sol-hidden')
+    panel.classList.toggle('sol-hidden', !opening)
+    if (opening) { EffectBus.emit('hidden:refresh', {}); this.#renderCreations() }
+  }
+
+  #closeCreations(): void { this.#creationsPanel?.classList.add('sol-hidden') }
+
+  /** Saved levels, newest first: continue editing or duplicate each one; hidden
+   *  ones wait in the delete area; any built-in cavern can seed a new creation. */
+  #renderCreations(): void {
+    const panel = this.#creationsPanel
+    if (!panel || panel.classList.contains('sol-hidden')) return
+    const creations = loadCreations().filter(c => !this.#goneIds.has(c.id)).sort((a, b) => b.savedAt - a.savedAt)
+    const shown = creations.filter(c => !this.#hiddenIds.has(c.id))
+    const hidden = creations.filter(c => this.#hiddenIds.has(c.id))
+
+    const head = el('div', { class: 'sol-cr-head' })
+    head.append(el('b', { text: 'Your creations' }), btn('✕', () => this.#closeCreations(), 'Close'))
+    const list = el('div', { class: 'sol-cr-list' })
+    if (!shown.length) list.append(el('div', { class: 'sol-cr-empty', text: 'Nothing saved yet — Save files the canvas here.' }))
+    for (const c of shown) {
+      list.append(this.#creationRow(c, [
+        btn('Edit', () => this.#designerEdit(c), 'Continue editing — Save files over it'),
+        btn('Duplicate', () => this.#designerDuplicate(c.level), 'Start a new level from a copy'),
+        btn('Hide', () => this.#designerConceal(c, true), 'Put away — it waits in the delete area'),
+      ]))
+    }
+    panel.replaceChildren(head, list)
+
+    if (hidden.length) {
+      panel.append(this.#fold('hidden', `Delete area (${hidden.length})`, hidden.map(c => this.#creationRow(c, [
+        btn('Show', () => this.#designerConceal(c, false), 'Put it back in the list'),
+        btn('Delete', () => EffectBus.emit('hidden:delete', { sig: c.id }), 'Forget this saved level on this device'),
+      ]))))
+    }
+    panel.append(this.#fold('builtin', 'Start from a built-in cavern', BUILTIN_LEVELS.map(level => {
+      const row = el('div', { class: 'sol-cr-row' })
+      const info = el('div', { class: 'sol-cr-info' })
+      info.append(el('span', { class: 'sol-cr-name', text: level.name }), el('span', { class: 'sol-cr-meta', text: `${level.cols}×${level.rows}` }))
+      row.append(info, btn('Duplicate', () => this.#designerDuplicate(level), 'Start a new level from a copy'))
+      return row
+    })))
+  }
+
+  #creationRow(c: Creation, actions: HTMLElement[]): HTMLElement {
+    const current = c.id === this.#designer.editingId
+    const row = el('div', { class: current ? 'sol-cr-row on' : 'sol-cr-row' })
+    const info = el('div', { class: 'sol-cr-info' })
+    const when = c.savedAt ? new Date(c.savedAt).toLocaleString() : 'saved earlier'
+    info.append(
+      el('span', { class: 'sol-cr-name', text: c.level.name }),
+      el('span', { class: 'sol-cr-meta', text: `${c.level.cols}×${c.level.rows} · ${when}${current ? ' · on the canvas' : ''}` }),
+    )
+    row.append(info, ...actions)
+    return row
+  }
+
+  /** A fold whose open state survives the panel re-rendering under it. */
+  #fold(key: 'hidden' | 'builtin', title: string, rows: HTMLElement[]): HTMLElement {
+    const fold = el('details', { class: 'sol-cr-fold' }) as HTMLDetailsElement
+    fold.open = this.#foldOpen[key]
+    fold.addEventListener('toggle', () => { this.#foldOpen[key] = fold.open })
+    fold.append(el('summary', { text: title }), ...rows)
+    return fold
   }
 
   #designerExport(): void {
@@ -1085,24 +1213,13 @@ export class SolomonOverlay {
   }
 
   #designerImport(): void {
+    if (!this.#mayReplaceCanvas()) return
     const text = window.prompt('Paste level JSON:')
     if (!text) return
     if (this.#designer.importJson(text)) {
-      if (this.#nameInput) this.#nameInput.value = this.#designer.level.name
-      this.#sizeCanvasTo(this.#designer.level)
-      this.#flash('level imported')
+      this.#canvasReplaced()
+      this.#flash('level imported — Save to keep it')
     } else this.#flash('import failed — invalid JSON')
-  }
-
-  #refreshLoadSelect(selected?: string): void {
-    const sel = this.#loadSelect
-    if (!sel) return
-    const custom = loadCustomLevels()
-    sel.innerHTML = ''
-    sel.appendChild(opt('', custom.length ? '— load custom —' : '— no custom levels —'))
-    for (const b of BUILTIN_LEVELS) sel.appendChild(opt(b.name, `(built-in) ${b.name}`))
-    for (const l of custom) sel.appendChild(opt(l.name, l.name))
-    if (selected) sel.value = selected
   }
 
   // ── level clear → tally → pan to next (continuous play) ──
@@ -1280,10 +1397,10 @@ function el(tag: string, props: { class?: string; text?: string; title?: string;
   return e
 }
 
-function opt(value: string, label: string): HTMLOptionElement {
-  const o = document.createElement('option')
-  o.value = value; o.textContent = label
-  return o
+function btn(text: string, onClick: () => void, title?: string): HTMLButtonElement {
+  const b = el('button', { class: 'sol-btn', text, title }) as HTMLButtonElement
+  b.onclick = onClick
+  return b
 }
 
 const CSS = `
@@ -1312,8 +1429,19 @@ const CSS = `
 .sol-tool.on{background:rgba(120,220,255,.3);border-color:rgba(120,220,255,.8);box-shadow:0 0 8px rgba(120,220,255,.5)}
 .sol-name{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.2);
   color:#fff;border-radius:6px;padding:.25rem .5rem;width:9rem;font-size:.82rem}
-.sol-select{background:rgba(20,14,36,.95);border:1px solid rgba(255,255,255,.2);
-  color:#fff;border-radius:6px;padding:.22rem .4rem;font-size:.8rem;max-width:11rem}
+.sol-creations{position:absolute;top:12px;right:12px;bottom:12px;width:min(27rem,calc(100% - 24px));
+  overflow:auto;display:flex;flex-direction:column;gap:.45rem;padding:.6rem;border-radius:10px;
+  background:rgba(10,7,22,.95);border:1px solid rgba(126,182,214,.3);box-shadow:0 12px 40px rgba(0,0,0,.55)}
+.sol-cr-head{display:flex;align-items:center;justify-content:space-between;color:#ffd24d}
+.sol-cr-list{display:flex;flex-direction:column;gap:.3rem}
+.sol-cr-row{display:flex;align-items:center;gap:.3rem;padding:.3rem .4rem;border-radius:6px;background:rgba(255,255,255,.04)}
+.sol-cr-row.on{box-shadow:inset 0 0 0 1px rgba(120,220,255,.6)}
+.sol-cr-info{flex:1;min-width:0;display:flex;flex-direction:column}
+.sol-cr-name{font-size:.85rem;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sol-cr-meta{font-size:.72rem;color:#9c98c4}
+.sol-cr-empty{font-size:.8rem;color:#9c98c4;padding:.4rem}
+.sol-cr-fold summary{cursor:pointer;font-size:.8rem;color:#cfd2ff;padding:.25rem 0}
+.sol-cr-fold .sol-cr-row{margin-top:.3rem}
 .sol-status{margin-left:auto;font-size:.8rem;color:#9ad9b0;min-height:1em}
 .sol-close{width:2rem;height:2rem;border-radius:50%;border:none;cursor:pointer;
   background:rgba(255,80,80,.18);color:#ff9a9a;font-size:1rem}

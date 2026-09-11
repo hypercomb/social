@@ -19,6 +19,9 @@
 }
 ;(window as any).__hcBoot('main.ts module evaluated')
 
+// Break capture starts in index.html, before any stylesheet, script or module
+// can fail (the break repair loop: documentation/break-repair-loop.md).
+
 // ── navigation perf trail ────────────────────────────────────────────────────
 // Same contract as __hcBoot but per NAVIGATION: 'nav:start' resets T0, every
 // later mark logs `[nav] +Nms label`. Shared/essentials code calls

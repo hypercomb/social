@@ -26,8 +26,18 @@ vi.hoisted(() => {
 })
 ;(globalThis as unknown as { __registry: unknown }).__registry = registry
 
+// The route-flow drain is the orchestrator's to SCHEDULE, not to run: its
+// own behaviour is chat-route.spec.ts's. Here it is a fake whose answers the
+// schedule cases choose.
+vi.mock('./chat-route.js', () => ({
+  drainRouteFlows: vi.fn(async () => ({ organized: 0, behind: 0, elapsedMs: 0 })),
+  readRoute: vi.fn(),
+  organizeRoute: vi.fn(),
+}))
+
 import { EffectBus } from '@hypercomb/core'
-import { OrchestratorDrone, ORCHESTRATOR_ID } from './orchestrator.drone.js'
+import { drainRouteFlows } from './chat-route.js'
+import { OrchestratorDrone, ORCHESTRATOR_ID, ROUTE_FLOW_SCHEDULE, ROUTE_FLOW_WAKES } from './orchestrator.drone.js'
 
 const agent = (over: Record<string, unknown>): Record<string, unknown> => ({
   id: 'a', behavior: 'opus', kind: 'model', status: 'working',
@@ -274,5 +284,252 @@ describe('the running commentary', () => {
       expect(clears).toHaveLength(2)
       expect(clears[1]).toContain('2 agents')
     } finally { vi.useRealTimers(); stop() }
+  })
+})
+
+// THE ROUTE-FLOW DRAIN'S CLOCK. "Ollama visits as many chats as possible" is a
+// promise about a schedule: soon while there is organizing to do, slow when
+// there is none, early when something changed, and never two passes stacked —
+// a model call outlasts any interval, and a second pass would pay for the same
+// conversations twice. Wakes are emitted TRANSIENT here so no case replays
+// its wake into the next.
+describe('the route-flow schedule', () => {
+  const drain = vi.mocked(drainRouteFlows)
+  const wake = (effect: string = ROUTE_FLOW_WAKES[0]): void => EffectBus.emitTransient(effect, { at: Date.now() })
+  const { soonMs, idleMs, wakeMs } = ROUTE_FLOW_SCHEDULE
+
+  /** When each pass started, on the fake clock. The schedule is asserted as
+   *  the GAPS between passes: the first pass may come at the early wake
+   *  instead of `soonMs`, because a wake effect emitted before the drone
+   *  subscribed replays to it — which is the behaviour, not a flake. */
+  const passes: number[] = []
+  type Drain = Awaited<ReturnType<typeof drainRouteFlows>>
+  const answer = (...results: Drain[]): void => {
+    for (const result of results) drain.mockImplementationOnce(async () => { passes.push(Date.now()); return result })
+  }
+  /** An answer built when the pass RUNS — for fields that are times. */
+  const answerAt = (result: () => Drain): void => {
+    drain.mockImplementationOnce(async () => { passes.push(Date.now()); return result() })
+  }
+  const gaps = (): number[] => passes.slice(1).map((at, i) => at - passes[i]!)
+
+  beforeEach(() => {
+    passes.length = 0
+    drain.mockReset()
+    drain.mockImplementation(async () => { passes.push(Date.now()); return { organized: 0, behind: 0, elapsedMs: 0 } })
+  })
+
+  // A PASS THAT RAN OUT OF BUDGET RESTS AS LONG AS IT RAN. "Ollama visits as
+  // many chats as possible" still leaves the participant's GPU half the time
+  // the page is open — a 90 s pass, then a 90 s rest.
+  it('rests after a budget pass for as long as the pass ran — a true 50%', async () => {
+    vi.useFakeTimers()
+    try {
+      answer({ organized: 3, behind: 2, stopped: 'budget', elapsedMs: 90_000 })
+      await orchestrator.warmup()
+      await vi.advanceTimersByTimeAsync(soonMs)
+      expect(passes).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(90_000 - 1)
+      expect(passes).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(gaps()).toEqual([90_000])
+    } finally { vi.useRealTimers() }
+  })
+
+  it('after a yield, comes back when the drain says the lane reopens — or soon when it did not say', async () => {
+    vi.useFakeTimers()
+    try {
+      answerAt(() => ({ organized: 0, behind: 1, stopped: 'yield', resumeAt: Date.now() + 30_000, elapsedMs: 1_200 }))
+      answer({ organized: 0, behind: 1, stopped: 'yield', elapsedMs: 10 } as Drain)
+      await orchestrator.warmup()
+      await vi.advanceTimersByTimeAsync(soonMs + 30_000 + soonMs)
+      expect(passes).toHaveLength(3)
+      expect(gaps(), 'resumeAt, then soonMs with no resumeAt').toEqual([30_000, soonMs])
+    } finally { vi.useRealTimers() }
+  })
+
+  it('never schedules NaN — a result missing its fields waits soonMs', async () => {
+    vi.useFakeTimers()
+    try {
+      const delays: number[] = []
+      const real = globalThis.setTimeout
+      const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((handler: () => void, ms?: number) => {
+        delays.push(Number(ms))
+        return real(handler, ms)
+      }) as typeof setTimeout)
+      try {
+        answer(
+          { organized: 0, behind: 0, stopped: 'budget' } as unknown as Drain,
+          { organized: 0, behind: 0, stopped: 'yield', resumeAt: Number.NaN } as unknown as Drain,
+        )
+        await orchestrator.warmup()
+        await vi.advanceTimersByTimeAsync(soonMs * 3)
+        expect(passes).toHaveLength(3)
+        expect(gaps()).toEqual([soonMs, soonMs])
+        expect(delays.every(ms => Number.isFinite(ms)), `delays: ${delays.join(',')}`).toBe(true)
+      } finally { spy.mockRestore() }
+    } finally { vi.useRealTimers() }
+  })
+
+  it('comes back slowly after a call ran out of time — the server may be loading', async () => {
+    vi.useFakeTimers()
+    try {
+      answer({ organized: 0, behind: 1, stopped: 'timeout', elapsedMs: 45_000 })
+      await orchestrator.warmup()
+      await vi.advanceTimersByTimeAsync(soonMs + idleMs)
+      expect(passes).toHaveLength(2)
+      expect(gaps()).toEqual([idleMs])
+    } finally { vi.useRealTimers() }
+  })
+
+  it('a wake during a rest does not shorten it — opening a conversation must not cancel the rest', async () => {
+    vi.useFakeTimers()
+    try {
+      answer({ organized: 2, behind: 3, stopped: 'budget', elapsedMs: 60_000 })
+      await orchestrator.warmup()
+      await vi.advanceTimersByTimeAsync(soonMs)
+      expect(passes).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(10_000)
+      for (const effect of ROUTE_FLOW_WAKES) wake(effect)
+      await vi.advanceTimersByTimeAsync(wakeMs * 5)
+      expect(passes, 'still resting').toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(60_000 - 10_000 - wakeMs * 5)
+      expect(passes).toHaveLength(2)
+      expect(gaps()).toEqual([60_000])
+    } finally { vi.useRealTimers() }
+  })
+
+  it('a wake heard during a pass that ends in a rest waits the rest out', async () => {
+    vi.useFakeTimers()
+    try {
+      let release!: (value: Drain) => void
+      drain.mockImplementationOnce(() => new Promise(resolve => { passes.push(Date.now()); release = resolve }))
+      await orchestrator.warmup()
+      await vi.advanceTimersByTimeAsync(soonMs)
+      expect(drain).toHaveBeenCalledTimes(1)
+      wake('chat:threads-changed')
+      await vi.advanceTimersByTimeAsync(20_000)
+      const endedAt = Date.now()
+      release({ organized: 1, behind: 4, stopped: 'budget', elapsedMs: 25_000 })
+      await vi.advanceTimersByTimeAsync(wakeMs)
+      expect(drain, 'not at the wake').toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(25_000 - wakeMs)
+      expect(drain).toHaveBeenCalledTimes(2)
+      expect(passes[1]! - endedAt).toBe(25_000)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('passes within a few seconds of starting, then comes back slowly when nothing is behind', async () => {
+    vi.useFakeTimers()
+    try {
+      const started = Date.now()
+      await orchestrator.warmup()
+      await vi.advanceTimersByTimeAsync(soonMs)
+      expect(passes).toHaveLength(1)
+      expect(passes[0]! - started).toBeLessThanOrEqual(soonMs)
+      await vi.advanceTimersByTimeAsync(idleMs)
+      expect(passes).toHaveLength(2)
+      expect(gaps()).toEqual([idleMs])
+    } finally { vi.useRealTimers() }
+  })
+
+  it('comes back soon while a conversation is behind or a short pass hit its budget, slowly once caught up', async () => {
+    vi.useFakeTimers()
+    try {
+      // A budget pass rests max(soonMs, elapsedMs): one that ran a second
+      // comes back at soonMs, like a pass that left conversations behind.
+      answer(
+        { organized: 1, behind: 2, elapsedMs: 8_000 },
+        { organized: 4, behind: 0, stopped: 'budget', elapsedMs: 1_000 },
+        { organized: 0, behind: 0, elapsedMs: 50 },
+      )
+      await orchestrator.warmup()
+      await vi.advanceTimersByTimeAsync(soonMs * 3 + idleMs)
+      expect(passes).toHaveLength(4)
+      expect(gaps(), 'behind → soon, budget → max(soon, elapsed), caught up → slow').toEqual([soonMs, soonMs, idleMs])
+    } finally { vi.useRealTimers() }
+  })
+
+  it('stays slow with no local model awake, and after a failed call', async () => {
+    vi.useFakeTimers()
+    try {
+      answer(
+        { organized: 0, behind: 0, stopped: 'gate', elapsedMs: 3 },
+        { organized: 0, behind: 1, stopped: 'fault', elapsedMs: 900 },
+      )
+      await orchestrator.warmup()
+      await vi.advanceTimersByTimeAsync(soonMs + idleMs * 2)
+      expect(passes).toHaveLength(3)
+      expect(gaps()).toEqual([idleMs, idleMs])
+    } finally { vi.useRealTimers() }
+  })
+
+  it('comes back just after a thread\'s last exchange goes quiet', async () => {
+    vi.useFakeTimers()
+    try {
+      answer({ organized: 0, behind: 0, dueIn: 30_000, elapsedMs: 40 })
+      await orchestrator.warmup()
+      await vi.advanceTimersByTimeAsync(soonMs + 31_000)
+      expect(passes).toHaveLength(2)
+      expect(gaps()).toEqual([31_000])
+    } finally { vi.useRealTimers() }
+  })
+
+  it('wakes early on each of its effects — and a burst of them is one pass', async () => {
+    vi.useFakeTimers()
+    try {
+      await orchestrator.warmup()
+      await vi.advanceTimersByTimeAsync(soonMs)
+      expect(drain).toHaveBeenCalledTimes(1)
+
+      for (const effect of ROUTE_FLOW_WAKES) wake(effect)
+      wake(); wake()
+      await vi.advanceTimersByTimeAsync(wakeMs - 1)
+      expect(drain).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(drain, 'five wakes, one pass').toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(wakeMs * 3)
+      expect(drain).toHaveBeenCalledTimes(2)
+
+      for (const [at, effect] of ROUTE_FLOW_WAKES.entries()) {
+        wake(effect)
+        await vi.advanceTimersByTimeAsync(wakeMs)
+        expect(drain, effect).toHaveBeenCalledTimes(3 + at)
+      }
+    } finally { vi.useRealTimers() }
+  })
+
+  it('never runs two passes at once — a wake during a pass becomes one pass after it', async () => {
+    vi.useFakeTimers()
+    try {
+      let release!: (value: { organized: number; behind: number }) => void
+      drain.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+      await orchestrator.warmup()
+      await vi.advanceTimersByTimeAsync(soonMs)
+      expect(drain).toHaveBeenCalledTimes(1)
+
+      for (const effect of ROUTE_FLOW_WAKES) wake(effect)
+      await vi.advanceTimersByTimeAsync(10 * 60_000)
+      expect(drain, 'still the one pass').toHaveBeenCalledTimes(1)
+
+      release({ organized: 0, behind: 0 })
+      await vi.advanceTimersByTimeAsync(wakeMs)
+      expect(drain, 'the wake it heard, once').toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(idleMs - 1)
+      expect(drain).toHaveBeenCalledTimes(2)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('stops for good when disposed', async () => {
+    vi.useFakeTimers()
+    try {
+      await orchestrator.warmup()
+      await vi.advanceTimersByTimeAsync(soonMs)
+      expect(drain).toHaveBeenCalledTimes(1)
+      ;(orchestrator as unknown as { dispose: () => void }).dispose()
+      wake()
+      await vi.advanceTimersByTimeAsync(idleMs * 2)
+      expect(drain).toHaveBeenCalledTimes(1)
+    } finally { vi.useRealTimers() }
   })
 })

@@ -86,6 +86,17 @@ const KEYBOARD_REASON = 'layout-pane'
  *  derivation and never a second opinion. */
 const SHELF_SIDE: 'left' | 'right' = 'left'
 
+/** One measurement, as the level reads it. `value` is what the level itself
+ *  declares (empty when it says nothing), `reads` what it actually gets, and
+ *  `from` the path of the level that said it — `[]` the root, `null` the
+ *  template's own fallback. Mirrors LevelState in template-author.drone.ts. */
+interface VariableState {
+  name: string
+  value: string
+  reads: string
+  from: string[] | null
+}
+
 /** One level of the arrangement, addressed by the hole path that reaches it. */
 interface LevelState {
   path: string[]
@@ -99,7 +110,7 @@ interface LevelState {
    *  rather than looked up: the palette holds the arrangement as DRAWN, and a
    *  level standing on its side is not that. */
   glyph: string
-  variables: { name: string; value: string }[]
+  variables: VariableState[]
   /** Where the parts sit along the axis, and how they sit across it. Resolved
    *  by the one reader, so a level that has never said anything still answers
    *  with where its parts actually are. */
@@ -279,6 +290,20 @@ const RANGE: Readonly<Record<string, readonly [number, number]>> = {
 }
 const DEFAULT_RANGE: readonly [number, number] = [0, 32]
 
+/** Slider bounds for a value in a unit that is not rem. A share runs the whole
+ *  allotment; a pixel length runs about as far as a rem range does. */
+const UNIT_RANGE: Readonly<Record<string, readonly [number, number]>> = {
+  '%': [0, 100],
+  px: [0, 640],
+}
+
+/** The units a PANE'S measure can be moved in. A share (`%`) fills or halves
+ *  an allotment — the anchor's `100%` is one — and a length (`rem`) holds a
+ *  width or, turned, a height. The container's own gutter and inset stay in
+ *  rem: a percentage padding resolves against the WIDTH on every side, which
+ *  is never what an even inset means. */
+const HOLE_UNITS: readonly string[] = ['rem', '%']
+
 /** The smallest a chip may be drawn. Small enough for a dense row of icons —
  *  pin the column count and they scale to whatever is asked for — and large
  *  enough that an arrangement is still legible at the floor. In `auto` the 31%
@@ -331,6 +356,10 @@ export class LayoutDesignerComponent implements OnDestroy {
    *  properties. */
   readonly dormant = signal(false)
   readonly #container = signal('')
+  /** Whether the targets window and the flex gallery are showing. Each says so
+   *  itself; the header's toggles only ever read it back. */
+  readonly targetsOpen = signal(false)
+  readonly flexOpen = signal(false)
 
   // ── this window's own state ───────────────────────────────────────
   readonly box = signal<CanvasBox>(DEFAULT_BOX)
@@ -573,19 +602,24 @@ export class LayoutDesignerComponent implements OnDestroy {
   /** TYPE TWO — the pane being pointed at. `measured: false` says the pane
    *  takes the remainder and has nothing to move, which is an answer rather
    *  than an empty row. */
-  readonly divisionMeasure = computed(() => {
+  readonly divisionMeasure = computed<(VariableState & { measured: boolean }) | null>(() => {
     const pane = this.focusedPane()
     if (!pane) return null
     const found = (this.selectedLevel()?.variables ?? []).find(v => v.name === pane)
-    return found ? { ...found, measured: true } : { name: pane, value: '', measured: false }
+    return found
+      ? { ...found, measured: true }
+      : { name: pane, value: '', reads: '', from: null, measured: false }
   })
 
   /** WHAT THE ONE SLIDER IS ON. The pane you are pointing at wins, then the
    *  chip you pressed, then the container's first measurement — so the slider
    *  always has something under it the moment a container is selected. */
-  readonly activeVariable = computed<{ name: string; value: string } | null>(() => {
+  readonly activeVariable = computed<VariableState | null>(() => {
     const division = this.divisionMeasure()
-    if (division?.measured) return { name: division.name, value: division.value }
+    if (division?.measured) {
+      const { measured: _measured, ...variable } = division
+      return variable
+    }
     const all = this.containerMeasures()
     const want = this.picked()
     return all.find(v => v.name === want) ?? all[0] ?? null
@@ -676,6 +710,15 @@ export class LayoutDesignerComponent implements OnDestroy {
       // Re-announce on every state change: the level is the same, but what it
       // says about itself may not be.
       this.#select(this.selectedPath())
+    }))
+
+    // THE WINDOWS THIS ONE MANAGES report themselves, and the header lights
+    // from what they said — never from what it last asked for.
+    this.#busCleanup.push(EffectBus.on<{ open?: boolean }>('targets:view-state', state => {
+      this.targetsOpen.set(state?.open === true)
+    }))
+    this.#busCleanup.push(EffectBus.on<{ open?: boolean }>('flex:view-state', state => {
+      this.flexOpen.set(state?.open === true)
     }))
 
     // Mount the arrangement and wire its holes as drop targets. It depends on
@@ -1497,8 +1540,57 @@ export class LayoutDesignerComponent implements OnDestroy {
     if (level) this.#select(level.path)
   }
 
-  min(name: string): number { return (RANGE[name] ?? DEFAULT_RANGE)[0] }
-  max(name: string): number { return (RANGE[name] ?? DEFAULT_RANGE)[1] }
+  min(variable: VariableState): number { return this.#range(variable.name, variable.reads)[0] }
+  max(variable: VariableState): number { return this.#range(variable.name, variable.reads)[1] }
+  /** Quarter-rems for a length; whole steps for a share or a pixel count. */
+  step(variable: VariableState): number { return this.unit(variable.reads) === 'rem' ? 0.25 : 1 }
+
+  #range(name: string, value: string): readonly [number, number] {
+    return UNIT_RANGE[this.unit(value)] ?? RANGE[name] ?? DEFAULT_RANGE
+  }
+
+  /** The units the active measure can be moved in — none offered for the
+   *  container's own gutter and inset, which stay in rem (see HOLE_UNITS). */
+  unitsFor(name: string): readonly string[] {
+    return CONTAINER_MEASURES.includes(name) ? [] : HOLE_UNITS
+  }
+
+  /**
+   * Move a measure into another unit. The number is KEPT and clamped to the
+   * new range, not converted: the pane's size is chrome, not design, so a
+   * conversion measured off it would bake how big the pane happened to be into
+   * the arrangement. `100%` lands at the top of the rem range and `20rem`
+   * becomes `20%` — each one drag from wherever it is wanted.
+   */
+  switchUnit(variable: VariableState, unit: string): void {
+    if (this.unit(variable.reads) === unit) return
+    const [low, high] = this.#range(variable.name, `0${unit}`)
+    const kept = Math.min(high, Math.max(low, this.amount(variable.reads)))
+    this.#commit(variable.name, `${kept}${unit}`)
+  }
+
+  /** What a measure shows: its own value, else what it reads, else zero — the
+   *  last being exactly what CSS does with a gutter nobody declared. */
+  shown(variable: VariableState): string {
+    return variable.value || variable.reads || '0'
+  }
+
+  /**
+   * Where a value this level does not declare was said: the name of the
+   * layout that declared it, `*` for the template's own default, or empty when
+   * the level declares it itself or nothing declares it at all.
+   *
+   * A layout NAME, because that is what a participant recognises on the pane;
+   * a hole path is how the arrangement addresses a level, not how anybody
+   * points at one.
+   */
+  originOf(variable: VariableState): string {
+    if (variable.value) return ''
+    if (variable.from === null) return variable.reads ? '*' : ''
+    const at = variable.from.join('/')
+    return this.levels().find(level => level.path.join('/') === at)?.layout
+      ?? variable.from.at(-1) ?? ''
+  }
 
   /** The slider position for a value like `10rem`. A value a slider cannot
    *  represent — a `calc()` — reads as 0 and is shown as typed, never rounded
@@ -1512,21 +1604,27 @@ export class LayoutDesignerComponent implements OnDestroy {
   }
 
   /** Under the pointer the property is written straight onto the live level,
-   *  so the layout moves under your hand with no round trip. */
-  previewVar(name: string, event: Event, current: string): void {
-    const next = `${(event.target as HTMLInputElement).value}${this.unit(current)}`
-    this.#levelElement()?.style.setProperty(`--hc-layout-${name}`, next)
+   *  so the layout moves under your hand with no round trip. The unit is the
+   *  one the level READS, so moving an inherited `100%` moves a share. */
+  previewVar(variable: VariableState, event: Event): void {
+    const next = `${(event.target as HTMLInputElement).value}${this.unit(variable.reads)}`
+    this.#levelElement()?.style.setProperty(`--hc-layout-${variable.name}`, next)
   }
 
-  /** Letting go is the act. A measurement belongs to the LEVEL that declares
-   *  it — the active container — never to the hole path that happened to point
-   *  at one of its panes. */
-  commitVar(name: string, event: Event, current: string): void {
+  /** Letting go is the act. */
+  commitVar(variable: VariableState, event: Event): void {
+    this.#commit(variable.name, `${(event.target as HTMLInputElement).value}${this.unit(variable.reads)}`)
+  }
+
+  /** A measurement belongs to the LEVEL that declares it — the active
+   *  container — never to the hole path that happened to point at one of its
+   *  panes. */
+  #commit(name: string, value: string): void {
     EffectBus.emit('template:set-var', {
       segments: this.segments(),
       path: this.selectedLevel()?.path ?? [],
       name,
-      value: `${(event.target as HTMLInputElement).value}${this.unit(current)}`,
+      value,
     })
   }
 
@@ -1563,6 +1661,17 @@ export class LayoutDesignerComponent implements OnDestroy {
    *  handler). */
   openTargets(): void {
     EffectBus.emit('targets:open', { open: true, at: Date.now() })
+  }
+
+  /** The header's two window toggles. Intents with a stamp, never flips: each
+   *  asks for the opposite of what its window last REPORTED, so a toggle can
+   *  never drift out of step with the window it stands for. */
+  toggleTargets(): void {
+    EffectBus.emit('targets:open', { open: !this.targetsOpen(), at: Date.now() })
+  }
+
+  toggleFlex(): void {
+    EffectBus.emit('flex:open', { open: !this.flexOpen(), at: Date.now() })
   }
 
   close(): void {

@@ -46,6 +46,7 @@ export class SolomonLabyrinthOverlay {
   #lastSaved = ''
   #restoreFailed = false
   #restoring = false
+  #afterRestore: 'world' | 'design' | null = null
   #mode: 'world' | 'room' | 'dungeon' | 'loading' | 'design' = 'world'
   #raf = 0
   #lastTs = 0
@@ -265,6 +266,7 @@ export class SolomonLabyrinthOverlay {
 
   #showWorld(): void {
     if (!this.#root) return
+    if (this.#restoring) { this.#afterRestore = 'world'; return }
     ++this.#generation
     this.#root.removeAttribute('aria-busy')
     this.#closeJournal()
@@ -283,6 +285,7 @@ export class SolomonLabyrinthOverlay {
 
   showDesigner(): void {
     if (!this.#root || this.#designer) return
+    if (this.#restoring) { this.#afterRestore = 'design'; return }
     this.#release()
     this.#save()
     ++this.#generation
@@ -377,6 +380,14 @@ export class SolomonLabyrinthOverlay {
       return
     }
     if (this.#slotPanel || this.#journal || this.#world?.isDialogOpen || this.#dungeon?.isDialogOpen) {
+      if (key === 'e' && !event.repeat && !this.#slotPanel) {
+        // E opened the conversation, so E puts it away again.
+        event.preventDefault(); event.stopImmediatePropagation()
+        if (this.#journal) this.#closeJournal()
+        else if (this.#world?.isDialogOpen) this.#world.closeDialog()
+        else this.#dungeon?.closeDialog()
+        return
+      }
       // Keep movement and hive shortcuts out of an encounter, while preserving
       // keyboard activation and focus navigation for its real DOM controls.
       const dialog = this.#root.querySelector<HTMLElement>('[role="dialog"]')
@@ -415,6 +426,7 @@ export class SolomonLabyrinthOverlay {
     if (right) this.#input.right = true
     if (up) this.#input.up = true
     if (down) this.#input.down = true
+    if (this.#mode === 'world' && !event.repeat && (key === 'z' || key === 'j')) { this.#world?.cast(); return }
     const engine = this.journey.engine
     if (this.#mode !== 'room' || !engine) return
     if (left) engine.input.left = true
@@ -515,6 +527,12 @@ export class SolomonLabyrinthOverlay {
     this.#say(`Continuing Slot ${this.#slots.activeSlot}…`)
     try {
       const state = record(save['journey'])!
+      // Permanent discoveries need no native room, so they show at once. The
+      // full restore below re-applies them once the chambers have hydrated.
+      this.journey.restoreProgress(state['progress'])
+      this.#world.restoreState(save['world'])
+      this.#readKnowledge(save['knowledge'])
+      this.#updateInventory()
       const ids = new Set(Array.isArray(state['roomIds']) ? state['roomIds'].filter((id): id is string => typeof id === 'string') : [])
       const labyrinths = new Set(ROOMS.filter(room => ids.has(room.id) || room.id === state['activeRoomId']).map(room => room.labyrinthId))
       for (const definition of ROOMS.filter(room => labyrinths.has(room.labyrinthId))) {
@@ -563,6 +581,12 @@ export class SolomonLabyrinthOverlay {
         this.#restoring = false
         this.#root?.removeAttribute('aria-busy')
         this.#updateSaveStatus()
+        // World and Designer wait for a pending continue: interrupting it would
+        // strand a half-restored adventure that never saves again.
+        const request = this.#afterRestore
+        this.#afterRestore = null
+        if (request === 'design') this.showDesigner()
+        else if (request === 'world' && !this.#restoreFailed) this.#showWorld()
       }
     }
   }

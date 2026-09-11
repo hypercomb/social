@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   getLaneScrollAxis,
   laneCountFromStoredPreference,
+  laneStopDelta,
   laneStripHorizontal,
   setLaneViewport,
 } from './lane-viewport-mode.js'
@@ -105,6 +106,46 @@ describe('lane viewport axis', () => {
     expect(laneStripHorizontal()).toBe(true)
     setViewport(500, 500)
     expect(laneStripHorizontal()).toBe(false)
+  })
+})
+
+// Portrait numbers measured on the phone shell: the window runs 56 → 778
+// (under the header, above the bar) and a 36-tile strip is 2210 px long.
+describe('lane stops — each end stops the moment it comes on screen', () => {
+  const near = 56
+  const far = 778
+
+  it('at rest, pulling toward the start moves nothing and pushing toward the end is free', () => {
+    expect(laneStopDelta(300, 56, 2266, near, far)).toBe(0)
+    expect(laneStopDelta(-300, 56, 2266, near, far)).toBe(-300)
+  })
+
+  it('pushing stops with the last tile just on screen, never past it', () => {
+    expect(laneStopDelta(-2000, 56, 2266, near, far)).toBe(-1488)
+    expect(laneStopDelta(-50, -1432, 778, near, far)).toBe(0)
+  })
+
+  it('pulling back stops the first tile at the near edge', () => {
+    expect(laneStopDelta(5000, -1432, 778, near, far)).toBe(1488)
+  })
+
+  it('mid-strip, travel is free both ways', () => {
+    expect(laneStopDelta(120, -400, 1810, near, far)).toBe(120)
+    expect(laneStopDelta(-120, -400, 1810, near, far)).toBe(-120)
+  })
+
+  it('a strip that already fits the window stands still', () => {
+    expect(laneStopDelta(200, 126, 394, near, far)).toBe(0)
+    expect(laneStopDelta(-200, 126, 394, near, far)).toBe(0)
+  })
+
+  it('a strip left out of place only moves back toward the window — never jumps', () => {
+    // A re-render left a gap under the last tile: pulling is free, pushing is not.
+    expect(laneStopDelta(0, -1600, 600, near, far)).toBe(0)
+    expect(laneStopDelta(-40, -1600, 600, near, far)).toBe(0)
+    expect(laneStopDelta(40, -1600, 600, near, far)).toBe(40)
+    // A short strip hanging above the top comes down to it and no further.
+    expect(laneStopDelta(500, -100, 168, near, far)).toBe(156)
   })
 })
 

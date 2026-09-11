@@ -137,6 +137,30 @@
   border-top-color: transparent;
 
   &::before { display: none; }
+
+  // …but the LEFT RAIL RUNS ON UP behind the mark, so the mark sits on the
+  // rail's column rather than floating over the hive (Jaime, 2026-09-10). The
+  // rail itself cannot reach: its fixed stage shares the header's z-index and
+  // comes later, so anything it drew up here would paint OVER the mark. The
+  // header paints the rail's top instead — the same ground (the rail
+  // gradient's first stop) and the same one right rule as controls-bar
+  // `.dock-left .controls-pill.column` — exactly the rail's measured width.
+  // `--hc-controls-left` is 0 unless the bar is docked left, so nothing is
+  // drawn otherwise (the rule's width is capped by it too). Divided by the
+  // header zoom: this box is zoomed, the rail is not.
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: -1;
+    box-sizing: border-box;
+    width: calc(var(--hc-controls-left, 0px) / var(--hc-header-zoom, 1));
+    background: color-mix(in srgb, var(--md-surface-c-low) 90%, transparent);
+    border-right: min(calc(1px / var(--hc-header-zoom, 1)), var(--hc-controls-left, 0px))
+      solid color-mix(in srgb, var(--md-outline-variant) 70%, transparent);
+  }
 }
 
 // ── hci icon font ────────────────────────────────────────

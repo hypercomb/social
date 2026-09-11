@@ -24,10 +24,14 @@
 // registers at runtime appears in the Beehaviors list for free, with its own
 // label, icon and description, and no edit here.
 //
-// ── The three surfaces a dormant game must vanish from ───────────────
+// ── The three surfaces a dormant game answers on ─────────────────────
 //
 //   • the header icon      — the drone emits `available:false`
-//   • the launch group     — `gameDormant` on the bee, read by games-group
+//   • the launch group     — `gameDormant` on the bee, read by games-group.
+//                            The tile STAYS on /games, painted as a hidden
+//                            tile, and its unhide relights `behaviorKind`.
+//                            Never drop it: the page's children are derived,
+//                            so a dropped tile is beyond undo's reach.
 //   • `/<gameId>`          — the queen refuses, and SAYS SO
 //
 // The last one is deliberate and is the one exception to "off is silent".

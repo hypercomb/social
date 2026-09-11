@@ -37,6 +37,9 @@ checklist
 bubble_chart
 conversion_path
 edit_document
+# the Revolución site's toggle + exit glyph — a decoration payload `icon`
+# written by scripts/intel-build-revolucion-site.ts, which ROOTS never scan
+local_fire_department
 sports_tennis
 touch_app
 view_carousel

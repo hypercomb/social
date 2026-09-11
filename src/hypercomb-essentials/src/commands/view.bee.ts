@@ -42,6 +42,7 @@ import { isFeatureHidden, isFeatureHiddenWithin } from '../sharing/feature-hidde
 import { isBehaviorDormant, ENABLEMENT_CHANGED, isPublishedVisitorShell } from '../sharing/behavior-enablement.js'
 import { DEFAULT_VIEW_DECORATION_KIND, normalizeViewToken } from './decoration-kind-index.js'
 import { defaultViewWithinAt } from './view-default.js'
+import { drawsAsGlyph } from './material-glyph.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 /** Fallback glyph when a view forgets to declare a Material toggleIcon. */
@@ -484,9 +485,13 @@ export class ViewBee extends Worker {
         if (hidden) continue
       }
 
+      // A site's own glyph comes from its DATA, and the icon font ships only the
+      // names the source uses — one it can't draw would be spelled out as a word
+      // on every surface this broadcast feeds, so it yields to the view's own.
+      const siteIcon = payloadIcon && drawsAsGlyph(payloadIcon) !== false ? payloadIcon : ''
       toggles.push({
         view: v.view,
-        icon: payloadIcon || v.toggleIcon || FALLBACK_TOGGLE_ICON,
+        icon: siteIcon || v.toggleIcon || FALLBACK_TOGGLE_ICON,
         label: payloadLabel || this.#label(v),
         active: vm.is(v.view),
         isDefault: !!defaultView && v.view === defaultView,

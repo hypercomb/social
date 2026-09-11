@@ -525,6 +525,11 @@
       </ng-template>
     }
 
+    <!-- THE CONVERSATION AREA: the thread, and on its right the sidebar that
+         draws the conversation's workflow working its way down
+         (documentation/chat-route.md §4). Two siblings, a scroller each — the
+         thread keeps its own flex column exactly as it was before the route. -->
+    <div class="chat-route-split">
     <!-- The scroller and the pill that rides over its bottom edge — the wrap
          exists to give the pill something to be positioned against that is not
          the whole panel (whose footer height moves with the panel scale). -->
@@ -532,16 +537,15 @@
     <!-- ONE delegated click for the whole transcript: rendered markdown is not
          a template, so its hive-path chips, code-copy buttons and links carry
          data attributes and are routed in the component. -->
-    <!-- THE ROUTE RIDES BESIDE THE THREAD (documentation/chat-route.md §4).
-         When there is something on it, the scroller becomes a two-column grid
-         — messages, then a narrow pipe — and EVERY row emits its message cell
-         and its route cell under the SAME condition, so a hidden column never
-         leaves a stray cell to auto-place. Below 701px the column is not
-         rendered at all (the rail's own query); the settled lines inside the
-         turns carry the decisions there. -->
     <div class="chat-thread" #scroller
-      [class.chat-thread-routed]="routeShown() && railVisible()"
+      [attr.data-route-steering]="routeSteering() ? '' : null"
       (scroll)="onScroll()" (click)="onThreadClick($event)">
+      <!-- THE START LINE (chat-route.md §4.4.3): while a pressed step holds, a
+           thread-wide rule marks where its active span begins. A child of the
+           scroller, so it scrolls with the rows and takes no flex gap. -->
+      @if (routeAnchorTop() !== null) {
+        <div class="chat-route-anchor" aria-hidden="true" [style.top.px]="routeAnchorTop()"></div>
+      }
       @if (empty()) {
         <p class="chat-empty">{{ 'chat.empty' | t }}</p>
       }
@@ -549,7 +553,8 @@
         <div class="chat-msg"
           [class.user]="entry.turn.role === 'user'"
           [class.ai]="entry.turn.role === 'assistant'"
-          [class.chat-route-lit]="routeCard()?.row === entry.index">
+          [class.chat-route-lit]="routeLitRows().has(entry.index)"
+          [attr.data-route-row]="entry.index">
           <div class="chat-msg-text" [innerHTML]="entry.html"></div>
 
           <!-- THE QUESTION THE REPLY ASKED, drawn where its fence was — by
@@ -620,54 +625,6 @@
           </div>
         </div>
 
-        <!-- THE ROW'S PIECES. The reply's own runs (joined on the turn's sig
-             — a turn not yet read back gets none), the junction if it asked
-             a question, then any run no reply followed that came after this
-             row. The pipe itself is the cell's pseudo-elements, so it runs
-             through rows with nothing on them; below an open junction it is
-             dashed. -->
-        @if (routeShown() && railVisible()) {
-          <div class="chat-route-cell" [class.chat-route-cell-open]="entry.question?.state === 'open'">
-            @for (piece of workOf(entry); track piece.runId) {
-              <ng-container *ngTemplateOutlet="workPiece; context: { $implicit: piece, row: entry.index, kind: 'work', key: 'w:' + piece.runId }"></ng-container>
-            }
-            @if (entry.question; as question) {
-              <span class="chat-route-piece chat-route-junction"
-                [class.chat-route-junction-open]="question.state === 'open'"
-                [attr.data-route-key]="'j:' + entry.index"
-                [tabindex]="isRouteTab('j:' + entry.index) ? 0 : -1"
-                [attr.aria-label]="'chat.route.junction' | t: { prompt: question.prompt }"
-                (mouseenter)="showRouteCard($event, { row: entry.index, kind: 'junction', question })"
-                (mouseleave)="hideRouteCard()"
-                (focus)="onRouteFocusIn($event, { row: entry.index, kind: 'junction', question })"
-                (blur)="onRouteFocusOut($event)"
-                (keydown)="onRouteKey($event)">
-                <!-- The card-game shape: a square card the pipe enters from
-                     the top, its outlets fanned to the bottom edge. Open →
-                     each outlet dashed; settled → the chosen one continues
-                     and the others are CAPPED (a bar); superseded → all
-                     capped. currentColor throughout, so the theme decides. -->
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                  <rect x="1" y="1" width="22" height="22" rx="3"></rect>
-                  <line x1="12" y1="1" x2="12" y2="8"></line>
-                  @for (outlet of outletsOf(question); track $index) {
-                    <line x1="12" y1="8" [attr.x2]="outlet.x" y2="16"></line>
-                    @if (outlet.state === 'capped') {
-                      <line class="chat-route-cap" [attr.x1]="outlet.x - 2" y1="18" [attr.x2]="outlet.x + 2" y2="18"></line>
-                    } @else {
-                      <line [attr.x1]="outlet.x" y1="16" [attr.x2]="outlet.x" y2="23"
-                        [class.chat-route-taken]="outlet.state === 'taken'"
-                        [class.chat-route-outlet-open]="outlet.state === 'open'"></line>
-                    }
-                  }
-                </svg>
-              </span>
-            }
-            @for (piece of unfinishedAfter(entry.index); track piece.runId) {
-              <ng-container *ngTemplateOutlet="workPiece; context: { $implicit: piece, row: entry.index, kind: 'unfinished', key: 'u:' + piece.runId }"></ng-container>
-            }
-          </div>
-        }
       }
       <!-- An answer arriving from the host tier, a chunk at a time. Not a turn
            until the stream closes and the text is on disk. `data-streaming`
@@ -676,9 +633,6 @@
         <div class="chat-msg ai" data-streaming aria-live="polite">
           <div class="chat-msg-text" [innerHTML]="streamHtml()"></div>
         </div>
-        @if (routeShown() && railVisible()) {
-          <div class="chat-route-cell"></div>
-        }
       } @else if (waiting()) {
         <!-- THE WAIT, TOLD HONESTLY. How long it has been, whether anything is
              actually listening, and a way out of it. -->
@@ -688,67 +642,10 @@
           }}</span>
           <span class="chat-wait-clock">{{ elapsedLabel() }}</span>
         </div>
-        <!-- The LIVE run — what the outstanding ask is doing right now — sits
-             in the wait row and grows as its steps land. -->
-        @if (routeShown() && railVisible()) {
-          <div class="chat-route-cell">
-            @if (route()?.live; as live) {
-              <ng-container *ngTemplateOutlet="workPiece; context: { $implicit: live, row: -1, kind: 'live', key: 'live' }"></ng-container>
-            }
-          </div>
-        }
         @if (unattended()) {
           <p class="chat-wait-hint">{{ 'chat.unattended.hint.wait' | t }}</p>
         }
       }
-      <!-- THE END of the pipe: open while the conversation goes on, a cap
-           once the goal receipt lands or while the thread is put away. Both
-           are states the participant can reverse, and the cap says so. -->
-      @if (routeShown() && railVisible()) {
-        <div class="chat-route-cell chat-route-cell-end" [class.chat-route-cell-capped]="routeEnd() !== 'open'">
-          @if (routeEnd() !== 'open') {
-            <span class="chat-route-piece chat-route-end"
-              data-route-key="end"
-              [tabindex]="isRouteTab('end') ? 0 : -1"
-              [attr.aria-label]="(routeEnd() === 'goal' ? 'chat.route.end.goal' : 'chat.route.end.archived') | t"
-              (mouseenter)="showRouteCard($event, { row: -1, kind: 'end' })"
-              (mouseleave)="hideRouteCard()"
-              (focus)="onRouteFocusIn($event, { row: -1, kind: 'end' })"
-              (blur)="onRouteFocusOut($event)"
-              (keydown)="onRouteKey($event)">
-              <span class="mat-sym" aria-hidden="true">{{ endIcon() }}</span>
-            </span>
-          }
-        </div>
-      }
-
-      <!-- ONE SHAPE for every work piece: a run, however many attempts it
-           holds, with the count and — when any attempt failed — a broken
-           outline and the error glyph. The label names the failure in words
-           (§3.4); the card lists the attempts in order. A span, never a
-           button: a button on a phone takes a 44px floor. -->
-      <ng-template #workPiece let-piece let-row="row" let-kind="kind" let-key="key">
-        <span class="chat-route-piece chat-route-work"
-          [class.chat-route-leak]="piece.leak"
-          [class.chat-route-progress]="piece.inProgress || kind === 'live'"
-          [class.chat-route-unfinished]="kind === 'unfinished' && !piece.inProgress"
-          [attr.data-route-key]="key"
-          [tabindex]="isRouteTab(key) ? 0 : -1"
-          [attr.aria-label]="pieceLabel(piece, kind)"
-          (mouseenter)="showRouteCard($event, { row, kind, piece })"
-          (mouseleave)="hideRouteCard()"
-          (focus)="onRouteFocusIn($event, { row, kind, piece })"
-          (blur)="onRouteFocusOut($event)"
-          (keydown)="onRouteKey($event)">
-          <span class="mat-sym" aria-hidden="true">{{ pieceIcon(piece) }}</span>
-          @if (piece.attempts.length > 1) {
-            <span class="chat-route-count" aria-hidden="true">{{ piece.attempts.length }}</span>
-          }
-          @if (piece.leak) {
-            <span class="mat-sym chat-route-error" aria-hidden="true">error</span>
-          }
-        </span>
-      </ng-template>
     </div>
 
     <!-- Scrolled up to read something: arrivals stop moving the view, and this
@@ -759,6 +656,389 @@
         <span class="mat-sym" aria-hidden="true">arrow_downward</span>
         <span>{{ 'chat.scrollDown' | t }}</span>
       </button>
+    }
+    </div>
+
+    <!-- THE SIDEBAR — the conversation's workflow, working its way down
+         (documentation/chat-route.md §4). One column: the TREE viewport on top
+         and the SUMMARY PANE under it. The tree is the flow's tasks in
+         preorder, each branch one step in with the pipe elbowing into it; then,
+         on the main line, one dormant card per exchange not organized yet, the
+         live run or the wait, and the end. Never a message's words. The
+         viewport pulls and pans; pressing a card makes it the current step,
+         says where it stands in the pane and moves the thread to its messages.
+         One tab stop and the ARIA tree keys; the column holds the keymap while
+         focus is anywhere inside it. Below 701px it is not rendered at all (the
+         rail's own query) — the settled lines inside the turns carry the
+         decisions there. -->
+    @if (routeSideShown()) {
+      <div class="chat-route-col"
+        (focusin)="onRouteColFocusIn()"
+        (focusout)="onRouteColFocusOut($event)"
+        (pointerenter)="routePointerInside = true"
+        (pointerleave)="routePointerInside = false">
+        <nav class="chat-route-side" #routeSide data-route-viewport
+          [class.chat-route-pulling]="routePulling()"
+          [attr.data-route-follow]="routeFollowing()"
+          [attr.aria-label]="'chat.route.side' | t"
+          (scroll)="onRouteSideScroll()"
+          (wheel)="onRouteSideWheel($event)"
+          (pointerdown)="onRouteSidePointerDown($event)"
+          (pointermove)="onRouteSidePointerMove($event)"
+          (pointerup)="onRouteSidePointerUp($event)"
+          (pointercancel)="onRouteSidePointerUp($event)">
+          <div class="chat-route-canvas" role="tree"
+            [attr.aria-label]="'chat.route.side' | t"
+            [attr.data-route-cols]="routeTree().cols"
+            [attr.data-route-rows]="routeTree().rows">
+            <!-- The free pipe cells: a trunk passing a row by, an elbow's
+                 horizontal run. Grid cells with segment spans, so the joints
+                 meet at any text size with nothing measured (routePipes). -->
+            @for (pipe of routeTree().pipes; track pipe.key) {
+              <span class="chat-route-pipe" aria-hidden="true"
+                [attr.data-route-x]="pipe.x"
+                [attr.data-route-y]="pipe.y"
+                [attr.data-route-pipe]="pipe.sides"
+                [style.grid-row]="pipe.y + 1"
+                [style.grid-column]="pipe.x + 1">
+                @for (seg of pipe.segs; track seg.side) {
+                  <span class="chat-route-seg" [attr.data-seg]="seg.side" [class.chat-route-seg-dashed]="seg.dashed"></span>
+                }
+              </span>
+            }
+            @for (item of routeTree().items; track item.key) {
+              <!-- A div with a role, never a button: a button takes the phone's
+                   44px floor. It runs from its column to the canvas's inline
+                   end, so a deeper card is one step narrower. -->
+              <div class="chat-route-item" role="treeitem"
+                [class.chat-route-node]="item.kind === 'node'"
+                [class.chat-route-branch]="item.kind === 'node' && item.x > 0"
+                [class.chat-route-collapsed]="item.collapsed"
+                [class.chat-route-state-done]="item.node?.state === 'done'"
+                [class.chat-route-state-open]="item.node?.state === 'open'"
+                [class.chat-route-state-decided]="item.node?.state === 'decided'"
+                [class.chat-route-state-dropped]="item.node?.state === 'dropped'"
+                [class.chat-route-stage]="item.kind === 'stage'"
+                [class.chat-route-dormant]="item.kind === 'stage'"
+                [class.chat-route-junction-open]="routeQuestionOpen(item)"
+                [class.chat-route-leak]="!!item.piece?.leak"
+                [class.chat-route-progress]="item.kind === 'live' || item.kind === 'wait'"
+                [class.chat-route-end]="item.kind === 'end'"
+                [class.chat-route-end-open]="item.kind === 'end' && routeEnd() === 'open'"
+                [class.chat-route-dashed]="item.dashed"
+                [class.chat-route-current]="routeCurrent()?.key === item.key"
+                [attr.data-route-key]="item.key"
+                [attr.data-route-kind]="item.kind"
+                [attr.data-route-row]="item.row"
+                [attr.data-route-x]="item.x"
+                [attr.data-route-y]="item.y"
+                [attr.data-route-joint]="item.jointSides"
+                [attr.data-route-node]="item.node?.id ?? null"
+                [attr.data-route-parent]="item.parent ?? null"
+                [attr.data-route-depth]="item.node ? item.x + 1 : null"
+                [attr.data-route-state]="item.node?.state ?? null"
+                [attr.data-route-turns]="item.node ? item.rows.join(',') : null"
+                [attr.data-route-card]="item.node ? routeCardState(item.node) : null"
+                [attr.aria-level]="item.level"
+                [attr.aria-setsize]="item.setSize"
+                [attr.aria-posinset]="item.posInSet"
+                [attr.aria-expanded]="item.descendants ? !item.collapsed : null"
+                [attr.aria-selected]="routeCurrent()?.key === item.key"
+                [attr.aria-describedby]="routeCurrent()?.key === item.key ? 'chat-route-summary-state chat-route-summary-outcome' : null"
+                [attr.aria-label]="routeItemLabel(item)"
+                [attr.title]="item.node?.title || null"
+                [style.grid-row]="item.y + 1"
+                [style.grid-column]="(item.x + 1) + ' / -1'"
+                [tabindex]="isRouteStop(item.key) ? 0 : -1"
+                (click)="onRouteItemClick(item)"
+                (focus)="onRouteItemFocus(item)"
+                (keydown)="onRouteItemKey($event, item)">
+                <!-- The joint (the pipe into this card) and the stem (the pipe
+                     on below it), from routePipes. -->
+                @for (seg of item.joint; track seg.side) {
+                  <span class="chat-route-seg" aria-hidden="true" [attr.data-seg]="seg.side" [class.chat-route-seg-dashed]="seg.dashed"></span>
+                }
+                @if (item.stem; as stem) {
+                  <span class="chat-route-stem" aria-hidden="true" [class.chat-route-seg-dashed]="stem.dashed"></span>
+                }
+                <span class="chat-route-piece" aria-hidden="true">
+                  @switch (item.kind) {
+                    @case ('node') {
+                      @if (item.node; as node) { <span class="mat-sym">{{ nodeIcon(node.state) }}</span> }
+                    }
+                    @case ('stage') { <span class="mat-sym">person</span> }
+                    @case ('wait') { <span class="mat-sym">hourglass_empty</span> }
+                    @case ('end') {
+                      <!-- Open is an open-ended card with nothing in it; the
+                           caps say goal reached or put away. -->
+                      @if (routeEnd() !== 'open') { <span class="mat-sym">{{ endIcon() }}</span> }
+                    }
+                    @case ('live') {
+                      <!-- The live run: its glyph, its growing count, and a
+                           broken outline and the error glyph on a leak. -->
+                      @if (item.piece; as piece) {
+                        <span class="mat-sym">{{ pieceIcon(piece) }}</span>
+                        @if (piece.attempts.length > 1) {
+                          <span class="chat-route-count">{{ piece.attempts.length }}</span>
+                        }
+                        @if (piece.leak) {
+                          <span class="mat-sym chat-route-error">error</span>
+                        }
+                      }
+                    }
+                  }
+                </span>
+                <span class="chat-route-caption">
+                  @switch (item.kind) {
+                    <!-- A task is titled in the local model's words; a stage
+                         the flow has not read says nothing — dormant. -->
+                    @case ('node') {
+                      @if (item.node; as node) {
+                        <span class="chat-route-title">{{ node.title || ('chat.route.flow.untitled' | t) }}</span>
+                        @if (item.descendants) {
+                          @if (item.collapsed) { <span class="chat-route-hidden">+{{ item.descendants }}</span> }
+                          <span class="mat-sym chat-route-fold" aria-hidden="true"
+                            [title]="'chat.route.flow.fold' | t"
+                            (click)="onRouteFoldClick($event, item)">{{ foldIcon(item) }}</span>
+                        }
+                      }
+                    }
+                    @case ('live') { {{ 'chat.route.live' | t }} }
+                    @case ('wait') { {{ 'chat.route.waiting' | t }} }
+                    @case ('end') { {{ endLabelKey() | t }} }
+                  }
+                </span>
+                <!-- The exchange's pieces as marks, in the order work → replied
+                     → question: ONE work mark with every attempt counted, a
+                     replied mark on a stage, ONE question mark with a count. -->
+                @if ((item.kind === 'node' || item.kind === 'stage') && (item.runs.length || item.questions.length || (item.kind === 'stage' && item.replyRow >= 0))) {
+                  <span class="chat-route-node-pieces" aria-hidden="true">
+                    @if (routeWorkOf(item); as work) {
+                      <span class="chat-route-mini" data-route-mini="work"
+                        [class.chat-route-mini-leak]="work.leak"
+                        [attr.title]="pieceLabel(work.first, 'work')">
+                        <span class="mat-sym">{{ pieceIcon(work.first) }}</span>{{ work.count }}
+                        @if (work.leak) { <span class="mat-sym">error</span> }
+                      </span>
+                    }
+                    @if (item.kind === 'stage' && item.replyRow >= 0) {
+                      <span class="chat-route-mini" data-route-mini="reply"
+                        [attr.title]="'chat.route.repliedHead' | t"><span class="mat-sym">chat_bubble</span></span>
+                    }
+                    @if (item.questions.length) {
+                      <span class="chat-route-mini" data-route-mini="junction"
+                        [class.chat-route-mini-open]="routeQuestionOpen(item)"
+                        [attr.title]="'chat.route.junction' | t: { prompt: item.questions[item.questions.length - 1]!.prompt }">
+                        <span class="mat-sym">alt_route</span>
+                        @if (item.questions.length > 1) { <span>{{ item.questions.length }}</span> }
+                      </span>
+                    }
+                  </span>
+                }
+              </div>
+            }
+          </div>
+        </nav>
+
+        <!-- THE SUMMARY PANE (§4.4) — the full state of the CURRENT step, never
+             what the pointer happens to be over. Where it stands comes first;
+             then its branches one line each; goal and what was done one press
+             away; its decisions and its work. A fixed height, so a change of
+             step never resizes the tree above. Never live; every string is
+             interpolated, never innerHTML. -->
+        <section class="chat-route-summary" #routeSummary
+          [attr.aria-label]="'chat.route.summary.region' | t"
+          [attr.data-route-current]="routeCurrent()?.key ?? ''"
+          [attr.data-route-source]="routeCurrent()?.source ?? ''"
+          [attr.data-route-summary-state]="routeSummaryState()"
+          [attr.data-route-organizer]="route()?.organizerState ?? null">
+          @if (routeCurrentItem(); as item) {
+            <h3 class="chat-route-summary-head">
+              @switch (item.kind) {
+                @case ('node') {
+                  @if (item.node; as node) {
+                    <span class="mat-sym" aria-hidden="true">{{ nodeIcon(node.state) }}</span>
+                    <span>{{ node.title || ('chat.route.flow.untitled' | t) }}</span>
+                  }
+                }
+                @case ('stage') {
+                  <span class="mat-sym" aria-hidden="true">person</span>
+                  <span>{{ 'chat.route.dormant' | t }}</span>
+                }
+                @case ('live') {
+                  @if (item.piece; as piece) { <span class="mat-sym" aria-hidden="true">{{ pieceIcon(piece) }}</span> }
+                  <span>{{ 'chat.route.live' | t }}</span>
+                }
+                @case ('wait') {
+                  <span class="mat-sym" aria-hidden="true">hourglass_empty</span>
+                  <span>{{ 'chat.route.waiting' | t }}</span>
+                }
+                @case ('end') {
+                  @if (routeEnd() !== 'open') { <span class="mat-sym" aria-hidden="true">{{ endIcon() }}</span> }
+                  <span>{{ endLabelKey() | t }}</span>
+                }
+              }
+            </h3>
+            @if (item.parent !== undefined) {
+              <p class="chat-route-summary-path">{{ 'chat.route.summary.partOf' | t: { path: routePathOf(item) } }}</p>
+            }
+            <!-- The state line: the display state, and a chip per run of the
+                 step's messages. -->
+            <p class="chat-route-summary-state" id="chat-route-summary-state">
+              @if (item.node; as node) {
+                <span>{{ routeStateKey(node.state) | t }}</span>
+              } @else if (item.kind === 'end') {
+                <span>{{ endHintKey() | t }}</span>
+              }
+              @if (routeSpans().length) {
+                <span class="chat-route-summary-spans">
+                  @for (span of routeSpans(); track $index) {
+                    <button type="button" class="chat-route-span"
+                      [class.chat-route-span-at]="routeSpanAt() === $index"
+                      [attr.aria-current]="routeSpanAt() === $index ? 'true' : null"
+                      [attr.data-route-span]="$index"
+                      [attr.data-route-rows]="span.join(',')"
+                      [attr.aria-label]="'chat.route.summary.goto' | t: { range: routeTurnRange(span) }"
+                      (click)="onRouteSpan($index)">{{ routeTurnRange(span) }}</button>
+                  }
+                </span>
+              }
+            </p>
+            <div class="chat-route-summary-body">
+              @if (item.node; as node) {
+                @if (node.card; as card) {
+                  <p class="chat-route-summary-outcome" id="chat-route-summary-outcome">
+                    <span class="chat-route-summary-label">{{ 'chat.route.summary.outcome' | t }}</span>{{ card.outcome }}
+                  </p>
+                  @if (routeNewer()) {
+                    <p class="chat-route-summary-newer">{{ 'chat.route.summary.newer' | t: { count: routeNewer() } }}</p>
+                  }
+                  @if (card.stale) {
+                    <p class="chat-route-summary-older">{{ 'chat.route.summary.older' | t: { count: card.exchanges ?? 0 } }}</p>
+                  }
+                  @if (routeStatus(); as status) {
+                    <p class="chat-route-summary-status">{{ status.key | t: status.params }}</p>
+                  }
+                } @else {
+                  <!-- No card: the status line stands in the outcome's place. -->
+                  @if (routeStatus(); as status) {
+                    <p class="chat-route-summary-status" id="chat-route-summary-outcome">{{ status.key | t: status.params }}</p>
+                  } @else if (node.detail) {
+                    <p class="chat-route-summary-outcome" id="chat-route-summary-outcome">{{ node.detail }}</p>
+                  }
+                  @if (routeNewer()) {
+                    <p class="chat-route-summary-newer">{{ 'chat.route.summary.newer' | t: { count: routeNewer() } }}</p>
+                  }
+                }
+                <!-- One line per branch, from the RECORD — its title and state,
+                     never model text — each pressable: its own pane leads with
+                     its own outcome. -->
+                @if (routeBranchesOf(item).length) {
+                  <div class="chat-route-summary-branches" role="group"
+                    [attr.aria-label]="'chat.route.summary.branches' | t">
+                    <span class="chat-route-summary-label" aria-hidden="true">{{ 'chat.route.summary.branches' | t }}</span>
+                    @for (branch of routeBranchesOf(item); track branch.id) {
+                      <div class="chat-route-summary-branch" role="button" tabindex="0"
+                        [attr.data-route-node]="branch.id"
+                        [attr.data-route-state]="branch.state"
+                        [attr.title]="branch.title || null"
+                        (click)="pressRouteBranch(branch.id)"
+                        (keydown)="onRouteBranchKey($event, branch.id)">
+                        <span class="mat-sym" aria-hidden="true">{{ nodeIcon(branch.state) }}</span>
+                        <span class="chat-route-summary-branch-title">{{ 'chat.route.flow.node' | t: { title: branch.title || ('chat.route.flow.untitled' | t), state: (routeStateKey(branch.state) | t) } }}</span>
+                      </div>
+                    }
+                  </div>
+                }
+                @if (node.card; as card) {
+                  <details class="chat-route-summary-more" [open]="routeMoreOpen()" (toggle)="onRouteMoreToggle($event)">
+                    <summary>{{ 'chat.route.summary.more' | t }}</summary>
+                    <p class="chat-route-summary-goal">
+                      <span class="chat-route-summary-label">{{ 'chat.route.summary.goal' | t }}</span>{{ card.goal }}
+                    </p>
+                    <p class="chat-route-summary-done">
+                      <span class="chat-route-summary-label">{{ 'chat.route.summary.done' | t }}</span>{{ card.done }}
+                    </p>
+                  </details>
+                }
+              } @else if (item.kind === 'stage') {
+                @if (routeStatus(); as status) {
+                  <p class="chat-route-summary-status" id="chat-route-summary-outcome">{{ status.key | t: status.params }}</p>
+                }
+              }
+            </div>
+            @if (item.collapsed) {
+              <p class="chat-route-summary-folded">{{ 'chat.route.flow.hidden' | t: { count: item.descendants } }}</p>
+            }
+            @if (item.kind === 'stage' && item.replyRow >= 0) {
+              <p class="chat-route-summary-item chat-route-summary-replied" [attr.data-route-key]="'r:' + item.replyRow">
+                <span class="mat-sym" aria-hidden="true">chat_bubble</span>{{ 'chat.route.repliedHead' | t }}
+              </p>
+            }
+            <!-- Every question the step asked: the answer taken, went on
+                 without an answer, or the open prompt — pressable, to answer it
+                 in the thread. -->
+            @if (item.questions.length) {
+              <div class="chat-route-summary-decided">
+                <span class="chat-route-summary-label">{{ 'chat.route.summary.decided' | t }}</span>
+                <ul role="none">
+                  @for (question of item.questions; track question.index) {
+                    @if (question.state === 'open') {
+                      <li class="chat-route-summary-item chat-route-summary-open" role="button" tabindex="0"
+                        [attr.data-route-key]="'j:' + question.index"
+                        (click)="pressRouteQuestion(question)"
+                        (keydown)="onRouteQuestionKey($event, question)">
+                        <span class="chat-question-mark" aria-hidden="true">◆</span>{{ question.prompt }}
+                      </li>
+                    } @else {
+                      <li class="chat-route-summary-item" [attr.data-route-key]="'j:' + question.index">
+                        <span class="chat-question-mark" aria-hidden="true">◆</span>@if (question.state === 'settled') { {{ 'chat.question.answered' | t: { prompt: question.prompt, answer: answerOf(question) } }} } @else { {{ 'chat.question.superseded' | t: { prompt: question.prompt } }} }
+                      </li>
+                    }
+                  }
+                </ul>
+              </div>
+            }
+            <!-- Every run, unfinished ones included, and its attempts in order.
+                 A failure is loud and says "failed". -->
+            @if (item.runs.length) {
+              <div class="chat-route-summary-work">
+                <span class="chat-route-summary-label">{{ 'chat.route.summary.work' | t: { count: routeAttemptCount(item) } }}@if (routeLeakCount(item); as leaks) { · {{ 'chat.route.summary.leaks' | t: { count: leaks } }} }</span>
+                @for (run of item.runs; track $index) {
+                  <div class="chat-route-summary-item"
+                    [attr.data-route-key]="(item.unfinished.has(run.runId) ? 'u:' : 'w:') + run.runId">
+                    @if (item.kind === 'live') {
+                      <span class="chat-route-summary-meta">{{ 'chat.route.live' | t }}</span>
+                    } @else if (run.inProgress) {
+                      <span class="chat-route-summary-meta">{{ 'chat.route.inProgress' | t }}</span>
+                    } @else if (item.unfinished.has(run.runId)) {
+                      <span class="chat-route-summary-meta">{{ 'chat.route.unfinished' | t }}</span>
+                    }
+                    @if (run.placedByTime) {
+                      <span class="chat-route-summary-meta">{{ 'chat.route.placedByTime' | t }}</span>
+                    }
+                    <ol>
+                      @for (attempt of run.attempts; track $index) {
+                        <li class="chat-route-summary-attempt" [attr.data-outcome]="attempt.outcome">
+                          <span class="chat-route-summary-verb">{{ attempt.verb }}</span>
+                          @if (attempt.cell) { <span class="chat-route-summary-cell">{{ attempt.cell }}</span> }
+                          <span class="chat-route-summary-result">{{ (attempt.outcome === 'failed' ? 'chat.route.failed' : 'chat.route.ok') | t }}</span>
+                          @if (attempt.error) { <span class="chat-route-summary-error">{{ attempt.error }}</span> }
+                        </li>
+                      }
+                    </ol>
+                  </div>
+                }
+              </div>
+            }
+            @if (item.node && route()?.flow?.model; as model) {
+              <p class="chat-route-summary-by">{{ 'chat.route.summary.by' | t: { model: model, count: route()?.flow?.upToTurnCount ?? 0 } }}@if (routeCardBy(item); as cardModel) { · <span class="chat-route-summary-card-by">{{ 'chat.route.summary.cardBy' | t: { model: cardModel } }}</span> }</p>
+            }
+          } @else {
+            <p class="chat-route-summary-empty">{{ 'chat.route.summary.empty' | t }}</p>
+          }
+        </section>
+      </div>
     }
     </div>
 
@@ -887,67 +1167,5 @@
       </div>
     }
 
-    <!-- THE ROUTE'S CARD — what a piece holds, shown on hover and on focus.
-         One for the window, a child of the PANEL rather than of the scroller
-         (which clips absolute children), placed from the piece's rect in the
-         panel's own coordinates and taken away on scroll. -->
-    @if (routeCard(); as card) {
-      <div class="chat-route-card" role="tooltip"
-        [style.left.px]="card.x" [style.top.px]="card.y">
-        @switch (card.kind) {
-          @case ('junction') {
-            @if (card.question; as question) {
-              <p class="chat-route-card-head">
-                <span class="mat-sym" aria-hidden="true">alt_route</span>{{ question.prompt }}
-              </p>
-              <ul class="chat-route-card-list">
-                @for (option of question.options; track $index) {
-                  <li [class.chat-route-card-taken]="question.state === 'settled' && question.outlet === $index"
-                    [class.chat-route-card-capped]="question.state !== 'open' && question.outlet !== $index">{{ option }}</li>
-                }
-              </ul>
-              <p class="chat-route-card-state">
-                @if (question.state === 'open') { {{ 'chat.question.waiting' | t }} }
-                @else if (question.state === 'superseded') { {{ 'chat.route.superseded' | t }} }
-                @else { {{ 'chat.route.taken' | t: { answer: answerOf(question) } }} }
-              </p>
-            }
-          }
-          @case ('end') {
-            <p class="chat-route-card-head">
-              <span class="mat-sym" aria-hidden="true">{{ endIcon() }}</span>{{ (routeEnd() === 'goal' ? 'chat.route.end.goal' : 'chat.route.end.archived') | t }}
-            </p>
-            <p class="chat-route-card-state">{{ (routeEnd() === 'goal' ? 'chat.route.end.goalHint' : 'chat.route.end.archivedHint') | t }}</p>
-          }
-          @default {
-            @if (card.piece; as piece) {
-              <p class="chat-route-card-head">
-                <span class="mat-sym" aria-hidden="true">{{ pieceIcon(piece) }}</span>{{ 'chat.route.work' | t: { count: piece.attempts.length } }}
-              </p>
-              @if (card.kind === 'live') {
-                <p class="chat-route-card-state">{{ 'chat.route.live' | t }}</p>
-              } @else if (piece.inProgress) {
-                <p class="chat-route-card-state">{{ 'chat.route.inProgress' | t }}</p>
-              } @else if (card.kind === 'unfinished') {
-                <p class="chat-route-card-state">{{ 'chat.route.unfinished' | t }}</p>
-              }
-              @if (piece.placedByTime) {
-                <p class="chat-route-card-state">{{ 'chat.route.placedByTime' | t }}</p>
-              }
-              <ol class="chat-route-card-list">
-                @for (attempt of piece.attempts; track attempt.seq) {
-                  <li [class.chat-route-card-failed]="attempt.outcome === 'failed'">
-                    <span class="chat-route-card-verb">{{ attempt.verb }}</span>
-                    @if (attempt.cell) { <span class="chat-route-card-cell">{{ attempt.cell }}</span> }
-                    <span class="chat-route-card-outcome">{{ (attempt.outcome === 'failed' ? 'chat.route.failed' : 'chat.route.ok') | t }}</span>
-                    @if (attempt.error) { <span class="chat-route-card-error">{{ attempt.error }}</span> }
-                  </li>
-                }
-              </ol>
-            }
-          }
-        }
-      </div>
-    }
   </aside>
 }

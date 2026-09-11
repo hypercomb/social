@@ -50,7 +50,20 @@ wrong way. Because only flat-top hexes pack into straight horizontal lanes and
 only point-top into vertical ones, **lane mode owns the hex orientation** while
 it is active and hands the participant's standing choice back when released.
 
-### P1c — Two rows of five, never six squeezed into one · **BUILT**
+### P1c — Two rows of five, never six squeezed into one · **BUILT 2026-07-31 · RETIRED · two rows RETURNED 2026-09-10**
+**Retired, then returned.** The chevron view row described below, built
+2026-07-31, was retired on 2026-09-01 (`0b8acb021`), when the chevron
+became the Views disc and its sheet (`mobile-rails-projection.md` §4), and
+removed on 2026-09-09 (`5c748adaa`), when the phone bar became Back · Add ·
+More. Two rows returned on 2026-09-10 in a new form: the bottom row is
+**Back · Face · Camera · Add · Tools** (the camera dead centre again), and
+Tools toggles a **tools row** above it on the same five columns — **Share ·
+Swarm · Tags · Pin · Fullscreen** — remembered (`hc:phone-tools-row`).
+Unlike the view row it is IN FLOW, so `--hc-controls-bottom` grows with it
+and nothing is lifted or covered, and no tap elsewhere closes it; in
+landscape both rows become columns down the left edge. Full shape:
+`mobile-one-column.md` (pass 5). The 2026-07-31 design, kept as history:
+
 The bottom bar is a **fixed five**: back · fit · **CAMERA** · view▲ · mesh,
 camera dead centre where the thumb lands. Everything that changes *how you see*
 moved one row up into a **pop-up view row** — fullscreen · lanes · rotate ·
@@ -127,9 +140,9 @@ to the card. Data-driven from marks, never a per-feature branch in the shell.
 | `sequence/sequence-cycle.drone.ts` | `lanes:set` / `lanes:step` / `lanes:off` effects (mobile-gated); lane direction from the DEVICE (`#landscape`), hex orientation aligned on engage and restored on release (with an echo guard so one act arranges once); `resize`/`orientationchange` re-lay the strip; toast names the rung; `lanes:changed {active, lanes}` published for chrome. |
 | `commands/lanes.queen.ts` | `/lanes`, `/lanes 1\|2\|3`, `/lanes off`. |
 | `navigation/zoom/pinch-zoom.input.ts` | In lane mode a pinch accumulates its ratio and steps the ladder at 1.35×, instead of being swallowed by the zoom lock. |
-| `ui/controls-bar/*` | Bottom five with the camera centred; the pop-up view row (fullscreen · lanes · rotate · arrange · pheromones), its toggle, tap-away close (capture phase — the canvas eats bubbling taps), and `--hc-mobile-row-lift`. Lane tap walks 3→2→1→3; long-press (contextmenu) releases lane mode. |
-| `selection/select-mode.drone.ts` | The select pill's `bottom` includes `--hc-mobile-row-lift`, so it rises with the view row. |
-| `i18n/*.json` | `controls.lanes`, `controls.view-row`, `controls.rotate`, `controls.arrange` in all 14 catalogs; `arrange.lanes.one/.other` (en + ja, matching the existing `arrange.*` scope). |
+| `ui/controls-bar/*` | Bottom five with the camera centred; the pop-up view row (fullscreen · lanes · rotate · arrange · pheromones), its toggle, tap-away close (capture phase — the canvas eats bubbling taps), and `--hc-mobile-row-lift`. Lane tap walks 3→2→1→3; long-press (contextmenu) releases lane mode. *View row retired 2026-09-01 (`0b8acb021`), removed 2026-09-09 (`5c748adaa`); two rows returned 2026-09-10 in a new form — bottom Back · Face · Camera · Add · Tools, tools row Share · Swarm · Tags · Pin · Fullscreen, in flow, remembered (`mobile-one-column.md`).* |
+| `selection/select-mode.drone.ts` | The select pill's `bottom` includes `--hc-mobile-row-lift`, so it rises with the view row. *The view row it rose with was removed 2026-09-09 (`5c748adaa`).* |
+| `i18n/*.json` | `controls.lanes`, `controls.view-row`, `controls.rotate`, `controls.arrange` in all 14 catalogs; `arrange.lanes.one/.other` (en + ja, matching the existing `arrange.*` scope). *`controls.view-row` now names the Tools cell for screen readers.* |
 
 **Verified live (dev-main-4258, 9 tiles, no OPFS wipe):** portrait ladder
 3 (3·3·3) → 2 (5·4) → 1 (single column of 9); landscape re-lays to a

@@ -14,9 +14,13 @@ export class EditorBackgroundProvider implements BackgroundProvider {
   #unsub: (() => void) | null = null
 
   constructor(requestRedraw: () => void) {
-    this.#unsub = EffectBus.on<{ active: boolean }>('editor:mode', ({ active }) => {
-      if (active !== this.#active) {
-        this.#active = active
+    // The blue wash belonged to the old modal editor, which hid the hive. The
+    // editor that fits into the view (a payload carrying `surface`) leaves the
+    // hive's own ground alone — that is what "seamless" has to mean.
+    this.#unsub = EffectBus.on<{ active: boolean; surface?: string }>('editor:mode', ({ active, surface }) => {
+      const covering = active && surface === undefined
+      if (covering !== this.#active) {
+        this.#active = covering
         requestRedraw()
       }
     })

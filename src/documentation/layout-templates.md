@@ -272,40 +272,72 @@ it can be destroyed. `forgetCreation` still exists and is that second act; the
 arrangement itself survives either way, because it is content and nobody owns a
 signature.
 
-### The library — five primitives, drawn one way
+### The library — six primitives, drawn one way
 
 **A layout is a division of space that was already being given.** The outermost
 panel is *implicit*, and this module never emits it: it is the **pane** in the
 designer and the viewport in a published page, and a container with nothing
 bound renders as its own page, unwrapped — `containerFor` hands the authored
 HTML straight back. Either way the container is already being drawn into
-somewhere. Binding a layout does not give it that space; it **divides** it.
+somewhere. Binding a layout does not give it that space; it **divides** it —
+or, with one hole, **anchors** a part in it.
 
-| Divides | | |
+| Shape | | |
 |---|---|---|
-| **in two** | `split` | two even shares — the one primitive with no self hole |
+| **in one** | `single` | one measured seat — the anchor a lone fragment lands in |
+| **in two** | `split` | two even shares |
 | | `rail` | a measured strip, and the rest |
 | **in three** | `thirds` | three even shares |
 | | `bookends` | a measured strip at each end, the rest between |
 | | `measure` | a measured strip in the middle, the rest at each end |
 
-**Two is the floor of the library.** A one-hole layout divides nothing — it
-puts one more box around the space. There was a `single` here that did exactly
-that, described as "the page, in a box of its own". Its one hole was the *self*
+`single` and `split` are the two with no self hole: they arrange parts without
+keeping a place for the container's own page.
+
+#### One hole is an anchor
+
+There was a `single` here once, and it was cut: its one hole was the *self*
 hole, where the container's own page goes, so no part could ever be seated into
-it; its `space` slider had no second child to space; and turning it moved
-nothing. A chip that divides nothing teaches the wrong thing about what a
-layout is.
+it, its `space` slider had nothing to space, and turning it moved nothing. Two
+became the floor.
 
-What `single` did carry was a padding and an alignment around an undivided
-page, and that goes with it: those belong to the page's own CSS, because a
-layout variable on a layout that divides nothing is not a layout variable.
+The floor was wrong about what a one-hole layout is **for**. It is not one more
+box around the space — it is the **target a lone fragment below seats into**,
+and the place the measurements around that one fragment are stated. Without it
+a container with one child had no honest shape to wear: a `split` leaves a dead
+half, and a nested `measure` seats the part into `before`, beside the space it
+was meant for. An even margin, a width or a height all had to be faked.
 
-**The floor is a curation rule, not a law of the format.** `parseLayoutTemplate`
-still accepts a one-hole record and `composeLayout` still draws one, and both
-must: a hive that bound `single` before it was cut resolves it by **signature**
-and never by name, so that container keeps rendering exactly as it did. Data
-never heals; a library is curated.
+| It gives one part | How |
+|---|---|
+| **an even inset** | `padding` on a `single` is one margin on all four sides |
+| **a measure** | its hole is **fixed**, at `100%` until moved: it fills its allotment and holds any extent it is given — a width in a row and, turned, the same bytes are a height. `justify` places it along the axis, `align` across |
+| **an anchor for what is nested** | measurements inherit, so a `single` at the top of a mixed arrangement is where `space` and `padding` are said once for every container below it |
+
+Its hole is a **member seat** and its key is `only` — a word no other primitive
+uses, so the anchor's `100%` cannot fall through into a `split`'s `one` and
+swallow the sibling beside it.
+
+The cascade the anchor relies on is **visible** now. `variablesAt(root, path)`
+reports, for every measurement a level reads, what the level declares, what it
+actually gets, and **which level said it** — or that it is the template's own
+default. The designer shows an undeclared value as that value with its origin
+(`2rem ↑ single`) instead of the bare word "inherited".
+
+A hive that bound the **old** `single` holds its bytes by **signature** and
+never by name, so that container keeps rendering exactly as it did:
+`parseLayoutTemplate` still accepts a one-hole self record and `composeLayout`
+still draws it. Data never heals; a library is curated.
+
+#### A template's default is the fallback, at every depth
+
+Only the root merges a template's defaults in; a nested level declares nothing
+until somebody moves something. A fixed hole used to fall back to `0px` there,
+so a nested `rail` had no rail and a nested `single` had no seat. Every hole now
+writes its own template default as the `var()` fallback —
+`flex:0 1 var(--hc-layout-rail,14rem)` — so a declaring ancestor still wins (a
+declared custom property inherits) and nothing collapses where nobody declared
+anything. `0px` stays the fallback only where the template gives no default.
 
 **Three is the ceiling, and that is a second idea — nesting, not
 implicitness.** Four even shares is `split` with a `split` in each hole; a
@@ -317,8 +349,9 @@ made of.
 There were twenty. Fifteen were another one turned, mirrored, or counted higher
 — `rows-two` was `split` on its side, `right-rail` was `left-rail` seen from
 the other end, `rows-four` was two `split`s — and the sixteenth divided nothing
-at all. A palette of twenty is a wall you read; a palette of five is a set of
-parts you build out of, and building is what this window is for.
+at all — until its hole became a seat. A palette of twenty is a wall you read;
+a palette of six is a set of parts you build out of, and building is what this
+window is for.
 
 What nesting cannot reach is a hole's own KIND. Fluid or fixed is a fact about
 the template, not a measurement, which is exactly why `rail`, `bookends` and
@@ -701,9 +734,36 @@ line up exactly and the workspace nests in what is left.
 
 ### The flex editor is the other side of the pane
 
-Select a container and a second window opens on the **right**, opposite the
-palette: the palette is what a container could *be*, this is how the one you
-picked *behaves*.
+Press the gallery toggle in the designer's header and a second window opens on
+the **right**, opposite the palette: the palette is what a container could
+*be*, this is how the one you picked *behaves*. It used to open by itself on
+every selection, which put a third window on screen the moment a design was
+touched. Comparing values is the rarer act, so it opens when asked, stays asked
+for (remembered), and shows whenever the designer is up with a container
+plugged in. The drone computes its previews only while it is showing.
+
+### The windows the designer manages
+
+The designer's header carries one toggle per window it manages — **targets**
+(what belongs in each hole), the flex **gallery**, and the **properties** sent
+across — each a drawn icon, lit while its window is up, so the header also
+answers "what else is open". Each asks, with a stamped intent, for the opposite
+of what its window last *reported*; nothing is a flip.
+
+The targets window is a **docked tool window** like its siblings. It was a
+fixed box pinned inboard of whatever else was docked on the right, which is how
+three windows on one edge came to stack into one another. It now takes a place
+in the right-hand lane (`attachDockedPanel`), resizes from its inner edge,
+carries the same settings gear, and reserves what it takes of the edge so the
+pane centres beside it. Only its body redraws on a state update — the header
+holds the gear.
+
+Every surface names **roles**, never colours: the panels through `tw.panel`,
+the workspace and its stage by minting the same identity and roles on
+`.ld-workspace`, and the designer's colours on purpose — the gold mark and the
+two wall colours — as `--ld-mark`, `--ld-fluid` and `--ld-fixed` through
+`tw.ink`, so they deepen under a bright look. The targets window restates the
+recipe in plain CSS, deep steel included.
 
 Five properties decide how a flexbox container arranges what is in it, and each
 is a row of an accordion. **Shut**, the row says what the axis does and what
@@ -802,10 +862,15 @@ said nothing, which reads as a broken window rather than as a rule.
 - A layout is drawn ONE way; the other three quarters are turns, and a turn is
   one variable on one level. The library therefore holds no mirror of anything
   it already holds, and no name in it may state a side.
-- The outermost panel is implicit, so a layout DIVIDES rather than wraps: no
-  built-in has fewer than two holes. That is a rule about the LIBRARY — the
-  format still accepts one hole, and must, so a binding made before the cut
-  keeps drawing.
+- The outermost panel is implicit, so a layout DIVIDES rather than wraps — with
+  one exception, `single`, whose one hole is a member SEAT and never the self
+  hole: it anchors a lone part and states the inset and measure around it. Its
+  key is `only`, a word no other primitive uses. The format still accepts the
+  old one-hole self `single`, and must, so a binding made before the cut keeps
+  drawing.
+- A hole's `var()` fallback is its template's own default, so a nested level
+  that declares nothing keeps its measure. `0px` only where the template gives
+  none.
 - No built-in goes past three holes. The fourth is a nesting, and a nesting the
   participant keeps is a creation.
 - Nesting is a signature, through a typed envelope; nothing is ever inlined.
@@ -834,8 +899,8 @@ said nothing, which reads as a broken window rather than as a rule.
 - A pointer gesture walks the stack under it rather than choosing a layer: a
   click comes round at the bottom, the wheel stops at both ends.
 
-Covered by `presentation/tiles/layout-template.spec.ts` (77 tests),
-`presentation/tiles/layout-creations.spec.ts` (5 tests),
+Covered by `presentation/tiles/layout-template.spec.ts` (85 tests),
+`presentation/tiles/layout-creations.spec.ts` (8 tests),
 `presentation/tiles/layout-groups.spec.ts` (11 tests),
 `presentation/tiles/hole-target.spec.ts` (17 tests),
 `presentation/tiles/layout-piece.spec.ts` (11 tests),

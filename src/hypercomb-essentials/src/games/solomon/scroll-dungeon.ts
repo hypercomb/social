@@ -1,6 +1,10 @@
 // These ruins have their own rules: walk, read, interpret, and attune. They
 // deliberately share no platformer engine, jumps, block magic, or life meter.
 import type { SigilRequirement } from './labyrinth.js'
+import { CavernPainter, type CavernCamera, type CavernLight } from './cavern-paint.js'
+import { canvasContext } from './island-paint.js'
+import { drawPlace, type PlaceGlow, type PlaceSprite } from './island-places.js'
+import { PLAYER_LOOK, drawWalker, type WalkerFacing } from './island-sprites.js'
 
 type Cell = { col: number; row: number }
 export interface DungeonInput { up: boolean; down: boolean; left: boolean; right: boolean }
@@ -263,22 +267,47 @@ export interface ScrollDungeonOptions {
   onExit?(): void
 }
 
+interface Feature {
+  button: HTMLButtonElement
+  cell: Cell
+  art: CanvasRenderingContext2D | null
+  look(): readonly [PlaceSprite, PlaceGlow]
+  drawn: string
+}
+
+const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value))
+
+/** A cavern walked by torchlight, in the island's three-quarter view: the
+ *  explorer and every stone, gate and relic stand up off a painted floor, and
+ *  the dark gives way only around your torch and the sconces on the walls. */
 export class ScrollDungeonView {
   readonly model: ScrollDungeonModel
   readonly #element = document.createElement('section')
   readonly #viewport = document.createElement('div')
-  readonly #board = document.createElement('div')
-  readonly #player = document.createElement('div')
+  readonly #ground = document.createElement('canvas')
+  readonly #light = document.createElement('canvas')
+  readonly #layer = document.createElement('div')
+  readonly #player = document.createElement('canvas')
   readonly #status = document.createElement('p')
   readonly #sentKnowledge = new Set<string>()
   readonly #gateButtons = new Map<string, HTMLButtonElement>()
+  readonly #features: Feature[] = []
+  readonly #painter: CavernPainter
+  readonly #camera: CavernCamera = { x: 0, y: 0, width: 0, height: 0, tile: 44, dpr: 1 }
+  #groundContext: CanvasRenderingContext2D | null = null
+  #lightContext: CanvasRenderingContext2D | null = null
+  #sprite: CanvasRenderingContext2D | null = null
+  #spriteKey = ''
+  #facing: WalkerFacing = 'right'
+  #time = 0
+  #resize: ResizeObserver | null = null
   #dialog: HTMLElement | null = null
   #completionSent = false
-  #tile = 40
   #disposed = false
 
   constructor(private readonly options: ScrollDungeonOptions) {
     this.model = new ScrollDungeonModel(options.index, options.has)
+    this.#painter = new CavernPainter(this.model.definition)
   }
 
   get isDialogOpen(): boolean { return this.#dialog !== null }
@@ -289,7 +318,7 @@ export class ScrollDungeonView {
     this.#sentKnowledge.clear()
     for (const id of this.model.discovered.keys()) this.#sentKnowledge.add(id)
     this.#completionSent = this.model.complete
-    this.#status.textContent = this.model.complete ? 'Your discovery is remembered. Continue exploring or return to the meadow.'
+    this.#status.textContent = this.model.complete ? 'Your discovery is remembered. Explore on, or return to the meadow.'
       : 'Explore the ruins. Read inscriptions and attune the rune gates.'
     this.#render()
   }
@@ -302,57 +331,74 @@ export class ScrollDungeonView {
     const title = document.createElement('strong')
     title.textContent = def.name
     const subtitle = document.createElement('span')
-    subtitle.textContent = 'Walk • read the stones • attune the runes'
+    subtitle.textContent = 'Walk by torchlight • read the stones • attune the runes'
     heading.append(title, subtitle)
     this.#viewport.className = 'sd-viewport'
     this.#viewport.setAttribute('data-consumes-wheel', '')
-    this.#viewport.setAttribute('aria-label', `${def.name}, a scrolling exploration dungeon`)
-    this.#board.className = 'sd-board'
-    this.#board.style.setProperty('--cols', String(def.cols))
-    this.#board.style.setProperty('--rows', String(def.rows))
-    for (let row = 0; row < def.rows; row++) for (let col = 0; col < def.cols; col++) {
-      const tile = document.createElement('div')
-      const code = def.tiles[row][col]
-      tile.className = `sd-tile ${code === '#' ? 'sd-wall' : code === '~' ? 'sd-water' : 'sd-path'}`
-      if (code === '.' && (col * 13 + row * 7) % 17 === 0) tile.classList.add('sd-flower')
-      this.#board.append(tile)
-    }
-    const feature = (id: string, cell: Cell, glyph: string, label: string, kind: string): HTMLButtonElement => {
+    this.#viewport.setAttribute('aria-label', `${def.name}, a cavern explored by torchlight`)
+    this.#ground.className = 'sd-ground'
+    this.#ground.setAttribute('aria-hidden', 'true')
+    this.#light.className = 'sd-light'
+    this.#light.setAttribute('aria-hidden', 'true')
+    this.#layer.className = 'sd-layer'
+    this.#groundContext = canvasContext(this.#ground)
+    this.#lightContext = canvasContext(this.#light)
+    const feature = (id: string, cell: Cell, label: string, kind: string, look: () => readonly [PlaceSprite, PlaceGlow]): HTMLButtonElement => {
       const button = document.createElement('button')
       button.type = 'button'
       button.className = `sd-feature ${kind}`
-      button.style.left = `calc(${cell.col} * var(--tile))`
-      button.style.top = `calc(${cell.row} * var(--tile))`
-      button.textContent = glyph
       button.setAttribute('aria-label', label)
       button.title = label
       button.addEventListener('click', () => this.#interact(id))
-      this.#board.append(button)
+      const art = document.createElement('canvas')
+      art.className = 'sd-art'
+      art.width = art.height = 96
+      art.setAttribute('aria-hidden', 'true')
+      button.append(art)
+      button.style.zIndex = String(cell.row * 10)
+      this.#layer.append(button)
+      this.#features.push({ button, cell, art: canvasContext(art), look, drawn: '' })
       return button
     }
     for (const gate of def.gates) {
-      feature(`clue-${gate.id}`, gate.clue, '▤', `${gate.name} inscription`, 'sd-inscription')
-      this.#gateButtons.set(gate.id, feature(gate.id, gate, '◇', gate.name, 'sd-gate'))
+      feature(`clue-${gate.id}`, gate.clue, `${gate.name} inscription`, 'sd-inscription', () => ['tablet', null])
+      this.#gateButtons.set(gate.id, feature(gate.id, gate, gate.name, 'sd-gate',
+        () => [this.model.openGates.has(gate.id) ? 'rune-door-open' : 'rune-door', null]))
     }
-    feature('exit', def.exit, '↩', 'Return to the meadow', 'sd-exit')
-    feature('artifact', def.artifact, '✧', 'Knowledge artifact', 'sd-artifact')
-    feature('alcove', def.alcove, '⬡', 'Memory alcove', 'sd-alcove')
+    feature('exit', def.exit, 'Return to the meadow', 'sd-exit', () => ['cave-exit', null])
+    feature('artifact', def.artifact, 'Knowledge artifact', 'sd-artifact', () => ['crystal', this.model.complete ? null : 'ready'])
+    feature('alcove', def.alcove, 'Memory alcove', 'sd-alcove', () => ['alcove', null])
     this.#player.className = 'sd-explorer'
-    this.#player.textContent = '✦'
+    this.#player.width = 64
+    this.#player.height = 96
     this.#player.setAttribute('role', 'img')
     this.#player.setAttribute('aria-label', 'Your explorer')
-    this.#board.append(this.#player)
-    this.#viewport.append(this.#board)
+    this.#sprite = canvasContext(this.#player)
+    this.#spriteKey = ''
+    this.#layer.append(this.#player)
+    this.#viewport.append(this.#ground, this.#layer, this.#light)
     this.#status.className = 'sd-status'
-    this.#status.textContent = 'Follow the tiled path. Arrow keys / WASD walk; E / Enter interacts. The arch returns to the meadow.'
+    this.#status.textContent = 'Arrow keys / WASD walk; E / Enter reads and attunes, and E closes what it opened. The daylit arch returns to the meadow.'
     this.#element.append(heading, this.#viewport, this.#status)
     host.append(this.#element)
+    if (typeof ResizeObserver !== 'undefined') {
+      this.#resize = new ResizeObserver(() => this.#fit())
+      this.#resize.observe(this.#viewport)
+    }
+    this.#fit()
     this.#render()
   }
 
   update(dt: number, input: DungeonInput): void {
     if (this.#disposed) return
-    if (!this.#dialog) this.model.update(dt, input)
+    if (!this.#dialog) {
+      this.model.update(dt, input)
+      if (input.left) this.#facing = 'left'
+      else if (input.right) this.#facing = 'right'
+      else if (input.up) this.#facing = 'up'
+      else if (input.down) this.#facing = 'down'
+    }
+    if (Number.isFinite(dt) && dt > 0) this.#time += Math.min(dt, 0.1)
     this.#render()
   }
 
@@ -387,11 +433,20 @@ export class ScrollDungeonView {
     dialog.setAttribute('role', 'dialog')
     dialog.setAttribute('aria-modal', 'true')
     dialog.setAttribute('aria-label', result.title)
+    dialog.tabIndex = -1
+    const close = document.createElement('button')
+    close.type = 'button'
+    close.className = 'sd-close'
+    close.textContent = '×'
+    close.setAttribute('aria-label', 'Close (E)')
+    close.title = 'Close (E)'
+    close.addEventListener('click', () => this.closeDialog())
     const title = document.createElement('h3')
     title.textContent = result.title
     const text = document.createElement('p')
     text.textContent = result.text
-    dialog.append(title, text)
+    dialog.append(close, title, text)
+    let firstChoice: HTMLButtonElement | null = null
     if (result.kind === 'gate' && result.gateId) {
       const gate = this.model.definition.gates.find(candidate => candidate.id === result.gateId)!
       const remembered = document.createElement('blockquote')
@@ -409,19 +464,15 @@ export class ScrollDungeonView {
           if (answer.opened) for (const choice of choices.querySelectorAll('button')) choice.disabled = true
           this.#render()
         })
+        firstChoice ??= button
         choices.append(button)
       }
       dialog.append(remembered, choices)
     }
-    const close = document.createElement('button')
-    close.type = 'button'
-    close.className = 'sd-continue'
-    close.textContent = 'Continue exploring'
-    close.addEventListener('click', () => this.closeDialog())
-    dialog.append(close)
     dialog.addEventListener('keydown', event => {
       event.stopPropagation()
-      if (event.key === 'Escape') { event.preventDefault(); this.closeDialog(); return }
+      // E opened this, so E puts it away again.
+      if (event.key === 'Escape' || (event.key.toLowerCase() === 'e' && !event.repeat)) { event.preventDefault(); this.closeDialog(); return }
       if (event.key !== 'Tab') return
       const buttons = [...dialog.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
       const first = buttons[0], last = buttons.at(-1)
@@ -431,31 +482,71 @@ export class ScrollDungeonView {
     shade.append(dialog)
     this.#element.append(shade)
     this.#dialog = shade
-    ;(dialog.querySelector('button') as HTMLButtonElement | null)?.focus()
+    ;(firstChoice ?? dialog).focus()
   }
 
   closeDialog(): void { this.#dialog?.remove(); this.#dialog = null }
 
+  #fit(): void {
+    const width = this.#viewport.clientWidth, height = this.#viewport.clientHeight
+    if (!width || !height) return
+    const dpr = clamp(globalThis.devicePixelRatio || 1, 1, 2)
+    const tile = clamp(Math.round(Math.min(width / 15, height / 9.5)), 30, 64)
+    Object.assign(this.#camera, { width, height, dpr, tile })
+    for (const canvas of [this.#ground, this.#light]) {
+      canvas.width = Math.round(width * dpr)
+      canvas.height = Math.round(height * dpr)
+    }
+    this.#viewport.style.setProperty('--sprite-scale', String(Math.round(tile / 42 * 100) / 100))
+    for (const { button, cell } of this.#features) {
+      button.style.left = `${(cell.col + 0.5) * tile}px`
+      button.style.top = `${(cell.row + 0.84) * tile}px`
+    }
+    this.#render()
+  }
+
   #render(): void {
-    const height = this.#viewport.clientHeight
-    const tile = height > 0 ? Math.max(22, Math.min(48, Math.floor(height / this.model.definition.rows))) : 40
-    if (tile !== this.#tile || !this.#board.style.getPropertyValue('--tile')) {
-      this.#tile = tile
-      this.#board.style.setProperty('--tile', `${tile}px`)
+    for (const [id, button] of this.#gateButtons) button.classList.toggle('sd-open', this.model.openGates.has(id))
+    for (const feature of this.#features) {
+      if (!feature.art) continue
+      const [sprite, glow] = feature.look()
+      const drawn = `${sprite}:${glow}`
+      if (drawn === feature.drawn) continue
+      feature.drawn = drawn
+      drawPlace(feature.art, sprite, glow)
     }
-    this.#player.style.transform = `translate(${(this.model.x - 0.36) * tile}px, ${(this.model.y - 0.36) * tile}px)`
-    this.#player.classList.toggle('sd-walking', this.model.moving && !this.#dialog)
-    // Direct camera placement follows sustained walking without queued smooth
-    // scroll animations. The entire dungeon remains a two-dimensional plane.
-    this.#viewport.scrollLeft = Math.max(0, this.model.x * tile - this.#viewport.clientWidth / 2)
-    for (const [id, button] of this.#gateButtons) {
-      button.classList.toggle('sd-open', this.model.openGates.has(id))
-      button.textContent = this.model.openGates.has(id) ? '·' : '◇'
+    const walking = this.model.moving && !this.#dialog
+    this.#player.classList.toggle('sd-walking', walking)
+    const step = walking ? Math.floor(this.#time * 8) % 4 : 0
+    const key = `${this.#facing}:${step}`
+    if (this.#sprite && key !== this.#spriteKey) {
+      this.#spriteKey = key
+      drawWalker(this.#sprite, PLAYER_LOOK, this.#facing, step)
     }
+    const camera = this.#camera, def = this.model.definition
+    if (!camera.width || !camera.height) return
+    const tile = camera.tile
+    const mapWidth = def.cols * tile, mapHeight = def.rows * tile
+    camera.x = Math.round(mapWidth <= camera.width ? (mapWidth - camera.width) / 2 : clamp(this.model.x * tile - camera.width / 2, 0, mapWidth - camera.width))
+    camera.y = Math.round(mapHeight <= camera.height ? (mapHeight - camera.height) / 2 : clamp(this.model.y * tile - camera.height / 2, 0, mapHeight - camera.height))
+    this.#layer.style.transform = `translate3d(${-camera.x}px, ${-camera.y}px, 0)`
+    this.#player.style.left = `${this.model.x * tile}px`
+    this.#player.style.top = `${(this.model.y + 0.3) * tile}px`
+    this.#player.style.zIndex = String(Math.round(this.model.y * 10))
+    this.#painter.reveal(this.model.x, this.model.y)
+    const lights: CavernLight[] = [
+      { x: def.exit.col + 0.5, y: def.exit.row + 0.5, radius: 2.4 },
+      { x: def.artifact.col + 0.5, y: def.artifact.row + 0.5, radius: this.model.complete ? 1.2 : 1.9 },
+      ...def.gates.filter(gate => this.model.openGates.has(gate.id)).map(gate => ({ x: gate.col + 0.5, y: gate.row + 0.5, radius: 1.3 })),
+    ]
+    if (this.#groundContext) this.#painter.paintRock(this.#groundContext, camera, this.#time)
+    if (this.#lightContext) this.#painter.paintLight(this.#lightContext, camera, { x: this.model.x, y: this.model.y }, this.#time, lights)
   }
 
   dispose(): void {
     this.#disposed = true
+    this.#resize?.disconnect()
+    this.#resize = null
     this.closeDialog()
     this.#element.remove()
     this.#gateButtons.clear()
@@ -463,13 +554,17 @@ export class ScrollDungeonView {
 }
 
 const SCROLL_DUNGEON_CSS = `
-.sol-scroll-dungeon{height:100%;min-height:0;display:flex;flex-direction:column;position:relative;background:#f5f1d9;color:#354434;color-scheme:light;font:14px/1.45 system-ui,sans-serif;border-radius:16px;overflow:hidden}
-.sol-scroll-dungeon header{display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:14px 20px;background:#fffdf0;border-bottom:1px solid #d5d4b7}.sol-scroll-dungeon header strong{font-size:20px;color:#35534b}.sol-scroll-dungeon header span{font-size:12px;color:#687264}
-.sd-viewport{min-height:0;flex:1;overflow:auto;overscroll-behavior:contain;position:relative;background:linear-gradient(#d7eee0,#e9efd3);display:flex;align-items:center;scrollbar-width:thin;scrollbar-color:#99ba9c #e9efd3}
-.sd-board{--tile:40px;display:grid;grid-template-columns:repeat(var(--cols),var(--tile));grid-template-rows:repeat(var(--rows),var(--tile));width:calc(var(--cols)*var(--tile));height:calc(var(--rows)*var(--tile));position:relative;flex:none;box-shadow:0 12px 36px #405c4824}
-.sd-tile{box-sizing:border-box}.sd-path{background:#edecd4;border:1px solid #d8dec2;box-shadow:inset 0 1px #ffffef}.sd-wall{background:linear-gradient(135deg,#e4cf98,#cabb80);border:1px solid #b7a975;border-bottom:5px solid #ae9f70;border-radius:3px;box-shadow:inset 0 2px #fff1b4}.sd-water{background:repeating-linear-gradient(165deg,#82c7bc 0 9px,#a5d9c7 10px 12px,#82c7bc 13px 22px);border:1px solid #70b5a8;box-shadow:inset 0 2px 7px #3b918326}.sd-flower{background:radial-gradient(ellipse at 60% 65%,#bfd89e 0 12%,transparent 15%),radial-gradient(ellipse at 72% 43%,#f5c4a4 0 8%,transparent 10%),#edecd4}
-.sol-scroll-dungeon .sd-feature{position:absolute;width:var(--tile);height:var(--tile);padding:0;border:0;background:transparent;font:700 calc(var(--tile)*.7)/1 Georgia,serif;cursor:pointer;color:#637854;text-shadow:0 2px #fffff0;z-index:2}.sol-scroll-dungeon .sd-feature:focus-visible{outline:3px solid #355f85;outline-offset:-3px}.sol-scroll-dungeon .sd-inscription{color:#7d7655;font-size:calc(var(--tile)*.58);background:#e5dcb5;border:3px solid #b7ae87;border-radius:4px;transform:scale(.84);box-shadow:0 4px #a69d7d}.sol-scroll-dungeon .sd-gate{background:linear-gradient(130deg,#c1d2d4,#749da2);border:3px solid #577e89;color:#ffedb0;box-shadow:0 4px #456c76;transform:scale(.96)}.sol-scroll-dungeon .sd-gate.sd-open{background:#d9e7cc;border-color:#b8d0a1;color:#689368;box-shadow:none;opacity:.7}.sol-scroll-dungeon .sd-artifact{color:#dc9c34;filter:drop-shadow(0 0 9px #fff0a0)}.sol-scroll-dungeon .sd-alcove{color:#9c82af}.sol-scroll-dungeon .sd-exit{color:#639074}
-.sd-explorer{position:absolute;left:0;top:0;width:calc(var(--tile)*.72);height:calc(var(--tile)*.72);display:grid;place-items:center;z-index:4;border-radius:40% 40% 35% 35%;background:linear-gradient(#f7d194 0 31%,#448f9b 34% 85%,#335f73 86%);color:#fff3c7;box-shadow:0 3px 0 #334e526b,inset 2px 0 #ffffff33;font-size:calc(var(--tile)*.42);pointer-events:none}
-.sd-status{padding:10px 18px;margin:0;background:#fffdf0;border-top:1px solid #d5d4b7;font-size:12px;color:#61735d}.sd-dialog-shade{position:absolute;inset:0;z-index:10;display:grid;place-items:center;padding:18px;background:#28413947;backdrop-filter:blur(3px)}.sd-dialog{width:min(440px,100%);box-sizing:border-box;border:1px solid #cabd91;border-radius:18px;padding:24px;background:#fffced;box-shadow:0 18px 70px #2c4e4940}.sd-dialog h3{margin:0 0 14px;font:600 23px Georgia,serif;color:#486657}.sd-dialog p{margin:10px 0;color:#46574b}.sd-dialog blockquote{margin:16px 0;padding:12px 16px;border-left:3px solid #ccae62;background:#f1efd9;font:italic 15px/1.5 Georgia,serif;color:#646746}.sd-runes{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0}.sol-scroll-dungeon .sd-runes button,.sol-scroll-dungeon .sd-continue{min-height:42px;border:1px solid #a7bb9a;border-radius:10px;padding:9px 15px;background:#e7eed6;color:#38574a;font:600 14px system-ui,sans-serif;cursor:pointer}.sol-scroll-dungeon .sd-runes button:hover,.sol-scroll-dungeon .sd-continue:hover{background:#d4e5bc}.sd-runes button:disabled{opacity:.55;cursor:default}.sol-scroll-dungeon .sd-continue{width:100%;background:#527c68;color:#fffdeb;border-color:#527c68}.sol-scroll-dungeon .sd-continue:hover{background:#416a57}.sd-dialog button:focus-visible{outline:3px solid #ad944e;outline-offset:3px}
-@media(max-width:600px){.sol-scroll-dungeon header{padding:10px 12px;display:block}.sol-scroll-dungeon header strong{font-size:17px}.sol-scroll-dungeon header span{display:block;margin-top:3px}.sd-status{font-size:11px;padding:7px 10px}.sd-dialog{padding:18px}.sd-dialog h3{font-size:21px}}
+.sol-scroll-dungeon{height:100%;min-height:0;display:flex;flex-direction:column;position:relative;background:#07080b;color:#e9dfc8;color-scheme:dark;font:14px/1.45 system-ui,sans-serif;border:1px solid #3a3228;border-radius:16px;overflow:hidden}
+.sol-scroll-dungeon header{display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:12px 18px;background:linear-gradient(#1a1612,#100e0b);border-bottom:1px solid #3a3228}.sol-scroll-dungeon header strong{font:600 20px Georgia,serif;letter-spacing:.02em;color:#f1d9a4}.sol-scroll-dungeon header span{font-size:12px;color:#a89a80}
+.sd-viewport{position:relative;flex:1;min-height:0;overflow:hidden;background:#060709;--sprite-scale:1}
+.sd-ground,.sd-light{position:absolute;inset:0;width:100%;height:100%;display:block}.sd-ground{z-index:0}.sd-light{z-index:2;pointer-events:none}
+.sd-layer{position:absolute;z-index:1;left:0;top:0;width:0;height:0;will-change:transform}
+.sol-scroll-dungeon .sd-feature{position:absolute;padding:0;border:0;background:transparent;cursor:pointer;transform:translate(-50%,-46px) scale(var(--sprite-scale));transform-origin:50% 46px}.sol-scroll-dungeon .sd-feature:focus-visible{outline:3px solid #f1d9a4;outline-offset:2px;border-radius:6px}
+.sd-art{display:block;width:48px;height:48px}
+.sd-explorer{position:absolute;pointer-events:none;width:32px;height:48px;transform:translate(-50%,-46px) scale(var(--sprite-scale));transform-origin:50% 46px}
+.sd-status{padding:9px 18px;margin:0;background:#100e0b;border-top:1px solid #3a3228;font-size:12px;color:#c9b98f}
+.sd-dialog-shade{position:absolute;inset:0;z-index:10;display:grid;place-items:center;padding:18px;background:rgba(3,4,8,.62);backdrop-filter:blur(3px)}.sd-dialog{position:relative;width:min(460px,100%);box-sizing:border-box;border:1px solid #6b5a3e;border-radius:16px;padding:24px;background:linear-gradient(160deg,#2a231b,#17130f);box-shadow:0 18px 70px rgba(0,0,0,.6);color:#eadfc6;outline:none}.sd-dialog h3{margin:0 34px 12px 0;font:600 22px Georgia,serif;color:#f1d9a4}.sd-dialog p{margin:10px 0;color:#d8ccb2}.sd-dialog blockquote{margin:16px 0;padding:12px 16px;border-left:3px solid #c9a15a;background:rgba(255,230,180,.06);font:italic 15px/1.5 Georgia,serif;color:#e6d4a8}
+.sd-runes{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 4px}.sol-scroll-dungeon .sd-runes button{min-height:42px;border:1px solid #7d6a48;border-radius:10px;padding:9px 15px;background:#3a3024;color:#f3e2bd;font:600 14px system-ui,sans-serif;cursor:pointer}.sol-scroll-dungeon .sd-runes button:hover{background:#4a3d2c}.sd-runes button:disabled{opacity:.5;cursor:default}
+.sol-scroll-dungeon .sd-close{position:absolute;right:12px;top:12px;width:30px;height:30px;border:1px solid #6b5a3e;border-radius:50%;background:#2d261d;color:#eadfc6;font-size:20px;line-height:1;cursor:pointer}.sd-dialog button:focus-visible{outline:3px solid #f1d9a4;outline-offset:3px}
+@media(max-width:600px){.sol-scroll-dungeon header{padding:10px 12px;display:block}.sol-scroll-dungeon header strong{font-size:17px}.sol-scroll-dungeon header span{display:block;margin-top:3px}.sd-status{font-size:11px;padding:7px 10px}.sd-dialog{padding:18px}.sd-dialog h3{font-size:20px}}
 `

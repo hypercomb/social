@@ -84,7 +84,55 @@ export type LlmCall = {
   readonly tools?: readonly LlmFunctionTool[]
   /** Hint that `system` is stable and worth prompt-caching where supported. */
   readonly cacheSystem?: boolean
+  /** false = answer without a reasoning pass. Honoured by the local provider only. */
+  readonly thinking?: false
+  /** Constrain the answer to this JSON Schema. Honoured by the local provider only. */
+  readonly jsonSchema?: Readonly<Record<string, unknown>>
+  /** Sampling temperature. Honoured by the local provider only. */
+  readonly temperature?: number
   readonly signal?: AbortSignal
+}
+
+// ── the participant's own local model ─────────────────────────────────
+//
+// "The local model I use" needs ONE answer, and only one path is the
+// participant's own local chat: the routed stream the chat window sends
+// through. So that path writes the model that answered, and nothing else
+// does — `callModel`'s callers are all automatic (the blurb drain, bee
+// banter, serving a peer, the providers window's test, every route-flow
+// call), and a model they happened to name is not a model anybody chose.
+// The route flow reads it to organize with exactly that model and never a
+// roster guess (documentation/chat-route.md §4.1.1). Device-local, like the
+// host override: which model you run is how THIS machine is set up.
+
+export const LOCAL_MODEL_STORAGE_KEY = 'hc:llm:local:model'
+
+/** The wire model of the participant's last own local chat, or null. Best-effort read. */
+export const participantLocalChoice = (): { readonly providerId: string; readonly model: string; readonly at: number } | null => {
+  try {
+    const raw = JSON.parse(globalThis.localStorage?.getItem(LOCAL_MODEL_STORAGE_KEY) ?? 'null') as
+      { providerId?: unknown; model?: unknown; at?: unknown } | null
+    if (!raw || typeof raw.providerId !== 'string' || typeof raw.model !== 'string') return null
+    const providerId = raw.providerId.trim()
+    const model = raw.model.trim()
+    if (!providerId || !model) return null
+    return { providerId, model, at: typeof raw.at === 'number' && Number.isFinite(raw.at) ? raw.at : 0 }
+  } catch { return null }
+}
+
+/** No key and fetched from the browser: the predicate `llm:local-used` has
+ *  always used for "this is the participant's own machine answering". */
+const isLocalUse = (provider: LlmProviderDescriptor): boolean =>
+  provider.requiresKey === false && provider.transport === 'browser-http'
+
+/** Remember the model that just answered the participant's own local chat.
+ *  A write that throws (a private window, a full quota) is skipped, as the
+ *  chat window's own `hc:chat-models` writes are. */
+const rememberLocalChoice = (provider: LlmProviderDescriptor, model: string): void => {
+  if (!isLocalUse(provider) || !model) return
+  try {
+    globalThis.localStorage?.setItem(LOCAL_MODEL_STORAGE_KEY, JSON.stringify({ providerId: provider.id, model, at: Date.now() }))
+  } catch { /* session-only */ }
 }
 
 /** One routed stream delta, carrying the truth about who actually answered. */
@@ -239,6 +287,11 @@ export const buildRequest = (
     maxTokens: call.maxTokens,
     tools: call.tools,
     cacheSystem: call.cacheSystem,
+    // Passed through only when set, so a request that names none of them is
+    // the same object it always was. Only the local adapter reads them.
+    ...(call.thinking === false ? { thinking: false as const } : {}),
+    ...(call.jsonSchema ? { jsonSchema: call.jsonSchema } : {}),
+    ...(call.temperature !== undefined ? { temperature: call.temperature } : {}),
     stream: options.stream === true,
     apiKey,
   }
@@ -314,8 +367,14 @@ export const callModel = async (call: LlmCall): Promise<LlmCallResult> => {
   // THE PARTICIPANT'S OWN WORK WINS. A local model this machine may be
   // lending to the swarm is busy the moment its owner uses it; peer-models
   // reads this stamp to hold requests off until they are done.
-  if (provider.requiresKey === false && provider.transport === 'browser-http') {
-    EffectBus.emit('llm:local-used', { providerId: provider.id })
+  //
+  // NEVER `interactive` here. Every caller of `callModel` is automatic — the
+  // blurb drain, bee banter, serving a peer, the route flow itself — and the
+  // route flow's lane pauses only for the participant's OWN chat, which is the
+  // routed stream below. Marking these would make background work pre-empt
+  // background work (documentation/chat-route.md §4.1.9).
+  if (isLocalUse(provider)) {
+    EffectBus.emit('llm:local-used', { providerId: provider.id, at: Date.now() })
   }
 
   const response = await send(provider, request, call.signal)
@@ -354,9 +413,13 @@ async function* sseFrames(response: Response, signal?: AbortSignal): AsyncGenera
   }
 }
 
+/** The stream is the participant's own chat — the chat window's local send is
+ *  its one caller — so its stamp says so. `interactive` is what the route
+ *  flow's lane pauses for; `peer-models` ignores the payload and keeps
+ *  counting every local use as the owner's. */
 const emitLocalUse = (provider: LlmProviderDescriptor): void => {
-  if (provider.requiresKey === false && provider.transport === 'browser-http') {
-    EffectBus.emit('llm:local-used', { providerId: provider.id })
+  if (isLocalUse(provider)) {
+    EffectBus.emit('llm:local-used', { providerId: provider.id, at: Date.now(), interactive: true })
   }
 }
 
@@ -379,6 +442,9 @@ async function* streamProvider(
     } else {
       emitLocalUse(provider)
       const response = await send(provider, request, call.signal)
+      // `send` throws on anything but OK, so reaching here means this model
+      // answered the participant's own chat.
+      rememberLocalChoice(provider, request.model)
       result = provider.fromResponse(await response.json(), request)
     }
     if (result.text || result.toolCalls?.length) {
@@ -394,6 +460,7 @@ async function* streamProvider(
   const request = buildRequest(provider, call, { stream: true })
   emitLocalUse(provider)
   const response = await send(provider, request, call.signal)
+  rememberLocalChoice(provider, request.model)
   const pendingToolCalls = new Map<number, {
     id?: string
     name: string

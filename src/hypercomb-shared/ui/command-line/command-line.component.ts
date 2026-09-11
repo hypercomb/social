@@ -1035,6 +1035,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#host.closest('.header-bar')?.classList.toggle('line-hidden', this.lineHidden())
   })
 
+  /** The MODE, not the moment: while the line is on demand the hive centres on
+   *  the whole window instead of under the bar (zoom.drone `zoomToFit` reads
+   *  this class). It stays on while a summoned line shows — a little overlap is
+   *  fine, a hive that jumps each time the line comes out is not (Jaime,
+   *  2026-09-10). */
+  readonly #headerOnDemand = effect(() => {
+    this.#host.closest('.header-bar')?.classList.toggle('line-on-demand', this.#onDemand() && !this.isMobile())
+  })
+
   /** Send the line away. A line nobody can see must hold nothing: a staged
    *  command, a live find filter or a note capture left in it would go on
    *  acting on the hive with no face to answer for it. */
@@ -2111,6 +2120,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#summonUnsub = EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
       const stance = SUMMON_STANCES.get(payload?.cmd ?? '')
       if (!stance) return
+      // A surface that hides the shell (the writing window, a takeover view)
+      // owns the screen: there is no line to arrive, so the stance stays put
+      // rather than changing where nobody can see it.
+      if (this.viewActive() || this.touchDragging()) return
       this.#setStance(stance)
       if (this.mobileHidden()) EffectBus.emit('mobile:input-visible', { visible: true, mobile: true })
       this.#focusShellSoon()

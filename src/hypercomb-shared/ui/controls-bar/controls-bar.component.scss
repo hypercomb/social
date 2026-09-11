@@ -66,6 +66,24 @@ $actions-corner: 12rem;
   &:hover, &:focus-visible { color: var(--md-on-surface); }
   &.agents-hidden { color: rgba(var(--hc-chrome-accent), var(--hc-ink-a-loud)); }
 
+  // The on-demand command line collapses the header bar, so a toggle anchored
+  // to the header's bottom edge would float in dead space above whatever the
+  // canvas now owns. Anchor it to the rail's foot instead — the one edge that
+  // stays put whether the header is showing or summoned away (Jaime,
+  // 2026-09-11: move it to the bottom in command-line-on-demand mode).
+  //
+  // Both live in the same bottom-left corner as the pheromone tag strip
+  // (`.tag-float`), which is itself bottom-anchored and grows UPWARD as tags
+  // wrap to more rows when opened out — a fixed offset overlapped it the
+  // moment the strip grew past one line. `--hc-tag-float-top` is the strip's
+  // measured top edge (distance from the viewport bottom), published live by
+  // the component; it is 0 when no strip is on screen, so the toggle falls
+  // back to sitting on the bare rail foot.
+  &.on-demand {
+    top: auto;
+    bottom: calc(0.7rem + var(--hc-safe-bottom, 0px) + var(--hc-tag-float-top, 0px));
+  }
+
   @media (max-width: 599px), (max-height: 449px) { display: none; }
 }
 
@@ -1389,190 +1407,158 @@ $actions-corner: 12rem;
   .room-display { font-size: 0.65rem; }
 }
 
-// ── mobile floating-icon strip ────────────────────────────
-// On phone-shaped viewports the controls-bar is just a row of floating
-// icons at the bottom of the screen — no background, no border, no shadow.
-// Driven by [class.mobile] (which also catches landscape phones where the
-// width-only @media (max-width: 599px) would miss).
+// ── mobile: a flat band along the bottom edge ─────────────
+// On phone-shaped viewports ([class.mobile], which also catches the landscape
+// phones a width-only query misses) the bar is chrome, not buttons floating on
+// the hive: a flat band flush to the bottom edge in the material of the list
+// header at the top of the screen — the same SOLID chrome ground and one
+// hairline — cut into flat cells, each a glyph over its word.
+//
+// The BOTTOM ROW (back · face · camera · add · tools) is always there; the
+// TOOLS ROW (share · swarm · pheromones · pin · fullscreen) is a second band
+// above it, inside the same surface, while the tools cell has it open. Both
+// rows are in flow in the stage, so its layout box — and the
+// `--hc-controls-bottom` measured from it — grows with the tools row, and
+// every sheet, list row and toast clears it.
 .pill-stage.mobile {
-  // 1.9rem, not 1.1rem: the discs carry a 0.62rem label under them now, and
-  // that label lives in this gap. The keyboard inset (`--hc-keyboard-inset`,
-  // published by the bar from the visual viewport) lifts the whole bar above
-  // the soft keyboard, which used to simply cover it on iOS.
-  bottom: calc(1.9rem + max(var(--hc-safe-bottom, 0px), var(--hc-keyboard-inset, 0px)));
+  left: 0;
+  right: 0;
+  // Stands on the soft keyboard (`--hc-keyboard-inset`, published from the
+  // visual viewport), which would otherwise cover the band on iOS.
+  bottom: var(--hc-keyboard-inset, 0px);
+  transform: none;
+  flex-direction: column;
+  align-items: stretch;
+  // The home indicator's inset — unless a keyboard under the band already
+  // covers it, when only the minimum is left.
+  padding-bottom: max(0.25rem, calc(var(--hc-safe-bottom, 0px) - var(--hc-keyboard-inset, 0px)));
+  // SOLID, like the list header and the revealed command line: the hive never
+  // shows through the thumb's half of the screen, and top and bottom read as
+  // one material.
+  background: rgb(var(--hc-chrome-glass));
+  border-top: 1px solid rgba(var(--hc-chrome-rule), 0.22);
+
+  &.faded,
+  &.faded:hover { transform: none; }
+
+  // Both wrappers follow the stage's direction: column here, row in landscape.
+  .pill-scaled { display: flex; flex-direction: inherit; }
 
   .controls-pill {
+    flex-direction: inherit;
+    align-items: stretch;
+    gap: 0;
+    padding: 0;
+    max-width: none;
+    overflow: visible;
     background: none;
     backdrop-filter: none;
-    border: none;
+    border: 0;
     border-radius: 0;
     box-shadow: none;
-    padding: 0;
-    gap: 0.4rem;
-    overflow: visible;
   }
 
-  // Each icon gets its own subtle floating disc so it reads as a tappable
-  // affordance against the canvas — but the bar that holds them is invisible.
-  // Bigger, thumb-friendly tap targets. Each icon is its own floating disc so
-  // it reads as tappable against the canvas; the bar that holds them stays
-  // invisible.
+  // ONE rhythm for both rows: five equal columns, so every tool stands over a
+  // cell of the row below. A browser without fullscreen leaves the tools
+  // row's last column empty rather than the tools closing up out of line.
+  .mobile-nav,
+  .mobile-tools-row {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0;
+  }
+
+  // A short rise as the tools row arrives (sideways in landscape). Only the
+  // start is animated — the resting style is the final state — and reduced
+  // motion takes it away.
+  .mobile-tools-row {
+    border-bottom: 1px solid rgba(var(--hc-chrome-rule), 0.22);
+    animation: hc-tools-rise 160ms ease-out;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mobile-tools-row { animation: none; }
+  }
+
+  // A FLAT CELL: no border, fill, shadow, blur or press scale — the glyph over
+  // its word, and the whole cell (3.5rem, 56px tall) is the touch target.
   .ctl-btn {
-    min-width: 3.4rem;
-    min-height: 3.4rem;
-    padding: 0.55rem;
-    border-radius: 50%;
-    background: rgba(var(--hc-chrome-glass), calc(var(--hc-chrome-glass-a) * 0.9));
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(var(--hc-chrome-rule), 0.34);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    flex-direction: column;
+    gap: 0.2rem;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    min-height: 3.5rem;
+    padding: 0.35rem 0.125rem;
+    border: 0;
+    border-radius: 0;
+    background: none;
     color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-plain));
+    transform: none;
+    isolation: isolate;
+    -webkit-tap-highlight-color: transparent;
 
-    --icon-size: 1.5rem;
+    .mat-sym { font-size: 1.5rem; }
 
-    &:hover { background: rgba(var(--hc-chrome-glass), var(--hc-chrome-glass-a)); }
-    &:active:not(:disabled) { transform: scale(0.92); }
+    // The wash behind a pressed or lit cell, inset so it reads as a key in the
+    // band — the ONLY rounded thing on the bar, at the ladder's smallest rung.
+    &::before {
+      content: '';
+      position: absolute;
+      inset: 0.2rem;
+      z-index: -1;
+      border-radius: var(--hc-radius-control);
+    }
 
-    // Unavailable ≠ invisible. The bar is a fixed five-slot rhythm, so a
-    // hidden button leaves a hole that reads as a missing icon and throws the
-    // balance off (back is disabled at the hive root — the most common state).
-    // Dim it in place instead: the slot keeps its position, the control is
-    // visibly not-available, and it stays untappable.
+    &:focus-visible { outline-offset: -2px; }
+
+    // Unavailable ≠ invisible: dimmed in place, so the five-slot rhythm has no
+    // hole (back is disabled at the hive root — the commonest state).
     &.disabled,
     &:disabled {
-      opacity: 0.28;
+      opacity: 0.3;
       pointer-events: none;
     }
   }
 
-  // THE WORD UNDER THE DISC. Glyphs in a row read as abstract marks; a word
-  // under each is what makes them the big native icons a phone expects. Out
-  // of the disc's flow (the disc is a circle) and out of the bar's layout
-  // box, so the sheets' clearance still measures the discs and the labels
-  // sit in the gap the bar leaves beneath itself. Three discs at 375px have
-  // room for a readable word (0.62rem was what five needed).
+  // THE WORD, in flow under its glyph: one line, ending in an ellipsis before
+  // it can cross into the next cell (the cell keeps its full aria-label).
   .ctl-label {
-    position: absolute;
-    top: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    margin-top: 0.22rem;
-    font-size: 0.74rem;
-    font-weight: 600;
-    line-height: 1;
-    letter-spacing: 0.02em;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
-    pointer-events: none;
-    color: rgba(var(--hc-chrome-ink), var(--hc-ink-a-plain));
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
-  }
-
-  // ONE distribution rhythm for the whole bar. It used to be a three-track
-  // grid (1fr | auto | 1fr) with each side distributing INSIDE its own track:
-  // two buttons on the right and three on the left (landscape adds the keyboard
-  // toggle) then produced two different spacings in two equal tracks — visibly
-  // uneven, and the wider side's buttons drifted away from the centre. Now
-  // every button is a direct participant (`.mobile-side { display: contents }`)
-  // in a single `space-evenly` row, so N controls are always N evenly-spaced
-  // controls, whatever N is. With a balanced 2 · 1 · 2 the centre button still
-  // lands dead centre — by arithmetic, not by a reserved track.
-  .mobile-nav {
-    display: flex;
-    align-items: center;
-    justify-content: space-evenly;
-    gap: 0.4rem;
-    // Viewport-relative width — NOT 100%: the pill ancestors are content-sized,
-    // so `100%` collapses back to the buttons' intrinsic width and they bunch in
-    // the middle. An explicit near-viewport width makes the ancestors grow, so
-    // the controls spread evenly across the screen.
-    width: min(94vw, 34rem);
-  }
-
-  // The side groups survive as DOM grouping only (they carry
-  // `data-consumes-wheel` and the landscape ordering) — they lay out nothing.
-  .mobile-side { display: contents; }
-
-  // The centre is the anchor by POSITION, not size — the same footprint as its
-  // flanks so the whole row reads evenly balanced. A hair more contrast is the
-  // only cue that it is the fixed one.
-  .ctl-btn.mobile-center {
-    align-self: center;
-    background: rgba(var(--hc-chrome-glass), var(--hc-chrome-glass-a));
-    border-color: rgba(var(--hc-chrome-rule), 0.42);
-  }
-
-  // Pinned layer — fit is gone; the spacer only holds the slot so the row keeps
-  // its rhythm instead of collapsing a gap.
-  .ctl-btn.pinned-spacer {
-    visibility: hidden;
-    pointer-events: none;
-  }
-
-  // ADD reads warm against the cold chrome — it is the one control on the
-  // bar that MAKES something rather than moving the view. (The shutter wore
-  // this colour when it was the centre disc; it lives on the deck now.)
-  .ctl-btn.add-btn .mat-sym,
-  .ctl-btn.camera-btn .mat-sym { color: var(--hc-status-secret); }
-
-  .badge { top: -4px; right: -4px; }
-}
-
-// Landscape keyboard toggle — lit while the command line is revealed,
-// same cold accent language as the mesh button's active state.
-.pill-stage.mobile .keyboard-btn.active {
-  color: var(--hc-status-ok);
-  background: color-mix(in srgb, var(--hc-status-ok) 14%, transparent);
-  border-color: color-mix(in srgb, var(--hc-status-ok) 45%, transparent);
-}
-
-// ADD — lit while the composer it revealed is up, so the disc says which
-// way its next press goes (a second press puts the composer away).
-.pill-stage.mobile .add-btn.active {
-  color: rgba(var(--hc-chrome-accent), var(--hc-ink-a-loud));
-  background: rgba(var(--hc-chrome-accent), 0.14);
-  border-color: rgba(var(--hc-chrome-accent), 0.45);
-}
-
-// Lanes — the legibility ladder. The digit sits in the corner of the glyph
-// as a readout, not a badge: it says which rung you are reading at, and it
-// is the only thing on the bar that reports a number. Lit while lane mode
-// owns the viewport, so "free zoom is off" is visible rather than deduced.
-.pill-stage.mobile .lanes-btn {
-  position: relative;
-
-  .lane-digit {
-    position: absolute;
-    right: 0.18rem;
-    bottom: 0.1rem;
-    font-size: 0.72rem;
+    font-size: 0.7rem;
     font-weight: 600;
-    line-height: 1;
-    letter-spacing: 0;
+    line-height: 1.2;
     pointer-events: none;
   }
 
-  &.active {
-    color: rgba(var(--hc-chrome-accent), var(--hc-ink-a-loud));
-    background: rgba(var(--hc-chrome-accent), 0.14);
-    border-color: rgba(var(--hc-chrome-accent), 0.45);
+  @media (hover: hover) {
+    .ctl-btn:hover::before { background: rgba(var(--hc-chrome-ink), 0.04); }
   }
+
+  // ADD and CAMERA read warm against the cold chrome — the two cells that MAKE
+  // something rather than moving the view. The swarm glyph wears its mode.
+  .add-btn .mat-sym,
+  .camera-btn .mat-sym { color: var(--hc-status-secret); }
+  .mesh-mobile-btn .mat-sym { color: var(--hc-status-solo); }
+  .mesh-mobile-btn.shield-mode .mat-sym { color: var(--hc-status-swarm); }
+
+  // Lit while what the cell opened or holds is on — the Add sheet is up
+  // (.add-btn), the tools row is out (.tools-btn), this layer is pinned
+  // (.pin-btn), the document is fullscreen (.fullscreen-btn) — so each cell
+  // says which way its next press goes.
+  .ctl-btn.active {
+    color: rgba(var(--hc-chrome-accent), var(--hc-ink-a-loud));
+    .mat-sym { color: inherit; }
+    &::before { background: rgba(var(--hc-chrome-accent), 0.12); }
+  }
+
+  .ctl-btn:active::before { background: rgba(var(--hc-chrome-ink), 0.06); }
 }
 
-// Fullscreen toggle — lit while the document is fullscreen, the same cold
-// steel the rest of the mobile chrome uses. (The mic that used to live on
-// this bar is now inside the command line; its recording visual moved with
-// it — see command-line.component.scss.)
-.pill-stage.mobile .fullscreen-btn.active {
-  color: rgba(var(--hc-chrome-accent), var(--hc-ink-a-loud));
-  background: rgba(var(--hc-chrome-accent), 0.14);
-  border-color: rgba(var(--hc-chrome-accent), 0.45);
-}
-
-// Solo / swarm mode indicator on mobile
-.pill-stage.mobile .mesh-mobile-btn {
-  color: var(--hc-status-solo); // solo
-
-  &.shield-mode { color: var(--hc-status-swarm); } // swarm
+@keyframes hc-tools-rise {
+  from { opacity: 0; translate: var(--hc-tools-rise, 0 0.5rem); }
 }
 
 // ── phone (≤599px) — non-mobile-pill phone-specific tweaks ───
@@ -1589,81 +1575,80 @@ $actions-corner: 12rem;
   // threshold as `isMobile`), which anchors the strip to the right edge.
 }
 
-// ── phone landscape → vertical sidebar (LEFT edge) ───────
+// ── phone landscape → a flat rail down the LEFT edge ─────
 // Rotating to landscape moves the bar off the (now-scarce) bottom and onto
-// the LEFT edge as a vertical strip (Jaime 2026-07-28: "On landscape the
-// buttons go to the left and the back button has to be at the bottom
-// facing to the left"). Same single evenly-spaced run, turned on its side and
-// REMAPPED top→bottom as share · mesh · camera · views · keyboard · back — so BACK sits
-// in the bottom-left thumb corner, its arrow pointing left off the edge it
-// exits through. Ordering is per-BUTTON (the groups are display:contents), so
-// the sixth control landscape adds just takes its place in the same rhythm
-// instead of crowding one zone. Icons stay UPRIGHT (no rotation).
+// the LEFT edge (Jaime 2026-07-28: "On landscape the buttons go to the left
+// and the back button has to be at the bottom facing to the left"): the same
+// material as a rail flush to that edge, from under the header to the bottom.
+// The rows turn into columns: the bottom row is the column AT the edge,
+// reading top→bottom tools · add · camera · face · back, so BACK sits in the
+// bottom-left thumb corner, its arrow pointing off the edge it exits through;
+// the tools row, while open, is the column to its RIGHT behind one hairline.
+// Both columns stack their DOM order upward (column-reverse) from one bottom
+// line in the same slots, so each tool sits beside the cell it stands over in
+// portrait — and a browser without fullscreen leaves the TOP slot empty. The
+// stage is as wide as both columns, so the `--hc-controls-left` measured from
+// it reserves both.
 .pill-stage.mobile.landscape {
-  left: calc(0.9rem + env(safe-area-inset-left, 0px));
+  // The MEASURED header bottom, which the bar removes while a landscape phone
+  // hides its header — the layer list beside the rail anchors the same way.
+  top: var(--hc-header-bottom, 0px);
   right: auto;
-  // Android resizes the visual viewport when its text editor opens. Keep the
-  // rail inside the part of that viewport which is actually canvas: below the
-  // command-line header and above the keyboard. Centring against `top: 0`
-  // allowed the fixed-height column to grow through the command line.
-  top: calc(var(--hc-header-anchor) + 0.35rem);
-  bottom: max(0.35rem, var(--hc-safe-bottom, 0px));
-  transform: none;
-  align-items: center;
+  bottom: 0;
+  flex-direction: row;
+  padding: 0 0 var(--hc-safe-bottom, 0px) env(safe-area-inset-left, 0px);
+  border-top: 0;
+  border-right: 1px solid rgba(var(--hc-chrome-rule), 0.22);
 
-  &.faded { transform: none; }     // drop the portrait fade-nudge (it re-added translateX)
+  .mobile-nav { order: -1; }       // the edge column; tools stand beside it
 
-  .mobile-nav {
-    flex-direction: column;
-    width: auto;
-    max-width: none;
-    // Fill the available header-to-keyboard interval. `space-evenly` now
-    // balances the first and last icons against those two real edges.
-    height: 100%;
-    max-height: 26rem;
-    box-sizing: border-box;
-    padding: 0.75rem 0;
+  .mobile-nav,
+  .mobile-tools-row {
+    display: flex;
+    flex-direction: column-reverse;
+    width: 4.5rem;                 // holds a ten-character 0.7rem word
   }
 
-  // Zone remap: DOM order is [left group, centre, right group] (portrait's
-  // back·views·keyboard | camera | share·mesh); read them bottom, middle,
-  // top instead, with back last of all so it is the bottom-most control.
-  .mobile-side.right > * { order: 1; }
-  .ctl-btn.mobile-center { order: 2; }
-  .mobile-side.left  > * { order: 3; }
-  .mobile-side.left .back-btn { order: 4; }
+  .mobile-tools-row {
+    border-bottom: 0;
+    border-left: 1px solid rgba(var(--hc-chrome-rule), 0.22);
+    --hc-tools-rise: -0.5rem 0;
+  }
 
-  // Icons upright — the previous 90° rotation is gone now that the strip
-  // itself is vertical.
-  .ctl-btn .hci,
-  .ctl-btn .mat-sym { transform: none; }
+  // FIVE SLOTS, none taller than a fifth of the rail: the column fits whatever
+  // the header leaves it, and both columns keep the same slots.
+  .ctl-btn {
+    flex: none;
+    height: min(3.5rem, 20%);
+    min-height: 0;
+  }
 
-  // Three discs in the column leave room for their words (six did not);
-  // the word sits under its disc as in portrait, and the column's gap
-  // carries it.
-  .mobile-nav { gap: 1.4rem; }
+  // THE COMMAND LINE OPEN takes clamp(3rem, 24vh, 4.5rem) off the top and the
+  // rail starts under it, so the words stand down (each cell keeps its
+  // aria-label) and the slots close to the 2.75rem thumb floor.
+  &.input-open {
+    .ctl-label { display: none; }
+    .ctl-btn { height: min(2.75rem, 20%); }
+  }
 }
 
-// A landscape phone with the Android editor open can leave only ~300px
-// between the command line and keyboard. Preserve every action without
-// overlap by tightening the discs in that short-height state; normal
-// landscape keeps the larger 3.4rem thumb targets above.
+// EVERY LANDSCAPE PHONE is short — MobileModeService's phone test is ≤449px
+// tall — so this is the rail that has to fit. A cell is 0.25rem of padding at
+// each end, a 1.35rem glyph, a 0.1rem gap and a 0.84rem line of word =
+// 2.79rem (44.6px) in a 3rem (48px) slot; five slots are 240px.
+//   375px-tall iPhone, header hidden: 375 − 21 (home indicator) = 354px rail.
+//   360×640 Chrome phone with its bars showing: a 280px rail.
+//   Command line open (2.75rem slots, 220px): the iPhone's header is 72px,
+//   leaving 282px; at 280px tall the header is 67px, leaving 213px, where the
+//   20% cap shortens each slot to 42.6px rather than run the top one under
+//   the command line.
 @media (orientation: landscape) and (max-height: 449px) {
-  .pill-stage.mobile.landscape {
-    // Tight, never so tight that a disc sits on the word under the one above
-    // it: 0.15rem was sized for six controls, and with three it tucked "more"
-    // and "add" under their neighbours.
-    .mobile-nav {
-      gap: 1.15rem;
-      padding-block: 0.4rem;
-    }
+  .pill-stage.mobile.landscape .ctl-btn {
+    height: min(3rem, 20%);
+    padding-block: 0.25rem;
+    gap: 0.1rem;
 
-    .ctl-btn {
-      min-width: 2.75rem;
-      min-height: 2.75rem;
-      padding: 0.4rem;
-      --icon-size: 1.25rem;
-    }
+    .mat-sym { font-size: 1.35rem; }
   }
 }
 

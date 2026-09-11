@@ -6,9 +6,12 @@
 // the Beehaviors panel lists a behaviour that can never belong there, and the
 // one tile it DOES belong to says nothing about that.
 //
-// Binding fixes both ends at once. `/behavior bind postit meetup` takes the
-// tile's name, resolves it to that tile's LOCATION SIGNATURE (HistoryService.
-// sign — `sha256(lineageKey(segments))`), and records the pair. From then on:
+// Binding fixes both ends at once. `/behavior bind postit`, standing on the
+// meetup tile, resolves where you stand to its LOCATION SIGNATURE
+// (HistoryService.sign — `sha256(lineageKey(segments))`), and records the
+// pair. (Naming a tile you are not standing on — `/behavior bind postit
+// meetup` — is deprecated: behaviours are managed only from the context
+// layer.) From then on:
 //
 //   • at that signature (and its subtree) the behaviour is awake, and its
 //     panel row is marked as BELONGING to that tile;
@@ -47,10 +50,9 @@ export class BehaviorQueenBee extends QueenBee {
   readonly command = 'behavior'
   override description = 'Bind a behaviour to the tile it belongs to — it shows there and nowhere else'
   override descriptionKey = 'slash.behavior'
-  override options = ['bind <behaviour> [tile]', 'free <behaviour>', 'where <behaviour>']
+  override options = ['bind <behaviour>', 'free <behaviour>', 'where <behaviour>']
   override examples = [
-    { input: '/behavior bind postit meetup', result: 'The post-it belongs to the meetup tile — it stops being offered anywhere else' },
-    { input: '/behavior bind postit', result: 'Binds it to the tile you are standing on' },
+    { input: '/behavior bind postit', result: 'The post-it belongs to the tile you are standing on — it stops being offered anywhere else' },
     { input: '/behavior where postit', result: 'Names the tile it belongs to, and its signature' },
     { input: '/behavior free postit', result: 'Gives it back to the whole hive' },
   ]
@@ -62,7 +64,7 @@ export class BehaviorQueenBee extends QueenBee {
     const tileArg = parts.join(' ').trim()
 
     if (!verb || !behaviourArg) {
-      this.#say('Name a behaviour: /behavior bind <behaviour> [tile]', 'help')
+      this.#say('Name a behaviour: /behavior bind <behaviour>', 'help')
       return
     }
 
@@ -92,8 +94,10 @@ export class BehaviorQueenBee extends QueenBee {
       return
     }
 
-    // The tile: a name on the layer you are standing on, an absolute path
-    // when it starts with `/`, or the tile you are standing on when omitted.
+    // The tile is the one you are standing on — the context layer, the only
+    // place behaviours are managed. Naming another tile (a name on this layer,
+    // or an absolute `/path`) is DEPRECATED (2026-09-10): it still binds, and
+    // says so, until the argument is removed.
     const here = [...(get<LineageShape>(LINEAGE_KEY)?.explorerSegments?.() ?? [])]
       .map(s => String(s ?? '').trim()).filter(Boolean)
     const segments = !tileArg
@@ -103,7 +107,7 @@ export class BehaviorQueenBee extends QueenBee {
         : [...here, tileArg]
 
     if (segments.length === 0) {
-      this.#say('The hive root is not a tile — stand on one, or name one', 'help')
+      this.#say('The hive root is not a tile — stand on one first', 'help')
       return
     }
 
@@ -122,8 +126,11 @@ export class BehaviorQueenBee extends QueenBee {
       path: behaviorPath(segments),
       name: segments[segments.length - 1],
     })
+    const bound = `"${behaviourArg}" now belongs to ${segments[segments.length - 1]} — ${sig.slice(0, 8)}`
     this.#say(
-      `"${behaviourArg}" now belongs to ${segments[segments.length - 1]} — ${sig.slice(0, 8)}`,
+      tileArg
+        ? `${bound} (naming a tile is deprecated — stand on it and use /behavior bind ${behaviourArg})`
+        : bound,
       'link',
     )
   }

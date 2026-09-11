@@ -195,10 +195,12 @@ light_mode
 lightbulb
 link
 link_off
+local_fire_department
 local_florist
 location_on
 lock
 lock_open
+login
 luggage
 mail
 mail_outline
@@ -356,6 +358,7 @@ verified_user
 video_file
 videocam
 view_carousel
+view_column
 view_in_ar
 view_list
 view_module

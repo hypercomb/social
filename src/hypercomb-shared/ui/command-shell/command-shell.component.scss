@@ -894,19 +894,36 @@ $bp-phone-max: 599px;
 .action-group { display: contents; }
 
 // THE LINE ON DEMAND, AT REST (command-line.component.ts `lineHidden`). The
-// words, their glyph and the stance tint step out; the box does not. Opacity,
-// never display or visibility — the box keeps its width so the rail beside it
-// holds still, and the input stays focusable for every door that summons it.
-// Nothing in the empty box takes a click (pointing is not a way in), but the
+// words and the stance tint step out; the box does not. Opacity, never display
+// or visibility — the box keeps its width so the rail beside it holds still,
+// and the input stays focusable for every door that summons it. The prompt's
+// slot wears the Hypercomb mark instead, so the corner keeps its spacing.
+// Nothing in the box takes a click (pointing is not a way in), but the
 // indicators stay lit and pressable: they report standing state, not the line.
 .command-shell.collapsed {
   background: transparent;
   pointer-events: none;
 
-  .prompt-glyph,
   .input-wrap { opacity: 0; }
 
   .indicators { pointer-events: auto; }
+
+  // The mark sits on the left rail's column (`_header-bar.scss` paints it up
+  // behind), so it centres on that column: half the rail's measured width, in
+  // this zoomed bar's own units, less the shell's padding and half the glyph.
+  // Undocked, a rail-sized column is assumed — the mark lands where it would.
+  .prompt-glyph {
+    margin-left: calc(
+      max(var(--hc-controls-left, 0px), 2.55rem) / var(--hc-header-zoom, 1) / 2
+      - 0.15rem - 0.675em
+    );
+  }
+}
+
+.prompt-mark {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 // Hairline group separator — the same steel the header frame and the

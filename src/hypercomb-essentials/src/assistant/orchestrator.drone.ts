@@ -36,6 +36,7 @@
 import { Drone, EffectBus } from '@hypercomb/core'
 import type { Agent, AgentRegistry } from './agent-registry.service.js'
 import { drainBlurbs } from './chat-blurb.js'
+import { drainRouteFlows } from './chat-route.js'
 
 export type FindingKind = 'waiting' | 'silent' | 'overlap' | 'failed' | 'rogue' | 'sweep' | 'blocked'
 
@@ -116,6 +117,44 @@ const BLURB_MS = 5 * 60_000
  *  for one main thread, so it takes a few and comes back in five minutes. */
 const BLURB_LIMIT = 2
 
+// ── ORGANIZING EVERY CONVERSATION ─────────────────────────────────────
+//
+// Jaime, 2026-09-10: "make sure that ollama visits as many chats as possible
+// and updates the workflow for each chat" — "a passive free local model
+// organization". The drain (chat-route.ts, `drainRouteFlows`) does the
+// visiting; this bee only keeps its clock, beside the blurbs and for the same
+// reason: an idle hive is when there is room. It never raises the bee and
+// never reports — the flows are the participant's private working material,
+// and a pass with no local model awake reads and calls nothing at all.
+//
+// ADAPTIVE: soon while a conversation is known to be behind, slow when
+// everything is organized or no model is up, and exactly when a thread's last
+// exchange goes quiet enough to close. Woken early — once, however many
+// arrive — when the model's state changes, a thread changes, or a reply
+// lands. One pass at a time, always.
+//
+// THREE OUTCOMES ARE RESTS, and a wake never cuts one short (§4.1.9):
+//
+//   budget   the pass ran out of calls or time: rest as long as it ran, so the
+//            participant's GPU works at most half the time the page is open
+//   yield    the participant's own chat or an attended call took the lane:
+//            come back when the drain says the lane reopens
+//   timeout  the server may be loading or busy: come back slowly
+//
+// Opening a conversation emits `chat:threads-changed`; if a wake could pull a
+// rest forward, every rest would be cancelled the moment anyone looked.
+export const ROUTE_FLOW_SCHEDULE = Object.freeze({
+  /** A conversation is behind, or the last pass stopped on its budget. */
+  soonMs: 5_000,
+  /** Nothing is behind, or no local model is awake. */
+  idleMs: 2 * 60_000,
+  /** An early wake: coalesced to one pass this long after the first. */
+  wakeMs: 2_000,
+})
+
+/** The effects that wake the drain early. */
+export const ROUTE_FLOW_WAKES = Object.freeze(['llm:policy-changed', 'chat:threads-changed', 'ask:chat-reply'] as const)
+
 const ioc = <T,>(key: string): T | undefined =>
   (window as unknown as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(key) as T | undefined
 
@@ -139,6 +178,16 @@ export class OrchestratorDrone extends Drone {
   /** A pass in flight. Model calls outlast the interval, and two drains would
    *  pick the same threads and pay for them twice. */
   #blurbBusy = false
+  /** The route-flow drain's one timer, when it is due, whether a pass is
+   *  running, and whether a wake arrived during it. */
+  #flowTimer: ReturnType<typeof setTimeout> | null = null
+  #flowDueAt = 0
+  #flowBusy = false
+  #flowWoken = false
+  /** A rest the last pass earned ends here; no wake schedules a pass before it. */
+  #flowRestUntil = 0
+  #flowOffs: Array<() => void> = []
+  #disposed = false
   #started = false
   /** Findings currently standing, keyed so the same one is not re-announced
    *  every 15 seconds — an alert that repeats is an alert nobody reads. */
@@ -177,6 +226,81 @@ export class OrchestratorDrone extends Drone {
     this.#sweep()
     this.#blurbTimer = setInterval(this.#blurbPass, BLURB_MS)
     void this.#blurbPass()
+    // PAUSED (Jaime, 2026-09-11: "hide the workflow sidebar for now and
+    // stop"). With the sidebar hidden nobody reads the flows, so the local
+    // model must not spend GPU organizing them. Flip to true to resume.
+    const flowsEnabled = false
+    if (flowsEnabled) {
+      this.#scheduleFlows(ROUTE_FLOW_SCHEDULE.soonMs)
+      for (const effect of ROUTE_FLOW_WAKES) this.#flowOffs.push(EffectBus.on(effect, this.#wakeFlows))
+    }
+  }
+
+  /** Put the drain's next pass `ms` from now, replacing whatever was due. */
+  #scheduleFlows = (ms: number): void => {
+    if (this.#disposed) return
+    if (this.#flowTimer !== null) clearTimeout(this.#flowTimer)
+    this.#flowDueAt = Date.now() + ms
+    this.#flowTimer = setTimeout(() => {
+      this.#flowTimer = null
+      this.#flowDueAt = 0
+      void this.#flowPass()
+    }, ms)
+  }
+
+  /** AN EARLY WAKE. Coalesced: a pass already due sooner than the wake stays
+   *  where it is, so a burst of changes is one pass, and a wake during a pass
+   *  is remembered rather than starting a second one. */
+  #wakeFlows = (): void => {
+    if (this.#disposed || !this.#started) return
+    if (this.#flowBusy) { this.#flowWoken = true; return }
+    // Never earlier than a standing rest: a wake during one leaves the timer
+    // at the rest's end.
+    const now = Date.now()
+    const dueAt = Math.max(now + ROUTE_FLOW_SCHEDULE.wakeMs, this.#flowRestUntil)
+    if (this.#flowTimer !== null && this.#flowDueAt <= dueAt) return
+    this.#scheduleFlows(dueAt - now)
+  }
+
+  /** ONE DRAIN PASS, then the next one scheduled by what it found. Silent. */
+  #flowPass = async (): Promise<void> => {
+    if (this.#flowBusy || this.#disposed) return
+    this.#flowBusy = true
+    this.#flowWoken = false
+    const { soonMs, idleMs, wakeMs } = ROUTE_FLOW_SCHEDULE
+    let next: number = idleMs
+    let rest = false
+    try {
+      const pass = await drainRouteFlows()
+      // Every field is guarded: a result from an older build or a spec mock
+      // that lacks one must never schedule `setTimeout(NaN)`.
+      if (pass.stopped === 'gate' || pass.stopped === 'fault') next = idleMs
+      else if (pass.stopped === 'budget') {
+        next = Number.isFinite(pass.elapsedMs) ? Math.max(soonMs, pass.elapsedMs) : soonMs
+        rest = true
+      } else if (pass.stopped === 'yield') {
+        const until = typeof pass.resumeAt === 'number' ? pass.resumeAt - Date.now() : Number.NaN
+        next = Number.isFinite(until) ? Math.max(soonMs, until) : soonMs
+        rest = true
+      } else if (pass.stopped === 'timeout') {
+        next = idleMs
+        rest = true
+      } else if (pass.behind > 0) next = soonMs
+      else if (typeof pass.dueIn === 'number' && Number.isFinite(pass.dueIn)) {
+        // A last exchange that closes on the clock: come back just after.
+        next = Math.min(idleMs, Math.max(soonMs, pass.dueIn + 1_000))
+      }
+    } catch { /* a convenience nobody asked for out loud must never raise */ }
+    finally {
+      if (!Number.isFinite(next)) next = soonMs
+      this.#flowBusy = false
+      this.#flowRestUntil = rest ? Date.now() + next : 0
+      // A wake heard during the pass is one pass after it — but never inside
+      // the rest the pass just earned.
+      this.#scheduleFlows(this.#flowWoken
+        ? Math.max(Math.min(next, wakeMs), this.#flowRestUntil - Date.now())
+        : next)
+    }
   }
 
   /** ONE LABELLING PASS. Never raises the bee: a hive with nothing to watch
@@ -610,6 +734,10 @@ export class OrchestratorDrone extends Drone {
     this.#timer = null
     if (this.#blurbTimer) clearInterval(this.#blurbTimer)
     this.#blurbTimer = null
+    this.#disposed = true
+    if (this.#flowTimer !== null) clearTimeout(this.#flowTimer)
+    this.#flowTimer = null
+    for (const off of this.#flowOffs.splice(0)) off()
   }
 }
 

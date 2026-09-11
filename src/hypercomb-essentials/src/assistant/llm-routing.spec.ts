@@ -340,3 +340,163 @@ describe('streamRoutedModel', () => {
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 })
+
+// ── three knobs, one provider ─────────────────────────────────────────────
+//
+// The route flow asks the participant's local model to answer without a
+// reasoning pass, in a fixed shape, at temperature 0 (chat-route.md §4.1.2).
+// Only the local adapter may turn those into wire fields; every other vendor's
+// body must stay byte for byte what it was, and a local call that sets none of
+// them must too.
+
+describe('the flow knobs reach the local body only', () => {
+  const SCHEMA = { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] }
+  const base = {
+    model: 'qwen3:8b',
+    messages: [{ role: 'user' as const, content: 'map these exchanges' }],
+    system: 'You map a conversation.',
+    maxTokens: 720,
+    apiKey: '',
+  }
+  const bodyOf = (request: { init: RequestInit }): Record<string, unknown> => JSON.parse(String(request.init.body)) as Record<string, unknown>
+
+  it('adds reasoning_effort, response_format and temperature only when set, and is byte-identical when unset', async () => {
+    const { LOCAL_PROVIDER, localLlmHost } = await import('./providers/local.provider.js')
+    const { openAiRequest } = await import('./providers/openai-shape.js')
+    const plain = LOCAL_PROVIDER.toRequest(base)
+    expect(plain.init.body).toBe(openAiRequest(`${localLlmHost()}/v1/chat/completions`, base, () => ({})).init.body)
+    expect(bodyOf(plain)).not.toHaveProperty('reasoning_effort')
+    expect(bodyOf(plain)).not.toHaveProperty('response_format')
+    expect(bodyOf(plain)).not.toHaveProperty('temperature')
+
+    const all = bodyOf(LOCAL_PROVIDER.toRequest({ ...base, thinking: false, jsonSchema: SCHEMA, temperature: 0 }))
+    expect(all['reasoning_effort']).toBe('none')
+    expect(all['response_format']).toEqual({ type: 'json_schema', json_schema: { name: 'answer', schema: SCHEMA } })
+    expect(all['temperature']).toBe(0)
+    expect(all['model']).toBe('qwen3:8b')
+    expect(all['max_tokens']).toBe(720)
+
+    expect(Object.keys(bodyOf(LOCAL_PROVIDER.toRequest({ ...base, thinking: false }))))
+      .toEqual([...Object.keys(bodyOf(plain)), 'reasoning_effort'])
+    expect(bodyOf(LOCAL_PROVIDER.toRequest({ ...base, temperature: 0.4 }))['temperature']).toBe(0.4)
+    expect(bodyOf(LOCAL_PROVIDER.toRequest({ ...base, jsonSchema: SCHEMA }))).not.toHaveProperty('reasoning_effort')
+  })
+
+  it('leaves every other vendor\'s request unchanged when a call sets them', async () => {
+    const vendors = ['anthropic', 'openai', 'google', 'xai', 'deepseek', 'mistral']
+    for (const vendor of vendors) {
+      const module = await import(`./providers/${vendor}.provider.js`) as Record<string, unknown>
+      const descriptor = Object.values(module).find(value =>
+        !!value && typeof value === 'object' && typeof (value as Descriptor).toRequest === 'function') as Descriptor
+      expect(descriptor, vendor).toBeDefined()
+      const keyed = { ...base, apiKey: 'sk-test' }
+      const before = descriptor.toRequest(keyed)
+      const after = descriptor.toRequest({ ...keyed, thinking: false, jsonSchema: SCHEMA, temperature: 0 })
+      expect(after.url, vendor).toBe(before.url)
+      expect(after.init.body, vendor).toBe(before.init.body)
+    }
+  })
+
+  it('buildRequest passes the knobs through, and adds no key for a call that set none', () => {
+    const provider = descriptor('knob-pass', 'unused')
+    registry.register(provider)
+    const set = buildRequest(provider, { providerId: provider.id, messages: base.messages, thinking: false, jsonSchema: SCHEMA, temperature: 0 })
+    expect(set.thinking).toBe(false)
+    expect(set.jsonSchema).toBe(SCHEMA)
+    expect(set.temperature).toBe(0)
+    const unset = buildRequest(provider, { providerId: provider.id, messages: base.messages })
+    expect(unset).not.toHaveProperty('thinking')
+    expect(unset).not.toHaveProperty('jsonSchema')
+    expect(unset).not.toHaveProperty('temperature')
+  })
+})
+
+// ── who is the participant ───────────────────────────────────────────────
+//
+// The route flow pauses only for the participant's OWN local chat, and names
+// only the model that answered it. `callModel`'s callers are all automatic, so
+// its stamp never says `interactive` and it never writes the stored choice;
+// the routed stream — the chat window's local send — does both, and only once
+// the server answered OK.
+
+describe('the participant\'s own local chat', () => {
+  const localish = (id: string, over: Partial<Descriptor> = {}): Descriptor => ({
+    ...descriptor(id, 'hi'),
+    fromResponse: () => ({ text: 'hi', stopReason: 'stop', inputTokens: 1, outputTokens: 1, model: `${id}-model` }),
+    ...over,
+  })
+  const heard = async (): Promise<{ payloads: Array<Record<string, unknown>>; off: () => void }> => {
+    const { EffectBus } = await import('@hypercomb/core')
+    const payloads: Array<Record<string, unknown>> = []
+    const off = EffectBus.on<Record<string, unknown>>('llm:local-used', payload => { payloads.push(payload) })
+    payloads.length = 0   // the replayed last value is not this test's
+    return { payloads, off }
+  }
+  const drainStream = async (call: Parameters<typeof streamRoutedModel>[0]): Promise<void> => {
+    for await (const _chunk of streamRoutedModel(call)) { /* consume */ }
+  }
+
+  it('callModel stamps { providerId, at } and never interactive, and remembers nothing', async () => {
+    const { callModel, LOCAL_MODEL_STORAGE_KEY } = await import('./llm-dispatch.js')
+    registry.register(localish('automatic'))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })))
+    const { payloads, off } = await heard()
+    try {
+      await callModel({ providerId: 'automatic', messages: [{ role: 'user', content: 'label this' }] })
+      expect(payloads).toHaveLength(1)
+      expect(Object.keys(payloads[0]!).sort()).toEqual(['at', 'providerId'])
+      expect(payloads[0]!['providerId']).toBe('automatic')
+      expect(typeof payloads[0]!['at']).toBe('number')
+      expect(localStorage.getItem(LOCAL_MODEL_STORAGE_KEY)).toBeNull()
+    } finally { off() }
+  })
+
+  it('the routed stream stamps interactive and writes hc:llm:local:model once the send is OK — both stream paths', async () => {
+    const { LOCAL_MODEL_STORAGE_KEY, participantLocalChoice } = await import('./llm-dispatch.js')
+    expect(LOCAL_MODEL_STORAGE_KEY).toBe('hc:llm:local:model')
+    registry.register(localish('own-local'))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })))
+    const { payloads, off } = await heard()
+    try {
+      await drainStream({ providerId: 'own-local', messages: [{ role: 'user', content: 'hello' }] })
+      expect(payloads.map(p => p['interactive'])).toEqual([true])
+      expect(typeof payloads[0]!['at']).toBe('number')
+      expect(JSON.parse(localStorage.getItem(LOCAL_MODEL_STORAGE_KEY)!)).toMatchObject({ providerId: 'own-local', model: 'own-local-model' })
+      expect(participantLocalChoice()).toMatchObject({ providerId: 'own-local', model: 'own-local-model', at: expect.any(Number) })
+
+      localStorage.clear()
+      registry.register(localish('own-streaming', { fromStreamEvent: openAiStreamEvent }))
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n', { status: 200 })))
+      await drainStream({ providerId: 'own-streaming', model: 'own-streaming-model', messages: [{ role: 'user', content: 'hello' }] })
+      expect(participantLocalChoice()).toMatchObject({ providerId: 'own-streaming', model: 'own-streaming-model' })
+    } finally { off() }
+  })
+
+  it('never writes the choice after a failed send, or for a keyed provider', async () => {
+    const { LOCAL_MODEL_STORAGE_KEY, participantLocalChoice } = await import('./llm-dispatch.js')
+    const { llmKeyStore } = await import('@hypercomb/core')
+    registry.register(localish('down-local'))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('model not loaded', { status: 500 })))
+    await expect(drainStream({ providerId: 'down-local', messages: [{ role: 'user', content: 'hello' }] })).rejects.toThrow('500')
+    expect(localStorage.getItem(LOCAL_MODEL_STORAGE_KEY)).toBeNull()
+
+    registry.register(localish('keyed-vendor', { requiresKey: true }))
+    llmKeyStore.set('keyed-vendor', 'sk-test')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })))
+    const { payloads, off } = await heard()
+    try {
+      await drainStream({ providerId: 'keyed-vendor', messages: [{ role: 'user', content: 'hello' }] })
+      expect(localStorage.getItem(LOCAL_MODEL_STORAGE_KEY)).toBeNull()
+      expect(participantLocalChoice()).toBeNull()
+      expect(payloads, 'a keyed vendor is not the participant\'s machine').toEqual([])
+    } finally { off() }
+  })
+
+  it('reads a malformed stored choice as none', async () => {
+    const { LOCAL_MODEL_STORAGE_KEY, participantLocalChoice } = await import('./llm-dispatch.js')
+    for (const stored of ['{not json', '"qwen3:8b"', '{"providerId":"local"}', '{"providerId":"","model":"qwen3:8b"}']) {
+      localStorage.setItem(LOCAL_MODEL_STORAGE_KEY, stored)
+      expect(participantLocalChoice(), stored).toBeNull()
+    }
+  })
+})

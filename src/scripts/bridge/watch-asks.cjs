@@ -33,10 +33,13 @@
 //     "contextTruncated": false,        ← the sig list was capped; widen with
 //                                        `layer-at` from `segments`
 //     "creationId": "<id>",             ← structural asks: stamp every tile
-//     "reply": "node scripts/bridge/_chat-reply.cjs <convoId> \"<reply text>\" --ask <sig>" }
+//     "reply": "node scripts/bridge/_chat-reply.cjs '<convoId>' '<reply text>' --ask '<sig>'" }
 //                                      ← mode:'chat' only — the exact command
 //                                        that delivers the reply into THIS
-//                                        conversation with the run attached
+//                                        conversation with the run attached;
+//                                        every argument single-quoted for a
+//                                        POSIX shell, so a tile path with a
+//                                        space stays ONE argument
 //   { "stopped": "<sig>" }              ← the participant stopped an ask this
 //                                          watcher announced: abort the work,
 //                                          write no note, retire nothing else
@@ -59,6 +62,24 @@ const ONCE = process.argv.includes('--once')
 
 let counter = 0
 const nextId = () => `askwatch-${Date.now()}-${++counter}`
+
+/**
+ * One argument, quoted for a POSIX shell: wrapped in single quotes, with each
+ * embedded `'` closed, escaped and reopened as `'\''`. Nothing inside single
+ * quotes expands, so a tile path holding a space, a `$`, a backtick or a
+ * quote reaches the script as ONE positional, byte for byte. Unquoted, a
+ * convoId like `chat:tile:/my notes` split into extra positionals and
+ * _chat-reply.cjs refused the reply.
+ */
+const shellQuote = value => `'${String(value).replace(/'/g, `'\\''`)}'`
+
+/**
+ * The exact command that delivers a reply into a chat conversation with the
+ * run attached — every interpolated argument quoted. The reply text is a
+ * single-quoted placeholder: substitute it the same way (`'\''` for a `'`).
+ */
+const replyCommand = (convoId, askSig) =>
+  `node scripts/bridge/_chat-reply.cjs ${shellQuote(convoId)} '<reply text>' --ask ${shellQuote(askSig)}`
 
 function send(req) {
   return new Promise((resolve, reject) => {
@@ -193,7 +214,7 @@ async function tick() {
       // ask a direction; retire the ask afterwards with `_ask-drain.cjs
       // retire <sig>`. A responder with no skill file has only this line.
       ...(mode === 'chat' && convoId
-        ? { reply: `node scripts/bridge/_chat-reply.cjs ${convoId} "<reply text>" --ask ${sig}` }
+        ? { reply: replyCommand(convoId, sig) }
         : {}),
       // 'hive' = asked from the root with no tile chosen: a hive-wide ask with
       // no single tile to own the answer. The responder reports on the
@@ -250,4 +271,6 @@ async function main() {
   }
 }
 
-main().catch(err => { console.error(String(err)); process.exit(1) })
+module.exports = { shellQuote, replyCommand }
+
+if (require.main === module) main().catch(err => { console.error(String(err)); process.exit(1) })

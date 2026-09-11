@@ -24,6 +24,12 @@
     "              a {model} token in an entry with no model resolves to the",
     "              defaultModel. An argv element that is ONLY an unresolved",
     "              placeholder is dropped, so a flagless CLI still runs.",
+    "  readOnlyArgv  OPTIONAL. The invocation for work that must not write",
+    "              (the break repair loop's headless review). It has to remove",
+    "              every tool that writes AND stop this machine's own settings",
+    "              from granting one back; {allow} expands to the caller's",
+    "              permission rules, one argument each. A bridge without one is",
+    "              refused read-only work rather than run with write access.",
     "  models      what this bridge can be asked for. `name` is the word a",
     "              participant types (/opus, /gemini); `id` is what the CLI is",
     "              given; tier is deep|balanced|fast.",
@@ -44,6 +50,17 @@
         "--model", "{model}",
         "--permission-mode", "acceptEdits",
         "--allowedTools", "Bash Read Grep Glob",
+        "--output-format", "text"
+      ],
+      "readOnlyArgv": [
+        "-p", "{prompt}",
+        "--model", "{model}",
+        "--restricted",
+        "--tools", "Read,Grep,Glob,Bash",
+        "--permission-mode", "dontAsk",
+        "--allowedTools", "{allow}",
+        "--disallowedTools", "Edit,Write,NotebookEdit,WebFetch,WebSearch",
+        "--strict-mcp-config",
         "--output-format", "text"
       ],
       "models": [

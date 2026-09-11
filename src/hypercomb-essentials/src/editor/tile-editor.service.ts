@@ -1,7 +1,38 @@
 // editor/tile-editor.service.ts
 import { EffectBus } from '@hypercomb/core'
 
-export type EditorModePayload = { active: boolean }
+/** Where an editing session is shown. `dock` sits beside the hive, which
+ *  stays visible; `page` is a full-height page on a phone. A payload with no
+ *  surface is the old modal and keeps its old meaning for anyone listening. */
+export type EditorSurfaceKind = 'dock' | 'page'
+
+export type EditorModePayload = {
+  active: boolean
+  surface?: EditorSurfaceKind
+  label?: string
+  segments?: readonly string[]
+}
+
+/** A changed draft that was thrown away — kept, one at a time and in memory
+ *  only, so reopening the same tile can offer it back. Escape, a right-click,
+ *  a sweep and a closing sheet all discard; none of them should cost the
+ *  participant what they had done. */
+export type EditorDraftStash = {
+  cell: string
+  segments: readonly string[]
+  properties: Record<string, unknown>
+  picture: {
+    source: Blob
+    point: { x: number; y: number; scale: number }
+    flat: { x: number; y: number; scale: number }
+    linked: boolean
+    mode: 'fill' | 'fit'
+  } | null
+  pictureRemoved: boolean
+  at: number
+}
+
+const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value ?? {})) as T
 
 export class TileEditorService extends EventTarget {
 
@@ -9,7 +40,12 @@ export class TileEditorService extends EventTarget {
   #cell = ''
   #targetSegments: readonly string[] = []
   #properties: Record<string, unknown> = {}
+  #baseline = '{}'
   #largeBlob: Blob | null = null
+  #surface: EditorSurfaceKind = 'dock'
+  #saving = false
+  #error = ''
+  #stash: EditorDraftStash | null = null
 
   // ── getters ────────────────────────────────────────────────────
 
@@ -20,6 +56,16 @@ export class TileEditorService extends EventTarget {
   get targetSegments(): readonly string[] { return this.#targetSegments }
   get properties(): Record<string, unknown> { return this.#properties }
   get largeBlob(): Blob | null { return this.#largeBlob }
+  get surface(): EditorSurfaceKind { return this.#surface }
+  get saving(): boolean { return this.#saving }
+  get error(): string { return this.#error }
+
+  /** The properties exactly as they were when the session opened. */
+  get baseline(): Record<string, unknown> { return JSON.parse(this.#baseline) as Record<string, unknown> }
+
+  /** Have the properties moved since the session opened? (The picture and its
+   *  framing are the ImageEditorService's to answer.) */
+  get dirty(): boolean { return JSON.stringify(this.#properties) !== this.#baseline }
 
   // ── specific property accessors (object notation) ──────────────
 
@@ -46,24 +92,58 @@ export class TileEditorService extends EventTarget {
     properties: Record<string, unknown>,
     largeBlob: Blob | null,
     targetSegments: readonly string[] = [],
+    surface: EditorSurfaceKind = 'dock',
   ): void => {
     this.#cell = cell
     this.#targetSegments = [...targetSegments]
-    this.#properties = { ...properties }
+    this.#properties = clone(properties)
+    this.#baseline = JSON.stringify(this.#properties)
     this.#largeBlob = largeBlob
+    this.#surface = surface
+    this.#saving = false
+    this.#error = ''
     this.#mode = 'editing'
     this.#emit()
-    EffectBus.emit<EditorModePayload>('editor:mode', { active: true })
+    EffectBus.emit<EditorModePayload>('editor:mode', {
+      active: true, surface, label: cell, segments: [...targetSegments],
+    })
   }
 
   readonly close = (): void => {
+    const payload: EditorModePayload = {
+      active: false, surface: this.#surface, label: this.#cell, segments: [...this.#targetSegments],
+    }
     this.#mode = 'idle'
     this.#cell = ''
     this.#targetSegments = []
     this.#properties = {}
+    this.#baseline = '{}'
     this.#largeBlob = null
+    this.#saving = false
+    this.#error = ''
     this.#emit()
-    EffectBus.emit<EditorModePayload>('editor:mode', { active: false })
+    EffectBus.emit<EditorModePayload>('editor:mode', payload)
+  }
+
+  /** The surface can change while a session is open — a window narrowed past
+   *  the dock, a phone rotated. Nobody listening to `editor:mode` treats the
+   *  two differently any more, so this is local. */
+  readonly setSurface = (surface: EditorSurfaceKind): void => {
+    if (surface === this.#surface) return
+    this.#surface = surface
+    this.#emit()
+  }
+
+  readonly setSaving = (saving: boolean): void => {
+    if (saving === this.#saving) return
+    this.#saving = saving
+    if (saving) this.#error = ''
+    this.#emit()
+  }
+
+  readonly setError = (message: string): void => {
+    this.#error = message
+    this.#emit()
   }
 
   // CLEARING IS `undefined`, NEVER `delete`. The editor form is handed whole to
@@ -74,40 +154,44 @@ export class TileEditorService extends EventTarget {
 
   readonly setLink = (value: string): void => {
     const props = this.#properties as any
-    props.link = value || undefined
+    const next = value || undefined
+    if (props.link === next || (props.link === undefined && next === undefined)) return
+    props.link = next
     this.#emit()
   }
 
   readonly setBorderColor = (value: string): void => {
     const props = this.#properties as any
     if (value) {
-      if (!props.border) props.border = {}
-      props.border.color = value
+      if (props.border?.color === value) return
+      props.border = { ...(props.border ?? {}), color: value }
     } else if (props.border) {
-      delete props.border.color
+      const { color: _dropped, ...rest } = props.border
       // The merge is shallow at the top level, so the whole `border` object is
       // replaced — dropping the colour is enough while other keys remain. An
       // emptied object must travel as `undefined` or the stored one survives.
-      if (Object.keys(props.border).length === 0) props.border = undefined
-    }
+      props.border = Object.keys(rest).length === 0 ? undefined : rest
+    } else return
     this.#emit()
   }
 
   readonly setBackgroundColor = (value: string): void => {
     const props = this.#properties as any
     if (value) {
-      if (!props.background) props.background = {}
-      props.background.color = value
+      if (props.background?.color === value) return
+      props.background = { ...(props.background ?? {}), color: value }
     } else if (props.background) {
-      delete props.background.color
-      if (Object.keys(props.background).length === 0) props.background = undefined
-    }
+      const { color: _dropped, ...rest } = props.background
+      props.background = Object.keys(rest).length === 0 ? undefined : rest
+    } else return
     this.#emit()
   }
 
   readonly setHideText = (value: boolean): void => {
     const props = this.#properties as any
-    props.hideText = value ? true : undefined
+    const next = value ? true : undefined
+    if (props.hideText === next) return
+    props.hideText = next
     this.#emit()
   }
 
@@ -116,28 +200,39 @@ export class TileEditorService extends EventTarget {
     this.#emit()
   }
 
+  /** Kept for callers of the old Pixi editor, which pushed framing here on
+   *  every drag. The framing now lives in ImageEditorService and is written
+   *  into the props at save. */
   readonly updateTransform = (x: number, y: number, scale: number, orientation: 'point-top' | 'flat-top' = 'point-top'): void => {
+    const props = this.#properties as any
     if (orientation === 'flat-top') {
-      if (!(this.#properties as any).flat) {
-        (this.#properties as any).flat = {}
-      }
-      if (!(this.#properties as any).flat.large) {
-        (this.#properties as any).flat.large = {}
-      }
-      const flatLarge = (this.#properties as any).flat.large
-      flatLarge.x = x
-      flatLarge.y = y
-      flatLarge.scale = scale
+      props.flat = { ...(props.flat ?? {}), large: { ...(props.flat?.large ?? {}), x, y, scale } }
     } else {
-      if (!(this.#properties as any).large) {
-        (this.#properties as any).large = {}
-      }
-      const large = (this.#properties as any).large
-      large.x = x
-      large.y = y
-      large.scale = scale
+      props.large = { ...(props.large ?? {}), x, y, scale }
     }
-    // no emit — transform updates are high frequency (drag/zoom)
+    // no emit — this was a high-frequency path
+  }
+
+  // ── discarded drafts ───────────────────────────────────────────
+
+  readonly stash = (draft: Omit<EditorDraftStash, 'at'>): void => {
+    this.#stash = { ...draft, properties: clone(draft.properties), at: Date.now() }
+  }
+
+  /** The discarded draft for this tile, if there is one. */
+  readonly stashFor = (cell: string, segments: readonly string[]): EditorDraftStash | null => {
+    const held = this.#stash
+    if (!held || held.cell !== cell) return null
+    if (held.segments.join('/') !== segments.join('/')) return null
+    return held
+  }
+
+  readonly dropStash = (): void => { this.#stash = null }
+
+  /** Put a stashed draft's properties back into the open session. */
+  readonly restoreProperties = (properties: Record<string, unknown>): void => {
+    this.#properties = clone(properties)
+    this.#emit()
   }
 
   // ── internal ───────────────────────────────────────────────────

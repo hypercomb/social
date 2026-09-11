@@ -83,22 +83,34 @@
         <span class="ld-title">{{ 'layout.title' | t }}</span>
         @if (cell()) { <span class="ld-subject">{{ cell() }}</span> }
       </div>
-      <!-- THE OTHER QUESTION. This window decides the container's SHAPE; the
-           targets window decides what BELONGS in its holes. Two acts, so two
-           windows, and the door between them is here because you go through it
-           in one direction: you shape it first, then you say what it is for. -->
-      <button class="ld-targets" type="button" (click)="openTargets()"
+      <!-- THE WINDOWS THIS ONE MANAGES, in one place and in one form. Each is
+           a toggle that says whether its window is up, so the header is also
+           the answer to "what else is open": the TARGETS window (what belongs
+           in each hole), the flex GALLERY (every value, drawn on this
+           container), and the PROPERTIES sent across to the other edge.
+           Drawn, not typed — a glyph from a font renders as whatever the stack
+           happens to resolve it to. -->
+      <button class="ld-act" type="button" (click)="toggleTargets()"
         [disabled]="!bound()"
-        [attr.aria-label]="'layout.targets' | t" [title]="'layout.targets' | t">◎</button>
-      <!-- SEND THE PROPERTIES ACROSS. They dock on the other edge and share
-           that lane with the flex gallery; the shelf gets the whole of this
-           side. The arrow points where they are going, which is the only thing
-           the button decides. -->
-      @if (!across()) {
-        <button class="ld-across" type="button" (click)="sendAcross()"
-          [attr.aria-label]="'layout.properties.across' | t"
-          [title]="'layout.properties.across' | t">⇥</button>
-      }
+        [class.is-on]="targetsOpen()"
+        [attr.aria-pressed]="targetsOpen()"
+        [attr.aria-label]="'layout.targets' | t" [title]="'layout.targets' | t">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" /><circle cx="8" cy="8" r="1.75" /></svg>
+      </button>
+      <button class="ld-act" type="button" (click)="toggleFlex()"
+        [disabled]="!bound()"
+        [class.is-on]="flexOpen()"
+        [attr.aria-pressed]="flexOpen()"
+        [attr.aria-label]="'layout.flex' | t" [title]="'layout.flex' | t">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11" /><circle class="knob" cx="5.5" cy="4" r="1.5" /><circle class="knob" cx="10.5" cy="8" r="1.5" /><circle class="knob" cx="7" cy="12" r="1.5" /></svg>
+      </button>
+      <button class="ld-act" type="button" (click)="sendAcross()"
+        [class.is-on]="across()"
+        [attr.aria-pressed]="across()"
+        [attr.aria-label]="(across() ? 'layout.properties.back' : 'layout.properties.across') | t"
+        [title]="(across() ? 'layout.properties.back' : 'layout.properties.across') | t">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3h12v10H2z" /><path d="M10 3v10" /></svg>
+      </button>
       <button class="ld-close" type="button" (click)="close()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
     </header>
 
@@ -346,9 +358,12 @@
           <span class="ld-title">{{ 'layout.options' | t }}</span>
           @if (layout()) { <span class="ld-subject">{{ layout() }}</span> }
         </div>
-        <button class="ld-across" type="button" (click)="sendAcross()"
+        <button class="ld-act is-on" type="button" (click)="sendAcross()"
+          [attr.aria-pressed]="true"
           [attr.aria-label]="'layout.properties.back' | t"
-          [title]="'layout.properties.back' | t">⇤</button>
+          [title]="'layout.properties.back' | t">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3h12v10H2z" /><path d="M6 3v10" /></svg>
+        </button>
       </header>
       <div class="ld-inspector is-away">
         <ng-container [ngTemplateOutlet]="properties"></ng-container>
@@ -360,9 +375,11 @@
   <ng-template #properties>
     @if (bound() && selectedLevel(); as level) {
       <!-- THE PROPERTIES of whichever level is selected. Dragging writes the
-           custom property straight onto that level; letting go commits it. -->
+           custom property straight onto that level; letting go commits it.
+           No "Options" heading over them: the level row below already says
+           which container this is, and a title that repeats the window's own
+           name is a line spent on nothing. -->
       <section class="ld-section">
-        <h3 class="ld-section-title">{{ 'layout.options' | t }}</h3>
         <p class="ld-level">
           <span class="ld-level-layout">{{ level.layout }}</span>
           <span class="ld-level-path">{{ level.path.length ? level.path.join(' › ') : ('layout.root' | t) }}</span>
@@ -428,22 +445,38 @@
             <button class="ld-naming-more" type="button"
               (click)="openTargets()"
               [attr.aria-label]="'layout.targets' | t"
-              [title]="'layout.hole.more' | t">◎</button>
+              [title]="'layout.hole.more' | t">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" /><circle cx="8" cy="8" r="1.75" /></svg>
+            </button>
           </div>
         }
+
+        <h3 class="ld-group-label">{{ 'layout.group.measure' | t }}</h3>
 
         <!-- THE TWO TYPES, IN ONE ROW. Left of the rule are the container's
              own flexbox measurements; right of it is the pane being pointed
              at. One row, because they are the same question asked of two
-             different things, and one slider serves both. -->
+             different things, and one slider serves both.
+
+             A value this level does not declare still SHOWS — the value it
+             actually reads, quietly, with where it was said. "inherited"
+             answered the wrong question: not whether a gutter is inherited,
+             but what it is and who set it. That is what makes an anchor
+             legible — a `single` setting the inset once is visible on every
+             level it reaches. -->
         <div class="ld-measures" role="group" [attr.aria-label]="'layout.measures' | t">
           @for (measure of containerMeasures(); track measure.name) {
+            @let origin = originOf(measure);
             <button class="ld-measure" type="button"
               [class.is-on]="activeVariable()?.name === measure.name && !divisionMeasure()?.measured"
+              [class.is-inherited]="!measure.value"
               [attr.aria-pressed]="activeVariable()?.name === measure.name && !divisionMeasure()?.measured"
               (click)="pickMeasure(measure.name)">
               <span class="ld-measure-name">{{ measure.name }}</span>
-              <span class="ld-measure-value">{{ measure.value || ('layout.inherited' | t) }}</span>
+              <span class="ld-measure-value">{{ shown(measure) }}</span>
+              @if (origin) {
+                <span class="ld-measure-from" [title]="'layout.inherited' | t">{{ origin === '*' ? ('layout.default' | t) :origin }}</span>
+              }
             </button>
           }
           @if (divisionMeasure(); as division) {
@@ -451,35 +484,55 @@
             <!-- A pane that takes the remainder has nothing to move. It still
                  shows, greyed, because "this one has no measurement" is an
                  answer and a missing chip is not. -->
+            @let paneOrigin = originOf(division);
             <span class="ld-measure is-division"
               [class.is-on]="division.measured"
               [class.is-still]="!division.measured"
+              [class.is-inherited]="division.measured && !division.value"
               [title]="(division.measured ? 'layout.wall.fixed' : 'layout.wall.fluid') | t">
               <span class="ld-measure-name">{{ division.name }}</span>
-              <span class="ld-measure-value">{{ division.measured ? (division.value || ('layout.inherited' | t)) : ('layout.unmeasured' | t) }}</span>
+              <span class="ld-measure-value">{{ division.measured ? shown(division) : ('layout.unmeasured' | t) }}</span>
+              @if (division.measured && paneOrigin) {
+                <span class="ld-measure-from">{{ paneOrigin === '*' ? ('layout.default' | t) :paneOrigin }}</span>
+              }
             </span>
           }
         </div>
 
-        <!-- ONE SLIDER, on whatever is active. -->
+        <!-- ONE SLIDER, on whatever is active. It sits at the value the level
+             READS, so moving it starts from what is on the pane rather than
+             from zero. A pane's measure also takes a unit: a share fills or
+             halves an allotment, a length holds a width. -->
         @if (activeVariable(); as variable) {
           <div class="ld-var">
             <div class="ld-var-head">
               <span class="ld-var-name">{{ variable.name }}</span>
-              <span class="ld-var-value">{{ variable.value || ('layout.inherited' | t) }}</span>
+              @if (unitsFor(variable.name).length) {
+                <span class="ld-units" role="group" [attr.aria-label]="'layout.unit' | t">
+                  @for (choice of unitsFor(variable.name); track choice) {
+                    <button class="ld-unit" type="button"
+                      [class.is-on]="choice === unit(variable.reads)"
+                      [attr.aria-pressed]="choice === unit(variable.reads)"
+                      (click)="switchUnit(variable, choice)">{{ choice }}</button>
+                  }
+                </span>
+              }
+              <span class="ld-var-value" [class.is-inherited]="!variable.value">{{ shown(variable) }}</span>
             </div>
             <input
               class="ld-slider"
               type="range"
-              step="0.25"
-              [min]="min(variable.name)"
-              [max]="max(variable.name)"
-              [value]="amount(variable.value)"
-              (input)="previewVar(variable.name, $event, variable.value)"
-              (change)="commitVar(variable.name, $event, variable.value)"
+              [step]="step(variable)"
+              [min]="min(variable)"
+              [max]="max(variable)"
+              [value]="amount(variable.reads)"
+              (input)="previewVar(variable, $event)"
+              (change)="commitVar(variable, $event)"
             />
           </div>
         }
+
+        <h3 class="ld-group-label">{{ 'layout.group.place' | t }}</h3>
 
 
         <!-- WHERE THE PARTS SIT.
@@ -514,26 +567,22 @@
           }
         </div>
 
-        <!-- The inheritance rule used to be three lines of prose here. It is
-             the largest single thing in a half of a window that may not
-             scroll, and it explains something the sliders already show: a
-             nested level reads "inherited" until you move it. It lives in the
-             documentation now. -->
-        <button class="ld-remove" type="button" (click)="removeLevel()">
-          {{ (level.path.length ? 'layout.unnest' : 'layout.unplug') | t }}
-        </button>
-      </section>
-
-      <!-- THE WALLS. What a border is telling you about a hole — four
-           specimens of the actual border, each naming itself on hover. Five
-           lines of prose was the single largest thing in a half of a window
-           that is not allowed to scroll, and a border is a thing you recognise
-           rather than read. -->
-      <section class="ld-section ld-legend">
-        <span class="ld-wall is-fluid" [attr.data-name]="'layout.wall.fluid' | t"><i></i></span>
-        <span class="ld-wall is-fixed" [attr.data-name]="'layout.wall.fixed' | t"><i></i></span>
-        <span class="ld-wall is-band" [attr.data-name]="'layout.wall.band' | t"><i></i></span>
-        <span class="ld-wall is-page" [attr.data-name]="'layout.wall.page' | t"><i></i></span>
+        <!-- THE FOOT. What the walls mean — four specimens of the actual
+             border, each naming itself on hover, because a border is a thing
+             you recognise rather than read — and taking this level back out.
+             Both are about the level as a whole, so they close it off together
+             instead of trailing below it as a section of their own. -->
+        <div class="ld-foot">
+          <div class="ld-legend">
+            <span class="ld-wall is-fluid" [attr.data-name]="'layout.wall.fluid' | t"><i></i></span>
+            <span class="ld-wall is-fixed" [attr.data-name]="'layout.wall.fixed' | t"><i></i></span>
+            <span class="ld-wall is-band" [attr.data-name]="'layout.wall.band' | t"><i></i></span>
+            <span class="ld-wall is-page" [attr.data-name]="'layout.wall.page' | t"><i></i></span>
+          </div>
+          <button class="ld-remove" type="button" (click)="removeLevel()">
+            {{ (level.path.length ? 'layout.unnest' : 'layout.unplug') | t }}
+          </button>
+        </div>
       </section>
     } @else {
       <p class="ld-still">{{ 'layout.intro' | t }}</p>

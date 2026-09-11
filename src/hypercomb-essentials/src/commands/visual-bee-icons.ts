@@ -491,17 +491,16 @@ function dispatchEnterAction(action: string, label: string | undefined, prefix: 
 /** Dispatch a click on an ASLEEP icon. Entering the view is exactly what it
  *  cannot do — a dormant takeover renders nothing, so the mode would flip and
  *  bounce straight back to the hexagons. Take the participant to where the
- *  answer is instead: the Beehaviors panel, on THIS tile, which is the one
- *  surface that both explains the dormancy and offers the wake. The same
- *  `tile:action` payload the panel's other doors send (ShowFeaturesDrone). */
+ *  answer is instead: the Beehaviors panel on the CONTEXT layer. It used to
+ *  open on THIS tile; behaviours are managed only from the layer you stand
+ *  in, so the per-tile aim is deprecated (2026-09-10). */
 function dispatchAsleepAction(label: string | undefined): void {
   const cell = String(label ?? '').trim()
   if (!cell) return
-  // Out of the `tile:action` dispatch we are standing in: re-emitting the same
-  // effect inside its own handler loop re-enters the subscriber set (and
-  // rewrites its last value) mid-iteration. A microtask makes it an ordinary
-  // second event.
-  queueMicrotask(() => EffectBus.emit('tile:action', { action: 'features', label: cell }))
+  // Out of the `tile:action` dispatch we are standing in: emitting inside its
+  // own handler loop re-enters the bus mid-iteration. A microtask makes it an
+  // ordinary second event.
+  queueMicrotask(() => EffectBus.emit('features:context-open', {}))
 }
 
 // ── Wire up: listen to registry changes + tile:action events ──────────

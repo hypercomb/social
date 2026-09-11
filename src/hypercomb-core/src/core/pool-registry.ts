@@ -285,6 +285,12 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // and not these two left exactly the gap this registry exists to close.
   'chat:blurbs',
   'chat:streams',
+  // Each conversation's organized WORKFLOW, as the machine-local model
+  // arranged it for the chat window's route sidebar (assistant/chat-route.ts,
+  // documentation/chat-route.md). DERIVED CACHE: one recycled slot per
+  // conversation (putPoolDoc sub-keyed by the convoId), version-stamped,
+  // never load-bearing — wipe-safe.
+  'chat:route-flows',
   // The context basket — signatures gathered while browsing, handed to an ask
   // as its closure root list (see assistant/context-basket.ts). Colon-scoped
   // so neither can collide with a tile slugged 'context' or 'changes'.
@@ -302,6 +308,15 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // cold client could never rebuild it (optimize-phase.md litmus). Colon-
   // scoped so it can never collide with a tile slugged 'feedback'.
   'feedback:summaries',
+  // THE BREAK REPAIR LOOP (essentials/assistant/breaks.ts,
+  // documentation/break-repair-loop.md). `breaks:queue` is the page's raw
+  // record of what broke — append-only, content-addressed, drained by the
+  // fold. `breaks:log` is one issue document per break fingerprint, carrying
+  // what the reviewing agent made of it and what the participant chose.
+  // TRUTH POOLS, never minted from the optimize phase: a break is an event,
+  // not a derivation of layers (optimize-phase.md litmus).
+  'breaks:log',
+  'breaks:queue',
   // WHAT THE PARTICIPANT PUT AWAY — the concealment records behind "hide
   // first, delete second" (essentials/concealment/concealment.ts). A pool
   // and not the optimize phase's business by the litmus in optimize-phase.md:

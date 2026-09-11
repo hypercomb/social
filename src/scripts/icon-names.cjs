@@ -98,11 +98,16 @@ for (const root of ROOTS) {
     //    'cable'` and `gameIcon = 'castle'` (roper, solomon) were invisible to
     //    the bare-word form and shipped as the WORDS "CABLE" and "CASTLE" in
     //    the behaviours list (2026-09-02).
-    for (const m of src.matchAll(/\b[\w$]*[Ii]cons?\s*:\s*'([a-z][a-z0-9_]*)'/g)) names.add(m[1])
-    for (const m of src.matchAll(/\b[\w$]*[Ii]cons?\s*:\s*"([a-z][a-z0-9_]*)"/g)) names.add(m[1])
+    //    `glyph` is the same word on the phone's app decks: an AppChip's
+    //    `glyph: 'view_column'` is the ligature app-deck.ts / tile-view.drone.ts
+    //    write straight into the plate. Reading only `icon` dropped
+    //    `view_column` (the lanes chip) and `login` (tile-view's enter chip)
+    //    from the subset, and both drew as WORDS (2026-09-10).
+    for (const m of src.matchAll(/\b[\w$]*(?:[Ii]cons?|[Gg]lyphs?)\s*:\s*'([a-z][a-z0-9_]*)'/g)) names.add(m[1])
+    for (const m of src.matchAll(/\b[\w$]*(?:[Ii]cons?|[Gg]lyphs?)\s*:\s*"([a-z][a-z0-9_]*)"/g)) names.add(m[1])
     // …and the assignment form of the same thing: `readonly icon = 'nearby'`.
-    for (const m of src.matchAll(/\b[\w$]*[Ii]cons?\s*=\s*'([a-z][a-z0-9_]*)'/g)) names.add(m[1])
-    for (const m of src.matchAll(/\b[\w$]*[Ii]cons?\s*=\s*"([a-z][a-z0-9_]*)"/g)) names.add(m[1])
+    for (const m of src.matchAll(/\b[\w$]*(?:[Ii]cons?|[Gg]lyphs?)\s*=\s*'([a-z][a-z0-9_]*)'/g)) names.add(m[1])
+    for (const m of src.matchAll(/\b[\w$]*(?:[Ii]cons?|[Gg]lyphs?)\s*=\s*"([a-z][a-z0-9_]*)"/g)) names.add(m[1])
 
     // 4. Glyph RESOLVERS: a declaration whose own name says icon, returning
     //    string literals. `case 'pools': return 'nearby'` renders a glyph just

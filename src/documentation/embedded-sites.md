@@ -140,6 +140,13 @@ into the hive chrome or fighting the other page.
 - `<link rel="stylesheet">` is still hoisted into `<head>` — an external
   sheet is fetched, so its text can't be rewritten. A page that wants to
   travel as an artifact should inline its styles.
+- The mount WAITS for those hoisted sheets to load or fail (capped at
+  3s) before any of the page goes in
+  (`presentation/tiles/cell-page-stylesheets.ts`). A link a script adds
+  to a live document does not hold back paint the way a parsed one does,
+  so without the wait the content painted bare and restyled a beat later
+  — every page linking the shared `chrome.css` flashed on load. The page
+  on screen stays up during the wait; the swap is one synchronous pass.
 - `<script>` nodes are recreated as live elements so they execute, and
   the `<body>` content is dropped into a fixed-position host div. The
   host is inset by `--hc-inset-left` / `--hc-inset-right` (the CSS mirror

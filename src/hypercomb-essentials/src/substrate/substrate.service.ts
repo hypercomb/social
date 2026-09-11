@@ -45,6 +45,7 @@ import {
 } from './folder-handles.js'
 import { readTilePropertiesAt, readTilePropsSigAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, writeTilePropsIndex, lookupTilePropsSig, isParticipantImage, isSignature, seedLayerKeyedTileProps, primaryTileImageSig } from '../editor/tile-properties.js'
 import { renderTileSmall } from './tile-small-render.js'
+import { readFraming } from '../editor/crop-math.js'
 
 const PROPS_FILE = '0000'                    // legacy per-hive dir props (read-fallback)
 const HIVE_KEY = 'substrate'                 // per-hive override (path string)
@@ -283,16 +284,11 @@ async function renderToHexBox(blob: Blob, w: number, h: number): Promise<Blob> {
   }
 }
 
-/** The framing a person chose, when one was saved. Zeroes are meaningful
- *  (a centred picture), so only a missing `scale` means "no framing". */
+/** The framing a person chose, when one was saved — read the one way every
+ *  framing is read (`editor/crop-math.ts`), so the attach doors' placeholder
+ *  `{0,0,1}` means "never framed" here exactly as it does in the editor. */
 function framingOf(saved: unknown): { x: number; y: number; scale: number } | undefined {
-  const t = saved as { x?: unknown; y?: unknown; scale?: unknown } | undefined
-  if (typeof t?.scale !== 'number' || !(t.scale > 0)) return undefined
-  return {
-    x: typeof t.x === 'number' ? t.x : 0,
-    y: typeof t.y === 'number' ? t.y : 0,
-    scale: t.scale,
-  }
+  return readFraming(saved)
 }
 
 /** Did a person ever work on this tile's look? Used only to REPORT tiles
@@ -1611,16 +1607,12 @@ export class SubstrateService extends EventTarget {
             height: Math.round(settings.hexHeight('point-top')),
             orientation: 'point-top',
             framing: framingOf(props?.large),
-            background: props?.background?.color,
-            border: props?.border?.color,
           })
           const flat = await renderTileSmall(blob, {
             width: Math.round(settings.hexWidth('flat-top')),
             height: Math.round(settings.hexHeight('flat-top')),
             orientation: 'flat-top',
             framing: framingOf(props?.flat?.large),
-            background: props?.background?.color,
-            border: props?.border?.color,
           })
           const pointSig = await store.putResource(point)
           const flatSig = await store.putResource(flat)

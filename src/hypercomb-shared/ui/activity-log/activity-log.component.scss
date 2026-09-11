@@ -60,7 +60,9 @@
 // ground so it stands off the rows it lies over.
 :host-context([data-hc-mobile='on']) .activity-panel {
   bottom: calc(max(var(--hc-controls-bottom, 0px), 4rem) + 0.5rem);
-  left: 0.75rem;
+  // Beside the bar's columns on a landscape phone (it publishes their width;
+  // portrait publishes 0), never underneath them.
+  left: calc(var(--hc-controls-left, 0px) + 0.75rem);
   right: 0.75rem;
   max-width: none;
   padding: 0.35rem 0.6rem;

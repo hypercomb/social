@@ -20,7 +20,10 @@ describe('a creation draws the design AS IT STANDS', () => {
     // The 14rem rail is asked for as a share instead: three chips wide is not
     // a rail, it is the whole chip.
     expect(glyph).toMatch(/--hc-layout-rail:22%/)
-    expect(glyph).not.toMatch(/14rem/)
+    // The page measure is never DECLARED in a chip. It still rides inside the
+    // hole's own `var()` as the template's fallback — what a nested level that
+    // declares nothing would read — and the chip's declaration beats it.
+    expect(glyph).not.toMatch(/--hc-layout-rail:14rem/)
   })
 
   it('turns a NESTED level without turning the one above it', () => {

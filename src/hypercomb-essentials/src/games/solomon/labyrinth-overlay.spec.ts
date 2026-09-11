@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { WALL } from './engine.js'
 import { type RoomDef } from './labyrinth.js'
 import { SolomonLabyrinthOverlay } from './labyrinth-overlay.js'
+import { SAVE_SLOTS_KEY } from './save-slots.js'
 import { type LoadedTileRoom } from './tile-surface.js'
 
 const native = vi.hoisted(() => ({ ensure: vi.fn(), create: vi.fn() }))
@@ -15,7 +16,11 @@ vi.mock('../audio.js', () => ({
     muted = true
     unlock(): void {}
     tone(): void {}
+    noise(): void {}
+    duck(): void {}
     toggleMuted(): boolean { return this.muted = !this.muted }
+    startAmbience(): void {}
+    stopAmbience(): void {}
     dispose(): void {}
   },
 }))
@@ -75,7 +80,8 @@ function solveMira(): void {
   marker('Mira').click()
   expect(document.querySelector('.sol-rpg-clue')?.textContent).toContain('sunrise')
   button('East, toward sunrise').click()
-  button('Keep exploring').click()
+  key('keydown', 'e')
+  key('keyup', 'e')
 }
 function walkToDawn(): void {
   // The lake blocks the direct western route. Follow the map's clear path.
@@ -94,6 +100,31 @@ function enter(): void {
   key('keyup', 'Enter')
 }
 async function settle(): Promise<void> { for (let i = 0; i < 12; i++) await Promise.resolve() }
+function stored(): { location: { mode: string }, world: { player: unknown } } {
+  return JSON.parse(localStorage.getItem(SAVE_SLOTS_KEY)!).slots[1].payload
+}
+/** Saves inside the Dawn Shrine, then reopens with the continue's first native
+ *  room still hydrating. `finish` lets that room load. */
+async function pendingContinue(): Promise<{ overlay: SolomonLabyrinthOverlay, finish: () => Promise<void> }> {
+  const first = mount()
+  solveMira()
+  walkToDawn()
+  fillDawn()
+  enter()
+  await settle()
+  first.engine!.arrive(first.journey.room!.relics[0])
+  frame()
+  first.unmount()
+  let resolve!: (value: LoadedTileRoom) => void
+  let requested!: RoomDef
+  native.ensure.mockImplementationOnce((room: RoomDef) => {
+    requested = room
+    return new Promise<LoadedTileRoom>(done => { resolve = done })
+  })
+  const overlay = mount()
+  expect(document.querySelector('.sol-adventure')?.getAttribute('aria-busy')).toBe('true')
+  return { overlay, finish: async () => { resolve(hydrate(requested)); await settle() } }
+}
 
 beforeEach(() => {
   localStorage.clear()
@@ -170,7 +201,9 @@ describe('the Solomon adventure shell with real journey and world models', () =>
     expect(marker('Dawn Shrine').dataset.state).toBe('open')
     marker('Mira').click()
     expect(document.querySelector('.sol-rpg-choices')).toBeNull()
-    button('Keep exploring').click()
+    key('keydown', 'e')
+    key('keyup', 'e')
+    expect(document.querySelector('.sol-rpg-dialog')).toBeNull()
     walkToDawn()
     expect(second.engine).toBeNull()
     marker('Dawn Shrine').click()
@@ -205,6 +238,43 @@ describe('the Solomon adventure shell with real journey and world models', () =>
     expect(pendingFrames.size).toBe(0)
   })
 
+  it.each([
+    ['Escape', () => key('keydown', 'Escape')],
+    ['the World button', () => button('World').click()],
+  ])('lets a pending continue finish before %s shows the world, so the adventure keeps saving', async (_, gesture) => {
+    const { overlay, finish } = await pendingContinue()
+    gesture()
+    await settle()
+    expect(overlay.isMounted()).toBe(true)
+    expect(document.querySelector('.sol-adventure')?.getAttribute('aria-busy')).toBe('true')
+    await finish()
+    expect(document.querySelector('.sol-adventure')?.hasAttribute('aria-busy')).toBe(false)
+    expect((document.querySelector('.sol-adventure-world') as HTMLElement).hidden).toBe(false)
+    expect((document.querySelector('.sol-adventure-rooms') as HTMLElement).hidden).toBe(true)
+    expect(overlay.engine).toBeNull()
+    expect(overlay.journey.engines.has('sunseed-porch')).toBe(true)
+    expect(document.querySelector('.sol-save-status')?.textContent).toBe('Autosaved')
+    expect(stored().location.mode).toBe('world')
+    const player = stored().world.player
+    walk('ArrowDown', 30)
+    for (let i = 0; i < 40; i++) frame()
+    expect(stored().world.player).not.toEqual(player)
+  })
+
+  it('opens the designer once a pending continue finishes, and saves again when it closes', async () => {
+    const { overlay, finish } = await pendingContinue()
+    overlay.showDesigner()
+    expect(document.querySelector('.sol-name')).toBeNull()
+    await finish()
+    expect(document.querySelector('.sol-name')).not.toBeNull()
+    expect((document.querySelector('.sol-adventure') as HTMLElement).hidden).toBe(true)
+    expect(overlay.journey.engines.has('sunseed-porch')).toBe(true)
+    key('keydown', 'Escape')
+    expect(document.querySelector('.sol-name')).toBeNull()
+    expect((document.querySelector('.sol-adventure') as HTMLElement).hidden).toBe(false)
+    expect(stored().location.mode).toBe('world')
+  })
+
   it('dispatches an overworld cavern to its separate scrolling knowledge dungeon', () => {
     const overlay = mount()
     walk('ArrowRight', 24)
@@ -215,7 +285,7 @@ describe('the Solomon adventure shell with real journey and world models', () =>
     frame()
     expect((document.querySelector('.sol-adventure-dungeon') as HTMLElement).hidden).toBe(false)
     expect(document.querySelector('.sol-scroll-dungeon header strong')?.textContent).toBe('Wayfarer Cavern')
-    expect(document.querySelectorAll('.sd-tile')).toHaveLength(46 * 13)
+    expect(document.querySelectorAll('.sol-scroll-dungeon .sd-feature')).toHaveLength(7)
     expect(overlay.engine).toBeNull()
     expect(native.ensure).not.toHaveBeenCalled()
     button('World').click()

@@ -2,144 +2,247 @@
 //
 // THE ROUTE and THE RESPONSE WIZARD (documentation/chat-route.md) — the
 // fifth sheet. The main sheet is at the component style budget, and the pipe
-// is its own vocabulary: a narrow column beside the thread, square pieces on
-// a straight line, a question drawn as a radiogroup inside the reply that
-// asked it and collapsed to one line once it is answered.
+// is its own vocabulary: a column on the right of the thread holding the
+// conversation's workflow as an indented tree of square cards with joined
+// pipes, the summary pane under it, and a question drawn as a radiogroup
+// inside the reply that asked it and collapsed to one line once it is
+// answered.
 //
 // A TOOL WINDOW NEVER NAMES A COLOUR. Everything here paints from `var(--acc)`
 // (the panel's identity, deepened under bright looks), the `--hc-window-*`
 // roles the panel mixin emits, and the ink ladder. The pipe is `currentColor`
 // on an ink role, so the theme decides what a hairline is. Rectangles take a
-// rung: pieces the card rung, controls the control rung, the hover card the
-// floating rung. The one round thing — the option's number — is round.
+// rung: cards the card rung, controls and chips the control rung. The one
+// round thing — the option's number — is round.
 //
 // MOTION is a 150 ms colour/opacity change and nothing else: the lock-in of
 // a decision is a change of state, not a performance, and under reduced
-// motion the resting state IS the final state, because nothing here has an
-// entrance that is the only way to a visible state.
+// motion the resting state IS the final state. Grid placement changes are
+// instant by nature, so a fold or a new branch never animates.
 //
-// Chrome geometry in rem (the column, the pieces, the card); text inside the
-// message cells in em, so it follows the panel's text ladder like the rest
-// of the transcript; text on the floating card in rem, like every off-panel
-// surface.
+// Chrome geometry and the sidebar's text in rem — the sidebar is chrome
+// beside the transcript, not transcript; text inside the message cards in
+// em, so it follows the panel's text ladder like the rest of the thread. The
+// only px left are hairlines: the 1 px divider, the 1 px start line and the
+// 2 px pipe.
 
 @use '../toolwindow' as tw;
+@use '../breakpoints' as bp;
 
-// ── the column ────────────────────────────────────────────────────────────
+// The square every card is. One branch step (ROUTE_INDENT_REM) and the
+// narrowest a card gets (ROUTE_CARD_MIN_REM) — with the depth cap the canvas
+// never needs more than 2 × 1.75 + 9 = 12.5rem. The cell's inline-start
+// padding, the card's inline-end padding, the pipe hairline, and J: where
+// every vertical length of pipe runs, the square's centre line.
+$square: 1.75rem;
+$indent: 1.75rem;
+$card-min: 9rem;
+$pad: 0.25rem;
+$gutter: 0.75rem;
+$line: 2px;
+$jx: calc(#{$pad} + #{$square} / 2);
+
+// ── the conversation area ─────────────────────────────────────────────────
 //
-// The scroller becomes a two-column grid ONLY when there is something on the
-// route (`routeShown()` in the component): messages in `minmax(0, 1fr)`, the
-// pipe in `--chat-route-w`. `row-gap: 0` so the pipe is continuous — the old
-// flex gap becomes block spacing on each message card instead — and every
-// singleton in the scroller spans both columns so auto-placement can never
-// drop one of them into the pipe.
+// [ thread | column ]. The thread keeps its own flex column and its own
+// scroller exactly as it was before the route existed; the column is a
+// sibling with two scrollers of its own. Below 701 px the component does not
+// render the column at all (the rail's query), so the thread takes the row.
 
-.chat-thread.chat-thread-routed {
-  --chat-route-w: 2.4rem;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--chat-route-w);
-  column-gap: 0.5em;
-  row-gap: 0;
-  align-content: start;
+.chat-route-split {
+  --chat-route-side-w: clamp(14rem, 30%, 22rem);
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
 
-  .chat-msg {
-    margin-block: 0.25em;
-    // The flex sheet says `align-self: flex-end` for the user card, which in
-    // a grid is the BLOCK axis. Rows are as tall as their tallest cell, so a
-    // card must sit at the top of its row and hug its side with justify.
-    align-self: start;
-    transition: border-color 150ms ease;
+  // CONVERSATION_MIN (260 px): at 701 px the column gives way to its own
+  // minimum before the thread drops below it.
+  > .chat-threadwrap {
+    min-width: 16.25rem;
   }
-  .chat-msg.user { justify-self: end; }
-  .chat-msg.ai { justify-self: start; }
-
-  .chat-empty,
-  .chat-wait-hint { grid-column: 1 / -1; }
-  .chat-empty { align-self: center; }
 }
 
-// A message whose piece is under the pointer, or has the focus, lifts its
-// border while the card is up. No text-decoration: an underline through
-// rendered markdown is the wrong mark.
+// The tree viewport over the summary pane, one divider for both.
+.chat-route-col {
+  flex: 0 1 var(--chat-route-side-w);
+  min-width: 12rem;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-inline-start: 1px solid var(--hc-window-edge);
+}
+
+// A landscape phone is wider than the rail's query and still has no room
+// beside a conversation — the same either-axis rule that hides the rail.
+@include bp.phone {
+  .chat-route-col { display: none; }
+}
+
+// The viewport. It scrolls on both axes — sideways only as far as a deep
+// branch needs at the narrowest column — and its ground can be PULLED: the
+// ground takes a drag, the cards take a click. Native overflow anchoring keeps
+// the card in view steady when the flow is re-derived above it.
+.chat-route-side {
+  flex: 1 1 auto;
+  min-height: 8rem;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: auto;
+  padding-block: 0.85rem 1rem;
+  padding-inline: 0.7rem 0.75rem;
+  font-size: 0.78rem;
+  line-height: 1.3;
+  cursor: grab;
+  user-select: none;
+  touch-action: pan-x pan-y;
+  scrollbar-width: thin;
+  scrollbar-color: var(--hc-window-edge) transparent;
+
+  &.chat-route-pulling { cursor: grabbing; }
+}
+
+// The current step's messages lift their border. No text-decoration: an
+// underline through rendered markdown is the wrong mark.
+.chat-panel .chat-msg {
+  transition: border-color 150ms ease;
+}
 .chat-msg.chat-route-lit {
   border-color: rgba(var(--acc), 0.55);
 }
 
-// ── the pipe ──────────────────────────────────────────────────────────────
-//
-// Every route cell draws the pipe as two half-height pseudo-elements, so it
-// runs through rows with nothing on them and the LOWER half can go dashed
-// below an open junction — the pipe is not yet flowing past a question that
-// has not been answered. Pieces are centred on the line and sit over it, so
-// on a row holding a junction the split lands under the junction's card.
-
-.chat-route-cell {
+// THE START LINE. While a pressed step holds, a thread-wide rule marks the
+// first message of its active span — not the bubble: assistant bubbles
+// already wear an accent inline-start border, and user bubbles sit at the
+// end. An absolute child of the scroller takes no flex gap and scrolls with
+// the rows; the component places it half a gap above the message.
+.chat-panel .chat-thread {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  padding-block: 0.5rem;
-  min-height: 1.5rem;
-  color: var(--hc-window-ink-quiet);
-
-  &::before,
-  &::after {
-    content: '';
-    position: absolute;
-    left: calc(50% - 1px);
-    width: 0;
-    border-left: 2px solid currentColor;
-    opacity: 0.55;
-    pointer-events: none;
-  }
-  &::before { top: 0; bottom: 50%; }
-  &::after { top: 50%; bottom: 0; }
-
-  &.chat-route-cell-open::after { border-left-style: dashed; }
-
-  // The end row: the pipe arrives and stops. Open, it simply ends; capped,
-  // the cap piece sits on its last length. After an unanswered question the
-  // whole of it is still the dashed, not-yet-flowing kind.
-  &.chat-route-cell-end {
-    grid-column: 2;
-    min-height: 1.75rem;
-    &::after { display: none; }
-    &.chat-route-cell-open::before { border-left-style: dashed; }
-  }
+}
+.chat-route-anchor {
+  position: absolute;
+  inset-inline: 0;
+  block-size: 0;
+  border-block-start: 1px solid var(--hc-window-accent);
+  pointer-events: none;
 }
 
-// ── pieces ────────────────────────────────────────────────────────────────
+// ── the tree ──────────────────────────────────────────────────────────────
 //
-// Square cards on the line — the card-game shape. Spans, never buttons: a
-// button on a phone takes a 44px floor, and these are not controls, they are
-// marks with a card behind them. One roving tab stop per column (the
-// component sets `tabindex`); ↑/↓ move between them.
+// One card per row in preorder, on a grid: `cols − 1` indent tracks and one
+// last track every card runs to, so a root spans the whole canvas and the
+// main line's width never depends on how many branches exist. Placement is
+// bound per item (grid-row y + 1; grid-column x + 1 / -1 on a card, x + 1 on
+// a pipe cell). `repeat(0, …)` is not valid CSS, hence one rule per column
+// count — the depth cap makes it three.
+
+.chat-route-canvas {
+  display: grid;
+  grid-auto-rows: auto;
+  box-sizing: border-box;
+  inline-size: 100%;
+  grid-template-columns: minmax(#{$card-min}, 1fr);
+
+  &[data-route-cols="2"] { grid-template-columns: #{$indent} minmax(#{$card-min}, 1fr); }
+  &[data-route-cols="3"] { grid-template-columns: #{$indent} #{$indent} minmax(#{$card-min}, 1fr); }
+}
+
+// ── the connectors ────────────────────────────────────────────────────────
+//
+// Segment spans inside cells, never SVG: rows are auto-height and every grid
+// item stretches, so a length of pipe that reaches its cell's edge always
+// meets the next cell's, at any text size, with nothing measured. Gaps are
+// zero; spacing is padding inside cells. J sits in the top strip of every
+// cell at `--route-drop / 2`; a card's square starts at `--route-drop`.
+
+.chat-route-pipe {
+  --route-drop: 1rem;
+  position: relative;
+  overflow-anchor: none;
+  pointer-events: none;
+  color: var(--hc-window-ink-quiet);
+}
+
+.chat-route-seg,
+.chat-route-stem {
+  position: absolute;
+  pointer-events: none;
+  opacity: 0.55;
+  border: 0 solid currentColor;
+}
+
+.chat-route-seg[data-seg="n"],
+.chat-route-seg[data-seg="s"],
+.chat-route-seg[data-seg="d"],
+.chat-route-stem {
+  inset-inline-start: $jx;
+  margin-inline-start: calc(#{$line} / -2);
+  border-inline-start-width: $line;
+}
+
+.chat-route-seg[data-seg="w"],
+.chat-route-seg[data-seg="e"] {
+  top: calc(var(--route-drop) / 2);
+  margin-block-start: calc(#{$line} / -2);
+  border-block-start-width: $line;
+}
+
+.chat-route-seg[data-seg="w"] { inset-inline-start: 0; inline-size: calc(#{$jx} + #{$line} / 2); }
+.chat-route-seg[data-seg="e"] { inset-inline-start: calc(#{$jx} - #{$line} / 2); inset-inline-end: 0; }
+.chat-route-pipe > .chat-route-seg[data-seg="n"] { top: 0; height: calc(var(--route-drop) / 2 + #{$line} / 2); }
+.chat-route-pipe > .chat-route-seg[data-seg="s"] { top: calc(var(--route-drop) / 2 - #{$line} / 2); bottom: 0; }
+.chat-route-item > .chat-route-seg[data-seg="n"] { top: 0; height: var(--route-drop); }
+.chat-route-item > .chat-route-seg[data-seg="d"] {
+  top: calc(var(--route-drop) / 2 - #{$line} / 2);
+  height: calc(var(--route-drop) / 2 + #{$line} / 2);
+}
+.chat-route-stem { top: calc(var(--route-drop) + #{$square}); bottom: 0; }
+
+// Every length of pipe after an open question: not flowing yet.
+.chat-route-seg-dashed { border-style: dashed; }
+
+// ── the cards ─────────────────────────────────────────────────────────────
+//
+// Square, on the line — the card-game shape: the square, a caption, and one
+// row of pieces under it. One roving tab stop for the whole tree (the
+// component sets `tabindex`).
+
+.chat-route-item {
+  --route-drop: 1rem;
+  position: relative;
+  display: grid;
+  grid-template-columns: #{$square} minmax(0, 1fr);
+  align-content: start;
+  column-gap: 0.45rem;
+  row-gap: 0.15rem;
+  padding-block: var(--route-drop) 0.25rem;
+  padding-inline: #{$pad} #{$gutter};
+  color: var(--hc-window-ink-quiet);
+  border-radius: tw.$radius-card;
+  cursor: pointer;
+  outline: none;
+  transition: background 150ms ease;
+
+  // The first card has nothing above it to drop from.
+  &[data-route-y="0"] { --route-drop: 0rem; }
+}
 
 .chat-route-piece {
   position: relative;
-  z-index: 1;
+  grid-column: 1;
+  grid-row: 1;
+  align-self: start;
+  box-sizing: border-box;
   display: inline-grid;
   place-items: center;
-  width: 1.5rem;
-  height: 1.5rem;
+  width: $square;
+  height: $square;
   border-radius: tw.$radius-card;
-  // The pane, opaque: the piece covers the pipe behind it.
-  background: rgb(var(--hc-panel-pane));
+  background: var(--hc-window-wash);
   border: 1px solid var(--hc-window-edge-firm);
   color: var(--hc-window-accent);
-  cursor: default;
   transition: color 150ms ease, background 150ms ease, border-color 150ms ease, opacity 150ms ease;
-
-  &:hover,
-  &:focus-visible {
-    background: var(--hc-window-wash);
-  }
-  &:focus-visible {
-    outline: 2px solid rgba(var(--acc), 0.55);
-    outline-offset: 1px;
-  }
 
   .mat-sym {
     font-size: 1rem;
@@ -147,52 +250,185 @@
   }
 }
 
-// THE JUNCTION. An SVG in currentColor: the inlet from the top, the outlets
-// fanned to the bottom edge. Open → every outlet dashed; settled → the taken
-// outlet continues, heavier, and the others are CAPPED with a bar; superseded
-// → all capped. The lock-in is the 150 ms colour change on the strokes.
-.chat-route-junction {
-  svg {
-    width: 100%;
-    height: 100%;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.5;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-  line { transition: stroke 150ms ease, opacity 150ms ease; }
-  .chat-route-outlet-open { stroke-dasharray: 2 2; }
-  .chat-route-taken { stroke-width: 2.5; }
-  .chat-route-cap {
-    stroke-width: 2;
-    stroke: var(--hc-window-ink-quiet);
-  }
-
-  &.chat-route-junction-open { border-style: dashed; }
+.chat-route-caption {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--hc-window-ink-plain);
+  transition: color 150ms ease;
 }
 
-// THE WORK PIECE. One run, with the count of its attempts when there is more
-// than one. A LEAK — a failed attempt anywhere in the run — breaks the
-// outline and wears the error glyph; its label and card say "failed" and
-// name the verb and target, so the colour never carries the meaning alone.
-.chat-route-work {
-  &.chat-route-leak {
-    border-style: dashed;
+.chat-route-item:hover,
+.chat-route-item:focus-visible {
+  .chat-route-piece { background: var(--hc-window-wash-strong); }
+  .chat-route-caption { color: var(--hc-window-ink-loud); }
+}
+.chat-route-item:focus-visible .chat-route-piece {
+  outline: 2px solid rgba(var(--acc), 0.55);
+  outline-offset: 1px;
+}
+
+// THE CURRENT STEP takes the window wash and an accent square. Nothing glows
+// and nothing moves.
+.chat-route-current { background: var(--hc-window-wash); }
+.chat-route-current .chat-route-piece { border-color: var(--hc-window-accent); }
+
+// ── a task of the flow ────────────────────────────────────────────────────
+//
+// Titled in the local model's words, clamped to three lines — a card is at
+// least 9rem wide, so an eight-word title fits. The full title stays in the
+// card's title, its label and the pane. The fold mark sits at the end of the
+// title line.
+
+.chat-route-node {
+  .chat-route-piece { background: var(--hc-window-wash-strong); }
+
+  .chat-route-caption {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: start;
+    align-content: center;
+    align-self: start;
+    column-gap: 0.3rem;
+    min-height: $square;
+    white-space: normal;
     color: var(--hc-window-ink-loud);
+    font-weight: 600;
   }
-  // Still going: the outstanding run in the wait row, or a run whose reply
-  // step is young enough that it may still be on its way.
-  &.chat-route-progress {
-    border-style: dashed;
-    color: var(--hc-window-ink-plain);
+
+  .chat-route-title {
+    min-width: 0;
+    overflow: hidden;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
   }
-  // No reply followed. Drawn faint, never absent — a missing step is unknown,
-  // not "did not happen".
-  &.chat-route-unfinished {
-    border-style: dotted;
-    opacity: 0.7;
+}
+
+.chat-route-node.chat-route-branch .chat-route-caption {
+  font-weight: 500;
+  color: var(--hc-window-ink-plain);
+}
+
+// A node's STATE, told twice — its glyph, and its card: done is the plain
+// card; open is still going (dashed); decided wears the accent; dropped is
+// CAPPED — an empty, quiet card whose title steps back and is struck.
+.chat-route-state-open .chat-route-piece { border-style: dashed; }
+.chat-route-state-decided .chat-route-piece {
+  color: var(--hc-window-accent);
+  border-color: rgba(var(--acc), 0.55);
+}
+.chat-route-state-dropped {
+  .chat-route-piece {
+    background: none;
+    color: var(--hc-window-ink-quiet);
+    opacity: 0.6;
   }
+  .chat-route-title {
+    color: var(--hc-window-ink-quiet);
+    text-decoration: line-through;
+  }
+}
+
+// The pieces of a card's exchanges as marks: its work as one mark with the
+// attempt count, a reply, and its questions as one mark with a count.
+.chat-route-node-pieces {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.chat-route-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  min-height: 1.1rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--hc-window-edge-firm);
+  border-radius: tw.$radius-control;
+  color: var(--hc-window-ink-plain);
+  font-family: var(--hc-code, inherit);
+  font-size: 0.68rem;
+  line-height: 1;
+
+  .mat-sym {
+    font-size: 0.8rem;
+    line-height: 1;
+  }
+}
+.chat-route-mini-leak {
+  border-style: dashed;
+  color: var(--hc-window-ink-loud);
+}
+.chat-route-mini-open {
+  border-style: dashed;
+  color: var(--hc-window-accent);
+}
+
+// The fold mark on a node with a branch beneath it, and how many are folded.
+.chat-route-fold {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: tw.$radius-control;
+  font-size: 0.95rem;
+  line-height: 1;
+  color: var(--hc-window-ink-quiet);
+  cursor: pointer;
+
+  &:hover {
+    color: var(--hc-window-ink-loud);
+    background: var(--hc-window-wash);
+  }
+}
+.chat-route-hidden {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  font-weight: 400;
+  color: var(--hc-window-ink-quiet);
+}
+
+// ── the tail ──────────────────────────────────────────────────────────────
+//
+// DORMANT — an exchange the local model has not organized (none is running,
+// or it has not got to this one). A quiet, open card with no caption: the
+// sidebar never falls back to the messages. Its marks sit beside the square.
+
+.chat-route-stage {
+  .chat-route-caption { display: none; }
+  .chat-route-node-pieces {
+    grid-row: 1;
+    align-self: center;
+  }
+}
+.chat-route-stage.chat-route-dormant .chat-route-piece {
+  background: none;
+  border-style: dashed;
+  color: var(--hc-window-ink-quiet);
+  opacity: 0.6;
+}
+
+// Still going: the live run, or a request with no run reported yet. A live
+// run with a failed attempt is a LEAK — a broken outline and the error glyph,
+// and its label says "failed", so colour never carries it alone.
+.chat-route-progress .chat-route-piece {
+  border-style: dashed;
+  color: var(--hc-window-ink-plain);
+}
+.chat-route-leak .chat-route-piece {
+  border-style: dashed;
+  color: var(--hc-window-ink-loud);
 }
 
 .chat-route-count {
@@ -212,105 +448,279 @@
   line-height: 1;
 }
 
-.chat-route-error {
+// Scoped to the card so it outranks the card's own `.mat-sym` size by
+// specificity, not by `!important`.
+.chat-route-piece .chat-route-error {
   position: absolute;
   top: -0.4rem;
   right: -0.4rem;
   font-size: 0.75rem;
   line-height: 1;
   color: var(--hc-window-ink-loud);
-  background: rgb(var(--hc-panel-pane));
+  background: var(--hc-window-on-accent);
   border-radius: tw.$radius-round;
 }
 
-// THE END CAP: goal reached, or put away. A state, not a seal — the card
-// says how it is reversed.
+// THE END: open while the conversation goes on (an open-ended card, nothing
+// in it), or a cap that says goal reached or put away. A state, not a seal —
+// the pane says how it is reversed.
 .chat-route-end {
-  color: var(--hc-window-ink-plain);
+  .chat-route-piece { color: var(--hc-window-ink-plain); }
+  .chat-route-caption { color: var(--hc-window-ink-quiet); }
+
+  &.chat-route-end-open .chat-route-piece {
+    border-style: dashed;
+    background: none;
+  }
 }
 
-// ── the hover card ────────────────────────────────────────────────────────
+// ── the summary pane ──────────────────────────────────────────────────────
 //
-// One card for the window, positioned by the component from the piece's
-// rect in the PANEL's coordinates (the scroller clips absolute children and
-// the panel's backdrop-filter makes it the containing block for `fixed` as
-// well). Drawn to the LEFT of the column, centred on the piece; taken away
-// on scroll, so it can never drift off the piece it describes.
+// The current step's full state, under the tree. Its height is FIXED: the
+// pane changes whenever the current step does, and a content-sized pane would
+// resize the tree viewport — and jump the tree — on every change. 45% is what
+// lets where-it-stands and a parent's branch lines fit without a pane scroll
+// at 1280×820. Never live, and it never takes focus on its own.
 
-.chat-route-card {
-  position: absolute;
-  z-index: 5;
-  transform: translate(calc(-100% - 0.6rem), -50%);
-  min-width: 11rem;
-  max-width: 22rem;
-  padding: 0.55rem 0.7rem;
-  border-radius: tw.$radius-floating;
-  border: 1px solid var(--hc-window-edge-firm);
-  background: rgb(var(--hc-panel-pane));
-  color: var(--hc-window-ink-plain);
-  box-shadow: 0 8px 24px rgba(var(--hc-panel-shadow), 0.35);
+.chat-route-summary {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  height: clamp(9rem, 45%, 24rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--hc-window-edge);
+  padding: 0.6rem 0.75rem 0.8rem;
   font-size: 0.8rem;
   line-height: 1.45;
-  pointer-events: none;
+  color: var(--hc-window-ink-plain);
+  scrollbar-width: thin;
+  scrollbar-color: var(--hc-window-edge) transparent;
 
-  p { margin: 0; }
+  p,
+  ul,
+  ol {
+    margin: 0;
+  }
 }
 
-.chat-route-card-head {
+// The head wraps, never ellipsizes: it is the step's whole name.
+.chat-route-summary-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.4rem;
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.35;
   font-weight: 600;
   color: var(--hc-window-ink-loud);
+  overflow-wrap: anywhere;
 
   .mat-sym {
+    flex: 0 0 auto;
     font-size: 1rem;
+    line-height: 1.15rem;
+    color: var(--hc-window-accent);
+  }
+}
+
+// Labels, the path and every meta line are quiet; summary sentences are
+// plain, in the reading face.
+.chat-route-summary-path,
+.chat-route-summary-state,
+.chat-route-summary-newer,
+.chat-route-summary-older,
+.chat-route-summary-status,
+.chat-route-summary-folded,
+.chat-route-summary-by,
+.chat-route-summary-empty,
+.chat-route-summary-label,
+.chat-route-summary-meta {
+  color: var(--hc-window-ink-quiet);
+}
+
+.chat-route-summary-path {
+  margin-top: 0.15rem !important;
+  overflow-wrap: anywhere;
+}
+
+.chat-route-summary-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.3rem !important;
+}
+
+.chat-route-summary-spans {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.chat-route-span,
+.chat-route-summary-branch,
+.chat-route-summary-more > summary {
+  border: 1px solid var(--hc-window-edge-firm);
+  border-radius: tw.$radius-control;
+}
+
+.chat-route-span,
+.chat-route-summary-branch,
+.chat-route-summary-more > summary,
+.chat-route-summary-open {
+  cursor: pointer;
+
+  &:hover { background: var(--hc-window-wash); }
+  &:focus-visible {
+    outline: 2px solid rgba(var(--acc), 0.55);
+    outline-offset: 1px;
+  }
+}
+
+// A span chip: jumps the thread straight to one run of the step's messages.
+.chat-route-span {
+  min-height: 1.3rem;
+  padding: 0 0.4rem;
+  font: inherit;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--hc-window-ink-plain);
+  background: none;
+
+  &.chat-route-span-at {
+    color: var(--hc-window-ink-loud);
+    background: var(--hc-window-wash-strong);
+    border-color: rgba(var(--acc), 0.55);
+  }
+}
+
+.chat-route-summary-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.chat-route-summary-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.chat-route-summary-outcome,
+.chat-route-summary-goal,
+.chat-route-summary-done {
+  font-family: var(--hc-read, inherit);
+  color: var(--hc-window-ink-plain);
+  overflow-wrap: anywhere;
+}
+
+// A branch line: one line, pressable, its title and state.
+.chat-route-summary-branches {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.chat-route-summary-branch {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  padding: 0.15rem 0.4rem;
+  color: var(--hc-window-ink-plain);
+
+  .mat-sym {
+    flex: 0 0 auto;
+    font-size: 0.9rem;
+    line-height: 1;
+    color: var(--hc-window-accent);
+  }
+}
+.chat-route-summary-branch-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+// Goal and what was done, one press away. Native `details`, its marker kept.
+.chat-route-summary-more {
+  > summary {
+    width: fit-content;
+    padding: 0.1rem 0.45rem;
+    color: var(--hc-window-ink-plain);
+  }
+  &[open] > summary { margin-bottom: 0.35rem; }
+  > p + p { margin-top: 0.35rem; }
+}
+
+.chat-route-summary-folded,
+.chat-route-summary-replied,
+.chat-route-summary-decided,
+.chat-route-summary-work {
+  margin-top: 0.55rem !important;
+}
+
+.chat-route-summary-replied {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+
+  .mat-sym {
+    font-size: 0.95rem;
     line-height: 1;
     color: var(--hc-window-accent);
   }
 }
 
-.chat-route-card-state {
-  margin-top: 0.3rem !important;
-  color: var(--hc-window-ink-quiet);
-}
+.chat-route-summary-decided ul {
+  margin-top: 0.2rem;
+  padding: 0;
+  list-style: none;
 
-.chat-route-card-list {
-  margin: 0.35rem 0 0;
-  padding-left: 1.1rem;
-
-  li { margin: 0.1rem 0; }
   li + li { margin-top: 0.15rem; }
 }
 
-// The outlet the pipe went through, and the ones that were capped.
-.chat-route-card-taken {
-  color: var(--hc-window-accent);
-  font-weight: 600;
-}
-.chat-route-card-capped {
-  color: var(--hc-window-ink-quiet);
-  text-decoration: line-through;
+// The open question's entry: the thread steers to it and an option takes the
+// focus.
+.chat-route-summary-open {
+  color: var(--hc-window-ink-loud);
+  border-radius: tw.$radius-control;
 }
 
-// An attempt: verb, target, outcome, and the error when it failed.
-.chat-route-card-verb {
+.chat-route-summary-meta {
+  display: block;
+}
+
+.chat-route-summary-work {
+  .chat-route-summary-item + .chat-route-summary-item { margin-top: 0.35rem; }
+
+  ol {
+    margin-top: 0.15rem;
+    padding-inline-start: 1.1rem;
+  }
+}
+
+// An attempt: verb, target, outcome, and the error when it failed. A failure
+// is loud and says "failed" — colour never carries it alone.
+.chat-route-summary-attempt + .chat-route-summary-attempt { margin-top: 0.1rem; }
+.chat-route-summary-verb {
   font-family: var(--hc-code, inherit);
   color: var(--hc-window-ink-loud);
 }
-.chat-route-card-cell {
-  margin-left: 0.35rem;
+.chat-route-summary-cell {
+  margin-inline-start: 0.35rem;
   color: var(--hc-window-ink-plain);
 }
-.chat-route-card-outcome {
-  margin-left: 0.35rem;
+.chat-route-summary-result {
+  margin-inline-start: 0.35rem;
   color: var(--hc-window-ink-quiet);
 }
-.chat-route-card-failed .chat-route-card-outcome {
+.chat-route-summary-attempt[data-outcome="failed"] .chat-route-summary-result {
   color: var(--hc-window-ink-loud);
   font-weight: 600;
 }
-.chat-route-card-error {
+.chat-route-summary-error {
   display: block;
   margin-top: 0.1rem;
   font-family: var(--hc-code, inherit);
@@ -318,6 +728,11 @@
   color: var(--hc-window-ink-plain);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.chat-route-summary-by {
+  margin-top: 0.6rem !important;
+  font-size: 0.72rem;
 }
 
 // THE NOTICE — the route could not be read. One quiet line on the
@@ -426,12 +841,16 @@
 
 // ── reduced motion ────────────────────────────────────────────────────────
 // The resting state is the final state everywhere above; what goes is only
-// the 150 ms between the two.
+// the 150 ms between the two. Segments and cards carry no transition of their
+// own beyond it, and a steer of the thread is instant (the component).
 @media (prefers-reduced-motion: reduce) {
+  .chat-route-item,
   .chat-route-piece,
-  .chat-route-junction line,
+  .chat-route-caption,
+  .chat-route-seg,
+  .chat-route-stem,
   .chat-question-option,
-  .chat-thread.chat-thread-routed .chat-msg {
+  .chat-panel .chat-msg {
     transition: none;
   }
 }

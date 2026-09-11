@@ -84,8 +84,24 @@ const HEARTBEAT_MS = 30_000
 const UNKNOWN = (host: string): LocalServerReport =>
   ({ state: 'unknown', host, models: [], checkedAt: 0 })
 
-const reports = new Map<string, LocalServerReport>()
-const inFlight = new Map<string, Promise<LocalServerReport>>()
+// THE REPORTS ARE PINNED ON globalThis. A web build inlines this file into
+// every bee that imports it relatively, so the shell's copy, the orchestrator
+// bee's copy and ChatThreads' copy are separate modules. A report map in module
+// scope would be one map per copy, and the gate in a copy no probe ever ran in
+// would read `unknown` forever — the route flow's "is the local model awake?"
+// would answer no while the console said yes. One map, whichever copy probed
+// (documentation/chat-route.md §4.1.9), the way `__hypercombEffectBus` pins the
+// bus.
+const LIVENESS_REPORTS = Symbol.for('hypercomb.local-liveness.reports')
+const pinnedReports = ((globalThis as Record<symbol, unknown>)[LIVENESS_REPORTS] ??= {
+  reports: new Map<string, LocalServerReport>(),
+  inFlight: new Map<string, Promise<LocalServerReport>>(),
+}) as {
+  readonly reports: Map<string, LocalServerReport>
+  readonly inFlight: Map<string, Promise<LocalServerReport>>
+}
+const reports = pinnedReports.reports
+const inFlight = pinnedReports.inFlight
 
 // ── which providers this file speaks for ──────────────────────────────────
 

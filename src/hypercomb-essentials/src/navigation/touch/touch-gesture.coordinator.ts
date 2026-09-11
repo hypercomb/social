@@ -39,7 +39,8 @@ const MOMENTUM_MAX_AGE_MS = 80           // discard stale samples
 const LS_KEY = 'hypercomb:touch-sensitivity'
 
 export type PanDelegate = {
-  panUpdate(prev: Point, current: Point, sensitivity: number): void
+  /** Returns the travel the viewport actually applied (zero against a stop). */
+  panUpdate(prev: Point, current: Point, sensitivity: number): Point | void
 }
 
 export type PinchDelegate = {
@@ -512,7 +513,16 @@ export class TouchGestureCoordinator {
     // apply via panDelegate with synthetic points
     const origin: Point = { x: 0, y: 0 }
     const delta: Point = { x: this.#momentumVx, y: this.#momentumVy }
-    this.#panDelegate?.panUpdate(origin, delta, this.#effectiveSensitivity)
+    const moved = this.#panDelegate?.panUpdate(origin, delta, this.#effectiveSensitivity)
+
+    // A COAST ENDS AT A STOP. When the viewport refuses the travel (a phone
+    // strip reaching its end, a framed page) there is nothing left to coast;
+    // decaying on anyway held the input gate and `touch:dragging` for most of
+    // a second while the strip stood still.
+    if (moved && Math.abs(moved.x) + Math.abs(moved.y) < 0.01) {
+      this.#cancelMomentum()
+      return
+    }
 
     this.#momentumRaf = requestAnimationFrame(this.#momentumTick)
   }

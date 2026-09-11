@@ -92,13 +92,14 @@
 // Shell UI — resolves everything through `window.ioc` at call time and never
 // imports essentials.
 
-import { Component, ElementRef, computed, effect, inject, signal, viewChild, type OnDestroy } from '@angular/core'
+import { Component, ElementRef, Injector, afterNextRender, computed, effect, inject, signal, viewChild, type OnDestroy } from '@angular/core'
 import { NgTemplateOutlet } from '@angular/common'
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser'
 import {
   CLAUDE_BRIDGE_ENABLED_STORAGE_KEY,
   EffectBus,
   PARTICIPANT_AI_HOST_STORAGE_KEY,
+  QUESTION_ASKING_INSTRUCTION,
   hostWireText,
   isLocalClaudeBridgeConfigured,
   isParticipantAiHostConfigured,
@@ -195,6 +196,70 @@ type Route = {
   readonly live?: RoutePiece
   /** Runs no reply followed, drawn after the row they came after. */
   readonly unfinished: readonly { readonly afterIndex: number; readonly piece: RoutePiece }[]
+  /** The conversation's ORGANIZED WORKFLOW (chat-route.md §4.1.7) — present
+   *  only when the slot holds a record at this version about THIS history.
+   *  Absent when nothing has organized it yet, and on an older essentials
+   *  build: then every exchange is a dormant stage. */
+  readonly flow?: RouteFlowView
+  /** What the participant's own local model can do right now, read from probe
+   *  STATE only (§3.5). Absent on an older essentials build: then the pane
+   *  says nothing about why no model is running and the section carries no
+   *  `data-route-organizer`. */
+  readonly organizerState?: RouteOrganizerState
+  /** Present only while `organizerState` is `awake`. */
+  readonly organizer?: { readonly providerId: string; readonly model: string }
+  /** A flow model call for THIS conversation is in flight. */
+  readonly organizing?: { readonly stage: 'structure' } | { readonly stage: 'card'; readonly nodeId: string }
+  /** Node ids whose card is in back-off: its last answer was unusable, recently. */
+  readonly cardBackoff?: readonly string[]
+}
+
+type RouteOrganizerState = 'awake' | 'off' | 'unknown' | 'asleep' | 'blocked' | 'needs-permission' | 'empty' | 'no-model'
+
+type RouteFlowState = 'done' | 'open' | 'decided' | 'dropped'
+
+/** A node's CARD — three parts in the local model's words (§4.1.5). `stale`
+ *  says it was written from fewer exchanges than the node now holds, or at an
+ *  older card version; `exchanges` is how many it read. Every field is
+ *  optional here: the shell reads whatever an essentials build of any age
+ *  hands it, and draws only what is there. */
+type RouteFlowCard = {
+  readonly cv?: number
+  readonly goal?: string
+  readonly done?: string
+  readonly outcome?: string
+  readonly exchanges?: number
+  readonly model?: string
+  readonly at?: number
+  readonly stale?: boolean
+}
+
+/** One node of a conversation's workflow: a task, in RATIONAL order. `turns`
+ *  are its OWN exchanges' turn ranges — a parent's never include its
+ *  branches', so pressing a parent finds where that goal was stated. `parent`
+ *  is an earlier node it branches from; `state` is the rolled-up display
+ *  state. */
+type RouteFlowNode = {
+  readonly id: string
+  readonly title: string
+  readonly named?: true
+  readonly state: RouteFlowState
+  readonly parent?: string
+  /** The 1-based exchange numbers the node owns (v2). */
+  readonly exchanges?: readonly number[]
+  readonly turns: readonly number[]
+  /** v1's one-line detail — what the pane says on an essentials build that
+   *  has no cards yet. */
+  readonly detail?: string
+  readonly card?: RouteFlowCard
+}
+
+type RouteFlowView = {
+  readonly upToTurnCount: number
+  readonly pending?: number
+  /** The model that organized it — "Organized by {model}". */
+  readonly model?: string
+  readonly nodes: readonly RouteFlowNode[]
 }
 
 /** How a piece names its verb. Written as an array of `{ verb, icon }` so the
@@ -223,22 +288,359 @@ const VERB_ICONS: readonly { verb: string; icon: string }[] = [
 /** A verb the map does not know still gets a glyph, never its name. */
 const VERB_ICON_FALLBACK: { readonly icon: string } = { icon: 'build' }
 
-/** What the participant is pointing at on the pipe, and where its card goes.
- *  One card for the whole window: the pieces are spans, the card is the one
- *  floating rung, and it follows whichever piece has the pointer or focus. */
-type RouteCard = {
-  /** Which drawn row the piece belongs to — the message that lifts its
-   *  border while the card is up. -1 for the wait row and the end. */
+/** ONE CARD OF THE SIDEBAR (documentation/chat-route.md §4). The tree is the
+ *  flow's tasks in preorder, each branch one indent step in; after it, on the
+ *  main line, the TAIL — one card per exchange the flow has not read, then the
+ *  live run or the wait, then the end. Every card points back at the thread
+ *  rows it stands for.
+ *
+ *    node   — a task of the organized workflow, titled in the local model's words
+ *    stage  — an exchange not organized yet: a dormant card with no text
+ *    live   — the run the outstanding ask is making now
+ *    wait   — a request is out and no run has reported yet
+ *    end    — open, goal reached, or put away
+ *
+ *  An exchange's work, reply and question are MARKS on its card and entries
+ *  in the pane, never cards of their own: v1 drew a card per piece, and one
+ *  or two open exchanges filled the followed viewport. */
+type RouteItem = {
+  readonly key: string
+  readonly kind: 'node' | 'stage' | 'live' | 'wait' | 'end'
+  /** The first thread row the card stands for; -1 is the thread's foot. */
   readonly row: number
-  readonly kind: 'junction' | 'work' | 'live' | 'unfinished' | 'end'
-  readonly question?: SettledQuestion
+  /** Every thread row it stands for — the rows that light together. */
+  readonly rows: readonly number[]
+  readonly node?: RouteFlowNode
+  /** The runs of those rows: each reply's own, and those no reply followed. */
+  readonly runs: readonly RoutePiece[]
+  /** Which of `runs` no reply followed. */
+  readonly unfinished: ReadonlySet<string>
+  readonly questions: readonly SettledQuestion[]
+  /** A stage's first reply row, or -1 while its exchange holds none. */
+  readonly replyRow: number
+  /** The live run, on the live card. */
   readonly piece?: RoutePiece
-  /** Relative to the panel, which is the card's containing block. */
+  /** The depth column and the grid row, both 0-based; `level` is ARIA's. */
   readonly x: number
   readonly y: number
-  /** Whether the pointer is over the piece or the piece is focused: the
-   *  card stays for either and leaves when neither holds. */
-  readonly focus: boolean
+  readonly level: number
+  /** The effective parent's node id — absent on the main line. */
+  readonly parent?: string
+  /** The first VISIBLE child's key, where → walks. */
+  readonly firstChild?: string
+  /** Among the visible siblings; the roots and the tail are one level-1 set. */
+  readonly setSize: number
+  readonly posInSet: number
+  /** Drawn nodes beneath, folded or not, and whether they are folded away. */
+  readonly descendants: number
+  readonly collapsed: boolean
+  /** The pipe INTO this card comes after an open question: not flowing yet. */
+  readonly dashed: boolean
+  readonly joint: readonly RouteSeg[]
+  /** The joint's sides as the DOM carries them — `n`, `w d`. */
+  readonly jointSides: string
+  readonly stem: RouteSeg | null
+}
+
+/** Where the current step came from (§4.4.3). A press, a key or a span chip
+ *  holds until the participant scrolls the thread; reading never holds. */
+type RouteSource = 'press' | 'key' | 'span' | 'thread'
+
+/** The sidebar as drawn: the cards, the free pipe cells between them, and
+ *  what the pane needs of the tree beyond the visible cards — every drawn
+ *  node, its effective parent, and its children folded or not. */
+type RouteTree = {
+  readonly items: readonly RouteItem[]
+  readonly pipes: readonly RoutePipe[]
+  readonly cols: number
+  readonly rows: number
+  readonly nodes: ReadonlyMap<string, RouteFlowNode>
+  readonly parentOf: ReadonlyMap<string, string>
+  readonly kids: ReadonlyMap<string, readonly string[]>
+}
+
+// ── THE TREE, pure (chat-route.md §4.2, §4.4.5) ────────────────────────────
+//
+// Module scope and no component state. The layout cannot live in essentials —
+// folds are the participant's live view, and shared never imports essentials —
+// and pure functions are what the worked layouts of §4.2.3 are checked
+// against. Exported for that reason only.
+
+/** One branch step, in rem — `$indent` in chat-route.scss. */
+export const ROUTE_INDENT_REM = 1.75
+
+/** The narrowest a card gets, in rem — `$card-min` in chat-route.scss. With
+ *  the depth cap, 2 × ROUTE_INDENT_REM + ROUTE_CARD_MIN_REM = 12.5rem is the
+ *  widest the canvas ever needs: at the 12rem column minimum a depth-3 branch
+ *  pans about half a rem, and at every other width nothing pans at all. */
+export const ROUTE_CARD_MIN_REM = 9
+
+export type RouteSide = 'n' | 'e' | 's' | 'w'
+export type RouteSeg = { readonly side: RouteSide | 'd'; readonly dashed: boolean }
+export type RoutePipe = {
+  readonly key: string
+  readonly x: number
+  readonly y: number
+  /** The cell's sides as the DOM carries them — `n e s`. */
+  readonly sides: string
+  readonly segs: readonly RouteSeg[]
+}
+
+export type RouteTreeLayout = {
+  /** The visible nodes in preorder — DOM order, key order and visual order. */
+  readonly order: readonly string[]
+  readonly place: ReadonlyMap<string, { readonly x: number; readonly y: number; readonly level: number }>
+  readonly roots: readonly string[]
+  /** The effective parent of every drawn node that has one. */
+  readonly parentOf: ReadonlyMap<string, string>
+  /** Every drawn node's children in record order, folded or not. */
+  readonly kids: ReadonlyMap<string, readonly string[]>
+  readonly descendants: ReadonlyMap<string, number>
+  readonly treeRows: number
+  /** Indent tracks + 1 — `data-route-cols`. */
+  readonly cols: number
+}
+
+/** The deepest column a card takes. The record caps depth at 3, so x is 0–2
+ *  and the canvas has at most three tracks: one CSS rule per count. */
+const ROUTE_MAX_X = 2
+
+/**
+ * PLACE THE TREE (§4.2.1–§4.2.2). `nodes` are the flow's nodes in record
+ * order, with `drawn` false for one that covers no turn below the rendered
+ * length. A drawn node hangs from its nearest DRAWN ancestor, and with none it
+ * is a root. Every card is its own row in preorder — a task, then its
+ * branches (each followed by its own), then the task's next sibling — at
+ * x = depth. A folded node's children are not visited: the rows below move up
+ * and nothing is reserved, because reserved empty space reads as a missing
+ * branch. The same input always gives the same coordinates, so a re-derived
+ * flow that keeps its ids does not jump. The tail follows at x = 0 from
+ * `treeRows`.
+ */
+export const layoutRouteTree = (
+  nodes: readonly { readonly id: string; readonly parent?: string; readonly drawn?: boolean }[],
+  folded: ReadonlySet<string>,
+): RouteTreeLayout => {
+  const index = new Map<string, number>()
+  nodes.forEach((node, at) => { if (!index.has(node.id)) index.set(node.id, at) })
+  const byId = new Map<string, (typeof nodes)[number]>()
+  for (const node of nodes) if (!byId.has(node.id)) byId.set(node.id, node)
+  const parentOf = new Map<string, string>()
+  const depthOf = new Map<string, number>()
+  const kids = new Map<string, string[]>()
+  const roots: string[] = []
+  nodes.forEach((node, at) => {
+    if (node.drawn === false || index.get(node.id) !== at) return
+    // The nearest drawn ancestor. A parent must come EARLIER in record order:
+    // a later one is not a parent this pass has placed, and following it
+    // could loop on a malformed record.
+    let parent: string | undefined
+    let id = node.parent
+    for (let hops = 0; id !== undefined && hops < nodes.length; hops++) {
+      const up = byId.get(id)
+      if (!up || (index.get(id) ?? at) >= at) break
+      if (depthOf.has(id)) { parent = id; break }
+      id = up.parent
+    }
+    // Deeper than the cap re-hangs one level up: the canvas has three tracks.
+    while (parent !== undefined && (depthOf.get(parent) ?? 0) >= ROUTE_MAX_X) parent = parentOf.get(parent)
+    depthOf.set(node.id, parent === undefined ? 0 : (depthOf.get(parent) ?? 0) + 1)
+    if (parent === undefined) { roots.push(node.id); return }
+    parentOf.set(node.id, parent)
+    const siblings = kids.get(parent) ?? []
+    siblings.push(node.id)
+    kids.set(parent, siblings)
+  })
+  const descendants = new Map<string, number>()
+  for (const id of depthOf.keys()) {
+    for (let up = parentOf.get(id); up !== undefined; up = parentOf.get(up)) {
+      descendants.set(up, (descendants.get(up) ?? 0) + 1)
+    }
+  }
+  const order: string[] = []
+  const place = new Map<string, { x: number; y: number; level: number }>()
+  const visit = (id: string, depth: number): void => {
+    place.set(id, { x: depth, y: order.length, level: depth + 1 })
+    order.push(id)
+    if (folded.has(id)) return
+    for (const child of kids.get(id) ?? []) visit(child, depth + 1)
+  }
+  for (const root of roots) visit(root, 0)
+  let indents = 0
+  for (const at of place.values()) indents = Math.max(indents, at.x)
+  return { order, place, roots, parentOf, kids, descendants, treeRows: order.length, cols: indents + 1 }
+}
+
+/**
+ * THE CONNECTORS (§4.2.4). `cards` are every card with its grid cell and its
+ * parent's KEY — absent on the main line. A trunk runs down the parent's
+ * column from the parent to each child, with an elbow into it; the spine runs
+ * down column 0 through every main-line card, the tail included. The trunk is
+ * always in free cells: every row between a parent and its child holds a
+ * deeper descendant, so the parent's column is free there, and column 0 is
+ * free on every branch's row. A mark on a card's own cell sets its joint (n,
+ * w) or its stem (s); anywhere else it is a free cell. Solid wins a merge, so
+ * the pipe flows up to the first card that is not flowing yet. A card whose
+ * joint has w and no n gets a d, from the bus down to its square.
+ */
+export const routePipes = (
+  cards: readonly { readonly key: string; readonly x: number; readonly y: number; readonly parent?: string; readonly dashed: boolean }[],
+): {
+  readonly joints: ReadonlyMap<string, readonly RouteSeg[]>
+  readonly stems: ReadonlyMap<string, RouteSeg>
+  readonly pipes: readonly RoutePipe[]
+} => {
+  const cardAt = new Map(cards.map(card => [`${card.x},${card.y}`, card]))
+  const byKey = new Map(cards.map(card => [card.key, card]))
+  const joints = new Map<string, Map<RouteSide, boolean>>()
+  const stems = new Map<string, boolean>()
+  const free = new Map<string, { readonly x: number; readonly y: number; readonly sides: Map<RouteSide, boolean> }>()
+  const merge = (previous: boolean | undefined, dashed: boolean): boolean =>
+    previous === undefined ? dashed : previous && dashed
+  const mark = (x: number, y: number, side: RouteSide, dashed: boolean): void => {
+    const card = cardAt.get(`${x},${y}`)
+    if (card && side === 's') { stems.set(card.key, merge(stems.get(card.key), dashed)); return }
+    let sides: Map<RouteSide, boolean>
+    if (card) {
+      sides = joints.get(card.key) ?? new Map()
+      joints.set(card.key, sides)
+    } else {
+      const key = `p:${x},${y}`
+      const cell = free.get(key) ?? { x, y, sides: new Map<RouteSide, boolean>() }
+      free.set(key, cell)
+      sides = cell.sides
+    }
+    sides.set(side, merge(sides.get(side), dashed))
+  }
+  const connectV = (x: number, fromY: number, toY: number, dashed: boolean): void => {
+    mark(x, fromY, 's', dashed)
+    for (let y = fromY + 1; y < toY; y++) { mark(x, y, 'n', dashed); mark(x, y, 's', dashed) }
+    mark(x, toY, 'n', dashed)
+  }
+  for (const child of cards) {
+    const parent = child.parent === undefined ? undefined : byKey.get(child.parent)
+    if (!parent) continue
+    connectV(parent.x, parent.y, child.y, child.dashed)
+    mark(parent.x, child.y, 'e', child.dashed)   // the elbow: a child is always one column in
+    mark(child.x, child.y, 'w', child.dashed)
+  }
+  const spine = cards
+    .filter(card => card.parent === undefined || !byKey.has(card.parent))
+    .sort((a, b) => a.y - b.y)
+  for (let at = 1; at < spine.length; at++) connectV(0, spine[at - 1]!.y, spine[at]!.y, spine[at]!.dashed)
+
+  const SIDES: readonly RouteSide[] = ['n', 'e', 's', 'w']
+  const segsOf = (sides: ReadonlyMap<RouteSide, boolean>): RouteSeg[] =>
+    SIDES.filter(side => sides.has(side)).map(side => ({ side, dashed: sides.get(side)! }))
+  const outJoints = new Map<string, readonly RouteSeg[]>()
+  for (const [key, sides] of joints) {
+    const segs = segsOf(sides)
+    if (sides.has('w') && !sides.has('n')) segs.push({ side: 'd', dashed: sides.get('w')! })
+    outJoints.set(key, segs)
+  }
+  const outStems = new Map<string, RouteSeg>()
+  for (const [key, dashed] of stems) outStems.set(key, { side: 's', dashed })
+  const pipes = [...free.entries()]
+    .map(([key, cell]): RoutePipe => {
+      const segs = segsOf(cell.sides)
+      return { key, x: cell.x, y: cell.y, sides: segs.map(seg => seg.side).join(' '), segs }
+    })
+    .sort((a, b) => a.y - b.y || a.x - b.x)
+  return { joints: outJoints, stems: outStems, pipes }
+}
+
+/** The maximal runs of consecutive rows — `[3, 4, 5, 9]` → `[[3, 4, 5], [9]]`.
+ *  A node's rows can be non-contiguous: its order is rational, not
+ *  chronological. */
+export const spansOf = (rows: readonly number[]): number[][] => {
+  const sorted = [...new Set(rows)].filter(row => Number.isInteger(row)).sort((a, b) => a - b)
+  const spans: number[][] = []
+  for (const row of sorted) {
+    const last = spans[spans.length - 1]
+    if (last && last[last.length - 1] === row - 1) last.push(row)
+    else spans.push([row])
+  }
+  return spans
+}
+
+/**
+ * WHICH STEP IS BEING READ (§4.4.5). `anchor` is the thread row at the top of
+ * the reading band, or the last row while the thread is at its bottom.
+ *
+ * - Inside the flow: the node owning the anchor's exchange, `newer` 0.
+ * - Past the flow: the NEWEST organized step — the owner of the last mapped
+ *   exchange — with `newer`, how many exchanges start at or after the flow's
+ *   end. The last exchange stays unorganized until the thread has gone quiet,
+ *   so choosing its dormant stage would put "not organized yet" in the pane
+ *   the whole time the participant chats. A dormant stage becomes current
+ *   only by a press or a key.
+ * - No flow: the stage whose exchange holds the anchor.
+ *
+ * A folded node maps to its nearest visible ancestor, and the fold stays as it
+ * is. An empty key changes nothing.
+ */
+export const routeKeyForRow = (
+  flow: {
+    readonly upToTurnCount: number
+    readonly nodes: readonly { readonly id: string; readonly parent?: string; readonly turns: readonly number[]; readonly exchanges?: readonly number[] }[]
+  } | undefined,
+  items: readonly { readonly key: string; readonly kind: string; readonly row: number }[],
+  rows: readonly { readonly index: number; readonly turn: { readonly role: string } }[],
+  anchor: number,
+): { readonly key: string; readonly newer: number } => {
+  const shown = new Set(items.map(item => item.key))
+  const nodes = flow?.nodes ?? []
+  const byId = new Map(nodes.map(node => [node.id, node]))
+  const visible = (id: string | undefined): string => {
+    let at = id
+    for (let hops = 0; at !== undefined && hops <= nodes.length; hops++) {
+      if (shown.has(`n:${at}`)) return `n:${at}`
+      at = byId.get(at)?.parent
+    }
+    return ''
+  }
+  const organized = flow && nodes.some(node => shown.has(`n:${node.id}`))
+    ? Math.min(flow.upToTurnCount, rows.length)
+    : 0
+  if (organized > 0) {
+    // The assignment gives every organized turn exactly one owner. An older
+    // record listed turns rather than whole exchanges; there the nearest
+    // covered turn above stands in for it.
+    const ownerOf = (row: number): string | undefined => {
+      const exact = nodes.find(node => node.turns.includes(row))
+      if (exact) return exact.id
+      let best: string | undefined
+      let nearest = -1
+      for (const node of nodes) for (const turn of node.turns) if (turn <= row && turn > nearest) { nearest = turn; best = node.id }
+      return best
+    }
+    if (anchor < organized) return { key: visible(ownerOf(anchor)), newer: 0 }
+    let newest: string | undefined
+    let last = 0
+    for (const node of nodes) for (const exchange of node.exchanges ?? []) if (exchange > last) { last = exchange; newest = node.id }
+    const newer = rows.filter(row => row.index >= organized && row.turn.role === 'user').length
+    return { key: visible(newest ?? ownerOf(organized - 1)), newer }
+  }
+  let key = ''
+  for (const item of items) if (item.kind === 'stage' && item.row <= anchor) key = item.key
+  return { key, newer: 0 }
+}
+
+/** WHY NO MODEL IS RUNNING, as the pane says it (§4.4.2) — by literal key so
+ *  the catalogs' drift check sees every one. The probe states the shell
+ *  already names reuse its own lines. Absent on an older essentials build:
+ *  no line. */
+const routeWhyKey = (state: RouteOrganizerState | undefined): string | null => {
+  switch (state) {
+    case 'off': return 'chat.route.summary.local.off'
+    case 'unknown': return 'chat.route.summary.local.unknown'
+    case 'asleep': return 'chat.link.local.down'
+    case 'blocked': return 'chat.link.local.blocked'
+    case 'needs-permission': return 'chat.link.local.permission'
+    case 'empty': return 'chat.route.summary.local.empty'
+    case 'no-model': return 'chat.route.summary.local.choose'
+    default: return null
+  }
 }
 
 type ConversationSummary = {
@@ -314,6 +716,16 @@ type ChatThreadsLike = {
    *  on a build that has not exposed it; then the route is read without a
    *  live run and the outstanding run is placed by the ledger's own rules. */
   runIdForAsk?(askSig: string): Promise<string>
+  /** Mint the conversation's flow with the participant's OWN machine-local
+   *  model (chat-route.md §3.5) — only when that model is already known awake,
+   *  never a probe. `prefer` names the node the participant is looking at: its
+   *  card, and the uncarded branches beneath it, are written first. No model
+   *  call starts while `waiting`, or while the lane is paused after the
+   *  participant's own local chat; a refused call resolves 0, reads nothing
+   *  and emits nothing. A write announces `chat:route-flow-changed
+   *  { convoId }`. Absent on an older essentials build: then every exchange
+   *  stays dormant. */
+  organizeRoute?(convoId: string, liveRunId?: string, waiting?: boolean, prefer?: string): Promise<number>
 }
 
 type QueenLike = {
@@ -585,11 +997,71 @@ const RENDER_CACHE_MAX = 240
 const ROUTE_REFRESH_MS = 150
 
 /** The keymap suppression reasons this window holds while its own keys are
- *  in use. Two, not one: the wizard and the column each hold and release on
+ *  in use. Two, not one: the wizard and the sidebar each hold and release on
  *  their own focus, and a shared reason would let one release the other's.
  *  Reason-keyed exactly as the command palette and the layout designer do it. */
 const QUESTION_KEYS_REASON = 'chat-question'
 const ROUTE_KEYS_REASON = 'chat-route'
+
+/** How far the pointer travels before a press on the sidebar becomes a PULL.
+ *  Under it the press is still a click on the card it started on. */
+const ROUTE_PULL_PX = 4
+
+/** A pull locks to one axis when it travels at least this many times further
+ *  along it than across, so a vertical pull does not drift sideways where a
+ *  narrow sidebar can pan. */
+const ROUTE_AXIS_LOCK = 2
+
+/** The tree follows the newest card only while it is at its bottom AND its
+ *  inline start — the newest cards live in column 0 at the bottom, and a
+ *  participant who panned right or scrolled up to read is never yanked back.
+ *  This is how close counts as there, on either edge. */
+const ROUTE_SIDE_BOTTOM_PX = 8
+
+/** A tree reveal the THREAD caused waits this long after any pan by the
+ *  participant: someone panning the tree is never fought. */
+const ROUTE_PAN_HOLD_MS = 2000
+
+/** Where a steer lands the first covered message — this far below the
+ *  thread's top, in rem. The tree's reveals keep the same margin. */
+const ROUTE_STEER_MARGIN_REM = 0.75
+
+/** A steer is smooth only when it travels at most this many screens, and never
+ *  under reduced motion: a long smooth flight through a thread is exactly the
+ *  flashy effect this window avoids. */
+const ROUTE_SMOOTH_SCREENS = 2
+
+/** A steer ends on `scrollend`, or once no scroll event has come for this
+ *  long, and never outlasts the cap. */
+const ROUTE_STEER_QUIET_MS = 160
+const ROUTE_STEER_MAX_MS = 1200
+
+/** Walking the tree with the keys moves the thread only once the walk rests. */
+const ROUTE_KEY_SETTLE_MS = 250
+
+/** Reverse sync applies once the reading band has been still this long. */
+const ROUTE_SYNC_MS = 120
+
+/** The reading band, as fractions of the thread's height from its top. A
+ *  covered row inside it is already on screen, and a press moves nothing. The
+ *  reading observer's rootMargin (`-8% 0px -60% 0px`) is the same band. */
+const ROUTE_BAND = { top: 0.08, bottom: 0.40 } as const
+
+/** A node whose card is missing or stale, once it has been current this long,
+ *  is passed to `organizeRoute` as `prefer`: its card is written first. */
+const ROUTE_SUMMARY_ASK_MS = 700
+
+/** The participant's own scroll keys — any of them inside the thread cancels
+ *  a steer, as a wheel or a touch does. */
+const ROUTE_STEER_KEYS: ReadonlySet<string> = new Set([
+  'PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', ' ',
+])
+
+/** The root font size in px, for the few measurements rem cannot make. */
+const remPx = (): number => parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
+
+/** A scroll offset the element can actually reach. */
+const clampScroll = (value: number, max: number): number => Math.max(0, Math.min(Math.max(0, max), value))
 
 // ── guided setup ─────────────────────────────────────────────────────────
 //
@@ -747,7 +1219,7 @@ export class ChatWindowComponent implements OnDestroy {
     // let go, or the whole hive stays deaf behind a window nobody can see.
     // The open question itself survives as a record and is drawn again on
     // unpark — without re-firing the arrival focus (`#questionArrived`).
-    if (!open) { this.#releaseQuestionKeys(); this.#releaseRouteKeys(); this.routeCard.set(null) }
+    if (!open) { this.#releaseQuestionKeys(); this.#releaseRouteKeys() }
   })
 
   readonly conversations = signal<readonly ConversationSummary[]>([])
@@ -1958,10 +2430,10 @@ export class ChatWindowComponent implements OnDestroy {
 
   // ── THE ROUTE — the conversation's workflow, fixed in place beside it ───
   //
-  // A vertical pipe in a narrow column beside the thread, one row per turn
-  // (documentation/chat-route.md). Junctions are the questions above, derived
-  // here; work pieces are runs read from the ledger by essentials; the end
-  // is a reversible state. The route is a VIEW over records that already
+  // A vertical pipe down the sidebar on the right of the thread, one stage per
+  // exchange (documentation/chat-route.md). Junctions are the questions above,
+  // derived here; work pieces are runs read from the ledger by essentials; the
+  // end is a reversible state. The route is a VIEW over records that already
   // exist. It writes nothing.
 
   /** What `readRoute` returned for the open conversation, or null when it is
@@ -1979,9 +2451,8 @@ export class ChatWindowComponent implements OnDestroy {
     return map
   })
 
-  /** The pieces on row `index`'s cell: the reply's own runs (matched on the
-   *  turn's sig — a turn without one gets none), then any run no reply
-   *  followed that came after this row. */
+  /** A reply's own runs, matched on the turn's sig — a turn without one gets
+   *  none. `unfinishedAfter` is the runs no reply followed after a row. */
   workOf(entry: { turn: ChatTurn; index: number }): readonly RoutePiece[] {
     const sig = entry.turn.sig
     return sig ? this.#routeBySig().get(sig) ?? [] : []
@@ -1992,17 +2463,6 @@ export class ChatWindowComponent implements OnDestroy {
       .filter(item => item.afterIndex === index)
       .map(item => item.piece)
   }
-
-  /** PRESENCE: the column exists only when there is something on it — at
-   *  least one junction the shell knows of, or at least one work row, a
-   *  live run or an unfinished one. A plain chat draws the thread exactly
-   *  as it did before the route existed. */
-  readonly routeShown = computed(() => {
-    if (this.rendered().some(entry => entry.question)) return true
-    const route = this.route()
-    if (!route) return false
-    return route.rows.some(row => row.pieces.length > 0) || !!route.live || route.unfinished.length > 0
-  })
 
   /** The pipe's last row: open while the conversation goes on, a cap that
    *  says goal reached or put away. Both are states the participant can
@@ -2031,113 +2491,34 @@ export class ChatWindowComponent implements OnDestroy {
     return piece.attempts.find(attempt => attempt.outcome === 'failed')
   }
 
-  /** The junction's outlets as the small SVG draws them: x positions fanned
-   *  across the card, each open, taken or capped. */
-  outletsOf(question: SettledQuestion): readonly { x: number; state: 'open' | 'taken' | 'capped' }[] {
-    const n = question.options.length
-    return question.options.map((_, at) => ({
-      x: 12 + (at - (n - 1) / 2) * 5,
-      state: question.state === 'open' ? 'open'
-        : question.state === 'settled' && question.outlet === at ? 'taken'
-        : 'capped',
-    }))
-  }
-
-  /** The hover card, one for the window. */
-  readonly routeCard = signal<RouteCard | null>(null)
-
-  /** The column's one roving tab stop, by piece key (`w:<runId>`, `j:<row>`,
-   *  `u:<runId>`, `live`, `end`). '' means the first piece in the column.
-   *  Every other piece is `tabindex=-1`; ↑/↓ move between them under the
-   *  same kind of suppression the wizard holds. */
+  /** The sidebar's one roving tab stop, by card key (`n:<id>`, `s:<row>`,
+   *  `live`, `wait`, `end`). '' means the first card. Every other card is
+   *  `tabindex=-1`; the ARIA tree keys walk between them under the column's
+   *  keymap hold. */
   readonly routeCursor = signal('')
 
-  /** Every piece key in the column, in drawn order — so "the first piece"
-   *  is a fact about the column and not about which row rendered first. */
-  readonly routeKeys = computed(() => {
-    const keys: string[] = []
-    for (const entry of this.rendered()) {
-      for (const piece of this.workOf(entry)) keys.push(`w:${piece.runId}`)
-      if (entry.question) keys.push(`j:${entry.index}`)
-      for (const piece of this.unfinishedAfter(entry.index)) keys.push(`u:${piece.runId}`)
-    }
-    if (this.route()?.live) keys.push('live')
-    if (this.routeEnd() !== 'open') keys.push('end')
-    return keys
-  })
-
-  isRouteTab(key: string): boolean {
-    const cursor = this.routeCursor()
-    const keys = this.routeKeys()
-    return (cursor && keys.includes(cursor) ? cursor : keys[0]) === key
-  }
-
   #routeKeysHeld = false
-
-  #routePieces(): HTMLElement[] {
-    const scroller = this.scroller()?.nativeElement
-    return scroller ? [...scroller.querySelectorAll<HTMLElement>('.chat-route-piece')] : []
-  }
 
   /** What a work piece says to a screen reader — and its title. A leak
    *  names the failure in words: failed, the verb, the target. Colour never
    *  carries the meaning alone. */
   pieceLabel(piece: RoutePiece, kind: 'work' | 'live' | 'unfinished'): string {
-    const i18n = ioc()?.get('@hypercomb.social/I18n') as
-      { t?: (key: string, params?: Record<string, unknown>) => string } | undefined
-    const t = (key: string, params?: Record<string, unknown>): string => i18n?.t?.(key, params) ?? key
     const parts: string[] = []
     const leak = this.leakOf(piece)
-    if (leak) parts.push(t('chat.route.leak', { verb: leak.verb, target: leak.cell || '—' }))
-    parts.push(t('chat.route.work', { count: piece.attempts.length }))
-    if (kind === 'live') parts.push(t('chat.route.live'))
-    else if (piece.inProgress) parts.push(t('chat.route.inProgress'))
-    else if (kind === 'unfinished') parts.push(t('chat.route.unfinished'))
-    if (piece.placedByTime) parts.push(t('chat.route.placedByTime'))
+    if (leak) parts.push(this.#t('chat.route.leak', { verb: leak.verb, target: leak.cell || '—' }))
+    parts.push(this.#t('chat.route.work', { count: piece.attempts.length }))
+    if (kind === 'live') parts.push(this.#t('chat.route.live'))
+    else if (piece.inProgress) parts.push(this.#t('chat.route.inProgress'))
+    else if (kind === 'unfinished') parts.push(this.#t('chat.route.unfinished'))
+    if (piece.placedByTime) parts.push(this.#t('chat.route.placedByTime'))
     return parts.join(' — ')
   }
 
-  /** Show the card for a piece. `focus` says which of hover and focus
-   *  brought it, so leaving with the pointer does not take a card that focus
-   *  is still holding. Positioned from the piece's rect, relative to the
-   *  panel: the scroller clips absolute children and the panel wears a
-   *  backdrop-filter, which makes it the containing block for `fixed` too —
-   *  so the card is an absolute child of the panel and the rect is read in
-   *  the panel's own coordinates. */
-  showRouteCard(event: Event, card: Omit<RouteCard, 'x' | 'y' | 'focus'>, focus = false): void {
-    const piece = event.currentTarget as HTMLElement | null
-    const panel = this.panel()?.nativeElement
-    if (!piece || !panel) return
-    const rect = piece.getBoundingClientRect()
-    const home = panel.getBoundingClientRect()
-    this.routeCard.set({
-      ...card,
-      x: rect.left - home.left,
-      y: rect.top - home.top + rect.height / 2,
-      focus: focus || (this.routeCard()?.focus ?? false),
-    })
-  }
-
-  hideRouteCard(fromFocus = false): void {
-    const held = this.routeCard()
-    if (!held) return
-    // The pointer leaving does not take a card that focus is holding.
-    if (!fromFocus && held.focus) { this.routeCard.set({ ...held, focus: true }); return }
-    this.routeCard.set(null)
-  }
-
-  onRouteFocusIn(event: FocusEvent, card: Omit<RouteCard, 'x' | 'y' | 'focus'>): void {
-    this.showRouteCard(event, card, true)
-    if (this.#routeKeysHeld) return
-    this.#routeKeysHeld = true
-    EffectBus.emit('keymap:suppress', { reason: ROUTE_KEYS_REASON })
-  }
-
-  onRouteFocusOut(event: FocusEvent): void {
-    this.hideRouteCard(true)
-    const to = event.relatedTarget as Element | null
-    if (to?.classList.contains('chat-route-piece')) return
-    this.#releaseRouteKeys()
+  /** A catalog string, for the labels the component builds itself. */
+  #t(key: string, params?: Record<string, string | number>): string {
+    const i18n = ioc()?.get('@hypercomb.social/I18n') as
+      { t?: (key: string, params?: Record<string, string | number>) => string } | undefined
+    return i18n?.t?.(key, params) ?? key
   }
 
   #releaseRouteKeys(): void {
@@ -2146,24 +2527,1050 @@ export class ChatWindowComponent implements OnDestroy {
     EffectBus.emit('keymap:unsuppress', { reason: ROUTE_KEYS_REASON })
   }
 
-  /** ↑/↓ walk the column's pieces; Home and End jump. The cursor follows the
-   *  piece that took focus, read off its `data-route-key`. */
-  onRouteKey(event: KeyboardEvent): void {
-    const pieces = this.#routePieces()
-    const at = Math.max(0, pieces.indexOf(event.currentTarget as HTMLElement))
-    const move = (to: number): void => {
-      const next = Math.max(0, Math.min(pieces.length - 1, to))
-      const target = pieces[next]
-      if (!target) return
-      this.routeCursor.set(target.dataset['routeKey'] ?? '')
-      target.focus({ preventScroll: true })
+  // ── THE SIDEBAR — the workflow, working its way down ────────────────────
+  //
+  // Jaime, 2026-09-10: "a visual workflow of what you accomplished on the
+  // right hand sidebar working its way down. It can be a viewport where you
+  // can pull it or you can just have it all on screen." And for v2: "give you
+  // a full summary at every state and kind of move you down the chat as well
+  // to find that spot … create a tree when this deviation happens for each of
+  // the nodes and show it vertically visually spread out … move it up and
+  // down inside to side slightly."
+  //
+  // So the column is two surfaces (chat-route.md §4). On top, the TREE: when
+  // the participant's own local model has organized the conversation, its
+  // tasks in preorder, each branch one indent step in with the pipe elbowing
+  // into it; then, on the main line, one dormant card per exchange it has not
+  // read, the live run or the wait, and the end. Under it, the SUMMARY PANE:
+  // where the current step stands, its branches, its decisions and its work.
+  // A step becomes current by a press, by the keys, or by scrolling the thread
+  // to its messages; a press or a key HOLDS until the participant scrolls the
+  // thread. Steering happens in the handlers and reverse sync only selects,
+  // so the two can never loop. Derived from the rows above and the route
+  // essentials reads; it writes nothing and never shows a message.
+
+  /** The tree viewport and the summary pane, while they are on screen. */
+  readonly routeSide = viewChild<ElementRef<HTMLElement>>('routeSide')
+  readonly routeSummary = viewChild<ElementRef<HTMLElement>>('routeSummary')
+
+  /** For the after-render hooks: a fold's anchor and a card not drawn yet —
+   *  never an animation frame, which a hidden tab is never served. */
+  readonly #injector = inject(Injector)
+
+  /** PRESENCE: any open conversation with a turn in it, when there is room
+   *  beside the thread (the rail's own query — below 701 px the settled lines
+   *  inside the turns carry the decisions and nothing is drawn). Not gated on
+   *  junctions or work: a plain chat's workflow is its exchanges. */
+  // HIDDEN (Jaime, 2026-09-11: "hide the workflow sidebar for now and stop").
+  // Everything that draws the route or asks the local model to organize it
+  // gates on this, so false hides the column and stops the attended call.
+  // Flip to true to bring it back.
+  readonly routeSideShown = computed(() =>
+    false && this.railVisible() && !!this.activeId() && this.turns().length > 0)
+
+  /** Branches folded away (←, or the fold mark), by conversation, for as long
+   *  as the window lives. Not a record: how the participant is looking. */
+  readonly #routeFolds = signal<ReadonlyMap<string, ReadonlySet<string>>>(new Map())
+
+  /** THE TREE AS DRAWN (§4.2). The flow's drawn nodes laid out in preorder
+   *  (`layoutRouteTree`), then the tail, then the pipes between them
+   *  (`routePipes`). It never reads the current step, so selecting one never
+   *  re-lays the tree. */
+  readonly routeTree = computed<RouteTree>(() => {
+    const none: RouteTree = { items: [], pipes: [], cols: 1, rows: 0, nodes: new Map(), parentOf: new Map(), kids: new Map() }
+    if (!this.routeSideShown()) return none
+    const rendered = this.rendered()
+    const route = this.route()
+    const flow = route?.flow
+    const limit = flow ? Math.max(0, Math.min(flow.upToTurnCount, rendered.length)) : 0
+    const ownRows = (node: RouteFlowNode): number[] =>
+      [...new Set(node.turns)].filter(row => Number.isInteger(row) && row >= 0 && row < limit).sort((a, b) => a - b)
+    const flowNodes = flow?.nodes ?? []
+    const drawn = new Set(flowNodes.filter(node => ownRows(node).length > 0).map(node => node.id))
+    // A flow that draws nothing is no flow: the whole conversation is the tail.
+    const upTo = drawn.size ? limit : 0
+    const folded = this.#routeFolds().get(this.activeId() || '') ?? new Set<string>()
+    const layout = layoutRouteTree(
+      flowNodes.map(node => ({ id: node.id, parent: node.parent, drawn: drawn.has(node.id) })), folded)
+    const nodes = new Map<string, RouteFlowNode>()
+    for (const node of flowNodes) if (drawn.has(node.id) && !nodes.has(node.id)) nodes.set(node.id, node)
+
+    /** What a set of thread rows recorded: each reply's own runs, then the runs
+     *  no reply followed after that row; every question; the first reply. */
+    const recorded = (rows: readonly number[]) => {
+      const runs: RoutePiece[] = []
+      const unfinished = new Set<string>()
+      const questions: SettledQuestion[] = []
+      let replyRow = -1
+      for (const row of rows) {
+        const entry = rendered[row]
+        if (!entry) continue
+        runs.push(...this.workOf(entry))
+        for (const piece of this.unfinishedAfter(row)) { runs.push(piece); unfinished.add(piece.runId) }
+        if (entry.question) questions.push(entry.question)
+        if (entry.turn.role === 'assistant' && replyRow < 0) replyRow = row
+      }
+      return { runs, unfinished, questions, replyRow }
+    }
+
+    type Draft = Omit<RouteItem, 'dashed' | 'joint' | 'jointSides' | 'stem' | 'setSize' | 'posInSet'>
+    const drafts: Draft[] = []
+    for (const id of layout.order) {
+      const node = nodes.get(id)
+      const at = layout.place.get(id)
+      if (!node || !at) continue
+      const rows = ownRows(node)
+      const beneath = layout.descendants.get(id) ?? 0
+      const collapsed = beneath > 0 && folded.has(id)
+      const first = collapsed ? undefined : layout.kids.get(id)?.[0]
+      drafts.push({
+        key: `n:${id}`, kind: 'node', row: rows[0] ?? -1, rows, node, ...recorded(rows),
+        x: at.x, y: at.y, level: at.level, parent: layout.parentOf.get(id),
+        firstChild: first === undefined ? undefined : `n:${first}`, descendants: beneath, collapsed,
+      })
+    }
+
+    // THE TAIL, on the main line: one card per exchange the flow has not read.
+    // An exchange opens at a user turn; the first one past the flow opens
+    // wherever the flow stopped, so turns before the first user turn — or a
+    // reply that grew inside the last organized exchange — still ride a card.
+    let y = layout.treeRows
+    const starts = rendered
+      .filter(entry => entry.index >= upTo && (entry.index === upTo || entry.turn.role === 'user'))
+      .map(entry => entry.index)
+    starts.forEach((start, at) => {
+      const end = starts[at + 1] ?? rendered.length
+      const rows = Array.from({ length: end - start }, (_, offset) => start + offset)
+      drafts.push({
+        key: `s:${start}`, kind: 'stage', row: start, rows, ...recorded(rows),
+        x: 0, y: y++, level: 1, descendants: 0, collapsed: false,
+      })
+    })
+    const bare = {
+      row: -1, rows: [] as readonly number[], runs: [] as readonly RoutePiece[], unfinished: new Set<string>(),
+      questions: [] as readonly SettledQuestion[], replyRow: -1, x: 0, level: 1, descendants: 0, collapsed: false,
+    }
+    const live = route?.live
+    if (live) drafts.push({ ...bare, key: 'live', kind: 'live', piece: live, runs: [live], y: y++ })
+    else if (this.waiting()) drafts.push({ ...bare, key: 'wait', kind: 'wait', y: y++ })
+    drafts.push({ ...bare, key: 'end', kind: 'end', y: y++ })
+
+    // Every length of pipe after an open question, in reading order, is dashed.
+    let open = false
+    const dashed = drafts.map(draft => {
+      const into = open
+      if (draft.questions.some(question => question.state === 'open')) open = true
+      return into
+    })
+    const pipes = routePipes(drafts.map((draft, at) => ({
+      key: draft.key, x: draft.x, y: draft.y,
+      parent: draft.parent === undefined ? undefined : `n:${draft.parent}`, dashed: dashed[at]!,
+    })))
+    const sets = new Map<string, string[]>()
+    for (const draft of drafts) {
+      const set = draft.parent ?? ''
+      const members = sets.get(set) ?? []
+      members.push(draft.key)
+      sets.set(set, members)
+    }
+    const items = drafts.map((draft, at): RouteItem => {
+      const siblings = sets.get(draft.parent ?? '') ?? []
+      const joint = pipes.joints.get(draft.key) ?? []
+      return {
+        ...draft, dashed: dashed[at]!, joint, jointSides: joint.map(seg => seg.side).join(' '),
+        stem: pipes.stems.get(draft.key) ?? null, setSize: siblings.length, posInSet: siblings.indexOf(draft.key) + 1,
+      }
+    })
+    return { items, pipes: pipes.pipes, cols: layout.cols, rows: y, nodes, parentOf: layout.parentOf, kids: layout.kids }
+  })
+
+  /** A node's state as a glyph — four returns, so the icon subset extractor
+   *  (scripts/icon-names.cjs, rule 4) sees every one. */
+  nodeIcon(state: RouteFlowState): string {
+    switch (state) {
+      case 'open': return 'hourglass_empty'
+      case 'decided': return 'alt_route'
+      case 'dropped': return 'block'
+      default: return 'task_alt'
+    }
+  }
+
+  /** The fold mark: folded shows the way in, unfolded the way it opened. */
+  foldIcon(item: RouteItem): string {
+    return item.collapsed ? 'chevron_right' : 'expand_more'
+  }
+
+  /** A node state's words, by literal key so the catalogs' drift check can
+   *  see every one. */
+  routeStateKey(state: RouteFlowState): string {
+    switch (state) {
+      case 'open': return 'chat.route.flow.state.open'
+      case 'decided': return 'chat.route.flow.state.decided'
+      case 'dropped': return 'chat.route.flow.state.dropped'
+      default: return 'chat.route.flow.state.done'
+    }
+  }
+
+  /** The turns a card covers, as the thread numbers them for a person:
+   *  one-based, consecutive runs joined — `1–3, 6`. */
+  routeTurnRange(rows: readonly number[] | undefined): string {
+    return spansOf(rows ?? [])
+      .map(span => span.length > 1 ? `${span[0]! + 1}–${span[span.length - 1]! + 1}` : `${span[0]! + 1}`)
+      .join(', ')
+  }
+
+  /** A card's work, compacted to one mark: the first run's glyph, every
+   *  attempt counted, broken when any failed. Null when it holds no work. */
+  routeWorkOf(item: RouteItem): { readonly first: RoutePiece; readonly count: number; readonly leak: boolean } | null {
+    const first = item.runs[0]
+    if (!first) return null
+    return { first, count: this.routeAttemptCount(item), leak: item.runs.some(run => run.leak) }
+  }
+
+  routeAttemptCount(item: RouteItem): number {
+    return item.runs.reduce((sum, run) => sum + run.attempts.length, 0)
+  }
+
+  routeLeakCount(item: RouteItem): number {
+    return item.runs.reduce((sum, run) => sum + run.attempts.filter(attempt => attempt.outcome === 'failed').length, 0)
+  }
+
+  /** Any question on the card still open — its mark is dashed. */
+  routeQuestionOpen(item: RouteItem): boolean {
+    return item.questions.some(question => question.state === 'open')
+  }
+
+  /** `data-route-card`: whether a node's card is current, stale, or absent. */
+  routeCardState(node: RouteFlowNode): 'current' | 'stale' | 'none' {
+    return node.card ? (node.card.stale ? 'stale' : 'current') : 'none'
+  }
+
+  /** The one roving tab stop: the cursor's card while it exists, else the
+   *  first card of the tree. */
+  isRouteStop(key: string): boolean {
+    const cursor = this.routeCursor()
+    const items = this.routeTree().items
+    const stop = cursor && items.some(item => item.key === cursor) ? cursor : items[0]?.key
+    return stop === key
+  }
+
+  /** The end's words: open, goal reached, put away — all reversible. */
+  endLabelKey(): string {
+    const end = this.routeEnd()
+    return end === 'goal' ? 'chat.route.end.goal' : end === 'archived' ? 'chat.route.end.archived' : 'chat.route.end.open'
+  }
+
+  endHintKey(): string {
+    const end = this.routeEnd()
+    return end === 'goal' ? 'chat.route.end.goalHint' : end === 'archived' ? 'chat.route.end.archivedHint' : 'chat.route.end.openHint'
+  }
+
+  /** What a card says to a screen reader. The live card leads with its leak
+   *  when there is one — colour never carries it alone. */
+  routeItemLabel(item: RouteItem): string {
+    switch (item.kind) {
+      case 'node': {
+        if (!item.node) return ''
+        const said = this.#t('chat.route.flow.node', {
+          title: item.node.title || this.#t('chat.route.flow.untitled'),
+          state: this.#t(this.routeStateKey(item.node.state)),
+        })
+        return item.collapsed ? `${said} — ${this.#t('chat.route.flow.hidden', { count: item.descendants })}` : said
+      }
+      case 'stage': return this.#t('chat.route.dormant')
+      case 'wait': return this.#t('chat.route.waiting')
+      case 'end': return this.#t(this.endLabelKey())
+      default: return item.piece ? this.pieceLabel(item.piece, 'live') : ''
+    }
+  }
+
+  // ── THE CURRENT STEP (§4.4.3) — one signal, four sources ─────────────────
+
+  readonly routeCurrent = signal<{ readonly key: string; readonly source: RouteSource } | null>(null)
+  /** The active span of the current card — which run of its rows. */
+  readonly routeSpanAt = signal(0)
+  /** A steer of the thread is running (`.chat-thread[data-route-steering]`). */
+  readonly routeSteering = signal(false)
+  /** Exchanges past the flow, when reading past it chose the current step. */
+  readonly routeNewer = signal(0)
+  /** A press, key or span choice holds until the participant scrolls the thread. */
+  readonly routeHold = signal(false)
+  /** The tree is at its bottom and its inline start (`data-route-follow`). */
+  readonly routeFollowing = signal(true)
+  readonly routePulling = signal(false)
+  /** The pointer is over the column: the thread only moves by itself then
+   *  (streaming, a steer), so reverse sync keeps the pane still. Focus does
+   *  not pause it — a pressed card keeps the focus. */
+  routePointerInside = false
+
+  readonly #routeCurrentKey = computed(() => this.routeCurrent()?.key ?? '')
+
+  /** The current card as the tree now draws it. */
+  readonly routeCurrentItem = computed<RouteItem | null>(() => {
+    const key = this.#routeCurrentKey()
+    return key ? this.routeTree().items.find(item => item.key === key) ?? null : null
+  })
+
+  /** The thread's lit rows: exactly the current card's. */
+  readonly routeLitRows = computed<ReadonlySet<number>>(() => new Set(this.routeCurrentItem()?.rows ?? []))
+
+  readonly routeSpans = computed(() => spansOf(this.routeCurrentItem()?.rows ?? []))
+
+  /** The row the start line marks — only while a hold stands. */
+  readonly routeAnchorRow = computed(() =>
+    this.routeHold() ? this.routeSpans()[this.routeSpanAt()]?.[0] ?? -1 : -1)
+
+  /** The start line's offset in the thread, measured after the render. */
+  readonly routeAnchorTop = signal<number | null>(null)
+
+  /** When the current key last changed — `prefer` waits ROUTE_SUMMARY_ASK_MS. */
+  #routeCurrentSince = 0
+  /** A card that became current by focus alone (Tab-in): its first press is a
+   *  press, not "again". */
+  #routeTabbedKey = ''
+  #keySettle: ReturnType<typeof setTimeout> | null = null
+  #preferTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** What the pane says, by state (§4.4.2) — `data-route-summary-state`. */
+  readonly routeSummaryState = computed(() => {
+    const item = this.routeCurrentItem()
+    if (!item) return 'empty'
+    const route = this.route()
+    if (item.kind === 'stage') {
+      if (route?.organizing?.stage === 'structure') return 'dormant-organizing'
+      return route?.organizer ? 'dormant-waiting' : 'dormant-no-model'
+    }
+    if (item.kind !== 'node' || !item.node) return 'item'
+    const card = item.node.card
+    if (card) return card.stale ? 'stale' : 'summary'
+    const organizing = route?.organizing
+    if (organizing?.stage === 'card' && organizing.nodeId === item.node.id) return 'summarizing'
+    if (route?.organizer) return route.cardBackoff?.includes(item.node.id) ? 'unusable' : 'pending'
+    // An essentials build older than cards still hands its one-line detail.
+    if (route?.organizerState === undefined && item.node.detail) return 'summary'
+    return 'no-model'
+  })
+
+  /** THE STATUS LINE: what the local model is doing about the current step,
+   *  or why nothing is. With a card it shows only while the card's replacement
+   *  is being written or is due. Keys are literal; the model's name is
+   *  interpolated, never translated. */
+  readonly routeStatus = computed((): { readonly key: string; readonly params: Record<string, string | number> } | null => {
+    const item = this.routeCurrentItem()
+    const route = this.route()
+    if (!item || !route) return null
+    const model = route.organizer?.model ?? route.flow?.model ?? ''
+    const id = item.node?.id
+    const writing = route.organizing?.stage === 'card' && route.organizing.nodeId === id
+    const state = this.routeSummaryState()
+    switch (state) {
+      case 'summarizing': return { key: 'chat.route.summary.summarizing', params: { model } }
+      case 'pending': return { key: 'chat.route.summary.pending', params: { model } }
+      case 'unusable': return { key: 'chat.route.summary.unusable', params: {} }
+      case 'dormant-organizing': return { key: 'chat.route.summary.dormant.organizing', params: { model } }
+      case 'dormant-waiting': return { key: 'chat.route.summary.dormant.waiting', params: { model } }
+      case 'summary':
+      case 'stale': {
+        if (writing) return { key: 'chat.route.summary.summarizing', params: { model } }
+        if (state !== 'stale' || !route.organizer) return null
+        return id && route.cardBackoff?.includes(id)
+          ? { key: 'chat.route.summary.unusable', params: {} }
+          : { key: 'chat.route.summary.pending', params: { model } }
+      }
+      case 'no-model':
+      case 'dormant-no-model': {
+        const key = routeWhyKey(route.organizerState)
+        return key ? { key, params: {} } : null
+      }
+      default: return null
+    }
+  })
+
+  /** A branch's path, root to parent, for the pane's "Part of" line. */
+  routePathOf(item: RouteItem): string {
+    const tree = this.routeTree()
+    const titles: string[] = []
+    for (let id = item.parent; id !== undefined; id = tree.parentOf.get(id)) {
+      titles.unshift(tree.nodes.get(id)?.title || this.#t('chat.route.flow.untitled'))
+    }
+    return titles.join(' › ')
+  }
+
+  /** A parent's branches, visible or folded, in record order. */
+  routeBranchesOf(item: RouteItem): readonly RouteFlowNode[] {
+    if (!item.node) return []
+    const tree = this.routeTree()
+    return (tree.kids.get(item.node.id) ?? [])
+      .map(id => tree.nodes.get(id))
+      .filter((node): node is RouteFlowNode => !!node)
+  }
+
+  /** "This summary by" — only when the card's model is not the flow's. */
+  routeCardBy(item: RouteItem): string {
+    const model = item.node?.card?.model ?? ''
+    return model && model !== (this.route()?.flow?.model ?? '') ? model : ''
+  }
+
+  /** Goal and what was done: opened once, it stays open while walking the
+   *  steps of that conversation, for the window's life. */
+  readonly #routeMoreOpen = signal<ReadonlySet<string>>(new Set())
+
+  routeMoreOpen(): boolean {
+    return this.#routeMoreOpen().has(this.activeId() || '')
+  }
+
+  onRouteMoreToggle(event: Event): void {
+    const open = (event.target as HTMLDetailsElement).open
+    const convoId = this.activeId() || ''
+    if (!convoId || open === this.routeMoreOpen()) return
+    const next = new Set(this.#routeMoreOpen())
+    if (open) next.add(convoId); else next.delete(convoId)
+    this.#routeMoreOpen.set(next)
+  }
+
+  /**
+   * SELECT A STEP (§4.4.4). A press, a key or a span chip holds and moves the
+   * thread — a press and a chip at once, a key once the walk rests. Reading
+   * (`thread`) only selects: it never moves the thread, so pressing and
+   * scrolling cannot loop. The tree reveals the card either way. Steering is
+   * done here, imperatively — never as an effect reacting to the signal.
+   */
+  selectRouteItem(item: RouteItem, source: RouteSource, span?: number): void {
+    if (source === 'press' && this.#routePulled) return
+    if (this.#keySettle !== null) { clearTimeout(this.#keySettle); this.#keySettle = null }
+    const previous = this.routeCurrent()
+    const same = previous?.key === item.key && this.#routeTabbedKey !== item.key
+    this.#routeTabbedKey = ''
+    if (source !== 'thread') {
+      this.routeCursor.set(item.key)
+      this.routeHold.set(true)
+      this.routeNewer.set(0)
+    }
+    if (previous?.key !== item.key) {
+      this.#routeCurrentSince = performance.now()
+      this.#armPrefer(item.key)
+    }
+    this.routeCurrent.set({ key: item.key, source })
+    const element = this.#routeElement(item.key)
+    if (element) this.#revealRoute(element, source === 'thread' ? 'thread' : 'participant')
+    if (source === 'thread') return
+    if (source === 'key') {
+      const key = item.key
+      this.#keySettle = setTimeout(() => {
+        this.#keySettle = null
+        const settled = this.routeTree().items.find(entry => entry.key === key)
+        if (settled && document.activeElement === this.#routeElement(key)) this.#steerTo(settled, 'key')
+      }, ROUTE_KEY_SETTLE_MS)
+      return
+    }
+    this.#steerTo(item, source, span, same)
+  }
+
+  /** A card's press, as the sidebar is now. A press that turned into a pull
+   *  is not a press. */
+  onRouteItemClick(item: RouteItem): void {
+    this.selectRouteItem(this.routeTree().items.find(entry => entry.key === item.key) ?? item, 'press')
+  }
+
+  /** Tab-in, or programmatic focus, moves the roving cursor only. It sets the
+   *  current step only when nothing is current, and never moves the thread. */
+  onRouteItemFocus(item: RouteItem): void {
+    this.routeCursor.set(item.key)
+    if (this.routeCurrent()) return
+    this.#routeTabbedKey = item.key
+    this.#routeCurrentSince = performance.now()
+    this.routeCurrent.set({ key: item.key, source: 'key' })
+  }
+
+  /** A span chip: straight to that run of the current step's messages. */
+  onRouteSpan(index: number): void {
+    const item = this.routeCurrentItem()
+    if (item) this.selectRouteItem(item, 'span', index)
+  }
+
+  /** A pane branch line selects that child as a press would. A child inside a
+   *  folded branch unfolds its ancestors first and lands after the render. The
+   *  focus goes to its card, since the line it was on is about to leave. */
+  pressRouteBranch(nodeId: string): void {
+    const convoId = this.activeId() || ''
+    const tree = this.routeTree()
+    const held = new Set(this.#routeFolds().get(convoId) ?? [])
+    let unfolded = false
+    for (let id = tree.parentOf.get(nodeId); id !== undefined; id = tree.parentOf.get(id)) {
+      if (held.delete(id)) unfolded = true
+    }
+    const land = (): void => {
+      const key = `n:${nodeId}`
+      const item = this.routeTree().items.find(entry => entry.key === key)
+      if (!item) return
+      this.#routeElement(key)?.focus({ preventScroll: true })
+      this.selectRouteItem(item, 'press')
+    }
+    if (!unfolded || !convoId) { land(); return }
+    const all = new Map(this.#routeFolds())
+    all.set(convoId, held)
+    this.#routeFolds.set(all)
+    afterNextRender(land, { injector: this.#injector })
+  }
+
+  onRouteBranchKey(event: KeyboardEvent, nodeId: string): void {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    this.pressRouteBranch(nodeId)
+  }
+
+  /** THE OPEN QUESTION, from its step's pane: the thread steers to the
+   *  question and its current option takes the focus — what pressing v1's
+   *  open junction card did. It is answered in the thread, never here. */
+  pressRouteQuestion(question: SettledQuestion): void {
+    if (question.state !== 'open' || this.openQuestion()?.index !== question.index) return
+    const options = this.#questionOptions()
+    const option = options[this.questionCursor()] ?? options[0]
+    if (!option) return
+    this.routeHold.set(true)
+    this.#steerThreadTo(question.index, option.closest<HTMLElement>('.chat-question') ?? undefined)
+    if (!option.disabled) option.focus({ preventScroll: true })
+  }
+
+  onRouteQuestionKey(event: KeyboardEvent, question: SettledQuestion): void {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    this.pressRouteQuestion(question)
+  }
+
+  // ── MOVING THE PARTICIPANT DOWN THE CHAT TO THE SPOT (§4.4.4) ────────────
+
+  /** Pick the span and move the thread to it — unless a covered row is
+   *  already in the reading band, when that span becomes the active one and
+   *  nothing moves. Pressing the current card again walks to its next span. */
+  #steerTo(item: RouteItem, source: RouteSource, span?: number, same = false): void {
+    // The live run, the wait and the end live at the thread's foot.
+    if (item.row < 0) { this.#scrollDown(true); return }
+    const spans = spansOf(item.rows)
+    if (!spans.length) return
+    const inBand = spans.findIndex(run => run.some(row => this.#rowInBand(row)))
+    const walk = same && source === 'press'
+    const at = span ?? (walk ? (this.routeSpanAt() + 1) % spans.length : inBand >= 0 ? inBand : 0)
+    const active = Math.max(0, Math.min(spans.length - 1, at))
+    this.routeSpanAt.set(active)
+    if (span === undefined && !walk && inBand >= 0) return
+    this.#steerThreadTo(spans[active]![0]!)
+  }
+
+  /** A thread row is in the reading band: 8%–40% of the thread's height. */
+  #rowInBand(row: number): boolean {
+    const scroller = this.scroller()?.nativeElement
+    const message = scroller?.querySelector<HTMLElement>(`.chat-msg[data-route-row="${row}"]`)
+    if (!scroller || !message) return false
+    const view = scroller.getBoundingClientRect()
+    const rect = message.getBoundingClientRect()
+    const top = view.top + view.height * ROUTE_BAND.top
+    const bottom = view.top + view.height * ROUTE_BAND.bottom
+    return rect.bottom > top && rect.top < bottom
+  }
+
+  #steer: {
+    readonly token: number
+    quiet: ReturnType<typeof setTimeout> | null
+    readonly cap: ReturnType<typeof setTimeout>
+    readonly scroller: HTMLElement
+  } | null = null
+  #steerToken = 0
+
+  /** The thread position this component last set itself — a steer's target, a
+   *  follow of the newest turn. A thread scroll anywhere else, outside a
+   *  steer, is the participant's own, and it releases the hold. */
+  #threadExpect: number | null = null
+
+  /**
+   * STEER THE THREAD so the row (or `target` inside it) sits 0.75rem below
+   * the thread's top. Scoped: the position comes from rects and is set on the
+   * scroller alone — `scrollIntoView` would scroll every scrollable ancestor.
+   * Smooth only when short and motion is allowed. `atBottom` is declared false
+   * BEFORE the first scroll event, or follow-newest would yank a steer that
+   * started at the bottom back mid-flight. The participant's own wheel, touch,
+   * press or scroll key cancels it; it ends on `scrollend`, or a quiet spell,
+   * capped — timers only, never an animation frame.
+   */
+  #steerThreadTo(row: number, target?: HTMLElement): void {
+    const scroller = this.scroller()?.nativeElement
+    const element = target ?? scroller?.querySelector<HTMLElement>(`.chat-msg[data-route-row="${row}"]`)
+    if (!scroller || !element) return
+    this.#cancelSteer(false)
+    const view = scroller.getBoundingClientRect()
+    const rect = element.getBoundingClientRect()
+    const max = scroller.scrollHeight - scroller.clientHeight
+    const top = clampScroll(scroller.scrollTop + (rect.top - view.top) - ROUTE_STEER_MARGIN_REM * remPx(), max)
+    const distance = Math.abs(top - scroller.scrollTop)
+    if (distance < 1) return
+    const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+    const smooth = !reduced && distance <= scroller.clientHeight * ROUTE_SMOOTH_SCREENS
+    if (max - top > NEAR_BOTTOM_PX) this.atBottom.set(false)
+    const token = ++this.#steerToken
+    this.#steer = { token, quiet: null, cap: setTimeout(() => this.#endSteer(token), ROUTE_STEER_MAX_MS), scroller }
+    scroller.addEventListener('wheel', this.#onSteerInput, { passive: true })
+    scroller.addEventListener('touchstart', this.#onSteerInput, { passive: true })
+    scroller.addEventListener('pointerdown', this.#onSteerInput, { passive: true })
+    scroller.addEventListener('keydown', this.#onSteerKey)
+    scroller.addEventListener('scrollend', this.#onSteerEnd)
+    this.#threadExpect = top
+    this.routeSteering.set(true)
+    scroller.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' })
+    this.#armQuiet(token)
+  }
+
+  #onSteerInput = (): void => { this.#cancelSteer(true) }
+  #onSteerKey = (event: KeyboardEvent): void => { if (ROUTE_STEER_KEYS.has(event.key)) this.#cancelSteer(true) }
+  #onSteerEnd = (): void => { if (this.#steer) this.#endSteer(this.#steer.token) }
+
+  #armQuiet(token: number): void {
+    const steer = this.#steer
+    if (!steer || steer.token !== token) return
+    if (steer.quiet !== null) clearTimeout(steer.quiet)
+    steer.quiet = setTimeout(() => this.#endSteer(token), ROUTE_STEER_QUIET_MS)
+  }
+
+  /** Drop a steer's timers and listeners; the scroller it ran on, if any. */
+  #disarmSteer(): HTMLElement | null {
+    const steer = this.#steer
+    if (!steer) return null
+    this.#steer = null
+    if (steer.quiet !== null) clearTimeout(steer.quiet)
+    clearTimeout(steer.cap)
+    steer.scroller.removeEventListener('wheel', this.#onSteerInput)
+    steer.scroller.removeEventListener('touchstart', this.#onSteerInput)
+    steer.scroller.removeEventListener('pointerdown', this.#onSteerInput)
+    steer.scroller.removeEventListener('keydown', this.#onSteerKey)
+    steer.scroller.removeEventListener('scrollend', this.#onSteerEnd)
+    this.routeSteering.set(false)
+    return steer.scroller
+  }
+
+  #endSteer(token: number): void {
+    if (this.#steer?.token !== token) return
+    this.#disarmSteer()
+    setTimeout(() => this.#measureAnchor(), 0)
+  }
+
+  /** THE PARTICIPANT ALWAYS WINS. Their input stops the steer where it is,
+   *  and the scroll that follows is theirs, so it clears the hold. `stop`
+   *  false only ends the bookkeeping: a follow of the newest turn is about to
+   *  take the view. */
+  #cancelSteer(stop: boolean): void {
+    const scroller = this.#disarmSteer()
+    if (!scroller || !stop) return
+    this.#threadExpect = null
+    scroller.scrollTo({ top: scroller.scrollTop, behavior: 'auto' })
+  }
+
+  /** THE START LINE's offset: the row's top, half the thread's gap above it —
+   *  measured after the render, static, never animated. */
+  readonly #routeAnchorWatch = effect(() => {
+    this.routeAnchorRow()
+    this.rendered()
+    setTimeout(() => this.#measureAnchor(), 0)
+  })
+
+  #measureAnchor(): void {
+    const row = this.routeAnchorRow()
+    const scroller = this.scroller()?.nativeElement
+    const message = row < 0 ? null : scroller?.querySelector<HTMLElement>(`.chat-msg[data-route-row="${row}"]`)
+    if (!scroller || !message) { this.routeAnchorTop.set(null); return }
+    const gap = parseFloat(getComputedStyle(scroller).rowGap) || 0
+    this.routeAnchorTop.set(message.offsetTop - gap / 2)
+  }
+
+  /** The pane reads from its top whenever the current step changes. */
+  readonly #routePaneTop = effect(() => {
+    this.#routeCurrentKey()
+    setTimeout(() => {
+      const pane = this.routeSummary()?.nativeElement
+      if (pane) pane.scrollTop = 0
+    }, 0)
+  })
+
+  // ── REVERSE SYNC (§4.4.5) — the current step follows your reading ───────
+
+  #readingObserver: IntersectionObserver | null = null
+  #observed = new WeakSet<Element>()
+  readonly #reading = new Set<number>()
+  #readingTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** Watch which thread rows sit in the reading band. Re-armed after every
+   *  render; each row is observed once, and a fresh observer reports every
+   *  row's state on `observe`. */
+  readonly #readingWatch = effect(() => {
+    this.rendered()
+    const shown = this.routeSideShown()
+    const scroller = this.scroller()?.nativeElement
+    setTimeout(() => {
+      if (!shown || !scroller || typeof IntersectionObserver === 'undefined') { this.#disconnectReading(); return }
+      if (!this.#readingObserver || this.#readingObserver.root !== scroller) {
+        this.#disconnectReading()
+        this.#readingObserver = new IntersectionObserver(entries => {
+          for (const entry of entries) {
+            const row = Number((entry.target as HTMLElement).dataset['routeRow'])
+            if (!Number.isInteger(row)) continue
+            if (entry.isIntersecting) this.#reading.add(row); else this.#reading.delete(row)
+          }
+          this.#scheduleReading()
+        }, { root: scroller, rootMargin: '-8% 0px -60% 0px', threshold: 0 })
+      }
+      for (const element of scroller.querySelectorAll('.chat-msg[data-route-row]')) {
+        if (this.#observed.has(element)) continue
+        this.#observed.add(element)
+        this.#readingObserver.observe(element)
+      }
+    }, 0)
+  })
+
+  /** Rows are tracked by position, so switching conversations reuses the same
+   *  message elements — and an observer reports only CHANGES. Without a fresh
+   *  observer, rows already in the band would never be re-added. */
+  #disconnectReading(): void {
+    this.#readingObserver?.disconnect()
+    this.#readingObserver = null
+    this.#observed = new WeakSet()
+    this.#reading.clear()
+    if (this.#readingTimer !== null) { clearTimeout(this.#readingTimer); this.#readingTimer = null }
+  }
+
+  #scheduleReading(): void {
+    if (this.#readingTimer !== null) clearTimeout(this.#readingTimer)
+    this.#readingTimer = setTimeout(() => {
+      this.#readingTimer = null
+      this.#applyReading()
+    }, ROUTE_SYNC_MS)
+  }
+
+  /** Select the step being read. Never on leaving the column — that flipped a
+   *  press back the moment the pointer left — and paused while a steer runs,
+   *  a pull is in progress, the pointer is inside the column, or a choice
+   *  holds. The current step stays while any of its rows is still being read;
+   *  a gap between cards keeps what is current. */
+  #applyReading(): void {
+    if (!this.routeSideShown() || this.peeking() || this.#steer || this.#routeDrag?.pulling || this.routeHold()) return
+    if (this.routePointerInside) return
+    const rows = this.rendered()
+    if (!rows.length) return
+    const current = this.routeCurrentItem()
+    if (current && current.rows.some(row => this.#reading.has(row))) return
+    const anchor = this.atBottom() ? rows[rows.length - 1]!.index : this.#reading.size ? Math.min(...this.#reading) : null
+    if (anchor === null) return
+    const tree = this.routeTree()
+    const { key, newer } = routeKeyForRow(this.route()?.flow, tree.items, rows, anchor)
+    this.routeNewer.set(newer)
+    if (!key || key === current?.key) return
+    const item = tree.items.find(entry => entry.key === key)
+    if (!item) return
+    this.selectRouteItem(item, 'thread')
+    this.routeSpanAt.set(Math.max(0, spansOf(item.rows).findIndex(run => run.includes(anchor))))
+  }
+
+  // ── THE VIEWPORT (§4.3) ─────────────────────────────────────────────────
+
+  /** The last key a reveal was made for, whether the tree had to move or not. */
+  #routeRevealedKey = ''
+  /** The current card was fully inside the viewport, as last measured. */
+  #routeCurrentVisible = false
+  /** The position the component last scrolled the viewport to itself. Any
+   *  other scroll — a pull, a wheel, a scrollbar, PageDown — is a pan. */
+  #routeExpect: { readonly top: number; readonly left: number } | null = null
+  #routePannedAt = -Infinity
+  /** A fold anchored the toggled card in this render: do not follow over it. */
+  #routeFoldAnchored = false
+
+  #routeItemElements(): HTMLElement[] {
+    const side = this.routeSide()?.nativeElement
+    return side ? [...side.querySelectorAll<HTMLElement>('.chat-route-item')] : []
+  }
+
+  #routeElement(key: string): HTMLElement | null {
+    return this.#routeItemElements().find(element => element.dataset['routeKey'] === key) ?? null
+  }
+
+  #routeInside(element: HTMLElement, side: HTMLElement): boolean {
+    const view = side.getBoundingClientRect()
+    const rect = element.getBoundingClientRect()
+    return rect.top >= view.top - 1 && rect.bottom <= view.bottom + 1
+      && rect.left >= view.left - 1 && rect.right <= view.right + 1
+  }
+
+  /** WHEN THE TREE CHANGES (§4.3.4), after the render: reveal the current
+   *  card when its key changed since the last reveal, or when it was fully in
+   *  view and a fold or an insertion moved it out; otherwise follow the newest
+   *  while following; otherwise leave the viewport where the participant put
+   *  it. A refresh that changes neither the current step nor its place moves
+   *  nothing. */
+  readonly #routeTreeWatch = effect(() => {
+    this.routeTree()
+    const before = this.#routeCurrentVisible
+    setTimeout(() => this.#afterRouteTree(before), 0)
+  })
+
+  #afterRouteTree(before: boolean): void {
+    const side = this.routeSide()?.nativeElement
+    if (!side) return
+    const current = this.routeCurrent()
+    const element = current ? this.#routeElement(current.key) : null
+    const anchored = this.#routeFoldAnchored
+    this.#routeFoldAnchored = false
+    if (element && current && current.key !== this.#routeRevealedKey) {
+      this.#revealRoute(element, current.source === 'thread' ? 'thread' : 'participant')
+    } else if (element && before && !this.#routeInside(element, side)) {
+      this.#revealRoute(element, 'participant')
+    } else if (this.routeFollowing() && !anchored) {
+      const top = Math.max(0, side.scrollHeight - side.clientHeight)
+      if (Math.abs(side.scrollTop - top) >= 1 || Math.abs(side.scrollLeft) >= 1) {
+        this.#routeExpect = { top, left: 0 }
+        side.scrollTo({ top, left: 0, behavior: 'auto' })
+      }
+    }
+    this.#routeCurrentVisible = element ? this.#routeInside(element, side) : false
+  }
+
+  /** REVEAL a card: instant, minimal, scoped to the viewport — never
+   *  `scrollIntoView`, which also scrolls the thread and the panel. Instant
+   *  because the tree's own moves are small, and a smooth tree scroll while the
+   *  thread may be moving too is two things animating at once. A reveal the
+   *  thread caused is skipped mid-pull and within the pan hold. */
+  #revealRoute(element: HTMLElement, reason: 'participant' | 'thread'): void {
+    const side = this.routeSide()?.nativeElement
+    if (!side) return
+    if (reason === 'thread' && (this.#routeDrag?.pulling || performance.now() - this.#routePannedAt < ROUTE_PAN_HOLD_MS)) {
+      this.#routeCurrentVisible = this.#routeInside(element, side)
+      return
+    }
+    this.#routeRevealedKey = this.routeCurrent()?.key ?? ''
+    const margin = ROUTE_STEER_MARGIN_REM * remPx()
+    const view = side.getBoundingClientRect()
+    const rect = element.getBoundingClientRect()
+    const near = (lo: number, hi: number, vlo: number, vhi: number): number =>
+      hi - lo > vhi - vlo - 2 * margin ? lo - vlo - margin
+        : lo < vlo + margin ? lo - vlo - margin
+          : hi > vhi - margin ? hi - vhi + margin
+            : 0
+    const top = near(rect.top, rect.bottom, view.top, view.bottom)
+    const left = near(rect.left, rect.right, view.left, view.right)
+    const next = {
+      top: clampScroll(side.scrollTop + top, side.scrollHeight - side.clientHeight),
+      left: clampScroll(side.scrollLeft + left, side.scrollWidth - side.clientWidth),
+    }
+    if (Math.abs(next.top - side.scrollTop) >= 1 || Math.abs(next.left - side.scrollLeft) >= 1) {
+      this.#routeExpect = next
+      side.scrollTo({ top: next.top, left: next.left, behavior: 'auto' })
+    }
+    this.#routeCurrentVisible = this.#routeInside(element, side)
+  }
+
+  /** Whose scroll it was: within a pixel of the position the component set,
+   *  its own; anything else the participant's pan. Follow is recomputed on
+   *  both edges. */
+  onRouteSideScroll(): void {
+    const side = this.routeSide()?.nativeElement
+    if (!side) return
+    const expect = this.#routeExpect
+    if (expect && Math.abs(side.scrollTop - expect.top) <= 1 && Math.abs(side.scrollLeft - expect.left) <= 1) {
+      this.#routeExpect = null
+    } else {
+      this.#routePannedAt = performance.now()
+    }
+    this.routeFollowing.set(
+      side.scrollHeight - side.scrollTop - side.clientHeight <= ROUTE_SIDE_BOTTOM_PX
+      && Math.abs(side.scrollLeft) <= ROUTE_SIDE_BOTTOM_PX)
+    const key = this.routeCurrent()?.key
+    const element = key ? this.#routeElement(key) : null
+    this.#routeCurrentVisible = element ? this.#routeInside(element, side) : false
+  }
+
+  // THE PULL. The wheel scrolls the viewport natively; a mouse or pen can also
+  // grab it and drag, on both axes. The press becomes a pull only past
+  // ROUTE_PULL_PX, and only then is the pointer captured — capturing on the
+  // press would retarget the click away from the card it started on. The axis
+  // locks once one direction clearly leads. Touch pans natively.
+
+  #routeDrag: { id: number; x: number; y: number; left: number; top: number; pulling: boolean; axis: 'x' | 'y' | 'both' } | null = null
+  #routePulled = false
+
+  onRouteSidePointerDown(event: PointerEvent): void {
+    if (event.pointerType === 'touch' || event.button !== 0) return
+    const side = event.currentTarget as HTMLElement
+    this.#routeDrag = {
+      id: event.pointerId, x: event.clientX, y: event.clientY,
+      left: side.scrollLeft, top: side.scrollTop, pulling: false, axis: 'both',
+    }
+    this.#routePulled = false
+  }
+
+  onRouteSidePointerMove(event: PointerEvent): void {
+    const drag = this.#routeDrag
+    if (!drag || drag.id !== event.pointerId) return
+    const side = event.currentTarget as HTMLElement
+    const dx = event.clientX - drag.x
+    const dy = event.clientY - drag.y
+    if (!drag.pulling) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < ROUTE_PULL_PX) return
+      drag.pulling = true
+      drag.axis = Math.abs(dy) >= ROUTE_AXIS_LOCK * Math.abs(dx) ? 'y'
+        : Math.abs(dx) >= ROUTE_AXIS_LOCK * Math.abs(dy) ? 'x'
+          : 'both'
+      side.setPointerCapture(event.pointerId)
+      this.routePulling.set(true)
+    }
+    event.preventDefault()
+    if (drag.axis !== 'x') side.scrollTop = drag.top - dy
+    if (drag.axis !== 'y') side.scrollLeft = drag.left - dx
+  }
+
+  /** The release that ends a pull swallows the click it would otherwise
+   *  become; the flag outlives this task by one tick, no longer. */
+  onRouteSidePointerUp(event: PointerEvent): void {
+    const drag = this.#routeDrag
+    if (!drag || drag.id !== event.pointerId) return
+    this.#routeDrag = null
+    this.routePulling.set(false)
+    const side = event.currentTarget as HTMLElement
+    if (side.hasPointerCapture(event.pointerId)) side.releasePointerCapture(event.pointerId)
+    if (!drag.pulling) return
+    this.#routePulled = true
+    setTimeout(() => { this.#routePulled = false }, 0)
+  }
+
+  /** Shift + wheel pans sideways — only when the platform did not already
+   *  convert it, so the viewport never pans twice. The vertical wheel and a
+   *  trackpad's horizontal scroll stay native. */
+  onRouteSideWheel(event: WheelEvent): void {
+    const side = event.currentTarget as HTMLElement
+    if (!event.shiftKey || event.deltaX !== 0 || event.deltaY === 0 || side.scrollWidth <= side.clientWidth) return
+    event.preventDefault()
+    side.scrollLeft += event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY
+  }
+
+  // ── FOLDS AND KEYS (§4.2.2, §4.3.5) ─────────────────────────────────────
+
+  /** Fold a node's branch away, or bring it back. The toggled card stays
+   *  where it was: its rect is read before, and the viewport moves by the
+   *  difference after the render. A current step folded away becomes the
+   *  fold itself — the pane never describes a card nobody can see. */
+  setRouteFold(nodeId: string, folded: boolean): void {
+    const convoId = this.activeId() || ''
+    if (!convoId || !nodeId) return
+    const key = `n:${nodeId}`
+    const before = this.#routeElement(key)?.getBoundingClientRect() ?? null
+    const all = new Map(this.#routeFolds())
+    const held = new Set(all.get(convoId) ?? [])
+    if (folded) held.add(nodeId); else held.delete(nodeId)
+    all.set(convoId, held)
+    const current = this.routeCurrent()
+    if (folded && current && this.#routeIsBeneath(current.key, nodeId)) this.routeCurrent.set({ key, source: current.source })
+    if (folded && this.#routeIsBeneath(this.routeCursor(), nodeId)) this.routeCursor.set(key)
+    this.#routeFolds.set(all)
+    if (!before) return
+    afterNextRender(() => {
+      const side = this.routeSide()?.nativeElement
+      const after = this.#routeElement(key)?.getBoundingClientRect()
+      if (!side || !after) return
+      this.#routeFoldAnchored = true
+      const top = after.top - before.top
+      const left = after.left - before.left
+      if (Math.abs(top) < 1 && Math.abs(left) < 1) return
+      const next = {
+        top: clampScroll(side.scrollTop + top, side.scrollHeight - side.clientHeight),
+        left: clampScroll(side.scrollLeft + left, side.scrollWidth - side.clientWidth),
+      }
+      this.#routeExpect = next
+      side.scrollTo({ top: next.top, left: next.left, behavior: 'auto' })
+    }, { injector: this.#injector })
+  }
+
+  #routeIsBeneath(key: string, ancestor: string): boolean {
+    if (!key.startsWith('n:')) return false
+    const parentOf = this.routeTree().parentOf
+    for (let id = parentOf.get(key.slice(2)); id !== undefined; id = parentOf.get(id)) if (id === ancestor) return true
+    return false
+  }
+
+  /** The fold mark on a node with a branch beneath it. Not the card's press:
+   *  it neither moves the thread nor moves the roving stop. */
+  onRouteFoldClick(event: MouseEvent, item: RouteItem): void {
+    event.stopPropagation()
+    if (this.#routePulled || !item.node || !item.descendants) return
+    this.setRouteFold(item.node.id, !item.collapsed)
+  }
+
+  /**
+   * THE WAI-ARIA TREE KEYS, exactly. ↓/↑ walk DOM order — the visible
+   * preorder, then the tail — which is also the visual order, since siblings
+   * stack; Home and End jump; Enter and Space press. On a node, → unfolds a
+   * collapsed one, or walks into an expanded one's first child; ← folds an
+   * expanded one, or walks to the parent. No sibling walk on ←/→: it would fold
+   * an expanded sibling on the way. Every one of them is `preventDefault`ed, so
+   * a focused card never pans the viewport natively. Escape is the cascade's.
+   */
+  onRouteItemKey(event: KeyboardEvent, item: RouteItem): void {
+    // THE CARD AS THE SIDEBAR IS NOW. A fold from the previous key may not
+    // have been drawn yet, and the template hands over the item it last drew
+    // with — two quick ← presses would both read "unfolded" and the second
+    // would fold again instead of walking to the parent.
+    const items = this.routeTree().items
+    const current = items.find(entry => entry.key === item.key) ?? item
+    const at = items.findIndex(entry => entry.key === current.key)
+    const walk = (key: string | undefined): void => {
+      if (key !== undefined && key !== current.key) this.#walkRouteTo(key)
     }
     switch (event.key) {
-      case 'ArrowDown': event.preventDefault(); move(at + 1); return
-      case 'ArrowUp': event.preventDefault(); move(at - 1); return
-      case 'Home': event.preventDefault(); move(0); return
-      case 'End': event.preventDefault(); move(pieces.length - 1); return
+      case 'ArrowDown': event.preventDefault(); walk(items[Math.min(items.length - 1, at + 1)]?.key); return
+      case 'ArrowUp': event.preventDefault(); walk(items[Math.max(0, at - 1)]?.key); return
+      case 'Home': event.preventDefault(); walk(items[0]?.key); return
+      case 'End': event.preventDefault(); walk(items[items.length - 1]?.key); return
+      case 'Enter': case ' ': event.preventDefault(); this.selectRouteItem(current, 'press'); return
+      case 'ArrowRight': {
+        event.preventDefault()
+        if (!current.node || !current.descendants) return
+        if (current.collapsed) { this.setRouteFold(current.node.id, false); return }
+        walk(current.firstChild)
+        return
+      }
+      case 'ArrowLeft': {
+        event.preventDefault()
+        if (!current.node) return
+        if (current.descendants && !current.collapsed) { this.setRouteFold(current.node.id, true); return }
+        if (current.parent !== undefined) walk(`n:${current.parent}`)
+        return
+      }
     }
+  }
+
+  /** A key move: focus without scrolling, then select — the arrival makes the
+   *  card current and reveals it. A card not drawn yet (a branch unfolded a
+   *  moment ago) lands after the next render. */
+  #walkRouteTo(key: string): void {
+    const land = (): boolean => {
+      const element = this.#routeElement(key)
+      const item = this.routeTree().items.find(entry => entry.key === key)
+      if (!element || !item) return false
+      element.focus({ preventScroll: true })
+      this.selectRouteItem(item, 'key')
+      return true
+    }
+    if (!land()) afterNextRender(() => { land() }, { injector: this.#injector })
+  }
+
+  /** THE KEYMAP HOLD. The hive's keymap runs on `window` in the capture phase,
+   *  so ↑/↓ would move the hex selection and Enter would paste before a card
+   *  saw the key. Held while focus is anywhere in the column — the pane's
+   *  controls too — and released when it leaves, and on close, park and
+   *  destroy. */
+  onRouteColFocusIn(): void {
+    if (this.#routeKeysHeld) return
+    this.#routeKeysHeld = true
+    EffectBus.emit('keymap:suppress', { reason: ROUTE_KEYS_REASON })
+  }
+
+  onRouteColFocusOut(event: FocusEvent): void {
+    const to = event.relatedTarget as Node | null
+    if (to && (event.currentTarget as HTMLElement).contains(to)) return
+    this.#releaseRouteKeys()
   }
 
   // ── reading the route ───────────────────────────────────────────────────
@@ -2171,9 +3578,11 @@ export class ChatWindowComponent implements OnDestroy {
   // On every refresh hint the bucket is re-read, never appended to from a
   // payload (§3.5): `agent:step` filtered on the conversation (EffectBus
   // replays the last value, so the filter is not optional), the thread
-  // changing, the goal landing. `ask:chat-reply` ends the wait and is NOT a
-  // hint — the reply's own step is written after that effect fires, and a
-  // read triggered by it would see a run with no reply for one refresh.
+  // changing, the goal landing, a flow landing or a model call for it starting
+  // or ending, and the local model's probe state flipping. `ask:chat-reply`
+  // ends the wait and is NOT a hint — the reply's own step is written after
+  // that effect fires, and a read triggered by it would see a run with no
+  // reply for one refresh.
 
   #routeTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -2210,6 +3619,19 @@ export class ChatWindowComponent implements OnDestroy {
       if (convoId !== this.activeId()) return
       this.route.set(route)
       this.routeError.set(false)
+      // THE FLOW. The participant is looking at this route, so this is an
+      // attended moment to (re-)organize it — with their own machine-local
+      // model only, when it is already known awake (the module decides and
+      // never knocks). Unawaited. `prefer` names the step they have been
+      // looking at for ROUTE_SUMMARY_ASK_MS while its card is missing or
+      // stale, so that card is written first. The module refuses while we
+      // wait on a reply or while the lane is paused after their own local
+      // chat, and a refused call reads nothing and emits nothing — so the
+      // refresh hints cannot turn this into a loop.
+      if (this.routeSideShown() && threads.organizeRoute) {
+        void threads.organizeRoute(convoId, liveRunId, this.waiting(), this.#routePrefer())
+          .catch(() => { /* the flow stays as it was */ })
+      }
     } catch {
       if (convoId !== this.activeId()) return
       this.route.set(null)
@@ -2217,13 +3639,50 @@ export class ChatWindowComponent implements OnDestroy {
     }
   }
 
-  /** Leaving a conversation leaves its route behind. */
+  /** The current node's id once it has been current ROUTE_SUMMARY_ASK_MS with
+   *  no card or a stale one; otherwise nothing to prefer. */
+  #routePrefer(): string | undefined {
+    const node = this.routeCurrentItem()?.node
+    if (!node || performance.now() - this.#routeCurrentSince < ROUTE_SUMMARY_ASK_MS) return undefined
+    return !node.card || node.card.stale ? node.id : undefined
+  }
+
+  /** A node that became current with no card, or a stale one, asks once it
+   *  has stayed current long enough: one re-read, whose attended call then
+   *  carries it as `prefer`. Only while the local model is awake — otherwise
+   *  there is nobody to ask. */
+  #armPrefer(key: string): void {
+    if (this.#preferTimer !== null) { clearTimeout(this.#preferTimer); this.#preferTimer = null }
+    if (!key.startsWith('n:')) return
+    this.#preferTimer = setTimeout(() => {
+      this.#preferTimer = null
+      if (this.routeCurrent()?.key !== key || !this.route()?.organizer || this.#routePrefer() === undefined) return
+      this.#scheduleRouteRefresh(this.activeId())
+    }, ROUTE_SUMMARY_ASK_MS + 20)
+  }
+
+  /** Leaving a conversation leaves its route behind — its current step, its
+   *  hold, its steer, and the reading observer, whose rows are about to be
+   *  reused by the next conversation's turns. */
   #clearRoute(): void {
     if (this.#routeTimer !== null) { clearTimeout(this.#routeTimer); this.#routeTimer = null }
+    if (this.#keySettle !== null) { clearTimeout(this.#keySettle); this.#keySettle = null }
+    if (this.#preferTimer !== null) { clearTimeout(this.#preferTimer); this.#preferTimer = null }
     this.route.set(null)
     this.routeError.set(false)
-    this.routeCard.set(null)
+    this.#cancelSteer(false)
+    this.routeCurrent.set(null)
+    this.routeSpanAt.set(0)
+    this.routeNewer.set(0)
+    this.routeHold.set(false)
     this.routeCursor.set('')
+    this.routeAnchorTop.set(null)
+    this.routeFollowing.set(true)
+    this.#routeRevealedKey = ''
+    this.#routeCurrentVisible = false
+    this.#routeExpect = null
+    this.#routeTabbedKey = ''
+    this.#disconnectReading()
   }
 
   /** The half-arrived answer. Its own computed and deliberately NOT cached —
@@ -2536,6 +3995,22 @@ export class ChatWindowComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<{ convoId?: string }>('chat:threads-changed', payload => {
       this.#scheduleRouteRefresh(String(payload?.convoId ?? ''))
     }))
+    // A workflow landed, or a model call for this conversation started or
+    // ended. Filtered on the conversation for the same replay reason as
+    // `agent:step` (#scheduleRouteRefresh only acts on the open one) — the
+    // passive drain organizes EVERY conversation, not only this.
+    this.#cleanups.push(EffectBus.on<{ convoId?: string }>('chat:route-flow-changed', payload => {
+      this.#scheduleRouteRefresh(String(payload?.convoId ?? ''))
+    }))
+    this.#cleanups.push(EffectBus.on<{ convoId?: string }>('chat:route-flow-organizing', payload => {
+      this.#scheduleRouteRefresh(String(payload?.convoId ?? ''))
+    }))
+    // The local model's probe state flipped, so what the pane says about why
+    // no model runs may have changed. It names no conversation: the open one
+    // is re-read.
+    this.#cleanups.push(EffectBus.on('llm:policy-changed', () => {
+      this.#scheduleRouteRefresh(this.activeId())
+    }))
 
     // ── WHAT THERE IS TO PASTE ───────────────────────────────────────
     // The clipboard's own contents, for the header's flyout. Last-value
@@ -2688,6 +4163,11 @@ export class ChatWindowComponent implements OnDestroy {
     this.#releaseQuestionKeys()
     this.#releaseRouteKeys()
     if (this.#routeTimer !== null) { clearTimeout(this.#routeTimer); this.#routeTimer = null }
+    // A steer's listeners, the reading observer and the step timers go with it.
+    this.#cancelSteer(false)
+    this.#disconnectReading()
+    if (this.#keySettle !== null) { clearTimeout(this.#keySettle); this.#keySettle = null }
+    if (this.#preferTimer !== null) { clearTimeout(this.#preferTimer); this.#preferTimer = null }
     // A DESTROY IS NOT A STOP. This used to abort the host's stream, so
     // folding the panel away — or any surface swap that rebuilds this
     // component — threw away an answer mid-arrival, unstored. The run lives in
@@ -3176,7 +4656,7 @@ export class ChatWindowComponent implements OnDestroy {
     // A keymap held by the wizard or the route goes with the window.
     this.#releaseQuestionKeys()
     this.#releaseRouteKeys()
-    this.routeCard.set(null)
+    this.#cancelSteer(false)
     // Closing the window is a real close: the sidebar's trail and subject go
     // down with it.
     // The half-written thought does NOT: it is flushed first, so closing the
@@ -3195,7 +4675,10 @@ export class ChatWindowComponent implements OnDestroy {
 
   #railBounds(): { min: number; max: number } {
     const panel = this.panel()?.nativeElement
-    const room = panel ? panel.getBoundingClientRect().width - CONVERSATION_MIN : RAIL_MAX
+    // The route column's minimum is room the rail cannot take either, so a
+    // dragged-wide rail never pushes the split past the panel.
+    const column = this.routeSideShown() ? 12 * remPx() : 0
+    const room = panel ? panel.getBoundingClientRect().width - CONVERSATION_MIN - column : RAIL_MAX
     return { min: RAIL_MIN, max: Math.max(RAIL_MIN, Math.min(RAIL_MAX, room)) }
   }
 
@@ -3834,6 +5317,12 @@ export class ChatWindowComponent implements OnDestroy {
     const baseSystem = about.length
       ? `You are helping inside Hypercomb. The participant says this conversation is about: ${about.join(', ')}. Do not claim to have read tile contents unless they are present in the messages.`
       : 'You are helping inside Hypercomb. Be accurate and concise. Do not claim to have read hive contents unless they are present in the messages.'
+    // THE SAME ASKING PARAGRAPH the bridge instruction carries
+    // (documentation/chat-route.md §2.4): a direction that must be decided is
+    // asked as ONE hypercomb-question fence at the end of the reply, and the
+    // answer arrives as the next turn. Core spells it once, from the parser's
+    // own limits, so every tier teaches the rule the parser enforces.
+    const askingSystem = `${baseSystem}\n\n${QUESTION_ASKING_INSTRUCTION}`
     const readGrammarContext = (): {
       readonly key: string
       readonly page: string
@@ -3854,12 +5343,12 @@ export class ChatWindowComponent implements OnDestroy {
     const grammarContext = readGrammarContext()
     const system = nativeProviderId
       ? [
-        baseSystem,
+        askingSystem,
         observationProviderId ? hypercombObservationInstruction() : '',
         actionProviderId ? hypercombGrammarInstruction(behaviourEntries) : '',
         `The native grammar context is page ${grammarContext.page || '/'} with selected tiles: ${grammarContext.selected.join(', ') || '(none)'}. Bare /tree and the word "here" mean that page, which may differ from the conversation subject. You may make at most ${MAX_OBSERVATION_ROUNDS} observation rounds before answering or acting.`,
       ].filter(Boolean).join('\n\n')
-      : baseSystem
+      : askingSystem
 
     const component = this
     const ask: HostAsk = async function* (_question, opts) {
@@ -4297,26 +5786,48 @@ export class ChatWindowComponent implements OnDestroy {
     const element = this.scroller()?.nativeElement
     if (!element) return
     const distance = element.scrollHeight - element.scrollTop - element.clientHeight
-    this.atBottom.set(distance <= NEAR_BOTTOM_PX)
-    // The route's card is positioned from a rect read once; a scroll moves
-    // the piece out from under it, so the card goes rather than drifting.
-    if (this.routeCard()) this.routeCard.set(null)
+    // A steer declared the view off the bottom before its first scroll event;
+    // its own flight does not get to take that back.
+    const bottom = distance <= NEAR_BOTTOM_PX && !(this.#steer && !this.atBottom())
+    const flipped = bottom !== this.atBottom()
+    this.atBottom.set(bottom)
+    if (this.#steer) {
+      // A steer's own scroll events keep it alive and release nothing.
+      this.#armQuiet(this.#steer.token)
+    } else if (this.#threadExpect === null || Math.abs(element.scrollTop - this.#threadExpect) > 1) {
+      // THE PARTICIPANT SCROLLED THE THREAD — a wheel, a scrollbar, a touch
+      // pan, the scroll keys — at a position this component did not set. That,
+      // and only that, releases a pressed step's hold: streaming chunks that
+      // follow the newest never do. Reading runs as the hold clears.
+      this.#threadExpect = null
+      if (this.routeHold()) { this.routeHold.set(false); this.#scheduleReading() }
+    }
+    if (flipped) this.#scheduleReading()
   }
 
   /** After the turn is in the DOM, not before. `force` is for arrivals the
-   *  participant caused — their own message, a thread they just opened. */
+   *  participant caused — their own message, a thread they just opened — and
+   *  it takes the view from any steer. The position it sets is recorded, so
+   *  its scroll never reads as the participant's. */
   #scrollDown(force = false): void {
+    if (force) this.#cancelSteer(false)
     if (!force && !this.atBottom()) return
     setTimeout(() => {
       const element = this.scroller()?.nativeElement
       if (!element) return
+      // A steer that started after this was scheduled owns the view now.
+      if (!force && this.#steer) return
       element.scrollTop = element.scrollHeight
+      this.#threadExpect = element.scrollTop
       this.atBottom.set(true)
     }, 0)
   }
 
-  /** The pill. Back to the newest turn, and following again from here. */
+  /** The pill. Back to the newest turn, and following again from here. It is
+   *  the participant's own act, so it releases a held step: the step read at
+   *  the bottom — the newest organized one — becomes current. */
   scrollToBottom(): void {
+    if (this.routeHold()) { this.routeHold.set(false); this.#scheduleReading() }
     this.#scrollDown(true)
   }
 

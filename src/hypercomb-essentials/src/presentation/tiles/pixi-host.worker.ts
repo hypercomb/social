@@ -128,8 +128,12 @@ export class PixiHostWorker extends Worker {
 
   constructor() {
     super()
-    this.onEffect<{ active: boolean }>('editor:mode', ({ active }) => {
-      this.#editorActive = active
+    // Only the OLD modal editor covers the hive (a payload with no `surface`).
+    // The tile editor now fits into the view — docked beside the hive, or a
+    // page on a phone — and the hive beside it has to stay painted: a crop, a
+    // rim colour and a name are judged against the neighbouring tiles.
+    this.onEffect<{ active: boolean; surface?: string }>('editor:mode', ({ active, surface }) => {
+      this.#editorActive = active && surface === undefined
       this.#applyHostVisibility()
     })
     this.onEffect<{ active: boolean }>('view:active', ({ active }) => {

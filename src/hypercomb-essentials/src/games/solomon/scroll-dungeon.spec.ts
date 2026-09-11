@@ -95,7 +95,8 @@ describe('scrolling inscription dungeons', () => {
     const host = document.createElement('div')
     const view = new ScrollDungeonView({ index: 0, has: () => false, onComplete, onKnowledge })
     view.mount(host)
-    expect(host.querySelectorAll('.sd-tile')).toHaveLength(46 * 13)
+    expect(host.querySelector('canvas.sd-ground')).not.toBeNull()
+    expect(host.querySelectorAll('.sd-feature')).toHaveLength(7)
     const artifact = host.querySelector<HTMLButtonElement>('[aria-label="Knowledge artifact"]')!
     artifact.click()
     expect(onComplete).not.toHaveBeenCalled()

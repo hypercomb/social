@@ -53,6 +53,12 @@ export interface GroupMember {
    *  is identity and never encodes order. Absent while the derivation (async
    *  sha-256) is still in flight; the group re-renders when it lands. */
   groupSig?: string
+  /** Switched OFF — the member's behaviour is dormant in the Beehaviors
+   *  roster. It stays a member so its cell stays on the group page (a page's
+   *  children are derived from members(), and a cell dropped there is not
+   *  recoverable by undo); the renderer paints it as a hidden tile, and
+   *  unhiding it relights the behaviour. Absent = lit. */
+  dormant?: boolean
 }
 
 export interface LaunchGroup {

@@ -5,10 +5,11 @@
 // copies it to the clipboard. The link is just an ADDRESS (name-first — no
 // sigs, no payload): opening it loads the domain like any visit, lands at
 // the tile's parent with the tile selected (the canonical bracket form
-// `/parent/[tile]`, the same shape NavigationService writes), and — when the
-// tile carries a feature — opens the features panel focused on it via the
-// `?features=<cell>` landing intent (see hypercomb-shared/core/
-// bootstrap-history.ts).
+// `/parent/[tile]`, the same shape NavigationService writes). It used to add
+// a `?features=<cell>` landing intent that opened the Beehaviors panel on the
+// shared tile; behaviours are managed only from the context layer, so the
+// link no longer carries it (deprecated 2026-09-10 — bootstrap-history still
+// honours old links by opening the context panel).
 //
 // Share the root and you've shared the domain; share a leaf and you've
 // shared the one thing. Same URL shape, same machinery — the depth of the
@@ -21,13 +22,11 @@
 // prevent.
 
 import { Drone } from '@hypercomb/core'
-import { kindsForLabel } from '../commands/decoration-kind-index.js'
 import { MOBILE_MODE_IOC_KEY } from '../preferences/mobile-pheromones.js'
 import { deliverLink } from './deliver-link.js'
 import { hostCurrentBranch } from './host-gesture.js'
 
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
-const VISUAL_BEE_REGISTRY_KEY = '@diamondcoreprocessor.com/VisualBeeRegistry'
 const ICON_PROVIDER_REGISTRY_KEY = '@hypercomb.social/IconProviderRegistry'
 
 // Material Icons Filled `link` — 24×24, white fill (tinted at sprite level).
@@ -36,10 +35,6 @@ const LINK_ICON_SVG =
 
 interface LineageLike {
   explorerSegments?: () => readonly string[]
-}
-
-interface VisualBeeRegistryLike {
-  byDecorationKind?: (kind: string) => unknown
 }
 
 interface IconProviderRegistryLike {
@@ -67,7 +62,7 @@ export class ShareLinkDrone extends Drone {
   override genotype = 'sharing'
 
   public override description =
-    'Mints a share link for any tile — the URL lands a visitor at the tile\'s parent with the tile selected (/parent/[tile]), and adds the ?features landing intent when the tile carries a feature. Copies to the clipboard; nothing activates on open.'
+    'Mints a share link for any tile — the URL lands a visitor at the tile\'s parent with the tile selected (/parent/[tile]). Copies to the clipboard; nothing activates on open.'
 
   protected override listens: string[] = ['tile:action']
   protected override emits: string[] = ['activity:log']
@@ -103,29 +98,19 @@ export class ShareLinkDrone extends Drone {
 
   #ioc = () => (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
 
-  /** Does this tile carry a registered visual-bee feature? Same signal the
-   *  selection menu's features button gates on — decides whether the link
-   *  carries the open-the-features-panel landing intent. */
-  #hasFeature(label: string): boolean {
-    const registry = this.#ioc()?.get<VisualBeeRegistryLike>(VISUAL_BEE_REGISTRY_KEY)
-    if (!registry?.byDecorationKind) return false
-    for (const kind of kindsForLabel(label)) {
-      if (registry.byDecorationKind(kind)) return true
-    }
-    return false
-  }
-
   /** Build the tile's share URL: parent path + canonical bracket selection,
    *  segment content percent-encoded (bootstrap-history decodes per segment
-   *  on landing), plus the features intent when there's a feature to land on. */
+   *  on landing). It no longer carries the `?features=<cell>` intent: that
+   *  aimed the Beehaviors panel at the shared tile, and behaviours are managed
+   *  only from the context layer (deprecated 2026-09-10). Old links still
+   *  land; bootstrap-history opens the context panel for them. */
   #buildUrl(label: string): string {
     const lineage = this.#ioc()?.get<LineageLike>(LINEAGE_KEY)
     const parent = (lineage?.explorerSegments?.() ?? [])
       .map(s => String(s ?? '').trim())
       .filter(Boolean)
     const path = [...parent.map(encodeURIComponent), `[${encodeURIComponent(label)}]`].join('/')
-    const intent = this.#hasFeature(label) ? `?features=${encodeURIComponent(label)}` : ''
-    return `${window.location.origin}/${path}${intent}`
+    return `${window.location.origin}/${path}`
   }
 
   /** Is this a phone-shaped session? ONE definition of mobile: the

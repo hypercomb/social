@@ -24,6 +24,7 @@ import { featureNeedsReview } from '../../sharing/feature-availability.js'
 import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
 import { openExternalLink } from './document-view-links.js'
 import { scopeCellPageCss } from './cell-page-css-scope.js'
+import { hoistPageStylesheets, stylesheetsSettled } from './cell-page-stylesheets.js'
 import { HEXAGONS_SURFACE, sameSiteSegments, siteReturnTarget, type SiteSpawn } from './site-return.js'
 
 type MountState = {
@@ -711,6 +712,20 @@ export class SiteViewDrone extends Drone {
     const rawHtml = await composeDivision(segments, await blob.text())
     if (gen !== this.#gen) return
 
+    const parsed = new DOMParser().parseFromString(rewriteCellPageRefs(rawHtml), 'text/html')
+
+    // The page's linked sheets load BEFORE any of it goes in, the way a document
+    // holds its first paint for the sheets in its <head> — otherwise the content
+    // paints bare and restyles a beat later (cell-page-stylesheets.ts). The page
+    // on screen stays up while they load (a site's pages share one sheet, so
+    // it is already warm), and everything below is one synchronous swap.
+    const linkNodes = hoistPageStylesheets(parsed, pageSig)
+    await stylesheetsSettled(linkNodes)
+    if (gen !== this.#gen) {
+      for (const node of linkNodes) node.remove()
+      return
+    }
+
     this.#teardown()
 
     // Snapshot the live <html>/<body> inline background BEFORE the page's
@@ -736,21 +751,6 @@ export class SiteViewDrone extends Drone {
     // and restored on unmount. null = the hive default (system / unset), so it
     // restores by REMOVING the attribute rather than writing an empty string.
     const prevTheme = document.documentElement.getAttribute('data-theme')
-
-    const parsed = new DOMParser().parseFromString(rewriteCellPageRefs(rawHtml), 'text/html')
-
-    // Hoist <link rel="stylesheet"> into the live head, tagged so unmount can
-    // remove exactly these (and not anyone else's). An external sheet is fetched
-    // by the browser, so its text can't be scoped the way inline CSS is — a page
-    // that wants to travel as an artifact should inline its styles.
-    const linkNodes: HTMLLinkElement[] = []
-    for (const l of Array.from(parsed.querySelectorAll('link[rel="stylesheet"]'))) {
-      const live = document.createElement('link')
-      live.setAttribute('data-hc-cell-page', pageSig)
-      for (const a of Array.from(l.attributes)) live.setAttribute(a.name, a.value)
-      document.head.appendChild(live)
-      linkNodes.push(live)
-    }
 
     // Move <body> children into a host div pinned over the viewport.
     const host = document.createElement('div')

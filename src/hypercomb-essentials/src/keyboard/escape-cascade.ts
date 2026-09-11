@@ -112,7 +112,14 @@ EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
   // and an editor that comes back looking almost right is a worse answer than
   // one that does not come back at all. Escape's memory is about what was
   // COVERING the hive, not about what you had typed into it.
+  //
+  // ONE LEVEL AT A TIME INSIDE IT FIRST. The editor's innermost state — a
+  // name being typed, the camera, a link warning — unwinds before the editor
+  // itself goes, so an Escape meant for a field never throws the whole draft
+  // away. (A discarded draft is also kept: reopening the tile offers it back.)
   if (editorActive) {
+    const view = window.ioc.get<{ dismissInner?(): boolean }>('@diamondcoreprocessor.com/TileEditorView')
+    if (view?.dismissInner?.()) return
     const drone = window.ioc.get<{ cancelEditing(): void }>('@diamondcoreprocessor.com/TileEditorDrone')
     drone?.cancelEditing()
     return

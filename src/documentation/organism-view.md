@@ -71,9 +71,10 @@ discovery is families × community, and the pool is fetched at its address
 (`GET /<sign(meaning)>/`). The organism is what that answer looks like when
 you draw it instead of listing it.
 
-The local reading of the same signal is the holder badge
-(`presentation/tiles/holder-badge.drone.ts`) — participant depth on one
-tile, from the participant stack. Same question, one tile versus the swarm.
+The local reading of the same signal is the holder count — a small number
+after the name of the tile under the pointer, and only that tile
+(`presentation/tiles/tile-name.drone.ts`) — participant depth on one tile,
+from the participant stack. Same question, one tile versus the swarm.
 
 ## Any ontology, one primitive
 

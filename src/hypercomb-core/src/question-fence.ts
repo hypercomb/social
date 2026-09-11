@@ -63,6 +63,30 @@ export const QUESTION_LIMITS = Object.freeze({
   optionsMax: 4,
 })
 
+/**
+ * THE ASKING PARAGRAPH — how a responder is taught to ask the participant a
+ * direction. ONE copy, beside the parser it describes: the bridge instruction
+ * (essentials llm.queen.ts) and the local providers' system text (the shell)
+ * both append this constant, so no tier is taught a different convention
+ * from the one `splitQuestion` reads. Built from `QUESTION_FENCE_LANG` and
+ * `QUESTION_LIMITS`, so a changed limit changes the lesson with it.
+ *
+ * The fence is ordinary reply text: it rides through every tier unchanged,
+ * and the answer comes back as the next user turn — an option's label
+ * verbatim, or whatever the participant typed, because the composer is
+ * always the other answer.
+ */
+export const QUESTION_ASKING_INSTRUCTION: string =
+  'ASKING. When you are replying into a conversation and a direction must'
+  + ' be decided by the participant, end your reply with ONE fenced code block'
+  + ' whose info string is `' + QUESTION_FENCE_LANG + '`, holding JSON of the'
+  + ' shape {"prompt": "...", "options": ["...", "..."]} — two to four short'
+  + ` options, the prompt under ${QUESTION_LIMITS.promptMax} characters, each option under ${QUESTION_LIMITS.optionMax}. Put the`
+  + ' fence LAST in the reply, and then END THE TURN: do not wait for an'
+  + ' answer. The participant\'s choice arrives as the next turn of the'
+  + ' conversation, either one of your options word for word or an answer in'
+  + ' their own words from the composer; treat both as the decision.'
+
 export interface ChatQuestion {
   /** The prompt, trimmed. 1–280 characters. */
   readonly prompt: string

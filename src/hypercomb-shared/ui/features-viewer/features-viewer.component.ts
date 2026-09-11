@@ -523,7 +523,9 @@ export class FeaturesViewerComponent implements OnDestroy {
     return n
   })
 
-  /** Canvas-selection response (documentation/selection-tool-windows.md). */
+  /** @deprecated 2026-09-10 — the canvas-selection button is retired:
+   *  behaviours are managed only from the context layer, never re-targeted at
+   *  a selected tile. No template reads these any more. */
   readonly canvasSelectionCount = signal(0)
   readonly canvasSelectionHasFeatures = signal(false)
   readonly showCanvasSelectionAffordance = computed(() =>
@@ -568,8 +570,13 @@ export class FeaturesViewerComponent implements OnDestroy {
       // Tile mode only: while IN the store the rows are the switches
       // themselves, and a features:open arriving would yank the panel out
       // of the store mid-flip (closeStore refreshes on the way back).
-      EffectBus.on(ENABLEMENT_CHANGED, () => {
+      // In the store, a light flipped from OUTSIDE the panel (unhiding a
+      // switched-off game on its page) moves just that row's bulb.
+      EffectBus.on<{ kind?: string; on?: boolean }>(ENABLEMENT_CHANGED, (p) => {
         if (this.visible() && this.mode() === 'tile') this.#refreshGroup()
+        else if (this.mode() === 'store' && p?.kind && typeof p.on === 'boolean') {
+          this.storeRows.update(rows => rows.map(r => r.kind === p.kind ? { ...r, on: p.on! } : r))
+        }
       }),
     )
     this.#cleanups.push(EffectBus.on<FeaturesOpenPayload>('features:open', (p) => {
@@ -830,7 +837,8 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.#phoneQuery?.removeEventListener('change', this.#phoneHandler)
   }
 
-  /** Re-target this window at the canvas selection. */
+  /** @deprecated 2026-09-10 — re-targeted this window at the canvas selection.
+   *  Behaviours are managed only from the context layer; no template calls it. */
   readonly openSelectionFeatures = (): void => {
     EffectBus.emit('controls:action', { action: 'features' })
   }

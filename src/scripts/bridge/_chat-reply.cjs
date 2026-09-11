@@ -19,7 +19,10 @@
 // question's opener would CLOSE it), and a `hypercomb-question` fence already
 // in the prose would make two of them — either way the parser declines and
 // the participant sees a code block with no radiogroup. Both are refused as
-// usage errors, so a question this script delivers always parses.
+// usage errors. And the composed text is then read back with a CommonJS
+// mirror of the parser's strict rule (`readQuestion`): unless it parses as
+// exactly the question given, the script exits 1 WITHOUT connecting. The
+// prose check gives the clear reason; the output check is the guarantee.
 //
 // `--ask <sig>` attaches `run: { ask }` to the request. The renderer resolves
 // the bucket itself — a chat ask's reply is filed in the conversation's own
@@ -146,6 +149,75 @@ function proseProblem(prose) {
   return null
 }
 
+// ── The composed reply, as the parser will read it ─────────────────────
+
+/** Every fence in the lines, recorded exactly as core's `scanFences` walks
+ *  them: while a fence is open, a line is its closer (same character, at
+ *  least as long) or body — an opener inside a fence is body, not a fence. */
+function scanFences(lines) {
+  const fences = []
+  let opener = ''
+  let lang = ''
+  let open = -1
+  let body = []
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(FENCE_RE)
+    if (opener) {
+      if (match && match[1][0] === opener[0] && match[1].length >= opener.length) {
+        fences.push({ lang, open, close: i, body })
+        opener = ''
+        lang = ''
+        body = []
+      } else {
+        body.push(lines[i])
+      }
+      continue
+    }
+    if (match) {
+      opener = match[1]
+      lang = match[2].trim().split(/\s+/)[0] ?? ''
+      open = i
+      body = []
+    }
+  }
+  if (opener) fences.push({ lang, open, close: -1, body })
+  return fences
+}
+
+/** Core's `parseBody`: a plain object holding exactly `prompt` and
+ *  `options`, and a question `questionProblem` accepts. */
+function parseBody(body) {
+  let parsed
+  try { parsed = JSON.parse(body) } catch { return null }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  const keys = Object.keys(parsed)
+  if (keys.length !== 2 || !keys.includes('prompt') || !keys.includes('options')) return null
+  if (questionProblem(parsed.prompt, parsed.options) !== null) return null
+  return { prompt: parsed.prompt.trim(), options: parsed.options.map(option => option.trim()) }
+}
+
+/**
+ * Core's STRICT RULE (`locate` in question-fence.ts), with the reason it
+ * declines: `{ question }` when the text holds exactly one
+ * `hypercomb-question` fence, that fence is the last fence, it is closed and
+ * its body validates — otherwise `{ problem }`. This is what the chat window
+ * will do with the text, so it is what the script checks its OUTPUT against
+ * before a socket exists. _chat-reply.spec.ts runs it beside core's
+ * `splitQuestion` over the same texts so the two cannot drift.
+ */
+function readQuestion(text) {
+  const fences = scanFences(String(text ?? '').split('\n'))
+  const questions = fences.filter(fence => fence.lang === QUESTION_FENCE_LANG)
+  if (!questions.length) return { problem: 'holds no hypercomb-question fence' }
+  if (questions.length !== 1) return { problem: 'holds more than one hypercomb-question fence' }
+  const fence = questions[0]
+  if (fence !== fences[fences.length - 1]) return { problem: 'has another fence after the question' }
+  if (fence.close < 0) return { problem: 'leaves the question fence open' }
+  const question = parseBody(fence.body.join('\n'))
+  if (!question) return { problem: 'holds a question body the parser refuses' }
+  return { question }
+}
+
 // ── Arguments ──────────────────────────────────────────────────────────
 
 const SIG_RE = /^[0-9a-f]{64}$/
@@ -211,10 +283,28 @@ function buildReply(argv) {
   const fence = question === undefined ? '' : questionFence(question, options)
   const text = said && fence ? `${said}\n\n${fence}` : (fence || said)
 
+  // THE BELT. `proseProblem` reads the input; this reads the OUTPUT with the
+  // parser's own strict rule, because the promise is about what the chat
+  // window will draw. A reply that would not come back out as exactly the
+  // question given is refused here — before any socket exists — rather than
+  // delivered as a code block.
+  const read = readQuestion(text)
+  if (question !== undefined) {
+    const asked = { prompt: question.trim(), options: options.map(option => option.trim()) }
+    if (read.problem) {
+      throw new Error(`refusing to send: the composed reply ${read.problem}, so the participant would see a code block, not the question`)
+    }
+    if (JSON.stringify(read.question) !== JSON.stringify(asked)) {
+      throw new Error('refusing to send: the composed reply parses as a different question from the one given')
+    }
+  } else if (read.question) {
+    throw new Error('refusing to send: the prose itself parses as a question — ask with --question instead')
+  }
+
   return { convoId: convoId.trim(), text, run: ask ? { ask } : null }
 }
 
-module.exports = { questionFence, questionProblem, proseProblem, buildReply, QUESTION_LIMITS, USAGE }
+module.exports = { questionFence, questionProblem, proseProblem, readQuestion, buildReply, QUESTION_LIMITS, USAGE }
 
 // ── Delivery ───────────────────────────────────────────────────────────
 

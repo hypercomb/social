@@ -466,6 +466,14 @@ export class HexSdfTextureShader {
         vec3 col = img;
         col = mix(col, vec3(0.03, 0.04, 0.07), pillMask * 0.92);   // dark banner behind the name
         col = mix(col, vec3(1.0), textA);                          // big white name
+        // The dim below (world mode / a switched-off game) never reaches this
+        // early return, so the silhouette takes it here: a dormant game still
+        // stands on its page, visibly out — hidden, never gone.
+        if (vUnshared > 0.5) {
+          col = mix(col, vec3(dot(col, vec3(0.299, 0.587, 0.114))), 0.75);
+          col *= 0.45;
+          alpha *= 0.6;
+        }
         fragColor = vec4(col * alpha, alpha);
         return;
       }

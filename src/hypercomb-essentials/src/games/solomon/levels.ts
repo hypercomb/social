@@ -19,6 +19,7 @@ import {
 } from './engine.js'
 
 const STORE_KEY = 'hc:solomon-levels'
+const DRAFT_KEY = 'hc:solomon-designer:draft'
 
 // ASCII legend (one char per cell):
 //   '#' grey WALL · 'B' orange BRICK · '.'/' ' EMPTY · 'P' player · 'D' door
@@ -685,33 +686,100 @@ export function sanitizeLevel(raw: unknown): LevelDef | null {
   }
 }
 
+/** One saved level. `id` is the creation's IDENTITY — 32 random bytes as hex — so
+ *  it holds while the level is edited and renamed, and it is the signature the
+ *  hide / delete pool knows the creation by. Two creations may share a name. */
+export interface Creation { id: string; savedAt: number; level: LevelDef }
+
+const CREATION_ID = /^[a-f0-9]{64}$/
+
+export function newCreationId(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join('')
+}
+
+function writeCreations(creations: readonly Creation[]): void {
+  const rows = creations.map(c => ({ ...c.level, id: c.id, savedAt: c.savedAt }))
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(rows)) } catch { /* quota / disabled */ }
+}
+
+/** Every saved level, in the order filed. Rows are stored as a LevelDef carrying
+ *  `id` + `savedAt`, so the key stays readable as a plain level list. */
+export function loadCreations(): Creation[] {
+  let rows: unknown
+  try { rows = JSON.parse(localStorage.getItem(STORE_KEY) ?? '[]') } catch { return [] }
+  if (!Array.isArray(rows)) return []
+  const creations: Creation[] = []
+  let minted = false
+  for (const row of rows) {
+    const level = sanitizeLevel(row)
+    if (!level) continue
+    const r = row as Record<string, unknown>
+    let id = typeof r['id'] === 'string' && CREATION_ID.test(r['id']) ? r['id'] : ''
+    if (!id) { id = newCreationId(); minted = true }
+    const savedAt = typeof r['savedAt'] === 'number' && Number.isFinite(r['savedAt']) ? r['savedAt'] : 0
+    creations.push({ id, savedAt, level })
+  }
+  // Levels saved before creations had identities get one now, written back once
+  // so the same id comes back on every later read.
+  if (minted) writeCreations(creations)
+  return creations
+}
+
 export function loadCustomLevels(): LevelDef[] {
+  return loadCreations().map(c => c.level)
+}
+
+/** File a level: over the creation `id` names, or as a new creation when `id`
+ *  is null (or names nothing saved). */
+export function saveCreation(level: LevelDef, id: string | null): Creation {
+  const creations = loadCreations()
+  const creation: Creation = {
+    id: id && CREATION_ID.test(id) ? id : newCreationId(),
+    savedAt: Date.now(),
+    level: cloneLevel(level),
+  }
+  const i = creations.findIndex(c => c.id === creation.id)
+  if (i >= 0) creations[i] = creation
+  else creations.push(creation)
+  writeCreations(creations)
+  return creation
+}
+
+/** Forget saved levels — only for ids the delete area destroyed. A local forget:
+ *  an exported copy is untouched. Returns how many went. */
+export function forgetCreations(ids: ReadonlySet<string>): number {
+  const creations = loadCreations()
+  const kept = creations.filter(c => !ids.has(c.id))
+  if (kept.length !== creations.length) writeCreations(kept)
+  return creations.length - kept.length
+}
+
+/** `base`, or `base 2`, `base 3`… — the first spelling no saved level uses. */
+export function uniqueCreationName(base: string, taken: readonly string[]): string {
+  const names = new Set(taken)
+  if (!names.has(base)) return base
+  let n = 2
+  while (names.has(`${base} ${n}`)) n++
+  return `${base} ${n}`
+}
+
+/** The designer's canvas between visits: what is on it, the creation it is filed
+ *  as (null = not saved yet), and the tool in hand. Written as it changes, read
+ *  when the designer opens — the designer is sticky across closes and reloads. */
+export interface DesignerDraft { level: LevelDef; editingId: string | null; tool: string }
+
+export function loadDesignerDraft(): DesignerDraft | null {
   try {
-    const raw = localStorage.getItem(STORE_KEY)
-    if (!raw) return []
-    const arr = JSON.parse(raw)
-    if (!Array.isArray(arr)) return []
-    return arr.map(sanitizeLevel).filter((l): l is LevelDef => l !== null)
-  } catch { return [] }
+    const raw = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? 'null') as Record<string, unknown> | null
+    const level = raw ? sanitizeLevel(raw['level']) : null
+    if (!raw || !level) return null
+    const id = raw['editingId']
+    return { level, editingId: typeof id === 'string' && CREATION_ID.test(id) ? id : null, tool: String(raw['tool'] ?? '') }
+  } catch { return null }
 }
 
-export function saveCustomLevels(levels: LevelDef[]): void {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(levels)) } catch { /* quota / disabled */ }
-}
-
-export function upsertCustomLevel(level: LevelDef): LevelDef[] {
-  const levels = loadCustomLevels()
-  const i = levels.findIndex(l => l.name === level.name)
-  if (i >= 0) levels[i] = level
-  else levels.push(level)
-  saveCustomLevels(levels)
-  return levels
-}
-
-export function deleteCustomLevel(name: string): LevelDef[] {
-  const levels = loadCustomLevels().filter(l => l.name !== name)
-  saveCustomLevels(levels)
-  return levels
+export function saveDesignerDraft(draft: DesignerDraft): void {
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)) } catch { /* quota / disabled */ }
 }
 
 export function cloneLevel(l: LevelDef): LevelDef {

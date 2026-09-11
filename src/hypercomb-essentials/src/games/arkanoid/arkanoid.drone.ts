@@ -15,15 +15,16 @@
 //   listens `behavior:enablement-changed`     ← the Beehaviors roster
 //
 // A game is a BEHAVIOUR in the roster, switched by the kind `game:arkanoid`
-// (games/game-enablement.ts). Off means gone: `available:false` takes the
-// header icon away, `gameDormant` takes the launcher tile, and an overlay
+// (games/game-enablement.ts). Off means dormant: `available:false` takes the
+// header icon away, `gameDormant` greys the launcher tile (hidden, never
+// removed — unhiding it relights `behaviorKind`), and an overlay
 // that happens to be open closes itself the moment the light goes out.
 //
 // Open state is session-only (NOT persisted): a game overlay re-opening on
 // every reload would be hostile. The toggle drives it explicitly.
 
 import { Drone, EffectBus } from '@hypercomb/core'
-import { isGameDormant, onEnablementChanged } from '../game-enablement.js'
+import { gameKind, isGameDormant, onEnablementChanged } from '../game-enablement.js'
 import { ArkanoidOverlay } from './overlay.js'
 
 export class ArkanoidDrone extends Drone {
@@ -79,9 +80,13 @@ export class ArkanoidDrone extends Drone {
   // ── public API ───────────────────────────────────────────
 
   /** Switched off in the Beehaviors roster (kind `game:arkanoid`). Read by
-   *  the shell's launch group off this bee, so the launcher tile leaves
-   *  with the header icon — the shell never has to know the kind. */
+   *  the shell's launch group off this bee, which keeps the launcher tile
+   *  on the page as a HIDDEN tile — the shell never has to know the kind. */
   public get gameDormant(): boolean { return isGameDormant(this.gameId) }
+
+  /** The roster kind this game's light is. The launch group relights it
+   *  when the participant unhides the dormant tile, without spelling it. */
+  public get behaviorKind(): string { return gameKind(this.gameId) }
 
   public isActive(): boolean { return !!this.#overlay?.isMounted() }
 

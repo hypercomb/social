@@ -29,6 +29,7 @@
 // `_shape.scss`, held by a doctrine ratchet.
 
 @use '../toolwindow' as tw;
+@use '../panel-identity' as identity;
 
 $steel: #7eb6d6;
 $dim: #7f95a3;
@@ -39,6 +40,19 @@ $accent: #c9a227;
   inset: 0;
   z-index: 100002;
   pointer-events: none;
+
+  // THE DESIGNER'S COLOURS ON PURPOSE, minted once where every surface of this
+  // window inherits them — both panels, the workspace, and the stage inside
+  // it. Each goes through `tw.ink`, so it keeps its hue and gains weight on a
+  // bright ground. They were literals picked against a dark pane, which is why
+  // the walls and the selection washed out under light, honey and sherbet.
+  //
+  //   mark    what is picked, selected, or being dropped on
+  //   fluid   a wall that takes the remainder
+  //   fixed   a wall that holds its measure
+  --ld-mark: #{tw.ink($accent)};
+  --ld-fluid: #{tw.ink(#6fbf94)};
+  --ld-fixed: #{tw.ink(#d99a4e)};
 }
 
 // LEFT-docked, the same side the workflow designer takes: you drag OUT of the
@@ -121,9 +135,9 @@ $accent: #c9a227;
   // WHILE A DESIGN IS ON ITS WAY HERE. The shelf says it will take it, and
   // says nothing at all the rest of the time.
   &.is-offering {
-    outline: 1px dashed rgba($accent, 0.7);
+    outline: 1px dashed color-mix(in srgb, var(--ld-mark) 70%, transparent);
     outline-offset: -3px;
-    background: rgba($accent, 0.06);
+    background: color-mix(in srgb, var(--ld-mark) 6%, transparent);
   }
 }
 
@@ -146,19 +160,19 @@ $accent: #c9a227;
   gap: 0.35rem;
   padding: 0.28rem 0.4rem;
   background: rgba(var(--hc-panel-ink), 0.05);
-  border: 1px solid rgba($steel, 0.22);
+  border: 1px solid rgba(var(--acc), 0.22);
   border-radius: tw.$radius-control;
   color: var(--hc-window-ink-plain);
-  font-size: calc(0.62rem * var(--hc-panel-scale, 1));
-  letter-spacing: 0.14em;
+  font-size: calc(0.7rem * var(--hc-panel-scale, 1));
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;
   transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
 
-  &:hover { border-color: rgba($steel, 0.55); }
+  &:hover { border-color: rgba(var(--acc), 0.55); }
   &.is-on {
-    border-color: rgba($accent, 0.8);
-    background: rgba($accent, 0.12);
+    border-color: color-mix(in srgb, var(--ld-mark) 80%, transparent);
+    background: color-mix(in srgb, var(--ld-mark) 12%, transparent);
     color: var(--hc-panel-text, inherit);
   }
 }
@@ -170,8 +184,8 @@ $accent: #c9a227;
   margin: 0 0 0.5rem;
   text-align: center;
   color: tw.ink($accent);
-  font-size: 0.62rem;
-  letter-spacing: 0.16em;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 .ld-shelf.is-offering .ld-keep-hint { display: block; }
@@ -180,8 +194,8 @@ $accent: #c9a227;
 // hint, which is absolutely placed over a drawing.
 .ld-none {
   margin: 0 0 0.5rem;
-  color: var(--hc-window-ink-faint);
-  font-size: 0.66rem;
+  color: var(--hc-window-ink-quiet);
+  font-size: 0.72rem;
   line-height: 1.5;
 }
 
@@ -222,12 +236,12 @@ $accent: #c9a227;
     height: 2px;
     transform: translateX(-50%);
     border-radius: 2px;
-    background: rgba($steel, 0.45);
+    background: rgba(var(--acc), 0.45);
     transition: background 0.14s ease;
   }
-  &:hover::after, &:focus-visible::after { background: rgba($accent, 0.85); }
-  &:hover::before { background: rgba($accent, 0.5); }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: -1px; }
+  &:hover::after, &:focus-visible::after { background: color-mix(in srgb, var(--ld-mark) 85%, transparent); }
+  &:hover::before { background: color-mix(in srgb, var(--ld-mark) 50%, transparent); }
+  &:focus-visible { outline: 1px solid color-mix(in srgb, var(--ld-mark) 70%, transparent); outline-offset: -1px; }
 }
 
 // THE BOTTOM HALF is the properties. Their natural height until the split is
@@ -242,14 +256,14 @@ $accent: #c9a227;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
-  scrollbar-color: rgba($steel, 0.45) transparent;
+  scrollbar-color: rgba(var(--acc), 0.45) transparent;
 }
 
 .ld-section { padding: 0.7rem 0.75rem 0.2rem; }
 .ld-section-title {
   margin: 0 0 0.5rem;
-  font-size: calc(0.62rem * var(--hc-panel-scale, 1));
-  letter-spacing: 0.18em;
+  font-size: calc(0.7rem * var(--hc-panel-scale, 1));
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--hc-window-ink-quiet);
   font-weight: 500;
@@ -285,15 +299,15 @@ $accent: #c9a227;
   aspect-ratio: 16 / 10;
   padding: 4px;
   background: rgba(var(--hc-panel-ink), 0.07);
-  border: 1px solid rgba($steel, 0.24);
+  border: 1px solid rgba(var(--acc), 0.24);
   border-radius: tw.$radius-control;
   cursor: grab;
   overflow: hidden;
   transition: border-color 0.12s ease, background 0.12s ease;
 
-  &:hover { border-color: rgba($steel, 0.65); background: rgba(var(--hc-panel-ink), 0.11); }
+  &:hover { border-color: rgba(var(--acc), 0.65); background: rgba(var(--hc-panel-ink), 0.11); }
   &:active { cursor: grabbing; }
-  &.is-on { border-color: rgba($accent, 0.85); background: rgba($accent, 0.1); }
+  &.is-on { border-color: color-mix(in srgb, var(--ld-mark) 85%, transparent); background: color-mix(in srgb, var(--ld-mark) 10%, transparent); }
 }
 
 // The name waits for the pointer, then states itself over the foot of the
@@ -309,9 +323,9 @@ $accent: #c9a227;
   justify-content: center;
   gap: 0.3rem;
   padding: 2px 4px;
-  background: rgba($accent, 0.92);
-  color: #17150e;
-  font: 500 0.58rem/1.5 var(--hc-mono, ui-monospace), monospace;
+  background: color-mix(in srgb, var(--ld-mark) 92%, transparent);
+  color: rgb(var(--hc-panel-pane));
+  font: 500 0.66rem/1.5 var(--hc-mono, ui-monospace), monospace;
   letter-spacing: 0.06em;
   white-space: nowrap;
   overflow: hidden;
@@ -323,20 +337,41 @@ $accent: #c9a227;
 .ld-asset:hover .ld-asset-name,
 .ld-asset:focus-visible .ld-asset-name { opacity: 1; }
 
-.ld-asset-note { color: #17150e; }
+.ld-asset-note { color: rgb(var(--hc-panel-pane)); }
 
-// The door to the targets window. Quiet until there is something to name —
-// an unplugged container has no holes, so it has no interfaces either.
-.ld-targets {
+// THE WINDOWS THIS ONE MANAGES — targets, gallery, properties across. One form
+// for all three: a drawn icon, lit while its window is up, so the header reads
+// as the list of what is open. Hit area, radius and focus ring come from
+// tw.header's own `> button` rule; an unplugged container dims the two that
+// have nothing to show.
+.ld-act {
   flex: 0 0 auto;
-  padding: 0 0.25rem;
   background: transparent;
-  border: 0;
+  border: 1px solid transparent;
   color: var(--hc-window-ink-quiet);
-  font: inherit;
-  line-height: 1;
   cursor: pointer;
-  &:hover:not(:disabled) { color: var(--hc-window-accent, #{$accent}); }
+
+  svg {
+    display: block;
+    width: 1rem;
+    height: 1rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  // A knob sits ON its line, so it is filled rather than see-through — with
+  // the ground at rest, with the identity while its window is up.
+  svg .knob { fill: rgb(var(--hc-panel-pane)); }
+
+  &:hover:not(:disabled) { color: var(--hc-panel-text); }
+  &.is-on {
+    color: var(--hc-window-accent);
+    background-color: var(--hc-window-wash);
+    border-color: var(--hc-window-edge);
+  }
+  &.is-on svg .knob { fill: currentColor; }
   &:disabled { opacity: 0.35; cursor: default; }
 }
 
@@ -367,7 +402,7 @@ $accent: #c9a227;
   place-items: center;
   padding: 0;
   background: var(--hc-panel-pane, rgba(0, 0, 0, 0.5));
-  border: 1px solid rgba($steel, 0.3);
+  border: 1px solid rgba(var(--acc), 0.3);
   color: var(--hc-window-ink-quiet);
   line-height: 1;
   cursor: pointer;
@@ -376,7 +411,7 @@ $accent: #c9a227;
 
   &:hover, &:focus-visible {
     color: var(--hc-panel-text, inherit);
-    border-color: rgba($steel, 0.7);
+    border-color: rgba(var(--acc), 0.7);
   }
 }
 
@@ -389,7 +424,7 @@ $accent: #c9a227;
   width: 1.1rem;
   height: 1.1rem;
   border-radius: 50%;
-  font-size: 0.66rem;
+  font-size: 0.72rem;
 
   &.is-name { right: 1.35rem; }
   &.is-hide { right: 2px; }
@@ -431,7 +466,7 @@ $accent: #c9a227;
   gap: 1px;
   padding: 1px;
   background: var(--hc-panel-pane, rgba(0, 0, 0, 0.85));
-  border-top: 1px solid rgba($accent, 0.5);
+  border-top: 1px solid color-mix(in srgb, var(--ld-mark) 50%, transparent);
 }
 .ld-chip-field {
   flex: 1 1 0;
@@ -441,9 +476,9 @@ $accent: #c9a227;
   border: 1px solid transparent;
   border-radius: 2px;
   color: var(--hc-panel-text, inherit);
-  font: 500 0.58rem/1.4 var(--hc-mono, ui-monospace), monospace;
+  font: 500 0.66rem/1.4 var(--hc-mono, ui-monospace), monospace;
 
-  &:focus { outline: none; border-color: rgba($accent, 0.8); }
+  &:focus { outline: none; border-color: color-mix(in srgb, var(--ld-mark) 80%, transparent); }
   // The WORD is the smaller of the two — a name is what this one thing is
   // called and a word is what a set of them are, so it is the qualifier.
   &.is-word { flex: 0 1 40%; color: tw.ink($accent); }
@@ -473,26 +508,26 @@ $accent: #c9a227;
   gap: 0.35rem;
   margin: 0 0 0.3rem;
   padding: 0.15rem 0.3rem;
-  border-left: 2px solid rgba($accent, 0.7);
+  border-left: 2px solid color-mix(in srgb, var(--ld-mark) 70%, transparent);
   color: var(--hc-window-ink-plain);
-  font-size: calc(0.6rem * var(--hc-panel-scale, 1));
+  font-size: calc(0.7rem * var(--hc-panel-scale, 1));
   font-weight: 500;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 
   // CARRY A CHIP TO A HEADING and it wears that word. The shelf already
   // speaks drag; this is the same gesture asking the other question, so
   // gathering needs no button at all.
   &.is-target {
-    border-left-color: rgba($accent, 1);
-    background: rgba($accent, 0.08);
+    border-left-color: color-mix(in srgb, var(--ld-mark) 100%, transparent);
+    background: color-mix(in srgb, var(--ld-mark) 8%, transparent);
   }
-  &.is-target:hover { background: rgba($accent, 0.16); }
+  &.is-target:hover { background: color-mix(in srgb, var(--ld-mark) 16%, transparent); }
 
   // The loose ones are under no word. The heading says so only when there is
   // a word somewhere else on the shelf to be distinguished from.
   &.is-loose {
-    border-left-color: rgba($steel, 0.4);
+    border-left-color: rgba(var(--acc), 0.4);
     color: var(--hc-window-ink-faint);
   }
 }
@@ -507,18 +542,18 @@ $accent: #c9a227;
   margin: 0 0 0.45rem;
   padding: 0.2rem 0.4rem;
   background: transparent;
-  border: 1px dashed rgba($steel, 0.35);
+  border: 1px dashed rgba(var(--acc), 0.35);
   border-radius: tw.$radius-control;
   color: var(--hc-window-ink-faint);
-  font-size: calc(0.6rem * var(--hc-panel-scale, 1));
-  letter-spacing: 0.12em;
+  font-size: calc(0.7rem * var(--hc-panel-scale, 1));
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;
 
-  &:hover { border-color: rgba($steel, 0.6); color: var(--hc-panel-text, inherit); }
+  &:hover { border-color: rgba(var(--acc), 0.6); color: var(--hc-panel-text, inherit); }
   &.is-on {
     border-style: solid;
-    border-color: rgba($accent, 0.7);
+    border-color: color-mix(in srgb, var(--ld-mark) 70%, transparent);
     color: var(--hc-panel-text, inherit);
   }
 }
@@ -533,7 +568,7 @@ $accent: #c9a227;
   height: 100%;
   ::ng-deep > div { width: 100%; height: 100%; }
   ::ng-deep [data-hc-hole] {
-    background: rgba($steel, 0.35);
+    background: rgba(var(--acc), 0.35);
     border-radius: 1px;
   }
   // NO OVERRIDE HERE. There used to be one — a rule that string-matched the
@@ -542,7 +577,7 @@ $accent: #c9a227;
   // a layout that only fits at one size is not finished. The chip now asks
   // for measurements suited to a chip (`glyphVars`), and every hole shrinks
   // to fit besides. Do not put a compensating rule back.
-  ::ng-deep [data-hc-self] { background: rgba($accent, 0.55); }
+  ::ng-deep [data-hc-self] { background: color-mix(in srgb, var(--ld-mark) 55%, transparent); }
 
   // A NESTED LEVEL FILLS ITS HOLE — the same rule the stage needs, for the
   // same reason.
@@ -581,9 +616,9 @@ $accent: #c9a227;
   margin: 0 0 0.7rem;
   padding: 0.25rem;
   box-sizing: border-box;
-  border: 1px solid rgba($steel, 0.28);
+  border: 1px solid rgba(var(--acc), 0.28);
   border-radius: 3px;
-  background: rgba($steel, 0.07);
+  background: rgba(var(--acc), 0.07);
 
   // Mounted imperatively, so it carries no component scope attribute.
   ::ng-deep > div { width: 100%; height: 100%; }
@@ -593,23 +628,23 @@ $accent: #c9a227;
 // here and a hole out on the workspace are the same hole, so they take the
 // same drag.
 :host ::ng-deep .ld-map-pane {
-  border: 1px solid rgba(126, 182, 214, 0.28);
+  border: 1px solid rgba(var(--acc), 0.28);
   border-radius: 2px;
-  background: rgba(126, 182, 214, 0.09);
+  background: rgba(var(--acc), 0.09);
   cursor: pointer;
   transition: border-color 0.14s ease, background 0.14s ease;
   min-width: 2px;
   min-height: 2px;
 
-  &:hover { border-color: rgba(126, 182, 214, 0.65); }
+  &:hover { border-color: rgba(var(--acc), 0.65); }
   &.is-over {
-    border-color: rgba(214, 182, 126, 0.9);
-    background: rgba(214, 182, 126, 0.2);
+    border-color: color-mix(in srgb, var(--ld-mark) 90%, transparent);
+    background: color-mix(in srgb, var(--ld-mark) 20%, transparent);
   }
   &.is-picked {
-    border-color: rgba(126, 182, 214, 0.95);
-    background: rgba(126, 182, 214, 0.28);
-    box-shadow: inset 0 0 0 1px rgba(126, 182, 214, 0.5);
+    border-color: rgba(var(--acc), 0.95);
+    background: rgba(var(--acc), 0.28);
+    box-shadow: inset 0 0 0 1px rgba(var(--acc), 0.5);
   }
 }
 
@@ -629,7 +664,7 @@ $accent: #c9a227;
   flex-direction: column;
   gap: 0.05rem;
   padding: 0.2rem 0.45rem;
-  border: 1px solid rgba($steel, 0.28);
+  border: 1px solid rgba(var(--acc), 0.28);
   border-radius: 2px;
   background: none;
   color: var(--hc-window-ink-quiet);
@@ -638,10 +673,10 @@ $accent: #c9a227;
   cursor: pointer;
   transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
 
-  &:hover { border-color: rgba($steel, 0.6); color: rgb(var(--hc-panel-ink)); }
+  &:hover { border-color: rgba(var(--acc), 0.6); color: rgb(var(--hc-panel-ink)); }
   &.is-on {
-    border-color: rgba($accent, 0.75);
-    background: rgba(126, 182, 214, 0.14);
+    border-color: color-mix(in srgb, var(--ld-mark) 75%, transparent);
+    background: rgba(var(--acc), 0.14);
     color: rgb(var(--hc-panel-ink));
   }
   // A pane that takes the remainder has nothing to move. It shows, greyed,
@@ -649,9 +684,9 @@ $accent: #c9a227;
   &.is-still {
     cursor: default;
     opacity: 0.55;
-    &:hover { border-color: rgba($steel, 0.28); color: var(--hc-window-ink-quiet); }
+    &:hover { border-color: rgba(var(--acc), 0.28); color: var(--hc-window-ink-quiet); }
   }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: 1px; }
+  &:focus-visible { outline: 1px solid color-mix(in srgb, var(--ld-mark) 70%, transparent); outline-offset: 1px; }
 }
 .ld-measure-name {
   font-size: 0.92em;
@@ -669,7 +704,7 @@ $accent: #c9a227;
   align-self: stretch;
   width: 1px;
   margin: 0.15rem 0.15rem;
-  background: rgba($steel, 0.3);
+  background: rgba(var(--acc), 0.3);
 }
 
 .ld-var { margin-bottom: 0.5rem; }
@@ -682,7 +717,7 @@ $accent: #c9a227;
 }
 .ld-var-name { color: var(--hc-window-ink-plain); }
 .ld-var-value { color: tw.ink($accent); font-size: 0.92em; }
-.ld-slider { width: 100%; accent-color: $accent; cursor: pointer; }
+.ld-slider { width: 100%; accent-color: var(--ld-mark); cursor: pointer; }
 
 .ld-note {
   margin: 0.9rem 0 0.6rem;
@@ -693,12 +728,12 @@ $accent: #c9a227;
   margin-bottom: 0.8rem;
   padding: 0.3rem 0.6rem;
   background: none;
-  border: 1px solid rgba($steel, 0.3);
+  border: 1px solid rgba(var(--acc), 0.3);
   border-radius: 2px;
   color: var(--hc-window-ink-quiet);
   font: inherit;
   cursor: pointer;
-  &:hover { border-color: rgba($steel, 0.6); color: rgb(var(--hc-panel-ink)); }
+  &:hover { border-color: rgba(var(--acc), 0.6); color: rgb(var(--hc-panel-ink)); }
 }
 .ld-still {
   margin: 0;
@@ -734,6 +769,14 @@ $accent: #c9a227;
   // Fallback first, for an engine without color-mix.
   background: rgb(var(--hc-panel-pane));
   background: color-mix(in srgb, rgb(var(--hc-panel-pane)) 72%, rgb(var(--hc-panel-shadow)));
+
+  // THE STAGE WEARS THE WINDOW'S IDENTITY TOO. `tw.panel` mints the roles on
+  // each panel, and the workspace is not inside one — it is a sibling — so
+  // every rule reaching into the stage used to name a literal instead. Minted
+  // here as well, the stage speaks the same vocabulary as the panels and
+  // deepens under a bright look the same way.
+  @include identity.accent($steel);
+  @include tw.window-roles;
 }
 
 // ── the pane ──────────────────────────────────────────────────────────
@@ -751,12 +794,12 @@ $accent: #c9a227;
   display: flex;
   flex-direction: column;
   background: rgb(var(--hc-panel-pane));
-  border: 1px solid rgba($steel, 0.4);
+  border: 1px solid rgba(var(--acc), 0.4);
   border-radius: 3px;
   box-shadow: 0 24px 70px rgba(var(--hc-panel-shadow), 0.55);
   font-family: var(--hc-mono, system-ui);
   color: rgb(var(--hc-panel-ink));
-  &.is-dragging { border-color: rgba($accent, 0.7); }
+  &.is-dragging { border-color: color-mix(in srgb, var(--ld-mark) 70%, transparent); }
 }
 
 // The pane takes the keyboard, so it says so — quietly, on the frame rather
@@ -764,7 +807,7 @@ $accent: #c9a227;
 // selection only while this is showing.
 .ld-pane:focus-visible {
   outline: none;
-  border-color: rgba($accent, 0.55);
+  border-color: color-mix(in srgb, var(--ld-mark) 55%, transparent);
 }
 
 .ld-pane-head {
@@ -774,7 +817,7 @@ $accent: #c9a227;
   justify-content: space-between;
   gap: 0.75rem;
   padding: 0.4rem 0.65rem;
-  border-bottom: 1px solid rgba($steel, 0.2);
+  border-bottom: 1px solid rgba(var(--acc), 0.2);
   font-size: 0.72rem;
 }
 .ld-pane-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -784,7 +827,7 @@ $accent: #c9a227;
 .ld-pane-head[draggable='true'] {
   cursor: grab;
   &:active { cursor: grabbing; }
-  &.is-offering { background: rgba($accent, 0.12); }
+  &.is-offering { background: color-mix(in srgb, var(--ld-mark) 12%, transparent); }
 }
 .ld-pane-grip {
   flex: 0 0 auto;
@@ -792,7 +835,7 @@ $accent: #c9a227;
   height: 0.55rem;
   margin-right: -0.4rem;
   align-self: center;
-  background-image: radial-gradient(circle, rgba($dim, 0.85) 1px, transparent 1.2px);
+  background-image: radial-gradient(circle, var(--hc-window-ink-quiet) 1px, transparent 1.2px);
   background-size: 3px 3px;
   opacity: 0.75;
 }
@@ -813,24 +856,24 @@ $accent: #c9a227;
   display: flex !important;
   align-items: center;
   justify-content: center;
-  border: 1px dashed rgba(126, 182, 214, 0.35);
+  border: 1px dashed rgba(var(--acc), 0.35);
   border-radius: 3px;
-  background: rgba(126, 182, 214, 0.05);
+  background: rgba(var(--acc), 0.05);
   cursor: pointer;
   overflow: hidden;
   transition: border-color 0.14s ease, background 0.14s ease;
 
-  &:hover { border-color: rgba(126, 182, 214, 0.6); }
+  &:hover { border-color: rgba(var(--acc), 0.6); }
   &.is-over {
     border-style: solid;
-    border-color: rgba(201, 162, 39, 0.95);
-    background: rgba(201, 162, 39, 0.12);
+    border-color: color-mix(in srgb, var(--ld-mark) 95%, transparent);
+    background: color-mix(in srgb, var(--ld-mark) 12%, transparent);
   }
-  &.is-picked { border-style: solid; border-color: rgba(201, 162, 39, 0.6); }
+  &.is-picked { border-style: solid; border-color: color-mix(in srgb, var(--ld-mark) 60%, transparent); }
   &.is-self {
     border-style: solid;
-    border-color: rgba(126, 182, 214, 0.45);
-    background: rgba(126, 182, 214, 0.1);
+    border-color: rgba(var(--acc), 0.45);
+    background: rgba(var(--acc), 0.1);
     cursor: default;
   }
 }
@@ -861,7 +904,7 @@ $accent: #c9a227;
 // write.
 :host ::ng-deep [data-hc-container] {
   position: relative;
-  outline: 1px dashed rgba($steel, 0.3);
+  outline: 1px dashed rgba(var(--acc), 0.3);
   outline-offset: -1px;
   border-radius: 2px;
   transition: outline-color 0.12s ease;
@@ -876,15 +919,16 @@ $accent: #c9a227;
   // glance it can read as belonging to the child. Outside, it can only mean
   // the division as a whole — which is the question being answered.
   //
-  // `$accent`, NOT `--hc-window-accent`. The role tokens are minted by
-  // `tw.panel` ON THE PANEL, and the stage is not inside it — it lives in the
-  // workspace, a sibling. A `var()` that resolves to nothing makes the WHOLE
-  // shorthand invalid at computed-value time, so `outline` fell back to
-  // `style: none` and the selected container wore no ring at all. Every other
-  // rule that reaches into the stage already names its colour for this reason.
-  outline: 2px solid rgba($accent, 0.95);
+  // `--ld-mark`, minted on :host. The window roles used to exist only ON THE
+  // PANELS, and the stage lives in the workspace, a sibling — and a `var()`
+  // that resolves to nothing makes the WHOLE shorthand invalid at
+  // computed-value time, so `outline` fell back to `style: none` and the
+  // selected container wore no ring at all. Everything the stage reads is now
+  // minted where the stage can reach it: the mark on :host, the identity on
+  // the workspace.
+  outline: 2px solid color-mix(in srgb, var(--ld-mark) 95%, transparent);
   outline-offset: 2px;
-  background: rgba($accent, 0.08);
+  background: color-mix(in srgb, var(--ld-mark) 8%, transparent);
 
   // Its name, kept — the hover badge is a question answered while you point,
   // this is the answer standing still.
@@ -895,10 +939,10 @@ $accent: #c9a227;
     top: 0;
     right: 0;
     padding: 1px 5px;
-    background: rgba($accent, 0.95);
-    color: #17150e;
-    font: 600 0.56rem/1.5 var(--hc-mono, ui-monospace), monospace;
-    letter-spacing: 0.12em;
+    background: color-mix(in srgb, var(--ld-mark) 95%, transparent);
+    color: rgb(var(--hc-panel-pane));
+    font: 600 0.66rem/1.5 var(--hc-mono, ui-monospace), monospace;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     border-radius: 0 2px 0 2px;
     pointer-events: none;
@@ -914,7 +958,7 @@ $accent: #c9a227;
 }
 
 :host ::ng-deep [data-hc-container]:hover:not(:has([data-hc-container]:hover)) {
-  outline: 1px solid rgba($accent, 0.85);
+  outline: 1px solid color-mix(in srgb, var(--ld-mark) 85%, transparent);
 
   &::before {
     content: attr(data-hc-container);
@@ -923,10 +967,10 @@ $accent: #c9a227;
     top: 0;
     left: 0;
     padding: 1px 5px;
-    background: rgba($accent, 0.92);
-    color: #17150e;
-    font: 500 0.56rem/1.5 var(--hc-mono, ui-monospace), monospace;
-    letter-spacing: 0.12em;
+    background: color-mix(in srgb, var(--ld-mark) 92%, transparent);
+    color: rgb(var(--hc-panel-pane));
+    font: 500 0.66rem/1.5 var(--hc-mono, ui-monospace), monospace;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     border-radius: 2px 0 2px 0;
     pointer-events: none;
@@ -964,8 +1008,8 @@ $accent: #c9a227;
 }
 
 :host ::ng-deep .ld-hole-name {
-  font-size: 0.58rem;
-  letter-spacing: 0.14em;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--hc-window-ink-quiet);
 }
@@ -989,10 +1033,10 @@ $accent: #c9a227;
   position: absolute;
   padding: 0;
   background: rgba(var(--hc-panel-pane), 0.98);
-  border: 1px solid rgba($steel, 0.75);
+  border: 1px solid rgba(var(--acc), 0.75);
   border-radius: 2px;
   touch-action: none;
-  &:hover { border-color: rgba($accent, 0.95); }
+  &:hover { border-color: color-mix(in srgb, var(--ld-mark) 95%, transparent); }
 
   width: 14px;
   height: 14px;
@@ -1012,21 +1056,21 @@ $accent: #c9a227;
 
 :host ::ng-deep .ld-hole[data-hc-fill='fluid'] {
   border-style: dashed;
-  border-color: rgba(111, 191, 148, 0.55);
+  border-color: color-mix(in srgb, var(--ld-fluid) 55%, transparent);
 }
 :host ::ng-deep .ld-hole[data-hc-fill='fixed'] {
   border-style: solid;
-  border-color: rgba(217, 154, 78, 0.6);
+  border-color: color-mix(in srgb, var(--ld-fixed) 60%, transparent);
 }
 :host ::ng-deep .ld-hole[data-hc-band] {
   border-style: double;
   border-width: 3px;
-  border-color: rgba(126, 182, 214, 0.6);
+  border-color: rgba(var(--acc), 0.6);
 }
 :host ::ng-deep .ld-hole[data-hc-self] {
   border-style: solid;
-  border-color: rgba(126, 182, 214, 0.5);
-  background: rgba(126, 182, 214, 0.12);
+  border-color: rgba(var(--acc), 0.5);
+  background: rgba(var(--acc), 0.12);
 }
 
 // Four specimens in one row, each drawn in the border it names. The name
@@ -1035,7 +1079,6 @@ $accent: #c9a227;
 .ld-legend {
   display: flex;
   gap: 0.4rem;
-  padding-bottom: 0.8rem;
 }
 .ld-wall {
   position: relative;
@@ -1056,13 +1099,13 @@ $accent: #c9a227;
     border: 1px solid transparent;
     border-radius: tw.$radius-control;
   }
-  &.is-fluid > i { border-style: dashed; border-color: rgba(111, 191, 148, 0.75); }
-  &.is-fixed > i { border-style: solid; border-color: rgba(217, 154, 78, 0.85); }
-  &.is-band > i { border-style: double; border-width: 3px; border-color: rgba(126, 182, 214, 0.8); }
+  &.is-fluid > i { border-style: dashed; border-color: color-mix(in srgb, var(--ld-fluid) 75%, transparent); }
+  &.is-fixed > i { border-style: solid; border-color: color-mix(in srgb, var(--ld-fixed) 85%, transparent); }
+  &.is-band > i { border-style: double; border-width: 3px; border-color: rgba(var(--acc), 0.8); }
   &.is-page > i {
     border-style: solid;
-    border-color: rgba(126, 182, 214, 0.6);
-    background: rgba(126, 182, 214, 0.14);
+    border-color: rgba(var(--acc), 0.6);
+    background: rgba(var(--acc), 0.14);
   }
 
   // The name, on hover, over the whole legend rather than over one swatch —
@@ -1076,9 +1119,9 @@ $accent: #c9a227;
     white-space: nowrap;
     padding: 2px 5px;
     border-radius: tw.$radius-control;
-    background: rgba($accent, 0.94);
-    color: #17150e;
-    font-size: 0.58rem;
+    background: color-mix(in srgb, var(--ld-mark) 94%, transparent);
+    color: rgb(var(--hc-panel-pane));
+    font-size: 0.68rem;
     line-height: 1.5;
     letter-spacing: 0.04em;
     pointer-events: none;
@@ -1122,14 +1165,14 @@ $accent: #c9a227;
   height: 1.5rem;
   padding: 0;
   background: none;
-  border: 1px solid rgba($steel, 0.28);
+  border: 1px solid rgba(var(--acc), 0.28);
   border-radius: tw.$radius-control;
   color: var(--hc-window-ink-quiet);
   cursor: pointer;
   transition: border-color 0.14s ease, color 0.14s ease;
 
-  &:hover { border-color: rgba($accent, 0.75); color: rgb(var(--hc-panel-ink)); }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.7); outline-offset: 1px; }
+  &:hover { border-color: color-mix(in srgb, var(--ld-mark) 75%, transparent); color: rgb(var(--hc-panel-ink)); }
+  &:focus-visible { outline: 1px solid color-mix(in srgb, var(--ld-mark) 70%, transparent); outline-offset: 1px; }
 }
 .ld-turn-arrow {
   width: 0.95rem;
@@ -1158,17 +1201,17 @@ $accent: #c9a227;
   text-align: center;
   color: var(--hc-window-ink-faint);
   font-size: 0.72rem;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   pointer-events: none;
 }
 .ld-pane.is-empty .ld-stage {
-  border: 1px dashed rgba($steel, 0.3);
+  border: 1px dashed rgba(var(--acc), 0.3);
   border-radius: 3px;
   margin: 0.5rem;
   padding: 0;
 }
-.ld-pane.is-dragging .ld-stage { border-color: rgba($accent, 0.7); }
+.ld-pane.is-dragging .ld-stage { border-color: color-mix(in srgb, var(--ld-mark) 70%, transparent); }
 
 @media (prefers-reduced-motion: reduce) {
   :host ::ng-deep .ld-hole { transition: none; }
@@ -1198,8 +1241,8 @@ $accent: #c9a227;
 .ld-axis-name {
   flex: 0 0 3.4rem;
   color: var(--hc-window-ink-faint);
-  font-size: calc(0.58rem * var(--hc-panel-scale, 1));
-  letter-spacing: 0.12em;
+  font-size: calc(0.7rem * var(--hc-panel-scale, 1));
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 .ld-axis-values {
@@ -1213,15 +1256,15 @@ $accent: #c9a227;
   height: 1.5rem;
   padding: 2px;
   background: rgba(var(--hc-panel-ink), 0.05);
-  border: 1px solid rgba($steel, 0.22);
+  border: 1px solid rgba(var(--acc), 0.22);
   border-radius: tw.$radius-control;
   cursor: pointer;
   transition: border-color 0.12s ease, background 0.12s ease;
 
-  &:hover { border-color: rgba($steel, 0.55); }
+  &:hover { border-color: rgba(var(--acc), 0.55); }
   &.is-on {
-    border-color: rgba($accent, 0.85);
-    background: rgba($accent, 0.12);
+    border-color: color-mix(in srgb, var(--ld-mark) 85%, transparent);
+    background: color-mix(in srgb, var(--ld-mark) 12%, transparent);
   }
 }
 
@@ -1235,11 +1278,11 @@ $accent: #c9a227;
   i {
     display: block;
     width: 3px;
-    background: rgba($dim, 0.75);
+    background: var(--hc-window-ink-quiet);
     border-radius: 1px;
   }
 }
-.ld-place.is-on .ld-place-mark i { background: var(--hc-window-accent, #{$accent}); }
+.ld-place.is-on .ld-place-mark i { background: var(--hc-window-accent); }
 
 // ALONG THE AXIS. The marks are full height, so what moves is where they sit.
 .ld-axis[data-axis='justify'] .ld-place-mark {
@@ -1311,22 +1354,6 @@ $accent: #c9a227;
   overflow-x: hidden;
 }
 
-// WHICH WAY THEY ARE GOING. Drawn like the targets door beside it — a quiet
-// glyph in the header band, not a labelled control: where a window lives is
-// chrome, and chrome does not argue for attention.
-.ld-across {
-  flex: 0 0 auto;
-  padding: 0 0.25rem;
-  background: transparent;
-  border: 0;
-  color: var(--hc-window-ink-quiet);
-  font: inherit;
-  line-height: 1;
-  cursor: pointer;
-
-  &:hover { color: var(--hc-window-accent, #{$accent}); }
-}
-
 // ── WHAT THIS HOLE IS FOR ─────────────────────────────────────────────
 //
 // One row, directly under the map that selected the pane. A family and a name,
@@ -1344,8 +1371,8 @@ $accent: #c9a227;
   margin: 0.4rem 0 0;
   padding: 0.25rem 0.3rem;
   background: rgba(var(--hc-panel-ink), 0.05);
-  border: 1px solid rgba($steel, 0.22);
-  border-left: 2px solid rgba($accent, 0.7);
+  border: 1px solid rgba(var(--acc), 0.22);
+  border-left: 2px solid color-mix(in srgb, var(--ld-mark) 70%, transparent);
   border-radius: tw.$radius-control;
 }
 
@@ -1355,8 +1382,8 @@ $accent: #c9a227;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba($dim, 0.8);
-  font-size: calc(0.58rem * var(--hc-panel-scale, 1));
+  color: var(--hc-window-ink-quiet);
+  font-size: calc(0.7rem * var(--hc-panel-scale, 1));
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -1365,8 +1392,8 @@ $accent: #c9a227;
 // hang from — so it says which it is rather than being refused a name.
 .ld-naming-kind {
   flex: 0 0 auto;
-  color: rgba($accent, 0.85);
-  font-size: calc(0.55rem * var(--hc-panel-scale, 1));
+  color: color-mix(in srgb, var(--ld-mark) 85%, transparent);
+  font-size: calc(0.7rem * var(--hc-panel-scale, 1));
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -1379,35 +1406,127 @@ $accent: #c9a227;
   border: 1px solid transparent;
   border-radius: 2px;
   color: var(--hc-panel-text, inherit);
-  font: 500 0.62rem/1.4 var(--hc-mono, ui-monospace), monospace;
+  font: 500 0.7rem/1.4 var(--hc-mono, ui-monospace), monospace;
 
-  &:focus { outline: none; border-color: rgba($accent, 0.8); }
+  &:focus { outline: none; border-color: color-mix(in srgb, var(--ld-mark) 80%, transparent); }
 }
-.ld-naming-family { flex: 0 1 auto; max-width: 6rem; color: rgba($accent, 0.95); }
+.ld-naming-family { flex: 0 1 auto; max-width: 6rem; color: color-mix(in srgb, var(--ld-mark) 95%, transparent); }
 .ld-naming-name { flex: 1 1 auto; }
-.ld-naming-name::placeholder { color: rgba($dim, 0.5); }
+.ld-naming-name::placeholder { color: var(--hc-window-ink-quiet); }
 
 .ld-naming-more {
   flex: 0 0 auto;
+  display: grid;
+  place-items: center;
   padding: 0 0.2rem;
   background: transparent;
   border: 0;
-  color: rgba($dim, 0.9);
-  font: inherit;
+  color: var(--hc-window-ink-quiet);
   line-height: 1;
   cursor: pointer;
 
-  &:hover { color: var(--hc-window-accent, #{$accent}); }
+  svg {
+    width: 0.95rem;
+    height: 0.95rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.3;
+  }
+  &:hover { color: var(--hc-window-accent); }
 }
 
 // A HOLE THAT HAS BEEN TOLD WHAT IT IS FOR SAYS SO, on the workspace and on
 // the map. It drew its KEY either way before, so naming one changed nothing on
 // the surface where the naming happened.
 .ld-hole-name.is-named {
-  color: var(--hc-window-accent, #{$accent});
+  color: var(--hc-window-accent);
   font-weight: 500;
 }
 .ld-map-pane.is-named {
-  outline: 1px solid rgba($accent, 0.55);
+  outline: 1px solid color-mix(in srgb, var(--ld-mark) 55%, transparent);
   outline-offset: -1px;
+}
+
+// ── THE PROPERTIES, GROUPED ───────────────────────────────────────────
+//
+// Two groups, each named once: MEASURE (the gutter, the inset, and the pane
+// being pointed at) and PLACE (where the parts sit). A column of controls with
+// no headings reads as one long question; two short labelled ones read as the
+// two questions they are.
+.ld-group-label {
+  margin: 0.85rem 0 0.4rem;
+  font-size: calc(0.7rem * var(--hc-panel-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hc-window-ink-quiet);
+}
+
+// WHERE AN INHERITED VALUE COMES FROM. A measurement a level does not declare
+// still has a value — the nearest level above that says it, or the template's
+// own default — so it shows that value, quietly, with where it was said. This
+// is what makes an anchor legible: a `single` setting the inset once is
+// visible on every level it reaches.
+.ld-measure.is-inherited .ld-measure-value,
+.ld-var-value.is-inherited { color: var(--hc-window-ink-quiet); }
+.ld-measure-from {
+  max-width: 7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78em;
+  color: var(--hc-window-ink-quiet);
+
+  // "Said above", DRAWN rather than typed — the same rule the turn arrow
+  // follows: an arrow character depends on whatever the mono stack resolves
+  // it to, and a border triangle depends on nothing.
+  &::before {
+    content: '';
+    display: inline-block;
+    margin-right: 0.3em;
+    vertical-align: 0.12em;
+    border-left: 0.26em solid transparent;
+    border-right: 0.26em solid transparent;
+    border-bottom: 0.34em solid currentColor;
+  }
+}
+
+// THE UNIT of a pane's measure. A share (`%`) is how an anchor fills or halves
+// its allotment; a length (`rem`) is how it holds a width. Two words, one on.
+.ld-units {
+  display: inline-flex;
+  margin-left: auto;
+  border: 1px solid var(--hc-window-line-firm);
+  border-radius: tw.$radius-control;
+  overflow: hidden;
+}
+.ld-unit {
+  padding: 0.05rem 0.45rem;
+  background: none;
+  border: 0;
+  color: var(--hc-window-ink-quiet);
+  font: inherit;
+  font-size: 0.85em;
+  line-height: 1.5;
+  cursor: pointer;
+
+  & + & { border-left: 1px solid var(--hc-window-line-firm); }
+  &:hover { color: var(--hc-panel-text); }
+  &.is-on { background: var(--hc-window-wash); color: var(--hc-window-accent); }
+  &:focus-visible { outline: 1px solid var(--hc-window-edge-firm); outline-offset: -1px; }
+}
+.ld-var-head { gap: 0.6rem; }
+
+// THE FOOT: what the walls mean, and taking this level back out — both about
+// the level as a whole, so they close it off together.
+.ld-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.9rem 0 0.8rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--hc-window-line);
+
+  .ld-legend { flex: 1 1 auto; }
+  .ld-remove { flex: 0 0 auto; margin-bottom: 0; }
 }

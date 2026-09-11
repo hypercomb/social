@@ -39,6 +39,7 @@ import { Drone } from '@hypercomb/core'
 import type { Application, Container } from 'pixi.js'
 import { DEFAULT_HEX_GEOMETRY, type HexGeometry } from '../grid/hex-geometry.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
+import { TILE_STACK_DEPTHS, type TileStackDepths } from './tile-stack.js'
 
 type Axial = { q: number; r: number }
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[] }
@@ -99,16 +100,22 @@ const FONT_STACK = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace'
  *  that have no light cut. --hc-tile-name-weight overrides. */
 const NAME_WEIGHT = 400
 
+/** THE HOLDER COUNT wears the grey-blue show-cell mixes into a stacked tile's
+ *  border (STACK_BORDER), so the number and the tint read as one cue. */
+const HOLDERS_INK = '#9eadc7'
+
 const STYLE = `
 .hc-tile-names{position:absolute;left:0;top:0;overflow:hidden;pointer-events:none;user-select:none;z-index:1}
 .hc-tile-names-world{position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0}
-.hc-tile-names span{position:absolute;left:0;top:0;white-space:nowrap;line-height:1;transform-origin:0 0;
-  overflow:hidden;text-overflow:ellipsis;
+.hc-tile-names-world>span{position:absolute;left:0;top:0;display:flex;align-items:baseline;justify-content:center;
+  white-space:nowrap;line-height:1;transform-origin:0 0;
   font-family:var(--hc-tile-name-font,${FONT_STACK});font-weight:var(--hc-tile-name-weight,${NAME_WEIGHT});
-  font-size:${LAYOUT_PX}px;letter-spacing:${NAME_TRACKING}em;color:var(--hc-tile-name-color,#fff);
-  text-align:center}
-.hc-tile-names span[hidden]{display:none}
-.hc-tile-names.hc-big-head span{letter-spacing:${BIG_HEAD_TRACKING}em;text-transform:uppercase}
+  font-size:${LAYOUT_PX}px;letter-spacing:${NAME_TRACKING}em;color:var(--hc-tile-name-color,#fff)}
+.hc-tile-names-world>span[hidden]{display:none}
+.hc-tile-name-text{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.hc-tile-name-holders{flex:none;margin-left:.45em;font-size:.5em;letter-spacing:0;color:var(--hc-tile-name-holders-color,${HOLDERS_INK})}
+.hc-tile-name-holders[hidden]{display:none}
+.hc-tile-names.hc-big-head .hc-tile-names-world>span{letter-spacing:${BIG_HEAD_TRACKING}em;text-transform:uppercase}
 `
 
 export class TileNameDrone extends Drone {
@@ -121,11 +128,14 @@ export class TileNameDrone extends Drone {
   protected override listens: string[] = [
     'render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:geometry-changed',
     'render:set-orientation', 'render:set-pivot', 'render:set-text-only', 'tile:toggle-text',
-    'tile:hover', 'overlay:band-rows', 'render:big-head-mode',
+    'tile:hover', 'overlay:band-rows', 'render:big-head-mode', 'render:name-visibility',
+    TILE_STACK_DEPTHS, 'location:changed',
   ]
   protected override emits: string[] = ['tile-names:dom']
 
   #initialized = false
+  /** Participant depth per label on this page — the holder count's source. */
+  #depths: Readonly<Record<string, number>> = {}
   #app: Application | null = null
   #container: Container | null = null
   #canvas: HTMLCanvasElement | null = null
@@ -158,8 +168,14 @@ export class TileNameDrone extends Drone {
     this.onEffect<{ flat: boolean }>('render:set-orientation', (p) => { this.#flat = p.flat; this.#placeAll() })
     this.onEffect<{ pivot: boolean }>('render:set-pivot', (p) => { this.#pivot = p.pivot; this.#placeAll() })
     this.onEffect('render:set-text-only', () => this.#refreshAll())
+    // A live edit (the tile editor's preview) changed whether a name shows.
+    this.onEffect('render:name-visibility', () => this.#refreshAll())
     this.onEffect('tile:toggle-text', () => { this.#visible = !this.#visible; if (this.#root) this.#root.hidden = !this.#visible })
     this.onEffect<HoverPayload>('tile:hover', (p) => { this.#hovered = p?.label ?? null; this.#refreshAll() })
+    // Depths belong to a page: arriving somewhere else drops them, so a count
+    // from the last page never lands on a same-named tile of this one.
+    this.onEffect<TileStackDepths>(TILE_STACK_DEPTHS, (p) => { this.#depths = p?.depths ?? {}; this.#placeHovered() })
+    this.onEffect('location:changed', () => { this.#depths = {}; this.#placeHovered() })
     this.onEffect<BandRowsPayload>('overlay:band-rows', (p) => { this.#band = { rows: p?.rows ?? 1, label: p?.label ?? null }; this.#placeAll() })
     this.onEffect<{ on: boolean }>('render:big-head-mode', (p) => {
       this.#bigHead = !!p?.on
@@ -260,6 +276,12 @@ export class TileNameDrone extends Drone {
     let span = this.#spans.get(label)
     if (!span) {
       span = document.createElement('span')
+      const name = document.createElement('span')
+      name.className = 'hc-tile-name-text'
+      const holders = document.createElement('small')
+      holders.className = 'hc-tile-name-holders'
+      holders.hidden = true
+      span.append(name, holders)
       this.#spans.set(label, span)
       this.#world.appendChild(span)
     }
@@ -283,9 +305,31 @@ export class TileNameDrone extends Drone {
 
   #refreshAll(): void { this.#placeAll() }
 
+  /** Only the hovered name can carry a holder count, so a depth update
+   *  repaints that one name and nothing else. */
+  #placeHovered(): void {
+    const label = this.#hovered
+    if (label === null) return
+    const axial = this.#cells.get(label)
+    const span = this.#spans.get(label)
+    if (axial && span) this.#place(span, label, axial, this.#showCell())
+  }
+
   #place(span: HTMLSpanElement, label: string, axial: Axial, sc: ShowCellLike | null): void {
     const text = sc?.displayNameFor(label) ?? label
-    if (span.textContent !== text) span.textContent = text
+    const name = span.firstElementChild as HTMLElement
+    if (name.textContent !== text) name.textContent = text
+
+    // THE HOLDER COUNT — how many participants hold their own version of this
+    // tile, you included. Under the pointer only, on one name only, small and
+    // right after it: a number on every tile was noise (Jaime, 2026-09-10:
+    // "Distraction is not good"). It sits inside the name's own width, so a
+    // long name is cut a little sooner rather than the number spilling out.
+    const holders = span.lastElementChild as HTMLElement
+    const depth = label === this.#hovered ? (this.#depths[label] ?? 0) : 0
+    const count = depth > 1 ? String(depth) : ''
+    if (holders.textContent !== count) holders.textContent = count
+    if (holders.hidden !== !count) holders.hidden = !count
 
     const hidden = !!sc && (sc.shaderDrawsName(label) || (label !== this.#hovered && sc.nameHidden(label)))
     if (span.hidden !== hidden) span.hidden = hidden
