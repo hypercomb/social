@@ -38,8 +38,9 @@ const C = {
   orange: '#e8902c', orangeLite: '#ffc56b', orangeDark: '#8a4a12',
   rock: '#544236', rockLite: '#8a6f52', rockDark: '#221913',
   mortar: '#191109', stoneLite: '#b39069',
-  gold: '#ffd24d', danaRobe: '#3a6ee0', danaRobeDark: '#2247a8',
-  face: '#f4c9a0', hat: '#7b46d6', hatDark: '#4f2a96',
+  gold: '#ffd24d', danaRobe: '#3f7df0', danaRobeDark: '#2a52bd',
+  face: '#f8d2aa', hat: '#8e55ea', hatDark: '#5b32ad',
+  ink: '#1c1230', cheek: 'rgba(240,120,110,0.45)',
   goblin: '#56b365', goblinDark: '#2f7d3e',
   ghost: '#cfe0ff', demon: '#e2433f',
   // light accents (glow sprite tints)
@@ -881,12 +882,14 @@ function actor_dana(ctx: CanvasRenderingContext2D, e: Engine, time: number, punc
   const swayU = anim === 'idle' ? Math.sin(time * 0.7) * 0.5 : 0   // idle weight-shift
   const ux = cx + swayU
 
-  const rH = w * 0.33
-  const headY = top + h * (duck ? 0.40 : 0.28) - lift
-  const robeTop = top + h * (duck ? 0.52 : 0.42) - lift
-  const shW = w * 0.30
-  const beltY = top + h * (duck ? 0.68 : 0.585) - lift * 0.8
-  const hipY = footY - h * (duck ? 0.24 : 0.32)
+  // cartoon proportions: a big round head sitting straight on the robe (no
+  // neck), short legs, a wide bell hem
+  const rH = w * 0.40
+  const headY = top + h * (duck ? 0.44 : 0.31) - lift
+  const robeTop = headY + rH * 0.74
+  const shW = w * 0.32
+  const beltY = top + h * (duck ? 0.74 : 0.66) - lift * 0.8
+  const hipY = footY - h * (duck ? 0.20 : 0.26)
 
   // ── feet + legs (drawn first — the robe overlaps the thighs) ──
   const amp = (anim === 'duckWalk' ? 3.2 : 4.8) * speed01
@@ -929,16 +932,18 @@ function actor_dana(ctx: CanvasRenderingContext2D, e: Engine, time: number, punc
   }
   const tuck = anim === 'jump' ? 2.6 : anim === 'apex' ? 1.6 : 0
   ctx.lineCap = 'round'
-  ctx.strokeStyle = sol_shade(C.danaRobeDark, -0.34)
-  ctx.lineWidth = 2.3
-  ctx.beginPath()                                                  // knee thrown toward facing
-  ctx.moveTo(cx - f * 1.8, hipY)
-  ctx.quadraticCurveTo((cx - f * 1.8 + fAx) / 2 + f * (1.4 + tuck), (hipY + fAy) / 2 - 0.6, fAx, fAy - 1.2)
-  ctx.stroke()
-  ctx.beginPath()
-  ctx.moveTo(cx + f * 1.8, hipY)
-  ctx.quadraticCurveTo((cx + f * 1.8 + fBx) / 2 + f * (1.4 + tuck), (hipY + fBy) / 2 - 0.6, fBx, fBy - 1.2)
-  ctx.stroke()
+  for (const pass of [0, 1]) {                                     // ink under, cloth over
+    ctx.strokeStyle = pass === 0 ? C.ink : sol_shade(C.danaRobeDark, -0.2)
+    ctx.lineWidth = pass === 0 ? 4.6 : 2.6
+    ctx.beginPath()                                                // knee thrown toward facing
+    ctx.moveTo(cx - f * 1.8, hipY)
+    ctx.quadraticCurveTo((cx - f * 1.8 + fAx) / 2 + f * (1.4 + tuck), (hipY + fAy) / 2 - 0.6, fAx, fAy - 1.2)
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.moveTo(cx + f * 1.8, hipY)
+    ctx.quadraticCurveTo((cx + f * 1.8 + fBx) / 2 + f * (1.4 + tuck), (hipY + fBy) / 2 - 0.6, fBx, fBy - 1.2)
+    ctx.stroke()
+  }
   dana_boot(ctx, fAx, fAy, f, fAt)
   dana_boot(ctx, fBx, fBy, f, fBt)
 
@@ -967,8 +972,8 @@ function actor_dana(ctx: CanvasRenderingContext2D, e: Engine, time: number, punc
 
   // ── the robe ──
   const sway = dana_clamp(vx / 105, -1, 1) * 3 + (anim === 'skid' ? f * 3.5 : 0)   // hem thrown forward on the skid
-  const hemLift = anim === 'jump' ? 7 : anim === 'apex' ? 5.4 : anim === 'run' ? 5 : anim === 'fall' ? 3 : 4.2
-  const hemY = footY - (duck ? 2.6 : hemLift)
+  const hemLift = anim === 'jump' ? 7.6 : anim === 'apex' ? 6.2 : anim === 'run' ? 5.8 : anim === 'fall' ? 4 : 5.2
+  const hemY = footY - (duck ? 3.4 : hemLift)
   const hemW = w * 0.50
     + (anim === 'fall' ? 2.6 : anim === 'apex' ? 1.2 : 0)
     + (anim === 'land' ? 1.8 * Math.min(1, punchLand) : 0)
@@ -976,104 +981,101 @@ function actor_dana(ctx: CanvasRenderingContext2D, e: Engine, time: number, punc
     + (anim === 'fall' ? -2.2 : anim === 'apex' ? -1.2 : 0)
     + (anim === 'land' ? 1.6 * Math.min(1, punchLand) : 0)
 
-  const rg = ctx.createLinearGradient(cx - hemW, robeTop, cx + hemW * 0.7, footY)
-  rg.addColorStop(0, sol_shade(C.danaRobe, 0.28))
-  rg.addColorStop(0.5, C.danaRobe)
-  rg.addColorStop(1, sol_shade(C.danaRobeDark, -0.22))
-  ctx.fillStyle = rg
+  // cel-shaded robe: flat blue, one shade wedge on the right flank, one pale
+  // highlight stripe on the left, everything inside a fat ink outline
+  ctx.fillStyle = C.danaRobe
   dana_robePath(ctx, cx, swayU, robeTop, shW, hemW, hemY, sway, scoop)
   ctx.fill()
-  // dark contour, then the warm torch rim up the left flank
-  ctx.strokeStyle = sol_shade(C.danaRobeDark, -0.5)
-  ctx.lineWidth = 1.1
+  ctx.save()
+  dana_robePath(ctx, cx, swayU, robeTop, shW, hemW, hemY, sway, scoop)
+  ctx.clip()
+  const midY = (robeTop + hemY) / 2
+  ctx.fillStyle = 'rgba(20,16,70,0.30)'
+  ctx.beginPath()
+  ctx.ellipse(cx + hemW * 0.95 + sway * 0.5, midY + 1, hemW * 0.95, (hemY - robeTop) * 0.9, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(255,255,255,0.28)'
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.moveTo(ux - shW + 1.8, robeTop + 3.2)
+  ctx.quadraticCurveTo(ux - shW - 0.4 + sway * 0.35, midY, cx - hemW + sway + 3.2, hemY - 1.6)
+  ctx.stroke()
+  // pale scalloped hem trim
+  ctx.strokeStyle = sol_shade(C.danaRobe, 0.5)
+  ctx.lineWidth = 2.2
+  ctx.beginPath()
+  ctx.moveTo(cx - hemW + sway, hemY - 0.9)
+  ctx.quadraticCurveTo(cx + sway * 0.5, hemY + 1.3 + scoop, cx + hemW + sway, hemY - 0.9)
+  ctx.stroke()
+  ctx.restore()
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 1.4
+  ctx.lineJoin = 'round'
   dana_robePath(ctx, cx, swayU, robeTop, shW, hemW, hemY, sway, scoop)
   ctx.stroke()
-  ctx.strokeStyle = 'rgba(255,205,150,0.32)'
-  ctx.lineWidth = 1
+  // wide collar
+  ctx.fillStyle = sol_shade(C.danaRobe, 0.42)
   ctx.beginPath()
-  ctx.moveTo(cx - hemW + sway + 1.2, hemY - 1.2)
-  ctx.quadraticCurveTo(ux - shW - 1.2 + sway * 0.35, (robeTop + hemY) / 2, ux - shW + 0.6, robeTop + 2.6)
-  ctx.stroke()
-  // hem: inner shadow band + a pale trim line that catches the torch
-  ctx.save()
-  ctx.globalAlpha = 0.5
-  ctx.strokeStyle = sol_shade(C.danaRobeDark, -0.35)
-  ctx.lineWidth = 1.8
-  ctx.beginPath()
-  ctx.moveTo(cx - hemW + sway + 1.6, hemY - 0.4)
-  ctx.quadraticCurveTo(cx + sway * 0.5, hemY + 1.4 + scoop, cx + hemW + sway - 1.6, hemY - 0.4)
-  ctx.stroke()
-  ctx.globalAlpha = 0.8
-  ctx.strokeStyle = sol_shade(C.danaRobe, 0.34)
-  ctx.lineWidth = 1
-  ctx.beginPath()
-  ctx.moveTo(cx - hemW + sway + 1.8, hemY - 1.8)
-  ctx.quadraticCurveTo(cx + sway * 0.5, hemY + 0.2 + scoop, cx + hemW + sway - 1.8, hemY - 1.8)
-  ctx.stroke()
-  // collar trim + falling fold lines
-  ctx.globalAlpha = 1
-  ctx.strokeStyle = sol_shade(C.danaRobe, 0.42)
-  ctx.lineWidth = 1.2
-  ctx.beginPath()
-  ctx.moveTo(ux - shW * 0.78, robeTop + 2.2)
-  ctx.quadraticCurveTo(ux, robeTop + 0.4, ux + shW * 0.78, robeTop + 2.2)
-  ctx.stroke()
-  ctx.globalAlpha = 0.6
-  ctx.strokeStyle = sol_shade(C.danaRobe, -0.3)
+  ctx.moveTo(ux - shW * 0.9, robeTop + 1.4)
+  ctx.quadraticCurveTo(ux, robeTop + 4.6, ux + shW * 0.9, robeTop + 1.4)
+  ctx.quadraticCurveTo(ux, robeTop - 0.6, ux - shW * 0.9, robeTop + 1.4)
+  ctx.closePath()
+  ctx.fill()
+  ctx.strokeStyle = C.ink
   ctx.lineWidth = 0.9
-  for (const o of [-2.8, 3.1]) {
+  ctx.stroke()
+  // belt: chunky dark band with a big round gold buckle
+  const bw = shW + (hemW - shW) * dana_clamp((beltY - robeTop) / Math.max(1, hemY - robeTop), 0, 1)
+  ctx.fillStyle = sol_shade(C.danaRobeDark, -0.45)
+  rr(ctx, cx - bw * 0.96, beltY - 1.7, bw * 1.92, 3.4, 1.4)
+  ctx.fill()
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 0.9
+  rr(ctx, cx - bw * 0.96, beltY - 1.7, bw * 1.92, 3.4, 1.4)
+  ctx.stroke()
+  ctx.fillStyle = C.ink
+  ctx.beginPath()
+  ctx.arc(cx, beltY, 3.1, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = C.gold
+  ctx.beginPath()
+  ctx.arc(cx, beltY, 2.3, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = sol_shade(C.gold, -0.5)
+  ctx.beginPath()
+  ctx.arc(cx, beltY, 0.9, 0, Math.PI * 2)
+  ctx.fill()
+  const glint = Math.max(0, Math.sin(time * 2.1 + 0.7))
+  ctx.fillStyle = `rgba(255,255,240,${0.35 + 0.5 * glint})`
+  ctx.beginPath()
+  ctx.arc(cx - 0.9, beltY - 0.9, 0.7, 0, Math.PI * 2)
+  ctx.fill()
+  // satchel strap over the wand shoulder, pouch on the far hip
+  for (const pass of [0, 1]) {
+    ctx.strokeStyle = pass === 0 ? C.ink : '#7a5330'
+    ctx.lineWidth = pass === 0 ? 2.4 : 1.2
     ctx.beginPath()
-    ctx.moveTo(cx + o * 0.7, beltY + 1.5)
-    ctx.quadraticCurveTo(cx + o + sway * 0.4, (beltY + hemY) / 2, cx + o * 1.5 + sway * 0.8, hemY - 1)
+    ctx.moveTo(ux + f * shW * 0.5, robeTop + 2.4)
+    ctx.quadraticCurveTo(cx + f * 0.6, (robeTop + beltY) / 2 + 1, cx - f * bw * 0.72, beltY + 0.6)
     ctx.stroke()
   }
-  ctx.restore()
-  // belt + gold buckle with a roving glint
-  const bw = shW + (hemW - shW) * dana_clamp((beltY - robeTop) / Math.max(1, hemY - robeTop), 0, 1)
-  ctx.fillStyle = sol_shade(C.danaRobeDark, -0.38)
-  rr(ctx, cx - bw * 0.94, beltY - 1.3, bw * 1.88, 2.7, 1.2)
+  const pxp = cx - f * (bw * 0.72 + 1.6)
+  ctx.fillStyle = '#7a5330'
+  rr(ctx, pxp - 2.8, beltY + 0.6, 5.6, 4.4, 1.6)
   ctx.fill()
-  ctx.strokeStyle = 'rgba(255,205,150,0.28)'
-  ctx.lineWidth = 0.7
-  ctx.beginPath()
-  ctx.moveTo(cx - bw * 0.86, beltY - 1.2)
-  ctx.lineTo(cx + bw * 0.86, beltY - 1.2)
+  ctx.fillStyle = sol_shade('#7a5330', -0.28)
+  rr(ctx, pxp - 2.8, beltY + 0.6, 5.6, 2, 1.2)
+  ctx.fill()
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 0.9
+  rr(ctx, pxp - 2.8, beltY + 0.6, 5.6, 4.4, 1.6)
   ctx.stroke()
   ctx.fillStyle = C.gold
-  rr(ctx, cx - 1.8, beltY - 1.7, 3.6, 3.4, 0.8)
-  ctx.fill()
-  ctx.fillStyle = sol_shade(C.gold, -0.55)
-  ctx.fillRect(cx - 0.8, beltY - 0.6, 1.6, 1.3)
-  const glint = Math.max(0, Math.sin(time * 2.1 + 0.7))
-  ctx.fillStyle = `rgba(255,255,235,${0.5 * glint})`
-  ctx.fillRect(cx - 1.3, beltY - 1.2, 1.1, 1.1)
-  // satchel strap over the wand shoulder, pouch on the far hip
-  ctx.strokeStyle = '#6b4a24'
-  ctx.lineWidth = 1.9
-  ctx.beginPath()
-  ctx.moveTo(ux + f * shW * 0.5, robeTop + 2.4)
-  ctx.quadraticCurveTo(cx + f * 0.6, (robeTop + beltY) / 2 + 1, cx - f * bw * 0.72, beltY + 0.6)
-  ctx.stroke()
-  ctx.strokeStyle = 'rgba(255,205,150,0.25)'
-  ctx.lineWidth = 0.7
-  ctx.beginPath()
-  ctx.moveTo(ux + f * shW * 0.5, robeTop + 1.8)
-  ctx.quadraticCurveTo(cx + f * 0.6, (robeTop + beltY) / 2 + 0.4, cx - f * bw * 0.72, beltY)
-  ctx.stroke()
-  const pxp = cx - f * (bw * 0.72 + 1.2)
-  ctx.fillStyle = '#6b4a24'
-  rr(ctx, pxp - 2.3, beltY + 0.8, 4.6, 3.6, 1.2)
-  ctx.fill()
-  ctx.fillStyle = sol_shade('#6b4a24', -0.3)
-  rr(ctx, pxp - 2.3, beltY + 0.8, 4.6, 1.6, 1)
-  ctx.fill()
-  ctx.fillStyle = C.gold
-  ctx.fillRect(pxp - 0.5, beltY + 2, 1, 1)
-  // little gold star emblem on the chest
-  ctx.save()
-  ctx.globalAlpha = 0.9
-  dana_star(ctx, ux + f * 0.2, robeTop + 5.2, 1.4, 0.3, C.gold)
-  ctx.restore()
+  ctx.fillRect(pxp - 0.6, beltY + 2, 1.2, 1.2)
+  // gold stars sprinkled on the robe — the wizard's polka dots
+  dana_star(ctx, ux + f * 0.4, robeTop + 6.2, 1.7, 0.3, C.gold, true)
+  dana_star(ctx, cx - f * 4.6 + sway * 0.5, beltY + 6.4, 1.2, 0.9, C.gold, true)
+  dana_star(ctx, cx + f * 5.2 + sway * 0.6, hemY - 5.6, 1.0, 1.6, C.gold, true)
 
   // ── the face: gaze, blink, mood ──
   let lookX = f * 0.62, lookY = 0.10
@@ -1110,9 +1112,9 @@ function actor_dana(ctx: CanvasRenderingContext2D, e: Engine, time: number, punc
   dana_face(ctx, ux, headY, rH, f, lookX, lookY, openK, mood, browK)
 
   // ── the hat (drawn after the face so a ducked brim drops over the eye) ──
-  const brimY = headY - (duck ? rH * 0.10 : rH * 0.52)
-  const coneH = h * (duck ? 0.34 : 0.30) + hatLift
-  const starPos = dana_hat(ctx, ux, brimY, w * 0.5, coneH, f, tdx, tdy - hatLift * 0.4, time)
+  const brimY = headY - (duck ? rH * 0.18 : rH * 0.64)
+  const coneH = h * (duck ? 0.40 : 0.36) + hatLift
+  const starPos = dana_hat(ctx, ux, brimY, w * 0.62, coneH, f, tdx, tdy - hatLift * 0.4, time)
 
   // ── wand arm on the facing side ──
   const shFX = ux + f * shW * 0.85
@@ -2936,9 +2938,9 @@ function dana_world(x: number, y: number, cx: number, footY: number, jx: number,
   return [cx + jx + (lx * c - ly * s) * sx, footY + (lx * s + ly * c) * sy]
 }
 
-/** Four-point star (hat tip, wand finial, cast sparkles). */
-function dana_star(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, rot: number, color: string): void {
-  ctx.fillStyle = color
+/** Four-point star (hat tip, wand finial, cast sparkles). `outline` draws
+ *  the cartoon ink edge under the fill. */
+function dana_star(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, rot: number, color: string, outline = false): void {
   ctx.beginPath()
   for (let i = 0; i < 8; i++) {
     const a = rot + i * Math.PI / 4
@@ -2947,53 +2949,85 @@ function dana_star(ctx: CanvasRenderingContext2D, x: number, y: number, r: numbe
     if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
   }
   ctx.closePath()
+  if (outline) {
+    ctx.strokeStyle = C.ink
+    ctx.lineWidth = 1.4
+    ctx.lineJoin = 'round'
+    ctx.stroke()
+  }
+  ctx.fillStyle = color
   ctx.fill()
 }
 
-/** A little leather boot: dark sole, toe cap toward facing, lit upper edge. */
+/** A chunky cartoon boot: one rounded toe-forward silhouette, pale sole band,
+ *  a gleam on the toe, all inside the ink outline. Drawn facing +x, mirrored
+ *  by `f`. */
 function dana_boot(ctx: CanvasRenderingContext2D, x: number, y: number, f: number, tilt: number): void {
   ctx.save()
   ctx.translate(x, y)
   ctx.rotate(tilt)
-  ctx.fillStyle = 'rgba(18,12,8,0.9)'
-  rr(ctx, -3.3, -1.0, 6.9, 1.2, 0.5)
+  ctx.scale(f, 1)
+  const path = (): void => {
+    ctx.beginPath()
+    ctx.moveTo(-3.4, -4.6)
+    ctx.lineTo(1.4, -4.6)
+    ctx.quadraticCurveTo(5.4, -4.4, 5.4, -1.6)
+    ctx.quadraticCurveTo(5.4, 0, 3.8, 0)
+    ctx.lineTo(-3.2, 0)
+    ctx.quadraticCurveTo(-4.4, 0, -4.4, -1.2)
+    ctx.lineTo(-4.4, -3.6)
+    ctx.quadraticCurveTo(-4.4, -4.6, -3.4, -4.6)
+    ctx.closePath()
+  }
+  path()
+  ctx.fillStyle = sol_shade(C.danaRobeDark, -0.42)
   ctx.fill()
-  ctx.fillStyle = sol_shade(C.danaRobeDark, -0.40)
-  rr(ctx, -3.0, -3.3, 6.0, 3.0, 1.2)
-  ctx.fill()
+  ctx.save()
+  path()
+  ctx.clip()
+  ctx.fillStyle = '#e9d8b6'                               // sole
+  ctx.fillRect(-5, -1.3, 11, 2)
+  ctx.fillStyle = 'rgba(255,255,255,0.22)'                // toe gleam
   ctx.beginPath()
-  ctx.ellipse(f * 2.7, -1.3, 1.8, 1.5, 0, 0, Math.PI * 2)
+  ctx.ellipse(2.6, -3.2, 1.6, 0.8, 0, 0, Math.PI * 2)
   ctx.fill()
-  ctx.strokeStyle = sol_shade(C.danaRobeDark, 0.3)
-  ctx.lineWidth = 0.8
-  ctx.beginPath()
-  ctx.moveTo(-2.3, -3.0)
-  ctx.lineTo(1.6, -3.0)
+  ctx.restore()
+  path()
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 1.3
+  ctx.lineJoin = 'round'
   ctx.stroke()
   ctx.restore()
 }
 
-/** A bare or clenched hand with a torch catchlight on the knuckle. */
+/** A round mitten hand (thumb bump on top) — ink disc under, skin disc over so
+ *  the two lobes read as one outlined shape. */
 function dana_hand(ctx: CanvasRenderingContext2D, x: number, y: number, fist: boolean): void {
-  const r = fist ? 1.85 : 1.55
-  ctx.fillStyle = sol_shade(C.face, -0.05)
+  const r = fist ? 2.5 : 2.3
+  const tx = x - 1.3, ty = y - 1.7, tr = fist ? 1.0 : 1.2
+  ctx.fillStyle = C.ink
+  ctx.beginPath()
+  ctx.arc(x, y, r + 1.1, 0, Math.PI * 2)
+  ctx.arc(tx, ty, tr + 1.1, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = C.face
   ctx.beginPath()
   ctx.arc(x, y, r, 0, Math.PI * 2)
   ctx.fill()
-  ctx.strokeStyle = sol_shade(C.face, -0.48)
-  ctx.lineWidth = 0.7
   ctx.beginPath()
-  ctx.arc(x, y, r, 0, Math.PI * 2)
-  ctx.stroke()
-  if (fist) {                                     // clenched knuckle crease
+  ctx.arc(tx, ty, tr, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = 'rgba(120,60,50,0.28)'          // palm shade
+  ctx.beginPath()
+  ctx.arc(x + 0.5, y + 0.7, r * 0.7, 0, Math.PI * 2)
+  ctx.fill()
+  if (fist) {                                     // knuckle crease
+    ctx.strokeStyle = 'rgba(90,50,40,0.5)'
+    ctx.lineWidth = 0.7
     ctx.beginPath()
-    ctx.arc(x, y, r - 0.6, -0.5, 1.3)
+    ctx.arc(x, y, r - 0.8, -0.4, 1.4)
     ctx.stroke()
   }
-  ctx.fillStyle = 'rgba(255,226,180,0.55)'
-  ctx.beginPath()
-  ctx.arc(x - 0.5, y - 0.6, 0.5, 0, Math.PI * 2)
-  ctx.fill()
 }
 
 /** Two-segment sleeve read: a quadratic from shoulder to hand whose control
@@ -3007,26 +3041,26 @@ function dana_arm(ctx: CanvasRenderingContext2D, sx0: number, sy0: number, hx: n
   const ex = mx + px * bow, ey = my + py * bow
   ctx.save()
   ctx.lineCap = 'round'
-  ctx.strokeStyle = sol_shade(C.danaRobe, -0.10 + tone)
-  ctx.lineWidth = 3.0
+  ctx.strokeStyle = C.ink                                 // ink sausage under
+  ctx.lineWidth = 5.8
   ctx.beginPath()
   ctx.moveTo(sx0, sy0)
   ctx.quadraticCurveTo(ex, ey, hx, hy)
   ctx.stroke()
-  ctx.strokeStyle = sol_shade(C.danaRobe, 0.24 + tone)   // torchlight seam
-  ctx.lineWidth = 1.0
+  ctx.strokeStyle = sol_shade(C.danaRobe, -0.04 + tone)  // the sleeve
+  ctx.lineWidth = 3.6
   ctx.beginPath()
-  ctx.moveTo(sx0 - 0.3, sy0 - 0.8)
-  ctx.quadraticCurveTo(ex - 0.3, ey - 1.0, hx - 0.2, hy - 0.8)
+  ctx.moveTo(sx0, sy0)
+  ctx.quadraticCurveTo(ex, ey, hx, hy)
   ctx.stroke()
-  const t = 0.84, u = 1 - t                              // cuff band at 84%
+  const t = 0.8, u = 1 - t                               // wide pale cuff
   const cxp = u * u * sx0 + 2 * u * t * ex + t * t * hx
   const cyp = u * u * sy0 + 2 * u * t * ey + t * t * hy
-  ctx.strokeStyle = sol_shade(C.danaRobe, 0.38 + tone)
-  ctx.lineWidth = 3.4
+  ctx.strokeStyle = sol_shade(C.danaRobe, 0.5 + tone)
+  ctx.lineWidth = 3.6
   ctx.beginPath()
   ctx.moveTo(cxp, cyp)
-  ctx.lineTo(cxp + (hx - cxp) * 0.42, cyp + (hy - cyp) * 0.42)
+  ctx.lineTo(cxp + (hx - cxp) * 0.55, cyp + (hy - cyp) * 0.55)
   ctx.stroke()
   ctx.restore()
 }
@@ -3034,27 +3068,33 @@ function dana_arm(ctx: CanvasRenderingContext2D, sx0: number, sy0: number, hx: n
 /** The wand: a thin worn-bright wooden stroke with a gold star finial.
  *  Returns the tip so the cast spark can ride it. */
 function dana_wand(ctx: CanvasRenderingContext2D, x: number, y: number, ang: number, starK: number, time: number): [number, number] {
-  const len = 8.2
+  const len = 9.4
   const dx = Math.cos(ang), dy = Math.sin(ang)
   const tx = x + dx * len, ty = y + dy * len
   ctx.save()
   ctx.lineCap = 'round'
-  ctx.strokeStyle = '#6b4a24'
-  ctx.lineWidth = 1.5
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 3.4
   ctx.beginPath()
-  ctx.moveTo(x - dx * 2.2, y - dy * 2.2)                 // butt pokes past the grip
+  ctx.moveTo(x - dx * 2.6, y - dy * 2.6)                 // butt pokes past the grip
   ctx.lineTo(tx, ty)
   ctx.stroke()
-  ctx.strokeStyle = '#9a7040'                            // handled-smooth leading half
-  ctx.lineWidth = 0.8
+  ctx.strokeStyle = '#8a5a2c'
+  ctx.lineWidth = 2.0
   ctx.beginPath()
-  ctx.moveTo(x + dx * len * 0.45, y + dy * len * 0.45 - 0.4)
-  ctx.lineTo(tx, ty - 0.4)
+  ctx.moveTo(x - dx * 2.6, y - dy * 2.6)
+  ctx.lineTo(tx, ty)
   ctx.stroke()
-  dana_star(ctx, tx, ty, 1.7 * starK, time * 0.9, C.gold)
+  ctx.strokeStyle = '#c99a5a'                            // worn-bright top edge
+  ctx.lineWidth = 0.7
+  ctx.beginPath()
+  ctx.moveTo(x + dx * len * 0.3 - dy * 0.5, y + dy * len * 0.3 + dx * 0.5 - 0.6)
+  ctx.lineTo(tx - dy * 0.5, ty + dx * 0.5 - 0.6)
+  ctx.stroke()
+  dana_star(ctx, tx, ty, 2.5 * starK, time * 0.9, C.gold, true)
   ctx.fillStyle = '#fff8dc'
   ctx.beginPath()
-  ctx.arc(tx, ty, 0.55 * starK, 0, Math.PI * 2)
+  ctx.arc(tx, ty, 0.7 * starK, 0, Math.PI * 2)
   ctx.fill()
   ctx.restore()
   return [tx, ty]
@@ -3081,127 +3121,176 @@ function dana_robePath(ctx: CanvasRenderingContext2D, cx: number, shx: number, r
  *  mood: 0 soft · 1 grim · 2 open-"oh" · 3 gritted. browK: +1 determined,
  *  −1 raised. */
 function dana_face(ctx: CanvasRenderingContext2D, cx: number, hy: number, rH: number, f: number, lookX: number, lookY: number, openK: number, mood: number, browK: number): void {
-  const g = ctx.createRadialGradient(cx - rH * 0.38, hy - rH * 0.42, rH * 0.18, cx, hy, rH * 1.06)
-  g.addColorStop(0, sol_shade(C.face, 0.18))
-  g.addColorStop(0.62, C.face)
-  g.addColorStop(1, sol_shade(C.face, -0.28))
-  ctx.fillStyle = g
+  // far ear + hair tufts sit BEHIND the head
+  const eaX = cx - f * rH * 0.92
+  ctx.fillStyle = C.ink
+  ctx.beginPath()
+  ctx.arc(eaX, hy + 0.4, 3.1, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = C.face
+  ctx.beginPath()
+  ctx.arc(eaX, hy + 0.4, 2.0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = 'rgba(120,60,50,0.35)'
+  ctx.beginPath()
+  ctx.arc(eaX, hy + 0.6, 0.9, 0, Math.PI * 2)
+  ctx.fill()
+  const hair = '#7a4a26'
+  for (const [ox, oy, ang] of [[-0.55, -0.62, 2.6], [-0.86, -0.28, 2.95], [-0.2, -0.8, 2.2]] as const) {
+    const bx = cx + f * rH * ox, by = hy + rH * oy
+    const tx = bx + f * Math.cos(ang) * 3.6 * -1, ty = by + Math.sin(ang) * 3.6
+    ctx.beginPath()
+    ctx.moveTo(bx, by - 1.3)
+    ctx.quadraticCurveTo(tx + f * 0.8, ty - 1.4, tx, ty)
+    ctx.quadraticCurveTo(tx - f * 0.6, ty + 0.2, bx, by + 1.3)
+    ctx.closePath()
+    ctx.strokeStyle = C.ink
+    ctx.lineWidth = 1.6
+    ctx.lineJoin = 'round'
+    ctx.stroke()
+    ctx.fillStyle = hair
+    ctx.fill()
+  }
+  // — the head: flat skin, cel shade crescent lower-right, ink outline —
+  ctx.fillStyle = C.face
   ctx.beginPath()
   ctx.arc(cx, hy, rH, 0, Math.PI * 2)
   ctx.fill()
-  ctx.strokeStyle = sol_shade(C.face, -0.5)              // lower-right contour
-  ctx.lineWidth = 1
+  ctx.save()
   ctx.beginPath()
-  ctx.arc(cx, hy, rH - 0.5, -0.25, 1.85)
-  ctx.stroke()
-  ctx.strokeStyle = 'rgba(255,216,164,0.5)'              // upper-left torch rim
-  ctx.lineWidth = 0.9
+  ctx.arc(cx, hy, rH, 0, Math.PI * 2)
+  ctx.clip()
+  ctx.fillStyle = 'rgba(150,70,60,0.22)'
   ctx.beginPath()
-  ctx.arc(cx, hy, rH - 0.6, Math.PI * 1.02, Math.PI * 1.55)
-  ctx.stroke()
-  // far ear
-  const eaX = cx - f * rH * 0.94
-  ctx.fillStyle = sol_shade(C.face, -0.12)
-  ctx.beginPath()
-  ctx.arc(eaX, hy + 0.6, 1.5, 0, Math.PI * 2)
+  ctx.arc(cx + rH * 0.55, hy + rH * 0.45, rH * 1.0, 0, Math.PI * 2)
   ctx.fill()
-  ctx.strokeStyle = sol_shade(C.face, -0.42)
-  ctx.lineWidth = 0.7
+  ctx.fillStyle = 'rgba(255,255,255,0.20)'
   ctx.beginPath()
-  ctx.arc(eaX, hy + 0.6, 0.7, 0, Math.PI * 2)
+  ctx.ellipse(cx - rH * 0.42, hy - rH * 0.5, rH * 0.32, rH * 0.18, -0.6, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 1.4
+  ctx.beginPath()
+  ctx.arc(cx, hy, rH, 0, Math.PI * 2)
   ctx.stroke()
-  // fringe wisps escaping the brim
-  ctx.strokeStyle = '#6b4322'
-  ctx.lineWidth = 1.1
-  ctx.lineCap = 'round'
-  for (let i = 0; i < 3; i++) {
-    const bx = cx + f * (i * 1.9 - 1.4)
-    ctx.beginPath()
-    ctx.moveTo(bx, hy - rH * 0.78)
-    ctx.quadraticCurveTo(bx + f * 0.8, hy - rH * 0.5, bx + f * 0.4, hy - rH * 0.32)
-    ctx.stroke()
-  }
-  // — the eye —
-  const ex = cx + f * rH * 0.38
-  const ey = hy - rH * 0.05
-  if (openK > 0.18) {
-    ctx.fillStyle = '#f6f9ff'
-    ctx.beginPath()
-    ctx.ellipse(ex, ey, 2.0, 2.3 * openK, 0, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.strokeStyle = 'rgba(60,35,20,0.4)'
-    ctx.lineWidth = 0.7
-    ctx.stroke()
-    const ix = ex + lookX * 0.95, iy = ey + lookY * 0.9
-    ctx.fillStyle = sol_shade(C.danaRobe, -0.12)         // boy-blue iris off the robe hue
-    ctx.beginPath()
-    ctx.arc(ix, iy, 1.25, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.fillStyle = '#10131f'
-    ctx.beginPath()
-    ctx.arc(ix + lookX * 0.2, iy + lookY * 0.2, 0.72, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.fillStyle = 'rgba(255,255,255,0.92)'             // catchlight, torch side
-    ctx.beginPath()
-    ctx.arc(ix - 0.5, iy - 0.55, 0.48, 0, Math.PI * 2)
-    ctx.fill()
-  } else {
-    ctx.strokeStyle = '#5a3a26'
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    if (mood === 1) {                                    // wince: screwed shut
-      ctx.moveTo(ex - 1.9, ey + 0.6)
-      ctx.quadraticCurveTo(ex, ey - 0.9, ex + 1.9, ey + 0.6)
-    } else {                                             // soft blink
-      ctx.moveTo(ex - 1.8, ey + 0.2)
-      ctx.quadraticCurveTo(ex, ey + 0.9, ex + 1.8, ey + 0.2)
+  // rosy cheeks
+  ctx.fillStyle = C.cheek
+  ctx.beginPath()
+  ctx.ellipse(cx + f * rH * 0.62, hy + rH * 0.36, 1.9, 1.3, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.beginPath()
+  ctx.ellipse(cx - f * rH * 0.18, hy + rH * 0.42, 1.5, 1.1, 0, 0, Math.PI * 2)
+  ctx.fill()
+  // — two big eyes in three-quarter view: near one large, far one smaller —
+  const ey = hy - rH * 0.06
+  const eyes: [number, number, number][] = [
+    [cx + f * rH * 0.44, 2.7, 3.2],                       // near: x, rx, ry
+    [cx - f * rH * 0.14, 2.0, 2.7],                       // far
+  ]
+  for (const [ex, rx, ry] of eyes) {
+    if (openK > 0.18) {
+      ctx.fillStyle = '#ffffff'
+      ctx.beginPath()
+      ctx.ellipse(ex, ey, rx, ry * openK, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.strokeStyle = C.ink
+      ctx.lineWidth = 1.0
+      ctx.stroke()
+      ctx.save()
+      ctx.beginPath()
+      ctx.ellipse(ex, ey, rx, ry * openK, 0, 0, Math.PI * 2)
+      ctx.clip()
+      const ix = ex + lookX * rx * 0.42, iy = ey + lookY * ry * 0.4
+      const ir = rx * 0.62
+      ctx.fillStyle = sol_shade(C.danaRobe, -0.05)         // big blue iris
+      ctx.beginPath()
+      ctx.arc(ix, iy, ir, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = C.ink
+      ctx.beginPath()
+      ctx.arc(ix + lookX * 0.15, iy + lookY * 0.15, ir * 0.58, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = '#ffffff'                            // big catchlight + a pin
+      ctx.beginPath()
+      ctx.arc(ix - ir * 0.38, iy - ir * 0.42, ir * 0.36, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.beginPath()
+      ctx.arc(ix + ir * 0.34, iy + ir * 0.36, ir * 0.14, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+      ctx.strokeStyle = C.ink                              // upper lid weight
+      ctx.lineWidth = 1.3
+      ctx.beginPath()
+      ctx.ellipse(ex, ey, rx, ry * openK, 0, Math.PI * 1.1, Math.PI * 1.9)
+      ctx.stroke()
+    } else {
+      ctx.strokeStyle = C.ink
+      ctx.lineWidth = 1.3
+      ctx.lineCap = 'round'
+      ctx.beginPath()
+      if (mood === 1) {                                    // wince: screwed shut
+        ctx.moveTo(ex - rx, ey + 0.9)
+        ctx.quadraticCurveTo(ex, ey - 1.4, ex + rx, ey + 0.9)
+      } else {                                             // happy blink
+        ctx.moveTo(ex - rx, ey - 0.2)
+        ctx.quadraticCurveTo(ex, ey + 1.6, ex + rx, ey - 0.2)
+      }
+      ctx.stroke()
     }
+  }
+  // brows — determined dips toward the nose, raised floats up
+  const raise = Math.max(0, -browK) * 1.2
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 1.5
+  ctx.lineCap = 'round'
+  for (const [ex, rx] of eyes) {
+    const inner = ex + f * rx * 0.9, outer = ex - f * rx * 0.9
+    const by = ey - 3.5 - raise
+    ctx.beginPath()
+    ctx.moveTo(outer, by - browK * 0.4)
+    ctx.quadraticCurveTo(ex, by - 1.2 + browK * 0.6, inner, by + browK * 1.3)
     ctx.stroke()
   }
-  // brow — determined dips toward the nose, raised floats up
-  const raise = Math.max(0, -browK) * 0.8
-  ctx.strokeStyle = '#5a3a26'
+  // button nose
+  ctx.strokeStyle = C.ink
   ctx.lineWidth = 1.1
-  ctx.lineCap = 'round'
+  const nx = cx + f * rH * 0.7, ny = hy + rH * 0.12
   ctx.beginPath()
-  ctx.moveTo(ex - f * 2.1, ey - 2.6 - browK * 0.3 - raise)
-  ctx.lineTo(ex + f * 1.8, ey - 2.8 + browK * 1.0 - raise)
-  ctx.stroke()
-  // the tiniest nose hook
-  ctx.strokeStyle = sol_shade(C.face, -0.4)
-  ctx.lineWidth = 0.9
-  ctx.beginPath()
-  ctx.moveTo(cx + f * rH * 0.66, hy + rH * 0.14)
-  ctx.quadraticCurveTo(cx + f * rH * 0.78, hy + rH * 0.3, cx + f * rH * 0.6, hy + rH * 0.38)
+  ctx.moveTo(nx, ny)
+  ctx.quadraticCurveTo(nx + f * 2.4, ny + 0.6, nx + f * 0.6, ny + 2.4)
   ctx.stroke()
   // mouth by mood
-  const mxp = cx + f * rH * 0.30
-  const myp = hy + rH * 0.52
-  ctx.strokeStyle = '#7a4530'
-  ctx.lineWidth = 1
+  const mxp = cx + f * rH * 0.28
+  const myp = hy + rH * 0.55
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 1.2
   if (mood === 1) {                                      // grim — corners down
     ctx.beginPath()
-    ctx.moveTo(mxp - 1.8, myp + 0.3)
-    ctx.quadraticCurveTo(mxp + f * 0.2, myp - 0.7, mxp + 1.8, myp + 0.3)
+    ctx.moveTo(mxp - 2.6, myp + 0.6)
+    ctx.quadraticCurveTo(mxp + f * 0.2, myp - 1.2, mxp + 2.6, myp + 0.6)
     ctx.stroke()
   } else if (mood === 2) {                               // the apex "oh"
-    ctx.fillStyle = '#4a2018'
+    ctx.fillStyle = '#4a1a1c'
     ctx.beginPath()
-    ctx.ellipse(mxp, myp, 1.05, 1.35, 0, 0, Math.PI * 2)
+    ctx.ellipse(mxp, myp + 0.3, 1.6, 2.1, 0, 0, Math.PI * 2)
     ctx.fill()
-    ctx.fillStyle = 'rgba(255,190,170,0.5)'
+    ctx.stroke()
+    ctx.fillStyle = '#e46a74'
     ctx.beginPath()
-    ctx.ellipse(mxp, myp + 0.55, 0.6, 0.4, 0, 0, Math.PI * 2)
+    ctx.ellipse(mxp, myp + 1.3, 0.9, 0.6, 0, 0, Math.PI * 2)
     ctx.fill()
   } else if (mood === 3) {                               // gritted teeth
-    ctx.fillStyle = '#4a2018'
-    ctx.fillRect(mxp - 1.9, myp - 0.7, 3.8, 1.5)
-    ctx.fillStyle = '#e8e0d0'
-    ctx.fillRect(mxp - 1.4, myp - 0.35, 2.8, 0.7)
-  } else {                                               // soft default smile
+    ctx.fillStyle = '#4a1a1c'
+    rr(ctx, mxp - 2.8, myp - 0.9, 5.6, 2.2, 0.8)
+    ctx.fill()
+    ctx.stroke()
+    ctx.fillStyle = '#fff4e0'
+    ctx.fillRect(mxp - 2.2, myp - 0.4, 4.4, 1.1)
+  } else {                                               // big friendly smile
     ctx.beginPath()
-    ctx.moveTo(mxp - 1.7, myp - 0.3)
-    ctx.quadraticCurveTo(mxp + f * 0.2, myp + 0.9, mxp + 1.8, myp - 0.4)
+    ctx.moveTo(mxp - 2.8, myp - 0.6)
+    ctx.quadraticCurveTo(mxp + f * 0.3, myp + 1.9, mxp + 2.9, myp - 0.8)
     ctx.stroke()
   }
 }
@@ -3211,80 +3300,86 @@ function dana_face(ctx: CanvasRenderingContext2D, cx: number, hy: number, rH: nu
  *  bend, warm rim on the torch edge, hat band with a gold clasp, and the
  *  gold star riding the tip. Returns the star centre for the world glow. */
 function dana_hat(ctx: CanvasRenderingContext2D, cx: number, brimY: number, halfBrim: number, coneH: number, f: number, tdx: number, tdy: number, time: number): [number, number] {
-  const baseHalf = halfBrim * 0.66
-  const tipX = cx + f * 1.4 + tdx
-  const tipY = brimY - coneH + tdy
-  const bendX = tdx * 0.34
-  // — cone —
-  const hg = ctx.createLinearGradient(cx - baseHalf, tipY, cx + baseHalf, brimY)
-  hg.addColorStop(0, sol_shade(C.hat, 0.30))
-  hg.addColorStop(0.5, C.hat)
-  hg.addColorStop(1, sol_shade(C.hatDark, -0.20))
-  ctx.fillStyle = hg
-  ctx.beginPath()
-  ctx.moveTo(cx - baseHalf, brimY - 0.4)
-  ctx.quadraticCurveTo(cx - baseHalf * 0.58 + bendX, brimY - coneH * 0.56 + tdy * 0.35, tipX, tipY)
-  ctx.quadraticCurveTo(cx + baseHalf * 0.34 + bendX, brimY - coneH * 0.50, cx + baseHalf, brimY - 0.4)
-  ctx.closePath()
+  const baseHalf = halfBrim * 0.60
+  // a floppy cone: rises in front, then the tip curls over and hangs BEHIND
+  const tipX = cx - f * baseHalf * 1.35 + tdx
+  const tipY = brimY - coneH * 0.66 + tdy
+  const peakX = cx + f * baseHalf * 0.35 + tdx * 0.4
+  const peakY = brimY - coneH * 1.12 + tdy * 0.5
+  const cone = (): void => {
+    ctx.beginPath()
+    ctx.moveTo(cx - f * baseHalf, brimY - 0.4)
+    ctx.quadraticCurveTo(cx - f * baseHalf * 0.3 + tdx * 0.3, brimY - coneH * 0.5, tipX, tipY)   // back edge, concave
+    ctx.quadraticCurveTo(peakX, peakY, cx + f * baseHalf, brimY - 0.4)                          // front edge, bulging
+    ctx.closePath()
+  }
+  cone()
+  ctx.fillStyle = C.hat
   ctx.fill()
-  // dark contour down the shade-side edge
-  ctx.strokeStyle = sol_shade(C.hatDark, -0.35)
-  ctx.lineWidth = 1
-  ctx.beginPath()
-  ctx.moveTo(cx + baseHalf - 0.4, brimY - 0.6)
-  ctx.quadraticCurveTo(cx + baseHalf * 0.34 + bendX, brimY - coneH * 0.50, tipX, tipY)
-  ctx.stroke()
-  // fold crease chasing the bend
   ctx.save()
-  ctx.globalAlpha = 0.65
-  ctx.strokeStyle = sol_shade(C.hat, -0.34)
-  ctx.lineWidth = 0.9
+  cone()
+  ctx.clip()
+  ctx.fillStyle = 'rgba(20,10,60,0.30)'                  // shade wedge on the right
   ctx.beginPath()
-  ctx.moveTo(cx - baseHalf * 0.16, brimY - 1.6)
-  ctx.quadraticCurveTo(cx + bendX * 0.8, brimY - coneH * 0.5, tipX - (tipX - cx) * 0.16, tipY + coneH * 0.10)
+  ctx.ellipse(cx + baseHalf * 1.1, brimY - coneH * 0.35, baseHalf * 1.2, coneH * 0.9, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(255,255,255,0.30)'             // highlight stroke up the left
+  ctx.lineWidth = 1.6
+  ctx.beginPath()
+  ctx.moveTo(cx - baseHalf * 0.6, brimY - 3)
+  ctx.quadraticCurveTo(cx - baseHalf * 0.25, brimY - coneH * 0.55, cx + f * baseHalf * 0.05, brimY - coneH * 0.85)
   ctx.stroke()
   ctx.restore()
-  // warm torch rim along the upper-left edge
-  ctx.strokeStyle = 'rgba(255,208,150,0.42)'
-  ctx.lineWidth = 1
-  ctx.beginPath()
-  ctx.moveTo(cx - baseHalf + 0.8, brimY - 1.0)
-  ctx.quadraticCurveTo(cx - baseHalf * 0.58 + bendX, brimY - coneH * 0.56 + tdy * 0.35, tipX - 0.4, tipY + 0.8)
+  cone()
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 1.4
+  ctx.lineJoin = 'round'
   ctx.stroke()
-  // — band + gold clasp —
-  ctx.fillStyle = sol_shade(C.hatDark, -0.10)
-  rr(ctx, cx - baseHalf * 0.92, brimY - 3.8, baseHalf * 1.84, 2.6, 1.2)
+  // — band + big gold buckle —
+  ctx.fillStyle = sol_shade(C.hatDark, -0.35)
+  rr(ctx, cx - baseHalf * 0.98, brimY - 4.4, baseHalf * 1.96, 3.2, 1.2)
   ctx.fill()
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 0.9
+  rr(ctx, cx - baseHalf * 0.98, brimY - 4.4, baseHalf * 1.96, 3.2, 1.2)
+  ctx.stroke()
+  const bkx = cx + f * baseHalf * 0.4
   ctx.fillStyle = C.gold
-  ctx.fillRect(cx + f * baseHalf * 0.42, brimY - 3.6, 2, 2.2)
+  rr(ctx, bkx - 1.5, brimY - 4.6, 3, 3.6, 0.7)
+  ctx.fill()
+  ctx.stroke()
   ctx.fillStyle = 'rgba(255,255,255,0.75)'
-  ctx.fillRect(cx + f * baseHalf * 0.42, brimY - 3.6, 1, 1)
-  // — brim: dark underside, then the lit top edge —
+  ctx.fillRect(bkx - 1, brimY - 4.1, 1, 1)
+  // — brim: fat ellipse, dark underside, ink edge —
   ctx.save()
   ctx.translate(cx, brimY)
   ctx.rotate(tdx * 0.014)
-  ctx.fillStyle = sol_shade(C.hatDark, -0.05)
+  ctx.fillStyle = C.hat
   ctx.beginPath()
-  ctx.ellipse(0, 0, halfBrim, 2.4, 0, 0, Math.PI * 2)
+  ctx.ellipse(0, 0, halfBrim, 3.2, 0, 0, Math.PI * 2)
   ctx.fill()
-  ctx.fillStyle = sol_shade(C.hatDark, -0.4)
+  ctx.fillStyle = 'rgba(20,10,60,0.42)'
   ctx.beginPath()
-  ctx.ellipse(0, 0.9, halfBrim - 0.6, 1.4, 0, 0, Math.PI)
+  ctx.ellipse(0, 0.6, halfBrim - 0.4, 2.4, 0, 0, Math.PI)
   ctx.fill()
-  ctx.strokeStyle = sol_shade(C.hat, 0.32)
-  ctx.lineWidth = 1
+  ctx.fillStyle = 'rgba(255,255,255,0.22)'
   ctx.beginPath()
-  ctx.ellipse(0, -0.7, halfBrim - 1.1, 1.5, 0, Math.PI * 1.05, Math.PI * 1.95)
+  ctx.ellipse(-halfBrim * 0.35, -1.2, halfBrim * 0.4, 0.9, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 1.4
+  ctx.beginPath()
+  ctx.ellipse(0, 0, halfBrim, 3.2, 0, 0, Math.PI * 2)
   ctx.stroke()
   ctx.restore()
   // — the gold star riding the tip —
   const twk = 1 + 0.14 * Math.sin(time * 3.1 + 1.3)
-  dana_star(ctx, tipX, tipY - 0.6, 2.1 * twk, time * 0.5, C.gold)
+  dana_star(ctx, tipX, tipY - 0.4, 2.8 * twk, time * 0.5, C.gold, true)
   ctx.fillStyle = '#fff6d8'
   ctx.beginPath()
-  ctx.arc(tipX, tipY - 0.6, 0.7, 0, Math.PI * 2)
+  ctx.arc(tipX, tipY - 0.4, 0.8, 0, Math.PI * 2)
   ctx.fill()
-  return [tipX, tipY - 0.6]
+  return [tipX, tipY - 0.4]
 }
 
 /** Flat-shaded polygon — the chisel primitive (x,y pairs). */
