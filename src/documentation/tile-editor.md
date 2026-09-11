@@ -103,6 +103,32 @@ rewritten in the background.
 **A tile with no original** (only small pictures) cannot be re-framed; the
 editor says so and keeps them as they are.
 
+## Live in the hive
+
+While a tile is being edited, its hexagon in the hive shows the edit as it
+happens — a new picture or none, the framing, the rim colour, whether the name
+shows — beside the docked editor. Nothing is written.
+
+- The view sends `tile:preview` with `EffectBus.emitTransient` (no replay):
+  `{ label, page, point?, flat?, removed, border, hideText }`, or
+  `{ label, clear: true }` when the editor closes. `point` / `flat` are the
+  twins' captures — the exact small pictures a save would write — with their
+  signatures.
+- `ShowCellDrone` paints it onto that one tile with attribute writes
+  (`aImageUV`, `aHasImage`, `aBorderColor`, `aLabelUV`), the same way a saved
+  change is painted in place. It is **never written into a cache**: the caches
+  keep describing what is stored, so ending a preview is a repaint from them,
+  and a full render re-applies the preview on top. The preview's pictures are
+  pinned in the atlas so nothing evicts them mid-edit.
+- Tile names are DOM text: `nameHidden(label)` answers from the preview, and
+  `render:name-visibility` tells `TileNameDrone` to re-ask.
+- **No flash on Save.** The capture is deterministic, so the saved small
+  pictures have the preview's signatures and are already on the GPU when the
+  save's render asks for them. The preview's end is deferred one turn and
+  skipped when `tile:saved` for that tile arrives in it.
+- Framing reaches the hive when a gesture settles (the twins' capture, ~0.2s),
+  not on every pointer move — the hive shows exactly what would be saved.
+
 ## The framing numbers
 
 Unchanged from every framing already stored (`editor/crop-math.ts`):
