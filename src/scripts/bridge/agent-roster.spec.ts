@@ -91,6 +91,76 @@ describe('invocation', () => {
   })
 })
 
+describe('read-only invocation', () => {
+  const locked = agent({
+    bin: 'node',
+    readOnlyArgv: ['-p', '{prompt}', '--tools', 'Read', '--allowedTools', '{allow}', '--output-format', 'text'],
+  })
+
+  it('spawns from the read-only template and expands {allow} one rule per argument', () => {
+    const { args, refused } = roster.invocation(locked, 'review', '', { readOnly: true, allow: ['Bash(a b)', 'Bash(c:*)'] })
+    expect(refused).toBe('')
+    expect(args).toEqual(['-p', 'review', '--tools', 'Read', '--allowedTools', 'Bash(a b)', 'Bash(c:*)', '--output-format', 'text'])
+  })
+
+  it('drops {allow} and its flag when there are no rules — nothing allowed, never everything', () => {
+    expect(roster.invocation(locked, 'review', '', { readOnly: true }).args)
+      .toEqual(['-p', 'review', '--tools', 'Read', '--output-format', 'text'])
+  })
+
+  it('refuses read-only work on a bridge with no read-only template', () => {
+    const plan = roster.invocation(agent({ bin: 'node' }), 'review', '', { readOnly: true })
+    expect(plan.bin).toBe('')
+    expect(plan.refused).toMatch(/no read-only invocation/)
+  })
+
+  it('keeps a prompt literal when it looks like a replacement pattern', () => {
+    expect(roster.invocation(agent({ bin: 'node' }), 'costs $& and $1', '').args).toContain('costs $& and $1')
+  })
+
+  it.runIf(process.platform === 'win32')('refuses a batch spawn it cannot unwrap when cmd.exe would cut, expand or re-read an argument', () => {
+    const shim = agent({ bin: 'C:\\npm\\probe.cmd' })
+    expect(roster.invocation(shim, 'two\nlines', '').refused).toMatch(/line break, % or "/)
+    expect(roster.invocation(shim, 'half of 50% done', '').refused).toMatch(/line break, % or "/)
+    expect(roster.invocation(shim, 'say "hi" > out.txt', '').refused).toMatch(/line break, % or "/)
+    expect(roster.invocation(shim, 'one plain line', '').refused).toBe('')
+  })
+
+  it.runIf(process.platform === 'win32')('spawns the program an npm shim forwards to, so no argument passes through cmd.exe', () => {
+    const fs = require_('node:fs') as typeof import('node:fs')
+    const os = require_('node:os') as typeof import('node:os')
+    const path = require_('node:path') as typeof import('node:path')
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roster-shim-'))
+    const exe = path.join(dir, 'node_modules', 'tool', 'bin', 'tool.exe')
+    fs.mkdirSync(path.dirname(exe), { recursive: true })
+    fs.writeFileSync(exe, '')
+    const shim = path.join(dir, 'tool.cmd')
+    fs.writeFileSync(shim, '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n"%dp0%\\node_modules\\tool\\bin\\tool.exe"   %*\r\n')
+    try {
+      const nasty = 'two\nlines "quoted" > out.txt 50%'
+      const plan = roster.spawnPlan(shim, ['-p', nasty])
+      expect(plan.viaComSpec).toBe(false)
+      expect(plan.file).toBe(exe)
+      expect(plan.args).toEqual(['-p', nasty])
+      expect(roster.invocation(agent({ bin: shim }), nasty, '').refused).toBe('')
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("ships Claude Code's read-only template locked: restricted, no writing tools, nothing else approved", () => {
+    const claude = roster.declared().find(a => a.id === 'claude-bridge')
+    const { args } = roster.invocation({ ...claude, bin: 'node' }, 'review', 'sonnet', { readOnly: true, allow: ['Bash(x)'] })
+    expect(args).toContain('--restricted')
+    expect(args).toContain('--strict-mcp-config')
+    expect(args[args.indexOf('--permission-mode') + 1]).toBe('dontAsk')
+    const tools = args[args.indexOf('--tools') + 1].split(',')
+    for (const writer of ['Edit', 'Write', 'NotebookEdit', 'WebFetch']) expect(tools).not.toContain(writer)
+    for (const loose of ['acceptEdits', 'bypassPermissions', '--dangerously-skip-permissions']) expect(args).not.toContain(loose)
+    expect(args).toContain('Bash(x)')
+  })
+})
+
 describe('spawnPlan', () => {
   const win = process.platform === 'win32'
 

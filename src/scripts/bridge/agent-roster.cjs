@@ -66,14 +66,45 @@ const quoteForCmd = (value) => {
   return `"${escaped}"`
 }
 
-/** `{ file, args, options }` ready for spawn/spawnSync on this platform. */
+/**
+ * An npm `.cmd` shim does nothing but forward to a real program — a native
+ * binary (`"%dp0%\node_modules\...\bin\claude.exe" %*`) or node with a script.
+ * Spawning that program directly takes cmd.exe out of the path, and with it the
+ * three things its command line cannot do: carry a line break (a line break
+ * ENDS the line and every argument after it is dropped), keep `%NAME%`
+ * unexpanded, and keep a `"` inside an argument from flipping its quote state so
+ * that `>`, `|` or `&` later in the argument are read as shell syntax. Null when
+ * the shim is not that shape.
+ */
+function unwrapNpmShim(shim) {
+  let text
+  try { text = fs.readFileSync(shim, 'utf8') } catch { return null }
+  const target = /"%dp0%\\([^"%]+)"\s+%\*/i.exec(text)
+  if (!target) return null
+  const dir = path.dirname(shim)
+  const file = path.join(dir, target[1])
+  if (!fs.existsSync(file)) return null
+  if (/\.exe$/i.test(file)) return { file, prefix: [] }
+  if (/\.[cm]?js$/i.test(file)) {
+    const localNode = path.join(dir, 'node.exe')
+    return { file: fs.existsSync(localNode) ? localNode : process.execPath, prefix: [file] }
+  }
+  return null
+}
+
+/** `{ file, args, options, viaComSpec }` ready for spawn/spawnSync on this
+ *  platform. `viaComSpec` is true only for a batch file that could not be
+ *  unwrapped — the one case whose arguments pass through cmd.exe's parser. */
 function spawnPlan(bin, args) {
-  if (!needsComSpec(bin)) return { file: bin, args, options: {} }
+  if (!needsComSpec(bin)) return { file: bin, args, options: {}, viaComSpec: false }
+  const direct = unwrapNpmShim(bin)
+  if (direct) return { file: direct.file, args: [...direct.prefix, ...args], options: {}, viaComSpec: false }
   const line = [bin, ...args].map(quoteForCmd).join(' ')
   return {
     file: process.env.ComSpec || 'cmd.exe',
     args: ['/d', '/s', '/c', line],
     options: { windowsVerbatimArguments: true },
+    viaComSpec: true,
   }
 }
 
@@ -160,22 +191,52 @@ function modelIdFor(agent, hint) {
  * `models`) still produces a runnable command instead of passing the literal
  * string "{model}" to a vendor.
  */
-function invocation(agent, prompt, modelHint) {
+//
+// READ-ONLY WORK. `{ readOnly: true }` spawns from the bridge's `readOnlyArgv`
+// instead: a template that must remove every tool that writes AND stop the
+// machine's own settings from granting one back. `{allow}` in it expands to
+// the caller's `allow` rules, one argument each; with no rules it is dropped
+// with its flag, which allows nothing rather than everything. A bridge that
+// declares no read-only template is REFUSED — `bin` is '' and `refused` says
+// why — because the only safe way to run "without write access" on a bridge
+// that cannot promise it is not to run.
+function invocation(agent, prompt, modelHint, opts = {}) {
+  const readOnly = opts.readOnly === true
+  if (readOnly && !Array.isArray(agent.readOnlyArgv)) {
+    return { bin: '', args: [], model: '', file: '', spawnArgs: [], options: {}, refused: `${agent.id} declares no read-only invocation` }
+  }
   const bin = agent.bin && path.isAbsolute(agent.bin) ? agent.bin : resolveBin(agent.bin)
   const model = modelIdFor(agent, modelHint)
-  const template = agent.argv ?? []
+  const template = (readOnly ? agent.readOnlyArgv : agent.argv) ?? []
+  const allow = Array.isArray(opts.allow) ? opts.allow.map(String).filter(Boolean) : []
   const args = []
   for (let i = 0; i < template.length; i++) {
     const raw = String(template[i])
-    if (raw === '{model}' && !model) {
+    if ((raw === '{model}' && !model) || (raw === '{allow}' && !allow.length)) {
       // drop the flag that introduced it, if we just pushed one
       if (args.length && /^-/.test(args[args.length - 1])) args.pop()
       continue
     }
-    args.push(raw.replace('{prompt}', prompt).replace('{model}', model))
+    if (raw === '{allow}') { args.push(...allow); continue }
+    // Replacer functions, so a `$&` or `$1` in a prompt stays literal.
+    args.push(raw.replace('{prompt}', () => prompt).replace('{model}', () => model))
   }
   const plan = spawnPlan(bin, args)
-  return { bin, args, model, file: plan.file, spawnArgs: plan.args, options: plan.options }
+  // Only a batch file that could not be unwrapped still goes through cmd.exe
+  // (see unwrapNpmShim). Its command line cannot carry a line break — a line
+  // break ENDS it, so every argument after it, lock flags included, silently
+  // never arrives (measured: `-p "a<LF>b" --restricted` reached the CLI as just
+  // `-p a`) — expands `%NAME%` even inside quotes, and a `"` inside an argument
+  // flips its quote state so the rest is read as shell syntax (measured: a
+  // prompt quoting `cmd /c "echo x > …"` never reached the program at all).
+  // Refuse, rather than spawn something other than what was built.
+  if (plan.viaComSpec && args.some(arg => /[\r\n%"]/.test(arg))) {
+    return {
+      bin: '', args, model, file: '', spawnArgs: [], options: {},
+      refused: `${agent.id}: an argument carries a line break, % or " that cmd.exe cannot pass to ${path.basename(bin)} intact`,
+    }
+  }
+  return { bin, args, model, file: plan.file, spawnArgs: plan.args, options: plan.options, refused: '' }
 }
 
 /**
