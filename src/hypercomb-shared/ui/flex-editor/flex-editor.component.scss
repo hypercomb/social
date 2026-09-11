@@ -1,17 +1,21 @@
 // hypercomb-shared/ui/flex-editor/flex-editor.component.scss
 //
-// Right-docked flex editor, opposite the layout palette. Everything structural
+// Right-docked flex gallery, opposite the layout palette. Everything structural
 // comes from `_toolwindow.scss` — the shell, the header band, the close button
 // and the accent identity — the same partial every other docked window uses.
 //
 // THE WINDOW DOES NOT SCROLL. Only the shelf of axes does, the same rule the
 // layout designer follows: the heading and the subject stay put so you always
 // know which container you are configuring.
+//
+// IT NAMES ROLES, NEVER COLOURS. The previews used to paint their holes from
+// the authored steel and gold, which never deepen — so a bright theme got
+// pastel boxes on a cream ground. The identity comes from `tw.panel`, and the
+// one colour on purpose (gold: what is chosen) goes through `tw.ink`.
 
 @use '../toolwindow' as tw;
 
 $steel: #7eb6d6;
-$dim: #7f95a3;
 $accent: #c9a227;
 
 :host {
@@ -35,6 +39,8 @@ $accent: #c9a227;
   flex-direction: column;
   font-size: calc(0.78rem * var(--hc-panel-scale, 1));
   @include tw.panel($steel, right);
+  // What is chosen — the designer's second colour, the same mark it paints.
+  --fx-mark: #{tw.ink($accent)};
   // After the include: the mixin sets its own overflow for a window whose body
   // is one long column, and this one is not.
   overflow: hidden;
@@ -78,14 +84,23 @@ $accent: #c9a227;
 .fx-where {
   flex: 0 0 auto;
   margin: 0;
-  padding: 0.4rem 0.75rem;
-  color: var(--hc-window-ink-faint);
-  font-size: 0.72em;
-  letter-spacing: 0.08em;
+  padding: 0.45rem 0.75rem;
+  color: var(--hc-window-ink-quiet);
+  font-size: 0.8em;
+  letter-spacing: 0.04em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  border-bottom: 1px solid var(--hc-window-edge);
+  border-bottom: 1px solid var(--hc-window-line);
+}
+
+// Nothing selected — said where the axes would be, in flow.
+.fx-none {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.7rem 0.75rem;
+  color: var(--hc-window-ink-quiet);
+  line-height: 1.55;
 }
 
 .fx-shelf {
@@ -100,7 +115,7 @@ $accent: #c9a227;
 
 .fx-axis {
   margin-bottom: 0.35rem;
-  border: 1px solid var(--hc-window-edge);
+  border: 1px solid var(--hc-window-line);
   border-radius: tw.$radius-control;
   overflow: hidden;
   &.is-open { border-color: var(--hc-window-edge-firm); }
@@ -112,20 +127,22 @@ $accent: #c9a227;
   grid-template-columns: 1fr auto;
   gap: 0.15rem 0.5rem;
   width: 100%;
-  padding: 0.4rem 0.55rem;
+  padding: 0.45rem 0.6rem;
   background: none;
   border: 0;
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
-  &:hover { background: rgba(var(--hc-panel-ink), 0.06); }
+  &:hover { background: var(--hc-window-tint); }
+  &:focus-visible { outline: 1px solid var(--hc-window-edge-firm); outline-offset: -1px; }
 }
 .fx-axis.is-open .fx-axis-head { background: var(--hc-window-wash); }
 
 .fx-axis-name {
-  font-size: 0.66em;
-  letter-spacing: 0.16em;
+  font-size: 0.8em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--hc-window-ink-plain);
 }
@@ -133,15 +150,15 @@ $accent: #c9a227;
   grid-column: 2;
   grid-row: 1 / span 2;
   align-self: center;
-  font-size: 0.68em;
-  color: var(--hc-window-accent);
+  font-size: 0.82em;
+  color: var(--fx-mark);
   white-space: nowrap;
 }
 .fx-axis-what {
   grid-column: 1;
-  font-size: 0.66em;
+  font-size: 0.8em;
   line-height: 1.4;
-  color: var(--hc-window-ink-faint);
+  color: var(--hc-window-ink-quiet);
 }
 
 .fx-values {
@@ -164,15 +181,19 @@ $accent: #c9a227;
   width: 100%;
   aspect-ratio: 16 / 10;
   padding: 3px;
-  background: rgba(var(--hc-panel-ink), 0.07);
-  border: 1px solid var(--hc-window-edge);
+  background: var(--hc-window-tint);
+  border: 1px solid var(--hc-window-line);
   border-radius: tw.$radius-control;
   cursor: pointer;
   overflow: hidden;
   transition: border-color 0.12s ease, background 0.12s ease;
 
-  &:hover { border-color: var(--hc-window-edge-firm); background: rgba(var(--hc-panel-ink), 0.11); }
-  &.is-on { border-color: var(--hc-window-accent); background: var(--hc-window-wash); }
+  &:hover { border-color: var(--hc-window-edge-firm); background: var(--hc-window-tint-strong); }
+  &.is-on {
+    border-color: var(--fx-mark);
+    background: color-mix(in srgb, var(--fx-mark) 12%, transparent);
+  }
+  &:focus-visible { outline: 1px solid var(--fx-mark); outline-offset: 1px; }
 }
 
 .fx-preview {
@@ -180,8 +201,11 @@ $accent: #c9a227;
   width: 100%;
   height: 100%;
   ::ng-deep > div { width: 100%; height: 100%; }
-  ::ng-deep [data-hc-hole] { background: rgba($steel, 0.38); border-radius: 1px; }
-  ::ng-deep [data-hc-self] { background: rgba($accent, 0.55); }
+  ::ng-deep [data-hc-hole] {
+    background: color-mix(in srgb, var(--hc-window-accent) 40%, transparent);
+    border-radius: 1px;
+  }
+  ::ng-deep [data-hc-self] { background: color-mix(in srgb, var(--fx-mark) 55%, transparent); }
 }
 
 // The value names itself on hover, over the foot of the picture where it
@@ -194,10 +218,10 @@ $accent: #c9a227;
   right: 0;
   bottom: 0;
   padding: 2px 4px;
-  background: rgba($accent, 0.92);
-  color: #17150e;
-  font: 500 0.56rem/1.5 var(--hc-mono, ui-monospace), monospace;
-  letter-spacing: 0.04em;
+  background: var(--fx-mark);
+  color: rgb(var(--hc-panel-pane));
+  font: 500 0.72em/1.5 var(--hc-mono, ui-monospace), monospace;
+  letter-spacing: 0.02em;
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
@@ -210,14 +234,6 @@ $accent: #c9a227;
 .fx-option:focus-visible .fx-option-name,
 .fx-option.is-on .fx-option-name { opacity: 1; }
 
-// WHY THERE ARE TWO PLACES — said once, quietly, at the head. The properties
-// hold the two axes you reach for; this is every axis drawn on your own
-// container, which is what you open to compare rather than to decide.
-.fx-relation {
-  flex: 0 0 auto;
-  margin: 0 0 0.5rem;
-  padding: 0 0.75rem;
-  color: var(--hc-window-ink-faint);
-  font-size: calc(0.62rem * var(--hc-panel-scale, 1));
-  line-height: 1.5;
+@media (prefers-reduced-motion: reduce) {
+  .fx-option, .fx-option-name { transition: none; }
 }

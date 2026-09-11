@@ -28,6 +28,7 @@ const { LOCAL_PROVIDER, localLlmHost } = await import('./local.provider.js')
 const {
   checkLocalServer,
   localModelServerUp,
+  localServerReport,
   machineLocalEndpoint,
   modelsFromServer,
   recheckLocalServers,
@@ -281,6 +282,38 @@ describe('the browser barrier', () => {
     expect((await checkLocalServer(provider)).state).toBe('asleep')
     expect(llmRouter.reason()).toBe('local-down')
     offPublicOrigin()
+  })
+})
+
+describe('one report map, whichever module copy probed', () => {
+  // The web build inlines this file into every bee that imports it, so the
+  // gate the route flow reads may live in a copy no probe ever ran in. A
+  // module-scope map there would read `unknown` forever while the console said
+  // awake; the map is pinned on globalThis instead (chat-route.md §4.1.9).
+  it('a report set through one copy reads awake through the other, both ways', async () => {
+    const provider = localDescriptor()
+    registry.register(provider)
+    vi.stubGlobal('fetch', serverWith('qwen3:8b'))
+
+    vi.resetModules()
+    const second = await import('./local-liveness.js')
+    expect(second.localServerReport(provider).state).toBe('unknown')
+
+    expect((await checkLocalServer(provider)).state).toBe('awake')
+    expect(second.localServerReport(provider).state, 'probed by the first copy, read by the second').toBe('awake')
+
+    // The other way: a second machine-local provider, probed only through the
+    // second copy, reads through the first copy's own function.
+    const other = { ...localDescriptor('http://127.0.0.1:12999'), id: 'other-machine' }
+    registry.register(other)
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === 'http://127.0.0.1:12999/v1/models') return new Response(JSON.stringify({ data: [{ id: 'qwen2.5-coder:7b' }] }), { status: 200 })
+      throw new TypeError(`unexpected call ${url}`)
+    }))
+    expect(localServerReport(other).state).toBe('unknown')
+    expect((await second.checkLocalServer(other)).state).toBe('awake')
+    expect(localServerReport(other).state, 'probed by the second copy, read by the first').toBe('awake')
+    expect((globalThis as Record<symbol, unknown>)[Symbol.for('hypercomb.local-liveness.reports')]).toBeTruthy()
   })
 })
 

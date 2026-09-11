@@ -2,7 +2,7 @@
 
 The adventure has three connected forms of play:
 
-- **Overworld:** walk through Sevenfold Valley, meet people, reason from their clues, and assemble the shrines in front of labyrinth entrances.
+- **Overworld:** a continuous island in three-quarter view. Start in the Sevenfold Valley, meet people, reason from their clues, assemble the shrines in front of labyrinth entrances, and use the wand on brickwork in the Brick Garden next door. Design and rules: `src/documentation/solomon-island.md`.
 - **Labyrinths:** twelve fixed 16 × 12 rooms across Sunseed, Tideglass, and the Pyramid of Accord. Each square is a native Hypercomb child layer. Movement stays on a two-dimensional playing surface; reciprocal passages connect chambers at different depths, including return routes and a cross-connection.
 - **Scrolling dungeons:** Wayfarer and Highland expeditions use their own four-direction exploration, inscriptions, rune sequences, and interpretation puzzles. Their discoveries explain real hidden treasures in the labyrinths.
 

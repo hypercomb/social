@@ -5,11 +5,10 @@ import { resolveCurrentLayer } from '../../history/layer-placement.js'
 import type { PlacementHistory } from '../../history/layer-placement.js'
 import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey, OverlayTintFn } from './tile-overlay.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
-import { hasDecorationKind, kindsForLabel } from '../../commands/decoration-kind-index.js'
+import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
 import { FILES_ATTACHMENT_KIND } from '../../files/files-attachment.js'
 import { FILES_ICON } from '../../files/file-types.js'
 import { SWARM_INVITE_KIND } from '../../sharing/meeting-invite.js'
-import { allBindings, behaviorPath } from '../../sharing/behavior-enablement.js'
 // Arrangement persistence currently disabled — `#getRootDir` returns
 // null pending the layer-slot read/write path, so the legacy
 // readCellProperties / writeCellProperties imports are no longer needed.
@@ -216,9 +215,6 @@ const ICONS = {
   reroll: md('M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z'),
   // sticky_note_2 — Material Icons Filled
   note: md('M19 3H4.99c-1.11 0-1.98.9-1.98 2L3 19c0 1.1.89 2 2 2h10l6-6V5c0-1.1-.9-2-2-2zM7 8h10v2H7V8zm5 6H7v-2h5v2zm2 5.5V14h5.5L14 19.5z'),
-  // extension (puzzle piece) — Material Icons Filled. "Features": opens the
-  // Beehaviors panel on a tile that carries a behaviour of its OWN.
-  extension: md('M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z'),
   // sync — Material Icons Filled
   sync: md('M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z'),
   // public/globe — Material Icons Filled (make THIS tile public: "the world")
@@ -276,48 +272,6 @@ const peerTileHasInvite = (label: string): boolean => {
 
 const tileHasInvite = (label: string): boolean =>
   hasDecorationKind(label, SWARM_INVITE_KIND) || peerTileHasInvite(label)
-
-// True when a behaviour was explicitly created FOR THIS TILE — not for the
-// hive, and not for an ancestor. Two ways a tile carries one of its own:
-//
-//   • a decoration kind ON the tile that a registered visual bee owns — a
-//     behaviour applied right here (a website page, a post-it, a tutor deck).
-//     Read from the live VisualBeeRegistry, so a new community view takes
-//     part automatically and a drone toggled off in DCP drops out; plain
-//     images and pure-data decorations (contact cards, file attachments) are
-//     NOT features and never light it.
-//   • a behaviour BOUND to this tile's LOCATION (`/behavior bind`, and every
-//     website root, which always binds). The binding record's canonical path
-//     is the synchronous match key — see sharing/behavior-enablement.ts.
-//
-// EXACT path match, never prefix: a binding covers its subtree for DORMANCY,
-// but this icon is a statement about the tile under the pointer, and lighting
-// up every descendant of a bound root would say nothing about any of them.
-//
-// This is the whole gate. There is no always-on puzzle piece any more —
-// behaviours belong to where you STAND, and the top rail's Beehaviors switch
-// is the door for the layer you are in. The icon comes back only for a tile
-// that genuinely has something of its own to show, which is exactly what a
-// tile ADDED FROM A SWARM needs: you click it in, it paints in full, and the
-// features it arrived carrying say so on its own hexagon.
-const tileCarriesOwnBehavior = (label: string): boolean => {
-  const registry = window.ioc.get<{ byDecorationKind?: (kind: string) => unknown }>(
-    '@diamondcoreprocessor.com/VisualBeeRegistry',
-  )
-  if (registry?.byDecorationKind) {
-    for (const kind of kindsForLabel(label)) {
-      if (registry.byDecorationKind(kind)) return true
-    }
-  }
-  const segments = (window.ioc.get<{ explorerSegments?: () => readonly string[] }>(
-    '@hypercomb.social/Lineage',
-  )?.explorerSegments?.() ?? []) as readonly string[]
-  const here = behaviorPath([...segments, label])
-  for (const bindings of Object.values(allBindings())) {
-    for (const b of bindings) if (b.path === here) return true
-  }
-  return false
-}
 
 // Login-style glyph (arrow stepping through a doorway) — "step into this
 // meeting place". Material "login" path, verbatim.
@@ -399,16 +353,12 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   // detection-only; its answer surfaces as the peer tiles themselves rather
   // than an icon. `sync` stays programmatic and never becomes an icon.
   //
-  // `features` (the puzzle piece) is NOT an always-on icon: beehaviours
-  // belong to where you STAND, so the panel's own doors are the top rail's
-  // Beehaviors switch and an empty layer raising it by itself
-  // (collection-empty-prompt.drone.ts). What DOES earn a per-tile icon is a
-  // behaviour explicitly created FOR THIS TILE — a view applied here, or a
-  // kind bound to this location (tileCarriesOwnBehavior). A tile added from
-  // a swarm is the case that matters: once it is yours it paints in full,
-  // and the features assigned to it show on it.
-  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, featureRow: true, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => tileCarriesOwnBehavior(ctx.label), labelKey: 'action.features', descriptionKey: 'action.features.description' },
-  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, featureRow: true, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => tileCarriesOwnBehavior(ctx.label), labelKey: 'action.features', descriptionKey: 'action.features.description' },
+  // There is NO `features` icon on a tile, earned or standing. Behaviours are
+  // managed ONLY from the context layer — the layer you stand in, through the
+  // top rail's Beehaviors switch or an empty layer raising the panel by itself
+  // (collection-empty-prompt.drone.ts). Asking the behaviour question about
+  // the tile under the pointer is the misaligned door (Jaime, 2026-09-10: "We
+  // only manage behaviors from the context layer"). Never re-register it.
   // ── public-external profile ──
   // 'hide' also lives in `public-own` (your own tile in public mode);
   // re-registering for `public-external` lets the same handler apply

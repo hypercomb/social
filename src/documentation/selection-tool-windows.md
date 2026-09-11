@@ -26,7 +26,9 @@ pattern.
    Drones skip the helper — they already take SelectionService as an IoC dep.
 4. **Each window implements its own response.** The clipboard window offers
    cut/copy of the selection; the files window opens the selection's
-   documents; the features window opens the selection's features; the tags
+   documents; the features window does NOT answer the selection (behaviours
+   are managed only from the context layer — its selection button was retired
+   2026-09-10); the tags
    window stages the armed keywords onto the selection; notes follows the
    active cell. No shared section component, no generic "selection tools"
    registry — a window's selection affordance is that window's own code.

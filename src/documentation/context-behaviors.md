@@ -4,6 +4,19 @@
 (passive behaviors + pheromone discovery), `shell-surfaces.md`,
 `pheromones.md`.
 
+> **Behaviours are managed ONLY from the context layer (Jaime, 2026-09-10:
+> "We only manage behaviors from the context layer").** The Beehaviors panel
+> opens by `features:context-open` — the top rail switch, or an empty layer —
+> and is always about the layer you stand in. Every per-tile door is removed
+> or deprecated: the tile overlay's puzzle-piece icon and the panel's
+> canvas-selection button are REMOVED; `selection:has-features`,
+> `controls:action {features}`, the adopt landing on the adopted tile, the
+> asleep-icon aim, the tile brief's plate-scale "Manage beehaviors", the
+> `?features=<cell>` subject and `/behavior bind <behaviour> <tile>` are
+> DEPRECATED (the asleep icon, the brief at page scale and the `?features=`
+> intent now open the context panel instead). Never add a door that names a
+> tile other than the context.
+
 > **The `/dashboard` first slice is RETIRED (2026-07-26).** It was built as
 > the worked example of the toggle semantics below and is cited that way
 > throughout this doc — but the dashboard itself (bag, producer, answer modal,

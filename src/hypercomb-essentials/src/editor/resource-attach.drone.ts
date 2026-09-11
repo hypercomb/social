@@ -84,15 +84,12 @@ export class ResourceAttachDrone {
       ;(props as any).flat.small = { image: payload.smallFlatSig }
     }
 
+    // The original, with NO framing: absent framing is the default (centred,
+    // covering), which is exactly how the smalls above were captured. The
+    // placeholder `{ x: 0, y: 0, scale: 1 }` this used to write reads as the
+    // picture at native pixel size — see `readFraming` in crop-math.ts.
     if (payload.largeSig) {
-      ;(props as any).large = {
-        image: payload.largeSig,
-        x: 0,
-        y: 0,
-        scale: 1,
-      }
-      if (!(props as any).flat) (props as any).flat = {}
-      ;(props as any).flat.large = { x: 0, y: 0, scale: 1 }
+      ;(props as any).large = { image: payload.largeSig }
     }
 
     if (payload.url) {

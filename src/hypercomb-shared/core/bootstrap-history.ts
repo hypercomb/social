@@ -39,8 +39,10 @@ export class BootstrapHistory {
 
     // ── Share-link landing intent ──────────────────────────────────
     // A minted share link carries `?features=<cell>` (see essentials'
-    // share-link.drone): land normally, then open the features panel for
-    // that cell once the shell has warmed. The param is CONSUMED here —
+    // share-link.drone): land normally, then open the Beehaviors panel on the
+    // context layer once the shell has warmed. The `<cell>` no longer picks
+    // the subject — the per-tile aim is deprecated (2026-09-10). The param is
+    // CONSUMED here —
     // stripped from the settling URL so a refresh doesn't re-open the
     // panel — and the intent only ever OPENS a panel: nothing activates,
     // downloads, or installs from a link.
@@ -117,13 +119,14 @@ export class BootstrapHistory {
 
     // Fire the landing intent on the first `synchronize` — emitted once all
     // registered bees have pulsed, i.e. the shell is warm and the lineage
-    // reflects the restored path. Emitting `tile:action {features}` is
-    // order-safe even if ShowFeaturesDrone loads later: EffectBus replays
-    // the last value to late subscribers.
+    // reflects the restored path. The intent opens the Beehaviors panel on the
+    // CONTEXT layer: the named tile is no longer the subject, because
+    // behaviours are managed only from the layer you stand in (the per-tile
+    // aim is deprecated, 2026-09-10). Order-safe even if the panel mounts
+    // later: EffectBus replays the last value to late subscribers.
     if (featuresIntent) {
-      const label = featuresIntent
       window.addEventListener('synchronize', () => {
-        EffectBus.emit('tile:action', { action: 'features', label })
+        EffectBus.emit('features:context-open', {})
       }, { once: true })
     }
 

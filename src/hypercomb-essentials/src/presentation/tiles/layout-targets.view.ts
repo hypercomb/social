@@ -61,7 +61,10 @@
 // reader would drift, and then the window and the page would disagree about
 // the same hole.
 
-import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import {
+  EffectBus, I18N_IOC_KEY, attachDockedPanel, isPhoneViewport,
+  type DockedPanel, type I18nProvider,
+} from '@hypercomb/core'
 import { TARGETS_OPEN, TARGETS_STATE, TARGETS_VIEW_STATE } from './template-author.drone.js'
 import type { HoleState, TargetsState } from './template-author.drone.js'
 
@@ -72,7 +75,13 @@ const OWNER = '@diamondcoreprocessor.com/LayoutTargetsView'
 /** The steel the shell's docked windows are edged in. Restated, not imported —
  *  a module cannot `@use` a shared stylesheet. */
 const STEEL = '126, 182, 214'
+/** The same steel taken deep for a bright theme — what `identity.deepen()`
+ *  computes for #7eb6d6, restated for the same reason the steel is. */
+const STEEL_DEEP = '39, 93, 124'
+/** The designer's second colour: what is picked, named, or dropped on. */
 const ACCENT = '201, 162, 39'
+/** Whose edge reservation this is — see `#reserve`. */
+const INSET_OWNER = 'layout-targets'
 
 const ioc = <T,>(key: string): T | undefined =>
   (window as { ioc?: { get?: (k: string) => T } }).ioc?.get?.(key)
@@ -101,9 +110,18 @@ const interpolate = (text: string, params?: Record<string, string | number>): st
 export class LayoutTargetsElement extends HTMLElement {
 
   #panel: HTMLElement | null = null
+  /** The part of the window a render redraws. The header is NOT in it — the
+   *  docked-panel primitive pins its gear into the header and its grip onto
+   *  the panel, and a render that rebuilt the whole window threw both away on
+   *  the first state update. */
+  #body: HTMLElement | null = null
+  #subject: HTMLElement | null = null
   #stage: HTMLElement | null = null
   #props: HTMLElement | null = null
   #state: TargetsState | null = null
+  /** The docked-panel primitive behind this window: its lane place, its grip
+   *  and its gear. */
+  #dock: DockedPanel | null = null
 
   /** Which hole is being named, as its path joined. Participant-local: what
    *  you are pointing at is not part of the design. */
@@ -116,6 +134,12 @@ export class LayoutTargetsElement extends HTMLElement {
   #draft = ''
 
   #cleanup: (() => void)[] = []
+
+  // What this window reserves of the right edge — see `#reserve`.
+  #observer: ResizeObserver | null = null
+  #offPoll: (() => void) | null = null
+  #frame = 0
+  #timer = 0
 
   connectedCallback(): void {
     ensureStyles()
@@ -138,11 +162,11 @@ export class LayoutTargetsElement extends HTMLElement {
       // its editor exactly as it was.
       const still = (state?.holes ?? []).some(hole => hole.path.join('/') === this.#picked)
       if (!still) { this.#picked = ''; this.#draft = '' }
-      // ALWAYS a full redraw. The state is what the window IS, and it arrives
-      // AFTER the window opens — the drone computes nothing until it is told
-      // somebody is looking. A path that only refreshed the properties left
-      // the container undrawn, and the window read "nothing is plugged in"
-      // over a container that plainly was.
+      // ALWAYS a full redraw of the body. The state is what the window IS, and
+      // it arrives AFTER the window opens — the drone computes nothing until it
+      // is told somebody is looking. A path that only refreshed the properties
+      // left the container undrawn, and the window read "nothing is plugged
+      // in" over a container that plainly was.
       this.#render()
     }))
   }
@@ -163,8 +187,31 @@ export class LayoutTargetsElement extends HTMLElement {
     // The hive must not pan or zoom under a window being read.
     panel.setAttribute('data-consumes-wheel', '')
     panel.addEventListener('keydown', this.#onKey)
+    panel.appendChild(this.#head())
+    const body = document.createElement('div')
+    body.className = 'hc-targets-body'
+    panel.appendChild(body)
     this.appendChild(panel)
     this.#panel = panel
+    this.#body = body
+
+    // A DOCKED TOOL WINDOW, LIKE EVERY OTHER ONE. It was a fixed box pinned
+    // just inboard of whatever else was docked on the right, which is how the
+    // properties, the flex gallery and this window came to stack into one
+    // another. Now it takes a place in the right-hand lane like its siblings,
+    // resizes from its inner edge, carries the same gear, and says what it
+    // takes of the edge so the design pane centres beside it rather than
+    // under it.
+    this.#dock = attachDockedPanel(panel, {
+      id: 'layout-targets',
+      dockSide: 'right',
+      minWidth: 260,
+      maxWidth: 520,
+      defaultWidth: 340,
+      onClose: () => this.close(),
+    })
+    this.#reserve()
+
     EffectBus.emit(TARGETS_VIEW_STATE, { open: true })
     this.#render()
   }
@@ -172,11 +219,66 @@ export class LayoutTargetsElement extends HTMLElement {
   close(): void {
     if (!this.#panel) return
     this.#panel.removeEventListener('keydown', this.#onKey)
+    this.#dock?.dispose()
+    this.#dock = null
+    this.#release()
     this.#panel.remove()
     this.#panel = null
+    this.#body = null
+    this.#subject = null
     this.#stage = null
     this.#props = null
     EffectBus.emit(TARGETS_VIEW_STATE, { open: false })
+  }
+
+  /**
+   * WHAT THIS WINDOW TAKES OF THE RIGHT EDGE — the job `hcDockInset` does for
+   * the Angular windows, which a module cannot import.
+   *
+   * The same two rules that directive keeps: a timer races the frame, so a
+   * window opened in a document that is not rendering still reserves; and a
+   * box spanning the viewport (a phone sheet) reserves nothing at all, or the
+   * canvas would be squeezed to zero behind it.
+   */
+  #reserve(): void {
+    const panel = this.#panel
+    if (!panel) return
+    this.#observer = new ResizeObserver(this.#schedule)
+    this.#observer.observe(panel)
+    window.addEventListener('resize', this.#schedule)
+    this.#offPoll = EffectBus.on('viewport:inset-poll', this.#schedule)
+    this.#schedule()
+  }
+
+  readonly #schedule = (): void => {
+    if (this.#frame || this.#timer) return
+    this.#frame = requestAnimationFrame(this.#measure)
+    this.#timer = window.setTimeout(this.#measure, 60)
+  }
+
+  readonly #measure = (): void => {
+    if (this.#frame) { cancelAnimationFrame(this.#frame); this.#frame = 0 }
+    if (this.#timer) { clearTimeout(this.#timer); this.#timer = 0 }
+    const rect = this.#panel?.getBoundingClientRect()
+    const spans = !rect || rect.width <= 0
+      || (rect.left <= 1 && rect.right >= window.innerWidth - 1)
+    const size = !rect || spans || isPhoneViewport()
+      ? 0
+      : Math.max(0, Math.round(window.innerWidth - rect.left))
+    EffectBus.emit('viewport:inset', { owner: INSET_OWNER, side: 'right', size })
+  }
+
+  #release(): void {
+    this.#observer?.disconnect()
+    this.#observer = null
+    window.removeEventListener('resize', this.#schedule)
+    this.#offPoll?.()
+    this.#offPoll = null
+    if (this.#frame) cancelAnimationFrame(this.#frame)
+    if (this.#timer) clearTimeout(this.#timer)
+    this.#frame = 0
+    this.#timer = 0
+    EffectBus.emit('viewport:inset', { owner: INSET_OWNER, side: 'right', size: 0 })
   }
 
   /** One level back per press: drop the selection, then close. The same
@@ -191,18 +293,18 @@ export class LayoutTargetsElement extends HTMLElement {
   // ── the drawing ─────────────────────────────────────────────────────────
 
   #render(): void {
-    const panel = this.#panel
-    if (!panel) return
-    panel.replaceChildren()
-    panel.appendChild(this.#head())
+    const body = this.#body
+    if (!body) return
+    body.replaceChildren()
+    if (this.#subject) this.#subject.textContent = this.#state?.cell ?? ''
 
     const state = this.#state
     if (state?.dormant) {
-      panel.appendChild(note('hc-targets-quiet',
+      body.appendChild(note('hc-targets-quiet',
         t('layout.dormant', 'The layout behaviour is switched off for this branch.')))
     }
     if (!state?.layout) {
-      panel.appendChild(note('hc-targets-quiet', t('targets.unplugged',
+      body.appendChild(note('hc-targets-quiet', t('targets.unplugged',
         'Nothing is plugged in here yet. Give this container a layout first — a hole is what gets named, and there are none until there is a shape.')))
       return
     }
@@ -213,16 +315,16 @@ export class LayoutTargetsElement extends HTMLElement {
     stage.className = 'hc-targets-stage'
     stage.innerHTML = state.container
     this.#bindHoles(stage, state.holes)
-    panel.appendChild(stage)
+    body.appendChild(stage)
     this.#stage = stage
 
     const named = state.holes.filter(hole => !!hole.meaning).length
-    panel.appendChild(note('hc-targets-count', t('targets.named', '{named} of {of} holes named',
+    body.appendChild(note('hc-targets-count', t('targets.named', '{named} of {of} holes named',
       { named, of: state.holes.length })))
 
     const props = document.createElement('div')
     props.className = 'hc-targets-props'
-    panel.appendChild(props)
+    body.appendChild(props)
     this.#props = props
     this.#renderProps()
 
@@ -231,29 +333,24 @@ export class LayoutTargetsElement extends HTMLElement {
     // name on it — so putting it under the selected hole would have made it
     // look like a property of that hole, and hidden it entirely while nothing
     // was selected, which is exactly when you want to see what you have built.
-    this.#renderGrow(panel)
+    this.#renderGrow(body)
   }
 
   #head(): HTMLElement {
     const head = document.createElement('header')
     head.className = 'hc-targets-head'
-    const title = document.createElement('span')
-    title.className = 'hc-targets-title'
-    title.textContent = t('targets.title', 'Targets')
-    head.appendChild(title)
-    if (this.#state?.cell) {
-      const subject = document.createElement('span')
-      subject.className = 'hc-targets-subject'
-      subject.textContent = this.#state.cell
-      head.appendChild(subject)
-    }
+    const title = face('hc-targets-title', t('targets.title', 'Targets'))
+    // Always present, empty until there is a container to name: the header is
+    // built once, so the subject is a node the render writes into.
+    const subject = face('hc-targets-subject', this.#state?.cell ?? '')
     const close = document.createElement('button')
     close.type = 'button'
     close.className = 'hc-targets-close'
     close.textContent = '×'
     close.setAttribute('aria-label', t('panel.close', 'Close'))
     close.addEventListener('click', () => this.close())
-    head.appendChild(close)
+    head.append(title, subject, close)
+    this.#subject = subject
     return head
   }
 
@@ -634,66 +731,83 @@ function ensureStyles(): void {
   const style = document.createElement('style')
   style.id = STYLE_ID
   style.textContent = `
-    /* THE SAME MATERIAL AS EVERY OTHER TOOL WINDOW. A module cannot @use the
-       shared stylesheet, so the recipe is restated — and the VALUES are the
-       shared ones, deliberately: the panel band, the flat docking edge with
-       its accent hairline, and content sized in em off the panel scale so it
-       follows the window-size ladder. */
+    /* THE SAME MATERIAL AS EVERY OTHER TOOL WINDOW, NAMED BY ROLE. A module
+       cannot @use the shared stylesheet, so the recipe is restated — and it
+       names ROLES, never colours. It used to paint from dark literals (a
+       near-black pane, near-white ink), which read on the dark theme and
+       vanished on every bright one. The pane, the ink and the grounds come from
+       the themed tokens on :root now, and the identity is declared here the way
+       tw.panel() declares it: the steel, taken deep under a bright look. */
     ${SURFACE} { display: contents; }
     .hc-targets {
+      --acc: ${STEEL};
+      --hc-window-accent: rgb(var(--acc));
+      --hc-window-accent-quiet: rgb(var(--acc));
+      --hc-window-wash: rgba(var(--acc), 0.10);
+      --hc-window-wash-strong: rgba(var(--acc), 0.20);
+      --hc-window-edge: rgba(var(--acc), 0.28);
+      --hc-window-edge-firm: rgba(var(--acc), 0.62);
+      --hc-window-on-accent: rgb(var(--hc-panel-pane));
+      /* The designer's second colour — what is picked, named, or dropped on —
+         brought down to this ground the way tw.ink() brings a colour down. */
+      --hc-targets-mark: color-mix(in srgb, rgb(${ACCENT}), rgb(var(--hc-panel-ink)) var(--hc-deepen, 0%));
       position: fixed;
       top: max(calc(2.3rem * var(--hc-header-zoom, 1.0)), var(--hc-header-anchor, 0px));
-      /* CLEAR OF THE RAIL *AND* OF ANYTHING DOCKED ON THIS EDGE.
-         It pinned to the rail alone, which is only the far edge — a docked
-         panel on the right (the flex gallery, and now the designer's own
-         properties when they are sent across) reserves --hc-inset-right
-         and this window painted straight over it at z-index 100002. The
-         larger of the two is the first free column either way. */
-      right: max(var(--hc-controls-right, 0px), var(--hc-inset-right, 0px));
+      /* The lane writes the real edge inline — beside the control bar, and
+         inboard of whatever else is docked on this side. */
+      right: 0;
       bottom: 0;
       width: 340px; min-width: 260px; max-width: calc(100vw - 1.5rem);
       box-sizing: border-box; display: flex; flex-direction: column;
       z-index: 100002;
-      background: rgba(13, 15, 21, 0.975);
+      background: rgba(var(--hc-panel-pane), 0.975);
       backdrop-filter: blur(14px) saturate(1.04);
       -webkit-backdrop-filter: blur(14px) saturate(1.04);
-      border: 0; border-left: 1px solid rgba(${STEEL}, 0.38); border-radius: 0;
-      box-shadow: -14px 0 44px rgba(0, 0, 0, 0.46);
-      color: #eef2f5;
+      border: 0; border-left: 1px solid rgba(var(--acc), 0.38); border-radius: 0;
+      box-shadow: -14px 0 44px rgba(var(--hc-panel-shadow), 0.46);
+      color: var(--hc-panel-text);
       font-family: var(--hc-mono, system-ui);
       font-size: calc(0.8125rem * var(--hc-panel-scale, 1));
       line-height: 1.45; overflow: hidden; outline: none;
     }
+    :is([data-theme="light"],[data-theme="honey"],[data-theme="bloom"],[data-theme="sherbet"]) .hc-targets { --acc: ${STEEL_DEEP}; }
+    @media (prefers-color-scheme: light) { :root:not([data-theme]) .hc-targets { --acc: ${STEEL_DEEP}; } }
+
     /* The shared header BAND — the same 2.875rem every docked window uses, so
        a row of them has one horizon. rem, not em: chrome height must not move
        when panel content scales. */
     .hc-targets-head {
       flex: 0 0 auto; box-sizing: border-box; display: flex; align-items: center;
       gap: 0.5rem; height: 2.875rem; min-height: 2.875rem; padding: 0 0.75rem;
-      background: linear-gradient(180deg, rgba(255,255,255,0.018), rgba(255,255,255,0.006));
-      border-bottom: 1px solid rgba(${STEEL}, 0.25);
+      line-height: 1;
+      background: linear-gradient(180deg, rgba(var(--hc-panel-sheen), 0.018), rgba(var(--hc-panel-sheen), 0.006));
+      border-bottom: 1px solid var(--hc-window-edge);
     }
     .hc-targets-title {
       font-weight: 600; font-size: 0.9em; letter-spacing: 0.06em;
-      text-transform: uppercase; color: rgba(${ACCENT}, 0.95);
+      text-transform: uppercase; color: var(--hc-window-accent);
     }
     .hc-targets-subject {
       flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-      white-space: nowrap; color: rgba(238, 244, 248, 0.55);
+      white-space: nowrap; color: var(--hc-window-ink-quiet);
     }
-    .hc-targets-head .hc-targets-title:only-child { flex: 1; }
     .hc-targets-close {
-      margin-left: auto; display: inline-grid; place-items: center;
+      display: inline-grid; place-items: center;
       width: 1.75rem; height: 1.75rem; padding: 0;
       background: none; border: 0; border-radius: var(--hc-radius-control, 2px);
-      color: rgba(238, 244, 248, 0.62); font: inherit; font-size: 1.125rem;
+      color: var(--hc-window-ink-faint); font: inherit; font-size: 1.125rem;
       line-height: 1; cursor: pointer;
     }
-    .hc-targets-close:hover { color: #fff; background-color: rgba(255,255,255,0.075); }
+    .hc-targets-close:hover { color: var(--hc-panel-text); background-color: rgba(var(--hc-panel-ink), 0.075); }
+    .hc-targets-close:focus-visible { outline: 1px solid var(--hc-window-edge-firm); outline-offset: 1px; }
+
+    .hc-targets-body {
+      flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+    }
 
     .hc-targets-quiet {
       margin: 0; padding: 0.7rem 0.75rem;
-      color: rgba(238, 244, 248, 0.5); font-size: 0.85em; line-height: 1.55;
+      color: var(--hc-window-ink-quiet); font-size: 0.85em; line-height: 1.55;
     }
 
     /* THE CONTAINER, at reading size. It keeps its place while the properties
@@ -702,106 +816,101 @@ function ensureStyles(): void {
     .hc-targets-stage {
       flex: 0 0 auto; display: flex; margin: 0.6rem; padding: 0.35rem;
       min-height: 9rem; box-sizing: border-box;
-      border: 1px solid rgba(${STEEL}, 0.22); border-radius: 2px;
-      background: rgba(255, 255, 255, 0.02); overflow: hidden;
+      border: 1px solid var(--hc-window-line); border-radius: var(--hc-radius-card, 3px);
+      background: var(--hc-window-tint); overflow: hidden;
     }
     /* THE CONTAINER IS DRAWN AT READING SIZE, and that has to be asked for.
-       A layout's height is INTRINSIC by doctrine — a hole states a width and
-       never a height — so an arrangement with nothing seated in it collapses
-       to one pixel, and the window showed a gold hairline where the picture
-       should have been.
-       The height is given by the STAGE and taken by stretching, never by a
-       min-height on the container: every level carries an inline min-height:0
-       (that is what keeps a long word from forcing a track wider than its
-       share) and an inline declaration beats any rule here. Stretching also
-       keeps the proportions honest — each level divides the height it is
-       given instead of every level claiming a floor of its own. */
+       A layout's height is INTRINSIC by doctrine, so an arrangement with
+       nothing seated in it collapses to one pixel. The height is given by the
+       STAGE and taken by stretching, never by a min-height on the container:
+       every level carries an inline min-height:0, and an inline declaration
+       beats any rule here. */
     .hc-targets-stage > [data-hc-container] { flex: 1 1 auto; }
-    /* EVERY FILLABLE HOLE IS A BUTTON. A hole holding a nested layout or the
-       container's own page carries no slot, is never wired, and is therefore
-       never lit — the honest answer: neither takes a part. */
     .hc-targets-hole {
       position: relative; min-height: 2.4rem;
-      border: 1px dashed rgba(${STEEL}, 0.3); border-radius: 2px;
+      border: 1px dashed var(--hc-window-edge); border-radius: var(--hc-radius-control, 2px);
       cursor: pointer; transition: background 120ms ease, border-color 120ms ease;
     }
-    .hc-targets-hole:hover { background: rgba(255, 255, 255, 0.05); }
-    .hc-targets-hole:focus-visible { outline: 1px solid rgba(${ACCENT}, 0.8); outline-offset: -2px; }
+    .hc-targets-hole:hover { background: var(--hc-window-wash); }
+    .hc-targets-hole:focus-visible { outline: 1px solid var(--hc-targets-mark); outline-offset: -2px; }
     /* NAMED IS A SOLID EDGE — a declared interface. Dashed is a gap nobody has
        decided about yet. */
-    .hc-targets-hole.is-named { border-style: solid; border-color: rgba(${ACCENT}, 0.75); }
+    .hc-targets-hole.is-named {
+      border-style: solid;
+      border-color: color-mix(in srgb, var(--hc-targets-mark) 75%, transparent);
+    }
     .hc-targets-hole.is-picked {
-      background: rgba(${ACCENT}, 0.16); border-color: rgba(${ACCENT}, 0.95);
+      background: color-mix(in srgb, var(--hc-targets-mark) 16%, transparent);
+      border-color: var(--hc-targets-mark);
     }
     .hc-targets-hole-name {
       position: absolute; top: 2px; left: 3px; right: 3px;
-      font-size: 0.72em; color: rgba(238, 244, 248, 0.8);
+      font-size: 0.72em; color: var(--hc-window-ink-plain);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       pointer-events: none;
     }
-    /* What is actually sitting in the hole, under its name. Quieter than the
-       name: the name is the design, the fill is today's answer to it. */
+    /* What is actually sitting in the hole, under its name. */
     .hc-targets-hole-fill {
       position: absolute; bottom: 2px; left: 3px; right: 3px;
-      font-size: 0.7em; color: rgba(${ACCENT}, 0.72);
+      font-size: 0.7em; color: var(--hc-targets-mark);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       pointer-events: none;
     }
 
     /* A SECTION is not a seat. It is drawn as the branch it is — a quiet frame
        around the holes inside it, its name in its own margin where none of its
-       children are, so pressing the section and pressing what is in it are two
-       different targets rather than a guess. */
+       children are. */
     .hc-targets-hole.is-section {
-      border-style: solid; border-color: rgba(${STEEL}, 0.22);
+      border-style: solid; border-color: var(--hc-window-line-firm);
       padding-top: 0.9rem;
     }
-    .hc-targets-hole.is-section.is-named { border-color: rgba(${ACCENT}, 0.45); }
-    .hc-targets-hole.is-section:hover { background: rgba(255, 255, 255, 0.03); }
+    .hc-targets-hole.is-section.is-named {
+      border-color: color-mix(in srgb, var(--hc-targets-mark) 45%, transparent);
+    }
+    .hc-targets-hole.is-section:hover { background: var(--hc-window-tint); }
     .hc-targets-hole.is-section > .hc-targets-hole-name {
-      color: rgba(${ACCENT}, 0.8);
+      color: var(--hc-targets-mark);
       font-size: 0.68em; letter-spacing: 0.1em; text-transform: uppercase;
     }
 
-    /* EVERY ANSWER IS A DOOR. They read as a row of small chips rather than a
-       list, because what matters is which one you want and not how many there
-       are — and a disabled one (a section, which takes no member) still shows,
-       because "this cannot be filled that way" is an answer. */
+    /* EVERY ANSWER IS A DOOR — a row of small chips, and a disabled one still
+       shows, because "this cannot be filled that way" is an answer. */
     .hc-targets-answers {
       display: flex; flex-wrap: wrap; gap: 0.25rem; min-width: 0;
     }
     .hc-targets-put {
       padding: 0.15rem 0.4rem;
-      background: rgba(${ACCENT}, 0.12);
-      border: 1px solid rgba(${ACCENT}, 0.45); border-radius: 2px;
-      color: rgba(238, 244, 248, 0.92);
+      background: color-mix(in srgb, var(--hc-targets-mark) 12%, transparent);
+      border: 1px solid color-mix(in srgb, var(--hc-targets-mark) 45%, transparent);
+      border-radius: var(--hc-radius-control, 2px);
+      color: var(--hc-window-ink-loud);
       font: inherit; font-size: 0.78em; line-height: 1.4;
       cursor: pointer; transition: background 120ms ease, border-color 120ms ease;
     }
     .hc-targets-put:hover:not(:disabled) {
-      background: rgba(${ACCENT}, 0.26); border-color: rgba(${ACCENT}, 0.9);
+      background: color-mix(in srgb, var(--hc-targets-mark) 26%, transparent);
+      border-color: var(--hc-targets-mark);
     }
     .hc-targets-put:disabled { opacity: 0.4; cursor: default; }
 
     .hc-targets-count {
       flex: 0 0 auto; margin: 0; padding: 0 0.75rem 0.5rem;
-      color: rgba(238, 244, 248, 0.45);
+      color: var(--hc-window-ink-quiet);
       font-size: 0.72em; letter-spacing: 0.1em; text-transform: uppercase;
-      border-bottom: 1px solid rgba(${STEEL}, 0.18);
+      border-bottom: 1px solid var(--hc-window-line);
     }
 
     /* WHAT THE DESIGN WOULD GROW. The indent is the answer — it says which
-       tile each name hangs from — so the list is drawn as a tree and never as
-       a set of paths with slashes in them. */
+       tile each name hangs from. */
     .hc-targets-grow {
       flex: 0 0 auto;
       margin: 0; padding: 0.6rem 0.75rem 0.8rem;
-      border-top: 1px solid rgba(${STEEL}, 0.18);
+      border-top: 1px solid var(--hc-window-line);
     }
     .hc-targets-grow-head {
       margin: 0 0 0.4rem; font-size: 0.72em; font-weight: 600;
       letter-spacing: 0.1em; text-transform: uppercase;
-      color: rgba(238, 244, 248, 0.55);
+      color: var(--hc-window-ink-quiet);
     }
     .hc-targets-outline {
       list-style: none; margin: 0 0 0.6rem; padding: 0;
@@ -810,7 +919,7 @@ function ensureStyles(): void {
     .hc-targets-outline li {
       position: relative;
       padding-top: 1px; padding-bottom: 1px;
-      font-size: 0.8em; color: rgba(${ACCENT}, 0.85);
+      font-size: 0.8em; color: var(--hc-targets-mark);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .hc-targets-do.is-grow { width: 100%; }
@@ -825,10 +934,10 @@ function ensureStyles(): void {
     }
     .hc-targets-where {
       min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      color: rgba(${ACCENT}, 0.95);
+      color: var(--hc-targets-mark);
     }
     .hc-targets-slot {
-      color: rgba(238, 244, 248, 0.45); font-size: 0.85em;
+      color: var(--hc-window-ink-quiet); font-size: 0.85em;
       font-variant-numeric: tabular-nums;
     }
 
@@ -838,53 +947,53 @@ function ensureStyles(): void {
     }
     .hc-targets-label {
       font-size: 0.7em; letter-spacing: 0.14em; text-transform: uppercase;
-      color: rgba(238, 244, 248, 0.5);
+      color: var(--hc-window-ink-quiet);
     }
     .hc-targets-input {
       width: 100%; min-width: 0; box-sizing: border-box; padding: 0.3rem 0.4rem;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(${STEEL}, 0.3); border-radius: var(--hc-radius-control, 2px);
+      background: var(--hc-window-tint);
+      border: 1px solid var(--hc-window-line-firm); border-radius: var(--hc-radius-control, 2px);
       color: inherit; font: inherit; font-size: 0.95em;
     }
     .hc-targets-input:focus-visible {
-      outline: 1px solid rgba(${ACCENT}, 0.8); outline-offset: -1px;
+      outline: 1px solid var(--hc-targets-mark); outline-offset: -1px;
     }
     .hc-targets-preview {
       margin: 0.1rem 0 0.5rem; min-height: 1em; text-align: right;
-      font-size: 0.85em; color: rgba(${ACCENT}, 0.9);
+      font-size: 0.85em; color: var(--hc-targets-mark);
     }
 
     .hc-targets-acts { display: flex; gap: 0.35rem; margin-bottom: 0.7rem; }
     .hc-targets-do {
       flex: 1 1 0; padding: 0.35rem 0.5rem;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(${STEEL}, 0.3); border-radius: var(--hc-radius-control, 2px);
+      background: var(--hc-window-tint);
+      border: 1px solid var(--hc-window-line-firm); border-radius: var(--hc-radius-control, 2px);
       color: inherit; font: inherit; font-size: 0.85em; letter-spacing: 0.06em;
       cursor: pointer;
     }
-    .hc-targets-do:hover:not(:disabled) { border-color: rgba(${ACCENT}, 0.8); }
+    .hc-targets-do:hover:not(:disabled) { border-color: var(--hc-targets-mark); }
     .hc-targets-do:disabled { opacity: 0.45; cursor: default; }
     .hc-targets-do.is-quiet { flex: 0 0 auto; }
 
     .hc-targets-row, .hc-targets-guide {
       margin: 0 0 0.45rem; font-size: 0.85em; line-height: 1.5;
-      color: rgba(238, 244, 248, 0.72);
+      color: var(--hc-window-ink-plain);
     }
     .hc-targets-row .hc-targets-label { display: block; }
     .hc-targets-sig, .hc-targets-kind {
       font-family: var(--hc-mono, ui-monospace), monospace;
-      color: rgba(238, 244, 248, 0.9);
+      color: var(--hc-window-ink-loud);
     }
-    .hc-targets-empty { color: rgba(238, 244, 248, 0.42); font-style: italic; }
+    .hc-targets-empty { color: var(--hc-window-ink-quiet); font-style: italic; }
     .hc-targets-visit {
       padding: 0; background: none; border: 0;
-      border-bottom: 1px solid rgba(${ACCENT}, 0.5);
-      color: rgba(${ACCENT}, 0.95); font: inherit; cursor: pointer;
+      border-bottom: 1px solid color-mix(in srgb, var(--hc-targets-mark) 50%, transparent);
+      color: var(--hc-targets-mark); font: inherit; cursor: pointer;
     }
     .hc-targets-guide {
       margin-top: 0.6rem; padding-top: 0.5rem;
-      border-top: 1px solid rgba(${STEEL}, 0.18);
-      color: rgba(238, 244, 248, 0.5);
+      border-top: 1px solid var(--hc-window-line);
+      color: var(--hc-window-ink-quiet);
     }
   `
   document.head.appendChild(style)

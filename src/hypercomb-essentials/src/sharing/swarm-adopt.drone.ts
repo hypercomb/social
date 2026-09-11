@@ -966,14 +966,12 @@ export class SwarmAdoptDrone extends Drone {
   #adoptQueue = (): AdoptQueueLike | undefined =>
     this.#ioc()?.get?.(ADOPT_QUEUE_KEY) as AdoptQueueLike | undefined
 
-  /** BEHAVIOURS COME AFTER THE TILES — the Beehaviors panel lands ONCE, on
-   *  the first tile of the gesture, when the whole gesture is in. The panel
-   *  replaces its subject, so firing it per fold meant N wipes and
-   *  last-one-wins; firing it mid-drain would land it on a half-adopted set. */
+  /** @deprecated 2026-09-10 — the adopt gesture no longer lands the
+   *  Beehaviors panel on the adopted tile: behaviours are managed only from
+   *  the context layer, and the adopted tile is not where you stand. All that
+   *  is left is settling the row's outcome; kept until its callers retire. */
   #openBehaviours = (label: string): void => {
-    const at = [...(this.#ioc()?.get?.(LINEAGE_KEY) as PlacementLineage | undefined)?.explorerSegments?.() ?? []]
     EffectBus.emit('features:outcome', { cell: label, kind: '', ok: true, message: '' })
-    EffectBus.emit('tile:action', { action: 'features', label, segments: [...at, label] })
   }
 
   /** True while a drain is running — the queue is serial by construction so
@@ -1224,17 +1222,15 @@ export class SwarmAdoptDrone extends Drone {
     if (res === 'committed') {
       // The pull may add/refresh feature decorations without a per-decoration
       // event — forget the label so the re-render re-walks the decorations slot
-      // (keeps the features icon's visual-bee gate honest) and bust the tile's
-      // per-cell caches so the publisher's latest image/border/tags show.
+      // and bust the tile's per-cell caches so the publisher's latest
+      // image/border/tags show.
       forgetDecorationLabel(branch.label)
       EffectBus.emit('tile:saved', { cell: branch.label })
     }
-    // Adopt SHOWS THE BEHAVIORS: after the pull lands (re-clicking adopt
-    // re-pulls the publisher's latest and returns you to this view), open the
-    // Beehaviors panel for the tile. The tiles are IN; the panel is where
-    // the participant sees what they carry and toggles it — a community-
-    // blocked feature reads "needs your OK" with its allow override right
-    // there.
+    // Adopt no longer lands on the Beehaviors panel for the adopted tile
+    // (deprecated 2026-09-10): behaviours are managed only from the context
+    // layer, and the adopted tile is not where you stand. The render-time
+    // gate stays the trust surface for a foreign page.
     if (res === 'committed' || res === 'exists') {
       // Seed the auto-sync receipt: this publisher sig IS the current
       // generation here, so re-broadcasts of the same sig never re-fold.
@@ -1245,12 +1241,9 @@ export class SwarmAdoptDrone extends Drone {
       // the installer's config fold, so when the installer went the marker
       // would have gone stale for every adopt that isn't one.
       this.#recordFoldedBranch(branch.layerSig, branch.label, [...branch.at])
-      // Bulk additive child-adopt (#additiveAdoptHeld) suppresses the per-tile
-      // Beehaviors landing — folding N missing children must not open N panels.
-      // The single-tile adopt still lands on the panel (its whole point).
+      // The row's outcome still settles; the per-tile panel landing is gone.
       if (!opts?.silent) {
         EffectBus.emit('features:outcome', { cell: branch.label, kind: '', ok: true, message: '' })
-        EffectBus.emit('tile:action', { action: 'features', label: branch.label, segments: [...branch.at, branch.label] })
       }
     } else if (res === 'rewound') {
       // The history cursor is viewing the past — the committer refuses to

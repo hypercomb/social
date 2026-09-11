@@ -2,9 +2,19 @@
 //
 // THE FLEX EDITOR — the other side of the pane.
 //
-// Select a container in the layout designer and this opens on the RIGHT,
-// opposite the palette: the palette is what a container could BE, this is how
-// the one you picked BEHAVES.
+// The layout designer selects a container; this shows, on the RIGHT, opposite
+// the palette: the palette is what a container could BE, this is how the one
+// you picked BEHAVES.
+//
+// ── IT OPENS WHEN ASKED ─────────────────────────────────────────────────
+//
+// It used to open by itself on every selection. That put a third window on
+// screen the moment a design was touched, beside the properties and the
+// targets, and the one job it does better than the properties — comparing
+// values you cannot choose between — is the rarer act. So it is a toggle in
+// the designer's header: asked for once, it stays asked for (remembered), and
+// it shows whenever the designer is up with a container plugged in. Its own
+// close says "not now", and that is remembered the same way.
 //
 // ── AN ACCORDION OF AXES ────────────────────────────────────────────────
 //
@@ -38,12 +48,13 @@
 // ── IT READS NOTHING ITSELF ─────────────────────────────────────────────
 //
 // Shell UI must not import essentials. TemplateAuthorDrone is the one reader;
-// this window renders `template:selected` and emits `template:set-var` back —
+// this window renders `template:selected` — which the drone only computes
+// while this window says it is showing — and emits `template:set-var` back,
 // the same intent the designer's own sliders use, so a variable has one write
 // path however it was moved.
 
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
-import { Component, computed, signal, type OnDestroy } from '@angular/core'
+import { Component, computed, effect, signal, untracked, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
@@ -60,6 +71,10 @@ interface SelectionMsg {
   layout?: string
   axes?: AxisState[]
 }
+
+/** Whether the participant asked for the gallery. Chrome: where you keep a
+ *  comparison window says nothing about the design it compares. */
+const WANTED_KEY = 'hc:layout-flex'
 
 @Component({
   selector: 'hc-flex-editor',
@@ -78,10 +93,9 @@ export class FlexEditorComponent implements OnDestroy {
    *  time, because a tool window is the thing you are doing (window-rule.ts).
    *  This is not that. It cannot exist without the designer, it shows the
    *  container the designer has selected, and every press in it edits that
-   *  selection: put the two side by side or neither is any use. That is the
-   *  same relation the pheromone palette has to whatever it paints, and the
-   *  rule states its exception without naming ids so exactly this case can
-   *  declare itself into it.
+   *  selection: put the two side by side or neither is any use. The rule
+   *  states its exception without naming ids so exactly this case can declare
+   *  itself into it.
    *
    *  On a phone the exception is spent — one full-bleed sheet has no room for
    *  a second — and the rule decides that on its own. */
@@ -104,33 +118,51 @@ export class FlexEditorComponent implements OnDestroy {
   /** The level being configured, as a trail. */
   readonly where = computed(() => this.path().join(' › '))
 
+  /** WHETHER THE PARTICIPANT ASKED FOR THE GALLERY. Remembered — see the
+   *  header on why it no longer opens by itself. */
+  readonly wanted = signal(safeRead(WANTED_KEY) === 'on')
+  /** The designer is showing, and the container on it is plugged in. Without
+   *  both, a gallery has nothing to draw and would only be a window in the way. */
+  readonly #designerOpen = signal(false)
+  readonly #bound = signal(false)
+
   #busCleanup: (() => void)[] = []
 
   constructor() {
-    // The designer owns whether there is a selection at all; this window is
-    // its other half and never opens on its own.
+    this.#busCleanup.push(EffectBus.on<{ open?: boolean; at?: number }>('flex:open', payload => {
+      // Stamped, like every open intent here: the bus replays its last value,
+      // and a reload must not re-deliver a request nobody just made.
+      if (Math.abs(Date.now() - (payload?.at ?? 0)) > 10_000) return
+      this.#want(payload?.open === true)
+    }))
+
     this.#busCleanup.push(EffectBus.on<SelectionMsg | null>('template:selected', state => {
-      if (!state?.axes?.length) {
-        this.axes.set([])
-        this.visible.set(false)
-        return
-      }
-      const moved = (state.path ?? []).join('/') !== this.path().join('/')
-      this.segments.set((state.segments ?? []).map(String))
-      this.path.set((state.path ?? []).map(String))
-      this.layout.set(String(state.layout ?? ''))
-      this.axes.set(state.axes ?? [])
+      const moved = (state?.path ?? []).join('/') !== this.path().join('/')
+      this.segments.set((state?.segments ?? []).map(String))
+      this.path.set((state?.path ?? []).map(String))
+      this.layout.set(String(state?.layout ?? ''))
+      this.axes.set(state?.axes ?? [])
       // A different container is a different question: do not carry the last
       // one's open row across, or the panel answers something nobody asked.
       if (moved) this.openAxis.set('')
-      this.visible.set(true)
     }))
 
-    // Closing the designer closes this with it: a configuration editor for a
-    // container nobody is looking at is a window in the way.
     this.#busCleanup.push(EffectBus.on<{ open?: boolean }>('template:view-state', state => {
-      if (state?.open === false) this.visible.set(false)
+      this.#designerOpen.set(state?.open === true)
     }))
+    this.#busCleanup.push(EffectBus.on<{ layout?: string }>('template:state', state => {
+      this.#bound.set(!!state?.layout)
+    }))
+
+    // SHOWING IS DERIVED, never flipped by hand from three places. Closing the
+    // designer puts this away with it, unplugging the container does too, and
+    // the next time both are true it comes back — because it was asked for.
+    effect(() => {
+      const show = this.wanted() && this.#designerOpen() && this.#bound()
+      if (show === untracked(() => this.visible())) return
+      this.visible.set(show)
+      EffectBus.emit('flex:view-state', { open: show })
+    })
   }
 
   ngOnDestroy(): void {
@@ -165,10 +197,27 @@ export class FlexEditorComponent implements OnDestroy {
     return true
   }
 
+  /** The window's own close is "not now" — remembered, so the designer's
+   *  toggle goes dark with it and the gallery stays away until asked for. */
   close(): void {
-    this.visible.set(false)
-    EffectBus.emit('flex:view-state', { open: false })
+    this.#want(false)
   }
+
+  #want(open: boolean): void {
+    this.wanted.set(open)
+    safeWrite(WANTED_KEY, open ? 'on' : 'off')
+  }
+}
+
+/** Storage can throw in a private window or with site data blocked; a gallery
+ *  that will not open because a preference could not be read is the worse
+ *  failure. */
+function safeRead(key: string): string | null {
+  try { return localStorage.getItem(key) } catch { return null }
+}
+
+function safeWrite(key: string, value: string): void {
+  try { localStorage.setItem(key, value) } catch { /* nothing to do about it */ }
 }
 
 registerShellSurface({

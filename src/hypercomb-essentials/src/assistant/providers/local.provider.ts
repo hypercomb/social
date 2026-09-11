@@ -84,7 +84,24 @@ export const LOCAL_PROVIDER: LlmProviderDescriptor = {
   docsUrl: 'https://ollama.com/download',
   // No Authorization header: a local server has no account behind it, and
   // sending `Bearer ` with an empty key makes some builds reject the call.
-  toRequest: request => openAiRequest(`${localLlmHost()}/v1/chat/completions`, request, () => ({})),
+  //
+  // THREE KNOBS ONLY THIS PROVIDER HONOURS. A thinking model spends 197–4000
+  // tokens reasoning before it answers, and a structured answer under a token
+  // cap then arrives empty; `reasoning_effort: 'none'` turned a 2.9 s call into
+  // 0.13 s on qwen3:8b through Ollama's OpenAI layer, and `response_format`
+  // holds the answer to the schema the caller validates anyway
+  // (documentation/chat-route.md §4.1.2). They are added to the shared body
+  // here and nowhere else, so a request that sets none of them is byte for
+  // byte what it was, and no other vendor's body ever carries them.
+  toRequest: request => {
+    const http = openAiRequest(`${localLlmHost()}/v1/chat/completions`, request, () => ({}))
+    if (request.thinking !== false && !request.jsonSchema && request.temperature === undefined) return http
+    const body = JSON.parse(String(http.init.body)) as Record<string, unknown>
+    if (request.thinking === false) body['reasoning_effort'] = 'none'
+    if (request.jsonSchema) body['response_format'] = { type: 'json_schema', json_schema: { name: 'answer', schema: request.jsonSchema } }
+    if (request.temperature !== undefined) body['temperature'] = request.temperature
+    return { url: http.url, init: { ...http.init, body: JSON.stringify(body) } }
+  },
   fromResponse: openAiResponse,
   fromStreamEvent: openAiStreamEvent,
 }

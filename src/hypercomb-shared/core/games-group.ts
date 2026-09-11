@@ -12,17 +12,25 @@
 // aggregator page (MixedGroupBag) — click a game tile to launch.
 //
 // A game is also a BEHAVIOUR in the Beehaviors roster (kind `game:<gameId>`,
-// owned essentials-side by `games/game-enablement.ts`). A switched-off game
-// leaves this group the way a dormant behaviour leaves every other surface —
-// and when the last one goes out, the icon itself goes with it.
+// owned essentials-side by `games/game-enablement.ts`). A switched-off game is
+// HIDDEN on the page, never removed from it (Jaime, 2026-09-10: "you should be
+// able to turn off the behavior but you shouldn't be able to lose the
+// possibility of restoring the icon"). The page's children are DERIVED from
+// members(): a member missing here is a cell MixedGroupBag drops from the
+// /games layer, and no undo brings it back — the next reconcile re-derives the
+// children and forces the cursor to head. So a dormant game stays a member,
+// flagged `dormant`: its cell keeps its place, show-cell paints it grey
+// whatever the show-hidden eye says, and the unhide every hidden tile offers
+// turns its light back on.
 //
 // Shell-level: never imports essentials; resolves games purely by enumerating
 // window.ioc and routes a launch back as `<gameId>:toggle` (the uniform toggle
 // the game drones already listen for). Mirrors websites-group.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, normalizeCell } from '@hypercomb/core'
 import { groupRegistry, type GroupMember } from './group-registry'
 import { LaunchGroupBase } from './launch-group-base'
+import { setKindGlobalOn } from '../ui/features-viewer/behavior-enablement'
 
 /** The self-describing surface a `genotype:'game'` bee exposes for the launcher. */
 type GameLike = {
@@ -35,6 +43,9 @@ type GameLike = {
    *  lens) so the shell never has to learn the spelling — the same way it
    *  reads the label and the icon off the bee rather than holding a table. */
   gameDormant?: unknown
+  /** The roster kind whose light this game is — named by the bee, for the
+   *  same reason: relighting it from the page must not spell it here. */
+  behaviorKind?: unknown
 }
 
 type IocLike = {
@@ -44,6 +55,8 @@ type IocLike = {
 }
 
 const ioc = (): IocLike | undefined => (window as unknown as { ioc?: IocLike }).ioc
+
+const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
 
 class GamesGroup extends LaunchGroupBase {
   override readonly id = 'games'
@@ -59,32 +72,37 @@ class GamesGroup extends LaunchGroupBase {
     ioc()?.onRegister((_key, value) => {
       if ((value as GameLike)?.genotype === 'game') groupRegistry.notifyChanged()
     })
-    // A roster flip changes who is in the group — and when the last lit game
-    // goes out, LaunchGroupBase hides the icon entirely (0 members). Without
-    // this the launcher would keep offering a game that is switched off, and
-    // clicking it would do nothing, which is worse than not being there.
+    // A roster flip changes how a member shows (lit ↔ hidden), so the page
+    // repaints in place — the cell itself never leaves the layer.
     EffectBus.on('behavior:enablement-changed', () => groupRegistry.notifyChanged())
+    // UNHIDE IS THE WAY BACK. A dormant game's tile wears the hidden face, so
+    // the overlay offers the same unhide any hidden tile offers — and on this
+    // page, unhiding a switched-off game means turning its light back on.
+    EffectBus.on<{ cell?: string }>('tile:unhidden', (p) => {
+      if (groupRegistry.currentId() !== this.id) return
+      const kind = str(this.#dormantGame(str(p?.cell))?.behaviorKind)
+      if (kind) setKindGlobalOn(kind, true)
+    })
   }
 
   /** The live pool of games — every `genotype:'game'` bee in IoC that carries a
-   *  launch descriptor AND whose Beehaviors light is on. No roster: a new game
-   *  module appears here for free, and a switched-off one leaves. */
+   *  launch descriptor. No roster: a new game module appears here for free. A
+   *  switched-off one STAYS, flagged `dormant`, so its tile is hidden rather
+   *  than deleted. */
   override members(): GroupMember[] {
-    const c = ioc()
-    if (!c) return []
-    const seen = new Set<string>()
     const out: GroupMember[] = []
-    for (const key of c.list()) {
-      const g = c.get(key) as GameLike | undefined
-      if (!g || g.genotype !== 'game') continue
-      // Off = gone, the same answer every other dormant behaviour gives.
-      if (g.gameDormant === true) continue
-      const gid = typeof g.gameId === 'string' ? g.gameId.trim() : ''
-      if (!gid || seen.has(gid)) continue
+    const seen = new Set<string>()
+    for (const g of this.#games()) {
+      const gid = str(g.gameId)
+      if (seen.has(gid)) continue
       seen.add(gid)
-      const label = typeof g.gameLabel === 'string' && g.gameLabel.trim() ? g.gameLabel.trim() : gid
-      const icon = typeof g.gameIcon === 'string' && g.gameIcon.trim() ? g.gameIcon.trim() : 'sports_esports'
-      out.push({ key: gid, label, segments: [], icon })
+      out.push({
+        key: gid,
+        label: this.#labelOf(g),
+        segments: [],
+        icon: str(g.gameIcon) || 'sports_esports',
+        ...(g.gameDormant === true ? { dormant: true } : {}),
+      })
     }
     return out.sort((a, b) => a.label.localeCompare(b.label))
   }
@@ -94,6 +112,32 @@ class GamesGroup extends LaunchGroupBase {
    *  it); games carry no hive location, so there is nothing to navigate here. */
   protected override activate(m: GroupMember): void {
     EffectBus.emit(`${m.key}:toggle`, {})
+  }
+
+  /** Every game bee with a launch descriptor, lit or not. */
+  *#games(): Generator<GameLike> {
+    const c = ioc()
+    if (!c) return
+    for (const key of c.list()) {
+      const g = c.get(key) as GameLike | undefined
+      if (g?.genotype === 'game' && str(g.gameId)) yield g
+    }
+  }
+
+  #labelOf(g: GameLike): string {
+    return str(g.gameLabel) || str(g.gameId)
+  }
+
+  /** The switched-off game whose tile wears this name. Compared as CELLS: the
+   *  overlay's unhide carries the label as drawn ("Roper"), a typed
+   *  `/hide ~roper` carries the normalized cell ("roper"). */
+  #dormantGame(label: string): GameLike | undefined {
+    const wantedCell = normalizeCell(label)
+    if (!wantedCell) return undefined
+    for (const g of this.#games()) {
+      if (g.gameDormant === true && normalizeCell(this.#labelOf(g)) === wantedCell) return g
+    }
+    return undefined
   }
 }
 

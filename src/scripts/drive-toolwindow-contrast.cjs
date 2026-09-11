@@ -62,6 +62,10 @@ const WINDOWS = [
   { id: 'context',    effect: 'context:tile-changed', payload: {},                   sel: '.ctx-panel' },
   { id: 'publish',    effect: 'publish:render',      payload: {},                    sel: '.publish-panel' },
   { id: 'references', effect: 'references:compose',  payload: {},                    sel: '.ref-panel' },
+  // The tile editor docks into the view with no border of its own, so every
+  // caption rests on the page ground through a translucent pane — exactly the
+  // case this measures. `tile:action` opens it on any label, existing or not.
+  { id: 'tile-editor', effect: 'tile:action', payload: { action: 'edit', label: 'contrast', q: 0, r: 0, index: 0 }, sel: '[data-hc-tile-editor]' },
   { id: 'action',     effect: 'action:hover-show',   payload: {
     label: 'Contrast audit', cmd: 'contrast-audit', kind: 'slash',
     steps: [['Ctrl', 'K']], category: 'audit',
@@ -101,14 +105,24 @@ const MEASURE = (sel) => {
   }
   // The ground a run of text actually sits on: walk out until something is
   // opaque, compositing each translucent layer on the way back down.
+  //
+  // A DRAWN GROUND. Text laid over a picture, an SVG or a canvas has a ground
+  // no computed style can report — walking out would composite it over the
+  // panel behind the drawing, which is not what the eye sees. Such text names
+  // its ground on itself or an ancestor with `data-hc-ground` (the WORST case
+  // of what is drawn there, e.g. a translucent band over a white picture); the
+  // walk stops at that element and composites onto the declared colour.
   const groundOf = (el) => {
     const stack = []
+    const drawn = el.closest('[data-hc-ground]')
+    const declared = drawn ? parse(drawn.getAttribute('data-hc-ground')) : null
     for (let n = el; n; n = n.parentElement) {
+      if (declared && n === drawn) break
       const bg = parse(getComputedStyle(n).backgroundColor)
       if (bg && bg[3] > 0) { stack.unshift(bg); if (bg[3] >= 0.999) break }
       if (n === document.documentElement) break
     }
-    let base = [255, 255, 255, 1]
+    let base = declared ? [declared[0], declared[1], declared[2], 1] : [255, 255, 255, 1]
     for (const layer of stack) base = over(layer, base)
     return base
   }

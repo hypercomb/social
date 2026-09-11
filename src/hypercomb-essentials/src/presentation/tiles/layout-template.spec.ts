@@ -20,6 +20,7 @@ import {
   meaningsIn,
   meaningsOf,
   miniatureVars,
+  variablesAt,
   sanitizeMarks,
   sanitizeMeaning,
   templateContainer,
@@ -59,45 +60,61 @@ const columnFlow = parseLayoutTemplate({
 })!
 
 describe('the built-ins', () => {
-  it('are five primitives, as data', () => {
+  it('are six primitives, as data', () => {
     // There were twenty. Fifteen were another one turned, mirrored or counted
     // higher — every one of those is a GESTURE now, a quarter-turn or a
-    // primitive dropped into a primitive's hole — and the sixteenth was a
-    // one-hole `single` that divided nothing.
-    expect(BUILTIN_LAYOUTS).toHaveLength(5)
+    // primitive dropped into a primitive's hole. The sixteenth was a one-hole
+    // `single` that divided nothing; it is back as the ANCHOR, with a seat.
+    expect(BUILTIN_LAYOUTS).toHaveLength(6)
     expect(BUILTIN_LAYOUTS.map(t => t.name)).toEqual([
-      'split', 'rail', 'thirds', 'bookends', 'measure',
+      'single', 'split', 'rail', 'thirds', 'bookends', 'measure',
     ])
   })
 
-  it('divide in two at least — the outermost panel is implicit', () => {
-    // The floor, and the reason there is one. The container is already being
-    // drawn into something — the designer's pane, the viewport, its own page —
-    // and a layout DIVIDES that rather than putting one more box around it. So
-    // a one-hole layout divides nothing, and `single` was cut.
-    for (const template of BUILTIN_LAYOUTS) {
+  it('anchor ONE part in `single` — a member seat, never the page', () => {
+    // The old `single` was cut because its one hole was the SELF hole, so
+    // nothing could ever be seated into it. The anchor's hole is a seat: the
+    // lone fragment below lands there, and the inset around it is the level's.
+    const single = builtinLayout('single')!
+    expect(single.holes).toHaveLength(1)
+    expect(memberHoles(single)).toHaveLength(1)
+    expect(single.holes[0]).toMatchObject({ key: 'only', fill: 'fixed' })
+    expect(single.holes[0].self).toBeUndefined()
+    const drawn = composeLayout(nodeOf(single))
+    expect(drawn.leaves.map(leaf => leaf.key)).toEqual(['only'])
+    expect(drawn.html).not.toMatch(/data-hc-self/)
+
+    // Every OTHER built-in still divides. DIVISION is the ruler there, not
+    // droppability, and the two are not the same number: `rail` divides in two
+    // and seats ONE part, because its other hole is the container's own page.
+    for (const template of BUILTIN_LAYOUTS.filter(t => t.name !== 'single')) {
       expect(template.holes.length).toBeGreaterThanOrEqual(2)
     }
-    expect(builtinLayout('single')).toBeNull()
-
-    // DIVISION is the ruler, not droppability, and the two are not the same
-    // number: `rail` divides in two and seats ONE part, because its other hole
-    // is the container's own page. Pinned here so the distinction is stated in
-    // the file rather than inferred from the floor.
     expect(memberHoles(builtinLayout('rail')!)).toHaveLength(1)
   })
 
-  it('but the FORMAT still takes one hole, so an older binding still draws', () => {
-    // The floor is a curation rule for the LIBRARY, never a law of the record.
-    // A hive that bound `single` before it was cut resolves it by SIGNATURE
-    // and never by name, so its stored template must keep parsing and keep
-    // drawing. Data never heals.
+  it('keep the anchor key to itself, so its measure cannot swallow a sibling', () => {
+    // `--hc-layout-only: 100%` falls through to everything nested under the
+    // anchor. Were the key `one`, a `split` nested there would read a 100%
+    // basis on its first hole and squeeze its second to nothing.
+    for (const template of BUILTIN_LAYOUTS.filter(t => t.name !== 'single')) {
+      expect(template.holes.map(hole => hole.key)).not.toContain('only')
+    }
+  })
+
+  it('but the FORMAT still takes the old self single, so an older binding still draws', () => {
+    // A hive that bound the old `single` resolves it by SIGNATURE and never by
+    // name, so its stored template must keep parsing and keep drawing. Data
+    // never heals.
     const stored = parseLayoutTemplate({
       kind: 'layout-template', version: 1, name: 'single', flow: 'row',
       holes: [{ key: 'body', fill: 'fluid', self: true }], vars: {},
     })!
     expect(stored.holes).toHaveLength(1)
     expect(templateContainer(stored)).toMatch(/data-hc-self/)
+    // Same name, different bytes — so a different signature, and the old
+    // binding never silently becomes the anchor.
+    expect(layoutTemplateRecord(stored)).not.toEqual(layoutTemplateRecord(builtinLayout('single')!))
   })
 
   it('divide in three at most — the fourth is a nesting', () => {
@@ -193,8 +210,8 @@ describe('holes are an interface', () => {
   it('a band takes the full line and its extent on the other axis', () => {
     const html = templateContainer(banded)
     // Shrinkable, like everything else — it was the last flex-shrink:0.
-    expect(html).toMatch(/flex:0 1 100%;height:var\(--hc-layout-top,0px\)/)
-    expect(html).toMatch(/flex:0 1 100%;height:var\(--hc-layout-bottom,0px\)/)
+    expect(html).toMatch(/flex:0 1 100%;height:var\(--hc-layout-top,3\.5rem\)/)
+    expect(html).toMatch(/flex:0 1 100%;height:var\(--hc-layout-bottom,1rem\)/)
   })
 
   it('gives every track min-width:0 — one long word must not widen its share', () => {
@@ -552,8 +569,18 @@ describe('a hole always fits the space it is allotted', () => {
     // flex-shrink 1, not 0. Zero is the obvious reading of "fixed" and it is
     // wrong at every scale but one: two 10rem rails in a 34px chip overflow by
     // 286px, silently, because flex overflow does not clip.
-    expect(templateContainer(bookends)).toMatch(/flex:0 1 var\(--hc-layout-head,0px\)/)
-    expect(templateContainer(bookends)).toMatch(/flex:0 1 var\(--hc-layout-tail,0px\)/)
+    expect(templateContainer(bookends)).toMatch(/flex:0 1 var\(--hc-layout-head,10rem\)/)
+    expect(templateContainer(bookends)).toMatch(/flex:0 1 var\(--hc-layout-tail,10rem\)/)
+    // The fallback is the template's own default, so a nested level that
+    // declares nothing keeps its measure. Where the template gives a fixed hole
+    // no default it is still 0px, never nothing — an undeclared variable would
+    // leave the basis at auto, and the hole would size itself to its content.
+    const bare = parseLayoutTemplate({
+      kind: 'layout-template', version: 1, name: 'bare', flow: 'row',
+      holes: [{ key: 'strip', fill: 'fixed' }, { key: 'rest', fill: 'fluid' }], vars: {},
+    })!
+    expect(templateContainer(bare)).toMatch(/flex:0 1 var\(--hc-layout-strip,0px\)/)
+    expect(templateContainer(bare)).toMatch(/flex:1 1 var\(--hc-layout-rest,0\)/)
   })
 
   it('a wrapping container fills its box rather than packing to the top', () => {
@@ -569,8 +596,8 @@ describe('a hole always fits the space it is allotted', () => {
 
   it('a band is clamped to the line it was given', () => {
     const html = templateContainer(banded)
-    expect(html).toMatch(/height:var\(--hc-layout-top,0px\);max-height:100%/)
-    expect(html).toMatch(/height:var\(--hc-layout-bottom,0px\);max-height:100%/)
+    expect(html).toMatch(/height:var\(--hc-layout-top,3\.5rem\);max-height:100%/)
+    expect(html).toMatch(/height:var\(--hc-layout-bottom,1rem\);max-height:100%/)
   })
 
   it('refuses a band on a flow that cannot break a line', () => {
@@ -616,8 +643,12 @@ describe('a hole always fits the space it is allotted', () => {
     for (const template of BUILTIN_LAYOUTS) {
       const vars = miniatureVars(template)
       for (const hole of template.holes) {
-        if (hole.fill === 'fixed') expect(vars[hole.key]).toBe('22%')
+        // A default that is ALREADY a share is kept — the anchor at `100%` is
+        // the whole chip, not a 22% strip at one end of it.
+        const own = template.vars[hole.key] ?? ''
+        if (hole.fill === 'fixed') expect(vars[hole.key]).toBe(own.endsWith('%') ? own : '22%')
       }
+      expect(miniatureVars(builtinLayout('single')!)['only']).toBe('100%')
       // No hole EXTENT survives as an absolute length — a zero gutter is
       // still zero at any size, which is why `padding` is exempt.
       for (const hole of template.holes) {
@@ -625,6 +656,63 @@ describe('a hole always fits the space it is allotted', () => {
       }
       expect(vars['overflow']).toBe('hidden')
     }
+  })
+})
+
+describe('the anchor', () => {
+  const single = builtinLayout('single')!
+
+  it('fills its allotment until measured, and holds the measure once it is', () => {
+    const html = templateContainer(single)
+    expect(html).toMatch(/--hc-layout-only:100%/)
+    expect(html).toMatch(/flex:0 1 var\(--hc-layout-only,100%\)/)
+    const measured = templateContainer(single, { ...single.vars, only: '20rem', justify: 'center' })
+    expect(measured).toMatch(/--hc-layout-only:20rem/)
+    expect(measured).toMatch(/justify-content:center/)
+  })
+
+  it('turned, the same bytes are a height', () => {
+    // Nothing about the hole is rewritten — the declaration that was a width
+    // in a row is a height in a column.
+    const turned = templateContainer(single, { ...single.vars, direction: turnedDirection(single) })
+    expect(turned).toMatch(/flex-direction:column/)
+    expect(turned).toMatch(/flex:0 1 var\(--hc-layout-only,100%\)/)
+  })
+
+  it('keeps its seat nested, with nothing above it to say otherwise', () => {
+    // Only the root merges defaults, so a nested level declares nothing — and
+    // a fixed hole used to fall back to 0px and vanish. The template's own
+    // default is the fallback now; a declaring ancestor still wins.
+    const tree = withNodeAt(nodeOf(builtinLayout('split')!), ['one'], nodeOf(single, {}))
+    const html = composeLayout(tree).html
+    expect(html).toMatch(/var\(--hc-layout-only,100%\)/)
+    expect(html).not.toMatch(/--hc-layout-only:/)
+    expect(composeLayout(tree).leaves.map(leaf => leaf.path.join('/')))
+      .toEqual(['one/only', 'two'])
+  })
+
+  it('does the same for a nested rail, which used to lose its rail', () => {
+    const tree = withNodeAt(nodeOf(builtinLayout('split')!), ['two'], nodeOf(builtinLayout('rail')!, {}))
+    expect(composeLayout(tree).html).toMatch(/var\(--hc-layout-rail,14rem\)/)
+  })
+
+  it('says where every measurement a level reads comes from', () => {
+    // The anchor declares the inset once; the rail nested in it changes only
+    // its gutter, reads the padding from above, and its rail from its own
+    // template.
+    const anchor = nodeOf(single, { ...single.vars, padding: '2rem', space: '1rem' })
+    const tree = withNodeAt(anchor, ['only'], nodeOf(builtinLayout('rail')!, { space: '0.5rem' }))
+    expect(variablesAt(tree, ['only'])).toEqual([
+      { name: 'space', own: '0.5rem', value: '0.5rem', from: ['only'] },
+      { name: 'padding', own: '', value: '2rem', from: [] },
+      { name: 'rail', own: '', value: '14rem', from: null },
+    ])
+    expect(variablesAt(tree, [])).toEqual([
+      { name: 'space', own: '1rem', value: '1rem', from: [] },
+      { name: 'padding', own: '2rem', value: '2rem', from: [] },
+      { name: 'only', own: '100%', value: '100%', from: [] },
+    ])
+    expect(variablesAt(tree, ['nowhere'])).toEqual([])
   })
 })
 
@@ -763,7 +851,7 @@ describe('a layout is drawn one way and turned to the other three', () => {
       QUARTER_TURNS.map(direction => templateContainer(rail, { ...rail.vars, direction })))
     expect(drawn.size).toBe(4)
     for (const html of drawn) {
-      expect(html).toMatch(/flex:0 1 var\(--hc-layout-rail,0px\)/)
+      expect(html).toMatch(/flex:0 1 var\(--hc-layout-rail,14rem\)/)
     }
   })
 })

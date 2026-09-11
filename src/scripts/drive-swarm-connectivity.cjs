@@ -828,9 +828,8 @@ async function main() {
   check('a flagged site root attaches to its tile (websites belong to a tile)',
     sitePaths.includes('/charlie'), JSON.stringify(bound))
 
-  // (The per-tile FEATURES icon that a bound behaviour earns is a local
-  // behaviour, not a swarm one — it has its own harness:
-  // scripts/drive-tile-behavior-icon.cjs.)
+  // (A bound behaviour earns no per-tile icon — behaviours are managed only
+  // from the context layer; scripts/drive-tile-behavior-icon.cjs holds that.)
 
   // ── the dead-swarm regression ──────────────────────────────────────
   // A client with no zone (what every visitor to a bare-domain origin has:

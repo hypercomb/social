@@ -39,9 +39,11 @@ $accent: #7eb6d6;
   // The rail is hidden, so its gutter goes with it.
   padding-left: 0;
 
-  // The reading half. Hidden, not removed.
+  // The reading half. Hidden, not removed. The route split holds the thread
+  // and the workflow sidebar beside it; both fold with it.
   .chat-rail,
   .chat-list,
+  .chat-route-split,
   .chat-threadwrap,
   .chat-setup {
     display: none;

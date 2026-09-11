@@ -8,11 +8,11 @@ type Point = { x: number; y: number }
 
 export class TouchPanInput {
   #pan: {
-    panBy: (delta: Point) => void
+    panBy: (delta: Point) => Point
   } | null = null
 
   attach = (
-    pan: { panBy: (delta: Point) => void },
+    pan: { panBy: (delta: Point) => Point },
   ): void => {
     this.#pan = pan
   }
@@ -23,13 +23,14 @@ export class TouchPanInput {
 
   /**
    * Called by TouchGestureCoordinator on each move event during a single-finger pan.
+   * Returns the travel the viewport actually applied — zero at a stop.
    */
-  panUpdate = (prev: Point, current: Point, sensitivity: number): void => {
-    if (!this.#pan) return
+  panUpdate = (prev: Point, current: Point, sensitivity: number): Point => {
+    if (!this.#pan) return { x: 0, y: 0 }
 
     const dx = (current.x - prev.x) * sensitivity
     const dy = (current.y - prev.y) * sensitivity
 
-    this.#pan.panBy({ x: dx, y: dy })
+    return this.#pan.panBy({ x: dx, y: dy })
   }
 }

@@ -9,6 +9,8 @@ import {
   plainQuestionText,
   settleQuestions,
   hostWireText,
+  QUESTION_ASKING_INSTRUCTION,
+  QUESTION_FENCE_LANG,
   type QuestionTurn,
 } from './question-fence.js'
 
@@ -18,6 +20,22 @@ const FENCE = '```hypercomb-question\n{"prompt":"How many pages?","options":["On
 
 const user = (text: string): QuestionTurn => ({ role: 'user', text })
 const ai = (text: string): QuestionTurn => ({ role: 'assistant', text })
+
+describe('QUESTION_ASKING_INSTRUCTION — the one lesson, spelled from the parser\'s constants', () => {
+  it('teaches the fence language and the limits the parser enforces', () => {
+    expect(QUESTION_ASKING_INSTRUCTION.startsWith('ASKING.')).toBe(true)
+    expect(QUESTION_ASKING_INSTRUCTION).toContain('`' + QUESTION_FENCE_LANG + '`')
+    expect(QUESTION_ASKING_INSTRUCTION).toContain('ONE fenced code block')
+    expect(QUESTION_ASKING_INSTRUCTION).toContain(`the prompt under ${QUESTION_LIMITS.promptMax} characters`)
+    expect(QUESTION_ASKING_INSTRUCTION).toContain(`each option under ${QUESTION_LIMITS.optionMax}`)
+    expect(QUESTION_ASKING_INSTRUCTION).toContain('LAST in the reply')
+    expect(QUESTION_ASKING_INSTRUCTION).toContain('END THE TURN')
+    // The option count is written in words; if the limits move, the words
+    // must move with them.
+    expect(QUESTION_ASKING_INSTRUCTION).toContain('two to four')
+    expect([QUESTION_LIMITS.optionsMin, QUESTION_LIMITS.optionsMax]).toEqual([2, 4])
+  })
+})
 
 describe('FENCE_RE — chat-markdown\'s fence grammar, to the character', () => {
   it('opens on a run of backticks or tildes with up to three spaces of indent', () => {

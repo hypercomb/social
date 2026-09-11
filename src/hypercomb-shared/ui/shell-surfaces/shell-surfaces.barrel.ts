@@ -59,7 +59,6 @@ import '../contact-card/contact-form.component'
 import '../contact-card/contact-hover.component'
 import '../action-card/action-card.component'
 import '../website-nav/website-nav.component'
-import '../tile-editor/tile-editor.component'
 import '../camera-capture/camera-capture.component'
 import '../portal/portal-overlay.component'
 // Draw on the screen, photograph it, and hand the picture to the agents —

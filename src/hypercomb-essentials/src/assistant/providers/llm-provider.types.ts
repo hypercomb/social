@@ -134,6 +134,12 @@ export type LlmRequest = {
    * Vendors that support prompt caching act on it; the rest ignore it.
    */
   readonly cacheSystem?: boolean
+  /** false = ask a model that can think to answer without a reasoning pass. Honoured by the local provider only. */
+  readonly thinking?: false
+  /** Constrain the answer to this JSON Schema. Honoured by the local provider only. */
+  readonly jsonSchema?: Readonly<Record<string, unknown>>
+  /** Sampling temperature. Honoured by the local provider only. */
+  readonly temperature?: number
   /** The participant's key. `''` for transports that need none. */
   readonly apiKey: string
 }

@@ -1,10 +1,15 @@
 // editor/resource-thumbnail.ts
 //
-// Generates hex-sized thumbnails from an image Blob using a plain offscreen
-// canvas (no Pixi, no ImageEditorService dependency). Produces BOTH orientations
-// (point-top and flat-top) so the dropped resource survives the orientation
-// toggle the same way a tile-editor-saved image does.
+// Small pictures for a dropped or pasted image, in BOTH orientations, so the
+// resource survives the orientation toggle the same way a tile-editor-saved
+// image does.
+//
+// They come from the same capture the editor saves with (`hex-capture.ts`),
+// at the default framing — so when the tile is later opened in the editor
+// the picture sits exactly where the hive showed it, and a save without a
+// touch changes nothing.
 
+import { captureBothOrientations, decodePicture } from './hex-capture.js'
 import type { Settings, HexOrientation } from '../preferences/settings.js'
 
 type GeneratedThumbnails = {
@@ -12,31 +17,16 @@ type GeneratedThumbnails = {
   flatBlob: Blob | null
 }
 
-/**
- * Decode `source` into an Image and produce cover-scaled thumbnails at the
- * point-top and flat-top hex dimensions reported by Settings.
- * Returns null blobs for orientations that failed to encode.
- */
+/** Both orientations' small pictures at the default framing. Null blobs when
+ *  the picture cannot be decoded. */
 export const generateHexThumbnails = async (source: Blob): Promise<GeneratedThumbnails> => {
   const settings = (window as any).ioc?.get?.('@diamondcoreprocessor.com/Settings') as Settings | undefined
-
-  const pw = settings ? Math.round(settings.hexWidth('point-top')) : 346
-  const ph = settings ? Math.round(settings.hexHeight('point-top')) : 400
-  const fw = settings ? Math.round(settings.hexWidth('flat-top')) : 400
-  const fh = settings ? Math.round(settings.hexHeight('flat-top')) : 346
-
-  const objectUrl = URL.createObjectURL(source)
+  const side = settings?.hexagonSide
   try {
-    const img = await loadImage(objectUrl)
-    const [pointBlob, flatBlob] = await Promise.all([
-      renderCover(img, pw, ph),
-      renderCover(img, fw, fh),
-    ])
-    return { pointBlob, flatBlob }
+    const both = await captureBothOrientations(source, typeof side === 'number' && side > 0 ? { side } : {})
+    return { pointBlob: both.point, flatBlob: both.flat }
   } catch {
     return { pointBlob: null, flatBlob: null }
-  } finally {
-    URL.revokeObjectURL(objectUrl)
   }
 }
 
@@ -45,43 +35,28 @@ export const generateHexThumbnails = async (source: Blob): Promise<GeneratedThum
  * in the command-line chevron slot (doesn't need hex dimensions).
  */
 export const generatePreviewThumbnail = async (source: Blob, size = 256): Promise<Blob | null> => {
-  const objectUrl = URL.createObjectURL(source)
   try {
-    const img = await loadImage(objectUrl)
-    return await renderCover(img, size, size)
+    const bitmap = await decodePicture(source)
+    try {
+      const canvas = document.createElement('canvas')
+      canvas.width = size
+      canvas.height = size
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return null
+      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingQuality = 'high'
+      const scale = Math.max(size / bitmap.width, size / bitmap.height)
+      const drawW = bitmap.width * scale
+      const drawH = bitmap.height * scale
+      ctx.drawImage(bitmap, (size - drawW) / 2, (size - drawH) / 2, drawW, drawH)
+      return await new Promise<Blob | null>(resolve => canvas.toBlob(b => resolve(b), 'image/webp', 0.9))
+    } finally {
+      bitmap.close()
+    }
   } catch {
     return null
-  } finally {
-    URL.revokeObjectURL(objectUrl)
   }
 }
-
-const renderCover = (img: HTMLImageElement, targetW: number, targetH: number): Promise<Blob | null> => {
-  const canvas = document.createElement('canvas')
-  canvas.width = targetW
-  canvas.height = targetH
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return Promise.resolve(null)
-
-  const scale = Math.max(targetW / img.naturalWidth, targetH / img.naturalHeight)
-  const drawW = img.naturalWidth * scale
-  const drawH = img.naturalHeight * scale
-  const dx = (targetW - drawW) / 2
-  const dy = (targetH - drawH) / 2
-
-  ctx.drawImage(img, dx, dy, drawW, drawH)
-  return new Promise<Blob | null>((resolve) => {
-    canvas.toBlob(b => resolve(b), 'image/png')
-  })
-}
-
-const loadImage = (src: string): Promise<HTMLImageElement> =>
-  new Promise((resolve, reject) => {
-    const img = new Image()
-    img.onload = () => resolve(img)
-    img.onerror = () => reject(new Error('image decode failed'))
-    img.src = src
-  })
 
 // Back-compat: keep the original name as an alias for any older references.
 export const generateThumbnailBlob = generatePreviewThumbnail

@@ -119,6 +119,7 @@
 @if (!isMobile()) {
   <button class="agent-visibility-toggle"
           [class.rail-left]="dockSide() === 'left'"
+          [class.on-demand]="commandLineOnDemand()"
           [class.agents-hidden]="!agentsVisible()"
           type="button"
           (click)="toggleAgents()"
@@ -237,15 +238,17 @@
   [class.dragging]="pillDragging()"
   [class.landscape]="isLandscape()"
   [class.mobile]="isMobile()"
+  [class.input-open]="isMobile() && inputVisible()"
   [style.left.px]="!isMobile() && !dockSide() ? pillPos()?.x : null"
   [style.top.px]="!isMobile() && !dockSide() ? pillPos()?.y : null"
   (mouseenter)="onBarEnter()"
   (mouseleave)="onBarLeave()"
 >
   <!-- zoomed wrapper keeps pill visuals 2× without scaling stage position.
-       The left full-height rail manages its own height, so the zoom (which
-       would scale the rail off the bottom) is dropped while docked left. -->
-  <div class="pill-scaled" [style.zoom]="dockSide() === 'left' && !isMobile() ? null : pillZoom()">
+       The zoom is dropped on phones — the flat band of labelled cells is
+       never scaled — and while docked left, where the full-height rail
+       manages its own height and the zoom would scale it off the bottom. -->
+  <div class="pill-scaled" [style.zoom]="isMobile() || dockSide() === 'left' ? null : pillZoom()">
   <!-- data-consumes-wheel: the wheel belongs to the toolbar whenever the
        pointer is over it, never to the hive underneath — the same mutual
        exclusion every other scroll surface in the app declares. The global
@@ -276,54 +279,125 @@
     @case ('browsing') {
 
       @if (isMobile()) {
-        <!-- ═══ MOBILE: three labelled discs ═══
-             BACK · ADD · MORE (documentation/mobile-one-column.md). The phone
-             reads a layer as a LIST (hc-layer-list, an essentials surface);
-             the bar under it does three things and every disc carries its
-             word. ADD reveals the composer — the command line, collapsed on a
-             phone until asked for — with focus so the keyboard rises inside
-             the tap; the camera, the library and the link pipeline are the
-             deck's plates until the Add sheet folds them in (pass 2). MORE
-             opens the layer deck: open as, add here, and the how-you-see
-             controls, plus share and swarm. Five discs (back · views ·
-             camera · share · solo) became these three: nothing was deleted,
-             it moved off the primary screen. The side groups survive as DOM
-             grouping only (they carry the landscape order remap). -->
+        <!-- ═══ MOBILE: two flat bands of labelled cells ═══
+             (documentation/mobile-one-column.md) The phone reads a layer as a
+             list or as hexagons, under the list header's back · where you are
+             · ⋯ (the layer deck). This bar is the thumb's half of the screen:
+
+               tools row  SHARE · SWARM · PHEROMONES · PIN · FULLSCREEN
+               bottom row BACK  · FACE  · CAMERA     · ADD · TOOLS
+
+             The bottom row is a flat band flush to the bottom edge and always
+             there; the tools row is a second band directly above it, one
+             hairline between, while the tools cell has it open. Both are the
+             same five-column grid, so every tool sits over a column of the row
+             below. Every cell is a glyph over its word — no border, circle,
+             shadow or press scaling; the only rounded pixels are the
+             pressed/lit highlight behind a cell. Both rows are IN FLOW in the
+             stage, so the edge the bar publishes (`--hc-controls-bottom`)
+             grows with the tools row and nothing is covered by it. In
+             landscape the bands turn into a flat rail flush to the left edge
+             under the header: back at the bottom, the tools column to the
+             right of it. -->
+
+        <!-- TOOLS ROW — a toggle, remembered (`hc:phone-tools-row`); no tap
+             elsewhere puts it away. -->
+        @if (toolsRowOpen()) {
+          <div class="controls-section mobile-tools-row">
+            <!-- SHARE — the publish sheet for this page. -->
+            <button class="ctl-btn share-btn"
+                    (click)="openShare()"
+                    [attr.aria-label]="'controls.share' | t">
+              <span class="mat-sym">ios_share</span>
+              <span class="ctl-label" aria-hidden="true">{{ 'controls.share' | t }}</span>
+            </button>
+
+            <!-- SWARM — solo or swarm; going public asks where first. -->
+            <button class="ctl-btn mesh-mobile-btn" [class.shield-mode]="meshPublic()"
+                    (click)="toggleMeshPublic()"
+                    [attr.aria-label]="(meshPublic() ? 'mesh.swarm' : 'mesh.solo') | t">
+              <span class="mat-sym" [class.filled]="meshPublic()">{{ meshPublic() ? 'groups' : 'person' }}</span>
+              <span class="ctl-label" aria-hidden="true">{{ (meshPublic() ? 'controls.swarm' : 'controls.solo') | t }}</span>
+            </button>
+
+            <!-- PHEROMONES — the pheromone panel. -->
+            <button class="ctl-btn pheromone-btn"
+                    (click)="openPheromones()"
+                    [attr.aria-label]="'tags.panel.open' | t">
+              <span class="mat-sym">label</span>
+              <span class="ctl-label" aria-hidden="true">{{ 'quickmenu.tags' | t }}</span>
+            </button>
+
+            <!-- PIN — hold this layer's view where it is. -->
+            <button class="ctl-btn pin-btn" [class.active]="pinnedHere()"
+                    (click)="togglePin()"
+                    [attr.aria-pressed]="pinnedHere()"
+                    [attr.aria-label]="'controls.pin' | t">
+              <span class="mat-sym" [class.filled]="pinnedHere()">push_pin</span>
+              <span class="ctl-label" aria-hidden="true">{{ 'controls.pin' | t }}</span>
+            </button>
+
+            <!-- FULLSCREEN — only where the browser has one; its column stays
+                 empty otherwise rather than the tools closing up. -->
+            @if (fullscreenEnabled) {
+              <button class="ctl-btn fullscreen-btn" [class.active]="isFullscreen()"
+                      (click)="toggleFullscreen()"
+                      [attr.aria-pressed]="isFullscreen()"
+                      [attr.aria-label]="'controls.fullscreen' | t">
+                <span class="mat-sym">{{ isFullscreen() ? 'fullscreen_exit' : 'fullscreen' }}</span>
+                <span class="ctl-label" aria-hidden="true">{{ 'controls.fullscreen' | t }}</span>
+              </button>
+            }
+          </div>
+        }
 
         <div class="controls-section mobile-nav">
-          <div class="mobile-side left" data-consumes-wheel>
-            <!-- BACK — fires on pointerdown; on a phone it first puts away any
-                 sheet that is up (goBack), and only then walks the lineage. -->
-            <button class="ctl-btn back-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()"
-                    (pointerdown)="onBackPointerDown($event)" (click)="onBackClick()"
-                    [attr.aria-label]="'controls.go-back' | t">
-              <span class="mat-sym">arrow_back</span>
-              <span class="ctl-label" aria-hidden="true">{{ 'controls.back' | t }}</span>
-            </button>
-          </div>
+          <!-- BACK — fires on pointerdown; on a phone it first puts away any
+               sheet that is up (goBack), and only then walks the lineage. -->
+          <button class="ctl-btn back-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()"
+                  (pointerdown)="onBackPointerDown($event)" (click)="onBackClick()"
+                  [attr.aria-label]="'controls.go-back' | t">
+            <span class="mat-sym">arrow_back</span>
+            <span class="ctl-label" aria-hidden="true">{{ 'controls.back' | t }}</span>
+          </button>
 
-          <!-- ADD — the centre act: the Add sheet (hc-add-sheet). Name it,
-               take a photo, the library, paste a link, say it — one sheet,
-               five doors. Lit while the sheet is up; a second press puts it
-               away. -->
-          <button class="ctl-btn add-btn mobile-center" [class.active]="addOpen()"
+          <!-- FACE — list ⇄ hexagons. It shows the face a tap turns to. The
+               layer list owns the face (`phone:face`); the cell only asks
+               (`phone:face-set`). -->
+          <button class="ctl-btn face-btn"
+                  (click)="togglePhoneFace()"
+                  [attr.aria-label]="(listFace() ? 'layer-list.face-hexagons' : 'layer-list.face-list') | t">
+            <span class="mat-sym">{{ listFace() ? 'hexagon' : 'view_list' }}</span>
+            <span class="ctl-label" aria-hidden="true">{{ (listFace() ? 'layer-list.face-hexagons' : 'layer-list.face-list') | t }}</span>
+          </button>
+
+          <!-- CAMERA — the centre cell: the viewfinder, whose shutter makes a
+               tile here. -->
+          <button class="ctl-btn camera-btn mobile-center"
+                  (click)="openCamera()"
+                  [attr.aria-label]="'controls.camera' | t">
+            <span class="mat-sym">photo_camera</span>
+            <span class="ctl-label" aria-hidden="true">{{ 'camera.title' | t }}</span>
+          </button>
+
+          <!-- ADD — the Add sheet (hc-add-sheet). Name it, take a photo, the
+               library, paste a link, say it — one sheet, five doors. Lit while
+               the sheet is up; a second press puts it away. -->
+          <button class="ctl-btn add-btn" [class.active]="addOpen()"
                   (click)="toggleAdd()"
                   [attr.aria-label]="'controls.add' | t">
             <span class="mat-sym">add</span>
             <span class="ctl-label" aria-hidden="true">{{ 'controls.add' | t }}</span>
           </button>
 
-          <div class="mobile-side right" data-consumes-wheel>
-            <!-- MORE — the layer deck (`layer:deck-open`): open this layer as
-                 one of its views, add a creation here, share it, the swarm,
-                 and the how-you-see controls. -->
-            <button class="ctl-btn more-btn"
-                    (click)="openViews()"
-                    [attr.aria-label]="'controls.more' | t">
-              <span class="mat-sym">more_horiz</span>
-              <span class="ctl-label" aria-hidden="true">{{ 'controls.more' | t }}</span>
-            </button>
-          </div>
+          <!-- TOOLS — opens and closes the tools row; lit while it is open. -->
+          <button class="ctl-btn tools-btn" [class.active]="toolsRowOpen()"
+                  (click)="toggleToolsRow()"
+                  [attr.aria-expanded]="toolsRowOpen()"
+                  [attr.aria-label]="'controls.view-row' | t">
+            <span class="mat-sym">{{ toolsRowOpen() ? 'expand_more' : 'expand_less' }}</span>
+            <span class="ctl-label" aria-hidden="true">{{ 'controls.tools' | t }}</span>
+          </button>
         </div>
       } @else {
         <!-- ═══ DESKTOP: single-row controls with edit-mode toggle ═══ -->

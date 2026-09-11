@@ -131,13 +131,17 @@ describe('an ask carries what this hive can do', () => {
   })
 
   it('teaches the responder how to ask the participant a direction', async () => {
-    const { QUESTION_FENCE_LANG, QUESTION_LIMITS } = await import('@hypercomb/core')
+    const { QUESTION_ASKING_INSTRUCTION, QUESTION_FENCE_LANG, QUESTION_LIMITS } = await import('@hypercomb/core')
     const queen = new LlmQueenBee()
     await queen.submitChat('c1', 'how should this be laid out?', [], [])
 
     const text = resources.get(String(lastPayload()['instructionSig'])) ?? ''
+    // ONE paragraph, from core — the local providers append the same
+    // constant, so the bridge tier cannot teach a different convention. It
+    // closes the instruction, so the slice from ASKING. is exactly it.
     const asking = text.slice(text.indexOf('ASKING.'))
-    expect(asking.startsWith('ASKING.')).toBe(true)
+    expect(asking).toBe(QUESTION_ASKING_INSTRUCTION)
+    expect(text.split('ASKING.')).toHaveLength(2)
     // The convention, as the parser reads it: ONE fence, that language, at
     // the END, two to four options, and the turn ends there.
     expect(asking).toContain('`' + QUESTION_FENCE_LANG + '`')

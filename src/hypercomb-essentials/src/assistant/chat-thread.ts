@@ -24,7 +24,8 @@
 // replies are two turns, never an overwrite.
 
 import { EffectBus } from '@hypercomb/core'
-import { readRoute, type Route } from './chat-route.js'
+import { organizeRoute, readRoute, type Route } from './chat-route.js'
+import { runIdForAsk } from './chat-steps.js'
 
 /** Pool of meaning holding conversations. Bare word, already in the frozen
  *  registry — do NOT re-spell it; `sign()` of a new spelling is a different
@@ -1266,6 +1267,36 @@ export class ChatThreads {
    *  the shell simply has no route. */
   readRoute(convoId: string, liveRunId?: string): Promise<Route> {
     return readRoute(convoId, liveRunId)
+  }
+
+  /** The run an outstanding ask is making — the `liveRunId` `readRoute`
+   *  takes. Without it the shell has the ask sig in hand and no way to name
+   *  the live run, so the route could only ever place it by time. Derived by
+   *  chat-steps (`runIdForAsk`), the same rule the renderer files the run
+   *  under, never re-spelled here. A METHOD for the same reason `readRoute`
+   *  is one: a field would dereference the chat-steps binding while the
+   *  import cycle is still evaluating. Feature-detected by the shell
+   *  (`runIdForAsk?.`). */
+  runIdForAsk(askSig: string): Promise<string> {
+    return runIdForAsk(askSig)
+  }
+
+  /** Organize the conversation's WORKFLOW with the participant's own
+   *  machine-local model — its structure when a closed exchange lies beyond
+   *  the flow, then a card per node — only when that model is already known
+   *  awake, never a probe (chat-route.ts, `organizeRoute`). `liveRunId` and
+   *  `waiting` are the shell's own knowledge of what is outstanding; `prefer`
+   *  names the node the participant is looking at, whose card is written
+   *  first. REFUSED — resolving 0 with nothing read, called or emitted — while
+   *  `waiting`, or for 30 s after the participant's own local chat, so it can
+   *  never re-trigger itself through a refresh hint. Resolves 1 when a flow
+   *  was written and announced as `chat:route-flow-changed { convoId }`, else
+   *  0. Shares one pinned lane and guard with the orchestrator's passive
+   *  drain, whichever module copy holds this class. A METHOD for the same
+   *  import-cycle reason as `readRoute`; feature-detected by the shell
+   *  (`organizeRoute?.`). */
+  organizeRoute(convoId: string, liveRunId?: string, waiting?: boolean, prefer?: string): Promise<number> {
+    return organizeRoute(convoId, liveRunId, waiting, prefer)
   }
 }
 

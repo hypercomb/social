@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { RpgOverworld, RpgOverworldView, componentKey, type WorldHooks } from './rpg-overworld.js'
+import { RpgOverworld, RpgOverworldView, WORLD_SHRINES, WORLD_START, componentKey, valleyPoint, type WorldHooks } from './rpg-overworld.js'
+
+const dawn = { x: WORLD_SHRINES[0].x, y: WORLD_SHRINES[0].y }
 
 function setup(owned = ['triangle:0']) {
   const inventory = new Set(owned)
@@ -14,7 +16,7 @@ describe('world save snapshots', () => {
   it('round-trips the player, conversations, knowledge and individual shrine sockets without replaying rewards', () => {
     const { hooks, model } = setup()
     model.answer('mira', 1)
-    Object.assign(model.player, { x: 8, y: 4, facing: 'left' })
+    Object.assign(model.player, { ...dawn, facing: 'left' })
     model.fillSocket('dawn-shrine', 0)
     const snapshot = model.exportState()
     const restored = new RpgOverworld(hooks)
@@ -23,7 +25,7 @@ describe('world save snapshots', () => {
     expect(hooks.grantRelic).not.toHaveBeenCalled()
     expect(hooks.onEnter).not.toHaveBeenCalled()
     snapshot.player.x = 999; snapshot.met.push('unknown'); snapshot.filledSockets.length = 0
-    expect(restored.player.x).toBe(8)
+    expect(restored.player.x).toBe(dawn.x)
     expect(model.filledSockets.has('dawn-shrine:0')).toBe(true)
     expect(model.met.has('unknown')).toBe(false)
   })
@@ -46,35 +48,44 @@ describe('world save snapshots', () => {
   it.each([{ x: 4.5, y: 4.5 }, { x: -1, y: 12 }, { x: NaN, y: 8 }, { x: Infinity, y: 12 }])('rejects invalid or blocked world positions %j', player => {
     const { model } = setup()
     model.restoreState({ version: 1, player: { ...player, facing: 'diagonal' } })
-    expect(model.player).toEqual({ x: 4, y: 12, facing: 'down' })
+    expect(model.player).toEqual({ ...WORLD_START, facing: 'down' })
   })
 
   it('replaces all old slot facts and resets unsupported versions', () => {
     const { model } = setup()
     model.answer('mira', 1)
-    Object.assign(model.player, { x: 8, y: 4 })
+    Object.assign(model.player, dawn)
     model.fillSocket('dawn-shrine', 0)
     model.restoreState({ version: 1, player: { x: 10, y: 12, facing: 'right' }, met: ['oren'] })
-    expect(model.player).toEqual({ x: 10, y: 12, facing: 'right' })
+    expect(model.player).toEqual({ ...valleyPoint(10, 12), facing: 'right' })
     expect([...model.met]).toEqual(['oren'])
     expect(model.solved.size).toBe(0)
     expect(model.filledSockets.size).toBe(0)
-    model.restoreState({ version: 2, player: { x: 10, y: 12 } })
+    model.restoreState({ version: 3, player: { x: 10, y: 12 } })
     expect(model.exportState()).toEqual(new RpgOverworld(model.hooks).exportState())
+  })
+
+  it('restores island positions from version 2 saves and keeps version 1 positions inside the valley they were written on', () => {
+    const { model } = setup()
+    model.restoreState({ version: 2, player: { x: 84, y: 142, facing: 'up' } })
+    expect(model.player).toEqual({ x: 84, y: 142, facing: 'up' })
+    model.restoreState({ version: 1, player: { x: 84, y: 142, facing: 'up' } })
+    expect(model.player).toEqual({ ...WORLD_START, facing: 'up' })
   })
 
   it('restores the mounted view without a conversation or entry action', () => {
     const { hooks } = setup()
     const host = document.createElement('div')
     const view = new RpgOverworldView(hooks)
+    const context = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
     try {
       view.mount(host); view.interact()
       expect(view.isDialogOpen).toBe(true)
       view.restoreState({ version: 1, player: { x: 9, y: 12, facing: 'right' } })
       expect(view.isDialogOpen).toBe(false)
-      expect(view.exportState().player).toEqual({ x: 9, y: 12, facing: 'right' })
+      expect(view.exportState().player).toEqual({ ...valleyPoint(9, 12), facing: 'right' })
       expect(host.querySelector('.sol-rpg-world-prompt')?.textContent).toContain('Wayfarer Cavern')
       expect(hooks.onDungeon).not.toHaveBeenCalled()
-    } finally { view.dispose() }
+    } finally { view.dispose(); context.mockRestore() }
   })
 })

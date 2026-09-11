@@ -641,15 +641,17 @@ export class SquareTileViewDrone extends Drone {
         const notes = window.ioc?.get<NotesWriteShape>('@diamondcoreprocessor.com/NotesService')
         void notes?.addAtSegments?.(parent, label, text)
       },
-      // The panel takes an explicit path, so this is right at either scale.
-      onBehaviors: () => EffectBus.emit('tile:action', {
-        action: 'features', label, segments: [...brief.segments],
-      }),
+      // Behaviours are managed only from the context layer, so the brief offers
+      // the Beehaviors panel only at page scale — standing IN the tile, where
+      // the tile is the context. A plate is a tile you are not in, and managing
+      // its behaviours from there was the misaligned door (deprecated 2026-09-10).
+      onBehaviors: page ? () => EffectBus.emit('features:context-open', {}) : undefined,
       onBehavior: behavior => {
         // A dormant takeover renders nothing — the mode would flip and bounce
-        // straight back. Send it where the sleep is explained and woken.
+        // straight back. At page scale the context panel explains and wakes it;
+        // on a plate the row's "asleep" is the whole answer.
         if (behavior.dormant) {
-          EffectBus.emit('tile:action', { action: 'features', label, segments: [...brief.segments] })
+          if (page) EffectBus.emit('features:context-open', {})
           return
         }
         // Standing in the tile, the view is simply this layer's other face.

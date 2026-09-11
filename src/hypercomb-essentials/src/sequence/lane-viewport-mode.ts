@@ -107,6 +107,26 @@ export const getLaneScrollAxis = (): LaneScrollAxis | null =>
     ? (laneStripHorizontal() ? 'x' : 'y')
     : null
 
+/** THE STRIP STOPS AT ITS ENDS — each end the moment it comes on screen.
+ *
+ *  One axis, canvas px: `start`/`end` are the strip's leading and trailing
+ *  edges (top/bottom in portrait, left/right in landscape), `near`/`far` the
+ *  window it is read through. Travel toward the start (pulling down) is free
+ *  only while the first tile is still before the near edge, and stops as it
+ *  arrives there; travel toward the end (pushing up) is free only while the
+ *  last tile is still past the far edge, and stops the instant it is fully on
+ *  screen. So a finger brings either end INTO view and never takes it back
+ *  out, a strip that already fits stands still, and one left out of place (a
+ *  re-render, a resize) only ever moves back toward the window — it never
+ *  jumps under the finger. Returns the part of `delta` that may be applied. */
+export const laneStopDelta = (
+  delta: number,
+  start: number,
+  end: number,
+  near: number,
+  far: number,
+): number => Math.max(Math.min(0, far - end), Math.min(Math.max(0, near - start), delta))
+
 /** The ladder rung, restored per participant. Readable on desktop too — it
  *  says nothing about the desktop viewport, it is simply the last rung the
  *  phone chose, and `/lanes` on a phone resumes there.

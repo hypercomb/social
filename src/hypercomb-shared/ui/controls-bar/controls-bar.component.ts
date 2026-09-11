@@ -365,6 +365,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  button reads it to flip its glyph — a toggle that always shows the same
    *  icon can't say which way it will go. */
   readonly isFullscreen = signal(false)
+  /** Whether this browser can go fullscreen at all (iPhone Safari cannot).
+   *  Where it cannot, the phone tools row leaves the fullscreen slot empty. */
+  readonly fullscreenEnabled = !!document.fullscreenEnabled
   /** The legibility ladder: how many lanes of hexagons the phone is reading
    *  at (3 scan · 2 browse · 1 read), and whether lane mode owns the
    *  viewport at all. Published by SequenceCycleDrone on `lanes:changed`. */
@@ -405,7 +408,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
   #syncInputVisibility = (): void => {
     // Desktop always shows the command line. A PHONE collapses it in either
-    // orientation — the bar's Add disc reveals it on demand (the composer is
+    // orientation — the bar's Add cell reveals it on demand (the composer is
     // a sheet you ask for, not a strip over the list: mobile-one-column.md,
     // superseding the 2026-07-28 portrait pin).
     // `focus: false` — a sync must never steal focus or pop the keyboard.
@@ -434,13 +437,35 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.inputVisible.set(next)
     EffectBus.emit('mobile:input-visible', { visible: next, mobile: this.isMobile() })
   }
-  /** ADD — the phone bar's centre disc: the Add sheet (`hc-add-sheet`, an
+  /** ADD — the phone bar's add cell: the Add sheet (`hc-add-sheet`, an
    * essentials surface) — name it, take a photo, the library, paste a link,
    * say it. The sheet toggles on the effect and reports its state back, so
-   * the disc is lit exactly while the sheet is up. */
+   * the cell is lit exactly while the sheet is up. */
   readonly addOpen = signal(false)
   readonly toggleAdd = (): void => { EffectBus.emit('add:sheet-open', {}) }
   #addSheetUnsub: (() => void) | null = null
+  /** THE TOOLS ROW — the phone bar's second flat band, directly above the
+   * bottom one (share · swarm · pheromones · pin · fullscreen), opened and
+   * closed by the tools cell. A toggle: no tap elsewhere puts it away, and it
+   * is remembered. */
+  readonly #toolsRowOpen = signal(localStorage.getItem('hc:phone-tools-row') === 'open')
+  readonly toolsRowOpen = this.#toolsRowOpen.asReadonly()
+  readonly toggleToolsRow = (): void => {
+    const next = !this.#toolsRowOpen()
+    this.#toolsRowOpen.set(next)
+    try { localStorage.setItem('hc:phone-tools-row', next ? 'open' : 'closed') } catch { /* posture only */ }
+  }
+  /** THE FACE the phone reads the layer as — true for the list, false for
+   * the hexagons. The layer list (essentials) owns it and publishes
+   * `phone:face {face}`, last-value replayed; the face cell shows the OTHER
+   * face and asks for it through `phone:face-set`. A boolean rather than the
+   * face string so the cell's glyph ternary holds no literal but its two
+   * glyphs — scripts/icon-names.cjs reads every literal there as an icon. */
+  readonly listFace = signal(true)
+  #phoneFaceUnsub: (() => void) | null = null
+  readonly togglePhoneFace = (): void => {
+    EffectBus.emit('phone:face-set', { face: this.listFace() ? 'hexagons' : 'list' })
+  }
   // The bar is not the only emitter — GO, the mic reveal, the tutorial and
   // the empty-hex long-press all move visibility on the same effect. Mirror
   // every emission into the signal so the keyboard button's lit state stays
@@ -455,6 +480,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #roomOpen = signal(false)
   #beesVisible = signal(localStorage.getItem('hc:bees-visible') === 'true')
   #agentsVisible = signal(localStorage.getItem('hc:agents-visible') !== 'false')
+  // The on-demand command line collapses the header, so the toggle's usual
+  // header-relative spot goes with it — read from the same storage key the
+  // command-line component owns, kept live via its broadcast.
+  #commandLineOnDemand = signal(localStorage.getItem('hc:command-line-on-demand') === '1')
+  readonly commandLineOnDemand = this.#commandLineOnDemand.asReadonly()
   #showHidden = signal(localStorage.getItem('hc:show-hidden') === '1')
   // Fit button is a two-state switch:
   //  - 'off'    (white): regular click performs a one-shot fit; nothing sticks
@@ -955,8 +985,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // Baseline 1.0 at 1920px and above (large monitors stay at 1×).
   // Small screens floor at 0.9. 13" laptop band (1367–2559px) gets a
   // 1.15× bump to match the header zoom in `_header-bar.scss` — keeps
-  // top + bottom chrome visually paired. Mobile uses a separate
-  // floating-icon layout that ignores this zoom.
+  // top + bottom chrome visually paired. Phones never take it: their bar
+  // is flat bands of labelled cells, and the template binds the zoom to
+  // null on every phone (and while docked left).
   readonly #pillZoom = signal(this.#computePillZoom())
   readonly pillZoom = this.#pillZoom.asReadonly()
 
@@ -1001,6 +1032,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // Live probe of the edge the docked control bar occupies, published as
   // `--hc-controls-<side>` so docked toolwindows sit beside the bar.
   #controlsObserver: ResizeObserver | null = null
+  // The pheromone tag strip (`.tag-float`) is bottom-anchored and grows
+  // UPWARD as tags wrap to more rows when opened out. Anything else sharing
+  // its bottom-left corner (the on-demand agent toggle) needs the strip's
+  // live top edge, not a guessed constant, or an expanded strip climbs over
+  // it — published as `--hc-tag-float-top` (distance from the viewport's
+  // bottom edge, i.e. the space to clear).
+  #tagFloatObserver: ResizeObserver | null = null
   /** The `.pill-stage` the observer is currently attached to, so a re-created
    *  element is re-observed instead of measured while detached. */
   #observedStage: HTMLElement | null = null
@@ -1279,7 +1317,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
 
-  /** Open the pheromone panel — the mobile control cluster's `label` button.
+  /** Open the pheromone panel — the phone tools row's `label` cell.
    *  The tag strip's head glyph does NOT come here: it carries the reach, and
    *  when it opened the panel while merely displaying the reach the opened-out
    *  strip had to add a second, identical globe to do the stepping. The panel
@@ -1295,18 +1333,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     EffectBus.emit('camera:capture-open', undefined)
   }
 
-  /** VIEWS — the layer deck: a sheet of big plates for this layer's views,
-   *  the creations offered here, and the how-you-see controls (rung,
-   *  fullscreen, pheromones, pin, undo/redo, library) that the pop-up view
-   *  row used to hold behind an unlabeled chevron. The deck is a drone-owned
-   *  shell surface that listens for this; the bar only asks. */
-  readonly openViews = (): void => {
-    EffectBus.emit('layer:deck-open', {})
-  }
-
   /** SHARE — the publish sheet for the current page (publish, links, community
-   *  hosts). Took the fit disc's slot: on a phone the rails own the fit, and
-   *  sharing what you made is the act a phone has to reach in one press. */
+   *  hosts). The phone tools row's first cell. */
   readonly openShare = (): void => {
     EffectBus.emit('publish:view-toggle', {})
   }
@@ -1460,6 +1488,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #iconEditUnsub: (() => void) | null = null
   #configureControlUnsub: (() => void) | null = null
   #pinToggleUnsub: (() => void) | null = null
+  #onDemandUnsub: (() => void) | null = null
   #onIconOverride = (): void => this.iconRev.update(v => v + 1)
 
   ngOnInit(): void {
@@ -1487,6 +1516,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // bus; this component remains the one owner of the persisted per-layer pin
     // set and the InputGate lock derived from it.
     this.#pinToggleUnsub = EffectBus.on('viewport:pin-toggle', () => this.togglePin())
+    this.#onDemandUnsub = EffectBus.on<{ on: boolean }>('command-line:on-demand', ({ on }) => {
+      this.#commandLineOnDemand.set(!!on)
+    })
 
     // The Escape cascade force-clears the gate as last-resort recovery. On a
     // pinned layer that IS the release gesture, so fold it back into the
@@ -1531,8 +1563,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // The location dialog's "start" confirmed (join mode) — flip to public
     // now that the where/secret are set. Idempotent: already public → no-op.
     // The way OUT of the swarm from anywhere that is not this bar (the phone's
-    // layer deck carries the swarm plate now that the solo/swarm disc is
-    // gone): the flip itself lives in the shell behind `meshToggled`, and
+    // layer deck carries a swarm plate as well as the tools row's solo/swarm
+    // cell): the flip itself lives in the shell behind `meshToggled`, and
     // this is its one effect-shaped door toward private.
     this.#meshLeaveUnsub = EffectBus.on('mesh:leave', () => {
       if (this.meshPublic()) this.meshToggled.emit()
@@ -1567,6 +1599,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     )
     this.#addSheetUnsub = EffectBus.on<{ open?: boolean }>('add:sheet-state', ({ open }) => {
       this.addOpen.set(open === true)
+    })
+    // Last-value replay: the face cell reads the layer list's face even when
+    // the list reported it before this bar mounted (a rotation rebuilds us).
+    this.#phoneFaceUnsub = EffectBus.on<{ face?: string }>('phone:face', payload => {
+      this.listFace.set(payload?.face !== 'hexagons')
     })
 
     // ── ONE definition of mobile ──
@@ -1789,11 +1826,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // THE PORTRAIT PHONE BAR IS A BOTTOM DOCK. It publishes how far up the
     // screen its top edge sits, so every sheet, the toast stack and the select
     // pill can stand ON it instead of guessing its height (the sheets guessed
-    // zero and covered the discs; the pill guessed 6.2rem). Layout box, not
+    // zero and covered the bar; the pill guessed 6.2rem). Layout box, not
     // the visual rect — the stage animates a transform (see below). The
     // number is measured from the viewport's bottom, so it already contains
-    // the safe inset and the bar's own gap: consumers max() it against the
-    // inset, they do not add the two.
+    // the safe inset (the flat band's own bottom padding): consumers max() it
+    // against the inset, they do not add the two.
     if (stage && this.isMobile() && !this.isLandscape() && stage.offsetHeight > 0) {
       bottom = Math.max(0, window.innerHeight - stage.offsetTop)
     }
@@ -1930,12 +1967,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   /** Re-measure whenever the bar changes edge (or mobile flips) — a dock swap
    *  moves the pill without necessarily resizing it, so the ResizeObserver
-   *  below can't see it. Field initializer: `effect()` needs an injection
+   *  below can't see it. The phone tools row opening or closing does resize
+   *  the stage; it is read here too so the edge follows it without waiting
+   *  on the observer. Field initializer: `effect()` needs an injection
    *  context, which ngAfterViewInit is not. */
   #controlsEdgeSync = effect(() => {
     this.#dockSide()
     this.isMobile()
     this.isLandscape()
+    this.toolsRowOpen()
     queueMicrotask(this.#measureControlsEdge)
   })
 
@@ -1949,14 +1989,45 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#measureControlsEdge()
   }
 
+  /** Re-measure the tag strip whenever it could change size: appearing,
+   *  wrapping to more rows on open, or losing rows on close. The strip is an
+   *  `@if`-gated child of this same template, so it can go from absent to
+   *  present between measures — re-query rather than caching the element. */
+  #tagFloatSync = effect(() => {
+    this.tags()
+    this.tagsExpanded()
+    queueMicrotask(this.#measureTagFloat)
+  })
+
+  #measureTagFloat = (): void => {
+    this.#tagFloatObserver?.disconnect()
+    this.#tagFloatObserver = null
+    const el = this.#host.nativeElement.querySelector('.tag-float') as HTMLElement | null
+    if (!el) {
+      document.documentElement.style.removeProperty('--hc-tag-float-top')
+      return
+    }
+    const measure = (): void => {
+      const top = el.getBoundingClientRect().top
+      const fromBottom = window.innerHeight - top
+      if (fromBottom <= 0) document.documentElement.style.removeProperty('--hc-tag-float-top')
+      else document.documentElement.style.setProperty('--hc-tag-float-top', `${Math.round(fromBottom)}px`)
+    }
+    measure()
+    this.#tagFloatObserver = new ResizeObserver(measure)
+    this.#tagFloatObserver.observe(el)
+  }
+
   /** THE SOFT KEYBOARD. iOS does not resize the layout viewport when the
    *  keyboard rises — `innerHeight` stays put, `position: fixed; bottom: 0`
    *  stays put, and the keyboard simply covers the bar, GO and every sheet.
    *  What shrinks is the VISUAL viewport, so its height (and its scroll
    *  offset, which the keyboard also moves) says how much of the bottom is
-   *  gone. Published as `--hc-keyboard-inset`; the bar's own `bottom` reads it
-   *  (max()ed with the safe inset), and because that moves the bar's top
-   *  edge, `--hc-controls-bottom` is re-measured once layout has it. Android
+   *  gone. Published as `--hc-keyboard-inset`; the portrait band's `bottom`
+   *  IS that inset, and the safe inset lives in its `padding-bottom` less the
+   *  keyboard inset (a keyboard under the band already covers the home
+   *  indicator). Because that moves the band's top edge,
+   *  `--hc-controls-bottom` is re-measured once layout has it. Android
    *  resizes the layout viewport instead, so the number is ~0 there and the
    *  fixed bar already moves. Off mobile it is 0px: a desktop pinch-zoom also
    *  shrinks the visual viewport, and the bar must not chase that. */
@@ -2022,10 +2093,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     if (this.gate?.lockedBy?.(PIN_OWNER)) this.gate.unlock(PIN_OWNER)
     this.#inputVisibleMirrorUnsub?.()
     this.#addSheetUnsub?.()
+    this.#phoneFaceUnsub?.()
     this.#mobileModeUnsub?.()
     this.#landscapeQuery?.removeEventListener('change', this.#landscapeHandler)
     this.#headerObserver?.disconnect()
     this.#controlsObserver?.disconnect()
+    this.#tagFloatObserver?.disconnect()
+    document.documentElement.style.removeProperty('--hc-tag-float-top')
     window.removeEventListener('resize', this.#measureControlsEdge)
     window.visualViewport?.removeEventListener('resize', this.#publishKeyboardInset)
     window.visualViewport?.removeEventListener('scroll', this.#publishKeyboardInset)
@@ -2081,6 +2155,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#iconEditUnsub?.()
     this.#configureControlUnsub?.()
     this.#pinToggleUnsub?.()
+    this.#onDemandUnsub?.()
     this.#titleTickUnsub?.()
     this.#localeTickUnsub?.()
     iconOverrides.removeEventListener('change', this.#onIconOverride)
@@ -2672,13 +2747,17 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       const box = this.zoom?.canvas?.getBoundingClientRect?.()
         ?? document.querySelector('canvas')?.getBoundingClientRect()
       const rootStyle = getComputedStyle(document.documentElement)
-      const headerBottom = document.querySelector('.header-bar')?.getBoundingClientRect().bottom ?? 0
+      const header = document.querySelector('.header-bar')
+      const headerBottom = header?.getBoundingClientRect().bottom ?? 0
       return [
         Math.round(box?.width ?? 0), Math.round(box?.height ?? 0),
         Math.round(box?.left ?? 0), Math.round(box?.top ?? 0),
         Math.round(Number.parseFloat(rootStyle.getPropertyValue('--hc-controls-left')) || 0),
         Math.round(Number.parseFloat(rootStyle.getPropertyValue('--hc-controls-right')) || 0),
         Math.round(headerBottom),
+        // The line on demand moves the centre zoomToFit aims at while every
+        // box above holds still — the mode is chrome too.
+        header?.classList.contains('line-on-demand') ? 1 : 0,
       ].join(':')
     }
     // A collapsed surface is never a framing — pixi-host refuses to follow the
@@ -3172,7 +3251,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // IN LANDSCAPE RAILS A LEFTWARD DRAG IS THE STRIP SCROLL. The rails run
     // left↔right there and the finger may only travel that way, so an edge
     // swipe would pan the strip AND walk the lineage back in one gesture.
-    // The Back disc and the hardware button remain the way back.
+    // The Back cell and the hardware button remain the way back.
     if (this.lanesActive() && this.isLandscape()) return
     const touch = e.touches[0]
     // only start from the right 40px edge of the screen
@@ -3391,8 +3470,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     try {
       const raw = localStorage.getItem(PILL_POS_KEY)
       // No persisted position → default to the left-edge dock on desktop.
-      // The template gates dockSide on !isMobile(), so the mobile floating
-      // strip is unaffected. Once the user drags the pill anywhere, the
+      // The template gates dockSide on !isMobile(), so the phone's flat
+      // band is unaffected. Once the user drags the pill anywhere, the
       // persisted position takes over on subsequent loads.
       if (!raw) {
         this.#dockSide.set('left')

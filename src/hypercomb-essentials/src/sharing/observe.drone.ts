@@ -8,8 +8,8 @@
 // read-model (swarm-observation.ts) on demand and RE-EMITS whenever the swarm
 // breathes (peers join/leave, interest shifts), so the panel stays live without
 // polling. It is OBSERVATION ONLY — no swarm-specific adopt/sync button (that
-// model is retired). Acting on what you observe is the SAME features icon you
-// use solo: identical in both scenarios, one surface, no "swarm mode".
+// model is retired). Acting on what you observe happens from the SAME context
+// layer you use solo: identical in both scenarios, one surface, no "swarm mode".
 //
 // Shell parity: the panel is a shared Angular component (it must not import
 // essentials), so all data crosses the boundary as `observe:render` payloads and

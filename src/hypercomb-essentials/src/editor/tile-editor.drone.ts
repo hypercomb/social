@@ -1,8 +1,10 @@
 // editor/tile-editor.drone.ts
-import { EffectBus } from '@hypercomb/core'
-import { TILE_PROPERTIES_FILE, readCellProperties, readTilePropertiesAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, lookupTilePropsSig } from './tile-properties.js'
+import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { readCellProperties, readTilePropertiesAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, lookupTilePropsSig } from './tile-properties.js'
 import { referenceEditsRootDefaultForLabel, referenceTargetForLabel } from '../commands/decoration-kind-index.js'
 import { portalEditTarget } from './portal-edit-target.js'
+import { parseHexColour } from './hex-capture.js'
+import { editorSurface } from './editor-surface.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
 
@@ -42,13 +44,43 @@ type Store = {
   getResource: (signature: string) => Promise<Blob | null>
 }
 
-type Settings = {
-  editorSize: number
-  hexWidth: (orientation: 'point-top' | 'flat-top') => number
-  hexHeight: (orientation: 'point-top' | 'flat-top') => number
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value)
+
+/** Props as a merge sees them: an `undefined` key is an absent key, and key
+ *  order carries no meaning. */
+const normalise = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(normalise)
+  if (!isRecord(value)) return value
+  const out: Record<string, unknown> = {}
+  for (const key of Object.keys(value).sort()) {
+    if (value[key] !== undefined) out[key] = normalise(value[key])
+  }
+  return out
+}
+
+const sameProps = (a: unknown, b: unknown): boolean =>
+  JSON.stringify(normalise(a)) === JSON.stringify(normalise(b))
+
+/** The orientation the hive is showing right now. The bus replays its last
+ *  value to a new subscriber, so subscribing and letting go reads it. */
+const hiveOrientation = (): 'point-top' | 'flat-top' => {
+  let flat = false
+  const off = EffectBus.on<{ flat?: boolean }>('render:set-orientation', payload => { flat = payload?.flat === true })
+  off?.()
+  return flat ? 'flat-top' : 'point-top'
+}
+
+const t = (key: string, fallback: string): string => {
+  try {
+    const text = window.ioc?.get<I18nProvider>(I18N_IOC_KEY)?.t?.(key)
+    return text && text !== key ? text : fallback
+  } catch { return fallback }
 }
 
 export class TileEditorDrone {
+
+  #saving = false
 
   constructor() {
     EffectBus.on<TileActionPayload>('tile:action', this.#onTileAction)
@@ -83,6 +115,10 @@ export class TileEditorDrone {
     const store = window.ioc.get<Store>('@hypercomb.social/Store')
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
     if (!store || !service) return
+
+    // A tile opened while another is being edited (a drop, a paste, the phone
+    // bar's camera): keep that draft before this one replaces it.
+    if (service.mode === 'editing') this.#stashDraft()
 
     // 1. read tile properties — canonical path is the cell's layer's
     // `properties` slot (`readTilePropertiesAt`). Falls back to:
@@ -155,133 +191,108 @@ export class TileEditorDrone {
       largeBlob = await store.getResource(largeSig)
     }
 
-    // 3. open editor service
-    service.open(targetCell, properties, largeBlob, target.segments)
+    // 3. open — the picture model first, so the view mounts onto the right
+    //    orientation, then the session, then the tile's own picture with the
+    //    framings it was saved at.
+    const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
+    imageEditor?.reset?.(hiveOrientation())
+    service.open(targetCell, properties, largeBlob, target.segments, editorSurface())
+    if (largeBlob && imageEditor?.loadOriginal) {
+      void imageEditor.loadOriginal(largeBlob, {
+        point: (properties as any).large,
+        flat: (properties as any).flat?.large,
+      })
+    }
   }
 
-  // ── save (called by Angular component) ─────────────────────────
+  // ── save (called by the editor view) ───────────────────────────
+  //
+  // WHAT A SAVE WRITES. The original picture's bytes, untouched, as
+  // `large.image`; the framing per orientation as plain numbers; and two small
+  // pictures captured OFF SCREEN from the original through `hex-capture.ts`,
+  // which cannot draw anything but the picture. Colours, link and hideText are
+  // whatever the session holds — nothing is stamped that the participant did
+  // not set. A save that changes nothing writes nothing: no layer, no history
+  // entry, no `tile:saved`.
 
   readonly saveAndComplete = async (): Promise<void> => {
     const store = window.ioc.get<Store>('@hypercomb.social/Store')
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
     const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
-    const settings = window.ioc.get<Settings>('@diamondcoreprocessor.com/Settings')
 
-    if (!store || !service || !imageEditor || !settings) return
-    if (service.mode !== 'editing') return
+    if (!store || !service || !imageEditor) return
+    if (service.mode !== 'editing' || this.#saving) return
+    this.#saving = true
+    service.setSaving?.(true)
 
-    // capture cell name AND ADDRESS up front so we can emit tile:saved if
-    // save succeeds. The whole save body runs inside try/finally — without
-    // this guarantee a thrown step (image capture, OPFS write, etc.) would
-    // leave the editor open and the InputGate locked, permanently blocking
-    // zoom. Segments are bound HERE, at gesture time: the save spans image
-    // captures + several putResource awaits, and reading lineage at write
-    // time used to stamp the edited props against wherever the user had
-    // navigated to mid-save — a cross-layer content graft.
+    // Bind the cell AND ITS ADDRESS at gesture time. The save spans captures
+    // and several store writes; reading lineage at write time used to stamp
+    // the edited props against wherever the participant had navigated to
+    // mid-save — a cross-layer content graft.
     const savedCell = service.cell
     const lineageAtSave = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
     const targetSegments = service.targetSegments.length > 0
       ? [...service.targetSegments]
       : [...(lineageAtSave?.explorerSegments?.() ?? []), savedCell]
     const segmentsForSave: readonly string[] = targetSegments.slice(0, -1)
-    let saveSucceeded = false
+    let saved = false
+    let wrote = false
 
     try {
-    const props: Record<string, unknown> = { ...service.properties }
-    const currentOrientation = imageEditor.orientation ?? 'point-top'
+      // A picture dropped a moment ago may still be decoding.
+      await imageEditor.ready
 
-    // 1. capture small image for CURRENT orientation (if image loaded)
-    if (imageEditor.hasImage) {
-      // save current orientation's transform before switching
-      const currentTransform = imageEditor.getTransform()
-      service.updateTransform(currentTransform.x, currentTransform.y, currentTransform.scale, currentOrientation)
+      const props: Record<string, unknown> = { ...service.properties }
+      const pictureChanged = imageEditor.pictureChanged === true
 
-      // capture current orientation snapshot
-      const curW = settings.hexWidth(currentOrientation)
-      const curH = settings.hexHeight(currentOrientation)
-      const currentBlob = await imageEditor.captureSmall(curW, curH)
-      const currentSig = await store.putResource(currentBlob)
-
-      // determine the other orientation
-      const otherOrientation = currentOrientation === 'point-top' ? 'flat-top' as const : 'point-top' as const
-      const otherW = settings.hexWidth(otherOrientation)
-      const otherH = settings.hexHeight(otherOrientation)
-
-      // switch to the other orientation, capture snapshot + transform, then switch back
-      const savedOtherTransform = otherOrientation === 'flat-top'
-        ? (props as any).flat?.large
-        : (props as any).large
-      await imageEditor.setOrientation(otherOrientation,
-        savedOtherTransform ? { x: savedOtherTransform.x ?? 0, y: savedOtherTransform.y ?? 0, scale: savedOtherTransform.scale ?? 1 } : undefined)
-      const otherBlob = await imageEditor.captureSmall(otherW, otherH)
-      const otherSig = await store.putResource(otherBlob)
-
-      // capture the actual transform while still in the other orientation
-      const otherActualTransform = imageEditor.getTransform()
-
-      // switch back to the current orientation
-      await imageEditor.setOrientation(currentOrientation,
-        { x: currentTransform.x, y: currentTransform.y, scale: currentTransform.scale })
-
-      // store point-top snapshot + transform
-      if (currentOrientation === 'point-top') {
-        ;(props as any).small = { image: currentSig }
-        if (!(props as any).flat) (props as any).flat = {}
-        ;(props as any).flat.small = { image: otherSig }
-      } else {
-        ;(props as any).small = { image: otherSig }
-        if (!(props as any).flat) (props as any).flat = {}
-        ;(props as any).flat.small = { image: currentSig }
+      if (imageEditor.removed) {
+        props['large'] = undefined
+        props['small'] = undefined
+        props['flat'] = undefined
+      } else if (imageEditor.hasImage && imageEditor.source && typeof imageEditor.capture === 'function') {
+        // Fill behind the picture is only ever the participant's colour, and
+        // the model only applies it to a picture set to Fit.
+        const fill = parseHexColour((props['background'] as { color?: unknown } | undefined)?.color)
+        const pointBlob = await imageEditor.capture('point-top', fill)
+        const flatBlob = await imageEditor.capture('flat-top', fill)
+        const largeSig = await store.putResource(imageEditor.source)
+        const pointSig = await store.putResource(pointBlob)
+        const flatSig = await store.putResource(flatBlob)
+        const point = imageEditor.framingFor('point-top')
+        const flat = imageEditor.framingFor('flat-top')
+        const flatProps = isRecord(props['flat']) ? props['flat'] : {}
+        props['large'] = { image: largeSig, x: point.x, y: point.y, scale: point.scale }
+        props['small'] = { image: pointSig }
+        props['flat'] = { ...flatProps, large: { x: flat.x, y: flat.y, scale: flat.scale }, small: { image: flatSig } }
+        // A picture framed by hand is the participant's, whatever marked it
+        // before — the merge earns the participant mark from the picture keys.
+        if (props['substrate'] !== undefined) props['substrate'] = undefined
       }
 
-      // 2. store large image blob + transforms
-      if (service.largeBlob) {
-        const largeSig = await store.putResource(service.largeBlob)
-
-        // assign the correct transform to each orientation
-        const pointyTransform = currentOrientation === 'point-top' ? currentTransform : otherActualTransform
-        const flatTransform = currentOrientation === 'flat-top' ? currentTransform : otherActualTransform
-
-        ;(props as any).large = {
-          image: largeSig,
-          x: pointyTransform.x,
-          y: pointyTransform.y,
-          scale: pointyTransform.scale,
-        }
-        if (!(props as any).flat) (props as any).flat = {}
-        ;(props as any).flat.large = {
-          x: flatTransform.x,
-          y: flatTransform.y,
-          scale: flatTransform.scale,
-        }
+      const baseline = (service as { baseline?: Record<string, unknown> }).baseline
+      const unchanged = !!baseline && !pictureChanged && sameProps(props, baseline)
+      if (!unchanged) {
+        // segmentsForSave was bound at gesture start — never re-read here.
+        await writeTilePropertiesAt(segmentsForSave, savedCell, props)
+        wrote = true
       }
-    }
-
-    // 3. preserve link + border.color from service
-    // (already in props via service.properties — setLink/setBorderColor mutate in-place)
-
-    // 4. CANONICAL WRITE — the edited image/link is the user's content, so it
-    // must land in the tile's canonical 0000 (the layer's properties slot),
-    // not just this browser's label index. Merges over existing canonical
-    // props, commits via the LayerCommitter cascade, and broadcasts
-    // cell:0000-changed — SwarmDrone republishes with it inlined.
-    try {
-      // segmentsForSave was bound at gesture start — never re-read here.
-      await writeTilePropertiesAt(segmentsForSave, savedCell, props as Record<string, unknown>)
+      saved = true
     } catch (err) {
-      console.warn('[tile-editor] canonical props write failed', err)
-    }
-
-    saveSucceeded = true
+      console.warn('[tile-editor] save failed', err)
+      service.setError?.(t('editor.save-failed', 'Could not save — your changes are still here.'))
     } finally {
-      // 6. cleanup — always runs so editor:mode {active:false} is emitted
-      // and InputGate.unlock() fires even if any step above threw.
-      imageEditor.destroy()
-      service.close()
+      this.#saving = false
+      service.setSaving?.(false)
     }
 
-    // 7. notify via effect bus (processor owns synchronize; drones use effects)
-    if (saveSucceeded) {
+    // A failed save keeps the editor open with the draft intact. Cancel is
+    // always there, and it always closes.
+    if (!saved) return
+    service.close()
+    imageEditor.destroy()
+
+    // notify via effect bus (processor owns synchronize; drones use effects)
+    if (wrote) {
       // Carry the gesture-time segments so downstream commit listeners
       // address the layer where the edit happened, not wherever the
       // user navigated to during the save.
@@ -294,8 +305,35 @@ export class TileEditorDrone {
   readonly cancelEditing = (): void => {
     const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
-    imageEditor?.destroy()
+    // A save in flight finishes and closes on its own; cancelling under it
+    // would close the session the save is about to write.
+    if (this.#saving) return
+    this.#stashDraft()
     service?.close()
+    imageEditor?.destroy()
+  }
+
+  /** Keep a changed draft that is about to be thrown away. */
+  #stashDraft(): void {
+    const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
+    const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
+    if (!service || service.mode !== 'editing' || typeof service.stash !== 'function') return
+    const pictureDirty = !!imageEditor && (imageEditor.pictureChanged || imageEditor.framingChanged)
+    if (!service.dirty && !pictureDirty) return
+    const source = imageEditor?.hasImage ? imageEditor.source : null
+    service.stash({
+      cell: service.cell,
+      segments: [...service.targetSegments],
+      properties: service.properties,
+      picture: source && imageEditor ? {
+        source,
+        point: imageEditor.framingFor('point-top'),
+        flat: imageEditor.framingFor('flat-top'),
+        linked: imageEditor.linked,
+        mode: imageEditor.mode,
+      } : null,
+      pictureRemoved: imageEditor?.removed === true,
+    })
   }
 }
 

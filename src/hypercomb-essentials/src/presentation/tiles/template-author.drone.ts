@@ -35,7 +35,7 @@ import { isBehaviorDormant } from '../../sharing/behavior-enablement.js'
 import {
   CONFIGURATION_AXES, composeLayout, configurationOf, configurationVarsOf,
   miniatureVars, nodeAt,
-  nodeOf, templateContainer, turnOf, turnedDirection, variablesOf, withNodeAt, withVarAt,
+  nodeOf, templateContainer, turnOf, turnedDirection, variablesAt, withNodeAt, withVarAt,
   type LayoutNode,
 } from './layout-template.js'
 import {
@@ -133,7 +133,17 @@ export interface LevelState {
    *  in the map was then in the wrong place. A level is the only thing that
    *  knows how it stands, so it hands over its own picture. */
   readonly glyph: string
-  readonly variables: readonly { name: string; value: string }[]
+  /** Every measurement this level reads. `value` is what the level itself
+   *  declares — empty when it says nothing. `reads` is what it actually gets,
+   *  and `from` is the path of the level that said it (`[]` the root, `null`
+   *  the template's own fallback): the cascade, made visible, so a level that
+   *  looks "inherited" can say from WHERE. See `variablesAt`. */
+  readonly variables: readonly {
+    name: string
+    value: string
+    reads: string
+    from: readonly string[] | null
+  }[]
   /** HOW THIS LEVEL DISTRIBUTES WHAT IS IN IT, resolved.
    *
    *  Where the parts sit along the axis, and how they sit across it. They are
@@ -317,6 +327,11 @@ export class TemplateAuthorDrone extends Drone {
   #targetsGen = 0
   /** Which level the designer is pointing at. Viewing state, not design. */
   #selected: string[] = []
+  /** Which container that level is in, as the designer last said. */
+  #selectedSegments: string[] = []
+  /** Whether the flex gallery is showing — the one surface that reads a
+   *  selection's previews, so nothing computes them while it is not. */
+  #flexOpen = false
   /** Creation identities the participant has put away — hidden AND deleted,
    *  because both mean "not on the shelf" and only the delete area tells them
    *  apart. Owned by the concealment drone; mirrored here so a read does not
@@ -404,7 +419,15 @@ export class TemplateAuthorDrone extends Drone {
     })
     this.onEffect<{ segments?: string[]; path?: string[] }>('template:select', payload => {
       this.#selected = this.#path(payload?.path)
-      void this.#publishSelection(this.#subject(payload?.segments))
+      this.#selectedSegments = this.#path(payload?.segments)
+      // THE GALLERY IS THE ONLY READER of a selection's previews, and it opens
+      // on request now — twenty-four renders per click for a window nobody has
+      // open are twenty-four renders wasted.
+      if (this.#flexOpen) void this.#publishSelection(this.#subject(payload?.segments))
+    })
+    this.onEffect<{ open?: boolean }>('flex:view-state', payload => {
+      this.#flexOpen = payload?.open === true
+      if (this.#flexOpen) void this.#publishSelection(this.#subject(this.#selectedSegments))
     })
     this.onEffect('decorations:changed', () => {
       if (this.#open) void this.#publish()
@@ -1036,7 +1059,7 @@ export class TemplateAuthorDrone extends Drone {
       withVarAt(bound.node, this.#path(path), name, String(value ?? '')),
     )
     await this.#publish()
-    await this.#publishSelection(subject)
+    if (this.#flexOpen) await this.#publishSelection(subject)
   }
 
   /**
@@ -1066,7 +1089,7 @@ export class TemplateAuthorDrone extends Drone {
       withVarAt(bound.node, where, 'direction', turnedDirection(level.template, level.vars)),
     )
     await this.#publish()
-    await this.#publishSelection(subject)
+    if (this.#flexOpen) await this.#publishSelection(subject)
   }
 
   async #clear(segments: readonly string[] | undefined): Promise<void> {
@@ -1094,9 +1117,11 @@ export function levelsOf(root: LayoutNode): LevelState[] {
         ...miniatureVars(node.template),
         ...configurationVarsOf(node.vars),
       }),
-      variables: variablesOf(node.template).map(name => ({
-        name,
-        value: node.vars[name] ?? '',
+      variables: variablesAt(root, path).map(variable => ({
+        name: variable.name,
+        value: variable.own,
+        reads: variable.value,
+        from: variable.from ? [...variable.from] : null,
       })),
       justify: configurationOf(node.template, node.vars).justify,
       align: configurationOf(node.template, node.vars).align,

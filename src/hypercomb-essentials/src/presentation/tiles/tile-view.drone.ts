@@ -92,7 +92,7 @@
 
 import { Drone, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { sniffImageMime } from '../../link/photo.js'
-import { readTilePropsIndex, lookupTilePropsSig, cellLocationSig, readTilePropertiesAt, recoverableTileImageSig } from '../../editor/tile-properties.js'
+import { readTilePropsIndex, lookupTilePropsSig, cellLocationSig, readTilePropertiesAt, recoverableTileImageSig, unframedTileImageSig } from '../../editor/tile-properties.js'
 import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
 import { nextTile, rememberCloseUpEntry, VIEW_ENTER_PREFIX } from './viewer-walk.js'
 import {
@@ -518,6 +518,11 @@ export class TileViewDrone extends Drone {
   #covered(): boolean {
     const host = this.#host
     if (!host) return false
+    // The tile editor fits into the view now — docked beside the hive it does
+    // not cover the screen's centre, yet the close-up must stay down while it
+    // is open (its Edit face is one of the ways in).
+    const editor = window.ioc?.get?.('@diamondcoreprocessor.com/TileEditorService') as { mode?: string } | undefined
+    if (editor?.mode === 'editing') return true
     const el = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2)
     if (!el || el === document.body || el === document.documentElement) return false
     if (el === host || host.contains(el)) return false
@@ -1694,14 +1699,18 @@ export class TileViewDrone extends Drone {
    *  the participant-local props index — the same two stores, in the same
    *  order, the slides viewer reads (index-only tiles are common).
    *
-   *  `small.image` FIRST, not `large.image`: that is the point-top hex
-   *  thumbnail the hive itself renders, already framed for this shape. The
-   *  full-size image is the fallback, cropped to `cover` — right picture,
-   *  slightly different framing from the hex you tapped. */
+   *  WHICH PICTURE DEPENDS ON THE SHAPE IT RESTS IN. On a desktop the card
+   *  rests as a hexagon, so `small.image` comes first — the hex capture the
+   *  hive itself renders, already framed for that shape. On a phone it rests
+   *  as a RECTANGLE, and a hex capture's corners are not picture: a tile
+   *  saved before captures were made pure carries a baked rim there. So the
+   *  phone reads the untouched original (`large.image`) first, cropped to
+   *  `cover`. */
   async #pictureSig(label: string): Promise<string> {
     const store = this.resolve<StoreShape>('store')
     const history = window.ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryShape | undefined
     if (!store?.getResourceLocal) return ''
+    const rectangle = this.#mobile()
 
     const fromPropsSig = async (sig: string): Promise<string> => {
       if (!SIG.test(sig)) return ''
@@ -1713,7 +1722,9 @@ export class TileViewDrone extends Drone {
           flat?: { small?: { image?: unknown } }
           large?: { image?: unknown }
         }
-        const image = props?.small?.image ?? props?.flat?.small?.image ?? props?.large?.image
+        const image = rectangle
+          ? props?.large?.image ?? props?.small?.image ?? props?.flat?.small?.image
+          : props?.small?.image ?? props?.flat?.small?.image ?? props?.large?.image
         return typeof image === 'string' && SIG.test(image) ? image : ''
       } catch { return '' }
     }
@@ -1723,7 +1734,7 @@ export class TileViewDrone extends Drone {
     // and editor consume; inherited image incidences need no reminting.
     try {
       const effective = await readTilePropertiesAt(this.#segments, label)
-      const inherited = recoverableTileImageSig(effective)
+      const inherited = (rectangle ? unframedTileImageSig(effective) : undefined) ?? recoverableTileImageSig(effective)
       if (inherited) return inherited
     } catch { /* continue through mixed-version fallbacks */ }
 

@@ -4,15 +4,15 @@
 // it gathers the META details (NO code) of the bee features there and emits
 // `features:open` so the shell-side right-docked panel can list them.
 //
-// BEHAVIOURS BELONG TO WHERE YOU STAND, so there is no always-on icon on a
-// tile: the doors are the top rail's Beehaviors switch, an empty layer
-// raising the panel by itself (collection-empty-prompt.drone.ts), the
-// selection menu's features button, and the `?features=` URL intent. The one
-// PER-TILE door is earned, not standing — the puzzle piece appears on a tile
-// that carries a behaviour explicitly created for IT (a view applied here, or
-// a kind bound to this location; tile-actions' tileCarriesOwnBehavior), which
-// is how a tile added from a swarm shows what it arrived carrying. Every one
-// of these arrives here as the same `tile:action` payload.
+// BEHAVIOURS ARE MANAGED ONLY FROM THE CONTEXT LAYER — the layer you stand in
+// (Jaime, 2026-09-10). The doors are the top rail's Beehaviors switch and an
+// empty layer raising the panel by itself (collection-empty-prompt.drone.ts),
+// both `features:context-open`, which the panel turns into the `tile:action`
+// payload handled here with the current layer's own segments. Every PER-TILE
+// door is gone or DEPRECATED: the overlay's puzzle piece is removed; the
+// selection button, the adopt landing, the asleep-icon route and the
+// `?features=` intent no longer aim the panel at a tile you are not standing
+// in. Do not add a door that names a tile other than the context.
 //
 // Beehaviors are managed ONE subject at a time: a new subject REPLACES the
 // panel's (its name rides in the panel header) — no accumulation, so you're
@@ -443,22 +443,19 @@ export class ShowFeaturesDrone extends Drone {
       void this.#open(label, root ? [] : (segments && segments.length ? segments : undefined))
     })
 
-    // The selection context menu is the one PER-TILE door left: when the
-    // selection includes a tile that carries a feature, its "features" button
-    // appears. Publish that gate on every selection change — last-value replay
-    // keeps a late-mounting menu correct. Same shape FileDropDrone uses for
-    // `selection:has-documents`.
+    // DEPRECATED (2026-09-10) — the selection door. It aimed the panel at a
+    // selected tile, and behaviours are managed only from the context layer.
+    // The panel's selection button is gone, so this gate and the handler below
+    // have no UI caller left; they stay only until they are deleted.
     this.onEffect<{ selected?: string[] }>('selection:changed', (payload) => {
       const labels = Array.isArray(payload?.selected) ? payload!.selected!.map(String) : []
       const value = labels.some(l => this.#labelHasFeature(l))
       this.emitEffect('selection:has-features', { value })
     })
 
-    // The menu's features button fires `controls:action {features}` — it has no
-    // single label, so read the selection here. Beehaviors are managed ONE tile
-    // at a time: open the first selected tile that actually carries a feature
-    // (the panel replaces its subject, so firing for the whole selection would
-    // just race to "last one wins").
+    // DEPRECATED (2026-09-10) — see above. The panel's selection button fired
+    // `controls:action {features}` to open the first selected tile carrying a
+    // feature; nothing fires it any more.
     this.onEffect<{ action?: string }>('controls:action', (payload) => {
       if (String(payload?.action ?? '') !== 'features') return
       const selection = this.#ioc()?.get<SelectionLike>(SELECTION_KEY)

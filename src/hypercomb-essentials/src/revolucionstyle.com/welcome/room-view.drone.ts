@@ -20,6 +20,7 @@ import { defaultViewAt } from '../../commands/view-default.js'
 import { isFeatureHidden } from '../../sharing/feature-hidden.js'
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { scopeCellPageCss } from '../../presentation/tiles/cell-page-css-scope.js'
+import { hoistPageStylesheets, stylesheetsSettled } from '../../presentation/tiles/cell-page-stylesheets.js'
 import { trackScrollGutter } from '../../presentation/tiles/scroll-gutter.js'
 import type { BackGesture } from '../../navigation/back-gesture.service.js'
 
@@ -155,15 +156,26 @@ export class RoomViewDrone extends Drone {
       return
     }
 
-    this.#teardown()
     const raw = rewritePageRefs(await blob.text(), RESOURCE_URL_PREFIX)
     if (gen !== this.#gen || this.#vm()?.mode !== ROOM_VIEW) return
+    const parsed = new DOMParser().parseFromString(raw, 'text/html')
+
+    // The page's linked sheets load before any of it goes in, so it paints
+    // once, styled (cell-page-stylesheets.ts). Whatever is on screen stays up
+    // while they load; the swap below is one synchronous pass.
+    const links = hoistPageStylesheets(parsed, pageSig)
+    await stylesheetsSettled(links)
+    if (gen !== this.#gen || this.#vm()?.mode !== ROOM_VIEW) {
+      for (const link of links) link.remove()
+      return
+    }
+    this.#teardown()
+    for (const link of links) this.#undo.push(() => link.remove())
 
     // ── Mount the page as an artifact (the site view's proven mechanics,
     //    trimmed): scoped CSS inside the host, root class/theme mirrored,
     //    scripts re-created so they execute, theme write undone on unmount.
     const prevTheme = document.documentElement.getAttribute('data-theme')
-    const parsed = new DOMParser().parseFromString(raw, 'text/html')
 
     const host = document.createElement('div')
     host.id = 'hc-revolucion-room-host'
@@ -175,13 +187,6 @@ export class RoomViewDrone extends Drone {
     // preventDefaults every wheel event and tall pages cannot scroll.
     host.setAttribute('data-consumes-wheel', '')
 
-    for (const link of Array.from(parsed.querySelectorAll('link[rel="stylesheet"]'))) {
-      const live = document.createElement('link')
-      live.setAttribute('data-hc-cell-page', pageSig)
-      for (const attr of Array.from(link.attributes)) live.setAttribute(attr.name, attr.value)
-      document.head.appendChild(live)
-      this.#undo.push(() => live.remove())
-    }
     for (const style of Array.from(parsed.querySelectorAll('style'))) {
       const live = document.createElement('style')
       live.setAttribute('data-hc-cell-page', pageSig)

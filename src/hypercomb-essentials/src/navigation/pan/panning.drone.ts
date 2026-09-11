@@ -4,10 +4,17 @@ import type { HostReadyPayload } from '../../presentation/tiles/pixi-host.worker
 import type { ViewportPersistence, ViewportSnapshot } from '../zoom/zoom.drone.js'
 import type { HexGeometry } from '../../presentation/grid/hex-geometry.js'
 import { DEFAULT_HEX_GEOMETRY } from '../../presentation/grid/hex-geometry.js'
-import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
+import { getLaneScrollAxis, laneStopDelta, type LaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
 import { viewportIsFramed } from '../../sequence/frame-lock.js'
 
 type Point = { x: number; y: number }
+
+/** The fit's own margin (ZoomDrone.zoomToFit `padding`), so a lane strip
+ *  pulled back to its start rests exactly where the fit put it. */
+const LANE_MARGIN_PX = 5
+
+/** Below this a clamped pan is float noise, not travel. */
+const STILL_PX = 0.01
 
 export class PanningDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -97,6 +104,7 @@ export class PanningDrone extends Drone {
   // the hex-mesh layer (user content only) in world/screen coords, so the
   // proposed pan delta simply shifts them. Clamp the delta so the bounds,
   // extended outward by one tile-diameter, still intersects the viewport.
+  // A phone reading in lanes is stricter along its scroll axis: see below.
   #clampStageDelta = (dx: number, dy: number): Point => {
     if (!this.stage || !this.renderer || !this.container) return { x: dx, y: dy }
     const layer = this.#findContentLayer(this.container)
@@ -121,7 +129,42 @@ export class PanningDrone extends Drone {
 
     const cx = minDx <= maxDx ? Math.max(minDx, Math.min(maxDx, dx)) : dx
     const cy = minDy <= maxDy ? Math.max(minDy, Math.min(maxDy, dy)) : dy
-    return { x: cx, y: cy }
+
+    // A PHONE STRIP STOPS AT ITS ENDS. "One tile left on screen" let a pull
+    // carry the whole strip away but a sliver — the first tile ended up at the
+    // bottom of the screen, the last at the top. Along the scroll axis the
+    // first tile now stops at the start of the window and the last one the
+    // moment it is fully on screen; the cross axis is fitted and keeps the
+    // rule above.
+    const laneAxis = getLaneScrollAxis()
+    if (!laneAxis) return { x: cx, y: cy }
+    const { near, far } = this.#laneWindow(laneAxis)
+    return laneAxis === 'y'
+      ? { x: cx, y: laneStopDelta(dy, b.y, b.y + b.height, near, far) }
+      : { x: laneStopDelta(dx, b.x, b.x + b.width, near, far), y: cy }
+  }
+
+  /** The window a lane strip is read through, along its axis, in canvas px:
+   *  below the header (as the fit measures it) and above the portrait bar, or
+   *  right of the landscape rail — inset by the fit's margin. The bar's edges
+   *  come from the inline custom properties the controls bar writes, so a
+   *  move never pays for a style recalc. */
+  #laneWindow = (axis: LaneScrollAxis): { near: number; far: number } => {
+    const screen = this.renderer.screen
+    const rect = this.canvas?.getBoundingClientRect()
+    const style = document.documentElement.style
+    const px = (name: string): number => Number.parseFloat(style.getPropertyValue(name)) || 0
+    if (axis === 'x') {
+      const left = Math.max(0, px('--hc-controls-left') - (rect?.left ?? 0))
+      return { near: left + LANE_MARGIN_PX, far: screen.width - px('--hc-controls-right') - LANE_MARGIN_PX }
+    }
+    const top = rect?.top ?? 0
+    const headerBottom = document.querySelector('.header-bar')?.getBoundingClientRect().bottom ?? 0
+    const barTop = window.innerHeight - px('--hc-controls-bottom') - top
+    return {
+      near: Math.max(0, headerBottom - top) + LANE_MARGIN_PX,
+      far: Math.min(screen.height, barTop) - LANE_MARGIN_PX,
+    }
   }
 
   public stop = async (): Promise<void> => {
@@ -150,8 +193,10 @@ export class PanningDrone extends Drone {
   // pan api (used by inputs)
   // -------------------------------------------------
 
-  public panBy = (delta: Point): void => {
-    if (!this.stage) return
+  /** Returns the travel actually applied — zero when nothing moved (a lane
+   *  stop, a framed page), which is how a coast knows to end. */
+  public panBy = (delta: Point): Point => {
+    if (!this.stage) return { x: 0, y: 0 }
 
     // A FRAMED page does not pan. The frame's promise is that the slots stay
     // where they are, sized to the window — one drag of the canvas and that is
@@ -160,14 +205,22 @@ export class PanningDrone extends Drone {
     // returns before ever reaching this method. Anything else that still calls
     // in here (touch pan, a keybinding) is asking to move the camera, which is
     // the one thing a frame forbids.
-    if (viewportIsFramed()) return
-
-    EffectBus.emitTransient('viewport:manual', {})
+    if (viewportIsFramed()) return { x: 0, y: 0 }
 
     const laneAxis = getLaneScrollAxis()
     const dx = laneAxis === 'y' ? 0 : delta.x
     const dy = laneAxis === 'x' ? 0 : delta.y
     const clamped = this.#clampStageDelta(dx, dy)
+
+    // Nothing moved — a pull against a lane stop, a strip that already fits.
+    // Announcing it anyway handed the page away from the global fit (the
+    // control bar reads `viewport:manual` as "the participant framed this")
+    // and persisted a pan that never changed. A strip resting on its stop
+    // reads back ~1e-13 px from it, so "nothing" is anything under STILL_PX.
+    if (Math.abs(clamped.x) < STILL_PX && Math.abs(clamped.y) < STILL_PX) return { x: 0, y: 0 }
+
+    EffectBus.emitTransient('viewport:manual', {})
+
     this.stage.position.x += clamped.x
     this.stage.position.y += clamped.y
 
@@ -192,6 +245,7 @@ export class PanningDrone extends Drone {
       // gesture is what we want preserved across nav.
       vp.setPan(dx, dy, 'user')
     }
+    return clamped
   }
 }
 

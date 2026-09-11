@@ -406,7 +406,6 @@ describe('doctrine ratchets', () => {
       "sequence-viewer/sequence-viewer.component",
       "shortcut-sheet/shortcut-sheet.component",
       "tags-viewer/tags-viewer.component",
-      "tile-editor/tile-editor.component",
       "toast/toast.component",
       "trust-prompt/trust-prompt.component",
       "tutorials-window/tutorials-window.component",

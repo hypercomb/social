@@ -31,7 +31,7 @@
 
 import {
   QueenBee, EffectBus, isLocalClaudeBridgeConfigured, isSignature, machineCatalogue,
-  QUESTION_FENCE_LANG,
+  QUESTION_ASKING_INSTRUCTION,
   type CensusEntry,
 } from '@hypercomb/core'
 import { llmProviderRegistry } from './llm-provider-registry.js'
@@ -168,21 +168,11 @@ const bridgeInstruction = (): string => {
     '',
     catalogue || '(no behaviour is currently machine-callable in this hive)',
     '',
-    // Built in the same change as the parser (core question-fence.ts) and
-    // the wizard that draws it, so the instruction describes only a door
-    // that exists. The fence is ordinary reply text: it rides through
-    // `chat-reply` unchanged on every tier, and the answer comes back as the
-    // next user turn — either an option's label verbatim, or whatever the
-    // participant typed, because the composer is always the other answer.
-    'ASKING. When you are replying into a conversation and a direction must'
-    + ' be decided by the participant, end your reply with ONE fenced code block'
-    + ' whose info string is `' + QUESTION_FENCE_LANG + '`, holding JSON of the'
-    + ' shape {"prompt": "...", "options": ["...", "..."]} — two to four short'
-    + ' options, the prompt under 280 characters, each option under 80. Put the'
-    + ' fence LAST in the reply, and then END THE TURN: do not wait for an'
-    + ' answer. The participant\'s choice arrives as the next turn of the'
-    + ' conversation, either one of your options word for word or an answer in'
-    + ' their own words from the composer; treat both as the decision.',
+    // ONE paragraph, owned by core beside the parser it describes
+    // (question-fence.ts). The local providers append the same constant to
+    // their system text, so every tier is taught the convention
+    // `splitQuestion` actually reads — never a copy that drifted.
+    QUESTION_ASKING_INSTRUCTION,
   ].join('\n')
 }
 

@@ -128,8 +128,11 @@ function facts(rows) {
       return [t.name, under ? under.name : null]
     })),
     // Can each visible disc be pressed, i.e. does the topmost element at its
-    // centre belong to it? false = something is on top of it.
+    // centre belong to it? false = something is on top of it. A disabled disc
+    // (Back at the hive root) takes no pointer events, so the point falls
+    // through it by design — report 'disabled', never a false "covered".
     hits: Object.fromEntries([...nav, ...tools].map(d => {
+      if (d.el.disabled) return [d.name, 'disabled']
       const at = document.elementFromPoint(...centre(d.b))
       return [d.name, !!at && d.el.contains(at)]
     })),
@@ -179,6 +182,24 @@ async function pass(browser, orientation) {
   try { await context.grantPermissions(['camera'], { origin: base }) } catch { /* the fake-ui flag still answers */ }
   await context.addInitScript(() => {
     try { localStorage.setItem('hc:mobile-mode', 'on') } catch { /* ignore */ }
+    // A recording shows ONE build, start to finish. The dev server's
+    // live-reload client (Vite's socket, protocol 'vite-hmr') reloads the page
+    // whenever any session saves any file — a reload lands mid-step, a tap
+    // fails, and a compile-error overlay can cover the frame. Hand that client
+    // a socket that never connects; every other socket is left alone.
+    const Native = window.WebSocket
+    function Guarded(url, protocols) {
+      const asked = [].concat(protocols ?? []).map(String)
+      if (asked.some(p => /vite/i.test(p))) {
+        const inert = new EventTarget()
+        Object.assign(inert, { url: String(url), protocol: '', readyState: 0, send() {}, close() {} })
+        return inert
+      }
+      return protocols === undefined ? new Native(url) : new Native(url, protocols)
+    }
+    Guarded.prototype = Native.prototype
+    Object.assign(Guarded, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 })
+    window.WebSocket = Guarded
   })
   const page = await context.newPage()
   const errors = []

@@ -54,7 +54,9 @@ export type BriefPanelOptions = {
   /** Write a note ON THIS TILE, at its own address — the desk principle, so a
    *  page writes where it reads and never has to move you to be useful. */
   onWriteInline?: (text: string) => void
-  /** Open the Beehaviors panel on this tile. */
+  /** Open the Beehaviors panel on the CONTEXT layer. Offer it only where this
+   *  tile IS the context (the page-scale brief) — behaviours are never managed
+   *  on a tile you are not standing in. */
   onBehaviors?: () => void
   /** Open one carried behaviour. */
   onBehavior?: (behavior: BriefBehavior) => void

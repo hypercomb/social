@@ -1,21 +1,16 @@
 // scripts/drive-tile-behavior-icon.cjs
 //
-// THE PER-TILE FEATURES ICON — earned, never standing.
+// NO PER-TILE FEATURES ICON — not standing, and not earned.
 //
-// Beehaviours belong to where you STAND, so no tile carries a puzzle piece
-// just for existing (that cost a slot in every hover band and asked the
-// behaviour question about the wrong tile). What DOES earn one is a
-// behaviour created for THAT tile: a view applied to it, or a kind bound to
-// its location. That is what makes a tile added from a swarm able to show
-// the features it arrived carrying — click it in, it paints in full, and its
-// own behaviours say so on its own hexagon.
-//
-// This harness proves both halves against a live shell, through the public
-// band API (TileOverlayDrone.actionsForTile — the same list the hover band
-// renders):
+// Behaviours are managed only from the context layer (Jaime, 2026-09-10: "We
+// only manage behaviors from the context layer"). The puzzle piece used to
+// appear on a tile that carried a behaviour of its own; that door is removed,
+// and this harness proves it stays removed against a live shell, through the
+// public band API (TileOverlayDrone.actionsForTile — the same list the hover
+// band renders):
 //   1. a fresh tile carries NO features icon
 //   2. `/website here` inside it binds visual:website:page to that location,
-//      and the icon appears on the tile — with nothing else changed
+//      and the tile STILL carries no features icon — its band is unchanged
 //
 // Usage:
 //   node scripts/drive-tile-behavior-icon.cjs                 # dev 4250
@@ -120,11 +115,11 @@ async function bandFor(page, label) {
   const after = await evalSafe(() => bandFor(page, TILE))
   const boundHere = (after.bound?.['visual:website:page'] ?? []).map(b => b?.path)
   check('the behaviour bound to this tile', boundHere.includes('/' + TILE), JSON.stringify(after.bound))
-  check('a tile with a behaviour of its own shows the features icon',
-    Array.isArray(after.band) && after.band.includes('features'), JSON.stringify(after.band))
+  check('a tile with a behaviour of its own STILL shows no features icon',
+    Array.isArray(after.band) && !after.band.includes('features'), JSON.stringify(after.band))
   check('and nothing else in the band changed',
     Array.isArray(after.band) && Array.isArray(before.band)
-      && after.band.filter(n => n !== 'features').join(',') === before.band.join(','),
+      && after.band.join(',') === before.band.join(','),
     `${JSON.stringify(before.band)} → ${JSON.stringify(after.band)}`)
 
   const passed = results.filter(r => r.ok).length

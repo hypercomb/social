@@ -8,6 +8,7 @@ import type { InputGate } from '../input-gate.service.js'
 import { readViewportAt, writeViewportAt } from '../../editor/viewport-store.js'
 import { getLaneScrollAxis } from '../../sequence/lane-viewport-mode.js'
 import { expandToFrame, viewportIsFramed } from '../../sequence/frame-lock.js'
+import { shouldRefit } from '../../presentation/tiles/stage-centering.js'
 
 type Pt = { x: number; y: number }
 
@@ -444,6 +445,17 @@ export class ZoomDrone extends Drone {
       this.#refitFramed()
     })
 
+    // The command line on demand moves the centre a fit aims at (the header's
+    // `line-on-demand` class, read in zoomToFit) without resizing anything, so
+    // a page resting on its fit is refitted when the mode flips either way —
+    // the rule pixi-host applies on resize. Two frames let the shell's class
+    // land first. Pages the global fit switch drives refit from controls-bar.
+    this.onEffect('command-line:on-demand', () => {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (shouldRefit(this.vp?.lastZoom, this.vp?.lastPan)) this.zoomToFit(true)
+      }))
+    })
+
     // lock the input gate while the editor is open so wheel/pinch zoom
     // doesn't fire underneath the editor overlay
     const gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate')
@@ -772,9 +784,15 @@ export class ZoomDrone extends Drone {
     // safe area in canvas space, so subtract the canvas's own top offset
     // (0 normally; non-zero only if the host is inset from the viewport top).
     const headerBottom = headerEl ? headerEl.getBoundingClientRect().bottom : 0
-    const headerBottomLocal = canvasRect ? headerBottom - canvasRect.top : headerBottom
-    const safeTop = Math.max(0, headerBottomLocal) + padding
-    const safeBottom = screen.height - padding
+    const headerBottomLocal = Math.max(0, canvasRect ? headerBottom - canvasRect.top : headerBottom)
+    // With the command line on demand (command-line.component.ts
+    // `line-on-demand`) the bar paints no strip, so the hive centres on the
+    // whole canvas: the header's height is reserved half above, half below.
+    // The scale is the one the normal mode fits — only the centre rises, by
+    // half the header — and a summoned line may overlap the top of the content.
+    const headerReserve = headerEl?.classList.contains('line-on-demand') ? headerBottomLocal / 2 : 0
+    const safeTop = headerBottomLocal - headerReserve + padding
+    const safeBottom = screen.height - headerReserve - padding
     const safeLeft = controlsLeft + padding
     const safeRight = screen.width - controlsRight - padding
     const availW = safeRight - safeLeft

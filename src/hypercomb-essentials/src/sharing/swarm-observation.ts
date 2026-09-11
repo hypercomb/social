@@ -71,7 +71,7 @@ export interface ObservedPoint {
   /** True when this point is a CHANGE you haven't taken — its branch sig isn't
    *  in your folded receipt (a new tile, or a peer's newer version of one you
    *  already have). Drives a passive colour cue only; there is NO sync action —
-   *  you act through the same features icon you use solo. */
+   *  you act from the context layer, exactly as you do solo. */
   changed: boolean
 }
 

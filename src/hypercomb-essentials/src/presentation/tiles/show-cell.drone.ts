@@ -88,9 +88,28 @@ const PENDING_CELL_LABEL = '\u2026'
 // not on an empty ink field.
 const ARRIVAL_GATE_MS = 2500
 
+/** `#rrggbb` → the 0..1 triple the border attribute takes; null otherwise. */
+const previewRgb = (hex: string | null | undefined): [number, number, number] | null => {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex ?? '').trim())
+  return m ? [parseInt(m[1], 16) / 255, parseInt(m[2], 16) / 255, parseInt(m[3], 16) / 255] : null
+}
+
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
 type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean; plain?: boolean; pendingProps?: boolean }
+
+/** `tile:preview` — the tile editor's edit in progress (editor/tile-editor.view.ts).
+ *  `page` is the page the tile sits on, segments joined with '/'. Pictures are
+ *  the exact small pictures a save would write, under their real signatures;
+ *  absent means "the stored picture", `removed` means "no picture". */
+type TilePreviewPicture = { sig: string; blob: Blob }
+type TilePreviewPayload =
+  | { label: string; clear: true }
+  | { label: string; clear?: false; page: string; point?: TilePreviewPicture | null; flat?: TilePreviewPicture | null; removed?: boolean; border?: string | null; hideText?: boolean }
+type TilePreview = Extract<TilePreviewPayload, { page: string }>
+
+/** The rim a tile wears when it names no colour — as #tryInPlaceCellUpdate paints it. */
+const PREVIEW_DEFAULT_BORDER: [number, number, number] = [0.784, 0.592, 0.353]
 
 /** One tile of a DIVE (`render:dive`, wave-view): what another layer's tile
  *  needs to be painted HERE, in the page's own slots, by the page's own
@@ -703,8 +722,8 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'clipboard:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover']
-  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'landing:pending', 'render:dive-painted']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'tile:root-default-changed', 'search:filter', 'render:set-orientation', 'render:grid-changed', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'arrange:preview', 'render:set-gap', 'move:preview', 'clipboard:captured', 'clipboard:verb', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'takeover:indexed', 'tags:removal-pending', 'tags:apply-pending', 'tags:preview', 'drop:dragging', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'cell:mutation-state', 'reference:branch-ready', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:filter', 'tile:hidden', 'tile:unhidden', 'content:arrived', 'overlay:band-rows', 'swarm:wand', 'prune:mode-changed', 'landing:quiet', 'landing:apply', 'render:dive', 'render:dive-hover', 'tile:preview']
+  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:tiles-target', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing', 'visual:wanted', 'landing:pending', 'render:dive-painted', 'render:name-visibility']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
@@ -1254,6 +1273,9 @@ export class ShowCellDrone extends Drone {
   #portalShimmerActive = false
   #showHiddenItems = false
   #currentHiddenSet = new Set<string>()
+  /** Launcher-page tiles whose behaviour is switched off — painted as hidden
+   *  items whatever the show-hidden eye says (see the filter pass). */
+  #dormantLaunchLabels = new Set<string>()
   // World mode (control-bar toggle): when on, tiles that are NOT public
   // render dimmed (a "what you're sharing" preview). It never removes tiles —
   // everything stays visible, unshared ones just dim.
@@ -4386,6 +4408,24 @@ export class ShowCellDrone extends Drone {
       }
     }
 
+    // A SWITCHED-OFF launcher member (a game whose Beehaviors light is out) is
+    // a HIDDEN tile, never a missing one: its group keeps it as a member, so
+    // the page's layer keeps its cell, and this pass paints it grey with the
+    // overlay's unhide as the way back. Not subject to the show-hidden eye — a
+    // behaviour going dark must be OBVIOUS on the page that offers it.
+    const dormantLaunch = new Set<string>()
+    if (isLauncherLocation(passSegments)) {
+      try {
+        const reg = (window as any).ioc?.get?.('@hypercomb.social/GroupLauncher') as
+          | { get?: (id: string) => { members?: () => readonly { label?: string; dormant?: boolean }[] } | undefined }
+          | undefined
+        for (const m of reg?.get?.(String(passSegments[0]))?.members?.() ?? []) {
+          if (m?.dormant === true && m.label && union.has(m.label)) dormantLaunch.add(m.label)
+        }
+      } catch { /* registry not up yet — the next synchronize re-reads it */ }
+    }
+    this.#dormantLaunchLabels = dormantLaunch
+
     // SWARM PRIVACY — inside a swarm your canvas shows ONLY what you chose to
     // share. World mode (the PREP stage) previews the split by DIMMING the
     // unshared tiles; the moment you actually join, the preview is over and
@@ -5307,7 +5347,7 @@ export class ShowCellDrone extends Drone {
     // slots — the hard display rule: a tile never renders without its
     // image outside text-only mode. Replacing the set wholesale unpins
     // the previous layer's sigs automatically.
-    this.imageAtlas?.setPinned(cells.flatMap(c => (c.imageSig ? [c.imageSig] : [])))
+    this.imageAtlas?.setPinned([...cells.flatMap(c => (c.imageSig ? [c.imageSig] : [])), ...this.#tilePreviewSigs()])
 
     // rebuild reverse axial lookup for O(1) tile:hover
     this.#axialToIndex.clear()
@@ -5328,6 +5368,9 @@ export class ShowCellDrone extends Drone {
     // property of the open window, not of this frame, so re-apply it here or
     // the cut rim vanishes the first time anything re-renders under it.
     this.#applySwapMode()
+    // A full render rebuilt every attribute from the caches; the edit in
+    // progress goes back on top of its tile.
+    this.#writeTilePreview()
     this.#emitRenderTags(cells)
   }
 
@@ -5861,7 +5904,12 @@ export class ShowCellDrone extends Drone {
 
     // tile:saved effect — invalidate only the saved cell's caches and run an
     // incremental render so the rest of the grid stays untouched.
+    // tile:preview — the tile editor's edit, painted live onto its own tile.
+    // Transient (emitTransient): nothing is cached and nothing replays.
+    this.onEffect<TilePreviewPayload>('tile:preview', (payload) => { void this.#applyTilePreview(payload) })
+
     this.onEffect<{ cell: string }>('tile:saved', (payload) => {
+      if (payload?.cell) this.#tilePreviewSavedLabel = payload.cell
       if (payload?.cell) {
         const oldSig = this.cellImageCache.get(payload.cell)
         this.cellImageCache.delete(payload.cell)
@@ -8028,7 +8076,7 @@ export class ShowCellDrone extends Drone {
         .map(c => c.label),
       substrateLabels: cells.filter(c => c.hasSubstrate).map(c => c.label),
       linkLabels: cells.filter(c => c.hasLink).map(c => c.label),
-      hiddenLabels: this.#showHiddenItems ? [...this.#currentHiddenSet] : [],
+      hiddenLabels: [...new Set([...(this.#showHiddenItems ? this.#currentHiddenSet : []), ...this.#dormantLaunchLabels])],
       // READINESS IS INFORMATION, NOT PERMISSION. A dim branch is still
       // preparing its next view — entering it is allowed and simply makes the
       // participant wait (TileOverlayDrone diverts the preloader at the tile
@@ -9504,6 +9552,7 @@ export class ShowCellDrone extends Drone {
       for (const cell of cells) {
         if (cell.imageSig) pins.add(cell.imageSig)
       }
+      for (const sig of this.#tilePreviewSigs()) pins.add(sig)
       imageAtlas.setPinned(pins)
     }
 
@@ -10879,7 +10928,10 @@ export class ShowCellDrone extends Drone {
       // (fill concluded empty → #fillMissedSigs, decode failure) — folding
       // it in lets the next natural repaint rebake the released shade.
       const sh = this.#cellIsShaded(c) ? 1 : 0
-      s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${ia}:${c.hasBranch ? 1 : 0}:${c.divergence ?? 0}:${c.hideText ? 1 : 0}:${c.unshared ? 1 : 0}:${pf}:${sh}|`
+      // Dormant-launcher bit: a roster flip changes a tile's face with every
+      // other field unchanged, so without it the dim would never be baked.
+      const dm = this.#dormantLaunchLabels.has(c.label) ? 1 : 0
+      s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${ia}:${c.hasBranch ? 1 : 0}:${c.divergence ?? 0}:${c.hideText ? 1 : 0}:${c.unshared ? 1 : 0}:${pf}:${sh}:${dm}|`
     }
     return s
   }
@@ -10983,8 +11035,9 @@ export class ShowCellDrone extends Drone {
       hp += 4
 
       let [cr, cg, cb] = labelToRgb(c.label)
-      // gray out hidden items when show-hidden is active
-      const isHiddenItem = !foreign && this.#showHiddenItems && this.#currentHiddenSet.has(c.label)
+      // gray out hidden items when show-hidden is active — and a switched-off
+      // launcher member always (it is never filtered, so this is its face)
+      const isHiddenItem = !foreign && ((this.#showHiddenItems && this.#currentHiddenSet.has(c.label)) || this.#dormantLaunchLabels.has(c.label))
       if (isHiddenItem) {
         const gray = cr * 0.3 + cg * 0.3 + cb * 0.3
         cr = gray * 0.5; cg = gray * 0.5; cb = gray * 0.5
@@ -11044,7 +11097,9 @@ export class ShowCellDrone extends Drone {
 
       const dv = c.divergence ?? 0
       divergence.set([dv, dv, dv, dv], dp)
-      const us = c.unshared ? 1 : 0
+      // A switched-off launcher member wears the same dim as an unshared tile:
+      // present, plainly not lit, still pressable (its unhide is the way back).
+      const us = c.unshared || (!foreign && this.#dormantLaunchLabels.has(c.label)) ? 1 : 0
       unshared.set([us, us, us, us], dp)
       // Continuous 0..1 — a tile mid-fade keeps its current fade value across a
       // geometry rebuild, so a repaint that happens to land during the fade
@@ -11301,6 +11356,14 @@ export class ShowCellDrone extends Drone {
 
   #labelIsHidden(label: string): boolean {
     if (label === this.#hoverRevealLabel) return false
+    // A tile under a live edit hides its name by the EDIT, not by what is stored.
+    const preview = this.#tilePreview
+    if (preview?.label === label) {
+      if (!preview.hideText || preview.removed) return false
+      const picture = this.#flat ? preview.flat : preview.point
+      const sig = picture?.sig ?? this.cellImageCache.get(label)
+      return this.#hidesName(true, !!(sig && this.imageAtlas?.getImageUV(sig)))
+    }
     const cell = this.renderedCells.get(label)
     if (!cell?.hideText || cell.plain || !cell.imageSig) return false
     return this.#hidesName(true, !!this.imageAtlas?.getImageUV(cell.imageSig))
@@ -11344,6 +11407,150 @@ export class ShowCellDrone extends Drone {
       }
     }
     this.#pushBuffer('aLabelUV')
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // LIVE PREVIEW — the tile editor's edit, on its own tile
+  // ─────────────────────────────────────────────────────────────────────
+  //
+  // While a tile is being edited, its hexagon in the hive shows the edit as it
+  // happens: the framing, a new picture or none, the rim colour, whether the
+  // name shows. It is painted the way #tryInPlaceCellUpdate paints a saved
+  // change — attribute writes on one tile, never a render pass — but from the
+  // editor's payload, and it is NEVER written into a cache: the caches go on
+  // describing what is stored, so ending a preview is a repaint from them.
+  //
+  // The pictures are the exact bytes a save writes (one capture function, one
+  // deterministic output), loaded under their real signatures — so when the
+  // save lands, its new picture is already on the GPU and nothing flashes.
+
+  #tilePreview: TilePreview | null = null
+  #tilePreviewToken = 0
+  /** The tile a save just landed on — its preview's end must not repaint the
+   *  old caches, because the save's own render is about to paint the truth. */
+  #tilePreviewSavedLabel = ''
+
+  #tilePreviewSigs(): string[] {
+    const p = this.#tilePreview
+    if (!p || p.removed) return []
+    return [p.point?.sig, p.flat?.sig].filter((sig): sig is string => !!sig)
+  }
+
+  #currentPageKey(): string {
+    return ((this.resolve<any>('lineage')?.explorerSegments?.() ?? []) as unknown[])
+      .map(s => String(s ?? '').trim()).filter(Boolean).join('/')
+  }
+
+  #applyTilePreview = async (payload: TilePreviewPayload | null | undefined): Promise<void> => {
+    if (!payload?.label) return
+    const token = ++this.#tilePreviewToken
+
+    if (payload.clear) {
+      const ended = this.#tilePreview
+      this.#tilePreview = null
+      if (!ended) return
+      // A save ends the preview and announces tile:saved in the same turn.
+      // Wait that turn out: repaint from the caches only if no save came.
+      this.#tilePreviewSavedLabel = ''
+      setTimeout(() => {
+        if (token !== this.#tilePreviewToken) return
+        if (this.#tilePreviewSavedLabel === ended.label) return
+        this.#restoreTileFromCaches(ended.label)
+      }, 0)
+      return
+    }
+
+    if (payload.page !== this.#currentPageKey()) return
+    const atlas = this.imageAtlas
+    // Decode both orientations before anything is swapped, so the tile never
+    // paints an empty slot mid-edit and an orientation flip finds its picture.
+    if (atlas && !payload.removed) {
+      const pictures = [payload.point, payload.flat].filter((p): p is TilePreviewPicture => !!p)
+      await Promise.all(pictures.map(p => atlas.loadImage(p.sig, p.blob).catch(() => null)))
+    }
+    if (token !== this.#tilePreviewToken) return
+    this.#tilePreview = payload
+    atlas?.setPinned([
+      ...[...this.renderedCells.values()].flatMap(c => (c.imageSig ? [c.imageSig] : [])),
+      ...this.#tilePreviewSigs(),
+    ])
+    this.#writeTilePreview()
+  }
+
+  /** Paint the preview onto its tile. False when there is nothing to paint or
+   *  the tile is not in the current geometry. */
+  #writeTilePreview(): boolean {
+    const preview = this.#tilePreview
+    if (!preview) return false
+    const i = this.#labelToIndex.get(preview.label)
+    const { imageUV, hasImage, borderColor, labelUV } = this.#buf
+    if (i === undefined || !imageUV || !hasImage || !borderColor || !labelUV) return false
+    if (!this.geom || !this.imageAtlas || !this.atlas) return false
+
+    const picture = this.#flat ? preview.flat : preview.point
+    const stored = this.cellImageCache.get(preview.label)
+    let uv = preview.removed
+      ? null
+      : picture
+        ? this.imageAtlas.getImageUV(picture.sig)
+        : (stored ? this.imageAtlas.getImageUV(stored) : null)
+    if (!preview.removed && picture && !uv) {
+      // Evicted or not decoded yet: keep what the tile shows and paint again
+      // the moment it lands.
+      uv = stored ? this.imageAtlas.getImageUV(stored) : null
+      void this.imageAtlas.loadImage(picture.sig, picture.blob)
+        .then(() => { if (this.#tilePreview === preview) this.#writeTilePreview() })
+        .catch(() => { /* the stored picture stays */ })
+    }
+
+    this.#writeCellVec4(imageUV, i, uv?.u0 ?? 0, uv?.v0 ?? 0, uv?.u1 ?? 0, uv?.v1 ?? 0)
+    this.#writeCellScalar(hasImage, i, uv ? 1 : 0)
+
+    const [r, g, b] = previewRgb(preview.border) ?? PREVIEW_DEFAULT_BORDER
+    this.#writeCellRgb(borderColor, i, r, g, b)
+
+    if (this.#hidesName(preview.hideText, !!uv) && preview.label !== this.#hoverRevealLabel) {
+      this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
+    } else {
+      const ruv = this.atlas.getLabelUV(preview.label)
+      this.#writeCellVec4(labelUV, i, ruv.u0, ruv.v0, ruv.u1, ruv.v1)
+    }
+
+    const pushed = this.#pushBuffer('aImageUV') && this.#pushBuffer('aHasImage')
+      && this.#pushBuffer('aBorderColor') && this.#pushBuffer('aLabelUV')
+    // Tile names are real DOM text (tile-name.drone) — tell them to re-ask.
+    this.emitEffect('render:name-visibility', { label: preview.label })
+    return pushed
+  }
+
+  /** A preview ended with no save: paint the tile from the caches again. */
+  #restoreTileFromCaches(label: string): void {
+    const i = this.#labelToIndex.get(label)
+    const { imageUV, hasImage, borderColor, labelUV } = this.#buf
+    if (i === undefined || !imageUV || !hasImage || !borderColor || !labelUV || !this.geom || !this.imageAtlas || !this.atlas) {
+      this.requestRender()
+      return
+    }
+    const sig = this.cellImageCache.get(label) ?? null
+    const uv = sig ? this.imageAtlas.getImageUV(sig) : null
+    if (sig && !uv) { this.requestRender(); return }
+    this.#writeCellVec4(imageUV, i, uv?.u0 ?? 0, uv?.v0 ?? 0, uv?.u1 ?? 0, uv?.v1 ?? 0)
+    this.#writeCellScalar(hasImage, i, uv ? 1 : 0)
+    const [r, g, b] = this.cellBorderColorCache.get(label) ?? PREVIEW_DEFAULT_BORDER
+    this.#writeCellRgb(borderColor, i, r, g, b)
+    const hideText = this.cellHideTextCache.get(label) ?? false
+    if (this.#hidesName(hideText, !!uv) && label !== this.#hoverRevealLabel) {
+      this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
+    } else {
+      const ruv = this.atlas.getLabelUV(label)
+      this.#writeCellVec4(labelUV, i, ruv.u0, ruv.v0, ruv.u1, ruv.v1)
+    }
+    this.imageAtlas.setPinned([...this.renderedCells.values()].flatMap(c => (c.imageSig ? [c.imageSig] : [])))
+    this.#pushBuffer('aImageUV')
+    this.#pushBuffer('aHasImage')
+    this.#pushBuffer('aBorderColor')
+    this.#pushBuffer('aLabelUV')
+    this.emitEffect('render:name-visibility', { label })
   }
 
   readonly #tryInPlaceCellUpdate = async (

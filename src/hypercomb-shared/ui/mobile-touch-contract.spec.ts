@@ -13,7 +13,6 @@ const read = (...parts: string[]): string => readFileSync(join(here, ...parts), 
 
 const devIndex = read('..', '..', 'hypercomb-dev', 'src', 'index.html')
 const webIndex = read('..', '..', 'hypercomb-web', 'src', 'index.html')
-const tileEditor = read('tile-editor', 'tile-editor.component.scss')
 const contactForm = read('contact-card', 'contact-form.component.scss')
 const iconPicker = read('icon-picker', 'icon-picker.component.scss')
 const docsOverlay = read('docs-overlay', 'docs-overlay.component.scss')
@@ -43,11 +42,6 @@ describe('mobile touch contracts', () => {
       expect(viewport).not.toMatch(/(?:maximum-scale\s*=\s*1|user-scalable\s*=\s*no)/i)
       expect(shell).toContain('browser zoom remains user-controlled')
     }
-  })
-
-  it('keeps the late-authored Q&A editor at 16px and its submit action thumb-sized', () => {
-    expect(tileEditor).toMatch(/@include phone\s*\{[\s\S]*\.qa-answer-input\s*\{\s*font-size:\s*16px;/)
-    expect(tileEditor).toMatch(/\.qa-submit\s*\{\s*min-width:\s*44px;\s*min-height:\s*44px;/)
   })
 
   it('stacks contact fields and floors fields and actions in the either-axis phone block', () => {

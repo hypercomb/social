@@ -414,26 +414,44 @@ const attr = (value: string): string =>
 // nothing bound renders as its own page, unwrapped — `containerFor` hands the
 // authored HTML straight back (division-assembly.ts). Either way the container
 // is already being drawn into somewhere. Binding a layout does not GIVE it
-// that space. It DIVIDES it.
+// that space. It DIVIDES it — or, with one hole, ANCHORS a part in it.
 //
-// TWO IS THE FLOOR OF THIS LIBRARY. A one-hole layout divides nothing: it puts
-// one more box around the space and calls that an arrangement. There was a
-// `single` here that did exactly that — "the page, in a box of its own". Its
-// one hole was the SELF hole, where the container's own page goes, so no PART
-// could ever be seated into it; its `space` slider had no second child to
-// space; and turning it moved nothing. A chip that divides nothing teaches the
-// wrong thing about what a layout is.
+// ── ONE HOLE IS AN ANCHOR ───────────────────────────────────────────────
 //
-// What `single` did carry was a padding and an alignment around an undivided
-// page, and that is deliberately gone with it: those belong to the page's own
-// CSS, because a layout variable on a layout that divides nothing is not a
-// layout variable.
+// There was a `single` here that divided nothing, and it was cut. Its one
+// hole was the SELF hole, where the container's own page goes, so no PART
+// could ever be seated into it; its `space` slider had nothing to space; and
+// turning it moved nothing. Two became the floor.
 //
-// THE FLOOR IS A CURATION RULE, NOT A LAW OF THE FORMAT. `parseLayoutTemplate`
-// still accepts a one-hole record and `composeLayout` still draws one, and
-// both must: a hive that bound `single` before it was cut resolves it by
-// SIGNATURE and never by name (template-target.ts), so that container keeps
-// rendering exactly as it did. Data never heals; a library is curated.
+// The floor was wrong about what a one-hole layout is FOR. It is not one more
+// box around the space: it is the TARGET a lone fragment below seats into, and
+// the place the measurements around that one fragment are stated. Without it a
+// container with one child had no honest shape to wear — a `split` leaves a
+// dead half, and a nested `measure` seats the part into `before`, beside the
+// space it was meant for — so an even margin, a width or a height all had to
+// be faked out of arrangements built for two or three.
+//
+//   EVEN INSET       `padding` on a `single` is one margin on all four sides
+//                    of one part.
+//   A MEASURE        its hole is FIXED, at `100%` until moved, so it fills its
+//                    allotment and holds any extent it is given — a width in a
+//                    row and, turned, the same bytes are a height. `justify`
+//                    places it along the axis, `align` across.
+//   AN ANCHOR        measurements inherit, so a `single` at the top of a mixed
+//                    arrangement is where `space` and `padding` are said once
+//                    for every container nested below it. That is the cascade
+//                    working, and `variablesAt` reports where each value a
+//                    level reads actually comes from, so it is seen rather
+//                    than stumbled on.
+//
+// Its hole is a MEMBER seat and never the self hole, and its key is `only` — a
+// word no other primitive uses, so the anchor's `100%` cannot fall through
+// into a `split`'s `one` and swallow the sibling beside it.
+//
+// A hive that bound the OLD `single` holds its bytes by SIGNATURE and never by
+// name (template-target.ts), so that container keeps rendering exactly as it
+// did: `parseLayoutTemplate` still accepts a one-hole self record, and
+// `composeLayout` still draws it. Data never heals; a library is curated.
 //
 // THREE IS THE CEILING, and that is a SECOND idea — nesting, not implicitness.
 // Four even shares is `split` with a `split` in each hole; a six-cell gallery
@@ -441,10 +459,12 @@ const attr = (value: string): string =>
 // library and every one of them cost a chip that said less than the gesture
 // that replaces it.
 //
-// So the library holds the divisions that cannot be made out of the others:
+// So the library holds the shapes that cannot be made out of the others:
 //
-//     IN TWO     split       two even shares — and the one primitive with no
-//                            self hole, so it divides the space WITHOUT
+//     IN ONE     single      one measured seat — the anchor a lone fragment
+//                            lands in, and where the inset around it lives
+//     IN TWO     split       two even shares — with `single`, the primitives
+//                            with no self hole, so they arrange parts WITHOUT
 //                            keeping a place for the container's own page
 //                rail        a measured strip, and the rest
 //     IN THREE   thirds      three even shares
@@ -456,12 +476,14 @@ const attr = (value: string): string =>
 // What is NOT reachable by nesting is a hole's own kind — fluid or fixed is a
 // fact about the template, not a measurement — which is exactly why `rail`,
 // `bookends` and `measure` are here and `two-thirds` is not: a proportion is a
-// measurement, and the slider already moves it.
+// measurement, and the slider already moves it. `single` is here for the same
+// reason from the other end: no arrangement of two or three gives ONE part a
+// measured seat of its own.
 //
 // There were twenty. Fifteen were another one turned, mirrored, or counted
 // higher — `rows-two` was `split` on its side, `right-rail` was `left-rail`
-// seen from the other end, `rows-four` was two `split`s — and the sixteenth
-// divided nothing at all.
+// seen from the other end, `rows-four` was two `split`s — and the sixteenth,
+// the old `single`, divided nothing until its hole became a seat.
 //
 // ── ROTATION IS THE OTHER HALF OF "ONE WAY" ─────────────────────────────
 //
@@ -492,9 +514,24 @@ const attr = (value: string): string =>
 // declare; nothing built in asks for it.
 
 const BUILTINS: readonly LayoutTemplate[] = [
+  // ── IN ONE ─────────────────────────────────────────────────────────
+  //
+  // The anchor. One FIXED member seat at `100%`: it fills its allotment until
+  // it is given a measure, and then it holds that measure. Turned, the measure
+  // is a height. See "ONE HOLE IS AN ANCHOR" above.
+  {
+    kind: LAYOUT_TEMPLATE_KIND,
+    version: 1,
+    name: 'single',
+    flow: 'row',
+    holes: [
+      { key: 'only', fill: 'fixed' },
+    ],
+    vars: { only: '100%' },
+  },
   // ── IN TWO ─────────────────────────────────────────────────────────
   //
-  // The smallest real division, and therefore where the set starts.
+  // The smallest real division.
   //
   // Turned, `split` is two even rows and `rail` is a header, a footer, or a
   // side rail — four shapes each, from one drawing.
@@ -718,6 +755,59 @@ export function variablesOf(template: LayoutTemplate): readonly string[] {
   return out
 }
 
+/** One variable, as a level actually READS it. */
+export interface ResolvedVariable {
+  readonly name: string
+  /** What this level itself declares — empty when it says nothing. */
+  readonly own: string
+  /** What it reads: its own declaration, else the nearest level above that
+   *  declares the name, else the template's own default for that hole, else
+   *  nothing (and CSS's own fallback, 0, stands). */
+  readonly value: string
+  /** The path of the level that declared `value` — `[]` is the root. `null`
+   *  when the value is the template's fallback, or when nothing says anything. */
+  readonly from: readonly string[] | null
+}
+
+/**
+ * WHERE EACH MEASUREMENT A LEVEL READS COMES FROM.
+ *
+ * Measurements cascade — that is the whole reason the vocabulary is shared —
+ * and a cascade nobody can see is one people fight. A `single` anchoring a
+ * mixed arrangement declares `padding` once and every container under it
+ * takes it; a level that reads as "inherited" has to say FROM WHERE, or
+ * finding the one slider that would change it is guesswork.
+ *
+ * The same walk CSS does: this level's own declaration, then each ancestor up
+ * to the root, then the fallback `holeStyle` bakes in for a hole's extent.
+ * `space` and `padding` have no template fallback — the container falls back
+ * to 0 — so a template default for those is never reported as one. Empty for a
+ * path that names no level.
+ */
+export function variablesAt(
+  root: LayoutNode,
+  path: readonly string[],
+): readonly ResolvedVariable[] {
+  const chain: { node: LayoutNode; path: readonly string[] }[] = [{ node: root, path: [] }]
+  for (let depth = 0; depth < path.length; depth++) {
+    const next = chain[depth].node.nested[path[depth]]
+    if (!next) return []
+    chain.push({ node: next, path: path.slice(0, depth + 1) })
+  }
+  const level = chain[chain.length - 1].node
+  const defaults = sanitizeVars(level.template.vars)
+  const holeKeys = new Set(level.template.holes.map(hole => hole.key))
+  return variablesOf(level.template).map((name): ResolvedVariable => {
+    const own = level.vars[name] ?? ''
+    for (let at = chain.length - 1; at >= 0; at--) {
+      const said = chain[at].node.vars[name]
+      if (said !== undefined) return { name, own, value: said, from: [...chain[at].path] }
+    }
+    const fallback = holeKeys.has(name) ? defaults[name] ?? '' : ''
+    return { name, own, value: fallback, from: null }
+  })
+}
+
 /**
  * The measurements a layout wears in a MINIATURE — a palette chip.
  *
@@ -736,9 +826,14 @@ export function miniatureVars(template: LayoutTemplate): Readonly<Record<string,
   // percentage to clamp against — so the one box with a definite height, the
   // chip, says so.
   const vars: Record<string, string> = { space: '1px', padding: '0rem', overflow: 'hidden' }
+  const defaults = sanitizeVars(template.vars)
   for (const hole of template.holes) {
     // Fluid holes take the remainder and need no measurement at any scale.
-    if (hole.fill === 'fixed') vars[hole.key] = '22%'
+    if (hole.fill !== 'fixed') continue
+    // A default that is ALREADY a share reads the same at any size, so it is
+    // kept: `single` at `100%` is the whole chip, not a 22% strip at one end.
+    const own = defaults[hole.key] ?? ''
+    vars[hole.key] = /^\d+(\.\d+)?%$/.test(own) ? own : '22%'
   }
   return vars
 }
@@ -774,9 +869,18 @@ export function miniatureVars(template: LayoutTemplate): Readonly<Record<string,
  *  grows with its content — the clamp resolves to nothing, which is exactly
  *  right: there is no allotted space to exceed. */
 function holeStyle(template: LayoutTemplate, hole: LayoutHole): string {
-  // `0px`, not nothing: an undeclared variable would leave `flex-basis` at
-  // `auto`, and a "fixed" hole would silently size itself to its content.
-  const extent = `var(${VAR_PREFIX}${hole.key},0px)`
+  // THE TEMPLATE'S OWN DEFAULT IS THE FALLBACK. Only the root merges defaults
+  // in, so a level nested below says nothing about its holes — and a fixed
+  // hole whose variable no ancestor declares used to fall back to `0px` and
+  // vanish: a nested `rail` with no rail, a nested `single` with no seat. An
+  // ancestor that DOES declare the name still wins, because a declared custom
+  // property inherits and a fallback only answers when nothing does.
+  //
+  // `0px` where the template says nothing, not nothing at all: an undeclared
+  // variable would leave `flex-basis` at `auto`, and a "fixed" hole would
+  // silently size itself to its content.
+  const fallback: string | undefined = sanitizeVars(template.vars)[hole.key]
+  const extent = `var(${VAR_PREFIX}${hole.key},${fallback ?? '0px'})`
   const bounds = 'min-width:0;min-height:0'
 
   // THE OPEN PROPERTIES. Two names this file resolves, each falling back to
@@ -800,7 +904,7 @@ function holeStyle(template: LayoutTemplate, hole: LayoutHole): string {
     return `flex:0 1 100%;${sizeOnCross(extent)};${bounds};${own}`
   }
   if (hole.fill === 'fixed') return `flex:0 1 ${extent};${bounds};${own}`
-  return `flex:${hole.grow ?? 1} 1 var(${VAR_PREFIX}${hole.key},0);${bounds};${own}`
+  return `flex:${hole.grow ?? 1} 1 var(${VAR_PREFIX}${hole.key},${fallback ?? '0'});${bounds};${own}`
 }
 
 /** A band breaks the line, so its own extent is on the OTHER axis from the

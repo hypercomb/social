@@ -110,29 +110,53 @@ const runFromEnv = (env = process.env) => {
 }
 
 /**
+ * The conversation an ask's run lives in, given the ask RECORD — the rule the
+ * renderer applies when it resolves `run: { ask }` (`runForAsk` in
+ * assistant/chat-steps.ts, the source of truth; loop-run.spec.ts compares the
+ * two). A chat ask names its conversation; anything else is `agent:<askSig>`.
+ */
+const runConvoForAskRecord = (askSig, record) => {
+  const payload = record && record.payload
+  const chat = payload && payload.mode === 'chat' && typeof payload.convoId === 'string'
+    ? payload.convoId.trim()
+    : ''
+  return chat || runConvoForAsk(askSig)
+}
+
+/**
  * Open a run against one conversation.
  *
  * Pass `ask` (the ask sig) and every op is sent as `run: { ask }`: the
  * RENDERER resolves where the run lives from the ask record it already
  * reads — a chat-mode ask into the chat's own bucket, anything else into
  * `agent:<askSig>` — so one input addresses the run on both sides and no
- * environment is involved. `convoId` is then only where `resume()` reads
- * from (the chat convoId, for a chat ask; it defaults to the note-mode
- * address). Pass `convoId` + `runId` explicitly, with no `ask`, only when
- * you have your own stable handle and can guarantee the next process spells
- * it identically — that form is sent as it always was.
+ * environment is involved.
+ *
+ * `resume()` must read THAT bucket, and a local guess cannot know it: a chat
+ * ask's run is not under `agent:<askSig>`, so guessing the note-mode address
+ * returns an empty ledger for a run that did the work — the silent false
+ * negative this file refuses. So the bucket is resolved the way the renderer
+ * resolves it, from the ask record (read over the bridge on first use, then
+ * held — a record's content never changes under its sig). Pass `convoId` too
+ * when you already know it (the wake line prints it); then no lookup is made.
+ * When the record is gone — retired — and no `convoId` was given, `resume()`
+ * THROWS: an empty ledger is never an answer to "I could not find out".
+ *
+ * Pass `convoId` + `runId` explicitly, with no `ask`, only when you have your
+ * own stable handle and can guarantee the next process spells it identically
+ * — that form is sent as it always was.
  */
 function openRun({ convoId, runId, ask, bridge = DEFAULT_BRIDGE, timeoutMs = 15_000 }) {
   const askSig = String(ask || '').trim()
-  const convo = String(convoId || (askSig ? runConvoForAsk(askSig) : '')).trim()
+  const given = String(convoId || '').trim()
   const id = String(runId || (askSig ? runIdForAsk(askSig) : '')).trim()
-  if (!convo) throw new Error('openRun needs a convoId')
+  if (!given && !askSig) throw new Error('openRun needs a convoId')
   if (!id) throw new Error('openRun needs `ask` (preferred — the id is derived) or an explicit stable `runId`')
 
   // THE ASK FORM WINS. With an ask in hand the renderer's resolution is the
   // one that cannot misfile (it reads the record); an explicit address is
   // the legacy form for runs that are not answering an ask.
-  const run = askSig ? { ask: askSig } : { convoId: convo, id }
+  const run = askSig ? { ask: askSig } : { convoId: given, id }
 
   /** Send one op AS A STEP of this run. The hive records it; you get the
    *  op's own answer back, unchanged. */
@@ -142,6 +166,33 @@ function openRun({ convoId, runId, ask, bridge = DEFAULT_BRIDGE, timeoutMs = 15_
   /** Send one op WITHOUT recording it — for the reads that are how you
    *  rejoin the loop rather than moves within it. */
   const peek = async (op, fields = {}) => send(bridge, { op, ...fields }, timeoutMs)
+
+  let resolved = given
+
+  /**
+   * The conversation this run's ledger lives in — the bucket the renderer
+   * files `run: { ask }` under. Given, or read from the ask record over the
+   * bridge and then held. THROWS when it cannot be known: the lookup failed,
+   * or the record is gone (retired) and no `convoId` was given. Guessing
+   * `agent:<askSig>` there would read an empty ledger for a chat run that
+   * did the work.
+   */
+  const resolveConvoId = async () => {
+    if (resolved) return resolved
+    const res = await peek('optimization-list', { kind: 'ask' })
+    if (!res || !res.ok) {
+      throw new Error(`cannot find the run's conversation: ${(res && res.error) || 'optimization-list failed'}`)
+    }
+    const items = (res.data && res.data.items) || []
+    const record = items.find(item => item && item.sig === askSig)
+    if (!record) {
+      throw new Error(
+        `cannot find the run's conversation: the ask ${askSig} is gone (retired?) and no convoId was given`
+        + ' — pass openRun({ ask, convoId }) with the convoId the wake line printed')
+    }
+    resolved = runConvoForAskRecord(askSig, record)
+    return resolved
+  }
 
   /** The request a step recorded, or undefined when it stored none. Throws
    *  only on transport failure — a resource that has gone is `undefined`,
@@ -163,6 +214,7 @@ function openRun({ convoId, runId, ask, bridge = DEFAULT_BRIDGE, timeoutMs = 15_
    *   nextSeq — the seq a fresh writer should claim
    */
   const resume = async () => {
+    const convo = await resolveConvoId()
     const res = await peek('thread-read', { cell: convo, steps: true, runId: id })
     if (!res || !res.ok) {
       throw new Error(`cannot read the run ledger: ${(res && res.error) || 'thread-read failed'}`)
@@ -215,7 +267,19 @@ function openRun({ convoId, runId, ask, bridge = DEFAULT_BRIDGE, timeoutMs = 15_
     return landed.some(s => s.verb === verb && (!predicate || predicate(s.request, s)))
   }
 
-  return { convoId: convo, runId: id, act, peek, resume, alreadyDid, requestOf }
+  return {
+    /** The conversation the ledger lives in: the one given, or the one read
+     *  from the ask record once `resume()` / `resolveConvoId()` found it.
+     *  `null` until then — never a guess. */
+    get convoId() { return resolved || null },
+    runId: id,
+    act,
+    peek,
+    resume,
+    alreadyDid,
+    requestOf,
+    resolveConvoId,
+  }
 }
 
-module.exports = { openRun, runIdForAsk, runRefForAsk, runConvoForAsk, runFromEnv }
+module.exports = { openRun, runIdForAsk, runRefForAsk, runConvoForAsk, runConvoForAskRecord, runFromEnv }

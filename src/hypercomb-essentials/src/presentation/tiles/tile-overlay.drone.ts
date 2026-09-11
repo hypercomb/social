@@ -3333,17 +3333,15 @@ export class TileOverlayDrone extends Drone {
     } catch { return false }
   }
 
-  // Cancel editor on right-click release (mirrors Escape cascade priority 1)
+  // The tile editor registers its own right-click way out with the
+  // BackGesture service (editor/tile-editor.view.ts), the one owner of that
+  // gesture. Cancelling it here as well made one right-click do two things.
   #onPointerUp = (e: PointerEvent): void => {
     // Any armed hold-to-enter dies on the release — it only ever fires from
     // its own timer, on a press that never moved and never let go.
     this.#cancelEnterHold()
     // Suppress orphaned pointerup from navigation gesture (click/contextmenu still pending)
     if (this.#consumedPointerId === e.pointerId) return
-    if (e.button !== 2) return
-    if (!this.#editing) return
-    const drone = window.ioc.get<{ cancelEditing(): void }>('@diamondcoreprocessor.com/TileEditorDrone')
-    drone?.cancelEditing()
   }
 
   #onConsumedGestureEnd = (e: CustomEvent<{ pointerId?: number }>): void => {

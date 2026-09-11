@@ -285,6 +285,12 @@ export const SCOPED_POOL_MEANINGS: readonly string[] = Object.freeze([
   // and not these two left exactly the gap this registry exists to close.
   'chat:blurbs',
   'chat:streams',
+  // Each conversation's organized WORKFLOW, as the machine-local model
+  // arranged it for the chat window's route sidebar (assistant/chat-route.ts,
+  // documentation/chat-route.md). DERIVED CACHE: one recycled slot per
+  // conversation (putPoolDoc sub-keyed by the convoId), version-stamped,
+  // never load-bearing — wipe-safe.
+  'chat:route-flows',
   // The context basket — signatures gathered while browsing, handed to an ask
   // as its closure root list (see assistant/context-basket.ts). Colon-scoped
   // so neither can collide with a tile slugged 'context' or 'changes'.
