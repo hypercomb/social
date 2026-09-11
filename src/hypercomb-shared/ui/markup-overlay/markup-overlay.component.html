@@ -21,7 +21,7 @@
          and the hint is always the line above it. -->
     <div class="mk-dock">
 
-    <div class="mk-hint">{{ 'markup.hint' | t }}</div>
+    <div class="mk-hint">{{ (tool() === 'cut' || cuts() ? 'markup.hint.cut' : 'markup.hint') | t }}</div>
 
     <div class="mk-bar" role="toolbar" [attr.aria-label]="'markup.title' | t">
 
@@ -45,6 +45,13 @@
                 (click)="pick('pin')"
                 [title]="'markup.tool.pin' | t" [attr.aria-label]="'markup.tool.pin' | t">
           <span class="mat-sym">counter_1</span>
+        </button>
+        <!-- THE CUT is not ink: a frame around a part that matters. Each cut
+             is sent as its own picture; no cut sends the whole screen. -->
+        <button type="button" class="mk-btn" [class.is-on]="tool() === 'cut'"
+                (click)="pick('cut')"
+                [title]="'markup.tool.cut' | t" [attr.aria-label]="'markup.tool.cut' | t">
+          <span class="mat-sym">content_cut</span>
         </button>
       </div>
 

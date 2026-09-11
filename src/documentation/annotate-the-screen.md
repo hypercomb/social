@@ -12,7 +12,7 @@ sentence. Annotating removes that half.
 1. Open the sheet — the `draw` button in the bottom-right cluster, the word
    `/annotate`, or the `d` key.
 2. Draw. Pen, arrow, box, numbered pins; six inks; `ctrl+z` undoes, Escape
-   closes.
+   closes. Optionally **cut** (the scissors) around the parts that matter.
 3. Choose a door.
 
 Two doors, and the difference between them is the whole design:
@@ -23,6 +23,35 @@ Two doors, and the difference between them is the whole design:
 | **start a conversation** | this *is* the thing to talk about — a new conversation on the location you were standing at, carrying the annotation and nothing else |
 
 `ctrl+enter` takes the first door, `ctrl+shift+enter` the second.
+
+## Cut out what matters
+
+The scissors draw a **cut**: a dashed frame around a part of the screen the
+question is about. Each cut is sent as its own picture, numbered in the order
+it was drawn (`annotation 1 of 2 — /dolphin/site`). No cut sends the whole
+screen, as before.
+
+It helps the reader in two ways:
+
+- **sharper** — the whole screen is downscaled to 1568px on its long edge, which
+  is where small interface text goes soft. A cut is taken from the
+  full-resolution frame and seldom needs downscaling at all.
+- **quicker** — what a vision model spends on a picture grows with its area, so
+  a panel-sized cut is read for a fraction of the whole screen.
+
+Several cuts beat one frame around all of them whenever the parts are far
+apart: that one frame would carry everything in between.
+
+A cut is not ink. Its frame leaves the sheet with the toolbar for the shot, and
+every cut is taken from the same frame, copied once at full resolution — a live
+screen moves between one encode and the next. Cuts are mapped from page pixels
+onto the frame by one ratio per axis (`markup-cut.ts`). When the surface shared
+is not this tab — a window, a monitor — the page cannot be found inside it, so
+the whole screen goes and a warning says why.
+
+All the pictures arrive in **one** `chat:attach-picture` payload (`pictures`).
+Separate landings would race a fresh conversation emptying the shelf, and the
+bus replays only the last of them.
 
 ## It knows where it was drawn
 
@@ -100,6 +129,7 @@ bar; adding a control made the two overlap.
 | What | Where |
 |---|---|
 | The sheet | `hypercomb-shared/ui/markup-overlay/` |
+| The cut arithmetic | `hypercomb-shared/ui/markup-overlay/markup-cut.ts` |
 | The opener | `hypercomb-shared/ui/edit-actions/` |
 | The word | `hypercomb-essentials/src/commands/annotate.queen.ts` |
 | The key | `hypercomb-essentials/src/keyboard/default-keymap.ts` (`markup.open`) |

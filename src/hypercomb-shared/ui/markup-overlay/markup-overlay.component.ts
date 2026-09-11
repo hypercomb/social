@@ -46,6 +46,13 @@
 //    that very tile with the annotation as its only reference. No picker, no
 //    second gesture naming a subject that was never in doubt.
 //
+// 5. A CUT SENDS ONLY WHAT MATTERS. Drag a cut around each part of the screen
+//    the question is about and each goes as its own picture, taken from the
+//    full-resolution frame — sharper than the downscaled whole, and a fraction
+//    of what a model spends reading it (markup-cut.ts says why several cuts
+//    beat one big one). A cut is not ink: its frame leaves the sheet with the
+//    toolbar for the shot, and no cut at all sends the whole screen.
+//
 // Numbers rather than typed labels: the words belong in the question, and a
 // pin dropped on the screen is what ties "the button at 1 is misaligned" to a
 // place. Typing on a canvas would be a second, worse composer.
@@ -56,6 +63,7 @@ import { Component, ElementRef, computed, signal, viewChild, type OnInit, type O
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
+import { cutRegions, type Region } from './markup-cut'
 
 const OWNER = '@hypercomb.shared/MarkupOverlayComponent'
 
@@ -75,6 +83,14 @@ const FRAME_TIMEOUT_MS = 1_500
 const INK_WIDTH = 3
 const PIN_RADIUS = 13
 
+/** The shorter side a cut needs to be a picture rather than a slip of the
+ *  pointer, in CSS pixels. */
+const MIN_CUT_PX = 12
+
+/** A cut's frame and number are about taking the picture, never in it, so
+ *  they wear one neutral ink rather than the palette. */
+const CUT_INK = '#f5f7fa'
+
 /** The palette. Bright on purpose: this ink is drawn over a screenshot, not
  *  over a panel, and it has to survive both a dark hive and a bright one. The
  *  values live here rather than in the stylesheet because the canvas is
@@ -85,13 +101,19 @@ const INKS = ['#ff4d4d', '#ffb020', '#3ddc84', '#48c6ff', '#ff6bd6', '#f5f7fa'] 
  *  dark glyph is the readable one, at both ends of the palette. */
 const PIN_TEXT = '#101418'
 
-type Tool = 'pen' | 'arrow' | 'box' | 'pin'
+type Tool = 'pen' | 'arrow' | 'box' | 'pin' | 'cut'
 type Point = { x: number; y: number }
 type Shape =
   | { tool: 'pen'; ink: string; points: Point[] }
   | { tool: 'arrow'; ink: string; from: Point; to: Point }
   | { tool: 'box'; ink: string; from: Point; to: Point }
   | { tool: 'pin'; ink: string; at: Point; n: number }
+  | { tool: 'cut'; from: Point; to: Point }
+
+/** What one press of a door photographs: a picture per cut, or the whole
+ *  screen. `uncut` — cuts were drawn, but the surface shared was not this tab,
+ *  so the whole screen went instead. */
+type Shot = { blobs: Blob[]; uncut: boolean }
 
 /** The hive's content store, over IoC — a picture is content like any other
  *  and is addressed by the signature of its bytes. */
@@ -136,6 +158,9 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
   /** Something is on the sheet — the send and clear controls are only real
    *  once there is ink to send. */
   readonly marked = signal(false)
+  /** How many cuts are on the sheet — once there is one, the hint says what
+   *  the doors will send. */
+  readonly cuts = signal(0)
 
   readonly inks = INKS
 
@@ -196,7 +221,7 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
     this.#shapes = []
     this.#drawing = null
     this.#pins = 0
-    this.marked.set(false)
+    this.#tally()
     this.active.set(true)
     // The canvas exists only once `active` has rendered it.
     setTimeout(() => { this.#size(); this.#paint() }, 0)
@@ -234,15 +259,21 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
   undo(): void {
     this.#shapes.pop()
     this.#pins = this.#shapes.reduce((n, shape) => (shape.tool === 'pin' ? n + 1 : n), 0)
-    this.marked.set(this.#shapes.length > 0)
+    this.#tally()
     this.#paint()
   }
 
   clear(): void {
     this.#shapes = []
     this.#pins = 0
-    this.marked.set(false)
+    this.#tally()
     this.#paint()
+  }
+
+  /** Recount what is on the sheet after anything changed it. */
+  #tally(): void {
+    this.marked.set(this.#shapes.length > 0)
+    this.cuts.set(this.#shapes.filter(shape => shape.tool === 'cut').length)
   }
 
   onPointerDown(event: PointerEvent): void {
@@ -252,19 +283,20 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
     canvas.setPointerCapture(event.pointerId)
     const at = { x: event.clientX, y: event.clientY }
     const ink = this.ink()
+    const tool = this.tool()
 
-    if (this.tool() === 'pin') {
+    if (tool === 'pin') {
       this.#shapes.push({ tool: 'pin', ink, at, n: ++this.#pins })
       this.marked.set(true)
       this.#paint()
       return
     }
-    const shape: Shape = this.tool() === 'pen'
-      ? { tool: 'pen', ink, points: [at] }
-      : { tool: this.tool() as 'arrow' | 'box', ink, from: at, to: at }
+    const shape: Shape = tool === 'pen' ? { tool: 'pen', ink, points: [at] }
+      : tool === 'cut' ? { tool: 'cut', from: at, to: at }
+      : { tool, ink, from: at, to: at }
     this.#drawing = shape
     this.#shapes.push(shape)
-    this.marked.set(true)
+    this.#tally()
     this.#paint()
   }
 
@@ -286,7 +318,7 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
     this.#drawing = null
     if (shape && this.#empty(shape)) {
       this.#shapes = this.#shapes.filter(held => held !== shape)
-      this.marked.set(this.#shapes.length > 0)
+      this.#tally()
       this.#paint()
     }
   }
@@ -294,7 +326,11 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
   #empty(shape: Shape): boolean {
     if (shape.tool === 'pen') return shape.points.length < 2
     if (shape.tool === 'pin') return false
-    return Math.abs(shape.to.x - shape.from.x) < 4 && Math.abs(shape.to.y - shape.from.y) < 4
+    const width = Math.abs(shape.to.x - shape.from.x)
+    const height = Math.abs(shape.to.y - shape.from.y)
+    // A cut becomes a picture of its own, so a sliver on EITHER side is a slip.
+    if (shape.tool === 'cut') return width < MIN_CUT_PX || height < MIN_CUT_PX
+    return width < 4 && height < 4
   }
 
   // ── painting ───────────────────────────────────────────────────────
@@ -316,7 +352,9 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
     canvas.height = Math.round(window.innerHeight * ratio)
   }
 
-  #paint(): void {
+  /** `shot` paints the sheet as the capture must see it: the ink, and none of
+   *  the cut frames — they decide what is sent and are not part of it. */
+  #paint(shot = false): void {
     const canvas = this.canvasRef()?.nativeElement
     const ctx = canvas?.getContext('2d')
     if (!canvas || !ctx) return
@@ -333,7 +371,13 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
     ctx.lineJoin = 'round'
     ctx.lineCap = 'round'
 
+    let cut = 0
     for (const shape of this.#shapes) {
+      if (shape.tool === 'cut') {
+        cut++
+        if (!shot) this.#cut(ctx, shape.from, shape.to, cut)
+        continue
+      }
       ctx.strokeStyle = shape.ink
       ctx.fillStyle = shape.ink
       if (shape.tool === 'pen') this.#pen(ctx, shape.points)
@@ -386,6 +430,30 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
     ctx.restore()
   }
 
+  /** A cut's frame: dashed, in the neutral ink, numbered in the order its
+   *  picture will be sent. The number sits OUTSIDE the frame's corner when
+   *  there is room, so it covers nothing the cut is about. */
+  #cut(ctx: CanvasRenderingContext2D, from: Point, to: Point, n: number): void {
+    const x = Math.min(from.x, to.x)
+    const y = Math.min(from.y, to.y)
+    const tab = 18
+    const top = y >= tab ? y - tab : y
+    ctx.save()
+    ctx.strokeStyle = CUT_INK
+    ctx.fillStyle = CUT_INK
+    ctx.lineWidth = 2
+    ctx.setLineDash([8, 6])
+    ctx.strokeRect(x, y, Math.abs(to.x - from.x), Math.abs(to.y - from.y))
+    ctx.fillRect(x, top, tab, tab)
+    ctx.shadowColor = 'transparent'
+    ctx.fillStyle = PIN_TEXT
+    ctx.font = '700 12px ui-monospace, monospace'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(String(n), x + tab / 2, top + tab / 2 + 1)
+    ctx.restore()
+  }
+
   // ── the shot ───────────────────────────────────────────────────────
 
   /** Take the picture and put it on the chat's shelf. The sheet closes on
@@ -400,7 +468,7 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
   async send(fresh = false): Promise<void> {
     if (this.busy()) return
     this.busy.set(true)
-    let blob: Blob | null = null
+    let shot: Shot | null = null
     try {
       // THE PERMISSION FIRST, the hiding second. The browser's picker sits
       // over the page, so nothing is gained by taking the toolbar away before
@@ -408,49 +476,70 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
       const stream = await this.#displayStream()
       if (stream) {
         this.shooting.set(true)
+        // The cut frames leave with the toolbar: both are about taking the
+        // picture, not in it.
+        this.#paint(true)
         // Two frames: one for the toolbar's removal to be laid out, one for
         // it to have been painted before the capture reads the compositor.
         await this.#nextPaint()
         await this.#nextPaint()
-        blob = await this.#shoot(stream)
+        shot = await this.#shoot(stream)
       }
     } finally {
       this.shooting.set(false)
       this.busy.set(false)
+      this.#paint()
     }
 
-    if (!blob) {
+    if (!shot) {
       EffectBus.emit('toast:show', { type: 'warning', title: 'markup', message: this.#say('markup.nopicture') })
       return
     }
 
+    // COMPLETE OR NOTHING. A shelf holding cut 1 of 3 reads as the whole
+    // annotation; a failure gets retried, a fragment gets misread.
     const store = ioc()?.get('@hypercomb.social/Store') as StoreLike | undefined
-    let sig = ''
-    if (store?.putResource) {
-      try { sig = await store.putResource(blob) } catch { sig = '' }
-    }
-    if (!SIG_RE.test(sig)) {
-      EffectBus.emit('toast:show', { type: 'warning', title: 'markup', message: this.#say('markup.nostore') })
-      return
+    const sigs: string[] = []
+    for (const blob of shot.blobs) {
+      let sig = ''
+      if (store?.putResource) {
+        try { sig = await store.putResource(blob) } catch { sig = '' }
+      }
+      if (!SIG_RE.test(sig)) {
+        EffectBus.emit('toast:show', { type: 'warning', title: 'markup', message: this.#say('markup.nostore') })
+        return
+      }
+      sigs.push(sig)
     }
 
     const where = this.where()
+    const total = shot.blobs.length
     EffectBus.emit('chat:attach-picture', {
-      sig,
-      name: this.#say('markup.name', { where }),
-      kind: blob.type || 'image/png',
-      size: blob.size,
+      // EVERY PICTURE IN ONE LANDING. Separate landings would race a fresh
+      // conversation emptying the shelf, and the bus replays only the last.
+      pictures: shot.blobs.map((blob, index) => ({
+        sig: sigs[index],
+        name: total > 1
+          ? this.#say('markup.name.part', { where, n: String(index + 1), total: String(total) })
+          : this.#say('markup.name', { where }),
+        kind: blob.type || 'image/png',
+        size: blob.size,
+      })),
       // THE LOCATION RIDES WITH THE PICTURE. The chat window reads it two
       // ways: as the crumb under the reference's name, and — with `fresh` —
       // as the tile the new conversation belongs to.
       path: this.location(),
       fresh,
     })
-    EffectBus.emit('toast:show', {
-      type: 'success',
-      title: 'markup',
-      message: this.#say(fresh ? 'markup.started' : 'markup.attached', { where }),
-    })
+    EffectBus.emit('toast:show', shot.uncut
+      ? { type: 'warning', title: 'markup', message: this.#say('markup.uncut') }
+      : {
+          type: 'success',
+          title: 'markup',
+          message: fresh ? this.#say('markup.started', { where })
+            : total > 1 ? this.#say('markup.attached.cuts', { n: String(total) })
+            : this.#say('markup.attached'),
+        })
     this.close()
   }
 
@@ -458,10 +547,13 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
     return new Promise(resolve => requestAnimationFrame(() => resolve()))
   }
 
-  /** One frame of the shared surface, as PNG. Null when there is no frame to
-   *  be had — a stream revoked from the browser's own sharing bar between the
-   *  grant and the grab still hands back a track that decodes nothing. */
-  async #shoot(stream: MediaStream): Promise<Blob | null> {
+  /** The pictures in one frame of the shared surface, as PNG: one per cut, or
+   *  the whole frame when there are none. Every cut comes from the SAME frame,
+   *  copied once at full resolution — a live screen keeps moving between one
+   *  encode and the next. Null when there is no frame to be had — a stream
+   *  revoked from the browser's own sharing bar between the grant and the
+   *  grab still hands back a track that decodes nothing. */
+  async #shoot(stream: MediaStream): Promise<Shot | null> {
     const video = await this.#playing(stream)
     if (!video) return null
 
@@ -469,16 +561,42 @@ export class MarkupOverlayComponent implements OnInit, OnDestroy {
     const height = video.videoHeight
     if (!width || !height) return null
 
-    const scale = Math.min(1, MAX_SHOT_PX / Math.max(width, height))
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.max(1, Math.round(width * scale))
-    canvas.height = Math.max(1, Math.round(height * scale))
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return null
-    ctx.imageSmoothingQuality = 'high'
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    const frame = document.createElement('canvas')
+    frame.width = width
+    frame.height = height
+    const frameCtx = frame.getContext('2d')
+    if (!frameCtx) return null
+    frameCtx.drawImage(video, 0, 0)
 
-    return await new Promise<Blob | null>(resolve => canvas.toBlob(blob => resolve(blob), 'image/png'))
+    const cuts = this.#shapes.flatMap(shape => (shape.tool === 'cut' ? [shape] : []))
+    // A tab reports itself as `browser`. A window or a monitor holds the page
+    // somewhere inside it, where a cut drawn in page pixels cannot be found.
+    const surface = (stream.getVideoTracks()[0]?.getSettings() as { displaySurface?: string } | undefined)?.displaySurface
+    const regions = cuts.length && (!surface || surface === 'browser')
+      ? cutRegions(cuts, { width: window.innerWidth, height: window.innerHeight }, { width, height }) ?? []
+      : []
+
+    const blobs: Blob[] = []
+    for (const region of regions.length ? regions : [{ x: 0, y: 0, width, height }]) {
+      const blob = await this.#picture(frame, region)
+      if (!blob) return null
+      blobs.push(blob)
+    }
+    return { blobs, uncut: cuts.length > 0 && regions.length === 0 }
+  }
+
+  /** One region of the frame as PNG, downscaled only when its long edge
+   *  passes the budget the vision models would read it at anyway. */
+  #picture(frame: HTMLCanvasElement, region: Region): Promise<Blob | null> {
+    const scale = Math.min(1, MAX_SHOT_PX / Math.max(region.width, region.height))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(region.width * scale))
+    canvas.height = Math.max(1, Math.round(region.height * scale))
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return Promise.resolve(null)
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(frame, region.x, region.y, region.width, region.height, 0, 0, canvas.width, canvas.height)
+    return new Promise(resolve => canvas.toBlob(blob => resolve(blob), 'image/png'))
   }
 
   /** The capture stream, asked for once and kept while the sheet is open. A
