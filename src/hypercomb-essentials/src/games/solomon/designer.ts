@@ -8,7 +8,9 @@
 // wings), every foe kind, and both demon-mirror flavours.
 
 import { EMPTY, WALL, BRICK, type LevelDef, type Cell, type EnemyKind, type ItemKind, type MirrorKind } from './engine.js'
-import { cloneLevel, emptyLevel, sanitizeLevel } from './levels.js'
+import {
+  cloneLevel, emptyLevel, sanitizeLevel, saveCreation, loadDesignerDraft, saveDesignerDraft, type Creation,
+} from './levels.js'
 
 const ITEM_TOOLS = {
   key: 'key', bell: 'bell', jewel: 'jewel', treasure: 'treasure', jar: 'jar', scroll: 'scroll',
@@ -60,14 +62,50 @@ export const TOOLS: { tool: Tool; label: string; glyph: string }[] = [
 export class Designer {
   level: LevelDef
   tool: Tool = 'wall'
+  /** The saved creation this canvas is filed as — null while it is new. */
+  editingId: string | null = null
 
   constructor(level?: LevelDef) {
     this.level = level ? cloneLevel(level) : emptyLevel('My Level')
   }
 
-  setLevel(level: LevelDef): void { this.level = cloneLevel(level) }
+  /** The canvas exactly as it was left — sticky across closes and reloads. */
+  static restore(): Designer {
+    const designer = new Designer()
+    const draft = loadDesignerDraft()
+    if (!draft) return designer
+    designer.level = draft.level
+    designer.editingId = draft.editingId
+    if (TOOLS.some(t => t.tool === draft.tool)) designer.tool = draft.tool as Tool
+    return designer
+  }
+
+  /** Remember the canvas. Called after every change the overlay makes. */
+  persist(): void { saveDesignerDraft({ level: this.level, editingId: this.editingId, tool: this.tool }) }
+
   setTool(tool: Tool): void { this.tool = tool }
-  newLevel(name = 'My Level'): void { this.level = emptyLevel(name) }
+  newLevel(name = 'My Level'): void { this.level = emptyLevel(name); this.editingId = null }
+
+  /** Continue editing a saved creation — Save files over it. */
+  edit(creation: Creation): void { this.level = cloneLevel(creation.level); this.editingId = creation.id }
+
+  /** Start a NEW creation from a copy of any level, saved or built-in. */
+  duplicate(level: LevelDef, name: string): void {
+    this.level = cloneLevel(level)
+    this.level.name = name
+    this.editingId = null
+  }
+
+  /** File the canvas: over the creation it came from, or as a new one. */
+  save(name: string): Creation { return saveCreation(this.named(name), this.editingId) }
+
+  /** Would replacing the canvas lose work? True when it differs from what it is
+   *  filed as — or, never filed, from a blank canvas of the same size. */
+  unsaved(saved: readonly Creation[]): boolean {
+    const filed = this.editingId ? saved.find(c => c.id === this.editingId) : undefined
+    const base = filed ? filed.level : emptyLevel(this.level.name, this.level.cols, this.level.rows)
+    return JSON.stringify(sanitizeLevel(this.level)) !== JSON.stringify(sanitizeLevel(base))
+  }
 
   #idx(col: number, row: number): number { return row * this.level.cols + col }
   #inBounds(col: number, row: number): boolean {
@@ -145,6 +183,7 @@ export class Designer {
       const lvl = sanitizeLevel(JSON.parse(text))
       if (!lvl) return false
       this.level = lvl
+      this.editingId = null
       return true
     } catch { return false }
   }
