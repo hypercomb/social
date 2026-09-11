@@ -63,9 +63,13 @@ export interface BreakRecord extends BreakSample {
  *  chosen    the participant picked it; the repair agent works it
  *  fixed     a fix landed — the fold reopens it if it breaks again in a page
  *            load that started after the fix
+ *  retired   the participant retired it WITHOUT a fix: the code it blamed had
+ *            moved, so the bytes that threw are gone. Falsified exactly the way
+ *            a fix is — it is a claim that can be proved wrong, which is why it
+ *            exists instead of reaching for `dismissed`.
  *  dismissed the participant said leave it; it keeps counting, silently
  */
-export type IssueStatus = 'new' | 'open' | 'chosen' | 'fixed' | 'dismissed'
+export type IssueStatus = 'new' | 'open' | 'chosen' | 'fixed' | 'dismissed' | 'retired'
 export type RepairMode = 'fix' | 'investigate'
 
 export interface IssueNote { readonly at: number; readonly text: string }
@@ -89,6 +93,8 @@ export interface BreakIssue extends BreakSample {
   readonly interpretation?: string
   readonly files?: readonly string[]
   readonly mode?: RepairMode
+  /** When the settled claim was made — a fix, or a retirement. One clock for
+   *  both, so the fold needs one comparison to falsify either. */
   readonly fixedAt?: number
   /** When a repair conversation last put this issue in front of the
    *  participant. The tick reads it so one batch opens one conversation. */
@@ -299,7 +305,11 @@ export const foldBreaks = (
       created.push(r.fingerprint)
       continue
     }
-    const recurred = prior.status === 'fixed' && typeof prior.fixedAt === 'number' && r.sessionAt > prior.fixedAt
+    // A retirement is a claim like a fix, so it is falsified like one. This is
+    // the whole safety net under retiring without fixing, and it works with no
+    // tick installed at all.
+    const settled = prior.status === 'fixed' || prior.status === 'retired'
+    const recurred = settled && typeof prior.fixedAt === 'number' && r.sessionAt > prior.fixedAt
     issues.set(r.fingerprint, {
       ...prior,
       status: recurred ? 'open' : prior.status,
@@ -314,7 +324,7 @@ export const foldBreaks = (
       routes: keep(prior.routes, r.route, PLACES_KEPT),
       stack: r.stack && r.lastAt >= prior.lastAt ? r.stack : prior.stack,
       notes: recurred
-        ? [...prior.notes, { at: now, text: `broke again after the fix, in a page loaded ${new Date(r.sessionAt).toISOString()}` }].slice(-NOTES_KEPT)
+        ? [...prior.notes, { at: now, text: `broke again after it was ${prior.status}, in a page loaded ${new Date(r.sessionAt).toISOString()}` }].slice(-NOTES_KEPT)
         : prior.notes,
     })
     if (recurred && !created.includes(r.fingerprint) && !reopened.includes(r.fingerprint)) reopened.push(r.fingerprint)
@@ -322,7 +332,7 @@ export const foldBreaks = (
   return { issues, created, reopened }
 }
 
-const STATUSES: ReadonlySet<string> = new Set(['new', 'open', 'chosen', 'fixed', 'dismissed'])
+const STATUSES: ReadonlySet<string> = new Set(['new', 'open', 'chosen', 'fixed', 'dismissed', 'retired'])
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] }
 
@@ -336,7 +346,7 @@ export const patchIssue = (issue: BreakIssue, patch: Readonly<Record<string, unk
   const next: Mutable<BreakIssue> = { ...issue }
   if (typeof patch['status'] === 'string' && STATUSES.has(patch['status'])) {
     next.status = patch['status'] as IssueStatus
-    if (next.status === 'fixed') next.fixedAt = now
+    if (next.status === 'fixed' || next.status === 'retired') next.fixedAt = now
   }
   if (typeof patch['rank'] === 'number' && Number.isFinite(patch['rank'])) next.rank = patch['rank']
   if (typeof patch['title'] === 'string') next.title = clean(patch['title'], 120)

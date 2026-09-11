@@ -122,7 +122,26 @@ describe('folding the queue into issues', () => {
     expect(fresh.reopened).toEqual([FP])
     expect(reopened.status).toBe('open')
     expect(reopened.offeredAt).toBeUndefined()
-    expect(reopened.notes.at(-1)?.text).toMatch(/^broke again after the fix/)
+    expect(reopened.notes.at(-1)?.text).toMatch(/^broke again after it was fixed/)
+  })
+
+  it('falsifies a retirement exactly the way it falsifies a fix', () => {
+    // Retiring says "the code that threw is gone". If it throws again from a
+    // page loaded after the claim, the claim was wrong and the issue comes
+    // back on its own — with no tick installed at all.
+    const retired = patchIssue(issueFrom(), { status: 'retired', offered: true }, 5_000)
+    expect(retired.fixedAt).toBe(5_000)
+
+    const stale = foldBreaks(new Map([[FP, retired]]), [record({ session: 'old', sessionAt: 4_000, firstAt: 6_000, lastAt: 6_000 })], 7_000)
+    expect(stale.issues.get(FP)).toMatchObject({ status: 'retired', count: 2 })
+    expect(stale.reopened).toEqual([])
+
+    const fresh = foldBreaks(new Map([[FP, retired]]), [record({ session: 'new', sessionAt: 8_000, firstAt: 9_000, lastAt: 9_000 })], 10_000)
+    const back = fresh.issues.get(FP)!
+    expect(fresh.reopened).toEqual([FP])
+    expect(back.status).toBe('open')
+    expect(back.offeredAt).toBeUndefined()
+    expect(back.notes.at(-1)?.text).toMatch(/^broke again after it was retired/)
   })
 
   it('leaves a dismissed issue dismissed, and keeps counting it', () => {

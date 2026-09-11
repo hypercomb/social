@@ -88,6 +88,7 @@ half-written litter and are removed.
 | `open` | interpreted, waiting for a choice | `interpret` (new issues only); the participant putting a chosen issue back (`choose --release`); the fold when a fix didn't hold; repair when it couldn't fix |
 | `chosen` | picked in triage, with a mode: `fix` or `investigate` | the participant |
 | `fixed` | a fix landed (`fixedAt`) | the repair agent |
+| `retired` | retired WITHOUT a fix: the code it blamed had moved, so the bytes that threw are gone (`fixedAt`) | the participant, or repair once it has confirmed from source |
 | `dismissed` | leave it — it keeps counting, silently | the participant |
 
 An issue also carries its `type` (a break's kind, or `warning`), `rank` (the list
@@ -96,9 +97,61 @@ past the last 50), `firstAt`, `lastAt`, recent `origins` and `routes`, the newes
 `stack`, the review's `title`, `area`, `interpretation` and `files`, `offeredAt`
 (when a conversation last showed it), and up to 30 `notes`.
 
-**A fix is proved by silence.** A `fixed` issue that breaks again in a page load
-that started after `fixedAt` is reopened by the fold with a note. A tab left open
-across the fix is still running the old code, so it can't reopen anything.
+**A settled claim is proved by silence.** A `fixed` **or `retired`** issue that
+breaks again in a page load that started after `fixedAt` is reopened by the fold
+with a note. A tab left open across the claim is still running the old code, so
+it can't reopen anything — which is why the tick carries a second, broader
+falsifier (§3.1). Retiring shares `fixedAt` deliberately: one clock, one
+comparison, and a retirement that can be proved wrong exactly like a fix. That is
+the whole reason `retired` exists instead of reaching for `dismissed`, which
+never reopens and records no reason.
+
+### 3.1 Breaks an agent caused — "code moved"
+
+Several agents edit this repo at once, so a large class of break is not a bug at
+all: a page was running a stale bundle while a refactor landed underneath it.
+Those should be retired, not fixed.
+
+The free tick asks ONE durable question per issue — *did every file this break
+blames change after the break last happened?* — from **committed git history
+only** (`git log -1 --format=%ct -- <file>`, the OLDEST of the blamed files, so
+naming more files makes the claim harder to earn, not easier). When it holds, the
+tick writes ONE note beginning `code moved:` and drops that fingerprint from the
+list that **summons** a conversation. It stays on `list` and on every checklist
+that opens for any other reason: the hold silences the summons, never the issue.
+
+**Nothing is ever retired automatically.** Measured on this tree, 178 of 936
+`.ts` files under essentials changed in three days and hot files take 4–9 commits
+in three days, so "the blamed file moved" measures how fast the repo is worked,
+not whether the bug is real — an unattended retire would fire hardest on the most
+actively edited code, which is exactly where real bugs live. The note therefore
+states evidence and names the competing explanation, and must never read as a
+verdict.
+
+What makes a wrong reading cheap:
+
+- **One note, ever.** Once an issue has been read, the tick never reads it again.
+  A wrong reading costs one delayed conversation, not an unbounded silence.
+- Any occurrence since the note, any note a **person** wrote, or `BREAKS_HOLD_DAYS`
+  (default 14) elapsing releases the hold permanently.
+- A `chosen` issue gains the note but is **never held** — a person put it there.
+- An issue this same tick reopened is never read.
+- Only dev-server breaks qualify: one non-localhost origin and the issue is never
+  a churn suspect. Warnings never qualify either.
+- `planUnretire` reopens any `retired` issue whose `lastAt` passed `fixedAt` —
+  broader than the fold, which needs a page load that *started* after the claim
+  and so cannot see a real bug throwing from one long-lived tab. `status` reports
+  the same condition as `stillBreaking`, covering wrong **fixes** too.
+
+Rejected, and why (all verified against this repo, not assumed): **mtime** —
+content-free, and a checkout, stash pop, worktree switch or formatter save bumps
+it; **`git status` dirtiness** — a dirty blamed file is a refactor *in flight*,
+precisely when nothing should be quietened; **symbol presence in source** — the
+crashing frame is routinely vendor code (`get canvas` appears twice in the
+bundle, both inside Pixi, zero in app code); **the source map's `sourcesContent`
+vs disk** — the strongest live signal and byte-exact in ~240 ms, but it answers
+*is the bundle stale right now*, so it reports "not churn" once the rebuild has
+happened, which is the one case that must be caught.
 
 Both pools are truth pools, colon-scoped, and never minted from the optimize
 phase. The queue is drained by the fold and nothing else; nothing is ever deleted

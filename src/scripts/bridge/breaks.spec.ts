@@ -191,3 +191,152 @@ describe('taking back the marks a failed conversation left behind', () => {
     ], [chosen])).toEqual([])
   })
 })
+
+// ─── has the code moved? ────────────────────────────────────────────────
+//
+// The tick may say "every file this break blames changed after it last
+// happened". That is evidence, never a verdict: it writes ONE note, holds the
+// issue out of the list that SUMMONS a conversation, and nothing else. Only a
+// person retires. These pin the parts that make a wrong reading cheap.
+
+const HOLD = 14 * 24 * 60 * 60_000
+const local = (over: Record<string, unknown> = {}) =>
+  issue({ files: ['a/b.ts'], origins: ['http://localhost:4250'], lastAt: NOW - HOLD, ...over })
+const movedAt = (fp: string, at: number, file = 'a/b.ts') => new Map([[fp, { at, file, files: 1 }]])
+const noteText = (plan: { notes: { payload: { note: string } }[] }) => plan.notes.map(w => w.payload.note)
+
+describe('the tick reading git', () => {
+  it('notes and holds a dev-server break whose files all moved since it last broke', () => {
+    const i = local()
+    const plan = breaks.planMoved([i], movedAt(i.fingerprint, NOW), NOW, HOLD, [])
+    expect([...plan.held]).toEqual([i.fingerprint])
+    expect(plan.notes).toHaveLength(1)
+    expect(plan.notes[0].payload.onlyIfStatus).toBe('open')
+    expect(noteText(plan)[0].startsWith(breaks.MOVED)).toBe(true)
+    // It names the competing explanation — it must never read as a verdict.
+    expect(noteText(plan)[0]).toContain('not proof the bug is gone')
+  })
+
+  it('notes a chosen issue but never holds it — a person put it there by hand', () => {
+    const i = local({ status: 'chosen' })
+    const plan = breaks.planMoved([i], movedAt(i.fingerprint, NOW), NOW, HOLD, [])
+    expect(plan.notes).toHaveLength(1)
+    expect([...plan.held]).toEqual([])
+  })
+
+  it('says nothing when the code moved before the break last happened', () => {
+    const i = local({ lastAt: NOW })
+    const plan = breaks.planMoved([i], movedAt(i.fingerprint, NOW - 1), NOW, HOLD, [])
+    expect(plan.notes).toEqual([])
+    expect([...plan.held]).toEqual([])
+  })
+
+  it('never reads a break a real reader hit, or a warning, or one with no named file', () => {
+    const deployed = local({ origins: ['http://localhost:4250', 'https://hypercomb.io'] })
+    const warned = local({ type: 'warning' })
+    const vague = local({ files: [] })
+    for (const i of [deployed, warned, vague]) {
+      expect(breaks.notable(i)).toBe(false)
+      expect(breaks.planMoved([i], movedAt(i.fingerprint, NOW), NOW, HOLD, []).notes).toEqual([])
+    }
+  })
+
+  it('writes one note ever, and a note a person wrote stops the hold', () => {
+    const already = local({ notes: [{ at: NOW - 1, text: `${breaks.MOVED} said once` }] })
+    const second = breaks.planMoved([already], movedAt(already.fingerprint, NOW), NOW, HOLD, [])
+    expect(second.notes).toEqual([])
+    expect([...second.held]).toEqual([already.fingerprint])
+
+    const worked = local({ notes: [{ at: NOW - 1, text: `${breaks.MOVED} said once` }, { at: NOW, text: 'I looked, it is real' }] })
+    const after = breaks.planMoved([worked], movedAt(worked.fingerprint, NOW), NOW, HOLD, [])
+    expect(after.notes).toEqual([])
+    expect([...after.held]).toEqual([])
+  })
+
+  it('releases the hold for good once it breaks again, and once the hold has run out', () => {
+    const broke = local({ notes: [{ at: NOW - 1_000, text: `${breaks.MOVED} said once` }], lastAt: NOW })
+    expect([...breaks.planMoved([broke], new Map(), NOW, HOLD, []).held]).toEqual([])
+
+    const old = local({ notes: [{ at: NOW - HOLD - 1, text: `${breaks.MOVED} said once` }], lastAt: NOW - HOLD - 2 })
+    expect([...breaks.planMoved([old], new Map(), NOW, HOLD, []).held]).toEqual([])
+  })
+
+  it('never reads an issue this very tick reopened', () => {
+    const back = local()
+    const plan = breaks.planMoved([back], movedAt(back.fingerprint, NOW), NOW, HOLD, [back.fingerprint])
+    expect(plan.notes).toEqual([])
+    expect([...plan.held]).toEqual([])
+  })
+
+  it('takes the OLDEST blamed file, so a vaguer review can never make a stronger claim', () => {
+    // One file moved after the break, one before. Naming MORE files must make
+    // the claim harder to earn, never easier.
+    const i = local({ files: ['a/b.ts', 'c/d.ts'], lastAt: NOW - 1_000 })
+    const at = (f: string) => (f === 'a/b.ts' ? NOW : NOW - 2_000)
+    const moved = breaks.probeMoved([i], at)
+    expect(moved.get(i.fingerprint)).toMatchObject({ at: NOW - 2_000, file: 'c/d.ts' })
+    expect(breaks.planMoved([i], moved, NOW, HOLD, []).notes).toEqual([])
+
+    // The same issue blaming only the file that DID move earns the note.
+    const narrow = local({ files: ['a/b.ts'], lastAt: NOW - 1_000 })
+    expect(breaks.planMoved([narrow], breaks.probeMoved([narrow], at), NOW, HOLD, []).notes).toHaveLength(1)
+  })
+
+  it('makes no claim at all when one blamed file cannot be read', () => {
+    const i = local({ files: ['a/b.ts', 'gone.ts'] })
+    const at = (f: string) => (f === 'a/b.ts' ? NOW : 0)
+    expect(breaks.probeMoved([i], at).size).toBe(0)
+  })
+})
+
+describe('a hold, and a retirement that can be proved wrong', () => {
+  it('drops a held break from the conversation it would open, and nothing else', () => {
+    const held = issue({ status: 'open' })
+    const other = issue({ status: 'open' })
+    const plan = breaks.planOffer([held, other], NOW, GAP, new Set([held.fingerprint]))
+    expect(plan.due).toEqual([other])
+  })
+
+  it('never holds a chosen issue back from its conversation', () => {
+    const chosen = issue({ status: 'chosen', offeredAt: NOW - GAP - 1 })
+    const plan = breaks.planOffer([chosen], NOW, GAP, new Set([chosen.fingerprint]))
+    expect(plan.due).toEqual([chosen])
+  })
+
+  it('un-retires anything that broke after it was retired, and reports wrong fixes too', () => {
+    const wrong = issue({ status: 'retired', fixedAt: 1_000, lastAt: 2_000 })
+    const holding = issue({ status: 'retired', fixedAt: 2_000, lastAt: 1_000 })
+    const badFix = issue({ status: 'fixed', fixedAt: 1_000, lastAt: 2_000 })
+    const plan = breaks.planUnretire([wrong, holding, badFix])
+    expect(plan.map((w: { issue: { fingerprint: string } }) => w.issue)).toEqual([wrong])
+    expect(plan[0].payload).toMatchObject({ status: 'open', onlyIfStatus: 'retired', offered: false })
+    expect(plan[0].payload.note.startsWith('broke again')).toBe(true)
+    expect(breaks.stillBreaking([wrong, holding, badFix]).map((r: { id: string }) => r.id))
+      .toEqual([wrong, badFix].map(i => i.fingerprint.slice(0, 8)))
+  })
+
+  it('retires from a triage, and the checklist offers Retire where Dismiss was', () => {
+    const i = issue({ status: 'open' })
+    const { patches } = breaks.planChoose([i], { retire: i.fingerprint.slice(0, 8) })
+    expect(patches).toEqual([{ issue: i, payload: { status: 'retired' } }])
+
+    const html = breaks.triageHtml([issue({ status: 'open', notes: [{ at: NOW, text: `${breaks.MOVED} it moved` }] })])
+    expect(html).toContain('<option value="retire">Retire</option>')
+    expect(html).not.toContain('Dismiss')
+    expect(html).toContain('code moved')
+    expect(html).toContain("'--retire '")
+  })
+})
+
+describe('a word the running hive has not learned', () => {
+  it('says so instead of letting a Retire click look like it worked', () => {
+    // The hive keeps a CLOSED status set and ignores a word it does not know,
+    // so `retired` before an essentials rebuild would be a silent no-op.
+    const i = issue({ status: 'chosen' })
+    expect(() => breaks.took({ issue: { ...i, status: 'chosen' } }, { status: 'retired' }, i))
+      .toThrow(/build:essentials/)
+    expect(breaks.took({ issue: { ...i, status: 'retired' } }, { status: 'retired' }, i)).toBeTruthy()
+    // A payload that says nothing about status is never second-guessed.
+    expect(breaks.took({ issue: i }, { offered: true }, i)).toBeTruthy()
+  })
+})
