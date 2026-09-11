@@ -9,7 +9,15 @@ interface UpdateAvailablePayload {
   newBees?: string[]
   previous?: string | null
   label?: string
+  /** Who announced it: the shell's bundled check, or a followed channel's
+   *  scout. Absent reads as the bundle. */
+  source?: string
+  /** The participant asked (`?upgrade=1`): open on it, even for a build they
+   *  once discarded. */
+  offer?: boolean
 }
+
+type UpdateSource = 'bundled' | 'channel'
 
 type UpdatePhase = 'idle' | 'available' | 'snapshotting' | 'applying' | 'complete' | 'error'
 interface UpdateStatusPayload {
@@ -75,6 +83,12 @@ export class UpgradeIndicatorComponent implements OnDestroy {
   #newBees: string[] = []
   #previous: string | null = null
   #label = ''
+  #source: UpdateSource = 'bundled'
+  /** One standing offer per announcer. The bundled check saying "nothing newer
+   *  HERE" must never hide what a followed channel announced, or the reverse. */
+  readonly #offers = new Map<UpdateSource, UpdateAvailablePayload>()
+  /** The announcer the participant explicitly asked for, when they did. */
+  #asked: UpdateSource | null = null
   #unsubs: (() => void)[] = []
   #completeTimer: number | null = null
 
@@ -82,30 +96,14 @@ export class UpgradeIndicatorComponent implements OnDestroy {
     this.#restoreCompletedState()
 
     this.#unsubs.push(EffectBus.on<UpdateAvailablePayload>('update:available', payload => {
+      const source: UpdateSource = payload?.source === 'channel' ? 'channel' : 'bundled'
       const sig = String(payload?.packageSig ?? '').trim().toLowerCase()
-      this.#packageSig = sig
-      this.#newBees = Array.isArray(payload?.newBees) ? payload.newBees.map(String) : []
-      this.#previous = typeof payload?.previous === 'string' ? payload.previous : null
-      this.#label = String(payload?.label ?? '').trim()
-      // The name is written the moment the update is announced — adopting is
-      // one click, and what the participant sees in the field is what the
-      // restore point will be called unless they type over it. The AUTHOR'S
-      // build name leads; date + time are the changing default, so every
-      // revision the hive takes reads as its own line in the list.
-      this.restorePointName.set(buildRevisionName({
-        packageSig: sig,
-        label: this.#label,
-        locale: this.#locale(),
-      }))
-      const suppressed = this.#inList(DISCARDED_KEY, sig, localStorage)
-        || this.#inList(SNOOZE_KEY, sig, sessionStorage)
-      this.available.set(!!payload?.available && !suppressed)
-      this.newCount.set(payload?.newCount ?? 0)
-      if (payload?.available && !suppressed && !this.busy() && this.phase() !== 'complete') {
-        this.phase.set('available')
-      } else if (!payload?.available && this.phase() === 'available') {
-        this.phase.set('idle')
-      }
+      const suppressed = !payload?.offer && (
+        this.#inList(DISCARDED_KEY, sig, localStorage) || this.#inList(SNOOZE_KEY, sig, sessionStorage))
+      if (payload?.offer) this.#asked = source
+      if (payload?.available && !suppressed) this.#offers.set(source, { ...payload, packageSig: sig, source })
+      else this.#offers.delete(source)
+      this.#show(!!payload?.offer)
     }))
 
     this.#unsubs.push(EffectBus.on<UpdateStatusPayload>('update:status', payload => {
@@ -152,11 +150,10 @@ export class UpgradeIndicatorComponent implements OnDestroy {
    *  hands the shell the name and the package and waits:
    *  `hypercomb:apply-update` snapshots under that name, installs the newer
    *  files and reloads — the URL is untouched, so the participant lands
-   *  exactly where they were, with the restore point already saved. If the
-   *  install has to go through DCP it does that off-screen (the portal's
-   *  headless iframe). Reviewing in the installer is the OVERRIDE, its own
-   *  button — never a step on the silent path. Enter in the name field
-   *  rides the same path. */
+   *  exactly where they were, with the restore point already saved. The
+   *  announcer rides along: the shell takes a bundled offer from its own
+   *  origin and a channel offer from the hosts it carries. Enter in the name
+   *  field rides the same path. */
   readonly adopt = (): void => {
     const restorePointName = this.restorePointName().trim()
       || buildRevisionName({ packageSig: this.#packageSig, label: this.#label, locale: this.#locale() })
@@ -167,6 +164,7 @@ export class UpgradeIndicatorComponent implements OnDestroy {
         packageSig: this.#packageSig || null,
         newBees: this.#newBees,
         previous: this.#previous,
+        source: this.#source,
       },
     }))
   }
@@ -179,20 +177,62 @@ export class UpgradeIndicatorComponent implements OnDestroy {
   readonly save = (): void => {
     this.#remember(SNOOZE_KEY, this.#packageSig, sessionStorage)
     this.#remember(SAVED_KEY, this.#packageSig, localStorage)
-    this.available.set(false)
-    this.phase.set('idle')
+    this.#dismiss()
   }
 
   readonly discard = (): void => {
     this.#remember(DISCARDED_KEY, this.#packageSig, localStorage)
-    this.available.set(false)
-    this.phase.set('idle')
+    this.#dismiss()
   }
 
   readonly returnToAvailable = (): void => {
     this.statusMessage.set('')
     this.phase.set(this.available() ? 'available' : 'idle')
     this.expanded.set(this.available())
+  }
+
+  /** Put the standing offer on the pill: the one the participant asked for,
+   *  else a channel's (signed by the publisher this hive follows), else the
+   *  bundle this origin ships. */
+  #show(expand: boolean): void {
+    const offer = (this.#asked && this.#offers.get(this.#asked))
+      || this.#offers.get('channel') || this.#offers.get('bundled') || null
+    const wasAvailable = this.phase() === 'available'
+    this.#packageSig = String(offer?.packageSig ?? '')
+    this.#newBees = Array.isArray(offer?.newBees) ? offer.newBees.map(String) : []
+    this.#previous = typeof offer?.previous === 'string' ? offer.previous : null
+    this.#label = String(offer?.label ?? '').trim()
+    this.#source = offer?.source === 'channel' ? 'channel' : 'bundled'
+    // The name is written the moment the update is announced — adopting is
+    // one click, and what the participant sees in the field is what the
+    // restore point will be called unless they type over it. The AUTHOR'S
+    // build name leads; date + time are the changing default, so every
+    // revision the hive takes reads as its own line in the list.
+    this.restorePointName.set(buildRevisionName({
+      packageSig: this.#packageSig,
+      label: this.#label,
+      locale: this.#locale(),
+    }))
+    this.available.set(!!offer)
+    this.newCount.set(offer?.newCount ?? 0)
+    if (offer && !this.busy() && this.phase() !== 'complete') {
+      this.phase.set('available')
+      if (expand && !wasAvailable) this.expanded.set(true)
+    } else if (!offer && this.phase() === 'available') {
+      this.phase.set('idle')
+    }
+  }
+
+  /** Save and Discard answer the build on the pill: every announcer's offer
+   *  of that signature goes, and another announcer's different build may take
+   *  its place. */
+  #dismiss(): void {
+    for (const [source, offer] of this.#offers) {
+      if (String(offer.packageSig ?? '') === this.#packageSig) this.#offers.delete(source)
+    }
+    this.expanded.set(false)
+    this.phase.set('idle')
+    this.#show(false)
   }
 
   #restoreCompletedState(): void {

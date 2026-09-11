@@ -11426,8 +11426,11 @@ export class ShowCellDrone extends Drone {
 
   #tilePreview: TilePreview | null = null
   #tilePreviewToken = 0
+  /** The tile the newest payload named ('' after a clear). */
+  #tilePreviewLatest = ''
   /** The tile a save just landed on — its preview's end must not repaint the
-   *  old caches, because the save's own render is about to paint the truth. */
+   *  old caches, because the save's own render is about to paint the truth.
+   *  Held until that tile is previewed again. */
   #tilePreviewSavedLabel = ''
 
   #tilePreviewSigs(): string[] {
@@ -11444,21 +11447,28 @@ export class ShowCellDrone extends Drone {
   #applyTilePreview = async (payload: TilePreviewPayload | null | undefined): Promise<void> => {
     if (!payload?.label) return
     const token = ++this.#tilePreviewToken
+    this.#tilePreviewLatest = payload.clear ? '' : payload.label
 
     if (payload.clear) {
       const ended = this.#tilePreview
       this.#tilePreview = null
       if (!ended) return
-      // A save ends the preview and announces tile:saved in the same turn.
-      // Wait that turn out: repaint from the caches only if no save came.
-      this.#tilePreviewSavedLabel = ''
+      // A save announces tile:saved in the same turn it ends the preview — or,
+      // when the docked editor saves and moves to another tile, just before.
+      // Wait the turn out: repaint from the caches only if no save came, and
+      // only if the same tile has not been taken up again meanwhile. A preview
+      // of a DIFFERENT tile arriving in between (the editor moving on) does not
+      // stop this one's tile being put back.
       setTimeout(() => {
-        if (token !== this.#tilePreviewToken) return
+        if (this.#tilePreviewLatest === ended.label) return
         if (this.#tilePreviewSavedLabel === ended.label) return
         this.#restoreTileFromCaches(ended.label)
       }, 0)
       return
     }
+
+    // Previewed again: an earlier save of this tile no longer describes it.
+    if (payload.label === this.#tilePreviewSavedLabel) this.#tilePreviewSavedLabel = ''
 
     if (payload.page !== this.#currentPageKey()) return
     const atlas = this.imageAtlas
@@ -11545,7 +11555,11 @@ export class ShowCellDrone extends Drone {
       const ruv = this.atlas.getLabelUV(label)
       this.#writeCellVec4(labelUV, i, ruv.u0, ruv.v0, ruv.u1, ruv.v1)
     }
-    this.imageAtlas.setPinned([...this.renderedCells.values()].flatMap(c => (c.imageSig ? [c.imageSig] : [])))
+    // The editor may already be previewing the next tile — keep its pictures.
+    this.imageAtlas.setPinned([
+      ...[...this.renderedCells.values()].flatMap(c => (c.imageSig ? [c.imageSig] : [])),
+      ...this.#tilePreviewSigs(),
+    ])
     this.#pushBuffer('aImageUV')
     this.#pushBuffer('aHasImage')
     this.#pushBuffer('aBorderColor')

@@ -116,8 +116,11 @@ export class App implements AfterViewInit {
     EffectBus.on<{ count?: number; settled?: boolean }>('render:cell-count', ({ count, settled }) => {
       if (preloadStarted || (!(Number(count) > 0) && settled !== true)) return
       preloadStarted = true
+      // Settled is the same announcement production's ScriptPreloader makes:
+      // derived pages (the /games launcher) wait for it before dropping a cell.
       void import('../../../hypercomb-essentials/src/preload-effects')
         .then(({ preloadEffects }) => preloadEffects())
+        .then(() => EffectBus.emit('loader:bees-done', { loaded: list().length, failed: 0, total: list().length }))
         .catch(error => console.warn('[app] post-render preload failed', error))
     })
 

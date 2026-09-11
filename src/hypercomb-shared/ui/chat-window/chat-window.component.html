@@ -175,6 +175,15 @@
         </div>
       }
       <span class="chat-header-space"></span>
+      <!-- Show or hide the workflow column: one icon, sticky, lit while shown. -->
+      <button class="chat-close chat-route-toggle" type="button"
+        [class.on]="routeSideWanted()"
+        (click)="toggleRouteSide()"
+        [title]="'chat.route.toggle' | t"
+        [attr.aria-pressed]="routeSideWanted()"
+        [attr.aria-label]="'chat.route.toggle' | t">
+        <span class="mat-sym" aria-hidden="true">account_tree</span>
+      </button>
       <button class="chat-close" type="button" (click)="close()"
         [attr.aria-label]="'chat.close' | t">×</button>
     </header>
@@ -529,7 +538,7 @@
          draws the conversation's workflow working its way down
          (documentation/chat-route.md §4). Two siblings, a scroller each — the
          thread keeps its own flex column exactly as it was before the route. -->
-    <div class="chat-route-split">
+    <div class="chat-route-split" [style.--chat-route-side-w]="routeSideStyle()">
     <!-- The scroller and the pill that rides over its bottom edge — the wrap
          exists to give the pill something to be positioned against that is not
          the whole panel (whose footer height moves with the panel scale). -->
@@ -673,10 +682,44 @@
          decisions there. -->
     @if (routeSideShown()) {
       <div class="chat-route-col"
+        [class.chat-route-resizing]="routeResizing()"
         (focusin)="onRouteColFocusIn()"
         (focusout)="onRouteColFocusOut($event)"
         (pointerenter)="routePointerInside = true"
         (pointerleave)="routePointerInside = false">
+        <!-- The grip on the column's start edge: drag it left to widen the
+             workflow, double-click (or Home) to hand the width back. -->
+        <div class="chat-route-grip" role="separator" aria-orientation="vertical"
+          tabindex="0"
+          [attr.aria-label]="'chat.route.resize' | t"
+          [title]="'chat.route.resize' | t"
+          (pointerdown)="startRouteSideDrag($event)"
+          (dblclick)="resetRouteSideWidth()"
+          (keydown)="onRouteGripKey($event)"></div>
+        <!-- THE HEAD (chat-experience redesign, pass 1): the conversation's
+             name and where it stands, in the local model's words, and how
+             many steps are done — "what is this session, is it going
+             anywhere", answered before a single card. -->
+        @if (routeHead(); as head) {
+          <header class="chat-route-head"
+            [class.chat-route-head-stale]="head.stale"
+            [class.chat-route-head-settled]="!head.open">
+            <div class="chat-route-head-kicker">{{ 'chat.route.head.kicker' | t }}</div>
+            <h3 class="chat-route-head-name">{{ head.name || ('chat.route.flow.untitled' | t) }}</h3>
+            @if (head.stands) {
+              <p class="chat-route-head-stands"><span class="mat-sym" aria-hidden="true">{{ head.icon }}</span><span>{{ head.stands }}</span></p>
+            }
+            <div class="chat-route-head-meter" role="img"
+              [attr.aria-label]="'chat.route.head.counts' | t: { done: head.done, open: head.open }">
+              <span class="chat-route-head-bar" aria-hidden="true">
+                <i class="chat-route-head-done" [style.flex-grow]="head.done"></i>
+                <i class="chat-route-head-open" [style.flex-grow]="head.open"></i>
+                <i class="chat-route-head-rest" [style.flex-grow]="head.total - head.done - head.open"></i>
+              </span>
+              <span class="chat-route-head-counts">{{ 'chat.route.head.counts' | t: { done: head.done, open: head.open } }}</span>
+            </div>
+          </header>
+        }
         <nav class="chat-route-side" #routeSide data-route-viewport
           [class.chat-route-pulling]="routePulling()"
           [attr.data-route-follow]="routeFollowing()"
@@ -764,7 +807,7 @@
                 <span class="chat-route-piece" aria-hidden="true">
                   @switch (item.kind) {
                     @case ('node') {
-                      @if (item.node; as node) { <span class="mat-sym">{{ nodeIcon(node.state) }}</span> }
+                      @if (item.node; as node) { <span class="mat-sym">{{ stepIcon(node) }}</span> }
                     }
                     @case ('stage') { <span class="mat-sym">person</span> }
                     @case ('wait') { <span class="mat-sym">hourglass_empty</span> }
@@ -857,7 +900,7 @@
               @switch (item.kind) {
                 @case ('node') {
                   @if (item.node; as node) {
-                    <span class="mat-sym" aria-hidden="true">{{ nodeIcon(node.state) }}</span>
+                    <span class="mat-sym" aria-hidden="true">{{ stepIcon(node) }}</span>
                     <span>{{ node.title || ('chat.route.flow.untitled' | t) }}</span>
                   }
                 }

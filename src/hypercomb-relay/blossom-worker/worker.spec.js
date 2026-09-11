@@ -371,3 +371,78 @@ test('a site door is readable cross-origin — its manifest carries the open COR
   assert.equal(res.status, 200)
   assert.equal(res.headers.get('access-control-allow-origin'), '*')
 })
+
+// ── the hold ─────────────────────────────────────────────────────────────────
+
+const page = (url, extra = {}) =>
+  new Request(url, { headers: { 'sec-fetch-dest': 'document', accept: 'text/html,*/*', ...extra } })
+
+test('a held door answers the page with a holding note, and nothing else', async () => {
+  const { env, assetRequests } = await fixture()
+  env.VISITOR_HOLD = '1'
+  const held = await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)
+  assert.equal(held.status, 200)
+  assert.equal(held.headers.get('x-reason'), 'visitor hold')
+  assert.equal(held.headers.get('cache-control'), 'no-store')
+  const body = await held.text()
+  assert.match(body, /not open yet/)
+  assert.match(body, /noindex/)
+  // the page names the key that opens it, and mirrors it into the cookie
+  assert.match(body, /hc:visitor:open/)
+  assert.match(body, /hc-visitor-open=1/)
+  assert.deepEqual(assetRequests, [])
+
+  // files are never held: the descriptor, the manifest, a chunk
+  const manifest = await worker.fetch(new Request('https://revolucion.pluginthematrix.com/content/manifest.json'), env)
+  assert.equal(manifest.headers.get('x-reason'), null)
+  assert.deepEqual(assetRequests, ['/content/manifest.json'])
+  const descriptor = await worker.fetch(page('https://revolucion.pluginthematrix.com/site.json'), env)
+  assert.equal(descriptor.status, 200)
+  assert.equal(descriptor.headers.get('x-reason'), null)
+})
+
+test('an opened door serves the engine; ?visitor=off closes it again', async () => {
+  const { env, assetRequests } = await fixture()
+  env.VISITOR_HOLD = '1'
+  const opened = await worker.fetch(page('https://revolucion.pluginthematrix.com/', { cookie: 'a=b; hc-visitor-open=1' }), env)
+  assert.equal(opened.headers.get('x-reason'), null)
+  assert.equal(await opened.text(), 'visitor engine')
+  assert.deepEqual(assetRequests, ['/'])
+
+  const closed = await worker.fetch(page('https://revolucion.pluginthematrix.com/?visitor=off', { cookie: 'hc-visitor-open=1' }), env)
+  assert.equal(closed.headers.get('x-reason'), 'visitor hold')
+  assert.match(closed.headers.get('set-cookie'), /hc-visitor-open=; Path=\/; Max-Age=0/)
+  assert.match(await closed.text(), /removeItem/)
+  assert.deepEqual(assetRequests, ['/'])
+})
+
+test('without the var, no door holds', async () => {
+  const { env } = await fixture()
+  const res = await worker.fetch(page('https://revolucion.pluginthematrix.com/'), env)
+  assert.equal(res.headers.get('x-reason'), null)
+  assert.equal(await res.text(), 'visitor engine')
+})
+
+test('under /content/ a miss is an honest 404, never the SPA page — the pool walk stops at the gap', async () => {
+  const pool = 'e'.repeat(64)
+  const { env, assetRequests } = await fixture()
+  const shipped = new Set([`/content/${pool}/`, `/content/${pool}/00000000`])
+  env.ASSETS.fetch = async (request) => {
+    const pathname = new URL(request.url).pathname
+    assetRequests.push(pathname)
+    if (!shipped.has(pathname)) return new Response('not found', { status: 404 })
+    return new Response('00000000\n', { headers: { 'content-type': 'text/plain' } })
+  }
+  const listing = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${pool}/`), env)
+  assert.equal(listing.status, 200)
+  assert.equal(await listing.text(), '00000000\n')
+  const marker = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${pool}/00000000`), env)
+  assert.equal(marker.status, 200)
+  const gap = await worker.fetch(new Request(`https://revolucion.pluginthematrix.com/content/${pool}/00000001`), env)
+  assert.equal(gap.status, 404)
+  assert.match(gap.headers.get('content-type'), /text\/plain/)
+  // the page itself still falls back to index.html
+  const deep = await worker.fetch(page('https://revolucion.pluginthematrix.com/some/route'), env)
+  assert.equal(deep.status, 404)
+  assert.deepEqual(assetRequests.slice(-2), ['/some/route', '/index.html'])
+})

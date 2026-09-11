@@ -144,3 +144,37 @@ The goal is for players to build their own shrines, with their own puzzle rooms,
 2. **Scrollers**: long side-on levels on the rooms' engine, with a camera.
 3. **More at the epicentre** before going further out: puzzles, residents and caches around Saltmere and the valley roads.
 4. **Community shrines**: authoring each kind of room, signing a shrine, seating it on a plot, finding it across hosts.
+
+## Handoff 2026-09-11 — the doors (built in another session by mistake, tests green)
+
+Jaime's direction, given in the chat-experience session and belonging here:
+touch a door to pass through it (no E); a ~1 s visualization between every
+warp; no direction glyphs — a door is its colour and shape, hashed from the
+room it leads to, so the same place always looks the same; zoom in/out as the
+theme for entering any place; later, proximity battles that slow time, new
+weapons and spells, interactables that unlock barriers, and a beauty overhaul
+of both the puzzle rooms and the caverns.
+
+Landed, uncommitted, 91/91 Solomon specs green, `tsc` clean:
+- `labyrinth.ts`: `get arrivalDoor()` on `LabyrinthJourney`.
+- `labyrinth-overlay.ts`: `#passDoor()` in the room loop — standing in an
+  open door passes through; the arrival door is skipped until you step off;
+  a locked door says its requirement once per approach (low tone); E still
+  works. Entry message reworded.
+- `labyrinth-view.ts`: `doorHue`/`doorShape` (FNV hash of the target room id;
+  shapes arch · round · peak · gate · keyhole), `.sol-passage` restyled with
+  `--door-h`, no text, `.known` glow when the far room was visited, locked =
+  dashed + hatch; the VEIL (`.sol-room-veil` canvas, `VEIL_MS` 1000): the old
+  room breaks into 6→1-tile blocks, the new room resolves 6→1 and the veil
+  lifts, drawn from the tile grid (walls stone, bricks clay, doors their hue,
+  relics gold); plus a ZOOM of the board from the arrival door (in: scale
+  .55→1, out: 1.35→1). Reduced motion: none of it. jsdom (no canvas): the
+  veil is skipped, the zoom uses `animate` when present.
+- `labyrinth-overlay.spec.ts`: "passes through a door by touching it".
+
+Not verified visually: a scratchpad harness (`solomon-doors-4334` in
+launch.json, another session's scratchpad path) mounted the overlay, but the
+keyboard-driven walk to the Dawn Shrine did not move the player in the Browser
+pane, so the veil and the door looks were not eyeballed. Please eyeball on
+your harness (`world.html`/`cavern.html` with `__at`) and adjust the door
+palette/shapes and the veil timing to taste.

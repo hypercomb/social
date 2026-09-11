@@ -1,8 +1,9 @@
 import { SIM_DT, type Engine } from './engine.js'
-import { LabyrinthJourney, ROOMS } from './labyrinth.js'
+import { LabyrinthJourney, ROOMS, describeRequirement } from './labyrinth.js'
 import { LabyrinthRoomView, LABYRINTH_ROOM_CSS } from './labyrinth-view.js'
 import { createSolomonTileSurface, type SolomonTileSurface, type LoadedTileRoom } from './tile-surface.js'
-import { RpgOverworldView, RELIC_LORE, WORLD_PEOPLE } from './rpg-overworld.js'
+import { RpgOverworldView, RELIC_LORE, WORLD_DUNGEONS, WORLD_PEOPLE, WORLD_SHRINES } from './rpg-overworld.js'
+import { PlaceVeil, PLACE_VEIL_CSS, type VeilLeg } from './place-veil.js'
 import { ScrollDungeonView } from './scroll-dungeon.js'
 import { SolomonOverlay } from './overlay.js'
 import { GameAudio } from '../audio.js'
@@ -38,6 +39,7 @@ export class SolomonLabyrinthOverlay {
   #roomView: LabyrinthRoomView | null = null
   #dungeon: ScrollDungeonView | null = null
   #designer: SolomonOverlay | null = null
+  #veil: PlaceVeil | null = null
   #journal: HTMLElement | null = null
   #slots: SaveSlotStore<unknown> | null = null
   #slotPanel: HTMLElement | null = null
@@ -78,7 +80,7 @@ export class SolomonLabyrinthOverlay {
     root.setAttribute('aria-modal', 'true')
     root.tabIndex = -1
     const style = element('style')
-    style.textContent = ADVENTURE_CSS + LABYRINTH_ROOM_CSS
+    style.textContent = ADVENTURE_CSS + LABYRINTH_ROOM_CSS + PLACE_VEIL_CSS
     root.append(style)
     const bar = element('header', 'sol-adventure-bar')
     bar.append(element('strong', '', '✡ Solomon’s Key'))
@@ -102,6 +104,7 @@ export class SolomonLabyrinthOverlay {
     this.#dungeonHost = element('div', 'sol-adventure-dungeon')
     this.#roomHost.hidden = this.#dungeonHost.hidden = true
     this.#content.append(this.#worldHost, this.#roomHost, this.#dungeonHost)
+    this.#veil = new PlaceVeil(this.#content)
     this.#message = element('div', 'sol-adventure-message', 'Talk to Mira by the path. She knows where the first triangle belongs.')
     this.#message.setAttribute('role', 'status')
     this.#message.setAttribute('aria-live', 'polite')
@@ -190,11 +193,15 @@ export class SolomonLabyrinthOverlay {
       if (generation !== this.#generation || !this.#root) return
       if (!this.journey.enterLabyrinth(id) || !this.journey.room) throw new Error('This shrine is still missing a component.')
       this.#mode = 'room'
-      this.#worldHost!.hidden = true
-      this.#roomHost!.hidden = false
-      this.#dungeonHost!.hidden = true
-      this.#roomView!.show(this.#loaded.get(this.journey.room.id)!)
-      this.#say('Teal doors lead deeper. Amber doors return. Every room remembers your visit.')
+      const loaded = this.#loaded.get(this.journey.room.id)!
+      const shrine = WORLD_SHRINES.find(place => place.labyrinthId === id)
+      this.#warp(this.#world!.leaveLeg(shrine ?? this.#world!.model.player, 'in'), this.#roomView!.arriveLeg(loaded, 'in'), () => {
+        this.#worldHost!.hidden = true
+        this.#roomHost!.hidden = false
+        this.#dungeonHost!.hidden = true
+        this.#roomView!.show(loaded)
+      })
+      this.#say('Walk into a door to pass through it. Every door keeps the colour and shape of where it leads, and every room remembers your visit.')
       this.#acc = 0
       this.#dirty = true
       this.#save()
@@ -207,6 +214,28 @@ export class SolomonLabyrinthOverlay {
     }
   }
 
+  /** TOUCH TO PASS. Jaime, 2026-09-11: "you just have to touch the door or
+   *  portal to go to the next level." Standing in an open door takes you
+   *  through it — except the door you just arrived by, until you step off it
+   *  and back on (the journey's arrival guard). A door you cannot open yet
+   *  says what it needs, once per approach, and stays a door. E still works
+   *  for anyone who reaches for it. */
+  #lockedSaid = ''
+  #passDoor(): void {
+    const door = this.journey.nearDoor()
+    if (!door) { this.#lockedSaid = ''; return }
+    if (door.id === this.journey.arrivalDoor) return
+    if (!this.journey.has(door.requires)) {
+      if (this.#lockedSaid !== door.id) {
+        this.#lockedSaid = door.id
+        this.#say(`${describeRequirement(door.requires)} opens this door.`)
+        this.#audio.tone({ freq: 220, endFreq: 180, dur: 0.14, vol: 0.05 })
+      }
+      return
+    }
+    this.#door(door.id)
+  }
+
   #door(id?: string): void {
     if (this.#mode !== 'room') return
     const oldDepth = this.journey.room?.depth ?? 0
@@ -216,7 +245,8 @@ export class SolomonLabyrinthOverlay {
     const loaded = this.#loaded.get(this.journey.room.id)
     if (!loaded) { this.#showWorld(); this.#say('This passage has no loaded destination.'); return }
     const delta = this.journey.room.depth - oldDepth
-    this.#roomView!.show(loaded, delta < 0 ? 'out' : delta === 0 ? 'across' : 'in')
+    if (this.#veil) this.#roomView!.warp(this.#veil, loaded, delta < 0 ? 'out' : delta === 0 ? 'across' : 'in')
+    else this.#roomView!.show(loaded)
     this.#release()
     this.#acc = 0
     this.#audio.tone({ freq: delta < 0 ? 660 : 440, endFreq: 880, dur: 0.22, vol: 0.07 })
@@ -231,11 +261,15 @@ export class SolomonLabyrinthOverlay {
     this.#release()
     this.journey.leave()
     const view = this.#getDungeon(index)
-    for (const host of Array.from(this.#dungeonHost.children) as HTMLElement[]) host.hidden = host.dataset['dungeon'] !== String(index)
     this.#dungeon = view
     this.#mode = 'dungeon'
-    this.#worldHost!.hidden = this.#roomHost!.hidden = true
-    this.#dungeonHost.hidden = false
+    const mouth = WORLD_DUNGEONS.find(place => place.levelIndex === index)
+    this.#warp(this.#world?.leaveLeg(mouth ?? this.#world.model.player, 'in') ?? null, view.arriveLeg('in'), () => {
+      for (const host of Array.from(this.#dungeonHost!.children) as HTMLElement[]) host.hidden = host.dataset['dungeon'] !== String(index)
+      this.#worldHost!.hidden = this.#roomHost!.hidden = true
+      this.#dungeonHost!.hidden = false
+      view.refresh()
+    })
     this.#say('Explore the passages. Read inscriptions and use what they teach you to attune the gates.')
     this.#save()
   }
@@ -272,21 +306,35 @@ export class SolomonLabyrinthOverlay {
     this.#closeJournal()
     this.#closeSlots()
     this.#release()
+    const leave = this.#mode === 'room' ? this.#roomView?.leaveLeg('out') ?? null
+      : this.#mode === 'dungeon' ? this.#dungeon?.leaveLeg('out') ?? null : null
     this.journey.leave()
     this.#dungeon?.closeDialog()
     this.#dungeon = null
     this.#mode = 'world'
-    this.#worldHost!.hidden = false
-    this.#roomHost!.hidden = this.#dungeonHost!.hidden = true
-    this.#world?.refresh()
+    this.#warp(leave, this.#world?.arriveLeg(this.#world.model.player, 'out') ?? null, () => {
+      this.#worldHost!.hidden = false
+      this.#roomHost!.hidden = this.#dungeonHost!.hidden = true
+      this.#world?.refresh()
+    })
     this.#save()
     this.#say('Explore the world, compare clues, and fill the shrines with the pieces you have found.')
+  }
+
+  /** Every change of place goes through the veil: the place on show zooms
+   *  into (or shrinks back into) the entrance, and the next place resolves.
+   *  Without a picture to leave from, or without a veil, the swap simply
+   *  happens. */
+  #warp(leave: VeilLeg | null, arrive: VeilLeg | null, swap: () => void): void {
+    if (!this.#veil || !leave || !this.#content) { swap(); return }
+    this.#veil.play({ leave, arrive: arrive ?? { element: this.#content, picture: null, origin: [0.5, 0.5], scale: 1 }, onSwap: swap })
   }
 
   showDesigner(): void {
     if (!this.#root || this.#designer) return
     if (this.#restoring) { this.#afterRestore = 'design'; return }
     this.#release()
+    this.#veil?.cancel()
     this.#save()
     ++this.#generation
     this.#closeJournal()
@@ -375,6 +423,7 @@ export class SolomonLabyrinthOverlay {
       else if (this.#journal) this.#closeJournal()
       else if (this.#world?.isDialogOpen) this.#world.closeDialog()
       else if (this.#dungeon?.isDialogOpen) this.#dungeon.closeDialog()
+      else if (this.#world?.dismiss() || this.#dungeon?.dismiss()) { /* a question put away; play goes on */ }
       else if (this.#mode !== 'world') this.#showWorld()
       else this.onClose()
       return
@@ -455,12 +504,18 @@ export class SolomonLabyrinthOverlay {
     this.#lastTs = ts
     this.#time += dt
     if (!document.hidden && !this.#journal && !this.#slotPanel) {
-      if (this.#mode === 'world') this.#world?.update(dt, this.#input)
-      if (this.#mode === 'dungeon') this.#dungeon?.update(dt, this.#input)
+      // While the veil plays, the places hold still: nothing moves on a
+      // world that is zooming into an entrance.
+      const warping = !!this.#veil?.playing
+      if (this.#mode === 'world' && !warping) this.#world?.update(dt, this.#input)
+      if (this.#mode === 'dungeon' && !warping) this.#dungeon?.update(dt, this.#input)
       if (this.#mode === 'room') {
-        this.#acc += dt
-        while (this.#acc >= SIM_DT) { this.journey.update(SIM_DT); this.#acc -= SIM_DT }
-        this.#recordRelic()
+        if (!warping) {
+          this.#acc += dt
+          while (this.#acc >= SIM_DT) { this.journey.update(SIM_DT); this.#acc -= SIM_DT }
+          this.#recordRelic()
+          this.#passDoor()
+        }
         this.#roomView?.render(this.#time)
       }
     }
@@ -652,6 +707,7 @@ export class SolomonLabyrinthOverlay {
     ++this.#generation
     this.#restoring = this.#restoreFailed = false
     this.#release()
+    this.#veil?.cancel()
     this.#world?.dispose(); this.#roomView?.dispose()
     for (const dungeon of this.#dungeons.values()) dungeon.dispose()
     this.#dungeons.clear(); this.#knowledge.clear()
@@ -699,6 +755,8 @@ export class SolomonLabyrinthOverlay {
     window.removeEventListener('pagehide', this.#save)
     this.#designer?.unmount()
     this.#designer = null
+    this.#veil?.dispose()
+    this.#veil = null
     this.#world?.dispose()
     this.#roomView?.dispose()
     for (const dungeon of this.#dungeons.values()) dungeon.dispose()

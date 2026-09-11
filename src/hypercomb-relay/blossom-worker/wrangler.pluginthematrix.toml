@@ -139,6 +139,10 @@ binding = "HIVES"
 id = "186c91f7458b421abea02d7647f27821"
 
 [vars]
+# Every published door holds ("not open yet") until a browser opens it with
+# localStorage['hc:visitor:open'] = '1' (worker.js visitorHold). Set to "0"
+# and deploy to open every door to the public.
+VISITOR_HOLD = "1"
 AUTO_GRANT = "1"
 DEFAULT_QUOTA_BYTES = "104857600"
 GRANT_TTL_DAYS = "90"

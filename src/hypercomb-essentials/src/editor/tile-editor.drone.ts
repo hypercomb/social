@@ -111,14 +111,15 @@ export class TileEditorDrone {
 
   // ── open editor ────────────────────────────────────────────────
 
-  async #openEditing(cell: string): Promise<void> {
+  async #openEditing(cell: string, options: { stash?: boolean } = {}): Promise<void> {
     const store = window.ioc.get<Store>('@hypercomb.social/Store')
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
     if (!store || !service) return
 
     // A tile opened while another is being edited (a drop, a paste, the phone
-    // bar's camera): keep that draft before this one replaces it.
-    if (service.mode === 'editing') this.#stashDraft()
+    // bar's camera, a click on another tile): keep that draft before this one
+    // replaces it — unless it was just saved.
+    if (service.mode === 'editing' && options.stash !== false) this.#stashDraft()
 
     // 1. read tile properties — canonical path is the cell's layer's
     // `properties` slot (`readTilePropertiesAt`). Falls back to:
@@ -216,12 +217,46 @@ export class TileEditorDrone {
   // entry, no `tile:saved`.
 
   readonly saveAndComplete = async (): Promise<void> => {
+    const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
+    const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
+    const outcome = await this.#persist()
+    // A failed save keeps the editor open with the draft intact. Cancel is
+    // always there, and it always closes.
+    if (!outcome) return
+    service?.close()
+    imageEditor?.destroy()
+    this.#announce(outcome)
+  }
+
+  // ── switch (called by the editor view) ─────────────────────────
+  //
+  // The docked editor sits beside a live hive, so a click on another tile
+  // moves the session there without closing the window. `save` writes this
+  // tile first and moves only if the write landed; otherwise this tile's
+  // changed draft is kept, exactly as a cancel keeps it, and offered back
+  // when the tile is opened again.
+
+  readonly switchTo = async (label: string, options: { save?: boolean } = {}): Promise<boolean> => {
+    const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
+    if (!service || service.mode !== 'editing' || this.#saving || !label) return false
+    if (options.save) {
+      const outcome = await this.#persist()
+      if (!outcome) return false
+      this.#announce(outcome)
+    }
+    await this.#openEditing(label, { stash: !options.save })
+    return service.mode === 'editing' && service.cell !== ''
+  }
+
+  /** Write the open session. Null when nothing could be written — the error
+   *  is on the session by then. */
+  async #persist(): Promise<{ wrote: boolean; cell: string; segments: readonly string[] } | null> {
     const store = window.ioc.get<Store>('@hypercomb.social/Store')
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
     const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
 
-    if (!store || !service || !imageEditor) return
-    if (service.mode !== 'editing' || this.#saving) return
+    if (!store || !service || !imageEditor) return null
+    if (service.mode !== 'editing' || this.#saving) return null
     this.#saving = true
     service.setSaving?.(true)
 
@@ -285,19 +320,16 @@ export class TileEditorDrone {
       service.setSaving?.(false)
     }
 
-    // A failed save keeps the editor open with the draft intact. Cancel is
-    // always there, and it always closes.
-    if (!saved) return
-    service.close()
-    imageEditor.destroy()
+    return saved ? { wrote, cell: savedCell, segments: segmentsForSave } : null
+  }
 
-    // notify via effect bus (processor owns synchronize; drones use effects)
-    if (wrote) {
-      // Carry the gesture-time segments so downstream commit listeners
-      // address the layer where the edit happened, not wherever the
-      // user navigated to during the save.
-      EffectBus.emit<{ cell: string; segments: readonly string[] }>('tile:saved', { cell: savedCell, segments: segmentsForSave })
-    }
+  /** Notify via the effect bus (the processor owns synchronize; drones use
+   *  effects). Carries the gesture-time segments so downstream commit
+   *  listeners address the layer where the edit happened, not wherever the
+   *  participant navigated to during the save. */
+  #announce(outcome: { wrote: boolean; cell: string; segments: readonly string[] }): void {
+    if (!outcome.wrote) return
+    EffectBus.emit<{ cell: string; segments: readonly string[] }>('tile:saved', { cell: outcome.cell, segments: outcome.segments })
   }
 
   // ── cancel ─────────────────────────────────────────────────────

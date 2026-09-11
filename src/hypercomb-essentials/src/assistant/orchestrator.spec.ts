@@ -329,7 +329,9 @@ describe('the route-flow schedule', () => {
       await orchestrator.warmup()
       await vi.advanceTimersByTimeAsync(soonMs)
       expect(passes).toHaveLength(1)
-      await vi.advanceTimersByTimeAsync(90_000 - 1)
+      // From the pass's OWN start: the first pass may have come at the early
+      // wake (a replayed effect), and the rest is measured from when it began.
+      await vi.advanceTimersByTimeAsync(passes[0]! + 90_000 - 1 - Date.now())
       expect(passes).toHaveLength(1)
       await vi.advanceTimersByTimeAsync(1)
       expect(gaps()).toEqual([90_000])
@@ -502,7 +504,7 @@ describe('the route-flow schedule', () => {
   it('never runs two passes at once — a wake during a pass becomes one pass after it', async () => {
     vi.useFakeTimers()
     try {
-      let release!: (value: { organized: number; behind: number }) => void
+      let release!: (value: Drain) => void
       drain.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
       await orchestrator.warmup()
       await vi.advanceTimersByTimeAsync(soonMs)
@@ -512,7 +514,7 @@ describe('the route-flow schedule', () => {
       await vi.advanceTimersByTimeAsync(10 * 60_000)
       expect(drain, 'still the one pass').toHaveBeenCalledTimes(1)
 
-      release({ organized: 0, behind: 0 })
+      release({ organized: 0, behind: 0, elapsedMs: 0 })
       await vi.advanceTimersByTimeAsync(wakeMs)
       expect(drain, 'the wake it heard, once').toHaveBeenCalledTimes(2)
       await vi.advanceTimersByTimeAsync(idleMs - 1)

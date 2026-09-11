@@ -150,6 +150,11 @@ export interface RouteRow {
 
 export type RouteFlowState = 'done' | 'open' | 'decided' | 'dropped'
 
+/** What a step WAS, as the card model reads it — one word from a closed list,
+ *  drawn as an icon. Never load-bearing: a card without one is still a card. */
+export type RouteFlowKind = 'fix' | 'idea' | 'choice' | 'build' | 'look'
+export const ROUTE_FLOW_KINDS: readonly RouteFlowKind[] = ['fix', 'idea', 'choice', 'build', 'look']
+
 /** A node's card: its summary in three parts, keyed by what it was derived
  *  from. The name the card gave lives on the node (`title`, `named`). */
 export interface RouteFlowCard {
@@ -160,6 +165,8 @@ export interface RouteFlowCard {
   readonly goal: string
   readonly done: string
   readonly outcome: string
+  /** The step's kind, when the model named one it was allowed to. */
+  readonly kind?: RouteFlowKind
   /** How many exchanges the node covered when this card was written. */
   readonly exchanges: number
   /** The wire model that wrote it. */
@@ -184,6 +191,25 @@ export interface RouteFlowNode {
   readonly card?: RouteFlowCard
 }
 
+/** THE SESSION CARD — the conversation's name and where it stands, written by
+ *  the local model from its steps' cards once every card is current. Keyed by
+ *  `sessionKey`: the nodes' states and card keys, so any step's change makes
+ *  it due again. What the masthead, the list row and the sidebar head show. */
+export interface RouteFlowSession {
+  /** 64 hex — `sessionKey` over the nodes when it was written. */
+  readonly key: string
+  /** `ROUTE_FLOW_SESSION_VERSION` when it was written. */
+  readonly sv: number
+  /** 3–8 words naming the goal the whole conversation serves. */
+  readonly name: string
+  /** One or two sentences: where it stands now. */
+  readonly stands: string
+  readonly model: string
+  readonly at: number
+  /** Set on read when `sv` is old or its key no longer matches the nodes. */
+  readonly stale?: true
+}
+
 /** The one record a conversation's slot holds. */
 export interface RouteFlowRecord {
   readonly kind: 'chat:route-flow'
@@ -204,6 +230,7 @@ export interface RouteFlowRecord {
   readonly nodes: readonly RouteFlowNode[]
   /** Nodes with no card or a stale card — recomputed on every read. */
   readonly pending: number
+  readonly session?: RouteFlowSession
 }
 
 /** One node as the shell draws it. */
@@ -231,6 +258,10 @@ export interface RouteFlowView {
   /** `record.model` — "Organized by {model}". */
   readonly model: string
   readonly nodes: readonly RouteFlowViewNode[]
+  /** The session card, `stale` when a step changed since it was written. */
+  readonly session?: Omit<RouteFlowSession, 'key'>
+  /** Nodes by ROLLED-UP state. */
+  readonly counts: Readonly<Record<RouteFlowState, number>>
 }
 
 /** What the participant's local model can do right now, read from probe STATE only. */
@@ -238,7 +269,10 @@ export type RouteOrganizerState =
   'awake' | 'off' | 'unknown' | 'asleep' | 'blocked' | 'needs-permission' | 'empty' | 'no-model'
 
 /** A flow model call in flight for one conversation. */
-export type RouteOrganizing = { readonly stage: 'structure' } | { readonly stage: 'card'; readonly nodeId: string }
+export type RouteOrganizing =
+  | { readonly stage: 'structure' }
+  | { readonly stage: 'card'; readonly nodeId: string }
+  | { readonly stage: 'session' }
 
 export interface Route {
   /** Only rows that hold work, in thread order. */
@@ -252,8 +286,8 @@ export interface Route {
    *  record at this version exists AND is about this thread's history. The
    *  pure derivation leaves it out. */
   readonly flow?: RouteFlowView
-  /** Probe STATE only: `localOrganizerState`, then `participantLocalModel`.
-   *  No fetch on any path. */
+  /** Probe STATE only: `organizerGate`, then `organizerModel`. No fetch on
+   *  any path. */
   readonly organizerState?: RouteOrganizerState
   /** Present only while `organizerState === 'awake'`. */
   readonly organizer?: { readonly providerId: string; readonly model: string }
@@ -472,7 +506,7 @@ export const readRoute = async (convoId: string, liveRunId?: string): Promise<Ro
   if (!records) return EMPTY_ROUTE
   const id = String(convoId ?? '').trim()
   const record = await readRouteFlow(id)
-  const flow = record ? flowView(record, records.turns) : undefined
+  const flow = record ? flowView(record, records.turns, !!record.session && await sessionDue(record)) : undefined
   const organizer = await organizerFields(id)
   const state = flowState()
   const organizing = state.organizingNow.get(id)
@@ -574,7 +608,10 @@ export const ROUTE_FLOW_VERSION = 2
 /** Bump on any change to the card prompt or its validators. It is stored on
  *  every card, because the card key cannot be recomputed on the synchronous
  *  read path; a card at an older version reads stale at once. */
-export const ROUTE_FLOW_CARD_VERSION = 1
+export const ROUTE_FLOW_CARD_VERSION = 2
+/** The session prompt's wording is part of this version too. */
+export const ROUTE_FLOW_SESSION_VERSION = 1
+export const ROUTE_FLOW_SESSION_STANDS_CHARS = 200
 
 export const ROUTE_FLOW_MAX_NODES = 32
 export const ROUTE_FLOW_MAX_DEPTH = 3
@@ -659,6 +696,23 @@ interface FlowCoordination {
   readonly plainLocalModels: Set<string>
   /** The model the last passive pass resolved. */
   lastPassModel: string
+  /** convoId → when the participant last opened it here. The drain's queue. */
+  readonly visited: Map<string, number>
+}
+
+/** Where the visited queue lives between reloads; the newest 200 kept. */
+export const ROUTE_VISITED_KEY = 'hc:chat-route-visited'
+const ROUTE_VISITED_CAP = 200
+
+const readVisited = (): Map<string, number> => {
+  try {
+    const raw = JSON.parse(globalThis.localStorage?.getItem(ROUTE_VISITED_KEY) ?? 'null') as Record<string, unknown> | null
+    const out = new Map<string, number>()
+    if (raw && typeof raw === 'object') {
+      for (const [id, at] of Object.entries(raw)) if (typeof at === 'number' && Number.isFinite(at) && id) out.set(id, at)
+    }
+    return out
+  } catch { return new Map() }
 }
 
 const flowState = (): FlowCoordination =>
@@ -674,7 +728,31 @@ const flowState = (): FlowCoordination =>
     backoff: new Map<string, number>(),
     plainLocalModels: new Set<string>(),
     lastPassModel: '',
+    visited: readVisited(),
   } satisfies FlowCoordination) as FlowCoordination
+
+/**
+ * THE VISITED QUEUE. Jaime: "if we don't touch the conversation let's not
+ * organize the workflow sidebar … it gets into a queue if you visit it and
+ * then that will be done in the background." Opening a conversation puts it
+ * here; the drain reads only from here, most recently opened first, and a
+ * conversation nobody opened on this machine is never organized. Persisted,
+ * newest 200, so a reload does not forget what you were working in.
+ */
+export const markRouteVisited = (convoId: string, at = Date.now()): void => {
+  const id = String(convoId ?? '').trim()
+  if (!id) return
+  const state = flowState()
+  state.visited.set(id, at)
+  if (state.visited.size > ROUTE_VISITED_CAP) {
+    const oldest = [...state.visited.entries()].sort((a, b) => a[1] - b[1]).slice(0, state.visited.size - ROUTE_VISITED_CAP)
+    for (const [key] of oldest) state.visited.delete(key)
+  }
+  try { globalThis.localStorage?.setItem(ROUTE_VISITED_KEY, JSON.stringify(Object.fromEntries(state.visited))) } catch { /* private mode */ }
+}
+
+/** The conversations the drain may organize, most recently opened first. */
+export const routeVisited = (): ReadonlyMap<string, number> => flowState().visited
 
 /**
  * THE PARTICIPANT'S OWN LOCAL CHAT PRE-EMPTS EVERYTHING. Measured on qwen3:8b:
@@ -1339,6 +1417,9 @@ export const ROUTE_FLOW_CARD_SYSTEM = [
   '  few words each; do not repeat their cards.',
   'outcome: one sentence: how it ended: the result, or exactly what is still open. A FAILED attempt that was',
   '  never fixed is still open.',
+  'kind: what this was, ONE of: "fix" (something broken was repaired), "idea" (something new was proposed or',
+  '  designed), "choice" (an option was weighed or settled), "build" (something was made, added or changed),',
+  '  "look" (something was read, checked or explained).',
   '',
   'Write about the work, never about the people ("Fixed the ...", not "The user asked ..."), and never use the',
   'words task, card, branch or state in the text. Reply with JSON only.',
@@ -1346,9 +1427,125 @@ export const ROUTE_FLOW_CARD_SYSTEM = [
 
 export const ROUTE_FLOW_CARD_SCHEMA = {
   type: 'object',
-  properties: { title: { type: 'string' }, goal: { type: 'string' }, done: { type: 'string' }, outcome: { type: 'string' } },
-  required: ['title', 'goal', 'done', 'outcome'],
+  properties: {
+    title: { type: 'string' }, goal: { type: 'string' }, done: { type: 'string' }, outcome: { type: 'string' },
+    kind: { type: 'string', enum: ['fix', 'idea', 'choice', 'build', 'look'] },
+  },
+  required: ['title', 'goal', 'done', 'outcome', 'kind'],
 } as const
+
+/** A kind word the model gave, or undefined — never a reason to refuse a card. */
+export const flowKind = (value: unknown): RouteFlowKind | undefined => {
+  const word = flat(value).toLowerCase()
+  return (ROUTE_FLOW_KINDS as readonly string[]).includes(word) ? word as RouteFlowKind : undefined
+}
+
+// ── the session card ────────────────────────────────────────────────────
+
+/** What the session model is told. Change a word, bump `ROUTE_FLOW_SESSION_VERSION`. */
+export const ROUTE_FLOW_SESSION_SYSTEM = [
+  'You name ONE conversation and say where it stands, from the cards of the steps it worked through.',
+  'name: 3 to 8 words naming the GOAL the whole conversation serves — the thing being built, fixed or decided.',
+  '  Verb first or a noun phrase, naming the specific thing. Never a vague word like task, discussion, chat,',
+  '  help, work, update, or conversation. Sentence case, no quotes, no period.',
+  'stands: one or two sentences, at most 200 characters, on where things stand NOW: what is finished, and',
+  '  exactly what is still open or waiting on someone. Name the specifics (the tile, the fix, the choice).',
+  '',
+  'Write about the work, never about the people, and never use the words task, card, step, branch or',
+  'conversation in the text. Reply with JSON only.',
+].join('\n')
+
+export const ROUTE_FLOW_SESSION_SCHEMA = {
+  type: 'object',
+  properties: { name: { type: 'string' }, stands: { type: 'string' } },
+  required: ['name', 'stands'],
+} as const
+
+export interface RouteFlowSessionInputs {
+  readonly prompt: string
+  /** Every card's text — what the name must be grounded in. */
+  readonly covered: string
+}
+
+/** The session prompt: the steps in preorder, one line each, with their
+ *  cards' outcomes; then the counts. Nodes without a current card are listed
+ *  by title alone. */
+export const routeFlowSessionInputs = (flow: Pick<RouteFlowRecord, 'nodes'>): RouteFlowSessionInputs => {
+  const depthOf = (id: string): number => {
+    let depth = 0
+    for (let at = flow.nodes.find(n => n.id === id)?.parent; at; at = flow.nodes.find(n => n.id === at)?.parent) depth++
+    return depth
+  }
+  const lines = flow.nodes.map(node => {
+    const card = node.card && !node.card.stale ? node.card : undefined
+    return `${'  '.repeat(depthOf(node.id))}- [${node.state}] ${node.title || 'untitled'}${card ? `: ${card.outcome}` : ''}`
+  })
+  const counts = countStates(flow.nodes.map(node => node.state))
+  const prompt = [
+    'STEPS, in order (a step under another is a branch of it):',
+    ...lines,
+    '',
+    `${counts.done} done, ${counts.open} open, ${counts.decided} decided, ${counts.dropped} dropped.`,
+    '',
+    'Write the name and where it stands as JSON.',
+  ].join('\n')
+  const covered = flow.nodes.map(node => [node.title, node.card?.goal, node.card?.done, node.card?.outcome].filter(Boolean).join(' ')).join('\n')
+  return { prompt, covered }
+}
+
+export type FlowSessionCheck =
+  | { readonly ok: true; readonly session: { readonly name: string; readonly stands: string } }
+  | { readonly ok: false; readonly why: string }
+
+/** The session validator: the name through `checkFlowTitle` against every
+ *  card's text; `stands` clipped to its limit at a sentence break, refused
+ *  when short, naming a role, or talking about "the task/card/step". */
+export const checkFlowSession = (obj: unknown, context: { readonly covered: string }): FlowSessionCheck => {
+  const source = (obj && typeof obj === 'object' ? obj : {}) as Record<string, unknown>
+  const name = checkFlowTitle(source['name'], { covered: context.covered, corpus: context.covered })
+  if (!name.ok) return { ok: false, why: `name rejected (${name.why})` }
+  let stands = flat(source['stands']).replace(/^["'`]+|["'`]+$/g, '').trim()
+  const limit = ROUTE_FLOW_SESSION_STANDS_CHARS
+  if (stands.length > limit) {
+    const cut = stands.slice(0, limit)
+    const stop = cut.lastIndexOf('. ')
+    stands = stop > limit * 0.6 ? cut.slice(0, stop + 1) : `${stands.slice(0, limit - 1).trimEnd()}…`
+  }
+  if (stands.length < 12) return { ok: false, why: 'short-stands' }
+  if (/\b(user|user's|assistant|participant|chatbot)\b/i.test(stands)) return { ok: false, why: 'role-stands' }
+  if (/\b(the|this) (task|card|step|branch|conversation)\b/i.test(stands)) return { ok: false, why: 'meta-stands' }
+  return { ok: true, session: { name: name.title, stands } }
+}
+
+const countStates = (states: readonly RouteFlowState[]): Record<RouteFlowState, number> => {
+  const out: Record<RouteFlowState, number> = { done: 0, open: 0, decided: 0, dropped: 0 }
+  for (const state of states) out[state]++
+  return out
+}
+
+/** The session card's key: the nodes' ids, states and card keys, in order —
+ *  any step's change makes the session due again. Independent of the model. */
+export const sessionKey = (flow: Pick<RouteFlowRecord, 'nodes'>): Promise<string> => {
+  const text = [
+    'chat:route-flow-session', `sv${ROUTE_FLOW_SESSION_VERSION}`,
+    ...flow.nodes.map(node => `${node.id}:${node.state}:${node.card && !node.card.stale ? node.card.key : ''}`),
+  ].join('\n')
+  const bytes = new TextEncoder().encode(text)
+  return SignatureService.sign(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
+}
+
+/** Is a session card owed? Once every step's card is current — or, when the
+ *  caller says so, once nothing more can be carded right now (a refused card
+ *  in back-off must not hold the conversation's name for ten minutes). */
+export const sessionDue = async (
+  record: Pick<RouteFlowRecord, 'nodes' | 'pending' | 'session'>,
+  allowPending = false,
+): Promise<boolean> => {
+  if (record.pending > 0 && !allowPending) return false
+  const session = record.session
+  if (!session || session.stale || session.sv !== ROUTE_FLOW_SESSION_VERSION) return true
+  return session.key !== await sessionKey(record)
+}
 
 export interface RouteFlowCardPromptInput {
   readonly state: RouteFlowState
@@ -1780,9 +1977,29 @@ const parseCard = (raw: unknown): RouteFlowCard | undefined => {
   if (typeof exchanges !== 'number' || !Number.isInteger(exchanges) || exchanges < 1) return undefined
   if (typeof card['model'] !== 'string' || !card['model'].trim()) return undefined
   const stale = card['stale'] === true || card['cv'] !== ROUTE_FLOW_CARD_VERSION
+  const kind = flowKind(card['kind'])
   return {
-    key: card['key'], cv: card['cv'], ...parts, exchanges, model: card['model'],
+    key: card['key'], cv: card['cv'], ...parts, ...(kind ? { kind } : {}), exchanges, model: card['model'],
     at: typeof card['at'] === 'number' && Number.isFinite(card['at']) ? card['at'] : 0,
+    ...(stale ? { stale: true as const } : {}),
+  }
+}
+
+/** A stored session card, or undefined — an invalid one is dropped, the
+ *  record kept; an old `sv` reads `stale`. */
+const parseSession = (raw: unknown): RouteFlowSession | undefined => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const session = raw as Record<string, unknown>
+  if (typeof session['key'] !== 'string' || !HEX64.test(session['key'])) return undefined
+  if (typeof session['sv'] !== 'number' || !Number.isInteger(session['sv'])) return undefined
+  const name = flat(session['name'])
+  const stands = flat(session['stands'])
+  if (!name || name.length > FLOW_TITLE_CHARS || !stands || stands.length > ROUTE_FLOW_SESSION_STANDS_CHARS) return undefined
+  if (typeof session['model'] !== 'string' || !session['model'].trim()) return undefined
+  const stale = session['stale'] === true || session['sv'] !== ROUTE_FLOW_SESSION_VERSION
+  return {
+    key: session['key'], sv: session['sv'], name, stands, model: session['model'],
+    at: typeof session['at'] === 'number' && Number.isFinite(session['at']) ? session['at'] : 0,
     ...(stale ? { stale: true as const } : {}),
   }
 }
@@ -1854,12 +2071,14 @@ export const parseFlowRecord = (value: unknown, convoId: string): RouteFlowRecor
   const settled = typeof settledRaw === 'number' && Number.isInteger(settledRaw) && settledRaw >= 0 && settledRaw <= exchanges.length
     ? settledRaw
     : Math.max(0, exchanges.length - ROUTE_FLOW_OVERLAP)
+  const session = parseSession(record['session'])
   return {
     kind: 'chat:route-flow', v: ROUTE_FLOW_VERSION, convoId,
     upToTurnCount: upTo, upToTurnSig: upToSig,
     at: typeof record['at'] === 'number' && Number.isFinite(record['at']) ? record['at'] : 0,
     model: typeof record['model'] === 'string' ? record['model'] : '',
     exchanges: exchanges as string[], settled, nodes, pending: pendingOf(nodes),
+    ...(session ? { session } : {}),
   }
 }
 
@@ -1885,7 +2104,7 @@ const flowFits = (record: Pick<RouteFlowRecord, 'upToTurnCount' | 'upToTurnSig' 
  * "Build a landing page [open]" over five finished branches. It does not fire
  * when the conversation came back to the parent later. Unmeasured.
  */
-const flowView = (record: RouteFlowRecord, turns: readonly RouteTurn[]): RouteFlowView | undefined => {
+const flowView = (record: RouteFlowRecord, turns: readonly RouteTurn[], sessionStale = false): RouteFlowView | undefined => {
   if (!flowFits(record, turns)) return undefined
   const coverage = nodeCoverage(record, turns)
   const nodes = record.nodes.map((node): RouteFlowViewNode => {
@@ -1909,7 +2128,12 @@ const flowView = (record: RouteFlowRecord, turns: readonly RouteTurn[]): RouteFl
       ...(node.card ? { detail: headClip(node.card.done, ROUTE_FLOW_DETAIL_CHARS - 1), card } : {}),
     }
   })
-  return { upToTurnCount: record.upToTurnCount, pending: record.pending, model: record.model, nodes }
+  const session = record.session
+  return {
+    upToTurnCount: record.upToTurnCount, pending: record.pending, model: record.model, nodes,
+    ...(session ? { session: { sv: session.sv, name: session.name, stands: session.stands, model: session.model, at: session.at, ...(session.stale || sessionStale ? { stale: true as const } : {}) } } : {}),
+    counts: countStates(nodes.map(node => node.state)),
+  }
 }
 
 /** Node ids of this flow with a card answer in back-off right now. */
@@ -2136,6 +2360,51 @@ export const localOrganizerState = async (): Promise<
   return { state: best ?? 'off' }
 }
 
+/**
+ * WHO MAY RUN THE BACKGROUND HELPER — the participant's setting
+ * (`llmPolicy.orchestratorProvider`, model-policy.ts) decides between the
+ * machine-local probe above and a named paid provider, gated the same way
+ * every other tier is: switched on, and keyed if it needs a key. Default is
+ * `'anthropic'` — Jaime, 2026-09-11, moved off the local-only default because
+ * the local model is "just not there yet" — `'local'` asks for exactly the
+ * probe `localOrganizerState` always ran.
+ */
+export const organizerGate = async (): Promise<
+  | { readonly state: 'awake'; readonly provider: LlmProviderDescriptor }
+  | { readonly state: Exclude<RouteOrganizerState, 'awake' | 'no-model'> }
+> => {
+  const { llmPolicy } = await import('./model-policy.js')
+  const chosen = llmPolicy.orchestratorProvider
+  if (chosen === 'local') return localOrganizerState()
+  const [{ llmProviderRegistry }, { llmActivation }, core] = await Promise.all([
+    import('./llm-provider-registry.js'),
+    import('./llm-activation.js'),
+    import('@hypercomb/core'),
+  ])
+  const provider = llmProviderRegistry().all().find(p => p.id === chosen)
+  if (!provider) return { state: 'off' }
+  if (!llmActivation.isEnabled(provider.id)) return { state: 'off' }
+  if (provider.requiresKey !== false && !core.llmKeyStore.has(provider.id)) return { state: 'off' }
+  return { state: 'awake', provider }
+}
+
+/** The wire model `organizerGate`'s provider should run at — the
+ *  participant's own remembered local model for `'local'` (unchanged from
+ *  before this setting existed), else the provider's model at
+ *  `llmPolicy.orchestratorTier` (default `fast` — Haiku-weight: cheap and
+ *  quick, the right size for mechanical tagging/summarizing). */
+const organizerModel = async (
+  gate: { readonly state: 'awake'; readonly provider: LlmProviderDescriptor },
+  options: { readonly convoIds?: readonly string[]; readonly fallback?: string } = {},
+): Promise<string | undefined> => {
+  if (gate.provider.id === 'local') {
+    const [{ llmProviderRegistry }, dispatch] = await Promise.all([import('./llm-provider-registry.js'), import('./llm-dispatch.js')])
+    return participantLocalModel(gate.provider, llmProviderRegistry(), dispatch.participantLocalChoice(), options) ?? undefined
+  }
+  const { llmPolicy, modelForTier } = await import('./model-policy.js')
+  return modelForTier(gate.provider, llmPolicy.orchestratorTier)
+}
+
 /** The machine-local model that may organize, ALREADY known awake. */
 export interface RouteLabeller {
   readonly id: string
@@ -2149,25 +2418,29 @@ export interface RouteLabeller {
  * call: it re-reads state and checks `model` is still installed; it never
  * re-resolves the model.
  *
- * Its call strips the caller's knobs and adds `thinking: false`, `jsonSchema`
- * and `temperature` back — unless this server refused them once this session,
- * so the plain retry really is plain — and sets `providerId` and `model` LAST,
- * so nothing a caller passes can re-point the call. An explicit provider and
+ * A machine-local model's call strips the caller's knobs and adds
+ * `thinking: false`, `jsonSchema` and `temperature` back — unless this server
+ * refused them once this session, so the plain retry really is plain. A paid
+ * provider's call passes the caller's knobs through unchanged — it is not the
+ * one refusing them. Either way `providerId` and `model` are set LAST, so
+ * nothing a caller passes can re-point the call. An explicit provider and
  * model give `routeCandidates` exactly one candidate and `callModel` makes one
  * attempt: there is no fallback to any other vendor.
  */
-export const awakeLocalLabeller = async (model: string): Promise<RouteLabeller | null> => {
+export const awakeOrganizerLabeller = async (model: string): Promise<RouteLabeller | null> => {
   const wanted = String(model ?? '').trim()
   if (!wanted) return null
-  const gate = await localOrganizerState()
+  const gate = await organizerGate()
   if (gate.state !== 'awake') return null
   if (!gate.provider.models.some(m => m.id === wanted)) return null
   const dispatch = await import('./llm-dispatch.js')
   const id = gate.provider.id
+  const isLocal = id === 'local'
   return {
     id,
     model: wanted,
     call: c => {
+      if (!isLocal) return dispatch.callModel({ ...c, providerId: id, model: wanted })
       const { thinking: _thinking, jsonSchema, temperature, ...rest } = c
       const plain = flowState().plainLocalModels.has(wanted)
       return dispatch.callModel({
@@ -2182,12 +2455,9 @@ export const awakeLocalLabeller = async (model: string): Promise<RouteLabeller |
 /** `organizerState` and `organizer` for a route read. Never throws, never probes. */
 const organizerFields = async (convoId: string): Promise<Pick<Route, 'organizerState' | 'organizer'>> => {
   try {
-    const gate = await localOrganizerState()
+    const gate = await organizerGate()
     if (gate.state !== 'awake') return { organizerState: gate.state }
-    const [{ llmProviderRegistry }, dispatch] = await Promise.all([import('./llm-provider-registry.js'), import('./llm-dispatch.js')])
-    const model = participantLocalModel(gate.provider, llmProviderRegistry(), dispatch.participantLocalChoice(), {
-      fallback: flowState().lastPassModel, convoIds: [convoId],
-    })
+    const model = await organizerModel(gate, { fallback: flowState().lastPassModel, convoIds: [convoId] })
     return model ? { organizerState: 'awake', organizer: { providerId: gate.provider.id, model } } : { organizerState: 'no-model' }
   } catch { return {} }
 }
@@ -2315,7 +2585,7 @@ const flowCall = async (
   const stop = options.beforeCall?.()
   if (stop) return { ok: false, why: stop === 'budget' ? 'budget' : 'yielded' }
   if (Date.now() < state.pausedUntil) return { ok: false, why: 'yielded' }
-  const labeller = await awakeLocalLabeller(options.model)
+  const labeller = await awakeOrganizerLabeller(options.model)
   if (!labeller) return { ok: false, why: 'gate' }
   if (options.attended && options.claim && !options.claim.counted) {
     options.claim.counted = true
@@ -2362,7 +2632,7 @@ const settleRecord = async (
   base: Pick<RouteFlowRecord, 'convoId' | 'upToTurnCount' | 'upToTurnSig' | 'model' | 'exchanges' | 'settled'> & {
     readonly nodes: readonly Omit<RouteFlowNode, 'card'>[] | readonly RouteFlowNode[]
   },
-  previous: Pick<RouteFlowRecord, 'nodes' | 'exchanges'> | null,
+  previous: (Pick<RouteFlowRecord, 'nodes' | 'exchanges'> & { readonly session?: RouteFlowSession }) | null,
   turns: readonly ChatTurn[],
   route: Pick<Route, 'rows' | 'unfinished'>,
 ): Promise<RouteFlowRecord> => {
@@ -2373,6 +2643,9 @@ const settleRecord = async (
     kind: 'chat:route-flow', v: ROUTE_FLOW_VERSION, convoId: base.convoId,
     upToTurnCount: base.upToTurnCount, upToTurnSig: base.upToTurnSig, at: Date.now(), model: base.model,
     exchanges: base.exchanges, settled: base.settled, nodes, pending: pendingOf(nodes),
+    // The session card rides along; `sessionDue` reads its key against the
+    // new nodes, so a changed step makes it due without a flag here.
+    ...(previous?.session ? { session: previous.session } : {}),
   }
 }
 
@@ -2415,7 +2688,7 @@ const organizeOne = async (convoId: string, options: OrganizeOptions): Promise<O
   const stop = (outcome: OrganizeOutcome): OrganizeResult => ({ outcome, wrote })
   try {
     const held = await readRouteFlow(convoId)
-    if (held && options.summary && held.upToTurnCount >= options.summary.turnCount && held.pending === 0) return stop('current')
+    if (held && options.summary && held.upToTurnCount >= options.summary.turnCount && held.pending === 0 && !(await sessionDue(held))) return stop('current')
 
     let records: Awaited<ReturnType<typeof readRouteRecords>>
     try { records = await readRouteRecords(convoId, options.liveRunId) } catch { return stop('unreadable') }
@@ -2437,8 +2710,9 @@ const organizeOne = async (convoId: string, options: OrganizeOptions): Promise<O
     const needStructure = closedExchanges > mapped && !!lastSig
     const needAdvance = !needStructure && !!record && closed > record.upToTurnCount && !!lastSig
     const needCards = !!record && record.pending > 0
+    const needSession = !!record && await sessionDue(record)
 
-    if (!needStructure && !needAdvance && !needCards) {
+    if (!needStructure && !needAdvance && !needCards && !needSession) {
       // What ONLY the clock is holding back: the thread is not yet quiet, and
       // once it is the last exchange would close. A thread already quiet and
       // still held (an ask outstanding) is not waiting on the clock — naming a
@@ -2454,11 +2728,11 @@ const organizeOne = async (convoId: string, options: OrganizeOptions): Promise<O
     const structureKey = `${convoId}|s|${lastSig ?? ''}`
     const structureTried = state.backoff.get(structureKey)
     const structureBackedOff = needStructure && structureTried !== undefined && now - structureTried < ROUTE_FLOW_RETRY_MS
-    if (structureBackedOff && !needCards) return stop('backoff')
+    if (structureBackedOff && !needCards && !needSession) return stop('backoff')
 
     // No local model awake means no call and no write — W-advance included:
     // it changes nothing the participant can see until a card follows it.
-    if (!(await awakeLocalLabeller(options.model))) return stop('gate')
+    if (!(await awakeOrganizerLabeller(options.model))) return stop('gate')
 
     if (needStructure && !structureBackedOff) {
       const texts = flowExchanges(turns, route, closedExchanges)
@@ -2596,8 +2870,9 @@ const organizeOne = async (convoId: string, options: OrganizeOptions): Promise<O
         model: title,
         working: checkFlowTitle(current.title, titleContext),
       })
+      const kind = flowKind((firstValue as { kind?: unknown } | null)?.kind)
       const card: RouteFlowCard = {
-        key, cv: ROUTE_FLOW_CARD_VERSION, ...summary.summary,
+        key, cv: ROUTE_FLOW_CARD_VERSION, ...summary.summary, ...(kind ? { kind } : {}),
         exchanges: Math.max(1, inputs.exchanges), model: options.model, at: Date.now(),
       }
       const nodes = working.nodes.map(candidate => candidate.id !== node.id ? candidate : {
@@ -2614,6 +2889,56 @@ const organizeOne = async (convoId: string, options: OrganizeOptions): Promise<O
       // Attended: after EACH card, so summaries appear one by one while the
       // participant watches. Passive: once, when the loop ends.
       if (options.attended && !(await save())) return stop('fault')
+    }
+    // THE SESSION CARD — once every step's card is current. One call, one
+    // retry that names the reason, backed off by key on an unusable answer.
+    if (await sessionDue(working, backedOff)) {
+      const key = await sessionKey(working)
+      const sessionBackoffKey = `${convoId}|x|${key}`
+      const tried = state.backoff.get(sessionBackoffKey)
+      if (tried !== undefined && options.now() - tried < ROUTE_FLOW_RETRY_MS) {
+        backedOff = true
+      } else {
+        const inputs = routeFlowSessionInputs(working)
+        const stage: RouteOrganizing = { stage: 'session' }
+        const request = (content: string): Omit<LlmCall, 'signal' | 'providerId' | 'model'> => ({
+          system: ROUTE_FLOW_SESSION_SYSTEM,
+          messages: [{ role: 'user', content }],
+          jsonSchema: ROUTE_FLOW_SESSION_SCHEMA as unknown as Readonly<Record<string, unknown>>,
+          temperature: 0,
+          maxTokens: 220,
+        })
+        const first = await flowCall(convoId, options, stage, request(inputs.prompt), ROUTE_FLOW_CARD_TIMEOUT_MS)
+        if (!first.ok) {
+          if (first.why === 'timeout') state.backoff.set(sessionBackoffKey, options.now())
+          if (unsaved && !(await save())) return stop('fault')
+          return stop(first.why)
+        }
+        const firstValue = extractRouteFlow(first.text)
+        let check = checkFlowSession(firstValue, inputs)
+        if (!check.ok) {
+          const retry = await flowCall(convoId, options, stage,
+            request(`${inputs.prompt}\n\nYour last answer was not usable: ${check.why}.\n${JSON.stringify(firstValue)}\nWrite it again, fixed.`),
+            ROUTE_FLOW_CARD_TIMEOUT_MS)
+          if (!retry.ok) {
+            if (retry.why === 'timeout') state.backoff.set(sessionBackoffKey, options.now())
+            if (unsaved && !(await save())) return stop('fault')
+            return stop(retry.why)
+          }
+          check = checkFlowSession(extractRouteFlow(retry.text), inputs)
+        }
+        if (check.ok) {
+          working = {
+            ...working, at: Date.now(),
+            session: { key, sv: ROUTE_FLOW_SESSION_VERSION, ...check.session, model: options.model, at: Date.now() },
+          }
+          state.backoff.delete(sessionBackoffKey)
+          unsaved = true
+        } else {
+          state.backoff.set(sessionBackoffKey, options.now())
+          backedOff = true
+        }
+      }
     }
     if (unsaved && !(await save())) return stop('fault')
     return stop(wrote ? 'wrote' : backedOff ? 'backoff' : 'current')
@@ -2647,17 +2972,17 @@ export const organizeRoute = async (
   if (!id) return 0
   const state = flowState()
   ensureSubscribed(state)
+  // The shell calls this for the conversation on screen: that is a visit,
+  // whatever the gate says next — the drain picks it up once a model wakes.
+  markRouteVisited(id)
   const preferred = String(prefer ?? '').trim()
   if (preferred) state.prefer.set(id, preferred)
   if (waiting || Date.now() < state.pausedUntil) return 0
   const claim = { counted: false }
   try {
-    const gate = await localOrganizerState()
+    const gate = await organizerGate()
     if (gate.state !== 'awake') return 0
-    const [{ llmProviderRegistry }, dispatch] = await Promise.all([import('./llm-provider-registry.js'), import('./llm-dispatch.js')])
-    const model = participantLocalModel(gate.provider, llmProviderRegistry(), dispatch.participantLocalChoice(), {
-      fallback: state.lastPassModel, convoIds: [id],
-    })
+    const model = await organizerModel(gate, { fallback: state.lastPassModel, convoIds: [id] })
     if (!model) return 0
     const { wrote } = await organizeOne(id, {
       attended: true, model, liveRunId, waiting, now: Date.now, pending: once(pendingChatAsks), claim,
@@ -2723,9 +3048,9 @@ const pruneBackoff = (state: FlowCoordination, now: number): void => {
  * nothing, fetches nothing and logs nothing. The pass model is resolved ONCE,
  * from the participant's stored choice and the live conversations, and pinned
  * as `lastPassModel` — a model swap on the participant's machine measured
- * 10–17 s and evicts the model they chat with. Then every conversation the list
- * knows, LIVE threads newest-first and then ARCHIVED newest-first, one at a
- * time, the gate re-read before each and the main thread given back between
+ * 10–17 s and evicts the model they chat with. Then every conversation the
+ * participant has OPENED here (the visited queue), most recently opened first,
+ * one at a time, the gate re-read before each and the main thread given back between
  * them. Before every call: the participant's pause and an attended call end the
  * pass as `yield` with a `resumeAt`; 48 calls or 90 s end it as `budget`.
  * `elapsedMs` is always returned, so the orchestrator can rest as long as the
@@ -2743,19 +3068,18 @@ export const drainRouteFlows = async (options: RouteFlowDrainOptions = {}): Prom
   let organized = 0
   let behind = 0
   try {
-    const gate = await localOrganizerState()
+    const gate = await organizerGate()
     if (gate.state !== 'awake') return { organized, behind, stopped: 'gate', elapsedMs: elapsed() }
     let conversations: ConversationSummary[]
     try { conversations = await listConversations() } catch { return { organized, behind, stopped: 'fault', elapsedMs: elapsed() } }
-    const newest = (a: ConversationSummary, b: ConversationSummary): number => b.lastAt - a.lastAt
+    // ONLY THE VISITED, most recently opened first — live or archived alike;
+    // a conversation nobody opened here is left as it is.
     const worth = (convo: ConversationSummary): boolean => convo.turnCount >= 2 && convo.replied !== false
-    const live = conversations.filter(convo => !convo.archived && worth(convo)).sort(newest)
-    const ordered = [...live, ...conversations.filter(convo => convo.archived && worth(convo)).sort(newest)]
+    const visitedAt = (convo: ConversationSummary): number => state.visited.get(convo.convoId) ?? 0
+    const ordered = conversations.filter(convo => worth(convo) && visitedAt(convo) > 0).sort((a, b) => visitedAt(b) - visitedAt(a) || b.lastAt - a.lastAt)
+    const live = ordered.filter(convo => !convo.archived)
 
-    const [{ llmProviderRegistry }, dispatch] = await Promise.all([import('./llm-provider-registry.js'), import('./llm-dispatch.js')])
-    const model = participantLocalModel(gate.provider, llmProviderRegistry(), dispatch.participantLocalChoice(), {
-      convoIds: live.map(convo => convo.convoId),
-    })
+    const model = await organizerModel(gate, { convoIds: live.map(convo => convo.convoId) })
     if (!model) return { organized, behind, stopped: 'gate', elapsedMs: elapsed() }
     state.lastPassModel = model
     pruneBackoff(state, now())
@@ -2778,7 +3102,7 @@ export const drainRouteFlows = async (options: RouteFlowDrainOptions = {}): Prom
       const reason = beforeCall()
       if (reason === 'yield') return { ...yielded(), ...(dueIn !== undefined ? { dueIn } : {}) }
       if (reason === 'budget') { stopped = 'budget'; break }
-      if ((await localOrganizerState()).state !== 'awake') { stopped = 'gate'; break }
+      if ((await organizerGate()).state !== 'awake') { stopped = 'gate'; break }
       const result = await organizeOne(convo.convoId, {
         attended: false, model, now, pending, summary: convo, beforeCall, afterCall: () => { calls++ },
       })

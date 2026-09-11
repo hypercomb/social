@@ -440,6 +440,10 @@ export class TileOverlayDrone extends Drone {
   #editing = false
   #editCooldown = false
   #editCooldownTimer: ReturnType<typeof setTimeout> | null = null
+  /** The tile the editor holds, when the editor is DOCKED beside the hive —
+   *  empty otherwise. A click on any other tile asks the editor to move there. */
+  #editDockedLabel = ''
+  #switchCursor = false
   #hasSelection = false
   /** Sampling mode — every tap picks instead of entering. See `sample:mode`. */
   #sampling = false
@@ -584,7 +588,7 @@ export class TileOverlayDrone extends Drone {
     'sample:mode', 'select:mode', 'tile:enter-request',
     'view:open-for-tile', 'view:active',
   ]
-  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-click', 'clipboard:take-items', 'clipboard:verb', 'swarm:wand']
+  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:navigate-reference', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'overlay:band-rows', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle', 'tags:apply-click', 'clipboard:take-items', 'clipboard:verb', 'swarm:wand', 'editor:switch-request']
 
   #dropDragging = false
   #dropGroupOnly = false
@@ -627,6 +631,17 @@ export class TileOverlayDrone extends Drone {
 
       this.onEffect<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
         if (cmd !== 'tile.editHovered') return
+        // Docked: `e` over another tile moves the open editor there, exactly as
+        // a click on it does.
+        if (this.#editing && this.#editDockedLabel && this.#currentAxial && !this.#hoverSuppressed) {
+          const hovered = this.#occupiedByAxial.get(
+            TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r),
+          )?.label
+          if (hovered && hovered !== this.#editDockedLabel) {
+            EffectBus.emitTransient('editor:switch-request', { label: hovered })
+          }
+          return
+        }
         // Gate: must be on a tile, not editing, not in arrange/public/drag
         if (this.#editing || this.#editCooldown) return
         if (this.#arrangeMode) return
@@ -1026,8 +1041,12 @@ export class TileOverlayDrone extends Drone {
         this.#updatePerTileVisibility()
       })
 
-      this.onEffect<{ active: boolean }>('editor:mode', (payload) => {
+      this.onEffect<{ active: boolean; surface?: string; label?: string }>('editor:mode', (payload) => {
         this.#editing = payload.active
+        this.#editDockedLabel = payload.active && payload.surface === 'dock' ? payload.label ?? '' : ''
+        // The tile under the pointer may be the one just opened; the next move
+        // says again.
+        this.#refreshSwitchCursor(null)
         // editing flips control of overlay visibility. Cooldown is a separate
         // 300ms click-suppression window: it only stops the trailing click
         // from save/cancel reaching the overlay's onClick / pointerdown
@@ -2486,6 +2505,7 @@ export class TileOverlayDrone extends Drone {
     // #onPointerDown already gates on the same condition; hover was the hole.
     if (e.target !== this.#canvas) {
       this.#suppressHover()
+      this.#refreshSwitchCursor(null)
       // A drag that wanders onto chrome has NO landing place, and the indicator
       // must say so rather than freeze on the last hex it crossed — a stuck ring
       // reads as "release here and it lands there", which is a lie the moment
@@ -2516,6 +2536,10 @@ export class TileOverlayDrone extends Drone {
     const meshLocalX = local.x - this.#meshOffset.x
     const meshLocalY = local.y - this.#meshOffset.y
     const axial = detector.pixelToAxial(meshLocalX, meshLocalY, this.#flat)
+
+    this.#refreshSwitchCursor(this.#editDockedLabel
+      ? this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))?.label ?? null
+      : null)
 
     // dev-mode: warn if occupied map is out of sync with visual mesh
     if (typeof (globalThis as any).ngDevMode !== 'undefined') {
@@ -3050,7 +3074,23 @@ export class TileOverlayDrone extends Drone {
     }
     if (this.#arrangeMode) { diag('arrange-mode'); return } // arrange mode absorbs clicks
     if (this.#navigationBlocked) { diag('navigation-blocked'); return }
-    if (this.#editing || this.#editCooldown) { diag('editing'); return }
+    if (this.#editing || this.#editCooldown) {
+      // A docked editor leaves the hive beside it live for this one gesture:
+      // a plain click on ANOTHER tile asks the editor to move there. The press
+      // above never navigated (it stands down while editing), and the editor
+      // decides whether unsaved changes need asking about first.
+      if (this.#editing && this.#editDockedLabel && e.target === this.#canvas
+        && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
+        const label = this.labelAtClient(e.clientX, e.clientY)
+        if (label && label !== this.#editDockedLabel) {
+          EffectBus.emitTransient('editor:switch-request', { label })
+          diag('editor-switch')
+          return
+        }
+      }
+      diag('editing')
+      return
+    }
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) { diag('no-renderer'); return }
     if (e.target !== this.#canvas) { diag('target-not-canvas'); return }
 
@@ -3879,6 +3919,23 @@ export class TileOverlayDrone extends Drone {
     this.#currentIndex = this.#lookupIndex(axial.q, axial.r)
     this.#positionOverlay(axial.q, axial.r)
     this.#updateCellLabel(axial.q, axial.r)
+  }
+
+  /** A hand over the tiles a docked editor can move to. Only ever clears the
+   *  cursor it set, so a drop refusal or a pan grip is left alone. */
+  #refreshSwitchCursor(label: string | null): void {
+    if (!this.#canvas) return
+    const want = !!label && !!this.#editDockedLabel && label !== this.#editDockedLabel
+    if (want) {
+      // Never over another drone's cursor (a bee's hand, a refused drop). At
+      // rest Pixi's event system leaves `inherit` here — that is nobody's.
+      const current = this.#canvas.style.cursor
+      if (!current || current === 'inherit' || current === 'default' || current === 'auto') this.#canvas.style.cursor = 'pointer'
+      this.#switchCursor = true
+    } else if (this.#switchCursor) {
+      this.#switchCursor = false
+      if (this.#canvas.style.cursor === 'pointer') this.#canvas.style.cursor = ''
+    }
   }
 
   /** Which tile sits under a VIEWPORT point, or null for empty hex / off-canvas.

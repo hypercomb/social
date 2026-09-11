@@ -1,28 +1,35 @@
-// stamp-install-channel — advance the signed install sentinel after a deploy.
+// stamp-install-channel — advance the signed install sentinel after a build.
 //
-//   tsx ./scripts/stamp-install-channel.ts [channel] [--sig <64-hex>] [--host <domain>]
+//   tsx ./scripts/stamp-install-channel.ts [channel] [--sig <64-hex>] [--host <domain>] [--require]
 //
-// The LAST step of `build:module:deploy` (install-by-replication.md, steps
-// 2+6): reads the freshly built package sig from dist/manifest.json and asks
-// the AUTHORING BROWSER — over the Claude bridge (ws:2401) — to merge
-// `install:<channel>` → packageSig into the publisher's signed hive index
-// (bridge op `hive-root-set`). Custody: browser-over-bridge — the key never
-// leaves the browser's NostrSigner; this script holds no secrets.
+// The LAST step of `build:module` and `build:module:deploy`
+// (install-by-replication.md, steps 2+6): reads the freshly built package sig
+// from dist's `host:packages` member and asks the AUTHORING BROWSER — over the
+// Claude bridge (ws:2401) — to merge `install:<channel>` → packageSig into the
+// publisher's signed hive index (bridge op `hive-root-set`). Custody:
+// browser-over-bridge — the key never leaves the browser's NostrSigner; this
+// script holds no secrets.
 //
-// THE DEPLOY PASSES --require, AND THAT IS THE POINT. copy-content has already
-// published the bytes to every target (the relay's content dir is the jwize.com
-// route) by the time this runs, so a failed stamp leaves a package that is
-// perfectly replicable and that nobody moves to: consumers resolve `current`
-// through the signed sentinel, not through the manifest a domain serves. A
-// deploy whose sentinel did not advance is a deploy nobody receives, so it
-// exits non-zero and says so rather than reporting success.
+// EVERY BUILD STAMPS. copy-content has already published the bytes to every
+// target (the relay's content dir is the jwize.com route) by the time this
+// runs, and consumers resolve `current` through the signed sentinel, not
+// through what a domain serves — so a build that is not stamped is a build
+// nobody is offered. `build:module` runs this best-effort: with the hive open
+// the build reaches followers; with it closed the owed box prints and the
+// build still succeeds. The DEPLOY passes --require, so a deploy whose
+// sentinel did not advance exits non-zero instead of reporting success.
+//
+// A successful stamp also names WHO builds follow: the signing pubkey and its
+// index host land in `src/sharing/install-publisher.json`, which the update
+// scout bundles into its own verified bytes (update-scout.service.ts). The
+// package stamped now predates the file; the next build carries it.
 //
 // The stamp is idempotent (an unchanged root no-ops), so the printed retry is
 // always safe to run — and a HAND invocation stays best-effort (exit 0) so
 // re-running it while the hive is closed is a nudge, not a failure.
 
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import WebSocket from 'ws'
@@ -30,6 +37,7 @@ import WebSocket from 'ws'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const BRIDGE = process.env.BRIDGE_URL || 'ws://localhost:2401'
 const SIG_RE = /^[a-f0-9]{64}$/
+const PUBLISHER_FILE = resolve(__dirname, '..', 'src', 'sharing', 'install-publisher.json')
 
 const argv = process.argv.slice(2)
 const flag = (name: string): string | undefined => {
@@ -82,6 +90,24 @@ function stamp(sig: string): Promise<Record<string, unknown>> {
   })
 }
 
+/** Name the key that just signed as the one this channel's builds follow.
+ *  Only the channel the scout reads, and only when something changed — an
+ *  ordinary stamp leaves the source tree alone. */
+function recordPublisher(data: Record<string, unknown>): void {
+  if (channel !== 'essentials') return
+  const pubkey = String(data['pubkey'] ?? '').trim().toLowerCase()
+  if (!SIG_RE.test(pubkey)) return
+  const host = String(data['host'] ?? '').trim().toLowerCase()
+  const next = { pubkey, hosts: host ? [host] : [], channel }
+  try {
+    const current = JSON.parse(readFileSync(PUBLISHER_FILE, 'utf8')) as typeof next
+    if (current.pubkey === next.pubkey && current.channel === next.channel
+      && JSON.stringify(current.hosts) === JSON.stringify(next.hosts)) return
+  } catch { /* absent or unreadable — write it */ }
+  writeFileSync(PUBLISHER_FILE, JSON.stringify(next, null, 2) + '\n')
+  console.log(`[stamp-install-channel] builds now follow pubkey ${pubkey.slice(0, 12)}… (src/sharing/install-publisher.json) — the next build carries it`)
+}
+
 const sig = packageSigFromDist()
 if (!sig) {
   console.error('[stamp-install-channel] no package sig — dist carries no host:packages member, or --sig is malformed')
@@ -95,6 +121,7 @@ try {
   } else {
     console.log(`[stamp-install-channel] SENTINEL ADVANCED: install:${channel} → ${sig.slice(0, 12)}… on ${String(data['host'])} (pubkey ${String(data['pubkey']).slice(0, 12)}…)`)
   }
+  recordPublisher(data)
 } catch (err) {
   const retry = `npx tsx hypercomb-essentials/scripts/stamp-install-channel.ts ${channel} --sig ${sig}`
   console.error('')

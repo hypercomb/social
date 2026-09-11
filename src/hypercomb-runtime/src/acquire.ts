@@ -14,13 +14,15 @@
 // pools, `.js` suffixes or URL shapes. Everything kind-shaped lives in the io
 // wiring below, which is where it belongs and where it stays.
 //
-// WHAT THIS DELIBERATELY DOES NOT DO — stated rather than implied, because it
-// is the difference between this chip and the next one: the manifest a domain
-// serves is NOT signed. Every atom is verified, so a hostile or hijacked host
-// cannot serve you wrong bytes — but it CAN offer you a different tree and
-// call it current. Binding "current" to a publisher identity is the signed
-// sentinel. Until that lands, adding a domain is exactly as much trust as
-// visiting one.
+// WHAT THIS DOES NOT DECIDE — stated rather than implied, because it is the
+// line between the two halves of admission: the pool a domain serves is NOT
+// signed. Every atom is verified, so a hostile or hijacked host cannot serve
+// you wrong bytes — but it CAN offer you a different tree and call it
+// current. Binding "current" to a publisher identity is the signed sentinel,
+// and `installPackage` asks it FIRST (activation-authority.ts): a package no
+// publisher the participant follows has signed is refused by name before a
+// byte is fetched. Adding a domain makes it a byte source and a door — never
+// an authority.
 
 // MOVED HERE FROM THE SHIM (2026-08-31). It began shim-side because the shim
 // is the cold-boot shell and acquisition is the first thing it does — but the
@@ -49,6 +51,9 @@ import { headPackage, hostBases, listHostPackages, type HostPackage } from './ho
 // install can leave the SAME mark — one key, one reader, one answer to "which
 // build am I on". Re-exported so existing callers keep their import site.
 import { installedPackageSig, stampInstalledPackage } from './installed-package.js'
+// The second half of admission: may this tree run HERE. Asked before a byte
+// moves — see the file for the three doors (self, genesis, attested).
+import { activationAuthority, registeredAttester } from './activation-authority.js'
 export { installedPackageSig }
 
 // Re-exported so the shim's own callers keep one import site. The
@@ -341,6 +346,20 @@ export const installPackage = async (
 ): Promise<InstallOutcome> => {
   const fail = (error: string): InstallOutcome =>
     ({ ok: false, packageSig: pkg.packageSig, fetched: 0, present: 0, holes: [], refused: [], error })
+
+  // MAY IT RUN HERE? Integrity below proves the bytes; this proves the
+  // publisher, and it is settled before the store is even opened. A refusal
+  // is complete-or-absent like every other: nothing fetched, nothing stamped,
+  // and the sentence says what to do instead (activation-authority.ts).
+  const authority = await activationAuthority({
+    packageSig: pkg.packageSig,
+    zone: pkg.zone,
+    self: location.host,
+    installed: installedPackageSig(),
+    zones: alsoFrom,
+    attester: registeredAttester(),
+  })
+  if (!authority.ok) return fail(authority.error)
 
   const store = window.ioc?.get?.<StoreLike>(STORE_KEY)
   if (!store) return fail('store unavailable')

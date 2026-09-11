@@ -400,9 +400,19 @@ export class LabyrinthJourney {
       const cell = candidates.find(candidate => !engine!.solidAt(candidate.col, candidate.row))
       if (cell) engine.arrive(cell, facing)
       this.#arrivalDoor = arrival.id
-    }
+    } else this.#guardDoor()
     return true
   }
+
+  /** The door Dana arrived through and has not yet stepped away from — the
+   *  one door that must not take her straight back. */
+  get arrivalDoor(): string | null { return this.#arrivalDoor }
+
+  /** A door Dana is standing in when she is SET DOWN (a spawn, a retry, a
+   *  respawn after a death) counts as her arrival door: every room's start
+   *  cell is beside its way back, and touching a door means walking into it,
+   *  never being placed in it. */
+  #guardDoor(): void { this.#arrivalDoor = this.nearDoor()?.id ?? null }
 
   nearDoor(): RoomDoor | null {
     if (!this.room || !this.engine || this.engine.state !== 'playing') return null
@@ -432,7 +442,9 @@ export class LabyrinthJourney {
     const engine = this.engine, room = this.room
     if (!engine || !room) return
     this.#applyGates()
+    const lives = engine.lives
     engine.update(dt)
+    if (engine.lives < lives && engine.state === 'playing') this.#guardDoor()
     if (this.#arrivalDoor && this.nearDoor()?.id !== this.#arrivalDoor) this.#arrivalDoor = null
     if (engine.state !== 'playing') { this.#bank(); return }
     for (const relic of room.relics) {
@@ -448,7 +460,7 @@ export class LabyrinthJourney {
     if (!this.engine) return false
     this.engine.lives = 3
     this.engine.spawn()
-    this.#arrivalDoor = null
+    this.#guardDoor()
     this.#applyGates()
     this.#bank()
     return true

@@ -100,6 +100,93 @@ OPFS is origin-private, so post-admission tampering is out of the threat model
 (an attacker who can write OPFS owns the origin and no runtime check would
 save you).
 
+## Activation authority — whose code may run HERE
+
+Integrity settles WHAT the bytes are. It never settled WHO may make them the
+live package of *this* origin — and the hosts window turned that gap into one
+click: a package offered by any carried domain could be applied, its bees
+written into this origin's pool and imported on the next boot with the
+participant's whole tree underneath them. Closed 2026-09-11.
+
+The rule (`hypercomb-runtime/src/activation-authority.ts`, asked by
+`installPackage` before a byte is fetched): a package may activate here when
+ONE of
+
+| door | when | why it is safe |
+|---|---|---|
+| **self** | the offering domain IS this origin | its code already runs here — nothing new can run |
+| **genesis** | no package ever activated here, no module is loaded, and the offer is from the ONE seed in `DEFAULT_HOST_ZONES` | the bootstrap trust the chain already rests on, spent once, before there is data to protect |
+| **attested** | a publisher the participant FOLLOWS has signed a sentinel naming it | authority (rule 3 above), enforced at the act |
+
+Everything else is refused by name, and the refusal says what to do instead.
+**Fail closed**: no attester loaded means no foreign package, never a free
+pass. The shim, which bundles no nostr, can therefore only ever take its own
+origin's package — which is all a published site needs.
+
+The attester (`hypercomb-essentials/src/sharing/package-attestation.ts`,
+registered under core's `ATTESTATION_IOC_KEY`) reads the SAME follow record
+the update scout reads — pinned pubkey, index hosts, channel — fetches the
+signed index from the followed hosts and from the offering domains (a host
+that serves the publisher's index vouches for its own head), verifies it
+end-to-end, and answers `current` when `install:<channel>` IS the package.
+Every root a followed key has been seen to name is WITNESSED
+(`hc:attested-packages`, sig → pubkey), so the ledger's pin/rollback rows
+answer `held` without a fetch; a witness under a key you no longer follow is
+no witness. A host that publishes a package and does not serve the
+publisher's signed index publishes something nobody can apply.
+
+### Where someone else's code runs
+
+**On their domain.** The browser's origin isolation is the segregation: a
+build visited at `theirs.example` runs against `theirs.example`'s OPFS and
+cannot reach yours. So the hosts window offers **Visit** beside every domain:
+try what they serve *there*, mark the creations you want (offers are still
+adopted one tile at a time by the swarm's grammar, which moves DATA, never
+code), and their BUILD becomes applicable *here* only when a publisher you
+follow signs it. Following a publisher is the trust act (`hc:install-follow`,
+or the bundled `install-publisher.json`), and it names a KEY, never a domain
+— a domain is a byte source and a door, not an authority.
+
+### A switch is said before it happens, and it can be undone
+
+A build from any domain but your own is a **switch**, and the hosts window
+calls it that — never Apply, never Update. The app restarts on somebody
+else's version, and the first thing a participant used to see was a hive that
+looked emptied: every tile still on disk, none of them shown by the build now
+running. Nothing was lost and nothing said so. Now:
+
+- **The window explains itself.** A four-line guide (domains, creations,
+  builds, *your tiles are safe*) sits at the top until put away; the `?` in
+  the header brings it back. Each domain's Creations and Builds lists open
+  with one sentence saying what kind of list they are.
+- **Your own domain is marked and listed first.** A build from it is an
+  Update; there is no Visit link on it, because that would open a second tab
+  on your own hive.
+- **A switch asks first.** A confirm sheet under the scrolling list states the
+  three facts: the app restarts on their version, nothing is deleted, and how
+  to come back. Going back to the build you were on never asks.
+- **The way back is one press.** Once a switch activates, the window records
+  the build it left (`hc:hosts:switched-from`, kept across onward switches so
+  it always names the build you started on), reopens by itself after the
+  restart, and offers **Switch back**. It looks for that build where it was
+  seen listed, then on your own domain; if neither lists it, it says to open
+  your own domain and choose the build you were on.
+
+### Vetting before following (design, not built)
+
+Following is the one act that admits foreign code, so that is where a review
+layer belongs — not at runtime (never verify at runtime) and not per package
+(a follow is a standing decision). The shape that fits the protocol: a
+**review record** in a pool of meaning (`review:packages`), content-addressed,
+minted by whoever reviewed a package root — a person, or the AI layer reading
+the ADMITTED bytes (they are on disk, sig-named; `deriveBeeDeps` and
+`core-surface` already read them the same way) and writing findings the
+participant reads BEFORE choosing to follow or apply. Community trust is then
+a count of review records from keys you already follow over a root —
+signatures compose, so a review of a root is a review of every atom under it.
+Nothing here executes code to judge it: the AI reads bytes, and the human
+follows keys.
+
 ## A community is a host
 
 Trusted communities are not a construct layered on top of domain hosts — **a
@@ -207,6 +294,20 @@ DCP the *transport* dies. DCP the *ledger* is promoted:
    closed). A deploy nobody receives does not report success; a HAND
    invocation of the retry stays best-effort. The first real stamp happens on
    the next deploy with the hive open.*
+   *Status 2026-09-11 — EVERY BUILD STAMPS; EVERY PACKAGE NAMES ITS
+   PUBLISHER. `build:module` ends with `stamp-install-channel.ts` best-effort
+   (no `--require`): with the hive open a build is offered to followers, with
+   it closed the owed box prints and the build still succeeds. The follow
+   record is no longer seeded by hand — a successful stamp writes
+   `sharing/install-publisher.json` (pubkey + index host + channel), and the
+   scout bundles that file into its own verified bytes and follows it whenever
+   the participant has no `hc:install-follow` record (`'off'` follows nobody).
+   Adopt on a channel offer acquires exactly the announced signature from the
+   carried hosts plus the defaults (hypercomb-web app.ts), behind the same
+   restore point as a bundled update, and the indicator keeps one offer per
+   announcer so the bundled check cannot hide a channel's. `?upgrade=1` now
+   OFFERS the bundle instead of applying it — a link anyone can send no longer
+   changes what a hive runs.*
 7. **Retire `LayerInstaller` and the DCP transport role.**
    *Status 2026-08-30 — DONE for the web shell and the DCP app itself.
    THERE IS NO INSTALL CONCEPT LEFT IN THE SHELL. Deleted: the
@@ -251,6 +352,12 @@ DCP the *transport* dies. DCP the *ledger* is promoted:
    signatures-only projection. Full chip, with the measurement:
    [host-packages-pool.md](host-packages-pool.md).
    *Status 2026-09-01: SPECIFIED, not built.*
+8. **Activation authority.** *BUILT 2026-09-11 — see "Activation authority"
+   above. `activationAuthority` in runtime (`installPackage` asks it before
+   opening the store), `attestPackage` in essentials registered under
+   `ATTESTATION_IOC_KEY`, witnessed roots for pin/rollback, Visit beside every
+   host in the hosts window. Vetting-before-following is designed there and
+   not built.*
 
 ## Doctrine rules
 
@@ -260,6 +367,9 @@ DCP the *transport* dies. DCP the *ledger* is promoted:
 - **Never activate an incomplete tree.** Complete-or-absent, gated on the
   closure result.
 - **Never advance a root without a verified sentinel signature.**
+- **Never activate a package no followed publisher signed.** Self-origin and
+  the one-shot genesis seed are the only doors past the attester; a missing
+  attester refuses (`activation-authority.ts`).
 - **Never push updates.** The consumer requests; the icon informs; the human
   decides.
 - **Never re-grow a second transport.** One verb: `replicate(root)`.

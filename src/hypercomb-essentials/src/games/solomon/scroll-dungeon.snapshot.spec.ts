@@ -93,8 +93,9 @@ describe('scrolling dungeon save snapshots', () => {
     const view = new ScrollDungeonView({ index: 0, has: () => true, onComplete, onKnowledge })
     try {
       view.mount(host); view.interact()
-      expect(view.isDialogOpen).toBe(true)
+      expect(view.isSpeaking).toBe(true)
       view.restoreState(completed().exportState())
+      expect(view.isSpeaking).toBe(false)
       expect(view.isDialogOpen).toBe(false)
       expect(host.querySelectorAll('.sd-gate.sd-open')).toHaveLength(2)
       expect(view.model.moving).toBe(false)

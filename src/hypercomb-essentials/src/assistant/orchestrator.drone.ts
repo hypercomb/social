@@ -229,7 +229,7 @@ export class OrchestratorDrone extends Drone {
     // PAUSED (Jaime, 2026-09-11: "hide the workflow sidebar for now and
     // stop"). With the sidebar hidden nobody reads the flows, so the local
     // model must not spend GPU organizing them. Flip to true to resume.
-    const flowsEnabled = false
+    const flowsEnabled = true
     if (flowsEnabled) {
       this.#scheduleFlows(ROUTE_FLOW_SCHEDULE.soonMs)
       for (const effect of ROUTE_FLOW_WAKES) this.#flowOffs.push(EffectBus.on(effect, this.#wakeFlows))
