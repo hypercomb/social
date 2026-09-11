@@ -88,6 +88,13 @@ export interface BreakIssue extends BreakSample {
   readonly lastAt: number
   readonly origins: readonly string[]
   readonly routes: readonly string[]
+  /** When the page loads this broke in STARTED — one entry per distinct load,
+   *  newest `LOADS_KEPT` kept, ascending. A tab open since this morning carries
+   *  this morning's `timeOrigin` forever: it can raise `count` on every frame
+   *  and push `lastAt` to right now, and it can never add an entry newer than
+   *  the moment it loaded. That is the only clock in this record a stale tab
+   *  cannot forge, so it is the only one anything is allowed to reason from. */
+  readonly loads?: readonly number[]
   readonly title?: string
   readonly area?: string
   readonly interpretation?: string
@@ -111,6 +118,7 @@ const NOTE_CAP = 2000
 const NOTES_KEPT = 30
 const RECENT_SESSIONS = 50
 const PLACES_KEPT = 8
+const LOADS_KEPT = 20
 
 /** Drop control and invisible/bidi codepoints and cap the length. This text
  *  is read by a person in a list and by an agent that must not be steered by
@@ -266,6 +274,20 @@ export const fingerprintBreak = async (sample: BreakSample): Promise<string> =>
 const keep = (list: readonly string[], value: string, cap: number): string[] =>
   !value || list.includes(value) ? [...list] : [...list, value].slice(-cap)
 
+/**
+ * Remember when a page load STARTED. `Math.min(now, …)` clamps a client clock
+ * running ahead — a future `timeOrigin` would otherwise look like a fresh load
+ * forever. Deduping by the exact stamp is what makes this immune to the
+ * `recentSessions` eviction artefact: once 50 newer ids have pushed a
+ * long-lived tab's id out, its next break re-adds its OLD start time, which is
+ * already here or already trimmed. It can never add a NEW entry.
+ */
+const addLoad = (list: readonly number[] = [], at: number, now: number): number[] => {
+  const t = Math.min(now, Math.round(at))
+  if (!Number.isFinite(t) || t <= 0 || list.includes(t)) return [...list]
+  return [...list, t].sort((a, b) => a - b).slice(-LOADS_KEPT)
+}
+
 export interface FoldResult {
   /** Every issue the fold changed or made, to be written whole. */
   readonly issues: ReadonlyMap<string, BreakIssue>
@@ -300,6 +322,7 @@ export const foldBreaks = (
         count: r.count, sessions: 1, recentSessions: [r.session],
         firstAt: r.firstAt, lastAt: r.lastAt,
         origins: keep([], r.origin, PLACES_KEPT), routes: keep([], r.route, PLACES_KEPT),
+        loads: addLoad([], r.sessionAt, now),
         notes: [],
       })
       created.push(r.fingerprint)
@@ -322,6 +345,7 @@ export const foldBreaks = (
       lastAt: Math.max(prior.lastAt, r.lastAt),
       origins: keep(prior.origins, r.origin, PLACES_KEPT),
       routes: keep(prior.routes, r.route, PLACES_KEPT),
+      loads: addLoad(prior.loads, r.sessionAt, now),
       stack: r.stack && r.lastAt >= prior.lastAt ? r.stack : prior.stack,
       notes: recurred
         ? [...prior.notes, { at: now, text: `broke again after it was ${prior.status}, in a page loaded ${new Date(r.sessionAt).toISOString()}` }].slice(-NOTES_KEPT)

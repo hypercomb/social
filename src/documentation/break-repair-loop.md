@@ -143,7 +143,75 @@ What makes a wrong reading cheap:
   and so cannot see a real bug throwing from one long-lived tab. `status` reports
   the same condition as `stillBreaking`, covering wrong **fixes** too.
 
-Rejected, and why (all verified against this repo, not assumed): **mtime** —
+### 3.2 When a reading is out-argued — "broke since you looked"
+
+Every stamped reading is a claim, and **the only thing that may contradict it is
+a page load that STARTED after it.** That one sentence covers all four rules: the
+fold's reopen, `planUnretire`, §3.1's hold release, and the climb.
+
+An issue carries `loads` — when each distinct page load it broke in *started*,
+newest 20 kept. It is the only clock in the record a stale tab cannot forge: a
+tab open since this morning can raise `count` on every frame and push `lastAt` to
+right now, and it can never add an entry newer than the moment it loaded.
+
+`planClimb` asks one question of an `open` issue that has already been shown:
+since the newest thing said about it, has it broken in page loads that started on
+**three different days**? Three days rules out both of this machine's artefacts
+at once — one long-lived tab is ONE entry however hard it throws, and a burst of
+dev-server rebuild reloads is many loads on ONE day (13 in 107 minutes, on the
+live record). Only repetition spread across days counts.
+
+It then writes a `broke since:` note and the issue re-enters `planOffer`'s due
+list through a **`climbed` bucket of its own**. It must NOT clear `offeredAt`:
+that field is simultaneously "he has seen it" and the gap's anchor
+(`lastOffer = max(offeredAt)`), so clearing it would collapse the anchor and open
+a conversation inside the gap about the very issue being held back.
+
+**`CLIMB_MAX` is 3.** The loop may raise one issue three times, ever, and the
+third note says so. A loop that stops arguing is the only reason a person keeps
+reading it — and it removes the pressure to reach for `dismissed`, the one
+verdict with no falsifier.
+
+`count`, `sessions`, `routes` and `rank` are read by **nothing** here. They are
+inflated by gesture bursts, silently deflated when the queue fills, and
+`sessions` double-counts a long-lived tab once its id is evicted. They appear in
+the note's words, for a person to weigh, and decide nothing.
+
+A climbed issue is **type-blind**: the warnings-never-summon rule protects FIRST
+contact, and a climb means he was already shown it and it broke on three further
+days.
+
+### 3.3 When the gap is shortened
+
+Urgency **shortens** the gap to 30 minutes; it never removes it. `waitMin` is the
+only thing serializing `openConversation`, so a true bypass would race two
+Terminal windows and two repair sessions over one log.
+
+One class qualifies (`urgentReason`): **a settled claim the hive has falsified**
+— the only thing the free tick knows is wrong without reading any code, and
+bounded by how often anybody claims a fix, so it cannot become a firehose. Two
+guards against this machine's own failure mode, where a compile error leaves the
+watcher serving the last good bundle and a fix "does not hold" because the bytes
+never shipped: the evidence must be **two** distinct page loads, the newer at
+least 30 minutes after the claim. Under that it still reopens — breadth for the
+record — it just waits out the ordinary gap.
+
+`!offeredAt` is the veto: once the tick has put an issue in front of somebody,
+nothing it does afterwards earns a shortened gap. So **a climb can never be
+urgent** — repetition reaches the door and stops there. The window's title
+carries the reason, since that is the only part of an interruption a person reads
+before deciding to engage.
+
+Rejected here: **a second attention channel** of any kind — a WinRT toast, a tray
+balloon, a push from the tick. The tick has no Claude tools, a channel Focus
+Assist can silently swallow is worse than none for a once-a-week event, and a
+toast does not remove the window, it adds a step before it. **`type: 'resource'`
+as an urgent class** — zero resource issues exist in the whole log, because a
+page failing to load its own code arrives through `console.warn` as a *warning*
+(live proof: `20b6bfbb`, "Failed to fetch dynamically imported module"), so the
+lane would carry real risk and zero coverage.
+
+Rejected in §3.1, and why (all verified against this repo, not assumed): **mtime** —
 content-free, and a checkout, stash pop, worktree switch or formatter save bumps
 it; **`git status` dirtiness** — a dirty blamed file is a refactor *in flight*,
 precisely when nothing should be quietened; **symbol presence in source** — the

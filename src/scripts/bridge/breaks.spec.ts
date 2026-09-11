@@ -254,7 +254,9 @@ describe('the tick reading git', () => {
   })
 
   it('releases the hold for good once it breaks again, and once the hold has run out', () => {
-    const broke = local({ notes: [{ at: NOW - 1_000, text: `${breaks.MOVED} said once` }], lastAt: NOW })
+    // "Breaks again" means a page load that STARTED after the note — a tab that
+    // was already open is running the very bytes the note says are gone.
+    const broke = local({ notes: [{ at: NOW - 1_000, text: `${breaks.MOVED} said once` }], loads: [NOW - 500], lastAt: NOW })
     expect([...breaks.planMoved([broke], new Map(), NOW, HOLD, []).held]).toEqual([])
 
     const old = local({ notes: [{ at: NOW - HOLD - 1, text: `${breaks.MOVED} said once` }], lastAt: NOW - HOLD - 2 })
@@ -338,5 +340,127 @@ describe('a word the running hive has not learned', () => {
     expect(breaks.took({ issue: { ...i, status: 'retired' } }, { status: 'retired' }, i)).toBeTruthy()
     // A payload that says nothing about status is never second-guessed.
     expect(breaks.took({ issue: i }, { offered: true }, i)).toBeTruthy()
+  })
+})
+
+// ─── broke since you looked ─────────────────────────────────────────────
+//
+// A reading can be out-argued. The ONLY evidence allowed is a page load that
+// STARTED after the reading — the one clock a tab left open since this morning
+// cannot forge. These pin that neither of this machine's two artefacts (one
+// long-lived tab; a burst of dev-server rebuild reloads) can climb an issue.
+
+const DAY = 24 * 60 * 60_000
+const shown = (over: Record<string, unknown> = {}) => issue({ status: 'open', offeredAt: NOW - 10 * DAY, ...over })
+const onDays = (...days: number[]) => days.map(d => NOW - d * DAY)
+
+describe('an issue that out-argues the reading it was left under', () => {
+  it('climbs on fresh page loads across three different days', () => {
+    const i = shown({ loads: onDays(3, 2, 1) })
+    const plan = breaks.planClimb([i])
+    expect(plan).toHaveLength(1)
+    expect(plan[0].payload.onlyIfStatus).toBe('open')
+    expect(plan[0].payload.note.startsWith(breaks.SINCE)).toBe(true)
+    expect(plan[0].payload.note).toContain('not proof the reading was wrong')
+  })
+
+  it('never climbs for one long-lived tab, however hard it throws', () => {
+    // 500 occurrences, count and lastAt both enormous — and ONE page load,
+    // which started before the reading. Nothing here may be read but `loads`.
+    const i = shown({ loads: [NOW - 20 * DAY], count: 500, sessions: 1, lastAt: NOW })
+    expect(breaks.planClimb([i])).toEqual([])
+  })
+
+  it('never climbs for a burst of rebuild reloads on one day', () => {
+    // 13 page loads in 107 minutes is the dev server's rebuild rhythm, minted
+    // by other agents saving files. Many loads, ONE day: one confirmation.
+    const burst = Array.from({ length: 13 }, (_, k) => NOW - 2 * DAY + k * 8 * 60_000)
+    expect(breaks.planClimb([shown({ loads: burst })])).toEqual([])
+  })
+
+  it('counts only loads newer than the NEWEST thing said about it', () => {
+    const i = shown({ loads: onDays(3, 2, 1), notes: [{ at: NOW - 1.5 * DAY, text: 'I looked at this' }] })
+    expect(breaks.planClimb([i])).toEqual([])
+  })
+
+  it('stops arguing after three times, and says so', () => {
+    const notes = (n: number) => Array.from({ length: n }, (_, k) => ({ at: NOW - (9 - k) * DAY, text: `${breaks.SINCE} again` }))
+    const third = shown({ loads: onDays(3, 2, 1), notes: notes(2), offeredAt: NOW - 20 * DAY })
+    expect(breaks.planClimb([third])[0].payload.note).toContain('will not raise it again')
+    expect(breaks.planClimb([shown({ loads: onDays(3, 2, 1), notes: notes(3), offeredAt: NOW - 20 * DAY })])).toEqual([])
+  })
+
+  it('never climbs what was never shown, what is held, or what a person settled', () => {
+    const fresh = issue({ status: 'open', loads: onDays(3, 2, 1) })
+    const heldOne = shown({ loads: onDays(3, 2, 1) })
+    const done = issue({ status: 'dismissed', offeredAt: NOW - 10 * DAY, loads: onDays(3, 2, 1) })
+    expect(breaks.planClimb([fresh, done])).toEqual([])
+    expect(breaks.planClimb([heldOne], new Set([heldOne.fingerprint]))).toEqual([])
+  })
+
+  it('re-enters the door without clearing offeredAt, so the gap still holds', () => {
+    const i = shown({ notes: [{ at: NOW - DAY, text: `${breaks.SINCE} it did` }] })
+    expect(breaks.climbed(i)).toBe(true)
+    const plan = breaks.planOffer([i], NOW, GAP)
+    expect(plan.due).toEqual([i])
+    // offeredAt untouched → it is still the gap's anchor → no window opens now.
+    expect(plan.waitMin).toBe(0)
+    const recent = shown({ offeredAt: NOW - 60_000, notes: [{ at: NOW - 30_000, text: `${breaks.SINCE} it did` }] })
+    expect(breaks.planOffer([recent], NOW, GAP).waitMin).toBeGreaterThan(0)
+  })
+
+  it('lets a climbed WARNING summon, though a fresh one never does', () => {
+    const climbedWarning = shown({ type: 'warning', notes: [{ at: NOW - DAY, text: `${breaks.SINCE} it did` }] })
+    expect(breaks.planOffer([climbedWarning], NOW, GAP).due).toEqual([climbedWarning])
+    expect(breaks.planOffer([issue({ type: 'warning' })], NOW, GAP).due).toEqual([])
+  })
+})
+
+describe('a hold that only a fresh page load may lift', () => {
+  it('survives a stale tab throwing, and lifts on a load that started after the note', () => {
+    const note = { at: NOW - 2 * DAY, text: `${breaks.MOVED} it moved` }
+    const base = { files: ['a/b.ts'], origins: ['http://localhost:4250'], notes: [note] }
+    // A tab loaded BEFORE the note, still throwing right now.
+    const stale = issue({ ...base, loads: [NOW - 5 * DAY], lastAt: NOW })
+    expect([...breaks.planMoved([stale], new Map(), NOW, 14 * DAY, []).held]).toEqual([stale.fingerprint])
+    // A page load that started after it.
+    const fresh = issue({ ...base, loads: [NOW - 5 * DAY, NOW - DAY], lastAt: NOW })
+    expect([...breaks.planMoved([fresh], new Map(), NOW, 14 * DAY, []).held]).toEqual([])
+  })
+
+  it("does not mistake the tick's own notes for a person's", () => {
+    const machine = issue({
+      files: ['a/b.ts'], origins: ['http://localhost:4250'], loads: [NOW - 5 * DAY],
+      notes: [{ at: NOW - 2 * DAY, text: `${breaks.MOVED} it moved` }, { at: NOW - DAY, text: `${breaks.SINCE} it did` }],
+    })
+    expect([...breaks.planMoved([machine], new Map(), NOW, 14 * DAY, []).held]).toEqual([machine.fingerprint])
+    const person = issue({ ...machine, notes: [...machine.notes, { at: NOW, text: 'I checked, it is real' }] })
+    expect([...breaks.planMoved([person], new Map(), NOW, 14 * DAY, []).held]).toEqual([])
+  })
+})
+
+describe('a fix that did not hold may shorten the gap', () => {
+  const reopened = (over: Record<string, unknown> = {}) =>
+    issue({ status: 'open', fixedAt: NOW - 3 * DAY, loads: [NOW - 2 * DAY, NOW - DAY], ...over })
+
+  it('shortens it only for two loads, well clear of the claim, never shown', () => {
+    expect(breaks.urgentReason(reopened())).toBe('a fix that did not hold')
+    // One load is a stale tab reloading onto the last good bundle, not proof.
+    expect(breaks.urgentReason(reopened({ loads: [NOW - DAY] }))).toBe('')
+    // A reload minutes after the claim is the dev watcher, not the fix failing.
+    expect(breaks.urgentReason(reopened({ fixedAt: NOW - DAY - 60_000, loads: [NOW - DAY - 30_000, NOW - DAY - 10_000] }))).toBe('')
+    // Already in front of him: nothing the tick does afterwards earns a rush.
+    expect(breaks.urgentReason(reopened({ offeredAt: NOW - DAY }))).toBe('')
+    expect(breaks.urgentReason(reopened({ type: 'warning' }))).toBe('')
+  })
+
+  it('shortens the gap to 30 minutes — it never removes it', () => {
+    const i = reopened()
+    const other = issue({ status: 'open', offeredAt: NOW - 60 * 60_000 })
+    // An hour since the last conversation: the 4h gap would wait, 30 min does not.
+    expect(breaks.planOffer([i, other], NOW, GAP).waitMin).toBe(0)
+    // Ten minutes since: even urgent waits, so two windows can never race.
+    const justNow = issue({ status: 'open', offeredAt: NOW - 10 * 60_000 })
+    expect(breaks.planOffer([i, justNow], NOW, GAP).waitMin).toBeGreaterThan(0)
   })
 })
