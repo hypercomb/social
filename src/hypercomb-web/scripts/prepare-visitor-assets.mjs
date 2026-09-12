@@ -19,11 +19,26 @@ const sourceContent = join(source, 'content')
 const outputContent = join(output, 'content')
 const SIG_RE = /^[a-f0-9]{64}$/
 
-const sourceManifest = JSON.parse(await readFile(join(sourceContent, 'manifest.json'), 'utf8'))
-const currentSig = Object.keys(sourceManifest?.packages ?? {})[0]
-const current = sourceManifest?.packages?.[currentSig]
-if (!SIG_RE.test(currentSig ?? '') || !current) {
-  throw new Error('visitor build has no current signed renderer package')
+// WHICH PACKAGE: the one the content pool names as its head — the same walk
+// the engine itself does. NEVER the first key of content/manifest.json: builds
+// stopped writing that document on 2026-09-03, so it froze on that day's
+// package and every visitor rebuild re-shipped a Sep 3 engine, one that cannot
+// unwrap META children and paints every published tile "unavailable". The
+// record comes from the manifest the essentials build writes beside the
+// package; a head with no record fails the build instead of shipping a stale one.
+const pool = createHash('sha256').update('host:packages').digest('hex')
+const poolNames = (await readdir(join(sourceContent, pool)).catch(() => [])).filter(n => /^\d{8}$/.test(n)).sort()
+const headEntry = poolNames.length ? await readFile(join(sourceContent, pool, poolNames[poolNames.length - 1]), 'utf8') : ''
+const currentSig = headEntry.split('\n')[0].trim().toLowerCase()
+const recordFrom = async (path) => {
+  try { return JSON.parse(await readFile(path, 'utf8'))?.packages?.[currentSig] ?? null } catch { return null }
+}
+const current = SIG_RE.test(currentSig)
+  ? (await recordFrom(join(project, '..', 'hypercomb-essentials', 'dist', 'manifest.json')))
+    ?? (await recordFrom(join(sourceContent, 'manifest.json')))
+  : null
+if (!current) {
+  throw new Error(`visitor build: the content pool names ${currentSig.slice(0, 12) || 'no package'} as current and no manifest carries its record — rebuild essentials`)
 }
 
 await rm(output, { recursive: true, force: true })
@@ -68,7 +83,6 @@ await writeFile(
 // for eight days because this directory was the one thing left out. A
 // published door carries ONE package, so its pool is one marker naming it,
 // plus the two listings a static host answers a directory with.
-const pool = createHash('sha256').update('host:packages').digest('hex')
 const poolDir = join(outputContent, pool)
 await mkdir(poolDir, { recursive: true })
 const label = String(current.label ?? '').trim()

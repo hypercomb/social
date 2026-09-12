@@ -18,6 +18,14 @@ class PlayerControls {
     Object.assign(engine.input, { left: false, right: false, down: false, jump: false }, input)
     this.journey.update(SIM_DT)
     if (engine.lives !== 3 || engine.state !== 'playing') throw new Error(`Route lost a life at ${this.location()}`)
+    // The Hush must never open on this pinned route once the Stand is armed
+    // (§7.12/M17): every content placement (§6.11) sits clear of the walked
+    // path by margin, and this guard is what actually protects that margin —
+    // if a future placement or a geometry change ever brought a FIGHTER back
+    // into HUSH_REACH, this throws immediately instead of silently drifting
+    // the route's timing (a Hush changes Dana's own tempo — never — but slows
+    // everything else, which would desync every frame-exact assertion below).
+    if (engine.battle) throw new Error(`An unplanned Hush opened at ${this.location()}`)
   }
 
   wait(steps: number): void { for (let i = 0; i < steps; i++) this.tick() }
@@ -110,12 +118,18 @@ describe('an uninterrupted physical labyrinth playthrough', () => {
     const world = new RpgOverworld({
       has: requirement => journey.has(requirement),
       grantRelic: relic => journey.grantRelic(relic),
-      onEnter: () => {},
+      seat: () => true,
+      onEntrance: () => {},
     })
     expect(world.answer('mira', 1).ok).toBe(true)
     expect(journey.enterLabyrinth('sunseed')).toBe(true)
     const player = new PlayerControls(journey)
     player.wait(2)
+    // Arm the Stand once, early (§6.11 places its stele one tile from spawn,
+    // reachable without a single step) — so the tick() guard above actually
+    // protects the margin §1.15/§3.5.3 measured, rather than passing trivially
+    // forever against a permanently-empty kit.
+    expect(journey.engine!.interact()?.id).toBe('stand')
 
     for (const id of ['sunseed', 'tideglass', 'starbloom']) {
       if (id !== 'sunseed') { journey.leave(); expect(journey.enterLabyrinth(id)).toBe(true) }

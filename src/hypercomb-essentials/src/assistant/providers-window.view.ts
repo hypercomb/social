@@ -30,6 +30,7 @@
 import { EffectBus, I18N_IOC_KEY, llmKeyStore, type I18nProvider } from '@hypercomb/core'
 import { isLendingModels } from '../sharing/peer-models.drone.js'
 import { llmActivation } from './llm-activation.js'
+import { llmHiveAccess } from './llm-hive-access.js'
 import { CHAT_NEED, TIERS, USAGE_PLANS, availabilityOf, candidatesFor, chooseProvider, costOf, explainChoice, llmPolicy } from './model-policy.js'
 import { callModel } from './llm-dispatch.js'
 import { llmProviderRegistry } from './llm-provider-registry.js'
@@ -37,6 +38,7 @@ import './providers/builtin-providers.js'
 import { importProviderSpec, providerOrigin } from './providers/provider-discovery.js'
 import type { LlmProviderDescriptor } from './providers/llm-provider.types.js'
 import { LOCAL_HOST_STORAGE_KEY, localLlmHost } from './providers/local.provider.js'
+import { fetchOpenRouterCatalog, type OpenRouterCatalogEntry } from './providers/openrouter-catalog.js'
 import {
   checkLocalServer,
   localServerReport,
@@ -97,6 +99,22 @@ const tabOf = (provider: LlmProviderDescriptor): ProviderTab => {
   const cost = costOf(provider)
   return cost === 'bridge' ? 'subscription' : cost === 'keyed' ? 'api' : 'swarm'
 }
+
+/**
+ * SINGLE-VENDOR ROWS ONE KEY ALREADY REACHES. OpenRouter fronts OpenAI,
+ * xAI, Anthropic, Google, and Mistral models behind the one key a
+ * participant pastes into ITS row — a separate ChatGPT/Grok/Claude/Gemini/
+ * Mistral row, each wanting its own key, is the same choice offered five
+ * more times. Hidden from the console list ONLY: the descriptors stay
+ * registered in `builtin-providers.ts` so anything that names them directly
+ * (the legacy `llm-api.ts` shim's hardcoded `anthropic` calls, an explicit
+ * `providerId` in a call) keeps working exactly as before. A vendor already
+ * IN USE is never hidden — pulling its row out from under an active key
+ * would strand it with no way to see or clear that key again.
+ */
+const OPENROUTER_SUPERSEDES = new Set(['openai', 'xai', 'anthropic', 'google', 'mistral'])
+const foldedIntoOpenRouter = (provider: LlmProviderDescriptor): boolean =>
+  OPENROUTER_SUPERSEDES.has(provider.id) && !llmKeyStore.has(provider.id)
 
 /** The tab the console last showed — or Subscriptions, the plan already paid. */
 const rememberedTab = (): ProviderTab => {
@@ -412,7 +430,8 @@ export class ProvidersWindowView extends EventTarget {
 
   /** Providers on one tab, already through the search filter. */
   #providersOn(tab: ProviderTab): LlmProviderDescriptor[] {
-    return llmProviderRegistry().all().filter(p => tabOf(p) === tab && this.#matches(p))
+    return llmProviderRegistry().all()
+      .filter(p => tabOf(p) === tab && this.#matches(p) && !foldedIntoOpenRouter(p))
   }
 
   /** Remember the tab without redrawing — for callers about to redraw anyway. */
@@ -912,6 +931,7 @@ export class ProvidersWindowView extends EventTarget {
       models.appendChild(chip)
     }
     detail.append(this.#label(this.#t('providers.models', 'Models')), models)
+    if (provider.id === 'openrouter') detail.append(this.#openRouterCatalog(provider))
 
     // active switch + test — the two verbs.
     const actions = document.createElement('div')
@@ -926,6 +946,28 @@ export class ProvidersWindowView extends EventTarget {
     toggle.append(checkbox, document.createTextNode(this.#t('providers.enabled', 'Available to the orchestrator')))
 
     actions.appendChild(toggle)
+
+    // THE GATE (anatomy-context-need §4). Keyed providers only: the local
+    // model always may, a bridge reads through its own doors, a peer is
+    // someone else's machine and never may. Off until the participant says
+    // so, here, per provider — nothing else ever turns it on.
+    if (provider.transport === 'browser-http' && provider.requiresKey !== false) {
+      const gate = document.createElement('label')
+      gate.className = 'hc-provider-toggle'
+      const box = document.createElement('input')
+      box.type = 'checkbox'
+      box.checked = llmHiveAccess.mayRead(provider.id)
+      box.addEventListener('change', () => llmHiveAccess.setMayRead(provider.id, box.checked))
+      gate.append(box, document.createTextNode(this.#t('providers.hiveAccess', 'May read the hive')))
+      gate.title = this.#t(
+        'providers.hiveAccessHint',
+        'Off, this provider only ever sees the conversation. On, it can ask the hive bounded questions '
+        + 'about the tiles you are looking at, and that content leaves this machine. '
+        + 'Naming a model in the chat never turns this on.',
+      )
+      actions.appendChild(gate)
+    }
+
     if (provider.transport === 'agent-bridge') {
       const bridgeState = document.createElement('span')
       bridgeState.className = 'hc-provider-status'
@@ -1075,12 +1117,15 @@ export class ProvidersWindowView extends EventTarget {
     this.#render()
   }
 
-  /** One tiny real call — the only honest key test there is. */
-  async #test(provider: LlmProviderDescriptor): Promise<void> {
+  /** One tiny real call — the only honest key test there is. An explicit
+   *  `model` override (from the catalogue picker) reaches the wire exactly
+   *  as typed; automatic tier routing never sees it. */
+  async #test(provider: LlmProviderDescriptor, model?: string): Promise<void> {
     this.#note(provider.id, this.#t('providers.testing', 'Testing…'))
     try {
       const result = await callModel({
         providerId: provider.id,
+        ...(model ? { model } : {}),
         maxTokens: 16,
         messages: [{ role: 'user', content: 'Reply with the single word OK.' }],
       })
@@ -1088,6 +1133,104 @@ export class ProvidersWindowView extends EventTarget {
     } catch (err) {
       this.#note(provider.id, `✗ ${err instanceof Error ? err.message : String(err)}`)
     }
+  }
+
+  /**
+   * THE CATALOGUE PICKER — OpenRouter only. The built-in roster above is a
+   * fixed, economical ladder for automatic tier routing (never touched here).
+   * This is the explicit escape hatch: fetch OpenRouter's real model list and
+   * render it as an actual browsable list — name, id and price per row, same
+   * shape as openrouter.ai/models — rather than a bare `<datalist>` that
+   * shows nothing until you start typing. Clicking a row fires one real call
+   * with the key already saved. Nothing selected here is persisted as a
+   * pin — picking a model and testing it is the whole action, same footing
+   * as typing a model id into any other explicit call.
+   */
+  #openRouterCatalog(provider: LlmProviderDescriptor): HTMLElement {
+    const section = document.createElement('div')
+    section.className = 'hc-provider-catalog'
+
+    const search = document.createElement('input')
+    search.className = 'hc-provider-input'
+    search.placeholder = this.#t('providers.orCatalogPlaceholder', 'Search models — name, vendor, or id')
+
+    const results = document.createElement('div')
+    results.className = 'hc-provider-catalog-list'
+
+    let all: readonly OpenRouterCatalogEntry[] = []
+
+    const renderList = (): void => {
+      const query = search.value.trim().toLowerCase()
+      const matches = (query
+        ? all.filter(entry => entry.id.toLowerCase().includes(query) || entry.name.toLowerCase().includes(query))
+        : all
+      ).slice(0, 60)
+      results.replaceChildren(...matches.map(entry => {
+        const item = document.createElement('button')
+        item.type = 'button'
+        item.className = 'hc-provider-catalog-item'
+        const name = document.createElement('span')
+        name.className = 'hc-provider-catalog-name'
+        name.textContent = entry.name
+        const id = document.createElement('span')
+        id.className = 'hc-provider-catalog-id'
+        id.textContent = entry.id
+        const price = document.createElement('span')
+        price.className = 'hc-provider-catalog-price'
+        price.textContent = entry.promptPrice
+          ? `$${entry.promptPrice} in · $${entry.completionPrice ?? '?'} out /M`
+          : ''
+        item.append(name, id, price)
+        item.addEventListener('click', () => { void this.#test(provider, entry.id) })
+        return item
+      }))
+      if (all.length && !matches.length) {
+        const empty = document.createElement('div')
+        empty.className = 'hc-provider-label'
+        empty.textContent = this.#t('providers.orNoMatch', 'No model matches that search.')
+        results.appendChild(empty)
+      }
+    }
+
+    search.addEventListener('input', renderList)
+
+    const retry = document.createElement('button')
+    retry.type = 'button'
+    retry.className = 'hc-provider-btn is-quiet'
+    retry.textContent = this.#t('providers.orRetry', 'Retry')
+    retry.addEventListener('click', () => { void loadCatalog() })
+
+    const loadCatalog = async (): Promise<void> => {
+      results.replaceChildren()
+      const loading = document.createElement('div')
+      loading.className = 'hc-provider-label'
+      loading.textContent = this.#t('providers.orLoading', 'Fetching OpenRouter’s model list…')
+      results.appendChild(loading)
+      try {
+        all = await fetchOpenRouterCatalog()
+        renderList()
+      } catch (err) {
+        // NEVER GO SILENTLY EMPTY. An earlier version cleared this panel and
+        // reported the failure on a status line elsewhere in the row — which
+        // reads, from here, as nothing having happened at all. The reason
+        // now lives in the exact spot the list would otherwise be.
+        const failure = document.createElement('div')
+        failure.className = 'hc-provider-label'
+        failure.textContent = `✗ ${err instanceof Error ? err.message : String(err)}`
+        results.replaceChildren(failure, retry)
+      }
+    }
+
+    void loadCatalog()
+
+    const hint = document.createElement('div')
+    hint.className = 'hc-provider-label'
+    hint.textContent = this.#t(
+      'providers.orCatalogHint',
+      'Click a model to call it once with the key above — never used by automatic routing unless you pin it.',
+    )
+    section.append(this.#label(this.#t('providers.orCatalog', 'Full catalogue')), search, results, hint)
+    return section
   }
 
   // ── what each tab lets you DO ────────────────────────────────────────────
@@ -1333,6 +1476,18 @@ export class ProvidersWindowView extends EventTarget {
       .hc-provider-usage.is-limited { border-left-color: rgba(240, 180, 90, 0.8); }
       .hc-provider-usage.is-exhausted { border-left-color: rgba(240, 100, 100, 0.8); }
       .hc-provider-usage-line { font-size: 0.9231em; line-height: 1.45; }
+      .hc-provider-catalog { margin: 0.3846em 0 0.6923em; }
+      .hc-provider-catalog .hc-provider-input { width: 100%; margin: 0.3077em 0; }
+      .hc-provider-catalog-list { max-height: 220px; overflow-y: auto; border: 1px solid rgba(${STEEL}, 0.2); border-radius: var(--hc-radius-control, 2px); }
+      .hc-provider-catalog-item {
+        display: flex; align-items: baseline; gap: 0.6154em; width: 100%; text-align: left; cursor: pointer;
+        padding: 0.3077em 0.6154em; background: none; border: none; border-bottom: 1px solid rgba(${STEEL}, 0.12); color: inherit; font: inherit;
+      }
+      .hc-provider-catalog-item:last-child { border-bottom: none; }
+      .hc-provider-catalog-item:hover { background: rgba(${STEEL}, 0.08); }
+      .hc-provider-catalog-name { flex: 0 0 auto; font-weight: 600; }
+      .hc-provider-catalog-id { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.65; font-size: 0.9231em; }
+      .hc-provider-catalog-price { flex: 0 0 auto; opacity: 0.75; font-size: 0.85em; white-space: nowrap; }
       .hc-provider-usage-line.is-dim { opacity: 0.58; }
       .hc-provider-warn {
         font-size: 0.8462em; line-height: 1.4; margin: 0.3077em 0 0.1538em; padding: 0.4615em 0.6154em;

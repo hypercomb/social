@@ -35,7 +35,14 @@ export type AttestationRefusal =
 
 export type AttestationVerdict =
   | { ok: true; pubkey: string; witnessed: 'current' | 'held' }
-  | { ok: false; reason: AttestationRefusal; detail?: string }
+  | {
+      ok: false
+      reason: AttestationRefusal
+      detail?: string
+      /** On 'not-named': the root the followed publisher DOES name, in full,
+       *  so a caller can offer that build instead of a refusal. */
+      named?: string
+    }
 
 export interface PackageAttestation {
   /** May `packageSig` become the live package of this origin? `zones` are the

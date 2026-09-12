@@ -972,6 +972,9 @@ type LlmMessageLike =
 type LlmRouterLike = {
   ready?(call?: { providerId?: string; model?: string; preferModel?: string; need?: { tier?: string; streaming?: boolean } }): boolean
   providerIdForModel?(model: string): string | undefined
+  /** The provider the mediator would pick for this need right now — so the
+   *  shell can tell whether that pick has been granted hive access. */
+  designatedProviderId?(need?: { tier?: string; streaming?: boolean }): string | undefined
   providerIsMachineLocal?(providerId: string): boolean
   providerMachineEndpoint?(providerId: string): string | undefined
   /** Why nothing can answer, as a token this shell turns into words of its
@@ -987,6 +990,8 @@ type LlmRouterLike = {
     tools?: readonly HypercombFunctionTool[]
     maxTokens?: number
     signal?: AbortSignal
+    /** The system prompt is stable enough to be prefix-cached by the vendor. */
+    cacheSystem?: boolean
   }): AsyncGenerator<RoutedChunkLike>
 }
 
@@ -1050,6 +1055,10 @@ const TRANSCRIPT_TURNS = 12
 const DRAFT_HOLD_MS = 500
 const HOST_AI_IOC_KEY = '@diamondcoreprocessor.com/HostAi'
 const LLM_ROUTER_IOC_KEY = '@diamondcoreprocessor.com/LlmRouter'
+/** assistant/anatomy/anatomy.service.ts — the static anatomy, over IoC. */
+const ANATOMY_IOC_KEY = '@hypercomb.social/Anatomy'
+/** assistant/llm-hive-access.ts — which keyed providers may read the hive. */
+const LLM_HIVE_ACCESS_IOC_KEY = '@hypercomb.social/LlmHiveAccess'
 const HIVE_TREE_READER_IOC_KEY = '@diamondcoreprocessor.com/HypercombHiveTreeReader'
 const MAX_OBSERVATION_ROUNDS = 3
 const MAX_OBSERVATION_CONTEXT_CHARS = 24_000
@@ -5606,16 +5615,20 @@ export class ChatWindowComponent implements OnDestroy {
     const behaviourEntries = slash?.entries?.() ?? []
     const canAct = !!slash?.executePublicCanonical && callableBehaviours(behaviourEntries).length > 0
     const canObserve = !!treeReader?.readTree && !!treeReader?.validateSnapshots
-    // Native grammar is LOCAL AUTHORITY. Automatic conversations prefer the
-    // participant's own model; an explicitly named remote model remains a
-    // normal answer-only provider and never receives tree data or action tools.
+    // Native grammar is LOCAL AUTHORITY, or GRANTED authority. Automatic
+    // conversations prefer the participant's own model. A keyed provider
+    // receives tree data and action tools only if the participant turned
+    // "may read the hive" on for it in the providers console; naming a
+    // remote model in the chat never grants that (anatomy-context-need §4).
     const namedProvider = namedModel ? router?.providerIdForModel?.(namedModel) : undefined
     const localEndpoint = router?.providerMachineEndpoint?.('local')
     const localReadyAndTrusted = router?.providerIsMachineLocal?.('local') === true
       && !!localEndpoint
       && router.ready?.({ providerId: 'local', need }) === true
+    const hiveAccess = ioc()?.get(LLM_HIVE_ACCESS_IOC_KEY) as { granted?: () => readonly string[] } | undefined
     const nativeProviderId = hypercombActionProviderId(
       canAct || canObserve, namedModel, namedProvider, localReadyAndTrusted,
+      { granted: hiveAccess?.granted?.() ?? [], designated: router?.designatedProviderId?.(need) },
     )
     const actionProviderId = canAct ? nativeProviderId : undefined
     const observationProviderId = canObserve ? nativeProviderId : undefined
@@ -5660,14 +5673,21 @@ export class ChatWindowComponent implements OnDestroy {
       }
     }
     const grammarContext = readGrammarContext()
+    // THE ANATOMY GOES FIRST, TO EVERY PROVIDER. It is the stable protocol +
+    // doctrine (documentation/anatomy-context-need.md): identical bytes on
+    // every call, so it is the part a vendor's prefix cache pays back. It
+    // carries no tree data — what the participant is looking at only ever
+    // reaches a provider through the observation tool, behind the gate.
+    const anatomyText = (ioc()?.get(ANATOMY_IOC_KEY) as { text?: string } | undefined)?.text ?? ''
     const system = nativeProviderId
       ? [
+        anatomyText,
         askingSystem,
         observationProviderId ? hypercombObservationInstruction() : '',
         actionProviderId ? hypercombGrammarInstruction(behaviourEntries) : '',
         `The native grammar context is page ${grammarContext.page || '/'} with selected tiles: ${grammarContext.selected.join(', ') || '(none)'}. Bare /tree and the word "here" mean that page, which may differ from the conversation subject. You may make at most ${MAX_OBSERVATION_ROUNDS} observation rounds before answering or acting.`,
       ].filter(Boolean).join('\n\n')
-      : askingSystem
+      : [anatomyText, askingSystem].filter(Boolean).join('\n\n')
 
     const component = this
     const ask: HostAsk = async function* (_question, opts) {
@@ -5729,6 +5749,7 @@ export class ChatWindowComponent implements OnDestroy {
           model: continuationModel,
           preferModel: observationRounds === 0 ? preferModel : undefined,
           need,
+          cacheSystem: true,
           messages,
           system,
           tools: roundTools.length ? roundTools : undefined,

@@ -55,12 +55,21 @@ export type ItemKind =
   | 'key' | 'jewel' | 'treasure' | 'bell' | 'jar' | 'superjar' | 'scroll'
   | 'hourglass' | 'hourglassHalf' | 'fairy' | 'life' | 'seal' | 'zodiac' | 'wings'
   | 'pageTime' | 'pageSpace' | 'princess'
+  // The Hush's own interactables: a stele teaches a spell/stance, a chest hands
+  // over a weapon (both E-gated, never touch-triggered), a barrier is a sealed
+  // WALL cell that opens the instant its `needs` skill enters the kit.
+  | 'stele' | 'chest' | 'barrier'
 // `hidden` items sit inside a brick (break it to reveal). `secret` items sit in an
 // EMPTY cell, invisible, and materialise only when Dana waves his wand over them —
 // the signature Solomon's Key reveal. A secret is also `hidden` until found. A
 // `deep` secret is the classic make-then-break find: the first cast walls it in
 // (the brick forms as normal) and only BREAKING that brick uncovers the item.
-export interface ItemSpawn extends Cell { kind: ItemKind; hidden?: boolean; secret?: boolean; deep?: boolean; value?: number }
+// `gives`/`needs` are the Hush's own fields: a stele/chest `gives` a CombatSkillId
+// on E; a barrier `needs` one to open.
+export interface ItemSpawn extends Cell {
+  kind: ItemKind; hidden?: boolean; secret?: boolean; deep?: boolean; value?: number
+  gives?: CombatSkillId; needs?: CombatSkillId
+}
 
 // A demon mirror — a generator that emits a steady stream of one foe kind.
 export type MirrorKind = 'demonhead' | 'saramandor'
@@ -90,13 +99,16 @@ export type GameState = 'playing' | 'won' | 'dead' | 'gameover' | 'complete'
 
 interface Body { x: number; y: number; w: number; h: number; vx: number; vy: number }
 
-/** Per-kind state machines — each foe uses a small subset of these. */
+/** Per-kind state machines — each foe uses a small subset of these. `'stagger'` is
+ *  the Hush's own: a non-killing hit (or a Ward parry) freezes the foe's own AI
+ *  for a beat while gravity keeps applying — mirrors `'stun'` one-for-one. */
 export type EnemyState =
   | 'patrol' | 'chase' | 'scan' | 'windup' | 'punch' | 'attack' | 'recover' | 'flee'
-  | 'hover' | 'align' | 'swoop' | 'rise' | 'drift' | 'dart' | 'hunt' | 'stun'
+  | 'hover' | 'align' | 'swoop' | 'rise' | 'drift' | 'dart' | 'hunt' | 'stun' | 'stagger'
 
-/** How a foe died — the overlay picks SFX/bursts by cause; 'expire' scores nothing. */
-export type KillCause = 'crush' | 'drop' | 'fire' | 'expire'
+/** How a foe died — the overlay picks SFX/bursts by cause; 'expire' scores nothing.
+ *  'blade'/'spell' are the Hush's own weapon/spell kills. */
+export type KillCause = 'crush' | 'drop' | 'fire' | 'expire' | 'blade' | 'spell'
 
 export interface Enemy extends Body {
   kind: EnemyKind
@@ -115,9 +127,49 @@ export interface Enemy extends Body {
   lockY: number
   homeY: number           // neul's hover baseline
   bounces: number         // sparkball bounce tally toward its supercharge
+  guard: number           // the Hush's own: hits this foe survives before a kill
 }
 
-interface Item extends ItemSpawn { taken: boolean; reveal: number }
+// ── The Hush: the Solomon's Key duel state, its weapons and spells ─────────
+//
+// Nothing here touches a ChamberModel room — the Hush lives ONLY inside a
+// labyrinth's own puzzle-platformer rooms, alongside the pre-existing wand/
+// fireball/relic/door mechanics above. A grounded FIGHTER close enough (and,
+// for every kind but the flying `neul`, level enough) to Dana — once she has
+// read the Stele of the Stand — opens a Hush: time bends (the world and every
+// OTHER foe/mirror/fairy slow to a quarter speed; the marked foe and every
+// shot in the room hold at roughly two thirds; Dana herself never slows) while
+// she and the marked foe trade blows. `ghost`/`sparkball`/`demonhead`/`panel`
+// never qualify — they stay exactly today's dodge/wall/drop/burn hazards.
+
+/** The five foe kinds a Hush can ever mark. Every other kind is untouched. */
+export const FIGHTERS = new Set<EnemyKind>(['goblin', 'gargoil', 'dragon', 'saramandor', 'neul'])
+
+/** The stance plus the five things it lets Dana wield — renamed from an
+ *  earlier draft's `AttainmentId`; nothing else in this repo used that name. */
+export type CombatSkillId = 'stand' | 'ward' | 'sickle' | 'ember' | 'sling' | 'hold'
+export const COMBAT_SKILLS: readonly CombatSkillId[] = ['stand', 'ward', 'sickle', 'ember', 'sling', 'hold']
+/** Feeds `labyrinth-view.ts`'s in-room prompt and `attainments.ts`'s registry —
+ *  never a second, parallel name table. */
+export const SKILL_NAMES: Readonly<Record<CombatSkillId, string>> = {
+  stand: 'The Stand', ward: 'Ward of Solomon', sickle: 'Sickle of the Sun',
+  ember: 'Ember Sigil', sling: 'Tideglass Sling', hold: 'Hourglass Hold',
+}
+export type WeaponKind = 'sickle' | 'sling'
+export type SpellKind = 'ward' | 'ember' | 'hold'
+
+export type BattlePhase = 'closing' | 'exchange' | 'parting'
+export type BattleEnd = 'won' | 'parted' | 'hurt' | 'stalemate'
+/** The live Hush: `k` is the 0..1 time-lock curve (smoothstepped on the way in,
+ *  linear on the way out); `t` is seconds in the current phase; `age` is total
+ *  seconds since it opened; `partedFor` accumulates seconds beyond `HUSH_BREAK`
+ *  toward a 'parted' ending; `end` is set the instant an ending is decided, one
+ *  tick before `battle` itself goes null (the renderer's one-shot cue). */
+export interface Battle { foe: Enemy; phase: BattlePhase; t: number; age: number; k: number; partedFor: number; end: BattleEnd | null }
+
+// Exported (not merely module-private) so `nearInteractable()` — a public method
+// on the exported `Engine` class — can name its return type without TS4053.
+export interface Item extends ItemSpawn { taken: boolean; reveal: number }
 
 /** A released fairy — bobs where it was freed until Dana collects it. */
 interface Fairy { x: number; y: number; phase: number; taken: boolean }
@@ -144,7 +196,8 @@ export interface EngineSnapshot {
   terrain: [index: number, baseline: number, current: number][]
   runtime: Pick<Engine, 'player' | 'facing' | 'onGround' | 'ducking' | 'doorOpen' | 'ammo' | 'ammoCap'
     | 'fairyCount' | 'sealCount' | 'zodiacHeld' | 'wingsHeld' | 'pageTime' | 'pageSpace'
-    | 'life' | 'lives' | 'score' | 'state' | 'coyote' | 'enemies' | 'fairies' | 'fireballs' | 'shots'> & {
+    | 'life' | 'lives' | 'score' | 'state' | 'coyote' | 'enemies' | 'fairies' | 'fireballs' | 'shots'
+    | 'kit' | 'weapon' | 'spell'> & {
     items: { taken: boolean; hidden: boolean; reveal: number }[]
     mirrors: { cd: number; count: number; telegraph: number }[]
   }
@@ -160,12 +213,17 @@ const snapshotNumber = (value: unknown, min: number, max: number): value is numb
 const snapshotInteger = (value: unknown, min: number, max: number): value is number =>
   snapshotNumber(value, min, max) && Number.isInteger(value)
 
-/** Copy only known fields; a save never supplies prototypes or extra properties. */
-function snapshotShape<T extends object>(raw: unknown, template: T): T | null {
+/** Copy only known fields; a save never supplies prototypes or extra properties.
+ *  `optional` names fields an OLDER save may simply lack — absent there, the
+ *  template's own value (already correct for this specific instance, e.g. a
+ *  per-kind `guard` default) rides through unchanged instead of failing the
+ *  whole shape. */
+function snapshotShape<T extends object>(raw: unknown, template: T, optional?: ReadonlySet<string>): T | null {
   if (!snapshotObject(raw)) return null
   const result = { ...template } as Record<string, unknown>
   for (const [key, sample] of Object.entries(template)) {
     const value = raw[key]
+    if (value === undefined && optional?.has(key)) continue
     if (typeof sample === 'number' ? !snapshotNumber(value, -1e9, 1e9)
       : sample === null ? value !== null && !snapshotNumber(value, -1e9, 1e9)
         : typeof value !== typeof sample) return null
@@ -173,6 +231,10 @@ function snapshotShape<T extends object>(raw: unknown, template: T): T | null {
   }
   return result as T
 }
+
+/** `Enemy` fields an older `EngineSnapshot` (saved before the Hush existed) may
+ *  not carry at all — `guard` alone; every other field predates this merge. */
+const ENEMY_OPTIONAL = new Set<string>(['guard'])
 
 // Tuning — pixels, pixels/second, pixels/second².
 const GRAVITY = 900          // enemies + projectiles fall at this
@@ -301,6 +363,40 @@ const DHEAD_DART_MULT = 1.9
 const PANEL_FIRE_CD = 1.7             // idle + the 0.5 windup = the old 2.2 period
 const PANEL_WINDUP = 0.5
 
+// ── The Hush: tuning ─────────────────────────────────────────────────────
+// Hits a FIGHTER (plus the fragile ghost/demonhead) survives before it dies —
+// sparkball/panel are special-cased in #hitEnemy before guard is ever touched.
+const GUARD: Partial<Record<EnemyKind, number>> = { goblin: 2, gargoil: 2, dragon: 4, saramandor: 2, neul: 2, ghost: 1, demonhead: 1 }
+const HUSH_REACH = TILE * 2.25      // opens a Hush within this centre-to-centre distance
+const HUSH_BAND = TILE * 1.5        // …plus this much vertical alignment (grounded kinds only)
+const HUSH_BREAK = TILE * 3.25      // beyond this, distance starts counting toward 'parted'
+const HUSH_LINGER = 0.4             // …for this many seconds beyond HUSH_BREAK before parting
+const TEMPO_IN = 0.25               // closing: seconds for k to reach 1
+const TEMPO_OUT = 0.4               // parting: seconds for k to reach 0
+const WORLD_TEMPO = 0.25            // the world's speed at full lock (k = 1)
+const FOE_TEMPO = 0.65              // the marked foe's + every shot's speed at full lock
+const HUSH_REST = 1.2               // no new Hush can open for this long after 'hurt'/'stalemate'
+const HUSH_MAX = 12                 // an unresolved Hush times out to 'stalemate' after this long
+const DUEL_BONUS = 500              // score for winning a Hush
+const HURT_SAND = 2500              // sand a 'hurt' contact costs instead of a life
+const MERCY_T = 1.2                 // i-frames after a 'hurt' contact — no repeat sand loss
+const STAGGER_T = 0.9               // a non-killing hit's stagger
+const STAGGER_LONG = 1.4            // a perfectly-timed Ward parry's longer stagger
+const WARD_PERFECT = 0.75           // telegraph at/above this on parry = perfect
+const KNOCK_VX = 200                // 'hurt' knockback, horizontal
+const KNOCK_VY = 170                // 'hurt' knockback, vertical (upward pop)
+const STRIKE_REACH = TILE * 1.05    // the Sickle's melee range ahead of Dana
+const STRIKE_CD: Record<WeaponKind, number> = { sickle: 0.45, sling: 0.35 }
+const SLING_SPEED = 260             // the Sling disc's flight/return speed, px/s
+const SLING_RANGE = TILE * 3.5      // the Sling disc's outbound range before it turns back
+const SPELL_CD: Record<SpellKind, number> = { ward: 0.8, ember: 0.6, hold: 1.0 }
+const WARD_T = 0.3                  // the parry window a Ward cast opens
+const EMBER_COST = 600              // sand Ember Sigil costs to cast
+const HOLD_COST = 1500              // sand Hourglass Hold costs to cast
+const HOLD_STILL = 2.5              // Hold's world-clock freeze, seconds
+const HOLD_FOE = 1.4                // Hold's EXTRA freeze on the marked foe, seconds
+const INTERACT_REACH = TILE * 1.25  // E-reach for a stele/chest
+
 /** Step `v` toward `target` by at most `maxDelta` (never overshoots). */
 function moveToward(v: number, target: number, maxDelta: number): number {
   if (v < target) return Math.min(v + maxDelta, target)
@@ -394,6 +490,48 @@ export class Engine {
   resonanceT = 0
   resonanceHot = false
 
+  // The Hush, its weapons and spells. `kit`/`weapon`/`spell` are PERMANENT —
+  // they persist across spawn() (a death/respawn or a room re-entry) and are
+  // cleared only by load() (a brand-new game); LabyrinthJourney banks them
+  // between rooms. `hushEnabled` is a dev-only override (selftest.ts's escape
+  // hatch), never saved, never banked.
+  kit: CombatSkillId[] = []
+  weapon: WeaponKind | null = null
+  spell: SpellKind | null = null
+  hushEnabled = true
+
+  // Transient combat state — reset by spawn(), never part of EngineSnapshot.
+  battle: Battle | null = null
+  mercy = 0
+  hushRest = 0
+  strikeCd = 0
+  spellCd = 0
+  wardT = 0
+  stillT = 0
+  holdT = 0
+  sling: { x: number; y: number; vx: number; life: number; hit: Set<Enemy> } | null = null
+
+  // One-shot flashes the room view/renderer diff after update() — same pattern
+  // as killFlash/spawnFlash/etc. above; reset by spawn(), never saved.
+  hushFlash = 0
+  hushCell: Cell | null = null
+  duelFlash = 0
+  hushEnd: BattleEnd | null = null
+  strikeFlash = 0
+  staggerFlash = 0
+  staggerCell: Cell | null = null
+  parryFlash = 0
+  wardFlash = 0
+  emberFlash = 0
+  emberCell: Cell | null = null
+  batFlash = 0
+  clangFlash = 0
+  catchFlash = 0
+  gotFlash = 0
+  gotId: CombatSkillId | null = null
+  gotKind: 'read' | 'taken' | 'again' | null = null
+  hurtCount = 0
+
   // Held input — the overlay writes these from key events (jump: press AND
   // release matter — the release cuts a rising arc short).
   input = { left: false, right: false, down: false, jump: false }
@@ -411,12 +549,19 @@ export class Engine {
 
   #definitionKey(): string {
     const level = this.level
-    const value = JSON.stringify([
+    const parts: unknown[] = [
       level.cols, level.rows, level.tiles, [level.player.col, level.player.row], [level.door.col, level.door.row],
       level.enemies.map(e => [e.col, e.row, e.kind ?? 'goblin', e.dir ?? 1]),
       level.items.map(i => [i.col, i.row, i.kind, !!i.hidden, !!i.secret, !!i.deep, i.value ?? null]),
       level.mirrors.map(m => [m.col, m.row, m.kind ?? 'demonhead']), !!level.interconnected,
-    ])
+    ]
+    // Length-gated: a room with no stele/chest/barrier appends nothing, so its
+    // key — and therefore any old save's block/enemy state for it — is
+    // byte-identical to before this merge. Only a room actually gaining Hush
+    // content sees its key (and old-save state) change.
+    const combat = level.items.filter(i => i.gives || i.needs).map(i => [i.col, i.row, i.gives ?? null, i.needs ?? null])
+    if (combat.length) parts.push(combat)
+    const value = JSON.stringify(parts)
     let hash = 2166136261
     for (let i = 0; i < value.length; i++) hash = Math.imul(hash ^ value.charCodeAt(i), 16777619)
     return `${value.length}:${(hash >>> 0).toString(16)}`
@@ -436,6 +581,7 @@ export class Engine {
         fireballs: this.fireballs.map(f => ({ ...f })), shots: this.shots.map(s => ({ ...s })),
         items: this.items.map(i => ({ taken: i.taken, hidden: !!i.hidden, reveal: i.reveal })),
         mirrors: this.mirrors.map(m => ({ cd: m.cd, count: m.count, telegraph: m.telegraph })),
+        kit: [...this.kit], weapon: this.weapon, spell: this.spell,
       },
       collectedSeals: [...this.#collectedSeals], groundRow: this.#groundRow, fireCooldown: this.#fireCooldown,
     }
@@ -487,16 +633,17 @@ export class Engine {
     }
     const allowedKinds = new Set([...this.level.enemies.map(e => e.kind ?? 'goblin'), ...this.level.mirrors.map(m => m.kind ?? 'demonhead')])
     if (!Array.isArray(runtime['enemies']) || runtime['enemies'].length > this.level.enemies.length + this.level.mirrors.length * (MIRROR_CAP + 2)) return false
-    const enemyStates = ['patrol', 'chase', 'scan', 'windup', 'punch', 'attack', 'recover', 'flee', 'hover', 'align', 'swoop', 'rise', 'drift', 'dart', 'hunt', 'stun']
+    const enemyStates = ['patrol', 'chase', 'scan', 'windup', 'punch', 'attack', 'recover', 'flee', 'hover', 'align', 'swoop', 'rise', 'drift', 'dart', 'hunt', 'stun', 'stagger']
     const enemies: Enemy[] = []
     for (const value of runtime['enemies']) {
       if (!snapshotObject(value) || !allowedKinds.has(value['kind'] as EnemyKind)) return false
       const kind = value['kind'] as EnemyKind, template = this.#makeEnemy(kind, 0, 0, 1)
-      const enemy = snapshotShape(value, template)
+      const enemy = snapshotShape(value, template, ENEMY_OPTIONAL)
       if (!enemy || (enemy.dir !== -1 && enemy.dir !== 1) || !enemyStates.includes(enemy.state)
         || enemy.w !== template.w || enemy.h !== template.h
         || !snapshotNumber(enemy.x, -TILE * 2, this.width + TILE * 2) || !snapshotNumber(enemy.y, -TILE * 2, this.height + TILE * 3)
-        || !snapshotNumber(enemy.vx, -4096, 4096) || !snapshotNumber(enemy.vy, -4096, 4096)) return false
+        || !snapshotNumber(enemy.vx, -4096, 4096) || !snapshotNumber(enemy.vy, -4096, 4096)
+        || !snapshotNumber(enemy.guard, 0, 10)) return false
       enemies.push(enemy)
     }
     const readArray = <T extends object>(value: unknown, template: T, maximum: number): T[] | null => {
@@ -511,6 +658,31 @@ export class Engine {
     if (!fairies || !fireballs || !shots) return false
     if ([...fairies, ...fireballs, ...shots].some(body => !snapshotNumber(body.x, -TILE * 4, this.width + TILE * 4) || !snapshotNumber(body.y, -TILE * 4, this.height + TILE * 4))) return false
     if ([...fireballs, ...shots].some(projectile => !snapshotNumber(projectile.vx, -4096, 4096) || !snapshotNumber(projectile.life, 0, 60))) return false
+
+    // kit/weapon/spell: absent entirely on a v1/v2-era save (from before the
+    // Hush existed) — default to empty/null, exactly like every other new
+    // field this merge adds. Present but forged (an unknown id, a duplicate,
+    // or a weapon/spell not actually in the kit) refuses the whole restore.
+    const rawKit = runtime['kit']
+    let kit: CombatSkillId[]
+    if (rawKit === undefined) kit = []
+    else {
+      if (!Array.isArray(rawKit) || rawKit.length > COMBAT_SKILLS.length) return false
+      const seenSkills = new Set<string>()
+      for (const id of rawKit) {
+        if (typeof id !== 'string' || !COMBAT_SKILLS.includes(id as CombatSkillId) || seenSkills.has(id)) return false
+        seenSkills.add(id)
+      }
+      kit = [...rawKit] as CombatSkillId[]
+    }
+    const rawWeapon = runtime['weapon']
+    if (rawWeapon !== undefined && rawWeapon !== null
+      && (typeof rawWeapon !== 'string' || !(['sickle', 'sling'] as const).includes(rawWeapon as WeaponKind) || !kit.includes(rawWeapon as CombatSkillId))) return false
+    const weapon = (rawWeapon === undefined ? null : rawWeapon) as WeaponKind | null
+    const rawSpell = runtime['spell']
+    if (rawSpell !== undefined && rawSpell !== null
+      && (typeof rawSpell !== 'string' || !(['ward', 'ember', 'hold'] as const).includes(rawSpell as SpellKind) || !kit.includes(rawSpell as CombatSkillId))) return false
+    const spell = (rawSpell === undefined ? null : rawSpell) as SpellKind | null
 
     this.spawn() // Clear effects and input only after every saved field validated.
     this.grid = grid
@@ -527,6 +699,8 @@ export class Engine {
     this.#groundRow = raw['groundRow']; this.#fireCooldown = raw['fireCooldown']
     this.walking = false; this.jumpBuffer = 0; this.#jumpHeldPrev = this.#jumpActive = false
     this.playerAnim = this.#animState(false)
+    this.kit = kit; this.weapon = weapon; this.spell = spell
+    this.applyBarriers() // re-derive, never trust a barrier's own saved terrain diff
     return true
   }
 
@@ -560,6 +734,9 @@ export class Engine {
     this.#collectedSeals.clear()
     this.pageTime = false
     this.pageSpace = false
+    this.kit = []
+    this.weapon = null
+    this.spell = null
     this.spawn()
   }
 
@@ -607,6 +784,27 @@ export class Engine {
     this.resonanceT = 0
     this.resonanceHot = false
     this.smashCell = this.pickupCell = this.killCell = this.shotCell = this.spawnCell = this.secretCell = this.revealCell = this.resonanceCell = null
+
+    // The Hush: transient state clears every spawn (kit/weapon/spell do NOT —
+    // they persist across a death/respawn, cleared only by load()).
+    this.battle = null
+    this.mercy = 0
+    this.hushRest = 0
+    this.strikeCd = 0
+    this.spellCd = 0
+    this.wardT = 0
+    this.stillT = 0
+    this.holdT = 0
+    this.sling = null
+    this.hushFlash = this.duelFlash = this.strikeFlash = this.staggerFlash = 0
+    this.parryFlash = this.wardFlash = this.emberFlash = 0
+    this.batFlash = this.clangFlash = this.catchFlash = this.gotFlash = 0
+    this.hushCell = this.staggerCell = this.emberCell = null
+    this.hushEnd = null
+    this.gotId = null
+    this.gotKind = null
+    this.hurtCount = 0
+    this.applyBarriers() // re-derive against the (persistent) kit every fresh spawn
   }
 
   #makeEnemy(kind: EnemyKind, col: number, row: number, dir: 1 | -1): Enemy {
@@ -626,6 +824,7 @@ export class Engine {
       lockX: 0, lockY: 0,
       homeY: row * TILE + (TILE - d.h),
       bounces: 0,
+      guard: GUARD[kind] ?? 0,
     }
     if (kind === 'sparkball') { e.vx = dir * E.sparkball.speed; e.vy = E.sparkball.speed * 0.6 }
     return e
@@ -736,6 +935,280 @@ export class Engine {
     return true
   }
 
+  // ── the Hush: weapons, spells, steles/chests/barriers ─────
+
+  /** Swing the Sickle (melee, ahead of Dana) or throw the Sling (a homing disc,
+   *  one in flight at a time). Blocked with no weapon held, on cooldown, off
+   *  duty, or with a disc already out. */
+  strike(): WeaponKind | 'blocked' {
+    if (this.state !== 'playing' || !this.weapon || this.strikeCd > 0) return 'blocked'
+    if (this.weapon === 'sickle') {
+      this.strikeCd = STRIKE_CD.sickle
+      this.strikeFlash += 1
+      const p = this.player
+      const bx = this.facing > 0 ? p.x + p.w : p.x - STRIKE_REACH
+      for (const e of this.enemies) {
+        if (!e.alive) continue
+        if (bx < e.x + e.w && bx + STRIKE_REACH > e.x && p.y < e.y + e.h && p.y + p.h > e.y) this.#hitEnemy(e, 1, 'blade')
+      }
+      return 'sickle'
+    }
+    if (this.sling) return 'blocked'
+    const p = this.player
+    this.sling = { x: p.x + p.w / 2, y: p.y + p.h / 2, vx: this.facing * SLING_SPEED, life: SLING_RANGE, hit: new Set() }
+    this.strikeFlash += 1
+    return 'sling'
+  }
+
+  /** Cast the held spell. Ward opens a parry window; Ember burns two cells
+   *  ahead; Hold freezes the world (and, mid-Hush, the marked foe longer).
+   *  Ember/Hold refuse with 'no-sand' rather than draining life below zero. */
+  castSpell(): SpellKind | 'blocked' | 'no-sand' {
+    if (this.state !== 'playing' || !this.spell || this.spellCd > 0) return 'blocked'
+    if (this.spell === 'ember' && this.life <= EMBER_COST + 1) return 'no-sand'
+    if (this.spell === 'hold' && this.life <= HOLD_COST + 1) return 'no-sand'
+    this.spellCd = SPELL_CD[this.spell]
+    if (this.spell === 'ward') {
+      this.wardT = WARD_T
+    } else if (this.spell === 'ember') {
+      this.life -= EMBER_COST
+      const a = this.targetCell(), b = { col: a.col + this.facing, row: a.row }
+      this.emberFlash += 1; this.emberCell = a
+      for (const e of this.enemies) {
+        if (!e.alive) continue
+        if (this.rectOverlapsCell(e, a.col, a.row) || this.rectOverlapsCell(e, b.col, b.row)) this.#hitEnemy(e, 2, 'spell')
+      }
+    } else {
+      this.life -= HOLD_COST
+      this.stillT = HOLD_STILL
+      if (this.battle) this.holdT = HOLD_FOE
+    }
+    return this.spell
+  }
+
+  /** Cycle to the next OWNED weapon/spell (no-op with none held). */
+  nextWeapon(): WeaponKind | null {
+    const owned = (['sickle', 'sling'] as const).filter(w => this.kit.includes(w))
+    if (!owned.length) return null
+    this.weapon = owned[(owned.indexOf(this.weapon as WeaponKind) + 1) % owned.length]!
+    return this.weapon
+  }
+
+  nextSpell(): SpellKind | null {
+    const owned = (['ward', 'ember', 'hold'] as const).filter(s => this.kit.includes(s))
+    if (!owned.length) return null
+    this.spell = owned[(owned.indexOf(this.spell as SpellKind) + 1) % owned.length]!
+    return this.spell
+  }
+
+  /** Equip an already-learned skill (false if not held, or if `id` is 'stand',
+   *  which has no slot). */
+  equip(id: CombatSkillId): boolean {
+    if (!this.kit.includes(id)) return false
+    if (id === 'sickle' || id === 'sling') { this.weapon = id; return true }
+    if (id === 'ward' || id === 'ember' || id === 'hold') { this.spell = id; return true }
+    return false   // 'stand' has no slot
+  }
+
+  /** The nearest stele/chest within reach — steles/chests are permanent
+   *  landmarks (never `taken` out of range), so a second E always finds them
+   *  again for the "again" re-read. */
+  nearInteractable(): (Item & { kind: 'stele' | 'chest' }) | null {
+    const p = this.player
+    const pcx = p.x + p.w / 2, pcy = p.y + p.h / 2
+    let best: (Item & { kind: 'stele' | 'chest' }) | null = null
+    let bestD = Infinity
+    for (const it of this.items) {
+      if (it.kind !== 'stele' && it.kind !== 'chest') continue
+      const cx = it.col * TILE + TILE / 2, cy = it.row * TILE + TILE / 2
+      const d = Math.hypot(pcx - cx, pcy - cy)
+      if (d <= INTERACT_REACH && d < bestD) { bestD = d; best = it as Item & { kind: 'stele' | 'chest' } }
+    }
+    return best
+  }
+
+  /** E beside a stele/chest: 'read'/'taken' the first time (and actually grows
+   *  the kit), 'again' every time after (never re-taught, never re-given —
+   *  the caller just re-shows the inscription). Null off reach or off duty. */
+  interact(): { kind: 'read' | 'taken' | 'again'; id: CombatSkillId } | null {
+    if (this.state !== 'playing') return null
+    const it = this.nearInteractable()
+    if (!it || !it.gives) return null
+    const id = it.gives
+    const already = this.kit.includes(id)
+    if (!already) { it.taken = true; this.#learn(id) }
+    const kind: 'read' | 'taken' | 'again' = already ? 'again' : (it.kind === 'chest' ? 'taken' : 'read')
+    this.gotFlash += 1
+    this.gotId = id
+    this.gotKind = kind
+    return { kind, id }
+  }
+
+  /** Grow the permanent kit (idempotent) and re-derive every barrier — a
+   *  barrier may be sealing the very room the player is standing in. */
+  #learn(id: CombatSkillId): void {
+    if (this.kit.includes(id)) return
+    this.kit.push(id)
+    this.applyBarriers()
+  }
+
+  /** Re-derive every barrier's WALL/EMPTY state from the current, permanent
+   *  kit — never from a prop, a brazier, or a two-hop unlock chain. Called at
+   *  spawn(), at restoreState(), and every time #learn() grows the kit; public
+   *  (not `#`) so `LabyrinthJourney.#enter()` can re-run it on room re-entry,
+   *  since a freshly-constructed room's barriers would otherwise seal against
+   *  the engine's still-empty class-field `kit` (§1.7/M9's correction). */
+  applyBarriers(): void {
+    for (const it of this.items) {
+      if (it.kind !== 'barrier' || !it.needs) continue
+      this.setTile(it.col, it.row, this.kit.includes(it.needs) ? EMPTY : WALL)
+    }
+  }
+
+  /** The nearest qualifying FIGHTER a Hush can mark: alive, a FIGHTERS kind,
+   *  within reach (and, for every kind but the flying neul, level enough), and
+   *  NOT already touching Dana — an already-overlapping foe is an instant hit,
+   *  never a Hush (arm's length only). */
+  #foeNear(): Enemy | null {
+    const p = this.player
+    const pcx = p.x + p.w / 2, pcy = p.y + p.h / 2
+    let best: Enemy | null = null
+    let bestD = Infinity
+    for (const e of this.enemies) {
+      if (!e.alive || !FIGHTERS.has(e.kind)) continue
+      const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2
+      const d = Math.hypot(pcx - ecx, pcy - ecy)
+      if (d > HUSH_REACH) continue
+      if (e.kind !== 'neul' && Math.abs(pcy - ecy) > HUSH_BAND) continue
+      if (p.x < e.x + e.w && p.x + p.w > e.x && p.y < e.y + e.h && p.y + p.h > e.y) continue
+      if (d < bestD) { bestD = d; best = e }
+    }
+    return best
+  }
+
+  /** The Hush's own per-tick state machine: opens on proximity (once the Stand
+   *  is learned and any post-Hush rest has elapsed), then closes/exchanges/
+   *  parts on a smoothstepped time-lock curve. Returns the two speed
+   *  multipliers `update()` scales its own dt by — the caller (not this
+   *  method) decides who runs at which. Dana's own clock (raw dt) never comes
+   *  through here at all. */
+  #stepBattle(dt: number): { world: number; foe: number } {
+    if (!this.battle) {
+      const next = this.hushEnabled && this.kit.includes('stand') && this.hushRest <= 0 ? this.#foeNear() : null
+      if (next) {
+        this.battle = { foe: next, phase: 'closing', t: 0, age: 0, k: 0, partedFor: 0, end: null }
+        this.hushFlash += 1
+        this.hushCell = { col: Math.floor((next.x + next.w / 2) / TILE), row: Math.floor((next.y + next.h / 2) / TILE) }
+      }
+      return { world: 1, foe: 1 }
+    }
+    const b = this.battle
+    b.t += dt; b.age += dt
+    if (b.phase === 'closing' && (b.k = Math.min(1, b.k + dt / TEMPO_IN)) >= 1) { b.phase = 'exchange'; b.t = 0 }
+    else if (b.phase === 'parting' && (b.k = Math.max(0, b.k - dt / TEMPO_OUT)) <= 0) {
+      const rest = b.end === 'hurt' || b.end === 'stalemate'
+      this.battle = null
+      if (rest) this.hushRest = HUSH_REST
+      return { world: 1, foe: 1 }
+    }
+    if (b.phase === 'exchange') {
+      if (!b.foe.alive) {
+        this.score += DUEL_BONUS; this.duelFlash += 1; this.hushEnd = b.end = 'won'
+        const next = this.#foeNear()
+        if (next) { b.foe = next; b.partedFor = 0 } else { b.phase = 'parting'; b.t = 0 }
+      } else {
+        const d = Math.hypot((this.player.x + this.player.w / 2) - (b.foe.x + b.foe.w / 2), (this.player.y + this.player.h / 2) - (b.foe.y + b.foe.h / 2))
+        b.partedFor = d > HUSH_BREAK ? b.partedFor + dt : 0
+        if (b.partedFor >= HUSH_LINGER) { b.phase = 'parting'; b.t = 0; this.hushEnd = b.end = 'parted' }
+        else if (b.age >= HUSH_MAX) { b.phase = 'parting'; b.t = 0; this.hushEnd = b.end = 'stalemate'; this.hushRest = HUSH_REST }
+      }
+    }
+    const s = b.k * b.k * (3 - 2 * b.k)
+    return { world: 1 - s * (1 - WORLD_TEMPO), foe: 1 - s * (1 - FOE_TEMPO) }
+  }
+
+  /** Damage a foe by `power`, killing it once guard runs out. Puzzle kills
+   *  (crush/drop/fire) never come through here — they bypass guard entirely,
+   *  exactly as before this merge. sparkball is batted (no guard spent, no
+   *  kill); panel clangs and stays alive (invulnerable, as ever). */
+  #hitEnemy(e: Enemy, power: number, cause: 'blade' | 'spell'): void {
+    if (!e.alive) return
+    if (e.kind === 'panel') { this.clangFlash += 1; return }
+    if (e.kind === 'sparkball') { e.vx = -e.vx; e.vy = -Math.abs(e.vy); this.batFlash += 1; return }
+    e.guard -= power
+    if (e.guard <= 0) { this.#killEnemy(e, cause); return }
+    e.state = 'stagger'
+    e.stateT = STAGGER_T
+    this.staggerFlash += 1
+    this.staggerCell = { col: Math.floor((e.x + e.w / 2) / TILE), row: Math.floor((e.y + e.h / 2) / TILE) }
+  }
+
+  /** Ward's own reaction: an incoming hit staggers its source instead of
+   *  hurting Dana — no guard spent, since this is a parry, not an attack. A
+   *  well-timed one (caught at real telegraph) staggers longer and scores. */
+  #wardParry(e: Enemy): void {
+    const perfect = e.telegraph >= WARD_PERFECT
+    e.state = 'stagger'
+    e.stateT = perfect ? STAGGER_LONG : STAGGER_T
+    if (perfect) this.score += 200
+    this.parryFlash += 1
+    this.wardT = 0
+  }
+
+  /** A 'hurt' contact — the marked foe's touch, or any shot, while a Hush is
+   *  open: sand and a knockback instead of a life (mercy-gated so standing in
+   *  contact doesn't drain every frame). Life reaching zero from it is still
+   *  an ordinary lost life, exactly as outside any Hush. */
+  #hurt(byFoe: boolean): void {
+    if (this.mercy > 0) return
+    this.mercy = MERCY_T
+    this.hurtFlash = 0.5
+    this.hurtCount += 1
+    const p = this.player
+    p.vx = -this.facing * KNOCK_VX
+    p.vy = -KNOCK_VY
+    if (this.battle) {
+      const b = this.battle
+      if (byFoe) { b.foe.state = 'stagger'; b.foe.stateT = STAGGER_T }
+      b.end = 'hurt'
+      b.phase = 'parting'
+      b.t = 0
+    }
+    this.life -= HURT_SAND
+    if (this.life <= 0) { this.life = 0; this.#die() }
+  }
+
+  /** The Tideglass Sling's own flight: out to SLING_RANGE (or a wall), then
+   *  home to Dana's current position and catch within 10px — one disc at a
+   *  time, one hit per foe per flight, fetching any plain item it crosses. */
+  #stepSling(dt: number): void {
+    const s = this.sling
+    if (!s) return
+    if (s.life > 0) {
+      s.life -= Math.abs(s.vx) * dt
+      const nx = s.x + s.vx * dt
+      if (s.life <= 0 || this.solidAt(Math.floor(nx / TILE), Math.floor(s.y / TILE))) s.life = 0
+      else s.x = nx
+    } else {
+      const cx = this.player.x + this.player.w / 2, cy = this.player.y + this.player.h / 2
+      const dx = cx - s.x, dy = cy - s.y, d = Math.hypot(dx, dy)
+      if (d <= 10) { this.sling = null; this.catchFlash += 1; this.strikeCd = STRIKE_CD.sling; return }
+      const step = Math.min(d, SLING_SPEED * dt)
+      s.x += (dx / d) * step; s.y += (dy / d) * step
+    }
+    for (const e of this.enemies) {
+      if (!e.alive || s.hit.has(e)) continue
+      if (Math.abs(s.x - (e.x + e.w / 2)) < e.w / 2 + 4 && Math.abs(s.y - (e.y + e.h / 2)) < e.h / 2 + 4) {
+        s.hit.add(e); this.#hitEnemy(e, 1, 'blade')
+      }
+    }
+    const col = Math.floor(s.x / TILE), row = Math.floor(s.y / TILE)
+    for (const it of this.items) {
+      if (it.taken || it.hidden || it.kind === 'stele' || it.kind === 'chest' || it.kind === 'barrier') continue
+      if (it.col === col && it.row === row) this.#takeItem(it)
+    }
+  }
+
   // ── simulation ───────────────────────────────────────────
 
   update(dt: number): void {
@@ -743,17 +1216,38 @@ export class Engine {
     if (this.hurtFlash > 0) this.hurtFlash = Math.max(0, this.hurtFlash - dt)
     if (this.smashFlash > 0) this.smashFlash = Math.max(0, this.smashFlash - dt)
     if (this.resonanceT > 0) this.resonanceT = Math.max(0, this.resonanceT - dt)
+    if (this.mercy > 0) this.mercy = Math.max(0, this.mercy - dt)
+    if (this.hushRest > 0) this.hushRest = Math.max(0, this.hushRest - dt)
+    if (this.strikeCd > 0) this.strikeCd = Math.max(0, this.strikeCd - dt)
+    if (this.spellCd > 0) this.spellCd = Math.max(0, this.spellCd - dt)
+    if (this.wardT > 0) this.wardT = Math.max(0, this.wardT - dt)
     if (this.state !== 'playing') return
 
-    this.life -= LIFE_DRAIN * dt
+    // The Hush lives HERE, first thing every tick: #stepBattle returns two
+    // 0..1 SPEED FRACTIONS (not already dt-scaled — the fraction alone is 1 at
+    // full speed and would drain/move things as if a whole extra second had
+    // passed every tick if used bare), so this is the one place they get
+    // multiplied against the real dt before anything reads them. At no battle
+    // (or hushRest/no Stand) both fractions are exactly 1, so worldDt/foeDt
+    // collapse back to plain dt and every existing frame-exact assertion
+    // elsewhere in this file is untouched.
+    const { world, foe } = this.#stepBattle(dt)
+    if (this.stillT > 0) this.stillT = Math.max(0, this.stillT - dt)
+    if (this.holdT > 0) this.holdT = Math.max(0, this.holdT - dt)
+    const worldDt = (this.stillT > 0 ? 0 : world) * dt
+    const foeDt = (this.holdT > 0 ? 0 : foe) * dt
+    const shotsDt = (this.stillT > 0 ? 0 : foe) * dt
+
+    this.life -= LIFE_DRAIN * worldDt
     if (this.life <= 0) { this.life = 0; this.#die(); return }
 
-    this.#stepPlayer(dt)
-    this.#stepEnemies(dt)
-    this.#stepMirrors(dt)
+    this.#stepPlayer(dt)                    // Dana never slows — raw dt, no exceptions
+    this.#stepEnemies(worldDt, foeDt)
+    this.#stepMirrors(worldDt)
     this.#stepFireballs(dt)
-    this.#stepShots(dt)
-    this.#stepFairies(dt)
+    this.#stepSling(dt)
+    this.#stepShots(shotsDt)
+    this.#stepFairies(worldDt)
     this.#collectibles()
     this.#hazardContact()
   }
@@ -1009,22 +1503,29 @@ export class Engine {
 
   // ── enemies ──────────────────────────────────────────────
 
-  #stepEnemies(dt: number): void {
+  /** `dt` is the world clock every enemy uses by default; `foeDt` is the
+   *  Hush's own, slower-decaying clock for the ONE marked foe (a per-iteration
+   *  shadow — every other foe, mirror and fairy never sees `foeDt` at all). */
+  #stepEnemies(dt: number, foeDt: number): void {
     for (const e of this.enemies) {
       if (!e.alive) { if (e.squash > 0) e.squash = Math.max(0, e.squash - dt); continue }
+      const edt = this.battle && this.battle.foe === e ? foeDt : dt
       switch (e.kind) {
-        case 'ghost': this.#stepGhost(e, dt); break
-        case 'neul': this.#stepNeul(e, dt); break
-        case 'sparkball': this.#stepSparkball(e, dt); break
-        case 'demonhead': this.#stepDemonhead(e, dt); break
-        case 'panel': this.#stepPanel(e, dt); break
-        default: this.#stepWalker(e, dt); break   // goblin, gargoil, dragon, saramandor
+        case 'ghost': this.#stepGhost(e, edt); break
+        case 'neul': this.#stepNeul(e, edt); break
+        case 'sparkball': this.#stepSparkball(e, edt); break
+        case 'demonhead': this.#stepDemonhead(e, edt); break
+        case 'panel': this.#stepPanel(e, edt); break
+        default: this.#stepWalker(e, edt); break   // goblin, gargoil, dragon, saramandor
       }
     }
     this.enemies = this.enemies.filter(e => e.alive || e.squash > 0)
   }
 
-  /** Ground foes: shared gravity + drop-death prelude, then a per-kind machine. */
+  /** Ground foes: shared gravity + drop-death prelude, then a per-kind machine.
+   *  A staggered walker still falls (gravity never pauses) but its own AI does
+   *  — this is one of the Hush's two `'stagger'` call sites (the other is
+   *  `#stepNeul`). */
   #stepWalker(e: Enemy, dt: number): void {
     e.vy = Math.min(e.vy + GRAVITY * dt, MAX_FALL)
     const before = e.y
@@ -1040,6 +1541,12 @@ export class Engine {
     if (e.smashCd > 0) e.smashCd -= dt
     if (e.fireCd > 0) e.fireCd -= dt
     if (e.stateT > 0) e.stateT -= dt
+
+    if (e.state === 'stagger') {
+      e.telegraph = 0
+      if (e.stateT <= 0) e.state = 'patrol'
+      return
+    }
 
     switch (e.kind) {
       case 'gargoil': this.#stepGargoil(e, dt, grounded); break
@@ -1288,6 +1795,9 @@ export class Engine {
     const dist = Math.hypot(pcx - ecx, pcy - ecy)
     e.telegraph = 0
     switch (e.state) {
+      case 'stagger':
+        if (e.stateT <= 0) e.state = 'hover'
+        break
       case 'align': {
         if (dist > NEUL_WAKE_RANGE * 1.4) { e.state = 'hover'; e.homeY = e.y; break }
         const dy = pcy - ecy
@@ -1560,7 +2070,9 @@ export class Engine {
     const p = this.player
     for (const it of this.items) {
       if (it.reveal > 0) it.reveal = Math.max(0, it.reveal - 0.016)   // the reveal pop always plays out
-      if (it.taken || it.hidden) continue
+      // Steles/chests are E-gated only (interact()) — a reveal must never snap
+      // open on a mid-air touch. Barriers are never a pickup at all.
+      if (it.taken || it.hidden || it.kind === 'stele' || it.kind === 'chest' || it.kind === 'barrier') continue
       if (this.rectOverlapsCell(p, it.col, it.row)) this.#takeItem(it)
     }
     for (const f of this.fairies) {
@@ -1616,14 +2128,35 @@ export class Engine {
 
   // ── hazards + death ──────────────────────────────────────
 
+  /** Outside any Hush, nothing changes: contact and shots are exactly today's
+   *  instant #die(). A live Ward window intercepts EITHER (a parry, never a
+   *  hurt or a die); failing that, a Hush open against the touching foe (or
+   *  any shot, since shots carry no owner to tell them apart) softens contact
+   *  to #hurt(); a bystander foe — mid-Hush with someone else, or with no Hush
+   *  open at all — is still instant death. */
   #hazardContact(): void {
     const p = this.player
     for (const e of this.enemies) {
       if (!e.alive) continue
-      if (p.x < e.x + e.w && p.x + p.w > e.x && p.y < e.y + e.h && p.y + p.h > e.y) { this.#die(); return }
+      if (p.x < e.x + e.w && p.x + p.w > e.x && p.y < e.y + e.h && p.y + p.h > e.y) {
+        if (this.wardT > 0) { this.#wardParry(e); return }
+        if (this.battle && this.battle.foe === e) { this.#hurt(true); return }
+        this.#die(); return
+      }
     }
-    for (const s of this.shots) {
-      if (p.x < s.x + 4 && p.x + p.w > s.x - 4 && p.y < s.y + 4 && p.y + p.h > s.y - 4) { this.#die(); return }
+    for (let i = 0; i < this.shots.length; i++) {
+      const s = this.shots[i]!
+      if (p.x < s.x + 4 && p.x + p.w > s.x - 4 && p.y < s.y + 4 && p.y + p.h > s.y - 4) {
+        if (this.wardT > 0) {
+          this.shots.splice(i, 1)
+          this.fireballs.push({ x: s.x, y: s.y, vx: -s.vx, life: FIRE_LIFE, super: false })
+          this.wardFlash += 1
+          this.wardT = 0
+          return
+        }
+        if (this.battle) { this.#hurt(false); return }
+        this.#die(); return
+      }
     }
   }
 

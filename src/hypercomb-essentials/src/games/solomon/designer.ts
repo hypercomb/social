@@ -7,7 +7,7 @@
 // + door singletons, every item pickup (incl. seals / constellation panels /
 // wings), every foe kind, and both demon-mirror flavours.
 
-import { EMPTY, WALL, BRICK, type LevelDef, type Cell, type EnemyKind, type ItemKind, type MirrorKind } from './engine.js'
+import { EMPTY, WALL, BRICK, type LevelDef, type Cell, type CombatSkillId, type EnemyKind, type ItemKind, type MirrorKind } from './engine.js'
 import {
   cloneLevel, emptyLevel, sanitizeLevel, saveCreation, loadDesignerDraft, saveDesignerDraft, type Creation,
 } from './levels.js'
@@ -21,10 +21,20 @@ const ENEMY_TOOLS = {
   goblin: 'goblin', gargoil: 'gargoil', dragon: 'dragon', saramandor: 'saramandor', ghost: 'ghost',
   neul: 'neul', sparkball: 'sparkball', demonhead: 'demonhead', panel: 'panel',
 } as const
+/** The Hush's own six tools (§5.3) — a stele teaches the stance/a spell, a
+ *  chest hands over a weapon. Keyed by the exact `CombatSkillId` each one
+ *  grants, so `paint()` never needs a second lookup to know which id to
+ *  write; a seventh tool, 'barrier', is a sibling literal below (its `needs`
+ *  is picked separately — see `barrierNeeds` — since one tool paints a
+ *  barrier requiring any of the six, not six barrier tools). */
+export const STELE_CHEST_TOOLS: Readonly<Record<CombatSkillId, 'stele' | 'chest'>> = {
+  stand: 'stele', ward: 'stele', ember: 'stele', hold: 'stele', sickle: 'chest', sling: 'chest',
+}
 
 export type Tool =
   | 'erase' | 'wall' | 'brick' | 'player' | 'door' | 'mirror' | 'firemirror'
   | keyof typeof ITEM_TOOLS | keyof typeof ENEMY_TOOLS
+  | keyof typeof STELE_CHEST_TOOLS | 'barrier'
 
 export const TOOLS: { tool: Tool; label: string; glyph: string }[] = [
   { tool: 'wall', label: 'Grey wall (permanent)', glyph: '▦' },
@@ -56,6 +66,13 @@ export const TOOLS: { tool: Tool; label: string; glyph: string }[] = [
   { tool: 'panel', label: 'Panel monster (turret)', glyph: '🗿' },
   { tool: 'mirror', label: 'Demon mirror (spawns demonheads)', glyph: '🪞' },
   { tool: 'firemirror', label: 'Fire mirror (spawns saramandors)', glyph: '🌋' },
+  { tool: 'stand', label: 'Stele of the Stand', glyph: '🧘' },
+  { tool: 'ward', label: 'Ward of Solomon (stele)', glyph: '🛡' },
+  { tool: 'ember', label: 'Ember Sigil (stele)', glyph: '🔥' },
+  { tool: 'hold', label: 'Hourglass Hold (stele)', glyph: '⏳' },
+  { tool: 'sickle', label: 'Sickle of the Sun (chest)', glyph: '🌙' },
+  { tool: 'sling', label: 'Tideglass Sling (chest)', glyph: '🌊' },
+  { tool: 'barrier', label: "Sealed barrier — needs the designer's picked skill", glyph: '🚧' },
   { tool: 'erase', label: 'Erase', glyph: '⌫' },
 ]
 
@@ -64,6 +81,9 @@ export class Designer {
   tool: Tool = 'wall'
   /** The saved creation this canvas is filed as — null while it is new. */
   editingId: string | null = null
+  /** Which skill the NEXT painted barrier needs — one 'barrier' tool, not six
+   *  (§5.3); a picker beside the palette sets this, `paint()` reads it. */
+  barrierNeeds: CombatSkillId = 'stand'
 
   constructor(level?: LevelDef) {
     this.level = level ? cloneLevel(level) : emptyLevel('My Level')
@@ -84,6 +104,7 @@ export class Designer {
   persist(): void { saveDesignerDraft({ level: this.level, editingId: this.editingId, tool: this.tool }) }
 
   setTool(tool: Tool): void { this.tool = tool }
+  setBarrierNeeds(id: CombatSkillId): void { this.barrierNeeds = id }
   newLevel(name = 'My Level'): void { this.level = emptyLevel(name); this.editingId = null }
 
   /** Continue editing a saved creation — Save files over it. */
@@ -145,6 +166,22 @@ export class Designer {
       this.#clearCell(col, row)
       L.tiles[this.#idx(col, row)] = EMPTY
       if (!had) L.mirrors.push({ col, row, kind })
+      return true
+    }
+    if (tool === 'barrier') {
+      const had = L.items.some(i => this.#same(i, col, row) && i.kind === 'barrier' && i.needs === this.barrierNeeds)
+      this.#clearCell(col, row)
+      L.tiles[this.#idx(col, row)] = WALL   // sealed by default — a barrier never paints EMPTY
+      if (!had) L.items.push({ col, row, kind: 'barrier', needs: this.barrierNeeds })
+      return true
+    }
+    if (tool in STELE_CHEST_TOOLS) {
+      const skill = tool as CombatSkillId
+      const kind = STELE_CHEST_TOOLS[skill]
+      const had = L.items.some(i => this.#same(i, col, row) && i.kind === kind && i.gives === skill)
+      this.#clearCell(col, row)
+      L.tiles[this.#idx(col, row)] = EMPTY
+      if (!had) L.items.push({ col, row, kind, gives: skill })
       return true
     }
     if (tool in ENEMY_TOOLS) {

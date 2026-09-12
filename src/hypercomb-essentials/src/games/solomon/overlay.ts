@@ -7,7 +7,7 @@
 // down on close. The SolomonDrone owns its lifecycle (open/close).
 
 import { EffectBus } from '@hypercomb/core'
-import { Engine, TILE, SIM_DT, type LevelDef } from './engine.js'
+import { Engine, TILE, SIM_DT, COMBAT_SKILLS, SKILL_NAMES, type CombatSkillId, type LevelDef } from './engine.js'
 import { Renderer } from './renderer.js'
 import { Designer, TOOLS, type Tool } from './designer.js'
 import {
@@ -25,6 +25,10 @@ const GAME_KEYS = new Set([
   'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ', 'Spacebar', 'Enter',
   'a', 'A', 'd', 'D', 'w', 'W', 's', 'S',
   'j', 'J', 'k', 'K', 'z', 'Z', 'x', 'X', 'm', 'M', 'r', 'R',
+  // The Hush (§5.3/§1.6): C strikes, V casts, N/B cycle the held weapon/
+  // spell, E reads/takes a stele/chest — straight to the status line here,
+  // no modal (this harness has no items table or gain screen to reuse).
+  'c', 'C', 'v', 'V', 'n', 'N', 'b', 'B', 'e', 'E',
 ])
 
 type Mode = 'play' | 'design' | 'overworld'
@@ -285,6 +289,20 @@ export class SolomonOverlay {
       palette.appendChild(b)
     }
     designBar.appendChild(palette)
+    // One 'barrier' tool paints a seal requiring any of the six skills — this
+    // picks which (§5.3); the palette itself stays seven buttons, not twelve.
+    const barrierNeeds = el('select', { class: 'sol-barrier-needs', title: 'Barrier needs' }) as HTMLSelectElement
+    for (const skill of COMBAT_SKILLS) {
+      const option = el('option', { text: SKILL_NAMES[skill] }) as HTMLOptionElement
+      option.value = skill
+      barrierNeeds.appendChild(option)
+    }
+    barrierNeeds.value = this.#designer.barrierNeeds
+    barrierNeeds.addEventListener('change', () => {
+      this.#designer.setBarrierNeeds(barrierNeeds.value as CombatSkillId)
+      this.#designer.persist()
+    })
+    designBar.appendChild(barrierNeeds)
     const nameInput = el('input', { class: 'sol-name', placeholder: 'level name' }) as HTMLInputElement
     nameInput.value = this.#designer.level.name
     nameInput.addEventListener('input', () => { this.#designer.level.name = nameInput.value; this.#designer.persist() })
@@ -954,6 +972,21 @@ export class SolomonOverlay {
       case 'k': case 'K': case 'x': case 'X': if (!e.repeat) eng.fireball(); break // fireball (needs ammo)
       case 'm': case 'M': this.#enterOverworld(); break                            // back to the map
       case 'r': case 'R': this.#restartCurrent(); break                            // restart this cavern
+      case 'c': case 'C': if (!e.repeat) eng.strike(); break                       // the Hush's weapons
+      case 'v': case 'V':
+        if (!e.repeat) { const r = eng.castSpell(); if (r === 'no-sand') this.#flash('Not enough sand.') }
+        break
+      case 'n': case 'N': if (!e.repeat) eng.nextWeapon(); break
+      case 'b': case 'B': if (!e.repeat) eng.nextSpell(); break
+      case 'e': case 'E':
+        // No modal, first or second — a deliberate simplification of a
+        // second shell's own reveal dialog for this stateless playtest
+        // harness (§1.6): straight to the existing status line.
+        if (!e.repeat) {
+          const r = eng.interact()
+          if (r) this.#flash(r.kind === 'again' ? `${SKILL_NAMES[r.id]} — already known.` : `${SKILL_NAMES[r.id]} learned.`)
+        }
+        break
     }
   }
 
@@ -1429,6 +1462,8 @@ const CSS = `
 .sol-tool.on{background:rgba(120,220,255,.3);border-color:rgba(120,220,255,.8);box-shadow:0 0 8px rgba(120,220,255,.5)}
 .sol-name{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.2);
   color:#fff;border-radius:6px;padding:.25rem .5rem;width:9rem;font-size:.82rem}
+.sol-barrier-needs{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.2);
+  color:#fff;border-radius:6px;padding:.2rem .35rem;font-size:.78rem}
 .sol-creations{position:absolute;top:12px;right:12px;bottom:12px;width:min(27rem,calc(100% - 24px));
   overflow:auto;display:flex;flex-direction:column;gap:.45rem;padding:.6rem;border-radius:10px;
   background:rgba(10,7,22,.95);border:1px solid rgba(126,182,214,.3);box-shadow:0 12px 40px rgba(0,0,0,.55)}

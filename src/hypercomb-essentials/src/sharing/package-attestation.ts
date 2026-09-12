@@ -121,6 +121,9 @@ export const attestPackage = async (
       detail: named
         ? `the followed publisher currently names ${named.slice(0, 12)}…`
         : `the followed publisher names no ${follow.channel} root`,
+      // The build a caller can offer instead: a domain's newest is often a
+      // build that reached the host before its stamp did.
+      ...(named ? { named } : {}),
     }
   }
   return forged ? { ok: false, reason: 'forged' } : { ok: false, reason: 'unreachable' }

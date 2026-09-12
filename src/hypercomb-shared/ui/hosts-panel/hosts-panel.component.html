@@ -140,7 +140,7 @@
 
       <div class="hosts-section-head">
         <span>{{ 'hosts.directory' | t }}</span>
-        <span class="hosts-total">{{ zones().length }}</span>
+        <span class="hosts-total">{{ orderedZones().length }}</span>
       </div>
 
       <!-- Your own domain first: it is the one you come back to. -->
@@ -178,6 +178,9 @@
           @if (branchCount(zone); as naming) {
             <span class="hosts-count">{{ 'hosts.naming' | t: { count: naming } }}</span>
           }
+          <!-- Only what you carry can be dropped. Your own domain is listed
+               because you are on it, and has no artifact to delete. -->
+          @if (isCarried(zone)) {
           <button
             class="hosts-drop"
             type="button"
@@ -185,6 +188,7 @@
             [attr.aria-label]="'hosts.remove' | t: { host: zone }"
             (click)="remove(zone)"
           >✕</button>
+          }
         </div>
 
         <!-- WHAT THIS HOST OFFERS YOU. Asked only when looked at — a manifest
@@ -239,7 +243,10 @@
               <span>{{ 'hosts.builds' | t }}</span>
             </div>
             <p class="hosts-note hosts-lead">{{ buildsNoteKey(zone) | t: { host: zone } }}</p>
+            <!-- Your own domain's build needs no signature — it is the self door. -->
+            @if (!isHome(zone)) {
             <p class="hosts-note hosts-authority">{{ 'hosts.builds.authority' | t }}</p>
+            }
             @if (isProbing(zone)) {
               <p class="hosts-probing" aria-live="polite">{{ 'hosts.probing' | t }}</p>
             } @else if (offerOf(zone); as offer) {
@@ -262,13 +269,28 @@
                         } }}</span>
                       </span>
                     </span>
-                    @if (intakeOf(newest); as state) {
-                      @if (state.detail) {
-                        <span
-                          class="hosts-offer-state"
-                          [class.failed]="state.phase === 'failed'"
-                          aria-live="polite"
-                        >{{ state.detail }}</span>
+                    <!-- SIGNED BEFORE OFFERED. When the publisher you follow
+                         has not signed the newest build here, it is said
+                         before the press, and the button takes the build that
+                         publisher has signed (targetOf). -->
+                    @if (unsignedOf(zone); as refused) {
+                      <span class="hosts-offer-state failed" aria-live="polite">
+                        @if (targetOf(zone); as target) {
+                          {{ 'hosts.offer.unsigned-signed' | t: { sig: target.packageSig.slice(0, 8) } }}
+                        } @else {
+                          {{ 'hosts.offer.unsigned-none' | t: { host: zone } }}@if (refused.detail) { ({{ refused.detail }})}
+                        }
+                      </span>
+                    }
+                    @if (targetOf(zone); as target) {
+                      @if (intakeOf(target); as state) {
+                        @if (state.detail) {
+                          <span
+                            class="hosts-offer-state"
+                            [class.failed]="state.phase === 'failed'"
+                            aria-live="polite"
+                          >{{ state.detail }}</span>
+                        }
                       }
                     }
                   </div>
@@ -280,7 +302,7 @@
                     [class.current]="!updateAvailable(zone)"
                     [disabled]="updateDisabled(zone)"
                     (click)="update(zone)"
-                  >{{ updateKey(zone) | t }}</button>
+                  >{{ updateKey(zone) | t: updateParams(zone) }}</button>
                 </div>
 
                 <!-- EVERY BUILD — closed by default. A version is a signature

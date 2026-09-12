@@ -73,7 +73,7 @@ describe('the island above the rooms', () => {
   })
 
   it('scrolls continuously: the valley road walks straight out onto the island', () => {
-    const model = new RpgOverworld({ has: () => false, grantRelic: () => undefined, onEnter: () => undefined })
+    const model = new RpgOverworld({ has: () => false, grantRelic: () => undefined, seat: () => false, onEntrance: () => undefined, gain: () => undefined })
     Object.assign(model.player, valleyPoint(22.5, 7.5))
     for (let frame = 0; frame < 60; frame++) model.update(0.05, { right: true })
     expect(model.player.x).toBeGreaterThan(ISLAND_DEF.valley.col + VALLEY_COLS)

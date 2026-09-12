@@ -422,4 +422,26 @@ describe('switching builds — named, confirmed, and reversible', () => {
   it('never offers Visit on your own domain — that is a second tab on your own hive', () => {
     expect(HOSTS_HTML).toMatch(/@if \(!isHome\(zone\)\) \{\s*<!--[\s\S]{0,400}?class="hosts-visit"/)
   })
+
+  // A FRESHLY DEPLOYED DOMAIN COULD NOT UPDATE FROM ITSELF. hypercomb.io was
+  // listed only if you had added it, so its own new build — the one that needs
+  // no signature — was not on the list at all.
+  it('lists your own domain whether or not you carry it, and drops only what you carry', () => {
+    expect(HOSTS_TS).toMatch(/zones\.find\(z => this\.isHome\(z\)\) \?\? this\.home/)
+    expect(HOSTS_HTML).toMatch(/@if \(isCarried\(zone\)\) \{[\s\S]{0,60}?class="hosts-drop"/)
+    expect(HOSTS_HTML).toMatch(/@if \(!isHome\(zone\)\) \{\s*<p class="hosts-note hosts-authority">/)
+  })
+
+  // SIGNED BEFORE OFFERED. jwize.com's newest build reached the host before its
+  // stamp did; the one button pointed at it, the gate refused it, and Retry
+  // could never succeed.
+  it('asks the followed publisher before offering another domain’s newest, and takes the build it signed', () => {
+    expect(HOSTS_TS).toMatch(/ATTESTATION_IOC_KEY/)
+    expect(HOSTS_TS).toMatch(/await this\.#ask\(zone\)\s*await this\.#checkSigned\(zone\)/)
+    expect(HOSTS_TS).toMatch(/find\(p => p\.packageSig === refused\.named\)/)
+    expect(HOSTS_TS).toMatch(/update\(zone: string\): void \{\s*const target = this\.targetOf\(zone\)/)
+    expect(HOSTS_HTML).toMatch(/@if \(unsignedOf\(zone\); as refused\)/)
+    expect(EN['hosts.offer.unsigned-signed']).toMatch(/\{sig\}/)
+    expect(EN['hosts.offer.unsigned-none']).toMatch(/\{host\}/)
+  })
 })

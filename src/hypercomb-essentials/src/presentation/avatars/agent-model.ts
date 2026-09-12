@@ -74,6 +74,7 @@ const VENDOR_BODY: Record<string, string> = {
   meta:      '#5a5ad6', // indigo
   deepseek:  '#9a5ad6', // violet
   xai:       '#c451a8', // magenta
+  openrouter: '#d64a6a', // rose — a router in front of many vendors
 }
 // Assigned so no two families share a hue, NOT an attempt at anyone's brand
 // assets. The first version gave xAI a slate grey, which is closer to their
@@ -92,6 +93,7 @@ const VENDOR_PATTERNS: ReadonlyArray<{ vendor: string; test: RegExp }> = [
   { vendor: 'mistral',   test: /(^|[^a-z])(mistral|mixtral|codestral|magistral)([^a-z]|$)/ },
   { vendor: 'xai',       test: /(^|[^a-z])grok([^a-z]|$)/ },
   { vendor: 'deepseek',  test: /(^|[^a-z])deepseek([^a-z]|$)/ },
+  { vendor: 'openrouter', test: /^openrouter[:/-]/ },
   { vendor: 'local',     test: /^(ollama|local|lmstudio|llamacpp)[:/-]/ },
 ]
 

@@ -46,14 +46,29 @@ export { callableBehaviours }
 
 export const HYPERCOMB_GRAMMAR_TOOL_NAME = 'hypercomb_act'
 
-/** Only the participant's own local provider may receive execution tools. */
+/** Who may receive the hive's tools this turn. The participant's own local
+ *  model always may. A keyed provider may only if the participant GRANTED it
+ *  in the console (documentation/anatomy-context-need.md §4) — and naming a
+ *  model in the chat never grants: naming picks who answers, the grant
+ *  decides what they may see. With no model named, the tools follow the
+ *  provider the mediator would designate anyway, if that one is granted. */
 export const hypercombActionProviderId = (
   canAct: boolean,
   namedModel: string | undefined,
   namedProvider: string | undefined,
   localReadyAndTrusted: boolean,
-): 'local' | undefined =>
-  canAct && localReadyAndTrusted && (!namedModel || namedProvider === 'local') ? 'local' : undefined
+  hiveAccess: { readonly granted?: readonly string[]; readonly designated?: string } = {},
+): string | undefined => {
+  if (!canAct) return undefined
+  const granted = new Set((hiveAccess.granted ?? []).map(id => id.toLowerCase()))
+  if (namedModel) {
+    if (namedProvider === 'local') return localReadyAndTrusted ? 'local' : undefined
+    return namedProvider && granted.has(namedProvider.toLowerCase()) ? namedProvider : undefined
+  }
+  if (localReadyAndTrusted) return 'local'
+  const designated = hiveAccess.designated?.toLowerCase()
+  return designated && designated !== 'local' && granted.has(designated) ? designated : undefined
+}
 
 /** Relative grammar is safe only while its page/selection context is stable. */
 export const hypercombContextKey = (

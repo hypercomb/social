@@ -1,6 +1,6 @@
 // assistant/providers/provider-spec.ts
 //
-// A PROVIDER AS DATA. The seven built-in vendors are code because each was
+// A PROVIDER AS DATA. The eight built-in vendors are code because each was
 // written by hand; everything discovered from a domain must instead be a
 // sig-addressed JSON resource — sharable, dedupable, verifiable — and this
 // file is the compiler that turns one into a live `LlmProviderDescriptor`.

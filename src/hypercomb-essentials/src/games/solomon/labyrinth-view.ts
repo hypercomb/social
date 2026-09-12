@@ -1,4 +1,5 @@
-import { TILE, WALL, BRICK, CRACKED, type Cell, type LevelDef } from './engine.js'
+import { TILE, WALL, BRICK, CRACKED, SKILL_NAMES, type Cell, type Engine, type LevelDef } from './engine.js'
+import { bakeRoomRelic, bakeRoomTile, ROOM_GATE_SHIMMER_CSS, ROOM_RELIC_FALLBACK, ROOM_TILE_FALLBACK, ROOM_TILE_VARIANTS, type RoomTileKind } from './labyrinth-tiles.js'
 import { LABYRINTHS, LabyrinthJourney, ROOMS, describeRequirement, type RoomDef } from './labyrinth.js'
 import { PlaceVeil, VEIL_ZOOM, veilGridPicture, type VeilDirection, type VeilLeg, type VeilRgb } from './place-veil.js'
 import { Renderer } from './renderer.js'
@@ -73,6 +74,7 @@ export class LabyrinthRoomView {
   readonly #depths = document.createElement('div')
   readonly #meter = document.createElement('progress')
   readonly #stats = document.createElement('span')
+  readonly #prompt = document.createElement('div')
   readonly #observer: ResizeObserver
   readonly #ctx: CanvasRenderingContext2D | null
   readonly #renderer: Renderer | null
@@ -81,6 +83,8 @@ export class LabyrinthRoomView {
   #descriptions: string[] = []
   #scale = 1
   #frameKey = ''
+  #promptKey = ''
+  #tilePx = TILE
 
   constructor(host: HTMLElement, private readonly journey: LabyrinthJourney, onDoor: (id: string) => void) {
     this.element.className = 'sol-native-room'
@@ -101,6 +105,9 @@ export class LabyrinthRoomView {
     this.#canvas.className = 'sol-room-actors'
     this.#canvas.setAttribute('aria-hidden', 'true')
     this.#board.append(this.#canvas)
+    this.#prompt.className = 'sol-room-prompt'
+    this.#prompt.hidden = true
+    this.#board.append(this.#prompt)
     viewport.append(this.#board)
     const foot = document.createElement('div')
     foot.className = 'sol-room-status'
@@ -245,17 +252,33 @@ export class LabyrinthRoomView {
       const terrain = cell.code === WALL ? 'wall' : cell.code === BRICK ? 'brick' : cell.code === CRACKED ? 'cracked' : 'air'
       const locked = !!door && !this.journey.has(door.requires)
       const gateLocked = !!gate && !this.journey.has(gate.requires)
-      const description = `${terrain}|${door?.id ?? ''}|${locked}|${door ? this.journey.visited.has(door.targetRoomId) : ''}|${relic?.id ?? ''}|${gateLocked}`
+      const variant = (cell.col * 7 + cell.row * 13) % ROOM_TILE_VARIANTS
+      const description = `${terrain}|${door?.id ?? ''}|${locked}|${door ? this.journey.visited.has(door.targetRoomId) : ''}|${relic?.id ?? ''}|${gateLocked}|${this.#tilePx}|${variant}`
       if (description === this.#descriptions[i]) continue
       this.#descriptions[i] = description
       plate.dataset['terrain'] = terrain
       plate.classList.toggle('is-gate', gateLocked)
       plate.replaceChildren()
+      // A locked gate's barrier covers the tile regardless of the terrain
+      // beneath it; otherwise bake the cell's own terrain (air stays the
+      // flat CSS colour it already is — no bake needed).
+      const bakeKind: RoomTileKind | null = gateLocked ? 'gate' : terrain !== 'air' ? terrain : null
+      if (bakeKind) {
+        const bg = bakeRoomTile(bakeKind, variant, this.#tilePx)
+        plate.style.backgroundImage = bg ? `url(${bg})` : ''
+        plate.style.backgroundColor = bg ? '' : ROOM_TILE_FALLBACK[bakeKind]
+      } else {
+        plate.style.backgroundImage = ''
+        plate.style.backgroundColor = ''
+      }
       let label = terrain === 'air' ? 'Open tile' : terrain === 'wall' ? 'Stone tile' : 'Conjurable block'
       if (gateLocked && gate) {
         const mark = document.createElement('span')
         mark.className = 'sol-gate-mark'
-        mark.textContent = '◇'
+        const markPx = Math.max(8, Math.round(this.#tilePx * 0.6))
+        const markUrl = bakeRoomTile('gate', variant, markPx)
+        mark.style.backgroundImage = markUrl ? `url(${markUrl})` : ''
+        mark.style.backgroundColor = markUrl ? '' : ROOM_TILE_FALLBACK.gate
         plate.append(mark)
         label = `Shrine barrier: ${describeRequirement(gate.requires)}`
       }
@@ -280,7 +303,9 @@ export class LabyrinthRoomView {
       if (relic) {
         const gem = document.createElement('span')
         gem.className = `sol-relic ${relic.kind}`
-        gem.textContent = relic.kind === 'hexagon' ? '⬡' : relic.kind === 'star' ? '✡' : '▲'
+        const relicUrl = bakeRoomRelic(relic.kind, this.#tilePx)
+        gem.style.backgroundImage = relicUrl ? `url(${relicUrl})` : ''
+        gem.style.backgroundColor = relicUrl ? '' : ROOM_RELIC_FALLBACK[relic.kind]
         if (relic.kind === 'triangle') gem.style.transform = `rotate(${(relic.point ?? 0) * 60}deg)`
         plate.append(gem)
         label += `, ${relic.kind === 'triangle' ? `triangle ${Number(relic.point) + 1}` : relic.kind}`
@@ -302,13 +327,50 @@ export class LabyrinthRoomView {
       : door && door.id === this.journey.arrivalDoor ? 'Step away from this door, and back into it, to return.'
       : door ? (this.journey.has(door.requires) ? `A door to ${doorTarget?.level.name ?? 'another chamber'} — walk through.` : `This door needs ${describeRequirement(door.requires)}.`)
       : 'Arrows / WASD move · Space jump · Z conjure / dispel · X fire · walk into a door to pass through · M world'
-    const stats = `Lives ${engine.lives} · Score ${engine.score.toLocaleString()} · Fire ${engine.ammo.length}`
+    const gear = [engine.weapon, engine.spell].filter((skill): skill is NonNullable<typeof skill> => !!skill).map(skill => SKILL_NAMES[skill]).join(' / ')
+    const stats = `Lives ${engine.lives} · Score ${engine.score.toLocaleString()} · Fire ${engine.ammo.length}${gear ? ` · ${gear}` : ''}`
     const frameKey = `${text}|${stats}`
     if (frameKey !== this.#frameKey) {
       this.#frameKey = frameKey
       this.#stats.textContent = stats
       this.#hint.textContent = text
     }
+    this.#updatePrompt(engine)
+  }
+
+  /** The beside-prompt for a stele/chest/barrier — the same visual and
+   *  interaction contract as `.sol-chamber-cue`/`.sol-rpg-cue` across the
+   *  island and chambers (M9): a bubble beside the target's cell, no key hint
+   *  on a tag, "E to <verb>" on an act. Anchored from `engine.nearInteractable()`
+   *  or, off reach of one, from a sealed barrier under Dana's own wand target.
+   *  Never a second tile-bake glyph (M24) — this is the ONE place any of the
+   *  three gets words. */
+  #updatePrompt(engine: Engine): void {
+    const near = engine.nearInteractable()
+    let cell: Cell | null = null, text = '', action: 'act' | 'tag' = 'act'
+    if (near && near.gives) {
+      cell = near
+      text = `${SKILL_NAMES[near.gives]} · E to ${near.kind === 'chest' ? 'take' : 'read'}`
+      action = 'act'
+    } else {
+      const target = engine.targetCell()
+      const barrier = engine.items.find(it => it.kind === 'barrier' && it.col === target.col && it.row === target.row && engine.solidAt(it.col, it.row))
+      if (barrier?.needs) {
+        cell = barrier
+        text = `Sealed stone · it knows the ${SKILL_NAMES[barrier.needs]}`
+        action = 'tag'
+      }
+    }
+    const key = cell ? `${cell.col}/${cell.row}|${text}|${action}` : ''
+    if (key === this.#promptKey) return
+    this.#promptKey = key
+    this.#prompt.hidden = !cell
+    if (!cell) return
+    this.#prompt.textContent = text
+    this.#prompt.dataset['action'] = action
+    this.#prompt.style.left = `${(cell.col + 0.5) * this.#tilePx}px`
+    this.#prompt.style.top = `${cell.row * this.#tilePx}px`
+    this.#prompt.classList.toggle('is-below', cell.row * this.#tilePx < this.#board.getBoundingClientRect().height * 0.3)
   }
 
   #fit(): void {
@@ -318,6 +380,8 @@ export class LabyrinthRoomView {
     this.#scale = width / (loaded.level.cols * TILE) * Math.min(window.devicePixelRatio || 1, 2)
     this.#canvas.width = Math.max(1, Math.round(loaded.level.cols * TILE * this.#scale))
     this.#canvas.height = Math.max(1, Math.round(loaded.level.rows * TILE * this.#scale))
+    // Bucketed to the nearest 4px so a 1px resize jitter doesn't thrash the bake cache.
+    this.#tilePx = Math.round(Math.round(width / loaded.level.cols) / 4) * 4
   }
 
   dispose(): void {
@@ -337,12 +401,15 @@ export const LABYRINTH_ROOM_CSS = `
 .sol-room-viewport{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:14px 24px;container-type:size;overflow:hidden}
 .sol-room-board{position:relative;isolation:isolate;display:grid;grid-template-columns:repeat(var(--cols),1fr);grid-template-rows:repeat(var(--rows),1fr);width:min(100cqw,calc(100cqh * var(--room-ratio)));flex-shrink:0;background:#253658;border:1px solid #8194bd;border-radius:6px;box-shadow:5px 7px 0 #496a8a,12px 14px 0 #233b60,0 18px 35px #08162c88}
 .sol-game-tile{position:relative;min-width:0;min-height:0;background:#263b5c;border:1px solid #7998ca13;box-sizing:border-box}
-.sol-game-tile[data-terrain=wall]{background:linear-gradient(135deg,#e4e8f3,#abbad7);border:1px solid #879abc;box-shadow:inset 2px 2px #f2f7ff,inset -3px -3px #8096b8}
-.sol-game-tile[data-terrain=brick],.sol-game-tile[data-terrain=cracked]{background:linear-gradient(135deg,#ffda8e,#de9d51);border:1px solid #c28a51;box-shadow:inset 2px 2px #ffedc1,inset -3px -3px #b5824d}
-.sol-game-tile[data-terrain=cracked]:after{content:'ϟ';position:absolute;inset:0;display:grid;place-items:center;color:#935730;font-size:24px}
-.sol-game-tile.is-gate{background:repeating-linear-gradient(90deg,#739fd477 0 3px,#38638755 3px 8px);box-shadow:inset 0 0 10px #81dded}
-.sol-gate-mark{position:absolute;inset:0;display:grid;place-items:center;color:#b8edff;font-size:24px}
+.sol-game-tile[data-terrain=wall]{background-size:100% 100%;background-repeat:no-repeat;border:1px solid #1c123022}
+.sol-game-tile[data-terrain=brick],.sol-game-tile[data-terrain=cracked]{background-size:100% 100%;background-repeat:no-repeat;border:1px solid #1c123022}
+.sol-game-tile.is-gate{background-size:100% 100%;background-repeat:no-repeat;box-shadow:inset 0 0 10px #81dded}
+${ROOM_GATE_SHIMMER_CSS}
+.sol-gate-mark{position:absolute;inset:0;display:grid;place-items:center;background-size:60% 60%;background-repeat:no-repeat;background-position:center}
 .sol-room-actors{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
+.sol-room-prompt{position:absolute;left:0;top:0;transform:translate(-50%,calc(-100% - 6px));width:max-content;max-width:200px;padding:4px 9px;border-radius:8px;background:rgba(14,22,26,.86);border:1px solid rgba(255,240,200,.3);color:#fff4d6;font-size:11px;font-weight:600;text-align:center;box-shadow:0 4px 10px rgba(0,0,0,.35);pointer-events:none;z-index:4}
+.sol-room-prompt[data-action=tag]{font-weight:500;color:#d9e6df;border-style:dashed}
+.sol-room-prompt.is-below{transform:translate(-50%,14px)}
 .sol-passage{--door-h:180;position:absolute;inset:4% 11% 0!important;width:78%;height:96%;overflow:hidden;border:2px solid hsl(var(--door-h) 75% 66%)!important;border-radius:45% 45% 3px 3px!important;background:radial-gradient(ellipse at 50% 40%,hsl(var(--door-h) 45% 42%),hsl(var(--door-h) 55% 12%) 78%)!important;color:transparent!important;padding:0!important;box-shadow:inset 0 0 8px hsl(var(--door-h) 80% 70% / .55),0 0 7px hsl(var(--door-h) 80% 60% / .35);cursor:pointer;font-size:0!important}
 .sol-door-seed{position:absolute;inset:0;width:100%;height:100%;image-rendering:pixelated;opacity:.85;z-index:0;pointer-events:none}
 .sol-passage:hover .sol-door-seed,.sol-passage.known .sol-door-seed{opacity:1}
@@ -354,8 +421,7 @@ export const LABYRINTH_ROOM_CSS = `
 .sol-passage.known{box-shadow:inset 0 0 8px hsl(var(--door-h) 80% 70% / .55),0 0 14px hsl(var(--door-h) 85% 65% / .7)}
 .sol-passage.locked{filter:saturate(.35);opacity:.8;border-style:dashed!important}
 .sol-passage.locked:after{content:'';position:absolute;inset:0;z-index:2;background:repeating-linear-gradient(-45deg,transparent 0 7px,hsl(var(--door-h) 30% 80% / .28) 7px 9px)}
-.sol-relic{position:absolute;inset:0;display:grid;place-items:center;color:#ffe599;font-size:clamp(14px,2.7vw,34px);text-shadow:0 0 12px #f7d06a;pointer-events:none}
-.sol-relic.hexagon{color:#8af2db;text-shadow:0 0 12px #69e5bd}.sol-relic.star{color:#ffc9ff}
+.sol-relic{position:absolute;inset:0;display:grid;place-items:center;background-size:68% 68%;background-repeat:no-repeat;background-position:center;pointer-events:none}
 .sol-room-status{display:flex;justify-content:space-between;gap:20px;align-items:center;font-size:13px;color:#bfcee5;padding:0 10px}
 .sol-room-status progress{height:8px;width:30%;accent-color:#88dac1}
 .sol-room-hint{font-size:12px;text-align:center;color:#b5c7dd;padding-bottom:4px}

@@ -34,8 +34,11 @@
   Cache-Control: public, max-age=604800
 /vendor/*
   Cache-Control: public, max-age=604800
+# Core is location-addressed and packages are checked against its exports, so
+# a day-old copy after a core-changing deploy refuses the new package (a black
+# door). Revalidate every load; an unchanged core costs a 304.
 /core/*
-  Cache-Control: public, max-age=86400
+  Cache-Control: public, max-age=0, must-revalidate
 /media/*
   Cache-Control: public, max-age=604800
 

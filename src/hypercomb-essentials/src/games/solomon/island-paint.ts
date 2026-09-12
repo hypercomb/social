@@ -45,12 +45,22 @@ const MINIMAP: Readonly<Record<IslandTerrain, readonly [number, number, number]>
   rune: [226, 196, 120], laid: [212, 150, 92], spring: [120, 214, 232], stone: [186, 178, 164], seal: [132, 120, 190],
 }
 
+/** The one canonical colour for a terrain code, so the minimap and any other
+ *  coarse picture of the island (an entrance's push-preview seed, (2) A2.8)
+ *  always agree — both read this, neither keeps its own table. */
+export function terrainColor(terrain: IslandTerrain): readonly [number, number, number] { return MINIMAP[terrain] }
+
 interface Cell { col: number; row: number; terrain: IslandTerrain; x: number; y: number; grain: number }
 type Layer = 'ground' | 'above'
 
 export class IslandPainter {
   readonly #island: Island
   readonly #terrainAt: TerrainLookup
+  /** True where a seated area (2) A4.1 claims a cell — cells that get a
+   *  canopy tint baked over their ordinary terrain, never a terrain change
+   *  of their own. Optional: every existing caller (no third argument)
+   *  paints exactly as before. */
+  readonly #seatedArea: ((col: number, row: number) => boolean) | null
   /** Baked chunks by layer and position; null records a chunk with nothing on it. */
   readonly #chunks = new Map<string, HTMLCanvasElement | null>()
   readonly #textures = new Map<string, CanvasPattern | null>()
@@ -58,9 +68,10 @@ export class IslandPainter {
   #cloud: HTMLCanvasElement | null | undefined
   #grading: { key: string; canvas: HTMLCanvasElement | null } = { key: '', canvas: null }
 
-  constructor(island: Island, terrainAt: TerrainLookup) {
+  constructor(island: Island, terrainAt: TerrainLookup, seatedArea?: (col: number, row: number) => boolean) {
     this.#island = island
     this.#terrainAt = terrainAt
+    this.#seatedArea = seatedArea ?? null
   }
 
   paint(ground: CanvasRenderingContext2D, above: CanvasRenderingContext2D | null, camera: IslandCamera, time: number): void {
@@ -116,7 +127,7 @@ export class IslandPainter {
     if (!ctx) return null
     const image = ctx.createImageData(cols, rows)
     for (let i = 0; i < grid.length; i++) {
-      const [r, g, b] = MINIMAP[this.#terrainAt(i % cols, Math.floor(i / cols))]
+      const [r, g, b] = terrainColor(this.#terrainAt(i % cols, Math.floor(i / cols)))
       image.data[i * 4] = r
       image.data[i * 4 + 1] = g
       image.data[i * 4 + 2] = b
@@ -171,7 +182,14 @@ export class IslandPainter {
     ctx.fillRect(0, 0, CHUNK * tile, CHUNK * tile)
     fill(texture('shallow'), union(isLand, 1.45))
     fill(texture('shallow'), union(t => isWater(t) && t !== 'deep', 0.8))
-    fill('rgba(236, 250, 252, 0.5)', union(isLand, 0.9))
+    // Foam posterises into two bands — a wide soft outer edge, a brighter lip —
+    // plus one ink shoreline traced along the same path the bright lip uses.
+    const shoreline = union(isLand, 0.9)
+    fill('rgba(236, 250, 252, 0.3)', union(isLand, 0.94))
+    fill('rgba(236, 250, 252, 0.6)', shoreline)
+    ctx.strokeStyle = 'rgba(28, 18, 10, 0.35)'
+    ctx.lineWidth = inkWidth(0.8, tile)
+    ctx.stroke(shoreline)
     fill('#5a4630', union(isLand, 0.74, 0.16))
     fill(texture('sand'), union(isLand, 0.74))
     fill(texture('grass'), union(isGrassy, 0.66))
@@ -209,6 +227,14 @@ export class IslandPainter {
     fill(texture('cobble'), floors(0.04))
     fill(texture('rock'), union(isHighland, 0.66))
     fill(texture('snow'), union(t => t === 'snow', 0.6))
+
+    // A seated area's own ground, tinted where its trees close over it — under
+    // the cell's ordinary decor, never replacing it.
+    if (this.#seatedArea) {
+      for (const cell of cells) {
+        if (this.#seatedArea(cell.col, cell.row)) canopyTint(ctx, cell.x, cell.y, tile, cell.col, cell.row)
+      }
+    }
 
     for (const cell of cells) {
       if (cell.col < col0 - 1 || cell.col > col0 + CHUNK || cell.row < row0 - 1 || cell.row > row0 + CHUNK) continue
@@ -378,6 +404,25 @@ function tint(hex: string, amount: number): string {
   return `rgb(${channel(16)}, ${channel(8)}, ${channel(0)})`
 }
 
+// ── the Dana language: flat colour, one wedge, one ink line ──
+
+const INK = '#1c1230'
+
+/** Lighten (t>0) / darken (t<0) a #rrggbb toward white / black — the same
+ *  recipe as renderer.ts's `sol_shade`, duplicated here since that function
+ *  is module-private there. One tone-step tool for every flat cel wedge. */
+function shade(hex: string, t: number): string {
+  const n = parseInt(hex.slice(1), 16)
+  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255
+  if (t >= 0) { r += (255 - r) * t; g += (255 - g) * t; b += (255 - b) * t }
+  else { r *= 1 + t; g *= 1 + t; b *= 1 + t }
+  return `rgb(${r | 0},${g | 0},${b | 0})`
+}
+
+/** An ink stroke width in local pixels: the art spec's numbers are given at
+ *  `TILE = 32`, so a `px` reference scales by this cell's own size `s`. */
+function inkWidth(px: number, s: number): number { return Math.max(1, px / 32 * s) }
+
 function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
   const radius = Math.min(r, w / 2, h / 2)
   ctx.beginPath()
@@ -412,14 +457,21 @@ function hexagramPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: 
 function drawCliff(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, snow: boolean, grain: number): void {
   ellipse(ctx, 'rgba(18, 20, 14, 0.3)', x + 0.5 * s, y + 1.1 * s, 0.66 * s, 0.15 * s)
   const top = y + 0.44 * s, bottom = y + 1.06 * s
-  const face = ctx.createLinearGradient(0, top, 0, bottom)
-  face.addColorStop(0, snow ? '#a4aeb6' : '#968c79')
-  face.addColorStop(0.5, snow ? '#7c868f' : '#6e6556')
-  face.addColorStop(1, snow ? '#586069' : '#4a433a')
-  ctx.fillStyle = face
-  roundedRect(ctx, x - 0.12 * s, top, 1.24 * s, bottom - top, 0.14 * s)
-  ctx.fill()
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.2)'
+  const faceX = x - 0.12 * s, faceW = 1.24 * s, split = top + (bottom - top) * 0.6
+  ctx.save()
+  roundedRect(ctx, faceX, top, faceW, bottom - top, 0.14 * s)
+  ctx.clip()
+  ctx.fillStyle = snow ? '#a4aeb6' : '#968c79'
+  ctx.fillRect(faceX, top, faceW, split - top)
+  ctx.fillStyle = snow ? '#586069' : '#4a433a'
+  ctx.fillRect(faceX, split, faceW, bottom - split)
+  ctx.restore()
+  ctx.strokeStyle = INK
+  ctx.lineWidth = inkWidth(0.9, s)
+  ctx.beginPath()
+  ctx.moveTo(faceX, split)
+  ctx.lineTo(faceX + faceW, split)
+  ctx.stroke()
   for (let k = 0; k < 4; k++) {
     const sx = x + (0.02 + k * 0.27 + grain * 0.08) * s
     ctx.beginPath()
@@ -428,7 +480,11 @@ function drawCliff(ctx: CanvasRenderingContext2D, x: number, y: number, s: numbe
     ctx.lineTo(sx + 0.1 * s, bottom - 0.1 * s)
     ctx.lineTo(sx + 0.06 * s, top + 0.08 * s)
     ctx.closePath()
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.22)'
     ctx.fill()
+    ctx.strokeStyle = INK
+    ctx.lineWidth = inkWidth(0.7, s)
+    ctx.stroke()
   }
   ctx.fillStyle = 'rgba(255, 255, 255, 0.16)'
   ctx.fillRect(x - 0.1 * s, top, 1.2 * s, 0.06 * s)
@@ -437,6 +493,11 @@ function drawCliff(ctx: CanvasRenderingContext2D, x: number, y: number, s: numbe
     roundedRect(ctx, x - 0.1 * s, top - 0.05 * s, 1.2 * s, 0.1 * s, 0.05 * s)
     ctx.fill()
   }
+  ctx.strokeStyle = INK
+  ctx.lineWidth = inkWidth(1, s)
+  ctx.lineJoin = 'round'
+  roundedRect(ctx, faceX, top, faceW, bottom - top, 0.14 * s)
+  ctx.stroke()
 }
 
 function drawDecor(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, terrain: IslandTerrain, col: number, row: number, at: TerrainLookup): void {
@@ -463,7 +524,7 @@ function drawDecor(ctx: CanvasRenderingContext2D, x: number, y: number, s: numbe
 
 function tuft(ctx: CanvasRenderingContext2D, x: number, y: number, s: number): void {
   ctx.lineCap = 'round'
-  ctx.strokeStyle = 'rgba(38, 80, 32, 0.75)'
+  ctx.strokeStyle = 'rgba(38, 25, 15, 0.75)'
   ctx.lineWidth = Math.max(1, s * 0.03)
   ctx.beginPath()
   for (const lean of [-0.08, -0.02, 0.05, 0.1]) {
@@ -492,6 +553,9 @@ function flowers(ctx: CanvasRenderingContext2D, x: number, y: number, s: number,
       ctx.arc(fx + Math.cos(angle) * r, fy + Math.sin(angle) * r, r * 0.8, 0, TAU)
     }
     ctx.fill()
+    ctx.strokeStyle = INK
+    ctx.lineWidth = inkWidth(0.3, s)
+    ctx.stroke()
     ellipse(ctx, '#f7d44a', fx, fy, r * 0.6, r * 0.6)
   }
 }
@@ -507,11 +571,19 @@ function bush(ctx: CanvasRenderingContext2D, x: number, y: number, s: number): v
       ctx.arc(x + dx * s - (scale < 1 ? 0.03 * s : 0), y + (dy + lift) * s, r * s * scale, 0, TAU)
     }
     ctx.fill()
+    if (scale === 1.05) {
+      // One shared ink outline around the outer (widest) lobe pass — the
+      // union silhouette — not one per lobe tone.
+      ctx.strokeStyle = INK
+      ctx.lineWidth = inkWidth(0.5, s)
+      ctx.lineJoin = 'round'
+      ctx.stroke()
+    }
   }
 }
 
 function reeds(ctx: CanvasRenderingContext2D, x: number, y: number, s: number): void {
-  ctx.strokeStyle = '#557a36'
+  ctx.strokeStyle = 'rgba(38, 25, 15, 0.75)'
   ctx.lineWidth = Math.max(1, s * 0.025)
   ctx.lineCap = 'round'
   ctx.beginPath()
@@ -528,27 +600,44 @@ function stones(ctx: CanvasRenderingContext2D, x: number, y: number, s: number):
   for (const [dx, dy, r] of [[0, 0, 0.07], [0.1, 0.03, 0.045]] as const) {
     ellipse(ctx, 'rgba(20, 26, 16, 0.3)', x + (dx + 0.015) * s, y + (dy + 0.02) * s, r * s, r * 0.6 * s)
     ellipse(ctx, '#9c968a', x + dx * s, y + dy * s, r * s, r * 0.66 * s)
+    ctx.strokeStyle = INK
+    ctx.lineWidth = inkWidth(0.5, s)
+    ctx.stroke()
     ellipse(ctx, 'rgba(255, 255, 255, 0.35)', x + (dx - r * 0.3) * s, y + (dy - r * 0.25) * s, r * 0.4 * s, r * 0.22 * s)
   }
 }
 
 function boulder(ctx: CanvasRenderingContext2D, x: number, y: number, r: number): void {
   ellipse(ctx, 'rgba(18, 22, 12, 0.32)', x + r * 0.3, y + r * 0.7, r * 1.1, r * 0.4)
-  const body = ctx.createLinearGradient(x - r, y - r, x + r, y + r)
-  body.addColorStop(0, '#b3ab98')
-  body.addColorStop(1, '#6b6456')
-  ellipse(ctx, body, x, y, r, r * 0.8)
+  ellipse(ctx, '#b3ab98', x, y, r, r * 0.8)
+  ctx.save()
+  ctx.beginPath()
+  ctx.ellipse(x, y, r, r * 0.8, 0, 0, TAU)
+  ctx.clip()
+  ellipse(ctx, '#6b6456', x + r * 0.4, y + r * 0.45, r * 0.75, r * 0.6)
+  ctx.restore()
+  ctx.beginPath()
+  ctx.ellipse(x, y, r, r * 0.8, 0, 0, TAU)
+  ctx.strokeStyle = INK
+  ctx.lineWidth = Math.max(0.6, r * 0.06)
+  ctx.stroke()
   ellipse(ctx, 'rgba(255, 255, 255, 0.25)', x - r * 0.35, y - r * 0.35, r * 0.35, r * 0.2)
 }
 
 function drawTrunk(ctx: CanvasRenderingContext2D, x: number, y: number, s: number): void {
   ellipse(ctx, 'rgba(10, 24, 12, 0.34)', x + 0.64 * s, y + 0.9 * s, 0.44 * s, 0.13 * s)
-  const bark = ctx.createLinearGradient(x + 0.42 * s, 0, x + 0.58 * s, 0)
-  bark.addColorStop(0, '#7c5838')
-  bark.addColorStop(1, '#43301f')
-  ctx.fillStyle = bark
+  ctx.fillStyle = '#5a3c22'
   roundedRect(ctx, x + 0.43 * s, y + 0.44 * s, 0.14 * s, 0.46 * s, 0.04 * s)
   ctx.fill()
+  ctx.save()
+  ctx.clip()
+  ctx.fillStyle = shade('#5a3c22', -0.3)
+  ctx.fillRect(x + 0.5 * s, y + 0.44 * s, 0.07 * s, 0.46 * s)
+  ctx.restore()
+  ctx.strokeStyle = INK
+  ctx.lineWidth = inkWidth(0.7, s)
+  roundedRect(ctx, x + 0.43 * s, y + 0.44 * s, 0.14 * s, 0.46 * s, 0.04 * s)
+  ctx.stroke()
   ellipse(ctx, '#43301f', x + 0.5 * s, y + 0.9 * s, 0.13 * s, 0.045 * s)
 }
 
@@ -558,12 +647,10 @@ function drawCanopy(ctx: CanvasRenderingContext2D, x: number, y: number, s: numb
   const cx = x + (0.5 + (g - 0.5) * 0.1) * s
   const highland = [at(col, row - 1), at(col, row + 1), at(col - 1, row), at(col + 1, row)].some(t => t === 'hill' || isHighland(t))
   if (highland || g2 < 0.14) {
+    const nearSnow = [at(col, row - 1), at(col, row + 1), at(col - 1, row), at(col + 1, row)].some(t => t === 'snow')
     for (let tier = 0; tier < 3; tier++) {
       const top = y + (-0.44 + tier * 0.3) * s, bottom = top + 0.56 * s, half = (0.24 + tier * 0.1) * s
-      const body = ctx.createLinearGradient(cx - half, 0, cx + half, 0)
-      body.addColorStop(0, '#448f4f')
-      body.addColorStop(1, '#1d4f2e')
-      for (const [style, dy, spread] of [['#15381f', 0.05 * s, 0.03 * s], [body, 0, 0]] as const) {
+      for (const [style, dy, spread] of [['#15381f', 0.05 * s, 0.03 * s], ['#3a7a44', 0, 0]] as const) {
         ctx.fillStyle = style
         ctx.beginPath()
         ctx.moveTo(cx, top + dy)
@@ -571,13 +658,27 @@ function drawCanopy(ctx: CanvasRenderingContext2D, x: number, y: number, s: numb
         ctx.quadraticCurveTo(cx, bottom + dy + half * 0.28, cx - half - spread, bottom + dy)
         ctx.closePath()
         ctx.fill()
+        if (style === '#3a7a44') {
+          ctx.strokeStyle = INK
+          ctx.lineWidth = inkWidth(1.2, s)
+          ctx.lineJoin = 'round'
+          ctx.stroke()
+          if (nearSnow) {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)'
+            ctx.lineWidth = inkWidth(1, s)
+            ctx.beginPath()
+            ctx.moveTo(cx - half * 0.7, top + 0.08 * s)
+            ctx.lineTo(cx + half * 0.7, top + 0.08 * s)
+            ctx.stroke()
+          }
+        }
       }
     }
     return
   }
   const cy = y + (0.08 + (g2 - 0.5) * 0.08) * s
   const r = (0.47 + g * 0.05) * s
-  const lobes = (style: string | CanvasGradient, scale: number, lift: number): void => {
+  const lobes = (style: string, scale: number, lift: number): void => {
     ctx.fillStyle = style
     ctx.beginPath()
     for (let k = 0; k < 7; k++) {
@@ -590,20 +691,37 @@ function drawCanopy(ctx: CanvasRenderingContext2D, x: number, y: number, s: numb
     ctx.fill()
   }
   lobes('#163d21', 1, 0.07)
-  const body = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.45, r * 0.1, cx, cy, r * 1.2)
-  body.addColorStop(0, '#62ab5c')
-  body.addColorStop(0.55, '#2f7036')
-  body.addColorStop(1, '#1c4a27')
-  lobes(body, 0.94, 0)
-  ctx.fillStyle = 'rgba(160, 222, 126, 0.32)'
+  ctx.strokeStyle = INK
+  ctx.lineWidth = inkWidth(1.3, s)
+  ctx.lineJoin = 'round'
+  ctx.stroke()
+  lobes('#3f8a48', 0.94, 0)
+  ctx.fillStyle = '#7fc26e'
   ctx.beginPath()
-  for (let k = 0; k < 5; k++) {
-    const px = cx - r * 0.45 + islandHash(col, row + k, 53) * r * 0.7, py = cy - r * 0.55 + islandHash(col + k, row, 59) * r * 0.6
-    const radius = r * (0.1 + islandHash(k, col, 61) * 0.08)
+  for (let k = 0; k < 3; k++) {
+    const px = cx - r * 0.4 + islandHash(col, row + k, 53) * r * 0.7, py = cy - r * 0.5 + islandHash(col + k, row, 59) * r * 0.5
+    const radius = r * (0.16 + islandHash(k, col, 61) * 0.08)
     ctx.moveTo(px + radius, py)
     ctx.arc(px, py, radius, 0, TAU)
   }
   ctx.fill()
+}
+
+/** A seated area's ground, shadowed as though the valley's own trees closed
+ *  over it — a flat wash plus a few warm flecks of light breaking through,
+ *  baked once under the cell's ordinary decor. Never a terrain change: the
+ *  cell is still whatever `IslandTerrain` it always was. */
+function canopyTint(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number): void {
+  ctx.fillStyle = 'rgba(18, 36, 14, 0.32)'
+  ctx.fillRect(x, y, s, s)
+  ctx.fillStyle = 'rgba(255, 240, 190, 0.14)'
+  for (let k = 0; k < 3; k++) {
+    const dx = islandHash(col + k, row, 63) * s, dy = islandHash(col, row + k, 65) * s
+    const g = islandHash(col + k, row + k, 67)
+    ctx.beginPath()
+    ctx.ellipse(x + dx, y + dy, s * (0.08 + g * 0.05), s * 0.05, 0.4, 0, TAU)
+    ctx.fill()
+  }
 }
 
 /** A two-by-two house from the front: footing, timber-framed walls, lit
@@ -619,15 +737,33 @@ function drawHouse(ctx: CanvasRenderingContext2D, house: IslandHouse, x: number,
   ctx.lineTo(x + 0.25 * s, y + h - 0.1 * s)
   ctx.closePath()
   ctx.fill()
-  const plaster = ctx.createLinearGradient(0, y + 0.9 * s, 0, y + h - 0.28 * s)
-  plaster.addColorStop(0, '#f1e3c2')
-  plaster.addColorStop(1, '#d3bf96')
-  ctx.fillStyle = plaster
+  ctx.fillStyle = '#e6d4a8'
   ctx.fillRect(x + 0.14 * s, y + 0.92 * s, w - 0.28 * s, h - 1.2 * s)
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(x + 0.14 * s, y + 0.92 * s, w - 0.28 * s, h - 1.2 * s)
+  ctx.clip()
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.12)'
+  ctx.beginPath()
+  ctx.moveTo(x + w * 0.58, y + h - 0.26 * s)
+  ctx.lineTo(x + w - 0.1 * s, y + h - 0.26 * s)
+  ctx.lineTo(x + w - 0.1 * s, y + 0.92 * s + (h - 1.2 * s) * 0.3)
+  ctx.closePath()
+  ctx.fill()
+  ctx.restore()
+  ctx.strokeStyle = INK
+  ctx.lineWidth = inkWidth(0.6, s)
+  for (const post of [0.14, 0.62, 1.3, 1.78]) {
+    const px = x + post * s, py = y + 0.92 * s, pw = 0.08 * s, ph = h - 1.2 * s
+    ctx.fillStyle = '#6b4a2e'
+    ctx.fillRect(px, py, pw, ph)
+    ctx.strokeRect(px, py, pw, ph)
+  }
   ctx.fillStyle = '#6b4a2e'
-  for (const post of [0.14, 0.62, 1.3, 1.78]) ctx.fillRect(x + post * s, y + 0.92 * s, 0.08 * s, h - 1.2 * s)
   ctx.fillRect(x + 0.14 * s, y + 0.92 * s, w - 0.28 * s, 0.07 * s)
+  ctx.strokeRect(x + 0.14 * s, y + 0.92 * s, w - 0.28 * s, 0.07 * s)
   ctx.fillRect(x + 0.14 * s, y + 1.42 * s, w - 0.28 * s, 0.05 * s)
+  ctx.strokeRect(x + 0.14 * s, y + 1.42 * s, w - 0.28 * s, 0.05 * s)
   ctx.fillStyle = '#8c8579'
   roundedRect(ctx, x + 0.1 * s, y + h - 0.3 * s, w - 0.2 * s, 0.24 * s, 0.05 * s)
   ctx.fill()
@@ -636,14 +772,18 @@ function drawHouse(ctx: CanvasRenderingContext2D, house: IslandHouse, x: number,
   for (const left of [0.3, 1.42]) {
     ctx.fillStyle = '#4f3520'
     ctx.fillRect(x + left * s, y + 1.07 * s, 0.3 * s, 0.28 * s)
-    const glass = ctx.createLinearGradient(0, y + 1.1 * s, 0, y + 1.32 * s)
-    glass.addColorStop(0, '#ffe8a4')
-    glass.addColorStop(1, '#e09f4a')
-    ctx.fillStyle = glass
+    ctx.fillStyle = '#ffcf6a'
     ctx.fillRect(x + (left + 0.03) * s, y + 1.1 * s, 0.24 * s, 0.22 * s)
-    ctx.fillStyle = '#4f3520'
-    ctx.fillRect(x + (left + 0.14) * s, y + 1.1 * s, 0.02 * s, 0.22 * s)
-    ctx.fillRect(x + (left + 0.03) * s, y + 1.2 * s, 0.24 * s, 0.02 * s)
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)'
+    ctx.fillRect(x + (left + 0.04) * s, y + 1.11 * s, 0.06 * s, 0.05 * s)
+    ctx.strokeStyle = INK
+    ctx.lineWidth = inkWidth(0.6, s)
+    ctx.beginPath()
+    ctx.moveTo(x + (left + 0.15) * s, y + 1.1 * s)
+    ctx.lineTo(x + (left + 0.15) * s, y + 1.32 * s)
+    ctx.moveTo(x + (left + 0.03) * s, y + 1.2 * s)
+    ctx.lineTo(x + (left + 0.27) * s, y + 1.2 * s)
+    ctx.stroke()
   }
   const doorX = x + w / 2 - 0.17 * s, doorY = y + 1.2 * s
   const arch = (dx: number, dy: number, dw: number, dh: number): void => {
@@ -657,12 +797,12 @@ function drawHouse(ctx: CanvasRenderingContext2D, house: IslandHouse, x: number,
   ctx.fillStyle = '#3f2818'
   arch(doorX - 0.03 * s, doorY - 0.03 * s, 0.4 * s, 0.76 * s)
   ctx.fill()
-  const door = ctx.createLinearGradient(doorX, 0, doorX + 0.34 * s, 0)
-  door.addColorStop(0, '#8e5d36')
-  door.addColorStop(1, '#5c3a21')
-  ctx.fillStyle = door
+  ctx.fillStyle = '#7a4d2e'
   arch(doorX, doorY, 0.34 * s, 0.73 * s)
   ctx.fill()
+  ctx.strokeStyle = INK
+  ctx.lineWidth = inkWidth(0.8, s)
+  ctx.stroke()
   ctx.fillStyle = 'rgba(0, 0, 0, 0.25)'
   ctx.fillRect(doorX + 0.11 * s, doorY + 0.12 * s, Math.max(1, 0.02 * s), 0.58 * s)
   ctx.fillRect(doorX + 0.22 * s, doorY + 0.12 * s, Math.max(1, 0.02 * s), 0.58 * s)
@@ -674,18 +814,19 @@ function drawHouse(ctx: CanvasRenderingContext2D, house: IslandHouse, x: number,
   roof.lineTo(x + w - 0.26 * s, y - 0.66 * s)
   roof.lineTo(x + w - 0.02 * s, y + 1.02 * s)
   roof.closePath()
-  const tiles = ctx.createLinearGradient(x, 0, x + w, 0)
-  tiles.addColorStop(0, tint(colour, 0.14))
-  tiles.addColorStop(1, tint(colour, -0.24))
-  ctx.fillStyle = tiles
+  ctx.fillStyle = tint(colour, -0.05)
   ctx.fill(roof)
+  ctx.strokeStyle = INK
+  ctx.lineWidth = inkWidth(1.3, s)
+  ctx.lineJoin = 'round'
+  ctx.stroke(roof)
   ctx.save()
   ctx.clip(roof)
   for (let band = 0; band < 7; band++) {
     const by = y + (-0.62 + band * 0.25) * s
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.18)'
+    ctx.fillStyle = tint(colour, -0.3)
     ctx.fillRect(x, by + 0.2 * s, w, 0.05 * s)
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.09)'
+    ctx.fillStyle = tint(colour, 0.16)
     ctx.beginPath()
     for (let k = 0; k < 9; k++) {
       const tx = x + (k + (band % 2) * 0.5) * 0.26 * s
@@ -697,13 +838,23 @@ function drawHouse(ctx: CanvasRenderingContext2D, house: IslandHouse, x: number,
   ctx.restore()
   ctx.fillStyle = tint(colour, -0.4)
   ctx.fillRect(x + 0.24 * s, y - 0.7 * s, w - 0.48 * s, 0.1 * s)
+  ctx.strokeStyle = INK
+  ctx.lineWidth = inkWidth(0.8, s)
+  ctx.beginPath()
+  ctx.moveTo(x + 0.24 * s, y - 0.65 * s)
+  ctx.lineTo(x + w - 0.24 * s, y - 0.65 * s)
+  ctx.stroke()
   ctx.fillStyle = 'rgba(0, 0, 0, 0.3)'
   ctx.fillRect(x + 0.1 * s, y + 0.96 * s, w - 0.2 * s, 0.07 * s)
   if (house.roof % 2 === 0) {
     ctx.fillStyle = '#7d6552'
     ctx.fillRect(x + w - 0.66 * s, y - 0.94 * s, 0.22 * s, 0.46 * s)
+    ctx.strokeStyle = INK
+    ctx.lineWidth = inkWidth(0.6, s)
+    ctx.strokeRect(x + w - 0.66 * s, y - 0.94 * s, 0.22 * s, 0.46 * s)
     ctx.fillStyle = '#5b493b'
     ctx.fillRect(x + w - 0.7 * s, y - 0.98 * s, 0.3 * s, 0.07 * s)
+    ctx.strokeRect(x + w - 0.7 * s, y - 0.98 * s, 0.3 * s, 0.07 * s)
   }
 }
 
@@ -712,18 +863,25 @@ function drawBridge(ctx: CanvasRenderingContext2D, x: number, y: number, s: numb
     if (horizontal) ctx.fillRect(x + a * s, y + b * s, length * s, breadth * s)
     else ctx.fillRect(x + b * s, y + a * s, breadth * s, length * s)
   }
+  const outline = (a: number, b: number, length: number, breadth: number): void => {
+    if (horizontal) ctx.strokeRect(x + a * s, y + b * s, length * s, breadth * s)
+    else ctx.strokeRect(x + b * s, y + a * s, breadth * s, length * s)
+  }
   ctx.fillStyle = 'rgba(8, 30, 40, 0.35)'
   span(0, 0.34, 1, 0.56)
-  const deck = horizontal ? ctx.createLinearGradient(0, y + 0.2 * s, 0, y + 0.8 * s) : ctx.createLinearGradient(x + 0.2 * s, 0, x + 0.8 * s, 0)
-  deck.addColorStop(0, '#bd8e5a')
-  deck.addColorStop(1, '#7a5431')
-  ctx.fillStyle = deck
+  ctx.fillStyle = '#9a6f42'
   span(0, 0.22, 1, 0.56)
+  ctx.fillStyle = shade('#9a6f42', -0.28)
+  span(0, 0.6, 1, 0.18)
   ctx.fillStyle = 'rgba(50, 30, 14, 0.45)'
   for (let k = 0; k < 5; k++) span(k * 0.2 + 0.1, 0.22, Math.max(1 / s, 0.025), 0.56)
   ctx.fillStyle = '#5a3c22'
   span(0, 0.16, 1, 0.07)
   span(0, 0.77, 1, 0.07)
+  ctx.strokeStyle = INK
+  ctx.lineWidth = inkWidth(0.6, s)
+  outline(0, 0.16, 1, 0.07)
+  outline(0, 0.77, 1, 0.07)
 }
 
 function drawRune(ctx: CanvasRenderingContext2D, x: number, y: number, s: number): void {
@@ -757,10 +915,18 @@ function drawSpring(ctx: CanvasRenderingContext2D, x: number, y: number, s: numb
 function drawStone(ctx: CanvasRenderingContext2D, x: number, y: number, s: number): void {
   ellipse(ctx, 'rgba(8, 30, 40, 0.4)', x + 0.54 * s, y + 0.66 * s, 0.42 * s, 0.2 * s)
   ellipse(ctx, '#6f6a5e', x + 0.5 * s, y + 0.58 * s, 0.41 * s, 0.22 * s)
-  const top = ctx.createLinearGradient(0, y + 0.3 * s, 0, y + 0.66 * s)
-  top.addColorStop(0, '#ddd6c6')
-  top.addColorStop(1, '#a29a88')
-  ellipse(ctx, top, x + 0.5 * s, y + 0.5 * s, 0.4 * s, 0.21 * s)
+  ellipse(ctx, '#ddd6c6', x + 0.5 * s, y + 0.5 * s, 0.4 * s, 0.21 * s)
+  ctx.save()
+  ctx.beginPath()
+  ctx.ellipse(x + 0.5 * s, y + 0.5 * s, 0.4 * s, 0.21 * s, 0, 0, TAU)
+  ctx.clip()
+  ellipse(ctx, '#a29a88', x + 0.62 * s, y + 0.58 * s, 0.3 * s, 0.16 * s)
+  ctx.restore()
+  ctx.beginPath()
+  ctx.ellipse(x + 0.5 * s, y + 0.5 * s, 0.4 * s, 0.21 * s, 0, 0, TAU)
+  ctx.strokeStyle = INK
+  ctx.lineWidth = inkWidth(1, s)
+  ctx.stroke()
   ellipse(ctx, 'rgba(255, 255, 255, 0.35)', x + 0.4 * s, y + 0.44 * s, 0.14 * s, 0.06 * s)
 }
 
@@ -772,6 +938,9 @@ function drawRubble(ctx: CanvasRenderingContext2D, x: number, y: number, s: numb
     ctx.fillStyle = k % 2 ? '#b27f53' : '#9a6a44'
     roundedRect(ctx, bx, by, 0.17 * s, 0.1 * s, 0.02 * s)
     ctx.fill()
+    ctx.strokeStyle = 'rgba(28, 18, 10, 0.5)'
+    ctx.lineWidth = inkWidth(0.5, s)
+    ctx.stroke()
   }
 }
 
@@ -789,26 +958,35 @@ function drawBlock(ctx: CanvasRenderingContext2D, x: number, y: number, s: numbe
   ctx.lineTo(x + 0.05 * s, y + 0.98 * s)
   ctx.closePath()
   ctx.fill()
-  const face = ctx.createLinearGradient(0, y + 0.32 * s, 0, y + s)
-  face.addColorStop(0, faceLight)
-  face.addColorStop(1, faceDark)
-  ctx.fillStyle = face
-  ctx.fillRect(x + 0.03 * s, y + 0.32 * s, 0.94 * s, 0.66 * s)
+  const faceTop = y + 0.32 * s, faceBottom = y + s, faceSplit = faceTop + (faceBottom - faceTop) * 0.45
+  ctx.fillStyle = faceLight
+  ctx.fillRect(x + 0.03 * s, faceTop, 0.94 * s, faceSplit - faceTop)
+  ctx.fillStyle = faceDark
+  ctx.fillRect(x + 0.03 * s, faceSplit, 0.94 * s, faceBottom - faceSplit)
   ctx.fillStyle = 'rgba(40, 24, 14, 0.38)'
   const mortar = Math.max(1, 0.03 * s)
   ctx.fillRect(x + 0.03 * s, y + 0.54 * s, 0.94 * s, mortar)
   ctx.fillRect(x + 0.03 * s, y + 0.76 * s, 0.94 * s, mortar)
   for (const [left, top] of [[0.5, 0.32], [0.26, 0.54], [0.74, 0.54], [0.5, 0.76]] as const) ctx.fillRect(x + left * s, y + top * s, mortar, 0.22 * s)
-  const topFace = ctx.createLinearGradient(0, y, 0, y + 0.34 * s)
-  topFace.addColorStop(0, topLight)
-  topFace.addColorStop(1, topDark)
-  ctx.fillStyle = topFace
+  ctx.save()
   roundedRect(ctx, x + 0.03 * s, y + 0.02 * s, 0.94 * s, 0.34 * s, 0.05 * s)
-  ctx.fill()
+  ctx.clip()
+  const topSplit = y + 0.02 * s + 0.34 * s * 0.5
+  ctx.fillStyle = topLight
+  ctx.fillRect(x + 0.03 * s, y + 0.02 * s, 0.94 * s, topSplit - (y + 0.02 * s))
+  ctx.fillStyle = topDark
+  ctx.fillRect(x + 0.03 * s, topSplit, 0.94 * s, y + 0.36 * s - topSplit)
+  ctx.restore()
   ctx.fillStyle = 'rgba(255, 248, 230, 0.35)'
   ctx.fillRect(x + 0.06 * s, y + 0.04 * s, 0.88 * s, Math.max(1, 0.035 * s))
   ctx.fillStyle = 'rgba(0, 0, 0, 0.25)'
   ctx.fillRect(x + 0.03 * s, y + 0.95 * s, 0.94 * s, 0.03 * s)
+  ctx.strokeStyle = INK
+  ctx.lineWidth = inkWidth(1, s)
+  ctx.lineJoin = 'round'
+  roundedRect(ctx, x + 0.03 * s, y + 0.02 * s, 0.94 * s, 0.34 * s, 0.05 * s)
+  ctx.stroke()
+  ctx.strokeRect(x + 0.03 * s, y + 0.32 * s, 0.94 * s, 0.66 * s)
   if (kind === 'crack') {
     ctx.strokeStyle = 'rgba(30, 16, 8, 0.85)'
     ctx.lineWidth = Math.max(1, 0.035 * s)
@@ -1011,41 +1189,61 @@ function caustics(ctx: CanvasRenderingContext2D, size: number, seed: number): vo
 function specks(ctx: CanvasRenderingContext2D, size: number, seed: number): void {
   const unit = size / 120
   scatter(size, Math.round(size * size / 90), seed, (x, y, a, b) => {
-    ctx.fillStyle = a < 0.5 ? 'rgba(150, 122, 80, 0.35)' : 'rgba(252, 240, 206, 0.45)'
-    ctx.fillRect(x, y, unit * (0.5 + b), unit * (0.5 + b))
-  })
-  ctx.strokeStyle = 'rgba(170, 138, 92, 0.18)'
-  ctx.lineWidth = unit
-  scatter(size, 10, seed + 5, (x, y, a) => {
-    ctx.beginPath()
-    ctx.arc(x, y + unit * 8, unit * (6 + a * 6), Math.PI * 1.15, Math.PI * 1.85)
-    ctx.stroke()
+    const sz = unit * (0.5 + b)
+    ctx.fillStyle = '#8a6a3c'
+    ctx.globalAlpha = 0.4
+    ctx.fillRect(x, y, sz, sz)
+    ctx.fillStyle = '#fff3d6'
+    ctx.globalAlpha = 0.55
+    ctx.fillRect(x + sz * 1.4, y + sz * 0.3, sz, sz)
+    ctx.globalAlpha = 1
+    if (a < 1 / 6) {
+      ctx.strokeStyle = 'rgba(60, 40, 20, 0.4)'
+      ctx.lineWidth = unit * 0.5
+      ctx.lineCap = 'round'
+      ctx.beginPath()
+      ctx.moveTo(x + sz * 2.6, y)
+      ctx.quadraticCurveTo(x + sz * 3.2, y - unit * 0.6, x + sz * 3.6, y + unit * 0.4)
+      ctx.stroke()
+    }
   })
 }
 
 function blades(ctx: CanvasRenderingContext2D, size: number, seed: number): void {
   const unit = size / 120
-  ctx.lineCap = 'round'
-  ctx.lineWidth = Math.max(1, unit * 0.9)
-  for (const [color, from] of [['rgba(46, 90, 38, 0.55)', 0], ['rgba(152, 198, 100, 0.5)', 1]] as const) {
-    ctx.strokeStyle = color
+  scatter(size, Math.round(size * size / 110), seed, (x, y, a, b) => {
+    const h = unit * (2.2 + b * 3.2), lean = (a - 0.5) * unit * 3.4, w = unit * 0.7
+    ctx.fillStyle = '#2c5024'
     ctx.beginPath()
-    scatter(size, Math.round(size * size / 110), seed + from, (x, y, a, b) => {
-      const h = unit * (2.2 + b * 3.2)
-      ctx.moveTo(x, y)
-      ctx.quadraticCurveTo(x + (a - 0.5) * unit * 2, y - h * 0.6, x + (a - 0.5) * unit * 3.4, y - h)
-    })
-    ctx.stroke()
-  }
+    ctx.moveTo(x - w * 0.5, y)
+    ctx.lineTo(x + w * 0.5, y)
+    ctx.lineTo(x + lean, y - h)
+    ctx.closePath()
+    ctx.fill()
+    ctx.fillStyle = '#a6d468'
+    ctx.beginPath()
+    ctx.moveTo(x - w * 0.3 + lean * 0.5, y - h * 0.45)
+    ctx.lineTo(x + w * 0.3 + lean * 0.5, y - h * 0.45)
+    ctx.lineTo(x + lean, y - h)
+    ctx.closePath()
+    ctx.fill()
+    ctx.fillStyle = 'rgba(28, 18, 10, 0.5)'
+    ctx.beginPath()
+    ctx.ellipse(x, y, unit * 0.4, unit * 0.4, 0, 0, TAU)
+    ctx.fill()
+  })
 }
 
 function litter(ctx: CanvasRenderingContext2D, size: number, seed: number): void {
   const unit = size / 120
   scatter(size, Math.round(size * size / 160), seed, (x, y, a, b) => {
-    ctx.fillStyle = a < 0.5 ? 'rgba(112, 88, 50, 0.35)' : a < 0.8 ? 'rgba(90, 120, 60, 0.4)' : 'rgba(150, 170, 90, 0.35)'
+    ctx.fillStyle = a < 0.34 ? '#5a4020' : a < 0.67 ? '#3a5a2a' : '#7a9048'
     ctx.beginPath()
     ctx.ellipse(x, y, unit * (0.8 + b * 1.4), unit * (0.5 + b * 0.7), a * TAU, 0, TAU)
     ctx.fill()
+    ctx.strokeStyle = 'rgba(28, 18, 10, 0.5)'
+    ctx.lineWidth = unit * 0.4
+    ctx.stroke()
   })
 }
 
@@ -1057,14 +1255,16 @@ function pebbles(ctx: CanvasRenderingContext2D, size: number, seed: number): voi
   })
   scatter(size, Math.round(size * size / 300), seed, (x, y, a, b) => {
     const rx = unit * (1 + b * 1.6), ry = rx * 0.7
-    ellipse(ctx, 'rgba(80, 62, 40, 0.35)', x + unit * 0.5, y + unit * 0.6, rx, ry)
     ellipse(ctx, a < 0.5 ? '#b8ab94' : '#a39580', x, y, rx, ry)
-    ellipse(ctx, 'rgba(255, 250, 235, 0.45)', x - rx * 0.3, y - ry * 0.35, rx * 0.4, ry * 0.3)
+    ctx.strokeStyle = 'rgba(28, 18, 10, 0.55)'
+    ctx.lineWidth = unit * 0.4
+    ctx.stroke()
+    ellipse(ctx, 'rgba(255, 250, 235, 0.5)', x - rx * 0.35, y - ry * 0.35, rx * 0.25, ry * 0.2)
   })
 }
 
 function cobbles(ctx: CanvasRenderingContext2D, size: number, seed: number): void {
-  const rows = 6, height = size / rows, gap = height * 0.09
+  const rows = 6, height = size / rows, gap = height * 0.09, unit = size / 120
   for (let r = 0; r < rows; r++) {
     let x = -height * 1.4 + (r % 2) * height * 0.7
     for (let k = 0; x < size + height; k++) {
@@ -1074,6 +1274,9 @@ function cobbles(ctx: CanvasRenderingContext2D, size: number, seed: number): voi
       ctx.fillStyle = `rgb(${tone}, ${tone - 8}, ${tone - 20})`
       roundedRect(ctx, left, top, w, h, height * 0.22)
       ctx.fill()
+      ctx.strokeStyle = 'rgba(28, 18, 10, 0.5)'
+      ctx.lineWidth = unit * 0.5
+      ctx.stroke()
       ctx.fillStyle = 'rgba(255, 250, 235, 0.22)'
       roundedRect(ctx, left + gap * 0.4, top + gap * 0.3, w * 0.7, h * 0.28, height * 0.12)
       ctx.fill()
@@ -1086,8 +1289,9 @@ function cobbles(ctx: CanvasRenderingContext2D, size: number, seed: number): voi
 
 function cracks(ctx: CanvasRenderingContext2D, size: number, seed: number): void {
   const unit = size / 120
-  ctx.strokeStyle = 'rgba(70, 64, 56, 0.45)'
-  ctx.lineWidth = Math.max(1, unit * 0.7)
+  ctx.strokeStyle = 'rgba(28, 18, 10, 0.6)'
+  ctx.lineWidth = unit * 0.8
+  ctx.lineJoin = 'round'
   scatter(size, 14, seed, (x, y, a, b) => {
     ctx.beginPath()
     ctx.moveTo(x, y)
@@ -1099,9 +1303,18 @@ function cracks(ctx: CanvasRenderingContext2D, size: number, seed: number): void
     }
     ctx.stroke()
   })
-  scatter(size, Math.round(size * size / 250), seed + 7, (x, y, a) => {
-    ctx.fillStyle = a < 0.5 ? 'rgba(120, 140, 88, 0.35)' : 'rgba(190, 182, 164, 0.4)'
-    ctx.fillRect(x, y, unit * 1.2, unit * 1.2)
+  scatter(size, Math.round(size * size / 250), seed + 7, (x, y, a, b) => {
+    ctx.fillStyle = a < 0.5 ? '#788858' : '#beb6a4'
+    ctx.beginPath()
+    ctx.moveTo(x, y)
+    ctx.lineTo(x + unit * (1 + b), y + unit * 0.3)
+    ctx.lineTo(x + unit * (0.6 + a), y + unit * (1.2 + b))
+    ctx.lineTo(x - unit * 0.3, y + unit * 0.8)
+    ctx.closePath()
+    ctx.fill()
+    ctx.strokeStyle = 'rgba(28, 18, 10, 0.5)'
+    ctx.lineWidth = unit * 0.4
+    ctx.stroke()
   })
 }
 

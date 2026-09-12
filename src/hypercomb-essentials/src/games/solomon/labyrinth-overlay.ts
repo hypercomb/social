@@ -123,6 +123,12 @@ export class SolomonLabyrinthOverlay {
     this.#raf = requestAnimationFrame(this.#loop)
   }
 
+  // (2) A2.2/M9's onEntrance/seat replace onEnter/onDungeon — this bridge maps
+  // each entrance's OWN id to today's #enterLabyrinth/#enterDungeon, so the
+  // island stays playable before Phase 3's real STORY-seated routing exists.
+  // Temporary; deleted with the rest of this bridge in Phase 3.
+  static readonly #WORLD_LABYRINTHS: Readonly<Record<string, string>> = { 'dawn-shrine': 'sunseed', 'tide-shrine': 'tideglass', 'pyramid-shrine': 'starbloom' }
+  static readonly #WORLD_DUNGEON_INDEX: Readonly<Record<string, number>> = { 'wayfarer-cavern': 0, 'highland-cavern': 2 }
   #mountSession(): void {
     this.#world = new RpgOverworldView({
       has: requirement => this.journey.has(requirement),
@@ -130,10 +136,19 @@ export class SolomonLabyrinthOverlay {
         this.journey.grantRelic(relic)
         this.#recordRelic()
       },
-      onEnter: id => { void this.#enterLabyrinth(id) },
-      onDungeon: index => this.#enterDungeon(index),
-      onJournal: () => this.#openJournal(),
+      seat: id => id in SolomonLabyrinthOverlay.#WORLD_LABYRINTHS || id in SolomonLabyrinthOverlay.#WORLD_DUNGEON_INDEX,
+      onEntrance: id => {
+        const labyrinthId = SolomonLabyrinthOverlay.#WORLD_LABYRINTHS[id]
+        if (labyrinthId) { void this.#enterLabyrinth(labyrinthId); return }
+        const index = SolomonLabyrinthOverlay.#WORLD_DUNGEON_INDEX[id]
+        if (index !== undefined) this.#enterDungeon(index)
+      },
+      onItems: () => this.#openJournal(),
       onMessage: message => { this.#say(message); this.#dirty = true },
+      // (2)'s gain→today's-cache-dialog bridge: no GainScreen exists yet, so
+      // the words just join every other status message; the view's own
+      // dialog still does the actual showing.
+      gain: request => { this.#say(request.words); this.#dirty = true },
     })
     this.#world.mount(this.#worldHost!)
     this.#roomView = new LabyrinthRoomView(this.#roomHost!, this.journey, id => this.#door(id))

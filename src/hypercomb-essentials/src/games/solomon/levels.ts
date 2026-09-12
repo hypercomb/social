@@ -13,8 +13,8 @@
 // state (a level in the layer would skew the lineage signature across peers).
 
 import {
-  EMPTY, WALL, BRICK, LIFE_FULL, LIFE_HALF,
-  type LevelDef, type Cell, type EnemySpawn, type EnemyKind,
+  COMBAT_SKILLS, EMPTY, WALL, BRICK, LIFE_FULL, LIFE_HALF,
+  type LevelDef, type Cell, type CombatSkillId, type EnemySpawn, type EnemyKind,
   type ItemSpawn, type ItemKind, type MirrorSpawn, type MirrorKind,
 } from './engine.js'
 
@@ -26,6 +26,13 @@ const DRAFT_KEY = 'hc:solomon-designer:draft'
 //   items:  K key · b bell · j jewel(500) · J jewel(5000) · $ treasure(2000) ·
 //           f jar · F super-jar · / scroll · t hourglass · u half-hourglass ·
 //           + extra life · @ Solomon's Seal · Z constellation panel · W Golden Wings
+//   the Hush's own steles/chests (§5.3) — a barrier has no glyph of its own:
+//           it needs a `needs: CombatSkillId` no single char can carry, so
+//           it rides `AsciiOpts.barriers` instead, exactly like a `deep`
+//           secret already rides `AsciiOpts.hidden` (M-note, not one of the
+//           source specs — this file's own established extension point):
+//           A Stele of the Stand · V Ward stele · E Ember stele · H Hold stele ·
+//           S Sickle chest · Q Sling chest
 //   foes:   g goblin · r gargoil · a dragon · s saramandor · h ghost ·
 //           l neul · k sparkball · o demonhead · n panel monster
 //   mirrors: M demonhead mirror · m saramandor mirror
@@ -34,7 +41,7 @@ const CHAR_ENEMY: Record<string, EnemyKind> = {
   g: 'goblin', r: 'gargoil', a: 'dragon', s: 'saramandor', h: 'ghost',
   l: 'neul', k: 'sparkball', o: 'demonhead', n: 'panel',
 }
-const CHAR_ITEM: Record<string, { kind: ItemKind; value?: number }> = {
+const CHAR_ITEM: Record<string, { kind: ItemKind; value?: number; gives?: CombatSkillId }> = {
   K: { kind: 'key' },
   b: { kind: 'bell' },
   j: { kind: 'jewel', value: 500 },
@@ -52,9 +59,24 @@ const CHAR_ITEM: Record<string, { kind: ItemKind; value?: number }> = {
   T: { kind: 'pageTime' },
   Y: { kind: 'pageSpace' },
   R: { kind: 'princess' },
+  A: { kind: 'stele', gives: 'stand' },
+  V: { kind: 'stele', gives: 'ward' },
+  E: { kind: 'stele', gives: 'ember' },
+  H: { kind: 'stele', gives: 'hold' },
+  S: { kind: 'chest', gives: 'sickle' },
+  Q: { kind: 'chest', gives: 'sling' },
 }
 
-interface AsciiOpts { hidden?: ItemSpawn[]; lifeStart?: number }
+interface AsciiOpts {
+  hidden?: ItemSpawn[]
+  lifeStart?: number
+  /** Barriers (§5.3): a `needs: CombatSkillId` can't fit one ASCII char (a
+   *  stele/chest can, since each glyph names one exact skill — CHAR_ITEM
+   *  above), so a barrier rides here instead, the same way `hidden` already
+   *  carries a `deep` secret's extra fields. Painted WALL, never EMPTY;
+   *  `kind` is always forced to 'barrier', so callers never supply it. */
+  barriers?: Omit<ItemSpawn, 'kind'>[]
+}
 
 /** Parse an ASCII room. Entity glyphs leave their cell EMPTY and record a
  *  placement; rows are padded / truncated to `cols`. Enemies face inward. */
@@ -81,11 +103,15 @@ export function fromAscii(name: string, art: string[], opts: AsciiOpts = {}): Le
       const en = CHAR_ENEMY[ch]
       if (en) { enemies.push({ col: c, row: r, kind: en, dir: inward(c) }); continue }
       const it = CHAR_ITEM[ch]
-      if (it) { items.push({ col: c, row: r, kind: it.kind, value: it.value }); continue }
+      if (it) { items.push({ col: c, row: r, kind: it.kind, value: it.value, gives: it.gives }); continue }
       tiles[i] = CHAR_TILE[ch] ?? EMPTY
     }
   }
 
+  for (const b of opts.barriers ?? []) {
+    items.push({ ...b, kind: 'barrier' })
+    tiles[b.row * cols + b.col] = WALL
+  }
   for (const h of opts.hidden ?? []) {
     items.push({ ...h, hidden: true })
     const i = h.row * cols + h.col
@@ -600,7 +626,7 @@ export function decideNext(p: {
 const MAX_DIM = 120
 const MAX_ENTITIES = MAX_DIM * MAX_DIM
 const ENEMY_KINDS = new Set<EnemyKind>(['goblin', 'gargoil', 'ghost', 'demonhead', 'dragon', 'panel', 'neul', 'saramandor', 'sparkball'])
-const ITEM_KINDS = new Set<ItemKind>(['key', 'jewel', 'treasure', 'bell', 'jar', 'superjar', 'scroll', 'hourglass', 'hourglassHalf', 'fairy', 'life', 'seal', 'zodiac', 'wings', 'pageTime', 'pageSpace', 'princess'])
+const ITEM_KINDS = new Set<ItemKind>(['key', 'jewel', 'treasure', 'bell', 'jar', 'superjar', 'scroll', 'hourglass', 'hourglassHalf', 'fairy', 'life', 'seal', 'zodiac', 'wings', 'pageTime', 'pageSpace', 'princess', 'stele', 'chest', 'barrier'])
 const MIRROR_KINDS = new Set(['demonhead', 'saramandor'])
 
 const isInt = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n)
@@ -637,12 +663,22 @@ export function sanitizeLevel(raw: unknown): LevelDef | null {
       if (!ITEM_KINDS.has(kind)) return null
       const value = (raw as ItemSpawn).value
       const secret = !!(raw as ItemSpawn).secret
+      // The Hush's own fields (§5.3): a stele/chest without a real `gives`, or
+      // a barrier without a real `needs`, is meaningless content — refuse the
+      // whole level rather than silently drop the id, exactly like an unknown
+      // `kind` above.
+      const gives = (raw as ItemSpawn).gives
+      if ((kind === 'stele' || kind === 'chest') && !COMBAT_SKILLS.includes(gives as CombatSkillId)) return null
+      const needs = (raw as ItemSpawn).needs
+      if (kind === 'barrier' && !COMBAT_SKILLS.includes(needs as CombatSkillId)) return null
       items.push({
         col: c.col, row: c.row, kind,
         hidden: !!(raw as ItemSpawn).hidden || secret,   // a secret is always hidden too
         secret: secret || undefined,
         deep: (secret && !!(raw as ItemSpawn).deep) || undefined,  // deep only means anything on a secret
         value: isInt(value) ? value : undefined,
+        gives: (kind === 'stele' || kind === 'chest') ? gives as CombatSkillId : undefined,
+        needs: kind === 'barrier' ? needs as CombatSkillId : undefined,
       })
     }
   } else {

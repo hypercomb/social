@@ -22,7 +22,7 @@
 
 import {
   Engine, TILE, WALL, BRICK, CRACKED, LIFE_FULL,
-  type LevelDef, type Fireball, type Shot,
+  type LevelDef, type Fireball, type Shot, type Cell,
 } from './engine.js'
 
 const HUD_H = 28
@@ -318,6 +318,14 @@ export class Renderer {
   #scorePop = 0
   #prevScore = -1
 
+  // The Hush's one-shot fx: Engine's own *Flash fields are bare edge-counters
+  // (never a duration — every other consumer in this codebase reads them the
+  // same way, see overlay.ts's #senseJuice), so the renderer keeps its own
+  // decaying envelope per effect, mirroring #punchLand/#punchHurt above.
+  #prevStrike = 0; #strikeT = 0
+  #prevWard = 0; #wardT = 0
+  #prevEmber = 0; #emberT = 0
+
   // HUD caches
   #hudPanel: HTMLCanvasElement | null = null
   #hudPanelW = 0
@@ -370,9 +378,20 @@ export class Renderer {
   #actors(e: Engine, time: number, pulse: number): void {
     const ctx = this.#ctx
     for (const it of e.items) {
-      if (it.taken) continue
-      if (it.hidden) { if (it.secret) fx_secretAura(ctx, it.col, it.row, time); continue }
-      if (it.secret && it.reveal > 0) fx_materialize(ctx, it.col, it.row, it.reveal)
+      if (it.kind === 'stele' || it.kind === 'chest') {
+        // Permanent landmarks (§5.3/M9) — engine.interact() sets `taken` the
+        // first time they're read/taken, but that never hides them the way a
+        // normal one-time pickup vanishes; a second E just re-shows the words.
+        if (it.hidden) continue
+      } else if (it.kind === 'barrier') {
+        // Drawn only while sealed — opened, its cell is plain floor and needs
+        // no prop, exactly like an already-latched chamber shutter.
+        if (it.hidden || !e.solidAt(it.col, it.row)) continue
+      } else {
+        if (it.taken) continue
+        if (it.hidden) { if (it.secret) fx_secretAura(ctx, it.col, it.row, time); continue }
+        if (it.secret && it.reveal > 0) fx_materialize(ctx, it.col, it.row, it.reveal)
+      }
       item_draw(ctx, it.kind, it.col, it.row, time, pulse, it.reveal, false)
     }
     for (const f of e.fairies) if (!f.taken) item_fairy(ctx, f.x, f.y, time, pulse)
@@ -382,8 +401,19 @@ export class Renderer {
 
     for (const f of e.fireballs) proj_fireball(ctx, f, time, pulse)
     for (const s of e.shots) proj_shot(ctx, s, time, pulse)
+    if (e.sling) proj_sling(ctx, e.sling, time, pulse)
     fx_wandTarget(ctx, e, pulse)
     fx_resonance(ctx, e)
+
+    // ── the Hush: strike/ward/ember one-shots, the Hold freeze, the duel ring ──
+    if (e.strikeFlash !== this.#prevStrike) { this.#prevStrike = e.strikeFlash; this.#strikeT = 1 }
+    if (e.wardFlash !== this.#prevWard) { this.#prevWard = e.wardFlash; this.#wardT = 1 }
+    if (e.emberFlash !== this.#prevEmber) { this.#prevEmber = e.emberFlash; this.#emberT = 1 }
+    if (this.#strikeT > 0) fx_strike(ctx, e, this.#strikeT)
+    if (this.#wardT > 0) fx_ward(ctx, e, this.#wardT)
+    if (this.#emberT > 0) fx_ember(ctx, this.#emberT, e.emberCell)
+    if (e.stillT > 0) fx_hold(ctx, e, time)
+    if (e.battle) fx_hush(ctx, e, time)
   }
 
   drawHud(e: Engine, time: number, viewW: number, viewH: number): void {
@@ -408,6 +438,7 @@ export class Renderer {
     this.#scorePop = Math.max(0, this.#scorePop - 0.06)
 
     hud_bar(ctx, e, time, viewW, this.#panel(viewW), this.#scorePop, this.#pulse)
+    if (e.battle) hud_duel(ctx, e, time, viewW)
 
     if (e.hurtFlash > 0) {
       ctx.fillStyle = `rgba(255,40,40,${0.35 * (e.hurtFlash / 0.5)})`
@@ -481,10 +512,15 @@ export class Renderer {
       this.#punchLand = this.#punchHurt = 0
       this.#scorePop = 0
       this.#prevScore = -1
+      this.#prevStrike = this.#prevWard = this.#prevEmber = 0
+      this.#strikeT = this.#wardT = this.#emberT = 0
     }
     this.#spikeV = Math.max(0, this.#spikeV - this.#spikeV * 3.2 * dt - 0.02 * dt)
     this.#punchLand = Math.max(0, this.#punchLand - dt * 4.5)
     this.#punchHurt = Math.max(0, this.#punchHurt - dt * 6)
+    this.#strikeT = Math.max(0, this.#strikeT - dt * 3.5)
+    this.#wardT = Math.max(0, this.#wardT - dt * 2.5)
+    this.#emberT = Math.max(0, this.#emberT - dt * 2.2)
     const slow = Math.sin(time * 2.1) * 0.31
     const flutter = Math.sin(time * 11.3) * 0.13
     const stutter = (sol_hash(Math.floor(time * 8)) - 0.5) * 0.12
@@ -775,27 +811,42 @@ function blink(time: number, seed: number): number {
   return ph < 0.11 ? 1 - Math.abs(ph / 0.055 - 1) : 0
 }
 
-/** A gradient-lit rounded body: base lit upper-left, shaded lower-right, with a
- *  dark contour. The house recipe every foe builds on. */
-function shadedBody(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, base: string, r: number): void {
-  const g = ctx.createLinearGradient(x, y, x + w * 0.6, y + h)
-  g.addColorStop(0, sol_shade(base, 0.35))
-  g.addColorStop(0.5, base)
-  g.addColorStop(1, sol_shade(base, -0.45))
-  ctx.fillStyle = g
-  rr(ctx, x, y, w, h, r)
-  ctx.fill()
-  ctx.strokeStyle = sol_shade(base, -0.62)
+/** Flat cel-shaded rounded body: base fill, one lower-right wedge, one
+ *  upper-left highlight stroke, ink outline. The house recipe every foe
+ *  builds on. */
+function cel_body(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, base: string, r: number): void {
+  ctx.fillStyle = base
+  rr(ctx, x, y, w, h, r); ctx.fill()
+  ctx.save()
+  rr(ctx, x, y, w, h, r); ctx.clip()
+  ctx.fillStyle = 'rgba(20,16,70,0.30)'
+  ctx.beginPath(); ctx.ellipse(x + w * 0.95, y + h * 1.05, w * 0.6, h * 0.6, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+  ctx.strokeStyle = 'rgba(255,255,255,0.26)'
   ctx.lineWidth = 1.2
-  rr(ctx, x + 0.6, y + 0.6, w - 1.2, h - 1.2, r)
-  ctx.stroke()
-  // rim light along the top-left
-  ctx.strokeStyle = 'rgba(255,220,170,0.35)'
+  ctx.beginPath(); ctx.moveTo(x + r, y + 1); ctx.lineTo(x + w * 0.55, y + 1); ctx.stroke()
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 1.4
+  ctx.lineJoin = 'round'
+  rr(ctx, x + 0.7, y + 0.7, w - 1.4, h - 1.4, r); ctx.stroke()
+}
+
+/** Flat cel-shaded circular head/body part (the goblin skull, a foe's
+ *  torso disc). Same recipe as cel_body but for a circle. */
+function cel_disc(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, base: string): void {
+  ctx.fillStyle = base
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill()
+  ctx.save()
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip()
+  ctx.fillStyle = 'rgba(20,16,70,0.28)'
+  ctx.beginPath(); ctx.arc(cx + r * 0.5, cy + r * 0.55, r * 0.85, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+  ctx.strokeStyle = 'rgba(255,255,255,0.26)'
   ctx.lineWidth = 1
-  ctx.beginPath()
-  ctx.moveTo(x + r, y + 1)
-  ctx.lineTo(x + w * 0.62, y + 1)
-  ctx.stroke()
+  ctx.beginPath(); ctx.arc(cx - r * 0.35, cy - r * 0.35, r * 0.5, -2.4, -0.6); ctx.stroke()
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 1.3
+  ctx.beginPath(); ctx.arc(cx, cy, r - 0.65, 0, Math.PI * 2); ctx.stroke()
 }
 
 // ── Dana ────────────────────────────────────────────────────
@@ -1281,13 +1332,15 @@ function foe_goblin(ctx: CanvasRenderingContext2D, x: number, y: number, w: numb
     fAx = cx + d * w * 0.5 + stride * 3.2; fAy = footY - 2.2 - liftA
     fBx = cx - d * w * 0.48 - stride * 3.2; fBy = footY - 2.2 - liftB
   }
+  walk_limb(ctx, cx - d * w * 0.24, shY, cx - d * w * 0.55, (shY + fBy) / 2 - 1, fBx, fBy, 3.2 + 2, C.ink)   // ink under, far arm
   walk_limb(ctx, cx - d * w * 0.24, shY, cx - d * w * 0.55, (shY + fBy) / 2 - 1, fBx, fBy, 3.2, armFar)   // far arm behind
   walk_fist(ctx, fBx, fBy, 2.6, armFar, sol_shade(C.goblinDark, -0.45))
-  shadedBody(ctx, x + w * 0.05, torsoTop, w * 0.9, footY - torsoTop - 1, C.goblin, 6)
+  cel_body(ctx, x + w * 0.05, torsoTop, w * 0.9, footY - torsoTop - 1, C.goblin, 6)
   // pot belly — breathing, with an additive sheen
   const breath = 1 + (recovering ? 0.09 * Math.sin(time * 11) : 0.04 * Math.sin(time * 3.2))
   ctx.fillStyle = sol_shade(C.goblin, 0.14)
   ctx.beginPath(); ctx.ellipse(cx - d, footY - h * 0.26, w * 0.35, h * 0.21 * breath, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 0.8; ctx.stroke()
   ctx.save()
   ctx.globalCompositeOperation = 'lighter'
   ctx.globalAlpha = 0.13 * pulse
@@ -1316,12 +1369,11 @@ function foe_goblin(ctx: CanvasRenderingContext2D, x: number, y: number, w: numb
   const earC = sol_shade(C.goblinDark, -0.05)
   walk_poly(ctx, earC, hx - hr * 0.45, hy - hr * 0.45, hx - hr * 1.95, hy - hr * 1.0 - tw,   // far ear, notch bitten
     hx - hr * 1.3, hy - hr * 0.4, hx - hr * 1.1, hy - hr * 0.68, hx - hr * 0.85, hy - hr * 0.15)
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1; ctx.lineJoin = 'round'; ctx.stroke()
   walk_poly(ctx, earC, hx + hr * 0.45, hy - hr * 0.5, hx + hr * 1.35, hy - hr * 1.15 + tw,   // near ear, notch on top edge
     hx + hr * 1.05, hy - hr * 0.72, hx + hr * 1.5, hy - hr * 0.55, hx + hr * 0.85, hy - hr * 0.05)
-  const hg = ctx.createRadialGradient(hx - hr * 0.4, hy - hr * 0.4, 1, hx, hy, hr * 1.25)
-  hg.addColorStop(0, sol_shade(C.goblin, 0.22)); hg.addColorStop(1, sol_shade(C.goblin, -0.32))
-  ctx.fillStyle = hg
-  ctx.beginPath(); ctx.arc(hx, hy, hr, 0, Math.PI * 2); ctx.fill()
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1; ctx.lineJoin = 'round'; ctx.stroke()
+  cel_disc(ctx, hx, hy, hr, C.goblin)
   // underbite jaw juts forward, tusks up at the corners
   ctx.fillStyle = sol_shade(C.goblin, -0.06)
   rr(ctx, hx - hr * 0.95 + d * 1.5, hy + hr * 0.22, hr * 1.9, hr * 0.72, 2); ctx.fill()
@@ -1346,6 +1398,7 @@ function foe_goblin(ctx: CanvasRenderingContext2D, x: number, y: number, w: numb
   walk_poly(ctx, sol_shade(C.goblinDark, -0.42),   // the brow itself, slanted angrier toward Dana
     hx - hr * 0.95, ey - 3 + (d * look < 0 ? 1.2 : 0), hx + hr * 0.95, ey - 3 + (d * look > 0 ? 1.2 : 0),
     hx + hr * 0.95, ey - 0.6, hx - hr * 0.95, ey - 0.6)
+  walk_limb(ctx, cx + d * w * 0.26, shY, cx + d * w * 0.6, (shY + fAy) / 2 - 2, fAx, fAy, 3.6 + 2, C.ink)   // ink under, near arm
   walk_limb(ctx, cx + d * w * 0.26, shY, cx + d * w * 0.6, (shY + fAy) / 2 - 2, fAx, fAy, 3.6, armC)   // near arm in front
   walk_fist(ctx, fAx, fAy, 3, armC, sol_shade(C.goblinDark, -0.45))
   if (punching) glow(ctx, C.SPARK, fAx, fAy, 3.5, 0.35 * tg * pulse)   // cocked fist gleams
@@ -1376,8 +1429,10 @@ function foe_gargoil(ctx: CanvasRenderingContext2D, x: number, y: number, w: num
     const tipx = cx + s * w * 0.6, tipy = y + h * 0.02 + oy - rip
     const wrx = cx + s * w * 0.4, wry = y + h * 0.3 + oy - rip * 0.5
     walk_poly(ctx, wing, cx + s * w * 0.1, y + h * 0.3 + oy, tipx, tipy, wrx, wry, cx + s * w * 0.33, y + h * 0.64 + oy)
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 1.6; ctx.lineJoin = 'round'; ctx.stroke()
     walk_poly(ctx, sol_shade(wing, -0.28), cx + s * w * 0.1, y + h * 0.33 + oy, wrx, wry, cx + s * w * 0.29, y + h * 0.62 + oy)
     walk_poly(ctx, sol_shade(wing, 0.18), tipx, tipy, tipx + s * 2.4, tipy - 3.2, tipx + s * 1.2, tipy + 1.5)   // thumb claw
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 0.9; ctx.lineJoin = 'round'; ctx.stroke()
   }
   // stone column legs — feet slabs plant alternately
   for (const s of [-1, 1]) {
@@ -1392,10 +1447,15 @@ function foe_gargoil(ctx: CanvasRenderingContext2D, x: number, y: number, w: num
   // chiseled torso: pelvis, chest split along a center ridge, pauldrons
   const chestTop = y + h * 0.3 + oy - rear * 0.3, waistY = y + h * 0.72 + oy
   walk_poly(ctx, sol_shade(stone, -0.18), cx - w * 0.22, waistY, cx + w * 0.22, waistY, cx + w * 0.18, footY - h * 0.2, cx - w * 0.18, footY - h * 0.2)
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1.4; ctx.lineJoin = 'round'; ctx.stroke()
   walk_poly(ctx, sol_shade(stone, 0.14), cx - w * 0.33, chestTop, cx, chestTop - 2, cx, waistY, cx - w * 0.25, waistY)     // lit facet
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1.4; ctx.lineJoin = 'round'; ctx.stroke()
   walk_poly(ctx, sol_shade(stone, -0.24), cx, chestTop - 2, cx + w * 0.33, chestTop, cx + w * 0.25, waistY, cx, waistY)   // shaded facet
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1.4; ctx.lineJoin = 'round'; ctx.stroke()
   walk_poly(ctx, sol_shade(stone, 0.02), cx - w * 0.44, chestTop - 1, cx - w * 0.3, chestTop - 3, cx - w * 0.26, chestTop + h * 0.14, cx - w * 0.4, chestTop + h * 0.12)
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1.4; ctx.lineJoin = 'round'; ctx.stroke()
   walk_poly(ctx, sol_shade(stone, -0.34), cx + w * 0.3, chestTop - 3, cx + w * 0.44, chestTop - 1, cx + w * 0.4, chestTop + h * 0.12, cx + w * 0.26, chestTop + h * 0.14)
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1.4; ctx.lineJoin = 'round'; ctx.stroke()
   ctx.strokeStyle = 'rgba(255,220,170,0.3)'   // torch rim along the shoulder line
   ctx.lineWidth = 1
   ctx.beginPath(); ctx.moveTo(cx - w * 0.4, chestTop - 1.6); ctx.lineTo(cx + w * 0.12, chestTop - 2.6); ctx.stroke()
@@ -1409,12 +1469,16 @@ function foe_gargoil(ctx: CanvasRenderingContext2D, x: number, y: number, w: num
   // square-jawed head — sweeps while scanning
   const hx = cx + sweep * w * 0.07, hy = y + h * 0.1 + oy
   walk_poly(ctx, sol_shade(stone, 0.2), hx - w * 0.17, hy + 2, hx - w * 0.1, hy - h * 0.06 - rear * 0.4, hx + w * 0.12, hy - h * 0.06 - rear * 0.4, hx + w * 0.17, hy + 2)
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1.4; ctx.lineJoin = 'round'; ctx.stroke()
   walk_poly(ctx, sol_shade(stone, -0.04), hx - w * 0.17, hy + 2, hx + w * 0.17, hy + 2, hx + w * 0.14, hy + h * 0.14, hx - w * 0.14, hy + h * 0.14)
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1.4; ctx.lineJoin = 'round'; ctx.stroke()
   walk_poly(ctx, sol_shade(stone, -0.16), hx - w * 0.13, hy + h * 0.12, hx + w * 0.13, hy + h * 0.12, hx + w * 0.11, hy + h * 0.21, hx - w * 0.11, hy + h * 0.21)
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1.4; ctx.lineJoin = 'round'; ctx.stroke()
   ctx.fillStyle = 'rgba(24,26,40,0.6)'   // mouth slit in the square jaw
   ctx.fillRect(Math.round(hx - w * 0.08), Math.round(hy + h * 0.135), Math.round(w * 0.16), 1.3)
   for (const s of [-1, 1]) {   // faceted horns, lit on the inner edge
     walk_poly(ctx, sol_shade(stone, -0.35), hx + s * w * 0.09, hy - h * 0.04, hx + s * w * 0.2, hy - h * 0.17 - rear, hx + s * w * 0.16, hy - h * 0.02)
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 1; ctx.lineJoin = 'round'; ctx.stroke()
     walk_poly(ctx, sol_shade(stone, 0.26), hx + s * w * 0.09, hy - h * 0.04, hx + s * w * 0.155, hy - h * 0.15 - rear, hx + s * w * 0.125, hy - h * 0.03)
   }
   const browY = hy + h * 0.015
@@ -1480,6 +1544,8 @@ function foe_dragon(ctx: CanvasRenderingContext2D, x: number, y: number, w: numb
   // tail whips behind on a slow quadratic
   const whip = Math.sin(anim * 0.17) * 2.6 + Math.sin(time * 1.9) * 0.8
   walk_whip(ctx, ax(0.05), footY - h * 0.15, ax(0.05) - d * w * 0.22, footY - h * 0.32 + whip,
+    ax(0.05) - d * w * 0.44, footY - h * 0.1 + whip * 0.6, 6, C.ink, C.ink)   // ink under the tail
+  walk_whip(ctx, ax(0.05), footY - h * 0.15, ax(0.05) - d * w * 0.22, footY - h * 0.32 + whip,
     ax(0.05) - d * w * 0.44, footY - h * 0.1 + whip * 0.6, 4, sol_shade(pink, -0.16), 'rgba(255,220,170,0.3)')
   walk_poly(ctx, sol_shade(pink, -0.16), ax(0.05) - d * w * 0.44, footY - h * 0.1 + whip * 0.6,   // spade tip
     ax(0.05) - d * w * 0.53, footY - h * 0.16 + whip * 0.6, ax(0.05) - d * w * 0.5, footY - h * 0.03 + whip * 0.6)
@@ -1501,12 +1567,16 @@ function foe_dragon(ctx: CanvasRenderingContext2D, x: number, y: number, w: numb
   body.quadraticCurveTo(ax(0.7), footY - 1, ax(0.45), footY - 2)
   body.quadraticCurveTo(ax(0.2), footY - 1, ax(0.03), footY - h * 0.1)
   body.closePath()
-  const bg = ctx.createLinearGradient(0, y - lift, 0, footY)
-  bg.addColorStop(0, sol_shade(pink, 0.3)); bg.addColorStop(0.55, pink); bg.addColorStop(1, sol_shade(pink, -0.45))
-  ctx.fillStyle = bg
+  ctx.fillStyle = pink
   ctx.fill(body)
-  ctx.strokeStyle = sol_shade(pink, -0.6)
-  ctx.lineWidth = 1.1
+  ctx.save()
+  ctx.clip(body)
+  ctx.fillStyle = sol_shade(pink, -0.3)   // lower-right cel wedge along the belly
+  ctx.beginPath(); ctx.ellipse(x + w * 0.75, footY - h * 0.02, w * 0.5, h * 0.32, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 1.6
+  ctx.lineJoin = 'round'
   ctx.stroke(body)
   ctx.strokeStyle = sol_shade(pink, -0.5)   // saddle creases between segments
   for (const t of [0.3, 0.56]) { ctx.beginPath(); ctx.moveTo(ax(t), top(t, t === 0.3 ? 0.32 : 0.4)); ctx.lineTo(ax(t) - d * 1.5, footY - 3); ctx.stroke() }
@@ -1533,13 +1603,11 @@ function foe_dragon(ctx: CanvasRenderingContext2D, x: number, y: number, w: numb
     const bx = ax(t), by = top(t, k) + 1
     const wob = Math.sin(time * 3.1 - i * 0.85) * 1.5
     walk_poly(ctx, '#f3a6d4', bx - 2.6, by, bx + wob * 0.4 - 0.4, by - h * 0.14 - wob, bx + 2.6, by)
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 0.9; ctx.lineJoin = 'round'; ctx.stroke()
     walk_poly(ctx, sol_shade('#f3a6d4', -0.35), bx + 0.5, by, bx + wob * 0.4 + 0.3, by - h * 0.13 - wob, bx + 2.4, by)
   }
   // the head: skull, brow, snout, and a jaw that actually lifts
-  const hg = ctx.createRadialGradient(hx - d * hr * 0.4, hy - hr * 0.5, 1, hx, hy, hr * 1.4)
-  hg.addColorStop(0, sol_shade(pink, 0.28)); hg.addColorStop(1, sol_shade(pink, -0.3))
-  ctx.fillStyle = hg
-  ctx.beginPath(); ctx.arc(hx, hy, hr, 0, Math.PI * 2); ctx.fill()
+  cel_disc(ctx, hx, hy, hr, pink)
   const snx = d > 0 ? hx + hr * 0.3 : hx - hr * 0.3 - w * 0.17
   ctx.fillStyle = sol_shade(pink, 0.06)
   rr(ctx, snx, hy - hr * 0.55, w * 0.17, hr, 2); ctx.fill()
@@ -1642,12 +1710,16 @@ function foe_saramandor(ctx: CanvasRenderingContext2D, x: number, y: number, w: 
   body.quadraticCurveTo(hx + d * w * 0.06, hy + h * 0.14, ax(0.86 + stretch), footY - 2.5)
   body.quadraticCurveTo(ax(0.5), footY - 1.5, ax(0.04 - stretch * 0.6), footY - h * 0.1)
   body.closePath()
-  const bg = ctx.createLinearGradient(0, footY - h * 0.44, 0, footY)
-  bg.addColorStop(0, sol_shade(base, 0.28)); bg.addColorStop(0.5, base); bg.addColorStop(1, sol_shade(base, -0.42))
-  ctx.fillStyle = bg
+  ctx.fillStyle = base
   ctx.fill(body)
-  ctx.strokeStyle = sol_shade(base, -0.58)
-  ctx.lineWidth = 1
+  ctx.save()
+  ctx.clip(body)
+  ctx.fillStyle = sol_shade(base, -0.3)   // lower-right cel wedge
+  ctx.beginPath(); ctx.ellipse(ax(0.65), footY - h * 0.05, w * 0.4, h * 0.3, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 1.4
+  ctx.lineJoin = 'round'
   ctx.stroke(body)
   // bright belly stripe hugging the underside (+ faint additive echo)
   ctx.strokeStyle = 'rgba(255,208,138,0.85)'
@@ -1771,16 +1843,21 @@ function foe_ghost(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
     ctx.restore()
   }
   const veil = fly_veilPath(cx, capY, rx, hemY, ph, amp, lean, d, stream, stunned ? 2.5 : 3.5)
-  // 1) the outer veil — low alpha, cool, barely there
+  // 1) the outer veil — two flat translucent layers, not a gradient sheet
   ctx.save()
-  const vg = ctx.createLinearGradient(0, capY, 0, hemY + 4)
-  vg.addColorStop(0, 'rgba(228,238,255,0.5)')
-  vg.addColorStop(0.6, 'rgba(190,210,248,0.34)')
-  vg.addColorStop(1, 'rgba(140,168,225,0.16)')
-  ctx.fillStyle = vg
+  ctx.fillStyle = 'rgba(140,160,220,0.55)'   // darker base sheet
   ctx.fill(veil)
-  ctx.strokeStyle = 'rgba(232,242,255,0.34)'
+  ctx.save()
+  ctx.clip(veil)
+  const shoulderY = capY + (hemY - capY) * 0.32
+  ctx.fillStyle = 'rgba(200,215,255,0.35)'   // lighter upper-body sheet
+  ctx.fillRect(cx - rx * 1.6, capY - 4, rx * 3.2, shoulderY - capY + 4)
+  ctx.strokeStyle = 'rgba(255,255,255,0.2)'   // one highlight
   ctx.lineWidth = 1
+  ctx.beginPath(); ctx.moveTo(cx - rx * 0.55, capY + 3); ctx.lineTo(cx - rx * 0.2, capY - 1); ctx.stroke()
+  ctx.restore()
+  ctx.strokeStyle = 'rgba(28,18,48,0.5)'   // soft ink edge — no hard outline on a ghost
+  ctx.lineWidth = 1.2
   ctx.stroke(veil)
   // 2) the core wisp — a brighter body drifting inside on its own slow phase
   ctx.clip(veil)
@@ -1895,24 +1972,29 @@ function foe_neul(ctx: CanvasRenderingContext2D, x: number, y: number, w: number
     fly_poly(ctx, sol_shade(tone, -0.22), bx + s * R * 0.34, by - R * 0.74, bx + s * R * 0.86, by - R * 1.62 - stroke * 0.4, bx + s * R * 0.82, by - R * 0.5)
     fly_poly(ctx, sol_shade(tone, -0.48), bx + s * R * 0.46, by - R * 0.72, bx + s * R * 0.76, by - R * 1.3 - stroke * 0.3, bx + s * R * 0.7, by - R * 0.56)
   }
-  // fuzzy round body — a scalloped fur silhouette under a lit radial gradient
-  ctx.beginPath()
+  // fuzzy round body — a scalloped fur silhouette, flat cel-shaded
+  const bodyPath = new Path2D()
   for (let i = 0; i <= 22; i++) {
     const a = (i / 22) * Math.PI * 2
     const fr = R + sol_hash(i * 13 + seed) * 1.5 + Math.sin(a * 5 + time * 1.8) * 0.3
     const px = bx + Math.cos(a) * fr, py = by + Math.sin(a) * fr * 1.04
-    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+    if (i === 0) bodyPath.moveTo(px, py); else bodyPath.lineTo(px, py)
   }
-  ctx.closePath()
-  const bg = ctx.createRadialGradient(bx - R * 0.4, by - R * 0.45, 1, bx, by, R * 1.35)
-  bg.addColorStop(0, sol_shade('#cdb6f5', 0.2))
-  bg.addColorStop(0.5, tone)
-  bg.addColorStop(1, sol_shade(tone, -0.42))
-  ctx.fillStyle = bg
-  ctx.fill()
-  ctx.strokeStyle = sol_shade(tone, -0.6)
-  ctx.lineWidth = 0.9
-  ctx.stroke()
+  bodyPath.closePath()
+  ctx.fillStyle = tone
+  ctx.fill(bodyPath)
+  ctx.save()
+  ctx.clip(bodyPath)
+  ctx.fillStyle = sol_shade(tone, -0.3)   // lower-right cel wedge
+  ctx.beginPath(); ctx.ellipse(bx + R * 0.5, by + R * 0.55, R * 0.9, R * 0.9, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+  ctx.strokeStyle = 'rgba(255,255,255,0.26)'   // upper-left highlight
+  ctx.lineWidth = 1
+  ctx.beginPath(); ctx.arc(bx - R * 0.35, by - R * 0.35, R * 0.5, -2.4, -0.6); ctx.stroke()
+  ctx.strokeStyle = C.ink   // scalloped edge, true ink
+  ctx.lineWidth = 1.2
+  ctx.lineJoin = 'round'
+  ctx.stroke(bodyPath)
   // tiny feet tucked under the belly
   ctx.strokeStyle = sol_shade(tone, -0.5)
   ctx.lineWidth = 1.4
@@ -2041,6 +2123,9 @@ function foe_sparkball(ctx: CanvasRenderingContext2D, x: number, y: number, w: n
     ctx.fillRect(fx - 0.9, fy - 0.9, 1.8, 1.8)
   }
   ctx.restore()
+  ctx.strokeStyle = 'rgba(28,18,10,0.4)'   // a faint ink ring so it reads as an object, not just light
+  ctx.lineWidth = 1
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke()
   glow(ctx, C.SPARK, cx, cy, r * (charged ? 3 : 2.3), (0.2 + 0.2 * tg + (charged ? 0.2 : 0)) * pulse)
 }
 
@@ -2109,18 +2194,23 @@ function foe_demonhead(ctx: CanvasRenderingContext2D, x: number, y: number, w: n
     ctx.moveTo(cx + s * w * 0.3, cy - h * 0.24); ctx.lineTo(cx + s * w * 0.44, cy - h * 0.36)
     ctx.stroke()
   }
-  // cranium — lit from the upper-left
-  const g = ctx.createRadialGradient(cx - w * 0.16, cy - h * 0.28, 1, cx, cy - h * 0.06, w * 0.56)
-  g.addColorStop(0, sol_shade(base, 0.3))
-  g.addColorStop(0.55, base)
-  g.addColorStop(1, sol_shade(base, -0.45))
-  ctx.fillStyle = g
+  // cranium — flat, cel-shaded, lit from the upper-left
+  ctx.fillStyle = base
   ctx.beginPath(); ctx.ellipse(cx, cy - h * 0.08, w * 0.38, h * 0.34, 0, 0, Math.PI * 2); ctx.fill()
-  // cheekbones + maxilla — a second, cooler gradient block under the cranium
-  const cg = ctx.createLinearGradient(0, cy - h * 0.05, 0, cy + h * 0.24)
-  cg.addColorStop(0, sol_shade(base, 0.05))
-  cg.addColorStop(1, sol_shade(base, -0.34))
-  ctx.fillStyle = cg
+  ctx.save()
+  ctx.beginPath(); ctx.ellipse(cx, cy - h * 0.08, w * 0.38, h * 0.34, 0, 0, Math.PI * 2); ctx.clip()
+  ctx.fillStyle = sol_shade(base, -0.32)
+  ctx.beginPath(); ctx.ellipse(cx + w * 0.18, cy + h * 0.14, w * 0.32, h * 0.3, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)'   // bone-white highlight, upper-left brow ridge
+  ctx.lineWidth = 1.2
+  ctx.beginPath(); ctx.arc(cx - w * 0.14, cy - h * 0.24, w * 0.12, -2.3, -0.6); ctx.stroke()
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 1.4
+  ctx.lineJoin = 'round'
+  ctx.beginPath(); ctx.ellipse(cx, cy - h * 0.08, w * 0.38 - 0.7, h * 0.34 - 0.7, 0, 0, Math.PI * 2); ctx.stroke()
+  // cheekbones + maxilla — flat, under the cranium
+  ctx.fillStyle = sol_shade(base, -0.12)
   ctx.beginPath()
   ctx.moveTo(cx - w * 0.36, cy - h * 0.06)
   ctx.quadraticCurveTo(cx - w * 0.3, cy + h * 0.2, cx - w * 0.19, cy + h * 0.21)
@@ -2209,6 +2299,10 @@ function foe_panel(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   fly_poly(ctx, 'rgba(255,220,170,0.1)', x, y, x + 2.5, y + 2.5, x + 2.5, y + h - 2.5, x, y + h)
   fly_poly(ctx, 'rgba(8,8,18,0.4)', x + w, y, x + w, y + h, x + w - 2.5, y + h - 2.5, x + w - 2.5, y + 2.5)
   fly_poly(ctx, 'rgba(8,8,18,0.45)', x, y + h, x + w, y + h, x + w - 2.5, y + h - 2.5, x + 2.5, y + h - 2.5)
+  ctx.strokeStyle = C.ink   // one ink edge around the outer block silhouette
+  ctx.lineWidth = 1.4
+  ctx.lineJoin = 'round'
+  ctx.strokeRect(x + 0.7, y + 0.7, w - 1.4, h - 1.4)
   // 2) the recess the face is cut into — darker, with an inner cast shadow
   const rx0 = x + w * 0.16, ry0 = y + h * 0.15, rw = w * 0.68, rh = h * 0.72
   const rg = ctx.createLinearGradient(0, ry0, 0, ry0 + rh)
@@ -2294,8 +2388,11 @@ function prop_mirror(ctx: CanvasRenderingContext2D, col: number, row: number, ti
   glow(ctx, '#b478ff', cx, cy, TILE * (0.7 + tg * 0.5), (0.15 + tg * 0.45) * pulse)
   ctx.fillStyle = '#15172b'
   rr(ctx, x + 3, y + 2, TILE - 6, TILE - 4, 6); ctx.fill()
-  ctx.strokeStyle = '#3a2a5a'; ctx.lineWidth = 2
+  ctx.strokeStyle = '#3a2a5a'; ctx.lineWidth = 1.4   // this frame stroke doubles as the ink outline
   rr(ctx, x + 3, y + 2, TILE - 6, TILE - 4, 6); ctx.stroke()
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)'   // one highlight along the frame's upper-left edge
+  ctx.lineWidth = 1
+  ctx.beginPath(); ctx.moveTo(x + 6, y + 8); ctx.lineTo(x + 6, y + 3); ctx.lineTo(x + TILE * 0.42, y + 3); ctx.stroke()
   // shifting sheen — accelerates as the emission charges
   const g = ctx.createLinearGradient(x, y, x + TILE, y + TILE)
   const p = (Math.sin(time * (2 + tg * 6)) + 1) * 0.5
@@ -2330,12 +2427,16 @@ function prop_door(ctx: CanvasRenderingContext2D, col: number, row: number, anim
   // stone arch: jambs + keystone
   ctx.fillStyle = sol_shade(C.rock, -0.05)
   ctx.fillRect(x - 2, y - TILE * 0.16, TILE + 4, TILE * 1.16)
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 1.4
+  ctx.strokeRect(x - 1.3, y - TILE * 0.16 + 0.7, TILE + 2.6, TILE * 1.16 - 1.4)
   ctx.fillStyle = sol_shade(C.rockLite, -0.05)
   ctx.beginPath()
   ctx.moveTo(x + TILE / 2 - 5, y - TILE * 0.16)
   ctx.lineTo(x + TILE / 2, y - TILE * 0.28)
   ctx.lineTo(x + TILE / 2 + 5, y - TILE * 0.16)
   ctx.closePath(); ctx.fill()
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1.4; ctx.lineJoin = 'round'; ctx.stroke()
   if (anim > 0) {
     // opening: gold spill + planks swinging away
     const g = ctx.createLinearGradient(x, y, x, y + TILE)
@@ -2372,10 +2473,10 @@ function prop_door(ctx: CanvasRenderingContext2D, col: number, row: number, anim
 }
 
 function door_planks(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
-  const g = ctx.createLinearGradient(x, y, x + w, y)
-  g.addColorStop(0, '#2e2110'); g.addColorStop(0.5, '#241a0d'); g.addColorStop(1, '#1c1409')
-  ctx.fillStyle = g
+  ctx.fillStyle = '#241a0d'
   ctx.fillRect(x, y, w, h)
+  ctx.fillStyle = 'rgba(0,0,0,0.25)'   // lower-right wedge
+  ctx.beginPath(); ctx.moveTo(x + w, y); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w * 0.35, y + h); ctx.closePath(); ctx.fill()
   ctx.strokeStyle = '#3c2c16'; ctx.lineWidth = 2
   for (let i = 1; i < 3; i++) { ctx.beginPath(); ctx.moveTo(x + i * w / 3, y); ctx.lineTo(x + i * w / 3, y + h); ctx.stroke() }
   // iron bands + rivets
@@ -2396,6 +2497,12 @@ const ITEM_GLOW: Record<string, string> = {
   hourglassHalf: '#ffb24d', fairy: C.FAIRY, life: '#78b4ff', seal: C.SEAL,
   zodiac: '#ffd76a', wings: C.DOOR_GOLD, pageTime: '#78dcff', pageSpace: '#c8a0ff',
   princess: C.FAIRY,
+  // The Hush's own interactables (§5.3) — a generic prop per kind; WHICH skill
+  // a stele/chest grants (or a barrier needs) is never painted here, only
+  // named beside it in the room's own prompt (labyrinth-view.ts, M9). The six
+  // per-skill icons live in island-treasure.ts's drawSkill, for the gain
+  // screen alone (M2/M7) — this file never imports it.
+  stele: C.MAGIC, chest: '#e8902c', barrier: C.EMBER,
 }
 
 function item_draw(ctx: CanvasRenderingContext2D, kind: string, col: number, row: number, time: number, pulse: number, reveal: number, hiddenGhost: boolean): void {
@@ -2431,6 +2538,9 @@ function item_draw(ctx: CanvasRenderingContext2D, kind: string, col: number, row
     case 'pageTime': item_page(ctx, cx, cy, time, true); break
     case 'pageSpace': item_page(ctx, cx, cy, time, false); break
     case 'princess': item_princess(ctx, cx, cy, time, pulse); break
+    case 'stele': item_stele(ctx, cx, cy, time); break
+    case 'chest': item_chest(ctx, cx, cy); break
+    case 'barrier': item_barrier(ctx, cx, cy, time); break
   }
   ctx.restore()
 }
@@ -2440,27 +2550,53 @@ function item_key(ctx: CanvasRenderingContext2D, cx: number, cy: number, time: n
   glow(ctx, C.DOOR_GOLD, cx, cy, 15, 0.35)
   const a = time * 2.2
   glow(ctx, '#fff6d0', cx + Math.cos(a) * 10, cy + Math.sin(a) * 10, 3.4, 0.7)
-  ctx.strokeStyle = C.gold
-  ctx.lineWidth = 3
-  ctx.beginPath(); ctx.arc(cx, cy - 5, 5, 0, Math.PI * 2); ctx.stroke()
-  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx, cy + 9); ctx.stroke()
-  ctx.beginPath(); ctx.moveTo(cx, cy + 9); ctx.lineTo(cx + 5, cy + 9); ctx.stroke()
-  ctx.beginPath(); ctx.moveTo(cx, cy + 5); ctx.lineTo(cx + 4, cy + 5); ctx.stroke()
-  ctx.strokeStyle = 'rgba(255,246,210,0.8)'
+  const ringY = cy - 5, rOut = 5, rIn = 3.2
+  // ring, shaft and teeth are now a flat filled silhouette, not bare strokes
+  ctx.fillStyle = C.gold
+  ctx.beginPath()
+  ctx.arc(cx, ringY, rOut, 0, Math.PI * 2)
+  ctx.arc(cx, ringY, rIn, 0, Math.PI * 2, true)
+  ctx.fill('evenodd')
+  ctx.fillRect(cx - 1.5, cy, 3, 9)
+  ctx.fillRect(cx, cy + 7.5, 5, 3)
+  ctx.fillRect(cx, cy + 3.5, 4, 3)
+  ctx.save()   // lower-right wedge on the ring
+  ctx.beginPath()
+  ctx.arc(cx, ringY, rOut, 0, Math.PI * 2)
+  ctx.arc(cx, ringY, rIn, 0, Math.PI * 2, true)
+  ctx.clip('evenodd')
+  ctx.fillStyle = sol_shade(C.gold, -0.3)
+  ctx.beginPath(); ctx.ellipse(cx + rOut * 0.5, ringY + rOut * 0.55, rOut * 0.9, rOut * 0.9, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+  ctx.strokeStyle = C.ink   // ink outline tracing the whole silhouette
+  ctx.lineWidth = 1.0
+  ctx.beginPath(); ctx.arc(cx, ringY, rOut, 0, Math.PI * 2); ctx.stroke()
+  ctx.beginPath(); ctx.arc(cx, ringY, rIn, 0, Math.PI * 2); ctx.stroke()
+  ctx.strokeRect(cx - 1.5, cy, 3, 9)
+  ctx.strokeRect(cx, cy + 7.5, 5, 3)
+  ctx.strokeRect(cx, cy + 3.5, 4, 3)
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)'   // upper-left highlight on the ring
   ctx.lineWidth = 1
-  ctx.beginPath(); ctx.arc(cx - 1, cy - 6, 4, Math.PI * 0.7, Math.PI * 1.5); ctx.stroke()
+  ctx.beginPath(); ctx.arc(cx - 1, ringY - 1, rIn + 0.7, Math.PI * 0.7, Math.PI * 1.5); ctx.stroke()
 }
 
 function item_bell(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
-  const g = ctx.createLinearGradient(cx - 7, cy - 7, cx + 7, cy + 5)
-  g.addColorStop(0, sol_shade(C.gold, 0.3)); g.addColorStop(1, sol_shade(C.gold, -0.25))
-  ctx.fillStyle = g
-  ctx.beginPath()
-  ctx.moveTo(cx, cy - 7)
-  ctx.quadraticCurveTo(cx + 7, cy - 4, cx + 6, cy + 4)
-  ctx.lineTo(cx - 6, cy + 4)
-  ctx.quadraticCurveTo(cx - 7, cy - 4, cx, cy - 7)
-  ctx.fill()
+  const bellPath = new Path2D()
+  bellPath.moveTo(cx, cy - 7)
+  bellPath.quadraticCurveTo(cx + 7, cy - 4, cx + 6, cy + 4)
+  bellPath.lineTo(cx - 6, cy + 4)
+  bellPath.quadraticCurveTo(cx - 7, cy - 4, cx, cy - 7)
+  bellPath.closePath()
+  ctx.fillStyle = C.gold
+  ctx.fill(bellPath)
+  ctx.save()
+  ctx.clip(bellPath)
+  ctx.fillStyle = sol_shade(C.gold, -0.35)   // lower-right wedge near the mouth
+  ctx.beginPath(); ctx.ellipse(cx + 3, cy + 2.5, 5, 4, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 1.1
+  ctx.stroke(bellPath)
   ctx.fillStyle = '#b8860b'; ctx.fillRect(Math.round(cx - 7), Math.round(cy + 4), 14, 2)
   ctx.beginPath(); ctx.arc(cx, cy + 7, 1.6, 0, Math.PI * 2); ctx.fill()
 }
@@ -2469,6 +2605,7 @@ function item_jewel(ctx: CanvasRenderingContext2D, cx: number, cy: number, color
   const r = 6
   ctx.fillStyle = color
   ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy); ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r, cy); ctx.closePath(); ctx.fill()
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1.0; ctx.lineJoin = 'round'; ctx.stroke()
   ctx.fillStyle = 'rgba(255,255,255,0.85)'
   ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r * 0.4, cy - r * 0.2); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill()
   // deterministic twinkle glint
@@ -2481,13 +2618,21 @@ function item_jewel(ctx: CanvasRenderingContext2D, cx: number, cy: number, color
 }
 
 function item_jar(ctx: CanvasRenderingContext2D, cx: number, cy: number, body: string, flame: string): void {
-  const g = ctx.createLinearGradient(cx - 5, cy, cx + 5, cy)
-  g.addColorStop(0, sol_shade(body, 0.25)); g.addColorStop(1, sol_shade(body, -0.3))
-  ctx.fillStyle = g
+  ctx.fillStyle = body
   rr(ctx, cx - 5, cy - 3, 10, 9, 3); ctx.fill()
+  ctx.save()
+  rr(ctx, cx - 5, cy - 3, 10, 9, 3); ctx.clip()
+  ctx.fillStyle = sol_shade(body, -0.3)
+  ctx.beginPath(); ctx.ellipse(cx + 3, cy + 4, 5, 4, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1.0
+  rr(ctx, cx - 5, cy - 3, 10, 9, 3); ctx.stroke()
   ctx.fillStyle = '#2a2a40'; ctx.fillRect(Math.round(cx - 3), Math.round(cy - 6), 6, 3)
-  ctx.fillStyle = flame
+  ctx.fillStyle = flame   // two-tone cartoon flame, outer only gets the ink edge
   ctx.beginPath(); ctx.moveTo(cx, cy - 11); ctx.lineTo(cx - 3, cy - 6); ctx.lineTo(cx + 3, cy - 6); ctx.closePath(); ctx.fill()
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 0.7; ctx.lineJoin = 'round'; ctx.stroke()
+  ctx.fillStyle = sol_shade(flame, 0.3)
+  ctx.beginPath(); ctx.moveTo(cx, cy - 9); ctx.lineTo(cx - 1.6, cy - 6); ctx.lineTo(cx + 1.6, cy - 6); ctx.closePath(); ctx.fill()
 }
 
 function item_hourglass(ctx: CanvasRenderingContext2D, cx: number, cy: number, sand: string): void {
@@ -2496,6 +2641,19 @@ function item_hourglass(ctx: CanvasRenderingContext2D, cx: number, cy: number, s
   ctx.fillStyle = sand
   ctx.beginPath(); ctx.moveTo(cx - 5, cy - 6); ctx.lineTo(cx + 5, cy - 6); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill()
   ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx - 5, cy + 6); ctx.lineTo(cx + 5, cy + 6); ctx.closePath(); ctx.fill()
+  ctx.strokeStyle = C.ink   // ink outline around the whole hourglass silhouette
+  ctx.lineWidth = 0.9
+  ctx.lineJoin = 'round'
+  ctx.beginPath()
+  ctx.moveTo(cx - 6, cy - 8); ctx.lineTo(cx + 6, cy - 8); ctx.lineTo(cx + 6, cy - 6)
+  ctx.lineTo(cx, cy); ctx.lineTo(cx + 6, cy + 6); ctx.lineTo(cx + 6, cy + 8)
+  ctx.lineTo(cx - 6, cy + 8); ctx.lineTo(cx - 6, cy + 6)
+  ctx.lineTo(cx, cy); ctx.lineTo(cx - 6, cy - 6)
+  ctx.closePath()
+  ctx.stroke()
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)'   // highlight tick, upper cap's left edge
+  ctx.lineWidth = 1
+  ctx.beginPath(); ctx.moveTo(cx - 6, cy - 8); ctx.lineTo(cx - 6, cy - 6.4); ctx.stroke()
 }
 
 function item_fairy(ctx: CanvasRenderingContext2D, cx: number, cy: number, time: number, pulse: number): void {
@@ -2503,31 +2661,69 @@ function item_fairy(ctx: CanvasRenderingContext2D, cx: number, cy: number, time:
   glow(ctx, C.FAIRY, cx, cy, 10, 0.4 * pulse)
   ctx.fillStyle = 'rgba(220,200,255,0.85)'
   ctx.beginPath(); ctx.ellipse(cx - 4, cy, 3, 5 + flap, -0.4, 0, Math.PI * 2); ctx.fill()
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 0.8; ctx.stroke()
   ctx.beginPath(); ctx.ellipse(cx + 4, cy, 3, 5 + flap, 0.4, 0, Math.PI * 2); ctx.fill()
-  ctx.fillStyle = '#ffd6f0'
-  ctx.beginPath(); ctx.arc(cx, cy, 2.6, 0, Math.PI * 2); ctx.fill()
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 0.8; ctx.stroke()
+  cel_disc(ctx, cx, cy, 2.6, '#ffd6f0')
 }
 
 function item_life(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
+  const hatPath = new Path2D()
+  hatPath.moveTo(cx, cy - 7); hatPath.lineTo(cx - 6, cy - 1); hatPath.lineTo(cx + 6, cy - 1); hatPath.closePath()
   ctx.fillStyle = C.hat
-  ctx.beginPath(); ctx.moveTo(cx, cy - 7); ctx.lineTo(cx - 6, cy - 1); ctx.lineTo(cx + 6, cy - 1); ctx.closePath(); ctx.fill()
-  ctx.fillStyle = C.face; ctx.beginPath(); ctx.arc(cx, cy + 2, 4, 0, Math.PI * 2); ctx.fill()
+  ctx.fill(hatPath)
+  ctx.save()
+  ctx.clip(hatPath)
+  ctx.fillStyle = sol_shade(C.hat, -0.3)   // tiny lower-right wedge
+  ctx.beginPath(); ctx.ellipse(cx + 3, cy - 1.5, 3.5, 2.5, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 0.8
+  ctx.stroke(hatPath)
+  cel_disc(ctx, cx, cy + 2, 4, C.face)
   ctx.fillStyle = C.danaRobe; ctx.fillRect(Math.round(cx - 3), Math.round(cy + 3), 6, 4)
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 0.7
+  ctx.strokeRect(Math.round(cx - 3), Math.round(cy + 3), 6, 4)
 }
 
 function item_treasure(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
-  const g = ctx.createLinearGradient(cx - 7, cy - 6, cx + 6, cy + 7)
-  g.addColorStop(0, sol_shade('#b07a2a', 0.2)); g.addColorStop(1, sol_shade('#b07a2a', -0.25))
-  ctx.fillStyle = g
-  ctx.beginPath(); ctx.moveTo(cx, cy - 6); ctx.quadraticCurveTo(cx + 8, cy - 2, cx + 6, cy + 7); ctx.lineTo(cx - 6, cy + 7); ctx.quadraticCurveTo(cx - 8, cy - 2, cx, cy - 6); ctx.fill()
+  const sackPath = new Path2D()
+  sackPath.moveTo(cx, cy - 6)
+  sackPath.quadraticCurveTo(cx + 8, cy - 2, cx + 6, cy + 7)
+  sackPath.lineTo(cx - 6, cy + 7)
+  sackPath.quadraticCurveTo(cx - 8, cy - 2, cx, cy - 6)
+  sackPath.closePath()
+  ctx.fillStyle = '#b07a2a'
+  ctx.fill(sackPath)
+  ctx.save()
+  ctx.clip(sackPath)
+  ctx.fillStyle = sol_shade('#b07a2a', -0.32)
+  ctx.beginPath(); ctx.ellipse(cx + 3, cy + 3.5, 5, 4.5, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 1.1
+  ctx.stroke(sackPath)
   ctx.fillStyle = '#7a5018'; ctx.fillRect(Math.round(cx - 5), Math.round(cy - 6), 10, 2)
-  ctx.fillStyle = '#ffd24d'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-  ctx.fillText('$', cx, cy + 2)
+  // a small flat gold coin-stack glyph in place of drawn text
+  ctx.fillStyle = C.gold
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 0.6
+  for (const oy of [3, 1, -1]) {
+    ctx.beginPath(); ctx.ellipse(cx, cy + oy, 3, 1.4, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke()
+  }
 }
 
 function item_scroll(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
   ctx.fillStyle = '#efe2c0'
   rr(ctx, cx - 7, cy - 4, 14, 8, 2); ctx.fill()
+  ctx.save()
+  rr(ctx, cx - 7, cy - 4, 14, 8, 2); ctx.clip()
+  ctx.fillStyle = sol_shade('#efe2c0', -0.15)   // thin wedge at the bottom-right corner
+  ctx.beginPath(); ctx.moveTo(cx + 7, cy + 4); ctx.lineTo(cx + 7, cy + 1); ctx.lineTo(cx + 3, cy + 4); ctx.closePath(); ctx.fill()
+  ctx.restore()
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 1.0
+  rr(ctx, cx - 7, cy - 4, 14, 8, 2); ctx.stroke()
   ctx.fillStyle = '#cdbf95'; ctx.fillRect(Math.round(cx - 7), Math.round(cy - 4), 2, 8); ctx.fillRect(Math.round(cx + 5), Math.round(cy - 4), 2, 8)
   ctx.strokeStyle = '#9a8a5a'; ctx.lineWidth = 1
   ctx.beginPath(); ctx.moveTo(cx - 3, cy - 1); ctx.lineTo(cx + 3, cy - 1); ctx.moveTo(cx - 3, cy + 1); ctx.lineTo(cx + 3, cy + 1); ctx.stroke()
@@ -2536,7 +2732,7 @@ function item_scroll(ctx: CanvasRenderingContext2D, cx: number, cy: number): voi
 function item_seal(ctx: CanvasRenderingContext2D, cx: number, cy: number, time: number, pulse: number): void {
   const r = 7 + Math.sin(time * 4) * 0.6
   glow(ctx, C.SEAL, cx, cy, 13, 0.4 * pulse)
-  ctx.strokeStyle = '#bfe0ff'; ctx.lineWidth = 2; ctx.fillStyle = 'rgba(90,140,255,0.25)'
+  ctx.strokeStyle = '#bfe0ff'; ctx.lineWidth = 2; ctx.fillStyle = 'rgba(126,168,255,0.6)'   // flat C.SEAL, higher opacity for a solid gem read
   for (const flip of [0, Math.PI]) {
     ctx.beginPath()
     for (let i = 0; i < 3; i++) {
@@ -2551,8 +2747,10 @@ function item_seal(ctx: CanvasRenderingContext2D, cx: number, cy: number, time: 
 function item_zodiac(ctx: CanvasRenderingContext2D, cx: number, cy: number, time: number): void {
   ctx.fillStyle = '#1b1740'
   rr(ctx, cx - 9, cy - 8, 18, 16, 3); ctx.fill()
-  ctx.strokeStyle = '#ffd76a'; ctx.lineWidth = 1.5
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1.1
   rr(ctx, cx - 9, cy - 8, 18, 16, 3); ctx.stroke()
+  ctx.strokeStyle = '#ffd76a'; ctx.lineWidth = 0.7   // gold frame, thinner, inside the ink
+  rr(ctx, cx - 8, cy - 7, 16, 14, 2.4); ctx.stroke()
   const stars: [number, number][] = [[-5, -3], [0, -5], [4, 1], [-2, 4], [6, 5]]
   ctx.strokeStyle = 'rgba(255,235,160,0.7)'; ctx.lineWidth = 1
   ctx.beginPath()
@@ -2573,6 +2771,10 @@ function item_wings(ctx: CanvasRenderingContext2D, cx: number, cy: number, time:
     ctx.quadraticCurveTo(cx + s * 12, cy - 6 - flap, cx + s * 11, cy + 4)
     ctx.quadraticCurveTo(cx + s * 7, cy + 1, cx, cy + 3)
     ctx.closePath(); ctx.fill()
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 0.9; ctx.lineJoin = 'round'; ctx.stroke()
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)'   // highlight along the leading edge
+    ctx.lineWidth = 0.8
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.quadraticCurveTo(cx + s * 12, cy - 6 - flap, cx + s * 11, cy + 4); ctx.stroke()
   }
   ctx.fillStyle = '#fff3c0'; ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI * 2); ctx.fill()
 }
@@ -2580,7 +2782,7 @@ function item_wings(ctx: CanvasRenderingContext2D, cx: number, cy: number, time:
 function item_page(ctx: CanvasRenderingContext2D, cx: number, cy: number, time: number, isTime: boolean): void {
   ctx.fillStyle = '#efe2c0'
   rr(ctx, cx - 6, cy - 8, 12, 16, 2); ctx.fill()
-  ctx.strokeStyle = '#bda87a'; ctx.lineWidth = 1
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1.0   // the existing stroke role now doubles as ink
   rr(ctx, cx - 6, cy - 8, 12, 16, 2); ctx.stroke()
   if (isTime) {
     ctx.strokeStyle = '#2a7ad0'; ctx.lineWidth = 1.5
@@ -2601,15 +2803,103 @@ function item_princess(ctx: CanvasRenderingContext2D, cx: number, cy: number, ti
   glow(ctx, C.FAIRY, cx, cy, 16, 0.5 * pulse)
   ctx.fillStyle = 'rgba(220,200,255,0.8)'
   ctx.beginPath(); ctx.ellipse(cx - 6, cy, 4, 8, -0.4, 0, Math.PI * 2); ctx.fill()
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1.0; ctx.stroke()
   ctx.beginPath(); ctx.ellipse(cx + 6, cy, 4, 8, 0.4, 0, Math.PI * 2); ctx.fill()
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1.0; ctx.stroke()
   ctx.fillStyle = '#ff9ed6'
   ctx.beginPath(); ctx.moveTo(cx, cy - 4); ctx.lineTo(cx - 6, cy + 10); ctx.lineTo(cx + 6, cy + 10); ctx.closePath(); ctx.fill()
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1.0; ctx.lineJoin = 'round'; ctx.stroke()
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)'   // highlight on the dress's upper-left
+  ctx.lineWidth = 0.9
+  ctx.beginPath(); ctx.moveTo(cx, cy - 4); ctx.lineTo(cx - 6, cy + 10); ctx.stroke()
   ctx.fillStyle = '#ffe0c0'; ctx.beginPath(); ctx.arc(cx, cy - 7, 4, 0, Math.PI * 2); ctx.fill()
+  ctx.save()
+  ctx.beginPath(); ctx.arc(cx, cy - 7, 4, 0, Math.PI * 2); ctx.clip()
+  ctx.fillStyle = 'rgba(150,70,60,0.2)'   // lower-right wedge on the face circle
+  ctx.beginPath(); ctx.ellipse(cx + 2, cy - 5, 3.2, 3.2, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1.0
+  ctx.beginPath(); ctx.arc(cx, cy - 7, 4, 0, Math.PI * 2); ctx.stroke()
   ctx.fillStyle = '#ffd24d'
   ctx.beginPath()
   ctx.moveTo(cx - 4, cy - 9); ctx.lineTo(cx - 4, cy - 12); ctx.lineTo(cx - 1, cy - 10)
   ctx.lineTo(cx, cy - 13); ctx.lineTo(cx + 1, cy - 10); ctx.lineTo(cx + 4, cy - 12); ctx.lineTo(cx + 4, cy - 9)
   ctx.closePath(); ctx.fill()
+}
+
+// ── the Hush's own props (§5.3) ──────────────────────────────
+//
+// A stele/chest/barrier paints ONE generic prop per kind — never one of the
+// six per-skill icons. Which skill a stele/chest grants (or a barrier needs)
+// is named beside it in the room's own beside-prompt (labyrinth-view.ts, M9);
+// the per-skill art (planted wand, glass disc, gold crescent…) lives in
+// island-treasure.ts's drawSkill, for the gain screen alone (M2/M7).
+
+function item_stele(ctx: CanvasRenderingContext2D, cx: number, cy: number, time: number): void {
+  const w = 11, h = 20, x = cx - w / 2, y = cy + 8 - h
+  const body = new Path2D()
+  body.moveTo(x, y + h); body.lineTo(x, y + 4)
+  body.quadraticCurveTo(x, y, x + w / 2, y)
+  body.quadraticCurveTo(x + w, y, x + w, y + 4)
+  body.lineTo(x + w, y + h); body.closePath()
+  ctx.fillStyle = '#8a92b8'
+  ctx.fill(body)
+  ctx.save()
+  ctx.clip(body)
+  ctx.fillStyle = sol_shade('#8a92b8', -0.32)   // lower-right wedge
+  ctx.beginPath(); ctx.ellipse(x + w * 0.72, y + h * 0.7, w * 0.75, h * 0.42, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1
+  ctx.stroke(body)
+  // a slow-pulsing carved rune — deliberately generic, never a per-skill glyph
+  const k = 0.5 + 0.5 * Math.sin(time * 1.6)
+  ctx.strokeStyle = `rgba(191,233,255,${(0.4 + 0.4 * k).toFixed(2)})`
+  ctx.lineWidth = 1.3
+  ctx.lineCap = 'round'
+  ctx.beginPath()
+  ctx.moveTo(cx, y + 5); ctx.lineTo(cx, y + h - 4)
+  ctx.moveTo(cx - 3, y + 8); ctx.lineTo(cx + 3, y + 11)
+  ctx.moveTo(cx + 3, y + 8); ctx.lineTo(cx - 3, y + 11)
+  ctx.stroke()
+}
+
+function item_chest(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
+  const w = 16, h = 11, x = cx - w / 2, y = cy + 6 - h
+  ctx.fillStyle = '#8a4a12'
+  rr(ctx, x, y, w, h, 2); ctx.fill()
+  ctx.save()
+  rr(ctx, x, y, w, h, 2); ctx.clip()
+  ctx.fillStyle = sol_shade('#8a4a12', -0.3)   // lower-right wedge
+  ctx.beginPath(); ctx.ellipse(x + w * 0.72, y + h * 0.72, w * 0.6, h * 0.5, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+  ctx.fillStyle = '#e8902c'
+  ctx.fillRect(x, y, w, 3)
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1
+  rr(ctx, x, y, w, h, 2); ctx.stroke()
+  ctx.fillStyle = C.gold
+  ctx.fillRect(cx - 1.6, y + 2, 3.2, 5)
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 0.8
+  ctx.strokeRect(cx - 1.6, y + 2, 3.2, 5)
+}
+
+/** Only ever drawn while sealed (the caller in #actors() skips it the instant
+ *  it opens) — an ember-lit ward-sigil on plain stone, no brazier, no prop
+ *  that survives its own unlock. */
+function item_barrier(ctx: CanvasRenderingContext2D, cx: number, cy: number, time: number): void {
+  const s = 22
+  ctx.fillStyle = C.rockDark
+  ctx.fillRect(cx - s / 2, cy - s / 2, s, s)
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1.2
+  ctx.strokeRect(cx - s / 2, cy - s / 2, s, s)
+  const k = 0.5 + 0.5 * Math.sin(time * 2.2)
+  glow(ctx, C.EMBER, cx, cy, 9, 0.22 + 0.18 * k)
+  ctx.strokeStyle = `rgba(255,143,77,${(0.5 + 0.3 * k).toFixed(2)})`
+  ctx.lineWidth = 1.4
+  ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI * 2); ctx.stroke()
+  ctx.beginPath()
+  ctx.moveTo(cx - 4, cy - 4); ctx.lineTo(cx + 4, cy + 4)
+  ctx.moveTo(cx + 4, cy - 4); ctx.lineTo(cx - 4, cy + 4)
+  ctx.stroke()
 }
 
 // ── projectiles ─────────────────────────────────────────────
@@ -2678,6 +2968,22 @@ function proj_shot(ctx: CanvasRenderingContext2D, s: Shot, time: number, pulse: 
   const r = 6 * flick
   ctx.globalAlpha = 0.85 + 0.15 * pulse
   ctx.drawImage(projCore('shot'), s.x - r, s.y - r, r * 2, r * 2)
+  ctx.restore()
+}
+
+/** The Tideglass Sling's thrown disc — teal glass, homing back to Dana once
+ *  its range runs out (Engine's own #stepSling owns the physics; this only
+ *  paints the live `sling` state — one disc in flight at a time). */
+function proj_sling(ctx: CanvasRenderingContext2D, s: NonNullable<Engine['sling']>, time: number, pulse: number): void {
+  ctx.save()
+  glow(ctx, '#58c5c5', s.x, s.y, 10, 0.3 + 0.2 * pulse)
+  ctx.translate(s.x, s.y)
+  ctx.rotate(time * 10)
+  ctx.fillStyle = '#58c5c5'
+  ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.fill()
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 1; ctx.stroke()
+  ctx.fillStyle = 'rgba(255,255,255,0.6)'
+  ctx.beginPath(); ctx.arc(-1.6, -1.6, 1.8, 0, Math.PI * 2); ctx.fill()
   ctx.restore()
 }
 
@@ -2796,6 +3102,89 @@ function fx_wandTarget(ctx: CanvasRenderingContext2D, e: Engine, pulse: number):
   ctx.restore()
 }
 
+// ── the Hush's own fx (§5.3) ──────────────────────────────────
+//
+// strikeFlash/wardFlash/emberFlash are bare edge-counters (Engine never times
+// them — every other consumer in this codebase reads them the same way, see
+// overlay.ts's #senseJuice), so the Renderer keeps its own decaying `t: 1→0`
+// envelope per effect (see #strikeT/#wardT/#emberT, driven from #actors()),
+// exactly the pattern #punchLand/#punchHurt already use for landing/hurt.
+
+/** The Sickle/Sling strike — a short ink arc swept from Dana's blade side. */
+function fx_strike(ctx: CanvasRenderingContext2D, e: Engine, t: number): void {
+  const p = e.player
+  const cx = p.x + p.w / 2 + e.facing * p.w * 0.6, cy = p.y + p.h * 0.42
+  const a0 = e.facing > 0 ? -0.9 : Math.PI - 0.9
+  const a1 = e.facing > 0 ? 0.9 : Math.PI + 0.9
+  ctx.save()
+  ctx.globalAlpha = t
+  ctx.strokeStyle = '#fff6d0'
+  ctx.lineWidth = 2.4
+  ctx.lineCap = 'round'
+  ctx.beginPath(); ctx.arc(cx, cy, 9 + (1 - t) * 7, a0, a1); ctx.stroke()
+  ctx.restore()
+}
+
+/** Ward of Solomon — a pale-blue eight-point sigil flaring in front of Dana on
+ *  cast or parry ("a pale-blue glass disc with a six-point star," (3) §3 —
+ *  reusing dana_star's own eight-point shape rather than a second star path). */
+function fx_ward(ctx: CanvasRenderingContext2D, e: Engine, t: number): void {
+  const p = e.player
+  const cx = p.x + p.w / 2, cy = p.y + p.h * 0.4
+  ctx.save()
+  ctx.globalAlpha = 0.8 * t
+  glow(ctx, C.MAGIC, cx, cy, 16 * (1.4 - t), 0.5)
+  dana_star(ctx, cx, cy, 9 + (1 - t) * 5, t * 3, 'rgba(191,233,255,0.85)', true)
+  ctx.restore()
+}
+
+/** Ember Sigil — an ink-circle sigil with a two-tone flame at the struck
+ *  cell(s); "no brazier, no barrier interaction" (§5.3) — purely offense. */
+function fx_ember(ctx: CanvasRenderingContext2D, t: number, cell: Cell | null): void {
+  if (!cell) return
+  const cx = cell.col * TILE + TILE / 2, cy = cell.row * TILE + TILE / 2
+  ctx.save()
+  ctx.globalAlpha = t
+  glow(ctx, C.EMBER, cx, cy, 14 * (1.3 - t), 0.55)
+  ctx.strokeStyle = 'rgba(28,18,48,0.8)'
+  ctx.lineWidth = 1.6
+  ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2); ctx.stroke()
+  ctx.fillStyle = sol_shade(C.EMBER, 0.25)
+  ctx.beginPath(); ctx.moveTo(cx, cy - 8); ctx.lineTo(cx - 4, cy + 4); ctx.lineTo(cx + 4, cy + 4); ctx.closePath(); ctx.fill()
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 0.7; ctx.lineJoin = 'round'
+  ctx.beginPath(); ctx.moveTo(cx, cy - 8); ctx.lineTo(cx - 4, cy + 4); ctx.lineTo(cx + 4, cy + 4); ctx.closePath(); ctx.stroke()
+  ctx.restore()
+}
+
+/** Hourglass Hold — the world (and, mid-Hush, the marked foe) freezes; a cool
+ *  wash and a suspended hourglass over Dana, never a full-screen flash (that
+ *  would fight drawHud's own hurt tint). Reacts to the persistent `stillT`
+ *  duration directly — no counter/envelope needed, unlike the one-shots above. */
+function fx_hold(ctx: CanvasRenderingContext2D, e: Engine, time: number): void {
+  const cx = e.player.x + e.player.w / 2, cy = e.player.y - 14
+  ctx.save()
+  ctx.globalAlpha = 0.55 + 0.2 * Math.sin(time * 4)
+  glow(ctx, '#96d2ff', cx, cy, 9, 0.5)
+  item_hourglass(ctx, cx, cy, '#bfe9ff')
+  ctx.restore()
+}
+
+/** The Hush's world-space tell: a slow-breathing ring locked on the marked
+ *  foe while time bends around it (§5.3) — amber mid-exchange, cool blue while
+ *  closing/parting. The HUD's own phase readout is hud_duel, just below. */
+function fx_hush(ctx: CanvasRenderingContext2D, e: Engine, time: number): void {
+  const b = e.battle
+  if (!b) return
+  const cx = b.foe.x + b.foe.w / 2, cy = b.foe.y + b.foe.h / 2
+  const r = 14 + b.k * 10 + Math.sin(time * 5) * 1.5
+  ctx.save()
+  ctx.globalAlpha = 0.35 + 0.25 * b.k
+  ctx.strokeStyle = b.phase === 'exchange' ? 'rgba(255,214,106,0.85)' : 'rgba(191,233,255,0.7)'
+  ctx.lineWidth = 2
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke()
+  ctx.restore()
+}
+
 // ── HUD ─────────────────────────────────────────────────────
 
 function hud_bar(
@@ -2896,6 +3285,30 @@ function hud_bar(
   }
   if (e.zodiacHeld) { ctx.fillStyle = '#ffd76a'; ctx.fillText('★', rx, midY); rx -= 14 }
   if (e.wingsHeld) { ctx.fillStyle = '#ffe39a'; ctx.fillText('≫', rx, midY); rx -= 14 }
+  ctx.restore()
+}
+
+/** The duel banner — the marked foe's guard pips + the Hush's phase, read the
+ *  instant a Hush opens. Sits just under the life bar so the HUD readout never
+ *  competes with fx_hush's world-space ring on the foe itself. */
+function hud_duel(ctx: CanvasRenderingContext2D, e: Engine, time: number, viewW: number): void {
+  const b = e.battle
+  if (!b) return
+  const cx = viewW / 2, y = HUD_H + 13
+  ctx.save()
+  ctx.globalAlpha = 0.55 + 0.35 * b.k
+  ctx.font = '700 9px "Segoe UI", system-ui, sans-serif'
+  ctx.textAlign = 'center'
+  ctx.fillStyle = 'rgba(255,214,106,0.9)'
+  ctx.fillText(b.phase === 'exchange' ? 'THE HUSH' : b.phase === 'closing' ? 'THE HUSH ⇢' : '⇠ THE HUSH', cx, y)
+  const guard = Math.max(0, b.foe.guard)
+  const pipW = 7, gap = 3, total = guard * pipW + Math.max(0, guard - 1) * gap
+  let px = cx - total / 2
+  for (let i = 0; i < guard; i++) {
+    ctx.fillStyle = i === guard - 1 && Math.sin(time * 8) > 0 ? '#fff' : 'rgba(255,214,106,0.85)'
+    ctx.beginPath(); ctx.arc(px + pipW / 2, y + 9, pipW / 2, 0, Math.PI * 2); ctx.fill()
+    px += pipW + gap
+  }
   ctx.restore()
 }
 
@@ -3575,22 +3988,32 @@ function fly_wing(ctx: CanvasRenderingContext2D, sx: number, sy: number, rootX: 
   }
   m.quadraticCurveTo(wx + (rootX - wx) * 0.5, wy + (rootY - wy) * 0.72, rootX, rootY)
   m.closePath()
-  const g = ctx.createLinearGradient(sx, sy - span * 0.3, wx, wy + span * 0.4)
-  g.addColorStop(0, sol_shade(tone, 0.24))
-  g.addColorStop(0.55, tone)
-  g.addColorStop(1, sol_shade(tone, -0.42))
-  ctx.fillStyle = g
+  ctx.fillStyle = tone
   ctx.fill(m)
-  ctx.strokeStyle = sol_shade(tone, -0.6)
-  ctx.lineWidth = 0.9
+  ctx.save()
+  ctx.clip(m)
+  ctx.fillStyle = sol_shade(tone, -0.32)   // lower-right cel wedge
+  ctx.beginPath(); ctx.ellipse(wx, wy + span * 0.3, span * 0.55, span * 0.5, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 1.2
+  ctx.lineJoin = 'round'
   ctx.stroke(m)
-  // finger struts + the arm bone, drawn over the skin
-  ctx.strokeStyle = sol_shade(tone, -0.5)
+  // finger struts + the arm bone — ink under, colour over
   ctx.lineCap = 'round'
   for (let i = 0; i < 3; i++) {
-    ctx.lineWidth = 1.5 - i * 0.3
+    const lw = 1.5 - i * 0.3
+    ctx.strokeStyle = C.ink
+    ctx.lineWidth = lw + 1.6
+    ctx.beginPath(); ctx.moveTo(wx, wy); ctx.lineTo(tx[i], ty[i]); ctx.stroke()
+    ctx.strokeStyle = sol_shade(tone, -0.5)
+    ctx.lineWidth = lw
     ctx.beginPath(); ctx.moveTo(wx, wy); ctx.lineTo(tx[i], ty[i]); ctx.stroke()
   }
+  ctx.strokeStyle = C.ink
+  ctx.lineWidth = 3.6
+  ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(wx, wy); ctx.stroke()
+  ctx.strokeStyle = sol_shade(tone, -0.5)
   ctx.lineWidth = 2
   ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(wx, wy); ctx.stroke()
   // torch rim along the leading edge + a hooked thumb claw at the wrist
@@ -3598,6 +4021,7 @@ function fly_wing(ctx: CanvasRenderingContext2D, sx: number, sy: number, rootX: 
   ctx.lineWidth = 1
   ctx.beginPath(); ctx.moveTo(sx, sy - 0.8); ctx.lineTo(wx, wy - 0.8); ctx.stroke()
   fly_poly(ctx, sol_shade(tone, -0.24), wx, wy, wx + s * 1.2, wy - 3.4, wx + s * 2.6, wy - 0.4)
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 0.9; ctx.lineJoin = 'round'; ctx.stroke()
 }
 
 /** A jagged arc of lightning: a polyline swept around (cx,cy) whose radius and
