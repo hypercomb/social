@@ -87,6 +87,28 @@ const REVIEW_MODEL = String(process.env.BREAKS_REVIEW_MODEL || 'sonnet').trim()
 const LOG = process.env.BREAKS_LOG || ''
 const TERMINAL = process.env.BREAKS_TERMINAL || 'wt.exe'
 const USE_API_KEY = process.env.BREAKS_USE_API_KEY === '1'
+// How long an issue whose code has moved stays out of the list that OPENS a
+// conversation. It is still on every checklist that opens for another reason —
+// the hold silences the summons, never the issue — and after this it is offered
+// normally, so nothing is quiet indefinitely without a person having seen it.
+const HOLD_MS = Math.max(1, Number(process.env.BREAKS_HOLD_DAYS) || 14) * 24 * 60 * 60_000
+const MOVED = 'code moved:'
+const SINCE = 'broke since:'
+// The notes the TICK writes. A person's note means something different — it
+// stops the tick reading an issue at all — so the machine must never be able to
+// impersonate one by writing a note of its own.
+const MACHINE = [MOVED, SINCE, 'broke again']
+// Fresh page loads on three different days out-argue a reading. A tab open all
+// morning is ONE load entry however often it throws, and a burst of dev-server
+// rebuild reloads is many loads on ONE day. Only repetition spread across days
+// counts, which is the one shape neither artefact can fake.
+const CLIMB_DAYS = 3
+// Times the loop may raise one issue. Three refusals is an answer, and a loop
+// that stops arguing is the only reason a person keeps reading it.
+const CLIMB_MAX = 3
+const URGENT_GAP_MS = 30 * 60_000
+const REOPEN_SETTLE_MS = 30 * 60_000
+const LOCAL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|$)/
 const REVIEW_LOCK = path.join(os.tmpdir(), 'hypercomb-breaks-review.lock')
 const REVIEW_LOCK_MS = 60 * 60_000
 const PENDING_ROLLBACK = path.join(os.tmpdir(), 'hypercomb-breaks-pending-rollback.json')
@@ -157,6 +179,21 @@ async function call(req) {
 const list = () => call({ op: 'breaks-list' })
 const update = (issue, payload) => call({ op: 'break-issue-update', sig: issue.fingerprint, payload })
 
+/**
+ * The hive keeps a CLOSED set of statuses, and silently ignores one it does not
+ * know — so a word this CLI has learned but the running bundle has not would
+ * look like a click that did nothing at all. Say it instead. (`retired` needs
+ * `npm run build:essentials` and a hive tab reload.)
+ */
+function took(reply, payload, issue) {
+  const want = payload && payload.status
+  const got = reply && reply.issue && reply.issue.status
+  if (want && got && got !== want) {
+    throw new Stop('hive-too-old', `the hive kept ${idOf(issue)} at "${got}" instead of "${want}" — run npm run build:essentials and reload the hive tab`)
+  }
+  return reply
+}
+
 // ─── ids and output ─────────────────────────────────────────────────────
 
 function resolveId(issues, prefix) {
@@ -183,7 +220,27 @@ const brief = i => ({
   title: i.title || i.message.slice(0, 120),
   ...(i.area ? { area: i.area } : {}),
   ...(i.status === 'chosen' && i.mode ? { mode: i.mode } : {}),
+  ...(movedNoteOf(i) ? { moved: true } : {}),
+  ...(climbed(i) ? { brokeSince: climbNotes(i).length } : {}),
+  ...(urgentReason(i) ? { urgent: urgentReason(i) } : {}),
 })
+
+/** The tick's evidence note, if it has written one. One per issue, ever. */
+const movedNoteOf = i => (i.notes || []).find(n => String(n.text).startsWith(MOVED))
+
+const isMachineNote = n => MACHINE.some(p => String(n.text).startsWith(p))
+/** A note a PERSON wrote — the tick's own notes are not that. */
+const humanNoted = i => (i.notes || []).some(n => !isMachineNote(n))
+/** The newest reading on the record: the checklist that last put it in front of
+ *  him, a note the tick wrote, a note he wrote. */
+const clueAt = i => (i.notes || []).reduce((max, n) => Math.max(max, n.at || 0), i.offeredAt || 0)
+/** Page loads that STARTED after `at`. The only evidence a stale tab cannot
+ *  manufacture: it can throw all day and never add a load newer than itself. */
+const loadsSince = (i, at) => (i.loads || []).filter(t => t > at)
+const daysOf = list => new Set(list.map(t => new Date(t).toDateString())).size
+const climbNotes = i => (i.notes || []).filter(n => String(n.text).startsWith(SINCE))
+const climbedAt = i => climbNotes(i).reduce((max, n) => Math.max(max, n.at || 0), 0)
+const climbed = i => i.status === 'open' && !!i.offeredAt && climbedAt(i) > i.offeredAt
 
 // ─── what a tick does ───────────────────────────────────────────────────
 
@@ -197,18 +254,178 @@ const reviewable = issues => issues.filter(i => i.status === 'new' && !isWarning
  * person chose it); and no conversation opens inside the gap of the last one.
  * `alsoShown` is the waiting warnings, marked offered once the conversation
  * that shows them has opened.
+ *
+ * `held` are fingerprints whose code has moved since they last happened. They
+ * are dropped from the bucket that SUMMONS a conversation and from nothing
+ * else: they stay on `list`, and on every checklist another issue opens. A
+ * chosen issue is never held — a person put it there by hand.
  */
-function planOffer(issues, now, gapMs) {
+function planOffer(issues, now, gapMs, held = new Set()) {
   const unshown = i => (i.status === 'new' || i.status === 'open') && !i.offeredAt
   const due = [
-    ...issues.filter(i => !isWarning(i) && unshown(i)),
+    ...issues.filter(i => !isWarning(i) && unshown(i) && !held.has(i.fingerprint)),
+    // An issue that out-argued the reading it was left under. Type-blind on
+    // purpose: the warnings-never-summon rule protects FIRST contact, and a
+    // climb means he was already shown it and it broke on three further days.
+    ...issues.filter(i => climbed(i)),
     ...issues.filter(i => i.status === 'chosen' && now - (i.offeredAt || 0) > gapMs),
   ]
   const alsoShown = due.length ? issues.filter(i => isWarning(i) && unshown(i)) : []
+  // `offeredAt` is BOTH "he has seen it" and the gap's anchor, so a climb must
+  // never clear it: that would collapse `lastOffer` and open a window inside
+  // the gap about the very issue that was being held back.
   const lastOffer = issues.reduce((max, i) => Math.max(max, i.offeredAt || 0), 0)
-  const waitMin = due.length && now - lastOffer < gapMs ? Math.ceil((gapMs - (now - lastOffer)) / 60_000) : 0
-  return { due, alsoShown, waitMin }
+  // Urgency SHORTENS the gap; it never removes it. `waitMin` is the only thing
+  // serializing `openConversation`, so a true bypass would race two Terminal
+  // windows and two repair sessions over one log.
+  const urgent = due.filter(i => urgentReason(i))
+  const floor = urgent.length ? Math.min(gapMs, URGENT_GAP_MS) : gapMs
+  const waitMin = due.length && now - lastOffer < floor ? Math.ceil((floor - (now - lastOffer)) / 60_000) : 0
+  return { due, alsoShown, waitMin, urgent }
 }
+
+/**
+ * Which issues may carry an evidence note at all. Deliberately narrow: a break
+ * (never a warning), blamed on named files, seen ONLY on a dev server — a break
+ * a real reader hit on a deployed host is never a churn suspect — and not yet
+ * annotated. One note per issue, ever: the moment anything has been said about
+ * an issue, the tick stops reading it.
+ */
+const notable = i => (i.status === 'new' || i.status === 'open' || i.status === 'chosen')
+  && !isWarning(i)
+  && (i.files || []).length > 0
+  && (i.origins || []).length > 0 && i.origins.every(o => LOCAL.test(o))
+  && !humanNoted(i)
+
+const span = ms => {
+  const min = Math.max(0, Math.round(ms / 60_000))
+  return min < 60 ? `${min}m` : `${Math.floor(min / 60)}h${min % 60}m`
+}
+
+/**
+ * The words the tick puts on the record. It states EVIDENCE and names the
+ * competing explanation, because the participant decides — a note that read as
+ * a verdict would launder a machine's reading through a human click.
+ */
+const movedNote = (issue, moved) =>
+  `${MOVED} every file this break blames changed after its last occurrence — ${moved.file} at ${new Date(moved.at).toISOString()}, `
+  + `${span(moved.at - issue.lastAt)} after the last of ${issue.count} occurrence${issue.count === 1 ? '' : 's'} at ${new Date(issue.lastAt).toISOString()}. `
+  + `All ${issue.sessions} page load${issue.sessions === 1 ? '' : 's'} came from a localhost dev server. `
+  + 'That is evidence the bytes that threw are gone; it is not proof the bug is gone — the same file may have changed for an unrelated reason. '
+  + 'Retire it if the crashing code was replaced.'
+
+/**
+ * The tick's reading of git, per issue. Pure, so the spec can pin it. `notes`
+ * are the evidence notes to write; `held` are the fingerprints that must not
+ * summon a conversation of their own.
+ *
+ * Everything here is built to make a wrong reading cheap. One note ever, so the
+ * cost is one delayed conversation rather than an unbounded silence; any
+ * occurrence since the note, any note a person wrote, or HOLD_MS elapsing
+ * releases the hold for good; an issue reopened by THIS tick is never touched;
+ * and a chosen issue gains the note but keeps its conversation.
+ */
+function planMoved(issues, moved, now, holdMs, reopened = []) {
+  const held = new Set()
+  const notes = []
+  for (const i of issues) {
+    const prior = movedNoteOf(i)
+    if (prior) {
+      // Released by a page load that STARTED after the note — not by any
+      // occurrence. A tab already open when the note was written is running the
+      // very bytes the note says are gone; letting it speak was backwards.
+      if (!humanNoted(i) && i.status !== 'chosen' && !loadsSince(i, prior.at).length && now - prior.at < holdMs) held.add(i.fingerprint)
+      continue
+    }
+    if (reopened.includes(i.fingerprint) || !notable(i)) continue
+    const m = moved.get(i.fingerprint)
+    if (!m || m.at <= i.lastAt) continue
+    if (i.status !== 'chosen') held.add(i.fingerprint)
+    notes.push({ issue: i, payload: { onlyIfStatus: i.status, note: movedNote(i, m) } })
+  }
+  return { held, notes }
+}
+
+const climbNote = (issue, at, since, nth) =>
+  `${SINCE} it has broken in ${since.length} page load${since.length === 1 ? '' : 's'} across ${daysOf(since)} different days `
+  + `since the last thing said about it on ${new Date(at).toISOString()} — the newest started ${new Date(since[since.length - 1]).toISOString()}. `
+  + `A tab that was already open then cannot produce those. It stands at ${issue.count} occurrence${issue.count === 1 ? '' : 's'} across ${issue.sessions} page loads. `
+  + 'That is evidence against the reading it was left under; it is not proof the reading was wrong — the same page can reload onto the same stale bundle. '
+  + (nth >= CLIMB_MAX ? 'This is the third time the loop has raised it. It will not raise it again.' : 'Choose it, or leave it again.')
+
+/**
+ * Which issues have out-argued the reading they were last left under. ONE
+ * question: since the newest thing said about this issue, has it broken in page
+ * loads that STARTED on `CLIMB_DAYS` different days?
+ *
+ * `count` and `sessions` are never read. They are inflated by gesture bursts,
+ * deflated silently when the queue fills, and `sessions` double-counts a
+ * long-lived tab once its id is evicted — so they appear in the note's WORDS,
+ * for a person to weigh, and decide nothing here.
+ */
+function planClimb(issues, held = new Set()) {
+  const plan = []
+  for (const i of issues) {
+    // Never shown: it is already in `due` and needs no argument. Held: the
+    // churn reading has not been contradicted yet, by definition.
+    if (i.status !== 'open' || !i.offeredAt) continue
+    if (held.has(i.fingerprint)) continue
+    if (climbNotes(i).length >= CLIMB_MAX) continue
+    const at = clueAt(i)
+    const since = loadsSince(i, at)
+    if (daysOf(since) < CLIMB_DAYS) continue
+    plan.push({ issue: i, payload: { onlyIfStatus: 'open', note: climbNote(i, at, since, climbNotes(i).length + 1) } })
+  }
+  return plan
+}
+
+/**
+ * Why an issue may open a conversation sooner than the gap, or '' when it may
+ * not. ONE class: a settled claim the hive has falsified — the only thing the
+ * free tick knows is WRONG without reading any code, and bounded by how often
+ * anybody claims a fix, so it cannot become a firehose by construction.
+ *
+ * Two guards against this machine's own failure mode: a compile error leaves
+ * the dev watcher serving the LAST GOOD bundle, so a fix can "not hold" because
+ * the bytes never shipped. The evidence must be TWO distinct page loads, the
+ * newer at least `REOPEN_SETTLE_MS` after the claim. Under that it still
+ * reopens — breadth for the record — it just waits out the ordinary gap.
+ *
+ * `!i.offeredAt` is the veto: once the tick has put an issue in front of
+ * somebody, nothing it does afterwards earns a shortened gap. So a climb can
+ * never be urgent — repetition reaches the door and stops there.
+ */
+const urgentReason = i => {
+  if (i.status !== 'open' || i.offeredAt || isWarning(i)) return ''
+  if (typeof i.fixedAt !== 'number') return ''
+  const after = loadsSince(i, i.fixedAt)
+  if (after.length < 2 || after[after.length - 1] - i.fixedAt < REOPEN_SETTLE_MS) return ''
+  return 'a fix that did not hold'
+}
+
+/**
+ * A settled claim the evidence contradicts. Broader than the fold's own test:
+ * the fold needs a page load that STARTED after the claim, and this hive runs
+ * one long-lived tab, so a real bug can throw all day from a tab older than the
+ * retirement. Any occurrence at all after the stamp brings it back. Pure.
+ */
+function planUnretire(issues) {
+  return issues
+    .filter(i => i.status === 'retired' && typeof i.fixedAt === 'number' && i.lastAt > i.fixedAt)
+    .map(i => ({
+      issue: i,
+      payload: {
+        status: 'open', onlyIfStatus: 'retired', offered: false,
+        note: `broke again after it was retired — an occurrence at ${new Date(i.lastAt).toISOString()}, after the retirement at ${new Date(i.fixedAt).toISOString()}.`,
+      },
+    }))
+}
+
+/** Settled claims the record still contradicts — wrong retirements AND wrong
+ *  fixes, which have the same hole today and no report at all. */
+const stillBreaking = issues => issues
+  .filter(i => (i.status === 'fixed' || i.status === 'retired') && typeof i.fixedAt === 'number' && i.lastAt > i.fixedAt)
+  .map(i => ({ id: idOf(i), status: i.status, since: new Date(i.fixedAt).toISOString(), last: new Date(i.lastAt).toISOString() }))
 
 /**
  * Which offered marks a failed conversation left behind can be taken back now.
@@ -251,8 +468,9 @@ function planChoose(issues, flags) {
   // The conversation that chose them is working them — offered, so the tick
   // does not open a second one on top.
   for (const id of ids(flags.tackle)) patch(resolveId(issues, id), { status: 'chosen', mode, offered: true })
+  for (const id of ids(flags.retire)) patch(resolveId(issues, id), { status: 'retired' })
   for (const id of ids(flags.dismiss)) patch(resolveId(issues, id), { status: 'dismissed' })
-  if (!patches.size) throw new Stop('bad-args', 'choose needs one of --tackle --release --top --bottom --dismiss --shown')
+  if (!patches.size) throw new Stop('bad-args', 'choose needs one of --tackle --release --top --bottom --retire --dismiss --shown')
   return { mode, patches: [...patches].map(([issue, payload]) => ({ issue, payload })) }
 }
 
@@ -293,7 +511,7 @@ const ago = at => {
 const brokeAgain = i => i.status === 'open' && (i.notes || []).some(n => String(n.text).startsWith('broke again'))
 
 // A widget for the desktop app's visualize tool: every row a checkbox (tackle)
-// and a place (keep, top, bottom, dismiss); Send posts the `choose` line back
+// and a place (keep, top, bottom, retire); Send posts the `choose` line back
 // into the conversation, where the agent runs it verbatim. Breaks come first;
 // warnings follow under a line of their own. A row that is already chosen and
 // stays checked is left alone, so the page's mode never rewrites its own; and
@@ -310,6 +528,18 @@ function triageHtml(issues) {
       : brokeAgain(i) ? badge('broke again', 'danger')
         : i.status === 'chosen' ? badge(`chosen: ${esc(i.mode || 'fix')}`, 'warning') : ''
     const kind = isWarning(i) ? '<span style="font-size:11px;font-weight:400;margin-left:6px;color:var(--text-muted)">warning</span>' : ''
+    // Plain words, never the jargon: the row states what was found, and the
+    // note under it names the competing explanation. A badge that read as a
+    // verdict would make "the participant chooses" nominal.
+    const moved = movedNoteOf(i)
+    const movedMark = moved && !brokeAgain(i) ? badge('code moved', 'warning') : ''
+    // The newest argument against the reading it was left under wins the row.
+    const since = climbed(i) ? climbNotes(i).at(-1) : undefined
+    const sinceMark = since ? badge('broke since you looked', 'danger') : ''
+    const said = since || moved
+    const evidence = said
+      ? `<p style="margin:4px 0 0;font-size:12px;line-height:1.5;color:var(--text-muted)">${esc(said.text)}</p>`
+      : ''
     const meta = [id, `${i.count} ${i.count === 1 ? 'time' : 'times'}`, `${i.sessions} page ${i.sessions === 1 ? 'load' : 'loads'}`, `last ${ago(i.lastAt)}`, i.area]
       .filter(Boolean).map(esc).join(' · ')
     const why = i.interpretation
@@ -317,9 +547,9 @@ function triageHtml(issues) {
       : ''
     return `<div style="display:grid;grid-template-columns:20px minmax(0,1fr) 140px;gap:12px;align-items:start;padding:12px 0;border-top:0.5px solid var(--border)">`
       + `<input type="checkbox" data-id="${id}"${i.status === 'chosen' ? ' checked data-chosen="1"' : ''} aria-label="Tackle ${head}" style="margin-top:4px">`
-      + `<div style="min-width:0"><p style="margin:0;font-size:14px;font-weight:500">${head}${mark}${kind}</p>`
-      + `<p style="margin:2px 0 0;font-size:12px;color:var(--text-muted)">${meta}</p>${why}</div>`
-      + `<select data-move="${id}" aria-label="Place for ${head}" style="width:100%"><option value="">Keep place</option><option value="top">Move to top</option><option value="bottom">Move to bottom</option><option value="dismiss">Dismiss</option></select>`
+      + `<div style="min-width:0"><p style="margin:0;font-size:14px;font-weight:500">${head}${mark}${sinceMark}${movedMark}${kind}</p>`
+      + `<p style="margin:2px 0 0;font-size:12px;color:var(--text-muted)">${meta}</p>${why}${evidence}</div>`
+      + `<select data-move="${id}" aria-label="Place for ${head}" style="width:100%"><option value="">Keep place</option><option value="top">Move to top</option><option value="bottom">Move to bottom</option><option value="retire">Retire</option></select>`
       + `</div>`
   }
   const rows = ordered.map((i, n) => {
@@ -342,10 +572,10 @@ ${rows}
 <script>
 const all = s => Array.from(document.querySelectorAll(s))
 document.getElementById('send').addEventListener('click', () => {
-  const moves = { top: [], bottom: [], dismiss: [] }
+  const moves = { top: [], bottom: [], retire: [] }
   all('select[data-move]').forEach(s => { if (s.value) moves[s.value].push(s.dataset.move) })
-  const tackle = all('input[data-id]:checked:not([data-chosen])').map(x => x.dataset.id).filter(id => !moves.dismiss.includes(id))
-  const release = all('input[data-chosen]:not(:checked)').map(x => x.dataset.id).filter(id => !moves.dismiss.includes(id))
+  const tackle = all('input[data-id]:checked:not([data-chosen])').map(x => x.dataset.id).filter(id => !moves.retire.includes(id))
+  const release = all('input[data-chosen]:not(:checked)').map(x => x.dataset.id).filter(id => !moves.retire.includes(id))
   const shown = all('input[data-id]').map(x => x.dataset.id)
   const mode = document.querySelector('input[name=mode]:checked').value
   const flags = ['--mode ' + mode]
@@ -354,11 +584,56 @@ document.getElementById('send').addEventListener('click', () => {
   if (release.length) { flags.push('--release ' + release.join(',')); said.push('put back ' + release.length) }
   if (moves.top.length) { flags.push('--top ' + moves.top.join(',')); said.push(moves.top.length + ' to the top') }
   if (moves.bottom.length) { flags.push('--bottom ' + moves.bottom.join(',')); said.push(moves.bottom.length + ' to the bottom') }
-  if (moves.dismiss.length) { flags.push('--dismiss ' + moves.dismiss.join(',')); said.push('dismiss ' + moves.dismiss.length) }
+  if (moves.retire.length) { flags.push('--retire ' + moves.retire.join(',')); said.push('retire ' + moves.retire.length) }
   flags.push('--shown ' + shown.join(','))
   sendPrompt('Break triage: ' + (said.length ? said.join(', ') : 'keep everything where it is') + '.\\nnode scripts/bridge/breaks.cjs choose ' + flags.join(' '))
 })
 </script>`
+}
+
+// ─── has the code moved? ────────────────────────────────────────────────
+
+// COMMITTED HISTORY ONLY. mtime is content-free — a checkout, a stash pop, a
+// worktree switch or a formatter save all bump it, and this repo has dozens of
+// worktrees. Dirtiness is worse: a dirty blamed file is a refactor IN FLIGHT,
+// which is exactly when nothing should be quietened. git accepts the review's
+// cwd-relative spelling as a pathspec, and `%ct` never prints a path, so no
+// path of git's is ever parsed.
+const commitAt = (() => {
+  const seen = new Map()
+  return file => {
+    if (seen.has(file)) return seen.get(file)
+    let at = 0
+    if (/^[\w./-]+$/.test(file) && !file.startsWith('-') && !file.includes('..')) {
+      const r = require('child_process').spawnSync('git', ['log', '-1', '--format=%ct', '--', file],
+        { cwd: REPO, timeout: 10_000, shell: false, encoding: 'utf8' })
+      const t = Number(String((r && r.stdout) || '').trim())
+      if (Number.isFinite(t) && t > 0) at = t * 1000
+    }
+    seen.set(file, at)
+    return at
+  }
+})()
+
+/**
+ * When every file an issue blames last changed — the OLDEST of them, so more
+ * blamed files makes the claim harder, not easier, and a vaguer review can
+ * never produce a stronger verdict. One unreadable file voids the claim
+ * entirely. Only candidates are probed, so a quiet tick runs no git at all.
+ */
+function probeMoved(issues, at = commitAt) {
+  const moved = new Map()
+  for (const i of issues.filter(notable)) {
+    let oldest = Infinity
+    let file = ''
+    for (const f of i.files) {
+      const c = at(f)
+      if (!c) { oldest = 0; break }
+      if (c < oldest) { oldest = c; file = f }
+    }
+    if (oldest && oldest !== Infinity) moved.set(i.fingerprint, { at: oldest, file, files: i.files.length })
+  }
+  return moved
 }
 
 // ─── the tick ───────────────────────────────────────────────────────────
@@ -439,12 +714,16 @@ function runReview(count) {
 // Terminal splits its command line on `;`. A new tab may be created by a
 // Terminal process that is already running, with that process's environment,
 // so the key is cleared inside the tab itself rather than only in `env`.
-function openConversation() {
+function openConversation(why) {
   return new Promise(resolve => {
     const launch = USE_API_KEY ? 'claude /break-repair' : 'set ANTHROPIC_API_KEY=&& claude /break-repair'
+    // The title bar is the only part of an interruption a person reads before
+    // deciding to engage, so it carries the reason when there is one. A plain
+    // hyphen: Windows Terminal splits its command line on `;`.
+    const title = why ? `Hypercomb breaks - ${why}` : 'Hypercomb breaks'
     let child
     try {
-      child = spawn(TERMINAL, ['-w', 'new', 'new-tab', '--title', 'Hypercomb breaks', '-d', REPO, 'cmd', '/k', launch], {
+      child = spawn(TERMINAL, ['-w', 'new', 'new-tab', '--title', title, '-d', REPO, 'cmd', '/k', launch], {
         cwd: REPO, shell: false, detached: true, stdio: 'ignore', windowsHide: false, env: childEnv(),
       })
     } catch (err) {
@@ -458,9 +737,13 @@ function openConversation() {
 async function tick(dry) {
   let issues
   let queued
+  // What this very tick reopened. An issue that just came back is never read as
+  // churn on the same pass — its `lastAt` is new and its evidence is stale.
+  let reopenedThisTick = []
   try {
     if (!dry) {
       const folded = await call({ op: 'breaks-compact' })
+      reopenedThisTick = folded.reopened || []
       if (folded.folded || folded.created.length || folded.reopened.length) {
         log(`folded ${folded.folded} records: ${folded.created.length} new, ${folded.reopened.length} broke again`)
       }
@@ -534,9 +817,44 @@ async function tick(dry) {
     }
   }
 
+  // A settled claim the hive kept contradicting comes back before anything
+  // else reads the list.
+  for (const { issue, payload } of planUnretire(issues)) {
+    if (dry) { log(`DRY: would un-retire ${idOf(issue)} — still breaking since it was retired`); continue }
+    try {
+      await update(issue, payload)
+      issue.status = 'open'
+      delete issue.offeredAt
+      log(`un-retired ${idOf(issue)}: it kept breaking after it was retired`)
+    } catch { /* the next tick tries again */ }
+  }
+
+  // Then the one question the free tick can answer: has the code each break
+  // blames moved since it last happened? Asked AFTER the review, so a churn
+  // break is still interpreted once — only the CONVERSATION is held.
+  const { held, notes } = planMoved(issues, probeMoved(issues), Date.now(), HOLD_MS, reopenedThisTick)
+  for (const { issue, payload } of notes) {
+    if (dry) { log(`DRY: would note code moved on ${idOf(issue)}`); continue }
+    try {
+      await update(issue, payload)
+      issue.notes = [...(issue.notes || []), { at: Date.now(), text: payload.note }]
+      log(`code moved under ${idOf(issue)}${issue.status === 'chosen' ? '' : ' — held from opening a conversation'}`)
+    } catch { /* the next tick tries again */ }
+  }
+
+  // And the other direction: what has out-argued the reading it was left under?
+  for (const { issue, payload } of planClimb(issues, held)) {
+    if (dry) { log(`DRY: would raise ${idOf(issue)} — it broke again since it was last read`); continue }
+    try {
+      await update(issue, payload)
+      issue.notes = [...(issue.notes || []), { at: Date.now(), text: payload.note }]
+      log(`${idOf(issue)} broke again since you looked — raising it`)
+    } catch { /* the next tick tries again */ }
+  }
+
   // Anything still `new` here is a review that failed; the conversation's own
   // review section picks it up, so it is offered like an open issue.
-  const { due, alsoShown, waitMin } = planOffer(issues, Date.now(), GAP_MS)
+  const { due, alsoShown, waitMin, urgent } = planOffer(issues, Date.now(), GAP_MS, held)
   if (!due.length) {
     const onList = issues.filter(i => OPEN.has(i.status))
     log(`quiet: ${queued} queued, ${onList.filter(i => !isWarning(i)).length} breaks and ${onList.filter(isWarning).length} warnings on the list`)
@@ -567,7 +885,7 @@ async function tick(dry) {
       const reply = await update(issue, { offered: true })
       mark.offeredAt = reply && reply.issue ? reply.issue.offeredAt : undefined
     }
-    failed = await openConversation()
+    failed = await openConversation((urgent || []).length ? urgentReason(urgent[0]) : '')
   } catch (err) {
     failed = String((err && err.message) || err)
   }
@@ -608,10 +926,16 @@ async function main() {
   switch (cmd) {
     case 'status': {
       const { issues, queued } = await list()
-      const counts = { new: 0, open: 0, chosen: 0, fixed: 0, dismissed: 0 }
+      const counts = { new: 0, open: 0, chosen: 0, fixed: 0, dismissed: 0, retired: 0 }
       for (const i of issues) counts[i.status] = (counts[i.status] ?? 0) + 1
       const warnings = issues.filter(i => isWarning(i) && OPEN.has(i.status)).length
-      return out({ ok: true, queued, issues: issues.length, ...counts, warnings })
+      const wrong = stillBreaking(issues)
+      const arguing = issues.filter(climbed).map(idOf)
+      return out({
+        ok: true, queued, issues: issues.length, ...counts, warnings,
+        ...(wrong.length ? { stillBreaking: wrong } : {}),
+        ...(arguing.length ? { brokeSince: arguing } : {}),
+      })
     }
 
     case 'compact': {
@@ -655,20 +979,22 @@ async function main() {
     case 'choose': {
       const { issues } = await list()
       const { mode, patches } = planChoose(issues, flags)
-      for (const { issue, payload } of patches) await update(issue, payload)
+      for (const { issue, payload } of patches) took(await update(issue, payload), payload, issue)
       return out({
         ok: true, mode,
         tackle: ids(flags.tackle), release: ids(flags.release), top: ids(flags.top),
-        bottom: ids(flags.bottom), dismiss: ids(flags.dismiss), shown: ids(flags.shown).length,
+        bottom: ids(flags.bottom), retire: ids(flags.retire), dismiss: ids(flags.dismiss), shown: ids(flags.shown).length,
       })
     }
 
     case 'resolve': {
       const status = args[1]
-      if (!['fixed', 'open', 'dismissed'].includes(status)) throw new Stop('bad-args', 'resolve <id> fixed|open|dismissed [--note T]')
+      // `open` is the un-retire gesture, by hand: it needs no new verb.
+      if (!['fixed', 'open', 'dismissed', 'retired'].includes(status)) throw new Stop('bad-args', 'resolve <id> fixed|open|dismissed|retired [--note T]')
       const { issues } = await list()
       const payload = { status, ...(typeof flags.note === 'string' ? { note: flags.note } : {}) }
-      const r = await update(resolveId(issues, args[0]), payload)
+      const issue = resolveId(issues, args[0])
+      const r = took(await update(issue, payload), payload, issue)
       return out({ ok: true, ...brief(r.issue) })
     }
 
@@ -698,7 +1024,12 @@ async function main() {
   }
 }
 
-module.exports = { REVIEW_ALLOW, Stop, reviewable, planOffer, planRollback, planChoose, childEnv, reviewInvocation, reviewPrompt, triageHtml }
+module.exports = {
+  REVIEW_ALLOW, Stop, reviewable, planOffer, planRollback, planChoose, childEnv,
+  reviewInvocation, reviewPrompt, triageHtml,
+  notable, probeMoved, planMoved, planUnretire, stillBreaking, took, MOVED,
+  planClimb, urgentReason, climbed, SINCE,
+}
 
 if (require.main === module) {
   main().catch(err => {

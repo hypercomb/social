@@ -2216,7 +2216,7 @@ The rail is `min(var(--chat-rail-width, clamp(15rem, 22vw, 20rem)), …)`
 reading area is what is left once the rail, and any providers console, are
 taken out.
 
-| Window | Reading area | Sidebar `clamp(14rem, 30%, 22rem)` | Thread | A depth-3 canvas (12.5rem) pans? |
+| Window | Reading area | Sidebar (v1 default `clamp(14rem, 30%, 22rem)`; since 2026-09-11 `clamp(16rem, 40%, 32rem)`, or the dragged width) | Thread | A depth-3 canvas (12.5rem) pans? |
 |---|---|---|---|---|
 | 1920 | 100rem | 22rem | 78rem | no |
 | 1440 | 70.2rem | 21.1rem | 49rem | no |
@@ -2230,7 +2230,18 @@ taken out.
 `#railBounds` (chat-window.component.ts:3671-3675) computes `room` as the
 panel width, minus `CONVERSATION_MIN`, minus 12 × the root font size while
 `routeSideShown()`. A dragged-wide rail therefore cannot push the split past
-the panel. There is no resize grip for the sidebar in this pass (§8).
+the panel.
+
+**The grip (2026-09-11, un-shelving).** Jaime: *"keep it how it is but draggable,
+make it wider."* The default widened to `clamp(16rem, 40%, 32rem)`, and the
+column wears a grip on its start edge (`.chat-route-grip`, the rail grip's
+twin): dragging it LEFT widens the workflow, double-click or Home hands the
+width back to the clamp, ←/→ step it by 12 px (40 with Shift). The dragged
+width is written to `--chat-route-side-w` on the split from
+`routeSideWidth` (`hc:chat-route-side-width`), bounded by the column's
+12rem minimum and the split's width minus `CONVERSATION_MIN`. This reverses
+the "no resize grip" decision of the same day. The viewport itself was already
+draggable: the pull (§4.3.2) pans the tree when the ground is dragged.
 
 #### 4.3.2 Pull (replaces chat-window.component.ts:2588-2624)
 
@@ -3698,7 +3709,9 @@ rather than taken as written.
 
 ### 2026-09-11 — Jaime's decisions
 
-- **Tree spread:** stacked, one 1.75rem step in; no resize grip.
+- **Tree spread:** stacked, one 1.75rem step in; no resize grip. *(Reversed
+  later the same day when the work was un-shelved: a grip and a wider default,
+  §4.3.1.)*
 - **Steps with branches:** the model's one-line outcome first, then one line
   per branch from the record; goal and done one press away.
 - **Background use:** a true 50% duty cycle while the page is open; the
@@ -3720,3 +3733,108 @@ rather than taken as written.
   (smaller windows, the plain request), and the pane says so in words when the
   chosen model is too weak to organize well — no extra compute, never a
   different model chosen on the participant's behalf.
+
+### 2026-09-11, later — un-shelved
+
+The sidebar was hidden and the drain paused for a day (`routeSideShown`,
+`flowsEnabled`). Jaime: *"I shelved the workflow on the right side of the AI
+chat window … this failed miserably but I'd like to continue and see if we can
+go at it a second time. Especially the labels need to be descriptive, not
+'Replied'."* What had happened: with no local model awake every exchange is a
+dormant stage — a person glyph and a chat-bubble mark, nothing descriptive —
+and the organizer never ran, so that was ALL he saw. Un-shelving:
+
+- both flags flipped back; the specs rewritten against the v2 pipeline
+  (`buildFlowTree`, the two prompt builders, the validators, `cardKey`,
+  `parseFlowRecord` v2, a two-stage stub server answering by request shape,
+  `hc:llm:local:model` seeded so a model resolves, the call budget instead of
+  a conversation limit); en + hi given the 30 summary keys;
+- proved on the isolated 4251 shell against the real `qwen3:8b` through
+  Ollama: a 12-turn pottery-studio conversation became six named steps
+  ("Create landing page for pottery studio" › "Lay out gallery from existing
+  tiles" › "Fix error in contact tile" …), each with a card, the pane reading
+  *where it stands* on a press — eight completions, all to 127.0.0.1:11434;
+- a tool window was asked for and withdrawn in the same breath (*"keep it how
+  it is but draggable, make it wider"*): the grip and the wider default of
+  §4.3.1.
+
+Still owed: the per-model answer-quality record (the 2026-09-11 decisions), and
+a v2 rewrite of `scripts/verify-chat-route.cjs` — its stub still answers in
+the v1 `nodes` shape, so its sections o–q no longer pass.
+
+## 10. The chat experience redesign — pass 1 (2026-09-11)
+
+Jaime, on seeing the un-shelved sidebar live: *"what is this session, am I
+getting anywhere, does it mean anything — it's not quickly apparent … it
+really just doesn't work much to add any clarity to moving between many open
+conversations … we really have to make this user experience incredible and
+versatile but also simple … I'm not talking about just the sidebar either, I'm
+talking about the whole chat AI experience … icons can be greatly useful …
+I love the look and if we could get that for every chat window passively that
+would be incredible."*
+
+The design (whole-window mockup, approved with "start"): every conversation
+has a NAME, a STATE and a "WHERE IT STANDS", written by the local model, and
+every surface shows the same three things the same way — the conversations
+list, the masthead over the thread, the workflow column, the step rules in the
+thread. Build order: (1) the session card and step kinds; (2) masthead, thread
+step rules, composer; (3) the conversations list, grouped by who it waits on;
+(4) the column on the same record. Pass 1 landed:
+
+- **The session card** (`RouteFlowRecord.session`, `RouteFlowSession`): `name`
+  (3–8 words, checked like a title against every card's text) and `stands`
+  (≤ 200 characters, one or two sentences), `sv` = `ROUTE_FLOW_SESSION_VERSION`,
+  keyed by `sessionKey` — the nodes' ids, states and current card keys — so any
+  step's change makes it due again. Written after the cards, once every card is
+  current OR nothing more can be carded right now (a refused card in back-off
+  never holds the name for ten minutes). One call, one retry naming the reason,
+  its own back-off key (`|x|`). `readRoute` hands the shell `flow.session`
+  (`stale` when a step changed since) and `flow.counts` by rolled-up state.
+- **A kind on every step card** (`RouteFlowCard.kind`: fix · idea · choice ·
+  build · look), asked for in the card prompt and its schema, never a reason to
+  refuse a card. `ROUTE_FLOW_CARD_VERSION` 1 → 2, so every card is written once
+  more. The shell draws it (`KIND_ICONS`: bug_report · lightbulb · alt_route ·
+  bolt · explore — all in the shipped subset) in place of the state glyph.
+- **The sidebar head** (`.chat-route-head`, `routeHead`): kicker, the name in
+  the reading face, the *stands* line with the open step's icon, a done/open
+  meter and counts. Until the session card exists it shows the first root step's
+  title and the newest carded step's outcome. State colours are COLOUR ON
+  PURPOSE through `tw.ink()`: done `#70d59a`, open `#e8b04a`, on the head's
+  icon, the meter and each step's glyph.
+- **THE VISITED QUEUE** — Jaime: *"if we don't touch the conversation let's not
+  organize the workflow sidebar … it gets into a queue if you visit it and then
+  that will be done in the background."* `markRouteVisited` (called by the
+  attended call, i.e. whenever a conversation is on screen) records
+  `hc:chat-route-visited` (newest 200). The drain organizes ONLY visited
+  conversations, most recently opened first, live or archived alike, and keeps
+  them fresh as they grow; a conversation nobody opened on this machine is left
+  as it is. This replaces "live newest-first, then archived".
+- Proved on the isolated 4253 shell with the real `qwen3:8b`: the pottery
+  conversation's steps re-carded with kinds (bolt, bug_report), the head read
+  "Create landing page for pottery studio — The landing page is in progress
+  with the gallery section completed and the contact form pending. 6 done · 0
+  open", one step's card sat in back-off and did not hold the session card.
+
+Passes 2–4 are owed. Also owed, noted 2026-09-11 while this landed: Jaime's
+build naming — *"here's a build, give it a name, the name stays and we just
+have revisions under it until we name it again; the date is already the
+created time, don't duplicate it"* — belongs with the revision pool
+(memory: manifest-should-be-a-revision-pool), not this document.
+
+### 2026-09-11, later — the helper runs on Haiku or Sonnet
+
+Jaime: *"Make sure we use Haiku or Sonnet for our background helper from now
+on because qwen is not doing it for us — helpers and/or orchestrators."* A
+parallel session landed the mechanism the same hour: `llmPolicy.orchestratorProvider`
+(model-policy.ts, default `'anthropic'`, `'local'` restores the machine-local
+probe) and `organizerGate` / `organizerModel` / `awakeOrganizerLabeller` in
+chat-route.ts, with a "Background helper" picker in the providers window; the
+weight is `llmPolicy.orchestratorTier` (`fast` = Haiku by default, `balanced`
+= Sonnet). The session card, the kinds and the visited queue run through the
+same gate unchanged. Consequences, stated plainly: the organizer now needs the
+provider's key under Providers — without one it reads `off`, and the pane's
+line was reworded for that ("the background helper is switched off or has no
+key"); the "nothing leaves the machine" promise of §4.1.8 holds only while the
+helper is set to Local. The local-model proofs above stand for the local path;
+the Haiku path was not proved live here because a key cannot be entered on the
+participant's behalf.

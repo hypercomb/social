@@ -57,6 +57,11 @@ vi.hoisted(() => {
 })
 
 import {
+  buildFlowTree,
+  cardKey,
+  checkFlowSession,
+  checkFlowSummary,
+  checkFlowTitle,
   closedFlowEnd,
   deriveRoute,
   extractRouteFlow,
@@ -64,13 +69,19 @@ import {
   flowMatches,
   IN_PROGRESS_MS,
   parseFlowRecord,
-  parseRouteFlow,
+  planFlowWindow,
+  ROUTE_FLOW_CARD_VERSION,
   ROUTE_FLOW_IDLE_MS,
+  ROUTE_FLOW_SESSION_VERSION,
   ROUTE_FLOW_MAX_NODES,
   ROUTE_FLOW_VERSION,
   routeExchanges,
-  routeFlowPrompt,
-  validateFlowNodes,
+  routeFlowCardPrompt,
+  routeFlowSessionInputs,
+  routeFlowStructurePrompt,
+  sessionDue,
+  sessionKey,
+  type RouteFlowExchange,
   type RouteTurn,
 } from './chat-route.js'
 import type { ChatStep } from './chat-steps.js'
@@ -643,15 +654,16 @@ describe('readRoute reads the records, strictly', () => {
     const pool = new MockDir('threads')
     const store = makeStore(pool)
     const { route, thread } = await load(store)
-    expect(await route.readRoute('chat:never')).toEqual({ rows: [], unfinished: [] })
-    expect(await route.readRoute('')).toEqual({ rows: [], unfinished: [] })
+    expect(await route.readRoute('chat:never')).toMatchObject({ rows: [], unfinished: [] })
+    expect(await route.readRoute('')).toMatchObject({ rows: [], unfinished: [] })
 
     await thread.appendTurn(CONVO, 'user', 'hello')
     expect((await bucketOf(pool, CONVO))!.dirs.size, 'no ledger was minted by reading').toBe(0)
     // No work, and no flow: the exchange is a dormant stage. Reading never
     // created the flows pool.
     const noLedger = await route.readRoute(CONVO)
-    expect(noLedger).toEqual({ rows: [], unfinished: [] })
+    expect(noLedger).toMatchObject({ rows: [], unfinished: [] })
+    expect(noLedger.flow).toBeUndefined()
     expect(store.pools.has('chat:route-flows')).toBe(false)
   })
 
@@ -758,189 +770,371 @@ describe('ChatThreads names the live run', () => {
 //  12. the passive drain: live newest-first then archived, a budget, the gate
 //      re-read mid-pass, and never a second mint beside the attended one
 
-describe('extracting and repairing a flow', () => {
-  const NODES = '{"nodes":[{"id":"a","title":"Plan the site","turns":[0,1],"state":"done"}]}'
-
-  it.each([
-    ['plain JSON', NODES],
-    ['a think block and a fence', `<think>I should group these</think>\n\`\`\`json\n${NODES}\n\`\`\``],
-    ['prose around it', `Here is the workflow:\n${NODES}\nHope that helps.`],
-    ['a bare array', '[{"id":"a","title":"Plan the site","turns":[0,1],"state":"done"}]'],
-    ['a trailing comma', '{"nodes":[{"id":"a","title":"Plan the site","turns":[0,1],"state":"done"},]}'],
-    ['a nested workflow object', `{"workflow":${NODES}}`],
-    ['an unterminated fence', `\`\`\`json\n${NODES}`],
-  ])('reads %s', (_name, text) => {
-    expect(parseRouteFlow(text, 4)).toEqual([{ id: 'a', title: 'Plan the site', turns: [0, 1], state: 'done' }])
-  })
-
-  it.each([
-    ['broken JSON', '{"nodes": [{"title": "Plan'],
-    ['no JSON at all', 'I organized it into three phases.'],
-    ['JSON left inside an unclosed think block', `<think>maybe ${NODES}`],
-    ['an empty answer', ''],
-    ['nodes with nothing valid', '{"nodes":[{"title":"","turns":[0]},{"title":"Far away","turns":[99]}]}'],
-  ])('refuses %s', (_name, text) => {
-    expect(parseRouteFlow(text, 4)).toBeNull()
-  })
-
-  it('extracts the JSON value, not the prose', () => {
+describe('extracting a flow answer', () => {
+  it('extracts the JSON value, not the prose — a think block, a fence, prose around it, a trailing comma', () => {
     expect(extractRouteFlow('ok ```\n[1, 2]\n``` done')).toEqual([1, 2])
+    expect(extractRouteFlow('<think>group them</think>\n```json\n{"exchanges":[{"e":1,},]}\n```')).toEqual({ exchanges: [{ e: 1 }] })
+    expect(extractRouteFlow('Here it is:\n{"a":1}\nHope that helps.')).toEqual({ a: 1 })
+    expect(extractRouteFlow('```json\n{"a":1}')).toEqual({ a: 1 })
     expect(extractRouteFlow('nothing here')).toBeNull()
+    expect(extractRouteFlow('<think>maybe {"a":1}')).toBeNull()
+    expect(extractRouteFlow('')).toBeNull()
+  })
+})
+
+// ── stage 1: the model tags exchanges, code builds the tree ─────────────
+
+const entry = (e: number, task: string, extra: Partial<{ title: string; from: string; state: string; drops: string }> = {}) =>
+  ({ e, task, title: '', from: '', state: 'open', drops: '', ...extra })
+const answer = (entries: unknown[]): string => JSON.stringify({ exchanges: entries })
+/** Exchanges whose words never meet, so the re-home never fires unless a test wants it to. */
+const plain = (count: number): Pick<RouteFlowExchange, 'participant' | 'replies'>[] =>
+  Array.from({ length: count }, (_, k) => ({ participant: `topic${k + 1}`, replies: [`reply${k + 1}`] }))
+const fresh = (count: number) => ({ previous: null, from: 0, upto: count, texts: plain(count) })
+
+describe('buildFlowTree — the model tags exchanges, code builds the tree', () => {
+  it('the Lisbon example: a reuse keeps the id, a part and a detour branch, a reversal drops its target — in preorder', () => {
+    const tree = buildFlowTree(answer([
+      entry(1, 't1', { title: 'Plan a week in Lisbon' }),
+      entry(2, 't2', { title: 'Book the morning flight to Lisbon', from: 't1', state: 'done' }),
+      entry(3, 't3', { title: 'Check passport expiry for the flight', from: 't2', state: 'done' }),
+      entry(4, 't2', { state: 'done' }),
+      entry(5, 't4', { title: 'Book the Alfama guesthouse', from: 't1', state: 'decided' }),
+      entry(6, 't5', { title: 'Book a hotel in Baixa instead', from: 't1', state: 'done', drops: 't4' }),
+      entry(7, 't5', { state: 'done' }),
+    ]), fresh(7))!
+    expect(tree.exchanges).toEqual(['t1', 't2', 't3', 't2', 't4', 't5', 't5'])
+    expect(tree.nodes.map(n => [n.id, n.parent, n.state, n.title])).toEqual([
+      ['t1', undefined, 'open', 'Plan a week in Lisbon'],
+      ['t2', 't1', 'done', 'Book the morning flight to Lisbon'],
+      ['t3', 't2', 'done', 'Check passport expiry for the flight'],
+      ['t4', 't1', 'dropped', 'Book the Alfama guesthouse'],
+      ['t5', 't1', 'done', 'Book a hotel in Baixa instead'],
+    ])
   })
 
-  it('repairs titles, details, turns and states', () => {
-    const nodes = validateFlowNodes({
-      nodes: [{
-        id: 'a',
-        title: '  "One two three four five six seven eight nine ten."  ',
-        detail: 'x'.repeat(300),
-        turns: [3, 0, '2', '4-5', 99, -1, 1.5, 'soon', 0],
-        state: 'Completed',
-      }, {
-        id: 'b', title: 'In flight', turns: [1], state: 'in progress',
-      }, {
-        id: 'c', title: 'Went nowhere', turns: [1], state: 'abandoned',
-      }, {
-        id: 'd', title: 'Picked one', turns: [1], state: 'decision',
-      }, {
-        id: 'e', title: 'Whatever', turns: [1], state: 'sideways',
-      }],
-    }, 6)!
-    expect(nodes[0]).toEqual({
-      id: 'a', title: 'One two three four five six seven eight', detail: 'x'.repeat(159) + '…', turns: [0, 2, 3, 4, 5], state: 'done',
-    })
-    expect(nodes.map(n => n.state)).toEqual(['done', 'open', 'dropped', 'decided', 'done'])
+  it("the model's ids are aliases: a first-seen t7 is canonical t1, and the alias is reused within the window", () => {
+    const tree = buildFlowTree(answer([entry(1, 't7', { title: 'Plan the garden beds' }), entry(2, 't7', { state: 'done' })]), fresh(2))!
+    expect(tree.exchanges).toEqual(['t1', 't1'])
+    expect(tree.nodes.map(n => [n.id, n.state])).toEqual([['t1', 'done']])
   })
 
-  it('keeps ids unique: a missing id is given one, a repeated id drops the later node', () => {
-    const nodes = validateFlowNodes([
-      { title: 'First', turns: [0] },
-      { id: 'n1', title: 'Second', turns: [1] },
-      { id: 'n1', title: 'Duplicate', turns: [2] },
-      'not a node',
-      { id: 'x', turns: [2] },
-    ], 4)!
-    expect(nodes.map(n => [n.id, n.title])).toEqual([['n1_', 'First'], ['n1', 'Second']])
+  it('a missing entry continues the previous task, and an exchange 1 with nothing usable is an untitled task', () => {
+    const tree = buildFlowTree(answer([entry(1, 't1', { title: 'Plan the site' }), entry(3, 't1')]), fresh(3))!
+    expect(tree.exchanges).toEqual(['t1', 't1', 't1'])
+    const untitled = buildFlowTree(answer([entry(1, 'a'), entry(2, 'a')]), fresh(2))!
+    expect(untitled.nodes).toEqual([{ id: 't1', title: '', state: 'open' }])
+    expect(untitled.exchanges).toEqual(['t1', 't1'])
   })
 
-  it('takes off parents that do not precede — which is what makes a cycle impossible', () => {
-    const nodes = validateFlowNodes([
-      { id: 'a', parent: 'b', title: 'A', turns: [0] },       // b comes later: off
-      { id: 'b', parent: 'a', title: 'B', turns: [1] },       // a precedes: kept
-      { id: 'c', parent: 'c', title: 'C', turns: [2] },       // itself: off
-      { id: 'd', parent: 'nobody', title: 'D', turns: [3] },  // unknown: off
-    ], 4)!
-    expect(nodes.map(n => [n.id, n.parent])).toEqual([['a', undefined], ['b', 'a'], ['c', undefined], ['d', undefined]])
+  it('deeper than three levels re-hangs on the ancestor at depth two', () => {
+    const tree = buildFlowTree(answer([
+      entry(1, 't1', { title: 'Build the landing page' }),
+      entry(2, 't2', { title: 'Add the gallery section', from: 't1' }),
+      entry(3, 't3', { title: 'Size the gallery thumbnails', from: 't2' }),
+      entry(4, 't4', { title: 'Pick the thumbnail border', from: 't3' }),
+    ]), fresh(4))!
+    expect(tree.nodes.map(n => [n.id, n.parent])).toEqual([['t1', undefined], ['t2', 't1'], ['t3', 't2'], ['t4', 't2']])
   })
 
-  it('re-hangs anything deeper than three levels on the ancestor at depth two', () => {
-    const nodes = validateFlowNodes([
-      { id: 'a', title: 'A', turns: [0] },
-      { id: 'b', parent: 'a', title: 'B', turns: [1] },
-      { id: 'c', parent: 'b', title: 'C', turns: [2] },
-      { id: 'd', parent: 'c', title: 'D', turns: [3] },
-      { id: 'e', parent: 'd', title: 'E', turns: [4] },
-    ], 5)!
-    expect(nodes.map(n => [n.id, n.parent])).toEqual([['a', undefined], ['b', 'a'], ['c', 'b'], ['d', 'b'], ['e', 'b']])
+  it('a drop marks an earlier task dropped — never itself or its own ancestor', () => {
+    const tree = buildFlowTree(answer([
+      entry(1, 't1', { title: 'Plan the site' }),
+      entry(2, 't2', { title: 'Write the about page', from: 't1', drops: 't1' }),
+      entry(3, 't3', { title: 'Write the contact page', from: 't1', drops: 't2' }),
+      entry(4, 't3', { drops: 't3' }),
+    ]), fresh(4))!
+    expect(tree.nodes.map(n => [n.id, n.state])).toEqual([['t1', 'open'], ['t2', 'dropped'], ['t3', 'open']])
   })
 
-  it('gives a node with no turns its children\'s, and drops a node that covers nothing either way', () => {
-    const nodes = validateFlowNodes([
-      { id: 'p', title: 'Phase', turns: [] },
-      { id: 'x', parent: 'p', title: 'X', turns: [4, 2] },
-      { id: 'y', parent: 'p', title: 'Y', turns: [3] },
-      { id: 'z', title: 'Out of range', turns: [50] },
-      { id: 'q', title: 'Empty phase' },
-      { id: 'r', parent: 'q', title: 'Empty child', turns: [] },
-    ], 10)!
-    expect(nodes.map(n => [n.id, n.turns])).toEqual([['p', [2, 3, 4]], ['x', [2, 4]], ['y', [3]]])
-  })
-
-  it(`keeps at most ${ROUTE_FLOW_MAX_NODES} nodes — the first ones, so every kept parent is kept`, () => {
-    const many = Array.from({ length: 30 }, (_, i) => ({ id: `n${i}`, title: `Node ${i}`, turns: [i % 5], ...(i ? { parent: 'n0' } : {}) }))
-    const nodes = validateFlowNodes(many, 5)!
-    expect(nodes).toHaveLength(ROUTE_FLOW_MAX_NODES)
-    expect(nodes[15]!.id).toBe('n15')
-    expect(nodes.every(n => !n.parent || nodes.some(p => p.id === n.parent))).toBe(true)
-  })
-
-  it('is null with nothing to cover or nothing valid', () => {
-    expect(validateFlowNodes([{ title: 'A', turns: [0] }], 0)).toBeNull()
-    expect(validateFlowNodes('junk', 5)).toBeNull()
-    expect(validateFlowNodes({ nodes: [] }, 5)).toBeNull()
-    expect(validateFlowNodes({ other: [{ title: 'A', turns: [0] }] }, 5)).toBeNull()
-  })
-
-  it('a stored record at another version, for another conversation, or with no sig reads as absent', () => {
-    const record = {
-      kind: 'chat:route-flow', v: ROUTE_FLOW_VERSION, convoId: CONVO, upToTurnCount: 2, upToTurnSig: SIG('b'), at: 1,
-      nodes: [{ id: 'a', title: 'A', turns: [0, 1, 7], state: 'done' }],
+  it('settled assignments never change; a released node not issued again goes, and its number is issued again', () => {
+    const previous = {
+      nodes: [{ id: 't1', title: 'Plan the site', state: 'open' as const }, { id: 't2', title: 'Fix the header', state: 'open' as const, parent: 't1' }],
+      exchanges: ['t1', 't2', 't2'],
     }
-    expect(parseFlowRecord(record, CONVO)?.nodes).toEqual([{ id: 'a', title: 'A', turns: [0, 1], state: 'done' }])
-    expect(parseFlowRecord({ ...record, v: ROUTE_FLOW_VERSION + 1 }, CONVO)).toBeNull()
-    expect(parseFlowRecord(record, 'chat:tile:/other')).toBeNull()
-    expect(parseFlowRecord({ ...record, upToTurnSig: '' }, CONVO)).toBeNull()
-    expect(parseFlowRecord({ ...record, upToTurnCount: 0 }, CONVO)).toBeNull()
-    expect(parseFlowRecord({ ...record, nodes: [{ title: 'A', turns: [5] }] }, CONVO)).toBeNull()
+    const tree = buildFlowTree(answer([entry(2, 't1'), entry(3, 'new', { title: 'Add a footer', from: 't1' })]),
+      { previous, from: 1, upto: 3, texts: plain(3) })!
+    expect(tree.exchanges).toEqual(['t1', 't1', 't2'])
+    expect(tree.nodes.map(n => [n.id, n.title, n.parent])).toEqual([['t1', 'Plan the site', undefined], ['t2', 'Add a footer', 't1']])
+  })
+
+  it('fewer than half the window answered is unusable; entries outside the window are ignored', () => {
+    expect(buildFlowTree(answer([entry(1, 't1', { title: 'Plan the site' })]), fresh(4))).toBeNull()
+    expect(buildFlowTree('I would group these into two phases.', fresh(2))).toBeNull()
+    const outside = buildFlowTree(answer([entry(9, 't1', { title: 'Plan the site' }), entry(1, 't1', { title: 'Plan the site' }), entry(2, 't1')]), fresh(2))!
+    expect(outside.exchanges).toEqual(['t1', 't1'])
+  })
+
+  it(`node ${ROUTE_FLOW_MAX_NODES + 1} folds into the task before it`, () => {
+    const many = Array.from({ length: ROUTE_FLOW_MAX_NODES + 1 }, (_, i) => entry(i + 1, `n${i + 1}`, { title: `Build section ${i + 1}` }))
+    const tree = buildFlowTree(answer(many), fresh(ROUTE_FLOW_MAX_NODES + 1))!
+    expect(tree.nodes).toHaveLength(ROUTE_FLOW_MAX_NODES)
+    expect(tree.exchanges[ROUTE_FLOW_MAX_NODES]).toBe(`t${ROUTE_FLOW_MAX_NODES}`)
+  })
+
+  it('re-homes by words: the test for the fold anchoring goes to the node whose covered text says fold and anchor', () => {
+    const texts = [
+      { participant: 'The sidebar jumps when folding a branch', replies: ['Anchored the fold so the sidebar stays put.'] },
+      { participant: 'Rename the project to Hypercomb', replies: ['Renamed it everywhere.'] },
+      { participant: 'Write a test for the fold anchoring from earlier.', replies: ['Wrote the test.'] },
+    ]
+    const tree = buildFlowTree(answer([
+      entry(1, 't1', { title: 'Fix sidebar jump' }),
+      entry(2, 't2', { title: 'Rename the project' }),
+      entry(3, 't2'),
+    ]), { previous: null, from: 0, upto: 3, texts })!
+    expect(tree.exchanges).toEqual(['t1', 't2', 't1'])
+  })
+})
+
+describe('parseFlowRecord v2 — what a stored record must be', () => {
+  const CARD = {
+    key: SIG('c'), cv: ROUTE_FLOW_CARD_VERSION, goal: 'Lay out the site pages.', done: 'Chose several pages for the site.',
+    outcome: 'Several pages it is.', exchanges: 1, model: 'qwen', at: 5,
+  }
+  const RECORD = {
+    kind: 'chat:route-flow', v: ROUTE_FLOW_VERSION, convoId: CONVO, upToTurnCount: 4, upToTurnSig: SIG('d'), at: 1, model: 'qwen',
+    exchanges: ['t1', 't2'], settled: 0, pending: 0,
+    nodes: [
+      { id: 't1', title: 'Lay out the site', state: 'open', named: true, card: CARD },
+      { id: 't2', title: 'Choose how many pages', state: 'decided', parent: 't1', card: { ...CARD, key: SIG('e') } },
+    ],
+  }
+
+  it('reads a whole record back, recomputing pending', () => {
+    expect(parseFlowRecord({ ...RECORD, pending: 7 }, CONVO)).toEqual(RECORD)
+  })
+
+  it('a v1 record, another conversation, no sig, or an exchange naming no node reads as absent', () => {
+    expect(parseFlowRecord({ ...RECORD, v: 1 }, CONVO)).toBeNull()
+    expect(parseFlowRecord(RECORD, 'chat:tile:/elsewhere')).toBeNull()
+    expect(parseFlowRecord({ ...RECORD, upToTurnSig: '' }, CONVO)).toBeNull()
+    expect(parseFlowRecord({ ...RECORD, exchanges: ['t1', 't9'] }, CONVO)).toBeNull()
+    expect(parseFlowRecord('junk', CONVO)).toBeNull()
+  })
+
+  it('a bad card removes the card only; a card at an older cv reads stale; both count as pending', () => {
+    const bad = parseFlowRecord({ ...RECORD, nodes: [{ ...RECORD.nodes[0], card: { ...CARD, key: 'not-a-sig' } }, RECORD.nodes[1]] }, CONVO)!
+    expect(bad.nodes[0]).toEqual({ id: 't1', title: 'Lay out the site', named: true, state: 'open' })
+    expect(bad.pending).toBe(1)
+    const old = parseFlowRecord({ ...RECORD, nodes: [RECORD.nodes[0], { ...RECORD.nodes[1], card: { ...CARD, key: SIG('e'), cv: 0 } }] }, CONVO)!
+    expect(old.nodes[1]!.card).toMatchObject({ cv: 0, stale: true })
+    expect(old.pending).toBe(1)
+  })
+
+  it('repairs settled, states, parents and depth', () => {
+    const seven = { ...RECORD, exchanges: ['t1', 't2', 't1', 't1', 't1', 't1', 't1'] }
+    expect(parseFlowRecord({ ...seven, settled: 99 }, CONVO)!.settled).toBe(2)
+    expect(parseFlowRecord({ ...seven, settled: -1 }, CONVO)!.settled).toBe(2)
+    expect(parseFlowRecord({ ...seven, settled: 3 }, CONVO)!.settled).toBe(3)
+    const repaired = parseFlowRecord({
+      ...RECORD, exchanges: ['t1', 't2', 't3', 't4', 't5'], nodes: [
+        { id: 't1', title: 'Plan the site', state: 'whatever' },
+        { id: 't2', title: 'Write a part', state: 'open', parent: 't9' },
+        { id: 't3', title: 'Go deeper', state: 'open', parent: 't2' },
+        { id: 't4', title: 'Deeper still', state: 'open', parent: 't3' },
+        { id: 't5', title: 'Too deep', state: 'open', parent: 't4' },
+      ],
+    }, CONVO)!
+    expect(repaired.nodes.map(n => [n.id, n.state, n.parent])).toEqual([
+      ['t1', 'done', undefined], ['t2', 'open', undefined], ['t3', 'open', 't2'], ['t4', 'open', 't3'], ['t5', 'open', 't3'],
+    ])
+    expect(repaired.pending).toBe(5)
   })
 })
 
 const QUESTION_REPLY = 'Two ways.\n\n```hypercomb-question\n{"prompt":"How many pages?","options":["One","Several"]}\n```'
 
 describe('what the model is given', () => {
-  it('numbers every turn, reads a question as its one line, and adds work and decisions', () => {
-    const prompt = routeFlowPrompt({
-      turns: [
-        { role: 'user', text: 'Lay it out' },
-        { role: 'assistant', text: QUESTION_REPLY },
-        { role: 'user', text: 'Several' },
-        { role: 'assistant', text: 'Several pages it is.' },
-      ],
-      work: new Map([[3, [
-        { seq: 0, verb: 'note-add', cell: 'site', outcome: 'ok', at: 1 },
-        { seq: 1, verb: 'update', cell: 'gone', outcome: 'failed', at: 2 },
-      ]]]),
+  const exchange = (participant: string, replies: string[], extra: Partial<RouteFlowExchange> = {}): RouteFlowExchange =>
+    ({ participant, replies, attempts: [], decided: [], ...extra })
+
+  it('a fresh window numbers every exchange, with its work and decisions, and asks for all of it', () => {
+    const prompt = routeFlowStructurePrompt({
+      exchanges: [exchange('Lay it out', ['Two ways.'], {
+        attempts: [{ verb: 'note-add', cell: 'site', outcome: 'ok' }, { verb: 'update', cell: 'gone', outcome: 'failed' }],
+        decided: ['How many pages? → Several'],
+      }), exchange('Several', ['Several pages it is.'])],
+      from: 0, upto: 2, tasks: [], assigned: [],
     })
-    expect(prompt).toContain('TURNS 0–3')
-    expect(prompt).toContain('[0] participant: Lay it out')
-    expect(prompt).toContain('[1] reply: Two ways.')
-    expect(prompt).toContain('How many pages?')
-    expect(prompt).not.toContain('hypercomb-question')
-    expect(prompt).toContain('    decided: How many pages? → Several')
-    expect(prompt).toContain('    work: note-add site ok · update gone FAILED')
-    expect(prompt).not.toContain('PREVIOUS WORKFLOW')
+    expect(prompt).toContain('EXCHANGES E1–E2:')
+    expect(prompt).toContain('E1:\n  participant: Lay it out\n  reply: Two ways.\n  work: note-add site ok · update gone FAILED\n  decided: How many pages? → Several')
+    expect(prompt).toContain('E2:\n  participant: Several\n  reply: Several pages it is.')
+    expect(prompt).toContain('Map every exchange, E1 to E2.')
+    expect(prompt).not.toContain('TASKS SO FAR')
   })
 
-  it('clips each turn and keeps a long thread\'s lead and tail, naming what it cut', () => {
-    const turns = Array.from({ length: 40 }, (_, i) => ({
-      role: (i % 2 ? 'assistant' : 'user') as 'user' | 'assistant',
-      text: `turn ${i} ` + 'word '.repeat(80),
-    }))
-    const prompt = routeFlowPrompt({ turns })
-    expect(prompt).toContain('[3] reply: turn 3')
-    expect(prompt).toContain('… turns 4–19 omitted …')
-    expect(prompt).not.toContain('[4] ')
-    expect(prompt).not.toContain('[19] ')
-    expect(prompt).toContain('[20] participant: turn 20')
-    expect(prompt).toContain('[39] reply: turn 39')
-    for (const line of prompt.split('\n').filter(l => l.startsWith('['))) {
-      expect(line.replace(/^\[\d+\] (participant|reply): /, '').length).toBeLessThanOrEqual(200)
+  it('a later window lists the tasks so far, repeats the last mapped exchange, and asks for the window only', () => {
+    const prompt = routeFlowStructurePrompt({
+      exchanges: [exchange('Lay it out', ['Two ways.']), exchange('Several', ['Several pages it is.']), exchange('Add a contact page', ['Added.'])],
+      from: 1, upto: 3,
+      tasks: [{ id: 't1', title: 'Lay out the site', state: 'open' }, { id: 't3', title: 'Choose how many pages', state: 'decided', parent: 't1' }],
+      assigned: ['t1'],
+    })
+    expect(prompt).toContain('TASKS SO FAR (E1–E1 are already mapped):\n- t1 [open]: Lay out the site\n- t3 (branch of t1) [decided]: Choose how many pages')
+    expect(prompt).toContain('THE LAST MAPPED EXCHANGE, for context:\nE1:\n  participant: Lay it out\n  reply: Two ways.\n  → t1')
+    expect(prompt).toContain('EXCHANGES E2–E3:')
+    expect(prompt).toContain('E3:\n  participant: Add a contact page')
+    expect(prompt).toContain('Map only E2 to E3. Reuse an id above when an exchange continues or returns to that task; the next new id is t4.')
+  })
+
+  it('a long reply keeps its head and tail, the middle replies fold to a count, and work past six folds too', () => {
+    const long = 'x'.repeat(500) + ' the end'
+    const prompt = routeFlowStructurePrompt({
+      exchanges: [exchange('Go', [long, 'second', 'third', 'fourth'], {
+        attempts: Array.from({ length: 8 }, (_, i) => ({ verb: `verb${i}`, cell: `c${i}`, outcome: 'ok' as const })),
+      })],
+      from: 0, upto: 1, tasks: [], assigned: [],
+    })
+    expect(prompt).toContain(`  reply: ${'x'.repeat(120)} … ${long.slice(-240)}\n  (+2 more replies)\n  reply: fourth`)
+    expect(prompt).toContain('  work: verb0 c0 ok · verb1 c1 ok · verb2 c2 ok · verb3 c3 ok · verb4 c4 ok · verb5 c5 ok · +2 more')
+    expect(prompt).not.toContain('second')
+  })
+
+  it('the window: nothing new means no call; the provisional five are mapped again with the new ones', () => {
+    const seven = Array.from({ length: 7 }, (_, k) => exchange(`topic${k + 1}`, [`reply${k + 1}`]))
+    const previous = { nodes: [{ id: 't1', title: 'Plan the beds', state: 'open' as const }], exchanges: Array<string>(7).fill('t1'), settled: 2 }
+    expect(planFlowWindow(seven, previous)).toBeNull()
+    const nine = [...seven, exchange('topic8', ['reply8']), exchange('topic9', ['reply9'])]
+    const window = planFlowWindow(nine, previous)!
+    expect([window.from, window.upto, window.tight]).toEqual([2, 9, false])
+    expect(window.prompt).toContain('TASKS SO FAR (E1–E2 are already mapped)')
+    expect(window.prompt).toContain('EXCHANGES E3–E9:')
+    expect(planFlowWindow(nine, null)).toMatchObject({ from: 0, upto: 9 })
+  })
+
+  it('a card is asked with the status, the name, its part-of, its branches and the numbered messages', () => {
+    const prompt = routeFlowCardPrompt({
+      state: 'open', title: 'Lay out the site', partOf: 'Build the studio site',
+      branches: [{ title: 'Choose how many pages', state: 'decided', outcome: 'Several pages it is.' }, { title: 'Pick a colour', state: 'open' }],
+      messages: [
+        { index: 0, role: 'user', text: 'Lay it out', work: [{ verb: 'note-add', cell: 'site', outcome: 'ok' }] },
+        { index: 1, role: 'assistant', text: 'Two ways.', decided: 'How many pages? → Several' },
+      ],
+    })
+    expect(prompt).toContain('STATUS: open\nWORKING NAME: Lay out the site\nPART OF: Build the studio site')
+    expect(prompt).toContain('ITS BRANCHES (each already has its own card):\n- Choose how many pages [decided]: Several pages it is.\n- Pick a colour [open]')
+    expect(prompt).toContain('MESSAGES:\n[1] participant: Lay it out\n    work: note-add site ok\n[2] reply: Two ways.\n    decided: How many pages? → Several')
+    expect(prompt.endsWith('Write the card as JSON.')).toBe(true)
+    expect(routeFlowCardPrompt({ state: 'done', title: 'Named', named: true, branches: [], messages: [] })).toContain('CURRENT NAME: Named')
+  })
+})
+
+describe('the card validators', () => {
+  const covered = 'Add the contact section now please\nAdded the contact section with opening hours.'
+
+  it('checkFlowTitle accepts a grounded verb-first title and sentence-cases it the way the conversation writes', () => {
+    expect(checkFlowTitle('"Add the contact section."', { covered })).toEqual({ ok: true, title: 'Add the contact section' })
+    const shadow = 'The Ollama host is shadowing the port'
+    expect(checkFlowTitle('Fix Ollama host Shadowing', { covered: shadow, corpus: shadow })).toEqual({ ok: true, title: 'Fix Ollama host shadowing' })
+  })
+
+  it('checkFlowTitle refuses the vague, the long, a question, a role word, an ungrounded title, a copied opening and a branch name', () => {
+    const why = (raw: string, context: Parameters<typeof checkFlowTitle>[1] = { covered }): string => {
+      const result = checkFlowTitle(raw, context)
+      return result.ok ? 'ok' : result.why
     }
+    expect(why('Discussion')).toBe('too-short')
+    expect(why('Handle the request')).toBe('generic')
+    expect(why('Add one two three four five six seven eight')).toBe('too-long')
+    expect(why('Assign plots fairly: waitlist or lottery?')).toBe('question')
+    expect(why('Help the user with contact')).toBe('role-word')
+    expect(why('Tune the hyperdrive')).toBe('ungrounded')
+    expect(why('Add the contact section now', { covered, participants: ['Add the contact section now please'] })).toBe('copied')
+    expect(why('Add the contact section', { covered, childTitles: ['add the contact section'] })).toBe('names-a-branch')
   })
 
-  it('passes the previous flow and asks for an UPDATE over the new turns', () => {
-    const turns = Array.from({ length: 8 }, (_, i) => ({ role: (i % 2 ? 'assistant' : 'user') as 'user' | 'assistant', text: `turn ${i}` }))
-    const previous = { upToTurnCount: 6, nodes: [{ id: 'site', title: 'Lay out the site', turns: [0, 1, 2], state: 'done' as const }] }
-    const prompt = routeFlowPrompt({ turns, previous })
-    expect(prompt).toContain('PREVIOUS WORKFLOW (organizes turns 0–5):')
-    expect(prompt).toContain('{"nodes":[{"id":"site","title":"Lay out the site","turns":[0,1,2],"state":"done"}]}')
-    expect(prompt).toContain('NEW TURNS 6–7 (turns 4–5 repeated for context):')
-    expect(prompt).toContain('[4] participant: turn 4')
-    expect(prompt).toContain('[7] reply: turn 7')
-    expect(prompt).not.toContain('[3] ')
-    expect(prompt).toContain('UPDATE it')
-    // A previous flow that already read every turn is not an update.
-    expect(routeFlowPrompt({ turns, previous: { ...previous, upToTurnCount: 8 } })).not.toContain('PREVIOUS WORKFLOW')
+  it("checkFlowSummary clips, then refuses a short part, a role word, meta talk, a repeat, a copied branch and another step's facts", () => {
+    const given = 'MESSAGES: [1] participant: make the gallery thumbnails larger [2] reply: Thumbnails are larger now.'
+    const others = 'Added opening hours under the contact form.'
+    const good = { goal: 'Make the gallery thumbnails larger.', done: 'Thumbnails were enlarged.', outcome: 'Thumbnails are larger now.' }
+    expect(checkFlowSummary(good, { given, others })).toEqual({ ok: true, summary: good })
+    const why = (card: Record<string, string>, context: Parameters<typeof checkFlowSummary>[1] = { given, others }): string => {
+      const result = checkFlowSummary(card, context)
+      return result.ok ? 'ok' : `${result.why}${result.word ? ':' + result.word : ''}`
+    }
+    expect(why({ ...good, goal: 'Bigger.' })).toBe('short-goal')
+    expect(why({ ...good, done: 'The user asked for larger thumbnails.' })).toBe('role-done')
+    expect(why({ ...good, outcome: 'This task is finished.' })).toBe('meta-outcome')
+    expect(why({ ...good, done: good.goal })).toBe('repeated')
+    expect(why({ ...good, outcome: 'Hours went under the contact form.' })).toBe('ungrounded-outcome:hours')
+    expect(why(good, { given, others, childCards: [{ done: 'Thumbnails were enlarged.' }] })).toBe('copies-a-branch')
+    const long = checkFlowSummary({ ...good, done: 'Enlarged the thumbnails. '.repeat(20) }, { given, others })
+    const clipped = long.ok ? long.summary.done.length : -1
+    expect(clipped).toBeGreaterThan(0)
+    expect(clipped).toBeLessThanOrEqual(280)
+  })
+})
+
+describe('the session card — a name and where it stands, from the steps', () => {
+  const CARD = { key: SIG('c'), cv: ROUTE_FLOW_CARD_VERSION, goal: 'Lay out the site pages.', done: 'Chose several pages for the site.', outcome: 'Several pages it is.', exchanges: 1, model: 'qwen', at: 5 }
+  const NODES = [
+    { id: 't1', title: 'Lay out the site', state: 'open' as const, card: CARD },
+    { id: 't2', title: 'Choose how many pages', state: 'decided' as const, parent: 't1', card: { ...CARD, key: SIG('e') } },
+    { id: 't3', title: 'Pick a colour', state: 'open' as const, parent: 't1' },
+  ]
+
+  it('asks with the steps in order, branches indented, outcomes where a card is current, and the counts', () => {
+    const inputs = routeFlowSessionInputs({ nodes: NODES })
+    expect(inputs.prompt).toContain('STEPS, in order (a step under another is a branch of it):\n- [open] Lay out the site: Several pages it is.\n  - [decided] Choose how many pages: Several pages it is.\n  - [open] Pick a colour\n\n0 done, 2 open, 1 decided, 0 dropped.')
+    expect(inputs.covered).toContain('Pick a colour')
+  })
+
+  it('checks the name like a title and clips where it stands at a sentence', () => {
+    const { covered } = routeFlowSessionInputs({ nodes: NODES })
+    expect(checkFlowSession({ name: '"Lay out the studio site."', stands: 'Several pages are chosen; the colour is still open.' }, { covered }))
+      .toEqual({ ok: true, session: { name: 'Lay out the studio site', stands: 'Several pages are chosen; the colour is still open.' } })
+    const why = (card: Record<string, string>): string => { const r = checkFlowSession(card, { covered }); return r.ok ? 'ok' : r.why }
+    expect(why({ name: 'Discussion', stands: 'Several pages are chosen.' })).toBe('name rejected (too-short)')
+    expect(why({ name: 'Tune the hyperdrive', stands: 'Several pages are chosen.' })).toBe('name rejected (ungrounded)')
+    expect(why({ name: 'Lay out the site', stands: 'Done.' })).toBe('short-stands')
+    expect(why({ name: 'Lay out the site', stands: 'The user still has to pick a colour.' })).toBe('role-stands')
+    expect(why({ name: 'Lay out the site', stands: 'This conversation is nearly finished.' })).toBe('meta-stands')
+    const long = checkFlowSession({ name: 'Lay out the site', stands: 'Several pages are chosen. '.repeat(20) }, { covered })
+    expect(long.ok ? long.session.stands.length : -1).toBeLessThanOrEqual(200)
+  })
+
+  it('is keyed by the steps: due when absent, stale, at an old version or when any step or card changed; never while a card is pending', async () => {
+    const key = await sessionKey({ nodes: NODES })
+    expect(key).toMatch(/^[0-9a-f]{64}$/)
+    const session = { key, sv: ROUTE_FLOW_SESSION_VERSION, name: 'Lay out the site', stands: 'Several pages are chosen.', model: 'qwen', at: 1 }
+    expect(await sessionDue({ nodes: NODES, pending: 0, session })).toBe(false)
+    expect(await sessionDue({ nodes: NODES, pending: 0 })).toBe(true)
+    expect(await sessionDue({ nodes: NODES, pending: 0, session: { ...session, stale: true } })).toBe(true)
+    expect(await sessionDue({ nodes: NODES, pending: 0, session: { ...session, sv: 0 } })).toBe(true)
+    expect(await sessionDue({ nodes: [{ ...NODES[0]!, state: 'done' }, ...NODES.slice(1)], pending: 0, session })).toBe(true)
+    expect(await sessionDue({ nodes: NODES, pending: 1, session: { ...session, key: SIG('0') } }), 'a pending card comes first').toBe(false)
+  })
+
+  it('parseFlowRecord keeps a valid session card, drops a bad one, and reads an old version as stale', () => {
+    const base = {
+      kind: 'chat:route-flow', v: ROUTE_FLOW_VERSION, convoId: CONVO, upToTurnCount: 4, upToTurnSig: SIG('d'), at: 1, model: 'qwen',
+      exchanges: ['t1', 't2'], settled: 0, pending: 0, nodes: NODES.slice(0, 2),
+    }
+    const session = { key: SIG('a'), sv: ROUTE_FLOW_SESSION_VERSION, name: 'Lay out the site', stands: 'Several pages are chosen.', model: 'qwen', at: 2 }
+    expect(parseFlowRecord({ ...base, session }, CONVO)?.session).toEqual(session)
+    expect(parseFlowRecord({ ...base, session: { ...session, key: 'nope' } }, CONVO)?.session).toBeUndefined()
+    expect(parseFlowRecord({ ...base, session: { ...session, sv: 0 } }, CONVO)?.session).toMatchObject({ sv: 0, stale: true })
+    expect(parseFlowRecord({ ...base, nodes: [{ ...NODES[0], card: { ...CARD, kind: 'fix' } }, NODES[1]] }, CONVO)?.nodes[0]?.card?.kind).toBe('fix')
+    expect(parseFlowRecord({ ...base, nodes: [{ ...NODES[0], card: { ...CARD, kind: 'party' } }, NODES[1]] }, CONVO)?.nodes[0]?.card?.kind).toBeUndefined()
+  })
+})
+
+describe('cardKey — a card is keyed by its inputs, never by the model', () => {
+  it('is stable for equal inputs and changes with the state, a turn, work, a decision or a branch key', async () => {
+    const base = {
+      state: 'open' as const, turnSigs: [SIG('a'), SIG('b')],
+      work: [{ verb: 'note-add', cell: 'site', outcome: 'ok' as const }],
+      decided: [{ prompt: 'How many pages?', chosen: 'Several' }], childKeys: [SIG('c')],
+    }
+    const key = await cardKey(base)
+    expect(key).toMatch(/^[0-9a-f]{64}$/)
+    expect(await cardKey({ ...base })).toBe(key)
+    expect(await cardKey({ ...base, state: 'done' })).not.toBe(key)
+    expect(await cardKey({ ...base, turnSigs: [SIG('a')] })).not.toBe(key)
+    expect(await cardKey({ ...base, work: [] })).not.toBe(key)
+    expect(await cardKey({ ...base, decided: [] })).not.toBe(key)
+    expect(await cardKey({ ...base, childKeys: [] })).not.toBe(key)
   })
 })
 
@@ -1013,14 +1207,15 @@ const LOCAL_HOST = 'http://127.0.0.1:11434'
 const MODELS_URL = `${LOCAL_HOST}/v1/models`
 const CHAT_URL = `${LOCAL_HOST}/v1/chat/completions`
 const FLOWS_MEANING = 'chat:route-flows'
-const FLOW_ANSWER = JSON.stringify({
-  nodes: [
-    { id: 'site', title: 'Lay out the site', detail: 'Chose a structure for the pages.', turns: [0, 1, 2, 3], state: 'done' },
-    { id: 'pages', parent: 'site', title: 'Choose how many pages', turns: [1, 2], state: 'decided' },
-  ],
-})
+/** The model of the participant's last own local chat — the one that organizes. */
+const MODEL = 'qwen2.5-coder:7b'
 /** An hour ago: every exchange here is long quiet unless a test says not. */
 const OLD_AT = Date.now() - 60 * 60_000
+
+const FLOW_STATE = Symbol.for('hypercomb.chat-route.flow-state')
+/** The pinned coordination state (lane, guards, back-offs) survives module
+ *  reloads on purpose — so every case starts it over. */
+const resetFlowState = (): void => { delete (globalThis as Record<symbol, unknown>)[FLOW_STATE] }
 
 const answered = (json: unknown) => ({
   ok: true, status: 200, json: async () => json, text: async () => JSON.stringify(json),
@@ -1030,14 +1225,59 @@ const completion = (content: string) => answered({
   usage: { prompt_tokens: 1, completion_tokens: 1 },
 })
 
+/** The request as the model reads it: the wire body with its newlines back. */
+const asked = (body: string): string => body.replace(/\\n/g, '\n')
+const isCardCall = (body: string): boolean => /You write the card for ONE task/.test(body)
+const isSessionCall = (body: string): boolean => /You name ONE conversation/.test(body)
+const isStructureCall = (body: string): boolean => /EXCHANGES E\d+–E\d+:/.test(asked(body))
+
+/** STAGE 1, as a well-behaved model answers it: exchange 1 opens t1, exchange
+ *  2 is a decided branch of it, every later exchange returns to t1. */
+const structureAnswer = (body: string): string => {
+  const [, from = '1', upto = '1'] = /EXCHANGES E(\d+)–E(\d+):/.exec(asked(body)) ?? []
+  const entries: unknown[] = []
+  for (let e = Number(from); e <= Number(upto); e++) {
+    entries.push(e === 1 ? { e, task: 't1', title: 'Lay out the site', from: '', state: 'open', drops: '' }
+      : e === 2 ? { e, task: 't2', title: 'Choose how many pages', from: 't1', state: 'decided', drops: '' }
+        : { e, task: 't1', title: '', from: '', state: 'open', drops: '' })
+  }
+  return JSON.stringify({ exchanges: entries })
+}
+/** STAGE 2: a card grounded in the node's own first participant message. */
+const cardAnswer = (body: string): string => {
+  const said = (/\[\d+\] participant: ([^\n]+)/.exec(asked(body))?.[1] ?? 'the work')
+    .split(' ').slice(0, 5).join(' ').replace(/[.?!]+$/, '')
+  return JSON.stringify({
+    title: `Settle ${said}`,
+    goal: `Set out to settle ${said}.`,
+    done: `Worked through ${said} in the replies given.`,
+    outcome: `Ended with ${said} settled.`,
+    kind: 'build',
+  })
+}
+/** THE SESSION CARD: a name grounded in the first step's title, and where it stands. */
+const sessionAnswer = (body: string): string => {
+  const first = /- \[\w+\] Settle ([^:\n]+)/.exec(asked(body))?.[1] ?? 'the work'
+  return JSON.stringify({ name: `Finish ${first}`, stands: `Every part of ${first} is settled; nothing is waiting.` })
+}
+const answerByShape = (body: string): string =>
+  isSessionCall(body) ? sessionAnswer(body) : isCardCall(body) ? cardAnswer(body) : structureAnswer(body)
+
 /** A machine-local server as fetch sees it: `/v1/models` names one model,
- *  completions answer through `reply`, anything else is refused. */
-const localServer = (reply: (body: string) => unknown = () => completion(FLOW_ANSWER)) =>
+ *  completions answer through `reply` (by request shape), anything else is refused. */
+const localServer = (reply: (body: string) => unknown = body => completion(answerByShape(body))) =>
   vi.fn(async (url: string, init?: { body?: unknown }): Promise<unknown> => {
-    if (url === MODELS_URL) return answered({ data: [{ id: 'qwen2.5-coder:7b' }] })
+    if (url === MODELS_URL) return answered({ data: [{ id: MODEL }] })
     if (url === CHAT_URL) return reply(String(init?.body ?? ''))
     throw new TypeError(`refused: ${url}`)
   })
+type LocalServer = ReturnType<typeof localServer>
+
+const chatCalls = (server: LocalServer): number => server.mock.calls.filter(([url]) => url === CHAT_URL).length
+/** The structure prompts sent, in order, as the model read them. */
+const structureCalls = (server: LocalServer): string[] => server.mock.calls
+  .filter(([url, init]) => url === CHAT_URL && isStructureCall(String(init?.body ?? '')))
+  .map(([, init]) => asked(String(init?.body ?? '')))
 
 /** A turn written the way chat-thread writes one, at a chosen time. */
 const seedTurn = async (
@@ -1089,10 +1329,12 @@ const loadFlows = async (store: ReturnType<typeof makeStore>) => {
 }
 type Flows = Awaited<ReturnType<typeof loadFlows>>
 
-/** Somebody ELSE's probe found the server awake — the console, a call. The
- *  fetch log is cleared afterwards, so every later call is the flow's. */
-const wake = async (m: Flows, server: ReturnType<typeof localServer>): Promise<void> => {
+/** Somebody ELSE's probe found the server awake — the console, a call — and
+ *  the participant's last own local chat named the model. The fetch log is
+ *  cleared afterwards, so every later call is the flow's. */
+const wake = async (m: Flows, server: LocalServer): Promise<void> => {
   vi.stubGlobal('fetch', server)
+  localStorage.setItem(m.dispatch.LOCAL_MODEL_STORAGE_KEY, JSON.stringify({ providerId: 'local', model: MODEL, at: Date.now() }))
   expect((await m.liveness.checkLocalServer(m.registry.get('local')!)).state).toBe('awake')
   server.mockClear()
 }
@@ -1106,13 +1348,13 @@ const recordIn = (slot: MockDir | undefined): Record<string, unknown> | null => 
   return file ? JSON.parse(new TextDecoder().decode(file.bytes)) as Record<string, unknown> : null
 }
 
-const bodyOf = (server: ReturnType<typeof localServer>, call: number): string =>
+const bodyOf = (server: LocalServer, call: number): string =>
   String(server.mock.calls[call]?.[1]?.body ?? '')
 
 const tick = (ms = 20): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
 
 describe('organizing a conversation — only the machine-local model, never a knock', () => {
-  beforeEach(() => { localStorage.clear() })
+  beforeEach(() => { localStorage.clear(); resetFlowState(); localStorage.setItem('hc:llm:orchestrator-provider', 'local') })
   afterEach(() => { vi.unstubAllGlobals() })
 
   it('with no machine-local provider: no call, no record, not even a read — attended or passive', async () => {
@@ -1126,7 +1368,7 @@ describe('organizing a conversation — only the machine-local model, never a kn
     store.opened.length = 0
 
     expect(await m.route.organizeRoute(CONVO)).toBe(0)
-    expect(await m.route.drainRouteFlows()).toEqual({ organized: 0, behind: 0, stopped: 'gate' })
+    expect(await m.route.drainRouteFlows()).toMatchObject({ organized: 0, behind: 0, stopped: 'gate' })
     await tick()
     expect(refused).not.toHaveBeenCalled()
     expect(store.opened, 'the gate runs before a single read').toEqual([])
@@ -1148,7 +1390,7 @@ describe('organizing a conversation — only the machine-local model, never a kn
     store.opened.length = 0
 
     expect(m.liveness.localServerReport(local).state).toBe('unknown')
-    expect(await m.route.awakeLocalLabeller()).toBeNull()
+    expect(await m.route.awakeOrganizerLabeller(MODEL)).toBeNull()
     expect(await m.route.organizeRoute(CONVO)).toBe(0)
     expect((await m.route.drainRouteFlows()).stopped).toBe('gate')
     await tick()
@@ -1179,7 +1421,7 @@ describe('organizing a conversation — only the machine-local model, never a kn
     expect(empty).not.toHaveBeenCalled()
   })
 
-  it('an awake local model organizes the conversation once, silently, into its one slot, and the route reads it back', async () => {
+  it('an awake local model organizes the conversation — one structure call, a card per node, silently, into its one slot — and the route reads it back', async () => {
     const pool = new MockDir('threads')
     const store = makeStore(pool)
     const sigs = await twoExchanges(store, pool)
@@ -1195,21 +1437,34 @@ describe('organizing a conversation — only the machine-local model, never a kn
     try {
       expect(await m.route.organizeRoute(CONVO)).toBe(1)
 
-      // Only one completion, on the local server — no probe rode along.
-      expect(server.mock.calls.map(([url]) => url)).toEqual([CHAT_URL])
-      const body = JSON.parse(bodyOf(server, 0)) as { model: string }
-      expect(body.model).toBe('qwen2.5-coder:7b')
-      const wire = bodyOf(server, 0)
-      expect(wire).toContain('RATIONAL order')
-      expect(wire).toContain('[0] participant: Lay out the site')
+      // The structure call, a card per node, then the session card, all on the
+      // local server — no probe rode along. Thinking is off and the shape is constrained.
+      expect(server.mock.calls.map(([url]) => url)).toEqual([CHAT_URL, CHAT_URL, CHAT_URL, CHAT_URL])
+      const body = JSON.parse(bodyOf(server, 0)) as { model: string; reasoning_effort?: string; response_format?: { type?: string } }
+      expect(body.model).toBe(MODEL)
+      expect(body.reasoning_effort).toBe('none')
+      expect(body.response_format?.type).toBe('json_schema')
+      const wire = asked(bodyOf(server, 0))
+      expect(wire).toContain('You map a conversation onto the TASKS')
+      expect(wire).toContain('E1:\n  participant: Lay out the site')
       expect(wire).toContain('decided: How many pages? → Several')
       expect(wire).not.toContain('hypercomb-question')
+      const cards = [1, 2].map(call => asked(bodyOf(server, call)))
+      expect(cards.every(isCardCall)).toBe(true)
+      expect(cards[0], 'post-order: the branch is carded before its parent').toContain('WORKING NAME: Choose how many pages')
+      expect(cards[1]).toContain('WORKING NAME: Lay out the site')
+      expect(cards[1], "the parent is told its branch's card").toContain('ITS BRANCHES (each already has its own card):\n- Settle Several [decided]: Ended with Several settled.')
+      const session = asked(bodyOf(server, 3))
+      expect(isSessionCall(session)).toBe(true)
+      expect(session).toContain('STEPS, in order (a step under another is a branch of it):\n- [open] Settle Lay out the site: Ended with Lay out the site settled.\n  - [decided] Settle Several: Ended with Several settled.')
+      expect(session).toContain('0 done, 1 open, 1 decided, 0 dropped.')
 
-      // SILENT: no resource minted, so no content:wrote for a host to pick up.
+      // SILENT: no resource minted, so no content:wrote for a host to pick up;
+      // announced once per write — the structure, then each card.
       expect(store.minted.length).toBe(minted)
       expect(wrote).not.toHaveBeenCalled()
-      expect(changed).toHaveBeenCalledTimes(1)
-      expect(changed).toHaveBeenCalledWith({ convoId: CONVO })
+      expect(changed).toHaveBeenCalledTimes(4)
+      expect(changed).toHaveBeenLastCalledWith({ convoId: CONVO })
 
       // ONE slot: the pool holds one sub-bucket for the conversation, and it
       // holds one document.
@@ -1218,29 +1473,39 @@ describe('organizing a conversation — only the machine-local model, never a kn
       expect(flows.dirs.size).toBe(1)
       const slot = await slotOf(store)
       expect(slot?.files.size).toBe(1)
-      expect(recordIn(slot)).toEqual({
-        kind: 'chat:route-flow', v: ROUTE_FLOW_VERSION, convoId: CONVO,
-        upToTurnCount: 4, upToTurnSig: sigs[3], at: expect.any(Number),
+      expect(recordIn(slot)).toMatchObject({
+        kind: 'chat:route-flow', v: ROUTE_FLOW_VERSION, convoId: CONVO, model: MODEL,
+        upToTurnCount: 4, upToTurnSig: sigs[3], exchanges: ['t1', 't2'], settled: 0, pending: 0,
         nodes: [
-          { id: 'site', title: 'Lay out the site', detail: 'Chose a structure for the pages.', turns: [0, 1, 2, 3], state: 'done' },
-          { id: 'pages', parent: 'site', title: 'Choose how many pages', turns: [1, 2], state: 'decided' },
+          {
+            id: 't1', title: 'Settle Lay out the site', named: true, state: 'open',
+            card: { cv: ROUTE_FLOW_CARD_VERSION, model: MODEL, exchanges: 1, outcome: 'Ended with Lay out the site settled.', kind: 'build' },
+          },
+          { id: 't2', parent: 't1', title: 'Settle Several', named: true, state: 'decided', card: { exchanges: 1, kind: 'build' } },
         ],
+        session: { sv: ROUTE_FLOW_SESSION_VERSION, name: 'Finish Lay out the site', stands: 'Every part of Lay out the site is settled; nothing is waiting.', model: MODEL },
       })
       const route = await m.route.readRoute(CONVO)
       expect(route.flow?.upToTurnCount).toBe(4)
-      expect(route.flow?.nodes.map(n => [n.id, n.parent])).toEqual([['site', undefined], ['pages', 'site']])
+      expect(route.flow?.nodes.map(n => [n.id, n.parent, n.exchanges, n.turns])).toEqual([['t1', undefined, [1], [0, 1]], ['t2', 't1', [2], [2, 3]]])
+      expect(route.flow?.nodes[0]?.card?.outcome).toBe('Ended with Lay out the site settled.')
+      expect(route.flow?.nodes[0]?.card?.kind).toBe('build')
+      expect(route.flow?.session).toMatchObject({ name: 'Finish Lay out the site', model: MODEL })
+      expect(route.flow?.session?.stale).toBeUndefined()
+      expect(route.flow?.counts, 'the parent rolls up to done over its settled branch').toEqual({ done: 1, open: 0, decided: 1, dropped: 0 })
+      expect(route.organizerState).toBe('awake')
 
       // Nothing closed beyond it: a second pass calls nothing, announces nothing.
       expect(await m.route.organizeRoute(CONVO)).toBe(0)
       expect((await m.route.drainRouteFlows()).organized).toBe(0)
-      expect(server).toHaveBeenCalledTimes(1)
-      expect(changed).toHaveBeenCalledTimes(1)
+      expect(chatCalls(server)).toBe(4)
+      expect(changed).toHaveBeenCalledTimes(4)
     } finally {
       for (const off of offs) off()
     }
   })
 
-  it('re-derives in place when a new exchange closes — the previous flow in the prompt, still one file', async () => {
+  it('re-derives in place when a new exchange closes — still one file, and only the node whose inputs changed is carded again', async () => {
     const pool = new MockDir('threads')
     const store = makeStore(pool)
     await twoExchanges(store, pool)
@@ -1249,24 +1514,52 @@ describe('organizing a conversation — only the machine-local model, never a kn
     await wake(m, server)
     expect(await m.route.organizeRoute(CONVO)).toBe(1)
     const firstFile = [...(await slotOf(store))!.files.keys()][0]
+    const before = chatCalls(server)
 
     await seedTurn(store, pool, 'user', 'Add a contact page', OLD_AT + 500)
     const last = await seedTurn(store, pool, 'assistant', 'Added.', OLD_AT + 600)
     expect(await m.route.organizeRoute(CONVO)).toBe(1)
 
-    expect(server).toHaveBeenCalledTimes(2)
-    const update = bodyOf(server, 1)
-    expect(update).toContain('PREVIOUS WORKFLOW (organizes turns 0–3):')
-    expect(update).toContain('Choose how many pages')
-    expect(update).toContain('NEW TURNS 4–5')
-    expect(update).toContain('[4] participant: Add a contact page')
-    expect(update).toContain('UPDATE it')
+    const structures = structureCalls(server)
+    expect(structures).toHaveLength(2)
+    expect(structures[1]).toContain('EXCHANGES E1–E3:')
+    expect(structures[1]).toContain('E3:\n  participant: Add a contact page\n  reply: Added.')
+    // t1 gained an exchange, so its card key changed; t2's did not — and a
+    // changed step makes the session card due again.
+    expect(chatCalls(server) - before).toBe(3)
 
     const slot = await slotOf(store)
     expect(slot?.files.size, 'the slot is recycled, not appended to').toBe(1)
     expect([...slot!.files.keys()][0]).not.toBe(firstFile)
-    expect(recordIn(slot)).toMatchObject({ upToTurnCount: 6, upToTurnSig: last })
+    expect(recordIn(slot)).toMatchObject({ upToTurnCount: 6, upToTurnSig: last, exchanges: ['t1', 't2', 't1'], settled: 0, pending: 0 })
     expect(store.pools.get(FLOWS_MEANING)!.dirs.size).toBe(1)
+  })
+
+  it('a long conversation is mapped window by window: the settled prefix is frozen and only the provisional tail is mapped again', async () => {
+    const pool = new MockDir('threads')
+    const store = makeStore(pool)
+    for (let k = 1; k <= 6; k++) {
+      await seedTurn(store, pool, 'user', `Question ${k} about the beds`, OLD_AT + k * 1_000)
+      await seedTurn(store, pool, 'assistant', `Answer ${k} about the beds.`, OLD_AT + k * 1_000 + 500)
+    }
+    const m = await loadFlows(store)
+    const server = localServer()
+    await wake(m, server)
+    expect(await m.route.organizeRoute(CONVO)).toBe(1)
+    expect(structureCalls(server)).toHaveLength(1)
+    expect(structureCalls(server)[0]).toContain('EXCHANGES E1–E6:')
+    expect(recordIn(await slotOf(store))).toMatchObject({ exchanges: ['t1', 't2', 't1', 't1', 't1', 't1'], settled: 1 })
+
+    await seedTurn(store, pool, 'user', 'Question 7 about the beds', OLD_AT + 7_000)
+    await seedTurn(store, pool, 'assistant', 'Answer 7 about the beds.', OLD_AT + 7_500)
+    expect(await m.route.organizeRoute(CONVO)).toBe(1)
+    const update = structureCalls(server)[1]!
+    expect(update).toContain('TASKS SO FAR (E1–E1 are already mapped):\n- t1 [open]: ')
+    expect(update).toContain('THE LAST MAPPED EXCHANGE, for context:\nE1:\n  participant: Question 1 about the beds\n  reply: Answer 1 about the beds.\n  → t1')
+    expect(update).toContain('EXCHANGES E2–E7:')
+    expect(update.split('E1:').length - 1, 'E1 appears once — as context, never in the window').toBe(1)
+    expect(update).toContain('the next new id is t2.')
+    expect(recordIn(await slotOf(store))).toMatchObject({ upToTurnCount: 14, exchanges: ['t1', 't2', 't1', 't1', 't1', 't1', 't1'], settled: 2 })
   })
 
   it('a record at another version, a corrupt one, or one about another history reads as absent and is minted again', async () => {
@@ -1283,19 +1576,20 @@ describe('organizing a conversation — only the machine-local model, never a kn
     file.bytes = new TextEncoder().encode(JSON.stringify({ ...record, v: record.v + 1 }))
     expect((await m.route.readRoute(CONVO)).flow).toBeUndefined()
     expect(await m.route.organizeRoute(CONVO)).toBe(1)
-    expect(bodyOf(server, 1)).not.toContain('PREVIOUS WORKFLOW')
+    expect(structureCalls(server)).toHaveLength(2)
+    expect(structureCalls(server)[1]).not.toContain('TASKS SO FAR')
 
     const again = [...(await slotOf(store))!.files.values()][0]!
     again.bytes = new TextEncoder().encode(JSON.stringify({ ...record, upToTurnSig: SIG('f') }))
     expect((await m.route.readRoute(CONVO)).flow).toBeUndefined()
     expect(await m.route.organizeRoute(CONVO)).toBe(1)
-    expect(bodyOf(server, 2), 'a flow about another history is not updated from').not.toContain('PREVIOUS WORKFLOW')
+    expect(structureCalls(server)[2], 'a flow about another history is not updated from').not.toContain('TASKS SO FAR')
 
     const third = [...(await slotOf(store))!.files.values()][0]!
     third.bytes = new TextEncoder().encode('{not json')
     expect((await m.route.readRoute(CONVO)).flow).toBeUndefined()
     expect(await m.route.organizeRoute(CONVO)).toBe(1)
-    expect(server).toHaveBeenCalledTimes(3 + 1)
+    expect(structureCalls(server)).toHaveLength(4)
     expect((await slotOf(store))?.files.size).toBe(1)
   })
 
@@ -1314,24 +1608,26 @@ describe('organizing a conversation — only the machine-local model, never a kn
     store.optimizations.set(SIG('9'), { kind: 'ask', payload: { mode: 'chat', convoId: CONVO } })
     store.optimizations.set(SIG('8'), { kind: 'ask', payload: { mode: 'chat', convoId: 'chat:tile:/elsewhere' } })
     expect(await m.route.organizeRoute(CONVO)).toBe(1)
-    expect(recordIn(await slotOf(store))).toMatchObject({ upToTurnCount: 2 })
-    expect(bodyOf(server, 0)).not.toContain('[2] ')
+    expect(recordIn(await slotOf(store))).toMatchObject({ upToTurnCount: 2, exchanges: ['t1'] })
+    expect(structureCalls(server)[0]).not.toContain('E2:')
+    const held = chatCalls(server)
 
     // The shell's own wait and live run hold it too.
     store.optimizations.clear()
     expect(await m.route.organizeRoute(CONVO, 'ask:' + '7'.repeat(32))).toBe(0)
     expect(await m.route.organizeRoute(CONVO, undefined, true)).toBe(0)
-    expect(server).toHaveBeenCalledTimes(1)
+    expect(chatCalls(server)).toBe(held)
 
     // Nothing outstanding and long quiet: now it closes.
     expect(await m.route.organizeRoute(CONVO)).toBe(1)
-    expect(recordIn(await slotOf(store))).toMatchObject({ upToTurnCount: 4 })
+    expect(recordIn(await slotOf(store))).toMatchObject({ upToTurnCount: 4, exchanges: ['t1', 't2'] })
+    const closed = chatCalls(server)
 
     // A reply seconds old is not closed.
     await seedTurn(store, pool, 'user', 'And a blog?', Date.now() - 4_000)
     await seedTurn(store, pool, 'assistant', 'Yes.', Date.now() - 3_000)
     expect(await m.route.organizeRoute(CONVO)).toBe(0)
-    expect(server).toHaveBeenCalledTimes(2)
+    expect(chatCalls(server)).toBe(closed)
   })
 
   it('an answer it cannot organize writes nothing and is not asked for again soon', async () => {
@@ -1347,14 +1643,30 @@ describe('organizing a conversation — only the machine-local model, never a kn
     expect(await slotOf(store)).toBeUndefined()
   })
 
-  it('reads an answer wrapped in reasoning and a fence', async () => {
+  it('a refused card in back-off does not hold the session card: it is written from what is carded', async () => {
     const pool = new MockDir('threads')
     const store = makeStore(pool)
     await twoExchanges(store, pool)
     const m = await loadFlows(store)
-    const server = localServer(() => completion(`<think>group by the site</think>\n\`\`\`json\n${FLOW_ANSWER}\n\`\`\``))
+    // t2's card answers are prose, twice: rejected, backed off. t1 and the session are fine.
+    const server = localServer(body => completion(isCardCall(body) && /WORKING NAME: Choose how many pages/.test(asked(body)) ? 'I cannot say.' : answerByShape(body)))
     await wake(m, server)
     expect(await m.route.organizeRoute(CONVO)).toBe(1)
+    const record = recordIn(await slotOf(store))!
+    expect(record['pending']).toBe(1)
+    expect(record['session']).toMatchObject({ name: expect.stringContaining('Lay out the site') })
+    expect((await m.route.readRoute(CONVO)).cardBackoff).toEqual(['t2'])
+  })
+
+  it('reads answers wrapped in reasoning and a fence — the structure and every card', async () => {
+    const pool = new MockDir('threads')
+    const store = makeStore(pool)
+    await twoExchanges(store, pool)
+    const m = await loadFlows(store)
+    const server = localServer(body => completion(`<think>group by the site</think>\n\`\`\`json\n${answerByShape(body)}\n\`\`\``))
+    await wake(m, server)
+    expect(await m.route.organizeRoute(CONVO)).toBe(1)
+    expect(recordIn(await slotOf(store))).toMatchObject({ pending: 0 })
     expect((recordIn(await slotOf(store))?.['nodes'] as unknown[])).toHaveLength(2)
   })
 
@@ -1370,7 +1682,7 @@ describe('organizing a conversation — only the machine-local model, never a kn
       models: [{ name: 'elsewhere', id: 'elsewhere-model', tier: 'fast' }], defaultModel: 'elsewhere-model',
       docsUrl: 'https://example.test',
       toRequest: () => ({ url: OTHER, init: { method: 'POST' } }),
-      fromResponse: () => ({ text: FLOW_ANSWER, stopReason: 'stop', inputTokens: 1, outputTokens: 1, model: 'elsewhere-model' }),
+      fromResponse: () => ({ text: structureAnswer(''), stopReason: 'stop', inputTokens: 1, outputTokens: 1, model: 'elsewhere-model' }),
     })
     const server = localServer(() => { throw new TypeError('connection refused') })
     await wake(m, server)
@@ -1395,22 +1707,37 @@ describe('organizing a conversation — only the machine-local model, never a kn
     const m = await loadFlows(store)
     const server = localServer()
     await wake(m, server)
-    expect((await m.route.awakeLocalLabeller())?.id).toBe('local')
+    expect((await m.route.awakeOrganizerLabeller(MODEL))?.id).toBe('local')
+    expect(await m.route.awakeOrganizerLabeller('not-installed:1b'), 'an uninstalled model is no labeller').toBeNull()
 
     localStorage.setItem(m.local.LOCAL_HOST_STORAGE_KEY, 'https://models.example.test')
-    expect(await m.route.awakeLocalLabeller()).toBeNull()
+    expect(await m.route.awakeOrganizerLabeller(MODEL)).toBeNull()
     expect(await m.route.organizeRoute(CONVO)).toBe(0)
     localStorage.removeItem(m.local.LOCAL_HOST_STORAGE_KEY)
 
     m.activation.setEnabled('local', false)
-    expect(await m.route.awakeLocalLabeller()).toBeNull()
+    expect(await m.route.awakeOrganizerLabeller(MODEL)).toBeNull()
     expect(await m.route.organizeRoute(CONVO)).toBe(0)
     expect(server).not.toHaveBeenCalled()
+  })
+
+  it('with no stored choice and no conversation that a local model answered, nothing runs and the route says no-model', async () => {
+    const pool = new MockDir('threads')
+    const store = makeStore(pool)
+    await twoExchanges(store, pool)
+    const m = await loadFlows(store)
+    const server = localServer()
+    await wake(m, server)
+    localStorage.removeItem(m.dispatch.LOCAL_MODEL_STORAGE_KEY)
+    expect(await m.route.organizeRoute(CONVO)).toBe(0)
+    expect((await m.route.drainRouteFlows()).stopped).toBe('gate')
+    expect(server).not.toHaveBeenCalled()
+    expect((await m.route.readRoute(CONVO)).organizerState).toBe('no-model')
   })
 })
 
 describe('the passive drain — as many conversations as it can reach', () => {
-  beforeEach(() => { localStorage.clear() })
+  beforeEach(() => { localStorage.clear(); resetFlowState(); localStorage.setItem('hc:llm:orchestrator-provider', 'local') })
   afterEach(() => { vi.unstubAllGlobals() })
 
   /** Six conversations nobody has opened: live and archived, old and new, and
@@ -1433,12 +1760,19 @@ describe('the passive drain — as many conversations as it can reach', () => {
     await thread.setConversationArchived('chat:tile:/archived-newer', true)
   }
 
-  const whoWasAsked = (server: ReturnType<typeof localServer>): string[] =>
-    server.mock.calls
-      .filter(([url]) => url === CHAT_URL)
-      .map(([, init]) => /(ARCHIVED-OLDER|LIVE-OLDER|ARCHIVED-NEWER|LIVE-NEWER|RECENT|FRESH)/.exec(String(init?.body ?? ''))?.[1] ?? '?')
+  /** The participant opened five of the six — in this order, oldest visit
+   *  first. FRESH was never opened. */
+  const visitFive = (m: Flows): void => {
+    const base = Date.now() - 60_000
+    ;['chat:tile:/archived-older', 'chat:tile:/archived-newer', 'chat:tile:/live-older', 'chat:tile:/live-newer', 'chat:tile:/recent']
+      .forEach((id, i) => m.route.markRouteVisited(id, base + i * 1_000))
+  }
 
-  it('visits live threads newest first, then archived, and leaves a recent last exchange alone', async () => {
+  /** Which conversation each STRUCTURE call was about, in order. */
+  const whoWasAsked = (server: LocalServer): string[] =>
+    structureCalls(server).map(body => /(ARCHIVED-OLDER|LIVE-OLDER|ARCHIVED-NEWER|LIVE-NEWER|RECENT|FRESH)/.exec(body)?.[1] ?? '?')
+
+  it('visits only the conversations you opened, most recently opened first, and leaves a recent last exchange alone', async () => {
     const pool = new MockDir('threads')
     const store = makeStore(pool)
     const m = await loadFlows(store)
@@ -1446,77 +1780,103 @@ describe('the passive drain — as many conversations as it can reach', () => {
     const server = localServer()
     await wake(m, server)
 
-    const pass = await m.route.drainRouteFlows({ limit: 10 })
+    // Nothing opened yet: the drain organizes nothing, and reads no thread.
+    expect(await m.route.drainRouteFlows()).toMatchObject({ organized: 0, behind: 0 })
+    expect(server).not.toHaveBeenCalled()
+    visitFive(m)
+    expect(JSON.parse(localStorage.getItem(m.route.ROUTE_VISITED_KEY)!)).toHaveProperty(['chat:tile:/recent'])
+
+    const pass = await m.route.drainRouteFlows()
     expect(whoWasAsked(server)).toEqual(['RECENT', 'LIVE-NEWER', 'LIVE-OLDER', 'ARCHIVED-NEWER', 'ARCHIVED-OLDER'])
-    expect(pass.organized).toBe(5)
+    expect(pass).toMatchObject({ organized: 5, behind: 0 })
     expect(pass.stopped).toBeUndefined()
+    expect(pass.elapsedMs).toBeGreaterThanOrEqual(0)
     // The recent thread's flow stops before its quiet-less last exchange…
-    expect(recordIn(await slotOf(store, 'chat:tile:/recent'))).toMatchObject({ upToTurnCount: 2 })
-    expect(bodyOf(server, 0)).not.toContain('RECENT second question')
-    // …and says when that exchange will close.
-    expect(pass.dueIn).toBeGreaterThan(0)
-    expect(pass.dueIn).toBeLessThanOrEqual(ROUTE_FLOW_IDLE_MS)
+    expect(recordIn(await slotOf(store, 'chat:tile:/recent'))).toMatchObject({ upToTurnCount: 2, exchanges: ['t1'] })
+    expect(structureCalls(server)[0]).not.toContain('RECENT second question')
+    // …and the next pass, with nothing else to do, says when that exchange
+    // will close. FRESH was never opened, so it is not waited on at all.
+    const again = await m.route.drainRouteFlows()
+    expect(again).toMatchObject({ organized: 0, behind: 0 })
+    expect(again.dueIn).toBeGreaterThan(0)
+    expect(again.dueIn).toBeLessThanOrEqual(ROUTE_FLOW_IDLE_MS)
     expect(await slotOf(store, 'chat:tile:/fresh')).toBeUndefined()
-    // One slot each.
+    // One slot each; a structure call, a card per node and a session card.
     expect(store.pools.get(FLOWS_MEANING)!.dirs.size).toBe(5)
+    expect(chatCalls(server)).toBe(3 + 4 * 4)
   })
 
-  it('stops starting conversations at its budget and picks up where it left off', async () => {
+  it('stops at its call budget between conversations and picks up where it left off; a time budget stops it too', async () => {
     const pool = new MockDir('threads')
     const store = makeStore(pool)
     const m = await loadFlows(store)
     await seedSix(store, pool, m.thread)
+    visitFive(m)
     const server = localServer()
     await wake(m, server)
 
-    expect(await m.route.drainRouteFlows({ limit: 2 })).toMatchObject({ organized: 2, stopped: 'budget' })
+    expect(await m.route.drainRouteFlows({ calls: 7 })).toMatchObject({ organized: 2, stopped: 'budget' })
     expect(whoWasAsked(server)).toEqual(['RECENT', 'LIVE-NEWER'])
-    expect(await m.route.drainRouteFlows({ limit: 2 })).toMatchObject({ organized: 2, stopped: 'budget' })
-    expect(await m.route.drainRouteFlows({ limit: 2 })).toMatchObject({ organized: 1 })
+    expect(await m.route.drainRouteFlows({ calls: 8 })).toMatchObject({ organized: 2, stopped: 'budget' })
+    expect(await m.route.drainRouteFlows({ calls: 8 })).toMatchObject({ organized: 1 })
     expect(whoWasAsked(server)).toEqual(['RECENT', 'LIVE-NEWER', 'LIVE-OLDER', 'ARCHIVED-NEWER', 'ARCHIVED-OLDER'])
 
-    // A time budget stops it too.
     let clock = Date.now()
     const slow = await m.route.drainRouteFlows({ now: () => (clock += 60_000), budgetMs: 90_000 })
     expect(slow.stopped).toBe('budget')
   })
 
-  it('re-reads the gate between conversations — a model gone mid-pass ends it with nothing more read or called', async () => {
+  it('re-reads the gate between calls — a model gone mid-pass ends it with nothing more read or called', async () => {
     const pool = new MockDir('threads')
     const store = makeStore(pool)
     const m = await loadFlows(store)
     await seedSix(store, pool, m.thread)
-    const server = localServer(() => {
+    visitFive(m)
+    const server = localServer(body => {
       // The participant switches the local tier off while the first answer
       // is on its way.
       m.activation.setEnabled('local', false)
-      return completion(FLOW_ANSWER)
+      return completion(answerByShape(body))
     })
     await wake(m, server)
 
-    const pass = await m.route.drainRouteFlows({ limit: 10 })
+    const pass = await m.route.drainRouteFlows()
     expect(pass).toMatchObject({ organized: 1, stopped: 'gate' })
-    expect(server.mock.calls.filter(([url]) => url === CHAT_URL)).toHaveLength(1)
+    expect(chatCalls(server)).toBe(1)
     expect(store.pools.get(FLOWS_MEANING)!.dirs.size).toBe(1)
   })
 
-  it('never mints the same flow twice — the attended call and the drain share one guard', async () => {
+  it('the attended call is a visit: the conversation on screen joins the queue, whatever the gate says', async () => {
+    const pool = new MockDir('threads')
+    const store = makeStore(pool)
+    await twoExchanges(store, pool)
+    const m = await loadFlows(store)
+    for (const provider of m.registry.all()) m.registry.unregister(provider.id)
+    expect(await m.route.organizeRoute(CONVO)).toBe(0)
+    expect(m.route.routeVisited().has(CONVO)).toBe(true)
+  })
+
+  it('never mints the same flow twice — the drain yields to an attended call in flight, and finds the flow current after it', async () => {
     const pool = new MockDir('threads')
     const store = makeStore(pool)
     await twoExchanges(store, pool)
     const m = await loadFlows(store)
     let release!: () => void
     const held = new Promise<void>(resolve => { release = resolve })
-    const server = localServer(async () => { await held; return completion(FLOW_ANSWER) })
+    const server = localServer(async body => { await held; return completion(answerByShape(body)) })
     await wake(m, server)
 
     const attended = m.route.organizeRoute(CONVO)
     await vi.waitFor(() => expect(server).toHaveBeenCalledTimes(1))
-    expect(await m.route.drainRouteFlows(), 'the drain sees the conversation busy').toEqual({ organized: 0, behind: 1 })
+    // The participant's own call holds the lane: the drain yields before it
+    // reads a thing, and says when to come back.
+    const yielded = await m.route.drainRouteFlows()
+    expect(yielded).toMatchObject({ organized: 0, behind: 0, stopped: 'yield' })
+    expect(yielded.resumeAt).toBeGreaterThan(Date.now())
     release()
     expect(await attended).toBe(1)
-    expect(await m.route.drainRouteFlows()).toEqual({ organized: 0, behind: 0 })
-    expect(server).toHaveBeenCalledTimes(1)
+    expect(await m.route.drainRouteFlows()).toMatchObject({ organized: 0, behind: 0 })
+    expect(chatCalls(server)).toBe(4)
     expect((await slotOf(store))?.files.size).toBe(1)
   })
 
@@ -1525,9 +1885,10 @@ describe('the passive drain — as many conversations as it can reach', () => {
     const store = makeStore(pool)
     const m = await loadFlows(store)
     await seedSix(store, pool, m.thread)
+    visitFive(m)
     const server = localServer(() => { throw new TypeError('connection refused') })
     await wake(m, server)
-    expect(await m.route.drainRouteFlows({ limit: 10 })).toMatchObject({ organized: 0, stopped: 'fault' })
-    expect(server.mock.calls.filter(([url]) => url === CHAT_URL)).toHaveLength(1)
+    expect(await m.route.drainRouteFlows()).toMatchObject({ organized: 0, stopped: 'fault' })
+    expect(chatCalls(server)).toBe(1)
   })
 })

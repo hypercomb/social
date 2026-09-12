@@ -263,7 +263,15 @@ class CollectionEmptyPromptDrone {
     host.id = 'hc-collection-empty-prompt'
     host.dataset['variant'] = 'root-notice'
     host.style.cssText =
-      'position:fixed;left:50%;bottom:28px;z-index:100000;transform:translateX(-50%);' +
+      // ABOVE THE BANDS, NOT ON THEM. A flat 28px put the notice inside the
+      // controls bar's two rows on a phone (mobile-one-column.md). The bar
+      // measures its own reach into `--hc-controls-bottom` live, so read that
+      // the way every other floating surface does (select-mode, layer-deck,
+      // add-sheet) instead of guessing a height that the tools row changes
+      // the moment it opens.
+      'position:fixed;left:50%;z-index:100000;transform:translateX(-50%);' +
+      'bottom:calc(max(var(--hc-controls-bottom,0px),env(safe-area-inset-bottom,0px))' +
+      ' + var(--hc-mobile-row-lift,0px) + 16px);' +
       'pointer-events:none;padding:0 16px;box-sizing:border-box;font-family:inherit;'
 
     const notice = document.createElement('div')
@@ -271,10 +279,15 @@ class CollectionEmptyPromptDrone {
       'pointer-events:auto;display:flex;align-items:center;gap:14px;max-width:calc(100vw - 32px);' +
       'padding:10px 11px 10px 16px;border-radius:var(--hc-radius-floating, 4px);background:rgba(var(--hc-chrome-glass),0.94);' +
       'border:1px solid rgba(var(--hc-chrome-ink),0.13);box-shadow:0 12px 32px rgba(var(--hc-chrome-shadow),0.24);' +
-      'backdrop-filter:blur(14px);white-space:nowrap;'
+      // NO `white-space:nowrap` HERE. The row is title + hint + button with a
+      // `max-width` ceiling; holding it to one line on a 400px phone did not
+      // shrink it, it OVERFLOWED it — "Add the first thing you want to keep."
+      // ran straight under the flex:none button and the two painted on top of
+      // each other. Wrapping lets the button drop to its own line instead.
+      'backdrop-filter:blur(14px);flex-wrap:wrap;'
 
     const copy = document.createElement('div')
-    copy.style.cssText = 'display:flex;align-items:baseline;gap:8px;min-width:0;'
+    copy.style.cssText = 'display:flex;align-items:baseline;gap:8px;min-width:0;flex-wrap:wrap;'
 
     const title = document.createElement('strong')
     title.style.cssText = 'font-size:13px;font-weight:650;color:var(--hc-chrome-text);'
@@ -391,6 +404,25 @@ class CollectionEmptyPromptDrone {
     if (event?.target instanceof HTMLElement) event.target.blur()
     this.#hide()
 
+    // THE CHEVRON, EMPTY, ON EVERY ROUTE — THE PHONE'S INCLUDED.
+    //
+    // This action promises to ADD A TILE, so it puts the line in the stance
+    // that makes one — the chevron, empty — whatever stance was standing: a
+    // name typed here IS a tile. It used to prefill `/create `, which dropped
+    // the participant into the command register to be taught a word.
+    //
+    // It has to happen ABOVE the phone's early return. The stance is sticky
+    // AND persisted (`hc:command-line-stance`), and the voice guard flips it
+    // to `command` the first time dictation runs (command-line.component.ts,
+    // `voice:active`) — so a participant who has ever pressed the mic finds
+    // the line standing in slash-space ever after, wearing `/` over "type a
+    // behaviour…". Returning to the add sheet without resetting it left that
+    // slash standing behind the sheet, and the next reveal of the line — by
+    // any door — still read as a command prompt. Focus is NOT taken here; it
+    // belongs to whichever route actually puts a line on screen.
+    EffectBus.emit('command-line:stance', { stance: 'tiles' })
+    EffectBus.emit('search:prefill', { value: '', focus: false })
+
     // ON A PHONE THE ADD SHEET IS THE NAMING DOOR (mobile-one-column.md): a
     // name field that makes a tile, and nothing else to learn. The command
     // line is a tool for people who know its words — never where "Add a tile"
@@ -402,14 +434,9 @@ class CollectionEmptyPromptDrone {
 
     const mobile = window.matchMedia('(max-width: 599px), (max-height: 599px)').matches
     EffectBus.emit('mobile:input-visible', { visible: true, mobile })
-    // This action promises to ADD A TILE, so it puts the line in the stance
-    // that makes one — the chevron, empty — whatever stance was standing: a
-    // name typed here IS a tile. It used to prefill `/create `, which dropped
-    // the participant into the command register to be taught a word, and an
-    // empty focus in command stance read the name as "nothing reads as a
-    // behaviour". `search:prefill` also owns the collapsed-mobile reveal and
-    // focus timing in the shell.
-    EffectBus.emit('command-line:stance', { stance: 'tiles' })
+    // The stance is already standing in `tiles` from above; this is the same
+    // empty line again, now claiming focus. `search:prefill` also owns the
+    // collapsed-mobile reveal and focus timing in the shell.
     EffectBus.emit('search:prefill', { value: '', focus: true })
 
     const focusInput = (): void => {

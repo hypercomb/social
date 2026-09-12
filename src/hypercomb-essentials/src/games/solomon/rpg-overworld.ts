@@ -11,6 +11,7 @@ import {
   type Island, type IslandDef, type IslandStamp, type IslandTerrain,
 } from './island.js'
 import { BURST_LIFE, IslandPainter, canvasContext, type IslandCamera, type WandBurst } from './island-paint.js'
+import { VEIL_ZOOM, veilCanvasPicture, type VeilDirection, type VeilLeg, type VeilPicture } from './place-veil.js'
 import { drawPlace, type PlaceGlow, type PlaceSprite } from './island-places.js'
 import { PLAYER_LOOK, drawWalker, lookFor } from './island-sprites.js'
 import { playChestReveal, type TreasureKind } from './island-treasure.js'
@@ -54,6 +55,9 @@ export interface WorldSign extends WorldPlace {
   kind: 'sign'; subtitle: string; text: string
 }
 export type WorldEncounter = WorldShrine | WorldPerson | WorldDungeon | WorldResident | WorldPlot | WorldCache | WorldSign
+/** What a bubble beside a place holds: a line for a while, or a question with
+ *  its choices until it is answered or walked away from. */
+interface WorldSpeech { key: string; until: number; text?: string; nodes?: () => Node[] }
 export type ShrineState = 'missing' | 'ready' | 'open'
 /** What one cast of the wand changed; `seal` is true when a seal opened or closed with it. */
 export interface WandChange { col: number; row: number; terrain: IslandTerrain; seal: boolean }
@@ -689,10 +693,16 @@ export class RpgOverworldView {
   readonly #placeLooks = new Map<string, string>()
   readonly #bursts: WandBurst[] = []
   #stopReveal: (() => void) | null = null
-  /** Speech above people and signs: in the world, not in a dialog. */
+  /** Speech beside people, signs, shrines and plots: in the world, never in a
+   *  dialog. Jaime, 2026-09-11: "these kind of messages should be eradicated
+   *  … when there are choices you still want the open view style … if they
+   *  ask you a question you can answer and then you can do something
+   *  different." A question keeps its bubble open, with its choices inside,
+   *  until it is answered or the player walks away. */
   #speechLayer: HTMLDivElement | null = null
-  readonly #bubbles = new Map<string, { place: WorldResident | WorldSign; bubble: HTMLDivElement }>()
-  readonly #speech = new Map<string, { text: string; until: number }>()
+  readonly #bubbles = new Map<string, { place: WorldEncounter; bubble: HTMLDivElement }>()
+  readonly #speech = new Map<string, WorldSpeech>()
+  #askSerial = 0
   #notice = ''
   readonly #camera: IslandCamera = { x: 0, y: 0, width: 0, height: 0, tile: 32, dpr: 1 }
   readonly #look = { x: 0, y: 0, ready: false }
@@ -705,6 +715,7 @@ export class RpgOverworldView {
   exportState(): WorldSnapshot { return this.model.exportState() }
   restoreState(raw: unknown): void {
     this.closeDialog()
+    this.#speech.clear()
     this.model.restoreState(raw)
     this.#notice = ''
     this.#region = this.model.regionAt()
@@ -714,6 +725,29 @@ export class RpgOverworldView {
     this.#look.ready = false
     this.refresh()
     this.#draw(0)
+  }
+
+  /** The island as the veil sees it: the map's canvases at one cell per
+   *  block, scaled around an island point — the entrance you take, or where
+   *  you stand when you come back up. Read lazily, from the camera as it is
+   *  when the veil draws. */
+  leaveLeg(at: { x: number; y: number }, direction: VeilDirection): VeilLeg | null { return this.#veilLeg(at, VEIL_ZOOM[direction].leave) }
+  arriveLeg(at: { x: number; y: number }, direction: VeilDirection): VeilLeg | null { return this.#veilLeg(at, VEIL_ZOOM[direction].arrive) }
+  #veilLeg(at: { x: number; y: number }, scale: number): VeilLeg | null {
+    const map = this.#map, ground = this.#ctx?.canvas, camera = this.#camera
+    if (!map || !ground) return null
+    const canvases = [ground, this.#above?.canvas].filter((canvas): canvas is HTMLCanvasElement => !!canvas)
+    const picture: VeilPicture = {
+      get cols() { return Math.ceil(camera.width / camera.tile) },
+      get rows() { return Math.ceil(camera.height / camera.tile) },
+      paint(ctx, block) { veilCanvasPicture(canvases, this.cols, this.rows).paint(ctx, block) },
+    }
+    return {
+      element: map, picture, scale,
+      get origin(): readonly [number, number] {
+        return camera.width && camera.height ? [clamp((at.x * camera.tile - camera.x) / camera.width, 0, 1), clamp((at.y * camera.tile - camera.y) / camera.height, 0, 1)] : [0.5, 0.5]
+      },
+    }
   }
 
   mount(host: HTMLElement): void {
@@ -755,7 +789,7 @@ export class RpgOverworldView {
       marker.style.zIndex = String(Math.round(place.y * 10))
       marker.append(art, element('span', 'sol-rpg-place-label', place.name))
       this.#places.set(place.id, marker); layer.append(marker)
-      if (place.kind === 'resident' || place.kind === 'sign') {
+      if (place.kind !== 'dungeon' && place.kind !== 'cache') {
         const bubble = element('div', `sol-rpg-bubble sol-rpg-bubble-${place.kind}`)
         bubble.dataset['for'] = place.id
         speech.append(bubble)
@@ -867,10 +901,19 @@ export class RpgOverworldView {
       const distance = Math.hypot(player.x - place.x, player.y - place.y)
       const spoken = this.#speech.get(place.id)
       if (spoken && (spoken.until < this.#time || distance > 4.5)) this.#speech.delete(place.id)
-      const text = place.kind === 'sign' && distance < SIGN_READ ? place.text : this.#speech.get(place.id)?.text ?? ''
+      const speech = this.#speech.get(place.id)
+      const signText = place.kind === 'sign' && distance < SIGN_READ ? place.text : ''
+      const key = speech?.key ?? (signText ? `sign:${place.id}` : '')
       // Keep the words while fading out, so the bubble does not empty as it goes.
-      if (text && bubble.textContent !== text) bubble.textContent = text
-      bubble.classList.toggle('is-shown', !!text)
+      if (key && bubble.dataset['key'] !== key) {
+        bubble.dataset['key'] = key
+        if (speech?.nodes) bubble.replaceChildren(...speech.nodes())
+        else bubble.textContent = speech?.text ?? signText
+      }
+      bubble.classList.toggle('is-shown', !!key)
+      bubble.classList.toggle('is-live', !!speech?.nodes)
+      // A bubble near the top of the view opens downward, so it stays on screen.
+      bubble.classList.toggle('is-below', this.#camera.height > 0 && place.y * tile - this.#camera.y < this.#camera.height * 0.42)
     }
     const nearest = this.model.nearest()
     const accessible = nearest?.kind === 'dungeon' || (nearest?.kind === 'shrine' && this.model.shrineStatus(nearest.id) === 'open')
@@ -886,12 +929,24 @@ export class RpgOverworldView {
     if (this.#prompt && this.#prompt.textContent !== message) this.#prompt.textContent = message
     if (this.#prompt) this.#prompt.disabled = !nearest
   }
+  /** A question is waiting beside someone or something: a person's choices,
+   *  or a shrine's sockets. Play goes on around it. */
+  get isSpeaking(): boolean { return [...this.#speech.values()].some(speech => !!speech.nodes) }
+  /** Puts every open question away; true when one was open. */
+  dismiss(): boolean {
+    const open = this.isSpeaking
+    for (const [id, speech] of this.#speech) if (speech.nodes) this.#speech.delete(id)
+    if (open) this.refresh()
+    return open
+  }
   interact(targetId?: string): void {
     if (this.isDialogOpen) return
     const result = this.model.interact(targetId)
     if (!result.encounter) { this.#notice = result.ok ? '' : result.message; this.refresh(); return }
     this.#notice = ''
     const place = result.encounter
+    // E opened this question, so E puts it away again.
+    if (!targetId && this.#speech.get(place.id)?.nodes) { this.#speech.delete(place.id); this.refresh(); return }
     if (place.kind === 'person') this.openPerson(place)
     else if (place.kind === 'shrine') this.openShrine(place)
     else if (place.kind === 'resident') this.#speak(place, this.model.talk(place.id).message)
@@ -1031,16 +1086,20 @@ export class RpgOverworldView {
     banner.classList.add('is-shown')
   }
 
-  /** A line spoken in the world, above whoever said it, for long enough to read. */
-  #speak(place: WorldResident | WorldSign, text: string): void {
+  /** A line spoken in the world, beside whoever said it, for long enough to read. */
+  #speak(place: WorldEncounter, text: string): void {
     if (!text) return
-    this.#speech.set(place.id, { text, until: this.#time + Math.max(4, text.length / 16) })
+    this.#speech.set(place.id, { key: `say:${text}`, text, until: this.#time + Math.max(4, text.length / 16) })
+    this.refresh()
+  }
+  /** Something asked beside a place, with its choices inside the bubble. It
+   *  stays until answered or walked away from; a timed one fades. */
+  #ask(place: WorldEncounter, nodes: () => Node[], seconds = Infinity): void {
+    this.#speech.set(place.id, { key: `ask:${place.id}:${++this.#askSerial}`, nodes, until: seconds === Infinity ? Infinity : this.#time + seconds })
     this.refresh()
   }
   #openPlot(plot: WorldPlot): void {
-    const body = this.dialog(plot.name, plot.subtitle)
-    body.append(element('p', 'sol-rpg-clue', plot.clue))
-    body.append(element('p', '', 'No shrine stands here yet. A builder’s shrine — its own puzzle rooms — can be set on ground like this, and every traveller who walks here will be able to enter it.'))
+    this.#speak(plot, `${plot.clue} No shrine stands here yet. A builder’s shrine — its own puzzle rooms — can be set on ground like this, and every traveller who walks here will be able to enter it.`)
   }
   /** The chest opens on a small stage — lid, light, and what it held rising
    *  out — the first time; afterwards it shows the settled scene. */
@@ -1091,25 +1150,39 @@ export class RpgOverworldView {
     body.focus({ preventScroll: true })
     return body
   }
+  /** A person speaks beside themselves. A question keeps its choices in the
+   *  bubble until it is answered; a wrong answer can be corrected; once it
+   *  is answered, the reply and the insight fade in their own time. */
   private openPerson(person: WorldPerson, reply = ''): void {
-    const body = this.dialog(person.name, person.role)
-    body.append(element('p', 'sol-rpg-clue', person.clue))
-    if (reply) body.append(element('p', 'sol-rpg-reply', reply))
-    if (this.model.solved.has(person.id)) {
-      if (!reply) body.append(element('p', 'sol-rpg-reply', person.insight))
-      return
-    }
-    body.append(element('h3', '', person.question))
-    const choices = element('div', 'sol-rpg-choices')
-    person.answers.forEach((answer, index) => choices.append(button(answer, () => {
-      const result = this.model.answer(person.id, index)
-      this.openPerson(person, result.message)
-    })))
-    body.append(choices)
+    const solved = this.model.solved.has(person.id)
+    this.#ask(person, () => {
+      const nodes: Node[] = [element('p', 'sol-rpg-clue', person.clue)]
+      if (reply) nodes.push(element('p', 'sol-rpg-reply', reply))
+      if (solved) {
+        if (!reply) nodes.push(element('p', 'sol-rpg-reply', person.insight))
+        return nodes
+      }
+      nodes.push(element('h4', '', person.question))
+      const choices = element('div', 'sol-rpg-choices')
+      person.answers.forEach((answer, index) => choices.append(button(answer, () => {
+        const result = this.model.answer(person.id, index)
+        this.openPerson(person, result.message)
+      })))
+      nodes.push(choices)
+      return nodes
+    }, solved ? 9 : Infinity)
   }
+  /** The shrine's sockets sit in a bubble beside it. Placing a piece keeps
+   *  the bubble; the last piece opens the way and the bubble says so. */
   private openShrine(shrine: WorldShrine, reply = ''): void {
-    const body = this.dialog(shrine.name, shrine.subtitle)
-    body.append(element('p', '', 'Fill each marked socket with its matching piece. Every piece stays with you as a permanent ability, and its information stays in your journal.'))
+    this.#ask(shrine, () => [
+      element('p', '', 'Fill each marked socket with its matching piece. Every piece stays with you as a permanent ability.'),
+      this.#shrinePattern(shrine),
+      ...(reply ? [element('p', 'sol-rpg-reply', reply)] : []),
+      element('p', 'sol-rpg-pattern-key', 'Lit sockets can be filled. Numbered points surround the heart (H). The way opens when every marked socket is filled.'),
+    ])
+  }
+  #shrinePattern(shrine: WorldShrine): HTMLElement {
     const pattern = element('div', 'sol-rpg-shrine-pattern')
     pattern.setAttribute('role', 'group'); pattern.setAttribute('aria-label', 'Star of David shrine: six triangular points surrounding one central hexagon')
     const outline = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
@@ -1121,17 +1194,16 @@ export class RpgOverworldView {
       outline.append(polygon)
     }
     pattern.append(outline)
-    const descriptions = element('dl', 'sol-rpg-shrine-information')
     for (let index = 0; index < shrine.components.length; index++) {
       const piece = shrine.components[index]!
       const filled = this.model.socketFilled(shrine.id, index), owned = this.model.owns(piece)
       const socket = button('', () => {
         const result = this.model.fillSocket(shrine.id, index)
         if (result.ok && this.model.shrineStatus(shrine.id) === 'open') {
-          this.closeDialog()
+          this.#speak(shrine, `${result.message} The way is open: walk in.`)
           return
         }
-        this.openShrine(shrine, result.message); this.refresh()
+        this.openShrine(shrine, result.message)
       }, `sol-rpg-socket${filled ? ' is-filled' : owned ? ' is-owned' : ''}`)
       const vertices = shrinePolygon(piece)
       const minX = Math.min(...vertices.map(point => point.x)), maxX = Math.max(...vertices.map(point => point.x))
@@ -1150,15 +1222,8 @@ export class RpgOverworldView {
       socket.title = `${componentName(piece)} · ${state}`
       socket.disabled = filled || !owned
       pattern.append(socket)
-      descriptions.append(element('dt', '', `${label} · ${componentName(piece)} — ${state}`), element('dd', '', owned
-        ? RELIC_LORE[componentKey(piece)]?.text ?? 'This piece remains a permanent ability.'
-        : 'Find this piece to learn the information it carries.'))
     }
-    body.append(pattern)
-    body.append(element('p', 'sol-rpg-pattern-key', 'Lit sockets can be filled. Numbered points surround the heart (H). Unmarked stone is not needed by this shrine.'))
-    if (reply) body.append(element('p', 'sol-rpg-reply', reply))
-    body.append(element('p', '', 'The way opens when every marked socket is filled.'))
-    body.append(descriptions)
+    return pattern
   }
   private openJournal(): void {
     const body = this.dialog('Knowledge journal', 'PIECES REMEMBER WHAT YOU LEARN')
@@ -1200,5 +1265,7 @@ const WORLD_STYLE = `
 .sol-rpg-shrine-pattern{position:relative;display:block;width:min(100%,280px);aspect-ratio:1;margin:12px auto 0;background:radial-gradient(circle,#8097731c,transparent 68%)}.sol-rpg-shrine-pattern svg{position:absolute;inset:0;width:100%;height:100%;fill:#172d30;stroke:#718571;stroke-width:2;stroke-linejoin:round}.sol-rpg-shrine-pattern .sol-rpg-socket{position:absolute;display:block;padding:0;border:0;border-radius:0;background:#5a6559;opacity:1}.sol-rpg-shrine-pattern .sol-rpg-socket.is-owned{background:#be9f50}.sol-rpg-shrine-pattern .sol-rpg-socket.is-filled{background:#68a787}.sol-rpg-shrine-pattern .sol-rpg-socket:not(:disabled):hover,.sol-rpg-shrine-pattern .sol-rpg-socket:focus-visible{background:#efd087;filter:brightness(1.25);outline:none}.sol-rpg-shrine-pattern .sol-rpg-socket-glyph{position:absolute;transform:translate(-50%,-50%);color:#fff9e5!important;font-size:18px;font-weight:750;text-shadow:0 1px 2px #0005}.sol-rpg-pattern-key{text-align:center;font-size:11px!important;color:#b6c6b7!important;margin:0 0 12px}.sol-rpg-shrine-information{margin:22px 0 0;border-top:1px solid #69816b55;padding-top:3px}.sol-rpg-shrine-information dt{font-size:12px;font-weight:650;color:#f2d799;margin-top:15px}.sol-rpg-shrine-information dd{font-size:12px;line-height:1.6;margin:4px 0 0;color:#c3d4c8}
 .sol-rpg-world .sol-rpg-world-prompt{flex-shrink:0;max-width:100%;min-height:30px;border:0;background:transparent;padding:8px 6px 3px;line-height:1.5;font-size:12px;text-align:center;color:#f0dbb4}.sol-rpg-world .sol-rpg-world-prompt:disabled{opacity:1;cursor:default}.sol-rpg-world-prompt:not(:disabled):hover{color:#fff0ba;text-decoration:underline}
 .sol-rpg-speech{position:absolute;z-index:3;left:0;top:0;width:0;height:0;pointer-events:none;will-change:transform}.sol-rpg-bubble{position:absolute;width:max-content;max-width:230px;padding:7px 11px;border:2px solid #1c1230;border-radius:12px;background:rgba(255,249,234,.97);color:#2a2118;font-size:12px;line-height:1.4;font-weight:500;box-shadow:0 6px 16px rgba(0,0,0,.35);transform:translate(-50%,calc(-100% - 54px * var(--sprite-scale)));opacity:0;transition:opacity .25s}.sol-rpg-bubble.is-shown{opacity:1}.sol-rpg-bubble::after{content:'';position:absolute;left:50%;bottom:-7px;width:11px;height:11px;background:inherit;border-right:2px solid #1c1230;border-bottom:2px solid #1c1230;transform:translateX(-50%) rotate(45deg)}.sol-rpg-bubble-sign{background:rgba(240,224,186,.97);font-family:Georgia,serif;font-size:12.5px}
+.sol-rpg-bubble.is-below{transform:translate(-50%,calc(16px * var(--sprite-scale)))}.sol-rpg-bubble.is-below::after{bottom:auto;top:-7px;border:0;border-left:2px solid #1c1230;border-top:2px solid #1c1230}
+.sol-rpg-bubble.is-live{pointer-events:auto;max-width:290px;text-align:left}.sol-rpg-bubble p{margin:0 0 6px;font-size:12px;line-height:1.45}.sol-rpg-bubble p:last-child{margin-bottom:0}.sol-rpg-bubble .sol-rpg-clue{background:transparent;border-left:0;border-radius:0;padding:0}.sol-rpg-bubble h4{margin:6px 0 5px;font-size:12px;color:#3a2a10}.sol-rpg-bubble .sol-rpg-choices{display:grid;gap:5px;margin-bottom:2px}.sol-rpg-bubble .sol-rpg-choices button{padding:6px 9px;border:1px solid #8a7550;border-radius:7px;background:#fff6e0;color:#2a2118;text-align:left;font-size:11.5px;cursor:pointer}.sol-rpg-bubble .sol-rpg-choices button:hover,.sol-rpg-bubble .sol-rpg-choices button:focus-visible{background:#ffe9b8;outline:none}.sol-rpg-bubble .sol-rpg-reply{color:#7a4b0b!important;font-weight:600}.sol-rpg-bubble .sol-rpg-shrine-pattern{width:160px;margin:4px auto 2px}.sol-rpg-bubble .sol-rpg-shrine-pattern .sol-rpg-socket-glyph{font-size:14px}.sol-rpg-bubble .sol-rpg-pattern-key{font-size:10px!important;color:#5a4a30!important;margin:4px 0 0;text-align:left}
 .sol-rpg-treasure{display:block;width:100%;max-width:440px;aspect-ratio:240/130;margin:6px auto 2px;border-radius:12px;background:radial-gradient(ellipse at 50% 78%,#3d311d,#16130f 72%)}.sol-rpg-items{list-style:none;display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin:10px 0 4px;padding:0}.sol-rpg-item{padding:4px 11px;border-radius:999px;background:rgba(255,220,140,.12);border:1px solid rgba(255,220,140,.4);color:#ffe8b0;font-size:12px;font-weight:600}.sol-rpg-items.is-fresh .sol-rpg-item{animation:sol-rpg-item .45s ease both}@keyframes sol-rpg-item{from{opacity:0;transform:translateY(8px) scale(.9)}to{opacity:1;transform:none}}
 `

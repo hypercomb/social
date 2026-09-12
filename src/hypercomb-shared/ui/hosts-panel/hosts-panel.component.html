@@ -17,10 +17,73 @@
   >
     <header class="hosts-header">
       <span class="hosts-title">{{ 'hosts.title' | t }}</span>
+      <!-- The guide's way back once it has been put away. -->
+      <button
+        class="hosts-help"
+        type="button"
+        [class.open]="guideOpen()"
+        [attr.aria-expanded]="guideOpen()"
+        [attr.aria-label]="'hosts.guide.open' | t"
+        [title]="'hosts.guide.open' | t"
+        (click)="toggleGuide()"
+      >?</button>
       <button class="hosts-close" type="button" (click)="close()" [attr.aria-label]="'panel.close' | t" [title]="'panel.close' | t">×</button>
     </header>
 
     <div class="hosts-body">
+      <!-- AFTER A SWITCH. The restart is the moment tiles can seem to vanish,
+           so this is the first thing on screen while you run the build a
+           switch took you to: what happened, that nothing was deleted, and
+           the one button that goes back. -->
+      @if (returnable(); as record) {
+        <section class="hosts-return" role="status" aria-live="polite">
+          <p class="hosts-return-title">{{ 'hosts.return.title' | t }}</p>
+          <p class="hosts-return-body">{{ 'hosts.return.body' | t: { host: record.toZone } }}</p>
+          @if (returnMissing(); as where) {
+            <p class="hosts-return-missing">{{ where === '-' ? ('hosts.return.missing-nowhere' | t) : ('hosts.return.missing' | t: { hosts: where }) }}</p>
+          }
+          @if (intake()[record.from]; as state) {
+            @if (state.detail) {
+              <p class="hosts-offer-state" [class.failed]="state.phase === 'failed'">{{ state.detail }}</p>
+            }
+          }
+          <div class="hosts-actions">
+            <button class="hosts-primary" type="button" [disabled]="returnBusy()" (click)="switchBack()">{{ returnKey() | t }}</button>
+            <button class="hosts-quiet" type="button" [disabled]="returnBusy()" (click)="keepSwitch()">{{ 'hosts.return.keep' | t }}</button>
+          </div>
+        </section>
+      }
+
+      <!-- HOW THIS WORKS, in four lines. Open until put away, and the ? in the
+           header brings it back. The last line is the one that matters most:
+           a switch never deletes a tile, and here is how to get back. -->
+      @if (guideOpen()) {
+        <section class="hosts-guide" [attr.aria-label]="'hosts.guide.title' | t">
+          <div class="hosts-guide-head">
+            <span class="hosts-guide-title">{{ 'hosts.guide.title' | t }}</span>
+            <button class="hosts-guide-hide" type="button" (click)="toggleGuide()">{{ 'hosts.guide.hide' | t }}</button>
+          </div>
+          <ul class="hosts-guide-steps">
+            <li class="hosts-guide-step">
+              <span class="hosts-guide-term">{{ 'hosts.guide.domain-term' | t }}</span>
+              <span>{{ 'hosts.guide.domain' | t }}</span>
+            </li>
+            <li class="hosts-guide-step">
+              <span class="hosts-guide-term">{{ 'hosts.guide.creations-term' | t }}</span>
+              <span>{{ 'hosts.guide.creations' | t }}</span>
+            </li>
+            <li class="hosts-guide-step">
+              <span class="hosts-guide-term">{{ 'hosts.guide.builds-term' | t }}</span>
+              <span>{{ 'hosts.guide.builds' | t }}</span>
+            </li>
+            <li class="hosts-guide-step safe">
+              <span class="hosts-guide-term">{{ 'hosts.guide.safe-term' | t }}</span>
+              <span>{{ 'hosts.guide.safe' | t }}</span>
+            </li>
+          </ul>
+        </section>
+      }
+
       <!-- NO HOSTING SWITCH. Publishing IS the gesture: `publishBranch` calls
            `enablePublicHost()` itself, so the ON position was arming something
            already armed. And OFF never meant what a switch means — bytes
@@ -80,8 +143,9 @@
         <span class="hosts-total">{{ zones().length }}</span>
       </div>
 
-      @for (zone of zones(); track zone) {
-        <div class="hosts-row" [class.selected]="selectedZone() === zone">
+      <!-- Your own domain first: it is the one you come back to. -->
+      @for (zone of orderedZones(); track zone) {
+        <div class="hosts-row" [class.selected]="selectedZone() === zone" [class.home]="isHome(zone)">
           <!-- The address IS the control that asks what it publishes: a host
                you carry is a place you can look into, and a separate button
                for that would be a second thing to explain. -->
@@ -93,6 +157,24 @@
             [attr.aria-expanded]="selectedZone() === zone"
             (click)="look(zone)"
           >{{ zone }}</button>
+          @if (isHome(zone)) {
+            <span class="hosts-home" [attr.data-tip]="'hosts.home-tip' | t">{{ 'hosts.home' | t }}</span>
+          }
+          @if (!isHome(zone)) {
+          <!-- THEIR DOOR. Someone else's build is tried THERE: the browser's
+               origin isolation runs it against their storage, never yours.
+               It is applied HERE only once a publisher you follow signs it.
+               Never drawn on your own domain: that would open a second tab
+               on your own hive, and the store admits one. -->
+          <a
+            class="hosts-visit"
+            [href]="visitUrl(zone)"
+            target="_blank"
+            rel="noopener"
+            [attr.data-tip]="'hosts.visit-tip' | t: { host: zone }"
+            [attr.aria-label]="'hosts.visit-tip' | t: { host: zone }"
+          >{{ 'hosts.visit' | t }}</a>
+          }
           @if (branchCount(zone); as naming) {
             <span class="hosts-count">{{ 'hosts.naming' | t: { count: naming } }}</span>
           }
@@ -124,6 +206,7 @@
                 @if (rows.length) { <span class="hosts-total">{{ rows.length }}</span> }
               }
             </div>
+            <p class="hosts-note hosts-lead">{{ 'hosts.creations.note' | t }}</p>
             @if (!creationsKnown(zone)) {
               <p class="hosts-probing" aria-live="polite">{{ 'hosts.probing' | t }}</p>
             } @else if (creationsOf(zone); as rows) {
@@ -155,6 +238,8 @@
             <div class="hosts-section-head">
               <span>{{ 'hosts.builds' | t }}</span>
             </div>
+            <p class="hosts-note hosts-lead">{{ buildsNoteKey(zone) | t: { host: zone } }}</p>
+            <p class="hosts-note hosts-authority">{{ 'hosts.builds.authority' | t }}</p>
             @if (isProbing(zone)) {
               <p class="hosts-probing" aria-live="polite">{{ 'hosts.probing' | t }}</p>
             } @else if (offerOf(zone); as offer) {
@@ -397,5 +482,25 @@
 
       <p class="hosts-note">{{ 'hosts.note' | t }}</p>
     </div>
+
+    <!-- BEFORE A SWITCH. Under the scrolling body, never inside it, so it is on
+         screen whichever row asked. It says the three things a participant
+         needs before pressing: the app changes, nothing is deleted, and here
+         is the way back. -->
+    @if (pending(); as pkg) {
+      <div class="hosts-confirm" role="alertdialog" aria-labelledby="hosts-confirm-title" aria-describedby="hosts-confirm-body">
+        <p class="hosts-confirm-title" id="hosts-confirm-title">{{ 'hosts.confirm.title' | t: { host: pkg.zone } }}</p>
+        <p class="hosts-confirm-facts">{{ pkg.label }}@if (when(pkg); as at) { · {{ at }}}@if (pkg.generation !== null) { · {{ 'hosts.offer.build' | t: { generation: pkg.generation } }}}</p>
+        <div id="hosts-confirm-body">
+          <p class="hosts-confirm-line">{{ 'hosts.confirm.body' | t: { host: pkg.zone } }}</p>
+          <p class="hosts-confirm-line hosts-confirm-safe">{{ 'hosts.confirm.safe' | t }}</p>
+          <p class="hosts-confirm-line">{{ 'hosts.confirm.back' | t }}</p>
+        </div>
+        <div class="hosts-actions">
+          <button class="hosts-primary" type="button" (click)="confirmSwitch()">{{ 'hosts.confirm.go' | t: { host: pkg.zone } }}</button>
+          <button class="hosts-quiet" type="button" (click)="cancelSwitch()">{{ 'hosts.confirm.cancel' | t }}</button>
+        </div>
+      </div>
+    }
   </aside>
 }

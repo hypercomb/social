@@ -1,7 +1,66 @@
-import { TILE, WALL, BRICK, CRACKED } from './engine.js'
-import { LabyrinthJourney, describeRequirement } from './labyrinth.js'
+import { TILE, WALL, BRICK, CRACKED, type Cell, type LevelDef } from './engine.js'
+import { LABYRINTHS, LabyrinthJourney, ROOMS, describeRequirement, type RoomDef } from './labyrinth.js'
+import { PlaceVeil, VEIL_ZOOM, veilGridPicture, type VeilDirection, type VeilLeg, type VeilRgb } from './place-veil.js'
 import { Renderer } from './renderer.js'
 import { type LoadedTileRoom, syncTerrain } from './tile-surface.js'
+
+// ── a door is WHERE IT LEADS ─────────────────────────────────────────────
+//
+// Jaime, 2026-09-11: "there's not like a right or left up or down … there's
+// just a door that you go through. Remove the symbols and keep the door; you
+// can change the colours … and even the shapes so we can add some elements
+// that make it easier to navigate." So a door wears no glyph. Its colour and
+// its shape are hashed from the room it leads TO, and the same room's own
+// door back wears the colour of where IT leads — so "the green round door"
+// always means the same place, from either side.
+
+export const DOOR_SHAPES = ['arch', 'round', 'peak', 'gate', 'keyhole'] as const
+export type DoorShape = typeof DOOR_SHAPES[number]
+
+const hashWord = (word: string): number => {
+  let h = 2166136261
+  for (let i = 0; i < word.length; i++) { h ^= word.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0 }
+  return h
+}
+const hexHue = (hex: string): number => {
+  const r = parseInt(hex.slice(1, 3), 16) / 255, g = parseInt(hex.slice(3, 5), 16) / 255, b = parseInt(hex.slice(5, 7), 16) / 255
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min
+  if (!d) return 0
+  const h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4
+  return Math.round(h * 60) % 360
+}
+/** Every authored room's hue: its labyrinth's own colour, turned by the
+ *  room's place among its siblings, so no two doors of one labyrinth can
+ *  look alike. A room the authored set does not know is hashed instead. */
+const ROOM_HUES = new Map<string, number>()
+for (const labyrinth of LABYRINTHS) {
+  const siblings = ROOMS.filter(room => room.labyrinthId === labyrinth.id)
+  siblings.forEach((room, index) => ROOM_HUES.set(room.id, Math.round(hexHue(labyrinth.color) + index * 360 / siblings.length) % 360))
+}
+/** A hue in [0, 360) for the room a door leads to. */
+export const doorHue = (targetRoomId: string): number =>
+  ROOM_HUES.get(targetRoomId) ?? Math.round((hashWord(targetRoomId) % 360 + (hashWord(targetRoomId) >>> 9) * 137.508) % 360)
+export const doorShape = (targetRoomId: string): DoorShape => DOOR_SHAPES[(hashWord(targetRoomId) >>> 4) % DOOR_SHAPES.length]!
+
+// ── the room as the veil sees it ─────────────────────────────────────────
+//
+// Warps between rooms go through the shell's PlaceVeil (place-veil.ts), the
+// one way into any place. A room describes itself to it as one colour per
+// tile: its terrain as it stands now, its doors in their own hues, its
+// uncollected relics gold. The same colours seed the doors.
+
+type VeilTile = { readonly col: number; readonly row: number; readonly color: VeilRgb }
+const rgb = (hex: string): VeilRgb => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)]
+const AIR = rgb('#263b5c'), STONE = rgb('#c9d3e6'), CLAY = rgb('#e9b56c'), GOLD = rgb('#ffe599')
+const hslToRgb = (h: number, s: number, l: number): VeilRgb => {
+  const k = (n: number): number => (n + h / 30) % 12
+  const a = s * Math.min(l, 1 - l)
+  const f = (n: number): number => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1))
+  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)]
+}
+const mix = (a: VeilRgb, b: VeilRgb, t: number): VeilRgb => [Math.round(a[0] + (b[0] - a[0]) * t), Math.round(a[1] + (b[1] - a[1]) * t), Math.round(a[2] + (b[2] - a[2]) * t)]
+const doorOrigin = (door: Cell | undefined, level: LevelDef): readonly [number, number] =>
+  door ? [(door.col + 0.5) / level.cols, (door.row + 0.5) / level.rows] : [0.5, 0.5]
 
 /** One plate per native child layer. The transparent canvas contains actors
  *  only; collision and plate terrain share the hydrated room's tile grid. */
@@ -22,7 +81,6 @@ export class LabyrinthRoomView {
   #descriptions: string[] = []
   #scale = 1
   #frameKey = ''
-  #transition: Animation | null = null
 
   constructor(host: HTMLElement, private readonly journey: LabyrinthJourney, onDoor: (id: string) => void) {
     this.element.className = 'sol-native-room'
@@ -58,8 +116,35 @@ export class LabyrinthRoomView {
     this.#observer.observe(this.#board)
   }
 
-  show(loaded: LoadedTileRoom, direction: 'in' | 'out' | 'across' = 'in'): void {
-    this.#transition?.cancel()
+  /** The board: what the veil scales when a warp leaves or arrives here. */
+  get board(): HTMLElement { return this.#board }
+
+  /** The leg that leaves the room on show, scaled around the door Dana took
+   *  (the journey has already moved: its arrival door is that door's far
+   *  side). Coming out by another way, the room shrinks about its centre. */
+  leaveLeg(direction: VeilDirection): VeilLeg | null {
+    const loaded = this.#loaded
+    if (!loaded) return null
+    const next = this.journey.room
+    const taken = next ? loaded.room.doors.find(door => door.targetRoomId === next.id && door.targetDoorId === this.journey.arrivalDoor) : undefined
+    return { element: this.#board, picture: this.picture(loaded.room), origin: doorOrigin(taken, loaded.level), scale: VEIL_ZOOM[direction].leave }
+  }
+
+  /** The leg that arrives in a room, settling from around the door Dana arrives by. */
+  arriveLeg(loaded: LoadedTileRoom, direction: VeilDirection): VeilLeg {
+    const arrival = loaded.room.doors.find(door => door.id === this.journey.arrivalDoor)
+    return { element: this.#board, picture: this.picture(loaded.room), origin: doorOrigin(arrival, loaded.level), scale: VEIL_ZOOM[direction].arrive }
+  }
+
+  /** Warps from the room on show to `loaded` through the veil; the board
+   *  changes rooms at the swap. */
+  warp(veil: PlaceVeil, loaded: LoadedTileRoom, direction: VeilDirection = 'in'): void {
+    const leave = this.leaveLeg(direction) ?? { element: this.#board, picture: null, origin: [0.5, 0.5] as const, scale: 1 }
+    veil.play({ leave, arrive: this.arriveLeg(loaded, direction), onSwap: () => this.show(loaded) })
+  }
+
+  show(loaded: LoadedTileRoom): void {
+    this.#board.style.transform = ''
     this.#loaded = loaded
     this.#frameKey = ''
     const { level, room } = loaded
@@ -99,12 +184,52 @@ export class LabyrinthRoomView {
       this.#depths.append(card)
     }
     this.#fit()
-    if (!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches && this.#board.animate) {
-      const scale = direction === 'out' ? 1.14 : direction === 'across' ? 0.98 : 0.84
-      this.#transition = this.#board.animate([
-        { transform: `scale(${scale})`, opacity: 0.1 }, { transform: 'scale(1)', opacity: 1 },
-      ], { duration: 380, easing: 'ease-out' })
+  }
+
+  /** The room as the veil sees it: one colour per tile. */
+  picture(room: RoomDef): ReturnType<typeof veilGridPicture> {
+    const tiles = this.#roomTiles(room), { cols, rows } = room.level
+    return veilGridPicture(cols, rows, (col, row) => tiles[row * cols + col]?.color ?? AIR)
+  }
+
+  /** The tile colours a room pixelates from, one per tile: its terrain as it
+   *  stands now (conjured blocks included), its doors in their own colours,
+   *  its uncollected relics gold. */
+  #roomTiles(room: RoomDef): VeilTile[] {
+    const { cols, rows } = room.level
+    const grid = this.journey.engines.get(room.id)?.grid ?? room.level.tiles
+    return Array.from({ length: cols * rows }, (_, index) => {
+      const col = index % cols, row = Math.floor(index / cols), code = grid[index] ?? 0
+      const door = room.doors.find(d => d.col === col && d.row === row)
+      const relic = room.relics.find(r => r.col === col && r.row === row && !this.journey.collected(r.id))
+      const color = door ? hslToRgb(doorHue(door.targetRoomId), 0.6, 0.5)
+        : relic ? GOLD
+        : code === WALL ? STONE
+        : code === BRICK || code === CRACKED ? CLAY
+        : AIR
+      return { col, row, color }
+    })
+  }
+
+  /** THE SEED. Jaime: "an entrance shows a seed of its inside before you
+   *  enter, so what you zoom toward is what you arrive in." A door carries a
+   *  pixel map of the room beyond, one pixel per tile, tinted its own hue. */
+  #seed(room: RoomDef): HTMLCanvasElement {
+    const seed = document.createElement('canvas')
+    seed.className = 'sol-door-seed'
+    seed.width = room.level.cols
+    seed.height = room.level.rows
+    seed.setAttribute('aria-hidden', 'true')
+    const ctx = seed.getContext('2d')
+    if (ctx) {
+      const tint = hslToRgb(doorHue(room.id), 0.55, 0.45)
+      for (const tile of this.#roomTiles(room)) {
+        const [r, g, b] = mix(tile.color, tint, 0.3)
+        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`
+        ctx.fillRect(tile.col, tile.row, 1, 1)
+      }
     }
+    return seed
   }
 
   render(time: number): void {
@@ -120,7 +245,7 @@ export class LabyrinthRoomView {
       const terrain = cell.code === WALL ? 'wall' : cell.code === BRICK ? 'brick' : cell.code === CRACKED ? 'cracked' : 'air'
       const locked = !!door && !this.journey.has(door.requires)
       const gateLocked = !!gate && !this.journey.has(gate.requires)
-      const description = `${terrain}|${door?.id ?? ''}|${locked}|${relic?.id ?? ''}|${gateLocked}`
+      const description = `${terrain}|${door?.id ?? ''}|${locked}|${door ? this.journey.visited.has(door.targetRoomId) : ''}|${relic?.id ?? ''}|${gateLocked}`
       if (description === this.#descriptions[i]) continue
       this.#descriptions[i] = description
       plate.dataset['terrain'] = terrain
@@ -137,13 +262,19 @@ export class LabyrinthRoomView {
       if (door) {
         const target = this.journey.rooms.get(door.targetRoomId)
         const delta = (target?.depth ?? room.depth) - room.depth
+        const known = this.journey.visited.has(door.targetRoomId)
         const passage = document.createElement('button')
-        passage.className = `sol-passage ${delta < 0 ? 'out' : delta === 0 ? 'across' : 'in'}${locked ? ' locked' : ''}`
+        // No glyph: the door IS its colour and shape (see the header). A door
+        // whose far side you have already stood in glows a little — you know
+        // that one.
+        passage.className = `sol-passage ${delta < 0 ? 'out' : delta === 0 ? 'across' : 'in'}${locked ? ' locked' : ''}${known ? ' known' : ''}`
         passage.dataset['door'] = door.id
-        passage.textContent = locked ? '◇' : delta < 0 ? '↥' : delta === 0 ? '↔' : '↧'
-        label = `${delta < 0 ? 'Return' : 'Passage'} to ${target?.level.name ?? 'chamber'}, depth ${target?.depth ?? room.depth}${locked ? ` — needs ${describeRequirement(door.requires)}` : ''}`
+        passage.dataset['shape'] = doorShape(door.targetRoomId)
+        passage.style.setProperty('--door-h', String(doorHue(door.targetRoomId)))
+        label = `Door to ${target?.level.name ?? 'a chamber'}, depth ${target?.depth ?? room.depth}${locked ? ` — needs ${describeRequirement(door.requires)}` : known ? ' — you have been there' : ''}`
         passage.title = label
         passage.setAttribute('aria-label', label)
+        if (target) passage.append(this.#seed(target))
         plate.append(passage)
       }
       if (relic) {
@@ -166,9 +297,11 @@ export class LabyrinthRoomView {
     this.#meter.max = engine.level.lifeStart ?? 10000
     this.#meter.value = engine.life
     const door = this.journey.nearDoor()
+    const doorTarget = door ? this.journey.rooms.get(door.targetRoomId) : undefined
     const text = engine.state === 'gameover' ? 'Try again with R. Your knowledge and collected pieces stay with you.'
-      : door ? `Enter / E: ${this.journey.has(door.requires) ? 'use passage' : `requires ${describeRequirement(door.requires)}`}`
-      : 'Arrows / WASD move · Space jump · Z conjure / dispel · X fire · E passage · M world'
+      : door && door.id === this.journey.arrivalDoor ? 'Step away from this door, and back into it, to return.'
+      : door ? (this.journey.has(door.requires) ? `A door to ${doorTarget?.level.name ?? 'another chamber'} — walk through.` : `This door needs ${describeRequirement(door.requires)}.`)
+      : 'Arrows / WASD move · Space jump · Z conjure / dispel · X fire · walk into a door to pass through · M world'
     const stats = `Lives ${engine.lives} · Score ${engine.score.toLocaleString()} · Fire ${engine.ammo.length}`
     const frameKey = `${text}|${stats}`
     if (frameKey !== this.#frameKey) {
@@ -188,7 +321,7 @@ export class LabyrinthRoomView {
   }
 
   dispose(): void {
-    this.#transition?.cancel()
+    this.#board.style.transform = ''
     this.#observer.disconnect()
     this.element.remove()
   }
@@ -210,10 +343,17 @@ export const LABYRINTH_ROOM_CSS = `
 .sol-game-tile.is-gate{background:repeating-linear-gradient(90deg,#739fd477 0 3px,#38638755 3px 8px);box-shadow:inset 0 0 10px #81dded}
 .sol-gate-mark{position:absolute;inset:0;display:grid;place-items:center;color:#b8edff;font-size:24px}
 .sol-room-actors{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
-.sol-passage{position:absolute;inset:4% 11% 0!important;width:78%;height:96%;border:2px solid #69e6d0!important;border-radius:45% 45% 3px 3px!important;background:radial-gradient(ellipse at center,#5e9ba7,#172c4d 75%)!important;color:#c9fff3!important;padding:0!important;display:grid;place-items:center;font-size:clamp(13px,2vw,26px)!important;box-shadow:inset 0 0 8px #71edd488,0 0 7px #73ead055;cursor:pointer}
-.sol-passage.out{border-color:#ffca7f!important;background:radial-gradient(ellipse at center,#9d754e,#302f48 75%)!important;color:#ffe6b5!important}
-.sol-passage.across{border-color:#c2a5ff!important}
-.sol-passage.locked{filter:saturate(.5);opacity:.85}
+.sol-passage{--door-h:180;position:absolute;inset:4% 11% 0!important;width:78%;height:96%;overflow:hidden;border:2px solid hsl(var(--door-h) 75% 66%)!important;border-radius:45% 45% 3px 3px!important;background:radial-gradient(ellipse at 50% 40%,hsl(var(--door-h) 45% 42%),hsl(var(--door-h) 55% 12%) 78%)!important;color:transparent!important;padding:0!important;box-shadow:inset 0 0 8px hsl(var(--door-h) 80% 70% / .55),0 0 7px hsl(var(--door-h) 80% 60% / .35);cursor:pointer;font-size:0!important}
+.sol-door-seed{position:absolute;inset:0;width:100%;height:100%;image-rendering:pixelated;opacity:.85;z-index:0;pointer-events:none}
+.sol-passage:hover .sol-door-seed,.sol-passage.known .sol-door-seed{opacity:1}
+.sol-passage[data-shape=round]{inset:6% 13% 2%!important;width:74%;height:92%;border-radius:50%!important}
+.sol-passage[data-shape=peak]{border-radius:0!important;clip-path:polygon(50% 0,100% 34%,100% 100%,0 100%,0 34%);border-width:0!important;box-shadow:none;background:radial-gradient(ellipse at 50% 55%,hsl(var(--door-h) 45% 42%),hsl(var(--door-h) 55% 12%) 78%),hsl(var(--door-h) 75% 66%)!important;background-clip:content-box,border-box!important;padding:2px!important}
+.sol-passage[data-shape=gate]{border-radius:5px!important;background:repeating-linear-gradient(90deg,transparent 0 22%,hsl(var(--door-h) 70% 62% / .55) 22% 30%),radial-gradient(ellipse at 50% 40%,hsl(var(--door-h) 45% 42%),hsl(var(--door-h) 55% 12%) 78%)!important}
+.sol-passage[data-shape=keyhole]{inset:2% 16% 0!important;width:68%;height:98%;border-radius:50% 50% 14% 14%!important}
+.sol-passage[data-shape=keyhole]:before{content:'';position:absolute;left:50%;top:44%;width:26%;height:44%;transform:translateX(-50%);background:hsl(var(--door-h) 60% 8%);border-radius:50% 50% 12% 12%;z-index:1}
+.sol-passage.known{box-shadow:inset 0 0 8px hsl(var(--door-h) 80% 70% / .55),0 0 14px hsl(var(--door-h) 85% 65% / .7)}
+.sol-passage.locked{filter:saturate(.35);opacity:.8;border-style:dashed!important}
+.sol-passage.locked:after{content:'';position:absolute;inset:0;z-index:2;background:repeating-linear-gradient(-45deg,transparent 0 7px,hsl(var(--door-h) 30% 80% / .28) 7px 9px)}
 .sol-relic{position:absolute;inset:0;display:grid;place-items:center;color:#ffe599;font-size:clamp(14px,2.7vw,34px);text-shadow:0 0 12px #f7d06a;pointer-events:none}
 .sol-relic.hexagon{color:#8af2db;text-shadow:0 0 12px #69e5bd}.sol-relic.star{color:#ffc9ff}
 .sol-room-status{display:flex;justify-content:space-between;gap:20px;align-items:center;font-size:13px;color:#bfcee5;padding:0 10px}

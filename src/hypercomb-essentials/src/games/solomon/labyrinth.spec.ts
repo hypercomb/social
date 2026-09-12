@@ -58,6 +58,41 @@ describe('the interconnected Solomon labyrinth', () => {
     }
   })
 
+  it('counts the door she is set down beside as her arrival door, so a spawn, a retry or a respawn never passes straight through it', () => {
+    const journey = start()
+    journey.grantRelic({ id: 'test-hexagon', kind: 'hexagon' })
+    // Every room starts beside its way back: the loop door is one step west.
+    expect(journey.room!.doors.find(door => door.id === journey.arrivalDoor)).toMatchObject({ id: 'loop', col: 1, row: 10 })
+    expect(journey.useDoor('loop').kind).toBe('out-of-range')
+    journey.update(0)
+    expect(journey.arrivalDoor).toBe('loop')
+    travel(journey, 'loop')
+    expect(journey.room!.id).toBe('sunseed-heart')
+    expect(journey.arrivalDoor).toBe('home')
+    journey.engine!.arrive({ col: 5, row: 2 })
+    journey.update(0)
+    expect(journey.arrivalDoor).toBeNull()
+    // A retry sets her down at the start, beside the door to the loft.
+    expect(journey.retryCurrent()).toBe(true)
+    expect(journey.arrivalDoor).toBe('return')
+    // So does a death.
+    travel(journey, 'home')
+    expect(journey.room!.id).toBe('sunseed-porch')
+    collect(journey, journey.room!.relics[0]!)
+    travel(journey, 'deeper')
+    expect(journey.room!.id).toBe('sunseed-steps')
+    journey.engine!.arrive({ col: 5, row: 2 })
+    journey.update(0)
+    expect(journey.arrivalDoor).toBeNull()
+    const foe = journey.room!.level.enemies[0]!
+    const lives = journey.engine!.lives
+    journey.engine!.arrive(foe)
+    journey.update(1 / 60)
+    expect(journey.engine!.lives).toBe(lives - 1)
+    expect(journey.engine!.state).toBe('playing')
+    expect(journey.arrivalDoor).toBe('return')
+  })
+
   it('progresses from an NPC point through room pickups to the pyramid without spending abilities', () => {
     const journey = new LabyrinthJourney()
     expect(journey.canEnterLabyrinth('sunseed')).toBe(false)

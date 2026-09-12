@@ -129,6 +129,50 @@ shows — beside the docked editor. Nothing is written.
 - Framing reaches the hive when a gesture settles (the twins' capture, ~0.2s),
   not on every pointer move — the hive shows exactly what would be saved.
 
+## Moving to another tile
+
+Docked, the hive beside the editor stays live for one gesture: **click another
+tile and the editor moves there**. The pointer is a hand over the tiles it can
+move to; the tile being edited and empty hive do nothing. `e` over another tile
+does the same, when the focus is in the hive. On a phone the page covers the
+hive, so this never arises.
+
+- **Nothing changed** — it just moves. It is the same window: its width, the
+  hive's reserved edge and the hive's fit do not move, and nothing is rebuilt.
+- **Unsaved changes** — the footer asks in place of Cancel and Save:
+  *Save your changes before opening "name"?* **keep editing** · **don't save** ·
+  **save and open**. Save and open holds the focus; Escape is keep editing.
+  - *save and open* writes the tile first and moves only when the write lands;
+    a failed save stays put with its error.
+  - *don't save* keeps the draft exactly as a cancel keeps it, and reopening
+    that tile offers **Restore**.
+
+How it is wired:
+
+- `TileOverlayDrone` answers a plain click while a session is docked
+  (`editor:mode` with `surface: 'dock'`) by resolving the tile under the click
+  and, when it is another tile, emitting `editor:switch-request { label }` with
+  `emitTransient`. The press never navigated — it stands down while editing.
+- The view decides: clean ⇒ `TileEditorDrone.switchTo(label)`; dirty ⇒ ask.
+  `switchTo(label, { save })` writes (and announces `tile:saved`) before
+  opening the next tile, and opens it **without** stashing a draft it just
+  saved.
+- The service is re-opened under the mounted panel; the view sees the target
+  change and **retargets** — ends the last tile's preview, drops its twins,
+  camera, link verdict, answer drafts and name, then syncs to the new tile.
+  While a move is in flight the preview stands down, so neither tile is painted
+  with the other's look.
+- `ShowCellDrone` puts the tile that was left back from its caches unless a
+  save for it just landed — a preview of a *different* tile arriving in the
+  same turn no longer cancels that repaint, and the repaint keeps the next
+  tile's preview pictures pinned. An earlier save stops protecting a tile once
+  that tile is previewed again.
+- Escape is heard first by the hive's keymap (window, capture — Escape pierces
+  its suppression), which unwinds the editor one level through
+  `dismissInner()`. The panel's own Escape handler stands down when the keymap
+  has taken the press (`defaultPrevented`), or one press would unwind two
+  levels and close the editor.
+
 ## The framing numbers
 
 Unchanged from every framing already stored (`editor/crop-math.ts`):
@@ -159,7 +203,7 @@ each decode carries a generation number and a stale one is dropped and closed.
 | `editor/hex-capture.ts` | The one capture. |
 | `editor/image-editor.service.ts` | The picture model: original, framing per orientation, Fill/Fit, linking. No Pixi. |
 | `editor/tile-editor.service.ts` | The session: properties, baseline, saving state, a one-slot stash of a discarded draft. |
-| `editor/tile-editor.drone.ts` | Opening and saving. |
+| `editor/tile-editor.drone.ts` | Opening, saving, and moving to another tile. |
 | `editor/editor-surface.ts` | Dock or page. |
 | `presentation/grid/tile-look.ts` | The shader's look constants. |
 
@@ -176,8 +220,9 @@ order 220). An older shell that still registers the Angular component keeps it
   `{ surface, label, segments }`. Only a payload **without** `surface` (an old
   modal) hides the hive or paints the editor wash.
 - The close-up stays suspended while a session is open.
-- A discarded changed draft (Escape, close, a sweep, another tile opening) is
-  kept once, in memory; reopening that tile offers **Restore**.
+- A discarded changed draft (Escape, close, a sweep, another tile opening, a
+  move with *don't save*) is kept once, in memory; reopening that tile offers
+  **Restore**.
 - Window id `tile-editor`: its text size is `hc:panel-text:tile-editor`, set
   from the docked-panel gear.
 
@@ -185,6 +230,7 @@ order 220). An older shell that still registers the Angular component keeps it
 
 ```bash
 npx vitest run hypercomb-essentials/src/editor hypercomb-essentials/src/presentation/grid/tile-look.spec.ts
+# tile-editor.switch.spec.ts covers moving: clean, asked, each answer, Escape, a failed move
 node scripts/drive-toolwindow-contrast.cjs --url http://localhost:4251 --engine msedge --themes honey,light,sherbet,dark
 node scripts/drive-text-size.cjs
 ```

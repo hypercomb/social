@@ -183,6 +183,41 @@ describe('the Solomon adventure shell with real journey and world models', () =>
     expect(native.ensure).toHaveBeenCalledTimes(4)
   })
 
+  it('passes through a door by touching it — no key — and never bounces straight back through the arrival door', async () => {
+    const overlay = mount()
+    solveMira()
+    walkToDawn()
+    fillDawn()
+    enter()
+    await settle()
+    frame()
+    expect(overlay.journey.room?.id).toBe('sunseed-porch')
+    // The deeper door needs the porch's triangle first — a locked door says so
+    // once and stays a door.
+    const deeper = overlay.journey.room!.doors.find(door => door.id === 'deeper')!
+    overlay.engine!.arrive(deeper)
+    frame()
+    expect(overlay.journey.room?.id, 'a locked door does not pass').toBe('sunseed-porch')
+    expect(document.querySelector('.sol-adventure-message')?.textContent).toContain('opens this door')
+    overlay.engine!.arrive(overlay.journey.room!.relics[0])
+    frame()
+    const passage = document.querySelector<HTMLElement>('.sol-passage[data-door="deeper"]')!
+    expect(passage.textContent, 'a door wears no glyph').toBe('')
+    expect(passage.dataset.shape).toBeTruthy()
+    expect(passage.style.getPropertyValue('--door-h')).toMatch(/^\d+$/)
+    overlay.engine!.arrive(deeper)
+    frame()
+    expect(overlay.journey.room?.id, 'standing in the door is enough').toBe('sunseed-steps')
+    for (let i = 0; i < 5; i++) frame()
+    expect(overlay.journey.room?.id, 'the arrival door does not take her straight back').toBe('sunseed-steps')
+    expect(overlay.journey.arrivalDoor).toBeTruthy()
+    // The door back wears the colour of the porch, and the porch is known.
+    const back = document.querySelector<HTMLElement>('.sol-passage.known')
+    expect(back).not.toBeNull()
+    overlay.unmount()
+    expect(pendingFrames.size, 'the veil leaves no frame behind').toBe(0)
+  })
+
   it('keeps NPC knowledge, filled shrine sockets and permanent relic rewards after close and reopen', async () => {
     const first = mount()
     solveMira()

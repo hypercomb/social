@@ -621,6 +621,73 @@ export class ProvidersWindowView extends EventTarget {
       section.appendChild(row)
     }
 
+    // BACKGROUND HELPER — chat-route.ts's STRUCTURE + CARDS calls, the
+    // sidebar's organized workflow. Not one of the tiers above: it never
+    // answers a chat turn, so it never competes with them, and "Local" is a
+    // real, explicit destination here rather than merely the absence of a
+    // pin — the local model used to be the ONLY option (Jaime, 2026-09-10:
+    // spend no paid compute on it), until Jaime, 2026-09-11, moved the
+    // default off it: "I can't trust [it], just not there yet."
+    {
+      const helperRow = document.createElement('div')
+      helperRow.className = 'hc-policy-row'
+
+      const helperName = document.createElement('span')
+      helperName.className = 'hc-policy-tier'
+      helperName.textContent = this.#t('providers.orchestrator', 'Background helper')
+
+      const directTransports = new Set(['browser-http', 'host-relay'])
+      const helperCandidates = llmProviderRegistry().all().filter(p => directTransports.has(p.transport))
+
+      const helperWrap = document.createElement('span')
+      helperWrap.className = 'hc-policy-pickwrap'
+      const helperPicker = document.createElement('select')
+      helperPicker.className = 'hc-policy-pick'
+      helperPicker.title = this.#t(
+        'providers.orchestratorHint',
+        'Who tags and summarizes a conversation for its sidebar workflow.',
+      )
+      for (const provider of helperCandidates) {
+        const option = document.createElement('option')
+        option.value = provider.id
+        option.textContent = provider.id === 'local' ? this.#t('providers.orchestratorLocal', 'Local') : provider.label
+        helperPicker.appendChild(option)
+      }
+      helperPicker.value = llmPolicy.orchestratorProvider
+      helperPicker.addEventListener('change', () => {
+        llmPolicy.orchestratorProvider = helperPicker.value
+        this.#render()
+      })
+      helperWrap.appendChild(helperPicker)
+      helperRow.append(helperName, helperWrap)
+
+      // The weight picker only means something once the helper is a paid
+      // provider with more than one weight to offer — the local model is
+      // picked by conversation history (chat-route.ts's
+      // `participantLocalModel`), never by a weight class.
+      if (llmPolicy.orchestratorProvider !== 'local') {
+        const weightWrap = document.createElement('span')
+        weightWrap.className = 'hc-policy-pickwrap'
+        const weightPicker = document.createElement('select')
+        weightPicker.className = 'hc-policy-pick'
+        for (const tier of TIERS) {
+          const option = document.createElement('option')
+          option.value = tier
+          option.textContent = this.#t(`providers.tier.${tier}`, tier)
+          weightPicker.appendChild(option)
+        }
+        weightPicker.value = llmPolicy.orchestratorTier
+        weightPicker.addEventListener('change', () => {
+          llmPolicy.orchestratorTier = weightPicker.value as typeof llmPolicy.orchestratorTier
+          this.#render()
+        })
+        weightWrap.appendChild(weightPicker)
+        helperRow.appendChild(weightWrap)
+      }
+
+      section.appendChild(helperRow)
+    }
+
     section.appendChild(this.#policySwitch(
       'providers.allowPeers', 'May use another participant’s machine automatically',
       llmPolicy.allowPeers, on => { llmPolicy.allowPeers = on },

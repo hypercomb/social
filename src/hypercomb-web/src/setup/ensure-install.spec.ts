@@ -202,4 +202,31 @@ describe('checkForUpdate — the signature is the answer', () => {
 
     expect(emit).toHaveBeenCalledWith('update:available', expect.objectContaining({ available: false }))
   })
+
+  it('offers the bundle on request whatever the install came from — and only offers', async () => {
+    // `?upgrade=1`: the participant asked, so the provenance gate steps aside.
+    localStorage.setItem('core-adapter.installed-manifest', JSON.stringify({
+      version: 2, layers: [], bees: ['b'.repeat(64)], dependencies: [], source: 'sentinel',
+    }))
+    localStorage.setItem('hc:shim:installed-package', INSTALLED)
+    vi.stubGlobal('fetch', await bundledPool(NEWER))
+
+    expect(await checkForUpdate({ offer: true })).toBe(true)
+
+    expect(emit).toHaveBeenCalledWith('update:available', expect.objectContaining({
+      available: true, packageSig: NEWER, source: 'bundled', offer: true,
+    }))
+    // Offering is all it does — a link anyone can send installs nothing.
+    expect(localStorage.getItem('hc:shim:installed-package')).toBe(INSTALLED)
+  })
+
+  it('answers false when the live package is the bundled one, read from the shared stamp', async () => {
+    // A channel install left the older bundled stamp behind; the shared stamp is the truth.
+    installed('e'.repeat(64))
+    localStorage.setItem('hc:shim:installed-package', NEWER)
+    vi.stubGlobal('fetch', await bundledPool(NEWER))
+
+    expect(await checkForUpdate({ offer: true })).toBe(false)
+    expect(emit).toHaveBeenCalledWith('update:available', expect.objectContaining({ available: false }))
+  })
 })

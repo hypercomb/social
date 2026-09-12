@@ -5,6 +5,7 @@ import { CavernPainter, type CavernCamera, type CavernLight } from './cavern-pai
 import { canvasContext } from './island-paint.js'
 import { drawPlace, type PlaceGlow, type PlaceSprite } from './island-places.js'
 import { PLAYER_LOOK, drawWalker, type WalkerFacing } from './island-sprites.js'
+import { VEIL_ZOOM, veilCanvasPicture, type VeilDirection, type VeilLeg, type VeilPicture } from './place-veil.js'
 
 type Cell = { col: number; row: number }
 export interface DungeonInput { up: boolean; down: boolean; left: boolean; right: boolean }
@@ -301,7 +302,13 @@ export class ScrollDungeonView {
   #facing: WalkerFacing = 'right'
   #time = 0
   #resize: ResizeObserver | null = null
-  #dialog: HTMLElement | null = null
+  /** Whatever answered E speaks beside itself, in the world, never in a
+   *  dialog (Jaime, 2026-09-11: "these kind of messages should be
+   *  eradicated … when there are choices you still want the open view
+   *  style"). A gate keeps its bubble, runes inside, until it is attuned or
+   *  walked away from; everything else fades in its own time. */
+  readonly #bubble = document.createElement('div')
+  #said: { cell: Cell; until: number; sticky: boolean } | null = null
   #completionSent = false
   #disposed = false
 
@@ -310,7 +317,16 @@ export class ScrollDungeonView {
     this.#painter = new CavernPainter(this.model.definition)
   }
 
-  get isDialogOpen(): boolean { return this.#dialog !== null }
+  /** Nothing here ever takes over the screen. */
+  get isDialogOpen(): boolean { return false }
+  /** A gate is waiting for its runes beside the explorer. */
+  get isSpeaking(): boolean { return this.#said !== null }
+  /** Puts an open bubble away; true when one was open. */
+  dismiss(): boolean {
+    const open = this.#said !== null
+    this.closeDialog()
+    return open
+  }
   exportState(): DungeonSnapshot { return this.model.exportState() }
   restoreState(raw: unknown): void {
     this.closeDialog()
@@ -376,7 +392,9 @@ export class ScrollDungeonView {
     this.#sprite = canvasContext(this.#player)
     this.#spriteKey = ''
     this.#layer.append(this.#player)
-    this.#viewport.append(this.#ground, this.#layer, this.#light)
+    this.#bubble.className = 'sd-bubble'
+    this.#bubble.setAttribute('aria-live', 'polite')
+    this.#viewport.append(this.#ground, this.#layer, this.#light, this.#bubble)
     this.#status.className = 'sd-status'
     this.#status.textContent = 'Arrow keys / WASD walk; E / Enter reads and attunes, and E closes what it opened. The daylit arch returns to the meadow.'
     this.#element.append(heading, this.#viewport, this.#status)
@@ -389,23 +407,54 @@ export class ScrollDungeonView {
     this.#render()
   }
 
+  /** Sizes and paints the cavern again, for a host that was just shown. */
+  refresh(): void { if (!this.#disposed) this.#fit() }
+
+  /** The cavern as the veil sees it: its floor and torchlight at one cell per
+   *  block, scaled around where you stand (leaving) or the daylit arch you
+   *  arrive by. Read lazily, so a cavern shown for the first time is seen
+   *  once it has been sized. */
+  leaveLeg(direction: VeilDirection): VeilLeg | null { return this.#veilLeg(() => ({ x: this.model.x, y: this.model.y }), VEIL_ZOOM[direction].leave) }
+  arriveLeg(direction: VeilDirection): VeilLeg | null {
+    const exit = this.model.definition.exit
+    return this.#veilLeg(() => ({ x: exit.col + 0.5, y: exit.row + 0.5 }), VEIL_ZOOM[direction].arrive)
+  }
+  #veilLeg(at: () => { x: number; y: number }, scale: number): VeilLeg | null {
+    if (!this.#groundContext || this.#disposed) return null
+    const camera = this.#camera, canvases = [this.#ground, this.#light]
+    const picture: VeilPicture = {
+      get cols() { return Math.ceil(camera.width / camera.tile) },
+      get rows() { return Math.ceil(camera.height / camera.tile) },
+      paint(ctx, block) { veilCanvasPicture(canvases, this.cols, this.rows).paint(ctx, block) },
+    }
+    return {
+      element: this.#viewport, picture, scale,
+      get origin(): readonly [number, number] {
+        const point = at()
+        return camera.width && camera.height ? [clamp((point.x * camera.tile - camera.x) / camera.width, 0, 1), clamp((point.y * camera.tile - camera.y) / camera.height, 0, 1)] : [0.5, 0.5]
+      },
+    }
+  }
+
   update(dt: number, input: DungeonInput): void {
     if (this.#disposed) return
-    if (!this.#dialog) {
-      this.model.update(dt, input)
-      if (input.left) this.#facing = 'left'
-      else if (input.right) this.#facing = 'right'
-      else if (input.up) this.#facing = 'up'
-      else if (input.down) this.#facing = 'down'
-    }
+    this.model.update(dt, input)
+    if (input.left) this.#facing = 'left'
+    else if (input.right) this.#facing = 'right'
+    else if (input.up) this.#facing = 'up'
+    else if (input.down) this.#facing = 'down'
     if (Number.isFinite(dt) && dt > 0) this.#time += Math.min(dt, 0.1)
     this.#render()
   }
 
-  interact(): void { if (!this.#dialog) this.#interact() }
+  /** E asks whatever is nearest; E again puts a waiting gate's bubble away. */
+  interact(): void {
+    if (this.#said?.sticky) { this.closeDialog(); return }
+    this.#interact()
+  }
 
   #interact(targetId?: string): void {
-    if (this.#disposed || this.#dialog) return
+    if (this.#disposed) return
     const result = this.model.interact(targetId)
     for (const [id, text] of this.model.discovered) {
       if (this.#sentKnowledge.has(id)) continue
@@ -414,8 +463,7 @@ export class ScrollDungeonView {
     }
     if (result.kind === 'exit' && this.options.onExit) { this.options.onExit(); return }
     this.options.onMessage?.(result.text)
-    this.#showDialog(result)
-    this.#render()
+    this.#showBubble(result)
     if (result.kind === 'artifact' && !this.#completionSent) {
       this.#completionSent = true
       // Notify last: the adventure shell can return to the world and close
@@ -424,31 +472,18 @@ export class ScrollDungeonView {
     }
   }
 
-  #showDialog(result: DungeonDialog): void {
-    this.closeDialog()
-    const shade = document.createElement('div')
-    shade.className = 'sd-dialog-shade'
-    const dialog = document.createElement('div')
-    dialog.className = 'sd-dialog'
-    dialog.setAttribute('role', 'dialog')
-    dialog.setAttribute('aria-modal', 'true')
-    dialog.setAttribute('aria-label', result.title)
-    dialog.tabIndex = -1
-    const close = document.createElement('button')
-    close.type = 'button'
-    close.className = 'sd-close'
-    close.textContent = '×'
-    close.setAttribute('aria-label', 'Close (E)')
-    close.title = 'Close (E)'
-    close.addEventListener('click', () => this.closeDialog())
-    const title = document.createElement('h3')
+  #showBubble(result: DungeonDialog): void {
+    const def = this.model.definition
+    const gate = result.kind === 'gate' && result.gateId ? def.gates.find(candidate => candidate.id === result.gateId) : undefined
+    const cell = gate ?? this.#nearestFeature() ?? { col: Math.floor(this.model.x), row: Math.floor(this.model.y) }
+    const bubble = this.#bubble
+    bubble.replaceChildren()
+    const title = document.createElement('h4')
     title.textContent = result.title
     const text = document.createElement('p')
     text.textContent = result.text
-    dialog.append(close, title, text)
-    let firstChoice: HTMLButtonElement | null = null
-    if (result.kind === 'gate' && result.gateId) {
-      const gate = this.model.definition.gates.find(candidate => candidate.id === result.gateId)!
+    bubble.append(title, text)
+    if (gate) {
       const remembered = document.createElement('blockquote')
       remembered.textContent = gate.inscription
       const choices = document.createElement('div')
@@ -461,31 +496,31 @@ export class ScrollDungeonView {
           const answer = this.model.choose(gate.id, rune.id)
           text.textContent = answer.text
           this.#status.textContent = answer.text
-          if (answer.opened) for (const choice of choices.querySelectorAll('button')) choice.disabled = true
+          if (answer.opened) {
+            for (const choice of choices.querySelectorAll('button')) choice.disabled = true
+            if (this.#said) this.#said = { ...this.#said, sticky: false, until: this.#time + 5 }
+          }
           this.#render()
         })
-        firstChoice ??= button
         choices.append(button)
       }
-      dialog.append(remembered, choices)
+      bubble.append(remembered, choices)
     }
-    dialog.addEventListener('keydown', event => {
-      event.stopPropagation()
-      // E opened this, so E puts it away again.
-      if (event.key === 'Escape' || (event.key.toLowerCase() === 'e' && !event.repeat)) { event.preventDefault(); this.closeDialog(); return }
-      if (event.key !== 'Tab') return
-      const buttons = [...dialog.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
-      const first = buttons[0], last = buttons.at(-1)
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
-    })
-    shade.append(dialog)
-    this.#element.append(shade)
-    this.#dialog = shade
-    ;(firstChoice ?? dialog).focus()
+    const sticky = !!gate
+    this.#said = { cell: { col: cell.col, row: cell.row }, sticky, until: sticky ? Infinity : this.#time + Math.max(4, result.text.length / 16) }
+    this.#render()
   }
 
-  closeDialog(): void { this.#dialog?.remove(); this.#dialog = null }
+  #nearestFeature(): Cell | null {
+    let best: { cell: Cell; distance: number } | null = null
+    for (const { cell } of this.#features) {
+      const distance = Math.hypot(this.model.x - cell.col - 0.5, this.model.y - cell.row - 0.5)
+      if (distance < 1.65 && (!best || distance < best.distance)) best = { cell, distance }
+    }
+    return best?.cell ?? null
+  }
+
+  closeDialog(): void { this.#said = null; this.#bubble.classList.remove('is-shown') }
 
   #fit(): void {
     const width = this.#viewport.clientWidth, height = this.#viewport.clientHeight
@@ -515,7 +550,7 @@ export class ScrollDungeonView {
       feature.drawn = drawn
       drawPlace(feature.art, sprite, glow)
     }
-    const walking = this.model.moving && !this.#dialog
+    const walking = this.model.moving
     this.#player.classList.toggle('sd-walking', walking)
     const step = walking ? Math.floor(this.#time * 8) % 4 : 0
     const key = `${this.#facing}:${step}`
@@ -523,6 +558,18 @@ export class ScrollDungeonView {
       this.#spriteKey = key
       drawWalker(this.#sprite, PLAYER_LOOK, this.#facing, step)
     }
+    // The bubble stays beside what spoke, moves with the camera, opens
+    // downward near the top of the view, and goes when its time is up or the
+    // explorer walks on.
+    const said = this.#said
+    if (said && (said.until < this.#time || Math.hypot(this.model.x - said.cell.col - 0.5, this.model.y - said.cell.row - 0.5) > 3.2)) this.#said = null
+    if (this.#said) {
+      const { tile: size, x: cx, y: cy, height: ch } = this.#camera
+      this.#bubble.style.left = `${(this.#said.cell.col + 0.5) * size - cx}px`
+      this.#bubble.style.top = `${(this.#said.cell.row + 0.84) * size - cy}px`
+      this.#bubble.classList.toggle('is-below', ch > 0 && (this.#said.cell.row + 0.5) * size - cy < ch * 0.42)
+    }
+    this.#bubble.classList.toggle('is-shown', this.#said !== null)
     const camera = this.#camera, def = this.model.definition
     if (!camera.width || !camera.height) return
     const tile = camera.tile
@@ -563,8 +610,8 @@ const SCROLL_DUNGEON_CSS = `
 .sd-art{display:block;width:48px;height:48px}
 .sd-explorer{position:absolute;pointer-events:none;width:32px;height:48px;transform:translate(-50%,-46px) scale(var(--sprite-scale));transform-origin:50% 46px}
 .sd-status{padding:9px 18px;margin:0;background:#100e0b;border-top:1px solid #3a3228;font-size:12px;color:#c9b98f}
-.sd-dialog-shade{position:absolute;inset:0;z-index:10;display:grid;place-items:center;padding:18px;background:rgba(3,4,8,.62);backdrop-filter:blur(3px)}.sd-dialog{position:relative;width:min(460px,100%);box-sizing:border-box;border:1px solid #6b5a3e;border-radius:16px;padding:24px;background:linear-gradient(160deg,#2a231b,#17130f);box-shadow:0 18px 70px rgba(0,0,0,.6);color:#eadfc6;outline:none}.sd-dialog h3{margin:0 34px 12px 0;font:600 22px Georgia,serif;color:#f1d9a4}.sd-dialog p{margin:10px 0;color:#d8ccb2}.sd-dialog blockquote{margin:16px 0;padding:12px 16px;border-left:3px solid #c9a15a;background:rgba(255,230,180,.06);font:italic 15px/1.5 Georgia,serif;color:#e6d4a8}
-.sd-runes{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 4px}.sol-scroll-dungeon .sd-runes button{min-height:42px;border:1px solid #7d6a48;border-radius:10px;padding:9px 15px;background:#3a3024;color:#f3e2bd;font:600 14px system-ui,sans-serif;cursor:pointer}.sol-scroll-dungeon .sd-runes button:hover{background:#4a3d2c}.sd-runes button:disabled{opacity:.5;cursor:default}
-.sol-scroll-dungeon .sd-close{position:absolute;right:12px;top:12px;width:30px;height:30px;border:1px solid #6b5a3e;border-radius:50%;background:#2d261d;color:#eadfc6;font-size:20px;line-height:1;cursor:pointer}.sd-dialog button:focus-visible{outline:3px solid #f1d9a4;outline-offset:3px}
-@media(max-width:600px){.sol-scroll-dungeon header{padding:10px 12px;display:block}.sol-scroll-dungeon header strong{font-size:17px}.sol-scroll-dungeon header span{display:block;margin-top:3px}.sd-status{font-size:11px;padding:7px 10px}.sd-dialog{padding:18px}.sd-dialog h3{font-size:20px}}
+.sd-bubble{position:absolute;z-index:5;width:max-content;max-width:300px;padding:9px 12px;border:2px solid #1c1230;border-radius:12px;background:rgba(245,232,200,.97);color:#2a2118;font-size:12px;line-height:1.45;text-align:left;box-shadow:0 6px 16px rgba(0,0,0,.45);transform:translate(-50%,calc(-100% - 58px * var(--sprite-scale)));opacity:0;transition:opacity .2s;pointer-events:none}.sd-bubble.is-shown{opacity:1;pointer-events:auto}.sd-bubble::after{content:'';position:absolute;left:50%;bottom:-7px;width:11px;height:11px;background:inherit;border-right:2px solid #1c1230;border-bottom:2px solid #1c1230;transform:translateX(-50%) rotate(45deg)}.sd-bubble.is-below{transform:translate(-50%,calc(16px * var(--sprite-scale)))}.sd-bubble.is-below::after{bottom:auto;top:-7px;border:0;border-left:2px solid #1c1230;border-top:2px solid #1c1230}
+.sd-bubble h4{margin:0 0 4px;font:600 14px Georgia,serif;color:#3a2a10}.sd-bubble p{margin:0 0 4px;color:#3b2f1f}.sd-bubble blockquote{margin:6px 0;padding:6px 10px;border-left:3px solid #a8823a;background:rgba(120,90,30,.08);font:italic 12.5px/1.45 Georgia,serif;color:#4a3a20}
+.sd-runes{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 2px}.sol-scroll-dungeon .sd-runes button{min-height:34px;border:1px solid #8a7550;border-radius:8px;padding:6px 11px;background:#fff6e0;color:#2a2118;font:600 12.5px system-ui,sans-serif;cursor:pointer}.sol-scroll-dungeon .sd-runes button:hover,.sol-scroll-dungeon .sd-runes button:focus-visible{background:#ffe9b8;outline:none}.sd-runes button:disabled{opacity:.5;cursor:default}
+@media(max-width:600px){.sol-scroll-dungeon header{padding:10px 12px;display:block}.sol-scroll-dungeon header strong{font-size:17px}.sol-scroll-dungeon header span{display:block;margin-top:3px}.sd-status{font-size:11px;padding:7px 10px}.sd-bubble{max-width:240px}}
 `

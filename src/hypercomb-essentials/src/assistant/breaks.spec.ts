@@ -122,7 +122,26 @@ describe('folding the queue into issues', () => {
     expect(fresh.reopened).toEqual([FP])
     expect(reopened.status).toBe('open')
     expect(reopened.offeredAt).toBeUndefined()
-    expect(reopened.notes.at(-1)?.text).toMatch(/^broke again after the fix/)
+    expect(reopened.notes.at(-1)?.text).toMatch(/^broke again after it was fixed/)
+  })
+
+  it('falsifies a retirement exactly the way it falsifies a fix', () => {
+    // Retiring says "the code that threw is gone". If it throws again from a
+    // page loaded after the claim, the claim was wrong and the issue comes
+    // back on its own — with no tick installed at all.
+    const retired = patchIssue(issueFrom(), { status: 'retired', offered: true }, 5_000)
+    expect(retired.fixedAt).toBe(5_000)
+
+    const stale = foldBreaks(new Map([[FP, retired]]), [record({ session: 'old', sessionAt: 4_000, firstAt: 6_000, lastAt: 6_000 })], 7_000)
+    expect(stale.issues.get(FP)).toMatchObject({ status: 'retired', count: 2 })
+    expect(stale.reopened).toEqual([])
+
+    const fresh = foldBreaks(new Map([[FP, retired]]), [record({ session: 'new', sessionAt: 8_000, firstAt: 9_000, lastAt: 9_000 })], 10_000)
+    const back = fresh.issues.get(FP)!
+    expect(fresh.reopened).toEqual([FP])
+    expect(back.status).toBe('open')
+    expect(back.offeredAt).toBeUndefined()
+    expect(back.notes.at(-1)?.text).toMatch(/^broke again after it was retired/)
   })
 
   it('leaves a dismissed issue dismissed, and keeps counting it', () => {
@@ -160,5 +179,27 @@ describe("Angular's echo of a window error event", () => {
   it('does not swallow real code that wraps a plain event', () => {
     expect(describeBreak('reported', ['[relay]', new Error('relay failed', { cause: { type: 'error' } })]))
       .toMatchObject({ type: 'reported', message: '[relay]: relay failed' })
+  })
+})
+
+describe('the clock a stale tab cannot forge', () => {
+  const NOW = 9_000
+  const fold = (prior: BreakIssue | undefined, over: Partial<BreakRecord>) =>
+    foldBreaks(prior ? new Map([[FP, prior]]) : new Map(), [record(over)], NOW).issues.get(FP)!
+
+  it('keeps one entry per distinct page load, and none a tab could invent', () => {
+    // A tab carries its own start time forever, so 500 breaks from one load is
+    // one entry — it can raise count and lastAt, never add a newer load.
+    let issue = fold(undefined, { sessionAt: 1_000 })
+    expect(issue.loads).toEqual([1_000])
+    for (let n = 0; n < 5; n++) issue = fold(issue, { session: 's', sessionAt: 1_000, lastAt: 8_000 })
+    expect(issue.loads).toEqual([1_000])
+    expect(issue.count).toBeGreaterThan(1)
+
+    expect(fold(issue, { session: 'b', sessionAt: 5_000 }).loads).toEqual([1_000, 5_000])
+  })
+
+  it('clamps a client clock running ahead, so nothing looks freshly loaded forever', () => {
+    expect(fold(undefined, { sessionAt: 10 ** 15 }).loads).toEqual([NOW])
   })
 })

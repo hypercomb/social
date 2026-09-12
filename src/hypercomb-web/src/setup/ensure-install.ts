@@ -21,7 +21,7 @@ import { checkCoreCompatibility, CoreMismatchError, describeCoreMismatch } from 
 import { aliasOf, bagEntryName, bagSignature, beeEntries, dependencyEntries, orderedEntries } from '@hypercomb/runtime/bags'
 import { HOST_PACKAGES_MEANING, markerIndices, parseMember, parsePoolListing, poolEntryName } from '@hypercomb/runtime/host-pool'
 import { registerPoolMeaning } from '@hypercomb/core'
-import { stampInstalledPackage } from '@hypercomb/runtime/installed-package'
+import { installedPackageSig, stampInstalledPackage } from '@hypercomb/runtime/installed-package'
 import { DEFAULT_HOST_ZONES, listHostZones } from '@hypercomb/runtime/host-zones'
 import { cacheImportMap } from './resolve-import-map'
 
@@ -434,35 +434,51 @@ const autoloadFromHosts = async (): Promise<boolean> => {
 // contract forbids a staleness fetch DURING boot, but once the app is
 // up we may compare the cached install against the shell's bundled
 // `/content/` package to surface an "update available" affordance. This
-// never installs anything — it only emits `update:available` so the UI
-// can show an upgrade icon that routes the user to the installer.
+// never installs anything — it only emits `update:available`, tagged
+// `source: 'bundled'` so the indicator keeps it apart from a followed
+// channel's offer, and the participant decides.
+//
+// `offer` is the `?upgrade=1` door: the participant asked, so the bundle is
+// offered whatever the install's provenance — but only ever offered. A link
+// anyone can send must never change what a hive runs by itself.
+//
+// Resolves true when an update is offered, false when the live package IS
+// the bundled one, null when there is nothing to compare.
 // ─────────────────────────────────────────────────────────────────────
 
-export const checkForUpdate = async (): Promise<void> => {
+export const checkForUpdate = async ({ offer = false }: { offer?: boolean } = {}): Promise<boolean | null> => {
   const cached = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
   // Not installed yet (cold/welcome state) — the install prompt handles that,
   // there's no "update" to offer over an absent install.
-  if (!cached || cached.bees.length === 0) return
+  if (!cached || cached.bees.length === 0) return null
   const bundled = await fetchBundledPackage()
   // No bundled manifest (dev shell has no /content/, or offline) — stay quiet.
-  if (!bundled) return
+  if (!bundled) return null
+
+  const announce = (available: boolean): void => {
+    EffectBus.emit('update:available', {
+      available,
+      newCount: 0,
+      newBees: [],
+      packageSig: bundled.packageSig,
+      previous: bundled.previous ?? null,
+      label: bundled.label,
+      source: 'bundled',
+      ...(offer ? { offer: true } : {}),
+    })
+  }
 
   // MERKLE FIRST. A package signature IS the closure it names, so equal sigs
   // mean equal trees and there is nothing to offer — no set comparison can say
   // more than that. It also keeps the comparisons below honest now that the
   // cached arrays are DERIVED from the signed tree while `bundled.*` is still
   // what /content/manifest.json asserts: the two are only ever put side by side
-  // when the packages genuinely differ.
-  if (localStorage.getItem(SYNC_SIG_KEY) === bundled.packageSig) {
-    EffectBus.emit('update:available', {
-      available: false,
-      newCount: 0,
-      newBees: [],
-      packageSig: bundled.packageSig,
-      previous: bundled.previous ?? null,
-      label: bundled.label,
-    })
-    return
+  // when the packages genuinely differ. The live signature is the one stamp
+  // every activation path writes, so a package a followed channel installed
+  // is compared as itself, not as the bundle it replaced.
+  if (installedPackageSig() === bundled.packageSig) {
+    announce(false)
+    return false
   }
 
   // ── Update-authority gate ────────────────────────────────────────────
@@ -476,17 +492,11 @@ export const checkForUpdate = async (): Promise<void> => {
   //
   // This used to INFER provenance by diffing bee sets. It cannot any more, and
   // should not: the bundle no longer states an inventory, because nothing a
-  // publisher writes down decides what a client installs.
-  if (cached.source !== 'bundled') {
-    EffectBus.emit('update:available', {
-      available: false,
-      newCount: 0,
-      newBees: [],
-      packageSig: bundled.packageSig,
-      previous: bundled.previous ?? null,
-      label: bundled.label,
-    })
-    return
+  // publisher writes down decides what a client installs. An explicit offer
+  // passes: the participant asked for the bundle by name.
+  if (cached.source !== 'bundled' && !offer) {
+    announce(false)
+    return null
   }
 
   // THE SIGNATURE IS THE ANSWER. Equal signatures returned above, so reaching
@@ -497,14 +507,8 @@ export const checkForUpdate = async (): Promise<void> => {
   // computing it honestly now would mean resolving the new package's whole
   // closure to render a number. The pill says a newer build is here; what
   // changed in it is a release note's job, not the installer's.
-  EffectBus.emit('update:available', {
-    available: true,
-    newCount: 0,
-    newBees: [],
-    packageSig: bundled.packageSig,
-    previous: bundled.previous ?? null,
-    label: bundled.label,
-  })
+  announce(true)
+  return true
 }
 
 

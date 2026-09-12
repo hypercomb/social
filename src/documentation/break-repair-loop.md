@@ -88,6 +88,7 @@ half-written litter and are removed.
 | `open` | interpreted, waiting for a choice | `interpret` (new issues only); the participant putting a chosen issue back (`choose --release`); the fold when a fix didn't hold; repair when it couldn't fix |
 | `chosen` | picked in triage, with a mode: `fix` or `investigate` | the participant |
 | `fixed` | a fix landed (`fixedAt`) | the repair agent |
+| `retired` | retired WITHOUT a fix: the code it blamed had moved, so the bytes that threw are gone (`fixedAt`) | the participant, or repair once it has confirmed from source |
 | `dismissed` | leave it — it keeps counting, silently | the participant |
 
 An issue also carries its `type` (a break's kind, or `warning`), `rank` (the list
@@ -96,9 +97,129 @@ past the last 50), `firstAt`, `lastAt`, recent `origins` and `routes`, the newes
 `stack`, the review's `title`, `area`, `interpretation` and `files`, `offeredAt`
 (when a conversation last showed it), and up to 30 `notes`.
 
-**A fix is proved by silence.** A `fixed` issue that breaks again in a page load
-that started after `fixedAt` is reopened by the fold with a note. A tab left open
-across the fix is still running the old code, so it can't reopen anything.
+**A settled claim is proved by silence.** A `fixed` **or `retired`** issue that
+breaks again in a page load that started after `fixedAt` is reopened by the fold
+with a note. A tab left open across the claim is still running the old code, so
+it can't reopen anything — which is why the tick carries a second, broader
+falsifier (§3.1). Retiring shares `fixedAt` deliberately: one clock, one
+comparison, and a retirement that can be proved wrong exactly like a fix. That is
+the whole reason `retired` exists instead of reaching for `dismissed`, which
+never reopens and records no reason.
+
+### 3.1 Breaks an agent caused — "code moved"
+
+Several agents edit this repo at once, so a large class of break is not a bug at
+all: a page was running a stale bundle while a refactor landed underneath it.
+Those should be retired, not fixed.
+
+The free tick asks ONE durable question per issue — *did every file this break
+blames change after the break last happened?* — from **committed git history
+only** (`git log -1 --format=%ct -- <file>`, the OLDEST of the blamed files, so
+naming more files makes the claim harder to earn, not easier). When it holds, the
+tick writes ONE note beginning `code moved:` and drops that fingerprint from the
+list that **summons** a conversation. It stays on `list` and on every checklist
+that opens for any other reason: the hold silences the summons, never the issue.
+
+**Nothing is ever retired automatically.** Measured on this tree, 178 of 936
+`.ts` files under essentials changed in three days and hot files take 4–9 commits
+in three days, so "the blamed file moved" measures how fast the repo is worked,
+not whether the bug is real — an unattended retire would fire hardest on the most
+actively edited code, which is exactly where real bugs live. The note therefore
+states evidence and names the competing explanation, and must never read as a
+verdict.
+
+What makes a wrong reading cheap:
+
+- **One note, ever.** Once an issue has been read, the tick never reads it again.
+  A wrong reading costs one delayed conversation, not an unbounded silence.
+- Any occurrence since the note, any note a **person** wrote, or `BREAKS_HOLD_DAYS`
+  (default 14) elapsing releases the hold permanently.
+- A `chosen` issue gains the note but is **never held** — a person put it there.
+- An issue this same tick reopened is never read.
+- Only dev-server breaks qualify: one non-localhost origin and the issue is never
+  a churn suspect. Warnings never qualify either.
+- `planUnretire` reopens any `retired` issue whose `lastAt` passed `fixedAt` —
+  broader than the fold, which needs a page load that *started* after the claim
+  and so cannot see a real bug throwing from one long-lived tab. `status` reports
+  the same condition as `stillBreaking`, covering wrong **fixes** too.
+
+### 3.2 When a reading is out-argued — "broke since you looked"
+
+Every stamped reading is a claim, and **the only thing that may contradict it is
+a page load that STARTED after it.** That one sentence covers all four rules: the
+fold's reopen, `planUnretire`, §3.1's hold release, and the climb.
+
+An issue carries `loads` — when each distinct page load it broke in *started*,
+newest 20 kept. It is the only clock in the record a stale tab cannot forge: a
+tab open since this morning can raise `count` on every frame and push `lastAt` to
+right now, and it can never add an entry newer than the moment it loaded.
+
+`planClimb` asks one question of an `open` issue that has already been shown:
+since the newest thing said about it, has it broken in page loads that started on
+**three different days**? Three days rules out both of this machine's artefacts
+at once — one long-lived tab is ONE entry however hard it throws, and a burst of
+dev-server rebuild reloads is many loads on ONE day (13 in 107 minutes, on the
+live record). Only repetition spread across days counts.
+
+It then writes a `broke since:` note and the issue re-enters `planOffer`'s due
+list through a **`climbed` bucket of its own**. It must NOT clear `offeredAt`:
+that field is simultaneously "he has seen it" and the gap's anchor
+(`lastOffer = max(offeredAt)`), so clearing it would collapse the anchor and open
+a conversation inside the gap about the very issue being held back.
+
+**`CLIMB_MAX` is 3.** The loop may raise one issue three times, ever, and the
+third note says so. A loop that stops arguing is the only reason a person keeps
+reading it — and it removes the pressure to reach for `dismissed`, the one
+verdict with no falsifier.
+
+`count`, `sessions`, `routes` and `rank` are read by **nothing** here. They are
+inflated by gesture bursts, silently deflated when the queue fills, and
+`sessions` double-counts a long-lived tab once its id is evicted. They appear in
+the note's words, for a person to weigh, and decide nothing.
+
+A climbed issue is **type-blind**: the warnings-never-summon rule protects FIRST
+contact, and a climb means he was already shown it and it broke on three further
+days.
+
+### 3.3 When the gap is shortened
+
+Urgency **shortens** the gap to 30 minutes; it never removes it. `waitMin` is the
+only thing serializing `openConversation`, so a true bypass would race two
+Terminal windows and two repair sessions over one log.
+
+One class qualifies (`urgentReason`): **a settled claim the hive has falsified**
+— the only thing the free tick knows is wrong without reading any code, and
+bounded by how often anybody claims a fix, so it cannot become a firehose. Two
+guards against this machine's own failure mode, where a compile error leaves the
+watcher serving the last good bundle and a fix "does not hold" because the bytes
+never shipped: the evidence must be **two** distinct page loads, the newer at
+least 30 minutes after the claim. Under that it still reopens — breadth for the
+record — it just waits out the ordinary gap.
+
+`!offeredAt` is the veto: once the tick has put an issue in front of somebody,
+nothing it does afterwards earns a shortened gap. So **a climb can never be
+urgent** — repetition reaches the door and stops there. The window's title
+carries the reason, since that is the only part of an interruption a person reads
+before deciding to engage.
+
+Rejected here: **a second attention channel** of any kind — a WinRT toast, a tray
+balloon, a push from the tick. The tick has no Claude tools, a channel Focus
+Assist can silently swallow is worse than none for a once-a-week event, and a
+toast does not remove the window, it adds a step before it. **`type: 'resource'`
+as an urgent class** — zero resource issues exist in the whole log, because a
+page failing to load its own code arrives through `console.warn` as a *warning*
+(live proof: `20b6bfbb`, "Failed to fetch dynamically imported module"), so the
+lane would carry real risk and zero coverage.
+
+Rejected in §3.1, and why (all verified against this repo, not assumed): **mtime** —
+content-free, and a checkout, stash pop, worktree switch or formatter save bumps
+it; **`git status` dirtiness** — a dirty blamed file is a refactor *in flight*,
+precisely when nothing should be quietened; **symbol presence in source** — the
+crashing frame is routinely vendor code (`get canvas` appears twice in the
+bundle, both inside Pixi, zero in app code); **the source map's `sourcesContent`
+vs disk** — the strongest live signal and byte-exact in ~240 ms, but it answers
+*is the bundle stale right now*, so it reports "not churn" once the rebuild has
+happened, which is the one case that must be caught.
 
 Both pools are truth pools, colon-scoped, and never minted from the optimize
 phase. The queue is drained by the fold and nothing else; nothing is ever deleted

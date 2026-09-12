@@ -76,6 +76,11 @@ export class MixedGroupBag {
   /** Last (group + member-label) signature already warmed by prewarm(), so
    *  the per-discovery-scan re-trigger is a cheap no-op once warm. */
   #prewarmedKey = ''
+  /** True once the shell's loader has settled every module (`loader:bees-done`
+   *  with nothing failed). Until then members() is only as complete as the
+   *  modules registered SO FAR — a game whose bee hasn't loaded yet is not
+   *  gone — so the reconcile may add cells but never drops one. */
+  #modulesSettled = false
 
   constructor(registry: GroupRegistry) {
     this.#registry = registry
@@ -120,6 +125,18 @@ export class MixedGroupBag {
       const was = prevPublic
       prevPublic = pub
       if (was === false && pub && this.isActive()) this.exit()
+    })
+
+    // A refresh straight into /games used to drop every game whose bee had
+    // not registered yet, then append each back as it arrived — the page
+    // emptied and refilled (reordered, with a history marker per step) on
+    // every reload. Drops wait for the loader; one refresh when it settles
+    // retires the cells whose member is genuinely gone. A load with failures
+    // never settles: a module that failed to load is not a removed member.
+    EffectBus.on<{ failed?: number }>('loader:bees-done', (p) => {
+      if (this.#modulesSettled || Number(p?.failed) > 0) return
+      this.#modulesSettled = true
+      void this.refreshIfActive()
     })
   }
 
@@ -418,14 +435,17 @@ export class MixedGroupBag {
 
     const wanted = members.map(m => m.label)
     const wantedSet = new Set(wanted)
-    const kept = existing.filter(n => wantedSet.has(n))          // preserve order
+    const settled = this.#modulesSettled
+    // Before the loader settles an absent member may just be unloaded — keep it.
+    const kept = settled ? existing.filter(n => wantedSet.has(n)) : existing   // preserve order
     const fresh = wanted.filter(n => !existing.includes(n))      // append new
     // Clustered-island groups (help) demand a FIXED members() order so each
     // category's header tile interleaves directly ahead of its members; the
     // per-category islands are derived from that order downstream. Every other
     // group preserves the participant's arrangement (kept first, new appended).
+    // A clustered page takes its fixed order only once its member set is whole.
     const ordered = !!this.#registry.get(id)?.orderedLayout
-    const order = ordered ? wanted : [...kept, ...fresh]
+    const order = ordered && settled ? wanted : [...kept, ...fresh]
 
     const store = get<StoreLike>('@hypercomb.social/Store')
     // 1. Create any FRESH launcher cells first — DETERMINISTICALLY, capturing each
@@ -450,7 +470,7 @@ export class MixedGroupBag {
     // only signal decorations:changed when the marker actually moved). Every
     // other group keeps the cheap fresh-only path (byte-identical payloads).
     const writtenMarker = new Map<string, string>()
-    const toWrite = ordered ? order : fresh
+    const toWrite = ordered ? wanted : fresh
     if (store?.putResource) {
       for (const name of toWrite) {
         const m = this.#memberByLabel.get(name)

@@ -6,6 +6,7 @@
 // the current package, its sigbags and ordinary shell assets; omit historical
 // packages, documentation and participant-only track assets from Cloudflare.
 
+import { createHash } from 'node:crypto'
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -58,6 +59,23 @@ await writeFile(
   JSON.stringify({ packages: { [currentSig]: current } }, null, 2) + '\n',
   'utf8',
 )
+
+// THE PACKAGE POOL, ONE ENTRY DEEP. Since 2026-09-03 the engine does not read
+// manifest.json to learn its own package — it walks `sign('host:packages')`
+// under /content/ exactly as it would on any host (ensure-install.ts,
+// fetchBundledPackage). A door that ships no pool ships no package: every
+// published subdomain booted to "visitor renderer package is unavailable"
+// for eight days because this directory was the one thing left out. A
+// published door carries ONE package, so its pool is one marker naming it,
+// plus the two listings a static host answers a directory with.
+const pool = createHash('sha256').update('host:packages').digest('hex')
+const poolDir = join(outputContent, pool)
+await mkdir(poolDir, { recursive: true })
+const label = String(current.label ?? '').trim()
+await writeFile(join(poolDir, '00000000'), label ? `${currentSig}\n${label}` : currentSig, 'utf8')
+for (const listing of ['index.html', 'listing.txt']) {
+  await writeFile(join(poolDir, listing), '00000000\n', 'utf8')
+}
 
 let bytes = 0
 const addSize = async (path) => {

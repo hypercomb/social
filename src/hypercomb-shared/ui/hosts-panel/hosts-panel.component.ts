@@ -65,6 +65,52 @@ type IntakeState = {
  *  count is always stated, so a collapsed list never reads as the whole. */
 const OFFERS_SHOWN = 8
 
+// ── switching, and the way back ─────────────────────────────────────────────
+//
+// A BUILD FROM ANOTHER DOMAIN IS A SWITCH, NOT AN UPDATE. It restarts the app
+// on somebody else's version, and the first thing a participant saw afterwards
+// was a hive that looked emptied — every tile still on disk, none of them
+// shown by the build now running. Nothing was lost and nothing said so. So a
+// switch is named before it happens, the build it left is remembered, and the
+// window reopens after the restart with one button that goes back.
+
+/** The build a switch left, so going back is one press. Written only after a
+ *  switch has verified and activated; cleared by going back, by updating from
+ *  your own domain, or by choosing to keep the new build. */
+const SWITCHED_KEY = 'hc:hosts:switched-from'
+
+/** Set just before the restart a switch causes and read once on the next
+ *  boot: the window reopens, so what changed and the way back are the first
+ *  things on screen. Session-scoped — it never outlives the tab. */
+const REOPEN_KEY = 'hc:hosts:reopen-after-switch'
+
+/** The guide stays open until it is put away, and stays put away. */
+const GUIDE_KEY = 'hc:hosts:guide-closed'
+
+const PACKAGE_SIG = /^[a-f0-9]{64}$/
+
+interface SwitchRecord {
+  /** The build you were on before any switch — the one your tiles look right in. */
+  from: string
+  /** The domain that lists it, when one was seen to. */
+  fromZone: string
+  /** The build the last switch took you to. */
+  to: string
+  toZone: string
+}
+
+const readSwitch = (): SwitchRecord | null => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SWITCHED_KEY) ?? 'null')
+    if (!raw || !PACKAGE_SIG.test(String(raw.from)) || !PACKAGE_SIG.test(String(raw.to))) return null
+    return { from: raw.from, fromZone: hostZone(raw.fromZone), to: raw.to, toZone: hostZone(raw.toZone) }
+  } catch { return null }
+}
+
+const readGuideOpen = (): boolean => {
+  try { return localStorage.getItem(GUIDE_KEY) !== '1' } catch { return true }
+}
+
 /** Mirrors HostsRenderPayload in sharing/hosts.drone.ts — shared cannot import
  *  essentials, so the shape is kept field-for-field by hand. */
 interface HostsRenderPayload {
@@ -157,6 +203,25 @@ export class HostsPanelComponent implements OnDestroy {
   readonly ledgerOpen = signal(false)
   readonly addError = signal(false)
 
+  /** The domain this app is running on. A build from here is an update; a
+   *  build from anywhere else is a switch, and says so before it happens. */
+  readonly home = hostZone(location.host)
+  /** Is the four-line guide showing? Open until put away. */
+  readonly guideOpen = signal(readGuideOpen())
+  /** A switch waiting for its yes — the confirm sheet shows while set. */
+  readonly pending = signal<HostPackage | null>(null)
+  /** The build a switch left, when one did. */
+  readonly switched = signal<SwitchRecord | null>(readSwitch())
+  /** Looking for the build to go back to. */
+  readonly returnFinding = signal(false)
+  /** Where it was looked for and not found: the zones, '-' for nowhere to
+   *  look, '' while there is nothing to report. */
+  readonly returnMissing = signal('')
+  /** Builds already confirmed this session, so a Retry does not ask twice. */
+  #confirmed = new Set<string>()
+  /** Manifests in flight, so a second asker waits on the first. */
+  #asking = new Map<string, Promise<void>>()
+
   /** Builds you have put away, this panel's scope only. */
   readonly hidden = signal<HiddenItem[]>([])
   /** Every signature that must not be offered — hidden AND deleted. Deleted
@@ -238,6 +303,15 @@ export class HostsPanelComponent implements OnDestroy {
       }
       this.naming.set(counts)
     }))
+
+    // BACK FROM A SWITCH. The restart a switch causes is the moment tiles can
+    // seem to vanish, so the window that explains it opens by itself — once.
+    try {
+      if (sessionStorage.getItem(REOPEN_KEY) === '1') {
+        sessionStorage.removeItem(REOPEN_KEY)
+        EffectBus.emit('hosts:open', {})
+      }
+    } catch { /* storage unavailable */ }
   }
 
   ngOnDestroy(): void {
@@ -246,7 +320,34 @@ export class HostsPanelComponent implements OnDestroy {
   }
 
   close(): void {
+    this.pending.set(null)
     EffectBus.emit('hosts:close', {})
+  }
+
+  // ── the guide, and your own domain ───────────────────────────────────────
+
+  toggleGuide(): void {
+    const open = !this.guideOpen()
+    this.guideOpen.set(open)
+    try { localStorage.setItem(GUIDE_KEY, open ? '0' : '1') } catch { /* storage unavailable */ }
+  }
+
+  /** Is this the domain the app is running on? */
+  isHome(zone: string): boolean {
+    return !!this.home && hostZone(zone) === this.home
+  }
+
+  /** Your own domain first — it is the one you come back to. */
+  orderedZones(): string[] {
+    const zones = this.zones()
+    const home = zones.filter(z => this.isHome(z))
+    return home.length ? [...home, ...zones.filter(z => !this.isHome(z))] : zones
+  }
+
+  /** The sentence that opens a domain's builds: your own domain is where you
+   *  return to, anyone else's is a switch to their version. */
+  buildsNoteKey(zone: string): string {
+    return this.isHome(zone) ? 'hosts.builds.home' : 'hosts.builds.foreign'
   }
 
   /** Take a host into your community. Normalization happens where the
@@ -348,6 +449,16 @@ export class HostsPanelComponent implements OnDestroy {
     return pkg.packageSig === this.installed()
   }
 
+  /** The domain's own door. Someone else's build is tried THERE — the
+   *  browser's origin isolation runs it against their storage, never yours —
+   *  and applied HERE only once a publisher you follow has signed it
+   *  (runtime activation-authority.ts refuses the rest by name). */
+  visitUrl(zone: string): string {
+    const bare = hostZone(zone) || String(zone ?? '').trim()
+    const scheme = /^(localhost|127(?:\.\d+){3})(:\d{1,5})?$/.test(bare) ? 'http' : 'https'
+    return `${scheme}://${bare}`
+  }
+
   /** When a build was made, short enough for a row: month, day and time in
    *  the reader's locale. The manifest stamps a local ISO string. */
   when(pkg: HostPackage): string {
@@ -432,7 +543,10 @@ export class HostsPanelComponent implements OnDestroy {
     if (phase === 'applying') return 'hosts.offer.applying'
     if (phase === 'applied') return 'hosts.offer.applied'
     if (phase === 'failed') return 'hosts.offer.retry'
-    return this.updateAvailable(zone) ? 'hosts.offer.update' : 'hosts.offer.current'
+    if (!this.updateAvailable(zone)) return 'hosts.offer.current'
+    // SAY WHAT IT DOES. Newer from your own domain is an update; anything
+    // from another domain is a switch to their version of the app.
+    return this.isHome(zone) ? 'hosts.offer.update' : 'hosts.offer.switch'
   }
 
   updateDisabled(zone: string): boolean {
@@ -444,7 +558,7 @@ export class HostsPanelComponent implements OnDestroy {
 
   update(zone: string): void {
     const newest = this.newestOf(zone)
-    if (newest) void this.apply(newest)
+    if (newest) this.apply(newest)
   }
 
   // ── the ledger fold: every build, for pinning and rollback ───────────────
@@ -619,17 +733,30 @@ export class HostsPanelComponent implements OnDestroy {
     // separately: the ledger is one small file and the manifest is megabytes,
     // so the creations are on screen long before the builds are.
     EffectBus.emit('hosts:creations', { zone })
-    if (zone in this.offers()) return
+    await this.#ask(zone)
+  }
 
-    this.offers.set({ ...this.offers(), [zone]: null })
-    let packages: HostPackage[] = []
-    let answered = false
-    try { ({ packages, answered } = await askHostPackages(zone)) } catch { /* no answer */ }
-    this.asked.set(new Set([...this.asked(), zone]))
-    this.offers.set({
-      ...this.offers(),
-      [zone]: { packages, answered },
-    })
+  /** Fetch one domain's manifest, once. A second asker — Switch back looking
+   *  for your build while you opened the same domain — waits on the first
+   *  rather than reading a half-answered null. */
+  #ask(zone: string): Promise<void> {
+    const flying = this.#asking.get(zone)
+    if (flying) return flying
+    if (zone in this.offers()) return Promise.resolve()
+    const run = (async () => {
+      this.offers.set({ ...this.offers(), [zone]: null })
+      let packages: HostPackage[] = []
+      let answered = false
+      try { ({ packages, answered } = await askHostPackages(zone)) } catch { /* no answer */ }
+      this.asked.set(new Set([...this.asked(), zone]))
+      this.offers.set({
+        ...this.offers(),
+        [zone]: { packages, answered },
+      })
+    })()
+    this.#asking.set(zone, run)
+    void run.finally(() => this.#asking.delete(zone))
+    return run
   }
 
   // ── the creations a domain serves, and the one switch on each ────────────
@@ -689,9 +816,10 @@ export class HostsPanelComponent implements OnDestroy {
     return this.intake()[pkg.packageSig]
   }
 
-  /** The ledger row's button: APPLY, or the intake phase it is in. Apply,
-   *  never Add: a ledger row can be older than what you are running, and
-   *  reaching for it is a DOWNGRADE — a word that says "add" hides that. */
+  /** The ledger row's button: SWITCH, or the intake phase it is in. Switch,
+   *  never Add or Apply: a ledger row can be older than what you are running,
+   *  or somebody else's version entirely, and taking it replaces the app you
+   *  are running — a word that says "add" hides that. */
   intakeActionKey(pkg: HostPackage): string {
     switch (this.intakeOf(pkg)?.phase) {
       case 'applying': return 'hosts.offer.applying'
@@ -708,15 +836,144 @@ export class HostsPanelComponent implements OnDestroy {
   }
 
   /**
+   * The one door every build button goes through. A build from your own
+   * domain goes straight on; any other domain's waits for a yes on the
+   * confirm sheet first.
+   */
+  apply(pkg: HostPackage): void {
+    if (this.intakeDisabled(pkg) || this.isCurrent(pkg)) return
+    if (this.#needsConfirm(pkg)) { this.pending.set(pkg); return }
+    void this.#switch(pkg)
+  }
+
+  /** Your own domain's build is an update. Any other domain's is a switch to
+   *  somebody else's version of the app, and that is said before it happens —
+   *  once per build, so a Retry does not ask twice. Going back to the build
+   *  you were on never asks: it is the undo. */
+  #needsConfirm(pkg: HostPackage): boolean {
+    if (this.isHome(pkg.zone)) return false
+    if (this.#confirmed.has(pkg.packageSig)) return false
+    return pkg.packageSig !== this.switched()?.from
+  }
+
+  confirmSwitch(): void {
+    const pkg = this.pending()
+    this.pending.set(null)
+    if (!pkg) return
+    this.#confirmed.add(pkg.packageSig)
+    void this.#switch(pkg)
+  }
+
+  cancelSwitch(): void {
+    this.pending.set(null)
+  }
+
+  // ── the way back ─────────────────────────────────────────────────────────
+
+  /** The note after a switch shows while you run the build it took you to,
+   *  and through the restart that goes back, so "Switched — restarting" has
+   *  somewhere to be said. */
+  returnable(): SwitchRecord | null {
+    const record = this.switched()
+    if (!record) return null
+    if (record.to === this.installed()) return record
+    return this.intake()[record.from]?.phase === 'applied' ? record : null
+  }
+
+  returnBusy(): boolean {
+    const record = this.switched()
+    const phase = record ? this.intake()[record.from]?.phase : undefined
+    return this.returnFinding() || phase === 'applying' || phase === 'applied'
+  }
+
+  returnKey(): string {
+    const record = this.switched()
+    const phase = record ? this.intake()[record.from]?.phase : undefined
+    if (this.returnFinding()) return 'hosts.return.finding'
+    if (phase === 'applying') return 'hosts.offer.applying'
+    if (phase === 'applied') return 'hosts.offer.applied'
+    if (phase === 'failed') return 'hosts.offer.retry'
+    return 'hosts.return.go'
+  }
+
+  /** Find the build you were on — where it was seen listed, then your own
+   *  domain — and switch to it. Its bytes are usually still here; the host is
+   *  asked only for the manifest that names them. */
+  async switchBack(): Promise<void> {
+    const record = this.returnable()
+    if (!record || this.returnBusy()) return
+    this.returnFinding.set(true)
+    this.returnMissing.set('')
+    const places = [...new Set([record.fromZone, ...this.zones().filter(z => this.isHome(z))].filter(Boolean))]
+    try {
+      for (const zone of places) {
+        await this.#ask(zone)
+        const pkg = this.offers()[zone]?.packages.find(p => p.packageSig === record.from)
+        if (!pkg) continue
+        this.returnFinding.set(false)
+        this.apply(pkg)
+        return
+      }
+      this.returnMissing.set(places.length ? places.join(', ') : '-')
+    } finally {
+      this.returnFinding.set(false)
+    }
+  }
+
+  /** Stay on the new build: the note goes, and so does the way back. */
+  keepSwitch(): void {
+    try { localStorage.removeItem(SWITCHED_KEY) } catch { /* storage unavailable */ }
+    this.switched.set(null)
+    this.returnMissing.set('')
+  }
+
+  /**
+   * Remember the way back, once a switch has activated. Answers whether there
+   * is now a note to show after the restart.
+   *
+   * Going back, or updating from your own domain, IS the way back, so the
+   * note goes (the signal keeps it until the restart, for the "restarting"
+   * line). Switching onward keeps the ORIGINAL build — the one your tiles
+   * look right in — rather than the build you passed through.
+   */
+  #remember(left: string | null, pkg: HostPackage): boolean {
+    const record = this.switched()
+    try {
+      if ((record && pkg.packageSig === record.from) || this.isHome(pkg.zone)) {
+        localStorage.removeItem(SWITCHED_KEY)
+        return false
+      }
+      if (!left || left === pkg.packageSig) return false
+      const next: SwitchRecord = record && record.to === left
+        ? { ...record, to: pkg.packageSig, toZone: hostZone(pkg.zone) }
+        : { from: left, fromZone: this.#zoneListing(left), to: pkg.packageSig, toZone: hostZone(pkg.zone) }
+      localStorage.setItem(SWITCHED_KEY, JSON.stringify(next))
+      this.switched.set(next)
+      return true
+    } catch { return false /* storage unavailable — the switch still happened */ }
+  }
+
+  /** The domain seen listing a build, your own first; '' when none was. */
+  #zoneListing(sig: string): string {
+    const listing = Object.entries(this.offers())
+      .filter(([, offer]) => offer?.packages.some(p => p.packageSig === sig))
+      .map(([zone]) => zone)
+    return listing.find(z => this.isHome(z)) ?? listing[0] ?? this.zones().find(z => this.isHome(z)) ?? ''
+  }
+
+  /**
    * Make a host's package ours through the one verified acquisition path.
    * Every carried host is offered as a source for the same signature, so a
    * missing atom on one can fall through to another. Activation happens only
    * after the complete-or-absent gate; then we restart because an import map
    * cannot be replaced underneath a running module graph.
    */
-  async apply(pkg: HostPackage): Promise<void> {
+  async #switch(pkg: HostPackage): Promise<void> {
     if (this.intakeDisabled(pkg) || this.isCurrent(pkg)) return
     const sig = pkg.packageSig
+    // Read fresh, not from the signal: the way back must name the build that
+    // is actually live at the moment of the switch.
+    const left = installedPackageSig()
     this.activeIntake.set(sig)
     this.intake.set({ ...this.intake(), [sig]: { phase: 'applying' } })
 
@@ -739,9 +996,14 @@ export class HostsPanelComponent implements OnDestroy {
           detail: `${outcome.fetched} fetched / ${outcome.present} already here`,
         },
       })
+      // Remembered BEFORE the restart, and the window asked back only when
+      // there is a way back to show in it.
+      if (this.#remember(left, pkg)) {
+        try { sessionStorage.setItem(REOPEN_KEY, '1') } catch { /* storage unavailable */ }
+      }
       this.installed.set(sig)
       EffectBus.emit('activity:log', {
-        message: `${pkg.label} build ${pkg.generation ?? sig.slice(0, 8)} applied from ${pkg.zone}; restarting`,
+        message: `switched to ${pkg.label} build ${pkg.generation ?? sig.slice(0, 8)} from ${pkg.zone}; restarting`,
       })
       setTimeout(() => location.reload(), 650)
     } catch (error) {

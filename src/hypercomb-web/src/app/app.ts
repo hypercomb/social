@@ -3,7 +3,7 @@ import { type Bee, EffectBus, hypercomb } from '@hypercomb/core'
 import { upgradeFromBundled, checkForUpdate, type BootStatus } from '../setup/ensure-install'
 import { cacheImportMap } from '../setup/resolve-import-map'
 import { acquire, installedPackageSig, listHostPackages } from '@hypercomb/runtime/acquire'
-import { addHostZone, listHostZones } from '@hypercomb/runtime/host-zones'
+import { addHostZone, DEFAULT_HOST_ZONES, listHostZones } from '@hypercomb/runtime/host-zones'
 import { CoreMismatchError } from '@hypercomb/runtime/core-surface'
 import { nativeAvailable } from '@hypercomb/runtime/native-filesystem'
 import { isTransientMode } from '@hypercomb/shared/core/view-mode.service'
@@ -98,6 +98,10 @@ export class App implements AfterViewInit {
   protected async upgradeFromBundledClicked(
     restorePointName?: string,
     requireCheckpoint = false,
+    /** What makes the package live. The bundle by default; a followed
+     *  channel's offer passes an acquisition, so both ride the same restore
+     *  point, import-map cache and reload. */
+    install: () => Promise<boolean> = upgradeFromBundled,
   ): Promise<void> {
     if (this.upgrading()) return
     this.upgrading.set(true)
@@ -118,7 +122,7 @@ export class App implements AfterViewInit {
         }
       }
       EffectBus.emit('update:status', { phase: 'applying', message: 'Updating packages and website…' })
-      const ok = await upgradeFromBundled()
+      const ok = await install()
       // Cache the map the upgrade just made resolvable so the reload boots
       // with it live before the module graph (see setup/resolve-import-map).
       if (ok) {
@@ -280,14 +284,16 @@ export class App implements AfterViewInit {
       EffectBus.emit('nav:to-hive', { reason: 'adopt-complete' })
     })
 
-    // "New features" indicator → just apply. We're in alpha; the eggs
-    // (negative-cache + render guards) protect the canvas, so a deployed
-    // package update installs straight away — no DCP review/opt-in gate.
-    // The mesh only announces WHICH features changed; the bytes are fetched
-    // by THIS origin from its own bundled `/content/` (upgradeFromBundled),
-    // then the shell reloads so the freshly-installed bees take over.
+    // "Update available" → Adopt. We're in alpha; the eggs (negative-cache +
+    // render guards) protect the canvas, so an adopted update installs straight
+    // away. WHERE the bytes come from follows who announced it: the shell's
+    // bundled check → this origin's own `/content/` (upgradeFromBundled); a
+    // followed channel (update-scout, `source: 'channel'`) → exactly the
+    // announced signature, acquired from every host this hive carries plus the
+    // defaults. Either way a restore point is saved first and the shell reloads
+    // so the freshly-installed bees take over.
     window.addEventListener('hypercomb:apply-update', event => {
-      const detail = (event as CustomEvent<{ restorePointName?: string; packageSig?: string | null }>).detail
+      const detail = (event as CustomEvent<{ restorePointName?: string; packageSig?: string | null; source?: string }>).detail
       // The indicator writes the name before it dispatches. `/upgrade` (and any
       // other door) may not, so mint one here rather than snapshotting under
       // the empty string — every update this hive takes gets a name.
@@ -305,6 +311,15 @@ export class App implements AfterViewInit {
       if (/^[a-f0-9]{64}$/.test(packageSig)) {
         void (globalThis as { __sentinelBridge?: { nameRevision?: (sig: string, name: string) => Promise<boolean> } })
           .__sentinelBridge?.nameRevision?.(packageSig, restorePointName)
+      }
+      if (detail?.source === 'channel' && /^[a-f0-9]{64}$/.test(packageSig)) {
+        void this.upgradeFromBundledClicked(restorePointName, true, async () => {
+          const zones = [...new Set([...await listHostZones(), ...DEFAULT_HOST_ZONES])]
+          const outcome = await acquire(packageSig, zones)
+          if (!outcome.ok) console.warn('[app] channel update did not complete', outcome.error ?? outcome)
+          return outcome.ok
+        })
+        return
       }
       void this.upgradeFromBundledClicked(restorePointName, true)
     })
@@ -361,9 +376,13 @@ export class App implements AfterViewInit {
    * served fresh on every load, so this door opens the moment the web app is
    * deployed, with no install involved.
    *
-   * The param is consumed BEFORE the upgrade runs: a successful upgrade
-   * reloads, and a param left in the URL would re-upgrade on every load for
-   * ever.
+   * It OFFERS, never applies. Anyone can send a link, so a link must not be
+   * able to change what a hive runs: the param opens the update pill on the
+   * bundled build — even for installs the provenance gate stays quiet for —
+   * and the participant's Adopt, restore point first, is what installs it.
+   *
+   * The param is consumed on read, so a reload never re-offers from a stale
+   * URL.
    */
   #consumeUpgradeParam(): boolean {
     try {
@@ -381,20 +400,23 @@ export class App implements AfterViewInit {
     void this.runtimeReady.then(() => {
       void this.startRegisteredBees()
 
-      // Asked for explicitly — take the bundled build now and skip the
-      // detection gate entirely. `upgradeFromBundledClicked` reloads on
-      // success, so nothing below runs on that path.
-      if (this.#consumeUpgradeParam()) {
-        void this.upgradeFromBundledClicked()
-        return
-      }
       // Post-boot update check — OFF the boot critical path (push-only boot
       // still reads OPFS only). Compares the cached install against the
       // shell's bundled package; if newer, emits `update:available` so the
       // header's upgrade indicator appears. Re-checks on tab refocus so a
       // long-open session notices a fresh deploy after the user returns.
-      const runCheck = (): void => { void checkForUpdate() }
-      setTimeout(runCheck, 4000)
+      //
+      // `?upgrade=1` asked for it: check now and OFFER the bundle whatever the
+      // install's provenance, for this page load — never apply it.
+      const offer = this.#consumeUpgradeParam()
+      const runCheck = (): void => { void checkForUpdate({ offer }) }
+      if (offer) {
+        void checkForUpdate({ offer }).then(state => {
+          if (state === false) EffectBus.emit('update:status', { phase: 'complete', message: 'Already up to date' })
+        })
+      } else {
+        setTimeout(runCheck, 4000)
+      }
       window.addEventListener('focus', () => setTimeout(runCheck, 500))
     })
   }

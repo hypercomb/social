@@ -45,6 +45,8 @@ const PIN_KEY = (tier: LlmTier): string => `hc:llm:pin:${tier}`
 const USAGE_PLAN_KEY = 'hc:llm:usage-plan'
 const PREFER_FREE_KEY = 'hc:llm:prefer-free'
 const ALLOW_PEERS_KEY = 'hc:llm:allow-peers'
+const ORCHESTRATOR_PROVIDER_KEY = 'hc:llm:orchestrator-provider'
+const ORCHESTRATOR_TIER_KEY = 'hc:llm:orchestrator-tier'
 
 export const TIERS: readonly LlmTier[] = ['deep', 'balanced', 'fast']
 
@@ -208,6 +210,45 @@ export class LlmPolicyStore extends EventTarget {
    *  need correctly has to be handed it rather than keep its own copy — which
    *  is exactly how the chat and the console came to disagree. */
   get chatNeed(): ModelNeed { return CHAT_NEED }
+
+  /** WHO RUNS THE BACKGROUND CHAT-WORKFLOW HELPER (chat-route.ts's STRUCTURE
+   *  + CARDS calls — the sidebar's organized workflow, not an ordinary reply).
+   *  This used to be hardcoded to the participant's machine-local model only,
+   *  to spend no paid compute on it; Jaime, 2026-09-11: "I can't trust
+   *  [the local model], just not there yet" — so the default moved to a paid
+   *  provider, and this became a setting rather than staying a constant.
+   *  `'local'` asks for the machine-local model, exactly as before this
+   *  setting existed; anything else names a provider id in the registry. */
+  get orchestratorProvider(): string {
+    try { return (globalThis.localStorage?.getItem(ORCHESTRATOR_PROVIDER_KEY) ?? '').trim().toLowerCase() || 'anthropic' }
+    catch { return 'anthropic' }
+  }
+  set orchestratorProvider(id: string) {
+    const v = String(id ?? '').trim().toLowerCase()
+    try {
+      if (v && v !== 'anthropic') globalThis.localStorage?.setItem(ORCHESTRATOR_PROVIDER_KEY, v)
+      else globalThis.localStorage?.removeItem(ORCHESTRATOR_PROVIDER_KEY)
+    } catch { /* session-only */ }
+    this.dispatchEvent(new Event('change'))
+  }
+
+  /** How much the background helper is asked to think — the same weight
+   *  classes a chat reply uses (`fast` = Haiku-weight, cheapest and quickest,
+   *  the right default for mechanical tagging/summarizing work). */
+  get orchestratorTier(): LlmTier {
+    try {
+      const v = (globalThis.localStorage?.getItem(ORCHESTRATOR_TIER_KEY) ?? '').trim().toLowerCase()
+      return v === 'deep' || v === 'balanced' || v === 'fast' ? v : 'fast'
+    } catch { return 'fast' }
+  }
+  set orchestratorTier(tier: LlmTier) {
+    const v = tier === 'deep' || tier === 'balanced' ? tier : ''
+    try {
+      if (v) globalThis.localStorage?.setItem(ORCHESTRATOR_TIER_KEY, v)
+      else globalThis.localStorage?.removeItem(ORCHESTRATOR_TIER_KEY)
+    } catch { /* session-only */ }
+    this.dispatchEvent(new Event('change'))
+  }
 }
 
 export const llmPolicy = new LlmPolicyStore()

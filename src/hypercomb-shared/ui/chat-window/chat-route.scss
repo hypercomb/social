@@ -50,27 +50,56 @@ $jx: calc(#{$pad} + #{$square} / 2);
 // render the column at all (the rail's query), so the thread takes the row.
 
 .chat-route-split {
-  --chat-route-side-w: clamp(14rem, 30%, 22rem);
+  // Wider by default (Jaime, 2026-09-11: "make it wider"); a dragged width
+  // overrides this from the component (`--chat-route-side-w` on the split).
+  --chat-route-side-w: clamp(16rem, 40%, 32rem);
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   align-items: stretch;
 
   // CONVERSATION_MIN (260 px): at 701 px the column gives way to its own
-  // minimum before the thread drops below it.
+  // minimum before the thread drops below it. A zero basis: the thread takes
+  // what the column leaves, so a dragged column width is honoured exactly
+  // (with `auto`, the thread's content width pushed a 503px drag back to 467).
   > .chat-threadwrap {
+    flex: 1 1 0;
     min-width: 16.25rem;
   }
 }
 
 // The tree viewport over the summary pane, one divider for both.
 .chat-route-col {
+  position: relative;
   flex: 0 1 var(--chat-route-side-w);
   min-width: 12rem;
   min-height: 0;
   display: flex;
   flex-direction: column;
   border-inline-start: 1px solid var(--hc-window-edge);
+
+  // Dragging: nothing inside the column may take the pointer or select.
+  &.chat-route-resizing { user-select: none; }
+}
+
+// The grip rides the column's start edge, the rail grip's twin: invisible at
+// rest, the accent wash while hovered, focused or dragged. Its 8px hit box
+// straddles the divider so the edge itself is what you grab.
+.chat-route-grip {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: -4px;
+  width: 8px;
+  z-index: 3;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+  transition: background 120ms ease;
+
+  &:hover,
+  &:focus-visible,
+  &.dragging { background: rgba(var(--acc), 0.35); }
+  &:focus-visible { outline: none; }
 }
 
 // A landscape phone is wider than the rail's query and still has no room
@@ -853,4 +882,89 @@ $jx: calc(#{$pad} + #{$square} / 2);
   .chat-panel .chat-msg {
     transition: none;
   }
+}
+
+// ── THE HEAD (chat-experience redesign, pass 1) ───────────────────────────
+//
+// The conversation's name and where it stands, in reading type, over a
+// done/open meter. State is COLOUR ON PURPOSE: done green, open amber, both
+// through `tw.ink()` so they deepen under the bright looks like every other
+// colour a tool window means.
+.chat-route-col {
+  --chat-route-done: #{tw.ink(#70d59a)};
+  --chat-route-open: #{tw.ink(#e8b04a)};
+}
+
+.chat-route-head {
+  flex: 0 0 auto;
+  padding: 0.8rem 0.9rem 0.7rem;
+  border-bottom: 1px solid var(--hc-window-line);
+
+  .chat-route-head-kicker {
+    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--hc-window-ink-quiet);
+    margin-bottom: 0.35rem;
+  }
+  .chat-route-head-name {
+    margin: 0 0 0.4rem;
+    font: 600 0.98rem/1.3 var(--hc-read, inherit);
+    color: var(--hc-window-ink-loud);
+    text-wrap: balance;
+    overflow-wrap: anywhere;
+  }
+  .chat-route-head-stands {
+    margin: 0;
+    display: flex;
+    gap: 0.45rem;
+    align-items: flex-start;
+    font: 400 0.8rem/1.4 var(--hc-read, inherit);
+    color: var(--hc-window-ink-plain);
+
+    .mat-sym {
+      flex: none;
+      font-size: 1.1rem;
+      margin-top: 0.05rem;
+      color: var(--chat-route-open);
+    }
+  }
+  &.chat-route-head-settled .chat-route-head-stands .mat-sym { color: var(--chat-route-done); }
+  // A step changed since the session card was written: the words are the
+  // last known, dimmed until the local model writes them again.
+  &.chat-route-head-stale .chat-route-head-stands { color: var(--hc-window-ink-quiet); }
+
+  .chat-route-head-meter {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    margin-top: 0.6rem;
+    font-size: 0.66rem;
+    color: var(--hc-window-ink-quiet);
+  }
+  .chat-route-head-bar {
+    flex: 1 1 auto;
+    display: flex;
+    height: 4px;
+    background: var(--hc-window-line);
+    overflow: hidden;
+
+    i { display: block; flex: 0 0 0; }
+    .chat-route-head-done { background: var(--chat-route-done); }
+    .chat-route-head-open { background: var(--chat-route-open); }
+  }
+  .chat-route-head-counts { white-space: nowrap; }
+}
+
+// A step's state, in the same colour on its glyph.
+.chat-route-state-done .chat-route-piece { color: var(--chat-route-done); }
+.chat-route-state-open .chat-route-piece { color: var(--chat-route-open); }
+
+// The header's workflow toggle: the close button's shape, the accent while
+// the column is shown.
+.chat-route-toggle {
+  display: inline-grid;
+  place-items: center;
+  .mat-sym { font-size: 1.05em; }
+  &.on { color: var(--hc-window-accent); }
 }

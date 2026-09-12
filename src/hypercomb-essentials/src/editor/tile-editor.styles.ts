@@ -265,6 +265,15 @@ ${S} .te-btn-primary{background:rgb(var(--acc));color:var(--hc-window-on-accent)
 ${S} .te-btn-primary:hover:not(:disabled){background:color-mix(in srgb, rgb(var(--acc)) 86%, var(--hc-panel-text,#000));color:var(--hc-window-on-accent);}
 ${S} .te-btn:disabled{opacity:0.6;cursor:default;}
 
+/* Another tile was clicked while this one has unsaved changes. The footer asks
+   in place of Cancel and Save, on the identity's wash — a tone step, no line. */
+${S} .te-actions[data-leaving]{flex-wrap:wrap;background:var(--hc-window-wash);}
+${S} .te-leave{flex:1 1 100%;min-width:0;display:flex;flex-direction:column;gap:0.5rem;
+  animation:te-fade 160ms var(--md-easing-standard,ease) both;}
+${S} .te-leave-question{margin:0;font-family:var(--te-read);font-size:0.82em;line-height:1.45;color:var(--te-ink);
+  overflow-wrap:anywhere;}
+${S} .te-leave-choices{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:0.45rem;}
+
 ${S} .te-panel button:focus-visible,${S} .te-swatch:focus-within,${S} .te-zoom input:focus-visible{outline:1px solid var(--te-focus);outline-offset:1px;}
 
 /* ── PAGE (phone) ──────────────────────────────────────────────────────── */

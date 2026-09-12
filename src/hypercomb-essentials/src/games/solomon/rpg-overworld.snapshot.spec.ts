@@ -80,8 +80,9 @@ describe('world save snapshots', () => {
     const context = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
     try {
       view.mount(host); view.interact()
-      expect(view.isDialogOpen).toBe(true)
+      expect(view.isSpeaking).toBe(true)
       view.restoreState({ version: 1, player: { x: 9, y: 12, facing: 'right' } })
+      expect(view.isSpeaking).toBe(false)
       expect(view.isDialogOpen).toBe(false)
       expect(view.exportState().player).toEqual({ ...valleyPoint(9, 12), facing: 'right' })
       expect(host.querySelector('.sol-rpg-world-prompt')?.textContent).toContain('Wayfarer Cavern')

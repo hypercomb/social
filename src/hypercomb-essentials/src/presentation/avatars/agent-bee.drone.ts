@@ -1789,9 +1789,13 @@ export class AgentBeeDrone extends Drone {
 
   #setHover = (id: string, clientX = 0, clientY = 0): void => {
     if (!id) {
+      const wasHovering = this.#hovering !== ''
       this.#hovering = ''
       if (this.#tooltip) this.#tooltip.style.display = 'none'
-      if (this.#canvas && this.#canvas.style.cursor === 'pointer') this.#canvas.style.cursor = ''
+      // Let go only of the hand THIS drone put up. Every pointer move with no
+      // bee under it lands here, and the canvas's hand is shared — the docked
+      // tile editor shows one over the tiles it can move to.
+      if (wasHovering && this.#canvas && this.#canvas.style.cursor === 'pointer') this.#canvas.style.cursor = ''
       return
     }
     const agent = this.#agentFor(id)

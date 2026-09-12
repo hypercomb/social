@@ -125,6 +125,21 @@ describe('hosts panel — the set, apart from the publishing', () => {
     expect(EN['hosts.offer.applied']).toMatch(/restarting/i)
   })
 
+  // WHO MAY MAKE IT LIVE. Integrity proves the bytes; it never proved the
+  // publisher, and the panel could apply ANY carried domain's package into
+  // this origin. Activation now asks the authority gate BEFORE a byte moves,
+  // and the panel offers the honest alternative — visit their domain.
+  it('refuses a package no followed publisher signed, before fetching it', () => {
+    const acquire = readFileSync(join(here, '..', '..', '..', 'hypercomb-runtime', 'src', 'acquire.ts'), 'utf8')
+    const gate = acquire.indexOf('await activationAuthority(')
+    expect(gate).toBeGreaterThan(-1)
+    expect(gate).toBeLessThan(acquire.indexOf('deriveInventory(pkg.packageSig'))
+    expect(acquire).toMatch(/if \(!authority\.ok\) return fail\(authority\.error\)/)
+    expect(HOSTS_HTML).toMatch(/class="hosts-visit"/)
+    expect(HOSTS_HTML).toMatch(/hosts\.builds\.authority/)
+    expect(EN['hosts.builds.authority']).toMatch(/publisher you follow/)
+  })
+
   // TWO FACTS AND ONE ACT. A host lists hundreds of builds and every one of
   // them is a valid root forever — but 175 identical rows each with its own
   // button is not a choice. The question is "am I current, and if not make me
@@ -354,5 +369,57 @@ describe('the host directory shows what a domain serves', () => {
     expect(HOSTS_HTML.indexOf('hosts-creations')).toBeGreaterThan(0)
     expect(HOSTS_HTML.indexOf('hosts-creations')).toBeLessThan(HOSTS_HTML.indexOf('hosts-inspector'))
     expect(EN['hosts.builds']).toBe('Builds')
+  })
+})
+
+// ── a switch is said before it happens, and there is a way back ─────────────
+//
+// Jaime, 2026-09-11: applying another domain's build restarted the app on
+// their version, and "now you come back and your tiles are gone and
+// everything's changed". Nothing was deleted and nothing said so. The window
+// now names the act (Switch, not Apply), asks before switching to a build
+// from any domain but your own, remembers the build you left, and reopens
+// after the restart with one button that goes back.
+describe('switching builds — named, confirmed, and reversible', () => {
+  it('calls it a switch, and an update only on your own domain', () => {
+    expect(HOSTS_TS).toMatch(/this\.isHome\(zone\) \? 'hosts\.offer\.update' : 'hosts\.offer\.switch'/)
+    expect(EN['hosts.offer.switch']).toBe('Switch to this build')
+    expect(EN['hosts.offer.apply']).toBe('Switch')
+    expect(EN['hosts.offer.update']).toBe('Update')
+  })
+
+  it('asks before switching to another domain’s build, and never before going back', () => {
+    const needs = HOSTS_TS.slice(HOSTS_TS.indexOf('#needsConfirm(pkg: HostPackage): boolean'))
+    expect(needs).toMatch(/if \(this\.isHome\(pkg\.zone\)\) return false/)
+    expect(needs).toMatch(/return pkg\.packageSig !== this\.switched\(\)\?\.from/)
+    expect(HOSTS_TS).toMatch(/if \(this\.#needsConfirm\(pkg\)\) \{ this\.pending\.set\(pkg\); return \}/)
+    expect(HOSTS_HTML).toMatch(/\(click\)="confirmSwitch\(\)"/)
+    expect(HOSTS_HTML).toMatch(/\(click\)="cancelSwitch\(\)"/)
+    // The confirm sheet sits OUTSIDE the scrolling body, so it is on screen
+    // whichever row asked for it.
+    expect(HOSTS_HTML.indexOf('class="hosts-confirm"')).toBeGreaterThan(HOSTS_HTML.lastIndexOf('class="hosts-note"'))
+    expect(EN['hosts.confirm.safe']).toMatch(/Nothing is deleted/)
+  })
+
+  it('remembers the build a switch left, and offers it back after the restart', () => {
+    expect(HOSTS_TS).toMatch(/const SWITCHED_KEY = 'hc:hosts:switched-from'/)
+    // Recorded only once the switch has activated, before the restart.
+    const sw = HOSTS_TS.slice(HOSTS_TS.indexOf('async #switch(pkg: HostPackage)'))
+    expect(sw.indexOf('this.#remember(left, pkg)')).toBeGreaterThan(sw.indexOf('await acquire(sig, sources)'))
+    expect(sw.indexOf('this.#remember(left, pkg)')).toBeLessThan(sw.indexOf('location.reload()'))
+    expect(HOSTS_TS).toMatch(/sessionStorage\.getItem\(REOPEN_KEY\) === '1'[\s\S]{0,120}?EffectBus\.emit\('hosts:open'/)
+    expect(HOSTS_HTML).toMatch(/\(click\)="switchBack\(\)"/)
+    expect(EN['hosts.return.go']).toBe('Switch back')
+  })
+
+  it('explains the whole thing where you read it, and says tiles are never deleted', () => {
+    expect(HOSTS_HTML).toMatch(/@if \(guideOpen\(\)\)/)
+    expect(EN['hosts.guide.safe']).toMatch(/never deletes/)
+    expect(EN['hosts.guide.builds']).toMatch(/restarts the app/)
+    expect(EN['hosts.builds.foreign']).toMatch(/\{host\}/)
+  })
+
+  it('never offers Visit on your own domain — that is a second tab on your own hive', () => {
+    expect(HOSTS_HTML).toMatch(/@if \(!isHome\(zone\)\) \{\s*<!--[\s\S]{0,400}?class="hosts-visit"/)
   })
 })

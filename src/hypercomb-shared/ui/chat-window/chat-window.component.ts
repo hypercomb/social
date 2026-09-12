@@ -228,7 +228,19 @@ type RouteFlowCard = {
   readonly goal?: string
   readonly done?: string
   readonly outcome?: string
+  /** What the step WAS — one word from a closed list, drawn as an icon. */
+  readonly kind?: string
   readonly exchanges?: number
+  readonly model?: string
+  readonly at?: number
+  readonly stale?: boolean
+}
+
+/** THE SESSION CARD — the conversation's name and where it stands, in the
+ *  local model's words, written once every step's card is current. */
+type RouteFlowSession = {
+  readonly name?: string
+  readonly stands?: string
   readonly model?: string
   readonly at?: number
   readonly stale?: boolean
@@ -260,6 +272,32 @@ type RouteFlowView = {
   /** The model that organized it — "Organized by {model}". */
   readonly model?: string
   readonly nodes: readonly RouteFlowNode[]
+  readonly session?: RouteFlowSession
+  /** Nodes by rolled-up state. */
+  readonly counts?: Partial<Readonly<Record<RouteFlowState, number>>>
+}
+
+/** A step's KIND as an icon. Written as an array so the icon subset extractor
+ *  sees every glyph; every name here is in the shipped subset. */
+const KIND_ICONS: readonly { kind: string; icon: string }[] = [
+  { kind: 'fix', icon: 'bug_report' },
+  { kind: 'idea', icon: 'lightbulb' },
+  { kind: 'choice', icon: 'alt_route' },
+  { kind: 'build', icon: 'bolt' },
+  { kind: 'look', icon: 'explore' },
+]
+
+/** What the sidebar's head says: the conversation's name, where it stands,
+ *  and the step counts. From the session card when there is one; until then
+ *  the first root step's name and the newest carded step's outcome. */
+type RouteHead = {
+  readonly name: string
+  readonly stands: string
+  readonly stale: boolean
+  readonly icon: string
+  readonly done: number
+  readonly open: number
+  readonly total: number
 }
 
 /** How a piece names its verb. Written as an array of `{ verb, icon }` so the
@@ -952,6 +990,24 @@ const readRailWidth = (): number => {
   try {
     const raw = Number(localStorage.getItem(RAIL_WIDTH_KEY) ?? '')
     return Number.isFinite(raw) && raw >= RAIL_MIN ? Math.min(RAIL_MAX, raw) : 0
+  } catch { return 0 }
+}
+
+/** The workflow sidebar's dragged width (chat-route.md §4.3.1). 0 = never
+ *  dragged: the stylesheet's clamp decides. Its floor is the column's own
+ *  `min-width` (12rem); its ceiling is measured against the split when set. */
+const ROUTE_SIDE_WIDTH_KEY = 'hc:chat-route-side-width'
+const ROUTE_SIDE_MIN_REM = 12
+const ROUTE_SIDE_WANTED_KEY = 'hc:chat-route-side'
+
+const readRouteSideWanted = (): boolean => {
+  try { return localStorage.getItem(ROUTE_SIDE_WANTED_KEY) !== 'false' } catch { return true }
+}
+
+const readRouteSideWidth = (): number => {
+  try {
+    const raw = Number(localStorage.getItem(ROUTE_SIDE_WIDTH_KEY) ?? '')
+    return Number.isFinite(raw) && raw > 0 ? Math.round(raw) : 0
   } catch { return 0 }
 }
 const DEFAULT_MODEL = 'auto'
@@ -2154,6 +2210,11 @@ export class ChatWindowComponent implements OnDestroy {
   readonly panel = viewChild<ElementRef<HTMLElement>>('panel')
 
   readonly railWidth = signal(readRailWidth())
+  /** The workflow sidebar's width once dragged (px), else 0 — the stylesheet's
+   *  default. Written to `--chat-route-side-w` on the split. */
+  readonly routeSideWidth = signal(readRouteSideWidth())
+  readonly routeSideStyle = computed<string | null>(() => (this.routeSideWidth() > 0 ? `${this.routeSideWidth()}px` : null))
+  readonly routeResizing = signal(false)
   readonly railDragging = signal(false)
 
   readonly #railWidthEffect = effect(() => {
@@ -2577,7 +2638,17 @@ export class ChatWindowComponent implements OnDestroy {
   // gates on this, so false hides the column and stops the attended call.
   // Flip to true to bring it back.
   readonly routeSideShown = computed(() =>
-    false && this.railVisible() && !!this.activeId() && this.turns().length > 0)
+    this.routeSideWanted() && this.railVisible() && !!this.activeId() && this.turns().length > 0)
+
+  /** The participant's choice to show the workflow column at all — a header
+   *  icon toggles it (Jaime, 2026-09-11: "hide and show it when we want more
+   *  chat screen real estate"). Shown by default; sticky per device. */
+  readonly routeSideWanted = signal(readRouteSideWanted())
+  toggleRouteSide(): void {
+    const next = !this.routeSideWanted()
+    this.routeSideWanted.set(next)
+    try { localStorage.setItem(ROUTE_SIDE_WANTED_KEY, next ? 'true' : 'false') } catch { /* private mode */ }
+  }
 
   /** Branches folded away (←, or the fold mark), by conversation, for as long
    *  as the window lives. Not a record: how the participant is looking. */
@@ -2705,6 +2776,33 @@ export class ChatWindowComponent implements OnDestroy {
       default: return 'task_alt'
     }
   }
+
+  /** A step's glyph: what it WAS when its card says so, else its state. */
+  stepIcon(node: Pick<RouteFlowNode, 'state' | 'card'>): string {
+    const kind = node.card?.kind
+    return (kind && KIND_ICONS.find(entry => entry.kind === kind)?.icon) || this.nodeIcon(node.state)
+  }
+
+  /** THE HEAD (chat-experience redesign, pass 1). Null with no flow. */
+  readonly routeHead = computed<RouteHead | null>(() => {
+    if (!this.routeSideShown()) return null
+    const flow = this.route()?.flow
+    if (!flow?.nodes.length) return null
+    const counts = flow.counts ?? {}
+    const done = (counts.done ?? 0) + (counts.decided ?? 0)
+    const open = counts.open ?? 0
+    const session = flow.session
+    const root = flow.nodes.find(node => !node.parent) ?? flow.nodes[0]!
+    const newestCarded = [...flow.nodes].reverse().find(node => node.card?.outcome && !node.card.stale)
+    const openStep = [...flow.nodes].reverse().find(node => node.state === 'open')
+    return {
+      name: String(session?.name || root.title || '').trim(),
+      stands: String(session?.stands || newestCarded?.card?.outcome || '').trim(),
+      stale: !!session?.stale,
+      icon: open > 0 ? this.stepIcon(openStep ?? root) : 'task_alt',
+      done, open, total: flow.nodes.length,
+    }
+  })
 
   /** The fold mark: folded shows the way in, unfolded the way it opened. */
   foldIcon(item: RouteItem): string {
@@ -4735,6 +4833,66 @@ export class ChatWindowComponent implements OnDestroy {
     if (event.key === 'ArrowLeft') { event.preventDefault(); this.#setRailWidth(current - step) }
     else if (event.key === 'ArrowRight') { event.preventDefault(); this.#setRailWidth(current + step) }
     else if (event.key === 'Home') { event.preventDefault(); this.resetRailWidth() }
+  }
+
+  // ── the workflow sidebar's grip ───────────────────────────────────────
+  //
+  // The same gesture as the rail's, mirrored: the column sits at the inline
+  // end, so dragging its start edge LEFT widens it. Bounded by the column's
+  // own minimum and by the thread's (`CONVERSATION_MIN`), measured against
+  // the split at drag time. Double-click or Home hands the width back to the
+  // stylesheet's clamp.
+
+  #routeSideBounds(): { min: number; max: number } {
+    const split = this.panel()?.nativeElement.querySelector<HTMLElement>('.chat-route-split')
+    const min = ROUTE_SIDE_MIN_REM * remPx()
+    const room = split ? split.getBoundingClientRect().width - CONVERSATION_MIN : min
+    return { min, max: Math.max(min, room) }
+  }
+
+  #setRouteSideWidth(next: number): void {
+    const { min, max } = this.#routeSideBounds()
+    const width = Math.round(Math.min(max, Math.max(min, next)))
+    this.routeSideWidth.set(width)
+    try { localStorage.setItem(ROUTE_SIDE_WIDTH_KEY, String(width)) } catch { /* private mode */ }
+  }
+
+  startRouteSideDrag(event: PointerEvent): void {
+    const grip = event.target as HTMLElement | null
+    const column = grip?.closest<HTMLElement>('.chat-route-col')
+    if (!grip || !column) return
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = column.getBoundingClientRect().width
+    this.routeResizing.set(true)
+    grip.classList.add('dragging')
+    try { grip.setPointerCapture(event.pointerId) } catch { /* older engines use the window listeners */ }
+    const move = (moved: PointerEvent): void => this.#setRouteSideWidth(startWidth + startX - moved.clientX)
+    const up = (): void => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      grip.classList.remove('dragging')
+      this.routeResizing.set(false)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+  }
+
+  resetRouteSideWidth(): void {
+    this.routeSideWidth.set(0)
+    try { localStorage.removeItem(ROUTE_SIDE_WIDTH_KEY) } catch { /* private mode */ }
+  }
+
+  onRouteGripKey(event: KeyboardEvent): void {
+    const step = event.shiftKey ? 40 : 12
+    const column = this.panel()?.nativeElement.querySelector<HTMLElement>('.chat-route-col')
+    const current = this.routeSideWidth() || column?.getBoundingClientRect().width || ROUTE_SIDE_MIN_REM * remPx()
+    // Mirrored: the column grows toward the start edge.
+    if (event.key === 'ArrowLeft') { event.preventDefault(); this.#setRouteSideWidth(current + step) }
+    else if (event.key === 'ArrowRight') { event.preventDefault(); this.#setRouteSideWidth(current - step) }
+    else if (event.key === 'Home') { event.preventDefault(); this.resetRouteSideWidth() }
   }
 
   onKey(event: KeyboardEvent): void {

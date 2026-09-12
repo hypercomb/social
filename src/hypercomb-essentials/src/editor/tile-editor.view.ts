@@ -47,7 +47,11 @@ const INSET_OWNER = 'tile-editor'
 const DEFAULT_BORDER = '#c8975a'
 const SLIDER_STEPS = 1000
 
-type DroneShape = { saveAndComplete?(): Promise<void>; cancelEditing?(): void }
+type DroneShape = {
+  saveAndComplete?(): Promise<void>
+  cancelEditing?(): void
+  switchTo?(label: string, options?: { save?: boolean }): Promise<boolean>
+}
 type NotesShape = { notesFor?(cell: string): readonly { id: string; text?: string }[] }
 type DecorationsShape = {
   titleOf?(segments: readonly string[], locale?: string): Promise<string>
@@ -139,6 +143,14 @@ export class TileEditorElement extends HTMLElement {
   #previewPictures: { point?: { sig: string; blob: Blob }; flat?: { sig: string; blob: Blob } } = {}
   #previewLabel = ''
 
+  // Moving to another tile while docked. `#target` is the tile the panel is
+  // built for; `#leaving` is a tile clicked while this one has unsaved changes
+  // (the footer asks); `#switchingTo` is a move in flight, during which the
+  // preview stands down so neither tile is painted with the other's look.
+  #target = ''
+  #leaving = ''
+  #switchingTo = ''
+
   // What this window reserves of the right edge — see #reserve.
   #insetObserver: ResizeObserver | null = null
   #offPoll: (() => void) | null = null
@@ -170,6 +182,7 @@ export class TileEditorElement extends HTMLElement {
       () => this.#model?.removeEventListener('change', this.#onModelChange),
       () => window.removeEventListener('resize', this.#onResize),
       EffectBus.on('notes:changed', () => this.#renderQuestions()),
+      EffectBus.on<{ label?: unknown }>('editor:switch-request', this.#onSwitchRequest),
     )
     this.#onServiceChange()
   }
@@ -189,6 +202,7 @@ export class TileEditorElement extends HTMLElement {
   dismissInner(): boolean {
     const panel = this.#panel
     if (!panel) return false
+    if (this.#leaving) { this.#setLeaving(''); return true }
     if (this.#camera) { this.#stopCamera(); return true }
     const title = this.#ref<HTMLInputElement>('title')
     if (title && document.activeElement === title) {
@@ -215,7 +229,13 @@ export class TileEditorElement extends HTMLElement {
     const editing = service.mode === 'editing'
     if (editing && !this.#panel) this.#open()
     else if (!editing && this.#panel) this.#teardown()
+    else if (editing && this.#targetKey() !== this.#target) this.#retarget()
     else if (editing) this.#syncFields()
+  }
+
+  #targetKey(): string {
+    const service = this.#service
+    return service ? `${service.cell}|${service.targetSegments.join('/')}` : ''
   }
 
   #onModelChange = (): void => {
@@ -254,6 +274,111 @@ export class TileEditorElement extends HTMLElement {
     void ioc<DroneShape>('@diamondcoreprocessor.com/TileEditorDrone')?.saveAndComplete?.()
   }
 
+  // ── another tile ──────────────────────────────────────────────
+  //
+  // Docked, the hive beside the editor stays live for one gesture: a click on
+  // another tile moves the editor there. Nothing changed, it just moves. With
+  // changes, the footer asks — save them and open, open without saving (the
+  // draft is kept and offered back, as a cancel keeps it), or keep editing.
+  // The press itself is the tile overlay's (`editor:switch-request`); on a
+  // phone the page covers the hive, so the request never comes.
+
+  #onSwitchRequest = (payload: { label?: unknown } | undefined): void => {
+    const service = this.#service
+    const label = typeof payload?.label === 'string' ? payload.label : ''
+    if (!label || !service || !this.#panel || this.#surface !== 'dock') return
+    if (service.mode !== 'editing' || service.saving || this.#switchingTo) return
+    if (label === service.cell) return
+    if (this.#dirty()) { this.#setLeaving(label); return }
+    void this.#switchTo(label, false)
+  }
+
+  #dirty(): boolean {
+    const service = this.#service
+    const model = this.#model
+    if (!service || !model) return false
+    return service.dirty || model.pictureChanged || model.framingChanged
+  }
+
+  async #switchTo(label: string, save: boolean): Promise<void> {
+    const service = this.#service
+    const drone = ioc<DroneShape>('@diamondcoreprocessor.com/TileEditorDrone')
+    if (!label || !service || !drone?.switchTo || this.#switchingTo) return
+    const from = this.#target
+    this.#setLeaving('')
+    // The name is written the moment it is let go of, draft or not.
+    const title = this.#ref<HTMLInputElement>('title')
+    if (title && document.activeElement === title) this.#commitTitle()
+    if (save) {
+      const link = this.#ref<HTMLInputElement>('link')
+      if (link) service.setLink(link.value.trim())
+    }
+    // The preview stays painted — a save's own render replaces it with the
+    // same pixels — but nothing new is emitted until the editor has arrived.
+    this.#switchingTo = label
+    try {
+      await drone.switchTo(label, { save })
+    } finally {
+      if (this.#switchingTo === label) this.#switchingTo = ''
+      // Still on the first tile (the save failed, or the tile could not be
+      // read): it goes on showing the edit.
+      if (this.#panel && this.#target === from) this.#emitPreview()
+    }
+  }
+
+  #setLeaving(label: string): void {
+    this.#leaving = label
+    const leave = this.#ref('leave')
+    if (!leave) return
+    const question = this.#ref('leave-question')
+    if (question && label) {
+      question.textContent = t('editor.leave-question', 'Save your changes before opening “{name}”?', { name: label })
+    }
+    const hadFocus = leave.contains(document.activeElement)
+    leave.hidden = !label
+    leave.parentElement?.toggleAttribute('data-leaving', !!label)
+    for (const name of ['cancel', 'primary']) {
+      const btn = this.#ref(name)
+      if (btn) btn.hidden = !!label
+    }
+    if (label) this.#ref<HTMLButtonElement>('leave-save')?.focus({ preventScroll: true })
+    else if (hadFocus) this.#panel?.focus({ preventScroll: true })
+  }
+
+  /** The session moved to another tile under an open panel. The window, its
+   *  width and the hive's reserved edge stay exactly where they are; what
+   *  belonged to the last tile goes. */
+  #retarget(): void {
+    this.#target = this.#targetKey()
+    this.#switchingTo = ''
+    this.#setLeaving('')
+    this.#endPreview()
+    this.#stopCamera()
+    if (this.#twinTimer) clearTimeout(this.#twinTimer)
+    this.#twinTimer = 0
+    this.#twinGeneration++
+    for (const orientation of ['point-top', 'flat-top'] as const) this.#setTwin(orientation, '')
+    this.#verdict = null
+    this.#renderVerdict()
+    this.#answerDrafts.clear()
+    // Empty the name BEFORE letting go of it: its blur commits, and the
+    // session already names the new tile.
+    this.#storedTitle = ''
+    const title = this.#ref<HTMLInputElement>('title')
+    if (title) {
+      title.value = ''
+      title.removeAttribute('aria-invalid')
+      if (document.activeElement === title) title.blur()
+    }
+    this.#setTitleHint('')
+    const body = this.#panel?.querySelector<HTMLElement>('.te-body')
+    if (body) body.scrollTop = 0
+    this.#renderQuestions()
+    this.#renderRestore()
+    this.#stage?.render()
+    this.#syncFields()
+  }
+
   // ── building ──────────────────────────────────────────────────
 
   #open(): void {
@@ -270,6 +395,7 @@ export class TileEditorElement extends HTMLElement {
     panel.setAttribute('data-consumes-wheel', '')
     panel.tabIndex = -1
     this.#panel = panel
+    this.#target = this.#targetKey()
 
     this.#stage = new CropStage(model, () => this.#afterGesture())
 
@@ -361,6 +487,9 @@ export class TileEditorElement extends HTMLElement {
     this.#verdict = null
     this.#titleFor = ''
     this.#answerDrafts.clear()
+    this.#target = ''
+    this.#leaving = ''
+    this.#switchingTo = ''
   }
 
   #ref<T extends HTMLElement>(name: string): T | null {
@@ -676,7 +805,7 @@ export class TileEditorElement extends HTMLElement {
 
   #buildActions(): HTMLElement {
     const bar = make('footer', 'te-actions')
-    const cancel = make('button', 'te-btn', t('editor.cancel', 'cancel'))
+    const cancel = this.#keep('cancel', make('button', 'te-btn', t('editor.cancel', 'cancel')))
     cancel.type = 'button'
     cancel.dataset['action'] = 'cancel'
     cancel.addEventListener('click', () => this.#cancel())
@@ -685,7 +814,32 @@ export class TileEditorElement extends HTMLElement {
     save.dataset['action'] = 'save'
     save.title = 'Ctrl+Enter'
     save.addEventListener('click', () => this.#save())
-    bar.append(cancel, save)
+
+    // Asked when another tile is clicked while this one has unsaved changes —
+    // in place of Cancel and Save, where the eye already goes to finish.
+    const leave = this.#keep('leave', make('div', 'te-leave'))
+    leave.hidden = true
+    leave.setAttribute('role', 'group')
+    const question = this.#keep('leave-question', make('p', 'te-leave-question'))
+    question.id = 'te-leave-question'
+    question.setAttribute('aria-live', 'polite')
+    leave.setAttribute('aria-labelledby', question.id)
+    const choices = make('div', 'te-leave-choices')
+    const choice = (name: string, key: string, fallback: string, primary: boolean, act: () => void): HTMLButtonElement => {
+      const btn = this.#keep(name, make('button', primary ? 'te-btn te-btn-primary' : 'te-btn', t(key, fallback)))
+      btn.type = 'button'
+      btn.dataset['action'] = name
+      btn.addEventListener('click', act)
+      return btn
+    }
+    choices.append(
+      choice('leave-stay', 'editor.leave-stay', 'keep editing', false, () => this.#setLeaving('')),
+      choice('leave-discard', 'editor.leave-discard', 'don’t save', false, () => void this.#switchTo(this.#leaving, false)),
+      choice('leave-save', 'editor.leave-save', 'save and open', true, () => void this.#switchTo(this.#leaving, true)),
+    )
+    leave.append(question, choices)
+
+    bar.append(leave, cancel, save)
     return bar
   }
 
@@ -974,7 +1128,8 @@ export class TileEditorElement extends HTMLElement {
     const service = this.#service
     const model = this.#model
     if (!this.#panel || !service || !model || service.mode !== 'editing' || !service.cell) return
-    const page = (ioc<LineageShape>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [])
+    if (this.#switchingTo) return
+    const page =(ioc<LineageShape>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? [])
       .map(s => String(s ?? '').trim()).filter(Boolean).join('/')
     const picturePending = model.hasImage && !this.#previewPictures.point && !this.#previewPictures.flat
     this.#previewLabel = service.cell
@@ -1148,8 +1303,11 @@ export class TileEditorElement extends HTMLElement {
     if (!value) { service.setLink(''); return }
     const safety = ioc<LinkSafetyShape>('@diamondcoreprocessor.com/LinkSafetyService')
     if (!safety) { service.setLink(value); return }
+    const target = this.#target
     try {
       const verdict = await safety.check(value)
+      // Moved to another tile while the check ran: the verdict is not its.
+      if (this.#target !== target) return
       if (input.value.trim() !== value) return
       if (verdict.decision === 'deny') {
         this.#verdict = { tone: 'alert', reason: verdict.reason }
@@ -1160,6 +1318,7 @@ export class TileEditorElement extends HTMLElement {
         service.setLink(value)
       }
     } catch {
+      if (this.#target !== target) return
       service.setLink(value)
     }
     this.#renderVerdict()
@@ -1264,6 +1423,11 @@ export class TileEditorElement extends HTMLElement {
     if (e.isComposing || e.keyCode === 229) return
     const target = e.target as HTMLElement
     if (e.key === 'Escape') {
+      // The hive's keymap hears Escape first (window, capture — Escape pierces
+      // its suppression) and the escape cascade has already unwound one level
+      // of this editor. A second unwind here would take the next level with it:
+      // a dismissed question, or a name let go of, would close the editor.
+      if (e.defaultPrevented) return
       e.preventDefault()
       e.stopPropagation()
       if (!this.dismissInner()) this.#cancel()
