@@ -350,10 +350,10 @@ async function main() {
       const waitRow = await page.$('.chat-thread .chat-wait')
       const stages = rows?.filter(r => r.kind === 'stage') ?? []
       const stage = stages[stages.length - 1]
-      // The asked exchange is a stage — dormant, and never the question's words.
-      return waitRow && stages.length >= 2 && stage?.dormant && stage.caption === '' && rows.some(r => r.kind === 'wait') ? rows : null
+      // Every unorganized exchange is ONE dormant tail stage, counted — never the question's words.
+      return waitRow && stages.length === 1 && stage?.dormant && /not organized yet/.test(stage.caption) && rows.some(r => r.kind === 'wait') ? rows : null
     }, 10_000)
-    check('a', 'the wait row appears and the sidebar shows the new (dormant, captionless) stage plus a [data-route-kind=wait] row', !!waited,
+    check('a', 'the wait row appears and the sidebar shows one counted dormant tail stage plus a [data-route-kind=wait] row', !!waited,
       waited ? waited.map(r => r.kind).join(' > ') : JSON.stringify(await side(page)))
 
     const asks = await waitFor(async () => { const a = await chatAsks(MAIN); return a.length ? a : null }, 10_000)
@@ -471,7 +471,7 @@ async function main() {
       }))
       const rows = await side(page)
       const stages = rows?.filter(r => r.kind === 'stage') ?? []
-      return dom.user.includes('Several pages') && !dom.group && stages.length >= 3 && stages[stages.length - 1].caption === '' && rows.some(r => r.kind === 'wait')
+      return dom.user.includes('Several pages') && !dom.group && stages.length === 1 && /not organized yet/.test(stages[0].caption) && rows.some(r => r.kind === 'wait')
         ? { dom, rows } : null
     }, 10_000)
     const eDom = picked?.dom ?? await page.evaluate(() => ({
@@ -525,8 +525,8 @@ async function main() {
     // ── n. dormant: no local model, no message text, no knock ─────────────
     const nRows = await side(page) ?? []
     const nStages = nRows.filter(r => r.kind === 'stage')
-    check('n', 'with no local model every stage is dormant: .chat-route-dormant, no caption text, aria-label "not organized yet"',
-      nStages.length >= 3 && nStages.every(s => s.dormant && s.caption === '' && s.aria === 'not organized yet'),
+    check('n', 'with no local model the whole conversation is ONE dormant tail: .chat-route-dormant, a counted caption, aria-label the same',
+      nStages.length === 1 && nStages.every(s => s.dormant && /^\d+ exchanges?, not organized yet$/.test(s.caption) && s.aria === s.caption),
       JSON.stringify(nStages.map(s => ({ key: s.key, dormant: s.dormant, caption: s.caption, aria: s.aria }))))
     const nReplies = nRows.filter(r => r.kind === 'reply')
     const sideText = await page.evaluate(() => document.querySelector('nav.chat-route-side')?.textContent ?? '')
@@ -988,8 +988,8 @@ async function main() {
     const lastNodeAt = oRows.map(r => r.kind).lastIndexOf('node')
     const tailStages = oRows.slice(lastNodeAt + 1).filter(r => r.kind === 'stage')
     const oTurns = (await threads(page, 'readTurns', MAIN)) ?? []
-    check('o', 'the exchanges past the flow follow it as DORMANT stages with no text',
-      oSlot.record && oSlot.record.upToTurnCount < oTurns.length && tailStages.length >= 1 && tailStages.every(s => s.dormant && s.caption === '')
+    check('o', 'the exchanges past the flow follow it as ONE dormant tail stage, counted as newer',
+      oSlot.record && oSlot.record.upToTurnCount < oTurns.length && tailStages.length === 1 && tailStages.every(s => s.dormant && /newer exchanges?, not organized yet$/.test(s.caption))
         && oRows.slice(0, lastNodeAt).every(r => r.kind === 'node'),
       JSON.stringify({ upTo: oSlot.record?.upToTurnCount, turns: oTurns.length, tail: oRows.slice(lastNodeAt + 1).map(r => `${r.kind}${r.dormant ? '(dormant)' : ''}:${r.caption}`) }))
     const oSideText = await page.evaluate(() => document.querySelector('nav.chat-route-side')?.textContent ?? '')
@@ -1118,8 +1118,8 @@ async function main() {
       JSON.stringify({ files: reSlot.files, upTo: [oSlot.record?.upToTurnCount, reSlot.record?.upToTurnCount], turns: reTurns.length }))
     const reRows = await side(page) ?? []
     const reTail = reRows.slice(reRows.map(r => r.kind).lastIndexOf('node') + 1).filter(r => r.kind === 'stage')
-    check('o', 'the unanswered last exchange stays a dormant tail stage with no text',
-      reTail.length === 1 && reTail[0].dormant && reTail[0].caption === '' && Number(reTail[0].row) === reTurns.length - 1,
+    check('o', 'the unanswered last exchange stays the one dormant tail stage, counted as 1 newer exchange',
+      reTail.length === 1 && reTail[0].dormant && /^1 newer exchange, not organized yet$/.test(reTail[0].caption) && Number(reTail[0].row) === reTurns.length - 1,
       JSON.stringify(reTail.map(r => ({ row: r.row, dormant: r.dormant, caption: r.caption }))))
 
     await contrastIn('o', 'with a flow drawn, .chat-route-caption (node titles) and .chat-question-* text')

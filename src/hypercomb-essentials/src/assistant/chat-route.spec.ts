@@ -66,6 +66,7 @@ import {
   deriveRoute,
   extractRouteFlow,
   flowIsBehind,
+  flowOpenSteps,
   flowMatches,
   IN_PROGRESS_MS,
   parseFlowRecord,
@@ -1890,5 +1891,22 @@ describe('the passive drain — as many conversations as it can reach', () => {
     await wake(m, server)
     expect(await m.route.drainRouteFlows()).toMatchObject({ organized: 0, stopped: 'fault' })
     expect(chatCalls(server)).toBe(1)
+  })
+})
+
+describe('flowOpenSteps — what a list says about a stored flow', () => {
+  const node = (id: string, state: 'open' | 'done' | 'decided' | 'dropped', parent?: string) =>
+    ({ id, title: id, state, ...(parent ? { parent } : {}) })
+
+  it('a parent stored open over settled branches it came before is not open', () => {
+    expect(flowOpenSteps({
+      nodes: [node('t1', 'open'), node('t2', 'done', 't1'), node('t3', 'decided', 't1')],
+      exchanges: ['t1', 't2', 't3'],
+    })).toBe(0)
+  })
+
+  it('stays open while a branch is open, or when the talk came back to the parent', () => {
+    expect(flowOpenSteps({ nodes: [node('t1', 'open'), node('t2', 'open', 't1')], exchanges: ['t1', 't2'] })).toBe(2)
+    expect(flowOpenSteps({ nodes: [node('t1', 'open'), node('t2', 'done', 't1')], exchanges: ['t1', 't2', 't1'] })).toBe(1)
   })
 })

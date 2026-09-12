@@ -34,7 +34,7 @@
     </button>
     <nav id="site-nav" aria-label="Page navigation">
       <a href="https://hypercomb.io">Use online</a>
-      <a href="#hives">Live hives</a>
+      <a href="#hives" data-deployed-nodes hidden>Live hives</a>
       <a href="#downloads">Downloads</a>
       <a href="https://github.com/hypercomb/social/tree/main/documentation">Documentation</a>
       <a href="https://github.com/hypercomb/social">Source</a>
@@ -69,7 +69,9 @@
       </aside>
     </section>
 
-    <section class="hives" id="hives" aria-labelledby="hives-heading">
+    <!-- The deployed nodes are an operator's view: shown only to a browser
+         holding hc:show-deployed-nodes, the same flag the host card reads. -->
+    <section class="hives" id="hives" aria-labelledby="hives-heading" data-deployed-nodes hidden>
       <header class="section-head">
         <div><p class="eyebrow"><span></span> Live now</p><h2 id="hives-heading">Hives on hypercomb.com</h2></div>
         <p>Publishing a hive named <code>susan</code> makes <code>susan.hypercomb.com</code> its website — nobody configures the address, the name becomes it. Every hive published under this domain is here.</p>
@@ -85,6 +87,7 @@
       </div>
       <!-- doors:end -->
     </section>
+    <script>try{var v=localStorage.getItem('hc:show-deployed-nodes');if(v==='1'||v==='true')document.querySelectorAll('[data-deployed-nodes]').forEach(function(e){e.hidden=false})}catch(e){}</script>
 
     <section class="downloads" id="downloads">
       <header class="section-head">

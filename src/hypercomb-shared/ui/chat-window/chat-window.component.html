@@ -38,16 +38,7 @@
       (keydown)="onRailGripKey($event)"></div>
     <header class="chat-header">
       <span class="mat-sym chat-glyph" aria-hidden="true">forum</span>
-      <!-- WHOSE CONVERSATION IS THIS, and WHAT THE NEXT REQUEST CARRIES.
-           The conversations themselves live in the sidebar now, under each
-           tile's own arrow — this row is the payload:
-
-             [ tile ]  [ the branch that needs changes ]  [ context… ]
-
-           The first box is the WORK: one branch, the thing to be changed.
-           The boxes after it are SUPPORTING context — any number, in the
-           order you added them, each contributing a signature. Both are
-           filled by dragging a tile out of the sidebar. -->
+      <!-- WHOSE CONVERSATION IS THIS. What the next request reads sits under the composer, where dropping happens. -->
       <span class="chat-subject" [title]="subjectPath() || ('chat.subject.none' | t: { tile: '' })">
         @if (subjectName()) {
           <!-- THE SAME FACE THE SIDEBAR SHOWED. The rail names a tile by its
@@ -67,113 +58,6 @@
         }
       </span>
 
-      <!-- ONE DROP AREA, always open. A long rectangle holding a single list
-           of signature-related tiles: everything the request should READ.
-           What it may CHANGE is not in here and never was a choice — it is
-           the tile whose conversation this is.
-
-           The rectangle is present whether or not it holds anything, because
-           a drop target that only appears once you are already dragging is a
-           target nobody discovers. -->
-      <div class="chat-payload" role="group" [attr.aria-label]="'chat.payload' | t"
-        [class.over]="dragOverReference()"
-        (dragover)="onDragOver($event)"
-        (dragleave)="onDragLeave()"
-        (drop)="onDropReference($event)">
-        <!-- THE WAY IN. The clipboard is where things are gathered from
-             anywhere in the hive; this icon is how you reach it without
-             crossing the screen to its panel. One click on an item in the
-             flyout pastes it onto the shelf. -->
-        <button class="chat-clip" type="button"
-          [class.on]="clipboardOpen()"
-          [class.holding]="clipboardHeld().length"
-          (click)="toggleClipboardShelf()"
-          [title]="'chat.clipboard.show' | t: { count: clipboardHeld().length }"
-          [attr.aria-expanded]="clipboardOpen()"
-          [attr.aria-label]="'chat.clipboard.show' | t: { count: clipboardHeld().length }">
-          <span class="mat-sym" aria-hidden="true">content_paste</span>
-          @if (clipboardHeld().length) {
-            <span class="chat-clip-count">{{ clipboardHeld().length }}</span>
-          }
-        </button>
-
-        <!-- THE REFERENCES — supporting layers and meta contexts, there to
-             be READ, never changed. Each reads as a small sentence: the
-             tile's picture shrunk to a MARK, its name, then the branch it
-             hangs off. A wall of squares answered "how many" and never
-             "which", and the whole point of putting references side by side
-             is seeing WHAT is being related to what.
-             Draggable: pulling one off the shelf sends it back to the
-             clipboard, and the × drops it from the request outright. -->
-        @for (pick of references(); track pick.key; let i = $index) {
-          <span class="chat-box chat-box-context filled"
-            draggable="true"
-            (dragstart)="onReferenceDragStart($event, i)"
-            (dragend)="onReferenceDragEnd()"
-            [title]="'chat.context.one' | t: { tile: pick.name }">
-            <!-- THE PICTURE IS THE WAY TO SEE THE PICTURE. A mark this small
-                 answers WHICH and never WHAT, so pressing it opens the thing
-                 full size where it already is. The rest of the box is
-                 unchanged: the name still reads, the × still drops it, and
-                 dragging it off still sends it back to the clipboard —
-                 nothing that already meant something means something else. -->
-            @if (contextThumbs()[pick.key]; as url) {
-              <button class="chat-box-look" type="button"
-                (click)="openPicture(pick, $event)"
-                [title]="'chat.reference.look' | t: { tile: pick.name }"
-                [attr.aria-label]="'chat.reference.look' | t: { tile: pick.name }">
-                <img class="chat-box-img" [src]="url" alt="">
-              </button>
-            } @else {
-              <span class="mat-sym chat-box-glyph" aria-hidden="true">hexagon</span>
-            }
-            <span class="chat-box-name">{{ pick.name }}</span>
-            @if (isPicture(pick)) {
-              <!-- A picture has no branch to come from; what it has is a
-                   weight, and that is what belongs in the same slot. -->
-              <span class="chat-box-branch">{{ 'chat.reference.picture' | t: { size: sizeOf(pick) } }}</span>
-            } @else if (branchOf(pick); as branch) {
-              <span class="chat-box-branch" [title]="pathOf(pick)">{{ branch }}</span>
-            }
-            <button class="chat-box-off" type="button"
-              (click)="removeContext(i)"
-              [title]="'chat.reference.off' | t: { tile: pick.name }"
-              [attr.aria-label]="'chat.reference.off' | t: { tile: pick.name }">×</button>
-          </span>
-        }
-
-        @if (!references().length) {
-          <span class="chat-payload-hint">{{ 'chat.reference.empty' | t }}</span>
-        }
-      </div>
-
-      <!-- THE CLIPBOARD, WHERE THE COMPOSER IS. Not a second clipboard: the
-           same entries the panel lists, shown here so a reference is one
-           click away. Clicking one moves it onto the shelf. -->
-      @if (clipboardOpen()) {
-        <div class="chat-clip-shelf" role="listbox" [attr.aria-label]="'chat.clipboard.title' | t">
-          @for (pick of clipboardHeld(); track pick.key) {
-            <button class="chat-clip-item" type="button" role="option"
-              [attr.aria-selected]="false"
-              (click)="pasteReference(pick)"
-              [title]="'chat.clipboard.paste' | t: { tile: pick.name }">
-              @if (contextThumbs()[pick.key]; as url) {
-                <img class="chat-clip-img" [src]="url" alt="">
-              } @else {
-                <span class="mat-sym chat-clip-glyph" aria-hidden="true">hexagon</span>
-              }
-              <span class="chat-clip-text">
-                <span class="chat-clip-name">{{ pick.name }}</span>
-                @if (branchOf(pick); as branch) {
-                  <span class="chat-clip-branch" [title]="pathOf(pick)">{{ branch }}</span>
-                }
-              </span>
-            </button>
-          } @empty {
-            <span class="chat-clip-empty">{{ 'chat.clipboard.empty' | t }}</span>
-          }
-        </div>
-      }
       <span class="chat-header-space"></span>
       <!-- Show or hide the workflow column: one icon, sticky, lit while shown. -->
       <button class="chat-close chat-route-toggle" type="button"
@@ -395,19 +279,86 @@
          transcript was a second home for the same thing and could not.
          Without a rail (a narrow shell hides it) the window still has to
          carry the list, and only then does the name become a control. -->
-    <div class="chat-bar">
+    <div class="chat-bar chat-mast">
+      <div class="chat-mast-main">
       @if (railVisible()) {
         <span class="chat-current chat-current-still">
-          <span class="chat-current-name">{{ activeAwaiting() ? ('agent.rail-chat-waiting' | t) : (activeTitle() || ('chat.untitled' | t)) }}</span>
+          <span class="chat-current-name">{{ activeAwaiting() ? ('agent.rail-chat-waiting' | t) : (sessionHead()?.name || activeTitle() || ('chat.untitled' | t)) }}</span>
         </span>
       } @else {
         <button class="chat-current" type="button" (click)="toggleList()"
           [attr.aria-expanded]="listOpen()"
           [title]="'chat.list.toggle' | t">
           <span class="mat-sym" aria-hidden="true">{{ listOpen() ? 'expand_more' : 'chevron_right' }}</span>
-          <span class="chat-current-name">{{ activeAwaiting() ? ('agent.rail-chat-waiting' | t) : (activeTitle() || ('chat.untitled' | t)) }}</span>
+          <span class="chat-current-name">{{ activeAwaiting() ? ('agent.rail-chat-waiting' | t) : (sessionHead()?.name || activeTitle() || ('chat.untitled' | t)) }}</span>
         </button>
       }
+      <div class="chat-mast-meter">
+        @if (sessionHead(); as head) {
+          @if (head.stands) {
+            <div class="chat-mast-stands-wrap" [class.chat-mast-open]="standsOpen()"
+              [class.chat-mast-settled]="!head.open" [class.chat-mast-stale]="head.stale">
+              <button type="button" class="chat-mast-stands-toggle" (click)="toggleStands()"
+                [attr.aria-expanded]="standsOpen()"
+                [title]="'chat.route.head.stands-toggle' | t">
+                <span class="mat-sym" aria-hidden="true">{{ head.icon }}</span>
+              </button>
+              <p class="chat-mast-stands">
+                <span>{{ head.stands }}</span>
+              </p>
+            </div>
+          }
+          <span class="chat-mast-bar" role="img" [attr.aria-label]="'chat.route.head.counts' | t: { done: head.done, open: head.open }">
+            <i class="chat-mast-done" [style.flex-grow]="head.done"></i>
+            <i class="chat-mast-open" [style.flex-grow]="head.open"></i>
+            <i [style.flex-grow]="head.total - head.done - head.open"></i>
+          </span>
+          <span class="chat-mast-counts" aria-hidden="true">{{ 'chat.route.head.counts' | t: { done: head.done, open: head.open } }}</span>
+        }
+        <!-- WHAT CAN ANSWER, on one line: the model and whose bridge it is coming
+               over. The row of reported context that used to follow
+               it is gone — nothing there was maintained, and a path reading
+               directly after a model made the model look like it had one.
+
+               NAMED, NOT ASSUMED. The bridge is one socket that any frontier CLI
+               can park on, so the line says WHO the designation put behind it
+               rather than the one vendor that used to be the only answer. With
+               nothing designated it says only what it knows: the link's state.
+
+               AND NOT A BRIDGE UNLESS THERE IS ONE. A key, or this machine's own
+               server, answers with no socket parked anywhere — the line said
+               "Bridge connected" for those too, which was false twice over when
+               the local server was not even running. The key comes from the
+               component (linkKey/linkKeyAny) because the choice now has four
+               inputs, and a nested ternary in a template is where a lie hides. -->
+        <div class="chat-link" [class.waiting]="!linkUp()">
+            <!-- WHO ANSWERS — reported, not asked. It leads the line because it is
+                 the shortest thing on it and the one most often looked for: the
+                 label says which model answers, and the sentence after it says
+                 from whose bridge. It used to sit in
+                 the row below, where the path fell in directly behind it and the
+                 two read as one string — a model with a location after it. The
+                 press is the way to the providers console, the one place company,
+                 model and level of thinking are chosen. -->
+          <button class="chat-answering" type="button" (click)="openProviders()"
+            [title]="answeringWhy() || ('chat.answering' | t)"
+            [attr.aria-label]="'chat.answering' | t">
+            <span class="mat-sym" aria-hidden="true">auto_awesome</span>{{ answering() }}
+          </button>
+          @if (designated(); as who) {
+            <span>{{ linkKey() | t: { provider: who.label } }}</span>
+          } @else {
+            <span>{{ linkKeyAny() | t }}</span>
+          }
+          <!-- THE ROUTE COULD NOT BE READ — a store fault, not an empty ledger.
+               One quiet line here, beside the link state, and never an empty
+               pipe standing in for an answer (chat-route.md §3.5). -->
+          @if (routeError()) {
+            <span class="chat-route-notice">{{ 'chat.route.unreadable' | t }}</span>
+          }
+        </div>
+      </div>
+      </div>
       <!-- ARCHIVE THE CHAT YOU ARE IN. The per-row control in the fold acts on
            a conversation you are pointing at; this one acts on the one you
            are READING, which is the common case and had nowhere to be. Same
@@ -456,8 +407,11 @@
         <!-- WHAT IS LIVE. Archived conversations are whole and readable, they
              are simply not rows you have to read past to find the one you
              want; the disclosure under the list is the way to them. -->
-        @for (conversation of liveRoster(); track conversation.convoId) {
-          <ng-container *ngTemplateOutlet="listRow; context: { $implicit: conversation }"></ng-container>
+        @for (group of listGroups(); track group.key) {
+          <li class="chat-list-group">{{ listGroupKey(group.key) | t }}</li>
+          @for (conversation of group.rows; track conversation.convoId) {
+            <ng-container *ngTemplateOutlet="listRow; context: { $implicit: conversation, group: group.key }"></ng-container>
+          }
         }
 
         <!-- THE WAY TO THE NEXT ONE, right under the conversations it would
@@ -491,26 +445,30 @@
       <!-- ONE ROW SHAPE for both shelves — a live conversation and an
            archived one are the same thing in different places, so drawing
            them from two copies of the markup is how they drift apart. -->
-      <ng-template #listRow let-conversation>
+      <ng-template #listRow let-conversation let-group="group">
         <li class="chat-list-row"
           [class.on]="conversation.convoId === activeId()"
           [class.filed]="conversation.archived">
           <button class="chat-list-body" type="button" (click)="pick(conversation.convoId)">
+            <span class="mat-sym chat-list-icon" aria-hidden="true" [attr.data-group]="group ?? null">{{ listIcon(conversation, group ?? null) }}</span>
             <!-- A tile chat is named by its TILE, not by its first sentence:
                  that is what you would look for when coming back to it. -->
-            @if (conversation.tile) {
+            @if (conversation.tile && conversation.tile !== '/') {
               <span class="chat-list-tile" [title]="conversation.tile">{{ conversation.tile }}</span>
             }
             <!-- A QUESTION STILL OUT has no subject to be named after; a thread PUT
                  AWAY without one was stopped rather than left waiting, so it
                  keeps its opening line. -->
-            <span class="chat-list-name" [class.awaiting]="!conversation.replied && !conversation.archived">{{ conversation.replied || conversation.archived ? (conversation.title || ('chat.untitled' | t)) : ('agent.rail-chat-waiting' | t) }}</span>
+            <span class="chat-list-name" [class.awaiting]="!conversation.replied && !conversation.archived">{{ conversation.replied || conversation.archived ? (listName(conversation) || ('chat.untitled' | t)) : ('agent.rail-chat-waiting' | t) }}</span>
+            @if (listLine(conversation); as line) {
+              <span class="chat-list-line">{{ line }}</span>
+            }
             <span class="chat-list-meta">
               @if (conversation.draft) {
                 <span class="chat-list-draft">{{ 'chat.list.draft' | t }}</span>
               }
-              @if (conversation.turnCount) {
-                {{ 'chat.turns' | t: { count: conversation.turnCount } }}
+              @if (listAge(conversation.lastAt); as age) {
+                {{ age }}
               }
             </span>
           </button>
@@ -559,6 +517,11 @@
         <p class="chat-empty">{{ 'chat.empty' | t }}</p>
       }
       @for (entry of rendered(); track entry.key) {
+        @if (stepRules().get(entry.index); as rule) {
+          <div class="chat-stepmark" role="separator" [attr.data-state]="rule.state" [attr.aria-label]="rule.title">
+            <span class="mat-sym" aria-hidden="true">{{ rule.icon }}</span><span class="chat-stepmark-title">{{ rule.title }}</span>
+          </div>
+        }
         <div class="chat-msg"
           [class.user]="entry.turn.role === 'user'"
           [class.ai]="entry.turn.role === 'assistant'"
@@ -696,30 +659,12 @@
           (pointerdown)="startRouteSideDrag($event)"
           (dblclick)="resetRouteSideWidth()"
           (keydown)="onRouteGripKey($event)"></div>
-        <!-- THE HEAD (chat-experience redesign, pass 1): the conversation's
-             name and where it stands, in the local model's words, and how
-             many steps are done — "what is this session, is it going
-             anywhere", answered before a single card. -->
-        @if (routeHead(); as head) {
-          <header class="chat-route-head"
-            [class.chat-route-head-stale]="head.stale"
-            [class.chat-route-head-settled]="!head.open">
-            <div class="chat-route-head-kicker">{{ 'chat.route.head.kicker' | t }}</div>
-            <h3 class="chat-route-head-name">{{ head.name || ('chat.route.flow.untitled' | t) }}</h3>
-            @if (head.stands) {
-              <p class="chat-route-head-stands"><span class="mat-sym" aria-hidden="true">{{ head.icon }}</span><span>{{ head.stands }}</span></p>
-            }
-            <div class="chat-route-head-meter" role="img"
-              [attr.aria-label]="'chat.route.head.counts' | t: { done: head.done, open: head.open }">
-              <span class="chat-route-head-bar" aria-hidden="true">
-                <i class="chat-route-head-done" [style.flex-grow]="head.done"></i>
-                <i class="chat-route-head-open" [style.flex-grow]="head.open"></i>
-                <i class="chat-route-head-rest" [style.flex-grow]="head.total - head.done - head.open"></i>
-              </span>
-              <span class="chat-route-head-counts">{{ 'chat.route.head.counts' | t: { done: head.done, open: head.open } }}</span>
-            </div>
-          </header>
-        }
+        <div class="chat-route-sec">
+          <span>{{ 'chat.route.sec' | t }}</span>
+          @if (routeTree().nodes.size) {
+            <span class="chat-route-sec-count">{{ 'chat.route.sec.steps' | t: { count: routeTree().nodes.size } }}</span>
+          }
+        </div>
         <nav class="chat-route-side" #routeSide data-route-viewport
           [class.chat-route-pulling]="routePulling()"
           [attr.data-route-follow]="routeFollowing()"
@@ -834,7 +779,7 @@
                 <span class="chat-route-caption">
                   @switch (item.kind) {
                     <!-- A task is titled in the local model's words; a stage
-                         the flow has not read says nothing — dormant. -->
+                         the flow has not read yet is one quiet counted line. -->
                     @case ('node') {
                       @if (item.node; as node) {
                         <span class="chat-route-title">{{ node.title || ('chat.route.flow.untitled' | t) }}</span>
@@ -846,11 +791,18 @@
                         }
                       }
                     }
+                    @case ('stage') { {{ routeTailKey() | t: { count: item.exchanges ?? 1 } }} }
                     @case ('live') { {{ 'chat.route.live' | t }} }
                     @case ('wait') { {{ 'chat.route.waiting' | t }} }
                     @case ('end') { {{ endLabelKey() | t }} }
                   }
                 </span>
+                @if (item.kind === 'node' && item.node?.card?.outcome) {
+                  <span class="chat-route-outcome">{{ item.node?.card?.outcome }}</span>
+                }
+                @if (item.kind === 'node' && item.rows.length) {
+                  <span class="chat-route-meta">{{ 'chat.route.card.messages' | t: { range: routeTurnRange(item.rows) } }}</span>
+                }
                 <!-- The exchange's pieces as marks, in the order work → replied
                      → question: ONE work mark with every attempt counted, a
                      replied mark on a stage, ONE question mark with a count. -->
@@ -895,7 +847,7 @@
           [attr.data-route-source]="routeCurrent()?.source ?? ''"
           [attr.data-route-summary-state]="routeSummaryState()"
           [attr.data-route-organizer]="route()?.organizerState ?? null">
-          @if (routeCurrentItem(); as item) {
+          @if (routePaneItem(); as item) {
             <h3 class="chat-route-summary-head">
               @switch (item.kind) {
                 @case ('node') {
@@ -1085,49 +1037,6 @@
     }
     </div>
 
-    <!-- WHAT CAN ANSWER, on one line: the model and whose bridge it is coming
-           over. The row of reported context that used to follow
-           it is gone — nothing there was maintained, and a path reading
-           directly after a model made the model look like it had one.
-
-           NAMED, NOT ASSUMED. The bridge is one socket that any frontier CLI
-           can park on, so the line says WHO the designation put behind it
-           rather than the one vendor that used to be the only answer. With
-           nothing designated it says only what it knows: the link's state.
-
-           AND NOT A BRIDGE UNLESS THERE IS ONE. A key, or this machine's own
-           server, answers with no socket parked anywhere — the line said
-           "Bridge connected" for those too, which was false twice over when
-           the local server was not even running. The key comes from the
-           component (linkKey/linkKeyAny) because the choice now has four
-           inputs, and a nested ternary in a template is where a lie hides. -->
-    <div class="chat-link" [class.waiting]="!linkUp()">
-        <!-- WHO ANSWERS — reported, not asked. It leads the line because it is
-             the shortest thing on it and the one most often looked for: the
-             label says which model answers, and the sentence after it says
-             from whose bridge. It used to sit in
-             the row below, where the path fell in directly behind it and the
-             two read as one string — a model with a location after it. The
-             press is the way to the providers console, the one place company,
-             model and level of thinking are chosen. -->
-      <button class="chat-answering" type="button" (click)="openProviders()"
-        [title]="answeringWhy() || ('chat.answering' | t)"
-        [attr.aria-label]="'chat.answering' | t">
-        <span class="mat-sym" aria-hidden="true">auto_awesome</span>{{ answering() }}
-      </button>
-      @if (designated(); as who) {
-        <span>{{ linkKey() | t: { provider: who.label } }}</span>
-      } @else {
-        <span>{{ linkKeyAny() | t }}</span>
-      }
-      <!-- THE ROUTE COULD NOT BE READ — a store fault, not an empty ledger.
-           One quiet line here, beside the link state, and never an empty
-           pipe standing in for an answer (chat-route.md §3.5). -->
-      @if (routeError()) {
-        <span class="chat-route-notice">{{ 'chat.route.unreadable' | t }}</span>
-      }
-    </div>
-
     <footer class="chat-foot"
       hcDockInset="bottom" [hcDockInsetActive]="peeking()">
 
@@ -1153,6 +1062,116 @@
             <span class="mat-sym" aria-hidden="true">arrow_upward</span>
           </button>
         }
+      </div>
+      <div class="chat-under">
+        <!-- ONE DROP AREA, always open. A long rectangle holding a single list
+             of signature-related tiles: everything the request should READ.
+             What it may CHANGE is not in here and never was a choice — it is
+             the tile whose conversation this is.
+
+             The rectangle is present whether or not it holds anything, because
+             a drop target that only appears once you are already dragging is a
+             target nobody discovers. -->
+        <div class="chat-payload" role="group" [attr.aria-label]="'chat.payload' | t"
+          [class.over]="dragOverReference()"
+          (dragover)="onDragOver($event)"
+          (dragleave)="onDragLeave()"
+          (drop)="onDropReference($event)">
+          <!-- THE WAY IN. The clipboard is where things are gathered from
+               anywhere in the hive; this icon is how you reach it without
+               crossing the screen to its panel. One click on an item in the
+               flyout pastes it onto the shelf. -->
+          <button class="chat-clip" type="button"
+            [class.on]="clipboardOpen()"
+            [class.holding]="clipboardHeld().length"
+            (click)="toggleClipboardShelf()"
+            [title]="'chat.clipboard.show' | t: { count: clipboardHeld().length }"
+            [attr.aria-expanded]="clipboardOpen()"
+            [attr.aria-label]="'chat.clipboard.show' | t: { count: clipboardHeld().length }">
+            <span class="mat-sym" aria-hidden="true">content_paste</span>
+            @if (clipboardHeld().length) {
+              <span class="chat-clip-count">{{ clipboardHeld().length }}</span>
+            }
+          </button>
+
+          <!-- THE REFERENCES — supporting layers and meta contexts, there to
+               be READ, never changed. Each reads as a small sentence: the
+               tile's picture shrunk to a MARK, its name, then the branch it
+               hangs off. A wall of squares answered "how many" and never
+               "which", and the whole point of putting references side by side
+               is seeing WHAT is being related to what.
+               Draggable: pulling one off the shelf sends it back to the
+               clipboard, and the × drops it from the request outright. -->
+          @for (pick of references(); track pick.key; let i = $index) {
+            <span class="chat-box chat-box-context filled"
+              draggable="true"
+              (dragstart)="onReferenceDragStart($event, i)"
+              (dragend)="onReferenceDragEnd()"
+              [title]="'chat.context.one' | t: { tile: pick.name }">
+              <!-- THE PICTURE IS THE WAY TO SEE THE PICTURE. A mark this small
+                   answers WHICH and never WHAT, so pressing it opens the thing
+                   full size where it already is. The rest of the box is
+                   unchanged: the name still reads, the × still drops it, and
+                   dragging it off still sends it back to the clipboard —
+                   nothing that already meant something means something else. -->
+              @if (contextThumbs()[pick.key]; as url) {
+                <button class="chat-box-look" type="button"
+                  (click)="openPicture(pick, $event)"
+                  [title]="'chat.reference.look' | t: { tile: pick.name }"
+                  [attr.aria-label]="'chat.reference.look' | t: { tile: pick.name }">
+                  <img class="chat-box-img" [src]="url" alt="">
+                </button>
+              } @else {
+                <span class="mat-sym chat-box-glyph" aria-hidden="true">hexagon</span>
+              }
+              <span class="chat-box-name">{{ pick.name }}</span>
+              @if (isPicture(pick)) {
+                <!-- A picture has no branch to come from; what it has is a
+                     weight, and that is what belongs in the same slot. -->
+                <span class="chat-box-branch">{{ 'chat.reference.picture' | t: { size: sizeOf(pick) } }}</span>
+              } @else if (branchOf(pick); as branch) {
+                <span class="chat-box-branch" [title]="pathOf(pick)">{{ branch }}</span>
+              }
+              <button class="chat-box-off" type="button"
+                (click)="removeContext(i)"
+                [title]="'chat.reference.off' | t: { tile: pick.name }"
+                [attr.aria-label]="'chat.reference.off' | t: { tile: pick.name }">×</button>
+            </span>
+          }
+
+          @if (!references().length) {
+            <span class="chat-payload-hint">{{ 'chat.reference.empty' | t }}</span>
+          }
+        </div>
+
+        <!-- THE CLIPBOARD, WHERE THE COMPOSER IS. Not a second clipboard: the
+             same entries the panel lists, shown here so a reference is one
+             click away. Clicking one moves it onto the shelf. -->
+        @if (clipboardOpen()) {
+          <div class="chat-clip-shelf" role="listbox" [attr.aria-label]="'chat.clipboard.title' | t">
+            @for (pick of clipboardHeld(); track pick.key) {
+              <button class="chat-clip-item" type="button" role="option"
+                [attr.aria-selected]="false"
+                (click)="pasteReference(pick)"
+                [title]="'chat.clipboard.paste' | t: { tile: pick.name }">
+                @if (contextThumbs()[pick.key]; as url) {
+                  <img class="chat-clip-img" [src]="url" alt="">
+                } @else {
+                  <span class="mat-sym chat-clip-glyph" aria-hidden="true">hexagon</span>
+                }
+                <span class="chat-clip-text">
+                  <span class="chat-clip-name">{{ pick.name }}</span>
+                  @if (branchOf(pick); as branch) {
+                    <span class="chat-clip-branch" [title]="pathOf(pick)">{{ branch }}</span>
+                  }
+                </span>
+              </button>
+            } @empty {
+              <span class="chat-clip-empty">{{ 'chat.clipboard.empty' | t }}</span>
+            }
+          </div>
+        }
+        <span class="chat-under-keys">{{ 'chat.compose.keys' | t }}</span>
       </div>
     </footer>
     </div>

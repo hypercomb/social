@@ -300,6 +300,13 @@ type RouteHead = {
   readonly total: number
 }
 
+/** A step rule in the thread: where a step begins, what it was, how it stands. */
+type StepRule = {
+  readonly title: string
+  readonly icon: string
+  readonly state: RouteFlowState
+}
+
 /** How a piece names its verb. Written as an array of `{ verb, icon }` so the
  *  icon subset extractor (scripts/icon-names.cjs, rule 3: `icon: '…'`) sees
  *  every glyph — a map keyed by verb would ship the WORDS. Every name here
@@ -356,6 +363,8 @@ type RouteItem = {
   readonly questions: readonly SettledQuestion[]
   /** A stage's first reply row, or -1 while its exchange holds none. */
   readonly replyRow: number
+  /** On the dormant tail: how many exchanges it holds. */
+  readonly exchanges?: number
   /** The live run, on the live card. */
   readonly piece?: RoutePiece
   /** The depth column and the grid row, both 0-based; `level` is ARIA's. */
@@ -696,13 +705,31 @@ type ConversationSummary = {
    *  build does not report it — and there, every thread reads as answered,
    *  which is exactly how this behaved before the flag existed. */
   readonly replied?: boolean
+  /** The newest turn is a reply that asked a question nobody has answered. */
+  readonly asking?: boolean
 }
 
 /** The threads module, reached through IoC — shell may never import essentials. */
+/** A conversation's organized standing, as essentials reads it for a list. */
+type ConversationStandingLike = {
+  readonly name: string
+  readonly stands: string
+  readonly open: number
+  readonly total: number
+  readonly upTo: number
+}
+
+type ListGroup = 'waiting' | 'open' | 'done'
+
 type ChatThreadsLike = {
   appendTurn(convoId: string, role: TurnRole, text: string): Promise<boolean>
   readTurns(convoId: string): Promise<ChatTurn[]>
   listConversations(): Promise<ConversationSummary[]>
+  /** Each conversation's organized standing, and who it waits on — the rail's
+   *  own reading, so the flat list and the rail group alike. Absent on an older
+   *  essentials build: then the list is one group. */
+  readConversationStandings?(convoIds: readonly string[]): Promise<ReadonlyMap<string, ConversationStandingLike>>
+  conversationGroup?(chat: { readonly asking?: boolean; readonly replied: boolean; readonly turns: number }, standing?: ConversationStandingLike): ListGroup
   /** One pass for the list AND the newest thread's turns — the resume path's
    *  read, so opening never re-reads the bucket the list walk just read. */
   listConversationsWithLatest?(): Promise<{ conversations: ConversationSummary[]; latestTurns: ChatTurn[] }>
@@ -827,6 +854,7 @@ type AttachedPicture = {
 export const TILE_DRAG_TYPE = 'application/x-hypercomb-tile'
 export type DroppedTile = { readonly name: string; readonly path: string; readonly sig: string }
 type TilesRailLike = {
+  showConversation?(convoId: string): void
   onSubjectChanged: (subject: RailPickLike | null) => void
   onSelectionChanged: (selection: RailPickLike[]) => void
   readonly subject: RailPickLike | null
@@ -1036,6 +1064,11 @@ const RECOVER_MAX_AGE_MS = 45 * 60_000
  *  registry's own seed uses. */
 const RECOVER_SCAN_LIMIT = 400
 const CHAT_VISIBLE_STORAGE_KEY = 'hc:chat-visible'
+/** The masthead's "where it stands" sentence, pinned open. Off by default —
+ *  collapsed to its icon, peeking on hover — and sticky once turned on: the
+ *  participant opens it once and it stays open across reloads until they
+ *  close it again the same way (see feedback_hiding_chrome_is_opt_in_sticky). */
+const STANDS_OPEN_KEY = 'hc:chat-mast-stands-open'
 
 /** How close to the bottom still counts as reading the newest turn. Below it,
  *  the transcript stops chasing arrivals and offers the pill instead. One line
@@ -1289,6 +1322,10 @@ export class ChatWindowComponent implements OnDestroy {
   /** The conversation list, open. Collapsed by default: the thread you are in
    *  is the thing you came for, and the others are one click away. */
   readonly listOpen = signal(false)
+
+  /** The masthead's "where it stands" sentence, pinned open — sticky
+   *  (localStorage), default off. */
+  readonly standsOpen = signal(readFlag(STANDS_OPEN_KEY))
 
   /** A question is out and its answer has not come back. Per window, not
    *  global — asking in one conversation must not make another look busy. */
@@ -2029,6 +2066,7 @@ export class ChatWindowComponent implements OnDestroy {
       archived: !!convo.archived,
       // Only ever false for a question still out — see ConversationSummary.
       replied: convo.replied !== false,
+      asking: !!convo.asking,
     }))
 
     const known = new Set(rows.map(row => row.convoId))
@@ -2052,6 +2090,7 @@ export class ChatWindowComponent implements OnDestroy {
         // A draft is unsent thinking, not a question waiting on anybody —
         // it is named by what it says, which is all there is of it.
         replied: true,
+        asking: false,
       })
     }
     return rows.sort((a, b) => b.lastAt - a.lastAt)
@@ -2062,6 +2101,75 @@ export class ChatWindowComponent implements OnDestroy {
 
   /** And what has been. Shown only when asked for; see `archiveOpen`. */
   readonly filedRoster = computed(() => this.roster().filter(row => row.archived))
+
+  /** What each listed conversation's workflow says. Read only while the flat
+   *  list is what the participant has — the rail reads its own. */
+  readonly listStandings = signal<ReadonlyMap<string, ConversationStandingLike>>(new Map())
+
+  /** The flat list, grouped the way the rail groups it. */
+  readonly listGroups = computed(() => {
+    const threads = this.#threads()
+    const standings = this.listStandings()
+    const rows = this.liveRoster()
+    const groupOf = (row: (typeof rows)[number]): ListGroup =>
+      threads?.conversationGroup?.({ asking: row.asking, replied: row.replied, turns: row.turnCount }, standings.get(row.convoId)) ?? 'open'
+    return (['waiting', 'open', 'done'] as const)
+      .map(key => ({ key, rows: rows.filter(row => groupOf(row) === key) }))
+      .filter(group => group.rows.length > 0)
+  })
+
+  readonly #listStandingsWatch = effect(() => {
+    if (this.railVisible() || !this.listOpen()) return
+    const ids = this.liveRoster().map(row => row.convoId)
+    void this.#refreshListStandings(ids)
+  })
+
+  async #refreshListStandings(ids: readonly string[]): Promise<void> {
+    const threads = this.#threads()
+    if (!threads?.readConversationStandings || !ids.length) return
+    try { this.listStandings.set(await threads.readConversationStandings(ids)) } catch { /* the list groups by what it has */ }
+  }
+
+  /** A group's heading, by literal key. */
+  listGroupKey(group: ListGroup): string {
+    switch (group) {
+      case 'waiting': return 'agent.rail-convos-waiting'
+      case 'done': return 'chat.list.done'
+      default: return 'agent.rail-convos-active'
+    }
+  }
+
+  /** A row's standing as a glyph. Every name is in the shipped subset. */
+  listIcon(row: { readonly replied: boolean; readonly archived: boolean }, group: ListGroup | null): string {
+    if (!row.replied && !row.archived) return 'hourglass_empty'
+    switch (group) {
+      case 'waiting': return 'help'
+      case 'done': return 'check_circle'
+      case 'open': return 'pending'
+      default: return 'archive'
+    }
+  }
+
+  /** A row's name: what its workflow calls it, else its opening line. */
+  listName(row: { readonly convoId: string; readonly title: string }): string {
+    return this.listStandings().get(row.convoId)?.name || row.title
+  }
+
+  /** Where a row's conversation stands, in its workflow's words. */
+  listLine(row: { readonly convoId: string; readonly replied: boolean; readonly archived: boolean }): string {
+    return row.replied || row.archived ? this.listStandings().get(row.convoId)?.stands ?? '' : ''
+  }
+
+  /** How long since a conversation moved, in the fewest characters. */
+  listAge(at: number): string {
+    if (!at) return ''
+    const minutes = Math.floor(Math.max(0, Date.now() - at) / 60_000)
+    if (minutes < 1) return this.#t('agent.rail-age-now')
+    if (minutes < 60) return this.#t('agent.rail-age-minutes').replace('{count}', String(minutes))
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return this.#t('agent.rail-age-hours').replace('{count}', String(hours))
+    return this.#t('agent.rail-age-days').replace('{count}', String(Math.floor(hours / 24)))
+  }
 
   /** Is the archive showing in this window's flat list? Not persisted:
    *  putting a conversation away is durable, wanting to look at what you put
@@ -2712,7 +2820,7 @@ export class ChatWindowComponent implements OnDestroy {
       })
     }
 
-    // THE TAIL, on the main line: one card per exchange the flow has not read.
+    // THE TAIL, on the main line: ONE quiet card holding every exchange the flow has not read.
     // An exchange opens at a user turn; the first one past the flow opens
     // wherever the flow stopped, so turns before the first user turn — or a
     // reply that grew inside the last organized exchange — still ride a card.
@@ -2720,14 +2828,14 @@ export class ChatWindowComponent implements OnDestroy {
     const starts = rendered
       .filter(entry => entry.index >= upTo && (entry.index === upTo || entry.turn.role === 'user'))
       .map(entry => entry.index)
-    starts.forEach((start, at) => {
-      const end = starts[at + 1] ?? rendered.length
-      const rows = Array.from({ length: end - start }, (_, offset) => start + offset)
+    if (starts.length) {
+      const start = starts[0]!
+      const rows = Array.from({ length: rendered.length - start }, (_, offset) => start + offset)
       drafts.push({
-        key: `s:${start}`, kind: 'stage', row: start, rows, ...recorded(rows),
+        key: `s:${start}`, kind: 'stage', row: start, rows, ...recorded(rows), exchanges: starts.length,
         x: 0, y: y++, level: 1, descendants: 0, collapsed: false,
       })
-    })
+    }
     const bare = {
       row: -1, rows: [] as readonly number[], runs: [] as readonly RoutePiece[], unfinished: new Set<string>(),
       questions: [] as readonly SettledQuestion[], replyRow: -1, x: 0, level: 1, descendants: 0, collapsed: false,
@@ -2783,9 +2891,9 @@ export class ChatWindowComponent implements OnDestroy {
     return (kind && KIND_ICONS.find(entry => entry.kind === kind)?.icon) || this.nodeIcon(node.state)
   }
 
-  /** THE HEAD (chat-experience redesign, pass 1). Null with no flow. */
-  readonly routeHead = computed<RouteHead | null>(() => {
-    if (!this.routeSideShown()) return null
+  /** THE MASTHEAD's words: the conversation's name, where it stands, its counts. */
+  readonly sessionHead = computed<RouteHead | null>(() => {
+    if (!this.activeId()) return null
     const flow = this.route()?.flow
     if (!flow?.nodes.length) return null
     const counts = flow.counts ?? {}
@@ -2802,6 +2910,19 @@ export class ChatWindowComponent implements OnDestroy {
       icon: open > 0 ? this.stepIcon(openStep ?? root) : 'task_alt',
       done, open, total: flow.nodes.length,
     }
+  })
+
+  /** THE STEP RULES: the thread row each step begins at. */
+  readonly stepRules = computed<ReadonlyMap<number, StepRule>>(() => {
+    const limit = this.turns().length
+    const rules = new Map<number, StepRule>()
+    for (const node of this.route()?.flow?.nodes ?? []) {
+      const rows = node.turns.filter(row => Number.isInteger(row) && row >= 0 && row < limit)
+      if (!rows.length) continue
+      const row = Math.min(...rows)
+      if (!rules.has(row)) rules.set(row, { title: node.title, icon: this.stepIcon(node), state: node.state })
+    }
+    return rules
   })
 
   /** The fold mark: folded shows the way in, unfolded the way it opened. */
@@ -2886,11 +3007,17 @@ export class ChatWindowComponent implements OnDestroy {
         })
         return item.collapsed ? `${said} — ${this.#t('chat.route.flow.hidden', { count: item.descendants })}` : said
       }
-      case 'stage': return this.#t('chat.route.dormant')
+      case 'stage': return this.#t(this.routeTailKey(), { count: item.exchanges ?? 1 })
       case 'wait': return this.#t('chat.route.waiting')
       case 'end': return this.#t(this.endLabelKey())
       default: return item.piece ? this.pieceLabel(item.piece, 'live') : ''
     }
+  }
+
+  /** The dormant tail's words: NEWER exchanges past an organized flow, or the
+   *  whole conversation while nothing is organized. Literal keys. */
+  routeTailKey(): string {
+    return this.routeTree().nodes.size ? 'chat.route.tail.newer' : 'chat.route.tail.all'
   }
 
   // ── THE CURRENT STEP (§4.4.3) — one signal, four sources ─────────────────
@@ -2920,10 +3047,23 @@ export class ChatWindowComponent implements OnDestroy {
     return key ? this.routeTree().items.find(item => item.key === key) ?? null : null
   })
 
+  /** WHAT THE PANE SHOWS — never nothing while the tree draws anything: the
+   *  current step, else the newest open step, else the last step, else the tail. */
+  readonly routePaneItem = computed<RouteItem | null>(() => {
+    const current = this.routeCurrentItem()
+    if (current) return current
+    const items = this.routeTree().items
+    const steps = items.filter(item => item.kind === 'node' && !!item.node)
+    return [...steps].reverse().find(item => item.node!.state === 'open')
+      ?? steps[steps.length - 1]
+      ?? items.find(item => item.kind === 'stage')
+      ?? null
+  })
+
   /** The thread's lit rows: exactly the current card's. */
   readonly routeLitRows = computed<ReadonlySet<number>>(() => new Set(this.routeCurrentItem()?.rows ?? []))
 
-  readonly routeSpans = computed(() => spansOf(this.routeCurrentItem()?.rows ?? []))
+  readonly routeSpans = computed(() => spansOf(this.routePaneItem()?.rows ?? []))
 
   /** The row the start line marks — only while a hold stands. */
   readonly routeAnchorRow = computed(() =>
@@ -2942,7 +3082,7 @@ export class ChatWindowComponent implements OnDestroy {
 
   /** What the pane says, by state (§4.4.2) — `data-route-summary-state`. */
   readonly routeSummaryState = computed(() => {
-    const item = this.routeCurrentItem()
+    const item = this.routePaneItem()
     if (!item) return 'empty'
     const route = this.route()
     if (item.kind === 'stage') {
@@ -2965,7 +3105,7 @@ export class ChatWindowComponent implements OnDestroy {
    *  is being written or is due. Keys are literal; the model's name is
    *  interpolated, never translated. */
   readonly routeStatus = computed((): { readonly key: string; readonly params: Record<string, string | number> } | null => {
-    const item = this.routeCurrentItem()
+    const item = this.routePaneItem()
     const route = this.route()
     if (!item || !route) return null
     const model = route.organizer?.model ?? route.flow?.model ?? ''
@@ -3093,7 +3233,7 @@ export class ChatWindowComponent implements OnDestroy {
 
   /** A span chip: straight to that run of the current step's messages. */
   onRouteSpan(index: number): void {
-    const item = this.routeCurrentItem()
+    const item = this.routePaneItem()
     if (item) this.selectRouteItem(item, 'span', index)
   }
 
@@ -3737,7 +3877,7 @@ export class ChatWindowComponent implements OnDestroy {
       // wait on a reply or while the lane is paused after their own local
       // chat, and a refused call reads nothing and emits nothing — so the
       // refresh hints cannot turn this into a loop.
-      if (this.routeSideShown() && threads.organizeRoute) {
+      if (this.turns().length > 0 && threads.organizeRoute) {
         void threads.organizeRoute(convoId, liveRunId, this.waiting(), this.#routePrefer())
           .catch(() => { /* the flow stays as it was */ })
       }
@@ -4051,6 +4191,9 @@ export class ChatWindowComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<{ model?: string; prefill?: string; convoId?: string }>(
       'chat:open', payload => { void this.open(payload) }))
 
+    this.#cleanups.push(EffectBus.on('chat:route-flow-changed', () => {
+      if (!this.railVisible() && this.listOpen()) void this.#refreshListStandings(this.liveRoster().map(row => row.convoId))
+    }))
     this.#cleanups.push(EffectBus.on('chat:toggle', () => {
       if (this.visible()) this.close()
       else void this.open()
@@ -4972,6 +5115,7 @@ export class ChatWindowComponent implements OnDestroy {
     const threads = this.#threads()
     if (!threads || !convoId) return
     this.activeId.set(convoId)
+    this.#rail?.showConversation?.(convoId)
     this.model.set(this.#rememberedModel(convoId))
     this.modelExplicit.set(false)
     this.streaming.set('')
@@ -5186,6 +5330,12 @@ export class ChatWindowComponent implements OnDestroy {
   toggleList(): void {
     this.armed.set('')
     this.listOpen.update(open => !open)
+  }
+
+  toggleStands(): void {
+    const next = !this.standsOpen()
+    this.standsOpen.set(next)
+    try { globalThis.localStorage?.setItem(STANDS_OPEN_KEY, next ? '1' : '0') } catch { /* session-local */ }
   }
 
   // ── model ───────────────────────────────────────────────────────────────

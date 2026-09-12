@@ -264,6 +264,32 @@ describe('chat-thread — turns are contentSig manifests; legacy stays readable'
     expect(store.resourceReads - before).toBe(4)
   })
 
+  it('a reply that asks marks its own manifest, so the list knows the thread waits on you without a read', async () => {
+    const { questionFence } = await import('@hypercomb/core')
+    await mod.appendTurn('chat:asked', 'user', 'which colour?')
+    await mod.appendTurn('chat:asked', 'assistant', `Pick one.\n\n${questionFence('Which colour?', ['Red', 'Blue'])}`)
+    await new Promise(r => setTimeout(r, 5))
+    await mod.appendTurn('chat:plain', 'user', 'hello')
+    await mod.appendTurn('chat:plain', 'assistant', 'hi there')
+
+    const before = store.resourceReads
+    const { conversations } = await mod.listConversationsWithLatest()
+    const byId = new Map(conversations.map(c => [c.convoId, c]))
+    expect(byId.get('chat:asked')?.asking).toBe(true)
+    expect(byId.get('chat:plain')?.asking).toBeUndefined()
+    // 2 title resolves + 2 for materializing the newest — the flag cost nothing.
+    expect(store.resourceReads - before).toBe(4)
+  })
+
+  it('groups a conversation by who it waits on', () => {
+    const settled = { name: 'n', stands: 's', open: 0, total: 3, upTo: 4 }
+    expect(mod.conversationGroup({ asking: true, replied: true, turns: 4 }, settled)).toBe('waiting')
+    expect(mod.conversationGroup({ replied: true, turns: 4 }, settled)).toBe('done')
+    expect(mod.conversationGroup({ replied: true, turns: 6 }, settled)).toBe('open')
+    expect(mod.conversationGroup({ replied: true, turns: 4 }, { ...settled, open: 1 })).toBe('open')
+    expect(mod.conversationGroup({ replied: false, turns: 1 }, undefined)).toBe('open')
+  })
+
   it('archiving is a marker in the thread’s own bucket, and every turn survives', async () => {
     await mod.appendTurn('chat:filed', 'user', 'a question worth keeping')
     await mod.appendTurn('chat:filed', 'assistant', 'an answer worth keeping')

@@ -23,8 +23,8 @@
 // one file per turn named by the hash of its own bytes. Append-only: two
 // replies are two turns, never an overwrite.
 
-import { EffectBus } from '@hypercomb/core'
-import { organizeRoute, readRoute, type Route } from './chat-route.js'
+import { EffectBus, splitQuestion } from '@hypercomb/core'
+import { flowOpenSteps, organizeRoute, readRoute, readRouteFlow, type Route } from './chat-route.js'
 import { runIdForAsk } from './chat-steps.js'
 
 /** Pool of meaning holding conversations. Bare word, already in the frozen
@@ -36,6 +36,9 @@ export type TurnRole = 'user' | 'assistant'
 
 export interface ChatTurn {
   readonly kind: 'chat-turn'
+  /** Set on a reply that asked a question, so a list can tell the thread
+   *  waits on the participant without reading the text. */
+  readonly asks?: true
   readonly convoId: string
   readonly role: TurnRole
   readonly text: string
@@ -64,6 +67,9 @@ export interface ChatTurn {
  *  a thread is whatever its bucket holds, in either shape. */
 type TurnManifest = {
   readonly kind: 'chat-turn'
+  /** Set on a reply that asked a question, so a list can tell the thread
+   *  waits on the participant without reading the text. */
+  readonly asks?: true
   readonly convoId: string
   readonly role: TurnRole
   readonly at: number
@@ -128,6 +134,7 @@ export interface ChatGoalReached {
 /** A parsed bucket file before its text is materialized: either a legacy
  *  inline turn (text present) or a manifest (contentSig present). */
 type RawTurn = {
+  readonly asks?: true
   readonly convoId: string
   readonly role: TurnRole
   readonly at: number
@@ -166,6 +173,8 @@ export interface ConversationSummary {
    *  line. Surfaces say so ("waiting for reply…") rather than naming a thread
    *  after the thing you did not know when you started it. */
   readonly replied: boolean
+  /** The newest turn is a reply holding a question nobody has answered yet. */
+  readonly asking?: boolean
 }
 
 /** Conversations that belong to a PERSON, and so appear in the chat window.
@@ -349,6 +358,7 @@ export const appendTurnSig = async (
   const id = String(convoId ?? '').trim()
   const body = String(text ?? '')
   if (!id || !body) return null
+  const asks = role === 'assistant' && !!splitQuestion(body).question
 
   const store = get<StoreLike>('@hypercomb.social/Store')
   const pool = await store?.getPool?.(THREADS_POOL)
@@ -370,9 +380,9 @@ export const appendTurnSig = async (
     let contentSig: string | undefined
     if (store?.putResource) {
       contentSig = await store.putResource(new Blob([body], { type: 'text/plain' }))
-      record = { kind: 'chat-turn', convoId: id, role, at: Date.now(), contentSig }
+      record = { kind: 'chat-turn', convoId: id, role, at: Date.now(), contentSig, ...(asks ? { asks: true as const } : {}) }
     } else {
-      record = { kind: 'chat-turn', convoId: id, role, at: Date.now(), text: body }
+      record = { kind: 'chat-turn', convoId: id, role, at: Date.now(), text: body, ...(asks ? { asks: true as const } : {}) }
     }
     const bytes = new TextEncoder().encode(JSON.stringify(record)).buffer as ArrayBuffer
     // Named by its own content hash: append-only. (Two deliberate repeats of
@@ -525,6 +535,13 @@ const resolveText = async (raw: RawTurn, store: StoreLike): Promise<string> => {
   } catch { return '' }
 }
 
+/** WAITING ON YOU: the newest turn is a reply that asked a question nobody
+ *  has answered. Read off the manifest the reply was stored with — no text. */
+const askingIn = (raw: readonly RawTurn[]): boolean => {
+  const last = raw[raw.length - 1]
+  return !!last && last.role === 'assistant' && last.asks === true
+}
+
 /** Raw records → the ChatTurn shape every consumer reads (text materialized). */
 const materializeTurns = async (
   raw: readonly RawTurn[],
@@ -621,6 +638,7 @@ export const listConversationsWithLatest = async (): Promise<ConversationList> =
           lastAt,
           archived: read.archived,
           replied: repliedIn(raw),
+          ...(!read.archived && askingIn(raw) ? { asking: true } : {}),
           ...(read.goal ? { goal: read.goal } : {}),
         })
         // AN ARCHIVED THREAD IS NEVER "where you were". `latestTurns` is what
@@ -693,6 +711,8 @@ export interface TileConversation {
   readonly turns: number
   /** Whether anything has come back — see ConversationSummary.replied. */
   readonly replied: boolean
+  /** The newest turn is a reply holding a question nobody has answered yet. */
+  readonly asking?: boolean
   readonly lastAt: number
   /** The newest turn landed after the last time this thread was opened. */
   readonly unread: boolean
@@ -733,6 +753,7 @@ export const listTileConversations = async (): Promise<TileConversation[]> => {
       title: convo.title,
       turns: convo.turnCount,
       replied: convo.replied,
+      ...(convo.asking ? { asking: true } : {}),
       lastAt: convo.lastAt,
       unread: convo.lastAt > (seen[convo.convoId] ?? 0),
       archived: convo.archived,
@@ -764,6 +785,7 @@ export const listRailConversations = async (): Promise<TileConversation[]> => {
       title: convo.title,
       turns: convo.turnCount,
       replied: convo.replied,
+      ...(convo.asking ? { asking: true } : {}),
       lastAt: convo.lastAt,
       unread: convo.lastAt > (seen[convo.convoId] ?? 0),
       archived: convo.archived,
@@ -795,6 +817,7 @@ export const readConversationSummary = async (convoId: string): Promise<TileConv
       title: await titleOfRaw(raw, store),
       turns: raw.length,
       replied: repliedIn(raw),
+      ...(!read?.archived && askingIn(raw) ? { asking: true } : {}),
       lastAt,
       unread: lastAt > (seenMap()[id] ?? 0),
       archived: !!read?.archived,
@@ -822,6 +845,7 @@ export const listGlobalConversations = async (): Promise<TileConversation[]> => 
       title: convo.title,
       turns: convo.turnCount,
       replied: convo.replied,
+      ...(convo.asking ? { asking: true } : {}),
       lastAt: convo.lastAt,
       unread: convo.lastAt > (seen[convo.convoId] ?? 0),
       archived: convo.archived,
@@ -1230,6 +1254,49 @@ export const recoverStreamCheckpoints = async (
 // functions and the window resolves them at call time, which is the sanctioned
 // way for a shell to consume a module.
 
+/** What a conversation's organized workflow says, as a list reads it. */
+export interface ConversationStanding {
+  readonly name: string
+  readonly stands: string
+  /** Steps still open once rolled up (flowOpenSteps). */
+  readonly open: number
+  readonly total: number
+  /** How far the flow read — fewer than the conversation's turns means newer talk. */
+  readonly upTo: number
+}
+
+/** Who a conversation waits on, as every list groups it. */
+export type ConversationGroup = 'waiting' | 'open' | 'done'
+
+/** Each conversation's standing, read from its stored flow: a pool read each
+ *  and no model call. A conversation nothing has organized is simply absent. */
+export const readConversationStandings = async (convoIds: readonly string[]): Promise<Map<string, ConversationStanding>> => {
+  const records = await Promise.all(convoIds.map(async id => [id, await readRouteFlow(id)] as const))
+  const out = new Map<string, ConversationStanding>()
+  for (const [id, record] of records) {
+    if (!record?.nodes.length) continue
+    out.set(id, {
+      name: record.session?.name ?? '',
+      stands: record.session?.stands ?? '',
+      open: flowOpenSteps(record),
+      total: record.nodes.length,
+      upTo: record.upToTurnCount,
+    })
+  }
+  return out
+}
+
+/** WHO IT WAITS ON: you, when its newest reply asked a question; nobody, when
+ *  every organized step is settled and nothing newer came in; otherwise open. */
+export const conversationGroup = (
+  chat: { readonly asking?: boolean; readonly replied: boolean; readonly turns: number },
+  standing: ConversationStanding | undefined,
+): ConversationGroup => {
+  if (chat.asking) return 'waiting'
+  if (chat.replied && standing && standing.total > 0 && standing.open === 0 && standing.upTo >= chat.turns) return 'done'
+  return 'open'
+}
+
 export class ChatThreads {
   readonly appendTurn = appendTurn
   readonly listTileConversations = listTileConversations
@@ -1295,6 +1362,17 @@ export class ChatThreads {
    *  drain, whichever module copy holds this class. A METHOD for the same
    *  import-cycle reason as `readRoute`; feature-detected by the shell
    *  (`organizeRoute?.`). */
+  readConversationStandings(convoIds: readonly string[]): Promise<Map<string, ConversationStanding>> {
+    return readConversationStandings(convoIds)
+  }
+
+  conversationGroup(
+    chat: { readonly asking?: boolean; readonly replied: boolean; readonly turns: number },
+    standing?: ConversationStanding,
+  ): ConversationGroup {
+    return conversationGroup(chat, standing)
+  }
+
   organizeRoute(convoId: string, liveRunId?: string, waiting?: boolean, prefer?: string): Promise<number> {
     return organizeRoute(convoId, liveRunId, waiting, prefer)
   }

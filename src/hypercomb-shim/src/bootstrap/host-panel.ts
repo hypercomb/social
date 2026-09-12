@@ -20,7 +20,7 @@
 import { addHostZone, hostZone, listHostZones, removeHostZone } from './hosts'
 import { installPackage, type HostPackage } from './replicate'
 import { askHostPackages } from '@hypercomb/runtime/host-packages'
-import { frontDoorOf, readWelcome, type FrontDoor, type Welcome, type WelcomeDoor, type WelcomeLink } from './welcome'
+import { frontDoorOf, readWelcome, showsDeployedNodes, type FrontDoor, type Welcome, type WelcomeDoor, type WelcomeLink } from './welcome'
 
 const STYLE = `
 :host { all: initial }
@@ -175,7 +175,7 @@ class HostPanelElement extends HTMLElement {
     if (this.#welcome === undefined) this.#welcome = await readWelcome()
     // Named as the zone it is — `localhost:4270` on a machine, the hostname
     // everywhere else — so the title and the box below it agree.
-    const door = frontDoorOf(this.#welcome, this.#self || location.hostname, location.origin)
+    const door = frontDoorOf(this.#welcome, this.#self || location.hostname, location.origin, showsDeployedNodes())
     // The tab is named for the place, not for the shell that drew it.
     document.title = door.title
     const zones = (await listHostZones()).filter(zone => zone !== this.#self)

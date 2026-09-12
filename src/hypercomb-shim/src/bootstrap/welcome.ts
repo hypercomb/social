@@ -149,17 +149,31 @@ const sameDoor = (a: string, b: string, origin: string): boolean => {
   } catch { return false }
 }
 
+/** THE DEPLOYED NODES ARE AN OPERATOR'S VIEW. The hives live on a zone are
+ *  staged with the rest of the front door, but a visitor is shown the details
+ *  — the name, the sentence, the links, what this host publishes — and not
+ *  the directory of nodes, unless this browser asks for it:
+ *  `localStorage.setItem('hc:show-deployed-nodes', '1')`. */
+export const SHOW_DEPLOYED_NODES_KEY = 'hc:show-deployed-nodes'
+
+export const showsDeployedNodes = (): boolean => {
+  try {
+    const value = localStorage.getItem(SHOW_DEPLOYED_NODES_KEY)
+    return value === '1' || value === 'true'
+  } catch { return false }
+}
+
 /** The card a host shows: the staged front door where there is one, and the
  *  host's own name, the platform's sentence and the platform's doors where
  *  there is not. Pure, so the default is a fact the suite can pin. */
-export const frontDoorOf = (welcome: Welcome | null, hostname: string, origin: string): FrontDoor => {
+export const frontDoorOf = (welcome: Welcome | null, hostname: string, origin: string, showNodes = false): FrontDoor => {
   const links = welcome?.links ?? []
   return {
     title: welcome?.title || hostname,
     tagline: welcome?.tagline || DEFAULT_TAGLINE,
     links,
     doorsLabel: welcome?.doorsLabel ?? '',
-    doors: welcome?.doors ?? [],
+    doors: showNodes ? welcome?.doors ?? [] : [],
     footer: PLATFORM_LINKS.filter(door => !links.some(link => sameDoor(link.href, door.href, origin))),
   }
 }

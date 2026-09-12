@@ -250,6 +250,28 @@ describe('tiles rail gestures — every row is a conversation', () => {
     expect(names(host)).toEqual(['pheromone-workflow', 'diagrams', 'ai-videos'])
   })
 
+  it('lists every conversation above the tiles, grouped by who it waits on, the archive folded shut', async () => {
+    const block = (): HTMLElement => host.querySelector('.hc-rail-convos') as HTMLElement
+    const convoNames = (): string[] => [...block().querySelectorAll('.hc-rail-convo-name')].map(n => n.textContent ?? '')
+
+    expect([...block().querySelectorAll('.hc-rail-convos-group')].map(n => n.textContent)).toEqual(['Open'])
+    expect(convoNames()).toEqual(['what is this'])
+    expect(block().querySelector('.hc-rail-convo')?.getAttribute('data-group')).toBe('open')
+    expect(host.querySelector('.hc-rail-tiles-head')).toBeTruthy()
+
+    const archived = block().querySelector('.hc-rail-convos-archived') as HTMLButtonElement
+    expect(archived.textContent).toBe('Archived (1)')
+    archived.click()
+    expect(convoNames()).toEqual(['what is this', 'the old thread'])
+
+    ;(block().querySelector('.hc-rail-convo') as HTMLButtonElement).click()
+    await settle()
+    expect(rail.subject?.name).toBe('diagrams')
+    expect(rail.subject?.convoId).toBe('chat:tile:/diagrams')
+    expect(block().querySelector('.hc-rail-convo.current .hc-rail-convo-name')?.textContent).toBe('what is this')
+  })
+
+
   it('leaves have no Go square that leads nowhere', () => {
     const walks = [...host.querySelectorAll(`${TILE_ROWS} .hc-rail-walk`)] as HTMLButtonElement[]
     expect(walks.map(walk => walk.hidden)).toEqual([false, true, true])

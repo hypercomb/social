@@ -6,6 +6,9 @@
   font-display: swap;
 }
 
+/* The deployed nodes are shown only to a browser holding hc:show-deployed-nodes. */
+[data-deployed-nodes][hidden] { display: none !important; }
+
 :root {
   color-scheme: light;
   --paper: #f7f0e5;
