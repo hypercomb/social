@@ -150,8 +150,35 @@ export class DependencyLoader extends EventTarget {
   #verifyAndImport = async (sig: string, alias: string): Promise<string> => {
     const pureSig = sig.replace(/\.js$/i, '')
     console.log(`[dependency-loader] importing ${alias} (${pureSig})`)
-    const mod = await import(/* @vite-ignore */ alias)
-    void mod
+
+    // Import from verified OPFS bytes via a self-typed blob URL — the same
+    // pattern Store.getBee uses for bees, and for the same reason: the
+    // CALLER, not the network, is responsible for knowing the MIME type of
+    // what it is about to import. `import(alias)` for a participant resolves
+    // to a network `/opfs/<sig>` URL whose type depends on the service
+    // worker being in control of the page. A page is UNCONTROLLED on its
+    // first navigation (first visit, or right after the worker updates), so
+    // that fetch falls through to the host's own routing — an SPA catch-all
+    // answers `text/html` for it — and the browser refuses to load it as a
+    // module. That is exactly the "blank until a hard refresh" failure: a
+    // hard refresh is a fresh navigation, which the by-then-active worker
+    // does control. Reading the verified bytes ourselves and blob-wrapping
+    // them removes the dependency on the worker (and the host) entirely.
+    const bytes = this.store.opfsAvailable ? await this.store.getDependencyBytes(pureSig) : null
+    if (bytes) {
+      const exact = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+      const blobUrl = URL.createObjectURL(new Blob([exact], { type: 'application/javascript' }))
+      try {
+        await import(/* @vite-ignore */ blobUrl)
+      } finally {
+        URL.revokeObjectURL(blobUrl)
+      }
+    } else {
+      // No verified local bytes to build a blob from — e.g. a read-only
+      // visitor, whose `alias` is already a self-typed `blob:` URL minted by
+      // resolveImportMap. Import it as-is; that path was never SW-dependent.
+      await import(/* @vite-ignore */ alias)
+    }
     console.log(`[dependency-loader] imported ${alias}`)
     return sig
   }
