@@ -7,6 +7,8 @@
 export type PlaceSprite = 'shrine' | 'pyramid' | 'cavern' | 'plot' | 'cache' | 'cache-open' | 'sign'
   // Inside the caverns.
   | 'tablet' | 'rune-door' | 'rune-door-open' | 'cave-exit' | 'crystal' | 'alcove'
+  // An area place crossed by walking through it, not entered by a door.
+  | 'grove'
 export type PlaceGlow = 'ready' | 'open' | null
 
 const INK = '#1c1230'
@@ -216,6 +218,24 @@ const PLACES: Readonly<Record<PlaceSprite, (ctx: CanvasRenderingContext2D, glow:
     part(ctx, '#6f665a', () => rounded(ctx, 5, 6, 14, 16.4, 1.2), 14)
     part(ctx, '#15171a', () => hexagonPath(ctx, 12, 13, 4.2))
     paint(ctx, '#c9b4ff', () => hexagonPath(ctx, 12, 13, 1.6))
+  },
+  grove(ctx) {
+    // Two canopy masses lean together over a shaded gap — the trees
+    // "closing over" the path where it crosses into the grove.
+    part(ctx, '#1c2e18', () => ctx.ellipse(5.4, 9.6, 5.4, 6.2, 0.18, 0, TAU), 8.6)
+    part(ctx, '#1c2e18', () => ctx.ellipse(18.6, 9.6, 5.4, 6.2, -0.18, 0, TAU), 21.8)
+    for (const tx of [3.2, 7.6, 16.4, 20.8]) {
+      part(ctx, '#5a3c22', () => rounded(ctx, tx - 0.9, 14.4, 1.8, 8, 0.3), tx + 0.3)
+    }
+    paint(ctx, 'rgba(8, 16, 6, 0.6)', () => { ctx.moveTo(7.4, 22.2); ctx.lineTo(7.4, 9); ctx.lineTo(16.6, 9); ctx.lineTo(16.6, 22.2); ctx.closePath() })
+    const day = ctx.createLinearGradient(0, 8, 0, 22.2)
+    day.addColorStop(0, 'rgba(220, 246, 196, 0.55)')
+    day.addColorStop(1, 'rgba(120, 180, 90, 0.12)')
+    ctx.fillStyle = day
+    ctx.beginPath()
+    ctx.moveTo(9, 22.2); ctx.lineTo(9, 12.4); ctx.quadraticCurveTo(12, 9.6, 15, 12.4); ctx.lineTo(15, 22.2); ctx.closePath()
+    ctx.fill()
+    paint(ctx, '#5f8a45', () => { ctx.ellipse(4.6, 21, 1.4, 0.7, 0, 0, TAU); ctx.moveTo(19.6, 20.6); ctx.ellipse(18.6, 20.6, 1.1, 0.6, 0, 0, TAU) })
   },
 }
 

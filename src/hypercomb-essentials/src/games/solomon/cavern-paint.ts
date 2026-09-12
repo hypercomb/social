@@ -3,12 +3,21 @@
 // — and darkness everywhere your torch does not reach. Passages you have
 // walked stay faintly remembered. The rock is baked once; per frame only the
 // light, the torch flames and the pool glints move.
+//
+// One look besides the cavern: `'wood'`, for the daylight chambers where the
+// map's own `#`/`.`/`~` mean trunk, grass and still pool instead of rock,
+// flagstone and dark water — same source characters, same bake-once
+// mechanism, a different palette and no darkness pass (torch reach is 0
+// outdoors; the look tells `paintLight` to skip the hole-punch entirely and
+// wash the scene in daylight instead).
 
 import { islandHash } from './island.js'
 import { canvasContext } from './island-paint.js'
 
-/** `#` rock, `.` floor, `~` water — one string per row. */
-export interface CavernMap { cols: number; rows: number; tiles: readonly string[] }
+/** `#` rock (wood: trunk), `.` floor (wood: grass), `~` water (wood: still
+ *  pool) — one string per row. `look` defaults to `'cavern'`, so every
+ *  existing caller (no `look` field) renders exactly as before. */
+export interface CavernMap { cols: number; rows: number; tiles: readonly string[]; look?: 'cavern' | 'wood' }
 /** The visible window in CSS pixels; `tile` is the size of one cell. */
 export interface CavernCamera { x: number; y: number; width: number; height: number; tile: number; dpr: number }
 export interface CavernLight { x: number; y: number; radius: number }
@@ -18,7 +27,9 @@ const TORCH_REACH = 3.6
 
 export class CavernPainter {
   readonly #map: CavernMap
-  /** Cells the torch has shown; they stay dimly visible afterwards. */
+  readonly #wood: boolean
+  /** Cells the torch has shown; they stay dimly visible afterwards. Unused
+   *  in the wood look, which skips the darkness pass entirely. */
   readonly seen: Uint8Array
   readonly torches: readonly { x: number; y: number }[]
   #rock: { key: string; canvas: HTMLCanvasElement | null } = { key: '', canvas: null }
@@ -27,10 +38,14 @@ export class CavernPainter {
 
   constructor(map: CavernMap) {
     this.#map = map
+    this.#wood = map.look === 'wood'
     this.seen = new Uint8Array(map.cols * map.rows)
     const torches: { x: number; y: number }[] = []
-    for (let row = 0; row < map.rows - 1; row++) for (let col = 1; col < map.cols - 1; col++) {
-      if (this.#at(col, row) === '#' && this.#at(col, row + 1) === '.' && (col * 7 + row * 3) % 9 === 0) torches.push({ x: col + 0.5, y: row + 0.66 })
+    // Daylight chambers carry no torches — the sun does the work.
+    if (!this.#wood) {
+      for (let row = 0; row < map.rows - 1; row++) for (let col = 1; col < map.cols - 1; col++) {
+        if (this.#at(col, row) === '#' && this.#at(col, row + 1) === '.' && (col * 7 + row * 3) % 9 === 0) torches.push({ x: col + 0.5, y: row + 0.66 })
+      }
     }
     this.torches = torches
   }
@@ -48,10 +63,10 @@ export class CavernPainter {
 
   paintRock(ctx: CanvasRenderingContext2D, camera: CavernCamera, time: number): void {
     const { tile, dpr, width, height } = camera
-    const key = `${tile}:${dpr}`
+    const key = `${tile}:${dpr}:${this.#wood ? 1 : 0}`
     if (this.#rock.key !== key) this.#rock = { key, canvas: this.#bake(tile, dpr) }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    ctx.fillStyle = '#060709'
+    ctx.fillStyle = this.#wood ? '#bfe0a0' : '#060709'
     ctx.fillRect(0, 0, width, height)
     if (this.#rock.canvas) ctx.drawImage(this.#rock.canvas, -camera.x, -camera.y, this.#map.cols * tile, this.#map.rows * tile)
     this.#glints(ctx, camera, time)
@@ -62,6 +77,7 @@ export class CavernPainter {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.globalCompositeOperation = 'source-over'
     ctx.clearRect(0, 0, width, height)
+    if (this.#wood) { this.#daylight(ctx, camera, time); return }
     ctx.fillStyle = 'rgba(4, 5, 9, 0.8)'
     ctx.fillRect(0, 0, width, height)
     ctx.fillStyle = '#040509'
@@ -92,6 +108,31 @@ export class CavernPainter {
     for (const torch of this.torches) flame(ctx, torch.x * tile - camera.x, torch.y * tile - camera.y, tile, time + torch.x)
   }
 
+  /** The wood look's whole "light" pass: no torch, no darkness, no memory of
+   *  what has been seen — outdoors, everything in view is simply lit. A soft
+   *  warm wash plus a slow drift of dappled shade, so it never reads as flat. */
+  #daylight(ctx: CanvasRenderingContext2D, camera: CavernCamera, time: number): void {
+    const { tile, width, height } = camera
+    const grade = ctx.createRadialGradient(width / 2, height * 0.35, tile, width / 2, height * 0.35, Math.max(width, height) * 0.8)
+    grade.addColorStop(0, 'rgba(255, 250, 214, 0.08)')
+    grade.addColorStop(1, 'rgba(60, 90, 40, 0.16)')
+    ctx.fillStyle = grade
+    ctx.fillRect(0, 0, width, height)
+    ctx.fillStyle = 'rgba(20, 40, 16, 0.14)'
+    const drift = time * 6
+    for (let row = 0; row < this.#map.rows; row++) for (let col = 0; col < this.#map.cols; col++) {
+      if (this.#at(col, row) === '#') continue
+      const g = islandHash(col, row, 231)
+      if (g > 0.22) continue
+      const x = col * tile - camera.x + tile * (0.2 + ((g * 340 + drift) % (tile * 1.4)) / tile * 0.3)
+      const y = row * tile - camera.y + tile * (0.3 + g * 0.4)
+      if (x < -tile || x > width + tile || y < -tile || y > height + tile) continue
+      ctx.beginPath()
+      ctx.ellipse(x, y, tile * 0.22, tile * 0.11, 0.4, 0, TAU)
+      ctx.fill()
+    }
+  }
+
   #at(col: number, row: number): string { return this.#map.tiles[row]?.[col] ?? '#' }
 
   #bake(tile: number, dpr: number): HTMLCanvasElement | null {
@@ -102,16 +143,17 @@ export class CavernPainter {
     const ctx = canvasContext(canvas)
     if (!ctx) return null
     ctx.setTransform(scale, 0, 0, scale, 0, 0)
+    const wood = this.#wood
     for (let row = 0; row < this.#map.rows; row++) for (let col = 0; col < this.#map.cols; col++) {
       const cell = this.#at(col, row)
-      if (cell === '~') pool(ctx, col * tile, row * tile, tile, col, row, this.#at(col, row - 1) !== '~')
-      else floor(ctx, col * tile, row * tile, tile, col, row, this.#at(col, row - 1) === '#')
+      if (cell === '~') pool(ctx, col * tile, row * tile, tile, col, row, this.#at(col, row - 1) !== '~', wood)
+      else floor(ctx, col * tile, row * tile, tile, col, row, this.#at(col, row - 1) === '#', wood)
     }
     for (let row = 0; row < this.#map.rows; row++) for (let col = 0; col < this.#map.cols; col++) {
       if (this.#at(col, row) !== '#') continue
-      wall(ctx, col * tile, row * tile, tile, col, row, this.#at(col, row + 1), this.#at(col, row - 1), this.#at(col - 1, row), this.#at(col + 1, row))
+      wall(ctx, col * tile, row * tile, tile, col, row, this.#at(col, row + 1), this.#at(col, row - 1), this.#at(col - 1, row), this.#at(col + 1, row), wood)
     }
-    for (const torch of this.torches) {
+    if (!wood) for (const torch of this.torches) {
       ctx.fillStyle = '#1a1512'
       ctx.fillRect((torch.x - 0.09) * tile, (torch.y + 0.02) * tile, 0.18 * tile, 0.08 * tile)
       ctx.fillStyle = '#5a3d24'
@@ -154,7 +196,8 @@ function radialSprite(rgb: string, stops: readonly (readonly [number, number])[]
   return canvas
 }
 
-function floor(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number, wallAbove: boolean): void {
+function floor(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number, wallAbove: boolean, wood: boolean): void {
+  if (wood) { floorWood(ctx, x, y, s, col, row, wallAbove); return }
   const g = islandHash(col, row, 201), h = islandHash(col, row, 203)
   const tone = 50 + Math.floor(g * 12)
   ctx.fillStyle = `rgb(${tone + 8}, ${tone + 1}, ${tone - 8})`
@@ -194,7 +237,41 @@ function floor(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, c
   }
 }
 
-function pool(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number, bankAbove: boolean): void {
+/** Grass instead of flagstone: angled blade strokes in two greens, the same
+ *  sparse leaf-litter/pale-patch accents, and — under a canopy cell — a soft
+ *  green-black shade rather than the cavern's cold black. */
+function floorWood(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number, wallAbove: boolean): void {
+  const g = islandHash(col, row, 201), h = islandHash(col, row, 203)
+  const tone = 96 + Math.floor(g * 22)
+  ctx.fillStyle = `rgb(${tone - 30}, ${tone + 18}, ${tone - 46})`
+  ctx.fillRect(x, y, s, s)
+  for (let k = 0; k < 5; k++) {
+    const bx = x + islandHash(col + k, row, 205) * s, by = y + islandHash(col, row + k, 207) * s
+    ctx.strokeStyle = k % 2 ? 'rgba(46, 84, 32, 0.5)' : 'rgba(150, 196, 96, 0.35)'
+    ctx.lineWidth = Math.max(1, s * 0.03)
+    ctx.beginPath()
+    ctx.moveTo(bx, by)
+    ctx.lineTo(bx + s * 0.05, by - s * 0.14)
+    ctx.stroke()
+  }
+  if (h < 0.1) {
+    ctx.fillStyle = 'rgba(60, 44, 22, 0.5)'
+    ctx.beginPath(); ctx.ellipse(x + s * 0.6, y + s * 0.68, s * 0.11, s * 0.05, 0.3, 0, TAU); ctx.fill()
+  } else if (h > 0.9) {
+    ctx.fillStyle = 'rgba(220, 210, 150, 0.3)'
+    ctx.beginPath(); ctx.ellipse(x + s * 0.35, y + s * 0.4, s * 0.16, s * 0.08, -0.2, 0, TAU); ctx.fill()
+  }
+  if (wallAbove) {
+    const shade = ctx.createLinearGradient(0, y, 0, y + s * 0.5)
+    shade.addColorStop(0, 'rgba(10, 26, 8, 0.5)')
+    shade.addColorStop(1, 'rgba(10, 26, 8, 0)')
+    ctx.fillStyle = shade
+    ctx.fillRect(x, y, s, s * 0.5)
+  }
+}
+
+function pool(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number, bankAbove: boolean, wood: boolean): void {
+  if (wood) { poolWood(ctx, x, y, s, col, row, bankAbove); return }
   const g = islandHash(col, row, 213)
   ctx.fillStyle = g < 0.5 ? '#0f262b' : '#11292f'
   ctx.fillRect(x, y, s, s)
@@ -211,7 +288,27 @@ function pool(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, co
   }
 }
 
-function wall(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number, below: string, above: string, left: string, right: string): void {
+/** A still pond instead of a dark cavern pool: warmer, greener water, a bank
+ *  of grass instead of stone. */
+function poolWood(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number, bankAbove: boolean): void {
+  const g = islandHash(col, row, 213)
+  ctx.fillStyle = g < 0.5 ? '#2e6a5c' : '#357a68'
+  ctx.fillRect(x, y, s, s)
+  ctx.strokeStyle = 'rgba(220, 240, 200, 0.18)'
+  ctx.lineWidth = Math.max(1, s * 0.03)
+  ctx.beginPath()
+  ctx.arc(x + s * (0.3 + g * 0.4), y + s * 0.75, s * 0.2, Math.PI * 1.2, Math.PI * 1.8)
+  ctx.stroke()
+  if (bankAbove) {
+    ctx.fillStyle = '#2f4a22'
+    ctx.fillRect(x, y, s, s * 0.16)
+    ctx.fillStyle = 'rgba(210, 230, 170, 0.28)'
+    ctx.fillRect(x, y + s * 0.16, s, Math.max(1, s * 0.04))
+  }
+}
+
+function wall(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number, below: string, above: string, left: string, right: string, wood: boolean): void {
+  if (wood) { wallWood(ctx, x, y, s, col, row, below, above, left, right); return }
   const g = islandHash(col, row, 211), h = islandHash(col, row, 215)
   const face = below !== '#'
   ctx.fillStyle = '#1b1814'
@@ -246,6 +343,51 @@ function wall(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, co
   }
   if (right !== '#') {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'
+    ctx.fillRect(x + s - Math.max(2, s * 0.06), y, Math.max(2, s * 0.06), s)
+  }
+}
+
+/** A trunk seen from the front where the ground opens below it; a leafy
+ *  canopy top, seen from above, everywhere else — boulders and dense brush
+ *  read the same way the Hollow Grove's own boulder ring does. */
+function wallWood(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, col: number, row: number, below: string, above: string, left: string, right: string): void {
+  const g = islandHash(col, row, 211), h = islandHash(col, row, 215)
+  const face = below !== '#'
+  ctx.fillStyle = '#173a1c'
+  ctx.fillRect(x, y, s, face ? s * 0.44 : s)
+  for (let k = 0; k < 5; k++) {
+    ctx.fillStyle = k % 2 ? 'rgba(60, 110, 50, 0.3)' : 'rgba(10, 24, 10, 0.35)'
+    ctx.beginPath()
+    ctx.ellipse(x + islandHash(col + k, row, 217) * s, y + islandHash(col, row + k, 219) * s * (face ? 0.4 : 1), s * 0.09, s * 0.05, 0, 0, TAU)
+    ctx.fill()
+  }
+  if (above !== '#') {
+    ctx.fillStyle = 'rgba(90, 130, 70, 0.3)'
+    ctx.fillRect(x, y, s, Math.max(1, s * 0.04))
+  }
+  if (face) {
+    const top = y + s * 0.4
+    const bark = ctx.createLinearGradient(0, top, 0, y + s)
+    bark.addColorStop(0, '#6a4a2c')
+    bark.addColorStop(0.55, '#4a3320')
+    bark.addColorStop(1, '#2c2013')
+    ctx.fillStyle = bark
+    ctx.fillRect(x, top, s, s * 0.6)
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.32)'
+    ctx.lineWidth = Math.max(1, s * 0.025)
+    ctx.beginPath()
+    ctx.moveTo(x + s * (0.2 + g * 0.15), top); ctx.lineTo(x + s * (0.24 + g * 0.15), y + s)
+    ctx.moveTo(x + s * (0.6 + h * 0.15), top); ctx.lineTo(x + s * (0.56 + h * 0.15), y + s)
+    ctx.stroke()
+    ctx.fillStyle = 'rgba(210, 190, 140, 0.16)'
+    ctx.fillRect(x, top, s, Math.max(1, s * 0.03))
+  }
+  if (left !== '#') {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.26)'
+    ctx.fillRect(x, y, Math.max(2, s * 0.06), s)
+  }
+  if (right !== '#') {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.34)'
     ctx.fillRect(x + s - Math.max(2, s * 0.06), y, Math.max(2, s * 0.06), s)
   }
 }

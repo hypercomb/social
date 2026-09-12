@@ -383,7 +383,7 @@ describe('the flow knobs reach the local body only', () => {
   })
 
   it('leaves every other vendor\'s request unchanged when a call sets them', async () => {
-    const vendors = ['anthropic', 'openai', 'google', 'xai', 'deepseek', 'mistral']
+    const vendors = ['anthropic', 'openai', 'google', 'xai', 'deepseek', 'mistral', 'openrouter']
     for (const vendor of vendors) {
       const module = await import(`./providers/${vendor}.provider.js`) as Record<string, unknown>
       const descriptor = Object.values(module).find(value =>

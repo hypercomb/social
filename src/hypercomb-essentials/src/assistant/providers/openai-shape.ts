@@ -21,9 +21,20 @@ import type {
   LlmToolCallDelta,
 } from './llm-provider.types.js'
 
+/** A system turn as content PARTS, so one part can carry a vendor cache
+ *  marker. Only routers that pass `cache_control` through (OpenRouter → the
+ *  Anthropic and Gemini upstreams) are asked for this form; the plain string
+ *  stays the default because several vendors on this shape reject arrays
+ *  for the system role. Design: documentation/anatomy-context-need.md §7. */
+type OpenAiTextPart = {
+  readonly type: 'text'
+  readonly text: string
+  readonly cache_control?: { readonly type: 'ephemeral' }
+}
+
 type OpenAiMessage = {
   readonly role: string
-  readonly content: string | null
+  readonly content: string | readonly OpenAiTextPart[] | null
   readonly tool_calls?: readonly {
     readonly id: string
     readonly type: 'function'
@@ -35,7 +46,20 @@ type OpenAiMessage = {
 /** Messages in OpenAI order: an optional system turn, then the conversation.
  *  Native observation results travel in the protocol's ordinary assistant
  *  tool-call/tool-result pair; no provider-specific state leaks above here. */
-export const openAiMessages = (request: LlmRequest): OpenAiMessage[] => {
+export type OpenAiShapeOptions = {
+  /** This endpoint passes `cache_control` through to an upstream that honours
+   *  it. With `request.cacheSystem` set, the system turn is sent as parts
+   *  with an ephemeral cache marker — the anatomy is billed once per window
+   *  instead of once per call. */
+  readonly cacheableSystem?: boolean
+}
+
+const systemTurn = (system: string, request: LlmRequest, options: OpenAiShapeOptions): OpenAiMessage =>
+  request.cacheSystem && options.cacheableSystem
+    ? { role: 'system', content: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] }
+    : { role: 'system', content: system }
+
+export const openAiMessages = (request: LlmRequest, options: OpenAiShapeOptions = {}): OpenAiMessage[] => {
   const turns = request.messages.map((message): OpenAiMessage => {
     if (message.role === 'tool') {
       return { role: 'tool', content: message.content, tool_call_id: message.toolCallId }
@@ -53,7 +77,7 @@ export const openAiMessages = (request: LlmRequest): OpenAiMessage[] => {
     }
     return { role: message.role, content: message.content }
   })
-  return request.system ? [{ role: 'system', content: request.system }, ...turns] : turns
+  return request.system ? [systemTurn(request.system, request, options), ...turns] : turns
 }
 
 /**
@@ -65,6 +89,7 @@ export const openAiRequest = (
   request: LlmRequest,
   authHeader: (apiKey: string) => Record<string, string> =
     apiKey => (apiKey ? { Authorization: `Bearer ${apiKey}` } : {} as Record<string, string>),
+  options: OpenAiShapeOptions = {},
 ): LlmHttpRequest => ({
   url,
   init: {
@@ -75,7 +100,7 @@ export const openAiRequest = (
     },
     body: JSON.stringify({
       model: request.model,
-      messages: openAiMessages(request),
+      messages: openAiMessages(request, options),
       max_tokens: request.maxTokens ?? 4096,
       ...(request.tools?.length ? { tools: request.tools, tool_choice: 'auto' } : {}),
       ...(request.stream ? { stream: true, stream_options: { include_usage: true } } : {}),

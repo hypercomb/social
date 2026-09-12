@@ -16,9 +16,14 @@ if (!tsxCli) {
   process.exit(0)
 }
 
-const result = spawnSync(process.execPath, [tsxCli, './scripts/prepare.ts'], {
-  cwd: packageRoot,
-  stdio: 'inherit',
-})
+// The anatomy FIRST: it writes src/assistant/anatomy/anatomy.generated.ts,
+// and prepare.ts must then see that file when it derives the folder index.
+for (const script of ['./scripts/build-anatomy.ts', './scripts/prepare.ts']) {
+  const result = spawnSync(process.execPath, [tsxCli, script], {
+    cwd: packageRoot,
+    stdio: 'inherit',
+  })
+  if ((result.status ?? 1) !== 0) process.exit(result.status ?? 1)
+}
 
-process.exit(result.status ?? 1)
+process.exit(0)

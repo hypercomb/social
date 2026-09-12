@@ -1,4 +1,7 @@
-import { BRICK, EMPTY, Engine, LIFE_FULL, MAX_AMMO, SCROLL_CAP, TILE, WALL, type Cell, type LevelDef, type EngineSnapshot } from './engine.js'
+import {
+  BRICK, COMBAT_SKILLS, EMPTY, Engine, LIFE_FULL, MAX_AMMO, SCROLL_CAP, TILE, WALL,
+  type Cell, type CombatSkillId, type EngineSnapshot, type LevelDef, type SpellKind, type WeaponKind,
+} from './engine.js'
 
 // NES terrain is two bytes per row, twelve rows per room:
 // https://datacrystal.tcrf.net/wiki/Solomon%27s_Key/ROM_map
@@ -54,6 +57,7 @@ export interface JourneyProgress {
 export interface JourneyStats {
   score: number; lives: number; fairyCount: number; sealCount: number
   pageTime: boolean; pageSpace: boolean; ammo: boolean[]; ammoCap: number
+  kit: CombatSkillId[]; weapon: WeaponKind | null; spell: SpellKind | null
 }
 export interface JourneySnapshot {
   version: 1
@@ -161,6 +165,36 @@ function buildRooms(): RoomDef[] {
       heart.relics.push({ id: 'starbloom-heart', kind: 'star', col: 12, row: 8, lore: 'Every path has a way home. The pyramid is awake.' })
       loft.level.items.push({ col: 8, row: 4, kind: 'life' })
     }
+    // The Hush's own content (§6.11) — a genuinely separate placement pass:
+    // zero coordinate overlap with the relics/pickups above. Every stele/chest
+    // sits on the room's floor or an existing shelf the pinned playthrough
+    // never stands on for long enough to matter (steles/chests are E-gated
+    // only, never touch-triggered, so walking past one does nothing either
+    // way — §5.3). Both barriers use the 'heart' chamber's own west shelf
+    // (row 6, cols 2-3 — layout 3's own `ledge(2,6,2)`, present in every
+    // labyrinth's heart room), well clear of the pinned route's fold/return/
+    // home approaches, since neither `ember` nor `hold` is ever learned
+    // during that route (interact() is never called there beyond the Stand's
+    // own arming line, §7.12) and a barrier the route actually crossed would
+    // wall the walkthrough shut for the rest of its run.
+    if (index === 0) {
+      porch.level.items.push(
+        { col: 3, row: 10, kind: 'stele', gives: 'stand' },     // Stele of the Stand — one tile from spawn, no platforming
+        { col: 4, row: 2, kind: 'stele', gives: 'ward' },       // Sundial Stone — the porch's own highest shelf
+      )
+      steps.level.items.push({ col: 12, row: 8, kind: 'chest', gives: 'sickle' })   // Sickle of the Sun — above the goblin's beat
+      loft.level.items.push({ col: 3, row: 2, kind: 'stele', gives: 'ember' })      // Hearth Stone — the loft's upper shelf
+      heart.level.items.push({ col: 2, row: 5, kind: 'barrier', needs: 'ember' })   // sealed until Ember is learned in the loft
+      heart.level.tiles[5 * ROOM_COLS + 2] = WALL
+    } else if (index === 1) {
+      steps.level.items.push({ col: 12, row: 8, kind: 'chest', gives: 'sling' })    // Tideglass Sling — the right-side shelf
+      loft.level.items.push({ col: 3, row: 2, kind: 'stele', gives: 'hold' })       // Hourglass Stone — the loft's upper shelf
+      // tideglass-heart: no new content — the existing gargoil duel already
+      // proves Ward's reflect against a telegraphed shot (§6.11).
+    } else {
+      heart.level.items.push({ col: 2, row: 5, kind: 'barrier', needs: 'hold' })    // the gauntlet's one gated reward
+      heart.level.tiles[5 * ROOM_COLS + 2] = WALL
+    }
     if (index < 2) {
       // The scrolling expedition's inscription names this exact empty square:
       // above the left end of the porch's highest shelf (col 2, row 3).
@@ -199,7 +233,10 @@ export class LabyrinthJourney {
   lastRelic: RoomRelic | null = null
   #arrivalDoor: string | null = null
   #lastRoom = new Map<string, string>()
-  #stats = { score: 0, lives: 3, fairyCount: 0, sealCount: 0, pageTime: false, pageSpace: false, ammo: [] as boolean[], ammoCap: MAX_AMMO }
+  #stats: JourneyStats = {
+    score: 0, lives: 3, fairyCount: 0, sealCount: 0, pageTime: false, pageSpace: false, ammo: [] as boolean[], ammoCap: MAX_AMMO,
+    kit: [], weapon: null, spell: null,
+  }
 
   constructor(rooms: readonly RoomDef[] = ROOMS, labyrinths: readonly LabyrinthDef[] = LABYRINTHS) {
     this.rooms = new Map(rooms.map(room => [room.id, room]))
@@ -228,7 +265,7 @@ export class LabyrinthJourney {
       version: 1, roomIds: [...this.engines.keys()], activeRoomId: this.room?.id ?? null,
       rooms: [...this.engines].map(([id, engine]) => ({ id, topologyKey: roomTopology(this.rooms.get(id)!), state: engine.exportState() })),
       progress: this.exportProgress(), visited: [...this.visited], lastRooms: [...this.#lastRoom], arrivalDoorId: this.#arrivalDoor,
-      stats: { ...this.#stats, ammo: [...this.#stats.ammo] },
+      stats: { ...this.#stats, ammo: [...this.#stats.ammo], kit: [...this.#stats.kit] },
     }
   }
 
@@ -247,11 +284,33 @@ export class LabyrinthJourney {
       || !saveInteger(stats['sealCount'], 1e6) || typeof stats['pageTime'] !== 'boolean' || typeof stats['pageSpace'] !== 'boolean'
       || !saveInteger(stats['ammoCap'], SCROLL_CAP) || stats['ammoCap'] < MAX_AMMO || !Array.isArray(stats['ammo'])
       || stats['ammo'].length > stats['ammoCap'] || stats['ammo'].some(value => typeof value !== 'boolean')) return
+    // kit/weapon/spell (§3.5.3), mirroring engine.ts's own restoreState() rule
+    // one-for-one: absent entirely (a v1/v2 journey saved before the Hush
+    // existed) defaults to empty/null; present but forged (an unknown id, a
+    // duplicate, or a weapon/spell not actually in the kit) refuses the whole
+    // restore, exactly like every other validated field above.
+    const rawKit = stats['kit']
+    let kit: CombatSkillId[]
+    if (rawKit === undefined) kit = []
+    else {
+      if (!Array.isArray(rawKit) || rawKit.length > COMBAT_SKILLS.length || new Set(rawKit).size !== rawKit.length
+        || rawKit.some(id => typeof id !== 'string' || !COMBAT_SKILLS.includes(id as CombatSkillId))) return
+      kit = [...rawKit] as CombatSkillId[]
+    }
+    const rawWeapon = stats['weapon']
+    if (rawWeapon !== undefined && rawWeapon !== null
+      && (typeof rawWeapon !== 'string' || (rawWeapon !== 'sickle' && rawWeapon !== 'sling') || !kit.includes(rawWeapon as CombatSkillId))) return
+    const weapon = (rawWeapon === undefined ? null : rawWeapon) as WeaponKind | null
+    const rawSpell = stats['spell']
+    if (rawSpell !== undefined && rawSpell !== null
+      && (typeof rawSpell !== 'string' || (rawSpell !== 'ward' && rawSpell !== 'ember' && rawSpell !== 'hold') || !kit.includes(rawSpell as CombatSkillId))) return
+    const spell = (rawSpell === undefined ? null : rawSpell) as SpellKind | null
     const stage = new LabyrinthJourney([...this.rooms.values()], this.labyrinths)
     stage.restoreProgress(progress)
     stage.#stats = {
       score: stats['score'], lives: stats['lives'], fairyCount: stats['fairyCount'], sealCount: stats['sealCount'],
       pageTime: stats['pageTime'], pageSpace: stats['pageSpace'], ammo: [...stats['ammo']] as boolean[], ammoCap: stats['ammoCap'],
+      kit, weapon, spell,
     }
     const roomIds = new Set(raw['roomIds'] as string[]), seen = new Set<string>()
     for (const entry of raw['rooms']) {
@@ -275,7 +334,7 @@ export class LabyrinthJourney {
     if (active && stage.engines.has(active.id) && stage.canEnterLabyrinth(active.labyrinthId)) {
       stage.room = active
       stage.engine = stage.engines.get(active.id)!
-      Object.assign(stage.engine, stage.#stats, { ammo: [...stage.#stats.ammo] })
+      Object.assign(stage.engine, stage.#stats, { ammo: [...stage.#stats.ammo], kit: [...stage.#stats.kit] })
       stage.#lastRoom.set(active.labyrinthId, active.id)
       stage.#arrivalDoor = active.doors.some(door => door.id === raw['arrivalDoorId']) ? raw['arrivalDoorId'] as string : null
     }
@@ -360,7 +419,11 @@ export class LabyrinthJourney {
   #bank(): void {
     const engine = this.engine
     if (!engine) return
-    this.#stats = { score: engine.score, lives: engine.lives, fairyCount: engine.fairyCount, sealCount: engine.sealCount, pageTime: engine.pageTime, pageSpace: engine.pageSpace, ammo: [...engine.ammo], ammoCap: engine.ammoCap }
+    this.#stats = {
+      score: engine.score, lives: engine.lives, fairyCount: engine.fairyCount, sealCount: engine.sealCount,
+      pageTime: engine.pageTime, pageSpace: engine.pageSpace, ammo: [...engine.ammo], ammoCap: engine.ammoCap,
+      kit: [...engine.kit], weapon: engine.weapon, spell: engine.spell,
+    }
   }
 
   #releaseInput(engine: Engine): void {
@@ -379,7 +442,14 @@ export class LabyrinthJourney {
       engine = new Engine({ ...copyLevel(room.level), interconnected: true })
       this.engines.set(roomId, engine)
     }
-    Object.assign(engine, this.#stats, { ammo: [...this.#stats.ammo] })
+    Object.assign(engine, this.#stats, { ammo: [...this.#stats.ammo], kit: [...this.#stats.kit] })
+    // Re-derive this room's barriers against the (persistent) kit that just
+    // landed on it — without this, a freshly-constructed room's barriers seal
+    // against the engine's still-empty class-field `kit` (the constructor's
+    // load()→spawn()→applyBarriers() runs BEFORE the Object.assign above ever
+    // reaches it), so a barrier whose attainment Dana already holds would stay
+    // wrongly sealed on both a first visit and a revisit (M6 — a real bug).
+    engine.applyBarriers()
     this.room = room
     this.engine = engine
     this.visited.add(roomId)
@@ -418,9 +488,30 @@ export class LabyrinthJourney {
     if (!this.room || !this.engine || this.engine.state !== 'playing') return null
     const player = this.engine.player
     const x = (player.x + player.w / 2) / TILE, y = (player.y + player.h / 2) / TILE
-    return [...this.room.doors].sort((a, b) => Math.hypot(a.col + 0.5 - x, a.row + 0.5 - y) - Math.hypot(b.col + 0.5 - x, b.row + 0.5 - y))
+    // A sealed barrier can sit on a door's own cell (M6) — a door is never a
+    // real destination while its cell is solid, exactly like standing inside
+    // wand-cast stone would be.
+    return this.room.doors
+      .filter(door => !this.engine!.solidAt(door.col, door.row))
+      .sort((a, b) => Math.hypot(a.col + 0.5 - x, a.row + 0.5 - y) - Math.hypot(b.col + 0.5 - x, b.row + 0.5 - y))
       .find(door => Math.abs(door.col + 0.5 - x) <= 1.25 && Math.abs(door.row + 0.5 - y) <= 0.8) ?? null
   }
+
+  /** Equip an already-learned skill (§4.9's UseContext/useVerb read `weapon`/
+   *  `spell` back off the getters below); banks immediately so the choice
+   *  survives a death/leave without waiting for the next natural #bank(). */
+  equip(id: CombatSkillId): boolean {
+    const ok = this.engine?.equip(id) ?? false
+    if (ok) this.#bank()
+    return ok
+  }
+
+  /** Read-only surface for the shell (§4.9/M22): the live room's engine when
+   *  one is active, else the banked journey-wide value — never a second
+   *  source of truth, since #bank()/#enter() keep the two in lockstep. */
+  get kit(): readonly CombatSkillId[] { return this.engine?.kit ?? this.#stats.kit }
+  get weapon(): WeaponKind | null { return this.engine?.weapon ?? this.#stats.weapon }
+  get spell(): SpellKind | null { return this.engine?.spell ?? this.#stats.spell }
 
   useDoor(id?: string): DoorResult {
     if (!this.room || !this.engine || this.engine.state !== 'playing') return { kind: 'inactive', message: 'Enter a labyrinth to use its doors.' }

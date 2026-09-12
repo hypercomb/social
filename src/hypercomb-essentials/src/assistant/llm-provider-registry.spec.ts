@@ -103,7 +103,7 @@ describe('the built-in roster', () => {
     const registry = mod.llmProviderRegistry()
     const ids = registry.all().map(p => p.id).sort()
     expect(ids).toEqual(
-      ['anthropic', 'deepseek', 'google', 'local', 'mistral', 'openai', 'xai'],
+      ['anthropic', 'deepseek', 'google', 'local', 'mistral', 'openai', 'openrouter', 'xai'],
     )
     for (const provider of registry.all()) {
       expect(KNOWN_VENDORS, provider.id).toContain(provider.vendor)

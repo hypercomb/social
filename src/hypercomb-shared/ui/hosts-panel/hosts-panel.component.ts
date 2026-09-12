@@ -35,7 +35,7 @@
 
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, signal, type OnDestroy } from '@angular/core'
-import { EffectBus } from '@hypercomb/core'
+import { ATTESTATION_IOC_KEY, EffectBus, type AttestationVerdict, type PackageAttestation } from '@hypercomb/core'
 // The SAME reader the shim uses on a cold boot. It lives in runtime precisely
 // so there is one answer to "what does this domain publish" — essentials
 // cannot reach runtime (it imports core and nothing else), which is why this
@@ -259,7 +259,8 @@ export class HostsPanelComponent implements OnDestroy {
       const zones = Array.isArray(p?.zones) ? p.zones : []
       this.zones.set(zones)
       this.loaded.set(!!p?.loaded)
-      if (this.selectedZone() && !zones.includes(this.selectedZone())) {
+      // Your own domain stays open whether or not you carry it.
+      if (this.selectedZone() && !zones.includes(this.selectedZone()) && !this.isHome(this.selectedZone())) {
         this.selectedZone.set('')
         this.expandedZone.set('')
         this.ledgerOpen.set(false)
@@ -337,11 +338,21 @@ export class HostsPanelComponent implements OnDestroy {
     return !!this.home && hostZone(zone) === this.home
   }
 
-  /** Your own domain first — it is the one you come back to. */
+  /** Your own domain first — it is the one you come back to — and listed
+   *  whether or not you carry it. The origin you are running on serves the
+   *  build it was deployed with, and taking that build needs no signature
+   *  (the self door), so leaving it off the list left a freshly deployed
+   *  domain with no way to update from itself. */
   orderedZones(): string[] {
     const zones = this.zones()
-    const home = zones.filter(z => this.isHome(z))
-    return home.length ? [...home, ...zones.filter(z => !this.isHome(z))] : zones
+    const home = zones.find(z => this.isHome(z)) ?? this.home
+    const others = zones.filter(z => !this.isHome(z))
+    return home ? [home, ...others] : others
+  }
+
+  /** Only a host you carry is an artifact you can drop. */
+  isCarried(zone: string): boolean {
+    return this.zones().includes(zone)
   }
 
   /** The sentence that opens a domain's builds: your own domain is where you
@@ -483,12 +494,58 @@ export class HostsPanelComponent implements OnDestroy {
     return groups
   }
 
-  /** Update is on offer when the host's newest is not what you are running.
-   *  A shell with no stamp at all is offered the newest too — taking it is
+  // ── signed before offered ────────────────────────────────────────────────
+  //
+  // A DOMAIN'S NEWEST IS NOT ALWAYS SIGNED. A build reaches a host the moment
+  // it is copied there and is signed only when its stamp lands, so a host can
+  // head with a build no publisher you follow has named. The gate refuses it
+  // on the press (activation-authority.ts), and while it was the one button's
+  // target the window's only act was a refusal Retry could never turn around.
+  // So the publisher is asked when you look, and the button takes the newest
+  // build it HAS signed.
+
+  /** packageSig → what the followed publisher said about it, or 'asking'. */
+  readonly signed = signal<Record<string, 'asking' | AttestationVerdict>>({})
+
+  /** Ask once whether another domain's newest is signed. Your own domain's
+   *  build needs no signature, and with no attester loaded there is nobody to
+   *  ask — the press still goes through the gate, which says why. */
+  async #checkSigned(zone: string): Promise<void> {
+    const newest = this.newestOf(zone)
+    if (this.isHome(zone) || !newest || this.isCurrent(newest) || newest.packageSig in this.signed()) return
+    const attester = window.ioc?.get?.<PackageAttestation>(ATTESTATION_IOC_KEY)
+    if (typeof attester?.attest !== 'function') return
+    const sig = newest.packageSig
+    this.signed.set({ ...this.signed(), [sig]: 'asking' })
+    const verdict = await attester.attest(sig, [zone])
+      .catch((): AttestationVerdict => ({ ok: false, reason: 'unreachable' }))
+    this.signed.set({ ...this.signed(), [sig]: verdict })
+  }
+
+  /** The refusal for this domain's newest, once one came back. An unreachable
+   *  index says nothing about the build — Retry can still succeed — so it is
+   *  not a refusal here. */
+  unsignedOf(zone: string): Extract<AttestationVerdict, { ok: false }> | null {
+    const newest = this.newestOf(zone)
+    const verdict = newest ? this.signed()[newest.packageSig] : undefined
+    return verdict && verdict !== 'asking' && !verdict.ok && verdict.reason !== 'unreachable' ? verdict : null
+  }
+
+  /** The build the one button takes: the newest here, unless the publisher
+   *  you follow refused it — then the build that publisher does name, when
+   *  this domain lists it, or nothing. */
+  targetOf(zone: string): HostPackage | null {
+    const refused = this.unsignedOf(zone)
+    if (!refused) return this.newestOf(zone)
+    return this.offeredOf(zone).find(p => p.packageSig === refused.named) ?? null
+  }
+
+  /** Update is on offer when the build the button takes is not what you are
+   *  running. A shell with no stamp at all is offered it too — taking it is
    *  how a stamp comes to exist. */
   updateAvailable(zone: string): boolean {
-    const newest = this.newestOf(zone)
-    return !!newest && !this.isCurrent(newest)
+    const target = this.targetOf(zone)
+    return !!target && !this.isCurrent(target)
   }
 
   /** A GENERATION AND A SIGNATURE ARE NOT THE SAME KIND OF THING.
@@ -537,28 +594,37 @@ export class HostsPanelComponent implements OnDestroy {
   /** What the one button says. Intake state first — it is the same
    *  acquisition whichever build it is taking — then current or update. */
   updateKey(zone: string): string {
-    const newest = this.newestOf(zone)
-    if (!newest) return 'hosts.offer.update'
-    const phase = this.intakeOf(newest)?.phase
+    const target = this.targetOf(zone)
+    if (!target) return this.newestOf(zone) ? 'hosts.offer.not-signed' : 'hosts.offer.update'
+    const phase = this.intakeOf(target)?.phase
     if (phase === 'applying') return 'hosts.offer.applying'
     if (phase === 'applied') return 'hosts.offer.applied'
     if (phase === 'failed') return 'hosts.offer.retry'
     if (!this.updateAvailable(zone)) return 'hosts.offer.current'
+    // A signed build that is not the newest shown above it is named, so the
+    // button never reads as taking the build the line above calls newest.
+    if (!this.isHome(zone) && target.packageSig !== this.newestOf(zone)?.packageSig) return 'hosts.offer.switch-signed'
     // SAY WHAT IT DOES. Newer from your own domain is an update; anything
     // from another domain is a switch to their version of the app.
     return this.isHome(zone) ? 'hosts.offer.update' : 'hosts.offer.switch'
   }
 
+  updateParams(zone: string): Record<string, string> {
+    return { sig: (this.targetOf(zone)?.packageSig ?? '').slice(0, 8) }
+  }
+
   updateDisabled(zone: string): boolean {
+    const target = this.targetOf(zone)
+    if (!target || !this.updateAvailable(zone)) return true
+    // Still asking whether the newest is signed: a press now could only be refused.
     const newest = this.newestOf(zone)
-    if (!newest) return true
-    if (!this.updateAvailable(zone)) return true
-    return this.intakeDisabled(newest)
+    if (newest && this.signed()[newest.packageSig] === 'asking') return true
+    return this.intakeDisabled(target)
   }
 
   update(zone: string): void {
-    const newest = this.newestOf(zone)
-    if (newest) this.apply(newest)
+    const target = this.targetOf(zone)
+    if (target) this.apply(target)
   }
 
   // ── the ledger fold: every build, for pinning and rollback ───────────────
@@ -734,6 +800,7 @@ export class HostsPanelComponent implements OnDestroy {
     // so the creations are on screen long before the builds are.
     EffectBus.emit('hosts:creations', { zone })
     await this.#ask(zone)
+    await this.#checkSigned(zone)
   }
 
   /** Fetch one domain's manifest, once. A second asker — Switch back looking
@@ -904,7 +971,7 @@ export class HostsPanelComponent implements OnDestroy {
     if (!record || this.returnBusy()) return
     this.returnFinding.set(true)
     this.returnMissing.set('')
-    const places = [...new Set([record.fromZone, ...this.zones().filter(z => this.isHome(z))].filter(Boolean))]
+    const places = [...new Set([record.fromZone, this.home].filter(Boolean))]
     try {
       for (const zone of places) {
         await this.#ask(zone)
@@ -958,7 +1025,7 @@ export class HostsPanelComponent implements OnDestroy {
     const listing = Object.entries(this.offers())
       .filter(([, offer]) => offer?.packages.some(p => p.packageSig === sig))
       .map(([zone]) => zone)
-    return listing.find(z => this.isHome(z)) ?? listing[0] ?? this.zones().find(z => this.isHome(z)) ?? ''
+    return listing.find(z => this.isHome(z)) ?? listing[0] ?? this.home
   }
 
   /**

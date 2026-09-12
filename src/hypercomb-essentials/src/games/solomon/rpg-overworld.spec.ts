@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { isWalkableTerrain } from './island.js'
 import {
-  ISLAND_DEF, RpgOverworld, RpgOverworldView, WORLD_CACHES, WORLD_ENCOUNTERS, WORLD_PEOPLE, WORLD_PLOTS, WORLD_RESIDENTS, WORLD_SHRINES, WORLD_SIGNS,
-  WORLD_COLS, WORLD_ROWS, WORLD_START, componentKey, valleyPoint, worldTerrain,
+  ISLAND_DEF, RpgOverworld, RpgOverworldView, WORLD_AREAS, WORLD_CACHES, WORLD_DOORS, WORLD_DUNGEONS, WORLD_ENCOUNTERS, WORLD_PEOPLE, WORLD_PLOTS,
+  WORLD_PUSH_DELAY, WORLD_RESIDENTS, WORLD_SHRINES, WORLD_SIGNS, WORLD_COLS, WORLD_ROWS, WORLD_START,
+  componentKey, shrinePolygon, valleyPoint, worldTerrain,
   type ShrineComponent, type WorldHooks, type WorldRelic,
 } from './rpg-overworld.js'
 
@@ -18,9 +19,12 @@ function at(id: string): { x: number; y: number } {
 function journey(initial: ShrineComponent[] = []) {
   const inventory = new Set(initial.map(componentKey))
   const grantRelic = vi.fn((relic: WorldRelic) => { inventory.add(componentKey(relic)); return true })
-  const onEnter = vi.fn(), onDungeon = vi.fn()
-  const hooks: WorldHooks = { has: piece => inventory.has(componentKey(piece)), grantRelic, onEnter, onDungeon }
-  return { model: new RpgOverworld(hooks), hooks, inventory, grantRelic, onEnter, onDungeon }
+  const seat = vi.fn(() => true)
+  const onEntrance = vi.fn()
+  const gain = vi.fn()
+  const found = vi.fn()
+  const hooks: WorldHooks = { has: piece => inventory.has(componentKey(piece)), grantRelic, seat, onEntrance, gain, found }
+  return { model: new RpgOverworld(hooks), hooks, inventory, grantRelic, seat, onEntrance, gain, found }
 }
 
 describe('the RPG world and permanent shrine abilities', () => {
@@ -32,8 +36,10 @@ describe('the RPG world and permanent shrine abilities', () => {
     expect(run.model.answer('mira', 1).ok).toBe(true)
     expect(run.inventory.has('triangle:0')).toBe(true)
     expect(run.model.journal.has('triangle:0')).toBe(true)
+    expect(run.gain).toHaveBeenCalledWith(expect.objectContaining({ id: 'triangle:0', fresh: true }))
     expect(run.model.answer('mira', 1).ok).toBe(true)
     expect(run.grantRelic).toHaveBeenCalledTimes(1)
+    expect(run.gain).toHaveBeenCalledTimes(1)
   })
 
   it('requires walking to conversations and entrances, including direct calls from map buttons', () => {
@@ -43,10 +49,9 @@ describe('the RPG world and permanent shrine abilities', () => {
     expect(run.model.answer('sela', 1).ok).toBe(false)
     expect(run.model.fillSocket('pyramid-shrine', 0).ok).toBe(false)
     expect(run.model.enter('pyramid-shrine').ok).toBe(false)
-    expect(run.model.enterDungeon('highland-cavern').ok).toBe(false)
+    expect(run.model.enter('highland-cavern').ok).toBe(false)
     expect(run.model.player).toEqual(before)
-    expect(run.onEnter).not.toHaveBeenCalled()
-    expect(run.onDungeon).not.toHaveBeenCalled()
+    expect(run.onEntrance).not.toHaveBeenCalled()
   })
 
   it('requires actual placement before entering and preserves the piece for later use', () => {
@@ -57,7 +62,7 @@ describe('the RPG world and permanent shrine abilities', () => {
     expect(run.model.fillSocket('dawn-shrine', 0).ok).toBe(true)
     expect(run.model.shrineStatus('dawn-shrine')).toBe('open')
     expect(run.model.enter('dawn-shrine').ok).toBe(true)
-    expect(run.onEnter).toHaveBeenCalledWith('sunseed')
+    expect(run.onEntrance).toHaveBeenCalledWith('dawn-shrine')
     expect(run.inventory.has('triangle:0')).toBe(true)
     expect(run.model.fillSocket('dawn-shrine', 0).ok).toBe(true)
     expect(run.model.filledSockets.size).toBe(1)
@@ -76,7 +81,7 @@ describe('the RPG world and permanent shrine abilities', () => {
     expect(run.model.shrineStatus('tide-shrine')).toBe('ready')
     run.model.fillSocket('tide-shrine', 1)
     expect(run.model.enter('tide-shrine').ok).toBe(true)
-    expect(run.onEnter).toHaveBeenCalledWith('tideglass')
+    expect(run.onEntrance).toHaveBeenCalledWith('tide-shrine')
     expect(run.inventory.size).toBe(4)
   })
 
@@ -89,7 +94,7 @@ describe('the RPG world and permanent shrine abilities', () => {
     expect(run.model.enter('pyramid-shrine').ok).toBe(false)
     expect(run.model.fillSocket('pyramid-shrine', 6).ok).toBe(true)
     expect(run.model.enter('pyramid-shrine').ok).toBe(true)
-    expect(run.onEnter).toHaveBeenCalledWith('starbloom')
+    expect(run.onEntrance).toHaveBeenCalledWith('pyramid-shrine')
     expect(run.inventory.size).toBe(pieces.length)
   })
 
@@ -101,21 +106,90 @@ describe('the RPG world and permanent shrine abilities', () => {
     }
     expect(run.grantRelic).not.toHaveBeenCalled()
     Object.assign(run.model.player, at('wayfarer-cavern'))
-    expect(run.model.enterDungeon('wayfarer-cavern').ok).toBe(true)
-    expect(run.onDungeon).toHaveBeenCalledWith(0)
+    expect(run.model.enter('wayfarer-cavern').ok).toBe(true)
+    expect(run.onEntrance).toHaveBeenCalledWith('wayfarer-cavern')
   })
 
-  it('lets the player walk over an entrance and wait there until they explicitly enter', () => {
+  it('never offers a cave mouth or an open shrine to E — only a not-yet-open shrine stays an E-target (M9/M14)', () => {
+    const run = journey([{ kind: 'triangle', point: 0 }])
+    Object.assign(run.model.player, at('wayfarer-cavern'))
+    expect(run.model.nearest()).toBeUndefined()
+    Object.assign(run.model.player, at('dawn-shrine'))
+    expect(run.model.nearest()?.id).toBe('dawn-shrine') // not yet open: still an E-target for its sockets
+    run.model.fillSocket('dawn-shrine', 0)
+    expect(run.model.shrineStatus('dawn-shrine')).toBe('open')
+    expect(run.model.nearest()).toBeUndefined() // open now: a portal, never E's target
+  })
+
+  it('pushes into a cave mouth after a sustained approach, then needs distance before it will fire again', () => {
     const run = journey()
-    Object.assign(run.model.player, valleyPoint(8, 12))
-    run.model.update(0.25, { right: true })
-    expect(run.model.nearest()?.id).toBe('wayfarer-cavern')
-    expect(run.onDungeon).not.toHaveBeenCalled()
-    expect(run.model.interact('wayfarer-cavern')).toMatchObject({ ok: true })
-    expect(run.onDungeon).toHaveBeenCalledTimes(1)
-    // Returning at the same coordinates never causes another entry.
-    for (let frame = 0; frame < 20; frame++) run.model.update(0.05, {})
-    expect(run.onDungeon).toHaveBeenCalledTimes(1)
+    const mouth = at('wayfarer-cavern')
+    Object.assign(run.model.player, { x: mouth.x - 1, y: mouth.y })
+    for (let frame = 0; frame < 40; frame++) run.model.update(0.05, { right: true })
+    expect(run.onEntrance).toHaveBeenCalledWith('wayfarer-cavern')
+    expect(run.onEntrance).toHaveBeenCalledTimes(1)
+    // Held against it, arrived on the same spot: it never fires a second time.
+    for (let frame = 0; frame < 20; frame++) run.model.update(0.05, { right: true })
+    expect(run.onEntrance).toHaveBeenCalledTimes(1)
+    // Stepping back and pushing again re-arms it (the disarm/rearm rule).
+    for (let frame = 0; frame < 20; frame++) run.model.update(0.05, { left: true })
+    for (let frame = 0; frame < 40; frame++) run.model.update(0.05, { right: true })
+    expect(run.onEntrance).toHaveBeenCalledTimes(2)
+  })
+
+  it('brushing past a portal, rather than into it, never fires it', () => {
+    const run = journey()
+    const mouth = at('wayfarer-cavern')
+    Object.assign(run.model.player, { x: mouth.x - 3, y: mouth.y - 1.4 })
+    for (let frame = 0; frame < 80; frame++) run.model.update(0.05, { right: true }) // crosses past its column, always clear of the collision radius
+    expect(run.onEntrance).not.toHaveBeenCalled()
+  })
+
+  it('shows an unseated portal or area as a tag, and pushing it reports the empty line instead of entering', () => {
+    const hooks: WorldHooks = { has: () => false, grantRelic: () => undefined, seat: () => false, onEntrance: vi.fn() }
+    const model = new RpgOverworld(hooks)
+    const door = WORLD_DOORS[0]!
+    Object.assign(model.player, { x: door.x, y: door.y })
+    expect(model.cue()).toMatchObject({ id: door.id, action: 'tag' })
+    Object.assign(model.player, { x: door.x - 1, y: door.y })
+    for (let frame = 0; frame < 40; frame++) model.update(0.05, { right: true })
+    expect(hooks.onEntrance).not.toHaveBeenCalled()
+    const grove = WORLD_AREAS[0]!
+    Object.assign(model.player, { x: grove.landings.north.x, y: grove.landings.north.y })
+    for (let frame = 0; frame < 40; frame++) model.update(0.05, { down: true })
+    expect(hooks.onEntrance).not.toHaveBeenCalled()
+  })
+
+  it('pushes into the Hollow Grove from any of its four landings', () => {
+    // Standing on a landing itself and pushing the opposite way from its own
+    // `facing` (the way you would face RETURNING from inside) walks straight
+    // into the footprint — every landing is on open ground (grass), unlike
+    // the unrelated tree band that happens to sit further out on some sides.
+    const into = { up: 'down', down: 'up', left: 'right', right: 'left' } as const
+    for (const side of ['north', 'south', 'west', 'east'] as const) {
+      const run = journey()
+      const landing = WORLD_AREAS[0]!.landings[side]
+      Object.assign(run.model.player, { x: landing.x, y: landing.y })
+      const key = into[landing.facing]
+      for (let frame = 0; frame < 40; frame++) run.model.update(0.05, { [key]: true })
+      expect(run.onEntrance, side).toHaveBeenCalledWith('valley-grove')
+    }
+  })
+
+  it('lands the traveller back at a portal, facing away and disarmed', () => {
+    const run = journey()
+    run.model.land('wayfarer-cavern')
+    expect(run.model.player).toMatchObject({ ...at('wayfarer-cavern'), facing: 'down' })
+    for (let frame = 0; frame < 5; frame++) run.model.update(0.05, {}) // standing still: never fires from merely landing there
+    expect(run.onEntrance).not.toHaveBeenCalled()
+  })
+
+  it('lands the traveller at the nearest edge of an area, facing the opposite way from its approach', () => {
+    const run = journey()
+    const grove = WORLD_AREAS[0]!
+    Object.assign(run.model.player, { x: grove.landings.south.x, y: grove.landings.south.y + 0.1 })
+    run.model.land('valley-grove')
+    expect(run.model.player.facing).toBe('up')
   })
 
   it('keeps every encounter on the island reachable on foot and with the wand from the starting clearing', () => {
@@ -134,6 +208,7 @@ describe('the RPG world and permanent shrine abilities', () => {
     expect(WORLD_RESIDENTS.length).toBeGreaterThan(0)
     expect(WORLD_PLOTS.length).toBeGreaterThan(0)
     expect(WORLD_CACHES.length).toBeGreaterThan(0)
+    expect(WORLD_DOORS.length).toBeGreaterThan(0)
     for (const encounter of WORLD_ENCOUNTERS) {
       expect(visited[Math.floor(encounter.y) * WORLD_COLS + Math.floor(encounter.x)], encounter.name).toBe(1)
     }
@@ -152,6 +227,53 @@ describe('the RPG world and permanent shrine abilities', () => {
     expect(model.player.x).toBeGreaterThan(0)
     expect(model.player.y).toBeLessThan(WORLD_ROWS)
     expect(model.player.x).toBeLessThan(WORLD_COLS)
+  })
+})
+
+describe('the moved entrances and new island fixtures (2) A2.2/A4.1', () => {
+  it('keeps the two unmoved entrances exactly where they were and moves the other three off the valley roads', () => {
+    expect(at('dawn-shrine')).toEqual(valleyPoint(8, 4))
+    expect(at('highland-cavern')).toEqual(valleyPoint(20, 4))
+    expect(at('tide-shrine')).toEqual(valleyPoint(18, 4))
+    expect(at('pyramid-shrine')).toEqual(valleyPoint(22, 10))
+    expect(at('wayfarer-cavern')).toEqual(valleyPoint(10, 11))
+  })
+
+  it('sits every moved entrance and its footprint on ground the wand or a walk can reach', () => {
+    for (const id of ['tide-shrine', 'pyramid-shrine', 'wayfarer-cavern']) {
+      const { x, y } = at(id)
+      expect(isWalkableTerrain(worldTerrain(Math.floor(x), Math.floor(y))) || WAND_OPENS.has(worldTerrain(Math.floor(x), Math.floor(y))), id).toBe(true)
+    }
+  })
+
+  it('pins the Hollow Grove footprint as ground already too dense to walk through (old trees) — the four landings are the only doors', () => {
+    const grove = WORLD_AREAS[0]!
+    expect(grove.cells).toHaveLength(9)
+    for (const [col, row] of grove.cells) expect(isWalkableTerrain(worldTerrain(col, row)), `${col},${row}`).toBe(false)
+    for (const landing of Object.values(grove.landings)) expect(isWalkableTerrain(worldTerrain(Math.floor(landing.x), Math.floor(landing.y)))).toBe(true)
+  })
+
+  it("gives Pell a third line naming the chandler's door, and adds no other new resident line", () => {
+    const pell = WORLD_RESIDENTS.find(resident => resident.id === 'pell')!
+    expect(pell.lines).toHaveLength(3)
+    expect(pell.lines[2]).toMatch(/door/i)
+  })
+
+  it('pins WORLD_PUSH_DELAY to the same value chamber.ts will use for its own portals', () => {
+    expect(WORLD_PUSH_DELAY).toBe(0.3)
+  })
+
+  it('exports shrinePolygon for the gains role to reuse', () => {
+    expect(shrinePolygon({ kind: 'hexagon' })).toHaveLength(6)
+    expect(shrinePolygon({ kind: 'triangle', point: 0 })).toHaveLength(3)
+  })
+
+  it("returns a coarse, terrain-coloured seed() picture around the traveller", () => {
+    const { model } = journey()
+    const seed = model.seed()
+    expect(seed.rgb).toHaveLength(seed.cols * seed.rows * 3)
+    Object.assign(model.player, valleyPoint(20, 20))
+    expect(model.seed().rgb).not.toEqual(seed.rgb)
   })
 })
 
@@ -195,10 +317,11 @@ describe('world conversations and shrine controls', () => {
     } finally { view.dispose(); host.remove() }
   })
 
-  it('closes completed shrine assembly and enters from the compact prompt', () => {
+  it('closes completed shrine assembly and enters by clicking the shrine, once it opens (M9)', () => {
     const run = journey([{ kind: 'triangle', point: 0 }])
     const host = document.createElement('div'); document.body.append(host)
     const view = new RpgOverworldView(run.hooks)
+    const marker = (): HTMLButtonElement => host.querySelector<HTMLButtonElement>('.sol-rpg-place-shrine[aria-label^="Dawn Shrine,"]')!
     try {
       view.mount(host); Object.assign(view.model.player, at('dawn-shrine')); view.interact('dawn-shrine')
       expect(host.querySelectorAll('.sol-rpg-shrine-pattern svg polygon')).toHaveLength(7)
@@ -207,40 +330,40 @@ describe('world conversations and shrine controls', () => {
       expect(host.querySelector<HTMLButtonElement>('.sol-rpg-socket')?.getAttribute('aria-label')).toContain('Dawn triangle: Place piece')
       expect(view.isDialogOpen).toBe(false)
       expect(view.isSpeaking).toBe(true)
-      expect(run.onEnter).not.toHaveBeenCalled()
+      expect(run.onEntrance).not.toHaveBeenCalled()
       host.querySelector<HTMLButtonElement>('.sol-rpg-socket')!.click()
       expect(view.isSpeaking).toBe(false)
       expect(host.querySelector('.sol-rpg-bubble.is-shown[data-for="dawn-shrine"]')?.textContent).toContain('walk in')
-      expect(run.onEnter).not.toHaveBeenCalled()
-      expect(host.querySelector<HTMLButtonElement>('.sol-rpg-world-prompt')?.textContent).toContain('click to enter')
-      host.querySelector<HTMLButtonElement>('.sol-rpg-world-prompt')!.click()
-      expect(run.onEnter).toHaveBeenCalledWith('sunseed')
+      expect(run.onEntrance).not.toHaveBeenCalled()
+      // Now open, it is a tag (a destination, no key hint) rather than an act.
+      expect(view.model.cue()).toMatchObject({ id: 'dawn-shrine', action: 'tag' })
+      marker().click()
+      expect(run.onEntrance).toHaveBeenCalledWith('dawn-shrine')
       expect(view.isDialogOpen).toBe(false)
       expect(run.inventory.has('triangle:0')).toBe(true)
     } finally { view.dispose(); host.remove() }
     expect(host.childElementCount).toBe(0)
   })
 
-  it('offers nearby dungeons in a small prompt and enters directly without a confirmation dialog', () => {
+  it('offers a nearby cave mouth as a tag cue and pushes into it directly without a confirmation dialog', () => {
     const run = journey()
     const host = document.createElement('div'); document.body.append(host)
     const view = new RpgOverworldView(run.hooks)
+    const mouth = at('wayfarer-cavern')
     try {
-      view.mount(host); Object.assign(view.model.player, valleyPoint(8, 12))
-      view.update(0.25, { right: true })
+      view.mount(host); Object.assign(view.model.player, { x: mouth.x - 1, y: mouth.y })
+      view.update(0.1, { right: true })
       expect(view.isDialogOpen).toBe(false)
-      expect(run.onDungeon).not.toHaveBeenCalled()
-      expect(host.querySelector<HTMLButtonElement>('.sol-rpg-world-prompt')?.textContent).toContain('Wayfarer Cavern')
-      host.querySelector<HTMLButtonElement>('.sol-rpg-world-prompt')!.click()
-      expect(run.onDungeon).toHaveBeenCalledWith(0)
+      expect(run.onEntrance).not.toHaveBeenCalled()
+      expect(host.querySelector('.sol-rpg-cue')?.textContent).toContain('Wayfarer Cavern')
+      expect(host.querySelector('.sol-rpg-cue')?.getAttribute('data-action')).toBe('tag')
+      for (let frame = 0; frame < 40; frame++) view.update(0.05, { right: true })
+      expect(run.onEntrance).toHaveBeenCalledWith('wayfarer-cavern')
       expect(view.isDialogOpen).toBe(false)
-      view.refresh(); view.update(0.1, {})
-      expect(run.onDungeon).toHaveBeenCalledTimes(1)
-      expect(host.querySelector<HTMLButtonElement>('.sol-rpg-world-prompt')?.textContent).toContain('click to enter')
     } finally { view.dispose(); host.remove() }
   })
 
-  it('opens incomplete shrines for assembly and directly enters completed shrines on interact', () => {
+  it('opens incomplete shrines for assembly and directly enters completed shrines on a marker click', () => {
     const run = journey([{ kind: 'triangle', point: 0 }])
     const host = document.createElement('div'); document.body.append(host)
     const view = new RpgOverworldView(run.hooks)
@@ -248,10 +371,10 @@ describe('world conversations and shrine controls', () => {
       view.mount(host); Object.assign(view.model.player, at('dawn-shrine'))
       view.interact('dawn-shrine')
       expect(view.isSpeaking).toBe(true)
-      expect(run.onEnter).not.toHaveBeenCalled()
+      expect(run.onEntrance).not.toHaveBeenCalled()
       expect(view.dismiss()).toBe(true); view.model.fillSocket('dawn-shrine', 0)
       view.interact('dawn-shrine')
-      expect(run.onEnter).toHaveBeenCalledWith('sunseed')
+      expect(run.onEntrance).toHaveBeenCalledWith('dawn-shrine')
       expect(view.isDialogOpen).toBe(false)
     } finally { view.dispose(); host.remove() }
   })
@@ -273,12 +396,11 @@ describe('world conversations and shrine controls', () => {
       expect(said()).toBe(tamsin.lines[1])
       const plot = WORLD_PLOTS[0]
       Object.assign(view.model.player, at(plot.id)); view.refresh()
-      expect(host.querySelector('.sol-rpg-world-prompt')?.textContent).toBe(`${plot.name} · Enter / E or click to look`)
+      expect(host.querySelector('.sol-rpg-cue')?.textContent).toBe(`${plot.name} · E to look`)
       view.interact(plot.id)
       expect(view.isDialogOpen).toBe(false)
       expect(host.querySelector(`.sol-rpg-bubble.is-shown[data-for="${plot.id}"]`)?.textContent).toContain('No shrine stands here yet')
-      expect(run.onEnter).not.toHaveBeenCalled()
-      expect(run.onDungeon).not.toHaveBeenCalled()
+      expect(run.onEntrance).not.toHaveBeenCalled()
       expect(view.model.met.size).toBe(0)
     } finally { view.dispose(); host.remove() }
   })

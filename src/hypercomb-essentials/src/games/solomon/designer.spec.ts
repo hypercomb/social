@@ -5,9 +5,10 @@
 // continued (Save files over it) or duplicated (a new creation).
 
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Designer } from './designer.js'
+import { Designer, STELE_CHEST_TOOLS } from './designer.js'
 import { SolomonOverlay } from './overlay.js'
-import { emptyLevel, forgetCreations, loadCreations, uniqueCreationName } from './levels.js'
+import { emptyLevel, forgetCreations, fromAscii, loadCreations, sanitizeLevel, uniqueCreationName } from './levels.js'
+import { COMBAT_SKILLS, EMPTY, WALL } from './engine.js'
 
 beforeEach(() => localStorage.clear())
 
@@ -114,5 +115,93 @@ describe('Solomon designer creations', () => {
   it('names new creations without colliding', () => {
     expect(uniqueCreationName('My Level', [])).toBe('My Level')
     expect(uniqueCreationName('My Level', ['My Level', 'My Level 2'])).toBe('My Level 3')
+  })
+})
+
+// The Hush's own tools (§5.3/(3) §4): six stele/chest tools, one keyed by the
+// exact CombatSkillId each grants, plus one 'barrier' tool whose `needs` is
+// picked separately (Designer.barrierNeeds) rather than by six more tools.
+describe("the Hush's steles, chests and a barrier", () => {
+  it('places each of the six stele/chest tools with the skill it grants, on an EMPTY tile', () => {
+    const d = new Designer()
+    for (const [index, skill] of COMBAT_SKILLS.entries()) {
+      const col = 2 + index
+      d.setTool(skill)
+      expect(d.paint(col, 2)).toBe(true)
+      const item = d.level.items.find(i => i.col === col && i.row === 2)!
+      expect(item.kind).toBe(STELE_CHEST_TOOLS[skill])
+      expect(item.gives).toBe(skill)
+      expect(d.level.tiles[2 * d.level.cols + col]).toBe(EMPTY)
+    }
+  })
+
+  it('places a sealed barrier that paints WALL, not EMPTY, requiring the picked skill', () => {
+    const d = new Designer()
+    d.setBarrierNeeds('ember')
+    d.setTool('barrier')
+    expect(d.paint(5, 5)).toBe(true)
+    const item = d.level.items.find(i => i.col === 5 && i.row === 5)!
+    expect(item.kind).toBe('barrier')
+    expect(item.needs).toBe('ember')
+    expect(d.level.tiles[5 * d.level.cols + 5]).toBe(WALL)
+
+    d.setBarrierNeeds('hold')
+    d.setTool('barrier')
+    d.paint(6, 6)
+    expect(d.level.items.find(i => i.col === 6 && i.row === 6)!.needs).toBe('hold')
+  })
+
+  it('erase strips a stele/chest/barrier and clears its tile back to EMPTY', () => {
+    const d = new Designer()
+    d.setTool('barrier')
+    d.paint(4, 4)
+    expect(d.level.tiles[4 * d.level.cols + 4]).toBe(WALL)
+    d.setTool('erase')
+    d.paint(4, 4)
+    expect(d.level.items.some(i => i.col === 4 && i.row === 4)).toBe(false)
+    expect(d.level.tiles[4 * d.level.cols + 4]).toBe(EMPTY)
+  })
+
+  it('round-trips a chest and a barrier through save + sanitizeLevel', () => {
+    const d = new Designer()
+    d.setTool('sickle')
+    d.paint(3, 3)
+    d.setBarrierNeeds('hold')
+    d.setTool('barrier')
+    d.paint(6, 6)
+    const clean = sanitizeLevel(JSON.parse(d.exportJson()))!
+    const chest = clean.items.find(i => i.col === 3 && i.row === 3)!
+    expect(chest.kind).toBe('chest')
+    expect(chest.gives).toBe('sickle')
+    expect(chest.needs).toBeUndefined()
+    const barrier = clean.items.find(i => i.col === 6 && i.row === 6)!
+    expect(barrier.kind).toBe('barrier')
+    expect(barrier.needs).toBe('hold')
+    expect(barrier.gives).toBeUndefined()
+  })
+
+  it('a stele/chest with no real `gives`, or a barrier with no real `needs`, refuses the whole level', () => {
+    const base = emptyLevel('bad')
+    expect(sanitizeLevel({ ...base, items: [{ col: 1, row: 1, kind: 'stele' }] })).toBeNull()
+    expect(sanitizeLevel({ ...base, items: [{ col: 1, row: 1, kind: 'chest', gives: 'not-a-skill' }] })).toBeNull()
+    expect(sanitizeLevel({ ...base, items: [{ col: 1, row: 1, kind: 'barrier' }] })).toBeNull()
+  })
+
+  it('the ASCII legend places the same six stele/chest glyphs the designer paints, and a barrier rides AsciiOpts.barriers as WALL', () => {
+    const level = fromAscii('hush-test', [
+      '#######',
+      '#AVEH.#',
+      '#SQ...#',
+      '#P...D#',
+      '#######',
+    ], { barriers: [{ col: 3, row: 2, needs: 'ember' }] })
+    expect(level.items.find(i => i.col === 1 && i.row === 1)).toMatchObject({ kind: 'stele', gives: 'stand' })
+    expect(level.items.find(i => i.col === 2 && i.row === 1)).toMatchObject({ kind: 'stele', gives: 'ward' })
+    expect(level.items.find(i => i.col === 3 && i.row === 1)).toMatchObject({ kind: 'stele', gives: 'ember' })
+    expect(level.items.find(i => i.col === 4 && i.row === 1)).toMatchObject({ kind: 'stele', gives: 'hold' })
+    expect(level.items.find(i => i.col === 1 && i.row === 2)).toMatchObject({ kind: 'chest', gives: 'sickle' })
+    expect(level.items.find(i => i.col === 2 && i.row === 2)).toMatchObject({ kind: 'chest', gives: 'sling' })
+    expect(level.items.find(i => i.col === 3 && i.row === 2)).toMatchObject({ kind: 'barrier', needs: 'ember' })
+    expect(level.tiles[2 * level.cols + 3]).toBe(WALL)
   })
 })

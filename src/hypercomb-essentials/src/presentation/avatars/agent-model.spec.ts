@@ -128,7 +128,8 @@ describe('modelPalette', () => {
   it('separates vendors — a Claude bee never looks like a GPT bee', () => {
     const families = KNOWN_VENDORS.map(v => hue(modelPalette(
       { anthropic: 'opus', openai: 'gpt-4o', google: 'gemini-pro', meta: 'llama-3',
-        mistral: 'mistral-large', xai: 'grok-2', deepseek: 'deepseek-r1', local: 'ollama:x' }[v] as string,
+        mistral: 'mistral-large', xai: 'grok-2', deepseek: 'deepseek-r1', local: 'ollama:x',
+        openrouter: 'openrouter/auto' }[v] as string,
     ).body))
     for (let i = 0; i < families.length; i++) {
       for (let j = i + 1; j < families.length; j++) {

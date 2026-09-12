@@ -659,6 +659,12 @@ export const llmRouter = {
   reason: (): '' | 'local-down' | 'local-blocked' | 'local-permission' => {
     try { return localTierReason() } catch { return '' }
   },
+  /** Who the mediator would pick for this need right now. The shell asks so
+   *  it can tell whether that pick has been granted hive access before it
+   *  attaches any tool (llm-hive-access.ts). */
+  designatedProviderId: (need: ModelNeed = {}): string | undefined => {
+    try { return chooseProvider(need)?.id } catch { return undefined }
+  },
   stream: (call: LlmCall): AsyncGenerator<LlmRoutedChunk> => streamRoutedModel(call),
 }
 publishService(LLM_ROUTER_IOC_KEY, llmRouter)

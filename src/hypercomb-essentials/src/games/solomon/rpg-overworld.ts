@@ -10,7 +10,7 @@ import {
   VALLEY_COLS, VALLEY_ROWS, buildIsland, isWalkableTerrain, islandRegionAt, islandTerrainAt, stampWidth,
   type Island, type IslandDef, type IslandStamp, type IslandTerrain,
 } from './island.js'
-import { BURST_LIFE, IslandPainter, canvasContext, type IslandCamera, type WandBurst } from './island-paint.js'
+import { BURST_LIFE, IslandPainter, canvasContext, terrainColor, type IslandCamera, type WandBurst } from './island-paint.js'
 import { VEIL_ZOOM, veilCanvasPicture, type VeilDirection, type VeilLeg, type VeilPicture } from './place-veil.js'
 import { drawPlace, type PlaceGlow, type PlaceSprite } from './island-places.js'
 import { PLAYER_LOOK, drawWalker, lookFor } from './island-sprites.js'
@@ -19,13 +19,44 @@ import { playChestReveal, type TreasureKind } from './island-treasure.js'
 export type ShrineComponent = { kind: 'triangle'; point: number } | { kind: 'hexagon' } | { kind: 'star' }
 export type WorldRelic = ShrineComponent & { id: string }
 export interface WorldInput { up?: boolean; down?: boolean; left?: boolean; right?: boolean }
+/** A reveal worth a moment's ceremony (M2's "one reveal mechanism for
+ *  everything attained") — a shrine piece, a fresh chest. There is no
+ *  GainScreen yet (that lands in Phase 2), so this is a forward-looking
+ *  notification only: the view keeps showing its own dialog regardless. */
+export interface WorldGainRequest {
+  readonly id: string
+  readonly title: string
+  readonly subtitle: string
+  readonly words: string
+  readonly items?: readonly { readonly kind: TreasureKind; readonly name: string }[]
+  readonly fresh: boolean
+}
 export interface WorldHooks {
   has(requirement: ShrineComponent): boolean
   grantRelic(relic: WorldRelic): unknown
-  onEnter(labyrinthId: string): void
-  onDungeon?(levelIndex: number): void
-  onJournal?(): void
+  /** Whether this island entrance currently leads anywhere. A stand-in for
+   *  the future `seatAt(STORY, 'island/<id>')` (Phase 3) — the shell answers
+   *  true for every entrance it already wires (the three shrines, the two
+   *  cave mouths) and false for one that has no place behind it yet (the
+   *  chandler door, the Hollow Grove) until Phase 2/3 build it. */
+  seat(id: string): boolean
+  /** A portal — a completed push, or a click on its marker (M9) — is seated;
+   *  the shell decides what opens. Replaces the old onEnter(labyrinthId) /
+   *  onDungeon(levelIndex) split: `id` is the world's OWN entrance id
+   *  ('dawn-shrine', 'wayfarer-cavern', 'chandler-door', 'valley-grove', …),
+   *  never a destination id. */
+  onEntrance(id: string): void
+  /** Renamed from onJournal (2) A6.4 — opens the Items surface. */
+  onItems?(): void
   onMessage?(message: string): void
+  /** See WorldGainRequest. */
+  gain?(request: WorldGainRequest): void
+  /** Records that this entrance has been reached, for the future found-ledger
+   *  (2) A9.1. Optional and unconsumed by anything yet — a notification only. */
+  found?(id: string): void
+  /** Reserved for the entrance-seed veil transition (Phase 3, (2) A2.6); not
+   *  called by anything in this file yet. */
+  seatSeed?(id: string): unknown
 }
 export interface WorldPlace { id: string; name: string; x: number; y: number }
 export interface WorldShrine extends WorldPlace {
@@ -54,7 +85,30 @@ export interface WorldCache extends WorldPlace {
 export interface WorldSign extends WorldPlace {
   kind: 'sign'; subtitle: string; text: string
 }
-export type WorldEncounter = WorldShrine | WorldPerson | WorldDungeon | WorldResident | WorldPlot | WorldCache | WorldSign
+/** A house door: a portal like a shrine or cave mouth, but one that may lead
+ *  nowhere yet (`hooks.seat` says so) — `empty` is what it says when pushed
+ *  before something is seated behind it. */
+export interface WorldDoor extends WorldPlace {
+  kind: 'door'; subtitle: string; empty: string
+}
+export type WorldEncounter = WorldShrine | WorldPerson | WorldDungeon | WorldResident | WorldPlot | WorldCache | WorldSign | WorldDoor
+export type WorldAreaFacing = 'up' | 'down' | 'left' | 'right'
+export interface WorldAreaLanding { readonly x: number; readonly y: number; readonly facing: WorldAreaFacing }
+/** A region ON the island that is itself a place (§0.1) — the Hollow Grove is
+ *  the first of these. Its footprint is blocked terrain (old trees you cannot
+ *  simply walk through); the only ways in are its four landings, pushed from
+ *  outside exactly like any other portal. */
+export interface WorldArea {
+  readonly kind: 'area'
+  readonly id: string
+  readonly name: string
+  readonly subtitle: string
+  readonly x: number
+  readonly y: number
+  readonly cells: readonly (readonly [col: number, row: number])[]
+  readonly landings: Readonly<Record<'north' | 'south' | 'east' | 'west', WorldAreaLanding>>
+  readonly empty: string
+}
 /** What a bubble beside a place holds: a line for a while, or a question with
  *  its choices until it is answered or walked away from. */
 interface WorldSpeech { key: string; until: number; text?: string; nodes?: () => Node[] }
@@ -163,7 +217,27 @@ const SPEED = 4.2
 const REACH_OF: Readonly<Partial<Record<WorldEncounter['kind'], number>>> = { cache: 0.95, sign: 2.2 }
 /** Walk this close to a signpost and it shows what it says. */
 const SIGN_READ = 1.9
-const FACING_STEP = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] } as const
+/** (2) A2.3 — a portal is pushed, not walked over: the same delay the
+ *  chamber model's own portals use (`PUSH_DELAY` in the future chamber.ts). */
+export const WORLD_PUSH_DELAY = 0.3
+/** Once a portal is pushed (or found unseated), the player must move this
+ *  far away before pressing into it arms again — mirrors chamber.ts's
+ *  future `REARM_DISTANCE`, so "arriving never bounces" (2) A11.1 #3. */
+const WORLD_REARM_DISTANCE = 0.75
+/** The radius of the physical obstruction a portal presents — small enough
+ *  that walking past one, rather than into it, never brushes it. */
+const PORTAL_RADIUS = 0.42
+/** seed()'s picture size — a comfortable stretch of ground, matching a
+ *  chamber's own typical footprint order of magnitude. */
+const WORLD_SEED_COLS = 24
+const WORLD_SEED_ROWS = 14
+const AWAY_FACING: Readonly<Record<WorldAreaFacing, WorldAreaFacing>> = { up: 'down', down: 'up', left: 'right', right: 'left' }
+/** Facing → unit step. Exported as the world's own small navigation contract
+ *  for the future IslandRuntime (Phase 3, (2) A2.6) to reuse, the way
+ *  chamber.ts exports `MoveInput`/`Facing` for the same purpose. */
+export const WorldNavigation: Readonly<Record<'up' | 'down' | 'left' | 'right', readonly [dx: number, dy: number]>> = {
+  up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0],
+}
 const WAND_CELLS: ReadonlySet<IslandTerrain> = new Set<IslandTerrain>(['crack', 'rune', 'spring'])
 const WAND_MADE: Readonly<Partial<Record<IslandTerrain, IslandTerrain>>> = { crack: 'rubble', rune: 'laid', spring: 'stone' }
 const WAND_WORDS: Readonly<Partial<Record<IslandTerrain, string>>> = {
@@ -188,8 +262,9 @@ export const RELIC_LORE: Readonly<Record<string, { title: string; text: string }
 
 export const WORLD_SHRINES: readonly WorldShrine[] = [
   { kind: 'shrine', id: 'dawn-shrine', name: 'Dawn Shrine', subtitle: 'Sunseed · the first labyrinth', ...valleyPoint(8, 4), labyrinthId: 'sunseed', components: [{ kind: 'triangle', point: 0 }] },
-  { kind: 'shrine', id: 'tide-shrine', name: 'Tide Observatory', subtitle: 'Tideglass · connected depths', ...valleyPoint(16, 4), labyrinthId: 'tideglass', components: [{ kind: 'triangle', point: 1 }, { kind: 'triangle', point: 2 }, { kind: 'hexagon' }] },
-  { kind: 'shrine', id: 'pyramid-shrine', name: 'Pyramid of Accord', subtitle: 'Complete the star to uncover its rooms', ...valleyPoint(20, 8), labyrinthId: 'starbloom', components: [...Array.from({ length: 6 }, (_, point) => ({ kind: 'triangle' as const, point })), { kind: 'hexagon' }] },
+  // (2) A2.2/D6 — moved off the valley's own walking lines; ids/names/components unchanged.
+  { kind: 'shrine', id: 'tide-shrine', name: 'Tide Observatory', subtitle: 'Tideglass · connected depths', ...valleyPoint(18, 4), labyrinthId: 'tideglass', components: [{ kind: 'triangle', point: 1 }, { kind: 'triangle', point: 2 }, { kind: 'hexagon' }] },
+  { kind: 'shrine', id: 'pyramid-shrine', name: 'Pyramid of Accord', subtitle: 'Complete the star to uncover its rooms', ...valleyPoint(22, 10), labyrinthId: 'starbloom', components: [...Array.from({ length: 6 }, (_, point) => ({ kind: 'triangle' as const, point })), { kind: 'hexagon' }] },
 ]
 
 export const WORLD_PEOPLE: readonly WorldPerson[] = [
@@ -218,8 +293,33 @@ export const WORLD_PEOPLE: readonly WorldPerson[] = [
 ]
 
 export const WORLD_DUNGEONS: readonly WorldDungeon[] = [
-  { kind: 'dungeon', id: 'wayfarer-cavern', name: 'Wayfarer Cavern', ...valleyPoint(9, 12), levelIndex: 0, subtitle: 'A scrolling dungeon', clue: 'An expedition through longer ruins. Read its inscriptions, interpret the rune sequence, and open the way onward. Return to the world with what you have learned.' },
+  // (2) A2.2/D6 — moved off the valley's own walking lines; id/name/levelIndex unchanged.
+  { kind: 'dungeon', id: 'wayfarer-cavern', name: 'Wayfarer Cavern', ...valleyPoint(10, 11), levelIndex: 0, subtitle: 'A scrolling dungeon', clue: 'An expedition through longer ruins. Read its inscriptions, interpret the rune sequence, and open the way onward. Return to the world with what you have learned.' },
   { kind: 'dungeon', id: 'highland-cavern', name: 'Highland Cavern', ...valleyPoint(20, 4), levelIndex: 2, subtitle: 'A deeper scrolling expedition', clue: 'An optional expedition through a larger cavern. Search for inscriptions and gather the information that explains its rune gate.' },
+]
+
+/** (2) A4.1 — a house door: an island portal like a shrine or cave mouth, but
+ *  one that may lead nowhere yet. Placed in front of the derived Saltmere
+ *  house at (81,136), roof index 2, violet. */
+export const WORLD_DOORS: readonly WorldDoor[] = [
+  { kind: 'door', id: 'chandler-door', name: "Wenna's Door", x: 82, y: 138.45, subtitle: "A chandler's house", empty: 'The door is shut. Nobody has opened it from within yet.' },
+]
+
+/** (2) A4.1 — the Hollow Grove, the first area place (§0.1): a dense clump of
+ *  old trees in the heart of the valley, entered by pushing through one of
+ *  its four edges. */
+export const WORLD_AREAS: readonly WorldArea[] = [
+  {
+    kind: 'area', id: 'valley-grove', name: 'A dense grove', subtitle: 'Old trees in the heart of the valley', x: 65.5, y: 113.5,
+    cells: [[64, 112], [65, 112], [66, 112], [64, 113], [65, 113], [66, 113], [64, 114], [65, 114], [66, 114]],
+    landings: {
+      north: { x: 65.5, y: 111.5, facing: 'up' },
+      south: { x: 65.5, y: 115.5, facing: 'down' },
+      west: { x: 63.5, y: 113.5, facing: 'left' },
+      east: { x: 67.5, y: 113.5, facing: 'right' },
+    },
+    empty: "The trees close ranks; there's no way through yet.",
+  },
 ]
 
 export const WORLD_RESIDENTS: readonly WorldResident[] = [
@@ -250,6 +350,7 @@ export const WORLD_RESIDENTS: readonly WorldResident[] = [
     lines: [
       'Have you been to the Brick Garden? Hollis lets me watch. The stones come up out of the water like fish.',
       'My grandmother says people from far away will come and build shrines here. I want to play every one.',
+      "There's a new door on the chandler's house. Wenna hasn't opened it to visitors yet, but I've seen candlelight through the shutters.",
     ],
   },
   {
@@ -321,7 +422,7 @@ export const WORLD_SIGNS: readonly WorldSign[] = [
 ]
 
 export const WORLD_ENCOUNTERS: readonly WorldEncounter[] = [
-  ...WORLD_SHRINES, ...WORLD_PEOPLE, ...WORLD_DUNGEONS, ...WORLD_RESIDENTS, ...WORLD_PLOTS, ...WORLD_CACHES, ...WORLD_SIGNS,
+  ...WORLD_SHRINES, ...WORLD_PEOPLE, ...WORLD_DUNGEONS, ...WORLD_RESIDENTS, ...WORLD_PLOTS, ...WORLD_CACHES, ...WORLD_SIGNS, ...WORLD_DOORS,
 ]
 
 export function componentKey(component: ShrineComponent): string {
@@ -348,6 +449,10 @@ export class RpgOverworld {
   /** Island cells the wand has changed. */
   readonly #changed = new Set<number>()
   readonly #stampCells = new Map<string, number[]>()
+  /** (2) A2.3's push-probe state, one portal (or area) id at a time. */
+  readonly #pressure = new Map<string, number>()
+  readonly #disarmed = new Set<string>()
+  readonly #disarmedAt = new Map<string, { x: number; y: number }>()
   constructor(hooks: WorldHooks) { this.hooks = hooks }
 
   get island(): Island { return theIsland() }
@@ -380,9 +485,49 @@ export class RpgOverworld {
     return [[0, -1], [0, 1], [-1, 0], [1, 0]].every(([dx, dy]) => !isWalkableTerrain(this.terrainAt(col + dx!, row + dy!)))
   }
 
+  /** (2) A2.8 — a coarse picture of the ground around the traveller, for the
+   *  veil and for entrance seeds: the same shape place.ts's future
+   *  `PlaceSeed` will carry, using the same `terrainColor` the minimap
+   *  already agrees with. Returned as plain data here since place.ts is not
+   *  built in this phase. */
+  seed(): { readonly cols: number; readonly rows: number; readonly rgb: Uint8ClampedArray } {
+    const cols = WORLD_SEED_COLS, rows = WORLD_SEED_ROWS
+    const rgb = new Uint8ClampedArray(cols * rows * 3)
+    const originCol = Math.floor(this.player.x) - Math.floor(cols / 2)
+    const originRow = Math.floor(this.player.y) - Math.floor(rows / 2)
+    for (let row = 0; row < rows; row++) for (let col = 0; col < cols; col++) {
+      const [r, g, b] = terrainColor(this.terrainAt(originCol + col, originRow + row))
+      const at = (row * cols + col) * 3
+      rgb[at] = r; rgb[at + 1] = g; rgb[at + 2] = b
+    }
+    return { cols, rows, rgb }
+  }
+
+  /** (2) A2.6 — where the traveller reappears, returning from below through
+   *  this entrance: a portal's own position, facing away from it; an area's
+   *  nearest landing, facing the opposite way from its own approach facing. */
+  land(entrance: string): void {
+    const place = WORLD_ENCOUNTERS.find(candidate => candidate.id === entrance)
+    if (place) { Object.assign(this.player, { x: place.x, y: place.y, facing: 'down' as const }); this.#disarmPortal(entrance); return }
+    const area = WORLD_AREAS.find(candidate => candidate.id === entrance)
+    if (!area) return
+    const landing = Object.values(area.landings).sort((a, b) =>
+      Math.hypot(this.player.x - a.x, this.player.y - a.y) - Math.hypot(this.player.x - b.x, this.player.y - b.y))[0]!
+    Object.assign(this.player, { x: landing.x, y: landing.y, facing: AWAY_FACING[landing.facing] })
+    this.#disarmPortal(area.id)
+  }
+
+  /** Landing on (or just entering) a portal must not re-fire it next frame —
+   *  mirrors ChamberModel's own arrive()/land() disarm. */
+  #disarmPortal(id: string): void {
+    this.#pressure.delete(id)
+    this.#disarmed.add(id)
+    this.#disarmedAt.set(id, { x: this.player.x, y: this.player.y })
+  }
+
   /** The cell the wand points at: the one in front of the cell you stand in. */
   wandTarget(): { col: number; row: number } {
-    const [dx, dy] = FACING_STEP[this.player.facing]
+    const [dx, dy] = WorldNavigation[this.player.facing]
     return { col: Math.floor(this.player.x) + dx, row: Math.floor(this.player.y) + dy }
   }
   canCast(): boolean {
@@ -425,6 +570,7 @@ export class RpgOverworld {
     Object.assign(this.player, { ...WORLD_START, facing: 'down' })
     this.met.clear(); this.solved.clear(); this.journal.clear(); this.filledSockets.clear()
     this.opened.clear(); this.#talks.clear(); this.#changed.clear()
+    this.#pressure.clear(); this.#disarmed.clear(); this.#disarmedAt.clear()
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return
     const saved = raw as Record<string, unknown>
     const version = saved['version']
@@ -478,7 +624,7 @@ export class RpgOverworld {
         x = inside ? moved.x : NaN
         y = inside ? moved.y : NaN
       }
-      if (typeof x === 'number' && typeof y === 'number' && this.walkable(x, y)) {
+      if (typeof x === 'number' && typeof y === 'number' && this.#groundWalkable(x, y)) {
         this.player.x = x; this.player.y = y
       }
       if (facing === 'up' || facing === 'down' || facing === 'left' || facing === 'right') this.player.facing = facing
@@ -486,6 +632,14 @@ export class RpgOverworld {
   }
 
   walkable(x: number, y: number): boolean {
+    return this.#groundWalkable(x, y) && !this.#portalBlocking(x, y)
+  }
+
+  /** Terrain alone, no portal — what a resumed position is checked against
+   *  (below): a portal opening around you must never itself evict a
+   *  position you already validly stood at, mirroring chamber.ts's own
+   *  "a saved position on a now-solid portal cell falls back" precedent. */
+  #groundWalkable(x: number, y: number): boolean {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return false
     for (const ox of [-0.2, 0.2]) for (const oy of [-0.2, 0.2]) {
       if (!isWalkableTerrain(this.terrainAt(Math.floor(x + ox), Math.floor(y + oy)))) return false
@@ -493,36 +647,97 @@ export class RpgOverworld {
     return true
   }
 
-  update(dt: number, input: WorldInput = {}): void {
-    if (!Number.isFinite(dt) || dt <= 0) return
+  /** Same four-corner sensitivity as the terrain check above, so a refused
+   *  step and "what refused it" always agree on the same portal. */
+  #portalBlocking(x: number, y: number): string | null {
+    for (const ox of [-0.2, 0.2]) for (const oy of [-0.2, 0.2]) {
+      const id = this.#blockedByPortal(x + ox, y + oy)
+      if (id) return id
+    }
+    return null
+  }
+
+  /** True kind of thing you push, not walk over (M9/M14): every dungeon
+   *  mouth and door, and a shrine only once it is open — a not-yet-open
+   *  shrine stays an E-target for filling its sockets. */
+  #isPortal(place: WorldEncounter): boolean {
+    if (place.kind === 'dungeon' || place.kind === 'door') return true
+    return place.kind === 'shrine' && this.shrineStatus(place.id) === 'open'
+  }
+
+  /** The portal (or area) whose physical obstruction covers this exact
+   *  point, if any — used both to refuse a step and to know what is being
+   *  pushed against. */
+  #blockedByPortal(x: number, y: number): string | null {
+    for (const place of WORLD_ENCOUNTERS) {
+      if (this.#isPortal(place) && Math.hypot(x - place.x, y - place.y) < PORTAL_RADIUS) return place.id
+    }
+    const col = Math.floor(x), row = Math.floor(y)
+    for (const area of WORLD_AREAS) if (area.cells.some(([c, r]) => c === col && r === row)) return area.id
+    return null
+  }
+
+  /** Returns the outcome the instant a push (or a settled approach to an
+   *  unseated one) completes this frame, else null — most frames, null. */
+  update(dt: number, input: WorldInput = {}): WorldResult | null {
+    if (!Number.isFinite(dt) || dt <= 0) return null
     let dx = Number(!!input.right) - Number(!!input.left)
     let dy = Number(!!input.down) - Number(!!input.up)
-    if (!dx && !dy) return
+    if (!dx && !dy) return this.#stepPush(dt, null)
     this.player.facing = dx < 0 ? 'left' : dx > 0 ? 'right' : dy < 0 ? 'up' : 'down'
     const scale = SPEED * Math.min(dt, 0.25) / Math.hypot(dx, dy)
     dx *= scale; dy *= scale
     // Small collision steps prevent a dropped frame from crossing a lake edge.
     const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / 0.15))
+    let pushed: string | null = null
     for (let i = 0; i < steps; i++) {
-      if (this.walkable(this.player.x + dx / steps, this.player.y)) this.player.x += dx / steps
-      if (this.walkable(this.player.x, this.player.y + dy / steps)) this.player.y += dy / steps
+      const nx = this.player.x + dx / steps
+      if (this.walkable(nx, this.player.y)) this.player.x = nx
+      else pushed = this.#portalBlocking(nx, this.player.y) ?? pushed
+      const ny = this.player.y + dy / steps
+      if (this.walkable(this.player.x, ny)) this.player.y = ny
+      else pushed = this.#portalBlocking(this.player.x, ny) ?? pushed
     }
+    return this.#stepPush(dt, pushed)
+  }
+
+  /** (2) A2.3's refused-substep push detector, ported to the island's
+   *  continuous ground: a sustained refusal against the same portal for
+   *  WORLD_PUSH_DELAY completes it; releasing or turning resets the count. */
+  #stepPush(dt: number, pushed: string | null): WorldResult | null {
+    if (pushed) { for (const id of this.#pressure.keys()) if (id !== pushed) this.#pressure.delete(id) }
+    else this.#pressure.clear()
+    for (const [id, at] of this.#disarmedAt) {
+      if (Math.hypot(this.player.x - at.x, this.player.y - at.y) >= WORLD_REARM_DISTANCE) { this.#disarmed.delete(id); this.#disarmedAt.delete(id) }
+    }
+    if (!pushed || this.#disarmed.has(pushed)) return null
+    const next = (this.#pressure.get(pushed) ?? 0) + dt
+    if (next < WORLD_PUSH_DELAY) { this.#pressure.set(pushed, next); return null }
+    this.#pressure.delete(pushed)
+    this.#disarmed.add(pushed)
+    this.#disarmedAt.set(pushed, { x: this.player.x, y: this.player.y })
+    const area = WORLD_AREAS.find(candidate => candidate.id === pushed)
+    return area ? this.enterArea(area.id) : this.enter(pushed)
   }
 
   near(encounter: WorldEncounter): boolean {
     return Math.hypot(this.player.x - encounter.x, this.player.y - encounter.y) <= (REACH_OF[encounter.kind] ?? REACH)
   }
-  /** The closest place E acts on. Signs are read by walking up to them, never by pressing E. */
+  /** The closest place E acts on. Signs are read by walking up to them,
+   *  never by pressing E; a portal (M9/M14) is never returned here — it is
+   *  pushed or clicked, never E'd. */
   nearest(): WorldEncounter | undefined {
-    return WORLD_ENCOUNTERS.filter(place => place.kind !== 'sign' && this.near(place)).sort((a, b) =>
+    return WORLD_ENCOUNTERS.filter(place => place.kind !== 'sign' && !this.#isPortal(place) && this.near(place)).sort((a, b) =>
       Math.hypot(this.player.x - a.x, this.player.y - a.y) - Math.hypot(this.player.x - b.x, this.player.y - b.y))[0]
   }
   interact(targetId?: string): WorldResult {
     const encounter = targetId ? WORLD_ENCOUNTERS.find(place => place.id === targetId) : this.nearest()
     if (!encounter) return this.result(false, 'Explore the world. Walk close to a person, shrine or cavern and press E to interact.')
+    // An explicit target (a click on a marker) treats a portal like a
+    // completed push (M9); E-with-no-target never reaches one, since
+    // nearest() already excludes every portal kind.
+    if (targetId !== undefined && this.#isPortal(encounter)) return this.enter(encounter.id)
     if (!this.near(encounter)) return this.result(false, `Walk closer to ${encounter.name} to interact.`)
-    if (encounter.kind === 'dungeon') return this.enterDungeon(encounter.id)
-    if (encounter.kind === 'shrine' && this.shrineStatus(encounter.id) === 'open') return this.enter(encounter.id)
     if (encounter.kind === 'person') {
       this.met.add(encounter.id)
       this.journal.add(`person:${encounter.id}`)
@@ -531,9 +746,33 @@ export class RpgOverworld {
       const fresh = !this.opened.has(encounter.id)
       this.opened.add(encounter.id)
       this.journal.add(`cache:${encounter.id}`)
+      if (fresh) this.hooks.gain?.({ id: `cache:${encounter.id}`, title: encounter.name, subtitle: encounter.subtitle, words: encounter.lore, items: encounter.items, fresh: true })
       return { ok: true, message: encounter.name, encounter, fresh }
     }
     return { ok: true, message: encounter.name, encounter }
+  }
+  /** The bubble beside whatever E would act on or push through right now
+   *  (M9): an act cue names its verb, a tag cue only names the destination. */
+  cue(): { readonly id: string; readonly x: number; readonly y: number; readonly words: string; readonly action: 'act' | 'tag' } | null {
+    const target = this.nearest()
+    if (target) return { id: target.id, x: target.x, y: target.y, words: `${target.name} · E to ${this.#actVerb(target)}`, action: 'act' }
+    const portal = WORLD_ENCOUNTERS.filter(place => this.#isPortal(place) && this.near(place))
+      .sort((a, b) => this.#distance(a) - this.#distance(b))[0] as WorldShrine | WorldDungeon | WorldDoor | undefined
+    if (portal) return { id: portal.id, x: portal.x, y: portal.y, words: `${portal.name} · ${portal.subtitle}`, action: 'tag' }
+    let nearestLanding: { area: WorldArea; landing: WorldAreaLanding } | null = null, best = Infinity
+    for (const area of WORLD_AREAS) for (const landing of Object.values(area.landings)) {
+      const d = Math.hypot(this.player.x - landing.x, this.player.y - landing.y)
+      if (d <= REACH && d < best) { best = d; nearestLanding = { area, landing } }
+    }
+    if (nearestLanding) return { id: nearestLanding.area.id, x: nearestLanding.landing.x, y: nearestLanding.landing.y, words: `${nearestLanding.area.name} · ${nearestLanding.area.subtitle}`, action: 'tag' }
+    return null
+  }
+  #distance(place: WorldPlace): number { return Math.hypot(this.player.x - place.x, this.player.y - place.y) }
+  #actVerb(target: WorldEncounter): string {
+    return target.kind === 'person' || target.kind === 'resident' ? 'talk'
+      : target.kind === 'plot' ? 'look'
+        : target.kind === 'cache' ? (this.opened.has(target.id) ? 'read again' : 'open')
+          : 'assemble'
   }
   answer(npcId: string, choiceIndex: number): WorldResult {
     const person = WORLD_PEOPLE.find(npc => npc.id === npcId)
@@ -542,8 +781,12 @@ export class RpgOverworld {
     if (choiceIndex !== person.correct) return this.result(false, person.retry)
     this.solved.add(person.id)
     if (person.reward) {
-      if (!this.hooks.has(person.reward)) this.hooks.grantRelic(person.reward)
-      this.journal.add(componentKey(person.reward))
+      const key = componentKey(person.reward)
+      if (!this.hooks.has(person.reward)) {
+        this.hooks.grantRelic(person.reward)
+        this.hooks.gain?.({ id: key, title: componentName(person.reward), subtitle: 'A PERMANENT ABILITY', words: RELIC_LORE[key]?.text ?? person.insight, fresh: true })
+      }
+      this.journal.add(key)
     }
     return this.result(true, person.insight)
   }
@@ -576,19 +819,28 @@ export class RpgOverworld {
       ? `${shrine.name} is complete. The labyrinth is open; your pieces and their knowledge stay with you.`
       : `${componentName(component)} placed. Its ability and knowledge stay with you.`)
   }
-  enter(shrineId: string): WorldResult {
-    const shrine = WORLD_SHRINES.find(place => place.id === shrineId)
-    if (!shrine || !this.near(shrine)) return this.result(false, 'Walk up to the shrine to enter.')
-    if (this.shrineStatus(shrineId) !== 'open') return this.result(false, 'Fill every component socket in this shrine before entering.')
-    this.hooks.onEnter(shrine.labyrinthId)
-    return { ok: true, message: `Entering ${shrine.name}.` }
+  /** Completes a push (or a click) on any portal — a shrine, a cave mouth,
+   *  or a house door — by its OWN entrance id, replacing the old shrine-only
+   *  enter()/dungeon-only enterDungeon() split (M9). */
+  enter(id: string): WorldResult {
+    const place = WORLD_ENCOUNTERS.find(candidate => candidate.id === id)
+    if (!place || !this.#isPortal(place)) return this.result(false, 'There is nothing to enter here.')
+    if (!this.near(place)) return this.result(false, `Walk closer to ${place.name} to enter.`)
+    if (!this.hooks.seat(place.id)) return this.result(false, place.kind === 'door' ? place.empty : `${place.name} leads nowhere yet.`)
+    this.hooks.found?.(place.id)
+    this.hooks.onEntrance(place.id)
+    return { ok: true, message: `Entering ${place.name}.`, encounter: place }
   }
-  enterDungeon(dungeonId: string): WorldResult {
-    const dungeon = WORLD_DUNGEONS.find(place => place.id === dungeonId)
-    if (!dungeon || !this.near(dungeon)) return this.result(false, 'Walk up to the cavern entrance first.')
-    if (!this.hooks.onDungeon) return this.result(false, 'This expedition is not available here yet.')
-    this.hooks.onDungeon(dungeon.levelIndex)
-    return { ok: true, message: `Entering ${dungeon.name}.` }
+  /** The area-place counterpart of enter() — a Hollow-Grove-shaped push. */
+  enterArea(id: string): WorldResult {
+    const area = WORLD_AREAS.find(candidate => candidate.id === id)
+    if (!area) return this.result(false, 'There is nothing to enter here.')
+    const near = Object.values(area.landings).some(landing => Math.hypot(this.player.x - landing.x, this.player.y - landing.y) <= REACH)
+    if (!near) return this.result(false, `Walk closer to ${area.name} to enter.`)
+    if (!this.hooks.seat(area.id)) return this.result(false, area.empty)
+    this.hooks.found?.(area.id)
+    this.hooks.onEntrance(area.id)
+    return { ok: true, message: `Entering ${area.name}.` }
   }
   private result(ok: boolean, message: string): WorldResult { this.hooks.onMessage?.(message); return { ok, message } }
 
@@ -654,11 +906,14 @@ function placeLook(place: WorldEncounter, model: RpgOverworld): readonly [PlaceS
   return ['sign', null]
 }
 const MINIMAP_DOT: Readonly<Record<WorldEncounter['kind'], string | null>> = {
-  shrine: '#ffd978', dungeon: '#e8c79a', plot: '#bfe3ff', cache: '#f2c96b', person: null, resident: null, sign: null,
+  shrine: '#ffd978', dungeon: '#e8c79a', plot: '#bfe3ff', cache: '#f2c96b', door: '#c9a0dc', person: null, resident: null, sign: null,
 }
+const AREA_MINIMAP_DOT = '#8fcf9a'
 
-/** Six equilateral points share the sides of the central hexagon. */
-function shrinePolygon(component: ShrineComponent): { x: number; y: number }[] {
+/** Six equilateral points share the sides of the central hexagon. Exported
+ *  for the gains role (2)'s ItemsTable/GainScreen, which draws the same
+ *  pattern for a held piece outside the shrine bubble. */
+export function shrinePolygon(component: ShrineComponent): { x: number; y: number }[] {
   const point = (angle: number, radius: number) => ({ x: 120 + Math.cos(angle * Math.PI / 180) * radius, y: 120 + Math.sin(angle * Math.PI / 180) * radius })
   if (component.kind === 'hexagon') return Array.from({ length: 6 }, (_, i) => point(-60 + i * 60, 100 / Math.sqrt(3)))
   const angle = -90 + (component.kind === 'triangle' ? component.point : 0) * 60
@@ -685,7 +940,14 @@ export class RpgOverworldView {
   #player: HTMLCanvasElement | null = null
   #sprite: CanvasRenderingContext2D | null = null
   #spriteKey = ''
-  #prompt: HTMLButtonElement | null = null
+  /** The one beside-the-target cue bubble (M9), replacing the old bottom
+   *  `.sol-rpg-world-prompt` line — it moves to whatever `model.cue()` names. */
+  #cue: HTMLDivElement | null = null
+  /** A fixed status echo for transient, non-targeted results — a wand cast,
+   *  "Entering X.", an unseated portal's empty line — kept separate from the
+   *  cue so a message never fights a nearby target's own bubble for space. */
+  #status: HTMLDivElement | null = null
+  #areaMarkers = new Map<string, HTMLDivElement>()
   #dialog: HTMLDivElement | null = null
   #lastFocus: HTMLElement | null = null
   #places = new Map<string, HTMLButtonElement>()
@@ -760,7 +1022,7 @@ export class RpgOverworldView {
     this.#regionTitle = element('h2', '', this.#region)
     heading.append(element('span', 'sol-rpg-eyebrow', 'THE ISLAND ABOVE'), this.#regionTitle, element('p', '', 'Meet its people. Learn the signs. Open the way below.'))
     const journal = button('Knowledge journal', () => {
-      if (this.model.hooks.onJournal) this.model.hooks.onJournal()
+      if (this.model.hooks.onItems) this.model.hooks.onItems()
       else this.openJournal()
     }, 'sol-rpg-journal')
     heading.append(journal); root.append(heading)
@@ -786,15 +1048,23 @@ export class RpgOverworldView {
       const artContext = canvasContext(art)
       if (artContext && walker) drawWalker(artContext, lookFor(place.id, place.color), 'down', 0)
       else if (artContext) this.#placeArt.set(place.id, artContext)
+      if (place.kind === 'door') art.hidden = true
       marker.style.zIndex = String(Math.round(place.y * 10))
       marker.append(art, element('span', 'sol-rpg-place-label', place.name))
       this.#places.set(place.id, marker); layer.append(marker)
-      if (place.kind !== 'dungeon' && place.kind !== 'cache') {
+      if (place.kind !== 'dungeon' && place.kind !== 'cache' && place.kind !== 'door') {
         const bubble = element('div', `sol-rpg-bubble sol-rpg-bubble-${place.kind}`)
         bubble.dataset['for'] = place.id
         speech.append(bubble)
         this.#bubbles.set(place.id, { place, bubble })
       }
+    }
+    for (const area of WORLD_AREAS) {
+      const marker = element('div', 'sol-rpg-area')
+      marker.dataset['for'] = area.id
+      marker.append(element('span', 'sol-rpg-area-label', area.name))
+      marker.setAttribute('aria-hidden', 'true')
+      this.#areaMarkers.set(area.id, marker); layer.append(marker)
     }
     this.#player = element('canvas', 'sol-rpg-player')
     this.#player.width = 64; this.#player.height = 96
@@ -812,12 +1082,15 @@ export class RpgOverworldView {
     minimap.width = land.cols; minimap.height = land.rows
     this.#minimap = canvasContext(minimap)
     this.#minimapBase = this.#minimap ? this.#painter.minimap() : null
+    this.#cue = element('div', 'sol-rpg-cue')
+    this.#cue.hidden = true
+    layer.append(this.#cue)
     map.append(canvas, layer, above, speech, this.#banner, minimap)
-    this.#prompt = button('', () => this.interact(), 'sol-rpg-world-prompt')
-    this.#prompt.setAttribute('aria-live', 'polite')
+    this.#status = element('div', 'sol-rpg-status')
+    this.#status.setAttribute('aria-live', 'polite')
     const controls = element('div', 'sol-rpg-world-controls')
     controls.append(element('span', '', 'WASD / arrows · Walk'), button('E · Interact', () => this.interact()), button('Z · Wand', () => this.cast()))
-    root.append(map, this.#prompt, controls)
+    root.append(map, this.#status, controls)
     host.append(root); this.#root = root
     this.#layout(); this.refresh(); this.#fit()
     if (typeof ResizeObserver !== 'undefined') {
@@ -829,9 +1102,10 @@ export class RpgOverworldView {
   update(dt: number, input: WorldInput = {}): void {
     if (this.isDialogOpen) return
     const beforeX = this.model.player.x, beforeY = this.model.player.y
-    this.model.update(dt, input)
+    const pushResult = this.model.update(dt, input)
     const moved = beforeX !== this.model.player.x || beforeY !== this.model.player.y
     if (moved) this.#notice = ''
+    if (pushResult) this.#notice = pushResult.message
     const step = Number.isFinite(dt) && dt > 0 ? Math.min(dt, 0.25) : 0
     this.#time += step
     for (const burst of this.#bursts) burst.age += step
@@ -915,19 +1189,19 @@ export class RpgOverworldView {
       // A bubble near the top of the view opens downward, so it stays on screen.
       bubble.classList.toggle('is-below', this.#camera.height > 0 && place.y * tile - this.#camera.y < this.#camera.height * 0.42)
     }
-    const nearest = this.model.nearest()
-    const accessible = nearest?.kind === 'dungeon' || (nearest?.kind === 'shrine' && this.model.shrineStatus(nearest.id) === 'open')
-    const verb = nearest?.kind === 'person' || nearest?.kind === 'resident' ? 'talk'
-      : nearest?.kind === 'plot' ? 'look'
-        : nearest?.kind === 'sign' ? 'read'
-          : nearest?.kind === 'cache' ? this.model.opened.has(nearest.id) ? 'read again' : 'open'
-            : 'assemble'
-    const message = this.#notice || (nearest
-      ? accessible ? `${nearest.name} · ${nearest.kind === 'dungeon' ? 'Read inscriptions and solve rune gates.' : 'The shrine is complete.'} Enter / E or click to enter`
-        : `${nearest.name} · Enter / E or click to ${verb}`
-      : 'Walk the valley. Mira, by the west path, has your first clue.')
-    if (this.#prompt && this.#prompt.textContent !== message) this.#prompt.textContent = message
-    if (this.#prompt) this.#prompt.disabled = !nearest
+    if (this.#status) this.#status.textContent = this.#notice || 'Walk the valley. Mira, by the west path, has your first clue.'
+    const cue = this.model.cue()
+    if (this.#cue) {
+      this.#cue.hidden = !cue
+      if (cue) {
+        if (this.#cue.textContent !== cue.words) this.#cue.textContent = cue.words
+        this.#cue.dataset['action'] = cue.action
+        this.#cue.style.left = `${cue.x * tile}px`
+        this.#cue.style.top = `${(cue.y + FOOT) * tile}px`
+        this.#cue.classList.toggle('is-below', this.#camera.height > 0 && cue.y * tile - this.#camera.y < this.#camera.height * 0.42)
+      }
+    }
+    for (const area of WORLD_AREAS) this.#areaMarkers.get(area.id)?.classList.toggle('is-near', cue?.id === area.id)
   }
   /** A question is waiting beside someone or something: a person's choices,
    *  or a shrine's sockets. Play goes on around it. */
@@ -943,16 +1217,19 @@ export class RpgOverworldView {
     if (this.isDialogOpen) return
     const result = this.model.interact(targetId)
     if (!result.encounter) { this.#notice = result.ok ? '' : result.message; this.refresh(); return }
-    this.#notice = ''
     const place = result.encounter
     // E opened this question, so E puts it away again.
-    if (!targetId && this.#speech.get(place.id)?.nodes) { this.#speech.delete(place.id); this.refresh(); return }
-    if (place.kind === 'person') this.openPerson(place)
-    else if (place.kind === 'shrine') this.openShrine(place)
-    else if (place.kind === 'resident') this.#speak(place, this.model.talk(place.id).message)
-    else if (place.kind === 'plot') this.#openPlot(place)
-    else if (place.kind === 'cache') this.#openCache(place, result.fresh === true)
-    else if (place.kind === 'sign') this.#speak(place, place.text)
+    if (!targetId && this.#speech.get(place.id)?.nodes) { this.#speech.delete(place.id); this.#notice = ''; this.refresh(); return }
+    if (place.kind === 'person') { this.#notice = ''; this.openPerson(place) }
+    else if (place.kind === 'shrine' && this.model.shrineStatus(place.id) !== 'open') { this.#notice = ''; this.openShrine(place) }
+    else if (place.kind === 'resident') { this.#notice = ''; this.#speak(place, this.model.talk(place.id).message) }
+    else if (place.kind === 'plot') { this.#notice = ''; this.#openPlot(place) }
+    else if (place.kind === 'cache') { this.#notice = ''; this.#openCache(place, result.fresh === true) }
+    else if (place.kind === 'sign') { this.#notice = ''; this.#speak(place, place.text) }
+    // A dungeon, a door, or an open shrine: a portal outcome (M9) — no
+    // dialog, just the "Entering X." / empty message, in #notice already.
+    else this.#notice = result.message
+    this.refresh()
   }
   closeDialog(): void {
     this.#stopReveal?.(); this.#stopReveal = null
@@ -963,7 +1240,8 @@ export class RpgOverworldView {
   dispose(): void {
     this.#resize?.disconnect(); this.#resize = null
     this.#dialog = null; this.#lastFocus = null
-    this.#root?.remove(); this.#root = null; this.#map = null; this.#layer = null; this.#player = null; this.#prompt = null
+    this.#root?.remove(); this.#root = null; this.#map = null; this.#layer = null; this.#player = null
+    this.#cue = null; this.#status = null; this.#areaMarkers.clear()
     this.#places.clear(); this.#placeArt.clear(); this.#placeLooks.clear(); this.#bursts.length = 0
     this.#bubbles.clear(); this.#speech.clear(); this.#speechLayer = null
     this.#ctx = null; this.#above = null; this.#sprite = null; this.#spriteKey = ''; this.#painter = null
@@ -1003,6 +1281,16 @@ export class RpgOverworldView {
     for (const { place, bubble } of this.#bubbles.values()) {
       bubble.style.left = `${place.x * tile}px`
       bubble.style.top = `${(place.y + FOOT) * tile}px`
+    }
+    for (const area of WORLD_AREAS) {
+      const marker = this.#areaMarkers.get(area.id)
+      if (!marker) continue
+      const cols = area.cells.map(([c]) => c), rows = area.cells.map(([, r]) => r)
+      const minCol = Math.min(...cols), minRow = Math.min(...rows)
+      marker.style.left = `${minCol * tile}px`
+      marker.style.top = `${minRow * tile}px`
+      marker.style.width = `${(Math.max(...cols) - minCol + 1) * tile}px`
+      marker.style.height = `${(Math.max(...rows) - minRow + 1) * tile}px`
     }
   }
 
@@ -1057,6 +1345,10 @@ export class RpgOverworldView {
       if (!color) continue
       ctx.fillStyle = color
       ctx.fillRect(place.x - 2, place.y - 2, 4, 4)
+    }
+    for (const area of WORLD_AREAS) {
+      ctx.fillStyle = AREA_MINIMAP_DOT
+      ctx.fillRect(area.x - 2, area.y - 2, 4, 4)
     }
     ctx.fillStyle = '#ffffff'
     ctx.strokeStyle = '#1b2a2f'
@@ -1256,14 +1548,19 @@ const WORLD_STYLE = `
 .sol-rpg-place-label{margin-top:1px;white-space:nowrap;background:rgba(14,22,26,.76);border:1px solid rgba(255,240,200,.24);border-radius:999px;padding:2px 9px;color:#fff4d6;font-size:11px;font-weight:600;letter-spacing:.02em;line-height:1.3;box-shadow:0 2px 6px rgba(0,0,0,.35);transition:opacity .25s}
 .sol-rpg-place-resident:not([data-near]) .sol-rpg-place-label,.sol-rpg-place-sign:not([data-near]) .sol-rpg-place-label,.sol-rpg-place-cache:not([data-near]) .sol-rpg-place-label{opacity:0}
 .sol-rpg-place-shrine[data-state=open] .sol-rpg-place-label{color:#c6ffe0}.sol-rpg-place-plot .sol-rpg-place-label{border-style:dashed;color:#d8e6ee}
+.sol-rpg-place-door{width:26px;height:34px;justify-content:flex-end}.sol-rpg-place-door::before{content:'';display:block;width:22px;height:30px;border-radius:5px 5px 2px 2px;background:linear-gradient(180deg,#6b4a2c,#4a3018);border:1px solid #2c1c0d;box-shadow:inset -4px 0 0 #00000022}.sol-rpg-place-door .sol-rpg-place-label{opacity:0}.sol-rpg-place-door[data-near] .sol-rpg-place-label{opacity:1}
+.sol-rpg-area{position:absolute;left:0;top:0;pointer-events:none;border:1px dashed #6f9a6f88;border-radius:10px;background:radial-gradient(ellipse at 50% 40%,#2d4a2d55,transparent 75%);transition:border-color .2s}.sol-rpg-area.is-near{border-color:#a9d9a9cc}.sol-rpg-area-label{position:absolute;left:50%;top:-1.6em;transform:translateX(-50%);white-space:nowrap;font-size:11px;color:#cfe8cf;background:rgba(14,22,26,.7);border-radius:999px;padding:2px 9px}
 .sol-rpg-player{position:absolute;pointer-events:none;width:32px;height:48px;transform:translate(-50%,-46px) scale(var(--sprite-scale));transform-origin:50% 46px}
 .sol-rpg-region{position:absolute;z-index:4;left:50%;top:12%;transform:translateX(-50%);pointer-events:none;opacity:0;padding:7px 28px;font-size:clamp(14px,2.2vw,22px);font-weight:600;letter-spacing:.24em;text-transform:uppercase;white-space:nowrap;color:#fff3cf;border-top:1px solid #f1d99a99;border-bottom:1px solid #f1d99a99;background:linear-gradient(90deg,transparent,#0c1a1fcc 18%,#0c1a1fcc 82%,transparent);text-shadow:0 2px 3px #0008}.sol-rpg-region.is-shown{animation:sol-rpg-region 2.8s ease both}@keyframes sol-rpg-region{0%{opacity:0;transform:translate(-50%,-6px)}14%{opacity:1;transform:translate(-50%,0)}78%{opacity:1}100%{opacity:0}}
 .sol-rpg-minimap{position:absolute;z-index:4;right:10px;bottom:10px;width:152px;height:114px;border:1px solid #e9d9a488;border-radius:6px;background:#1d5274;opacity:.93;pointer-events:none;box-shadow:0 6px 18px #0006}
 .sol-rpg-world-controls{display:flex;flex-shrink:0;justify-content:center;gap:14px;align-items:center;font-size:10px;color:#c5d1c5}.sol-rpg-world-controls button{border:1px solid #61736a;background:#294137;padding:5px 12px;border-radius:5px}
 .sol-rpg-dialog-backdrop{position:absolute;inset:0;z-index:10;background:#09171dcc;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)}.sol-rpg-dialog{position:relative;max-width:650px;width:100%;max-height:100%;overflow:auto;padding:26px;border-radius:16px;border:1px solid #a9a17e;background:linear-gradient(145deg,#263d39,#172b2e);box-shadow:0 20px 70px #0008;outline:none}.sol-rpg-dialog h2{font-size:24px;padding-right:28px}.sol-rpg-dialog h3{font-size:14px;color:#f2d799;margin:20px 0 8px}.sol-rpg-dialog p{font-size:13px;line-height:1.65;color:#d5e2d9}.sol-rpg-dialog .sol-rpg-close{position:absolute;right:13px;top:12px;width:30px;height:30px;border:1px solid #657b71;background:#314740;border-radius:50%;font-size:21px}.sol-rpg-clue{background:#b6cdac12;border-left:3px solid #b8ca96;border-radius:3px;padding:12px 15px}.sol-rpg-reply{color:#f9dea1!important}.sol-rpg-choices{display:grid;gap:8px}.sol-rpg-choices button,.sol-rpg-primary{padding:11px 14px;border:1px solid #a5b48e;border-radius:7px;background:#3b5745;text-align:left;font-size:13px!important}.sol-rpg-primary{display:block;margin-top:18px;background:#826f38;border-color:#d5b970;color:#fff4d8!important;font-weight:650!important}.sol-rpg-socket{display:flex;flex-direction:column;align-items:center;gap:5px;background:#15272b;border:1px dashed #7b8977;border-radius:9px;padding:10px 6px}.sol-rpg-socket strong{font-size:12px}.sol-rpg-socket small{font-size:10px;color:#b8c7bd}.sol-rpg-socket-glyph{font-size:30px;color:#9eab91}.sol-rpg-socket.is-owned{border:1px solid #d8b769;background:#564d30}.sol-rpg-socket.is-owned .sol-rpg-socket-glyph{color:#ffe19a}.sol-rpg-socket.is-filled{border:1px solid #86ba9b;background:#294c3a;opacity:1!important}.sol-rpg-socket.is-filled .sol-rpg-socket-glyph{color:#bbf7ce}
-@media(max-width:600px){.sol-rpg-world{padding:10px 8px 6px}.sol-rpg-world-heading{padding-right:0;margin-bottom:8px}.sol-rpg-world-heading p{max-width:62%;font-size:10px}.sol-rpg-journal{top:18px;padding:7px;font-size:10px!important}.sol-rpg-map{border-radius:10px}.sol-rpg-minimap{width:96px;height:72px;right:6px;bottom:6px}.sol-rpg-place-label{max-width:84px;white-space:normal;text-align:center}.sol-rpg-world-prompt{font-size:10px}.sol-rpg-dialog{padding:20px}.sol-rpg-dialog-backdrop{padding:10px}.sol-rpg-dialog p{font-size:12px}.sol-rpg-socket strong{font-size:10px}.sol-rpg-socket small{font-size:9px}}
+@media(max-width:600px){.sol-rpg-world{padding:10px 8px 6px}.sol-rpg-world-heading{padding-right:0;margin-bottom:8px}.sol-rpg-world-heading p{max-width:62%;font-size:10px}.sol-rpg-journal{top:18px;padding:7px;font-size:10px!important}.sol-rpg-map{border-radius:10px}.sol-rpg-minimap{width:96px;height:72px;right:6px;bottom:6px}.sol-rpg-place-label{max-width:84px;white-space:normal;text-align:center}.sol-rpg-status{font-size:10px}.sol-rpg-dialog{padding:20px}.sol-rpg-dialog-backdrop{padding:10px}.sol-rpg-dialog p{font-size:12px}.sol-rpg-socket strong{font-size:10px}.sol-rpg-socket small{font-size:9px}}
 .sol-rpg-shrine-pattern{position:relative;display:block;width:min(100%,280px);aspect-ratio:1;margin:12px auto 0;background:radial-gradient(circle,#8097731c,transparent 68%)}.sol-rpg-shrine-pattern svg{position:absolute;inset:0;width:100%;height:100%;fill:#172d30;stroke:#718571;stroke-width:2;stroke-linejoin:round}.sol-rpg-shrine-pattern .sol-rpg-socket{position:absolute;display:block;padding:0;border:0;border-radius:0;background:#5a6559;opacity:1}.sol-rpg-shrine-pattern .sol-rpg-socket.is-owned{background:#be9f50}.sol-rpg-shrine-pattern .sol-rpg-socket.is-filled{background:#68a787}.sol-rpg-shrine-pattern .sol-rpg-socket:not(:disabled):hover,.sol-rpg-shrine-pattern .sol-rpg-socket:focus-visible{background:#efd087;filter:brightness(1.25);outline:none}.sol-rpg-shrine-pattern .sol-rpg-socket-glyph{position:absolute;transform:translate(-50%,-50%);color:#fff9e5!important;font-size:18px;font-weight:750;text-shadow:0 1px 2px #0005}.sol-rpg-pattern-key{text-align:center;font-size:11px!important;color:#b6c6b7!important;margin:0 0 12px}.sol-rpg-shrine-information{margin:22px 0 0;border-top:1px solid #69816b55;padding-top:3px}.sol-rpg-shrine-information dt{font-size:12px;font-weight:650;color:#f2d799;margin-top:15px}.sol-rpg-shrine-information dd{font-size:12px;line-height:1.6;margin:4px 0 0;color:#c3d4c8}
-.sol-rpg-world .sol-rpg-world-prompt{flex-shrink:0;max-width:100%;min-height:30px;border:0;background:transparent;padding:8px 6px 3px;line-height:1.5;font-size:12px;text-align:center;color:#f0dbb4}.sol-rpg-world .sol-rpg-world-prompt:disabled{opacity:1;cursor:default}.sol-rpg-world-prompt:not(:disabled):hover{color:#fff0ba;text-decoration:underline}
+.sol-rpg-world .sol-rpg-status{flex-shrink:0;max-width:100%;min-height:30px;padding:8px 6px 3px;line-height:1.5;font-size:12px;text-align:center;color:#f0dbb4}
+.sol-rpg-cue{position:absolute;left:0;top:0;transform:translate(-50%,calc(-100% - 40px * var(--sprite-scale)));width:max-content;max-width:220px;padding:5px 10px;border-radius:10px;background:rgba(14,22,26,.86);border:1px solid rgba(255,240,200,.3);color:#fff4d6;font-size:11.5px;font-weight:600;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,.35);pointer-events:none}
+.sol-rpg-cue[data-action=tag]{font-weight:500;color:#d9e6df;border-style:dashed}
+.sol-rpg-cue.is-below{transform:translate(-50%,calc(10px * var(--sprite-scale)))}
 .sol-rpg-speech{position:absolute;z-index:3;left:0;top:0;width:0;height:0;pointer-events:none;will-change:transform}.sol-rpg-bubble{position:absolute;width:max-content;max-width:230px;padding:7px 11px;border:2px solid #1c1230;border-radius:12px;background:rgba(255,249,234,.97);color:#2a2118;font-size:12px;line-height:1.4;font-weight:500;box-shadow:0 6px 16px rgba(0,0,0,.35);transform:translate(-50%,calc(-100% - 54px * var(--sprite-scale)));opacity:0;transition:opacity .25s}.sol-rpg-bubble.is-shown{opacity:1}.sol-rpg-bubble::after{content:'';position:absolute;left:50%;bottom:-7px;width:11px;height:11px;background:inherit;border-right:2px solid #1c1230;border-bottom:2px solid #1c1230;transform:translateX(-50%) rotate(45deg)}.sol-rpg-bubble-sign{background:rgba(240,224,186,.97);font-family:Georgia,serif;font-size:12.5px}
 .sol-rpg-bubble.is-below{transform:translate(-50%,calc(16px * var(--sprite-scale)))}.sol-rpg-bubble.is-below::after{bottom:auto;top:-7px;border:0;border-left:2px solid #1c1230;border-top:2px solid #1c1230}
 .sol-rpg-bubble.is-live{pointer-events:auto;max-width:290px;text-align:left}.sol-rpg-bubble p{margin:0 0 6px;font-size:12px;line-height:1.45}.sol-rpg-bubble p:last-child{margin-bottom:0}.sol-rpg-bubble .sol-rpg-clue{background:transparent;border-left:0;border-radius:0;padding:0}.sol-rpg-bubble h4{margin:6px 0 5px;font-size:12px;color:#3a2a10}.sol-rpg-bubble .sol-rpg-choices{display:grid;gap:5px;margin-bottom:2px}.sol-rpg-bubble .sol-rpg-choices button{padding:6px 9px;border:1px solid #8a7550;border-radius:7px;background:#fff6e0;color:#2a2118;text-align:left;font-size:11.5px;cursor:pointer}.sol-rpg-bubble .sol-rpg-choices button:hover,.sol-rpg-bubble .sol-rpg-choices button:focus-visible{background:#ffe9b8;outline:none}.sol-rpg-bubble .sol-rpg-reply{color:#7a4b0b!important;font-weight:600}.sol-rpg-bubble .sol-rpg-shrine-pattern{width:160px;margin:4px auto 2px}.sol-rpg-bubble .sol-rpg-shrine-pattern .sol-rpg-socket-glyph{font-size:14px}.sol-rpg-bubble .sol-rpg-pattern-key{font-size:10px!important;color:#5a4a30!important;margin:4px 0 0;text-align:left}

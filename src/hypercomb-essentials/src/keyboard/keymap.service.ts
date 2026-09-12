@@ -215,7 +215,11 @@ export class KeyMapService extends EventTarget {
 
   #matchesSingleKey(e: KeyboardEvent, k: KeyChord): boolean {
     if (k.code) {
-      if (e.code.toLowerCase() !== k.code) return false
+      // Defensive: synthetic events (IME, mobile soft-keyboards, autofill
+      // chips — see #isModifierOnly) can deliver an event with `code`
+      // undefined. Guard before .toLowerCase() so the keymap pipeline
+      // doesn't throw on every keystroke and abort the surrounding listeners.
+      if (typeof e.code !== 'string' || e.code.toLowerCase() !== k.code) return false
     } else {
       if (this.#normalize(e.key) !== k.key) return false
     }

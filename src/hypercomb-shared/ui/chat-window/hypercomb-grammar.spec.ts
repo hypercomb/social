@@ -70,6 +70,18 @@ describe('Hypercomb model grammar contract', () => {
     expect(hypercombActionProviderId(true, undefined, undefined, false)).toBeUndefined()
   })
 
+  it('lets a keyed provider read only when granted, and never because it was named', () => {
+    const granted = { granted: ['openrouter'] }
+    // named + granted → that provider; named + not granted → nobody, even with local ready
+    expect(hypercombActionProviderId(true, 'deepseek', 'openrouter', true, granted)).toBe('openrouter')
+    expect(hypercombActionProviderId(true, 'gpt-5', 'openai', true, granted)).toBeUndefined()
+    // unnamed: local first; without local, the designated provider only if granted
+    expect(hypercombActionProviderId(true, undefined, undefined, true, { ...granted, designated: 'openrouter' })).toBe('local')
+    expect(hypercombActionProviderId(true, undefined, undefined, false, { ...granted, designated: 'openrouter' })).toBe('openrouter')
+    expect(hypercombActionProviderId(true, undefined, undefined, false, { granted: [], designated: 'openrouter' })).toBeUndefined()
+    expect(hypercombActionProviderId(true, undefined, undefined, false, { ...granted, designated: 'deepseek' })).toBeUndefined()
+  })
+
   it('keys relative grammar to its page and selection, independent of selection order', () => {
     expect(hypercombContextKey(['projects'], ['b', 'a']))
       .toBe(hypercombContextKey(['projects'], ['a', 'b']))

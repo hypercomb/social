@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BRICK, EMPTY, Engine, TILE, WALL } from './engine.js'
+import { BRICK, EMPTY, Engine, TILE, WALL, type LevelDef } from './engine.js'
 import { LABYRINTHS, LabyrinthJourney, ROOM_COLS, ROOM_ROWS, ROOMS, type RoomDef, type RoomRelic } from './labyrinth.js'
 
 function start(): LabyrinthJourney {
@@ -282,6 +282,77 @@ describe('the interconnected Solomon labyrinth', () => {
       expect(engine.score).toBe(5000)
       engine.update(0)
       expect(engine.score).toBe(5000)
+    }
+  })
+})
+
+// The Hush's own combat state, exercised at the Engine level only — the
+// LabyrinthJourney banking (`JourneyStats.kit`/`.weapon`/`.spell`, `#bank()`,
+// the `applyBarriers()` call in `#enter()`, `nearDoor()`'s solidity guard) and
+// the §6.11 room content itself (buildRooms()/chamber()) are stage 2's own
+// integration work; the assertions below prove the ENGINE mechanics that
+// integration depends on, using Engine directly, exactly like the rest of
+// this file's ROOMS-grounded specs above.
+describe('combat state — engine-level (stage 1); LabyrinthJourney integration is stage 2', () => {
+  it('kit/weapon/spell survive a death + respawn, and are cleared only by a fresh load(), never by spawn()', () => {
+    const engine = new Engine(ROOMS[0]!.level)
+    engine.kit.push('stand', 'sickle')
+    engine.weapon = 'sickle'
+    engine.lives = 2
+    engine.life = 1   // one more tick of drain kills Dana and calls spawn()
+    engine.update(1)
+    expect(engine.lives).toBe(1)
+    expect(engine.kit).toEqual(['stand', 'sickle'])
+    expect(engine.weapon).toBe('sickle')
+    engine.load(ROOMS[0]!.level)
+    expect(engine.kit).toEqual([])
+    expect(engine.weapon).toBeNull()
+  })
+
+  it('#definitionKey is length-gated: byte-identical with no combat items, and only changes once one is added — an old save for existing content is never disturbed', () => {
+    const cols = 6, rows = 6
+    const bareTiles = new Array(cols * rows).fill(EMPTY)
+    const bare: LevelDef = { name: 'k', cols, rows, tiles: bareTiles, player: { col: 1, row: 1 }, door: { col: 4, row: 4 }, enemies: [], items: [], mirrors: [] }
+    const withCombat: LevelDef = { ...bare, items: [{ col: 2, row: 2, kind: 'stele', gives: 'ward' }] }
+    const keyBare = new Engine(bare).exportState().definitionKey
+    const keyBareAgain = new Engine({ ...bare, items: [] }).exportState().definitionKey
+    const keyCombat = new Engine(withCombat).exportState().definitionKey
+    expect(keyBareAgain).toBe(keyBare)
+    expect(keyCombat).not.toBe(keyBare)
+  })
+
+  it('a barrier sealing a real door’s own cell is exactly the case nearDoor()’s new solidity guard exists for (M6)', () => {
+    const door = ROOMS[0]!.doors[0]!
+    const level: LevelDef = { ...ROOMS[0]!.level, items: [...ROOMS[0]!.level.items, { col: door.col, row: door.row, kind: 'barrier', needs: 'ember' }] }
+    const engine = new Engine(level)
+    expect(engine.solidAt(door.col, door.row)).toBe(true)
+    engine.kit.push('ember')
+    engine.applyBarriers()
+    expect(engine.solidAt(door.col, door.row)).toBe(false)
+  })
+
+  it('reachability contract: a stele/chest sits on solid-floored, walkable ground and is approachable from a side (mechanism proof — the real §6.11 placements land with the labyrinth.ts/levels.ts integration, stage 2)', () => {
+    const cols = 8, rows = 6
+    const tiles = new Array(cols * rows).fill(EMPTY)
+    for (let c = 0; c < cols; c++) { tiles[c] = WALL; tiles[(rows - 1) * cols + c] = WALL }
+    for (let r = 0; r < rows; r++) { tiles[r * cols] = WALL; tiles[r * cols + cols - 1] = WALL }
+    for (let c = 0; c < cols; c++) tiles[(rows - 2) * cols + c] = WALL   // solid floor
+    const standRow = rows - 3
+    const placements = [
+      { col: 3, row: standRow, kind: 'stele' as const },
+      { col: 4, row: standRow, kind: 'chest' as const },
+    ]
+    const level: LevelDef = {
+      name: 'reach', cols, rows, tiles,
+      player: { col: 1, row: standRow }, door: { col: cols - 2, row: standRow },
+      enemies: [], items: placements.map(p => ({ ...p, gives: 'ward' as const })), mirrors: [],
+    }
+    const engine = new Engine(level)
+    for (const p of placements) {
+      expect(engine.tileAt(p.col, p.row)).toBe(EMPTY)                        // walkable
+      expect(engine.solidAt(p.col, p.row + 1)).toBe(true)                    // solid ground beneath
+      const east = !engine.solidAt(p.col + 1, p.row), west = !engine.solidAt(p.col - 1, p.row)
+      expect(east || west).toBe(true)                                       // approachable from a side
     }
   })
 })

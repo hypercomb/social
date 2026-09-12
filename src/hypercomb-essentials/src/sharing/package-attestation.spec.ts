@@ -68,6 +68,8 @@ describe('attestPackage', () => {
     const verdict = await attestPackage(STRANGER, ['evil.example'], { storage, publisher: null, fetchIndex })
     expect(verdict).toMatchObject({ ok: false, reason: 'not-named' })
     expect((verdict as { detail?: string }).detail).toMatch(new RegExp(CURRENT.slice(0, 12)))
+    // …and names it in full, so the host directory can offer THAT build.
+    expect((verdict as { named?: string }).named).toBe(CURRENT)
     expect(readWitnessed(storage)).toEqual({ [CURRENT]: PUB })
   })
 

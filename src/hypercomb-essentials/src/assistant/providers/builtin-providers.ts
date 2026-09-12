@@ -16,6 +16,7 @@ import './google.provider.js'
 import './xai.provider.js'
 import './deepseek.provider.js'
 import './mistral.provider.js'
+import './openrouter.provider.js'
 import './local.provider.js'
 
 // Not a vendor either: the heartbeat that asks the machine's own model server

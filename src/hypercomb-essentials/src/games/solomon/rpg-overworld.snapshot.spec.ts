@@ -7,7 +7,7 @@ function setup(owned = ['triangle:0']) {
   const inventory = new Set(owned)
   const hooks: WorldHooks = {
     has: piece => inventory.has(componentKey(piece)),
-    grantRelic: vi.fn(piece => inventory.add(componentKey(piece))), onEnter: vi.fn(), onDungeon: vi.fn(), onMessage: vi.fn(),
+    grantRelic: vi.fn(piece => inventory.add(componentKey(piece))), seat: vi.fn(() => true), onEntrance: vi.fn(), onMessage: vi.fn(),
   }
   return { hooks, model: new RpgOverworld(hooks) }
 }
@@ -23,7 +23,7 @@ describe('world save snapshots', () => {
     restored.restoreState(JSON.parse(JSON.stringify(snapshot)))
     expect(restored.exportState()).toEqual(snapshot)
     expect(hooks.grantRelic).not.toHaveBeenCalled()
-    expect(hooks.onEnter).not.toHaveBeenCalled()
+    expect(hooks.onEntrance).not.toHaveBeenCalled()
     snapshot.player.x = 999; snapshot.met.push('unknown'); snapshot.filledSockets.length = 0
     expect(restored.player.x).toBe(dawn.x)
     expect(model.filledSockets.has('dawn-shrine:0')).toBe(true)
@@ -85,8 +85,8 @@ describe('world save snapshots', () => {
       expect(view.isSpeaking).toBe(false)
       expect(view.isDialogOpen).toBe(false)
       expect(view.exportState().player).toEqual({ ...valleyPoint(9, 12), facing: 'right' })
-      expect(host.querySelector('.sol-rpg-world-prompt')?.textContent).toContain('Wayfarer Cavern')
-      expect(hooks.onDungeon).not.toHaveBeenCalled()
+      expect(host.querySelector('.sol-rpg-cue')?.textContent).toContain('Wayfarer Cavern')
+      expect(hooks.onEntrance).not.toHaveBeenCalled()
     } finally { view.dispose(); context.mockRestore() }
   })
 })

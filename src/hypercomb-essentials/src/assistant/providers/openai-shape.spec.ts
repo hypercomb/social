@@ -76,6 +76,26 @@ describe('the OpenAI-compatible request shape', () => {
   })
 })
 
+describe('the cacheable system turn', () => {
+  const body = (url: string, over: Partial<LlmRequest>, options?: { cacheableSystem?: boolean }) =>
+    JSON.parse(String(openAiRequest(url, request(over), undefined, options).init.body)) as { messages: { role: string; content: unknown }[] }
+
+  it('marks the system turn ephemeral only when both the request and the endpoint ask for it', () => {
+    const cached = body('https://openrouter.ai/x', { system: 'anatomy', cacheSystem: true }, { cacheableSystem: true })
+    expect(cached.messages[0]).toEqual({
+      role: 'system',
+      content: [{ type: 'text', text: 'anatomy', cache_control: { type: 'ephemeral' } }],
+    })
+  })
+
+  it('keeps the plain string form for every vendor that did not opt in, whatever the request says', () => {
+    expect(body('https://api.deepseek.com/x', { system: 'anatomy', cacheSystem: true }).messages[0])
+      .toEqual({ role: 'system', content: 'anatomy' })
+    expect(body('https://openrouter.ai/x', { system: 'anatomy' }, { cacheableSystem: true }).messages[0])
+      .toEqual({ role: 'system', content: 'anatomy' })
+  })
+})
+
 describe('the OpenAI-compatible response shape', () => {
   it('normalizes a tool-only answer while preserving raw argument JSON', () => {
     const result = openAiResponse({
