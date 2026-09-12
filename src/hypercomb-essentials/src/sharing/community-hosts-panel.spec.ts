@@ -469,13 +469,18 @@ describe('updating happens in the hosts window', () => {
     expect(HOSTS_TS).toMatch(/async #focusBuild\(/)
   })
 
-  it('saves a restore point before switching, and only once the build may run here', () => {
+  it('tries a restore point before switching, once the build may run here — bounded, never a gate', () => {
     const sw = HOSTS_TS.slice(HOSTS_TS.indexOf('async #switch(pkg: HostPackage)'))
     const gate = sw.indexOf('await activationAuthority(')
     const restore = sw.indexOf('createRestorePoint')
     expect(gate).toBeGreaterThan(-1)
     expect(restore).toBeGreaterThan(gate)
     expect(restore).toBeLessThan(sw.indexOf('await acquire(sig, sources)'))
+    // A hive that cannot seal (one cold cell) or takes minutes to must still
+    // switch: the wait is bounded and a missing restore point is said, not fatal.
+    expect(HOSTS_TS).toMatch(/RESTORE_POINT_WAIT_MS/)
+    expect(sw).not.toMatch(/restore point was not saved, so nothing was switched/)
+    expect(EN['hosts.return.go']).toBe('Switch back')
   })
 
   it('an install from your own domain keeps the bundled update check listening', () => {

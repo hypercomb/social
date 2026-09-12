@@ -89,6 +89,9 @@ const GUIDE_KEY = 'hc:hosts:guide-closed'
 
 const PACKAGE_SIG = /^[a-f0-9]{64}$/
 
+/** How long a switch waits for its restore point before going on without one. */
+const RESTORE_POINT_WAIT_MS = 15_000
+
 interface SwitchRecord {
   /** The build you were on before any switch — the one your tiles look right in. */
   from: string
@@ -1114,18 +1117,24 @@ export class HostsPanelComponent implements OnDestroy {
         this.intake.set({ ...this.intake(), [sig]: { phase: 'failed', detail: authority.error } })
         return
       }
-      // A RESTORE POINT FIRST — the safety the header's Adopt had, kept where
-      // updates now happen. Not saved, not switched.
+      // A RESTORE POINT FIRST, BEST-EFFORT. The safety the header's Adopt had,
+      // kept where updates now happen — but never a gate. Sealing walks every
+      // tile: a hive with one cold cell cannot seal, and a large one takes
+      // longer than anyone waits ("Switching…" forever, 2026-09-12). A switch
+      // changes no tile, and Switch back is the way back, so a restore point
+      // that could not be taken is SAID, and the switch goes on.
       const snapshots = window.ioc?.get?.<{ createRestorePoint?: (name: string) => Promise<boolean> }>('@diamondcoreprocessor.com/SnapshotQueenBee')
       const restorePoint = buildRevisionName({
         packageSig: sig,
         label: pkg.label,
         locale: String(window.ioc?.get?.<{ locale?: string }>('@hypercomb.social/I18n')?.locale ?? 'en'),
       })
-      if (!await snapshots?.createRestorePoint?.(restorePoint)) {
-        this.intake.set({ ...this.intake(), [sig]: { phase: 'failed', detail: 'the restore point was not saved, so nothing was switched' } })
-        return
-      }
+      const saved = await Promise.race([
+        Promise.resolve(snapshots?.createRestorePoint?.(restorePoint) ?? false).catch(() => false),
+        new Promise<false>(resolve => setTimeout(() => resolve(false), RESTORE_POINT_WAIT_MS)),
+      ])
+      const restoreNote = saved ? '' : 'no restore point could be saved — Switch back is the way back'
+      this.intake.set({ ...this.intake(), [sig]: { phase: 'applying', detail: restoreNote } })
       const { acquire } = await import('@hypercomb/runtime/acquire')
       const outcome = await acquire(sig, sources)
       if (!outcome.ok) {
@@ -1140,7 +1149,7 @@ export class HostsPanelComponent implements OnDestroy {
         ...this.intake(),
         [sig]: {
           phase: 'applied',
-          detail: `${outcome.fetched} fetched / ${outcome.present} already here`,
+          detail: `${outcome.fetched} fetched / ${outcome.present} already here${restoreNote ? ` · ${restoreNote}` : ''}`,
         },
       })
       // Remembered BEFORE the restart, and the window asked back only when

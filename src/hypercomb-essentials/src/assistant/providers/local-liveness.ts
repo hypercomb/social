@@ -103,6 +103,24 @@ const pinnedReports = ((globalThis as Record<symbol, unknown>)[LIVENESS_REPORTS]
 const reports = pinnedReports.reports
 const inFlight = pinnedReports.inFlight
 
+// THE WATCH IS PINNED THE SAME WAY, for the same reason. Every copy called
+// `startLocalLivenessWatch()` as it loaded and every copy started its own
+// heartbeat, so a page carrying eight copies knocked eight times per beat and
+// walked the sibling spellings eight times as often — a wall of red lines for
+// a server that is simply not running. One watch, one set of asks and one walk
+// clock per page, whichever copy got there first.
+const LIVENESS_WATCH = Symbol.for('hypercomb.local-liveness.watch')
+const pinnedWatch = ((globalThis as Record<symbol, unknown>)[LIVENESS_WATCH] ??= {
+  watching: false,
+  asked: new Set<string>(),
+  lastWalk: 0,
+}) as { watching: boolean; readonly asked: Set<string>; lastWalk: number }
+
+/** A server found asleep is asked again unattended this rarely. Every knock on
+ *  a closed port is a red line nobody can silence; whoever starts the server
+ *  presses Check again (never gated) or waits one long beat. */
+const ASLEEP_RECHECK_MS = 5 * 60_000
+
 // ── which providers this file speaks for ──────────────────────────────────
 
 // EVERY SPELLING HERE HAS TO NAME THE PARTICIPANT'S OWN PROCESS, because
@@ -216,7 +234,7 @@ const permissionPending = (): boolean =>
 
 const answeredKey = (provider: LlmProviderDescriptor): string => `hc:llm:${provider.id}:answered`
 
-const askedThisSession = new Set<string>()
+const askedThisSession = pinnedWatch.asked
 
 const answeredHere = (provider: LlmProviderDescriptor): boolean => {
   try { return globalThis.localStorage?.getItem(answeredKey(provider)) === '1' } catch { return false }
@@ -355,7 +373,6 @@ const alternatesFor = (provider: LlmProviderDescriptor, primary: string): string
  *  requests. Once per five minutes is enough to notice a server that came up
  *  on the other spelling; pressing "Check again" always walks. */
 const WALK_EVERY_MS = 5 * 60_000
-let lastWalk = 0
 
 const findTheServer = async (
   provider: LlmProviderDescriptor,
@@ -367,8 +384,8 @@ const findTheServer = async (
   if (first.state !== 'asleep') return first
   // (a pending permission already returned above: it is not `asleep`)
   const alternates = alternatesFor(provider, primary)
-  if (!alternates.length || Date.now() - lastWalk < WALK_EVERY_MS) return first
-  lastWalk = Date.now()
+  if (!alternates.length || Date.now() - pinnedWatch.lastWalk < WALK_EVERY_MS) return first
+  pinnedWatch.lastWalk = Date.now()
   const tried = await Promise.all(alternates.map(host => probeLocalServer(host)))
   const found = tried.find(report => report.state === 'awake' || report.state === 'empty')
     ?? tried.find(report => report.state === 'blocked')
@@ -406,7 +423,8 @@ export const refreshLocalServer = (provider: LlmProviderDescriptor): void => {
   // Unattended, so only where someone has reason to look (see "who asked").
   if (!worthKnocking(provider)) return
   const cached = localServerReport(provider)
-  if (cached.state !== 'unknown' && Date.now() - cached.checkedAt < STALE_MS) return
+  const staleAfter = cached.state === 'asleep' ? ASLEEP_RECHECK_MS : STALE_MS
+  if (cached.state !== 'unknown' && Date.now() - cached.checkedAt < staleAfter) return
   void checkLocalServer(provider)
 }
 
@@ -553,7 +571,7 @@ export const startLocalLivenessWatch = (): void => {
 export const recheckLocalServers = (): void => {
   reports.clear()
   askedThisSession.clear()
-  lastWalk = 0
+  pinnedWatch.lastWalk = 0
   if (permissionPending()) { sweep(); return }
   for (const provider of llmProviderRegistry().all()) {
     if (machineLocalEndpoint(provider)) void checkLocalServer(provider)
