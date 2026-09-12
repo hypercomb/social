@@ -187,19 +187,22 @@ function sceneObject(s) {
 // Every hive published under hypercomb.com is a door on the splash. The list is
 // derived and PROVEN by hosts.cjs and baked in here, because the page itself is
 // one self-contained file that asks nobody for anything at view time.
+// The deployed nodes are an operator's view: baked in, but shown only to a
+// browser holding `hc:show-deployed-nodes` — the same flag the host card reads.
 function doorsHtml(doors) {
   if (!doors.length) return ''
   // a new tab: a door is a place to go, not a way to lose the deck you are watching
   const chip = d => `
       <a class="door" href="https://${esc(d.host)}/" target="_blank" rel="noopener">` +
     `<b>${esc(d.title)}</b><span>${esc(d.host)}</span></a>`
-  return `  <nav id="doors" aria-label="Hives published on ${hosts.ZONE}">
+  return `  <nav id="doors" aria-label="Hives published on ${hosts.ZONE}" hidden>
 ` +
     `    <p class="lbl">live on ${hosts.ZONE} · ${doors.length} ${doors.length === 1 ? 'hive' : 'hives'}</p>
 ` +
     `    <div id="doorrow">${doors.map(chip).join('')}
     </div>
-  </nav>`
+  </nav>
+  <script>try{var v=localStorage.getItem('hc:show-deployed-nodes');if(v==='1'||v==='true')document.getElementById('doors').hidden=false}catch(e){}</script>`
 }
 
 function assemble(doors) {

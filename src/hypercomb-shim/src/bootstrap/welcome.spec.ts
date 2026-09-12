@@ -81,9 +81,23 @@ describe('frontDoorOf — the default experience, and a staged one on top', () =
 
   it('a staged title or tagline that is empty falls back to the default, field by field', () => {
     const door = frontDoorOf({ title: '', tagline: '', links: [], doorsLabel: '', doors: [{ title: 'a', host: 'a.example.com' }] },
-      'host.example', 'https://host.example')
+      'host.example', 'https://host.example', true)
     expect(door.title).toBe('host.example')
     expect(door.tagline).toBe(DEFAULT_TAGLINE)
     expect(door.doors).toHaveLength(1)
+  })
+
+  it('the deployed nodes stay off the card unless the browser asks for them; every other detail shows', () => {
+    const staged = {
+      title: 'hypercomb', tagline: 'An open software platform.',
+      links: [{ label: 'Watch the tour', href: '/tour/', note: '' }],
+      doorsLabel: 'live on hypercomb.com · 1 hive',
+      doors: [{ title: 'susan', host: 'susan.hypercomb.com' }],
+    }
+    const visitor = frontDoorOf(staged, 'hypercomb.com', 'https://hypercomb.com')
+    expect(visitor.doors).toEqual([])
+    expect(visitor.title).toBe('hypercomb')
+    expect(visitor.links).toHaveLength(1)
+    expect(frontDoorOf(staged, 'hypercomb.com', 'https://hypercomb.com', true).doors).toEqual(staged.doors)
   })
 })
