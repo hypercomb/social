@@ -1,19 +1,16 @@
 import { Component, signal, type OnDestroy } from '@angular/core'
-import { buildRevisionName, EffectBus } from '@hypercomb/core'
+import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 
 interface UpdateAvailablePayload {
   available?: boolean
   newCount?: number
   packageSig?: string
-  newBees?: string[]
-  previous?: string | null
-  label?: string
   /** Who announced it: the shell's bundled check, or a followed channel's
    *  scout. Absent reads as the bundle. */
   source?: string
-  /** The participant asked (`?upgrade=1`): open on it, even for a build they
-   *  once discarded. */
+  /** The participant asked (`?upgrade=1`): show it, even for a build they
+   *  once dismissed. */
   offer?: boolean
 }
 
@@ -25,11 +22,18 @@ interface UpdateStatusPayload {
   message?: string
 }
 
-const SAVED_KEY = 'hc:features-saved'
 const DISCARDED_KEY = 'hc:features-discarded'
 const SNOOZE_KEY = 'hc:features-snoozed'
 const COMPLETE_KEY = 'hc:update-complete'
 const COMPLETE_VISIBLE_MS = 12_000
+
+// A NOTICE, NOT AN INSTALLER (2026-09-12). This pill used to install: Adopt
+// saved a restore point and swapped the running build from the header in one
+// press, with nothing on screen saying which build or from where. Updating now
+// happens in ONE place — the hosts window, where the build is named, its
+// signature is checked before you press, a restore point is saved first and
+// the way back is offered after. So the pill only says an update exists and
+// takes you there, looking at that build.
 
 @Component({
   selector: 'hc-upgrade-indicator',
@@ -38,31 +42,23 @@ const COMPLETE_VISIBLE_MS = 12_000
   template: `
     @if (phase() !== 'idle') {
       <div class="upgrade-indicator" role="status" aria-live="polite" [attr.data-phase]="phase()">
-        <button class="status-button" type="button" (click)="toggleExpanded()"
-          [disabled]="busy()" [attr.aria-expanded]="expanded()"
-          [attr.aria-label]="statusText()" [title]="statusText()">
+        <button class="status-button" type="button" (click)="openHosts()"
+          [disabled]="phase() !== 'available'"
+          [attr.aria-label]="phase() === 'available' ? ('upgrade.open-hosts' | t) : statusText()"
+          [title]="phase() === 'available' ? ('upgrade.open-hosts' | t) : statusText()">
           <span>{{ statusText() }}</span>
           @if (phase() === 'available' && newCount() > 0) {
             <span class="upgrade-count">{{ newCount() }}</span>
           }
         </button>
 
-        @if (phase() === 'available' && expanded()) {
-          <label class="restore-name">
-            <input type="text" [value]="restorePointName()"
-              [attr.aria-label]="'upgrade.revision' | t" [title]="'upgrade.revision' | t"
-              (input)="restorePointName.set($any($event.target).value)"
-              (keydown.enter)="adopt()" (keydown.escape)="collapse()" />
-          </label>
-          <!-- Adopt applies SILENTLY: snapshot under the shown name, apply,
-               reload back to this exact spot. No screen to visit. -->
-          <button class="upgrade-act adopt" type="button" (click)="adopt()">{{ 'upgrade.adopt' | t }}</button>
-          <button class="upgrade-act save" type="button" (click)="save()">{{ 'upgrade.save' | t }}</button>
-          <button class="upgrade-act discard" type="button" (click)="discard()">{{ 'upgrade.discard' | t }}</button>
+        @if (phase() === 'available') {
+          <button class="upgrade-dismiss" type="button" (click)="dismiss()"
+            [attr.aria-label]="'upgrade.dismiss' | t" [title]="'upgrade.dismiss' | t">×</button>
         }
 
         @if (phase() === 'error') {
-          <button class="upgrade-act save" type="button" (click)="returnToAvailable()">Try again</button>
+          <button class="upgrade-act" type="button" (click)="returnToAvailable()">Try again</button>
         }
       </div>
     }
@@ -73,16 +69,9 @@ export class UpgradeIndicatorComponent implements OnDestroy {
   readonly available = signal(false)
   readonly newCount = signal(0)
   readonly phase = signal<UpdatePhase>('idle')
-  readonly expanded = signal(false)
-  /** Written for the participant when the update is announced (see the
-   *  `update:available` subscription) — theirs to overwrite, never to supply. */
-  readonly restorePointName = signal('')
   readonly statusMessage = signal('')
 
   #packageSig = ''
-  #newBees: string[] = []
-  #previous: string | null = null
-  #label = ''
   #source: UpdateSource = 'bundled'
   /** One standing offer per announcer. The bundled check saying "nothing newer
    *  HERE" must never hide what a followed channel announced, or the reverse. */
@@ -103,14 +92,13 @@ export class UpgradeIndicatorComponent implements OnDestroy {
       if (payload?.offer) this.#asked = source
       if (payload?.available && !suppressed) this.#offers.set(source, { ...payload, packageSig: sig, source })
       else this.#offers.delete(source)
-      this.#show(!!payload?.offer)
+      this.#show()
     }))
 
     this.#unsubs.push(EffectBus.on<UpdateStatusPayload>('update:status', payload => {
       const next = payload?.phase
       if (!next) return
       this.statusMessage.set(String(payload.message ?? '').trim())
-      this.expanded.set(false)
       this.phase.set(next)
       if (next === 'complete') {
         try { sessionStorage.setItem(COMPLETE_KEY, String(Date.now())) } catch { /* unavailable */ }
@@ -124,8 +112,6 @@ export class UpgradeIndicatorComponent implements OnDestroy {
     if (this.#completeTimer !== null) window.clearTimeout(this.#completeTimer)
   }
 
-  readonly busy = (): boolean => this.phase() === 'snapshotting' || this.phase() === 'applying'
-
   readonly statusText = (): string => {
     if (this.statusMessage()) return this.statusMessage()
     switch (this.phase()) {
@@ -137,102 +123,49 @@ export class UpgradeIndicatorComponent implements OnDestroy {
     }
   }
 
-  readonly toggleExpanded = (): void => {
+  /** Go where updating happens: the hosts window, opened on the build this
+   *  notice announced. Seeing it there is enough — the notice stays away for
+   *  the rest of the session. */
+  readonly openHosts = (): void => {
     if (this.phase() !== 'available') return
-    this.expanded.update(value => !value)
+    EffectBus.emit('hosts:open', { packageSig: this.#packageSig || null, source: this.#source })
+    this.dismiss()
   }
 
-  readonly collapse = (): void => {
-    this.expanded.set(false)
-  }
-
-  /** Adopt goes NOWHERE — updates are installed, never visited. One click
-   *  hands the shell the name and the package and waits:
-   *  `hypercomb:apply-update` snapshots under that name, installs the newer
-   *  files and reloads — the URL is untouched, so the participant lands
-   *  exactly where they were, with the restore point already saved. The
-   *  announcer rides along: the shell takes a bundled offer from its own
-   *  origin and a channel offer from the hosts it carries. Enter in the name
-   *  field rides the same path. */
-  readonly adopt = (): void => {
-    const restorePointName = this.restorePointName().trim()
-      || buildRevisionName({ packageSig: this.#packageSig, label: this.#label, locale: this.#locale() })
-    this.collapse()
-    window.dispatchEvent(new CustomEvent('hypercomb:apply-update', {
-      detail: {
-        restorePointName,
-        packageSig: this.#packageSig || null,
-        newBees: this.#newBees,
-        previous: this.#previous,
-        source: this.#source,
-      },
-    }))
-  }
-
-  #locale(): string {
-    const i18n = window.ioc?.get<{ locale?: string }>('@hypercomb.social/I18n')
-    return String(i18n?.locale ?? 'en')
-  }
-
-  readonly save = (): void => {
+  /** Not now: this build is not announced again this session. */
+  readonly dismiss = (): void => {
     this.#remember(SNOOZE_KEY, this.#packageSig, sessionStorage)
-    this.#remember(SAVED_KEY, this.#packageSig, localStorage)
-    this.#dismiss()
-  }
-
-  readonly discard = (): void => {
-    this.#remember(DISCARDED_KEY, this.#packageSig, localStorage)
     this.#dismiss()
   }
 
   readonly returnToAvailable = (): void => {
     this.statusMessage.set('')
     this.phase.set(this.available() ? 'available' : 'idle')
-    this.expanded.set(this.available())
   }
 
   /** Put the standing offer on the pill: the one the participant asked for,
    *  else a channel's (signed by the publisher this hive follows), else the
    *  bundle this origin ships. */
-  #show(expand: boolean): void {
+  #show(): void {
     const offer = (this.#asked && this.#offers.get(this.#asked))
       || this.#offers.get('channel') || this.#offers.get('bundled') || null
-    const wasAvailable = this.phase() === 'available'
     this.#packageSig = String(offer?.packageSig ?? '')
-    this.#newBees = Array.isArray(offer?.newBees) ? offer.newBees.map(String) : []
-    this.#previous = typeof offer?.previous === 'string' ? offer.previous : null
-    this.#label = String(offer?.label ?? '').trim()
     this.#source = offer?.source === 'channel' ? 'channel' : 'bundled'
-    // The name is written the moment the update is announced — adopting is
-    // one click, and what the participant sees in the field is what the
-    // restore point will be called unless they type over it. The AUTHOR'S
-    // build name leads; date + time are the changing default, so every
-    // revision the hive takes reads as its own line in the list.
-    this.restorePointName.set(buildRevisionName({
-      packageSig: this.#packageSig,
-      label: this.#label,
-      locale: this.#locale(),
-    }))
     this.available.set(!!offer)
     this.newCount.set(offer?.newCount ?? 0)
-    if (offer && !this.busy() && this.phase() !== 'complete') {
-      this.phase.set('available')
-      if (expand && !wasAvailable) this.expanded.set(true)
-    } else if (!offer && this.phase() === 'available') {
-      this.phase.set('idle')
-    }
+    const busy = this.phase() === 'snapshotting' || this.phase() === 'applying'
+    if (offer && !busy && this.phase() !== 'complete') this.phase.set('available')
+    else if (!offer && this.phase() === 'available') this.phase.set('idle')
   }
 
-  /** Save and Discard answer the build on the pill: every announcer's offer
-   *  of that signature goes, and another announcer's different build may take
-   *  its place. */
+  /** Every announcer's offer of the build on the pill goes; another
+   *  announcer's different build may take its place. */
   #dismiss(): void {
     for (const [source, offer] of this.#offers) {
       if (String(offer.packageSig ?? '') === this.#packageSig) this.#offers.delete(source)
     }
-    this.expanded.set(false)
     this.phase.set('idle')
-    this.#show(false)
+    this.#show()
   }
 
   #restoreCompletedState(): void {

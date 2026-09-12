@@ -3,11 +3,10 @@ import { type Bee, EffectBus, hypercomb } from '@hypercomb/core'
 import { upgradeFromBundled, checkForUpdate, type BootStatus } from '../setup/ensure-install'
 import { cacheImportMap } from '../setup/resolve-import-map'
 import { acquire, installedPackageSig, listHostPackages } from '@hypercomb/runtime/acquire'
-import { addHostZone, DEFAULT_HOST_ZONES, listHostZones } from '@hypercomb/runtime/host-zones'
+import { addHostZone, listHostZones } from '@hypercomb/runtime/host-zones'
 import { CoreMismatchError } from '@hypercomb/runtime/core-surface'
 import { nativeAvailable } from '@hypercomb/runtime/native-filesystem'
 import { isTransientMode } from '@hypercomb/shared/core/view-mode.service'
-import { buildRevisionName } from '@hypercomb/core'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
 import { CoreAdapter } from './core-adapter'
@@ -284,45 +283,11 @@ export class App implements AfterViewInit {
       EffectBus.emit('nav:to-hive', { reason: 'adopt-complete' })
     })
 
-    // "Update available" → Adopt. We're in alpha; the eggs (negative-cache +
-    // render guards) protect the canvas, so an adopted update installs straight
-    // away. WHERE the bytes come from follows who announced it: the shell's
-    // bundled check → this origin's own `/content/` (upgradeFromBundled); a
-    // followed channel (update-scout, `source: 'channel'`) → exactly the
-    // announced signature, acquired from every host this hive carries plus the
-    // defaults. Either way a restore point is saved first and the shell reloads
-    // so the freshly-installed bees take over.
-    window.addEventListener('hypercomb:apply-update', event => {
-      const detail = (event as CustomEvent<{ restorePointName?: string; packageSig?: string | null; source?: string }>).detail
-      // The indicator writes the name before it dispatches. `/upgrade` (and any
-      // other door) may not, so mint one here rather than snapshotting under
-      // the empty string — every update this hive takes gets a name.
-      const restorePointName = String(detail?.restorePointName ?? '').trim()
-        || buildRevisionName({
-          packageSig: detail?.packageSig,
-          locale: String(window.ioc?.get<{ locale?: string }>('@hypercomb.social/I18n')?.locale ?? 'en'),
-        })
-      // The typed (or minted) name names THIS deployed revision — land it on
-      // the installer's version row too, so DCP's revision list reads the
-      // same name the participant saw in the pill. Fire-and-forget BEFORE the
-      // upgrade: the success path ends in location.reload(), which would kill
-      // an in-flight port message. Best-effort — no bridge, no rename.
-      const packageSig = String(detail?.packageSig ?? '').trim().toLowerCase()
-      if (/^[a-f0-9]{64}$/.test(packageSig)) {
-        void (globalThis as { __sentinelBridge?: { nameRevision?: (sig: string, name: string) => Promise<boolean> } })
-          .__sentinelBridge?.nameRevision?.(packageSig, restorePointName)
-      }
-      if (detail?.source === 'channel' && /^[a-f0-9]{64}$/.test(packageSig)) {
-        void this.upgradeFromBundledClicked(restorePointName, true, async () => {
-          const zones = [...new Set([...await listHostZones(), ...DEFAULT_HOST_ZONES])]
-          const outcome = await acquire(packageSig, zones)
-          if (!outcome.ok) console.warn('[app] channel update did not complete', outcome.error ?? outcome)
-          return outcome.ok
-        })
-        return
-      }
-      void this.upgradeFromBundledClicked(restorePointName, true)
-    })
+    // UPDATES HAPPEN IN THE HOSTS WINDOW (2026-09-12). The header pill used to
+    // install from here (`hypercomb:apply-update`). It is a notice now that
+    // opens the hosts window on the build it announces, and that window's
+    // Update/Switch is the one door: signature checked, restore point saved
+    // first, the way back offered after.
 
     // ViewMode subscription — drives Pixi-canvas visibility via app.html.
     // Self-registered in shared/core/view-mode.service.ts at module load.
@@ -377,9 +342,9 @@ export class App implements AfterViewInit {
    * deployed, with no install involved.
    *
    * It OFFERS, never applies. Anyone can send a link, so a link must not be
-   * able to change what a hive runs: the param opens the update pill on the
-   * bundled build — even for installs the provenance gate stays quiet for —
-   * and the participant's Adopt, restore point first, is what installs it.
+   * able to change what a hive runs: the param shows the update notice for
+   * the bundled build — even for installs the provenance gate stays quiet
+   * for — and the hosts window's Update, restore point first, installs it.
    *
    * The param is consumed on read, so a reload never re-offers from a stale
    * URL.

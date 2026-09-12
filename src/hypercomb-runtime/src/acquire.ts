@@ -54,6 +54,7 @@ import { installedPackageSig, stampInstalledPackage } from './installed-package.
 // The second half of admission: may this tree run HERE. Asked before a byte
 // moves — see the file for the three doors (self, genesis, attested).
 import { activationAuthority, registeredAttester } from './activation-authority.js'
+import { hostZone } from './host-zones.js'
 export { installedPackageSig }
 
 // Re-exported so the shim's own callers keep one import site. The
@@ -521,13 +522,14 @@ const activate = (
       bees: inventory.bees,
       dependencies: inventory.dependencies,
       beeDeps,
-      // Provenance: a HOST produced this install, so the shell's own bundled
-      // `/content/` package is NOT this install's update authority. 'sentinel'
-      // is the existing spelling for "an external authority is current"; the
-      // shim never runs the update check that reads it, but a web shell
-      // sharing this origin would, and it must not raise a phantom "new
-      // features" by diffing a host install against its own bundle.
-      source: 'sentinel' as const,
+      // Provenance. A package taken from ANOTHER domain is not answerable to
+      // this shell's bundled `/content/` ('sentinel' — an external authority
+      // is current), so the bundled check must not raise a phantom "new
+      // features" by diffing it against the bundle. A package taken from THIS
+      // origin's own domain IS the bundle's line, and since the hosts window
+      // became the only way to update, recording it as 'sentinel' would have
+      // silenced every later "your domain has a newer deploy" notice.
+      source: hostZone(pkg.zone) === hostZone(location.host) ? 'bundled' : 'sentinel',
     }))
     // Per-bee dependency closure, read by the preloader when it lazy-loads a
     // bee's deps. A global rather than storage because it is re-derived every

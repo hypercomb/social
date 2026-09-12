@@ -1,58 +1,42 @@
 // commands/upgrade.queen.ts
 //
-// `/upgrade` — take the newest build the shell is serving.
+// `/upgrade` — open the hosts window on your own domain's builds.
 //
 // ── Why this exists ───────────────────────────────────────────────────
 //
 // An installed hive had no participant-reachable way to move to a newer
-// build. The header's upgrade indicator only lights when checkForUpdate
-// decides an update is available, and for a DCP-sourced install its
-// provenance gate returns `available: false` unconditionally — DCP is
-// supposed to surface those updates itself, so when it doesn't, there is
-// no second door. The install prompt's "Upgrade Hypercomb" button renders
-// only while nothing is installed. `window.upgradeHypercomb()` needs a
-// console, which a phone does not have.
+// build: the header notice lights only when a check decides an update is
+// available, and `window.upgradeHypercomb()` needs a console, which a phone
+// does not have. So: a behaviour, typed where every other verb is typed.
 //
-// So: a behaviour, typed where every other verb is typed.
+// ── Updating happens in the hosts window (2026-09-12) ─────────────────
 //
-// ── What it does NOT replace ──────────────────────────────────────────
-//
-// The shell's `?upgrade=1` door stays the primary one, because THIS is a
-// bee — it can only run once the build carrying it is already installed,
-// which is exactly the situation an upgrade is needed to escape. Use the
-// URL for the first hop onto a build that has this; use `/upgrade` after.
-//
-// The work itself is the shell's: `hypercomb:apply-update` is the event
-// the header indicator's Adopt already dispatches, and the web shell binds
-// it to upgradeFromBundled() + reload. Nothing about the install path is
-// duplicated here — this is a door, not a mechanism.
+// This verb used to install the shell's bundled build on the spot. Every
+// update now goes through ONE place, the hosts window, where the build is
+// named, a restore point is saved first and the way back is offered after —
+// so the verb takes you there, looking at your own domain. The shell's
+// `?upgrade=1` door stays for the first hop onto a build that has this.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
-
-const APPLY_UPDATE_EVENT = 'hypercomb:apply-update'
 
 export class UpgradeQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'upgrade'
-  override description = 'Install the newest build this shell is serving, then reload'
+  override description = 'Open the hosts window on your own domain to update'
   override descriptionKey = 'slash.upgrade'
   override examples = [
-    { input: '/upgrade', result: 'Fetches the shell’s current package, replaces the installed modules and reloads' },
+    { input: '/upgrade', result: 'Opens Hosts on your own domain — Update there saves a restore point, then installs' },
   ]
 
   protected async execute(): Promise<void> {
     // The dev shell imports modules directly at dev-time — there is no OPFS
-    // install to replace, so say so rather than firing an event nothing binds.
+    // install to replace, so say so rather than opening a window with nothing
+    // to take.
     if (!('upgradeHypercomb' in window)) {
-      this.#log('This shell loads modules directly — there is nothing to upgrade')
+      EffectBus.emit('activity:log', { message: 'This shell loads modules directly — there is nothing to upgrade', icon: '⬡' })
       return
     }
-    this.#log('Taking the newest build — the hive will reload', '⬡')
-    window.dispatchEvent(new CustomEvent(APPLY_UPDATE_EVENT))
-  }
-
-  #log(message: string, icon = '⬡'): void {
-    EffectBus.emit('activity:log', { message, icon })
+    EffectBus.emit('hosts:open', { source: 'bundled' })
   }
 }
 

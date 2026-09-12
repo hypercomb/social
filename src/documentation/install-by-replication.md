@@ -308,6 +308,15 @@ DCP the *transport* dies. DCP the *ledger* is promoted:
    announcer so the bundled check cannot hide a channel's. `?upgrade=1` now
    OFFERS the bundle instead of applying it — a link anyone can send no longer
    changes what a hive runs.*
+   *Status 2026-09-12 — UPDATES HAPPEN IN THE HOSTS WINDOW. The header pill
+   no longer installs: it is a notice ("Update available") that opens the
+   hosts window on the build it announces (`hosts:open {packageSig, source}`),
+   and `/upgrade` opens it on your own domain. `hypercomb:apply-update` is
+   gone. The hosts window's Update / Switch is the one door: the activation
+   gate is asked first, a restore point is saved before any byte moves, and
+   Switch back is offered after. An install from your own domain records
+   `source: 'bundled'`, so the bundled check keeps announcing that domain's
+   next deploy.*
 7. **Retire `LayerInstaller` and the DCP transport role.**
    *Status 2026-08-30 — DONE for the web shell and the DCP app itself.
    THERE IS NO INSTALL CONCEPT LEFT IN THE SHELL. Deleted: the

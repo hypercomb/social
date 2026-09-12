@@ -35,7 +35,7 @@
 
 import { registerShellSurface } from '@hypercomb/runtime/shell-surface-registry'
 import { Component, signal, type OnDestroy } from '@angular/core'
-import { ATTESTATION_IOC_KEY, EffectBus, type AttestationVerdict, type PackageAttestation } from '@hypercomb/core'
+import { ATTESTATION_IOC_KEY, buildRevisionName, EffectBus, type AttestationVerdict, type PackageAttestation } from '@hypercomb/core'
 // The SAME reader the shim uses on a cold boot. It lives in runtime precisely
 // so there is one answer to "what does this domain publish" — essentials
 // cannot reach runtime (it imports core and nothing else), which is why this
@@ -265,6 +265,10 @@ export class HostsPanelComponent implements OnDestroy {
         this.expandedZone.set('')
         this.ledgerOpen.set(false)
       }
+      // A build a notice opened the window on resumes as the carried list
+      // arrives; closing the window drops the ask.
+      if (!p?.open) this.#focus = null
+      else if (this.#focus) void this.#focusBuild()
     }))
 
     // WHAT HAS BEEN PUT AWAY. One pool, one owner, one render — a build
@@ -303,6 +307,16 @@ export class HostsPanelComponent implements OnDestroy {
         for (const zone of row?.zones ?? []) counts[zone] = (counts[zone] ?? 0) + 1
       }
       this.naming.set(counts)
+    }))
+
+    // OPENED FOR A BUILD. The update notice sends the build it announced, and
+    // the window opens looking at it — where it is listed, your own domain
+    // first — so the one button you need is the one on screen. An open with
+    // no build (Publish, the return after a switch) changes nothing here.
+    this.#cleanups.push(EffectBus.on<{ packageSig?: string | null; source?: string }>('hosts:open', (p) => {
+      if (!p?.packageSig && !p?.source) return
+      this.#focus = { sig: String(p.packageSig ?? ''), bundled: p.source === 'bundled', tried: new Set() }
+      void this.#focusBuild()
     }))
 
     // BACK FROM A SWITCH. The restart a switch causes is the moment tiles can
@@ -803,6 +817,44 @@ export class HostsPanelComponent implements OnDestroy {
     await this.#checkSigned(zone)
   }
 
+  /** Open onto the build a notice announced: the domain listing it — your own
+   *  first — selected and its builds asked for. A bundled notice is about your
+   *  own domain by definition. Listed nowhere leaves the window as it was. */
+  //
+  // The carried list is re-read on every step, never taken once up front: the
+  // drone reads the pool AS the window opens, so the list at the moment of the
+  // open is usually still empty. The ask stays pending until a place listing
+  // the build is found, and each render with new places resumes it.
+  async #focusBuild(): Promise<void> {
+    const focus = this.#focus
+    if (!focus || this.#focusing) return
+    this.#focusing = true
+    try {
+      for (;;) {
+        const zone = [this.home, ...(focus.bundled ? [] : this.zones())].find(z => z && !focus.tried.has(z))
+        if (!zone) return
+        focus.tried.add(zone)
+        await this.#ask(zone)
+        if (this.#focus !== focus) return
+        if (focus.sig && !this.offers()[zone]?.packages.some(p => p.packageSig === focus.sig)) continue
+        this.#focus = null
+        this.installed.set(installedPackageSig())
+        this.selectedZone.set(zone)
+        this.expandedZone.set('')
+        this.ledgerOpen.set(false)
+        EffectBus.emit('hosts:creations', { zone })
+        await this.#checkSigned(zone)
+        return
+      }
+    } finally {
+      this.#focusing = false
+    }
+  }
+
+  /** The build a notice opened the window on, until a place listing it is found. */
+  #focus: { sig: string; bundled: boolean; tried: Set<string> } | null = null
+  #focusing = false
+
   /** Fetch one domain's manifest, once. A second asker — Switch back looking
    *  for your build while you opened the same domain — waits on the first
    *  rather than reading a half-answered null. */
@@ -1045,8 +1097,36 @@ export class HostsPanelComponent implements OnDestroy {
     this.intake.set({ ...this.intake(), [sig]: { phase: 'applying' } })
 
     try {
-      const { acquire } = await import('@hypercomb/runtime/acquire')
       const sources = [...new Set([pkg.zone, ...this.zones()])]
+      // MAY IT RUN HERE, asked first — a build the gate will refuse must not
+      // leave a restore point behind for a switch that never happened. acquire
+      // asks again itself; a yes here is witnessed, so that second ask is free.
+      const { activationAuthority, registeredAttester } = await import('@hypercomb/runtime/activation-authority')
+      const authority = await activationAuthority({
+        packageSig: sig,
+        zone: pkg.zone,
+        self: location.host,
+        installed: left,
+        zones: sources.filter(zone => zone !== pkg.zone),
+        attester: registeredAttester(),
+      })
+      if (!authority.ok) {
+        this.intake.set({ ...this.intake(), [sig]: { phase: 'failed', detail: authority.error } })
+        return
+      }
+      // A RESTORE POINT FIRST — the safety the header's Adopt had, kept where
+      // updates now happen. Not saved, not switched.
+      const snapshots = window.ioc?.get?.<{ createRestorePoint?: (name: string) => Promise<boolean> }>('@diamondcoreprocessor.com/SnapshotQueenBee')
+      const restorePoint = buildRevisionName({
+        packageSig: sig,
+        label: pkg.label,
+        locale: String(window.ioc?.get?.<{ locale?: string }>('@hypercomb.social/I18n')?.locale ?? 'en'),
+      })
+      if (!await snapshots?.createRestorePoint?.(restorePoint)) {
+        this.intake.set({ ...this.intake(), [sig]: { phase: 'failed', detail: 'the restore point was not saved, so nothing was switched' } })
+        return
+      }
+      const { acquire } = await import('@hypercomb/runtime/acquire')
       const outcome = await acquire(sig, sources)
       if (!outcome.ok) {
         this.intake.set({

@@ -445,3 +445,40 @@ describe('switching builds — named, confirmed, and reversible', () => {
     expect(EN['hosts.offer.unsigned-none']).toMatch(/\{host\}/)
   })
 })
+
+// UPDATES HAPPEN IN ONE PLACE (2026-09-12). The header pill installed with one
+// press; now it is a notice that opens the hosts window on the build it
+// announces, and the hosts window saves a restore point before any switch.
+describe('updating happens in the hosts window', () => {
+  const root = join(here, '..', '..', '..')
+  const INDICATOR = readFileSync(join(shared, 'ui', 'upgrade-indicator', 'upgrade-indicator.component.ts'), 'utf8')
+  const APP = readFileSync(join(root, 'hypercomb-web', 'src', 'app', 'app.ts'), 'utf8')
+  const UPGRADE = readFileSync(join(here, '..', 'commands', 'upgrade.queen.ts'), 'utf8')
+  const ACQUIRE = readFileSync(join(root, 'hypercomb-runtime', 'src', 'acquire.ts'), 'utf8')
+
+  it('the pill is a notice: it opens Hosts on its build and never installs', () => {
+    expect(INDICATOR).not.toMatch(/hypercomb:apply-update/)
+    expect(INDICATOR).toMatch(/EffectBus\.emit\('hosts:open', \{ packageSig:/)
+    expect(APP).not.toMatch(/addEventListener\('hypercomb:apply-update'/)
+    expect(UPGRADE).not.toMatch(/hypercomb:apply-update/)
+    expect(UPGRADE).toMatch(/EffectBus\.emit\('hosts:open', \{ source: 'bundled' \}\)/)
+  })
+
+  it('opens on the build the notice named', () => {
+    expect(HOSTS_TS).toMatch(/EffectBus\.on<[^>]*>\('hosts:open'/)
+    expect(HOSTS_TS).toMatch(/async #focusBuild\(/)
+  })
+
+  it('saves a restore point before switching, and only once the build may run here', () => {
+    const sw = HOSTS_TS.slice(HOSTS_TS.indexOf('async #switch(pkg: HostPackage)'))
+    const gate = sw.indexOf('await activationAuthority(')
+    const restore = sw.indexOf('createRestorePoint')
+    expect(gate).toBeGreaterThan(-1)
+    expect(restore).toBeGreaterThan(gate)
+    expect(restore).toBeLessThan(sw.indexOf('await acquire(sig, sources)'))
+  })
+
+  it('an install from your own domain keeps the bundled update check listening', () => {
+    expect(ACQUIRE).toMatch(/source: hostZone\(pkg\.zone\) === hostZone\(location\.host\) \? 'bundled' : 'sentinel'/)
+  })
+})
