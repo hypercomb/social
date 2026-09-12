@@ -3838,3 +3838,120 @@ key"); the "nothing leaves the machine" promise of §4.1.8 holds only while the
 helper is set to Local. The local-model proofs above stand for the local path;
 the Haiku path was not proved live here because a key cannot be entered on the
 participant's behalf.
+
+### 2026-09-11, later — pass 2: the masthead, the step rules, the composer
+
+The centre of the window now reads as one story, from the same record pass 1
+wrote (`route.flow.session`, `flow.counts`, the node kinds) — nothing new is
+asked of the model.
+
+- **The masthead** (`.chat-bar.chat-mast`, `sessionHead`): the conversation's
+  name in the reading face (the session card's name, else the thread's own
+  title), the *stands* line with the open step's icon, a done/open meter with
+  counts, and the model + bridge line (`.chat-link`) as a quiet chip on the same
+  row — the status band that used to sit above the composer is gone. The tools
+  (goal, fold, providers, archive) stay at its end. Folded, the row still shows
+  only its tools.
+- **The column's own head is removed** — the masthead carries the same words,
+  and saying them twice was noise. `chat.route.head.kicker` went with it.
+- **Step rules in the thread** (`.chat-stepmark`, `stepRules`): before the first
+  row each node owns, a thin labelled rule with the step's kind icon (else its
+  state glyph) in the state colour. The state colours now live on `.chat-panel`
+  so the masthead, the rules and the column share them. The rules show whether
+  or not the column does — a narrow window keeps the structure in the thread.
+- **The composer** is one box (`.chat-inputrow` with the send inside it), and
+  the drop area with the clipboard shelf moved out of the header to a row under
+  it (`.chat-under`), beside "Enter sends · Shift+Enter new line"
+  (`chat.compose.keys`, 14 catalogs; hidden on touch). The shelf opens upward.
+- **Organizing is attended whenever a conversation is on screen**, not only
+  while the column is shown: the masthead reads the record even with the column
+  hidden, so the visit (`organizeRoute` → `markRouteVisited`) no longer depends
+  on the column toggle.
+
+Proved on the isolated 4253 shell (test bridge on 2411, helper set to Local,
+`qwen3:8b`): the ten-turn pottery conversation organized into five steps with
+kinds; the masthead read "Create landing page for pottery studio" with its
+stands line and 5 done · 0 open; five step rules drew in the thread (bolt,
+bolt, bug_report, bolt, and one card with no kind falling back to its state
+glyph). Composer and drop row checked at desktop width. At 375 px the masthead first measured 231 px (tools share its row, so the stands line ran three lines and the link sentence clipped); on a phone the stands line now clamps to two lines and the link sentence hides (the model chip stays), bringing it to 172 px with no horizontal overflow. The stands sentence
+qwen wrote ("the contact form is pending") disagreed with its own five done
+steps — a model-quality miss, the reason the helper defaults to Haiku.
+
+### 2026-09-11, later — pass 3: the conversations list, grouped by who it waits on
+
+Jaime chose the mockup's shape (option 1): one **Conversations** section at the
+top of the tiles rail (`agent-tiles-rail.ts`), across every tile, with the
+tiles below it under a "Tiles here" heading. A tile's own fold still lists its
+threads — this is the one place to see everything at once.
+
+- **Groups.** *Waiting on you* — the newest turn is a reply that asked a
+  question nobody has answered. *Open* — everything else live, including a
+  question still out ("waiting for reply…", hourglass). *Done today* — replied,
+  organized, every step settled once rolled up, nothing newer than the flow,
+  and active since midnight; older finished threads stay under their tile.
+  *Archived (n)* folds shut beneath them. The head counts waiting + open.
+- **A row** (`.hc-rail-convo`) is a state icon (help · pending ·
+  hourglass_empty · check_circle · archive), the NAME (the session card's name,
+  else the opening line), one line of where it stands (the session's *stands*,
+  else the blurb), and an age (now · 12m · 2h · 3d). One line each, so the list
+  scans and never resizes under the hand. New class names, so the tile folds
+  and their tests are untouched.
+- **"Waiting on you" costs no read.** `appendTurnSig` stamps `asks: true` on a
+  reply's manifest when `splitQuestion` finds a question; the list walk reads
+  the flag (`askingIn`) and surfaces `asking` on `ConversationSummary` /
+  `TileConversation` (present only when true). The one-text-per-thread guard in
+  `chat-thread-shape.spec.ts` still holds. Replies stored before this carry no
+  flag and list as Open.
+- **One roll-up rule.** A stored node can read `open` while its display state
+  is `done` (a parent over settled branches). The rule moved out of `flowView`
+  into `rolledState`, and `flowOpenSteps(record)` exports it for the list, so
+  the masthead's counts and the list's grouping cannot disagree.
+- **The current row follows the window.** The chat window calls the rail's
+  `showConversation(convoId)` whenever it loads a conversation, however it was
+  opened; the row lights without announcing anything back.
+- **Freshness.** Standings are re-read after every list walk or merge and on
+  `chat:route-flow-changed`; the section repaints in place keeping its scroll.
+
+Proved on the isolated 4253 shell with seeded threads: "Conversations · 3 open";
+Waiting on you (the backgrounds thread whose reply asked which tiles keep
+their photo); Open (a question still out, and a replied thread nothing had
+organized); Done today (the organized pottery thread, lit as current);
+Archived (1). Before the roll-up fix the pottery thread sat in Open — its root
+node is stored `open` over five settled branches.
+
+Not in this pass: the chat window's own fallback list (no rail — narrow shells
+and phones) is still the flat list.
+
+### 2026-09-11, later — pass 4: the column reads as the story
+
+The column now follows the sidebar mockup on the same record. The name, where
+it stands and the meter already live in the masthead (pass 2), so the column
+carries the steps themselves.
+
+- **A heading** (`.chat-route-sec`): "Workflow · N steps" (`chat.route.sec`,
+  `chat.route.sec.steps` plural), the count from the drawn nodes.
+- **What each step came to.** A step card carries its card's outcome in the
+  reading face, clamped to two lines (`.chat-route-outcome`), and which messages
+  it covers (`.chat-route-meta`, `chat.route.card.messages` → "messages 3–4").
+  Titles move to the reading face too; chrome stays mono. Decided takes its own
+  colour (`--chat-route-decided`) beside done and open.
+- **ONE dormant tail.** Every exchange the flow has not read is ONE quiet stage
+  card (`RouteItem.exchanges`), captioned "3 newer exchanges, not organized
+  yet" past an organized flow (`chat.route.tail.newer`) or "3 exchanges, not
+  organized yet" when nothing is organized (`chat.route.tail.all`) — never a
+  card per exchange. It is still one tree item, so the keyboard walk, the pipes
+  and reading-the-thread selection are unchanged; its rows are every tail row.
+- **The pane is never empty** (`routePaneItem`): the current step; else the
+  newest open step; else the last step; else the tail. The spans, the summary
+  state, the status line and the span chips read the pane's item. The current
+  step (`routeCurrent`, lit rows, `aria-selected`) is untouched — the fallback
+  only fills the pane.
+
+Proved on the isolated 4253 shell: the pottery thread drew "Workflow · 5
+steps", each card with its outcome and "messages 1–2" … "messages 9–10", the
+pane on a step with nothing pressed; a thread of one unorganized exchange drew
+one tail line "1 exchange, not organized yet" and the pane fell back to it.
+
+**Owed:** `scripts/verify-chat-route.cjs` still asserts one stage card per
+exchange and stages with no caption text (sections n, o and the re-tail
+check); it needs updating to the single counted tail before it is run again.

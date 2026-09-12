@@ -2096,6 +2096,24 @@ const flowFits = (record: Pick<RouteFlowRecord, 'upToTurnCount' | 'upToTurnSig' 
   flowMatches(record, turns)
   && exchangeStarts(turns).filter(start => start < record.upToTurnCount).length === record.exchanges.length
 
+/** A node's DISPLAY state, from the record alone: an `open` node shows `done`
+ *  when it has branches, every descendant is settled, and all of its own
+ *  exchanges came before its first descendant's (see `flowView`). */
+const rolledState = (record: Pick<RouteFlowRecord, 'nodes' | 'exchanges'>, node: RouteFlowNode): RouteFlowState => {
+  if (node.state !== 'open') return node.state
+  const exchangesOf = (id: string): number[] => record.exchanges.flatMap((owner, k) => (owner === id ? [k] : []))
+  const descendants = [...descendantsOf(record.nodes, node.id)]
+  const settledAll = descendants.length > 0
+    && descendants.every(id => record.nodes.find(candidate => candidate.id === id)?.state !== 'open')
+  const firstDescendant = Math.min(...descendants.flatMap(exchangesOf))
+  return settledAll && exchangesOf(node.id).every(k => k < firstDescendant) ? 'done' : 'open'
+}
+
+/** How many steps of a stored flow still read `open` once rolled up — what a
+ *  list says about a conversation without drawing it. */
+export const flowOpenSteps = (record: Pick<RouteFlowRecord, 'nodes' | 'exchanges'>): number =>
+  record.nodes.filter(node => rolledState(record, node) === 'open').length
+
 /**
  * THE VIEW the shell draws — never stored. A node's exchanges are 1-based; its
  * turns are its own exchanges' ranges. Its display state ROLLS UP: a node whose
@@ -2109,14 +2127,7 @@ const flowView = (record: RouteFlowRecord, turns: readonly RouteTurn[], sessionS
   const coverage = nodeCoverage(record, turns)
   const nodes = record.nodes.map((node): RouteFlowViewNode => {
     const own = coverage.get(node.id) ?? { exchanges: [], turns: [] }
-    let state = node.state
-    if (state === 'open') {
-      const descendants = [...descendantsOf(record.nodes, node.id)]
-      const settledAll = descendants.length > 0
-        && descendants.every(id => record.nodes.find(candidate => candidate.id === id)?.state !== 'open')
-      const firstDescendant = Math.min(...descendants.flatMap(id => coverage.get(id)?.exchanges ?? []))
-      if (settledAll && own.exchanges.every(k => k < firstDescendant)) state = 'done'
-    }
+    const state = rolledState(record, node)
     const { key: _key, ...card } = node.card ?? ({} as RouteFlowCard)
     return {
       id: node.id, title: node.title,

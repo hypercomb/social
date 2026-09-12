@@ -23,7 +23,7 @@
 // one file per turn named by the hash of its own bytes. Append-only: two
 // replies are two turns, never an overwrite.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, splitQuestion } from '@hypercomb/core'
 import { organizeRoute, readRoute, type Route } from './chat-route.js'
 import { runIdForAsk } from './chat-steps.js'
 
@@ -36,6 +36,9 @@ export type TurnRole = 'user' | 'assistant'
 
 export interface ChatTurn {
   readonly kind: 'chat-turn'
+  /** Set on a reply that asked a question, so a list can tell the thread
+   *  waits on the participant without reading the text. */
+  readonly asks?: true
   readonly convoId: string
   readonly role: TurnRole
   readonly text: string
@@ -64,6 +67,9 @@ export interface ChatTurn {
  *  a thread is whatever its bucket holds, in either shape. */
 type TurnManifest = {
   readonly kind: 'chat-turn'
+  /** Set on a reply that asked a question, so a list can tell the thread
+   *  waits on the participant without reading the text. */
+  readonly asks?: true
   readonly convoId: string
   readonly role: TurnRole
   readonly at: number
@@ -128,6 +134,7 @@ export interface ChatGoalReached {
 /** A parsed bucket file before its text is materialized: either a legacy
  *  inline turn (text present) or a manifest (contentSig present). */
 type RawTurn = {
+  readonly asks?: true
   readonly convoId: string
   readonly role: TurnRole
   readonly at: number
@@ -166,6 +173,8 @@ export interface ConversationSummary {
    *  line. Surfaces say so ("waiting for reply…") rather than naming a thread
    *  after the thing you did not know when you started it. */
   readonly replied: boolean
+  /** The newest turn is a reply holding a question nobody has answered yet. */
+  readonly asking?: boolean
 }
 
 /** Conversations that belong to a PERSON, and so appear in the chat window.
@@ -349,6 +358,7 @@ export const appendTurnSig = async (
   const id = String(convoId ?? '').trim()
   const body = String(text ?? '')
   if (!id || !body) return null
+  const asks = role === 'assistant' && !!splitQuestion(body).question
 
   const store = get<StoreLike>('@hypercomb.social/Store')
   const pool = await store?.getPool?.(THREADS_POOL)
@@ -370,9 +380,9 @@ export const appendTurnSig = async (
     let contentSig: string | undefined
     if (store?.putResource) {
       contentSig = await store.putResource(new Blob([body], { type: 'text/plain' }))
-      record = { kind: 'chat-turn', convoId: id, role, at: Date.now(), contentSig }
+      record = { kind: 'chat-turn', convoId: id, role, at: Date.now(), contentSig, ...(asks ? { asks: true as const } : {}) }
     } else {
-      record = { kind: 'chat-turn', convoId: id, role, at: Date.now(), text: body }
+      record = { kind: 'chat-turn', convoId: id, role, at: Date.now(), text: body, ...(asks ? { asks: true as const } : {}) }
     }
     const bytes = new TextEncoder().encode(JSON.stringify(record)).buffer as ArrayBuffer
     // Named by its own content hash: append-only. (Two deliberate repeats of
@@ -525,6 +535,13 @@ const resolveText = async (raw: RawTurn, store: StoreLike): Promise<string> => {
   } catch { return '' }
 }
 
+/** WAITING ON YOU: the newest turn is a reply that asked a question nobody
+ *  has answered. Read off the manifest the reply was stored with — no text. */
+const askingIn = (raw: readonly RawTurn[]): boolean => {
+  const last = raw[raw.length - 1]
+  return !!last && last.role === 'assistant' && last.asks === true
+}
+
 /** Raw records → the ChatTurn shape every consumer reads (text materialized). */
 const materializeTurns = async (
   raw: readonly RawTurn[],
@@ -621,6 +638,7 @@ export const listConversationsWithLatest = async (): Promise<ConversationList> =
           lastAt,
           archived: read.archived,
           replied: repliedIn(raw),
+          ...(!read.archived && askingIn(raw) ? { asking: true } : {}),
           ...(read.goal ? { goal: read.goal } : {}),
         })
         // AN ARCHIVED THREAD IS NEVER "where you were". `latestTurns` is what
@@ -693,6 +711,8 @@ export interface TileConversation {
   readonly turns: number
   /** Whether anything has come back — see ConversationSummary.replied. */
   readonly replied: boolean
+  /** The newest turn is a reply holding a question nobody has answered yet. */
+  readonly asking?: boolean
   readonly lastAt: number
   /** The newest turn landed after the last time this thread was opened. */
   readonly unread: boolean
@@ -733,6 +753,7 @@ export const listTileConversations = async (): Promise<TileConversation[]> => {
       title: convo.title,
       turns: convo.turnCount,
       replied: convo.replied,
+      ...(convo.asking ? { asking: true } : {}),
       lastAt: convo.lastAt,
       unread: convo.lastAt > (seen[convo.convoId] ?? 0),
       archived: convo.archived,
@@ -764,6 +785,7 @@ export const listRailConversations = async (): Promise<TileConversation[]> => {
       title: convo.title,
       turns: convo.turnCount,
       replied: convo.replied,
+      ...(convo.asking ? { asking: true } : {}),
       lastAt: convo.lastAt,
       unread: convo.lastAt > (seen[convo.convoId] ?? 0),
       archived: convo.archived,
@@ -795,6 +817,7 @@ export const readConversationSummary = async (convoId: string): Promise<TileConv
       title: await titleOfRaw(raw, store),
       turns: raw.length,
       replied: repliedIn(raw),
+      ...(!read?.archived && askingIn(raw) ? { asking: true } : {}),
       lastAt,
       unread: lastAt > (seenMap()[id] ?? 0),
       archived: !!read?.archived,
@@ -822,6 +845,7 @@ export const listGlobalConversations = async (): Promise<TileConversation[]> => 
       title: convo.title,
       turns: convo.turnCount,
       replied: convo.replied,
+      ...(convo.asking ? { asking: true } : {}),
       lastAt: convo.lastAt,
       unread: convo.lastAt > (seen[convo.convoId] ?? 0),
       archived: convo.archived,

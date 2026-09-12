@@ -95,6 +95,7 @@ import {
   type TileConversation,
 } from './chat-thread.js'
 import { readBlurbs, type ChatBlurb } from './chat-blurb.js'
+import { flowOpenSteps, readRouteFlow } from './chat-route.js'
 import { walkTree, type WalkHistory, type WalkStore } from '../presentation/tiles/tree-walk.js'
 import { readThumbnail, type ThumbnailStore } from '../presentation/tiles/thumbnails.js'
 import { tilePictureCandidates } from '../editor/tile-properties.js'
@@ -212,6 +213,25 @@ const STEEL = '126, 182, 214'
 /** Amber says THE HIVE: work in flight, or something waiting for you. It is
  *  never used for your own unsent words — those wear the name's white. */
 const AMBER = '226, 196, 140'
+/** A conversation's standing, in the colours the chat window uses for it. */
+const CONVO_WAIT = '201, 139, 224'
+const CONVO_OPEN = '232, 176, 74'
+const CONVO_DONE = '112, 213, 154'
+
+/** Who a conversation waits on, as the list groups it. */
+type ConvoGroup = 'waiting' | 'open' | 'done'
+
+/** A conversation's standing as an icon. Every name is in the shipped subset. */
+const CONVO_ICONS = { waiting: 'help', open: 'pending', done: 'check_circle', asked: 'hourglass_empty', filed: 'archive' } as const
+
+/** What a conversation's organized workflow says, as the list reads it. */
+type ConvoStanding = {
+  readonly name: string
+  readonly stands: string
+  readonly open: number
+  readonly total: number
+  readonly upTo: number
+}
 
 /** The rail's own stylesheet — installed on first mount so the rail reads
  *  identically inside the agent panel and the chat window. Host geometry
@@ -544,6 +564,50 @@ const RAIL_CSS = `
   font-family:var(--hc-mono,monospace);letter-spacing:0.04em;}
 .hc-rail-archived.on{color:var(--hc-window-accent, rgb(${STEEL}));}
 
+/* THE CONVERSATIONS, across every tile, above the tiles. Grouped by who each
+   one waits on; a row is its name, where it stands and how long since it moved,
+   one line each, so the list scans and never grows under your hand. */
+.hc-rail-convos-block{display:flex;flex-direction:column;}
+.hc-rail-convos{display:flex;flex-direction:column;gap:1px;max-height:45vh;overflow-y:auto;}
+.hc-rail-convos-head{display:flex;align-items:baseline;justify-content:space-between;gap:0.5rem;
+  padding:0.45rem 0.45rem 0.2rem;font-family:var(--hc-mono,monospace);font-size:0.64rem;
+  letter-spacing:0.12em;text-transform:uppercase;color:var(--hc-window-ink-quiet);}
+.hc-rail-convos-count{letter-spacing:0.04em;text-transform:none;color:var(--hc-window-ink-plain);}
+.hc-rail-convos-group{padding:0.45rem 0.45rem 0.15rem;font-family:var(--hc-mono,monospace);
+  font-size:0.66rem;color:var(--hc-window-ink-quiet);}
+.hc-rail-convo{display:grid;grid-template-columns:1.3rem minmax(0,1fr) auto;gap:0.45rem;
+  align-items:start;width:100%;padding:0.4rem 0.45rem;border:0;background:none;cursor:pointer;
+  text-align:left;font:inherit;color:var(--hc-window-ink-plain);
+  border-radius:var(--hc-radius-control, 2px);}
+.hc-rail-convo:hover{background:rgba(255,255,255,0.05);color:var(--hc-window-ink-loud);}
+.hc-rail-convo:focus-visible{outline:1px solid rgba(${STEEL},0.6);outline-offset:-1px;}
+.hc-rail-convo.current{background:rgba(${STEEL},0.12);color:var(--hc-window-ink-loud);
+  box-shadow:inset 2px 0 0 rgba(${STEEL},0.9);}
+.hc-rail-convo.filed{color:var(--hc-window-ink-quiet);}
+.hc-rail-convo-icon{font-family:'Material Symbols Outlined','Material Symbols Rounded';
+  font-weight:400;font-style:normal;letter-spacing:normal;text-transform:none;
+  white-space:nowrap;direction:ltr;-webkit-font-feature-settings:'liga';
+  font-feature-settings:'liga';-webkit-font-smoothing:antialiased;
+  font-size:1.05rem;line-height:1.15;color:var(--hc-window-ink-quiet);}
+.hc-rail-convo[data-group="waiting"] .hc-rail-convo-icon{color:color-mix(in srgb, rgba(${CONVO_WAIT},0.95), rgb(var(--hc-panel-ink, 43, 30, 6)) var(--hc-deepen, 0%));}
+.hc-rail-convo[data-group="open"] .hc-rail-convo-icon{color:color-mix(in srgb, rgba(${CONVO_OPEN},0.95), rgb(var(--hc-panel-ink, 43, 30, 6)) var(--hc-deepen, 0%));}
+.hc-rail-convo[data-group="done"] .hc-rail-convo-icon{color:color-mix(in srgb, rgba(${CONVO_DONE},0.95), rgb(var(--hc-panel-ink, 43, 30, 6)) var(--hc-deepen, 0%));}
+.hc-rail-convo-text{display:flex;flex-direction:column;gap:0.1rem;min-width:0;}
+.hc-rail-convo-name{font-size:0.8rem;line-height:1.3;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;}
+.hc-rail-convo.unread .hc-rail-convo-name{color:var(--hc-window-ink-loud);font-weight:600;}
+.hc-rail-convo-line{font-size:0.72rem;line-height:1.3;color:var(--hc-window-ink-quiet);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hc-rail-convo-age{font-family:var(--hc-mono,monospace);font-size:0.64rem;line-height:1.7;
+  color:var(--hc-window-ink-quiet);}
+.hc-rail-convos-archived{margin-top:0.2rem;padding:0.3rem 0.45rem;border:0;background:none;
+  cursor:pointer;text-align:left;font-family:var(--hc-mono,monospace);font-size:0.72rem;
+  letter-spacing:0.04em;color:var(--hc-window-ink-quiet);}
+.hc-rail-convos-archived.on{color:var(--hc-window-accent, rgb(${STEEL}));}
+.hc-rail-tiles-head{margin:0.35rem 0 0.2rem;padding:0.5rem 0.45rem 0.2rem;
+  border-top:1px solid rgba(${STEEL},0.18);font-family:var(--hc-mono,monospace);
+  font-size:0.64rem;letter-spacing:0.12em;text-transform:uppercase;color:var(--hc-window-ink-quiet);}
+
 /* Same defect, same pass: placeholder text needs 4.5:1, not 2.76:1. */
 .hc-rail-find input::placeholder{color:var(--hc-window-ink-quiet);}
 
@@ -659,6 +723,15 @@ export class AgentTilesRail {
    *  never load-bearing: a row whose blurb is missing, stale or wiped draws
    *  exactly as it did before blurbs existed. */
   #blurbs = new Map<string, ChatBlurb>()
+  #dropFlowWatch: (() => void) | null = null
+  /** What each conversation's organized workflow says, by convoId — read
+   *  from the flows pool, never derived here, and never load-bearing. */
+  #standings = new Map<string, ConvoStanding>()
+  #standingsEpoch = 0
+  /** Is the conversations list's archive shelf showing? Not persisted. */
+  #convosArchiveOpen = false
+  /** The conversation the window has open, however it was opened. */
+  #openConvo = ''
   #dropBusyWatch: (() => void) | null = null
   #dropGroupWatch: (() => void) | null = null
 
@@ -778,6 +851,7 @@ export class AgentTilesRail {
     this.#dropDraftWatch?.()
     this.#dropChatWatch?.()
     this.#dropBlurbWatch?.()
+    this.#dropFlowWatch?.()
     if (this.#profile.chats) {
       this.#dropDraftWatch = EffectBus.on('chat:drafts-changed', () => { void this.#refreshDrafts() })
       this.#dropChatWatch = EffectBus.on<{ convoId?: string }>(
@@ -785,6 +859,8 @@ export class AgentTilesRail {
       // The label follows the POOL, not this surface: a blurb minted by the
       // orchestrator while the rail is open shows up without a reopen.
       this.#dropBlurbWatch = EffectBus.on('chat:blurbs-changed', () => { void this.#refreshBlurbs() })
+      // A conversation's workflow is written in the background; its row follows.
+      this.#dropFlowWatch = EffectBus.on('chat:route-flow-changed', () => { void this.#refreshStandings() })
     }
     this.#dropGroupWatch?.()
     this.#dropGroupWatch = EffectBus.on<{ paths?: readonly string[] }>('context:active-set', payload => {
@@ -848,6 +924,15 @@ export class AgentTilesRail {
     if (this.#subject?.key === key) return
     this.#subject = { key, path: [...this.#here()], name }
     this.#markCurrent(this.#rowFor(key))
+  }
+
+  /** Light the conversation the window has open WITHOUT announcing it — the
+  *  window opened it (from the list, a tile, a command) and already knows. */
+  showConversation(convoId: string): void {
+    const id = String(convoId ?? '')
+    if (id === this.#openConvo) return
+    this.#openConvo = id
+    this.#repaintConvos()
   }
 
   /** Re-read every row's badge from the surface, in place. */
@@ -914,6 +999,8 @@ export class AgentTilesRail {
     this.#dropChatWatch = null
     this.#dropBlurbWatch?.()
     this.#dropBlurbWatch = null
+    this.#dropFlowWatch?.()
+    this.#dropFlowWatch = null
     this.#dropBusyWatch?.()
     this.#dropBusyWatch = null
     this.#dropGroupWatch?.()
@@ -1054,6 +1141,8 @@ export class AgentTilesRail {
     // question on. It sits above the level whatever level you are on, so
     // "ask about the whole thing" is never somewhere else. Hidden only while
     // the find box is narrowing the list: it is not one of the matches.
+    // THE CONVERSATIONS, across every tile, above the tiles themselves.
+    if (this.#profile.chats && !this.#query && this.#chatList.length) list.appendChild(this.#convosBlock())
     if (this.#profile.chats && !this.#query) list.appendChild(this.#hiveGroup())
 
     if (rows === null) {
@@ -1288,6 +1377,7 @@ export class AgentTilesRail {
   #repaintExpanded(): void {
     const list = this.#list
     if (!list) return
+    this.#repaintConvos()
     for (const panel of list.querySelectorAll<HTMLElement>('.hc-rail-chats')) {
       const key = panel.dataset['key'] ?? ''
       if (key === HIVE_KEY) { panel.replaceWith(this.#chatsPanel(key, this.#hiveRow())); continue }
@@ -1539,6 +1629,198 @@ export class AgentTilesRail {
     return panel
   }
 
+  /** Read what every listed conversation's workflow says. A pool read each and
+   *  no model call; a conversation nothing has organized is simply absent. */
+  async #refreshStandings(): Promise<void> {
+    if (!this.#profile.chats) return
+    const epoch = ++this.#standingsEpoch
+    const ids = this.#chatList.filter(chat => !chat.archived).map(chat => chat.convoId)
+    const records = await Promise.all(ids.map(async id => [id, await readRouteFlow(id)] as const))
+    if (this.#disposed || epoch !== this.#standingsEpoch) return
+    const next = new Map<string, ConvoStanding>()
+    for (const [id, record] of records) {
+      if (!record?.nodes.length) continue
+      next.set(id, {
+        name: record.session?.name ?? '',
+        stands: record.session?.stands ?? '',
+        open: flowOpenSteps(record),
+        total: record.nodes.length,
+        upTo: record.upToTurnCount,
+      })
+    }
+    this.#standings = next
+    this.#repaintConvos()
+  }
+
+  /** Who a conversation waits on: YOU when its newest reply asked a question;
+   *  nobody when every organized step is settled and nothing newer came in;
+   *  otherwise it is open. */
+  #convoGroup(chat: TileConversation): ConvoGroup {
+    if (chat.asking) return 'waiting'
+    const standing = this.#standings.get(chat.convoId)
+    if (chat.replied && standing && standing.total > 0 && standing.open === 0 && standing.upTo >= chat.turns) return 'done'
+    return 'open'
+  }
+
+  /** How long since a conversation moved, in the fewest characters. */
+  #age(at: number): string {
+    const minutes = Math.floor(Math.max(0, Date.now() - at) / 60_000)
+    if (minutes < 1) return this.#t('agent.rail-age-now', 'now')
+    if (minutes < 60) return this.#t('agent.rail-age-minutes', '{count}m').replace('{count}', String(minutes))
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return this.#t('agent.rail-age-hours', '{count}h').replace('{count}', String(hours))
+    return this.#t('agent.rail-age-days', '{count}d').replace('{count}', String(Math.floor(hours / 24)))
+  }
+
+  /** The conversations list and the heading that hands over to the tiles. */
+  #convosBlock(): HTMLElement {
+    const block = document.createElement('div')
+    block.className = 'hc-rail-convos-block'
+    block.appendChild(this.#convosSection())
+    const tiles = document.createElement('div')
+    tiles.className = 'hc-rail-tiles-head'
+    tiles.textContent = this.#t('agent.rail-tiles', 'Tiles here')
+    block.appendChild(tiles)
+    return block
+  }
+
+  /** THE CONVERSATIONS, across every tile, by who they wait on: a question
+   *  out to you, still open, done today — and what was put away, folded shut
+   *  under them. A tile's own fold below still lists its threads; this is the
+   *  one place to see everything at once. */
+  #convosSection(): HTMLElement {
+    const section = document.createElement('section')
+    section.className = 'hc-rail-convos'
+    const heading = this.#t('agent.rail-convos', 'Conversations')
+    section.setAttribute('aria-label', heading)
+
+    const live = this.#chatList.filter(chat => !chat.archived)
+    const filed = this.#chatList.filter(chat => chat.archived)
+    const startOfToday = new Date().setHours(0, 0, 0, 0)
+    const groups: Record<ConvoGroup, TileConversation[]> = { waiting: [], open: [], done: [] }
+    for (const chat of live) {
+      const group = this.#convoGroup(chat)
+      if (group === 'done' && chat.lastAt < startOfToday) continue
+      groups[group].push(chat)
+    }
+
+    const head = document.createElement('div')
+    head.className = 'hc-rail-convos-head'
+    const title = document.createElement('span')
+    title.textContent = heading
+    const count = document.createElement('span')
+    count.className = 'hc-rail-convos-count'
+    const open = groups.waiting.length + groups.open.length
+    count.textContent = open ? this.#t('agent.rail-convos-open', '{count} open').replace('{count}', String(open)) : ''
+    head.append(title, count)
+    section.appendChild(head)
+
+    const current = this.#openConvo || this.#subject?.convoId || ''
+    const labels: Record<ConvoGroup, string> = {
+      waiting: this.#t('agent.rail-convos-waiting', 'Waiting on you'),
+      open: this.#t('agent.rail-convos-active', 'Open'),
+      done: this.#t('agent.rail-convos-done', 'Done today'),
+    }
+    for (const group of ['waiting', 'open', 'done'] as const) {
+      if (!groups[group].length) continue
+      const label = document.createElement('div')
+      label.className = 'hc-rail-convos-group'
+      label.textContent = labels[group]
+      section.appendChild(label)
+      for (const chat of groups[group]) section.appendChild(this.#convoRow(chat, group, current))
+    }
+
+    if (filed.length) {
+      const toggle = document.createElement('button')
+      toggle.type = 'button'
+      toggle.className = 'hc-rail-convos-archived'
+      toggle.classList.toggle('on', this.#convosArchiveOpen)
+      toggle.setAttribute('aria-expanded', this.#convosArchiveOpen ? 'true' : 'false')
+      toggle.textContent = this.#t('agent.rail-chat-archived', 'Archived ({count})').replace('{count}', String(filed.length))
+      toggle.addEventListener('click', event => {
+        event.stopPropagation()
+        this.#convosArchiveOpen = !this.#convosArchiveOpen
+        this.#repaintConvos()
+      })
+      section.appendChild(toggle)
+      if (this.#convosArchiveOpen) for (const chat of filed) section.appendChild(this.#convoRow(chat, null, current))
+    }
+    return section
+  }
+
+  /** One conversation: what it is, where it stands, how long since it moved. */
+  #convoRow(chat: TileConversation, group: ConvoGroup | null, current: string): HTMLElement {
+    const standing = this.#standings.get(chat.convoId)
+    const asked = !chat.replied && !chat.archived
+    const row = document.createElement('button')
+    row.type = 'button'
+    row.className = 'hc-rail-convo'
+    if (group) row.dataset['group'] = group
+    row.classList.toggle('current', !!current && chat.convoId === current)
+    row.classList.toggle('unread', chat.unread)
+    row.classList.toggle('filed', chat.archived)
+
+    const icon = document.createElement('span')
+    icon.className = 'hc-rail-convo-icon'
+    icon.setAttribute('aria-hidden', 'true')
+    icon.textContent = asked ? CONVO_ICONS.asked : group ? CONVO_ICONS[group] : CONVO_ICONS.filed
+
+    const text = document.createElement('span')
+    text.className = 'hc-rail-convo-text'
+    const name = document.createElement('span')
+    name.className = 'hc-rail-convo-name'
+    name.textContent = asked
+      ? this.#t('agent.rail-chat-waiting', 'waiting for reply…')
+      : (standing?.name || chat.title || this.#t('agent.rail-chat-untitled', 'Untitled'))
+    text.appendChild(name)
+    const said = asked ? chat.title : (standing?.stands || this.#blurbs.get(chat.convoId)?.line || '')
+    if (said) {
+      const line = document.createElement('span')
+      line.className = 'hc-rail-convo-line'
+      line.textContent = said
+      text.appendChild(line)
+    }
+
+    const age = document.createElement('span')
+    age.className = 'hc-rail-convo-age'
+    age.textContent = this.#age(chat.lastAt)
+
+    row.append(icon, text, age)
+    row.title = said ? `${name.textContent}\n${said}` : name.textContent ?? ''
+    row.addEventListener('click', event => {
+      event.stopPropagation()
+      this.#enterConvo(chat)
+    })
+    return row
+  }
+
+  /** Enter a conversation from the list, wherever its tile is. A tile on the
+   *  level in hand lends its row (picture, signature); one elsewhere is named
+   *  by the path the conversation already carries. */
+  #enterConvo(chat: TileConversation): void {
+    const segments = chat.path.split('/').filter(Boolean)
+    if (!segments.length) { this.#enterChat(this.#hiveRow(), HIVE_KEY, chat.convoId); return }
+    const key = pathKey(segments)
+    const level = this.#levels.get(pathKey(this.#here())) ?? []
+    const row = level.find(candidate => pathKey(candidate.segments) === key)
+      ?? { name: segments[segments.length - 1]!, segments, childCount: 0 }
+    this.#enterChat(row, key, chat.convoId)
+  }
+
+  /** Redraw the conversations list in place, keeping where it was scrolled. */
+  #repaintConvos(): void {
+    const list = this.#list
+    if (!list || !this.#profile.chats) return
+    const old = [...list.children].find(element => element.classList.contains('hc-rail-convos-block')) as HTMLElement | undefined
+    if (this.#query || !this.#chatList.length) { old?.remove(); return }
+    const scrolled = old?.querySelector<HTMLElement>('.hc-rail-convos')?.scrollTop ?? 0
+    const fresh = this.#convosBlock()
+    if (old) old.replaceWith(fresh)
+    else list.prepend(fresh)
+    const section = fresh.querySelector<HTMLElement>('.hc-rail-convos')
+    if (section) section.scrollTop = scrolled
+  }
+
   /** Enter one named conversation on a tile, and remember it as this tile's
    *  chat so coming back resumes it. */
   #enterChat(row: RailRow, key: string, convoId: string): void {
@@ -1687,6 +1969,7 @@ export class AgentTilesRail {
     this.#paintStatus()
     if (this.#expanded.size) this.#repaintExpanded()
     void this.#refreshBlurbs()
+    void this.#refreshStandings()
   }
 
   /** What the threads in hand turned out to be about. A pool read per
@@ -1707,6 +1990,7 @@ export class AgentTilesRail {
     try { blurbs = await readBlurbs(ids) } catch { return }
     if (this.#disposed) return
     this.#blurbs = blurbs
+    this.#repaintConvos()
     if (this.#expanded.size) this.#repaintExpanded()
   }
 
@@ -1723,6 +2007,7 @@ export class AgentTilesRail {
     // An unfolded list showing yesterday's threads is worse than none.
     if (this.#expanded.size) this.#repaintExpanded()
     void this.#refreshBlurbs()
+    void this.#refreshStandings()
   }
 
   /** The conversations on one tile, newest first. The pool is the list:

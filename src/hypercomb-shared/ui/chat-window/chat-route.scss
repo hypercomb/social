@@ -435,11 +435,12 @@ $jx: calc(#{$pad} + #{$square} / 2);
 // sidebar never falls back to the messages. Its marks sit beside the square.
 
 .chat-route-stage {
-  .chat-route-caption { display: none; }
-  .chat-route-node-pieces {
-    grid-row: 1;
-    align-self: center;
+  .chat-route-caption {
+    font-family: var(--hc-code, inherit);
+    font-size: 0.7rem;
+    color: var(--hc-window-ink-quiet);
   }
+  .chat-route-node-pieces { grid-row: 2; }
 }
 .chat-route-stage.chat-route-dormant .chat-route-piece {
   background: none;
@@ -890,75 +891,16 @@ $jx: calc(#{$pad} + #{$square} / 2);
 // done/open meter. State is COLOUR ON PURPOSE: done green, open amber, both
 // through `tw.ink()` so they deepen under the bright looks like every other
 // colour a tool window means.
-.chat-route-col {
+.chat-panel {
   --chat-route-done: #{tw.ink(#70d59a)};
   --chat-route-open: #{tw.ink(#e8b04a)};
-}
-
-.chat-route-head {
-  flex: 0 0 auto;
-  padding: 0.8rem 0.9rem 0.7rem;
-  border-bottom: 1px solid var(--hc-window-line);
-
-  .chat-route-head-kicker {
-    font-size: 0.62rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--hc-window-ink-quiet);
-    margin-bottom: 0.35rem;
-  }
-  .chat-route-head-name {
-    margin: 0 0 0.4rem;
-    font: 600 0.98rem/1.3 var(--hc-read, inherit);
-    color: var(--hc-window-ink-loud);
-    text-wrap: balance;
-    overflow-wrap: anywhere;
-  }
-  .chat-route-head-stands {
-    margin: 0;
-    display: flex;
-    gap: 0.45rem;
-    align-items: flex-start;
-    font: 400 0.8rem/1.4 var(--hc-read, inherit);
-    color: var(--hc-window-ink-plain);
-
-    .mat-sym {
-      flex: none;
-      font-size: 1.1rem;
-      margin-top: 0.05rem;
-      color: var(--chat-route-open);
-    }
-  }
-  &.chat-route-head-settled .chat-route-head-stands .mat-sym { color: var(--chat-route-done); }
-  // A step changed since the session card was written: the words are the
-  // last known, dimmed until the local model writes them again.
-  &.chat-route-head-stale .chat-route-head-stands { color: var(--hc-window-ink-quiet); }
-
-  .chat-route-head-meter {
-    display: flex;
-    align-items: center;
-    gap: 0.55rem;
-    margin-top: 0.6rem;
-    font-size: 0.66rem;
-    color: var(--hc-window-ink-quiet);
-  }
-  .chat-route-head-bar {
-    flex: 1 1 auto;
-    display: flex;
-    height: 4px;
-    background: var(--hc-window-line);
-    overflow: hidden;
-
-    i { display: block; flex: 0 0 0; }
-    .chat-route-head-done { background: var(--chat-route-done); }
-    .chat-route-head-open { background: var(--chat-route-open); }
-  }
-  .chat-route-head-counts { white-space: nowrap; }
+  --chat-route-decided: #{tw.ink(#7fb4e8)};
 }
 
 // A step's state, in the same colour on its glyph.
 .chat-route-state-done .chat-route-piece { color: var(--chat-route-done); }
 .chat-route-state-open .chat-route-piece { color: var(--chat-route-open); }
+.chat-route-state-decided .chat-route-piece { color: var(--chat-route-decided); border-color: var(--chat-route-decided); }
 
 // The header's workflow toggle: the close button's shape, the accent while
 // the column is shown.
@@ -968,3 +910,304 @@ $jx: calc(#{$pad} + #{$square} / 2);
   .mat-sym { font-size: 1.05em; }
   &.on { color: var(--hc-window-accent); }
 }
+
+// ── the masthead, the step rules, the composer ─────────────────────────────
+//
+// The centre reads as one story: the masthead names the conversation and says
+// where it stands, a rule in the thread marks where each step begins, and the
+// composer is one box with the drop area and its keys underneath.
+
+.chat-panel .chat-bar.chat-mast {
+  align-items: flex-start;
+  padding: 0.7rem 0.6rem 0.65rem 0.9rem;
+  border-bottom: 1px solid var(--hc-window-line);
+}
+
+.chat-mast-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+
+  .chat-current {
+    align-self: flex-start;
+    max-width: 100%;
+    padding: 0;
+    font-size: 1rem;
+    color: var(--hc-window-ink-loud);
+  }
+  .chat-current-name {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-wrap: balance;
+    font: 600 1.05rem/1.3 var(--hc-read, inherit);
+  }
+}
+
+// The masthead's "where it stands" sentence starts CLOSED — the meter row
+// carries only its status icon, on the SAME line as the counts and the model
+// chip, so the masthead never grows past two lines (title, then everything
+// else). Hovering the icon peeks the sentence (a floating shelf, same
+// material as .chat-clip-shelf); clicking it PINS the sentence open inline,
+// sticky (localStorage) so a participant who wants it visible does not have
+// to reopen it every load.
+.chat-mast-stands-wrap {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.chat-mast-stands-toggle {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  color: var(--chat-route-open);
+  cursor: pointer;
+
+  .mat-sym { font-size: 1rem; }
+  &:hover { background: rgba(var(--acc), 0.14); color: var(--hc-window-ink-loud); }
+  &:focus-visible { outline: 1px solid rgba(var(--acc), 0.7); outline-offset: 1px; }
+}
+.chat-mast-stands-wrap.chat-mast-settled .chat-mast-stands-toggle { color: var(--chat-route-done); }
+// A step changed since the words were written: last known, dimmed.
+.chat-mast-stands-wrap.chat-mast-stale .chat-mast-stands-toggle { color: var(--hc-window-ink-quiet); }
+
+.chat-mast-stands {
+  margin: 0;
+  max-width: 64ch;
+  font: 400 0.84rem/1.45 var(--hc-read, inherit);
+  color: var(--hc-window-ink-plain);
+}
+
+// Closed (default, not pinned): the sentence is a hover peek, floated over
+// whatever sits below rather than pushed into the layout.
+.chat-mast-stands-wrap:not(.chat-mast-open) {
+  position: relative;
+
+  .chat-mast-stands {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 3;
+    margin-top: 0.3rem;
+    padding: 0.5rem 0.6rem;
+    // Sized to its own text (clamped by max-width), not to the tiny icon
+    // button that is the wrap's only in-flow content.
+    width: max-content;
+    max-width: 26rem;
+    background: rgba(var(--hc-panel-pane), 0.97);
+    border: 1px solid rgba(var(--acc), 0.35);
+    border-radius: var(--hc-radius-floating, 4px);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+  }
+  &:hover .chat-mast-stands,
+  &:focus-within .chat-mast-stands {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+  }
+}
+
+.chat-mast-meter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.7rem;
+  font: 0.68rem/1.2 var(--hc-mono, monospace);
+  color: var(--hc-window-ink-quiet);
+
+  .chat-link {
+    min-width: 0;
+    padding: 0;
+    font-size: inherit;
+  }
+  .chat-answering {
+    max-width: 18rem;
+    margin-right: 0.3rem;
+  }
+}
+
+.chat-mast-bar {
+  flex: 0 1 10rem;
+  display: flex;
+  height: 4px;
+  background: var(--hc-window-line);
+  overflow: hidden;
+
+  i { display: block; flex: 0 0 0; }
+  .chat-mast-done { background: var(--chat-route-done); }
+  .chat-mast-open { background: var(--chat-route-open); }
+}
+
+.chat-mast-counts { white-space: nowrap; }
+
+.chat-stepmark {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+  margin-top: 0.6em;
+  font: 500 0.66em/1.2 var(--hc-mono, monospace);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hc-window-ink-quiet);
+
+  .mat-sym {
+    flex: none;
+    font-size: 1.35em;
+  }
+  .chat-stepmark-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  &::after {
+    content: '';
+    flex: 1 1 2em;
+    height: 1px;
+    background: var(--hc-window-line);
+  }
+
+  &[data-state='done'] .mat-sym,
+  &[data-state='decided'] .mat-sym { color: var(--chat-route-done); }
+  &[data-state='open'] .mat-sym { color: var(--chat-route-open); }
+  &[data-state='dropped'] { opacity: 0.7; }
+}
+
+.chat-panel .chat-inputrow {
+  gap: 0;
+  background: rgba(var(--hc-panel-ink), 0.05);
+  border: 1px solid rgba(var(--hc-panel-ink), 0.16);
+  border-radius: var(--md-shape-xs, 4px);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+
+  &:focus-within {
+    border-color: rgba(var(--acc), 0.6);
+    box-shadow: 0 0 0 1px rgba(var(--acc), 0.18);
+  }
+
+  .chat-input,
+  .chat-input:focus {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+  }
+  .chat-send {
+    background: transparent;
+    border-color: transparent;
+    color: var(--hc-window-accent);
+
+    &:hover { background: rgba(var(--acc), 0.14); }
+  }
+}
+
+.chat-under {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.45rem;
+
+  .chat-payload {
+    flex: 1 1 auto;
+    margin: 0;
+    min-height: 1.9rem;
+  }
+  .chat-clip-shelf {
+    top: auto;
+    bottom: calc(100% + 0.3rem);
+    left: 0;
+  }
+}
+
+.chat-under-keys {
+  flex: none;
+  font: 0.64rem/1 var(--hc-mono, monospace);
+  color: var(--hc-window-ink-quiet);
+  white-space: nowrap;
+
+  @include bp.touch { display: none; }
+}
+
+// A phone keeps the masthead to its name, two lines of where it stands and one
+// meter row: the model chip stays, the sentence about the link goes.
+@include bp.phone {
+  .chat-mast-stands > span:last-child {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
+  .chat-mast-meter .chat-link > span:not(.chat-route-notice) { display: none; }
+}
+
+// ── the column: a heading, and what each step came to ─────────────────────
+//
+// The column says what it is and how many steps it holds; a step card carries
+// its outcome in the reading face and which messages it covers, so the tree
+// reads as the story without pressing anything.
+
+.chat-route-sec {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem 0.35rem;
+  font-family: var(--hc-code, inherit);
+  font-size: 0.64rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--hc-window-ink-quiet);
+}
+.chat-route-sec-count {
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--hc-window-ink-plain);
+}
+
+.chat-route-node .chat-route-title { font-family: var(--hc-read, inherit); }
+
+.chat-route-outcome {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+  font-family: var(--hc-read, inherit);
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: var(--hc-window-ink-plain);
+}
+.chat-route-meta {
+  grid-column: 2;
+  grid-row: 3;
+  font-family: var(--hc-code, inherit);
+  font-size: 0.64rem;
+  color: var(--hc-window-ink-quiet);
+}
+.chat-route-node .chat-route-node-pieces { grid-row: 4; }
