@@ -24,7 +24,7 @@
 // replies are two turns, never an overwrite.
 
 import { EffectBus, splitQuestion } from '@hypercomb/core'
-import { organizeRoute, readRoute, type Route } from './chat-route.js'
+import { flowOpenSteps, organizeRoute, readRoute, readRouteFlow, type Route } from './chat-route.js'
 import { runIdForAsk } from './chat-steps.js'
 
 /** Pool of meaning holding conversations. Bare word, already in the frozen
@@ -1254,6 +1254,49 @@ export const recoverStreamCheckpoints = async (
 // functions and the window resolves them at call time, which is the sanctioned
 // way for a shell to consume a module.
 
+/** What a conversation's organized workflow says, as a list reads it. */
+export interface ConversationStanding {
+  readonly name: string
+  readonly stands: string
+  /** Steps still open once rolled up (flowOpenSteps). */
+  readonly open: number
+  readonly total: number
+  /** How far the flow read — fewer than the conversation's turns means newer talk. */
+  readonly upTo: number
+}
+
+/** Who a conversation waits on, as every list groups it. */
+export type ConversationGroup = 'waiting' | 'open' | 'done'
+
+/** Each conversation's standing, read from its stored flow: a pool read each
+ *  and no model call. A conversation nothing has organized is simply absent. */
+export const readConversationStandings = async (convoIds: readonly string[]): Promise<Map<string, ConversationStanding>> => {
+  const records = await Promise.all(convoIds.map(async id => [id, await readRouteFlow(id)] as const))
+  const out = new Map<string, ConversationStanding>()
+  for (const [id, record] of records) {
+    if (!record?.nodes.length) continue
+    out.set(id, {
+      name: record.session?.name ?? '',
+      stands: record.session?.stands ?? '',
+      open: flowOpenSteps(record),
+      total: record.nodes.length,
+      upTo: record.upToTurnCount,
+    })
+  }
+  return out
+}
+
+/** WHO IT WAITS ON: you, when its newest reply asked a question; nobody, when
+ *  every organized step is settled and nothing newer came in; otherwise open. */
+export const conversationGroup = (
+  chat: { readonly asking?: boolean; readonly replied: boolean; readonly turns: number },
+  standing: ConversationStanding | undefined,
+): ConversationGroup => {
+  if (chat.asking) return 'waiting'
+  if (chat.replied && standing && standing.total > 0 && standing.open === 0 && standing.upTo >= chat.turns) return 'done'
+  return 'open'
+}
+
 export class ChatThreads {
   readonly appendTurn = appendTurn
   readonly listTileConversations = listTileConversations
@@ -1319,6 +1362,17 @@ export class ChatThreads {
    *  drain, whichever module copy holds this class. A METHOD for the same
    *  import-cycle reason as `readRoute`; feature-detected by the shell
    *  (`organizeRoute?.`). */
+  readConversationStandings(convoIds: readonly string[]): Promise<Map<string, ConversationStanding>> {
+    return readConversationStandings(convoIds)
+  }
+
+  conversationGroup(
+    chat: { readonly asking?: boolean; readonly replied: boolean; readonly turns: number },
+    standing?: ConversationStanding,
+  ): ConversationGroup {
+    return conversationGroup(chat, standing)
+  }
+
   organizeRoute(convoId: string, liveRunId?: string, waiting?: boolean, prefer?: string): Promise<number> {
     return organizeRoute(convoId, liveRunId, waiting, prefer)
   }

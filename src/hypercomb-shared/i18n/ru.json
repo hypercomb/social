@@ -2265,6 +2265,7 @@
   "chat.untitled": "Новый чат",
   "chat.list.toggle": "Переключить беседу",
   "chat.list.empty": "Бесед пока нет.",
+  "chat.list.done": "Готово",
   "chat.turns.one": "{count} сообщение",
   "chat.turns.other": "{count} сообщений",
   "chat.delete": "Удалить эту беседу",

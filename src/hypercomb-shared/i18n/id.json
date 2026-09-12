@@ -2265,6 +2265,7 @@
   "chat.untitled": "Obrolan baru",
   "chat.list.toggle": "Ganti percakapan",
   "chat.list.empty": "Belum ada percakapan.",
+  "chat.list.done": "Selesai",
   "chat.turns.one": "{count} pesan",
   "chat.turns.other": "{count} pesan",
   "chat.delete": "Hapus percakapan ini",

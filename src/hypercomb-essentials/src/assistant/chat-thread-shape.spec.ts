@@ -281,6 +281,15 @@ describe('chat-thread — turns are contentSig manifests; legacy stays readable'
     expect(store.resourceReads - before).toBe(4)
   })
 
+  it('groups a conversation by who it waits on', () => {
+    const settled = { name: 'n', stands: 's', open: 0, total: 3, upTo: 4 }
+    expect(mod.conversationGroup({ asking: true, replied: true, turns: 4 }, settled)).toBe('waiting')
+    expect(mod.conversationGroup({ replied: true, turns: 4 }, settled)).toBe('done')
+    expect(mod.conversationGroup({ replied: true, turns: 6 }, settled)).toBe('open')
+    expect(mod.conversationGroup({ replied: true, turns: 4 }, { ...settled, open: 1 })).toBe('open')
+    expect(mod.conversationGroup({ replied: false, turns: 1 }, undefined)).toBe('open')
+  })
+
   it('archiving is a marker in the thread’s own bucket, and every turn survives', async () => {
     await mod.appendTurn('chat:filed', 'user', 'a question worth keeping')
     await mod.appendTurn('chat:filed', 'assistant', 'an answer worth keeping')

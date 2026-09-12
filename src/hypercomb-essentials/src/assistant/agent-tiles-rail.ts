@@ -92,10 +92,11 @@ import {
   HIVE_PATH, foldTileConversations, listRailConversations, listTileDrafts,
   newTileConvoId, readConversationSummary, tileConvoId,
   tilePath, tilePathOf,
+  conversationGroup, readConversationStandings,
+  type ConversationGroup, type ConversationStanding,
   type TileConversation,
 } from './chat-thread.js'
 import { readBlurbs, type ChatBlurb } from './chat-blurb.js'
-import { flowOpenSteps, readRouteFlow } from './chat-route.js'
 import { walkTree, type WalkHistory, type WalkStore } from '../presentation/tiles/tree-walk.js'
 import { readThumbnail, type ThumbnailStore } from '../presentation/tiles/thumbnails.js'
 import { tilePictureCandidates } from '../editor/tile-properties.js'
@@ -219,19 +220,13 @@ const CONVO_OPEN = '232, 176, 74'
 const CONVO_DONE = '112, 213, 154'
 
 /** Who a conversation waits on, as the list groups it. */
-type ConvoGroup = 'waiting' | 'open' | 'done'
+type ConvoGroup = ConversationGroup
 
 /** A conversation's standing as an icon. Every name is in the shipped subset. */
 const CONVO_ICONS = { waiting: 'help', open: 'pending', done: 'check_circle', asked: 'hourglass_empty', filed: 'archive' } as const
 
 /** What a conversation's organized workflow says, as the list reads it. */
-type ConvoStanding = {
-  readonly name: string
-  readonly stands: string
-  readonly open: number
-  readonly total: number
-  readonly upTo: number
-}
+type ConvoStanding = ConversationStanding
 
 /** The rail's own stylesheet — installed on first mount so the rail reads
  *  identically inside the agent panel and the chat window. Host geometry
@@ -1635,19 +1630,8 @@ export class AgentTilesRail {
     if (!this.#profile.chats) return
     const epoch = ++this.#standingsEpoch
     const ids = this.#chatList.filter(chat => !chat.archived).map(chat => chat.convoId)
-    const records = await Promise.all(ids.map(async id => [id, await readRouteFlow(id)] as const))
+    const next = await readConversationStandings(ids)
     if (this.#disposed || epoch !== this.#standingsEpoch) return
-    const next = new Map<string, ConvoStanding>()
-    for (const [id, record] of records) {
-      if (!record?.nodes.length) continue
-      next.set(id, {
-        name: record.session?.name ?? '',
-        stands: record.session?.stands ?? '',
-        open: flowOpenSteps(record),
-        total: record.nodes.length,
-        upTo: record.upToTurnCount,
-      })
-    }
     this.#standings = next
     this.#repaintConvos()
   }
@@ -1656,10 +1640,7 @@ export class AgentTilesRail {
    *  nobody when every organized step is settled and nothing newer came in;
    *  otherwise it is open. */
   #convoGroup(chat: TileConversation): ConvoGroup {
-    if (chat.asking) return 'waiting'
-    const standing = this.#standings.get(chat.convoId)
-    if (chat.replied && standing && standing.total > 0 && standing.open === 0 && standing.upTo >= chat.turns) return 'done'
-    return 'open'
+    return conversationGroup(chat, this.#standings.get(chat.convoId))
   }
 
   /** How long since a conversation moved, in the fewest characters. */

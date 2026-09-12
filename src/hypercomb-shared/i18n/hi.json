@@ -2265,6 +2265,7 @@
   "chat.untitled": "नई चैट",
   "chat.list.toggle": "बातचीत बदलें",
   "chat.list.empty": "अभी कोई बातचीत नहीं।",
+  "chat.list.done": "पूरी",
   "chat.turns.one": "{count} संदेश",
   "chat.turns.other": "{count} संदेश",
   "chat.delete": "यह बातचीत हटाएँ",

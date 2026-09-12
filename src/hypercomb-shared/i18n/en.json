@@ -1881,6 +1881,7 @@
   "chat.untitled": "New chat",
   "chat.list.toggle": "Switch conversation",
   "chat.list.empty": "No conversations yet.",
+  "chat.list.done": "Done",
   "chat.turns.one": "{count} message",
   "chat.turns.other": "{count} messages",
   "chat.delete": "Delete this conversation",

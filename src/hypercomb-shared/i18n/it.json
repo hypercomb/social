@@ -2265,6 +2265,7 @@
   "chat.untitled": "Nuova chat",
   "chat.list.toggle": "Cambia conversazione",
   "chat.list.empty": "Ancora nessuna conversazione.",
+  "chat.list.done": "Fatte",
   "chat.turns.one": "{count} messaggio",
   "chat.turns.other": "{count} messaggi",
   "chat.delete": "Elimina questa conversazione",

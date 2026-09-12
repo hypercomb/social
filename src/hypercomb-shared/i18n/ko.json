@@ -2265,6 +2265,7 @@
   "chat.untitled": "새 채팅",
   "chat.list.toggle": "대화 전환",
   "chat.list.empty": "아직 대화가 없습니다.",
+  "chat.list.done": "완료",
   "chat.turns.one": "메시지 {count}개",
   "chat.turns.other": "메시지 {count}개",
   "chat.delete": "이 대화 삭제",

@@ -407,8 +407,11 @@
         <!-- WHAT IS LIVE. Archived conversations are whole and readable, they
              are simply not rows you have to read past to find the one you
              want; the disclosure under the list is the way to them. -->
-        @for (conversation of liveRoster(); track conversation.convoId) {
-          <ng-container *ngTemplateOutlet="listRow; context: { $implicit: conversation }"></ng-container>
+        @for (group of listGroups(); track group.key) {
+          <li class="chat-list-group">{{ listGroupKey(group.key) | t }}</li>
+          @for (conversation of group.rows; track conversation.convoId) {
+            <ng-container *ngTemplateOutlet="listRow; context: { $implicit: conversation, group: group.key }"></ng-container>
+          }
         }
 
         <!-- THE WAY TO THE NEXT ONE, right under the conversations it would
@@ -442,26 +445,30 @@
       <!-- ONE ROW SHAPE for both shelves — a live conversation and an
            archived one are the same thing in different places, so drawing
            them from two copies of the markup is how they drift apart. -->
-      <ng-template #listRow let-conversation>
+      <ng-template #listRow let-conversation let-group="group">
         <li class="chat-list-row"
           [class.on]="conversation.convoId === activeId()"
           [class.filed]="conversation.archived">
           <button class="chat-list-body" type="button" (click)="pick(conversation.convoId)">
+            <span class="mat-sym chat-list-icon" aria-hidden="true" [attr.data-group]="group ?? null">{{ listIcon(conversation, group ?? null) }}</span>
             <!-- A tile chat is named by its TILE, not by its first sentence:
                  that is what you would look for when coming back to it. -->
-            @if (conversation.tile) {
+            @if (conversation.tile && conversation.tile !== '/') {
               <span class="chat-list-tile" [title]="conversation.tile">{{ conversation.tile }}</span>
             }
             <!-- A QUESTION STILL OUT has no subject to be named after; a thread PUT
                  AWAY without one was stopped rather than left waiting, so it
                  keeps its opening line. -->
-            <span class="chat-list-name" [class.awaiting]="!conversation.replied && !conversation.archived">{{ conversation.replied || conversation.archived ? (conversation.title || ('chat.untitled' | t)) : ('agent.rail-chat-waiting' | t) }}</span>
+            <span class="chat-list-name" [class.awaiting]="!conversation.replied && !conversation.archived">{{ conversation.replied || conversation.archived ? (listName(conversation) || ('chat.untitled' | t)) : ('agent.rail-chat-waiting' | t) }}</span>
+            @if (listLine(conversation); as line) {
+              <span class="chat-list-line">{{ line }}</span>
+            }
             <span class="chat-list-meta">
               @if (conversation.draft) {
                 <span class="chat-list-draft">{{ 'chat.list.draft' | t }}</span>
               }
-              @if (conversation.turnCount) {
-                {{ 'chat.turns' | t: { count: conversation.turnCount } }}
+              @if (listAge(conversation.lastAt); as age) {
+                {{ age }}
               }
             </span>
           </button>

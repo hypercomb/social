@@ -895,6 +895,7 @@ $jx: calc(#{$pad} + #{$square} / 2);
   --chat-route-done: #{tw.ink(#70d59a)};
   --chat-route-open: #{tw.ink(#e8b04a)};
   --chat-route-decided: #{tw.ink(#7fb4e8)};
+  --chat-route-wait: #{tw.ink(#c98be0)};
 }
 
 // A step's state, in the same colour on its glyph.
@@ -1211,3 +1212,53 @@ $jx: calc(#{$pad} + #{$square} / 2);
   color: var(--hc-window-ink-quiet);
 }
 .chat-route-node .chat-route-node-pieces { grid-row: 4; }
+
+// ── the flat conversations list (no rail): grouped as the rail groups ─────
+
+.chat-list-group {
+  padding: 0.6em 0.9em 0.15em;
+  font-family: var(--hc-code, inherit);
+  font-size: 0.64em;
+  color: var(--hc-window-ink-quiet);
+}
+
+.chat-panel .chat-list-body {
+  display: grid;
+  grid-template-columns: 1.3rem minmax(0, 1fr) auto;
+  column-gap: 0.45rem;
+  row-gap: 0.1em;
+  align-items: start;
+}
+
+.chat-list-icon {
+  grid-column: 1;
+  grid-row: 1 / span 3;
+  font-size: 1.05rem;
+  line-height: 1.2;
+  color: var(--hc-window-ink-quiet);
+
+  &[data-group='waiting'] { color: var(--chat-route-wait); }
+  &[data-group='open'] { color: var(--chat-route-open); }
+  &[data-group='done'] { color: var(--chat-route-done); }
+}
+
+.chat-panel .chat-list-body > .chat-list-tile,
+.chat-panel .chat-list-body > .chat-list-name,
+.chat-list-line {
+  grid-column: 2;
+  min-width: 0;
+}
+
+.chat-list-line {
+  font-size: 0.7em;
+  color: var(--hc-window-ink-quiet);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-panel .chat-list-body > .chat-list-meta {
+  grid-column: 3;
+  grid-row: 1;
+  font-family: var(--hc-code, inherit);
+}

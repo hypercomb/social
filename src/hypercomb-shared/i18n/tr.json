@@ -2265,6 +2265,7 @@
   "chat.untitled": "Yeni sohbet",
   "chat.list.toggle": "Konuşmayı değiştir",
   "chat.list.empty": "Henüz konuşma yok.",
+  "chat.list.done": "Bitenler",
   "chat.turns.one": "{count} mesaj",
   "chat.turns.other": "{count} mesaj",
   "chat.delete": "Bu konuşmayı sil",

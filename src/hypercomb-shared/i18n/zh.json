@@ -2265,6 +2265,7 @@
   "chat.untitled": "新建聊天",
   "chat.list.toggle": "切换对话",
   "chat.list.empty": "还没有对话。",
+  "chat.list.done": "已完成",
   "chat.turns.one": "{count} 条消息",
   "chat.turns.other": "{count} 条消息",
   "chat.delete": "删除此对话",

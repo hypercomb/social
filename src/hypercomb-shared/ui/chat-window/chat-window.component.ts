@@ -705,13 +705,31 @@ type ConversationSummary = {
    *  build does not report it — and there, every thread reads as answered,
    *  which is exactly how this behaved before the flag existed. */
   readonly replied?: boolean
+  /** The newest turn is a reply that asked a question nobody has answered. */
+  readonly asking?: boolean
 }
 
 /** The threads module, reached through IoC — shell may never import essentials. */
+/** A conversation's organized standing, as essentials reads it for a list. */
+type ConversationStandingLike = {
+  readonly name: string
+  readonly stands: string
+  readonly open: number
+  readonly total: number
+  readonly upTo: number
+}
+
+type ListGroup = 'waiting' | 'open' | 'done'
+
 type ChatThreadsLike = {
   appendTurn(convoId: string, role: TurnRole, text: string): Promise<boolean>
   readTurns(convoId: string): Promise<ChatTurn[]>
   listConversations(): Promise<ConversationSummary[]>
+  /** Each conversation's organized standing, and who it waits on — the rail's
+   *  own reading, so the flat list and the rail group alike. Absent on an older
+   *  essentials build: then the list is one group. */
+  readConversationStandings?(convoIds: readonly string[]): Promise<ReadonlyMap<string, ConversationStandingLike>>
+  conversationGroup?(chat: { readonly asking?: boolean; readonly replied: boolean; readonly turns: number }, standing?: ConversationStandingLike): ListGroup
   /** One pass for the list AND the newest thread's turns — the resume path's
    *  read, so opening never re-reads the bucket the list walk just read. */
   listConversationsWithLatest?(): Promise<{ conversations: ConversationSummary[]; latestTurns: ChatTurn[] }>
@@ -2048,6 +2066,7 @@ export class ChatWindowComponent implements OnDestroy {
       archived: !!convo.archived,
       // Only ever false for a question still out — see ConversationSummary.
       replied: convo.replied !== false,
+      asking: !!convo.asking,
     }))
 
     const known = new Set(rows.map(row => row.convoId))
@@ -2071,6 +2090,7 @@ export class ChatWindowComponent implements OnDestroy {
         // A draft is unsent thinking, not a question waiting on anybody —
         // it is named by what it says, which is all there is of it.
         replied: true,
+        asking: false,
       })
     }
     return rows.sort((a, b) => b.lastAt - a.lastAt)
@@ -2081,6 +2101,75 @@ export class ChatWindowComponent implements OnDestroy {
 
   /** And what has been. Shown only when asked for; see `archiveOpen`. */
   readonly filedRoster = computed(() => this.roster().filter(row => row.archived))
+
+  /** What each listed conversation's workflow says. Read only while the flat
+   *  list is what the participant has — the rail reads its own. */
+  readonly listStandings = signal<ReadonlyMap<string, ConversationStandingLike>>(new Map())
+
+  /** The flat list, grouped the way the rail groups it. */
+  readonly listGroups = computed(() => {
+    const threads = this.#threads()
+    const standings = this.listStandings()
+    const rows = this.liveRoster()
+    const groupOf = (row: (typeof rows)[number]): ListGroup =>
+      threads?.conversationGroup?.({ asking: row.asking, replied: row.replied, turns: row.turnCount }, standings.get(row.convoId)) ?? 'open'
+    return (['waiting', 'open', 'done'] as const)
+      .map(key => ({ key, rows: rows.filter(row => groupOf(row) === key) }))
+      .filter(group => group.rows.length > 0)
+  })
+
+  readonly #listStandingsWatch = effect(() => {
+    if (this.railVisible() || !this.listOpen()) return
+    const ids = this.liveRoster().map(row => row.convoId)
+    void this.#refreshListStandings(ids)
+  })
+
+  async #refreshListStandings(ids: readonly string[]): Promise<void> {
+    const threads = this.#threads()
+    if (!threads?.readConversationStandings || !ids.length) return
+    try { this.listStandings.set(await threads.readConversationStandings(ids)) } catch { /* the list groups by what it has */ }
+  }
+
+  /** A group's heading, by literal key. */
+  listGroupKey(group: ListGroup): string {
+    switch (group) {
+      case 'waiting': return 'agent.rail-convos-waiting'
+      case 'done': return 'chat.list.done'
+      default: return 'agent.rail-convos-active'
+    }
+  }
+
+  /** A row's standing as a glyph. Every name is in the shipped subset. */
+  listIcon(row: { readonly replied: boolean; readonly archived: boolean }, group: ListGroup | null): string {
+    if (!row.replied && !row.archived) return 'hourglass_empty'
+    switch (group) {
+      case 'waiting': return 'help'
+      case 'done': return 'check_circle'
+      case 'open': return 'pending'
+      default: return 'archive'
+    }
+  }
+
+  /** A row's name: what its workflow calls it, else its opening line. */
+  listName(row: { readonly convoId: string; readonly title: string }): string {
+    return this.listStandings().get(row.convoId)?.name || row.title
+  }
+
+  /** Where a row's conversation stands, in its workflow's words. */
+  listLine(row: { readonly convoId: string; readonly replied: boolean; readonly archived: boolean }): string {
+    return row.replied || row.archived ? this.listStandings().get(row.convoId)?.stands ?? '' : ''
+  }
+
+  /** How long since a conversation moved, in the fewest characters. */
+  listAge(at: number): string {
+    if (!at) return ''
+    const minutes = Math.floor(Math.max(0, Date.now() - at) / 60_000)
+    if (minutes < 1) return this.#t('agent.rail-age-now')
+    if (minutes < 60) return this.#t('agent.rail-age-minutes').replace('{count}', String(minutes))
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return this.#t('agent.rail-age-hours').replace('{count}', String(hours))
+    return this.#t('agent.rail-age-days').replace('{count}', String(Math.floor(hours / 24)))
+  }
 
   /** Is the archive showing in this window's flat list? Not persisted:
    *  putting a conversation away is durable, wanting to look at what you put
@@ -4102,6 +4191,9 @@ export class ChatWindowComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<{ model?: string; prefill?: string; convoId?: string }>(
       'chat:open', payload => { void this.open(payload) }))
 
+    this.#cleanups.push(EffectBus.on('chat:route-flow-changed', () => {
+      if (!this.railVisible() && this.listOpen()) void this.#refreshListStandings(this.liveRoster().map(row => row.convoId))
+    }))
     this.#cleanups.push(EffectBus.on('chat:toggle', () => {
       if (this.visible()) this.close()
       else void this.open()

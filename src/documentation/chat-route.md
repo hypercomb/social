@@ -3955,3 +3955,28 @@ one tail line "1 exchange, not organized yet" and the pane fell back to it.
 **Owed:** `scripts/verify-chat-route.cjs` still asserts one stage card per
 exchange and stages with no caption text (sections n, o and the re-tail
 check); it needs updating to the single counted tail before it is run again.
+
+### 2026-09-11, later — the flat list groups like the rail
+
+The chat window's own conversations list — the one a narrow shell or a phone
+gets when the tiles rail is hidden — now groups the way the rail does:
+*Waiting on you*, *Open*, *Done*, with *Archived* folded beneath. A row is a
+state icon, the name (the session card's, else the opening line), where it
+stands, and an age; turn counts are gone. Unlike the rail's *Done today*, this
+list keeps every finished thread under *Done*, because it is the only list
+there is.
+
+- **One rule, one reader.** `readConversationStandings(convoIds)` and
+  `conversationGroup(chat, standing)` moved into `chat-thread.ts` and ride the
+  `ChatThreads` IoC object; the rail and the shell both call them, so the two
+  lists cannot group differently. Pinned in `chat-thread-shape.spec.ts`.
+- **Read only while it is the list.** The shell reads standings only while the
+  rail is hidden and the list is open, and again on `chat:route-flow-changed`.
+- The hive's own path ("/") is no longer printed as a tile label on its rows.
+- `scripts/verify-chat-route.cjs` now expects the single counted dormant tail
+  (sections a, e, n, o). It still asserts version-1 flow records elsewhere —
+  that part predates this work and remains owed.
+
+Proved at 375 px on the isolated 4253 shell with seeded threads: Waiting on you
+(the reply that asked), Open (a question still out, a replied thread), Done
+(a thread whose stored flow is fully settled, lit as current), Archived (1).

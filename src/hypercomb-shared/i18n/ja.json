@@ -1690,6 +1690,7 @@
   "chat.untitled": "新しいチャット",
   "chat.list.toggle": "会話を切り替える",
   "chat.list.empty": "会話はまだありません。",
+  "chat.list.done": "完了",
   "chat.turns.one": "{count} 件のメッセージ",
   "chat.turns.other": "{count} 件のメッセージ",
   "chat.delete": "この会話を削除",
