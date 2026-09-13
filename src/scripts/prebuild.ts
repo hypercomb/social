@@ -360,6 +360,9 @@ async function main() {
 
       console.log(`${TAG} copying modules to the content targets...`)
       run(tsxRun('./scripts/copy-content.ts'), essentialsDir)
+
+      // A published build no signer names is never offered; CI has no signer to ask.
+      if (!process.env.CI) run(tsxRun('./scripts/stamp-install-channel.ts'), essentialsDir, true)
     } else {
       console.log(`${TAG} essentials modules — up to date`)
     }

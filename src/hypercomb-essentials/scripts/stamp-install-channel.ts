@@ -15,9 +15,10 @@
 // runs, and consumers resolve `current` through the signed sentinel, not
 // through what a domain serves — so a build that is not stamped is a build
 // nobody is offered. `build:module` runs this best-effort: with the hive open
-// the build reaches followers; with it closed the owed box prints and the
-// build still succeeds. The DEPLOY passes --require, so a deploy whose
-// sentinel did not advance exits non-zero instead of reporting success.
+// the build reaches followers; with it closed the stamp is recorded as OWED
+// (scripts/bridge/owed-stamps.cjs) and the broker pays it the next time a hive
+// attaches. The DEPLOY passes --require, so a deploy whose sentinel did not
+// advance exits non-zero instead of reporting success.
 //
 // A successful stamp also names WHO builds follow: the signing pubkey and its
 // index host land in `src/sharing/install-publisher.json`, which the update
@@ -30,6 +31,7 @@
 
 import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import WebSocket from 'ws'
@@ -38,6 +40,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const BRIDGE = process.env.BRIDGE_URL || 'ws://localhost:2401'
 const SIG_RE = /^[a-f0-9]{64}$/
 const PUBLISHER_FILE = resolve(__dirname, '..', 'src', 'sharing', 'install-publisher.json')
+const owedStamps = createRequire(import.meta.url)('../../scripts/bridge/owed-stamps.cjs') as {
+  recordOwed(channel: string, sig: string, host?: string): boolean
+  settleOwed(channel: string, sig: string): boolean
+}
 
 const argv = process.argv.slice(2)
 const flag = (name: string): string | undefined => {
@@ -122,7 +128,9 @@ try {
     console.log(`[stamp-install-channel] SENTINEL ADVANCED: install:${channel} → ${sig.slice(0, 12)}… on ${String(data['host'])} (pubkey ${String(data['pubkey']).slice(0, 12)}…)`)
   }
   recordPublisher(data)
+  owedStamps.settleOwed(channel, sig)
 } catch (err) {
+  owedStamps.recordOwed(channel, sig, flag('--host'))
   const retry = `npx tsx hypercomb-essentials/scripts/stamp-install-channel.ts ${channel} --sig ${sig}`
   console.error('')
   console.error('  ┌─────────────────────────────────────────────────────────────┐')
@@ -132,7 +140,8 @@ try {
     : String(err)
   console.error(`  │  reason: ${reason}`)
   console.error('  │  Bytes ARE published; consumers see the OLD root until')
-  console.error('  │  stamped. With the hive open, run:')
+  console.error('  │  stamped. The debt is recorded: the bridge pays it the')
+  console.error('  │  next time a hive attaches (?claudeBridge=1). Or run:')
   console.error(`  │    ${retry}`)
   console.error('  └─────────────────────────────────────────────────────────────┘')
   console.error('')

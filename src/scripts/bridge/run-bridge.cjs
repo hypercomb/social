@@ -28,6 +28,7 @@
 // behaves exactly as before.
 
 const { WebSocketServer, WebSocket } = require('ws')
+const { readOwed, settleOwed, followedPubkey, servedByRelay } = require('./owed-stamps.cjs')
 
 const BRIDGE_PORT = Number(process.env.BRIDGE_PORT || 2401)
 const BRIDGE_HOST = process.env.BRIDGE_HOST || '127.0.0.1'
@@ -37,6 +38,7 @@ const wss = new WebSocketServer({ port: BRIDGE_PORT, host: BRIDGE_HOST })
 
 let renderer = null
 const pending = new Map()
+let paying = false
 
 const LOOPBACK_RE = /^(::1|127\.\d+\.\d+\.\d+|::ffff:127\.\d+\.\d+\.\d+)$/
 
@@ -48,6 +50,49 @@ function presentedToken(req) {
   const header = String(req?.headers?.['authorization'] || '')
   const m = /^Bearer\s+(.+)$/i.exec(header)
   return m ? m[1].trim() : ''
+}
+
+function askRenderer(op) {
+  return new Promise((resolve) => {
+    const id = `owed-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const timer = setTimeout(() => { pending.delete(id); resolve({ ok: false, error: 'renderer did not answer' }) }, 30_000)
+    pending.set(id, {
+      readyState: WebSocket.OPEN,
+      send: (json) => {
+        clearTimeout(timer)
+        try { resolve(JSON.parse(json)) } catch { resolve({ ok: false, error: 'unreadable answer' }) }
+      },
+    })
+    if (renderer && renderer.readyState === WebSocket.OPEN) {
+      renderer.send(JSON.stringify({ ...op, id }))
+    } else {
+      clearTimeout(timer)
+      pending.delete(id)
+      resolve({ ok: false, error: 'no renderer connected' })
+    }
+  })
+}
+
+// A build that found no signer left its install stamp owed; the hive that just attached holds the key.
+async function payOwedStamps() {
+  if (paying) return
+  paying = true
+  try {
+    const followed = followedPubkey()
+    for (const [channel, debt] of Object.entries(readOwed())) {
+      const label = `install:${channel} → ${debt.sig.slice(0, 12)}…`
+      if (!followed) { console.warn(`[bridge] owed stamp ${label} left owed — no followed publisher recorded`); continue }
+      if (!servedByRelay(debt.sig)) { console.warn(`[bridge] owed stamp ${label} left owed — the local relay does not serve it`); continue }
+      const res = await askRenderer({ op: 'hive-root-set', key: `install:${channel}`, sig: debt.sig, ...(debt.host ? { host: debt.host } : {}) })
+      if (!res?.ok) { console.warn(`[bridge] owed stamp ${label} still owed: ${res?.error || 'failed'}`); continue }
+      const signer = String(res.data?.pubkey || '').toLowerCase()
+      if (signer !== followed) { console.warn(`[bridge] owed stamp ${label} left owed — signed by ${signer.slice(0, 12)}…, not the followed publisher`); continue }
+      settleOwed(channel, debt.sig)
+      console.log(`[bridge] owed stamp paid: ${label} (pubkey ${signer.slice(0, 12)}…)`)
+    }
+  } finally {
+    paying = false
+  }
 }
 
 wss.on('connection', (ws, req) => {
@@ -75,6 +120,7 @@ wss.on('connection', (ws, req) => {
       renderer = ws
       identified = true
       console.log('[bridge] renderer connected')
+      void payOwedStamps()
       return
     }
 
