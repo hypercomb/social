@@ -1,10 +1,8 @@
 import { AfterViewInit, Component, computed, effect, HostBinding, inject, signal } from '@angular/core'
 import { type Bee, EffectBus, hypercomb } from '@hypercomb/core'
-import { upgradeFromBundled, checkForUpdate, type BootStatus } from '../setup/ensure-install'
-import { cacheImportMap } from '../setup/resolve-import-map'
+import { type BootStatus } from '../setup/ensure-install'
 import { acquire, installedPackageSig, listHostPackages } from '@hypercomb/runtime/acquire'
 import { addHostZone, listHostZones } from '@hypercomb/runtime/host-zones'
-import { CoreMismatchError } from '@hypercomb/runtime/core-surface'
 import { nativeAvailable } from '@hypercomb/runtime/native-filesystem'
 import { isTransientMode } from '@hypercomb/shared/core/view-mode.service'
 import { RouterOutlet } from '@angular/router'
@@ -87,66 +85,7 @@ export class App implements AfterViewInit {
     window.dispatchEvent(new CustomEvent('hypercomb:start-install'))
   }
 
-  /**
-   * User-initiated install from the shell's bundled `/content/` package.
-   * Wired to the "Upgrade Hypercomb" button in the install-needed prompt;
-   * also surfaced as `window.upgradeHypercomb` for headless triggering.
-   * On success, reloads the page so the freshly-installed bees take over.
-   */
   protected upgrading = signal(false)
-  protected async upgradeFromBundledClicked(
-    restorePointName?: string,
-    requireCheckpoint = false,
-    /** What makes the package live. The bundle by default; a followed
-     *  channel's offer passes an acquisition, so both ride the same restore
-     *  point, import-map cache and reload. */
-    install: () => Promise<boolean> = upgradeFromBundled,
-  ): Promise<void> {
-    if (this.upgrading()) return
-    this.upgrading.set(true)
-    try {
-      if (requireCheckpoint) {
-        EffectBus.emit('update:status', { phase: 'snapshotting', message: 'Saving restore point…' })
-        const queen = window.ioc?.get<{
-          createRestorePoint?: (name: string) => Promise<boolean>
-        }>('@diamondcoreprocessor.com/SnapshotQueenBee')
-        const checkpointed = await queen?.createRestorePoint?.(String(restorePointName ?? '').trim())
-        if (!checkpointed) {
-          EffectBus.emit('update:status', {
-            phase: 'error',
-            message: 'Update stopped — the restore point was not saved',
-          })
-          this.upgrading.set(false)
-          return
-        }
-      }
-      EffectBus.emit('update:status', { phase: 'applying', message: 'Updating packages and website…' })
-      const ok = await install()
-      // Cache the map the upgrade just made resolvable so the reload boots
-      // with it live before the module graph (see setup/resolve-import-map).
-      if (ok) {
-        await cacheImportMap()
-        EffectBus.emit('update:status', { phase: 'complete', message: 'Everything is updated' })
-        location.reload()
-      } else {
-        EffectBus.emit('update:status', { phase: 'error', message: 'Update failed — nothing was adopted' })
-        this.upgrading.set(false)
-      }
-    } catch (err) {
-      console.error('[app] upgradeFromBundled failed', err)
-      // The package needs a core this shell does not serve (core-surface.ts).
-      // Nothing was touched; the fix is a newer shell, not another attempt.
-      const needsShell = err instanceof CoreMismatchError
-      const i18n = window.ioc?.get<{ t?: (key: string) => string }>('@hypercomb.social/I18n')
-      EffectBus.emit('update:status', {
-        phase: 'error',
-        message: needsShell
-          ? (i18n?.t?.('upgrade.needs-shell') ?? 'This update needs a newer Hypercomb — refresh the page first, then adopt again')
-          : 'Update failed — nothing was adopted',
-      })
-      this.upgrading.set(false)
-    }
-  }
 
   @HostBinding('class.move-mode')
   get moveModeClass() { return this.moveMode(); }
@@ -178,18 +117,10 @@ export class App implements AfterViewInit {
 
     this.runtimeReady = this.core.initialize()
 
-    // Exposed for console / headless testing. Same effect as clicking
-    // "Upgrade Hypercomb" in the install-needed prompt.
-    ;(window as any).upgradeHypercomb = () => this.upgradeFromBundledClicked()
-
     // ACQUISITION FROM A DOMAIN — the same call the shim makes, from the same
     // implementation (`@hypercomb/runtime/acquire`).
     //
-    // `upgradeHypercomb` above can only ever reach THIS origin's bundled
-    // `/content/`, so a shell whose own bundle is behind can never catch up
-    // from it — which is exactly the state hypercomb.io was in, serving one
-    // package at generation 1 while a host carried 172. This reaches a domain
-    // instead:
+    // The origin is the shell, never a host, so acquisition reaches a domain:
     //
     //   await hypercomb.acquire('<64-hex sig>', ['jwize.com'])
     //   await hypercomb.acquire('<sig>')        // every domain you carry
@@ -324,65 +255,9 @@ export class App implements AfterViewInit {
     console.log('[app] initialized')
   }
 
-  /**
-   * `?upgrade=1` — the one upgrade door that works on a PHONE.
-   *
-   * Every other route to an upgrade is unreachable on a touch device with an
-   * existing install: `window.upgradeHypercomb()` needs a console, the
-   * "Upgrade Hypercomb" button only renders in the install-NEEDED prompt (so
-   * never once you are installed), and the header indicator is suppressed
-   * outright for DCP-sourced installs by checkForUpdate's provenance gate.
-   * The net effect was that a deployed build could not reach a phone at all.
-   * An address bar is the one input every device has.
-   *
-   * This lives in the SHELL on purpose. The upgrade path can never be shipped
-   * as a bee, because bees are the thing being upgraded — a fix delivered as a
-   * drone only exists after the upgrade it was meant to trigger. The shell is
-   * served fresh on every load, so this door opens the moment the web app is
-   * deployed, with no install involved.
-   *
-   * It OFFERS, never applies. Anyone can send a link, so a link must not be
-   * able to change what a hive runs: the param shows the update notice for
-   * the bundled build — even for installs the provenance gate stays quiet
-   * for — and the hosts window's Update, restore point first, installs it.
-   *
-   * The param is consumed on read, so a reload never re-offers from a stale
-   * URL.
-   */
-  #consumeUpgradeParam(): boolean {
-    try {
-      const url = new URL(location.href)
-      if (!url.searchParams.has('upgrade')) return false
-      url.searchParams.delete('upgrade')
-      history.replaceState(history.state, '', url.toString())
-      return true
-    } catch {
-      return false
-    }
-  }
-
   public ngAfterViewInit(): void {
     void this.runtimeReady.then(() => {
       void this.startRegisteredBees()
-
-      // Post-boot update check — OFF the boot critical path (push-only boot
-      // still reads OPFS only). Compares the cached install against the
-      // shell's bundled package; if newer, emits `update:available` so the
-      // header's upgrade indicator appears. Re-checks on tab refocus so a
-      // long-open session notices a fresh deploy after the user returns.
-      //
-      // `?upgrade=1` asked for it: check now and OFFER the bundle whatever the
-      // install's provenance, for this page load — never apply it.
-      const offer = this.#consumeUpgradeParam()
-      const runCheck = (): void => { void checkForUpdate({ offer }) }
-      if (offer) {
-        void checkForUpdate({ offer }).then(state => {
-          if (state === false) EffectBus.emit('update:status', { phase: 'complete', message: 'Already up to date' })
-        })
-      } else {
-        setTimeout(runCheck, 4000)
-      }
-      window.addEventListener('focus', () => setTimeout(runCheck, 500))
     })
   }
 

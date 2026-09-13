@@ -41,7 +41,7 @@
 // `@hypercomb/core` is EXTERNAL — the import map resolves it to the runtime
 // the shim already loaded, so this bundle shares its instances rather than
 // minting a second set.
-import { MARKER_NAME, hardDeleteVetoFor, registerPoolMeaning, SignatureStore } from '@hypercomb/core'
+import { INSTALL_IOC_KEY, MARKER_NAME, hardDeleteVetoFor, registerPoolMeaning, SignatureService, SignatureStore, type InstallProvider } from '@hypercomb/core'
 // These two are PURE — stateless functions over bytes, no IoC registration, no
 // module state — which is the entire reason they may be bundled in here. The
 // walker IS the protocol; only the io wiring below is ours.
@@ -65,6 +65,13 @@ import { validateSealedPackage } from './sealed-package.js'
 import { deriveBeeDeps } from './bee-deps.js'
 import { checkCoreCompatibility, describeCoreMismatch } from './core-surface.js'
 import { aliasOf, bagEntryName, bagSignature, beeEntries, dependencyEntries, orderedEntries } from './bags.js'
+// WHICH PARTS OF THE TREE RUN. The trunk with the participant's picks laid
+// over it, minus the paths they turned off (package-tree.ts).
+import { changedUnits, dependencyUnits, packageUnits, readOffUnits, writeOffUnits } from './package-units.js'
+import {
+  composeDependencies, enabledBees, isPath, layerAt, missingNamespaces, movedPaths, namespaceOf, orderRevisions,
+  readPicks, sigsOf, walkTree, withAncestors, within, writePicks, type Picks, type RevisionSource,
+} from './package-tree.js'
 
 // Store is reached STRUCTURALLY, never imported. Importing the module would
 // bundle a second Store class AND run its module-scope
@@ -99,9 +106,16 @@ export type InstallOutcome = {
   error?: string
 }
 
-/** The shim's OWN origin is always a byte source, so a node that serves its
- *  own content needs no host added at all — it already carries itself. */
+/** This origin's content bases — a byte source only through {@link originAmong}. */
 export const selfBases = (): string[] => [`${location.origin}/content`, location.origin]
+
+/** Is this origin one of the domains asked? Only then is it a byte source: a
+ *  node serving its own content carries itself, and a shell that is not a host
+ *  (hypercomb.io) never serves a byte (documentation/packages-window.md). */
+export const originAmong = (zones: readonly string[]): boolean => {
+  const self = hostZone(location.host)
+  return !!self && zones.some(zone => hostZone(zone) === self)
+}
 
 const fetchBytes = async (url: string): Promise<Uint8Array<ArrayBuffer> | null> => {
   try {
@@ -368,7 +382,8 @@ export const installPackage = async (
   if (!store.opfsAvailable) return fail('OPFS unavailable')
 
   // BYTE SOURCES: the host that offered it, then every other domain that
-  // publishes the same signature, then the shim's own origin.
+  // publishes the same signature, then this origin — only when it is itself
+  // one of the domains asked. A shell is not a host.
   //
   // A signature names one closure, so any host holding it holds the SAME
   // bytes — which is what makes a second domain a COPY rather than another
@@ -382,7 +397,7 @@ export const installPackage = async (
   const origins = [...new Set([
     pkg.base,
     ...alsoFrom.flatMap(zone => hostBases(zone)),
-    ...selfBases(),
+    ...(originAmong([pkg.zone, ...alsoFrom]) ? selfBases() : []),
   ])]
   const fetchFrom = async (sig: string): Promise<Uint8Array<ArrayBuffer> | null> => {
     for (const base of origins) {
@@ -458,6 +473,15 @@ export const installPackage = async (
     }
   }
 
+  // PICKS RIDE ACROSS A TRUNK MOVE. What the participant took at a path stays
+  // taken on the new trunk, so the selection is composed over what is now
+  // held — and passes every gate below again, over the composed set.
+  if (Object.keys(readPicks()).length) {
+    const selection = await applySelection(pkg.packageSig, held.held)
+    if (!selection.ok) return fail(selection.error)
+    return { ok: true, packageSig: pkg.packageSig, fetched: held.fetched, present: held.present, holes: [], refused: [] }
+  }
+
   // CAN THIS SHELL RUN IT? (core-surface.ts). The modules just admitted name
   // what they import from `@hypercomb/core`; the shell's runtime core is asked
   // what it exports. A shell that is short refuses HERE, by name, instead of
@@ -484,7 +508,7 @@ export const installPackage = async (
   // not a typed folder.
   await writeBags(store, inventory)
 
-  activate(pkg, inventory, beeDeps, held.held)
+  await activate(pkg.packageSig, inventory, beeDeps, held.held, await enabledOf(pkg.packageSig, inventory.bees, layersIo))
   return {
     ok: true,
     packageSig: pkg.packageSig,
@@ -508,28 +532,278 @@ const SIG_STORE_KEY = 'hypercomb.signature-store'
  * one place where "held" becomes "running", kept separate for exactly that
  * reason.
  */
-const activate = (
-  pkg: HostPackage,
+/** The io a layer walk uses in this origin: held layers first, then every
+ *  domain given (this origin only when it is one of them), each verified
+ *  before it is written. */
+export const layersIoFor = async (zones: readonly string[]): Promise<ReplicationIo | null> => {
+  const store = window.ioc?.get?.<StoreLike>(STORE_KEY)
+  if (!store) return null
+  await store.initialize()
+  if (!store.opfsAvailable) return null
+  const origins = [...new Set([...zones.flatMap(zone => hostBases(zone)), ...(originAmong(zones) ? selfBases() : [])])]
+  return {
+    read: readFrom([store.hypercombRoot], sig => [sig, `${sig}.json`]),
+    fetch: async (sig) => {
+      for (const base of origins) {
+        const bytes = await fetchBytes(`${base}/${sig}`)
+        if (bytes) return bytes
+      }
+      return null
+    },
+    write: writeTo(store.hypercombRoot, sig => sig, sig => `/opfs/${sig}`, 'application/json; charset=utf-8'),
+  }
+}
+
+/** The bees that run from one root with nothing picked: all of them, minus
+ *  the paths that are off. A tree that cannot be walked loads whole. */
+const enabledOf = async (root: string, bees: string[], layers: ReplicationIo): Promise<string[]> => {
+  const off = readOffUnits()
+  if (!off.size) return bees
+  const walk = await walkTree(root, { ...layers, fetch: async () => null })
+  return walk.complete ? enabledBees(walk, off) : bees
+}
+
+/**
+ * REPOINT THE LIVE SELECTION FROM WHAT IS ALREADY HELD. Turning a package on
+ * or off, or dropping a pick, changes which bytes run, not which exist: the
+ * trunk and every pick stay in the heap, so this composes them locally and
+ * writes the activation record again — no host asked, no byte fetched. False
+ * when the held selection does not compose, in which case nothing is changed.
+ */
+export const applyUnits = async (): Promise<boolean> => {
+  const trunk = installedPackageSig()
+  return !!trunk && (await applySelection(trunk)).ok
+}
+
+export type SelectionOutcome = { ok: true } | { ok: false; error: string }
+
+/**
+ * THE SELECTION, COMPOSED AND MADE LIVE. The trunk's tree with the picks laid
+ * over it by path; each pick's namespace dependencies from the root it was
+ * picked from; the paths that are off left out of what loads. Everything is
+ * read from what is held — admission happened before this — and every gate an
+ * install passes is passed again over the composed set: complete, runnable by
+ * this shell's core, and no picked module importing a namespace the selection
+ * does not carry. The picks are written only once all of that holds.
+ */
+export const applySelection = async (
+  trunk: string,
+  admitted: readonly string[] = [],
+  picks: Picks = readPicks(),
+): Promise<SelectionOutcome> => {
+  const fail = (error: string): SelectionOutcome => ({ ok: false, error })
+  const store = window.ioc?.get?.<StoreLike>(STORE_KEY)
+  const io = await layersIoFor([])
+  if (!store || !io) return fail('store unavailable')
+  const local: ReplicationIo = { ...io, fetch: async () => null }
+
+  // A pick from the trunk itself is no pick: the trunk already names it.
+  const live: Picks = Object.fromEntries(Object.entries(picks).filter(([, pick]) => pick.root !== trunk))
+  const walk = await walkTree(trunk, local, live)
+  if (!walk.complete) return fail('the selection names a layer that is not held here')
+
+  const readModule = readFrom([store.bees, store.dependencies], sig => [`${sig}.js`, sig])
+  const readDependency = readFrom([store.dependencies], sig => [`${sig}.js`, sig])
+  const namespaces = new Map<string, Promise<string | null>>()
+  const readNamespace = (sig: string): Promise<string | null> => {
+    let pending = namespaces.get(sig)
+    if (!pending) { pending = readDependency(sig).then(bytes => bytes ? namespaceOf(bytes) : null); namespaces.set(sig, pending) }
+    return pending
+  }
+
+  const sources: { path: string; dependencies: string[] }[] = []
+  for (const path of walk.applied) {
+    const bytes = await local.read(live[path]!.root)
+    let record: { dependencies?: unknown } | null = null
+    try { record = bytes ? JSON.parse(new TextDecoder().decode(bytes)) as { dependencies?: unknown } : null } catch { record = null }
+    if (!record) return fail(`the root ${path} was picked from is not held here`)
+    sources.push({ path, dependencies: sigsOf(record.dependencies) })
+  }
+  const dependencies = sources.length
+    ? await composeDependencies(walk.rootDependencies, sources, walk.applied, readNamespace)
+    : walk.rootDependencies
+  const bees = [...new Set([...walk.rootBees, ...walk.nodes.flatMap(node => node.bees)])].sort()
+  for (const sig of [...bees, ...dependencies]) {
+    if (!(await readModule(sig))) return fail(`${sig.slice(0, 12)}… is not held here`)
+  }
+  const inventory: PackageInventory = { layers: walk.layers, bees, dependencies }
+  const off = readOffUnits()
+  const enabled = enabledBees(walk, off)
+
+  // SIDEWAYS. A picked module that imports a namespace the selection does not
+  // carry would die at evaluation — refused, by name. Only what the picks
+  // introduced is judged: a trunk that already reaches for something it does
+  // not ship is the trunk's own business, and was running before this.
+  if (sources.length) {
+    const provided = async (deps: readonly string[]): Promise<Set<string>> =>
+      new Set((await Promise.all(deps.map(readNamespace))).filter((ns): ns is string => !!ns))
+    const trunkWalk = await walkTree(trunk, local)
+    const before = new Set(await missingNamespaces(
+      [...enabledBees(trunkWalk, off), ...walk.rootDependencies], await provided(walk.rootDependencies), readModule))
+    const missing = (await missingNamespaces([...enabled, ...dependencies], await provided(dependencies), readModule))
+      .filter(ns => !before.has(ns))
+    if (missing.length) {
+      return fail(`this selection needs ${missing.join(', ')}, which nothing picked and nothing on the trunk carries — take ${missing.length === 1 ? 'it' : 'them'} as well`)
+    }
+  }
+
+  const compat = await checkCoreCompatibility([...bees, ...dependencies], readModule)
+  if (!compat.ok) return fail(`selection ${describeCoreMismatch(compat.missing)}`)
+  const beeDeps = await deriveBeeDeps(bees, dependencies, readModule)
+  await writeBags(store, inventory)
+  writePicks(live)
+  await activate(trunk, inventory, beeDeps, [...admitted, ...walk.layers, ...bees, ...dependencies], enabled)
+  return { ok: true }
+}
+
+/** Has this shell already trusted a root — it ran here, or was admitted here? */
+const trustedHere = (sig: string): boolean => {
+  try {
+    const store = new SignatureStore()
+    const raw = localStorage.getItem(SIG_STORE_KEY)
+    if (raw) store.restore(JSON.parse(raw) as { sigs?: string[]; storeSig?: string | null })
+    return store.isTrusted(sig)
+  } catch { return false }
+}
+
+/**
+ * TAKE ONE REVISION AT ONE PATH.
+ *
+ * The pairing is never taken on trust: a candidate root must name that layer
+ * at that path. It must also be a root this shell already trusts, or one the
+ * authority gate admits — the same three doors as an install — so an older
+ * revision is pickable exactly when a publisher you follow once named a root
+ * carrying it. Then only what the pick needs is admitted: the branch's layers
+ * and bees, and the root's namespace bundles under the path. Nothing becomes
+ * live until the selection composes (applySelection).
+ */
+export const pickRevision = async (
+  path: string,
+  revision: { layer: string; root: string; roots?: readonly string[] },
+  zones: readonly string[],
+  options: { hides?: boolean } = {},
+): Promise<InstallOutcome> => {
+  let fetched = 0
+  let present = 0
+  const fail = (error: string): InstallOutcome =>
+    ({ ok: false, packageSig: revision.root, fetched, present, holes: [], refused: [], error })
+
+  const trunk = installedPackageSig()
+  if (!trunk) return fail('nothing is installed here to pick onto')
+  if (!isPath(path) || !SIG_RE.test(revision.layer)) return fail('not a revision')
+  const store = window.ioc?.get?.<StoreLike>(STORE_KEY)
+  const carried = [...new Set(zones.map(zone => String(zone ?? '').trim()).filter(Boolean))]
+  const io = await layersIoFor(carried)
+  if (!store || !io) return fail('store unavailable')
+
+  let root = ''
+  let refusal = ''
+  for (const candidate of [...new Set([revision.root, ...(revision.roots ?? [])])].filter(sig => SIG_RE.test(sig))) {
+    if ((await layerAt(candidate, path, io)) !== revision.layer) {
+      refusal ||= `${candidate.slice(0, 12)}… does not carry that revision of ${path}`
+      continue
+    }
+    if (!trustedHere(candidate)) {
+      const verdict = await activationAuthority({
+        packageSig: candidate,
+        zone: carried[0] ?? '',
+        self: location.host,
+        installed: trunk,
+        zones: carried.slice(1),
+        attester: registeredAttester(),
+      })
+      if (!verdict.ok) { refusal = verdict.error; continue }
+    }
+    root = candidate
+    break
+  }
+  if (!root) return fail(refusal || 'no root carries that revision')
+
+  const origins = [...new Set([...carried.flatMap(zone => hostBases(zone)), ...(originAmong(carried) ? selfBases() : [])])]
+  const fetchFrom = async (sig: string): Promise<Uint8Array<ArrayBuffer> | null> => {
+    for (const base of origins) {
+      const bytes = await fetchBytes(`${base}/${sig}`)
+      if (bytes) return bytes
+    }
+    return null
+  }
+
+  // THE BRANCH: its layer closure, and the bees it declares.
+  const branch = await deriveInventory(revision.layer, io)
+  fetched += branch.result.fetched
+  present += branch.result.present
+  if (!isComplete(branch.result)) return fail(`${branch.result.holes.length + branch.result.refused.length} layer(s) of ${path} could not be admitted`)
+  const beesUrlBase = `/opfs/${await registerPoolMeaning(BEES_MEANING)}`
+  const depsUrlBase = `/opfs/${await registerPoolMeaning(DEPENDENCIES_MEANING)}`
+  const bees = await resolveInventory(revision.layer, branch.inventory.bees, {
+    read: readFrom([store.bees], sig => [`${sig}.js`, sig]),
+    fetch: fetchFrom,
+    write: writeTo(store.bees, sig => `${sig}.js`, sig => `${beesUrlBase}/${sig}.js`, 'application/javascript; charset=utf-8'),
+  } satisfies ReplicationIo)
+  fetched += bees.fetched
+  present += bees.present
+  if (!isComplete(bees)) return fail(`${bees.holes.length + bees.refused.length} bee(s) of ${path} could not be admitted`)
+
+  // ITS NAMESPACE BUNDLES: every dependency the root lists whose alias falls
+  // under the path — read where held, else fetched, verified, and kept only
+  // when it belongs. A bundle that cannot be read at all could be one of them,
+  // so it fails the pick rather than leaving a hole nobody named.
+  let rootDependencies: string[] = []
+  try {
+    const bytes = await io.read(root)
+    rootDependencies = sigsOf((JSON.parse(new TextDecoder().decode(bytes!)) as { dependencies?: unknown }).dependencies)
+  } catch { return fail(`${root.slice(0, 12)}… could not be read`) }
+  const readDependency = readFrom([store.dependencies], sig => [`${sig}.js`, sig])
+  const writeDependency = writeTo(store.dependencies, sig => `${sig}.js`, sig => `${depsUrlBase}/${sig}`, 'application/javascript; charset=utf-8')
+  const unreadable: string[] = []
+  for (const sig of rootDependencies) {
+    if (await readDependency(sig)) { present++; continue }
+    const bytes = await fetchFrom(sig)
+    if (!bytes || (await SignatureService.sign(bytes.buffer)) !== sig) { unreadable.push(sig); continue }
+    if (!within(namespaceOf(bytes), path)) continue
+    await writeDependency(sig, bytes)
+    fetched++
+  }
+  if (unreadable.length) return fail(`${unreadable.length} namespace bundle(s) of ${root.slice(0, 12)}… could not be admitted`)
+
+  const outcome = await applySelection(trunk, [root, ...branch.result.held, ...bees.held], {
+    ...readPicks(),
+    [path]: { layer: revision.layer, root, hides: options.hides === true, at: Date.now() },
+  })
+  if (!outcome.ok) return fail(outcome.error)
+  return { ok: true, packageSig: root, fetched, present, holes: [], refused: [] }
+}
+
+/** Drop the pick at a path: the trunk's layer runs there again. */
+export const unpickRevision = async (path: string): Promise<SelectionOutcome> => {
+  const trunk = installedPackageSig()
+  if (!trunk) return { ok: false, error: 'nothing is installed here' }
+  const picks = readPicks()
+  if (!picks[path]) return { ok: true }
+  delete picks[path]
+  return applySelection(trunk, [], picks)
+}
+
+const activate = async (
+  packageSig: string,
   inventory: PackageInventory,
   beeDeps: Record<string, string[]>,
-  held: string[],
-): void => {
+  held: readonly string[],
+  /** The bees that load — every bee the selection names, minus the paths that
+   *  are off. Their layers and bytes stay held either way. */
+  bees: readonly string[],
+): Promise<void> => {
   try {
-    stampInstalledPackage(pkg.packageSig)
+    stampInstalledPackage(packageSig)
     localStorage.setItem(INSTALL_MANIFEST_KEY, JSON.stringify({
       version: 2,
       layers: inventory.layers,
-      bees: inventory.bees,
+      bees: [...bees],
       dependencies: inventory.dependencies,
       beeDeps,
-      // Provenance. A package taken from ANOTHER domain is not answerable to
-      // this shell's bundled `/content/` ('sentinel' — an external authority
-      // is current), so the bundled check must not raise a phantom "new
-      // features" by diffing it against the bundle. A package taken from THIS
-      // origin's own domain IS the bundle's line, and since the hosts window
-      // became the only way to update, recording it as 'sentinel' would have
-      // silenced every later "your domain has a newer deploy" notice.
-      source: hostZone(pkg.zone) === hostZone(location.host) ? 'bundled' : 'sentinel',
+      // Answerable to the channel the participant follows — the web has no
+      // bundled authority, because the origin is the shell, not a host.
+      source: 'sentinel',
     }))
     // Per-bee dependency closure, read by the preloader when it lazy-loads a
     // bee's deps. A global rather than storage because it is re-derived every
@@ -615,3 +889,124 @@ const writeBags = async (store: StoreLike, inventory: PackageInventory): Promise
   await put(store.dependencies, dependencyEntries(inventory.dependencies, sig => aliases.get(sig) ?? ''))
   await put(store.bees, beeEntries(inventory.bees))
 }
+
+// ── the install port ────────────────────────────────────────────────────────
+// Registered under the key CORE declares (install.types.ts), so a module that
+// imports core and nothing else can ask what runs here, walk a tree, list a
+// path's revisions, turn a path on or off, and take a revision or a root —
+// through the same gated acquisition as every shell.
+
+/** Recent roots a domain lists, per revisions question. Each is a few layer
+ *  reads the first time and none after. */
+const REVISION_ROOTS = 25
+
+const installProvider: InstallProvider = {
+  installedSig: () => installedPackageSig(),
+  unitsOf: async (root, zones) => {
+    const io = await layersIoFor(zones)
+    return io ? packageUnits(root, io) : []
+  },
+  nodesOf: async (root, zones) => {
+    const io = await layersIoFor(zones)
+    return io ? (await walkTree(root, io)).nodes : []
+  },
+  headOf: async (zone) => (await headPackage(zone))?.packageSig ?? null,
+  movedUnits: async (installedRoot, nextRoot, zones) => {
+    const io = await layersIoFor(zones)
+    const store = window.ioc?.get?.<StoreLike>(STORE_KEY)
+    if (!io || !store) return []
+    const [mine, next] = await Promise.all([packageUnits(installedRoot, io), packageUnits(nextRoot, io)])
+    const moved = changedUnits(mine, next)
+    const readHeld = readFrom([store.dependencies], sig => [`${sig}.js`, sig])
+    for (const name of await dependencyUnits(installedRoot, nextRoot, io, readHeld)) moved.add(name)
+    return [...moved].sort()
+  },
+  movedPaths: async (nextRoot, zones) => {
+    const trunk = installedPackageSig()
+    const io = await layersIoFor(zones)
+    const store = window.ioc?.get?.<StoreLike>(STORE_KEY)
+    if (!trunk || !io || !store) return []
+    const [mine, next] = await Promise.all([
+      walkTree(trunk, { ...io, fetch: async () => null }, readPicks()),
+      walkTree(nextRoot, io),
+    ])
+    const moved = movedPaths(mine.nodes, next.nodes)
+    // A queen, a view or a service moves only its namespace bundle, which the
+    // root lists — so a bundle the next root runs and this shell does not
+    // marks the namespace it names.
+    let running: string[] = []
+    try { running = (JSON.parse(localStorage.getItem(INSTALL_MANIFEST_KEY) ?? '{}') as { dependencies?: string[] }).dependencies ?? [] } catch { running = [] }
+    const before = new Set(running)
+    const readHeld = readFrom([store.dependencies], sig => [`${sig}.js`, sig])
+    for (const sig of next.rootDependencies.filter(dep => !before.has(dep))) {
+      let bytes = await readHeld(sig)
+      if (!bytes) {
+        const fetchedBytes = await io.fetch(sig)
+        bytes = fetchedBytes && (await SignatureService.sign(fetchedBytes.buffer)) === sig ? fetchedBytes : null
+      }
+      const ns = namespaceOf(bytes)
+      if (ns) moved.add(ns)
+    }
+    return [...withAncestors(moved)].sort()
+  },
+  selection: async () => {
+    const trunk = installedPackageSig()
+    const picks = readPicks()
+    const io = trunk ? await layersIoFor([]) : null
+    if (!trunk || !io) return { trunk, picks, applied: [], eclipsed: [], nodes: [] }
+    const walk = await walkTree(trunk, { ...io, fetch: async () => null }, picks)
+    return { trunk, picks, applied: walk.applied, eclipsed: walk.eclipsed, nodes: walk.nodes }
+  },
+  revisionsOf: async (path, zones, roots = []) => {
+    const io = await layersIoFor(zones)
+    if (!io || !isPath(path)) return []
+    const found: { layer: string; source: RevisionSource }[] = []
+    const trunk = installedPackageSig()
+    const held = [...new Set([trunk ?? '', ...Object.values(readPicks()).map(pick => pick.root), ...roots])].filter(sig => SIG_RE.test(sig))
+    await Promise.all(held.map(async root => {
+      const layer = await layerAt(root, path, io)
+      if (layer) found.push({ layer, source: { root, zone: '', at: '', rank: 0 } })
+    }))
+    await Promise.all(zones.map(async zone => {
+      const rows = await listHostPackages(zone, { limit: REVISION_ROOTS }).catch(() => [])
+      await Promise.all(rows.map(async (row, rank) => {
+        const layer = await layerAt(row.packageSig, path, io)
+        if (layer) found.push({ layer, source: { root: row.packageSig, zone, at: row.at, rank } })
+      }))
+    }))
+    return orderRevisions(found).map(revision => ({
+      layer: revision.layer,
+      at: revision.at,
+      sources: revision.sources.map(({ root, zone, at }) => ({ root, zone, at })),
+    }))
+  },
+  revisionNodes: async (path, root, zones) => {
+    const io = await layersIoFor(zones)
+    if (!io) return []
+    const layer = await layerAt(root, path, io)
+    if (!layer) return []
+    const walk = await walkTree(layer, io)
+    const under = (relative: string): string => `${path}/${relative}`
+    return walk.nodes.map(node => ({ ...node, path: under(node.path), children: node.children.map(under) }))
+  },
+  pick: async (path, revision, zones, options) => {
+    const outcome = await pickRevision(path, revision, zones, options)
+    return { ok: outcome.ok, fetched: outcome.fetched, present: outcome.present, ...(outcome.error ? { error: outcome.error } : {}) }
+  },
+  unpick: async (path) => {
+    const outcome = await unpickRevision(path)
+    return { ok: outcome.ok, fetched: 0, present: 0, ...(outcome.ok ? {} : { error: outcome.error }) }
+  },
+  acquire: async (root, zones) => {
+    const outcome = await acquire(root, zones)
+    return { ok: outcome.ok, fetched: outcome.fetched, present: outcome.present, ...(outcome.error ? { error: outcome.error } : {}) }
+  },
+  applyUnits,
+  offUnits: () => readOffUnits(),
+  setOffUnits: (names) => writeOffUnits(names),
+}
+
+try {
+  ;(globalThis as { ioc?: { register?: (k: string, v: unknown) => void } })
+    .ioc?.register?.(INSTALL_IOC_KEY, installProvider)
+} catch { /* no ioc in this environment — direct importers still work */ }

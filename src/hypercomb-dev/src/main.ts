@@ -47,6 +47,10 @@ import { bundledCatalogs, bundledLocales } from '@hypercomb/shared/core/bundled-
 // global at module scope. This line documents the dependency and is a no-op
 // the second time — see the header of hypercomb-runtime/src/ioc.web.ts.
 import '@hypercomb/runtime/ioc.web'
+// The install port (core install.types.ts). This shell imports its packages
+// from source and never activates one, so the host directory lists what your
+// hosts carry here and leaves turning packages on or off to a hive.
+import '@hypercomb/runtime/acquire'
 // The escape cascade's door. This used to ride into every shell inside
 // runtime-initializer; the runtime package cannot reach hypercomb-shared/ui,
 // so the shell that wants tool windows imports them itself.

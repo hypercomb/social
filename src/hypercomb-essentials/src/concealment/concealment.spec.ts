@@ -15,7 +15,6 @@ const here = dirname(fileURLToPath(import.meta.url))
 const shared = join(here, '..', '..', '..', 'hypercomb-shared')
 const POOL = readFileSync(join(here, 'concealment.ts'), 'utf8')
 const DRONE = readFileSync(join(here, 'concealment.drone.ts'), 'utf8')
-const HOSTS_HTML = readFileSync(join(shared, 'ui', 'hosts-panel', 'hosts-panel.component.html'), 'utf8')
 const PUBLISH_HTML = readFileSync(join(shared, 'ui', 'publish-panel', 'publish-panel.component.html'), 'utf8')
 const PUBLISH_TS = readFileSync(join(shared, 'ui', 'publish-panel', 'publish-panel.component.ts'), 'utf8')
 
@@ -78,10 +77,10 @@ describe('concealment — the doctrine, not a feature', () => {
     expect(PUBLISH_TS).not.toMatch(/@hypercomb\/essentials/)
   })
 
-  // THE SURFACES. Both lists offer hide and only hide; both delete areas are
-  // folds you open on purpose.
-  it('is the same doctrine on both surfaces', () => {
-    for (const html of [HOSTS_HTML, PUBLISH_HTML]) {
+  // THE SURFACE. The publish list offers hide and only hide; its delete area is
+  // a fold you open on purpose. (The host directory takes no build to hide.)
+  it('the publish list offers hide and only hide, and deletes only from its fold', () => {
+    for (const html of [PUBLISH_HTML]) {
       expect(html).toMatch(/hidden:conceal|hide\(pkg\)|hideVersion\(row, v\)/)
       expect(html).toMatch(/THE DELETE AREA/)
     }

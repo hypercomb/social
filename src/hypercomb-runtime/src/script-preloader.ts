@@ -106,7 +106,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       // Falls back to the flat install-manifest bees list for legacy/dev.
       const layerRoots = ScriptPreloader.readManifestLayers()
       const tWalk = performance.now()
-      const walked = layerRoots.length
+      let walked = layerRoots.length
         ? await this.#walkLayers(layerRoots)
         : {
             bees: ScriptPreloader.readManifestBees(),
@@ -114,6 +114,16 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
             resources: ScriptPreloader.#EMPTY_SIGS,
             criticalBees: ScriptPreloader.#EMPTY_SIGS,
           }
+      // WHAT LOADS is the activation record's bee list — acquire.ts writes
+      // every bee the root names minus the units the participant turned off
+      // (package-units.ts). The layers say what EXISTS; the record says what
+      // runs. The render-critical bees stay regardless: without them there is
+      // no hive to turn anything back on from.
+      const enabled = ScriptPreloader.readManifestBees()
+      if (layerRoots.length && enabled.length) {
+        const keep = new Set([...enabled, ...walked.criticalBees])
+        walked = { ...walked, bees: walked.bees.filter(sig => keep.has(sig)) }
+      }
       const walkMs = performance.now() - tWalk
 
       // Cache warming, AT IDLE AND IN SMALL BATCHES.

@@ -6,15 +6,10 @@ interface UpdateAvailablePayload {
   available?: boolean
   newCount?: number
   packageSig?: string
-  /** Who announced it: the shell's bundled check, or a followed channel's
-   *  scout. Absent reads as the bundle. */
+  /** Who announced it. Only a followed channel's scout is heard: the shell's
+   *  own origin is not a host and announces nothing. */
   source?: string
-  /** The participant asked (`?upgrade=1`): show it, even for a build they
-   *  once dismissed. */
-  offer?: boolean
 }
-
-type UpdateSource = 'bundled' | 'channel'
 
 type UpdatePhase = 'idle' | 'available' | 'snapshotting' | 'applying' | 'complete' | 'error'
 interface UpdateStatusPayload {
@@ -29,11 +24,9 @@ const COMPLETE_VISIBLE_MS = 12_000
 
 // A NOTICE, NOT AN INSTALLER (2026-09-12). This pill used to install: Adopt
 // saved a restore point and swapped the running build from the header in one
-// press, with nothing on screen saying which build or from where. Updating now
-// happens in ONE place — the hosts window, where the build is named, its
-// signature is checked before you press, a restore point is saved first and
-// the way back is offered after. So the pill only says an update exists and
-// takes you there, looking at that build.
+// press. Updating now happens in ONE place — the Packages window, where each
+// part of the app is on or off and an update mark sits on what the publisher
+// you follow moved. So the pill only says an update exists and opens it.
 
 @Component({
   selector: 'hc-upgrade-indicator',
@@ -42,10 +35,10 @@ const COMPLETE_VISIBLE_MS = 12_000
   template: `
     @if (phase() !== 'idle') {
       <div class="upgrade-indicator" role="status" aria-live="polite" [attr.data-phase]="phase()">
-        <button class="status-button" type="button" (click)="openHosts()"
+        <button class="status-button" type="button" (click)="openPackages()"
           [disabled]="phase() !== 'available'"
-          [attr.aria-label]="phase() === 'available' ? ('upgrade.open-hosts' | t) : statusText()"
-          [title]="phase() === 'available' ? ('upgrade.open-hosts' | t) : statusText()">
+          [attr.aria-label]="phase() === 'available' ? ('upgrade.open-packages' | t) : statusText()"
+          [title]="phase() === 'available' ? ('upgrade.open-packages' | t) : statusText()">
           <span>{{ statusText() }}</span>
           @if (phase() === 'available' && newCount() > 0) {
             <span class="upgrade-count">{{ newCount() }}</span>
@@ -72,12 +65,8 @@ export class UpgradeIndicatorComponent implements OnDestroy {
   readonly statusMessage = signal('')
 
   #packageSig = ''
-  #source: UpdateSource = 'bundled'
-  /** One standing offer per announcer. The bundled check saying "nothing newer
-   *  HERE" must never hide what a followed channel announced, or the reverse. */
-  readonly #offers = new Map<UpdateSource, UpdateAvailablePayload>()
-  /** The announcer the participant explicitly asked for, when they did. */
-  #asked: UpdateSource | null = null
+  /** The standing offer, when the followed channel has one. */
+  #offer: UpdateAvailablePayload | null = null
   #unsubs: (() => void)[] = []
   #completeTimer: number | null = null
 
@@ -85,13 +74,10 @@ export class UpgradeIndicatorComponent implements OnDestroy {
     this.#restoreCompletedState()
 
     this.#unsubs.push(EffectBus.on<UpdateAvailablePayload>('update:available', payload => {
-      const source: UpdateSource = payload?.source === 'channel' ? 'channel' : 'bundled'
-      const sig = String(payload?.packageSig ?? '').trim().toLowerCase()
-      const suppressed = !payload?.offer && (
-        this.#inList(DISCARDED_KEY, sig, localStorage) || this.#inList(SNOOZE_KEY, sig, sessionStorage))
-      if (payload?.offer) this.#asked = source
-      if (payload?.available && !suppressed) this.#offers.set(source, { ...payload, packageSig: sig, source })
-      else this.#offers.delete(source)
+      if (payload?.source !== 'channel') return
+      const sig = String(payload.packageSig ?? '').trim().toLowerCase()
+      const suppressed = this.#inList(DISCARDED_KEY, sig, localStorage) || this.#inList(SNOOZE_KEY, sig, sessionStorage)
+      this.#offer = payload.available && !suppressed ? { ...payload, packageSig: sig } : null
       this.#show()
     }))
 
@@ -123,12 +109,11 @@ export class UpgradeIndicatorComponent implements OnDestroy {
     }
   }
 
-  /** Go where updating happens: the hosts window, opened on the build this
-   *  notice announced. Seeing it there is enough — the notice stays away for
-   *  the rest of the session. */
-  readonly openHosts = (): void => {
+  /** Go where updating happens: the Packages window. Seeing it there is
+   *  enough — the notice stays away for the rest of the session. */
+  readonly openPackages = (): void => {
     if (this.phase() !== 'available') return
-    EffectBus.emit('hosts:open', { packageSig: this.#packageSig || null, source: this.#source })
+    EffectBus.emit('packages:open', { packageSig: this.#packageSig || null })
     this.dismiss()
   }
 
@@ -143,14 +128,10 @@ export class UpgradeIndicatorComponent implements OnDestroy {
     this.phase.set(this.available() ? 'available' : 'idle')
   }
 
-  /** Put the standing offer on the pill: the one the participant asked for,
-   *  else a channel's (signed by the publisher this hive follows), else the
-   *  bundle this origin ships. */
+  /** Put the standing offer on the pill. */
   #show(): void {
-    const offer = (this.#asked && this.#offers.get(this.#asked))
-      || this.#offers.get('channel') || this.#offers.get('bundled') || null
+    const offer = this.#offer
     this.#packageSig = String(offer?.packageSig ?? '')
-    this.#source = offer?.source === 'channel' ? 'channel' : 'bundled'
     this.available.set(!!offer)
     this.newCount.set(offer?.newCount ?? 0)
     const busy = this.phase() === 'snapshotting' || this.phase() === 'applying'
@@ -158,12 +139,8 @@ export class UpgradeIndicatorComponent implements OnDestroy {
     else if (!offer && this.phase() === 'available') this.phase.set('idle')
   }
 
-  /** Every announcer's offer of the build on the pill goes; another
-   *  announcer's different build may take its place. */
   #dismiss(): void {
-    for (const [source, offer] of this.#offers) {
-      if (String(offer.packageSig ?? '') === this.#packageSig) this.#offers.delete(source)
-    }
+    if (String(this.#offer?.packageSig ?? '') === this.#packageSig) this.#offer = null
     this.phase.set('idle')
     this.#show()
   }

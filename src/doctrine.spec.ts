@@ -385,7 +385,6 @@ describe('doctrine ratchets', () => {
       "flex-editor/flex-editor.component",
       "format-painter/format-painter.component",
       "history-viewer/history-viewer.component",
-      "hosts-panel/hosts-panel.component",
       "icon-picker/icon-picker.component",
       "landing-badge/landing-badge.component",
       "layer-cycle-strip/layer-cycle-strip.component",

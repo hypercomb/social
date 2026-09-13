@@ -28,7 +28,8 @@
 // behaves exactly as before.
 
 const { WebSocketServer, WebSocket } = require('ws')
-const { readOwed, settleOwed, followedPubkey, servedByRelay } = require('./owed-stamps.cjs')
+const { watchFile } = require('node:fs')
+const { OWED_FILE, readOwed, settleOwed, followedPubkey, servedByRelay } = require('./owed-stamps.cjs')
 
 const BRIDGE_PORT = Number(process.env.BRIDGE_PORT || 2401)
 const BRIDGE_HOST = process.env.BRIDGE_HOST || '127.0.0.1'
@@ -39,6 +40,11 @@ const wss = new WebSocketServer({ port: BRIDGE_PORT, host: BRIDGE_HOST })
 let renderer = null
 const pending = new Map()
 let paying = false
+
+// A debt recorded while a hive is already attached is paid without waiting for it to reconnect.
+watchFile(OWED_FILE, { interval: Number(process.env.BRIDGE_OWED_POLL_MS || 3000) }, () => {
+  if (renderer && renderer.readyState === WebSocket.OPEN) void payOwedStamps()
+})
 
 const LOOPBACK_RE = /^(::1|127\.\d+\.\d+\.\d+|::ffff:127\.\d+\.\d+\.\d+)$/
 
@@ -52,10 +58,10 @@ function presentedToken(req) {
   return m ? m[1].trim() : ''
 }
 
-function askRenderer(op) {
+function askRenderer(op, waitMs = 45_000) {
   return new Promise((resolve) => {
     const id = `owed-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    const timer = setTimeout(() => { pending.delete(id); resolve({ ok: false, error: 'renderer did not answer' }) }, 30_000)
+    const timer = setTimeout(() => { pending.delete(id); resolve({ ok: false, error: 'renderer did not answer' }) }, waitMs)
     pending.set(id, {
       readyState: WebSocket.OPEN,
       send: (json) => {
@@ -83,7 +89,15 @@ async function payOwedStamps() {
       const label = `install:${channel} → ${debt.sig.slice(0, 12)}…`
       if (!followed) { console.warn(`[bridge] owed stamp ${label} left owed — no followed publisher recorded`); continue }
       if (!servedByRelay(debt.sig)) { console.warn(`[bridge] owed stamp ${label} left owed — the local relay does not serve it`); continue }
-      const res = await askRenderer({ op: 'hive-root-set', key: `install:${channel}`, sig: debt.sig, ...(debt.host ? { host: debt.host } : {}) })
+      // A hive answers the bridge before its store is open, and a big hive
+      // takes a while to open — so a silent renderer is asked again while it
+      // is still the same connection, not given up on at the first timeout.
+      const asked = renderer
+      let res = null
+      for (let attempt = 0; attempt < 6 && renderer === asked; attempt++) {
+        res = await askRenderer({ op: 'hive-root-set', key: `install:${channel}`, sig: debt.sig, ...(debt.host ? { host: debt.host } : {}) })
+        if (res?.ok || res?.error !== 'renderer did not answer') break
+      }
       if (!res?.ok) { console.warn(`[bridge] owed stamp ${label} still owed: ${res?.error || 'failed'}`); continue }
       const signer = String(res.data?.pubkey || '').toLowerCase()
       if (signer !== followed) { console.warn(`[bridge] owed stamp ${label} left owed — signed by ${signer.slice(0, 12)}…, not the followed publisher`); continue }
@@ -167,11 +181,14 @@ wss.on('connection', (ws, req) => {
   })
 })
 
-console.log(`[bridge] listening on ws://${BRIDGE_HOST}:${BRIDGE_PORT}`)
-console.log(
-  BRIDGE_HOST === '127.0.0.1'
-    ? '[bridge] loopback-only bind — set BRIDGE_HOST=0.0.0.0 for remote answering sessions'
-    : TOKEN
-      ? '[bridge] bound wide; remote senders must present HYPERCOMB_BRIDGE_TOKEN'
-      : '[bridge] bound wide with NO token — remote senders will be REFUSED (set HYPERCOMB_BRIDGE_TOKEN to allow them)',
-)
+// Said once the socket is bound — a client that trusts this line must be able to connect.
+wss.on('listening', () => {
+  console.log(`[bridge] listening on ws://${BRIDGE_HOST}:${BRIDGE_PORT}`)
+  console.log(
+    BRIDGE_HOST === '127.0.0.1'
+      ? '[bridge] loopback-only bind — set BRIDGE_HOST=0.0.0.0 for remote answering sessions'
+      : TOKEN
+        ? '[bridge] bound wide; remote senders must present HYPERCOMB_BRIDGE_TOKEN'
+        : '[bridge] bound wide with NO token — remote senders will be REFUSED (set HYPERCOMB_BRIDGE_TOKEN to allow them)',
+  )
+})

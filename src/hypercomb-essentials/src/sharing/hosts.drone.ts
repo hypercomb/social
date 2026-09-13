@@ -25,9 +25,9 @@
 // community-hosts.ts for the split and documentation/website-artifact-paradigm.md
 // for why it is that way.
 //
-// Shell parity: the panel is a shared Angular component and must not import
-// essentials, so the list crosses as a `hosts:render` payload and comes back
-// as intents (hosts:add, hosts:remove).
+// The window is the host directory (host-directory.view.ts), an element that
+// reads the list off `hosts:render` and hands back intents (hosts:add,
+// hosts:remove, hosts:close) — this drone stays the pool's one writer.
 
 import { Drone, isWindowShowing } from '@hypercomb/core'
 import {

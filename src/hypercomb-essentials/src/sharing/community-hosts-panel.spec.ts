@@ -11,9 +11,8 @@ const PUBLISH_BRANCH = readFileSync(join(here, 'publish-branch.ts'), 'utf8')
 const HOST_SYNC = readFileSync(join(here, 'host-sync.service.ts'), 'utf8')
 const HTML = readFileSync(join(shared, 'ui', 'publish-panel', 'publish-panel.component.html'), 'utf8')
 const TS = readFileSync(join(shared, 'ui', 'publish-panel', 'publish-panel.component.ts'), 'utf8')
-const HOSTS_HTML = readFileSync(join(shared, 'ui', 'hosts-panel', 'hosts-panel.component.html'), 'utf8')
-const HOSTS_TS = readFileSync(join(shared, 'ui', 'hosts-panel', 'hosts-panel.component.ts'), 'utf8')
-const BARREL = readFileSync(join(shared, 'ui', 'shell-surfaces', 'shell-surfaces.barrel.ts'), 'utf8')
+/** The host directory — one framework-free element (host-directory-view.spec.ts). */
+const VIEW = readFileSync(join(here, 'host-directory.view.ts'), 'utf8')
 const EN = JSON.parse(readFileSync(join(shared, 'i18n', 'en.json'), 'utf8')) as Record<string, string>
 
 // TWO FACTS, KEPT APART. What you carry is a community of host artifacts; where
@@ -23,14 +22,9 @@ const EN = JSON.parse(readFileSync(join(shared, 'i18n', 'en.json'), 'utf8')) as 
 //
 // A THIRD separation joined them: the community is no longer a TAB inside
 // publish. A host exists before any branch names it and outlives every branch
-// that does, so it has its own panel and its own drone, and publish reads the
+// that does, so it has its own window and its own drone, and publish reads the
 // same pool rather than owning it.
-describe('hosts panel — the set, apart from the publishing', () => {
-  it('is its own shell surface, mounted from the barrel', () => {
-    expect(HOSTS_TS).toMatch(/registerShellSurface\(\{[\s\S]{0,200}?name: 'hc-hosts-panel'/)
-    expect(BARREL).toMatch(/import '\.\.\/hosts-panel\/hosts-panel\.component'/)
-  })
-
+describe('the host directory — the set, apart from the publishing', () => {
   it('left the publish panel entirely — no tab, no case, no handlers', () => {
     expect(HTML).not.toMatch(/setTab\('community'\)/)
     expect(HTML).not.toMatch(/@case \('community'\)/)
@@ -44,10 +38,8 @@ describe('hosts panel — the set, apart from the publishing', () => {
   })
 
   it('adds and REMOVES hosts, through the drone that owns the pool', () => {
-    expect(HOSTS_HTML).toMatch(/add\(hostInput\)/)
-    expect(HOSTS_HTML).toMatch(/remove\(zone\)/)
-    expect(HOSTS_TS).toMatch(/EffectBus\.emit\('hosts:add'/)
-    expect(HOSTS_TS).toMatch(/EffectBus\.emit\('hosts:remove'/)
+    expect(VIEW).toMatch(/EffectBus\.emit\('hosts:add', \{ zone \}\)/)
+    expect(VIEW).toMatch(/EffectBus\.emit\('hosts:remove', \{ zone \}\)/)
     expect(HOSTS_DRONE).toMatch(/onEffect<\{ zone\?: string \}>\('hosts:add'/)
     expect(HOSTS_DRONE).toMatch(/onEffect<\{ zone\?: string \}>\('hosts:remove'/)
   })
@@ -62,138 +54,65 @@ describe('hosts panel — the set, apart from the publishing', () => {
   })
 
   it('reads the list eagerly, so the publish picker is never empty for want of a look', () => {
-    // The failure this pins: as a tab, the list did not exist until the
-    // publish panel had rendered once.
     expect(HOSTS_DRONE).toMatch(/void this\.#read\(\)/)
-    expect(HOSTS_DRONE).toMatch(/const carried = await listCommunityHosts\(\)|await listCommunityHosts\(\)/)
+    expect(HOSTS_DRONE).toMatch(/await listCommunityHosts\(\)/)
   })
 
   it('tells "none yet" from "not read yet" instead of flashing an empty state', () => {
     expect(HOSTS_DRONE).toMatch(/loaded: boolean/)
-    expect(HOSTS_HTML).toMatch(/@if \(loaded\(\)\) \{/)
-  })
-
-  it('counts branches as a DECORATION, never as its own truth', () => {
-    // publish:render is read for the count and nothing else; a host with no
-    // count renders without one rather than with a zero.
-    expect(HOSTS_TS).toMatch(/EffectBus\.on<PublishRenderish>\('publish:render'/)
-    expect(HOSTS_HTML).toMatch(/@if \(branchCount\(zone\); as naming\)/)
+    expect(VIEW).toMatch(/this\.#reading \|\| !this\.#loaded/)
   })
 
   // ONE READER of "what does this domain publish". The shim asks it on a cold
-  // boot and the app asks it in the panel; two copies would drift on the first
-  // change to the manifest shape, and the two readers would then disagree
-  // about what a host offers — the one thing they must never do.
-  it('reads a host manifest from runtime, never from a second copy', () => {
+  // boot and the directory asks it through the install port; two copies would
+  // drift on the first change to the pool shape.
+  it('reads what a host publishes from runtime, never from a second copy', () => {
     const runtime = readFileSync(join(here, '..', '..', '..', 'hypercomb-runtime', 'src', 'host-packages.ts'), 'utf8')
     const shimReplicate = readFileSync(join(here, '..', '..', '..', 'hypercomb-shim', 'src', 'bootstrap', 'replicate.ts'), 'utf8')
 
     expect(runtime).toMatch(/export const listHostPackages/)
     expect(runtime).toMatch(/export const hostBases/)
-    // ACQUISITION ITSELF moved to runtime too, so both shells share one
-    // implementation. The shim file is now nothing but a re-export.
     expect(shimReplicate).toMatch(/from '@hypercomb\/runtime\/acquire'/)
     expect(shimReplicate).not.toMatch(/export const listHostPackages = async/)
     expect(shimReplicate).not.toMatch(/export const installPackage = async/)
     expect(shimReplicate).not.toMatch(/const basesFor =/)
-    // The panel uses the same one — NOT a drone, because essentials imports
-    // core and nothing else and so cannot reach runtime.
-    expect(HOSTS_TS).toMatch(/from '@hypercomb\/runtime\/host-packages'/)
+    // The directory reads packages through the install port and nothing else;
+    // the drone never asks a domain what it publishes.
+    expect(VIEW).not.toMatch(/host-packages|listHostPackages/)
     expect(HOSTS_DRONE).not.toMatch(/listHostPackages/)
   })
 
-  it('asks a host what it publishes ON DEMAND, never on open', () => {
-    // A manifest runs to megabytes (jwize.com's is 3.4 MB). Opening the panel
-    // must not fetch every carried host's.
-    expect(HOSTS_TS).toMatch(/async look\(zone: string\)/)
-    expect(HOSTS_TS).not.toMatch(/listHostPackages\([\s\S]{0,80}?\)[\s\S]{0,40}?constructor/)
-    expect(HOSTS_HTML).toMatch(/\(click\)="look\(zone\)"/)
-  })
-
-  // POINT AND CLICK (Jaime, 2026-09-12): "you should have a list of builds, not
-  // this confusing All builds button — you're just clicking a heading and
-  // getting a list." Every build is listed under its name; a name is a heading,
-  // one open at a time, and nothing else has to be pressed to see the list.
-  it('lists every build under its name heading, one open at a time — no fold button', () => {
-    expect(HOSTS_TS).toMatch(/import \{ accordion \} from '\.\.\/accordion'/)
-    expect(HOSTS_TS).toMatch(/readonly heading = accordion\(\)/)
-    expect(HOSTS_TS).toMatch(/groupsOf\(zone: string\)[\s\S]{0,200}?for \(const pkg of this\.offeredOf\(zone\)\)/)
-    expect(HOSTS_HTML).toMatch(/\(click\)="heading\.toggle\(groupKey\(group\)\)"/)
-    // Keyed by a build's signature, never a position: hiding one run must not
-    // hand its open state to another run of the same name.
-    expect(HOSTS_TS).toMatch(/groupKey\(group: \{ packages: HostPackage\[\] \}\): string \{\s*return group\.packages\[0\]\?\.packageSig/)
-    expect(HOSTS_TS).toMatch(/'hidden:render'[\s\S]{0,400}?this\.#settleHeading\(\)/)
-    // A look never lands in the delete area; it is somewhere you go.
-    expect(HOSTS_TS).not.toMatch(/reveal\(HIDDEN_HEADING\)/)
-    expect(HOSTS_HTML).toMatch(/\(click\)="heading\.toggle\(hiddenHeading\)"/)
-    expect(HOSTS_TS).not.toMatch(/OFFERS_SHOWN|packagesShown|ledgerOpen|toggleLedger|expandedZone|hiddenOpen/)
-    for (const key of ['hosts.offer.ledger-open', 'hosts.offer.ledger-close', 'hosts.offer.show-all', 'hosts.offer.show-less', 'hosts.hidden.open', 'hosts.hidden.close']) {
-      expect(EN[key]).toBeUndefined()
-      expect(HOSTS_HTML).not.toContain(key)
-    }
-  })
-
-  it('applies a build through verified runtime acquisition, then restarts', () => {
-    expect(HOSTS_HTML).toMatch(/\(click\)="apply\(pkg\)"/)
-    expect(HOSTS_TS).toMatch(/import\('@hypercomb\/runtime\/acquire'\)/)
-    expect(HOSTS_TS).toMatch(/await installPackage\(pkg, sources\.filter\(zone => zone !== pkg\.zone\)\)/)
-    expect(HOSTS_TS).toMatch(/setTimeout\(\(\) => location\.reload\(\)/)
-    expect(EN['hosts.offer.applied']).toMatch(/restarting/i)
+  it('asks a domain for its creations ON DEMAND, never on open', () => {
+    const creations = VIEW.slice(VIEW.indexOf("t('hosts.creations.title'"))
+    expect(creations).toMatch(/this\.#view = 'creations'[\s\S]{0,80}?EffectBus\.emit\('hosts:creations', \{ zone: this\.#scope \}\)/)
+    const connected = VIEW.slice(VIEW.indexOf('connectedCallback(): void {'), VIEW.indexOf('disconnectedCallback(): void {'))
+    expect(connected).not.toContain("emit('hosts:creations'")
   })
 
   // WHO MAY MAKE IT LIVE. Integrity proves the bytes; it never proved the
-  // publisher, and the panel could apply ANY carried domain's package into
-  // this origin. Activation now asks the authority gate BEFORE a byte moves,
-  // and the panel offers the honest alternative — visit their domain.
+  // publisher. Activation asks the authority gate BEFORE a byte moves, and the
+  // directory offers the honest alternative — visit their domain.
   it('refuses a package no followed publisher signed, before fetching it', () => {
     const acquire = readFileSync(join(here, '..', '..', '..', 'hypercomb-runtime', 'src', 'acquire.ts'), 'utf8')
     const gate = acquire.indexOf('await activationAuthority(')
     expect(gate).toBeGreaterThan(-1)
     expect(gate).toBeLessThan(acquire.indexOf('deriveInventory(pkg.packageSig'))
     expect(acquire).toMatch(/if \(!authority\.ok\) return fail\(authority\.error\)/)
-    expect(HOSTS_HTML).toMatch(/class="hosts-visit"/)
-    expect(HOSTS_HTML).toMatch(/hosts\.builds\.authority/)
-    expect(EN['hosts.builds.authority']).toMatch(/publisher you follow/)
+    // Their door, never drawn on the domain you are on.
+    expect(VIEW).toMatch(/if \(hostZone\(this\.#scope\) !== this\.#home\) \{\s*const visit = make\('a'/)
+    expect(VIEW).toMatch(/visit\.target = '_blank'/)
   })
 
-  // TWO FACTS AND ONE ACT. A host lists hundreds of builds and every one of
-  // them is a valid root forever — but 175 identical rows each with its own
-  // button is not a choice. The question is "am I current, and if not make me
-  // current": the build you are on, the newest here, and ONE Update button.
-  // Every build stays listed under its name for pinning and rollback.
-  it('says which build you are on, from the ONE stamp both install paths leave', () => {
+  it('one stamp says which build runs, left by both install paths', () => {
     const root = join(here, '..', '..', '..')
     const runtime = readFileSync(join(root, 'hypercomb-runtime', 'src', 'installed-package.ts'), 'utf8')
     const acquire = readFileSync(join(root, 'hypercomb-runtime', 'src', 'acquire.ts'), 'utf8')
     const ensureInstall = readFileSync(join(root, 'hypercomb-web', 'src', 'setup', 'ensure-install.ts'), 'utf8')
     expect(runtime).toMatch(/export const installedPackageSig/)
     expect(runtime).toMatch(/export const stampInstalledPackage/)
-    // Both activation paths stamp it; nothing else writes the key.
-    expect(acquire).toMatch(/stampInstalledPackage\(pkg\.packageSig\)/)
+    expect(acquire).toMatch(/stampInstalledPackage\(packageSig\)/)
     expect(acquire).not.toMatch(/localStorage\.setItem\(INSTALLED_KEY/)
     expect(ensureInstall).toMatch(/stampInstalledPackage\(bundled\.packageSig\)/)
-    expect(HOSTS_TS).toMatch(/from '@hypercomb\/runtime\/installed-package'/)
-    expect(HOSTS_HTML).toMatch(/yoursKey\(zone\)/)
-    expect(EN['hosts.offer.yours']).toMatch(/build \{generation\}/)
-  })
-
-  it('offers ONE Update button, which applies the newest build', () => {
-    expect(HOSTS_TS).toMatch(/newestOf\(zone: string\): HostPackage \| null \{[\s\S]{0,60}?return this\.offeredOf\(zone\)\[0\]/)
-    expect(HOSTS_TS).toMatch(/offeredOf\(zone: string\): HostPackage\[\]/)
-    expect(HOSTS_TS).toMatch(/concealed\.has\(p\.packageSig\)/)
-  })
-
-  it('says "you hid everything" rather than "publishes nothing"', () => {
-    expect(HOSTS_TS).toMatch(/allHidden\(zone: string\): boolean/)
-    expect(HOSTS_HTML).toMatch(/hosts\.hidden\.all/)
-    expect(EN['hosts.hidden.all']).toBeTruthy()
-  })
-
-  it('promises only what a local forget can deliver', () => {
-    // Deleting reaches nothing across the network — the build stays on the
-    // host that published it, fetchable by anyone who names its signature.
-    expect(EN['hosts.hidden.note']).toMatch(/stays published on the host/i)
-    expect(EN['hosts.hidden.delete-tip']).toMatch(/stays on the host/i)
   })
 
   it('links Publish to the host directory without mixing the two surfaces', () => {
@@ -211,8 +130,6 @@ describe('hosts panel — the set, apart from the publishing', () => {
     expect(sideEffects).not.toMatch(/sharing\/host\.queen/)
     expect(() => readFileSync(join(here, 'host.queen.ts'), 'utf8')).toThrow()
     expect(EN['slash.host']).toBeUndefined()
-    // The GESTURE survives as a plain function — the phone share sheet needs
-    // one call that publishes a branch and hands back an openable link.
     const gesture = readFileSync(join(here, 'host-gesture.ts'), 'utf8')
     expect(gesture).toMatch(/export const hostCurrentBranch/)
     expect(gesture).not.toMatch(/readonly command = 'host'/)
@@ -220,49 +137,36 @@ describe('hosts panel — the set, apart from the publishing', () => {
   })
 
   it('has NO hosting switch — publishing is the gesture', () => {
-    // It was redundant in one direction and untrue in the other. ON armed
-    // something `publishBranch` arms itself (`enablePublicHost()`), so it
-    // could only ever be already-on by the time it mattered. OFF read as
-    // "my sites come down" and did nothing of the kind: bytes already on a
-    // host stay (no delete surface, deliberately), the signed index still
-    // names the head, every published site keeps serving — and the next
-    // publish silently flipped the flag back on, so even the one thing it
-    // did do never survived. Taking something down is `unpublishBranch`.
-    expect(HOSTS_HTML).not.toMatch(/toggleHosting/)
-    expect(HOSTS_HTML).not.toMatch(/role="switch"/)
-    expect(HOSTS_HTML).not.toMatch(/hosts-switch/)
-    expect(HOSTS_TS).not.toMatch(/toggleHosting/)
-    expect(HOSTS_TS).not.toMatch(/hosting/)
+    // ON armed something `publishBranch` arms itself; OFF read as "my sites
+    // come down" and did nothing of the kind. Taking something down is
+    // `unpublishBranch`.
+    expect(VIEW).not.toMatch(/toggleHosting|hosts-switch|hosting/)
     expect(HOSTS_DRONE).not.toMatch(/hosts:set-hosting/)
     expect(HOSTS_DRONE).not.toMatch(/disablePublicHost/)
   })
 
-  it('leaves no orphan strings behind for a control that is gone', () => {
-    for (const key of Object.keys(EN)) expect(key.startsWith('hosts.hosting.')).toBe(false)
+  it('leaves no orphan strings behind for controls that are gone', () => {
+    for (const key of Object.keys(EN)) {
+      expect(key.startsWith('hosts.hosting.')).toBe(false)
+      for (const gone of ['hosts.offer.', 'hosts.hidden.', 'hosts.builds', 'hosts.confirm.', 'hosts.return.', 'hosts.guide.', 'hosts.home', 'hosts.naming.']) {
+        expect(key.startsWith(gone)).toBe(false)
+      }
+    }
   })
 
   it('seeds ONE known host into an empty pool, and only ever once', () => {
-    // Replication needs somewhere to pull FROM before anyone has typed
-    // anything. But a seed that returns after a removal is the "one entry you
-    // cannot delete" bug all over again, so emptiness gets the seed once and a
-    // flag makes sure it is once.
     expect(HOSTS_DRONE).toMatch(/const SEED_HOST = 'jwize\.com'/)
     expect(HOSTS_DRONE).toMatch(/if \(this\.#zones\.length === 0\) await this\.#seedOnce\(\)/)
     expect(HOSTS_DRONE).toMatch(/localStorage\.getItem\(SEEDED_KEY\) === '1'\) return/)
   })
 
   it('spends the one seed only when it actually landed', () => {
-    // THE BUG THIS PINS, found live: the flag was set BEFORE the add. On the
-    // eager first read the Store has not registered, `addCommunityHost`
-    // answers '', and the participant was left flagged-as-seeded with an empty
-    // pool — nothing to replicate from, silently and for good.
     const seed = HOSTS_DRONE.slice(HOSTS_DRONE.indexOf('async #seedOnce'))
     const addAt = seed.indexOf('await addCommunityHost(SEED_HOST)')
     const setAt = seed.indexOf('localStorage.setItem(SEEDED_KEY')
     expect(addAt).toBeGreaterThan(-1)
-    expect(setAt).toBeGreaterThan(addAt)          // set AFTER the add, never before
+    expect(setAt).toBeGreaterThan(addAt)
     expect(seed).toMatch(/if \(!zone\) return\s*\n\s*try \{ localStorage\.setItem\(SEEDED_KEY/)
-    // And the read runs again once the Store exists, so the retry actually happens.
     expect(HOSTS_DRONE).toMatch(/whenReady\?\.\(STORE_KEY, \(\) => \{ void this\.#read\(\) \}\)/)
   })
 
@@ -270,7 +174,7 @@ describe('hosts panel — the set, apart from the publishing', () => {
     const row = HTML.indexOf('class="pdet-domains pcur-hosts"')
     const tabs = HTML.indexOf('<nav class="publish-tabs"')
     expect(row).toBeGreaterThan(-1)
-    expect(row).toBeLessThan(tabs)          // above the tabs: it belongs to the row
+    expect(row).toBeLessThan(tabs)
     expect(HTML).toMatch(/toggleHost\(row, choice\.zone\)/)
     expect(HTML).toMatch(/makePrimary\(row, choice\.zone\)/)
   })
@@ -308,64 +212,48 @@ describe('hosts panel — the set, apart from the publishing', () => {
   })
 })
 
-// ── the other half of the directory: what a domain SERVES ───────────────────
+// ── what a domain serves besides packages: creations ────────────────────────
 //
-// A domain is a list of domains until it can show you what is on them. Jaime,
-// 2026-09-09: "just a sidebar with a list of domains, and each time you select
-// one you get to see the list of features — and then when you're done you just
-// see the list of features that your domain has."
+// Jaime, 2026-09-09: "just a sidebar with a list of domains, and each time you
+// select one you get to see the list of features — and then when you're done
+// you just see the list of features that your domain has."
 //
 // The switch on each creation is an OFFER and nothing else. Per the static
-// peers ruling: shaded by default, and the walk in is the adopt. There is no
-// door here that brings a branch in, and the publisher never sets the flag for
-// you — the offers document is yours, written in your own pool.
+// peers ruling: shaded by default, and the walk in is the adopt.
 const STATIC_PEERS = readFileSync(join(here, 'static-peers.drone.ts'), 'utf8')
 
-describe('the host directory shows what a domain serves', () => {
-  it('asks the domain for its creations when you look into it, and only then', () => {
-    expect(HOSTS_TS).toMatch(/EffectBus\.emit\('hosts:creations', \{ zone \}\)/)
+describe('the host directory shows the creations a domain serves', () => {
+  it('asks the domain for its creations when you open them, answered by the drone that owns the offers', () => {
     expect(STATIC_PEERS).toMatch(/this\.onEffect<\{ zone\?: string \}>\('hosts:creations'/)
-    // Asked from look(), never from the render loop or the panel opening.
-    expect(HOSTS_TS).toMatch(/async look\(zone: string\)[\s\S]{0,800}?EffectBus\.emit\('hosts:creations'/)
-  })
-
-  it('is answered by the drone that owns the offers, so the switch cannot disagree with the hive', () => {
     expect(STATIC_PEERS).toMatch(/'community:offers-render'/)
     expect(STATIC_PEERS).toMatch(/'hosts:creations:render'/)
-    // The offered flag is read at emit time, never stored on the card.
     expect(STATIC_PEERS).toMatch(/#renderCreations = \(zone: string\): void => \{[\s\S]{0,600}?offered: this\.#offers\.has\(row\.name\)/)
-    // Offering or withdrawing anywhere in the hive redraws every list.
     expect(STATIC_PEERS).toMatch(/#renderOfferState = \(\): void => \{[\s\S]{0,200}?this\.#renderMine\(\)[\s\S]{0,200}?this\.#renderCreations\(zone\)/)
+    expect(VIEW).toMatch(/EffectBus\.on<[^>]*>\('hosts:creations:render'/)
   })
 
-  it('mints the offer where the offers live — shared never builds one', () => {
+  it('mints the offer where the offers live — the directory never builds one', () => {
     expect(STATIC_PEERS).toMatch(/const offer = offerFromCard\(card\)/)
-    // Shared holds the shape by hand and never the mapping: no mint here, and
-    // no reach into essentials to borrow one.
-    expect(HOSTS_TS).not.toMatch(/offerFromCard/)
-    expect(HOSTS_TS).not.toMatch(/lineageKey: [^;\n]*\.lineage/)
-    expect(HOSTS_TS).not.toMatch(/from '@hypercomb\/essentials/)
-    expect(HOSTS_TS).toMatch(/offer: unknown \| null/)
-    // The panel sends back exactly what it was handed.
-    expect(HOSTS_TS).toMatch(/EffectBus\.emit\('community:offer', row\.offer\)/)
+    expect(VIEW).not.toMatch(/offerFromCard/)
+    expect(VIEW).toMatch(/offer: unknown \| null/)
+    expect(VIEW).toMatch(/else if \(row\.offer\) EffectBus\.emit\('community:offer', row\.offer\)/)
   })
 
   it('offers a creation and withdraws it — and never adopts a branch', () => {
-    expect(HOSTS_TS).toMatch(/EffectBus\.emit\('community:withdraw', \{ name: row\.name \}\)/)
-    expect(HOSTS_HTML).not.toMatch(/adopt/i)
+    expect(VIEW).toMatch(/EffectBus\.emit\('community:withdraw', \{ name: row\.name \}\)/)
+    expect(VIEW).not.toMatch(/adopt/i)
     expect(EN['hosts.creations.show-title']).toMatch(/shaded until you walk into it/i)
     expect(EN['hosts.mine.note']).toMatch(/taking one tile never takes its branch/i)
   })
 
   it('draws no switch on a plate it could not hold', () => {
-    expect(HOSTS_HTML).toMatch(/@if \(row\.offer \|\| row\.offered\)/)
-    expect(HOSTS_TS).toMatch(/if \(!row\.offer\) return/)
+    expect(VIEW).toMatch(/if \(row\.offer \|\| row\.offered\)/)
     expect(EN['hosts.creations.unheld']).toBeTruthy()
   })
 
   it('tells "publishes nothing" from "did not answer" for creations too', () => {
     expect(STATIC_PEERS).toMatch(/answered: cards !== null/)
-    expect(HOSTS_HTML).toMatch(/creationsAnswered\(zone\) \? 'hosts\.creations\.none' : 'hosts\.creations\.silent'/)
+    expect(VIEW).toMatch(/known\.answered\s*\?\s*t\('hosts\.creations\.none'/)
     expect(EN['hosts.creations.silent']).toMatch(/down/i)
   })
 
@@ -374,169 +262,43 @@ describe('the host directory shows what a domain serves', () => {
   })
 
   it('shows what your hive carries without being asked, from every domain at once', () => {
-    // Emitted once the document is read, so a panel opened later replays it.
     expect(STATIC_PEERS).toMatch(/await this\.#migrateLegacyFollows\(\)[\s\S]{0,300}?this\.#renderMine\(\)/)
-    expect(HOSTS_TS).toMatch(/'community:offers-render'/)
-    expect(HOSTS_HTML).toMatch(/hosts\.mine\.open/)
+    expect(VIEW).toMatch(/EffectBus\.on<[^>]*>\('community:offers-render'/)
     expect(EN['hosts.mine.open']).toMatch(/\{count\}/)
   })
 
-  // Jaime, 2026-09-12: "two tabs, and it should always open to builds when you
-  // click" a domain — Creations is the other tab, one click away.
-  it('opens every domain on Builds, with Creations the other tab', () => {
-    expect(HOSTS_HTML).toMatch(/class="hosts-tabs" role="tablist"/)
-    expect(HOSTS_HTML).toMatch(/\(click\)="setTab\('builds'\)"/)
-    expect(HOSTS_HTML).toMatch(/\(click\)="setTab\('creations'\)"/)
-    expect(HOSTS_HTML.indexOf("setTab('builds')")).toBeLessThan(HOSTS_HTML.indexOf("setTab('creations')"))
-    // A count only for a list that answered — a host that is down is not "0".
-    expect(HOSTS_HTML).toMatch(/@if \(offerAnswered\(zone\)\) \{ <span class="hosts-tab-count">/)
-    expect(HOSTS_HTML).toMatch(/@if \(creationsAnswered\(zone\)\) \{ <span class="hosts-tab-count">/)
-    // Every look resets to Builds and lists the newest name's builds once they land.
-    expect(HOSTS_TS).toMatch(/async look\(zone: string\)[\s\S]{0,600}?this\.tab\.set\('builds'\)/)
-    expect(HOSTS_TS).toMatch(/await this\.#ask\(zone\)[\s\S]{0,300}?this\.#openBuilds\(zone\)/)
-    expect(HOSTS_TS).toMatch(/async #focusBuild\([\s\S]{0,1200}?this\.#openBuilds\(zone, focus\.sig\)/)
-    expect(EN['hosts.tab.builds']).toBe('Builds')
-    expect(EN['hosts.tab.creations']).toBe('Creations')
-    expect(EN['hosts.builds']).toBeUndefined()
+  it('no builds and no switch — one list of packages, on or off', () => {
+    for (const gone of ['hosts-inspector', 'hosts-return', 'hosts-confirm', 'switchBack', 'confirmSwitch', 'SWITCHED_KEY', 'createRestorePoint', 'hosts.offer', 'hosts.builds']) {
+      expect(VIEW).not.toContain(gone)
+    }
   })
 })
 
-// ── a switch is said before it happens, and there is a way back ─────────────
+// ── updating happens in the host directory ───────────────────────────────────
 //
-// Jaime, 2026-09-11: applying another domain's build restarted the app on
-// their version, and "now you come back and your tiles are gone and
-// everything's changed". Nothing was deleted and nothing said so. The window
-// now names the act (Switch, not Apply), asks before switching to a build
-// from any domain but your own, remembers the build you left, and reopens
-// after the restart with one button that goes back.
-describe('switching builds — named, confirmed, and reversible', () => {
-  it('calls it a switch, and an update only on your own domain', () => {
-    expect(HOSTS_TS).toMatch(/this\.isHome\(zone\) \? 'hosts\.offer\.update' : 'hosts\.offer\.switch'/)
-    expect(EN['hosts.offer.switch']).toBe('Switch to this build')
-    expect(EN['hosts.offer.apply']).toBe('Switch')
-    expect(EN['hosts.offer.update']).toBe('Update')
-  })
-
-  it('asks before switching to another domain’s build, and never before going back', () => {
-    const needs = HOSTS_TS.slice(HOSTS_TS.indexOf('#needsConfirm(pkg: HostPackage): boolean'))
-    expect(needs).toMatch(/if \(this\.isHome\(pkg\.zone\)\) return false/)
-    expect(needs).toMatch(/return pkg\.packageSig !== this\.switched\(\)\?\.from/)
-    expect(HOSTS_TS).toMatch(/if \(this\.#needsConfirm\(pkg\)\) \{ this\.pending\.set\(pkg\); return \}/)
-    expect(HOSTS_HTML).toMatch(/\(click\)="confirmSwitch\(\)"/)
-    expect(HOSTS_HTML).toMatch(/\(click\)="cancelSwitch\(\)"/)
-    // The confirm sheet sits OUTSIDE the scrolling body, so it is on screen
-    // whichever row asked for it.
-    expect(HOSTS_HTML.indexOf('class="hosts-confirm"')).toBeGreaterThan(HOSTS_HTML.lastIndexOf('class="hosts-note"'))
-    expect(EN['hosts.confirm.safe']).toMatch(/Nothing is deleted/)
-  })
-
-  it('remembers the build a switch left, and offers it back after the restart', () => {
-    expect(HOSTS_TS).toMatch(/const SWITCHED_KEY = 'hc:hosts:switched-from'/)
-    // Recorded only once the switch has activated, before the restart.
-    const sw = HOSTS_TS.slice(HOSTS_TS.indexOf('async #switch(pkg: HostPackage)'))
-    expect(sw.indexOf('this.#remember(left, pkg)')).toBeGreaterThan(sw.indexOf('await installPackage(pkg,'))
-    expect(sw.indexOf('this.#remember(left, pkg)')).toBeLessThan(sw.indexOf('location.reload()'))
-    expect(HOSTS_TS).toMatch(/sessionStorage\.getItem\(REOPEN_KEY\) === '1'[\s\S]{0,120}?EffectBus\.emit\('hosts:open'/)
-    expect(HOSTS_HTML).toMatch(/\(click\)="switchBack\(\)"/)
-    expect(EN['hosts.return.go']).toBe('Switch back')
-  })
-
-  it('switch back resolves locally when no host lists the build any more', () => {
-    // A host's own catalogue moves on with every deploy it makes — not the
-    // same fact as the bytes being gone (2026-09-12: hypercomb.io's
-    // self-served pool holds only its newest build after each deploy, so a
-    // build switched away from stops being LISTED there without ever having
-    // left this device's own store). Failing at that first "is it listed"
-    // check, instead of also trying a resolve, turned an ordinary re-deploy
-    // into a permanent "not listed" for Switch back.
-    const back = HOSTS_TS.slice(HOSTS_TS.indexOf('async switchBack('), HOSTS_TS.indexOf('async keepSwitch('))
-    const loopEnd = back.indexOf('if (!places.length)')
-    const fallback = back.indexOf('const fallbackZone')
-    expect(loopEnd).toBeGreaterThan(-1)
-    expect(fallback).toBeGreaterThan(loopEnd)
-    expect(back).toMatch(/const fallbackZone = record\.fromZone \|\| this\.home/)
-    expect(back).toMatch(/base: hostBases\(fallbackZone\)\[0\] \?\? ''/)
-    expect(back).toMatch(/layers: \[\],\s*bees: \[\],\s*dependencies: \[\]/)
-    // The fallback package still goes through apply() → #switch(), so it gets
-    // the same activation-authority check, restore-point attempt, and
-    // confirm-sheet rule as a build found in a live listing — never a second,
-    // looser door.
-    expect(back.slice(fallback)).toMatch(/this\.apply\(\{/)
-    expect(HOSTS_TS).toMatch(/import \{ askHostPackages, hostBases, type HostPackage \} from '@hypercomb\/runtime\/host-packages'/)
-  })
-
-  it('explains the whole thing where you read it, and says tiles are never deleted', () => {
-    expect(HOSTS_HTML).toMatch(/@if \(guideOpen\(\)\)/)
-    expect(EN['hosts.guide.safe']).toMatch(/never deletes/)
-    expect(EN['hosts.guide.builds']).toMatch(/restarts the app/)
-    expect(EN['hosts.builds.foreign']).toMatch(/\{host\}/)
-  })
-
-  it('never offers Visit on your own domain — that is a second tab on your own hive', () => {
-    expect(HOSTS_HTML).toMatch(/@if \(!isHome\(zone\)\) \{\s*<!--[\s\S]{0,400}?class="hosts-visit"/)
-  })
-
-  // A FRESHLY DEPLOYED DOMAIN COULD NOT UPDATE FROM ITSELF. hypercomb.io was
-  // listed only if you had added it, so its own new build — the one that needs
-  // no signature — was not on the list at all.
-  it('lists your own domain whether or not you carry it, and drops only what you carry', () => {
-    expect(HOSTS_TS).toMatch(/zones\.find\(z => this\.isHome\(z\)\) \?\? this\.home/)
-    expect(HOSTS_HTML).toMatch(/@if \(isCarried\(zone\)\) \{[\s\S]{0,60}?class="hosts-drop"/)
-    expect(HOSTS_HTML).toMatch(/@if \(!isHome\(zone\)\) \{\s*<p class="hosts-note hosts-authority">/)
-  })
-
-  // SIGNED BEFORE OFFERED. jwize.com's newest build reached the host before its
-  // stamp did; the one button pointed at it, the gate refused it, and Retry
-  // could never succeed.
-  it('asks the followed publisher before offering another domain’s newest, and takes the build it signed', () => {
-    expect(HOSTS_TS).toMatch(/ATTESTATION_IOC_KEY/)
-    expect(HOSTS_TS).toMatch(/await this\.#ask\(zone\)[\s\S]{0,300}?await this\.#checkSigned\(zone\)/)
-    expect(HOSTS_TS).toMatch(/find\(p => p\.packageSig === refused\.named\)/)
-    expect(HOSTS_TS).toMatch(/update\(zone: string\): void \{\s*const target = this\.targetOf\(zone\)/)
-    expect(HOSTS_HTML).toMatch(/@if \(unsignedOf\(zone\); as refused\)/)
-    expect(EN['hosts.offer.unsigned-signed']).toMatch(/\{sig\}/)
-    expect(EN['hosts.offer.unsigned-none']).toMatch(/\{host\}/)
-  })
-})
-
-// UPDATES HAPPEN IN ONE PLACE (2026-09-12). The header pill installed with one
-// press; now it is a notice that opens the hosts window on the build it
-// announces, and the hosts window saves a restore point before any switch.
-describe('updating happens in the hosts window', () => {
+// Jaime, 2026-09-13: "it's just on or off in your domain; look at other
+// domains to see what's on or off there; there is no switching." The notice
+// and /upgrade open the directory and nothing else.
+describe('updating happens in the host directory', () => {
   const root = join(here, '..', '..', '..')
   const INDICATOR = readFileSync(join(shared, 'ui', 'upgrade-indicator', 'upgrade-indicator.component.ts'), 'utf8')
   const APP = readFileSync(join(root, 'hypercomb-web', 'src', 'app', 'app.ts'), 'utf8')
   const UPGRADE = readFileSync(join(here, '..', 'commands', 'upgrade.queen.ts'), 'utf8')
   const ACQUIRE = readFileSync(join(root, 'hypercomb-runtime', 'src', 'acquire.ts'), 'utf8')
 
-  it('the pill is a notice: it opens Hosts on its build and never installs', () => {
+  it('the pill is a notice: it opens the directory and never installs', () => {
     expect(INDICATOR).not.toMatch(/hypercomb:apply-update/)
-    expect(INDICATOR).toMatch(/EffectBus\.emit\('hosts:open', \{ packageSig:/)
+    expect(INDICATOR).toMatch(/EffectBus\.emit\('packages:open', \{ packageSig:/)
     expect(APP).not.toMatch(/addEventListener\('hypercomb:apply-update'/)
     expect(UPGRADE).not.toMatch(/hypercomb:apply-update/)
-    expect(UPGRADE).toMatch(/EffectBus\.emit\('hosts:open', \{ source: 'bundled' \}\)/)
+    expect(UPGRADE).toMatch(/EffectBus\.emit\('packages:open', \{\}\)/)
   })
 
-  it('opens on the build the notice named', () => {
-    expect(HOSTS_TS).toMatch(/EffectBus\.on<[^>]*>\('hosts:open'/)
-    expect(HOSTS_TS).toMatch(/async #focusBuild\(/)
-  })
-
-  it('tries a restore point before switching, once the build may run here — bounded, never a gate', () => {
-    const sw = HOSTS_TS.slice(HOSTS_TS.indexOf('async #switch(pkg: HostPackage)'))
-    const gate = sw.indexOf('await activationAuthority(')
-    const restore = sw.indexOf('createRestorePoint')
-    expect(gate).toBeGreaterThan(-1)
-    expect(restore).toBeGreaterThan(gate)
-    expect(restore).toBeLessThan(sw.indexOf('await installPackage(pkg,'))
-    // A hive that cannot seal (one cold cell) or takes minutes to must still
-    // switch: the wait is bounded and a missing restore point is said, not fatal.
-    expect(HOSTS_TS).toMatch(/RESTORE_POINT_WAIT_MS/)
-    expect(sw).not.toMatch(/restore point was not saved, so nothing was switched/)
-    expect(EN['hosts.return.go']).toBe('Switch back')
-  })
-
-  it('an install from your own domain keeps the bundled update check listening', () => {
-    expect(ACQUIRE).toMatch(/source: hostZone\(pkg\.zone\) === hostZone\(location\.host\) \? 'bundled' : 'sentinel'/)
+  it('this origin is a byte source only when it is among the domains asked — a shell is not a host', () => {
+    expect(ACQUIRE).toMatch(/export const originAmong = \(zones: readonly string\[\]\): boolean =>/)
+    expect(ACQUIRE).toMatch(/\.\.\.\(originAmong\(\[pkg\.zone, \.\.\.alsoFrom\]\) \? selfBases\(\) : \[\]\)/)
+    expect(ACQUIRE).toMatch(/\.\.\.\(originAmong\(zones\) \? selfBases\(\) : \[\]\)/)
+    expect(ACQUIRE).not.toMatch(/^\s*\.\.\.selfBases\(\),?\s*$/m)
+    expect(ACQUIRE).not.toMatch(/'bundled'/)
   })
 })

@@ -52,7 +52,6 @@ import '../observe-viewer/observe-viewer.component'
 // The hosts you carry — lifted out of the publish panel, where it had been a
 // tab. It is the data set that panel's picker draws from, so it has to be
 // readable on its own terms and not as a by-product of a publish sweep.
-import '../hosts-panel/hosts-panel.component'
 import '../publish-panel/publish-panel.component'
 import '../clipboard-panel/clipboard-panel.component'
 import '../contact-card/contact-form.component'
