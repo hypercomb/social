@@ -29,11 +29,9 @@ const COMPLETE_VISIBLE_MS = 12_000
 
 // A NOTICE, NOT AN INSTALLER (2026-09-12). This pill used to install: Adopt
 // saved a restore point and swapped the running build from the header in one
-// press, with nothing on screen saying which build or from where. Updating now
-// happens in ONE place — the hosts window, where the build is named, its
-// signature is checked before you press, a restore point is saved first and
-// the way back is offered after. So the pill only says an update exists and
-// takes you there, looking at that build.
+// press. Updating now happens in ONE place — the Packages window, where each
+// part of the app is on or off and an update mark sits on what the publisher
+// you follow moved. So the pill only says an update exists and opens it.
 
 @Component({
   selector: 'hc-upgrade-indicator',
@@ -123,15 +121,11 @@ export class UpgradeIndicatorComponent implements OnDestroy {
     }
   }
 
-  /** Go where updating happens: the hosts window, opened on the build this
-   *  notice announced. Seeing it there is enough — the notice stays away for
-   *  the rest of the session. */
+  /** Go where updating happens: the Packages window. Seeing it there is
+   *  enough — the notice stays away for the rest of the session. */
   readonly openHosts = (): void => {
     if (this.phase() !== 'available') return
     EffectBus.emit('packages:open', { packageSig: this.#packageSig || null, source: this.#source })
-    // A package from before the Packages window has no element to answer;
-    // its hosts window is where the update that brings one is taken.
-    if (!customElements.get('hc-packages')) EffectBus.emit('hosts:open', { packageSig: this.#packageSig || null, source: this.#source })
     this.dismiss()
   }
 

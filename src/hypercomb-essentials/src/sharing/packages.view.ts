@@ -71,44 +71,73 @@ export const changedUnits = (installed: readonly InstallUnit[], next: readonly I
 export interface PackageRow {
   name: string
   description: string
+  /** Lit: turned on, and its bytes are here. */
   on: boolean
+  /** Its bytes are in this origin's heap. */
   held: boolean
+  /** The publisher you follow has moved this one. */
   update: boolean
-  offered: boolean
+  /** How many of your domains carry it. */
+  count: number
 }
 
 type Tree = { root: string; units: InstallUnit[] }
 
-/** The rows one scope shows. Pure, so the list can be reasoned about apart
- *  from the DOM: `mine` is the installed tree, `next` the one the followed
- *  publisher names, `tree` the scope on screen (mine, or a domain's head). */
+/**
+ * THE SWITCHBOARD. Pure, so the list can be reasoned about apart from the DOM.
+ *
+ * "This hive" is every package any of your domains carries, in one list, with
+ * a count of how many carry it. On and off are by NAME and global: a package
+ * turned off is shaded in every domain that has it, because the same name is
+ * the same package wherever it is served. A domain is the same board filtered
+ * to what that domain carries — a package it offers that you have off is
+ * shaded there too. Nothing switches.
+ *
+ * `mine` is the installed tree (what is held), `next` the tree the followed
+ * publisher names now, `carried` each domain's head tree.
+ */
 export const packageRows = (input: {
   scope: string
   mine: Tree | null
   next: Tree | null
-  tree: Tree | null
+  carried: ReadonlyMap<string, Tree | null>
   off: ReadonlySet<string>
   query: string
 }): PackageRow[] => {
-  const { scope, mine, next, tree, off } = input
-  if (!tree) return []
+  const { scope, mine, next, carried, off } = input
   const moved = next && mine ? changedUnits(mine.units, next.units) : new Set<string>()
   const held = new Set(mine?.units.map(u => u.name) ?? [])
   const names = new Map<string, InstallUnit>()
-  for (const unit of tree.units) names.set(unit.name, unit)
-  if (!scope && next) for (const unit of next.units) if (!names.has(unit.name)) names.set(unit.name, unit)
+  const take = (tree: Tree | null | undefined): void => {
+    for (const unit of tree?.units ?? []) if (!names.has(unit.name)) names.set(unit.name, unit)
+  }
+  if (scope) take(carried.get(scope))
+  else { take(mine); take(next); for (const tree of carried.values()) take(tree) }
+  const counts = new Map<string, number>()
+  for (const tree of carried.values()) for (const unit of tree?.units ?? []) counts.set(unit.name, (counts.get(unit.name) ?? 0) + 1)
   const q = input.query.trim().toLowerCase()
   return [...names.values()]
     .filter(unit => !q || unit.name.toLowerCase().includes(q) || unit.description.toLowerCase().includes(q))
     .map(unit => ({
       name: unit.name,
       description: unit.description,
-      on: held.has(unit.name) && !off.has(unit.name) && (!scope || tree.root === mine?.root),
+      on: held.has(unit.name) && !off.has(unit.name),
       held: held.has(unit.name),
-      update: moved.has(unit.name) && (!scope || tree.root === next?.root),
-      offered: !!scope && tree.root !== mine?.root,
+      update: moved.has(unit.name),
+      count: counts.get(unit.name) ?? 0,
     }))
     .sort((a, b) => Number(b.on) - Number(a.on) || a.name.localeCompare(b.name))
+}
+
+/** The tree to take a package from when its bytes are not here: the one the
+ *  followed publisher names when it has the name, else the first domain that
+ *  carries it — the scope's own domain first. */
+export const treeCarrying = (name: string, input: { scope: string; next: Tree | null; carried: ReadonlyMap<string, Tree | null> }): Tree | null => {
+  const has = (tree: Tree | null | undefined): tree is Tree => !!tree && tree.units.some(u => u.name === name)
+  if (input.scope && has(input.carried.get(input.scope))) return input.carried.get(input.scope)!
+  if (has(input.next)) return input.next
+  for (const tree of input.carried.values()) if (has(tree)) return tree
+  return null
 }
 
 export class PackagesElement extends HTMLElement {
@@ -126,6 +155,8 @@ export class PackagesElement extends HTMLElement {
   #error = ''
   #restarting = false
   #announced = ''
+  /** The one heading open at a time. */
+  #opened = ''
 
   #mine: Tree | null = null
   #next: Tree | null = null
@@ -234,7 +265,7 @@ export class PackagesElement extends HTMLElement {
       scope: this.#scope,
       mine: this.#mine,
       next: this.#next,
-      tree: this.#scope ? this.#served.get(this.#scope) ?? null : this.#mine,
+      carried: this.#served,
       off: install?.offUnits() ?? new Set(),
       query: this.#query,
     })
@@ -255,6 +286,27 @@ export class PackagesElement extends HTMLElement {
     }
     chip('', t('packages.mine', 'this hive'))
     for (const zone of this.#zones) chip(zone, zone)
+    // A domain is added here, at the end of the row it joins — the hosts
+    // drone owns the pool; the new chip arrives on the next hosts:render.
+    const add = make('form', 'pk-add')
+    const field = make('input', 'pk-add-input')
+    field.type = 'text'
+    field.autocomplete = 'off'
+    field.spellcheck = false
+    field.placeholder = t('packages.add-placeholder', 'add a domain')
+    field.setAttribute('aria-label', t('packages.add', 'Add a domain'))
+    const go = make('button', 'pk-add-go', t('packages.add-go', 'Add'))
+    go.type = 'submit'
+    add.append(field, go)
+    add.addEventListener('submit', (event) => {
+      event.preventDefault()
+      const zone = zoneOf(field.value)
+      if (!zone) { field.setAttribute('aria-invalid', 'true'); field.focus(); return }
+      field.removeAttribute('aria-invalid')
+      EffectBus.emit('hosts:add', { zone })
+      field.value = ''
+    })
+    scopes.append(add)
 
     const input = this.#refs.get('input') as HTMLInputElement
     const placeholder = this.#scope
@@ -320,10 +372,36 @@ export class PackagesElement extends HTMLElement {
       bulb.append(glyph)
       bulb.addEventListener('click', () => { void this.#toggle(row) })
 
-      li.append(bulb, make('span', 'pk-name', row.name))
+      // THE ACCORDION. A row is a heading — thousands of packages read as a
+      // list of names — and one opens at a time: its description and every
+      // domain carrying it, at which version.
+      const opened = this.#opened === row.name
+      const name = make('button', 'pk-name', row.name)
+      name.type = 'button'
+      name.setAttribute('aria-expanded', String(opened))
+      name.addEventListener('click', () => { this.#opened = opened ? '' : row.name; this.#renderList() })
+      li.append(bulb, name)
       if (row.update) li.append(make('span', 'pk-mark', t('packages.update-mark', 'update')))
-      if (row.offered && !row.held) li.append(make('span', 'pk-mark quiet', t('packages.new', 'not here yet')))
-      if (row.description) li.append(make('span', 'pk-desc', row.description))
+      if (!row.held) li.append(make('span', 'pk-mark quiet', t('packages.new', 'not here yet')))
+      // How many of your domains carry it — the board is the union of them.
+      if (!this.#scope && row.count > 0) {
+        const count = make('span', 'pk-count', String(row.count))
+        count.title = t('packages.carried-by', 'carried by {count} of your domains', { count: row.count })
+        li.append(count)
+      }
+      if (opened) {
+        li.classList.add('open')
+        const detail = make('div', 'pk-detail')
+        if (row.description) detail.append(make('p', 'pk-desc', row.description))
+        const mineSig = this.#mine?.units.find(u => u.name === row.name)?.layerSig ?? ''
+        for (const [zone, tree] of this.#served) {
+          const unit = tree?.units.find(u => u.name === row.name)
+          if (!unit) continue
+          const same = unit.layerSig === mineSig
+          detail.append(make('p', 'pk-where', `${zone} · ${unit.layerSig.slice(0, 8)}${same ? ' · ' + t('packages.same', 'same as here') : ''}`))
+        }
+        li.append(detail)
+      }
       list.append(li)
     }
     body.append(list)
@@ -345,7 +423,7 @@ export class PackagesElement extends HTMLElement {
       if (row.on) off.add(row.name); else off.delete(row.name)
       install.setOffUnits(off)
       if (!row.held) {
-        const tree = this.#scope ? this.#served.get(this.#scope) : this.#next
+        const tree = treeCarrying(row.name, { scope: this.#scope, next: this.#next, carried: this.#served })
         const root = tree?.root ?? ''
         const outcome = root ? await install.acquire(root, this.#sources()) : { ok: false, error: 'nothing to take' }
         if (!outcome.ok) {
@@ -410,11 +488,16 @@ export class PackagesElement extends HTMLElement {
       if (namedSig && namedSig !== installedSig) {
         if (this.#next?.root !== namedSig) this.#next = await this.#tree(namedSig, this.#zones)
       } else this.#next = null
-      const scope = this.#scope
-      if (scope && !this.#served.has(scope)) {
-        const head = await install.headOf(scope).catch(() => null)
-        this.#served.set(scope, head ? await this.#tree(head, [scope]) : null)
-      }
+      // EVERY domain's head, because the board is the union of them: the
+      // scope first so its rows land first, the rest together. Each is read
+      // once per open and rendered as it arrives.
+      const zones = [...new Set([this.#scope, ...this.#zones].filter(Boolean))]
+      await Promise.all(zones.map(async zone => {
+        if (this.#served.has(zone)) return
+        const head = await install.headOf(zone).catch(() => null)
+        this.#served.set(zone, head ? await this.#tree(head, [zone]) : null)
+        this.#renderList()
+      }))
     } finally {
       this.#reading = false
       this.#renderList()
@@ -481,6 +564,11 @@ ${S} .pk-scopes{display:flex;flex-wrap:wrap;gap:.25em;padding:.5em .7em 0;}
 ${S} .pk-scope{padding:.25em .5em;font:inherit;font-size:.7em;letter-spacing:.04em;color:var(--pk-ink-quiet);background:none;border:1px solid transparent;border-radius:var(--hc-radius-control,2px);cursor:pointer;}
 ${S} .pk-scope:hover{color:var(--pk-ink);background:rgba(var(--acc),0.07);}
 ${S} .pk-scope.selected{color:var(--pk-ink);border-color:rgba(var(--acc),0.45);background:rgba(var(--acc),0.09);}
+${S} .pk-add{display:inline-flex;align-items:center;gap:.25em;margin-left:auto;}
+${S} .pk-add-input{width:9em;padding:.2em .4em;font:inherit;font-size:.7em;color:var(--pk-ink);background:rgba(var(--acc),0.06);border:1px solid rgba(var(--acc),0.22);border-radius:var(--hc-radius-control,2px);}
+${S} .pk-add-input[aria-invalid="true"]{border-color:rgba(217,160,135,0.72);}
+${S} .pk-add-go{padding:.2em .45em;font:inherit;font-size:.7em;color:var(--pk-ink-quiet);background:none;border:1px solid transparent;border-radius:var(--hc-radius-control,2px);cursor:pointer;}
+${S} .pk-add-go:hover{color:var(--pk-ink);background:rgba(var(--acc),0.07);}
 ${S} .pk-search{padding:.45em .7em .2em;}
 ${S} .pk-input{width:100%;box-sizing:border-box;padding:.3em .45em;font:inherit;font-size:.8em;color:var(--pk-ink);background:rgba(var(--acc),0.06);border:1px solid rgba(var(--acc),0.22);border-radius:var(--hc-radius-control,2px);}
 ${S} .pk-body{flex:1 1 auto;overflow-y:auto;padding:.3em .7em .8em;}
@@ -496,11 +584,15 @@ ${S} .pk-row.busy{cursor:progress;}
 ${S} .pk-bulb{grid-row:1 / span 2;background:none;border:none;padding:.1em;font-size:1em;line-height:1;color:rgb(255,205,100);cursor:pointer;}
 ${S} .pk-row.off .pk-bulb{color:var(--pk-ink-quiet);}
 ${S} .pk-bulb:disabled{cursor:default;opacity:.55;}
-${S} .pk-name{font-size:.8em;color:var(--pk-ink);}
+${S} .pk-name{font-size:.8em;color:var(--pk-ink);background:none;border:none;padding:0;font-family:inherit;text-align:left;cursor:pointer;}
+${S} .pk-name:hover{text-decoration:underline;}
+${S} .pk-detail{grid-column:2 / span 2;padding:.15em 0 .3em;}
+${S} .pk-where{margin:.1em 0;font-size:.66em;line-height:1.35;color:var(--pk-ink-quiet);}
 ${S} .pk-row.off .pk-name{color:var(--pk-ink-quiet);}
 ${S} .pk-mark{justify-self:end;padding:.05em .4em;font-size:.62em;letter-spacing:.06em;text-transform:uppercase;color:rgb(255,205,100);border:1px solid rgba(var(--acc),0.35);border-radius:var(--hc-radius-control,2px);}
 ${S} .pk-mark.quiet{color:var(--pk-ink-quiet);}
-${S} .pk-desc{grid-column:2 / span 2;font-size:.68em;line-height:1.35;color:var(--pk-ink-quiet);}
+${S} .pk-count{justify-self:end;min-width:1.4em;padding:0 .35em;font-size:.62em;text-align:center;color:var(--pk-ink-quiet);border:1px solid rgba(var(--acc),0.2);border-radius:var(--hc-radius-control,2px);}
+${S} .pk-desc{margin:0 0 .2em;font-size:.68em;line-height:1.35;color:var(--pk-ink-quiet);}
 `
   document.head.appendChild(style)
 }

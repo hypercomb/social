@@ -875,3 +875,18 @@ $accent: #7eb6d6;
   border-top: 2px solid rgba(var(--acc), 0.55);
   background: color-mix(in srgb, rgb(var(--hc-panel-pane)) 90%, rgb(var(--acc)));
 }
+
+// The app's own parts a domain serves are packages — one press to the same
+// list, scoped there. A word, not a boxed button (consoles stay minimal).
+.hosts-packages {
+  margin: 0.4em 0 0;
+  padding: 0.2em 0;
+  font: inherit;
+  font-size: 0.74em;
+  color: var(--hc-window-accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+  &:hover { text-decoration: underline; }
+  &:focus-visible { outline: 1px solid var(--hc-accent); outline-offset: 1px; }
+}

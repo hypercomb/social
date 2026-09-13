@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { changedUnits, packageRows } from './packages.view'
+import { changedUnits, packageRows, treeCarrying } from './packages.view'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..', '..', '..')
@@ -49,18 +49,19 @@ describe('the packages window', () => {
     expect(INDICATOR).toMatch(/EffectBus\.emit\('packages:open'/)
     expect(UPGRADE).toMatch(/EffectBus\.emit\('packages:open', \{\}\)/)
     expect(VIEW).toMatch(/EffectBus\.on<[^>]*>\('packages:open'/)
-    expect(VIEW).not.toMatch(/your domain|isHome|hosts\.home/)
+    expect(VIEW).not.toMatch(/\byour domain\b(?!s)|isHome|hosts\.home/)
     expect(EN['packages.mine']).toBe('this hive')
     expect(EN['packages.search-in']).toMatch(/\{host\}/)
   })
 
   it('lists on rows first, shaded rows after, and search filters both', () => {
     const mine = { root: 'r1', units: [unit('games', 'g1', 'play'), unit('notes', 'n1'), unit('sharing', 's1')] }
-    const rows = packageRows({ scope: '', mine, next: null, tree: mine, off: new Set(['notes']), query: '' })
+    const carried = new Map([['jwize.com', mine]])
+    const rows = packageRows({ scope: '', mine, next: null, carried, off: new Set(['notes']), query: '' })
     expect(rows.map(r => `${r.name}:${r.on ? 'on' : 'off'}`)).toEqual(['games:on', 'sharing:on', 'notes:off'])
-    expect(rows.every(r => r.held && !r.update && !r.offered)).toBe(true)
+    expect(rows.every(r => r.held && !r.update && r.count === 1)).toBe(true)
 
-    const found = packageRows({ scope: '', mine, next: null, tree: mine, off: new Set(), query: 'PLAY' })
+    const found = packageRows({ scope: '', mine, next: null, carried, off: new Set(), query: 'PLAY' })
     expect(found.map(r => r.name)).toEqual(['games'])
   })
 
@@ -69,20 +70,46 @@ describe('the packages window', () => {
     const next = { root: 'r2', units: [unit('games', 'g2'), unit('notes', 'n1'), unit('comfy', 'c1')] }
     expect([...changedUnits(mine.units, next.units)].sort()).toEqual(['comfy', 'games'])
 
-    const rows = packageRows({ scope: '', mine, next, tree: mine, off: new Set(), query: '' })
+    const rows = packageRows({ scope: '', mine, next, carried: new Map(), off: new Set(), query: '' })
     const byName = Object.fromEntries(rows.map(r => [r.name, r]))
     expect(byName['games']).toMatchObject({ on: true, update: true })
     expect(byName['notes']).toMatchObject({ on: true, update: false })
     expect(byName['comfy']).toMatchObject({ on: false, held: false, update: true })
   })
 
-  it('a domain lookup is the same list, scoped: its head is on offer, nothing there is "on" unless it is the installed tree', () => {
-    const mine = { root: 'r1', units: [unit('games', 'g1')] }
-    const theirs = { root: 'r9', units: [unit('games', 'g9'), unit('wheel', 'w1')] }
-    const rows = packageRows({ scope: 'jwize.com', mine, next: null, tree: theirs, off: new Set(), query: '' })
-    expect(rows.map(r => `${r.name}:${r.on}:${r.held}:${r.offered}`)).toEqual(['games:false:true:true', 'wheel:false:false:true'])
+  it('this hive is the switchboard: the union of every domain, a count of how many carry each, on/off by name everywhere', () => {
+    // Jaime 2026-09-13: "your domain is a list of all of the packages on or
+    // off and that includes all domains together… a number beside the
+    // packages to see how many of your hosts carry that particular package…
+    // if you turn them on it should turn them on for all domains that have
+    // it because they're identical… if you turn anything off on the main one
+    // it shades it on all the domains."
+    const mine = { root: 'r1', units: [unit('games', 'g1'), unit('notes', 'n1')] }
+    const jwize = { root: 'r9', units: [unit('games', 'g9'), unit('wheel', 'w1')] }
+    const plugin = { root: 'r7', units: [unit('games', 'g1')] }
+    const carried = new Map([['jwize.com', jwize], ['pluginthematrix.com', plugin]])
+    const off = new Set(['games'])
 
-    const same = packageRows({ scope: 'jwize.com', mine, next: null, tree: mine, off: new Set(), query: '' })
-    expect(same[0]).toMatchObject({ name: 'games', on: true, offered: false })
+    const board = packageRows({ scope: '', mine, next: null, carried, off, query: '' })
+    expect(board.map(r => `${r.name}:${r.on}:${r.held}:${r.count}`)).toEqual(['notes:true:true:0', 'games:false:true:2', 'wheel:false:false:1'])
+
+    // A domain is the same board filtered to what it carries — games is off
+    // there too, because the switch is the name.
+    const there = packageRows({ scope: 'jwize.com', mine, next: null, carried, off, query: '' })
+    expect(there.map(r => `${r.name}:${r.on}:${r.held}`)).toEqual(['games:false:true', 'wheel:false:false'])
+
+    // A package not held is taken from where it is carried — the scope's own
+    // domain first, then the followed publisher, then any domain.
+    expect(treeCarrying('wheel', { scope: 'jwize.com', next: null, carried })?.root).toBe('r9')
+    expect(treeCarrying('wheel', { scope: '', next: null, carried })?.root).toBe('r9')
+    expect(treeCarrying('games', { scope: '', next: { root: 'r2', units: [unit('games', 'g2')] }, carried })?.root).toBe('r2')
+    expect(treeCarrying('absent', { scope: '', next: null, carried })).toBeNull()
+  })
+
+  it('a row is a heading that opens alone — thousands read as names', () => {
+    expect(VIEW).toMatch(/#opened = ''/)
+    expect(VIEW).toMatch(/const opened = this\.#opened === row\.name/)
+    expect(VIEW).toMatch(/this\.#opened = opened \? '' : row\.name/)
+    expect(VIEW).toMatch(/pk-where/)
   })
 })

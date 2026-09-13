@@ -81,3 +81,27 @@ entry, never a runtime import; the notice and `/upgrade` open it; rows
 ordered on-first; marks only where the layer moved; a domain lookup is the
 same list scoped. `runtime/src/package-units.spec.ts`: the walk, the off set,
 the bee filter, the change set.
+
+## The switchboard (2026-09-13)
+
+*Jaime: "your domain is a list of all of the packages on or off, and that
+includes all domains together… a number beside the packages to see how many of
+your hosts carry that particular package… if you turn them on it should turn
+them on for all domains that have it because they're identical… each sub
+domain is the same, you just see the ones that are on and off for that domain.
+No switching, nothing like that." And: "a molecule is the same thing as a
+branch — a molecule amalgamates more branches, and a branch is recursive."*
+
+- **This hive** is the union of every package any of your domains carries,
+  one row per name, with a count of how many domains carry it. On/off is by
+  NAME and global: a package turned off is shaded in every domain that has it.
+- **A domain chip** is the same board filtered to what that domain carries —
+  a package it offers that you have off is shaded there too. "Add a domain"
+  sits at the end of the chips.
+- **A row is a heading** (thousands read as names); one opens at a time,
+  showing the description and every domain carrying it, at which version.
+- **A package not held** is taken from where it is carried — the scope's own
+  domain first, then the followed publisher, then any domain — through the
+  same gated acquisition as everything else.
+- **The hosts window** lost Builds entirely: it is Domains (add / remove /
+  visit) + Creations, with one link per domain to Packages. Nothing switches.
