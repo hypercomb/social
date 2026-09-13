@@ -356,16 +356,19 @@ export const orderRevisions = (found: readonly { layer: string; source: Revision
     if (!list.some(s => s.root === source.root && s.zone === source.zone)) list.push(source)
     byLayer.set(layer, list)
   }
-  // A root held here but listed by no domain dates nothing: a revision only
-  // this shell holds sorts after every listed one.
+  // Ordered by the NEWEST root carrying each revision, never the first: a
+  // layer a later build returned to is the current one, and must not sort
+  // under the revisions it replaced (found live 2026-09-13 — the running
+  // games/solomon listed below four it had superseded). A root held here but
+  // listed by no domain dates nothing and sorts after every listed one.
   const revisions = [...byLayer].map(([layer, sources]) => {
     const listed = sources.filter(s => s.zone)
     const dates = listed.map(s => s.at).filter(Boolean).sort()
-    return { layer, at: dates[0] ?? '', sources, oldest: listed.length ? Math.max(...listed.map(s => s.rank)) : Number.POSITIVE_INFINITY }
+    return { layer, at: dates[dates.length - 1] ?? '', sources, newest: listed.length ? Math.min(...listed.map(s => s.rank)) : Number.POSITIVE_INFINITY }
   })
   revisions.sort((a, b) => (a.at && b.at && a.at !== b.at)
     ? b.at.localeCompare(a.at)
-    : a.oldest === b.oldest ? 0 : a.oldest < b.oldest ? -1 : 1)
+    : a.newest === b.newest ? 0 : a.newest < b.newest ? -1 : 1)
   return revisions.map(({ layer, at, sources }) => ({ layer, at, sources }))
 }
 

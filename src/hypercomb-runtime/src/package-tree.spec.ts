@@ -180,8 +180,20 @@ describe('the package tree', () => {
       { layer: 'c'.repeat(64), source: { root: 'r3', zone: 'jwize.com', at: '2026-09-13T00:00:00.000Z', rank: 0 } },
     ])
     expect(revisions.map(r => r.layer[0])).toEqual(['c', 'b', 'a'])
-    expect(revisions[1]).toMatchObject({ at: '2026-09-11T00:00:00.000Z' })
+    expect(revisions[1]).toMatchObject({ at: '2026-09-12T00:00:00.000Z' })
     expect(revisions[1]!.sources.map(s => s.zone)).toEqual(['jwize.com', 'plugin.com'])
+  })
+
+  it('a revision a later build returned to is the newest, not the oldest', () => {
+    // Found live 2026-09-13: the head's games/solomon had first appeared a
+    // day earlier and listed under four revisions it had since replaced.
+    const revisions = orderRevisions([
+      { layer: 'a'.repeat(64), source: { root: 'head', zone: 'jwize.com', at: '', rank: 0 } },
+      { layer: 'b'.repeat(64), source: { root: 'r1', zone: 'jwize.com', at: '', rank: 1 } },
+      { layer: 'a'.repeat(64), source: { root: 'r2', zone: 'jwize.com', at: '', rank: 2 } },
+      { layer: 'c'.repeat(64), source: { root: 'held', zone: '', at: '', rank: 0 } },
+    ])
+    expect(revisions.map(r => r.layer[0])).toEqual(['a', 'b', 'c'])
   })
 
   it('names what a revision would replace beneath its path, and marks the way down to a change', async () => {
