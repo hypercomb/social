@@ -68,6 +68,7 @@ const startBroker = async (ws: ReturnType<typeof workspace>) => {
       HYPERCOMB_STAMP_OWED_FILE: ws.owed,
       HYPERCOMB_INSTALL_PUBLISHER_FILE: ws.publisher,
       HYPERCOMB_RELAY_CONTENT_DIR: ws.relay,
+      BRIDGE_OWED_POLL_MS: '100',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -146,5 +147,19 @@ describe('owed install stamps', () => {
     await waitFor(() => broker.log().includes('does not serve it'))
     expect(ops).toHaveLength(0)
     expect(owedStamps.readOwed(ws.owed)['essentials']?.sig).toBe(NEWER)
+  })
+
+  it('pays a debt recorded while a hive is already attached, without waiting for it to reconnect', async () => {
+    // Found 2026-09-13: a build's stamp timed out against a slow tab that stayed
+    // attached, and the debt waited for a reconnect that never came.
+    const ws = workspace([BUILT])
+    const broker = await startBroker(ws)
+    const ops = await attachRenderer(broker.port, PUBLISHER)
+    await new Promise(resolve => setTimeout(resolve, 300))
+    expect(ops).toHaveLength(0)
+    owedStamps.recordOwed('essentials', BUILT, undefined, ws.owed)
+    await waitFor(() => !existsSync(ws.owed), 5000)
+    expect(ops[0]).toMatchObject({ op: 'hive-root-set', key: 'install:essentials', sig: BUILT })
+    expect(broker.log()).toContain('owed stamp paid')
   })
 })
